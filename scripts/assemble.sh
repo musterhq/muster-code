@@ -48,12 +48,20 @@ for H in "$APP"/Contents/Frameworks/VSCodium\ Helper*.app; do
   plist_set "$NEW/Contents/Info.plist" CFBundleExecutable="Muster Code Helper${suffix}" CFBundleName="Muster Code Helper${suffix}" CFBundleDisplayName="Muster Code Helper${suffix}" CFBundleIdentifier="$ident"
 done
 
+# The CLI launchers hardcode the old executable name.
+sed -i '' 's#/MacOS/VSCodium#/MacOS/Muster Code#g' "$RES/bin/codium" "$RES/bin/codium-tunnel" 2>/dev/null || true
+mv "$RES/bin/codium" "$RES/bin/muster-code" 2>/dev/null || true
+mv "$RES/bin/codium-tunnel" "$RES/bin/muster-code-tunnel" 2>/dev/null || true
+
 echo "▸ installing the built-in Muster layer + theme"
 pnpm --filter @muster-code/builtin build >/dev/null
 pnpm --filter @muster-code/theme build >/dev/null
 rm -rf "$RES/extensions/muster.muster-code" "$RES/extensions/muster.theme-muster"
 cp -R "$ROOT/packages/builtin/dist-ext" "$RES/extensions/muster.muster-code"
 cp -R "$ROOT/packages/theme/dist-ext" "$RES/extensions/muster.theme-muster"
+
+echo "▸ patching the workbench"
+python3 "$ROOT/scripts/patch-workbench.py" "$RES/out/vs/workbench/workbench.desktop.main.js"
 
 echo "▸ applying the workbench skin"
 cat "$ROOT/product/muster-workbench.css" >> "$RES/out/vs/workbench/workbench.desktop.main.css"
