@@ -1,0 +1,39 @@
+{
+  "name": "@muster-code/theme",
+  "displayName": "Muster Themes",
+  "description": "Muster Dark \u2014 the Muster Code default theme.",
+  "version": "0.1.0",
+  "publisher": "muster",
+  "private": true,
+  "license": "UNLICENSED",
+  "engines": {
+    "vscode": "^1.126.0"
+  },
+  "categories": [
+    "Themes"
+  ],
+  "contributes": {
+    "themes": [
+      {
+        "label": "Muster Dark",
+        "uiTheme": "vs-dark",
+        "path": "./themes/muster-dark-color-theme.json"
+      }
+    ],
+    "configurationDefaults": {
+      "workbench.colorTheme": "Muster Dark",
+      "workbench.activityBar.location": "default",
+      "window.commandCenter": true,
+      "workbench.startupEditor": "none",
+      "editor.fontSize": 13,
+      "editor.lineHeight": 20,
+      "editor.minimap.enabled": false,
+      "editor.inlineSuggest.enabled": true,
+      "chat.commandCenter.enabled": true,
+      "workbench.secondarySideBar.defaultVisibility": "visible"
+    }
+  },
+  "scripts": {
+    "build": "node -e \"require('fs').mkdirSync('dist-ext',{recursive:true});require('fs').cpSync('themes','dist-ext/themes',{recursive:true});const p=require('./package.json');delete p.scripts;require('fs').writeFileSync('dist-ext/package.json',JSON.stringify(p,null,2))\""
+  }
+}

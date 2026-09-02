@@ -34,16 +34,32 @@ node "$ROOT/scripts/overlay-product.mjs" "$RES/product.json" "$ROOT/product/prod
 
 echo "▸ branding"
 cp "$ROOT/product/Muster Code.icns" "$APP/Contents/Resources/Codium.icns" 2>/dev/null || true
-/usr/libexec/PlistBuddy -c "Set :CFBundleName Muster Code" "$APP/Contents/Info.plist"
-/usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName Muster Code" "$APP/Contents/Info.plist"
-/usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier dev.themuster.code" "$APP/Contents/Info.plist"
+plist_set() { python3 "$ROOT/scripts/plist-set.py" "$@"; }
+plist_set "$APP/Contents/Info.plist" CFBundleName="Muster Code" CFBundleDisplayName="Muster Code" CFBundleIdentifier=dev.themuster.code CFBundleExecutable="Muster Code"
+mv "$APP/Contents/MacOS/VSCodium" "$APP/Contents/MacOS/Muster Code"
+# Electron derives helper-app names from the main executable name: rename the
+# main binary AND every helper consistently, or the app cannot find its helpers.
+for H in "$APP"/Contents/Frameworks/VSCodium\ Helper*.app; do
+  suffix="${H##*/VSCodium Helper}"; suffix="${suffix%.app}"
+  NEW="$APP/Contents/Frameworks/Muster Code Helper${suffix}.app"
+  mv "$H" "$NEW"
+  mv "$NEW/Contents/MacOS/VSCodium Helper${suffix}" "$NEW/Contents/MacOS/Muster Code Helper${suffix}"
+  ident="dev.themuster.code.helper$(echo "${suffix}" | tr -d ' ()' | tr '[:upper:]' '[:lower:]')"
+  plist_set "$NEW/Contents/Info.plist" CFBundleExecutable="Muster Code Helper${suffix}" CFBundleName="Muster Code Helper${suffix}" CFBundleDisplayName="Muster Code Helper${suffix}" CFBundleIdentifier="$ident"
+done
 
-echo "▸ installing the built-in Muster layer"
+echo "▸ installing the built-in Muster layer + theme"
 pnpm --filter @muster-code/builtin build >/dev/null
-rm -rf "$RES/extensions/muster.muster-code"
+pnpm --filter @muster-code/theme build >/dev/null
+rm -rf "$RES/extensions/muster.muster-code" "$RES/extensions/muster.theme-muster"
 cp -R "$ROOT/packages/builtin/dist-ext" "$RES/extensions/muster.muster-code"
+cp -R "$ROOT/packages/theme/dist-ext" "$RES/extensions/muster.theme-muster"
+
+echo "▸ applying the workbench skin"
+cat "$ROOT/product/muster-workbench.css" >> "$RES/out/vs/workbench/workbench.desktop.main.css"
 
 echo "▸ signing (ad-hoc, local use)"
 codesign --force --deep --sign - "$APP" >/dev/null 2>&1
 
 echo "✓ $APP"
+echo "  run: open \"$APP\"   (dev: \"$APP/Contents/MacOS/Muster Code\" --user-data-dir /tmp/mc-udd)"

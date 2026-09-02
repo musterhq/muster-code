@@ -1,0 +1,146 @@
+/* Muster Code workbench skin — maps VS Code's native chat DOM onto the measured
+   Cursor rules (docs/cursor-ux-spec.md §3–4). Appended after the workbench CSS so
+   equal-specificity rules win. Tokens follow Cursor's alpha-layer system. */
+.monaco-workbench {
+  --mc-fg: var(--vscode-editor-foreground);
+  --mc-bg-primary: color-mix(in srgb, var(--mc-fg) 20%, transparent);
+  --mc-bg-secondary: color-mix(in srgb, var(--mc-fg) 14%, transparent);
+  --mc-bg-tertiary: color-mix(in srgb, var(--mc-fg) 8%, transparent);
+  --mc-bg-quaternary: color-mix(in srgb, var(--mc-fg) 6%, transparent);
+  --mc-bg-quinary: color-mix(in srgb, var(--mc-fg) 4%, transparent);
+  --mc-text-secondary: color-mix(in srgb, var(--mc-fg) 55%, transparent);
+  --mc-text-tertiary: color-mix(in srgb, var(--mc-fg) 37%, transparent);
+  --mc-stroke-secondary: color-mix(in srgb, var(--mc-fg) 10%, transparent);
+  --mc-stroke-tertiary: color-mix(in srgb, var(--mc-fg) 7%, transparent);
+  --mc-radius-sm: 4px; --mc-radius-base: 6px; --mc-radius-lg: 8px; --mc-radius-xl: 12px;
+  --mc-font-xs: 11px; --mc-font-sm: 12px; --mc-font-base: 13px; --mc-font-lg: 14px;
+  --mc-line-lg: 22px;
+  --mc-accent: var(--vscode-textLink-foreground);
+}
+
+/* Conversation surface: 840px max like Cursor's bar mode, 14px text, 22px lines */
+.interactive-session .interactive-list .monaco-list-row .interactive-item-container {
+  padding: 8px 12px;
+  font-size: var(--mc-font-lg);
+  line-height: var(--mc-line-lg);
+}
+.interactive-session .rendered-markdown { font-size: var(--mc-font-lg); line-height: var(--mc-line-lg); }
+.interactive-session .rendered-markdown code { font-size: var(--mc-font-base); border-radius: var(--mc-radius-sm); }
+
+/* Human message → right-aligned bubble: input bg, 1px stroke, radius 12, 8×10 padding */
+.interactive-session .interactive-item-container.interactive-request {
+  background: transparent;
+  border: none;
+}
+.interactive-session .interactive-item-container.interactive-request .value {
+  align-self: flex-end;
+  margin-left: max(32px, 20%);
+  background: var(--vscode-input-background);
+  border: 1px solid var(--mc-stroke-secondary);
+  border-radius: var(--mc-radius-xl);
+  padding: 8px 10px;
+  min-width: 150px;
+}
+.interactive-session .interactive-item-container.interactive-request .header { display: none; }
+
+/* Assistant message: plain, no bubble, no avatar chrome */
+.interactive-session .interactive-item-container.interactive-response .header .avatar { display: none; }
+.interactive-session .interactive-item-container.interactive-response .header { min-height: 0; padding: 0; }
+.interactive-session .interactive-item-container.interactive-response .header .username { color: var(--mc-text-tertiary); font-size: var(--mc-font-xs); }
+
+/* Tool calls → cards: editor bg, 1px stroke, radius 12, 8×10 padding, 28px header */
+.interactive-session .chat-tool-invocation-part,
+.interactive-session .chat-thinking-tool-wrapper,
+.interactive-session .chat-used-context {
+  background: var(--vscode-editor-background);
+  border: 1px solid var(--mc-stroke-tertiary);
+  border-radius: var(--mc-radius-xl);
+  padding: 8px 10px;
+  margin: 6px 0;
+  font-size: var(--mc-font-base);
+  color: var(--mc-text-tertiary);
+}
+.interactive-session .chat-used-context-label { color: var(--mc-text-secondary); font-size: var(--mc-font-base); }
+.interactive-session .chat-progress-message { color: var(--mc-text-secondary); font-size: var(--mc-font-base); }
+
+/* Thinking: collapsible, tertiary, italic like a layer beneath the answer */
+.interactive-session .chat-thinking-collapsible { color: var(--mc-text-tertiary); font-style: italic; }
+
+/* Composer: rounded card, input bg, 1px stroke, radius 12 */
+.interactive-session .chat-input-container,
+.interactive-session .interactive-input-part .chat-input-container {
+  background: var(--vscode-input-background) !important;
+  border: 1px solid var(--mc-stroke-secondary) !important;
+  border-radius: var(--mc-radius-xl) !important;
+  padding: 8px 10px 6px;
+}
+.interactive-session .chat-input-container:focus-within { border-color: color-mix(in srgb, var(--mc-fg) 20%, transparent) !important; }
+.interactive-session .chat-input-toolbars { padding-top: 4px; gap: 4px; }
+.interactive-session .chat-input-toolbars .action-label { border-radius: var(--mc-radius-sm); font-size: var(--mc-font-sm); }
+/* Mode + model pickers read as pills (Cursor's unified dropdown) */
+.interactive-session .chat-input-toolbars .chat-modelPicker-item .action-label,
+.interactive-session .chat-input-toolbars .chat-modePicker-item .action-label {
+  background: var(--mc-bg-secondary);
+  border-radius: var(--mc-radius-base);
+  padding: 2px 8px;
+  height: 20px;
+  line-height: 16px;
+}
+/* Send: circular */
+.interactive-session .chat-input-toolbars .chat-execute-toolbar .codicon-send,
+.interactive-session .chat-input-toolbars .chat-execute-toolbar .codicon-stop-circle {
+  background: var(--mc-fg);
+  color: var(--vscode-editor-background);
+  border-radius: 9999px;
+  width: 22px; height: 22px;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+
+/* Context pills: 20px, 12px text, 1px widget border, radius 4 */
+.interactive-session .chat-attached-context-attachment {
+  height: 20px;
+  font-size: var(--mc-font-sm);
+  line-height: 16px;
+  border: 1px solid var(--vscode-editorWidget-border);
+  border-radius: var(--mc-radius-sm);
+  gap: 4px;
+  padding: 0 6px;
+  background: transparent;
+}
+.interactive-session .chat-attached-context-attachment:hover { background: color-mix(in srgb, var(--vscode-list-hoverBackground) 80%, transparent); }
+
+/* Editing session (Review bar): Cursor's "Review +156 −41 · Keep/Undo" row */
+.interactive-session .chat-editing-session-container {
+  border: 1px solid var(--mc-stroke-tertiary);
+  border-radius: var(--mc-radius-lg);
+  background: var(--vscode-editor-background);
+  padding: 4px 8px;
+}
+.interactive-session .chat-editing-session-toolbar-actions .action-label { border-radius: var(--mc-radius-sm); font-size: var(--mc-font-sm); }
+
+/* Welcome: quiet */
+.interactive-session .chat-welcome-view { color: var(--mc-text-secondary); }
+.interactive-session .chat-welcome-view-icon { display: none; }
+.interactive-session .chat-welcome-view-suggested-prompt { border-radius: var(--mc-radius-base); border: 1px solid var(--mc-stroke-tertiary); }
+
+/* Chat sessions list → agent sidebar cells: radius 6, 6×8 padding, 12px title, 11px subtitle */
+.chat-sessions-view .monaco-list-row,
+.pane-body.chat-sessions .monaco-list-row {
+  border-radius: var(--mc-radius-base);
+  padding: 6px 8px;
+}
+.chat-sessions-view .monaco-list-row:hover { background: var(--mc-bg-quaternary); }
+.chat-sessions-view .monaco-list-row.selected { background: var(--mc-bg-tertiary); }
+.chat-sessions-view .monaco-list-row .label-name { font-size: var(--mc-font-sm); line-height: 16px; color: var(--mc-text-secondary); }
+.chat-sessions-view .monaco-list-row .label-description { font-size: var(--mc-font-xs); line-height: 14px; color: var(--mc-text-tertiary); font-variant-numeric: tabular-nums; }
+
+/* Inline diffs inside chat: 3px gutter stripe green/red (Cursor agent-layout) */
+.interactive-session .monaco-diff-editor:not(.side-by-side) .gutter-insert { box-shadow: inset 3px 0 0 var(--vscode-terminal-ansiGreen); }
+.interactive-session .monaco-diff-editor:not(.side-by-side) .gutter-delete { box-shadow: inset 3px 0 0 var(--vscode-terminal-ansiRed); }
+
+/* Ghost text: Cursor's grayed suggestion */
+.monaco-editor .ghost-text-decoration, .monaco-editor .ghost-text { color: var(--vscode-editorGhostText-foreground); }
+
+/* Chrome: hairline separations everywhere, no heavy borders */
+.monaco-workbench .part.sidebar, .monaco-workbench .part.auxiliarybar { border-color: var(--mc-stroke-tertiary) !important; }
+.monaco-workbench .part.statusbar { font-size: var(--mc-font-sm); }

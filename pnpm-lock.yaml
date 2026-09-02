@@ -30,6 +30,8 @@ importers:
         specifier: ^5.7.0
         version: 5.9.3
 
+  packages/theme: {}
+
 packages:
 
   '@esbuild/aix-ppc64@0.25.12':

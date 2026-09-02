@@ -12,7 +12,6 @@
   "documentationUrl": "https://themuster.dev/code",
   "reportIssueUrl": "https://themuster.dev/code/issues",
   "releaseNotesUrl": "https://themuster.dev/code/releases",
-  "updateUrl": "https://updates.themuster.dev/code",
   "defaultChatAgent": {
     "extensionId": "muster.muster-code",
     "chatExtensionId": "muster.muster-code",
@@ -28,7 +27,9 @@
     "upgradePlanUrl": "https://themuster.dev/code",
     "providerId": "muster",
     "providerName": "Muster",
-    "providerScopes": [[]],
+    "providerScopes": [
+      []
+    ],
     "entitlementUrl": "",
     "entitlementSignupLimitedUrl": "",
     "chatWelcomeTitle": "Muster",
@@ -71,6 +72,9 @@
       "embeddings"
     ]
   },
-  "linkProtectionTrustedDomains": ["https://open-vsx.org", "https://themuster.dev"],
+  "linkProtectionTrustedDomains": [
+    "https://open-vsx.org",
+    "https://themuster.dev"
+  ],
   "enableTelemetry": false
 }
