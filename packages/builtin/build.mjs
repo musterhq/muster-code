@@ -12,10 +12,13 @@ await build({
   entryPoints: ["src/extension.ts"],
   bundle: true,
   platform: "node",
-  format: "esm",
+  format: "cjs",
   target: "node22",
   outfile: `${out}/extension.js`,
-  banner: { js: "import { createRequire as __mcCreateRequire } from \"node:module\"; const require = __mcCreateRequire(import.meta.url);" },
+  // The extension host loads built-ins as CJS; muster core is ESM and uses
+  // import.meta (node:sqlite via createRequire, path math). Shim it faithfully.
+  define: { "import.meta": "__mcImportMeta" },
+  banner: { js: "const __mcImportMeta = { url: require(\"node:url\").pathToFileURL(__filename).href, resolve: (s) => require(\"node:url\").pathToFileURL(require.resolve(s)).href };" },
   external: ["vscode", "node:sqlite"],
   sourcemap: true,
   logLevel: "warning",
@@ -25,7 +28,6 @@ const manifest = JSON.parse(readFileSync("package.json", "utf8"));
 delete manifest.scripts;
 delete manifest.devDependencies;
 delete manifest.dependencies;
-manifest.type = "module";
 // The VS Code identity is publisher.name → "muster.muster-code" (product.json
 // grants + defaultChatAgent key off it); the workspace name stays npm-only.
 manifest.name = "muster-code";

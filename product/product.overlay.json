@@ -76,5 +76,6 @@
     "https://open-vsx.org",
     "https://themuster.dev"
   ],
-  "enableTelemetry": false
+  "enableTelemetry": false,
+  "checksums": {}
 }
