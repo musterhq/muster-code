@@ -13,7 +13,7 @@
   "reportIssueUrl": "https://themuster.dev/code/issues",
   "releaseNotesUrl": "https://themuster.dev/code/releases",
   "defaultChatAgent": {
-    "extensionId": "muster.muster-code",
+    "extensionId": "muster.muster-completions",
     "chatExtensionId": "muster.muster-code",
     "chatExtensionOutputId": "muster.muster-code.Muster.log",
     "chatExtensionOutputExtensionStateCommand": "muster.debug.extensionState",
