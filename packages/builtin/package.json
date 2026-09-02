@@ -1,0 +1,89 @@
+{
+  "name": "@muster-code/builtin",
+  "displayName": "Muster",
+  "description": "The Muster layer of Muster Code: Codex-first agent chat, pinned threads, live diffs, the board.",
+  "version": "0.1.0",
+  "publisher": "muster",
+  "private": true,
+  "license": "UNLICENSED",
+  "engines": { "vscode": "^1.126.0", "node": ">=22" },
+  "main": "./dist-ext/extension.js",
+  "activationEvents": ["onStartupFinished"],
+  "enabledApiProposals": [
+    "defaultChatParticipant",
+    "chatParticipantPrivate",
+    "chatParticipantAdditions",
+    "chatProvider",
+    "chatSessionsProvider",
+    "languageModelThinkingPart",
+    "languageModelCapabilities",
+    "inlineCompletionsAdditions",
+    "mappedEditsProvider",
+    "mcpServerDefinitions"
+  ],
+  "contributes": {
+    "chatParticipants": [
+      {
+        "id": "muster.agent",
+        "name": "muster",
+        "fullName": "Muster",
+        "description": "Codex-first agent for this workspace",
+        "isDefault": true,
+        "locations": ["panel", "editor", "terminal", "notebook"],
+        "modes": ["ask", "edit", "agent"]
+      }
+    ],
+    "chatSessions": [
+      {
+        "type": "codex",
+        "name": "codex",
+        "displayName": "Codex threads",
+        "description": "Your Codex threads, by the app's own names",
+        "when": "true"
+      }
+    ],
+    "languageModelChatProviders": [
+      { "vendor": "muster", "displayName": "Muster (Codex · Claude · more)" }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        { "id": "muster", "title": "Muster", "icon": "resources/muster.svg" }
+      ]
+    },
+    "views": {
+      "muster": [
+        { "id": "muster.threads", "name": "Threads" },
+        { "id": "muster.board", "name": "Board", "type": "webview" }
+      ]
+    },
+    "commands": [
+      { "command": "muster.threads.refresh", "title": "Muster: Refresh Threads" },
+      { "command": "muster.thread.resume", "title": "Muster: Resume Thread" },
+      { "command": "muster.board.open", "title": "Muster: Open Board" },
+      { "command": "muster.debug.extensionState", "title": "Muster: Show Extension State" }
+    ],
+    "configuration": {
+      "title": "Muster",
+      "properties": {
+        "muster.codex.model": { "type": "string", "default": "gpt-5.6-sol", "description": "Default Codex model for new threads." },
+        "muster.codex.effort": { "type": "string", "enum": ["low", "medium", "high", "xhigh", "max", "ultra"], "default": "medium", "description": "Codex reasoning effort (the app's Effort setting)." },
+        "muster.completions.enabled": { "type": "boolean", "default": true, "description": "Inline (Tab) completions." }
+      }
+    }
+  },
+  "scripts": {
+    "build": "node build.mjs",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "node --test --import tsx test/*.test.ts"
+  },
+  "dependencies": {
+    "@musterhq/core": "link:../../../muster/packages/core"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/vscode": "^1.105.0",
+    "esbuild": "^0.25.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0"
+  }
+}
