@@ -8,6 +8,7 @@ import { AgentPane } from "./agent-pane.js";
 import { LiveEditController } from "./live-edit.js";
 import { startDevControl } from "./dev-control.js";
 import { registerCompletions } from "./completions.js";
+import { PlanEditorProvider } from "./plan-editor.js";
 
 const SESSION_TYPE = "codex";
 const SESSION_SCHEME = "muster-codex";
@@ -189,9 +190,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     tabItem.text = on ? "Muster Tab" : "Muster Tab: off";
     void vscode.window.setStatusBarMessage(on ? "Muster Tab on — Codex completes as you pause" : "Muster Tab off", 2500);
   }));
-  context.subscriptions.push(vscode.commands.registerCommand("muster.plan.preview", (uri?: vscode.Uri) => vscode.commands.executeCommand("markdown.showPreviewToSide", uri ?? vscode.window.activeTextEditor?.document.uri)));
+  context.subscriptions.push(vscode.commands.registerCommand("muster.plan.preview", (uri?: vscode.Uri) => { const target = uri ?? vscode.window.activeTextEditor?.document.uri; if (target) return vscode.commands.executeCommand("vscode.openWith", target, "muster.planEditor"); }));
   context.subscriptions.push(vscode.commands.registerCommand("muster.plan.build", (uri?: vscode.Uri) => { const target = uri ?? vscode.window.activeTextEditor?.document.uri; if (target) void pane.buildFromFile(target); }));
   context.subscriptions.push(vscode.commands.registerCommand("muster.plan.model", () => pane.pickBuildModel()));
+  context.subscriptions.push(vscode.window.registerCustomEditorProvider(PlanEditorProvider.viewType, new PlanEditorProvider({
+    models: () => pane.catalog().models,
+    currentModel: () => pane.catalog().model,
+    build: (request) => pane.buildFromFile(request.uri, { ...(request.todos ? { todos: request.todos } : {}), ...(request.model ? { model: request.model } : {}), ...(request.newThread ? { newThread: true } : {}) }),
+  }), { webviewOptions: { retainContextWhenHidden: true }, supportsMultipleEditorsPerDocument: false }));
   context.subscriptions.push(vscode.commands.registerCommand("muster.agent.more", () => vscode.commands.executeCommand("workbench.action.openSettings", "muster")));
   context.subscriptions.push(vscode.commands.registerCommand("muster.agent.stop", () => pane.stop()));
   context.subscriptions.push(vscode.commands.registerCommand("muster.agent.maximize", () => vscode.commands.executeCommand("workbench.action.toggleMaximizedAuxiliaryBar")));

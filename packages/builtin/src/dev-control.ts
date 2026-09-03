@@ -10,7 +10,7 @@ import { existsSync, unlinkSync } from "node:fs";
 import type { LiveEditController } from "./live-edit.js";
 import { queryCodex } from "./codex.js";
 
-interface Deps { readonly live: LiveEditController; readonly log: (line: string) => void; readonly pane?: { debugState(): Record<string, unknown>; debugThreads(): Promise<Record<string, unknown>>; harness(input: { text: string; mode?: string; newTab?: boolean; access?: string }): Promise<Record<string, unknown>> } }
+interface Deps { readonly live: LiveEditController; readonly log: (line: string) => void; readonly pane?: { debugState(): Record<string, unknown>; debugThreads(): Promise<Record<string, unknown>>; harness(input: { text: string; mode?: string; newTab?: boolean; access?: string; thread?: string; build?: number[]; buildModel?: string }): Promise<Record<string, unknown>> } }
 
 export function startDevControl(context: vscode.ExtensionContext, deps: Deps): void {
   const path = process.env.MUSTER_CODE_DEV_SOCK;
@@ -57,7 +57,8 @@ async function handle(line: string, deps: Deps): Promise<unknown> {
     }
     case "chat": {
       if (!deps.pane) return { ok: false, error: "no pane" };
-      const result = await deps.pane.harness({ text: String(message.text ?? ""), ...(message.mode ? { mode: String(message.mode) } : {}), ...(message.newTab ? { newTab: true } : {}), ...(message.access ? { access: String(message.access) } : {}) });
+      const { cmd: _cmd, ...rest } = message;
+      const result = await deps.pane.harness({ ...(rest as Record<string, unknown>), text: String(message.text ?? "") } as Parameters<NonNullable<Deps["pane"]>["harness"]>[0]);
       return { ok: true, ...result };
     }
     case "exec": {

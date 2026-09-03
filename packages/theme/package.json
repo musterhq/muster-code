@@ -28,7 +28,7 @@
       "workbench.layoutControl.enabled": true,
       "workbench.secondarySideBar.defaultVisibility": "visible",
       "workbench.startupEditor": "none",
-      "workbench.tips.enabled": false,
+      "workbench.tips.enabled": true,
       "workbench.statusBar.visible": true,
       "chat.commandCenter.enabled": false,
       "editor.fontSize": 13,
@@ -36,7 +36,7 @@
       "editor.minimap.enabled": false,
       "editor.inlineSuggest.enabled": true,
       "explorer.compactFolders": false,
-      "workbench.editor.empty.hint": "hidden",
+      "workbench.editor.empty.hint": "text",
       "diffEditor.renderSideBySide": false,
       "diffEditor.ignoreTrimWhitespace": false,
       "chat.disableAIFeatures": true

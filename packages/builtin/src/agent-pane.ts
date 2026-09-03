@@ -46,7 +46,7 @@ type FromPane =
   | { type: "setMode"; id: string } | { type: "setAccess"; id: string } | { type: "setModel"; id: string } | { type: "setEffort"; id: string }
   | { type: "pin"; id: string; pinned: boolean }
   | { type: "viewPlan" } | { type: "buildPlan"; todos?: number[]; model?: string; newThread?: boolean }
-  | { type: "suggest"; kind: "file" | "skill"; query: string } | { type: "restore"; id: string } | { type: "redo" }
+  | { type: "suggest"; kind: "file" | "skill"; query: string } | { type: "restore"; id: string } | { type: "command"; id: string } | { type: "redo" }
   | { type: "openReview" }
   | { type: "boardAdd"; title: string } | { type: "boardRun"; id: string } | { type: "boardMove"; id: string; column: BoardTask["column"] };
 
@@ -245,15 +245,27 @@ export class AgentPane implements vscode.WebviewViewProvider {
     this.pushState();
   }
 
-  /** "Build" from a .plan.md editor: implement that plan in the active thread. */
-  async buildFromFile(uri: vscode.Uri): Promise<void> {
-    const tab = this.active();
+  /** "Build" from the plan editor: implement that plan (all, or the chosen to-dos) with the chosen model, here or in a new thread. */
+  async buildFromFile(uri: vscode.Uri, options: { todos?: number[]; model?: string; newThread?: boolean } = {}): Promise<void> {
+    const rel = relative(this.cwd(), uri.fsPath);
+    const card = parsePlan(existsSync(uri.fsPath) ? readFileSync(uri.fsPath, "utf8") : "");
+    const chosen = (options.todos ?? []).filter((i) => i >= 0 && i < card.todos.length);
+    const scope = chosen.length && chosen.length < card.todos.length ? `Implement ONLY these to-dos from the plan (leave the others untouched):\n${chosen.map((i) => `- ${card.todos[i]!.text}`).join("\n")}` : "Work through the to-dos in order and keep them updated.";
+    const tab = options.newThread ? this.newTab(`Build: ${card.title}`.slice(0, 40)) : this.active();
+    if (options.newThread) { this.post({ type: "messages", messages: [] }); }
+    tab.plan = { ...card, path: uri.fsPath };
     tab.settings.mode = "agent";
+    if (options.model && this.models.some((m) => m.id === options.model)) { tab.settings.modelId = options.model; const model = this.models.find((m) => m.id === options.model)!; if (!model.efforts.some((e) => e.id === tab.settings.effortId)) tab.settings.effortId = model.defaultEffort; }
     this.persist(tab);
     this.paneView = "chat";
     this.pushState();
     await vscode.commands.executeCommand(`${AgentPane.viewId}.focus`);
-    await this.send(`Implement the plan in ${relative(this.cwd(), uri.fsPath)}. Work through the to-dos in order and keep them updated.`);
+    await this.send(`${options.newThread ? `@${rel} ` : ""}Implement the plan in ${rel}. ${scope}`);
+  }
+
+  /** What the plan editor needs from the pane. */
+  catalog(): { models: { id: string; name: string; provider: string }[]; model: string | undefined } {
+    return { models: this.models.map((m) => ({ id: m.id, name: m.name, provider: m.provider })), model: this.active().settings.modelId };
   }
 
   /** ⌘K: edit the selection (or the whole file) in place; the result streams in as the inline diff. */
@@ -359,6 +371,7 @@ export class AgentPane implements vscode.WebviewViewProvider {
       case "rejectAll": await this.live.rejectAll(); return;
       case "open": await this.live.open(message.path); return;
       case "openReview": await this.live.openReview(); return;
+      case "command": await vscode.commands.executeCommand(message.id); return;
       case "newAgent": this.newAgent(); return;
       case "activateTab": { const tab = this.tabs.find((t) => t.id === message.id); if (tab) { this.activeId = tab.id; this.paneView = "chat"; this.pushState(); this.post({ type: "messages", messages: tab.messages }); } return; }
       case "closeTab": { this.tabs = this.tabs.filter((t) => t.id !== message.id); if (!this.tabs.length) this.newTab(); if (!this.tabs.some((t) => t.id === this.activeId)) this.activeId = this.tabs[this.tabs.length - 1]!.id; this.pushState(); this.post({ type: "messages", messages: this.active().messages }); return; }
@@ -657,7 +670,7 @@ export class AgentPane implements vscode.WebviewViewProvider {
   }
 
   private async openPlan(path: string): Promise<void> {
-    await vscode.commands.executeCommand("markdown.showPreview", vscode.Uri.file(path));
+    await vscode.commands.executeCommand("vscode.openWith", vscode.Uri.file(path), "muster.planEditor", { preserveFocus: true });
   }
 }
 
@@ -704,7 +717,7 @@ function paneHtml(csp: string): string {
   html, body { height: 100%; margin: 0; }
   body { font-family: var(--vscode-font-family); font-size: var(--fs-lg); line-height: var(--lh-lg); color: var(--fg); background: transparent; -webkit-font-smoothing: subpixel-antialiased; display: flex; flex-direction: column; overflow: hidden; }
   button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; }
-  #tabs { display: flex; align-items: center; gap: 4px; padding: 6px 8px 4px; overflow-x: auto; scrollbar-width: none; flex: 0 0 auto; }
+  #tabs { display: flex; align-items: center; gap: 2px; padding: 4px 6px 2px; overflow-x: auto; scrollbar-width: none; flex: 0 0 auto; border-bottom: 1px solid var(--stroke-tertiary); }
   #tabs::-webkit-scrollbar { display: none; }
   .tab { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 8px 0 10px; border-radius: var(--radius-base); font-size: var(--fs-base); color: var(--text-secondary); white-space: nowrap; max-width: 220px; cursor: pointer; flex: 0 0 auto; }
   .tab .name { overflow: hidden; text-overflow: ellipsis; }
@@ -721,15 +734,15 @@ function paneHtml(csp: string): string {
   #tabs .spacer { flex: 1; }
   .view { display: none; flex: 1; min-height: 0; flex-direction: column; }
   body[data-view="chat"] #chat, body[data-view="history"] #history, body[data-view="board"] #board { display: flex; }
-  #messages { flex: 1; overflow: auto; padding: 8px 10px 12px; display: flex; flex-direction: column; gap: 10px; }
+  #messages { flex: 1; overflow: auto; padding: 6px 10px 10px; display: flex; flex-direction: column; gap: 6px; }
   body:not(.has-messages) #messages { display: none; }
-  .human { align-self: flex-end; margin-left: max(32px, 20%); min-width: 150px; max-height: 120px; overflow: hidden; position: relative; background: var(--vscode-input-background); border: 1px solid var(--stroke-secondary); border-radius: var(--radius-xl); padding: 8px 10px; white-space: pre-wrap; word-break: break-word; }
+  .human { align-self: flex-end; margin-left: max(24px, 12%); min-width: 120px; max-height: 108px; overflow: hidden; position: relative; background: var(--vscode-input-background); border: 1px solid var(--stroke-secondary); border-radius: var(--radius-xl); padding: 6px 10px; white-space: pre-wrap; word-break: break-word; font-size: var(--fs-base); line-height: 20px; }
   .human { padding-right: 34px; }
   .human .restore { position: absolute; right: 6px; bottom: 4px; width: 22px; height: 22px; border-radius: 4px; display: inline-flex; align-items: center; justify-content: center; color: var(--text-tertiary); background: var(--vscode-input-background); font-size: 13px; }
   .human:hover .restore { color: var(--text-secondary); }
   .human .restore:hover { color: var(--fg); background: var(--bg-tertiary); }
   .human.clipped::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 28px; background: linear-gradient(to bottom, transparent, var(--vscode-input-background)); border-radius: 0 0 var(--radius-xl) var(--radius-xl); }
-  .assistant { word-break: break-word; }
+  .assistant { word-break: break-word; font-size: var(--fs-base); line-height: 20px; }
   .assistant p { margin: 0 0 8px; }
   .assistant h1, .assistant h2, .assistant h3 { margin: 12px 0 6px; font-weight: 600; line-height: 1.3; }
   .assistant h1 { font-size: 17px; } .assistant h2 { font-size: 15px; } .assistant h3 { font-size: var(--fs-lg); }
@@ -746,7 +759,7 @@ function paneHtml(csp: string): string {
   .assistant table { border-collapse: collapse; margin: 0 0 8px; font-size: var(--fs-base); }
   .assistant th, .assistant td { border: 1px solid var(--stroke-secondary); padding: 3px 8px; text-align: left; }
   .assistant hr { border: 0; border-top: 1px solid var(--stroke-secondary); margin: 10px 0; }
-  .thinking { color: var(--text-tertiary); font-size: var(--fs-base); }
+  .thinking { color: var(--text-tertiary); font-size: var(--fs-sm); line-height: 18px; }
   .thinking summary { cursor: pointer; color: var(--text-secondary); list-style: none; }
   .thinking summary::before { content: "▸ "; }
   .thinking[open] summary::before { content: "▾ "; }
@@ -763,20 +776,22 @@ function paneHtml(csp: string): string {
   .editwrap .diff .a { background: var(--vscode-diffEditor-insertedLineBackground); display: block; }
   .editwrap .diff .d { background: var(--vscode-diffEditor-removedLineBackground); display: block; opacity: .9; }
   .editwrap .diff .h { color: var(--text-tertiary); display: block; }
-  .tool .head { display: flex; align-items: center; gap: 8px; height: 28px; padding: 0 10px; color: var(--text-secondary); cursor: pointer; }
-  .tool .head .cmd { font-family: var(--vscode-editor-font-family); font-size: var(--fs-sm); color: var(--fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tool { border: 0; background: transparent; border-radius: var(--radius-sm); margin: -3px 0; }
+  .tool:hover { background: var(--bg-quinary); }
+  .tool .head { display: flex; align-items: center; gap: 6px; height: 22px; padding: 0 4px; color: var(--text-tertiary); font-size: var(--fs-sm); cursor: pointer; }
+  .tool .head .cmd { font-family: var(--vscode-editor-font-family); font-size: var(--fs-xs); color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .tool .head .status { margin-left: auto; color: var(--text-tertiary); font-size: var(--fs-xs); }
   .tool pre { display: none; margin: 0; padding: 6px 10px 8px; border-top: 1px solid var(--stroke-tertiary); max-height: 220px; overflow: auto; font-family: var(--vscode-editor-font-family); font-size: var(--fs-sm); line-height: 18px; color: var(--text-secondary); white-space: pre-wrap; }
   .tool.open pre { display: block; }
-  .plan { padding: 10px 12px 8px; }
+  .plan { padding: 8px 10px 8px; }
   .plan .file { display: flex; align-items: center; gap: 6px; font-size: var(--fs-base); color: var(--text-secondary); margin-bottom: 6px; }
   .plan .file .icon { color: var(--text-tertiary); }
   .plan .file .name { font-family: var(--vscode-editor-font-family); font-size: var(--fs-sm); }
-  .plan h3 { margin: 4px 0 6px; font-size: 16px; font-weight: 600; }
-  .plan .summary { color: var(--text-secondary); margin-bottom: 8px; }
-  .plan .todos { border: 1px solid var(--stroke-tertiary); border-radius: var(--radius-lg); padding: 8px 10px; background: var(--bg-quinary); }
+  .plan h3 { margin: 2px 0 4px; font-size: 14px; font-weight: 600; line-height: 20px; }
+  .plan .summary { color: var(--text-secondary); margin-bottom: 6px; font-size: var(--fs-base); line-height: 19px; }
+  .plan .todos { border: 1px solid var(--stroke-tertiary); border-radius: var(--radius-lg); padding: 6px 8px; background: var(--bg-quinary); }
   .plan .todos .t { color: var(--text-tertiary); font-size: var(--fs-base); margin-bottom: 4px; }
-  .plan .todo { display: flex; gap: 8px; align-items: flex-start; padding: 3px 4px; margin: 0 -4px; border-radius: 4px; font-size: var(--fs-base); cursor: pointer; }
+  .plan .todo { display: flex; gap: 8px; align-items: flex-start; padding: 2px 4px; margin: 0 -4px; border-radius: 4px; font-size: var(--fs-sm); line-height: 18px; cursor: pointer; }
   .plan .todo:hover { background: var(--bg-quaternary); }
   .plan .todo .o { width: 14px; height: 14px; border-radius: 50%; border: 1.5px solid var(--stroke-primary); flex: 0 0 auto; margin-top: 3px; display: inline-flex; align-items: center; justify-content: center; font-size: 9px; color: var(--vscode-button-foreground); }
   .plan .todo.sel .o { background: var(--amber); border-color: var(--amber); color: #1a1a1a; }
@@ -794,7 +809,7 @@ function paneHtml(csp: string): string {
   .plan .todo.done .o { background: var(--vscode-charts-green); border-color: var(--vscode-charts-green); }
   .plan .todo.done { color: var(--text-tertiary); text-decoration: line-through; }
   .plan .more { color: var(--text-tertiary); font-size: var(--fs-base); padding: 3px 0 0 22px; }
-  .plan .foot { display: flex; align-items: center; gap: 10px; margin-top: 10px; flex-wrap: wrap; }
+  .plan .foot { display: flex; align-items: center; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
   .plan .foot .viewplan { color: var(--text-secondary); font-size: var(--fs-base); }
   .plan .foot .viewplan:hover { color: var(--fg); }
   .plan .foot .spacer { flex: 1; }
@@ -822,7 +837,7 @@ function paneHtml(csp: string): string {
   #status { display: none; align-items: center; justify-content: space-between; padding: 0 12px 6px; font-size: var(--fs-base); color: var(--text-secondary); }
   body.running #status { display: flex; }
   #status .stop { cursor: pointer; } #status .stop kbd { font-family: inherit; color: var(--text-tertiary); margin-left: 6px; }
-  #composer { margin: 8px 10px 10px; background: var(--vscode-input-background); border: 1px solid var(--stroke-secondary); border-radius: var(--radius-xl); padding: 10px 12px 8px; position: relative; flex: 0 0 auto; min-width: 0; overflow: hidden; container-type: inline-size; }
+  #composer { margin: 6px 10px 8px; background: var(--vscode-input-background); border: 1px solid var(--stroke-secondary); border-radius: var(--radius-xl); padding: 10px 12px 8px; position: relative; flex: 0 0 auto; min-width: 0; overflow: hidden; container-type: inline-size; }
   #messages, .card, .assistant, .human { min-width: 0; }
   #messages > * { flex-shrink: 0; }
   .card { overflow: hidden; }
@@ -832,7 +847,7 @@ function paneHtml(csp: string): string {
   @container (max-width: 300px) { .pill.mode .lbl { display: none; } .icon[title="Dictate"] { display: none; } }
   #composer:focus-within { border-color: var(--stroke-primary); }
   body:not(.has-messages)[data-view="chat"] #composer { order: -1; }
-  #input { width: 100%; min-height: 84px; max-height: 240px; resize: none; border: 0; outline: 0; background: transparent; color: var(--fg); font: inherit; font-size: var(--fs-lg); line-height: var(--lh-lg); padding: 0; }
+  #input { width: 100%; min-height: 64px; max-height: 240px; resize: none; border: 0; outline: 0; background: transparent; color: var(--fg); font: inherit; font-size: var(--fs-lg); line-height: var(--lh-lg); padding: 0; }
   #input::placeholder { color: var(--vscode-input-placeholderForeground); }
   .bar { display: flex; align-items: center; gap: 6px; margin-top: 6px; min-width: 0; }
   .pill { display: inline-flex; align-items: center; gap: 5px; height: 22px; padding: 0 7px; border-radius: var(--radius-base); font-size: var(--fs-sm); color: var(--fg); cursor: pointer; white-space: nowrap; min-width: 0; flex: 0 1 auto; }
@@ -926,6 +941,8 @@ function paneHtml(csp: string): string {
     plus: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>',
     history: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5M12 7v5l3 3"/></svg>',
     board: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="5" height="16" rx="1"/><rect x="10" y="4" width="5" height="10" rx="1"/><rect x="17" y="4" width="4" height="13" rx="1"/></svg>',
+    more: '<svg viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg>',
+    max: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 9V4h5M20 15v5h-5M20 9V4h-5M4 15v5h5"/></svg>',
   };
   function inline(t) {
     return escape(t)
@@ -1042,6 +1059,8 @@ function paneHtml(csp: string): string {
     const sp = document.createElement("span"); sp.className = "spacer"; t.appendChild(sp);
     t.appendChild(mk(ICONS.history, "History", state.view === "history", () => vscode.postMessage({ type: "view", view: state.view === "history" ? "chat" : "history" })));
     t.appendChild(mk(ICONS.board, "Board (Kanban)", state.view === "board", () => vscode.postMessage({ type: "view", view: state.view === "board" ? "chat" : "board" })));
+    t.appendChild(mk(ICONS.more, "More", false, () => vscode.postMessage({ type: "command", id: "muster.agent.more" })));
+    t.appendChild(mk(ICONS.max, "Maximize Chat ⌥⌘E", false, () => vscode.postMessage({ type: "command", id: "muster.agent.maximize" })));
   }
   function effortLabel(id) { return ({ low: "Low", medium: "Medium", high: "High", xhigh: "Extra High", max: "Max", ultra: "Ultra" })[id] || id; }
   function renderState() {

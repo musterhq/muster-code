@@ -198,3 +198,7 @@
 .monaco-editor .muster-cmdk-hint .k { padding: 0 5px; height: 16px; line-height: 16px; border-radius: 4px; background: color-mix(in srgb, var(--vscode-editor-foreground) 8%, transparent); color: color-mix(in srgb, var(--vscode-editor-foreground) 66%, transparent); }
 .monaco-editor .muster-cmdk-hint .lbl { margin-left: 4px; }
 .monaco-editor .muster-cmdk-status { font-size: 11px; color: color-mix(in srgb, var(--vscode-editor-foreground) 66%, transparent); min-height: 0; }
+
+/* ── Agent pane density: the webview's tab row is the header (Cursor) ── */
+.monaco-workbench .part.auxiliarybar > .title { display: none !important; }
+.monaco-workbench .part.auxiliarybar .content .pane-header { display: none !important; }

@@ -371,6 +371,18 @@
         "mac": "cmd+k",
         "when": "terminalFocus"
       }
+    ],
+    "customEditors": [
+      {
+        "viewType": "muster.planEditor",
+        "displayName": "Plan",
+        "selector": [
+          {
+            "filenamePattern": "*.plan.md"
+          }
+        ],
+        "priority": "default"
+      }
     ]
   },
   "scripts": {

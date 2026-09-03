@@ -50,6 +50,22 @@ insert_at = js.index(";", export_at) + 1
 js = js[:insert_at] + "\n" + MARK + "\n" + contrib + "\n" + END + "\n" + js[insert_at:]
 js_path.write_text(js)
 
+# 4. Cursor's empty-editor welcome: New Agent / Show Terminal / Search Files / Maximize Chat / Add Repository / Open Settings.
+WATERMARK = {
+    "workbench.action.showCommands": ('"New Agent"', "muster.agent.new"),
+    "workbench.action.quickOpen": ('"Search Files"', "workbench.action.quickOpen"),
+    "workbench.action.findInFiles": ('"Maximize Chat"', "muster.agent.maximize"),
+    "workbench.action.terminal.toggleTerminal": ('"Show Terminal"', "workbench.action.terminal.toggleTerminal"),
+    "workbench.action.debug.start": ('"Add Repository"', "workbench.action.addRootFolder"),
+    "workbench.action.openSettings": ('"Open Settings"', "workbench.action.openSettings"),
+}
+for old_id, (text, new_id) in WATERMARK.items():
+    pattern = re.compile(r'text:[a-zA-Z_$]+\(\d+,null\),id:"' + re.escape(old_id) + '"')
+    js, count = pattern.subn(f'text:{text},id:"{new_id}"', js, count=1)
+    if not count and f'id:"{new_id}"' not in js:
+        sys.exit(f"anchor missing: watermark entry {old_id}")
+js_path.write_text(js)
+
 product = json.loads(product_path.read_text())
 product["checksums"] = {}
 product_path.write_text(json.dumps(product, indent=2) + "\n")
