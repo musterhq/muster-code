@@ -10,7 +10,7 @@ import { existsSync, unlinkSync } from "node:fs";
 import type { LiveEditController } from "./live-edit.js";
 import { queryCodex } from "./codex.js";
 
-interface Deps { readonly live: LiveEditController; readonly log: (line: string) => void; readonly pane?: { debugState(): Record<string, unknown> } }
+interface Deps { readonly live: LiveEditController; readonly log: (line: string) => void; readonly pane?: { debugState(): Record<string, unknown>; harness(input: { text: string; mode?: string; newTab?: boolean; access?: string }): Promise<Record<string, unknown>> } }
 
 export function startDevControl(context: vscode.ExtensionContext, deps: Deps): void {
   const path = process.env.MUSTER_CODE_DEV_SOCK;
@@ -19,7 +19,8 @@ export function startDevControl(context: vscode.ExtensionContext, deps: Deps): v
   const server = createServer((socket) => serve(socket, deps));
   server.on("error", (error) => deps.log(`dev control error: ${error.message}`));
   server.listen(path, () => deps.log(`dev control listening on ${path}`));
-  context.subscriptions.push({ dispose: () => { server.close(); if (existsSync(path)) unlinkSync(path); } });
+  // Never unlink on dispose: a successor extension host (window reload, folder switch) may already own the path.
+  context.subscriptions.push({ dispose: () => { server.close(); } });
 }
 
 function serve(socket: Socket, deps: Deps): void {
@@ -54,8 +55,14 @@ async function handle(line: string, deps: Deps): Promise<unknown> {
       const written = message.write === false ? [] : deps.live.simulateWrite(itemId);
       return { ok: true, ms: Date.now() - started, written };
     }
+    case "chat": {
+      if (!deps.pane) return { ok: false, error: "no pane" };
+      const result = await deps.pane.harness({ text: String(message.text ?? ""), ...(message.mode ? { mode: String(message.mode) } : {}), ...(message.newTab ? { newTab: true } : {}), ...(message.access ? { access: String(message.access) } : {}) });
+      return { ok: true, ...result };
+    }
     case "exec": {
-      const result = await vscode.commands.executeCommand(String(message.command), ...((message.args as unknown[]) ?? []));
+      const args = ((message.args as unknown[]) ?? []).map((a) => (a && typeof a === "object" && "$uri" in (a as Record<string, unknown>) ? vscode.Uri.parse(String((a as Record<string, unknown>).$uri)) : a));
+      const result = await vscode.commands.executeCommand(String(message.command), ...args);
       return { ok: true, result: result ?? null };
     }
     case "query": {

@@ -40,6 +40,7 @@ interface FileArgs { uri: string; action: "accept" | "reject" }
 interface GoArgs { uri: string; direction: 1 | -1 }
 
 export type Checkpoint = Map<string, { readonly existed: boolean; readonly content: string }>;
+export interface RestoreResult { readonly changed: number; readonly inverse: Checkpoint }
 
 export class LiveEditController {
   private checkpoint: Checkpoint | undefined;
@@ -142,9 +143,12 @@ export class LiveEditController {
   takeCheckpoint(): Checkpoint { const taken = this.checkpoint ?? new Map(); this.checkpoint = undefined; return taken; }
 
   /** Restore a checkpoint: files the agent created are removed, edited files get their turn-start contents back. */
-  async restore(checkpoint: Checkpoint): Promise<number> {
+  async restore(checkpoint: Checkpoint): Promise<RestoreResult> {
     let count = 0;
+    const inverse: Checkpoint = new Map();
     for (const [abs, before] of checkpoint) {
+      const existed = existsSync(abs);
+      inverse.set(abs, { existed, content: existed ? readFileSync(abs, "utf8") : "" });
       const live = this.files.get(abs);
       if (live) { this.clearPaint(live); this.files.delete(abs); }
       if (!before.existed) { if (existsSync(abs)) { unlinkSync(abs); count++; } continue; }
@@ -154,7 +158,7 @@ export class LiveEditController {
     }
     if (!this.files.size) await vscode.commands.executeCommand("setContext", "muster.liveEdit", false);
     this.changed.fire();
-    return count;
+    return { changed: count, inverse };
   }
 
   review(): EditCard[] {

@@ -18,11 +18,12 @@ type PaneMessage =
   | { kind: "assistant"; text: string; reasoning: string }
   | ToolMessage
   | { kind: "plan"; card: PlanCard };
-interface Tab { id: string; name: string; thread?: CodexThread; messages: PaneMessage[]; settings: ThreadSettings; plan?: PlanCard; claudeSession?: string; running: boolean; checkpoints: Map<string, Checkpoint>; autoFixed?: boolean }
+interface RedoState { checkpoint: Checkpoint; messages: PaneMessage[] }
+interface Tab { id: string; name: string; thread?: CodexThread; messages: PaneMessage[]; settings: ThreadSettings; plan?: PlanCard; claudeSession?: string; running: boolean; checkpoints: Map<string, Checkpoint>; redo?: RedoState; autoFixed?: boolean; lastError?: string }
 interface BoardTask { id: string; title: string; column: "backlog" | "progress" | "review" | "done"; threadId?: string; createdAt: number }
 
 type ToPane =
-  | { type: "state"; tabs: { id: string; name: string; running: boolean }[]; activeId: string; view: "chat" | "history" | "board"; modes: ModeInfo[]; access: AccessMode[]; models: ModelInfo[]; settings: ThreadSettings; loading: boolean }
+  | { type: "state"; tabs: { id: string; name: string; running: boolean }[]; activeId: string; view: "chat" | "history" | "board"; modes: ModeInfo[]; access: AccessMode[]; models: ModelInfo[]; settings: ThreadSettings; loading: boolean; canRedo: boolean }
   | { type: "messages"; messages: PaneMessage[] }
   | { type: "user"; text: string }
   | { type: "start" }
@@ -45,7 +46,7 @@ type FromPane =
   | { type: "setMode"; id: string } | { type: "setAccess"; id: string } | { type: "setModel"; id: string } | { type: "setEffort"; id: string }
   | { type: "pin"; id: string; pinned: boolean }
   | { type: "viewPlan" } | { type: "buildPlan" }
-  | { type: "suggest"; kind: "file" | "skill"; query: string } | { type: "restore"; id: string }
+  | { type: "suggest"; kind: "file" | "skill"; query: string } | { type: "restore"; id: string } | { type: "redo" }
   | { type: "openReview" }
   | { type: "boardAdd"; title: string } | { type: "boardRun"; id: string } | { type: "boardMove"; id: string; column: BoardTask["column"] };
 
@@ -171,6 +172,36 @@ export class AgentPane implements vscode.WebviewViewProvider {
     await this.send(`Review the changes in this repository against the ${branch} branch for issues (bugs, regressions, missing tests, risky changes). Run \`git diff ${branch}\` (and \`git status\`) to see them; report findings with file:line references, most severe first, or say "No issues found".`);
   }
 
+  /** Dev harness: run a real turn through the pane exactly as a user would, and report what happened. */
+  async harness(input: { text: string; mode?: string; newTab?: boolean; access?: string; thread?: string }): Promise<Record<string, unknown>> {
+    if (input.thread) { const found = (await this.visibleThreads()).find((t) => t.id === input.thread); if (found) await this.openThread(found); }
+    else if (input.newTab) { this.newTab(); this.paneView = "chat"; this.post({ type: "messages", messages: [] }); }
+    const tab = this.active();
+    if (input.mode) tab.settings.mode = input.mode;
+    if (input.access) tab.settings.accessId = input.access;
+    this.persist(tab);
+    this.pushState();
+    const before = tab.messages.length;
+    const started = Date.now();
+    await this.send(input.text);
+    const after = tab.messages.slice(before);
+    const assistant = after.filter((m): m is Extract<PaneMessage, { kind: "assistant" }> => m.kind === "assistant").map((m) => m.text).join("\n");
+    return {
+      ms: Date.now() - started,
+      error: tab.lastError ?? null,
+      thread: tab.thread?.id ?? null,
+      name: tab.name,
+      mode: tab.settings.mode,
+      debugStage: tab.settings.debugStage ?? null,
+      assistant: assistant.slice(0, 600),
+      reasoningChars: after.filter((m): m is Extract<PaneMessage, { kind: "assistant" }> => m.kind === "assistant").reduce((n, m) => n + m.reasoning.length, 0),
+      tools: after.filter((m) => m.kind === "tool").map((m) => (m as ToolMessage).title + " " + (m as ToolMessage).detail.slice(0, 80)),
+      plan: tab.plan ? { title: tab.plan.title, todos: tab.plan.todos.length, path: tab.plan.path ?? null } : null,
+      review: this.live.review(),
+      tabs: this.tabs.length,
+    };
+  }
+
   /** Dev harness: what the pane believes about itself. */
   debugState(): Record<string, unknown> {
     return { resolved: !!this.view, visible: this.view?.visible ?? null, ready: this.readyCount, models: this.models.length, access: this.access.length, loading: this.loading, tabs: this.tabs.length, view: this.paneView, activeMode: this.active().settings.mode };
@@ -287,7 +318,7 @@ export class AgentPane implements vscode.WebviewViewProvider {
   private pushState(): void {
     const tab = this.active();
     const modes = this.modes().map((m) => (m.debug ? { ...m, placeholder: DEBUG_STAGES[tab.settings.debugStage ?? 0]!.placeholder } : m));
-    this.post({ type: "state", tabs: this.tabs.map((t) => ({ id: t.id, name: t.name, running: t.running })), activeId: tab.id, view: this.paneView, modes, access: this.access, models: this.models, settings: tab.settings, loading: this.loading });
+    this.post({ type: "state", tabs: this.tabs.map((t) => ({ id: t.id, name: t.name, running: t.running })), activeId: tab.id, view: this.paneView, modes, access: this.access, models: this.models, settings: tab.settings, loading: this.loading, canRedo: !!tab.redo });
   }
 
   private pushBoard(): void {
@@ -314,7 +345,33 @@ export class AgentPane implements vscode.WebviewViewProvider {
       case "closeTab": { this.tabs = this.tabs.filter((t) => t.id !== message.id); if (!this.tabs.length) this.newTab(); if (!this.tabs.some((t) => t.id === this.activeId)) this.activeId = this.tabs[this.tabs.length - 1]!.id; this.pushState(); this.post({ type: "messages", messages: this.active().messages }); return; }
       case "openThread": { const thread = (await this.visibleThreads()).find((t) => t.id === message.id); if (thread) await this.openThread(thread); else void vscode.window.showWarningMessage("That thread belongs to another folder."); return; }
       case "suggest": { this.post({ type: "suggestions", kind: message.kind, items: await this.suggest(message.kind, message.query) }); return; }
-      case "restore": { const tab = this.active(); const checkpoint = tab.checkpoints.get(message.id); if (!checkpoint) return; const n = await this.live.restore(checkpoint); const at = tab.messages.findIndex((m) => m.kind === "user" && m.checkpoint === message.id); if (at >= 0) tab.messages = tab.messages.slice(0, at); this.post({ type: "messages", messages: tab.messages }); void vscode.window.setStatusBarMessage(`Checkpoint restored · ${n} file(s)`, 3000); return; }
+      case "restore": {
+        const tab = this.active();
+        const checkpoint = tab.checkpoints.get(message.id);
+        if (!checkpoint) return;
+        const messages = tab.messages.slice();
+        const { changed, inverse } = await this.live.restore(checkpoint);
+        if (!tab.redo) tab.redo = { checkpoint: inverse, messages };
+        else for (const [path, state] of inverse) if (!tab.redo.checkpoint.has(path)) tab.redo.checkpoint.set(path, state);
+        const at = tab.messages.findIndex((m) => m.kind === "user" && m.checkpoint === message.id);
+        if (at >= 0) tab.messages = tab.messages.slice(0, at);
+        this.post({ type: "messages", messages: tab.messages });
+        this.pushState();
+        void vscode.window.setStatusBarMessage(`Checkpoint restored · ${changed} file(s)`, 3000);
+        return;
+      }
+      case "redo": {
+        const tab = this.active();
+        if (!tab.redo || tab.running) return;
+        const redo = tab.redo;
+        const { changed } = await this.live.restore(redo.checkpoint);
+        tab.messages = redo.messages;
+        delete tab.redo;
+        this.post({ type: "messages", messages: tab.messages });
+        this.pushState();
+        void vscode.window.setStatusBarMessage(`Checkpoint redone · ${changed} file(s)`, 3000);
+        return;
+      }
       case "view": { if (message.view === "history") await this.showHistory(); else if (message.view === "board") await this.showBoard(); else { this.paneView = "chat"; this.pushState(); this.post({ type: "messages", messages: this.active().messages }); } return; }
       case "setMode": { const tab = this.active(); tab.settings.mode = message.id; const mode = this.modes().find((m) => m.id === message.id); if (mode?.effort && this.models.find((m) => m.id === tab.settings.modelId)?.efforts.some((e) => e.id === mode.effort)) tab.settings.effortId = mode.effort; this.persist(tab); this.pushState(); if (mode?.board) await this.showBoard(); return; }
       case "setAccess": { const tab = this.active(); tab.settings.accessId = message.id; this.persist(tab); this.pushState(); return; }
@@ -352,6 +409,8 @@ export class AgentPane implements vscode.WebviewViewProvider {
   private async send(text: string): Promise<void> {
     const tab = this.active();
     if (!text.trim() || tab.running) return;
+    delete tab.redo;
+    this.pushState();
     const mode = this.modes().find((m) => m.id === tab.settings.mode) ?? BUILTIN_MODES[0]!;
     if (mode.board) { await this.onMessage({ type: "boardAdd", title: text.trim() }); await this.showBoard(); return; }
     if (mode.parallel) { await this.runParallel(text); return; }
@@ -429,8 +488,11 @@ export class AgentPane implements vscode.WebviewViewProvider {
         ? await runClaudeTurn({ prompt, cwd, model: model.id.replace(/^claude:/, ""), effort, ...(tab.claudeSession ? { sessionId: tab.claudeSession, resume: true } : { sessionId: (tab.claudeSession = cryptoId()) }), handlers })
         : await runTurn({ prompt, cwd, ...(tab.thread ? { threadId: tab.thread.id } : {}), ...(model ? { model: model.id } : {}), reasoning: effort, ...(askAccess ? { access: askAccess } : {}), mode: mode.plan ? "plan" : "default", ...(rules ? { rules } : {}), handlers });
       if (result.status === "failed") {
-        this.post({ type: "done", ok: false, error: result.errorMessage ?? "The turn failed." });
+        tab.lastError = result.errorMessage ?? "The turn failed.";
+        this.output.appendLine(`turn failed: ${tab.lastError}`);
+        this.post({ type: "done", ok: false, error: tab.lastError });
       } else {
+        delete tab.lastError;
         if (result.threadId && !tab.thread && model?.provider !== "claude") {
           const thread = (await listThreads()).find((t) => t.id === result.threadId);
           if (thread) { tab.thread = thread; tab.name = thread.name; }
@@ -441,7 +503,9 @@ export class AgentPane implements vscode.WebviewViewProvider {
         if (mode.autoFix && !tab.autoFixed) void this.autoFix(tab, checkpointId);
       }
     } catch (error) {
-      this.post({ type: "done", ok: false, error: error instanceof Error ? error.message : String(error) });
+      tab.lastError = error instanceof Error ? error.message : String(error);
+      this.output.appendLine(`turn threw: ${tab.lastError}`);
+      this.post({ type: "done", ok: false, error: tab.lastError });
     } finally {
       tab.running = false;
       tab.checkpoints.set(checkpointId, this.live.takeCheckpoint());
@@ -624,8 +688,9 @@ function paneHtml(csp: string): string {
   #messages { flex: 1; overflow: auto; padding: 8px 10px 12px; display: flex; flex-direction: column; gap: 10px; }
   body:not(.has-messages) #messages { display: none; }
   .human { align-self: flex-end; margin-left: max(32px, 20%); min-width: 150px; max-height: 120px; overflow: hidden; position: relative; background: var(--vscode-input-background); border: 1px solid var(--stroke-secondary); border-radius: var(--radius-xl); padding: 8px 10px; white-space: pre-wrap; word-break: break-word; }
-  .human .restore { position: absolute; right: 6px; bottom: 4px; width: 22px; height: 22px; border-radius: 4px; display: none; align-items: center; justify-content: center; color: var(--text-secondary); background: var(--vscode-input-background); font-size: 13px; }
-  .human:hover .restore { display: inline-flex; }
+  .human { padding-right: 34px; }
+  .human .restore { position: absolute; right: 6px; bottom: 4px; width: 22px; height: 22px; border-radius: 4px; display: inline-flex; align-items: center; justify-content: center; color: var(--text-tertiary); background: var(--vscode-input-background); font-size: 13px; }
+  .human:hover .restore { color: var(--text-secondary); }
   .human .restore:hover { color: var(--fg); background: var(--bg-tertiary); }
   .human.clipped::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 28px; background: linear-gradient(to bottom, transparent, var(--vscode-input-background)); border-radius: 0 0 var(--radius-xl) var(--radius-xl); }
   .assistant { word-break: break-word; }
@@ -680,7 +745,7 @@ function paneHtml(csp: string): string {
   .plan .todo.done .o { background: var(--vscode-charts-green); border-color: var(--vscode-charts-green); }
   .plan .todo.done { color: var(--text-tertiary); text-decoration: line-through; }
   .plan .more { color: var(--text-tertiary); font-size: var(--fs-base); padding: 3px 0 0 22px; }
-  .plan .foot { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
+  .plan .foot { display: flex; align-items: center; gap: 10px; margin-top: 10px; flex-wrap: wrap; }
   .plan .foot .viewplan { color: var(--text-secondary); font-size: var(--fs-base); }
   .plan .foot .viewplan:hover { color: var(--fg); }
   .plan .foot .spacer { flex: 1; }
@@ -689,6 +754,11 @@ function paneHtml(csp: string): string {
   .btn.amber kbd { font-family: inherit; opacity: .7; }
   .btn.text { color: var(--text-secondary); } .btn.text:hover { color: var(--fg); background: var(--bg-quaternary); }
   .btn.primary { background: var(--vscode-button-background); color: var(--vscode-button-foreground); }
+  #redo { display: none; padding: 0 10px 8px; }
+  body.can-redo:not(.running) #redo { display: flex; }
+  #redo button { height: 28px; padding: 0 10px; border-radius: var(--radius-base); display: inline-flex; align-items: center; gap: 7px; color: var(--text-secondary); background: var(--bg-tertiary); font-size: var(--fs-base); }
+  #redo button:hover { color: var(--fg); background: var(--bg-secondary); }
+  #redo svg { width: 14px; height: 14px; }
   #review { display: none; margin: 0 10px; border: 1px solid var(--stroke-secondary); border-bottom: 0; border-radius: var(--radius-xl) var(--radius-xl) 0 0; background: var(--vscode-input-background); font-size: var(--fs-base); }
   body.reviewing #review { display: block; }
   body.reviewing #composer { margin-top: 0; border-top-left-radius: 0; border-top-right-radius: 0; }
@@ -703,20 +773,29 @@ function paneHtml(csp: string): string {
   #status { display: none; align-items: center; justify-content: space-between; padding: 0 12px 6px; font-size: var(--fs-base); color: var(--text-secondary); }
   body.running #status { display: flex; }
   #status .stop { cursor: pointer; } #status .stop kbd { font-family: inherit; color: var(--text-tertiary); margin-left: 6px; }
-  #composer { margin: 8px 10px 10px; background: var(--vscode-input-background); border: 1px solid var(--stroke-secondary); border-radius: var(--radius-xl); padding: 10px 12px 8px; position: relative; flex: 0 0 auto; }
+  #composer { margin: 8px 10px 10px; background: var(--vscode-input-background); border: 1px solid var(--stroke-secondary); border-radius: var(--radius-xl); padding: 10px 12px 8px; position: relative; flex: 0 0 auto; min-width: 0; overflow: hidden; container-type: inline-size; }
+  #messages, .card, .assistant, .human { min-width: 0; }
+  .card { overflow: hidden; }
+  .edit .path, .tool .head .cmd { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .assistant pre, .assistant table { max-width: 100%; }
+  @container (max-width: 420px) { .pill.access .lbl { display: none; } .pill.model .lbl { max-width: 110px; } }
+  @container (max-width: 300px) { .pill.mode .lbl { display: none; } .icon[title="Dictate"] { display: none; } }
   #composer:focus-within { border-color: var(--stroke-primary); }
   body:not(.has-messages)[data-view="chat"] #composer { order: -1; }
   #input { width: 100%; min-height: 84px; max-height: 240px; resize: none; border: 0; outline: 0; background: transparent; color: var(--fg); font: inherit; font-size: var(--fs-lg); line-height: var(--lh-lg); padding: 0; }
   #input::placeholder { color: var(--vscode-input-placeholderForeground); }
-  .bar { display: flex; align-items: center; gap: 6px; margin-top: 6px; }
-  .pill { display: inline-flex; align-items: center; gap: 5px; height: 22px; padding: 0 7px; border-radius: var(--radius-base); font-size: var(--fs-sm); color: var(--fg); cursor: pointer; white-space: nowrap; }
+  .bar { display: flex; align-items: center; gap: 6px; margin-top: 6px; min-width: 0; }
+  .pill { display: inline-flex; align-items: center; gap: 5px; height: 22px; padding: 0 7px; border-radius: var(--radius-base); font-size: var(--fs-sm); color: var(--fg); cursor: pointer; white-space: nowrap; min-width: 0; flex: 0 1 auto; }
+  .pill .lbl { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 180px; }
+  .pill.mode { flex-shrink: 0; }
+  .icon, .send { flex-shrink: 0; }
   .pill:hover { background: var(--bg-tertiary); }
   .pill.mode { background: var(--bg-secondary); }
   .pill.mode.plan { background: color-mix(in srgb, var(--amber) 24%, transparent); color: var(--amber); }
   .pill .chev { font-size: 9px; opacity: .7; }
   .pill.model, .pill.access { color: var(--text-secondary); }
   .pill.model:hover, .pill.access:hover { color: var(--fg); }
-  .spacer { flex: 1; }
+  .spacer { flex: 1 1 0; min-width: 4px; }
   .icon { width: 26px; height: 26px; display: inline-flex; align-items: center; justify-content: center; border-radius: var(--radius-base); color: var(--fg); cursor: pointer; }
   .icon:hover { background: var(--bg-tertiary); }
   .icon svg { width: 16px; height: 16px; }
@@ -766,14 +845,15 @@ function paneHtml(csp: string): string {
   <div id="tabs"></div>
   <div class="view" id="chat">
     <div id="messages"></div>
+    <div id="redo"><button title="Restore edits to the latest checkpoint"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M20 8v5h-5"/><path d="M19 13a8 8 0 1 1-2.3-5.7L20 10"/></svg><span>Redo checkpoint</span></button></div>
     <div id="review"><div class="head" id="review-head"><span class="chev">▶</span><span id="review-summary">1 file</span><span class="adds" id="review-adds">+0</span><span class="dels" id="review-dels">−0</span><span class="spacer"></span><button class="btn text" id="review-open" title="Review Changes editor">Review</button><button class="btn text" id="review-reject">Reject</button><button class="btn primary" id="review-accept">Accept</button></div><div class="files" id="review-files"></div></div>
     <div id="status"><span>Generating..</span><span class="stop" id="stop">Stop<kbd>⇧⌘⌫</kbd></span></div>
     <div id="composer">
       <textarea id="input" placeholder="Plan, search, build anything" rows="1"></textarea>
       <div class="bar">
-        <span class="pill mode" id="mode-pill"><span id="mode-icon">∞</span><span id="mode-name">Agent</span><span class="chev">▼</span></span>
-        <span class="pill access" id="access-pill"><span id="access-name">…</span><span class="chev">▼</span></span>
-        <span class="pill model" id="model-pill"><span id="model-name">…</span><span class="chev">▼</span></span>
+        <span class="pill mode" id="mode-pill"><span id="mode-icon">∞</span><span class="lbl" id="mode-name">Agent</span><span class="chev">▼</span></span>
+        <span class="pill access" id="access-pill" title="Access"><span class="lbl" id="access-name">…</span><span class="chev">▼</span></span>
+        <span class="pill model" id="model-pill" title="Model"><span class="lbl" id="model-name">…</span><span class="chev">▼</span></span>
         <span class="spacer"></span>
         <span class="icon" title="Attach"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 12.5l-8.5 8.5a6 6 0 0 1-8.5-8.5l9-9a4 4 0 0 1 5.7 5.7l-9 9a2 2 0 0 1-2.8-2.8l8.3-8.3"/></svg></span>
         <span class="icon" title="Dictate"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="9" y="3" width="6" height="12" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg></span>
@@ -898,6 +978,7 @@ function paneHtml(csp: string): string {
     const effort = model && model.efforts.find((e) => e.id === state.settings.effortId);
     $("model-name").textContent = model ? model.name + (effort ? " " + effortLabel(effort.id) : "") : (state.loading ? "Loading models…" : "Choose model");
     body.classList.toggle("running", !!state.tabs.find((t) => t.id === state.activeId && t.running));
+    body.classList.toggle("can-redo", state.canRedo);
   }
   function placeMenu(anchor) {
     // Adaptive: below the pill when there is room, else above; clamped to the pane.
@@ -966,6 +1047,7 @@ function paneHtml(csp: string): string {
   $("review-accept").addEventListener("click", () => vscode.postMessage({ type: "acceptAll" }));
   $("review-open").addEventListener("click", () => vscode.postMessage({ type: "openReview" }));
   $("review-reject").addEventListener("click", () => vscode.postMessage({ type: "rejectAll" }));
+  $("redo").querySelector("button").addEventListener("click", () => vscode.postMessage({ type: "redo" }));
   function renderReview(files) {
     body.classList.toggle("reviewing", files.length > 0); if (!files.length) return;
     $("review-summary").textContent = files.length + (files.length === 1 ? " file" : " files"); $("review-adds").textContent = "+" + files.reduce((n, f) => n + f.adds, 0); $("review-dels").textContent = "−" + files.reduce((n, f) => n + f.dels, 0);
