@@ -144,7 +144,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   const pane = new AgentPane(context, output, live);
   context.subscriptions.push(vscode.window.registerWebviewViewProvider(AgentPane.viewId, pane, { webviewOptions: { retainContextWhenHidden: true } }));
   context.subscriptions.push(vscode.commands.registerCommand("muster.agent.new", () => pane.newAgent()));
-  context.subscriptions.push(vscode.commands.registerCommand("muster.agent.history", () => pane.pickThread()));
+  context.subscriptions.push(vscode.commands.registerCommand("muster.agent.history", () => pane.showHistory()));
+  context.subscriptions.push(vscode.commands.registerCommand("muster.agent.board", () => pane.showBoard()));
+  context.subscriptions.push(vscode.commands.registerCommand("muster.agent.mode", () => pane.cycleMode()));
   context.subscriptions.push(vscode.commands.registerCommand("muster.agent.more", () => vscode.commands.executeCommand("workbench.action.openSettings", "muster")));
   context.subscriptions.push(vscode.commands.registerCommand("muster.agent.stop", () => pane.stop()));
   context.subscriptions.push(vscode.commands.registerCommand("muster.agent.maximize", () => vscode.commands.executeCommand("workbench.action.toggleMaximizedAuxiliaryBar")));

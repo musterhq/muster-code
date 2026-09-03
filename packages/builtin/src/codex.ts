@@ -9,6 +9,7 @@ import {
   type CodexSessionSummary,
   type CodexTranscriptMessage,
 } from "@musterhq/core";
+import { queryCodexAppServer, runClaudeCode } from "@musterhq/core";
 
 export interface CodexThread {
   readonly id: string;
@@ -84,6 +85,10 @@ export async function runTurn(input: {
   readonly threadId?: string;
   readonly model?: string;
   readonly reasoning?: "low" | "medium" | "high" | "xhigh" | "max" | "ultra";
+  /** Discovered from permissionProfile/list (see listAccessModes); defaults to workspace-write without prompts. */
+  readonly access?: AccessMode;
+  /** "plan" runs the turn in Codex's plan collaboration mode. */
+  readonly mode?: "plan" | "default";
   readonly handlers: CodexTurnHandlers;
 }): Promise<CodexTurnResult> {
   const result = await runCodexAppServer({
@@ -92,7 +97,9 @@ export async function runTurn(input: {
     ...(input.threadId ? { threadId: input.threadId, cacheKey: `thread:${input.threadId}` } : { cacheKey: `new:${input.cwd}` }),
     ...(input.model ? { model: input.model } : {}),
     ...(input.reasoning ? { reasoning: input.reasoning } : {}),
-    sandbox: "workspace-write",
+    sandbox: input.access?.sandbox ?? "workspace-write",
+    ...(input.access ? { approvalPolicy: input.access.approvalPolicy } : {}),
+    ...(input.mode === "plan" ? { collaborationMode: { mode: "plan" as const, settings: { model: input.model ?? "", ...(input.reasoning ? { reasoning_effort: input.reasoning } : {}) } } } : {}),
     transportOwner: TRANSPORT_OWNER,
     keepAlive: true,
     configOverrides: ['model_reasoning_summary="detailed"'],
@@ -124,4 +131,73 @@ export function formatAge(iso: string, nowMs = Date.now()): string {
 
 export function formatSize(bytes: number): string {
   return bytes >= 1_048_576 ? `${(bytes / 1_048_576).toFixed(1)}MB` : `${Math.max(1, Math.round(bytes / 1024))}KB`;
+}
+
+/** Ask the app-server directly (model/list, permissionProfile/list, thread/list, skills/list…). Nothing is hardcoded from these answers. */
+export async function queryCodex(method: string, params: Record<string, unknown> = {}, cwd?: string): Promise<Record<string, unknown>> {
+  return queryCodexAppServer(method, params, { ...(cwd ? { cwd } : {}) });
+}
+
+// ── Discovery: nothing below is a fixed list; the app-server answers are the truth. ──
+
+export interface AccessMode {
+  readonly id: string;
+  readonly label: string;
+  readonly sandbox: "read-only" | "workspace-write" | "danger-full-access";
+  readonly approvalPolicy: "untrusted" | "on-request" | "never";
+}
+
+const ACCESS_PRESETS: Record<string, Omit<AccessMode, "id">> = {
+  ":read-only": { label: "Read only", sandbox: "read-only", approvalPolicy: "on-request" },
+  ":workspace": { label: "Manual approval", sandbox: "workspace-write", approvalPolicy: "on-request" },
+  ":danger-full-access": { label: "Full access", sandbox: "danger-full-access", approvalPolicy: "never" },
+};
+
+/** permissionProfile/list → the access modes the app exposes (labels follow the Codex app's names). */
+export async function listAccessModes(cwd?: string): Promise<AccessMode[]> {
+  const result = await queryCodex("permissionProfile/list", {}, cwd);
+  const data = (result.data as { id?: string; description?: string | null; allowed?: boolean }[] | undefined) ?? [];
+  return data.filter((p) => p.id && p.allowed !== false).map((p) => {
+    const id = String(p.id);
+    const preset = ACCESS_PRESETS[id];
+    return { id, label: preset?.label ?? p.description ?? id.replace(/^:/, ""), sandbox: preset?.sandbox ?? "workspace-write", approvalPolicy: preset?.approvalPolicy ?? "on-request" };
+  });
+}
+
+export interface ModelInfo {
+  readonly id: string;
+  readonly provider: "codex" | "claude";
+  readonly name: string;
+  readonly description: string;
+  readonly efforts: { readonly id: string; readonly description: string }[];
+  readonly defaultEffort: string;
+  readonly isDefault: boolean;
+}
+
+/** model/list (Codex, with each model's own reasoning efforts) + the Claude models the user configured. */
+export async function listModels(cwd?: string, claudeModels: readonly string[] = []): Promise<ModelInfo[]> {
+  const models: ModelInfo[] = [];
+  try {
+    const result = await queryCodex("model/list", { includeHidden: false }, cwd);
+    for (const raw of (result.data as Record<string, unknown>[] | undefined) ?? []) {
+      if (raw.hidden) continue;
+      const efforts = ((raw.supportedReasoningEfforts as { reasoningEffort?: string; description?: string }[] | undefined) ?? [])
+        .map((e) => ({ id: String(e.reasoningEffort ?? ""), description: String(e.description ?? "") })).filter((e) => e.id);
+      models.push({ id: String(raw.id ?? raw.model), provider: "codex", name: String(raw.displayName ?? raw.id), description: String(raw.description ?? ""), efforts, defaultEffort: String(raw.defaultReasoningEffort ?? efforts[0]?.id ?? "medium"), isDefault: raw.isDefault === true });
+    }
+  } catch { /* offline or not signed in: the picker shows what it can */ }
+  for (const id of claudeModels) {
+    models.push({ id: `claude:${id}`, provider: "claude", name: id.replace(/^claude-/, "Claude ").replace(/-(\d)/g, " $1").replace(/-\d{8}$/, ""), description: "Claude Code · your Claude subscription", efforts: ["low", "medium", "high", "xhigh", "max"].map((e) => ({ id: e, description: "" })), defaultEffort: "medium", isDefault: false });
+  }
+  return models;
+}
+
+/** A Claude Code turn through muster core (headless CLI), shaped like a Codex turn for the pane. */
+export async function runClaudeTurn(input: { readonly prompt: string; readonly cwd: string; readonly model: string; readonly effort?: string; readonly sessionId?: string; readonly resume?: boolean; readonly handlers: CodexTurnHandlers }): Promise<CodexTurnResult> {
+  const effort = input.effort && ["low", "medium", "high", "xhigh", "max"].includes(input.effort) ? (input.effort as "low" | "medium" | "high" | "xhigh" | "max") : undefined;
+  const raw = (await runClaudeCode({ prompt: input.prompt, cwd: input.cwd, model: input.model, ...(effort ? { effort } : {}), ...(input.sessionId ? { sessionId: input.sessionId, resume: input.resume === true } : {}) })) as unknown as Record<string, unknown>;
+  const text = String(raw.text ?? raw.output ?? raw.finalMessage ?? raw.response ?? "");
+  if (text) input.handlers.onDelta(text);
+  const failed = raw.status === "failed" || raw.ok === false;
+  return { status: failed ? "failed" : "completed", ...(typeof raw.errorMessage === "string" ? { errorMessage: raw.errorMessage } : {}), ...(input.sessionId ? { threadId: input.sessionId } : {}) } as unknown as CodexTurnResult;
 }

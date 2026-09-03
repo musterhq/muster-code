@@ -156,6 +156,15 @@
       {
         "command": "muster.edit.go",
         "title": "Go to Change"
+      },
+      {
+        "command": "muster.agent.board",
+        "title": "Agent Board",
+        "icon": "$(layout)"
+      },
+      {
+        "command": "muster.agent.mode",
+        "title": "Cycle Agent Mode"
       }
     ],
     "configuration": {
@@ -183,6 +192,27 @@
           "type": "boolean",
           "default": true,
           "description": "Inline (Tab) completions."
+        },
+        "muster.modes": {
+          "type": "array",
+          "default": [],
+          "description": "Custom agent modes: objects with id, name, icon, placeholder, prompt. Built-in modes: agent, plan, ask, kanban.",
+          "items": {
+            "type": "object"
+          }
+        },
+        "muster.claude.models": {
+          "type": "array",
+          "default": [
+            "claude-fable-5-1",
+            "claude-opus-5",
+            "claude-sonnet-5",
+            "claude-haiku-4-5-20251001"
+          ],
+          "description": "Claude models offered in the model picker (run through Claude Code on your Claude subscription).",
+          "items": {
+            "type": "string"
+          }
         }
       }
     },
@@ -199,9 +229,14 @@
           "group": "navigation@2"
         },
         {
-          "command": "muster.agent.more",
+          "command": "muster.agent.board",
           "when": "view == muster.agent.pane",
           "group": "navigation@3"
+        },
+        {
+          "command": "muster.agent.more",
+          "when": "view == muster.agent.pane",
+          "group": "navigation@4"
         }
       ]
     },
@@ -251,6 +286,12 @@
         "key": "shift+alt+f5",
         "mac": "shift+alt+f5",
         "when": "muster.liveEdit && editorTextFocus"
+      },
+      {
+        "command": "muster.agent.mode",
+        "key": "ctrl+.",
+        "mac": "cmd+.",
+        "when": "focusedView == muster.agent.pane"
       }
     ]
   },

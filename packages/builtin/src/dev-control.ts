@@ -8,6 +8,7 @@ import * as vscode from "vscode";
 import { createServer, type Socket } from "node:net";
 import { existsSync, unlinkSync } from "node:fs";
 import type { LiveEditController } from "./live-edit.js";
+import { queryCodex } from "./codex.js";
 
 interface Deps { readonly live: LiveEditController; readonly log: (line: string) => void }
 
@@ -56,6 +57,11 @@ async function handle(line: string, deps: Deps): Promise<unknown> {
     case "exec": {
       const result = await vscode.commands.executeCommand(String(message.command), ...((message.args as unknown[]) ?? []));
       return { ok: true, result: result ?? null };
+    }
+    case "query": {
+      const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+      const result = await queryCodex(String(message.method), (message.params as Record<string, unknown>) ?? {}, cwd);
+      return { ok: true, result };
     }
     case "state":
       return {
