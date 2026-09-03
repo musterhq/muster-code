@@ -13,12 +13,14 @@ import type { BrowserPick } from "./browser.js";
 // ── browser: the last picked element / screenshot, and the live page context from the workbench guest ──
 let lastPick: BrowserPick | undefined;
 export function rememberPick(pick: BrowserPick): void { lastPick = pick; }
+let browserProvider: (() => { url: string; title: string; console: { level: string; message: string; line?: number; source?: string }[] } | undefined) | undefined;
+export function setBrowserProvider(fn: typeof browserProvider): void { browserProvider = fn; }
 async function browserContext(): Promise<string | undefined> {
-  const live = (await Promise.resolve(vscode.commands.executeCommand("muster.browser.context", {})).catch(() => null)) as { url?: string; title?: string; console?: { level: number; message: string; line?: number; source?: string }[] } | null;
+  const live = browserProvider?.() ?? ((await Promise.resolve(vscode.commands.executeCommand("muster.browser.context", {})).catch(() => null)) as { url?: string; title?: string; console?: { level: string | number; message: string; line?: number; source?: string }[] } | null);
   const parts: string[] = [];
   if (live?.url) parts.push(`url: ${live.url}${live.title ? `\ntitle: ${live.title}` : ""}`);
   if (lastPick?.picked) { const p = lastPick.picked; parts.push(`selected element: ${p.selector}\nhtml: ${p.html.slice(0, 1200)}\ntext: ${p.text.slice(0, 200)}\nrect: ${JSON.stringify(p.rect)}\nstyles: ${Object.entries(p.styles).map(([k, v]) => `${k}: ${v}`).join("; ")}`); }
-  const consoleTail = (live?.console ?? []).slice(-40).map((c) => `[${["log", "warn", "error"][c.level] ?? c.level}] ${c.message}${c.source ? ` (${c.source.split("/").pop()}:${c.line ?? ""})` : ""}`);
+  const consoleTail = (live?.console ?? []).slice(-40).map((c) => `[${typeof c.level === "number" ? ["log", "warn", "error"][c.level] ?? c.level : c.level}] ${c.message}${c.source ? ` (${c.source.split("/").pop()}:${c.line ?? ""})` : ""}`);
   if (consoleTail.length) parts.push(`console:\n${consoleTail.join("\n")}`);
   return parts.length ? parts.join("\n\n") : undefined;
 }

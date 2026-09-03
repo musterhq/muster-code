@@ -9,7 +9,7 @@ import { LiveEditController } from "./live-edit.js";
 import { startDevControl } from "./dev-control.js";
 import { registerCompletions } from "./completions.js";
 import { PlanEditorProvider } from "./plan-editor.js";
-import { watchTerminals } from "./context.js";
+import { watchTerminals, setBrowserProvider } from "./context.js";
 import { SettingsPage } from "./settings-page.js";
 import { BrowserController } from "./browser.js";
 import { queryCodex } from "./codex.js";
@@ -247,6 +247,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // Browser (⇧⌘B): a Chromium guest tab with Cursor's visual editor; picks and screenshots go to the chat.
   const browser = new BrowserController(context, workspaceCwd);
   pane.browser = browser;
+  setBrowserProvider(() => { const id = browser.activeEditorBrowser() ?? pane.activeBrowserId() ?? browser.list()[0]?.id; const st = id ? browser.get(id) : undefined; return st ? { url: st.url, title: st.title, console: st.console } : undefined; });
   browser.onChange((state) => pane.browserChanged(state));
   browser.onPick((pick) => { if (pick.imagePath || !pick.picked) void pane.addBrowserPick(pick); });
   context.subscriptions.push(vscode.commands.registerCommand("muster.browser.openTab", async (url?: string) => { const target = typeof url === "string" ? url : await vscode.window.showInputBox({ prompt: "Open Browser", value: browser.defaultUrl(), placeHolder: "Enter URL or search..." }); if (!target) return; if (config().get<string>("browser.location", "editor") === "pane") pane.openBrowserTab(target); else browser.open(target, "editor"); }));
