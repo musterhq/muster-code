@@ -157,3 +157,35 @@
 .monaco-workbench .editor-group-watermark .keybinding { opacity: .8; }
 /* Explorer rows a touch airier, like Cursor */
 .monaco-workbench .explorer-viewlet .monaco-list-row { font-size: 13px; }
+
+/* ── Muster inline diff (Cursor's inline-diff contribution, rebuilt) ── */
+.monaco-editor .muster-added-line { background-color: var(--vscode-diffEditor-insertedLineBackground); }
+.monaco-editor .muster-added-first::after { content: ""; position: absolute; right: -10px; top: 0; width: 10px; height: 100%; background-image: linear-gradient(to right, var(--vscode-diffEditor-insertedLineBackground), transparent); }
+.monaco-editor .muster-ghost { background-color: var(--vscode-diffEditor-removedLineBackground); opacity: .9; white-space: pre; overflow: hidden; -webkit-user-select: text; user-select: text; cursor: text; }
+.monaco-editor .muster-ghost-line { padding-left: .5px; }
+.monaco-editor .muster-hunk { position: absolute; display: flex; align-items: center; gap: 4px; margin-top: 2px; z-index: 30; pointer-events: none; font-family: var(--vscode-font-family); }
+.monaco-editor .muster-hunk > * { pointer-events: auto; }
+.monaco-editor .muster-nav { display: flex; align-items: center; gap: 2px; padding: 2px 6px; border-radius: 4px; position: relative; isolation: isolate; background: color-mix(in srgb, color-mix(in srgb, var(--vscode-editor-foreground) 14%, transparent) 67%, transparent); }
+.monaco-editor .muster-nav::before { content: ""; position: absolute; inset: 0; border-radius: inherit; background: var(--vscode-editor-background); z-index: -1; pointer-events: none; }
+.monaco-editor .muster-nav-counter { color: var(--vscode-input-foreground); font-size: 12px; min-width: 36px; text-align: center; white-space: nowrap; font-variant-numeric: tabular-nums; font-feature-settings: "tnum"; }
+.monaco-editor .muster-btn { display: flex; align-items: center; height: 22px; padding: 0 8px; border: 1px solid transparent; border-radius: 4px; font-size: 12px; font-family: inherit; cursor: pointer; position: relative; isolation: isolate; white-space: nowrap; outline: none; color: var(--vscode-input-foreground); background: transparent; }
+.monaco-editor .muster-hunk.compact .muster-btn .label { display: none; }
+.monaco-editor .muster-hunk.compact .muster-btn kbd { margin-left: 0; }
+.monaco-editor .muster-btn kbd { font-family: inherit; opacity: .7; margin-left: 4px; }
+.monaco-editor .muster-btn.secondary { background-color: color-mix(in srgb, var(--vscode-editor-foreground) 12%, transparent) !important; }
+.monaco-editor .muster-btn.secondary::before { content: ""; position: absolute; inset: 0; border-radius: inherit; background: var(--vscode-editor-background); z-index: -1; pointer-events: none; }
+.monaco-editor .muster-btn.secondary:hover { background-color: color-mix(in srgb, var(--vscode-editor-foreground) 20%, transparent) !important; }
+.monaco-editor .muster-btn.primary { color: var(--vscode-button-foreground); background-color: var(--vscode-editor-background); }
+.monaco-editor .muster-btn.primary::before { content: ""; position: absolute; inset: 0; border-radius: inherit; background: color-mix(in srgb, var(--vscode-charts-green) 85%, transparent); z-index: -1; pointer-events: none; }
+.monaco-editor .muster-btn.primary:hover::before { background: var(--vscode-charts-green); }
+.monaco-editor .muster-btn.primary kbd { color: var(--vscode-button-foreground); }
+.monaco-editor .muster-review { position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%); display: flex; align-items: center; gap: 40px; max-width: 720px; padding: 6px 10px; border-radius: 6px; z-index: 40; font-family: var(--vscode-font-family); font-size: 12px; background: var(--vscode-editorWidget-background); border: 1px solid var(--vscode-editorWidget-border, color-mix(in srgb, var(--vscode-editor-foreground) 12%, transparent)); box-shadow: 0 2px 8px var(--vscode-widget-shadow); color: var(--vscode-input-foreground); }
+.monaco-editor .muster-review .muster-nav { margin-left: 2px; }
+.monaco-editor .muster-review .muster-nav .arrow { width: 18px; height: 18px; display: inline-flex; align-items: center; justify-content: center; border-radius: 4px; cursor: pointer; color: var(--vscode-input-foreground); opacity: .8; }
+.monaco-editor .muster-review .muster-nav .arrow:hover { background: color-mix(in srgb, var(--vscode-editor-foreground) 10%, transparent); opacity: 1; }
+.monaco-editor .muster-review .slash { opacity: .6; margin: 0 2px; }
+.monaco-editor .muster-review .actions { display: flex; align-items: center; gap: 8px; }
+.monaco-editor .muster-review .muster-btn.text { color: var(--vscode-button-secondaryForeground, var(--vscode-input-foreground)); }
+.monaco-editor .muster-review .muster-btn.text:hover { background: color-mix(in srgb, var(--vscode-editor-foreground) 8%, transparent); }
+.monaco-editor .muster-review .muster-btn.accent { color: var(--vscode-button-foreground); background: var(--vscode-button-background); }
+.monaco-editor .muster-review .muster-btn.accent:hover { filter: brightness(1.08); }

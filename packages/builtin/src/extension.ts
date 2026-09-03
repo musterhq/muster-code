@@ -6,6 +6,7 @@ import * as vscode from "vscode";
 import { formatAge, formatSize, interruptTurn, listThreads, readHistory, runTurn, type CodexThread } from "./codex.js";
 import { AgentPane } from "./agent-pane.js";
 import { LiveEditController } from "./live-edit.js";
+import { startDevControl } from "./dev-control.js";
 
 const SESSION_TYPE = "codex";
 const SESSION_SCHEME = "muster-codex";
@@ -135,8 +136,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   context.subscriptions.push(vscode.lm.registerLanguageModelChatProvider("muster", modelProvider));
 
   // ── Live edits (Cursor-style streaming inline diffs) ──
-  const live = new LiveEditController(workspaceCwd);
+  const live = new LiveEditController(workspaceCwd, (line) => output.appendLine(line));
   live.register(context);
+  startDevControl(context, { live, log: (line) => output.appendLine(line) });
 
   // ── The Agent pane (secondary sidebar) — the Cursor-standard surface ──
   const pane = new AgentPane(context, output, live);

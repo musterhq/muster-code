@@ -61,7 +61,7 @@ cp -R "$ROOT/packages/builtin/dist-ext" "$RES/extensions/muster.muster-code"
 cp -R "$ROOT/packages/theme/dist-ext" "$RES/extensions/muster.theme-muster"
 
 echo "▸ patching the workbench"
-python3 "$ROOT/scripts/patch-workbench.py" "$RES/out/vs/workbench/workbench.desktop.main.js"
+python3 "$ROOT/scripts/patch-workbench.py" "$RES/out/vs/workbench/workbench.desktop.main.js" "$ROOT/product/muster-inline-diff.js" "$RES/product.json"
 
 echo "▸ applying the workbench skin"
 cat "$ROOT/product/muster-workbench.css" >> "$RES/out/vs/workbench/workbench.desktop.main.css"

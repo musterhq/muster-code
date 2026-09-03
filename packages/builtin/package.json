@@ -114,16 +114,48 @@
         "title": "Muster: Show Extension State"
       },
       {
-        "command": "muster.edit.keep",
-        "title": "Keep Change"
+        "command": "muster.edit.accept",
+        "title": "Accept Change"
       },
       {
-        "command": "muster.edit.undo",
-        "title": "Undo Change"
+        "command": "muster.edit.reject",
+        "title": "Reject Change"
       },
       {
-        "command": "muster.edit.keepAll",
-        "title": "Keep All Changes"
+        "command": "muster.edit.acceptFile",
+        "title": "Accept File"
+      },
+      {
+        "command": "muster.edit.rejectFile",
+        "title": "Reject File"
+      },
+      {
+        "command": "muster.edit.acceptAll",
+        "title": "Accept All Changes"
+      },
+      {
+        "command": "muster.edit.rejectAll",
+        "title": "Reject All Changes"
+      },
+      {
+        "command": "muster.edit.next",
+        "title": "Next Change"
+      },
+      {
+        "command": "muster.edit.prev",
+        "title": "Previous Change"
+      },
+      {
+        "command": "muster.edit.hunk",
+        "title": "Decide a Change"
+      },
+      {
+        "command": "muster.edit.file",
+        "title": "Decide a File"
+      },
+      {
+        "command": "muster.edit.go",
+        "title": "Go to Change"
       }
     ],
     "configuration": {
@@ -185,15 +217,39 @@
         "mac": "alt+cmd+e"
       },
       {
-        "command": "muster.edit.keep",
-        "key": "cmd+enter",
+        "command": "muster.edit.accept",
+        "key": "ctrl+shift+y",
+        "mac": "cmd+y",
+        "when": "muster.liveEdit && editorTextFocus"
+      },
+      {
+        "command": "muster.edit.reject",
+        "key": "ctrl+n",
+        "mac": "cmd+n",
+        "when": "muster.liveEdit && editorTextFocus"
+      },
+      {
+        "command": "muster.edit.acceptFile",
+        "key": "ctrl+enter",
         "mac": "cmd+enter",
         "when": "muster.liveEdit && editorTextFocus"
       },
       {
-        "command": "muster.edit.undo",
-        "key": "cmd+backspace",
+        "command": "muster.edit.rejectFile",
+        "key": "ctrl+shift+backspace",
         "mac": "cmd+backspace",
+        "when": "muster.liveEdit && editorTextFocus"
+      },
+      {
+        "command": "muster.edit.next",
+        "key": "alt+f5",
+        "mac": "alt+f5",
+        "when": "muster.liveEdit && editorTextFocus"
+      },
+      {
+        "command": "muster.edit.prev",
+        "key": "shift+alt+f5",
+        "mac": "shift+alt+f5",
         "when": "muster.liveEdit && editorTextFocus"
       }
     ]

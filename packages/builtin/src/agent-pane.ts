@@ -13,8 +13,9 @@ type ToPane =
   | { type: "delta"; text: string }
   | { type: "reasoning"; text: string }
   | { type: "done"; ok: boolean; error?: string }
-  | { type: "edit"; card: EditCard };
-type FromPane = { type: "ready" } | { type: "send"; text: string } | { type: "stop" };
+  | { type: "edit"; card: EditCard }
+  | { type: "review"; files: EditCard[] };
+type FromPane = { type: "ready" } | { type: "send"; text: string } | { type: "stop" } | { type: "acceptAll" } | { type: "rejectAll" } | { type: "open"; path: string };
 
 export class AgentPane implements vscode.WebviewViewProvider {
   static readonly viewId = "muster.agent.pane";
@@ -24,6 +25,7 @@ export class AgentPane implements vscode.WebviewViewProvider {
 
   constructor(private readonly context: vscode.ExtensionContext, private readonly output: vscode.LogOutputChannel, private readonly live: LiveEditController) {
     this.live.onCard((card) => this.post({ type: "edit", card }));
+    this.live.onChange(() => this.post({ type: "review", files: this.live.review() }));
   }
 
   resolveWebviewView(view: vscode.WebviewView): void {
@@ -80,6 +82,9 @@ export class AgentPane implements vscode.WebviewViewProvider {
   private async onMessage(message: FromPane): Promise<void> {
     if (message.type === "ready") { this.pushState(); return; }
     if (message.type === "stop") { this.stop(); return; }
+    if (message.type === "acceptAll") { await this.live.acceptAll(); return; }
+    if (message.type === "rejectAll") { await this.live.rejectAll(); return; }
+    if (message.type === "open") { await this.live.open(message.path); return; }
     if (message.type !== "send" || !message.text.trim() || this.running) return;
     const config = vscode.workspace.getConfiguration("muster");
     const cwd = this.thread?.cwd ?? vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? process.cwd();
@@ -135,10 +140,11 @@ function paneHtml(csp: string): string {
     --bg-secondary: color-mix(in srgb, var(--fg) 14%, transparent);
     --bg-tertiary: color-mix(in srgb, var(--fg) 8%, transparent);
     --bg-quaternary: color-mix(in srgb, var(--fg) 6%, transparent);
-    --text-secondary: color-mix(in srgb, var(--fg) 55%, transparent);
-    --text-tertiary: color-mix(in srgb, var(--fg) 37%, transparent);
-    --stroke-secondary: color-mix(in srgb, var(--fg) 10%, transparent);
-    --stroke-tertiary: color-mix(in srgb, var(--fg) 7%, transparent);
+    --text-secondary: color-mix(in srgb, var(--fg) 66%, transparent);
+    --text-tertiary: color-mix(in srgb, var(--fg) 36%, transparent);
+    --stroke-primary: color-mix(in srgb, var(--fg) 20%, transparent);
+    --stroke-secondary: color-mix(in srgb, var(--fg) 12%, transparent);
+    --stroke-tertiary: color-mix(in srgb, var(--fg) 8%, transparent);
     --radius-sm: 4px; --radius-base: 6px; --radius-xl: 12px;
     --fs-xs: 11px; --fs-sm: 12px; --fs-base: 13px; --fs-lg: 14px; --lh-lg: 22px;
   }
@@ -162,6 +168,24 @@ function paneHtml(csp: string): string {
   .edit .adds { color: var(--vscode-charts-green); font-variant-numeric: tabular-nums; }
   .edit .dels { color: var(--vscode-charts-red); font-variant-numeric: tabular-nums; }
   .edit .state { margin-left: auto; color: var(--text-tertiary); font-size: var(--fs-xs); }
+  #review { display: none; margin: 0 10px; border: 1px solid var(--stroke-secondary); border-bottom: 0; border-radius: var(--radius-xl) var(--radius-xl) 0 0; background: var(--vscode-input-background); font-size: var(--fs-base); }
+  body.reviewing #review { display: block; }
+  body.reviewing #composer { margin-top: 0; border-top-left-radius: 0; border-top-right-radius: 0; }
+  #review .head { display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 10px; cursor: pointer; }
+  #review .head .chev { color: var(--text-tertiary); font-size: 10px; width: 10px; }
+  #review .adds { color: var(--vscode-charts-green); font-variant-numeric: tabular-nums; }
+  #review .dels { color: var(--vscode-charts-red); font-variant-numeric: tabular-nums; }
+  #review .files { display: none; border-top: 1px solid var(--stroke-tertiary); padding: 4px 0; }
+  #review.open .files { display: block; }
+  #review .file { display: flex; align-items: center; gap: 8px; height: 24px; padding: 0 10px; cursor: pointer; }
+  #review .file:hover { background: var(--bg-quaternary); }
+  #review .file .name { font-family: var(--vscode-editor-font-family); font-size: var(--fs-sm); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #review .file .dir { color: var(--text-tertiary); font-size: var(--fs-xs); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+  .btn { height: 22px; padding: 0 8px; border-radius: var(--radius-sm); border: 1px solid transparent; font: inherit; font-size: var(--fs-sm); cursor: pointer; }
+  .btn.text { background: transparent; color: var(--text-secondary); }
+  .btn.text:hover { color: var(--fg); background: var(--bg-quaternary); }
+  .btn.primary { background: var(--vscode-button-background); color: var(--vscode-button-foreground); }
+  .btn.primary:hover { filter: brightness(1.08); }
   #status { display: none; align-items: center; justify-content: space-between; padding: 0 12px 6px; font-size: var(--fs-base); color: var(--text-secondary); }
   body.running #status { display: flex; }
   #status .stop { cursor: pointer; color: var(--text-secondary); }
@@ -186,6 +210,7 @@ function paneHtml(csp: string): string {
 </style></head>
 <body>
   <div id="messages"></div>
+  <div id="review"><div class="head" id="review-head"><span class="chev">▶</span><span id="review-summary">1 file</span><span class="adds" id="review-adds">+0</span><span class="dels" id="review-dels">−0</span><span class="spacer"></span><button class="btn text" id="review-reject">Reject</button><button class="btn primary" id="review-accept">Accept</button></div><div class="files" id="review-files"></div></div>
   <div id="status"><span>Generating..</span><span class="stop" id="stop">Stop<kbd>⇧⌘⌫</kbd></span></div>
   <div id="composer">
     <textarea id="input" placeholder="Plan, Build, / for skills, @ for context" rows="1"></textarea>
@@ -221,6 +246,24 @@ function paneHtml(csp: string): string {
   input.addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } });
   $("send").addEventListener("click", send);
   $("stop").addEventListener("click", () => vscode.postMessage({ type: "stop" }));
+  $("review-head").addEventListener("click", (e) => { if (e.target.closest("button")) return; $("review").classList.toggle("open"); });
+  $("review-accept").addEventListener("click", () => vscode.postMessage({ type: "acceptAll" }));
+  $("review-reject").addEventListener("click", () => vscode.postMessage({ type: "rejectAll" }));
+  function renderReview(files) {
+    body.classList.toggle("reviewing", files.length > 0);
+    if (!files.length) return;
+    const adds = files.reduce((n, f) => n + f.adds, 0), dels = files.reduce((n, f) => n + f.dels, 0);
+    $("review-summary").textContent = files.length + (files.length === 1 ? " file" : " files");
+    $("review-adds").textContent = "+" + adds; $("review-dels").textContent = "−" + dels;
+    const list = $("review-files"); list.innerHTML = "";
+    for (const f of files) {
+      const row = document.createElement("div"); row.className = "file";
+      const parts = f.path.split("/"); const name = parts.pop(); const dir = parts.join("/");
+      row.innerHTML = '<span class="name">' + escape(name) + '</span><span class="dir">' + escape(dir) + '</span><span class="adds">+' + f.adds + '</span><span class="dels">−' + f.dels + '</span>';
+      row.addEventListener("click", () => vscode.postMessage({ type: "open", path: f.path }));
+      list.appendChild(row);
+    }
+  }
   window.addEventListener("message", (event) => {
     const m = event.data;
     if (m.type === "state") { $("model").innerHTML = escape(m.model) + " " + escape(m.effort) + ' <span class="lock">🔒</span>'; }
@@ -229,7 +272,8 @@ function paneHtml(csp: string): string {
     else if (m.type === "start") { body.classList.add("running"); }
     else if (m.type === "reasoning") { const t = ensureThinking(); t.querySelector(".body").textContent += m.text; scroll(); }
     else if (m.type === "delta") { const a = ensureAssistant(); a.dataset.raw += m.text; a.innerHTML = renderMarkdown(a.dataset.raw); scroll(); }
-    else if (m.type === "edit") { const id = "edit-" + m.card.path.replace(/[^a-z0-9]/gi, "_"); let el = document.getElementById(id); if (!el) { el = document.createElement("div"); el.className = "edit"; el.id = id; messages.appendChild(el); body.classList.add("has-messages"); } const labels = { streaming: "Editing…", written: "Written", kept: "Kept", undone: "Undone" }; el.innerHTML = '<span class="path">' + escape(m.card.path) + '</span><span class="adds">+' + m.card.adds + '</span><span class="dels">−' + m.card.dels + '</span><span class="state">' + labels[m.card.status] + '</span>'; scroll(); }
+    else if (m.type === "edit") { const id = "edit-" + m.card.path.replace(/[^a-z0-9]/gi, "_"); let el = document.getElementById(id); if (!el) { el = document.createElement("div"); el.className = "edit"; el.id = id; messages.appendChild(el); body.classList.add("has-messages"); } const labels = { streaming: "Editing…", written: "Review", kept: "Accepted", undone: "Rejected" }; el.innerHTML = '<span class="path">' + escape(m.card.path) + '</span><span class="adds">+' + m.card.adds + '</span><span class="dels">−' + m.card.dels + '</span><span class="state">' + labels[m.card.status] + '</span>'; scroll(); }
+    else if (m.type === "review") { renderReview(m.files); }
     else if (m.type === "done") { body.classList.remove("running"); if (thinkingEl) thinkingEl.querySelector("summary").textContent = "Thought"; if (!m.ok) { const e = document.createElement("div"); e.className = "error"; e.textContent = m.error || "Failed"; messages.appendChild(e); } assistantEl = thinkingEl = null; scroll(); }
   });
   autosize();

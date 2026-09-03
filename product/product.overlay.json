@@ -77,5 +77,6 @@
     "https://themuster.dev"
   ],
   "enableTelemetry": false,
-  "checksums": {}
+  "checksums": {},
+  "tunnelApplicationName": "muster-code-tunnel"
 }

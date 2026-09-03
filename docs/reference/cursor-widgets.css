@@ -1,0 +1,104 @@
+.monaco-workbench .part.editor>.content .editor-group-container .breadcrumbs-control .monaco-breadcrumb-item.focused .monaco-icon-label.file-icon.plan-file-icon,.monaco-workbench .part.editor>.content .editor-group-container .breadcrumbs-control .monaco-breadcrumb-item.selected .monaco-icon-label.file-icon.plan-file-icon {text-decoration:none!important}
+.monaco-workbench .part.editor>.content .editor-group-container .breadcrumbs-control .monaco-breadcrumb-item.focused .monaco-icon-label.file-icon.plan-file-icon>.monaco-icon-label-container>.monaco-icon-name-container>.label-name,.monaco-workbench .part.editor>.content .editor-group-container .breadcrumbs-control .monaco-breadcrumb-item.selected .monaco-icon-label.file-icon.plan-file-icon>.monaco-icon-label-container>.monaco-icon-name-container>.label-name {text-decoration:underline!important}
+.acceptRejectPartialEditWidget .hoverButton,.acceptRejectPartialEditWidget .partialHoverButton {border-radius:4px;font-size:12px}
+.acceptRejectFullEditWidget .hoverButton {align-items:center;background-color:var(--cusor-hover-color);border:none;border-radius:0;color:#fff;display:flex;font-size:12px;margin:0;padding:4px 8px;text-transform:underline;white-space:nowrap}
+.acceptRejectFullEditWidget .hoverButton:hover {background-color:var(--cusor-hover-color-on-hover);cursor:pointer}
+.partialHoverButton:not(.secondary-button) {background-color:var(--vscode-editor-background);border:none}
+.partialHoverButton:not(.secondary-button):hover:before {background-color:var(--vscode-charts-green)}
+[data-high-contrast=true][data-dark-theme=true] .partialHoverButton:not(.secondary-button) {opacity:1}
+[data-themed-diff=true] .partialHoverButton:not(.secondary-button) {color:var(--vscode-button-foreground)}
+[data-themed-diff=false] .partialHoverButton:not(.secondary-button) {color:var(--vscode-input-foreground)}
+.partialHoverButton.secondary-button {background-color:var(--cursor-stroke-secondary)!important;border:1px solid transparent!important;color:var(--vscode-input-foreground)!important;position:relative}
+[data-themed-diff=true] .partialHoverButton:not(.secondary-button):before {background:color-mix(in srgb,var(--vscode-charts-green) 85%,transparent);border-radius:inherit;content:"";inset:0;pointer-events:none;position:absolute;z-index:-1}
+[data-themed-diff=false] .partialHoverButton:not(.secondary-button):before {background:rgba(0,255,0,.3);border-radius:inherit;content:"";inset:0;pointer-events:none;position:absolute;z-index:-1}
+.partialHoverButton.secondary-button:before {background:var(--vscode-editor-background);border-radius:inherit;content:"";inset:0;pointer-events:none;position:absolute;z-index:-1}
+.partialHoverButton.secondary-button:hover {background-color:var(--cursor-stroke-primary)!important;opacity:1!important}
+.keyboard-shortcut {color:var(--vscode-input-foreground);opacity:.7}
+[data-themed-diff=true] .partialHoverButton:not(.secondary-button) .keyboard-shortcut {color:var(--vscode-button-foreground)}
+.cursorHoverWidget .hoverButton {align-items:center;background-color:transparent;border:none;border-radius:6px;color:var(--vscode-foreground);display:flex;font-family:inherit;font-size:12px;gap:6px;height:24px;justify-content:center;margin:0;padding:0 7px;white-space:nowrap}
+.cursorHoverWidget .hoverButton:hover {background-color:var(--vscode-toolbar-hoverBackground)!important;cursor:pointer}
+.cursorHoverWidget .hoverButton .text {font-weight:400}
+.cursorHoverWidget .hoverButton .codicon {opacity:.8}
+.cursorHoverWidget .codicon-add,.cursorHoverWidget .hoverButton .codicon {font-size:12px!important;margin-right:4px}
+.plan-choice-option:active {transform:scale(.99)}
+.plan-choice-option-selected {border-color:var(--vscode-button-background)!important;color:color-mix(in srgb,var(--vscode-button-background) 10%,var(--vscode-dropdown-foreground))!important}
+.plan-choice-option-selected,.vs .plan-choice-option-selected {background:color-mix(in srgb,var(--vscode-button-background) 10%,var(--vscode-sideBar-background))!important}
+.plan-choice-option-unselected {border-color:color-mix(in srgb,var(--vscode-foreground) 20%,transparent);color:var(--vscode-dropdown-foreground)!important}
+.plan-choice-option:not(.plan-choice-option-selected):hover {background:color-mix(in srgb,var(--vscode-button-background) 3%,var(--vscode-sideBar-background))!important}
+.composer-bar[data-composer-location=bar] {margin:0 auto;max-width:var(--composer-max-width,840px)}
+.composer-bar.editor,.composer-bar.editor .composer-human-message-container,.composer-bar.editor .conversations {background:var(--composer-pane-background)!important}
+.editor-container .composer-bar.editor {box-sizing:border-box}
+.composer-bar.editor.empty {display:flex}
+.composer-bar.editor.empty .full-input-box {box-shadow:var(--cursor-shadow-primary),var(--cursor-shadow-secondary)}
+.agent-layout .composer-bar.editor.empty .full-input-box {box-shadow:var(--cursor-shadow-workbench)}
+.composer-bar .monaco-icon-label:before,.composer-control-panel .monaco-icon-label:before {align-items:center;display:flex;justify-content:center}
+.composer-bar .monaco-scrollable-element {overflow-x:hidden}
+.composer-bar .input-box-code-selection {background:var(--vscode-editor-background)!important}
+.composer-bar .monaco-editor,.composer-bar .monaco-editor .margin,.composer-bar .monaco-editor .monaco-editor-background {background-color:var(--vscode-editor-background)!important}
+.composer-bar .simple-code-render .monaco-editor,.composer-bar .simple-code-render .monaco-editor .monaco-editor-background {background-color:transparent!important}
+.agent-layout .app-layout-multi-diff-root .decorationsOverviewRuler,.composer-bar .composer-message-codeblock .decorationsOverviewRuler,.composer-bar .markdown-code-outer-container .decorationsOverviewRuler {display:none!important}
+.composer-bar-control-button {opacity:.8;transition:opacity .1s}
+.composer-bar-control-button:hover {opacity:1}
+.composer-input-edit-banner {align-items:center;background-color:color-mix(in srgb,var(--vscode-input-background) 80%,var(--vscode-focusBorder) 20%);border-left:1px solid var(--cursor-stroke-tertiary,var(--vscode-widget-border));border-radius:6px 6px 0 0;border-right:1px solid var(--cursor-stroke-tertiary,var(--vscode-widget-border));border-top:1px solid var(--cursor-stroke-tertiary,var(--vscode-widget-border));color:var(--vscode-foreground);display:flex;font-size:12px;justify-content:space-between;padding:6px 12px}
+.composer-input-edit-banner-text {opacity:.9}
+.composer-input-edit-banner-cancel {background:transparent;border:none;border-radius:4px;color:var(--vscode-textLink-foreground);cursor:pointer;font-size:12px;padding:2px 6px}
+.composer-input-edit-banner-cancel:hover {background-color:var(--vscode-list-hoverBackground)}
+.todo-summary-sticky-container {--todo-summary-indicator-slot-width:16px;--todo-summary-indicator-slot-height:16px;--todo-summary-indicator-gap:6px;background-color:var(--vscode-input-background);border:1px solid var(--cursor-stroke-secondary);border-radius:var(--conversation-surface-border-radius);box-sizing:border-box;display:flex;flex-direction:column;gap:0;min-width:150px;padding:0 8px;position:relative;transition:background-color .1s ease-in-out,border .1s ease-in-out,min-height .2s ease-in-out;width:100%}
+body[data-cursor-glass-mode=true] .todo-summary-sticky-container {--todo-summary-hover-border-color:color-mix(in srgb,var(--cursor-stroke-primary) 30%,var(--cursor-stroke-secondary))}
+.todo-summary-sticky-container:hover {border:1px solid var(--todo-summary-hover-border-color,var(--cursor-stroke-primary))}
+.todo-summary-empty-line {flex-shrink:0}
+.todo-summary-content {align-items:center;display:flex;font-size:var(--conversation-tray-font-size,13px);gap:var(--todo-summary-indicator-gap)}
+.todo-summary-content>span {text-box:trim-both cap alphabetic}
+.todo-summary-icon-slot {align-items:center;display:flex;flex-shrink:0;justify-content:center;width:var(--todo-summary-indicator-slot-width)}
+.todo-summary-chevron {animation:chevronFadeIn .1s ease-in forwards;color:var(--vscode-foreground);display:block;flex-shrink:0;opacity:.4;transform-origin:50% 50%;transition:transform .15s ease-in-out,opacity .2s ease-in-out}
+.todo-summary-content-clickable {cursor:pointer;transition:opacity .1s ease-in-out}
+.todo-summary-content-clickable:hover {opacity:.9}
+.todo-summary-content-clickable:focus-visible {border-radius:calc(var(--conversation-surface-border-radius) - 1px);outline:1px solid var(--vscode-focusBorder);outline-offset:-1px}
+.todo-summary-text {color:var(--vscode-foreground);font-size:var(--conversation-tray-font-size,13px);white-space:nowrap}
+.todo-summary-text-plan {color:var(--cursor-text-secondary)}
+.todo-summary-expanded-content {background-color:var( --todo-summary-surface-background,var(--vscode-input-background) );max-height:0;opacity:0;overflow:hidden;transition:max-height .25s ease-in-out,opacity .2s ease-in-out}
+.todo-summary-expanded-content.expanded {max-height:500px;opacity:1}
+.todo-summary-list {display:flex;flex-direction:column;gap:10px;list-style:none;margin:0;padding:8px 0 4px}
+.todo-summary-item {align-items:flex-start;animation:todoFadeIn .2s ease-out forwards;display:flex;gap:var(--todo-summary-indicator-gap)}
+.todo-summary-indicator-container {flex-shrink:0}
+.todo-summary-indicator-container,.todo-summary-more-indicator {align-items:center;display:flex;height:var(--todo-summary-indicator-slot-height);justify-content:center;width:var(--todo-summary-indicator-slot-width)}
+.todo-summary-more-indicator {color:var(--vscode-foreground);font-size:14px;line-height:1;opacity:.4}
+.todo-summary-item-content {color:var(--vscode-foreground);cursor:text;flex:1;font-size:var(--conversation-tray-font-size,13px);line-height:var(--todo-summary-indicator-slot-height);min-width:0;overflow-wrap:anywhere;user-select:text}
+.todo-summary-item-content.todo-in-progress {color:var(--cursor-text-primary)}
+.todo-summary-item-content.todo-completed {opacity:.5;text-decoration:line-through}
+.human-message-with-todos-wrapper,.plan-execution-with-todos-wrapper {display:flex;flex-direction:column;gap:0}
+.plan-execution-with-todos-wrapper {position:relative}
+.plan-execution-message-container {align-items:center;background-color:var(--plan-execution-message-background,var(--vscode-input-background));border:1px solid var(--cursor-stroke-secondary);border-radius:var(--conversation-surface-border-radius);display:flex;gap:8px;justify-content:space-between;min-height:32px;padding:0 8px;transition:background-color .1s ease-in-out,border .1s ease-in-out}
+body[data-cursor-glass-mode=true] .plan-execution-message-container {--plan-execution-message-background:var(--glass-chat-bubble-opaque-background);--plan-execution-message-hover-background:color-mix(in srgb,var(--glass-chat-bubble-background) 60%,var(--vscode-editor-background));--plan-execution-message-hover-border-color:color-mix(in srgb,var(--cursor-stroke-primary) 30%,var(--cursor-stroke-secondary));padding-inline:10px}
+.plan-execution-action-button {margin-bottom:6px!important}
+body[data-cursor-glass-mode=true] .composer-human-message .restore-button,body[data-cursor-glass-mode=true] .plan-execution-message-container .restore-button {margin:-1px -1px 0 0}
+.plan-execution-message-container:hover {background-color:var(--plan-execution-message-hover-background,color-mix(in srgb,var(--vscode-input-background) 96%,var(--vscode-editor-background)))!important;border:1px solid var(--plan-execution-message-hover-border-color,var(--cursor-stroke-primary))}
+.plan-execution-message-container:hover .stop-button {opacity:1!important}
+.plan-execution-message-container:hover .generating-spinner {opacity:0!important}
+.plan-execution-action-slot {align-items:center;display:flex;flex-shrink:0;height:20px;justify-content:center;position:relative;width:20px}
+.plan-execution-action-slot[data-glass-stop] {height:24px;width:24px}
+.plan-execution-message-content {align-items:center;color:var(--cursor-text-secondary);display:flex;flex:1;font-size:var(--conversation-text-font-size);gap:6px;line-height:var( --conversation-line-height,var(--cursor-line-height-lg,22px) );min-width:0;padding:7px 0}
+body[data-cursor-glass-mode=true] .plan-execution-message-content {padding-block:8px}
+.plan-execution-message-content>span.codicon.codicon-todos {flex-shrink:0}
+.plan-execution-label {flex-shrink:0;font-weight:500}
+.plan-execution-title {color:var(--vscode-foreground);min-width:0;overflow-x:clip;overflow-y:visible;text-overflow:ellipsis;white-space:nowrap}
+.plan-editor {display:flex;flex-direction:column;height:100%;overflow:hidden;position:relative;width:100%}
+.plan-editor__scrollable {flex:1;min-height:0;min-width:0}
+.plan-editor__scrollable--hidden {visibility:hidden}
+.plan-editor__wrapper {box-sizing:border-box;display:flex;flex-direction:column;margin:0 auto;max-width:800px;min-height:100%;min-width:0;padding:32px 24px 64px;width:100%}
+.plan-editor__richtext {flex:1}
+.plan-editor__footer {display:flex;flex-direction:column;gap:16px;margin-top:24px}
+.monaco-workbench .plan-editor .plan-list-row__empty:focus,.monaco-workbench .plan-editor .plan-list-row__empty:focus-visible,.monaco-workbench .plan-editor .plan-list-row__icon:focus,.monaco-workbench .plan-editor .plan-list-row__icon:focus-visible,.monaco-workbench .plan-editor .plan-list-row__text--editable:focus,.monaco-workbench .plan-editor .plan-list-row__text--editable:focus-visible,.monaco-workbench .plan-editor .plan-references-section__item:focus,.monaco-workbench .plan-editor .plan-references-section__item:focus-visible,.monaco-workbench .plan-editor .plan-todo__assignment:focus,.monaco-workbench .plan-editor .plan-todo__assignment:focus-visible,.monaco-workbench .plan-editor .plan-todo__remove:focus,.monaco-workbench .plan-editor .plan-todo__remove:focus-visible,.monaco-workbench .plan-editor .plan-todos-section__phase-action:focus,.monaco-workbench .plan-editor .plan-todos-section__phase-action:focus-visible {box-shadow:none!important;outline:none!important}
+.composer-bar,.composer-messages-container {--conversation-text-font-size:var(--cursor-font-size-lg);--conversation-tool-font-size:var(--cursor-font-size-lg);--conversation-tray-font-size:var(--cursor-font-size-base);--conversation-font-size:var(--conversation-tool-font-size);--conversation-line-height:var(--cursor-line-height-lg);--conversation-block-gap:16px;--conversation-list-before-gap:8px;--conversation-list-after-gap:18px;--conversation-heading-after-gap:4px;--conversation-embedded-block-before-gap:12px;--conversation-list-item-gap:8px;--conversation-tool-card-padding-x:10px;--conversation-tool-card-padding-y:8px;--conversation-tool-card-gap:6px;--conversation-tool-card-padding-tight-x:calc(var(--conversation-tool-card-padding-x) - 2px);--card-border-color:var(--cursor-stroke-secondary);--conversation-surface-border-radius:var(--cursor-radius-xl);--card-border-radius:var(--conversation-surface-border-radius)}
+.composer-bar.editor .background-composer-instance-header-root {padding-top:10px}
+.breadcrumbs-extra-actions,.plan-breadcrumb-controls span span {color:var(--vscode-breadcrumb-foreground)}
+.plan-breadcrumb-controls .ui-model-picker__trigger-text span {color:unset}
+.breadcrumbs-extra-actions,.plan-breadcrumb-controls .breadcrumbs-action-btn span {color:var(--vscode-editor-background)}
+.plan-breadcrumb-controls .codicon-chevron-down {color:var(--cursor-text-secondary)!important;opacity:1}
+.breadcrumbs-extra-actions .plan-build-button .codicon {color:var(--vscode-editor-background)!important;opacity:1!important}
+.breadcrumbs-extra-actions .plan-build-button>div:nth-child(2) {margin-left:0!important;padding:0 2px!important}
+.monaco-workbench .part.editor>.content .editor-group-container .plan-breadcrumb-controls .breadcrumbs-action-btn {background:var(--cursor-bg-yellow-primary);border:1px solid var(--vscode-button-border,transparent);box-shadow:none!important;cursor:pointer;font-size:13px;line-height:18px;white-space:nowrap}
+.monaco-workbench .part.editor>.content .editor-group-container .plan-breadcrumb-controls .breadcrumbs-action-btn:hover {background:color-mix(in srgb,var(--cursor-bg-yellow-primary) 80%,var(--cursor-bg-yellow-secondary));transition:color .1s ease-in-out}
+.plan-breadcrumb-controls .anysphere-button,.plan-breadcrumb-controls .anysphere-text-button,.plan-breadcrumb-controls .composer-unified-dropdown,.plan-breadcrumb-controls .plan-build-button {font-size:13px!important}
+.plan-breadcrumb-built-indicator {align-items:center;color:var(--cursor-text-yellow-primary)!important;display:flex;font-size:13px;gap:3px}
+.plan-breadcrumb-built-indicator .codicon {color:var(--cursor-text-yellow-primary)!important;font-size:11px!important;margin-left:2px}
