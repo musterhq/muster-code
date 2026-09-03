@@ -191,6 +191,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   }));
   context.subscriptions.push(vscode.commands.registerCommand("muster.plan.preview", (uri?: vscode.Uri) => vscode.commands.executeCommand("markdown.showPreviewToSide", uri ?? vscode.window.activeTextEditor?.document.uri)));
   context.subscriptions.push(vscode.commands.registerCommand("muster.plan.build", (uri?: vscode.Uri) => { const target = uri ?? vscode.window.activeTextEditor?.document.uri; if (target) void pane.buildFromFile(target); }));
+  context.subscriptions.push(vscode.commands.registerCommand("muster.plan.model", () => pane.pickBuildModel()));
   context.subscriptions.push(vscode.commands.registerCommand("muster.agent.more", () => vscode.commands.executeCommand("workbench.action.openSettings", "muster")));
   context.subscriptions.push(vscode.commands.registerCommand("muster.agent.stop", () => pane.stop()));
   context.subscriptions.push(vscode.commands.registerCommand("muster.agent.maximize", () => vscode.commands.executeCommand("workbench.action.toggleMaximizedAuxiliaryBar")));

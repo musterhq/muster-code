@@ -203,6 +203,11 @@
       {
         "command": "muster.completions.toggle",
         "title": "Toggle Muster Tab"
+      },
+      {
+        "command": "muster.plan.model",
+        "title": "Model for Build",
+        "icon": "$(sparkle)"
       }
     ],
     "configuration": {
@@ -285,6 +290,11 @@
         },
         {
           "command": "muster.plan.build",
+          "when": "resourceFilename =~ /\\\\.plan\\\\.md$/",
+          "group": "navigation@3"
+        },
+        {
+          "command": "muster.plan.model",
           "when": "resourceFilename =~ /\\\\.plan\\\\.md$/",
           "group": "navigation@2"
         }

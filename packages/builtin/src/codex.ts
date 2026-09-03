@@ -109,7 +109,8 @@ export async function runTurn(input: {
     ...(input.rules ? { developerInstructions: input.rules } : {}),
     sandbox: input.access?.sandbox ?? "workspace-write",
     ...(input.access ? { approvalPolicy: input.access.approvalPolicy } : {}),
-    ...(input.mode === "plan" ? { collaborationMode: { mode: "plan" as const, settings: { model: input.model ?? "", ...(input.reasoning ? { reasoning_effort: input.reasoning } : {}) } } } : {}),
+    // Codex keeps a thread in its last collaboration mode: say which one on every turn (plan → no edits; default → agent).
+    ...(input.mode && input.model ? { collaborationMode: { mode: input.mode, settings: { model: input.model, ...(input.reasoning ? { reasoning_effort: input.reasoning } : {}) } } } : {}),
     transportOwner: TRANSPORT_OWNER,
     keepAlive: true,
     configOverrides: ['model_reasoning_summary="detailed"'],

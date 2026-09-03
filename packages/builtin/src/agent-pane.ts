@@ -11,7 +11,7 @@ import type { Checkpoint, EditCard, LiveEditController } from "./live-edit.js";
 
 interface ModeInfo { readonly id: string; readonly name: string; readonly icon: string; readonly placeholder: string; readonly description?: string; readonly prompt?: string; readonly readOnly?: boolean; readonly plan?: boolean; readonly board?: boolean; readonly effort?: string; readonly autoFix?: boolean; readonly debug?: boolean; readonly parallel?: boolean; readonly spec?: boolean }
 interface ThreadSettings { mode: string; accessId: string; modelId: string; effortId: string; debugStage?: 0 | 1 | 2 }
-interface PlanCard { title: string; summary: string; todos: { text: string; done: boolean }[]; path?: string }
+interface PlanCard { title: string; summary: string; todos: { text: string; done: boolean }[]; path?: string; model?: string; modelId?: string }
 type ToolMessage = { kind: "tool"; id: string; title: string; detail: string; output: string; status: string };
 type PaneMessage =
   | { kind: "user"; text: string; checkpoint?: string }
@@ -45,7 +45,7 @@ type FromPane =
   | { type: "view"; view: "chat" | "history" | "board" }
   | { type: "setMode"; id: string } | { type: "setAccess"; id: string } | { type: "setModel"; id: string } | { type: "setEffort"; id: string }
   | { type: "pin"; id: string; pinned: boolean }
-  | { type: "viewPlan" } | { type: "buildPlan" }
+  | { type: "viewPlan" } | { type: "buildPlan"; todos?: number[]; model?: string; newThread?: boolean }
   | { type: "suggest"; kind: "file" | "skill"; query: string } | { type: "restore"; id: string } | { type: "redo" }
   | { type: "openReview" }
   | { type: "boardAdd"; title: string } | { type: "boardRun"; id: string } | { type: "boardMove"; id: string; column: BoardTask["column"] };
@@ -173,7 +173,8 @@ export class AgentPane implements vscode.WebviewViewProvider {
   }
 
   /** Dev harness: run a real turn through the pane exactly as a user would, and report what happened. */
-  async harness(input: { text: string; mode?: string; newTab?: boolean; access?: string; thread?: string }): Promise<Record<string, unknown>> {
+  async harness(input: { text: string; mode?: string; newTab?: boolean; access?: string; thread?: string; build?: number[]; buildModel?: string }): Promise<Record<string, unknown>> {
+    if (input.build) { const t0 = Date.now(); await this.onMessage({ type: "buildPlan", todos: input.build, ...(input.buildModel ? { model: input.buildModel } : {}) }); const tab = this.active(); return { ms: Date.now() - t0, error: tab.lastError ?? null, thread: tab.thread?.id ?? null, review: this.live.review(), assistant: (tab.messages.filter((m) => m.kind === "assistant").pop() as { text?: string } | undefined)?.text?.slice(0, 600) ?? "" }; }
     if (input.thread) { const found = (await this.visibleThreads()).find((t) => t.id === input.thread); if (found) await this.openThread(found); }
     else if (input.newTab) { this.newTab(); this.paneView = "chat"; this.post({ type: "messages", messages: [] }); }
     const tab = this.active();
@@ -230,6 +231,18 @@ export class AgentPane implements vscode.WebviewViewProvider {
   /** Privacy: only this folder's threads exist as far as the pane is concerned. */
   private async visibleThreads(): Promise<CodexThread[]> {
     return threadsForWorkspace(await listThreads(), (vscode.workspace.workspaceFolders ?? []).map((f) => f.uri.fsPath));
+  }
+
+  /** Plan editor toolbar: choose the model that will build (mirrors Cursor's "Model used to build this plan"). */
+  async pickBuildModel(): Promise<void> {
+    const tab = this.active();
+    const pick = await vscode.window.showQuickPick(this.models.map((m) => ({ label: m.name, description: m.provider === "claude" ? "Claude Code" : "Codex", detail: m.description, picked: m.id === tab.settings.modelId, id: m.id })), { placeHolder: "Model used to build this plan" });
+    if (!pick) return;
+    tab.settings.modelId = pick.id;
+    const model = this.models.find((m) => m.id === pick.id);
+    if (model && !model.efforts.some((e) => e.id === tab.settings.effortId)) tab.settings.effortId = model.defaultEffort;
+    this.persist(tab);
+    this.pushState();
   }
 
   /** "Build" from a .plan.md editor: implement that plan in the active thread. */
@@ -385,7 +398,22 @@ export class AgentPane implements vscode.WebviewViewProvider {
       case "setEffort": { const tab = this.active(); tab.settings.effortId = message.id; this.persist(tab); this.pushState(); return; }
       case "pin": { const pinned = new Set(this.context.workspaceState.get<string[]>("muster.pinnedThreads", [])); if (message.pinned) pinned.add(message.id); else pinned.delete(message.id); await this.context.workspaceState.update("muster.pinnedThreads", [...pinned]); await this.showHistory(); return; }
       case "viewPlan": { const plan = this.active().plan; if (plan?.path) await this.openPlan(plan.path); return; }
-      case "buildPlan": { const tab = this.active(); const plan = tab.plan; if (!plan) return; tab.settings.mode = "agent"; this.persist(tab); this.pushState(); await this.send(`Implement the plan${plan.path ? ` in ${relative(this.cwd(), plan.path)}` : ""}. Work through the to-dos in order and keep them updated.`); return; }
+      case "buildPlan": {
+        const source = this.active();
+        const plan = source.plan;
+        if (!plan) return;
+        const chosen = (message.todos ?? []).filter((i) => i >= 0 && i < plan.todos.length);
+        const scope = chosen.length && chosen.length < plan.todos.length ? `Implement ONLY these to-dos from the plan (leave the others untouched):\n${chosen.map((i) => `- ${plan.todos[i]!.text}`).join("\n")}` : "Work through the to-dos in order and keep them updated.";
+        const rel = plan.path ? relative(this.cwd(), plan.path) : "";
+        const tab = message.newThread ? this.newTab(`Build: ${plan.title}`.slice(0, 40)) : source;
+        if (message.newThread) { tab.plan = plan; this.paneView = "chat"; this.post({ type: "messages", messages: [] }); }
+        tab.settings.mode = "agent";
+        if (message.model && this.models.some((m) => m.id === message.model)) { tab.settings.modelId = message.model; const model = this.models.find((m) => m.id === message.model)!; if (!model.efforts.some((e) => e.id === tab.settings.effortId)) tab.settings.effortId = model.defaultEffort; }
+        this.persist(tab);
+        this.pushState();
+        await this.send(`${message.newThread && rel ? `@${rel} ` : ""}Implement the plan${rel ? ` in ${rel}` : ""}. ${scope}`);
+        return;
+      }
       case "boardAdd": { const tasks = this.context.workspaceState.get<BoardTask[]>("muster.board", []); tasks.push({ id: `task-${Date.now().toString(36)}`, title: message.title, column: "backlog", createdAt: Date.now() }); await this.context.workspaceState.update("muster.board", tasks); this.pushBoard(); return; }
       case "boardMove": { const tasks = this.context.workspaceState.get<BoardTask[]>("muster.board", []); const task = tasks.find((t) => t.id === message.id); if (task) { task.column = message.column; await this.context.workspaceState.update("muster.board", tasks); } this.pushBoard(); return; }
       case "boardRun": {
@@ -470,13 +498,15 @@ export class AgentPane implements vscode.WebviewViewProvider {
           planText = String(item.text ?? planText);
           const card = parsePlan(planText);
           card.path = this.savePlan(card, planText, cwd);
+          const planned = this.models.find((m) => m.id === tab.settings.modelId);
+          if (planned) { card.model = planned.name; card.modelId = planned.id; }
           tab.plan = card;
           tab.messages.push({ kind: "plan", card });
           this.post({ type: "plan", card });
           void this.openPlan(card.path);
         } else if (method === "turn/plan/updated") {
           const steps = ((params.plan as { step?: string; status?: string }[] | undefined) ?? []).map((s) => ({ text: String(s.step ?? ""), done: s.status === "completed" }));
-          if (steps.length) { const card: PlanCard = { title: tab.plan?.title ?? "Plan", summary: String(params.explanation ?? tab.plan?.summary ?? ""), todos: steps, ...(tab.plan?.path ? { path: tab.plan.path } : {}) }; tab.plan = card; this.post({ type: "plan", card }); }
+          if (steps.length) { const card: PlanCard = { title: tab.plan?.title ?? "Plan", summary: String(params.explanation ?? tab.plan?.summary ?? ""), todos: steps, ...(tab.plan?.path ? { path: tab.plan.path } : {}), ...(tab.plan?.model ? { model: tab.plan.model, modelId: tab.plan.modelId ?? "" } : {}) }; tab.plan = card; this.post({ type: "plan", card }); }
         }
       },
       onRequest: async (method: string, params: Record<string, unknown>) => this.approve(method, params),
@@ -746,8 +776,21 @@ function paneHtml(csp: string): string {
   .plan .summary { color: var(--text-secondary); margin-bottom: 8px; }
   .plan .todos { border: 1px solid var(--stroke-tertiary); border-radius: var(--radius-lg); padding: 8px 10px; background: var(--bg-quinary); }
   .plan .todos .t { color: var(--text-tertiary); font-size: var(--fs-base); margin-bottom: 4px; }
-  .plan .todo { display: flex; gap: 8px; align-items: flex-start; padding: 3px 0; font-size: var(--fs-base); }
-  .plan .todo .o { width: 14px; height: 14px; border-radius: 50%; border: 1.5px solid var(--stroke-primary); flex: 0 0 auto; margin-top: 3px; }
+  .plan .todo { display: flex; gap: 8px; align-items: flex-start; padding: 3px 4px; margin: 0 -4px; border-radius: 4px; font-size: var(--fs-base); cursor: pointer; }
+  .plan .todo:hover { background: var(--bg-quaternary); }
+  .plan .todo .o { width: 14px; height: 14px; border-radius: 50%; border: 1.5px solid var(--stroke-primary); flex: 0 0 auto; margin-top: 3px; display: inline-flex; align-items: center; justify-content: center; font-size: 9px; color: var(--vscode-button-foreground); }
+  .plan .todo.sel .o { background: var(--amber); border-color: var(--amber); color: #1a1a1a; }
+  .plan .todos .t { display: flex; align-items: center; gap: 8px; }
+  .plan .todos .t .all { margin-left: auto; color: var(--text-secondary); font-size: var(--fs-xs); cursor: pointer; }
+  .plan .todos .t .all:hover { color: var(--fg); }
+  .plan .more { cursor: pointer; } .plan .more:hover { color: var(--text-secondary); }
+  .plan .foot .modelpick { color: var(--text-secondary); font-size: var(--fs-base); cursor: pointer; display: inline-flex; align-items: center; gap: 4px; padding: 0 6px; height: 24px; border-radius: var(--radius-base); }
+  .plan .foot .modelpick:hover { background: var(--bg-quaternary); color: var(--fg); }
+  .plan .foot .split { display: inline-flex; border-radius: var(--radius-base); overflow: hidden; }
+  .plan .foot .split .btn { border-radius: 0; }
+  .plan .foot .split .chev { width: 22px; height: 24px; display: inline-flex; align-items: center; justify-content: center; background: var(--amber); color: #1a1a1a; border-left: 1px solid rgba(0,0,0,.25); cursor: pointer; font-size: 9px; }
+  .btn.amber, .btn.amber kbd { color: #1a1a1a; }
+  .plan .planned { color: var(--text-tertiary); font-size: var(--fs-xs); margin-left: auto; }
   .plan .todo.done .o { background: var(--vscode-charts-green); border-color: var(--vscode-charts-green); }
   .plan .todo.done { color: var(--text-tertiary); text-decoration: line-through; }
   .plan .more { color: var(--text-tertiary); font-size: var(--fs-base); padding: 3px 0 0 22px; }
@@ -924,15 +967,41 @@ function paneHtml(csp: string): string {
     if (!el) { el = document.createElement("div"); el.className = "card tool"; el.id = "tool-" + tool.id; el.innerHTML = '<div class="head"><span class="t"></span><span class="cmd"></span><span class="status"></span></div><pre></pre>'; el.querySelector(".head").addEventListener("click", () => el.classList.toggle("open")); messages.appendChild(el); body.classList.add("has-messages"); }
     el.querySelector(".t").textContent = tool.title; el.querySelector(".cmd").textContent = tool.detail; el.querySelector(".status").textContent = tool.status === "running" ? "Running…" : tool.status; el.querySelector("pre").textContent = tool.output; scroll();
   }
+  let planSel = new Set(), planExpanded = false, planModel = null, planCardData = null;
+  function buildPlan(newThread) {
+    if (!planCardData) return;
+    const todos = [...planSel].sort((a, b) => a - b);
+    vscode.postMessage({ type: "buildPlan", todos: todos.length ? todos : undefined, model: planModel || undefined, newThread: !!newThread });
+  }
   function planCard(card) {
-    if (!planEl) { planEl = document.createElement("div"); planEl.className = "card plan"; messages.appendChild(planEl); body.classList.add("has-messages"); }
-    const shown = card.todos.slice(0, 3), more = card.todos.length - shown.length;
-    planEl.innerHTML = '<div class="file"><span class="icon">☰</span><span class="name">' + escape(card.path ? card.path.split("/").pop() : "plan.md") + '</span></div><h3>' + escape(card.title) + '</h3>' + (card.summary ? '<div class="summary">' + escape(card.summary) + '</div>' : "") +
-      (card.todos.length ? '<div class="todos"><div class="t">' + card.todos.length + ' To-dos</div>' + shown.map((t) => '<div class="todo' + (t.done ? " done" : "") + '"><span class="o"></span><span>' + escape(t.text) + '</span></div>').join("") + (more > 0 ? '<div class="more">··· ' + more + ' more</div>' : "") + '</div>' : "") +
-      '<div class="foot"><button class="viewplan" id="plan-view">View Plan</button><span class="spacer"></span><button class="btn amber" id="plan-build">Build <kbd>⌘⏎</kbd></button></div>';
+    if (!planEl) { planEl = document.createElement("div"); planEl.className = "card plan"; messages.appendChild(planEl); body.classList.add("has-messages"); planSel = new Set(); planExpanded = false; planModel = card.modelId || (state && state.settings.modelId) || null; }
+    planCardData = card;
+    if (!planModel) planModel = card.modelId || (state && state.settings.modelId) || null;
+    const shown = planExpanded ? card.todos : card.todos.slice(0, 3), more = card.todos.length - shown.length;
+    const modelName = (state && (state.models.find((m) => m.id === planModel) || {}).name) || card.model || "Model";
+    const sel = planSel.size;
+    planEl.innerHTML = '<div class="file"><span class="icon">☰</span><span class="name">' + escape(card.path ? card.path.split("/").pop() : "plan.md") + '</span>' + (card.model ? '<span class="planned">Planned with ' + escape(card.model) + '</span>' : "") + '</div><h3>' + escape(card.title) + '</h3>' + (card.summary ? '<div class="summary">' + escape(card.summary) + '</div>' : "") +
+      (card.todos.length ? '<div class="todos"><div class="t"><span>' + card.todos.length + ' To-dos' + (sel ? ' · ' + sel + ' selected' : '') + '</span><span class="all" id="plan-all">' + (sel === card.todos.length ? "Clear" : "Select all") + '</span></div>' + shown.map((t, i) => '<div class="todo' + (t.done ? " done" : "") + (planSel.has(i) ? " sel" : "") + '" data-i="' + i + '"><span class="o">' + (planSel.has(i) ? "✓" : "") + '</span><span>' + escape(t.text) + '</span></div>').join("") + (more > 0 ? '<div class="more" id="plan-more">··· ' + more + ' more</div>' : "") + '</div>' : "") +
+      '<div class="foot"><button class="viewplan" id="plan-view">View Plan</button><span class="spacer"></span><span class="modelpick" id="plan-model" title="Model used to build this plan">' + escape(modelName) + ' <span class="chev">▼</span></span><span class="split"><button class="btn amber" id="plan-build">Build' + (sel && sel < card.todos.length ? " " + sel : "") + ' <kbd>⌘⏎</kbd></button><span class="chev" id="plan-build-more">▼</span></span></div>';
     planEl.querySelector("#plan-view").addEventListener("click", () => vscode.postMessage({ type: "viewPlan" }));
-    planEl.querySelector("#plan-build").addEventListener("click", () => vscode.postMessage({ type: "buildPlan" }));
+    planEl.querySelector("#plan-build").addEventListener("click", () => buildPlan(false));
+    planEl.querySelector("#plan-build-more").addEventListener("click", (e) => { e.stopPropagation(); openPlanBuildMenu(e.currentTarget); });
+    planEl.querySelector("#plan-model").addEventListener("click", (e) => { e.stopPropagation(); openPlanModelMenu(e.currentTarget); });
+    const all = planEl.querySelector("#plan-all"); if (all) all.addEventListener("click", () => { if (planSel.size === card.todos.length) planSel = new Set(); else planSel = new Set(card.todos.map((_, i) => i)); planCard(card); });
+    const moreEl = planEl.querySelector("#plan-more"); if (moreEl) moreEl.addEventListener("click", () => { planExpanded = true; planCard(card); });
+    planEl.querySelectorAll(".todo").forEach((el) => el.addEventListener("click", () => { const i = Number(el.dataset.i); if (planSel.has(i)) planSel.delete(i); else planSel.add(i); planCard(card); }));
     scroll();
+  }
+  function openPlanModelMenu(anchor) {
+    menu.dataset.kind = "planmodel"; menu.innerHTML = ""; const add = (html) => menu.insertAdjacentHTML("beforeend", html);
+    for (const [prov, title] of [["codex", "Codex"], ["claude", "Claude Code"]]) { const ms = (state ? state.models : []).filter((m) => m.provider === prov); if (!ms.length) continue; add('<div class="group">' + title + '</div>'); for (const m of ms) add('<div class="item' + (m.id === planModel ? " on" : "") + '" data-id="' + escape(m.id) + '"><span class="lbl">' + escape(m.name) + '</span><span class="check">✓</span></div>'); }
+    menu.querySelectorAll(".item").forEach((el) => el.addEventListener("click", () => { planModel = el.dataset.id; closeMenu(); if (planCardData) planCard(planCardData); }));
+    menu.classList.remove("wide"); menu.classList.add("open"); placeMenu(anchor);
+  }
+  function openPlanBuildMenu(anchor) {
+    menu.dataset.kind = "planbuild"; menu.innerHTML = '<div class="item" data-act="here"><span class="lbl">Build in this thread</span><span class="kbd">⌘⏎</span></div><div class="item" data-act="new"><span class="lbl">Build in a new agent thread</span></div>';
+    menu.querySelectorAll(".item").forEach((el) => el.addEventListener("click", () => { closeMenu(); buildPlan(el.dataset.act === "new"); }));
+    menu.classList.remove("wide"); menu.classList.add("open"); placeMenu(anchor);
   }
   function editCard(card) {
     const id = "edit-" + card.path.replace(/[^a-z0-9]/gi, "_"); let wrap = document.getElementById(id);
@@ -956,7 +1025,7 @@ function paneHtml(csp: string): string {
       if (m.kind === "user") addHuman(m.text, m.checkpoint);
       else if (m.kind === "assistant") { if (m.reasoning) { const d = document.createElement("details"); d.className = "thinking"; d.innerHTML = "<summary>Thought</summary><div class=body>" + escape(m.reasoning) + "</div>"; messages.appendChild(d); } addAssistant(m.text); }
       else if (m.kind === "tool") toolEl(m);
-      else if (m.kind === "plan") { planEl = null; planCard(m.card); }
+      else if (m.kind === "plan") { planEl = null; planSel = new Set(); planExpanded = false; planModel = null; planCard(m.card); }
     }
     scroll();
   }
@@ -1033,7 +1102,7 @@ function paneHtml(csp: string): string {
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape") closeMenu();
     if ((e.metaKey || e.ctrlKey) && e.key === "." && state) { e.preventDefault(); const i = state.modes.findIndex((m) => m.id === state.settings.mode); vscode.postMessage({ type: "setMode", id: state.modes[(i + 1) % state.modes.length].id }); }
-    if ((e.metaKey || e.ctrlKey) && e.key === "Enter" && planEl && !body.classList.contains("running") && !input.value.trim()) vscode.postMessage({ type: "buildPlan" });
+    if ((e.metaKey || e.ctrlKey) && e.key === "Enter" && planEl && !body.classList.contains("running") && !input.value.trim()) buildPlan(false);
   });
   $("hsearch").addEventListener("input", renderHistory);
   function renderHistory() {
