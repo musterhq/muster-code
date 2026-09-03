@@ -179,6 +179,14 @@
         "command": "muster.plan.build",
         "title": "Build",
         "icon": "$(play)"
+      },
+      {
+        "command": "muster.cmdk.submit",
+        "title": "Submit \u2318K Prompt"
+      },
+      {
+        "command": "muster.agent.plugins",
+        "title": "Codex Plugins and MCP Servers"
       }
     ],
     "configuration": {

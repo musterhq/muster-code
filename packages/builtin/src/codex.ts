@@ -169,6 +169,30 @@ export async function listAccessModes(cwd?: string): Promise<AccessMode[]> {
   });
 }
 
+/** Claude Code's own effort levels (`claude --effort low|medium|high|xhigh|max`); Codex efforts come from model/list per model. */
+export const CLAUDE_EFFORTS: { readonly id: string; readonly description: string }[] = [
+  { id: "low", description: "Fast, lighter reasoning" },
+  { id: "medium", description: "Balanced speed and depth" },
+  { id: "high", description: "Deeper reasoning" },
+  { id: "xhigh", description: "Extra high reasoning depth" },
+  { id: "max", description: "Maximum reasoning" },
+];
+
+export interface PluginInfo { readonly name: string; readonly kind: "plugin" | "mcp"; readonly detail: string }
+
+/** plugin/list + mcpServerStatus/list: what Codex has loaded for this folder — the same config the Codex app uses. */
+export async function listPlugins(cwd?: string): Promise<PluginInfo[]> {
+  const out: PluginInfo[] = [];
+  const rows = (result: Record<string, unknown>): Record<string, unknown>[] => {
+    const seen: Record<string, unknown>[] = [];
+    const walk = (v: unknown): void => { if (Array.isArray(v)) { for (const x of v) walk(x); return; } if (v && typeof v === "object") { const r = v as Record<string, unknown>; if (typeof r.name === "string" || typeof r.id === "string") seen.push(r); for (const k of ["data", "items", "plugins", "servers"]) if (k in r) walk(r[k]); } };
+    walk(result); return seen;
+  };
+  try { for (const r of rows(await queryCodex("plugin/list", {}, cwd))) out.push({ name: String(r.name ?? r.id), kind: "plugin", detail: [r.version, r.enabled === false ? "disabled" : r.enabled === true ? "enabled" : "", r.description].filter(Boolean).join(" · ") }); } catch { /* no plugin support */ }
+  try { for (const r of rows(await queryCodex("mcpServerStatus/list", {}, cwd))) out.push({ name: String(r.name ?? r.id), kind: "mcp", detail: [r.status ?? r.state, Array.isArray(r.tools) ? `${r.tools.length} tools` : ""].filter(Boolean).join(" · ") }); } catch { /* no MCP */ }
+  return out;
+}
+
 export interface ModelInfo {
   readonly id: string;
   readonly provider: "codex" | "claude";
@@ -192,7 +216,7 @@ export async function listModels(cwd?: string, claudeModels: readonly string[] =
     }
   } catch { /* offline or not signed in: the picker shows what it can */ }
   for (const id of claudeModels) {
-    models.push({ id: `claude:${id}`, provider: "claude", name: id.replace(/^claude-/, "Claude ").replace(/-(\d)/g, " $1").replace(/-\d{8}$/, ""), description: "Claude Code · your Claude subscription", efforts: ["low", "medium", "high", "xhigh", "max"].map((e) => ({ id: e, description: "" })), defaultEffort: "medium", isDefault: false });
+    models.push({ id: `claude:${id}`, provider: "claude", name: id.replace(/^claude-/, "Claude ").replace(/-(\d)/g, " $1").replace(/-\d{8}$/, ""), description: "Claude Code · your Claude subscription", efforts: CLAUDE_EFFORTS, defaultEffort: "medium", isDefault: false });
   }
   return models;
 }

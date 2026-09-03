@@ -9,7 +9,7 @@ import { join, relative } from "node:path";
 import { formatAge, formatSize, interruptTurn, listAccessModes, listModels, listSkills, listThreads, readHistory, readRules, runClaudeTurn, runTurn, threadsForWorkspace, type AccessMode, type CodexThread, type ModelInfo, type SkillInfo } from "./codex.js";
 import type { Checkpoint, EditCard, LiveEditController } from "./live-edit.js";
 
-interface ModeInfo { readonly id: string; readonly name: string; readonly icon: string; readonly placeholder: string; readonly prompt?: string }
+interface ModeInfo { readonly id: string; readonly name: string; readonly icon: string; readonly placeholder: string; readonly description?: string; readonly prompt?: string; readonly readOnly?: boolean; readonly plan?: boolean; readonly board?: boolean; readonly effort?: string }
 interface ThreadSettings { mode: string; accessId: string; modelId: string; effortId: string }
 interface PlanCard { title: string; summary: string; todos: { text: string; done: boolean }[]; path?: string }
 type ToolMessage = { kind: "tool"; id: string; title: string; detail: string; output: string; status: string };
@@ -35,7 +35,8 @@ type ToPane =
   | { type: "review"; files: EditCard[] }
   | { type: "threads"; items: { id: string; name: string; project: string; age: string; turns: number; size: string; live: boolean; pinned: boolean }[] }
   | { type: "board"; columns: { id: string; title: string; cards: { id: string; title: string; subtitle: string; running: boolean }[] }[] }
-  | { type: "suggestions"; kind: "file" | "skill"; items: { label: string; detail: string; insert: string }[] };
+  | { type: "suggestions"; kind: "file" | "skill"; items: { label: string; detail: string; insert: string }[] }
+  | { type: "openModeMenu" };
 type FromPane =
   | { type: "ready" } | { type: "send"; text: string } | { type: "stop" }
   | { type: "acceptAll" } | { type: "rejectAll" } | { type: "open"; path: string }
@@ -47,11 +48,17 @@ type FromPane =
   | { type: "suggest"; kind: "file" | "skill"; query: string } | { type: "restore"; id: string }
   | { type: "boardAdd"; title: string } | { type: "boardRun"; id: string } | { type: "boardMove"; id: string; column: BoardTask["column"] };
 
+// Cursor 3.18's built-in modes (docs/cursor-feature-atlas.md §3), mapped onto Codex: plan/spec use the
+// plan collaboration mode, ask/project are read-only, triage prefers the delegating effort, multitask is the board.
 const BUILTIN_MODES: ModeInfo[] = [
-  { id: "agent", name: "Agent", icon: "∞", placeholder: "Plan, search, build anything" },
-  { id: "plan", name: "Plan", icon: "☰", placeholder: "Plan, Build, / for skills, @ for context" },
-  { id: "ask", name: "Ask", icon: "◌", placeholder: "Ask, learn, brainstorm" },
-  { id: "kanban", name: "Kanban", icon: "▦", placeholder: "Add a task to the board" },
+  { id: "agent", name: "Agent", icon: "∞", description: "Plan, search, make edits, run commands", placeholder: "Plan, search, build anything" },
+  { id: "triage", name: "Triage", icon: "⇶", description: "Coordinate long-horizon tasks with delegated subagents", placeholder: "Describe the long-horizon task to coordinate", effort: "ultra", prompt: "Coordinate this as a long-horizon task: break it into sub-tasks, delegate what can run independently to subagents, integrate the results, and report what was done and what remains." },
+  { id: "plan", name: "Plan", icon: "☰", description: "Create detailed plans for accomplishing tasks", placeholder: "Plan, Build, / for skills, @ for context", plan: true },
+  { id: "spec", name: "Spec", icon: "☑", description: "Create structured plans with implementation steps", placeholder: "Describe what to specify", plan: true, prompt: "Write a structured specification: goals, non-goals, architecture, data changes, then numbered implementation steps with acceptance criteria as a to-do list." },
+  { id: "debug", name: "Debug", icon: "✱", description: "Systematically diagnose and fix bugs using runtime traces", placeholder: "Enter additional context about the issue", prompt: "Debug systematically: first add temporary instrumentation (logs/traces) to confirm the hypothesis, reproduce the issue, then fix the root cause and remove the instrumentation. Report the evidence at each step." },
+  { id: "multitask", name: "Multitask", icon: "◎", description: "Run and coordinate multiple tasks in parallel", placeholder: "Add a task to the board", board: true },
+  { id: "chat", name: "Ask", icon: "◌", description: "Ask questions about your codebase", placeholder: "Ask, learn, brainstorm", readOnly: true },
+  { id: "project", name: "Project", icon: "▣", description: "Special conversation mode for project-level discussions", placeholder: "Discuss the project", readOnly: true, prompt: "This is a project-level discussion: reason about architecture, scope and trade-offs across the whole repository; do not edit files." },
 ];
 
 export class AgentPane implements vscode.WebviewViewProvider {
@@ -123,13 +130,32 @@ export class AgentPane implements vscode.WebviewViewProvider {
     this.pushBoard();
   }
 
+  /** ⌘. opens the mode menu in the composer, as Cursor's composer.openModeMenu does. */
   cycleMode(): void {
+    this.post({ type: "openModeMenu" });
+    void vscode.commands.executeCommand(`${AgentPane.viewId}.focus`);
+  }
+
+  /** ⌘K "Quick Question": ask about the selection in the pane, read-only. */
+  async askSelection(editor: vscode.TextEditor, question: string): Promise<void> {
     const tab = this.active();
-    const modes = this.modes();
-    const index = modes.findIndex((m) => m.id === tab.settings.mode);
-    tab.settings.mode = modes[(index + 1) % modes.length]!.id;
+    tab.settings.mode = "chat";
     this.persist(tab);
+    this.paneView = "chat";
     this.pushState();
+    await vscode.commands.executeCommand(`${AgentPane.viewId}.focus`);
+    const rel = relative(this.cwd(), editor.document.uri.fsPath);
+    const sel = editor.selection.isEmpty ? undefined : editor.selection;
+    const code = editor.document.getText(sel ? new vscode.Range(sel.start.line, 0, sel.end.line, Number.MAX_SAFE_INTEGER) : undefined);
+    await this.send(`${question}\n\nAbout ${rel}${sel ? ` lines ${sel.start.line + 1}-${sel.end.line + 1}` : ""}:\n\`\`\`\n${code.slice(0, 12000)}\n\`\`\``);
+  }
+
+  /** Codex plugins and MCP servers loaded for this folder — the same config the Codex app uses, nothing to migrate. */
+  async showPlugins(): Promise<void> {
+    const { listPlugins } = await import("./codex.js");
+    const items = await listPlugins(this.cwd());
+    if (!items.length) { void vscode.window.showInformationMessage("Codex reports no plugins or MCP servers for this folder."); return; }
+    await vscode.window.showQuickPick(items.map((p) => ({ label: `$(${p.kind === "mcp" ? "server" : "extensions"}) ${p.name}`, description: p.kind === "mcp" ? "MCP server" : "plugin", detail: p.detail })), { placeHolder: "Codex plugins and MCP servers active in this folder", matchOnDetail: true });
   }
 
   stop(): void {
@@ -203,7 +229,7 @@ export class AgentPane implements vscode.WebviewViewProvider {
 
   private modes(): ModeInfo[] {
     const custom = vscode.workspace.getConfiguration("muster").get<Partial<ModeInfo>[]>("modes", []);
-    return [...BUILTIN_MODES, ...custom.filter((m) => m.id && m.name).map((m) => ({ id: m.id!, name: m.name!, icon: m.icon ?? "◆", placeholder: m.placeholder ?? "Plan, search, build anything", ...(m.prompt ? { prompt: m.prompt } : {}) }))];
+    return [...BUILTIN_MODES, ...custom.filter((m) => m.id && m.name).map((m) => ({ id: m.id!, name: m.name!, icon: m.icon ?? "◆", placeholder: m.placeholder ?? "Plan, search, build anything", ...(m.description ? { description: m.description } : {}), ...(m.prompt ? { prompt: m.prompt } : {}), ...(m.readOnly ? { readOnly: true } : {}), ...(m.plan ? { plan: true } : {}) }))];
   }
 
   private async loadCatalog(): Promise<void> {
@@ -260,7 +286,7 @@ export class AgentPane implements vscode.WebviewViewProvider {
       case "suggest": { this.post({ type: "suggestions", kind: message.kind, items: await this.suggest(message.kind, message.query) }); return; }
       case "restore": { const tab = this.active(); const checkpoint = tab.checkpoints.get(message.id); if (!checkpoint) return; const n = await this.live.restore(checkpoint); const at = tab.messages.findIndex((m) => m.kind === "user" && m.checkpoint === message.id); if (at >= 0) tab.messages = tab.messages.slice(0, at); this.post({ type: "messages", messages: tab.messages }); void vscode.window.setStatusBarMessage(`Checkpoint restored · ${n} file(s)`, 3000); return; }
       case "view": { if (message.view === "history") await this.showHistory(); else if (message.view === "board") await this.showBoard(); else { this.paneView = "chat"; this.pushState(); this.post({ type: "messages", messages: this.active().messages }); } return; }
-      case "setMode": { const tab = this.active(); tab.settings.mode = message.id; this.persist(tab); this.pushState(); if (message.id === "kanban") await this.showBoard(); return; }
+      case "setMode": { const tab = this.active(); tab.settings.mode = message.id; const mode = this.modes().find((m) => m.id === message.id); if (mode?.effort && this.models.find((m) => m.id === tab.settings.modelId)?.efforts.some((e) => e.id === mode.effort)) tab.settings.effortId = mode.effort; this.persist(tab); this.pushState(); if (mode?.board) await this.showBoard(); return; }
       case "setAccess": { const tab = this.active(); tab.settings.accessId = message.id; this.persist(tab); this.pushState(); return; }
       case "setModel": { const tab = this.active(); tab.settings.modelId = message.id; const model = this.models.find((m) => m.id === message.id); if (model && !model.efforts.some((e) => e.id === tab.settings.effortId)) tab.settings.effortId = model.defaultEffort; this.persist(tab); this.pushState(); return; }
       case "setEffort": { const tab = this.active(); tab.settings.effortId = message.id; this.persist(tab); this.pushState(); return; }
@@ -297,7 +323,7 @@ export class AgentPane implements vscode.WebviewViewProvider {
     const tab = this.active();
     if (!text.trim() || tab.running) return;
     const mode = this.modes().find((m) => m.id === tab.settings.mode) ?? BUILTIN_MODES[0]!;
-    if (mode.id === "kanban") { await this.onMessage({ type: "boardAdd", title: text.trim() }); await this.showBoard(); return; }
+    if (mode.board) { await this.onMessage({ type: "boardAdd", title: text.trim() }); await this.showBoard(); return; }
     const cwd = this.cwd();
     tab.running = true;
     const checkpointId = `cp-${Date.now().toString(36)}`;
@@ -349,14 +375,14 @@ export class AgentPane implements vscode.WebviewViewProvider {
     };
     const model = this.models.find((m) => m.id === tab.settings.modelId);
     const access = this.access.find((a) => a.id === tab.settings.accessId);
-    const askAccess: AccessMode | undefined = mode.id === "ask" ? { id: ":read-only", label: "Read only", sandbox: "read-only", approvalPolicy: "on-request" } : access;
+    const askAccess: AccessMode | undefined = mode.readOnly ? { id: ":read-only", label: "Read only", sandbox: "read-only", approvalPolicy: "on-request" } : access;
     const prompt = this.expandMentions(mode.prompt ? `${mode.prompt}\n\n${text}` : text, cwd);
     const rules = readRules(cwd);
     try {
       const effort = tab.settings.effortId as "low" | "medium" | "high" | "xhigh" | "max" | "ultra";
       const result = model?.provider === "claude"
         ? await runClaudeTurn({ prompt, cwd, model: model.id.replace(/^claude:/, ""), effort, ...(tab.claudeSession ? { sessionId: tab.claudeSession, resume: true } : { sessionId: (tab.claudeSession = cryptoId()) }), handlers })
-        : await runTurn({ prompt, cwd, ...(tab.thread ? { threadId: tab.thread.id } : {}), ...(model ? { model: model.id } : {}), reasoning: effort, ...(askAccess ? { access: askAccess } : {}), mode: mode.id === "plan" ? "plan" : "default", ...(rules ? { rules } : {}), handlers });
+        : await runTurn({ prompt, cwd, ...(tab.thread ? { threadId: tab.thread.id } : {}), ...(model ? { model: model.id } : {}), reasoning: effort, ...(askAccess ? { access: askAccess } : {}), mode: mode.plan ? "plan" : "default", ...(rules ? { rules } : {}), handlers });
       if (result.status === "failed") {
         this.post({ type: "done", ok: false, error: result.errorMessage ?? "The turn failed." });
       } else {
@@ -613,6 +639,10 @@ function paneHtml(csp: string): string {
   .menu .item .check { width: 14px; color: var(--fg); visibility: hidden; }
   .menu .item.on .check { visibility: visible; }
   .menu .item .kbd { color: var(--text-tertiary); font-size: var(--fs-xs); }
+  .menu .item.mode { align-items: flex-start; padding: 6px 10px; }
+  .menu .item .two { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+  .menu .item .desc { color: var(--text-tertiary); font-size: var(--fs-xs); line-height: 16px; white-space: normal; }
+  .menu.wide { min-width: 300px; max-width: 360px; }
   .menu .sep { border-top: 1px solid var(--stroke-tertiary); margin: 4px 0; }
   .menu .note { padding: 6px 10px; color: var(--text-tertiary); font-size: var(--fs-xs); }
   #history { padding: 4px 10px 10px; gap: 6px; }
@@ -756,7 +786,7 @@ function paneHtml(csp: string): string {
     body.dataset.view = state.view; renderTabs();
     const mode = state.modes.find((m) => m.id === state.settings.mode) || state.modes[0];
     $("mode-icon").textContent = mode.icon; $("mode-name").textContent = mode.name; $("mode-pill").classList.toggle("plan", mode.id === "plan");
-    input.placeholder = body.classList.contains("has-messages") && mode.id === "plan" ? "Steer the plan, or add more details" : mode.placeholder;
+    input.placeholder = planEl && mode.id === "spec" ? "Spin up a new thread with this plan as context" : (body.classList.contains("has-messages") && mode.id === "plan" ? "Steer the plan, or add more details" : mode.placeholder);
     const access = state.access.find((a) => a.id === state.settings.accessId); $("access-name").textContent = access ? access.label : (state.loading ? "…" : "Access");
     const model = state.models.find((m) => m.id === state.settings.modelId);
     const effort = model && model.efforts.find((e) => e.id === state.settings.effortId);
@@ -779,8 +809,8 @@ function paneHtml(csp: string): string {
     menuAnchor = anchor;
     menu.dataset.kind = kind; menu.innerHTML = ""; const add = (html) => menu.insertAdjacentHTML("beforeend", html);
     if (kind === "mode") {
-      for (const m of state.modes) add('<div class="item' + (m.id === state.settings.mode ? " on" : "") + '" data-id="' + escape(m.id) + '"><span class="ic">' + escape(m.icon) + '</span><span class="lbl">' + escape(m.name) + '</span><span class="check">✓</span></div>');
-      add('<div class="sep"></div><div class="note">⌘. cycles modes · custom modes: settings → muster.modes</div>');
+      for (const m of state.modes) add('<div class="item mode' + (m.id === state.settings.mode ? " on" : "") + '" data-id="' + escape(m.id) + '"><span class="ic">' + escape(m.icon) + '</span><span class="two"><span class="lbl">' + escape(m.name) + '</span><span class="desc">' + escape(m.description || "") + '</span></span><span class="check">✓</span></div>');
+      add('<div class="sep"></div><div class="note">⌘. or ⇧Tab opens this menu · custom modes: settings → muster.modes</div>');
       menu.querySelectorAll(".item").forEach((el) => el.addEventListener("click", () => { vscode.postMessage({ type: "setMode", id: el.dataset.id }); closeMenu(); }));
     } else if (kind === "access") {
       if (!state.access.length) add('<div class="note">' + (state.loading ? "Loading access modes from Codex…" : "No access modes reported by Codex (permissionProfile/list)") + '</div>');
@@ -791,10 +821,11 @@ function paneHtml(csp: string): string {
       for (const [prov, title] of [["codex", "Codex · ChatGPT plan"], ["claude", "Claude Code · Claude subscription"]]) { const ms = state.models.filter((m) => m.provider === prov); if (!ms.length) continue; add('<div class="group">' + title + '</div>');
         for (const m of ms) add('<div class="item' + (m.id === state.settings.modelId ? " on" : "") + '" data-id="' + escape(m.id) + '" title="' + escape(m.description) + '"><span class="lbl">' + escape(m.name) + '</span>' + (m.isDefault ? '<span class="sub">default</span>' : "") + '<span class="check">✓</span></div>'); }
       const model = state.models.find((m) => m.id === state.settings.modelId);
-      if (model && model.efforts.length) { add('<div class="sep"></div><div class="group">Effort · ' + escape(model.name) + '</div>'); for (const e of model.efforts) add('<div class="item' + (e.id === state.settings.effortId ? " on" : "") + '" data-effort="' + escape(e.id) + '" title="' + escape(e.description) + '"><span class="lbl">' + effortLabel(e.id) + '</span><span class="check">✓</span></div>'); }
+      if (model && model.efforts.length) { add('<div class="sep"></div><div class="group">Effort · ' + escape(model.name) + '</div>'); for (const e of model.efforts) add('<div class="item' + (e.id === state.settings.effortId ? " on" : "") + '" data-effort="' + escape(e.id) + '"><span class="lbl">' + effortLabel(e.id) + '</span><span class="sub">' + escape(e.description) + '</span><span class="check">✓</span></div>'); }
       menu.querySelectorAll(".item[data-id]").forEach((el) => el.addEventListener("click", () => { vscode.postMessage({ type: "setModel", id: el.dataset.id }); setTimeout(() => { if (menuAnchor) { menu.classList.remove("open"); openMenu("model", menuAnchor); } }, 60); }));
       menu.querySelectorAll(".item[data-effort]").forEach((el) => el.addEventListener("click", () => { vscode.postMessage({ type: "setEffort", id: el.dataset.effort }); closeMenu(); }));
     }
+    menu.classList.toggle("wide", kind === "mode");
     menu.classList.add("open");
     placeMenu(anchor);
   }
@@ -848,7 +879,7 @@ function paneHtml(csp: string): string {
   }
   function acceptSuggestion(insert) { if (!suggest) return; const end = input.selectionStart; input.value = input.value.slice(0, suggest.start) + insert + " " + input.value.slice(end); const caret = suggest.start + insert.length + 1; input.setSelectionRange(caret, caret); suggest = null; closeMenu(); autosize(); input.focus(); }
   input.addEventListener("input", () => { autosize(); const t = triggerAt(); if (!t) { if (suggest) { suggest = null; closeMenu(); } return; } suggest = { ...t, items: suggest && suggest.items || [] }; clearTimeout(suggestTimer); suggestTimer = setTimeout(() => vscode.postMessage({ type: "suggest", kind: t.kind, query: t.query }), 120); });
-  input.addEventListener("keydown", (e) => { if (suggest && menu.classList.contains("open")) { if (e.key === "Enter" || e.key === "Tab") { e.preventDefault(); if (suggest.items[0]) acceptSuggestion(suggest.items[0].insert); return; } if (e.key === "Escape") { suggest = null; closeMenu(); return; } } if (e.key === "Enter" && !e.shiftKey && !e.metaKey && !e.ctrlKey) { e.preventDefault(); send(); } });
+  input.addEventListener("keydown", (e) => { if (e.key === "Tab" && e.shiftKey) { e.preventDefault(); openMenu("mode", $("mode-pill")); return; } if (suggest && menu.classList.contains("open")) { if (e.key === "Enter" || e.key === "Tab") { e.preventDefault(); if (suggest.items[0]) acceptSuggestion(suggest.items[0].insert); return; } if (e.key === "Escape") { suggest = null; closeMenu(); return; } } if (e.key === "Enter" && !e.shiftKey && !e.metaKey && !e.ctrlKey) { e.preventDefault(); send(); } });
   $("send").addEventListener("click", send);
   $("stop").addEventListener("click", () => vscode.postMessage({ type: "stop" }));
   window.addEventListener("message", (event) => {
@@ -866,6 +897,7 @@ function paneHtml(csp: string): string {
     else if (m.type === "threads") { threads = m.items; renderHistory(); }
     else if (m.type === "board") { renderBoard(m.columns); }
     else if (m.type === "suggestions") { renderSuggestions(m.kind, m.items); }
+    else if (m.type === "openModeMenu") { openMenu("mode", $("mode-pill")); }
     else if (m.type === "done") { body.classList.remove("running"); if (thinkingEl) thinkingEl.querySelector("summary").textContent = "Thought"; if (!m.ok) { const e = document.createElement("div"); e.className = "error"; e.textContent = m.error || "Failed"; messages.appendChild(e); } assistantEl = thinkingEl = null; scroll(); }
   });
   autosize();

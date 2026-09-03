@@ -151,9 +151,20 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   context.subscriptions.push(vscode.commands.registerCommand("muster.cmdk", async () => {
     const editor = vscode.window.activeTextEditor;
     if (!editor) return;
-    const instruction = await vscode.window.showInputBox({ prompt: "Edit with the agent", placeHolder: "Describe the change · Enter to generate · Esc to cancel", ignoreFocusOut: true });
-    if (instruction?.trim()) await pane.inlineEdit(editor, instruction.trim());
+    try {
+      await vscode.commands.executeCommand("muster.cmdk.show", { uri: editor.document.uri.toString(), line: editor.selection.start.line + 1 });
+    } catch {
+      const instruction = await vscode.window.showInputBox({ prompt: "Edit with the agent", placeHolder: "Describe the change · Enter to generate · Esc to cancel", ignoreFocusOut: true });
+      if (instruction?.trim()) await pane.inlineEdit(editor, instruction.trim());
+    }
   }));
+  context.subscriptions.push(vscode.commands.registerCommand("muster.cmdk.submit", async (args: { uri: string; instruction: string; quick?: boolean }) => {
+    const editor = vscode.window.visibleTextEditors.find((e) => e.document.uri.toString() === args.uri) ?? vscode.window.activeTextEditor;
+    if (!editor) return;
+    if (args.quick) { await vscode.commands.executeCommand("muster.cmdk.hide", { uri: args.uri }); await pane.askSelection(editor, args.instruction); return; }
+    try { await pane.inlineEdit(editor, args.instruction); } finally { await vscode.commands.executeCommand("muster.cmdk.hide", { uri: args.uri }); }
+  }));
+  context.subscriptions.push(vscode.commands.registerCommand("muster.agent.plugins", () => pane.showPlugins()));
   context.subscriptions.push(vscode.commands.registerCommand("muster.plan.preview", (uri?: vscode.Uri) => vscode.commands.executeCommand("markdown.showPreviewToSide", uri ?? vscode.window.activeTextEditor?.document.uri)));
   context.subscriptions.push(vscode.commands.registerCommand("muster.plan.build", (uri?: vscode.Uri) => { const target = uri ?? vscode.window.activeTextEditor?.document.uri; if (target) void pane.buildFromFile(target); }));
   context.subscriptions.push(vscode.commands.registerCommand("muster.agent.more", () => vscode.commands.executeCommand("workbench.action.openSettings", "muster")));

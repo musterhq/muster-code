@@ -241,6 +241,56 @@
     const services = { modelService: accessor.get(IModelService), languageService: accessor.get(ILanguageService) };
     for (const editor of editorsFor(accessor.get(ICodeEditorService), args.uri)) render(editor, services, args);
   });
+  // ── ⌘K prompt bar (Cursor's aipopup): a view zone above the selection with Edit Selection ⏎ / Quick Question ⌥⏎ ──
+  const bars = new Map();
+  function hideBar(uri) {
+    const bar = bars.get(uri);
+    if (!bar) return;
+    bars.delete(uri);
+    try { bar.editor.changeViewZones((a) => a.removeZone(bar.zoneId)); } catch { /* editor gone */ }
+  }
+  function showBar(editor, line) {
+    const model = editor.getModel();
+    if (!model) return;
+    const uri = model.uri.toString();
+    hideBar(uri);
+    const dom = el("div", "muster-cmdk");
+    const input = el("textarea", "muster-cmdk-input");
+    input.rows = 1;
+    input.placeholder = "Edit selection…";
+    const hint = el("div", "muster-cmdk-hint");
+    hint.innerHTML = '<span class="k">⌘K</span><span class="lbl">Edit Selection</span><span class="k">⏎</span><span class="lbl">Quick Question</span><span class="k">⌥⏎</span><span class="lbl">Close</span><span class="k">Esc</span>';
+    const status = el("div", "muster-cmdk-status", "");
+    dom.append(input, hint, status);
+    const bar = { editor, dom, input, status, zoneId: null };
+    editor.changeViewZones((a) => { bar.zoneId = a.addZone({ afterLineNumber: Math.max(0, line - 1), heightInPx: 84, domNode: dom }); });
+    const stop = (e) => e.stopPropagation();
+    input.addEventListener("keyup", stop);
+    input.addEventListener("keypress", stop);
+    input.addEventListener("keydown", (e) => {
+      e.stopPropagation();
+      if (e.key === "Escape") { e.preventDefault(); hideBar(uri); editor.focus(); return; }
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        const text = input.value.trim();
+        if (!text || input.disabled) return;
+        input.disabled = true;
+        status.textContent = e.altKey ? "Asking…" : "Generating…";
+        run("muster.cmdk.submit", { uri, instruction: text, quick: !!e.altKey });
+      }
+    });
+    bars.set(uri, bar);
+    setTimeout(() => input.focus(), 0);
+  }
+  Registry.registerCommand("muster.cmdk.show", (accessor, args) => {
+    commands = commands || accessor.get(ICommandService);
+    const editors = editorsFor(accessor.get(ICodeEditorService), args.uri);
+    const editor = editors.find((e) => e.hasTextFocus()) || editors[0];
+    if (editor) showBar(editor, args.line || 1);
+  });
+  Registry.registerCommand("muster.cmdk.hide", (accessor, args) => hideBar(args.uri));
+  Registry.registerCommand("muster.cmdk.status", (accessor, args) => { const bar = bars.get(args.uri); if (bar) bar.status.textContent = args.text || ""; });
+
   Registry.registerCommand("muster.inlineDiff.clear", (accessor, args) => {
     for (const editor of editorsFor(accessor.get(ICodeEditorService), args.uri)) clear(editor);
   });
