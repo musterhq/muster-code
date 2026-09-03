@@ -199,7 +199,8 @@
       },
       {
         "command": "muster.review.git",
-        "title": "Review Changes Against Branch"
+        "title": "Review Changes with Agent",
+        "icon": "$(sparkle)"
       },
       {
         "command": "muster.completions.toggle",
@@ -237,6 +238,11 @@
       {
         "command": "muster.agent.addSelection",
         "title": "Add Selection to Chat"
+      },
+      {
+        "command": "muster.settings.open",
+        "title": "Muster Settings",
+        "icon": "$(settings-gear)"
       }
     ],
     "configuration": {
@@ -293,6 +299,11 @@
           "items": {
             "type": "object"
           }
+        },
+        "muster.review.onCommit": {
+          "type": "boolean",
+          "default": false,
+          "description": "After each commit, review it for issues in the Agent pane (read-only turn)."
         }
       }
     },
@@ -329,6 +340,13 @@
           "command": "muster.plan.model",
           "when": "resourceFilename =~ /\\\\.plan\\\\.md$/",
           "group": "navigation@2"
+        }
+      ],
+      "scm/title": [
+        {
+          "command": "muster.review.git",
+          "when": "scmProvider == git",
+          "group": "navigation@1"
         }
       ]
     },

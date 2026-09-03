@@ -220,6 +220,17 @@ export class AgentPane implements vscode.WebviewViewProvider {
     return { resolved: !!this.view, visible: this.view?.visible ?? null, ready: this.readyCount, models: this.models.length, access: this.access.length, loading: this.loading, tabs: this.tabs.length, view: this.paneView, activeMode: this.active().settings.mode };
   }
 
+  /** Review a commit (Bugbot on commit): a read-only Ask turn over `git show <sha>` in the pane. */
+  async reviewCommit(sha: string): Promise<void> {
+    const tab = this.newTab(`Review ${sha.slice(0, 7)}`);
+    tab.settings.mode = "chat";
+    this.persist(tab);
+    this.paneView = "chat";
+    this.pushState();
+    this.post({ type: "messages", messages: [] });
+    await this.send(`Review commit ${sha} for issues (bugs, regressions, missing tests, risky changes). Run \`git show ${sha}\` to see it; report findings with file:line references, most severe first, or say "No issues found".`);
+  }
+
   /** Codex plugins and MCP servers loaded for this folder — the same config the Codex app uses, nothing to migrate. */
   async showPlugins(): Promise<void> {
     const { listPlugins } = await import("./codex.js");

@@ -10,6 +10,7 @@ import { startDevControl } from "./dev-control.js";
 import { registerCompletions } from "./completions.js";
 import { PlanEditorProvider } from "./plan-editor.js";
 import { watchTerminals } from "./context.js";
+import { SettingsPage } from "./settings-page.js";
 import { queryCodex } from "./codex.js";
 
 const SESSION_TYPE = "codex";
@@ -241,7 +242,25 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     await pane.buildFromFile(active.uri, { ...(active.selection.length ? { todos: active.selection } : {}), ...(active.model ? { model: active.model } : {}), ...(pick.id === "new" ? { newThread: true } : {}) });
   }));
   context.subscriptions.push(vscode.window.registerCustomEditorProvider(PlanEditorProvider.viewType, planEditors, { webviewOptions: { retainContextWhenHidden: true }, supportsMultipleEditorsPerDocument: false }));
-  context.subscriptions.push(vscode.commands.registerCommand("muster.agent.more", () => vscode.commands.executeCommand("workbench.action.openSettings", "muster")));
+  const settings = new SettingsPage(context, workspaceCwd);
+  context.subscriptions.push(vscode.commands.registerCommand("muster.agent.more", () => settings.open("general")));
+  context.subscriptions.push(vscode.commands.registerCommand("muster.settings.open", (section?: "general" | "models" | "rules" | "mcp" | "skills" | "plugins" | "hooks" | "docs") => settings.open(section ?? "general")));
+  // Bugbot-style review on commit: after each commit, review it read-only in the pane (setting muster.review.onCommit).
+  void (async () => {
+    const git = vscode.extensions.getExtension<{ getAPI(v: number): { repositories: { state: { HEAD?: { commit?: string }; onDidChange: vscode.Event<void> } }[]; onDidOpenRepository: vscode.Event<unknown> } }>("vscode.git");
+    const api = git ? (await git.activate()).getAPI(1) : undefined;
+    if (!api) return;
+    const watch = (repo: { state: { HEAD?: { commit?: string }; onDidChange: vscode.Event<void> } }) => {
+      let last = repo.state.HEAD?.commit;
+      context.subscriptions.push(repo.state.onDidChange(() => {
+        const head = repo.state.HEAD?.commit;
+        if (head && last && head !== last && config().get<boolean>("review.onCommit", false)) void pane.reviewCommit(head);
+        last = head;
+      }));
+    };
+    api.repositories.forEach(watch);
+    context.subscriptions.push(api.onDidOpenRepository(() => api.repositories.forEach(watch)));
+  })();
   context.subscriptions.push(vscode.commands.registerCommand("muster.agent.stop", () => pane.stop()));
   context.subscriptions.push(vscode.commands.registerCommand("muster.agent.maximize", () => vscode.commands.executeCommand("workbench.action.toggleMaximizedAuxiliaryBar")));
   context.subscriptions.push(vscode.commands.registerCommand("muster.thread.resume", async (thread?: CodexThread) => {
