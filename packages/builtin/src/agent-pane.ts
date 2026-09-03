@@ -8,7 +8,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import { formatAge, formatSize, interruptTurn, listAccessModes, listModels, listSkills, listThreads, readHistory, readRules, runClaudeTurn, runTurn, threadsForWorkspace, type AccessMode, type CodexThread, type ModelInfo, type SkillInfo } from "./codex.js";
 import type { Checkpoint, EditCard, LiveEditController } from "./live-edit.js";
-import { expandContext, suggestMentions, rememberPick } from "./context.js";
+import { expandContext, suggestMentions, rememberPick, suggestSlash, type MenuData, type MenuSection } from "./context.js";
 import type { BrowserPick, BrowserController, BrowserState } from "./browser.js";
 
 interface ModeInfo { readonly id: string; readonly name: string; readonly icon: string; readonly placeholder: string; readonly description?: string; readonly prompt?: string; readonly readOnly?: boolean; readonly plan?: boolean; readonly board?: boolean; readonly effort?: string; readonly autoFix?: boolean; readonly debug?: boolean; readonly parallel?: boolean; readonly spec?: boolean }
@@ -39,8 +39,9 @@ type ToPane =
   | { type: "review"; files: EditCard[] }
   | { type: "threads"; items: { id: string; name: string; project: string; age: string; turns: number; size: string; live: boolean; pinned: boolean }[] }
   | { type: "board"; columns: { id: string; title: string; cards: { id: string; title: string; subtitle: string; running: boolean }[] }[] }
-  | { type: "suggestions"; kind: "file" | "skill"; seq?: number; items: { label: string; detail: string; insert: string; group?: string }[] }
+  | { type: "suggestions"; kind: "file" | "skill"; seq?: number; mode: string; title: string; sections: MenuSection[] }
   | { type: "validated"; ok: string[]; bad: string[] }
+  | { type: "setInput"; text: string }
   | { type: "openModeMenu" }
   | { type: "insert"; text: string };
 type FromPane =
@@ -51,7 +52,8 @@ type FromPane =
   | { type: "setMode"; id: string } | { type: "setAccess"; id: string } | { type: "setModel"; id: string } | { type: "setEffort"; id: string }
   | { type: "pin"; id: string; pinned: boolean }
   | { type: "viewPlan" } | { type: "buildPlan"; todos?: number[]; model?: string; newThread?: boolean }
-  | { type: "suggest"; kind: "file" | "skill"; query: string; seq?: number } | { type: "restore"; id: string } | { type: "attach" } | { type: "validate"; tokens: string[] } | { type: "command"; id: string } | { type: "redo" }
+  | { type: "suggest"; kind: "file" | "skill"; query: string; mode?: string; seq?: number } | { type: "slashAction"; id: string }
+  | { type: "probed"; seq?: number; query?: string | null; mode?: string | null; rows: { text: string; sel: boolean; icon: string }[]; chips: { t: string; bad: boolean }[]; marks: { t: string; bad: boolean }[]; title: string } | { type: "restore"; id: string } | { type: "attach" } | { type: "validate"; tokens: string[] } | { type: "command"; id: string } | { type: "redo" }
   | { type: "openReview" }
   | { type: "boardAdd"; title: string } | { type: "boardRun"; id: string } | { type: "boardMove"; id: string; column: BoardTask["column"] }
   | { type: "browserEdit"; id: string; kind: "text" | "style"; prop?: string; value: string } | { type: "browserRevert"; id: string; index: number } | { type: "browserApply"; id: string } | { type: "browserTakeControl"; id: string }
@@ -90,6 +92,7 @@ export class AgentPane implements vscode.WebviewViewProvider {
   private lastChatId = "";
   private skills: SkillInfo[] | undefined;
   private readyCount = 0;
+  private lastProbe: unknown = null;
   private readonly catalogChanged = new vscode.EventEmitter<void>();
   readonly onCatalog = this.catalogChanged.event;
   private readonly accountEvents = new vscode.EventEmitter<Record<string, unknown>>();
@@ -103,8 +106,9 @@ export class AgentPane implements vscode.WebviewViewProvider {
 
   resolveWebviewView(view: vscode.WebviewView): void {
     this.view = view;
-    view.webview.options = { enableScripts: true, localResourceRoots: [this.context.extensionUri] };
-    view.webview.html = paneHtml(view.webview.cspSource);
+    const appRoot = vscode.Uri.file(vscode.env.appRoot);
+    view.webview.options = { enableScripts: true, localResourceRoots: [this.context.extensionUri, appRoot] };
+    view.webview.html = paneHtml(view.webview.cspSource, view.webview.asWebviewUri(vscode.Uri.joinPath(appRoot, "out", "media", "codicon.ttf")).toString());
     view.webview.onDidReceiveMessage((message: FromPane) => void this.onMessage(message).catch((error) => this.output.appendLine(`pane: ${error instanceof Error ? error.message : String(error)}`)));
   }
 
@@ -224,10 +228,13 @@ export class AgentPane implements vscode.WebviewViewProvider {
   }
 
   /** Harness: time the popover data path. */
-  async debugSuggest(kind: "file" | "skill", query: string): Promise<Record<string, unknown>> { const t0 = Date.now(); const items = await this.suggest(kind, query); return { ms: Date.now() - t0, count: items.length, items: items.slice(0, 8) }; }
+  async debugSuggest(kind: "file" | "skill", query: string, mode = "all"): Promise<Record<string, unknown>> { const t0 = Date.now(); const data = await this.suggest(kind, query, mode); const items = data.sections.flatMap((sec) => sec.items); return { ms: Date.now() - t0, mode: data.mode, title: data.title, sections: data.sections.map((sec) => `${sec.title || "(untitled)"}: ${sec.items.length}`), count: items.length, items: items.slice(0, 10).map((it) => ({ label: it.label, detail: it.detail, insert: it.insert, nav: it.nav, action: it.action, icon: it.icon })) }; }
+
+  /** Harness: type into the composer; the webview reports the rendered menu rows, chips and marks (debugState().probe). */
+  debugInput(text: string): void { this.lastProbe = null; this.post({ type: "setInput", text }); }
 
   debugState(): Record<string, unknown> {
-    return { resolved: !!this.view, visible: this.view?.visible ?? null, ready: this.readyCount, models: this.models.length, access: this.access.length, loading: this.loading, tabs: this.tabs.length, view: this.paneView, activeMode: this.active().settings.mode };
+    return { probe: this.lastProbe, resolved: !!this.view, visible: this.view?.visible ?? null, ready: this.readyCount, models: this.models.length, access: this.access.length, loading: this.loading, tabs: this.tabs.length, view: this.paneView, activeMode: this.active().settings.mode };
   }
 
   /** Review a commit (Bugbot on commit): a read-only Ask turn over `git show <sha>` in the pane. */
@@ -469,7 +476,9 @@ export class AgentPane implements vscode.WebviewViewProvider {
       case "activateTab": { const tab = this.tabs.find((t) => t.id === message.id); if (tab) { this.activeId = tab.id; if (tab.kind === "browser") { this.paneView = "browser"; this.pushState(); const st = tab.browserId ? this.browser?.get(tab.browserId) : undefined; if (st) this.post({ type: "browser", state: st }); } else { this.lastChatId = tab.id; this.paneView = "chat"; this.pushState(); this.post({ type: "messages", messages: tab.messages }); } void vscode.commands.executeCommand("setContext", "muster.browserActive", tab.kind === "browser"); } return; }
       case "closeTab": { const closing = this.tabs.find((t) => t.id === message.id); if (closing?.kind === "browser" && closing.browserId) this.browser?.close(closing.browserId); this.tabs = this.tabs.filter((t) => t.id !== message.id); if (!this.tabs.length) this.newTab(); if (!this.tabs.some((t) => t.id === this.activeId)) this.activeId = this.tabs[this.tabs.length - 1]!.id; const now = this.active(); this.paneView = now.kind === "browser" ? "browser" : "chat"; this.pushState(); if (now.kind === "browser" && now.browserId) { const st = this.browser?.get(now.browserId); if (st) this.post({ type: "browser", state: st }); } else this.post({ type: "messages", messages: now.messages }); void vscode.commands.executeCommand("setContext", "muster.browserActive", now.kind === "browser"); return; }
       case "openThread": { const thread = (await this.visibleThreads()).find((t) => t.id === message.id); if (thread) await this.openThread(thread); else void vscode.window.showWarningMessage("That thread belongs to another folder."); return; }
-      case "suggest": { this.post({ type: "suggestions", kind: message.kind, ...(message.seq !== undefined ? { seq: message.seq } : {}), items: await this.suggest(message.kind, message.query) }); return; }
+      case "suggest": { const data = await this.suggest(message.kind, message.query, message.mode ?? "all"); this.post({ type: "suggestions", kind: message.kind, ...(message.seq !== undefined ? { seq: message.seq } : {}), mode: data.mode, title: data.title, sections: data.sections }); return; }
+      case "slashAction": await this.slashAction(message.id); return;
+      case "probed": this.lastProbe = { seq: message.seq, query: message.query, mode: message.mode, rows: message.rows, chips: message.chips, marks: message.marks, title: message.title }; return;
       case "validate": { const ok: string[] = []; const bad: string[] = []; for (const t of message.tokens) ((await this.tokenResolves(t)) ? ok : bad).push(t); this.post({ type: "validated", ok, bad }); return; }
       case "attach": {
         const picked = await vscode.window.showOpenDialog({ canSelectMany: true, filters: { Images: ["png", "jpg", "jpeg", "gif", "webp"] }, openLabel: "Attach" });
@@ -744,12 +753,20 @@ export class AgentPane implements vscode.WebviewViewProvider {
     return existsSync(join(cwd, body.replace(/:\d+-\d+$/, "")));
   }
 
-  private async suggest(kind: "file" | "skill", query: string): Promise<{ label: string; detail: string; insert: string }[]> {
-    if (kind === "skill") {
-      this.skills ??= await listSkills(this.cwd());
-      return this.skills.filter((s) => s.name.toLowerCase().includes(query.toLowerCase())).slice(0, 12).map((s) => ({ label: s.name, detail: s.description, insert: `/${s.name}` }));
+  private async suggest(kind: "file" | "skill", query: string, mode = "all"): Promise<MenuData> {
+    if (kind === "skill") { this.skills ??= await listSkills(this.cwd()); return suggestSlash(this.cwd(), query, this.skills); }
+    return suggestMentions(this.cwd(), query, mode);
+  }
+
+  /** Cursor's built-in slash commands: they act, they are not inserted as text. */
+  private async slashAction(id: string): Promise<void> {
+    if (id === "reset") { const tab = this.newTab(); this.activeId = tab.id; this.paneView = "chat"; this.pushState(); this.post({ type: "messages", messages: [] }); return; }
+    if (id === "summarize") { await this.send("Summarize our conversation so far in under 10 lines: what I asked, what you did, what is left."); return; }
+    if (id === "browser") { this.openBrowserTab(); return; }
+    if (id === "review") {
+      const tab = this.newTab("Review changes"); tab.settings.mode = "chat"; this.persist(tab); this.activeId = tab.id; this.paneView = "chat"; this.pushState(); this.post({ type: "messages", messages: [] });
+      await this.send("Review the current working tree changes (run `git status` and `git diff`, including staged changes) for bugs, regressions, missing tests and risky changes. Report findings with file:line references, most severe first, or say \"No issues found\". Do not edit files.");
     }
-    return suggestMentions(this.cwd(), query);
   }
 
   /** Approval and question requests from the provider (Manual approval / Read only): ask in the app, answer on the wire. */
@@ -813,10 +830,10 @@ function parsePlan(markdown: string): PlanCard {
   return { title, summary: summary.trim(), todos };
 }
 
-function paneHtml(csp: string): string {
+function paneHtml(csp: string, codicon = ""): string {
   return /* html */ `<!doctype html>
 <html><head><meta charset="utf-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline' ${csp}; script-src 'unsafe-inline' ${csp}; img-src ${csp} data:;">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline' ${csp}; script-src 'unsafe-inline' ${csp}; img-src ${csp} data:; font-src ${csp};">
 <style>
   :root {
     --fg: var(--vscode-editor-foreground);
@@ -988,16 +1005,19 @@ function paneHtml(csp: string): string {
   @container (max-width: 300px) { .pill.mode .lbl { display: none; } .icon[title="Dictate"] { display: none; } }
   #composer:focus-within { border-color: var(--stroke-primary); }
   body:not(.has-messages)[data-view="chat"] #composer { order: -1; }
-  .ctxrow { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 6px; }
-  .ctx { display: inline-flex; align-items: center; gap: 4px; height: 20px; padding: 0 7px; border-radius: 5px; font-size: var(--fs-xs); background: color-mix(in srgb, var(--amber) 18%, transparent); color: var(--fg); border: 1px solid color-mix(in srgb, var(--amber) 45%, transparent); white-space: nowrap; max-width: 220px; }
+  /* Cursor's context pills (.context-pill): 20px, 12px text, icon that turns into × on hover; dashed for suggestions and "Add Context". */
+  .ctx { display: inline-flex; align-items: center; gap: 4px; height: 20px; box-sizing: border-box; padding: 2px 4px; border: 1px solid var(--stroke-secondary); border-radius: 4px; font-size: 12px; line-height: 16px; color: var(--fg); white-space: nowrap; max-width: 220px; cursor: default; user-select: none; }
+  .ctx:hover { background: color-mix(in srgb, var(--vscode-list-hoverBackground) 80%, transparent); }
+  .ctx .ci { display: inline-flex; width: 12px; height: 12px; align-items: center; justify-content: center; flex: 0 0 auto; } .ctx .ci .cod { font-size: 12px; width: 12px; height: 12px; } .ctx .ci .badge { font-size: 8px; height: 12px; line-height: 12px; min-width: 14px; padding: 0 2px; }
+  .ctx .x { display: none; width: 12px; height: 12px; align-items: center; justify-content: center; cursor: pointer; color: var(--fg); font-family: codicon; font-size: 12px; } .ctx:hover .ci { display: none; } .ctx:hover .x { display: inline-flex; }
   .ctx .n { overflow: hidden; text-overflow: ellipsis; }
-  .ctx .x { color: var(--text-tertiary); cursor: pointer; margin-left: 2px; } .ctx .x:hover { color: var(--fg); }
-  .ctx.bad { background: transparent; border-style: dashed; border-color: var(--stroke-primary); color: var(--text-tertiary); }
-  .ctx.add { background: transparent; border: 1px solid var(--stroke-secondary); color: var(--text-secondary); cursor: pointer; } .ctx.add:hover { color: var(--fg); border-color: var(--stroke-primary); }
+  .ctx.bad { border-style: dashed; opacity: .6; }
+  .ctx.add { border-style: dashed; opacity: .6; cursor: pointer; color: var(--text-secondary); } .ctx.add:hover { opacity: .9; background: transparent; } .ctx.add .cod { font-size: 12px; width: 12px; height: 12px; }
   .inputwrap { position: relative; }
+  /* Cursor's inline mention (.mention): radius 6, padding 1px 4px, quiet background; unresolved ones dashed. */
+  #backdrop mark { color: transparent; background: color-mix(in srgb, var(--fg) 12%, transparent); border-radius: 6px; padding: 1px 4px; margin: 0 -4px; }
+  #backdrop mark.bad { background: transparent; outline: 1px dashed color-mix(in srgb, var(--fg) 35%, transparent); outline-offset: -1px; }
   #backdrop { position: absolute; inset: 0; overflow: hidden; pointer-events: none; color: transparent; white-space: pre-wrap; word-wrap: break-word; font: inherit; font-size: var(--fs-lg); line-height: var(--lh-lg); padding: 0; }
-  #backdrop mark { color: transparent; background: color-mix(in srgb, var(--amber) 24%, transparent); box-shadow: 0 0 0 1px color-mix(in srgb, var(--amber) 45%, transparent), 0 0 8px color-mix(in srgb, var(--amber) 25%, transparent); border-radius: 4px; }
-  #backdrop mark.bad { background: transparent; box-shadow: 0 0 0 1px color-mix(in srgb, var(--fg) 25%, transparent); }
   #input { position: relative; z-index: 1; width: 100%; min-height: 64px; max-height: 240px; resize: none; border: 0; outline: 0; background: transparent; color: var(--fg); font: inherit; font-size: var(--fs-lg); line-height: var(--lh-lg); padding: 0; }
   #input::placeholder { color: var(--vscode-input-placeholderForeground); }
   .bar { display: flex; align-items: center; gap: 6px; margin-top: 6px; min-width: 0; }
@@ -1022,10 +1042,20 @@ function paneHtml(csp: string): string {
   .menu .group { padding: 6px 10px 2px; font-size: var(--fs-xs); color: var(--text-tertiary); text-transform: uppercase; letter-spacing: .3px; }
   .menu .item { display: flex; align-items: center; gap: 8px; padding: 5px 10px; border-radius: var(--radius-sm); cursor: pointer; }
   .menu .item:hover, .menu .item.sel { background: var(--bg-tertiary); }
+  /* Cursor's typeahead popover: 300px, 2px padding, 24px rows (12px text, 2px 6px padding), path right-aligned and truncated from the left, matches highlighted. */
+  .cod { font-family: codicon; font-size: 14px; line-height: 1; display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; flex: 0 0 auto; color: var(--text-secondary); }
+  .menu.typeahead { width: 300px; min-width: 300px; max-width: 300px; padding: 2px; border-radius: 6px; box-shadow: 0 5px 10px rgba(0, 0, 0, .3); }
+  .menu .title { padding: 4px 6px 2px; font-size: 11px; line-height: 15px; color: var(--vscode-input-placeholderForeground); }
+  .menu .row { display: flex; align-items: center; gap: 6px; height: 24px; padding: 2px 6px; box-sizing: border-box; border-radius: 4px; font-size: 12px; line-height: 20px; cursor: pointer; }
+  .menu .row.sel { background: var(--vscode-list-hoverBackground); }
+  .menu .row .text { flex: 0 1 auto; min-width: 36px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--fg); }
+  .menu .row .secondary { flex: 1 1 auto; min-width: 0; direction: rtl; text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text-tertiary); font-size: 12px; }
+  .menu .row .hl { color: var(--vscode-list-highlightForeground); font-weight: 600; }
+  .menu .row .chev { margin-left: auto; color: var(--text-tertiary); } .menu .row .secondary + .chev { margin-left: 0; }
+  .menu .back { display: flex; align-items: center; gap: 4px; height: 24px; padding: 2px 6px; box-sizing: border-box; font-size: 12px; color: var(--text-secondary); cursor: pointer; border-bottom: 1px solid var(--stroke-tertiary); margin-bottom: 2px; }
+  .menu .ic.badge { font-size: 9px; font-weight: 700; letter-spacing: .2px; line-height: 14px; height: 14px; min-width: 18px; padding: 0 3px; border-radius: 3px; text-align: center; background: color-mix(in srgb, var(--badge, #8b949e) 22%, transparent); color: var(--badge, #8b949e); flex: 0 0 auto; }
+  .menu .ic.slash { width: 16px; text-align: center; color: var(--amber); font-weight: 600; }
   .menu .item.sel .lbl { color: var(--fg); }
-  .menu .item .ic.badge { font-size: 9px; font-weight: 700; letter-spacing: .2px; line-height: 14px; height: 14px; min-width: 18px; padding: 0 3px; border-radius: 3px; background: color-mix(in srgb, var(--badge, #8b949e) 22%, transparent); color: var(--badge, #8b949e); }
-  .menu .item .ic.kind { color: var(--amber); }
-  .menu .item .ic.skill { color: var(--amber); font-weight: 600; }
   .menu .item .ic { width: 16px; text-align: center; color: var(--text-secondary); }
   .menu .item .lbl { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .menu .item .sub { color: var(--text-tertiary); font-size: var(--fs-xs); margin-left: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 200px; flex: 0 1 auto; }
@@ -1071,7 +1101,7 @@ function paneHtml(csp: string): string {
     <div id="review"><div class="head" id="review-head"><span class="chev">▶</span><span id="review-summary">1 file</span><span class="adds" id="review-adds">+0</span><span class="dels" id="review-dels">−0</span><span class="spacer"></span><button class="btn text" id="review-open" title="Review Changes editor">Review</button><button class="btn text" id="review-reject">Reject</button><button class="btn primary" id="review-accept">Accept</button></div><div class="files" id="review-files"></div></div>
     <div id="status"><span>Generating..</span><span class="stop" id="stop">Stop<kbd>⇧⌘⌫</kbd></span></div>
     <div id="composer">
-      <div class="ctxrow" id="ctxrow"><span class="ctx add" id="ctx-add">@ Add Context</span></div>
+      <div class="ctxrow" id="ctxrow"><span class="ctx add" id="ctx-add" title="Add context (@)"><span class="cod"></span>Add Context</span></div>
       <div class="inputwrap"><div id="backdrop"></div><textarea id="input" placeholder="Plan, search, build anything" rows="1"></textarea></div>
       <div class="bar">
         <span class="pill mode" id="mode-pill"><span id="mode-icon">∞</span><span class="lbl" id="mode-name">Agent</span><span class="chev">▼</span></span>
@@ -1275,7 +1305,7 @@ function paneHtml(csp: string): string {
     menu.classList.add("open");
     placeMenu(anchor);
   }
-  function closeMenu() { menu.classList.remove("open"); menuAnchor = null; }
+  function closeMenu() { menu.classList.remove("open"); menu.classList.remove("typeahead"); menuAnchor = null; }
   window.addEventListener("resize", () => { if (menuAnchor) placeMenu(menuAnchor); });
   messages.addEventListener("scroll", closeMenu);
   $("mode-pill").addEventListener("click", (e) => { e.stopPropagation(); openMenu("mode", e.currentTarget); });
@@ -1315,52 +1345,100 @@ function paneHtml(csp: string): string {
   }
   // Mentions light up like the Plan pill when they resolve; a chips row mirrors them with remove buttons (Cursor's context row).
   const TOKEN = /(^|\\s)(@[\\w./:-]+|\\/[\\w-]+)/g;
-  let tokenOk = new Set(), tokenBad = new Set(), validateTimer = null;
+  let tokenOk = new Set(), tokenBad = new Set();
   function tokensIn(text) { const out = []; let m; TOKEN.lastIndex = 0; while ((m = TOKEN.exec(text))) out.push(m[2]); return out; }
   function renderTokens() {
     const text = input.value;
-    let html = ""; let last = 0; TOKEN.lastIndex = 0; let m;
-    while ((m = TOKEN.exec(text))) { const start = m.index + m[1].length; html += escape(text.slice(last, start)) + '<mark class="' + (tokenBad.has(m[2]) ? "bad" : "") + '">' + escape(m[2]) + '</mark>'; last = start + m[2].length; }
+    // The token still being typed at the caret is not a mention yet (Cursor shows the pill once it is chosen).
+    const typing = triggerAt(); const typingEnd = typing ? input.selectionStart : -1;
+    let html = ""; let last = 0; TOKEN.lastIndex = 0; let m; const done = [];
+    while ((m = TOKEN.exec(text))) { const start = m.index + m[1].length; const end = start + m[2].length; if (end === typingEnd) continue; done.push(m[2]); html += escape(text.slice(last, start)) + '<mark class="' + (tokenBad.has(m[2]) ? "bad" : "") + '">' + escape(m[2]) + '</mark>'; last = end; }
     html += escape(text.slice(last)) + "\\n";
     $("backdrop").innerHTML = html; $("backdrop").scrollTop = input.scrollTop;
     const row = $("ctxrow"); [...row.querySelectorAll(".ctx:not(.add)")].forEach((c) => c.remove());
     const seen = new Set();
-    for (const t of tokensIn(text)) {
+    for (const t of done) {
       if (seen.has(t)) continue; seen.add(t);
       const chip = document.createElement("span"); chip.className = "ctx" + (tokenBad.has(t) ? " bad" : ""); chip.title = tokenBad.has(t) ? t + " (not found)" : t;
-      const label = t.startsWith("@image:") ? "🖼 " + t.split("/").pop() : t.startsWith("@") ? "@ " + t.slice(1).split("/").pop() : t;
-      chip.innerHTML = '<span class="n">' + escape(label) + '</span><span class="x" title="Remove">×</span>';
+      const body = t.slice(1); let icon, label;
+      if (t.startsWith("/")) { icon = cod("sparkle"); label = t; }
+      else if (body.startsWith("image:")) { icon = "🖼"; label = body.split("/").pop(); }
+      else if (body === "browser") { icon = cod("browser"); label = "Browser"; }
+      else if (body === "web") { icon = cod("globe"); label = "Web"; }
+      else if (body.startsWith("git:commit:")) { icon = cod("git-commit"); label = body.slice(11, 18); }
+      else if (body.startsWith("git:")) { icon = cod("git-branch"); label = body === "git:branch" ? "Branch" : "Working Tree"; }
+      else if (body.startsWith("terminal")) { icon = cod("terminal"); label = body.includes(":") ? body.slice(9) : "Terminal"; }
+      else if (body.startsWith("docs:")) { icon = cod("book"); label = body.slice(5); }
+      else if (body.startsWith("chat:")) { icon = cod("comment-discussion"); label = "Past chat"; }
+      else { const name = body.replace(/:\\d+-\\d+$/, "").split("/").pop() || body; icon = name.includes(".") ? badge(name.split(".").pop()) : cod("folder"); label = name + (/:\\d+-\\d+$/.test(body) ? body.slice(body.lastIndexOf(":")) : ""); }
+      chip.innerHTML = '<span class="ci">' + icon + '</span><span class="n">' + escape(label) + '</span><span class="x" title="Remove">' + String.fromCodePoint(COD.close) + '</span>';
       chip.querySelector(".x").addEventListener("click", () => { const re = new RegExp("(^|\\\\s)" + t.replace(/[.*+?^\${}()|[\\]\\\\/]/g, "\\\\$&") + "(?=\\\\s|$)"); input.value = input.value.replace(re, "$1").replace(/  +/g, " "); autosize(); input.focus(); });
       row.appendChild(chip);
     }
     const toks = [...seen].filter((t) => !tokenOk.has(t) && !tokenBad.has(t));
-    if (toks.length) { clearTimeout(validateTimer); validateTimer = setTimeout(() => vscode.postMessage({ type: "validate", tokens: toks }), 150); }
+    if (toks.length) vscode.postMessage({ type: "validate", tokens: toks });
   }
   input.addEventListener("scroll", () => { $("backdrop").scrollTop = input.scrollTop; });
+  $("ctx-add").querySelector(".cod").textContent = String.fromCodePoint(0xeb1f);
   $("ctx-add").addEventListener("click", () => { const at = input.selectionStart; const pre = input.value.slice(0, at); const needsSpace = pre && !/\\s$/.test(pre); input.value = pre + (needsSpace ? " @" : "@") + input.value.slice(at); const caret = pre.length + (needsSpace ? 2 : 1); input.setSelectionRange(caret, caret); input.focus(); input.dispatchEvent(new Event("input")); });
   function autosize() { input.style.height = "auto"; input.style.height = Math.min(240, Math.max(64, input.scrollHeight)) + "px"; $("backdrop").style.height = input.style.height; body.classList.toggle("dirty", input.value.trim().length > 0); renderTokens(); }
   function send() { let text = input.value.trim(); const mode = state && state.modes.find((m) => m.id === state.settings.mode); if (!text && mode && mode.id === "debug" && input.placeholder !== "Enter additional context about the issue") text = input.placeholder; if (!text || body.classList.contains("running")) return; vscode.postMessage({ type: "send", text }); input.value = ""; autosize(); }
-  // @ files and / skills: a popover while typing, filled by the extension.
-  let suggest = null, suggestTimer = null;
-  function triggerAt() { const upto = input.value.slice(0, input.selectionStart); const m = /(^|\\s)([@/])([\\w./-]*)$/.exec(upto); return m ? { kind: m[2] === "@" ? "file" : "skill", start: upto.length - m[3].length - 1, query: m[3] } : null; }
+  // @ mentions and / commands — Cursor's typeahead: an empty state with recent files and navigation rows into modes
+  // (Files & Folders, Past Chats, Docs, Terminals, Commits), one "Results" list while typing, highlighted matches,
+  // ↑/↓, Enter/Tab, → into a mode, Backspace out of it, Escape.
+  const COD = { folder: 0xea83, "comment-discussion": 0xeac7, "git-branch": 0xec6f, "git-commit": 0xeafc, terminal: 0xea85, globe: 0xeb01, book: 0xeaa4, browser: 0xeaae, "chevron-right": 0xeab6, "chevron-left": 0xeab5, close: 0xea76, mention: 0xeb1f, sparkle: 0xec10, history: 0xea82, tools: 0xeb6d, file: 0xea7b, "symbol-method": 0xea8c, search: 0xea6d, refresh: 0xeb37, "chat-sparkle": 0xec4f, link: 0xeb15, plug: 0xeb2d, extensions: 0xeae6, checklist: 0xeab3, "circle-slash": 0xeabd, robot: 0xec20, "git-pull-request": 0xea64, comment: 0xea6b, note: 0xeb26, "file-code": 0xeae9, play: 0xeb2c };
+  const cod = (name, cls) => '<span class="cod ' + (cls || "") + '">' + String.fromCodePoint(COD[name] || COD.file) + '</span>';
   const BADGE = { ts: "#519aba", tsx: "#519aba", js: "#cbcb41", jsx: "#cbcb41", mjs: "#cbcb41", cjs: "#cbcb41", json: "#cbcb41", md: "#519aba", mdx: "#519aba", css: "#a074c4", scss: "#f55385", html: "#e37933", py: "#519aba", go: "#519aba", rs: "#e37933", sh: "#4d5a5e", zsh: "#4d5a5e", yml: "#a074c4", yaml: "#a074c4", toml: "#8b949e", svg: "#f55385", png: "#f55385", jpg: "#f55385", swift: "#e37933", java: "#cc3e44", rb: "#cc3e44", sql: "#519aba", txt: "#8b949e", lock: "#8b949e" };
-  let suggestSeq = 0;
-  function suggestIcon(kind, it) {
-    if (kind === "skill") return '<span class="ic skill">/</span>';
-    if (it.group === "Files & Folders") { const ext = (it.label.includes(".") ? it.label.split(".").pop() : "").toLowerCase(); const color = BADGE[ext] || "#8b949e"; return '<span class="ic badge" style="--badge:' + color + '">' + escape((ext || "file").slice(0, 4).toUpperCase()) + '</span>'; }
-    return '<span class="ic kind">' + ({"Git":"⎇","Commits":"◦","Terminals":">_","Web":"◎","Docs":"▤","Past Chats":"…","Browser":"◫"}[it.group] || "▤") + '</span>';
-  }
-  function markSel() { if (!suggest) return; const els = menu.querySelectorAll(".item"); els.forEach((el, i) => el.classList.toggle("sel", i === suggest.index)); const cur = els[suggest.index]; if (cur) cur.scrollIntoView({ block: "nearest" }); }
-  function renderSuggestions(kind, items, seq) {
-    if (!suggest || suggest.kind !== kind || (seq !== undefined && seq !== suggestSeq)) return;
-    suggest.items = items; suggest.index = 0; menu.dataset.kind = "suggest"; menu.innerHTML = items.length ? "" : '<div class="note">No matches</div>';
-    let lastGroup = null; for (const it of items) { if (it.group && it.group !== lastGroup) { menu.insertAdjacentHTML("beforeend", '<div class="group">' + escape(it.group) + '</div>'); lastGroup = it.group; } menu.insertAdjacentHTML("beforeend", '<div class="item" data-insert="' + escape(it.insert) + '">' + suggestIcon(kind, it) + '<span class="lbl">' + escape(it.label) + '</span><span class="sub">' + escape(it.detail) + '</span></div>'); }
-    menu.querySelectorAll(".item").forEach((el, i) => { el.addEventListener("mousedown", (e) => { e.preventDefault(); acceptSuggestion(el.dataset.insert); }); el.addEventListener("mouseenter", () => { if (suggest) { suggest.index = i; markSel(); } }); });
+  const badge = (ext) => { ext = String(ext || "").toLowerCase(); const color = BADGE[ext] || "#8b949e"; return '<span class="ic badge" style="--badge:' + color + '">' + escape((ext || "file").slice(0, 4).toUpperCase()) + '</span>'; };
+  function menuIcon(it) { if (it.iconKind === "badge") return badge(it.icon); if (it.iconKind === "slash") return '<span class="ic slash">/</span>'; return cod(it.icon || "file", "ic"); }
+  function hl(label, query) { if (!query) return escape(label); const lower = label.toLowerCase(); let qi = 0, out = ""; for (let i = 0; i < label.length; i++) { if (qi < query.length && lower[i] === query[qi]) { out += '<span class="hl">' + escape(label[i]) + '</span>'; qi++; } else out += escape(label[i]); } return out; }
+  let suggest = null, suggestSeq = 0;
+  function triggerAt() { const upto = input.value.slice(0, input.selectionStart); const m = /(^|\\s)([@/])([\\w./:-]*)$/.exec(upto); return m ? { kind: m[2] === "@" ? "file" : "skill", start: upto.length - m[3].length - 1, query: m[3] } : null; }
+  // Posted on every keystroke, no timer: the extension answers from memory, stale replies are dropped by seq, and timers in an occluded window fire late.
+  function requestSuggestions() { if (!suggest) return; suggestSeq++; vscode.postMessage({ type: "suggest", kind: suggest.kind, query: suggest.query, mode: suggest.mode, seq: suggestSeq }); }
+  function markSel() { if (!suggest) return; const els = menu.querySelectorAll(".row"); els.forEach((el, i) => el.classList.toggle("sel", i === suggest.index)); const cur = els[suggest.index]; if (cur) cur.scrollIntoView({ block: "nearest" }); }
+  function closeSuggest() { suggest = null; menu.classList.remove("typeahead"); closeMenu(); }
+  function renderSuggestions(m) {
+    if (!suggest || suggest.kind !== m.kind || (m.seq !== undefined && m.seq !== suggestSeq)) return;
+    suggest.sections = m.sections || []; suggest.items = suggest.sections.flatMap((s) => s.items); suggest.index = 0; suggest.title = m.title || "";
+    menu.dataset.kind = "suggest"; menu.classList.add("typeahead"); menu.innerHTML = "";
+    if (suggest.mode !== "all") { const back = document.createElement("div"); back.className = "back"; back.innerHTML = cod("chevron-left") + '<span>' + escape(suggest.title) + '</span>'; back.addEventListener("mousedown", (e) => { e.preventDefault(); setMode("all"); }); menu.appendChild(back); }
+    if (!suggest.items.length) menu.insertAdjacentHTML("beforeend", '<div class="note">No results</div>');
+    const q = suggest.query.toLowerCase(); let flat = 0;
+    for (const sec of suggest.sections) {
+      if (sec.title) menu.insertAdjacentHTML("beforeend", '<div class="title">' + escape(sec.title) + '</div>');
+      for (const it of sec.items) {
+        const row = document.createElement("div"); row.className = "row"; row.dataset.i = String(flat++); row.title = it.insert || it.label;
+        row.innerHTML = menuIcon(it) + '<span class="text">' + hl(it.label, q) + '</span>' + (it.detail ? '<span class="secondary">' + escape(it.detail) + '</span>' : "") + (it.nav ? cod("chevron-right", "chev") : "");
+        row.addEventListener("mousedown", (e) => { e.preventDefault(); chooseSuggestion(it); });
+        row.addEventListener("mouseenter", () => { if (suggest) { suggest.index = Number(row.dataset.i); markSel(); } });
+        menu.appendChild(row);
+      }
+    }
     menu.classList.add("open"); placeMenu($("mode-pill")); markSel();
   }
-  function acceptSuggestion(insert) { if (!suggest) return; const end = input.selectionStart; input.value = input.value.slice(0, suggest.start) + insert + " " + input.value.slice(end); const caret = suggest.start + insert.length + 1; input.setSelectionRange(caret, caret); suggest = null; closeMenu(); autosize(); input.focus(); }
-  input.addEventListener("input", () => { autosize(); const t = triggerAt(); if (!t) { if (suggest) { suggest = null; closeMenu(); } return; } suggest = { ...t, items: suggest && suggest.items || [], index: suggest && suggest.index || 0 }; clearTimeout(suggestTimer); suggestTimer = setTimeout(() => { suggestSeq++; vscode.postMessage({ type: "suggest", kind: t.kind, query: t.query, seq: suggestSeq }); }, 40); });
-  input.addEventListener("keydown", (e) => { if (e.key === "Tab" && e.shiftKey) { e.preventDefault(); openMenu("mode", $("mode-pill")); return; } if (suggest && menu.classList.contains("open")) { if (e.key === "ArrowDown" || e.key === "ArrowUp") { e.preventDefault(); const n = suggest.items.length; if (n) { suggest.index = (suggest.index + (e.key === "ArrowDown" ? 1 : n - 1)) % n; markSel(); } return; } if (e.key === "Enter" || e.key === "Tab") { e.preventDefault(); const it = suggest.items[suggest.index] || suggest.items[0]; if (it) acceptSuggestion(it.insert); return; } if (e.key === "Escape") { suggest = null; closeMenu(); return; } } if (e.key === "Enter" && !e.shiftKey && !e.metaKey && !e.ctrlKey) { e.preventDefault(); send(); } });
+  // Entering or leaving a mode drops what was typed after the trigger (Cursor deletes that range too).
+  function setMode(mode) { if (!suggest) return; const caret = input.selectionStart; input.value = input.value.slice(0, suggest.start + 1) + input.value.slice(caret); input.setSelectionRange(suggest.start + 1, suggest.start + 1); suggest.query = ""; suggest.mode = mode; autosize(); requestSuggestions(); }
+  function chooseSuggestion(it) {
+    if (!suggest) return;
+    if (it.nav) { setMode(it.nav); return; }
+    if (it.action) { const end = input.selectionStart; input.value = input.value.slice(0, suggest.start) + input.value.slice(end); input.setSelectionRange(suggest.start, suggest.start); closeSuggest(); autosize(); vscode.postMessage({ type: "slashAction", id: it.action }); return; }
+    if (it.insert) acceptSuggestion(it.insert);
+  }
+  function acceptSuggestion(insert) { if (!suggest) return; const end = input.selectionStart; input.value = input.value.slice(0, suggest.start) + insert + " " + input.value.slice(end); const caret = suggest.start + insert.length + 1; input.setSelectionRange(caret, caret); closeSuggest(); autosize(); input.focus(); }
+  input.addEventListener("input", () => { autosize(); const t = triggerAt(); if (!t) { if (suggest) closeSuggest(); return; } const keep = suggest && suggest.kind === t.kind && suggest.start === t.start; suggest = { ...t, mode: keep ? suggest.mode : "all", items: keep ? suggest.items : [], sections: keep ? suggest.sections : [], index: keep ? suggest.index : 0, title: keep ? suggest.title : "" }; requestSuggestions(); });
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Tab" && e.shiftKey) { e.preventDefault(); openMenu("mode", $("mode-pill")); return; }
+    if (suggest && menu.classList.contains("open")) {
+      const n = suggest.items.length;
+      if (e.key === "ArrowDown" || e.key === "ArrowUp") { e.preventDefault(); if (n) { suggest.index = (suggest.index + (e.key === "ArrowDown" ? 1 : n - 1)) % n; markSel(); } return; }
+      if (e.key === "Enter" || e.key === "Tab") { e.preventDefault(); const it = suggest.items[suggest.index] || suggest.items[0]; if (it) chooseSuggestion(it); return; }
+      if (e.key === "ArrowRight") { const it = suggest.items[suggest.index]; if (it && it.nav) { e.preventDefault(); setMode(it.nav); return; } }
+      if (e.key === "Backspace" && suggest.query === "" && suggest.mode !== "all") { e.preventDefault(); setMode("all"); return; }
+      if (e.key === "Escape") { closeSuggest(); return; }
+    }
+    if (e.key === "Enter" && !e.shiftKey && !e.metaKey && !e.ctrlKey) { e.preventDefault(); send(); }
+  });
   $("send").addEventListener("click", send);
   $("attach").addEventListener("click", () => vscode.postMessage({ type: "attach" }));
   $("stop").addEventListener("click", () => vscode.postMessage({ type: "stop" }));
@@ -1419,7 +1497,8 @@ function paneHtml(csp: string): string {
     else if (m.type === "review") { renderReview(m.files); }
     else if (m.type === "threads") { threads = m.items; renderHistory(); }
     else if (m.type === "board") { renderBoard(m.columns); }
-    else if (m.type === "suggestions") { renderSuggestions(m.kind, m.items, m.seq); }
+    else if (m.type === "suggestions") { renderSuggestions(m); }
+    else if (m.type === "setInput") { input.focus(); input.value = m.text; input.setSelectionRange(m.text.length, m.text.length); input.dispatchEvent(new Event("input")); setTimeout(() => vscode.postMessage({ type: "probed", seq: suggestSeq, query: suggest ? suggest.query : null, mode: suggest ? suggest.mode : null, title: menu.classList.contains("typeahead") ? (menu.querySelector(".back span") || {}).textContent || "" : "", rows: [...menu.querySelectorAll(".typeahead .row, .row")].filter((r) => menu.classList.contains("open")).map((r) => ({ text: (r.querySelector(".text") || {}).textContent || "", sel: r.classList.contains("sel"), icon: (r.querySelector(".ic, .cod") || {}).className || "" })), chips: [...$("ctxrow").querySelectorAll(".ctx:not(.add)")].map((e) => ({ t: e.title, bad: e.classList.contains("bad") })), marks: [...$("backdrop").querySelectorAll("mark")].map((e) => ({ t: e.textContent, bad: e.classList.contains("bad") })) }), 700); }
     else if (m.type === "validated") { for (const t of m.ok) { tokenOk.add(t); tokenBad.delete(t); } for (const t of m.bad) { tokenBad.add(t); tokenOk.delete(t); } renderTokens(); }
     else if (m.type === "openModeMenu") { openMenu("mode", $("mode-pill")); }
     else if (m.type === "insert") { const at = input.selectionStart; input.value = input.value.slice(0, at) + m.text + input.value.slice(at); input.setSelectionRange(at + m.text.length, at + m.text.length); autosize(); input.focus(); }

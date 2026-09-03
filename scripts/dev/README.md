@@ -7,4 +7,4 @@ All talk to a running Muster Code launched with `MUSTER_CODE_DEV_SOCK=/tmp/mc-de
 - `mcp-test.py` — the browser-tools regression: navigate, click, type+submit, select, hover, link click, back, reload, bad port, bad ref. Serve the test site first: `cd scripts/dev/site && python3 -m http.server 8765 --bind 127.0.0.1`.
 - `site/` — the test page (`#btn` writes to `#out`, console log/warn/error on load, `data-source` on `.lead` for the picker).
 
-Dev-socket commands: `state`, `text`, `pane` (state; `input` sets composer text), `suggest` (kind/query → items + ms), `expand`, `threads`, `query`, `exec`, `chat` (text/mode/newTab/access/thread/build/buildModel), `event`.
+Dev-socket commands: `state`, `text`, `pane` (state; `input` types into the composer and `probe` then reports the rendered menu rows, chips and marks — wait ~2 s, timers in an occluded window are throttled), `suggest` (kind/query → items + ms), `expand`, `threads`, `query`, `exec`, `chat` (text/mode/newTab/access/thread/build/buildModel), `event`.

@@ -3,11 +3,12 @@
 // Past Chats, Web, images. Tokens stay in the prompt (the model sees what was
 // meant); their contents are appended as <context> blocks.
 import * as vscode from "vscode";
+import { homedir } from "node:os";
 import { execFile } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { listThreads, readHistory, threadsForWorkspace } from "./codex.js";
+import { formatAge, listThreads, readHistory, threadsForWorkspace } from "./codex.js";
 import type { BrowserPick } from "./browser.js";
 
 // ── browser: the last picked element / screenshot, and the live page context from the workbench guest ──
@@ -29,6 +30,10 @@ const run = promisify(execFile);
 const MAX_LINES = 300;
 
 export interface Suggestion { readonly label: string; readonly detail: string; readonly insert: string; readonly group?: string }
+/** One row of the composer typeahead (Cursor's mention menu): a mention to insert, a navigation row into a mode, or an action. */
+export interface MenuItem { readonly id: string; readonly label: string; readonly detail: string; readonly insert?: string; readonly icon: string; readonly iconKind: "cod" | "badge" | "slash"; readonly nav?: string; readonly action?: string }
+export interface MenuSection { readonly title: string; readonly items: MenuItem[] }
+export interface MenuData { readonly mode: string; readonly title: string; readonly sections: MenuSection[] }
 
 // ── terminals: a ring buffer of what each terminal printed (terminalDataWriteEvent) ──
 const terminalBuffers = new Map<vscode.Terminal, string>();
@@ -81,10 +86,10 @@ async function docText(cwd: string, name: string): Promise<string | undefined> {
   } catch { return undefined; }
 }
 
-// ── suggestions for the "@" popover ──
-// The popover must answer within a keystroke: files come from an in-memory index (refreshed in the
-// background), commits from a short-lived cache, past chats from the last listing — never a process spawn.
-const index = { files: [] as string[], at: 0, building: null as Promise<void> | null, log: [] as string[], logAt: 0, chats: [] as Suggestion[], chatsAt: 0, chatsBuilding: false };
+// ── the "@" typeahead (Cursor's mention menu) ──
+// Answers within a keystroke: files from an in-memory index (refreshed in the background), commits from a
+// short-lived cache, past chats from the last listing — never a process spawn on the keystroke path.
+const index = { files: [] as string[], at: 0, building: null as Promise<void> | null, log: [] as string[], logAt: 0, chats: [] as MenuItem[], chatsAt: 0, chatsBuilding: false };
 async function fileIndex(): Promise<string[]> {
   if (Date.now() - index.at > 45_000 || !index.files.length) {
     index.building ??= (async () => {
@@ -103,38 +108,116 @@ function score(rel: string, q: string): number {
   return i === q.length ? 30 - tie : -1;
 }
 export function refreshMentionIndex(): void { index.at = 0; void fileIndex(); }
+const openFiles = () => vscode.window.tabGroups.all.flatMap((g) => g.tabs).map((t) => (t.input as { uri?: vscode.Uri })?.uri).filter((u): u is vscode.Uri => !!u && u.scheme === "file").map((u) => vscode.workspace.asRelativePath(u)).filter((r) => !r.startsWith(".."));
+const fileItem = (r: string): MenuItem => { const name = r.split("/").pop() ?? r; const dir = r.includes("/") ? r.slice(0, r.lastIndexOf("/")) : ""; return { id: `f:${r}`, label: name, detail: dir, insert: `@${r}`, icon: name.includes(".") ? name.split(".").pop()! : "file", iconKind: "badge" }; };
+const rankedFiles = (all: string[], q: string, limit: number) => all.map((r) => [score(r, q), r] as const).filter(([s]) => s >= 0).sort((a, b) => b[0] - a[0]).slice(0, limit).map(([, r]) => r);
+function refreshChats(cwd: string): MenuItem[] {
+  if (Date.now() - index.chatsAt > 60_000 && !index.chatsBuilding) {
+    index.chatsBuilding = true;
+    void listThreads().then((threads) => { index.chats = threadsForWorkspace(threads, [cwd]).slice(0, 20).map((t) => ({ id: `c:${t.id}`, label: t.name, detail: `${t.turnCount} turns · ${formatAge(t.lastActivityAt)}`, insert: `@chat:${t.id}`, icon: "comment-discussion", iconKind: "cod" as const })); index.chatsAt = Date.now(); }).finally(() => { index.chatsBuilding = false; });
+  }
+  return index.chats;
+}
+async function commits(cwd: string): Promise<MenuItem[]> {
+  if (Date.now() - index.logAt > 15_000) { index.log = (await git(cwd, ["log", "--oneline", "-12"])).split("\n").filter(Boolean); index.logAt = Date.now(); }
+  return index.log.map((line) => { const [sha, ...rest] = line.split(" "); return { id: `g:${sha}`, label: rest.join(" ").slice(0, 60), detail: sha ?? "", insert: `@git:commit:${sha}`, icon: "git-commit", iconKind: "cod" as const }; });
+}
+const matches = (it: MenuItem, q: string) => !q || it.label.toLowerCase().includes(q) || it.detail.toLowerCase().includes(q) || (it.insert ?? "").toLowerCase().includes(q);
 
-export async function suggestMentions(cwd: string, query: string): Promise<Suggestion[]> {
+/** Menu data for a query and mode ("all", or a category entered from a navigation row). */
+export async function suggestMentions(cwd: string, query: string, mode = "all"): Promise<MenuData> {
   const q = query.toLowerCase();
-  const out: Suggestion[] = [];
   const all = await fileIndex();
-  const open = vscode.window.tabGroups.all.flatMap((g) => g.tabs).map((t) => (t.input as { uri?: vscode.Uri })?.uri).filter((u): u is vscode.Uri => !!u && u.scheme === "file").map((u) => vscode.workspace.asRelativePath(u)).filter((r) => !r.startsWith(".."));
-  const files = q
-    ? all.map((r) => [score(r, q), r] as const).filter(([s]) => s >= 0).sort((a, b) => b[0] - a[0]).slice(0, 12).map(([, r]) => r)
-    : [...new Set([...open, ...all])].slice(0, 8);
-  for (const r of files) out.push({ group: "Files & Folders", label: r.split("/").pop() ?? r, detail: r, insert: `@${r}` });
-  const fixed: Suggestion[] = [
-    { group: "Git", label: "Branch (Diff with Main)", detail: "changes on this branch vs the default branch", insert: "@git:branch" },
-    { group: "Git", label: "Working tree diff", detail: "uncommitted changes", insert: "@git:diff" },
-    { group: "Terminals", label: "Terminal", detail: vscode.window.activeTerminal ? `last output of ${vscode.window.activeTerminal.name}` : "last output of the active terminal", insert: "@terminal" },
-    { group: "Web", label: "Web", detail: "ask the agent to search the web", insert: "@web" },
-    { group: "Browser", label: "Browser", detail: "the open browser tab: page, selected element, console", insert: "@browser" },
+  const open = openFiles();
+  const docs = docsList().map((d): MenuItem => ({ id: `d:${d.name}`, label: d.name, detail: d.url.replace(/^https?:\/\//, "").slice(0, 40), insert: `@docs:${d.name}`, icon: "book", iconKind: "cod" }));
+  const terminals = vscode.window.terminals.map((t): MenuItem => ({ id: `t:${t.name}`, label: t.name, detail: t === vscode.window.activeTerminal ? "active terminal" : "terminal", insert: t === vscode.window.activeTerminal ? "@terminal" : `@terminal:${t.name}`, icon: "terminal", iconKind: "cod" }));
+  const browser = browserProvider?.();
+  const direct: MenuItem[] = [
+    { id: "branch", label: "Branch (Diff with Main)", detail: "", insert: "@git:branch", icon: "git-branch", iconKind: "cod" },
+    { id: "diff", label: "Working Tree", detail: "uncommitted changes", insert: "@git:diff", icon: "git-branch", iconKind: "cod" },
+    { id: "web", label: "Web", detail: "search the web", insert: "@web", icon: "globe", iconKind: "cod" },
+    ...(browser ? [{ id: "browser", label: "Browser", detail: (browser.title || browser.url || "").slice(0, 40), insert: "@browser", icon: "browser", iconKind: "cod" as const }] : []),
   ];
-  for (const d of docsList()) fixed.push({ group: "Docs", label: d.name, detail: d.url, insert: `@docs:${d.name}` });
-  if (!query || /^(git|com|log)/.test(q)) {
-    if (Date.now() - index.logAt > 15_000) { index.log = (await git(cwd, ["log", "--oneline", "-8"])).split("\n").filter(Boolean); index.logAt = Date.now(); }
-    for (const line of index.log) { const [sha, ...rest] = line.split(" "); out.push({ group: "Commits", label: rest.join(" ").slice(0, 60), detail: sha ?? "", insert: `@git:commit:${sha}` }); }
+  const chats = refreshChats(cwd);
+  switch (mode) {
+    case "files": return { mode, title: "Files & Folders", sections: [{ title: "", items: (q ? rankedFiles(all, q, 15) : [...new Set([...open, ...all])].slice(0, 15)).map(fileItem) }] };
+    case "chats": return { mode, title: "Past Chats", sections: [{ title: "", items: chats.filter((c) => matches(c, q)).slice(0, 12) }] };
+    case "docs": return { mode, title: "Docs", sections: [{ title: "", items: docs.filter((d) => matches(d, q)) }] };
+    case "terminals": return { mode, title: "Terminals", sections: [{ title: "", items: terminals.filter((t) => matches(t, q)) }] };
+    case "commits": return { mode, title: "Commits", sections: [{ title: "", items: (await commits(cwd)).filter((c) => matches(c, q)) }] };
+    default: {
+      if (!q) {
+        // Cursor's empty state: a few recent files on top, then the categories as navigation rows and the direct kinds.
+        const top = [...new Set(open)].slice(0, 3).map(fileItem);
+        const nav: MenuItem[] = [
+          { id: "nav:files", label: "Files & Folders", detail: "", icon: "folder", iconKind: "cod", nav: "files" },
+          { id: "nav:chats", label: "Past Chats", detail: "", icon: "comment-discussion", iconKind: "cod", nav: "chats" },
+          ...(docs.length ? [{ id: "nav:docs", label: "Docs", detail: "", icon: "book", iconKind: "cod" as const, nav: "docs" }] : []),
+          ...(terminals.length ? [{ id: "nav:terminals", label: "Terminals", detail: "", icon: "terminal", iconKind: "cod" as const, nav: "terminals" }] : []),
+          { id: "nav:commits", label: "Commits", detail: "", icon: "git-commit", iconKind: "cod", nav: "commits" },
+        ];
+        return { mode: "all", title: "Mentions", sections: [...(top.length ? [{ title: "", items: top }] : []), { title: "", items: [...nav, ...direct] }] };
+      }
+      const items: MenuItem[] = [
+        ...rankedFiles(all, q, 8).map(fileItem),
+        ...direct.filter((d) => matches(d, q)),
+        ...docs.filter((d) => matches(d, q)).slice(0, 3),
+        ...terminals.filter((t) => matches(t, q)).slice(0, 3),
+        ...chats.filter((c) => matches(c, q)).slice(0, 3),
+        ...(/^[0-9a-f]{3,}$/.test(q) || /^(git|com|log)/.test(q) ? (await commits(cwd)).filter((c) => matches(c, q)).slice(0, 3) : []),
+      ];
+      return { mode: "all", title: "Results", sections: [{ title: "Results", items }] };
+    }
   }
-  if (!query || /^(chat|past)/.test(q)) {
-    if (Date.now() - index.chatsAt > 60_000 && !index.chatsBuilding) { index.chatsBuilding = true; void listThreads().then((threads) => { index.chats = threadsForWorkspace(threads, [cwd]).slice(0, 5).map((t) => ({ group: "Past Chats", label: t.name, detail: `${t.turnCount} turns`, insert: `@chat:${t.id}` })); index.chatsAt = Date.now(); }).finally(() => { index.chatsBuilding = false; }); }
-    out.push(...index.chats);
-  }
-  for (const s of fixed) if (!query || s.label.toLowerCase().includes(q) || s.insert.includes(q)) out.push(s);
-  return out.slice(0, 40);
+}
+
+// ── the "/" typeahead: commands, custom commands, skills ──
+export interface CustomCommand { readonly name: string; readonly path: string; readonly source: "project" | "user"; readonly subdir?: string; readonly description: string }
+const commandCache = { at: 0, cwd: "", list: [] as CustomCommand[] };
+/** `.cursor/commands`, `.claude/commands`, `.muster/commands` in the workspace and the home directory (*.md / *.txt), the way Cursor loads them. */
+export function listCommands(cwd: string): CustomCommand[] {
+  if (commandCache.cwd === cwd && Date.now() - commandCache.at < 30_000) return commandCache.list;
+  const out: CustomCommand[] = [];
+  const dirs = [".cursor/commands", ".claude/commands", ".muster/commands"];
+  const roots: { dir: string; source: "project" | "user" }[] = [...dirs.map((d) => ({ dir: join(cwd, d), source: "project" as const })), ...dirs.map((d) => ({ dir: join(homedir(), d), source: "user" as const }))];
+  const walk = (dir: string, rel: string, source: "project" | "user") => {
+    let entries: string[] = []; try { entries = readdirSync(dir); } catch { return; }
+    for (const e of entries) {
+      const full = join(dir, e); let st; try { st = statSync(full); } catch { continue; }
+      if (st.isDirectory()) { walk(full, rel ? `${rel}/${e}` : e, source); continue; }
+      if (!/\.(md|txt)$/i.test(e)) continue;
+      const name = e.replace(/\.(md|txt)$/i, "");
+      if (out.some((c) => c.name === name)) continue;
+      let description = ""; try { const text = readFileSync(full, "utf8"); const fm = /^---\n([\s\S]*?)\n---/.exec(text); const d = fm && /^description:\s*(.+)$/m.exec(fm[1]!); description = (d?.[1] ?? text.replace(/^---[\s\S]*?---\s*/, "").split("\n").find((l) => l.trim()) ?? "").replace(/^#+\s*/, "").trim().slice(0, 80); } catch { /* unreadable */ }
+      out.push({ name, path: full, source, ...(rel ? { subdir: rel } : {}), description });
+    }
+  };
+  for (const r of roots) walk(r.dir, "", r.source);
+  commandCache.at = Date.now(); commandCache.cwd = cwd; commandCache.list = out;
+  return out;
+}
+export function suggestSlash(cwd: string, query: string, skills: { name: string; description: string }[]): MenuData {
+  const q = query.toLowerCase();
+  const builtins: MenuItem[] = [
+    { id: "reset", label: "Reset", detail: "Start a new chat", icon: "refresh", iconKind: "cod", action: "reset" },
+    { id: "summarize", label: "Summarize", detail: "Summarize the chat so far", icon: "note", iconKind: "cod", action: "summarize" },
+    { id: "review", label: "Agent Review", detail: "Review the working tree changes", icon: "checklist", iconKind: "cod", action: "review" },
+    { id: "browser", label: "Open Browser", detail: "Open a browser tab", icon: "browser", iconKind: "cod", action: "browser" },
+  ];
+  const custom = listCommands(cwd).map((c): MenuItem => ({ id: `cmd:${c.path}`, label: `/${c.name}`, detail: c.description || (c.subdir ? `/${c.subdir}` : c.source === "project" ? "Project" : "User"), insert: `/${c.name}`, icon: "play", iconKind: "cod" }));
+  const skillItems = skills.map((s): MenuItem => ({ id: `skill:${s.name}`, label: `/${s.name}`, detail: s.description, insert: `/${s.name}`, icon: "sparkle", iconKind: "cod" }));
+  const sections: MenuSection[] = [
+    { title: "Commands", items: [...builtins, ...custom].filter((it) => matches(it, q)).slice(0, 12) },
+    { title: "Skills", items: skillItems.filter((it) => matches(it, q)).slice(0, 12) },
+  ].filter((sec) => sec.items.length);
+  return { mode: "all", title: "Commands", sections };
 }
 
 // ── expansion: every mention kind becomes a context block ──
 export async function expandContext(prompt: string, cwd: string): Promise<{ prompt: string; images: string[] }> {
+  // A leading /command from .cursor|.claude|.muster/commands becomes its file content ($ARGUMENTS or appended arguments).
+  const slash = /^\s*\/([\w:-]+)(?:\s+([\s\S]*))?$/.exec(prompt);
+  if (slash) { const cmd = listCommands(cwd).find((c) => c.name === slash[1]); if (cmd) { try { const body = readFileSync(cmd.path, "utf8").replace(/^---[\s\S]*?---\s*/, ""); const args = slash[2]?.trim() ?? ""; prompt = body.includes("$ARGUMENTS") ? body.replace(/\$ARGUMENTS/g, args) : args ? `${body}\n\n${args}` : body; } catch { /* keep the prompt */ } } }
   const blocks: string[] = [];
   const images: string[] = [];
   const clip = (text: string, path = "") => { const lines = text.split("\n"); return `${lines.slice(0, MAX_LINES).join("\n")}${lines.length > MAX_LINES ? `\n… (${lines.length - MAX_LINES} more lines${path ? ` in ${path}` : ""})` : ""}`; };

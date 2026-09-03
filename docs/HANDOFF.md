@@ -152,3 +152,4 @@ i. **Agents window / board (V2)**, **browser** (T3-style preview MCP + screensho
 - The webview script check must gate the build: a broken template escape reached the app twice. Pipeline: `tsc` → webview `node --check` → `esbuild` → swap → reload; each step `|| exit 1`.
 - Popover data must be in-memory: no `findFiles`, `git`, or app-server spawn on the keystroke path (`{"cmd":"suggest"}` measures it).
 - Real Codex turns cost the user's plan; verify with the shim harness first, and run one confirming turn only for provider-side behaviour.
+- Never debounce with `setTimeout` in the pane webview: an occluded window gets 1 s-aligned timers (measured 130–640 ms late). Post immediately and guard with a sequence number; the harness composer probe needs ~2 s waits for the same reason.
