@@ -444,6 +444,9 @@
   Registry.registerCommand("muster.browser.screenshot", (accessor, args) => { const b = browsers.get(args.id); if (b) return screenshot(b); });
   Registry.registerCommand("muster.browser.context", async (accessor, args) => { const b = args && args.id ? browsers.get(args.id) : [...browsers.values()].find((x) => x.shown) || [...browsers.values()][0]; if (!b) return null; const info = await mb({ type: "url", id: b.id }).catch(() => null); return { id: b.id, url: (info && info.url) || b.url, title: (info && info.title) || b.title }; });
   Registry.registerCommand("muster.browser.eval", (accessor, args) => mb({ type: "eval", id: args.id, js: String(args.js) }));
+  Registry.registerCommand("muster.browser.capture", (accessor, args) => mb({ type: "capture", id: args.id }));
+  Registry.registerCommand("muster.browser.waitLoad", (accessor, args) => mb({ type: "waitLoad", id: args.id, timeout: args.timeout }));
+  Registry.registerCommand("muster.browser.input", (accessor, args) => mb({ type: "input", id: args.id, event: args.event }));
   Registry.registerCommand("muster.browser.probe", async (accessor, args) => { const b = browsers.get(args.id); const main = await mb({ type: "probe", id: args.id }).catch((e) => ({ error: String(e) })); return { ipc: !!ipc(), frame: b ? hostFrame(b) : null, renderer: b ? { ready: b.ready, shown: b.shown, rel: b.rel, visible: b.visible, bounds: b.bounds } : null, main }; });
   const browserObserver = new MutationObserver(() => layoutBrowsers());
   browserObserver.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["class", "style"] });

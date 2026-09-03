@@ -24,6 +24,9 @@ await build({
   logLevel: "warning",
 });
 
+// The browser MCP shim Codex launches over stdio (no vscode import; runs under ELECTRON_RUN_AS_NODE).
+await build({ entryPoints: ["src/browser-mcp.ts"], bundle: true, platform: "node", format: "cjs", target: "node22", outfile: `${out}/browser-mcp.js`, logLevel: "warning" });
+
 const manifest = JSON.parse(readFileSync("package.json", "utf8"));
 delete manifest.scripts;
 delete manifest.devDependencies;

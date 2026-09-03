@@ -143,3 +143,12 @@ i. **Agents window / board (V2)**, **browser** (T3-style preview MCP + screensho
 1. Before building a surface, mine Cursor's bundle for it (strings → component → CSS rules → tokens); record the facts in `docs/`.
 2. Build; typecheck + unit-test; hot-swap; reload via the socket; drive it via `replay`/`exec`; screenshot; compare with the Cursor frame; iterate. Claim only what the screenshot shows.
 3. Commit small, push to `musterhq/muster-code` main; keep `docs/cursor-parity-spec.md` statuses current.
+
+## Rules learned — 2026-09-03 (browser tools, composer)
+- Code-OSS's main process guards every new webContents with `will-navigate` → `preventDefault()`; a browser view must `removeAllListeners("will-navigate")` (now + `setImmediate` + first `did-start-loading`) or links never work.
+- `loadURL` to the URL a view already shows returns before the new document commits; never poll `document.readyState` after navigating — await `did-finish-load`/`did-stop-loading` in the main process (`awaitLoad`).
+- Static dev servers (python `http.server`) serve stale pages from Chromium's heuristic cache; localhost requests get `Cache-Control: max-age=0` and reload uses `reloadIgnoringCache()`.
+- Codex spawns MCP servers itself; hand it a launcher script with the environment baked in (temp dir, per window), never a bare Electron binary that depends on `ELECTRON_RUN_AS_NODE` from config. With tool search enabled Codex calls MCP tools from its `exec` runtime (a separate process); trace the shim (`<sock>.log`) to see whether calls arrive.
+- The webview script check must gate the build: a broken template escape reached the app twice. Pipeline: `tsc` → webview `node --check` → `esbuild` → swap → reload; each step `|| exit 1`.
+- Popover data must be in-memory: no `findFiles`, `git`, or app-server spawn on the keystroke path (`{"cmd":"suggest"}` measures it).
+- Real Codex turns cost the user's plan; verify with the shim harness first, and run one confirming turn only for provider-side behaviour.

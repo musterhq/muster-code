@@ -81,6 +81,18 @@ export async function readHistory(thread: CodexThread): Promise<readonly CodexTr
 }
 
 /** One turn on an existing thread (or a new one when threadId is undefined). */
+// The Muster browser as MCP tools for the agent (browser-mcp.js), launched by the app-server process itself.
+let browserMcp: { command: string; args: string[]; env: Record<string, string> } | null = null;
+export function setBrowserMcp(config: { command: string; args: string[]; env: Record<string, string> } | null): void { browserMcp = config; }
+/** Around every agent turn: the browser lock banner and "Take control" reset live here. */
+export const turnHooks: { start?: () => void; end?: () => void } = {};
+const BROWSER_NOTE = "The IDE has a built-in browser tab that the user is looking at. Whenever you need a browser (\"open the site\", \"check the page\", \"click\", reproducing or verifying UI work, reading console errors), use the muster_browser MCP tools — browser_navigate, browser_snapshot, browser_click, browser_type, browser_press_key, browser_hover, browser_select_option, browser_screenshot, browser_console_messages, browser_evaluate, browser_wait_for, browser_go_back, browser_reload, browser_tabs — and not other browser automation or computer-use tools unless the user explicitly asks for those. Flow: browser_navigate, read the snapshot, act on the [ref=eN] handles, re-snapshot.";
+function browserOverrides(): string[] {
+  if (!browserMcp) return [];
+  const env = Object.entries(browserMcp.env).map(([k, v]) => `${k} = ${JSON.stringify(v)}`).join(", ");
+  return [`mcp_servers.muster_browser.command=${JSON.stringify(browserMcp.command)}`, `mcp_servers.muster_browser.args=${JSON.stringify(browserMcp.args)}`, ...(env ? [`mcp_servers.muster_browser.env={ ${env} }`] : [])];
+}
+
 export async function runTurn(input: {
   readonly prompt: string;
   readonly cwd: string;
@@ -99,6 +111,9 @@ export async function runTurn(input: {
   readonly images?: readonly string[];
   readonly handlers: CodexTurnHandlers;
 }): Promise<CodexTurnResult> {
+  const instructions = [input.rules ?? "", browserMcp ? BROWSER_NOTE : ""].filter(Boolean).join("\n\n");
+  turnHooks.start?.();
+  try {
   const result = await runCodexAppServer({
     prompt: input.prompt,
     cwd: input.cwd,
@@ -108,7 +123,7 @@ export async function runTurn(input: {
     cacheKey: input.conversation ? `conv:${input.conversation}` : input.threadId ? `thread:${input.threadId}` : `new:${input.cwd}:${Date.now().toString(36)}`,
     ...(input.model ? { model: input.model } : {}),
     ...(input.reasoning ? { reasoning: input.reasoning } : {}),
-    ...(input.rules ? { developerInstructions: input.rules } : {}),
+    ...(instructions ? { developerInstructions: instructions } : {}),
     ...(input.images?.length ? { images: input.images } : {}),
     sandbox: input.access?.sandbox ?? "workspace-write",
     ...(input.access ? { approvalPolicy: input.access.approvalPolicy } : {}),
@@ -116,7 +131,7 @@ export async function runTurn(input: {
     ...(input.mode && input.model ? { collaborationMode: { mode: input.mode, settings: { model: input.model, ...(input.reasoning ? { reasoning_effort: input.reasoning } : {}) } } } : {}),
     transportOwner: TRANSPORT_OWNER,
     keepAlive: true,
-    configOverrides: ['model_reasoning_summary="detailed"'],
+    configOverrides: ['model_reasoning_summary="detailed"', ...browserOverrides()],
     onDelta: input.handlers.onDelta,
     onReasoningDelta: input.handlers.onReasoning,
     ...(input.handlers.onEvent ? { onEvent: input.handlers.onEvent } : {}),
@@ -129,6 +144,7 @@ export async function runTurn(input: {
     ...(result.errorMessage ? { errorMessage: result.errorMessage } : {}),
     ...(result.tokenUsage ? { tokenUsage: result.tokenUsage } : {}),
   };
+  } finally { turnHooks.end?.(); }
 }
 
 export function interruptTurn(): Promise<boolean> {

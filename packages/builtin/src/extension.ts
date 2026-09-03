@@ -3,7 +3,9 @@
 // the default chat participant + models (native chat kept as plumbing for
 // inline chat / chat editing), and Cursor's status-bar cluster.
 import * as vscode from "vscode";
-import { formatAge, formatSize, interruptTurn, listThreads, readHistory, runTurn, threadsForWorkspace, type CodexThread } from "./codex.js";
+import { formatAge, formatSize, interruptTurn, listThreads, readHistory, runTurn, setBrowserMcp, threadsForWorkspace, turnHooks, type CodexThread } from "./codex.js";
+import { BrowserToolServer } from "./browser-tools.js";
+import { join as joinPath } from "node:path";
 import { AgentPane } from "./agent-pane.js";
 import { LiveEditController } from "./live-edit.js";
 import { startDevControl } from "./dev-control.js";
@@ -250,6 +252,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   setBrowserProvider(() => { const id = browser.activeEditorBrowser() ?? pane.activeBrowserId() ?? browser.list()[0]?.id; const st = id ? browser.get(id) : undefined; return st ? { url: st.url, title: st.title, console: st.console } : undefined; });
   browser.onChange((state) => pane.browserChanged(state));
   browser.onPick((pick) => { if (pick.imagePath || !pick.picked) void pane.addBrowserPick(pick); });
+  // The browser as agent tools: Codex launches our MCP shim, which calls back into this host over a socket.
+  const browserTools = new BrowserToolServer(browser, () => browser.activeEditorBrowser() ?? pane.activeBrowserId(), (url) => { pane.openBrowserTab(url); return browser.list().at(-1); }, (line) => output.appendLine(line));
+  browserTools.start(joinPath(context.extensionPath, "browser-mcp.js")); context.subscriptions.push(browserTools);
+  setBrowserMcp({ command: browserTools.launcherPath, args: [], env: {} });
+  turnHooks.start = () => browserTools.turnStarted(); turnHooks.end = () => browserTools.turnEnded();
+  output.appendLine(`browser tools listening on ${browserTools.socketPath} (shim: ${browserTools.launcherPath})`);
   context.subscriptions.push(vscode.commands.registerCommand("muster.browser.openTab", async (url?: string) => { const target = typeof url === "string" ? url : await vscode.window.showInputBox({ prompt: "Open Browser", value: browser.defaultUrl(), placeHolder: "Enter URL or search..." }); if (!target) return; if (config().get<string>("browser.location", "editor") === "pane") pane.openBrowserTab(target); else browser.open(target, "editor"); }));
   context.subscriptions.push(vscode.commands.registerCommand("muster.browser.reloadActive", () => { const id = browser.activeEditorBrowser() ?? pane.activeBrowserId(); if (id) browser.action(id, "reload"); }));
   context.subscriptions.push(vscode.commands.registerCommand("muster.browser.pickActive", () => { const id = browser.activeEditorBrowser() ?? pane.activeBrowserId(); if (id) browser.action(id, "pick"); }));

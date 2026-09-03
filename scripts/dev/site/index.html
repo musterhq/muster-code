@@ -1,0 +1,20 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Muster Browser Test</title>
+<style>body{font:16px system-ui;margin:40px;color:#222} .lead{color:#555} nav a{margin-right:12px} #out{margin-top:16px;padding:8px;background:#f3f3f3;border-radius:6px;min-height:24px}</style></head>
+<body>
+<h1>Hello from the test site</h1>
+<nav><a href="#about" id="about-link">About</a><a href="/page2.html">Page two</a></nav>
+<p class="lead" data-source="README.md:3">A paragraph to pick.</p>
+<button id="btn">Click me</button>
+<label>Search <input id="q" placeholder="Search"></label>
+<label>Color <select id="color"><option value="r">Red</option><option value="g">Green</option><option value="b">Blue</option></select></label>
+<div id="hover" style="padding:6px;border:1px solid #ccc;width:120px">Hover me</div>
+<div id="out">(nothing yet)</div>
+<script>
+  console.log("page booted"); console.warn("a warning"); setTimeout(() => console.error("late error"), 300);
+  const out = document.getElementById("out"); const say = (t) => { out.textContent = t; console.log("out: " + t); };
+  document.getElementById("btn").addEventListener("click", () => say("button clicked"));
+  document.getElementById("q").addEventListener("keydown", (e) => { if (e.key === "Enter") say("searched for " + e.target.value); });
+  document.getElementById("q").addEventListener("input", (e) => console.log("input: " + e.target.value));
+  document.getElementById("color").addEventListener("change", (e) => say("color " + e.target.value));
+  document.getElementById("hover").addEventListener("mouseenter", () => say("hovered"));
+</script></body></html>

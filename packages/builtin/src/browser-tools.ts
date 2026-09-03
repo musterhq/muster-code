@@ -6,7 +6,7 @@
 import * as vscode from "vscode";
 import { createServer, type Server } from "node:net";
 import { createInterface } from "node:readline";
-import { existsSync, unlinkSync } from "node:fs";
+import { chmodSync, existsSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { BrowserController, BrowserState } from "./browser.js";
@@ -18,7 +18,8 @@ const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 const SNAPSHOT_JS = `(() => {
   const refs = []; const lines = [];
   const vis = (el) => { const r = el.getBoundingClientRect(); const cs = getComputedStyle(el); return r.width > 0 && r.height > 0 && cs.visibility !== "hidden" && cs.display !== "none"; };
-  const name = (el) => String(el.getAttribute("aria-label") || (el.labels && el.labels[0] && el.labels[0].innerText) || el.getAttribute("placeholder") || el.getAttribute("alt") || el.getAttribute("title") || el.innerText || el.value || "").replace(/\\s+/g, " ").trim().slice(0, 80);
+  const labelText = (el) => { const l = el.labels && el.labels[0]; if (!l) return ""; return [...l.childNodes].filter((n) => n.nodeType === 3).map((n) => n.textContent).join(" ").replace(/\\s+/g, " ").trim() || l.innerText; };
+  const name = (el) => String(el.getAttribute("aria-label") || labelText(el) || el.getAttribute("placeholder") || el.getAttribute("alt") || el.getAttribute("title") || (el.tagName === "SELECT" ? "" : el.innerText) || (el.tagName === "SELECT" ? "" : el.value) || el.name || "").replace(/\\s+/g, " ").trim().slice(0, 80);
   const role = (el) => { const t = el.tagName.toLowerCase(); const r = el.getAttribute("role"); if (r) return r; if (t === "a" && el.getAttribute("href")) return "link"; if (t === "button" || (t === "input" && /^(button|submit|reset)$/.test(el.type))) return "button"; if (t === "input") return /^(checkbox|radio)$/.test(el.type) ? el.type : "textbox"; if (t === "textarea") return "textbox"; if (t === "select") return "combobox"; if (/^h[1-6]$/.test(t)) return "heading"; if (t === "img") return "img"; if (el.isContentEditable && !(el.parentElement && el.parentElement.isContentEditable)) return "textbox"; return null; };
   const leaf = /^(button|link|heading|textbox|combobox|checkbox|radio|img|option|menuitem|tab)$/;
   const textTags = /^(P|LI|TD|TH|SPAN|DIV|LABEL|STRONG|EM|CODE|PRE|SMALL|DT|DD|FIGCAPTION|BLOCKQUOTE)$/;
@@ -31,7 +32,8 @@ const SNAPSHOT_JS = `(() => {
       if (!/^(heading|img)$/.test(r)) { refs.push(el); line += " [ref=e" + refs.length + "]"; }
       if (r === "heading") line += " [level=" + el.tagName[1] + "]";
       if (r === "link") line += " href=" + el.getAttribute("href");
-      if (/^(textbox|combobox)$/.test(r) && el.value) line += ' value="' + String(el.value).slice(0, 60) + '"';
+      if (r === "combobox" && el.selectedOptions && el.selectedOptions[0]) line += ' value="' + String(el.selectedOptions[0].label).slice(0, 60) + '" options=' + [...el.options].slice(0, 12).map((o) => o.label).join("|");
+      else if (/^(textbox|combobox)$/.test(r) && el.value) line += ' value="' + String(el.value).slice(0, 60) + '"';
       if (/^(checkbox|radio)$/.test(r) && el.checked) line += " [checked]";
       if (el.disabled) line += " [disabled]";
       lines.push(line);
@@ -48,6 +50,8 @@ const KEYS: Record<string, string> = { enter: "Return", return: "Return", tab: "
 
 export class BrowserToolServer implements vscode.Disposable {
   readonly socketPath = join(tmpdir(), `muster-browser-${process.pid}.sock`);
+  /** Launcher Codex runs as the MCP server command: environment baked in, so it works however Codex (or its exec runtime) spawns it. */
+  readonly launcherPath = join(tmpdir(), `muster-browser-${process.pid}.sh`);
   private server: Server | undefined;
   private userControl = false;
 
@@ -62,13 +66,17 @@ export class BrowserToolServer implements vscode.Disposable {
     browser.onTakeControl((id) => { this.userControl = true; this.log(`browser: user took control of ${id}`); });
   }
 
-  start(): void {
+  start(shimPath: string): void {
     if (existsSync(this.socketPath)) { try { unlinkSync(this.socketPath); } catch { /* stale */ } }
+    const q = (s: string) => `'${s.replace(/'/g, "'\\''")}'`;
+    writeFileSync(this.launcherPath, `#!/bin/sh\n# Muster browser MCP shim (per IDE window). Electron runs as Node here; the socket leads back to the IDE.\nexport ELECTRON_RUN_AS_NODE=1\nexport MUSTER_BROWSER_SOCK=${q(this.socketPath)}\nexec ${q(process.execPath)} ${q(shimPath)} "$@"\n`);
+    chmodSync(this.launcherPath, 0o755);
     this.server = createServer((conn) => {
       createInterface({ input: conn }).on("line", async (line) => {
         let m: { id: number; tool: string; args?: Record<string, unknown> };
         try { m = JSON.parse(line); } catch { return; }
         const started = Date.now();
+        this.log(`browser tool ${m.tool} start`);
         const result = await this.execute(m.tool, m.args ?? {}).catch((error: Error) => ({ text: `Error: ${error.message}`, isError: true }));
         this.log(`browser tool ${m.tool} ${JSON.stringify(m.args ?? {}).slice(0, 120)} → ${result.isError ? "error" : "ok"} in ${Date.now() - started}ms`);
         conn.write(`${JSON.stringify({ id: m.id, result })}\n`);
@@ -77,16 +85,16 @@ export class BrowserToolServer implements vscode.Disposable {
     this.server.listen(this.socketPath);
   }
 
-  dispose(): void { this.server?.close(); try { unlinkSync(this.socketPath); } catch { /* gone */ } }
+  dispose(): void { this.server?.close(); for (const p of [this.socketPath, this.launcherPath]) { try { unlinkSync(p); } catch { /* gone */ } } }
   turnStarted(): void { this.userControl = false; }
   turnEnded(): void { for (const t of this.browser.list()) if (t.driving) this.browser.setDriving(t.id, false); }
 
   private eval(id: string, js: string): Promise<unknown> { return Promise.resolve(vscode.commands.executeCommand("muster.browser.eval", { id, js })); }
   private input(id: string, event: Record<string, unknown>): Promise<unknown> { return Promise.resolve(vscode.commands.executeCommand("muster.browser.input", { id, event })); }
-  private async waitReady(id: string, ms = 12_000): Promise<void> {
-    await sleep(250);
-    const until = Date.now() + ms;
-    while (Date.now() < until) { const r = await this.eval(id, "document.readyState").catch(() => null); if (r === "complete" || r === "interactive") return; await sleep(150); }
+  /** After an action that may navigate: give the navigation a moment to start, then wait for the load to settle. */
+  private async waitReady(id: string, ms = 10_000): Promise<void> {
+    await sleep(300);
+    await Promise.resolve(vscode.commands.executeCommand("muster.browser.waitLoad", { id, timeout: ms })).catch(() => null);
   }
   private async key(id: string, key: string): Promise<void> {
     const code = KEYS[key.toLowerCase()] ?? key;
@@ -118,15 +126,27 @@ export class BrowserToolServer implements vscode.Disposable {
     const id = tab.id;
     this.browser.setDriving(id, true);
     switch (tool) {
-      case "browser_navigate": { this.browser.navigate(id, String(args.url ?? "")); await this.waitReady(id); this.browser.setDriving(id, true); return { text: await this.snapshot(id) }; }
+      case "browser_navigate": { const r = await this.browser.navigate(id, String(args.url ?? "")); if (r && typeof r === "object" && "error" in r) return { text: `Navigation failed: ${String((r as { error: string }).error)}`, isError: true }; await sleep(150); this.browser.setDriving(id, true); return { text: await this.snapshot(id) }; }
       case "browser_snapshot": return { text: await this.snapshot(id) };
-      case "browser_click": { const p = await this.locate(id, args); const clicks = args.double ? 2 : 1; await this.input(id, { type: "mouseMove", x: Math.round(p.x), y: Math.round(p.y) }); for (let i = 1; i <= clicks; i++) { await this.input(id, { type: "mouseDown", x: Math.round(p.x), y: Math.round(p.y), button: "left", clickCount: i }); await this.input(id, { type: "mouseUp", x: Math.round(p.x), y: Math.round(p.y), button: "left", clickCount: i }); } await sleep(400); await this.waitReady(id, 3000); this.browser.setDriving(id, true); return { text: `Clicked ${p.label}\n\n${await this.snapshot(id)}` }; }
+      case "browser_click": {
+        const p = await this.locate(id, args); const clicks = args.double ? 2 : 1; const x = Math.round(p.x), y = Math.round(p.y);
+        // Real input events, verified: a capturing listener counts the click; if none arrived (first click after a load can be swallowed), fall back to a synthetic click.
+        await this.eval(id, `(() => { window.__mclick = 0; document.addEventListener("click", () => { window.__mclick++; }, { capture: true, once: true }); return true; })()`);
+        await this.input(id, { type: "mouseMove", x, y }); await sleep(40);
+        for (let i = 1; i <= clicks; i++) { await this.input(id, { type: "mouseDown", x, y, button: "left", clickCount: i }); await this.input(id, { type: "mouseUp", x, y, button: "left", clickCount: i }); }
+        await sleep(120);
+        const seen = await this.eval(id, "window.__mclick").catch(() => null);
+        let via = "";
+        if (seen === 0) { const ref = typeof args.ref === "string" ? args.ref.replace(/^e/, "") : ""; const finder = ref ? `(window.__mref || [])[${Number(ref) - 1}]` : `document.querySelector(${JSON.stringify(String(args.selector ?? ""))})`; await this.eval(id, `(() => { const el = ${finder}; if (el) el.click(); return true; })()`); via = " (synthetic click)"; }
+        await this.waitReady(id, 5000); this.browser.setDriving(id, true);
+        return { text: `Clicked ${p.label}${via}\n\n${await this.snapshot(id)}` };
+      }
       case "browser_hover": { const p = await this.locate(id, args); await this.input(id, { type: "mouseMove", x: Math.round(p.x), y: Math.round(p.y) }); await sleep(200); return { text: `Hovering ${p.label}` }; }
       case "browser_type": {
         const p = await this.locate(id, args); await this.input(id, { type: "mouseMove", x: Math.round(p.x), y: Math.round(p.y) }); await this.input(id, { type: "mouseDown", x: Math.round(p.x), y: Math.round(p.y), button: "left", clickCount: 1 }); await this.input(id, { type: "mouseUp", x: Math.round(p.x), y: Math.round(p.y), button: "left", clickCount: 1 });
         const ref = typeof args.ref === "string" ? args.ref.replace(/^e/, "") : ""; const finder = ref ? `(window.__mref || [])[${Number(ref) - 1}]` : `document.querySelector(${JSON.stringify(String(args.selector ?? ""))})`;
         await this.eval(id, `(() => { const el = ${finder}; if (!el) return false; el.focus(); const v = ${JSON.stringify(String(args.text ?? ""))}; if (el.isContentEditable) { el.textContent = v; } else { const proto = el.tagName === "TEXTAREA" ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype; const set = Object.getOwnPropertyDescriptor(proto, "value"); if (set && set.set) set.set.call(el, v); else el.value = v; } el.dispatchEvent(new Event("input", { bubbles: true })); el.dispatchEvent(new Event("change", { bubbles: true })); return true; })()`);
-        if (args.submit) { await this.key(id, "Enter"); await sleep(300); await this.waitReady(id, 3000); this.browser.setDriving(id, true); }
+        if (args.submit) { await this.key(id, "Enter"); await this.waitReady(id, 5000); this.browser.setDriving(id, true); }
         return { text: `Typed into ${p.label}${args.submit ? " and pressed Enter" : ""}\n\n${await this.snapshot(id)}` };
       }
       case "browser_press_key": { await this.key(id, String(args.key ?? "")); await sleep(250); return { text: `Pressed ${String(args.key)}\n\n${await this.snapshot(id)}` }; }
@@ -144,8 +164,8 @@ export class BrowserToolServer implements vscode.Disposable {
         const until = Date.now() + ms; while (Date.now() < until) { if ((await this.eval(id, `document.body && document.body.innerText.includes(${JSON.stringify(text)})`)) === true) return { text: `Found "${text}"` }; await sleep(250); }
         return { text: `Did not see "${text}" within ${ms}ms`, isError: true };
       }
-      case "browser_go_back": { this.browser.action(id, "back"); await this.waitReady(id); this.browser.setDriving(id, true); return { text: await this.snapshot(id) }; }
-      case "browser_reload": { this.browser.action(id, "reload"); await this.waitReady(id); this.browser.setDriving(id, true); return { text: await this.snapshot(id) }; }
+      case "browser_go_back": { await this.browser.action(id, "back"); await sleep(150); this.browser.setDriving(id, true); return { text: await this.snapshot(id) }; }
+      case "browser_reload": { await this.browser.action(id, "reload"); await sleep(150); this.browser.setDriving(id, true); return { text: await this.snapshot(id) }; }
       default: return { text: `Unknown tool ${tool}`, isError: true };
     }
   }

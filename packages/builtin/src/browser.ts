@@ -142,12 +142,18 @@ export class BrowserController {
   }
 
   close(id: string): void { this.tabs.delete(id); void vscode.commands.executeCommand("muster.browser.close", { id }); }
-  navigate(id: string, url: string): void { let u = url.trim(); if (u && !/^[a-z]+:\/\//i.test(u)) u = /^(localhost|\d+\.\d+|[\w-]+:\d+)/.test(u) ? `http://${u}` : `https://${u}`; const tab = this.tabs.get(id); if (tab && u) { tab.url = u; this.changes.fire(tab); void vscode.commands.executeCommand("muster.browser.navigate", { id, url: u }); } }
-  action(id: string, action: "back" | "forward" | "reload" | "pick" | "screenshot"): void {
+  /** Load a URL; the tab's URL follows the request and is restored if the load fails (the bar must not show a page that never loaded). */
+  navigate(id: string, url: string): Promise<unknown> {
+    let u = url.trim(); if (u && !/^[a-z]+:\/\//i.test(u)) u = /^(localhost|\d+\.\d+|[\w-]+:\d+)/.test(u) ? `http://${u}` : `https://${u}`;
+    const tab = this.tabs.get(id); if (!tab || !u) return Promise.resolve(false);
+    const previous = tab.url; tab.url = u; this.changes.fire(tab);
+    return Promise.resolve(vscode.commands.executeCommand("muster.browser.navigate", { id, url: u })).then((r) => { if (r && typeof r === "object" && "error" in (r as object)) { tab.url = previous; this.changes.fire(tab); } return r; });
+  }
+  action(id: string, action: "back" | "forward" | "reload" | "pick" | "screenshot"): Promise<unknown> {
     const tab = this.tabs.get(id);
-    if (!tab) return;
+    if (!tab) return Promise.resolve(false);
     if (action === "pick") { tab.picking = true; this.changes.fire(tab); }
-    void vscode.commands.executeCommand(`muster.browser.${action}`, { id });
+    return Promise.resolve(vscode.commands.executeCommand(`muster.browser.${action}`, { id }));
   }
   /** Where the page area sits inside the pane's webview; the workbench adds the webview's own offset. */
   place(id: string, rect: { top: number; left: number; width: number; height: number }, visible: boolean, host: "pane" | "editor" = "pane"): void {
