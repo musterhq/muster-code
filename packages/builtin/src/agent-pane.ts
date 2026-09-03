@@ -1286,23 +1286,30 @@ function paneHtml(csp: string): string {
     for (const f of files) { const row = document.createElement("div"); row.className = "file"; const parts = f.path.split("/"); const name = parts.pop(); row.innerHTML = '<span class="name">' + escape(name) + '</span><span class="dir">' + escape(parts.join("/")) + '</span><span class="adds">+' + f.adds + '</span><span class="dels">−' + f.dels + '</span>'; row.addEventListener("click", () => vscode.postMessage({ type: "open", path: f.path })); list.appendChild(row); }
   }
   // Mentions light up like the Plan pill when they resolve; a chips row mirrors them with remove buttons (Cursor's context row).
-  const TOKEN = /(^|\s)(@[\w./:-]+|\/[\w-]+)/g;
+  const TOKEN = /(^|\\s)(@[\\w./:-]+|\\/[\\w-]+)/g;
   let tokenOk = new Set(), tokenBad = new Set(), validateTimer = null;
   function tokensIn(text) { const out = []; let m; TOKEN.lastIndex = 0; while ((m = TOKEN.exec(text))) out.push(m[2]); return out; }
   function renderTokens() {
     const text = input.value;
     let html = ""; let last = 0; TOKEN.lastIndex = 0; let m;
     while ((m = TOKEN.exec(text))) { const start = m.index + m[1].length; html += escape(text.slice(last, start)) + '<mark class="' + (tokenBad.has(m[2]) ? "bad" : "") + '">' + escape(m[2]) + '</mark>'; last = start + m[2].length; }
-    html += escape(text.slice(last)) + "\n";
+    html += escape(text.slice(last)) + "\\n";
     $("backdrop").innerHTML = html; $("backdrop").scrollTop = input.scrollTop;
     const row = $("ctxrow"); [...row.querySelectorAll(".ctx:not(.add)")].forEach((c) => c.remove());
     const seen = new Set();
-    for (const t of tokensIn(text)) { if (seen.has(t)) continue; seen.add(t); const chip = document.createElement("span"); chip.className = "ctx" + (tokenBad.has(t) ? " bad" : ""); chip.title = t; const label = t.startsWith("@image:") ? "🖼 " + t.split("/").pop() : t.startsWith("@") ? "@ " + t.slice(1).split("/").pop() : t; chip.innerHTML = '<span class="n">' + escape(label) + '</span><span class="x" title="Remove">×</span>'; chip.querySelector(".x").addEventListener("click", () => { input.value = input.value.replace(new RegExp("(^|\\s)" + t.replace(/[.*+?^\${}()|[\]\\/]/g, "\\$&") + "(?=\\s|$)"), "$1").replace(/  +/g, " "); autosize(); input.focus(); }); row.appendChild(chip); }
+    for (const t of tokensIn(text)) {
+      if (seen.has(t)) continue; seen.add(t);
+      const chip = document.createElement("span"); chip.className = "ctx" + (tokenBad.has(t) ? " bad" : ""); chip.title = tokenBad.has(t) ? t + " (not found)" : t;
+      const label = t.startsWith("@image:") ? "🖼 " + t.split("/").pop() : t.startsWith("@") ? "@ " + t.slice(1).split("/").pop() : t;
+      chip.innerHTML = '<span class="n">' + escape(label) + '</span><span class="x" title="Remove">×</span>';
+      chip.querySelector(".x").addEventListener("click", () => { const re = new RegExp("(^|\\\\s)" + t.replace(/[.*+?^\${}()|[\\]\\\\/]/g, "\\\\$&") + "(?=\\\\s|$)"); input.value = input.value.replace(re, "$1").replace(/  +/g, " "); autosize(); input.focus(); });
+      row.appendChild(chip);
+    }
     const toks = [...seen].filter((t) => !tokenOk.has(t) && !tokenBad.has(t));
     if (toks.length) { clearTimeout(validateTimer); validateTimer = setTimeout(() => vscode.postMessage({ type: "validate", tokens: toks }), 150); }
   }
   input.addEventListener("scroll", () => { $("backdrop").scrollTop = input.scrollTop; });
-  $("ctx-add").addEventListener("click", () => { const at = input.selectionStart; const pre = input.value.slice(0, at); const needsSpace = pre && !/\s$/.test(pre); input.value = pre + (needsSpace ? " @" : "@") + input.value.slice(at); const caret = pre.length + (needsSpace ? 2 : 1); input.setSelectionRange(caret, caret); input.focus(); input.dispatchEvent(new Event("input")); });
+  $("ctx-add").addEventListener("click", () => { const at = input.selectionStart; const pre = input.value.slice(0, at); const needsSpace = pre && !/\\s$/.test(pre); input.value = pre + (needsSpace ? " @" : "@") + input.value.slice(at); const caret = pre.length + (needsSpace ? 2 : 1); input.setSelectionRange(caret, caret); input.focus(); input.dispatchEvent(new Event("input")); });
   function autosize() { input.style.height = "auto"; input.style.height = Math.min(240, Math.max(64, input.scrollHeight)) + "px"; $("backdrop").style.height = input.style.height; body.classList.toggle("dirty", input.value.trim().length > 0); renderTokens(); }
   function send() { let text = input.value.trim(); const mode = state && state.modes.find((m) => m.id === state.settings.mode); if (!text && mode && mode.id === "debug" && input.placeholder !== "Enter additional context about the issue") text = input.placeholder; if (!text || body.classList.contains("running")) return; vscode.postMessage({ type: "send", text }); input.value = ""; autosize(); }
   // @ files and / skills: a popover while typing, filled by the extension.
