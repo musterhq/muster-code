@@ -203,6 +203,12 @@ export class AgentPane implements vscode.WebviewViewProvider {
   }
 
   /** Dev harness: what the pane believes about itself. */
+  async debugThreads(): Promise<Record<string, unknown>> {
+    const all = await listThreads();
+    const visible = await this.visibleThreads();
+    return { all: all.length, visible: visible.length, folders: (vscode.workspace.workspaceFolders ?? []).map((f) => f.uri.fsPath), sample: all.slice(0, 5).map((t) => ({ id: t.id.slice(0, 13), cwd: t.cwd, name: t.name, age: formatAge(t.lastActivityAt) })), tabs: this.tabs.map((t) => ({ name: t.name, thread: t.thread?.id ?? null, mode: t.settings.mode, error: t.lastError ?? null })) };
+  }
+
   debugState(): Record<string, unknown> {
     return { resolved: !!this.view, visible: this.view?.visible ?? null, ready: this.readyCount, models: this.models.length, access: this.access.length, loading: this.loading, tabs: this.tabs.length, view: this.paneView, activeMode: this.active().settings.mode };
   }
@@ -486,7 +492,7 @@ export class AgentPane implements vscode.WebviewViewProvider {
       const effort = tab.settings.effortId as "low" | "medium" | "high" | "xhigh" | "max" | "ultra";
       const result = model?.provider === "claude"
         ? await runClaudeTurn({ prompt, cwd, model: model.id.replace(/^claude:/, ""), effort, ...(tab.claudeSession ? { sessionId: tab.claudeSession, resume: true } : { sessionId: (tab.claudeSession = cryptoId()) }), handlers })
-        : await runTurn({ prompt, cwd, ...(tab.thread ? { threadId: tab.thread.id } : {}), ...(model ? { model: model.id } : {}), reasoning: effort, ...(askAccess ? { access: askAccess } : {}), mode: mode.plan ? "plan" : "default", ...(rules ? { rules } : {}), handlers });
+        : await runTurn({ prompt, cwd, ...(tab.thread ? { threadId: tab.thread.id } : {}), conversation: tab.id, ...(model ? { model: model.id } : {}), reasoning: effort, ...(askAccess ? { access: askAccess } : {}), mode: mode.plan ? "plan" : "default", ...(rules ? { rules } : {}), handlers });
       if (result.status === "failed") {
         tab.lastError = result.errorMessage ?? "The turn failed.";
         this.output.appendLine(`turn failed: ${tab.lastError}`);
@@ -775,6 +781,7 @@ function paneHtml(csp: string): string {
   #status .stop { cursor: pointer; } #status .stop kbd { font-family: inherit; color: var(--text-tertiary); margin-left: 6px; }
   #composer { margin: 8px 10px 10px; background: var(--vscode-input-background); border: 1px solid var(--stroke-secondary); border-radius: var(--radius-xl); padding: 10px 12px 8px; position: relative; flex: 0 0 auto; min-width: 0; overflow: hidden; container-type: inline-size; }
   #messages, .card, .assistant, .human { min-width: 0; }
+  #messages > * { flex-shrink: 0; }
   .card { overflow: hidden; }
   .edit .path, .tool .head .cmd { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .assistant pre, .assistant table { max-width: 100%; }

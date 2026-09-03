@@ -85,6 +85,8 @@ export async function runTurn(input: {
   readonly prompt: string;
   readonly cwd: string;
   readonly threadId?: string;
+  /** Stable id of the conversation surface (pane tab); keeps one warm process per conversation. */
+  readonly conversation?: string;
   readonly model?: string;
   readonly reasoning?: "low" | "medium" | "high" | "xhigh" | "max" | "ultra";
   /** Discovered from permissionProfile/list (see listAccessModes); defaults to workspace-write without prompts. */
@@ -98,7 +100,10 @@ export async function runTurn(input: {
   const result = await runCodexAppServer({
     prompt: input.prompt,
     cwd: input.cwd,
-    ...(input.threadId ? { threadId: input.threadId, cacheKey: `thread:${input.threadId}` } : { cacheKey: `new:${input.cwd}` }),
+    // One warm app-server process per conversation (pane tab): the process that started a thread is its
+    // writer, and a second process resuming it would be refused ("already has an active writer").
+    ...(input.threadId ? { threadId: input.threadId } : {}),
+    cacheKey: input.conversation ? `conv:${input.conversation}` : input.threadId ? `thread:${input.threadId}` : `new:${input.cwd}:${Date.now().toString(36)}`,
     ...(input.model ? { model: input.model } : {}),
     ...(input.reasoning ? { reasoning: input.reasoning } : {}),
     ...(input.rules ? { developerInstructions: input.rules } : {}),
