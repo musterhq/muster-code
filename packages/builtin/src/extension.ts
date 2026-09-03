@@ -7,6 +7,7 @@ import { formatAge, formatSize, interruptTurn, listThreads, readHistory, runTurn
 import { AgentPane } from "./agent-pane.js";
 import { LiveEditController } from "./live-edit.js";
 import { startDevControl } from "./dev-control.js";
+import { registerCompletions } from "./completions.js";
 
 const SESSION_TYPE = "codex";
 const SESSION_SCHEME = "muster-codex";
@@ -165,6 +166,29 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     try { await pane.inlineEdit(editor, args.instruction); } finally { await vscode.commands.executeCommand("muster.cmdk.hide", { uri: args.uri }); }
   }));
   context.subscriptions.push(vscode.commands.registerCommand("muster.agent.plugins", () => pane.showPlugins()));
+  context.subscriptions.push(vscode.commands.registerCommand("muster.review.git", () => pane.reviewAgainstBranch()));
+  // Terminal ⌘K: describe the command, the agent writes it into the terminal (not run until you press Enter).
+  context.subscriptions.push(vscode.commands.registerCommand("muster.cmdk.terminal", async () => {
+    const terminal = vscode.window.activeTerminal;
+    if (!terminal) return;
+    const instruction = await vscode.window.showInputBox({ prompt: "Command instructions", placeHolder: "Describe the command to run in this terminal" });
+    if (!instruction?.trim()) return;
+    let text = "";
+    const status = vscode.window.setStatusBarMessage("$(sync~spin) Writing command…");
+    try {
+      const result = await runTurn({ prompt: `Reply with ONLY a single shell command (zsh on macOS, no prose, no fences) that does: ${instruction.trim()}. Working directory: ${workspaceCwd()}.`, cwd: workspaceCwd(), reasoning: "low", access: { id: ":read-only", label: "Read only", sandbox: "read-only", approvalPolicy: "never" }, handlers: { onDelta: (d) => { text += d; }, onReasoning: () => {} } });
+      if (result.status === "failed") { void vscode.window.showWarningMessage(result.errorMessage ?? "Could not write the command."); return; }
+      const command = text.replace(/^```[a-z]*\n?/i, "").replace(/\n?```\s*$/, "").trim().split("\n")[0] ?? "";
+      if (command) terminal.sendText(command, false);
+    } finally { status.dispose(); }
+  }));
+  registerCompletions(context, workspaceCwd, () => config().get<string>("codex.model"));
+  context.subscriptions.push(vscode.commands.registerCommand("muster.completions.toggle", async () => {
+    const on = !config().get<boolean>("completions.enabled", false);
+    await config().update("completions.enabled", on, vscode.ConfigurationTarget.Global);
+    tabItem.text = on ? "Muster Tab" : "Muster Tab: off";
+    void vscode.window.setStatusBarMessage(on ? "Muster Tab on — Codex completes as you pause" : "Muster Tab off", 2500);
+  }));
   context.subscriptions.push(vscode.commands.registerCommand("muster.plan.preview", (uri?: vscode.Uri) => vscode.commands.executeCommand("markdown.showPreviewToSide", uri ?? vscode.window.activeTextEditor?.document.uri)));
   context.subscriptions.push(vscode.commands.registerCommand("muster.plan.build", (uri?: vscode.Uri) => { const target = uri ?? vscode.window.activeTextEditor?.document.uri; if (target) void pane.buildFromFile(target); }));
   context.subscriptions.push(vscode.commands.registerCommand("muster.agent.more", () => vscode.commands.executeCommand("workbench.action.openSettings", "muster")));
@@ -180,7 +204,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   // ── Status bar, Cursor's right cluster ──
   const tabItem = vscode.window.createStatusBarItem("muster.tab", vscode.StatusBarAlignment.Right, 60);
-  tabItem.text = "Muster Tab"; tabItem.tooltip = "Inline completions"; tabItem.show();
+  tabItem.text = config().get<boolean>("completions.enabled", false) ? "Muster Tab" : "Muster Tab: off"; tabItem.tooltip = "Inline completions from Codex (click to toggle; uses your plan)"; tabItem.command = "muster.completions.toggle"; tabItem.show();
   const statsItem = vscode.window.createStatusBarItem("muster.agentStats", vscode.StatusBarAlignment.Right, 59);
   statsItem.text = "$(comment-discussion) Agent Stats: 0/0 (0%)"; statsItem.tooltip = "Turns this session"; statsItem.show();
   context.subscriptions.push(tabItem, statsItem);

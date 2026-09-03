@@ -103,3 +103,9 @@ Sources: `docs/reference/cursor-inline-diff.css`, `docs/reference/cursor-widgets
 - MCP elicitations (computer use) and approval/user-input requests are answered in-app.
 - Composer: `@` file picker (workspace search, contents attached as context) and `/` skills picker (`skills/list`).
 - Still to build: Tab completions, in-editor ⌘K bar, terminal ⌘K, multi-file review editor, agents window, browser, git review, diff preview block inside chat cards.
+
+## Status update 2026-09-03 (night)
+- Modes now mirror Cursor 3.18's list with descriptions (Agent, Triage, Plan, Spec, Debug, Multitask, Ask, Project + custom); ⌘. / ⇧Tab open the mode menu; plan/spec → Codex plan mode; ask/project → read-only; triage → delegating effort; multitask → board.
+- Efforts are per provider: Codex from model/list per model; Claude from the CLI (low/medium/high/xhigh/max) with descriptions.
+- ⌘K prompt bar in the editor (view zone: Edit Selection ⏎ · Quick Question ⌥⏎ · Esc), terminal ⌘K (writes the command, does not run it), Review Changes multi-diff editor (turn-start vs now), git review against a branch, diff block inside chat edit cards (click to expand, ⌘-click opens), Codex plugins/MCP list (same config as the Codex app), Muster Tab completions (off by default; status bar toggles).
+- Remaining: agents window, browser/visual editor, Redo checkpoint, worktrees/background agents.

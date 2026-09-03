@@ -187,6 +187,22 @@
       {
         "command": "muster.agent.plugins",
         "title": "Codex Plugins and MCP Servers"
+      },
+      {
+        "command": "muster.cmdk.terminal",
+        "title": "Terminal: Write Command with Agent"
+      },
+      {
+        "command": "muster.review.open",
+        "title": "Review Changes"
+      },
+      {
+        "command": "muster.review.git",
+        "title": "Review Changes Against Branch"
+      },
+      {
+        "command": "muster.completions.toggle",
+        "title": "Toggle Muster Tab"
       }
     ],
     "configuration": {
@@ -212,8 +228,8 @@
         },
         "muster.completions.enabled": {
           "type": "boolean",
-          "default": true,
-          "description": "Inline (Tab) completions."
+          "default": false,
+          "description": "Muster Tab: inline completions from Codex as you pause typing. Uses your ChatGPT plan; off by default."
         },
         "muster.modes": {
           "type": "array",
@@ -338,6 +354,12 @@
         "key": "ctrl+enter",
         "mac": "cmd+enter",
         "when": "resourceFilename =~ /\\\\.plan\\\\.md$/ && editorTextFocus"
+      },
+      {
+        "command": "muster.cmdk.terminal",
+        "key": "ctrl+k",
+        "mac": "cmd+k",
+        "when": "terminalFocus"
       }
     ]
   },

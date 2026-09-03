@@ -46,6 +46,7 @@ type FromPane =
   | { type: "pin"; id: string; pinned: boolean }
   | { type: "viewPlan" } | { type: "buildPlan" }
   | { type: "suggest"; kind: "file" | "skill"; query: string } | { type: "restore"; id: string }
+  | { type: "openReview" }
   | { type: "boardAdd"; title: string } | { type: "boardRun"; id: string } | { type: "boardMove"; id: string; column: BoardTask["column"] };
 
 // Cursor 3.18's built-in modes (docs/cursor-feature-atlas.md §3), mapped onto Codex: plan/spec use the
@@ -148,6 +149,19 @@ export class AgentPane implements vscode.WebviewViewProvider {
     const sel = editor.selection.isEmpty ? undefined : editor.selection;
     const code = editor.document.getText(sel ? new vscode.Range(sel.start.line, 0, sel.end.line, Number.MAX_SAFE_INTEGER) : undefined);
     await this.send(`${question}\n\nAbout ${rel}${sel ? ` lines ${sel.start.line + 1}-${sel.end.line + 1}` : ""}:\n\`\`\`\n${code.slice(0, 12000)}\n\`\`\``);
+  }
+
+  /** Git review (Cursor's Agent Review): review the diff against a branch for issues, read-only. */
+  async reviewAgainstBranch(): Promise<void> {
+    const branch = await vscode.window.showInputBox({ prompt: "Review changes against branch", value: "main", placeHolder: "main" });
+    if (!branch) return;
+    const tab = this.active();
+    tab.settings.mode = "chat";
+    this.persist(tab);
+    this.paneView = "chat";
+    this.pushState();
+    await vscode.commands.executeCommand(`${AgentPane.viewId}.focus`);
+    await this.send(`Review the changes in this repository against the ${branch} branch for issues (bugs, regressions, missing tests, risky changes). Run \`git diff ${branch}\` (and \`git status\`) to see them; report findings with file:line references, most severe first, or say "No issues found".`);
   }
 
   /** Codex plugins and MCP servers loaded for this folder — the same config the Codex app uses, nothing to migrate. */
@@ -279,6 +293,7 @@ export class AgentPane implements vscode.WebviewViewProvider {
       case "acceptAll": await this.live.acceptAll(); return;
       case "rejectAll": await this.live.rejectAll(); return;
       case "open": await this.live.open(message.path); return;
+      case "openReview": await this.live.openReview(); return;
       case "newAgent": this.newAgent(); return;
       case "activateTab": { const tab = this.tabs.find((t) => t.id === message.id); if (tab) { this.activeId = tab.id; this.paneView = "chat"; this.pushState(); this.post({ type: "messages", messages: tab.messages }); } return; }
       case "closeTab": { this.tabs = this.tabs.filter((t) => t.id !== message.id); if (!this.tabs.length) this.newTab(); if (!this.tabs.some((t) => t.id === this.activeId)) this.activeId = this.tabs[this.tabs.length - 1]!.id; this.pushState(); this.post({ type: "messages", messages: this.active().messages }); return; }
@@ -568,6 +583,11 @@ function paneHtml(csp: string): string {
   .edit .path { color: var(--fg); font-family: var(--vscode-editor-font-family); font-size: var(--fs-sm); }
   .adds { color: var(--vscode-charts-green); font-variant-numeric: tabular-nums; } .dels { color: var(--vscode-charts-red); font-variant-numeric: tabular-nums; }
   .edit .state { margin-left: auto; color: var(--text-tertiary); font-size: var(--fs-xs); }
+  .editwrap .diff { display: none; margin: 0; padding: 6px 10px 8px; border-top: 1px solid var(--stroke-tertiary); max-height: 260px; overflow: auto; font-family: var(--vscode-editor-font-family); font-size: var(--fs-sm); line-height: 18px; white-space: pre; }
+  .editwrap.open .diff { display: block; }
+  .editwrap .diff .a { background: var(--vscode-diffEditor-insertedLineBackground); display: block; }
+  .editwrap .diff .d { background: var(--vscode-diffEditor-removedLineBackground); display: block; opacity: .9; }
+  .editwrap .diff .h { color: var(--text-tertiary); display: block; }
   .tool .head { display: flex; align-items: center; gap: 8px; height: 28px; padding: 0 10px; color: var(--text-secondary); cursor: pointer; }
   .tool .head .cmd { font-family: var(--vscode-editor-font-family); font-size: var(--fs-sm); color: var(--fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .tool .head .status { margin-left: auto; color: var(--text-tertiary); font-size: var(--fs-xs); }
@@ -672,7 +692,7 @@ function paneHtml(csp: string): string {
   <div id="tabs"></div>
   <div class="view" id="chat">
     <div id="messages"></div>
-    <div id="review"><div class="head" id="review-head"><span class="chev">▶</span><span id="review-summary">1 file</span><span class="adds" id="review-adds">+0</span><span class="dels" id="review-dels">−0</span><span class="spacer"></span><button class="btn text" id="review-reject">Reject</button><button class="btn primary" id="review-accept">Accept</button></div><div class="files" id="review-files"></div></div>
+    <div id="review"><div class="head" id="review-head"><span class="chev">▶</span><span id="review-summary">1 file</span><span class="adds" id="review-adds">+0</span><span class="dels" id="review-dels">−0</span><span class="spacer"></span><button class="btn text" id="review-open" title="Review Changes editor">Review</button><button class="btn text" id="review-reject">Reject</button><button class="btn primary" id="review-accept">Accept</button></div><div class="files" id="review-files"></div></div>
     <div id="status"><span>Generating..</span><span class="stop" id="stop">Stop<kbd>⇧⌘⌫</kbd></span></div>
     <div id="composer">
       <textarea id="input" placeholder="Plan, search, build anything" rows="1"></textarea>
@@ -752,10 +772,20 @@ function paneHtml(csp: string): string {
     scroll();
   }
   function editCard(card) {
-    const id = "edit-" + card.path.replace(/[^a-z0-9]/gi, "_"); let el = document.getElementById(id);
-    if (!el) { el = document.createElement("div"); el.className = "card edit"; el.id = id; el.addEventListener("click", () => vscode.postMessage({ type: "open", path: card.path })); messages.appendChild(el); body.classList.add("has-messages"); }
+    const id = "edit-" + card.path.replace(/[^a-z0-9]/gi, "_"); let wrap = document.getElementById(id);
+    if (!wrap) {
+      wrap = document.createElement("div"); wrap.className = "card editwrap"; wrap.id = id;
+      const head = document.createElement("div"); head.className = "edit"; const diff = document.createElement("pre"); diff.className = "diff";
+      head.addEventListener("click", (e) => { if (e.altKey || e.metaKey) vscode.postMessage({ type: "open", path: card.path }); else if (wrap.dataset.hasDiff === "1") wrap.classList.toggle("open"); else vscode.postMessage({ type: "open", path: card.path }); });
+      head.addEventListener("dblclick", () => vscode.postMessage({ type: "open", path: card.path }));
+      wrap.append(head, diff); messages.appendChild(wrap); body.classList.add("has-messages");
+    }
     const labels = { streaming: "Editing…", written: "Review", kept: "Accepted", undone: "Rejected" };
-    el.innerHTML = '<span class="path">' + escape(card.path) + '</span><span class="adds">+' + card.adds + '</span><span class="dels">−' + card.dels + '</span><span class="state">' + labels[card.status] + '</span>'; scroll();
+    wrap.querySelector(".edit").innerHTML = '<span class="path">' + escape(card.path) + '</span><span class="adds">+' + card.adds + '</span><span class="dels">−' + card.dels + '</span><span class="state">' + labels[card.status] + (card.diff ? " ▾" : "") + '</span>';
+    const pre = wrap.querySelector(".diff"); wrap.dataset.hasDiff = card.diff ? "1" : "0";
+    pre.innerHTML = card.diff ? card.diff.split("\n").map((l) => '<span class="' + (l[0] === "+" ? "a" : l[0] === "-" ? "d" : "h") + '">' + escape(l) + '</span>').join("") : "";
+    if (card.status === "streaming" && card.diff) wrap.classList.add("open");
+    scroll();
   }
   function renderMessages(list) {
     messages.innerHTML = ""; assistantEl = thinkingEl = planEl = null; body.classList.toggle("has-messages", list.length > 0);
@@ -858,6 +888,7 @@ function paneHtml(csp: string): string {
   }
   $("review-head").addEventListener("click", (e) => { if (e.target.closest("button")) return; $("review").classList.toggle("open"); });
   $("review-accept").addEventListener("click", () => vscode.postMessage({ type: "acceptAll" }));
+  $("review-open").addEventListener("click", () => vscode.postMessage({ type: "openReview" }));
   $("review-reject").addEventListener("click", () => vscode.postMessage({ type: "rejectAll" }));
   function renderReview(files) {
     body.classList.toggle("reviewing", files.length > 0); if (!files.length) return;

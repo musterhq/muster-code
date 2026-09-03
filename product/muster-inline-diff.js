@@ -259,7 +259,7 @@
     input.rows = 1;
     input.placeholder = "Edit selection…";
     const hint = el("div", "muster-cmdk-hint");
-    hint.innerHTML = '<span class="k">⌘K</span><span class="lbl">Edit Selection</span><span class="k">⏎</span><span class="lbl">Quick Question</span><span class="k">⌥⏎</span><span class="lbl">Close</span><span class="k">Esc</span>';
+    for (const [label, key] of [["Edit Selection", "⏎"], ["Quick Question", "⌥⏎"], ["Close", "Esc"]]) { hint.append(el("span", "lbl", label), el("span", "k", key)); }
     const status = el("div", "muster-cmdk-status", "");
     dom.append(input, hint, status);
     const bar = { editor, dom, input, status, zoneId: null };

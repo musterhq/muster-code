@@ -11,7 +11,9 @@ import { ApplyPatchStream, type PatchFile } from "./apply-patch.js";
 import { applyHunk, lineDiff, type LineHunk } from "./line-diff.js";
 
 export type EditStatus = "streaming" | "written" | "kept" | "undone";
-export interface EditCard { readonly path: string; readonly adds: number; readonly dels: number; readonly status: EditStatus; readonly hunks: number }
+export interface EditCard { readonly path: string; readonly adds: number; readonly dels: number; readonly status: EditStatus; readonly hunks: number; readonly diff?: string }
+
+export const BASELINE_SCHEME = "muster-baseline";
 
 interface LiveFile {
   readonly uri: vscode.Uri;
@@ -80,6 +82,17 @@ export class LiveEditController {
     context.subscriptions.push(vscode.window.onDidChangeVisibleTextEditors(() => {
       for (const file of this.files.values()) this.repaint(file);
     }));
+    // Turn-start contents, for the multi-file Review Changes editor (vscode.changes).
+    context.subscriptions.push(vscode.workspace.registerTextDocumentContentProvider(BASELINE_SCHEME, { provideTextDocumentContent: (uri) => this.files.get(uri.path)?.origin ?? "" }));
+    cmd("muster.review.open", () => this.openReview());
+  }
+
+  /** Cursor's "Review Changes" editor: every live file against its turn-start contents, in one multi-diff editor. */
+  async openReview(): Promise<void> {
+    const files = [...this.files.values()];
+    if (!files.length) { vscode.window.setStatusBarMessage("No pending changes to review", 2000); return; }
+    const resources = files.map((f) => [f.uri, vscode.Uri.from({ scheme: BASELINE_SCHEME, path: f.abs }), f.uri]);
+    await vscode.commands.executeCommand("vscode.changes", "Review Changes", resources);
   }
 
   /** Every raw app-server event of a turn flows through here. */
@@ -373,6 +386,15 @@ export class LiveEditController {
   private card(file: LiveFile): EditCard {
     const adds = file.hunks.reduce((n, h) => n + h.targetCount, 0);
     const dels = file.hunks.reduce((n, h) => n + h.removed.length, 0);
-    return { path: file.rel, adds, dels, status: file.status, hunks: file.hunks.length };
+    const doc = vscode.workspace.textDocuments.find((d) => d.uri.toString() === file.uri.toString());
+    const lines = doc ? doc.getText().split("\n") : [];
+    const out: string[] = [];
+    for (const h of file.hunks) {
+      if (out.length > 160) { out.push("…"); break; }
+      out.push(`@@ ${h.targetStart + 1}`);
+      for (const r of h.removed) out.push(`-${r}`);
+      for (let i = 0; i < h.targetCount; i++) out.push(`+${lines[h.targetStart + i] ?? ""}`);
+    }
+    return { path: file.rel, adds, dels, status: file.status, hunks: file.hunks.length, ...(out.length ? { diff: out.join("\n") } : {}) };
   }
 }
