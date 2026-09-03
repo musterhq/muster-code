@@ -518,8 +518,8 @@ function paneHtml(csp: string): string {
   .icon svg { width: 16px; height: 16px; }
   .send { background: var(--fg); color: var(--vscode-editor-background); border-radius: 9999px; width: 24px; height: 24px; display: none; align-items: center; justify-content: center; cursor: pointer; }
   body.dirty .send { display: inline-flex; } body.running .send { display: none; }
-  .menu { position: absolute; bottom: 44px; left: 10px; min-width: 220px; max-width: 320px; max-height: 320px; overflow: auto; background: var(--vscode-dropdown-background, var(--vscode-editorWidget-background)); border: 1px solid var(--stroke-secondary); border-radius: var(--radius-lg); box-shadow: 0 6px 24px var(--vscode-widget-shadow); padding: 4px; z-index: 20; display: none; font-size: var(--fs-base); }
-  .menu.open { display: block; }
+  .menu { position: fixed; top: 0; left: 0; visibility: hidden; min-width: 220px; max-width: 320px; max-height: 320px; overflow: auto; background: var(--vscode-dropdown-background, var(--vscode-editorWidget-background)); border: 1px solid var(--stroke-secondary); border-radius: var(--radius-lg); box-shadow: 0 6px 24px var(--vscode-widget-shadow); padding: 4px; z-index: 20; display: none; font-size: var(--fs-base); }
+  .menu.open { display: block; visibility: visible; }
   .menu .group { padding: 6px 10px 2px; font-size: var(--fs-xs); color: var(--text-tertiary); text-transform: uppercase; letter-spacing: .3px; }
   .menu .item { display: flex; align-items: center; gap: 8px; padding: 5px 10px; border-radius: var(--radius-sm); cursor: pointer; }
   .menu .item:hover { background: var(--bg-tertiary); }
@@ -679,8 +679,20 @@ function paneHtml(csp: string): string {
     $("model-name").textContent = model ? model.name + (effort ? " " + effortLabel(effort.id) : "") : (state.loading ? "Loading models…" : "Choose model");
     body.classList.toggle("running", !!state.tabs.find((t) => t.id === state.activeId && t.running));
   }
-  function openMenu(kind) {
+  function placeMenu(anchor) {
+    // Adaptive: below the pill when there is room, else above; clamped to the pane.
+    const a = anchor.getBoundingClientRect(), vw = window.innerWidth, vh = window.innerHeight;
+    menu.style.maxHeight = Math.max(120, Math.max(vh - a.bottom - 12, a.top - 12)) + "px";
+    const w = menu.offsetWidth, h = menu.offsetHeight;
+    const below = vh - a.bottom - 8, above = a.top - 8;
+    const top = (h <= below || below >= above) ? Math.min(a.bottom + 4, vh - h - 4) : Math.max(4, a.top - h - 4);
+    const left = Math.max(6, Math.min(a.left, vw - w - 6));
+    menu.style.top = top + "px"; menu.style.left = left + "px";
+  }
+  let menuAnchor = null;
+  function openMenu(kind, anchor) {
     if (menu.dataset.kind === kind && menu.classList.contains("open")) { closeMenu(); return; }
+    menuAnchor = anchor;
     menu.dataset.kind = kind; menu.innerHTML = ""; const add = (html) => menu.insertAdjacentHTML("beforeend", html);
     if (kind === "mode") {
       for (const m of state.modes) add('<div class="item' + (m.id === state.settings.mode ? " on" : "") + '" data-id="' + escape(m.id) + '"><span class="ic">' + escape(m.icon) + '</span><span class="lbl">' + escape(m.name) + '</span><span class="check">✓</span></div>');
@@ -696,15 +708,18 @@ function paneHtml(csp: string): string {
         for (const m of ms) add('<div class="item' + (m.id === state.settings.modelId ? " on" : "") + '" data-id="' + escape(m.id) + '" title="' + escape(m.description) + '"><span class="lbl">' + escape(m.name) + '</span>' + (m.isDefault ? '<span class="sub">default</span>' : "") + '<span class="check">✓</span></div>'); }
       const model = state.models.find((m) => m.id === state.settings.modelId);
       if (model && model.efforts.length) { add('<div class="sep"></div><div class="group">Effort · ' + escape(model.name) + '</div>'); for (const e of model.efforts) add('<div class="item' + (e.id === state.settings.effortId ? " on" : "") + '" data-effort="' + escape(e.id) + '" title="' + escape(e.description) + '"><span class="lbl">' + effortLabel(e.id) + '</span><span class="check">✓</span></div>'); }
-      menu.querySelectorAll(".item[data-id]").forEach((el) => el.addEventListener("click", () => vscode.postMessage({ type: "setModel", id: el.dataset.id })));
+      menu.querySelectorAll(".item[data-id]").forEach((el) => el.addEventListener("click", () => { vscode.postMessage({ type: "setModel", id: el.dataset.id }); setTimeout(() => { if (menuAnchor) { menu.classList.remove("open"); openMenu("model", menuAnchor); } }, 60); }));
       menu.querySelectorAll(".item[data-effort]").forEach((el) => el.addEventListener("click", () => { vscode.postMessage({ type: "setEffort", id: el.dataset.effort }); closeMenu(); }));
     }
     menu.classList.add("open");
+    placeMenu(anchor);
   }
-  function closeMenu() { menu.classList.remove("open"); }
-  $("mode-pill").addEventListener("click", (e) => { e.stopPropagation(); openMenu("mode"); });
-  $("access-pill").addEventListener("click", (e) => { e.stopPropagation(); openMenu("access"); });
-  $("model-pill").addEventListener("click", (e) => { e.stopPropagation(); openMenu("model"); });
+  function closeMenu() { menu.classList.remove("open"); menuAnchor = null; }
+  window.addEventListener("resize", () => { if (menuAnchor) placeMenu(menuAnchor); });
+  messages.addEventListener("scroll", closeMenu);
+  $("mode-pill").addEventListener("click", (e) => { e.stopPropagation(); openMenu("mode", e.currentTarget); });
+  $("access-pill").addEventListener("click", (e) => { e.stopPropagation(); openMenu("access", e.currentTarget); });
+  $("model-pill").addEventListener("click", (e) => { e.stopPropagation(); openMenu("model", e.currentTarget); });
   document.addEventListener("click", (e) => { if (!menu.contains(e.target)) closeMenu(); });
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape") closeMenu();

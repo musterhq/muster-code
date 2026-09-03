@@ -38,7 +38,8 @@
       "explorer.compactFolders": false,
       "workbench.editor.empty.hint": "hidden",
       "diffEditor.renderSideBySide": false,
-      "diffEditor.ignoreTrimWhitespace": false
+      "diffEditor.ignoreTrimWhitespace": false,
+      "chat.disableAIFeatures": true
     }
   },
   "scripts": {
