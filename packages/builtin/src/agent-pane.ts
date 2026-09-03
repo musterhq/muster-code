@@ -9,8 +9,8 @@ import { join, relative } from "node:path";
 import { formatAge, formatSize, interruptTurn, listAccessModes, listModels, listSkills, listThreads, readHistory, readRules, runClaudeTurn, runTurn, threadsForWorkspace, type AccessMode, type CodexThread, type ModelInfo, type SkillInfo } from "./codex.js";
 import type { Checkpoint, EditCard, LiveEditController } from "./live-edit.js";
 
-interface ModeInfo { readonly id: string; readonly name: string; readonly icon: string; readonly placeholder: string; readonly description?: string; readonly prompt?: string; readonly readOnly?: boolean; readonly plan?: boolean; readonly board?: boolean; readonly effort?: string }
-interface ThreadSettings { mode: string; accessId: string; modelId: string; effortId: string }
+interface ModeInfo { readonly id: string; readonly name: string; readonly icon: string; readonly placeholder: string; readonly description?: string; readonly prompt?: string; readonly readOnly?: boolean; readonly plan?: boolean; readonly board?: boolean; readonly effort?: string; readonly autoFix?: boolean; readonly debug?: boolean; readonly parallel?: boolean; readonly spec?: boolean }
+interface ThreadSettings { mode: string; accessId: string; modelId: string; effortId: string; debugStage?: 0 | 1 | 2 }
 interface PlanCard { title: string; summary: string; todos: { text: string; done: boolean }[]; path?: string }
 type ToolMessage = { kind: "tool"; id: string; title: string; detail: string; output: string; status: string };
 type PaneMessage =
@@ -18,7 +18,7 @@ type PaneMessage =
   | { kind: "assistant"; text: string; reasoning: string }
   | ToolMessage
   | { kind: "plan"; card: PlanCard };
-interface Tab { id: string; name: string; thread?: CodexThread; messages: PaneMessage[]; settings: ThreadSettings; plan?: PlanCard; claudeSession?: string; running: boolean; checkpoints: Map<string, Checkpoint> }
+interface Tab { id: string; name: string; thread?: CodexThread; messages: PaneMessage[]; settings: ThreadSettings; plan?: PlanCard; claudeSession?: string; running: boolean; checkpoints: Map<string, Checkpoint>; autoFixed?: boolean }
 interface BoardTask { id: string; title: string; column: "backlog" | "progress" | "review" | "done"; threadId?: string; createdAt: number }
 
 type ToPane =
@@ -51,13 +51,19 @@ type FromPane =
 
 // Cursor 3.18's built-in modes (docs/cursor-feature-atlas.md §3), mapped onto Codex: plan/spec use the
 // plan collaboration mode, ask/project are read-only, triage prefers the delegating effort, multitask is the board.
+const DEBUG_STAGES = [
+  { placeholder: "Enter additional context about the issue", prompt: "Debug mode, step 1 of 3: do NOT fix anything yet. Form hypotheses about the issue, add temporary instrumentation (logs/traces/assertions) at the points that will confirm or rule them out, then stop and ask me to reproduce the issue." },
+  { placeholder: "Issue reproduced, please proceed", prompt: "Debug mode, step 2 of 3: I have reproduced the issue with your instrumentation in place. Read the captured logs/traces (run the relevant commands or tests if needed), identify the root cause, fix it, and confirm the fix with evidence. Keep the instrumentation for now." },
+  { placeholder: "The issue has been fixed. Please clean up the instrumentation.", prompt: "Debug mode, step 3 of 3: the issue is fixed. Remove every piece of temporary instrumentation you added, keeping the fix, and summarise the root cause in two sentences." },
+];
+
 const BUILTIN_MODES: ModeInfo[] = [
-  { id: "agent", name: "Agent", icon: "∞", description: "Plan, search, make edits, run commands", placeholder: "Plan, search, build anything" },
+  { id: "agent", name: "Agent", icon: "∞", description: "Plan, search, make edits, run commands", placeholder: "Plan, search, build anything", autoFix: true },
   { id: "triage", name: "Triage", icon: "⇶", description: "Coordinate long-horizon tasks with delegated subagents", placeholder: "Describe the long-horizon task to coordinate", effort: "ultra", prompt: "Coordinate this as a long-horizon task: break it into sub-tasks, delegate what can run independently to subagents, integrate the results, and report what was done and what remains." },
   { id: "plan", name: "Plan", icon: "☰", description: "Create detailed plans for accomplishing tasks", placeholder: "Plan, Build, / for skills, @ for context", plan: true },
-  { id: "spec", name: "Spec", icon: "☑", description: "Create structured plans with implementation steps", placeholder: "Describe what to specify", plan: true, prompt: "Write a structured specification: goals, non-goals, architecture, data changes, then numbered implementation steps with acceptance criteria as a to-do list." },
-  { id: "debug", name: "Debug", icon: "✱", description: "Systematically diagnose and fix bugs using runtime traces", placeholder: "Enter additional context about the issue", prompt: "Debug systematically: first add temporary instrumentation (logs/traces) to confirm the hypothesis, reproduce the issue, then fix the root cause and remove the instrumentation. Report the evidence at each step." },
-  { id: "multitask", name: "Multitask", icon: "◎", description: "Run and coordinate multiple tasks in parallel", placeholder: "Add a task to the board", board: true },
+  { id: "spec", name: "Spec", icon: "☑", description: "Create structured plans with implementation steps", placeholder: "Describe what to specify", plan: true, spec: true, prompt: "Write a structured specification: goals, non-goals, architecture, data changes, then numbered implementation steps with acceptance criteria as a to-do list." },
+  { id: "debug", name: "Debug", icon: "✱", description: "Systematically diagnose and fix bugs using runtime traces", placeholder: "Enter additional context about the issue", debug: true, autoFix: true },
+  { id: "multitask", name: "Multitask", icon: "◎", description: "Run and coordinate multiple tasks in parallel", placeholder: "List the tasks to run in parallel (one per line)", parallel: true },
   { id: "chat", name: "Ask", icon: "◌", description: "Ask questions about your codebase", placeholder: "Ask, learn, brainstorm", readOnly: true },
   { id: "project", name: "Project", icon: "▣", description: "Special conversation mode for project-level discussions", placeholder: "Discuss the project", readOnly: true, prompt: "This is a project-level discussion: reason about architecture, scope and trade-offs across the whole repository; do not edit files." },
 ];
@@ -274,7 +280,8 @@ export class AgentPane implements vscode.WebviewViewProvider {
 
   private pushState(): void {
     const tab = this.active();
-    this.post({ type: "state", tabs: this.tabs.map((t) => ({ id: t.id, name: t.name, running: t.running })), activeId: tab.id, view: this.paneView, modes: this.modes(), access: this.access, models: this.models, settings: tab.settings, loading: this.loading });
+    const modes = this.modes().map((m) => (m.debug ? { ...m, placeholder: DEBUG_STAGES[tab.settings.debugStage ?? 0]!.placeholder } : m));
+    this.post({ type: "state", tabs: this.tabs.map((t) => ({ id: t.id, name: t.name, running: t.running })), activeId: tab.id, view: this.paneView, modes, access: this.access, models: this.models, settings: tab.settings, loading: this.loading });
   }
 
   private pushBoard(): void {
@@ -339,6 +346,19 @@ export class AgentPane implements vscode.WebviewViewProvider {
     if (!text.trim() || tab.running) return;
     const mode = this.modes().find((m) => m.id === tab.settings.mode) ?? BUILTIN_MODES[0]!;
     if (mode.board) { await this.onMessage({ type: "boardAdd", title: text.trim() }); await this.showBoard(); return; }
+    if (mode.parallel) { await this.runParallel(text); return; }
+    if (mode.spec && tab.plan?.path) {
+      // Cursor: "Spin up a new thread with this plan as context".
+      const rel = relative(this.cwd(), tab.plan.path);
+      const next = this.newTab(`Build: ${tab.plan.title}`.slice(0, 40));
+      next.settings.mode = "agent";
+      this.persist(next);
+      this.paneView = "chat";
+      this.pushState();
+      this.post({ type: "messages", messages: [] });
+      await this.send(`@${rel} ${text}`);
+      return;
+    }
     const cwd = this.cwd();
     tab.running = true;
     const checkpointId = `cp-${Date.now().toString(36)}`;
@@ -391,7 +411,9 @@ export class AgentPane implements vscode.WebviewViewProvider {
     const model = this.models.find((m) => m.id === tab.settings.modelId);
     const access = this.access.find((a) => a.id === tab.settings.accessId);
     const askAccess: AccessMode | undefined = mode.readOnly ? { id: ":read-only", label: "Read only", sandbox: "read-only", approvalPolicy: "on-request" } : access;
-    const prompt = this.expandMentions(mode.prompt ? `${mode.prompt}\n\n${text}` : text, cwd);
+    const stage = mode.debug ? DEBUG_STAGES[tab.settings.debugStage ?? 0]! : undefined;
+    const preset = stage?.prompt ?? mode.prompt;
+    const prompt = this.expandMentions(preset ? `${preset}\n\n${text}` : text, cwd);
     const rules = readRules(cwd);
     try {
       const effort = tab.settings.effortId as "low" | "medium" | "high" | "xhigh" | "max" | "ultra";
@@ -407,6 +429,8 @@ export class AgentPane implements vscode.WebviewViewProvider {
         }
         if (tab.name === "New Agent") tab.name = text.trim().slice(0, 40);
         this.post({ type: "done", ok: true });
+        if (mode.debug) { tab.settings.debugStage = (((tab.settings.debugStage ?? 0) + 1) % 3) as 0 | 1 | 2; this.persist(tab); }
+        if (mode.autoFix && !tab.autoFixed) void this.autoFix(tab, checkpointId);
       }
     } catch (error) {
       this.post({ type: "done", ok: false, error: error instanceof Error ? error.message : String(error) });
@@ -415,6 +439,48 @@ export class AgentPane implements vscode.WebviewViewProvider {
       tab.checkpoints.set(checkpointId, this.live.takeCheckpoint());
       this.pushState();
     }
+  }
+
+  /** Cursor's autoFix: after the agent edits, errors the language services report in the touched files go back to the agent once. */
+  private async autoFix(tab: Tab, checkpointId: string): Promise<void> {
+    await new Promise((r) => setTimeout(r, 1500));
+    const touched = [...(tab.checkpoints.get(checkpointId)?.keys() ?? [])];
+    const problems: string[] = [];
+    for (const abs of touched) {
+      for (const d of vscode.languages.getDiagnostics(vscode.Uri.file(abs))) {
+        if (d.severity !== vscode.DiagnosticSeverity.Error) continue;
+        problems.push(`${relative(this.cwd(), abs)}:${d.range.start.line + 1}: ${d.message}`);
+        if (problems.length >= 20) break;
+      }
+    }
+    if (!problems.length || tab.running) return;
+    tab.autoFixed = true;
+    try { await this.send(`Fix these problems reported by the language services in the files you edited (auto-fix):\n${problems.join("\n")}`); } finally { tab.autoFixed = false; }
+  }
+
+  /** Cursor's Multitask: one request becomes several tasks that run in parallel threads and appear on the board. */
+  private async runParallel(text: string): Promise<void> {
+    const items = text.split("\n").map((l) => l.replace(/^\s*(?:[-*]|\d+[.)])\s*/, "").trim()).filter(Boolean);
+    const tasks = items.length > 1 ? items : [text.trim()];
+    const board = this.context.workspaceState.get<BoardTask[]>("muster.board", []);
+    const runs: Promise<void>[] = [];
+    for (const title of tasks) {
+      const task: BoardTask = { id: `task-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`, title, column: "progress", createdAt: Date.now() };
+      board.push(task);
+      const tab = this.newTab(title.slice(0, 40));
+      tab.settings.mode = "agent";
+      runs.push((async () => {
+        this.activeId = tab.id;
+        await this.send(title);
+        if (tab.thread) task.threadId = tab.thread.id;
+        task.column = "review";
+        await this.context.workspaceState.update("muster.board", board);
+        this.pushBoard();
+      })());
+    }
+    await this.context.workspaceState.update("muster.board", board);
+    await this.showBoard();
+    await Promise.allSettled(runs);
   }
 
   /** @path mentions become context blocks; the mention text stays so the agent sees what was meant. */
@@ -647,7 +713,7 @@ function paneHtml(csp: string): string {
   .icon:hover { background: var(--bg-tertiary); }
   .icon svg { width: 16px; height: 16px; }
   .send { background: var(--fg); color: var(--vscode-editor-background); border-radius: 9999px; width: 24px; height: 24px; display: none; align-items: center; justify-content: center; cursor: pointer; }
-  body.dirty .send { display: inline-flex; } body.running .send { display: none; }
+  body.dirty .send, body.stage .send { display: inline-flex; } body.running .send { display: none; }
   .menu { position: fixed; top: 0; left: 0; visibility: hidden; min-width: 220px; max-width: 320px; max-height: 320px; overflow: auto; background: var(--vscode-dropdown-background, var(--vscode-editorWidget-background)); border: 1px solid var(--stroke-secondary); border-radius: var(--radius-lg); box-shadow: 0 6px 24px var(--vscode-widget-shadow); padding: 4px; z-index: 20; display: none; font-size: var(--fs-base); }
   .menu.open { display: block; visibility: visible; }
   .menu .group { padding: 6px 10px 2px; font-size: var(--fs-xs); color: var(--text-tertiary); text-transform: uppercase; letter-spacing: .3px; }
@@ -815,7 +881,7 @@ function paneHtml(csp: string): string {
   function renderState() {
     body.dataset.view = state.view; renderTabs();
     const mode = state.modes.find((m) => m.id === state.settings.mode) || state.modes[0];
-    $("mode-icon").textContent = mode.icon; $("mode-name").textContent = mode.name; $("mode-pill").classList.toggle("plan", mode.id === "plan");
+    $("mode-icon").textContent = mode.icon; $("mode-name").textContent = mode.name; $("mode-pill").classList.toggle("plan", mode.id === "plan" || mode.id === "spec"); body.classList.toggle("stage", mode.id === "debug" && mode.placeholder !== "Enter additional context about the issue");
     input.placeholder = planEl && mode.id === "spec" ? "Spin up a new thread with this plan as context" : (body.classList.contains("has-messages") && mode.id === "plan" ? "Steer the plan, or add more details" : mode.placeholder);
     const access = state.access.find((a) => a.id === state.settings.accessId); $("access-name").textContent = access ? access.label : (state.loading ? "…" : "Access");
     const model = state.models.find((m) => m.id === state.settings.modelId);
@@ -897,7 +963,7 @@ function paneHtml(csp: string): string {
     for (const f of files) { const row = document.createElement("div"); row.className = "file"; const parts = f.path.split("/"); const name = parts.pop(); row.innerHTML = '<span class="name">' + escape(name) + '</span><span class="dir">' + escape(parts.join("/")) + '</span><span class="adds">+' + f.adds + '</span><span class="dels">−' + f.dels + '</span>'; row.addEventListener("click", () => vscode.postMessage({ type: "open", path: f.path })); list.appendChild(row); }
   }
   function autosize() { input.style.height = "auto"; input.style.height = Math.min(240, Math.max(84, input.scrollHeight)) + "px"; body.classList.toggle("dirty", input.value.trim().length > 0); }
-  function send() { const text = input.value.trim(); if (!text || body.classList.contains("running")) return; vscode.postMessage({ type: "send", text }); input.value = ""; autosize(); }
+  function send() { let text = input.value.trim(); const mode = state && state.modes.find((m) => m.id === state.settings.mode); if (!text && mode && mode.id === "debug" && input.placeholder !== "Enter additional context about the issue") text = input.placeholder; if (!text || body.classList.contains("running")) return; vscode.postMessage({ type: "send", text }); input.value = ""; autosize(); }
   // @ files and / skills: a popover while typing, filled by the extension.
   let suggest = null, suggestTimer = null;
   function triggerAt() { const upto = input.value.slice(0, input.selectionStart); const m = /(^|\s)([@/])([\w./-]*)$/.exec(upto); return m ? { kind: m[2] === "@" ? "file" : "skill", start: upto.length - m[3].length - 1, query: m[3] } : null; }
