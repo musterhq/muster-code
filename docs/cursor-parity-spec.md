@@ -149,3 +149,19 @@ Mined from Cursor 3.18.25 (`workbench.desktop.main.js`: mention-menu modes and t
 - **Inline mentions**: quiet pill (`fg` 12 %, radius 6, padding 1px 4px) on the backdrop once a token is complete; unresolved tokens dashed; the token under the caret is not a pill until chosen. **Context pills** above the input follow `.context-pill`: 20 px, 12 px text, 1 px `stroke-secondary` border, radius 4, icon (codicon or extension badge) that turns into × on hover; "Add Context" is a dashed suggestion pill.
 - **No timers on the keystroke path**: Chromium aligns timers to 1 s in an occluded window, which made the old 40 ms debounce fire 130–640 ms late; requests go out per keystroke with a sequence guard, and the extension answers from memory in 0–9 ms.
 - Verified through the harness composer probe (`{"cmd":"pane","input":"…"}` then `{"cmd":"pane"}` → `probe.rows/chips/marks`) for `@`, `@agent-p`, `@brow`, `/`, `/rev` and a mixed prompt.
+
+## Pending against Cursor — consolidated 2026-09-03 (night; supersedes the checklist at the top)
+**Built and verified live**: IDE shell/skin/themes/chrome; Agent pane (tabs, history per folder, board, discovered modes and behaviours, Codex+Claude model picker, efforts, access modes, inherited threads with full history); plan mode end to end (plan card, to-do selection, planned-with model, build model picker, `.plan.md` editor + breadcrumb toolbar, plan checkpoints); realtime inline diff with token boxes, hunk widgets, review bar, multi-file Keep all / Review next file, review on commit; browser (editor tab + pane tab, pick → source, screenshot, console, `@browser`, agent tools via the shim, Take control, Changes tab); `@` and `/` typeahead on Cursor's structure; context kinds files/ranges, git diff/branch/commit, terminals, docs, past chats, web, browser, images; custom commands; skills/plugins/MCP listing; settings page; usage chip; dev harness.
+**Built, not yet verified with real turns**: editor ⌘K prompt bar and terminal ⌘K; Debug stages, Triage, Multitask, Spec, Ask; checkpoint restore/redo; approvals and elicitations (computer use); Claude turns; Muster Tab completions (off by default); browser tools from Codex's `exec` tool-search runtime (launcher fix applied).
+**Pending**:
+1. Terminal tool execution as Cursor cards: live stdout/stderr, Run / Skip, approval inside the chat (⏎ / ⇧⏎ / Esc) instead of VS Code notifications, background continuation.
+2. Markdown renderer: file-path links, tables, copy/apply on code blocks, streaming caret, citations; Mermaid (V2).
+3. Cursor Tab: partial accept (⌘→), next-edit prediction, snooze, status-bar state; the provider itself exists.
+4. Checkpoints per human message with `thread/rollback` + workspace snapshot; "Redo checkpoint" after restore (partial).
+5. Multi-file review editor ("Review Changes": changed-files tree, per-file Keep/Undo, unified/split) — today: per-file cards + review bar + `vscode.changes`.
+6. Context kinds still missing: `@folder`, `@code`/symbols, `@link` (URLs), rules as mentions, current-file suggestion pill, PR / PR diff, projects, MCP attachments; pill hover actions (Open / Remove / Collapse); hovered-file side preview in the menu.
+7. Settings pages Cursor-style for rules (enable state, auto/manual, Markdown editor), MCP (enable/disable, tools, health, auth, logs), skills, hooks, custom modes editor.
+8. Shortcut parity pass from the atlas table (⌘. mode cycle, ⇧⌘L, ⌥⌘E, ⇧⌘B, ⌘⏎/⌘⇧⌫, ⌘Y/⌘N, ⌥J/⌥K, ⌥L/⌥H) with `when` clauses.
+9. Browser: bookmarks bar, DevTools/network, certificate overlay UI, headless tabs, tools for Claude turns; agent screenshot annotations.
+10. Dictation; thread rename/pin/archive/export in the history tab; "Generating… Stop ⇧⌘⌫" label state.
+11. V2 (owner: not yet important): Agents window, background agents, worktrees; git review surface.
