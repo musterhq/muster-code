@@ -39,7 +39,8 @@
       "workbench.editor.empty.hint": "text",
       "diffEditor.renderSideBySide": false,
       "diffEditor.ignoreTrimWhitespace": false,
-      "chat.disableAIFeatures": true
+      "chat.disableAIFeatures": true,
+      "workbench.activityBar.autoHide": true
     }
   },
   "scripts": {

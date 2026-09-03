@@ -291,14 +291,33 @@
   Registry.registerCommand("muster.cmdk.hide", (accessor, args) => hideBar(args.uri));
   Registry.registerCommand("muster.cmdk.status", (accessor, args) => { const bar = bars.get(args.uri); if (bar) bar.status.textContent = args.text || ""; });
 
-  // Cursor: the agent pane has no separate header rows — its tab row is the header. Hide the
-  // secondary sidebar's composite bar and title (their actions live in the pane's own tab row).
-  function trimAuxBar() {
-    for (const node of document.querySelectorAll(".part.auxiliarybar > .composite.header, .part.auxiliarybar > .composite.title")) node.style.setProperty("display", "none", "important");
+  // Cursor: the agent pane's header is its tab strip. Render the pane's tabs into the secondary
+  // sidebar's title row, beside the view actions (+, history, …); the composite bar is hidden by
+  // workbench.activityBar.autoHide (single container), so the layout stays VS Code's own.
+  let agentHeader = { tabs: [], activeId: "" };
+  function renderAgentHeader() {
+    const title = document.querySelector(".part.auxiliarybar > .composite.title");
+    if (!title) return;
+    const label = title.querySelector(":scope > .title-label");
+    if (label) label.style.display = "none";
+    let strip = title.querySelector(":scope > .muster-tabs");
+    if (!strip) { strip = el("div", "muster-tabs"); title.insertBefore(strip, title.firstChild); }
+    strip.textContent = "";
+    for (const tab of agentHeader.tabs) {
+      const node = el("div", "muster-tab" + (tab.id === agentHeader.activeId ? " active" : ""));
+      node.title = tab.name;
+      if (tab.running) node.append(el("span", "dot"));
+      node.append(el("span", "name", tab.name));
+      const close = el("span", "x", "×"); close.title = "Close";
+      close.addEventListener("click", (e) => { e.stopPropagation(); run("muster.agent.closeTab", { id: tab.id }); });
+      node.append(close);
+      node.addEventListener("click", () => run("muster.agent.tab", { id: tab.id }));
+      strip.append(node);
+    }
   }
-  trimAuxBar();
-  const auxObserver = new MutationObserver(() => trimAuxBar());
-  auxObserver.observe(document.body, { childList: true, subtree: true });
+  Registry.registerCommand("muster.agentHeader.set", (accessor, args) => { commands = commands || accessor.get(ICommandService); agentHeader = { tabs: args.tabs || [], activeId: args.activeId || "" }; renderAgentHeader(); });
+  const headerObserver = new MutationObserver(() => { const title = document.querySelector(".part.auxiliarybar > .composite.title"); if (title && !title.querySelector(":scope > .muster-tabs")) renderAgentHeader(); });
+  headerObserver.observe(document.body, { childList: true, subtree: true });
 
   // Cursor's plan editor toolbar lives in the breadcrumb row: Preview ⌄ · model ⌄ · Build ⌘⏎ ⌄.
   let planToolbar = { visible: false, model: "", count: 0, selected: 0 };

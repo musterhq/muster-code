@@ -200,8 +200,6 @@
 .monaco-editor .muster-cmdk-status { font-size: 11px; color: color-mix(in srgb, var(--vscode-editor-foreground) 66%, transparent); min-height: 0; }
 
 /* ── Agent pane density: the webview's tab row is the header (Cursor) ── */
-.monaco-workbench .part.auxiliarybar > .title { display: none !important; }
-.monaco-workbench .part.auxiliarybar .content .pane-header { display: none !important; }
 
 /* ── Plan editor toolbar in the breadcrumb row (Cursor) ── */
 .monaco-workbench .breadcrumbs-control { position: relative; }
@@ -214,3 +212,16 @@
 .monaco-workbench .pbc-build { height: 20px; padding: 0 8px; background: #D2943E; color: #1a1a1a; border: 0; font: inherit; font-size: 12px; font-weight: 500; cursor: pointer; display: inline-flex; align-items: center; gap: 5px; }
 .monaco-workbench .pbc-build kbd { font-family: inherit; color: #1a1a1a; opacity: .7; }
 .monaco-workbench .pbc-more { width: 18px; height: 20px; display: inline-flex; align-items: center; justify-content: center; background: #D2943E; color: #1a1a1a; border-left: 1px solid rgba(0,0,0,.25); cursor: pointer; font-size: 8px; }
+
+/* ── Agent pane header = tab strip (rendered into the secondary sidebar's title row) ── */
+.monaco-workbench .part.auxiliarybar > .composite.title { padding-left: 6px; }
+.monaco-workbench .muster-tabs { display: flex; align-items: center; gap: 2px; flex: 1 1 auto; min-width: 0; overflow-x: auto; scrollbar-width: none; height: 35px; }
+.monaco-workbench .muster-tabs::-webkit-scrollbar { display: none; }
+.monaco-workbench .muster-tab { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 6px 0 10px; border-radius: 6px; font-size: 13px; color: color-mix(in srgb, var(--vscode-editor-foreground) 66%, transparent); white-space: nowrap; max-width: 220px; cursor: pointer; flex: 0 0 auto; }
+.monaco-workbench .muster-tab .name { overflow: hidden; text-overflow: ellipsis; }
+.monaco-workbench .muster-tab.active { background: color-mix(in srgb, var(--vscode-editor-foreground) 8%, transparent); color: var(--vscode-editor-foreground); }
+.monaco-workbench .muster-tab:hover { background: color-mix(in srgb, var(--vscode-editor-foreground) 6%, transparent); }
+.monaco-workbench .muster-tab .x { width: 16px; height: 16px; border-radius: 3px; display: inline-flex; align-items: center; justify-content: center; color: color-mix(in srgb, var(--vscode-editor-foreground) 36%, transparent); font-size: 12px; visibility: hidden; }
+.monaco-workbench .muster-tab:hover .x, .monaco-workbench .muster-tab.active .x { visibility: visible; }
+.monaco-workbench .muster-tab .x:hover { background: color-mix(in srgb, var(--vscode-editor-foreground) 14%, transparent); color: var(--vscode-editor-foreground); }
+.monaco-workbench .muster-tab .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--vscode-charts-green); }

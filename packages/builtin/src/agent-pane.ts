@@ -350,8 +350,13 @@ export class AgentPane implements vscode.WebviewViewProvider {
     void this.view?.webview.postMessage(message);
   }
 
+  activateTab(id: string): void { void this.onMessage({ type: "activateTab", id }); }
+  closeTab(id: string): void { void this.onMessage({ type: "closeTab", id }); }
+
   private pushState(): void {
     const tab = this.active();
+    // Cursor: the tab strip is the pane header. The workbench renders it in the sidebar's title row.
+    void vscode.commands.executeCommand("muster.agentHeader.set", { tabs: this.tabs.map((t) => ({ id: t.id, name: t.name, running: t.running })), activeId: tab.id });
     const modes = this.modes().map((m) => (m.debug ? { ...m, placeholder: DEBUG_STAGES[tab.settings.debugStage ?? 0]!.placeholder } : m));
     this.post({ type: "state", tabs: this.tabs.map((t) => ({ id: t.id, name: t.name, running: t.running })), activeId: tab.id, view: this.paneView, modes, access: this.access, models: this.models, settings: tab.settings, loading: this.loading, canRedo: !!tab.redo });
   }
@@ -721,7 +726,7 @@ function paneHtml(csp: string): string {
   html, body { height: 100%; margin: 0; }
   body { font-family: var(--vscode-font-family); font-size: var(--fs-lg); line-height: var(--lh-lg); color: var(--fg); background: transparent; -webkit-font-smoothing: subpixel-antialiased; display: flex; flex-direction: column; overflow: hidden; }
   button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; }
-  #tabs { display: flex; align-items: center; gap: 2px; padding: 4px 6px 2px; overflow-x: auto; scrollbar-width: none; flex: 0 0 auto; border-bottom: 1px solid var(--stroke-tertiary); }
+  #tabs { display: none; }
   #tabs::-webkit-scrollbar { display: none; }
   .tab { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 8px 0 10px; border-radius: var(--radius-base); font-size: var(--fs-base); color: var(--text-secondary); white-space: nowrap; max-width: 220px; cursor: pointer; flex: 0 0 auto; }
   .tab .name { overflow: hidden; text-overflow: ellipsis; }

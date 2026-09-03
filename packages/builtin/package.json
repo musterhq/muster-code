@@ -216,6 +216,14 @@
       {
         "command": "muster.plan.buildMenu",
         "title": "Build Options"
+      },
+      {
+        "command": "muster.agent.tab",
+        "title": "Activate Agent Tab"
+      },
+      {
+        "command": "muster.agent.closeTab",
+        "title": "Close Agent Tab"
       }
     ],
     "configuration": {
@@ -278,11 +286,6 @@
           "command": "muster.agent.history",
           "when": "view == muster.agent.pane",
           "group": "navigation@2"
-        },
-        {
-          "command": "muster.agent.board",
-          "when": "view == muster.agent.pane",
-          "group": "navigation@3"
         },
         {
           "command": "muster.agent.more",

@@ -113,7 +113,7 @@ function planHtml(csp: string): string {
   #sel { color: var(--text-tertiary); font-size: 12px; }
 </style></head>
 <body>
-  <div id="bar">
+  <div id="bar" style="display:none">
     <span class="crumb"><span class="ic">☰</span><span id="name">plan.md</span></span>
     <span class="spacer"></span>
     <span id="sel"></span>
