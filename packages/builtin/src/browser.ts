@@ -67,7 +67,9 @@ export class BrowserController {
 
   /** Cursor's browser editor: a tab in the editor area (beside the code), with the navbar and tools drawn by the tab itself. */
   private openEditor(tab: BrowserState): void {
-    const column = this.groupColumn ?? vscode.ViewColumn.Beside;
+    const groups = vscode.window.tabGroups.all;
+    const empty = groups.find((g) => g.tabs.length === 0);
+    const column = this.groupColumn ?? empty?.viewColumn ?? (groups.length >= 2 ? groups[groups.length - 1]!.viewColumn : vscode.ViewColumn.Beside);
     const panel = vscode.window.createWebviewPanel("muster.browserTab", `Browser ${tab.id}`, column, { enableScripts: true, retainContextWhenHidden: true });
     this.groupColumn = panel.viewColumn ?? column;
     panel.iconPath = vscode.Uri.joinPath(this.context.extensionUri, "resources", "muster.svg");

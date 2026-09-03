@@ -40,6 +40,7 @@ type ToPane =
   | { type: "threads"; items: { id: string; name: string; project: string; age: string; turns: number; size: string; live: boolean; pinned: boolean }[] }
   | { type: "board"; columns: { id: string; title: string; cards: { id: string; title: string; subtitle: string; running: boolean }[] }[] }
   | { type: "suggestions"; kind: "file" | "skill"; items: { label: string; detail: string; insert: string; group?: string }[] }
+  | { type: "validated"; ok: string[]; bad: string[] }
   | { type: "openModeMenu" }
   | { type: "insert"; text: string };
 type FromPane =
@@ -50,7 +51,7 @@ type FromPane =
   | { type: "setMode"; id: string } | { type: "setAccess"; id: string } | { type: "setModel"; id: string } | { type: "setEffort"; id: string }
   | { type: "pin"; id: string; pinned: boolean }
   | { type: "viewPlan" } | { type: "buildPlan"; todos?: number[]; model?: string; newThread?: boolean }
-  | { type: "suggest"; kind: "file" | "skill"; query: string } | { type: "restore"; id: string } | { type: "attach" } | { type: "command"; id: string } | { type: "redo" }
+  | { type: "suggest"; kind: "file" | "skill"; query: string } | { type: "restore"; id: string } | { type: "attach" } | { type: "validate"; tokens: string[] } | { type: "command"; id: string } | { type: "redo" }
   | { type: "openReview" }
   | { type: "boardAdd"; title: string } | { type: "boardRun"; id: string } | { type: "boardMove"; id: string; column: BoardTask["column"] }
   | { type: "browserNav"; id: string; url: string } | { type: "browserAction"; id: string; action: "back" | "forward" | "reload" | "pick" | "screenshot" } | { type: "browserRect"; id: string; rect: { top: number; left: number; width: number; height: number }; visible: boolean } | { type: "browserToChat"; id: string } | { type: "newBrowser" };
@@ -456,6 +457,7 @@ export class AgentPane implements vscode.WebviewViewProvider {
       case "closeTab": { const closing = this.tabs.find((t) => t.id === message.id); if (closing?.kind === "browser" && closing.browserId) this.browser?.close(closing.browserId); this.tabs = this.tabs.filter((t) => t.id !== message.id); if (!this.tabs.length) this.newTab(); if (!this.tabs.some((t) => t.id === this.activeId)) this.activeId = this.tabs[this.tabs.length - 1]!.id; const now = this.active(); this.paneView = now.kind === "browser" ? "browser" : "chat"; this.pushState(); if (now.kind === "browser" && now.browserId) { const st = this.browser?.get(now.browserId); if (st) this.post({ type: "browser", state: st }); } else this.post({ type: "messages", messages: now.messages }); void vscode.commands.executeCommand("setContext", "muster.browserActive", now.kind === "browser"); return; }
       case "openThread": { const thread = (await this.visibleThreads()).find((t) => t.id === message.id); if (thread) await this.openThread(thread); else void vscode.window.showWarningMessage("That thread belongs to another folder."); return; }
       case "suggest": { this.post({ type: "suggestions", kind: message.kind, items: await this.suggest(message.kind, message.query) }); return; }
+      case "validate": { const ok: string[] = []; const bad: string[] = []; for (const t of message.tokens) ((await this.tokenResolves(t)) ? ok : bad).push(t); this.post({ type: "validated", ok, bad }); return; }
       case "attach": {
         const picked = await vscode.window.showOpenDialog({ canSelectMany: true, filters: { Images: ["png", "jpg", "jpeg", "gif", "webp"] }, openLabel: "Attach" });
         for (const uri of picked ?? []) this.post({ type: "insert", text: `@image:${uri.fsPath} ` });
@@ -713,6 +715,18 @@ export class AgentPane implements vscode.WebviewViewProvider {
     return blocks.length ? `${prompt}\n\nContext:\n${blocks.join("\n")}` : prompt;
   }
 
+  /** Does a mention resolve to something the turn will attach? (Drives the pill colour in the composer.) */
+  private async tokenResolves(token: string): Promise<boolean> {
+    const cwd = this.cwd();
+    if (token.startsWith("/")) { this.skills ??= await listSkills(cwd); return this.skills.some((s) => `/${s.name}` === token); }
+    const body = token.slice(1);
+    if (["browser", "web", "terminal", "git:diff", "git:branch"].includes(body) || body.startsWith("terminal:") || body.startsWith("git:commit:")) return true;
+    if (body.startsWith("image:")) return existsSync(body.slice(6));
+    if (body.startsWith("docs:")) return vscode.workspace.getConfiguration("muster").get<{ name: string }[]>("docs", []).some((d) => d.name.toLowerCase() === body.slice(5).toLowerCase());
+    if (body.startsWith("chat:")) return (await this.visibleThreads()).some((t) => t.id === body.slice(5));
+    return existsSync(join(cwd, body.replace(/:\d+-\d+$/, "")));
+  }
+
   private async suggest(kind: "file" | "skill", query: string): Promise<{ label: string; detail: string; insert: string }[]> {
     if (kind === "skill") {
       this.skills ??= await listSkills(this.cwd());
@@ -950,7 +964,17 @@ function paneHtml(csp: string): string {
   @container (max-width: 300px) { .pill.mode .lbl { display: none; } .icon[title="Dictate"] { display: none; } }
   #composer:focus-within { border-color: var(--stroke-primary); }
   body:not(.has-messages)[data-view="chat"] #composer { order: -1; }
-  #input { width: 100%; min-height: 64px; max-height: 240px; resize: none; border: 0; outline: 0; background: transparent; color: var(--fg); font: inherit; font-size: var(--fs-lg); line-height: var(--lh-lg); padding: 0; }
+  .ctxrow { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 6px; }
+  .ctx { display: inline-flex; align-items: center; gap: 4px; height: 20px; padding: 0 7px; border-radius: 5px; font-size: var(--fs-xs); background: color-mix(in srgb, var(--amber) 18%, transparent); color: var(--fg); border: 1px solid color-mix(in srgb, var(--amber) 45%, transparent); white-space: nowrap; max-width: 220px; }
+  .ctx .n { overflow: hidden; text-overflow: ellipsis; }
+  .ctx .x { color: var(--text-tertiary); cursor: pointer; margin-left: 2px; } .ctx .x:hover { color: var(--fg); }
+  .ctx.bad { background: transparent; border-style: dashed; border-color: var(--stroke-primary); color: var(--text-tertiary); }
+  .ctx.add { background: transparent; border: 1px solid var(--stroke-secondary); color: var(--text-secondary); cursor: pointer; } .ctx.add:hover { color: var(--fg); border-color: var(--stroke-primary); }
+  .inputwrap { position: relative; }
+  #backdrop { position: absolute; inset: 0; overflow: hidden; pointer-events: none; color: transparent; white-space: pre-wrap; word-wrap: break-word; font: inherit; font-size: var(--fs-lg); line-height: var(--lh-lg); padding: 0; }
+  #backdrop mark { color: transparent; background: color-mix(in srgb, var(--amber) 24%, transparent); box-shadow: 0 0 0 1px color-mix(in srgb, var(--amber) 45%, transparent), 0 0 8px color-mix(in srgb, var(--amber) 25%, transparent); border-radius: 4px; }
+  #backdrop mark.bad { background: transparent; box-shadow: 0 0 0 1px color-mix(in srgb, var(--fg) 25%, transparent); }
+  #input { position: relative; z-index: 1; width: 100%; min-height: 64px; max-height: 240px; resize: none; border: 0; outline: 0; background: transparent; color: var(--fg); font: inherit; font-size: var(--fs-lg); line-height: var(--lh-lg); padding: 0; }
   #input::placeholder { color: var(--vscode-input-placeholderForeground); }
   .bar { display: flex; align-items: center; gap: 6px; margin-top: 6px; min-width: 0; }
   .pill { display: inline-flex; align-items: center; gap: 5px; height: 22px; padding: 0 7px; border-radius: var(--radius-base); font-size: var(--fs-sm); color: var(--fg); cursor: pointer; white-space: nowrap; min-width: 0; flex: 0 1 auto; }
@@ -1019,7 +1043,8 @@ function paneHtml(csp: string): string {
     <div id="review"><div class="head" id="review-head"><span class="chev">▶</span><span id="review-summary">1 file</span><span class="adds" id="review-adds">+0</span><span class="dels" id="review-dels">−0</span><span class="spacer"></span><button class="btn text" id="review-open" title="Review Changes editor">Review</button><button class="btn text" id="review-reject">Reject</button><button class="btn primary" id="review-accept">Accept</button></div><div class="files" id="review-files"></div></div>
     <div id="status"><span>Generating..</span><span class="stop" id="stop">Stop<kbd>⇧⌘⌫</kbd></span></div>
     <div id="composer">
-      <textarea id="input" placeholder="Plan, search, build anything" rows="1"></textarea>
+      <div class="ctxrow" id="ctxrow"><span class="ctx add" id="ctx-add">@ Add Context</span></div>
+      <div class="inputwrap"><div id="backdrop"></div><textarea id="input" placeholder="Plan, search, build anything" rows="1"></textarea></div>
       <div class="bar">
         <span class="pill mode" id="mode-pill"><span id="mode-icon">∞</span><span class="lbl" id="mode-name">Agent</span><span class="chev">▼</span></span>
         <span class="pill access" id="access-pill" title="Access"><span class="lbl" id="access-name">…</span><span class="chev">▼</span></span>
@@ -1260,7 +1285,25 @@ function paneHtml(csp: string): string {
     const list = $("review-files"); list.innerHTML = "";
     for (const f of files) { const row = document.createElement("div"); row.className = "file"; const parts = f.path.split("/"); const name = parts.pop(); row.innerHTML = '<span class="name">' + escape(name) + '</span><span class="dir">' + escape(parts.join("/")) + '</span><span class="adds">+' + f.adds + '</span><span class="dels">−' + f.dels + '</span>'; row.addEventListener("click", () => vscode.postMessage({ type: "open", path: f.path })); list.appendChild(row); }
   }
-  function autosize() { input.style.height = "auto"; input.style.height = Math.min(240, Math.max(84, input.scrollHeight)) + "px"; body.classList.toggle("dirty", input.value.trim().length > 0); }
+  // Mentions light up like the Plan pill when they resolve; a chips row mirrors them with remove buttons (Cursor's context row).
+  const TOKEN = /(^|\s)(@[\w./:-]+|\/[\w-]+)/g;
+  let tokenOk = new Set(), tokenBad = new Set(), validateTimer = null;
+  function tokensIn(text) { const out = []; let m; TOKEN.lastIndex = 0; while ((m = TOKEN.exec(text))) out.push(m[2]); return out; }
+  function renderTokens() {
+    const text = input.value;
+    let html = ""; let last = 0; TOKEN.lastIndex = 0; let m;
+    while ((m = TOKEN.exec(text))) { const start = m.index + m[1].length; html += escape(text.slice(last, start)) + '<mark class="' + (tokenBad.has(m[2]) ? "bad" : "") + '">' + escape(m[2]) + '</mark>'; last = start + m[2].length; }
+    html += escape(text.slice(last)) + "\n";
+    $("backdrop").innerHTML = html; $("backdrop").scrollTop = input.scrollTop;
+    const row = $("ctxrow"); [...row.querySelectorAll(".ctx:not(.add)")].forEach((c) => c.remove());
+    const seen = new Set();
+    for (const t of tokensIn(text)) { if (seen.has(t)) continue; seen.add(t); const chip = document.createElement("span"); chip.className = "ctx" + (tokenBad.has(t) ? " bad" : ""); chip.title = t; const label = t.startsWith("@image:") ? "🖼 " + t.split("/").pop() : t.startsWith("@") ? "@ " + t.slice(1).split("/").pop() : t; chip.innerHTML = '<span class="n">' + escape(label) + '</span><span class="x" title="Remove">×</span>'; chip.querySelector(".x").addEventListener("click", () => { input.value = input.value.replace(new RegExp("(^|\\s)" + t.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&") + "(?=\\s|$)"), "$1").replace(/  +/g, " "); autosize(); input.focus(); }); row.appendChild(chip); }
+    const toks = [...seen].filter((t) => !tokenOk.has(t) && !tokenBad.has(t));
+    if (toks.length) { clearTimeout(validateTimer); validateTimer = setTimeout(() => vscode.postMessage({ type: "validate", tokens: toks }), 150); }
+  }
+  input.addEventListener("scroll", () => { $("backdrop").scrollTop = input.scrollTop; });
+  $("ctx-add").addEventListener("click", () => { const at = input.selectionStart; const pre = input.value.slice(0, at); const needsSpace = pre && !/\s$/.test(pre); input.value = pre + (needsSpace ? " @" : "@") + input.value.slice(at); const caret = pre.length + (needsSpace ? 2 : 1); input.setSelectionRange(caret, caret); input.focus(); input.dispatchEvent(new Event("input")); });
+  function autosize() { input.style.height = "auto"; input.style.height = Math.min(240, Math.max(64, input.scrollHeight)) + "px"; $("backdrop").style.height = input.style.height; body.classList.toggle("dirty", input.value.trim().length > 0); renderTokens(); }
   function send() { let text = input.value.trim(); const mode = state && state.modes.find((m) => m.id === state.settings.mode); if (!text && mode && mode.id === "debug" && input.placeholder !== "Enter additional context about the issue") text = input.placeholder; if (!text || body.classList.contains("running")) return; vscode.postMessage({ type: "send", text }); input.value = ""; autosize(); }
   // @ files and / skills: a popover while typing, filled by the extension.
   let suggest = null, suggestTimer = null;
@@ -1320,6 +1363,7 @@ function paneHtml(csp: string): string {
     else if (m.type === "threads") { threads = m.items; renderHistory(); }
     else if (m.type === "board") { renderBoard(m.columns); }
     else if (m.type === "suggestions") { renderSuggestions(m.kind, m.items); }
+    else if (m.type === "validated") { for (const t of m.ok) { tokenOk.add(t); tokenBad.delete(t); } for (const t of m.bad) { tokenBad.add(t); tokenOk.delete(t); } renderTokens(); }
     else if (m.type === "openModeMenu") { openMenu("mode", $("mode-pill")); }
     else if (m.type === "insert") { const at = input.selectionStart; input.value = input.value.slice(0, at) + m.text + input.value.slice(at); input.setSelectionRange(at + m.text.length, at + m.text.length); autosize(); input.focus(); }
     else if (m.type === "done") { body.classList.remove("running"); if (thinkingEl) thinkingEl.querySelector("summary").textContent = "Thought"; if (!m.ok) { const e = document.createElement("div"); e.className = "error"; e.textContent = m.error || "Failed"; messages.appendChild(e); } assistantEl = thinkingEl = null; scroll(); }
