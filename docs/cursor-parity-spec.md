@@ -83,3 +83,8 @@ Sources: `docs/reference/cursor-inline-diff.css`, `docs/reference/cursor-widgets
 - Chat shows a plan card: file header (plan icon, filename, export + expand icons), rendered title + summary, a nested "N To-dos" box with radio circles and "··· k more", footer "View Plan" (text button) · model picker · amber "Build ⌘⏎ ⌄".
 - Human bubbles clip long text with a bottom fade; each carries a "Restore Checkpoint" icon button (`anysphere-icon-button`, 26px tall, `--cursor-text-primary`), replaced by "Stop ⇧⌘⌫" while running.
 - Mode pill in plan mode is amber-tinted with the plan icon; right cluster: spinner · @ · globe · image · mic.
+
+
+## Status update 2026-09-03 (afternoon)
+- Realtime inline diff: DONE and verified live (Cursor architecture: workbench contribution + extension bridge). Original visible, red ghost rows (tokenized, no line numbers), green added lines streaming token by token, ruler marks, follow-scroll, per-hunk "n of m · Reject ⌘N · Accept ⌘Y" widgets (compact when text collides), bottom "Undo All / Keep All" bar, per-hunk/file/all accept-reject, clean disk convergence. Remaining polish listed in docs/HANDOFF.md §7a.
+- Agent pane: composer + review bar exist; the Cursor chat rebuild (tabs, history, non-hardcoded models/modes incl. Kanban + access modes, inherited full history, diff preview cards, plan cards, approvals) is specified in docs/HANDOFF.md §7b — next.

@@ -74,10 +74,11 @@ printf '%s\n' '{"cmd":"exec","command":"workbench.action.reloadWindow"}' | nc -U
 # stream a patch into the running editor (no Codex quota needed) and inspect
 printf '%s\n' "$(python3 -c 'import json;print(json.dumps({"cmd":"replay","patch":open("patch.txt").read(),"pace":45,"chunk":4,"itemId":"dev-1"}))')" | nc -U /tmp/mc-dev.sock
 printf '%s\n' '{"cmd":"state"}' | nc -U /tmp/mc-dev.sock
-screencapture -x shot.png          # then look at it; sample pixels with a pure-python PNG reader if needed
+screencapture -x shot.png          # full screen captures whatever the owner is doing — prefer the app window only:
+# WID=$(osascript -e 'tell app "System Events" to id of window 1 of process "Muster Code"'); screencapture -x -l "$WID" shot.png (fall back to full screen only if the window id lookup fails)
 ```
 
-Rules learned the hard way: kill every stale instance before relaunching (`ps -A | grep mc-udd`; two instances on one profile → "Could not register service worker", blank webviews); the workbench patch must run after any product.json edit (checksums); `engines.vscode` must be a real version; extension id = manifest `name` ("muster-code"); `defaultChatAgent` must exist; the chat-extension auto-disable must stay patched.
+Rules learned the hard way: after `reloadWindow` never delete the socket file (the new ext host recreates it within ~2 s; deleting it strands the harness); kill every stale instance before relaunching (`ps -A | grep mc-udd`; two instances on one profile → "Could not register service worker", blank webviews); the workbench patch must run after any product.json edit (checksums); `engines.vscode` must be a real version; extension id = manifest `name` ("muster-code"); `defaultChatAgent` must exist; the chat-extension auto-disable must stay patched.
 
 ## 4. Done and verified (2026-09-03)
 
@@ -86,7 +87,7 @@ Rules learned the hard way: kill every stale instance before relaunching (`ps -A
 - Agent pane: composer per Cursor tokens, edit cards with live +/-, review bar "▸ N files +a −d · Reject · Accept" with per-file rows.
 - Core hooks (`onEvent`/`onRequest`) + request-detection fix, unit-tested (core 737/737).
 
-Known defects at handoff (fixes written, awaiting a window reload + screenshot check):
+Verified after reload (2026-09-03 14:10 IST): Accept button visible (green), bottom bar "⌃ 1 / 3 ⌄ · Undo All ⌘⌫ · Keep All ⌘⏎" rendered, compact widget on long lines, accept-hunk → 2 hunks left, undo-file → clean buffer + original disk. The fixes were:
 - Accept button invisible → `isolation: isolate` added to `.muster-btn` / `.muster-nav` (the green `::before` at z-index −1 needs a stacking context).
 - Bottom review bar off-screen → Monaco's overlay container has width only; the bar is now positioned by `top = editor height − bar height − 14`.
 - Widgets now switch to a compact (shortcut-only) form when the line's text would collide (`textEnd + 32 > width − right − widgetWidth`), as Cursor does.
