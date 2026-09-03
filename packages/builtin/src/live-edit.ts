@@ -189,8 +189,12 @@ export class LiveEditController {
   async acceptAll(): Promise<void> { for (const file of [...this.files.values()]) await this.acceptFile(file); }
   async rejectAll(): Promise<void> { for (const file of [...this.files.values()]) await this.rejectFile(file); }
 
-  async open(path: string): Promise<void> {
-    await vscode.window.showTextDocument(vscode.Uri.file(resolve(this.cwd(), path)), { preview: false });
+  /** Open the file from a chat card; with ifClosed, only when no editor shows it yet (keeps the diff toggle a no-op otherwise). */
+  async open(path: string, ifClosed = false): Promise<void> {
+    const uri = vscode.Uri.file(resolve(this.cwd(), path));
+    const shown = vscode.window.visibleTextEditors.some((e) => e.document.uri.fsPath === uri.fsPath);
+    if (ifClosed && shown) return;
+    await vscode.window.showTextDocument(uri, { preview: false, preserveFocus: ifClosed });
   }
 
   // ── streaming ──

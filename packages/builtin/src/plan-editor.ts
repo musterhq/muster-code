@@ -13,16 +13,48 @@ export interface PlanEditorHost {
 
 export class PlanEditorProvider implements vscode.CustomTextEditorProvider {
   static readonly viewType = "muster.planEditor";
+  private readonly panels = new Map<string, { panel: vscode.WebviewPanel; document: vscode.TextDocument; selection: number[]; todos: number; model: string }>();
+  private activeUri: string | undefined;
 
   constructor(private readonly host: PlanEditorHost) {}
+
+  /** The plan editor that is active right now (for the breadcrumb toolbar's commands). */
+  active(): { uri: vscode.Uri; selection: number[]; model: string } | undefined {
+    const entry = this.activeUri ? this.panels.get(this.activeUri) : undefined;
+    return entry ? { uri: entry.document.uri, selection: entry.selection, model: entry.model } : undefined;
+  }
+
+  refreshAll(): void {
+    for (const entry of this.panels.values()) void entry.panel.webview.postMessage({ type: "plan", text: entry.document.getText(), name: entry.document.uri.path.split("/").pop() ?? "plan.md", models: this.host.models(), model: entry.model || this.host.currentModel() || "" });
+    this.syncToolbar();
+  }
+
+  setModel(id: string): void {
+    const entry = this.activeUri ? this.panels.get(this.activeUri) : undefined;
+    if (entry) { entry.model = id; this.refreshAll(); }
+  }
+
+  private syncToolbar(): void {
+    const entry = this.activeUri ? this.panels.get(this.activeUri) : undefined;
+    const visible = !!entry && entry.panel.active;
+    const modelName = entry ? (this.host.models().find((m) => m.id === (entry.model || this.host.currentModel()))?.name ?? "Model") : "";
+    void vscode.commands.executeCommand("muster.planToolbar.set", { visible, model: modelName, count: entry?.todos ?? 0, selected: entry?.selection.length ?? 0 });
+  }
 
   resolveCustomTextEditor(document: vscode.TextDocument, panel: vscode.WebviewPanel): void {
     panel.webview.options = { enableScripts: true };
     panel.webview.html = planHtml(panel.webview.cspSource);
-    const push = () => void panel.webview.postMessage({ type: "plan", text: document.getText(), name: document.uri.path.split("/").pop() ?? "plan.md", models: this.host.models(), model: this.host.currentModel() ?? "" });
-    const sub = vscode.workspace.onDidChangeTextDocument((e) => { if (e.document.uri.toString() === document.uri.toString()) push(); });
-    panel.onDidDispose(() => sub.dispose());
-    panel.webview.onDidReceiveMessage(async (message: { type: string; todos?: number[]; model?: string; newThread?: boolean }) => {
+    const key = document.uri.toString();
+    const entry = { panel, document, selection: [] as number[], todos: 0, model: "" };
+    this.panels.set(key, entry);
+    if (panel.active) this.activeUri = key;
+    const push = () => void panel.webview.postMessage({ type: "plan", text: document.getText(), name: document.uri.path.split("/").pop() ?? "plan.md", models: this.host.models(), model: entry.model || this.host.currentModel() || "" });
+    const sub = vscode.workspace.onDidChangeTextDocument((e) => { if (e.document.uri.toString() === key) push(); });
+    const view = panel.onDidChangeViewState(() => { if (panel.active) this.activeUri = key; else if (this.activeUri === key) this.activeUri = undefined; this.syncToolbar(); });
+    panel.onDidDispose(() => { sub.dispose(); view.dispose(); this.panels.delete(key); if (this.activeUri === key) this.activeUri = undefined; this.syncToolbar(); });
+    this.syncToolbar();
+    panel.webview.onDidReceiveMessage(async (message: { type: string; todos?: number[]; model?: string; newThread?: boolean; count?: number }) => {
+      if (message.type === "selection") { entry.selection = message.todos ?? []; entry.todos = message.count ?? entry.todos; this.syncToolbar(); return; }
       if (message.type === "ready") push();
       else if (message.type === "source") await vscode.commands.executeCommand("vscode.openWith", document.uri, "default");
       else if (message.type === "build") await this.host.build({ uri: document.uri, ...(message.todos?.length ? { todos: message.todos } : {}), ...(message.model ? { model: message.model } : {}), ...(message.newThread ? { newThread: true } : {}) });
@@ -42,7 +74,7 @@ function planHtml(csp: string): string {
   * { box-sizing: border-box; }
   html, body { margin: 0; height: 100%; }
   body { background: var(--bg); color: var(--fg); font-family: var(--vscode-font-family); font-size: 14px; line-height: 22px; display: flex; flex-direction: column; }
-  #bar { flex: 0 0 auto; height: 32px; display: flex; align-items: center; gap: 6px; padding: 0 12px 0 16px; border-bottom: 1px solid var(--stroke-tertiary); font-size: 13px; }
+  #bar { display: none; flex: 0 0 auto; height: 32px; display: flex; align-items: center; gap: 6px; padding: 0 12px 0 16px; border-bottom: 1px solid var(--stroke-tertiary); font-size: 13px; }
   #bar .crumb { display: inline-flex; align-items: center; gap: 6px; color: var(--text-secondary); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   #bar .crumb .ic { color: var(--text-tertiary); }
   #bar .spacer { flex: 1; }
@@ -54,7 +86,7 @@ function planHtml(csp: string): string {
   .split .build { height: 24px; padding: 0 9px; background: var(--amber); color: #1a1a1a; font: inherit; font-size: 13px; font-weight: 500; border: 0; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; }
   .split .build kbd { font-family: inherit; color: #1a1a1a; opacity: .7; }
   .split .more { width: 22px; height: 24px; display: inline-flex; align-items: center; justify-content: center; background: var(--amber); color: #1a1a1a; border-left: 1px solid rgba(0,0,0,.25); cursor: pointer; font-size: 9px; }
-  #doc { flex: 1; overflow: auto; padding: 36px 48px 80px; max-width: 900px; }
+  #doc { flex: 1; overflow: auto; padding: 28px 48px 80px; max-width: 900px; }
   #doc h1 { font-size: 28px; line-height: 34px; margin: 0 0 20px; font-weight: 600; }
   #doc h2 { font-size: 20px; margin: 24px 0 10px; font-weight: 600; }
   #doc h3 { font-size: 16px; margin: 20px 0 8px; font-weight: 600; }
@@ -127,6 +159,7 @@ function planHtml(csp: string): string {
     $("sel").textContent = sel.size ? sel.size + " of " + todoCount + " to-dos selected" : "";
     $("build").innerHTML = "Build" + (sel.size && sel.size < todoCount ? " " + sel.size : "") + " <kbd>⌘⏎</kbd>";
     doc.querySelectorAll("li.todo").forEach((el) => el.addEventListener("click", () => { const i = Number(el.dataset.i); if (sel.has(i)) sel.delete(i); else sel.add(i); paint(); }));
+    vscode.postMessage({ type: "selection", todos: [...sel].sort((a, b) => a - b), count: todoCount });
   }
   function build(newThread) { vscode.postMessage({ type: "build", todos: [...sel].sort((a, b) => a - b), model: model || plan.model || undefined, newThread: !!newThread }); }
   function place(anchor) { const a = anchor.getBoundingClientRect(); menu.style.top = (a.bottom + 4) + "px"; menu.style.left = Math.max(6, Math.min(a.left, window.innerWidth - menu.offsetWidth - 6)) + "px"; }

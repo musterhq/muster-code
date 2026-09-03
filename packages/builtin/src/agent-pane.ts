@@ -40,7 +40,7 @@ type ToPane =
   | { type: "openModeMenu" };
 type FromPane =
   | { type: "ready" } | { type: "boot" } | { type: "clientError"; message: string } | { type: "send"; text: string } | { type: "stop" }
-  | { type: "acceptAll" } | { type: "rejectAll" } | { type: "open"; path: string }
+  | { type: "acceptAll" } | { type: "rejectAll" } | { type: "open"; path: string; ifClosed?: boolean }
   | { type: "newAgent" } | { type: "openThread"; id: string } | { type: "closeTab"; id: string } | { type: "activateTab"; id: string }
   | { type: "view"; view: "chat" | "history" | "board" }
   | { type: "setMode"; id: string } | { type: "setAccess"; id: string } | { type: "setModel"; id: string } | { type: "setEffort"; id: string }
@@ -81,6 +81,8 @@ export class AgentPane implements vscode.WebviewViewProvider {
   private catalogLoaded = false;
   private skills: SkillInfo[] | undefined;
   private readyCount = 0;
+  private readonly catalogChanged = new vscode.EventEmitter<void>();
+  readonly onCatalog = this.catalogChanged.event;
 
   constructor(private readonly context: vscode.ExtensionContext, private readonly output: vscode.LogOutputChannel, private readonly live: LiveEditController) {
     this.live.onCard((card) => this.post({ type: "edit", card }));
@@ -234,15 +236,16 @@ export class AgentPane implements vscode.WebviewViewProvider {
   }
 
   /** Plan editor toolbar: choose the model that will build (mirrors Cursor's "Model used to build this plan"). */
-  async pickBuildModel(): Promise<void> {
+  async pickBuildModel(): Promise<string | undefined> {
     const tab = this.active();
     const pick = await vscode.window.showQuickPick(this.models.map((m) => ({ label: m.name, description: m.provider === "claude" ? "Claude Code" : "Codex", detail: m.description, picked: m.id === tab.settings.modelId, id: m.id })), { placeHolder: "Model used to build this plan" });
-    if (!pick) return;
+    if (!pick) return undefined;
     tab.settings.modelId = pick.id;
     const model = this.models.find((m) => m.id === pick.id);
     if (model && !model.efforts.some((e) => e.id === tab.settings.effortId)) tab.settings.effortId = model.defaultEffort;
     this.persist(tab);
     this.pushState();
+    return pick.id;
   }
 
   /** "Build" from the plan editor: implement that plan (all, or the chosen to-dos) with the chosen model, here or in a new thread. */
@@ -329,6 +332,7 @@ export class AgentPane implements vscode.WebviewViewProvider {
     this.models = models;
     this.access = access;
     this.loading = false;
+    this.catalogChanged.fire();
     for (const tab of this.tabs) {
       if (!this.models.some((m) => m.id === tab.settings.modelId)) tab.settings.modelId = this.defaultSettings().modelId;
       if (!this.access.some((a) => a.id === tab.settings.accessId)) tab.settings.accessId = this.defaultSettings().accessId;
@@ -369,7 +373,7 @@ export class AgentPane implements vscode.WebviewViewProvider {
       case "stop": this.stop(); return;
       case "acceptAll": await this.live.acceptAll(); return;
       case "rejectAll": await this.live.rejectAll(); return;
-      case "open": await this.live.open(message.path); return;
+      case "open": await this.live.open(message.path, message.ifClosed === true); return;
       case "openReview": await this.live.openReview(); return;
       case "command": await vscode.commands.executeCommand(message.id); return;
       case "newAgent": this.newAgent(); return;
@@ -1025,8 +1029,7 @@ function paneHtml(csp: string): string {
     if (!wrap) {
       wrap = document.createElement("div"); wrap.className = "card editwrap"; wrap.id = id;
       const head = document.createElement("div"); head.className = "edit"; const diff = document.createElement("pre"); diff.className = "diff";
-      head.addEventListener("click", (e) => { if (e.altKey || e.metaKey) vscode.postMessage({ type: "open", path: card.path }); else if (wrap.dataset.hasDiff === "1") wrap.classList.toggle("open"); else vscode.postMessage({ type: "open", path: card.path }); });
-      head.addEventListener("dblclick", () => vscode.postMessage({ type: "open", path: card.path }));
+      head.addEventListener("click", () => { if (wrap.dataset.hasDiff === "1") wrap.classList.toggle("open"); vscode.postMessage({ type: "open", path: card.path, ifClosed: true }); });
       wrap.append(head, diff); messages.appendChild(wrap); body.classList.add("has-messages");
     }
     const labels = { streaming: "Editing…", written: "Review", kept: "Accepted", undone: "Rejected" };
@@ -1058,7 +1061,7 @@ function paneHtml(csp: string): string {
     t.appendChild(mk(ICONS.plus, "New Agent ⇧⌘L", false, () => vscode.postMessage({ type: "newAgent" })));
     const sp = document.createElement("span"); sp.className = "spacer"; t.appendChild(sp);
     t.appendChild(mk(ICONS.history, "History", state.view === "history", () => vscode.postMessage({ type: "view", view: state.view === "history" ? "chat" : "history" })));
-    t.appendChild(mk(ICONS.board, "Board (Kanban)", state.view === "board", () => vscode.postMessage({ type: "view", view: state.view === "board" ? "chat" : "board" })));
+    if (state.view === "board") t.appendChild(mk(ICONS.board, "Board", true, () => vscode.postMessage({ type: "view", view: "chat" })));
     t.appendChild(mk(ICONS.more, "More", false, () => vscode.postMessage({ type: "command", id: "muster.agent.more" })));
     t.appendChild(mk(ICONS.max, "Maximize Chat ⌥⌘E", false, () => vscode.postMessage({ type: "command", id: "muster.agent.maximize" })));
   }

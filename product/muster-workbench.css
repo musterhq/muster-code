@@ -202,3 +202,15 @@
 /* ── Agent pane density: the webview's tab row is the header (Cursor) ── */
 .monaco-workbench .part.auxiliarybar > .title { display: none !important; }
 .monaco-workbench .part.auxiliarybar .content .pane-header { display: none !important; }
+
+/* ── Plan editor toolbar in the breadcrumb row (Cursor) ── */
+.monaco-workbench .breadcrumbs-control { position: relative; }
+.monaco-workbench .plan-breadcrumb-controls { position: absolute; right: 8px; top: 0; height: 22px; display: flex; align-items: center; gap: 4px; font-family: var(--vscode-font-family); font-size: 12px; z-index: 5; background: var(--vscode-editor-background); padding-left: 8px; }
+.monaco-workbench .pbc-pill { display: inline-flex; align-items: center; gap: 4px; height: 20px; padding: 0 6px; border-radius: 4px; color: color-mix(in srgb, var(--vscode-editor-foreground) 66%, transparent); cursor: pointer; white-space: nowrap; }
+.monaco-workbench .pbc-pill:hover { background: color-mix(in srgb, var(--vscode-editor-foreground) 8%, transparent); color: var(--vscode-editor-foreground); }
+.monaco-workbench .pbc-chev { font-size: 8px; opacity: .7; }
+.monaco-workbench .pbc-sep { width: 1px; height: 14px; background: color-mix(in srgb, var(--vscode-editor-foreground) 12%, transparent); margin: 0 2px; }
+.monaco-workbench .pbc-split { display: inline-flex; border-radius: 5px; overflow: hidden; margin-left: 2px; }
+.monaco-workbench .pbc-build { height: 20px; padding: 0 8px; background: #D2943E; color: #1a1a1a; border: 0; font: inherit; font-size: 12px; font-weight: 500; cursor: pointer; display: inline-flex; align-items: center; gap: 5px; }
+.monaco-workbench .pbc-build kbd { font-family: inherit; color: #1a1a1a; opacity: .7; }
+.monaco-workbench .pbc-more { width: 18px; height: 20px; display: inline-flex; align-items: center; justify-content: center; background: #D2943E; color: #1a1a1a; border-left: 1px solid rgba(0,0,0,.25); cursor: pointer; font-size: 8px; }

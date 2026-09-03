@@ -208,6 +208,14 @@
         "command": "muster.plan.model",
         "title": "Model for Build",
         "icon": "$(sparkle)"
+      },
+      {
+        "command": "muster.plan.previewMenu",
+        "title": "Plan View"
+      },
+      {
+        "command": "muster.plan.buildMenu",
+        "title": "Build Options"
       }
     ],
     "configuration": {

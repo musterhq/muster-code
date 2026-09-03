@@ -191,13 +191,27 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     void vscode.window.setStatusBarMessage(on ? "Muster Tab on — Codex completes as you pause" : "Muster Tab off", 2500);
   }));
   context.subscriptions.push(vscode.commands.registerCommand("muster.plan.preview", (uri?: vscode.Uri) => { const target = uri ?? vscode.window.activeTextEditor?.document.uri; if (target) return vscode.commands.executeCommand("vscode.openWith", target, "muster.planEditor"); }));
-  context.subscriptions.push(vscode.commands.registerCommand("muster.plan.build", (uri?: vscode.Uri) => { const target = uri ?? vscode.window.activeTextEditor?.document.uri; if (target) void pane.buildFromFile(target); }));
-  context.subscriptions.push(vscode.commands.registerCommand("muster.plan.model", () => pane.pickBuildModel()));
-  context.subscriptions.push(vscode.window.registerCustomEditorProvider(PlanEditorProvider.viewType, new PlanEditorProvider({
+  context.subscriptions.push(vscode.commands.registerCommand("muster.plan.build", (uri?: vscode.Uri) => { const active = planEditors.active(); if (!uri && active) { void pane.buildFromFile(active.uri, { ...(active.selection.length ? { todos: active.selection } : {}), ...(active.model ? { model: active.model } : {}) }); return; } const target = uri ?? vscode.window.activeTextEditor?.document.uri; if (target) void pane.buildFromFile(target); }));
+  context.subscriptions.push(vscode.commands.registerCommand("muster.plan.model", async () => { const id = await pane.pickBuildModel(); if (id) planEditors.setModel(id); }));
+  const planEditors = new PlanEditorProvider({
     models: () => pane.catalog().models,
     currentModel: () => pane.catalog().model,
     build: (request) => pane.buildFromFile(request.uri, { ...(request.todos ? { todos: request.todos } : {}), ...(request.model ? { model: request.model } : {}), ...(request.newThread ? { newThread: true } : {}) }),
-  }), { webviewOptions: { retainContextWhenHidden: true }, supportsMultipleEditorsPerDocument: false }));
+  });
+  pane.onCatalog(() => planEditors.refreshAll());
+  context.subscriptions.push(vscode.commands.registerCommand("muster.plan.previewMenu", async () => {
+    const pick = await vscode.window.showQuickPick([{ label: "$(check) Preview", id: "preview" }, { label: "Markdown source", id: "source" }], { placeHolder: "Plan view" });
+    const active = planEditors.active();
+    if (pick?.id === "source" && active) await vscode.commands.executeCommand("vscode.openWith", active.uri, "default");
+  }));
+  context.subscriptions.push(vscode.commands.registerCommand("muster.plan.buildMenu", async () => {
+    const active = planEditors.active();
+    if (!active) return;
+    const pick = await vscode.window.showQuickPick([{ label: "Build in this thread", description: "⌘⏎", id: "here" }, { label: "Build in a new agent thread", id: "new" }], { placeHolder: "Build" });
+    if (!pick) return;
+    await pane.buildFromFile(active.uri, { ...(active.selection.length ? { todos: active.selection } : {}), ...(active.model ? { model: active.model } : {}), ...(pick.id === "new" ? { newThread: true } : {}) });
+  }));
+  context.subscriptions.push(vscode.window.registerCustomEditorProvider(PlanEditorProvider.viewType, planEditors, { webviewOptions: { retainContextWhenHidden: true }, supportsMultipleEditorsPerDocument: false }));
   context.subscriptions.push(vscode.commands.registerCommand("muster.agent.more", () => vscode.commands.executeCommand("workbench.action.openSettings", "muster")));
   context.subscriptions.push(vscode.commands.registerCommand("muster.agent.stop", () => pane.stop()));
   context.subscriptions.push(vscode.commands.registerCommand("muster.agent.maximize", () => vscode.commands.executeCommand("workbench.action.toggleMaximizedAuxiliaryBar")));

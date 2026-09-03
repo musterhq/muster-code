@@ -291,6 +291,45 @@
   Registry.registerCommand("muster.cmdk.hide", (accessor, args) => hideBar(args.uri));
   Registry.registerCommand("muster.cmdk.status", (accessor, args) => { const bar = bars.get(args.uri); if (bar) bar.status.textContent = args.text || ""; });
 
+  // Cursor: the agent pane has no separate header rows — its tab row is the header. Hide the
+  // secondary sidebar's composite bar and title (their actions live in the pane's own tab row).
+  function trimAuxBar() {
+    for (const node of document.querySelectorAll(".part.auxiliarybar > .composite.header, .part.auxiliarybar > .composite.title")) node.style.setProperty("display", "none", "important");
+  }
+  trimAuxBar();
+  const auxObserver = new MutationObserver(() => trimAuxBar());
+  auxObserver.observe(document.body, { childList: true, subtree: true });
+
+  // Cursor's plan editor toolbar lives in the breadcrumb row: Preview ⌄ · model ⌄ · Build ⌘⏎ ⌄.
+  let planToolbar = { visible: false, model: "", count: 0, selected: 0 };
+  function mountPlanToolbar() {
+    for (const stale of document.querySelectorAll(".plan-breadcrumb-controls")) if (!planToolbar.visible || stale.closest(".editor-group-container:not(.active)")) stale.remove();
+    if (!planToolbar.visible) return;
+    const crumbs = document.querySelector(".editor-group-container.active .breadcrumbs-control");
+    if (!crumbs) return;
+    let node = crumbs.querySelector(":scope > .plan-breadcrumb-controls");
+    if (!node) {
+      node = el("div", "plan-breadcrumb-controls");
+      const pill = (label, cmd, cls) => { const b = el("span", "pbc-pill " + (cls || ""), label); b.append(el("span", "pbc-chev", "▼")); b.addEventListener("click", (e) => { e.stopPropagation(); run(cmd, {}); }); return b; };
+      node.append(pill("Preview", "muster.plan.previewMenu", "pbc-preview"), el("span", "pbc-sep"), pill("Model", "muster.plan.model", "pbc-model"));
+      const split = el("span", "pbc-split");
+      const build = el("button", "pbc-build"); build.append(el("span", "lbl", "Build"), el("kbd", null, "⌘⏎")); build.addEventListener("click", (e) => { e.stopPropagation(); run("muster.plan.build", {}); });
+      const more = el("span", "pbc-more", "▼"); more.addEventListener("click", (e) => { e.stopPropagation(); run("muster.plan.buildMenu", {}); });
+      split.append(build, more); node.append(split);
+      crumbs.append(node);
+    }
+    const modelPill = node.querySelector(".pbc-model"); if (modelPill) modelPill.firstChild.textContent = planToolbar.model || "Model";
+    const lbl = node.querySelector(".pbc-build .lbl"); if (lbl) lbl.textContent = planToolbar.selected && planToolbar.selected < planToolbar.count ? `Build ${planToolbar.selected}` : "Build";
+  }
+  Registry.registerCommand("muster.planToolbar.set", (accessor, args) => { commands = commands || accessor.get(ICommandService); planToolbar = { ...planToolbar, ...args }; mountPlanToolbar(); });
+  const crumbObserver = new MutationObserver(() => { if (planToolbar.visible && !document.querySelector(".editor-group-container.active .breadcrumbs-control > .plan-breadcrumb-controls")) mountPlanToolbar(); });
+  crumbObserver.observe(document.body, { childList: true, subtree: true });
+
+  // Dev: inspect the workbench DOM from the harness ({selector, limit}).
+  Registry.registerCommand("muster.dom", (accessor, args) => {
+    const nodes = [...document.querySelectorAll(args.selector)];
+    return nodes.slice(0, args.max || 3).map((n) => ({ tag: n.tagName, cls: n.className, display: getComputedStyle(n).display, rect: n.getBoundingClientRect().toJSON(), html: n.outerHTML.slice(0, args.limit || 600) }));
+  });
   Registry.registerCommand("muster.inlineDiff.clear", (accessor, args) => {
     for (const editor of editorsFor(accessor.get(ICodeEditorService), args.uri)) clear(editor);
   });
