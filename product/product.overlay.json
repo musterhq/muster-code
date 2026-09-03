@@ -78,5 +78,14 @@
   ],
   "enableTelemetry": false,
   "checksums": {},
-  "tunnelApplicationName": "muster-code-tunnel"
+  "tunnelApplicationName": "muster-code-tunnel",
+  "configurationDefaults": {
+    "window.titleBarStyle": "custom",
+    "workbench.activityBar.location": "top",
+    "workbench.activityBar.autoHide": true,
+    "workbench.secondarySideBar.defaultVisibility": "visible",
+    "chat.disableAIFeatures": true,
+    "workbench.startupEditor": "none",
+    "window.commandCenter": false
+  }
 }
