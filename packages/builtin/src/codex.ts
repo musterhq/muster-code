@@ -225,7 +225,7 @@ export async function listModels(cwd?: string, claudeModels: readonly string[] =
     }
   } catch { /* offline or not signed in: the picker shows what it can */ }
   for (const id of claudeModels) {
-    models.push({ id: `claude:${id}`, provider: "claude", name: id.replace(/^claude-/, "Claude ").replace(/-(\d)/g, " $1").replace(/-\d{8}$/, ""), description: "Claude Code · your Claude subscription", efforts: CLAUDE_EFFORTS, defaultEffort: "medium", isDefault: false });
+    models.push({ id: `claude:${id}`, provider: "claude", name: claudeName(id), description: "Claude Code · your Claude subscription", efforts: CLAUDE_EFFORTS, defaultEffort: "medium", isDefault: false });
   }
   return models;
 }
@@ -284,4 +284,13 @@ export async function listSkills(cwd?: string): Promise<SkillInfo[]> {
     walk(raw);
     return flat.map((s) => ({ name: String(s.name), description: String(s.description ?? s.summary ?? "") }));
   } catch { return []; }
+}
+
+/** "claude-fable-5-1" → "Claude Fable 5.1", "claude-haiku-4-5-20251001" → "Claude Haiku 4.5". */
+function claudeName(id: string): string {
+  const parts = id.replace(/-\d{8}$/, "").split("-");
+  const words: string[] = [];
+  const digits: string[] = [];
+  for (const part of parts) { if (/^\d+$/.test(part)) digits.push(part); else words.push(part[0]!.toUpperCase() + part.slice(1)); }
+  return `${words.join(" ")}${digits.length ? ` ${digits.join(".")}` : ""}`;
 }

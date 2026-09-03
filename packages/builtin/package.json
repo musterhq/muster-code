@@ -254,10 +254,6 @@
         "title": "Browser: Reload"
       },
       {
-        "command": "muster.browser.focusLocationActive",
-        "title": "Browser: Focus Location Bar"
-      },
-      {
         "command": "muster.browser.pickActive",
         "title": "Browser: Select Element for Chat"
       }
@@ -321,6 +317,15 @@
           "type": "boolean",
           "default": false,
           "description": "After each commit, review it for issues in the Agent pane (read-only turn)."
+        },
+        "muster.browser.location": {
+          "type": "string",
+          "enum": [
+            "editor",
+            "pane"
+          ],
+          "default": "editor",
+          "description": "Where Open Browser (\u21e7\u2318B) puts the browser: an editor tab beside the code (Cursor's browser editor) or a tab in the Agent pane."
         }
       }
     },
@@ -472,12 +477,6 @@
         "key": "ctrl+r",
         "mac": "cmd+r",
         "when": "muster.browserActive"
-      },
-      {
-        "command": "muster.browser.focusLocationActive",
-        "key": "ctrl+l",
-        "mac": "cmd+l",
-        "when": "muster.browserActive && !editorTextFocus"
       },
       {
         "command": "muster.browser.pickActive",

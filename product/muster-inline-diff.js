@@ -321,6 +321,7 @@
       const node = el("div", "muster-tab" + (tab.id === agentHeader.activeId ? " active" : ""));
       node.title = tab.name;
       if (tab.running) node.append(el("span", "dot"));
+      if (tab.kind === "browser") node.append(el("span", "glyph", "◎"));
       node.append(el("span", "name", tab.name));
       const close = el("span", "x", "×"); close.title = "Close";
       close.addEventListener("click", (e) => { e.stopPropagation(); run("muster.agent.closeTab", { id: tab.id }); });
@@ -368,66 +369,60 @@
     const sel = (el) => { const parts = []; let n = el; while (n && n.nodeType === 1 && parts.length < 6) { let p = n.tagName.toLowerCase(); if (n.id) { parts.unshift(p + "#" + n.id); break; } const cls = [...n.classList].slice(0, 2).join("."); if (cls) p += "." + cls; const sib = n.parentElement ? [...n.parentElement.children].filter((c) => c.tagName === n.tagName) : []; if (sib.length > 1) p += ":nth-of-type(" + (sib.indexOf(n) + 1) + ")"; parts.unshift(p); n = n.parentElement; } return parts.join(" > "); };
     let cur = null;
     const move = (e) => { const el = document.elementFromPoint(e.clientX, e.clientY); if (!el || el === box || el === tag) return; cur = el; const r = el.getBoundingClientRect(); Object.assign(box.style, { left: r.left + "px", top: r.top + "px", width: r.width + "px", height: r.height + "px" }); tag.textContent = el.tagName.toLowerCase() + (el.id ? "#" + el.id : "") + (el.classList.length ? "." + [...el.classList].slice(0, 2).join(".") : "") + " · " + Math.round(r.width) + "×" + Math.round(r.height); tag.style.left = r.left + "px"; tag.style.top = Math.max(0, r.top - 22) + "px"; };
-    const click = (e) => { e.preventDefault(); e.stopPropagation(); const el = cur || e.target; const cs = getComputedStyle(el); const r = el.getBoundingClientRect(); const styles = {}; for (const k of ["display","position","width","height","margin","padding","color","background-color","font-family","font-size","font-weight","line-height","border","border-radius","gap","flex-direction","justify-content","align-items"]) styles[k] = cs.getPropertyValue(k); window.__musterPick = { selector: sel(el), tag: el.tagName.toLowerCase(), id: el.id || "", classes: [...el.classList], text: (el.innerText || "").slice(0, 300), html: el.outerHTML.slice(0, 2000), rect: { x: Math.round(r.left), y: Math.round(r.top), w: Math.round(r.width), h: Math.round(r.height) }, styles, url: location.href, title: document.title }; stop(); };
+    const source = (el) => { let n = el; while (n && n.nodeType === 1) { const ds = n.getAttribute("data-source") || n.getAttribute("data-inspector-location") || n.getAttribute("data-v-inspector") || n.getAttribute("data-loc"); if (ds) { const m = /^(.*?):(\\d+)(?::(\\d+))?$/.exec(ds); if (m) return { file: m[1], line: Number(m[2]), col: m[3] ? Number(m[3]) : 0, via: "attribute" }; }
+        const fk = Object.keys(n).find((k) => k.startsWith("__reactFiber$")); if (fk) { let f = n[fk]; let hops = 0; while (f && hops < 12) { const src = f._debugSource; if (src && src.fileName) return { file: src.fileName, line: src.lineNumber || 0, col: src.columnNumber || 0, via: "react", component: (f.type && (f.type.displayName || f.type.name)) || "" }; f = f._debugOwner || f.return; hops++; } }
+        if (n.__svelte_meta && n.__svelte_meta.loc) { const l = n.__svelte_meta.loc; return { file: l.file, line: l.line + 1, col: l.column || 0, via: "svelte" }; }
+        n = n.parentElement; } return null; };
+    const click = (e) => { e.preventDefault(); e.stopPropagation(); const el = cur || e.target; const cs = getComputedStyle(el); const r = el.getBoundingClientRect(); const styles = {}; for (const k of ["display","position","width","height","margin","padding","color","background-color","font-family","font-size","font-weight","line-height","border","border-radius","gap","flex-direction","justify-content","align-items"]) styles[k] = cs.getPropertyValue(k); window.__musterPick = { selector: sel(el), tag: el.tagName.toLowerCase(), id: el.id || "", classes: [...el.classList], text: (el.innerText || "").slice(0, 300), html: el.outerHTML.slice(0, 2000), rect: { x: Math.round(r.left), y: Math.round(r.top), w: Math.round(r.width), h: Math.round(r.height) }, styles, source: source(el), url: location.href, title: document.title }; stop(); };
     const key = (e) => { if (e.key === "Escape") { window.__musterPick = { cancelled: true }; stop(); } };
     function stop() { window.__musterPickerOn = false; document.removeEventListener("mousemove", move, true); document.removeEventListener("click", click, true); document.removeEventListener("keydown", key, true); box.remove(); tag.remove(); }
     document.addEventListener("mousemove", move, true); document.addEventListener("click", click, true); document.addEventListener("keydown", key, true); })();`;
-  function browserHost(id) {
-    const label = [...document.querySelectorAll(".editor-group-container .tab.active .tab-label")].find((n) => (n.getAttribute("aria-label") || n.textContent || "").includes(`Browser ${id}`));
-    return label ? label.closest(".editor-group-container")?.querySelector(":scope > .editor-container") : null;
+  // The host webview (pane, or a browser editor tab) reports the page area relative to itself; add that webview iframe's offset.
+  function hostFrame(b) {
+    let container = null;
+    if (b.host === "editor") {
+      const label = [...document.querySelectorAll(".editor-group-container .tab.active .tab-label")].find((n) => (n.getAttribute("aria-label") || n.textContent || "").includes(`Browser ${b.id}`));
+      container = label ? label.closest(".editor-group-container")?.querySelector(":scope > .editor-container") : null;
+    } else container = document.querySelector(".part.auxiliarybar > .content");
+    if (!container) return null;
+    const cr = container.getBoundingClientRect();
+    let best = null, bestArea = 0;
+    for (const f of document.querySelectorAll("iframe.webview")) { const r = f.getBoundingClientRect(); const w = Math.max(0, Math.min(r.right, cr.right) - Math.max(r.left, cr.left)); const h = Math.max(0, Math.min(r.bottom, cr.bottom) - Math.max(r.top, cr.top)); if (w * h > bestArea) { bestArea = w * h; best = r; } }
+    return bestArea > 0 ? best : null;
   }
   function layoutBrowsers() {
     for (const b of browsers.values()) {
-      const host = b.shown ? browserHost(b.id) : null;
-      const on = !!host;
-      b.root.style.display = on ? "flex" : "none";
+      const frame = hostFrame(b);
+      const on = !!(b.shown && b.rel && frame && b.rel.width > 10 && b.rel.height > 10);
       if (!on) { if (b.visible !== false) { b.visible = false; void mb({ type: "bounds", id: b.id, visible: false, bounds: { x: 0, y: 0, width: 0, height: 0 } }); } continue; }
-      const r = host.getBoundingClientRect();
-      Object.assign(b.root.style, { left: `${r.left}px`, top: `${r.top}px`, width: `${r.width}px`, height: `${r.height}px` });
-      const bar = 34;
-      const bounds = { x: Math.round(r.left), y: Math.round(r.top + bar), width: Math.max(0, Math.round(r.width)), height: Math.max(0, Math.round(r.height - bar)) };
+      const bounds = { x: Math.round(frame.left + b.rel.left), y: Math.round(frame.top + b.rel.top), width: Math.max(0, Math.round(b.rel.width)), height: Math.max(0, Math.round(b.rel.height)) };
       const same = b.visible === true && b.bounds && ["x", "y", "width", "height"].every((k) => b.bounds[k] === bounds[k]);
       if (!same) { b.visible = true; b.bounds = bounds; void mb({ type: "bounds", id: b.id, visible: true, bounds }); }
     }
   }
-  function makeBrowser(id, url) {
-    const root = el("div", "muster-browser");
-    const bar = el("div", "muster-browser-bar");
-    const nav = (label, title, fn) => { const x = el("button", "mb-btn", label); x.title = title; x.addEventListener("click", fn); return x; };
-    const input = el("input", "mb-url"); input.value = url; input.placeholder = "Enter a URL";
-    const consoleLog = [];
-    const b = { id, root, input, shown: true, consoleLog, url, title: "", picking: false, pickTimer: null, ready: false, visible: undefined, bounds: null };
-    const go = () => { let u = input.value.trim(); if (u && !/^[a-z]+:\/\//i.test(u)) u = /^(localhost|\d+\.\d+|[\w-]+:\d+)/.test(u) ? `http://${u}` : `https://${u}`; if (u) { b.url = u; void mb({ type: "navigate", id, url: u }); } };
-    input.addEventListener("keydown", (e) => { e.stopPropagation(); if (e.key === "Enter") go(); });
-    input.addEventListener("keyup", (e) => e.stopPropagation());
-    const pick = nav("⌖", "Select an element to add it to the chat", () => startPick(b)); pick.classList.add("mb-pick");
-    const shot = nav("⧉", "Screenshot to chat", () => screenshot(b));
-    bar.append(nav("←", "Back", () => mb({ type: "back", id })), nav("→", "Forward", () => mb({ type: "forward", id })), nav("⟳", "Reload", () => mb({ type: "reload", id })), input, pick, shot);
-    root.append(bar, el("div", "muster-browser-view"));
-    document.body.append(root);
+  function makeBrowser(id, url, host) {
+    const b = { id, url, host: host || "pane", title: "", shown: false, rel: null, visible: undefined, bounds: null, ready: false, picking: false, pickTimer: null, poll: null };
     browsers.set(id, b);
     b.poll = setInterval(async () => {
       const events = await mb({ type: "events", id }).catch(() => null);
       for (const e of events || []) {
-        if (e.kind === "title") { b.title = e.title; run("muster.browser.event", { id, kind: "title", title: e.title, url: e.url }); }
-        else if (e.kind === "navigate") { b.url = e.url; if (document.activeElement !== input) input.value = e.url; run("muster.browser.event", { id, kind: "navigate", url: e.url }); }
-        else if (e.kind === "ready") { b.ready = true; }
-        else if (e.kind === "console") { consoleLog.push(e); if (consoleLog.length > 300) consoleLog.shift(); }
+        if (e.kind === "title") b.title = e.title;
+        if (e.kind === "navigate" || e.kind === "ready") { b.url = e.url; if (e.kind === "ready") b.ready = true; }
+        run("muster.browser.event", { id, ...e });
       }
     }, 400);
-    layoutBrowsers();
-    void mb({ type: "open", id, url, bounds: b.bounds || { x: 0, y: 0, width: 0, height: 0 } });
+    void mb({ type: "open", id, url, bounds: { x: 0, y: 0, width: 0, height: 0 } });
     return b;
   }
   function startPick(b) {
-    b.picking = true; b.root.classList.add("picking");
+    b.picking = true;
     void mb({ type: "eval", id: b.id, js: PICKER });
     clearInterval(b.pickTimer);
     b.pickTimer = setInterval(async () => {
       const picked = await mb({ type: "eval", id: b.id, js: "(() => { const p = window.__musterPick; window.__musterPick = null; return p; })()" }).catch(() => null);
       if (!picked || picked.error) return;
-      clearInterval(b.pickTimer); b.picking = false; b.root.classList.remove("picking");
-      if (picked.cancelled) return;
+      clearInterval(b.pickTimer); b.picking = false;
+      if (picked.cancelled) { run("muster.browser.picked", { id: b.id, picked: null, image: null }); return; }
       const image = await mb({ type: "capture", id: b.id }).catch(() => null);
       run("muster.browser.picked", { id: b.id, picked, image: typeof image === "string" ? image : null });
     }, 250);
@@ -437,17 +432,19 @@
     const info = await mb({ type: "url", id: b.id }).catch(() => null);
     run("muster.browser.picked", { id: b.id, picked: null, image: typeof image === "string" ? image : null, url: info && info.url, title: info && info.title });
   }
-  Registry.registerCommand("muster.browser.open", (accessor, args) => { commands = commands || accessor.get(ICommandService); const b = browsers.get(args.id); if (b) { b.shown = true; void mb({ type: "navigate", id: args.id, url: args.url }); layoutBrowsers(); return true; } makeBrowser(args.id, args.url); return true; });
-  Registry.registerCommand("muster.browser.show", (accessor, args) => { const b = browsers.get(args.id); if (b) { b.shown = !!args.visible; layoutBrowsers(); } });
-  Registry.registerCommand("muster.browser.close", (accessor, args) => { const b = browsers.get(args.id); if (b) { clearInterval(b.pickTimer); clearInterval(b.poll); b.root.remove(); browsers.delete(args.id); void mb({ type: "close", id: args.id }); } });
+  Registry.registerCommand("muster.browser.open", (accessor, args) => { commands = commands || accessor.get(ICommandService); if (browsers.has(args.id)) { void mb({ type: "navigate", id: args.id, url: args.url }); return true; } makeBrowser(args.id, args.url, args.host); return true; });
+  Registry.registerCommand("muster.browser.place", (accessor, args) => { const b = browsers.get(args.id); if (!b) return false; b.rel = args.rel; b.shown = !!args.visible; if (args.host) b.host = args.host; layoutBrowsers(); return true; });
+  Registry.registerCommand("muster.browser.close", (accessor, args) => { const b = browsers.get(args.id); if (b) { clearInterval(b.pickTimer); clearInterval(b.poll); browsers.delete(args.id); void mb({ type: "close", id: args.id }); } });
   Registry.registerCommand("muster.browser.reload", (accessor, args) => mb({ type: "reload", id: args.id }));
-  Registry.registerCommand("muster.browser.navigate", (accessor, args) => { const b = browsers.get(args.id); if (b) { b.input.value = args.url; } return mb({ type: "navigate", id: args.id, url: args.url }); });
-  Registry.registerCommand("muster.browser.focusLocation", (accessor, args) => { const b = browsers.get(args.id); if (b) { b.input.focus(); b.input.select(); } });
+  Registry.registerCommand("muster.browser.back", (accessor, args) => mb({ type: "back", id: args.id }));
+  Registry.registerCommand("muster.browser.forward", (accessor, args) => mb({ type: "forward", id: args.id }));
+  Registry.registerCommand("muster.browser.navigate", (accessor, args) => mb({ type: "navigate", id: args.id, url: args.url }));
+  Registry.registerCommand("muster.browser.focus", (accessor, args) => mb({ type: "focus", id: args.id }));
   Registry.registerCommand("muster.browser.pick", (accessor, args) => { const b = browsers.get(args.id); if (b) startPick(b); });
   Registry.registerCommand("muster.browser.screenshot", (accessor, args) => { const b = browsers.get(args.id); if (b) return screenshot(b); });
-  Registry.registerCommand("muster.browser.context", async (accessor, args) => { const b = args && args.id ? browsers.get(args.id) : [...browsers.values()].find((x) => x.shown) || [...browsers.values()][0]; if (!b) return null; const info = await mb({ type: "url", id: b.id }).catch(() => null); return { id: b.id, url: (info && info.url) || b.url, title: (info && info.title) || b.title, console: b.consoleLog.slice(-80) }; });
+  Registry.registerCommand("muster.browser.context", async (accessor, args) => { const b = args && args.id ? browsers.get(args.id) : [...browsers.values()].find((x) => x.shown) || [...browsers.values()][0]; if (!b) return null; const info = await mb({ type: "url", id: b.id }).catch(() => null); return { id: b.id, url: (info && info.url) || b.url, title: (info && info.title) || b.title }; });
   Registry.registerCommand("muster.browser.eval", (accessor, args) => mb({ type: "eval", id: args.id, js: String(args.js) }));
-  Registry.registerCommand("muster.browser.probe", async (accessor, args) => { const b = browsers.get(args.id); const main = await mb({ type: "probe", id: args.id }).catch((e) => ({ error: String(e) })); return { ipc: !!ipc(), renderer: b ? { ready: b.ready, visible: b.visible, bounds: b.bounds, console: b.consoleLog.length } : null, main }; });
+  Registry.registerCommand("muster.browser.probe", async (accessor, args) => { const b = browsers.get(args.id); const main = await mb({ type: "probe", id: args.id }).catch((e) => ({ error: String(e) })); return { ipc: !!ipc(), frame: b ? hostFrame(b) : null, renderer: b ? { ready: b.ready, shown: b.shown, rel: b.rel, visible: b.visible, bounds: b.bounds } : null, main }; });
   const browserObserver = new MutationObserver(() => layoutBrowsers());
   browserObserver.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["class", "style"] });
   window.addEventListener("resize", layoutBrowsers);

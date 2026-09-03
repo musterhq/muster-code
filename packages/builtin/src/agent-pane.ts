@@ -9,7 +9,7 @@ import { join, relative } from "node:path";
 import { formatAge, formatSize, interruptTurn, listAccessModes, listModels, listSkills, listThreads, readHistory, readRules, runClaudeTurn, runTurn, threadsForWorkspace, type AccessMode, type CodexThread, type ModelInfo, type SkillInfo } from "./codex.js";
 import type { Checkpoint, EditCard, LiveEditController } from "./live-edit.js";
 import { expandContext, suggestMentions, rememberPick } from "./context.js";
-import type { BrowserPick } from "./browser.js";
+import type { BrowserPick, BrowserController, BrowserState } from "./browser.js";
 
 interface ModeInfo { readonly id: string; readonly name: string; readonly icon: string; readonly placeholder: string; readonly description?: string; readonly prompt?: string; readonly readOnly?: boolean; readonly plan?: boolean; readonly board?: boolean; readonly effort?: string; readonly autoFix?: boolean; readonly debug?: boolean; readonly parallel?: boolean; readonly spec?: boolean }
 interface ThreadSettings { mode: string; accessId: string; modelId: string; effortId: string; debugStage?: 0 | 1 | 2 }
@@ -21,11 +21,12 @@ type PaneMessage =
   | ToolMessage
   | { kind: "plan"; card: PlanCard };
 interface RedoState { checkpoint: Checkpoint; messages: PaneMessage[] }
-interface Tab { id: string; name: string; thread?: CodexThread; messages: PaneMessage[]; settings: ThreadSettings; plan?: PlanCard; claudeSession?: string; running: boolean; checkpoints: Map<string, Checkpoint>; redo?: RedoState; autoFixed?: boolean; lastError?: string }
+interface Tab { id: string; name: string; kind?: "chat" | "browser"; browserId?: string; thread?: CodexThread; messages: PaneMessage[]; settings: ThreadSettings; plan?: PlanCard; claudeSession?: string; running: boolean; checkpoints: Map<string, Checkpoint>; redo?: RedoState; autoFixed?: boolean; lastError?: string }
 interface BoardTask { id: string; title: string; column: "backlog" | "progress" | "review" | "done"; threadId?: string; createdAt: number }
 
 type ToPane =
-  | { type: "state"; tabs: { id: string; name: string; running: boolean }[]; activeId: string; view: "chat" | "history" | "board"; modes: ModeInfo[]; access: AccessMode[]; models: ModelInfo[]; settings: ThreadSettings; loading: boolean; canRedo: boolean }
+  | { type: "state"; tabs: { id: string; name: string; running: boolean; kind?: "chat" | "browser" }[]; activeId: string; view: "chat" | "history" | "board" | "browser"; modes: ModeInfo[]; access: AccessMode[]; models: ModelInfo[]; settings: ThreadSettings; loading: boolean; canRedo: boolean }
+  | { type: "browser"; state: BrowserState }
   | { type: "messages"; messages: PaneMessage[] }
   | { type: "user"; text: string }
   | { type: "start" }
@@ -51,7 +52,8 @@ type FromPane =
   | { type: "viewPlan" } | { type: "buildPlan"; todos?: number[]; model?: string; newThread?: boolean }
   | { type: "suggest"; kind: "file" | "skill"; query: string } | { type: "restore"; id: string } | { type: "attach" } | { type: "command"; id: string } | { type: "redo" }
   | { type: "openReview" }
-  | { type: "boardAdd"; title: string } | { type: "boardRun"; id: string } | { type: "boardMove"; id: string; column: BoardTask["column"] };
+  | { type: "boardAdd"; title: string } | { type: "boardRun"; id: string } | { type: "boardMove"; id: string; column: BoardTask["column"] }
+  | { type: "browserNav"; id: string; url: string } | { type: "browserAction"; id: string; action: "back" | "forward" | "reload" | "pick" | "screenshot" } | { type: "browserRect"; id: string; rect: { top: number; left: number; width: number; height: number }; visible: boolean } | { type: "browserToChat"; id: string } | { type: "newBrowser" };
 
 // Cursor 3.18's built-in modes (docs/cursor-feature-atlas.md §3), mapped onto Codex: plan/spec use the
 // plan collaboration mode, ask/project are read-only, triage prefers the delegating effort, multitask is the board.
@@ -77,11 +79,13 @@ export class AgentPane implements vscode.WebviewViewProvider {
   private view: vscode.WebviewView | undefined;
   private tabs: Tab[] = [];
   private activeId = "";
-  private paneView: "chat" | "history" | "board" = "chat";
+  private paneView: "chat" | "history" | "board" | "browser" = "chat";
+  browser: BrowserController | undefined;
   private models: ModelInfo[] = [];
   private access: AccessMode[] = [];
   private loading = true;
   private catalogLoaded = false;
+  private lastChatId = "";
   private skills: SkillInfo[] | undefined;
   private readyCount = 0;
   private readonly catalogChanged = new vscode.EventEmitter<void>();
@@ -377,11 +381,38 @@ export class AgentPane implements vscode.WebviewViewProvider {
     this.post({ type: "insert", text: `${mention} ` });
   }
 
+  /** ⇧⌘B: a browser tab in this pane (Cursor's browser lives in the side pane). */
+  openBrowserTab(url?: string): void {
+    if (!this.browser) return;
+    const state = this.browser.open(url);
+    const tab: Tab = { id: `browser-${state.id}`, name: url ? url.replace(/^https?:\/\//, "").slice(0, 30) : "Browser", kind: "browser", browserId: state.id, messages: [], settings: this.defaultSettings(), running: false, checkpoints: new Map() };
+    this.tabs.push(tab);
+    this.activeId = tab.id;
+    this.paneView = "browser";
+    this.pushState();
+    this.post({ type: "browser", state });
+    void vscode.commands.executeCommand("setContext", "muster.browserActive", true);
+    void vscode.commands.executeCommand(`${AgentPane.viewId}.focus`);
+  }
+
+  activeBrowserId(): string | undefined { const tab = this.active(); return tab.kind === "browser" ? tab.browserId : undefined; }
+
+  browserChanged(state: BrowserState): void {
+    const tab = this.tabs.find((t) => t.browserId === state.id);
+    if (!tab) return;
+    tab.name = (state.title || state.url.replace(/^https?:\/\//, "") || "Browser").slice(0, 30);
+    this.post({ type: "browser", state });
+    if (tab.id === this.activeId) this.pushState();
+  }
+
   /** Visual editor: a picked element or screenshot from the browser becomes context in the composer. */
   async addBrowserPick(pick: BrowserPick): Promise<void> {
     rememberPick(pick);
+    const chat = this.tabs.find((t) => t.kind !== "browser" && t.id === this.lastChatId) ?? this.tabs.find((t) => t.kind !== "browser") ?? this.newTab();
+    this.activeId = chat.id;
     this.paneView = "chat";
     this.pushState();
+    this.post({ type: "messages", messages: chat.messages });
     await vscode.commands.executeCommand(`${AgentPane.viewId}.focus`);
     const parts = ["@browser"];
     if (pick.imagePath) parts.push(`@image:${pick.imagePath}`);
@@ -395,9 +426,9 @@ export class AgentPane implements vscode.WebviewViewProvider {
   private pushState(): void {
     const tab = this.active();
     // Cursor: the tab strip is the pane header. The workbench renders it in the sidebar's title row.
-    void vscode.commands.executeCommand("muster.agentHeader.set", { tabs: this.tabs.map((t) => ({ id: t.id, name: t.name, running: t.running })), activeId: tab.id });
+    void vscode.commands.executeCommand("muster.agentHeader.set", { tabs: this.tabs.map((t) => ({ id: t.id, name: t.name, running: t.running, kind: t.kind ?? "chat" })), activeId: tab.id });
     const modes = this.modes().map((m) => (m.debug ? { ...m, placeholder: DEBUG_STAGES[tab.settings.debugStage ?? 0]!.placeholder } : m));
-    this.post({ type: "state", tabs: this.tabs.map((t) => ({ id: t.id, name: t.name, running: t.running })), activeId: tab.id, view: this.paneView, modes, access: this.access, models: this.models, settings: tab.settings, loading: this.loading, canRedo: !!tab.redo });
+    this.post({ type: "state", tabs: this.tabs.map((t) => ({ id: t.id, name: t.name, running: t.running, ...(t.kind ? { kind: t.kind } : {}) })), activeId: tab.id, view: this.paneView, modes, access: this.access, models: this.models, settings: tab.settings, loading: this.loading, canRedo: !!tab.redo });
   }
 
   private pushBoard(): void {
@@ -421,8 +452,8 @@ export class AgentPane implements vscode.WebviewViewProvider {
       case "openReview": await this.live.openReview(); return;
       case "command": await vscode.commands.executeCommand(message.id); return;
       case "newAgent": this.newAgent(); return;
-      case "activateTab": { const tab = this.tabs.find((t) => t.id === message.id); if (tab) { this.activeId = tab.id; this.paneView = "chat"; this.pushState(); this.post({ type: "messages", messages: tab.messages }); } return; }
-      case "closeTab": { this.tabs = this.tabs.filter((t) => t.id !== message.id); if (!this.tabs.length) this.newTab(); if (!this.tabs.some((t) => t.id === this.activeId)) this.activeId = this.tabs[this.tabs.length - 1]!.id; this.pushState(); this.post({ type: "messages", messages: this.active().messages }); return; }
+      case "activateTab": { const tab = this.tabs.find((t) => t.id === message.id); if (tab) { this.activeId = tab.id; if (tab.kind === "browser") { this.paneView = "browser"; this.pushState(); const st = tab.browserId ? this.browser?.get(tab.browserId) : undefined; if (st) this.post({ type: "browser", state: st }); } else { this.lastChatId = tab.id; this.paneView = "chat"; this.pushState(); this.post({ type: "messages", messages: tab.messages }); } void vscode.commands.executeCommand("setContext", "muster.browserActive", tab.kind === "browser"); } return; }
+      case "closeTab": { const closing = this.tabs.find((t) => t.id === message.id); if (closing?.kind === "browser" && closing.browserId) this.browser?.close(closing.browserId); this.tabs = this.tabs.filter((t) => t.id !== message.id); if (!this.tabs.length) this.newTab(); if (!this.tabs.some((t) => t.id === this.activeId)) this.activeId = this.tabs[this.tabs.length - 1]!.id; const now = this.active(); this.paneView = now.kind === "browser" ? "browser" : "chat"; this.pushState(); if (now.kind === "browser" && now.browserId) { const st = this.browser?.get(now.browserId); if (st) this.post({ type: "browser", state: st }); } else this.post({ type: "messages", messages: now.messages }); void vscode.commands.executeCommand("setContext", "muster.browserActive", now.kind === "browser"); return; }
       case "openThread": { const thread = (await this.visibleThreads()).find((t) => t.id === message.id); if (thread) await this.openThread(thread); else void vscode.window.showWarningMessage("That thread belongs to another folder."); return; }
       case "suggest": { this.post({ type: "suggestions", kind: message.kind, items: await this.suggest(message.kind, message.query) }); return; }
       case "attach": {
@@ -501,6 +532,11 @@ export class AgentPane implements vscode.WebviewViewProvider {
         return;
       }
       case "send": await this.send(message.text); return;
+      case "newBrowser": this.openBrowserTab(); return;
+      case "browserNav": this.browser?.navigate(message.id, message.url); return;
+      case "browserAction": this.browser?.action(message.id, message.action); return;
+      case "browserRect": this.browser?.place(message.id, message.rect, message.visible && this.paneView === "browser" && this.active().browserId === message.id && (this.view?.visible ?? false)); return;
+      case "browserToChat": { const st = this.browser?.get(message.id); if (st?.picked) await this.addBrowserPick({ id: message.id, picked: st.picked, imagePath: undefined, url: st.url, title: st.title }); return; }
     }
   }
 
@@ -787,7 +823,20 @@ function paneHtml(csp: string): string {
   .tabbtn svg { width: 15px; height: 15px; }
   #tabs .spacer { flex: 1; }
   .view { display: none; flex: 1; min-height: 0; flex-direction: column; }
-  body[data-view="chat"] #chat, body[data-view="history"] #history, body[data-view="board"] #board { display: flex; }
+  body[data-view="chat"] #chat, body[data-view="history"] #history, body[data-view="board"] #board, body[data-view="browser"] #browserpane { display: flex; }
+  .bbar { display: flex; align-items: center; gap: 4px; height: 34px; padding: 0 8px; border-bottom: 1px solid var(--stroke-tertiary); flex: 0 0 auto; }
+  .bbtn { width: 26px; height: 24px; border-radius: var(--radius-base); color: var(--text-secondary); font-size: 13px; display: inline-flex; align-items: center; justify-content: center; }
+  .bbtn:hover { background: var(--bg-tertiary); color: var(--fg); } .bbtn.on { background: var(--amber); color: #1a1a1a; }
+  #burl { flex: 1; min-width: 0; height: 24px; border: 1px solid var(--stroke-secondary); border-radius: var(--radius-base); background: var(--vscode-input-background); color: var(--fg); font: inherit; font-size: var(--fs-sm); padding: 0 10px; outline: none; }
+  #burl:focus { border-color: var(--stroke-primary); }
+  #bhost { flex: 1; min-height: 120px; background: transparent; }
+  .bsections { flex: 0 0 auto; height: 190px; border-top: 1px solid var(--stroke-tertiary); display: flex; flex-direction: column; }
+  .bstabs { display: flex; align-items: center; gap: 2px; height: 28px; padding: 0 6px; border-bottom: 1px solid var(--stroke-tertiary); font-size: var(--fs-sm); }
+  .bstab { padding: 3px 8px; border-radius: var(--radius-sm); color: var(--text-secondary); cursor: pointer; } .bstab:hover { background: var(--bg-quaternary); } .bstab.on { background: var(--bg-tertiary); color: var(--fg); }
+  .bstab .cnt { color: var(--text-tertiary); font-size: var(--fs-xs); }
+  .bsbody { flex: 1; overflow: auto; padding: 6px 10px; font-family: var(--vscode-editor-font-family); font-size: var(--fs-xs); line-height: 17px; white-space: pre-wrap; word-break: break-word; }
+  .bsbody .c { display: block; } .bsbody .c.warn { color: var(--vscode-charts-yellow, #D2943E); } .bsbody .c.error { color: var(--vscode-charts-red); } .bsbody .c.debug { color: var(--text-tertiary); }
+  .bsbody .kv { display: block; } .bsbody .kv b { color: var(--text-secondary); font-weight: 500; }
   #messages { flex: 1; overflow: auto; padding: 6px 10px 10px; display: flex; flex-direction: column; gap: 6px; }
   body:not(.has-messages) #messages { display: none; }
   .human { align-self: flex-end; margin-left: max(24px, 12%); min-width: 120px; max-height: 108px; overflow: hidden; position: relative; background: var(--vscode-input-background); border: 1px solid var(--stroke-secondary); border-radius: var(--radius-xl); padding: 6px 10px; white-space: pre-wrap; word-break: break-word; font-size: var(--fs-base); line-height: 20px; }
@@ -927,7 +976,9 @@ function paneHtml(csp: string): string {
   .menu .item:hover { background: var(--bg-tertiary); }
   .menu .item .ic { width: 16px; text-align: center; color: var(--text-secondary); }
   .menu .item .lbl { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .menu .item .sub { color: var(--text-tertiary); font-size: var(--fs-xs); margin-left: 6px; white-space: nowrap; }
+  .menu .item .sub { color: var(--text-tertiary); font-size: var(--fs-xs); margin-left: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 200px; flex: 0 1 auto; }
+  .menu .item .lbl { flex: 0 0 auto; }
+  .menu .item.mode .lbl { flex: 0 0 auto; }
   .menu .item .check { width: 14px; color: var(--fg); visibility: hidden; }
   .menu .item.on .check { visibility: visible; }
   .menu .item .kbd { color: var(--text-tertiary); font-size: var(--fs-xs); }
@@ -981,6 +1032,11 @@ function paneHtml(csp: string): string {
       <div class="menu" id="menu"></div>
     </div>
   </div>
+  <div class="view" id="browserpane">
+    <div class="bbar"><button class="bbtn" data-act="back" title="Back">←</button><button class="bbtn" data-act="forward" title="Forward">→</button><button class="bbtn" data-act="reload" title="Reload ⌘R">⟳</button><input id="burl" placeholder="Enter a URL"><button class="bbtn" id="bpick" data-act="pick" title="Select an element for the chat">⌖</button><button class="bbtn" data-act="screenshot" title="Screenshot to chat">⧉</button></div>
+    <div id="bhost"></div>
+    <div class="bsections"><div class="bstabs"><span class="bstab on" data-sec="console">Console <span id="bconsole-count" class="cnt"></span></span><span class="bstab" data-sec="selected">Selected</span><span class="bstab" data-sec="page">Page</span><span class="spacer"></span><button class="btn text" id="bclear">Clear</button><button class="btn primary" id="btochat">Add to chat</button></div><div class="bsbody" id="bsbody"></div></div>
+  </div>
   <div class="view" id="history"><input id="hsearch" placeholder="Search threads"><div id="hlist"></div></div>
   <div class="view" id="board"><input id="badd" placeholder="Add a task to the board and press Enter"><div id="bcols"></div></div>
 <script>const vscode = acquireVsCodeApi(); vscode.postMessage({ type: "boot" });</script>
@@ -995,6 +1051,7 @@ function paneHtml(csp: string): string {
     plus: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>',
     history: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5M12 7v5l3 3"/></svg>',
     board: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="5" height="16" rx="1"/><rect x="10" y="4" width="5" height="10" rx="1"/><rect x="17" y="4" width="4" height="13" rx="1"/></svg>',
+    globe: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></svg>',
     more: '<svg viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg>',
     max: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 9V4h5M20 15v5h-5M20 9V4h-5M4 15v5h5"/></svg>',
   };
@@ -1109,6 +1166,7 @@ function paneHtml(csp: string): string {
     }
     const mk = (icon, title, on, fn) => { const b = document.createElement("button"); b.className = "tabbtn" + (on ? " on" : ""); b.title = title; b.innerHTML = icon; b.addEventListener("click", fn); return b; };
     t.appendChild(mk(ICONS.plus, "New Agent ⇧⌘L", false, () => vscode.postMessage({ type: "newAgent" })));
+    t.appendChild(mk(ICONS.globe, "Open Browser ⇧⌘B", false, () => vscode.postMessage({ type: "newBrowser" })));
     const sp = document.createElement("span"); sp.className = "spacer"; t.appendChild(sp);
     t.appendChild(mk(ICONS.history, "History", state.view === "history", () => vscode.postMessage({ type: "view", view: state.view === "history" ? "chat" : "history" })));
     if (state.view === "board") t.appendChild(mk(ICONS.board, "Board", true, () => vscode.postMessage({ type: "view", view: "chat" })));
@@ -1220,9 +1278,36 @@ function paneHtml(csp: string): string {
   $("send").addEventListener("click", send);
   $("attach").addEventListener("click", () => vscode.postMessage({ type: "attach" }));
   $("stop").addEventListener("click", () => vscode.postMessage({ type: "stop" }));
+  // ── browser tab: URL bar, page area (the workbench places the real page over #bhost), sections ──
+  let bstate = null, bsec = "console";
+  const bhost = $("bhost");
+  function reportRect() {
+    if (!bstate) return;
+    const r = bhost.getBoundingClientRect(); const visible = body.dataset.view === "browser" && r.width > 10 && r.height > 10;
+    vscode.postMessage({ type: "browserRect", id: bstate.id, rect: { top: r.top, left: r.left, width: r.width, height: r.height }, visible });
+  }
+  setInterval(reportRect, 500);
+  window.addEventListener("resize", reportRect);
+  function renderBrowser(st) {
+    bstate = st;
+    if (document.activeElement !== $("burl")) $("burl").value = st.url || "";
+    $("bpick").classList.toggle("on", !!st.picking);
+    $("bconsole-count").textContent = st.console.length ? "(" + st.console.length + ")" : "";
+    const body_ = $("bsbody");
+    if (bsec === "console") body_.innerHTML = st.console.length ? st.console.slice(-200).map((c) => '<span class="c ' + escape(c.level) + '">' + escape(c.message) + (c.source ? ' <span style="opacity:.5">' + escape(String(c.source).split("/").pop()) + (c.line ? ':' + c.line : '') + '</span>' : '') + '</span>').join("") : '<span class="c debug">No console output yet.</span>';
+    else if (bsec === "selected") body_.innerHTML = st.picked ? '<span class="kv"><b>selector</b> ' + escape(st.picked.selector) + '</span>' + (st.picked.source ? '<span class="kv"><b>source</b> ' + escape(st.picked.source.file) + ':' + escape(st.picked.source.line) + '</span>' : '') + '<span class="kv"><b>text</b> ' + escape(st.picked.text) + '</span><span class="kv"><b>rect</b> ' + escape(JSON.stringify(st.picked.rect)) + '</span><span class="kv"><b>styles</b> ' + escape(Object.entries(st.picked.styles).map(([k, v]) => k + ": " + v).join("; ")) + '</span><span class="kv"><b>html</b> ' + escape(st.picked.html.slice(0, 800)) + '</span>' : '<span class="c debug">Click ⌖ then an element in the page.</span>';
+    else body_.innerHTML = '<span class="kv"><b>url</b> ' + escape(st.url) + '</span><span class="kv"><b>title</b> ' + escape(st.title) + '</span>';
+    reportRect();
+  }
+  $("burl").addEventListener("keydown", (e) => { if (e.key === "Enter" && bstate) vscode.postMessage({ type: "browserNav", id: bstate.id, url: $("burl").value }); e.stopPropagation(); });
+  document.querySelectorAll(".bbar .bbtn").forEach((b) => b.addEventListener("click", () => { if (bstate) vscode.postMessage({ type: "browserAction", id: bstate.id, action: b.dataset.act }); }));
+  document.querySelectorAll(".bstab").forEach((t) => t.addEventListener("click", () => { bsec = t.dataset.sec; document.querySelectorAll(".bstab").forEach((x) => x.classList.toggle("on", x === t)); if (bstate) renderBrowser(bstate); }));
+  $("bclear").addEventListener("click", () => { if (bstate) { bstate.console = []; renderBrowser(bstate); } });
+  $("btochat").addEventListener("click", () => { if (bstate) vscode.postMessage({ type: "browserToChat", id: bstate.id }); });
   window.addEventListener("message", (event) => {
     const m = event.data;
-    if (m.type === "state") { state = m; renderState(); }
+    if (m.type === "browser") { renderBrowser(m.state); }
+    if (m.type === "state") { state = m; renderState(); reportRect(); }
     else if (m.type === "messages") { renderMessages(m.messages); if (state) renderState(); }
     else if (m.type === "user") { assistantEl = thinkingEl = null; addHuman(m.text, m.checkpoint); if (state) renderState(); }
     else if (m.type === "start") { body.classList.add("running"); }
