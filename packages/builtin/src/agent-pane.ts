@@ -37,7 +37,8 @@ type ToPane =
   | { type: "threads"; items: { id: string; name: string; project: string; age: string; turns: number; size: string; live: boolean; pinned: boolean }[] }
   | { type: "board"; columns: { id: string; title: string; cards: { id: string; title: string; subtitle: string; running: boolean }[] }[] }
   | { type: "suggestions"; kind: "file" | "skill"; items: { label: string; detail: string; insert: string }[] }
-  | { type: "openModeMenu" };
+  | { type: "openModeMenu" }
+  | { type: "insert"; text: string };
 type FromPane =
   | { type: "ready" } | { type: "boot" } | { type: "clientError"; message: string } | { type: "send"; text: string } | { type: "stop" }
   | { type: "acceptAll" } | { type: "rejectAll" } | { type: "open"; path: string; ifClosed?: boolean }
@@ -350,6 +351,17 @@ export class AgentPane implements vscode.WebviewViewProvider {
     void this.view?.webview.postMessage(message);
   }
 
+  /** ⌘L: the selection (or file) becomes a mention in the composer, Cursor's "Add to Chat". */
+  async addSelection(editor: vscode.TextEditor): Promise<void> {
+    const rel = relative(this.cwd(), editor.document.uri.fsPath);
+    const sel = editor.selection;
+    const mention = sel.isEmpty ? `@${rel}` : `@${rel}:${sel.start.line + 1}-${sel.end.line + 1}`;
+    this.paneView = "chat";
+    this.pushState();
+    await vscode.commands.executeCommand(`${AgentPane.viewId}.focus`);
+    this.post({ type: "insert", text: `${mention} ` });
+  }
+
   activateTab(id: string): void { void this.onMessage({ type: "activateTab", id }); }
   closeTab(id: string): void { void this.onMessage({ type: "closeTab", id }); }
 
@@ -616,14 +628,16 @@ export class AgentPane implements vscode.WebviewViewProvider {
   /** @path mentions become context blocks; the mention text stays so the agent sees what was meant. */
   private expandMentions(prompt: string, cwd: string): string {
     const blocks: string[] = [];
-    for (const match of prompt.matchAll(/(?:^|\s)@([\w./-]+)/g)) {
-      const rel = match[1]!;
+    for (const match of prompt.matchAll(/(?:^|\s)@([\w./-]+(?::\d+-\d+)?)/g)) {
+      const rel = match[1]!.replace(/:\d+-\d+$/, "");
+      const range = /:(\d+)-(\d+)$/.exec(match[1]!);
       const abs = join(cwd, rel);
       if (!existsSync(abs) || blocks.length >= 8) continue;
       try {
         const text = readFileSync(abs, "utf8");
         const lines = text.split("\n");
-        blocks.push(`<file path="${rel}">\n${lines.slice(0, 400).join("\n")}${lines.length > 400 ? "\n… (truncated)" : ""}\n</file>`);
+        const slice = range ? lines.slice(Number(range[1]) - 1, Number(range[2])) : lines.slice(0, 400);
+        blocks.push(`<file path="${rel}"${range ? ` lines="${range[1]}-${range[2]}"` : ""}>\n${slice.join("\n")}${!range && lines.length > 400 ? "\n… (truncated)" : ""}\n</file>`);
       } catch { /* directories and binaries are skipped */ }
     }
     return blocks.length ? `${prompt}\n\nContext:\n${blocks.join("\n")}` : prompt;
@@ -1190,6 +1204,7 @@ function paneHtml(csp: string): string {
     else if (m.type === "board") { renderBoard(m.columns); }
     else if (m.type === "suggestions") { renderSuggestions(m.kind, m.items); }
     else if (m.type === "openModeMenu") { openMenu("mode", $("mode-pill")); }
+    else if (m.type === "insert") { const at = input.selectionStart; input.value = input.value.slice(0, at) + m.text + input.value.slice(at); input.setSelectionRange(at + m.text.length, at + m.text.length); autosize(); input.focus(); }
     else if (m.type === "done") { body.classList.remove("running"); if (thinkingEl) thinkingEl.querySelector("summary").textContent = "Thought"; if (!m.ok) { const e = document.createElement("div"); e.className = "error"; e.textContent = m.error || "Failed"; messages.appendChild(e); } assistantEl = thinkingEl = null; scroll(); }
   });
   autosize();

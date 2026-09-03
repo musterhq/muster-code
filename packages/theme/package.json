@@ -18,6 +18,11 @@
         "label": "Muster Dark",
         "uiTheme": "vs-dark",
         "path": "./themes/muster-dark-color-theme.json"
+      },
+      {
+        "label": "Muster Light",
+        "uiTheme": "vs",
+        "path": "./themes/muster-light-color-theme.json"
       }
     ],
     "configurationDefaults": {

@@ -56,7 +56,7 @@
     node.style.fontFeatureSettings = style.fontFeatureSettings;
   }
 
-  function ghostRows(services, languageId, lines, lineHeight) {
+  function ghostRows(services, languageId, lines, lineHeight, innerRemoved) {
     const frag = document.createDocumentFragment();
     let model;
     try {
@@ -66,6 +66,7 @@
         const row = el("div", "muster-ghost-line");
         row.style.height = row.style.lineHeight = lineHeight;
         const text = lines[i - 1];
+        for (const box of (innerRemoved || []).filter((r) => r.row === i - 1)) { const b = el("span", "muster-inner-removed"); b.style.left = `calc(${box.start}ch + .5px)`; b.style.width = `${Math.max(1, box.end - box.start)}ch`; row.append(b); }
         const tokens = model.tokenization.getLineTokens(i);
         const count = tokens.getCount();
         for (let t = 0; t < count; t++) row.append(el("span", tokens.getClassName(t), text.slice(tokens.getStartOffset(t), tokens.getEndOffset(t))));
@@ -109,10 +110,13 @@
     const actions = el("div", "actions");
     const undo = button("Undo All", KEYS.rejectFile, "text", () => run("muster.edit.file", { uri: st.uri, action: "reject" }));
     const keep = button("Keep All", KEYS.acceptFile, "accent", () => run("muster.edit.file", { uri: st.uri, action: "accept" }));
-    actions.append(undo, keep);
+    // Multi-file review (Cursor): "Keep all changes" + "Review next file ⌥L".
+    const keepAll = button("Keep all changes", "", "text", () => run("muster.edit.acceptAll", {}));
+    const nextFile = button("Review next file", "⌥L", "accent", () => run("muster.edit.nextFile", {}));
+    actions.append(undo, keep, keepAll, nextFile);
     dom.append(nav, actions);
     const id = `muster.review.${Math.random().toString(36).slice(2)}`;
-    return { getId: () => id, getDomNode: () => dom, getPosition: () => ({ preference: null }), counter, undo, keep, dom };
+    return { getId: () => id, getDomNode: () => dom, getPosition: () => ({ preference: null }), counter, undo, keep, keepAll, nextFile, dom };
   }
 
   function currentIndex(editor, hunks) {
@@ -134,6 +138,9 @@
     st.bar.counter.textContent = `${index} / ${shown}`;
     st.bar.undo.firstChild.textContent = total > 1 ? "Undo All" : "Undo";
     st.bar.keep.firstChild.textContent = total > 1 ? "Keep All" : "Keep";
+    const multi = (st.files || 1) > 1;
+    st.bar.undo.style.display = multi ? "none" : ""; st.bar.keep.style.display = multi ? "none" : "";
+    st.bar.keepAll.style.display = multi ? "" : "none"; st.bar.nextFile.style.display = multi ? "" : "none";
     // Monaco sizes the overlay container by width only: anchor the bar by top.
     const info = editor.getLayoutInfo();
     const height = st.bar.dom.offsetHeight || 34;
@@ -207,18 +214,24 @@
         range: { startLineNumber: h.start, startColumn: 1, endLineNumber: last, endColumn: 1 },
         options: { description: "muster-added", isWholeLine: true, className: "muster-added-line", overviewRuler: { color: { id: "editorOverviewRuler.addedForeground" }, position: 7 } },
       });
+      decorations.push({ range: { startLineNumber: h.start, startColumn: 1, endLineNumber: h.start, endColumn: 1 }, options: { description: "muster-added-first", isWholeLine: true, className: "muster-added-first" } });
+      for (const box of (h.inner && h.inner.added) || []) {
+        const line = h.start + box.row;
+        if (line > last) continue;
+        decorations.push({ range: { startLineNumber: line, startColumn: box.start + 1, endLineNumber: line, endColumn: box.end + 1 }, options: { description: "muster-inner-added", className: "muster-inner-added" } });
+      }
     }
     st.decorations.set(decorations);
 
     const wanted = new Map();
-    for (const h of st.hunks) if (h.removed && h.removed.length) wanted.set(`${h.start}\n${h.removed.join("\n")}`, h);
+    for (const h of st.hunks) if (h.removed && h.removed.length) wanted.set(`${h.start}\n${h.removed.join("\n")}\n${JSON.stringify((h.inner && h.inner.removed) || [])}`, h);
     editor.changeViewZones((a) => {
       for (const [key, id] of st.zones) if (!wanted.has(key)) { a.removeZone(id); st.zones.delete(key); }
       for (const [key, h] of wanted) {
         if (st.zones.has(key)) continue;
         const dom = el("div", "muster-ghost");
         applyFont(editor, dom);
-        dom.append(ghostRows(services, model.getLanguageId(), h.removed, lineHeight));
+        dom.append(ghostRows(services, model.getLanguageId(), h.removed, lineHeight, h.inner && h.inner.removed));
         st.zones.set(key, a.addZone({ afterLineNumber: Math.max(0, h.start - 1), heightInLines: h.removed.length, domNode: dom }));
       }
     });

@@ -224,6 +224,18 @@
       {
         "command": "muster.agent.closeTab",
         "title": "Close Agent Tab"
+      },
+      {
+        "command": "muster.edit.nextFile",
+        "title": "Review Next File"
+      },
+      {
+        "command": "muster.edit.prevFile",
+        "title": "Review Previous File"
+      },
+      {
+        "command": "muster.agent.addSelection",
+        "title": "Add Selection to Chat"
       }
     ],
     "configuration": {
@@ -347,18 +359,6 @@
         "when": "muster.liveEdit && editorTextFocus"
       },
       {
-        "command": "muster.edit.next",
-        "key": "alt+f5",
-        "mac": "alt+f5",
-        "when": "muster.liveEdit && editorTextFocus"
-      },
-      {
-        "command": "muster.edit.prev",
-        "key": "shift+alt+f5",
-        "mac": "shift+alt+f5",
-        "when": "muster.liveEdit && editorTextFocus"
-      },
-      {
         "command": "muster.agent.mode",
         "key": "ctrl+.",
         "mac": "cmd+.",
@@ -381,6 +381,42 @@
         "key": "ctrl+k",
         "mac": "cmd+k",
         "when": "terminalFocus"
+      },
+      {
+        "command": "muster.edit.next",
+        "key": "alt+j",
+        "mac": "alt+j",
+        "when": "muster.liveEdit && editorTextFocus"
+      },
+      {
+        "command": "muster.edit.prev",
+        "key": "alt+k",
+        "mac": "alt+k",
+        "when": "muster.liveEdit && editorTextFocus"
+      },
+      {
+        "command": "muster.edit.nextFile",
+        "key": "alt+l",
+        "mac": "alt+l",
+        "when": "muster.liveEdit"
+      },
+      {
+        "command": "muster.edit.prevFile",
+        "key": "alt+h",
+        "mac": "alt+h",
+        "when": "muster.liveEdit"
+      },
+      {
+        "command": "muster.agent.addSelection",
+        "key": "ctrl+l",
+        "mac": "cmd+l",
+        "when": "editorTextFocus"
+      },
+      {
+        "command": "muster.agent.mode",
+        "key": "ctrl+i",
+        "mac": "cmd+i",
+        "when": "editorTextFocus || focusedView == muster.agent.pane"
       }
     ],
     "customEditors": [

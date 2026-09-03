@@ -64,6 +64,8 @@ export class LiveEditController {
     cmd("muster.edit.rejectAll", () => this.rejectAll());
     cmd("muster.edit.next", () => this.onCurrent((file, editor) => this.jump(file, editor, 1)));
     cmd("muster.edit.prev", () => this.onCurrent((file, editor) => this.jump(file, editor, -1)));
+    cmd("muster.edit.nextFile", () => this.jumpFile(1));
+    cmd("muster.edit.prevFile", () => this.jumpFile(-1));
     // Clicks from the workbench widgets arrive with the file spelled out.
     cmd("muster.edit.hunk", (args: HunkArgs) => {
       const file = this.fileFor(args.uri);
@@ -298,9 +300,10 @@ export class LiveEditController {
     const doc = vscode.workspace.textDocuments.find((d) => d.uri.toString() === file.uri.toString());
     if (!doc) return;
     file.hunks = lineDiff(file.baseline, doc.getText().split("\n"));
+    const lines = doc.getText().split("\n");
     void vscode.commands.executeCommand("muster.inlineDiff.render", {
       uri: file.uri.toString(),
-      hunks: file.hunks.map((h) => ({ start: h.targetStart + 1, count: h.targetCount, removed: h.removed })),
+      hunks: file.hunks.map((h) => ({ start: h.targetStart + 1, count: h.targetCount, removed: h.removed, inner: innerRanges(h.removed, lines.slice(h.targetStart, h.targetStart + h.targetCount)) })),
       streaming: file.streaming,
       files: this.files.size,
     });
@@ -330,6 +333,18 @@ export class LiveEditController {
     if (inside >= 0) return inside;
     const after = file.hunks.findIndex((h) => h.targetStart > line);
     return after >= 0 ? after : 0;
+  }
+
+  /** ⌥L / ⌥H: the next or previous file with pending changes, revealed at its first hunk (Cursor's review navigation). */
+  private async jumpFile(direction: 1 | -1): Promise<void> {
+    const files = [...this.files.values()];
+    if (!files.length) return;
+    const activePath = vscode.window.activeTextEditor?.document.uri.fsPath;
+    const at = files.findIndex((f) => f.abs === activePath);
+    const next = files[((at < 0 ? (direction > 0 ? -1 : 0) : at) + direction + files.length) % files.length]!;
+    const editor = await vscode.window.showTextDocument(next.uri, { preview: false });
+    const first = next.hunks[0];
+    if (first) { const position = new vscode.Position(first.targetStart, 0); editor.selection = new vscode.Selection(position, position); editor.revealRange(new vscode.Range(position, position), vscode.TextEditorRevealType.InCenterIfOutsideViewport); }
   }
 
   private async jump(file: LiveFile, editor: vscode.TextEditor, direction: 1 | -1): Promise<void> {
@@ -426,4 +441,27 @@ export class LiveEditController {
     }
     return { path: file.rel, adds, dels, status: file.status, hunks: file.hunks.length, ...(out.length ? { diff: out.join("\n") } : {}) };
   }
+}
+
+/** Cursor's inner-change highlights: for removed/added lines paired by position, the changed span after trimming
+ * the common prefix and suffix (row = index within the hunk; columns are 0-based character offsets). */
+export function innerRanges(removed: readonly string[], added: readonly string[]): { added: { row: number; start: number; end: number }[]; removed: { row: number; start: number; end: number }[] } {
+  const out = { added: [] as { row: number; start: number; end: number }[], removed: [] as { row: number; start: number; end: number }[] };
+  const pairs = Math.min(removed.length, added.length);
+  for (let i = 0; i < pairs; i++) {
+    const before = removed[i]!;
+    const after = added[i]!;
+    let prefix = 0;
+    while (prefix < before.length && prefix < after.length && before[prefix] === after[prefix]) prefix++;
+    let suffix = 0;
+    while (suffix < before.length - prefix && suffix < after.length - prefix && before[before.length - 1 - suffix] === after[after.length - 1 - suffix]) suffix++;
+    const changedBefore = before.length - prefix - suffix;
+    const changedAfter = after.length - prefix - suffix;
+    if (changedBefore <= 0 && changedAfter <= 0) continue;
+    // Whole-line rewrites get no inner box (Cursor shows plain green/red for those).
+    if (changedAfter > after.length * 0.8 && changedBefore > before.length * 0.8) continue;
+    if (changedAfter > 0) out.added.push({ row: i, start: prefix, end: after.length - suffix });
+    if (changedBefore > 0) out.removed.push({ row: i, start: prefix, end: before.length - suffix });
+  }
+  return out;
 }

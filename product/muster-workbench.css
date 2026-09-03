@@ -225,3 +225,12 @@
 .monaco-workbench .muster-tab:hover .x, .monaco-workbench .muster-tab.active .x { visibility: visible; }
 .monaco-workbench .muster-tab .x:hover { background: color-mix(in srgb, var(--vscode-editor-foreground) 14%, transparent); color: var(--vscode-editor-foreground); }
 .monaco-workbench .muster-tab .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--vscode-charts-green); }
+
+/* ── Inline diff polish: inner-change boxes (Cursor: rgba(12,233,27,.15) / rgba(242,13,59,.25)) ── */
+.monaco-editor .muster-inner-added { background-color: rgba(12,233,27,.15); border-left: 1px solid rgba(12,233,27,.15); border-right: 1px solid rgba(12,233,27,.15); box-sizing: border-box; }
+.monaco-editor .muster-ghost-line { position: relative; }
+.monaco-editor .muster-inner-removed { position: absolute; top: 0; height: 100%; background-color: rgba(242,13,59,.25); border-left: 1px solid rgba(242,13,59,.25); border-right: 1px solid rgba(242,13,59,.25); box-sizing: border-box; pointer-events: none; }
+.monaco-editor .muster-added-first { position: relative; }
+
+/* ── Chrome: no VS Code chat-setup "Sign In" indicator in the title bar (Codex/Claude status lives in the status bar) ── */
+.monaco-workbench .titlebar .action-item[aria-label="Sign In"], .monaco-workbench .titlebar .update-indicator.prominent { display: none !important; }

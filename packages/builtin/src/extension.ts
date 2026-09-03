@@ -150,6 +150,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   context.subscriptions.push(vscode.commands.registerCommand("muster.agent.board", () => pane.showBoard()));
   context.subscriptions.push(vscode.commands.registerCommand("muster.agent.mode", () => pane.cycleMode()));
   context.subscriptions.push(vscode.commands.registerCommand("muster.agent.tab", (args: { id: string }) => pane.activateTab(args.id)));
+  context.subscriptions.push(vscode.commands.registerCommand("muster.agent.addSelection", () => { const editor = vscode.window.activeTextEditor; if (editor) void pane.addSelection(editor); }));
   context.subscriptions.push(vscode.commands.registerCommand("muster.agent.closeTab", (args: { id: string }) => pane.closeTab(args.id)));
   // ⌘K: edit the selection (or the file) with the agent; the change streams in as the inline diff.
   context.subscriptions.push(vscode.commands.registerCommand("muster.cmdk", async () => {
