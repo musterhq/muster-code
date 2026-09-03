@@ -10,7 +10,7 @@ import { existsSync, unlinkSync } from "node:fs";
 import type { LiveEditController } from "./live-edit.js";
 import { queryCodex } from "./codex.js";
 
-interface Deps { readonly live: LiveEditController; readonly log: (line: string) => void }
+interface Deps { readonly live: LiveEditController; readonly log: (line: string) => void; readonly pane?: { debugState(): Record<string, unknown> } }
 
 export function startDevControl(context: vscode.ExtensionContext, deps: Deps): void {
   const path = process.env.MUSTER_CODE_DEV_SOCK;
@@ -63,6 +63,8 @@ async function handle(line: string, deps: Deps): Promise<unknown> {
       const result = await queryCodex(String(message.method), (message.params as Record<string, unknown>) ?? {}, cwd);
       return { ok: true, result };
     }
+    case "pane":
+      return { ok: true, pane: deps.pane?.debugState() ?? null };
     case "state":
       return {
         ok: true,

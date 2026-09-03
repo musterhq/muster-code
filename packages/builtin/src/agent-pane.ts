@@ -38,7 +38,7 @@ type ToPane =
   | { type: "suggestions"; kind: "file" | "skill"; items: { label: string; detail: string; insert: string }[] }
   | { type: "openModeMenu" };
 type FromPane =
-  | { type: "ready" } | { type: "send"; text: string } | { type: "stop" }
+  | { type: "ready" } | { type: "boot" } | { type: "clientError"; message: string } | { type: "send"; text: string } | { type: "stop" }
   | { type: "acceptAll" } | { type: "rejectAll" } | { type: "open"; path: string }
   | { type: "newAgent" } | { type: "openThread"; id: string } | { type: "closeTab"; id: string } | { type: "activateTab"; id: string }
   | { type: "view"; view: "chat" | "history" | "board" }
@@ -79,6 +79,7 @@ export class AgentPane implements vscode.WebviewViewProvider {
   private loading = true;
   private catalogLoaded = false;
   private skills: SkillInfo[] | undefined;
+  private readyCount = 0;
 
   constructor(private readonly context: vscode.ExtensionContext, private readonly output: vscode.LogOutputChannel, private readonly live: LiveEditController) {
     this.live.onCard((card) => this.post({ type: "edit", card }));
@@ -168,6 +169,11 @@ export class AgentPane implements vscode.WebviewViewProvider {
     this.pushState();
     await vscode.commands.executeCommand(`${AgentPane.viewId}.focus`);
     await this.send(`Review the changes in this repository against the ${branch} branch for issues (bugs, regressions, missing tests, risky changes). Run \`git diff ${branch}\` (and \`git status\`) to see them; report findings with file:line references, most severe first, or say "No issues found".`);
+  }
+
+  /** Dev harness: what the pane believes about itself. */
+  debugState(): Record<string, unknown> {
+    return { resolved: !!this.view, visible: this.view?.visible ?? null, ready: this.readyCount, models: this.models.length, access: this.access.length, loading: this.loading, tabs: this.tabs.length, view: this.paneView, activeMode: this.active().settings.mode };
   }
 
   /** Codex plugins and MCP servers loaded for this folder — the same config the Codex app uses, nothing to migrate. */
@@ -295,7 +301,9 @@ export class AgentPane implements vscode.WebviewViewProvider {
 
   private async onMessage(message: FromPane): Promise<void> {
     switch (message.type) {
-      case "ready": this.pushState(); this.post({ type: "messages", messages: this.active().messages }); void this.loadCatalog(); return;
+      case "boot": this.output.appendLine("pane webview booted"); return;
+      case "clientError": this.output.appendLine(`pane webview error: ${message.message}`); return;
+      case "ready": this.readyCount++; this.pushState(); this.post({ type: "messages", messages: this.active().messages }); void this.loadCatalog(); return;
       case "stop": this.stop(); return;
       case "acceptAll": await this.live.acceptAll(); return;
       case "rejectAll": await this.live.rejectAll(); return;
@@ -776,8 +784,10 @@ function paneHtml(csp: string): string {
   </div>
   <div class="view" id="history"><input id="hsearch" placeholder="Search threads"><div id="hlist"></div></div>
   <div class="view" id="board"><input id="badd" placeholder="Add a task to the board and press Enter"><div id="bcols"></div></div>
+<script>const vscode = acquireVsCodeApi(); vscode.postMessage({ type: "boot" });</script>
 <script>
-  const vscode = acquireVsCodeApi();
+  window.addEventListener("error", (e) => vscode.postMessage({ type: "clientError", message: String(e.message) + " @" + e.lineno + ":" + e.colno }));
+  window.addEventListener("unhandledrejection", (e) => vscode.postMessage({ type: "clientError", message: "unhandled: " + String(e.reason) }));
   const $ = (id) => document.getElementById(id);
   const messages = $("messages"), input = $("input"), body = document.body, menu = $("menu");
   let assistantEl = null, thinkingEl = null, planEl = null, state = null, threads = [];
@@ -849,7 +859,7 @@ function paneHtml(csp: string): string {
     const labels = { streaming: "Editing…", written: "Review", kept: "Accepted", undone: "Rejected" };
     wrap.querySelector(".edit").innerHTML = '<span class="path">' + escape(card.path) + '</span><span class="adds">+' + card.adds + '</span><span class="dels">−' + card.dels + '</span><span class="state">' + labels[card.status] + (card.diff ? " ▾" : "") + '</span>';
     const pre = wrap.querySelector(".diff"); wrap.dataset.hasDiff = card.diff ? "1" : "0";
-    pre.innerHTML = card.diff ? card.diff.split("\n").map((l) => '<span class="' + (l[0] === "+" ? "a" : l[0] === "-" ? "d" : "h") + '">' + escape(l) + '</span>').join("") : "";
+    pre.innerHTML = card.diff ? card.diff.split("\\n").map((l) => '<span class="' + (l[0] === "+" ? "a" : l[0] === "-" ? "d" : "h") + '">' + escape(l) + '</span>').join("") : "";
     if (card.status === "streaming" && card.diff) wrap.classList.add("open");
     scroll();
   }
@@ -966,7 +976,7 @@ function paneHtml(csp: string): string {
   function send() { let text = input.value.trim(); const mode = state && state.modes.find((m) => m.id === state.settings.mode); if (!text && mode && mode.id === "debug" && input.placeholder !== "Enter additional context about the issue") text = input.placeholder; if (!text || body.classList.contains("running")) return; vscode.postMessage({ type: "send", text }); input.value = ""; autosize(); }
   // @ files and / skills: a popover while typing, filled by the extension.
   let suggest = null, suggestTimer = null;
-  function triggerAt() { const upto = input.value.slice(0, input.selectionStart); const m = /(^|\s)([@/])([\w./-]*)$/.exec(upto); return m ? { kind: m[2] === "@" ? "file" : "skill", start: upto.length - m[3].length - 1, query: m[3] } : null; }
+  function triggerAt() { const upto = input.value.slice(0, input.selectionStart); const m = /(^|\\s)([@/])([\\w./-]*)$/.exec(upto); return m ? { kind: m[2] === "@" ? "file" : "skill", start: upto.length - m[3].length - 1, query: m[3] } : null; }
   function renderSuggestions(kind, items) {
     if (!suggest || suggest.kind !== kind) return;
     suggest.items = items; menu.dataset.kind = "suggest"; menu.innerHTML = items.length ? "" : '<div class="note">No matches</div>';

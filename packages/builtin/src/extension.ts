@@ -139,7 +139,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // ── Live edits (Cursor-style streaming inline diffs) ──
   const live = new LiveEditController(workspaceCwd, (line) => output.appendLine(line));
   live.register(context);
-  startDevControl(context, { live, log: (line) => output.appendLine(line) });
+  startDevControl(context, { live, log: (line) => output.appendLine(line), pane: { debugState: () => pane.debugState() } });
 
   // ── The Agent pane (secondary sidebar) — the Cursor-standard surface ──
   const pane = new AgentPane(context, output, live);
