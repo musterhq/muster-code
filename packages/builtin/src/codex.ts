@@ -25,6 +25,10 @@ export interface CodexThread {
 export interface CodexTurnHandlers {
   readonly onDelta: (text: string) => void;
   readonly onReasoning: (text: string) => void;
+  /** Raw item/turn notifications — the live edit painter and tool cards feed on these. */
+  readonly onEvent?: (method: string, params: Record<string, unknown>) => void;
+  /** Approvals / elicitations (computer use, command approval); undefined = decline. */
+  readonly onRequest?: (method: string, params: Record<string, unknown>) => Promise<Record<string, unknown> | undefined>;
 }
 
 export interface CodexTurnResult {
@@ -94,6 +98,8 @@ export async function runTurn(input: {
     configOverrides: ['model_reasoning_summary="detailed"'],
     onDelta: input.handlers.onDelta,
     onReasoningDelta: input.handlers.onReasoning,
+    ...(input.handlers.onEvent ? { onEvent: input.handlers.onEvent } : {}),
+    ...(input.handlers.onRequest ? { onRequest: input.handlers.onRequest } : {}),
   });
   return {
     status: result.status,

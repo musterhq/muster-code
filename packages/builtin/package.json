@@ -62,43 +62,68 @@
       }
     ],
     "viewsContainers": {
-      "activitybar": [
+      "secondarySidebar": [
         {
-          "id": "muster",
-          "title": "Muster",
-          "icon": "resources/muster.svg"
+          "id": "muster-agent",
+          "title": "Agent",
+          "icon": "resources/agent.svg"
         }
       ]
     },
     "views": {
-      "muster": [
+      "muster-agent": [
         {
-          "id": "muster.threads",
-          "name": "Threads"
-        },
-        {
-          "id": "muster.board",
-          "name": "Board",
-          "type": "webview"
+          "id": "muster.agent.pane",
+          "type": "webview",
+          "name": "New Agent",
+          "icon": "resources/agent.svg",
+          "initialSize": 1
         }
       ]
     },
     "commands": [
       {
-        "command": "muster.threads.refresh",
-        "title": "Muster: Refresh Threads"
+        "command": "muster.agent.new",
+        "title": "New Agent",
+        "icon": "$(add)"
+      },
+      {
+        "command": "muster.agent.history",
+        "title": "Agent History",
+        "icon": "$(history)"
+      },
+      {
+        "command": "muster.agent.more",
+        "title": "More",
+        "icon": "$(ellipsis)"
+      },
+      {
+        "command": "muster.agent.stop",
+        "title": "Stop Agent"
+      },
+      {
+        "command": "muster.agent.maximize",
+        "title": "Maximize Chat"
       },
       {
         "command": "muster.thread.resume",
-        "title": "Muster: Resume Thread"
-      },
-      {
-        "command": "muster.board.open",
-        "title": "Muster: Open Board"
+        "title": "Muster: Resume Codex Thread"
       },
       {
         "command": "muster.debug.extensionState",
         "title": "Muster: Show Extension State"
+      },
+      {
+        "command": "muster.edit.keep",
+        "title": "Keep Change"
+      },
+      {
+        "command": "muster.edit.undo",
+        "title": "Undo Change"
+      },
+      {
+        "command": "muster.edit.keepAll",
+        "title": "Keep All Changes"
       }
     ],
     "configuration": {
@@ -128,7 +153,50 @@
           "description": "Inline (Tab) completions."
         }
       }
-    }
+    },
+    "menus": {
+      "view/title": [
+        {
+          "command": "muster.agent.new",
+          "when": "view == muster.agent.pane",
+          "group": "navigation@1"
+        },
+        {
+          "command": "muster.agent.history",
+          "when": "view == muster.agent.pane",
+          "group": "navigation@2"
+        },
+        {
+          "command": "muster.agent.more",
+          "when": "view == muster.agent.pane",
+          "group": "navigation@3"
+        }
+      ]
+    },
+    "keybindings": [
+      {
+        "command": "muster.agent.new",
+        "key": "shift+cmd+l",
+        "mac": "shift+cmd+l"
+      },
+      {
+        "command": "muster.agent.maximize",
+        "key": "alt+cmd+e",
+        "mac": "alt+cmd+e"
+      },
+      {
+        "command": "muster.edit.keep",
+        "key": "cmd+enter",
+        "mac": "cmd+enter",
+        "when": "muster.liveEdit && editorTextFocus"
+      },
+      {
+        "command": "muster.edit.undo",
+        "key": "cmd+backspace",
+        "mac": "cmd+backspace",
+        "when": "muster.liveEdit && editorTextFocus"
+      }
+    ]
   },
   "scripts": {
     "build": "node build.mjs",

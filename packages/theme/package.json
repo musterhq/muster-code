@@ -22,15 +22,23 @@
     ],
     "configurationDefaults": {
       "workbench.colorTheme": "Muster Dark",
-      "workbench.activityBar.location": "default",
-      "window.commandCenter": true,
+      "workbench.activityBar.location": "top",
+      "window.titleBarStyle": "custom",
+      "window.commandCenter": false,
+      "workbench.layoutControl.enabled": true,
+      "workbench.secondarySideBar.defaultVisibility": "visible",
       "workbench.startupEditor": "none",
+      "workbench.tips.enabled": false,
+      "workbench.statusBar.visible": true,
+      "chat.commandCenter.enabled": false,
       "editor.fontSize": 13,
       "editor.lineHeight": 20,
       "editor.minimap.enabled": false,
       "editor.inlineSuggest.enabled": true,
-      "chat.commandCenter.enabled": true,
-      "workbench.secondarySideBar.defaultVisibility": "visible"
+      "explorer.compactFolders": false,
+      "workbench.editor.empty.hint": "hidden",
+      "diffEditor.renderSideBySide": false,
+      "diffEditor.ignoreTrimWhitespace": false
     }
   },
   "scripts": {

@@ -1,8 +1,11 @@
-// Muster Code — the built-in Muster layer. Codex-first: the default chat
-// participant, Codex threads as chat sessions, Codex models in the model
-// picker, the Threads view, and the Board view.
+// Muster Code — the built-in Muster layer. Codex-first: the Agent pane (the
+// Cursor-standard surface, secondary sidebar), Codex threads as chat sessions,
+// the default chat participant + models (native chat kept as plumbing for
+// inline chat / chat editing), and Cursor's status-bar cluster.
 import * as vscode from "vscode";
 import { formatAge, formatSize, interruptTurn, listThreads, readHistory, runTurn, type CodexThread } from "./codex.js";
+import { AgentPane } from "./agent-pane.js";
+import { LiveEditController } from "./live-edit.js";
 
 const SESSION_TYPE = "codex";
 const SESSION_SCHEME = "muster-codex";
@@ -21,13 +24,13 @@ const output = vscode.window.createOutputChannel("Muster", { log: true });
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
   const config = () => vscode.workspace.getConfiguration("muster");
   const workspaceCwd = () => vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? process.cwd();
+  const effort = () => (config().get<string>("codex.effort") as "low" | "medium" | "high" | "xhigh" | "max" | "ultra") ?? "medium";
 
-  // ── The default chat participant: streams a Codex turn into the native chat ──
+  // ── Default chat participant (plumbing for inline chat / chat editing) ──
   const handler: vscode.ChatRequestHandler = async (request, _context, stream, token) => {
     const threadId = threadIdForRequest(request);
     const thread = threadsCache.find((item) => item.id === threadId);
     const cwd = thread?.cwd ?? workspaceCwd();
-    let reasoningBuffer = "";
     stream.progress(thread ? `Continuing ${thread.name}` : "Thinking");
     const cancel = token.onCancellationRequested(() => { void interruptTurn(); });
     try {
@@ -36,13 +39,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         cwd,
         ...(threadId ? { threadId } : {}),
         model: config().get<string>("codex.model") ?? "gpt-5.6-sol",
-        reasoning: (config().get<string>("codex.effort") as "low" | "medium" | "high" | "xhigh" | "max" | "ultra") ?? "medium",
+        reasoning: effort(),
         handlers: {
           onDelta: (text) => stream.markdown(text),
           onReasoning: (text) => {
-            reasoningBuffer += text;
             (stream as unknown as { thinkingProgress?: (d: { text: string; id: string }) => void }).thinkingProgress?.({ text, id: "codex-reasoning" });
           },
+          onEvent: (method, params) => live.onEvent(method, params),
         },
       });
       if (result.status === "failed") {
@@ -50,7 +53,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         return { errorDetails: { message: result.errorMessage ?? "failed" } };
       }
       if (result.threadId && !threadId) void refreshThreads();
-      return { metadata: { threadId: result.threadId ?? threadId, reasoningChars: reasoningBuffer.length, tokens: result.tokenUsage } };
+      return { metadata: { threadId: result.threadId ?? threadId, tokens: result.tokenUsage } };
     } finally {
       cancel.dispose();
     }
@@ -59,7 +62,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   participant.iconPath = vscode.Uri.joinPath(context.extensionUri, "resources", "muster.svg");
   context.subscriptions.push(participant);
 
-  // ── Codex threads as chat sessions (the sidebar list, by the app's own names) ──
+  // ── Codex threads as chat sessions (by the app's own names) ──
   const controller = vscode.chat.createChatSessionItemController(SESSION_TYPE, async () => {
     await refreshThreads();
     controller.items.replace(threadsCache.map((thread) => {
@@ -131,31 +134,34 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   };
   context.subscriptions.push(vscode.lm.registerLanguageModelChatProvider("muster", modelProvider));
 
-  // ── Threads view (activity bar) ──
-  const tree = new ThreadsTree();
-  context.subscriptions.push(vscode.window.registerTreeDataProvider("muster.threads", tree));
-  context.subscriptions.push(vscode.commands.registerCommand("muster.threads.refresh", async () => { await refreshThreads(); tree.refresh(); await controller.refreshHandler(new vscode.CancellationTokenSource().token); }));
+  // ── Live edits (Cursor-style streaming inline diffs) ──
+  const live = new LiveEditController(workspaceCwd);
+  live.register(context);
+
+  // ── The Agent pane (secondary sidebar) — the Cursor-standard surface ──
+  const pane = new AgentPane(context, output, live);
+  context.subscriptions.push(vscode.window.registerWebviewViewProvider(AgentPane.viewId, pane, { webviewOptions: { retainContextWhenHidden: true } }));
+  context.subscriptions.push(vscode.commands.registerCommand("muster.agent.new", () => pane.newAgent()));
+  context.subscriptions.push(vscode.commands.registerCommand("muster.agent.history", () => pane.pickThread()));
+  context.subscriptions.push(vscode.commands.registerCommand("muster.agent.more", () => vscode.commands.executeCommand("workbench.action.openSettings", "muster")));
+  context.subscriptions.push(vscode.commands.registerCommand("muster.agent.stop", () => pane.stop()));
+  context.subscriptions.push(vscode.commands.registerCommand("muster.agent.maximize", () => vscode.commands.executeCommand("workbench.action.toggleMaximizedAuxiliaryBar")));
   context.subscriptions.push(vscode.commands.registerCommand("muster.thread.resume", async (thread?: CodexThread) => {
-    const target = thread ?? (await pickThread());
-    if (!target) return;
-    await vscode.commands.executeCommand("vscode.open", sessionUri(target.id));
+    if (thread) await pane.openThread(thread); else await pane.pickThread();
   }));
   context.subscriptions.push(vscode.commands.registerCommand("muster.debug.extensionState", () => {
     output.appendLine(JSON.stringify({ threads: threadsCache.length, model: config().get("codex.model"), effort: config().get("codex.effort") }));
     output.show();
   }));
 
-  // ── Board view (webview) ──
-  context.subscriptions.push(vscode.window.registerWebviewViewProvider("muster.board", {
-    resolveWebviewView(view) {
-      view.webview.options = { enableScripts: false };
-      view.webview.html = boardHtml();
-    },
-  }));
-  context.subscriptions.push(vscode.commands.registerCommand("muster.board.open", () => vscode.commands.executeCommand("muster.board.focus")));
+  // ── Status bar, Cursor's right cluster ──
+  const tabItem = vscode.window.createStatusBarItem("muster.tab", vscode.StatusBarAlignment.Right, 60);
+  tabItem.text = "Muster Tab"; tabItem.tooltip = "Inline completions"; tabItem.show();
+  const statsItem = vscode.window.createStatusBarItem("muster.agentStats", vscode.StatusBarAlignment.Right, 59);
+  statsItem.text = "$(comment-discussion) Agent Stats: 0/0 (0%)"; statsItem.tooltip = "Turns this session"; statsItem.show();
+  context.subscriptions.push(tabItem, statsItem);
 
   await refreshThreads();
-  tree.refresh();
   output.appendLine(`Muster activated · ${threadsCache.length} Codex threads`);
 
   async function refreshThreads(): Promise<CodexThread[]> {
@@ -165,16 +171,6 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       output.appendLine(`thread discovery failed: ${error instanceof Error ? error.message : String(error)}`);
     }
     return threadsCache;
-  }
-
-  async function pickThread(): Promise<CodexThread | undefined> {
-    const picked = await vscode.window.showQuickPick(threadsCache.map((thread) => ({
-      label: thread.name,
-      description: `${thread.project} · ${formatAge(thread.lastActivityAt)}`,
-      detail: `${thread.turnCount} turns · ${formatSize(thread.sizeBytes)}`,
-      thread,
-    })), { placeHolder: "Continue a Codex thread", matchOnDescription: true });
-    return picked?.thread;
   }
 }
 
@@ -189,30 +185,8 @@ function sessionUri(threadId: string): vscode.Uri {
 }
 
 function threadIdForRequest(request: vscode.ChatRequest): string | undefined {
-  const resource = (request as unknown as { resourceUri?: vscode.Uri; sessionResource?: vscode.Uri }).sessionResource
+  const resource = (request as unknown as { sessionResource?: vscode.Uri }).sessionResource
     ?? (request as unknown as { resourceUri?: vscode.Uri }).resourceUri;
   if (resource?.scheme === SESSION_SCHEME) return resource.path.replace(/^\//, "");
   return undefined;
-}
-
-class ThreadsTree implements vscode.TreeDataProvider<CodexThread> {
-  private readonly emitter = new vscode.EventEmitter<CodexThread | undefined>();
-  readonly onDidChangeTreeData = this.emitter.event;
-  refresh(): void { this.emitter.fire(undefined); }
-  getChildren(): CodexThread[] { return threadsCache; }
-  getTreeItem(thread: CodexThread): vscode.TreeItem {
-    const item = new vscode.TreeItem(thread.name);
-    item.description = `${thread.project} · ${formatAge(thread.lastActivityAt)}`;
-    item.tooltip = `${thread.cwd}\n${thread.turnCount} turns · ${formatSize(thread.sizeBytes)}`;
-    item.iconPath = new vscode.ThemeIcon(thread.live ? "circle-filled" : "comment-discussion");
-    item.command = { command: "muster.thread.resume", title: "Resume", arguments: [thread] };
-    return item;
-  }
-}
-
-function boardHtml(): string {
-  return `<!doctype html><html><body style="font-family:var(--vscode-font-family);color:var(--vscode-foreground);padding:12px">
-  <div style="opacity:.6;font-size:12px">Board</div>
-  <div style="margin-top:8px">Tasks run in worktrees and land here for review. Start one from the chat: <code>/tasks "goal"</code>.</div>
-  </body></html>`;
 }

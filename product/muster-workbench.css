@@ -144,3 +144,16 @@
 /* Chrome: hairline separations everywhere, no heavy borders */
 .monaco-workbench .part.sidebar, .monaco-workbench .part.auxiliarybar { border-color: var(--mc-stroke-tertiary) !important; }
 .monaco-workbench .part.statusbar { font-size: var(--mc-font-sm); }
+
+/* ── Cursor chrome: the right pane is the Agent pane; native chat stays plumbing ── */
+.monaco-workbench .part.auxiliarybar .composite-bar .action-item[aria-label^="Chat"],
+.monaco-workbench .part.auxiliarybar .composite-bar .action-item[aria-label^="Copilot"] { display: none !important; }
+/* Pane header reads as Cursor's tab row: title + right-aligned actions, hairline below */
+.monaco-workbench .part.auxiliarybar .title-label h2 { font-size: 13px; font-weight: 500; }
+.monaco-workbench .part.auxiliarybar .pane-header { border-bottom: 1px solid var(--mc-stroke-tertiary); }
+/* Empty editor: keep the letterpress mark, quiet the shortcut list to Cursor's dim style */
+.monaco-workbench .editor-group-watermark .shortcuts { color: var(--mc-text-tertiary); font-size: 13px; }
+.monaco-workbench .editor-group-watermark dl dt { color: var(--mc-text-secondary); }
+.monaco-workbench .editor-group-watermark .keybinding { opacity: .8; }
+/* Explorer rows a touch airier, like Cursor */
+.monaco-workbench .explorer-viewlet .monaco-list-row { font-size: 13px; }
