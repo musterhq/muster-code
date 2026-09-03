@@ -9,6 +9,7 @@ import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "
 import { dirname, resolve } from "node:path";
 import { ApplyPatchStream, type PatchFile } from "./apply-patch.js";
 import { applyHunk, lineDiff, type LineHunk } from "./line-diff.js";
+import { parseUnifiedDiff, reverseApply } from "./unified-diff.js";
 
 export type EditStatus = "streaming" | "written" | "kept" | "undone";
 export interface EditCard { readonly path: string; readonly adds: number; readonly dels: number; readonly status: EditStatus; readonly hunks: number; readonly diff?: string }
@@ -108,6 +109,7 @@ export class LiveEditController {
       }
       return;
     }
+    if (method === "turn/diff/updated") { this.adoptTurnDiff(String(params.diff ?? "")); return; }
     if (method === "item/completed") {
       const item = (params.item ?? {}) as Record<string, unknown>;
       if (item.type !== "fileChange") return;
@@ -117,6 +119,25 @@ export class LiveEditController {
       const state = this.streams.get(itemId);
       for (const path of paths.length ? paths : [...(state?.touched.keys() ?? [])]) this.reconcile(path);
       this.streams.delete(itemId);
+    }
+  }
+
+  /** Edits made by any means (shell, scripts): the turn's unified diff tells us which files changed; we rebuild their turn-start
+   * contents and paint them with the same inline diff and review controls. */
+  private adoptTurnDiff(diff: string): void {
+    if (!diff.trim()) return;
+    for (const file of parseUnifiedDiff(diff)) {
+      const abs = resolve(this.cwd(), file.path);
+      if (this.files.has(abs)) continue;
+      const exists = existsSync(abs);
+      const current = exists ? readFileSync(abs, "utf8") : "";
+      const origin = file.oldPath === null ? "" : reverseApply(current, file);
+      if (origin === current) continue;
+      if (this.checkpoint && !this.checkpoint.has(abs)) this.checkpoint.set(abs, { existed: file.oldPath !== null, content: origin });
+      const live: LiveFile = { uri: vscode.Uri.file(abs), abs, rel: file.path, origin, originItem: "turn-diff", baseline: origin.split("\n"), target: current, streaming: false, hunks: [], status: "written", busy: false, again: false, shown: false };
+      this.files.set(abs, live);
+      void vscode.commands.executeCommand("setContext", "muster.liveEdit", true);
+      void (async () => { try { await this.flush(live); await this.clearDirty(live); this.repaint(live); } catch (error) { this.log(`turn diff adopt failed: ${error instanceof Error ? error.message : String(error)}`); } })();
     }
   }
 

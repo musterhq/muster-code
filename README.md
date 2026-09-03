@@ -17,4 +17,6 @@ pnpm assemble          # → dist/Muster Code.app
 open "dist/Muster Code.app"
 ```
 
+Dev launch (isolated profile): `MUSTER_CODE_DEV_SOCK=/tmp/mc-dev.sock "dist/Muster Code.app/Contents/MacOS/Muster Code" --user-data-dir /tmp/mc-udd /tmp/mc-sample`
+
 Base: Code-OSS 1.126 (Electron 42, Node 24 with node:sqlite), from the VSCodium release binaries.

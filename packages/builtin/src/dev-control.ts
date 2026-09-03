@@ -75,6 +75,9 @@ async function handle(line: string, deps: Deps): Promise<unknown> {
       return { ok: true, pane: deps.pane?.debugState() ?? null };
     case "threads":
       return { ok: true, ...((await deps.pane?.debugThreads()) ?? {}) };
+    case "event":
+      deps.live.onEvent(String(message.method), (message.params as Record<string, unknown>) ?? {});
+      return { ok: true };
     case "state":
       return {
         ok: true,
