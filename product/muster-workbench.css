@@ -234,3 +234,13 @@
 
 /* ── Chrome: no VS Code chat-setup "Sign In" indicator in the title bar (Codex/Claude status lives in the status bar) ── */
 .monaco-workbench .titlebar .action-item[aria-label="Sign In"], .monaco-workbench .titlebar .update-indicator.prominent { display: none !important; }
+
+/* ── Browser (guest webview overlaid on its editor tab) ── */
+.monaco-workbench .muster-browser { position: fixed; z-index: 30; display: none; flex-direction: column; background: var(--vscode-editor-background); }
+.monaco-workbench .muster-browser-bar { display: flex; align-items: center; gap: 4px; height: 34px; padding: 0 8px; border-bottom: 1px solid color-mix(in srgb, var(--vscode-editor-foreground) 8%, transparent); font-family: var(--vscode-font-family); font-size: 12px; }
+.monaco-workbench .mb-btn { width: 26px; height: 24px; border: 0; border-radius: 6px; background: transparent; color: color-mix(in srgb, var(--vscode-editor-foreground) 66%, transparent); cursor: pointer; font: inherit; font-size: 13px; }
+.monaco-workbench .mb-btn:hover { background: color-mix(in srgb, var(--vscode-editor-foreground) 8%, transparent); color: var(--vscode-editor-foreground); }
+.monaco-workbench .muster-browser.picking .mb-pick { background: #D2943E; color: #1a1a1a; }
+.monaco-workbench .mb-url { flex: 1; height: 24px; border: 1px solid color-mix(in srgb, var(--vscode-editor-foreground) 12%, transparent); border-radius: 6px; background: var(--vscode-input-background); color: var(--vscode-editor-foreground); font: inherit; padding: 0 10px; outline: none; }
+.monaco-workbench .mb-url:focus { border-color: color-mix(in srgb, var(--vscode-editor-foreground) 24%, transparent); }
+.monaco-workbench .muster-browser-view { flex: 1; background: transparent; }

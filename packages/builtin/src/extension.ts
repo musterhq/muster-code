@@ -11,6 +11,7 @@ import { registerCompletions } from "./completions.js";
 import { PlanEditorProvider } from "./plan-editor.js";
 import { watchTerminals } from "./context.js";
 import { SettingsPage } from "./settings-page.js";
+import { BrowserTabs } from "./browser.js";
 import { queryCodex } from "./codex.js";
 
 const SESSION_TYPE = "codex";
@@ -243,6 +244,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   }));
   context.subscriptions.push(vscode.window.registerCustomEditorProvider(PlanEditorProvider.viewType, planEditors, { webviewOptions: { retainContextWhenHidden: true }, supportsMultipleEditorsPerDocument: false }));
   const settings = new SettingsPage(context, workspaceCwd);
+  // Browser (⇧⌘B): a Chromium guest tab with Cursor's visual editor; picks and screenshots go to the chat.
+  const browser = new BrowserTabs(context, workspaceCwd);
+  context.subscriptions.push(vscode.commands.registerCommand("muster.browser.openTab", (url?: string) => browser.open(typeof url === "string" ? url : undefined)));
+  context.subscriptions.push(vscode.commands.registerCommand("muster.browser.reloadActive", () => { const id = browser.active(); if (id) void vscode.commands.executeCommand("muster.browser.reload", { id }); }));
+  context.subscriptions.push(vscode.commands.registerCommand("muster.browser.focusLocationActive", () => { const id = browser.active(); if (id) void vscode.commands.executeCommand("muster.browser.focusLocation", { id }); }));
+  context.subscriptions.push(vscode.commands.registerCommand("muster.browser.pickActive", () => { const id = browser.active(); if (id) void vscode.commands.executeCommand("muster.browser.pick", { id }); }));
+  browser.onPick((pick) => void pane.addBrowserPick(pick));
   context.subscriptions.push(vscode.commands.registerCommand("muster.agent.more", () => settings.open("general")));
   context.subscriptions.push(vscode.commands.registerCommand("muster.settings.open", (section?: "general" | "models" | "rules" | "mcp" | "skills" | "plugins" | "hooks" | "docs") => settings.open(section ?? "general")));
   // Bugbot-style review on commit: after each commit, review it read-only in the pane (setting muster.review.onCommit).

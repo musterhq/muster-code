@@ -8,6 +8,20 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { listThreads, readHistory, threadsForWorkspace } from "./codex.js";
+import type { BrowserPick } from "./browser.js";
+
+// ── browser: the last picked element / screenshot, and the live page context from the workbench guest ──
+let lastPick: BrowserPick | undefined;
+export function rememberPick(pick: BrowserPick): void { lastPick = pick; }
+async function browserContext(): Promise<string | undefined> {
+  const live = (await Promise.resolve(vscode.commands.executeCommand("muster.browser.context", {})).catch(() => null)) as { url?: string; title?: string; console?: { level: number; message: string; line?: number; source?: string }[] } | null;
+  const parts: string[] = [];
+  if (live?.url) parts.push(`url: ${live.url}${live.title ? `\ntitle: ${live.title}` : ""}`);
+  if (lastPick?.picked) { const p = lastPick.picked; parts.push(`selected element: ${p.selector}\nhtml: ${p.html.slice(0, 1200)}\ntext: ${p.text.slice(0, 200)}\nrect: ${JSON.stringify(p.rect)}\nstyles: ${Object.entries(p.styles).map(([k, v]) => `${k}: ${v}`).join("; ")}`); }
+  const consoleTail = (live?.console ?? []).slice(-40).map((c) => `[${["log", "warn", "error"][c.level] ?? c.level}] ${c.message}${c.source ? ` (${c.source.split("/").pop()}:${c.line ?? ""})` : ""}`);
+  if (consoleTail.length) parts.push(`console:\n${consoleTail.join("\n")}`);
+  return parts.length ? parts.join("\n\n") : undefined;
+}
 
 const run = promisify(execFile);
 const MAX_LINES = 300;
@@ -78,6 +92,7 @@ export async function suggestMentions(cwd: string, query: string): Promise<Sugge
     { group: "Git", label: "Working tree diff", detail: "uncommitted changes", insert: "@git:diff" },
     { group: "Terminals", label: "Terminal", detail: vscode.window.activeTerminal ? `last output of ${vscode.window.activeTerminal.name}` : "last output of the active terminal", insert: "@terminal" },
     { group: "Web", label: "Web", detail: "ask the agent to search the web", insert: "@web" },
+    { group: "Browser", label: "Browser", detail: "the open browser tab: page, selected element, console", insert: "@browser" },
   ];
   for (const d of docsList()) fixed.push({ group: "Docs", label: d.name, detail: d.url, insert: `@docs:${d.name}` });
   if (!query || /^(git|com|log)/.test(q)) for (const line of (await git(cwd, ["log", "--oneline", "-8"])).split("\n").filter(Boolean)) { const [sha, ...rest] = line.split(" "); out.push({ group: "Commits", label: rest.join(" ").slice(0, 60), detail: sha ?? "", insert: `@git:commit:${sha}` }); }
@@ -94,6 +109,7 @@ export async function expandContext(prompt: string, cwd: string): Promise<{ prom
   for (const match of prompt.matchAll(/(?:^|\s)@([\w./:-]+)/g)) {
     const token = match[1]!;
     if (blocks.length >= 12) break;
+    if (token === "browser" || token === "browser:console") { const ctx = await browserContext(); if (ctx) blocks.push(`<browser>\n${ctx}\n</browser>`); continue; }
     if (token === "web") { blocks.push("<instruction>Use web search for anything that needs current or external information.</instruction>"); continue; }
     if (token === "terminal" || token.startsWith("terminal:")) { const tail = terminalTail(token.slice("terminal:".length)); if (tail) blocks.push(`<terminal>\n${tail}\n</terminal>`); continue; }
     if (token === "git:diff") { const d = await git(cwd, ["diff"]); if (d.trim()) blocks.push(`<git-diff>\n${clip(d)}\n</git-diff>`); continue; }

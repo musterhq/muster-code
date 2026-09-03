@@ -358,6 +358,100 @@
   const crumbObserver = new MutationObserver(() => { if (planToolbar.visible && !document.querySelector(".editor-group-container.active .breadcrumbs-control > .plan-breadcrumb-controls")) mountPlanToolbar(); });
   crumbObserver.observe(document.body, { childList: true, subtree: true });
 
+  // ── Browser (Cursor's browser pane + visual editor): a main-process WebContentsView positioned over a placeholder tab ──
+  const browsers = new Map();
+  const ipc = () => (globalThis.vscode && globalThis.vscode.ipcRenderer) || null;
+  const mb = (msg) => { const i = ipc(); return i ? i.invoke("vscode:muster-browser", msg) : Promise.resolve(null); };
+  const PICKER = `(() => { if (window.__musterPickerOn) return; window.__musterPickerOn = true; window.__musterPick = null;
+    const box = document.createElement("div"); box.id = "__muster_pick_box"; Object.assign(box.style, { position: "fixed", pointerEvents: "none", zIndex: 2147483647, border: "2px solid #D2943E", background: "rgba(210,148,62,.12)", borderRadius: "3px", transition: "all .05s" }); document.documentElement.appendChild(box);
+    const tag = document.createElement("div"); Object.assign(tag.style, { position: "fixed", zIndex: 2147483647, pointerEvents: "none", font: "12px -apple-system, system-ui, sans-serif", background: "#D2943E", color: "#1a1a1a", padding: "2px 6px", borderRadius: "4px" }); document.documentElement.appendChild(tag);
+    const sel = (el) => { const parts = []; let n = el; while (n && n.nodeType === 1 && parts.length < 6) { let p = n.tagName.toLowerCase(); if (n.id) { parts.unshift(p + "#" + n.id); break; } const cls = [...n.classList].slice(0, 2).join("."); if (cls) p += "." + cls; const sib = n.parentElement ? [...n.parentElement.children].filter((c) => c.tagName === n.tagName) : []; if (sib.length > 1) p += ":nth-of-type(" + (sib.indexOf(n) + 1) + ")"; parts.unshift(p); n = n.parentElement; } return parts.join(" > "); };
+    let cur = null;
+    const move = (e) => { const el = document.elementFromPoint(e.clientX, e.clientY); if (!el || el === box || el === tag) return; cur = el; const r = el.getBoundingClientRect(); Object.assign(box.style, { left: r.left + "px", top: r.top + "px", width: r.width + "px", height: r.height + "px" }); tag.textContent = el.tagName.toLowerCase() + (el.id ? "#" + el.id : "") + (el.classList.length ? "." + [...el.classList].slice(0, 2).join(".") : "") + " · " + Math.round(r.width) + "×" + Math.round(r.height); tag.style.left = r.left + "px"; tag.style.top = Math.max(0, r.top - 22) + "px"; };
+    const click = (e) => { e.preventDefault(); e.stopPropagation(); const el = cur || e.target; const cs = getComputedStyle(el); const r = el.getBoundingClientRect(); const styles = {}; for (const k of ["display","position","width","height","margin","padding","color","background-color","font-family","font-size","font-weight","line-height","border","border-radius","gap","flex-direction","justify-content","align-items"]) styles[k] = cs.getPropertyValue(k); window.__musterPick = { selector: sel(el), tag: el.tagName.toLowerCase(), id: el.id || "", classes: [...el.classList], text: (el.innerText || "").slice(0, 300), html: el.outerHTML.slice(0, 2000), rect: { x: Math.round(r.left), y: Math.round(r.top), w: Math.round(r.width), h: Math.round(r.height) }, styles, url: location.href, title: document.title }; stop(); };
+    const key = (e) => { if (e.key === "Escape") { window.__musterPick = { cancelled: true }; stop(); } };
+    function stop() { window.__musterPickerOn = false; document.removeEventListener("mousemove", move, true); document.removeEventListener("click", click, true); document.removeEventListener("keydown", key, true); box.remove(); tag.remove(); }
+    document.addEventListener("mousemove", move, true); document.addEventListener("click", click, true); document.addEventListener("keydown", key, true); })();`;
+  function browserHost(id) {
+    const label = [...document.querySelectorAll(".editor-group-container .tab.active .tab-label")].find((n) => (n.getAttribute("aria-label") || n.textContent || "").includes(`Browser ${id}`));
+    return label ? label.closest(".editor-group-container")?.querySelector(":scope > .editor-container") : null;
+  }
+  function layoutBrowsers() {
+    for (const b of browsers.values()) {
+      const host = b.shown ? browserHost(b.id) : null;
+      const on = !!host;
+      b.root.style.display = on ? "flex" : "none";
+      if (!on) { if (b.visible !== false) { b.visible = false; void mb({ type: "bounds", id: b.id, visible: false, bounds: { x: 0, y: 0, width: 0, height: 0 } }); } continue; }
+      const r = host.getBoundingClientRect();
+      Object.assign(b.root.style, { left: `${r.left}px`, top: `${r.top}px`, width: `${r.width}px`, height: `${r.height}px` });
+      const bar = 34;
+      const bounds = { x: Math.round(r.left), y: Math.round(r.top + bar), width: Math.max(0, Math.round(r.width)), height: Math.max(0, Math.round(r.height - bar)) };
+      const same = b.visible === true && b.bounds && ["x", "y", "width", "height"].every((k) => b.bounds[k] === bounds[k]);
+      if (!same) { b.visible = true; b.bounds = bounds; void mb({ type: "bounds", id: b.id, visible: true, bounds }); }
+    }
+  }
+  function makeBrowser(id, url) {
+    const root = el("div", "muster-browser");
+    const bar = el("div", "muster-browser-bar");
+    const nav = (label, title, fn) => { const x = el("button", "mb-btn", label); x.title = title; x.addEventListener("click", fn); return x; };
+    const input = el("input", "mb-url"); input.value = url; input.placeholder = "Enter a URL";
+    const consoleLog = [];
+    const b = { id, root, input, shown: true, consoleLog, url, title: "", picking: false, pickTimer: null, ready: false, visible: undefined, bounds: null };
+    const go = () => { let u = input.value.trim(); if (u && !/^[a-z]+:\/\//i.test(u)) u = /^(localhost|\d+\.\d+|[\w-]+:\d+)/.test(u) ? `http://${u}` : `https://${u}`; if (u) { b.url = u; void mb({ type: "navigate", id, url: u }); } };
+    input.addEventListener("keydown", (e) => { e.stopPropagation(); if (e.key === "Enter") go(); });
+    input.addEventListener("keyup", (e) => e.stopPropagation());
+    const pick = nav("⌖", "Select an element to add it to the chat", () => startPick(b)); pick.classList.add("mb-pick");
+    const shot = nav("⧉", "Screenshot to chat", () => screenshot(b));
+    bar.append(nav("←", "Back", () => mb({ type: "back", id })), nav("→", "Forward", () => mb({ type: "forward", id })), nav("⟳", "Reload", () => mb({ type: "reload", id })), input, pick, shot);
+    root.append(bar, el("div", "muster-browser-view"));
+    document.body.append(root);
+    browsers.set(id, b);
+    b.poll = setInterval(async () => {
+      const events = await mb({ type: "events", id }).catch(() => null);
+      for (const e of events || []) {
+        if (e.kind === "title") { b.title = e.title; run("muster.browser.event", { id, kind: "title", title: e.title, url: e.url }); }
+        else if (e.kind === "navigate") { b.url = e.url; if (document.activeElement !== input) input.value = e.url; run("muster.browser.event", { id, kind: "navigate", url: e.url }); }
+        else if (e.kind === "ready") { b.ready = true; }
+        else if (e.kind === "console") { consoleLog.push(e); if (consoleLog.length > 300) consoleLog.shift(); }
+      }
+    }, 400);
+    layoutBrowsers();
+    void mb({ type: "open", id, url, bounds: b.bounds || { x: 0, y: 0, width: 0, height: 0 } });
+    return b;
+  }
+  function startPick(b) {
+    b.picking = true; b.root.classList.add("picking");
+    void mb({ type: "eval", id: b.id, js: PICKER });
+    clearInterval(b.pickTimer);
+    b.pickTimer = setInterval(async () => {
+      const picked = await mb({ type: "eval", id: b.id, js: "(() => { const p = window.__musterPick; window.__musterPick = null; return p; })()" }).catch(() => null);
+      if (!picked || picked.error) return;
+      clearInterval(b.pickTimer); b.picking = false; b.root.classList.remove("picking");
+      if (picked.cancelled) return;
+      const image = await mb({ type: "capture", id: b.id }).catch(() => null);
+      run("muster.browser.picked", { id: b.id, picked, image: typeof image === "string" ? image : null });
+    }, 250);
+  }
+  async function screenshot(b) {
+    const image = await mb({ type: "capture", id: b.id }).catch(() => null);
+    const info = await mb({ type: "url", id: b.id }).catch(() => null);
+    run("muster.browser.picked", { id: b.id, picked: null, image: typeof image === "string" ? image : null, url: info && info.url, title: info && info.title });
+  }
+  Registry.registerCommand("muster.browser.open", (accessor, args) => { commands = commands || accessor.get(ICommandService); const b = browsers.get(args.id); if (b) { b.shown = true; void mb({ type: "navigate", id: args.id, url: args.url }); layoutBrowsers(); return true; } makeBrowser(args.id, args.url); return true; });
+  Registry.registerCommand("muster.browser.show", (accessor, args) => { const b = browsers.get(args.id); if (b) { b.shown = !!args.visible; layoutBrowsers(); } });
+  Registry.registerCommand("muster.browser.close", (accessor, args) => { const b = browsers.get(args.id); if (b) { clearInterval(b.pickTimer); clearInterval(b.poll); b.root.remove(); browsers.delete(args.id); void mb({ type: "close", id: args.id }); } });
+  Registry.registerCommand("muster.browser.reload", (accessor, args) => mb({ type: "reload", id: args.id }));
+  Registry.registerCommand("muster.browser.navigate", (accessor, args) => { const b = browsers.get(args.id); if (b) { b.input.value = args.url; } return mb({ type: "navigate", id: args.id, url: args.url }); });
+  Registry.registerCommand("muster.browser.focusLocation", (accessor, args) => { const b = browsers.get(args.id); if (b) { b.input.focus(); b.input.select(); } });
+  Registry.registerCommand("muster.browser.pick", (accessor, args) => { const b = browsers.get(args.id); if (b) startPick(b); });
+  Registry.registerCommand("muster.browser.screenshot", (accessor, args) => { const b = browsers.get(args.id); if (b) return screenshot(b); });
+  Registry.registerCommand("muster.browser.context", async (accessor, args) => { const b = args && args.id ? browsers.get(args.id) : [...browsers.values()].find((x) => x.shown) || [...browsers.values()][0]; if (!b) return null; const info = await mb({ type: "url", id: b.id }).catch(() => null); return { id: b.id, url: (info && info.url) || b.url, title: (info && info.title) || b.title, console: b.consoleLog.slice(-80) }; });
+  Registry.registerCommand("muster.browser.eval", (accessor, args) => mb({ type: "eval", id: args.id, js: String(args.js) }));
+  Registry.registerCommand("muster.browser.probe", async (accessor, args) => { const b = browsers.get(args.id); const main = await mb({ type: "probe", id: args.id }).catch((e) => ({ error: String(e) })); return { ipc: !!ipc(), renderer: b ? { ready: b.ready, visible: b.visible, bounds: b.bounds, console: b.consoleLog.length } : null, main }; });
+  const browserObserver = new MutationObserver(() => layoutBrowsers());
+  browserObserver.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["class", "style"] });
+  window.addEventListener("resize", layoutBrowsers);
+
   // Dev: the view containers VS Code keeps in the secondary sidebar (why its composite bar shows).
   Registry.registerCommand("muster.viewContainers", (accessor, args) => {
     const vds = accessor.get(IViewDescriptorService);

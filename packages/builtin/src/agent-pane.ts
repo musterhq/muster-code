@@ -8,7 +8,8 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import { formatAge, formatSize, interruptTurn, listAccessModes, listModels, listSkills, listThreads, readHistory, readRules, runClaudeTurn, runTurn, threadsForWorkspace, type AccessMode, type CodexThread, type ModelInfo, type SkillInfo } from "./codex.js";
 import type { Checkpoint, EditCard, LiveEditController } from "./live-edit.js";
-import { expandContext, suggestMentions } from "./context.js";
+import { expandContext, suggestMentions, rememberPick } from "./context.js";
+import type { BrowserPick } from "./browser.js";
 
 interface ModeInfo { readonly id: string; readonly name: string; readonly icon: string; readonly placeholder: string; readonly description?: string; readonly prompt?: string; readonly readOnly?: boolean; readonly plan?: boolean; readonly board?: boolean; readonly effort?: string; readonly autoFix?: boolean; readonly debug?: boolean; readonly parallel?: boolean; readonly spec?: boolean }
 interface ThreadSettings { mode: string; accessId: string; modelId: string; effortId: string; debugStage?: 0 | 1 | 2 }
@@ -374,6 +375,18 @@ export class AgentPane implements vscode.WebviewViewProvider {
     this.pushState();
     await vscode.commands.executeCommand(`${AgentPane.viewId}.focus`);
     this.post({ type: "insert", text: `${mention} ` });
+  }
+
+  /** Visual editor: a picked element or screenshot from the browser becomes context in the composer. */
+  async addBrowserPick(pick: BrowserPick): Promise<void> {
+    rememberPick(pick);
+    this.paneView = "chat";
+    this.pushState();
+    await vscode.commands.executeCommand(`${AgentPane.viewId}.focus`);
+    const parts = ["@browser"];
+    if (pick.imagePath) parts.push(`@image:${pick.imagePath}`);
+    this.post({ type: "insert", text: `${parts.join(" ")} ` });
+    if (pick.picked) void vscode.window.setStatusBarMessage(`Selected <${pick.picked.tag}> ${pick.picked.selector.slice(0, 60)}`, 4000);
   }
 
   activateTab(id: string): void { void this.onMessage({ type: "activateTab", id }); }

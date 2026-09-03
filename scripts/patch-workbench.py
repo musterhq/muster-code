@@ -13,7 +13,7 @@ import pathlib
 import re
 import sys
 
-js_path, contrib_path, product_path = (pathlib.Path(p) for p in sys.argv[1:4])
+js_path, contrib_path, product_path = (pathlib.Path(p) for p in sys.argv[1:4])  # argv[4]: main-process browser module (optional)
 js = js_path.read_text()
 
 anchor = "ensureChatExtensionInitialDisabledState(){if(!this._chatExtensionId||"
@@ -66,6 +66,21 @@ for old_id, (text, new_id) in WATERMARK.items():
     if not count and f'id:"{new_id}"' not in js:
         sys.exit(f"anchor missing: watermark entry {old_id}")
 js_path.write_text(js)
+
+# 5. The in-app browser is a Chromium guest (<webview>) hosted by the workbench: enable the tag for the main window.
+main_js = product_path.parent / "out" / "main.js"
+browser_main = js_path.parent.parent.parent.parent.parent / "product" / "muster-browser-main.js"
+if main_js.exists():
+    main = main_js.read_text()
+    MB, MBE = "/*muster-browser*/", "/*muster-browser:end*/"
+    if MB in main:
+        main = main[: main.index(MB)] + main[main.index(MBE) + len(MBE):]
+    source = pathlib.Path(sys.argv[4]).read_text() if len(sys.argv) > 4 else ""
+    if source:
+        marker = main.rfind("//# sourceMappingURL")
+        at = marker if marker >= 0 else len(main)
+        main = main[:at] + "\n" + MB + "\n" + source + "\n" + MBE + "\n" + main[at:]
+    main_js.write_text(main)
 
 product = json.loads(product_path.read_text())
 product["checksums"] = {}
