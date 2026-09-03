@@ -14,6 +14,7 @@
   const IModelService = __IModelService__;
   const ILanguageService = __ILanguageService__;
   const ICommandService = __ICommandService__;
+  const IViewDescriptorService = __IViewDescriptorService__;
 
   const states = new WeakMap();
   let commands = null;
@@ -344,6 +345,27 @@
   const crumbObserver = new MutationObserver(() => { if (planToolbar.visible && !document.querySelector(".editor-group-container.active .breadcrumbs-control > .plan-breadcrumb-controls")) mountPlanToolbar(); });
   crumbObserver.observe(document.body, { childList: true, subtree: true });
 
+  // Dev: the view containers VS Code keeps in the secondary sidebar (why its composite bar shows).
+  Registry.registerCommand("muster.viewContainers", (accessor, args) => {
+    const vds = accessor.get(IViewDescriptorService);
+    const location = args && typeof args.location === "number" ? args.location : 2;
+    return vds.getViewContainersByLocation(location).map((c) => { const model = vds.getViewContainerModel(c); return { id: c.id, title: typeof c.title === "string" ? c.title : (c.title && c.title.value) || "", active: model.activeViewDescriptors.length, visible: model.visibleViewDescriptors.length, all: model.allViewDescriptors.length }; });
+  });
+  // The built-in Chat container stays registered in the secondary sidebar (even with AI features off) and keeps
+  // its composite bar showing. Move it to the panel once, so the sidebar holds only the Agent pane and
+  // VS Code hides the bar natively (workbench.activityBar.autoHide) with a correct layout.
+  Registry.registerCommand("muster.evictBuiltinChat", (accessor) => {
+    const vds = accessor.get(IViewDescriptorService);
+    const chat = vds.getViewContainerById("workbench.panel.chat");
+    if (chat && vds.getViewContainerLocation(chat) === 2) { vds.moveViewContainerToLocation(chat, 1, undefined, "muster"); return true; }
+    return false;
+  });
+  Registry.registerCommand("muster.moveViewContainer", (accessor, args) => {
+    const vds = accessor.get(IViewDescriptorService);
+    const container = vds.getViewContainerById(args.id);
+    if (container) vds.moveViewContainerToLocation(container, args.location, undefined, "muster");
+    return !!container;
+  });
   // Dev: parse a CSS text the way the browser does and report how many rules survive ({text}).
   Registry.registerCommand("muster.cssParse", (accessor, args) => { const sheet = new CSSStyleSheet(); sheet.replaceSync(args.text); return { rules: sheet.cssRules.length, last: sheet.cssRules.length ? sheet.cssRules[sheet.cssRules.length - 1].cssText.slice(0, 80) : "" }; });
   // Dev: which of our stylesheet rules the browser actually parsed ({needle}).

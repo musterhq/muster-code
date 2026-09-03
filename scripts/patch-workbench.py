@@ -33,6 +33,7 @@ anchors = {
     "__IModelService__": r'(?:var |,)([\w$]+)=[\w$]+\("modelService"\)',
     "__ILanguageService__": r'(?:var |,)([\w$]+)=[\w$]+\("languageService"\)',
     "__ICommandService__": r'(?:var |,)([\w$]+)=[\w$]+\("commandService"\)',
+    "__IViewDescriptorService__": r'(?:var |,)([\w$]+)=[\w$]+\("viewDescriptorService"\)',
 }
 contrib = contrib_path.read_text()
 resolved = {}

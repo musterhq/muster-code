@@ -235,6 +235,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   await refreshThreads();
   output.appendLine(`Muster activated · ${threadsCache.length} Codex threads`);
   // Cursor opens with its agent pane, not VS Code's chat: make ours the secondary sidebar's view on startup.
+  void vscode.commands.executeCommand("muster.evictBuiltinChat").then(undefined, () => undefined);
   void vscode.commands.executeCommand("workbench.view.extension.muster-agent");
 
   async function refreshThreads(): Promise<CodexThread[]> {
