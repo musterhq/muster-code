@@ -5,6 +5,7 @@
 import * as vscode from "vscode";
 import { mkdirSync, writeFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
+import { rememberPick } from "./context.js";
 
 export interface PickedSource { file: string; line: number; col: number; via: string; component?: string }
 export interface PickedElement { selector: string; tag: string; id: string; classes: string[]; text: string; html: string; rect: { x: number; y: number; w: number; h: number }; styles: Record<string, string>; source?: PickedSource | null; url: string; title: string }
@@ -40,7 +41,9 @@ export class BrowserController {
         writeFileSync(imagePath, Buffer.from(args.image.slice("data:image/png;base64,".length), "base64"));
       }
       if (tab) { tab.picking = false; if (args.picked) tab.picked = args.picked; this.changes.fire(tab); }
-      this.picks.fire({ id: args.id, picked: args.picked, imagePath, url: args.picked?.url ?? args.url ?? tab?.url ?? "", title: args.picked?.title ?? args.title ?? tab?.title ?? "" });
+      const pick: BrowserPick = { id: args.id, picked: args.picked, imagePath, url: args.picked?.url ?? args.url ?? tab?.url ?? "", title: args.picked?.title ?? args.title ?? tab?.title ?? "" };
+      if (pick.picked) rememberPick(pick);
+      this.picks.fire(pick);
       if (args.picked?.source?.file) void this.openSource(args.picked.source);
     }));
   }
