@@ -325,6 +325,17 @@
   const crumbObserver = new MutationObserver(() => { if (planToolbar.visible && !document.querySelector(".editor-group-container.active .breadcrumbs-control > .plan-breadcrumb-controls")) mountPlanToolbar(); });
   crumbObserver.observe(document.body, { childList: true, subtree: true });
 
+  // Dev: parse a CSS text the way the browser does and report how many rules survive ({text}).
+  Registry.registerCommand("muster.cssParse", (accessor, args) => { const sheet = new CSSStyleSheet(); sheet.replaceSync(args.text); return { rules: sheet.cssRules.length, last: sheet.cssRules.length ? sheet.cssRules[sheet.cssRules.length - 1].cssText.slice(0, 80) : "" }; });
+  // Dev: which of our stylesheet rules the browser actually parsed ({needle}).
+  Registry.registerCommand("muster.css", (accessor, args) => {
+    const out = [];
+    for (const sheet of document.styleSheets) {
+      let rules; try { rules = sheet.cssRules; } catch { continue; }
+      for (const rule of rules) if (rule.cssText && rule.cssText.includes(args.needle)) out.push({ href: (sheet.href || "inline").slice(-60), text: rule.cssText.slice(0, args.limit || 200) });
+    }
+    return { sheets: document.styleSheets.length, matches: out.slice(0, args.max || 5) };
+  });
   // Dev: inspect the workbench DOM from the harness ({selector, limit}).
   Registry.registerCommand("muster.dom", (accessor, args) => {
     const nodes = [...document.querySelectorAll(args.selector)];
