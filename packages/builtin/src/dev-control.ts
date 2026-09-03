@@ -10,7 +10,7 @@ import { existsSync, unlinkSync } from "node:fs";
 import type { LiveEditController } from "./live-edit.js";
 import { queryCodex } from "./codex.js";
 
-interface Deps { readonly live: LiveEditController; readonly log: (line: string) => void; readonly pane?: { debugState(): Record<string, unknown>; debugThreads(): Promise<Record<string, unknown>>; harness(input: { text: string; mode?: string; newTab?: boolean; access?: string; thread?: string; build?: number[]; buildModel?: string }): Promise<Record<string, unknown>> } }
+interface Deps { readonly live: LiveEditController; readonly log: (line: string) => void; readonly pane?: { debugState(): Record<string, unknown>; debugSuggest(kind: "file" | "skill", query: string): Promise<Record<string, unknown>>; debugThreads(): Promise<Record<string, unknown>>; harness(input: { text: string; mode?: string; newTab?: boolean; access?: string; thread?: string; build?: number[]; buildModel?: string }): Promise<Record<string, unknown>> } }
 
 export function startDevControl(context: vscode.ExtensionContext, deps: Deps): void {
   const path = process.env.MUSTER_CODE_DEV_SOCK;
@@ -71,6 +71,8 @@ async function handle(line: string, deps: Deps): Promise<unknown> {
       const result = await queryCodex(String(message.method), (message.params as Record<string, unknown>) ?? {}, cwd);
       return { ok: true, result };
     }
+    case "suggest":
+      return { ok: true, ...(await deps.pane?.debugSuggest(message.kind === "skill" ? "skill" : "file", String(message.query ?? ""))) };
     case "pane":
       return { ok: true, pane: deps.pane?.debugState() ?? null };
     case "threads":

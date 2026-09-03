@@ -39,7 +39,7 @@ type ToPane =
   | { type: "review"; files: EditCard[] }
   | { type: "threads"; items: { id: string; name: string; project: string; age: string; turns: number; size: string; live: boolean; pinned: boolean }[] }
   | { type: "board"; columns: { id: string; title: string; cards: { id: string; title: string; subtitle: string; running: boolean }[] }[] }
-  | { type: "suggestions"; kind: "file" | "skill"; items: { label: string; detail: string; insert: string; group?: string }[] }
+  | { type: "suggestions"; kind: "file" | "skill"; seq?: number; items: { label: string; detail: string; insert: string; group?: string }[] }
   | { type: "validated"; ok: string[]; bad: string[] }
   | { type: "openModeMenu" }
   | { type: "insert"; text: string };
@@ -51,9 +51,10 @@ type FromPane =
   | { type: "setMode"; id: string } | { type: "setAccess"; id: string } | { type: "setModel"; id: string } | { type: "setEffort"; id: string }
   | { type: "pin"; id: string; pinned: boolean }
   | { type: "viewPlan" } | { type: "buildPlan"; todos?: number[]; model?: string; newThread?: boolean }
-  | { type: "suggest"; kind: "file" | "skill"; query: string } | { type: "restore"; id: string } | { type: "attach" } | { type: "validate"; tokens: string[] } | { type: "command"; id: string } | { type: "redo" }
+  | { type: "suggest"; kind: "file" | "skill"; query: string; seq?: number } | { type: "restore"; id: string } | { type: "attach" } | { type: "validate"; tokens: string[] } | { type: "command"; id: string } | { type: "redo" }
   | { type: "openReview" }
   | { type: "boardAdd"; title: string } | { type: "boardRun"; id: string } | { type: "boardMove"; id: string; column: BoardTask["column"] }
+  | { type: "browserEdit"; id: string; kind: "text" | "style"; prop?: string; value: string } | { type: "browserRevert"; id: string; index: number } | { type: "browserApply"; id: string } | { type: "browserTakeControl"; id: string }
   | { type: "browserNav"; id: string; url: string } | { type: "browserAction"; id: string; action: "back" | "forward" | "reload" | "pick" | "screenshot" } | { type: "browserRect"; id: string; rect: { top: number; left: number; width: number; height: number }; visible: boolean } | { type: "browserToChat"; id: string } | { type: "newBrowser" };
 
 // Cursor 3.18's built-in modes (docs/cursor-feature-atlas.md §3), mapped onto Codex: plan/spec use the
@@ -221,6 +222,9 @@ export class AgentPane implements vscode.WebviewViewProvider {
     const visible = await this.visibleThreads();
     return { all: all.length, visible: visible.length, folders: (vscode.workspace.workspaceFolders ?? []).map((f) => f.uri.fsPath), sample: all.slice(0, 5).map((t) => ({ id: t.id.slice(0, 13), cwd: t.cwd, name: t.name, age: formatAge(t.lastActivityAt) })), tabs: this.tabs.map((t) => ({ name: t.name, thread: t.thread?.id ?? null, mode: t.settings.mode, error: t.lastError ?? null })) };
   }
+
+  /** Harness: time the popover data path. */
+  async debugSuggest(kind: "file" | "skill", query: string): Promise<Record<string, unknown>> { const t0 = Date.now(); const items = await this.suggest(kind, query); return { ms: Date.now() - t0, count: items.length, items: items.slice(0, 8) }; }
 
   debugState(): Record<string, unknown> {
     return { resolved: !!this.view, visible: this.view?.visible ?? null, ready: this.readyCount, models: this.models.length, access: this.access.length, loading: this.loading, tabs: this.tabs.length, view: this.paneView, activeMode: this.active().settings.mode };
@@ -406,6 +410,15 @@ export class AgentPane implements vscode.WebviewViewProvider {
     if (tab.id === this.activeId) this.pushState();
   }
 
+  /** Switch to the last chat tab and put text in its composer (visual-editor changes, picks). */
+  private async toChat(text: string): Promise<void> {
+    const chat = this.tabs.find((t) => t.kind !== "browser" && t.id === this.lastChatId) ?? this.tabs.find((t) => t.kind !== "browser") ?? this.newTab();
+    this.activeId = chat.id; this.paneView = "chat"; this.pushState();
+    this.post({ type: "messages", messages: chat.messages });
+    await vscode.commands.executeCommand(`${AgentPane.viewId}.focus`);
+    this.post({ type: "insert", text });
+  }
+
   /** Visual editor: a picked element or screenshot from the browser becomes context in the composer. */
   async addBrowserPick(pick: BrowserPick): Promise<void> {
     rememberPick(pick);
@@ -456,7 +469,7 @@ export class AgentPane implements vscode.WebviewViewProvider {
       case "activateTab": { const tab = this.tabs.find((t) => t.id === message.id); if (tab) { this.activeId = tab.id; if (tab.kind === "browser") { this.paneView = "browser"; this.pushState(); const st = tab.browserId ? this.browser?.get(tab.browserId) : undefined; if (st) this.post({ type: "browser", state: st }); } else { this.lastChatId = tab.id; this.paneView = "chat"; this.pushState(); this.post({ type: "messages", messages: tab.messages }); } void vscode.commands.executeCommand("setContext", "muster.browserActive", tab.kind === "browser"); } return; }
       case "closeTab": { const closing = this.tabs.find((t) => t.id === message.id); if (closing?.kind === "browser" && closing.browserId) this.browser?.close(closing.browserId); this.tabs = this.tabs.filter((t) => t.id !== message.id); if (!this.tabs.length) this.newTab(); if (!this.tabs.some((t) => t.id === this.activeId)) this.activeId = this.tabs[this.tabs.length - 1]!.id; const now = this.active(); this.paneView = now.kind === "browser" ? "browser" : "chat"; this.pushState(); if (now.kind === "browser" && now.browserId) { const st = this.browser?.get(now.browserId); if (st) this.post({ type: "browser", state: st }); } else this.post({ type: "messages", messages: now.messages }); void vscode.commands.executeCommand("setContext", "muster.browserActive", now.kind === "browser"); return; }
       case "openThread": { const thread = (await this.visibleThreads()).find((t) => t.id === message.id); if (thread) await this.openThread(thread); else void vscode.window.showWarningMessage("That thread belongs to another folder."); return; }
-      case "suggest": { this.post({ type: "suggestions", kind: message.kind, items: await this.suggest(message.kind, message.query) }); return; }
+      case "suggest": { this.post({ type: "suggestions", kind: message.kind, ...(message.seq !== undefined ? { seq: message.seq } : {}), items: await this.suggest(message.kind, message.query) }); return; }
       case "validate": { const ok: string[] = []; const bad: string[] = []; for (const t of message.tokens) ((await this.tokenResolves(t)) ? ok : bad).push(t); this.post({ type: "validated", ok, bad }); return; }
       case "attach": {
         const picked = await vscode.window.showOpenDialog({ canSelectMany: true, filters: { Images: ["png", "jpg", "jpeg", "gif", "webp"] }, openLabel: "Attach" });
@@ -536,6 +549,10 @@ export class AgentPane implements vscode.WebviewViewProvider {
       case "send": await this.send(message.text); return;
       case "newBrowser": this.openBrowserTab(); return;
       case "browserNav": this.browser?.navigate(message.id, message.url); return;
+      case "browserEdit": this.browser?.applyEdit(message.id, { kind: message.kind, ...(message.prop ? { prop: message.prop } : {}), value: message.value }); return;
+      case "browserRevert": this.browser?.revertEdit(message.id, message.index); return;
+      case "browserTakeControl": this.browser?.takeControl(message.id); return;
+      case "browserApply": { const text = this.browser?.changesPrompt(message.id); if (text) await this.toChat(text); return; }
       case "browserAction": this.browser?.action(message.id, message.action); return;
       case "browserRect": this.browser?.place(message.id, message.rect, message.visible && this.paneView === "browser" && this.active().browserId === message.id && (this.view?.visible ?? false)); return;
       case "browserToChat": { const st = this.browser?.get(message.id); if (st?.picked) await this.addBrowserPick({ id: message.id, picked: st.picked, imagePath: undefined, url: st.url, title: st.title }); return; }
@@ -851,6 +868,13 @@ function paneHtml(csp: string): string {
   .bsbody { flex: 1; overflow: auto; padding: 6px 10px; font-family: var(--vscode-editor-font-family); font-size: var(--fs-xs); line-height: 17px; white-space: pre-wrap; word-break: break-word; }
   .bsbody .c { display: block; } .bsbody .c.warn { color: var(--vscode-charts-yellow, #D2943E); } .bsbody .c.error { color: var(--vscode-charts-red); } .bsbody .c.debug { color: var(--text-tertiary); }
   .bsbody .kv { display: block; } .bsbody .kv b { color: var(--text-secondary); font-weight: 500; }
+  .bdriving { display: inline-flex; align-items: center; gap: 6px; margin-left: 8px; color: var(--amber); font-size: var(--fs-xs); white-space: nowrap; } .bdriving[hidden] { display: none; }
+  .bdriving .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--amber); box-shadow: 0 0 6px var(--amber); }
+  .bsbody .field { display: flex; align-items: center; gap: 6px; margin: 3px 0; font-family: var(--vscode-font-family); } .bsbody .field b { width: 96px; flex: 0 0 auto; color: var(--text-secondary); font-weight: 500; }
+  .bsbody .field input { flex: 1; min-width: 0; height: 20px; background: var(--bg-quaternary); border: 1px solid var(--stroke-tertiary); border-radius: var(--radius-sm); color: var(--fg); font: inherit; font-size: var(--fs-xs); padding: 0 6px; outline: 0; } .bsbody .field input:focus { border-color: var(--amber); }
+  .bsbody .field input.changed { border-color: color-mix(in srgb, var(--amber) 60%, transparent); background: color-mix(in srgb, var(--amber) 10%, transparent); }
+  .bchange { display: flex; align-items: center; gap: 6px; margin: 2px 0; white-space: nowrap; overflow: hidden; } .bchange .sel { color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; max-width: 40%; } .bchange .old { color: var(--text-tertiary); text-decoration: line-through; } .bchange .arrow { color: var(--text-tertiary); } .bchange .new { color: var(--fg); } .bchange .x { cursor: pointer; color: var(--text-tertiary); margin-left: auto; } .bchange .x:hover { color: var(--fg); }
+  .bsbody .bapply { margin-top: 8px; }
   #messages { flex: 1; overflow: auto; padding: 6px 10px 10px; display: flex; flex-direction: column; gap: 6px; }
   body:not(.has-messages) #messages { display: none; }
   .human { align-self: flex-end; margin-left: max(24px, 12%); min-width: 120px; max-height: 108px; overflow: hidden; position: relative; background: var(--vscode-input-background); border: 1px solid var(--stroke-secondary); border-radius: var(--radius-xl); padding: 6px 10px; white-space: pre-wrap; word-break: break-word; font-size: var(--fs-base); line-height: 20px; }
@@ -997,7 +1021,11 @@ function paneHtml(csp: string): string {
   .menu.open { display: block; visibility: visible; }
   .menu .group { padding: 6px 10px 2px; font-size: var(--fs-xs); color: var(--text-tertiary); text-transform: uppercase; letter-spacing: .3px; }
   .menu .item { display: flex; align-items: center; gap: 8px; padding: 5px 10px; border-radius: var(--radius-sm); cursor: pointer; }
-  .menu .item:hover { background: var(--bg-tertiary); }
+  .menu .item:hover, .menu .item.sel { background: var(--bg-tertiary); }
+  .menu .item.sel .lbl { color: var(--fg); }
+  .menu .item .ic.badge { font-size: 9px; font-weight: 700; letter-spacing: .2px; line-height: 14px; height: 14px; min-width: 18px; padding: 0 3px; border-radius: 3px; background: color-mix(in srgb, var(--badge, #8b949e) 22%, transparent); color: var(--badge, #8b949e); }
+  .menu .item .ic.kind { color: var(--amber); }
+  .menu .item .ic.skill { color: var(--amber); font-weight: 600; }
   .menu .item .ic { width: 16px; text-align: center; color: var(--text-secondary); }
   .menu .item .lbl { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .menu .item .sub { color: var(--text-tertiary); font-size: var(--fs-xs); margin-left: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 200px; flex: 0 1 auto; }
@@ -1060,7 +1088,7 @@ function paneHtml(csp: string): string {
   <div class="view" id="browserpane">
     <div class="bbar"><button class="bbtn" data-act="back" title="Back">←</button><button class="bbtn" data-act="forward" title="Forward">→</button><button class="bbtn" data-act="reload" title="Reload ⌘R">⟳</button><input id="burl" placeholder="Enter a URL"><button class="bbtn" id="bpick" data-act="pick" title="Select an element for the chat">⌖</button><button class="bbtn" data-act="screenshot" title="Screenshot to chat">⧉</button></div>
     <div id="bhost"></div>
-    <div class="bsections"><div class="bstabs"><span class="bstab on" data-sec="console">Console <span id="bconsole-count" class="cnt"></span></span><span class="bstab" data-sec="selected">Selected</span><span class="bstab" data-sec="page">Page</span><span class="spacer"></span><button class="btn text" id="bclear">Clear</button><button class="btn primary" id="btochat">Add to chat</button></div><div class="bsbody" id="bsbody"></div></div>
+    <div class="bsections"><div class="bstabs"><span class="bstab on" data-sec="console">Console <span id="bconsole-count" class="cnt"></span></span><span class="bstab" data-sec="selected">Selected</span><span class="bstab" data-sec="page">Page</span><span class="bstab" data-sec="changes">Changes <span id="bchanges-count" class="cnt"></span></span><span class="bdriving" id="bdriving" hidden><span class="dot"></span>Agent is browsing<button class="btn text" id="btake">Take control</button></span><span class="spacer"></span><button class="btn text" id="bclear">Clear</button><button class="btn primary" id="btochat">Add to chat</button></div><div class="bsbody" id="bsbody"></div></div>
   </div>
   <div class="view" id="history"><input id="hsearch" placeholder="Search threads"><div id="hlist"></div></div>
   <div class="view" id="board"><input id="badd" placeholder="Add a task to the board and press Enter"><div id="bcols"></div></div>
@@ -1315,16 +1343,24 @@ function paneHtml(csp: string): string {
   // @ files and / skills: a popover while typing, filled by the extension.
   let suggest = null, suggestTimer = null;
   function triggerAt() { const upto = input.value.slice(0, input.selectionStart); const m = /(^|\\s)([@/])([\\w./-]*)$/.exec(upto); return m ? { kind: m[2] === "@" ? "file" : "skill", start: upto.length - m[3].length - 1, query: m[3] } : null; }
-  function renderSuggestions(kind, items) {
-    if (!suggest || suggest.kind !== kind) return;
-    suggest.items = items; menu.dataset.kind = "suggest"; menu.innerHTML = items.length ? "" : '<div class="note">No matches</div>';
-    let lastGroup = null; for (const it of items) { if (it.group && it.group !== lastGroup) { menu.insertAdjacentHTML("beforeend", '<div class="group">' + escape(it.group) + '</div>'); lastGroup = it.group; } menu.insertAdjacentHTML("beforeend", '<div class="item" data-insert="' + escape(it.insert) + '"><span class="ic">' + (kind === "file" ? ({"Git":"⎇","Commits":"◦","Terminals":">_","Web":"◎","Docs":"▤","Past Chats":"…"}[it.group] || "▤") : "/") + '</span><span class="lbl">' + escape(it.label) + '</span><span class="sub">' + escape(it.detail) + '</span></div>'); }
-    menu.querySelectorAll(".item").forEach((el) => el.addEventListener("mousedown", (e) => { e.preventDefault(); acceptSuggestion(el.dataset.insert); }));
-    menu.classList.add("open"); placeMenu($("mode-pill"));
+  const BADGE = { ts: "#519aba", tsx: "#519aba", js: "#cbcb41", jsx: "#cbcb41", mjs: "#cbcb41", cjs: "#cbcb41", json: "#cbcb41", md: "#519aba", mdx: "#519aba", css: "#a074c4", scss: "#f55385", html: "#e37933", py: "#519aba", go: "#519aba", rs: "#e37933", sh: "#4d5a5e", zsh: "#4d5a5e", yml: "#a074c4", yaml: "#a074c4", toml: "#8b949e", svg: "#f55385", png: "#f55385", jpg: "#f55385", swift: "#e37933", java: "#cc3e44", rb: "#cc3e44", sql: "#519aba", txt: "#8b949e", lock: "#8b949e" };
+  let suggestSeq = 0;
+  function suggestIcon(kind, it) {
+    if (kind === "skill") return '<span class="ic skill">/</span>';
+    if (it.group === "Files & Folders") { const ext = (it.label.includes(".") ? it.label.split(".").pop() : "").toLowerCase(); const color = BADGE[ext] || "#8b949e"; return '<span class="ic badge" style="--badge:' + color + '">' + escape((ext || "file").slice(0, 4).toUpperCase()) + '</span>'; }
+    return '<span class="ic kind">' + ({"Git":"⎇","Commits":"◦","Terminals":">_","Web":"◎","Docs":"▤","Past Chats":"…","Browser":"◫"}[it.group] || "▤") + '</span>';
+  }
+  function markSel() { if (!suggest) return; const els = menu.querySelectorAll(".item"); els.forEach((el, i) => el.classList.toggle("sel", i === suggest.index)); const cur = els[suggest.index]; if (cur) cur.scrollIntoView({ block: "nearest" }); }
+  function renderSuggestions(kind, items, seq) {
+    if (!suggest || suggest.kind !== kind || (seq !== undefined && seq !== suggestSeq)) return;
+    suggest.items = items; suggest.index = 0; menu.dataset.kind = "suggest"; menu.innerHTML = items.length ? "" : '<div class="note">No matches</div>';
+    let lastGroup = null; for (const it of items) { if (it.group && it.group !== lastGroup) { menu.insertAdjacentHTML("beforeend", '<div class="group">' + escape(it.group) + '</div>'); lastGroup = it.group; } menu.insertAdjacentHTML("beforeend", '<div class="item" data-insert="' + escape(it.insert) + '">' + suggestIcon(kind, it) + '<span class="lbl">' + escape(it.label) + '</span><span class="sub">' + escape(it.detail) + '</span></div>'); }
+    menu.querySelectorAll(".item").forEach((el, i) => { el.addEventListener("mousedown", (e) => { e.preventDefault(); acceptSuggestion(el.dataset.insert); }); el.addEventListener("mouseenter", () => { if (suggest) { suggest.index = i; markSel(); } }); });
+    menu.classList.add("open"); placeMenu($("mode-pill")); markSel();
   }
   function acceptSuggestion(insert) { if (!suggest) return; const end = input.selectionStart; input.value = input.value.slice(0, suggest.start) + insert + " " + input.value.slice(end); const caret = suggest.start + insert.length + 1; input.setSelectionRange(caret, caret); suggest = null; closeMenu(); autosize(); input.focus(); }
-  input.addEventListener("input", () => { autosize(); const t = triggerAt(); if (!t) { if (suggest) { suggest = null; closeMenu(); } return; } suggest = { ...t, items: suggest && suggest.items || [] }; clearTimeout(suggestTimer); suggestTimer = setTimeout(() => vscode.postMessage({ type: "suggest", kind: t.kind, query: t.query }), 120); });
-  input.addEventListener("keydown", (e) => { if (e.key === "Tab" && e.shiftKey) { e.preventDefault(); openMenu("mode", $("mode-pill")); return; } if (suggest && menu.classList.contains("open")) { if (e.key === "Enter" || e.key === "Tab") { e.preventDefault(); if (suggest.items[0]) acceptSuggestion(suggest.items[0].insert); return; } if (e.key === "Escape") { suggest = null; closeMenu(); return; } } if (e.key === "Enter" && !e.shiftKey && !e.metaKey && !e.ctrlKey) { e.preventDefault(); send(); } });
+  input.addEventListener("input", () => { autosize(); const t = triggerAt(); if (!t) { if (suggest) { suggest = null; closeMenu(); } return; } suggest = { ...t, items: suggest && suggest.items || [], index: suggest && suggest.index || 0 }; clearTimeout(suggestTimer); suggestTimer = setTimeout(() => { suggestSeq++; vscode.postMessage({ type: "suggest", kind: t.kind, query: t.query, seq: suggestSeq }); }, 40); });
+  input.addEventListener("keydown", (e) => { if (e.key === "Tab" && e.shiftKey) { e.preventDefault(); openMenu("mode", $("mode-pill")); return; } if (suggest && menu.classList.contains("open")) { if (e.key === "ArrowDown" || e.key === "ArrowUp") { e.preventDefault(); const n = suggest.items.length; if (n) { suggest.index = (suggest.index + (e.key === "ArrowDown" ? 1 : n - 1)) % n; markSel(); } return; } if (e.key === "Enter" || e.key === "Tab") { e.preventDefault(); const it = suggest.items[suggest.index] || suggest.items[0]; if (it) acceptSuggestion(it.insert); return; } if (e.key === "Escape") { suggest = null; closeMenu(); return; } } if (e.key === "Enter" && !e.shiftKey && !e.metaKey && !e.ctrlKey) { e.preventDefault(); send(); } });
   $("send").addEventListener("click", send);
   $("attach").addEventListener("click", () => vscode.postMessage({ type: "attach" }));
   $("stop").addEventListener("click", () => vscode.postMessage({ type: "stop" }));
@@ -1345,10 +1381,24 @@ function paneHtml(csp: string): string {
     $("bconsole-count").textContent = st.console.length ? "(" + st.console.length + ")" : "";
     const body_ = $("bsbody");
     if (bsec === "console") body_.innerHTML = st.console.length ? st.console.slice(-200).map((c) => '<span class="c ' + escape(c.level) + '">' + escape(c.message) + (c.source ? ' <span style="opacity:.5">' + escape(String(c.source).split("/").pop()) + (c.line ? ':' + c.line : '') + '</span>' : '') + '</span>').join("") : '<span class="c debug">No console output yet.</span>';
+    else if (bsec === "changes") body_.innerHTML = (st.changes || []).length ? st.changes.map((c, i) => '<span class="bchange"><span class="sel" title="' + escape(c.selector) + '">' + escape(c.selector) + '</span><span>' + escape(c.kind === "text" ? "text" : c.prop) + '</span><span class="old">' + escape(c.before) + '</span><span class="arrow">→</span><span class="new">' + escape(c.after) + '</span><span class="x" data-i="' + i + '" title="Revert">×</span></span>').join("") + '<button class="btn primary bapply" id="bapply">Apply changes in chat</button>' : '<span class="c debug">Edit the selected element’s text or styles; every change is listed here as old → new until the agent applies it to code.</span>';
+    else if (bsec === "selected" && st.picked && body_.contains(document.activeElement)) { /* keep the field being edited */ }
     else if (bsec === "selected") body_.innerHTML = st.picked ? '<span class="kv"><b>selector</b> ' + escape(st.picked.selector) + '</span>' + (st.picked.source ? '<span class="kv"><b>source</b> ' + escape(st.picked.source.file) + ':' + escape(st.picked.source.line) + '</span>' : '') + '<span class="kv"><b>text</b> ' + escape(st.picked.text) + '</span><span class="kv"><b>rect</b> ' + escape(JSON.stringify(st.picked.rect)) + '</span><span class="kv"><b>styles</b> ' + escape(Object.entries(st.picked.styles).map(([k, v]) => k + ": " + v).join("; ")) + '</span><span class="kv"><b>html</b> ' + escape(st.picked.html.slice(0, 800)) + '</span>' : '<span class="c debug">Click ⌖ then an element in the page.</span>';
     else body_.innerHTML = '<span class="kv"><b>url</b> ' + escape(st.url) + '</span><span class="kv"><b>title</b> ' + escape(st.title) + '</span>';
+    if (bsec === "selected" && st.picked && !body_.querySelector(".field")) {
+      const changed = (prop) => (st.changes || []).some((c) => c.selector === st.picked.selector && (c.kind === "text" ? "text" : c.prop) === prop);
+      const field = (label, prop, value) => '<span class="field"><b>' + escape(label) + '</b><input data-prop="' + escape(prop) + '" class="' + (changed(prop) ? "changed" : "") + '" value="' + escape(value || "") + '"></span>';
+      let html = '<span class="kv" style="margin-top:8px"><b>Edit</b></span>' + field("text", "text", st.picked.text);
+      for (const p of ["color", "background-color", "font-size", "font-weight", "padding", "margin", "border-radius"]) html += field(p, p, (st.picked.styles || {})[p]);
+      body_.insertAdjacentHTML("beforeend", html);
+    }
+    $("bdriving").hidden = !st.driving;
+    $("bchanges-count").textContent = (st.changes || []).length ? "(" + st.changes.length + ")" : "";
     reportRect();
   }
+  $("btake").addEventListener("click", () => { if (bstate) vscode.postMessage({ type: "browserTakeControl", id: bstate.id }); });
+  $("bsbody").addEventListener("change", (e) => { const f = e.target; if (bstate && f && f.dataset && f.dataset.prop) vscode.postMessage({ type: "browserEdit", id: bstate.id, kind: f.dataset.prop === "text" ? "text" : "style", prop: f.dataset.prop === "text" ? undefined : f.dataset.prop, value: f.value }); });
+  $("bsbody").addEventListener("click", (e) => { const t = e.target; if (!bstate || !t) return; if (t.classList.contains("x") && t.dataset.i !== undefined) vscode.postMessage({ type: "browserRevert", id: bstate.id, index: Number(t.dataset.i) }); else if (t.id === "bapply") vscode.postMessage({ type: "browserApply", id: bstate.id }); });
   $("burl").addEventListener("keydown", (e) => { if (e.key === "Enter" && bstate) vscode.postMessage({ type: "browserNav", id: bstate.id, url: $("burl").value }); e.stopPropagation(); });
   document.querySelectorAll(".bbar .bbtn").forEach((b) => b.addEventListener("click", () => { if (bstate) vscode.postMessage({ type: "browserAction", id: bstate.id, action: b.dataset.act }); }));
   document.querySelectorAll(".bstab").forEach((t) => t.addEventListener("click", () => { bsec = t.dataset.sec; document.querySelectorAll(".bstab").forEach((x) => x.classList.toggle("on", x === t)); if (bstate) renderBrowser(bstate); }));
@@ -1369,7 +1419,7 @@ function paneHtml(csp: string): string {
     else if (m.type === "review") { renderReview(m.files); }
     else if (m.type === "threads") { threads = m.items; renderHistory(); }
     else if (m.type === "board") { renderBoard(m.columns); }
-    else if (m.type === "suggestions") { renderSuggestions(m.kind, m.items); }
+    else if (m.type === "suggestions") { renderSuggestions(m.kind, m.items, m.seq); }
     else if (m.type === "validated") { for (const t of m.ok) { tokenOk.add(t); tokenBad.delete(t); } for (const t of m.bad) { tokenBad.add(t); tokenOk.delete(t); } renderTokens(); }
     else if (m.type === "openModeMenu") { openMenu("mode", $("mode-pill")); }
     else if (m.type === "insert") { const at = input.selectionStart; input.value = input.value.slice(0, at) + m.text + input.value.slice(at); input.setSelectionRange(at + m.text.length, at + m.text.length); autosize(); input.focus(); }

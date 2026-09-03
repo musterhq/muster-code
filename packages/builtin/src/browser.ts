@@ -11,7 +11,19 @@ export interface PickedSource { file: string; line: number; col: number; via: st
 export interface PickedElement { selector: string; tag: string; id: string; classes: string[]; text: string; html: string; rect: { x: number; y: number; w: number; h: number }; styles: Record<string, string>; source?: PickedSource | null; url: string; title: string }
 export interface BrowserPick { readonly id: string; readonly picked: PickedElement | null; readonly imagePath: string | undefined; readonly url: string; readonly title: string }
 export interface ConsoleEntry { level: string; message: string; line?: number; source?: string }
-export interface BrowserState { id: string; url: string; title: string; console: ConsoleEntry[]; picked: PickedElement | null; picking: boolean }
+/** A visual-editor edit made in the browser (Cursor's CHANGES list: old → new), applied live to the page until the agent puts it in code. */
+export interface VisualChange { selector: string; kind: "text" | "style"; prop?: string; before: string; after: string; source?: PickedSource | null }
+export interface BrowserState { id: string; url: string; title: string; console: ConsoleEntry[]; picked: PickedElement | null; picking: boolean; driving: boolean; changes: VisualChange[] }
+
+/** Cursor's lock overlay while the agent drives: banner + "Take control" (the page stays clickable so the agent's own input events land). */
+export const LOCK_JS = `(() => { if (document.getElementById("__muster_lock")) return true; const d = document.createElement("div"); d.id = "__muster_lock"; d.setAttribute("style", "position:fixed;inset:0;z-index:2147483647;pointer-events:none;display:flex;align-items:flex-end;justify-content:center;font:13px -apple-system,system-ui,sans-serif;color:#fff;box-shadow:inset 0 0 0 2px #D2943E");
+  d.innerHTML = '<div style="pointer-events:auto;margin-bottom:20px;background:#1e1e1e;border:1px solid rgba(255,255,255,.18);border-radius:8px;padding:8px 8px 8px 14px;display:flex;gap:12px;align-items:center;box-shadow:0 8px 24px rgba(0,0,0,.4)"><span style="display:inline-flex;align-items:center;gap:8px"><span style="width:8px;height:8px;border-radius:50%;background:#D2943E;box-shadow:0 0 8px #D2943E"></span>Agent is using the browser</span><button id="__muster_take" style="background:#D2943E;color:#1a1a1a;border:0;border-radius:6px;padding:5px 10px;font:inherit;font-weight:600;cursor:pointer">Take control</button></div>';
+  document.documentElement.appendChild(d); d.querySelector("#__muster_take").onclick = () => { d.remove(); console.log("__muster:takecontrol"); }; return true; })()`;
+export const UNLOCK_JS = `(() => { const d = document.getElementById("__muster_lock"); if (d) d.remove(); return true; })()`;
+
+function applyJs(selector: string, kind: "text" | "style", prop: string, value: string): string {
+  return `(() => { const el = document.querySelector(${JSON.stringify(selector)}); if (!el) return false; ${kind === "text" ? `el.textContent = ${JSON.stringify(value)}` : `el.style.setProperty(${JSON.stringify(prop)}, ${JSON.stringify(value)})`}; return true; })()`;
+}
 
 export class BrowserController {
   private readonly tabs = new Map<string, BrowserState>();
@@ -21,6 +33,9 @@ export class BrowserController {
   readonly onChange = this.changes.event;
   private readonly picks = new vscode.EventEmitter<BrowserPick>();
   readonly onPick = this.picks.event;
+  private readonly control = new vscode.EventEmitter<string>();
+  /** The user pressed "Take control" while the agent was driving this tab. */
+  readonly onTakeControl = this.control.event;
 
   constructor(private readonly context: vscode.ExtensionContext, private readonly cwd: () => string) {
     this.lastUrl = context.workspaceState.get<string>("muster.browser.lastUrl", "http://localhost:3000");
@@ -29,6 +44,7 @@ export class BrowserController {
       if (!tab) return;
       if (args.kind === "title" && args.title !== undefined) tab.title = args.title;
       if ((args.kind === "navigate" || args.kind === "title" || args.kind === "ready") && args.url) { tab.url = args.url; this.lastUrl = args.url; void context.workspaceState.update("muster.browser.lastUrl", args.url); }
+      if (args.kind === "console" && args.message === "__muster:takecontrol") { this.takeControl(args.id); return; }
       if (args.kind === "console" && args.message !== undefined) { tab.console.push({ level: args.level ?? "log", message: args.message, ...(args.line !== undefined ? { line: args.line } : {}), ...(args.source ? { source: args.source } : {}) }); if (tab.console.length > 300) tab.console.shift(); }
       this.changes.fire(tab);
     }));
@@ -55,7 +71,7 @@ export class BrowserController {
   /** A new browser tab: the host (pane webview or a browser editor tab) draws the chrome and reports the page area. */
   open(url?: string, host: "pane" | "editor" = "pane"): BrowserState {
     const id = `b${++this.counter}`;
-    const tab: BrowserState = { id, url: url ?? this.lastUrl, title: "", console: [], picked: null, picking: false };
+    const tab: BrowserState = { id, url: url ?? this.lastUrl, title: "", console: [], picked: null, picking: false, driving: false, changes: [] };
     this.tabs.set(id, tab);
     void vscode.commands.executeCommand("muster.browser.open", { id, url: tab.url, host });
     if (host === "editor") this.openEditor(tab);
@@ -89,6 +105,41 @@ export class BrowserController {
   }
 
   activeEditorBrowser(): string | undefined { for (const [id, panel] of this.panels) if (panel.active) return id; return undefined; }
+
+  /** Agent driving on/off: paints or removes the lock banner in the page. */
+  setDriving(id: string, on: boolean): void {
+    const tab = this.tabs.get(id); if (!tab) return;
+    const changed = tab.driving !== on; tab.driving = on;
+    void vscode.commands.executeCommand("muster.browser.eval", { id, js: on ? LOCK_JS : UNLOCK_JS });
+    if (changed) this.changes.fire(tab);
+  }
+  takeControl(id: string): void { this.setDriving(id, false); this.control.fire(id); }
+
+  /** Visual editor: edit the picked element's text or a style live; the change is remembered as old → new. */
+  applyEdit(id: string, edit: { kind: "text" | "style"; prop?: string; value: string }): void {
+    const tab = this.tabs.get(id); const picked = tab?.picked; if (!tab || !picked) return;
+    const prop = edit.kind === "style" ? (edit.prop ?? "") : "text";
+    const existing = tab.changes.find((c) => c.selector === picked.selector && (c.kind === "text" ? "text" : c.prop) === prop);
+    const before = existing?.before ?? (edit.kind === "text" ? picked.text : (picked.styles[prop] ?? ""));
+    if (before === edit.value && existing) { tab.changes.splice(tab.changes.indexOf(existing), 1); }
+    else if (existing) existing.after = edit.value;
+    else if (before !== edit.value) tab.changes.push({ selector: picked.selector, kind: edit.kind, ...(edit.kind === "style" ? { prop } : {}), before, after: edit.value, source: picked.source ?? null });
+    if (edit.kind === "text") picked.text = edit.value; else picked.styles[prop] = edit.value;
+    void vscode.commands.executeCommand("muster.browser.eval", { id, js: applyJs(picked.selector, edit.kind, prop, edit.value) });
+    this.changes.fire(tab);
+  }
+  revertEdit(id: string, index: number): void {
+    const tab = this.tabs.get(id); const c = tab?.changes[index]; if (!tab || !c) return;
+    tab.changes.splice(index, 1);
+    void vscode.commands.executeCommand("muster.browser.eval", { id, js: applyJs(c.selector, c.kind, c.prop ?? "", c.before) });
+    if (tab.picked?.selector === c.selector) { if (c.kind === "text") tab.picked.text = c.before; else tab.picked.styles[c.prop ?? ""] = c.before; }
+    this.changes.fire(tab);
+  }
+  /** The CHANGES list as a request for the agent (Cursor: "Apply changes" hands the visual edits to the agent). */
+  changesPrompt(id: string): string {
+    const tab = this.tabs.get(id); if (!tab?.changes.length) return "";
+    return `Apply these visual edits I made in the browser to the source code, keeping everything else as is:\n${tab.changes.map((c) => `- ${c.selector}${c.source?.file ? ` (source ${c.source.file}:${c.source.line})` : ""}: ${c.kind === "text" ? "text" : c.prop} "${c.before}" → "${c.after}"`).join("\n")}\n\nPage: ${tab.url}`;
+  }
 
   close(id: string): void { this.tabs.delete(id); void vscode.commands.executeCommand("muster.browser.close", { id }); }
   navigate(id: string, url: string): void { let u = url.trim(); if (u && !/^[a-z]+:\/\//i.test(u)) u = /^(localhost|\d+\.\d+|[\w-]+:\d+)/.test(u) ? `http://${u}` : `https://${u}`; const tab = this.tabs.get(id); if (tab && u) { tab.url = u; this.changes.fire(tab); void vscode.commands.executeCommand("muster.browser.navigate", { id, url: u }); } }

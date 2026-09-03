@@ -82,12 +82,36 @@ async function docText(cwd: string, name: string): Promise<string | undefined> {
 }
 
 // ── suggestions for the "@" popover ──
+// The popover must answer within a keystroke: files come from an in-memory index (refreshed in the
+// background), commits from a short-lived cache, past chats from the last listing — never a process spawn.
+const index = { files: [] as string[], at: 0, building: null as Promise<void> | null, log: [] as string[], logAt: 0, chats: [] as Suggestion[], chatsAt: 0, chatsBuilding: false };
+async function fileIndex(): Promise<string[]> {
+  if (Date.now() - index.at > 45_000 || !index.files.length) {
+    index.building ??= (async () => {
+      try { const uris = await vscode.workspace.findFiles("**/*", "**/{node_modules,.git,dist,build,out,.next,coverage,target,.muster}/**", 8000); index.files = uris.map((u) => vscode.workspace.asRelativePath(u)).filter((r) => !r.startsWith("..")).sort((a, b) => a.length - b.length); index.at = Date.now(); }
+      finally { index.building = null; }
+    })();
+    if (!index.files.length) await index.building;
+  }
+  return index.files;
+}
+/** Cursor-style ranking: file-name prefix, then file-name substring, path substring, then subsequence; shorter paths first. */
+function score(rel: string, q: string): number {
+  const name = (rel.split("/").pop() ?? rel).toLowerCase(); const lower = rel.toLowerCase(); const tie = rel.length / 1000;
+  if (name.startsWith(q)) return 100 - tie; if (name.includes(q)) return 80 - tie; if (lower.includes(q)) return 60 - tie;
+  let i = 0; for (const ch of lower) if (i < q.length && ch === q[i]) i++;
+  return i === q.length ? 30 - tie : -1;
+}
+export function refreshMentionIndex(): void { index.at = 0; void fileIndex(); }
+
 export async function suggestMentions(cwd: string, query: string): Promise<Suggestion[]> {
   const q = query.toLowerCase();
   const out: Suggestion[] = [];
-  const glob = query ? `**/*${query.split("").map((c) => (/[\w]/.test(c) ? c : "")).join("*")}*` : "**/*";
-  const uris = await vscode.workspace.findFiles(glob, "**/{node_modules,.git,dist,build,out}/**", 40);
-  const files = uris.map((u) => vscode.workspace.asRelativePath(u)).filter((r) => !r.startsWith("..")).sort((a, b) => a.length - b.length).slice(0, query ? 12 : 6);
+  const all = await fileIndex();
+  const open = vscode.window.tabGroups.all.flatMap((g) => g.tabs).map((t) => (t.input as { uri?: vscode.Uri })?.uri).filter((u): u is vscode.Uri => !!u && u.scheme === "file").map((u) => vscode.workspace.asRelativePath(u)).filter((r) => !r.startsWith(".."));
+  const files = q
+    ? all.map((r) => [score(r, q), r] as const).filter(([s]) => s >= 0).sort((a, b) => b[0] - a[0]).slice(0, 12).map(([, r]) => r)
+    : [...new Set([...open, ...all])].slice(0, 8);
   for (const r of files) out.push({ group: "Files & Folders", label: r.split("/").pop() ?? r, detail: r, insert: `@${r}` });
   const fixed: Suggestion[] = [
     { group: "Git", label: "Branch (Diff with Main)", detail: "changes on this branch vs the default branch", insert: "@git:branch" },
@@ -97,8 +121,14 @@ export async function suggestMentions(cwd: string, query: string): Promise<Sugge
     { group: "Browser", label: "Browser", detail: "the open browser tab: page, selected element, console", insert: "@browser" },
   ];
   for (const d of docsList()) fixed.push({ group: "Docs", label: d.name, detail: d.url, insert: `@docs:${d.name}` });
-  if (!query || /^(git|com|log)/.test(q)) for (const line of (await git(cwd, ["log", "--oneline", "-8"])).split("\n").filter(Boolean)) { const [sha, ...rest] = line.split(" "); out.push({ group: "Commits", label: rest.join(" ").slice(0, 60), detail: sha ?? "", insert: `@git:commit:${sha}` }); }
-  if (!query || /^(chat|past)/.test(q)) for (const t of threadsForWorkspace(await listThreads(), [cwd]).slice(0, 5)) out.push({ group: "Past Chats", label: t.name, detail: `${t.turnCount} turns`, insert: `@chat:${t.id}` });
+  if (!query || /^(git|com|log)/.test(q)) {
+    if (Date.now() - index.logAt > 15_000) { index.log = (await git(cwd, ["log", "--oneline", "-8"])).split("\n").filter(Boolean); index.logAt = Date.now(); }
+    for (const line of index.log) { const [sha, ...rest] = line.split(" "); out.push({ group: "Commits", label: rest.join(" ").slice(0, 60), detail: sha ?? "", insert: `@git:commit:${sha}` }); }
+  }
+  if (!query || /^(chat|past)/.test(q)) {
+    if (Date.now() - index.chatsAt > 60_000 && !index.chatsBuilding) { index.chatsBuilding = true; void listThreads().then((threads) => { index.chats = threadsForWorkspace(threads, [cwd]).slice(0, 5).map((t) => ({ group: "Past Chats", label: t.name, detail: `${t.turnCount} turns`, insert: `@chat:${t.id}` })); index.chatsAt = Date.now(); }).finally(() => { index.chatsBuilding = false; }); }
+    out.push(...index.chats);
+  }
   for (const s of fixed) if (!query || s.label.toLowerCase().includes(q) || s.insert.includes(q)) out.push(s);
   return out.slice(0, 40);
 }
