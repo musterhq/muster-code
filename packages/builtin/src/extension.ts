@@ -9,6 +9,8 @@ import { LiveEditController } from "./live-edit.js";
 import { startDevControl } from "./dev-control.js";
 import { registerCompletions } from "./completions.js";
 import { PlanEditorProvider } from "./plan-editor.js";
+import { watchTerminals } from "./context.js";
+import { queryCodex } from "./codex.js";
 
 const SESSION_TYPE = "codex";
 const SESSION_SCHEME = "muster-codex";
@@ -187,6 +189,30 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     } finally { status.dispose(); }
   }));
   registerCompletions(context, workspaceCwd, () => config().get<string>("codex.model"));
+  watchTerminals(context);
+  // Codex status (Cursor shows plan/usage in its chrome): plan + the primary rate-limit window, refreshed periodically and on account events.
+  const codexItem = vscode.window.createStatusBarItem("muster.codex", vscode.StatusBarAlignment.Right, 61);
+  codexItem.command = "muster.agent.plugins";
+  const renderLimits = (limits: Record<string, unknown> | undefined, plan: string) => {
+    const primary = (limits?.primary ?? null) as { usedPercent?: number; windowDurationMins?: number; resetsAt?: number } | null;
+    const secondary = (limits?.secondary ?? null) as { usedPercent?: number; windowDurationMins?: number } | null;
+    const window = (m?: number) => (!m ? "" : m >= 1440 ? `${Math.round(m / 1440)}d` : `${Math.round(m / 60)}h`);
+    const parts = [primary ? `${primary.usedPercent ?? 0}% / ${window(primary.windowDurationMins)}` : "", secondary ? `${secondary.usedPercent ?? 0}% / ${window(secondary.windowDurationMins)}` : ""].filter(Boolean);
+    codexItem.text = `$(hubot) Codex ${plan ? plan[0]!.toUpperCase() + plan.slice(1) : ""}${parts.length ? ` · ${parts.join(" · ")}` : ""}`;
+    codexItem.tooltip = primary?.resetsAt ? `Codex ${plan} · ${primary.usedPercent ?? 0}% of the ${window(primary.windowDurationMins)} window used · resets ${new Date(primary.resetsAt * 1000).toLocaleString()}` : "Codex account";
+    codexItem.show();
+  };
+  const refreshCodexStatus = async () => {
+    try {
+      const account = (await queryCodex("account/read", {}, workspaceCwd())).account as { planType?: string } | undefined;
+      const limits = (await queryCodex("account/rateLimits/read", {}, workspaceCwd())).rateLimits as Record<string, unknown> | undefined;
+      renderLimits(limits, account?.planType ?? "");
+    } catch { codexItem.text = "$(hubot) Codex: sign in"; codexItem.show(); }
+  };
+  void refreshCodexStatus();
+  const statusTimer = setInterval(() => void refreshCodexStatus(), 10 * 60_000);
+  context.subscriptions.push({ dispose: () => clearInterval(statusTimer) }, codexItem);
+  pane.onAccountEvent((params) => { const limits = (params.rateLimits ?? params) as Record<string, unknown>; renderLimits(limits, String((limits.planType as string | undefined) ?? "")); });
   context.subscriptions.push(vscode.commands.registerCommand("muster.completions.toggle", async () => {
     const on = !config().get<boolean>("completions.enabled", false);
     await config().update("completions.enabled", on, vscode.ConfigurationTarget.Global);

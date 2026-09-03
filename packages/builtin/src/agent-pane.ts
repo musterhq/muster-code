@@ -8,6 +8,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import { formatAge, formatSize, interruptTurn, listAccessModes, listModels, listSkills, listThreads, readHistory, readRules, runClaudeTurn, runTurn, threadsForWorkspace, type AccessMode, type CodexThread, type ModelInfo, type SkillInfo } from "./codex.js";
 import type { Checkpoint, EditCard, LiveEditController } from "./live-edit.js";
+import { expandContext, suggestMentions } from "./context.js";
 
 interface ModeInfo { readonly id: string; readonly name: string; readonly icon: string; readonly placeholder: string; readonly description?: string; readonly prompt?: string; readonly readOnly?: boolean; readonly plan?: boolean; readonly board?: boolean; readonly effort?: string; readonly autoFix?: boolean; readonly debug?: boolean; readonly parallel?: boolean; readonly spec?: boolean }
 interface ThreadSettings { mode: string; accessId: string; modelId: string; effortId: string; debugStage?: 0 | 1 | 2 }
@@ -36,7 +37,7 @@ type ToPane =
   | { type: "review"; files: EditCard[] }
   | { type: "threads"; items: { id: string; name: string; project: string; age: string; turns: number; size: string; live: boolean; pinned: boolean }[] }
   | { type: "board"; columns: { id: string; title: string; cards: { id: string; title: string; subtitle: string; running: boolean }[] }[] }
-  | { type: "suggestions"; kind: "file" | "skill"; items: { label: string; detail: string; insert: string }[] }
+  | { type: "suggestions"; kind: "file" | "skill"; items: { label: string; detail: string; insert: string; group?: string }[] }
   | { type: "openModeMenu" }
   | { type: "insert"; text: string };
 type FromPane =
@@ -47,7 +48,7 @@ type FromPane =
   | { type: "setMode"; id: string } | { type: "setAccess"; id: string } | { type: "setModel"; id: string } | { type: "setEffort"; id: string }
   | { type: "pin"; id: string; pinned: boolean }
   | { type: "viewPlan" } | { type: "buildPlan"; todos?: number[]; model?: string; newThread?: boolean }
-  | { type: "suggest"; kind: "file" | "skill"; query: string } | { type: "restore"; id: string } | { type: "command"; id: string } | { type: "redo" }
+  | { type: "suggest"; kind: "file" | "skill"; query: string } | { type: "restore"; id: string } | { type: "attach" } | { type: "command"; id: string } | { type: "redo" }
   | { type: "openReview" }
   | { type: "boardAdd"; title: string } | { type: "boardRun"; id: string } | { type: "boardMove"; id: string; column: BoardTask["column"] };
 
@@ -84,6 +85,8 @@ export class AgentPane implements vscode.WebviewViewProvider {
   private readyCount = 0;
   private readonly catalogChanged = new vscode.EventEmitter<void>();
   readonly onCatalog = this.catalogChanged.event;
+  private readonly accountEvents = new vscode.EventEmitter<Record<string, unknown>>();
+  readonly onAccountEvent = this.accountEvents.event;
 
   constructor(private readonly context: vscode.ExtensionContext, private readonly output: vscode.LogOutputChannel, private readonly live: LiveEditController) {
     this.live.onCard((card) => this.post({ type: "edit", card }));
@@ -398,6 +401,11 @@ export class AgentPane implements vscode.WebviewViewProvider {
       case "closeTab": { this.tabs = this.tabs.filter((t) => t.id !== message.id); if (!this.tabs.length) this.newTab(); if (!this.tabs.some((t) => t.id === this.activeId)) this.activeId = this.tabs[this.tabs.length - 1]!.id; this.pushState(); this.post({ type: "messages", messages: this.active().messages }); return; }
       case "openThread": { const thread = (await this.visibleThreads()).find((t) => t.id === message.id); if (thread) await this.openThread(thread); else void vscode.window.showWarningMessage("That thread belongs to another folder."); return; }
       case "suggest": { this.post({ type: "suggestions", kind: message.kind, items: await this.suggest(message.kind, message.query) }); return; }
+      case "attach": {
+        const picked = await vscode.window.showOpenDialog({ canSelectMany: true, filters: { Images: ["png", "jpg", "jpeg", "gif", "webp"] }, openLabel: "Attach" });
+        for (const uri of picked ?? []) this.post({ type: "insert", text: `@image:${uri.fsPath} ` });
+        return;
+      }
       case "restore": {
         const tab = this.active();
         const checkpoint = tab.checkpoints.get(message.id);
@@ -510,6 +518,7 @@ export class AgentPane implements vscode.WebviewViewProvider {
       onDelta: (delta: string) => { assistant.text += delta; this.post({ type: "delta", text: delta }); },
       onReasoning: (delta: string) => { assistant.reasoning += delta; this.post({ type: "reasoning", text: delta }); },
       onEvent: (method: string, params: Record<string, unknown>) => {
+        if (method === "account/rateLimits/updated") this.accountEvents.fire(params);
         this.live.onEvent(method, params);
         const item = (params.item ?? {}) as Record<string, unknown>;
         if (method === "item/started" && (item.type === "commandExecution" || item.type === "mcpToolCall" || item.type === "webSearch")) {
@@ -550,13 +559,14 @@ export class AgentPane implements vscode.WebviewViewProvider {
     const askAccess: AccessMode | undefined = mode.readOnly ? { id: ":read-only", label: "Read only", sandbox: "read-only", approvalPolicy: "on-request" } : access;
     const stage = mode.debug ? DEBUG_STAGES[tab.settings.debugStage ?? 0]! : undefined;
     const preset = stage?.prompt ?? mode.prompt;
-    const prompt = this.expandMentions(preset ? `${preset}\n\n${text}` : text, cwd);
+    const expanded = await expandContext(preset ? `${preset}\n\n${text}` : text, cwd);
+    const prompt = expanded.prompt;
     const rules = readRules(cwd);
     try {
       const effort = tab.settings.effortId as "low" | "medium" | "high" | "xhigh" | "max" | "ultra";
       const result = model?.provider === "claude"
         ? await runClaudeTurn({ prompt, cwd, model: model.id.replace(/^claude:/, ""), effort, ...(tab.claudeSession ? { sessionId: tab.claudeSession, resume: true } : { sessionId: (tab.claudeSession = cryptoId()) }), handlers })
-        : await runTurn({ prompt, cwd, ...(tab.thread ? { threadId: tab.thread.id } : {}), conversation: tab.id, ...(model ? { model: model.id } : {}), reasoning: effort, ...(askAccess ? { access: askAccess } : {}), mode: mode.plan ? "plan" : "default", ...(rules ? { rules } : {}), handlers });
+        : await runTurn({ prompt, cwd, ...(tab.thread ? { threadId: tab.thread.id } : {}), conversation: tab.id, ...(model ? { model: model.id } : {}), reasoning: effort, ...(askAccess ? { access: askAccess } : {}), mode: mode.plan ? "plan" : "default", ...(rules ? { rules } : {}), ...(expanded.images.length ? { images: expanded.images } : {}), handlers });
       if (result.status === "failed") {
         tab.lastError = result.errorMessage ?? "The turn failed.";
         this.output.appendLine(`turn failed: ${tab.lastError}`);
@@ -648,10 +658,7 @@ export class AgentPane implements vscode.WebviewViewProvider {
       this.skills ??= await listSkills(this.cwd());
       return this.skills.filter((s) => s.name.toLowerCase().includes(query.toLowerCase())).slice(0, 12).map((s) => ({ label: s.name, detail: s.description, insert: `/${s.name}` }));
     }
-    const glob = query ? `**/*${query.split("").map((c) => (/[\w]/.test(c) ? c : "")).join("*")}*` : "**/*";
-    const uris = await vscode.workspace.findFiles(glob, "**/{node_modules,.git,dist,build,out}/**", 40);
-    const cwd = this.cwd();
-    return uris.map((u) => relative(cwd, u.fsPath)).filter((r) => !r.startsWith("..")).sort((a, b) => a.length - b.length).slice(0, 12).map((r) => ({ label: r.split("/").pop() ?? r, detail: r, insert: `@${r}` }));
+    return suggestMentions(this.cwd(), query);
   }
 
   /** Approval and question requests from the provider (Manual approval / Read only): ask in the app, answer on the wire. */
@@ -943,7 +950,7 @@ function paneHtml(csp: string): string {
         <span class="pill access" id="access-pill" title="Access"><span class="lbl" id="access-name">…</span><span class="chev">▼</span></span>
         <span class="pill model" id="model-pill" title="Model"><span class="lbl" id="model-name">…</span><span class="chev">▼</span></span>
         <span class="spacer"></span>
-        <span class="icon" title="Attach"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 12.5l-8.5 8.5a6 6 0 0 1-8.5-8.5l9-9a4 4 0 0 1 5.7 5.7l-9 9a2 2 0 0 1-2.8-2.8l8.3-8.3"/></svg></span>
+        <span class="icon" title="Attach image" id="attach"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 12.5l-8.5 8.5a6 6 0 0 1-8.5-8.5l9-9a4 4 0 0 1 5.7 5.7l-9 9a2 2 0 0 1-2.8-2.8l8.3-8.3"/></svg></span>
         <span class="icon" title="Dictate"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="9" y="3" width="6" height="12" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg></span>
         <span class="send" id="send"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" width="14" height="14"><path d="M12 19V5M5 12l7-7 7 7"/></svg></span>
       </div>
@@ -1052,9 +1059,9 @@ function paneHtml(csp: string): string {
       wrap.append(head, diff); messages.appendChild(wrap); body.classList.add("has-messages");
     }
     const labels = { streaming: "Editing…", written: "Review", kept: "Accepted", undone: "Rejected" };
-    wrap.querySelector(".edit").innerHTML = '<span class="path">' + escape(card.path) + '</span><span class="adds">+' + card.adds + '</span><span class="dels">−' + card.dels + '</span><span class="state">' + labels[card.status] + (card.diff ? " ▾" : "") + '</span>';
-    const pre = wrap.querySelector(".diff"); wrap.dataset.hasDiff = card.diff ? "1" : "0";
-    pre.innerHTML = card.diff ? card.diff.split("\\n").map((l) => '<span class="' + (l[0] === "+" ? "a" : l[0] === "-" ? "d" : "h") + '">' + escape(l) + '</span>').join("") : "";
+    wrap.querySelector(".edit").innerHTML = '<span class="path">' + escape(card.path) + '</span><span class="adds">+' + card.adds + '</span><span class="dels">−' + card.dels + '</span><span class="state">' + labels[card.status] + ((card.diff || wrap.dataset.lastDiff) ? " ▾" : "") + '</span>';
+    const pre = wrap.querySelector(".diff"); if (card.diff) wrap.dataset.lastDiff = card.diff; const diffText = card.diff || wrap.dataset.lastDiff || ""; wrap.dataset.hasDiff = diffText ? "1" : "0";
+    pre.innerHTML = diffText ? diffText.split("\\n").map((l) => '<span class="' + (l[0] === "+" ? "a" : l[0] === "-" ? "d" : "h") + '">' + escape(l) + '</span>').join("") : "";
     if (card.status === "streaming" && card.diff) wrap.classList.add("open");
     scroll();
   }
@@ -1179,7 +1186,7 @@ function paneHtml(csp: string): string {
   function renderSuggestions(kind, items) {
     if (!suggest || suggest.kind !== kind) return;
     suggest.items = items; menu.dataset.kind = "suggest"; menu.innerHTML = items.length ? "" : '<div class="note">No matches</div>';
-    for (const it of items) menu.insertAdjacentHTML("beforeend", '<div class="item" data-insert="' + escape(it.insert) + '"><span class="ic">' + (kind === "file" ? "▤" : "/") + '</span><span class="lbl">' + escape(it.label) + '</span><span class="sub">' + escape(it.detail) + '</span></div>');
+    let lastGroup = null; for (const it of items) { if (it.group && it.group !== lastGroup) { menu.insertAdjacentHTML("beforeend", '<div class="group">' + escape(it.group) + '</div>'); lastGroup = it.group; } menu.insertAdjacentHTML("beforeend", '<div class="item" data-insert="' + escape(it.insert) + '"><span class="ic">' + (kind === "file" ? ({"Git":"⎇","Commits":"◦","Terminals":">_","Web":"◎","Docs":"▤","Past Chats":"…"}[it.group] || "▤") : "/") + '</span><span class="lbl">' + escape(it.label) + '</span><span class="sub">' + escape(it.detail) + '</span></div>'); }
     menu.querySelectorAll(".item").forEach((el) => el.addEventListener("mousedown", (e) => { e.preventDefault(); acceptSuggestion(el.dataset.insert); }));
     menu.classList.add("open"); placeMenu($("mode-pill"));
   }
@@ -1187,6 +1194,7 @@ function paneHtml(csp: string): string {
   input.addEventListener("input", () => { autosize(); const t = triggerAt(); if (!t) { if (suggest) { suggest = null; closeMenu(); } return; } suggest = { ...t, items: suggest && suggest.items || [] }; clearTimeout(suggestTimer); suggestTimer = setTimeout(() => vscode.postMessage({ type: "suggest", kind: t.kind, query: t.query }), 120); });
   input.addEventListener("keydown", (e) => { if (e.key === "Tab" && e.shiftKey) { e.preventDefault(); openMenu("mode", $("mode-pill")); return; } if (suggest && menu.classList.contains("open")) { if (e.key === "Enter" || e.key === "Tab") { e.preventDefault(); if (suggest.items[0]) acceptSuggestion(suggest.items[0].insert); return; } if (e.key === "Escape") { suggest = null; closeMenu(); return; } } if (e.key === "Enter" && !e.shiftKey && !e.metaKey && !e.ctrlKey) { e.preventDefault(); send(); } });
   $("send").addEventListener("click", send);
+  $("attach").addEventListener("click", () => vscode.postMessage({ type: "attach" }));
   $("stop").addEventListener("click", () => vscode.postMessage({ type: "stop" }));
   window.addEventListener("message", (event) => {
     const m = event.data;

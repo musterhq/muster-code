@@ -95,6 +95,8 @@ export async function runTurn(input: {
   readonly mode?: "plan" | "default";
   /** Rules for the agent (.muster/rules, .cursor/rules), sent as developer instructions. */
   readonly rules?: string;
+  /** Local image paths attached to the prompt. */
+  readonly images?: readonly string[];
   readonly handlers: CodexTurnHandlers;
 }): Promise<CodexTurnResult> {
   const result = await runCodexAppServer({
@@ -107,6 +109,7 @@ export async function runTurn(input: {
     ...(input.model ? { model: input.model } : {}),
     ...(input.reasoning ? { reasoning: input.reasoning } : {}),
     ...(input.rules ? { developerInstructions: input.rules } : {}),
+    ...(input.images?.length ? { images: input.images } : {}),
     sandbox: input.access?.sandbox ?? "workspace-write",
     ...(input.access ? { approvalPolicy: input.access.approvalPolicy } : {}),
     // Codex keeps a thread in its last collaboration mode: say which one on every turn (plan → no edits; default → agent).

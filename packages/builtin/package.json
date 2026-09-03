@@ -23,7 +23,8 @@
     "languageModelCapabilities",
     "inlineCompletionsAdditions",
     "mappedEditsProvider",
-    "mcpServerDefinitions"
+    "mcpServerDefinitions",
+    "terminalDataWriteEvent"
   ],
   "contributes": {
     "chatParticipants": [
@@ -283,6 +284,14 @@
           "description": "Claude models offered in the model picker (run through Claude Code on your Claude subscription).",
           "items": {
             "type": "string"
+          }
+        },
+        "muster.docs": {
+          "type": "array",
+          "default": [],
+          "description": "Docs for the @Docs mention: [{\"name\":\"React\",\"url\":\"https://react.dev/reference\"}]. Fetched once and cached under .muster/docs.",
+          "items": {
+            "type": "object"
           }
         }
       }
