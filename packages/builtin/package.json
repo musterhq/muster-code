@@ -165,6 +165,20 @@
       {
         "command": "muster.agent.mode",
         "title": "Cycle Agent Mode"
+      },
+      {
+        "command": "muster.cmdk",
+        "title": "Edit with Agent"
+      },
+      {
+        "command": "muster.plan.preview",
+        "title": "Preview",
+        "icon": "$(open-preview)"
+      },
+      {
+        "command": "muster.plan.build",
+        "title": "Build",
+        "icon": "$(play)"
       }
     ],
     "configuration": {
@@ -238,6 +252,18 @@
           "when": "view == muster.agent.pane",
           "group": "navigation@4"
         }
+      ],
+      "editor/title": [
+        {
+          "command": "muster.plan.preview",
+          "when": "resourceFilename =~ /\\\\.plan\\\\.md$/",
+          "group": "navigation@1"
+        },
+        {
+          "command": "muster.plan.build",
+          "when": "resourceFilename =~ /\\\\.plan\\\\.md$/",
+          "group": "navigation@2"
+        }
       ]
     },
     "keybindings": [
@@ -292,6 +318,18 @@
         "key": "ctrl+.",
         "mac": "cmd+.",
         "when": "focusedView == muster.agent.pane"
+      },
+      {
+        "command": "muster.cmdk",
+        "key": "ctrl+k",
+        "mac": "cmd+k",
+        "when": "editorTextFocus && !editorReadonly"
+      },
+      {
+        "command": "muster.plan.build",
+        "key": "ctrl+enter",
+        "mac": "cmd+enter",
+        "when": "resourceFilename =~ /\\\\.plan\\\\.md$/ && editorTextFocus"
       }
     ]
   },
@@ -310,4 +348,4 @@
     "tsx": "^4.19.0",
     "typescript": "^5.7.0"
   }
-}
+}\n

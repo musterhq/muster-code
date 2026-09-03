@@ -93,3 +93,13 @@ Sources: `docs/reference/cursor-inline-diff.css`, `docs/reference/cursor-widgets
 - Agent pane rebuilt (commit 154270f): thread tabs with + / close, in-pane History (search, pin), Kanban board view (backlog → in progress → review → done; Run starts a thread), mode pill Agent / Plan / Ask / Kanban + custom modes (`muster.modes`, ⌘. cycles), access pill from `permissionProfile/list` (Read only / Manual approval / Full access), model pill from `model/list` with per-model efforts + Claude models (`muster.claude.models`) through Claude Code; all per thread and persisted. Plan mode runs Codex's plan collaboration mode, renders the plan card (To-dos, View Plan, Build ⌘⏎), saves `.muster/plans/<slug>.plan.md` and opens the markdown preview; Build switches to Agent and implements the plan. Approvals/questions are answered in-app. Markdown renderer, tool cards, clickable edit cards.
 - Not yet verified with a live Codex turn (owner's quota); verified: build, tests (core 25/25 file, builtin 8/8), activation, discovery queries (model/list, permissionProfile/list) live.
 - Next: verify plan mode end to end with a real turn; Cursor-exact plan editor toolbar (Preview ⌄ · model · Build) for `.plan.md`; diff preview block inside chat edit cards; @ context picker; Cmd-K; Tab.
+
+## Status update 2026-09-03 (late)
+- Privacy: threads are scoped to the open folder(s) everywhere (history, open-by-id, board, native session list) via `threadsForWorkspace`; other folders' chats are not listed or openable.
+- ⌘K inline edit (input box → agent edits the selection/file → streams in as the inline diff; the in-editor floating prompt bar is still to be built on the workbench side).
+- `.plan.md` editor toolbar: Preview · Build (⌘⏎) via editor/title menus; Build implements the plan in the active thread.
+- Checkpoints: every human message records the turn-start contents of every file the agent touches; ↺ Restore Checkpoint on the bubble restores them and truncates the conversation view.
+- Rules: `.muster/rules/*.md` and `.cursor/rules/*.mdc` are sent as developer instructions on every turn.
+- MCP elicitations (computer use) and approval/user-input requests are answered in-app.
+- Composer: `@` file picker (workspace search, contents attached as context) and `/` skills picker (`skills/list`).
+- Still to build: Tab completions, in-editor ⌘K bar, terminal ⌘K, multi-file review editor, agents window, browser, git review, diff preview block inside chat cards.

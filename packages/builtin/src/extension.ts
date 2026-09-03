@@ -3,7 +3,7 @@
 // the default chat participant + models (native chat kept as plumbing for
 // inline chat / chat editing), and Cursor's status-bar cluster.
 import * as vscode from "vscode";
-import { formatAge, formatSize, interruptTurn, listThreads, readHistory, runTurn, type CodexThread } from "./codex.js";
+import { formatAge, formatSize, interruptTurn, listThreads, readHistory, runTurn, threadsForWorkspace, type CodexThread } from "./codex.js";
 import { AgentPane } from "./agent-pane.js";
 import { LiveEditController } from "./live-edit.js";
 import { startDevControl } from "./dev-control.js";
@@ -147,6 +147,15 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   context.subscriptions.push(vscode.commands.registerCommand("muster.agent.history", () => pane.showHistory()));
   context.subscriptions.push(vscode.commands.registerCommand("muster.agent.board", () => pane.showBoard()));
   context.subscriptions.push(vscode.commands.registerCommand("muster.agent.mode", () => pane.cycleMode()));
+  // ⌘K: edit the selection (or the file) with the agent; the change streams in as the inline diff.
+  context.subscriptions.push(vscode.commands.registerCommand("muster.cmdk", async () => {
+    const editor = vscode.window.activeTextEditor;
+    if (!editor) return;
+    const instruction = await vscode.window.showInputBox({ prompt: "Edit with the agent", placeHolder: "Describe the change · Enter to generate · Esc to cancel", ignoreFocusOut: true });
+    if (instruction?.trim()) await pane.inlineEdit(editor, instruction.trim());
+  }));
+  context.subscriptions.push(vscode.commands.registerCommand("muster.plan.preview", (uri?: vscode.Uri) => vscode.commands.executeCommand("markdown.showPreviewToSide", uri ?? vscode.window.activeTextEditor?.document.uri)));
+  context.subscriptions.push(vscode.commands.registerCommand("muster.plan.build", (uri?: vscode.Uri) => { const target = uri ?? vscode.window.activeTextEditor?.document.uri; if (target) void pane.buildFromFile(target); }));
   context.subscriptions.push(vscode.commands.registerCommand("muster.agent.more", () => vscode.commands.executeCommand("workbench.action.openSettings", "muster")));
   context.subscriptions.push(vscode.commands.registerCommand("muster.agent.stop", () => pane.stop()));
   context.subscriptions.push(vscode.commands.registerCommand("muster.agent.maximize", () => vscode.commands.executeCommand("workbench.action.toggleMaximizedAuxiliaryBar")));
@@ -172,7 +181,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   async function refreshThreads(): Promise<CodexThread[]> {
     try {
-      threadsCache = await listThreads();
+      threadsCache = threadsForWorkspace(await listThreads(), (vscode.workspace.workspaceFolders ?? []).map((f) => f.uri.fsPath));
     } catch (error) {
       output.appendLine(`thread discovery failed: ${error instanceof Error ? error.message : String(error)}`);
     }

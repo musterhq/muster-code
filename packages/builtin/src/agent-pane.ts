@@ -4,21 +4,21 @@
 // modes and models discovered from the app-server, plan cards saved as
 // .plan.md in the workspace, tool cards, edit cards, the review bar.
 import * as vscode from "vscode";
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, relative } from "node:path";
-import { formatAge, formatSize, interruptTurn, listAccessModes, listModels, listThreads, readHistory, runClaudeTurn, runTurn, type AccessMode, type CodexThread, type ModelInfo } from "./codex.js";
-import type { EditCard, LiveEditController } from "./live-edit.js";
+import { formatAge, formatSize, interruptTurn, listAccessModes, listModels, listSkills, listThreads, readHistory, readRules, runClaudeTurn, runTurn, threadsForWorkspace, type AccessMode, type CodexThread, type ModelInfo, type SkillInfo } from "./codex.js";
+import type { Checkpoint, EditCard, LiveEditController } from "./live-edit.js";
 
 interface ModeInfo { readonly id: string; readonly name: string; readonly icon: string; readonly placeholder: string; readonly prompt?: string }
 interface ThreadSettings { mode: string; accessId: string; modelId: string; effortId: string }
 interface PlanCard { title: string; summary: string; todos: { text: string; done: boolean }[]; path?: string }
 type ToolMessage = { kind: "tool"; id: string; title: string; detail: string; output: string; status: string };
 type PaneMessage =
-  | { kind: "user"; text: string }
+  | { kind: "user"; text: string; checkpoint?: string }
   | { kind: "assistant"; text: string; reasoning: string }
   | ToolMessage
   | { kind: "plan"; card: PlanCard };
-interface Tab { id: string; name: string; thread?: CodexThread; messages: PaneMessage[]; settings: ThreadSettings; plan?: PlanCard; claudeSession?: string; running: boolean }
+interface Tab { id: string; name: string; thread?: CodexThread; messages: PaneMessage[]; settings: ThreadSettings; plan?: PlanCard; claudeSession?: string; running: boolean; checkpoints: Map<string, Checkpoint> }
 interface BoardTask { id: string; title: string; column: "backlog" | "progress" | "review" | "done"; threadId?: string; createdAt: number }
 
 type ToPane =
@@ -34,7 +34,8 @@ type ToPane =
   | { type: "edit"; card: EditCard }
   | { type: "review"; files: EditCard[] }
   | { type: "threads"; items: { id: string; name: string; project: string; age: string; turns: number; size: string; live: boolean; pinned: boolean }[] }
-  | { type: "board"; columns: { id: string; title: string; cards: { id: string; title: string; subtitle: string; running: boolean }[] }[] };
+  | { type: "board"; columns: { id: string; title: string; cards: { id: string; title: string; subtitle: string; running: boolean }[] }[] }
+  | { type: "suggestions"; kind: "file" | "skill"; items: { label: string; detail: string; insert: string }[] };
 type FromPane =
   | { type: "ready" } | { type: "send"; text: string } | { type: "stop" }
   | { type: "acceptAll" } | { type: "rejectAll" } | { type: "open"; path: string }
@@ -43,6 +44,7 @@ type FromPane =
   | { type: "setMode"; id: string } | { type: "setAccess"; id: string } | { type: "setModel"; id: string } | { type: "setEffort"; id: string }
   | { type: "pin"; id: string; pinned: boolean }
   | { type: "viewPlan" } | { type: "buildPlan" }
+  | { type: "suggest"; kind: "file" | "skill"; query: string } | { type: "restore"; id: string }
   | { type: "boardAdd"; title: string } | { type: "boardRun"; id: string } | { type: "boardMove"; id: string; column: BoardTask["column"] };
 
 const BUILTIN_MODES: ModeInfo[] = [
@@ -62,6 +64,7 @@ export class AgentPane implements vscode.WebviewViewProvider {
   private access: AccessMode[] = [];
   private loading = true;
   private catalogLoaded = false;
+  private skills: SkillInfo[] | undefined;
 
   constructor(private readonly context: vscode.ExtensionContext, private readonly output: vscode.LogOutputChannel, private readonly live: LiveEditController) {
     this.live.onCard((card) => this.post({ type: "edit", card }));
@@ -107,7 +110,7 @@ export class AgentPane implements vscode.WebviewViewProvider {
     this.pushState();
     await vscode.commands.executeCommand(`${AgentPane.viewId}.focus`);
     const pinned = new Set(this.context.workspaceState.get<string[]>("muster.pinnedThreads", []));
-    const threads = await listThreads();
+    const threads = await this.visibleThreads();
     const items = threads.map((t) => ({ id: t.id, name: t.name, project: t.project, age: formatAge(t.lastActivityAt), turns: t.turnCount, size: formatSize(t.sizeBytes), live: t.live, pinned: pinned.has(t.id) }));
     items.sort((a, b) => Number(b.pinned) - Number(a.pinned));
     this.post({ type: "threads", items });
@@ -135,10 +138,49 @@ export class AgentPane implements vscode.WebviewViewProvider {
 
   // ── state ──
 
+  /** Privacy: only this folder's threads exist as far as the pane is concerned. */
+  private async visibleThreads(): Promise<CodexThread[]> {
+    return threadsForWorkspace(await listThreads(), (vscode.workspace.workspaceFolders ?? []).map((f) => f.uri.fsPath));
+  }
+
+  /** "Build" from a .plan.md editor: implement that plan in the active thread. */
+  async buildFromFile(uri: vscode.Uri): Promise<void> {
+    const tab = this.active();
+    tab.settings.mode = "agent";
+    this.persist(tab);
+    this.paneView = "chat";
+    this.pushState();
+    await vscode.commands.executeCommand(`${AgentPane.viewId}.focus`);
+    await this.send(`Implement the plan in ${relative(this.cwd(), uri.fsPath)}. Work through the to-dos in order and keep them updated.`);
+  }
+
+  /** ⌘K: edit the selection (or the whole file) in place; the result streams in as the inline diff. */
+  async inlineEdit(editor: vscode.TextEditor, instruction: string): Promise<void> {
+    const tab = this.active();
+    const cwd = this.cwd();
+    const rel = relative(cwd, editor.document.uri.fsPath);
+    const selection = editor.selection.isEmpty ? undefined : editor.selection;
+    const start = selection ? selection.start.line + 1 : 1;
+    const end = selection ? selection.end.line + 1 : editor.document.lineCount;
+    const code = editor.document.getText(selection ? new vscode.Range(selection.start.line, 0, selection.end.line, Number.MAX_SAFE_INTEGER) : undefined);
+    const prompt = `Edit ${rel}${selection ? ` lines ${start}-${end} only` : ""} as instructed. Change nothing else, do not explain, apply the change with apply_patch.\n\nInstruction: ${instruction}\n\nCurrent code:\n\`\`\`\n${code}\n\`\`\``;
+    const model = this.models.find((m) => m.id === tab.settings.modelId);
+    const access = this.access.find((a) => a.id === tab.settings.accessId);
+    const status = vscode.window.setStatusBarMessage("$(sync~spin) Generating edit…");
+    this.live.beginCheckpoint();
+    try {
+      const result = await runTurn({ prompt, cwd, ...(model && model.provider === "codex" ? { model: model.id } : {}), reasoning: tab.settings.effortId as "low" | "medium" | "high" | "xhigh" | "max" | "ultra", ...(access ? { access } : {}), rules: readRules(cwd), handlers: { onDelta: () => {}, onReasoning: () => {}, onEvent: (m, p) => this.live.onEvent(m, p), onRequest: (m, p) => this.approve(m, p) } });
+      if (result.status === "failed") void vscode.window.showWarningMessage(result.errorMessage ?? "The edit failed.");
+    } finally {
+      status.dispose();
+      this.live.takeCheckpoint();
+    }
+  }
+
   private newTab(name = "New Agent", thread?: CodexThread): Tab {
     const id = thread?.id ?? `new-${Date.now().toString(36)}`;
     const saved = this.context.workspaceState.get<Record<string, ThreadSettings>>("muster.threadSettings", {})[id];
-    const tab: Tab = { id, name, ...(thread ? { thread } : {}), messages: [], settings: saved ?? this.defaultSettings(), running: false };
+    const tab: Tab = { id, name, ...(thread ? { thread } : {}), messages: [], settings: saved ?? this.defaultSettings(), running: false, checkpoints: new Map() };
     this.tabs.push(tab);
     this.activeId = id;
     return tab;
@@ -214,7 +256,9 @@ export class AgentPane implements vscode.WebviewViewProvider {
       case "newAgent": this.newAgent(); return;
       case "activateTab": { const tab = this.tabs.find((t) => t.id === message.id); if (tab) { this.activeId = tab.id; this.paneView = "chat"; this.pushState(); this.post({ type: "messages", messages: tab.messages }); } return; }
       case "closeTab": { this.tabs = this.tabs.filter((t) => t.id !== message.id); if (!this.tabs.length) this.newTab(); if (!this.tabs.some((t) => t.id === this.activeId)) this.activeId = this.tabs[this.tabs.length - 1]!.id; this.pushState(); this.post({ type: "messages", messages: this.active().messages }); return; }
-      case "openThread": { const thread = (await listThreads()).find((t) => t.id === message.id); if (thread) await this.openThread(thread); return; }
+      case "openThread": { const thread = (await this.visibleThreads()).find((t) => t.id === message.id); if (thread) await this.openThread(thread); else void vscode.window.showWarningMessage("That thread belongs to another folder."); return; }
+      case "suggest": { this.post({ type: "suggestions", kind: message.kind, items: await this.suggest(message.kind, message.query) }); return; }
+      case "restore": { const tab = this.active(); const checkpoint = tab.checkpoints.get(message.id); if (!checkpoint) return; const n = await this.live.restore(checkpoint); const at = tab.messages.findIndex((m) => m.kind === "user" && m.checkpoint === message.id); if (at >= 0) tab.messages = tab.messages.slice(0, at); this.post({ type: "messages", messages: tab.messages }); void vscode.window.setStatusBarMessage(`Checkpoint restored · ${n} file(s)`, 3000); return; }
       case "view": { if (message.view === "history") await this.showHistory(); else if (message.view === "board") await this.showBoard(); else { this.paneView = "chat"; this.pushState(); this.post({ type: "messages", messages: this.active().messages }); } return; }
       case "setMode": { const tab = this.active(); tab.settings.mode = message.id; this.persist(tab); this.pushState(); if (message.id === "kanban") await this.showBoard(); return; }
       case "setAccess": { const tab = this.active(); tab.settings.accessId = message.id; this.persist(tab); this.pushState(); return; }
@@ -229,7 +273,7 @@ export class AgentPane implements vscode.WebviewViewProvider {
         const tasks = this.context.workspaceState.get<BoardTask[]>("muster.board", []);
         const task = tasks.find((t) => t.id === message.id);
         if (!task) return;
-        if (task.threadId) { const thread = (await listThreads()).find((t) => t.id === task.threadId); if (thread) { await this.openThread(thread); return; } }
+        if (task.threadId) { const thread = (await this.visibleThreads()).find((t) => t.id === task.threadId); if (thread) { await this.openThread(thread); return; } }
         const tab = this.newTab(task.title);
         tab.settings.mode = "agent";
         task.column = "progress";
@@ -256,7 +300,9 @@ export class AgentPane implements vscode.WebviewViewProvider {
     if (mode.id === "kanban") { await this.onMessage({ type: "boardAdd", title: text.trim() }); await this.showBoard(); return; }
     const cwd = this.cwd();
     tab.running = true;
-    tab.messages.push({ kind: "user", text });
+    const checkpointId = `cp-${Date.now().toString(36)}`;
+    this.live.beginCheckpoint();
+    tab.messages.push({ kind: "user", text, checkpoint: checkpointId });
     this.post({ type: "user", text });
     this.post({ type: "start" });
     this.pushState();
@@ -304,12 +350,13 @@ export class AgentPane implements vscode.WebviewViewProvider {
     const model = this.models.find((m) => m.id === tab.settings.modelId);
     const access = this.access.find((a) => a.id === tab.settings.accessId);
     const askAccess: AccessMode | undefined = mode.id === "ask" ? { id: ":read-only", label: "Read only", sandbox: "read-only", approvalPolicy: "on-request" } : access;
-    const prompt = mode.prompt ? `${mode.prompt}\n\n${text}` : text;
+    const prompt = this.expandMentions(mode.prompt ? `${mode.prompt}\n\n${text}` : text, cwd);
+    const rules = readRules(cwd);
     try {
       const effort = tab.settings.effortId as "low" | "medium" | "high" | "xhigh" | "max" | "ultra";
       const result = model?.provider === "claude"
         ? await runClaudeTurn({ prompt, cwd, model: model.id.replace(/^claude:/, ""), effort, ...(tab.claudeSession ? { sessionId: tab.claudeSession, resume: true } : { sessionId: (tab.claudeSession = cryptoId()) }), handlers })
-        : await runTurn({ prompt, cwd, ...(tab.thread ? { threadId: tab.thread.id } : {}), ...(model ? { model: model.id } : {}), reasoning: effort, ...(askAccess ? { access: askAccess } : {}), mode: mode.id === "plan" ? "plan" : "default", handlers });
+        : await runTurn({ prompt, cwd, ...(tab.thread ? { threadId: tab.thread.id } : {}), ...(model ? { model: model.id } : {}), reasoning: effort, ...(askAccess ? { access: askAccess } : {}), mode: mode.id === "plan" ? "plan" : "default", ...(rules ? { rules } : {}), handlers });
       if (result.status === "failed") {
         this.post({ type: "done", ok: false, error: result.errorMessage ?? "The turn failed." });
       } else {
@@ -324,8 +371,36 @@ export class AgentPane implements vscode.WebviewViewProvider {
       this.post({ type: "done", ok: false, error: error instanceof Error ? error.message : String(error) });
     } finally {
       tab.running = false;
+      tab.checkpoints.set(checkpointId, this.live.takeCheckpoint());
       this.pushState();
     }
+  }
+
+  /** @path mentions become context blocks; the mention text stays so the agent sees what was meant. */
+  private expandMentions(prompt: string, cwd: string): string {
+    const blocks: string[] = [];
+    for (const match of prompt.matchAll(/(?:^|\s)@([\w./-]+)/g)) {
+      const rel = match[1]!;
+      const abs = join(cwd, rel);
+      if (!existsSync(abs) || blocks.length >= 8) continue;
+      try {
+        const text = readFileSync(abs, "utf8");
+        const lines = text.split("\n");
+        blocks.push(`<file path="${rel}">\n${lines.slice(0, 400).join("\n")}${lines.length > 400 ? "\n… (truncated)" : ""}\n</file>`);
+      } catch { /* directories and binaries are skipped */ }
+    }
+    return blocks.length ? `${prompt}\n\nContext:\n${blocks.join("\n")}` : prompt;
+  }
+
+  private async suggest(kind: "file" | "skill", query: string): Promise<{ label: string; detail: string; insert: string }[]> {
+    if (kind === "skill") {
+      this.skills ??= await listSkills(this.cwd());
+      return this.skills.filter((s) => s.name.toLowerCase().includes(query.toLowerCase())).slice(0, 12).map((s) => ({ label: s.name, detail: s.description, insert: `/${s.name}` }));
+    }
+    const glob = query ? `**/*${query.split("").map((c) => (/[\w]/.test(c) ? c : "")).join("*")}*` : "**/*";
+    const uris = await vscode.workspace.findFiles(glob, "**/{node_modules,.git,dist,build,out}/**", 40);
+    const cwd = this.cwd();
+    return uris.map((u) => relative(cwd, u.fsPath)).filter((r) => !r.startsWith("..")).sort((a, b) => a.length - b.length).slice(0, 12).map((r) => ({ label: r.split("/").pop() ?? r, detail: r, insert: `@${r}` }));
   }
 
   /** Approval and question requests from the provider (Manual approval / Read only): ask in the app, answer on the wire. */
@@ -335,6 +410,12 @@ export class AgentPane implements vscode.WebviewViewProvider {
       const pick = await vscode.window.showWarningMessage(`Codex wants to ${method.includes("commandExecution") ? "run" : "do"}: ${what}`, "Allow", "Allow for session", "Deny");
       const decision = pick === "Allow" ? "accept" : pick === "Allow for session" ? "acceptForSession" : "decline";
       return { decision };
+    }
+    if (method === "mcpServer/elicitation/request") {
+      // Computer use and other MCP servers ask for consent here (T3 Code answers the same way).
+      const text = String(params.message ?? params.prompt ?? "An MCP server asks for permission.");
+      const pick = await vscode.window.showWarningMessage(text, "Allow", "Decline");
+      return pick === "Allow" ? { action: "accept", content: {} } : { action: "decline", content: null };
     }
     if (method === "item/tool/requestUserInput") {
       const questions = (params.questions as { id?: string; header?: string; question?: string; options?: { label?: string }[] }[] | undefined) ?? [];
@@ -428,6 +509,9 @@ function paneHtml(csp: string): string {
   #messages { flex: 1; overflow: auto; padding: 8px 10px 12px; display: flex; flex-direction: column; gap: 10px; }
   body:not(.has-messages) #messages { display: none; }
   .human { align-self: flex-end; margin-left: max(32px, 20%); min-width: 150px; max-height: 120px; overflow: hidden; position: relative; background: var(--vscode-input-background); border: 1px solid var(--stroke-secondary); border-radius: var(--radius-xl); padding: 8px 10px; white-space: pre-wrap; word-break: break-word; }
+  .human .restore { position: absolute; right: 6px; bottom: 4px; width: 22px; height: 22px; border-radius: 4px; display: none; align-items: center; justify-content: center; color: var(--text-secondary); background: var(--vscode-input-background); font-size: 13px; }
+  .human:hover .restore { display: inline-flex; }
+  .human .restore:hover { color: var(--fg); background: var(--bg-tertiary); }
   .human.clipped::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 28px; background: linear-gradient(to bottom, transparent, var(--vscode-input-background)); border-radius: 0 0 var(--radius-xl) var(--radius-xl); }
   .assistant { word-break: break-word; }
   .assistant p { margin: 0 0 8px; }
@@ -618,7 +702,7 @@ function paneHtml(csp: string): string {
   }
   messages.addEventListener("click", (e) => { const b = e.target.closest("[data-copy]"); if (b) { navigator.clipboard.writeText(b.parentElement.nextElementSibling.textContent); b.textContent = "Copied"; setTimeout(() => (b.textContent = "Copy"), 1200); } });
   function scroll() { messages.scrollTop = messages.scrollHeight; }
-  function addHuman(text) { const el = document.createElement("div"); el.className = "human"; el.textContent = text; messages.appendChild(el); if (el.scrollHeight > 120) el.classList.add("clipped"); body.classList.add("has-messages"); scroll(); }
+  function addHuman(text, checkpoint) { const el = document.createElement("div"); el.className = "human"; el.textContent = text; if (checkpoint) { const b = document.createElement("button"); b.className = "restore"; b.title = "Restore Checkpoint"; b.textContent = "↺"; b.addEventListener("click", (e) => { e.stopPropagation(); vscode.postMessage({ type: "restore", id: checkpoint }); }); el.appendChild(b); } messages.appendChild(el); if (el.scrollHeight > 120) el.classList.add("clipped"); body.classList.add("has-messages"); scroll(); }
   function addAssistant(text) { const el = document.createElement("div"); el.className = "assistant"; el.dataset.raw = text; el.innerHTML = renderMarkdown(text); messages.appendChild(el); body.classList.add("has-messages"); return el; }
   function ensureAssistant() { if (!assistantEl) assistantEl = addAssistant(""); return assistantEl; }
   function ensureThinking() { if (!thinkingEl) { thinkingEl = document.createElement("details"); thinkingEl.className = "thinking"; thinkingEl.innerHTML = "<summary>Thinking</summary><div class=body></div>"; messages.appendChild(thinkingEl); } return thinkingEl; }
@@ -646,7 +730,7 @@ function paneHtml(csp: string): string {
   function renderMessages(list) {
     messages.innerHTML = ""; assistantEl = thinkingEl = planEl = null; body.classList.toggle("has-messages", list.length > 0);
     for (const m of list) {
-      if (m.kind === "user") addHuman(m.text);
+      if (m.kind === "user") addHuman(m.text, m.checkpoint);
       else if (m.kind === "assistant") { if (m.reasoning) { const d = document.createElement("details"); d.className = "thinking"; d.innerHTML = "<summary>Thought</summary><div class=body>" + escape(m.reasoning) + "</div>"; messages.appendChild(d); } addAssistant(m.text); }
       else if (m.kind === "tool") toolEl(m);
       else if (m.kind === "plan") { planEl = null; planCard(m.card); }
@@ -752,15 +836,26 @@ function paneHtml(csp: string): string {
   }
   function autosize() { input.style.height = "auto"; input.style.height = Math.min(240, Math.max(84, input.scrollHeight)) + "px"; body.classList.toggle("dirty", input.value.trim().length > 0); }
   function send() { const text = input.value.trim(); if (!text || body.classList.contains("running")) return; vscode.postMessage({ type: "send", text }); input.value = ""; autosize(); }
-  input.addEventListener("input", autosize);
-  input.addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey && !e.metaKey && !e.ctrlKey) { e.preventDefault(); send(); } });
+  // @ files and / skills: a popover while typing, filled by the extension.
+  let suggest = null, suggestTimer = null;
+  function triggerAt() { const upto = input.value.slice(0, input.selectionStart); const m = /(^|\s)([@/])([\w./-]*)$/.exec(upto); return m ? { kind: m[2] === "@" ? "file" : "skill", start: upto.length - m[3].length - 1, query: m[3] } : null; }
+  function renderSuggestions(kind, items) {
+    if (!suggest || suggest.kind !== kind) return;
+    suggest.items = items; menu.dataset.kind = "suggest"; menu.innerHTML = items.length ? "" : '<div class="note">No matches</div>';
+    for (const it of items) menu.insertAdjacentHTML("beforeend", '<div class="item" data-insert="' + escape(it.insert) + '"><span class="ic">' + (kind === "file" ? "▤" : "/") + '</span><span class="lbl">' + escape(it.label) + '</span><span class="sub">' + escape(it.detail) + '</span></div>');
+    menu.querySelectorAll(".item").forEach((el) => el.addEventListener("mousedown", (e) => { e.preventDefault(); acceptSuggestion(el.dataset.insert); }));
+    menu.classList.add("open"); placeMenu($("mode-pill"));
+  }
+  function acceptSuggestion(insert) { if (!suggest) return; const end = input.selectionStart; input.value = input.value.slice(0, suggest.start) + insert + " " + input.value.slice(end); const caret = suggest.start + insert.length + 1; input.setSelectionRange(caret, caret); suggest = null; closeMenu(); autosize(); input.focus(); }
+  input.addEventListener("input", () => { autosize(); const t = triggerAt(); if (!t) { if (suggest) { suggest = null; closeMenu(); } return; } suggest = { ...t, items: suggest && suggest.items || [] }; clearTimeout(suggestTimer); suggestTimer = setTimeout(() => vscode.postMessage({ type: "suggest", kind: t.kind, query: t.query }), 120); });
+  input.addEventListener("keydown", (e) => { if (suggest && menu.classList.contains("open")) { if (e.key === "Enter" || e.key === "Tab") { e.preventDefault(); if (suggest.items[0]) acceptSuggestion(suggest.items[0].insert); return; } if (e.key === "Escape") { suggest = null; closeMenu(); return; } } if (e.key === "Enter" && !e.shiftKey && !e.metaKey && !e.ctrlKey) { e.preventDefault(); send(); } });
   $("send").addEventListener("click", send);
   $("stop").addEventListener("click", () => vscode.postMessage({ type: "stop" }));
   window.addEventListener("message", (event) => {
     const m = event.data;
     if (m.type === "state") { state = m; renderState(); }
     else if (m.type === "messages") { renderMessages(m.messages); if (state) renderState(); }
-    else if (m.type === "user") { assistantEl = thinkingEl = null; addHuman(m.text); if (state) renderState(); }
+    else if (m.type === "user") { assistantEl = thinkingEl = null; addHuman(m.text, m.checkpoint); if (state) renderState(); }
     else if (m.type === "start") { body.classList.add("running"); }
     else if (m.type === "reasoning") { const t = ensureThinking(); t.querySelector(".body").textContent += m.text; scroll(); }
     else if (m.type === "delta") { const a = ensureAssistant(); a.dataset.raw += m.text; a.innerHTML = renderMarkdown(a.dataset.raw); scroll(); }
@@ -770,6 +865,7 @@ function paneHtml(csp: string): string {
     else if (m.type === "review") { renderReview(m.files); }
     else if (m.type === "threads") { threads = m.items; renderHistory(); }
     else if (m.type === "board") { renderBoard(m.columns); }
+    else if (m.type === "suggestions") { renderSuggestions(m.kind, m.items); }
     else if (m.type === "done") { body.classList.remove("running"); if (thinkingEl) thinkingEl.querySelector("summary").textContent = "Thought"; if (!m.ok) { const e = document.createElement("div"); e.className = "error"; e.textContent = m.error || "Failed"; messages.appendChild(e); } assistantEl = thinkingEl = null; scroll(); }
   });
   autosize();

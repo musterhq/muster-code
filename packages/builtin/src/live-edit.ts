@@ -5,7 +5,7 @@
 // widgets, the review bar); this side owns the state — baseline, hunks,
 // accept/reject — and drives the painter through muster.inlineDiff.*.
 import * as vscode from "vscode";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { ApplyPatchStream, type PatchFile } from "./apply-patch.js";
 import { applyHunk, lineDiff, type LineHunk } from "./line-diff.js";
@@ -37,7 +37,10 @@ interface HunkArgs { uri: string; index: number; action: "accept" | "reject" }
 interface FileArgs { uri: string; action: "accept" | "reject" }
 interface GoArgs { uri: string; direction: 1 | -1 }
 
+export type Checkpoint = Map<string, { readonly existed: boolean; readonly content: string }>;
+
 export class LiveEditController {
+  private checkpoint: Checkpoint | undefined;
   private readonly files = new Map<string, LiveFile>();
   private readonly streams = new Map<string, StreamState>();
   private readonly cards = new vscode.EventEmitter<EditCard>();
@@ -121,6 +124,26 @@ export class LiveEditController {
     return paths;
   }
 
+  /** Checkpoints: record what every touched file looked like when the turn began. */
+  beginCheckpoint(): void { this.checkpoint = new Map(); }
+  takeCheckpoint(): Checkpoint { const taken = this.checkpoint ?? new Map(); this.checkpoint = undefined; return taken; }
+
+  /** Restore a checkpoint: files the agent created are removed, edited files get their turn-start contents back. */
+  async restore(checkpoint: Checkpoint): Promise<number> {
+    let count = 0;
+    for (const [abs, before] of checkpoint) {
+      const live = this.files.get(abs);
+      if (live) { this.clearPaint(live); this.files.delete(abs); }
+      if (!before.existed) { if (existsSync(abs)) { unlinkSync(abs); count++; } continue; }
+      if (!existsSync(abs) || readFileSync(abs, "utf8") !== before.content) { mkdirSync(dirname(abs), { recursive: true }); writeFileSync(abs, before.content); count++; }
+      const doc = vscode.workspace.textDocuments.find((d) => d.uri.fsPath === abs);
+      if (doc?.isDirty) await vscode.commands.executeCommand("workbench.action.files.revert", doc.uri);
+    }
+    if (!this.files.size) await vscode.commands.executeCommand("setContext", "muster.liveEdit", false);
+    this.changed.fire();
+    return count;
+  }
+
   review(): EditCard[] {
     return [...this.files.values()].map((file) => this.card(file));
   }
@@ -142,6 +165,7 @@ export class LiveEditController {
       const exists = existsSync(abs);
       const origin = exists ? readFileSync(abs, "utf8") : "";
       if (!exists) { mkdirSync(dirname(abs), { recursive: true }); writeFileSync(abs, ""); }
+      if (this.checkpoint && !this.checkpoint.has(abs)) this.checkpoint.set(abs, { existed: exists, content: origin });
       live = { uri: vscode.Uri.file(abs), abs, rel: file.path, origin, originItem: itemId, baseline: origin.split("\n"), target: origin, streaming: true, hunks: [], status: "streaming", busy: false, again: false, shown: false };
       this.files.set(abs, live);
       void vscode.commands.executeCommand("setContext", "muster.liveEdit", true);

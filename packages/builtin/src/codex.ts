@@ -10,6 +10,8 @@ import {
   type CodexTranscriptMessage,
 } from "@musterhq/core";
 import { queryCodexAppServer, runClaudeCode } from "@musterhq/core";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { join as joinPath, resolve as resolvePath } from "node:path";
 
 export interface CodexThread {
   readonly id: string;
@@ -89,6 +91,8 @@ export async function runTurn(input: {
   readonly access?: AccessMode;
   /** "plan" runs the turn in Codex's plan collaboration mode. */
   readonly mode?: "plan" | "default";
+  /** Rules for the agent (.muster/rules, .cursor/rules), sent as developer instructions. */
+  readonly rules?: string;
   readonly handlers: CodexTurnHandlers;
 }): Promise<CodexTurnResult> {
   const result = await runCodexAppServer({
@@ -97,6 +101,7 @@ export async function runTurn(input: {
     ...(input.threadId ? { threadId: input.threadId, cacheKey: `thread:${input.threadId}` } : { cacheKey: `new:${input.cwd}` }),
     ...(input.model ? { model: input.model } : {}),
     ...(input.reasoning ? { reasoning: input.reasoning } : {}),
+    ...(input.rules ? { developerInstructions: input.rules } : {}),
     sandbox: input.access?.sandbox ?? "workspace-write",
     ...(input.access ? { approvalPolicy: input.access.approvalPolicy } : {}),
     ...(input.mode === "plan" ? { collaborationMode: { mode: "plan" as const, settings: { model: input.model ?? "", ...(input.reasoning ? { reasoning_effort: input.reasoning } : {}) } } } : {}),
@@ -200,4 +205,50 @@ export async function runClaudeTurn(input: { readonly prompt: string; readonly c
   if (text) input.handlers.onDelta(text);
   const failed = raw.status === "failed" || raw.ok === false;
   return { status: failed ? "failed" : "completed", ...(typeof raw.errorMessage === "string" ? { errorMessage: raw.errorMessage } : {}), ...(input.sessionId ? { threadId: input.sessionId } : {}) } as unknown as CodexTurnResult;
+}
+
+/** Privacy: only threads that belong to the open folder(s) are visible or openable. */
+export function threadsForWorkspace<T extends { readonly cwd: string }>(threads: readonly T[], folders: readonly string[]): T[] {
+  if (!folders.length) return [];
+  const roots = folders.map((f) => resolvePath(f).replace(/\/+$/, ""));
+  return threads.filter((t) => {
+    const cwd = resolvePath(t.cwd || "/").replace(/\/+$/, "");
+    return roots.some((root) => cwd === root || cwd.startsWith(`${root}/`));
+  });
+}
+
+/** Rules for the agent: .muster/rules/*.md and Cursor's .cursor/rules/*.mdc, concatenated. */
+export function readRules(cwd: string): string {
+  const parts: string[] = [];
+  for (const dir of [joinPath(cwd, ".muster", "rules"), joinPath(cwd, ".cursor", "rules")]) {
+    if (!existsSync(dir)) continue;
+    for (const name of readdirSync(dir).sort()) {
+      const path = joinPath(dir, name);
+      if (!/\.(md|mdc)$/.test(name) || !statSync(path).isFile()) continue;
+      const text = readFileSync(path, "utf8").replace(/^---[\s\S]*?---\n/, "").trim();
+      if (text) parts.push(`# Rule: ${name}\n${text}`);
+    }
+  }
+  return parts.join("\n\n");
+}
+
+export interface SkillInfo { readonly name: string; readonly description: string }
+
+/** skills/list → the skills Codex knows for this folder ("/" in the composer). */
+export async function listSkills(cwd?: string): Promise<SkillInfo[]> {
+  try {
+    const result = await queryCodex("skills/list", {}, cwd);
+    const raw = (result.data ?? result.skills ?? []) as unknown;
+    const flat: Record<string, unknown>[] = [];
+    const walk = (value: unknown): void => {
+      if (Array.isArray(value)) { for (const v of value) walk(v); return; }
+      if (value && typeof value === "object") {
+        const record = value as Record<string, unknown>;
+        if (typeof record.name === "string") flat.push(record);
+        for (const key of ["skills", "items", "data"]) if (key in record) walk(record[key]);
+      }
+    };
+    walk(raw);
+    return flat.map((s) => ({ name: String(s.name), description: String(s.description ?? s.summary ?? "") }));
+  } catch { return []; }
 }
