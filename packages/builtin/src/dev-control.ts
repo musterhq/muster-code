@@ -10,7 +10,7 @@ import { existsSync, unlinkSync } from "node:fs";
 import type { LiveEditController } from "./live-edit.js";
 import { queryCodex } from "./codex.js";
 
-interface Deps { readonly live: LiveEditController; readonly log: (line: string) => void; readonly pane?: { debugState(): Record<string, unknown>; debugInput(text: string): void; debugSend(text: string): void; debugStop(): void; debugEdit(checkpoint: string, text: string): void; debugDecide(id: string, decision: string): void; debugRequest(method: string, params: Record<string, unknown>): Promise<Record<string, unknown> | undefined>; debugSuggest(kind: "file" | "skill", query: string, mode?: string): Promise<Record<string, unknown>>; debugThreads(): Promise<Record<string, unknown>>; harness(input: { text: string; mode?: string; newTab?: boolean; access?: string; thread?: string; build?: number[]; buildModel?: string }): Promise<Record<string, unknown>> } }
+interface Deps { readonly live: LiveEditController; readonly log: (line: string) => void; readonly settings?: () => { debugData(section: string): Promise<unknown> } | undefined; readonly pane?: { debugState(): Record<string, unknown>; debugInput(text: string): void; debugSend(text: string): void; debugStop(): void; debugEdit(checkpoint: string, text: string): void; debugDecide(id: string, decision: string): void; debugRequest(method: string, params: Record<string, unknown>): Promise<Record<string, unknown> | undefined>; debugSuggest(kind: "file" | "skill", query: string, mode?: string): Promise<Record<string, unknown>>; debugThreads(): Promise<Record<string, unknown>>; harness(input: { text: string; mode?: string; newTab?: boolean; access?: string; thread?: string; build?: number[]; buildModel?: string }): Promise<Record<string, unknown>> } }
 
 export function startDevControl(context: vscode.ExtensionContext, deps: Deps): void {
   const path = process.env.MUSTER_CODE_DEV_SOCK;
@@ -73,6 +73,8 @@ async function handle(line: string, deps: Deps): Promise<unknown> {
     }
     case "suggest":
       return { ok: true, ...(await deps.pane?.debugSuggest(message.kind === "skill" ? "skill" : "file", String(message.query ?? ""), String(message.mode ?? "all"))) };
+    case "settings":
+      return { ok: true, data: await deps.settings?.()?.debugData(String(message.section ?? "general")) };
     case "request":
       return { ok: true, answer: await deps.pane?.debugRequest(String(message.method), (message.params as Record<string, unknown>) ?? {}) };
     case "pane":

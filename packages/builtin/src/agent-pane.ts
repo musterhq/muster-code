@@ -70,7 +70,7 @@ const DEBUG_STAGES = [
   { placeholder: "The issue has been fixed. Please clean up the instrumentation.", prompt: "Debug mode, step 3 of 3: the issue is fixed. Remove every piece of temporary instrumentation you added, keeping the fix, and summarise the root cause in two sentences." },
 ];
 
-const BUILTIN_MODES: ModeInfo[] = [
+export const BUILTIN_MODES: ModeInfo[] = [
   { id: "agent", name: "Agent", icon: "∞", description: "Plan, search, make edits, run commands", placeholder: "Plan, search, build anything", autoFix: true },
   { id: "triage", name: "Triage", icon: "⇶", description: "Coordinate long-horizon tasks with delegated subagents", placeholder: "Describe the long-horizon task to coordinate", effort: "ultra", prompt: "Coordinate this as a long-horizon task: break it into sub-tasks, delegate what can run independently to subagents, integrate the results, and report what was done and what remains." },
   { id: "plan", name: "Plan", icon: "☰", description: "Create detailed plans for accomplishing tasks", placeholder: "Plan, Build, / for skills, @ for context", plan: true },
@@ -109,6 +109,7 @@ export class AgentPane implements vscode.WebviewViewProvider {
 
   resolveWebviewView(view: vscode.WebviewView): void {
     this.context.subscriptions.push(vscode.window.onDidChangeActiveTextEditor(() => { if (this.view?.visible) this.pushState(); }));
+    this.context.subscriptions.push(vscode.workspace.onDidChangeConfiguration((e) => { if (e.affectsConfiguration("muster.modes")) this.pushState(); }));
     this.view = view;
     const appRoot = vscode.Uri.file(vscode.env.appRoot);
     view.webview.options = { enableScripts: true, localResourceRoots: [this.context.extensionUri, appRoot] };
@@ -432,7 +433,13 @@ export class AgentPane implements vscode.WebviewViewProvider {
 
   private modes(): ModeInfo[] {
     const custom = vscode.workspace.getConfiguration("muster").get<Partial<ModeInfo>[]>("modes", []);
-    return [...BUILTIN_MODES, ...custom.filter((m) => m.id && m.name).map((m) => ({ id: m.id!, name: m.name!, icon: m.icon ?? "◆", placeholder: m.placeholder ?? "Plan, search, build anything", ...(m.description ? { description: m.description } : {}), ...(m.prompt ? { prompt: m.prompt } : {}), ...(m.readOnly ? { readOnly: true } : {}), ...(m.plan ? { plan: true } : {}) }))];
+    // Every behaviour flag a built-in mode can have is available to a custom one (settings → Modes); they behave, not just look, the same.
+    return [...BUILTIN_MODES, ...custom.filter((m) => m.id && m.name).map((m) => {
+      const mode: Record<string, unknown> = { id: m.id!, name: m.name!, icon: m.icon ?? "◆", placeholder: m.placeholder ?? "Plan, search, build anything" };
+      for (const k of ["description", "prompt", "effort"] as const) if (typeof m[k] === "string" && m[k]) mode[k] = m[k];
+      for (const k of ["readOnly", "plan", "board", "autoFix", "debug", "parallel", "spec"] as const) if (m[k]) mode[k] = true;
+      return mode as unknown as ModeInfo;
+    })];
   }
 
   private async loadCatalog(): Promise<void> {
@@ -752,7 +759,7 @@ export class AgentPane implements vscode.WebviewViewProvider {
     const preset = stage?.prompt ?? mode.prompt;
     const expanded = await expandContext(preset ? `${preset}\n\n${text}` : text, cwd);
     const prompt = expanded.prompt;
-    const rules = readRules(cwd);
+    const rules = readRules(cwd, { disabled: vscode.workspace.getConfiguration("muster").get<string[]>("rules.disabled", []), mentioned: [...text.matchAll(/(?:^|\s)@([\w./:-]+)/g)].map((m) => m[1]!) });
     try {
       const effort = tab.settings.effortId as "low" | "medium" | "high" | "xhigh" | "max" | "ultra";
       const result = model?.provider === "claude"

@@ -186,3 +186,10 @@ Mined from Cursor 3.18.25 (`workbench.desktop.main.js`: mention-menu modes and t
 - Menu: **Code** and **Rules** categories (navigation rows), folders inside Files & Folders and Results, symbols in Results while typing (language service first, grep fallback), a **Link** row when the query is a URL, **Pull Request** among the direct kinds.
 - Pills: the active editor's file appears as a dashed suggestion pill (click adds it); file pills open the file on click; link / code / rule / PR / folder pills get their own glyphs.
 - Not yet: projects, MCP attachments, the hovered-file side preview, "Open / Remove / Collapse" hover popover.
+
+## Settings pages — 2026-09-04
+- **Rules**: every rule shows Cursor's kind from its frontmatter — Always (`alwaysApply: true`, or a plain `.md` without frontmatter), Auto (`globs`), Agent (`description`), Manual — and an enable toggle (`muster.rules.disabled`, workspace setting). `readRules` now attaches them the way Cursor does: Always every turn; Auto when a mentioned file matches the globs; Agent as a one-line offer that `@rule:name` loads; Manual only when mentioned. "New rule" writes a frontmatter template. User rules (`~/.codex/AGENTS.md`) and the project AGENTS.md are listed.
+- **MCP**: from `mcpServerStatus/list` — version, runtime status, auth status (needs login → Login runs `codex mcp login <name>` in a terminal), tool list, plugin origin, enable toggle (`muster.mcp.disabled` → `mcp_servers.<name>.enabled=false` on Muster's turns only), Open config, Reveal logs.
+- **Skills** with Open when a path is reported; **Hooks** as rows (event, matcher, command, source, async, timeout) from `hooks/list`.
+- **Modes**: built-ins with their behaviour flags, custom modes with Edit / Delete, and a form (id, name, icon, description, placeholder, effort, system prompt, flags readOnly · plan · autoFix · parallel · board · spec · debug) writing `muster.modes`; the composer's mode menu refreshes on save and a custom mode carries every behaviour flag.
+- Harness: `{"cmd":"settings","section":"mcp"}` returns a section's data.

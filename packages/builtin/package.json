@@ -59,7 +59,7 @@
     "languageModelChatProviders": [
       {
         "vendor": "muster",
-        "displayName": "Muster (Codex \u00b7 Claude \u00b7 more)"
+        "displayName": "Muster (Codex · Claude · more)"
       }
     ],
     "viewsContainers": {
@@ -183,7 +183,7 @@
       },
       {
         "command": "muster.cmdk.submit",
-        "title": "Submit \u2318K Prompt"
+        "title": "Submit ⌘K Prompt"
       },
       {
         "command": "muster.agent.plugins",
@@ -325,7 +325,23 @@
             "pane"
           ],
           "default": "editor",
-          "description": "Where Open Browser (\u21e7\u2318B) puts the browser: an editor tab beside the code (Cursor's browser editor) or a tab in the Agent pane."
+          "description": "Where Open Browser (⇧⌘B) puts the browser: an editor tab beside the code (Cursor's browser editor) or a tab in the Agent pane."
+        },
+        "muster.rules.disabled": {
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "description": "Rule names (without extension) that are not sent to the agent. Managed from Muster Settings → Rules."
+        },
+        "muster.mcp.disabled": {
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "description": "MCP servers switched off for Muster Code turns (passed as mcp_servers.<name>.enabled=false; ~/.codex/config.toml is untouched). Managed from Muster Settings → MCP."
         }
       }
     },

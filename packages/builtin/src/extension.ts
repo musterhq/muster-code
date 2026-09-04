@@ -3,7 +3,7 @@
 // the default chat participant + models (native chat kept as plumbing for
 // inline chat / chat editing), and Cursor's status-bar cluster.
 import * as vscode from "vscode";
-import { formatAge, formatSize, interruptTurn, listThreads, readHistory, runTurn, setBrowserMcp, threadsForWorkspace, turnHooks, type CodexThread } from "./codex.js";
+import { formatAge, formatSize, interruptTurn, listThreads, readHistory, runTurn, setBrowserMcp, setDisabledMcpServers, threadsForWorkspace, turnHooks, type CodexThread } from "./codex.js";
 import { BrowserToolServer } from "./browser-tools.js";
 import { join as joinPath } from "node:path";
 import { AgentPane } from "./agent-pane.js";
@@ -146,7 +146,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // ── Live edits (Cursor-style streaming inline diffs) ──
   const live = new LiveEditController(workspaceCwd, (line) => output.appendLine(line));
   live.register(context);
-  startDevControl(context, { live, log: (line) => output.appendLine(line), pane: { debugState: () => pane.debugState(), debugInput: (text) => pane.debugInput(text), debugSend: (text) => pane.debugSend(text), debugStop: () => pane.debugStop(), debugEdit: (cp, text) => pane.debugEdit(cp, text), debugDecide: (id, d) => pane.debugDecide(id, d), debugRequest: (m, p) => pane.debugRequest(m, p), debugSuggest: (kind, query, mode) => pane.debugSuggest(kind, query, mode), debugThreads: () => pane.debugThreads(), harness: (input) => pane.harness(input) } });
+  startDevControl(context, { live, log: (line) => output.appendLine(line), settings: () => settings, pane: { debugState: () => pane.debugState(), debugInput: (text) => pane.debugInput(text), debugSend: (text) => pane.debugSend(text), debugStop: () => pane.debugStop(), debugEdit: (cp, text) => pane.debugEdit(cp, text), debugDecide: (id, d) => pane.debugDecide(id, d), debugRequest: (m, p) => pane.debugRequest(m, p), debugSuggest: (kind, query, mode) => pane.debugSuggest(kind, query, mode), debugThreads: () => pane.debugThreads(), harness: (input) => pane.harness(input) } });
 
   // ── The Agent pane (secondary sidebar) — the Cursor-standard surface ──
   const pane = new AgentPane(context, output, live);
@@ -246,6 +246,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   }));
   context.subscriptions.push(vscode.window.registerCustomEditorProvider(PlanEditorProvider.viewType, planEditors, { webviewOptions: { retainContextWhenHidden: true }, supportsMultipleEditorsPerDocument: false }));
   const settings = new SettingsPage(context, workspaceCwd);
+  setDisabledMcpServers(vscode.workspace.getConfiguration("muster").get<string[]>("mcp.disabled", []));
+  context.subscriptions.push(vscode.workspace.onDidChangeConfiguration((e) => { if (e.affectsConfiguration("muster.mcp.disabled")) setDisabledMcpServers(vscode.workspace.getConfiguration("muster").get<string[]>("mcp.disabled", [])); }));
   // Browser (⇧⌘B): a Chromium guest tab with Cursor's visual editor; picks and screenshots go to the chat.
   const browser = new BrowserController(context, workspaceCwd);
   pane.browser = browser;

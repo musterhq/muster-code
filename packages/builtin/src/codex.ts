@@ -131,7 +131,7 @@ export async function runTurn(input: {
     ...(input.mode && input.model ? { collaborationMode: { mode: input.mode, settings: { model: input.model, ...(input.reasoning ? { reasoning_effort: input.reasoning } : {}) } } } : {}),
     transportOwner: TRANSPORT_OWNER,
     keepAlive: true,
-    configOverrides: ['model_reasoning_summary="detailed"', ...browserOverrides()],
+    configOverrides: ['model_reasoning_summary="detailed"', ...browserOverrides(), ...disabledMcpServers.map((n) => `mcp_servers.${n}.enabled=false`)],
     onDelta: input.handlers.onDelta,
     onReasoningDelta: input.handlers.onReasoning,
     ...(input.handlers.onEvent ? { onEvent: input.handlers.onEvent } : {}),
@@ -284,22 +284,52 @@ export function threadsForWorkspace<T extends { readonly cwd: string }>(threads:
   });
 }
 
-/** Rules for the agent: .muster/rules/*.md and Cursor's .cursor/rules/*.mdc, concatenated. */
-export function readRules(cwd: string): string {
-  const parts: string[] = [];
-  for (const dir of [joinPath(cwd, ".muster", "rules"), joinPath(cwd, ".cursor", "rules")]) {
+/** A rule file with Cursor's kinds: Always · Auto Attached (globs) · Agent Requested (description) · Manual. */
+export interface RuleFile { readonly name: string; readonly path: string; readonly source: "muster" | "cursor"; readonly kind: "always" | "auto" | "agent" | "manual"; readonly description: string; readonly globs: string[]; readonly body: string }
+export function listRuleFiles(cwd: string): RuleFile[] {
+  const out: RuleFile[] = [];
+  for (const [dir, source] of [[joinPath(cwd, ".muster", "rules"), "muster"], [joinPath(cwd, ".cursor", "rules"), "cursor"]] as const) {
     if (!existsSync(dir)) continue;
     for (const name of readdirSync(dir).sort()) {
       const path = joinPath(dir, name);
       if (!/\.(md|mdc)$/.test(name) || !statSync(path).isFile()) continue;
-      const text = readFileSync(path, "utf8").replace(/^---[\s\S]*?---\n/, "").trim();
-      if (text) parts.push(`# Rule: ${name}\n${text}`);
+      const raw = readFileSync(path, "utf8"); const fm = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/.exec(raw); const body = raw.replace(/^---[\s\S]*?---\r?\n?/, "").trim();
+      const field = (k: string) => (fm ? (new RegExp(`^${k}:\\s*(.*)$`, "m").exec(fm[1]!)?.[1] ?? "").trim() : "");
+      const globs = field("globs").replace(/^\[|\]$/g, "").split(",").map((g) => g.trim().replace(/^["']|["']$/g, "")).filter(Boolean);
+      const always = /^true$/i.test(field("alwaysApply")); const description = field("description").replace(/^["']|["']$/g, "");
+      const kind: RuleFile["kind"] = always ? "always" : globs.length ? "auto" : description ? "agent" : fm ? "manual" : "always";
+      out.push({ name: name.replace(/\.(md|mdc)$/, ""), path, source, kind, description, globs, body });
     }
+  }
+  return out;
+}
+function globToRegExp(glob: string): RegExp {
+  const re = glob.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*\*\//g, "(?:.*/)?").replace(/\*\*/g, ".*").replace(/\*/g, "[^/]*").replace(/\?/g, ".");
+  return new RegExp(`(^|/)${re}$`);
+}
+/**
+ * Rules for the agent, the way Cursor attaches them: Always rules go every turn; Auto rules when a mentioned
+ * file matches their globs; Agent rules as a one-line offer (`@rule:name` loads them); Manual only when mentioned.
+ * Disabled rules (settings → Rules) never go.
+ */
+export function readRules(cwd: string, options: { readonly disabled?: readonly string[]; readonly mentioned?: readonly string[] } = {}): string {
+  const disabled = new Set(options.disabled ?? []); const mentioned = options.mentioned ?? [];
+  const parts: string[] = [];
+  for (const r of listRuleFiles(cwd)) {
+    if (disabled.has(r.name) || !r.body) continue;
+    const named = mentioned.includes(`rule:${r.name}`) || mentioned.includes("rules");
+    if (r.kind === "always" || named) parts.push(`# Rule: ${r.name}\n${r.body}`);
+    else if (r.kind === "auto" && r.globs.some((g) => { const re = globToRegExp(g); return mentioned.some((m) => re.test(m.replace(/:\d+-\d+$/, ""))); })) parts.push(`# Rule: ${r.name} (auto-attached for ${r.globs.join(", ")})\n${r.body}`);
+    else if (r.kind === "agent") parts.push(`# Available rule: ${r.name} — ${r.description}. Ask for it with @rule:${r.name} when relevant.`);
   }
   return parts.join("\n\n");
 }
 
-export interface SkillInfo { readonly name: string; readonly description: string }
+/** MCP servers the user switched off in Muster Code (settings → MCP): passed as config overrides, the user's config.toml is untouched. */
+export let disabledMcpServers: readonly string[] = [];
+export function setDisabledMcpServers(names: readonly string[]): void { disabledMcpServers = names; }
+
+export interface SkillInfo { readonly name: string; readonly description: string; readonly path?: string }
 
 /** skills/list → the skills Codex knows for this folder ("/" in the composer). */
 export async function listSkills(cwd?: string): Promise<SkillInfo[]> {
@@ -316,7 +346,7 @@ export async function listSkills(cwd?: string): Promise<SkillInfo[]> {
       }
     };
     walk(raw);
-    return flat.map((s) => ({ name: String(s.name), description: String(s.description ?? s.summary ?? "") }));
+    return flat.map((s) => ({ name: String(s.name), description: String(s.description ?? s.summary ?? ""), ...(typeof s.path === "string" ? { path: s.path } : typeof s.location === "string" ? { path: s.location } : {}) }));
   } catch { return []; }
 }
 
