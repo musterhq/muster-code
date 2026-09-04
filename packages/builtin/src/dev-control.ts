@@ -10,7 +10,7 @@ import { existsSync, unlinkSync } from "node:fs";
 import type { LiveEditController } from "./live-edit.js";
 import { queryCodex } from "./codex.js";
 
-interface Deps { readonly live: LiveEditController; readonly log: (line: string) => void; readonly pane?: { debugState(): Record<string, unknown>; debugInput(text: string): void; debugSend(text: string): void; debugStop(): void; debugEdit(checkpoint: string, text: string): void; debugSuggest(kind: "file" | "skill", query: string, mode?: string): Promise<Record<string, unknown>>; debugThreads(): Promise<Record<string, unknown>>; harness(input: { text: string; mode?: string; newTab?: boolean; access?: string; thread?: string; build?: number[]; buildModel?: string }): Promise<Record<string, unknown>> } }
+interface Deps { readonly live: LiveEditController; readonly log: (line: string) => void; readonly pane?: { debugState(): Record<string, unknown>; debugInput(text: string): void; debugSend(text: string): void; debugStop(): void; debugEdit(checkpoint: string, text: string): void; debugDecide(id: string, decision: string): void; debugRequest(method: string, params: Record<string, unknown>): Promise<Record<string, unknown> | undefined>; debugSuggest(kind: "file" | "skill", query: string, mode?: string): Promise<Record<string, unknown>>; debugThreads(): Promise<Record<string, unknown>>; harness(input: { text: string; mode?: string; newTab?: boolean; access?: string; thread?: string; build?: number[]; buildModel?: string }): Promise<Record<string, unknown>> } }
 
 export function startDevControl(context: vscode.ExtensionContext, deps: Deps): void {
   const path = process.env.MUSTER_CODE_DEV_SOCK;
@@ -73,10 +73,13 @@ async function handle(line: string, deps: Deps): Promise<unknown> {
     }
     case "suggest":
       return { ok: true, ...(await deps.pane?.debugSuggest(message.kind === "skill" ? "skill" : "file", String(message.query ?? ""), String(message.mode ?? "all"))) };
+    case "request":
+      return { ok: true, answer: await deps.pane?.debugRequest(String(message.method), (message.params as Record<string, unknown>) ?? {}) };
     case "pane":
       if (message.input !== undefined) deps.pane?.debugInput(String(message.input));
       if (message.send !== undefined) deps.pane?.debugSend(String(message.send));
       if (message.stop) deps.pane?.debugStop();
+      if (message.decide && typeof message.decide === "object") { const d = message.decide as { id?: string; decision?: string }; deps.pane?.debugDecide(String(d.id ?? ""), String(d.decision ?? "accept")); }
       if (message.edit && typeof message.edit === "object") { const e = message.edit as { checkpoint?: string; text?: string }; deps.pane?.debugEdit(String(e.checkpoint ?? ""), String(e.text ?? "")); }
       return { ok: true, pane: deps.pane?.debugState() ?? null };
     case "threads":

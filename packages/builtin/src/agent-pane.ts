@@ -14,7 +14,9 @@ import type { BrowserPick, BrowserController, BrowserState } from "./browser.js"
 interface ModeInfo { readonly id: string; readonly name: string; readonly icon: string; readonly placeholder: string; readonly description?: string; readonly prompt?: string; readonly readOnly?: boolean; readonly plan?: boolean; readonly board?: boolean; readonly effort?: string; readonly autoFix?: boolean; readonly debug?: boolean; readonly parallel?: boolean; readonly spec?: boolean }
 interface ThreadSettings { mode: string; accessId: string; modelId: string; effortId: string; debugStage?: 0 | 1 | 2 }
 interface PlanCard { title: string; summary: string; todos: { text: string; done: boolean }[]; path?: string; model?: string; modelId?: string }
-type ToolMessage = { kind: "tool"; id: string; title: string; detail: string; output: string; status: string };
+type ToolMessage = { kind: "tool"; id: string; title: string; detail: string; output: string; status: string; tool?: "command" | "mcp" | "search"; exitCode?: number | null; durationMs?: number; cwd?: string };
+/** An approval the provider is waiting on, shown as a card in the chat (Cursor: Run ⏎ / Skip Esc). */
+type ApprovalCard = { id: string; kind: "command" | "patch" | "elicitation"; command: string; cwd?: string; reason?: string; files?: string[] };
 type PaneMessage =
   | { kind: "user"; text: string; checkpoint?: string; steer?: boolean; turnId?: string }
   | { kind: "assistant"; text: string; reasoning: string }
@@ -29,6 +31,7 @@ type ToPane =
   | { type: "browser"; state: BrowserState }
   | { type: "messages"; messages: PaneMessage[] }
   | { type: "user"; text: string; steer?: boolean }
+  | { type: "approval"; approval: ApprovalCard } | { type: "approvalDone"; id: string; decision: string }
   | { type: "start" }
   | { type: "delta"; text: string }
   | { type: "reasoning"; text: string }
@@ -45,7 +48,7 @@ type ToPane =
   | { type: "openModeMenu" }
   | { type: "insert"; text: string };
 type FromPane =
-  | { type: "ready" } | { type: "boot" } | { type: "clientError"; message: string } | { type: "send"; text: string } | { type: "stop" } | { type: "dropQueued"; index: number } | { type: "editMessage"; checkpoint: string; text: string }
+  | { type: "ready" } | { type: "boot" } | { type: "clientError"; message: string } | { type: "send"; text: string } | { type: "stop" } | { type: "dropQueued"; index: number } | { type: "decide"; id: string; decision: string } | { type: "openPath"; path: string; line?: number; endLine?: number } | { type: "insertBlock"; code: string } | { type: "applyBlock"; path: string; code: string; lang?: string } | { type: "editMessage"; checkpoint: string; text: string }
   | { type: "acceptAll" } | { type: "rejectAll" } | { type: "open"; path: string; ifClosed?: boolean }
   | { type: "newAgent" } | { type: "openThread"; id: string } | { type: "closeTab"; id: string } | { type: "activateTab"; id: string }
   | { type: "view"; view: "chat" | "history" | "board" }
@@ -53,7 +56,7 @@ type FromPane =
   | { type: "pin"; id: string; pinned: boolean }
   | { type: "viewPlan" } | { type: "buildPlan"; todos?: number[]; model?: string; newThread?: boolean }
   | { type: "suggest"; kind: "file" | "skill"; query: string; mode?: string; seq?: number } | { type: "slashAction"; id: string }
-  | { type: "probed"; seq?: number; query?: string | null; mode?: string | null; rows: { text: string; sel: boolean; icon: string }[]; chips: { t: string; bad: boolean }[]; marks: { t: string; bad: boolean }[]; title: string } | { type: "restore"; id: string } | { type: "attach" } | { type: "validate"; tokens: string[] } | { type: "command"; id: string } | { type: "redo" }
+  | { type: "probed"; seq?: number; query?: string | null; mode?: string | null; cards?: string[]; rows: { text: string; sel: boolean; icon: string }[]; chips: { t: string; bad: boolean }[]; marks: { t: string; bad: boolean }[]; title: string } | { type: "restore"; id: string } | { type: "attach" } | { type: "validate"; tokens: string[] } | { type: "command"; id: string } | { type: "redo" }
   | { type: "openReview" }
   | { type: "boardAdd"; title: string } | { type: "boardRun"; id: string } | { type: "boardMove"; id: string; column: BoardTask["column"] }
   | { type: "browserEdit"; id: string; kind: "text" | "style"; prop?: string; value: string } | { type: "browserRevert"; id: string; index: number } | { type: "browserApply"; id: string } | { type: "browserTakeControl"; id: string }
@@ -240,7 +243,7 @@ export class AgentPane implements vscode.WebviewViewProvider {
 
   debugState(): Record<string, unknown> {
     const active = this.active();
-    return { probe: this.lastProbe, running: active.running, queue: active.queue ?? [], messages: active.messages.map((m) => m.kind + ((m as { steer?: boolean }).steer ? "*" : "")), checkpoints: [...active.checkpoints.keys()], lastAssistant: [...active.messages].reverse().find((m) => m.kind === "assistant")?.text.slice(0, 160) ?? null, lastError: active.lastError ?? null, resolved: !!this.view, visible: this.view?.visible ?? null, ready: this.readyCount, models: this.models.length, access: this.access.length, loading: this.loading, tabs: this.tabs.length, view: this.paneView, activeMode: this.active().settings.mode };
+    return { probe: this.lastProbe, approvals: [...this.pending.keys()], running: active.running, queue: active.queue ?? [], messages: active.messages.map((m) => m.kind + ((m as { steer?: boolean }).steer ? "*" : "")), checkpoints: [...active.checkpoints.keys()], lastAssistant: [...active.messages].reverse().find((m) => m.kind === "assistant")?.text.slice(0, 160) ?? null, lastError: active.lastError ?? null, resolved: !!this.view, visible: this.view?.visible ?? null, ready: this.readyCount, models: this.models.length, access: this.access.length, loading: this.loading, tabs: this.tabs.length, view: this.paneView, activeMode: this.active().settings.mode };
   }
 
   /** Review a commit (Bugbot on commit): a read-only Ask turn over `git show <sha>` in the pane. */
@@ -261,6 +264,32 @@ export class AgentPane implements vscode.WebviewViewProvider {
     if (!items.length) { void vscode.window.showInformationMessage("Codex reports no plugins or MCP servers for this folder."); return; }
     await vscode.window.showQuickPick(items.map((p) => ({ label: `$(${p.kind === "mcp" ? "server" : "extensions"}) ${p.name}`, description: p.kind === "mcp" ? "MCP server" : "plugin", detail: p.detail })), { placeHolder: "Codex plugins and MCP servers active in this folder", matchOnDetail: true });
   }
+
+  /** A file reference in an answer (path, path:line, Codex citation) opens the file at that line. */
+  private async openPath(path: string, line?: number, endLine?: number): Promise<void> {
+    const cwd = this.cwd(); const raw = path.replace(/^["'\u3010]|["'\u3011]$/g, "");
+    let abs = raw.startsWith("/") ? raw : join(cwd, raw);
+    if (!existsSync(abs)) { const hit = (await vscode.workspace.findFiles(`**/${raw.split("/").pop()}`, "**/{node_modules,.git,dist,build,out}/**", 1))[0]; if (!hit) { void vscode.window.showInformationMessage(`Not found: ${raw}`); return; } abs = hit.fsPath; }
+    const editor = await vscode.window.showTextDocument(vscode.Uri.file(abs), { preview: true, viewColumn: vscode.ViewColumn.One });
+    if (line) { const a = new vscode.Position(Math.max(0, line - 1), 0); const b = new vscode.Position(Math.max(0, (endLine ?? line) - 1), 0); editor.selection = new vscode.Selection(a, b.line > a.line ? editor.document.lineAt(b.line).range.end : a); editor.revealRange(new vscode.Range(a, b), vscode.TextEditorRevealType.InCenter); }
+  }
+
+  // ── approvals as chat cards ──
+  private readonly pending = new Map<string, { resolve: (decision: string) => void; kind: ApprovalCard["kind"] }>();
+  private decide(id: string, decision: string): void {
+    const p = this.pending.get(id); if (!p) return;
+    this.pending.delete(id); p.resolve(decision);
+    this.post({ type: "approvalDone", id, decision });
+  }
+  /** Ask in the chat and wait for the click or the key (⏎ accept, ⇧⏎ accept for session, Esc decline). */
+  private askInChat(card: ApprovalCard): Promise<string> {
+    return new Promise((resolve) => { this.pending.set(card.id, { resolve, kind: card.kind }); this.post({ type: "approval", approval: card }); void vscode.commands.executeCommand(`${AgentPane.viewId}.focus`); });
+  }
+  /** A turn that ends (stopped, failed) must not leave a question hanging. */
+  private settlePending(decision = "decline"): void { for (const id of [...this.pending.keys()]) this.decide(id, decision); }
+  debugDecide(id: string, decision: string): void { this.decide(id, decision); }
+  /** Harness: raise the same server request the provider would (approval / elicitation) and return the answer. */
+  debugRequest(method: string, params: Record<string, unknown>): Promise<Record<string, unknown> | undefined> { return this.approve(method, params); }
 
   stop(): void {
     const tab = this.active();
@@ -511,6 +540,10 @@ export class AgentPane implements vscode.WebviewViewProvider {
       case "clientError": this.output.appendLine(`pane webview error: ${message.message}`); return;
       case "ready": this.readyCount++; this.pushState(); this.post({ type: "messages", messages: this.active().messages }); void this.loadCatalog(); return;
       case "stop": this.stop(); return;
+      case "decide": this.decide(message.id, message.decision); return;
+      case "openPath": await this.openPath(message.path, message.line, message.endLine); return;
+      case "insertBlock": { const editor = vscode.window.activeTextEditor; if (!editor) { void vscode.window.showInformationMessage("Open a file to insert into."); return; } await editor.edit((b) => b.insert(editor.selection.active, message.code)); return; }
+      case "applyBlock": await this.send(`Apply this ${message.lang ?? ""} code block to ${message.path} exactly as written, keeping the rest of the file as is:\n\n\`\`\`${message.lang ?? ""}\n${message.code}\n\`\`\``); return;
       case "dropQueued": { const tab = this.active(); tab.queue?.splice(message.index, 1); this.pushState(); return; }
       case "editMessage": await this.editMessage(message.checkpoint, message.text); return;
       case "acceptAll": await this.live.acceptAll(); return;
@@ -524,7 +557,7 @@ export class AgentPane implements vscode.WebviewViewProvider {
       case "openThread": { const thread = (await this.visibleThreads()).find((t) => t.id === message.id); if (thread) await this.openThread(thread); else void vscode.window.showWarningMessage("That thread belongs to another folder."); return; }
       case "suggest": { const data = await this.suggest(message.kind, message.query, message.mode ?? "all"); this.post({ type: "suggestions", kind: message.kind, ...(message.seq !== undefined ? { seq: message.seq } : {}), mode: data.mode, title: data.title, sections: data.sections }); return; }
       case "slashAction": await this.slashAction(message.id); return;
-      case "probed": this.lastProbe = { seq: message.seq, query: message.query, mode: message.mode, rows: message.rows, chips: message.chips, marks: message.marks, title: message.title }; return;
+      case "probed": this.lastProbe = { seq: message.seq, query: message.query, mode: message.mode, cards: message.cards ?? [], rows: message.rows, chips: message.chips, marks: message.marks, title: message.title }; return;
       case "validate": { const ok: string[] = []; const bad: string[] = []; for (const t of message.tokens) ((await this.tokenResolves(t)) ? ok : bad).push(t); this.post({ type: "validated", ok, bad }); return; }
       case "attach": {
         const picked = await vscode.window.showOpenDialog({ canSelectMany: true, filters: { Images: ["png", "jpg", "jpeg", "gif", "webp"] }, openLabel: "Attach" });
@@ -670,7 +703,7 @@ export class AgentPane implements vscode.WebviewViewProvider {
         this.live.onEvent(method, params);
         const item = (params.item ?? {}) as Record<string, unknown>;
         if (method === "item/started" && (item.type === "commandExecution" || item.type === "mcpToolCall" || item.type === "webSearch")) {
-          const tool: ToolMessage = { kind: "tool", id: String(item.id ?? ""), title: item.type === "commandExecution" ? "Ran" : item.type === "webSearch" ? "Searched" : "Called", detail: String(item.command ?? item.query ?? item.tool ?? item.server ?? ""), output: "", status: "running" };
+          const tool: ToolMessage = { kind: "tool", id: String(item.id ?? ""), tool: item.type === "commandExecution" ? "command" : item.type === "webSearch" ? "search" : "mcp", ...(item.cwd ? { cwd: String(item.cwd) } : {}), title: item.type === "commandExecution" ? "Ran" : item.type === "webSearch" ? "Searched" : "Called", detail: String(item.command ?? item.query ?? item.tool ?? item.server ?? ""), output: "", status: "running" };
           tools.set(tool.id, tool);
           tab.messages.push(tool);
           this.post({ type: "tool", tool });
@@ -681,6 +714,8 @@ export class AgentPane implements vscode.WebviewViewProvider {
           const tool = tools.get(String(item.id))!;
           if (item.type === "commandExecution") void this.live.syncTurnWatch();
           tool.status = String(item.status ?? "completed");
+          if (typeof item.exitCode === "number") tool.exitCode = item.exitCode;
+          if (typeof item.durationMs === "number") tool.durationMs = item.durationMs;
           if (typeof item.aggregatedOutput === "string" && !tool.output) tool.output = item.aggregatedOutput;
           this.post({ type: "tool", tool });
         } else if (method === "item/plan/delta") {
@@ -736,6 +771,7 @@ export class AgentPane implements vscode.WebviewViewProvider {
       this.output.appendLine(`turn threw: ${tab.lastError}`);
       this.post({ type: "done", ok: false, error: tab.lastError });
     } finally {
+      this.settlePending();
       await this.live.syncTurnWatch(true).catch(() => undefined);
       tab.running = false;
       tab.checkpoints.set(checkpointId, this.live.takeCheckpoint());
@@ -836,16 +872,17 @@ export class AgentPane implements vscode.WebviewViewProvider {
   /** Approval and question requests from the provider (Manual approval / Read only): ask in the app, answer on the wire. */
   private async approve(method: string, params: Record<string, unknown>): Promise<Record<string, unknown> | undefined> {
     if (method.endsWith("/requestApproval")) {
-      const what = String(params.command ?? params.reason ?? (Array.isArray(params.changes) ? `edit ${params.changes.length} file(s)` : method));
-      const pick = await vscode.window.showWarningMessage(`Codex wants to ${method.includes("commandExecution") ? "run" : "do"}: ${what}`, "Allow", "Allow for session", "Deny");
-      const decision = pick === "Allow" ? "accept" : pick === "Allow for session" ? "acceptForSession" : "decline";
+      const isCommand = method.includes("commandExecution");
+      const files = Array.isArray(params.changes) ? (params.changes as { path?: string }[]).map((c) => String(c.path ?? "")).filter(Boolean) : undefined;
+      const card: ApprovalCard = { id: String(params.approvalId ?? params.itemId ?? `ap-${Date.now().toString(36)}`), kind: isCommand ? "command" : "patch", command: String(params.command ?? (files?.length ? `Edit ${files.length} file(s)` : params.reason ?? "Apply changes")), ...(params.cwd ? { cwd: String(params.cwd) } : {}), ...(params.reason ? { reason: String(params.reason) } : {}), ...(files ? { files } : {}) };
+      const decision = await this.askInChat(card);
       return { decision };
     }
     if (method === "mcpServer/elicitation/request") {
-      // Computer use and other MCP servers ask for consent here (T3 Code answers the same way).
+      // Computer use and other MCP servers ask for consent here; the card offers Allow / Decline.
       const text = String(params.message ?? params.prompt ?? "An MCP server asks for permission.");
-      const pick = await vscode.window.showWarningMessage(text, "Allow", "Decline");
-      return pick === "Allow" ? { action: "accept", content: {} } : { action: "decline", content: null };
+      const decision = await this.askInChat({ id: `el-${Date.now().toString(36)}`, kind: "elicitation", command: text });
+      return decision === "decline" ? { action: "decline", content: null } : { action: "accept", content: {} };
     }
     if (method === "item/tool/requestUserInput") {
       const questions = (params.questions as { id?: string; header?: string; question?: string; options?: { label?: string }[] }[] | undefined) ?? [];
@@ -989,6 +1026,12 @@ function paneHtml(csp: string, codicon = ""): string {
   .assistant .code .copy:hover { color: var(--fg); }
   .assistant pre { margin: 0; padding: 8px 10px; overflow: auto; font-family: var(--vscode-editor-font-family); font-size: var(--fs-base); line-height: 20px; }
   .assistant a { color: var(--vscode-textLink-foreground); text-decoration: none; }
+  .assistant a.file { color: inherit; cursor: pointer; } .assistant a.file code, .assistant a.file .path { text-decoration: underline dotted color-mix(in srgb, var(--fg) 40%, transparent); text-underline-offset: 3px; } .assistant a.file:hover code, .assistant a.file:hover .path { background: var(--bg-tertiary); }
+  .assistant .cite { display: inline-flex; align-items: center; gap: 3px; height: 18px; padding: 0 5px; border-radius: 4px; border: 1px solid var(--stroke-secondary); font-size: var(--fs-xs); font-family: var(--vscode-editor-font-family); vertical-align: middle; } .assistant .cite .cod { font-size: 11px; width: 12px; height: 12px; }
+  .assistant .code .head .path { font-family: var(--vscode-editor-font-family); color: var(--text-secondary); } .assistant .code .head .spacer { flex: 1; }
+  .assistant .code .head button { margin-left: 6px; color: var(--text-tertiary); font-size: var(--fs-xs); cursor: pointer; } .assistant .code .head button:hover { color: var(--fg); } .assistant .code .head button.apply { color: var(--amber); }
+  .assistant li.task { list-style: none; margin-left: -16px; display: flex; align-items: flex-start; gap: 6px; } .assistant li.task .cod { font-size: 13px; width: 14px; height: 20px; color: var(--text-tertiary); } .assistant li.task.done .cod { color: var(--vscode-charts-green, #7bd88f); } .assistant li.task.done { color: var(--text-tertiary); }
+  .assistant.streaming > :last-child::after { content: ""; display: inline-block; width: 2px; height: 1em; margin-left: 2px; background: var(--fg); vertical-align: -2px; animation: caret 1s steps(2) infinite; } @keyframes caret { 50% { opacity: 0; } }
   .assistant blockquote { margin: 0 0 8px; padding-left: 10px; border-left: 2px solid var(--stroke-primary); color: var(--text-secondary); }
   .assistant table { border-collapse: collapse; margin: 0 0 8px; font-size: var(--fs-base); }
   .assistant th, .assistant td { border: 1px solid var(--stroke-secondary); padding: 3px 8px; text-align: left; }
@@ -1017,6 +1060,16 @@ function paneHtml(csp: string, codicon = ""): string {
   .tool .head .status { margin-left: auto; color: var(--text-tertiary); font-size: var(--fs-xs); }
   .tool pre { display: none; margin: 0; padding: 6px 10px 8px; border-top: 1px solid var(--stroke-tertiary); max-height: 220px; overflow: auto; font-family: var(--vscode-editor-font-family); font-size: var(--fs-sm); line-height: 18px; color: var(--text-secondary); white-space: pre-wrap; }
   .tool.open pre { display: block; }
+  .tool .head .ic { display: inline-flex; } .tool .head .ic .cod { font-size: 13px; width: 14px; height: 14px; color: var(--text-tertiary); }
+  .tool.running .head .t::after { content: ""; display: inline-block; width: 6px; height: 6px; margin-left: 6px; border-radius: 50%; background: var(--amber); box-shadow: 0 0 6px var(--amber); vertical-align: middle; }
+  .tool.failed .head .t, .tool.failed .head .status { color: var(--vscode-charts-red); }
+  .card.approval { margin: 4px 0; border-color: color-mix(in srgb, var(--amber) 45%, transparent); background: var(--vscode-editor-background); }
+  .card.approval .head { display: flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px; font-size: var(--fs-sm); color: var(--text-secondary); border-bottom: 1px solid var(--stroke-tertiary); }
+  .card.approval .head .ic .cod { font-size: 13px; width: 14px; height: 14px; color: var(--amber); } .card.approval .head .t { color: var(--fg); font-weight: 500; } .card.approval .head .hint { margin-left: auto; color: var(--text-tertiary); font-size: var(--fs-xs); }
+  .card.approval .what { margin: 0; padding: 8px 10px; font-family: var(--vscode-editor-font-family); font-size: var(--fs-sm); white-space: pre-wrap; word-break: break-word; max-height: 160px; overflow: auto; }
+  .card.approval .meta { padding: 0 10px 6px; font-size: var(--fs-xs); color: var(--text-tertiary); } .card.approval .meta:empty { display: none; }
+  .card.approval .actions { display: flex; gap: 6px; padding: 6px 10px 8px; border-top: 1px solid var(--stroke-tertiary); } .card.approval .actions kbd { font-family: inherit; margin-left: 6px; opacity: .6; font-size: var(--fs-xs); }
+  .card.approval.decided { border-color: var(--stroke-tertiary); opacity: .8; }
   .plan { padding: 8px 10px 8px; }
   .plan .file { display: flex; align-items: center; gap: 6px; font-size: var(--fs-base); color: var(--text-secondary); margin-bottom: 6px; }
   .plan .file .icon { color: var(--text-tertiary); }
@@ -1214,9 +1267,14 @@ function paneHtml(csp: string, codicon = ""): string {
     more: '<svg viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg>',
     max: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 9V4h5M20 15v5h-5M20 9V4h-5M4 15v5h5"/></svg>',
   };
+  // File references become links: \`path.ts\`, \`src/a.ts:12\`, \`a.ts:12-20\`, bare paths with a slash, and Codex citations 【F:path†L12-L20】.
+  const PATH_RE = /^((?:[\\w.@-]+\\/)*[\\w.@-]+\\.[a-zA-Z0-9]{1,8})(?::(\\d+)(?:-(\\d+))?)?$/;
+  function fileLink(path, line, endLine, label) { return '<a class="file" data-path="' + escape(path) + '"' + (line ? ' data-line="' + line + '"' : "") + (endLine ? ' data-end="' + endLine + '"' : "") + ' title="' + escape(path) + (line ? ":" + line : "") + '">' + label + '</a>'; }
   function inline(t) {
     return escape(t)
-      .replace(/\`([^\`\\n]+)\`/g, "<code>$1</code>")
+      .replace(/\\u3010F:([^\\u2020\\u3011]+)\\u2020L(\\d+)(?:-L(\\d+))?\\u3011/g, (m, p, l1, l2) => fileLink(p, l1, l2, '<span class="cite">' + cod("file") + escape(p.split("/").pop()) + ":" + l1 + (l2 ? "-" + l2 : "") + "</span>"))
+      .replace(/\`([^\`\\n]+)\`/g, (m, c) => { const f = PATH_RE.exec(c); return f && (c.includes("/") || f[2] || /\\.[a-z]{1,5}$/.test(c)) ? fileLink(f[1], f[2], f[3], "<code>" + c + "</code>") : "<code>" + c + "</code>"; })
+      .replace(/(^|[\\s(])((?:[\\w.@-]+\\/)+[\\w.@-]+\\.[a-zA-Z0-9]{1,8}(?::\\d+(?:-\\d+)?)?)(?=$|[\\s,.;:)])/g, (m, pre, ref) => { const f = PATH_RE.exec(ref); return f ? pre + fileLink(f[1], f[2], f[3], ref) : m; })
       .replace(/\\*\\*([^*\\n]+)\\*\\*/g, "<b>$1</b>")
       .replace(/(^|[^*])\\*([^*\\n]+)\\*(?!\\*)/g, "$1<i>$2</i>")
       .replace(/\\[([^\\]]+)\\]\\((https?:[^)\\s]+)\\)/g, '<a href="$2">$1</a>');
@@ -1226,13 +1284,13 @@ function paneHtml(csp: string, codicon = ""): string {
     const flushP = () => { if (para.length) html += "<p>" + inline(para.join(" ")) + "</p>"; para = []; };
     while (i < lines.length) {
       const l = lines[i];
-      const fence = /^\`\`\`(\\w*)\\s*$/.exec(l);
-      if (fence) { flushP(); const lang = fence[1]; const code = []; i++; while (i < lines.length && !/^\`\`\`\\s*$/.test(lines[i])) code.push(lines[i++]); i++;
-        html += '<div class="code"><div class="head"><span>' + escape(lang || "code") + '</span><button class="copy" data-copy>Copy</button></div><pre>' + escape(code.join("\\n")) + "</pre></div>"; continue; }
+      const fence = /^\`\`\`\\s*([\\w+#.-]*)(?:[:\\s]+([^\\s\`]+))?\\s*$/.exec(l);
+      if (fence) { flushP(); const lang = fence[1]; const path = fence[2] && /[\\w.-]+\\.[a-zA-Z0-9]{1,8}$/.test(fence[2]) ? fence[2] : ""; const code = []; i++; while (i < lines.length && !/^\`\`\`\\s*$/.test(lines[i])) code.push(lines[i++]); i++;
+        html += '<div class="code"' + (path ? ' data-path="' + escape(path) + '"' : "") + ' data-lang="' + escape(lang) + '"><div class="head">' + (path ? fileLink(path, "", "", '<span class="path">' + escape(path) + "</span>") : '<span>' + escape(lang || "code") + '</span>') + '<span class="spacer"></span><button class="copy" data-copy>Copy</button>' + (path ? '<button class="apply" data-apply>Apply</button>' : '<button class="apply" data-insert>Insert</button>') + '</div><pre>' + escape(code.join("\\n")) + "</pre></div>"; continue; }
       const h = /^(#{1,3})\\s+(.*)$/.exec(l);
       if (h) { flushP(); html += "<h" + h[1].length + ">" + inline(h[2]) + "</h" + h[1].length + ">"; i++; continue; }
       if (/^\\s*([-*]|\\d+\\.)\\s+/.test(l)) { flushP(); const ordered = /^\\s*\\d+\\./.test(l); const items = []; while (i < lines.length && /^\\s*([-*]|\\d+\\.)\\s+/.test(lines[i])) items.push(lines[i++].replace(/^\\s*([-*]|\\d+\\.)\\s+/, ""));
-        html += (ordered ? "<ol>" : "<ul>") + items.map((t) => "<li>" + inline(t.replace(/^\\[( |x)\\]\\s*/, "")) + "</li>").join("") + (ordered ? "</ol>" : "</ul>"); continue; }
+        html += (ordered ? "<ol>" : "<ul>") + items.map((t) => { const task = /^\\[( |x|X)\\]\\s*/.exec(t); return '<li' + (task ? ' class="task' + (task[1] !== " " ? " done" : "") + '"' : "") + ">" + (task ? cod(task[1] !== " " ? "pass-filled" : "circle-large") : "") + inline(task ? t.slice(task[0].length) : t) + "</li>"; }).join("") + (ordered ? "</ol>" : "</ul>"); continue; }
       if (/^\\s*>/.test(l)) { flushP(); const q = []; while (i < lines.length && /^\\s*>/.test(lines[i])) q.push(lines[i++].replace(/^\\s*>\\s?/, "")); html += "<blockquote>" + inline(q.join(" ")) + "</blockquote>"; continue; }
       if (/^\\s*\\|/.test(l) && /^\\s*\\|/.test(lines[i + 1] || "")) { flushP(); const rows = []; while (i < lines.length && /^\\s*\\|/.test(lines[i])) rows.push(lines[i++]);
         const cells = (r) => r.trim().replace(/^\\||\\|$/g, "").split("|").map((c) => c.trim()); const head = cells(rows[0]); const bodyRows = rows.slice(1).filter((r) => !/^\\s*\\|?\\s*:?-+/.test(r));
@@ -1243,7 +1301,12 @@ function paneHtml(csp: string, codicon = ""): string {
     }
     flushP(); return html;
   }
-  messages.addEventListener("click", (e) => { const b = e.target.closest("[data-copy]"); if (b) { navigator.clipboard.writeText(b.parentElement.nextElementSibling.textContent); b.textContent = "Copied"; setTimeout(() => (b.textContent = "Copy"), 1200); } });
+  messages.addEventListener("click", (e) => {
+    const b = e.target.closest("[data-copy]"); if (b) { navigator.clipboard.writeText(b.parentElement.nextElementSibling.textContent); b.textContent = "Copied"; setTimeout(() => (b.textContent = "Copy"), 1200); return; }
+    const ap = e.target.closest("[data-apply]"); if (ap) { const block = ap.closest(".code"); vscode.postMessage({ type: "applyBlock", path: block.dataset.path, lang: block.dataset.lang, code: block.querySelector("pre").textContent }); ap.textContent = "Applying…"; return; }
+    const ins = e.target.closest("[data-insert]"); if (ins) { const block = ins.closest(".code"); vscode.postMessage({ type: "insertBlock", code: block.querySelector("pre").textContent }); return; }
+    const f = e.target.closest("a.file"); if (f) { e.preventDefault(); vscode.postMessage({ type: "openPath", path: f.dataset.path, line: f.dataset.line ? Number(f.dataset.line) : undefined, endLine: f.dataset.end ? Number(f.dataset.end) : undefined }); }
+  });
   function scroll() { messages.scrollTop = messages.scrollHeight; }
   function buildHuman(text, checkpoint, steer) {
     const el = document.createElement("div"); el.className = "human" + (steer ? " steer" : "");
@@ -1273,11 +1336,40 @@ function paneHtml(csp: string, codicon = ""): string {
   function addAssistant(text) { const el = document.createElement("div"); el.className = "assistant"; el.dataset.raw = text; el.innerHTML = renderMarkdown(text); messages.appendChild(el); body.classList.add("has-messages"); return el; }
   function ensureAssistant() { if (!assistantEl) assistantEl = addAssistant(""); return assistantEl; }
   function ensureThinking() { if (!thinkingEl) { thinkingEl = document.createElement("details"); thinkingEl.className = "thinking"; thinkingEl.innerHTML = "<summary>Thinking</summary><div class=body></div>"; messages.appendChild(thinkingEl); } return thinkingEl; }
+  // Cursor's tool rows: "Running…" while live, then "Ran" (exit 0) / "Exit 1" / "Skipped", duration, output on click.
   function toolEl(tool) {
     let el = document.getElementById("tool-" + tool.id);
-    if (!el) { el = document.createElement("div"); el.className = "card tool"; el.id = "tool-" + tool.id; el.innerHTML = '<div class="head"><span class="t"></span><span class="cmd"></span><span class="status"></span></div><pre></pre>'; el.querySelector(".head").addEventListener("click", () => el.classList.toggle("open")); messages.appendChild(el); body.classList.add("has-messages"); }
-    el.querySelector(".t").textContent = tool.title; el.querySelector(".cmd").textContent = tool.detail; el.querySelector(".status").textContent = tool.status === "running" ? "Running…" : tool.status; el.querySelector("pre").textContent = tool.output; scroll();
+    if (!el) { el = document.createElement("div"); el.className = "card tool" + (tool.tool ? " " + tool.tool : ""); el.id = "tool-" + tool.id; el.innerHTML = '<div class="head"><span class="ic"></span><span class="t"></span><span class="cmd"></span><span class="status"></span></div><pre></pre>'; el.querySelector(".head").addEventListener("click", () => el.classList.toggle("open")); el.querySelector(".ic").innerHTML = cod(tool.tool === "command" ? "terminal" : tool.tool === "search" ? "globe" : "plug"); messages.appendChild(el); body.classList.add("has-messages"); }
+    const running = tool.status === "running" || tool.status === "inProgress";
+    const failed = tool.status === "failed" || (typeof tool.exitCode === "number" && tool.exitCode !== 0);
+    const title = tool.tool === "command" ? (running ? "Running" : tool.status === "declined" ? "Skipped" : failed ? "Failed" : "Ran") : tool.tool === "search" ? (running ? "Searching" : "Searched") : (running ? "Calling" : "Called");
+    const dur = typeof tool.durationMs === "number" ? (tool.durationMs >= 1000 ? (tool.durationMs / 1000).toFixed(1) + "s" : tool.durationMs + "ms") : "";
+    el.classList.toggle("running", running); el.classList.toggle("failed", failed);
+    el.querySelector(".t").textContent = title; el.querySelector(".cmd").textContent = tool.detail; el.querySelector(".cmd").title = (tool.cwd ? tool.cwd + " $ " : "") + tool.detail;
+    el.querySelector(".status").textContent = running ? "…" : [typeof tool.exitCode === "number" && tool.exitCode !== 0 ? "exit " + tool.exitCode : "", dur].filter(Boolean).join(" · ");
+    el.querySelector("pre").textContent = tool.output; if (failed && tool.output) el.classList.add("open"); scroll();
   }
+  // Approval cards (Cursor: the pending shell tool decision — ⏎ Run, ⇧⏎ Run and allow for session, Esc Skip).
+  const approvals = new Map();
+  function approvalEl(a) {
+    const el = document.createElement("div"); el.className = "card approval " + a.kind; el.id = "approval-" + a.id;
+    const head = a.kind === "command" ? "Run command" : a.kind === "patch" ? "Apply changes" : "Permission request";
+    el.innerHTML = '<div class="head"><span class="ic"></span><span class="t"></span><span class="hint">waiting for you</span></div><pre class="what"></pre><div class="meta"></div><div class="actions"><button class="btn primary run"></button><button class="btn text session"></button><button class="btn text skip"></button></div>';
+    el.querySelector(".ic").innerHTML = cod(a.kind === "command" ? "terminal" : a.kind === "patch" ? "file-code" : "plug"); el.querySelector(".t").textContent = head;
+    el.querySelector(".what").textContent = a.kind === "patch" && a.files && a.files.length ? a.files.join("\\n") : a.command;
+    el.querySelector(".meta").textContent = [a.cwd ? "in " + a.cwd : "", a.reason || ""].filter(Boolean).join(" · ");
+    el.querySelector(".run").innerHTML = (a.kind === "command" ? "Run" : a.kind === "patch" ? "Apply" : "Allow") + '<kbd>⏎</kbd>';
+    el.querySelector(".session").innerHTML = 'Allow for session<kbd>⇧⏎</kbd>'; if (a.kind === "elicitation") el.querySelector(".session").remove();
+    el.querySelector(".skip").innerHTML = (a.kind === "elicitation" ? "Decline" : "Skip") + '<kbd>esc</kbd>';
+    el.querySelector(".run").addEventListener("click", () => decide(a.id, "accept")); const ses = el.querySelector(".session"); if (ses) ses.addEventListener("click", () => decide(a.id, "acceptForSession")); el.querySelector(".skip").addEventListener("click", () => decide(a.id, "decline"));
+    approvals.set(a.id, el); messages.appendChild(el); body.classList.add("has-messages"); body.classList.add("pending"); scroll();
+  }
+  function decide(id, decision) { if (!approvals.has(id)) return; vscode.postMessage({ type: "decide", id, decision }); }
+  function approvalDone(id, decision) {
+    const el = approvals.get(id); approvals.delete(id); if (!approvals.size) body.classList.remove("pending"); if (!el) return;
+    el.classList.add("decided"); el.querySelector(".actions").remove(); el.querySelector(".hint").textContent = decision === "decline" ? "skipped" : decision === "acceptForSession" ? "allowed for the session" : "approved";
+  }
+  function firstApproval() { return approvals.size ? [...approvals.keys()][0] : null; }
   let planSel = new Set(), planExpanded = false, planModel = null, planCardData = null;
   function buildPlan(newThread) {
     if (!planCardData) return;
@@ -1486,7 +1578,7 @@ function paneHtml(csp: string, codicon = ""): string {
   // @ mentions and / commands — Cursor's typeahead: an empty state with recent files and navigation rows into modes
   // (Files & Folders, Past Chats, Docs, Terminals, Commits), one "Results" list while typing, highlighted matches,
   // ↑/↓, Enter/Tab, → into a mode, Backspace out of it, Escape.
-  const COD = { edit: 0xea73, folder: 0xea83, "comment-discussion": 0xeac7, "git-branch": 0xec6f, "git-commit": 0xeafc, terminal: 0xea85, globe: 0xeb01, book: 0xeaa4, browser: 0xeaae, "chevron-right": 0xeab6, "chevron-left": 0xeab5, close: 0xea76, mention: 0xeb1f, sparkle: 0xec10, history: 0xea82, tools: 0xeb6d, file: 0xea7b, "symbol-method": 0xea8c, search: 0xea6d, refresh: 0xeb37, "chat-sparkle": 0xec4f, link: 0xeb15, plug: 0xeb2d, extensions: 0xeae6, checklist: 0xeab3, "circle-slash": 0xeabd, robot: 0xec20, "git-pull-request": 0xea64, comment: 0xea6b, note: 0xeb26, "file-code": 0xeae9, play: 0xeb2c };
+  const COD = { edit: 0xea73, "pass-filled": 0xebb3, "circle-large": 0xebb4, folder: 0xea83, "comment-discussion": 0xeac7, "git-branch": 0xec6f, "git-commit": 0xeafc, terminal: 0xea85, globe: 0xeb01, book: 0xeaa4, browser: 0xeaae, "chevron-right": 0xeab6, "chevron-left": 0xeab5, close: 0xea76, mention: 0xeb1f, sparkle: 0xec10, history: 0xea82, tools: 0xeb6d, file: 0xea7b, "symbol-method": 0xea8c, search: 0xea6d, refresh: 0xeb37, "chat-sparkle": 0xec4f, link: 0xeb15, plug: 0xeb2d, extensions: 0xeae6, checklist: 0xeab3, "circle-slash": 0xeabd, robot: 0xec20, "git-pull-request": 0xea64, comment: 0xea6b, note: 0xeb26, "file-code": 0xeae9, play: 0xeb2c };
   const cod = (name, cls) => '<span class="cod ' + (cls || "") + '">' + String.fromCodePoint(COD[name] || COD.file) + '</span>';
   const BADGE = { ts: "#519aba", tsx: "#519aba", js: "#cbcb41", jsx: "#cbcb41", mjs: "#cbcb41", cjs: "#cbcb41", json: "#cbcb41", md: "#519aba", mdx: "#519aba", css: "#a074c4", scss: "#f55385", html: "#e37933", py: "#519aba", go: "#519aba", rs: "#e37933", sh: "#4d5a5e", zsh: "#4d5a5e", yml: "#a074c4", yaml: "#a074c4", toml: "#8b949e", svg: "#f55385", png: "#f55385", jpg: "#f55385", swift: "#e37933", java: "#cc3e44", rb: "#cc3e44", sql: "#519aba", txt: "#8b949e", lock: "#8b949e" };
   const badge = (ext) => { ext = String(ext || "").toLowerCase(); const color = BADGE[ext] || "#8b949e"; return '<span class="ic badge" style="--badge:' + color + '">' + escape((ext || "file").slice(0, 4).toUpperCase()) + '</span>'; };
@@ -1537,8 +1629,14 @@ function paneHtml(csp: string, codicon = ""): string {
       if (e.key === "Backspace" && suggest.query === "" && suggest.mode !== "all") { e.preventDefault(); setMode("all"); return; }
       if (e.key === "Escape") { closeSuggest(); return; }
     }
+    const pendingId = firstApproval();
+    if (pendingId && !input.value.trim()) {
+      if (e.key === "Enter" && !e.metaKey && !e.ctrlKey) { e.preventDefault(); decide(pendingId, e.shiftKey ? "acceptForSession" : "accept"); return; }
+      if (e.key === "Escape") { e.preventDefault(); decide(pendingId, "decline"); return; }
+    }
     if (e.key === "Enter" && !e.shiftKey && !e.metaKey && !e.ctrlKey) { e.preventDefault(); send(); }
   });
+  document.addEventListener("keydown", (e) => { if (e.target === input) return; const id = firstApproval(); if (!id) return; if (e.key === "Enter" && !e.metaKey && !e.ctrlKey) { e.preventDefault(); decide(id, e.shiftKey ? "acceptForSession" : "accept"); } else if (e.key === "Escape") { e.preventDefault(); decide(id, "decline"); } });
   $("send").addEventListener("click", send);
   $("attach").addEventListener("click", () => vscode.postMessage({ type: "attach" }));
   $("stop").addEventListener("click", () => vscode.postMessage({ type: "stop" }));
@@ -1594,19 +1692,21 @@ function paneHtml(csp: string, codicon = ""): string {
     else if (m.type === "user") { assistantEl = thinkingEl = null; addHuman(m.text, m.checkpoint, m.steer); if (state) renderState(); }
     else if (m.type === "start") { body.classList.add("running"); }
     else if (m.type === "reasoning") { const t = ensureThinking(); t.querySelector(".body").textContent += m.text; scroll(); }
-    else if (m.type === "delta") { const a = ensureAssistant(); a.dataset.raw += m.text; a.innerHTML = renderMarkdown(a.dataset.raw); scroll(); }
+    else if (m.type === "delta") { const a = ensureAssistant(); a.classList.add("streaming"); a.dataset.raw += m.text; a.innerHTML = renderMarkdown(a.dataset.raw); scroll(); }
     else if (m.type === "tool") { toolEl(m.tool); }
+    else if (m.type === "approval") { approvalEl(m.approval); }
+    else if (m.type === "approvalDone") { approvalDone(m.id, m.decision); }
     else if (m.type === "plan") { planCard(m.card); }
     else if (m.type === "edit") { editCard(m.card); }
     else if (m.type === "review") { renderReview(m.files); }
     else if (m.type === "threads") { threads = m.items; renderHistory(); }
     else if (m.type === "board") { renderBoard(m.columns); }
     else if (m.type === "suggestions") { renderSuggestions(m); }
-    else if (m.type === "setInput") { input.focus(); input.value = m.text; input.setSelectionRange(m.text.length, m.text.length); input.dispatchEvent(new Event("input")); setTimeout(() => vscode.postMessage({ type: "probed", seq: suggestSeq, query: suggest ? suggest.query : null, mode: suggest ? suggest.mode : null, title: menu.classList.contains("typeahead") ? (menu.querySelector(".back span") || {}).textContent || "" : "", rows: [...menu.querySelectorAll(".typeahead .row, .row")].filter((r) => menu.classList.contains("open")).map((r) => ({ text: (r.querySelector(".text") || {}).textContent || "", sel: r.classList.contains("sel"), icon: (r.querySelector(".ic, .cod") || {}).className || "" })), chips: [...$("ctxrow").querySelectorAll(".ctx:not(.add)")].map((e) => ({ t: e.title, bad: e.classList.contains("bad") })), marks: [...$("backdrop").querySelectorAll("mark")].map((e) => ({ t: e.textContent, bad: e.classList.contains("bad") })) }), 700); }
+    else if (m.type === "setInput") { input.focus(); input.value = m.text; input.setSelectionRange(m.text.length, m.text.length); input.dispatchEvent(new Event("input")); setTimeout(() => vscode.postMessage({ type: "probed", seq: suggestSeq, query: suggest ? suggest.query : null, mode: suggest ? suggest.mode : null, title: menu.classList.contains("typeahead") ? (menu.querySelector(".back span") || {}).textContent || "" : "", rows: [...menu.querySelectorAll(".typeahead .row, .row")].filter((r) => menu.classList.contains("open")).map((r) => ({ text: (r.querySelector(".text") || {}).textContent || "", sel: r.classList.contains("sel"), icon: (r.querySelector(".ic, .cod") || {}).className || "" })), chips: [...$("ctxrow").querySelectorAll(".ctx:not(.add)")].map((e) => ({ t: e.title, bad: e.classList.contains("bad") })), cards: [...messages.querySelectorAll(".card")].map((e) => e.className + " | " + ((e.querySelector(".t") || {}).textContent || "") + " | " + ((e.querySelector(".hint, .status") || {}).textContent || "")), marks: [...$("backdrop").querySelectorAll("mark")].map((e) => ({ t: e.textContent, bad: e.classList.contains("bad") })) }), 700); }
     else if (m.type === "validated") { for (const t of m.ok) { tokenOk.add(t); tokenBad.delete(t); } for (const t of m.bad) { tokenBad.add(t); tokenOk.delete(t); } renderTokens(); }
     else if (m.type === "openModeMenu") { openMenu("mode", $("mode-pill")); }
     else if (m.type === "insert") { const at = input.selectionStart; input.value = input.value.slice(0, at) + m.text + input.value.slice(at); input.setSelectionRange(at + m.text.length, at + m.text.length); autosize(); input.focus(); }
-    else if (m.type === "done") { body.classList.remove("running"); if (thinkingEl) thinkingEl.querySelector("summary").textContent = "Thought"; if (!m.ok) { const e = document.createElement("div"); e.className = "error"; e.textContent = m.error || "Failed"; messages.appendChild(e); } assistantEl = thinkingEl = null; scroll(); }
+    else if (m.type === "done") { body.classList.remove("running"); document.querySelectorAll(".assistant.streaming").forEach((a) => a.classList.remove("streaming")); if (thinkingEl) thinkingEl.querySelector("summary").textContent = "Thought"; if (!m.ok) { const e = document.createElement("div"); e.className = "error"; e.textContent = m.error || "Failed"; messages.appendChild(e); } assistantEl = thinkingEl = null; scroll(); }
   });
   autosize();
   vscode.postMessage({ type: "ready" });

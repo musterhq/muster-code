@@ -146,7 +146,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // ── Live edits (Cursor-style streaming inline diffs) ──
   const live = new LiveEditController(workspaceCwd, (line) => output.appendLine(line));
   live.register(context);
-  startDevControl(context, { live, log: (line) => output.appendLine(line), pane: { debugState: () => pane.debugState(), debugInput: (text) => pane.debugInput(text), debugSend: (text) => pane.debugSend(text), debugStop: () => pane.debugStop(), debugEdit: (cp, text) => pane.debugEdit(cp, text), debugSuggest: (kind, query, mode) => pane.debugSuggest(kind, query, mode), debugThreads: () => pane.debugThreads(), harness: (input) => pane.harness(input) } });
+  startDevControl(context, { live, log: (line) => output.appendLine(line), pane: { debugState: () => pane.debugState(), debugInput: (text) => pane.debugInput(text), debugSend: (text) => pane.debugSend(text), debugStop: () => pane.debugStop(), debugEdit: (cp, text) => pane.debugEdit(cp, text), debugDecide: (id, d) => pane.debugDecide(id, d), debugRequest: (m, p) => pane.debugRequest(m, p), debugSuggest: (kind, query, mode) => pane.debugSuggest(kind, query, mode), debugThreads: () => pane.debugThreads(), harness: (input) => pane.harness(input) } });
 
   // ── The Agent pane (secondary sidebar) — the Cursor-standard surface ──
   const pane = new AgentPane(context, output, live);
