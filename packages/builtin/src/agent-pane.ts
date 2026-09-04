@@ -1274,7 +1274,7 @@ function paneHtml(csp: string, codicon = ""): string {
   </div>
   <div class="view" id="history"><input id="hsearch" placeholder="Search threads"><div id="hlist"></div></div>
   <div class="view" id="board"><input id="badd" placeholder="Add a task to the board and press Enter"><div id="bcols"></div></div>
-<script>const vscode = acquireVsCodeApi(); vscode.postMessage({ type: "boot" });</script>
+<script>const vscode = acquireVsCodeApi(); vscode.postMessage({ type: "boot" }); window.addEventListener("error", (e) => vscode.postMessage({ type: "clientError", message: String(e.message) + " @" + e.lineno + ":" + e.colno }));</script>
 <script>
   window.addEventListener("error", (e) => vscode.postMessage({ type: "clientError", message: String(e.message) + " @" + e.lineno + ":" + e.colno }));
   window.addEventListener("unhandledrejection", (e) => vscode.postMessage({ type: "clientError", message: "unhandled: " + String(e.reason) }));
@@ -1584,21 +1584,21 @@ function paneHtml(csp: string, codicon = ""): string {
       else if (body.startsWith("git:")) { icon = cod("git-branch"); label = body === "git:branch" ? "Branch" : "Working Tree"; }
       else if (body.startsWith("terminal")) { icon = cod("terminal"); label = body.includes(":") ? body.slice(9) : "Terminal"; }
       else if (body.startsWith("docs:")) { icon = cod("book"); label = body.slice(5); }
-      else if (body.startsWith("link:") || /^https?:\/\//.test(body)) { icon = cod("link"); label = body.replace(/^link:/, "").replace(/^https?:\/\//, "").slice(0, 40); }
+      else if (body.startsWith("link:") || /^https?:\\/\\//.test(body)) { icon = cod("link"); label = body.replace(/^link:/, "").replace(/^https?:\\/\\//, "").slice(0, 40); }
       else if (body.startsWith("code:") || body.startsWith("symbol:")) { icon = cod("symbol-method"); label = body.slice(body.indexOf(":") + 1); }
       else if (body === "rules" || body.startsWith("rule:")) { icon = cod("note"); label = body === "rules" ? "Rules" : body.slice(5); }
       else if (body === "git:pr") { icon = cod("git-pull-request"); label = "Pull Request"; }
-      else if (body.startsWith("folder:") || body.endsWith("/")) { icon = cod("folder"); label = body.replace(/^folder:/, "").replace(/\/$/, "").split("/").pop() || body; }
+      else if (body.startsWith("folder:") || body.endsWith("/")) { icon = cod("folder"); label = body.replace(/^folder:/, "").replace(/\\/$/, "").split("/").pop() || body; }
       else if (body.startsWith("chat:")) { icon = cod("comment-discussion"); label = "Past chat"; }
       else { const name = body.replace(/:\\d+-\\d+$/, "").split("/").pop() || body; icon = name.includes(".") ? badge(name.split(".").pop()) : cod("folder"); label = name + (/:\\d+-\\d+$/.test(body) ? body.slice(body.lastIndexOf(":")) : ""); }
       chip.innerHTML = '<span class="ci">' + icon + '</span><span class="n">' + escape(label) + '</span><span class="x" title="Remove">' + String.fromCodePoint(COD.close) + '</span>';
-      if (t.startsWith("@") && !/^(browser|web|terminal|git:|docs:|chat:|image:|link:|code:|symbol:|rules$|rule:|folder:|https?:)/.test(body) && !tokenBad.has(t)) { chip.classList.add("openable"); chip.querySelector(".n").addEventListener("click", () => { const range = /:(\d+)-(\d+)$/.exec(body); vscode.postMessage({ type: "openPath", path: body.replace(/:\d+-\d+$/, "").replace(/\/$/, ""), line: range ? Number(range[1]) : undefined, endLine: range ? Number(range[2]) : undefined }); }); }
+      if (t.startsWith("@") && !/^(browser|web|terminal|git:|docs:|chat:|image:|link:|code:|symbol:|rules$|rule:|folder:|https?:)/.test(body) && !tokenBad.has(t)) { chip.classList.add("openable"); chip.querySelector(".n").addEventListener("click", () => { const range = /:(\\d+)-(\\d+)$/.exec(body); vscode.postMessage({ type: "openPath", path: body.replace(/:\\d+-\\d+$/, "").replace(/\\/$/, ""), line: range ? Number(range[1]) : undefined, endLine: range ? Number(range[2]) : undefined }); }); }
       chip.querySelector(".x").addEventListener("click", () => { const re = new RegExp("(^|\\\\s)" + t.replace(/[.*+?^\${}()|[\\]\\\\/]/g, "\\\\$&") + "(?=\\\\s|$)"); input.value = input.value.replace(re, "$1").replace(/  +/g, " "); autosize(); input.focus(); });
       row.appendChild(chip);
     }
     // Cursor: the active editor's file as a dashed suggestion pill; click to add it.
-    const cur = state && state.currentFile; const curTok = cur ? "@" + cur : null;
-    if (curTok && !seen.has(curTok)) { const sug = document.createElement("span"); sug.className = "ctx suggestion"; sug.title = "Add the current file: " + cur; const nm = cur.split("/").pop(); sug.innerHTML = '<span class="ci">' + (nm.includes(".") ? badge(nm.split(".").pop()) : cod("file")) + '</span><span class="n">' + escape(nm) + '</span>'; sug.addEventListener("click", () => { const at = input.selectionStart; const pre = input.value.slice(0, at); const sp = pre && !/\s$/.test(pre) ? " " : ""; input.value = pre + sp + curTok + " " + input.value.slice(at); const c = (pre + sp + curTok + " ").length; input.setSelectionRange(c, c); input.focus(); input.dispatchEvent(new Event("input")); }); row.appendChild(sug); }
+    let cur = null; try { cur = state && state.currentFile; } catch { cur = null; } const curTok = cur ? "@" + cur : null;
+    if (curTok && !seen.has(curTok)) { const sug = document.createElement("span"); sug.className = "ctx suggestion"; sug.title = "Add the current file: " + cur; const nm = cur.split("/").pop(); sug.innerHTML = '<span class="ci">' + (nm.includes(".") ? badge(nm.split(".").pop()) : cod("file")) + '</span><span class="n">' + escape(nm) + '</span>'; sug.addEventListener("click", () => { const at = input.selectionStart; const pre = input.value.slice(0, at); const sp = pre && !/\\s$/.test(pre) ? " " : ""; input.value = pre + sp + curTok + " " + input.value.slice(at); const c = (pre + sp + curTok + " ").length; input.setSelectionRange(c, c); input.focus(); input.dispatchEvent(new Event("input")); }); row.appendChild(sug); }
     const toks = [...seen].filter((t) => !tokenOk.has(t) && !tokenBad.has(t));
     if (toks.length) vscode.postMessage({ type: "validate", tokens: toks });
   }
