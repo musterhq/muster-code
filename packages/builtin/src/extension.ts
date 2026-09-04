@@ -286,7 +286,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // The browser as agent tools: Codex launches our MCP shim, which calls back into this host over a socket.
   const browserTools = new BrowserToolServer(browser, () => browser.activeEditorBrowser() ?? pane.activeBrowserId(), (url, headless) => { if (headless) return browser.open(url, "headless"); pane.openBrowserTab(url); return browser.list().at(-1); }, (line) => output.appendLine(line));
   browserTools.start(joinPath(context.extensionPath, "browser-mcp.js")); context.subscriptions.push(browserTools);
-  setBrowserMcp({ command: browserTools.launcherPath, args: [], env: {} });
+  setBrowserMcp({ command: browserTools.launcherPath, args: [], env: {}, mcpConfig: browserTools.mcpConfigPath });
   turnHooks.start = () => browserTools.turnStarted(); turnHooks.end = () => browserTools.turnEnded();
   output.appendLine(`browser tools listening on ${browserTools.socketPath} (shim: ${browserTools.launcherPath})`);
   context.subscriptions.push(vscode.commands.registerCommand("muster.browser.openTab", async (url?: string) => { const target = typeof url === "string" ? url : await vscode.window.showInputBox({ prompt: "Open Browser", value: browser.defaultUrl(), placeHolder: "Enter URL or search..." }); if (!target) return; if (config().get<string>("browser.location", "editor") === "pane") pane.openBrowserTab(target); else browser.open(target, "editor"); }));

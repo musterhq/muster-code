@@ -52,6 +52,8 @@ export class BrowserToolServer implements vscode.Disposable {
   readonly socketPath = join(tmpdir(), `muster-browser-${process.pid}.sock`);
   /** Launcher Codex runs as the MCP server command: environment baked in, so it works however Codex (or its exec runtime) spawns it. */
   readonly launcherPath = join(tmpdir(), `muster-browser-${process.pid}.sh`);
+  /** Claude Code's `--mcp-config` pointing at the same launcher. */
+  readonly mcpConfigPath = join(tmpdir(), `muster-browser-${process.pid}.mcp.json`);
   private server: Server | undefined;
   private userControl = false;
 
@@ -71,6 +73,7 @@ export class BrowserToolServer implements vscode.Disposable {
     const q = (s: string) => `'${s.replace(/'/g, "'\\''")}'`;
     writeFileSync(this.launcherPath, `#!/bin/sh\n# Muster browser MCP shim (per IDE window). Electron runs as Node here; the socket leads back to the IDE.\nexport ELECTRON_RUN_AS_NODE=1\nexport MUSTER_BROWSER_SOCK=${q(this.socketPath)}\nexec ${q(process.execPath)} ${q(shimPath)} "$@"\n`);
     chmodSync(this.launcherPath, 0o755);
+    writeFileSync(this.mcpConfigPath, JSON.stringify({ mcpServers: { muster_browser: { command: this.launcherPath, args: [] } } }, null, 2));
     this.server = createServer((conn) => {
       createInterface({ input: conn }).on("line", async (line) => {
         let m: { id: number; tool: string; args?: Record<string, unknown> };
@@ -85,7 +88,7 @@ export class BrowserToolServer implements vscode.Disposable {
     this.server.listen(this.socketPath);
   }
 
-  dispose(): void { this.server?.close(); for (const p of [this.socketPath, this.launcherPath]) { try { unlinkSync(p); } catch { /* gone */ } } }
+  dispose(): void { this.server?.close(); for (const p of [this.socketPath, this.launcherPath, this.mcpConfigPath]) { try { unlinkSync(p); } catch { /* gone */ } } }
   turnStarted(): void { this.userControl = false; }
   turnEnded(): void { for (const t of this.browser.list()) if (t.driving) this.browser.setDriving(t.id, false); }
 

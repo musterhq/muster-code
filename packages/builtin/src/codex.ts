@@ -83,8 +83,8 @@ export async function readHistory(thread: CodexThread): Promise<readonly CodexTr
 
 /** One turn on an existing thread (or a new one when threadId is undefined). */
 // The Muster browser as MCP tools for the agent (browser-mcp.js), launched by the app-server process itself.
-let browserMcp: { command: string; args: string[]; env: Record<string, string> } | null = null;
-export function setBrowserMcp(config: { command: string; args: string[]; env: Record<string, string> } | null): void { browserMcp = config; }
+let browserMcp: { command: string; args: string[]; env: Record<string, string>; mcpConfig?: string } | null = null;
+export function setBrowserMcp(config: { command: string; args: string[]; env: Record<string, string>; mcpConfig?: string } | null): void { browserMcp = config; }
 /** Around every agent turn: the browser lock banner and "Take control" reset live here. */
 export const turnHooks: { start?: () => void; end?: () => void } = {};
 const BROWSER_NOTE = "The IDE has a built-in browser tab that the user is looking at. Whenever you need a browser (\"open the site\", \"check the page\", \"click\", reproducing or verifying UI work, reading console errors), use the muster_browser MCP tools — browser_navigate, browser_snapshot, browser_click, browser_type, browser_press_key, browser_hover, browser_select_option, browser_screenshot, browser_console_messages, browser_evaluate, browser_wait_for, browser_go_back, browser_reload, browser_tabs — and not other browser automation or computer-use tools unless the user explicitly asks for those. Flow: browser_navigate, read the snapshot, act on the [ref=eN] handles, re-snapshot.";
@@ -320,7 +320,8 @@ export async function listModels(cwd?: string, claudeModels: readonly string[] =
 /** A Claude Code turn through muster core (headless CLI), shaped like a Codex turn for the pane. */
 export async function runClaudeTurn(input: { readonly prompt: string; readonly cwd: string; readonly model: string; readonly effort?: string; readonly sessionId?: string; readonly resume?: boolean; readonly handlers: CodexTurnHandlers }): Promise<CodexTurnResult> {
   const effort = input.effort && ["low", "medium", "high", "xhigh", "max"].includes(input.effort) ? (input.effort as "low" | "medium" | "high" | "xhigh" | "max") : undefined;
-  const raw = (await runClaudeCode({ prompt: input.prompt, cwd: input.cwd, model: input.model, ...(effort ? { effort } : {}), ...(input.sessionId ? { sessionId: input.sessionId, resume: input.resume === true } : {}) })) as unknown as Record<string, unknown>;
+  // The browser tools reach Claude turns through Claude Code's own MCP config; the note tells it they exist.
+  const raw = (await runClaudeCode({ prompt: input.prompt, cwd: input.cwd, model: input.model, ...(effort ? { effort } : {}), ...(input.sessionId ? { sessionId: input.sessionId, resume: input.resume === true } : {}), ...(browserMcp?.mcpConfig ? { mcpConfig: browserMcp.mcpConfig, allowedTools: ["mcp__muster_browser"], systemPrompt: BROWSER_NOTE } : {}) })) as unknown as Record<string, unknown>;
   const text = String(raw.text ?? raw.output ?? raw.finalMessage ?? raw.response ?? "");
   if (text) input.handlers.onDelta(text);
   const failed = raw.status === "failed" || raw.ok === false;
