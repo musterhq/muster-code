@@ -23,7 +23,7 @@ type PaneMessage =
   | ToolMessage
   | { kind: "plan"; card: PlanCard };
 interface RedoState { checkpoint: Checkpoint; messages: PaneMessage[] }
-interface Tab { id: string; name: string; kind?: "chat" | "browser"; browserId?: string; thread?: CodexThread; messages: PaneMessage[]; settings: ThreadSettings; plan?: PlanCard; claudeSession?: string; running: boolean; checkpoints: Map<string, Checkpoint>; redo?: RedoState; autoFixed?: boolean; queue?: string[]; lastError?: string }
+interface Tab { id: string; name: string; kind?: "chat" | "browser"; browserId?: string; thread?: CodexThread; messages: PaneMessage[]; settings: ThreadSettings; plan?: PlanCard; claudeSession?: string; running: boolean; checkpoints: Map<string, Checkpoint>; redo?: RedoState; autoFixed?: boolean; queue?: string[]; pendingRevert?: { turnId?: string; turns: number }; lastError?: string }
 interface BoardTask { id: string; title: string; column: "backlog" | "progress" | "review" | "done"; threadId?: string; createdAt: number }
 
 type ToPane =
@@ -317,15 +317,18 @@ export class AgentPane implements vscode.WebviewViewProvider {
   }
 
   /** Make the provider forget the turn at `at` and everything after it: `thread/revert` (paginated threads) or `thread/rollback` (legacy). */
-  private async forgetTurnsFrom(tab: Tab, at: number): Promise<void> {
-    if (!tab.thread) return;
+  private revertRecord(tab: Tab, at: number): { turnId?: string; turns: number } {
     const first = tab.messages[at]; const turns = tab.messages.slice(at).filter((m) => m.kind === "user" && !m.steer).length;
-    if (!turns) return;
+    return { ...(first?.kind === "user" && first.turnId ? { turnId: first.turnId } : {}), turns };
+  }
+  private async forgetTurns(tab: Tab, rec: { turnId?: string; turns: number }): Promise<void> {
+    if (!tab.thread || !rec.turns) return;
     let ok = false; let how = "";
-    if (first?.kind === "user" && first.turnId) { ok = await revertThread(tab.id, tab.thread.id, first.turnId, this.cwd()); how = `revert before ${first.turnId.slice(0, 8)}`; }
-    if (!ok) { ok = await rollbackThread(tab.id, tab.thread.id, turns, this.cwd()); how += `${how ? ", then " : ""}rollback ${turns}`; }
+    if (rec.turnId) { ok = await revertThread(tab.id, tab.thread.id, rec.turnId, this.cwd()); how = `revert before ${rec.turnId.slice(0, 8)}`; }
+    if (!ok) { ok = await rollbackThread(tab.id, tab.thread.id, rec.turns, this.cwd()); how += `${how ? ", then " : ""}rollback ${rec.turns}`; }
     this.output.appendLine(`thread history: ${how} → ${ok}${ok ? "" : ` (${lastRollbackError})`}`);
   }
+  private forgetTurnsFrom(tab: Tab, at: number): Promise<void> { return this.forgetTurns(tab, this.revertRecord(tab, at)); }
 
   /** Cursor: edit a sent message → the workspace goes back to that point, the thread forgets the later turns, the text is resent. */
   private async editMessage(checkpointId: string, text: string): Promise<void> {
@@ -587,7 +590,8 @@ export class AgentPane implements vscode.WebviewViewProvider {
         const { changed, inverse } = await this.revertTo(tab, at < 0 ? tab.messages.length : at);
         if (!tab.redo) tab.redo = { checkpoint: inverse, messages };
         else for (const [path, state] of inverse) if (!tab.redo.checkpoint.has(path)) tab.redo.checkpoint.set(path, state);
-        if (at >= 0) await this.forgetTurnsFrom(tab, at);
+        // The provider forgets these turns only when the next message is sent, so "Redo checkpoint" can bring them back intact.
+        if (at >= 0) tab.pendingRevert = this.revertRecord(tab, at);
         if (at >= 0) tab.messages = tab.messages.slice(0, at);
         tab.queue = [];
         this.post({ type: "messages", messages: tab.messages });
@@ -601,7 +605,7 @@ export class AgentPane implements vscode.WebviewViewProvider {
         const redo = tab.redo;
         const { changed } = await this.live.restore(redo.checkpoint);
         tab.messages = redo.messages;
-        delete tab.redo;
+        delete tab.redo; delete tab.pendingRevert;
         this.post({ type: "messages", messages: tab.messages });
         this.pushState();
         void vscode.window.setStatusBarMessage(`Checkpoint redone · ${changed} file(s)`, 3000);
@@ -676,6 +680,7 @@ export class AgentPane implements vscode.WebviewViewProvider {
       return;
     }
     delete tab.redo;
+    if (tab.pendingRevert) { await this.forgetTurns(tab, tab.pendingRevert); delete tab.pendingRevert; }
     // Full access (Cursor auto-apply): edits stand as they land, the diff colours stay for review, nothing asks Accept/Reject per hunk.
     this.live.setReviewMode(this.access.find((a) => a.id === tab.settings.accessId)?.sandbox === "danger-full-access" ? "auto" : "review");
     this.pushState();

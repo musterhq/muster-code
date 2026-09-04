@@ -1,3 +1,4 @@
+import * as vscode from "vscode";
 // The Codex side of Muster Code: threads, history, and turns — all through
 // muster core's app-server client on the owner's ChatGPT plan.
 import {
@@ -182,6 +183,48 @@ export function formatSize(bytes: number): string {
 }
 
 /** Ask the app-server directly (model/list, permissionProfile/list, thread/list, skills/list…). Nothing is hardcoded from these answers. */
+// ── catalog cache ──
+// A one-shot app-server process costs seconds (it loads the user's plugins and, for mcpServerStatus/list,
+// connects every MCP server). Catalog answers change rarely, so they are served from a persisted cache
+// and revalidated in the background — settings and pickers open instantly after the first run.
+interface CatalogEntry { at: number; value?: Record<string, unknown>; inflight?: Promise<Record<string, unknown>> }
+const catalog = new Map<string, CatalogEntry>();
+let catalogStore: vscode.Memento | undefined;
+export function useCatalogStore(store: vscode.Memento): void {
+  catalogStore = store;
+  for (const [k, v] of Object.entries(store.get<Record<string, { at: number; value: Record<string, unknown> }>>("muster.catalog", {}))) if (!catalog.has(k)) catalog.set(k, { at: v.at, value: v.value });
+}
+function persistCatalog(): void {
+  if (!catalogStore) return;
+  const out: Record<string, { at: number; value: Record<string, unknown> }> = {};
+  for (const [k, v] of catalog) if (v.value !== undefined && JSON.stringify(v.value).length < 400_000) out[k] = { at: v.at, value: v.value };
+  void catalogStore.update("muster.catalog", out);
+}
+export function catalogAge(method: string, params: Record<string, unknown> = {}, cwd?: string): number | undefined { const e = catalog.get(`${cwd ?? ""}|${method}|${JSON.stringify(params)}`); return e?.value !== undefined ? Date.now() - e.at : undefined; }
+/** Cached one-shot query: fresh → cached; stale → cached now, refreshed in the background; empty → wait for the process. */
+export async function cachedQuery(method: string, params: Record<string, unknown> = {}, cwd?: string, options: { ttlMs?: number; refresh?: boolean } = {}): Promise<Record<string, unknown>> {
+  const key = `${cwd ?? ""}|${method}|${JSON.stringify(params)}`; const ttl = options.ttlMs ?? 10 * 60_000;
+  const entry = catalog.get(key) ?? { at: 0 }; catalog.set(key, entry);
+  const fresh = entry.value !== undefined && Date.now() - entry.at < ttl && !options.refresh;
+  if (fresh) return entry.value!;
+  if (!entry.inflight) {
+    entry.inflight = queryCodex(method, params, cwd).then((value) => { entry.value = value; entry.at = Date.now(); persistCatalog(); return value; }).finally(() => { delete entry.inflight; });
+    entry.inflight.catch(() => undefined);
+  }
+  if (entry.value !== undefined && !options.refresh) return entry.value;
+  return entry.inflight;
+}
+/** Warm the catalog in the background (activation): models, access modes, skills, plugins and MCP status. */
+export function prefetchCatalog(cwd: string): void {
+  // One process at a time, most useful first; fresh entries cost nothing. mcpServerStatus/list goes last (it connects every MCP server).
+  void (async () => {
+    for (const [method, params] of [["model/list", { includeHidden: false }], ["permissionProfile/list", {}], ["account/read", {}], ["account/rateLimits/read", {}], ["skills/list", {}], ["plugin/list", {}], ["hooks/list", {}], ["mcpServerStatus/list", {}]] as const) {
+      await cachedQuery(method, params as Record<string, unknown>, cwd).catch(() => undefined);
+      await new Promise((r) => setTimeout(r, 500));
+    }
+  })();
+}
+
 export async function queryCodex(method: string, params: Record<string, unknown> = {}, cwd?: string): Promise<Record<string, unknown>> {
   return queryCodexAppServer(method, params, { ...(cwd ? { cwd } : {}) });
 }
@@ -203,7 +246,7 @@ const ACCESS_PRESETS: Record<string, Omit<AccessMode, "id">> = {
 
 /** permissionProfile/list → the access modes the app exposes (labels follow the Codex app's names). */
 export async function listAccessModes(cwd?: string): Promise<AccessMode[]> {
-  const result = await queryCodex("permissionProfile/list", {}, cwd);
+  const result = await cachedQuery("permissionProfile/list", {}, cwd);
   const data = (result.data as { id?: string; description?: string | null; allowed?: boolean }[] | undefined) ?? [];
   return data.filter((p) => p.id && p.allowed !== false).map((p) => {
     const id = String(p.id);
@@ -231,8 +274,8 @@ export async function listPlugins(cwd?: string): Promise<PluginInfo[]> {
     const walk = (v: unknown): void => { if (Array.isArray(v)) { for (const x of v) walk(x); return; } if (v && typeof v === "object") { const r = v as Record<string, unknown>; if (typeof r.name === "string" || typeof r.id === "string") seen.push(r); for (const k of ["data", "items", "plugins", "servers"]) if (k in r) walk(r[k]); } };
     walk(result); return seen;
   };
-  try { for (const r of rows(await queryCodex("plugin/list", {}, cwd))) out.push({ name: String(r.name ?? r.id), kind: "plugin", detail: [r.version, r.enabled === false ? "disabled" : r.enabled === true ? "enabled" : "", r.description].filter(Boolean).join(" · ") }); } catch { /* no plugin support */ }
-  try { for (const r of rows(await queryCodex("mcpServerStatus/list", {}, cwd))) out.push({ name: String(r.name ?? r.id), kind: "mcp", detail: [r.status ?? r.state, Array.isArray(r.tools) ? `${r.tools.length} tools` : ""].filter(Boolean).join(" · ") }); } catch { /* no MCP */ }
+  try { for (const r of rows(await cachedQuery("plugin/list", {}, cwd))) out.push({ name: String(r.name ?? r.id), kind: "plugin", detail: [r.version, r.enabled === false ? "disabled" : r.enabled === true ? "enabled" : "", r.description].filter(Boolean).join(" · ") }); } catch { /* no plugin support */ }
+  try { for (const r of rows(await cachedQuery("mcpServerStatus/list", {}, cwd))) out.push({ name: String(r.name ?? r.id), kind: "mcp", detail: [r.status ?? r.state, Array.isArray(r.tools) ? `${r.tools.length} tools` : ""].filter(Boolean).join(" · ") }); } catch { /* no MCP */ }
   return out;
 }
 
@@ -250,7 +293,7 @@ export interface ModelInfo {
 export async function listModels(cwd?: string, claudeModels: readonly string[] = []): Promise<ModelInfo[]> {
   const models: ModelInfo[] = [];
   try {
-    const result = await queryCodex("model/list", { includeHidden: false }, cwd);
+    const result = await cachedQuery("model/list", { includeHidden: false }, cwd);
     for (const raw of (result.data as Record<string, unknown>[] | undefined) ?? []) {
       if (raw.hidden) continue;
       const efforts = ((raw.supportedReasoningEfforts as { reasoningEffort?: string; description?: string }[] | undefined) ?? [])
@@ -334,7 +377,7 @@ export interface SkillInfo { readonly name: string; readonly description: string
 /** skills/list → the skills Codex knows for this folder ("/" in the composer). */
 export async function listSkills(cwd?: string): Promise<SkillInfo[]> {
   try {
-    const result = await queryCodex("skills/list", {}, cwd);
+    const result = await cachedQuery("skills/list", {}, cwd);
     const raw = (result.data ?? result.skills ?? []) as unknown;
     const flat: Record<string, unknown>[] = [];
     const walk = (value: unknown): void => {

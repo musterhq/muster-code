@@ -92,6 +92,15 @@ export class LiveEditController {
     // Turn-start contents, for the multi-file Review Changes editor (vscode.changes).
     context.subscriptions.push(vscode.workspace.registerTextDocumentContentProvider(BASELINE_SCHEME, { provideTextDocumentContent: (uri) => this.files.get(uri.path)?.origin ?? "" }));
     cmd("muster.review.open", () => this.openReview());
+    // Review Changes editor (multi-diff): per-file Keep / Undo from the file header, layout toggle from the title.
+    const byArg = (arg: unknown, fn: (file: LiveFile) => Promise<void>) => {
+      const a = arg as { resource?: vscode.Uri; uri?: vscode.Uri; modifiedUri?: vscode.Uri } | vscode.Uri | undefined;
+      const uri = a instanceof vscode.Uri ? a : a?.modifiedUri ?? a?.resource ?? a?.uri ?? vscode.window.activeTextEditor?.document.uri;
+      const file = uri ? this.files.get(uri.fsPath) : undefined; return file ? fn(file) : undefined;
+    };
+    cmd("muster.review.keepFile", (arg: unknown) => byArg(arg, (f) => this.acceptFile(f)));
+    cmd("muster.review.undoFile", (arg: unknown) => byArg(arg, (f) => this.rejectFile(f)));
+    cmd("muster.review.toggleLayout", async () => { await vscode.commands.executeCommand("toggle.diff.renderSideBySide"); });
   }
 
   /** Cursor's "Review Changes" editor: every live file against its turn-start contents, in one multi-diff editor. */

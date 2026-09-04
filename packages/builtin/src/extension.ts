@@ -3,13 +3,13 @@
 // the default chat participant + models (native chat kept as plumbing for
 // inline chat / chat editing), and Cursor's status-bar cluster.
 import * as vscode from "vscode";
-import { formatAge, formatSize, interruptTurn, listThreads, readHistory, runTurn, setBrowserMcp, setDisabledMcpServers, threadsForWorkspace, turnHooks, type CodexThread } from "./codex.js";
+import { cachedQuery, formatAge, formatSize, interruptTurn, listThreads, prefetchCatalog, readHistory, runTurn, setBrowserMcp, setDisabledMcpServers, threadsForWorkspace, turnHooks, type CodexThread, useCatalogStore } from "./codex.js";
 import { BrowserToolServer } from "./browser-tools.js";
 import { join as joinPath } from "node:path";
 import { AgentPane } from "./agent-pane.js";
 import { LiveEditController } from "./live-edit.js";
 import { startDevControl } from "./dev-control.js";
-import { registerCompletions } from "./completions.js";
+import { completionsSnoozedFor, registerCompletions, snoozeCompletions } from "./completions.js";
 import { PlanEditorProvider } from "./plan-editor.js";
 import { watchTerminals, setBrowserProvider } from "./context.js";
 import { SettingsPage } from "./settings-page.js";
@@ -31,6 +31,8 @@ let threadsCache: CodexThread[] = [];
 const output = vscode.window.createOutputChannel("Muster", { log: true });
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
+  useCatalogStore(context.globalState);
+  setTimeout(() => prefetchCatalog(vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? process.cwd()), 1500);
   const config = () => vscode.workspace.getConfiguration("muster");
   const workspaceCwd = () => vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? process.cwd();
   const effort = () => (config().get<string>("codex.effort") as "low" | "medium" | "high" | "xhigh" | "max" | "ultra") ?? "medium";
@@ -209,7 +211,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   const refreshCodexStatus = async () => {
     try {
       const account = (await queryCodex("account/read", {}, workspaceCwd())).account as { planType?: string } | undefined;
-      const limits = (await queryCodex("account/rateLimits/read", {}, workspaceCwd())).rateLimits as Record<string, unknown> | undefined;
+      const limits = (await cachedQuery("account/rateLimits/read", {}, workspaceCwd(), { ttlMs: 9 * 60_000 })).rateLimits as Record<string, unknown> | undefined;
       renderLimits(limits, account?.planType ?? "");
     } catch { codexItem.text = "$(hubot) Codex: sign in"; codexItem.show(); }
   };
@@ -217,12 +219,38 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   const statusTimer = setInterval(() => void refreshCodexStatus(), 10 * 60_000);
   context.subscriptions.push({ dispose: () => clearInterval(statusTimer) }, codexItem);
   pane.onAccountEvent((params) => { const limits = (params.rateLimits ?? params) as Record<string, unknown>; renderLimits(limits, String((limits.planType as string | undefined) ?? "")); });
+  // Cursor's status-bar Tab item: toggle, snooze, per-language, settings.
+  const refreshTab = () => { const on = config().get<boolean>("completions.enabled", false); const left = completionsSnoozedFor(); tabItem.text = !on ? "Muster Tab: off" : left > 0 ? `Muster Tab: snoozed ${Math.ceil(left / 60_000)}m` : "Muster Tab"; };
   context.subscriptions.push(vscode.commands.registerCommand("muster.completions.toggle", async () => {
     const on = !config().get<boolean>("completions.enabled", false);
     await config().update("completions.enabled", on, vscode.ConfigurationTarget.Global);
-    tabItem.text = on ? "Muster Tab" : "Muster Tab: off";
+    refreshTab();
     void vscode.window.setStatusBarMessage(on ? "Muster Tab on — Codex completes as you pause" : "Muster Tab off", 2500);
   }));
+  context.subscriptions.push(vscode.commands.registerCommand("muster.completions.snooze", async (minutes?: number) => {
+    const pick = typeof minutes === "number" ? String(minutes) : (await vscode.window.showQuickPick([{ label: "15 minutes", value: "15" }, { label: "1 hour", value: "60" }, { label: "Until tomorrow", value: "720" }, { label: "Resume now", value: "0" }], { placeHolder: "Snooze Muster Tab" }))?.value;
+    if (pick === undefined) return;
+    snoozeCompletions(Number(pick) * 60_000); refreshTab();
+  }));
+  context.subscriptions.push(vscode.commands.registerCommand("muster.completions.menu", async () => {
+    const on = config().get<boolean>("completions.enabled", false); const lang = vscode.window.activeTextEditor?.document.languageId;
+    const disabled = config().get<string[]>("completions.disabledLanguages", ["markdown", "plaintext"]);
+    const items = [
+      { label: on ? "$(circle-slash) Turn off Muster Tab" : "$(check) Turn on Muster Tab", act: "toggle" },
+      ...(on ? [{ label: completionsSnoozedFor() > 0 ? "$(debug-start) Resume" : "$(clock) Snooze…", act: completionsSnoozedFor() > 0 ? "resume" : "snooze" }] : []),
+      ...(lang ? [{ label: disabled.includes(lang) ? `$(check) Enable for ${lang}` : `$(circle-slash) Disable for ${lang}`, act: "lang" }] : []),
+      { label: config().get<boolean>("completions.nextEdit", true) ? "$(circle-slash) Turn off next-edit prediction" : "$(check) Turn on next-edit prediction", act: "next" },
+      { label: "$(gear) Settings", act: "settings" },
+    ];
+    const pick = await vscode.window.showQuickPick(items, { placeHolder: "Muster Tab" }); if (!pick) return;
+    if (pick.act === "toggle") await vscode.commands.executeCommand("muster.completions.toggle");
+    else if (pick.act === "snooze") await vscode.commands.executeCommand("muster.completions.snooze");
+    else if (pick.act === "resume") { snoozeCompletions(0); refreshTab(); }
+    else if (pick.act === "lang" && lang) await config().update("completions.disabledLanguages", disabled.includes(lang) ? disabled.filter((l) => l !== lang) : [...disabled, lang], vscode.ConfigurationTarget.Global);
+    else if (pick.act === "next") await config().update("completions.nextEdit", !config().get<boolean>("completions.nextEdit", true), vscode.ConfigurationTarget.Global);
+    else if (pick.act === "settings") await vscode.commands.executeCommand("workbench.action.openSettings", "muster.completions");
+  }));
+  const tabTimer = setInterval(refreshTab, 30_000); context.subscriptions.push({ dispose: () => clearInterval(tabTimer) });
   context.subscriptions.push(vscode.commands.registerCommand("muster.plan.preview", (uri?: vscode.Uri) => { const target = uri ?? vscode.window.activeTextEditor?.document.uri; if (target) return vscode.commands.executeCommand("vscode.openWith", target, "muster.planEditor"); }));
   context.subscriptions.push(vscode.commands.registerCommand("muster.plan.build", (uri?: vscode.Uri) => { const active = planEditors.active(); if (!uri && active) { void pane.buildFromFile(active.uri, { ...(active.selection.length ? { todos: active.selection } : {}), ...(active.model ? { model: active.model } : {}) }); return; } const target = uri ?? vscode.window.activeTextEditor?.document.uri; if (target) void pane.buildFromFile(target); }));
   context.subscriptions.push(vscode.commands.registerCommand("muster.plan.model", async () => { const id = await pane.pickBuildModel(); if (id) planEditors.setModel(id); }));
@@ -293,7 +321,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   // ── Status bar, Cursor's right cluster ──
   const tabItem = vscode.window.createStatusBarItem("muster.tab", vscode.StatusBarAlignment.Right, 60);
-  tabItem.text = config().get<boolean>("completions.enabled", false) ? "Muster Tab" : "Muster Tab: off"; tabItem.tooltip = "Inline completions from Codex (click to toggle; uses your plan)"; tabItem.command = "muster.completions.toggle"; tabItem.show();
+  tabItem.text = config().get<boolean>("completions.enabled", false) ? "Muster Tab" : "Muster Tab: off"; tabItem.tooltip = "Muster Tab — inline completions and next-edit prediction from Codex (uses your plan). Click for snooze and options."; tabItem.command = "muster.completions.menu"; tabItem.show();
   const statsItem = vscode.window.createStatusBarItem("muster.agentStats", vscode.StatusBarAlignment.Right, 59);
   statsItem.text = "$(comment-discussion) Agent Stats: 0/0 (0%)"; statsItem.tooltip = "Turns this session"; statsItem.show();
   context.subscriptions.push(tabItem, statsItem);

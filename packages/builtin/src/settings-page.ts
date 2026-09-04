@@ -6,7 +6,7 @@ import * as vscode from "vscode";
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { BUILTIN_MODES } from "./agent-pane.js";
-import { CLAUDE_EFFORTS, listAccessModes, listModels, listPlugins, listRuleFiles, listSkills, queryCodex, setDisabledMcpServers } from "./codex.js";
+import { CLAUDE_EFFORTS, cachedQuery, catalogAge, listAccessModes, listModels, listPlugins, listRuleFiles, listSkills, queryCodex, setDisabledMcpServers } from "./codex.js";
 
 type Section = "general" | "models" | "rules" | "mcp" | "skills" | "plugins" | "hooks" | "modes" | "docs";
 
@@ -31,6 +31,7 @@ export class SettingsPage {
     const config = vscode.workspace.getConfiguration("muster");
     switch (m.type) {
       case "ready": case "section": await this.push(m.section ?? "general"); return;
+      case "refresh": await this.push(m.section ?? "general", true); return;
       case "set": await config.update(String(m.key), m.value, vscode.ConfigurationTarget.Global); await this.push(m.section ?? "general"); return;
       case "open": if (m.path) await vscode.window.showTextDocument(vscode.Uri.file(m.path)); return;
       case "newRule": {
@@ -63,10 +64,15 @@ export class SettingsPage {
   /** Harness: the data a section renders from. */
   debugData(section: string): Promise<unknown> { return this.data(section as Section); }
 
-  private async push(section: Section): Promise<void> {
+  private refresh = false;
+  private async push(section: Section, refresh = false): Promise<void> {
     if (!this.panel) return;
-    const data = await this.data(section).catch((error) => ({ error: error instanceof Error ? error.message : String(error) }));
-    await this.panel.webview.postMessage({ type: "section", section, data });
+    this.refresh = refresh;
+    try {
+      const data = await this.data(section).catch((error) => ({ error: error instanceof Error ? error.message : String(error) }));
+      const age = catalogAge({ general: "account/read", models: "model/list", mcp: "mcpServerStatus/list", skills: "skills/list", plugins: "plugin/list", hooks: "hooks/list" }[section as string] ?? "", section === "models" ? { includeHidden: false } : {}, this.cwd());
+      await this.panel.webview.postMessage({ type: "section", section, data, ...(age !== undefined ? { age } : {}) });
+    } finally { this.refresh = false; }
   }
 
   private async data(section: Section): Promise<unknown> {
@@ -74,7 +80,7 @@ export class SettingsPage {
     const config = vscode.workspace.getConfiguration("muster");
     switch (section) {
       case "general": {
-        const [account, limits, access] = await Promise.all([queryCodex("account/read", {}, cwd).catch((): Record<string, unknown> => ({})), queryCodex("account/rateLimits/read", {}, cwd).catch((): Record<string, unknown> => ({})), listAccessModes(cwd).catch(() => [])]);
+        const [account, limits, access] = await Promise.all([cachedQuery("account/read", {}, cwd, { refresh: this.refresh }).catch((): Record<string, unknown> => ({})), cachedQuery("account/rateLimits/read", {}, cwd, { refresh: this.refresh, ttlMs: 2 * 60_000 }).catch((): Record<string, unknown> => ({})), listAccessModes(cwd).catch(() => [])]);
         return { account: account.account ?? null, limits: limits.rateLimits ?? null, access, settings: { model: config.get("codex.model"), effort: config.get("codex.effort"), completions: config.get("completions.enabled"), claudeModels: config.get("claude.models") } };
       }
       case "models": return { models: await listModels(cwd, config.get<string[]>("claude.models", [])), claudeEfforts: CLAUDE_EFFORTS };
@@ -86,7 +92,7 @@ export class SettingsPage {
       }
       case "mcp": {
         const disabled = new Set(config.get<string[]>("mcp.disabled", []));
-        const raw = await queryCodex("mcpServerStatus/list", {}, cwd).catch((): Record<string, unknown> => ({}));
+        const raw = await cachedQuery("mcpServerStatus/list", {}, cwd, { refresh: this.refresh }).catch((): Record<string, unknown> => ({}));
         const rows = (Array.isArray(raw.data) ? raw.data : []) as Record<string, unknown>[];
         const servers = rows.map((r) => { const tools = r.tools && typeof r.tools === "object" ? Object.keys(r.tools as Record<string, unknown>) : []; const info = (r.serverInfo ?? {}) as Record<string, unknown>; return { name: String(r.name ?? r.id), status: String(r.runtimeStatus ?? ""), auth: String(r.authStatus ?? ""), version: String(info.version ?? ""), tools, plugin: r.pluginId ? String(r.pluginId) : "", enabled: !disabled.has(String(r.name ?? r.id)) }; });
         return { servers, configPath: join(process.env.HOME ?? "", ".codex", "config.toml") };
@@ -95,7 +101,7 @@ export class SettingsPage {
       case "modes": { const custom = config.get<Record<string, unknown>[]>("modes", []); return { builtin: BUILTIN_MODES, custom }; }
       case "plugins": return { plugins: (await listPlugins(cwd)).filter((p) => p.kind === "plugin") };
       case "hooks": {
-        const result = await queryCodex("hooks/list", {}, cwd).catch(() => ({} as Record<string, unknown>));
+        const result = await cachedQuery("hooks/list", {}, cwd, { refresh: this.refresh }).catch(() => ({} as Record<string, unknown>));
         const groups = (Array.isArray(result.data) ? result.data : []) as { cwd?: string; hooks?: Record<string, unknown>[] }[];
         const hooks = groups.flatMap((g) => (g.hooks ?? []).map((h) => ({ event: String(h.eventName ?? ""), matcher: String(h.matcher ?? ""), command: String(h.command ?? h.handlerType ?? ""), source: String(h.sourcePath ?? ""), async: !!h.async, timeout: h.timeoutSec ? Number(h.timeoutSec) : 0 })));
         return { hooks, raw: hooks.length ? "" : JSON.stringify(result, null, 1).slice(0, 2000) };
@@ -131,6 +137,7 @@ function html(csp: string): string {
   .bar { height: 6px; border-radius: 3px; background: var(--s3); overflow: hidden; margin-top: 6px; } .bar > i { display: block; height: 100%; background: var(--vscode-charts-green); }
   pre { background: var(--b4); border-radius: 6px; padding: 10px; font-family: var(--vscode-editor-font-family); font-size: 12px; overflow: auto; }
   .empty { color: var(--t3); padding: 12px 0; }
+  .fresh { float: right; font-size: 11px; color: var(--t3); margin-top: 4px; } .fresh a { color: var(--t2); }
   .pill.warn { background: color-mix(in srgb, var(--vscode-charts-yellow, #D2943E) 20%, transparent); color: var(--vscode-charts-yellow, #D2943E); }
   .row details { font-size: 12px; color: var(--t2); } .row details code { font-size: 11px; background: var(--b4); padding: 1px 4px; border-radius: 3px; margin: 2px 2px 0 0; display: inline-block; } .row summary { cursor: pointer; }
   .row .l + .toggle, .row .l + button, .row .l + span { flex: 0 0 auto; }
@@ -148,9 +155,10 @@ function html(csp: string): string {
   const esc = (s) => String(s == null ? "" : s).replace(/[&<>"]/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
   for (const [id, label] of SECTIONS) { const el = document.createElement("div"); el.className = "item" + (id === current ? " on" : ""); el.textContent = label; el.dataset.id = id; el.addEventListener("click", () => { current = id; [...nav.querySelectorAll(".item")].forEach((n) => n.classList.toggle("on", n.dataset.id === id)); vscode.postMessage({ type: "section", section: id }); }); nav.appendChild(el); }
   const row = (t, d, right) => '<div class="row"><div class="l"><div class="t">' + t + '</div>' + (d ? '<div class="d">' + d + '</div>' : "") + '</div>' + (right || "") + '</div>';
-  function render(section, data) {
+  function render(section, data, age) {
     if (data && data.error) { main.innerHTML = '<h2>' + esc(section) + '</h2><div class="empty">' + esc(data.error) + '</div>'; return; }
     let h = "";
+    if (age !== undefined) h += '<div class="fresh">' + (age < 60000 ? "updated just now" : "updated " + Math.round(age / 60000) + " min ago") + ' · <a href="#" id="refresh">Refresh</a></div>';
     if (section === "general") {
       const a = data.account, l = data.limits, p = l && l.primary;
       h += '<h2>General</h2><div class="sub">Account, usage and defaults for new agents.</div>';
@@ -209,6 +217,7 @@ function html(csp: string): string {
       for (const d of data.docs) h += row(esc(d.name), esc(d.url), '<button data-removedoc="' + esc(d.name) + '">Remove</button>');
     }
     main.innerHTML = h;
+    const rf = document.getElementById("refresh"); if (rf) rf.addEventListener("click", (e) => { e.preventDefault(); rf.textContent = "Refreshing…"; vscode.postMessage({ type: "refresh", section }); });
     main.querySelectorAll("[data-open]").forEach((b) => b.addEventListener("click", () => vscode.postMessage({ type: "open", path: b.dataset.open })));
     main.querySelectorAll("[data-rule]").forEach((t) => t.addEventListener("click", () => vscode.postMessage({ type: "toggleRule", name: t.dataset.rule })));
     main.querySelectorAll("[data-mcp]").forEach((t) => t.addEventListener("click", () => vscode.postMessage({ type: "toggleMcp", name: t.dataset.mcp })));
@@ -224,7 +233,7 @@ function html(csp: string): string {
     const ad = document.getElementById("addDoc"); if (ad) ad.addEventListener("click", () => vscode.postMessage({ type: "addDoc", name: document.getElementById("docName").value.trim(), url: document.getElementById("docUrl").value.trim() }));
     main.querySelectorAll("[data-removedoc]").forEach((b) => b.addEventListener("click", () => vscode.postMessage({ type: "removeDoc", name: b.dataset.removedoc })));
   }
-  window.addEventListener("message", (e) => { const m = e.data; if (m.type === "section") { current = m.section; [...nav.querySelectorAll(".item")].forEach((n) => n.classList.toggle("on", n.dataset.id === current)); render(m.section, m.data); } });
+  window.addEventListener("message", (e) => { const m = e.data; if (m.type === "section") { current = m.section; [...nav.querySelectorAll(".item")].forEach((n) => n.classList.toggle("on", n.dataset.id === current)); render(m.section, m.data, m.age); } });
   vscode.postMessage({ type: "ready" });
 </script>
 </body></html>`;

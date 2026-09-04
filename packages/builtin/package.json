@@ -132,11 +132,13 @@
       },
       {
         "command": "muster.edit.acceptAll",
-        "title": "Accept All Changes"
+        "title": "Accept All Changes",
+        "icon": "$(check-all)"
       },
       {
         "command": "muster.edit.rejectAll",
-        "title": "Reject All Changes"
+        "title": "Reject All Changes",
+        "icon": "$(discard)"
       },
       {
         "command": "muster.edit.next",
@@ -256,6 +258,29 @@
       {
         "command": "muster.browser.pickActive",
         "title": "Browser: Select Element for Chat"
+      },
+      {
+        "command": "muster.completions.menu",
+        "title": "Muster Tab: Options"
+      },
+      {
+        "command": "muster.completions.snooze",
+        "title": "Muster Tab: Snooze"
+      },
+      {
+        "command": "muster.review.keepFile",
+        "title": "Keep File",
+        "icon": "$(check)"
+      },
+      {
+        "command": "muster.review.undoFile",
+        "title": "Undo File",
+        "icon": "$(discard)"
+      },
+      {
+        "command": "muster.review.toggleLayout",
+        "title": "Review: Inline / Side by side",
+        "icon": "$(split-horizontal)"
       }
     ],
     "configuration": {
@@ -342,6 +367,22 @@
             "type": "string"
           },
           "description": "MCP servers switched off for Muster Code turns (passed as mcp_servers.<name>.enabled=false; ~/.codex/config.toml is untouched). Managed from Muster Settings → MCP."
+        },
+        "muster.completions.disabledLanguages": {
+          "type": "array",
+          "default": [
+            "markdown",
+            "plaintext"
+          ],
+          "items": {
+            "type": "string"
+          },
+          "description": "Languages Muster Tab stays quiet in (Cursor's default: markdown, plaintext)."
+        },
+        "muster.completions.nextEdit": {
+          "type": "boolean",
+          "default": true,
+          "description": "Next-edit prediction: after an edit, Muster Tab may suggest the change it implies elsewhere in the file as an inline edit (Tab jumps and accepts)."
         }
       }
     },
@@ -378,6 +419,21 @@
           "command": "muster.plan.model",
           "when": "resourceFilename =~ /\\\\.plan\\\\.md$/",
           "group": "navigation@2"
+        },
+        {
+          "command": "muster.edit.acceptAll",
+          "when": "activeEditor == 'workbench.editor.multiDiffEditor' && muster.liveEdit",
+          "group": "navigation@1"
+        },
+        {
+          "command": "muster.edit.rejectAll",
+          "when": "activeEditor == 'workbench.editor.multiDiffEditor' && muster.liveEdit",
+          "group": "navigation@2"
+        },
+        {
+          "command": "muster.review.toggleLayout",
+          "when": "activeEditor == 'workbench.editor.multiDiffEditor'",
+          "group": "navigation@3"
         }
       ],
       "scm/title": [
@@ -385,6 +441,18 @@
           "command": "muster.review.git",
           "when": "scmProvider == git",
           "group": "navigation@1"
+        }
+      ],
+      "multiDiffEditor/resource/title": [
+        {
+          "command": "muster.review.keepFile",
+          "when": "muster.liveEdit",
+          "group": "navigation@1"
+        },
+        {
+          "command": "muster.review.undoFile",
+          "when": "muster.liveEdit",
+          "group": "navigation@2"
         }
       ]
     },
@@ -505,6 +573,12 @@
         "key": "ctrl+t",
         "mac": "cmd+t",
         "when": "muster.browserActive"
+      },
+      {
+        "command": "editor.action.inlineSuggest.acceptNextWord",
+        "key": "ctrl+right",
+        "mac": "cmd+right",
+        "when": "inlineSuggestionVisible && !editorReadonly"
       }
     ],
     "customEditors": [
