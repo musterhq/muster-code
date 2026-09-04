@@ -156,3 +156,9 @@ i. **Agents window / board (V2)**, **browser** (T3-style preview MCP + screensho
 - Codex app-server: `turn/steer {threadId, expectedTurnId, input}` joins a running turn; `thread/revert {threadId, beforeTurnId}` is the rollback for paginated threads (`thread/rollback` is refused); both must go to the warm process that owns the thread (`callCodexConversation`).
 - `turn/diff/updated` fires only for apply_patch edits; shell edits need the turn watcher (`beginTurnWatch`/`syncTurnWatch` in live-edit).
 - Webview code lives inside a TS template literal: a lone `\/`, `\d`, `\s` silently loses its backslash (`/^https?:\/\//` became a regex plus a `//` comment that ate the line). Write `\\/`, `\\d`, `\\s` there, and run `scripts/dev/pane-check.py` (full `node --check` of the extracted script) plus `scripts/dev/render-test.py` before every build; `tsc` cannot see these.
+
+## 9. Packaging (macOS)
+- `scripts/assemble.sh` → `dist/Muster Code.app` (ad-hoc signed: runs here, Gatekeeper blocks it elsewhere). `scripts/package.sh` → `dist/Muster Code-<version>-<arch>.zip` and `.dmg`.
+- Distribution needs an Apple Developer ID: `MUSTER_SIGN_IDENTITY="Developer ID Application: … (TEAMID)"` signs inside-out with the hardened runtime and `product/entitlements.plist` (Electron's JIT / unsigned-memory / library-validation entitlements, mic and camera for dictation and the browser); `MUSTER_NOTARY_PROFILE=<keychain profile>` (created once with `xcrun notarytool store-credentials`) notarizes the zip and the DMG and staples both.
+- The overlay sets `updateUrl` to empty so the app never polls VSCodium's release feed; ship updates by publishing a new DMG (an update server is a later step). Version comes from the root `package.json`.
+- Intel Macs need a second run on x86_64 with `BASE_TAG` pointing at the `VSCodium-darwin-x64` zip (assemble.sh downloads arm64 only today); Windows/Linux need their own base zips and different helper renames in assemble.sh.

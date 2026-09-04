@@ -87,5 +87,7 @@
     "chat.disableAIFeatures": true,
     "workbench.startupEditor": "none",
     "window.commandCenter": false
-  }
+  },
+  "updateUrl": "",
+  "quality": "stable"
 }
