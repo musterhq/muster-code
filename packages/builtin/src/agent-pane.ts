@@ -8,7 +8,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import { formatAge, formatSize, interruptTurn, lastRollbackError, revertThread, rollbackThread, steerTurn, listAccessModes, listModels, listSkills, listThreads, readHistory, readRules, runClaudeTurn, runTurn, threadsForWorkspace, type AccessMode, type CodexThread, type ModelInfo, type SkillInfo } from "./codex.js";
 import type { Checkpoint, EditCard, LiveEditController } from "./live-edit.js";
-import { expandContext, suggestMentions, rememberPick, suggestSlash, type MenuData, type MenuSection } from "./context.js";
+import { expandContext, listRules, rememberPick, suggestMentions, suggestSlash, type MenuData, type MenuSection } from "./context.js";
 import type { BrowserPick, BrowserController, BrowserState } from "./browser.js";
 
 interface ModeInfo { readonly id: string; readonly name: string; readonly icon: string; readonly placeholder: string; readonly description?: string; readonly prompt?: string; readonly readOnly?: boolean; readonly plan?: boolean; readonly board?: boolean; readonly effort?: string; readonly autoFix?: boolean; readonly debug?: boolean; readonly parallel?: boolean; readonly spec?: boolean }
@@ -27,7 +27,7 @@ interface Tab { id: string; name: string; kind?: "chat" | "browser"; browserId?:
 interface BoardTask { id: string; title: string; column: "backlog" | "progress" | "review" | "done"; threadId?: string; createdAt: number }
 
 type ToPane =
-  | { type: "state"; queue?: string[]; tabs: { id: string; name: string; running: boolean; kind?: "chat" | "browser" }[]; activeId: string; view: "chat" | "history" | "board" | "browser"; modes: ModeInfo[]; access: AccessMode[]; models: ModelInfo[]; settings: ThreadSettings; loading: boolean; canRedo: boolean }
+  | { type: "state"; queue?: string[]; currentFile?: string | undefined; tabs: { id: string; name: string; running: boolean; kind?: "chat" | "browser" }[]; activeId: string; view: "chat" | "history" | "board" | "browser"; modes: ModeInfo[]; access: AccessMode[]; models: ModelInfo[]; settings: ThreadSettings; loading: boolean; canRedo: boolean }
   | { type: "browser"; state: BrowserState }
   | { type: "messages"; messages: PaneMessage[] }
   | { type: "user"; text: string; steer?: boolean }
@@ -108,6 +108,7 @@ export class AgentPane implements vscode.WebviewViewProvider {
   }
 
   resolveWebviewView(view: vscode.WebviewView): void {
+    this.context.subscriptions.push(vscode.window.onDidChangeActiveTextEditor(() => { if (this.view?.visible) this.pushState(); }));
     this.view = view;
     const appRoot = vscode.Uri.file(vscode.env.appRoot);
     view.webview.options = { enableScripts: true, localResourceRoots: [this.context.extensionUri, appRoot] };
@@ -290,6 +291,12 @@ export class AgentPane implements vscode.WebviewViewProvider {
   debugDecide(id: string, decision: string): void { this.decide(id, decision); }
   /** Harness: raise the same server request the provider would (approval / elicitation) and return the answer. */
   debugRequest(method: string, params: Record<string, unknown>): Promise<Record<string, unknown> | undefined> { return this.approve(method, params); }
+
+  /** The file in the active editor, relative to the workspace (Cursor's dashed "current file" pill). */
+  private currentFile(): string | undefined {
+    const uri = vscode.window.activeTextEditor?.document.uri; if (!uri || uri.scheme !== "file") return undefined;
+    const rel = vscode.workspace.asRelativePath(uri); return rel.startsWith("..") || rel === uri.fsPath ? undefined : rel;
+  }
 
   stop(): void {
     const tab = this.active();
@@ -522,7 +529,7 @@ export class AgentPane implements vscode.WebviewViewProvider {
     // Cursor: the tab strip is the pane header. The workbench renders it in the sidebar's title row.
     void vscode.commands.executeCommand("muster.agentHeader.set", { tabs: this.tabs.map((t) => ({ id: t.id, name: t.name, running: t.running, kind: t.kind ?? "chat" })), activeId: tab.id });
     const modes = this.modes().map((m) => (m.debug ? { ...m, placeholder: DEBUG_STAGES[tab.settings.debugStage ?? 0]!.placeholder } : m));
-    this.post({ type: "state", queue: this.active().queue ?? [], tabs: this.tabs.map((t) => ({ id: t.id, name: t.name, running: t.running, ...(t.kind ? { kind: t.kind } : {}) })), activeId: tab.id, view: this.paneView, modes, access: this.access, models: this.models, settings: tab.settings, loading: this.loading, canRedo: !!tab.redo });
+    this.post({ type: "state", queue: this.active().queue ?? [], ...(this.currentFile() ? { currentFile: this.currentFile() } : {}), tabs: this.tabs.map((t) => ({ id: t.id, name: t.name, running: t.running, ...(t.kind ? { kind: t.kind } : {}) })), activeId: tab.id, view: this.paneView, modes, access: this.access, models: this.models, settings: tab.settings, loading: this.loading, canRedo: !!tab.redo });
   }
 
   private pushBoard(): void {
@@ -846,7 +853,9 @@ export class AgentPane implements vscode.WebviewViewProvider {
     const cwd = this.cwd();
     if (token.startsWith("/")) { this.skills ??= await listSkills(cwd); return this.skills.some((s) => `/${s.name}` === token); }
     const body = token.slice(1);
-    if (["browser", "web", "terminal", "git:diff", "git:branch"].includes(body) || body.startsWith("terminal:") || body.startsWith("git:commit:")) return true;
+    if (["browser", "web", "terminal", "git:diff", "git:branch", "git:pr", "rules"].includes(body) || body.startsWith("terminal:") || body.startsWith("git:commit:") || body.startsWith("code:") || body.startsWith("symbol:") || body.startsWith("link:") || /^https?:\/\//.test(body)) return true;
+    if (body.startsWith("rule:")) return listRules(cwd).some((r) => r.name === body.slice(5));
+    if (body.startsWith("folder:")) return existsSync(join(cwd, body.slice(7)));
     if (body.startsWith("image:")) return existsSync(body.slice(6));
     if (body.startsWith("docs:")) return vscode.workspace.getConfiguration("muster").get<{ name: string }[]>("docs", []).some((d) => d.name.toLowerCase() === body.slice(5).toLowerCase());
     if (body.startsWith("chat:")) return (await this.visibleThreads()).some((t) => t.id === body.slice(5));
@@ -1141,6 +1150,8 @@ function paneHtml(csp: string, codicon = ""): string {
   .ctx .x { display: none; width: 12px; height: 12px; align-items: center; justify-content: center; cursor: pointer; color: var(--fg); font-family: codicon; font-size: 12px; } .ctx:hover .ci { display: none; } .ctx:hover .x { display: inline-flex; }
   .ctx .n { overflow: hidden; text-overflow: ellipsis; }
   .ctx.bad { border-style: dashed; opacity: .6; }
+  .ctx.suggestion { border-style: dashed; opacity: .6; cursor: pointer; } .ctx.suggestion:hover { opacity: .9; }
+  .ctx.openable .n { cursor: pointer; } .ctx.openable .n:hover { text-decoration: underline; }
   .ctx.add { border-style: dashed; opacity: .6; cursor: pointer; color: var(--text-secondary); } .ctx.add:hover { opacity: .9; background: transparent; } .ctx.add .cod { font-size: 12px; width: 12px; height: 12px; }
   .inputwrap { position: relative; }
   /* Cursor's inline mention (.mention): radius 6, padding 1px 4px, quiet background; unresolved ones dashed. */
@@ -1536,7 +1547,7 @@ function paneHtml(csp: string, codicon = ""): string {
     for (const f of files) { const row = document.createElement("div"); row.className = "file"; const parts = f.path.split("/"); const name = parts.pop(); row.innerHTML = '<span class="name">' + escape(name) + '</span><span class="dir">' + escape(parts.join("/")) + '</span><span class="adds">+' + f.adds + '</span><span class="dels">−' + f.dels + '</span>'; row.addEventListener("click", () => vscode.postMessage({ type: "open", path: f.path })); list.appendChild(row); }
   }
   // Mentions light up like the Plan pill when they resolve; a chips row mirrors them with remove buttons (Cursor's context row).
-  const TOKEN = /(^|\\s)(@[\\w./:-]+|\\/[\\w-]+)/g;
+  const TOKEN = /(^|\\s)(@[\\w./:?=&%#+-]+|\\/[\\w-]+)/g;
   let tokenOk = new Set(), tokenBad = new Set();
   function tokensIn(text) { const out = []; let m; TOKEN.lastIndex = 0; while ((m = TOKEN.exec(text))) out.push(m[2]); return out; }
   function renderTokens() {
@@ -1561,12 +1572,21 @@ function paneHtml(csp: string, codicon = ""): string {
       else if (body.startsWith("git:")) { icon = cod("git-branch"); label = body === "git:branch" ? "Branch" : "Working Tree"; }
       else if (body.startsWith("terminal")) { icon = cod("terminal"); label = body.includes(":") ? body.slice(9) : "Terminal"; }
       else if (body.startsWith("docs:")) { icon = cod("book"); label = body.slice(5); }
+      else if (body.startsWith("link:") || /^https?:\/\//.test(body)) { icon = cod("link"); label = body.replace(/^link:/, "").replace(/^https?:\/\//, "").slice(0, 40); }
+      else if (body.startsWith("code:") || body.startsWith("symbol:")) { icon = cod("symbol-method"); label = body.slice(body.indexOf(":") + 1); }
+      else if (body === "rules" || body.startsWith("rule:")) { icon = cod("note"); label = body === "rules" ? "Rules" : body.slice(5); }
+      else if (body === "git:pr") { icon = cod("git-pull-request"); label = "Pull Request"; }
+      else if (body.startsWith("folder:") || body.endsWith("/")) { icon = cod("folder"); label = body.replace(/^folder:/, "").replace(/\/$/, "").split("/").pop() || body; }
       else if (body.startsWith("chat:")) { icon = cod("comment-discussion"); label = "Past chat"; }
       else { const name = body.replace(/:\\d+-\\d+$/, "").split("/").pop() || body; icon = name.includes(".") ? badge(name.split(".").pop()) : cod("folder"); label = name + (/:\\d+-\\d+$/.test(body) ? body.slice(body.lastIndexOf(":")) : ""); }
       chip.innerHTML = '<span class="ci">' + icon + '</span><span class="n">' + escape(label) + '</span><span class="x" title="Remove">' + String.fromCodePoint(COD.close) + '</span>';
+      if (t.startsWith("@") && !/^(browser|web|terminal|git:|docs:|chat:|image:|link:|code:|symbol:|rules$|rule:|folder:|https?:)/.test(body) && !tokenBad.has(t)) { chip.classList.add("openable"); chip.querySelector(".n").addEventListener("click", () => { const range = /:(\d+)-(\d+)$/.exec(body); vscode.postMessage({ type: "openPath", path: body.replace(/:\d+-\d+$/, "").replace(/\/$/, ""), line: range ? Number(range[1]) : undefined, endLine: range ? Number(range[2]) : undefined }); }); }
       chip.querySelector(".x").addEventListener("click", () => { const re = new RegExp("(^|\\\\s)" + t.replace(/[.*+?^\${}()|[\\]\\\\/]/g, "\\\\$&") + "(?=\\\\s|$)"); input.value = input.value.replace(re, "$1").replace(/  +/g, " "); autosize(); input.focus(); });
       row.appendChild(chip);
     }
+    // Cursor: the active editor's file as a dashed suggestion pill; click to add it.
+    const cur = state && state.currentFile; const curTok = cur ? "@" + cur : null;
+    if (curTok && !seen.has(curTok)) { const sug = document.createElement("span"); sug.className = "ctx suggestion"; sug.title = "Add the current file: " + cur; const nm = cur.split("/").pop(); sug.innerHTML = '<span class="ci">' + (nm.includes(".") ? badge(nm.split(".").pop()) : cod("file")) + '</span><span class="n">' + escape(nm) + '</span>'; sug.addEventListener("click", () => { const at = input.selectionStart; const pre = input.value.slice(0, at); const sp = pre && !/\s$/.test(pre) ? " " : ""; input.value = pre + sp + curTok + " " + input.value.slice(at); const c = (pre + sp + curTok + " ").length; input.setSelectionRange(c, c); input.focus(); input.dispatchEvent(new Event("input")); }); row.appendChild(sug); }
     const toks = [...seen].filter((t) => !tokenOk.has(t) && !tokenBad.has(t));
     if (toks.length) vscode.postMessage({ type: "validate", tokens: toks });
   }
@@ -1585,7 +1605,7 @@ function paneHtml(csp: string, codicon = ""): string {
   function menuIcon(it) { if (it.iconKind === "badge") return badge(it.icon); if (it.iconKind === "slash") return '<span class="ic slash">/</span>'; return cod(it.icon || "file", "ic"); }
   function hl(label, query) { if (!query) return escape(label); const lower = label.toLowerCase(); let qi = 0, out = ""; for (let i = 0; i < label.length; i++) { if (qi < query.length && lower[i] === query[qi]) { out += '<span class="hl">' + escape(label[i]) + '</span>'; qi++; } else out += escape(label[i]); } return out; }
   let suggest = null, suggestSeq = 0;
-  function triggerAt() { const upto = input.value.slice(0, input.selectionStart); const m = /(^|\\s)([@/])([\\w./:-]*)$/.exec(upto); return m ? { kind: m[2] === "@" ? "file" : "skill", start: upto.length - m[3].length - 1, query: m[3] } : null; }
+  function triggerAt() { const upto = input.value.slice(0, input.selectionStart); const m = /(^|\\s)([@/])([\\w./:?=&%#+-]*)$/.exec(upto); return m ? { kind: m[2] === "@" ? "file" : "skill", start: upto.length - m[3].length - 1, query: m[3] } : null; }
   // Posted on every keystroke, no timer: the extension answers from memory, stale replies are dropped by seq, and timers in an occluded window fire late.
   function requestSuggestions() { if (!suggest) return; suggestSeq++; vscode.postMessage({ type: "suggest", kind: suggest.kind, query: suggest.query, mode: suggest.mode, seq: suggestSeq }); }
   function markSel() { if (!suggest) return; const els = menu.querySelectorAll(".row"); els.forEach((el, i) => el.classList.toggle("sel", i === suggest.index)); const cur = els[suggest.index]; if (cur) cur.scrollIntoView({ block: "nearest" }); }
@@ -1687,7 +1707,7 @@ function paneHtml(csp: string, codicon = ""): string {
   window.addEventListener("message", (event) => {
     const m = event.data;
     if (m.type === "browser") { renderBrowser(m.state); }
-    if (m.type === "state") { state = m; renderState(); renderQueue(m.queue || []); reportRect(); }
+    if (m.type === "state") { state = m; renderState(); renderQueue(m.queue || []); renderTokens(); reportRect(); }
     else if (m.type === "messages") { renderMessages(m.messages); if (state) renderState(); }
     else if (m.type === "user") { assistantEl = thinkingEl = null; addHuman(m.text, m.checkpoint, m.steer); if (state) renderState(); }
     else if (m.type === "start") { body.classList.add("running"); }

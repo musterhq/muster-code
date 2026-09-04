@@ -6,9 +6,9 @@ import * as vscode from "vscode";
 import { homedir } from "node:os";
 import { execFile } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 import { promisify } from "node:util";
-import { formatAge, listThreads, readHistory, threadsForWorkspace } from "./codex.js";
+import { formatAge, listThreads, readHistory, readRules, threadsForWorkspace } from "./codex.js";
 import type { BrowserPick } from "./browser.js";
 
 // ── browser: the last picked element / screenshot, and the live page context from the workbench guest ──
@@ -136,11 +136,27 @@ export async function suggestMentions(cwd: string, query: string, mode = "all"):
     { id: "branch", label: "Branch (Diff with Main)", detail: "", insert: "@git:branch", icon: "git-branch", iconKind: "cod" },
     { id: "diff", label: "Working Tree", detail: "uncommitted changes", insert: "@git:diff", icon: "git-branch", iconKind: "cod" },
     { id: "web", label: "Web", detail: "search the web", insert: "@web", icon: "globe", iconKind: "cod" },
+    { id: "pr", label: "Pull Request", detail: "the open PR (gh) or the branch diff", insert: "@git:pr", icon: "git-pull-request", iconKind: "cod" },
     ...(browser ? [{ id: "browser", label: "Browser", detail: (browser.title || browser.url || "").slice(0, 40), insert: "@browser", icon: "browser", iconKind: "cod" as const }] : []),
   ];
   const chats = refreshChats(cwd);
+  const rules = listRules(cwd).map((r): MenuItem => ({ id: `r:${r.name}`, label: r.name, detail: relative(cwd, r.path), insert: `@rule:${r.name}`, icon: "note", iconKind: "cod" }));
+  const dirs = [...new Set(all.filter((r) => r.includes("/")).map((r) => r.slice(0, r.lastIndexOf("/"))))];
+  const folderItem = (d: string): MenuItem => ({ id: `dir:${d}`, label: d.split("/").pop() ?? d, detail: d.includes("/") ? d.slice(0, d.lastIndexOf("/")) : "", insert: `@${d}/`, icon: "folder", iconKind: "cod" });
+  const rankedDirs = (limit: number) => (q ? dirs.map((d) => [score(d, q), d] as const).filter(([sc]) => sc >= 0).sort((a, b) => b[0] - a[0]).slice(0, limit).map(([, d]) => d) : dirs.slice(0, limit)).map(folderItem);
+  const isUrl = /^(https?:\/\/|www\.)\S+$/i.test(query);
+  const linkItem: MenuItem[] = isUrl ? [{ id: "link", label: "Link", detail: query.slice(0, 60), insert: `@link:${query.startsWith("www.") ? "https://" + query : query}`, icon: "link", iconKind: "cod" }] : [];
+  const codeItems = async (): Promise<MenuItem[]> => {
+    if (q.length < 2 || isUrl) return [];
+    const symbols = await Promise.race([vscode.commands.executeCommand<vscode.SymbolInformation[]>("vscode.executeWorkspaceSymbolProvider", query), new Promise<vscode.SymbolInformation[]>((r) => setTimeout(() => r([]), 250))]).catch(() => [] as vscode.SymbolInformation[]);
+    const fromService = (symbols ?? []).filter((sym) => sym.location.uri.scheme === "file" && !vscode.workspace.asRelativePath(sym.location.uri).startsWith("..")).slice(0, 5).map((sym): MenuItem => ({ id: `sym:${sym.name}:${sym.location.uri.fsPath}`, label: sym.name, detail: `${vscode.workspace.asRelativePath(sym.location.uri)}:${sym.location.range.start.line + 1}`, insert: `@code:${sym.name}`, icon: "symbol-method", iconKind: "cod" }));
+    if (fromService.length) return fromService;
+    return (await grepDefinitions(cwd, query, 5, true)).map((h): MenuItem => ({ id: `sym:${h.name}:${h.file}`, label: h.name, detail: `${h.file}:${h.line}`, insert: `@code:${h.name}`, icon: "symbol-method", iconKind: "cod" }));
+  };
   switch (mode) {
-    case "files": return { mode, title: "Files & Folders", sections: [{ title: "", items: (q ? rankedFiles(all, q, 15) : [...new Set([...open, ...all])].slice(0, 15)).map(fileItem) }] };
+    case "files": return { mode, title: "Files & Folders", sections: [{ title: "", items: [...(q ? rankedFiles(all, q, 12) : [...new Set([...open, ...all])].slice(0, 12)).map(fileItem), ...rankedDirs(q ? 4 : 3)] }] };
+    case "rules": return { mode, title: "Rules", sections: [{ title: "", items: [{ id: "rules-all", label: "All rules", detail: `${rules.length} file(s)`, insert: "@rules", icon: "note", iconKind: "cod" }, ...rules.filter((r) => matches(r, q))] }] };
+    case "code": return { mode, title: "Code", sections: [{ title: "", items: await codeItems() }] };
     case "chats": return { mode, title: "Past Chats", sections: [{ title: "", items: chats.filter((c) => matches(c, q)).slice(0, 12) }] };
     case "docs": return { mode, title: "Docs", sections: [{ title: "", items: docs.filter((d) => matches(d, q)) }] };
     case "terminals": return { mode, title: "Terminals", sections: [{ title: "", items: terminals.filter((t) => matches(t, q)) }] };
@@ -155,11 +171,17 @@ export async function suggestMentions(cwd: string, query: string, mode = "all"):
           ...(docs.length ? [{ id: "nav:docs", label: "Docs", detail: "", icon: "book", iconKind: "cod" as const, nav: "docs" }] : []),
           ...(terminals.length ? [{ id: "nav:terminals", label: "Terminals", detail: "", icon: "terminal", iconKind: "cod" as const, nav: "terminals" }] : []),
           { id: "nav:commits", label: "Commits", detail: "", icon: "git-commit", iconKind: "cod", nav: "commits" },
+          { id: "nav:code", label: "Code", detail: "symbols", icon: "symbol-method", iconKind: "cod", nav: "code" },
+          ...(rules.length ? [{ id: "nav:rules", label: "Rules", detail: "", icon: "note", iconKind: "cod" as const, nav: "rules" }] : []),
         ];
         return { mode: "all", title: "Mentions", sections: [...(top.length ? [{ title: "", items: top }] : []), { title: "", items: [...nav, ...direct] }] };
       }
       const items: MenuItem[] = [
+        ...linkItem,
         ...rankedFiles(all, q, 8).map(fileItem),
+        ...rankedDirs(2),
+        ...(await codeItems()),
+        ...rules.filter((r) => matches(r, q)).slice(0, 3),
         ...direct.filter((d) => matches(d, q)),
         ...docs.filter((d) => matches(d, q)).slice(0, 3),
         ...terminals.filter((t) => matches(t, q)).slice(0, 3),
@@ -213,6 +235,88 @@ export function suggestSlash(cwd: string, query: string, skills: { name: string;
   return { mode: "all", title: "Commands", sections };
 }
 
+// ── expansion helpers for the newer kinds ──
+function isDirectory(abs: string): boolean { try { return existsSync(abs) && statSync(abs).isDirectory(); } catch { return false; } }
+/** `@link:` — the page as text (HTML stripped), 10 s budget. */
+async function fetchText(url: string): Promise<string> {
+  try {
+    const ctrl = new AbortController(); const timer = setTimeout(() => ctrl.abort(), 10_000);
+    const res = await fetch(url, { signal: ctrl.signal, headers: { "user-agent": "muster-code" } }); clearTimeout(timer);
+    const raw = await res.text(); const type = res.headers.get("content-type") ?? "";
+    if (!type.includes("html")) return raw.slice(0, 60_000);
+    return raw.replace(/<script[\s\S]*?<\/script>|<style[\s\S]*?<\/style>/gi, "").replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, "\"").replace(/[ \t]+/g, " ").replace(/\n\s*\n+/g, "\n").trim().slice(0, 60_000);
+  } catch { return ""; }
+}
+/** `@code:Name` — the symbol's source from the language service (workspace symbols → document symbol range). */
+async function symbolText(cwd: string, name: string): Promise<string> {
+  const symbols = ((await vscode.commands.executeCommand<vscode.SymbolInformation[]>("vscode.executeWorkspaceSymbolProvider", name)) ?? []).filter((sym) => sym.name === name || sym.name.startsWith(name)).slice(0, 3);
+  const out: string[] = [];
+  for (const sym of symbols) {
+    if (!sym.location.uri.fsPath.startsWith(cwd)) continue;
+    const doc = await vscode.workspace.openTextDocument(sym.location.uri);
+    const flat: vscode.DocumentSymbol[] = []; const walk = (list: vscode.DocumentSymbol[]) => { for (const d of list) { flat.push(d); walk(d.children); } };
+    walk(((await vscode.commands.executeCommand<vscode.DocumentSymbol[]>("vscode.executeDocumentSymbolProvider", sym.location.uri)) ?? []));
+    const full = flat.find((d) => d.name === sym.name && d.range.contains(sym.location.range.start));
+    const range = full?.range ?? sym.location.range;
+    const text = doc.getText(new vscode.Range(range.start.line, 0, Math.min(range.end.line + 1, doc.lineCount), 0));
+    out.push(`<symbol name="${sym.name}" file="${vscode.workspace.asRelativePath(sym.location.uri)}:${range.start.line + 1}-${range.end.line + 1}">\n${text.split("\n").slice(0, 200).join("\n")}\n</symbol>`);
+  }
+  if (out.length) return out.join("\n");
+  // No language service answer (project not loaded yet): find the definition with git grep and take the lines around it.
+  const hits = await grepDefinitions(cwd, name, 3);
+  for (const h of hits) {
+    try { const lines = readFileSync(join(cwd, h.file), "utf8").split("\n"); const from = Math.max(0, h.line - 1); const text = lines.slice(from, from + 120).join("\n"); out.push(`<symbol name="${h.name}" file="${h.file}:${h.line}">\n${text}\n</symbol>`); } catch { /* skip */ }
+  }
+  return out.join("\n");
+}
+const DEF_KEYWORDS = "function\\*?|class|interface|type|enum|const|let|var|def|fn|struct|trait|impl|func|module";
+/** Definitions matching a name (or prefix) via `git grep`, as a fallback for `@code:` and the Code category. */
+async function grepDefinitions(cwd: string, name: string, limit: number, prefix = false): Promise<{ name: string; file: string; line: number }[]> {
+  if (!/^[\w$]+$/.test(name)) return [];
+  // POSIX ERE for git grep (no (?:…) groups): optional export/default/async, a definition keyword, the name (or prefix).
+  const pattern = `(^|[[:space:]])(export[[:space:]]+)?(default[[:space:]]+)?(async[[:space:]]+)?(pub[[:space:]]+)?(${DEF_KEYWORDS})[[:space:]]+${name}${prefix ? "[A-Za-z0-9_]*" : ""}([^A-Za-z0-9_]|$)`;
+  const raw = await git(cwd, ["grep", "-n", "-I", "-E", "--", pattern, "--", ":!node_modules", ":!dist", ":!*.min.js", ":!*.map"]);
+  const out: { name: string; file: string; line: number }[] = [];
+  for (const line of raw.split("\n")) {
+    const m = /^([^:]+):(\d+):(.*)$/.exec(line); if (!m) continue;
+    const nm = new RegExp(`(?:${DEF_KEYWORDS})\\s+(${name}[A-Za-z0-9_]*)`).exec(m[3]!)?.[1] ?? name;
+    if (out.some((o) => o.name === nm && o.file === m[1])) continue;
+    out.push({ name: nm, file: m[1]!, line: Number(m[2]) }); if (out.length >= limit) break;
+  }
+  return out;
+}
+const RULE_DIRS = (cwd: string) => [join(cwd, ".muster", "rules"), join(cwd, ".cursor", "rules")];
+function readRule(cwd: string, name: string): string { for (const dir of RULE_DIRS(cwd)) for (const ext of ["", ".md", ".mdc"]) { const p = join(dir, name + ext); try { if (existsSync(p) && statSync(p).isFile()) return readFileSync(p, "utf8"); } catch { /* skip */ } } return ""; }
+export function listRules(cwd: string): { name: string; path: string }[] {
+  const out: { name: string; path: string }[] = [];
+  for (const dir of RULE_DIRS(cwd)) { if (!existsSync(dir)) continue; for (const f of readdirSync(dir).sort()) if (/\.(md|mdc)$/.test(f)) out.push({ name: f.replace(/\.(md|mdc)$/, ""), path: join(dir, f) }); }
+  return out;
+}
+/** `@git:pr` — the pull request through `gh` (title, body, diff); without gh, the branch diff against the default branch. */
+async function prContext(cwd: string): Promise<string> {
+  const gh = (args: string[]) => new Promise<string>((r) => execFile("gh", args, { cwd, maxBuffer: 16 * 1024 * 1024 }, (e, out) => r(e ? "" : String(out))));
+  const view = await gh(["pr", "view", "--json", "number,title,body,baseRefName,headRefName,url"]);
+  if (!view) { const base = await defaultBranch(cwd); const d = await git(cwd, ["diff", `${base}...HEAD`]); return d.trim() ? `<pull-request note="no gh pull request; branch diff vs ${base}">\n${d.split("\n").slice(0, MAX_LINES).join("\n")}\n</pull-request>` : ""; }
+  const diff = await gh(["pr", "diff"]);
+  return `<pull-request>\n${view.trim()}\n${diff.split("\n").slice(0, MAX_LINES).join("\n")}\n</pull-request>`;
+}
+/** `@folder` — the tree (3 levels, 200 entries) with sizes. */
+function folderListing(cwd: string, rel: string): string {
+  const abs = join(cwd, rel); const out: string[] = [];
+  const walk = (dir: string, depth: number) => {
+    if (out.length >= 200 || depth > 3) return;
+    let entries: string[] = []; try { entries = readdirSync(dir).sort(); } catch { return; }
+    for (const e of entries) {
+      if (/^(node_modules|\.git|dist|build|out|coverage)$/.test(e)) continue;
+      const p = join(dir, e); let st; try { st = statSync(p); } catch { continue; }
+      const r = relative(abs, p);
+      if (st.isDirectory()) { out.push(`${r}/`); walk(p, depth + 1); } else out.push(`${r} (${st.size} B)`);
+      if (out.length >= 200) { out.push("…"); return; }
+    }
+  };
+  walk(abs, 0); return out.join("\n");
+}
+
 // ── expansion: every mention kind becomes a context block ──
 export async function expandContext(prompt: string, cwd: string): Promise<{ prompt: string; images: string[] }> {
   // A leading /command from .cursor|.claude|.muster/commands becomes its file content ($ARGUMENTS or appended arguments).
@@ -221,9 +325,14 @@ export async function expandContext(prompt: string, cwd: string): Promise<{ prom
   const blocks: string[] = [];
   const images: string[] = [];
   const clip = (text: string, path = "") => { const lines = text.split("\n"); return `${lines.slice(0, MAX_LINES).join("\n")}${lines.length > MAX_LINES ? `\n… (${lines.length - MAX_LINES} more lines${path ? ` in ${path}` : ""})` : ""}`; };
-  for (const match of prompt.matchAll(/(?:^|\s)@([\w./:-]+)/g)) {
-    const token = match[1]!;
+  for (const match of prompt.matchAll(/(?:^|\s)@([\w./:?=&%#+-]+)/g)) {
+    const token = match[1]!.replace(/[.,;:)]+$/, "");
     if (blocks.length >= 12) break;
+    if (token.startsWith("link:") || /^https?:\/\//.test(token)) { const url = token.startsWith("link:") ? token.slice(5) : token; const text = await fetchText(url); if (text) blocks.push(`<link url="${url}">\n${clip(text)}\n</link>`); continue; }
+    if (token.startsWith("code:") || token.startsWith("symbol:")) { const found = await symbolText(cwd, token.slice(token.indexOf(":") + 1)); if (found) blocks.push(found); continue; }
+    if (token === "rules" || token.startsWith("rule:")) { const text = token === "rules" ? readRules(cwd) : readRule(cwd, token.slice(5)); if (text) blocks.push(`<rules${token === "rules" ? "" : ` name="${token.slice(5)}"`}>\n${clip(text)}\n</rules>`); continue; }
+    if (token === "git:pr") { const pr = await prContext(cwd); if (pr) blocks.push(pr); continue; }
+    if (token.startsWith("folder:") || (isDirectory(join(cwd, token.replace(/\/$/, ""))) && !/:\d+-\d+$/.test(token))) { const rel = (token.startsWith("folder:") ? token.slice(7) : token).replace(/\/$/, ""); const listing = folderListing(cwd, rel); if (listing) blocks.push(`<folder path="${rel}">\n${listing}\n</folder>`); continue; }
     if (token === "browser" || token === "browser:console") { const ctx = await browserContext(); if (ctx) blocks.push(`<browser>\n${ctx}\n</browser>`); continue; }
     if (token === "web") { blocks.push("<instruction>Use web search for anything that needs current or external information.</instruction>"); continue; }
     if (token === "terminal" || token.startsWith("terminal:")) { const tail = terminalTail(token.slice("terminal:".length)); if (tail) blocks.push(`<terminal>\n${tail}\n</terminal>`); continue; }
