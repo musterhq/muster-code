@@ -12,7 +12,7 @@ import { LiveEditController } from "./live-edit.js";
 import { startDevControl } from "./dev-control.js";
 import { completionsSnoozedFor, registerCompletions, snoozeCompletions } from "./completions.js";
 import { PlanEditorProvider } from "./plan-editor.js";
-import { watchTerminals, setBrowserProvider } from "./context.js";
+import { refreshMentionIndex, setBrowserProvider, watchTerminals } from "./context.js";
 import { SettingsPage } from "./settings-page.js";
 import { BrowserController } from "./browser.js";
 import { queryCodex } from "./codex.js";
@@ -34,6 +34,7 @@ const output = vscode.window.createOutputChannel("Muster", { log: true });
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
   useCatalogStore(context.globalState);
   setTimeout(() => prefetchCatalog(vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? process.cwd()), 1500);
+  setTimeout(() => refreshMentionIndex(), 2500); // the @ file index, so the first popover is instant
   const config = () => vscode.workspace.getConfiguration("muster");
   const workspaceCwd = () => vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? process.cwd();
   const effort = () => (config().get<string>("codex.effort") as "low" | "medium" | "high" | "xhigh" | "max" | "ultra") ?? "medium";
