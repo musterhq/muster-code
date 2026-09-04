@@ -13,7 +13,7 @@ export interface BrowserPick { readonly id: string; readonly picked: PickedEleme
 export interface ConsoleEntry { level: string; message: string; line?: number; source?: string }
 /** A visual-editor edit made in the browser (Cursor's CHANGES list: old → new), applied live to the page until the agent puts it in code. */
 export interface VisualChange { selector: string; kind: "text" | "style"; prop?: string; before: string; after: string; source?: PickedSource | null }
-export interface BrowserState { id: string; url: string; title: string; console: ConsoleEntry[]; picked: PickedElement | null; picking: boolean; driving: boolean; changes: VisualChange[] }
+export interface BrowserState { id: string; url: string; title: string; console: ConsoleEntry[]; picked: PickedElement | null; picking: boolean; driving: boolean; changes: VisualChange[]; cert?: { url: string; error: string } | null; headless?: boolean }
 
 /** Cursor's lock overlay while the agent drives: banner + "Take control" (the page stays clickable so the agent's own input events land). */
 export const LOCK_JS = `(() => { if (document.getElementById("__muster_lock")) return true; const d = document.createElement("div"); d.id = "__muster_lock"; d.setAttribute("style", "position:fixed;inset:0;z-index:2147483647;pointer-events:none;display:flex;align-items:flex-end;justify-content:center;font:13px -apple-system,system-ui,sans-serif;color:#fff;box-shadow:inset 0 0 0 2px #D2943E");
@@ -45,6 +45,8 @@ export class BrowserController {
       if (args.kind === "title" && args.title !== undefined) tab.title = args.title;
       if ((args.kind === "navigate" || args.kind === "title" || args.kind === "ready") && args.url) { tab.url = args.url; this.lastUrl = args.url; void context.workspaceState.update("muster.browser.lastUrl", args.url); }
       if (args.kind === "console" && args.message === "__muster:takecontrol") { this.takeControl(args.id); return; }
+      if (args.kind === "cert") { tab.cert = { url: String(args.url ?? tab.url), error: String(args.message ?? "certificate error") }; this.changes.fire(tab); return; }
+      if (args.kind === "navigate" || args.kind === "ready") tab.cert = null;
       if (args.kind === "console" && args.message !== undefined) { tab.console.push({ level: args.level ?? "log", message: args.message, ...(args.line !== undefined ? { line: args.line } : {}), ...(args.source ? { source: args.source } : {}) }); if (tab.console.length > 300) tab.console.shift(); }
       this.changes.fire(tab);
     }));
@@ -69,9 +71,9 @@ export class BrowserController {
   defaultUrl(): string { return this.lastUrl; }
 
   /** A new browser tab: the host (pane webview or a browser editor tab) draws the chrome and reports the page area. */
-  open(url?: string, host: "pane" | "editor" = "pane"): BrowserState {
+  open(url?: string, host: "pane" | "editor" | "headless" = "pane"): BrowserState {
     const id = `b${++this.counter}`;
-    const tab: BrowserState = { id, url: url ?? this.lastUrl, title: "", console: [], picked: null, picking: false, driving: false, changes: [] };
+    const tab: BrowserState = { id, url: url ?? this.lastUrl, title: "", console: [], picked: null, picking: false, driving: false, changes: [], ...(host === "headless" ? { headless: true } : {}) };
     this.tabs.set(id, tab);
     void vscode.commands.executeCommand("muster.browser.open", { id, url: tab.url, host });
     if (host === "editor") this.openEditor(tab);

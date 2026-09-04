@@ -3,6 +3,7 @@
 // the default chat participant + models (native chat kept as plumbing for
 // inline chat / chat editing), and Cursor's status-bar cluster.
 import * as vscode from "vscode";
+import { spawn } from "node:child_process";
 import { cachedQuery, formatAge, formatSize, interruptTurn, listThreads, prefetchCatalog, readHistory, runTurn, setBrowserMcp, setDisabledMcpServers, threadsForWorkspace, turnHooks, type CodexThread, useCatalogStore } from "./codex.js";
 import { BrowserToolServer } from "./browser-tools.js";
 import { join as joinPath } from "node:path";
@@ -283,12 +284,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   browser.onChange((state) => pane.browserChanged(state));
   browser.onPick((pick) => { if (pick.imagePath || !pick.picked) void pane.addBrowserPick(pick); });
   // The browser as agent tools: Codex launches our MCP shim, which calls back into this host over a socket.
-  const browserTools = new BrowserToolServer(browser, () => browser.activeEditorBrowser() ?? pane.activeBrowserId(), (url) => { pane.openBrowserTab(url); return browser.list().at(-1); }, (line) => output.appendLine(line));
+  const browserTools = new BrowserToolServer(browser, () => browser.activeEditorBrowser() ?? pane.activeBrowserId(), (url, headless) => { if (headless) return browser.open(url, "headless"); pane.openBrowserTab(url); return browser.list().at(-1); }, (line) => output.appendLine(line));
   browserTools.start(joinPath(context.extensionPath, "browser-mcp.js")); context.subscriptions.push(browserTools);
   setBrowserMcp({ command: browserTools.launcherPath, args: [], env: {} });
   turnHooks.start = () => browserTools.turnStarted(); turnHooks.end = () => browserTools.turnEnded();
   output.appendLine(`browser tools listening on ${browserTools.socketPath} (shim: ${browserTools.launcherPath})`);
   context.subscriptions.push(vscode.commands.registerCommand("muster.browser.openTab", async (url?: string) => { const target = typeof url === "string" ? url : await vscode.window.showInputBox({ prompt: "Open Browser", value: browser.defaultUrl(), placeHolder: "Enter URL or search..." }); if (!target) return; if (config().get<string>("browser.location", "editor") === "pane") pane.openBrowserTab(target); else browser.open(target, "editor"); }));
+  context.subscriptions.push(vscode.commands.registerCommand("muster.browser.devtoolsActive", () => { const id = browser.activeEditorBrowser() ?? pane.activeBrowserId(); if (id) void vscode.commands.executeCommand("muster.browser.devtools", { id }); }));
   context.subscriptions.push(vscode.commands.registerCommand("muster.browser.reloadActive", () => { const id = browser.activeEditorBrowser() ?? pane.activeBrowserId(); if (id) browser.action(id, "reload"); }));
   context.subscriptions.push(vscode.commands.registerCommand("muster.browser.pickActive", () => { const id = browser.activeEditorBrowser() ?? pane.activeBrowserId(); if (id) browser.action(id, "pick"); }));
   context.subscriptions.push(vscode.commands.registerCommand("muster.agent.more", () => settings.open("general")));
@@ -310,6 +312,35 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     context.subscriptions.push(api.onDidOpenRepository(() => api.repositories.forEach(watch)));
   })();
   context.subscriptions.push(vscode.commands.registerCommand("muster.agent.stop", () => pane.stop()));
+  // Cursor's chat keyboard surface (see docs/cursor-feature-atlas.md §2).
+  context.subscriptions.push(vscode.commands.registerCommand("muster.agent.focus", () => pane.focus()));
+  context.subscriptions.push(vscode.commands.registerCommand("muster.agent.closeActiveTab", () => pane.closeActive()));
+  context.subscriptions.push(vscode.commands.registerCommand("muster.agent.prevTab", () => pane.stepTab(-1)));
+  context.subscriptions.push(vscode.commands.registerCommand("muster.agent.nextTab", () => pane.stepTab(1)));
+  context.subscriptions.push(vscode.commands.registerCommand("muster.agent.model", () => pane.openMenu("model")));
+  context.subscriptions.push(vscode.commands.registerCommand("muster.agent.access", () => pane.openMenu("access")));
+  context.subscriptions.push(vscode.commands.registerCommand("muster.agent.addContext", () => pane.openMenu("context")));
+  context.subscriptions.push(vscode.commands.registerCommand("muster.agent.fixError", () => pane.fixErrorAtCursor()));
+  context.subscriptions.push(vscode.commands.registerCommand("muster.plan.toggleMode", async () => {
+    const tab = vscode.window.tabGroups.activeTabGroup.activeTab; const input = tab?.input as { uri?: vscode.Uri; viewType?: string } | undefined; const uri = input?.uri ?? vscode.window.activeTextEditor?.document.uri;
+    if (!uri || !/\.plan\.md$/i.test(uri.fsPath)) return;
+    await vscode.commands.executeCommand("vscode.openWith", uri, input?.viewType === "muster.planEditor" ? "default" : "muster.planEditor");
+  }));
+  // Dictation: a command that prints transcribed text (default `hear`, Apple's on-device recognition via brew install hear); lines land in the composer.
+  let dictation: import("node:child_process").ChildProcess | undefined;
+  const stopDictation = () => { if (dictation) { dictation.kill(); dictation = undefined; } pane.dictation(false); };
+  const startDictation = (command?: string) => {
+    const cmd = command ?? config().get<string>("dictation.command", "hear");
+    const child = spawn(cmd, { shell: true, cwd: workspaceCwd(), env: process.env });
+    dictation = child; pane.dictation(true);
+    let buf = "";
+    child.stdout?.on("data", (d: Buffer) => { buf += d.toString(); const lines = buf.split(/\r?\n/); buf = lines.pop() ?? ""; for (const l of lines) if (l.trim()) pane.dictation(true, l.trim()); });
+    child.on("error", (e) => { pane.dictation(false); dictation = undefined; void vscode.window.showWarningMessage(`Dictation command failed (${e.message}). Install it (brew install hear) or set muster.dictation.command.`); });
+    child.on("exit", (code) => { if (buf.trim()) pane.dictation(true, buf.trim()); if (dictation === child) { dictation = undefined; pane.dictation(false); if (code && code !== 0 && code !== 143) void vscode.window.showWarningMessage(`Dictation command exited with ${code}. Install hear (brew install hear) or set muster.dictation.command.`); } });
+  };
+  pane.onDictate = () => { if (dictation) stopDictation(); else startDictation(); };
+  context.subscriptions.push(vscode.commands.registerCommand("muster.dictation.toggle", () => pane.onDictate?.()), { dispose: stopDictation });
+  context.subscriptions.push(vscode.commands.registerCommand("muster.dictation.start", (command?: string) => { stopDictation(); startDictation(command); }));
   context.subscriptions.push(vscode.commands.registerCommand("muster.agent.maximize", () => vscode.commands.executeCommand("workbench.action.toggleMaximizedAuxiliaryBar")));
   context.subscriptions.push(vscode.commands.registerCommand("muster.thread.resume", async (thread?: CodexThread) => {
     if (thread) await pane.openThread(thread); else await pane.pickThread();

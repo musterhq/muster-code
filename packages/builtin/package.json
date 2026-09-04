@@ -281,6 +281,66 @@
         "command": "muster.review.toggleLayout",
         "title": "Review: Inline / Side by side",
         "icon": "$(split-horizontal)"
+      },
+      {
+        "command": "muster.agent.focus",
+        "title": "Open Chat",
+        "category": "Muster"
+      },
+      {
+        "command": "muster.agent.closeActiveTab",
+        "title": "Close Chat Tab",
+        "category": "Muster"
+      },
+      {
+        "command": "muster.agent.prevTab",
+        "title": "Previous Chat Tab",
+        "category": "Muster"
+      },
+      {
+        "command": "muster.agent.nextTab",
+        "title": "Next Chat Tab",
+        "category": "Muster"
+      },
+      {
+        "command": "muster.agent.model",
+        "title": "Open Model Menu",
+        "category": "Muster"
+      },
+      {
+        "command": "muster.agent.access",
+        "title": "Open Access Menu",
+        "category": "Muster"
+      },
+      {
+        "command": "muster.agent.addContext",
+        "title": "Add Context (@)",
+        "category": "Muster"
+      },
+      {
+        "command": "muster.agent.fixError",
+        "title": "Investigate Error in Chat",
+        "category": "Muster"
+      },
+      {
+        "command": "muster.plan.toggleMode",
+        "title": "Plan: Toggle Editor Mode",
+        "category": "Muster"
+      },
+      {
+        "command": "muster.dictation.toggle",
+        "title": "Toggle Dictation",
+        "category": "Muster"
+      },
+      {
+        "command": "muster.dictation.start",
+        "title": "Start Dictation (command)",
+        "category": "Muster"
+      },
+      {
+        "command": "muster.browser.devtoolsActive",
+        "title": "Browser: DevTools",
+        "category": "Muster"
       }
     ],
     "configuration": {
@@ -383,6 +443,11 @@
           "type": "boolean",
           "default": true,
           "description": "Next-edit prediction: after an edit, Muster Tab may suggest the change it implies elsewhere in the file as an inline edit (Tab jumps and accepts)."
+        },
+        "muster.dictation.command": {
+          "type": "string",
+          "default": "hear",
+          "description": "Command whose stdout lines are typed into the composer while dictating (⌘⇧Space or the mic). Default: hear — Apple's on-device speech recognition (brew install hear). Any transcriber that prints lines works."
         }
       }
     },
@@ -488,7 +553,7 @@
       {
         "command": "muster.edit.rejectFile",
         "key": "ctrl+shift+backspace",
-        "mac": "cmd+backspace",
+        "mac": "shift+cmd+backspace",
         "when": "muster.liveEdit && editorTextFocus"
       },
       {
@@ -546,12 +611,6 @@
         "when": "editorTextFocus"
       },
       {
-        "command": "muster.agent.mode",
-        "key": "ctrl+i",
-        "mac": "cmd+i",
-        "when": "editorTextFocus || focusedView == muster.agent.pane"
-      },
-      {
         "command": "muster.browser.openTab",
         "key": "ctrl+shift+b",
         "mac": "shift+cmd+b"
@@ -579,6 +638,124 @@
         "key": "ctrl+right",
         "mac": "cmd+right",
         "when": "inlineSuggestionVisible && !editorReadonly"
+      },
+      {
+        "command": "muster.agent.focus",
+        "key": "ctrl+i",
+        "mac": "cmd+i",
+        "when": "!terminalFocus"
+      },
+      {
+        "command": "muster.agent.focus",
+        "key": "ctrl+l",
+        "mac": "cmd+l",
+        "when": "!editorTextFocus && !terminalFocus"
+      },
+      {
+        "command": "muster.agent.new",
+        "key": "ctrl+shift+i",
+        "mac": "shift+cmd+i"
+      },
+      {
+        "command": "muster.agent.new",
+        "key": "ctrl+t",
+        "mac": "cmd+t",
+        "when": "focusedView == muster.agent.pane && !muster.browserActive"
+      },
+      {
+        "command": "muster.agent.new",
+        "key": "ctrl+n",
+        "mac": "cmd+n",
+        "when": "focusedView == muster.agent.pane"
+      },
+      {
+        "command": "muster.agent.closeActiveTab",
+        "key": "ctrl+w",
+        "mac": "cmd+w",
+        "when": "focusedView == muster.agent.pane && !editorTextFocus"
+      },
+      {
+        "command": "muster.agent.stop",
+        "key": "ctrl+shift+backspace",
+        "mac": "shift+cmd+backspace",
+        "when": "focusedView == muster.agent.pane"
+      },
+      {
+        "command": "muster.agent.prevTab",
+        "key": "ctrl+[",
+        "mac": "cmd+[",
+        "when": "focusedView == muster.agent.pane && !editorTextFocus"
+      },
+      {
+        "command": "muster.agent.nextTab",
+        "key": "ctrl+]",
+        "mac": "cmd+]",
+        "when": "focusedView == muster.agent.pane && !editorTextFocus"
+      },
+      {
+        "command": "muster.agent.prevTab",
+        "key": "ctrl+alt+left",
+        "mac": "alt+cmd+left",
+        "when": "focusedView == muster.agent.pane && !editorTextFocus"
+      },
+      {
+        "command": "muster.agent.nextTab",
+        "key": "ctrl+alt+right",
+        "mac": "alt+cmd+right",
+        "when": "focusedView == muster.agent.pane && !editorTextFocus"
+      },
+      {
+        "command": "muster.agent.model",
+        "key": "ctrl+/",
+        "mac": "cmd+/",
+        "when": "focusedView == muster.agent.pane && !editorTextFocus"
+      },
+      {
+        "command": "muster.agent.addContext",
+        "key": "ctrl+alt+p",
+        "mac": "alt+cmd+p",
+        "when": "focusedView == muster.agent.pane && !editorTextFocus"
+      },
+      {
+        "command": "muster.agent.fixError",
+        "key": "ctrl+shift+d",
+        "mac": "shift+cmd+d",
+        "when": "editorTextFocus"
+      },
+      {
+        "command": "muster.review.open",
+        "key": "ctrl+shift+r",
+        "mac": "shift+cmd+r",
+        "when": "focusedView == muster.agent.pane"
+      },
+      {
+        "command": "workbench.action.toggleAuxiliaryBar",
+        "key": "ctrl+alt+u",
+        "mac": "alt+cmd+u"
+      },
+      {
+        "command": "muster.plan.toggleMode",
+        "key": "ctrl+shift+v",
+        "mac": "shift+cmd+v",
+        "when": "activeCustomEditorId == muster.planEditor || (editorLangId == markdown && resourceFilename =~ /\\.plan\\.md$/)"
+      },
+      {
+        "command": "muster.plan.build",
+        "key": "ctrl+enter",
+        "mac": "cmd+enter",
+        "when": "activeCustomEditorId == muster.planEditor"
+      },
+      {
+        "command": "muster.dictation.toggle",
+        "key": "ctrl+shift+space",
+        "mac": "shift+cmd+space",
+        "when": "!terminalFocus"
+      },
+      {
+        "command": "muster.browser.devtoolsActive",
+        "key": "ctrl+shift+j",
+        "mac": "alt+cmd+i",
+        "when": "muster.browserActive"
       }
     ],
     "customEditors": [

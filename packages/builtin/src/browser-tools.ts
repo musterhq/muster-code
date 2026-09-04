@@ -60,7 +60,7 @@ export class BrowserToolServer implements vscode.Disposable {
     /** The tab the user is looking at (pane tab or browser editor), else undefined. */
     private readonly visibleTab: () => string | undefined,
     /** Open a browser tab for the agent when none exists. */
-    private readonly openTab: (url?: string) => BrowserState | undefined,
+    private readonly openTab: (url?: string, headless?: boolean) => BrowserState | undefined,
     private readonly log: (line: string) => void,
   ) {
     browser.onTakeControl((id) => { this.userControl = true; this.log(`browser: user took control of ${id}`); });
@@ -114,13 +114,14 @@ export class BrowserToolServer implements vscode.Disposable {
 
   private target(args: Record<string, unknown>, url?: string): BrowserState {
     const wanted = typeof args.tab === "string" ? this.browser.get(args.tab) : undefined;
-    const visible = this.visibleTab(); const tab = wanted ?? (visible ? this.browser.get(visible) : undefined) ?? this.browser.list()[0] ?? this.openTab(url);
+    if (!wanted && args.headless === true) { const t = this.openTab(url, true); if (t) return t; }
+    const visible = this.visibleTab(); const tab = wanted ?? (visible ? this.browser.get(visible) : undefined) ?? this.browser.list().find((t) => !t.headless) ?? this.openTab(url);
     if (!tab) throw new Error("No browser tab could be opened.");
     return tab;
   }
 
   async execute(tool: string, args: Record<string, unknown>): Promise<ToolResult> {
-    if (tool === "browser_tabs") return { text: this.browser.list().map((t) => `${t.id}: ${t.title || "(untitled)"} — ${t.url}${t.driving ? " (agent)" : ""}`).join("\n") || "No browser tabs are open; browser_navigate opens one." };
+    if (tool === "browser_tabs") return { text: this.browser.list().map((t) => `${t.id}: ${t.title || "(untitled)"} — ${t.url}${t.driving ? " (agent)" : ""}${t.headless ? " (headless)" : ""}`).join("\n") || "No browser tabs are open; browser_navigate opens one." };
     if (this.userControl) return { text: "The user took control of the browser. Ask them before using it again.", isError: true };
     const tab = this.target(args, tool === "browser_navigate" ? String(args.url ?? "") : undefined);
     const id = tab.id;

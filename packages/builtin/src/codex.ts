@@ -155,6 +155,16 @@ export function steerTurn(text: string, conversation?: string): Promise<boolean>
 }
 
 export let lastRollbackError = "";
+/** `thread/name/set` on the process that owns the thread (or a one-shot when none is warm). */
+export async function setThreadName(conversation: string | undefined, threadId: string, name: string, cwd: string): Promise<boolean> {
+  try { await callCodexConversation(conversation ? `conv:${conversation}` : `none:${threadId}`, "thread/name/set", { threadId, name }, { transportOwner: TRANSPORT_OWNER, cwd }); return true; }
+  catch (error) { lastRollbackError = error instanceof Error ? error.message : String(error); return false; }
+}
+/** `thread/archive`: the rollout moves to archived_sessions; the History tab stops listing it. */
+export async function archiveThread(conversation: string | undefined, threadId: string, cwd: string): Promise<boolean> {
+  try { await callCodexConversation(conversation ? `conv:${conversation}` : `none:${threadId}`, "thread/archive", { threadId }, { transportOwner: TRANSPORT_OWNER, cwd }); return true; }
+  catch (error) { lastRollbackError = error instanceof Error ? error.message : String(error); return false; }
+}
 /** Paginated threads: replace the history so that `beforeTurnId` and every later turn are gone (`thread/revert`). */
 export async function revertThread(conversation: string, threadId: string, beforeTurnId: string, cwd: string): Promise<boolean> {
   try { await callCodexConversation(`conv:${conversation}`, "thread/revert", { threadId, beforeTurnId }, { transportOwner: TRANSPORT_OWNER, cwd }); return true; }

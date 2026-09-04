@@ -5,6 +5,7 @@
 import { ipcMain as __mbIpcMain, WebContentsView as __mbWebContentsView, BrowserWindow as __mbBrowserWindow } from "electron";
 (() => {
   const views = new Map();
+  const trusted = new Set(); // hosts whose certificate the user chose to trust ("Proceed anyway")
   const key = (win, id) => `${win.id}:${id}`;
   // Electron console levels: numeric 0 verbose · 1 info · 2 warning · 3 error (older signature) or strings "debug" | "info" | "warning" | "error".
   // Resolve when the current load settles (finish, stop, or fail other than an abort), or after a timeout.
@@ -32,12 +33,13 @@ import { ipcMain as __mbIpcMain, WebContentsView as __mbWebContentsView, Browser
       // a browser must follow links, so drop that guard from our views (now, and again once creation events settle).
       const unguard = () => wc.removeAllListeners("will-navigate");
       unguard(); setImmediate(unguard); wc.once("did-start-loading", unguard);
+      wc.on("certificate-error", (event, url, error) => { push({ kind: "cert", url, message: error }); });
       wc.on("did-fail-load", (_e, code, desc, url, isMainFrame) => { if (isMainFrame && code !== -3) push({ kind: "console", level: "error", message: `Failed to load ${url}: ${desc} (${code})` }); });
       // Local dev servers without cache headers (python -m http.server, file watchers) must never show a stale page: revalidate localhost loads.
       const ses = wc.session;
       if (!ses.__musterFresh) { ses.__musterFresh = true;
         // Self-signed dev certificates: trust localhost only; everything else keeps Chromium's verdict.
-        ses.setCertificateVerifyProc((request, callback) => callback(/^(localhost|127\.0\.0\.1|\[::1\]|.*\.localhost)$/.test(request.hostname) ? 0 : -3)); ses.webRequest.onBeforeSendHeaders({ urls: ["http://localhost/*", "http://127.0.0.1/*", "http://0.0.0.0/*", "http://*.localhost/*", "https://localhost/*", "https://*.localhost/*"] }, (details, callback) => callback({ requestHeaders: { ...details.requestHeaders, "Cache-Control": "max-age=0" } })); }
+        ses.setCertificateVerifyProc((request, callback) => callback(/^(localhost|127\.0\.0\.1|\[::1\]|.*\.localhost)$/.test(request.hostname) || trusted.has(request.hostname) ? 0 : -3)); ses.webRequest.onBeforeSendHeaders({ urls: ["http://localhost/*", "http://127.0.0.1/*", "http://0.0.0.0/*", "http://*.localhost/*", "https://localhost/*", "https://*.localhost/*"] }, (details, callback) => callback({ requestHeaders: { ...details.requestHeaders, "Cache-Control": "max-age=0" } })); }
       const push = (payload) => { entry.events.push(payload); if (entry.events.length > 400) entry.events.shift(); };
       wc.on("page-title-updated", (_e, title) => { entry.title = title; push({ kind: "title", title, url: wc.getURL() }); });
       wc.on("did-navigate", (_e, url) => push({ kind: "navigate", url }));
@@ -64,6 +66,8 @@ import { ipcMain as __mbIpcMain, WebContentsView as __mbWebContentsView, Browser
       case "url": return entry ? { url: entry.view.webContents.getURL(), title: entry.title } : null;
       case "probe": return entry ? { attached: entry.view.webContents.id, url: entry.view.webContents.getURL(), title: entry.title, bounds: entry.view.getBounds() } : null;
       case "focus": { if (entry) entry.view.webContents.focus(); return !!entry; }
+      case "devtools": { if (entry) entry.view.webContents.openDevTools({ mode: "detach" }); return !!entry; }
+      case "trust": { try { const host = new URL(String(msg.url)).hostname; trusted.add(host); } catch {} return true; }
       // Agent input (browser tools): real mouse/keyboard events into the page, coordinates in the view's own CSS px.
       case "input": { if (!entry || !msg.event) return false; try { entry.view.webContents.focus(); entry.view.webContents.sendInputEvent(msg.event); return true; } catch (error) { return { error: String((error && error.message) || error) }; } }
       case "close": { if (entry) { try { win.contentView.removeChildView(entry.view); } catch {} try { entry.view.webContents.close(); } catch {} views.delete(k); } return true; }

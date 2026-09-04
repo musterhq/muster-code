@@ -73,6 +73,9 @@ async function handle(line: string, deps: Deps): Promise<unknown> {
     }
     case "suggest":
       return { ok: true, ...(await deps.pane?.debugSuggest(message.kind === "skill" ? "skill" : "file", String(message.query ?? ""), String(message.mode ?? "all"))) };
+    case "dictate":
+      await vscode.commands.executeCommand("muster.dictation.start", String(message.command ?? "printf hello"));
+      return { ok: true };
     case "settings":
       return { ok: true, data: await deps.settings?.()?.debugData(String(message.section ?? "general")) };
     case "request":
