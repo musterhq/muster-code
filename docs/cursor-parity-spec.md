@@ -165,3 +165,12 @@ Mined from Cursor 3.18.25 (`workbench.desktop.main.js`: mention-menu modes and t
 9. Browser: bookmarks bar, DevTools/network, certificate overlay UI, headless tabs, tools for Claude turns; agent screenshot annotations.
 10. Dictation; thread rename/pin/archive/export in the history tab; "Generating… Stop ⇧⌘⌫" label state.
 11. V2 (owner: not yet important): Agents window, background agents, worktrees; git review surface.
+
+## Turn control, checkpoints, full access — 2026-09-04
+- **Typing mid-turn**: Enter while a turn runs sends the message into the running turn (`turn/steer` on the warm process, shown as a user bubble labelled "added mid-turn"); if the provider cannot take it (no active turn, Claude), it is queued under the messages ("Queued", × to drop) and sent when the turn ends. Verified live.
+- **Stop**: the send slot becomes a Stop button while running; ⇧⌘⌫ anywhere in the pane; `turn/interrupt` scoped to the tab's conversation. Verified live (2 s).
+- **Edit a sent prompt** (hover → Edit, or double-click): the workspace goes back to that point (every later turn's checkpoint restored, newest first), the provider forgets the turn and everything after it (`thread/revert { beforeTurnId }` for paginated threads, `thread/rollback` fallback), the chat is truncated, the edited text is resent. Verified live: after editing, the model's own memory holds only the new turn. **Restore checkpoint** (hover → Restore checkpoint) does the same without resending.
+- Turn ids come from `turn/started` and are stored on the user message; `thread/rollback` is refused for paginated threads ("paginated threads do not support thread/rollback"), which is every thread this app-server version starts.
+- **Full access = Cursor auto-apply**: the inline diff renders without per-hunk Accept/Reject widgets (`widgets:false`), the colours stay in the files, the bar offers Keep all / Undo all; Manual approval and Read only keep the review widgets.
+- **Cards keep their counts after Keep** (`kept` adds/dels survive settling; "+2 −1 · kept" instead of "+0 −0").
+- **Shell-made edits are painted**: a turn watcher snapshots dirty files at turn start and adopts every working-tree change the agent makes (origin from the snapshot, else HEAD, else empty for new files) after each command and at turn end — `turn/diff/updated` only covers apply_patch.

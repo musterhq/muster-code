@@ -5,7 +5,7 @@ import {
   readCodexThreadNames,
   readCodexRollout,
   runCodexAppServer,
-  interruptActiveCodexTurn,
+  interruptActiveCodexTurn, steerActiveCodexTurn, callCodexConversation,
   type CodexSessionSummary,
   type CodexTranscriptMessage,
 } from "@musterhq/core";
@@ -147,8 +147,26 @@ export async function runTurn(input: {
   } finally { turnHooks.end?.(); }
 }
 
-export function interruptTurn(): Promise<boolean> {
-  return interruptActiveCodexTurn(TRANSPORT_OWNER);
+/** Stop the running turn of one conversation (pane tab), or every turn of this host when none is given. */
+/** Type mid-turn: the message joins the running turn (`turn/steer`); false when nothing is running for that conversation. */
+export function steerTurn(text: string, conversation?: string): Promise<boolean> {
+  return steerActiveCodexTurn(text, TRANSPORT_OWNER, conversation ? `conv:${conversation}` : undefined);
+}
+
+export let lastRollbackError = "";
+/** Paginated threads: replace the history so that `beforeTurnId` and every later turn are gone (`thread/revert`). */
+export async function revertThread(conversation: string, threadId: string, beforeTurnId: string, cwd: string): Promise<boolean> {
+  try { await callCodexConversation(`conv:${conversation}`, "thread/revert", { threadId, beforeTurnId }, { transportOwner: TRANSPORT_OWNER, cwd }); return true; }
+  catch (error) { lastRollbackError = error instanceof Error ? error.message : String(error); return false; }
+}
+/** Drop the last N turns of a thread's history (`thread/rollback`); the caller reverts the files from its checkpoints. */
+export async function rollbackThread(conversation: string, threadId: string, numTurns: number, cwd: string): Promise<boolean> {
+  try { await callCodexConversation(`conv:${conversation}`, "thread/rollback", { threadId, numTurns }, { transportOwner: TRANSPORT_OWNER, cwd }); return true; }
+  catch (error) { lastRollbackError = error instanceof Error ? error.message : String(error); return false; }
+}
+
+export function interruptTurn(conversation?: string): Promise<boolean> {
+  return interruptActiveCodexTurn(TRANSPORT_OWNER, conversation ? `conv:${conversation}` : undefined);
 }
 
 export function formatAge(iso: string, nowMs = Date.now()): string {

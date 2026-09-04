@@ -5,7 +5,8 @@
 // widgets, the review bar); this side owns the state — baseline, hunks,
 // accept/reject — and drives the painter through muster.inlineDiff.*.
 import * as vscode from "vscode";
-import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { execFile } from "node:child_process";
+import { existsSync, mkdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { ApplyPatchStream, type PatchFile } from "./apply-patch.js";
 import { applyHunk, lineDiff, type LineHunk } from "./line-diff.js";
@@ -17,6 +18,8 @@ export interface EditCard { readonly path: string; readonly adds: number; readon
 export const BASELINE_SCHEME = "muster-baseline";
 
 interface LiveFile {
+  /** Counts of hunks already kept, so a settled card still reads "+12 −3" (Cursor keeps the numbers after Keep). */
+  kept?: { adds: number; dels: number };
   readonly uri: vscode.Uri;
   readonly abs: string;
   readonly rel: string;
@@ -111,7 +114,7 @@ export class LiveEditController {
       }
       return;
     }
-    if (method === "turn/diff/updated") { this.adoptTurnDiff(String(params.diff ?? "")); return; }
+    if (method === "turn/diff/updated") { const diff = String(params.diff ?? ""); this.log(`turn/diff/updated: ${diff.length} chars, ${parseUnifiedDiff(diff).length} file(s)`); this.adoptTurnDiff(diff); return; }
     if (method === "item/completed") {
       const item = (params.item ?? {}) as Record<string, unknown>;
       if (item.type !== "fileChange") return;
@@ -134,7 +137,7 @@ export class LiveEditController {
       const exists = existsSync(abs);
       const current = exists ? readFileSync(abs, "utf8") : "";
       const origin = file.oldPath === null ? "" : reverseApply(current, file);
-      if (origin === current) continue;
+      if (origin === current) { this.log(`turn diff: ${file.path} — reverse apply left the file unchanged, not adopted`); continue; }
       if (this.checkpoint && !this.checkpoint.has(abs)) this.checkpoint.set(abs, { existed: file.oldPath !== null, content: origin });
       const live: LiveFile = { uri: vscode.Uri.file(abs), abs, rel: file.path, origin, originItem: "turn-diff", baseline: origin.split("\n"), target: current, streaming: false, hunks: [], status: "written", busy: false, again: false, shown: false };
       this.files.set(abs, live);
@@ -162,6 +165,48 @@ export class LiveEditController {
   }
 
   /** Checkpoints: record what every touched file looked like when the turn began. */
+  /** "review": per-hunk Accept/Reject widgets; "auto" (full access): edits stand, diff colours stay, only Keep all / Undo all. */
+  reviewMode: "review" | "auto" = "review";
+  setReviewMode(mode: "review" | "auto"): void { if (this.reviewMode !== mode) { this.reviewMode = mode; for (const file of this.files.values()) this.repaint(file); } }
+
+  // ── turn watch: shell-made edits (no apply_patch, no turn/diff/updated) still get painted ──
+  private watch: { dirty: Map<string, string>; untracked: Set<string>; cwd: string } | undefined;
+  private git(cwd: string, args: string[]): Promise<string> {
+    return new Promise((resolve) => execFile("git", args, { cwd, maxBuffer: 64 * 1024 * 1024 }, (error, stdout) => resolve(error ? "" : String(stdout))));
+  }
+  /** Snapshot the files that are already dirty (their pre-turn content is not in HEAD) and remember what is untracked. */
+  async beginTurnWatch(cwd: string): Promise<void> {
+    const dirty = new Map<string, string>();
+    const changed = (await this.git(cwd, ["diff", "--name-only", "HEAD"])).split("\n").filter(Boolean);
+    for (const rel of changed.slice(0, 300)) { const abs = resolve(cwd, rel); try { if (existsSync(abs) && statSync(abs).size < 2_000_000) dirty.set(abs, readFileSync(abs, "utf8")); } catch { /* unreadable */ } }
+    const untracked = new Set((await this.git(cwd, ["ls-files", "--others", "--exclude-standard"])).split("\n").filter(Boolean).map((rel) => resolve(cwd, rel)));
+    this.watch = { dirty, untracked, cwd };
+  }
+  /** Adopt every file the working tree now shows changed that nothing painted yet (origin: the pre-turn snapshot, else HEAD, else empty for new files). */
+  async syncTurnWatch(final = false): Promise<void> {
+    const w = this.watch; if (!w) return;
+    const status = (await this.git(w.cwd, ["status", "--porcelain", "--untracked-files=all"])).split("\n").filter(Boolean);
+    for (const line of status) {
+      const code = line.slice(0, 2); const rel = line.slice(3).split(" -> ").pop()!.replace(/^"|"$/g, "");
+      if (code.includes("D") || /^(node_modules|dist|\.git)\//.test(rel)) continue;
+      const abs = resolve(w.cwd, rel);
+      if (this.files.has(abs) || !existsSync(abs)) continue;
+      let current: string; try { if (statSync(abs).size > 2_000_000) continue; current = readFileSync(abs, "utf8"); } catch { continue; }
+      let origin: string; let existed = true;
+      if (w.dirty.has(abs)) origin = w.dirty.get(abs)!;
+      else if (w.untracked.has(abs) || code.startsWith("??") || code.startsWith("A")) { origin = ""; existed = false; if (w.untracked.has(abs)) continue; }
+      else origin = await this.git(w.cwd, ["show", `HEAD:${rel}`]);
+      if (origin === current) continue;
+      if (this.checkpoint && !this.checkpoint.has(abs)) this.checkpoint.set(abs, { existed, content: origin });
+      const live: LiveFile = { uri: vscode.Uri.file(abs), abs, rel, origin, originItem: "turn-watch", baseline: origin.split("\n"), target: current, streaming: false, hunks: [], status: "written", busy: false, again: false, shown: false };
+      this.files.set(abs, live);
+      this.log(`turn watch: adopted ${rel} (${existed ? "modified" : "new"})`);
+      void vscode.commands.executeCommand("setContext", "muster.liveEdit", true);
+      try { await this.flush(live); await this.clearDirty(live); this.repaint(live); } catch (error) { this.log(`turn watch adopt failed: ${error instanceof Error ? error.message : String(error)}`); }
+    }
+    if (final) this.watch = undefined;
+  }
+
   beginCheckpoint(): void { this.checkpoint = new Map(); }
   takeCheckpoint(): Checkpoint { const taken = this.checkpoint ?? new Map(); this.checkpoint = undefined; return taken; }
 
@@ -187,6 +232,9 @@ export class LiveEditController {
   review(): EditCard[] {
     return [...this.files.values()].map((file) => this.card(file));
   }
+  /** Cards of files already kept or undone this session (their counts survive settling, as in Cursor). */
+  private readonly settled = new Map<string, EditCard>();
+  settledCards(): EditCard[] { return [...this.settled.values()]; }
 
   async acceptAll(): Promise<void> { for (const file of [...this.files.values()]) await this.acceptFile(file); }
   async rejectAll(): Promise<void> { for (const file of [...this.files.values()]) await this.rejectFile(file); }
@@ -306,6 +354,7 @@ export class LiveEditController {
       hunks: file.hunks.map((h) => ({ start: h.targetStart + 1, count: h.targetCount, removed: h.removed, inner: innerRanges(h.removed, lines.slice(h.targetStart, h.targetStart + h.targetCount)) })),
       streaming: file.streaming,
       files: this.files.size,
+      widgets: this.reviewMode === "review",
     });
     this.cards.fire(this.card(file));
     this.changed.fire();
@@ -365,6 +414,7 @@ export class LiveEditController {
     if (!hunk) return;
     if (file.streaming && index === file.hunks.length - 1) { vscode.window.setStatusBarMessage("Still writing this change", 2000); return; }
     const doc = await vscode.workspace.openTextDocument(file.uri);
+    file.kept = { adds: (file.kept?.adds ?? 0) + hunk.targetCount, dels: (file.kept?.dels ?? 0) + hunk.removed.length };
     file.baseline = applyHunk(file.baseline, doc.getText().split("\n"), hunk);
     this.repaint(file);
     if (!file.hunks.length) await this.settle(file);
@@ -393,6 +443,7 @@ export class LiveEditController {
   private async acceptFile(file: LiveFile): Promise<void> {
     if (file.streaming) { vscode.window.setStatusBarMessage("Still writing this file", 2000); return; }
     const doc = await vscode.workspace.openTextDocument(file.uri);
+    file.kept = { adds: (file.kept?.adds ?? 0) + file.hunks.reduce((n, h) => n + h.targetCount, 0), dels: (file.kept?.dels ?? 0) + file.hunks.reduce((n, h) => n + h.removed.length, 0) };
     file.baseline = doc.getText().split("\n");
     await this.settle(file);
   }
@@ -419,6 +470,7 @@ export class LiveEditController {
     this.clearPaint(file);
     this.files.delete(file.abs);
     if (!this.files.size) await vscode.commands.executeCommand("setContext", "muster.liveEdit", false);
+    this.settled.set(file.abs, this.card(file));
     this.cards.fire(this.card(file));
     this.changed.fire();
   }
@@ -428,8 +480,8 @@ export class LiveEditController {
   }
 
   private card(file: LiveFile): EditCard {
-    const adds = file.hunks.reduce((n, h) => n + h.targetCount, 0);
-    const dels = file.hunks.reduce((n, h) => n + h.removed.length, 0);
+    const adds = file.hunks.reduce((n, h) => n + h.targetCount, 0) + (file.kept?.adds ?? 0);
+    const dels = file.hunks.reduce((n, h) => n + h.removed.length, 0) + (file.kept?.dels ?? 0);
     const doc = vscode.workspace.textDocuments.find((d) => d.uri.toString() === file.uri.toString());
     const lines = doc ? doc.getText().split("\n") : [];
     const out: string[] = [];

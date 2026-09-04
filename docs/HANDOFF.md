@@ -153,3 +153,5 @@ i. **Agents window / board (V2)**, **browser** (T3-style preview MCP + screensho
 - Popover data must be in-memory: no `findFiles`, `git`, or app-server spawn on the keystroke path (`{"cmd":"suggest"}` measures it).
 - Real Codex turns cost the user's plan; verify with the shim harness first, and run one confirming turn only for provider-side behaviour.
 - Never debounce with `setTimeout` in the pane webview: an occluded window gets 1 s-aligned timers (measured 130–640 ms late). Post immediately and guard with a sequence number; the harness composer probe needs ~2 s waits for the same reason.
+- Codex app-server: `turn/steer {threadId, expectedTurnId, input}` joins a running turn; `thread/revert {threadId, beforeTurnId}` is the rollback for paginated threads (`thread/rollback` is refused); both must go to the warm process that owns the thread (`callCodexConversation`).
+- `turn/diff/updated` fires only for apply_patch edits; shell edits need the turn watcher (`beginTurnWatch`/`syncTurnWatch` in live-edit).

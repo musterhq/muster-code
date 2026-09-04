@@ -236,8 +236,10 @@
       }
     });
 
-    while (st.hunkWidgets.length > st.hunks.length) { const w = st.hunkWidgets.pop(); if (w) editor.removeOverlayWidget(w); }
-    st.hunks.forEach((h, i) => {
+    // Full access (auto-apply): no per-hunk Accept/Reject prompts; the colours stay and the bar offers Keep all / Undo all.
+    const wantWidgets = args.widgets !== false;
+    while (st.hunkWidgets.length > (wantWidgets ? st.hunks.length : 0)) { const w = st.hunkWidgets.pop(); if (w) editor.removeOverlayWidget(w); }
+    if (wantWidgets) st.hunks.forEach((h, i) => {
       let w = st.hunkWidgets[i];
       if (!w) { w = makeHunkWidget(editor, st, i); st.hunkWidgets[i] = w; editor.addOverlayWidget(w); }
       w.index = i;
