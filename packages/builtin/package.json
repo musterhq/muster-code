@@ -33,12 +33,9 @@
         "name": "muster",
         "fullName": "Muster",
         "description": "Codex-first agent for this workspace",
-        "isDefault": true,
+        "isDefault": false,
         "locations": [
-          "panel",
-          "editor",
-          "terminal",
-          "notebook"
+          "editor"
         ],
         "modes": [
           "ask",
@@ -53,13 +50,13 @@
         "name": "codex",
         "displayName": "Codex threads",
         "description": "Your Codex threads, by the app's own names",
-        "when": "true"
+        "when": "false"
       }
     ],
     "languageModelChatProviders": [
       {
         "vendor": "muster",
-        "displayName": "Muster (Codex · Claude · more)"
+        "displayName": "Muster (Codex \u00b7 Claude \u00b7 more)"
       }
     ],
     "viewsContainers": {
@@ -99,6 +96,16 @@
         "icon": "$(ellipsis)"
       },
       {
+        "command": "muster.navigation.goTo",
+        "title": "Muster: Go To",
+        "category": "Muster"
+      },
+      {
+        "command": "muster.workspace.hub",
+        "title": "Muster: Workspaces",
+        "category": "Muster"
+      },
+      {
         "command": "muster.agent.stop",
         "title": "Stop Agent"
       },
@@ -107,8 +114,74 @@
         "title": "Maximize Chat"
       },
       {
+        "command": "muster.agent.togglePane",
+        "title": "Agents Window",
+        "category": "Muster",
+        "icon": "$(layout-sidebar-right)"
+      },
+      {
         "command": "muster.thread.resume",
         "title": "Muster: Resume Codex Thread"
+      },
+      {
+        "command": "muster.thread.catalog",
+        "title": "Muster: Thread Catalog",
+        "category": "Muster"
+      },
+      {
+        "command": "muster.thread.list",
+        "title": "Muster: List Codex Threads",
+        "category": "Muster"
+      },
+      {
+        "command": "muster.thread.search",
+        "title": "Muster: Search Codex Threads",
+        "category": "Muster"
+      },
+      {
+        "command": "muster.thread.listSubagents",
+        "title": "Muster: List Subagent Threads",
+        "category": "Muster"
+      },
+      {
+        "command": "muster.thread.open",
+        "title": "Muster: Open Codex Thread",
+        "category": "Muster"
+      },
+      {
+        "command": "muster.thread.inspect",
+        "title": "Muster: Open Thread Metadata",
+        "category": "Muster"
+      },
+      {
+        "command": "muster.thread.continue",
+        "title": "Muster: Continue Codex Thread",
+        "category": "Muster"
+      },
+      {
+        "command": "muster.thread.rename",
+        "title": "Muster: Rename Codex Thread",
+        "category": "Muster"
+      },
+      {
+        "command": "muster.thread.pin",
+        "title": "Muster: Pin or Unpin Codex Thread",
+        "category": "Muster"
+      },
+      {
+        "command": "muster.thread.archive",
+        "title": "Muster: Archive Codex Thread",
+        "category": "Muster"
+      },
+      {
+        "command": "muster.thread.unarchive",
+        "title": "Muster: Restore Codex Thread",
+        "category": "Muster"
+      },
+      {
+        "command": "muster.thread.fork",
+        "title": "Muster: Fork Codex Thread",
+        "category": "Muster"
       },
       {
         "command": "muster.debug.extensionState",
@@ -185,7 +258,7 @@
       },
       {
         "command": "muster.cmdk.submit",
-        "title": "Submit ⌘K Prompt"
+        "title": "Submit \u2318K Prompt"
       },
       {
         "command": "muster.agent.plugins",
@@ -194,6 +267,51 @@
       {
         "command": "muster.cmdk.terminal",
         "title": "Terminal: Write Command with Agent"
+      },
+      {
+        "command": "muster.terminal.workspace",
+        "title": "Muster: Managed Terminal Workspace",
+        "category": "Muster"
+      },
+      {
+        "command": "muster.terminal.list",
+        "title": "Muster: List Managed Terminals",
+        "category": "Muster"
+      },
+      {
+        "command": "muster.terminal.open",
+        "title": "Muster: Open Managed Terminal",
+        "category": "Muster"
+      },
+      {
+        "command": "muster.terminal.create",
+        "title": "Muster: Create Managed Terminal",
+        "category": "Muster"
+      },
+      {
+        "command": "muster.terminal.reveal",
+        "title": "Muster: Reveal Managed Terminal",
+        "category": "Muster"
+      },
+      {
+        "command": "muster.terminal.output",
+        "title": "Muster: Inspect Managed Terminal Output",
+        "category": "Muster"
+      },
+      {
+        "command": "muster.terminal.search",
+        "title": "Muster: Search Managed Terminal Output",
+        "category": "Muster"
+      },
+      {
+        "command": "muster.terminal.send",
+        "title": "Muster: Write to Managed Terminal",
+        "category": "Muster"
+      },
+      {
+        "command": "muster.terminal.close",
+        "title": "Muster: Close Managed Terminal",
+        "category": "Muster"
       },
       {
         "command": "muster.review.open",
@@ -341,6 +459,10 @@
         "command": "muster.browser.devtoolsActive",
         "title": "Browser: DevTools",
         "category": "Muster"
+      },
+      {
+        "command": "muster.appearance.open",
+        "title": "Muster: Appearance and Themes"
       }
     ],
     "configuration": {
@@ -410,7 +532,19 @@
             "pane"
           ],
           "default": "editor",
-          "description": "Where Open Browser (⇧⌘B) puts the browser: an editor tab beside the code (Cursor's browser editor) or a tab in the Agent pane."
+          "description": "Where Open Browser (\u21e7\u2318B) puts the browser: an editor tab beside the code (Cursor's browser editor) or a tab in the Agent pane."
+        },
+        "muster.terminal.maxOutputBytes": {
+          "type": "number",
+          "minimum": 4096,
+          "maximum": 1000000,
+          "default": 40000,
+          "description": "Maximum UTF-8 bytes retained per managed shell terminal for inspection and search."
+        },
+        "muster.ui.glass": {
+          "type": "boolean",
+          "default": true,
+          "description": "Use restrained translucent surfaces in the Muster pane when the active theme supports them."
         },
         "muster.rules.disabled": {
           "type": "array",
@@ -418,7 +552,7 @@
           "items": {
             "type": "string"
           },
-          "description": "Rule names (without extension) that are not sent to the agent. Managed from Muster Settings → Rules."
+          "description": "Rule names (without extension) that are not sent to the agent. Managed from Muster Settings \u2192 Rules."
         },
         "muster.mcp.disabled": {
           "type": "array",
@@ -426,7 +560,7 @@
           "items": {
             "type": "string"
           },
-          "description": "MCP servers switched off for Muster Code turns (passed as mcp_servers.<name>.enabled=false; ~/.codex/config.toml is untouched). Managed from Muster Settings → MCP."
+          "description": "MCP servers switched off for Muster Code turns (passed as mcp_servers.<name>.enabled=false; ~/.codex/config.toml is untouched). Managed from Muster Settings \u2192 MCP."
         },
         "muster.completions.disabledLanguages": {
           "type": "array",
@@ -447,7 +581,40 @@
         "muster.dictation.command": {
           "type": "string",
           "default": "hear",
-          "description": "Command whose stdout lines are typed into the composer while dictating (⌘⇧Space or the mic). Default: hear — Apple's on-device speech recognition (brew install hear). Any transcriber that prints lines works."
+          "description": "Command whose stdout lines are typed into the composer while dictating (\u2318\u21e7Space or the mic). Default: hear \u2014 Apple's on-device speech recognition (brew install hear). Any transcriber that prints lines works."
+        },
+        "muster.codex.reasoningSummary": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "concise",
+            "detailed",
+            "none"
+          ],
+          "default": "detailed",
+          "description": "Amount of provider reasoning summary to request. Does not change the model or reasoning effort. Tool activity and diffs remain visible."
+        },
+        "muster.ui.density": {
+          "type": "string",
+          "enum": [
+            "comfortable",
+            "compact"
+          ],
+          "default": "comfortable",
+          "description": "Spacing in the Muster conversation surface."
+        },
+        "muster.ui.fontSize": {
+          "type": "number",
+          "minimum": 12,
+          "maximum": 18,
+          "default": 13,
+          "description": "Chat and composer text size in pixels."
+        },
+        "muster.ui.accent": {
+          "type": "string",
+          "pattern": "^$|^#[0-9a-fA-F]{6}$",
+          "default": "",
+          "description": "Optional chat accent override; empty follows the current theme."
         }
       }
     },
@@ -519,9 +686,27 @@
           "when": "muster.liveEdit",
           "group": "navigation@2"
         }
+      ],
+      "LayoutControlMenu": [
+        {
+          "command": "muster.agent.togglePane",
+          "group": "navigation@2",
+          "when": "config.workbench.layoutControl.enabled && config.workbench.layoutControl.type != 'menu'"
+        }
+      ],
+      "TitleBar": [
+        {
+          "command": "muster.agent.togglePane",
+          "group": "navigation@15"
+        }
       ]
     },
     "keybindings": [
+      {
+        "command": "muster.navigation.goTo",
+        "key": "ctrl+alt+g",
+        "mac": "cmd+alt+g"
+      },
       {
         "command": "muster.agent.new",
         "key": "shift+cmd+l",
@@ -783,6 +968,8 @@
     "@types/node": "^22.0.0",
     "@types/vscode": "^1.105.0",
     "esbuild": "^0.25.0",
+    "linkedom": "^0.18.13",
+    "lucide-static": "^1.45.0",
     "tsx": "^4.19.0",
     "typescript": "^5.7.0"
   }

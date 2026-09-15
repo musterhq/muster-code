@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Patch the assembled workbench (idempotent; exits 1 if an anchor is missing).
 
-  patch-workbench.py <workbench.desktop.main.js> <muster-inline-diff.js> <product.json>
+  patch-workbench.py <workbench.desktop.main.js> <muster-inline-diff.js> <product.json> [muster-browser-main.js]
 
 1. Never auto-disable the designated chat extension (VS Code does on first run).
 2. Inject the Muster inline-diff contribution after the module export, with its
@@ -51,14 +51,15 @@ insert_at = js.index(";", export_at) + 1
 js = js[:insert_at] + "\n" + MARK + "\n" + contrib + "\n" + END + "\n" + js[insert_at:]
 js_path.write_text(js)
 
-# 4. Cursor's empty-editor welcome: New Agent / Show Terminal / Search Files / Maximize Chat / Add Repository / Open Settings.
+# 4. Keep the empty-editor welcome wired to honest native workbench actions.
+# Do not route native command/file/search controls to unrelated Muster actions.
 WATERMARK = {
-    "workbench.action.showCommands": ('"New Agent"', "muster.agent.new"),
-    "workbench.action.quickOpen": ('"Search Files"', "workbench.action.quickOpen"),
-    "workbench.action.findInFiles": ('"Maximize Chat"', "muster.agent.maximize"),
-    "workbench.action.terminal.toggleTerminal": ('"Show Terminal"', "workbench.action.terminal.toggleTerminal"),
-    "workbench.action.debug.start": ('"Add Repository"', "workbench.action.addRootFolder"),
-    "workbench.action.openSettings": ('"Open Settings"', "workbench.action.openSettings"),
+    "workbench.action.showCommands": ('"Commands"', "workbench.action.showCommands"),
+    "workbench.action.quickOpen": ('"Files"', "workbench.action.quickOpen"),
+    "workbench.action.findInFiles": ('"Search in Files"', "workbench.action.findInFiles"),
+    "workbench.action.terminal.toggleTerminal": ('"Terminal"', "workbench.action.terminal.toggleTerminal"),
+    "workbench.action.debug.start": ('"Add Folder"', "workbench.action.addRootFolder"),
+    "workbench.action.openSettings": ('"Settings"', "workbench.action.openSettings"),
 }
 for old_id, (text, new_id) in WATERMARK.items():
     pattern = re.compile(r'text:[a-zA-Z_$]+\(\d+,null\),id:"' + re.escape(old_id) + '"')

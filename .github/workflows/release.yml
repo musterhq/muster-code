@@ -1,0 +1,104 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to build and publish (e.g. v0.2.0)"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event_name == 'workflow_dispatch' && format('refs/tags/{0}', inputs.tag) || github.ref }}
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Verify
+        run: |
+          pnpm typecheck
+          pnpm build
+          python3 scripts/dev/pane-check.py
+          python3 scripts/dev/render-test.py
+          pnpm test
+
+      - name: Package macOS app
+        env:
+          MUSTER_SIGN_IDENTITY: ${{ secrets.MUSTER_SIGN_IDENTITY }}
+          MUSTER_NOTARY_PROFILE: ${{ secrets.MUSTER_NOTARY_PROFILE }}
+        run: zsh scripts/package.sh
+
+      - name: Collect artifacts
+        id: artifacts
+        run: |
+          VERSION="$(node -p "require('./package.json').version")"
+          ARCH="$(uname -m)"
+          BASE="Muster Code-${VERSION}-${ARCH}"
+          echo "base=${BASE}" >> "$GITHUB_OUTPUT"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          ls -lh "dist/${BASE}.zip" "dist/${BASE}.dmg"
+
+      - name: Draft release notes body
+        id: notes
+        run: |
+          TAG="${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}"
+          PREV="$(git describe --tags --abbrev=0 "${TAG}^" 2>/dev/null || echo "")"
+          {
+            echo "notes<<EOF"
+            echo "## Muster Code ${TAG#v}"
+            echo
+            if [[ -n "$PREV" ]]; then
+              echo "Changes since \`${PREV}\`:"
+            else
+              echo "Initial release notes for this tag:"
+            fi
+            echo
+            if [[ -n "$PREV" ]]; then
+              git log --pretty=format:'- %s (%h)' "${PREV}..${TAG}"
+            else
+              git log --pretty=format:'- %s (%h)' -n 80
+            fi
+            echo
+            echo
+            echo "### Artifacts"
+            echo "- \`${{ steps.artifacts.outputs.base }}.zip\`"
+            echo "- \`${{ steps.artifacts.outputs.base }}.dmg\`"
+            echo
+            echo "Built from commit \`${{ github.sha }}\` on \`$(uname -m)\`."
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+          name: Muster Code ${{ steps.artifacts.outputs.version }}
+          body: ${{ steps.notes.outputs.notes }}
+          generate_release_notes: true
+          append_body: true
+          files: |
+            dist/${{ steps.artifacts.outputs.base }}.zip
+            dist/${{ steps.artifacts.outputs.base }}.dmg
+          draft: false
+          prerelease: ${{ contains(github.ref_name, '-') }}

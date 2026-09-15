@@ -82,11 +82,13 @@
   "configurationDefaults": {
     "window.titleBarStyle": "custom",
     "workbench.activityBar.location": "top",
-    "workbench.activityBar.autoHide": true,
+    "workbench.activityBar.autoHide": false,
     "workbench.secondarySideBar.defaultVisibility": "visible",
     "chat.disableAIFeatures": true,
     "workbench.startupEditor": "none",
-    "window.commandCenter": false
+    "window.commandCenter": false,
+    "workbench.layoutControl.enabled": true,
+    "workbench.layoutControl.type": "both"
   },
   "updateUrl": "",
   "quality": "stable"

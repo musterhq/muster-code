@@ -7,14 +7,20 @@ import {
   readCodexRollout,
   runCodexAppServer,
   interruptActiveCodexTurn, steerActiveCodexTurn, callCodexConversation,
+  clearCodexAppServerConversation,
   type CodexSessionSummary,
   type CodexTranscriptMessage,
 } from "@musterhq/core";
 import { queryCodexAppServer, runClaudeCode } from "@musterhq/core";
+import { childControlRequest } from "./agent-control.js";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join as joinPath, resolve as resolvePath } from "node:path";
+import { applyProviderDispatch, isDirectModel, PROVIDER_MODELS, providerLabel, providerModelId, resolveProviderRoute, validateSelection, type ProviderId } from "./provider-routing.js";
+import { queryProvider } from "./provider-query.js";
 
 export interface CodexThread {
+  readonly providerId?: ProviderId;
+  readonly model?: string;
   readonly id: string;
   readonly name: string;
   readonly project: string;
@@ -39,11 +45,21 @@ export interface CodexTurnResult {
   readonly status: "completed" | "failed";
   readonly text: string;
   readonly threadId?: string;
+  readonly turnId?: string;
+  readonly dispatchState?: "not-dispatched" | "dispatched" | "unknown";
   readonly errorMessage?: string;
-  readonly tokenUsage?: { readonly inputTokens?: number; readonly outputTokens?: number };
+  readonly fallbackEligible?: boolean;
+  readonly hadActivity?: boolean;
+  readonly timings?: { readonly startupMs: number; readonly queueMs: number; readonly threadOpenMs: number; readonly requestToFirstDeltaMs?: number; readonly cacheState: string; readonly threadOpenState: string };
+  readonly tokenUsage?: { readonly inputTokens?: number; readonly cachedInputTokens?: number; readonly outputTokens?: number; readonly reasoningOutputTokens?: number };
 }
 
 const TRANSPORT_OWNER = "muster-code";
+const conversationProviders = new Map<string, ProviderId>();
+const runningConversations = new Set<string>();
+const conversationScopes = new Map<string, string>();
+export function bindConversationProvider(conversation: string, provider: ProviderId): void { conversationProviders.set(conversation, provider); }
+function conversationKey(conversation: string): string { const provider = conversationProviders.get(conversation); return `conv:${conversation}${provider ? `:provider:${provider}` : ""}`; }
 
 export function projectLabel(cwd: string): string {
   const label = cwd.replace(/[/\\]+$/, "").split(/[/\\]/).pop();
@@ -64,6 +80,8 @@ export async function listThreads(limit = 60): Promise<CodexThread[]> {
     .sort((a, b) => bucket(a) - bucket(b) || Date.parse(b.lastActivityAt) - Date.parse(a.lastActivityAt))
     .map((item) => ({
       id: item.threadId,
+      ...(item.modelProvider === "openai" ? { providerId: "openai-direct" as const } : item.modelProvider === "hybrow" ? { providerId: "hybrow" as const } : {}),
+      ...(item.model ? { model: item.model } : {}),
       name: item.threadName ?? names.get(item.threadId) ?? projectLabel(item.cwd),
       project: projectLabel(item.cwd),
       cwd: item.cwd,
@@ -87,7 +105,9 @@ let browserMcp: { command: string; args: string[]; env: Record<string, string>; 
 export function setBrowserMcp(config: { command: string; args: string[]; env: Record<string, string>; mcpConfig?: string } | null): void { browserMcp = config; }
 /** Around every agent turn: the browser lock banner and "Take control" reset live here. */
 export const turnHooks: { start?: () => void; end?: () => void } = {};
-const BROWSER_NOTE = "The IDE has a built-in browser tab that the user is looking at. Whenever you need a browser (\"open the site\", \"check the page\", \"click\", reproducing or verifying UI work, reading console errors), use the muster_browser MCP tools — browser_navigate, browser_snapshot, browser_click, browser_type, browser_press_key, browser_hover, browser_select_option, browser_screenshot, browser_console_messages, browser_evaluate, browser_wait_for, browser_go_back, browser_reload, browser_tabs — and not other browser automation or computer-use tools unless the user explicitly asks for those. Flow: browser_navigate, read the snapshot, act on the [ref=eN] handles, re-snapshot.";
+const BROWSER_NOTE = "The IDE has a built-in browser tab the user is looking at. For that tab, prefer muster_browser MCP tools (browser_navigate, browser_snapshot, browser_click, browser_type, browser_press_key, browser_hover, browser_select_option, browser_screenshot, browser_console_messages, browser_evaluate, browser_wait_for, browser_scroll, browser_resize, browser_set_appearance, browser_go_back, browser_reload, browser_tabs). Flow: navigate, snapshot, act on [ref=eN], re-snapshot. For macOS desktop apps, Accessibility, Screen Recording, or anything outside that tab, use the signed-in Codex computer-use plugin (computer-use@openai-bundled / unified-computer-use) the same way Codex desktop does — list apps, snapshot, click, type, scroll, then confirm consequential actions. Use the visualize plugin to save screenshots and embed them as ![alt](path) in the reply. Do not invent a second computer-use path.";
+/** Exact plugin tool names; BROWSER_NOTE already points at the plugin. */
+const COMPUTER_USE_NOTE = "Codex computer-use plugin tools: listApps, snapshot, click, type, scroll. Visualize screenshots as ![alt](path).";
 function browserOverrides(): string[] {
   if (!browserMcp) return [];
   const env = Object.entries(browserMcp.env).map(([k, v]) => `${k} = ${JSON.stringify(v)}`).join(", ");
@@ -101,6 +121,7 @@ export async function runTurn(input: {
   /** Stable id of the conversation surface (pane tab); keeps one warm process per conversation. */
   readonly conversation?: string;
   readonly model?: string;
+  readonly providerId?: ProviderId;
   readonly reasoning?: "low" | "medium" | "high" | "xhigh" | "max" | "ultra";
   /** Discovered from permissionProfile/list (see listAccessModes); defaults to workspace-write without prompts. */
   readonly access?: AccessMode;
@@ -112,10 +133,23 @@ export async function runTurn(input: {
   readonly images?: readonly string[];
   readonly handlers: CodexTurnHandlers;
 }): Promise<CodexTurnResult> {
-  const instructions = [input.rules ?? "", browserMcp ? BROWSER_NOTE : ""].filter(Boolean).join("\n\n");
+  const selection = { modelId: input.model ?? "openai-direct:gpt-5.6-terra", ...(input.providerId ? { providerId: input.providerId } : {}) };
+  const route = validateSelection(selection);
+  if (input.conversation && runningConversations.has(input.conversation)) throw new Error("This task already has an active provider run.");
+  const previousProvider = input.conversation ? conversationProviders.get(input.conversation) : undefined;
+  if (input.threadId && previousProvider && previousProvider !== route.providerId) throw new Error("Task provider mismatch. Start a new task to change providers.");
+  if (input.conversation) runningConversations.add(input.conversation);
+  if (input.conversation) bindConversationProvider(input.conversation, route.providerId);
+  const instructions = [input.rules ?? "", COMPUTER_USE_NOTE, browserMcp ? BROWSER_NOTE : ""].filter(Boolean).join("\n\n");
   turnHooks.start?.();
   try {
-  const result = await runCodexAppServer({
+  if (input.conversation) {
+    const scope = JSON.stringify([route.providerId, route.model, input.reasoning, input.access, browserOverrides(), mcpDisableOverrides()]);
+    const previous = conversationScopes.get(input.conversation);
+    if (previous && previous !== scope) clearCodexAppServerConversation(conversationKey(input.conversation), TRANSPORT_OWNER);
+    conversationScopes.set(input.conversation, scope);
+  }
+  const result = await runCodexAppServer(applyProviderDispatch({
     prompt: input.prompt,
     cwd: input.cwd,
     // One warm app-server process per conversation (pane tab): the process that started a thread is its
@@ -132,52 +166,86 @@ export async function runTurn(input: {
     ...(input.mode && input.model ? { collaborationMode: { mode: input.mode, settings: { model: input.model, ...(input.reasoning ? { reasoning_effort: input.reasoning } : {}) } } } : {}),
     transportOwner: TRANSPORT_OWNER,
     keepAlive: true,
-    configOverrides: ['model_reasoning_summary="detailed"', ...browserOverrides(), ...disabledMcpServers.map((n) => `mcp_servers.${n}.enabled=false`)],
+    // Core's buildCodexAppServerArgs only adds these as -c; it already loads ~/.codex plugins.
+    configOverrides: [`model_reasoning_summary=${JSON.stringify(vscode.workspace.getConfiguration("muster").get<string>("codex.reasoningSummary", "detailed"))}`, ...browserOverrides(), ...mcpDisableOverrides()],
     onDelta: input.handlers.onDelta,
     onReasoningDelta: input.handlers.onReasoning,
     ...(input.handlers.onEvent ? { onEvent: input.handlers.onEvent } : {}),
     ...(input.handlers.onRequest ? { onRequest: input.handlers.onRequest } : {}),
-  });
+  }, route, input.conversation));
   return {
     status: result.status,
     text: result.finalMessage,
     ...(result.threadId ? { threadId: result.threadId } : {}),
-    ...(result.errorMessage ? { errorMessage: result.errorMessage } : {}),
+    ...(result.turnId ? { turnId: result.turnId } : {}),
+    ...(result.dispatchState ? { dispatchState: result.dispatchState } : {}),
+    ...(result.errorMessage ? { errorMessage: `${providerLabel(route.providerId)}: ${result.errorMessage}` } : {}),
+    ...(result.fallbackEligible !== undefined ? { fallbackEligible: result.fallbackEligible } : {}),
+    ...(result.hadActivity !== undefined ? { hadActivity: result.hadActivity } : {}),
+    ...(result.timings ? { timings: result.timings } : {}),
     ...(result.tokenUsage ? { tokenUsage: result.tokenUsage } : {}),
   };
-  } finally { turnHooks.end?.(); }
+  } finally { if (input.conversation) runningConversations.delete(input.conversation); turnHooks.end?.(); }
 }
 
 /** Stop the running turn of one conversation (pane tab), or every turn of this host when none is given. */
 /** Type mid-turn: the message joins the running turn (`turn/steer`); false when nothing is running for that conversation. */
 export function steerTurn(text: string, conversation?: string): Promise<boolean> {
-  return steerActiveCodexTurn(text, TRANSPORT_OWNER, conversation ? `conv:${conversation}` : undefined);
+  return steerActiveCodexTurn(text, TRANSPORT_OWNER, conversation ? conversationKey(conversation) : undefined);
+}
+
+/** Control a provider-created child through the warm parent conversation that owns it. */
+export async function controlOwnedTurn(conversation: string, threadId: string, turnId: string, action: "steer" | "interrupt", text: string | undefined, cwd: string): Promise<{ ok: boolean; reason?: string; capability?: boolean }> {
+  if (!conversation || !threadId || !turnId) return { ok: false, reason: "An owning conversation and active turn ID are required." };
+  const request = childControlRequest(threadId, turnId, action, text);
+  try {
+    await callCodexConversation(conversationKey(conversation), request.method, request.params, { transportOwner: TRANSPORT_OWNER, cwd, requireOwner: true });
+    return { ok: true };
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    return { ok: false, reason, ...( /unsupported|unknown method|capabilit|not supported/i.test(reason) ? { capability: true } : {}) };
+  }
+}
+
+/** Call a management method on a loaded thread's actual warm owner; never fall back to a new writer. */
+export function callOwnedThread(conversation: string, threadId: string, method: string, params: Record<string, unknown>, cwd: string): Promise<Record<string, unknown>> {
+  return callCodexConversation(conversationKey(conversation), method, params, { transportOwner: TRANSPORT_OWNER, cwd, requireOwner: true });
 }
 
 export let lastRollbackError = "";
+async function manageThread(conversation: string | undefined, method: string, params: Record<string, unknown>, cwd: string): Promise<Record<string, unknown>> {
+  if (conversation) {
+    try { return await callCodexConversation(conversationKey(conversation), method, params, { transportOwner: TRANSPORT_OWNER, cwd, requireOwner: true }); }
+    catch (error) { if (!(error instanceof Error) || !error.message.startsWith("No live app-server owner")) throw error; }
+    const provider = conversationProviders.get(conversation);
+    if (provider) return queryProvider(resolveProviderRoute(provider, provider === "hybrow" ? "codex/gpt-5.6-terra" : "gpt-5.6-terra"), method, params, cwd);
+  }
+  // These metadata-only operations never start or resume a turn.
+  return queryCodex(method, params, cwd);
+}
 /** `thread/name/set` on the process that owns the thread (or a one-shot when none is warm). */
 export async function setThreadName(conversation: string | undefined, threadId: string, name: string, cwd: string): Promise<boolean> {
-  try { await callCodexConversation(conversation ? `conv:${conversation}` : `none:${threadId}`, "thread/name/set", { threadId, name }, { transportOwner: TRANSPORT_OWNER, cwd }); return true; }
+  try { await manageThread(conversation, "thread/name/set", { threadId, name }, cwd); return true; }
   catch (error) { lastRollbackError = error instanceof Error ? error.message : String(error); return false; }
 }
 /** `thread/archive`: the rollout moves to archived_sessions; the History tab stops listing it. */
 export async function archiveThread(conversation: string | undefined, threadId: string, cwd: string): Promise<boolean> {
-  try { await callCodexConversation(conversation ? `conv:${conversation}` : `none:${threadId}`, "thread/archive", { threadId }, { transportOwner: TRANSPORT_OWNER, cwd }); return true; }
+  try { await manageThread(conversation, "thread/archive", { threadId }, cwd); return true; }
   catch (error) { lastRollbackError = error instanceof Error ? error.message : String(error); return false; }
 }
 /** Paginated threads: replace the history so that `beforeTurnId` and every later turn are gone (`thread/revert`). */
 export async function revertThread(conversation: string, threadId: string, beforeTurnId: string, cwd: string): Promise<boolean> {
-  try { await callCodexConversation(`conv:${conversation}`, "thread/revert", { threadId, beforeTurnId }, { transportOwner: TRANSPORT_OWNER, cwd }); return true; }
+  try { await manageThread(conversation, "thread/revert", { threadId, beforeTurnId }, cwd); return true; }
   catch (error) { lastRollbackError = error instanceof Error ? error.message : String(error); return false; }
 }
 /** Drop the last N turns of a thread's history (`thread/rollback`); the caller reverts the files from its checkpoints. */
 export async function rollbackThread(conversation: string, threadId: string, numTurns: number, cwd: string): Promise<boolean> {
-  try { await callCodexConversation(`conv:${conversation}`, "thread/rollback", { threadId, numTurns }, { transportOwner: TRANSPORT_OWNER, cwd }); return true; }
+  try { await manageThread(conversation, "thread/rollback", { threadId, numTurns }, cwd); return true; }
   catch (error) { lastRollbackError = error instanceof Error ? error.message : String(error); return false; }
 }
 
 export function interruptTurn(conversation?: string): Promise<boolean> {
-  return interruptActiveCodexTurn(TRANSPORT_OWNER, conversation ? `conv:${conversation}` : undefined);
+  return interruptActiveCodexTurn(TRANSPORT_OWNER, conversation ? conversationKey(conversation) : undefined);
 }
 
 export function formatAge(iso: string, nowMs = Date.now()): string {
@@ -212,13 +280,14 @@ function persistCatalog(): void {
 }
 export function catalogAge(method: string, params: Record<string, unknown> = {}, cwd?: string): number | undefined { const e = catalog.get(`${cwd ?? ""}|${method}|${JSON.stringify(params)}`); return e?.value !== undefined ? Date.now() - e.at : undefined; }
 /** Cached one-shot query: fresh → cached; stale → cached now, refreshed in the background; empty → wait for the process. */
-export async function cachedQuery(method: string, params: Record<string, unknown> = {}, cwd?: string, options: { ttlMs?: number; refresh?: boolean } = {}): Promise<Record<string, unknown>> {
-  const key = `${cwd ?? ""}|${method}|${JSON.stringify(params)}`; const ttl = options.ttlMs ?? 10 * 60_000;
+export async function cachedQuery(method: string, params: Record<string, unknown> = {}, cwd?: string, options: { ttlMs?: number; refresh?: boolean; providerId?: ProviderId } = {}): Promise<Record<string, unknown>> {
+  const key = `${options.providerId ? `provider:${options.providerId}|` : ""}${cwd ?? ""}|${method}|${JSON.stringify(params)}`; const ttl = options.ttlMs ?? 10 * 60_000;
   const entry = catalog.get(key) ?? { at: 0 }; catalog.set(key, entry);
   const fresh = entry.value !== undefined && Date.now() - entry.at < ttl && !options.refresh;
   if (fresh) return entry.value!;
   if (!entry.inflight) {
-    entry.inflight = queryCodex(method, params, cwd).then((value) => { entry.value = value; entry.at = Date.now(); persistCatalog(); return value; }).finally(() => { delete entry.inflight; });
+    const request = options.providerId ? queryProvider(resolveProviderRoute(options.providerId, options.providerId === "hybrow" ? "codex/gpt-5.6-terra" : "gpt-5.6-terra"), method, params, cwd) : queryCodex(method, params, cwd);
+    entry.inflight = request.then((value) => { entry.value = value; entry.at = Date.now(); persistCatalog(); return value; }).finally(() => { delete entry.inflight; });
     entry.inflight.catch(() => undefined);
   }
   if (entry.value !== undefined && !options.refresh) return entry.value;
@@ -254,15 +323,28 @@ const ACCESS_PRESETS: Record<string, Omit<AccessMode, "id">> = {
   ":danger-full-access": { label: "Full access", sandbox: "danger-full-access", approvalPolicy: "never" },
 };
 
+/** Map an app-server permission profile onto sandbox + approval policy. */
+export function normalizeAccessMode(id: string, description?: string | null): AccessMode {
+  const colon = id.startsWith(":") ? id : `:${id}`;
+  const preset = ACCESS_PRESETS[id] ?? ACCESS_PRESETS[colon];
+  if (preset) return { id, ...preset };
+  const blob = `${id} ${description ?? ""}`.toLowerCase();
+  if (/danger-full-access|full[\s_-]*access/.test(blob)) return { id, label: description?.trim() || "Full access", sandbox: "danger-full-access", approvalPolicy: "never" };
+  if (/read-only|read only/.test(blob)) return { id, label: description?.trim() || "Read only", sandbox: "read-only", approvalPolicy: "on-request" };
+  if (/workspace/.test(blob)) return { id, label: description?.trim() || "Manual approval", sandbox: "workspace-write", approvalPolicy: "on-request" };
+  return { id, label: description?.trim() || id.replace(/^:/, ""), sandbox: "workspace-write", approvalPolicy: "on-request" };
+}
+
+/** Full access / never: the host must not pause the turn on command or patch cards. */
+export function isUnattendedAccess(access?: Pick<AccessMode, "sandbox" | "approvalPolicy">): boolean {
+  return access?.approvalPolicy === "never" || access?.sandbox === "danger-full-access";
+}
+
 /** permissionProfile/list → the access modes the app exposes (labels follow the Codex app's names). */
 export async function listAccessModes(cwd?: string): Promise<AccessMode[]> {
   const result = await cachedQuery("permissionProfile/list", {}, cwd);
   const data = (result.data as { id?: string; description?: string | null; allowed?: boolean }[] | undefined) ?? [];
-  return data.filter((p) => p.id && p.allowed !== false).map((p) => {
-    const id = String(p.id);
-    const preset = ACCESS_PRESETS[id];
-    return { id, label: preset?.label ?? p.description ?? id.replace(/^:/, ""), sandbox: preset?.sandbox ?? "workspace-write", approvalPolicy: preset?.approvalPolicy ?? "on-request" };
-  });
+  return data.filter((p) => p.id && p.allowed !== false).map((p) => normalizeAccessMode(String(p.id), p.description));
 }
 
 /** Claude Code's own effort levels (`claude --effort low|medium|high|xhigh|max`); Codex efforts come from model/list per model. */
@@ -290,6 +372,7 @@ export async function listPlugins(cwd?: string): Promise<PluginInfo[]> {
 }
 
 export interface ModelInfo {
+  readonly providerId?: ProviderId;
   readonly id: string;
   readonly provider: "codex" | "claude";
   readonly name: string;
@@ -302,15 +385,20 @@ export interface ModelInfo {
 /** model/list (Codex, with each model's own reasoning efforts) + the Claude models the user configured. */
 export async function listModels(cwd?: string, claudeModels: readonly string[] = []): Promise<ModelInfo[]> {
   const models: ModelInfo[] = [];
-  try {
-    const result = await cachedQuery("model/list", { includeHidden: false }, cwd);
+  for (const providerId of ["openai-direct", "hybrow"] as const) try {
+    const result = await cachedQuery("model/list", { includeHidden: false }, cwd, { providerId });
     for (const raw of (result.data as Record<string, unknown>[] | undefined) ?? []) {
       if (raw.hidden) continue;
+      const id = String(raw.model ?? raw.id);
+      if (!(providerId === "openai-direct" ? isDirectModel(id) : PROVIDER_MODELS.some(entry => entry.providerId === providerId && entry.model === id))) continue;
       const efforts = ((raw.supportedReasoningEfforts as { reasoningEffort?: string; description?: string }[] | undefined) ?? [])
         .map((e) => ({ id: String(e.reasoningEffort ?? ""), description: String(e.description ?? "") })).filter((e) => e.id);
-      models.push({ id: String(raw.id ?? raw.model), provider: "codex", name: String(raw.displayName ?? raw.id), description: String(raw.description ?? ""), efforts, defaultEffort: String(raw.defaultReasoningEffort ?? efforts[0]?.id ?? "medium"), isDefault: raw.isDefault === true });
+      models.push({ id: providerModelId(providerId, id), provider: "codex", providerId, name: String(raw.displayName ?? raw.id), description: String(raw.description ?? ""), efforts, defaultEffort: String(raw.defaultReasoningEffort ?? efforts[0]?.id ?? "medium"), isDefault: providerId === "openai-direct" && raw.isDefault === true });
     }
-  } catch { /* offline or not signed in: the picker shows what it can */ }
+  } catch { /* Preserve the failed provider as selectable explicit routes: dispatch reports its configuration error. */ }
+  for (const definition of PROVIDER_MODELS) if (!models.some(model => model.id === providerModelId(definition.providerId, definition.model))) {
+    models.push({ id: providerModelId(definition.providerId, definition.model), provider: "codex", providerId: definition.providerId, name: definition.name, description: `${definition.description}. Catalog unavailable; dispatch will validate the profile.`, efforts: [], defaultEffort: definition.defaultEffort, isDefault: definition.providerId === "openai-direct" && definition.isDefault === true });
+  }
   for (const id of claudeModels) {
     models.push({ id: `claude:${id}`, provider: "claude", name: claudeName(id), description: "Claude Code · your Claude subscription", efforts: CLAUDE_EFFORTS, defaultEffort: "medium", isDefault: false });
   }
@@ -379,9 +467,30 @@ export function readRules(cwd: string, options: { readonly disabled?: readonly s
   return parts.join("\n\n");
 }
 
+/**
+ * Bundled Codex computer-use MCP names. Keep them enabled on Muster turns.
+ * Never emit mcp_servers.<name>.enabled=false for these. The default disabled
+ * list is empty; a Settings toggle of these names is ignored so they stay on
+ * even when they share a name with the unused user MCP
+ * `[mcp_servers.computer-use] enabled = false` in ~/.codex/config.toml (never
+ * written here). Plugin enable already lives in that host file as
+ * `[plugins."computer-use@openai-bundled"]` / unified-computer-use / visualize;
+ * sibling core only forwards caller -c overrides and does not disable plugins.
+ */
+export const HOST_COMPUTER_USE_MCP = ["computer-use", "unified-computer-use", "visualize", "cua_repl", "node_repl"] as const;
+function isHostComputerUseMcp(name: string): boolean {
+  const n = name.trim().toLowerCase();
+  return HOST_COMPUTER_USE_MCP.some((id) => n === id || n.startsWith(`${id}@`));
+}
 /** MCP servers the user switched off in Muster Code (settings → MCP): passed as config overrides, the user's config.toml is untouched. */
 export let disabledMcpServers: readonly string[] = [];
 export function setDisabledMcpServers(names: readonly string[]): void { disabledMcpServers = names; }
+export function mcpDisableOverrides(names: readonly string[] = disabledMcpServers): string[] {
+  // Allow-list: skip bundled computer-use names so a Settings toggle (or a
+  // collision with the disabled user MCP of the same name) cannot turn the
+  // host plugin off. Honor muster.mcp.disabled for every other server.
+  return names.filter((n) => !isHostComputerUseMcp(n)).map((n) => `mcp_servers.${n}.enabled=false`);
+}
 
 export interface SkillInfo { readonly name: string; readonly description: string; readonly path?: string }
 

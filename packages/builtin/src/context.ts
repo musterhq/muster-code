@@ -2,6 +2,8 @@
 // Files & Folders, Docs, Git (branch diff, working tree, commits), Terminals,
 // Past Chats, Web, images. Tokens stay in the prompt (the model sees what was
 // meant); their contents are appended as <context> blocks.
+import { createHash } from "node:crypto";
+import { uniqueMentions } from "./conversation-state.js";
 import * as vscode from "vscode";
 import { homedir } from "node:os";
 import { execFile } from "node:child_process";
@@ -16,18 +18,41 @@ let lastPick: BrowserPick | undefined;
 export function rememberPick(pick: BrowserPick): void { lastPick = pick; }
 let browserProvider: (() => { url: string; title: string; console: { level: string; message: string; line?: number; source?: string }[] } | undefined) | undefined;
 export function setBrowserProvider(fn: typeof browserProvider): void { browserProvider = fn; }
-async function browserContext(): Promise<string | undefined> {
+/** Frozen selections survive subsequent picks, navigation, and extension reloads. */
+export function saveBrowserPick(cwd: string, pick: BrowserPick): string {
+  const data = JSON.stringify(pick);
+  const id = createHash("sha256").update(data).digest("hex").slice(0, 20);
+  const dir = join(cwd, ".muster", "browser"); mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, `context-${id}.json`), data);
+  return `@browser:${id}`;
+}
+async function browserContext(pick?: BrowserPick): Promise<string | undefined> {
   const live = browserProvider?.() ?? ((await Promise.resolve(vscode.commands.executeCommand("muster.browser.context", {})).catch(() => null)) as { url?: string; title?: string; console?: { level: string | number; message: string; line?: number; source?: string }[] } | null);
   const parts: string[] = [];
-  if (live?.url) parts.push(`url: ${live.url}${live.title ? `\ntitle: ${live.title}` : ""}`);
-  if (lastPick?.picked) { const p = lastPick.picked; parts.push(`selected element: ${p.selector}\nhtml: ${p.html.slice(0, 1200)}\ntext: ${p.text.slice(0, 200)}\nrect: ${JSON.stringify(p.rect)}\nstyles: ${Object.entries(p.styles).map(([k, v]) => `${k}: ${v}`).join("; ")}`); }
-  const consoleTail = (live?.console ?? []).slice(-40).map((c) => `[${typeof c.level === "number" ? ["log", "warn", "error"][c.level] ?? c.level : c.level}] ${c.message}${c.source ? ` (${c.source.split("/").pop()}:${c.line ?? ""})` : ""}`);
+  if (pick) parts.push(`url: ${pick.url}\ntitle: ${pick.title}`);
+  else if (live?.url) parts.push(`url: ${live.url}${live.title ? `\ntitle: ${live.title}` : ""}`);
+  const selected = pick ?? (lastPick?.url === live?.url ? lastPick : undefined);
+  if (selected?.picked) { const p = selected.picked; parts.push(`selected element: ${p.selector}\nhtml: ${p.html.slice(0, 1200)}\ntext: ${p.text.slice(0, 200)}\nrect: ${JSON.stringify(p.rect)}\nstyles: ${Object.entries(p.styles).map(([k, v]) => `${k}: ${v}`).join("; ")}`); }
+  const consoleTail = (pick ? [] : live?.console ?? []).slice(-40).map((c) => `[${typeof c.level === "number" ? ["log", "warn", "error"][c.level] ?? c.level : c.level}] ${c.message}${c.source ? ` (${c.source.split("/").pop()}:${c.line ?? ""})` : ""}`);
   if (consoleTail.length) parts.push(`console:\n${consoleTail.join("\n")}`);
   return parts.length ? parts.join("\n\n") : undefined;
 }
 
 const run = promisify(execFile);
 const MAX_LINES = 300;
+
+export interface ContextReference {
+  readonly token: string;
+  readonly kind: string;
+  readonly source?: string;
+  readonly sourceMtimeMs?: number;
+  readonly startLine?: number;
+  readonly endLine?: number;
+  readonly includedLines?: number;
+  readonly truncated?: boolean;
+  readonly unavailable?: boolean;
+  readonly tokenEstimate: number;
+}
 
 export interface Suggestion { readonly label: string; readonly detail: string; readonly insert: string; readonly group?: string }
 /** One row of the composer typeahead (Cursor's mention menu): a mention to insert, a navigation row into a mode, or an action. */
@@ -109,7 +134,7 @@ function score(rel: string, q: string): number {
 }
 export function refreshMentionIndex(): void { index.at = 0; void fileIndex(); }
 const openFiles = () => vscode.window.tabGroups.all.flatMap((g) => g.tabs).map((t) => (t.input as { uri?: vscode.Uri })?.uri).filter((u): u is vscode.Uri => !!u && u.scheme === "file").map((u) => vscode.workspace.asRelativePath(u)).filter((r) => !r.startsWith(".."));
-const fileItem = (r: string): MenuItem => { const name = r.split("/").pop() ?? r; const dir = r.includes("/") ? r.slice(0, r.lastIndexOf("/")) : ""; return { id: `f:${r}`, label: name, detail: dir, insert: `@${r}`, icon: name.includes(".") ? name.split(".").pop()! : "file", iconKind: "badge" }; };
+const fileItem = (r: string): MenuItem => { const name = r.split("/").pop() ?? r; const dir = r.includes("/") ? r.slice(0, r.lastIndexOf("/")) : ""; return { id: `f:${r}`, label: name, detail: dir, insert: `@${encodeURI(r)}`, icon: name.includes(".") ? name.split(".").pop()! : "file", iconKind: "badge" }; };
 const rankedFiles = (all: string[], q: string, limit: number) => all.map((r) => [score(r, q), r] as const).filter(([s]) => s >= 0).sort((a, b) => b[0] - a[0]).slice(0, limit).map(([, r]) => r);
 function refreshChats(cwd: string): MenuItem[] {
   if (Date.now() - index.chatsAt > 60_000 && !index.chatsBuilding) {
@@ -318,39 +343,59 @@ function folderListing(cwd: string, rel: string): string {
 }
 
 // ── expansion: every mention kind becomes a context block ──
-export async function expandContext(prompt: string, cwd: string): Promise<{ prompt: string; images: string[] }> {
+export async function expandContext(prompt: string, cwd: string): Promise<{ prompt: string; images: string[]; references: ContextReference[] }> {
   // A leading /command from .cursor|.claude|.muster/commands becomes its file content ($ARGUMENTS or appended arguments).
   const slash = /^\s*\/([\w:-]+)(?:\s+([\s\S]*))?$/.exec(prompt);
   if (slash) { const cmd = listCommands(cwd).find((c) => c.name === slash[1]); if (cmd) { try { const body = readFileSync(cmd.path, "utf8").replace(/^---[\s\S]*?---\s*/, ""); const args = slash[2]?.trim() ?? ""; prompt = body.includes("$ARGUMENTS") ? body.replace(/\$ARGUMENTS/g, args) : args ? `${body}\n\n${args}` : body; } catch { /* keep the prompt */ } } }
   const blocks: string[] = [];
   const images: string[] = [];
+  const references: ContextReference[] = [];
+  const addReference = (token: string, kind: string, text: string, meta: Omit<ContextReference, "token" | "kind" | "tokenEstimate"> = {}) => {
+    blocks.push(text);
+    references.push({ token, kind, ...meta, tokenEstimate: Math.ceil(text.length / 4) });
+  };
   const clip = (text: string, path = "") => { const lines = text.split("\n"); return `${lines.slice(0, MAX_LINES).join("\n")}${lines.length > MAX_LINES ? `\n… (${lines.length - MAX_LINES} more lines${path ? ` in ${path}` : ""})` : ""}`; };
-  for (const match of prompt.matchAll(/(?:^|\s)@([\w./:?=&%#+-]+)/g)) {
-    const token = match[1]!.replace(/[.,;:)]+$/, "");
-    if (blocks.length >= 12) break;
-    if (token.startsWith("link:") || /^https?:\/\//.test(token)) { const url = token.startsWith("link:") ? token.slice(5) : token; const text = await fetchText(url); if (text) blocks.push(`<link url="${url}">\n${clip(text)}\n</link>`); continue; }
-    if (token.startsWith("code:") || token.startsWith("symbol:")) { const found = await symbolText(cwd, token.slice(token.indexOf(":") + 1)); if (found) blocks.push(found); continue; }
-    if (token === "rules" || token.startsWith("rule:")) { const text = token === "rules" ? readRules(cwd) : readRule(cwd, token.slice(5)); if (text) blocks.push(`<rules${token === "rules" ? "" : ` name="${token.slice(5)}"`}>\n${clip(text)}\n</rules>`); continue; }
-    if (token === "git:pr") { const pr = await prContext(cwd); if (pr) blocks.push(pr); continue; }
-    if (token.startsWith("folder:") || (isDirectory(join(cwd, token.replace(/\/$/, ""))) && !/:\d+-\d+$/.test(token))) { const rel = (token.startsWith("folder:") ? token.slice(7) : token).replace(/\/$/, ""); const listing = folderListing(cwd, rel); if (listing) blocks.push(`<folder path="${rel}">\n${listing}\n</folder>`); continue; }
-    if (token === "browser" || token === "browser:console") { const ctx = await browserContext(); if (ctx) blocks.push(`<browser>\n${ctx}\n</browser>`); continue; }
-    if (token === "web") { blocks.push("<instruction>Use web search for anything that needs current or external information.</instruction>"); continue; }
-    if (token === "terminal" || token.startsWith("terminal:")) { const tail = terminalTail(token.slice("terminal:".length)); if (tail) blocks.push(`<terminal>\n${tail}\n</terminal>`); continue; }
-    if (token === "git:diff") { const d = await git(cwd, ["diff"]); if (d.trim()) blocks.push(`<git-diff>\n${clip(d)}\n</git-diff>`); continue; }
-    if (token === "git:branch") { const base = await defaultBranch(cwd); const d = await git(cwd, ["diff", `${base}...HEAD`]); blocks.push(`<git-branch-diff base="${base}">\n${clip(d || "(no differences)")}\n</git-branch-diff>`); continue; }
-    if (token.startsWith("git:commit:")) { const sha = token.slice("git:commit:".length); const d = await git(cwd, ["show", "--stat", "--patch", sha]); if (d.trim()) blocks.push(`<git-commit sha="${sha}">\n${clip(d)}\n</git-commit>`); continue; }
-    if (token.startsWith("docs:")) { const text = await docText(cwd, token.slice(5)); if (text) blocks.push(`<doc name="${token.slice(5)}">\n${clip(text)}\n</doc>`); continue; }
-    if (token.startsWith("chat:")) { const id = token.slice(5); const thread = threadsForWorkspace(await listThreads(), [cwd]).find((t) => t.id === id); if (thread) { const history = await readHistory(thread); const tail = history.slice(-4).map((m) => `${m.role}: ${m.text.slice(0, 1500)}`).join("\n\n"); blocks.push(`<past-chat name="${thread.name}">\n${tail}\n</past-chat>`); } continue; }
-    if (token.startsWith("image:")) { const path = token.slice(6); if (existsSync(path)) images.push(path); continue; }
+  for (const rawToken of uniqueMentions(prompt)) {
+    let token: string; try { token = decodeURIComponent(rawToken); } catch { token = rawToken; }
+    if (token.startsWith("link:") || /^https?:\/\//.test(token)) { const url = token.startsWith("link:") ? token.slice(5) : token; const text = await fetchText(url); if (text) { const body = clip(text); addReference(token, "link", `<link url="${url}">\n${body}\n</link>`, { source: url, truncated: body.length < text.length }); } else references.push({ token, kind: "link", source: url, unavailable: true, tokenEstimate: 0 }); continue; }
+    if (token.startsWith("code:") || token.startsWith("symbol:")) { const found = await symbolText(cwd, token.slice(token.indexOf(":") + 1)); if (found) addReference(token, "symbol", found); else references.push({ token, kind: "symbol", unavailable: true, tokenEstimate: 0 }); continue; }
+    if (token === "rules" || token.startsWith("rule:")) { const text = token === "rules" ? readRules(cwd) : readRule(cwd, token.slice(5)); if (text) { const body = clip(text); addReference(token, "rules", `<rules${token === "rules" ? "" : ` name="${token.slice(5)}"`}>\n${body}\n</rules>`, { truncated: body.length < text.length }); } else references.push({ token, kind: "rules", unavailable: true, tokenEstimate: 0 }); continue; }
+    if (token === "git:pr") { const pr = await prContext(cwd); if (pr) addReference(token, "git-pr", pr); continue; }
+    if (token.startsWith("folder:") || (isDirectory(join(cwd, token.replace(/\/$/, ""))) && !/:\d+-\d+$/.test(token))) { const rel = (token.startsWith("folder:") ? token.slice(7) : token).replace(/\/$/, ""); const listing = folderListing(cwd, rel); if (listing) addReference(token, "folder", `<folder path="${rel}">\n${listing}\n</folder>`, { source: join(cwd, rel) }); continue; }
+    if (/^browser:[a-f0-9]{20}$/.test(token)) {
+      try { const snapshot = join(cwd, ".muster", "browser", `context-${token.slice(8)}.json`); const pick = JSON.parse(readFileSync(snapshot, "utf8")) as BrowserPick; const ctx = await browserContext(pick); if (ctx) addReference(token, "browser", `<browser selection="${token}">\n${ctx}\n</browser>`, { source: snapshot, sourceMtimeMs: statSync(snapshot).mtimeMs }); }
+      catch { addReference(token, "browser", `<context-unavailable ref="${token}">Saved selection is unavailable. Ask to attach it again if needed.</context-unavailable>`, { source: join(cwd, ".muster", "browser", `context-${token.slice(8)}.json`) }); }
+      continue;
+    }
+    if (token === "browser" || token === "browser:console") { const ctx = await browserContext(); if (ctx) addReference(token, "browser", `<browser>\n${ctx}\n</browser>`); continue; }
+    if (token === "web") { addReference(token, "instruction", "<instruction>Use web search for anything that needs current or external information.</instruction>"); continue; }
+    if (token === "terminal" || token.startsWith("terminal:")) { const tail = terminalTail(token.slice("terminal:".length)); if (tail) addReference(token, "terminal", `<terminal>\n${tail}\n</terminal>`); continue; }
+    if (token === "git:diff") { const d = await git(cwd, ["diff"]); if (d.trim()) { const body = clip(d); addReference(token, "git-diff", `<git-diff>\n${body}\n</git-diff>`, { truncated: body.length < d.length }); } continue; }
+    if (token === "git:branch") { const base = await defaultBranch(cwd); const d = await git(cwd, ["diff", `${base}...HEAD`]); const body = clip(d || "(no differences)"); addReference(token, "git-branch", `<git-branch-diff base="${base}">\n${body}\n</git-branch-diff>`, { source: base, truncated: body.length < d.length }); continue; }
+    if (token.startsWith("git:commit:")) { const sha = token.slice("git:commit:".length); const d = await git(cwd, ["show", "--stat", "--patch", sha]); if (d.trim()) { const body = clip(d); addReference(token, "git-commit", `<git-commit sha="${sha}">\n${body}\n</git-commit>`, { source: sha, truncated: body.length < d.length }); } continue; }
+    if (token.startsWith("docs:")) { const text = await docText(cwd, token.slice(5)); if (text) { const body = clip(text); addReference(token, "docs", `<doc name="${token.slice(5)}">\n${body}\n</doc>`, { source: token.slice(5), truncated: body.length < text.length }); } continue; }
+    if (token.startsWith("chat:")) { const id = token.slice(5); const thread = threadsForWorkspace(await listThreads(), [cwd]).find((t) => t.id === id); if (thread) { const history = await readHistory(thread); const tail = history.slice(-4).map((m) => `${m.role}: ${m.text.slice(0, 1500)}`).join("\n\n"); addReference(token, "chat", `<past-chat name="${thread.name}">\n${tail}\n</past-chat>`, { source: thread.id }); } continue; }
+    if (token.startsWith("image:")) { const path = token.slice(6); if (existsSync(path)) { images.push(path); references.push({ token, kind: "image", source: path, sourceMtimeMs: statSync(path).mtimeMs, tokenEstimate: 0 }); } else references.push({ token, kind: "image", source: path, unavailable: true, tokenEstimate: 0 }); continue; }
     const rel = token.replace(/:\d+-\d+$/, "");
     const range = /:(\d+)-(\d+)$/.exec(token);
     const abs = join(cwd, rel);
-    if (!existsSync(abs)) continue;
+    if (!existsSync(abs)) { references.push({ token, kind: "file", source: abs, unavailable: true, tokenEstimate: 0 }); continue; }
     try {
       const lines = readFileSync(abs, "utf8").split("\n");
       const slice = range ? lines.slice(Number(range[1]) - 1, Number(range[2])) : lines.slice(0, 400);
-      blocks.push(`<file path="${rel}"${range ? ` lines="${range[1]}-${range[2]}"` : ""}>\n${slice.join("\n")}${!range && lines.length > 400 ? "\n… (truncated)" : ""}\n</file>`);
+      const truncated = !range && lines.length > 400;
+      addReference(token, "file", `<file path="${rel}"${range ? ` lines="${range[1]}-${range[2]}"` : ""}>\n${slice.join("\n")}${truncated ? "\n… (truncated)" : ""}\n</file>`, { source: abs, sourceMtimeMs: statSync(abs).mtimeMs, ...(range ? { startLine: Number(range[1]), endLine: Number(range[2]) } : {}), includedLines: slice.length, truncated });
     } catch { /* directories and binaries are skipped */ }
   }
-  return { prompt: blocks.length ? `${prompt}\n\nContext:\n${blocks.join("\n")}` : prompt, images };
+  // Keep the inspector truthful: a supported mention that produced no block
+  // is still visible as unavailable rather than silently disappearing.
+  const included = new Set(references.map((reference) => reference.token));
+  for (const rawToken of uniqueMentions(prompt)) {
+    let token: string; try { token = decodeURIComponent(rawToken); } catch { token = rawToken; }
+    if (included.has(token)) continue;
+    const kind = token.startsWith("link:") || /^https?:\/\//.test(token) ? "link" : token.startsWith("image:") ? "image" : token.startsWith("browser") ? "browser" : token.startsWith("git:") ? "git" : token.startsWith("terminal") ? "terminal" : token.startsWith("docs:") ? "docs" : token.startsWith("chat:") ? "chat" : token.startsWith("code:") || token.startsWith("symbol:") ? "symbol" : token.startsWith("rule") ? "rules" : token.startsWith("folder:") ? "folder" : "file";
+    references.push({ token, kind, unavailable: true, tokenEstimate: 0 });
+  }
+  const cleaned = prompt.replace(/(^|\s)@image:[^\s]+/g, "$1").replace(/[ \t]{2,}/g, " ").replace(/\n{3,}/g, "\n\n").trim();
+  return { prompt: blocks.length ? `${cleaned}\n\nContext:\n${blocks.join("\n")}` : cleaned, images, references };
 }

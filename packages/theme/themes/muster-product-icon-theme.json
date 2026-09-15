@@ -1,0 +1,311 @@
+{
+  "fonts": [
+    {
+      "id": "muster-lucide",
+      "src": [
+        {
+          "path": "./icons/lucide.ttf",
+          "format": "truetype"
+        }
+      ],
+      "weight": "normal",
+      "style": "normal"
+    }
+  ],
+  "iconDefinitions": {
+    "edit": {
+      "fontCharacter": "\\e1f9"
+    },
+    "pass-filled": {
+      "fontCharacter": "\\e226"
+    },
+    "circle-large": {
+      "fontCharacter": "\\e076"
+    },
+    "folder": {
+      "fontCharacter": "\\e0d7"
+    },
+    "comment-discussion": {
+      "fontCharacter": "\\e40d"
+    },
+    "git-branch": {
+      "fontCharacter": "\\e0e2"
+    },
+    "git-commit": {
+      "fontCharacter": "\\e0e3"
+    },
+    "terminal": {
+      "fontCharacter": "\\e20a"
+    },
+    "globe": {
+      "fontCharacter": "\\e0e8"
+    },
+    "book": {
+      "fontCharacter": "\\e05f"
+    },
+    "browser": {
+      "fontCharacter": "\\e12c"
+    },
+    "chevron-right": {
+      "fontCharacter": "\\e06f"
+    },
+    "chevron-left": {
+      "fontCharacter": "\\e06e"
+    },
+    "close": {
+      "fontCharacter": "\\e1b2"
+    },
+    "mention": {
+      "fontCharacter": "\\e04e"
+    },
+    "sparkle": {
+      "fontCharacter": "\\e412"
+    },
+    "history": {
+      "fontCharacter": "\\e1f5"
+    },
+    "tools": {
+      "fontCharacter": "\\e1b1"
+    },
+    "file": {
+      "fontCharacter": "\\e0c0"
+    },
+    "symbol-method": {
+      "fontCharacter": "\\e36a"
+    },
+    "search": {
+      "fontCharacter": "\\e151"
+    },
+    "refresh": {
+      "fontCharacter": "\\e145"
+    },
+    "chat-sparkle": {
+      "fontCharacter": "\\e116"
+    },
+    "link": {
+      "fontCharacter": "\\e102"
+    },
+    "plug": {
+      "fontCharacter": "\\e37f"
+    },
+    "extensions": {
+      "fontCharacter": "\\e4fa"
+    },
+    "checklist": {
+      "fontCharacter": "\\e1d0"
+    },
+    "circle-slash": {
+      "fontCharacter": "\\e402"
+    },
+    "robot": {
+      "fontCharacter": "\\e1bb"
+    },
+    "git-pull-request": {
+      "fontCharacter": "\\e0e5"
+    },
+    "comment": {
+      "fontCharacter": "\\e117"
+    },
+    "note": {
+      "fontCharacter": "\\e596"
+    },
+    "file-code": {
+      "fontCharacter": "\\e0c3"
+    },
+    "play": {
+      "fontCharacter": "\\e13c"
+    },
+    "copy": {
+      "fontCharacter": "\\e09e"
+    },
+    "git-fork": {
+      "fontCharacter": "\\e28d"
+    },
+    "reply": {
+      "fontCharacter": "\\e22a"
+    },
+    "files": {
+      "fontCharacter": "\\e0cf"
+    },
+    "debug": {
+      "fontCharacter": "\\e20c"
+    },
+    "run": {
+      "fontCharacter": "\\e13c"
+    },
+    "debug-alt": {
+      "fontCharacter": "\\e50e"
+    },
+    "debug-start": {
+      "fontCharacter": "\\e13c"
+    },
+    "debug-pause": {
+      "fontCharacter": "\\e12e"
+    },
+    "debug-stop": {
+      "fontCharacter": "\\e167"
+    },
+    "debug-restart": {
+      "fontCharacter": "\\e149"
+    },
+    "settings": {
+      "fontCharacter": "\\e154"
+    },
+    "settings-gear": {
+      "fontCharacter": "\\e154"
+    },
+    "gear": {
+      "fontCharacter": "\\e154"
+    },
+    "account": {
+      "fontCharacter": "\\e461"
+    },
+    "hubot": {
+      "fontCharacter": "\\e1bb"
+    },
+    "lightbulb": {
+      "fontCharacter": "\\e1c2"
+    },
+    "lightbulb-autofix": {
+      "fontCharacter": "\\e412"
+    },
+    "add": {
+      "fontCharacter": "\\e13d"
+    },
+    "remove": {
+      "fontCharacter": "\\e11c"
+    },
+    "check": {
+      "fontCharacter": "\\e06c"
+    },
+    "check-all": {
+      "fontCharacter": "\\e38e"
+    },
+    "trash": {
+      "fontCharacter": "\\e18e"
+    },
+    "terminal-bash": {
+      "fontCharacter": "\\e20a"
+    },
+    "terminal-powershell": {
+      "fontCharacter": "\\e20a"
+    },
+    "terminal-cmd": {
+      "fontCharacter": "\\e20a"
+    },
+    "terminal-linux": {
+      "fontCharacter": "\\e181"
+    },
+    "terminal-tmux": {
+      "fontCharacter": "\\e12c"
+    },
+    "terminal-debian": {
+      "fontCharacter": "\\e181"
+    },
+    "chevron-down": {
+      "fontCharacter": "\\e06d"
+    },
+    "chevron-up": {
+      "fontCharacter": "\\e070"
+    },
+    "layout-sidebar-left": {
+      "fontCharacter": "\\e12a"
+    },
+    "layout-sidebar-right": {
+      "fontCharacter": "\\e431"
+    },
+    "layout-sidebar-left-off": {
+      "fontCharacter": "\\e21c"
+    },
+    "layout-sidebar-right-off": {
+      "fontCharacter": "\\e432"
+    },
+    "layout-panel": {
+      "fontCharacter": "\\e42c"
+    },
+    "layout-panel-off": {
+      "fontCharacter": "\\e42d"
+    },
+    "layout-statusbar": {
+      "fontCharacter": "\\e42c"
+    },
+    "layout-menubar": {
+      "fontCharacter": "\\e115"
+    },
+    "layout-activitybar-left": {
+      "fontCharacter": "\\e4d1"
+    },
+    "layout-centered": {
+      "fontCharacter": "\\e1cb"
+    },
+    "ellipsis": {
+      "fontCharacter": "\\e0b6"
+    },
+    "discard": {
+      "fontCharacter": "\\e2a1"
+    },
+    "open-preview": {
+      "fontCharacter": "\\e0ba"
+    },
+    "pin": {
+      "fontCharacter": "\\e259"
+    },
+    "pinned": {
+      "fontCharacter": "\\e259"
+    },
+    "send": {
+      "fontCharacter": "\\e152"
+    },
+    "stop-circle": {
+      "fontCharacter": "\\e083"
+    },
+    "loading": {
+      "fontCharacter": "\\e10a"
+    },
+    "split-horizontal": {
+      "fontCharacter": "\\e098"
+    },
+    "split-vertical": {
+      "fontCharacter": "\\e439"
+    },
+    "code": {
+      "fontCharacter": "\\e093"
+    },
+    "source-control": {
+      "fontCharacter": "\\e0e2"
+    },
+    "git-compare": {
+      "fontCharacter": "\\e359"
+    },
+    "git-merge": {
+      "fontCharacter": "\\e0e4"
+    },
+    "git-pull-request-draft": {
+      "fontCharacter": "\\e35b"
+    },
+    "repo": {
+      "fontCharacter": "\\e3f1"
+    },
+    "remote": {
+      "fontCharacter": "\\e45d"
+    },
+    "browser-open": {
+      "fontCharacter": "\\e12c"
+    },
+    "error": {
+      "fontCharacter": "\\e084"
+    },
+    "warning": {
+      "fontCharacter": "\\e193"
+    },
+    "info": {
+      "fontCharacter": "\\e0f9"
+    },
+    "bell": {
+      "fontCharacter": "\\e059"
+    },
+    "comment-unresolved": {
+      "fontCharacter": "\\e568"
+    }
+  }
+}

@@ -11,7 +11,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 BASE_TAG="${BASE_TAG:-1.126.04524}"
 CACHE="$ROOT/.cache"
-DIST="$ROOT/dist"
+DIST="${MUSTER_CODE_DIST:-$ROOT/dist}"
 APP="$DIST/Muster Code.app"
 ZIP="$CACHE/VSCodium-darwin-arm64-$BASE_TAG.zip"
 
@@ -55,7 +55,10 @@ mv "$RES/bin/codium-tunnel" "$RES/bin/muster-code-tunnel" 2>/dev/null || true
 
 echo "▸ installing the built-in Muster layer + theme"
 pnpm --filter @muster-code/builtin build >/dev/null
-pnpm --filter @muster-code/theme build >/dev/null
+(
+  cd "$ROOT/packages/theme"
+  pnpm run build >/dev/null
+)
 rm -rf "$RES/extensions/muster.muster-code" "$RES/extensions/muster.theme-muster"
 cp -R "$ROOT/packages/builtin/dist-ext" "$RES/extensions/muster.muster-code"
 cp -R "$ROOT/packages/theme/dist-ext" "$RES/extensions/muster.theme-muster"

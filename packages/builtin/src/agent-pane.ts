@@ -1,3 +1,11 @@
+import { activityId, boundedEventData, cancelQueuedMessages, cleanDraft, queueMessage, readUsage, type ActivityRecord, type ComposerDraft, type DurableRun, type RunState, type RunUsage, type UsageLedgerEntry } from "./conversation-state.js";
+import { paneHtml } from "./agent-view.js";
+import { assertSelectionChange, migrateProviderSelection, validateSelection, providerLabel, type ProviderId } from "./provider-routing.js";
+import { bindConversationProvider } from "./codex.js";
+import { AgentGraphAdapter, type AgentGraphSnapshot } from "./agent-orchestration.js";
+import { isChildOfRoot } from "./agent-control.js";
+import { activeDescendantCount, editLeaseActive as isEditLeaseActive, canCloseWithActiveDescendants } from "./edit-lease.js";
+import { TaskRuntimeRegistry, type TaskRuntimeIdentity } from "./task-runtime-registry.js";
 // The Agent pane — muster's own chat surface in the secondary sidebar, built to
 // Cursor's chat (docs/cursor-parity-spec.md, docs/cursor-feature-atlas.md):
 // thread tabs, history, modes (Agent / Plan / Ask / Kanban / custom), access
@@ -5,32 +13,48 @@
 // .plan.md in the workspace, tool cards, edit cards, the review bar.
 import * as vscode from "vscode";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join, relative } from "node:path";
-import { archiveThread, formatAge, formatSize, interruptTurn, lastRollbackError, listAccessModes, listModels, listSkills, listThreads, readHistory, readRules, revertThread, rollbackThread, runClaudeTurn, runTurn, setThreadName, steerTurn, threadsForWorkspace, type AccessMode, type CodexThread, type ModelInfo, type SkillInfo } from "./codex.js";
-import type { Checkpoint, EditCard, LiveEditController } from "./live-edit.js";
-import { expandContext, listRules, rememberPick, suggestMentions, suggestSlash, type MenuData, type MenuSection } from "./context.js";
+import { homedir, tmpdir } from "node:os";
+import { dirname, join, relative, resolve as resolvePath } from "node:path";
+import { archiveThread, controlOwnedTurn, formatAge, formatSize, interruptTurn, isUnattendedAccess, lastRollbackError, listAccessModes, listModels, listSkills, listThreads, readHistory, readRules, revertThread, rollbackThread, runClaudeTurn, runTurn, setThreadName, steerTurn, threadsForWorkspace, type AccessMode, type CodexThread, type ModelInfo, type SkillInfo } from "./codex.js";
+import { LiveEditController, type Checkpoint, type EditCard } from "./live-edit.js";
+import { expandContext, listRules, rememberPick, saveBrowserPick, suggestMentions, suggestSlash, type ContextReference, type MenuData, type MenuSection } from "./context.js";
 import type { BrowserPick, BrowserController, BrowserState } from "./browser.js";
+import type { ThreadRead, ThreadRecord } from "./thread-catalog.js";
 
 interface ModeInfo { readonly id: string; readonly name: string; readonly icon: string; readonly placeholder: string; readonly description?: string; readonly prompt?: string; readonly readOnly?: boolean; readonly plan?: boolean; readonly board?: boolean; readonly effort?: string; readonly autoFix?: boolean; readonly debug?: boolean; readonly parallel?: boolean; readonly spec?: boolean }
-interface ThreadSettings { mode: string; accessId: string; modelId: string; effortId: string; debugStage?: 0 | 1 | 2 }
+interface ThreadSettings { providerId?: ProviderId; mode: string; accessId: string; modelId: string; effortId: string; debugStage?: 0 | 1 | 2 }
 interface PlanCard { title: string; summary: string; todos: { text: string; done: boolean }[]; path?: string; model?: string; modelId?: string }
-type ToolMessage = { kind: "tool"; id: string; title: string; detail: string; output: string; status: string; tool?: "command" | "mcp" | "search"; exitCode?: number | null; durationMs?: number; cwd?: string };
+type ToolMessage = { kind: "tool"; id: string; title: string; detail: string; output: string; status: string; tool?: "command" | "mcp" | "search" | "computer"; exitCode?: number | null; durationMs?: number; cwd?: string };
 /** An approval the provider is waiting on, shown as a card in the chat (Cursor: Run ⏎ / Skip Esc). */
-type ApprovalCard = { id: string; kind: "command" | "patch" | "elicitation"; command: string; cwd?: string; reason?: string; files?: string[] };
+type ApprovalCard = { diff?: string; id: string; kind: "command" | "patch" | "elicitation"; command: string; cwd?: string; reason?: string; files?: string[] };
 type PaneMessage =
   | { kind: "user"; text: string; checkpoint?: string; steer?: boolean; turnId?: string }
   | { kind: "assistant"; text: string; reasoning: string }
   | ToolMessage
   | { kind: "plan"; card: PlanCard };
 interface RedoState { checkpoint: Checkpoint; messages: PaneMessage[] }
-interface Tab { id: string; name: string; kind?: "chat" | "browser"; browserId?: string; thread?: CodexThread; messages: PaneMessage[]; settings: ThreadSettings; plan?: PlanCard; claudeSession?: string; running: boolean; checkpoints: Map<string, Checkpoint>; redo?: RedoState; autoFixed?: boolean; queue?: string[]; pendingRevert?: { turnId?: string; turns: number }; lastError?: string }
+interface Tab { queueWaiters?: (() => void)[]; proposals?: Map<string, {path?: string; diff?: string}[]>; promptEstimate?: number; draft?: ComposerDraft; usage?: RunUsage; usageLedger?: UsageLedgerEntry[]; activity?: string; activityTimeline?: ActivityRecord[]; contextReferences?: ContextReference[]; agentGraph?: AgentGraphSnapshot; run?: DurableRun; startedAt?: number; edits?: EditCard[]; id: string; name: string; kind?: "chat" | "browser"; browserId?: string; thread?: CodexThread; messages: PaneMessage[]; settings: ThreadSettings; plan?: PlanCard; claudeSession?: string; running: boolean; inlineRunning?: boolean; checkpoints: Map<string, Checkpoint>; redo?: RedoState; autoFixed?: boolean; queue?: string[]; pendingRevert?: { turnId?: string; turns: number }; lastError?: string }
 interface BoardTask { id: string; title: string; column: "backlog" | "progress" | "review" | "done"; threadId?: string; createdAt: number }
 
+function isPaneMessage(value: unknown): value is PaneMessage {
+  if (!value || typeof value !== "object") return false;
+  const kind = (value as { kind?: unknown }).kind;
+  const row = value as Record<string, unknown>;
+  if (kind === "user") return typeof row.text === "string";
+  if (kind === "assistant") return typeof row.text === "string" && typeof row.reasoning === "string";
+  if (kind === "tool") return typeof row.id === "string" && typeof row.title === "string" && typeof row.detail === "string" && typeof row.output === "string" && typeof row.status === "string";
+  if (kind === "plan") { const card = row.card; return !!card && typeof card === "object" && typeof (card as Record<string, unknown>).title === "string" && typeof (card as Record<string, unknown>).summary === "string" && Array.isArray((card as Record<string, unknown>).todos); }
+  return false;
+}
+
 type ToPane =
-  | { type: "state"; queue?: string[]; currentFile?: string | undefined; tabs: { id: string; name: string; running: boolean; kind?: "chat" | "browser" }[]; activeId: string; view: "chat" | "history" | "board" | "browser"; modes: ModeInfo[]; access: AccessMode[]; models: ModelInfo[]; settings: ThreadSettings; loading: boolean; canRedo: boolean }
+  | { type: "state"; appearance: { density: string; fontSize: number; accent: string; glass: boolean }; draft: ComposerDraft; usage?: RunUsage; usageLedger?: UsageLedgerEntry[]; activity?: string; activityTimeline?: ActivityRecord[]; contextReferences?: ContextReference[]; agentWorkspace?: AgentGraphSnapshot; taskWorkspace?: { version: 1; activeTaskId: string; tasks: readonly (TaskRuntimeIdentity & { name: string; status: string; capability: "isolated-worktree" | "shared-checkout-serialized"; activeTurnId?: string })[] }; run?: DurableRun; runState?: RunState; startedAt?: number; promptEstimate?: number; reviewMode: "auto" | "review"; queue?: string[]; currentFile?: string | undefined; tabs: { id: string; name: string; running: boolean; kind?: "chat" | "browser" }[]; activeId: string; view: "chat" | "history" | "board" | "browser"; modes: ModeInfo[]; access: AccessMode[]; models: ModelInfo[]; settings: ThreadSettings; loading: boolean; canRedo: boolean }
   | { type: "browser"; state: BrowserState }
-  | { type: "messages"; messages: PaneMessage[] }
-  | { type: "user"; text: string; steer?: boolean }
+  | { type: "messages"; messages: PaneMessage[]; edits?: EditCard[] }
+  | { type: "telemetry"; activity: string; usage?: RunUsage; usageLedger?: UsageLedgerEntry[]; activityTimeline?: ActivityRecord[]; contextReferences?: ContextReference[]; agentWorkspace?: AgentGraphSnapshot; run?: DurableRun; runState?: RunState; startedAt?: number; promptEstimate?: number }
+  | { type: "agentActionResult"; action: string; agentId: string; ok: boolean; reason?: string }
+  | { type: "agentWorkspace"; data: AgentGraphSnapshot }
+  | { type: "user"; text: string; checkpoint?: string; steer?: boolean }
   | { type: "approval"; approval: ApprovalCard } | { type: "approvalDone"; id: string; decision: string }
   | { type: "start" }
   | { type: "delta"; text: string }
@@ -46,9 +70,11 @@ type ToPane =
   | { type: "validated"; ok: string[]; bad: string[] }
   | { type: "setInput"; text: string }
   | { type: "openModeMenu" } | { type: "openMenu"; kind: "model" | "context" | "access" } | { type: "dictation"; text?: string; on: boolean } | { type: "browserExtras"; bookmarks: { title: string; url: string }[]; cert?: { url: string; error: string } | null }
-  | { type: "insert"; text: string };
+  | { type: "insert"; text: string }
+  | { type: "imageResolved"; src: string; uri: string };
 type FromPane =
-  | { type: "ready" } | { type: "boot" } | { type: "clientError"; message: string } | { type: "send"; text: string } | { type: "stop" } | { type: "dropQueued"; index: number } | { type: "decide"; id: string; decision: string } | { type: "openPath"; path: string; line?: number; endLine?: number } | { type: "insertBlock"; code: string } | { type: "applyBlock"; path: string; code: string; lang?: string } | { type: "editMessage"; checkpoint: string; text: string }
+  | { type: "draft"; id: string; draft: ComposerDraft }
+  | { type: "ready" } | { type: "boot" } | { type: "clientError"; message: string } | { type: "send"; text: string } | { type: "stop" } | { type: "dropQueued"; index: number } | { type: "decide"; id: string; decision: string } | { type: "openPath"; path: string; line?: number; endLine?: number } | { type: "insertBlock"; code: string } | { type: "applyBlock"; path: string; code: string; lang?: string } | { type: "editMessage"; checkpoint: string; text: string } | { type: "resolveImage"; src: string }
   | { type: "acceptAll" } | { type: "rejectAll" } | { type: "open"; path: string; ifClosed?: boolean }
   | { type: "newAgent" } | { type: "openThread"; id: string } | { type: "closeTab"; id: string } | { type: "activateTab"; id: string } | { type: "renameThread"; id: string } | { type: "archiveThread"; id: string } | { type: "exportThread"; id: string } | { type: "dictate" } | { type: "browserBookmark"; id: string } | { type: "browserDevtools"; id: string } | { type: "browserTrust"; id: string }
   | { type: "view"; view: "chat" | "history" | "board" }
@@ -56,11 +82,12 @@ type FromPane =
   | { type: "pin"; id: string; pinned: boolean }
   | { type: "viewPlan" } | { type: "buildPlan"; todos?: number[]; model?: string; newThread?: boolean }
   | { type: "suggest"; kind: "file" | "skill"; query: string; mode?: string; seq?: number } | { type: "slashAction"; id: string }
-  | { type: "probed"; seq?: number; query?: string | null; mode?: string | null; cards?: string[]; value?: string; rows: { text: string; sel: boolean; icon: string }[]; chips: { t: string; bad: boolean }[]; marks: { t: string; bad: boolean }[]; title: string } | { type: "restore"; id: string } | { type: "attach" } | { type: "validate"; tokens: string[] } | { type: "command"; id: string } | { type: "redo" }
+  | { type: "probed"; seq?: number; query?: string | null; mode?: string | null; cards?: string[]; value?: string; rows: { text: string; sel: boolean; icon: string }[]; chips: { t: string; bad: boolean }[]; marks: { t: string; bad: boolean }[]; title: string } | { type: "restore"; id: string } | { type: "attach" } | { type: "pasteImage"; mime: string; data: string; name?: string } | { type: "validate"; tokens: string[] } | { type: "command"; id: string } | { type: "redo" }
   | { type: "openReview" }
   | { type: "boardAdd"; title: string } | { type: "boardRun"; id: string } | { type: "boardMove"; id: string; column: BoardTask["column"] }
   | { type: "browserEdit"; id: string; kind: "text" | "style"; prop?: string; value: string } | { type: "browserRevert"; id: string; index: number } | { type: "browserApply"; id: string } | { type: "browserTakeControl"; id: string }
-  | { type: "browserNav"; id: string; url: string } | { type: "browserAction"; id: string; action: "back" | "forward" | "reload" | "pick" | "screenshot" } | { type: "browserRect"; id: string; rect: { top: number; left: number; width: number; height: number }; visible: boolean } | { type: "browserToChat"; id: string } | { type: "newBrowser" };
+  | { type: "browserNav"; id: string; url: string } | { type: "browserAction"; id: string; action: "back" | "forward" | "reload" | "pick" | "screenshot" } | { type: "browserRect"; id: string; rect: { top: number; left: number; width: number; height: number }; visible: boolean } | { type: "browserToChat"; id: string } | { type: "newBrowser" }
+  | { type: "agentAction"; action: "open" | "steer" | "interrupt" | "stop"; agentId: string; threadId?: string };
 
 // Cursor 3.18's built-in modes (docs/cursor-feature-atlas.md §3), mapped onto Codex: plan/spec use the
 // plan collaboration mode, ask/project are read-only, triage prefers the delegating effort, multitask is the board.
@@ -100,20 +127,66 @@ export class AgentPane implements vscode.WebviewViewProvider {
   readonly onCatalog = this.catalogChanged.event;
   private readonly accountEvents = new vscode.EventEmitter<Record<string, unknown>>();
   readonly onAccountEvent = this.accountEvents.event;
+  private readonly taskRuntimes = new TaskRuntimeRegistry<LiveEditController>();
+  private readonly runtimeControllers = new Map<string, LiveEditController>();
 
   constructor(private readonly context: vscode.ExtensionContext, private readonly output: vscode.LogOutputChannel, private readonly live: LiveEditController) {
-    this.live.onCard((card) => this.post({ type: "edit", card }));
+    this.live.onCard((card) => { const tab = this.editOwner ?? this.active(); (tab.edits ??= []); const i = tab.edits.findIndex(e => e.path === card.path); if (i < 0) tab.edits.push(card); else tab.edits[i] = card; this.post({ type: "edit", card }, tab.id); });
     this.live.onChange(() => this.post({ type: "review", files: this.live.review() }));
-    this.newTab();
+    const saved = this.context.workspaceState.get<{ id: string; name: string; thread?: CodexThread; draft: ComposerDraft; settings: ThreadSettings; messages?: PaneMessage[]; usage?: RunUsage; usageLedger?: UsageLedgerEntry[]; activityTimeline?: ActivityRecord[]; contextReferences?: ContextReference[]; agentGraph?: AgentGraphSnapshot; run?: DurableRun; queue?: string[] }[]>("muster.openChats", []);
+    for (const item of saved) {
+      const run = item.run?.state === "preparing" || item.run?.state === "running" || item.run?.state === "waiting" ? { ...item.run, state: "disconnected" as const, endedAt: Date.now(), error: "Muster Code was reloaded while this run was active. It was not replayed." } : item.run;
+      this.tabs.push({ ...item, settings: migrateProviderSelection(item.settings), draft: cleanDraft(item.draft), messages: Array.isArray(item.messages) ? item.messages.filter(isPaneMessage) : [], ...(Array.isArray(item.queue) ? { queue: item.queue.filter((value): value is string => typeof value === "string").slice(0, 100) } : {}), ...(item.usage ? { usage: readUsage(item.usage) } : {}), ...(item.usageLedger ? { usageLedger: item.usageLedger } : {}), ...(item.activityTimeline ? { activityTimeline: item.activityTimeline } : {}), ...(item.contextReferences ? { contextReferences: item.contextReferences } : {}), ...(item.agentGraph ? { agentGraph: AgentGraphAdapter.from(item.agentGraph).snapshot() } : {}), ...(run ? { run, ...(run.state === "disconnected" ? { activity: "Disconnected", lastError: run.error } : {}) } : {}), running: false, checkpoints: new Map() });
+    }
+    this.activeId = this.context.workspaceState.get<string>("muster.activeChat", "");
+    for (const tab of this.tabs) if (tab.settings.providerId) bindConversationProvider(tab.id, tab.settings.providerId);
+    if (!this.tabs.length) this.newTab();
+    else if (!this.tabs.some(t => t.id === this.activeId)) this.activeId = this.tabs[0]!.id;
+  }
+
+  private editOwner: Tab | undefined;
+  private restorePromise: Promise<void> | undefined;
+  /** Memento writes are async; serialize snapshots so an older event cannot
+   * resolve after a newer event and overwrite durable run state. */
+  private saveChain: Promise<void> = Promise.resolve();
+  private async restoreHistories(): Promise<void> {
+    if (this.restorePromise) return this.restorePromise;
+    this.restorePromise = Promise.allSettled(this.tabs.filter(t => t.thread && !t.messages.length).map(async t => {
+      const history = await readHistory(t.thread!);
+      t.messages = history.map((m, i) => m.role === "user" ? { kind: "user", text: m.text, checkpoint: `cp-h-${t.thread!.id}-${i}` } : { kind: "assistant", text: m.text, reasoning: "" });
+    })).then(() => undefined);
+    return this.restorePromise;
+  }
+  private compactMessages(messages: PaneMessage[]): PaneMessage[] {
+    return messages.slice(-240).map((message) => message.kind === "tool" ? { ...message, output: message.output.slice(-24_000) } : message.kind === "assistant" ? { ...message, text: message.text.slice(-80_000), reasoning: message.reasoning.slice(-24_000) } : message);
+  }
+  private saveChats(): void {
+    const chats = this.tabs.filter(t => t.kind !== "browser").map(t => ({ id: t.id, name: t.name, ...(t.thread ? { thread: t.thread } : {}), draft: t.draft ?? cleanDraft(null), settings: t.settings, messages: this.compactMessages(t.messages), ...(t.queue?.length ? { queue: t.queue.slice(0, 100) } : {}), ...(t.usage ? { usage: t.usage } : {}), ...(t.usageLedger?.length ? { usageLedger: t.usageLedger.slice(-100) } : {}), ...(t.activityTimeline?.length ? { activityTimeline: t.activityTimeline.slice(-300) } : {}), ...(t.contextReferences?.length ? { contextReferences: t.contextReferences.slice(-100) } : {}), ...(t.agentGraph ? { agentGraph: t.agentGraph } : {}), ...(t.run ? { run: t.run } : {}) }));
+    const activeChat = this.activeId;
+    this.saveChain = this.saveChain.catch(() => undefined).then(async () => {
+      await this.context.workspaceState.update("muster.openChats", chats);
+      await this.context.workspaceState.update("muster.activeChat", activeChat);
+    }).catch((error) => this.output.appendLine(`state save failed: ${error instanceof Error ? error.message : String(error)}`));
+  }
+
+  private recordActivity(tab: Tab, method: string, params: Record<string, unknown>): void {
+    const item = params.item && typeof params.item === "object" ? params.item as Record<string, unknown> : {};
+    const sequence = (tab.activityTimeline?.length ?? 0) + 1;
+    const data = boundedEventData(params);
+    const record: ActivityRecord = { id: activityId(method, params, sequence), ts: Date.now(), method, ...(typeof item.type === "string" ? { itemType: item.type } : {}), ...(typeof item.id === "string" ? { itemId: item.id } : {}), ...(method === "item/commandExecution/outputDelta" ? { summary: String(params.delta ?? "").slice(0, 240) } : {}), ...(method.endsWith("/requestApproval") ? { summary: "Approval requested" } : {}), ...(method === "turn/completed" ? { summary: String((params.turn as Record<string, unknown> | undefined)?.status ?? "completed") } : {}), ...(data ? { data } : {}) };
+    (tab.activityTimeline ??= []).push(record);
+    if (tab.activityTimeline.length > 300) tab.activityTimeline.splice(0, tab.activityTimeline.length - 300);
   }
 
   resolveWebviewView(view: vscode.WebviewView): void {
     this.context.subscriptions.push(vscode.window.onDidChangeActiveTextEditor(() => { if (this.view?.visible) this.pushState(); }));
-    this.context.subscriptions.push(vscode.workspace.onDidChangeConfiguration((e) => { if (e.affectsConfiguration("muster.modes")) this.pushState(); }));
+    this.context.subscriptions.push(vscode.workspace.onDidChangeConfiguration((e) => { if (e.affectsConfiguration("muster.modes") || e.affectsConfiguration("muster.ui")) this.pushState(); }));
     this.view = view;
     const appRoot = vscode.Uri.file(vscode.env.appRoot);
-    view.webview.options = { enableScripts: true, localResourceRoots: [this.context.extensionUri, appRoot] };
-    view.webview.html = paneHtml(view.webview.cspSource, view.webview.asWebviewUri(vscode.Uri.joinPath(appRoot, "out", "media", "codicon.ttf")).toString());
+    const localResourceRoots = [this.context.extensionUri, appRoot, vscode.Uri.file("/tmp"), vscode.Uri.file(tmpdir()), vscode.Uri.file(homedir())];
+    for (const folder of vscode.workspace.workspaceFolders ?? []) localResourceRoots.push(folder.uri);
+    view.webview.options = { enableScripts: true, localResourceRoots };
+    view.webview.html = paneHtml(view.webview.cspSource, view.webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "resources", "lucide.ttf")).toString());
     view.webview.onDidReceiveMessage((message: FromPane) => void this.onMessage(message).catch((error) => this.output.appendLine(`pane: ${error instanceof Error ? error.message : String(error)}`)));
   }
 
@@ -132,7 +205,7 @@ export class AgentPane implements vscode.WebviewViewProvider {
     if (!tab) {
       tab = this.newTab(thread.name, thread);
       const history = await readHistory(thread);
-      tab.messages = history.map((m) => (m.role === "user" ? { kind: "user", text: m.text } : { kind: "assistant", text: m.text, reasoning: "" }));
+      tab.messages = history.map((m, i) => (m.role === "user" ? { kind: "user", text: m.text, checkpoint: `cp-h-${thread.id}-${i}` } : { kind: "assistant", text: m.text, reasoning: "" }));
     }
     this.activeId = tab.id;
     this.paneView = "chat";
@@ -264,7 +337,7 @@ export class AgentPane implements vscode.WebviewViewProvider {
 
   debugState(): Record<string, unknown> {
     const active = this.active();
-    return { probe: this.lastProbe, approvals: [...this.pending.keys()], running: active.running, queue: active.queue ?? [], messages: active.messages.map((m) => m.kind + ((m as { steer?: boolean }).steer ? "*" : "")), checkpoints: [...active.checkpoints.keys()], lastAssistant: [...active.messages].reverse().find((m) => m.kind === "assistant")?.text.slice(0, 160) ?? null, lastError: active.lastError ?? null, resolved: !!this.view, visible: this.view?.visible ?? null, ready: this.readyCount, models: this.models.length, access: this.access.length, loading: this.loading, tabs: this.tabs.length, view: this.paneView, activeMode: this.active().settings.mode };
+    return { probe: this.lastProbe, approvals: [...this.pending.keys()], running: active.running, queue: active.queue ?? [], messages: active.messages.map((m) => m.kind + ((m as { steer?: boolean }).steer ? "*" : "")), checkpoints: [...active.checkpoints.keys()], lastAssistant: [...active.messages].reverse().find((m) => m.kind === "assistant")?.text.slice(0, 160) ?? null, lastError: active.lastError ?? null, run: active.run ?? null, agentGraph: active.agentGraph ?? null, activityTimeline: active.activityTimeline?.length ?? 0, usageLedger: active.usageLedger ?? [], contextReferences: active.contextReferences ?? [], resolved: !!this.view, visible: this.view?.visible ?? null, ready: this.readyCount, models: this.models.length, access: this.access.length, loading: this.loading, tabs: this.tabs.length, view: this.paneView, activeMode: this.active().settings.mode };
   }
 
   /** Review a commit (Bugbot on commit): a read-only Ask turn over `git show <sha>` in the pane. */
@@ -289,25 +362,33 @@ export class AgentPane implements vscode.WebviewViewProvider {
   /** A file reference in an answer (path, path:line, Codex citation) opens the file at that line. */
   private async openPath(path: string, line?: number, endLine?: number): Promise<void> {
     const cwd = this.cwd(); const raw = path.replace(/^["'\u3010]|["'\u3011]$/g, "");
-    let abs = raw.startsWith("/") ? raw : join(cwd, raw);
+    let abs = raw.startsWith("~/") ? join(homedir(), raw.slice(2)) : raw.startsWith("/") ? raw : join(cwd, raw);
     if (!existsSync(abs)) { const hit = (await vscode.workspace.findFiles(`**/${raw.split("/").pop()}`, "**/{node_modules,.git,dist,build,out}/**", 1))[0]; if (!hit) { void vscode.window.showInformationMessage(`Not found: ${raw}`); return; } abs = hit.fsPath; }
     const editor = await vscode.window.showTextDocument(vscode.Uri.file(abs), { preview: true, viewColumn: vscode.ViewColumn.One });
     if (line) { const a = new vscode.Position(Math.max(0, line - 1), 0); const b = new vscode.Position(Math.max(0, (endLine ?? line) - 1), 0); editor.selection = new vscode.Selection(a, b.line > a.line ? editor.document.lineAt(b.line).range.end : a); editor.revealRange(new vscode.Range(a, b), vscode.TextEditorRevealType.InCenter); }
   }
 
   // ── approvals as chat cards ──
-  private readonly pending = new Map<string, { resolve: (decision: string) => void; kind: ApprovalCard["kind"] }>();
+  private readonly pending = new Map<string, { resolve: (decision: string) => void; kind: ApprovalCard["kind"]; tabId: string; card: ApprovalCard; childThreadId?: string }>();
   private decide(id: string, decision: string): void {
     const p = this.pending.get(id); if (!p) return;
     this.pending.delete(id); p.resolve(decision);
-    this.post({ type: "approvalDone", id, decision });
+    const tab = this.tabs.find((candidate) => candidate.id === p.tabId);
+    if (!p.childThreadId && tab?.run?.state === "waiting") { tab.run = { ...tab.run, state: "running" }; this.saveChats(); }
+    this.post({ type: "approvalDone", id, decision }, p.tabId);
   }
   /** Ask in the chat and wait for the click or the key (⏎ accept, ⇧⏎ accept for session, Esc decline). */
-  private askInChat(card: ApprovalCard): Promise<string> {
-    return new Promise((resolve) => { this.pending.set(card.id, { resolve, kind: card.kind }); this.post({ type: "approval", approval: card }); void vscode.commands.executeCommand(`${AgentPane.viewId}.focus`); });
+  private askInChat(card: ApprovalCard, tab: Tab = this.active(), childThreadId?: string): Promise<string> {
+    // Provider item ids are only unique within a process. Namespace collisions
+    // across pane tabs so one approval can never resolve another tab's request.
+    const originalId = card.id;
+    let id = originalId;
+    while (this.pending.has(id)) id = `${originalId}-${tab.id.slice(-8)}`;
+    const queued = id === originalId ? card : { ...card, id };
+    return new Promise((resolve) => { this.pending.set(id, { resolve, kind: queued.kind, tabId: tab.id, card: queued, ...(childThreadId ? { childThreadId } : {}) }); if (tab.run && !childThreadId) { tab.run = { ...tab.run, state: "waiting" }; this.saveChats(); } this.post({ type: "approval", approval: queued }, tab.id); void vscode.commands.executeCommand(`${AgentPane.viewId}.focus`); });
   }
   /** A turn that ends (stopped, failed) must not leave a question hanging. */
-  private settlePending(decision = "decline"): void { for (const id of [...this.pending.keys()]) this.decide(id, decision); }
+  private settlePending(decision = "decline", tabId?: string, includeChild = false): void { for (const [id, p] of this.pending) if ((!tabId || p.tabId === tabId) && (includeChild || !p.childThreadId)) this.decide(id, decision); }
   debugDecide(id: string, decision: string): void { this.decide(id, decision); }
   /** Harness: raise the same server request the provider would (approval / elicitation) and return the answer. */
   debugRequest(method: string, params: Record<string, unknown>): Promise<Record<string, unknown> | undefined> { return this.approve(method, params); }
@@ -320,7 +401,10 @@ export class AgentPane implements vscode.WebviewViewProvider {
 
   stop(): void {
     const tab = this.active();
-    if (tab.running) void interruptTurn(tab.id).then((ok) => this.output.appendLine(`stop: ${ok ? "interrupted" : "nothing to interrupt"}`));
+    if (tab.running || tab.inlineRunning) {
+      if (tab.run) { tab.run = { ...tab.run, state: "interrupted", endedAt: Date.now(), error: "Interrupted by user." }; this.recordActivity(tab, "muster/run/interrupted", { runId: tab.run.id }); this.saveChats(); }
+      void interruptTurn(tab.id).then((ok) => this.output.appendLine(`stop: ${ok ? "interrupted" : "nothing to interrupt"}`));
+    }
   }
 
   /** Revert the workspace to the state before the user message at `at` (every later turn's checkpoint, newest first). */
@@ -329,7 +413,7 @@ export class AgentPane implements vscode.WebviewViewProvider {
     const ids = tab.messages.slice(at).filter((m): m is Extract<PaneMessage, { kind: "user" }> => m.kind === "user" && !!m.checkpoint).map((m) => m.checkpoint!).reverse();
     for (const id of ids) {
       const checkpoint = tab.checkpoints.get(id); if (!checkpoint) continue;
-      const r = await this.live.restore(checkpoint); changed += r.changed;
+      const r = await this.runtimeFor(tab).restore(checkpoint); changed += r.changed;
       for (const [path, state] of r.inverse) if (!inverse.has(path)) inverse.set(path, state);
     }
     return { changed, inverse };
@@ -373,9 +457,9 @@ export class AgentPane implements vscode.WebviewViewProvider {
   /** Plan editor toolbar: choose the model that will build (mirrors Cursor's "Model used to build this plan"). */
   async pickBuildModel(): Promise<string | undefined> {
     const tab = this.active();
-    const pick = await vscode.window.showQuickPick(this.models.map((m) => ({ label: m.name, description: m.provider === "claude" ? "Claude Code" : "Codex", detail: m.description, picked: m.id === tab.settings.modelId, id: m.id })), { placeHolder: "Model used to build this plan" });
+    const pick = await vscode.window.showQuickPick(this.models.map((m) => ({ label: m.name, description: m.providerId ? providerLabel(m.providerId) : "Claude Code", detail: m.description, picked: m.id === tab.settings.modelId, id: m.id })), { placeHolder: "Model used to build this plan" });
     if (!pick) return undefined;
-    tab.settings.modelId = pick.id;
+    if (!this.selectModel(tab, pick.id)) return undefined;
     const model = this.models.find((m) => m.id === pick.id);
     if (model && !model.efforts.some((e) => e.id === tab.settings.effortId)) tab.settings.effortId = model.defaultEffort;
     this.persist(tab);
@@ -393,7 +477,7 @@ export class AgentPane implements vscode.WebviewViewProvider {
     if (options.newThread) { this.post({ type: "messages", messages: [] }); }
     tab.plan = { ...card, path: uri.fsPath };
     tab.settings.mode = "agent";
-    if (options.model && this.models.some((m) => m.id === options.model)) { tab.settings.modelId = options.model; const model = this.models.find((m) => m.id === options.model)!; if (!model.efforts.some((e) => e.id === tab.settings.effortId)) tab.settings.effortId = model.defaultEffort; }
+    if (options.model && !this.selectModel(tab, options.model)) return;
     this.persist(tab);
     this.paneView = "chat";
     this.pushState();
@@ -403,13 +487,21 @@ export class AgentPane implements vscode.WebviewViewProvider {
 
   /** What the plan editor needs from the pane. */
   catalog(): { models: { id: string; name: string; provider: string }[]; model: string | undefined } {
-    return { models: this.models.map((m) => ({ id: m.id, name: m.name, provider: m.provider })), model: this.active().settings.modelId };
+    return { models: this.models.map((m) => ({ id: m.id, name: m.providerId ? `${providerLabel(m.providerId)} · ${m.name}` : m.name, provider: m.providerId ?? m.provider })), model: this.active().settings.modelId };
   }
 
   /** ⌘K: edit the selection (or the whole file) in place; the result streams in as the inline diff. */
   async inlineEdit(editor: vscode.TextEditor, instruction: string): Promise<void> {
     const tab = this.active();
+    const selectedModel = this.models.find(m => m.id === tab.settings.modelId);
+    if (!selectedModel) { void vscode.window.showWarningMessage("Select an available provider and model before editing."); return; }
+    if (selectedModel.provider !== "claude") validateSelection(tab.settings, tab.thread?.providerId);
     const cwd = this.cwd();
+    const runtime = this.runtimeFor(tab);
+    if (this.editOwner && (this.editOwner.running || this.editOwner.inlineRunning) && !this.runtimeCanStart(tab).ok) { void vscode.window.showInformationMessage("An agent is editing this workspace. Let it finish before starting an inline edit."); return; }
+    const runtimeTurnId = `inline-${cryptoId()}`;
+    const started = this.taskRuntimes.beginTurn(tab.id, runtimeTurnId);
+    if (!started.ok) { void vscode.window.showInformationMessage(started.reason ?? "This task cannot start while its workspace is busy."); return; }
     const rel = relative(cwd, editor.document.uri.fsPath);
     const selection = editor.selection.isEmpty ? undefined : editor.selection;
     const start = selection ? selection.start.line + 1 : 1;
@@ -419,20 +511,42 @@ export class AgentPane implements vscode.WebviewViewProvider {
     const model = this.models.find((m) => m.id === tab.settings.modelId);
     const access = this.access.find((a) => a.id === tab.settings.accessId);
     const status = vscode.window.setStatusBarMessage("$(sync~spin) Generating edit…");
-    this.live.beginCheckpoint();
+    runtime.setReviewMode(isUnattendedAccess(access) ? "auto" : "review");
+    this.editOwner = tab;
+    tab.inlineRunning = true;
+    runtime.beginCheckpoint();
+    let inlineStatus: "completed" | "failed" = "completed";
     try {
-      const result = await runTurn({ prompt, cwd, ...(model && model.provider === "codex" ? { model: model.id } : {}), reasoning: tab.settings.effortId as "low" | "medium" | "high" | "xhigh" | "max" | "ultra", ...(access ? { access } : {}), rules: readRules(cwd), handlers: { onDelta: () => {}, onReasoning: () => {}, onEvent: (m, p) => this.live.onEvent(m, p), onRequest: (m, p) => this.approve(m, p) } });
-      if (result.status === "failed") void vscode.window.showWarningMessage(result.errorMessage ?? "The edit failed.");
+      const result = await (selectedModel.provider === "claude" ? runClaudeTurn({ prompt, cwd, model: selectedModel.id.replace(/^claude:/, ""), effort: tab.settings.effortId, handlers: { onDelta: () => {}, onReasoning: () => {} } }) : runTurn({ prompt, cwd, model: selectedModel.id, ...(tab.settings.providerId ? { providerId: tab.settings.providerId } : {}), reasoning: tab.settings.effortId as "low" | "medium" | "high" | "xhigh" | "max" | "ultra", ...(access ? { access } : {}), rules: readRules(cwd), handlers: { onDelta: () => {}, onReasoning: () => {}, onEvent: (m, p) => { this.taskRuntimes.routeEvent({ taskId: tab.id, workspaceId: this.runtimeIdentity(tab).workspaceId, method: m, params: p, ...(typeof p.threadId === "string" ? { threadId: p.threadId } : {}), ...(typeof p.eventId === "string" ? { eventId: p.eventId } : {}), ...(typeof p.turnId === "string" ? { turnId: p.turnId } : {}) }); }, onRequest: (m, p) => this.approve(m, p, tab) } }));
+      if (result.status === "failed") { inlineStatus = "failed"; void vscode.window.showWarningMessage(result.errorMessage ?? "The edit failed."); }
     } finally {
       status.dispose();
-      this.live.takeCheckpoint();
+      tab.inlineRunning = false;
+      this.taskRuntimes.finishTurn(tab.id, this.taskRuntimes.get(tab.id)?.activeTurnId ?? runtimeTurnId, inlineStatus);
+      tab.checkpoints.set(`inline-${runtimeTurnId}`, runtime.takeCheckpoint());
+      this.drainQueued(tab);
     }
   }
 
+  private selectModel(tab: Tab, id: string): boolean {
+    const model = this.models.find(candidate => candidate.id === id);
+    if (!model) { void vscode.window.showWarningMessage("Selected model is unavailable."); return false; }
+    try {
+      assertSelectionChange(tab.settings, { modelId: id, ...(model.providerId ? { providerId: model.providerId } : {}) }, this.editLeaseActive(tab) || !!tab.queue?.length, !!tab.thread || !!tab.claudeSession);
+      if (model.provider !== "claude") validateSelection({ modelId: id }, tab.thread?.providerId);
+      tab.settings = { ...tab.settings, modelId: id };
+      delete tab.settings.providerId;
+      if (model.providerId) tab.settings.providerId = model.providerId;
+      if (!model.efforts.some(e => e.id === tab.settings.effortId)) tab.settings.effortId = model.defaultEffort;
+      this.persist(tab); return true;
+    } catch (error) { void vscode.window.showWarningMessage(error instanceof Error ? error.message : String(error)); return false; }
+  }
+
   private newTab(name = "New Agent", thread?: CodexThread): Tab {
-    const id = thread?.id ?? `new-${Date.now().toString(36)}`;
+    const id = thread?.id ?? `new-${cryptoId()}`;
     const saved = this.context.workspaceState.get<Record<string, ThreadSettings>>("muster.threadSettings", {})[id];
-    const tab: Tab = { id, name, ...(thread ? { thread } : {}), messages: [], settings: saved ?? this.defaultSettings(), running: false, checkpoints: new Map() };
+    const tab: Tab = { id, name, ...(thread ? { thread } : {}), messages: [], settings: saved ? migrateProviderSelection(saved) : this.defaultSettings(), running: false, checkpoints: new Map() };
+    if (!saved && thread) tab.settings = migrateProviderSelection({ ...tab.settings, modelId: thread.model ?? (thread.providerId === "hybrow" ? "codex/gpt-5.6-terra" : thread.providerId === "openai-direct" ? "gpt-5.6-terra" : ""), ...(thread.providerId ? { providerId: thread.providerId } : {}) });
     this.tabs.push(tab);
     this.activeId = id;
     return tab;
@@ -445,11 +559,13 @@ export class AgentPane implements vscode.WebviewViewProvider {
   private defaultSettings(): ThreadSettings {
     const config = vscode.workspace.getConfiguration("muster");
     const model = this.models.find((m) => m.id === config.get<string>("codex.model")) ?? this.models.find((m) => m.isDefault) ?? this.models[0];
-    return { mode: "agent", accessId: this.access.find((a) => a.id === ":workspace")?.id ?? this.access[0]?.id ?? ":workspace", modelId: model?.id ?? config.get<string>("codex.model") ?? "", effortId: config.get<string>("codex.effort") ?? model?.defaultEffort ?? "medium" };
+    return { mode: "agent", accessId: this.access.find((a) => a.id === ":workspace")?.id ?? this.access[0]?.id ?? ":workspace", modelId: migrateProviderSelection({ modelId: config.get<string>("codex.model") || model?.id || "gpt-5.6-terra" }).modelId, effortId: config.get<string>("codex.effort") ?? model?.defaultEffort ?? "medium" };
   }
 
   private persist(tab: Tab): void {
-    const all = { ...this.context.workspaceState.get<Record<string, ThreadSettings>>("muster.threadSettings", {}), [tab.id]: tab.settings };
+    tab.settings = migrateProviderSelection(tab.settings);
+    if (tab.settings.providerId) bindConversationProvider(tab.id, tab.settings.providerId);
+    const all = { ...this.context.workspaceState.get<Record<string, ThreadSettings>>("muster.threadSettings", {}), [tab.id]: tab.settings, ...(tab.thread ? { [tab.thread.id]: tab.settings } : {}) };
     void this.context.workspaceState.update("muster.threadSettings", all);
   }
 
@@ -475,7 +591,8 @@ export class AgentPane implements vscode.WebviewViewProvider {
     this.loading = false;
     this.catalogChanged.fire();
     for (const tab of this.tabs) {
-      if (!this.models.some((m) => m.id === tab.settings.modelId)) tab.settings.modelId = this.defaultSettings().modelId;
+      tab.settings = migrateProviderSelection(tab.settings);
+      if (tab.running || tab.inlineRunning) continue;
       if (!this.access.some((a) => a.id === tab.settings.accessId)) tab.settings.accessId = this.defaultSettings().accessId;
       const model = this.models.find((m) => m.id === tab.settings.modelId);
       if (model && !model.efforts.some((e) => e.id === tab.settings.effortId)) tab.settings.effortId = model.defaultEffort;
@@ -487,8 +604,52 @@ export class AgentPane implements vscode.WebviewViewProvider {
     return this.active().thread?.cwd ?? vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? process.cwd();
   }
 
-  private post(message: ToPane): void {
+  /** Resolve the task's provider cwd before any turn or file event is routed. */
+  private runtimeIdentity(tab: Tab): TaskRuntimeIdentity {
+    const cwd = tab.thread?.cwd ?? vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? process.cwd();
+    return { taskId: tab.id, workspaceId: cwd, cwd, ...(tab.thread?.id ? { threadId: tab.thread.id } : {}) };
+  }
+
+  /**
+   * Keep a controller per task. Isolation is deliberately false until the
+   * host has validated a real worktree and passes that proof; provider child
+   * IDs and labels alone never enable parallel writes.
+   */
+  private runtimeFor(tab: Tab): LiveEditController {
+    const identity = this.runtimeIdentity(tab);
+    const known = this.taskRuntimes.get(tab.id);
+    if (known && (known.cwd !== identity.cwd || known.workspaceId !== identity.workspaceId)) {
+      this.taskRuntimes.unregister(tab.id);
+      this.runtimeControllers.delete(tab.id);
+    }
+    else if (known && known.threadId !== identity.threadId) this.taskRuntimes.bindThread(tab.id, identity.threadId);
+    let controller = this.runtimeControllers.get(tab.id);
+    if (!controller) {
+      const sourceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+      controller = sourceRoot && resolvePath(sourceRoot) === resolvePath(identity.cwd) ? this.live : new LiveEditController(() => identity.cwd, (line) => this.output.appendLine(line));
+      this.runtimeControllers.set(tab.id, controller);
+      this.taskRuntimes.register(identity, controller, { isolated: false });
+      if (controller !== this.live) {
+        controller.onCard((card) => {
+          const owner = this.tabs.find((candidate) => candidate.id === tab.id) ?? tab;
+          (owner.edits ??= []);
+          const index = owner.edits.findIndex((edit) => edit.path === card.path);
+          if (index < 0) owner.edits.push(card); else owner.edits[index] = card;
+          this.post({ type: "edit", card }, owner.id);
+        });
+        controller.onChange(() => this.post({ type: "review", files: controller!.review() }, tab.id));
+      }
+    }
+    return controller;
+  }
+
+  private runtimeCanStart(tab: Tab): { readonly ok: boolean; readonly reason?: string } { this.runtimeFor(tab); return this.taskRuntimes.canStart(tab.id); }
+
+  private post(message: ToPane, tabId?: string): void {
+    if (tabId && tabId !== this.activeId) return;
+    if (message.type === "messages") message = { ...message, edits: this.active().edits ?? [] };
     void this.view?.webview.postMessage(message);
+    if (message.type === "messages") for (const p of this.pending.values()) if (p.tabId === this.activeId) void this.view?.webview.postMessage({ type: "approval", approval: p.card });
   }
 
   /** ⌘L: the selection (or file) becomes a mention in the composer, Cursor's "Add to Chat". */
@@ -517,6 +678,33 @@ export class AgentPane implements vscode.WebviewViewProvider {
   }
 
   activeBrowserId(): string | undefined { const tab = this.active(); return tab.kind === "browser" ? tab.browserId : undefined; }
+
+  /** Stable ownership metadata for agent-owned terminal sessions. */
+  terminalContext(): { taskId: string; taskLabel: string; cwd: string } {
+    const tab = this.active();
+    return { taskId: tab.id, taskLabel: tab.name, cwd: tab.thread?.cwd ?? this.cwd() };
+  }
+
+  /** Return the warm pane conversation that owns a provider thread or observed child. */
+  conversationForThread(threadId: string): string | undefined {
+    for (const tab of this.tabs) if (tab.thread?.id === threadId || tab.agentGraph?.nodes.some((node) => node.threadId === threadId)) return tab.id;
+    return undefined;
+  }
+
+  /** Hydrate a real chat tab from a non-resuming catalog read; sending is the only dispatch path. */
+  async openCatalogThread(record: ThreadRecord, read: ThreadRead, _mode: "open" | "continue"): Promise<void> {
+    const nativeProvider = read.thread.modelProvider ?? record.raw.modelProvider;
+    const providerId = nativeProvider === "hybrow" ? "hybrow" : nativeProvider === "openai" ? "openai-direct" : undefined;
+    const thread = { ...catalogThread(record), ...(providerId ? { providerId: providerId as ProviderId } : {}), ...(typeof read.thread.model === "string" ? { model: read.thread.model } : {}) };
+    let tab = this.tabs.find((candidate) => candidate.thread?.id === record.id);
+    if (!tab) tab = this.newTab(record.name, thread);
+    else { tab.thread = thread; tab.name = record.name; }
+    if (!tab.messages.length) tab.messages = hydrateCatalogTurns((read.thread as { turns?: unknown }).turns);
+    tab.agentGraph = replayCatalogGraph(record.id, (read.thread as { turns?: unknown }).turns);
+    delete tab.lastError;
+    this.activeId = tab.id; this.lastChatId = tab.id; this.paneView = "chat"; this.pushState();
+    await vscode.commands.executeCommand(`${AgentPane.viewId}.focus`); this.post({ type: "messages", messages: tab.messages });
+  }
 
   private bookmarks(): { title: string; url: string }[] { return this.context.workspaceState.get<{ title: string; url: string }[]>("muster.browser.bookmarks", []); }
   private toggleBookmark(id: string): void {
@@ -552,8 +740,8 @@ export class AgentPane implements vscode.WebviewViewProvider {
     this.pushState();
     this.post({ type: "messages", messages: chat.messages });
     await vscode.commands.executeCommand(`${AgentPane.viewId}.focus`);
-    const parts = ["@browser"];
-    if (pick.imagePath) parts.push(`@image:${pick.imagePath}`);
+    const parts = [saveBrowserPick(this.cwd(), pick)];
+    if (pick.imagePath) parts.push(`@image:${encodeURI(pick.imagePath)}`);
     this.post({ type: "insert", text: `${parts.join(" ")} ` });
     if (pick.picked) void vscode.window.setStatusBarMessage(`Selected <${pick.picked.tag}> ${pick.picked.selector.slice(0, 60)}`, 4000);
   }
@@ -566,7 +754,18 @@ export class AgentPane implements vscode.WebviewViewProvider {
     // Cursor: the tab strip is the pane header. The workbench renders it in the sidebar's title row.
     void vscode.commands.executeCommand("muster.agentHeader.set", { tabs: this.tabs.map((t) => ({ id: t.id, name: t.name, running: t.running, kind: t.kind ?? "chat" })), activeId: tab.id });
     const modes = this.modes().map((m) => (m.debug ? { ...m, placeholder: DEBUG_STAGES[tab.settings.debugStage ?? 0]!.placeholder } : m));
-    this.post({ type: "state", queue: this.active().queue ?? [], ...(this.currentFile() ? { currentFile: this.currentFile() } : {}), tabs: this.tabs.map((t) => ({ id: t.id, name: t.name, running: t.running, ...(t.kind ? { kind: t.kind } : {}) })), activeId: tab.id, view: this.paneView, modes, access: this.access, models: this.models, settings: tab.settings, loading: this.loading, canRedo: !!tab.redo });
+    this.saveChats();
+    const ui = vscode.workspace.getConfiguration("muster.ui");
+    this.post({ type: "state", appearance: { density: ui.get("density", "comfortable"), fontSize: ui.get("fontSize", 13), accent: ui.get("accent", ""), glass: ui.get("glass", true) }, draft: tab.draft ?? cleanDraft(null), ...(tab.usage ? { usage: tab.usage } : {}), ...(tab.usageLedger?.length ? { usageLedger: tab.usageLedger } : {}), ...(tab.activity ? { activity: tab.activity } : {}), ...(tab.activityTimeline?.length ? { activityTimeline: tab.activityTimeline } : {}), ...(tab.contextReferences?.length ? { contextReferences: tab.contextReferences } : {}), ...(tab.agentGraph ? { agentWorkspace: tab.agentGraph } : {}), taskWorkspace: this.taskWorkspaceSnapshot(), ...(tab.run ? { run: tab.run, runState: tab.run.state } : {}), ...(tab.startedAt ? { startedAt: tab.startedAt } : {}), reviewMode: this.runtimeFor(tab).reviewMode, ...(tab.promptEstimate !== undefined ? { promptEstimate: tab.promptEstimate } : {}), queue: this.active().queue ?? [], ...(this.currentFile() ? { currentFile: this.currentFile() } : {}), tabs: this.tabs.map((t) => ({ id: t.id, name: t.name, running: t.running, ...(t.kind ? { kind: t.kind } : {}) })), activeId: tab.id, view: this.paneView, modes, access: this.access, models: this.models, settings: tab.settings, loading: this.loading, canRedo: !!tab.redo });
+  }
+
+  private taskWorkspaceSnapshot(): { version: 1; activeTaskId: string; tasks: readonly (TaskRuntimeIdentity & { name: string; status: string; capability: "isolated-worktree" | "shared-checkout-serialized"; activeTurnId?: string })[] } {
+    const tasks = this.tabs.filter((candidate) => candidate.kind !== "browser").map((candidate) => {
+      this.runtimeFor(candidate);
+      const runtime = this.taskRuntimes.get(candidate.id)!;
+      return { taskId: runtime.taskId, workspaceId: runtime.workspaceId, cwd: runtime.cwd, ...(runtime.threadId ? { threadId: runtime.threadId } : {}), name: candidate.name, status: runtime.status, capability: runtime.capability, ...(runtime.activeTurnId ? { activeTurnId: runtime.activeTurnId } : {}) };
+    });
+    return { version: 1, activeTaskId: this.activeId, tasks };
   }
 
   private pushBoard(): void {
@@ -578,34 +777,72 @@ export class AgentPane implements vscode.WebviewViewProvider {
 
   // ── messages from the webview ──
 
+  private resolveImagePath(raw: string): string | undefined {
+    const cwd = this.cwd();
+    let s = String(raw || "").trim().replace(/^["']|["']$/g, "");
+    try { s = decodeURIComponent(s); } catch { /* keep raw */ }
+    if (/^file:\/\//i.test(s)) { try { s = vscode.Uri.parse(s).fsPath; } catch { return undefined; } }
+    const candidates = [
+      s,
+      s.startsWith("~/") ? join(homedir(), s.slice(2)) : s,
+      s.startsWith("/") ? s : join(cwd, s),
+      join(cwd, String(raw || "").trim().replace(/^["']|["']$/g, "")),
+    ];
+    for (const abs of candidates) { if (abs && existsSync(abs)) return abs; }
+    return undefined;
+  }
+
   private async onMessage(message: FromPane): Promise<void> {
     switch (message.type) {
       case "boot": this.output.appendLine("pane webview booted"); return;
       case "clientError": this.output.appendLine(`pane webview error: ${message.message}`); return;
-      case "ready": this.readyCount++; this.pushState(); this.post({ type: "messages", messages: this.active().messages }); void this.loadCatalog(); return;
+      case "draft": { const tab = this.tabs.find(t => t.id === message.id); if (tab) { const draft = cleanDraft(message.draft); const same = tab.draft?.text === draft.text && JSON.stringify(tab.draft?.context ?? []) === JSON.stringify(draft.context); if (!same) { tab.draft = draft; this.saveChats(); } } return; }
+      case "ready": this.readyCount++; await this.restoreHistories(); this.pushState(); this.post({ type: "messages", messages: this.active().messages }); void this.loadCatalog(); return;
       case "stop": this.stop(); return;
       case "decide": this.decide(message.id, message.decision); return;
       case "openPath": await this.openPath(message.path, message.line, message.endLine); return;
+      case "resolveImage": {
+        const abs = this.resolveImagePath(message.src);
+        if (!this.view || !abs) return;
+        const uri = this.view.webview.asWebviewUri(vscode.Uri.file(abs)).toString();
+        this.post({ type: "imageResolved", src: message.src, uri });
+        return;
+      }
       case "insertBlock": { const editor = vscode.window.activeTextEditor; if (!editor) { void vscode.window.showInformationMessage("Open a file to insert into."); return; } await editor.edit((b) => b.insert(editor.selection.active, message.code)); return; }
       case "applyBlock": await this.send(`Apply this ${message.lang ?? ""} code block to ${message.path} exactly as written, keeping the rest of the file as is:\n\n\`\`\`${message.lang ?? ""}\n${message.code}\n\`\`\``); return;
-      case "dropQueued": { const tab = this.active(); tab.queue?.splice(message.index, 1); this.pushState(); return; }
+      case "dropQueued": { const tab = this.active(); this.taskRuntimes.cancelQueuedAt(tab.id, message.index); tab.queue?.splice(message.index, 1); tab.queueWaiters?.splice(message.index, 1)[0]?.(); this.pushState(); return; }
       case "editMessage": await this.editMessage(message.checkpoint, message.text); return;
-      case "acceptAll": await this.live.acceptAll(); return;
-      case "rejectAll": await this.live.rejectAll(); return;
-      case "open": await this.live.open(message.path, message.ifClosed === true); return;
-      case "openReview": await this.live.openReview(); return;
+      case "acceptAll": await this.runtimeFor(this.active()).acceptAll(); return;
+      case "rejectAll": await this.runtimeFor(this.active()).rejectAll(); return;
+      case "open": await this.runtimeFor(this.active()).open(message.path, message.ifClosed === true); return;
+      case "openReview": await this.runtimeFor(this.active()).openReview(); return;
       case "command": await vscode.commands.executeCommand(message.id); return;
       case "newAgent": this.newAgent(); return;
       case "activateTab": { const tab = this.tabs.find((t) => t.id === message.id); if (tab) { this.activeId = tab.id; if (tab.kind === "browser") { this.paneView = "browser"; this.pushState(); const st = tab.browserId ? this.browser?.get(tab.browserId) : undefined; if (st) this.post({ type: "browser", state: st }); } else { this.lastChatId = tab.id; this.paneView = "chat"; this.pushState(); this.post({ type: "messages", messages: tab.messages }); } void vscode.commands.executeCommand("setContext", "muster.browserActive", tab.kind === "browser"); } return; }
-      case "closeTab": { const closing = this.tabs.find((t) => t.id === message.id); if (closing?.kind === "browser" && closing.browserId) this.browser?.close(closing.browserId); this.tabs = this.tabs.filter((t) => t.id !== message.id); if (!this.tabs.length) this.newTab(); if (!this.tabs.some((t) => t.id === this.activeId)) this.activeId = this.tabs[this.tabs.length - 1]!.id; const now = this.active(); this.paneView = now.kind === "browser" ? "browser" : "chat"; this.pushState(); if (now.kind === "browser" && now.browserId) { const st = this.browser?.get(now.browserId); if (st) this.post({ type: "browser", state: st }); } else this.post({ type: "messages", messages: now.messages }); void vscode.commands.executeCommand("setContext", "muster.browserActive", now.kind === "browser"); return; }
+      case "closeTab": { const closing = this.tabs.find((t) => t.id === message.id); if (closing && !this.canCloseTab(closing)) return; if (closing) { this.settlePending("decline", closing.id, true); this.taskRuntimes.cancel(closing.id); cancelQueuedMessages(closing.queue ??= [], closing.queueWaiters ??= []); if (closing.running || closing.inlineRunning) await interruptTurn(closing.id); this.taskRuntimes.unregister(closing.id); this.runtimeControllers.delete(closing.id); } if (closing?.kind === "browser" && closing.browserId) this.browser?.close(closing.browserId); this.tabs = this.tabs.filter((t) => t.id !== message.id); if (!this.tabs.length) this.newTab(); if (!this.tabs.some((t) => t.id === this.activeId)) this.activeId = this.tabs[this.tabs.length - 1]!.id; const now = this.active(); this.paneView = now.kind === "browser" ? "browser" : "chat"; this.pushState(); if (now.kind === "browser" && now.browserId) { const st = this.browser?.get(now.browserId); if (st) this.post({ type: "browser", state: st }); } else this.post({ type: "messages", messages: now.messages }); void vscode.commands.executeCommand("setContext", "muster.browserActive", now.kind === "browser"); return; }
       case "openThread": { const thread = (await this.visibleThreads()).find((t) => t.id === message.id); if (thread) await this.openThread(thread); else void vscode.window.showWarningMessage("That thread belongs to another folder."); return; }
       case "suggest": { const data = await this.suggest(message.kind, message.query, message.mode ?? "all"); this.post({ type: "suggestions", kind: message.kind, ...(message.seq !== undefined ? { seq: message.seq } : {}), mode: data.mode, title: data.title, sections: data.sections }); return; }
       case "slashAction": await this.slashAction(message.id); return;
+      case "agentAction": await this.agentAction(message); return;
       case "probed": this.lastProbe = { seq: message.seq, query: message.query, mode: message.mode, cards: message.cards ?? [], value: message.value ?? "", rows: message.rows, chips: message.chips, marks: message.marks, title: message.title }; return;
       case "validate": { const ok: string[] = []; const bad: string[] = []; for (const t of message.tokens) ((await this.tokenResolves(t)) ? ok : bad).push(t); this.post({ type: "validated", ok, bad }); return; }
       case "attach": {
         const picked = await vscode.window.showOpenDialog({ canSelectMany: true, filters: { Images: ["png", "jpg", "jpeg", "gif", "webp"] }, openLabel: "Attach" });
-        for (const uri of picked ?? []) this.post({ type: "insert", text: `@image:${uri.fsPath} ` });
+        for (const uri of picked ?? []) this.post({ type: "insert", text: `@image:${encodeURI(uri.fsPath)} ` });
+        return;
+      }
+      case "pasteImage": {
+        const mime = message.mime || "image/png";
+        if (!/^image\/(png|jpe?g|gif|webp)$/i.test(mime)) return;
+        let buf: Buffer;
+        try { buf = Buffer.from(message.data, "base64"); } catch { return; }
+        if (!buf.length || buf.length > 8_000_000) { void vscode.window.showWarningMessage("That image is too large to attach."); return; }
+        const ext = /jpe?g/i.test(mime) ? "jpg" : /gif/i.test(mime) ? "gif" : /webp/i.test(mime) ? "webp" : "png";
+        const dir = join(tmpdir(), "muster-chat-images");
+        mkdirSync(dir, { recursive: true });
+        const dest = join(dir, `paste-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`);
+        writeFileSync(dest, buf);
+        this.post({ type: "insert", text: `@image:${encodeURI(dest)} ` });
         return;
       }
       case "restore": {
@@ -630,7 +867,7 @@ export class AgentPane implements vscode.WebviewViewProvider {
         const tab = this.active();
         if (!tab.redo || tab.running) return;
         const redo = tab.redo;
-        const { changed } = await this.live.restore(redo.checkpoint);
+        const { changed } = await this.runtimeFor(tab).restore(redo.checkpoint);
         tab.messages = redo.messages;
         delete tab.redo; delete tab.pendingRevert;
         this.post({ type: "messages", messages: tab.messages });
@@ -640,9 +877,9 @@ export class AgentPane implements vscode.WebviewViewProvider {
       }
       case "view": { if (message.view === "history") await this.showHistory(); else if (message.view === "board") await this.showBoard(); else { this.paneView = "chat"; this.pushState(); this.post({ type: "messages", messages: this.active().messages }); } return; }
       case "setMode": { const tab = this.active(); tab.settings.mode = message.id; const mode = this.modes().find((m) => m.id === message.id); if (mode?.effort && this.models.find((m) => m.id === tab.settings.modelId)?.efforts.some((e) => e.id === mode.effort)) tab.settings.effortId = mode.effort; this.persist(tab); this.pushState(); if (mode?.board) await this.showBoard(); return; }
-      case "setAccess": { const tab = this.active(); tab.settings.accessId = message.id; this.persist(tab); this.pushState(); return; }
-      case "setModel": { const tab = this.active(); tab.settings.modelId = message.id; const model = this.models.find((m) => m.id === message.id); if (model && !model.efforts.some((e) => e.id === tab.settings.effortId)) tab.settings.effortId = model.defaultEffort; this.persist(tab); this.pushState(); return; }
-      case "setEffort": { const tab = this.active(); tab.settings.effortId = message.id; this.persist(tab); this.pushState(); return; }
+      case "setAccess": { const tab = this.active(); if (!this.access.some(a => a.id === message.id)) return; tab.settings.accessId = message.id; this.runtimeFor(tab).setReviewMode(isUnattendedAccess(this.access.find(a => a.id === message.id)) ? "auto" : "review"); this.persist(tab); this.pushState(); return; }
+      case "setModel": { this.selectModel(this.active(), message.id); this.pushState(); return; }
+      case "setEffort": { const tab = this.active(); if (this.editLeaseActive(tab)) { void vscode.window.showWarningMessage("Wait for this task to finish before changing effort."); return; } tab.settings.effortId = message.id; this.persist(tab); this.pushState(); return; }
       case "dictate": this.onDictate?.(); return;
       case "renameThread": {
         const thread = (await this.visibleThreads()).find((t) => t.id === message.id); if (!thread) return;
@@ -683,7 +920,7 @@ export class AgentPane implements vscode.WebviewViewProvider {
         const tab = message.newThread ? this.newTab(`Build: ${plan.title}`.slice(0, 40)) : source;
         if (message.newThread) { tab.plan = plan; this.paneView = "chat"; this.post({ type: "messages", messages: [] }); }
         tab.settings.mode = "agent";
-        if (message.model && this.models.some((m) => m.id === message.model)) { tab.settings.modelId = message.model; const model = this.models.find((m) => m.id === message.model)!; if (!model.efforts.some((e) => e.id === tab.settings.effortId)) tab.settings.effortId = model.defaultEffort; }
+        if (message.model && !this.selectModel(tab, message.model)) return;
         this.persist(tab);
         this.pushState();
         await this.send(`${message.newThread && rel ? `@${rel} ` : ""}Implement the plan${rel ? ` in ${rel}` : ""}. ${scope}`);
@@ -724,20 +961,34 @@ export class AgentPane implements vscode.WebviewViewProvider {
 
   // ── running a turn ──
 
-  private async send(text: string): Promise<void> {
-    const tab = this.active();
-    if (!text.trim()) return;
+  private enqueueTab(tab: Tab, text: string): Promise<void> {
+    const queued = this.taskRuntimes.enqueue(tab.id, text);
+    if (!queued.id) return queued.promise.then(() => undefined);
+    return new Promise<void>((resolve) => {
+      queueMessage(tab.queue ??= [], tab.queueWaiters ??= [], text, () => { this.taskRuntimes.settleQueue(tab.id, queued.id!, { accepted: true }); resolve(); });
+    });
+  }
+
+  private async send(text: string, tab: Tab = this.active()): Promise<void> {
+    const post = (message: ToPane) => this.post(message, tab.id);
+    if (!text.trim() || !this.tabs.includes(tab)) return;
+    this.runtimeFor(tab);
+    const runtimeBlocked = !this.runtimeCanStart(tab).ok;
+    if (tab.inlineRunning || runtimeBlocked) {
+      await this.enqueueTab(tab, text); this.pushState(); return;
+    }
     if (tab.running) {
       // Typing mid-turn (Codex app / Claude Code): the message joins the running turn; if the provider cannot take it, it is queued for right after.
       const trimmed = text.trim();
-      if (await steerTurn(trimmed, tab.id)) { tab.messages.push({ kind: "user", text: trimmed, steer: true }); this.post({ type: "user", text: trimmed, steer: true }); this.output.appendLine("steered the running turn"); }
-      else { (tab.queue ??= []).push(trimmed); this.pushState(); }
+      if (await steerTurn(trimmed, tab.id)) { tab.messages.push({ kind: "user", text: trimmed, steer: true }); post({ type: "user", text: trimmed, steer: true }); this.output.appendLine("steered the running turn"); }
+      else { void this.enqueueTab(tab, trimmed); this.pushState(); }
       return;
     }
     delete tab.redo;
     if (tab.pendingRevert) { await this.forgetTurns(tab, tab.pendingRevert); delete tab.pendingRevert; }
     // Full access (Cursor auto-apply): edits stand as they land, the diff colours stay for review, nothing asks Accept/Reject per hunk.
-    this.live.setReviewMode(this.access.find((a) => a.id === tab.settings.accessId)?.sandbox === "danger-full-access" ? "auto" : "review");
+    const runtime = this.runtimeFor(tab);
+    runtime.setReviewMode(isUnattendedAccess(this.access.find((a) => a.id === tab.settings.accessId)) ? "auto" : "review");
     this.pushState();
     const mode = this.modes().find((m) => m.id === tab.settings.mode) ?? BUILTIN_MODES[0]!;
     if (mode.board) { await this.onMessage({ type: "boardAdd", title: text.trim() }); await this.showBoard(); return; }
@@ -750,51 +1001,101 @@ export class AgentPane implements vscode.WebviewViewProvider {
       this.persist(next);
       this.paneView = "chat";
       this.pushState();
-      this.post({ type: "messages", messages: [] });
+      post({ type: "messages", messages: [] });
       await this.send(`@${rel} ${text}`);
       return;
     }
-    const cwd = this.cwd();
+    const cwd = tab.thread?.cwd ?? vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? process.cwd();
+    const runId = `run-${Date.now().toString(36)}-${cryptoId().slice(0, 8)}`;
+    const runtimeStart = this.taskRuntimes.beginTurn(tab.id, runId);
+    if (!runtimeStart.ok) { tab.lastError = runtimeStart.reason ?? "This task cannot start while its workspace is busy."; post({ type: "done", ok: false, error: tab.lastError }); return; }
+    this.editOwner = tab;
     tab.running = true;
+    tab.startedAt = Date.now(); tab.activity = "Preparing context"; delete tab.usage; tab.contextReferences = [];
     const checkpointId = `cp-${Date.now().toString(36)}`;
-    this.live.beginCheckpoint();
-    await this.live.beginTurnWatch(cwd);
+    tab.run = { id: runId, state: "preparing", startedAt: tab.startedAt, ...(tab.thread ? { threadId: tab.thread.id } : {}), dispatched: false };
+    tab.activityTimeline ??= [];
+    this.recordActivity(tab, "muster/run/preparing", { runId, checkpointId });
+    this.saveChats();
+    runtime.beginCheckpoint();
+
     tab.messages.push({ kind: "user", text, checkpoint: checkpointId });
-    this.post({ type: "user", text });
-    this.post({ type: "start" });
+    post({ type: "user", text, checkpoint: checkpointId });
+    post({ type: "start" });
     this.pushState();
     const assistant: Extract<PaneMessage, { kind: "assistant" }> = { kind: "assistant", text: "", reasoning: "" };
     tab.messages.push(assistant);
     const tools = new Map<string, ToolMessage>();
     let planText = "";
+    const graph = AgentGraphAdapter.from(tab.agentGraph ?? { rootThreadId: tab.thread?.id });
     const handlers = {
-      onDelta: (delta: string) => { assistant.text += delta; this.post({ type: "delta", text: delta }); },
-      onReasoning: (delta: string) => { assistant.reasoning += delta; this.post({ type: "reasoning", text: delta }); },
+      onDelta: (delta: string) => { assistant.text += delta; post({ type: "delta", text: delta }); },
+      onReasoning: (delta: string) => { assistant.reasoning += delta; post({ type: "reasoning", text: delta }); },
       onEvent: (method: string, params: Record<string, unknown>) => {
+        const eventThreadId = typeof params.threadId === "string" ? params.threadId : typeof (params.turn as { threadId?: unknown } | undefined)?.threadId === "string" ? String((params.turn as { threadId: string }).threadId) : typeof (params.item as { threadId?: unknown } | undefined)?.threadId === "string" ? String((params.item as { threadId: string }).threadId) : undefined;
+        if (method === "thread/started" && !tab.thread) {
+          const started = params.thread as { id?: string } | undefined;
+          if (started?.id) {
+            const provider = validateSelection(selection).providerId;
+            tab.thread = { id: started.id, providerId: provider, name: tab.name, cwd, project: cwd.split("/").pop() ?? cwd, filePath: "", lastActivityAt: new Date().toISOString(), turnCount: 0, sizeBytes: 0, live: true };
+            tab.settings = { ...selection, providerId: provider }; this.persist(tab); this.saveChats();
+          }
+        }
+        const rootThreadId = tab.thread?.id ?? graph.snapshot().rootThreadId;
+        const childEvent = !!eventThreadId && !!rootThreadId && eventThreadId !== rootThreadId && (tab.agentGraph?.nodes ?? graph.snapshot().nodes).some((node) => node.threadId === eventThreadId && node.parentThreadId);
+        const providerTurnId = typeof params.turnId === "string" ? params.turnId : typeof (params.turn as { id?: unknown } | undefined)?.id === "string" ? String((params.turn as { id: string }).id) : undefined;
+        if (method === "turn/started" && !childEvent && providerTurnId) this.taskRuntimes.adoptTurn(tab.id, this.taskRuntimes.get(tab.id)?.activeTurnId ?? runId, providerTurnId);
+        const routed = this.taskRuntimes.routeEvent({ taskId: tab.id, workspaceId: this.runtimeIdentity(tab).workspaceId, method, params, ...(eventThreadId ? { threadId: eventThreadId } : {}), ...(providerTurnId ? { turnId: providerTurnId } : {}), ...(childEvent ? { child: true } : {}), ...(typeof params.eventId === "string" ? { eventId: params.eventId } : {}) });
+        if (!routed.accepted) { this.output.appendLine(`runtime event dropped: ${routed.reason ?? "unowned"}`); return; }
+        const graphEvent = graph.ingest(method, params);
+        tab.agentGraph = graph.snapshot();
+        if (graphEvent) post({ type: "agentWorkspace", data: tab.agentGraph });
+        if (childEvent && (method === "thread/status/changed" || method === "turn/completed" || method === "thread/closed")) this.maybeReleaseEditLease(tab);
+        this.recordActivity(tab, method, params);
         if (process.env.MUSTER_CODE_DEV_SOCK && !method.endsWith("Delta") && !method.endsWith("/delta")) this.output.appendLine(`ev ${method} ${String(((params.item as { type?: string } | undefined)?.type) ?? "")}`);
+        if (method === "thread/tokenUsage/updated" && !childEvent) {
+          tab.usage = readUsage((params.tokenUsage as { last?: unknown } | undefined)?.last);
+          const turnId = typeof params.turnId === "string" ? params.turnId : tab.run?.turnId;
+          const previous = turnId ? tab.usageLedger?.find((entry) => entry.turnId === turnId) : undefined;
+          const usage = { ...(previous ?? {}), id: previous?.id ?? `usage-${turnId ?? runId}`, startedAt: previous?.startedAt ?? tab.startedAt ?? Date.now(), ...(turnId ? { turnId } : {}), ...tab.usage, ...(tab.settings.modelId ? { model: tab.settings.modelId } : {}), ...(tab.settings.effortId ? { effort: tab.settings.effortId } : {}) } as UsageLedgerEntry;
+          tab.usageLedger = [...(tab.usageLedger ?? []).filter((entry) => entry.id !== usage.id), usage];
+        }
+        if (method === "turn/started" && !childEvent) { tab.activity = "Working"; if (tab.run) { const turnId = String((params.turn as { id?: string } | undefined)?.id ?? params.turnId ?? ""); tab.run = { ...tab.run, state: "running", ...(turnId ? { turnId } : {}), dispatched: true }; } }
+        if (method.endsWith("/requestApproval") && tab.run && !childEvent) { tab.run = { ...tab.run, state: "waiting" }; if (providerTurnId) this.taskRuntimes.setWaiting(tab.id, providerTurnId); }
+        if (method === "item/started" && !childEvent) { const item = params.item as { type?: string; tool?: string; command?: string } | undefined; tab.activity = item?.type === "commandExecution" ? "Running command" : item?.type === "fileChange" ? "Editing files" : item?.type === "mcpToolCall" ? `Using ${item.tool ?? "tool"}` : item?.type === "webSearch" ? "Searching the web" : item?.type === "reasoning" ? "Thinking" : "Writing response"; }
+        if ((method === "thread/tokenUsage/updated" && !childEvent) || (method === "item/started" && !childEvent) || (method === "turn/started" && !childEvent) || (method.endsWith("/requestApproval") && !childEvent)) post({ type: "telemetry", activity: tab.activity ?? "Working", ...(tab.usage ? { usage: tab.usage } : {}), ...(tab.usageLedger?.length ? { usageLedger: tab.usageLedger } : {}), ...(tab.activityTimeline?.length ? { activityTimeline: tab.activityTimeline } : {}), ...(tab.contextReferences?.length ? { contextReferences: tab.contextReferences } : {}), ...(tab.agentGraph ? { agentWorkspace: tab.agentGraph } : {}), ...(tab.run ? { run: tab.run, runState: tab.run.state } : {}), ...(tab.startedAt ? { startedAt: tab.startedAt } : {}) });
         if (method === "account/rateLimits/updated") this.accountEvents.fire(params);
-        if (method === "turn/started") { const turnId = String((params.turn as { id?: string } | undefined)?.id ?? params.turnId ?? ""); const mine = tab.messages.find((m) => m.kind === "user" && m.checkpoint === checkpointId); if (turnId && mine && mine.kind === "user") mine.turnId = turnId; }
-        this.live.onEvent(method, params);
+        if (method === "turn/started" && !childEvent) { const turnId = String((params.turn as { id?: string } | undefined)?.id ?? params.turnId ?? ""); const mine = tab.messages.find((m) => m.kind === "user" && m.checkpoint === checkpointId); if (turnId && mine && mine.kind === "user") mine.turnId = turnId; }
+        if (method === "item/started" && (params.item as {type?: string} | undefined)?.type === "fileChange") { const item = params.item as {id: string; changes?: {path?: string; diff?: string}[]}; (tab.proposals ??= new Map()).set(item.id, item.changes ?? []); }
         const item = (params.item ?? {}) as Record<string, unknown>;
-        if (method === "item/started" && (item.type === "commandExecution" || item.type === "mcpToolCall" || item.type === "webSearch")) {
-          const tool: ToolMessage = { kind: "tool", id: String(item.id ?? ""), tool: item.type === "commandExecution" ? "command" : item.type === "webSearch" ? "search" : "mcp", ...(item.cwd ? { cwd: String(item.cwd) } : {}), title: item.type === "commandExecution" ? "Ran" : item.type === "webSearch" ? "Searched" : "Called", detail: String(item.command ?? item.query ?? item.tool ?? item.server ?? ""), output: "", status: "running" };
+        if (method === "item/reasoning/textDelta" && !childEvent) {
+          const delta = String(params.delta ?? "");
+          if (delta) { assistant.reasoning += delta; post({ type: "reasoning", text: delta }); }
+        } else if (method === "item/completed" && item.type === "reasoning" && !childEvent) {
+          const text = String(item.text ?? item.summary ?? "");
+          if (text && !assistant.reasoning) { assistant.reasoning = text; post({ type: "reasoning", text }); }
+        } else if (!childEvent && method === "item/started" && (item.type === "commandExecution" || item.type === "mcpToolCall" || item.type === "webSearch")) {
+          const cua = computerUseToolFromItem(item);
+          const tool: ToolMessage = cua
+            ? { kind: "tool", ...cua, title: "Computer use", output: "", status: "running" }
+            : { kind: "tool", id: String(item.id ?? ""), tool: item.type === "commandExecution" ? "command" : item.type === "webSearch" ? "search" : "mcp", ...(item.cwd ? { cwd: String(item.cwd) } : {}), title: item.type === "commandExecution" ? "Ran" : item.type === "webSearch" ? "Searched" : "Called", detail: String(item.command ?? item.query ?? item.tool ?? item.server ?? ""), output: "", status: "running" };
           tools.set(tool.id, tool);
           tab.messages.push(tool);
-          this.post({ type: "tool", tool });
-        } else if (method === "item/commandExecution/outputDelta") {
+          post({ type: "tool", tool });
+        } else if (method === "item/commandExecution/outputDelta" || method === "item/mcpToolCall/progress") {
           const tool = tools.get(String(params.itemId ?? ""));
-          if (tool) { tool.output += String(params.delta ?? ""); this.post({ type: "tool", tool }); }
+          if (tool) { tool.output += String(params.delta ?? params.message ?? ""); post({ type: "tool", tool }); }
         } else if (method === "item/completed" && tools.has(String(item.id ?? ""))) {
           const tool = tools.get(String(item.id))!;
-          if (item.type === "commandExecution") void this.live.syncTurnWatch();
+          if (item.type === "commandExecution") void runtime.syncTurnWatch();
           tool.status = String(item.status ?? "completed");
           if (typeof item.exitCode === "number") tool.exitCode = item.exitCode;
           if (typeof item.durationMs === "number") tool.durationMs = item.durationMs;
           if (typeof item.aggregatedOutput === "string" && !tool.output) tool.output = item.aggregatedOutput;
-          this.post({ type: "tool", tool });
+          post({ type: "tool", tool });
         } else if (method === "item/plan/delta") {
           planText += String(params.delta ?? "");
-          this.post({ type: "plan", card: parsePlan(planText) });
+          post({ type: "plan", card: parsePlan(planText) });
         } else if (method === "item/completed" && item.type === "plan") {
           planText = String(item.text ?? planText);
           const card = parsePlan(planText);
@@ -803,56 +1104,120 @@ export class AgentPane implements vscode.WebviewViewProvider {
           if (planned) { card.model = planned.name; card.modelId = planned.id; }
           tab.plan = card;
           tab.messages.push({ kind: "plan", card });
-          this.post({ type: "plan", card });
+          post({ type: "plan", card });
           void this.openPlan(card.path);
         } else if (method === "turn/plan/updated") {
           const steps = ((params.plan as { step?: string; status?: string }[] | undefined) ?? []).map((s) => ({ text: String(s.step ?? ""), done: s.status === "completed" }));
-          if (steps.length) { const card: PlanCard = { title: tab.plan?.title ?? "Plan", summary: String(params.explanation ?? tab.plan?.summary ?? ""), todos: steps, ...(tab.plan?.path ? { path: tab.plan.path } : {}), ...(tab.plan?.model ? { model: tab.plan.model, modelId: tab.plan.modelId ?? "" } : {}) }; tab.plan = card; this.post({ type: "plan", card }); }
+          if (steps.length) { const card: PlanCard = { title: tab.plan?.title ?? "Plan", summary: String(params.explanation ?? tab.plan?.summary ?? ""), todos: steps, ...(tab.plan?.path ? { path: tab.plan.path } : {}), ...(tab.plan?.model ? { model: tab.plan.model, modelId: tab.plan.modelId ?? "" } : {}) }; tab.plan = card; post({ type: "plan", card }); }
         }
+        if (method === "thread/tokenUsage/updated" || method === "item/completed" || method === "thread/status/changed" || method.endsWith("/requestApproval")) this.saveChats();
       },
-      onRequest: async (method: string, params: Record<string, unknown>) => this.approve(method, params),
+      onRequest: async (method: string, params: Record<string, unknown>) => {
+        const requestThreadId = typeof params.threadId === "string" ? params.threadId : undefined;
+        const rootThreadId = tab.thread?.id ?? tab.agentGraph?.rootThreadId;
+        const childApproval = !!requestThreadId && !!rootThreadId && requestThreadId !== rootThreadId && tab.agentGraph?.nodes.some((node) => node.threadId === requestThreadId && node.parentThreadId);
+        return this.approve(method, childApproval ? { ...params, reason: `Child agent ${requestThreadId}: ${String(params.reason ?? "Approval requested")}` } : params, tab);
+      },
     };
     const model = this.models.find((m) => m.id === tab.settings.modelId);
+    const selection = { ...tab.settings };
     const access = this.access.find((a) => a.id === tab.settings.accessId);
     const askAccess: AccessMode | undefined = mode.readOnly ? { id: ":read-only", label: "Read only", sandbox: "read-only", approvalPolicy: "on-request" } : access;
     const stage = mode.debug ? DEBUG_STAGES[tab.settings.debugStage ?? 0]! : undefined;
     const preset = stage?.prompt ?? mode.prompt;
+    try {
+    if (!model) throw new Error("Select an available provider and model before running this task.");
+    if (model.provider !== "claude") validateSelection(selection, tab.thread?.providerId);
+    await runtime.beginTurnWatch(cwd);
     const expanded = await expandContext(preset ? `${preset}\n\n${text}` : text, cwd);
     const prompt = expanded.prompt;
+    tab.contextReferences = expanded.references;
+    tab.promptEstimate = Math.ceil(prompt.length / 4);
+    post({ type: "telemetry", activity: "Sending context", promptEstimate: tab.promptEstimate, contextReferences: tab.contextReferences, ...(tab.agentGraph ? { agentWorkspace: tab.agentGraph } : {}), ...(tab.run ? { run: tab.run, runState: tab.run.state } : {}) });
+    this.saveChats();
     const rules = readRules(cwd, { disabled: vscode.workspace.getConfiguration("muster").get<string[]>("rules.disabled", []), mentioned: [...text.matchAll(/(?:^|\s)@([\w./:-]+)/g)].map((m) => m[1]!) });
-    try {
       const effort = tab.settings.effortId as "low" | "medium" | "high" | "xhigh" | "max" | "ultra";
+      if (model?.provider === "claude" && tab.run) { tab.run = { ...tab.run, state: "running", dispatched: true }; post({ type: "telemetry", activity: "Working", run: tab.run, runState: tab.run.state }); }
       const result = model?.provider === "claude"
         ? await runClaudeTurn({ prompt, cwd, model: model.id.replace(/^claude:/, ""), effort, ...(tab.claudeSession ? { sessionId: tab.claudeSession, resume: true } : { sessionId: (tab.claudeSession = cryptoId()) }), handlers })
-        : await runTurn({ prompt, cwd, ...(tab.thread ? { threadId: tab.thread.id } : {}), conversation: tab.id, ...(model ? { model: model.id } : {}), reasoning: effort, ...(askAccess ? { access: askAccess } : {}), mode: mode.plan ? "plan" : "default", ...(rules ? { rules } : {}), ...(expanded.images.length ? { images: expanded.images } : {}), handlers });
+        : await runTurn({ prompt, cwd, ...(tab.thread ? { threadId: tab.thread.id } : {}), conversation: tab.id, model: model.id, ...(selection.providerId ? { providerId: selection.providerId } : {}), reasoning: effort, ...(askAccess ? { access: askAccess } : {}), mode: mode.plan ? "plan" : "default", ...(rules ? { rules } : {}), ...(expanded.images.length ? { images: expanded.images } : {}), handlers });
+      if (result.threadId && model.provider !== "claude") {
+        const route = validateSelection(selection);
+        tab.thread = { ...(tab.thread ?? { name: tab.name, cwd, project: cwd.split("/").pop() ?? cwd, filePath: "", lastActivityAt: new Date().toISOString(), turnCount: 0, sizeBytes: 0, live: true }), id: result.threadId, providerId: route.providerId };
+        tab.settings = { ...selection, providerId: route.providerId };
+        this.persist(tab);
+      }
+      if (result.turnId && tab.run && !tab.run.turnId) tab.run = { ...tab.run, turnId: result.turnId, ...(result.dispatchState !== "not-dispatched" ? { dispatched: true } : {}) };
+      if (result.tokenUsage) { tab.usage = readUsage(result.tokenUsage); const usage = { id: `usage-${tab.run?.turnId ?? runId}`, ...(tab.run?.turnId ? { turnId: tab.run.turnId } : {}), startedAt: tab.startedAt ?? Date.now(), endedAt: Date.now(), ...tab.usage, model: tab.settings.modelId, effort: tab.settings.effortId } as UsageLedgerEntry; tab.usageLedger = [...(tab.usageLedger ?? []).filter((entry) => entry.id !== usage.id), usage]; }
       if (result.status === "failed") {
         tab.lastError = result.errorMessage ?? "The turn failed.";
+        if (tab.run) tab.run = { ...tab.run, state: result.fallbackEligible === false ? "disconnected" : "failed", endedAt: Date.now(), error: tab.lastError, ...(result.threadId ? { threadId: result.threadId } : {}) };
         this.output.appendLine(`turn failed: ${tab.lastError}`);
-        this.post({ type: "done", ok: false, error: tab.lastError });
+        post({ type: "done", ok: false, error: tab.lastError });
       } else {
         delete tab.lastError;
-        if (result.threadId && !tab.thread && model?.provider !== "claude") {
-          const thread = (await listThreads()).find((t) => t.id === result.threadId);
-          if (thread) { tab.thread = thread; tab.name = thread.name; }
+        if (tab.run) tab.run = { ...tab.run, state: "complete", endedAt: Date.now(), ...(result.threadId ? { threadId: result.threadId } : {}) };
+        if (result.threadId && model.provider !== "claude") {
+          const thread = (await listThreads().catch(() => [] as CodexThread[])).find((t) => t.id === result.threadId);
+          if (thread) { tab.thread = { ...thread, providerId: validateSelection(selection).providerId }; tab.name = thread.name; this.persist(tab); }
         }
         if (tab.name === "New Agent") tab.name = text.trim().slice(0, 40);
-        this.post({ type: "done", ok: true });
+        post({ type: "done", ok: true });
         if (mode.debug) { tab.settings.debugStage = (((tab.settings.debugStage ?? 0) + 1) % 3) as 0 | 1 | 2; this.persist(tab); }
         if (mode.autoFix && !tab.autoFixed) void this.autoFix(tab, checkpointId);
       }
     } catch (error) {
       tab.lastError = error instanceof Error ? error.message : String(error);
+      if (tab.run) tab.run = { ...tab.run, state: tab.run.dispatched ? "disconnected" : "failed", endedAt: Date.now(), error: tab.lastError };
       this.output.appendLine(`turn threw: ${tab.lastError}`);
-      this.post({ type: "done", ok: false, error: tab.lastError });
+      post({ type: "done", ok: false, error: tab.lastError });
     } finally {
-      this.settlePending();
-      await this.live.syncTurnWatch(true).catch(() => undefined);
-      tab.running = false;
-      tab.checkpoints.set(checkpointId, this.live.takeCheckpoint());
+      this.settlePending("decline", tab.id);
+      await runtime.syncTurnWatch(true).catch(() => undefined);
+      tab.running = false; tab.activity = tab.run?.state === "interrupted" ? "Interrupted" : tab.run?.state === "disconnected" ? "Disconnected" : tab.lastError ? "Needs attention" : "Complete";
+      if (tab.run && (tab.run.state === "preparing" || tab.run.state === "running" || tab.run.state === "waiting")) tab.run = { ...tab.run, state: tab.lastError ? "failed" : "complete", endedAt: Date.now(), ...(tab.lastError ? { error: tab.lastError } : {}) };
+      tab.checkpoints.set(checkpointId, runtime.takeCheckpoint());
+      const activeTurnId = this.taskRuntimes.get(tab.id)?.activeTurnId;
+      if (activeTurnId) this.taskRuntimes.finishTurn(tab.id, activeTurnId, tab.lastError ? "failed" : "completed");
+      this.taskRuntimes.checkpoint(tab.id, checkpointId, tab.checkpoints.get(checkpointId));
+      this.recordActivity(tab, `muster/run/${tab.run?.state ?? "complete"}`, { runId, checkpointId, ...(tab.lastError ? { error: tab.lastError } : {}) });
+      this.saveChats();
       this.pushState();
-      const next = tab.queue?.shift();
-      if (next) { this.pushState(); void this.send(next); }
+      this.maybeReleaseEditLease(tab);
     }
+  }
+
+  private drainQueued(preferred?: Tab): void {
+    const queued = preferred?.queue?.length ? preferred : this.tabs.find((candidate) => !candidate.running && !candidate.inlineRunning && candidate.queue?.length);
+    if (queued && (this.editLeaseActive(queued) || !this.runtimeCanStart(queued).ok)) return;
+    const next = queued?.queue?.shift();
+    const settled = queued?.queueWaiters?.shift();
+    if (!queued || !next) return;
+    const runtimeItem = this.taskRuntimes.dequeue(queued.id);
+    this.pushState();
+    void this.send(next, queued).finally(() => { if (runtimeItem) this.taskRuntimes.settleQueue(queued.id, runtimeItem.id); settled?.(); });
+  }
+
+  private activeDescendants(tab: Tab): AgentGraphSnapshot["nodes"] {
+    const graph = tab.agentGraph; const root = graph?.rootThreadId ?? tab.thread?.id; if (!graph || !root) return [];
+    return graph.nodes.filter((node) => isChildOfRoot(graph.nodes, node.threadId, root) && (node.status === "pendingInit" || node.status === "running"));
+  }
+
+  private editLeaseActive(tab: Tab): boolean { const graph = tab.agentGraph; const root = graph?.rootThreadId ?? tab.thread?.id; return !!(tab.inlineRunning || isEditLeaseActive(!!tab.running, graph?.nodes ?? [], root)); }
+
+  private maybeReleaseEditLease(tab: Tab): void {
+    if (this.editLeaseActive(tab)) return;
+    const runtime = this.taskRuntimes.get(tab.id);
+    if (runtime?.activeTurnId) this.taskRuntimes.finishTurn(tab.id, runtime.activeTurnId, tab.lastError ? "failed" : "completed");
+    if (this.editOwner === tab) this.editOwner = undefined;
+    this.drainQueued(tab);
+  }
+
+  /** Refuse closing an owner tab while descendants are still running so their warm owner remains resolvable. */
+  private canCloseTab(tab: Tab): boolean {
+    const graph = tab.agentGraph; const root = graph?.rootThreadId ?? tab.thread?.id; const active = graph && root ? activeDescendantCount(graph.nodes, root) : 0; if (!active) return true;
+    void vscode.window.showWarningMessage(`Keep ${tab.name} open while ${active} child agent${active === 1 ? " is" : "s are"} still running. Stop the child work before closing this tab.`);
+    return false;
   }
 
   /** Cursor's autoFix: after the agent edits, errors the language services report in the touched files go back to the agent once. */
@@ -867,9 +1232,9 @@ export class AgentPane implements vscode.WebviewViewProvider {
         if (problems.length >= 20) break;
       }
     }
-    if (!problems.length || tab.running) return;
+    if (!problems.length || tab.running || !this.tabs.includes(tab) || tab.queue?.length) return;
     tab.autoFixed = true;
-    try { await this.send(`Fix these problems reported by the language services in the files you edited (auto-fix):\n${problems.join("\n")}`); } finally { tab.autoFixed = false; }
+    try { await this.send(`Fix these problems reported by the language services in the files you edited (auto-fix):\n${problems.join("\n")}`, tab); } finally { tab.autoFixed = false; }
   }
 
   /** Cursor's Multitask: one request becomes several tasks that run in parallel threads and appear on the board. */
@@ -919,7 +1284,8 @@ export class AgentPane implements vscode.WebviewViewProvider {
   private async tokenResolves(token: string): Promise<boolean> {
     const cwd = this.cwd();
     if (token.startsWith("/")) { this.skills ??= await listSkills(cwd); return this.skills.some((s) => `/${s.name}` === token); }
-    const body = token.slice(1);
+    let body = token.slice(1); try { body = decodeURIComponent(body); } catch { return false; }
+    if (/^browser:[a-f0-9]{20}$/.test(body)) return existsSync(join(cwd, ".muster", "browser", `context-${body.slice(8)}.json`));
     if (["browser", "web", "terminal", "git:diff", "git:branch", "git:pr", "rules"].includes(body) || body.startsWith("terminal:") || body.startsWith("git:commit:") || body.startsWith("code:") || body.startsWith("symbol:") || body.startsWith("link:") || /^https?:\/\//.test(body)) return true;
     if (body.startsWith("rule:")) return listRules(cwd).some((r) => r.name === body.slice(5));
     if (body.startsWith("folder:")) return existsSync(join(cwd, body.slice(7)));
@@ -945,19 +1311,64 @@ export class AgentPane implements vscode.WebviewViewProvider {
     }
   }
 
+  private async agentAction(message: Extract<FromPane, { type: "agentAction" }>): Promise<void> {
+    const tab = this.active(); const graph = tab.agentGraph;
+    const node = graph?.nodes.find((candidate) => candidate.threadId === message.threadId || candidate.threadId === message.agentId || candidate.id === message.agentId);
+    if (!node) { this.post({ type: "agentActionResult", action: message.action, agentId: message.agentId, ok: false, reason: "Agent is not part of the current provider graph." }, tab.id); return; }
+    if (message.threadId && message.threadId !== node.threadId) { this.post({ type: "agentActionResult", action: message.action, agentId: message.agentId, ok: false, reason: "The requested agent ID does not match the provider graph node." }, tab.id); return; }
+    const rootId = graph?.rootThreadId ?? tab.thread?.id;
+    if (message.action === "open") {
+      if (node.threadId === rootId) { this.post({ type: "agentActionResult", action: message.action, agentId: message.agentId, ok: true }, tab.id); return; }
+      try { const opened = await vscode.commands.executeCommand<boolean>("muster.thread.open", { id: node.threadId }); this.post({ type: "agentActionResult", action: message.action, agentId: message.agentId, ok: opened === true, ...(opened === true ? {} : { reason: "The child thread could not be opened in the Agent pane." }) }, tab.id); } catch (error) { this.post({ type: "agentActionResult", action: message.action, agentId: message.agentId, ok: false, reason: error instanceof Error ? error.message : String(error) }, tab.id); }
+      return;
+    }
+    const descendant = !!rootId && isChildOfRoot(graph?.nodes ?? [], node.threadId, rootId);
+    if (!descendant) { this.post({ type: "agentActionResult", action: message.action, agentId: message.agentId, ok: false, reason: "The requested agent is not a child of the active root thread." }, tab.id); return; }
+    if (node.status !== "running" || !node.turnId) { this.post({ type: "agentActionResult", action: message.action, agentId: message.agentId, ok: false, reason: "The child has no active turn to control." }, tab.id); return; }
+    if (message.action === "steer") {
+      const text = await vscode.window.showInputBox({ prompt: `Steer ${node.name ?? node.threadId}`, placeHolder: "Instruction for the running agent" });
+      if (!text?.trim()) { this.post({ type: "agentActionResult", action: message.action, agentId: message.agentId, ok: false, reason: "No steering instruction provided." }, tab.id); return; }
+      const result = await controlOwnedTurn(tab.id, node.threadId, node.turnId, "steer", text.trim(), tab.thread?.cwd ?? this.cwd()); this.post({ type: "agentActionResult", action: message.action, agentId: message.agentId, ok: result.ok, ...(result.ok ? {} : { reason: result.reason ?? "The child provider turn could not be steered." }) }, tab.id); return;
+    }
+    const result = await controlOwnedTurn(tab.id, node.threadId, node.turnId, "interrupt", undefined, tab.thread?.cwd ?? this.cwd()); this.post({ type: "agentActionResult", action: message.action, agentId: message.agentId, ok: result.ok, ...(result.ok ? {} : { reason: result.reason ?? "The child provider turn could not be interrupted." }) }, tab.id);
+  }
+
   /** Approval and question requests from the provider (Manual approval / Read only): ask in the app, answer on the wire. */
-  private async approve(method: string, params: Record<string, unknown>): Promise<Record<string, unknown> | undefined> {
+  private async approve(method: string, params: Record<string, unknown>, tab: Tab = this.active()): Promise<Record<string, unknown> | undefined> {
+    const requestThreadId = typeof params.threadId === "string" ? params.threadId : undefined;
+    const requestTurnId = typeof params.turnId === "string" ? params.turnId : undefined;
+    const rootThreadId = tab.thread?.id ?? tab.agentGraph?.rootThreadId;
+    const childThreadId = requestThreadId && rootThreadId && requestThreadId !== rootThreadId && tab.agentGraph?.nodes.some((node) => node.threadId === requestThreadId && node.parentThreadId) ? requestThreadId : undefined;
+    if (requestThreadId && requestThreadId !== rootThreadId && !childThreadId) return undefined;
+    this.runtimeFor(tab);
+    if (method !== "item/permissions/requestApproval" && !method.endsWith("/requestApproval") && method !== "mcpServer/elicitation/request" && !method.endsWith("/elicitation/request") && method !== "openai/form" && method !== "item/tool/requestUserInput") return undefined;
+    const approvalId = String(params.approvalId ?? params.itemId ?? `ap-${Date.now().toString(36)}`);
+    const claim = this.taskRuntimes.requestApproval(tab.id, { id: approvalId, method, ...(requestThreadId ? { threadId: requestThreadId } : {}), ...(requestTurnId ? { turnId: requestTurnId } : {}), payload: params });
+    if (!claim.accepted) { this.output.appendLine(`approval dropped: ${claim.reason ?? "already owned"}`); return undefined; }
+    const resolveClaim = (decision: unknown) => { this.taskRuntimes.resolveApproval(tab.id, approvalId, decision); return decision; };
+    const silent = isUnattendedAccess(this.access.find((a) => a.id === tab.settings.accessId));
+    if (method === "item/permissions/requestApproval") {
+      if (silent) return resolveClaim({ permissions: params.permissions ?? {}, scope: "session" }) as Record<string, unknown>;
+      const decision = await this.askInChat({ id: String(params.itemId ?? cryptoId()), kind: "elicitation", command: JSON.stringify(params.permissions ?? {}, null, 2), reason: String(params.reason ?? "Additional permissions requested") }, tab, childThreadId);
+      resolveClaim(decision);
+      return { permissions: decision === "accept" || decision === "acceptForSession" ? params.permissions ?? {} : {}, scope: decision === "acceptForSession" ? "session" : "turn" };
+    }
     if (method.endsWith("/requestApproval")) {
+      if (silent) return resolveClaim({ decision: "accept" }) as Record<string, unknown>;
       const isCommand = method.includes("commandExecution");
-      const files = Array.isArray(params.changes) ? (params.changes as { path?: string }[]).map((c) => String(c.path ?? "")).filter(Boolean) : undefined;
-      const card: ApprovalCard = { id: String(params.approvalId ?? params.itemId ?? `ap-${Date.now().toString(36)}`), kind: isCommand ? "command" : "patch", command: String(params.command ?? (files?.length ? `Edit ${files.length} file(s)` : params.reason ?? "Apply changes")), ...(params.cwd ? { cwd: String(params.cwd) } : {}), ...(params.reason ? { reason: String(params.reason) } : {}), ...(files ? { files } : {}) };
-      const decision = await this.askInChat(card);
+      const changes = Array.isArray(params.changes) ? params.changes as {path?: string; diff?: string}[] : tab.proposals?.get(String(params.itemId ?? "")) ?? [];
+      const files = changes.map(c => c.path ?? "").filter(Boolean);
+      const diff = changes.map(c => `${c.path ?? ""}\n${c.diff ?? ""}`).join("\n\n");
+      const card: ApprovalCard = { id: String(params.approvalId ?? params.itemId ?? `ap-${Date.now().toString(36)}`), kind: isCommand ? "command" : "patch", command: String(params.command ?? (files?.length ? `Edit ${files.length} file(s)` : params.reason ?? "Apply changes")), ...(params.cwd ? { cwd: String(params.cwd) } : {}), ...(params.reason ? { reason: String(params.reason) } : {}), ...(files.length ? { files } : {}), ...(diff ? { diff } : {}) };
+      const decision = await this.askInChat(card, tab, childThreadId);
+      resolveClaim(decision);
       return { decision };
     }
-    if (method === "mcpServer/elicitation/request") {
-      // Computer use and other MCP servers ask for consent here; the card offers Allow / Decline.
-      const text = String(params.message ?? params.prompt ?? "An MCP server asks for permission.");
-      const decision = await this.askInChat({ id: `el-${Date.now().toString(36)}`, kind: "elicitation", command: text });
+    if (method === "mcpServer/elicitation/request" || method.endsWith("/elicitation/request") || method === "openai/form") {
+      if (silent) return resolveClaim({ action: "accept", content: {} }) as Record<string, unknown>;
+      const text = elicitationText(params);
+      const decision = await this.askInChat({ id: String(params.elicitationId ?? params.id ?? `el-${Date.now().toString(36)}`), kind: "elicitation", command: text, ...(params.reason ? { reason: String(params.reason) } : {}) }, tab);
+      resolveClaim(decision);
       return decision === "decline" ? { action: "decline", content: null } : { action: "accept", content: {} };
     }
     if (method === "item/tool/requestUserInput") {
@@ -968,6 +1379,7 @@ export class AgentPane implements vscode.WebviewViewProvider {
         const answer = options.length ? await vscode.window.showQuickPick(options, { placeHolder: q.question ?? q.header ?? "Codex asks" }) : await vscode.window.showInputBox({ prompt: q.question ?? q.header ?? "Codex asks" });
         answers[String(q.id ?? q.header ?? "answer")] = { answers: answer ? [answer] : [] };
       }
+      resolveClaim(answers);
       return { answers };
     }
     return undefined;
@@ -989,6 +1401,70 @@ export class AgentPane implements vscode.WebviewViewProvider {
   }
 }
 
+const COMPUTER_USE_SERVER = /computer-use|unified-computer-use|cua_repl|node_repl/i;
+const COMPUTER_USE_TOOL = /^(listApps|list_apps|snapshot|getAppState|get_app_state|click|type|typeText|type_text|scroll)$/i;
+
+/** item/started mcpToolCall payload → transcript tool card fields. */
+export function computerUseToolFromItem(item: Record<string, unknown>, status = "running"): { id: string; tool: "computer"; detail: string; status: string } | undefined {
+  const server = String(item.server ?? item.mcpServer ?? item.serverName ?? item.plugin ?? "");
+  const name = String(item.tool ?? item.toolName ?? item.name ?? "");
+  const type = String(item.type ?? "");
+  if (type && type !== "mcpToolCall") return undefined;
+  if (!COMPUTER_USE_SERVER.test(server) && !COMPUTER_USE_SERVER.test(name) && !COMPUTER_USE_TOOL.test(name)) return undefined;
+  return { id: String(item.id ?? ""), tool: "computer", detail: [server, name].filter(Boolean).join(" ") || "computer-use", status };
+}
+
+/** Computer-use / MCP elicitation text from app-server or plugin payload shapes. */
+export function elicitationText(params: Record<string, unknown>): string {
+  const nested = params.elicitation ?? params.params ?? params.request;
+  const row = nested && typeof nested === "object" && !Array.isArray(nested) ? nested as Record<string, unknown> : undefined;
+  for (const value of [params.message, params.prompt, params.text, params.description, params.reason, params.title, row?.message, row?.prompt, row?.text, row?.description]) {
+    if (typeof value === "string" && value.trim()) return value;
+  }
+  const schema = params.requestedSchema ?? row?.requestedSchema;
+  if (schema && typeof schema === "object") return JSON.stringify(schema, null, 2);
+  return "An MCP server asks for permission.";
+}
+
+function catalogThread(record: ThreadRecord): CodexThread {
+  const raw = record.raw; const updatedAt = typeof raw.updatedAt === "number" ? raw.updatedAt : Date.now() / 1000;
+  return { id: record.id, name: record.name, project: record.workspaceRoot.split(/[\\/]/).pop() || record.workspaceRoot || "(workspace)", cwd: record.cwd, filePath: typeof raw.path === "string" ? raw.path : typeof raw.filePath === "string" ? raw.filePath : "", lastActivityAt: new Date(updatedAt * 1000).toISOString(), turnCount: Array.isArray((raw as { turns?: unknown }).turns) ? (raw as { turns: unknown[] }).turns.length : 0, sizeBytes: 0, live: record.status?.type === "active" };
+}
+
+function hydrateCatalogTurns(value: unknown): PaneMessage[] {
+  const messages: PaneMessage[] = [];
+  for (const turn of Array.isArray(value) ? value : []) {
+    const items = turn && typeof turn === "object" && Array.isArray((turn as { items?: unknown }).items) ? (turn as { items: unknown[] }).items : [];
+    const storedTurnId = turn && typeof turn === "object" && typeof (turn as { id?: unknown }).id === "string" ? String((turn as { id: string }).id) : undefined;
+    for (const item of items) {
+      if (!item || typeof item !== "object") continue;
+      const row = item as Record<string, unknown>; const type = typeof row.type === "string" ? row.type : "";
+      if (type === "userMessage") {
+        const content = Array.isArray(row.content) ? row.content.map((part) => part && typeof part === "object" && typeof (part as { text?: unknown }).text === "string" ? (part as { text: string }).text : part && typeof part === "object" && typeof (part as { path?: unknown }).path === "string" ? `[${String((part as { type?: unknown }).type ?? "attachment")}:${String((part as { path: string }).path)}]` : "").filter(Boolean).join("\n") : "";
+        if (content) messages.push({ kind: "user", text: content, ...(storedTurnId ? { turnId: storedTurnId } : {}) });
+      } else if (type === "agentMessage" && typeof row.text === "string") messages.push({ kind: "assistant", text: row.text, reasoning: "" });
+      else if (type === "commandExecution") messages.push({ kind: "tool", id: String(row.id ?? cryptoId()), title: "Command", detail: String(row.command ?? ""), output: String(row.aggregatedOutput ?? ""), status: String(row.status ?? "completed"), ...(typeof row.exitCode === "number" ? { exitCode: row.exitCode } : {}), ...(typeof row.cwd === "string" ? { cwd: row.cwd } : {}) });
+      else if (type === "fileChange") { const paths = Array.isArray(row.changes) ? row.changes.map((change) => change && typeof change === "object" ? String((change as { path?: unknown }).path ?? "") : "").filter(Boolean) : []; messages.push({ kind: "assistant", text: paths.length ? `File changes: ${paths.join(", ")}` : "File changes", reasoning: "" }); }
+      else if (type === "plan" && typeof row.text === "string") messages.push({ kind: "assistant", text: row.text, reasoning: "" });
+    }
+  }
+  return messages;
+}
+
+function replayCatalogGraph(rootThreadId: string, value: unknown): AgentGraphSnapshot {
+  const graph = new AgentGraphAdapter(rootThreadId);
+  for (const turn of Array.isArray(value) ? value : []) {
+    if (!turn || typeof turn !== "object") continue;
+    const row = turn as Record<string, unknown>; const turnId = typeof row.id === "string" ? row.id : ""; if (!turnId) continue;
+    const startedAt = typeof row.startedAt === "number" ? row.startedAt * 1000 : 0; const completedAt = typeof row.completedAt === "number" ? row.completedAt * 1000 : startedAt;
+    graph.ingest("turn/started", { threadId: rootThreadId, turn: { id: turnId } }, startedAt);
+    for (const item of Array.isArray(row.items) ? row.items : []) if (item && typeof item === "object") graph.ingest("item/completed", { threadId: rootThreadId, turnId, item }, completedAt);
+    const status = typeof row.status === "string" ? row.status : "";
+    if (status && status !== "inProgress") graph.ingest("turn/completed", { threadId: rootThreadId, turn: { id: turnId, status } }, completedAt);
+  }
+  return graph.snapshot();
+}
+
 function cryptoId(): string {
   return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => { const r = (Math.random() * 16) | 0; return (c === "x" ? r : (r & 0x3) | 0x8).toString(16); });
 }
@@ -1005,821 +1481,4 @@ function parsePlan(markdown: string): PlanCard {
     return { text: raw.replace(/^\[( |x|X)\]\s*/, "").replace(/\*\*/g, ""), done: !!box && box[1] !== " " };
   });
   return { title, summary: summary.trim(), todos };
-}
-
-function paneHtml(csp: string, codicon = ""): string {
-  return /* html */ `<!doctype html>
-<html><head><meta charset="utf-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline' ${csp}; script-src 'unsafe-inline' ${csp}; img-src ${csp} data:; font-src ${csp};">
-<style>
-  :root {
-    --fg: var(--vscode-editor-foreground);
-    --bg-primary: color-mix(in srgb, var(--fg) 20%, transparent);
-    --bg-secondary: color-mix(in srgb, var(--fg) 14%, transparent);
-    --bg-tertiary: color-mix(in srgb, var(--fg) 8%, transparent);
-    --bg-quaternary: color-mix(in srgb, var(--fg) 6%, transparent);
-    --bg-quinary: color-mix(in srgb, var(--fg) 4%, transparent);
-    --text-secondary: color-mix(in srgb, var(--fg) 66%, transparent);
-    --text-tertiary: color-mix(in srgb, var(--fg) 36%, transparent);
-    --stroke-primary: color-mix(in srgb, var(--fg) 20%, transparent);
-    --stroke-secondary: color-mix(in srgb, var(--fg) 12%, transparent);
-    --stroke-tertiary: color-mix(in srgb, var(--fg) 8%, transparent);
-    --amber: #D2943E;
-    --radius-sm: 4px; --radius-base: 6px; --radius-lg: 8px; --radius-xl: 12px;
-    --fs-xs: 11px; --fs-sm: 12px; --fs-base: 13px; --fs-lg: 14px; --lh-lg: 22px;
-  }
-  * { box-sizing: border-box; }
-  html, body { height: 100%; margin: 0; }
-  body { font-family: var(--vscode-font-family); font-size: var(--fs-lg); line-height: var(--lh-lg); color: var(--fg); background: transparent; -webkit-font-smoothing: subpixel-antialiased; display: flex; flex-direction: column; overflow: hidden; }
-  button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; }
-  #tabs { display: none; }
-  #tabs::-webkit-scrollbar { display: none; }
-  .tab { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 8px 0 10px; border-radius: var(--radius-base); font-size: var(--fs-base); color: var(--text-secondary); white-space: nowrap; max-width: 220px; cursor: pointer; flex: 0 0 auto; }
-  .tab .name { overflow: hidden; text-overflow: ellipsis; }
-  .tab.active { background: var(--bg-tertiary); color: var(--fg); }
-  .tab:hover { background: var(--bg-quaternary); }
-  .tab .x { width: 16px; height: 16px; border-radius: 3px; display: inline-flex; align-items: center; justify-content: center; color: var(--text-tertiary); font-size: 12px; visibility: hidden; }
-  .tab:hover .x, .tab.active .x { visibility: visible; }
-  .tab .x:hover { background: var(--bg-secondary); color: var(--fg); }
-  .tab .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--vscode-charts-green); }
-  .tabbtn { width: 26px; height: 26px; border-radius: var(--radius-base); display: inline-flex; align-items: center; justify-content: center; color: var(--text-secondary); flex: 0 0 auto; }
-  .tabbtn:hover { background: var(--bg-tertiary); color: var(--fg); }
-  .tabbtn.on { color: var(--fg); background: var(--bg-tertiary); }
-  .tabbtn svg { width: 15px; height: 15px; }
-  #tabs .spacer { flex: 1; }
-  .view { display: none; flex: 1; min-height: 0; flex-direction: column; }
-  body[data-view="chat"] #chat, body[data-view="history"] #history, body[data-view="board"] #board, body[data-view="browser"] #browserpane { display: flex; }
-  .bbar { display: flex; align-items: center; gap: 4px; height: 34px; padding: 0 8px; border-bottom: 1px solid var(--stroke-tertiary); flex: 0 0 auto; }
-  .bbtn { width: 26px; height: 24px; border-radius: var(--radius-base); color: var(--text-secondary); font-size: 13px; display: inline-flex; align-items: center; justify-content: center; }
-  .bbtn:hover { background: var(--bg-tertiary); color: var(--fg); } .bbtn.on { background: var(--amber); color: #1a1a1a; }
-  #burl { flex: 1; min-width: 0; height: 24px; border: 1px solid var(--stroke-secondary); border-radius: var(--radius-base); background: var(--vscode-input-background); color: var(--fg); font: inherit; font-size: var(--fs-sm); padding: 0 10px; outline: none; }
-  #burl:focus { border-color: var(--stroke-primary); }
-  #bhost { flex: 1; min-height: 120px; background: transparent; }
-  .bsections { flex: 0 0 auto; height: 190px; border-top: 1px solid var(--stroke-tertiary); display: flex; flex-direction: column; }
-  .bstabs { display: flex; align-items: center; gap: 2px; height: 28px; padding: 0 6px; border-bottom: 1px solid var(--stroke-tertiary); font-size: var(--fs-sm); }
-  .bstab { padding: 3px 8px; border-radius: var(--radius-sm); color: var(--text-secondary); cursor: pointer; } .bstab:hover { background: var(--bg-quaternary); } .bstab.on { background: var(--bg-tertiary); color: var(--fg); }
-  .bstab .cnt { color: var(--text-tertiary); font-size: var(--fs-xs); }
-  .bsbody { flex: 1; overflow: auto; padding: 6px 10px; font-family: var(--vscode-editor-font-family); font-size: var(--fs-xs); line-height: 17px; white-space: pre-wrap; word-break: break-word; }
-  .bsbody .c { display: block; } .bsbody .c.warn { color: var(--vscode-charts-yellow, #D2943E); } .bsbody .c.error { color: var(--vscode-charts-red); } .bsbody .c.debug { color: var(--text-tertiary); }
-  .bsbody .kv { display: block; } .bsbody .kv b { color: var(--text-secondary); font-weight: 500; }
-  .bbookmarks { display: none; gap: 4px; padding: 3px 8px; border-bottom: 1px solid var(--stroke-tertiary); overflow-x: auto; white-space: nowrap; } .bbookmarks.has { display: flex; }
-  .bbookmarks .bm { display: inline-flex; align-items: center; gap: 4px; height: 20px; padding: 0 6px; border-radius: 4px; font-size: var(--fs-xs); color: var(--text-secondary); cursor: pointer; max-width: 160px; } .bbookmarks .bm:hover { background: var(--bg-tertiary); color: var(--fg); } .bbookmarks .bm span { overflow: hidden; text-overflow: ellipsis; } .bbookmarks .bm .cod { font-size: 11px; width: 12px; height: 12px; }
-  #bstar.on { color: var(--amber); }
-  .bcert { display: flex; align-items: center; gap: 8px; padding: 6px 10px; font-size: var(--fs-sm); color: var(--vscode-charts-yellow, #D2943E); border-bottom: 1px solid var(--stroke-tertiary); } .bcert[hidden] { display: none; } .bcert .msg { flex: 1; }
-  body.dictating .icon[title="Dictate"] { color: var(--amber); filter: drop-shadow(0 0 4px var(--amber)); }
-  .bdriving { display: inline-flex; align-items: center; gap: 6px; margin-left: 8px; color: var(--amber); font-size: var(--fs-xs); white-space: nowrap; } .bdriving[hidden] { display: none; }
-  .bdriving .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--amber); box-shadow: 0 0 6px var(--amber); }
-  .bsbody .field { display: flex; align-items: center; gap: 6px; margin: 3px 0; font-family: var(--vscode-font-family); } .bsbody .field b { width: 96px; flex: 0 0 auto; color: var(--text-secondary); font-weight: 500; }
-  .bsbody .field input { flex: 1; min-width: 0; height: 20px; background: var(--bg-quaternary); border: 1px solid var(--stroke-tertiary); border-radius: var(--radius-sm); color: var(--fg); font: inherit; font-size: var(--fs-xs); padding: 0 6px; outline: 0; } .bsbody .field input:focus { border-color: var(--amber); }
-  .bsbody .field input.changed { border-color: color-mix(in srgb, var(--amber) 60%, transparent); background: color-mix(in srgb, var(--amber) 10%, transparent); }
-  .bchange { display: flex; align-items: center; gap: 6px; margin: 2px 0; white-space: nowrap; overflow: hidden; } .bchange .sel { color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; max-width: 40%; } .bchange .old { color: var(--text-tertiary); text-decoration: line-through; } .bchange .arrow { color: var(--text-tertiary); } .bchange .new { color: var(--fg); } .bchange .x { cursor: pointer; color: var(--text-tertiary); margin-left: auto; } .bchange .x:hover { color: var(--fg); }
-  .bsbody .bapply { margin-top: 8px; }
-  #messages { flex: 1; overflow: auto; padding: 6px 10px 10px; display: flex; flex-direction: column; gap: 6px; }
-  body:not(.has-messages) #messages { display: none; }
-  .human { align-self: flex-end; margin-left: max(24px, 12%); min-width: 120px; max-height: 108px; overflow: hidden; position: relative; background: var(--vscode-input-background); border: 1px solid var(--stroke-secondary); border-radius: var(--radius-xl); padding: 6px 10px; white-space: pre-wrap; word-break: break-word; font-size: var(--fs-base); line-height: 20px; }
-  .human { padding-right: 12px; }
-  .human .tools { position: absolute; right: 6px; bottom: 4px; display: none; gap: 3px; }
-  .human:hover .tools { display: inline-flex; }
-  .human .tools button { height: 22px; padding: 0 7px; border-radius: 4px; display: inline-flex; align-items: center; gap: 4px; color: var(--text-secondary); font-size: var(--fs-xs); background: var(--vscode-input-background); border: 1px solid var(--stroke-secondary); cursor: pointer; }
-  .human .tools button:hover { color: var(--fg); background: var(--bg-tertiary); } .human .tools .cod { font-size: 12px; width: 12px; height: 12px; }
-  .human.editing { max-height: none; overflow: visible; }
-  .human textarea.edit { width: 100%; min-height: 64px; box-sizing: border-box; background: transparent; border: 0; outline: 0; color: var(--fg); font: inherit; font-size: var(--fs-base); line-height: var(--lh-base); resize: vertical; padding: 0; }
-  .human .editbar { display: flex; justify-content: flex-end; margin-top: 4px; font-size: var(--fs-xs); color: var(--text-tertiary); }
-  .human.steer .txt::before { content: "added mid-turn"; display: block; font-size: var(--fs-xs); color: var(--text-tertiary); margin-bottom: 2px; }
-  #queue { display: none; flex-direction: column; gap: 4px; padding: 0 12px 6px; } #queue.has { display: flex; }
-  #queue .q { display: flex; align-items: center; gap: 8px; padding: 4px 8px; border: 1px dashed var(--stroke-secondary); border-radius: var(--radius-base); font-size: var(--fs-sm); color: var(--text-secondary); min-width: 0; }
-  #queue .q .lbl { flex: 0 0 auto; font-size: var(--fs-xs); text-transform: uppercase; letter-spacing: .3px; color: var(--text-tertiary); } #queue .q .txt { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } #queue .q .x { cursor: pointer; } #queue .q .x:hover { color: var(--fg); }
-  .stopbtn { display: none; background: var(--fg); color: var(--vscode-editor-background); border-radius: 9999px; width: 24px; height: 24px; align-items: center; justify-content: center; cursor: pointer; font-size: 10px; } body.running .stopbtn { display: inline-flex; }
-  .human .restore { position: absolute; right: 6px; bottom: 4px; width: 22px; height: 22px; border-radius: 4px; display: inline-flex; align-items: center; justify-content: center; color: var(--text-tertiary); background: var(--vscode-input-background); font-size: 13px; }
-  .human:hover .restore { color: var(--text-secondary); }
-  .human .restore:hover { color: var(--fg); background: var(--bg-tertiary); }
-  .human.clipped::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 28px; background: linear-gradient(to bottom, transparent, var(--vscode-input-background)); border-radius: 0 0 var(--radius-xl) var(--radius-xl); }
-  .assistant { word-break: break-word; font-size: var(--fs-base); line-height: 20px; }
-  .assistant p { margin: 0 0 8px; }
-  .assistant h1, .assistant h2, .assistant h3 { margin: 12px 0 6px; font-weight: 600; line-height: 1.3; }
-  .assistant h1 { font-size: 17px; } .assistant h2 { font-size: 15px; } .assistant h3 { font-size: var(--fs-lg); }
-  .assistant ul, .assistant ol { margin: 0 0 8px; padding-left: 22px; }
-  .assistant li { margin: 2px 0; }
-  .assistant code { background: var(--vscode-textCodeBlock-background); border-radius: var(--radius-sm); padding: 1px 4px; font-family: var(--vscode-editor-font-family); font-size: var(--fs-base); }
-  .assistant .code { position: relative; margin: 8px 0; border: 1px solid var(--stroke-tertiary); border-radius: var(--radius-base); background: var(--vscode-textCodeBlock-background); }
-  .assistant .code .head { display: flex; align-items: center; height: 26px; padding: 0 10px; font-size: var(--fs-xs); color: var(--text-tertiary); border-bottom: 1px solid var(--stroke-tertiary); }
-  .assistant .code .copy { margin-left: auto; color: var(--text-secondary); font-size: var(--fs-xs); }
-  .assistant .code .copy:hover { color: var(--fg); }
-  .assistant pre { margin: 0; padding: 8px 10px; overflow: auto; font-family: var(--vscode-editor-font-family); font-size: var(--fs-base); line-height: 20px; }
-  .assistant a { color: var(--vscode-textLink-foreground); text-decoration: none; }
-  .assistant a.file { color: inherit; cursor: pointer; } .assistant a.file code, .assistant a.file .path { text-decoration: underline dotted color-mix(in srgb, var(--fg) 40%, transparent); text-underline-offset: 3px; } .assistant a.file:hover code, .assistant a.file:hover .path { background: var(--bg-tertiary); }
-  .assistant .cite { display: inline-flex; align-items: center; gap: 3px; height: 18px; padding: 0 5px; border-radius: 4px; border: 1px solid var(--stroke-secondary); font-size: var(--fs-xs); font-family: var(--vscode-editor-font-family); vertical-align: middle; } .assistant .cite .cod { font-size: 11px; width: 12px; height: 12px; }
-  .assistant .code .head .path { font-family: var(--vscode-editor-font-family); color: var(--text-secondary); } .assistant .code .head .spacer { flex: 1; }
-  .assistant .code .head button { margin-left: 6px; color: var(--text-tertiary); font-size: var(--fs-xs); cursor: pointer; } .assistant .code .head button:hover { color: var(--fg); } .assistant .code .head button.apply { color: var(--amber); }
-  .assistant li.task { list-style: none; margin-left: -16px; display: flex; align-items: flex-start; gap: 6px; } .assistant li.task .cod { font-size: 13px; width: 14px; height: 20px; color: var(--text-tertiary); } .assistant li.task.done .cod { color: var(--vscode-charts-green, #7bd88f); } .assistant li.task.done { color: var(--text-tertiary); }
-  .assistant.streaming > :last-child::after { content: ""; display: inline-block; width: 2px; height: 1em; margin-left: 2px; background: var(--fg); vertical-align: -2px; animation: caret 1s steps(2) infinite; } @keyframes caret { 50% { opacity: 0; } }
-  .assistant blockquote { margin: 0 0 8px; padding-left: 10px; border-left: 2px solid var(--stroke-primary); color: var(--text-secondary); }
-  .assistant table { border-collapse: collapse; margin: 0 0 8px; font-size: var(--fs-base); }
-  .assistant th, .assistant td { border: 1px solid var(--stroke-secondary); padding: 3px 8px; text-align: left; }
-  .assistant hr { border: 0; border-top: 1px solid var(--stroke-secondary); margin: 10px 0; }
-  .thinking { color: var(--text-tertiary); font-size: var(--fs-sm); line-height: 18px; }
-  .thinking summary { cursor: pointer; color: var(--text-secondary); list-style: none; }
-  .thinking summary::before { content: "▸ "; }
-  .thinking[open] summary::before { content: "▾ "; }
-  .thinking .body { white-space: pre-wrap; font-style: italic; margin-top: 4px; }
-  .error { color: var(--vscode-errorForeground); font-size: var(--fs-base); }
-  .card { border: 1px solid var(--stroke-tertiary); border-radius: var(--radius-xl); background: var(--vscode-editor-background); font-size: var(--fs-base); }
-  .edit { display: flex; align-items: center; gap: 8px; height: 28px; padding: 0 10px; color: var(--text-secondary); cursor: pointer; }
-  .edit:hover { background: var(--bg-quinary); }
-  .edit .path { color: var(--fg); font-family: var(--vscode-editor-font-family); font-size: var(--fs-sm); }
-  .adds { color: var(--vscode-charts-green); font-variant-numeric: tabular-nums; } .dels { color: var(--vscode-charts-red); font-variant-numeric: tabular-nums; }
-  .edit .state { margin-left: auto; color: var(--text-tertiary); font-size: var(--fs-xs); }
-  .editwrap .diff { display: none; margin: 0; padding: 6px 10px 8px; border-top: 1px solid var(--stroke-tertiary); max-height: 260px; overflow: auto; font-family: var(--vscode-editor-font-family); font-size: var(--fs-sm); line-height: 18px; white-space: pre; }
-  .editwrap.open .diff { display: block; }
-  .editwrap .diff .a { background: var(--vscode-diffEditor-insertedLineBackground); display: block; }
-  .editwrap .diff .d { background: var(--vscode-diffEditor-removedLineBackground); display: block; opacity: .9; }
-  .editwrap .diff .h { color: var(--text-tertiary); display: block; }
-  .tool { border: 0; background: transparent; border-radius: var(--radius-sm); margin: -3px 0; }
-  .tool:hover { background: var(--bg-quinary); }
-  .tool .head { display: flex; align-items: center; gap: 6px; height: 22px; padding: 0 4px; color: var(--text-tertiary); font-size: var(--fs-sm); cursor: pointer; }
-  .tool .head .cmd { font-family: var(--vscode-editor-font-family); font-size: var(--fs-xs); color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .tool .head .status { margin-left: auto; color: var(--text-tertiary); font-size: var(--fs-xs); }
-  .tool pre { display: none; margin: 0; padding: 6px 10px 8px; border-top: 1px solid var(--stroke-tertiary); max-height: 220px; overflow: auto; font-family: var(--vscode-editor-font-family); font-size: var(--fs-sm); line-height: 18px; color: var(--text-secondary); white-space: pre-wrap; }
-  .tool.open pre { display: block; }
-  .tool .head .ic { display: inline-flex; } .tool .head .ic .cod { font-size: 13px; width: 14px; height: 14px; color: var(--text-tertiary); }
-  .tool.running .head .t::after { content: ""; display: inline-block; width: 6px; height: 6px; margin-left: 6px; border-radius: 50%; background: var(--amber); box-shadow: 0 0 6px var(--amber); vertical-align: middle; }
-  .tool.failed .head .t, .tool.failed .head .status { color: var(--vscode-charts-red); }
-  .card.approval { margin: 4px 0; border-color: color-mix(in srgb, var(--amber) 45%, transparent); background: var(--vscode-editor-background); }
-  .card.approval .head { display: flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px; font-size: var(--fs-sm); color: var(--text-secondary); border-bottom: 1px solid var(--stroke-tertiary); }
-  .card.approval .head .ic .cod { font-size: 13px; width: 14px; height: 14px; color: var(--amber); } .card.approval .head .t { color: var(--fg); font-weight: 500; } .card.approval .head .hint { margin-left: auto; color: var(--text-tertiary); font-size: var(--fs-xs); }
-  .card.approval .what { margin: 0; padding: 8px 10px; font-family: var(--vscode-editor-font-family); font-size: var(--fs-sm); white-space: pre-wrap; word-break: break-word; max-height: 160px; overflow: auto; }
-  .card.approval .meta { padding: 0 10px 6px; font-size: var(--fs-xs); color: var(--text-tertiary); } .card.approval .meta:empty { display: none; }
-  .card.approval .actions { display: flex; gap: 6px; padding: 6px 10px 8px; border-top: 1px solid var(--stroke-tertiary); } .card.approval .actions kbd { font-family: inherit; margin-left: 6px; opacity: .6; font-size: var(--fs-xs); }
-  .card.approval.decided { border-color: var(--stroke-tertiary); opacity: .8; }
-  .plan { padding: 8px 10px 8px; }
-  .plan .file { display: flex; align-items: center; gap: 6px; font-size: var(--fs-base); color: var(--text-secondary); margin-bottom: 6px; }
-  .plan .file .icon { color: var(--text-tertiary); }
-  .plan .file .name { font-family: var(--vscode-editor-font-family); font-size: var(--fs-sm); }
-  .plan h3 { margin: 2px 0 4px; font-size: 14px; font-weight: 600; line-height: 20px; }
-  .plan .summary { color: var(--text-secondary); margin-bottom: 6px; font-size: var(--fs-base); line-height: 19px; }
-  .plan .todos { border: 1px solid var(--stroke-tertiary); border-radius: var(--radius-lg); padding: 6px 8px; background: var(--bg-quinary); }
-  .plan .todos .t { color: var(--text-tertiary); font-size: var(--fs-base); margin-bottom: 4px; }
-  .plan .todo { display: flex; gap: 8px; align-items: flex-start; padding: 2px 4px; margin: 0 -4px; border-radius: 4px; font-size: var(--fs-sm); line-height: 18px; cursor: pointer; }
-  .plan .todo:hover { background: var(--bg-quaternary); }
-  .plan .todo .o { width: 14px; height: 14px; border-radius: 50%; border: 1.5px solid var(--stroke-primary); flex: 0 0 auto; margin-top: 3px; display: inline-flex; align-items: center; justify-content: center; font-size: 9px; color: var(--vscode-button-foreground); }
-  .plan .todo.sel .o { background: var(--amber); border-color: var(--amber); color: #1a1a1a; }
-  .plan .todos .t { display: flex; align-items: center; gap: 8px; }
-  .plan .todos .t .all { margin-left: auto; color: var(--text-secondary); font-size: var(--fs-xs); cursor: pointer; }
-  .plan .todos .t .all:hover { color: var(--fg); }
-  .plan .more { cursor: pointer; } .plan .more:hover { color: var(--text-secondary); }
-  .plan .foot .modelpick { color: var(--text-secondary); font-size: var(--fs-base); cursor: pointer; display: inline-flex; align-items: center; gap: 4px; padding: 0 6px; height: 24px; border-radius: var(--radius-base); }
-  .plan .foot .modelpick:hover { background: var(--bg-quaternary); color: var(--fg); }
-  .plan .foot .split { display: inline-flex; border-radius: var(--radius-base); overflow: hidden; }
-  .plan .foot .split .btn { border-radius: 0; }
-  .plan .foot .split .chev { width: 22px; height: 24px; display: inline-flex; align-items: center; justify-content: center; background: var(--amber); color: #1a1a1a; border-left: 1px solid rgba(0,0,0,.25); cursor: pointer; font-size: 9px; }
-  .btn.amber, .btn.amber kbd { color: #1a1a1a; }
-  .plan .planned { color: var(--text-tertiary); font-size: var(--fs-xs); margin-left: auto; }
-  .plan .todo.done .o { background: var(--vscode-charts-green); border-color: var(--vscode-charts-green); }
-  .plan .todo.done { color: var(--text-tertiary); text-decoration: line-through; }
-  .plan .more { color: var(--text-tertiary); font-size: var(--fs-base); padding: 3px 0 0 22px; }
-  .plan .foot { display: flex; align-items: center; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
-  .plan .foot .viewplan { color: var(--text-secondary); font-size: var(--fs-base); }
-  .plan .foot .viewplan:hover { color: var(--fg); }
-  .plan .foot .spacer { flex: 1; }
-  .btn { height: 24px; padding: 0 9px; border-radius: var(--radius-base); font-size: var(--fs-sm); display: inline-flex; align-items: center; gap: 6px; }
-  .btn.amber { background: var(--amber); color: #1a1a1a; font-weight: 500; }
-  .btn.amber kbd { font-family: inherit; opacity: .7; }
-  .btn.text { color: var(--text-secondary); } .btn.text:hover { color: var(--fg); background: var(--bg-quaternary); }
-  .btn.primary { background: var(--vscode-button-background); color: var(--vscode-button-foreground); }
-  #redo { display: none; padding: 0 10px 8px; }
-  body.can-redo:not(.running) #redo { display: flex; }
-  #redo button { height: 28px; padding: 0 10px; border-radius: var(--radius-base); display: inline-flex; align-items: center; gap: 7px; color: var(--text-secondary); background: var(--bg-tertiary); font-size: var(--fs-base); }
-  #redo button:hover { color: var(--fg); background: var(--bg-secondary); }
-  #redo svg { width: 14px; height: 14px; }
-  #review { display: none; margin: 0 10px; border: 1px solid var(--stroke-secondary); border-bottom: 0; border-radius: var(--radius-xl) var(--radius-xl) 0 0; background: var(--vscode-input-background); font-size: var(--fs-base); }
-  body.reviewing #review { display: block; }
-  body.reviewing #composer { margin-top: 0; border-top-left-radius: 0; border-top-right-radius: 0; }
-  #review .head { display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 10px; cursor: pointer; }
-  #review .chev { color: var(--text-tertiary); font-size: 10px; width: 10px; }
-  #review .files { display: none; border-top: 1px solid var(--stroke-tertiary); padding: 4px 0; }
-  #review.open .files { display: block; }
-  #review .file { display: flex; align-items: center; gap: 8px; height: 24px; padding: 0 10px; cursor: pointer; }
-  #review .file:hover { background: var(--bg-quaternary); }
-  #review .file .name { font-family: var(--vscode-editor-font-family); font-size: var(--fs-sm); }
-  #review .file .dir { color: var(--text-tertiary); font-size: var(--fs-xs); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  #status { display: none; align-items: center; justify-content: space-between; padding: 0 12px 6px; font-size: var(--fs-base); color: var(--text-secondary); }
-  body.running #status { display: flex; }
-  #status .stop { cursor: pointer; } #status .stop kbd { font-family: inherit; color: var(--text-tertiary); margin-left: 6px; }
-  #composer { margin: 6px 10px 8px; background: var(--vscode-input-background); border: 1px solid var(--stroke-secondary); border-radius: var(--radius-xl); padding: 10px 12px 8px; position: relative; flex: 0 0 auto; min-width: 0; overflow: hidden; container-type: inline-size; }
-  #messages, .card, .assistant, .human { min-width: 0; }
-  #messages > * { flex-shrink: 0; }
-  .card { overflow: hidden; }
-  .edit .path, .tool .head .cmd { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .assistant pre, .assistant table { max-width: 100%; }
-  @container (max-width: 420px) { .pill.access .lbl { display: none; } .pill.model .lbl { max-width: 110px; } }
-  @container (max-width: 300px) { .pill.mode .lbl { display: none; } .icon[title="Dictate"] { display: none; } }
-  #composer:focus-within { border-color: var(--stroke-primary); }
-  body:not(.has-messages)[data-view="chat"] #composer { order: -1; }
-  /* Cursor's context pills (.context-pill): 20px, 12px text, icon that turns into × on hover; dashed for suggestions and "Add Context". */
-  .ctx { display: inline-flex; align-items: center; gap: 4px; height: 20px; box-sizing: border-box; padding: 2px 4px; border: 1px solid var(--stroke-secondary); border-radius: 4px; font-size: 12px; line-height: 16px; color: var(--fg); white-space: nowrap; max-width: 220px; cursor: default; user-select: none; }
-  .ctx:hover { background: color-mix(in srgb, var(--vscode-list-hoverBackground) 80%, transparent); }
-  .ctx .ci { display: inline-flex; width: 12px; height: 12px; align-items: center; justify-content: center; flex: 0 0 auto; } .ctx .ci .cod { font-size: 12px; width: 12px; height: 12px; } .ctx .ci .badge { font-size: 8px; height: 12px; line-height: 12px; min-width: 14px; padding: 0 2px; }
-  .ctx .x { display: none; width: 12px; height: 12px; align-items: center; justify-content: center; cursor: pointer; color: var(--fg); font-family: codicon; font-size: 12px; } .ctx:hover .ci { display: none; } .ctx:hover .x { display: inline-flex; }
-  .ctx .n { overflow: hidden; text-overflow: ellipsis; }
-  .ctx.bad { border-style: dashed; opacity: .6; }
-  .ctx.suggestion { border-style: dashed; opacity: .6; cursor: pointer; } .ctx.suggestion:hover { opacity: .9; }
-  .ctx.openable .n { cursor: pointer; } .ctx.openable .n:hover { text-decoration: underline; }
-  .ctx.add { border-style: dashed; opacity: .6; cursor: pointer; color: var(--text-secondary); } .ctx.add:hover { opacity: .9; background: transparent; } .ctx.add .cod { font-size: 12px; width: 12px; height: 12px; }
-  .inputwrap { position: relative; }
-  /* Cursor's inline mention (.mention): radius 6, padding 1px 4px, quiet background; unresolved ones dashed. */
-  #backdrop mark { color: transparent; background: color-mix(in srgb, var(--fg) 12%, transparent); border-radius: 6px; padding: 1px 4px; margin: 0 -4px; }
-  #backdrop mark.bad { background: transparent; outline: 1px dashed color-mix(in srgb, var(--fg) 35%, transparent); outline-offset: -1px; }
-  #backdrop { position: absolute; inset: 0; overflow: hidden; pointer-events: none; color: transparent; white-space: pre-wrap; word-wrap: break-word; font: inherit; font-size: var(--fs-lg); line-height: var(--lh-lg); padding: 0; }
-  #input { position: relative; z-index: 1; width: 100%; min-height: 64px; max-height: 240px; resize: none; border: 0; outline: 0; background: transparent; color: var(--fg); font: inherit; font-size: var(--fs-lg); line-height: var(--lh-lg); padding: 0; }
-  #input::placeholder { color: var(--vscode-input-placeholderForeground); }
-  .bar { display: flex; align-items: center; gap: 6px; margin-top: 6px; min-width: 0; }
-  .pill { display: inline-flex; align-items: center; gap: 5px; height: 22px; padding: 0 7px; border-radius: var(--radius-base); font-size: var(--fs-sm); color: var(--fg); cursor: pointer; white-space: nowrap; min-width: 0; flex: 0 1 auto; }
-  .pill .lbl { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 180px; }
-  .pill.mode { flex-shrink: 0; }
-  .icon, .send { flex-shrink: 0; }
-  .pill:hover { background: var(--bg-tertiary); }
-  .pill.mode { background: var(--bg-secondary); }
-  .pill.mode.plan { background: color-mix(in srgb, var(--amber) 24%, transparent); color: var(--amber); }
-  .pill .chev { font-size: 9px; opacity: .7; }
-  .pill.model, .pill.access { color: var(--text-secondary); }
-  .pill.model:hover, .pill.access:hover { color: var(--fg); }
-  .spacer { flex: 1 1 0; min-width: 4px; }
-  .icon { width: 26px; height: 26px; display: inline-flex; align-items: center; justify-content: center; border-radius: var(--radius-base); color: var(--fg); cursor: pointer; }
-  .icon:hover { background: var(--bg-tertiary); }
-  .icon svg { width: 16px; height: 16px; }
-  .send { background: var(--fg); color: var(--vscode-editor-background); border-radius: 9999px; width: 24px; height: 24px; display: none; align-items: center; justify-content: center; cursor: pointer; }
-  body.dirty .send, body.stage .send { display: inline-flex; } body.running .send { display: none; }
-  .menu { position: fixed; top: 0; left: 0; visibility: hidden; min-width: 220px; max-width: 320px; max-height: 320px; overflow: auto; background: var(--vscode-dropdown-background, var(--vscode-editorWidget-background)); border: 1px solid var(--stroke-secondary); border-radius: var(--radius-lg); box-shadow: 0 6px 24px var(--vscode-widget-shadow); padding: 4px; z-index: 20; display: none; font-size: var(--fs-base); }
-  .menu.open { display: block; visibility: visible; }
-  .menu .group { padding: 6px 10px 2px; font-size: var(--fs-xs); color: var(--text-tertiary); text-transform: uppercase; letter-spacing: .3px; }
-  .menu .item { display: flex; align-items: center; gap: 8px; padding: 5px 10px; border-radius: var(--radius-sm); cursor: pointer; }
-  .menu .item:hover, .menu .item.sel { background: var(--bg-tertiary); }
-  /* Cursor's typeahead popover: 300px, 2px padding, 24px rows (12px text, 2px 6px padding), path right-aligned and truncated from the left, matches highlighted. */
-  .cod { font-family: codicon; font-size: 14px; line-height: 1; display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; flex: 0 0 auto; color: var(--text-secondary); }
-  .menu.typeahead { width: 300px; min-width: 300px; max-width: 300px; padding: 2px; border-radius: 6px; box-shadow: 0 5px 10px rgba(0, 0, 0, .3); }
-  .menu .title { padding: 4px 6px 2px; font-size: 11px; line-height: 15px; color: var(--vscode-input-placeholderForeground); }
-  .menu .row { display: flex; align-items: center; gap: 6px; height: 24px; padding: 2px 6px; box-sizing: border-box; border-radius: 4px; font-size: 12px; line-height: 20px; cursor: pointer; }
-  .menu .row.sel { background: var(--vscode-list-hoverBackground); }
-  .menu .row .text { flex: 0 1 auto; min-width: 36px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--fg); }
-  .menu .row .secondary { flex: 1 1 auto; min-width: 0; direction: rtl; text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text-tertiary); font-size: 12px; }
-  .menu .row .hl { color: var(--vscode-list-highlightForeground); font-weight: 600; }
-  .menu .row .chev { margin-left: auto; color: var(--text-tertiary); } .menu .row .secondary + .chev { margin-left: 0; }
-  .menu .back { display: flex; align-items: center; gap: 4px; height: 24px; padding: 2px 6px; box-sizing: border-box; font-size: 12px; color: var(--text-secondary); cursor: pointer; border-bottom: 1px solid var(--stroke-tertiary); margin-bottom: 2px; }
-  .menu .ic.badge { font-size: 9px; font-weight: 700; letter-spacing: .2px; line-height: 14px; height: 14px; min-width: 18px; padding: 0 3px; border-radius: 3px; text-align: center; background: color-mix(in srgb, var(--badge, #8b949e) 22%, transparent); color: var(--badge, #8b949e); flex: 0 0 auto; }
-  .menu .ic.slash { width: 16px; text-align: center; color: var(--amber); font-weight: 600; }
-  .menu .item.sel .lbl { color: var(--fg); }
-  .menu .item .ic { width: 16px; text-align: center; color: var(--text-secondary); }
-  .menu .item .lbl { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .menu .item .sub { color: var(--text-tertiary); font-size: var(--fs-xs); margin-left: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 200px; flex: 0 1 auto; }
-  .menu .item .lbl { flex: 0 0 auto; }
-  .menu .item.mode .lbl { flex: 0 0 auto; }
-  .menu .item .check { width: 14px; color: var(--fg); visibility: hidden; }
-  .menu .item.on .check { visibility: visible; }
-  .menu .item .kbd { color: var(--text-tertiary); font-size: var(--fs-xs); }
-  .menu .item.mode { align-items: flex-start; padding: 6px 10px; }
-  .menu .item .two { flex: 1; display: flex; flex-direction: column; min-width: 0; }
-  .menu .item .desc { color: var(--text-tertiary); font-size: var(--fs-xs); line-height: 16px; white-space: normal; }
-  .menu.wide { min-width: 300px; max-width: 360px; }
-  .menu .sep { border-top: 1px solid var(--stroke-tertiary); margin: 4px 0; }
-  .menu .note { padding: 6px 10px; color: var(--text-tertiary); font-size: var(--fs-xs); }
-  #history { padding: 4px 10px 10px; gap: 6px; }
-  #hsearch { height: 30px; border: 1px solid var(--stroke-secondary); border-radius: var(--radius-lg); background: var(--vscode-input-background); color: var(--fg); padding: 0 10px; font: inherit; font-size: var(--fs-base); outline: none; }
-  #hlist { flex: 1; overflow: auto; display: flex; flex-direction: column; gap: 2px; }
-  .h { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: var(--radius-base); cursor: pointer; }
-  .h:hover { background: var(--bg-quaternary); }
-  .h .name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-base); }
-  .h .meta { color: var(--text-tertiary); font-size: var(--fs-xs); white-space: nowrap; }
-  .h .pin { color: var(--text-tertiary); width: 18px; text-align: center; visibility: hidden; }
-  .h .hacts { display: none; gap: 2px; margin-left: auto; } .h:hover .hacts { display: inline-flex; } .h .hb { width: 20px; height: 20px; display: inline-flex; align-items: center; justify-content: center; border-radius: 4px; color: var(--text-tertiary); cursor: pointer; } .h .hb:hover { color: var(--fg); background: var(--bg-tertiary); } .h .hb .cod { font-size: 12px; width: 12px; height: 12px; }
-  .h:hover .pin, .h.pinned .pin { visibility: visible; } .h.pinned .pin { color: var(--amber); }
-  .live { width: 6px; height: 6px; border-radius: 50%; background: var(--vscode-charts-green); display: inline-block; }
-  .hsec { color: var(--text-tertiary); font-size: var(--fs-xs); padding: 8px 8px 2px; text-transform: uppercase; letter-spacing: .3px; }
-  #board { padding: 4px 10px 10px; gap: 8px; }
-  #bcols { flex: 1; display: grid; grid-template-columns: repeat(4, minmax(140px, 1fr)); gap: 8px; overflow: auto; }
-  .col { border: 1px solid var(--stroke-tertiary); border-radius: var(--radius-lg); background: var(--bg-quinary); display: flex; flex-direction: column; min-height: 120px; }
-  .col .ct { padding: 6px 10px; font-size: var(--fs-xs); color: var(--text-tertiary); text-transform: uppercase; letter-spacing: .3px; display: flex; gap: 6px; }
-  .col .cards { padding: 0 6px 6px; display: flex; flex-direction: column; gap: 6px; }
-  .kcard { border: 1px solid var(--stroke-tertiary); border-radius: var(--radius-base); background: var(--vscode-editor-background); padding: 6px 8px; font-size: var(--fs-base); cursor: pointer; }
-  .kcard:hover { border-color: var(--stroke-primary); }
-  .kcard .sub { color: var(--text-tertiary); font-size: var(--fs-xs); display: flex; align-items: center; gap: 6px; margin-top: 2px; }
-  .kcard .acts { display: none; gap: 4px; margin-top: 6px; } .kcard:hover .acts { display: flex; }
-  .kcard .acts .btn { height: 20px; padding: 0 6px; font-size: var(--fs-xs); background: var(--bg-tertiary); }
-  #badd { height: 30px; border: 1px solid var(--stroke-secondary); border-radius: var(--radius-lg); background: var(--vscode-input-background); color: var(--fg); padding: 0 10px; font: inherit; font-size: var(--fs-base); outline: none; }
-</style></head>
-<body data-view="chat">
-  <div id="tabs"></div>
-  <div class="view" id="chat">
-    <div id="messages"></div>
-    <div id="redo"><button title="Restore edits to the latest checkpoint"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M20 8v5h-5"/><path d="M19 13a8 8 0 1 1-2.3-5.7L20 10"/></svg><span>Redo checkpoint</span></button></div>
-    <div id="review"><div class="head" id="review-head"><span class="chev">▶</span><span id="review-summary">1 file</span><span class="adds" id="review-adds">+0</span><span class="dels" id="review-dels">−0</span><span class="spacer"></span><button class="btn text" id="review-open" title="Review Changes editor">Review</button><button class="btn text" id="review-reject">Reject</button><button class="btn primary" id="review-accept">Accept</button></div><div class="files" id="review-files"></div></div>
-    <div id="status"><span>Generating..</span><span class="stop" id="stop">Stop<kbd>⇧⌘⌫</kbd></span></div>
-    <div id="composer">
-      <div class="ctxrow" id="ctxrow"><span class="ctx add" id="ctx-add" title="Add context (@)"><span class="cod"></span>Add Context</span></div>
-      <div class="inputwrap"><div id="backdrop"></div><textarea id="input" placeholder="Plan, search, build anything" rows="1"></textarea></div>
-      <div class="bar">
-        <span class="pill mode" id="mode-pill"><span id="mode-icon">∞</span><span class="lbl" id="mode-name">Agent</span><span class="chev">▼</span></span>
-        <span class="pill access" id="access-pill" title="Access"><span class="lbl" id="access-name">…</span><span class="chev">▼</span></span>
-        <span class="pill model" id="model-pill" title="Model"><span class="lbl" id="model-name">…</span><span class="chev">▼</span></span>
-        <span class="spacer"></span>
-        <span class="icon" title="Attach image" id="attach"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 12.5l-8.5 8.5a6 6 0 0 1-8.5-8.5l9-9a4 4 0 0 1 5.7 5.7l-9 9a2 2 0 0 1-2.8-2.8l8.3-8.3"/></svg></span>
-        <span class="icon" title="Dictate"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="9" y="3" width="6" height="12" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg></span>
-        <span class="send" id="send"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" width="14" height="14"><path d="M12 19V5M5 12l7-7 7 7"/></svg></span>
-      </div>
-      <div class="menu" id="menu"></div>
-    </div>
-  </div>
-  <div class="view" id="browserpane">
-    <div class="bbar"><button class="bbtn" data-act="back" title="Back">←</button><button class="bbtn" data-act="forward" title="Forward">→</button><button class="bbtn" data-act="reload" title="Reload ⌘R">⟳</button><input id="burl" placeholder="Enter a URL"><button class="bbtn" id="bpick" data-act="pick" title="Select an element for the chat">⌖</button><button class="bbtn" data-act="screenshot" title="Screenshot to chat">⧉</button><button class="bbtn" id="bstar" title="Bookmark">☆</button><button class="bbtn" id="bdevtools" title="DevTools">⚙</button></div>
-    <div class="bbookmarks" id="bbookmarks"></div>
-    <div class="bcert" id="bcert" hidden><span class="msg"></span><button class="btn text">Proceed anyway</button></div>
-    <div id="bhost"></div>
-    <div class="bsections"><div class="bstabs"><span class="bstab on" data-sec="console">Console <span id="bconsole-count" class="cnt"></span></span><span class="bstab" data-sec="selected">Selected</span><span class="bstab" data-sec="page">Page</span><span class="bstab" data-sec="changes">Changes <span id="bchanges-count" class="cnt"></span></span><span class="bdriving" id="bdriving" hidden><span class="dot"></span>Agent is browsing<button class="btn text" id="btake">Take control</button></span><span class="spacer"></span><button class="btn text" id="bclear">Clear</button><button class="btn primary" id="btochat">Add to chat</button></div><div class="bsbody" id="bsbody"></div></div>
-  </div>
-  <div class="view" id="history"><input id="hsearch" placeholder="Search threads"><div id="hlist"></div></div>
-  <div class="view" id="board"><input id="badd" placeholder="Add a task to the board and press Enter"><div id="bcols"></div></div>
-<script>const vscode = acquireVsCodeApi(); vscode.postMessage({ type: "boot" }); window.addEventListener("error", (e) => vscode.postMessage({ type: "clientError", message: String(e.message) + " @" + e.lineno + ":" + e.colno }));</script>
-<script>
-  window.addEventListener("error", (e) => vscode.postMessage({ type: "clientError", message: String(e.message) + " @" + e.lineno + ":" + e.colno }));
-  window.addEventListener("unhandledrejection", (e) => vscode.postMessage({ type: "clientError", message: "unhandled: " + String(e.reason) }));
-  const $ = (id) => document.getElementById(id);
-  const messages = $("messages"), input = $("input"), body = document.body, menu = $("menu");
-  let assistantEl = null, thinkingEl = null, planEl = null, state = null, threads = [];
-  const escape = (s) => String(s).replace(/[&<>"]/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
-  const ICONS = {
-    plus: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>',
-    history: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5M12 7v5l3 3"/></svg>',
-    board: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="5" height="16" rx="1"/><rect x="10" y="4" width="5" height="10" rx="1"/><rect x="17" y="4" width="4" height="13" rx="1"/></svg>',
-    globe: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></svg>',
-    more: '<svg viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg>',
-    max: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 9V4h5M20 15v5h-5M20 9V4h-5M4 15v5h5"/></svg>',
-  };
-  // File references become links: \`path.ts\`, \`src/a.ts:12\`, \`a.ts:12-20\`, bare paths with a slash, and Codex citations 【F:path†L12-L20】.
-  const PATH_RE = /^((?:[\\w.@-]+\\/)*[\\w.@-]+\\.[a-zA-Z0-9]{1,8})(?::(\\d+)(?:-(\\d+))?)?$/;
-  function fileLink(path, line, endLine, label) { return '<a class="file" data-path="' + escape(path) + '"' + (line ? ' data-line="' + line + '"' : "") + (endLine ? ' data-end="' + endLine + '"' : "") + ' title="' + escape(path) + (line ? ":" + line : "") + '">' + label + '</a>'; }
-  function inline(t) {
-    return escape(t)
-      .replace(/\\u3010F:([^\\u2020\\u3011]+)\\u2020L(\\d+)(?:-L(\\d+))?\\u3011/g, (m, p, l1, l2) => fileLink(p, l1, l2, '<span class="cite">' + cod("file") + escape(p.split("/").pop()) + ":" + l1 + (l2 ? "-" + l2 : "") + "</span>"))
-      .replace(/\`([^\`\\n]+)\`/g, (m, c) => { const f = PATH_RE.exec(c); return f && (c.includes("/") || f[2] || /\\.[a-z]{1,5}$/.test(c)) ? fileLink(f[1], f[2], f[3], "<code>" + c + "</code>") : "<code>" + c + "</code>"; })
-      .replace(/(^|[\\s(])((?:[\\w.@-]+\\/)+[\\w.@-]+\\.[a-zA-Z0-9]{1,8}(?::\\d+(?:-\\d+)?)?)(?=$|[\\s,.;:)])/g, (m, pre, ref) => { const f = PATH_RE.exec(ref); return f ? pre + fileLink(f[1], f[2], f[3], ref) : m; })
-      .replace(/\\*\\*([^*\\n]+)\\*\\*/g, "<b>$1</b>")
-      .replace(/(^|[^*])\\*([^*\\n]+)\\*(?!\\*)/g, "$1<i>$2</i>")
-      .replace(/\\[([^\\]]+)\\]\\((https?:[^)\\s]+)\\)/g, '<a href="$2">$1</a>');
-  }
-  function renderMarkdown(text) {
-    const lines = text.split("\\n"); let html = "", i = 0, para = [];
-    const flushP = () => { if (para.length) html += "<p>" + inline(para.join(" ")) + "</p>"; para = []; };
-    while (i < lines.length) {
-      const l = lines[i];
-      const fence = /^\`\`\`\\s*([\\w+#.-]*)(?:[:\\s]+([^\\s\`]+))?\\s*$/.exec(l);
-      if (fence) { flushP(); const lang = fence[1]; const path = fence[2] && /[\\w.-]+\\.[a-zA-Z0-9]{1,8}$/.test(fence[2]) ? fence[2] : ""; const code = []; i++; while (i < lines.length && !/^\`\`\`\\s*$/.test(lines[i])) code.push(lines[i++]); i++;
-        html += '<div class="code"' + (path ? ' data-path="' + escape(path) + '"' : "") + ' data-lang="' + escape(lang) + '"><div class="head">' + (path ? fileLink(path, "", "", '<span class="path">' + escape(path) + "</span>") : '<span>' + escape(lang || "code") + '</span>') + '<span class="spacer"></span><button class="copy" data-copy>Copy</button>' + (path ? '<button class="apply" data-apply>Apply</button>' : '<button class="apply" data-insert>Insert</button>') + '</div><pre>' + escape(code.join("\\n")) + "</pre></div>"; continue; }
-      const h = /^(#{1,3})\\s+(.*)$/.exec(l);
-      if (h) { flushP(); html += "<h" + h[1].length + ">" + inline(h[2]) + "</h" + h[1].length + ">"; i++; continue; }
-      if (/^\\s*([-*]|\\d+\\.)\\s+/.test(l)) { flushP(); const ordered = /^\\s*\\d+\\./.test(l); const items = []; while (i < lines.length && /^\\s*([-*]|\\d+\\.)\\s+/.test(lines[i])) items.push(lines[i++].replace(/^\\s*([-*]|\\d+\\.)\\s+/, ""));
-        html += (ordered ? "<ol>" : "<ul>") + items.map((t) => { const task = /^\\[( |x|X)\\]\\s*/.exec(t); return '<li' + (task ? ' class="task' + (task[1] !== " " ? " done" : "") + '"' : "") + ">" + (task ? cod(task[1] !== " " ? "pass-filled" : "circle-large") : "") + inline(task ? t.slice(task[0].length) : t) + "</li>"; }).join("") + (ordered ? "</ol>" : "</ul>"); continue; }
-      if (/^\\s*>/.test(l)) { flushP(); const q = []; while (i < lines.length && /^\\s*>/.test(lines[i])) q.push(lines[i++].replace(/^\\s*>\\s?/, "")); html += "<blockquote>" + inline(q.join(" ")) + "</blockquote>"; continue; }
-      if (/^\\s*\\|/.test(l) && /^\\s*\\|/.test(lines[i + 1] || "")) { flushP(); const rows = []; while (i < lines.length && /^\\s*\\|/.test(lines[i])) rows.push(lines[i++]);
-        const cells = (r) => r.trim().replace(/^\\||\\|$/g, "").split("|").map((c) => c.trim()); const head = cells(rows[0]); const bodyRows = rows.slice(1).filter((r) => !/^\\s*\\|?\\s*:?-+/.test(r));
-        html += "<table><tr>" + head.map((c) => "<th>" + inline(c) + "</th>").join("") + "</tr>" + bodyRows.map((r) => "<tr>" + cells(r).map((c) => "<td>" + inline(c) + "</td>").join("") + "</tr>").join("") + "</table>"; continue; }
-      if (/^\\s*(-{3,}|\\*{3,})\\s*$/.test(l)) { flushP(); html += "<hr>"; i++; continue; }
-      if (!l.trim()) { flushP(); i++; continue; }
-      para.push(l); i++;
-    }
-    flushP(); return html;
-  }
-  messages.addEventListener("click", (e) => {
-    const b = e.target.closest("[data-copy]"); if (b) { navigator.clipboard.writeText(b.parentElement.nextElementSibling.textContent); b.textContent = "Copied"; setTimeout(() => (b.textContent = "Copy"), 1200); return; }
-    const ap = e.target.closest("[data-apply]"); if (ap) { const block = ap.closest(".code"); vscode.postMessage({ type: "applyBlock", path: block.dataset.path, lang: block.dataset.lang, code: block.querySelector("pre").textContent }); ap.textContent = "Applying…"; return; }
-    const ins = e.target.closest("[data-insert]"); if (ins) { const block = ins.closest(".code"); vscode.postMessage({ type: "insertBlock", code: block.querySelector("pre").textContent }); return; }
-    const f = e.target.closest("a.file"); if (f) { e.preventDefault(); vscode.postMessage({ type: "openPath", path: f.dataset.path, line: f.dataset.line ? Number(f.dataset.line) : undefined, endLine: f.dataset.end ? Number(f.dataset.end) : undefined }); }
-  });
-  function scroll() { messages.scrollTop = messages.scrollHeight; }
-  function buildHuman(text, checkpoint, steer) {
-    const el = document.createElement("div"); el.className = "human" + (steer ? " steer" : "");
-    const span = document.createElement("span"); span.className = "txt"; span.textContent = text; el.appendChild(span);
-    if (checkpoint) {
-      // Cursor: hover a sent message → Edit (restores the checkpoint, resends) / Restore checkpoint.
-      const tools = document.createElement("div"); tools.className = "tools";
-      const edit = document.createElement("button"); edit.title = "Edit and resend — the files go back to this point"; edit.innerHTML = cod("edit") + "<span>Edit</span>";
-      edit.addEventListener("click", (e) => { e.stopPropagation(); startEdit(el, text, checkpoint, steer); });
-      const restore = document.createElement("button"); restore.title = "Revert the files to this point and forget everything after this message"; restore.innerHTML = cod("history") + "<span>Restore checkpoint</span>";
-      restore.addEventListener("click", (e) => { e.stopPropagation(); vscode.postMessage({ type: "restore", id: checkpoint }); });
-      tools.append(edit, restore); el.appendChild(tools);
-      span.addEventListener("dblclick", () => startEdit(el, text, checkpoint, steer));
-    }
-    return el;
-  }
-  function startEdit(el, text, checkpoint, steer) {
-    if (el.classList.contains("editing")) return;
-    el.classList.add("editing"); el.classList.remove("clipped"); el.innerHTML = "";
-    const ta = document.createElement("textarea"); ta.className = "edit"; ta.value = text;
-    const bar = document.createElement("div"); bar.className = "editbar"; bar.innerHTML = '<span>⏎ resend · esc cancel · the workspace goes back to this point</span>';
-    el.append(ta, bar); ta.focus(); ta.setSelectionRange(text.length, text.length);
-    ta.addEventListener("keydown", (e) => { e.stopPropagation(); if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); vscode.postMessage({ type: "editMessage", checkpoint, text: ta.value }); } else if (e.key === "Escape") { el.replaceWith(buildHuman(text, checkpoint, steer)); } });
-  }
-  function addHuman(text, checkpoint, steer) { const el = buildHuman(text, checkpoint, steer); messages.appendChild(el); if (el.scrollHeight > 120) el.classList.add("clipped"); body.classList.add("has-messages"); scroll(); }
-  function renderQueue(list) { const q = $("queue"); if (!q) return; q.innerHTML = ""; q.classList.toggle("has", list.length > 0); list.forEach((t, i) => { const row = document.createElement("div"); row.className = "q"; row.innerHTML = '<span class="lbl">Queued</span><span class="txt"></span><span class="x" title="Remove">×</span>'; row.querySelector(".txt").textContent = t; row.querySelector(".x").addEventListener("click", () => vscode.postMessage({ type: "dropQueued", index: i })); q.appendChild(row); }); }
-  function addAssistant(text) { const el = document.createElement("div"); el.className = "assistant"; el.dataset.raw = text; el.innerHTML = renderMarkdown(text); messages.appendChild(el); body.classList.add("has-messages"); return el; }
-  function ensureAssistant() { if (!assistantEl) assistantEl = addAssistant(""); return assistantEl; }
-  function ensureThinking() { if (!thinkingEl) { thinkingEl = document.createElement("details"); thinkingEl.className = "thinking"; thinkingEl.innerHTML = "<summary>Thinking</summary><div class=body></div>"; messages.appendChild(thinkingEl); } return thinkingEl; }
-  // Cursor's tool rows: "Running…" while live, then "Ran" (exit 0) / "Exit 1" / "Skipped", duration, output on click.
-  function toolEl(tool) {
-    let el = document.getElementById("tool-" + tool.id);
-    if (!el) { el = document.createElement("div"); el.className = "card tool" + (tool.tool ? " " + tool.tool : ""); el.id = "tool-" + tool.id; el.innerHTML = '<div class="head"><span class="ic"></span><span class="t"></span><span class="cmd"></span><span class="status"></span></div><pre></pre>'; el.querySelector(".head").addEventListener("click", () => el.classList.toggle("open")); el.querySelector(".ic").innerHTML = cod(tool.tool === "command" ? "terminal" : tool.tool === "search" ? "globe" : "plug"); messages.appendChild(el); body.classList.add("has-messages"); }
-    const running = tool.status === "running" || tool.status === "inProgress";
-    const failed = tool.status === "failed" || (typeof tool.exitCode === "number" && tool.exitCode !== 0);
-    const title = tool.tool === "command" ? (running ? "Running" : tool.status === "declined" ? "Skipped" : failed ? "Failed" : "Ran") : tool.tool === "search" ? (running ? "Searching" : "Searched") : (running ? "Calling" : "Called");
-    const dur = typeof tool.durationMs === "number" ? (tool.durationMs >= 1000 ? (tool.durationMs / 1000).toFixed(1) + "s" : tool.durationMs + "ms") : "";
-    el.classList.toggle("running", running); el.classList.toggle("failed", failed);
-    el.querySelector(".t").textContent = title; el.querySelector(".cmd").textContent = tool.detail; el.querySelector(".cmd").title = (tool.cwd ? tool.cwd + " $ " : "") + tool.detail;
-    el.querySelector(".status").textContent = running ? "…" : [typeof tool.exitCode === "number" && tool.exitCode !== 0 ? "exit " + tool.exitCode : "", dur].filter(Boolean).join(" · ");
-    el.querySelector("pre").textContent = tool.output; if (failed && tool.output) el.classList.add("open"); scroll();
-  }
-  // Approval cards (Cursor: the pending shell tool decision — ⏎ Run, ⇧⏎ Run and allow for session, Esc Skip).
-  const approvals = new Map();
-  function approvalEl(a) {
-    const el = document.createElement("div"); el.className = "card approval " + a.kind; el.id = "approval-" + a.id;
-    const head = a.kind === "command" ? "Run command" : a.kind === "patch" ? "Apply changes" : "Permission request";
-    el.innerHTML = '<div class="head"><span class="ic"></span><span class="t"></span><span class="hint">waiting for you</span></div><pre class="what"></pre><div class="meta"></div><div class="actions"><button class="btn primary run"></button><button class="btn text session"></button><button class="btn text skip"></button></div>';
-    el.querySelector(".ic").innerHTML = cod(a.kind === "command" ? "terminal" : a.kind === "patch" ? "file-code" : "plug"); el.querySelector(".t").textContent = head;
-    el.querySelector(".what").textContent = a.kind === "patch" && a.files && a.files.length ? a.files.join("\\n") : a.command;
-    el.querySelector(".meta").textContent = [a.cwd ? "in " + a.cwd : "", a.reason || ""].filter(Boolean).join(" · ");
-    el.querySelector(".run").innerHTML = (a.kind === "command" ? "Run" : a.kind === "patch" ? "Apply" : "Allow") + '<kbd>⏎</kbd>';
-    el.querySelector(".session").innerHTML = 'Allow for session<kbd>⇧⏎</kbd>'; if (a.kind === "elicitation") el.querySelector(".session").remove();
-    el.querySelector(".skip").innerHTML = (a.kind === "elicitation" ? "Decline" : "Skip") + '<kbd>esc</kbd>';
-    el.querySelector(".run").addEventListener("click", () => decide(a.id, "accept")); const ses = el.querySelector(".session"); if (ses) ses.addEventListener("click", () => decide(a.id, "acceptForSession")); el.querySelector(".skip").addEventListener("click", () => decide(a.id, "decline"));
-    approvals.set(a.id, el); messages.appendChild(el); body.classList.add("has-messages"); body.classList.add("pending"); scroll();
-  }
-  function decide(id, decision) { if (!approvals.has(id)) return; vscode.postMessage({ type: "decide", id, decision }); }
-  function approvalDone(id, decision) {
-    const el = approvals.get(id); approvals.delete(id); if (!approvals.size) body.classList.remove("pending"); if (!el) return;
-    el.classList.add("decided"); el.querySelector(".actions").remove(); el.querySelector(".hint").textContent = decision === "decline" ? "skipped" : decision === "acceptForSession" ? "allowed for the session" : "approved";
-  }
-  function firstApproval() { return approvals.size ? [...approvals.keys()][0] : null; }
-  let planSel = new Set(), planExpanded = false, planModel = null, planCardData = null;
-  function buildPlan(newThread) {
-    if (!planCardData) return;
-    const todos = [...planSel].sort((a, b) => a - b);
-    vscode.postMessage({ type: "buildPlan", todos: todos.length ? todos : undefined, model: planModel || undefined, newThread: !!newThread });
-  }
-  function planCard(card) {
-    if (!planEl) { planEl = document.createElement("div"); planEl.className = "card plan"; messages.appendChild(planEl); body.classList.add("has-messages"); planSel = new Set(); planExpanded = false; planModel = card.modelId || (state && state.settings.modelId) || null; }
-    planCardData = card;
-    if (!planModel) planModel = card.modelId || (state && state.settings.modelId) || null;
-    const shown = planExpanded ? card.todos : card.todos.slice(0, 3), more = card.todos.length - shown.length;
-    const modelName = (state && (state.models.find((m) => m.id === planModel) || {}).name) || card.model || "Model";
-    const sel = planSel.size;
-    planEl.innerHTML = '<div class="file"><span class="icon">☰</span><span class="name">' + escape(card.path ? card.path.split("/").pop() : "plan.md") + '</span>' + (card.model ? '<span class="planned">Planned with ' + escape(card.model) + '</span>' : "") + '</div><h3>' + escape(card.title) + '</h3>' + (card.summary ? '<div class="summary">' + escape(card.summary) + '</div>' : "") +
-      (card.todos.length ? '<div class="todos"><div class="t"><span>' + card.todos.length + ' To-dos' + (sel ? ' · ' + sel + ' selected' : '') + '</span><span class="all" id="plan-all">' + (sel === card.todos.length ? "Clear" : "Select all") + '</span></div>' + shown.map((t, i) => '<div class="todo' + (t.done ? " done" : "") + (planSel.has(i) ? " sel" : "") + '" data-i="' + i + '"><span class="o">' + (planSel.has(i) ? "✓" : "") + '</span><span>' + escape(t.text) + '</span></div>').join("") + (more > 0 ? '<div class="more" id="plan-more">··· ' + more + ' more</div>' : "") + '</div>' : "") +
-      '<div class="foot"><button class="viewplan" id="plan-view">View Plan</button><span class="spacer"></span><span class="modelpick" id="plan-model" title="Model used to build this plan">' + escape(modelName) + ' <span class="chev">▼</span></span><span class="split"><button class="btn amber" id="plan-build">Build' + (sel && sel < card.todos.length ? " " + sel : "") + ' <kbd>⌘⏎</kbd></button><span class="chev" id="plan-build-more">▼</span></span></div>';
-    planEl.querySelector("#plan-view").addEventListener("click", () => vscode.postMessage({ type: "viewPlan" }));
-    planEl.querySelector("#plan-build").addEventListener("click", () => buildPlan(false));
-    planEl.querySelector("#plan-build-more").addEventListener("click", (e) => { e.stopPropagation(); openPlanBuildMenu(e.currentTarget); });
-    planEl.querySelector("#plan-model").addEventListener("click", (e) => { e.stopPropagation(); openPlanModelMenu(e.currentTarget); });
-    const all = planEl.querySelector("#plan-all"); if (all) all.addEventListener("click", () => { if (planSel.size === card.todos.length) planSel = new Set(); else planSel = new Set(card.todos.map((_, i) => i)); planCard(card); });
-    const moreEl = planEl.querySelector("#plan-more"); if (moreEl) moreEl.addEventListener("click", () => { planExpanded = true; planCard(card); });
-    planEl.querySelectorAll(".todo").forEach((el) => el.addEventListener("click", () => { const i = Number(el.dataset.i); if (planSel.has(i)) planSel.delete(i); else planSel.add(i); planCard(card); }));
-    scroll();
-  }
-  function openPlanModelMenu(anchor) {
-    menu.dataset.kind = "planmodel"; menu.innerHTML = ""; const add = (html) => menu.insertAdjacentHTML("beforeend", html);
-    for (const [prov, title] of [["codex", "Codex"], ["claude", "Claude Code"]]) { const ms = (state ? state.models : []).filter((m) => m.provider === prov); if (!ms.length) continue; add('<div class="group">' + title + '</div>'); for (const m of ms) add('<div class="item' + (m.id === planModel ? " on" : "") + '" data-id="' + escape(m.id) + '"><span class="lbl">' + escape(m.name) + '</span><span class="check">✓</span></div>'); }
-    menu.querySelectorAll(".item").forEach((el) => el.addEventListener("click", () => { planModel = el.dataset.id; closeMenu(); if (planCardData) planCard(planCardData); }));
-    menu.classList.remove("wide"); menu.classList.add("open"); placeMenu(anchor);
-  }
-  function openPlanBuildMenu(anchor) {
-    menu.dataset.kind = "planbuild"; menu.innerHTML = '<div class="item" data-act="here"><span class="lbl">Build in this thread</span><span class="kbd">⌘⏎</span></div><div class="item" data-act="new"><span class="lbl">Build in a new agent thread</span></div>';
-    menu.querySelectorAll(".item").forEach((el) => el.addEventListener("click", () => { closeMenu(); buildPlan(el.dataset.act === "new"); }));
-    menu.classList.remove("wide"); menu.classList.add("open"); placeMenu(anchor);
-  }
-  function editCard(card) {
-    const id = "edit-" + card.path.replace(/[^a-z0-9]/gi, "_"); let wrap = document.getElementById(id);
-    if (!wrap) {
-      wrap = document.createElement("div"); wrap.className = "card editwrap"; wrap.id = id;
-      const head = document.createElement("div"); head.className = "edit"; const diff = document.createElement("pre"); diff.className = "diff";
-      head.addEventListener("click", () => { if (wrap.dataset.hasDiff === "1") wrap.classList.toggle("open"); vscode.postMessage({ type: "open", path: card.path, ifClosed: true }); });
-      wrap.append(head, diff); messages.appendChild(wrap); body.classList.add("has-messages");
-    }
-    const labels = { streaming: "Editing…", written: "Review", kept: "Accepted", undone: "Rejected" };
-    wrap.querySelector(".edit").innerHTML = '<span class="path">' + escape(card.path) + '</span><span class="adds">+' + card.adds + '</span><span class="dels">−' + card.dels + '</span><span class="state">' + labels[card.status] + ((card.diff || wrap.dataset.lastDiff) ? " ▾" : "") + '</span>';
-    const pre = wrap.querySelector(".diff"); if (card.diff) wrap.dataset.lastDiff = card.diff; const diffText = card.diff || wrap.dataset.lastDiff || ""; wrap.dataset.hasDiff = diffText ? "1" : "0";
-    pre.innerHTML = diffText ? diffText.split("\\n").map((l) => '<span class="' + (l[0] === "+" ? "a" : l[0] === "-" ? "d" : "h") + '">' + escape(l) + '</span>').join("") : "";
-    if (card.status === "streaming" && card.diff) wrap.classList.add("open");
-    scroll();
-  }
-  function renderMessages(list) {
-    messages.innerHTML = ""; assistantEl = thinkingEl = planEl = null; body.classList.toggle("has-messages", list.length > 0);
-    for (const m of list) {
-      if (m.kind === "user") addHuman(m.text, m.checkpoint, m.steer);
-      else if (m.kind === "assistant") { if (m.reasoning) { const d = document.createElement("details"); d.className = "thinking"; d.innerHTML = "<summary>Thought</summary><div class=body>" + escape(m.reasoning) + "</div>"; messages.appendChild(d); } addAssistant(m.text); }
-      else if (m.kind === "tool") toolEl(m);
-      else if (m.kind === "plan") { planEl = null; planSel = new Set(); planExpanded = false; planModel = null; planCard(m.card); }
-    }
-    scroll();
-  }
-  function renderTabs() {
-    const t = $("tabs"); t.innerHTML = "";
-    for (const tab of state.tabs) {
-      const el = document.createElement("div"); el.className = "tab" + (tab.id === state.activeId ? " active" : ""); el.title = tab.name;
-      el.innerHTML = (tab.running ? '<span class="dot"></span>' : "") + '<span class="name">' + escape(tab.name) + '</span><span class="x" title="Close">×</span>';
-      el.addEventListener("click", (e) => { if (e.target.classList.contains("x")) vscode.postMessage({ type: "closeTab", id: tab.id }); else vscode.postMessage({ type: "activateTab", id: tab.id }); });
-      t.appendChild(el);
-    }
-    const mk = (icon, title, on, fn) => { const b = document.createElement("button"); b.className = "tabbtn" + (on ? " on" : ""); b.title = title; b.innerHTML = icon; b.addEventListener("click", fn); return b; };
-    t.appendChild(mk(ICONS.plus, "New Agent ⇧⌘L", false, () => vscode.postMessage({ type: "newAgent" })));
-    t.appendChild(mk(ICONS.globe, "Open Browser ⇧⌘B", false, () => vscode.postMessage({ type: "newBrowser" })));
-    const sp = document.createElement("span"); sp.className = "spacer"; t.appendChild(sp);
-    t.appendChild(mk(ICONS.history, "History", state.view === "history", () => vscode.postMessage({ type: "view", view: state.view === "history" ? "chat" : "history" })));
-    if (state.view === "board") t.appendChild(mk(ICONS.board, "Board", true, () => vscode.postMessage({ type: "view", view: "chat" })));
-    t.appendChild(mk(ICONS.more, "More", false, () => vscode.postMessage({ type: "command", id: "muster.agent.more" })));
-    t.appendChild(mk(ICONS.max, "Maximize Chat ⌥⌘E", false, () => vscode.postMessage({ type: "command", id: "muster.agent.maximize" })));
-  }
-  function effortLabel(id) { return ({ low: "Low", medium: "Medium", high: "High", xhigh: "Extra High", max: "Max", ultra: "Ultra" })[id] || id; }
-  function renderState() {
-    body.dataset.view = state.view; renderTabs();
-    const mode = state.modes.find((m) => m.id === state.settings.mode) || state.modes[0];
-    $("mode-icon").textContent = mode.icon; $("mode-name").textContent = mode.name; $("mode-pill").classList.toggle("plan", mode.id === "plan" || mode.id === "spec"); body.classList.toggle("stage", mode.id === "debug" && mode.placeholder !== "Enter additional context about the issue");
-    input.placeholder = planEl && mode.id === "spec" ? "Spin up a new thread with this plan as context" : (body.classList.contains("has-messages") && mode.id === "plan" ? "Steer the plan, or add more details" : mode.placeholder);
-    const access = state.access.find((a) => a.id === state.settings.accessId); $("access-name").textContent = access ? access.label : (state.loading ? "…" : "Access");
-    const model = state.models.find((m) => m.id === state.settings.modelId);
-    const effort = model && model.efforts.find((e) => e.id === state.settings.effortId);
-    $("model-name").textContent = model ? model.name + (effort ? " " + effortLabel(effort.id) : "") : (state.loading ? "Loading models…" : "Choose model");
-    body.classList.toggle("running", !!state.tabs.find((t) => t.id === state.activeId && t.running));
-    body.classList.toggle("can-redo", state.canRedo);
-  }
-  function placeMenu(anchor) {
-    // Adaptive: below the pill when there is room, else above; clamped to the pane.
-    const a = anchor.getBoundingClientRect(), vw = window.innerWidth, vh = window.innerHeight;
-    menu.style.maxHeight = Math.max(120, Math.max(vh - a.bottom - 12, a.top - 12)) + "px";
-    const w = menu.offsetWidth, h = menu.offsetHeight;
-    const below = vh - a.bottom - 8, above = a.top - 8;
-    const top = (h <= below || below >= above) ? Math.min(a.bottom + 4, vh - h - 4) : Math.max(4, a.top - h - 4);
-    const left = Math.max(6, Math.min(a.left, vw - w - 6));
-    menu.style.top = top + "px"; menu.style.left = left + "px";
-  }
-  let menuAnchor = null;
-  function openMenu(kind, anchor) {
-    if (menu.dataset.kind === kind && menu.classList.contains("open")) { closeMenu(); return; }
-    menuAnchor = anchor;
-    menu.dataset.kind = kind; menu.innerHTML = ""; const add = (html) => menu.insertAdjacentHTML("beforeend", html);
-    if (kind === "mode") {
-      for (const m of state.modes) add('<div class="item mode' + (m.id === state.settings.mode ? " on" : "") + '" data-id="' + escape(m.id) + '"><span class="ic">' + escape(m.icon) + '</span><span class="two"><span class="lbl">' + escape(m.name) + '</span><span class="desc">' + escape(m.description || "") + '</span></span><span class="check">✓</span></div>');
-      add('<div class="sep"></div><div class="note">⌘. or ⇧Tab opens this menu · custom modes: settings → muster.modes</div>');
-      menu.querySelectorAll(".item").forEach((el) => el.addEventListener("click", () => { vscode.postMessage({ type: "setMode", id: el.dataset.id }); closeMenu(); }));
-    } else if (kind === "access") {
-      if (!state.access.length) add('<div class="note">' + (state.loading ? "Loading access modes from Codex…" : "No access modes reported by Codex (permissionProfile/list)") + '</div>');
-      for (const a of state.access) add('<div class="item' + (a.id === state.settings.accessId ? " on" : "") + '" data-id="' + escape(a.id) + '"><span class="lbl">' + escape(a.label) + '</span><span class="sub">' + escape(a.sandbox) + ' · ' + escape(a.approvalPolicy) + '</span><span class="check">✓</span></div>');
-      menu.querySelectorAll(".item").forEach((el) => el.addEventListener("click", () => { vscode.postMessage({ type: "setAccess", id: el.dataset.id }); closeMenu(); }));
-    } else if (kind === "model") {
-      if (!state.models.length) add('<div class="note">' + (state.loading ? "Loading models from Codex…" : "No models reported (model/list). Is Codex signed in?") + '</div>');
-      for (const [prov, title] of [["codex", "Codex · ChatGPT plan"], ["claude", "Claude Code · Claude subscription"]]) { const ms = state.models.filter((m) => m.provider === prov); if (!ms.length) continue; add('<div class="group">' + title + '</div>');
-        for (const m of ms) add('<div class="item' + (m.id === state.settings.modelId ? " on" : "") + '" data-id="' + escape(m.id) + '" title="' + escape(m.description) + '"><span class="lbl">' + escape(m.name) + '</span>' + (m.isDefault ? '<span class="sub">default</span>' : "") + '<span class="check">✓</span></div>'); }
-      const model = state.models.find((m) => m.id === state.settings.modelId);
-      if (model && model.efforts.length) { add('<div class="sep"></div><div class="group">Effort · ' + escape(model.name) + '</div>'); for (const e of model.efforts) add('<div class="item' + (e.id === state.settings.effortId ? " on" : "") + '" data-effort="' + escape(e.id) + '"><span class="lbl">' + effortLabel(e.id) + '</span><span class="sub">' + escape(e.description) + '</span><span class="check">✓</span></div>'); }
-      menu.querySelectorAll(".item[data-id]").forEach((el) => el.addEventListener("click", () => { vscode.postMessage({ type: "setModel", id: el.dataset.id }); setTimeout(() => { if (menuAnchor) { menu.classList.remove("open"); openMenu("model", menuAnchor); } }, 60); }));
-      menu.querySelectorAll(".item[data-effort]").forEach((el) => el.addEventListener("click", () => { vscode.postMessage({ type: "setEffort", id: el.dataset.effort }); closeMenu(); }));
-    }
-    menu.classList.toggle("wide", kind === "mode");
-    menu.classList.add("open");
-    placeMenu(anchor);
-  }
-  function closeMenu() { menu.classList.remove("open"); menu.classList.remove("typeahead"); menuAnchor = null; }
-  window.addEventListener("resize", () => { if (menuAnchor) placeMenu(menuAnchor); });
-  messages.addEventListener("scroll", closeMenu);
-  $("mode-pill").addEventListener("click", (e) => { e.stopPropagation(); openMenu("mode", e.currentTarget); });
-  $("access-pill").addEventListener("click", (e) => { e.stopPropagation(); openMenu("access", e.currentTarget); });
-  $("model-pill").addEventListener("click", (e) => { e.stopPropagation(); openMenu("model", e.currentTarget); });
-  document.addEventListener("click", (e) => { if (!menu.contains(e.target)) closeMenu(); });
-  document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape") closeMenu();
-    if ((e.metaKey || e.ctrlKey) && e.key === "." && state) { e.preventDefault(); const i = state.modes.findIndex((m) => m.id === state.settings.mode); vscode.postMessage({ type: "setMode", id: state.modes[(i + 1) % state.modes.length].id }); }
-    if ((e.metaKey || e.ctrlKey) && e.key === "Enter" && planEl && !body.classList.contains("running") && !input.value.trim()) buildPlan(false);
-  });
-  $("hsearch").addEventListener("input", renderHistory);
-  function renderHistory() {
-    const q = $("hsearch").value.toLowerCase(); const list = $("hlist"); list.innerHTML = "";
-    const items = threads.filter((t) => !q || (t.name + " " + t.project).toLowerCase().includes(q));
-    const section = (title, arr) => { if (!arr.length) return; list.insertAdjacentHTML("beforeend", '<div class="hsec">' + title + '</div>'); for (const t of arr) { const el = document.createElement("div"); el.className = "h" + (t.pinned ? " pinned" : ""); el.innerHTML = (t.live ? '<span class="live"></span>' : "") + '<span class="name">' + escape(t.name) + '</span><span class="meta">' + escape(t.project) + ' · ' + escape(t.age) + ' · ' + t.turns + ' turns</span><span class="hacts"><span class="hb" data-act="renameThread" title="Rename">' + cod("edit") + '</span><span class="hb" data-act="exportThread" title="Export as Markdown">' + cod("link") + '</span><span class="hb" data-act="archiveThread" title="Archive">' + cod("history") + '</span></span><span class="pin" title="Pin">★</span>'; el.querySelector(".pin").addEventListener("click", (e) => { e.stopPropagation(); vscode.postMessage({ type: "pin", id: t.id, pinned: !t.pinned }); }); el.querySelectorAll(".hb").forEach((b) => b.addEventListener("click", (e) => { e.stopPropagation(); vscode.postMessage({ type: b.dataset.act, id: t.id }); })); el.addEventListener("click", () => vscode.postMessage({ type: "openThread", id: t.id })); list.appendChild(el); } };
-    section("Pinned", items.filter((t) => t.pinned)); section("Threads", items.filter((t) => !t.pinned));
-  }
-  $("badd").addEventListener("keydown", (e) => { if (e.key === "Enter" && e.target.value.trim()) { vscode.postMessage({ type: "boardAdd", title: e.target.value.trim() }); e.target.value = ""; } });
-  function renderBoard(columns) {
-    const root = $("bcols"); root.innerHTML = "";
-    for (const c of columns) { const col = document.createElement("div"); col.className = "col"; col.innerHTML = '<div class="ct">' + escape(c.title) + '<span class="n">' + c.cards.length + '</span></div><div class="cards"></div>'; const cards = col.querySelector(".cards");
-      for (const k of c.cards) { const el = document.createElement("div"); el.className = "kcard"; el.innerHTML = '<div>' + escape(k.title) + '</div><div class="sub">' + (k.running ? '<span class="live"></span> running' : escape(k.subtitle)) + '</div><div class="acts"><button class="btn" data-run>' + (k.subtitle === "thread" ? "Open" : "Run") + '</button>' + (c.id !== "done" ? '<button class="btn" data-move="' + (c.id === "backlog" ? "progress" : c.id === "progress" ? "review" : "done") + '">→</button>' : "") + '</div>';
-        el.querySelector("[data-run]").addEventListener("click", (e) => { e.stopPropagation(); vscode.postMessage({ type: "boardRun", id: k.id }); }); const mv = el.querySelector("[data-move]"); if (mv) mv.addEventListener("click", (e) => { e.stopPropagation(); vscode.postMessage({ type: "boardMove", id: k.id, column: mv.dataset.move }); }); cards.appendChild(el); }
-      root.appendChild(col); }
-  }
-  $("review-head").addEventListener("click", (e) => { if (e.target.closest("button")) return; $("review").classList.toggle("open"); });
-  $("review-accept").addEventListener("click", () => vscode.postMessage({ type: "acceptAll" }));
-  $("review-open").addEventListener("click", () => vscode.postMessage({ type: "openReview" }));
-  $("review-reject").addEventListener("click", () => vscode.postMessage({ type: "rejectAll" }));
-  $("redo").querySelector("button").addEventListener("click", () => vscode.postMessage({ type: "redo" }));
-  function renderReview(files) {
-    body.classList.toggle("reviewing", files.length > 0); if (!files.length) return;
-    $("review-summary").textContent = files.length + (files.length === 1 ? " file" : " files"); $("review-adds").textContent = "+" + files.reduce((n, f) => n + f.adds, 0); $("review-dels").textContent = "−" + files.reduce((n, f) => n + f.dels, 0);
-    const list = $("review-files"); list.innerHTML = "";
-    for (const f of files) { const row = document.createElement("div"); row.className = "file"; const parts = f.path.split("/"); const name = parts.pop(); row.innerHTML = '<span class="name">' + escape(name) + '</span><span class="dir">' + escape(parts.join("/")) + '</span><span class="adds">+' + f.adds + '</span><span class="dels">−' + f.dels + '</span>'; row.addEventListener("click", () => vscode.postMessage({ type: "open", path: f.path })); list.appendChild(row); }
-  }
-  // Mentions light up like the Plan pill when they resolve; a chips row mirrors them with remove buttons (Cursor's context row).
-  const TOKEN = /(^|\\s)(@[\\w./:?=&%#+-]+|\\/[\\w-]+)/g;
-  let tokenOk = new Set(), tokenBad = new Set();
-  function tokensIn(text) { const out = []; let m; TOKEN.lastIndex = 0; while ((m = TOKEN.exec(text))) out.push(m[2]); return out; }
-  function renderTokens() {
-    const text = input.value;
-    // The token still being typed at the caret is not a mention yet (Cursor shows the pill once it is chosen).
-    const typing = triggerAt(); const typingEnd = typing ? input.selectionStart : -1;
-    let html = ""; let last = 0; TOKEN.lastIndex = 0; let m; const done = [];
-    while ((m = TOKEN.exec(text))) { const start = m.index + m[1].length; const end = start + m[2].length; if (end === typingEnd) continue; done.push(m[2]); html += escape(text.slice(last, start)) + '<mark class="' + (tokenBad.has(m[2]) ? "bad" : "") + '">' + escape(m[2]) + '</mark>'; last = end; }
-    html += escape(text.slice(last)) + "\\n";
-    $("backdrop").innerHTML = html; $("backdrop").scrollTop = input.scrollTop;
-    const row = $("ctxrow"); [...row.querySelectorAll(".ctx:not(.add)")].forEach((c) => c.remove());
-    const seen = new Set();
-    for (const t of done) {
-      if (seen.has(t)) continue; seen.add(t);
-      const chip = document.createElement("span"); chip.className = "ctx" + (tokenBad.has(t) ? " bad" : ""); chip.title = tokenBad.has(t) ? t + " (not found)" : t;
-      const body = t.slice(1); let icon, label;
-      if (t.startsWith("/")) { icon = cod("sparkle"); label = t; }
-      else if (body.startsWith("image:")) { icon = "🖼"; label = body.split("/").pop(); }
-      else if (body === "browser") { icon = cod("browser"); label = "Browser"; }
-      else if (body === "web") { icon = cod("globe"); label = "Web"; }
-      else if (body.startsWith("git:commit:")) { icon = cod("git-commit"); label = body.slice(11, 18); }
-      else if (body.startsWith("git:")) { icon = cod("git-branch"); label = body === "git:branch" ? "Branch" : "Working Tree"; }
-      else if (body.startsWith("terminal")) { icon = cod("terminal"); label = body.includes(":") ? body.slice(9) : "Terminal"; }
-      else if (body.startsWith("docs:")) { icon = cod("book"); label = body.slice(5); }
-      else if (body.startsWith("link:") || /^https?:\\/\\//.test(body)) { icon = cod("link"); label = body.replace(/^link:/, "").replace(/^https?:\\/\\//, "").slice(0, 40); }
-      else if (body.startsWith("code:") || body.startsWith("symbol:")) { icon = cod("symbol-method"); label = body.slice(body.indexOf(":") + 1); }
-      else if (body === "rules" || body.startsWith("rule:")) { icon = cod("note"); label = body === "rules" ? "Rules" : body.slice(5); }
-      else if (body === "git:pr") { icon = cod("git-pull-request"); label = "Pull Request"; }
-      else if (body.startsWith("folder:") || body.endsWith("/")) { icon = cod("folder"); label = body.replace(/^folder:/, "").replace(/\\/$/, "").split("/").pop() || body; }
-      else if (body.startsWith("chat:")) { icon = cod("comment-discussion"); label = "Past chat"; }
-      else { const name = body.replace(/:\\d+-\\d+$/, "").split("/").pop() || body; icon = name.includes(".") ? badge(name.split(".").pop()) : cod("folder"); label = name + (/:\\d+-\\d+$/.test(body) ? body.slice(body.lastIndexOf(":")) : ""); }
-      chip.innerHTML = '<span class="ci">' + icon + '</span><span class="n">' + escape(label) + '</span><span class="x" title="Remove">' + String.fromCodePoint(COD.close) + '</span>';
-      if (t.startsWith("@") && !/^(browser|web|terminal|git:|docs:|chat:|image:|link:|code:|symbol:|rules$|rule:|folder:|https?:)/.test(body) && !tokenBad.has(t)) { chip.classList.add("openable"); chip.querySelector(".n").addEventListener("click", () => { const range = /:(\\d+)-(\\d+)$/.exec(body); vscode.postMessage({ type: "openPath", path: body.replace(/:\\d+-\\d+$/, "").replace(/\\/$/, ""), line: range ? Number(range[1]) : undefined, endLine: range ? Number(range[2]) : undefined }); }); }
-      chip.querySelector(".x").addEventListener("click", () => { const re = new RegExp("(^|\\\\s)" + t.replace(/[.*+?^\${}()|[\\]\\\\/]/g, "\\\\$&") + "(?=\\\\s|$)"); input.value = input.value.replace(re, "$1").replace(/  +/g, " "); autosize(); input.focus(); });
-      row.appendChild(chip);
-    }
-    // Cursor: the active editor's file as a dashed suggestion pill; click to add it.
-    let cur = null; try { cur = state && state.currentFile; } catch { cur = null; } const curTok = cur ? "@" + cur : null;
-    if (curTok && !seen.has(curTok)) { const sug = document.createElement("span"); sug.className = "ctx suggestion"; sug.title = "Add the current file: " + cur; const nm = cur.split("/").pop(); sug.innerHTML = '<span class="ci">' + (nm.includes(".") ? badge(nm.split(".").pop()) : cod("file")) + '</span><span class="n">' + escape(nm) + '</span>'; sug.addEventListener("click", () => { const at = input.selectionStart; const pre = input.value.slice(0, at); const sp = pre && !/\\s$/.test(pre) ? " " : ""; input.value = pre + sp + curTok + " " + input.value.slice(at); const c = (pre + sp + curTok + " ").length; input.setSelectionRange(c, c); input.focus(); input.dispatchEvent(new Event("input")); }); row.appendChild(sug); }
-    const toks = [...seen].filter((t) => !tokenOk.has(t) && !tokenBad.has(t));
-    if (toks.length) vscode.postMessage({ type: "validate", tokens: toks });
-  }
-  input.addEventListener("scroll", () => { $("backdrop").scrollTop = input.scrollTop; });
-  $("ctx-add").querySelector(".cod").textContent = String.fromCodePoint(0xeb1f);
-  $("ctx-add").addEventListener("click", () => { const at = input.selectionStart; const pre = input.value.slice(0, at); const needsSpace = pre && !/\\s$/.test(pre); input.value = pre + (needsSpace ? " @" : "@") + input.value.slice(at); const caret = pre.length + (needsSpace ? 2 : 1); input.setSelectionRange(caret, caret); input.focus(); input.dispatchEvent(new Event("input")); });
-  function autosize() { input.style.height = "auto"; input.style.height = Math.min(240, Math.max(64, input.scrollHeight)) + "px"; $("backdrop").style.height = input.style.height; body.classList.toggle("dirty", input.value.trim().length > 0); renderTokens(); }
-  function send() { let text = input.value.trim(); const mode = state && state.modes.find((m) => m.id === state.settings.mode); if (!text && mode && mode.id === "debug" && input.placeholder !== "Enter additional context about the issue") text = input.placeholder; if (!text) return; vscode.postMessage({ type: "send", text }); input.value = ""; autosize(); }
-  // @ mentions and / commands — Cursor's typeahead: an empty state with recent files and navigation rows into modes
-  // (Files & Folders, Past Chats, Docs, Terminals, Commits), one "Results" list while typing, highlighted matches,
-  // ↑/↓, Enter/Tab, → into a mode, Backspace out of it, Escape.
-  const COD = { edit: 0xea73, "pass-filled": 0xebb3, "circle-large": 0xebb4, folder: 0xea83, "comment-discussion": 0xeac7, "git-branch": 0xec6f, "git-commit": 0xeafc, terminal: 0xea85, globe: 0xeb01, book: 0xeaa4, browser: 0xeaae, "chevron-right": 0xeab6, "chevron-left": 0xeab5, close: 0xea76, mention: 0xeb1f, sparkle: 0xec10, history: 0xea82, tools: 0xeb6d, file: 0xea7b, "symbol-method": 0xea8c, search: 0xea6d, refresh: 0xeb37, "chat-sparkle": 0xec4f, link: 0xeb15, plug: 0xeb2d, extensions: 0xeae6, checklist: 0xeab3, "circle-slash": 0xeabd, robot: 0xec20, "git-pull-request": 0xea64, comment: 0xea6b, note: 0xeb26, "file-code": 0xeae9, play: 0xeb2c };
-  const cod = (name, cls) => '<span class="cod ' + (cls || "") + '">' + String.fromCodePoint(COD[name] || COD.file) + '</span>';
-  const BADGE = { ts: "#519aba", tsx: "#519aba", js: "#cbcb41", jsx: "#cbcb41", mjs: "#cbcb41", cjs: "#cbcb41", json: "#cbcb41", md: "#519aba", mdx: "#519aba", css: "#a074c4", scss: "#f55385", html: "#e37933", py: "#519aba", go: "#519aba", rs: "#e37933", sh: "#4d5a5e", zsh: "#4d5a5e", yml: "#a074c4", yaml: "#a074c4", toml: "#8b949e", svg: "#f55385", png: "#f55385", jpg: "#f55385", swift: "#e37933", java: "#cc3e44", rb: "#cc3e44", sql: "#519aba", txt: "#8b949e", lock: "#8b949e" };
-  const badge = (ext) => { ext = String(ext || "").toLowerCase(); const color = BADGE[ext] || "#8b949e"; return '<span class="ic badge" style="--badge:' + color + '">' + escape((ext || "file").slice(0, 4).toUpperCase()) + '</span>'; };
-  function menuIcon(it) { if (it.iconKind === "badge") return badge(it.icon); if (it.iconKind === "slash") return '<span class="ic slash">/</span>'; return cod(it.icon || "file", "ic"); }
-  function hl(label, query) { if (!query) return escape(label); const lower = label.toLowerCase(); let qi = 0, out = ""; for (let i = 0; i < label.length; i++) { if (qi < query.length && lower[i] === query[qi]) { out += '<span class="hl">' + escape(label[i]) + '</span>'; qi++; } else out += escape(label[i]); } return out; }
-  let suggest = null, suggestSeq = 0;
-  function triggerAt() { const upto = input.value.slice(0, input.selectionStart); const m = /(^|\\s)([@/])([\\w./:?=&%#+-]*)$/.exec(upto); return m ? { kind: m[2] === "@" ? "file" : "skill", start: upto.length - m[3].length - 1, query: m[3] } : null; }
-  // Posted on every keystroke, no timer: the extension answers from memory, stale replies are dropped by seq, and timers in an occluded window fire late.
-  function requestSuggestions() { if (!suggest) return; suggestSeq++; vscode.postMessage({ type: "suggest", kind: suggest.kind, query: suggest.query, mode: suggest.mode, seq: suggestSeq }); }
-  function markSel() { if (!suggest) return; const els = menu.querySelectorAll(".row"); els.forEach((el, i) => el.classList.toggle("sel", i === suggest.index)); const cur = els[suggest.index]; if (cur) cur.scrollIntoView({ block: "nearest" }); }
-  function closeSuggest() { suggest = null; menu.classList.remove("typeahead"); closeMenu(); }
-  function renderSuggestions(m) {
-    if (!suggest || suggest.kind !== m.kind || (m.seq !== undefined && m.seq !== suggestSeq)) return;
-    suggest.sections = m.sections || []; suggest.items = suggest.sections.flatMap((s) => s.items); suggest.index = 0; suggest.title = m.title || "";
-    menu.dataset.kind = "suggest"; menu.classList.add("typeahead"); menu.innerHTML = "";
-    if (suggest.mode !== "all") { const back = document.createElement("div"); back.className = "back"; back.innerHTML = cod("chevron-left") + '<span>' + escape(suggest.title) + '</span>'; back.addEventListener("mousedown", (e) => { e.preventDefault(); setMode("all"); }); menu.appendChild(back); }
-    if (!suggest.items.length) menu.insertAdjacentHTML("beforeend", '<div class="note">No results</div>');
-    const q = suggest.query.toLowerCase(); let flat = 0;
-    for (const sec of suggest.sections) {
-      if (sec.title) menu.insertAdjacentHTML("beforeend", '<div class="title">' + escape(sec.title) + '</div>');
-      for (const it of sec.items) {
-        const row = document.createElement("div"); row.className = "row"; row.dataset.i = String(flat++); row.title = it.insert || it.label;
-        row.innerHTML = menuIcon(it) + '<span class="text">' + hl(it.label, q) + '</span>' + (it.detail ? '<span class="secondary">' + escape(it.detail) + '</span>' : "") + (it.nav ? cod("chevron-right", "chev") : "");
-        row.addEventListener("mousedown", (e) => { e.preventDefault(); chooseSuggestion(it); });
-        row.addEventListener("mouseenter", () => { if (suggest) { suggest.index = Number(row.dataset.i); markSel(); } });
-        menu.appendChild(row);
-      }
-    }
-    menu.classList.add("open"); placeMenu($("mode-pill")); markSel();
-  }
-  // Entering or leaving a mode drops what was typed after the trigger (Cursor deletes that range too).
-  function setMode(mode) { if (!suggest) return; const caret = input.selectionStart; input.value = input.value.slice(0, suggest.start + 1) + input.value.slice(caret); input.setSelectionRange(suggest.start + 1, suggest.start + 1); suggest.query = ""; suggest.mode = mode; autosize(); requestSuggestions(); }
-  function chooseSuggestion(it) {
-    if (!suggest) return;
-    if (it.nav) { setMode(it.nav); return; }
-    if (it.action) { const end = input.selectionStart; input.value = input.value.slice(0, suggest.start) + input.value.slice(end); input.setSelectionRange(suggest.start, suggest.start); closeSuggest(); autosize(); vscode.postMessage({ type: "slashAction", id: it.action }); return; }
-    if (it.insert) acceptSuggestion(it.insert);
-  }
-  function acceptSuggestion(insert) { if (!suggest) return; const end = input.selectionStart; input.value = input.value.slice(0, suggest.start) + insert + " " + input.value.slice(end); const caret = suggest.start + insert.length + 1; input.setSelectionRange(caret, caret); closeSuggest(); autosize(); input.focus(); }
-  input.addEventListener("input", () => { autosize(); const t = triggerAt(); if (!t) { if (suggest) closeSuggest(); return; } const keep = suggest && suggest.kind === t.kind && suggest.start === t.start; suggest = { ...t, mode: keep ? suggest.mode : "all", items: keep ? suggest.items : [], sections: keep ? suggest.sections : [], index: keep ? suggest.index : 0, title: keep ? suggest.title : "" }; requestSuggestions(); });
-  input.addEventListener("keydown", (e) => {
-    if (e.key === "Tab" && e.shiftKey) { e.preventDefault(); openMenu("mode", $("mode-pill")); return; }
-    if (suggest && menu.classList.contains("open")) {
-      const n = suggest.items.length;
-      if (e.key === "ArrowDown" || e.key === "ArrowUp") { e.preventDefault(); if (n) { suggest.index = (suggest.index + (e.key === "ArrowDown" ? 1 : n - 1)) % n; markSel(); } return; }
-      if (e.key === "Enter" || e.key === "Tab") { e.preventDefault(); const it = suggest.items[suggest.index] || suggest.items[0]; if (it) chooseSuggestion(it); return; }
-      if (e.key === "ArrowRight") { const it = suggest.items[suggest.index]; if (it && it.nav) { e.preventDefault(); setMode(it.nav); return; } }
-      if (e.key === "Backspace" && suggest.query === "" && suggest.mode !== "all") { e.preventDefault(); setMode("all"); return; }
-      if (e.key === "Escape") { closeSuggest(); return; }
-    }
-    const pendingId = firstApproval();
-    if (pendingId && !input.value.trim()) {
-      if (e.key === "Enter" && !e.metaKey && !e.ctrlKey) { e.preventDefault(); decide(pendingId, e.shiftKey ? "acceptForSession" : "accept"); return; }
-      if (e.key === "Escape") { e.preventDefault(); decide(pendingId, "decline"); return; }
-    }
-    if (e.key === "Enter" && !e.shiftKey && !e.metaKey && !e.ctrlKey) { e.preventDefault(); send(); }
-  });
-  document.addEventListener("keydown", (e) => { if (e.target === input) return; const id = firstApproval(); if (!id) return; if (e.key === "Enter" && !e.metaKey && !e.ctrlKey) { e.preventDefault(); decide(id, e.shiftKey ? "acceptForSession" : "accept"); } else if (e.key === "Escape") { e.preventDefault(); decide(id, "decline"); } });
-  $("send").addEventListener("click", send);
-  $("attach").addEventListener("click", () => vscode.postMessage({ type: "attach" }));
-  { const mic = document.querySelector('.icon[title="Dictate"]'); if (mic) mic.addEventListener("click", () => vscode.postMessage({ type: "dictate" })); }
-  $("stop").addEventListener("click", () => vscode.postMessage({ type: "stop" }));
-  // Stop in the send slot while running (Cursor), ⇧⌘⌫ anywhere in the pane; queued follow-ups live between the messages and the composer.
-  { const stopBtn = document.createElement("span"); stopBtn.className = "stopbtn"; stopBtn.id = "stopbtn"; stopBtn.title = "Stop ⇧⌘⌫"; stopBtn.textContent = "■"; stopBtn.addEventListener("click", () => vscode.postMessage({ type: "stop" })); $("send").parentNode.insertBefore(stopBtn, $("send").nextSibling);
-    const q = document.createElement("div"); q.id = "queue"; $("status").parentNode.insertBefore(q, $("status")); }
-  document.addEventListener("keydown", (e) => { if (e.key === "Backspace" && e.metaKey && e.shiftKey) { e.preventDefault(); vscode.postMessage({ type: "stop" }); } });
-  // ── browser tab: URL bar, page area (the workbench places the real page over #bhost), sections ──
-  let bstate = null, bsec = "console";
-  const bhost = $("bhost");
-  function reportRect() {
-    if (!bstate) return;
-    const r = bhost.getBoundingClientRect(); const visible = body.dataset.view === "browser" && r.width > 10 && r.height > 10;
-    vscode.postMessage({ type: "browserRect", id: bstate.id, rect: { top: r.top, left: r.left, width: r.width, height: r.height }, visible });
-  }
-  setInterval(reportRect, 500);
-  window.addEventListener("resize", reportRect);
-  function renderBrowser(st) {
-    bstate = st;
-    if (document.activeElement !== $("burl")) $("burl").value = st.url || "";
-    $("bpick").classList.toggle("on", !!st.picking);
-    $("bconsole-count").textContent = st.console.length ? "(" + st.console.length + ")" : "";
-    const body_ = $("bsbody");
-    if (bsec === "console") body_.innerHTML = st.console.length ? st.console.slice(-200).map((c) => '<span class="c ' + escape(c.level) + '">' + escape(c.message) + (c.source ? ' <span style="opacity:.5">' + escape(String(c.source).split("/").pop()) + (c.line ? ':' + c.line : '') + '</span>' : '') + '</span>').join("") : '<span class="c debug">No console output yet.</span>';
-    else if (bsec === "changes") body_.innerHTML = (st.changes || []).length ? st.changes.map((c, i) => '<span class="bchange"><span class="sel" title="' + escape(c.selector) + '">' + escape(c.selector) + '</span><span>' + escape(c.kind === "text" ? "text" : c.prop) + '</span><span class="old">' + escape(c.before) + '</span><span class="arrow">→</span><span class="new">' + escape(c.after) + '</span><span class="x" data-i="' + i + '" title="Revert">×</span></span>').join("") + '<button class="btn primary bapply" id="bapply">Apply changes in chat</button>' : '<span class="c debug">Edit the selected element’s text or styles; every change is listed here as old → new until the agent applies it to code.</span>';
-    else if (bsec === "selected" && st.picked && body_.contains(document.activeElement)) { /* keep the field being edited */ }
-    else if (bsec === "selected") body_.innerHTML = st.picked ? '<span class="kv"><b>selector</b> ' + escape(st.picked.selector) + '</span>' + (st.picked.source ? '<span class="kv"><b>source</b> ' + escape(st.picked.source.file) + ':' + escape(st.picked.source.line) + '</span>' : '') + '<span class="kv"><b>text</b> ' + escape(st.picked.text) + '</span><span class="kv"><b>rect</b> ' + escape(JSON.stringify(st.picked.rect)) + '</span><span class="kv"><b>styles</b> ' + escape(Object.entries(st.picked.styles).map(([k, v]) => k + ": " + v).join("; ")) + '</span><span class="kv"><b>html</b> ' + escape(st.picked.html.slice(0, 800)) + '</span>' : '<span class="c debug">Click ⌖ then an element in the page.</span>';
-    else body_.innerHTML = '<span class="kv"><b>url</b> ' + escape(st.url) + '</span><span class="kv"><b>title</b> ' + escape(st.title) + '</span>';
-    if (bsec === "selected" && st.picked && !body_.querySelector(".field")) {
-      const changed = (prop) => (st.changes || []).some((c) => c.selector === st.picked.selector && (c.kind === "text" ? "text" : c.prop) === prop);
-      const field = (label, prop, value) => '<span class="field"><b>' + escape(label) + '</b><input data-prop="' + escape(prop) + '" class="' + (changed(prop) ? "changed" : "") + '" value="' + escape(value || "") + '"></span>';
-      let html = '<span class="kv" style="margin-top:8px"><b>Edit</b></span>' + field("text", "text", st.picked.text);
-      for (const p of ["color", "background-color", "font-size", "font-weight", "padding", "margin", "border-radius"]) html += field(p, p, (st.picked.styles || {})[p]);
-      body_.insertAdjacentHTML("beforeend", html);
-    }
-    $("bdriving").hidden = !st.driving;
-    $("bchanges-count").textContent = (st.changes || []).length ? "(" + st.changes.length + ")" : "";
-    reportRect();
-  }
-  $("btake").addEventListener("click", () => { if (bstate) vscode.postMessage({ type: "browserTakeControl", id: bstate.id }); });
-  // Cursor's browser chrome extras: bookmarks bar under the address bar, DevTools, and the certificate overlay.
-  let bookmarks = [];
-  function renderBookmarks(list, cert) {
-    bookmarks = list; const bar = $("bbookmarks"); bar.innerHTML = ""; bar.classList.toggle("has", list.length > 0);
-    for (const b of list) { const chip = document.createElement("span"); chip.className = "bm"; chip.title = b.url; chip.innerHTML = cod("globe") + '<span>' + escape(b.title) + '</span>'; chip.addEventListener("click", () => { if (bstate) vscode.postMessage({ type: "browserNav", id: bstate.id, url: b.url }); }); bar.appendChild(chip); }
-    $("bstar").classList.toggle("on", !!(bstate && list.some((b) => b.url === bstate.url)));
-    const c = $("bcert"); c.hidden = !cert; if (cert) c.querySelector(".msg").textContent = "Certificate not trusted for " + cert.url.replace(/^https?:\\/\\//, "").split("/")[0] + " (" + cert.error + ")";
-  }
-  $("bstar").addEventListener("click", () => { if (bstate) vscode.postMessage({ type: "browserBookmark", id: bstate.id }); });
-  $("bdevtools").addEventListener("click", () => { if (bstate) vscode.postMessage({ type: "browserDevtools", id: bstate.id }); });
-  $("bcert").querySelector("button").addEventListener("click", () => { if (bstate) vscode.postMessage({ type: "browserTrust", id: bstate.id }); });
-  $("bsbody").addEventListener("change", (e) => { const f = e.target; if (bstate && f && f.dataset && f.dataset.prop) vscode.postMessage({ type: "browserEdit", id: bstate.id, kind: f.dataset.prop === "text" ? "text" : "style", prop: f.dataset.prop === "text" ? undefined : f.dataset.prop, value: f.value }); });
-  $("bsbody").addEventListener("click", (e) => { const t = e.target; if (!bstate || !t) return; if (t.classList.contains("x") && t.dataset.i !== undefined) vscode.postMessage({ type: "browserRevert", id: bstate.id, index: Number(t.dataset.i) }); else if (t.id === "bapply") vscode.postMessage({ type: "browserApply", id: bstate.id }); });
-  $("burl").addEventListener("keydown", (e) => { if (e.key === "Enter" && bstate) vscode.postMessage({ type: "browserNav", id: bstate.id, url: $("burl").value }); e.stopPropagation(); });
-  document.querySelectorAll(".bbar .bbtn").forEach((b) => b.addEventListener("click", () => { if (bstate) vscode.postMessage({ type: "browserAction", id: bstate.id, action: b.dataset.act }); }));
-  document.querySelectorAll(".bstab").forEach((t) => t.addEventListener("click", () => { bsec = t.dataset.sec; document.querySelectorAll(".bstab").forEach((x) => x.classList.toggle("on", x === t)); if (bstate) renderBrowser(bstate); }));
-  $("bclear").addEventListener("click", () => { if (bstate) { bstate.console = []; renderBrowser(bstate); } });
-  $("btochat").addEventListener("click", () => { if (bstate) vscode.postMessage({ type: "browserToChat", id: bstate.id }); });
-  window.addEventListener("message", (event) => {
-    const m = event.data;
-    if (m.type === "browser") { renderBrowser(m.state); }
-    if (m.type === "state") { state = m; renderState(); renderQueue(m.queue || []); renderTokens(); reportRect(); }
-    else if (m.type === "messages") { renderMessages(m.messages); if (state) renderState(); }
-    else if (m.type === "user") { assistantEl = thinkingEl = null; addHuman(m.text, m.checkpoint, m.steer); if (state) renderState(); }
-    else if (m.type === "start") { body.classList.add("running"); }
-    else if (m.type === "reasoning") { const t = ensureThinking(); t.querySelector(".body").textContent += m.text; scroll(); }
-    else if (m.type === "delta") { const a = ensureAssistant(); a.classList.add("streaming"); a.dataset.raw += m.text; a.innerHTML = renderMarkdown(a.dataset.raw); scroll(); }
-    else if (m.type === "tool") { toolEl(m.tool); }
-    else if (m.type === "approval") { approvalEl(m.approval); }
-    else if (m.type === "approvalDone") { approvalDone(m.id, m.decision); }
-    else if (m.type === "plan") { planCard(m.card); }
-    else if (m.type === "edit") { editCard(m.card); }
-    else if (m.type === "review") { renderReview(m.files); }
-    else if (m.type === "threads") { threads = m.items; renderHistory(); }
-    else if (m.type === "board") { renderBoard(m.columns); }
-    else if (m.type === "suggestions") { renderSuggestions(m); }
-    else if (m.type === "setInput") { input.focus(); input.value = m.text; input.setSelectionRange(m.text.length, m.text.length); input.dispatchEvent(new Event("input")); setTimeout(() => vscode.postMessage({ type: "probed", value: input.value, seq: suggestSeq, query: suggest ? suggest.query : null, mode: suggest ? suggest.mode : null, title: menu.classList.contains("typeahead") ? (menu.querySelector(".back span") || {}).textContent || "" : "", rows: [...menu.querySelectorAll(".typeahead .row, .row")].filter((r) => menu.classList.contains("open")).map((r) => ({ text: (r.querySelector(".text") || {}).textContent || "", sel: r.classList.contains("sel"), icon: (r.querySelector(".ic, .cod") || {}).className || "" })), chips: [...$("ctxrow").querySelectorAll(".ctx:not(.add)")].map((e) => ({ t: e.title, bad: e.classList.contains("bad") })), cards: [...messages.querySelectorAll(".card")].map((e) => e.className + " | " + ((e.querySelector(".t") || {}).textContent || "") + " | " + ((e.querySelector(".hint, .status") || {}).textContent || "")), marks: [...$("backdrop").querySelectorAll("mark")].map((e) => ({ t: e.textContent, bad: e.classList.contains("bad") })) }), 700); }
-    else if (m.type === "validated") { for (const t of m.ok) { tokenOk.add(t); tokenBad.delete(t); } for (const t of m.bad) { tokenBad.add(t); tokenOk.delete(t); } renderTokens(); }
-    else if (m.type === "openModeMenu") { openMenu("mode", $("mode-pill")); }
-    else if (m.type === "openMenu") { if (m.kind === "model") openMenu("model", $("model-pill")); else if (m.kind === "access") openMenu("access", $("access-pill")); else $("ctx-add").click(); }
-    else if (m.type === "dictation") { body.classList.toggle("dictating", !!m.on); if (m.text) { const at = input.selectionStart; const pre = input.value.slice(0, at); const sp = pre && !/\\s$/.test(pre) ? " " : ""; input.value = pre + sp + m.text + input.value.slice(at); const c = (pre + sp + m.text).length; input.setSelectionRange(c, c); input.dispatchEvent(new Event("input")); } }
-    else if (m.type === "browserExtras") { renderBookmarks(m.bookmarks || [], m.cert || null); }
-    else if (m.type === "insert") { const at = input.selectionStart; input.value = input.value.slice(0, at) + m.text + input.value.slice(at); input.setSelectionRange(at + m.text.length, at + m.text.length); autosize(); input.focus(); }
-    else if (m.type === "done") { body.classList.remove("running"); document.querySelectorAll(".assistant.streaming").forEach((a) => a.classList.remove("streaming")); if (thinkingEl) thinkingEl.querySelector("summary").textContent = "Thought"; if (!m.ok) { const e = document.createElement("div"); e.className = "error"; e.textContent = m.error || "Failed"; messages.appendChild(e); } assistantEl = thinkingEl = null; scroll(); }
-  });
-  autosize();
-  vscode.postMessage({ type: "ready" });
-</script>
-</body></html>`;
 }

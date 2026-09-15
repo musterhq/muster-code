@@ -9,7 +9,9 @@ import { createInterface } from "node:readline";
 import { chmodSync, existsSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { BrowserController, BrowserState } from "./browser.js";
+import type { BrowserColorScheme, BrowserController, BrowserState } from "./browser.js";
+import { saveScreenshotPng, SCREENSHOT_EMBED_HINT } from "./browser-screenshot.js";
+import { runWaitFor } from "./browser-wait-for.js";
 
 type ToolResult = { text?: string; image?: string; isError?: boolean };
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
@@ -64,6 +66,8 @@ export class BrowserToolServer implements vscode.Disposable {
     /** Open a browser tab for the agent when none exists. */
     private readonly openTab: (url?: string, headless?: boolean) => BrowserState | undefined,
     private readonly log: (line: string) => void,
+    /** Workspace root for saved screenshots (optional for tests). */
+    private readonly workspaceDir: () => string | undefined = () => undefined,
   ) {
     browser.onTakeControl((id) => { this.userControl = true; this.log(`browser: user took control of ${id}`); });
   }
@@ -95,9 +99,9 @@ export class BrowserToolServer implements vscode.Disposable {
   private eval(id: string, js: string): Promise<unknown> { return Promise.resolve(vscode.commands.executeCommand("muster.browser.eval", { id, js })); }
   private input(id: string, event: Record<string, unknown>): Promise<unknown> { return Promise.resolve(vscode.commands.executeCommand("muster.browser.input", { id, event })); }
   /** After an action that may navigate: give the navigation a moment to start, then wait for the load to settle. */
-  private async waitReady(id: string, ms = 10_000): Promise<void> {
+  private async waitReady(id: string, ms = 15_000): Promise<unknown> {
     await sleep(300);
-    await Promise.resolve(vscode.commands.executeCommand("muster.browser.waitLoad", { id, timeout: ms })).catch(() => null);
+    return Promise.resolve(vscode.commands.executeCommand("muster.browser.waitLoad", { id, timeout: ms })).catch((error) => ({ error: error instanceof Error ? error.message : String(error) }));
   }
   private async key(id: string, key: string): Promise<void> {
     const code = KEYS[key.toLowerCase()] ?? key;
@@ -116,21 +120,25 @@ export class BrowserToolServer implements vscode.Disposable {
   private async snapshot(id: string): Promise<string> { const r = await this.eval(id, SNAPSHOT_JS); return typeof r === "string" ? r : `Snapshot failed: ${JSON.stringify(r)}`; }
 
   private target(args: Record<string, unknown>, url?: string): BrowserState {
-    const wanted = typeof args.tab === "string" ? this.browser.get(args.tab) : undefined;
-    if (!wanted && args.headless === true) { const t = this.openTab(url, true); if (t) return t; }
-    const visible = this.visibleTab(); const tab = wanted ?? (visible ? this.browser.get(visible) : undefined) ?? this.browser.list().find((t) => !t.headless) ?? this.openTab(url);
+    if (typeof args.tab === "string") {
+      const wanted = this.browser.get(args.tab);
+      if (!wanted) throw new Error(`Unknown browser tab ${args.tab}; call browser_tabs for current tabs.`);
+      return wanted;
+    }
+    if (args.headless === true) { const t = this.openTab(url, true); if (t) return t; }
+    const visible = this.visibleTab(); const tab = (visible ? this.browser.get(visible) : undefined) ?? this.browser.list().find((t) => !t.headless) ?? this.openTab(url);
     if (!tab) throw new Error("No browser tab could be opened.");
     return tab;
   }
 
   async execute(tool: string, args: Record<string, unknown>): Promise<ToolResult> {
-    if (tool === "browser_tabs") return { text: this.browser.list().map((t) => `${t.id}: ${t.title || "(untitled)"} — ${t.url}${t.driving ? " (agent)" : ""}${t.headless ? " (headless)" : ""}`).join("\n") || "No browser tabs are open; browser_navigate opens one." };
+    if (tool === "browser_tabs") return { text: this.browser.list().map((t) => { const h = t.history ?? { canGoBack: false, canGoForward: false }; return `${t.id}: ${t.title || "(untitled)"} — ${t.url}${t.loading ? " (loading)" : ""}${t.loadError ? ` (error: ${t.loadError})` : ""}${t.driving ? " (agent)" : ""}${t.headless ? " (headless)" : ""} [back:${h.canGoBack ? "yes" : "no"}, forward:${h.canGoForward ? "yes" : "no"}]`; }).join("\n") || "No browser tabs are open; browser_navigate opens one." };
     if (this.userControl) return { text: "The user took control of the browser. Ask them before using it again.", isError: true };
     const tab = this.target(args, tool === "browser_navigate" ? String(args.url ?? "") : undefined);
     const id = tab.id;
     this.browser.setDriving(id, true);
     switch (tool) {
-      case "browser_navigate": { const r = await this.browser.navigate(id, String(args.url ?? "")); if (r && typeof r === "object" && "error" in r) return { text: `Navigation failed: ${String((r as { error: string }).error)}`, isError: true }; await sleep(150); this.browser.setDriving(id, true); return { text: await this.snapshot(id) }; }
+      case "browser_navigate": { const r = await this.browser.navigate(id, String(args.url ?? "")); if (r && typeof r === "object" && "error" in r && !(r as { superseded?: boolean }).superseded) return { text: `Navigation failed: ${String((r as { error: string }).error)}`, isError: true }; this.browser.setDriving(id, true); return { text: await this.snapshot(id) }; }
       case "browser_snapshot": return { text: await this.snapshot(id) };
       case "browser_click": {
         const p = await this.locate(id, args); const clicks = args.double ? 2 : 1; const x = Math.round(p.x), y = Math.round(p.y);
@@ -159,17 +167,73 @@ export class BrowserToolServer implements vscode.Disposable {
         const r = await this.eval(id, `(() => { const el = ${finder}; if (!el || el.tagName !== "SELECT") return "not a select"; const want = ${JSON.stringify(String(args.value ?? ""))}; const opt = [...el.options].find((o) => o.value === want || o.label.trim() === want || o.textContent.trim() === want); if (!opt) return "no option " + want + " among " + [...el.options].map((o) => o.value).join(", "); el.value = opt.value; el.dispatchEvent(new Event("input", { bubbles: true })); el.dispatchEvent(new Event("change", { bubbles: true })); return "selected " + opt.label; })()`);
         return { text: String(r) + "\n\n" + (await this.snapshot(id)), ...(typeof r === "string" && !r.startsWith("selected") ? { isError: true } : {}) };
       }
-      case "browser_screenshot": { const data = await vscode.commands.executeCommand<string | null>("muster.browser.capture", { id }); if (typeof data !== "string" || !data.startsWith("data:image/png;base64,")) return { text: "Screenshot failed (is the browser tab visible?)", isError: true }; return { text: `Screenshot of ${tab.url}`, image: data.slice("data:image/png;base64,".length) }; }
-      case "browser_console_messages": { const list = tab.console.slice(-100); return { text: list.length ? list.map((c) => `[${c.level}] ${c.message}${c.source ? ` (${c.source.split("/").pop()}${c.line ? `:${c.line}` : ""})` : ""}`).join("\n") : "No console output." }; }
+      case "browser_screenshot": {
+        const fullPage = args.fullPage === true;
+        const data = await vscode.commands.executeCommand<string | null>("muster.browser.capture", { id, fullPage });
+        if (typeof data !== "string" || !data.startsWith("data:image/png;base64,")) return { text: "Screenshot failed (is the browser tab visible?)", isError: true };
+        const image = data.slice("data:image/png;base64,".length);
+        let text = `Screenshot of ${tab.url}`;
+        if (args.save === true) {
+          let slug = "page";
+          try { slug = new URL(tab.url).hostname || slug; } catch { /* ignore */ }
+          const path = saveScreenshotPng(this.workspaceDir(), slug, image);
+          text += `\nscreenshotPath: ${path}\n${SCREENSHOT_EMBED_HINT.replace("/abs/path", path)}`;
+        }
+        return { text, image };
+      }
+      case "browser_scroll": {
+        const dx = Number(args.deltaX) || 0;
+        const dy = Number(args.deltaY) || 0;
+        const ref = typeof args.ref === "string" ? args.ref.replace(/^e/, "") : "";
+        const target = ref
+          ? `(window.__mref || [])[${Number(ref) - 1}]`
+          : typeof args.selector === "string" && args.selector
+            ? `document.querySelector(${JSON.stringify(args.selector)})`
+            : "null";
+        const r = await this.eval(id, `(() => { const el = ${target}; if (el) { el.scrollBy(${dx}, ${dy}); return "element"; } window.scrollBy(${dx}, ${dy}); return "window"; })()`);
+        return { text: `Scrolled ${r === "element" ? "container" : "window"} by (${dx}, ${dy})\n\n${await this.snapshot(id)}` };
+      }
+      case "browser_resize": {
+        const mode = String(args.mode ?? "fill") as "fill" | "freeform" | "preset";
+        const r = await this.browser.setViewport(id, {
+          mode,
+          ...(args.width !== undefined ? { width: Number(args.width) } : {}),
+          ...(args.height !== undefined ? { height: Number(args.height) } : {}),
+          ...(typeof args.preset === "string" ? { preset: args.preset } : {}),
+          ...(typeof args.orientation === "string" ? { orientation: args.orientation as "portrait" | "landscape" } : {}),
+        });
+        if ("error" in r) return { text: r.error, isError: true };
+        return { text: JSON.stringify(r, null, 2) };
+      }
+      case "browser_set_appearance": {
+        const scheme = String(args.colorScheme ?? "system") as BrowserColorScheme;
+        if (scheme !== "dark" && scheme !== "light" && scheme !== "system") return { text: "colorScheme must be dark, light, or system.", isError: true };
+        const r = await this.browser.setAppearance(id, scheme);
+        if ("error" in r) return { text: r.error, isError: true };
+        return { text: JSON.stringify(r, null, 2) };
+      }
+      case "browser_status": {
+        const d = this.browser.status(id);
+        return d ? { text: JSON.stringify(d, null, 2) } : { text: `Unknown browser tab ${id}`, isError: true };
+      }
+      case "browser_console_messages": { const level = typeof args.level === "string" ? args.level : ""; const limit = Math.max(1, Math.min(300, Number(args.limit) || 100)); const list = tab.console.filter((c) => !level || c.level === level).slice(-limit); return { text: list.length ? list.map((c) => `[${c.level}] ${c.message}${c.source ? ` (${c.source.split("/").pop()}${c.line ? `:${c.line}` : ""})` : ""}`).join("\n") : `No console output${level ? ` at level ${level}` : ""}.` }; }
+      case "browser_diagnostics": { const d = this.browser.diagnostics(id); return d ? { text: JSON.stringify(d, null, 2) } : { text: `Unknown browser tab ${id}`, isError: true }; }
       case "browser_evaluate": { const r = await this.eval(id, `(() => { try { const v = (0, eval)(${JSON.stringify(String(args.expression ?? ""))}); return v === undefined ? "undefined" : JSON.stringify(v); } catch (e) { return "Error: " + (e && e.message || e); } })()`); const text = typeof r === "string" ? r : JSON.stringify(r); return { text: text.length > 20_000 ? `${text.slice(0, 20_000)}… (truncated)` : text, ...(typeof text === "string" && text.startsWith("Error:") ? { isError: true } : {}) }; }
       case "browser_wait_for": {
-        const text = typeof args.text === "string" ? args.text : ""; const ms = Math.min(30_000, Number(args.timeMs) || (text ? 10_000 : 1000));
-        if (!text) { await sleep(ms); return { text: `Waited ${ms}ms` }; }
-        const until = Date.now() + ms; while (Date.now() < until) { if ((await this.eval(id, `document.body && document.body.innerText.includes(${JSON.stringify(text)})`)) === true) return { text: `Found "${text}"` }; await sleep(250); }
-        return { text: `Did not see "${text}" within ${ms}ms`, isError: true };
+        const timeoutMs = Math.min(60_000, Math.max(1, Number(args.timeoutMs) || 10_000));
+        const conditions = {
+          ...(typeof args.text === "string" && args.text ? { text: args.text } : {}),
+          ...(typeof args.selector === "string" && args.selector ? { selector: args.selector } : {}),
+          ...(typeof args.url === "string" && args.url ? { url: args.url } : {}),
+          ...(args.timeMs !== undefined ? { timeMs: Number(args.timeMs) } : {}),
+        };
+        const outcome = await runWaitFor(conditions, { timeoutMs, pollMs: 150, evalJs: (js) => this.eval(id, js), sleep });
+        if (!outcome.ok) return { text: `Timed out waiting for condition: ${outcome.failed}`, isError: true };
+        return { text: await this.snapshot(id) };
       }
-      case "browser_go_back": { await this.browser.action(id, "back"); await sleep(150); this.browser.setDriving(id, true); return { text: await this.snapshot(id) }; }
-      case "browser_reload": { await this.browser.action(id, "reload"); await sleep(150); this.browser.setDriving(id, true); return { text: await this.snapshot(id) }; }
+      case "browser_go_back": { const r = await this.browser.action(id, "back"); if (r && typeof r === "object" && "error" in r) return { text: `Back failed: ${String((r as { error: string }).error)}`, isError: true }; this.browser.setDriving(id, true); return { text: await this.snapshot(id) }; }
+      case "browser_go_forward": { const r = await this.browser.action(id, "forward"); if (r && typeof r === "object" && "error" in r) return { text: `Forward failed: ${String((r as { error: string }).error)}`, isError: true }; this.browser.setDriving(id, true); return { text: await this.snapshot(id) }; }
+      case "browser_reload": { const r = await this.browser.action(id, "reload"); if (r && typeof r === "object" && "error" in r) return { text: `Reload failed: ${String((r as { error: string }).error)}`, isError: true }; this.browser.setDriving(id, true); return { text: await this.snapshot(id) }; }
       default: return { text: `Unknown tool ${tool}`, isError: true };
     }
   }

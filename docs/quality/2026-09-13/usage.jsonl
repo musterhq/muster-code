@@ -1,0 +1,5 @@
+{"checkpoint": "start", "utc": "2026-09-13T06:10:56.120358+00:00", "usedPercent": 7, "remainingPercent": 93, "resetsAt": 1789817159, "scope": "account-wide"}
+{"checkpoint": "first implementation wave", "utc": "2026-09-13T06:22:20.999870+00:00", "usedPercent": 8, "remainingPercent": 92, "scope": "account-wide", "resetsAt": 1789817159}
+{"checkpoint": "integrated batch freeze", "utc": "2026-09-13T06:43:01.384579+00:00", "usedPercent": 9, "remainingPercent": 91, "scope": "account-wide", "resetsAt": 1789817159}
+{"timestamp": "2026-09-14T06:19:57.406491+00:00", "usedPercent": 19, "remainingPercent": 81, "window": "weekly; account-wide", "resetsAt": 1789817159, "note": "Sep14 continuation milestone; not attributable solely to this session"}
+{"timestamp": "2026-09-14T06:59:45.634017+00:00", "usedPercent": 22, "remainingPercent": 78, "window": "weekly; account-wide", "note": "Direct collaboration restored; Spark short window exhausted; no reset redeemed"}

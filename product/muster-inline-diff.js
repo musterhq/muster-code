@@ -137,7 +137,8 @@
     const index = Math.min(currentIndex(editor, st.hunks) + 1, shown);
     st.bar.counter.textContent = `${index} / ${shown}`;
     st.bar.undo.firstChild.textContent = total > 1 ? "Undo All" : "Undo";
-    st.bar.keep.firstChild.textContent = total > 1 ? "Keep All" : "Keep";
+    st.bar.keep.firstChild.textContent = st.autoApplied ? "Dismiss review" : total > 1 ? "Keep All" : "Keep";
+    st.bar.keepAll.firstChild.textContent = st.autoApplied ? "Dismiss review" : "Keep all changes";
     const multi = (st.files || 1) > 1;
     st.bar.undo.style.display = multi ? "none" : ""; st.bar.keep.style.display = multi ? "none" : "";
     st.bar.keepAll.style.display = multi ? "" : "none"; st.bar.nextFile.style.display = multi ? "" : "none";
@@ -238,6 +239,7 @@
 
     // Full access (auto-apply): no per-hunk Accept/Reject prompts; the colours stay and the bar offers Keep all / Undo all.
     const wantWidgets = args.widgets !== false;
+    st.autoApplied = !wantWidgets;
     while (st.hunkWidgets.length > (wantWidgets ? st.hunks.length : 0)) { const w = st.hunkWidgets.pop(); if (w) editor.removeOverlayWidget(w); }
     if (wantWidgets) st.hunks.forEach((h, i) => {
       let w = st.hunkWidgets[i];
@@ -393,18 +395,37 @@
     for (const f of document.querySelectorAll("iframe.webview")) { const r = f.getBoundingClientRect(); const w = Math.max(0, Math.min(r.right, cr.right) - Math.max(r.left, cr.left)); const h = Math.max(0, Math.min(r.bottom, cr.bottom) - Math.max(r.top, cr.top)); if (w * h > bestArea) { bestArea = w * h; best = r; } }
     return bestArea > 0 ? best : null;
   }
+  // Keep in sync with packages/builtin/src/browser-viewport.ts VIEWPORT_PRESETS
+  const VIEWPORT_PRESETS = { "iphone-se": { width: 375, height: 667 }, "iphone-12-pro": { width: 390, height: 844 }, "pixel-7": { width: 412, height: 915 }, ipad: { width: 820, height: 1180 }, "desktop-1280": { width: 1280, height: 800 }, "desktop-1440": { width: 1440, height: 900 } };
+  function letterboxViewport(hostW, hostH, targetW, targetH) {
+    const scale = Math.min(1, hostW / targetW, hostH / targetH);
+    const width = Math.max(1, Math.round(targetW * scale));
+    const height = Math.max(1, Math.round(targetH * scale));
+    return { offsetX: Math.round((hostW - width) / 2), offsetY: Math.round((hostH - height) / 2), width, height };
+  }
+  function targetViewport(b, hostW, hostH) {
+    const vp = b.viewport;
+    if (!vp || vp.mode === "fill") return { offsetX: 0, offsetY: 0, width: Math.max(1, Math.round(hostW)), height: Math.max(1, Math.round(hostH)) };
+    let tw = vp.width, th = vp.height;
+    if (vp.mode === "preset" && vp.preset && VIEWPORT_PRESETS[vp.preset]) { tw = VIEWPORT_PRESETS[vp.preset].width; th = VIEWPORT_PRESETS[vp.preset].height; }
+    return letterboxViewport(hostW, hostH, tw, th);
+  }
   function layoutBrowsers() {
     for (const b of browsers.values()) {
       const frame = hostFrame(b);
       const on = !!(b.shown && b.rel && frame && b.rel.width > 10 && b.rel.height > 10);
       if (!on) { if (b.visible !== false) { b.visible = false; void mb({ type: "bounds", id: b.id, visible: false, bounds: { x: 0, y: 0, width: 0, height: 0 } }); } continue; }
-      const bounds = { x: Math.round(frame.left + b.rel.left), y: Math.round(frame.top + b.rel.top), width: Math.max(0, Math.round(b.rel.width)), height: Math.max(0, Math.round(b.rel.height)) };
+      const hostW = Math.max(0, Math.round(b.rel.width));
+      const hostH = Math.max(0, Math.round(b.rel.height));
+      const inner = targetViewport(b, hostW, hostH);
+      b.measuredViewport = { width: inner.width, height: inner.height };
+      const bounds = { x: Math.round(frame.left + b.rel.left + inner.offsetX), y: Math.round(frame.top + b.rel.top + inner.offsetY), width: inner.width, height: inner.height };
       const same = b.visible === true && b.bounds && ["x", "y", "width", "height"].every((k) => b.bounds[k] === bounds[k]);
       if (!same) { b.visible = true; b.bounds = bounds; void mb({ type: "bounds", id: b.id, visible: true, bounds }); }
     }
   }
   function makeBrowser(id, url, host) {
-    const b = { id, url, host: host || "pane", title: "", shown: false, rel: null, visible: undefined, bounds: null, ready: false, picking: false, pickTimer: null, poll: null };
+    const b = { id, url, host: host || "pane", title: "", shown: false, rel: null, visible: undefined, bounds: null, ready: false, picking: false, pickTimer: null, poll: null, viewport: { mode: "fill" }, measuredViewport: null };
     browsers.set(id, b);
     b.poll = setInterval(async () => {
       const events = await mb({ type: "events", id }).catch(() => null);
@@ -447,7 +468,19 @@
   Registry.registerCommand("muster.browser.screenshot", (accessor, args) => { const b = browsers.get(args.id); if (b) return screenshot(b); });
   Registry.registerCommand("muster.browser.context", async (accessor, args) => { const b = args && args.id ? browsers.get(args.id) : [...browsers.values()].find((x) => x.shown) || [...browsers.values()][0]; if (!b) return null; const info = await mb({ type: "url", id: b.id }).catch(() => null); return { id: b.id, url: (info && info.url) || b.url, title: (info && info.title) || b.title }; });
   Registry.registerCommand("muster.browser.eval", (accessor, args) => mb({ type: "eval", id: args.id, js: String(args.js) }));
-  Registry.registerCommand("muster.browser.capture", (accessor, args) => mb({ type: "capture", id: args.id }));
+  Registry.registerCommand("muster.browser.capture", (accessor, args) => mb({ type: "capture", id: args.id, fullPage: !!args.fullPage }));
+  Registry.registerCommand("muster.browser.viewport", (accessor, args) => {
+    const b = browsers.get(args.id);
+    if (!b) return { error: "Unknown browser tab" };
+    b.viewport = args.viewport || { mode: "fill" };
+    layoutBrowsers();
+    const frame = hostFrame(b);
+    if (!frame || !b.rel || b.rel.width < 10 || b.rel.height < 10) {
+      return { error: "Browser viewport resize requires a visible browser host (pane or editor tab). The WebContentsView cannot be letterboxed while the tab is hidden or headless." };
+    }
+    return { width: b.measuredViewport?.width || 0, height: b.measuredViewport?.height || 0 };
+  });
+  Registry.registerCommand("muster.browser.setAppearance", (accessor, args) => mb({ type: "setAppearance", id: args.id, colorScheme: args.colorScheme }));
   Registry.registerCommand("muster.browser.devtools", (accessor, args) => mb({ type: "devtools", id: args.id }));
   Registry.registerCommand("muster.browser.trust", (accessor, args) => mb({ type: "trust", id: args.id, url: args.url }));
   Registry.registerCommand("muster.browser.waitLoad", (accessor, args) => mb({ type: "waitLoad", id: args.id, timeout: args.timeout }));
@@ -463,14 +496,15 @@
     const location = args && typeof args.location === "number" ? args.location : 2;
     return vds.getViewContainersByLocation(location).map((c) => { const model = vds.getViewContainerModel(c); return { id: c.id, title: typeof c.title === "string" ? c.title : (c.title && c.title.value) || "", active: model.activeViewDescriptors.length, visible: model.visibleViewDescriptors.length, all: model.allViewDescriptors.length }; });
   });
-  // The built-in Chat container stays registered in the secondary sidebar (even with AI features off) and keeps
-  // its composite bar showing. Move it to the panel once, so the sidebar holds only the Agent pane and
-  // VS Code hides the bar natively (workbench.activityBar.autoHide) with a correct layout.
+  // Builtin Chat must stay registered for workbench plumbing, but it must not occupy the
+  // bottom panel (that is how "Chat" / "Build with Agent" leaked). If an older session
+  // parked it in the panel, pull it back to the auxiliary bar; CSS hides those labels there.
   Registry.registerCommand("muster.evictBuiltinChat", (accessor) => {
     const vds = accessor.get(IViewDescriptorService);
     const chat = vds.getViewContainerById("workbench.panel.chat");
-    if (chat && vds.getViewContainerLocation(chat) === 2) { vds.moveViewContainerToLocation(chat, 1, undefined, "muster"); return true; }
-    return false;
+    if (!chat) return false;
+    if (vds.getViewContainerLocation(chat) === 1) { vds.moveViewContainerToLocation(chat, 2, undefined, "muster"); return true; }
+    return true;
   });
   Registry.registerCommand("muster.moveViewContainer", (accessor, args) => {
     const vds = accessor.get(IViewDescriptorService);

@@ -1,7 +1,7 @@
 {
   "name": "@muster-code/theme",
   "displayName": "Muster Themes",
-  "description": "Muster Dark \u2014 the Muster Code default theme.",
+  "description": "Muster color palettes and Lucide product icons, with native customization support.",
   "version": "0.1.0",
   "publisher": "muster",
   "private": true,
@@ -23,14 +23,30 @@
         "label": "Muster Light",
         "uiTheme": "vs",
         "path": "./themes/muster-light-color-theme.json"
+      },
+      {
+        "label": "Muster Graphite",
+        "uiTheme": "vs-dark",
+        "path": "./themes/muster-graphite-color-theme.json"
+      },
+      {
+        "label": "Muster Midnight",
+        "uiTheme": "vs-dark",
+        "path": "./themes/muster-midnight-color-theme.json"
+      },
+      {
+        "label": "Muster Sand",
+        "uiTheme": "vs",
+        "path": "./themes/muster-sand-color-theme.json"
       }
     ],
     "configurationDefaults": {
-      "workbench.colorTheme": "Muster Dark",
+      "workbench.colorTheme": "Muster Graphite",
       "workbench.activityBar.location": "top",
       "window.titleBarStyle": "custom",
       "window.commandCenter": false,
       "workbench.layoutControl.enabled": true,
+      "workbench.layoutControl.type": "both",
       "workbench.secondarySideBar.defaultVisibility": "visible",
       "workbench.startupEditor": "none",
       "workbench.tips.enabled": true,
@@ -45,8 +61,17 @@
       "diffEditor.renderSideBySide": false,
       "diffEditor.ignoreTrimWhitespace": false,
       "chat.disableAIFeatures": true,
-      "workbench.activityBar.autoHide": true
-    }
+      "inlineChat.accessibleDiffView": "off",
+      "workbench.activityBar.autoHide": false,
+      "workbench.productIconTheme": "muster-lucide"
+    },
+    "productIconThemes": [
+      {
+        "id": "muster-lucide",
+        "label": "Muster Icons",
+        "path": "./themes/muster-product-icon-theme.json"
+      }
+    ]
   },
   "scripts": {
     "build": "node -e \"require('fs').mkdirSync('dist-ext',{recursive:true});require('fs').cpSync('themes','dist-ext/themes',{recursive:true});const p=require('./package.json');delete p.scripts;require('fs').writeFileSync('dist-ext/package.json',JSON.stringify(p,null,2))\""

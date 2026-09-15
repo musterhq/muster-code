@@ -1,0 +1,6 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Slow browser fixture</title></head>
+<body><h1>Slow page</h1><p id="status">Waiting for delayed content…</p>
+<script>
+  console.log("slow fixture booted");
+  setTimeout(() => { document.getElementById("status").textContent = "Delayed content ready"; console.log("slow fixture ready"); }, 1200);
+</script></body></html>

@@ -4,7 +4,7 @@
 // inline chat / chat editing), and Cursor's status-bar cluster.
 import * as vscode from "vscode";
 import { spawn } from "node:child_process";
-import { cachedQuery, formatAge, formatSize, interruptTurn, listThreads, prefetchCatalog, readHistory, runTurn, setBrowserMcp, setDisabledMcpServers, threadsForWorkspace, turnHooks, type CodexThread, useCatalogStore } from "./codex.js";
+import { cachedQuery, callOwnedThread, formatAge, formatSize, interruptTurn, listThreads, prefetchCatalog, readHistory, runTurn, setBrowserMcp, setDisabledMcpServers, threadsForWorkspace, turnHooks, type CodexThread, useCatalogStore } from "./codex.js";
 import { BrowserToolServer } from "./browser-tools.js";
 import { join as joinPath } from "node:path";
 import { AgentPane } from "./agent-pane.js";
@@ -16,6 +16,10 @@ import { refreshMentionIndex, setBrowserProvider, watchTerminals } from "./conte
 import { SettingsPage } from "./settings-page.js";
 import { BrowserController } from "./browser.js";
 import { queryCodex } from "./codex.js";
+import { TerminalWorkspace } from "./terminal-workspace.js";
+import { handoffThread, ThreadCatalog, ThreadCatalogError, type ThreadListOptions, type ThreadRead, type ThreadRecord } from "./thread-catalog.js";
+import { NavigationHub } from "./navigation.js";
+import { registerWorkspaceHub } from "./workspace-hub.js";
 
 const SESSION_TYPE = "codex";
 const SESSION_SCHEME = "muster-codex";
@@ -33,6 +37,9 @@ const output = vscode.window.createOutputChannel("Muster", { log: true });
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
   useCatalogStore(context.globalState);
+  if (vscode.workspace.getConfiguration("workbench").get<string>("colorTheme") === "Muster Dark") {
+    void vscode.workspace.getConfiguration("workbench").update("colorTheme", "Muster Graphite", vscode.ConfigurationTarget.Global);
+  }
   setTimeout(() => prefetchCatalog(vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? process.cwd()), 1500);
   setTimeout(() => refreshMentionIndex(), 2500); // the @ file index, so the first popover is instant
   const config = () => vscode.workspace.getConfiguration("muster");
@@ -155,6 +162,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // ── The Agent pane (secondary sidebar) — the Cursor-standard surface ──
   const pane = new AgentPane(context, output, live);
   context.subscriptions.push(vscode.window.registerWebviewViewProvider(AgentPane.viewId, pane, { webviewOptions: { retainContextWhenHidden: true } }));
+  registerWorkspaceHub(context, { sourceRoot: workspaceCwd });
+  const navigation = new NavigationHub({
+    getCommands: (all = true) => vscode.commands.getCommands(all),
+    showQuickPick: (items, options) => vscode.window.showQuickPick(items, options),
+    executeCommand: (command, ...args) => vscode.commands.executeCommand(command, ...args),
+  });
+  context.subscriptions.push(vscode.commands.registerCommand("muster.navigation.goTo", () => navigation.open()));
   context.subscriptions.push(vscode.commands.registerCommand("muster.agent.new", () => pane.newAgent()));
   context.subscriptions.push(vscode.commands.registerCommand("muster.agent.history", () => pane.showHistory()));
   context.subscriptions.push(vscode.commands.registerCommand("muster.agent.board", () => pane.showBoard()));
@@ -198,6 +212,23 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   }));
   registerCompletions(context, workspaceCwd, () => config().get<string>("codex.model"));
   watchTerminals(context);
+  const terminalWorkspace = new TerminalWorkspace(context, workspaceCwd, () => config().get<number>("terminal.maxOutputBytes", 40_000));
+  context.subscriptions.push(terminalWorkspace);
+  const terminalContext = (): { taskId?: string; taskLabel?: string; cwd?: string } => {
+    const provider = pane as AgentPane & { terminalContext?: () => { taskId?: string; taskLabel?: string; cwd?: string } };
+    const value = provider.terminalContext?.();
+    return value && typeof value === "object" ? value : {};
+  };
+  const terminalArgs = (args?: Parameters<TerminalWorkspace["open"]>[0]): Parameters<TerminalWorkspace["open"]>[0] => ({ ...terminalContext(), ...(args ?? {}) });
+  context.subscriptions.push(vscode.commands.registerCommand("muster.terminal.workspace", () => terminalWorkspace.openInteractive(terminalArgs())));
+  context.subscriptions.push(vscode.commands.registerCommand("muster.terminal.list", (args?: { includeClosed?: boolean }) => args ? terminalWorkspace.list(args.includeClosed !== false) : terminalWorkspace.listInteractive()));
+  context.subscriptions.push(vscode.commands.registerCommand("muster.terminal.open", (args?: Parameters<TerminalWorkspace["open"]>[0]) => args ? terminalWorkspace.open(terminalArgs(args)) : terminalWorkspace.openInteractive(terminalArgs())));
+  context.subscriptions.push(vscode.commands.registerCommand("muster.terminal.create", (args?: Parameters<TerminalWorkspace["create"]>[0]) => terminalWorkspace.create(terminalArgs(args))));
+  context.subscriptions.push(vscode.commands.registerCommand("muster.terminal.reveal", (args?: { id?: string }) => terminalWorkspace.revealInteractive(args?.id)));
+  context.subscriptions.push(vscode.commands.registerCommand("muster.terminal.output", (args?: { id?: string; maxChars?: number }) => terminalWorkspace.outputInteractive(args?.id, args?.maxChars)));
+  context.subscriptions.push(vscode.commands.registerCommand("muster.terminal.search", (args?: { id?: string; query?: string; limit?: number; caseSensitive?: boolean }) => args?.id && args.query ? terminalWorkspace.search(args.id, args.query, { ...(args.limit === undefined ? {} : { limit: args.limit }), ...(args.caseSensitive === undefined ? {} : { caseSensitive: args.caseSensitive }) }) : terminalWorkspace.searchInteractive(args?.id, args?.query)));
+  context.subscriptions.push(vscode.commands.registerCommand("muster.terminal.send", (args?: { id?: string; text?: string; execute?: boolean }) => args?.id && args.text ? terminalWorkspace.send(args.id, args.text, args.execute === true) : terminalWorkspace.sendInteractive(args?.id)));
+  context.subscriptions.push(vscode.commands.registerCommand("muster.terminal.close", (args?: { id?: string }) => terminalWorkspace.closeInteractive(args?.id)));
   // Codex status (Cursor shows plan/usage in its chrome): plan + the primary rate-limit window, refreshed periodically and on account events.
   const codexItem = vscode.window.createStatusBarItem("muster.codex", vscode.StatusBarAlignment.Right, 61);
   codexItem.command = "muster.agent.plugins";
@@ -276,6 +307,68 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   }));
   context.subscriptions.push(vscode.window.registerCustomEditorProvider(PlanEditorProvider.viewType, planEditors, { webviewOptions: { retainContextWhenHidden: true }, supportsMultipleEditorsPerDocument: false }));
   const settings = new SettingsPage(context, workspaceCwd);
+  context.subscriptions.push(vscode.commands.registerCommand("muster.appearance.open", () => settings.open("appearance")));
+  const threadCatalog = new ThreadCatalog({ query: (method, params, cwd) => queryCodex(method, params, cwd), callOwned: (threadId, method, params, cwd) => { const owner = (pane as AgentPane & { conversationForThread?: (id: string) => string | undefined }).conversationForThread?.(threadId); if (!owner) return Promise.resolve(undefined); return callOwnedThread(owner, threadId, method, params, cwd); } }, () => (vscode.workspace.workspaceFolders ?? []).map((folder) => folder.uri.fsPath));
+  const catalogError = (error: unknown): void => {
+    const detail = error instanceof ThreadCatalogError && error.capability ? " This app-server does not expose that capability." : "";
+    void vscode.window.showErrorMessage(`${error instanceof Error ? error.message : String(error)}${detail}`);
+  };
+  const selectCatalogThread = async (options: Omit<ThreadListOptions, "cursor"> = {}): Promise<ThreadRecord | undefined> => {
+    try {
+      const records = await threadCatalog.listAll(options);
+      if (!records.length) { void vscode.window.showInformationMessage("No Codex threads match the open workspaces and filters."); return undefined; }
+      const pick = await vscode.window.showQuickPick(records.map((record) => ({ label: `${record.isPinned ? "$(pinned) " : ""}${record.name}`, description: `${record.workspaceRoot || record.cwd} · ${record.sourceKind || "thread"}`, detail: `${record.id}${record.relation.forkedFromId ? ` · fork of ${record.relation.forkedFromId}` : ""}${record.relation.spawnedParentId ? ` · spawned by ${record.relation.spawnedParentId}` : ""}`, id: record.id })), { placeHolder: "Select a Codex thread" });
+      return pick ? threadCatalog.knownThread(pick.id) : undefined;
+    } catch (error) { catalogError(error); return undefined; }
+  };
+  const resolveCatalogThread = async (id: string | undefined, options: Omit<ThreadListOptions, "cursor"> = {}): Promise<ThreadRecord | undefined> => {
+    if (!id) return selectCatalogThread(options);
+    const known = threadCatalog.knownThread(id); if (known) return known;
+    const refreshed = await threadCatalog.listAll(options); const found = refreshed.find((record) => record.id === id);
+    if (!found) throw new ThreadCatalogError(`Thread ${id} is not available in the currently open workspaces.`, "thread/read");
+    return found;
+  };
+  const inspectCatalogThread = async (args?: { id?: string; includeTurns?: boolean }): Promise<void> => {
+    try {
+      const record = await resolveCatalogThread(args?.id, { includeSubagents: true });
+      if (!record) return;
+      const read = await threadCatalog.read(record.id, args?.includeTurns !== false);
+      const metadata = { ...read.thread, relation: record.relation, workspaceRoot: record.workspaceRoot };
+      const text = [`# ${record.name}`, "", `Thread ${record.id}`, `Workspace ${record.workspaceRoot || record.cwd}`, `Source ${record.sourceKind || "unknown"}`, "", "```json", JSON.stringify(metadata, null, 2), "```", ""].join("\n");
+      const doc = await vscode.workspace.openTextDocument({ content: text, language: "markdown" }); await vscode.window.showTextDocument(doc, { preview: true, preserveFocus: false });
+    } catch (error) { catalogError(error); }
+  };
+  const openCatalogThread = async (args: { id?: string } | undefined, mode: "open" | "continue"): Promise<boolean> => {
+    try {
+      const record = await resolveCatalogThread(args?.id, { includeSubagents: true }); if (!record) return false;
+      const read = await threadCatalog.read(record.id, true);
+      await handoffThread(pane as AgentPane & { openCatalogThread?: (record: ThreadRecord, read: ThreadRead, mode: "open" | "continue") => Promise<void> }, record, read, mode);
+      return true;
+    } catch (error) { catalogError(error); return false; }
+  };
+  const searchCatalogThread = async (): Promise<ThreadRecord | undefined> => {
+    const searchTerm = await vscode.window.showInputBox({ prompt: "Search Codex thread titles", placeHolder: "Optional title text" });
+    if (searchTerm === undefined) return undefined;
+    const archiveChoice = await vscode.window.showQuickPick([{ label: "Active threads", archived: false }, { label: "Archived threads", archived: true }, { label: "All active and archived", archived: undefined }], { placeHolder: "Thread state" });
+    if (!archiveChoice) return undefined;
+    const pinChoice = await vscode.window.showQuickPick([{ label: "Pinned and unpinned", isPinned: undefined }, { label: "Pinned only", isPinned: true }, { label: "Unpinned only", isPinned: false }], { placeHolder: "Pin filter" });
+    if (!pinChoice) return undefined;
+    const folders = (vscode.workspace.workspaceFolders ?? []).map((folder) => folder.uri.fsPath);
+    const cwdChoice = folders.length > 1 ? await vscode.window.showQuickPick([{ label: "All open workspaces", cwd: undefined }, ...folders.map((cwd) => ({ label: cwd, cwd }))], { placeHolder: "Workspace filter" }) : undefined;
+    return selectCatalogThread({ ...(searchTerm.trim() ? { searchTerm: searchTerm.trim() } : {}), ...(archiveChoice.archived === undefined ? {} : { archived: archiveChoice.archived }), ...(pinChoice.isPinned === undefined ? {} : { isPinned: pinChoice.isPinned }), ...(cwdChoice?.cwd ? { cwd: cwdChoice.cwd } : {}) });
+  };
+  context.subscriptions.push(vscode.commands.registerCommand("muster.thread.catalog", () => selectCatalogThread()));
+  context.subscriptions.push(vscode.commands.registerCommand("muster.thread.list", async (args?: ThreadListOptions) => args ? threadCatalog.listPage(args) : selectCatalogThread()));
+  context.subscriptions.push(vscode.commands.registerCommand("muster.thread.search", () => searchCatalogThread()));
+  context.subscriptions.push(vscode.commands.registerCommand("muster.thread.listSubagents", () => selectCatalogThread({ includeSubagents: true })));
+  context.subscriptions.push(vscode.commands.registerCommand("muster.thread.inspect", (args?: { id?: string; includeTurns?: boolean }) => inspectCatalogThread(args)));
+  context.subscriptions.push(vscode.commands.registerCommand("muster.thread.open", (args?: { id?: string }) => openCatalogThread(args, "open")));
+  context.subscriptions.push(vscode.commands.registerCommand("muster.thread.continue", (args?: { id?: string }) => openCatalogThread(args, "continue")));
+  context.subscriptions.push(vscode.commands.registerCommand("muster.thread.rename", async (args?: { id?: string; name?: string }) => { try { const record = await resolveCatalogThread(args?.id); if (!record) return; const name = args?.name ?? await vscode.window.showInputBox({ prompt: "Thread name", value: record.name }); if (name === undefined) return; await threadCatalog.rename(record.id, name); void vscode.window.showInformationMessage(`Renamed thread to ${name.trim()}.`); } catch (error) { catalogError(error); } }));
+  context.subscriptions.push(vscode.commands.registerCommand("muster.thread.pin", async (args?: { id?: string; pinned?: boolean }) => { try { const record = await resolveCatalogThread(args?.id); if (!record) return; await threadCatalog.setPinned(record.id, args?.pinned ?? !record.isPinned); void vscode.window.showInformationMessage(`${args?.pinned ?? !record.isPinned ? "Pinned" : "Unpinned"} ${record.name}.`); } catch (error) { catalogError(error); } }));
+  context.subscriptions.push(vscode.commands.registerCommand("muster.thread.archive", async (args?: { id?: string }) => { try { const record = await resolveCatalogThread(args?.id); if (!record) return; const ok = await vscode.window.showWarningMessage(`Archive ${record.name}?`, { modal: true }, "Archive"); if (ok === "Archive") { await threadCatalog.archive(record.id); void vscode.window.showInformationMessage(`Archived ${record.name}.`); } } catch (error) { catalogError(error); } }));
+  context.subscriptions.push(vscode.commands.registerCommand("muster.thread.unarchive", async (args?: { id?: string }) => { try { const record = await resolveCatalogThread(args?.id, { archived: true, includeSubagents: true }); if (!record) return; await threadCatalog.unarchive(record.id); void vscode.window.showInformationMessage(`Restored ${record.name}.`); } catch (error) { catalogError(error); } }));
+  context.subscriptions.push(vscode.commands.registerCommand("muster.thread.fork", async (args?: { id?: string; lastTurnId?: string; ephemeral?: boolean }) => { try { const record = await resolveCatalogThread(args?.id, { includeSubagents: true }); if (!record) return; const fork = await threadCatalog.fork(record.id, { ...(args?.lastTurnId ? { lastTurnId: args.lastTurnId } : {}), ...(args?.ephemeral === true ? { ephemeral: true } : {}) }); if (args?.ephemeral === true) { void vscode.window.showInformationMessage(`Created ephemeral fork ${fork.id}; it is available only in the owning app-server session.`); return; } const read = await threadCatalog.read(fork.id, true); await handoffThread(pane as AgentPane & { openCatalogThread?: (record: ThreadRecord, read: ThreadRead, mode: "open" | "continue") => Promise<void> }, fork, read, "continue"); } catch (error) { catalogError(error); } }));
   setDisabledMcpServers(vscode.workspace.getConfiguration("muster").get<string[]>("mcp.disabled", []));
   context.subscriptions.push(vscode.workspace.onDidChangeConfiguration((e) => { if (e.affectsConfiguration("muster.mcp.disabled")) setDisabledMcpServers(vscode.workspace.getConfiguration("muster").get<string[]>("mcp.disabled", [])); }));
   // Browser (⇧⌘B): a Chromium guest tab with Cursor's visual editor; picks and screenshots go to the chat.
@@ -285,7 +378,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   browser.onChange((state) => pane.browserChanged(state));
   browser.onPick((pick) => { if (pick.imagePath || !pick.picked) void pane.addBrowserPick(pick); });
   // The browser as agent tools: Codex launches our MCP shim, which calls back into this host over a socket.
-  const browserTools = new BrowserToolServer(browser, () => browser.activeEditorBrowser() ?? pane.activeBrowserId(), (url, headless) => { if (headless) return browser.open(url, "headless"); pane.openBrowserTab(url); return browser.list().at(-1); }, (line) => output.appendLine(line));
+  const browserTools = new BrowserToolServer(browser, () => browser.activeEditorBrowser() ?? pane.activeBrowserId(), (url, headless) => { if (headless) return browser.open(url, "headless"); pane.openBrowserTab(url); return browser.list().at(-1); }, (line) => output.appendLine(line), () => vscode.workspace.workspaceFolders?.[0]?.uri.fsPath);
   browserTools.start(joinPath(context.extensionPath, "browser-mcp.js")); context.subscriptions.push(browserTools);
   setBrowserMcp({ command: browserTools.launcherPath, args: [], env: {}, mcpConfig: browserTools.mcpConfigPath });
   turnHooks.start = () => browserTools.turnStarted(); turnHooks.end = () => browserTools.turnEnded();
@@ -343,6 +436,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   context.subscriptions.push(vscode.commands.registerCommand("muster.dictation.toggle", () => pane.onDictate?.()), { dispose: stopDictation });
   context.subscriptions.push(vscode.commands.registerCommand("muster.dictation.start", (command?: string) => { stopDictation(); startDictation(command); }));
   context.subscriptions.push(vscode.commands.registerCommand("muster.agent.maximize", () => vscode.commands.executeCommand("workbench.action.toggleMaximizedAuxiliaryBar")));
+  context.subscriptions.push(vscode.commands.registerCommand("muster.agent.togglePane", () => vscode.commands.executeCommand("workbench.action.toggleAuxiliaryBar")));
   context.subscriptions.push(vscode.commands.registerCommand("muster.thread.resume", async (thread?: CodexThread) => {
     if (thread) await pane.openThread(thread); else await pane.pickThread();
   }));

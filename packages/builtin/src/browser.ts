@@ -2,18 +2,25 @@
 // pane with its own URL bar and sections). The pane's webview draws the chrome
 // and reports where the page area sits; the workbench places a main-process
 // WebContentsView over it and streams page events (title, URL, console) back.
+import { browserUrl } from "./conversation-state.js";
 import * as vscode from "vscode";
 import { mkdirSync, writeFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { rememberPick } from "./context.js";
+import { resolveViewportSetting, type ViewportSetting } from "./browser-viewport.js";
+
+export type BrowserColorScheme = "dark" | "light" | "system";
+export type BrowserViewportState = ViewportSetting & { measured?: { width: number; height: number } };
 
 export interface PickedSource { file: string; line: number; col: number; via: string; component?: string }
 export interface PickedElement { selector: string; tag: string; id: string; classes: string[]; text: string; html: string; rect: { x: number; y: number; w: number; h: number }; styles: Record<string, string>; source?: PickedSource | null; url: string; title: string }
 export interface BrowserPick { readonly id: string; readonly picked: PickedElement | null; readonly imagePath: string | undefined; readonly url: string; readonly title: string }
 export interface ConsoleEntry { level: string; message: string; line?: number; source?: string }
+export interface BrowserHistory { canGoBack: boolean; canGoForward: boolean }
+export interface BrowserLoadError { url: string; error: string; code?: number; mainFrame: boolean; time: number }
 /** A visual-editor edit made in the browser (Cursor's CHANGES list: old → new), applied live to the page until the agent puts it in code. */
 export interface VisualChange { selector: string; kind: "text" | "style"; prop?: string; before: string; after: string; source?: PickedSource | null }
-export interface BrowserState { id: string; url: string; title: string; console: ConsoleEntry[]; picked: PickedElement | null; picking: boolean; driving: boolean; changes: VisualChange[]; cert?: { url: string; error: string } | null; headless?: boolean }
+export interface BrowserState { loading?: boolean; loadError?: string | null; navigation?: number; history?: BrowserHistory; networkErrors?: BrowserLoadError[]; id: string; url: string; title: string; console: ConsoleEntry[]; picked: PickedElement | null; picking: boolean; driving: boolean; changes: VisualChange[]; cert?: { url: string; error: string } | null; headless?: boolean; viewport?: BrowserViewportState; colorScheme?: BrowserColorScheme }
 
 /** Cursor's lock overlay while the agent drives: banner + "Take control" (the page stays clickable so the agent's own input events land). */
 export const LOCK_JS = `(() => { if (document.getElementById("__muster_lock")) return true; const d = document.createElement("div"); d.id = "__muster_lock"; d.setAttribute("style", "position:fixed;inset:0;z-index:2147483647;pointer-events:none;display:flex;align-items:flex-end;justify-content:center;font:13px -apple-system,system-ui,sans-serif;color:#fff;box-shadow:inset 0 0 0 2px #D2943E");
@@ -27,6 +34,8 @@ function applyJs(selector: string, kind: "text" | "style", prop: string, value: 
 
 export class BrowserController {
   private readonly tabs = new Map<string, BrowserState>();
+  /** Request generations are local to the extension host; main-process generations are separate. */
+  private readonly requests = new Map<string, number>();
   private counter = 0;
   private lastUrl: string;
   private readonly changes = new vscode.EventEmitter<BrowserState>();
@@ -39,9 +48,21 @@ export class BrowserController {
 
   constructor(private readonly context: vscode.ExtensionContext, private readonly cwd: () => string) {
     this.lastUrl = context.workspaceState.get<string>("muster.browser.lastUrl", "http://localhost:3000");
-    context.subscriptions.push(vscode.commands.registerCommand("muster.browser.event", (args: { id: string; kind: string; title?: string; url?: string; level?: string; message?: string; line?: number; source?: string }) => {
+    context.subscriptions.push(vscode.commands.registerCommand("muster.browser.event", (args: { id: string; kind: string; title?: string; url?: string; level?: string; message?: string; line?: number; source?: string; navigation?: number; history?: BrowserHistory; mainFrame?: boolean; code?: number }) => {
       const tab = this.tabs.get(args.id);
       if (!tab) return;
+      if (typeof args.navigation === "number" && typeof tab.navigation === "number" && args.navigation < tab.navigation) return;
+      if (typeof args.navigation === "number") tab.navigation = args.navigation;
+      if (args.history) tab.history = { canGoBack: !!args.history.canGoBack, canGoForward: !!args.history.canGoForward };
+      if (args.kind === "loading") { tab.loading = true; tab.loadError = null; }
+      if (args.kind === "loaded") tab.loading = false;
+      if (args.kind === "loadError") { tab.loading = false; tab.loadError = args.message ?? "Page could not be loaded"; }
+      if (args.kind === "networkError") {
+        const error: BrowserLoadError = { url: args.url ?? tab.url, error: args.message ?? "Request failed", ...(args.code !== undefined ? { code: args.code } : {}), mainFrame: !!args.mainFrame, time: Date.now() };
+        (tab.networkErrors ??= []).push(error);
+        if (tab.networkErrors.length > 100) tab.networkErrors.splice(0, tab.networkErrors.length - 100);
+      }
+      if (args.kind === "navigate" && args.url && args.url !== tab.url) { tab.picked = null; tab.changes = []; }
       if (args.kind === "title" && args.title !== undefined) tab.title = args.title;
       if ((args.kind === "navigate" || args.kind === "title" || args.kind === "ready") && args.url) { tab.url = args.url; this.lastUrl = args.url; void context.workspaceState.update("muster.browser.lastUrl", args.url); }
       if (args.kind === "console" && args.message === "__muster:takecontrol") { this.takeControl(args.id); return; }
@@ -69,11 +90,67 @@ export class BrowserController {
   list(): BrowserState[] { return [...this.tabs.values()]; }
   get(id: string): BrowserState | undefined { return this.tabs.get(id); }
   defaultUrl(): string { return this.lastUrl; }
+  private tabDiagnostics(tab: BrowserState): { id: string; url: string; title: string; loading: boolean; loadError?: string | null; history: BrowserHistory; console: { total: number; errors: number; warnings: number }; networkErrors: BrowserLoadError[]; changes: number } {
+    return { id: tab.id, url: tab.url, title: tab.title, loading: !!tab.loading, ...(tab.loadError ? { loadError: tab.loadError } : {}), history: tab.history ?? { canGoBack: false, canGoForward: false }, console: { total: tab.console.length, errors: tab.console.filter((c) => c.level === "error").length, warnings: tab.console.filter((c) => c.level === "warn" || c.level === "warning").length }, networkErrors: [...(tab.networkErrors ?? [])], changes: tab.changes.length };
+  }
+
+  diagnostics(id: string): ReturnType<BrowserController["tabDiagnostics"]> | undefined {
+    const tab = this.tabs.get(id); if (!tab) return undefined;
+    return this.tabDiagnostics(tab);
+  }
+
+  status(id: string): (ReturnType<BrowserController["tabDiagnostics"]> & {
+    viewport: { width: number; height: number; mode: string; preset?: string };
+    colorScheme: BrowserColorScheme;
+    recording: "unsupported";
+  }) | undefined {
+    const base = this.diagnostics(id); if (!base) return undefined;
+    const tab = this.tabs.get(id)!;
+    const vp = tab.viewport;
+    const measured = vp?.measured;
+    const mode = vp?.mode ?? "fill";
+    return {
+      ...base,
+      viewport: {
+        width: measured?.width ?? (vp && "width" in vp ? vp.width : 0),
+        height: measured?.height ?? (vp && "height" in vp ? vp.height : 0),
+        mode,
+        ...(vp && vp.mode === "preset" ? { preset: vp.preset } : {}),
+      },
+      colorScheme: tab.colorScheme ?? "system",
+      recording: "unsupported",
+    };
+  }
+
+  async setViewport(id: string, input: { mode: "fill" | "freeform" | "preset"; width?: number; height?: number; preset?: string; orientation?: "portrait" | "landscape" }): Promise<{ viewport: { width: number; height: number; mode: string; preset?: string } } | { error: string }> {
+    const tab = this.tabs.get(id); if (!tab) return { error: `Unknown browser tab ${id}` };
+    let setting: ViewportSetting;
+    try { setting = resolveViewportSetting(input); } catch (error) { return { error: error instanceof Error ? error.message : String(error) }; }
+    tab.viewport = { ...setting };
+    this.changes.fire(tab);
+    const layout = await Promise.resolve(vscode.commands.executeCommand<{ width?: number; height?: number; error?: string }>("muster.browser.viewport", { id, viewport: setting }));
+    if (layout && typeof layout === "object" && layout.error) return { error: layout.error };
+    const measured = await Promise.resolve(vscode.commands.executeCommand<{ width?: number; height?: number }>("muster.browser.eval", { id, js: "({ width: window.innerWidth, height: window.innerHeight })" })).catch(() => null);
+    const width = typeof measured === "object" && measured && "width" in measured ? Number((measured as { width: number }).width) : layout?.width ?? 0;
+    const height = typeof measured === "object" && measured && "height" in measured ? Number((measured as { height: number }).height) : layout?.height ?? 0;
+    tab.viewport = { ...setting, measured: { width, height } };
+    this.changes.fire(tab);
+    return { viewport: { width, height, mode: setting.mode, ...(setting.mode === "preset" ? { preset: setting.preset } : {}) } };
+  }
+
+  async setAppearance(id: string, colorScheme: BrowserColorScheme): Promise<{ colorScheme: BrowserColorScheme } | { error: string }> {
+    const tab = this.tabs.get(id); if (!tab) return { error: `Unknown browser tab ${id}` };
+    const result = await Promise.resolve(vscode.commands.executeCommand<{ colorScheme?: BrowserColorScheme; error?: string }>("muster.browser.setAppearance", { id, colorScheme }));
+    if (result && typeof result === "object" && result.error) return { error: result.error };
+    tab.colorScheme = colorScheme;
+    this.changes.fire(tab);
+    return { colorScheme };
+  }
 
   /** A new browser tab: the host (pane webview or a browser editor tab) draws the chrome and reports the page area. */
   open(url?: string, host: "pane" | "editor" | "headless" = "pane"): BrowserState {
     const id = `b${++this.counter}`;
-    const tab: BrowserState = { id, url: url ?? this.lastUrl, title: "", console: [], picked: null, picking: false, driving: false, changes: [], ...(host === "headless" ? { headless: true } : {}) };
+    const tab: BrowserState = { id, url: browserUrl(url ?? this.lastUrl), title: "", console: [], networkErrors: [], history: { canGoBack: false, canGoForward: false }, picked: null, picking: false, driving: false, changes: [], ...(host === "headless" ? { headless: true } : {}) };
     this.tabs.set(id, tab);
     void vscode.commands.executeCommand("muster.browser.open", { id, url: tab.url, host });
     if (host === "editor") this.openEditor(tab);
@@ -143,19 +220,38 @@ export class BrowserController {
     return `Apply these visual edits I made in the browser to the source code, keeping everything else as is:\n${tab.changes.map((c) => `- ${c.selector}${c.source?.file ? ` (source ${c.source.file}:${c.source.line})` : ""}: ${c.kind === "text" ? "text" : c.prop} "${c.before}" → "${c.after}"`).join("\n")}\n\nPage: ${tab.url}`;
   }
 
-  close(id: string): void { this.tabs.delete(id); void vscode.commands.executeCommand("muster.browser.close", { id }); }
+  close(id: string): void { this.tabs.delete(id); this.requests.delete(id); void vscode.commands.executeCommand("muster.browser.close", { id }); }
   /** Load a URL; the tab's URL follows the request and is restored if the load fails (the bar must not show a page that never loaded). */
   navigate(id: string, url: string): Promise<unknown> {
-    let u = url.trim(); if (u && !/^[a-z]+:\/\//i.test(u)) u = /^(localhost|\d+\.\d+|[\w-]+:\d+)/.test(u) ? `http://${u}` : `https://${u}`;
-    const tab = this.tabs.get(id); if (!tab || !u) return Promise.resolve(false);
-    const previous = tab.url; tab.url = u; this.changes.fire(tab);
-    return Promise.resolve(vscode.commands.executeCommand("muster.browser.navigate", { id, url: u })).then((r) => { if (r && typeof r === "object" && "error" in (r as object)) { tab.url = previous; this.changes.fire(tab); } return r; });
+    const tab = this.tabs.get(id); if (!tab) return Promise.resolve(false);
+    let u: string;
+    try { u = browserUrl(url); } catch (error) { tab.loadError = error instanceof Error ? error.message : "Invalid URL"; this.changes.fire(tab); return Promise.resolve({ error: tab.loadError }); }
+    const previousUrl = tab.url;
+    const request = (this.requests.get(id) ?? 0) + 1; this.requests.set(id, request);
+    tab.url = u; tab.loading = true; tab.loadError = null; tab.picked = null; tab.changes = []; this.changes.fire(tab);
+    return Promise.resolve(vscode.commands.executeCommand("muster.browser.navigate", { id, url: u })).then((result) => {
+      if (this.requests.get(id) !== request) return result;
+      tab.loading = false;
+      if (result === false || result && typeof result === "object" && "error" in result) { tab.loadError = result === false ? "Page load timed out. Retry or check the address." : String((result as { error: unknown }).error); tab.url = previousUrl; }
+      this.changes.fire(tab); return result;
+    }, error => { if (this.requests.get(id) === request) { tab.loading = false; tab.loadError = error instanceof Error ? error.message : String(error); tab.url = previousUrl; this.changes.fire(tab); } return { error: String(error) }; });
   }
   action(id: string, action: "back" | "forward" | "reload" | "pick" | "screenshot"): Promise<unknown> {
     const tab = this.tabs.get(id);
     if (!tab) return Promise.resolve(false);
     if (action === "pick") { tab.picking = true; this.changes.fire(tab); }
-    return Promise.resolve(vscode.commands.executeCommand(`muster.browser.${action}`, { id }));
+    if (action !== "back" && action !== "forward" && action !== "reload") return Promise.resolve(vscode.commands.executeCommand(`muster.browser.${action}`, { id }));
+    const request = (this.requests.get(id) ?? 0) + 1; this.requests.set(id, request);
+    tab.loading = true; tab.loadError = null; tab.picked = null; tab.changes = []; this.changes.fire(tab);
+    return Promise.resolve(vscode.commands.executeCommand(`muster.browser.${action}`, { id })).then((result) => {
+      if (this.requests.get(id) !== request) return result;
+      tab.loading = false;
+      if (result === false || (result && typeof result === "object" && "error" in result)) tab.loadError = result === false ? "Page load timed out. Retry or check the address." : String((result as { error: unknown }).error);
+      this.changes.fire(tab); return result;
+    }, (error) => {
+      if (this.requests.get(id) === request) { tab.loading = false; tab.loadError = error instanceof Error ? error.message : String(error); this.changes.fire(tab); }
+      return { error: String(error) };
+    });
   }
   /** Where the page area sits inside the pane's webview; the workbench adds the webview's own offset. */
   place(id: string, rect: { top: number; left: number; width: number; height: number }, visible: boolean, host: "pane" | "editor" = "pane"): void {
@@ -175,7 +271,7 @@ export class BrowserController {
   }
 }
 
-function browserEditorHtml(csp: string): string {
+export function browserEditorHtml(csp: string): string {
   return /* html */ `<!doctype html><html><head><meta charset="utf-8">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline' ${csp}; script-src 'unsafe-inline' ${csp};">
 <style>
@@ -191,6 +287,10 @@ function browserEditorHtml(csp: string): string {
   .url-input::placeholder { color: var(--vscode-input-placeholderForeground); opacity: .5; }
   .url-loading-bar { position: absolute; left: 0; right: 0; bottom: -1px; height: 2px; background: transparent; }
   .url-loading-bar-progress { height: 100%; width: 0; background: var(--vscode-progressBar-background); transition: width .3s ease; }
+  .browser-state { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; background: var(--vscode-editor-background); color: var(--vscode-descriptionForeground); text-align: center; padding: 24px; box-sizing: border-box; z-index: 2; }
+  .browser-state[hidden] { display: none; }
+  .browser-state.error { color: var(--vscode-errorForeground); }
+  .browser-state button { border: 1px solid var(--vscode-button-border, transparent); border-radius: 4px; padding: 5px 12px; color: var(--vscode-button-foreground); background: var(--vscode-button-background); cursor: pointer; }
   .browser-tools { display: flex; gap: 2px; margin-left: auto; flex-shrink: 0; }
   .browser-tools::before { content: ""; align-self: center; width: 1px; height: 16px; margin: 0 4px; background: var(--vscode-panel-border); opacity: .5; }
   .browser-tools .nav-button.on { background: #D2943E; color: #1a1a1a; opacity: 1; }
@@ -199,11 +299,11 @@ function browserEditorHtml(csp: string): string {
 </style></head>
 <body>
   <div class="browser-navbar">
-    <button class="nav-button" data-act="back" title="Back">←</button><button class="nav-button" data-act="forward" title="Forward">→</button><button class="nav-button" data-act="reload" title="Reload">⟳</button>
+    <button class="nav-button" id="back" data-act="back" title="Back" aria-label="Back">←</button><button class="nav-button" id="forward" data-act="forward" title="Forward" aria-label="Forward">→</button><button class="nav-button" id="reload" data-act="reload" title="Reload" aria-label="Reload">⟳</button>
     <div class="url-input-container"><input class="url-input" id="url" type="text" placeholder="Enter URL or search..." autocomplete="off"><div class="url-loading-bar"><div class="url-loading-bar-progress" id="progress"></div></div></div>
     <div class="browser-tools"><button class="nav-button" id="pick" data-act="pick" title="Select element">⌖</button><button class="nav-button" data-act="screenshot" title="Screenshot to chat">⧉</button></div>
   </div>
-  <div class="browser-frame-container" id="host"></div>
+  <div class="browser-frame-container" id="host"><div class="browser-state" id="browser-state" role="status" aria-live="polite" hidden><span id="browser-state-label"></span><button id="browser-retry" type="button" hidden>Retry</button></div></div>
 <script>
   const vscode = acquireVsCodeApi();
   const host = document.getElementById("host"), url = document.getElementById("url");
@@ -212,7 +312,7 @@ function browserEditorHtml(csp: string): string {
   setInterval(report, 400); window.addEventListener("resize", report);
   url.addEventListener("keydown", (e) => { if (e.key === "Enter") vscode.postMessage({ type: "nav", url: url.value }); e.stopPropagation(); });
   document.querySelectorAll(".nav-button").forEach((b) => b.addEventListener("click", () => vscode.postMessage({ type: "action", action: b.dataset.act })));
-  window.addEventListener("message", (e) => { const m = e.data; if (m.type === "state" && m.state) { st = m.state; if (document.activeElement !== url) url.value = st.url || ""; document.getElementById("pick").classList.toggle("on", !!st.picking); if (st.url) host.setAttribute("data-loaded", "1"); report(); } });
+  window.addEventListener("message", (e) => { const m = e.data; if (m.type === "state" && m.state) { st = m.state; if (document.activeElement !== url) url.value = st.url || ""; document.getElementById("pick").classList.toggle("on", !!st.picking); const back = document.getElementById("back"), forward = document.getElementById("forward"), reload = document.getElementById("reload"), state = document.getElementById("browser-state"), label = document.getElementById("browser-state-label"), retry = document.getElementById("browser-retry"); back.disabled = !st.history?.canGoBack; forward.disabled = !st.history?.canGoForward; reload.disabled = !!st.loading; state.hidden = !st.loading && !st.loadError; state.classList.toggle("error", !!st.loadError); label.textContent = st.loadError || (st.loading ? "Loading page…" : ""); retry.hidden = !st.loadError; if (st.loadError) retry.onclick = () => vscode.postMessage({ type: "action", action: "reload" }); host.toggleAttribute("data-loaded", !st.loading && !st.loadError); report(); } });
   vscode.postMessage({ type: "ready" });
 </script></body></html>`;
 }

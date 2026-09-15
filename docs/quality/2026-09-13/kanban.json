@@ -1,0 +1,591 @@
+{
+  "title": "Muster Code \u2014 production hardening",
+  "updatedAt": "2026-09-14T06:59:45.634017+00:00",
+  "columns": [
+    "Intake",
+    "Design",
+    "Ready",
+    "In Progress",
+    "Integration",
+    "QA",
+    "Done"
+  ],
+  "releaseRule": "No feature is Done until parent live QA and applicable tests have evidence. An N/A requires a reason.",
+  "usage": {
+    "baselineUsedPercent": 7,
+    "remainingPercent": 78,
+    "window": "weekly; account-wide",
+    "resetsAt": 1789817159,
+    "latestUsedPercent": 22
+  },
+  "cards": [
+    {
+      "id": "MC-001",
+      "priority": "P0",
+      "status": "QA",
+      "owner": "Orchestrator",
+      "title": "Baseline staged app and release contract",
+      "scope": "dist/verified; live desktop/browser evidence",
+      "dependencies": "None",
+      "acceptance": "Confirm exact executable, baseline human flows, capture defects without treating fixture data as live inference.",
+      "checks": {
+        "happy": "pending",
+        "negative": "pending",
+        "edge": "pending",
+        "human_flow": "pending",
+        "context_latency": "pending",
+        "ui_interaction": "pending",
+        "ui_regression": "pending",
+        "regression": "pending",
+        "stress": "pending"
+      },
+      "evidence": []
+    },
+    {
+      "id": "MC-101",
+      "priority": "P0",
+      "status": "QA",
+      "owner": "runtime",
+      "title": "Durable activity and recoverable runs",
+      "scope": "agent-pane.ts; codex.ts; runtime modules",
+      "dependencies": "MC-001",
+      "acceptance": "Rich transcript survives reload; disconnected/interrupted states are explicit; no blind write replay.",
+      "checks": {
+        "happy": "pending",
+        "negative": "pending",
+        "edge": "pending",
+        "human_flow": "pending",
+        "context_latency": "pending",
+        "ui_interaction": "pending",
+        "ui_regression": "pending",
+        "regression": "automated pass; live pending",
+        "stress": "pending"
+      },
+      "evidence": []
+    },
+    {
+      "id": "MC-102",
+      "priority": "P0",
+      "status": "QA",
+      "owner": "runtime",
+      "title": "Approval, checkpoint and queue correctness",
+      "scope": "agent-pane.ts; runtime tests",
+      "dependencies": "MC-001",
+      "acceptance": "Correct task receives each event/approval; cancelling or removing queued work cannot strand a task or corrupt checkpoints.",
+      "checks": {
+        "happy": "pending",
+        "negative": "pending",
+        "edge": "pending",
+        "human_flow": "pending",
+        "context_latency": "pending",
+        "ui_interaction": "pending",
+        "ui_regression": "pending",
+        "regression": "automated pass; live pending",
+        "stress": "pending"
+      },
+      "evidence": []
+    },
+    {
+      "id": "MC-103",
+      "priority": "P1",
+      "status": "QA",
+      "owner": "runtime",
+      "title": "Exact context metadata and attachment reliability",
+      "scope": "context.ts; conversation-state.ts",
+      "dependencies": "MC-001",
+      "acceptance": "Files, folders, selections and browser refs resolve once; range/truncation/source details are inspectable; failures preserve the draft.",
+      "checks": {
+        "happy": "pending",
+        "negative": "pending",
+        "edge": "pending",
+        "human_flow": "pending",
+        "context_latency": "pending",
+        "ui_interaction": "pending",
+        "ui_regression": "pending",
+        "regression": "automated pass; live pending",
+        "stress": "pending"
+      },
+      "evidence": []
+    },
+    {
+      "id": "MC-104",
+      "priority": "P1",
+      "status": "QA",
+      "owner": "runtime",
+      "title": "Reported per-turn usage ledger",
+      "scope": "codex.ts; usage modules; core transport",
+      "dependencies": "MC-101",
+      "acceptance": "Input/cached/output/reasoning usage is reported with correct task/turn ownership; unknown remains unknown; model/effort stay explicit.",
+      "checks": {
+        "happy": "pending",
+        "negative": "pending",
+        "edge": "pending",
+        "human_flow": "pending",
+        "context_latency": "pending",
+        "ui_interaction": "pending",
+        "ui_regression": "pending",
+        "regression": "automated pass; live pending",
+        "stress": "pending"
+      },
+      "evidence": []
+    },
+    {
+      "id": "MC-201",
+      "priority": "P0",
+      "status": "QA",
+      "owner": "frontend",
+      "title": "Chat interactions, long content and rendering",
+      "scope": "agent-view.ts; agent-polish.ts; DOM tests",
+      "dependencies": "MC-001",
+      "acceptance": "Typing, IME, editing, scrolling, expanded state and midstream task switches work at narrow/wide sizes under stress.",
+      "checks": {
+        "happy": "pending",
+        "negative": "pending",
+        "edge": "pending",
+        "human_flow": "pending",
+        "context_latency": "pending",
+        "ui_interaction": "pending",
+        "ui_regression": "pending",
+        "regression": "automated pass; live pending",
+        "stress": "partial: Unicode typing and context removal pass; inspector layout failure MC-203"
+      },
+      "evidence": []
+    },
+    {
+      "id": "MC-202",
+      "priority": "P1",
+      "status": "QA",
+      "owner": "frontend",
+      "title": "Customizable themes and icons",
+      "scope": "appearance/settings views; packages/theme",
+      "dependencies": "MC-001",
+      "acceptance": "Five palettes and customization persist/reset safely; readable controls, keyboard focus and semantic full-file diff colors in every palette.",
+      "checks": {
+        "happy": "pending",
+        "negative": "pending",
+        "edge": "pending",
+        "human_flow": "pending",
+        "context_latency": "pending",
+        "ui_interaction": "pending",
+        "ui_regression": "pending",
+        "regression": "automated pass; live pending",
+        "stress": "pending"
+      },
+      "evidence": []
+    },
+    {
+      "id": "MC-203",
+      "priority": "P1",
+      "status": "In Progress",
+      "owner": "frontend",
+      "title": "Context, activity and usage inspection UI",
+      "scope": "agent-view.ts; agent-polish.ts",
+      "dependencies": "MC-101, MC-103, MC-104",
+      "acceptance": "Exact context and genuine event/usage details remain accessible without blocking typing or scrolling.",
+      "checks": {
+        "happy": "pending",
+        "negative": "pending",
+        "edge": "pending",
+        "human_flow": "pending",
+        "context_latency": "pending",
+        "ui_interaction": "pending",
+        "ui_regression": "pending",
+        "regression": "automated pass; live pending",
+        "stress": "fail: expanded inspectors push composer offscreen"
+      },
+      "evidence": [
+        "evidence/Q7-activity-overflow-before.png"
+      ]
+    },
+    {
+      "id": "MC-301",
+      "priority": "P0",
+      "status": "QA",
+      "owner": "browser",
+      "title": "Browser navigation and diagnostics",
+      "scope": "browser.ts; product/muster-browser-main.js",
+      "dependencies": "MC-001",
+      "acceptance": "Success, redirects, refused/offline/invalid URLs, history and overlapping loads settle correctly without stale state.",
+      "checks": {
+        "happy": "pending",
+        "negative": "pending",
+        "edge": "pending",
+        "human_flow": "pending",
+        "context_latency": "pending",
+        "ui_interaction": "pending",
+        "ui_regression": "pending",
+        "regression": "automated pass; live pending",
+        "stress": "pending"
+      },
+      "evidence": []
+    },
+    {
+      "id": "MC-302",
+      "priority": "P1",
+      "status": "QA",
+      "owner": "browser",
+      "title": "Browser picks, visual edits and context handoff",
+      "scope": "browser-tools.ts; browser-mcp.ts; browser fixtures",
+      "dependencies": "MC-301, MC-103",
+      "acceptance": "Pick/edit/screenshot/add-to-chat flows retain exact source and complete through a real inference; take-control and cancellation work.",
+      "checks": {
+        "happy": "pending",
+        "negative": "pending",
+        "edge": "pending",
+        "human_flow": "pending",
+        "context_latency": "pending",
+        "ui_interaction": "pending",
+        "ui_regression": "pending",
+        "regression": "automated pass; live pending",
+        "stress": "pending"
+      },
+      "evidence": []
+    },
+    {
+      "id": "MC-303",
+      "priority": "P1",
+      "status": "QA",
+      "owner": "browser",
+      "title": "Browser stress and lifecycle cleanup",
+      "scope": "browser tests/fixtures",
+      "dependencies": "MC-301",
+      "acceptance": "Large DOM/console output and repeated open-close/navigation remain responsive with bounded retained resources.",
+      "checks": {
+        "happy": "pending",
+        "negative": "pending",
+        "edge": "pending",
+        "human_flow": "pending",
+        "context_latency": "pending",
+        "ui_interaction": "pending",
+        "ui_regression": "pending",
+        "regression": "automated pass; live pending",
+        "stress": "pending"
+      },
+      "evidence": []
+    },
+    {
+      "id": "MC-401",
+      "priority": "P0",
+      "status": "QA",
+      "owner": "Orchestrator",
+      "title": "Realtime full-file and multi-file diff regression gate",
+      "scope": "live native editor; protected parser/reconcile/renderer",
+      "dependencies": "MC-102, MC-202",
+      "acceptance": "Human-prompted streamed edits preserve full-file view, dirty edits, add/delete/move, review/undo and stop-midstream behavior.",
+      "checks": {
+        "happy": "pending",
+        "negative": "pending",
+        "edge": "pending",
+        "human_flow": "pending",
+        "context_latency": "pending",
+        "ui_interaction": "pending",
+        "ui_regression": "pending",
+        "regression": "automated pass; live pending",
+        "stress": "pending"
+      },
+      "evidence": []
+    },
+    {
+      "id": "MC-501",
+      "priority": "P1",
+      "status": "QA",
+      "owner": "browser (terminal wave)",
+      "title": "Agent-owned terminal workspace",
+      "scope": "new terminal modules; extension command integration",
+      "dependencies": "MC-101",
+      "acceptance": "Task-labelled terminal sessions show cwd/status/output, reconnect/reopen safely and link commands to changed files without breaking shell semantics. All exposed palette commands must work without hidden arguments.",
+      "checks": {
+        "happy": "pending",
+        "negative": "pending",
+        "edge": "pending",
+        "human_flow": "pending",
+        "context_latency": "pending",
+        "ui_interaction": "pending",
+        "ui_regression": "pending",
+        "regression": "pending",
+        "stress": "pending"
+      },
+      "evidence": []
+    },
+    {
+      "id": "MC-601",
+      "priority": "P2",
+      "status": "Design",
+      "owner": "Unassigned Luna High",
+      "title": "Independent agent workspaces",
+      "scope": "worktree/checkpoint architecture",
+      "dependencies": "MC-102, MC-401",
+      "acceptance": "Concurrent editing requires isolated worktrees and task-specific checkpoints; integration cannot overwrite another task\u2019s work.",
+      "checks": {
+        "happy": "pending",
+        "negative": "pending",
+        "edge": "pending",
+        "human_flow": "pending",
+        "context_latency": "pending",
+        "ui_interaction": "pending",
+        "ui_regression": "pending",
+        "regression": "pending",
+        "stress": "pending"
+      },
+      "evidence": []
+    },
+    {
+      "id": "MC-701",
+      "priority": "P0",
+      "status": "Ready",
+      "owner": "Orchestrator",
+      "title": "Integrated human-flow and stress acceptance",
+      "scope": "staged build; evidence; all lanes",
+      "dependencies": "All implementation cards",
+      "acceptance": "For each feature record happy, negative, edge, normal human, latency, UI regression, regression and stress results; Done only with evidence.",
+      "checks": {
+        "happy": "pending",
+        "negative": "pending",
+        "edge": "pending",
+        "human_flow": "pending",
+        "context_latency": "pending",
+        "ui_interaction": "pending",
+        "ui_regression": "pending",
+        "regression": "pending",
+        "stress": "pending"
+      },
+      "evidence": []
+    },
+    {
+      "id": "MC-801",
+      "priority": "P0",
+      "status": "In Progress",
+      "owner": "runtime",
+      "title": "Real agent orchestration and event graph",
+      "scope": "Codex protocol adapter; runtime agent graph; owning-tab messages",
+      "dependencies": "MC-101, MC-102",
+      "acceptance": "Real spawned/managed agents have explicit provenance, parent/child identity, live status, messages, per-agent changes and supported controls; no fabricated progress.",
+      "checks": {
+        "happy": "pending",
+        "negative": "pending",
+        "edge": "pending",
+        "human_flow": "pending",
+        "context_latency": "pending",
+        "ui_interaction": "pending",
+        "ui_regression": "pending",
+        "regression": "pending",
+        "stress": "pending"
+      },
+      "evidence": []
+    },
+    {
+      "id": "MC-802",
+      "priority": "P0",
+      "status": "In Progress",
+      "owner": "frontend",
+      "title": "Agent workspace and sub-agent screen",
+      "scope": "Agent hierarchy/list/detail view; message and change timelines",
+      "dependencies": "MC-801",
+      "acceptance": "User can inspect active children, their assigned work, main\u2194child messages, changes and actual state, and perform supported actions without disrupting chat or diffs.",
+      "checks": {
+        "happy": "pending",
+        "negative": "pending",
+        "edge": "pending",
+        "human_flow": "pending",
+        "context_latency": "pending",
+        "ui_interaction": "pending",
+        "ui_regression": "pending",
+        "regression": "pending",
+        "stress": "pending"
+      },
+      "evidence": []
+    },
+    {
+      "id": "MC-803",
+      "priority": "P0",
+      "status": "In Progress",
+      "owner": "browser (threads wave)",
+      "title": "Codex-grade thread and project management",
+      "scope": "Thread catalog/actions; extension commands; UI contract",
+      "dependencies": "MC-101",
+      "acceptance": "Search/filter/page real threads, pin/rename/archive/restore/fork/open with correct identity, scope and recoverable capability errors.",
+      "checks": {
+        "happy": "pending",
+        "negative": "pending",
+        "edge": "pending",
+        "human_flow": "pending",
+        "context_latency": "pending",
+        "ui_interaction": "pending",
+        "ui_regression": "pending",
+        "regression": "pending",
+        "stress": "pending"
+      },
+      "evidence": []
+    },
+    {
+      "id": "MC-804",
+      "priority": "P1",
+      "status": "In Progress",
+      "owner": "frontend",
+      "title": "Evidence-backed IDE/harness parity matrix",
+      "scope": "Official Codex/Cursor and two open-source references",
+      "dependencies": "None",
+      "acceptance": "Map user workflows to implemented/missing/experimental support with primary sources and concrete acceptance criteria; do not equate UI mockups with real functionality.",
+      "checks": {
+        "happy": "pending",
+        "negative": "pending",
+        "edge": "pending",
+        "human_flow": "pending",
+        "context_latency": "pending",
+        "ui_interaction": "pending",
+        "ui_regression": "pending",
+        "regression": "pending",
+        "stress": "pending"
+      },
+      "evidence": []
+    },
+    {
+      "id": "MC-805",
+      "priority": "P0",
+      "status": "Ready",
+      "owner": "Orchestrator",
+      "title": "End-to-end agent and thread workflow gate",
+      "scope": "Live staged IDE and provider-backed QA tasks",
+      "dependencies": "MC-801, MC-802, MC-803",
+      "acceptance": "Type a real delegation task, observe child creation/work/messages/changes, inspect/steer/stop a child where supported, then reopen/recover/search/manage threads with no identity mixup or lost work.",
+      "checks": {
+        "happy": "pending",
+        "negative": "pending",
+        "edge": "pending",
+        "human_flow": "pending",
+        "context_latency": "pending",
+        "ui_interaction": "pending",
+        "ui_regression": "pending",
+        "regression": "pending",
+        "stress": "pending"
+      },
+      "evidence": []
+    },
+    {
+      "id": "MC-901",
+      "title": "Mac navigation and discoverable shortcuts",
+      "owner": "browser \u00b7 Luna High",
+      "status": "In Progress",
+      "scope": "navigation.ts; extension commands; native QuickPick",
+      "acceptance": "Files, commands, symbols, lines, tasks, terminals and review reachable by keyboard; cancel restores focus; existing diff and inline-edit shortcuts retained.",
+      "priority": "P1",
+      "dependencies": "MC-001; MC-401",
+      "checks": {
+        "happy": "pending",
+        "negative": "pending",
+        "edge": "pending",
+        "human_flow": "pending",
+        "context_latency": "pending",
+        "ui_interaction": "pending",
+        "ui_regression": "pending",
+        "regression": "pending",
+        "stress": "pending"
+      },
+      "evidence": [
+        "../2026-09-14/orchestration.md"
+      ]
+    },
+    {
+      "id": "MC-902",
+      "title": "Customizable glass appearance",
+      "owner": "frontend",
+      "status": "Integration",
+      "scope": "webview appearance; theme-aware surfaces",
+      "acceptance": "Five palettes retained; Graphite default; glass/solid choice persists; high contrast and reduced transparency fallback; composer and long content stay visible. Host glass setting and reduced-transparency/high-contrast fallbacks still need integration.",
+      "priority": "P1",
+      "dependencies": "MC-001; MC-401",
+      "checks": {
+        "happy": "pending",
+        "negative": "pending",
+        "edge": "pending",
+        "human_flow": "pending",
+        "context_latency": "pending",
+        "ui_interaction": "pending",
+        "ui_regression": "pending",
+        "regression": "pending",
+        "stress": "pending"
+      },
+      "evidence": [
+        "frontend-lane.md"
+      ]
+    },
+    {
+      "id": "MC-903",
+      "title": "Reuse host computer-use capability",
+      "owner": "runtime",
+      "status": "Design",
+      "scope": "installed host bridge; app-server capability boundary",
+      "acceptance": "Document installed transport and permissions; integration only through verified interface; explicit availability, ownership and stop state; no secret copying.",
+      "priority": "P1",
+      "dependencies": "MC-001; MC-401",
+      "checks": {
+        "happy": "pending",
+        "negative": "pending",
+        "edge": "pending",
+        "human_flow": "pending",
+        "context_latency": "pending",
+        "ui_interaction": "pending",
+        "ui_regression": "pending",
+        "regression": "pending",
+        "stress": "pending"
+      },
+      "evidence": []
+    },
+    {
+      "id": "MC-904",
+      "title": "Subscription live voice in Muster",
+      "owner": "runtime",
+      "status": "Design",
+      "scope": "Experimental app-server thread/realtime methods; successful catalog probe; audio session not tested",
+      "acceptance": "Verify account-backed transport without extra API key; implement only with proven capability; mic, speaker, cancellation, reconnect, transcription and tool-state QA.",
+      "priority": "P1",
+      "dependencies": "MC-001; MC-401",
+      "checks": {
+        "happy": "pending",
+        "negative": "pending",
+        "edge": "pending",
+        "human_flow": "pending",
+        "context_latency": "pending",
+        "ui_interaction": "pending",
+        "ui_regression": "pending",
+        "regression": "pending",
+        "stress": "pending"
+      },
+      "evidence": [
+        "host-capabilities.md",
+        "evidence/realtime-catalog.json"
+      ]
+    },
+    {
+      "id": "MC-905",
+      "title": "Native worktree workspace hub",
+      "owner": "runtime \u00b7 Luna High",
+      "status": "In Progress",
+      "scope": "Git worktree registry; list/create/open in separate Muster windows; no Orca requirement",
+      "acceptance": "Open or create isolated worktree from Muster; retain correct repository/path ownership; show service and route state without exposing credentials; dirty work protected; no duplicate dispatch.",
+      "priority": "P1",
+      "dependencies": "MC-001; MC-401",
+      "checks": {
+        "happy": "pending",
+        "negative": "pending",
+        "edge": "pending",
+        "human_flow": "pending",
+        "context_latency": "pending",
+        "ui_interaction": "pending",
+        "ui_regression": "pending",
+        "regression": "pending",
+        "stress": "pending"
+      },
+      "evidence": []
+    }
+  ],
+  "integration": {
+    "builtinTestsPassed": 43,
+    "typecheck": "pass",
+    "bundle": "pass",
+    "coreTestsPreviouslyPassed": 737,
+    "live": "pending integrated stage; baseline inference passed"
+  },
+  "productTarget": "Full Codex/Cursor replacement IDE: thread/project management and real agent orchestration are primary, with preserved editing/browser/terminal workflows.",
+  "appearance": "Neutral Graphite default; multiple palettes remain selectable; semantic diff colors preserved."
+}

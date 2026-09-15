@@ -31,3 +31,15 @@ test("unanchored hunks append instead of vanishing", () => {
   stream.push("*** Begin Patch\n*** Update File: src/x.js\n@@ nowhere\n+// appended\n*** End Patch\n");
   assert.ok(stream.render(stream.files[0]!, BASE).endsWith("// appended\n") || stream.render(stream.files[0]!, BASE).includes("// appended"));
 });
+
+test("full-file replacements converge across arbitrary stream boundaries without losing tail lines", () => {
+  const original = Array.from({length:250},(_,i)=>`old ${i}: α`).join("\n")+"\n";
+  const target = Array.from({length:310},(_,i)=>`new ${i}: β`).join("\n")+"\n";
+  const patch = "*** Begin Patch\n*** Update File: full.ts\n@@\n"+original.trimEnd().split("\n").map(l=>"-"+l).join("\n")+"\n"+target.trimEnd().split("\n").map(l=>"+"+l).join("\n")+"\n*** End Patch\n";
+  for(const size of [1,7,83,1024]){
+    const stream = new ApplyPatchStream();let intermediate=false;
+    for(let i=0;i<patch.length;i+=size){for(const file of stream.push(patch.slice(i,i+size))){const text=stream.render(file,original);if(!file.complete && text.includes("new 0"))intermediate=true;}}
+    assert.equal(stream.render(stream.files[0]!,original),target,`chunk size ${size}`);
+    assert.equal(intermediate,true,"content is visible before the complete patch arrives");
+  }
+});

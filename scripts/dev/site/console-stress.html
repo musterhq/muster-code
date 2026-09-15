@@ -1,0 +1,5 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Console stress fixture</title></head>
+<body><h1>Console stress</h1><button id="emit">Emit 450 messages</button><output id="count">0</output>
+<script>
+  let count = 0; document.getElementById("emit").onclick = () => { for (let i = 0; i < 450; i++) console.log("stress message " + i); count += 450; document.getElementById("count").textContent = String(count); };
+</script></body></html>

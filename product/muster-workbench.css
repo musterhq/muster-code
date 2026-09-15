@@ -146,7 +146,8 @@
 .monaco-workbench .part.statusbar { font-size: var(--mc-font-sm); }
 
 /* ── Cursor chrome: the right pane is the Agent pane; native chat stays plumbing ── */
-.monaco-workbench .part.auxiliarybar .composite-bar .action-item[aria-label^="Chat"],
+.monaco-workbench .part.auxiliarybar .composite-bar .action-item[aria-label*="Chat"],
+.monaco-workbench .part.auxiliarybar .composite-bar .action-item[aria-label*="Build with Agent"],
 .monaco-workbench .part.auxiliarybar .composite-bar .action-item[aria-label^="Copilot"] { display: none !important; }
 /* Pane header reads as Cursor's tab row: title + right-aligned actions, hairline below */
 .monaco-workbench .part.auxiliarybar .title-label h2 { font-size: 13px; font-weight: 500; }
@@ -244,3 +245,296 @@
 .monaco-workbench .mb-url { flex: 1; height: 24px; border: 1px solid color-mix(in srgb, var(--vscode-editor-foreground) 12%, transparent); border-radius: 6px; background: var(--vscode-input-background); color: var(--vscode-editor-foreground); font: inherit; padding: 0 10px; outline: none; }
 .monaco-workbench .mb-url:focus { border-color: color-mix(in srgb, var(--vscode-editor-foreground) 24%, transparent); }
 .monaco-workbench .muster-browser-view { flex: 1; background: transparent; }
+
+/* Muster identity: quiet graphite chrome and a typographic empty workspace. */
+.monaco-workbench .editor-group-watermark .letterpress { background-image:none!important; opacity:1; display:flex; align-items:center; justify-content:center; }
+.monaco-workbench .editor-group-watermark .letterpress::after { content:"muster"; font:500 38px -apple-system,system-ui,sans-serif; letter-spacing:-2px; color:var(--vscode-textLink-foreground); opacity:.6; }
+.monaco-workbench .part.titlebar { border-bottom:1px solid var(--mc-stroke-tertiary); }
+.monaco-workbench .part.auxiliarybar { border-left:1px solid var(--mc-stroke-secondary); }
+.monaco-workbench .statusbar-item[id*="copilot" i] { display:none!important; }
+
+/* ── Muster Go To: restrained native QuickPick treatment ── */
+.monaco-workbench .quick-input-widget {
+  background: color-mix(in srgb, var(--vscode-quickInput-background, var(--vscode-editorWidget-background)) 92%, var(--vscode-textLink-foreground) 8%);
+  border: 1px solid var(--vscode-quickInput-foreground, var(--mc-stroke-secondary));
+  border-color: color-mix(in srgb, var(--vscode-foreground) 22%, transparent);
+  box-shadow: 0 8px 24px var(--vscode-widget-shadow), inset 0 1px color-mix(in srgb, #fff 10%, transparent);
+  border-radius: 8px;
+}
+.monaco-workbench .quick-input-widget .quick-input-list-row { min-height: 36px; }
+.monaco-workbench .quick-input-widget .quick-input-list-row .label-name { color: var(--vscode-quickInput-foreground, var(--vscode-foreground)); font-weight: 500; }
+.monaco-workbench .quick-input-widget .quick-input-list-row .label-description { color: var(--vscode-descriptionForeground); }
+@media (prefers-contrast: more) {
+  .monaco-workbench .quick-input-widget { background: var(--vscode-quickInput-background, var(--vscode-editorWidget-background)); border: 1px solid var(--vscode-contrastBorder, var(--vscode-foreground)); box-shadow: none; }
+}
+
+/* ── Muster shell: graphite workbench chrome ────────────────────────────────
+   This layer owns native Code-OSS chrome only. Editors, diff editors, and
+   source-backed documents keep opaque theme surfaces for legibility. */
+.monaco-workbench {
+  --mc-shell-ink: var(--vscode-foreground);
+  --mc-shell-surface: var(--vscode-sideBar-background, #141414);
+  --mc-shell-surface-strong: var(--vscode-editorWidget-background, #141414);
+  --mc-shell-line: color-mix(in srgb, var(--vscode-foreground) 7.5%, transparent);
+  --mc-shell-line-strong: color-mix(in srgb, var(--vscode-foreground) 13%, transparent);
+  --mc-shell-muted: color-mix(in srgb, var(--vscode-foreground) 55%, transparent);
+  --mc-shell-dim: color-mix(in srgb, var(--vscode-foreground) 37%, transparent);
+  --mc-shell-accent: var(--vscode-textLink-foreground, #81A1C1);
+  --mc-shell-radius: 6px;
+  --mc-shell-filter: none;
+  background: var(--vscode-editor-background);
+  color: var(--mc-shell-ink);
+}
+
+/* Masthead: a compact product rail with a quiet copper edge. */
+.monaco-workbench .part.titlebar {
+  background: var(--mc-shell-surface) !important;
+  border-bottom: 1px solid var(--mc-shell-line-strong) !important;
+  box-shadow: 0 1px 0 color-mix(in srgb, var(--vscode-foreground) 5%, transparent);
+}
+.monaco-workbench .part.titlebar > .titlebar-container { padding: 0 14px; }
+.monaco-workbench .part.titlebar .window-title {
+  color: var(--vscode-titleBar-activeForeground);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: .02em;
+}
+.monaco-workbench .part.titlebar .window-title .command-center {
+  border: 1px solid var(--mc-shell-line);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--vscode-input-background) 78%, transparent);
+  box-shadow: inset 0 1px color-mix(in srgb, #fff 8%, transparent);
+}
+.monaco-workbench .part.titlebar .window-title .command-center:hover,
+.monaco-workbench .part.titlebar .window-title .command-center:focus-within {
+  border-color: var(--mc-shell-line-strong);
+  background: var(--vscode-input-background);
+}
+.monaco-workbench .part.titlebar .action-label { border-radius: 6px; }
+
+/* Left rail and project/task surfaces: stacked controls instead of a flat IDE edge. */
+.monaco-workbench .part.activitybar {
+  background: var(--mc-shell-surface) !important;
+  border-right: 1px solid var(--mc-shell-line) !important;
+}
+.monaco-workbench .part.activitybar .action-item {
+  margin: 3px 5px;
+  border-radius: var(--mc-shell-radius);
+}
+.monaco-workbench .part.activitybar .action-item:hover { background: color-mix(in srgb, var(--mc-fg) 6.7%, transparent); }
+.monaco-workbench .part.activitybar .action-item.checked,
+.monaco-workbench .part.activitybar .action-item[aria-checked="true"] {
+  background: color-mix(in srgb, var(--mc-fg) 12%, transparent);
+  box-shadow: inset 2px 0 var(--mc-shell-accent);
+}
+.monaco-workbench .part.sidebar,
+.monaco-workbench .part.auxiliarybar {
+  background: color-mix(in srgb, var(--mc-shell-surface) 94%, transparent) !important;
+  border-color: var(--mc-shell-line) !important;
+}
+.monaco-workbench .part.sidebar > .title,
+.monaco-workbench .part.auxiliarybar > .title,
+.monaco-workbench .part.sidebar .pane-header,
+.monaco-workbench .part.auxiliarybar .pane-header {
+  min-height: 38px;
+  border-bottom: 1px solid var(--mc-shell-line) !important;
+  background: color-mix(in srgb, var(--mc-shell-surface-strong) 82%, transparent);
+}
+.monaco-workbench .part.sidebar .title-label,
+.monaco-workbench .part.auxiliarybar .title-label {
+  color: var(--mc-shell-muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+.monaco-workbench .part.sidebar .monaco-list-row,
+.monaco-workbench .part.auxiliarybar .monaco-list-row {
+  border-radius: 6px;
+  margin: 1px 6px;
+  width: calc(100% - 12px);
+}
+.monaco-workbench .part.sidebar .monaco-list-row:hover,
+.monaco-workbench .part.auxiliarybar .monaco-list-row:hover { background: color-mix(in srgb, var(--mc-shell-accent) 9%, transparent); }
+.monaco-workbench .part.sidebar .monaco-list-row.selected,
+.monaco-workbench .part.auxiliarybar .monaco-list-row.selected {
+  background: color-mix(in srgb, var(--mc-shell-accent) 14%, transparent);
+  box-shadow: inset 2px 0 var(--mc-shell-accent);
+}
+
+/* Editor groups: frame the workspace while preserving the editor's opaque canvas. */
+.monaco-workbench .part.editor { background: var(--vscode-editor-background) !important; }
+.monaco-workbench .part.editor > .content .editor-group-container {
+  border: 1px solid var(--mc-shell-line);
+  border-radius: var(--mc-shell-radius);
+  overflow: hidden;
+  box-shadow: 0 8px 24px color-mix(in srgb, #000 16%, transparent);
+}
+.monaco-workbench .part.editor > .content .editor-group-container > .title {
+  background: var(--mc-shell-surface) !important;
+  border-bottom: 1px solid var(--mc-shell-line) !important;
+}
+.monaco-workbench .part.editor > .content .editor-group-container > .title .tabs-container > .tab {
+  min-width: 124px;
+  height: 34px;
+  border-right: 1px solid var(--mc-shell-line);
+  background: transparent !important;
+  color: var(--mc-shell-dim);
+}
+.monaco-workbench .part.editor > .content .editor-group-container > .title .tabs-container > .tab:hover { background: color-mix(in srgb, var(--mc-shell-accent) 8%, transparent) !important; }
+.monaco-workbench .part.editor > .content .editor-group-container > .title .tabs-container > .tab.active {
+  color: var(--vscode-tab-activeForeground);
+  background: var(--vscode-editor-background) !important;
+  box-shadow: inset 0 -2px var(--mc-shell-accent);
+}
+.monaco-workbench .part.editor > .content .editor-group-container > .title .tabs-container > .tab .label-name { font-weight: 600; }
+
+/* Panel and status dock: shared chrome language, without changing panel access. */
+.monaco-workbench .part.panel,
+.monaco-workbench .part.basepanel {
+  background: var(--mc-shell-surface) !important;
+  border-top: 1px solid var(--mc-shell-line-strong) !important;
+}
+.monaco-workbench .part.panel > .title,
+.monaco-workbench .part.basepanel > .title {
+  min-height: 34px;
+  background: var(--mc-shell-surface-strong) !important;
+  border-bottom: 1px solid var(--mc-shell-line) !important;
+}
+.monaco-workbench .part.panel > .title .title-label,
+.monaco-workbench .part.basepanel > .title .title-label { color: var(--mc-shell-muted); font-size: 11px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; }
+.monaco-workbench .part.statusbar {
+  height: 24px;
+  background: var(--mc-shell-surface-strong) !important;
+  border-top: 1px solid var(--mc-shell-line) !important;
+  color: var(--mc-shell-muted);
+}
+.monaco-workbench .part.statusbar > .items-container > .statusbar-item { line-height: 24px; }
+.monaco-workbench .part.statusbar > .items-container > .statusbar-item:hover { background: color-mix(in srgb, var(--mc-shell-accent) 12%, transparent); }
+
+/* Native controls: the same compact pill language as the masthead. */
+.monaco-workbench .quick-input-widget,
+.monaco-workbench .monaco-menu-container .monaco-menu,
+.monaco-workbench .context-view .monaco-menu {
+  background: var(--mc-shell-surface-strong) !important;
+  border: 1px solid var(--mc-shell-line-strong) !important;
+  border-radius: var(--mc-shell-radius);
+  box-shadow: 0 18px 42px color-mix(in srgb, #000 30%, transparent), inset 0 1px color-mix(in srgb, #fff 8%, transparent);
+}
+.monaco-workbench .quick-input-widget .quick-input-box { border-radius: 7px; background: var(--vscode-input-background); }
+.monaco-workbench .quick-input-widget .quick-input-list-row { min-height: 34px; border-radius: 6px; margin: 2px 6px; width: calc(100% - 12px); }
+.monaco-workbench .quick-input-widget .quick-input-list-row.focused { background: color-mix(in srgb, var(--mc-fg) 12%, transparent); }
+.monaco-workbench .settings-editor { background: var(--vscode-editor-background); }
+.monaco-workbench .settings-editor > .settings-header { border-bottom: 1px solid var(--mc-shell-line); }
+
+.monaco-workbench .notifications-toasts .notification-toast,
+.monaco-workbench .notifications-center {
+  background: var(--vscode-notifications-background, var(--vscode-editorWidget-background)) !important;
+  border: 1px solid var(--vscode-notifications-border, var(--mc-shell-line)) !important;
+  border-radius: 8px !important;
+  box-shadow: 0 0 0 1px var(--mc-shell-line), 0 2px 8px color-mix(in srgb, #000 45%, transparent) !important;
+}
+.monaco-workbench .monaco-button {
+  border-radius: 6px !important;
+  border: 0 !important;
+  height: 22px;
+  padding: 0 10px;
+  font-size: 12px;
+  transition: background-color 120ms cubic-bezier(0.16, 1, 0.3, 1), transform 80ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+.monaco-workbench .monaco-button:hover { filter: brightness(1.06); }
+.monaco-workbench .monaco-button:active { transform: scale(.96); }
+.monaco-workbench .monaco-text-button { background: var(--vscode-button-background) !important; color: var(--vscode-button-foreground) !important; }
+.monaco-workbench .monaco-button.secondary {
+  background: color-mix(in srgb, var(--mc-fg) 8%, transparent) !important;
+  color: var(--mc-fg) !important;
+}
+.monaco-workbench .monaco-action-bar .action-item .action-label {
+  border-radius: 6px;
+  transition: background-color 120ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+.monaco-workbench .monaco-action-bar .action-item .action-label:hover { background: color-mix(in srgb, var(--mc-fg) 6.7%, transparent); }
+.monaco-workbench .notification-list-item .notification-list-item-message { line-height: 18px; }
+.monaco-workbench .notifications-toasts .monaco-action-bar .action-item .action-label { border-radius: 4px; }
+
+.monaco-workbench .part.activitybar .action-item:hover { background: color-mix(in srgb, var(--mc-fg) 6.7%, transparent); }
+.monaco-workbench .part.auxiliarybar .monaco-list-row:hover { background: color-mix(in srgb, var(--mc-fg) 6.7%, transparent); }
+.monaco-workbench .part.editor > .content .editor-group-container > .title .tabs-container > .tab:hover { background: color-mix(in srgb, var(--mc-fg) 6.7%, transparent) !important; }
+.monaco-workbench .part.statusbar > .items-container > .statusbar-item:hover { background: color-mix(in srgb, var(--mc-fg) 12%, transparent); }
+
+/* Keep the agent in the Muster pane. Hide VS Code's terminal chat overlay. */
+.monaco-workbench .pane-body.integrated-terminal .interactive-session,
+.monaco-workbench .pane-body.integrated-terminal .interactive-input-part,
+.monaco-workbench .terminal-wrapper .chat-widget,
+.monaco-workbench .terminal-group .chat-input,
+.monaco-workbench .terminal-chat,
+.monaco-workbench .chat-in-terminal,
+.monaco-workbench .terminal-instance .inline-chat,
+.monaco-workbench .xterm-helper-widget .interactive-session {
+  display: none !important;
+}
+
+/* Native Chat view belongs in the Agent pane, not the bottom panel. */
+.monaco-workbench .part.panel .composite-bar .action-item[aria-label*="Chat"],
+.monaco-workbench .part.panel .composite-bar .action-item[aria-label*="Build with Agent"],
+.monaco-workbench .part.panel .action-item:has(.codicon-comment-discussion),
+.monaco-workbench .part.panel .action-item:has(.codicon-chat-sparkle),
+.monaco-workbench .part.panel .pane-body.chat,
+.monaco-workbench .part.panel .pane-body.interactive-session,
+.monaco-workbench .part.panel .composite.chat,
+.monaco-workbench .part.panel .view-pane:has(.chat-view),
+.monaco-workbench .titlebar .action-item[aria-label="Chat"],
+.monaco-workbench .titlebar .action-item[aria-label="Toggle Chat"],
+.monaco-workbench .titlebar .action-item[aria-label="Open Chat"],
+.monaco-workbench .titlebar .action-item[aria-label*="Build with Agent"],
+.monaco-workbench .titlebar .action-item[aria-label^="Chat"] {
+  display: none !important;
+}
+
+/* Top activity bar: keep badges from covering the next icon. */
+.monaco-workbench .activitybar.position-top .monaco-action-bar .action-item,
+.monaco-workbench .part.activitybar.top .monaco-action-bar .action-item {
+  position: relative;
+  overflow: visible;
+  margin-right: 6px;
+}
+.monaco-workbench .activitybar.position-top .badge,
+.monaco-workbench .part.activitybar.top .badge {
+  top: 1px;
+  right: 0;
+  max-width: 22px;
+}
+.monaco-workbench .activitybar.position-top .badge .badge-content,
+.monaco-workbench .part.activitybar.top .badge .badge-content {
+  min-width: 0;
+  max-width: 22px;
+  padding: 0 3px;
+  font-size: 9px;
+  line-height: 14px;
+  overflow: hidden;
+}
+
+/* Glass is restricted to chrome/control surfaces. Keep an opaque fallback and
+   disable filtering for users who request reduced transparency or high contrast. */
+@supports (backdrop-filter: blur(1px)) {
+  .monaco-workbench .part.titlebar,
+  .monaco-workbench .part.activitybar,
+  .monaco-workbench .part.sidebar,
+  .monaco-workbench .part.auxiliarybar,
+  .monaco-workbench .part.panel,
+  .monaco-workbench .part.basepanel,
+  .monaco-workbench .part.statusbar,
+  .monaco-workbench .quick-input-widget,
+  .monaco-workbench .context-view .monaco-menu { backdrop-filter: var(--mc-shell-filter); -webkit-backdrop-filter: var(--mc-shell-filter); }
+}
+@media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {
+  .monaco-workbench .part.titlebar,
+  .monaco-workbench .part.activitybar,
+  .monaco-workbench .part.sidebar,
+  .monaco-workbench .part.auxiliarybar,
+  .monaco-workbench .part.panel,
+  .monaco-workbench .part.basepanel,
+  .monaco-workbench .part.statusbar,
+  .monaco-workbench .quick-input-widget,
+  .monaco-workbench .context-view .monaco-menu { backdrop-filter: none; -webkit-backdrop-filter: none; }
+}

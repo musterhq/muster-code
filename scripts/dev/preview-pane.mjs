@@ -1,0 +1,77 @@
+// A deterministic, offline visual fixture of the real pane renderer. No model calls.
+import { build } from '../../packages/builtin/node_modules/esbuild/lib/main.js';
+import { readFile, writeFile, mkdir } from 'node:fs/promises';
+import { pathToFileURL } from 'node:url';
+const dir='/tmp/muster-polish-preview';await mkdir(dir,{recursive:true});
+await build({entryPoints:['packages/builtin/src/agent-view.ts'],bundle:true,platform:'node',format:'esm',outfile:`${dir}/view.mjs`});
+await build({entryPoints:['packages/builtin/src/agent-orchestration.ts'],bundle:true,platform:'node',format:'esm',outfile:`${dir}/agent-orchestration.mjs`});
+const {paneHtml}=await import(pathToFileURL(`${dir}/view.mjs`));
+const {AgentGraphAdapter}=await import(pathToFileURL(`${dir}/agent-orchestration.mjs`));
+const embed = value => JSON.stringify(value).replace(/</g,'\\u003c').replace(/>/g,'\\u003e').replace(/\u2028/g,'\\u2028').replace(/\u2029/g,'\\u2029');
+const themeManifest=JSON.parse(await readFile('packages/theme/package.json','utf8'));
+const themeFlag=process.argv.indexOf('--theme');
+const requestedTheme=themeFlag === -1 ? themeManifest.contributes.configurationDefaults['workbench.colorTheme'] : process.argv[themeFlag + 1];
+if (!requestedTheme || requestedTheme.startsWith('--')) throw new Error('Pass a theme name after --theme.');
+const themeEntry=themeManifest.contributes.themes.find(theme => theme.label === requestedTheme);
+if (!themeEntry) throw new Error(`Unknown Muster theme: ${requestedTheme}`);
+const theme=JSON.parse(await readFile(`packages/theme/${themeEntry.path.slice(2)}`,'utf8'));
+const css=Object.entries(theme.colors).map(([k,v])=>`--vscode-${k.replaceAll('.','-')}:${v}`).join(';');
+const transcript=[{kind:'user',checkpoint:'fixture-user',text:'Polish the chat experience so context stays attached, messages are readable, and live activity is easy to inspect.\n\nKeep browser selections available when I switch tasks. Show changes before any required approval.\n\nMake model usage visible without turning the chat into a log viewer.\n\nThis last paragraph must remain available when the message is expanded. The interface should be calm and useful at both wide and narrow sizes.'},{kind:'tool',id:'fixture-tool',title:'Ran',tool:'command',detail:'pnpm test',output:'19 tests passed\nDraft persistence, context retention, message expansion, and streamed output verified.\nThis is an offline visual fixture, not a live agent run.',status:'completed',durationMs:385},{kind:'assistant',text:'The context shelf now stays with this task. You can inspect the applied diff below, expand tool output, and open activity details for the reported token counts.\n\nLong messages retain their full text. Streaming follows new output only when you are already at the bottom.',reasoning:'Provider summary fixture: check state ownership and persistence before changing presentation.'}];
+const state={type:'state',activeId:'fixture',view:'chat',reviewMode:'auto',draft:{text:'',context:['@src/chat.ts','@browser:abc123def456abc123de']},activity:'Complete',usage:{inputTokens:4820,cachedInputTokens:3700,outputTokens:640,reasoningOutputTokens:210},promptEstimate:920,tabs:[{id:'fixture',name:'Conversation polish',running:false}],modes:[{id:'agent',name:'Agent',icon:'∞',placeholder:'Add a follow-up'}],access:[{id:'full',label:'Full access',sandbox:'danger-full-access',approvalPolicy:'never'}],models:[{id:'astra',name:'GPT-6 Astra',provider:'codex',efforts:[{id:'high'}]}],settings:{mode:'agent',accessId:'full',modelId:'astra',effortId:'high'}};
+const previewModels=[{id:'openai-direct:gpt-6-astra',providerId:'openai-direct',name:'Astra',description:'Fast general-purpose model',efforts:[{id:'high',description:'Deeper reasoning for complex tasks'}]},{id:'openai-direct:gpt-5.6-sol',providerId:'openai-direct',name:'Sol',description:'Balanced everyday coding model',efforts:[{id:'medium',description:'Balanced speed and reasoning'}]},{id:'hybrow:codex/gpt-5.6-terra',providerId:'hybrow',name:'Terra',description:'Shared routing for broad coding work',efforts:[{id:'medium',description:'Balanced speed and reasoning'}]},{id:'hybrow:codex/gpt-5.6-luna',providerId:'hybrow',name:'Luna',description:'Shared routing for careful implementation',efforts:[{id:'medium',description:'Balanced speed and reasoning'}]},{id:'hybrow:codex/gpt-5.6-sol',providerId:'hybrow',name:'Sol',description:'Shared routing for fast iteration',efforts:[{id:'high',description:'Deeper reasoning for complex tasks'}]},{id:'hybrow:codex/gpt-6-astra',providerId:'hybrow',name:'Astra',description:'Shared routing for advanced reasoning',efforts:[{id:'high',description:'Deeper reasoning for complex tasks'}]},{id:'hybrow:codex/gpt-5.6-fable',providerId:'hybrow',name:'Fable',description:'Shared routing for concise assistance',efforts:[{id:'medium',description:'Balanced speed and reasoning'}]},{id:'claude:claude-code',providerId:'claude',name:'Claude',description:'Claude Code subscription model',efforts:[{id:'high',description:'Deeper reasoning for complex tasks'}]}];
+const edits=[{path:'src/chat.ts',adds:3,dels:1,status:'written',diff:'@@ -14,1 +14,3 @@\n- clearContext();\n+ saveDraft(task.id);\n+ retainContext(task.id);\n+ restoreReadingPosition();'}];
+const agentGraphBuilder=new AgentGraphAdapter('root-thread');
+agentGraphBuilder.ingest('thread/started',{thread:{id:'root-thread',name:'Root coordinator'}},1720000000000);
+agentGraphBuilder.ingest('item/started',{threadId:'root-thread',item:{id:'spawn-1',type:'collabAgentToolCall',tool:'spawnAgent',senderThreadId:'root-thread',receiverThreadIds:['child-a','child-b'],agentsStates:{'child-a':{status:'running'},'child-b':{status:'pendingInit'}},prompt:'Split the review across two workers.'}},1720000000000);
+agentGraphBuilder.ingest('item/started',{threadId:'root-thread',item:{id:'followup-1',type:'collabAgentToolCall',tool:'sendInput',senderThreadId:'root-thread',receiverThreadIds:['child-a'],prompt:'Review auth and report changed files.'}},1720000000000);
+agentGraphBuilder.ingest('thread/status/changed',{threadId:'child-a',status:{type:'running'}},1720000000000);
+agentGraphBuilder.ingest('item/completed',{threadId:'child-a',turnId:'turn-a',item:{id:'item-a',type:'fileChange',status:'completed',changes:[{path:'src/auth.ts',diff:'- before\n+ <script>fixture only</script>'}]}},1720000000000);
+agentGraphBuilder.ingest('thread/tokenUsage/updated',{threadId:'child-a',turnId:'turn-a',tokenUsage:{last:{inputTokens:120,cachedInputTokens:80,outputTokens:32,reasoningOutputTokens:8}}},1720000000000);
+agentGraphBuilder.ingest('thread/status/changed',{threadId:'child-b',status:{type:'idle'}},1720000000000);
+agentGraphBuilder.ingest('item/completed',{threadId:'child-b',turnId:'turn-b',item:{id:'item-b',type:'fileChange',status:'completed',changes:[{path:'src/auth.ts',diff:'x'.repeat(32001)}]}},1720000000000);
+const generatedAgentGraph=agentGraphBuilder.snapshot();
+const agentGraph={...generatedAgentGraph,nodes:generatedAgentGraph.nodes.map(n=>({...n,updatedAt:1720000000000})),agents:generatedAgentGraph.agents.map(n=>({...n,updatedAt:1720000000000})),events:generatedAgentGraph.events.map(e=>({...e,ts:1720000000000})),capabilities:{...generatedAgentGraph.capabilities,childSteerSupported:false,childInterruptSupported:false}};
+const taskWorkspace={version:1,activeTaskId:'task-chat',tasks:[
+  {taskId:'task-chat',workspaceId:'workspace-chat',cwd:'/workspace/muster',threadId:'fixture',name:'Context polish',status:'running',activeTurnId:'turn-chat',capability:'shared-checkout-serialized',workspaceOwner:'current checkout',changes:[{path:'src/chat.ts',adds:3,dels:1}]},
+  {taskId:'task-auth',workspaceId:'workspace-auth',cwd:'/worktrees/auth-review',threadId:'task-auth-thread',name:'Auth review',status:'waiting',activeTurnId:'turn-auth',capability:'isolated-worktree',workspaceOwner:'auth-review worktree',changes:[{path:'src/auth.ts',adds:8,dels:2}]},
+  {taskId:'task-docs',workspaceId:'workspace-docs',cwd:'/worktrees/docs-refresh',name:'Docs refresh',status:'completed',capability:'isolated-worktree',workspaceOwner:'docs-refresh worktree',changes:[]},
+]};
+const wire=`<script>
+const fixtureStateKey='fixtureState';
+const emitFixture=(data)=>window.dispatchEvent(new MessageEvent('message',{data}));
+const scenario=new URLSearchParams(location.search).get('scenario');
+const baseState=${embed(state)};
+const baseTranscript=${embed(transcript)};
+const baseEdits=${embed(edits)};
+const scriptedAgentGraph=${embed(agentGraph)};
+const scriptedTaskWorkspace=${embed(taskWorkspace)};
+const sendBase=()=>{for(const data of [baseState,{type:'messages',messages:baseTranscript,edits:baseEdits},{type:'review',files:baseEdits}])emitFixture(data);};
+const sendModels=()=>{emitFixture({...baseState,models:${embed(previewModels)},settings:{...baseState.settings,modelId:'openai-direct:gpt-6-astra',effortId:'high'}});emitFixture({type:'messages',messages:baseTranscript});setTimeout(()=>document.getElementById('model-pill').click(),0);};
+const sendAgents=()=>{const sub=document.querySelector('.masthead .sub');if(sub)sub.textContent='Offline scripted agent graph · no live runtime';const empty=new URLSearchParams(location.search).get('state')==='empty';const graph=empty?{...scriptedAgentGraph,nodes:[],agents:[],events:[]}:scriptedAgentGraph;emitFixture({...baseState,activity:'Offline scripted graph',agentWorkspace:graph});emitFixture({type:'messages',messages:baseTranscript});const marker=document.createElement('span');marker.id='agents-fixture-note';marker.setAttribute('role','status');marker.textContent='Offline scripted graph · actions do not run';document.querySelector('.masthead').append(marker);};
+const sendTasks=()=>{const sub=document.querySelector('.masthead .sub');if(sub)sub.textContent='Offline scripted task registry · no live runtime';const empty=new URLSearchParams(location.search).get('state')==='empty';const snapshot=empty?{...scriptedTaskWorkspace,activeTaskId:'missing',tasks:[]}:scriptedTaskWorkspace;emitFixture({...baseState,activity:'Offline scripted task workspace',tabs:[{id:'fixture',name:'Context polish',running:true}],taskWorkspace:snapshot});emitFixture({type:'messages',messages:baseTranscript});const marker=document.createElement('span');marker.id='tasks-fixture-note';marker.setAttribute('role','status');marker.textContent='Offline scripted task registry · actions do not run';document.querySelector('.masthead').append(marker);};
+const sendStress=()=>{
+  const repeats='This deterministic offline stress line keeps long content measurable and exercises wrapping, expansion, scrolling, and incremental markdown rendering. ';
+  const largeText=(kind,index)=>Array.from({length:kind==='tool'?42:14},(_,line)=>kind+' '+index+' · '+line+' · '+repeats).join('\\n');
+  const stressMessages=[];
+  for(let i=0;i<24;i++){
+    stressMessages.push({kind:'user',checkpoint:'stress-cp-'+i,text:largeText('user',i)});
+    stressMessages.push({kind:'assistant',text:largeText('assistant',i),reasoning:'Stress reasoning '+i+' · '+repeats.slice(0,120)});
+    stressMessages.push({kind:'tool',id:'stress-tool-'+i,title:'Ran',tool:'command',detail:'stress command '+i,output:largeText('tool',i),status:'completed',durationMs:i+1});
+  }
+  const activityTimeline=Array.from({length:40},(_,i)=>({id:'stress-event-'+i,ts:1720000000000+i,method:'stress/item/updated',summary:'Rapid event '+i}));
+  const usageLedger=Array.from({length:20},(_,i)=>({id:'stress-usage-'+i,turnId:'stress-turn-'+i,startedAt:1720000000000+i,inputTokens:i*100,cachedInputTokens:i*70,outputTokens:i*20,reasoningOutputTokens:i*5}));
+  const contextReferences=Array.from({length:24},(_,i)=>({token:'@stress/file-'+i+'.ts',kind:'file',source:'stress/file-'+i+'.ts',startLine:1,endLine:80,includedLines:80,sourceMtimeMs:1720000000000,truncated:i%2===0,tokenEstimate:80}));
+  emitFixture({...baseState,activity:'Stress running',run:{id:'stress-run',state:'running',startedAt:1720000000000},tabs:[{id:'fixture',name:'Stress fixture',running:true}],activityTimeline,usageLedger,contextReferences});
+  emitFixture({type:'messages',messages:stressMessages});
+  for(let i=0;i<40;i++) emitFixture({type:'telemetry',activity:'Stress event '+i,run:{id:'stress-run',state:'running',startedAt:1720000000000},activityTimeline:activityTimeline.slice(0,i+1),usageLedger,contextReferences});
+  for(let i=0;i<80;i++) emitFixture({type:'delta',text:'rapid delta '+i+' · '+repeats.slice(0,80)+'\\n'});
+  emitFixture({type:'done',ok:true});
+  const marker=document.createElement('span');marker.id='stress-complete';marker.setAttribute('role','status');marker.textContent='Stress complete · 72 messages · 40 events · 80 deltas';document.querySelector('.masthead').append(marker);
+};
+const showOfflineNotice=()=>{if(document.getElementById('offline-preview-notice'))return;const notice=document.createElement('span');notice.id='offline-preview-notice';notice.setAttribute('role','status');notice.textContent='Offline preview: no model requests';document.querySelector('.masthead').append(notice);};
+window.acquireVsCodeApi=()=>({getState:()=>JSON.parse(sessionStorage.getItem(fixtureStateKey)||'{}'),setState:v=>sessionStorage.setItem(fixtureStateKey,JSON.stringify(v)),postMessage:m=>{if(m.type==='agentAction'&&(scenario==='agents'||scenario==='tasks'))setTimeout(()=>emitFixture({type:'agentActionResult',action:m.action,agentId:m.agentId,ok:false,reason:'Offline scripted fixture: no live runtime action executed.'}),0);if(m.type==='command'&&m.id==='muster.thread.catalog'&&(scenario==='agents'||scenario==='tasks'))setTimeout(()=>{const box=document.getElementById('aw-feedback');if(box){box.hidden=false;box.classList.add('error');box.textContent='Offline scripted fixture: thread manager is not live.';}},0);if(scenario==='tasks'&&['activateTab','openPath','openReview'].includes(m.type))setTimeout(()=>{const box=document.getElementById('tw-feedback');if(box){box.hidden=false;box.classList.add('error');box.textContent='Offline scripted task registry: no live runtime action executed.';}},0);if(m.type==='ready')setTimeout(()=>{showOfflineNotice();scenario==='stress'?sendStress():scenario==='agents'?sendAgents():scenario==='tasks'?sendTasks():scenario==='models'?sendModels():sendBase();},0);}});
+</script>`;
+let html=paneHtml("'self'",'/codicon.ttf');html=html.replace('A workspace for considered work','Offline verification fixture · sample data').replace('<head>','<head><title>Muster UI verification fixture</title>'+wire).replace('</head>',`<style>:root{${css};--vscode-font-family:-apple-system,system-ui,sans-serif;--vscode-editor-font-family:ui-monospace,monospace}body{background:var(--vscode-sideBar-background)}#stress-complete,#agents-fixture-note,#tasks-fixture-note{position:fixed;top:4px;right:4px;max-width:calc(100vw - 8px);color:var(--vscode-charts-green);font-size:10px;line-height:14px;white-space:normal;overflow-wrap:anywhere;text-align:right;pointer-events:none;z-index:100}#offline-preview-notice{position:fixed;top:8px;left:8px;padding:4px 7px;border:1px solid var(--vscode-charts-yellow);border-radius:5px;background:var(--vscode-editorWidget-background);color:var(--vscode-charts-yellow);font-size:11px;font-weight:600;line-height:14px;pointer-events:none;z-index:101}</style></head>`);
+await writeFile(`${dir}/index.html`,html);
+await writeFile(`${dir}/codicon.ttf`,await readFile('packages/builtin/resources/lucide.ttf'));
+console.log(dir);

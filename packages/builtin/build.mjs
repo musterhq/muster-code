@@ -2,7 +2,7 @@
 // the installable extension directory (dist-ext/) that assemble.sh copies into
 // the app bundle. The extension host provides `vscode`; everything else bundles.
 import { build } from "esbuild";
-import { cpSync, mkdirSync, rmSync, writeFileSync, readFileSync } from "node:fs";
+import { cpSync, mkdirSync, rmSync, writeFileSync, readFileSync, chmodSync } from "node:fs";
 
 const out = "dist-ext";
 rmSync(out, { recursive: true, force: true });
@@ -37,4 +37,5 @@ manifest.name = "muster-code";
 manifest.main = "./extension.js";
 writeFileSync(`${out}/package.json`, `${JSON.stringify(manifest, null, 2)}\n`);
 cpSync("resources", `${out}/resources`, { recursive: true });
+for (const profile of ["openai-direct", "hybrow-gateway"]) chmodSync(`${out}/resources/codex-${profile}.sh`, 0o755);
 console.log(`built ${out}/`);

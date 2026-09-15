@@ -1,5 +1,9 @@
 # Muster Code — Handoff Spec
 
+> **Superseded implementation direction — read [the authoritative Terra handoff](TERRA-HANDOFF-2026-09-14.md) first.** It contains the current product intention, finish standard, features, interrupted agent state, crash blocker and exact continuation prompts. Cursor imitation, parent-only GUI work, and old usage-monitoring instructions below are historical and must not override the user's latest requirements.
+
+> Current direction (2026-09-12): the owner now wants a distinct, customizable Muster UI. Exact Cursor imitation below is historical. Preserve working realtime/full-file diffs and use [the quality report](quality/2026-09-12/report.md) for the current changes, evidence, and release gates.
+
 Read this first. It is written so that any builder (Codex included) can continue exactly the way the work has been done so far: research Cursor from its own bundle, build the Cursor shape, verify live in the running app, never guess.
 
 ## 0. Acceptance criteria and owner rulings (verbatim intent)
