@@ -532,7 +532,7 @@
             "pane"
           ],
           "default": "editor",
-          "description": "Where Open Browser (\u21e7\u2318B) puts the browser: an editor tab beside the code (Cursor's browser editor) or a tab in the Agent pane."
+          "description": "Where Open Browser (\u21e7\u2318B) puts the browser: an editor tab beside the code (the reference IDE's browser editor) or a tab in the Agent pane."
         },
         "muster.terminal.maxOutputBytes": {
           "type": "number",
@@ -571,7 +571,7 @@
           "items": {
             "type": "string"
           },
-          "description": "Languages Muster Tab stays quiet in (Cursor's default: markdown, plaintext)."
+          "description": "Languages Muster Tab stays quiet in (the reference IDE's default: markdown, plaintext)."
         },
         "muster.completions.nextEdit": {
           "type": "boolean",

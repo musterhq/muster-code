@@ -1,6 +1,6 @@
 # Muster IDE execution Kanban
 
-Full Codex/Cursor replacement IDE: thread/project management and real agent orchestration are primary, with preserved editing/browser/terminal workflows.
+Full Codex/the reference IDE replacement IDE: thread/project management and real agent orchestration are primary, with preserved editing/browser/terminal workflows.
 
 No feature is Done until parent live QA and applicable tests have evidence. An N/A requires a reason.
 

@@ -1,4 +1,4 @@
-// Context kinds for the composer's "@" picker, after Cursor's mention sections:
+// Context kinds for the composer's "@" picker, after the reference IDE's mention sections:
 // Files & Folders, Docs, Git (branch diff, working tree, commits), Terminals,
 // Past Chats, Web, images. Tokens stay in the prompt (the model sees what was
 // meant); their contents are appended as <context> blocks.
@@ -55,7 +55,7 @@ export interface ContextReference {
 }
 
 export interface Suggestion { readonly label: string; readonly detail: string; readonly insert: string; readonly group?: string }
-/** One row of the composer typeahead (Cursor's mention menu): a mention to insert, a navigation row into a mode, or an action. */
+/** One row of the composer typeahead (the reference IDE's mention menu): a mention to insert, a navigation row into a mode, or an action. */
 export interface MenuItem { readonly id: string; readonly label: string; readonly detail: string; readonly insert?: string; readonly icon: string; readonly iconKind: "cod" | "badge" | "slash"; readonly nav?: string; readonly action?: string }
 export interface MenuSection { readonly title: string; readonly items: MenuItem[] }
 export interface MenuData { readonly mode: string; readonly title: string; readonly sections: MenuSection[] }
@@ -111,7 +111,7 @@ async function docText(cwd: string, name: string): Promise<string | undefined> {
   } catch { return undefined; }
 }
 
-// ── the "@" typeahead (Cursor's mention menu) ──
+// ── the "@" typeahead (the reference IDE's mention menu) ──
 // Answers within a keystroke: files from an in-memory index (refreshed in the background), commits from a
 // short-lived cache, past chats from the last listing — never a process spawn on the keystroke path.
 const index = { files: [] as string[], at: 0, building: null as Promise<void> | null, log: [] as string[], logAt: 0, chats: [] as MenuItem[], chatsAt: 0, chatsBuilding: false };
@@ -125,7 +125,7 @@ async function fileIndex(): Promise<string[]> {
   }
   return index.files;
 }
-/** Cursor-style ranking: file-name prefix, then file-name substring, path substring, then subsequence; shorter paths first. */
+/** reference-IDE-style ranking: file-name prefix, then file-name substring, path substring, then subsequence; shorter paths first. */
 function score(rel: string, q: string): number {
   const name = (rel.split("/").pop() ?? rel).toLowerCase(); const lower = rel.toLowerCase(); const tie = rel.length / 1000;
   if (name.startsWith(q)) return 100 - tie; if (name.includes(q)) return 80 - tie; if (lower.includes(q)) return 60 - tie;
@@ -188,7 +188,7 @@ export async function suggestMentions(cwd: string, query: string, mode = "all"):
     case "commits": return { mode, title: "Commits", sections: [{ title: "", items: (await commits(cwd)).filter((c) => matches(c, q)) }] };
     default: {
       if (!q) {
-        // Cursor's empty state: a few recent files on top, then the categories as navigation rows and the direct kinds.
+        // the reference IDE's empty state: a few recent files on top, then the categories as navigation rows and the direct kinds.
         const top = [...new Set(open)].slice(0, 3).map(fileItem);
         const nav: MenuItem[] = [
           { id: "nav:files", label: "Files & Folders", detail: "", icon: "folder", iconKind: "cod", nav: "files" },
@@ -221,7 +221,7 @@ export async function suggestMentions(cwd: string, query: string, mode = "all"):
 // ── the "/" typeahead: commands, custom commands, skills ──
 export interface CustomCommand { readonly name: string; readonly path: string; readonly source: "project" | "user"; readonly subdir?: string; readonly description: string }
 const commandCache = { at: 0, cwd: "", list: [] as CustomCommand[] };
-/** `.cursor/commands`, `.claude/commands`, `.muster/commands` in the workspace and the home directory (*.md / *.txt), the way Cursor loads them. */
+/** `.cursor/commands`, `.claude/commands`, `.muster/commands` in the workspace and the home directory (*.md / *.txt), the way the reference IDE loads them. */
 export function listCommands(cwd: string): CustomCommand[] {
   if (commandCache.cwd === cwd && Date.now() - commandCache.at < 30_000) return commandCache.list;
   const out: CustomCommand[] = [];

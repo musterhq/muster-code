@@ -73,7 +73,7 @@ export function settingsHtml(csp: string): string {
       h += '<h2>Models</h2><div class="sub">From model/list (Codex) and your Claude Code models. Efforts are each provider’s own.</div>';
       for (const m of data.models) h += row(esc(m.name) + (m.isDefault ? ' <span class="pill">default</span>' : ""), esc(m.description) + "<br>" + (Array.isArray(m.efforts) ? m.efforts : []).map((e) => esc(e.id)).join(" · "), '<span class="pill">' + (m.provider === "claude" ? "Claude Code" : "Codex") + '</span>');
     } else if (section === "rules") {
-      h += '<h2>Rules</h2><div class="sub">How Cursor attaches them: <b>Always</b> every turn · <b>Auto</b> when a mentioned file matches the globs · <b>Agent</b> offered by description (@rule:name loads it) · <b>Manual</b> only when mentioned. Files: .muster/rules/*.md, .cursor/rules/*.mdc.</div>';
+      h += '<h2>Rules</h2><div class="sub">How the reference IDE attaches them: <b>Always</b> every turn · <b>Auto</b> when a mentioned file matches the globs · <b>Agent</b> offered by description (@rule:name loads it) · <b>Manual</b> only when mentioned. Files: .muster/rules/*.md, .cursor/rules/*.mdc.</div>';
       h += '<div style="margin:0 0 10px"><button class="primary" id="newRule">New rule</button></div>';
       if (data.userRules) h += row("User rules <span class=\\"pill\\">~/.codex/AGENTS.md</span>", esc(data.userRules.preview), '<button data-open="' + esc(data.userRules.path) + '">Open</button>');
       if (data.agentsMd) h += row("AGENTS.md <span class=\\"pill\\">project</span>", esc(data.agentsMd.preview), '<button data-open="' + esc(data.agentsMd.path) + '">Open</button>');

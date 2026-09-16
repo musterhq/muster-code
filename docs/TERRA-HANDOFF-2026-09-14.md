@@ -2,7 +2,7 @@
 
 Prepared by the outgoing coordinator on 14 September 2026, after the user explicitly stopped implementation and requested this handoff. This is a continuation package, not a completion report.
 
-**Start here. Do not reread the whole conversation or all historical documents.** Read sections 1–5 for state, sections 21–24 for the complete product and finish standard, and section 25 for preserving the existing agents. A worker should then read only its assigned lane. Use the prompt in section 18 for a new coordinator or section 25 to continue the same task with the same agents. For transcript, composer, motion, and computer/browser polish, read section 28 and `docs/quality/2026-09-15/interaction-atlas.md` instead of re-researching Cursor, Codex, or T3 Code.
+**Start here. Do not reread the whole conversation or all historical documents.** Read sections 1–5 for state, sections 21–24 for the complete product and finish standard, and section 25 for preserving the existing agents. A worker should then read only its assigned lane. Use the prompt in section 18 for a new coordinator or section 25 to continue the same task with the same agents. For transcript, composer, motion, and computer/browser polish, read section 28 and `docs/quality/2026-09-15/interaction-atlas.md` instead of re-researching the reference IDE, Codex, or T3 Code.
 
 ## Current visual default — Graphite, not green
 
@@ -13,7 +13,7 @@ selectable. Do not restore green as the default. Keep all five palettes.
 Preserve newer backend features (provider routing, task state, orchestration,
 browser tools, inline diffs, computer-use plugin path).
 
-The owner also asked that chat interaction/visualization/movement match Cursor,
+The owner also asked that chat interaction/visualization/movement match the reference IDE,
 and that Muster use Codex computer-use through the signed-in bundled plugin
 (not a private CUA socket). Native QA of those flows must use **Luna**.
 
@@ -21,7 +21,7 @@ This records intent. It is not proof of a rebuilt/installed app.
 
 ## 1. What the user is actually building
 
-Muster Code is intended to replace the user's daily Codex and Cursor workflow with one polished, lightweight, IDE-native application. It must support reading and editing code as well as supervising agents. It is not intended to be a terminal dashboard, a cosmetic VS Code skin, or merely a chat sidebar with inline diffs.
+Muster Code is intended to replace the user's daily Codex and the reference IDE workflow with one polished, lightweight, IDE-native application. It must support reading and editing code as well as supervising agents. It is not intended to be a terminal dashboard, a cosmetic VS Code skin, or merely a chat sidebar with inline diffs.
 
 The desired daily workflow is:
 
@@ -101,7 +101,7 @@ Other accepted preferences:
 
 ### Historical instructions that must not be revived
 
-`docs/HANDOFF.md` contains old instructions to replicate Cursor exactly. That is historical and superseded by this document. Some lane notes still say the parent owns GUI QA; the latest instruction delegates GUI testing to a worker and leaves the coordinator reviewing evidence. Old usage percentages are historical observations, not permission to fetch new ones.
+`docs/HANDOFF.md` contains old instructions to replicate the reference IDE exactly. That is historical and superseded by this document. Some lane notes still say the parent owns GUI QA; the latest instruction delegates GUI testing to a worker and leaves the coordinator reviewing evidence. Old usage percentages are historical observations, not permission to fetch new ones.
 
 ## 3. Repository and interrupted-state checkpoint
 
@@ -119,7 +119,7 @@ At handoff preparation, both branches were **`main`**:
 
 | Repository | HEAD observed | Working changes |
 |---|---|---|
-| muster-code | `4482bd8` — docs: deep gap analysis vs Cursor 3.18.25 | Many modified and untracked implementation, test, theme and QA files |
+| muster-code | `4482bd8` — docs: deep gap analysis vs the reference IDE | Many modified and untracked implementation, test, theme and QA files |
 | muster | `5de4eae` — claude: --mcp-config passthrough for host MCP servers | `packages/core/src/codex-app-server.ts` and `packages/core/test/codex.test.ts` |
 
 No new commit or merge is claimed for this session. Most work is **uncommitted**, including important new files. Do not reset, clean, stash indiscriminately, checkout over the changes, or replace them with default-branch files. The user's reference to a dev/UI branch expresses the desired integration destination; it does not prove such a branch currently exists. Verify before switching branches. Staying in the current checkout while preserving work is preferable to an unsafe branch move.
@@ -601,7 +601,7 @@ Historical docs contain stale counts, ownership notes and limitations that were 
 ```text
 You are the Terra coordinator for Muster Code. Read docs/TERRA-HANDOFF-2026-09-14.md sections 1–5 first, then only the lane-specific material needed for the next step. Do not reread the entire conversation or rescan the whole repository.
 
-The goal is a polished, lightweight, Mac-like IDE that replaces my daily Codex/Cursor workflow: named concurrent tasks, subagents and their messages, persistent context, browser integration, and complete realtime inline diffs. The final agent workflow must be IDE-native, not a terminal dashboard. Graphite/violet is the default; keep customizable themes and accessible solid fallbacks.
+The goal is a polished, lightweight, Mac-like IDE that replaces my daily Codex/the reference IDE workflow: named concurrent tasks, subagents and their messages, persistent context, browser integration, and complete realtime inline diffs. The final agent workflow must be IDE-native, not a terminal dashboard. Graphite/violet is the default; keep customizable themes and accessible solid fallbacks.
 
 Use Terra as coordinator. Delegate most commands, research, implementation, builds and testing to bounded Luna/Terra workers. Use Sol only for a specific hard problem or independent review. Do not use Astra by default. No recursive delegation, duplicate implementations, redundant tool calls or repeated broad tests. Do not check usage, create quota polling or redeem credits unless I explicitly ask. Do not revive Orca or alter my default provider/auth configuration.
 
@@ -1010,19 +1010,19 @@ Define reusable material tokens and component states; preserve Graphite/violet d
 Coordinate with the native-shell owner and do not modify a running or known-crashing build. Produce one coherent implemented direction, compare its actual interaction/resource behavior against the same baseline, and validate it in the staged app. Do not call the feature complete from a screenshot, a CSS property or a library demo alone.
 ```
 
-## 28. Interaction and polish atlas: what to copy from Cursor, Codex and T3 Code
+## 28. Interaction and polish atlas: what to copy from the reference IDE, Codex and T3 Code
 
-The owner asked to pick interactions and nuances from Codex, T3 Code, and Cursor: transitions, effortlessness, polish, completeness. Do not re-clone or re-read those trees unless this section and the atlas conflict with current `packages/builtin/src`.
+The owner asked to pick interactions and nuances from Codex, T3 Code, and the reference IDE: transitions, effortlessness, polish, completeness. Do not re-clone or re-read those trees unless this section and the atlas conflict with current `packages/builtin/src`.
 
 **Companion (implementation-ready):** `docs/quality/2026-09-15/interaction-atlas.md` — transcript anatomy, streaming semantics, composer/slash/@, motion tokens, color/material, computer/browser-use gaps, a 40-item checklist, and a P0/P1/P2 backlog mapped to Muster files.
 
-**Existing Cursor docs (do not duplicate):** `docs/cursor-ux-spec.md`, `docs/cursor-feature-atlas.md`, `docs/cursor-gap-analysis.md` (2026-09-06; several rows are stale), `docs/cursor-parity-spec.md`, `docs/quality/2026-09-13/ide-parity.md`. Voice/CUA boundary remains section 8 and `docs/quality/2026-09-13/host-capabilities.md`. Liquid Glass remains section 27.
+**Existing the reference IDE docs (do not duplicate):** `docs/cursor-ux-spec.md`, `docs/cursor-feature-atlas.md`, `docs/cursor-gap-analysis.md` (2026-09-06; several rows are stale), `docs/cursor-parity-spec.md`, `docs/quality/2026-09-13/ide-parity.md`. Voice/CUA boundary remains section 8 and `docs/quality/2026-09-13/host-capabilities.md`. Liquid Glass remains section 27.
 
 ### What to copy (short)
 
 | Surface | Copy from | Muster note |
 |---|---|---|
-| Grouped tool summaries (`Explored 3 files, 1 search`), command cards (icon, human title, muted argv, clipped output), `Thought Ns` disclosure, mode/model pills, Stop | Cursor 3.x chat (owner screenshots 2026-09-15) + `cursor-ux-spec.md` §4 | Today: flat `.tool` rows, summary always “Reasoning summary”, no duration (`agent-view.ts`) |
+| Grouped tool summaries (`Explored 3 files, 1 search`), command cards (icon, human title, muted argv, clipped output), `Thought Ns` disclosure, mode/model pills, Stop | the reference IDE 3.x chat (owner screenshots 2026-09-15) + `cursor-ux-spec.md` §4 | Today: flat `.tool` rows, summary always “Reasoning summary”, no duration (`agent-view.ts`) |
 | Incremental markdown (stable fenced prefix), incremental highlight, follow-vs-read scroll, human tool verbs, `![alt](screenshotPath)` visualize loop, slash-at-start vs skills anywhere, 150ms ease-out motion | T3 `/tmp/t3code` — see atlas citations | Today: full `innerHTML` flush per rAF (`agent-polish.ts`); local images not rendered |
 | Account-backed CUA | Codex host plugin/MCP only | Private `ComputerUseIPC*` / native pipe is **out of bounds** (section 8) |
 | Browser computer-use | Muster MCP `browser_*` in `browser-mcp.ts` (20 tools as of this handoff) shaped like T3 `preview_*` | Recording, desktop snapshot, device toolkit still missing; screenshot **save → inline image** is the P0 visualize gap |

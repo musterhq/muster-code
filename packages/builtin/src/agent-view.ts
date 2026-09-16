@@ -346,7 +346,7 @@ export function paneHtml(csp: string, codicon = ""): string {
   @container (max-width: 420px) { .pill.access .lbl { display: none; } .pill.model .lbl { max-width: 110px; } }
   @container (max-width: 300px) { .pill.mode .lbl { display: none; } .icon[title="Dictate"] { display: none; } }
   #composer:focus-within { border-color: var(--stroke-primary); }
-  /* Cursor's context pills (.context-pill): 20px, 12px text, icon that turns into × on hover; dashed for suggestions and "Add Context". */
+  /* the reference IDE's context pills (.context-pill): 20px, 12px text, icon that turns into × on hover; dashed for suggestions and "Add Context". */
   .ctx { display: inline-flex; align-items: center; gap: 4px; height: 20px; box-sizing: border-box; padding: 2px 4px; border: 1px solid var(--stroke-secondary); border-radius: 4px; font-size: 12px; line-height: 16px; color: var(--fg); white-space: nowrap; max-width: 220px; cursor: default; user-select: none; }
   .ctx:hover { background: color-mix(in srgb, var(--vscode-list-hoverBackground) 80%, transparent); }
   .ctx .ci { display: inline-flex; width: 12px; height: 12px; align-items: center; justify-content: center; flex: 0 0 auto; } .ctx .ci .cod { font-size: 12px; width: 12px; height: 12px; } .ctx .ci .badge { font-size: 8px; height: 12px; line-height: 12px; min-width: 14px; padding: 0 2px; }
@@ -357,7 +357,7 @@ export function paneHtml(csp: string, codicon = ""): string {
   .ctx.openable .n { cursor: pointer; } .ctx.openable .n:hover { text-decoration: underline; }
   .ctx.add { border-style: dashed; opacity: .6; cursor: pointer; color: var(--text-secondary); } .ctx.add:hover { opacity: .9; background: transparent; } .ctx.add .cod { font-size: 12px; width: 12px; height: 12px; }
   .inputwrap { position: relative; }
-  /* Cursor's inline mention (.mention): radius 6, padding 1px 4px, quiet background; unresolved ones dashed. */
+  /* the reference IDE's inline mention (.mention): radius 6, padding 1px 4px, quiet background; unresolved ones dashed. */
   #backdrop mark { color: transparent; background: color-mix(in srgb, var(--fg) 12%, transparent); border-radius: 6px; padding: 1px 4px; margin: 0 -4px; }
   #backdrop mark.bad { background: transparent; outline: 1px dashed color-mix(in srgb, var(--fg) 35%, transparent); outline-offset: -1px; }
   #backdrop { position: absolute; inset: 0; overflow: hidden; pointer-events: none; color: transparent; white-space: pre-wrap; word-wrap: break-word; font: inherit; font-size: var(--fs-lg); line-height: var(--lh-lg); padding: 0; }
@@ -386,7 +386,7 @@ export function paneHtml(csp: string, codicon = ""): string {
   .menu .group { padding: 6px 10px 2px; font-size: var(--fs-xs); color: var(--text-tertiary); text-transform: uppercase; letter-spacing: .3px; }
   .menu .item { display: flex; align-items: center; gap: 8px; padding: 5px 10px; border-radius: var(--radius-sm); cursor: pointer; }
   .menu .item:hover, .menu .item.sel { background: var(--bg-tertiary); }
-  /* Cursor's typeahead popover: 300px, 2px padding, 24px rows (12px text, 2px 6px padding), path right-aligned and truncated from the left, matches highlighted. */
+  /* the reference IDE's typeahead popover: 300px, 2px padding, 24px rows (12px text, 2px 6px padding), path right-aligned and truncated from the left, matches highlighted. */
   .cod { font-family: codicon; font-size: 14px; line-height: 1; display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; flex: 0 0 auto; color: var(--text-secondary); }
   .menu.typeahead { width: min(300px, calc(100vw - 16px)); min-width: min(300px, calc(100vw - 16px)); max-width: min(300px, calc(100vw - 16px)); padding: 2px; border-radius: 6px; box-shadow: 0 5px 10px rgba(0, 0, 0, .3); }
   .menu .title { padding: 4px 6px 2px; font-size: 11px; line-height: 15px; color: var(--vscode-input-placeholderForeground); text-transform: uppercase; letter-spacing: .4px; }
@@ -805,7 +805,7 @@ ${polishStyles}
     head.onkeydown = e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); head.click(); } };
     messages.appendChild(g); return g;
   }
-  // Cursor's tool rows: "Running…" while live, then "Ran" (exit 0) / "Exit 1" / "Skipped", duration, output on click.
+  // the reference IDE's tool rows: "Running…" while live, then "Ran" (exit 0) / "Exit 1" / "Skipped", duration, output on click.
   function toolEl(tool) {
     if (!tool || typeof tool !== "object" || !tool.id) return;
     hookTranscriptLifecycle();
@@ -863,7 +863,7 @@ ${polishStyles}
     const group = el.closest(".tool-group"); if (group) group.querySelector(".g-label").textContent = exploreLabel(group);
     scroll();
   }
-  // Approval cards (Cursor: the pending shell tool decision — ⏎ Run, ⇧⏎ Run and allow for session, Esc Skip).
+  // Approval cards (the reference IDE: the pending shell tool decision — ⏎ Run, ⇧⏎ Run and allow for session, Esc Skip).
   const approvals = new Map();
   function approvalEl(a) {
     if (!a || typeof a !== "object" || !a.id) return;
@@ -1116,13 +1116,13 @@ ${polishStyles}
     const list = $("review-files"); list.innerHTML = "";
     for (const f of files) { if (!f || typeof f !== "object" || typeof f.path !== "string") continue; const row = document.createElement("div"); row.className = "file"; const parts = f.path.split("/"); const name = parts.pop(); row.innerHTML = '<span class="name">' + escape(name) + '</span><span class="dir">' + escape(parts.join("/")) + '</span><span class="adds">+' + (Number.isFinite(f.adds) ? f.adds : 0) + '</span><span class="dels">−' + (Number.isFinite(f.dels) ? f.dels : 0) + '</span>'; row.addEventListener("click", () => vscode.postMessage({ type: "open", path: f.path })); list.appendChild(row); }
   }
-  // Mentions light up like the Plan pill when they resolve; a chips row mirrors them with remove buttons (Cursor's context row).
+  // Mentions light up like the Plan pill when they resolve; a chips row mirrors them with remove buttons (the reference IDE's context row).
   const TOKEN = /(^|\\s)(@[\\w./:?=&%#+-]+|\\/[\\w-]+)/g;
   let tokenOk = new Set(), tokenBad = new Set();
   function tokensIn(text) { const out = []; let m; TOKEN.lastIndex = 0; while ((m = TOKEN.exec(text))) out.push(m[2]); return out; }
   function renderTokens() {
     const text = input.value;
-    // The token still being typed at the caret is not a mention yet (Cursor shows the pill once it is chosen).
+    // The token still being typed at the caret is not a mention yet (the reference IDE shows the pill once it is chosen).
     const typing = triggerAt(); const typingEnd = typing ? input.selectionStart : -1;
     let html = ""; let last = 0; TOKEN.lastIndex = 0; let m; const done = [];
     while ((m = TOKEN.exec(text))) { const start = m.index + m[1].length; const end = start + m[2].length; if (end === typingEnd) continue; done.push(m[2]); html += escape(text.slice(last, start)) + '<mark class="' + (tokenBad.has(m[2]) ? "bad" : "") + '">' + escape(m[2]) + '</mark>'; last = end; }
@@ -1159,7 +1159,7 @@ ${polishStyles}
       chip.querySelector(".x").setAttribute("role", "button"); chip.querySelector(".x").tabIndex = 0; chip.querySelector(".x").setAttribute("aria-label", "Remove " + label); chip.querySelector(".x").onkeydown = e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); e.stopPropagation(); chip.querySelector(".x").click(); } };
       addChip(chip);
     }
-    // Cursor: the active editor's file as a dashed suggestion pill; click to add it.
+    // the reference IDE: the active editor's file as a dashed suggestion pill; click to add it.
     let cur = null; try { cur = state && state.currentFile; } catch { cur = null; } const curTok = cur ? "@" + encodeURI(cur) : null;
     if (curTok && !seen.has(curTok)) { const sug = document.createElement("span"); sug.className = "ctx suggestion"; sug.title = "Add the current file: " + cur; const nm = cur.split("/").pop(); sug.innerHTML = '<span class="ci">' + (nm.includes(".") ? badge(nm.split(".").pop()) : cod("file")) + '</span><span class="n">' + escape(nm) + '</span>'; sug.addEventListener("click", () => { const at = input.selectionStart; const pre = input.value.slice(0, at); const sp = pre && !/\\s$/.test(pre) ? " " : ""; input.value = pre + sp + curTok + " " + input.value.slice(at); const c = (pre + sp + curTok + " ").length; input.setSelectionRange(c, c); input.focus(); input.dispatchEvent(new Event("input")); }); row.appendChild(sug); }
     if ($("context-hint")) $("context-hint").textContent = retainedContext.length ? retainedContext.length + " retained · refreshed on each send" : "Attach files or browser selections with @";
@@ -1184,7 +1184,7 @@ ${polishStyles}
     const prompt = [...imageBits, text, extra.length ? extra.join(" ") : ""].filter(Boolean).join("\\n\\n");
     following = true; composerImages = []; vscode.postMessage({ type: "send", text: prompt }); input.value = ""; autosize(); persistView();
   }
-  // @ mentions and / commands — Cursor's typeahead: an empty state with recent files and navigation rows into modes
+  // @ mentions and / commands — the reference IDE's typeahead: an empty state with recent files and navigation rows into modes
   // (Files & Folders, Past Chats, Docs, Terminals, Commits), one "Results" list while typing, highlighted matches,
   // ↑/↓, Enter/Tab, → into a mode, Backspace out of it, Escape.
   const COD = ${JSON.stringify(MUSTER_ICON_CODES)};
@@ -1218,7 +1218,7 @@ ${polishStyles}
     }
     menu.classList.add("open"); placeMenu($("mode-pill")); markSel();
   }
-  // Entering or leaving a mode drops what was typed after the trigger (Cursor deletes that range too).
+  // Entering or leaving a mode drops what was typed after the trigger (the reference IDE deletes that range too).
   function setMode(mode) { if (!suggest) return; const caret = input.selectionStart; input.value = input.value.slice(0, suggest.start + 1) + input.value.slice(caret); input.setSelectionRange(suggest.start + 1, suggest.start + 1); suggest.query = ""; suggest.mode = mode; autosize(); requestSuggestions(); }
   function chooseSuggestion(it) {
     if (!suggest) return;
@@ -1279,7 +1279,7 @@ ${polishStyles}
   });
   { const mic = document.querySelector('.icon[title="Dictate"]'); if (mic) mic.addEventListener("click", () => vscode.postMessage({ type: "dictate" })); }
   $("stop").addEventListener("click", () => vscode.postMessage({ type: "stop" }));
-  // Stop in the send slot while running (Cursor), ⇧⌘⌫ anywhere in the pane; queued follow-ups live between the messages and the composer.
+  // Stop in the send slot while running (the reference IDE), ⇧⌘⌫ anywhere in the pane; queued follow-ups live between the messages and the composer.
   { const stopBtn = document.createElement("span"); stopBtn.className = "stopbtn"; stopBtn.id = "stopbtn"; stopBtn.title = "Stop ⇧⌘⌫"; stopBtn.textContent = "■"; stopBtn.addEventListener("click", () => vscode.postMessage({ type: "stop" })); $("send").parentNode.insertBefore(stopBtn, $("send").nextSibling); }
   document.addEventListener("keydown", (e) => { if (e.key === "Backspace" && e.metaKey && e.shiftKey) { e.preventDefault(); vscode.postMessage({ type: "stop" }); } });
   // ── browser tab: URL bar, page area (the workbench places the real page over #bhost), sections ──
@@ -1317,7 +1317,7 @@ ${polishStyles}
     reportRect();
   }
   $("btake").addEventListener("click", () => { if (bstate) vscode.postMessage({ type: "browserTakeControl", id: bstate.id }); });
-  // Cursor's browser chrome extras: bookmarks bar under the address bar, DevTools, and the certificate overlay.
+  // the reference IDE's browser chrome extras: bookmarks bar under the address bar, DevTools, and the certificate overlay.
   let bookmarks = [];
   function renderBookmarks(list, cert) {
     bookmarks = list; const bar = $("bbookmarks"); bar.innerHTML = ""; bar.classList.toggle("has", list.length > 0);

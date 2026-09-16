@@ -1,7 +1,7 @@
 // Muster Code — the built-in Muster layer. Codex-first: the Agent pane (the
-// Cursor-standard surface, secondary sidebar), Codex threads as chat sessions,
+// the reference IDE-standard surface, secondary sidebar), Codex threads as chat sessions,
 // the default chat participant + models (native chat kept as plumbing for
-// inline chat / chat editing), and Cursor's status-bar cluster.
+// inline chat / chat editing), and the reference IDE's status-bar cluster.
 import * as vscode from "vscode";
 import { spawn } from "node:child_process";
 import { cachedQuery, callOwnedThread, formatAge, formatSize, interruptTurn, listThreads, prefetchCatalog, readHistory, runTurn, setBrowserMcp, setDisabledMcpServers, threadsForWorkspace, turnHooks, type CodexThread, useCatalogStore } from "./codex.js";
@@ -154,12 +154,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   };
   context.subscriptions.push(vscode.lm.registerLanguageModelChatProvider("muster", modelProvider));
 
-  // ── Live edits (Cursor-style streaming inline diffs) ──
+  // ── Live edits (reference-IDE-style streaming inline diffs) ──
   const live = new LiveEditController(workspaceCwd, (line) => output.appendLine(line));
   live.register(context);
   startDevControl(context, { live, log: (line) => output.appendLine(line), settings: () => settings, pane: { debugState: () => pane.debugState(), debugInput: (text) => pane.debugInput(text), debugSend: (text) => pane.debugSend(text), debugStop: () => pane.debugStop(), debugEdit: (cp, text) => pane.debugEdit(cp, text), debugDecide: (id, d) => pane.debugDecide(id, d), debugRequest: (m, p) => pane.debugRequest(m, p), debugSuggest: (kind, query, mode) => pane.debugSuggest(kind, query, mode), debugThreads: () => pane.debugThreads(), harness: (input) => pane.harness(input) } });
 
-  // ── The Agent pane (secondary sidebar) — the Cursor-standard surface ──
+  // ── The Agent pane (secondary sidebar) — the the reference IDE-standard surface ──
   const pane = new AgentPane(context, output, live);
   context.subscriptions.push(vscode.window.registerWebviewViewProvider(AgentPane.viewId, pane, { webviewOptions: { retainContextWhenHidden: true } }));
   registerWorkspaceHub(context, { sourceRoot: workspaceCwd });
@@ -229,7 +229,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   context.subscriptions.push(vscode.commands.registerCommand("muster.terminal.search", (args?: { id?: string; query?: string; limit?: number; caseSensitive?: boolean }) => args?.id && args.query ? terminalWorkspace.search(args.id, args.query, { ...(args.limit === undefined ? {} : { limit: args.limit }), ...(args.caseSensitive === undefined ? {} : { caseSensitive: args.caseSensitive }) }) : terminalWorkspace.searchInteractive(args?.id, args?.query)));
   context.subscriptions.push(vscode.commands.registerCommand("muster.terminal.send", (args?: { id?: string; text?: string; execute?: boolean }) => args?.id && args.text ? terminalWorkspace.send(args.id, args.text, args.execute === true) : terminalWorkspace.sendInteractive(args?.id)));
   context.subscriptions.push(vscode.commands.registerCommand("muster.terminal.close", (args?: { id?: string }) => terminalWorkspace.closeInteractive(args?.id)));
-  // Codex status (Cursor shows plan/usage in its chrome): plan + the primary rate-limit window, refreshed periodically and on account events.
+  // Codex status (the reference IDE shows plan/usage in its chrome): plan + the primary rate-limit window, refreshed periodically and on account events.
   const codexItem = vscode.window.createStatusBarItem("muster.codex", vscode.StatusBarAlignment.Right, 61);
   codexItem.command = "muster.agent.plugins";
   const renderLimits = (limits: Record<string, unknown> | undefined, plan: string) => {
@@ -252,7 +252,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   const statusTimer = setInterval(() => void refreshCodexStatus(), 10 * 60_000);
   context.subscriptions.push({ dispose: () => clearInterval(statusTimer) }, codexItem);
   pane.onAccountEvent((params) => { const limits = (params.rateLimits ?? params) as Record<string, unknown>; renderLimits(limits, String((limits.planType as string | undefined) ?? "")); });
-  // Cursor's status-bar Tab item: toggle, snooze, per-language, settings.
+  // the reference IDE's status-bar Tab item: toggle, snooze, per-language, settings.
   const refreshTab = () => { const on = config().get<boolean>("completions.enabled", false); const left = completionsSnoozedFor(); tabItem.text = !on ? "Muster Tab: off" : left > 0 ? `Muster Tab: snoozed ${Math.ceil(left / 60_000)}m` : "Muster Tab"; };
   context.subscriptions.push(vscode.commands.registerCommand("muster.completions.toggle", async () => {
     const on = !config().get<boolean>("completions.enabled", false);
@@ -371,7 +371,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   context.subscriptions.push(vscode.commands.registerCommand("muster.thread.fork", async (args?: { id?: string; lastTurnId?: string; ephemeral?: boolean }) => { try { const record = await resolveCatalogThread(args?.id, { includeSubagents: true }); if (!record) return; const fork = await threadCatalog.fork(record.id, { ...(args?.lastTurnId ? { lastTurnId: args.lastTurnId } : {}), ...(args?.ephemeral === true ? { ephemeral: true } : {}) }); if (args?.ephemeral === true) { void vscode.window.showInformationMessage(`Created ephemeral fork ${fork.id}; it is available only in the owning app-server session.`); return; } const read = await threadCatalog.read(fork.id, true); await handoffThread(pane as AgentPane & { openCatalogThread?: (record: ThreadRecord, read: ThreadRead, mode: "open" | "continue") => Promise<void> }, fork, read, "continue"); } catch (error) { catalogError(error); } }));
   setDisabledMcpServers(vscode.workspace.getConfiguration("muster").get<string[]>("mcp.disabled", []));
   context.subscriptions.push(vscode.workspace.onDidChangeConfiguration((e) => { if (e.affectsConfiguration("muster.mcp.disabled")) setDisabledMcpServers(vscode.workspace.getConfiguration("muster").get<string[]>("mcp.disabled", [])); }));
-  // Browser (⇧⌘B): a Chromium guest tab with Cursor's visual editor; picks and screenshots go to the chat.
+  // Browser (⇧⌘B): a Chromium guest tab with the reference IDE's visual editor; picks and screenshots go to the chat.
   const browser = new BrowserController(context, workspaceCwd);
   pane.browser = browser;
   setBrowserProvider(() => { const id = browser.activeEditorBrowser() ?? pane.activeBrowserId() ?? browser.list()[0]?.id; const st = id ? browser.get(id) : undefined; return st ? { url: st.url, title: st.title, console: st.console } : undefined; });
@@ -406,7 +406,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     context.subscriptions.push(api.onDidOpenRepository(() => api.repositories.forEach(watch)));
   })();
   context.subscriptions.push(vscode.commands.registerCommand("muster.agent.stop", () => pane.stop()));
-  // Cursor's chat keyboard surface (see docs/cursor-feature-atlas.md §2).
+  // the reference IDE's chat keyboard surface (see docs/cursor-feature-atlas.md §2).
   context.subscriptions.push(vscode.commands.registerCommand("muster.agent.focus", () => pane.focus()));
   context.subscriptions.push(vscode.commands.registerCommand("muster.agent.closeActiveTab", () => pane.closeActive()));
   context.subscriptions.push(vscode.commands.registerCommand("muster.agent.prevTab", () => pane.stepTab(-1)));
@@ -445,7 +445,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     output.show();
   }));
 
-  // ── Status bar, Cursor's right cluster ──
+  // ── Status bar, the reference IDE's right cluster ──
   const tabItem = vscode.window.createStatusBarItem("muster.tab", vscode.StatusBarAlignment.Right, 60);
   tabItem.text = config().get<boolean>("completions.enabled", false) ? "Muster Tab" : "Muster Tab: off"; tabItem.tooltip = "Muster Tab — inline completions and next-edit prediction from Codex (uses your plan). Click for snooze and options."; tabItem.command = "muster.completions.menu"; tabItem.show();
   const statsItem = vscode.window.createStatusBarItem("muster.agentStats", vscode.StatusBarAlignment.Right, 59);
@@ -454,7 +454,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   await refreshThreads();
   output.appendLine(`Muster activated · ${threadsCache.length} Codex threads`);
-  // Cursor opens with its agent pane, not VS Code's chat: make ours the secondary sidebar's view on startup.
+  // the reference IDE opens with its agent pane, not VS Code's chat: make ours the secondary sidebar's view on startup.
   void vscode.commands.executeCommand("muster.evictBuiltinChat").then(undefined, () => undefined);
   void vscode.commands.executeCommand("workbench.view.extension.muster-agent");
 

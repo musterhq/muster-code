@@ -1,4 +1,4 @@
-// Browser tabs inside the Agent pane (Cursor: the browser is a tab of the side
+// Browser tabs inside the Agent pane (the reference IDE: the browser is a tab of the side
 // pane with its own URL bar and sections). The pane's webview draws the chrome
 // and reports where the page area sits; the workbench places a main-process
 // WebContentsView over it and streams page events (title, URL, console) back.
@@ -18,11 +18,11 @@ export interface BrowserPick { readonly id: string; readonly picked: PickedEleme
 export interface ConsoleEntry { level: string; message: string; line?: number; source?: string }
 export interface BrowserHistory { canGoBack: boolean; canGoForward: boolean }
 export interface BrowserLoadError { url: string; error: string; code?: number; mainFrame: boolean; time: number }
-/** A visual-editor edit made in the browser (Cursor's CHANGES list: old → new), applied live to the page until the agent puts it in code. */
+/** A visual-editor edit made in the browser (the reference IDE's CHANGES list: old → new), applied live to the page until the agent puts it in code. */
 export interface VisualChange { selector: string; kind: "text" | "style"; prop?: string; before: string; after: string; source?: PickedSource | null }
 export interface BrowserState { loading?: boolean; loadError?: string | null; navigation?: number; history?: BrowserHistory; networkErrors?: BrowserLoadError[]; id: string; url: string; title: string; console: ConsoleEntry[]; picked: PickedElement | null; picking: boolean; driving: boolean; changes: VisualChange[]; cert?: { url: string; error: string } | null; headless?: boolean; viewport?: BrowserViewportState; colorScheme?: BrowserColorScheme }
 
-/** Cursor's lock overlay while the agent drives: banner + "Take control" (the page stays clickable so the agent's own input events land). */
+/** the reference IDE's lock overlay while the agent drives: banner + "Take control" (the page stays clickable so the agent's own input events land). */
 export const LOCK_JS = `(() => { if (document.getElementById("__muster_lock")) return true; const d = document.createElement("div"); d.id = "__muster_lock"; d.setAttribute("style", "position:fixed;inset:0;z-index:2147483647;pointer-events:none;display:flex;align-items:flex-end;justify-content:center;font:13px -apple-system,system-ui,sans-serif;color:#fff;box-shadow:inset 0 0 0 2px #D2943E");
   d.innerHTML = '<div style="pointer-events:auto;margin-bottom:20px;background:#1e1e1e;border:1px solid rgba(255,255,255,.18);border-radius:8px;padding:8px 8px 8px 14px;display:flex;gap:12px;align-items:center;box-shadow:0 8px 24px rgba(0,0,0,.4)"><span style="display:inline-flex;align-items:center;gap:8px"><span style="width:8px;height:8px;border-radius:50%;background:#D2943E;box-shadow:0 0 8px #D2943E"></span>Agent is using the browser</span><button id="__muster_take" style="background:#D2943E;color:#1a1a1a;border:0;border-radius:6px;padding:5px 10px;font:inherit;font-weight:600;cursor:pointer">Take control</button></div>';
   document.documentElement.appendChild(d); d.querySelector("#__muster_take").onclick = () => { d.remove(); console.log("__muster:takecontrol"); }; return true; })()`;
@@ -160,7 +160,7 @@ export class BrowserController {
   private readonly panels = new Map<string, vscode.WebviewPanel>();
   private groupColumn: vscode.ViewColumn | undefined;
 
-  /** Cursor's browser editor: a tab in the editor area (beside the code), with the navbar and tools drawn by the tab itself. */
+  /** the reference IDE's browser editor: a tab in the editor area (beside the code), with the navbar and tools drawn by the tab itself. */
   private openEditor(tab: BrowserState): void {
     const groups = vscode.window.tabGroups.all;
     const empty = groups.find((g) => g.tabs.length === 0);
@@ -214,7 +214,7 @@ export class BrowserController {
     if (tab.picked?.selector === c.selector) { if (c.kind === "text") tab.picked.text = c.before; else tab.picked.styles[c.prop ?? ""] = c.before; }
     this.changes.fire(tab);
   }
-  /** The CHANGES list as a request for the agent (Cursor: "Apply changes" hands the visual edits to the agent). */
+  /** The CHANGES list as a request for the agent (the reference IDE: "Apply changes" hands the visual edits to the agent). */
   changesPrompt(id: string): string {
     const tab = this.tabs.get(id); if (!tab?.changes.length) return "";
     return `Apply these visual edits I made in the browser to the source code, keeping everything else as is:\n${tab.changes.map((c) => `- ${c.selector}${c.source?.file ? ` (source ${c.source.file}:${c.source.line})` : ""}: ${c.kind === "text" ? "text" : c.prop} "${c.before}" → "${c.after}"`).join("\n")}\n\nPage: ${tab.url}`;

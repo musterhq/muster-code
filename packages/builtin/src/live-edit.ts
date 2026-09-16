@@ -1,4 +1,4 @@
-// Live edits, the Cursor way: the file stays in its own editor while the
+// Live edits, the the reference IDE way: the file stays in its own editor while the
 // streamed patch lands in it token by token. Painting is done by the
 // workbench-side contribution (product/muster-inline-diff.js: added-line
 // decorations, tokenized ghost rows for removed lines, per-hunk overlay
@@ -18,7 +18,7 @@ export interface EditCard { readonly path: string; readonly adds: number; readon
 export const BASELINE_SCHEME = "muster-baseline";
 
 interface LiveFile {
-  /** Counts of hunks already kept, so a settled card still reads "+12 −3" (Cursor keeps the numbers after Keep). */
+  /** Counts of hunks already kept, so a settled card still reads "+12 −3" (the reference IDE keeps the numbers after Keep). */
   kept?: { adds: number; dels: number };
   readonly uri: vscode.Uri;
   readonly abs: string;
@@ -103,7 +103,7 @@ export class LiveEditController {
     cmd("muster.review.toggleLayout", async () => { await vscode.commands.executeCommand("toggle.diff.renderSideBySide"); });
   }
 
-  /** Cursor's "Review Changes" editor: every live file against its turn-start contents, in one multi-diff editor. */
+  /** the reference IDE's "Review Changes" editor: every live file against its turn-start contents, in one multi-diff editor. */
   async openReview(): Promise<void> {
     const files = [...this.files.values()];
     if (!files.length) { vscode.window.setStatusBarMessage("No pending changes to review", 2000); return; }
@@ -241,7 +241,7 @@ export class LiveEditController {
   review(): EditCard[] {
     return [...this.files.values()].map((file) => this.card(file));
   }
-  /** Cards of files already kept or undone this session (their counts survive settling, as in Cursor). */
+  /** Cards of files already kept or undone this session (their counts survive settling, as in the reference IDE). */
   private readonly settled = new Map<string, EditCard>();
   settledCards(): EditCard[] { return [...this.settled.values()]; }
 
@@ -393,7 +393,7 @@ export class LiveEditController {
     return after >= 0 ? after : 0;
   }
 
-  /** ⌥L / ⌥H: the next or previous file with pending changes, revealed at its first hunk (Cursor's review navigation). */
+  /** ⌥L / ⌥H: the next or previous file with pending changes, revealed at its first hunk (the reference IDE's review navigation). */
   private async jumpFile(direction: 1 | -1): Promise<void> {
     const files = [...this.files.values()];
     if (!files.length) return;
@@ -504,7 +504,7 @@ export class LiveEditController {
   }
 }
 
-/** Cursor's inner-change highlights: for removed/added lines paired by position, the changed span after trimming
+/** the reference IDE's inner-change highlights: for removed/added lines paired by position, the changed span after trimming
  * the common prefix and suffix (row = index within the hunk; columns are 0-based character offsets). */
 export function innerRanges(removed: readonly string[], added: readonly string[]): { added: { row: number; start: number; end: number }[]; removed: { row: number; start: number; end: number }[] } {
   const out = { added: [] as { row: number; start: number; end: number }[], removed: [] as { row: number; start: number; end: number }[] };
@@ -519,7 +519,7 @@ export function innerRanges(removed: readonly string[], added: readonly string[]
     const changedBefore = before.length - prefix - suffix;
     const changedAfter = after.length - prefix - suffix;
     if (changedBefore <= 0 && changedAfter <= 0) continue;
-    // Whole-line rewrites get no inner box (Cursor shows plain green/red for those).
+    // Whole-line rewrites get no inner box (the reference IDE shows plain green/red for those).
     if (changedAfter > after.length * 0.8 && changedBefore > before.length * 0.8) continue;
     if (changedAfter > 0) out.added.push({ row: i, start: prefix, end: after.length - suffix });
     if (changedBefore > 0) out.removed.push({ row: i, start: prefix, end: before.length - suffix });

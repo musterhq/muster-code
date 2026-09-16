@@ -1,4 +1,4 @@
-// The Muster browser as MCP tools for the agent (Cursor exposes its browser to
+// The Muster browser as MCP tools for the agent (the reference IDE exposes its browser to
 // the agent the same way, Playwright-style). Codex launches this file over stdio
 // (see setBrowserMcp in codex.ts); every call is bridged to the extension host
 // over a unix socket, so the agent drives the very tab the user is looking at.

@@ -1,7 +1,7 @@
 // Extension-host half of the browser tools: a unix-socket server the MCP shim
 // (browser-mcp.ts) calls into. Tools run against the visible browser tab through
 // the workbench's browser commands (eval/input/capture over the main process),
-// show Cursor's "Agent is using the browser · Take control" lock while driving,
+// show the reference IDE's "Agent is using the browser · Take control" lock while driving,
 // and stop the moment the user takes control.
 import * as vscode from "vscode";
 import { createServer, type Server } from "node:net";

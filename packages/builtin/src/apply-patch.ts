@@ -37,7 +37,7 @@ export class ApplyPatchStream {
       if (file) touched.add(file);
       newline = this.buffer.indexOf("\n", this.consumed);
     }
-    // The in-progress (unterminated) line still paints: Cursor shows words as they land.
+    // The in-progress (unterminated) line still paints: the reference IDE shows words as they land.
     const tail = this.buffer.slice(this.consumed);
     if (tail && this.current && this.current.hunks.length && /^[ +-]/.test(tail)) {
       const hunk = this.current.hunks[this.current.hunks.length - 1]!;

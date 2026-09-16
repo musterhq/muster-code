@@ -1,6 +1,6 @@
 # Muster IDE product contract
 
-The target is a replacement for the user’s daily Codex and Cursor workflow, not merely a chat/diff feature. Primary flows include thread/project management, agent spawning, a sub-agent workspace, inspecting each agent’s assignment/status/messages/changes, parent-to-child communication, interruption/steering, context/files/folders/browser handoff, and integrated terminals.
+The target is a replacement for the user’s daily Codex and the reference IDE workflow, not merely a chat/diff feature. Primary flows include thread/project management, agent spawning, a sub-agent workspace, inspecting each agent’s assignment/status/messages/changes, parent-to-child communication, interruption/steering, context/files/folders/browser handoff, and integrated terminals.
 
 Graphite is the default visual direction. Other themes stay customizable. Existing realtime/full-file diff behavior is protected.
 

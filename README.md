@@ -1,6 +1,6 @@
 # Muster Code
 
-Private. The standalone, Codex-first coding environment around muster: Cursor as the bar, every VS Code feature, your Codex threads pinned, the board in the editor.
+Private. The standalone, Codex-first coding environment around muster: the reference IDE as the bar, every VS Code feature, your Codex threads pinned, the board in the editor.
 
 ## Shape
 

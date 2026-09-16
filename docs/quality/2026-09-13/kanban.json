@@ -423,7 +423,7 @@
       "status": "In Progress",
       "owner": "frontend",
       "title": "Evidence-backed IDE/harness parity matrix",
-      "scope": "Official Codex/Cursor and two open-source references",
+      "scope": "Official Codex and two open-source references",
       "dependencies": "None",
       "acceptance": "Map user workflows to implemented/missing/experimental support with primary sources and concrete acceptance criteria; do not equate UI mockups with real functionality.",
       "checks": {
@@ -586,6 +586,6 @@
     "coreTestsPreviouslyPassed": 737,
     "live": "pending integrated stage; baseline inference passed"
   },
-  "productTarget": "Full Codex/Cursor replacement IDE: thread/project management and real agent orchestration are primary, with preserved editing/browser/terminal workflows.",
+  "productTarget": "Full-featured Codex-first IDE: thread/project management and real agent orchestration are primary, with preserved editing/browser/terminal workflows.",
   "appearance": "Neutral Graphite default; multiple palettes remain selectable; semantic diff colors preserved."
 }

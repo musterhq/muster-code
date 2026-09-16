@@ -1,12 +1,12 @@
 // Muster Tab: inline completions and next-edit prediction from Codex (ghost text and
-// inline edits), Cursor-style but quota-aware: off unless muster.completions.enabled,
+// inline edits), reference-IDE-style but quota-aware: off unless muster.completions.enabled,
 // snoozable, per-language, debounced, one request in flight, short windows, one JSON
 // answer carrying both the continuation at the cursor and the edit it implies elsewhere.
 import * as vscode from "vscode";
 import { runTurn } from "./codex.js";
 
 let snoozedUntil = 0;
-/** Cursor's status-bar "Snooze": no requests until the time passes (0 resumes). */
+/** the reference IDE's status-bar "Snooze": no requests until the time passes (0 resumes). */
 export function snoozeCompletions(ms: number): void { snoozedUntil = ms > 0 ? Date.now() + ms : 0; }
 export function completionsSnoozedFor(): number { return Math.max(0, snoozedUntil - Date.now()); }
 
@@ -69,7 +69,7 @@ export function registerCompletions(context: vscode.ExtensionContext, cwd: () =>
         if (line >= 0 && line < document.lineCount && line !== position.line) {
           const current = document.lineAt(line);
           if (typeof next.replace !== "string" || current.text.trim() === next.replace.trim()) {
-            // Cursor Tab's jump: an inline edit elsewhere — Tab jumps there and accepts, Esc dismisses.
+            // the reference IDE Tab's jump: an inline edit elsewhere — Tab jumps there and accepts, Esc dismisses.
             const item = new vscode.InlineCompletionItem(next.with, current.range) as vscode.InlineCompletionItem & { isInlineEdit?: boolean; showInlineEditMenu?: boolean };
             item.isInlineEdit = true; item.showInlineEditMenu = true;
             items.push(item);

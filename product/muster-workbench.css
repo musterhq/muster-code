@@ -1,6 +1,6 @@
 /* Muster Code workbench skin — maps VS Code's native chat DOM onto the measured
-   Cursor rules (docs/cursor-ux-spec.md §3–4). Appended after the workbench CSS so
-   equal-specificity rules win. Tokens follow Cursor's alpha-layer system. */
+   the reference IDE rules (docs/cursor-ux-spec.md §3–4). Appended after the workbench CSS so
+   equal-specificity rules win. Tokens follow the reference IDE's alpha-layer system. */
 .monaco-workbench {
   --mc-fg: var(--vscode-editor-foreground);
   --mc-bg-primary: color-mix(in srgb, var(--mc-fg) 20%, transparent);
@@ -18,7 +18,7 @@
   --mc-accent: var(--vscode-textLink-foreground);
 }
 
-/* Conversation surface: 840px max like Cursor's bar mode, 14px text, 22px lines */
+/* Conversation surface: 840px max like the reference IDE's bar mode, 14px text, 22px lines */
 .interactive-session .interactive-list .monaco-list-row .interactive-item-container {
   padding: 8px 12px;
   font-size: var(--mc-font-lg);
@@ -77,7 +77,7 @@
 .interactive-session .chat-input-container:focus-within { border-color: color-mix(in srgb, var(--mc-fg) 20%, transparent) !important; }
 .interactive-session .chat-input-toolbars { padding-top: 4px; gap: 4px; }
 .interactive-session .chat-input-toolbars .action-label { border-radius: var(--mc-radius-sm); font-size: var(--mc-font-sm); }
-/* Mode + model pickers read as pills (Cursor's unified dropdown) */
+/* Mode + model pickers read as pills (the reference IDE's unified dropdown) */
 .interactive-session .chat-input-toolbars .chat-modelPicker-item .action-label,
 .interactive-session .chat-input-toolbars .chat-modePicker-item .action-label {
   background: var(--mc-bg-secondary);
@@ -109,7 +109,7 @@
 }
 .interactive-session .chat-attached-context-attachment:hover { background: color-mix(in srgb, var(--vscode-list-hoverBackground) 80%, transparent); }
 
-/* Editing session (Review bar): Cursor's "Review +156 −41 · Keep/Undo" row */
+/* Editing session (Review bar): the reference IDE's "Review +156 −41 · Keep/Undo" row */
 .interactive-session .chat-editing-session-container {
   border: 1px solid var(--mc-stroke-tertiary);
   border-radius: var(--mc-radius-lg);
@@ -134,32 +134,32 @@
 .chat-sessions-view .monaco-list-row .label-name { font-size: var(--mc-font-sm); line-height: 16px; color: var(--mc-text-secondary); }
 .chat-sessions-view .monaco-list-row .label-description { font-size: var(--mc-font-xs); line-height: 14px; color: var(--mc-text-tertiary); font-variant-numeric: tabular-nums; }
 
-/* Inline diffs inside chat: 3px gutter stripe green/red (Cursor agent-layout) */
+/* Inline diffs inside chat: 3px gutter stripe green/red (the reference IDE agent-layout) */
 .interactive-session .monaco-diff-editor:not(.side-by-side) .gutter-insert { box-shadow: inset 3px 0 0 var(--vscode-terminal-ansiGreen); }
 .interactive-session .monaco-diff-editor:not(.side-by-side) .gutter-delete { box-shadow: inset 3px 0 0 var(--vscode-terminal-ansiRed); }
 
-/* Ghost text: Cursor's grayed suggestion */
+/* Ghost text: the reference IDE's grayed suggestion */
 .monaco-editor .ghost-text-decoration, .monaco-editor .ghost-text { color: var(--vscode-editorGhostText-foreground); }
 
 /* Chrome: hairline separations everywhere, no heavy borders */
 .monaco-workbench .part.sidebar, .monaco-workbench .part.auxiliarybar { border-color: var(--mc-stroke-tertiary) !important; }
 .monaco-workbench .part.statusbar { font-size: var(--mc-font-sm); }
 
-/* ── Cursor chrome: the right pane is the Agent pane; native chat stays plumbing ── */
+/* ── the reference IDE chrome: the right pane is the Agent pane; native chat stays plumbing ── */
 .monaco-workbench .part.auxiliarybar .composite-bar .action-item[aria-label*="Chat"],
 .monaco-workbench .part.auxiliarybar .composite-bar .action-item[aria-label*="Build with Agent"],
 .monaco-workbench .part.auxiliarybar .composite-bar .action-item[aria-label^="Copilot"] { display: none !important; }
-/* Pane header reads as Cursor's tab row: title + right-aligned actions, hairline below */
+/* Pane header reads as the reference IDE's tab row: title + right-aligned actions, hairline below */
 .monaco-workbench .part.auxiliarybar .title-label h2 { font-size: 13px; font-weight: 500; }
 .monaco-workbench .part.auxiliarybar .pane-header { border-bottom: 1px solid var(--mc-stroke-tertiary); }
-/* Empty editor: keep the letterpress mark, quiet the shortcut list to Cursor's dim style */
+/* Empty editor: keep the letterpress mark, quiet the shortcut list to the reference IDE's dim style */
 .monaco-workbench .editor-group-watermark .shortcuts { color: var(--mc-text-tertiary); font-size: 13px; }
 .monaco-workbench .editor-group-watermark dl dt { color: var(--mc-text-secondary); }
 .monaco-workbench .editor-group-watermark .keybinding { opacity: .8; }
-/* Explorer rows a touch airier, like Cursor */
+/* Explorer rows a touch airier, like the reference IDE */
 .monaco-workbench .explorer-viewlet .monaco-list-row { font-size: 13px; }
 
-/* ── Muster inline diff (Cursor's inline-diff contribution, rebuilt) ── */
+/* ── Muster inline diff (the reference IDE's inline-diff contribution, rebuilt) ── */
 .monaco-editor .muster-added-line { background-color: var(--vscode-diffEditor-insertedLineBackground); }
 .monaco-editor .muster-added-first::after { content: ""; position: absolute; right: -10px; top: 0; width: 10px; height: 100%; background-image: linear-gradient(to right, var(--vscode-diffEditor-insertedLineBackground), transparent); }
 .monaco-editor .muster-ghost { background-color: var(--vscode-diffEditor-removedLineBackground); opacity: .9; white-space: pre; overflow: hidden; -webkit-user-select: text; user-select: text; cursor: text; }
@@ -200,9 +200,9 @@
 .monaco-editor .muster-cmdk-hint .lbl { margin-left: 4px; }
 .monaco-editor .muster-cmdk-status { font-size: 11px; color: color-mix(in srgb, var(--vscode-editor-foreground) 66%, transparent); min-height: 0; }
 
-/* ── Agent pane density: the webview's tab row is the header (Cursor) ── */
+/* ── Agent pane density: the webview's tab row is the header (the reference IDE) ── */
 
-/* ── Plan editor toolbar in the breadcrumb row (Cursor) ── */
+/* ── Plan editor toolbar in the breadcrumb row (the reference IDE) ── */
 .monaco-workbench .breadcrumbs-control { position: relative; }
 .monaco-workbench .plan-breadcrumb-controls { position: absolute; right: 8px; top: 0; height: 22px; display: flex; align-items: center; gap: 4px; font-family: var(--vscode-font-family); font-size: 12px; z-index: 5; background: var(--vscode-editor-background); padding-left: 8px; }
 .monaco-workbench .pbc-pill { display: inline-flex; align-items: center; gap: 4px; height: 20px; padding: 0 6px; border-radius: 4px; color: color-mix(in srgb, var(--vscode-editor-foreground) 66%, transparent); cursor: pointer; white-space: nowrap; }
@@ -227,7 +227,7 @@
 .monaco-workbench .muster-tab .x:hover { background: color-mix(in srgb, var(--vscode-editor-foreground) 14%, transparent); color: var(--vscode-editor-foreground); }
 .monaco-workbench .muster-tab .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--vscode-charts-green); }
 
-/* ── Inline diff polish: inner-change boxes (Cursor: rgba(12,233,27,.15) / rgba(242,13,59,.25)) ── */
+/* ── Inline diff polish: inner-change boxes (the reference IDE: rgba(12,233,27,.15) / rgba(242,13,59,.25)) ── */
 .monaco-editor .muster-inner-added { background-color: rgba(12,233,27,.15); border-left: 1px solid rgba(12,233,27,.15); border-right: 1px solid rgba(12,233,27,.15); box-sizing: border-box; }
 .monaco-editor .muster-ghost-line { position: relative; }
 .monaco-editor .muster-inner-removed { position: absolute; top: 0; height: 100%; background-color: rgba(242,13,59,.25); border-left: 1px solid rgba(242,13,59,.25); border-right: 1px solid rgba(242,13,59,.25); box-sizing: border-box; pointer-events: none; }

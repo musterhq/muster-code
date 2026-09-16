@@ -1,11 +1,11 @@
-# Cursor UX — measured spec (the acceptance bar for Muster Code)
+# reference IDE UX — measured spec (the acceptance bar for Muster Code)
 
-Measured 2026-09-03 from Cursor 3.18.25's own app bundle (Code-OSS 1.128 base), its
+Measured 2026-09-03 from the reference IDE's own app bundle (Code-OSS 1.128 base), its
 docs/changelog frames, and live screenshots on the owner's Mac. Every value here is
-read from Cursor's theme JSON or workbench CSS — not estimated. Reference frames:
+read from the reference IDE's theme JSON or workbench CSS — not estimated. Reference frames:
 `docs/reference/`.
 
-## 1. What Cursor is, structurally
+## 1. What the reference IDE is, structurally
 - A Code-OSS distribution: `product.json` with its own gallery
   (`marketplace.cursorapi.com`), `dataFolderName: .cursor`, no `defaultChatAgent`
   (its agent is native workbench code), ~20 built-in `cursor-*` extensions
@@ -15,10 +15,10 @@ read from Cursor's theme JSON or workbench CSS — not estimated. Reference fram
   `agent-layout` / `agent-sidebar-cell` / `cursorGhostTextWidget` CSS.
 - Muster Code mirrors the shape: Code-OSS 1.126 base, built-in `muster.muster-code`,
   native chat workbench via `defaultChatAgent` + proposal grants, muster core as
-  the agent runtime. Where Cursor patched the workbench, we first use the native
+  the agent runtime. Where the reference IDE patched the workbench, we first use the native
   chat/inline-chat/chat-editing surfaces the OSS build already ships, then patch.
 
-## 2. Theme — "Cursor Dark" (default) → Muster Dark
+## 2. Theme — "reference-IDE-dark" (default) → Muster Dark
 Neutral structure (kept exactly; these are generic values):
 | role | value |
 |---|---|
@@ -35,18 +35,18 @@ Neutral structure (kept exactly; these are generic values):
 | diff inserted text / line | #3FA26622 / #3FA26633 |
 | diff removed text / line | #B8004922 / #B8004933 |
 | gutter added / deleted | #3FA266 / #E34671 |
-Accent (Cursor: steel blue `button.background #81A1C1`, `badge #88C0D0`,
+Accent (the reference IDE: steel blue `button.background #81A1C1`, `badge #88C0D0`,
 `textLink #81A1C1`). Muster Dark uses muster's identity instead: links/badges/
 selection caret = periwinkle `#B0B8F8` (the owner-matched value), buttons a
 desaturated periwinkle `#8F97E6` with ink foreground `#14162A`; coral is reserved
 for the wordmark. Everything else is identical to the table above.
-Base palette Cursor derives semantics from: blue #7BAFE9 · green #3FA266 ·
+Base palette the reference IDE derives semantics from: blue #7BAFE9 · green #3FA266 ·
 red #FC6B83 · yellow (charts) · cyan #81A1C1 · magenta #B48EAD · purple #9386F2 ·
 orange #D08770 · added #70B489 · removed #FC6B83 · modified #F1B467.
 
 ## 3. Design tokens (the alpha-layer system)
 All chrome tints are `color-mix` of the editor foreground over transparent —
-this is what makes Cursor feel "one material":
+this is what makes the reference IDE feel "one material":
 - `--cursor-bg-primary` 20–48% fg · `secondary` 14–20% · `tertiary` 6–8% ·
   `quaternary` 6% · `quinary` 4%
 - `--cursor-text-primary` = fg · `text-secondary` ≈ 55% · `text-tertiary` ≈ 37% ·
@@ -104,10 +104,10 @@ inherit bg, line numbers tertiary, active line primary.
 **Ghost text** (`.cursorGhostTextWidget`): `editorGhostText.foreground`; "cpp"
 (next-edit) hint pill: editor bg, 1px progressBar-foreground border, 12px;
 multi-edit button min-width 120px; small triangle pointer.
-**Status bar** (frame): `Cursor Tab · Ln 1, Col 1 · Spaces: 2 · UTF-8 · LF ·
+**Status bar** (frame): `the reference IDE Tab · Ln 1, Col 1 · Spaces: 2 · UTF-8 · LF ·
 {} TypeScript · 🔔`, right-aligned, 13px.
 
-## 5. The Agents window (Cursor 2.x, frames)
+## 5. The Agents window (the reference IDE 2.x, frames)
 Separate window from the editor: left rail with `New Agent ⌘N`, `Automations`,
 `Customize`; grouped agent lists by repo with status dot (blue = running/
 unread, gray = done), item title + optional badges (`+156 −41`); user footer
@@ -120,12 +120,12 @@ Login screen (dark): centered logo, title, tagline, `Log In` steel-blue button,
 `Sign Up` gray, footer note.
 
 ## 6. Muster Code mapping (what we build to this spec)
-- Native chat view = Cursor's agent pane: our participant streams into VS Code's
+- Native chat view = the reference IDE's agent pane: our participant streams into VS Code's
   chat; we theme via Muster Dark + CSS contributions to match §4 (bubble,
   cards, tool lines, pills, toolbar).
 - Chat sessions sidebar = agent list (§4 cell spec) fed by Codex threads.
-- Chat editing (multi-file accept/reject) = Cursor's Review / Keep-Undo flow.
+- Chat editing (multi-file accept/reject) = the reference IDE's Review / Keep-Undo flow.
 - Inline chat (⌘I/⌘K) = Cmd+K; inline completions = Tab with the cpp hint pill.
 - Board = agents window's grouped list + our worktree cards; diff pane rules §4.
-Acceptance: side-by-side screenshots with Cursor on the same file, same theme
+Acceptance: side-by-side screenshots with the reference IDE on the same file, same theme
 family, judged by the owner. No claim of parity without that frame.

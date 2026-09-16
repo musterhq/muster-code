@@ -1,5 +1,5 @@
 // Muster inline diff — the workbench half of live agent edits, modelled on
-// Cursor's inline-diff contribution: decorations for added lines, tokenized
+// the reference IDE's inline-diff contribution: decorations for added lines, tokenized
 // view zones for removed lines, a per-hunk overlay widget ("n of m · Reject ·
 // Accept") on the line after each hunk, and a bottom review bar. The built-in
 // extension drives it through two commands:
@@ -110,7 +110,7 @@
     const actions = el("div", "actions");
     const undo = button("Undo All", KEYS.rejectFile, "text", () => run("muster.edit.file", { uri: st.uri, action: "reject" }));
     const keep = button("Keep All", KEYS.acceptFile, "accent", () => run("muster.edit.file", { uri: st.uri, action: "accept" }));
-    // Multi-file review (Cursor): "Keep all changes" + "Review next file ⌥L".
+    // Multi-file review (the reference IDE): "Keep all changes" + "Review next file ⌥L".
     const keepAll = button("Keep all changes", "", "text", () => run("muster.edit.acceptAll", {}));
     const nextFile = button("Review next file", "⌥L", "accent", () => run("muster.edit.nextFile", {}));
     actions.append(undo, keep, keepAll, nextFile);
@@ -161,7 +161,7 @@
       if (!visible) continue;
       w.dom.style.top = `${Math.round(top)}px`;
       w.dom.style.right = `${right}px`;
-      // Cursor shrinks the widget to shortcuts when the line's text would run into it.
+      // the reference IDE shrinks the widget to shortcuts when the line's text would run into it.
       const model = editor.getModel();
       let textEnd = 0;
       try { textEnd = info.contentLeft + editor.getOffsetForColumn(w.line, model.getLineMaxColumn(w.line)) - editor.getScrollLeft(); } catch { textEnd = 0; }
@@ -259,7 +259,7 @@
     const services = { modelService: accessor.get(IModelService), languageService: accessor.get(ILanguageService) };
     for (const editor of editorsFor(accessor.get(ICodeEditorService), args.uri)) render(editor, services, args);
   });
-  // ── ⌘K prompt bar (Cursor's aipopup): a view zone above the selection with Edit Selection ⏎ / Quick Question ⌥⏎ ──
+  // ── ⌘K prompt bar (the reference IDE's aipopup): a view zone above the selection with Edit Selection ⏎ / Quick Question ⌥⏎ ──
   const bars = new Map();
   function hideBar(uri) {
     const bar = bars.get(uri);
@@ -309,7 +309,7 @@
   Registry.registerCommand("muster.cmdk.hide", (accessor, args) => hideBar(args.uri));
   Registry.registerCommand("muster.cmdk.status", (accessor, args) => { const bar = bars.get(args.uri); if (bar) bar.status.textContent = args.text || ""; });
 
-  // Cursor: the agent pane's header is its tab strip. Render the pane's tabs into the secondary
+  // the reference IDE: the agent pane's header is its tab strip. Render the pane's tabs into the secondary
   // sidebar's title row, beside the view actions (+, history, …); the composite bar is hidden by
   // workbench.activityBar.autoHide (single container), so the layout stays VS Code's own.
   let agentHeader = { tabs: [], activeId: "" };
@@ -338,7 +338,7 @@
   const headerObserver = new MutationObserver(() => { const title = document.querySelector(".part.auxiliarybar > .composite.title"); if (title && !title.querySelector(":scope > .muster-tabs")) renderAgentHeader(); });
   headerObserver.observe(document.body, { childList: true, subtree: true });
 
-  // Cursor's plan editor toolbar lives in the breadcrumb row: Preview ⌄ · model ⌄ · Build ⌘⏎ ⌄.
+  // the reference IDE's plan editor toolbar lives in the breadcrumb row: Preview ⌄ · model ⌄ · Build ⌘⏎ ⌄.
   let planToolbar = { visible: false, model: "", count: 0, selected: 0 };
   function mountPlanToolbar() {
     for (const stale of document.querySelectorAll(".plan-breadcrumb-controls")) if (!planToolbar.visible || stale.closest(".editor-group-container:not(.active)")) stale.remove();
@@ -363,7 +363,7 @@
   const crumbObserver = new MutationObserver(() => { if (planToolbar.visible && !document.querySelector(".editor-group-container.active .breadcrumbs-control > .plan-breadcrumb-controls")) mountPlanToolbar(); });
   crumbObserver.observe(document.body, { childList: true, subtree: true });
 
-  // ── Browser (Cursor's browser pane + visual editor): a main-process WebContentsView positioned over a placeholder tab ──
+  // ── Browser (the reference IDE's browser pane + visual editor): a main-process WebContentsView positioned over a placeholder tab ──
   const browsers = new Map();
   const ipc = () => (globalThis.vscode && globalThis.vscode.ipcRenderer) || null;
   const mb = (msg) => { const i = ipc(); return i ? i.invoke("vscode:muster-browser", msg) : Promise.resolve(null); };

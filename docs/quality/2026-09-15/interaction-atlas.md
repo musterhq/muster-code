@@ -1,15 +1,15 @@
 # Interaction and polish atlas
 
-Implementation companion to `docs/TERRA-HANDOFF-2026-09-14.md` §28. Written 15 September 2026. Do not treat older Cursor gap docs as current Muster truth; they are checkpoints.
+Implementation companion to `docs/TERRA-HANDOFF-2026-09-14.md` §28. Written 15 September 2026. Do not treat older the reference IDE gap docs as current Muster truth; they are checkpoints.
 
-**Do not duplicate:** `docs/cursor-ux-spec.md` (measured Cursor 3.18 chrome/tokens), `docs/cursor-feature-atlas.md` (bundle inventory), `docs/cursor-gap-analysis.md` (2026-09-06 scores; several rows are stale vs current `packages/builtin/src`), `docs/cursor-parity-spec.md` (acceptance checklist), `docs/quality/2026-09-13/ide-parity.md` (workflow matrix). This file covers **transcript anatomy, streaming, composer, motion, materials, computer/browser use, and a testable effortlessness checklist.**
+**Do not duplicate:** `docs/cursor-ux-spec.md` (measured the reference IDE chrome/tokens), `docs/cursor-feature-atlas.md` (bundle inventory), `docs/cursor-gap-analysis.md` (2026-09-06 scores; several rows are stale vs current `packages/builtin/src`), `docs/cursor-parity-spec.md` (acceptance checklist), `docs/quality/2026-09-13/ide-parity.md` (workflow matrix). This file covers **transcript anatomy, streaming, composer, motion, materials, computer/browser use, and a testable effortlessness checklist.**
 
 **Evidence classes**
 
 | Source | What was read |
 |---|---|
 | T3 Code | `/tmp/t3code` (clone). Paths below are under that root unless noted. |
-| Cursor | Owner screenshots of Cursor 3.x chat (Thought duration, grouped “Explored…”, command cards, mode/model pills, stop). Plus the Cursor docs listed above. |
+| the reference IDE | Owner screenshots of the reference IDE 3.x chat (Thought duration, grouped “Explored…”, command cards, mode/model pills, stop). Plus the the reference IDE docs listed above. |
 | Codex / ChatGPT.app | `docs/quality/2026-09-13/host-capabilities.md`, handoff §8. Readable host files under `/Applications/ChatGPT.app/Contents/Resources` (no IPC probing, no quota). |
 | Muster | Only `packages/builtin/src` (and cited product CSS). Claims of “Muster already has X” are from those files. |
 
@@ -19,19 +19,19 @@ Anything not in those sources is marked **not verified**.
 
 ## A. Transcript anatomy
 
-Tokens to use in Muster (already in `agent-view.ts` `:root`, lines 10–24): `--fg`, `--bg-primary`…`--bg-quinary`, `--text-secondary`, `--text-tertiary`, `--stroke-primary`…`--stroke-tertiary`, `--amber` `#D2943E`, `--radius-sm` 4 / `--radius-base` 6 / `--radius-lg` 8 / `--radius-xl` 12, `--fs-xs` 11 / `--fs-sm` 12 / `--fs-base` 13 / `--fs-lg` 14. Map Cursor measured values from `docs/cursor-ux-spec.md` §3–4 onto these names; do not invent a second ladder.
+Tokens to use in Muster (already in `agent-view.ts` `:root`, lines 10–24): `--fg`, `--bg-primary`…`--bg-quinary`, `--text-secondary`, `--text-tertiary`, `--stroke-primary`…`--stroke-tertiary`, `--amber` `#D2943E`, `--radius-sm` 4 / `--radius-base` 6 / `--radius-lg` 8 / `--radius-xl` 12, `--fs-xs` 11 / `--fs-sm` 12 / `--fs-base` 13 / `--fs-lg` 14. Map the reference IDE measured values from `docs/cursor-ux-spec.md` §3–4 onto these names; do not invent a second ladder.
 
-| Element | Cursor (observed + spec) | T3 Code (source) | Codex desktop | Muster **target** |
+| Element | the reference IDE (observed + spec) | T3 Code (source) | Codex desktop | Muster **target** |
 |---|---|---|---|---|
 | **User bubble** | Right-aligned; `input.background`; 1px `stroke-secondary`; radius `xl` 12px; min-width 150px; padding 8×10; 14/22 in composer bar (`cursor-ux-spec.md` §4). | User input uses chat-style hard breaks (`ChatMarkdown.tsx` `lineBreaks`, ~210). Message surface tokens `--message-surface` / `--message-foreground` (`index.css` ~986–988). Exact bubble geometry **not verified** in this pass. | **Not verified** (UI is inside packed `app.asar`; no chat CSS extracted). | Keep current `.human`: `align-self: flex-end`; `margin-left: max(24px, 12%)`; `min-width: 120px`; `border-radius: var(--radius-xl)`; `padding: 6px 10px`; `font-size: var(--fs-base)`; `line-height: 20px`; clip at `max-height: 108px` with 28px fade and “Show full message” (`agent-view.ts` 74–91, 418). Hover tools Copy/Edit 22px. Steer prefix copy: `added mid-turn`. |
 | **Assistant prose** | No bubble; markdown at ~1.214em of tool size (`cursor-ux-spec.md` §4). | Incremental markdown + GFM + GitHub alerts + file/image/citation chips (`ChatMarkdown.tsx` 81–90, 198–227). Streaming: `data-streaming` opacity fade 600ms (`index.css` 1894–1907). | Streamed assistant items via app-server (`ide-parity.md`). Visual chrome **not verified**. | No bubble. `.assistant` 13px/20px. Code fences: `.code` radius `--radius-base`, header 26px, Copy + Apply/Insert (`agent-view.ts` 99–108, 370–371). File refs: dotted underline, hover `--bg-tertiary`. **Images:** `inline()` only rewrites `https?` markdown links, not `![alt](path)` (`agent-view.ts` 355–362) — **gap, P0**. GitHub alerts: not rendered (blockquotes only). |
 | **Reasoning disclosure** | Screenshot: collapsible `Thought 5s ˅` (duration after the word Thought). | Thinking is a work-log tone (`presentation.ts` `tone: "thinking"` line 24). Duration label in T3 UI **not verified** in this pass. | Reasoning/effort settings exist on turns (`ide-parity.md`). Duration UI **not verified**. | Today: `<details class="thinking">` summary always `Reasoning summary`; body italic; chevron via CSS `▸`/`▾`; no elapsed seconds (`agent-view.ts` 115–119, 422, 851). **Target copy:** while running `Thought · Ns` (tabular-nums, update 1 Hz); on `done` `Thought Ns ˅` (or `Thought` if duration &lt; 1s). Do not rename to “Reasoning summary” on complete. |
 | **Tool card** | Screenshot: 16px-class icon; title (e.g. `Locate slash suggestion source…`); muted one-line command (`rg, head, echo, sed`); clipped output. Spec: card radius `xl`, header 28px, 13px, 16px icon (`cursor-ux-spec.md` §4). | Human titles from `T3_MCP_TOOL_LABELS` present/past/failed verbs (`presentation.ts` 65–176). Shell titles via `commandProgramName()` (`commandLabel.ts` 1367–1369) so labels are `rg` not `bash -lc`. Activity icons/surfaces in `toolPresentation.ts`. | Tool items stream on the app-server; collab agent tools in generated schema (`host-capabilities.md`). Card chrome **not verified**. | Today: `.tool` chrome-less 22px header; 6px amber running pulse; `.cmd` ellipsis; `<pre>` hidden until `.open`, max-height 220px (`agent-view.ts` 132–140). **Target:** collapsed = icon 14px + **human title** (verb + object) + muted clipped argv + status; expanded = full output, never steal composer focus. Grouping below. |
-| **Tool group** | Screenshot: `Explored 3 files, 1 search` as one collapsible summary. | `summarizeToolGroup()`: `Read N files`, `Changed N files` (unique paths), `Ran N commands`, `Used browser N times`, `Used device controls N times`, `Searched code/web`, integrations by name (`presentation.ts` 558–625). Tests: `Ran 4 commands and used browser 15 times` (`presentation.test.ts` 375). | **Not verified** whether Codex groups the same way. | **Target copy** (Cursor-shaped, T3 counts): `Explored {n} files, {m} search` when the group is only read+search; otherwise T3 sentences. Running group stays present-tense (`liveActivityToolStatus`, `presentation.ts` 179–184). Clicking the summary expands members; click does not focus composer. |
-| **Approval card** | Cursor Manual / allow-list / auto-run (`ide-parity.md`). Visual of approval card in the attached screenshots: **not present**. | Approvals are distinct work-log entries; group label `Received N updates` (`presentation.ts` 584–585). Card chrome **not verified** here. | App-server `item/permissions/requestApproval` etc., scoped by threadId/turnId (`ide-parity.md`). | Already: `.card.approval` amber 45% rim; head 26px; `what` max-height 160px; actions Allow / Allow for session / Decline; Enter / Shift+Enter / Escape (`agent-view.ts` 142–148; `agent-pane.ts` 1287–1312). Decided state opacity 0.8. Keep copy **Allow**, **Allow for session**, **Decline**. |
+| **Tool group** | Screenshot: `Explored 3 files, 1 search` as one collapsible summary. | `summarizeToolGroup()`: `Read N files`, `Changed N files` (unique paths), `Ran N commands`, `Used browser N times`, `Used device controls N times`, `Searched code/web`, integrations by name (`presentation.ts` 558–625). Tests: `Ran 4 commands and used browser 15 times` (`presentation.test.ts` 375). | **Not verified** whether Codex groups the same way. | **Target copy** (the reference IDE-shaped, T3 counts): `Explored {n} files, {m} search` when the group is only read+search; otherwise T3 sentences. Running group stays present-tense (`liveActivityToolStatus`, `presentation.ts` 179–184). Clicking the summary expands members; click does not focus composer. |
+| **Approval card** | the reference IDE Manual / allow-list / auto-run (`ide-parity.md`). Visual of approval card in the attached screenshots: **not present**. | Approvals are distinct work-log entries; group label `Received N updates` (`presentation.ts` 584–585). Card chrome **not verified** here. | App-server `item/permissions/requestApproval` etc., scoped by threadId/turnId (`ide-parity.md`). | Already: `.card.approval` amber 45% rim; head 26px; `what` max-height 160px; actions Allow / Allow for session / Decline; Enter / Shift+Enter / Escape (`agent-view.ts` 142–148; `agent-pane.ts` 1287–1312). Decided state opacity 0.8. Keep copy **Allow**, **Allow for session**, **Decline**. |
 | **Diff receipt** | Inline agent diffs; 3px green/red gutter (`cursor-ux-spec.md` §4). Agents window Review `+N −M`. | `DiffPanel.tsx`: inline/side modes, file tree, word wrap, ignore-whitespace, collapse all, copy path, open in editor (props 100–105, imports 17–57). | File-change items before approval (`ide-parity.md`). | `.editwrap` 28px row: path + tabular `adds`/`dels` + state `Editing…` / `Applied` / `Reviewed` / `Undone` (`agent-view.ts` 121–131, 505). Full-file engine is a **release gate** (handoff §2). Compact preview may truncate; complete change must remain in the editor. |
 | **Image / screenshot embed** | Image pills 32×32 in composer (`cursor-ux-spec.md` §4). Chat image expand **not verified** in attached shots. | Workspace images via `classifyMarkdownImageSource` / expanded image dialog (`ChatMarkdown.tsx` 48–103). `preview_snapshot` instructs `![alt](screenshotPath)` (`preview/tools.ts` 122). | CUA screenshots are private IPC results (`host-capabilities.md`). Chat embed **not verified**. | **Target:** render `![alt](abs-or-workspace-path)` as `<img>` with radius `--radius-base`, max-width 100%, click-to-expand. Tool PNG (`browser_screenshot` without save) stays on the tool card, not the transcript. Save path: `browser-screenshot.ts` `SCREENSHOT_EMBED_HINT`. |
-| **Error state** | Cursor Resume / Try again cards (`cursor-gap-analysis.md` §1 — 2026-09-06). | Failed tools: `Failed to {action}` (`presentation.ts` 143–144). Markdown copy failures toast (`ChatMarkdown.tsx` ~1994). | Turn failure items on the wire (`ide-parity.md`). | `.error` uses `--vscode-errorForeground` (`agent-view.ts` 120). `done` with `!ok` appends `m.error \|\| "Failed"` (851). **Target copy:** one line `Couldn't complete this turn` + the provider reason; retry control if the runtime exposes it (do not invent). Failed tools: red title, auto-expand output. |
+| **Error state** | the reference IDE Resume / Try again cards (`cursor-gap-analysis.md` §1 — 2026-09-06). | Failed tools: `Failed to {action}` (`presentation.ts` 143–144). Markdown copy failures toast (`ChatMarkdown.tsx` ~1994). | Turn failure items on the wire (`ide-parity.md`). | `.error` uses `--vscode-errorForeground` (`agent-view.ts` 120). `done` with `!ok` appends `m.error \|\| "Failed"` (851). **Target copy:** one line `Couldn't complete this turn` + the provider reason; retry control if the runtime exposes it (do not invent). Failed tools: red title, auto-expand output. |
 
 ---
 
@@ -39,7 +39,7 @@ Tokens to use in Muster (already in `agent-view.ts` `:root`, lines 10–24): `--
 
 ### Flicker avoidance
 
-| Technique | T3 | Cursor | Muster today | Muster target |
+| Technique | T3 | the reference IDE | Muster today | Muster target |
 |---|---|---|---|---|
 | Incremental markdown parse | Cache closed fenced code + blank line as a stable prefix; parse only the suffix; clone prefix children; full reparse if definitions/footnotes/CR/BOM (`markdown-incremental.ts` 33–84, 87–106). | **Not verified** (closed source). Observed: streaming does not rebuild whole transcript chrome. | `scheduleStream` → rAF → `flushStream` replaces **entire** `innerHTML` from `dataset.raw` (`agent-polish.ts` 241–242). Open fences re-parse every frame. | Port T3 prefix rule: once a fence closes and a blank line follows, freeze that HTML node; only the last open block re-renders. |
 | Incremental highlight | Resume TextMate state after last complete line; always re-highlight current line (`incrementalHighlighting.ts` 13–16). | **Not verified**. | No highlighter while streaming; fence is escaped text. | Optional: highlight only after fence close, or incremental if a highlighter is added. Do not flash unstyled → styled on every token. |
@@ -61,7 +61,7 @@ T3 extra: streaming markdown uses `@starting-style { opacity: 0 }` **only** unde
 - Triggers: `(^|\s)([@/])` then `[\w./:?=&%#+-]*`.
 - Slash builtins (action, **not** inserted): Reset, Summarize, Agent Review, Open Browser.
 - Custom `.md` commands and skills: **insert** `/{name}`.
-- @ modes: Files & Folders, Past Chats, Docs, Terminals, Commits; empty state recent files; `→` enters mode; Backspace with empty query leaves mode; typed range after `@`/`/` is cleared on mode change (Cursor-matched comment at 732).
+- @ modes: Files & Folders, Past Chats, Docs, Terminals, Commits; empty state recent files; `→` enters mode; Backspace with empty query leaves mode; typed range after `@`/`/` is cleared on mode change (the reference IDE-matched comment at 732).
 - Keys: ↑↓, Enter/Tab act, Escape closes, Shift+Tab opens mode menu.
 - Visible row: icon + highlighted label + `detail` description.
 
@@ -73,7 +73,7 @@ T3 extra: streaming markdown uses `@starting-style { opacity: 0 }` **only** unde
 - Built-in examples: `/model` “Switch response model for this thread”, `/plan` when plan UI enabled (`ChatComposer.tsx` 2294–2308).
 - Mentions are Lexical chips (`composer-editor-mentions.ts`); ArrowUp/Down at visual line edges go to prompt history, not the menu (`ComposerPromptEditor.tsx` 849–853, 885–888).
 
-**Cursor (spec + screenshot):** `@` button + pills; mode pill `∞ Agent ˅`; model pill. Slash/mention filtering details: `cursor-feature-atlas.md` / `cursor-ux-spec.md`; do not re-mine the bundle here.
+**the reference IDE (spec + screenshot):** `@` button + pills; mode pill `∞ Agent ˅`; model pill. Slash/mention filtering details: `cursor-feature-atlas.md` / `cursor-ux-spec.md`; do not re-mine the bundle here.
 
 **Codex:** context via input items / file / skill (`ide-parity.md`). Composer slash UI **not verified**.
 
@@ -87,11 +87,11 @@ T3 extra: streaming markdown uses `@starting-style { opacity: 0 }` **only** unde
 
 ### Mode / model pills
 
-Cursor screenshot: left `∞ Agent ˅`, right model name, circular Stop while streaming. Muster: mode pill + model in composer (`agent-view.ts` `mode-pill` at 730). Visual of ∞ / Agent **not verified** as matching Cursor; keep Muster mode list from provider settings. Stop: 24px circular `.stopbtn`, `⇧⌘⌫` (`agent-view.ts` 87, 768).
+the reference IDE screenshot: left `∞ Agent ˅`, right model name, circular Stop while streaming. Muster: mode pill + model in composer (`agent-view.ts` `mode-pill` at 730). Visual of ∞ / Agent **not verified** as matching the reference IDE; keep Muster mode list from provider settings. Stop: 24px circular `.stopbtn`, `⇧⌘⌫` (`agent-view.ts` 87, 768).
 
 ### Queue / steer
 
-Muster: `#queue` dashed chips; steer messages `.human.steer` (`agent-view.ts` 83–86). Cursor: `N in queue` (`cursor-ux-spec.md` §4). Target: queue rows 12px, radius 4, dismiss `×` without focusing issues.
+Muster: `#queue` dashed chips; steer messages `.human.steer` (`agent-view.ts` 83–86). the reference IDE: `N in queue` (`cursor-ux-spec.md` §4). Target: queue rows 12px, radius 4, dismiss `×` without focusing issues.
 
 ### Draft persistence
 
@@ -99,7 +99,7 @@ Muster: `#queue` dashed chips; steer messages `.human.steer` (`agent-view.ts` 83
 |---|---|
 | T3 | Zustand persist key `t3code:composer-drafts:v1`, debounce **300ms**, `beforeunload` flush (`composerDraftStore.ts` 84–131). Prompt stash `t3code:prompt-stash:v2`, max 20, ~2.7M chars attachment budget (`promptStashStore.ts` 11–31). Files needing reattach after reload: `composerFileNeedsReattach` (161–163). |
 | Muster | Draft posted on 180ms timer; per-tab `viewStates` including composer text, context, scroll, following (`agent-polish.ts` 222–229). |
-| Cursor | Drafts persist (gap analysis 2026-09-06 claimed Muster lost drafts; **stale** vs polish persist). |
+| the reference IDE | Drafts persist (gap analysis 2026-09-06 claimed Muster lost drafts; **stale** vs polish persist). |
 | Codex | **Not verified** for composer localStorage. |
 
 Target: keep 180ms persist; flush on `visibilitychange`/`beforeunload` like T3; never clear the box on tab switch.
@@ -135,7 +135,7 @@ No `spring()` / physics springs in `apps/web/src` (grep hits were DST “spring-
 | Reduced motion | `durationMs > 0 && !prefersReducedMotion && !suppressed` | `panelAnimations.ts` 75–78. First paint of a route: **no** panel animation (`usePanelNavigationSuppression`, 11–13). Sidebar skips FLIP if `prefers-reduced-motion: reduce` or &gt;40 faded rows (`Sidebar.motion.ts` 7, 22–24, 142–146). Theme swap: `transition-duration: 0s` (`index.css` 961–967). |
 | Drag | dnd-kit + `Sidebar.drag.ts`: reject invalid drop targets; do not auto-jump section without pointer crossing the divider (28–55). | |
 
-### Cursor-observed
+### the reference IDE-observed
 
 ~120–180ms ease-out on chrome (owner instruction; not re-measured from the bundle in this pass). Spec spacing/radius in `cursor-ux-spec.md` §3.
 
@@ -165,9 +165,9 @@ Motion explains a change; it must not delay the action. Prefer short ease-out on
 
 `--background`, `--app-chrome-background`, `--toolbar-*`, `--surface-raised` (`color-mix(in srgb, var(--card) 20%, transparent)`), `--card`, `--popover`, `--muted`, `--accent`, `--input`, `--border`, `--ring`. Semantic: `--success`, `--error`, `--warning`, `--info`, `--update`, `--diff-addition`, `--diff-deletion`, `--tool-error-icon`. Glass: `--glass-blur` 12px light / 16px dark, `--glass-opacity` 80%, `--glass-saturation` 1.14/1.08 (103–120). `--radius` 0.625rem (10px). `--control-radius` 0.5rem. Popovers use `.dropdown-glass` + 1px inner highlight `before:shadow-[0_1px_black/4%]` (dark: white/6% from top).
 
-### Cursor
+### the reference IDE
 
-Neutral fg-alpha ladder — **use `cursor-ux-spec.md` §2–3**. Do not copy Cursor steel-blue as Muster accent (Graphite/violet default; forest restoration override at top of the handoff).
+Neutral fg-alpha ladder — **use `cursor-ux-spec.md` §2–3**. Do not copy the reference IDE steel-blue as Muster accent (Graphite/violet default; forest restoration override at top of the handoff).
 
 ### Codex UI tokens
 
@@ -306,7 +306,7 @@ Notifications (T3 `threadNotifications.ts`: badge `#e5484d`, completion/input so
 | **P0-1** | Incremental markdown: freeze closed fences; rAF paint only the tail | `agent-view.ts` `renderMarkdown`; `agent-polish.ts` `flushStream` | Fixture: stream a 200-line fence then prose; no full-innerHTML flicker (mutation observer / HTML snapshot of prefix). |
 | **P0-2** | Render `![alt](path)` workspace/absolute images | `agent-view.ts` `inline`/`renderMarkdown`; CSP `img-src` already allows `${csp}` | Fixture HTML + native: save screenshot, inject markdown, image visible. |
 | **P0-3** | Thought duration label | `agent-view.ts` `ensureThinking` / `done` | Unit on elapsed formatter; GUI: reasoning deltas then `Thought 3s`. |
-| **P0-4** | Tool group summaries (Cursor “Explored…”) | `agent-view.ts` tool DOM; optionally extract helpers from T3 `presentation.ts` (reimplement, do not import T3) | Unit: counts/copy; GUI: 3 reads + 1 search collapse. |
+| **P0-4** | Tool group summaries (the reference IDE “Explored…”) | `agent-view.ts` tool DOM; optionally extract helpers from T3 `presentation.ts` (reimplement, do not import T3) | Unit: counts/copy; GUI: 3 reads + 1 search collapse. |
 | **P0-5** | Human tool titles (verb + argv via program name) | `agent-view.ts` tool head; new small `command-label.ts` inspired by `commandLabel.ts` | Unit: `bash -lc 'rg foo'` → title contains `rg`. |
 | **P0-6** | Follow-scroll regression: never move when user scrolled up | `agent-polish.ts` scroll listener; `agent-view.ts` `scroll()` | GUI: scroll up mid-stream, assert `scrollTop` stable for 1s of deltas. |
 | **P1-1** | Motion CSS variables + reduced-motion | `agent-view.ts` styles; `product/muster-workbench.css` | CSS fixture + `prefers-reduced-motion` emulation. |
@@ -317,7 +317,7 @@ Notifications (T3 `threadNotifications.ts`: badge `#e5484d`, completion/input so
 | **P1-6** | `browser_wait_for` locator parity (optional Playwright) | `browser-mcp.ts`, `browser-tools.ts`, `browser.ts` | Contract test: url + text + selector. |
 | **P1-7** | Annotation overlay (select + screenshot region) | `browser.ts` pick; product browser preload | Native: pick → chip + image path. |
 | **P1-8** | Go To palette material (Spotlight) | `navigation.ts`; workbench CSS; §27 | Keyboard + screenshot vs solid fallback. |
-| **P1-9** | Queue/steer visual match to Cursor 12px rows | `agent-view.ts` `#queue` | Screenshot + chip wrap. |
+| **P1-9** | Queue/steer visual match to the reference IDE 12px rows | `agent-view.ts` `#queue` | Screenshot + chip wrap. |
 | **P1-10** | Draft flush on hide | `agent-polish.ts` | Reload mid-debounce. |
 | **P2-1** | Recording start/stop | `browser.ts` (`recording: "unsupported"`), MCP | Defer until capture exists. |
 | **P2-2** | Desktop snapshot + AX attach | new module; **not** Codex CUA socket | Capability + permission UI. |
@@ -336,7 +336,7 @@ One overlay, three modes that never stack: command `⌘K`, files `⌘P`, content
 ## Appendix: not verified
 
 - Codex ChatGPT transcript layout, motion, slash menu, and glass CSS (`app.asar` not unpacked).
-- Cursor closed-source streaming parser and exact ms of chrome motion (used owner ~120–180ms).
+- the reference IDE closed-source streaming parser and exact ms of chrome motion (used owner ~120–180ms).
 - T3 thinking-duration label in the live UI.
 - Muster notification sound/badge behavior.
 - Whether `browser_screenshot` images already display **inside tool cards** as `<img>` in the webview (tool result `image` field exists in MCP bridge; DOM binding **not verified** in `agent-view.ts` grep for `<img>`).

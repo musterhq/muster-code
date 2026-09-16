@@ -1,4 +1,4 @@
-// The Plan editor — Cursor's rendered surface for *.plan.md (docs/cursor-feature-atlas.md §4):
+// The Plan editor — the reference IDE's rendered surface for *.plan.md (docs/cursor-feature-atlas.md §4):
 // breadcrumb toolbar with "Preview ⌄" (rendered / markdown source), the model that will
 // build, and the amber "Build ⌘⏎ ⌄" split button; the plan body rendered with clickable
 // to-dos so one, some or all of them can be built.

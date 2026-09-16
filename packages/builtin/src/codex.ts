@@ -426,7 +426,7 @@ export function threadsForWorkspace<T extends { readonly cwd: string }>(threads:
   });
 }
 
-/** A rule file with Cursor's kinds: Always · Auto Attached (globs) · Agent Requested (description) · Manual. */
+/** A rule file with the reference IDE's kinds: Always · Auto Attached (globs) · Agent Requested (description) · Manual. */
 export interface RuleFile { readonly name: string; readonly path: string; readonly source: "muster" | "cursor"; readonly kind: "always" | "auto" | "agent" | "manual"; readonly description: string; readonly globs: string[]; readonly body: string }
 export function listRuleFiles(cwd: string): RuleFile[] {
   const out: RuleFile[] = [];
@@ -450,7 +450,7 @@ function globToRegExp(glob: string): RegExp {
   return new RegExp(`(^|/)${re}$`);
 }
 /**
- * Rules for the agent, the way Cursor attaches them: Always rules go every turn; Auto rules when a mentioned
+ * Rules for the agent, the way the reference IDE attaches them: Always rules go every turn; Auto rules when a mentioned
  * file matches their globs; Agent rules as a one-line offer (`@rule:name` loads them); Manual only when mentioned.
  * Disabled rules (settings → Rules) never go.
  */

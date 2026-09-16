@@ -1,6 +1,6 @@
 import { settingsHtml } from "./settings-view.js";
 import { MUSTER_THEMES } from "./appearance.js";
-// Muster Settings — Cursor's settings page shape (sidebar of sections, content on
+// Muster Settings — the reference IDE's settings page shape (sidebar of sections, content on
 // the right): General (account, usage, defaults), Models, Rules, MCP, Skills,
 // Plugins, Hooks, Docs. Everything shown comes from the app-server or the
 // workspace; nothing is hardcoded.

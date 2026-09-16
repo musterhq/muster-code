@@ -7,7 +7,7 @@ import { isChildOfRoot } from "./agent-control.js";
 import { activeDescendantCount, editLeaseActive as isEditLeaseActive, canCloseWithActiveDescendants } from "./edit-lease.js";
 import { TaskRuntimeRegistry, type TaskRuntimeIdentity } from "./task-runtime-registry.js";
 // The Agent pane — muster's own chat surface in the secondary sidebar, built to
-// Cursor's chat (docs/cursor-parity-spec.md, docs/cursor-feature-atlas.md):
+// the reference IDE's chat (docs/cursor-parity-spec.md, docs/cursor-feature-atlas.md):
 // thread tabs, history, modes (Agent / Plan / Ask / Kanban / custom), access
 // modes and models discovered from the app-server, plan cards saved as
 // .plan.md in the workspace, tool cards, edit cards, the review bar.
@@ -25,7 +25,7 @@ interface ModeInfo { readonly id: string; readonly name: string; readonly icon: 
 interface ThreadSettings { providerId?: ProviderId; mode: string; accessId: string; modelId: string; effortId: string; debugStage?: 0 | 1 | 2 }
 interface PlanCard { title: string; summary: string; todos: { text: string; done: boolean }[]; path?: string; model?: string; modelId?: string }
 type ToolMessage = { kind: "tool"; id: string; title: string; detail: string; output: string; status: string; tool?: "command" | "mcp" | "search" | "computer"; exitCode?: number | null; durationMs?: number; cwd?: string };
-/** An approval the provider is waiting on, shown as a card in the chat (Cursor: Run ⏎ / Skip Esc). */
+/** An approval the provider is waiting on, shown as a card in the chat (the reference IDE: Run ⏎ / Skip Esc). */
 type ApprovalCard = { diff?: string; id: string; kind: "command" | "patch" | "elicitation"; command: string; cwd?: string; reason?: string; files?: string[] };
 type PaneMessage =
   | { kind: "user"; text: string; checkpoint?: string; steer?: boolean; turnId?: string }
@@ -89,7 +89,7 @@ type FromPane =
   | { type: "browserNav"; id: string; url: string } | { type: "browserAction"; id: string; action: "back" | "forward" | "reload" | "pick" | "screenshot" } | { type: "browserRect"; id: string; rect: { top: number; left: number; width: number; height: number }; visible: boolean } | { type: "browserToChat"; id: string } | { type: "newBrowser" }
   | { type: "agentAction"; action: "open" | "steer" | "interrupt" | "stop"; agentId: string; threadId?: string };
 
-// Cursor 3.18's built-in modes (docs/cursor-feature-atlas.md §3), mapped onto Codex: plan/spec use the
+// the reference IDE's built-in modes (docs/cursor-feature-atlas.md §3), mapped onto Codex: plan/spec use the
 // plan collaboration mode, ask/project are read-only, triage prefers the delegating effort, multitask is the board.
 const DEBUG_STAGES = [
   { placeholder: "Enter additional context about the issue", prompt: "Debug mode, step 1 of 3: do NOT fix anything yet. Form hypotheses about the issue, add temporary instrumentation (logs/traces/assertions) at the points that will confirm or rule them out, then stop and ask me to reproduce the issue." },
@@ -234,12 +234,12 @@ export class AgentPane implements vscode.WebviewViewProvider {
     this.pushBoard();
   }
 
-  /** Cursor's keyboard surface for the chat pane (⌘I / ⌘L focus, ⌘T new, ⌘W close, ⌘[ ⌘] cycle, ⌘/ model, ⌘⌥P context). */
+  /** the reference IDE's keyboard surface for the chat pane (⌘I / ⌘L focus, ⌘T new, ⌘W close, ⌘[ ⌘] cycle, ⌘/ model, ⌘⌥P context). */
   async focus(): Promise<void> { await vscode.commands.executeCommand(`${AgentPane.viewId}.focus`); }
   async closeActive(): Promise<void> { await this.onMessage({ type: "closeTab", id: this.activeId }); }
   async stepTab(delta: number): Promise<void> { const i = this.tabs.findIndex((t) => t.id === this.activeId); const next = this.tabs[(i + delta + this.tabs.length) % this.tabs.length]; if (next) await this.onMessage({ type: "activateTab", id: next.id }); }
   openMenu(kind: "model" | "context" | "access"): void { this.post({ type: "openMenu", kind }); }
-  /** Cursor's "Investigate Error in Chat" (⌘⇧D): the diagnostics under the cursor go to the agent with the file range. */
+  /** the reference IDE's "Investigate Error in Chat" (⌘⇧D): the diagnostics under the cursor go to the agent with the file range. */
   async fixErrorAtCursor(): Promise<void> {
     const editor = vscode.window.activeTextEditor; if (!editor) return;
     const line = editor.selection.active.line;
@@ -253,7 +253,7 @@ export class AgentPane implements vscode.WebviewViewProvider {
   dictation(on: boolean, text?: string): void { this.post({ type: "dictation", on, ...(text !== undefined ? { text } : {}) }); }
   onDictate: (() => void) | undefined;
 
-  /** ⌘. opens the mode menu in the composer, as Cursor's composer.openModeMenu does. */
+  /** ⌘. opens the mode menu in the composer, as the reference IDE's composer.openModeMenu does. */
   cycleMode(): void {
     this.post({ type: "openModeMenu" });
     void vscode.commands.executeCommand(`${AgentPane.viewId}.focus`);
@@ -273,7 +273,7 @@ export class AgentPane implements vscode.WebviewViewProvider {
     await this.send(`${question}\n\nAbout ${rel}${sel ? ` lines ${sel.start.line + 1}-${sel.end.line + 1}` : ""}:\n\`\`\`\n${code.slice(0, 12000)}\n\`\`\``);
   }
 
-  /** Git review (Cursor's Agent Review): review the diff against a branch for issues, read-only. */
+  /** Git review (the reference IDE's Agent Review): review the diff against a branch for issues, read-only. */
   async reviewAgainstBranch(): Promise<void> {
     const branch = await vscode.window.showInputBox({ prompt: "Review changes against branch", value: "main", placeHolder: "main" });
     if (!branch) return;
@@ -393,7 +393,7 @@ export class AgentPane implements vscode.WebviewViewProvider {
   /** Harness: raise the same server request the provider would (approval / elicitation) and return the answer. */
   debugRequest(method: string, params: Record<string, unknown>): Promise<Record<string, unknown> | undefined> { return this.approve(method, params); }
 
-  /** The file in the active editor, relative to the workspace (Cursor's dashed "current file" pill). */
+  /** The file in the active editor, relative to the workspace (the reference IDE's dashed "current file" pill). */
   private currentFile(): string | undefined {
     const uri = vscode.window.activeTextEditor?.document.uri; if (!uri || uri.scheme !== "file") return undefined;
     const rel = vscode.workspace.asRelativePath(uri); return rel.startsWith("..") || rel === uri.fsPath ? undefined : rel;
@@ -433,7 +433,7 @@ export class AgentPane implements vscode.WebviewViewProvider {
   }
   private forgetTurnsFrom(tab: Tab, at: number): Promise<void> { return this.forgetTurns(tab, this.revertRecord(tab, at)); }
 
-  /** Cursor: edit a sent message → the workspace goes back to that point, the thread forgets the later turns, the text is resent. */
+  /** the reference IDE: edit a sent message → the workspace goes back to that point, the thread forgets the later turns, the text is resent. */
   private async editMessage(checkpointId: string, text: string): Promise<void> {
     const tab = this.active();
     const at = tab.messages.findIndex((m) => m.kind === "user" && m.checkpoint === checkpointId);
@@ -454,7 +454,7 @@ export class AgentPane implements vscode.WebviewViewProvider {
     return threadsForWorkspace(await listThreads(), (vscode.workspace.workspaceFolders ?? []).map((f) => f.uri.fsPath));
   }
 
-  /** Plan editor toolbar: choose the model that will build (mirrors Cursor's "Model used to build this plan"). */
+  /** Plan editor toolbar: choose the model that will build (mirrors the reference IDE's "Model used to build this plan"). */
   async pickBuildModel(): Promise<string | undefined> {
     const tab = this.active();
     const pick = await vscode.window.showQuickPick(this.models.map((m) => ({ label: m.name, description: m.providerId ? providerLabel(m.providerId) : "Claude Code", detail: m.description, picked: m.id === tab.settings.modelId, id: m.id })), { placeHolder: "Model used to build this plan" });
@@ -652,7 +652,7 @@ export class AgentPane implements vscode.WebviewViewProvider {
     if (message.type === "messages") for (const p of this.pending.values()) if (p.tabId === this.activeId) void this.view?.webview.postMessage({ type: "approval", approval: p.card });
   }
 
-  /** ⌘L: the selection (or file) becomes a mention in the composer, Cursor's "Add to Chat". */
+  /** ⌘L: the selection (or file) becomes a mention in the composer, the reference IDE's "Add to Chat". */
   async addSelection(editor: vscode.TextEditor): Promise<void> {
     const rel = relative(this.cwd(), editor.document.uri.fsPath);
     const sel = editor.selection;
@@ -663,7 +663,7 @@ export class AgentPane implements vscode.WebviewViewProvider {
     this.post({ type: "insert", text: `${mention} ` });
   }
 
-  /** ⇧⌘B: a browser tab in this pane (Cursor's browser lives in the side pane). */
+  /** ⇧⌘B: a browser tab in this pane (the reference IDE's browser lives in the side pane). */
   openBrowserTab(url?: string): void {
     if (!this.browser) return;
     const state = this.browser.open(url);
@@ -751,7 +751,7 @@ export class AgentPane implements vscode.WebviewViewProvider {
 
   private pushState(): void {
     const tab = this.active();
-    // Cursor: the tab strip is the pane header. The workbench renders it in the sidebar's title row.
+    // the reference IDE: the tab strip is the pane header. The workbench renders it in the sidebar's title row.
     void vscode.commands.executeCommand("muster.agentHeader.set", { tabs: this.tabs.map((t) => ({ id: t.id, name: t.name, running: t.running, kind: t.kind ?? "chat" })), activeId: tab.id });
     const modes = this.modes().map((m) => (m.debug ? { ...m, placeholder: DEBUG_STAGES[tab.settings.debugStage ?? 0]!.placeholder } : m));
     this.saveChats();
@@ -986,7 +986,7 @@ export class AgentPane implements vscode.WebviewViewProvider {
     }
     delete tab.redo;
     if (tab.pendingRevert) { await this.forgetTurns(tab, tab.pendingRevert); delete tab.pendingRevert; }
-    // Full access (Cursor auto-apply): edits stand as they land, the diff colours stay for review, nothing asks Accept/Reject per hunk.
+    // Full access (the reference IDE auto-apply): edits stand as they land, the diff colours stay for review, nothing asks Accept/Reject per hunk.
     const runtime = this.runtimeFor(tab);
     runtime.setReviewMode(isUnattendedAccess(this.access.find((a) => a.id === tab.settings.accessId)) ? "auto" : "review");
     this.pushState();
@@ -994,7 +994,7 @@ export class AgentPane implements vscode.WebviewViewProvider {
     if (mode.board) { await this.onMessage({ type: "boardAdd", title: text.trim() }); await this.showBoard(); return; }
     if (mode.parallel) { await this.runParallel(text); return; }
     if (mode.spec && tab.plan?.path) {
-      // Cursor: "Spin up a new thread with this plan as context".
+      // the reference IDE: "Spin up a new thread with this plan as context".
       const rel = relative(this.cwd(), tab.plan.path);
       const next = this.newTab(`Build: ${tab.plan.title}`.slice(0, 40));
       next.settings.mode = "agent";
@@ -1220,7 +1220,7 @@ export class AgentPane implements vscode.WebviewViewProvider {
     return false;
   }
 
-  /** Cursor's autoFix: after the agent edits, errors the language services report in the touched files go back to the agent once. */
+  /** the reference IDE's autoFix: after the agent edits, errors the language services report in the touched files go back to the agent once. */
   private async autoFix(tab: Tab, checkpointId: string): Promise<void> {
     await new Promise((r) => setTimeout(r, 1500));
     const touched = [...(tab.checkpoints.get(checkpointId)?.keys() ?? [])];
@@ -1237,7 +1237,7 @@ export class AgentPane implements vscode.WebviewViewProvider {
     try { await this.send(`Fix these problems reported by the language services in the files you edited (auto-fix):\n${problems.join("\n")}`, tab); } finally { tab.autoFixed = false; }
   }
 
-  /** Cursor's Multitask: one request becomes several tasks that run in parallel threads and appear on the board. */
+  /** the reference IDE's Multitask: one request becomes several tasks that run in parallel threads and appear on the board. */
   private async runParallel(text: string): Promise<void> {
     const items = text.split("\n").map((l) => l.replace(/^\s*(?:[-*]|\d+[.)])\s*/, "").trim()).filter(Boolean);
     const tasks = items.length > 1 ? items : [text.trim()];
@@ -1300,7 +1300,7 @@ export class AgentPane implements vscode.WebviewViewProvider {
     return suggestMentions(this.cwd(), query, mode);
   }
 
-  /** Cursor's built-in slash commands: they act, they are not inserted as text. */
+  /** the reference IDE's built-in slash commands: they act, they are not inserted as text. */
   private async slashAction(id: string): Promise<void> {
     if (id === "reset") { const tab = this.newTab(); this.activeId = tab.id; this.paneView = "chat"; this.pushState(); this.post({ type: "messages", messages: [] }); return; }
     if (id === "summarize") { await this.send("Summarize our conversation so far in under 10 lines: what I asked, what you did, what is left."); return; }
