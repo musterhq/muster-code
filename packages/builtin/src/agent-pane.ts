@@ -149,13 +149,29 @@ export class AgentPane implements vscode.WebviewViewProvider {
   /** Memento writes are async; serialize snapshots so an older event cannot
    * resolve after a newer event and overwrite durable run state. */
   private saveChain: Promise<void> = Promise.resolve();
+  private readonly historyLoads = new Map<string, Promise<void>>();
+  /** Load one tab's transcript from disk into `tab.messages`, once. Concurrent
+   * callers for the same tab share the in-flight promise. */
+  private restoreTabHistory(tab: Tab): Promise<void> {
+    if (!tab.thread || tab.messages.length) return Promise.resolve();
+    const existing = this.historyLoads.get(tab.id);
+    if (existing) return existing;
+    const thread = tab.thread;
+    const load = readHistory(thread).then((history) => {
+      if (tab.messages.length) return; // a run or another load already populated this tab
+      tab.messages = history.map((m, i) => m.role === "user" ? { kind: "user", text: m.text, checkpoint: `cp-h-${thread.id}-${i}` } : { kind: "assistant", text: m.text, reasoning: "" });
+    }).catch((error) => { this.output.appendLine(`history restore failed for ${tab.id}: ${error instanceof Error ? error.message : String(error)}`); }).finally(() => { this.historyLoads.delete(tab.id); });
+    this.historyLoads.set(tab.id, load);
+    return load;
+  }
+  /** First paint must not wait on every open tab's transcript: restore the
+   * active tab inline, then hydrate the rest in the background so switching
+   * to them later is instant instead of racing a fresh disk read. */
   private async restoreHistories(): Promise<void> {
-    if (this.restorePromise) return this.restorePromise;
-    this.restorePromise = Promise.allSettled(this.tabs.filter(t => t.thread && !t.messages.length).map(async t => {
-      const history = await readHistory(t.thread!);
-      t.messages = history.map((m, i) => m.role === "user" ? { kind: "user", text: m.text, checkpoint: `cp-h-${t.thread!.id}-${i}` } : { kind: "assistant", text: m.text, reasoning: "" });
-    })).then(() => undefined);
-    return this.restorePromise;
+    await this.restoreTabHistory(this.active());
+    if (!this.restorePromise) {
+      this.restorePromise = Promise.allSettled(this.tabs.filter(t => t.id !== this.activeId).map(t => this.restoreTabHistory(t))).then(() => undefined);
+    }
   }
   private compactMessages(messages: PaneMessage[]): PaneMessage[] {
     return messages.slice(-240).map((message) => message.kind === "tool" ? { ...message, output: message.output.slice(-24_000) } : message.kind === "assistant" ? { ...message, text: message.text.slice(-80_000), reasoning: message.reasoning.slice(-24_000) } : message);
@@ -818,7 +834,7 @@ export class AgentPane implements vscode.WebviewViewProvider {
       case "openReview": await this.runtimeFor(this.active()).openReview(); return;
       case "command": await vscode.commands.executeCommand(message.id); return;
       case "newAgent": this.newAgent(); return;
-      case "activateTab": { const tab = this.tabs.find((t) => t.id === message.id); if (tab) { this.activeId = tab.id; if (tab.kind === "browser") { this.paneView = "browser"; this.pushState(); const st = tab.browserId ? this.browser?.get(tab.browserId) : undefined; if (st) this.post({ type: "browser", state: st }); } else { this.lastChatId = tab.id; this.paneView = "chat"; this.pushState(); this.post({ type: "messages", messages: tab.messages }); } void vscode.commands.executeCommand("setContext", "muster.browserActive", tab.kind === "browser"); } return; }
+      case "activateTab": { const tab = this.tabs.find((t) => t.id === message.id); if (tab) { this.activeId = tab.id; if (tab.kind === "browser") { this.paneView = "browser"; this.pushState(); const st = tab.browserId ? this.browser?.get(tab.browserId) : undefined; if (st) this.post({ type: "browser", state: st }); } else { this.lastChatId = tab.id; this.paneView = "chat"; this.pushState(); if (tab.thread && !tab.messages.length) await this.restoreTabHistory(tab); this.post({ type: "messages", messages: tab.messages }); } void vscode.commands.executeCommand("setContext", "muster.browserActive", tab.kind === "browser"); } return; }
       case "closeTab": { const closing = this.tabs.find((t) => t.id === message.id); if (closing && !this.canCloseTab(closing)) return; if (closing) { this.settlePending("decline", closing.id, true); this.taskRuntimes.cancel(closing.id); cancelQueuedMessages(closing.queue ??= [], closing.queueWaiters ??= []); if (closing.running || closing.inlineRunning) await interruptTurn(closing.id); this.taskRuntimes.unregister(closing.id); this.runtimeControllers.delete(closing.id); } if (closing?.kind === "browser" && closing.browserId) this.browser?.close(closing.browserId); this.tabs = this.tabs.filter((t) => t.id !== message.id); if (!this.tabs.length) this.newTab(); if (!this.tabs.some((t) => t.id === this.activeId)) this.activeId = this.tabs[this.tabs.length - 1]!.id; const now = this.active(); this.paneView = now.kind === "browser" ? "browser" : "chat"; this.pushState(); if (now.kind === "browser" && now.browserId) { const st = this.browser?.get(now.browserId); if (st) this.post({ type: "browser", state: st }); } else this.post({ type: "messages", messages: now.messages }); void vscode.commands.executeCommand("setContext", "muster.browserActive", now.kind === "browser"); return; }
       case "openThread": { const thread = (await this.visibleThreads()).find((t) => t.id === message.id); if (thread) await this.openThread(thread); else void vscode.window.showWarningMessage("That thread belongs to another folder."); return; }
       case "suggest": { const data = await this.suggest(message.kind, message.query, message.mode ?? "all"); this.post({ type: "suggestions", kind: message.kind, ...(message.seq !== undefined ? { seq: message.seq } : {}), mode: data.mode, title: data.title, sections: data.sections }); return; }
