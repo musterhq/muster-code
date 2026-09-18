@@ -1,0 +1,29 @@
+import type { Commands } from '../shared/protocol.ts';
+
+/** Runtime allowlist mirroring the keys of the parent-owned `Commands` interface.
+ *  `satisfies` keeps it in lockstep: protocol drift breaks typecheck here. */
+const COMMANDS = {
+  'app.snapshot': true,
+  'folder.add': true,
+  'folder.pick': true,
+  'chat.create': true,
+  'chat.select': true,
+  'chat.update': true,
+  'chat.send': true,
+  'chat.stop': true,
+  'approval.respond': true,
+  'project.create': true,
+  'files.list': true,
+  'files.read': true,
+  'git.changes': true,
+  'git.diff': true,
+  'providers.list': true,
+  'providers.reveal': true,
+} as const satisfies Record<keyof Commands, true>;
+
+export type CommandName = keyof typeof COMMANDS;
+
+// Type guard: preserves narrowing for untrusted IPC channel strings.
+export function isCommandName(value: unknown): value is CommandName {
+  return typeof value === 'string' && Object.hasOwn(COMMANDS, value);
+}
