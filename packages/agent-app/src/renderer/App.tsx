@@ -1,4 +1,5 @@
-import React, { useCallback, useRef } from 'react';
+import {PanelLeft} from 'lucide-react';
+import React, { useCallback, useRef,useEffect } from 'react';
 import {WorkControls} from './components/WorkControls';
 import { ChatView } from './components/ChatView';
 import { Sidebar } from './components/Sidebar';
@@ -10,15 +11,21 @@ import {
   dismissNotice,
   persistNavWidth,
   setNavWidth,
+  setNavHidden,
+  getState,
   closeSettings,
   createChat,
 } from './store';
 import { useStore } from './useStore';
-import { focusComposer } from './focus';
+import { focusComposer,isChord } from './focus';
 
 export function App(): React.ReactElement {
   const state = useStore();
   const dragging = useRef(false);
+  useEffect(()=>{
+    const toggle=(event:KeyboardEvent)=>{if(isChord(event,'b')){event.preventDefault();setNavHidden(!getState().navHidden);}};
+    window.addEventListener('keydown',toggle);return()=>window.removeEventListener('keydown',toggle);
+  },[]);
 
   const onSeparatorPointerDown = useCallback((e: React.PointerEvent) => {
     dragging.current = true;
@@ -59,15 +66,17 @@ export function App(): React.ReactElement {
   }
 
   return (
-    <div className="app">
+    <div className="app" data-nav-hidden={state.navHidden}>
+      <button type="button" className="nav-toggle icon-button" style={{left:state.navHidden?100:state.navWidth-38}} aria-label={state.navHidden?'Show left sidebar':'Hide left sidebar'} title={state.navHidden?'Show left sidebar (⌘B)':'Hide left sidebar (⌘B)'} aria-expanded={!state.navHidden} aria-keyshortcuts="Meta+B Control+B" onClick={()=>setNavHidden(!state.navHidden)}><PanelLeft size={16}/></button>
       <nav
         className="nav"
+        hidden={state.navHidden}
         style={{ width: state.navWidth }}
         aria-label="Chats and folders"
       >
         <Sidebar />
       </nav>
-      <div
+      {!state.navHidden&&<div
         className="nav-separator"
         role="separator"
         aria-orientation="vertical"
@@ -84,9 +93,8 @@ export function App(): React.ReactElement {
           setNavWidth(NAV_DEFAULT);
           persistNavWidth();
         }}
-      />
+      />}
       <main className="center">
-        {state.screen==='work'&&<WorkControls/>}
         {state.screen === 'projects' ? <ProjectsScreen onBack={closeSettings} onStartChat={(projectId, folderId)=>void createChat(folderId, projectId).then(() => focusComposer())} /> : state.screen === 'providers' ? <ProvidersScreen /> : state.boot.phase === 'loading' || state.boot.phase === 'idle' ? (
           <div className="center-loading" role="status">
             Loading workspace…
@@ -94,6 +102,7 @@ export function App(): React.ReactElement {
         ) : (
           <ChatView />
         )}
+        {state.screen==='work'&&<WorkControls/>}
       </main>
       {state.screen === 'work' && (
         <ResourcePane />

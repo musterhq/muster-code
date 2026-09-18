@@ -56,6 +56,7 @@ export interface AppState {
   gitChanges: Record<string, Loadable<ChangedFile[]>>;
   navWidth: number;
   resourcesHidden: boolean;
+  navHidden: boolean;
 }
 
 const NAV_KEY = 'muster.navWidth';
@@ -82,6 +83,7 @@ let state: AppState = {
   fileBodies: {},
   diffs: {},
   gitChanges: {},
+  navHidden: localStorage.getItem('muster.navHidden')==='true',
   resourcesHidden: localStorage.getItem('muster.resourcesHidden')==='true' || (localStorage.getItem('muster.resourcesHidden')===null && savedWorkspace.tabs.length===0),
   navWidth: clampNav(Number(localStorage.getItem(NAV_KEY)) || NAV_DEFAULT),
 };
@@ -571,4 +573,10 @@ export function setNavWidth(width: number): void {
 
 export function persistNavWidth(): void {
   localStorage.setItem(NAV_KEY, String(state.navWidth));
+}
+
+/** Hiding navigation preserves its width, selection and draft state. */
+export function setNavHidden(hidden:boolean):void {
+ set({navHidden:hidden});
+ try{localStorage.setItem('muster.navHidden',String(hidden));}catch{}
 }

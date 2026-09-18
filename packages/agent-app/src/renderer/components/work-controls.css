@@ -4,3 +4,5 @@
 .work-actions > button:hover, .work-actions > button:focus-visible { background:var(--bg-hover); color:var(--text); }
 .center { position:relative; }
 .chat-head { padding-right:92px; }
+
+.work-controls button { -webkit-app-region:no-drag; }

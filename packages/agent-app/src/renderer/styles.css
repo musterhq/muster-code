@@ -636,7 +636,7 @@ textarea:focus-visible {
 }
 
 /* Keep native traffic lights clear and give the frameless host a drag target. */
-.nav::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 40px; -webkit-app-region: drag; }
+.nav::before { content: ''; position: absolute; top: 0; left: 0; right: 44px; height: 40px; -webkit-app-region: drag; }
 .nav-inner { display: flex; flex-direction: column; min-height: 100%; }
 .nav-toolbar { display: flex; align-items: center; justify-content: space-between; padding: 0 6px 12px; }
 .tool-button { display: inline-flex; align-items: center; gap: 8px; color: var(--text-dim); padding: 6px; border-radius: var(--radius); }
@@ -648,7 +648,16 @@ textarea:focus-visible {
 .nav-section-head { gap: 6px; }
 .nav-section-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .nav-section-actions { flex-shrink: 0; }
-.chat-head { min-height: 44px; -webkit-app-region: drag; }
+.chat-head { min-height: 44px; position:relative; -webkit-app-region:no-drag; }
+/* Native hit testing must never include the header controls in a drag region. */
+.chat-head::before { content:''; position:absolute; top:0; bottom:0; left:0; right:100px; -webkit-app-region:drag; }
+.app { position:relative; }
+.nav[hidden] { display:none; }
+.nav-toggle { position:absolute; top:10px; z-index:20; -webkit-app-region:no-drag; }
+.app[data-nav-hidden='true'] .chat-head { padding-left:140px; }
+.app[data-nav-hidden='true'] .chat-head::before { left:140px; }
+.app[data-nav-hidden='true'] .settings-topbar { padding-left:140px; -webkit-app-region:no-drag; }
+.app[data-nav-hidden='true'] .settings-topbar::before { content:''; position:absolute; top:0; left:140px; right:0; height:44px; -webkit-app-region:drag; }
 .chat-head button, .chat-head select { -webkit-app-region: no-drag; }
 ::selection { background: #404040; color: var(--text); }
 @media (prefers-reduced-transparency: reduce) { .nav { background: #222222; } }
