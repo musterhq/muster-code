@@ -10,12 +10,13 @@ const disclosures=new Map<string,{open:boolean;page:number}>();
 function remember(id:string,open:boolean,page:number){disclosures.delete(id);disclosures.set(id,{open,page});if(disclosures.size>200)disclosures.delete(disclosures.keys().next().value!);}
 export function ActivityGroup({items}:{items:TimelineItem[]}) {
   const key=items[0]?.id??'';
-  const [open,setOpen]=useState(()=>disclosures.get(key)?.open??false),[page,setPage]=useState(()=>disclosures.get(key)?.page??0);const id=useId();
+  const [open,setOpen]=useState(()=>disclosures.get(key)?.open??items.some(item=>item.status==='running')),[page,setPage]=useState(()=>disclosures.get(key)?.page??0);const id=useId();
   const changePage=(value:number)=>{setPage(value);remember(key,open,value);};
   const active=items.some(item=>item.status==='running');
   const currentItem=items.findLast(item=>item.status==='running')??items.at(-1);
   const lastPage=Math.max(0,Math.ceil(items.length/40)-1),current=Math.min(page,lastPage);
   const label=summarizeActivity(items);
+  if(items.length===1)return <ToolCard item={items[0]}/>;
   return <section className="activity-group" aria-label="Agent activity">
     <button className="activity-summary" aria-expanded={open} aria-controls={id} onClick={()=>{setOpen(!open);remember(key,!open,page);}} title={label}>
       <ToolGlyph kind={classifyTool(currentItem?.data).kind} running={active}/>

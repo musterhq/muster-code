@@ -33,5 +33,6 @@ export function summarizeActivity(items:TimelineItem[]):string {
   const failed=unique.filter(item=>item.status==='failed').length;
   const interrupted=unique.filter(item=>item.status==='interrupted'||item.status==='cancelled').length;
   if(failed)parts.push(`${failed} failed`);if(interrupted)parts.push(`${interrupted} interrupted`);
-  return parts.join(', ') || 'Activity';
+  const summary=parts.join(', ');
+  return summary?summary[0].toUpperCase()+summary.slice(1):'Activity';
 }

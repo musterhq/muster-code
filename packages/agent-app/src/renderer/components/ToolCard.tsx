@@ -53,33 +53,20 @@ export function ToolCard({item}: {item: TimelineItem}) {
   const output = item.text.startsWith(prefix) ? item.text.slice(prefix.length).replace(/^\n/, '') : item.text;
   const bodyId = `tool-body-${item.id}`;
 
-  if (p.kind === 'command') {
-    const command = commandLabel(raw);
-    return <div className={`command-card${running ? ' is-running' : ''}`}>
-      <button className="command-head" aria-expanded={open} aria-controls={bodyId} onClick={()=>setOpen(v=>!v)}>
-        <ToolGlyph kind={p.kind} running={running}/>
-        <span className="command-label" title={command}>{command}</span>
-        <span className="command-state">{state}</span>
-        {open ? <ChevronDown size={12}/> : <ChevronRight size={12}/>}
-      </button>
-      {open ? <div className="command-body" id={bodyId}>
-        <div className="command-source"><code>{raw}</code><button className="icon-button" aria-label={copied ? 'Command copied' : 'Copy command'} onClick={()=>copy(raw)}>{copied ? <Check size={13}/> : <Copy size={13}/>}</button></div>
-        <pre className="tool-output">{output || (running ? 'Waiting for output…' : 'No output')}</pre>
-        <Metadata item={item}/>
-      </div> : output ? <pre className="command-preview" aria-hidden="true">{output.slice(0,400)}</pre> : null}
-    </div>;
-  }
 
+  const subject=p.kind==='command'?commandLabel(raw):(p.kind==='read'||p.kind==='edit')?p.subject.split(', ').map(path=>path.split('/').filter(Boolean).at(-1)||path).join(', '):p.subject;
+  const duration=typeof item.data?.durationMs==='number'&&item.status!=='running'?item.data.durationMs:null;
   return <div className={`tool-row-card kind-${p.kind}${running ? ' is-running' : ''}${failed ? ' is-failed' : ''}`}>
     <button className="tool-row-head" aria-expanded={open} aria-controls={bodyId} onClick={()=>setOpen(v=>!v)}>
       <ToolGlyph kind={p.kind} running={running}/>
       <span className="tool-row-state">{state}</span>
-      {p.subject ? <span className="tool-row-subject" title={p.subject}>{p.subject}</span> : <span className="tool-row-subject" />}
+      {subject ? <span className="tool-row-subject" title={p.subject}>{subject}</span> : <span className="tool-row-subject" />}
+      {duration!=null&&duration>=1000&&<span className="tool-row-duration">in {Math.round(duration/1000)}s</span>}
       {open ? <ChevronDown size={12}/> : <ChevronRight size={12}/>}
     </button>
     {open ? <div className="tool-row-body" id={bodyId}>
-      {p.subject ? <div className="tool-row-source"><code>{p.subject}</code><button className="icon-button" aria-label={copied ? 'Copied' : 'Copy'} onClick={()=>copy(p.subject)}>{copied ? <Check size={13}/> : <Copy size={13}/>}</button></div> : null}
-      <pre className="tool-output">{output || (running ? 'Waiting for output…' : 'No output')}</pre>
+      {p.subject ? <div className="tool-row-source"><code>{p.subject}</code><button className="icon-button" aria-label={copied ? 'Copied' : p.kind==='command'?'Copy command':'Copy'} onClick={()=>copy(p.subject)}>{copied ? <Check size={13}/> : <Copy size={13}/>}</button></div> : null}
+      {(output||p.kind==='command')&&<pre className="tool-output">{output || (running ? 'Waiting for output…' : 'No output')}</pre>}
       <Metadata item={item}/>
     </div> : null}
   </div>;

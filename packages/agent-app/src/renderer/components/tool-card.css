@@ -1,11 +1,12 @@
 .tool-row-card { border-radius: 5px; overflow: hidden; }
-.tool-row-head { display: flex; align-items: center; gap: 8px; padding: 7px 12px; width: 100%; color: var(--text-dim); text-align: left; font-size: 12px; }
+.tool-row-head { display: flex; align-items: center; gap: 6px; padding: 5px 0; width: 100%; color: var(--text-dim); text-align: left; font-size: 13px; }
 .tool-row-head:hover { background:var(--bg-hover); }
-.tool-row-subject { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 11px/1.6 var(--mono); color: var(--text-faint); }
-.tool-row-state { flex: none; font-size: 11px; color: var(--text-faint); }
+.tool-row-subject { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: inherit; color: var(--text-dim); }
+.tool-row-state { flex: none; font-size: inherit; color: inherit; }
+.tool-row-duration { flex: none; color: var(--text-faint); font-size: 11px; }
 .is-failed .tool-row-state { color: #e5534b; }
 .kind-subagent { border-color: #4a6da766; }
-.tool-row-body { border-top: 1px solid var(--hairline); padding: 10px 12px; }
+.tool-row-body { margin: 4px 0 8px 20px; border: 1px solid var(--hairline); border-radius: 7px; background: var(--bg-raised); padding: 10px 12px; }
 .tool-row-source { display: flex; gap: 10px; align-items: flex-start; margin-bottom: 10px; color: var(--text-dim); }
 .tool-row-source code { flex: 1; min-width: 0; font: 11px/1.6 var(--mono); overflow-wrap: anywhere; }
 .tool-row-source button { flex: none; }
@@ -21,3 +22,7 @@
 .tool-details summary:focus-visible { outline:2px solid var(--accent); }
 .tool-child-ids { padding-top:6px; user-select:text; }
 @media (prefers-reduced-motion: no-preference) { .tool-glyph.is-active { animation:tool-run-pulse 1.2s ease-in-out infinite; } }
+
+.tool-row-head:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.tool-row-head > svg:last-child { flex: none; opacity: .5; }
+.tool-row-head:hover > svg:last-child, .tool-row-head:focus-visible > svg:last-child { opacity: 1; }
