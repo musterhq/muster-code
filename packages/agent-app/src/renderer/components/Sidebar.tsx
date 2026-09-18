@@ -133,10 +133,10 @@ function FolderSection({ folder, chats, open, onToggle }: {
   folder: Folder;
   chats: Chat[];
   open: boolean;
-  onToggle: (id: string) => void;
+  onToggle: (id: string, open: boolean) => void;
 }): React.ReactElement {
   return (
-    <Collapsible.Root className="nav-section" open={open} onOpenChange={()=>onToggle(`folder:${folder.id}`)}>
+    <Collapsible.Root className="nav-section" open={open} onOpenChange={value=>onToggle(`folder:${folder.id}`,value)}>
       <GroupHead title={folder.name} tooltip={folder.path}>
         <button
           type="button"
@@ -191,11 +191,11 @@ export function Sidebar(): React.ReactElement {
     setSearching(false);
     if (restore) restoreFocus(searchButton.current);
   };
-  const toggleGroup = (id: string) => {
+  useEffect(() => { saveCollapsed(localStorage, collapsed); }, [collapsed]);
+  const toggleGroup = (id: string, open: boolean) => {
     setCollapsed((prev) => {
       const next = new Set(prev);
-      if (!next.delete(id)) next.add(id);
-      saveCollapsed(localStorage, next);
+      if (open) next.delete(id); else next.add(id);
       return next;
     });
   };
@@ -239,7 +239,7 @@ export function Sidebar(): React.ReactElement {
       </div>
       <div className="nav-scroll">
         {pinned.length > 0 && (
-          <Collapsible.Root className="nav-section" open={isOpen('pinned')} onOpenChange={()=>toggleGroup('pinned')}>
+          <Collapsible.Root className="nav-section" open={isOpen('pinned')} onOpenChange={value=>toggleGroup('pinned',value)}>
             <GroupHead title="Pinned" />
             <Collapsible.Panel className="nav-group-panel">{pinned.map((chat) => (
               <ChatRow key={chat.id} chat={chat} />
@@ -250,7 +250,7 @@ export function Sidebar(): React.ReactElement {
           const chats = unpinned.filter((c) => c.projectId === project.id);
           const gid = `project:${project.id}`;
           return (
-            <Collapsible.Root className="nav-section" key={project.id} open={isOpen(gid)} onOpenChange={()=>toggleGroup(gid)}>
+            <Collapsible.Root className="nav-section" key={project.id} open={isOpen(gid)} onOpenChange={value=>toggleGroup(gid,value)}>
               <GroupHead title={project.name} tooltip={project.goal}>
                 <button
                   type="button"
@@ -279,7 +279,7 @@ export function Sidebar(): React.ReactElement {
           />
         ))}
         {orphanChats.filter((c) => !c.projectId).length > 0 && (
-          <Collapsible.Root className="nav-section" open={isOpen('chats')} onOpenChange={()=>toggleGroup('chats')}>
+          <Collapsible.Root className="nav-section" open={isOpen('chats')} onOpenChange={value=>toggleGroup('chats',value)}>
             <GroupHead title="Chats" />
             <Collapsible.Panel className="nav-group-panel">{orphanChats
               .filter((c) => !c.projectId)
