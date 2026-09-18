@@ -34,7 +34,16 @@ assert.equal(store.getState().activeChatId,'a','resource refresh must not switch
 assert.equal(document.querySelectorAll('.timeline').length,1);
 store.setResourcesHidden(true);
 await new Promise(r=>setTimeout(r,80));
-assert.equal(document.querySelectorAll('.workspace').length,0);
+assert.equal(document.querySelector('.workspace')!.hasAttribute('hidden'),true);
+const preservedTimeline=document.querySelector('.timeline');
+store.setNavHidden(true);await new Promise(r=>setTimeout(r,30));
+assert.ok(document.querySelector('.nav[hidden]'));
+assert.ok(document.querySelector('[aria-label="Show left sidebar"]'));
+assert.equal(document.querySelector('.timeline'),preservedTimeline,'navigation toggle preserves mounted conversation');
+assert.equal(persisted.get('muster.navHidden'),'true');
+store.setNavHidden(false);await new Promise(r=>setTimeout(r,30));
+assert.ok(!document.querySelector('.nav[hidden]'));
+assert.equal(document.querySelector('.timeline'),preservedTimeline);
 assert.equal(store.getState().tabs.length,1,'hiding preserves resource tabs');
 assert.ok(document.querySelector('[aria-label="Show resource pane"]'));
 await store.openFile('folder','example.ts');

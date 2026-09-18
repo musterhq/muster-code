@@ -6,3 +6,8 @@
 .chat-head { padding-right:92px; }
 
 .work-controls button { -webkit-app-region:no-drag; }
+
+.work-actions { transform-origin:top right; transition:opacity 120ms ease,transform 150ms cubic-bezier(.2,.8,.2,1),display 150ms allow-discrete; }
+.work-actions[hidden] { display:none; opacity:0; transform:translateY(-3px) scale(.98); }
+@starting-style { .work-actions:not([hidden]) { opacity:0; transform:translateY(-3px) scale(.98); } }
+@media (prefers-reduced-motion:reduce) { .work-actions { transition:none; } }
