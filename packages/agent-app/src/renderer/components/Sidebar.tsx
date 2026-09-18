@@ -3,11 +3,14 @@ import {
   ArchiveRestore,
   FolderOpen,
   FolderPlus,
+  Layers,
   KeyRound,
   MessageSquarePlus,
   Pencil,
   Pin,
   PinOff,
+  Search,
+  Settings2,
 } from 'lucide-react';
 import React, { useState } from 'react';
 import type { Chat, Folder } from '../../shared/protocol';
@@ -15,6 +18,7 @@ import {
   createChat,
   openFilesTab,
   openProvidersTab,
+  openProjectsScreen,
   pickFolder,
   selectChat,
   updateChat,
@@ -138,13 +142,16 @@ function FolderSection({ folder, chats }: { folder: Folder; chats: Chat[] }): Re
 export function Sidebar(): React.ReactElement {
   const state = useStore();
   const [showArchived, setShowArchived] = useState(false);
+  const [searching, setSearching] = useState(false);
+  const [query, setQuery] = useState('');
   const snapshot = state.snapshot;
 
   if (!snapshot) {
     return <div className="nav-empty">Loading…</div>;
   }
 
-  const live = snapshot.chats.filter((c) => !c.archived).sort(chatOrder);
+  const matches = (c: Chat) => !query.trim() || c.title.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase());
+  const live = snapshot.chats.filter((c) => !c.archived && matches(c)).sort(chatOrder);
   const archived = snapshot.chats.filter((c) => c.archived).sort(chatOrder);
   const orphanChats = live.filter(
     (c) => !c.folderId || !snapshot.folders.some((f) => f.id === c.folderId),
@@ -153,17 +160,22 @@ export function Sidebar(): React.ReactElement {
   return (
     <div className="nav-inner">
       <div className="nav-toolbar">
+        <button type="button" className="tool-button" onClick={() => void createChat()}>
+          <MessageSquarePlus size={15} /><span>New chat</span>
+        </button>
+        <button type="button" className="tool-button" onClick={() => setSearching(v => !v)} aria-expanded={searching}>
+          <Search size={15} /><span>Search chats</span>
+        </button>
+        {searching && <input autoFocus className="nav-search" aria-label="Search chats" placeholder="Search chats…" value={query} onChange={e=>setQuery(e.target.value)} onKeyDown={e=>{if(e.key==='Escape'){setQuery('');setSearching(false);}}} />}
+        <button type="button" className="tool-button" onClick={openProjectsScreen}>
+          <Layers size={15} /><span>Projects</span>
+        </button>
+      </div>
+      <div className="nav-folders-head">
+        <span>Folders</span>
         <button type="button" className="tool-button" onClick={() => void pickFolder()}>
           <FolderPlus size={14} />
           <span>Add folder</span>
-        </button>
-        <button
-          type="button"
-          className="icon-button"
-          aria-label="Providers"
-          onClick={openProvidersTab}
-        >
-          <KeyRound size={14} />
         </button>
       </div>
       <div className="nav-scroll">
@@ -179,7 +191,9 @@ export function Sidebar(): React.ReactElement {
                   type="button"
                   className="icon-button"
                   aria-label={`New chat in project ${project.name}`}
-                  onClick={() => void createChat(undefined, project.id)}
+                  onClick={() => project.folderIds.length === 1
+                    ? void createChat(project.folderIds[0], project.id)
+                    : openProjectsScreen()}
                 >
                   <MessageSquarePlus size={13} />
                 </button>
@@ -231,6 +245,12 @@ export function Sidebar(): React.ReactElement {
           </section>
         )}
       </div>
+      <footer className="nav-footer">
+        <button type="button" className="tool-button" onClick={openProvidersTab}>
+          <Settings2 size={15} /><span>Providers</span>
+        </button>
+        <span className="nav-footer-label">Muster</span>
+      </footer>
     </div>
   );
 }

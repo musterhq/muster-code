@@ -18,3 +18,23 @@ test('folder and Project identities, draft/pin/title survive reopening; outside 
 test('approval item ID resolves real pending request and failed execution remains visible',async t=>{
  let decision;const {service}=await fixture(t,async x=>{decision=await x.onRequest('item/commandExecution/requestApproval',{command:'touch fixture'});throw Error('Fixture provider disconnected');});const c=await service.invoke('chat.create',{});await service.invoke('chat.send',{id:c.id,text:'test approval',requestId:randomUUID()});let items=await service.invoke('chat.select',{id:c.id});const approval=items.find(x=>x.kind==='approval');assert.ok(approval);await service.invoke('approval.respond',{id:approval.id,approved:false});await settled(service,c.id);assert.deepEqual(decision,{decision:'decline'});items=await service.invoke('chat.select',{id:c.id});assert.equal(items.find(x=>x.kind==='approval').status,'declined');assert.match(items.at(-1).text,/disconnected/);
 });
+test('Project chats resolve a sole attached folder and reject unrelated or ambiguous folders', async t => {
+ const {dir, service} = await fixture(t, async () => ({status:'completed', finalMessage:''}));
+ const fs = require('node:fs/promises');
+ const folders = [];
+ for (const name of ['one', 'two', 'unrelated']) {
+   const path = join(dir, name); await fs.mkdir(path);
+   folders.push(await service.invoke('folder.add', {path}));
+ }
+ const solo = await service.invoke('project.create', {name:'Solo', goal:'One workspace', folderIds:[folders[0].id]});
+ const chat = await service.invoke('chat.create', {projectId:solo.id});
+ assert.equal(chat.folderId, folders[0].id);
+ assert.equal(chat.projectId, solo.id);
+ const multi = await service.invoke('project.create', {name:'Several', goal:'Two workspaces', folderIds:folders.slice(0,2).map(f=>f.id)});
+ await assert.rejects(service.invoke('chat.create', {projectId:multi.id}), /Choose a Project folder/);
+ await assert.rejects(service.invoke('chat.create', {projectId:multi.id, folderId:folders[2].id}), /not attached/);
+ const selected = await service.invoke('chat.create', {projectId:multi.id, folderId:folders[1].id});
+ assert.equal(selected.folderId, folders[1].id);
+ const independent = await service.invoke('chat.create', {folderId:folders[0].id});
+ assert.equal(independent.projectId, undefined);
+});

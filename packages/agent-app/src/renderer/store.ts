@@ -30,7 +30,7 @@ export interface Notice {
 }
 
 export interface AppState {
-  screen: 'work' | 'providers';
+  screen: 'work' | 'providers' | 'projects';
   bridgeAvailable: boolean;
   boot: Loadable<true>;
   snapshot: Snapshot | null;
@@ -208,7 +208,7 @@ export function retryTimeline(id: string): void {
 export async function createChat(folderId?: string, projectId?: string): Promise<void> {
   try {
     const chat = await invoke('chat.create', { folderId, projectId });
-    set({ activeChatId: chat.id });
+    set({ activeChatId: chat.id, screen: 'work' });
     await loadTimeline(chat.id);
   } catch (cause) {
     pushNotice(errorText(cause));
@@ -335,6 +335,7 @@ export function openProvidersTab(): void {
   set({ screen: 'providers', revealed: {} });
   void loadProviders(true);
 }
+export function openProjectsScreen(): void { set({ screen: 'projects', revealed: {} }); }
 export function closeSettings(): void { set({ screen: 'work', revealed: {} }); }
 
 export function dirKey(folderId: string, path: string): string {

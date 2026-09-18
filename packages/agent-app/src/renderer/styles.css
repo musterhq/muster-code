@@ -120,9 +120,9 @@ textarea:focus-visible {
 
 .workspace {
   flex: none;
-  width: 40%;
+  width: 33%;
   min-width: 320px;
-  max-width: 560px;
+  max-width: 520px;
   display: flex;
   flex-direction: column;
   background: var(--bg);
@@ -294,24 +294,25 @@ textarea:focus-visible {
   user-select: text;
 }
 
-.timeline-inner { position: relative; width: 100%; }
+.timeline-inner { position: relative; width: min(100%, 804px); margin: 0 auto; }
 
 .timeline-row {
   position: absolute;
   top: 0;
   left: 0;
   width: 100%;
-  padding: 4px 24px;
+  padding: 8px 32px;
 }
 
 .msg { max-width: 720px; }
 .msg-user {
   margin-left: auto;
-  background: var(--bg-active);
-  border-radius: 10px;
+  background: var(--bg-raised);
+  border: 1px solid var(--hairline);
+  border-radius: 12px;
   padding: 8px 12px;
   width: fit-content;
-  max-width: 80%;
+  max-width: 100%;
 }
 .msg-assistant { padding: 4px 0; }
 .msg-text { white-space: pre-wrap; overflow-wrap: anywhere; }
@@ -692,3 +693,48 @@ textarea:focus-visible {
 .add-connection input { display: block; width: 100%; margin-top: 7px; padding: 9px 10px; border: 1px solid var(--hairline); border-radius: 6px; background: var(--bg); color: var(--text); font: inherit; }
 .add-connection input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .optional, .field-help { color: var(--text-faint); }
+
+/* Reference-aligned chat hierarchy; expensive materials remain native-only. */
+.nav { padding-top: 48px; overflow: hidden; }
+.nav-inner { height: 100%; min-height: 0; }
+.nav-toolbar { flex-direction: column; align-items: stretch; gap: 2px; padding: 0 0 22px; }
+.nav-toolbar .tool-button { width: 100%; padding: 7px 10px; font-size: 12px; }
+.nav-folders-head { display: flex; align-items: center; justify-content: space-between; padding: 0 8px; color: var(--text-faint); font-size: 11px; }
+.nav-folders-head .tool-button { font-size: 11px; gap: 5px; padding: 4px 0; }
+.nav-scroll { flex: 1; min-height: 0; overflow: auto; }
+.nav-search { width: 100%; border: 1px solid var(--hairline); border-radius: 6px; background: var(--bg-raised); color: var(--text); padding: 7px; font: inherit; }
+.nav-footer { display: flex; align-items: center; justify-content: space-between; padding: 12px 4px 2px; }
+.nav-footer-label { font-size: 11px; color: var(--text-faint); }
+.chat-row { min-height: 30px; padding: 5px 8px; font-size: 12px; position: relative; }
+.chat-row-actions { position: absolute; right: 4px; background: #2b2b2b; border-radius: 5px; padding-left: 4px; }
+.chat-head { gap: 7px; min-height: 42px; height: 42px; padding: 0 20px; border-bottom: 0; font-size: 12px; }
+.chat-head-title { font-weight: 450; flex: 1; }
+.chat-head-meta { display: none; }
+.timeline { padding-top: 12px; }
+.msg { max-width: none; font-size: 14px; line-height: 1.7; }
+.msg-user { width: 100%; padding: 12px 14px; margin: 4px 0 12px; font-size: 13px; line-height: 1.55; }
+.msg-assistant { padding: 4px 10px; }
+.card-collapsible { max-width: none; border-color: var(--hairline); border-radius: 9px; }
+.card-collapsible-head { padding: 9px 11px; gap: 8px; font-size: 12px; }
+.card-collapsible-label { font-weight: 400; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.card-collapsible-meta { font-size: 11px; }
+.composer { width: min(calc(100% - 64px), 740px); margin: 16px auto 10px; padding: 8px 10px; border: 1px solid var(--hairline); background: var(--bg-raised); border-radius: 16px; gap: 8px; }
+.composer-input { background: transparent; border: 0; border-radius: 0; padding: 3px 2px; min-height: 26px; font-size: 13px; outline: none; }
+.composer-input:focus-visible { outline: none; }
+.composer:focus-within { border-color: #f0f0f02a; }
+.composer-send,.composer-stop { width: 26px; height: 26px; border-radius: 50%; background: var(--text); color: var(--bg); }
+.workspace-tabs { min-height: 42px; align-items: stretch; }
+.workspace-tab { border-right: 0; }
+.workspace-tab-label { font-size: 11px; }
+.workspace-tab.is-active { background: #f0f0f006; }
+.code-table { font-size: 12px; line-height: 1.6; }
+@media (max-width: 1000px) { .workspace { width: 32%; min-width: 280px; } .timeline-row { padding-inline: 20px; } .composer { width: calc(100% - 40px); } }
+.command-card { border: 1px solid var(--hairline); border-radius: 9px; background: #1d1d1d; overflow: hidden; }
+.command-head { display: flex; align-items: center; gap: 8px; padding: 9px 12px; width: 100%; color: var(--text-dim); text-align: left; }
+.command-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+.command-state { font-size: 11px; color: var(--text-faint); }
+.command-preview { margin: 0; padding: 0 12px 10px; max-height: 58px; overflow: hidden; font: 11px/1.6 var(--mono); color: var(--text-faint); white-space: pre-wrap; mask-image: linear-gradient(#000 20%,transparent); }
+.command-body { border-top: 1px solid var(--hairline); padding: 10px 12px; }
+.command-source { display: flex; gap: 10px; align-items: flex-start; margin-bottom: 10px; color: var(--text-dim); }
+.command-source code { flex: 1; min-width: 0; font: 11px/1.6 var(--mono); overflow-wrap: anywhere; }
+.command-source button { flex: none; }

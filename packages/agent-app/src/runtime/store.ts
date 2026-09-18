@@ -154,8 +154,15 @@ export class AgentStore {
   createChat(input: { folderId?: string; projectId?: string; model: string; mode: Chat['mode'] }): Chat {
     return this.tx(() => {
       if (input.folderId && !this.folder(input.folderId)) throw new Error(`Unknown folder: ${input.folderId}`);
-      if (input.projectId && !this.db.prepare('SELECT id FROM projects WHERE id = ?').get(input.projectId)) {
-        throw new Error(`Unknown project: ${input.projectId}`);
+      if (input.projectId) {
+        const project = this.db.prepare('SELECT folder_ids FROM projects WHERE id = ?').get(input.projectId) as {folder_ids: string} | undefined;
+        if (!project) throw new Error(`Unknown project: ${input.projectId}`);
+        const folderIds: string[] = JSON.parse(project.folder_ids);
+        if (input.folderId && !folderIds.includes(input.folderId)) {
+          throw new Error('The selected folder is not attached to this Project.');
+        }
+        if (!input.folderId && folderIds.length === 1) input = {...input, folderId: folderIds[0]};
+        if (!input.folderId && folderIds.length > 1) throw new Error('Choose a Project folder for this chat.');
       }
       const id = randomUUID();
       this.db.prepare(
