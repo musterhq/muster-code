@@ -16,7 +16,7 @@ export function classifyTool(data:Record<string,unknown>|undefined):ToolPresenta
  if(type==='webSearch')return {kind:'search',verb:'Searched',runningVerb:'Searching',subject:string(data?.query)||subject};
  if(type==='todoList')return {kind:'list',verb:'Updated plan',runningVerb:'Updating plan',subject};
  if(type==='collabAgentToolCall')return {kind:'subagent',verb:data?.tool==='wait'?'Waited for agents':'Agent action',runningVerb:data?.tool==='wait'?'Waiting for agents':'Working with agents',subject:string(data?.prompt)||string(data?.tool)||subject};
- if(type==='mcpToolCall'||type==='dynamicToolCall')return {kind:'mcp',verb:'Used',runningVerb:'Using',subject:[string(data?.server)||string(data?.namespace),string(data?.tool)].filter(Boolean).join(' / ')||subject};
+ if(type==='mcpToolCall'||type==='dynamicToolCall')return {kind:'mcp',verb:'Used',runningVerb:'Using',subject:string(data?.title)||[string(data?.server)||string(data?.namespace),string(data?.tool)].filter(Boolean).join(' / ')||subject};
  return {kind:'generic',verb:'Ran tool',runningVerb:'Running tool',subject};
 }
 /** Display-only unwrapping; copying retains the exact command. */

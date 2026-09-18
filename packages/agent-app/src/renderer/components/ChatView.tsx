@@ -1,4 +1,4 @@
-import { ArrowUp, Check, ChevronDown, ChevronRight, Monitor, Square, X } from 'lucide-react';
+import { ArrowUp, Brain, Check, ChevronDown, ChevronRight, Monitor, Square, X } from 'lucide-react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import React, {
   useCallback,
@@ -27,35 +27,21 @@ import { ActivityGroup } from './ActivityGroup';
 import { groupActivity, type TranscriptEntry } from './activityGrouping';
 import { CopyButton, MessageBody } from './MessageBody';
 
+import {Collapsible as Disclosure} from '@base-ui/react/collapsible';
+import {useDisclosure} from './useDisclosure';
 const DRAFT_DEBOUNCE_MS = 250;
 
-function Collapsible({
-  label,
-  meta,
-  children,
-  defaultOpen = false,
-}: {
-  label: string;
-  meta?: string;
-  children: React.ReactNode;
-  defaultOpen?: boolean;
-}): React.ReactElement {
-  const [open, setOpen] = useState(defaultOpen);
-  return (
-    <div className="card-collapsible">
-      <button
-        type="button"
-        className="card-collapsible-head"
-        aria-expanded={open}
-        onClick={() => setOpen((v) => !v)}
-      >
-        {open ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
-        <span className="card-collapsible-label">{label}</span>
-        {meta && <span className="card-collapsible-meta">{meta}</span>}
-      </button>
-      {open && <div className="card-collapsible-body">{children}</div>}
-    </div>
-  );
+function ReasoningDisclosure({item}:{item:TimelineItem}):React.ReactElement {
+  const [open,setOpen]=useDisclosure('reasoning:'+item.id);
+  const running=item.status==='running';
+  return <Disclosure.Root open={open} onOpenChange={setOpen} className="card-collapsible">
+    <Disclosure.Trigger className="activity-summary">
+      <span className={running?'tool-glyph is-active':'tool-glyph'} aria-hidden="true"><Brain size={14}/></span>
+      <span>{running?'Thinking…':item.status==='failed'?'Thinking failed':item.status==='interrupted'?'Thinking interrupted':'Thought'}</span>
+      <ChevronRight className="tool-chevron" size={12}/>
+    </Disclosure.Trigger>
+    <Disclosure.Panel className="activity-disclosure"><div className="card-collapsible-body msg-text msg-reasoning">{item.text}</div></Disclosure.Panel>
+  </Disclosure.Root>;
 }
 
 function TimelineCard({ item }: { item: TranscriptEntry }): React.ReactElement {
@@ -76,12 +62,7 @@ function TimelineCard({ item }: { item: TranscriptEntry }): React.ReactElement {
           </div>
         </div>
       );
-    case 'reasoning':
-      return (
-        <Collapsible label={item.status === 'running' ? 'Thinking…' : 'Thought'}>
-          <div className="msg-text msg-reasoning">{item.text}</div>
-        </Collapsible>
-      );
+    case 'reasoning': return <ReasoningDisclosure item={item}/>;
     case 'tool': return <ToolCard item={item} />;
     case 'approval': {
       const pending = item.status === 'pending';

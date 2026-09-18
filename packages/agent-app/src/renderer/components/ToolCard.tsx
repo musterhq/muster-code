@@ -1,3 +1,5 @@
+import {ToolOutput,ToolDetail} from './ToolOutput';
+import {useDisclosure} from './useDisclosure';
 import {copyText} from '../clipboard';
 import { Bot, Check, ChevronDown, ChevronRight, Copy, FileText, Pencil, ListChecks, Plug, Search, SquareTerminal, Wrench } from 'lucide-react';
 import React, { useEffect, useRef, useState } from 'react';
@@ -17,14 +19,14 @@ function Metadata({item}:{item:TimelineItem}) {
   const changes=Array.isArray(d.changes)?d.changes as Record<string,unknown>[]:[];
   const blocks=[['Arguments',d.arguments],['Result',d.result],['Error',d.error],['Task',d.prompt],['Agent status',d.agentsStates],['Output',d.contentItems]];
   return <div className="tool-details">
-    {typeof d.command==='string'&&classifyTool(d).kind!=='command'&&<details><summary>Command</summary><pre className="tool-metadata">{d.command}</pre></details>}
+    {typeof d.command==='string'&&classifyTool(d).kind!=='command'&&<ToolDetail id={item.id+':command'} label="Command" text={d.command} language="shell"/>}
     <dl>{typeof d.cwd==='string'&&<><dt>Folder</dt><dd>{d.cwd}</dd></>}
       {typeof d.durationMs==='number'&&<><dt>Duration</dt><dd>{(d.durationMs/1000).toFixed(2)}s</dd></>}
       {typeof d.exitCode==='number'&&<><dt>Exit code</dt><dd>{d.exitCode}</dd></>}
       {typeof d.model==='string'&&<><dt>Model</dt><dd>{d.model}</dd></>}
     </dl>
-    {changes.map((change,index)=><details key={index} className="tool-file-change"><summary>{String(change.path??'File change')}</summary><pre className="tool-metadata">{String(change.diff??'Patch details were not supplied by the provider.')}</pre></details>)}
-    {blocks.filter(([,value])=>value!=null).map(([label,value])=><details key={String(label)}><summary>{String(label)}</summary><pre className="tool-metadata">{pretty(value)}</pre></details>)}
+    {changes.map((change,index)=><ToolDetail key={index} id={item.id+':patch:'+index} label={String(change.path??'File change')} text={String(change.diff??'Patch details were not supplied by the provider.')} language="diff"/>)}
+    {blocks.filter(([,value])=>value!=null).map(([label,value])=><ToolDetail key={String(label)} id={item.id+':'+label} label={String(label)} text={pretty(value)??''}/>)}
     {Array.isArray(d.receiverThreadIds)&&<div className="tool-child-ids">Agents: {d.receiverThreadIds.join(', ')}</div>}
   </div>;
 }
@@ -44,7 +46,7 @@ function useCopy(): [boolean, (text: string) => void] {
 }
 
 export function ToolCard({item}: {item: TimelineItem}) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useDisclosure('tool:'+item.id);
   const [copied, copy] = useCopy();
   const p = classifyTool(item.data);
   const running = item.status === 'running';
@@ -68,7 +70,7 @@ export function ToolCard({item}: {item: TimelineItem}) {
     </Collapsible.Trigger>
     <Collapsible.Panel className="activity-disclosure"><div className="tool-row-body" id={bodyId}>
       {p.subject ? <div className="tool-row-source"><code>{p.subject}</code><button className="icon-button" aria-label={copied ? 'Copied' : p.kind==='command'?'Copy command':'Copy'} onClick={()=>copy(p.subject)}>{copied ? <Check size={13}/> : <Copy size={13}/>}</button></div> : null}
-      {(output||p.kind==='command')&&<pre className="tool-output">{output || (running ? 'Waiting for output…' : 'No output')}</pre>}
+      {(output||p.kind==='command')&&<ToolOutput id={item.id} text={output || (running ? 'Waiting for output…' : 'No output')}/>}
       <Metadata item={item}/>
     </div></Collapsible.Panel>
   </Collapsible.Root>;
