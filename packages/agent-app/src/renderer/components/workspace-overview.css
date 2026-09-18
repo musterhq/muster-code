@@ -1,0 +1,20 @@
+.workspace-overview { width:100%; min-width:0; margin:auto; padding:36px 24px; overflow:auto; }
+.workspace-overview-section + .workspace-overview-section { margin-top:20px; padding-top:18px; border-top:1px solid var(--hairline); }
+.workspace-overview-section header { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:12px; color:var(--text-faint); font-size:12px; }
+.workspace-overview-section header span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.workspace-launchers { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; }
+.workspace-launchers button { display:flex; flex-direction:column; align-items:center; justify-content:center; gap:10px; min-height:98px; padding:12px; border:1px solid var(--hairline); border-radius:12px; color:var(--text-dim); }
+.workspace-launchers button:hover { background:var(--bg-hover); color:var(--text); }
+.workspace-count { color:var(--text-faint); font-size:11px; white-space:nowrap; }
+.workspace-count b { color:var(--ok); font-weight:400; }
+.workspace-count em { color:var(--danger); font-style:normal; }
+.workspace-overview.is-compact { padding:10px 7px; max-height:min(65vh,520px); }
+.is-compact .workspace-launchers { display:flex; flex-direction:column; gap:2px; }
+.is-compact .workspace-launchers button { min-height:34px; padding:7px; border:0; border-radius:5px; flex-direction:row; justify-content:flex-start; }
+.is-compact .workspace-count { margin-left:auto; }
+.workspace-empty { display:flex; align-items:center; flex-direction:column; gap:8px; color:var(--text-faint); text-align:center; }
+.workspace-open-folder { padding:8px 12px; border:1px solid var(--hairline); border-radius:7px; }
+.workspace-status { font-size:11px; color:var(--text-faint); }
+.workspace-activity { display:flex; gap:9px; align-items:center; color:var(--text-dim); font-size:12px; }
+.workspace-activity svg { flex-shrink:0; }
+.workspace-activity span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }

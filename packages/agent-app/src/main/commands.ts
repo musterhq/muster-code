@@ -17,6 +17,7 @@ const COMMANDS = {
   'files.list': true,
   'files.read': true,
   'git.changes': true,
+  'link.open': true,
   'git.diff': true,
   'providers.list': true,
   'providers.reveal': true,

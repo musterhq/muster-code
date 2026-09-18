@@ -1,6 +1,6 @@
 export interface SavedTab {
   id: string;
-  kind: 'files' | 'file' | 'diff';
+  kind: 'files' | 'changes' | 'file' | 'diff';
   folderId?: string;
   path?: string;
   title: string;
@@ -19,12 +19,12 @@ export function readWorkspace(storage: Pick<Storage, 'getItem'>): SavedWorkspace
     if (parsed.version !== 1 || !Array.isArray(parsed.tabs)) return empty();
     const tabs: SavedTab[] = [];
     for (const t of parsed.tabs.slice(0, MAX_TABS)) {
-      if (!t || !['files','file','diff'].includes(t.kind) || typeof t.folderId !== 'string' || t.folderId.length > 128) continue;
+      if (!t || !['files','changes','file','diff'].includes(t.kind) || typeof t.folderId !== 'string' || t.folderId.length > 128) continue;
       if (typeof t.title !== 'string' || t.title.length > 4096) continue;
-      if (t.kind !== 'files' && (typeof t.path !== 'string' || !t.path || t.path.length > 8192)) continue;
-      const id = t.kind === 'files' ? `files:${t.folderId}` : `${t.kind}:${t.folderId}:${t.path}`;
+      if (!['files','changes'].includes(t.kind) && (typeof t.path !== 'string' || !t.path || t.path.length > 8192)) continue;
+      const id = ['files','changes'].includes(t.kind) ? `${t.kind}:${t.folderId}` : `${t.kind}:${t.folderId}:${t.path}`;
       if (tabs.some(tab => tab.id === id)) continue;
-      tabs.push({id, kind:t.kind, folderId:t.folderId, ...(t.kind !== 'files' ? {path:t.path}:{}), title:t.title});
+      tabs.push({id, kind:t.kind, folderId:t.folderId, ...(!['files','changes'].includes(t.kind) ? {path:t.path}:{}), title:t.title});
     }
     return {tabs, activeTabId:tabs.some(t=>t.id===parsed.activeTabId) ? parsed.activeTabId : tabs[0]?.id ?? null};
   } catch { return empty(); }

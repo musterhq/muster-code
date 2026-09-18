@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, screen, session } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, screen, session, shell } from 'electron';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import type { AgentEvent, Commands, Snapshot } from '../shared/protocol.ts';
@@ -141,6 +141,13 @@ async function main(): Promise<void> {
     }
     if (!isCommandName(command)) {
       throw new Error('Unknown command.');
+    }
+    if(command === 'link.open'){
+      const raw=(input as {url?:unknown})?.url;
+      if(typeof raw!=='string'||raw.length>8192)throw new Error('Invalid link.');
+      const url=new URL(raw);
+      if(!['http:','https:'].includes(url.protocol)||url.username||url.password)throw new Error('Unsupported link.');
+      await shell.openExternal(url.href);return;
     }
     if (command === 'folder.pick') {
       return pickFolder();

@@ -105,3 +105,9 @@
 }
 .msg-assistant:hover .msg-actions,
 .msg-actions:focus-within { opacity: 1; }
+
+.md-resource-link { display:inline; color:var(--text-dim); text-decoration:underline; text-decoration-color:var(--hairline); text-underline-offset:3px; text-align:inherit; font:inherit; user-select:text; }
+.md-resource-link:hover { color:var(--text); text-decoration-color:var(--text-faint); }
+.md-unavailable-link { color:var(--text-dim); }
+.md-body input[type='checkbox'] { accent-color:var(--accent); margin-right:6px; }
+.file-line-target { background:var(--bg-active); }

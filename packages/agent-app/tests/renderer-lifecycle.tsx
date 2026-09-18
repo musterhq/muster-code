@@ -50,5 +50,14 @@ assert.equal(document.querySelector('.workspace')?.getAttribute('data-maximized'
 (document.querySelector('.resource-maximize') as HTMLButtonElement).click();
 await new Promise(r=>setTimeout(r,80));
 assert.ok(document.querySelector('.resource-compact-open'));
+window.innerWidth=1280;window.dispatchEvent(new window.Event('resize'));
+store.closeTab(store.getState().tabs[0].id);
+await new Promise(r=>setTimeout(r,80));
+assert.ok(document.querySelector('.workspace-empty'),'closing final resource leaves a useful empty pane');
+store.setResourcesHidden(true);
+await new Promise(r=>setTimeout(r,80));
+(document.querySelector('[aria-label="Show resource pane"]') as HTMLButtonElement).click();
+await new Promise(r=>setTimeout(r,80));
+assert.ok(document.querySelector('.workspace-empty'),'empty pane can be hidden and reopened');
 root.unmount();
 console.log("PASS: repeated chat switching keeps one transcript and composer, with no stale messages or render errors");

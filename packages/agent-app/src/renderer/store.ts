@@ -20,10 +20,11 @@ export interface Loadable<T> {
 
 export interface WorkspaceTab {
   id: string;
-  kind: 'files' | 'file' | 'diff';
+  kind: 'files' | 'changes' | 'file' | 'diff';
   folderId?: string;
   path?: string;
   title: string;
+  line?: number;
 }
 
 export interface Notice {
@@ -77,7 +78,7 @@ let state: AppState = {
   fileBodies: {},
   diffs: {},
   gitChanges: {},
-  resourcesHidden: localStorage.getItem('muster.resourcesHidden')==='true',
+  resourcesHidden: localStorage.getItem('muster.resourcesHidden')==='true' || (localStorage.getItem('muster.resourcesHidden')===null && savedWorkspace.tabs.length===0),
   navWidth: clampNav(Number(localStorage.getItem(NAV_KEY)) || NAV_DEFAULT),
 };
 
@@ -103,6 +104,8 @@ function set(patch: Partial<AppState>): void {
   for (const l of listeners) l();
   if ('tabs' in patch && state.boot.phase === 'ready') syncResourceWatches();
 }
+
+export function notifyError(cause: unknown): void { pushNotice(errorText(cause)); }
 
 function pushNotice(message: string): void {
   const notice = { id: ++noticeSeq, message };
@@ -328,7 +331,7 @@ export function openTab(tab: WorkspaceTab): void {
   const existing = state.tabs.find((t) => t.id === tab.id);
   if (!existing && state.tabs.length >= MAX_TABS) { pushNotice('Close a resource tab before opening another.'); return; }
   set({
-    tabs: existing ? state.tabs : [...state.tabs, tab],
+    tabs: existing ? state.tabs.map(t=>t.id===tab.id?{...t,...tab}:t) : [...state.tabs, tab],
     activeTabId: tab.id,
     resourcesHidden: false,
   });
@@ -355,7 +358,7 @@ export function activateTab(id: string): void {
 
 /** Lazily reconnect a restored tab; missing paths remain recoverable errors. */
 export function hydrateTab(tab: WorkspaceTab): void {
-  if (tab.kind === 'files') {
+  if (tab.kind === 'files' || tab.kind === 'changes') {
     if (!state.files[dirKey(tab.folderId!, '')]) void loadDir(tab.folderId!, '');
     if (!state.gitChanges[tab.folderId!]) void loadGitChanges(tab.folderId!);
   } else if (tab.kind === 'file' && !state.fileBodies[tab.id]) void openFile(tab.folderId!, tab.path!);
@@ -365,6 +368,11 @@ export function hydrateTab(tab: WorkspaceTab): void {
 export function openFilesTab(folderId: string, folderName: string): void {
   openTab({ id: `files:${folderId}`, kind: 'files', folderId, title: folderName });
   void loadDir(folderId, '');
+  void loadGitChanges(folderId);
+}
+
+export function openChangesTab(folderId: string, folderName: string): void {
+  openTab({id:`changes:${folderId}`,kind:'changes',folderId,title:`Changes · ${folderName}`});
   void loadGitChanges(folderId);
 }
 
@@ -392,9 +400,9 @@ export async function loadDir(folderId: string, path: string): Promise<void> {
   }
 }
 
-export async function openFile(folderId: string, path: string): Promise<void> {
+export async function openFile(folderId: string, path: string, line?: number): Promise<void> {
   const id = `file:${folderId}:${path}`;
-  openTab({ id, kind: 'file', folderId, path, title: path.split('/').pop() ?? path });
+  openTab({ id, kind: 'file', folderId, path, line, title: path.split('/').pop() ?? path });
   if (state.fileBodies[id]?.phase === 'ready' || state.fileBodies[id]?.phase === 'loading') return;
   set({ fileBodies: { ...state.fileBodies, [id]: { phase: 'loading' } } });
   try {
@@ -474,6 +482,7 @@ async function refreshResources(folderId: string): Promise<void> {
       const {[folderId]: stale, ...otherGitChanges} = state.gitChanges;
       set({fileBodies,diffs,files,gitChanges:active?.kind==='files'?state.gitChanges:otherGitChanges});
       if (!active) continue;
+      if(active.kind==='changes'){await loadGitChanges(folderId);continue;}
       if (active.kind === 'files') { const paths=[...new Set(['',...Object.keys(files).filter(key=>key.startsWith(folderId+'\0')).map(key=>key.slice(folderId.length+1))])].slice(0,64); await Promise.all([...paths.map(path=>loadDir(folderId,path)),loadGitChanges(folderId)]); continue; }
       try {
         if (active.kind === 'file') {

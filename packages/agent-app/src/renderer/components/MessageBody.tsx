@@ -1,6 +1,7 @@
 import { Check, Copy, X } from 'lucide-react';
 import React, { useEffect, useRef, useState } from 'react';
 import ReactMarkdown, { type Components } from 'react-markdown';
+import {ResourceLink} from './ResourceLink';
 import {MarkdownTable} from './MarkdownTable';
 import remarkGfm from 'remark-gfm';
 
@@ -12,8 +13,8 @@ const SAFE_PROTOCOL = /^(https?|mailto):/i;
 /** Allow http(s)/mailto and relative refs; drop javascript:, data:, etc. */
 export function safeUrl(url: string): string | null {
   const value = url.trim();
-  if (/[\u0000-\u0020\u007f]/.test(value)) return null;
-  if (HAS_PROTOCOL.test(value)) return SAFE_PROTOCOL.test(value) ? value : null;
+  if (/[\u0000-\u001f\u007f]/.test(value)) return null;
+  if (HAS_PROTOCOL.test(value) && !/^[^:]+:\d+(?::\d+)?$/.test(value)) return SAFE_PROTOCOL.test(value) ? value : null;
   return value;
 }
 
@@ -92,11 +93,7 @@ function Pre({ children }: { children?: React.ReactNode }): React.ReactElement {
 const components: Components = {
   pre: Pre,
   table: ({node: _node, ...props}) => <MarkdownTable {...props}/>,
-  a: ({ children, href }) => (
-    <a href={href} rel="noreferrer noopener">
-      {children}
-    </a>
-  ),
+  a: ({ children, href }) => <ResourceLink href={href}>{children}</ResourceLink>,
 };
 
 export function MessageBody({ text }: { text: string }): React.ReactElement {

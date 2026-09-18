@@ -20,6 +20,7 @@ import {
   type WorkspaceTab,
 } from '../store';
 import { useStore } from '../useStore';
+import {WorkspaceOverview} from './WorkspaceOverview';
 
 
 // ---------------------------------------------------------------------------
@@ -139,10 +140,10 @@ function FilesTab({ tab }: { tab: WorkspaceTab }): React.ReactElement {
           </ul>
         )}
       </section>
-      <section className="files-browser">
+      {tab.kind==='files'&&<section className="files-browser">
         <header className="files-section-head">Files</header>
         <DirEntries folderId={folderId} path="" />
-      </section>
+      </section>}
     </div>
   );
 }
@@ -153,6 +154,8 @@ function FilesTab({ tab }: { tab: WorkspaceTab }): React.ReactElement {
 function FileTab({ tab }: { tab: WorkspaceTab }): React.ReactElement {
   const state = useStore();
   const body = state.fileBodies[tab.id];
+  const code = useRef<HTMLDivElement>(null);
+  useEffect(()=>{if(tab.line&&body?.phase==='ready')code.current?.querySelector(`[data-line="${tab.line}"]`)?.scrollIntoView({block:"center"});},[tab.line,body?.phase]);
   if (!body || body.phase === 'loading' || body.phase === 'idle') {
     return <div className="pane-loading">Loading {tab.path}…</div>;
   }
@@ -169,13 +172,13 @@ function FileTab({ tab }: { tab: WorkspaceTab }): React.ReactElement {
   const { text, truncated } = body.value!;
   const lines = text === '' ? [] : text.split('\n');
   return (
-    <div className="file-view">
+    <div className="file-view" ref={code}>
       <div className="file-path">{tab.path}</div>
       <div className="code-scroll">
         <table className="code-table">
           <tbody>
             {lines.map((line, i) => (
-              <tr key={i}>
+              <tr key={i} data-line={i+1} className={i+1===tab.line?'file-line-target':undefined}>
                 <td className="code-no">{i + 1}</td>
                 <td className="code-line">{line}</td>
               </tr>
@@ -292,6 +295,7 @@ function TabBody({ tab }: { tab: WorkspaceTab }): React.ReactElement {
   useEffect(() => hydrateTab(tab), [tab.id]);
   switch (tab.kind) {
     case 'files':
+    case 'changes':
       return <FilesTab tab={tab} />;
     case 'file':
       return <FileTab tab={tab} />;
@@ -303,7 +307,7 @@ function TabBody({ tab }: { tab: WorkspaceTab }): React.ReactElement {
 export function Workspace(): React.ReactElement | null {
   const state = useStore();
   const tabButtons = useRef(new Map<string, HTMLButtonElement>());
-  if (state.tabs.length === 0) return null;
+  if (state.tabs.length === 0) return <WorkspaceOverview/>;
   const active = state.tabs.find((t) => t.id === state.activeTabId) ?? state.tabs[0];
   const focusTab = (id: string) => requestAnimationFrame(() => tabButtons.current.get(id)?.focus());
   const closeAndFocus = (id: string) => {

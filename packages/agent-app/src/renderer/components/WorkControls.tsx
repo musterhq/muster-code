@@ -3,6 +3,7 @@ import {Files,MoreHorizontal,PanelRight,Pin} from 'lucide-react';
 import {activeChat,openFilesTab,pickFolder,setResourcesHidden,updateChat} from '../store';
 import {useStore} from '../useStore';
 import './work-controls.css';
+import {WorkspaceOverview} from './WorkspaceOverview';
 
 /** Always reachable from the conversation, including with the resource pane hidden. */
 export function WorkControls(){
@@ -22,10 +23,11 @@ export function WorkControls(){
  const browse=()=>{close();if(folder)openFilesTab(folder.id,folder.name);else void pickFolder();};
  return <div className="work-controls" ref={root} onBlur={e=>{if(!e.currentTarget.contains(e.relatedTarget as Node))setOpen(false);}}>
   <button ref={trigger} className="icon-button" aria-label="Conversation actions" title="Conversation actions" aria-expanded={open} onClick={()=>setOpen(value=>!value)}><MoreHorizontal size={17}/></button>
-  <button className="icon-button" aria-label={state.tabs.length&&!state.resourcesHidden?'Hide resource pane':'Show resource pane'} title={state.tabs.length&&!state.resourcesHidden?'Hide resource pane':'Show resource pane'} aria-pressed={state.tabs.length>0&&!state.resourcesHidden} onClick={()=>{if(!state.tabs.length)browse();else setResourcesHidden(!state.resourcesHidden);}}><PanelRight size={16}/></button>
+  <button className="icon-button" aria-label={!state.resourcesHidden?'Hide resource pane':'Show resource pane'} title={!state.resourcesHidden?'Hide resource pane':'Show resource pane'} aria-pressed={!state.resourcesHidden} onClick={()=>{setResourcesHidden(!state.resourcesHidden);}}><PanelRight size={16}/></button>
   {open&&<div className="work-actions" role="group" aria-label="Conversation actions">
+   <WorkspaceOverview compact onNavigate={()=>close()}/>
    <button onClick={browse}><Files size={14}/>{folder?'Files and changes':'Open folder…'}</button>
-   {state.tabs.length>0&&<button onClick={()=>{setResourcesHidden(!state.resourcesHidden);close(true);}}><PanelRight size={14}/>{state.resourcesHidden?'Show resources':'Hide resources'}</button>}
+   {<button onClick={()=>{setResourcesHidden(!state.resourcesHidden);close(true);}}><PanelRight size={14}/>{state.resourcesHidden?'Show resources':'Hide resources'}</button>}
    {chat&&<button onClick={()=>{void updateChat(chat.id,{pinned:!chat.pinned});close(true);}}><Pin size={14}/>{chat.pinned?'Unpin chat':'Pin chat'}</button>}
   </div>}
  </div>;

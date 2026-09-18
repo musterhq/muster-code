@@ -95,7 +95,7 @@ export function App(): React.ReactElement {
           <ChatView />
         )}
       </main>
-      {state.screen === 'work' && state.tabs.length > 0 && (
+      {state.screen === 'work' && (
         <ResourcePane />
       )}
       {state.notices.length > 0 && (
