@@ -2,6 +2,7 @@ import React, {useEffect} from 'react';
 import {Files,FolderOpen,GitCompare,Activity,RefreshCw} from 'lucide-react';
 import {activeChat,loadGitChanges,openChangesTab,openFilesTab,pickFolder} from '../store';
 import {useStore} from '../useStore';
+import {ToolCard} from './ToolCard';
 import {classifyTool} from './toolPresentation';
 import './workspace-overview.css';
 
@@ -32,6 +33,6 @@ export function WorkspaceOverview({compact=false,onNavigate=()=>{}}:{compact?:bo
     {changes?.phase==='error'&&<p className="workspace-status" role="status">Changes unavailable. Open Changes for details or retry.</p>}
    </section>;
   })}
-  {compact&&current&&<section className="workspace-overview-section"><header>Latest activity</header><div className="workspace-activity" title={current.subject}><Activity size={15}/><span>{latestTool?.status==='running'?current.runningVerb:latestTool?.status==='failed'?'Failed':latestTool?.status==='completed'?current.verb:'Interrupted'} {current.subject}</span></div></section>}
+  {compact&&current&&<section className="workspace-overview-section"><header>Latest activity</header><ToolCard item={latestTool!}/></section>}
  </div>;
 }

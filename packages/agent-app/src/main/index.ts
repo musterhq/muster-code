@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, screen, session, shell } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, screen, session, shell, clipboard } from 'electron';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import type { AgentEvent, Commands, Snapshot } from '../shared/protocol.ts';
@@ -141,6 +141,11 @@ async function main(): Promise<void> {
     }
     if (!isCommandName(command)) {
       throw new Error('Unknown command.');
+    }
+    if(command === 'clipboard.write'){
+      const text=(input as {text?:unknown})?.text;
+      if(typeof text!=='string'||text.length>2097152)throw new Error('Copy exceeds the 2 MB limit.');
+      clipboard.writeText(text);return;
     }
     if(command === 'link.open'){
       const raw=(input as {url?:unknown})?.url;

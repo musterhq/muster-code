@@ -1,11 +1,13 @@
-import { Bot, Check, ChevronDown, ChevronRight, Copy, FileText, Pencil, ListChecks, Plug, Search, Terminal, Wrench } from 'lucide-react';
+import {copyText} from '../clipboard';
+import { Bot, Check, ChevronDown, ChevronRight, Copy, FileText, Pencil, ListChecks, Plug, Search, SquareTerminal, Wrench } from 'lucide-react';
 import React, { useEffect, useRef, useState } from 'react';
 import type { TimelineItem } from '../../shared/protocol';
 import { classifyTool, commandLabel, type ToolKind } from './toolPresentation';
 import './tool-card.css';
+import {Collapsible} from '@base-ui/react/collapsible';
 
 const ICONS: Record<ToolKind, React.ComponentType<{size?: number; 'aria-hidden'?: boolean | 'true'}>> = {
-  read: FileText, edit: Pencil, search: Search, list: ListChecks, command: Terminal, subagent: Bot, mcp: Plug, generic: Wrench,
+  read: FileText, edit: Pencil, search: Search, list: ListChecks, command: SquareTerminal, subagent: Bot, mcp: Plug, generic: Wrench,
 };
 export function ToolGlyph({kind,running=false}:{kind:ToolKind;running?:boolean}) { const Icon=ICONS[kind];return <span className={running?'tool-glyph is-active':'tool-glyph'} aria-hidden="true"><Icon size={14}/></span>; }
 
@@ -32,7 +34,7 @@ function useCopy(): [boolean, (text: string) => void] {
   const timer = useRef<number | undefined>(undefined);
   useEffect(() => () => clearTimeout(timer.current), []);
   const copy = (text: string) => {
-    void navigator.clipboard.writeText(text).then(() => {
+    void copyText(text).then(() => {
       setCopied(true);
       clearTimeout(timer.current);
       timer.current = window.setTimeout(() => setCopied(false), 1500);
@@ -56,18 +58,18 @@ export function ToolCard({item}: {item: TimelineItem}) {
 
   const subject=p.kind==='command'?commandLabel(raw):(p.kind==='read'||p.kind==='edit')?p.subject.split(', ').map(path=>path.split('/').filter(Boolean).at(-1)||path).join(', '):p.subject;
   const duration=typeof item.data?.durationMs==='number'&&item.status!=='running'?item.data.durationMs:null;
-  return <div className={`tool-row-card kind-${p.kind}${running ? ' is-running' : ''}${failed ? ' is-failed' : ''}`}>
-    <button className="tool-row-head" aria-expanded={open} aria-controls={open?bodyId:undefined} onClick={()=>setOpen(v=>!v)}>
+  return <Collapsible.Root open={open} onOpenChange={setOpen} className={`tool-row-card kind-${p.kind}${running ? ' is-running' : ''}${failed ? ' is-failed' : ''}`}>
+    <Collapsible.Trigger className="tool-row-head">
       <ToolGlyph kind={p.kind} running={running}/>
       <span className="tool-row-state">{state}</span>
       {subject ? <span className="tool-row-subject" title={p.subject}>{subject}</span> : <span className="tool-row-subject" />}
       {duration!=null&&duration>=1000&&<span className="tool-row-duration">in {Math.round(duration/1000)}s</span>}
-      {open ? <ChevronDown size={12}/> : <ChevronRight size={12}/>}
-    </button>
-    {open ? <div className="tool-row-body" id={bodyId}>
+      <ChevronRight className="tool-chevron" size={12}/>
+    </Collapsible.Trigger>
+    <Collapsible.Panel className="activity-disclosure"><div className="tool-row-body" id={bodyId}>
       {p.subject ? <div className="tool-row-source"><code>{p.subject}</code><button className="icon-button" aria-label={copied ? 'Copied' : p.kind==='command'?'Copy command':'Copy'} onClick={()=>copy(p.subject)}>{copied ? <Check size={13}/> : <Copy size={13}/>}</button></div> : null}
       {(output||p.kind==='command')&&<pre className="tool-output">{output || (running ? 'Waiting for output…' : 'No output')}</pre>}
       <Metadata item={item}/>
-    </div> : null}
-  </div>;
+    </div></Collapsible.Panel>
+  </Collapsible.Root>;
 }

@@ -10,6 +10,7 @@ export interface ChangedFile { path: string; previousPath?: string; status: stri
 export interface ProviderInfo { id: string; name: string; available: boolean; identityMasked: string; models: { id: string; name: string }[]; error?: string; status?: 'ready' | 'configured' | 'installed' | 'not-detected' | 'error'; source?: string; detail?: string; canReveal?: boolean; custom?: boolean; endpoint?: string; apiKeyEnv?: string; checkedAt?: string }
 export type AgentEvent = {type:'workspaceChanged';folderId:string} | {type:'chatSelected'; chatId:string} | { type: 'snapshot'; snapshot: Snapshot } | { type: 'timeline'; chatId: string; items: TimelineItem[] } | { type: 'notice'; message: string };
 export interface Commands {
+ 'clipboard.write': {input:{text:string};output:void};
  'link.open': {input:{url:string};output:void};
  'app.snapshot': { input: undefined; output: Snapshot };
  'folder.add': { input: {path: string}; output: Folder };

@@ -26,3 +26,17 @@
 .tool-row-head:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .tool-row-head > svg:last-child { flex: none; opacity: .5; }
 .tool-row-head:hover > svg:last-child, .tool-row-head:focus-visible > svg:last-child { opacity: 1; }
+
+/* T3's Base UI disclosure contract: measured height, not guessed max-height.
+   Panels unmount after closing; no hidden output trees or JS animation loop. */
+.activity-disclosure { height:var(--collapsible-panel-height); overflow:hidden; }
+.activity-disclosure[data-starting-style], .activity-disclosure[data-ending-style] { height:0; }
+.activity-disclosure[data-open][data-ending-style] { height:var(--collapsible-panel-height); }
+.tool-chevron { transition:transform 180ms cubic-bezier(.2,.8,.2,1); }
+[aria-expanded='true'] > .tool-chevron { transform:rotate(90deg); }
+.tool-glyph { width:16px; height:16px; justify-content:center; color:var(--text-dim); }
+.tool-glyph svg { display:block; stroke-width:1.6; }
+@media (prefers-reduced-motion:no-preference) {
+ .activity-disclosure { transition:height 200ms cubic-bezier(.2,.8,.2,1); }
+}
+@media (prefers-reduced-motion:reduce) { .tool-chevron { transition:none; } }

@@ -1,3 +1,4 @@
+import {copyText} from '../clipboard';
 import { Check, Copy, X } from 'lucide-react';
 import React, { useEffect, useRef, useState } from 'react';
 import ReactMarkdown, { type Components } from 'react-markdown';
@@ -37,7 +38,7 @@ export function CopyButton({
   );
 
   const onClick = () => {
-    navigator.clipboard.writeText(getText()).then(
+    copyText(getText()).then(
       () => setState('copied'),
       () => setState('error'),
     );
