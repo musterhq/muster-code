@@ -1,6 +1,7 @@
 import {
   Archive,
   ArchiveRestore,
+  ChevronRight,
   FolderOpen,
   FolderPlus,
   Layers,
@@ -12,6 +13,7 @@ import {
   Search,
   Settings2,
 } from 'lucide-react';
+import {Collapsible} from '@base-ui/react/collapsible';
 import React, { useEffect, useRef, useState } from 'react';
 import type { Chat, Folder } from '../../shared/protocol';
 import {
@@ -25,7 +27,9 @@ import {
 } from '../store';
 import { useStore } from '../useStore';
 import { focusComposer, isChord, restoreFocus } from '../focus';
+import { readCollapsed, saveCollapsed } from '../sidebarDisclosure';
 import { StatusDot } from './StatusDot';
+import './sidebar-disclosure.css';
 
 function chatOrder(a: Chat, b: Chat): number {
   if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
@@ -107,36 +111,54 @@ function ChatRow({ chat }: { chat: Chat }): React.ReactElement {
   );
 }
 
-function FolderSection({ folder, chats }: { folder: Folder; chats: Chat[] }): React.ReactElement {
+function GroupHead({ title, tooltip, children }: {
+  title: string;
+  tooltip?: string;
+  children?: React.ReactNode;
+}): React.ReactElement {
   return (
-    <section className="nav-section">
-      <header className="nav-section-head">
-        <span className="nav-section-title" title={folder.path}>
-          {folder.name}
+    <header className="nav-section-head">
+      <Collapsible.Trigger className="nav-disclosure">
+        <ChevronRight size={13} className="nav-chevron"/>
+        <span className="nav-section-title" title={tooltip ?? title}>
+          {title}
         </span>
-        <span className="nav-section-actions">
-          <button
-            type="button"
-            className="icon-button"
-            aria-label={`Browse files in ${folder.name}`}
-            onClick={() => openFilesTab(folder.id, folder.name)}
-          >
-            <FolderOpen size={13} />
-          </button>
-          <button
-            type="button"
-            className="icon-button"
-            aria-label={`New chat in ${folder.name}`}
-            onClick={() => void createChat(folder.id)}
-          >
-            <MessageSquarePlus size={13} />
-          </button>
-        </span>
-      </header>
-      {chats.map((chat) => (
+      </Collapsible.Trigger>
+      {children && <span className="nav-section-actions">{children}</span>}
+    </header>
+  );
+}
+
+function FolderSection({ folder, chats, open, onToggle }: {
+  folder: Folder;
+  chats: Chat[];
+  open: boolean;
+  onToggle: (id: string) => void;
+}): React.ReactElement {
+  return (
+    <Collapsible.Root className="nav-section" open={open} onOpenChange={()=>onToggle(`folder:${folder.id}`)}>
+      <GroupHead title={folder.name} tooltip={folder.path}>
+        <button
+          type="button"
+          className="icon-button"
+          aria-label={`Browse files in ${folder.name}`}
+          onClick={() => openFilesTab(folder.id, folder.name)}
+        >
+          <FolderOpen size={13} />
+        </button>
+        <button
+          type="button"
+          className="icon-button"
+          aria-label={`New chat in ${folder.name}`}
+          onClick={() => void createChat(folder.id)}
+        >
+          <MessageSquarePlus size={13} />
+        </button>
+      </GroupHead>
+      <Collapsible.Panel className="nav-group-panel">{chats.map((chat) => (
         <ChatRow key={chat.id} chat={chat} />
-      ))}
-    </section>
+      ))}</Collapsible.Panel>
+    </Collapsible.Root>
   );
 }
 
@@ -147,6 +169,7 @@ export function Sidebar(): React.ReactElement {
   const [query, setQuery] = useState('');
   const searchButton = useRef<HTMLButtonElement>(null);
   const searchInput = useRef<HTMLInputElement>(null);
+  const [collapsed, setCollapsed] = useState(() => readCollapsed(localStorage));
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -168,6 +191,15 @@ export function Sidebar(): React.ReactElement {
     setSearching(false);
     if (restore) restoreFocus(searchButton.current);
   };
+  const toggleGroup = (id: string) => {
+    setCollapsed((prev) => {
+      const next = new Set(prev);
+      if (!next.delete(id)) next.add(id);
+      saveCollapsed(localStorage, next);
+      return next;
+    });
+  };
+  const isOpen = (id: string) => (searching && query.trim() !== '') || !collapsed.has(id);
   const snapshot = state.snapshot;
 
   if (!snapshot) {
@@ -176,8 +208,10 @@ export function Sidebar(): React.ReactElement {
 
   const matches = (c: Chat) => !query.trim() || c.title.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase());
   const live = snapshot.chats.filter((c) => !c.archived && matches(c)).sort(chatOrder);
-  const archived = snapshot.chats.filter((c) => c.archived).sort(chatOrder);
-  const orphanChats = live.filter(
+  const archived = snapshot.chats.filter((c) => c.archived && matches(c)).sort(chatOrder);
+  const pinned = live.filter((c) => c.pinned);
+  const unpinned = live.filter((c) => !c.pinned);
+  const orphanChats = unpinned.filter(
     (c) => !c.folderId || !snapshot.folders.some((f) => f.id === c.folderId),
   );
 
@@ -204,14 +238,20 @@ export function Sidebar(): React.ReactElement {
         </button>
       </div>
       <div className="nav-scroll">
+        {pinned.length > 0 && (
+          <Collapsible.Root className="nav-section" open={isOpen('pinned')} onOpenChange={()=>toggleGroup('pinned')}>
+            <GroupHead title="Pinned" />
+            <Collapsible.Panel className="nav-group-panel">{pinned.map((chat) => (
+              <ChatRow key={chat.id} chat={chat} />
+            ))}</Collapsible.Panel>
+          </Collapsible.Root>
+        )}
         {snapshot.projects.map((project) => {
-          const chats = live.filter((c) => c.projectId === project.id);
+          const chats = unpinned.filter((c) => c.projectId === project.id);
+          const gid = `project:${project.id}`;
           return (
-            <section className="nav-section" key={project.id}>
-              <header className="nav-section-head">
-                <span className="nav-section-title nav-project" title={project.goal}>
-                  {project.name}
-                </span>
+            <Collapsible.Root className="nav-section" key={project.id} open={isOpen(gid)} onOpenChange={()=>toggleGroup(gid)}>
+              <GroupHead title={project.name} tooltip={project.goal}>
                 <button
                   type="button"
                   className="icon-button"
@@ -222,31 +262,31 @@ export function Sidebar(): React.ReactElement {
                 >
                   <MessageSquarePlus size={13} />
                 </button>
-              </header>
-              {chats.map((chat) => (
+              </GroupHead>
+              <Collapsible.Panel className="nav-group-panel">{chats.map((chat) => (
                 <ChatRow key={chat.id} chat={chat} />
-              ))}
-            </section>
+              ))}</Collapsible.Panel>
+            </Collapsible.Root>
           );
         })}
         {snapshot.folders.map((folder) => (
           <FolderSection
             key={folder.id}
             folder={folder}
-            chats={live.filter((c) => c.folderId === folder.id && !c.projectId)}
+            chats={unpinned.filter((c) => c.folderId === folder.id && !c.projectId)}
+            open={isOpen(`folder:${folder.id}`)}
+            onToggle={toggleGroup}
           />
         ))}
         {orphanChats.filter((c) => !c.projectId).length > 0 && (
-          <section className="nav-section">
-            <header className="nav-section-head">
-              <span className="nav-section-title">Chats</span>
-            </header>
-            {orphanChats
+          <Collapsible.Root className="nav-section" open={isOpen('chats')} onOpenChange={()=>toggleGroup('chats')}>
+            <GroupHead title="Chats" />
+            <Collapsible.Panel className="nav-group-panel">{orphanChats
               .filter((c) => !c.projectId)
               .map((chat) => (
                 <ChatRow key={chat.id} chat={chat} />
-              ))}
-          </section>
+              ))}</Collapsible.Panel>
+          </Collapsible.Root>
         )}
         {snapshot.folders.length === 0 && live.length === 0 && (
           <div className="nav-empty">
@@ -255,19 +295,10 @@ export function Sidebar(): React.ReactElement {
           </div>
         )}
         {archived.length > 0 && (
-          <section className="nav-section">
-            <header className="nav-section-head">
-              <button
-                type="button"
-                className="nav-section-title nav-archived-toggle"
-                aria-expanded={showArchived}
-                onClick={() => setShowArchived((v) => !v)}
-              >
-                Archived ({archived.length})
-              </button>
-            </header>
-            {showArchived && archived.map((chat) => <ChatRow key={chat.id} chat={chat} />)}
-          </section>
+          <Collapsible.Root className="nav-section" open={showArchived} onOpenChange={setShowArchived}>
+            <header className="nav-section-head"><Collapsible.Trigger className="nav-disclosure"><ChevronRight size={13} className="nav-chevron"/><span className="nav-section-title">Archived ({archived.length})</span></Collapsible.Trigger></header>
+            <Collapsible.Panel className="nav-group-panel">{archived.map((chat) => <ChatRow key={chat.id} chat={chat} />)}</Collapsible.Panel>
+          </Collapsible.Root>
         )}
       </div>
       <footer className="nav-footer">

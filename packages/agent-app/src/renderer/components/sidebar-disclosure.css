@@ -1,0 +1,34 @@
+/* Sidebar disclosure ------------------------------------------------------ */
+
+.nav-disclosure {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  border-radius: 4px;
+  text-align: left;
+}
+.nav-disclosure:hover .nav-section-title,
+.nav-disclosure:focus-visible .nav-section-title { color: var(--text-dim); }
+.nav-disclosure:focus-visible { outline: 1px solid var(--hairline); }
+.nav-disclosure > svg { flex-shrink: 0; color: var(--text-faint); }
+
+.nav-disclosure .nav-section-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nav-section-head .nav-section-actions { visibility: hidden; }
+.nav-section-head:hover .nav-section-actions,
+.nav-section-head:focus-within .nav-section-actions { visibility: visible; }
+
+.nav-chevron { transition:transform 180ms ease; }
+.nav-disclosure[aria-expanded="true"] .nav-chevron { transform:rotate(90deg); }
+.nav-group-panel { height:var(--collapsible-panel-height); overflow:hidden; transition:height 180ms cubic-bezier(.2,.8,.2,1),opacity 180ms ease; }
+.nav-group-panel[data-starting-style], .nav-group-panel[data-ending-style] { height:0; opacity:0; }
+@media (prefers-reduced-motion:reduce) { .nav-chevron,.nav-group-panel { transition:none; } }
