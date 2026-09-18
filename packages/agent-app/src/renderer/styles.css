@@ -752,3 +752,5 @@ textarea:focus-visible {
 .resource-maximize { position: absolute; top: 10px; right: 7px; background: var(--bg); z-index: 2; }
 .workspace-tabs { padding-right: 36px; }
 .app:has(.workspace[data-maximized='true']) > .center { display: none; }
+.resource-compact-open { position: absolute; top: 10px; right: 12px; z-index: 3; background: var(--bg); -webkit-app-region: no-drag; }
+.app:has(.resource-compact-open) .chat-head { padding-right: 48px; }

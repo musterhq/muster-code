@@ -10,7 +10,7 @@ function initialWidth() {
 }
 
 export function ResourcePane() {
-  const {navWidth} = useStore();
+  const {navWidth, tabs} = useStore();
   const [width, setWidth] = useState(initialWidth);
   const [maximized, setMaximized] = useState(false);
   const [viewport, setViewport] = useState(window.innerWidth);
@@ -20,6 +20,13 @@ export function ResourcePane() {
   const maxWidth = Math.max(280, viewport-navWidth-360);
   const effectiveWidth = Math.min(maxWidth, Math.max(280,width));
   const persist = () => {try{localStorage.setItem(KEY,String(latest.current));}catch{}};
+  // Preserve a readable conversation at the native window's minimum size.
+  // Resource references stay in the store while their surface is collapsed.
+  if (viewport - navWidth < 640 && !maximized) {
+    return <button className="icon-button resource-compact-open" aria-label={`Open resources (${tabs.length})`} onClick={()=>setMaximized(true)}>
+      <Maximize2 size={14}/>
+    </button>;
+  }
   return <aside className="workspace" aria-label="Resources" data-maximized={maximized}
     style={{width:maximized ? `calc(100% - ${navWidth}px)` : effectiveWidth,minWidth:280,maxWidth:'none',position:'relative'}}>
     {!maximized && <div className="resource-separator" role="separator" aria-label="Resize resources" aria-orientation="vertical" aria-valuemin={280} aria-valuemax={maxWidth} aria-valuenow={effectiveWidth} tabIndex={0}
