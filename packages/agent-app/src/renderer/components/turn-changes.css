@@ -1,0 +1,9 @@
+.turn-changes { position:relative; flex:none; width:min(calc(100% - 64px),740px); margin:0 auto 8px; display:flex; justify-content:flex-end; }
+.changes-pill { display:flex; align-items:center; gap:6px; padding:6px 10px; border:1px solid var(--hairline); border-radius:16px; background:var(--bg-raised); color:var(--text-dim); font-size:12px; }
+.changes-pill:hover { background:var(--bg-hover); }
+.turn-change-list { position:absolute; bottom:35px; right:0; width:min(340px,100%); padding:6px; z-index:4; border:1px solid var(--hairline); border-radius:10px; background:var(--bg-raised); box-shadow:0 8px 24px #0005; }
+.turn-change-heading { padding:5px 8px 8px; font-size:11px; color:var(--text-faint); }
+.turn-change-list button { display:flex; gap:8px; width:100%; padding:8px; border-radius:5px; font-size:12px; text-align:left; }
+.turn-change-list button:hover { background:var(--bg-hover); }
+.turn-change-list button>span:first-child { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; }
+.change-adds { color:#80b88d; }.change-dels { color:#d78787; }

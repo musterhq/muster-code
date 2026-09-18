@@ -18,6 +18,9 @@ import {
   updateChat,
 } from '../store';
 import { useStore } from '../useStore';
+import {captureAnchor,isAtBottom,recallPosition,rememberPosition,resolveAnchorIndex} from './chatContinuity';
+import './chat-continuity.css';
+import {TurnChanges} from './TurnChanges';
 import { StatusDot } from './StatusDot';
 import { ToolCard } from './ToolCard';
 import { ActivityGroup } from './ActivityGroup';
@@ -113,10 +116,15 @@ function TimelineCard({ item }: { item: TranscriptEntry }): React.ReactElement {
   }
 }
 
-function Timeline({ items }: { items: TimelineItem[] }): React.ReactElement {
+function Timeline({ items, chatId }: { items: TimelineItem[]; chatId:string }): React.ReactElement {
   const rows=useMemo(()=>groupActivity(items),[items]);
   const scrollRef = useRef<HTMLDivElement>(null);
-  const atBottom = useRef(true);
+  const saved=useRef(recallPosition(chatId));
+  const atBottom = useRef(!saved.current);
+  const restoring=useRef(Boolean(saved.current));
+  const [away,setAway]=useState(Boolean(saved.current));
+  const [unread,setUnread]=useState(false);
+  const lastItems=useRef(items);
   const virtualizer = useVirtualizer({
     count: rows.length,
     getScrollElement: () => scrollRef.current,
@@ -124,13 +132,34 @@ function Timeline({ items }: { items: TimelineItem[] }): React.ReactElement {
     overscan: 8,
     getItemKey: (index) => rows[index].id,
   });
+  virtualizer.shouldAdjustScrollPositionOnItemSizeChange=(item,_delta,instance)=>!atBottom.current&&item.start<(instance.scrollOffset??0);
   const totalSize = virtualizer.getTotalSize();
+  const jumpToLatest=()=>{restoring.current=false;atBottom.current=true;setAway(false);setUnread(false);rememberPosition(chatId,null);virtualizer.scrollToIndex(rows.length-1,{align:'end'});};
+  useLayoutEffect(()=>{
+    const anchor=saved.current;
+    if(!anchor)return;
+    const index=resolveAnchorIndex(anchor,rows);
+    if(index<0){restoring.current=false;atBottom.current=true;setAway(false);saved.current=null;return;}
+    virtualizer.scrollToIndex(index,{align:'start'});
+    const frame=requestAnimationFrame(()=>{
+      const offset=virtualizer.getOffsetForIndex(index,'start')?.[0];
+      if(offset!=null)virtualizer.scrollToOffset(Math.max(0,offset+anchor.offset));
+      restoring.current=false;
+    });
+    saved.current=null;
+    return()=>cancelAnimationFrame(frame);
+  },[chatId,virtualizer]);
+  useEffect(()=>{if(items!==lastItems.current&&!atBottom.current)setUnread(true);lastItems.current=items;},[items]);
 
   const onScroll = useCallback(() => {
     const el = scrollRef.current;
     if (!el) return;
-    atBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 48;
-  }, []);
+    if(restoring.current)return;
+    atBottom.current = isAtBottom(el.scrollTop,el.scrollHeight,el.clientHeight);
+    setAway(!atBottom.current);
+    if(atBottom.current)setUnread(false);
+    rememberPosition(chatId,atBottom.current?null:captureAnchor(virtualizer.getVirtualItems(),el.scrollTop));
+  }, [chatId,virtualizer]);
 
   // Follow the tail only while the reader is at the bottom; a reader scrolled
   // up keeps their anchor as new items stream in.
@@ -141,6 +170,7 @@ function Timeline({ items }: { items: TimelineItem[] }): React.ReactElement {
   }, [rows.length, totalSize, virtualizer]);
 
   return (
+    <div className="timeline-shell">
     <div className="timeline" ref={scrollRef} onScroll={onScroll}>
       <div
         className="timeline-inner"
@@ -150,6 +180,7 @@ function Timeline({ items }: { items: TimelineItem[] }): React.ReactElement {
           <div
             key={v.key}
             data-index={v.index}
+            data-item-id={rows[v.index].id}
             ref={virtualizer.measureElement}
             className="timeline-row"
             style={{ transform: `translateY(${v.start}px)` }}
@@ -158,6 +189,8 @@ function Timeline({ items }: { items: TimelineItem[] }): React.ReactElement {
           </div>
         ))}
       </div>
+    </div>
+    {away&&<button className="jump-latest" onClick={jumpToLatest} aria-label={unread?'New activity — jump to latest':'Jump to latest'}><ArrowUp size={14} style={{transform:'rotate(180deg)'}}/>{unread&&<span>New activity</span>}</button>}
     </div>
   );
 }
@@ -324,8 +357,9 @@ export function ChatView(): React.ReactElement {
           <p>No messages yet. Say what you want done in {folder?.name ?? 'this workspace'}.</p>
         </div>
       ) : (
-        <Timeline key={`timeline:${chat.id}`} items={timeline.value ?? []} />
+        <Timeline key={`timeline:${chat.id}`} items={timeline.value ?? []} chatId={chat.id} />
       )}
+      <TurnChanges key={`changes:${chat.id}`} chat={chat} items={timeline.value??[]}/>
       <Composer key={`composer:${chat.id}`} chat={chat} />
       <footer className="chat-context"><Monitor size={12}/><span>This Mac</span>{folder && <span title={folder.path}>{folder.name}</span>}</footer>
     </div>
