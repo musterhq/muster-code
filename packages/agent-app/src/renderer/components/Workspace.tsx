@@ -6,7 +6,7 @@ import {
   RefreshCw,
   X,
 } from 'lucide-react';
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { buildDiffRows, diffStats, foldContext, type DiffRow } from '../diffModel';
 import {
   activateTab,
@@ -302,11 +302,29 @@ function TabBody({ tab }: { tab: WorkspaceTab }): React.ReactElement {
 
 export function Workspace(): React.ReactElement | null {
   const state = useStore();
+  const tabButtons = useRef(new Map<string, HTMLButtonElement>());
   if (state.tabs.length === 0) return null;
   const active = state.tabs.find((t) => t.id === state.activeTabId) ?? state.tabs[0];
+  const focusTab = (id: string) => requestAnimationFrame(() => tabButtons.current.get(id)?.focus());
+  const closeAndFocus = (id: string) => {
+    const index = state.tabs.findIndex(t => t.id === id);
+    const remaining = state.tabs.filter(t => t.id !== id);
+    closeTab(id);
+    const next = id === active.id ? remaining[Math.min(index, remaining.length - 1)] : active;
+    if (next) focusTab(next.id);
+  };
+  const navigate = (event: React.KeyboardEvent, id: string) => {
+    if (event.altKey || event.ctrlKey || event.metaKey) return;
+    const index = state.tabs.findIndex(t => t.id === id);
+    const target = event.key === 'ArrowRight' ? (index + 1) % state.tabs.length
+      : event.key === 'ArrowLeft' ? (index + state.tabs.length - 1) % state.tabs.length
+      : event.key === 'Home' ? 0 : event.key === 'End' ? state.tabs.length - 1 : -1;
+    if (target >= 0) { event.preventDefault(); const next = state.tabs[target]; activateTab(next.id); focusTab(next.id); }
+    else if (event.key === 'Delete') { event.preventDefault(); closeAndFocus(id); }
+  };
   return (
     <>
-      <div className="workspace-tabs" role="tablist">
+      <div className="workspace-tabs" role="tablist" aria-label="Open resources">
         {state.tabs.map((tab) => (
           <div
             key={tab.id}
@@ -315,11 +333,16 @@ export function Workspace(): React.ReactElement | null {
             <button
               type="button"
               role="tab"
+              id={`resource-tab-${tab.id}`}
+              aria-controls="active-resource-panel"
+              tabIndex={tab.id === active.id ? 0 : -1}
+              ref={el=>{ if (el) tabButtons.current.set(tab.id,el); else tabButtons.current.delete(tab.id); }}
+              onKeyDown={e=>navigate(e,tab.id)}
               aria-selected={tab.id === active.id}
               className="workspace-tab-label"
               title={tab.title}
               onClick={() => activateTab(tab.id)}
-              onAuxClick={e=>{if(e.button===1){e.preventDefault();closeTab(tab.id);}}}
+              onAuxClick={e=>{if(e.button===1){e.preventDefault();closeAndFocus(tab.id);}}}
             >
               {tab.title}
             </button>
@@ -327,14 +350,14 @@ export function Workspace(): React.ReactElement | null {
               type="button"
               className="icon-button workspace-tab-close"
               aria-label={`Close ${tab.title}`}
-              onClick={() => closeTab(tab.id)}
+              onClick={() => closeAndFocus(tab.id)}
             >
               <X size={12} />
             </button>
           </div>
         ))}
       </div>
-      <div className="workspace-body" role="tabpanel">
+      <div className="workspace-body" role="tabpanel" id="active-resource-panel" aria-labelledby={`resource-tab-${active.id}`}>
         <TabBody key={active.id} tab={active} />
       </div>
     </>

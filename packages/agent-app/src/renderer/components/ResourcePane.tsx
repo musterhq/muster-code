@@ -21,10 +21,10 @@ export function ResourcePane() {
   const effectiveWidth = Math.min(maxWidth, Math.max(280,width));
   const persist = () => {try{localStorage.setItem(KEY,String(latest.current));}catch{}};
   return <aside className="workspace" aria-label="Resources" data-maximized={maximized}
-    style={{width:maximized ? `calc(100% - ${navWidth}px)` : effectiveWidth,maxWidth:'none',position:'relative'}}>
+    style={{width:maximized ? `calc(100% - ${navWidth}px)` : effectiveWidth,minWidth:280,maxWidth:'none',position:'relative'}}>
     {!maximized && <div className="resource-separator" role="separator" aria-label="Resize resources" aria-orientation="vertical" aria-valuemin={280} aria-valuemax={maxWidth} aria-valuenow={effectiveWidth} tabIndex={0}
       onPointerDown={e=>{drag.current={x:e.clientX,width:effectiveWidth};e.currentTarget.setPointerCapture(e.pointerId);}}
-      onPointerMove={e=>{if(drag.current)setWidth(Math.min(maxWidth,Math.max(280,drag.current.width+drag.current.x-e.clientX)));}}
+      onPointerMove={e=>{if(drag.current){const value=Math.min(maxWidth,Math.max(280,drag.current.width+drag.current.x-e.clientX));latest.current=value;setWidth(value);}}}
       onPointerUp={e=>{drag.current=null;if(e.currentTarget.hasPointerCapture(e.pointerId))e.currentTarget.releasePointerCapture(e.pointerId);persist();}}
       onPointerCancel={()=>{drag.current=null;}}
       onDoubleClick={()=>{const value=Math.round(viewport/3);latest.current=value;setWidth(value);persist();}}

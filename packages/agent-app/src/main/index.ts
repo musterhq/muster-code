@@ -93,11 +93,22 @@ async function main(): Promise<void> {
       nodeIntegration: false,
       preload: path.join(__dirname, '../preload/index.cjs'),
       spellcheck: false,
+      // A visible Agent window must paint streaming text and resize changes
+      // even while another app has keyboard focus. Hidden windows are throttled below.
+      backgroundThrottling: false,
     },
   });
   if (geometry.maximized) window.maximize();
   window.once('ready-to-show', () => window?.show());
+  const syncPainting = () => {
+    if (!window || window.isDestroyed()) return;
+    window.webContents.setBackgroundThrottling(!window.isVisible() || window.isMinimized());
+  };
+  window.on('hide', syncPainting);
+  window.on('minimize', syncPainting);
+  window.on('restore', syncPainting);
   window.on('show', () => {
+    syncPainting();
     if (!service) return;
     void service.invoke('app.snapshot', undefined).then(async (snapshot) => {
       onEvent({ type: 'snapshot', snapshot });
