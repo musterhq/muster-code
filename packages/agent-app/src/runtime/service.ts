@@ -1,0 +1,168 @@
+import { createHash } from 'node:crypto';
+import { promises as fs } from 'node:fs';
+import { basename, join } from 'node:path';
+import type { AgentEvent, Chat, Commands, TimelineItem } from '../shared/protocol.ts';
+import { AgentStore } from './store.ts';
+import { listFiles, readFile } from './files.ts';
+import { AgentModeReviewHost } from './review.ts';
+import { createProviderAdapter, MODEL, type ProviderAdapter } from './provider.ts';
+
+function object(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Invalid command input.');
+  return value as Record<string, unknown>;
+}
+function text(value: unknown, field: string, max = 4096): string {
+  if (typeof value !== 'string' || value.includes('\0') || value.length > max) throw new Error(`Invalid ${field}.`);
+  return value;
+}
+function id(value: unknown): string {
+  const result = text(value, 'id', 128);
+  if (!/^[a-zA-Z0-9_-]+$/.test(result)) throw new Error('Invalid id.');
+  return result;
+}
+function detail(value: unknown): string {
+  if (typeof value === 'string') return value.slice(0, 65536);
+  try { return JSON.stringify(value ?? {}).slice(0, 65536); } catch { return 'Details unavailable'; }
+}
+interface ActiveRun { cwd: string; stopped: boolean; promise?: Promise<void> }
+interface PendingApproval { chatId: string; resolve(approved: boolean): void; timer: ReturnType<typeof setTimeout> }
+
+export function createAgentService(options: { dataDir: string; onEvent(event: AgentEvent): void; provider?: ProviderAdapter }) {
+  const store = new AgentStore(options.dataDir);
+  const provider = options.provider ?? createProviderAdapter();
+  const runs = new Map<string, ActiveRun>();
+  const approvals = new Map<string, PendingApproval>();
+  const timers = new Map<string, ReturnType<typeof setTimeout>>();
+  let disposed = false;
+  store.recoverOrphanedRuns();
+  const emit = (event: AgentEvent) => { if (!disposed) options.onEvent(event); };
+  const state = () => emit({ type: 'snapshot', snapshot: store.snapshot() });
+  const timeline = (chatId: string) => emit({ type: 'timeline', chatId, items: store.timeline(chatId) });
+  const scheduleTimeline = (chatId: string) => {
+    if (!timers.has(chatId)) timers.set(chatId, setTimeout(() => { timers.delete(chatId); if (!disposed) timeline(chatId); }, 33));
+  };
+  const chatFor = (chatId: string): Chat => { const chat = store.chat(chatId); if (!chat) throw new Error('Chat does not exist.'); return chat; };
+  const folderFor = (folderId: unknown) => { const folder = store.folder(id(folderId)); if (!folder) throw new Error('Folder does not exist.'); return folder; };
+  function settleApprovals(chatId: string) {
+    for (const [approvalId, pending] of approvals) if (pending.chatId === chatId) {
+      clearTimeout(pending.timer); approvals.delete(approvalId); pending.resolve(false);
+    }
+  }
+  async function send(chatId: string, prompt: string, requestId: string) {
+    const chat = chatFor(chatId);
+    const receipt = store.receipt(requestId);
+    if (receipt) { if (receipt.chatId !== chatId || receipt.fingerprint !== createHash('sha256').update(prompt).digest('hex')) throw new Error('Request identity conflicts with its original message.'); return {runId: receipt.runId}; }
+    if (!prompt.trim()) throw new Error('Write a message first.');
+    if (chat.archived) throw new Error('Restore this chat before sending.');
+    if (!provider.info().some(p => p.available)) throw new Error('Hybrow provider is unavailable. Your draft is retained.');
+    const folder = chat.folderId ? folderFor(chat.folderId) : undefined;
+    const cwd = folder?.path ?? join(options.dataDir, 'scratch', chatId);
+    if (folder) { if (!(await fs.stat(cwd)).isDirectory()) throw new Error('Selected folder is unavailable.'); }
+    else await fs.mkdir(cwd, {recursive: true, mode: 0o700});
+    if ([...runs.values()].some(run => run.cwd === cwd)) throw new Error('Another chat is working in this folder. Wait or choose a separate folder.');
+    const accepted = store.recordSend(chatId, requestId, prompt);
+    if (accepted.replay) return {runId: accepted.runId};
+    const run: ActiveRun = {cwd, stopped: false}; runs.set(chatId, run); state(); timeline(chatId);
+    let segment: TimelineItem | undefined;
+    let producedAssistant = false;
+    const toolIds = new Map<string, string>();
+    const append = (kind: 'assistant' | 'reasoning', delta: string) => {
+      if (disposed || !runs.has(chatId) || !delta) return;
+      if (kind === 'assistant') producedAssistant = true;
+      if (!segment || segment.kind !== kind) segment = store.appendItem(chatId, kind, '', 'running');
+      segment = {...segment, text: segment.text + delta}; store.updateItem(segment.id, segment.text, 'running'); scheduleTimeline(chatId);
+    };
+    const seal = () => { if (segment) store.updateItem(segment.id, segment.text, 'completed'); segment = undefined; };
+    run.promise = (async () => {
+      try {
+        const result = await provider.run({ chat, cwd, prompt, onDelta: delta => append('assistant', delta), onReasoning: delta => append('reasoning', delta),
+          onEvent(method, params) {
+            if (disposed) return;
+            const item = params.item && typeof params.item === 'object' ? params.item as Record<string, unknown> : params;
+            const type = String(item.type ?? '');
+            if (type === 'agentMessage' || type === 'reasoning' || type === 'userMessage' || !method.startsWith('item/')) return;
+            const itemId = String(item.id ?? params.itemId ?? '');
+            if (!itemId) return;
+            if (method === 'item/started' || method === 'item/completed') {
+              seal();
+              const label = detail(item.command ?? item.title ?? item.name ?? item.type);
+              const output = detail(item.aggregatedOutput ?? item.output ?? '');
+              const body = label + (output ? '\n' + output : '');
+              let local = toolIds.get(itemId);
+              if (!local) { local = store.appendItem(chatId, 'tool', body, method.endsWith('completed') ? 'completed' : 'running', {providerItemId: itemId, type, name: label}).id; toolIds.set(itemId, local); }
+              else store.updateItem(local, body, method.endsWith('completed') ? 'completed' : 'running');
+              scheduleTimeline(chatId);
+            } else if (method.endsWith('/outputDelta')) {
+              const local = toolIds.get(itemId); const previous = local ? store.item(local) : undefined;
+              if (previous) { store.updateItem(previous.id, (previous.text + String(params.delta ?? '')).slice(-131072), 'running'); scheduleTimeline(chatId); }
+            }
+          },
+          async onRequest(method, params) {
+            seal();
+            if (chat.mode !== 'agent' || !['item/commandExecution/requestApproval', 'item/fileChange/requestApproval'].includes(method)) return undefined;
+            const item = store.appendItem(chatId, 'approval', detail(params.command ?? params.reason ?? params.changes), 'pending', {method});
+            const approvalId = item.id;
+            timeline(chatId);
+            const approved = await new Promise<boolean>(resolve => {
+              const timer = setTimeout(() => { approvals.delete(approvalId); resolve(false); }, 10 * 60_000);
+              approvals.set(approvalId, {chatId, resolve, timer});
+            });
+            if (!disposed) { store.updateItem(item.id, item.text, approved ? 'approved' : 'declined'); timeline(chatId); }
+            return {decision: approved ? 'accept' : 'decline'};
+          },
+        });
+        if (disposed) return;
+        seal();
+        if (!producedAssistant && result.finalMessage) store.appendItem(chatId, 'assistant', result.finalMessage, 'completed');
+        store.updateChat(chatId, { status: run.stopped ? 'interrupted' : result.status, ...(result.threadId ? {providerThreadId: result.threadId} : {}), ...(result.errorMessage ? {error: result.errorMessage} : {}) });
+      } catch (error) {
+        if (!disposed) { seal(); const message = error instanceof Error ? error.message : String(error); store.appendItem(chatId, 'notice', message, 'failed'); store.updateChat(chatId, {status: run.stopped ? 'interrupted' : 'failed', error: message}); }
+      } finally {
+        settleApprovals(chatId); runs.delete(chatId);
+        if (!disposed) { const timer = timers.get(chatId); if (timer) clearTimeout(timer); timers.delete(chatId); timeline(chatId); state(); }
+      }
+    })();
+    return {runId: accepted.runId};
+  }
+  async function invoke<K extends keyof Commands>(command: K, input: Commands[K]['input']): Promise<Commands[K]['output']> {
+    if (disposed) throw new Error('Agent runtime is closed.');
+    const result = await dispatch(command, input); return result as Commands[K]['output'];
+  }
+  async function dispatch(command: string, input: unknown): Promise<unknown> {
+    if (command === 'app.snapshot') return store.snapshot();
+    if (command === 'providers.list') return provider.info();
+    const p = object(input);
+    switch (command) {
+      case 'folder.add': { const path = await fs.realpath(text(p.path, 'folder path')); if (!(await fs.stat(path)).isDirectory()) throw new Error('Choose a folder.'); const result = store.addFolder(path, basename(path)); state(); return result; }
+      case 'chat.create': { const result = store.createChat({folderId: p.folderId === undefined ? undefined : id(p.folderId), projectId: p.projectId === undefined ? undefined : id(p.projectId), model: MODEL, mode: 'agent'}); state(); return result; }
+      case 'chat.select': { const chatId = id(p.id); chatFor(chatId); store.setActiveChat(chatId); return store.timeline(chatId); }
+      case 'chat.update': {
+        const chatId = id(p.id); const chat = chatFor(chatId); const patch: Parameters<AgentStore['updateChat']>[1] = {};
+        if (p.title !== undefined) { patch.title = text(p.title, 'title', 256).trim(); if (!patch.title) throw new Error('Title cannot be empty.'); }
+        if (p.draft !== undefined) patch.draft = text(p.draft, 'draft', 262144);
+        for (const flag of ['pinned', 'archived'] as const) if (p[flag] !== undefined) { if (typeof p[flag] !== 'boolean') throw new Error(`Invalid ${flag}.`); patch[flag] = p[flag]; }
+        if (p.mode !== undefined) { if (!['ask','plan','agent'].includes(String(p.mode))) throw new Error('Invalid mode.'); if (chat.status === 'running' || chat.status === 'stopping') throw new Error('Stop this run before changing mode.'); patch.mode = p.mode as Chat['mode']; }
+        const result = store.updateChat(chatId, patch); state(); return result;
+      }
+      case 'chat.send': return send(id(p.id), text(p.text, 'message', 262144), id(p.requestId));
+      case 'chat.stop': { const chatId = id(p.id); chatFor(chatId); const run = runs.get(chatId); if (!run) return; run.stopped = true; store.updateChat(chatId, {status: 'stopping'}); settleApprovals(chatId); state(); await provider.stop(chatId); return; }
+      case 'approval.respond': { const approvalId = id(p.id); if (typeof p.approved !== 'boolean') throw new Error('Invalid approval decision.'); const pending = approvals.get(approvalId); if (!pending) throw new Error('This approval is no longer pending.'); approvals.delete(approvalId); clearTimeout(pending.timer); pending.resolve(p.approved); return; }
+      case 'project.create': { const name = text(p.name,'project name',256).trim(); if (!name) throw new Error('Name the Project.'); if (!Array.isArray(p.folderIds) || p.folderIds.length > 100) throw new Error('Invalid Project folders.'); const result = store.createProject(name, text(p.goal,'goal',32768), [...new Set(p.folderIds.map(id))]); state(); return result; }
+      case 'files.list': return listFiles(folderFor(p.folderId).path, text(p.path ?? '', 'path'));
+      case 'files.read': return readFile(folderFor(p.folderId).path, text(p.path,'path'));
+      case 'git.changes': { const root = folderFor(p.folderId).path; const result = await new AgentModeReviewHost(() => root).listChanges(); if (result.error) throw new Error(result.error); return result.files; }
+      case 'git.diff': { const root = folderFor(p.folderId).path; const result = await new AgentModeReviewHost(() => root).readChange(text(p.path,'path')); if (result.error) throw new Error(result.error); return {path: result.path, before: result.before, after: result.after, truncated: result.truncated}; }
+      case 'providers.reveal': throw new Error('This provider does not expose a verified account label. Credentials remain private.');
+      default: throw new Error('Unsupported command.');
+    }
+  }
+  return {invoke, async dispose() {
+    if (disposed) return;
+    for (const [chatId, run] of runs) { run.stopped = true; settleApprovals(chatId); }
+    provider.dispose();
+    let deadline: ReturnType<typeof setTimeout> | undefined;
+    await Promise.race([Promise.allSettled([...runs.values()].map(run => run.promise)), new Promise(resolve => { deadline = setTimeout(resolve, 2000); })]);
+    if (deadline) clearTimeout(deadline);
+    disposed = true; for (const timer of timers.values()) clearTimeout(timer); timers.clear(); store.close();
+  }};
+}

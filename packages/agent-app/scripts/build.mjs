@@ -7,16 +7,25 @@ const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const src = (...p) => path.join(root, 'src', ...p);
 const dist = (...p) => path.join(root, 'dist', ...p);
 const watch = process.argv.includes('--watch');
+if (!existsSync(src('runtime', 'service.ts')) || !existsSync(src('renderer', 'main.tsx'))) {
+  throw new Error('Agent Mode build requires both the real runtime and renderer. Integrate the owned slices first.');
+}
 
 /** @type {esbuild.BuildOptions} */
 const common = {
   bundle: true,
+  minify: true,
+  define: { 'process.env.NODE_ENV': '"production"' },
   sourcemap: true,
   logLevel: 'info',
   absWorkingDir: root,
 };
 
+const runtimeRoot = process.env.MUSTER_RUNTIME_SOURCE_ROOT || path.resolve(root, '../../../muster');
+const coreEntry = path.join(runtimeRoot, 'packages/core/src/codex-app-server.ts');
+if (!existsSync(coreEntry)) throw new Error('Headless Muster runtime source unavailable. Set MUSTER_RUNTIME_SOURCE_ROOT to the sibling muster checkout.');
 const builds = [
+  { ...common, entryPoints: [coreEntry], outfile: dist('runtime', 'core-client.cjs'), platform: 'node', format: 'cjs', target: 'node24' },
   {
     ...common,
     entryPoints: [src('main', 'index.ts')],
@@ -92,6 +101,8 @@ function copyRendererStatic() {
 }
 
 copyRendererStatic();
+mkdirSync(dist('runtime', 'resources'), {recursive: true});
+for (const name of ['codex-hybrow-gateway.sh', 'codex-profile.cjs']) cpSync(path.resolve(root, '../builtin/resources', name), dist('runtime', 'resources', name));
 
 if (watch) {
   const contexts = await Promise.all(builds.map((options) => esbuild.context(options)));

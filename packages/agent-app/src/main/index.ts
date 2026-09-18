@@ -1,16 +1,24 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, screen, session } from 'electron';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 import type { AgentEvent, Commands, Snapshot } from '../shared/protocol.ts';
 import { isCommandName } from './commands.ts';
 import { buildMenu } from './menu.ts';
 import { loadAgentService, type AgentService } from './service-loader.ts';
 import { clampGeometry, DEFAULT_GEOMETRY, MIN_HEIGHT, MIN_WIDTH, WindowStateStore, type WindowGeometry } from './window-state.ts';
 
+app.setName('Muster Agent');
+app.setPath('userData', app.commandLine.getSwitchValue('user-data-dir') || path.join(app.getPath('appData'), 'Muster Agent'));
+
 // Single instance: second launch focuses the existing window instead.
 if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
-  void main();
+  void main().catch((error: unknown) => {
+    console.error('Muster Agent startup failed:', error);
+    dialog.showErrorBox('Muster Agent could not start', error instanceof Error ? error.message : String(error));
+    app.exit(1);
+  });
 }
 
 async function main(): Promise<void> {
@@ -25,10 +33,21 @@ async function main(): Promise<void> {
   app.on('second-instance', () => {
     if (window) {
       if (window.isMinimized()) window.restore();
+      window.show();
       window.focus();
     }
   });
 
+  app.on('activate', () => {
+    if (window && !window.isDestroyed()) {
+      if (window.isMinimized()) window.restore();
+      window.show();
+      window.focus();
+    }
+  });
+
+  // Match the dark renderer with the dark native sidebar material.
+  nativeTheme.themeSource = 'dark';
   await app.whenReady();
 
   // --- Agent service -------------------------------------------------------
@@ -37,7 +56,7 @@ async function main(): Promise<void> {
     if (event.type === 'snapshot') {
       runningChats = event.snapshot.chats.filter((c) => c.status === 'running' || c.status === 'stopping').length;
     }
-    if (window && !window.isDestroyed()) {
+    if (window && !window.isDestroyed() && window.isVisible()) {
       window.webContents.send('muster:event', event);
     }
   };
@@ -62,12 +81,12 @@ async function main(): Promise<void> {
     minWidth: MIN_WIDTH,
     minHeight: MIN_HEIGHT,
     show: false,
-    title: 'Muster Code',
+    title: 'Muster Agent',
     titleBarStyle: isMac ? 'hiddenInset' : 'default',
     trafficLightPosition: isMac ? { x: 18, y: 18 } : undefined,
     ...(wantsVibrancy
       ? { vibrancy: 'sidebar' as const, transparent: false }
-      : { backgroundColor: '#1e1e20' }),
+      : { backgroundColor: '#181818' }),
     webPreferences: {
       sandbox: true,
       contextIsolation: true,
@@ -78,13 +97,24 @@ async function main(): Promise<void> {
   });
   if (geometry.maximized) window.maximize();
   window.once('ready-to-show', () => window?.show());
+  window.on('show', () => {
+    if (!service) return;
+    void service.invoke('app.snapshot', undefined).then(async (snapshot) => {
+      onEvent({ type: 'snapshot', snapshot });
+      if (snapshot.activeChatId) {
+        const items = await service!.invoke('chat.select', { id: snapshot.activeChatId });
+        onEvent({ type: 'timeline', chatId: snapshot.activeChatId, items });
+      }
+    }).catch((error: Error) => onEvent({ type: 'notice', message: error.message }));
+  });
 
   // --- Navigation hardening: renderer is app-local only --------------------
-  const appOrigin = 'file://';
+  const rendererEntry = path.join(__dirname, '../renderer/index.html');
+  const rendererURL = pathToFileURL(rendererEntry).href;
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
-  window.webContents.on('will-navigate', (event, url) => {
-    if (!url.startsWith(appOrigin)) event.preventDefault();
-  });
+  window.webContents.on('will-navigate', (event) => event.preventDefault());
+  window.webContents.on('will-frame-navigate', (event) => event.preventDefault());
+  window.webContents.on('will-attach-webview', (event) => event.preventDefault());
   session.defaultSession.setPermissionRequestHandler((_wc, _permission, callback) => callback(false));
 
   // --- IPC: single validated entry point -----------------------------------
@@ -92,7 +122,7 @@ async function main(): Promise<void> {
     window !== null && !window.isDestroyed() &&
     senderId === window.webContents.id &&
     frame !== null && frame === window.webContents.mainFrame &&
-    frame.url.startsWith(appOrigin);
+    frame.url.split('#')[0] === rendererURL;
 
   ipcMain.handle('muster:invoke', async (event, command: unknown, input: unknown) => {
     if (!isTrustedSender(event.senderFrame, event.sender.id)) {
@@ -137,7 +167,12 @@ async function main(): Promise<void> {
         if (folder) send({ type: 'notice', message: `Added folder ${folder.name}` });
       }).catch((error: Error) => send({ type: 'notice', message: `Could not add folder: ${error.message}` }));
     },
-    stopRun: () => send({ type: 'notice', message: 'Use the stop control on the running chat.' }),
+    stopRun: () => {
+      if (!service) return;
+      void service.invoke('app.snapshot', undefined).then(async (snapshot) => {
+        if (snapshot.activeChatId) await service!.invoke('chat.stop', { id: snapshot.activeChatId });
+      }).catch((error: Error) => send({ type: 'notice', message: error.message }));
+    },
   }));
 
   // --- Geometry persistence -------------------------------------------------
@@ -159,7 +194,15 @@ async function main(): Promise<void> {
   window.on('close', (event) => {
     // On macOS closing the window keeps the app (and agent runs) alive.
     // Elsewhere close quits, so it gets the same confirmation as quit.
-    if (isMac || quitting || runningChats === 0) return;
+    if (quitting) return;
+    if (isMac) {
+      event.preventDefault();
+      if (saveTimer) clearTimeout(saveTimer);
+      void stateStore.save(captureGeometry());
+      window?.hide();
+      return;
+    }
+    if (runningChats === 0) return;
     event.preventDefault();
     void confirmQuit().then((ok) => {
       if (ok) {
@@ -215,5 +258,5 @@ async function main(): Promise<void> {
     window.webContents.once('did-finish-load', () =>
       send({ type: 'notice', message: 'Agent runtime not built; UI is in shell-only mode.' }));
   }
-  await window.loadFile(path.join(__dirname, '../renderer/index.html'));
+  await window.loadFile(rendererEntry);
 }
