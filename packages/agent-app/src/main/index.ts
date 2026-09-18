@@ -158,6 +158,7 @@ async function main(): Promise<void> {
         const chat = await service.invoke('chat.create', {});
         const snapshot = await service.invoke('app.snapshot', undefined) as Snapshot;
         send({ type: 'snapshot', snapshot: { ...snapshot, activeChatId: chat.id } });
+        send({type:'chatSelected',chatId:chat.id});
       } catch (error) {
         send({ type: 'notice', message: `Could not create chat: ${(error as Error).message}` });
       }

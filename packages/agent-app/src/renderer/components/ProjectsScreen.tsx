@@ -3,6 +3,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import type { Chat, Folder, Project } from '../../shared/protocol';
 import { invoke } from '../bridge';
 import { selectChat } from '../store';
+import { restoreFocus } from '../focus';
 import { useStore } from '../useStore';
 // @ts-ignore -- side-effect CSS import; esbuild bundles it into dist/renderer/main.css
 import './projects-screen.css';
@@ -13,17 +14,21 @@ export function ProjectsScreen({ onBack, onStartChat }: { onBack: () => void; on
   const [creating, setCreating] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const back = useRef<HTMLButtonElement>(null);
-  useEffect(() => { back.current?.focus(); }, []);
+  const launcher = useRef<Element | null>(null);
+  const newProjectButton = useRef<HTMLButtonElement>(null);
+  useEffect(() => { launcher.current = document.activeElement; back.current?.focus(); }, []);
+  const leave = () => { onBack(); restoreFocus(launcher.current); };
+  const closeForm = (restore: boolean) => { setCreating(false); if (restore) requestAnimationFrame(() => restoreFocus(newProjectButton.current)); };
   const projects = snapshot?.projects ?? [];
   const folders = snapshot?.folders ?? [];
   const chats = snapshot?.chats ?? [];
   const selected = projects.find(p => p.id === selectedId) ?? null;
-  return <section className="settings-screen" aria-label="Projects">
-    <header className="settings-topbar"><button ref={back} className="settings-back" onClick={onBack}><ArrowLeft size={15}/>Back to work</button><span>Projects</span></header>
+  return <section className="settings-screen" aria-label="Projects" onKeyDown={e => { if (e.key === 'Escape' && !e.defaultPrevented) { e.preventDefault(); leave(); } }}>
+    <header className="settings-topbar"><button ref={back} className="settings-back" onClick={leave}><ArrowLeft size={15}/>Back to work</button><span>Projects</span></header>
     <div className="settings-scroll"><div className="settings-content">
       <div className="settings-title"><div><h1>Projects</h1><p>A project carries one shared goal across multiple folders. Ordinary folder chats stay scoped to a single folder with no shared goal.</p></div>
-        {!creating && <button className="settings-button" onClick={() => { setCreating(true); }}><Plus size={14}/>New project</button>}</div>
-      {creating && <NewProjectForm folders={folders} onClose={() => setCreating(false)} onCreated={p => { setCreating(false); setSelectedId(p.id); }}/>}
+        {!creating && <button ref={newProjectButton} className="settings-button" onClick={() => { setCreating(true); }}><Plus size={14}/>New project</button>}</div>
+      {creating && <NewProjectForm folders={folders} onClose={() => closeForm(true)} onCreated={p => { closeForm(false); setSelectedId(p.id); }}/>}
       {projects.length === 0 && !creating && <p className="projects-empty" role="status">No projects yet. Create one to share a goal across folders.</p>}
       {projects.length > 0 && <ul className="projects-list">{projects.map(p =>
         <li key={p.id}><button type="button" className={`projects-item${p.id === selectedId ? ' is-selected' : ''}`} aria-pressed={p.id === selectedId} onClick={() => setSelectedId(p.id === selectedId ? null : p.id)}>
@@ -45,12 +50,14 @@ function NewProjectForm({ folders, onClose, onCreated }: { folders: Folder[]; on
   useEffect(() => first.current?.focus(), []);
   function toggle(id: string) { setFolderIds(ids => ids.includes(id) ? ids.filter(f => f !== id) : [...ids, id]); }
   async function submit(e: React.FormEvent) {
-    e.preventDefault(); setError(''); setBusy(true);
+    e.preventDefault();
+    if (busy) return;
+    setError(''); setBusy(true);
     try { onCreated(await invoke('project.create', { name: name.trim(), goal: goal.trim(), folderIds })); }
     catch (err) { setError(err instanceof Error ? err.message : 'Could not create the project.'); }
     finally { setBusy(false); }
   }
-  return <form className="new-project" onSubmit={e => void submit(e)} aria-label="New project" onKeyDown={e => { if (e.key === 'Escape' && !busy) { e.stopPropagation(); onClose(); } }}>
+  return <form className="new-project" onSubmit={e => void submit(e)} aria-label="New project" onKeyDown={e => { if (e.key === 'Escape') { e.stopPropagation(); e.preventDefault(); if (!busy) onClose(); } }}>
     <header><h2>New project</h2><button type="button" className="icon-button" aria-label="Cancel new project" disabled={busy} onClick={onClose}><X size={16}/></button></header>
     <label>Name<input ref={first} required maxLength={200} value={name} onChange={e => setName(e.target.value)} placeholder="My project" disabled={busy}/></label>
     <label>Shared goal <span className="optional">shown to every chat in the project</span><textarea rows={3} maxLength={4000} value={goal} onChange={e => setGoal(e.target.value)} placeholder="What should this project achieve?" disabled={busy}/></label>

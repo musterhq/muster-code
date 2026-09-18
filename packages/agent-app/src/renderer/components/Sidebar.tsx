@@ -12,7 +12,7 @@ import {
   Search,
   Settings2,
 } from 'lucide-react';
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import type { Chat, Folder } from '../../shared/protocol';
 import {
   createChat,
@@ -24,6 +24,7 @@ import {
   updateChat,
 } from '../store';
 import { useStore } from '../useStore';
+import { focusComposer, isChord, restoreFocus } from '../focus';
 import { StatusDot } from './StatusDot';
 
 function chatOrder(a: Chat, b: Chat): number {
@@ -144,6 +145,29 @@ export function Sidebar(): React.ReactElement {
   const [showArchived, setShowArchived] = useState(false);
   const [searching, setSearching] = useState(false);
   const [query, setQuery] = useState('');
+  const searchButton = useRef<HTMLButtonElement>(null);
+  const searchInput = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (isChord(e, 'n')) {
+        e.preventDefault();
+        void createChat().then(() => focusComposer());
+      } else if (isChord(e, 'k')) {
+        e.preventDefault();
+        setSearching(true);
+        searchInput.current?.focus();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
+  const closeSearch = (restore: boolean) => {
+    setQuery('');
+    setSearching(false);
+    if (restore) restoreFocus(searchButton.current);
+  };
   const snapshot = state.snapshot;
 
   if (!snapshot) {
@@ -160,13 +184,14 @@ export function Sidebar(): React.ReactElement {
   return (
     <div className="nav-inner">
       <div className="nav-toolbar">
-        <button type="button" className="tool-button" onClick={() => void createChat()}>
+        <button type="button" className="tool-button" onClick={() => void createChat().then(() => focusComposer())}>
           <MessageSquarePlus size={15} /><span>New chat</span>
         </button>
-        <button type="button" className="tool-button" onClick={() => setSearching(v => !v)} aria-expanded={searching}>
+        <button ref={searchButton} type="button" className="tool-button" onClick={() => (searching ? closeSearch(false) : setSearching(true))} aria-expanded={searching}>
           <Search size={15} /><span>Search chats</span>
         </button>
-        {searching && <input autoFocus className="nav-search" aria-label="Search chats" placeholder="Search chats…" value={query} onChange={e=>setQuery(e.target.value)} onKeyDown={e=>{if(e.key==='Escape'){setQuery('');setSearching(false);}}} />}
+        {searching && <input ref={searchInput} autoFocus className="nav-search" aria-label="Search chats" placeholder="Search chats…" value={query} onChange={e=>setQuery(e.target.value)} onKeyDown={e=>{if(e.key==='Escape'){e.stopPropagation();closeSearch(true);}}} />}
+        {searching && query.trim() !== '' && live.length === 0 && <p className="nav-empty" role="status">No chats match “{query.trim()}”.</p>}
         <button type="button" className="tool-button" onClick={openProjectsScreen}>
           <Layers size={15} /><span>Projects</span>
         </button>

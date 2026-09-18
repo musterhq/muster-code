@@ -7,6 +7,7 @@ import type {
   TimelineItem,
 } from '../shared/protocol';
 import { BridgeError, getBridge, invoke, subscribe } from './bridge';
+import { focusComposer } from './focus';
 import { MAX_TABS, readWorkspace, saveWorkspace } from './workspacePersistence';
 
 export type LoadPhase = 'idle' | 'loading' | 'ready' | 'error';
@@ -134,6 +135,7 @@ export async function boot(): Promise<void> {
   unsubscribe?.();
   unsubscribe = subscribe((event) => {
     if (event.type === 'snapshot') applySnapshot(event.snapshot);
+    else if (event.type === 'chatSelected') void selectChat(event.chatId).then(()=>focusComposer());
     else if (event.type === 'timeline') {
       set({
         timelines: {

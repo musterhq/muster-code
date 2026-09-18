@@ -3,7 +3,7 @@ import { ChatView } from './components/ChatView';
 import { Sidebar } from './components/Sidebar';
 import { ProvidersScreen } from './components/ProvidersScreen';
 import { ProjectsScreen } from './components/ProjectsScreen';
-import { Workspace } from './components/Workspace';
+import { ResourcePane } from './components/ResourcePane';
 import {
   NAV_DEFAULT,
   dismissNotice,
@@ -13,6 +13,7 @@ import {
   createChat,
 } from './store';
 import { useStore } from './useStore';
+import { focusComposer } from './focus';
 
 export function App(): React.ReactElement {
   const state = useStore();
@@ -84,7 +85,7 @@ export function App(): React.ReactElement {
         }}
       />
       <main className="center">
-        {state.screen === 'projects' ? <ProjectsScreen onBack={closeSettings} onStartChat={(projectId, folderId)=>void createChat(folderId, projectId)} /> : state.screen === 'providers' ? <ProvidersScreen /> : state.boot.phase === 'loading' || state.boot.phase === 'idle' ? (
+        {state.screen === 'projects' ? <ProjectsScreen onBack={closeSettings} onStartChat={(projectId, folderId)=>void createChat(folderId, projectId).then(() => focusComposer())} /> : state.screen === 'providers' ? <ProvidersScreen /> : state.boot.phase === 'loading' || state.boot.phase === 'idle' ? (
           <div className="center-loading" role="status">
             Loading workspace…
           </div>
@@ -93,9 +94,7 @@ export function App(): React.ReactElement {
         )}
       </main>
       {state.screen === 'work' && state.tabs.length > 0 && (
-        <aside className="workspace" aria-label="Resources">
-          <Workspace />
-        </aside>
+        <ResourcePane />
       )}
       {state.notices.length > 0 && (
         <div className="notices" role="log" aria-live="polite">
