@@ -6,6 +6,7 @@ import { discoverLocalProviders } from './provider-discovery.ts';
 import { CustomProviders } from './custom-providers.ts';
 import { AgentStore } from './store.ts';
 import { WorkspaceWatchService } from './workspace-watch.ts';
+import {appendCommandOutput,finishCommandOutput} from './command-output-buffer.ts';
 import { toolEventDetails } from './tool-event-details.ts';
 import { applyProviderEvent } from './context-telemetry.ts';
 import { listFiles, readFile } from './files.ts';
@@ -110,20 +111,22 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
               const label = detail(item.command ?? item.title ?? item.name ?? item.tool ?? item.query ?? previous?.data?.name ?? item.type);
               const streamed = typeof previous?.data?.output === 'string' ? previous.data.output : '';
               const supplied = item.aggregatedOutput ?? item.output;
-              const finalOutput = supplied == null ? '' : detail(supplied);
+              const finalOutput = supplied == null ? null : typeof supplied === 'string' ? supplied : detail(supplied);
               // Some harnesses finish with only the last output chunk. Preserve an
               // already received stream when it contains that final suffix.
-              const output = (supplied == null || (streamed && streamed.endsWith(finalOutput)) ? streamed : finalOutput).slice(-131072);
+              const buffered=finishCommandOutput({output:streamed,truncated:previous?.data?.outputTruncated===true},finalOutput);
+              const output=buffered.output;
               const body = label + (output ? '\n' + output : '');
-              const metadata = {...toolEventDetails(item),providerItemId:itemId,type:type || previous?.data?.type,name:label,output};
+              const metadata = {...toolEventDetails(item),providerItemId:itemId,type:type || previous?.data?.type,name:label,output,outputTruncated:buffered.truncated};
               if (!local) { local = store.appendItem(chatId, 'tool', body, status, metadata).id; toolIds.set(itemId, local); }
               else store.updateItem(local, body, status, {...store.item(local)?.data,...metadata});
               scheduleTimeline(chatId);
             } else if (method.endsWith('/outputDelta')) {
               const local = toolIds.get(itemId); const previous = local ? store.item(local) : undefined;
               if (previous?.status === 'running') {
-                const output = (String(previous.data?.output ?? '') + String(params.delta ?? '')).slice(-131072);
-                store.updateItem(previous.id, String(previous.data?.name ?? '') + '\n' + output, 'running', {...previous.data, output});
+                const buffered=appendCommandOutput({output:String(previous.data?.output??''),truncated:previous.data?.outputTruncated===true},String(params.delta??''));
+                const output=buffered.output;
+                store.updateItem(previous.id, String(previous.data?.name ?? '') + '\n' + output, 'running', {...previous.data, output,outputTruncated:buffered.truncated});
                 scheduleTimeline(chatId);
               }
             }

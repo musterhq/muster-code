@@ -9,13 +9,14 @@ export function outputPreview(text:string):{preview:string;truncated:boolean}{
  return {preview,truncated:preview.length<text.length};
 }
 /** Progressive output preview; source text remains literal, never interpreted as UI. */
-export function ToolOutput({text,id,language='plaintext'}:{text:string;id:string;language?:string}){
+export function ToolOutput({text,id,language='plaintext',sourceTruncated=false}:{text:string;id:string;language?:string;sourceTruncated?:boolean}){
  const [expanded,setExpanded]=useDisclosure('output:'+id);
  const {preview,truncated}=outputPreview(text);
  return <div className="tool-result" data-preview={truncated&&!expanded}>
-  <header><span>{language}</span><CopyButton getText={()=>text} label="Copy output"/></header>
+  <header><span>{language}</span><CopyButton getText={()=>text} label={sourceTruncated?"Copy retained output":"Copy output"}/></header>
+  {sourceTruncated&&<p className="tool-output-limit">Only the end of this long output was retained.</p>}
   <pre className="tool-result-text" tabIndex={0}>{expanded?text:preview}</pre>
-  {truncated&&<button className="tool-result-expand" aria-expanded={expanded} onClick={()=>setExpanded(!expanded)}>{expanded?'Show less':'Show full output'}</button>}
+  {truncated&&<button className="tool-result-expand" aria-expanded={expanded} onClick={()=>setExpanded(!expanded)}>{expanded?'Show less':sourceTruncated?'Show retained output':'Show full output'}</button>}
  </div>;
 }
 export function ToolDetail({label,text,id,language}:{label:string;text:string;id:string;language?:string}){

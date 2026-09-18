@@ -70,7 +70,7 @@ export function ToolCard({item}: {item: TimelineItem}) {
     </Collapsible.Trigger>
     <Collapsible.Panel className="activity-disclosure"><div className="tool-row-body" id={bodyId}>
       {p.subject ? <div className="tool-row-source"><code>{p.subject}</code><button className="icon-button" aria-label={copied ? 'Copied' : p.kind==='command'?'Copy command':'Copy'} onClick={()=>copy(p.subject)}>{copied ? <Check size={13}/> : <Copy size={13}/>}</button></div> : null}
-      {(output||p.kind==='command')&&<ToolOutput id={item.id} text={output || (running ? 'Waiting for output…' : 'No output')}/>}
+      {(output||p.kind==='command')&&<ToolOutput id={item.id} sourceTruncated={item.data?.outputTruncated===true} text={output || (running ? 'Waiting for output…' : 'No output')}/>}
       <Metadata item={item}/>
     </div></Collapsible.Panel>
   </Collapsible.Root>;

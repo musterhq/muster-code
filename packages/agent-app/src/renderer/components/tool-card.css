@@ -55,3 +55,5 @@
 .tool-detail-trigger span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .tool-row-body { border:0; background:none; padding:3px 0 0; }
 .tool-row-source { margin:0 0 5px; }
+
+.tool-output-limit { margin:0; padding:3px 11px; color:var(--text-faint); font-size:11px; }
