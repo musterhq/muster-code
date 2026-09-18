@@ -11,6 +11,7 @@ import { buildDiffRows, diffStats, foldContext, type DiffRow } from '../diffMode
 import {
   activateTab,
   closeTab,
+  hydrateTab,
   dirKey,
   loadDir,
   loadGitChanges,
@@ -288,6 +289,7 @@ function DiffTab({ tab }: { tab: WorkspaceTab }): React.ReactElement {
 // Shell
 
 function TabBody({ tab }: { tab: WorkspaceTab }): React.ReactElement {
+  useEffect(() => hydrateTab(tab), [tab.id]);
   switch (tab.kind) {
     case 'files':
       return <FilesTab tab={tab} />;
@@ -317,6 +319,7 @@ export function Workspace(): React.ReactElement | null {
               className="workspace-tab-label"
               title={tab.title}
               onClick={() => activateTab(tab.id)}
+              onAuxClick={e=>{if(e.button===1){e.preventDefault();closeTab(tab.id);}}}
             >
               {tab.title}
             </button>
@@ -332,7 +335,7 @@ export function Workspace(): React.ReactElement | null {
         ))}
       </div>
       <div className="workspace-body" role="tabpanel">
-        <TabBody tab={active} />
+        <TabBody key={active.id} tab={active} />
       </div>
     </>
   );

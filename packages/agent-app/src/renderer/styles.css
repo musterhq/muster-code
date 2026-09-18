@@ -747,3 +747,8 @@ textarea:focus-visible {
 .chat-context span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .msg-actions { justify-content: flex-start; }
 @media (prefers-reduced-motion: reduce) { .msg-actions { transition: none; } }
+.resource-separator { position: absolute; width: 5px; top: 42px; bottom: 0; left: -3px; cursor: col-resize; z-index: 2; touch-action: none; }
+.resource-separator:hover,.resource-separator:focus-visible { background: var(--bg-active); }
+.resource-maximize { position: absolute; top: 10px; right: 7px; background: var(--bg); z-index: 2; }
+.workspace-tabs { padding-right: 36px; }
+.app:has(.workspace[data-maximized='true']) > .center { display: none; }

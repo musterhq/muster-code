@@ -7,6 +7,7 @@ import type {
   TimelineItem,
 } from '../shared/protocol';
 import { BridgeError, getBridge, invoke, subscribe } from './bridge';
+import { MAX_TABS, readWorkspace, saveWorkspace } from './workspacePersistence';
 
 export type LoadPhase = 'idle' | 'loading' | 'ready' | 'error';
 
@@ -56,6 +57,7 @@ export const NAV_DEFAULT = 224;
 export const NAV_MIN = 180;
 export const NAV_MAX = 320;
 
+const savedWorkspace = readWorkspace(localStorage);
 let state: AppState = {
   screen: 'work',
   bridgeAvailable: getBridge() !== null,
@@ -65,8 +67,8 @@ let state: AppState = {
   timelines: {},
   sending: {},
   notices: [],
-  tabs: [],
-  activeTabId: null,
+  tabs: savedWorkspace.tabs,
+  activeTabId: savedWorkspace.activeTabId,
   providers: { phase: 'idle' },
   revealed: {},
   files: {},
@@ -94,6 +96,7 @@ export function subscribeStore(listener: () => void): () => void {
 
 function set(patch: Partial<AppState>): void {
   state = { ...state, ...patch };
+  if ('tabs' in patch || 'activeTabId' in patch) saveWorkspace(localStorage, {tabs:state.tabs, activeTabId:state.activeTabId});
   for (const l of listeners) l();
 }
 
@@ -306,6 +309,7 @@ export async function pickFolder(): Promise<void> {
 
 export function openTab(tab: WorkspaceTab): void {
   const existing = state.tabs.find((t) => t.id === tab.id);
+  if (!existing && state.tabs.length >= MAX_TABS) { pushNotice('Close a resource tab before opening another.'); return; }
   set({
     tabs: existing ? state.tabs : [...state.tabs, tab],
     activeTabId: tab.id,
@@ -313,16 +317,31 @@ export function openTab(tab: WorkspaceTab): void {
 }
 
 export function closeTab(id: string): void {
+  const index = state.tabs.findIndex(t=>t.id===id);
   const tabs = state.tabs.filter((t) => t.id !== id);
+  const { [id]: _body, ...fileBodies } = state.fileBodies;
+  const { [id]: _diff, ...diffs } = state.diffs;
   set({
     tabs,
+    fileBodies,
+    diffs,
     activeTabId:
-      state.activeTabId === id ? (tabs[tabs.length - 1]?.id ?? null) : state.activeTabId,
+      state.activeTabId === id ? (tabs[Math.min(index,tabs.length-1)]?.id ?? null) : state.activeTabId,
   });
 }
 
 export function activateTab(id: string): void {
+  if (!state.tabs.some(tab=>tab.id===id)) return;
   set({ activeTabId: id });
+}
+
+/** Lazily reconnect a restored tab; missing paths remain recoverable errors. */
+export function hydrateTab(tab: WorkspaceTab): void {
+  if (tab.kind === 'files') {
+    if (!state.files[dirKey(tab.folderId!, '')]) void loadDir(tab.folderId!, '');
+    if (!state.gitChanges[tab.folderId!]) void loadGitChanges(tab.folderId!);
+  } else if (tab.kind === 'file' && !state.fileBodies[tab.id]) void openFile(tab.folderId!, tab.path!);
+  else if (tab.kind === 'diff' && !state.diffs[tab.id]) void openDiff(tab.folderId!, tab.path!);
 }
 
 export function openFilesTab(folderId: string, folderName: string): void {
