@@ -1,7 +1,7 @@
 .activity-summary { display:flex; align-items:center; gap:8px; width:100%; min-height:28px; padding:3px 0; color:var(--text-faint); text-align:left; font-size:13px; border-radius:5px; }
 .activity-summary>span:not(.tool-glyph) { flex:1; min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .activity-summary>svg { flex:none; }
-.activity-summary:hover { color:var(--text-dim); background:var(--bg-hover); }
+.activity-summary:hover { color:var(--text); }
 .activity-details { display:flex; flex-direction:column; gap:1px; padding:4px 0 0; }
 .activity-pages { display:flex; justify-content:space-between; align-items:center; padding:8px 10px; color:var(--text-faint); font-size:11px; }
 .activity-pages button { padding:4px 8px; border:1px solid var(--hairline); border-radius:5px; }

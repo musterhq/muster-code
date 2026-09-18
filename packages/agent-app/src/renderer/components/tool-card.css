@@ -1,6 +1,7 @@
 .tool-row-card { border-radius: 5px; overflow: hidden; }
 .tool-row-head { display: flex; align-items: center; gap: 6px; padding: 5px 0; width: 100%; color: var(--text-dim); text-align: left; font-size: 13px; }
-.tool-row-head:hover { background:var(--bg-hover); }
+.tool-row-head:hover { color:var(--text); }
+.tool-row-head:hover .tool-row-subject { color:var(--text); }
 .tool-row-subject { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: inherit; color: var(--text-dim); }
 .tool-row-state { flex: none; font-size: inherit; color: inherit; }
 .tool-row-duration { flex: none; color: var(--text-faint); font-size: 11px; }
@@ -23,9 +24,9 @@
 .tool-child-ids { padding-top:6px; user-select:text; }
 @media (prefers-reduced-motion: no-preference) { .tool-glyph.is-active { animation:tool-run-pulse 1.2s ease-in-out infinite; } }
 
-.tool-row-head:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.tool-row-head > svg:last-child { flex: none; opacity: .5; }
-.tool-row-head:hover > svg:last-child, .tool-row-head:focus-visible > svg:last-child { opacity: 1; }
+.tool-row-head:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
+.tool-row-head > svg:last-child { flex: none; opacity: 0; }
+.tool-row-head:hover > svg:last-child, .tool-row-head:focus-visible > svg:last-child, .tool-row-head[aria-expanded='true'] > svg:last-child { opacity: .8; }
 
 /* T3's Base UI disclosure contract: measured height, not guessed max-height.
    Panels unmount after closing; no hidden output trees or JS animation loop. */
@@ -34,9 +35,11 @@
 .activity-disclosure[data-open][data-ending-style] { height:var(--collapsible-panel-height); }
 .tool-chevron { transition:transform 180ms cubic-bezier(.2,.8,.2,1); }
 [aria-expanded='true'] > .tool-chevron { transform:rotate(90deg); }
-.tool-glyph { width:16px; height:16px; justify-content:center; color:var(--text-dim); }
+.tool-glyph { width:16px; height:16px; justify-content:center; color:inherit; }
 .tool-glyph svg { display:block; stroke-width:1.6; }
 @media (prefers-reduced-motion:no-preference) {
  .activity-disclosure { transition:height 200ms cubic-bezier(.2,.8,.2,1); }
 }
 @media (prefers-reduced-motion:reduce) { .tool-chevron { transition:none; } }
+
+@media (hover:none) { .tool-row-head > svg:last-child { opacity:.55; } }
