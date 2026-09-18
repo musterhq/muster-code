@@ -1,4 +1,4 @@
-import { Check, ChevronDown, ChevronRight, Send, Square, X } from 'lucide-react';
+import { ArrowUp, Check, ChevronDown, ChevronRight, Monitor, Square, X } from 'lucide-react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import React, {
   useCallback,
@@ -18,6 +18,8 @@ import {
 } from '../store';
 import { useStore } from '../useStore';
 import { StatusDot } from './StatusDot';
+import { ToolCard } from './ToolCard';
+import { CopyButton, MessageBody } from './MessageBody';
 
 const DRAFT_DEBOUNCE_MS = 250;
 
@@ -61,23 +63,19 @@ function TimelineCard({ item }: { item: TimelineItem }): React.ReactElement {
     case 'assistant':
       return (
         <div className="msg msg-assistant">
-          <div className="msg-text">{item.text}</div>
+          <MessageBody text={item.text} />
+          <div className="msg-actions">
+            <CopyButton getText={() => item.text} label="Copy response" />
+          </div>
         </div>
       );
     case 'reasoning':
       return (
-        <Collapsible label="Reasoning" meta={item.status}>
+        <Collapsible label={item.status === 'running' ? 'Thinking…' : 'Thought'}>
           <div className="msg-text msg-reasoning">{item.text}</div>
         </Collapsible>
       );
-    case 'tool': {
-      const name = typeof item.data?.name === 'string' ? item.data.name : 'Tool';
-      return (
-        <Collapsible label={name} meta={item.status}>
-          <pre className="tool-output">{item.text}</pre>
-        </Collapsible>
-      );
-    }
+    case 'tool': return <ToolCard item={item} />;
     case 'approval': {
       const pending = item.status === 'pending';
       return (
@@ -121,6 +119,7 @@ function Timeline({ items }: { items: TimelineItem[] }): React.ReactElement {
     overscan: 8,
     getItemKey: (index) => items[index].id,
   });
+  const totalSize = virtualizer.getTotalSize();
 
   const onScroll = useCallback(() => {
     const el = scrollRef.current;
@@ -134,13 +133,13 @@ function Timeline({ items }: { items: TimelineItem[] }): React.ReactElement {
     if (atBottom.current && items.length > 0) {
       virtualizer.scrollToIndex(items.length - 1, { align: 'end' });
     }
-  }, [items.length, virtualizer]);
+  }, [items.length, totalSize, virtualizer]);
 
   return (
     <div className="timeline" ref={scrollRef} onScroll={onScroll}>
       <div
         className="timeline-inner"
-        style={{ height: virtualizer.getTotalSize() }}
+        style={{ height: totalSize }}
       >
         {virtualizer.getVirtualItems().map((v) => (
           <div
@@ -204,7 +203,7 @@ function Composer({ chat }: { chat: Chat }): React.ReactElement {
 
   const submit = async () => {
     const value = text.trim();
-    if (!value || sending) return;
+    if (!value || sending || running) return;
     if (timer.current) {
       clearTimeout(timer.current);
       timer.current = null;
@@ -224,7 +223,7 @@ function Composer({ chat }: { chat: Chat }): React.ReactElement {
       <textarea
         className="composer-input"
         aria-label="Message"
-        placeholder="Message the agent…"
+        placeholder={running ? 'Agent is working…' : 'Send a follow-up…'}
         value={text}
         rows={Math.min(8, Math.max(1, text.split('\n').length))}
         onChange={(e) => {
@@ -238,6 +237,13 @@ function Composer({ chat }: { chat: Chat }): React.ReactElement {
           }
         }}
       />
+      <div className="composer-options">
+        <select aria-label="Chat mode" value={chat.mode} disabled={running || sending}
+          onChange={e=>void updateChat(chat.id,{mode:e.target.value as Chat['mode']})}>
+          <option value="agent">Agent</option><option value="ask">Ask</option><option value="plan">Plan</option>
+        </select>
+        <span title={chat.model}>Fable 5</span>
+      </div>
       {running ? (
         <button
           type="button"
@@ -256,7 +262,7 @@ function Composer({ chat }: { chat: Chat }): React.ReactElement {
           disabled={!text.trim() || sending}
           onClick={() => void submit()}
         >
-          <Send size={14} />
+          <ArrowUp size={15} />
         </button>
       )}
     </div>
@@ -313,9 +319,10 @@ export function ChatView(): React.ReactElement {
           <p>No messages yet. Say what you want done in {folder?.name ?? 'this workspace'}.</p>
         </div>
       ) : (
-        <Timeline items={timeline.value ?? []} />
+        <Timeline key={chat.id} items={timeline.value ?? []} />
       )}
-      <Composer chat={chat} />
+      <Composer key={chat.id} chat={chat} />
+      <footer className="chat-context"><Monitor size={12}/><span>This Mac</span>{folder && <span title={folder.path}>{folder.name}</span>}</footer>
     </div>
   );
 }

@@ -59,6 +59,10 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
     if (chat.archived) throw new Error('Restore this chat before sending.');
     if (!provider.info().some(p => p.available)) throw new Error('Hybrow provider is unavailable. Your draft is retained.');
     const folder = chat.folderId ? folderFor(chat.folderId) : undefined;
+    const project = chat.projectId ? store.snapshot().projects.find(p => p.id === chat.projectId) : undefined;
+    const contextualPrompt = project
+      ? `Project: ${project.name}\nShared goal: ${project.goal || '(not set)'}\n\nCurrent user request:\n${prompt}`
+      : prompt;
     const cwd = folder?.path ?? join(options.dataDir, 'scratch', chatId);
     if (folder) { if (!(await fs.stat(cwd)).isDirectory()) throw new Error('Selected folder is unavailable.'); }
     else await fs.mkdir(cwd, {recursive: true, mode: 0o700});
@@ -78,7 +82,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
     const seal = () => { if (segment) store.updateItem(segment.id, segment.text, 'completed'); segment = undefined; };
     run.promise = (async () => {
       try {
-        const result = await provider.run({ chat, cwd, prompt, onDelta: delta => append('assistant', delta), onReasoning: delta => append('reasoning', delta),
+        const result = await provider.run({ chat, cwd, prompt: contextualPrompt, onDelta: delta => append('assistant', delta), onReasoning: delta => append('reasoning', delta),
           onEvent(method, params) {
             if (disposed) return;
             const item = params.item && typeof params.item === 'object' ? params.item as Record<string, unknown> : params;

@@ -1,0 +1,35 @@
+/* Projects screen. Reuses .settings-screen shell classes from styles.css. */
+.projects-empty { margin: 8px 0 0; color: var(--text-faint); font-size: 13px; }
+.projects-list { list-style: none; margin: 24px 0 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 10px; }
+.projects-item { display: flex; flex-direction: column; gap: 4px; width: 100%; text-align: left; padding: 12px 14px; border: 1px solid var(--hairline); border-radius: var(--radius); background: var(--bg-raised); }
+.projects-item:hover { background: var(--bg-hover); }
+.projects-item.is-selected { border-color: var(--accent); }
+.projects-item-name { font-weight: 600; color: var(--text); }
+.projects-item-meta { font-size: 12px; color: var(--text-faint); }
+
+.new-project { margin-top: 24px; padding: 18px 20px; border: 1px solid var(--hairline); border-radius: var(--radius); background: var(--bg-raised); display: flex; flex-direction: column; gap: 14px; }
+.new-project header { display: flex; align-items: center; justify-content: space-between; }
+.new-project h2 { margin: 0; font-size: 15px; font-weight: 600; }
+.new-project label { display: flex; flex-direction: column; gap: 6px; font-size: 12px; color: var(--text-dim); }
+.new-project input[type='text'], .new-project input:not([type]), .new-project textarea { background: var(--bg); color: var(--text); border: 1px solid var(--hairline); border-radius: var(--radius); padding: 7px 9px; font-size: 13px; }
+.new-project textarea { resize: vertical; font-family: inherit; }
+.new-project .optional { color: var(--text-faint); font-weight: 400; }
+.projects-folder-picker { border: 1px solid var(--hairline); border-radius: var(--radius); padding: 10px 12px; margin: 0; display: flex; flex-direction: column; gap: 8px; }
+.projects-folder-picker legend { font-size: 12px; color: var(--text-dim); padding: 0 4px; }
+.projects-folder-option { flex-direction: row !important; align-items: center; gap: 8px !important; }
+.projects-folder-option code { color: var(--text-faint); font-family: var(--mono); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.project-overview { margin-top: 28px; padding-top: 20px; border-top: 1px solid var(--hairline); }
+.project-overview-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; flex-wrap: wrap; }
+.project-overview-top h2 { margin: 0; font-size: 19px; font-weight: 600; }
+.project-start { display: flex; align-items: flex-end; gap: 12px; flex-wrap: wrap; }
+.project-start-folder { display: flex; flex-direction: column; gap: 5px; font-size: 12px; color: var(--text-dim); }
+.project-start-folder select { background: var(--bg-raised); color: var(--text); border: 1px solid var(--hairline); border-radius: var(--radius); padding: 6px 8px; font-size: 12px; }
+.project-overview .settings-section-label { margin: 22px 0 8px; }
+.project-goal { margin: 0; color: var(--text-dim); white-space: pre-wrap; max-width: 68ch; }
+.project-folders, .project-chats { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.project-folders li { display: flex; align-items: center; gap: 8px; color: var(--text-dim); font-size: 13px; }
+.project-folders code { color: var(--text-faint); font-family: var(--mono); font-size: 11px; }
+.project-chats button { display: flex; align-items: baseline; justify-content: space-between; gap: 14px; width: 100%; text-align: left; padding: 8px 10px; border: 1px solid var(--hairline); border-radius: var(--radius); background: var(--bg-raised); }
+.project-chats button:hover { background: var(--bg-hover); }
+.project-chat-title { color: var(--text); font-size: 13px; }

@@ -2,12 +2,15 @@ import React, { useCallback, useRef } from 'react';
 import { ChatView } from './components/ChatView';
 import { Sidebar } from './components/Sidebar';
 import { ProvidersScreen } from './components/ProvidersScreen';
+import { ProjectsScreen } from './components/ProjectsScreen';
 import { Workspace } from './components/Workspace';
 import {
   NAV_DEFAULT,
   dismissNotice,
   persistNavWidth,
   setNavWidth,
+  closeSettings,
+  createChat,
 } from './store';
 import { useStore } from './useStore';
 
@@ -81,7 +84,7 @@ export function App(): React.ReactElement {
         }}
       />
       <main className="center">
-        {state.screen === 'providers' ? <ProvidersScreen /> : state.boot.phase === 'loading' || state.boot.phase === 'idle' ? (
+        {state.screen === 'projects' ? <ProjectsScreen onBack={closeSettings} onStartChat={(projectId, folderId)=>void createChat(folderId, projectId)} /> : state.screen === 'providers' ? <ProvidersScreen /> : state.boot.phase === 'loading' || state.boot.phase === 'idle' ? (
           <div className="center-loading" role="status">
             Loading workspace…
           </div>

@@ -1,0 +1,107 @@
+/* Markdown message body. Imported only by MessageBody.tsx; palette comes from
+   the app-level vars in styles.css. */
+
+.md-body { overflow-wrap: anywhere; line-height: 1.55; }
+.md-body > :first-child { margin-top: 0; }
+.md-body > :last-child { margin-bottom: 0; }
+
+.md-body p,
+.md-body ul,
+.md-body ol,
+.md-body table,
+.md-body blockquote { margin: 8px 0; }
+
+.md-body h1, .md-body h2, .md-body h3, .md-body h4, .md-body h5, .md-body h6 {
+  margin: 14px 0 6px;
+  font-size: 13px;
+  font-weight: 600;
+}
+.md-body h1 { font-size: 15px; }
+.md-body h2 { font-size: 14px; }
+
+.md-body ul, .md-body ol { padding-left: 22px; }
+.md-body li { margin: 2px 0; }
+.md-body li > ul, .md-body li > ol { margin: 2px 0; }
+
+.md-body a { color: var(--accent); text-decoration: none; }
+.md-body a:hover { text-decoration: underline; }
+
+.md-body blockquote {
+  padding: 2px 12px;
+  border-left: 2px solid var(--hairline);
+  color: var(--text-dim);
+}
+
+.md-body hr { border: 0; border-top: 1px solid var(--hairline); margin: 12px 0; }
+
+.md-body code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+}
+.md-body :not(pre) > code {
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--bg-raised);
+  border: 1px solid var(--hairline);
+}
+
+.md-code {
+  margin: 8px 0;
+  border: 1px solid var(--hairline);
+  border-radius: 7px;
+  background: var(--bg-raised);
+  overflow: hidden;
+}
+.md-code-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 6px 4px 10px;
+  border-bottom: 1px solid var(--hairline);
+}
+.md-code-lang {
+  font-size: 11px;
+  color: var(--text-dim);
+  text-transform: lowercase;
+}
+.md-code-body {
+  margin: 0;
+  padding: 10px;
+  overflow-x: auto;
+  user-select: text;
+}
+.md-code-body code { background: none; border: 0; padding: 0; }
+
+.md-body table { border-collapse: collapse; display: block; overflow-x: auto; }
+.md-body th, .md-body td {
+  padding: 4px 10px;
+  border: 1px solid var(--hairline);
+  text-align: left;
+}
+.md-body th { background: var(--bg-raised); font-weight: 600; }
+
+.md-copy {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: 0;
+  border-radius: 5px;
+  background: none;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+.md-copy:hover { background: var(--bg-hover); color: var(--text); }
+.md-copy[data-state='copied'] { color: var(--accent); }
+.md-copy[data-state='error'] { color: var(--danger); }
+
+.msg-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 2px;
+  opacity: 0;
+  transition: opacity 120ms;
+}
+.msg-assistant:hover .msg-actions,
+.msg-actions:focus-within { opacity: 1; }

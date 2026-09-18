@@ -738,3 +738,12 @@ textarea:focus-visible {
 .command-source { display: flex; gap: 10px; align-items: flex-start; margin-bottom: 10px; color: var(--text-dim); }
 .command-source code { flex: 1; min-width: 0; font: 11px/1.6 var(--mono); overflow-wrap: anywhere; }
 .command-source button { flex: none; }
+.composer { display: grid; grid-template-columns: 1fr 26px; align-items: center; padding: 10px 12px; }
+.composer-input { grid-column: 1 / -1; width: 100%; }
+.composer-options { display: flex; align-items: center; gap: 12px; font-size: 11px; color: var(--text-faint); }
+.composer-options select { border: 0; background: transparent; color: var(--text-dim); font: inherit; padding: 3px 0; cursor: pointer; }
+.composer-options select:disabled { cursor: default; opacity: .55; }
+.chat-context { width: min(calc(100% - 64px), 740px); margin: 0 auto 12px; display: flex; gap: 8px; align-items: center; color: var(--text-faint); font-size: 11px; }
+.chat-context span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.msg-actions { justify-content: flex-start; }
+@media (prefers-reduced-motion: reduce) { .msg-actions { transition: none; } }
