@@ -8,7 +8,11 @@ export interface Snapshot { folders: Folder[]; chats: Chat[]; projects: Project[
 export interface FileEntry { name: string; path: string; kind: 'file' | 'directory' }
 export interface ChangedFile { path: string; previousPath?: string; status: string; adds?: number; dels?: number }
 export interface ProviderInfo { id: string; name: string; available: boolean; identityMasked: string; models: { id: string; name: string }[]; error?: string; status?: 'ready' | 'configured' | 'installed' | 'not-detected' | 'error'; source?: string; detail?: string; canReveal?: boolean; custom?: boolean; endpoint?: string; apiKeyEnv?: string; checkedAt?: string }
-export type AgentEvent = {type:'workspaceChanged';folderId:string} | {type:'chatSelected'; chatId:string} | { type: 'snapshot'; snapshot: Snapshot } | { type: 'timeline'; chatId: string; items: TimelineItem[] } | { type: 'notice'; message: string };
+/** 'live' = from a provider event this session; 'restored' = loaded from SQLite after restart. */
+export type ContextSource = 'live' | 'restored';
+/** Context-window occupancy telemetry. Unknown values are null ("Unavailable"), never zero. */
+export interface ContextTelemetry { usedTokens: number | null; windowTokens: number | null; source: ContextSource | null; compacted: boolean; updatedAt: string | null }
+export type AgentEvent = {type:'workspaceChanged';folderId:string} | {type:'chatSelected'; chatId:string} | { type: 'snapshot'; snapshot: Snapshot } | { type: 'timeline'; chatId: string; items: TimelineItem[] } | { type: 'notice'; message: string } | { type: 'contextTelemetry'; chatId: string; telemetry: ContextTelemetry };
 export interface Commands {
  'clipboard.write': {input:{text:string};output:void};
  'link.open': {input:{url:string};output:void};
@@ -32,6 +36,7 @@ export interface Commands {
  'providers.remove': { input: {id: string}; output: void };
  'providers.check': { input: {id: string}; output: ProviderInfo };
  'providers.reveal': { input: {id: string}; output: {identity: string} };
+  'chat.contextTelemetry': { input: {id: string}; output: ContextTelemetry };
 }
 export interface AgentBridge {
  invoke<K extends keyof Commands>(command: K, input: Commands[K]['input']): Promise<Commands[K]['output']>;

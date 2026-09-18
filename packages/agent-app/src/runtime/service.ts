@@ -7,6 +7,7 @@ import { CustomProviders } from './custom-providers.ts';
 import { AgentStore } from './store.ts';
 import { WorkspaceWatchService } from './workspace-watch.ts';
 import { toolEventDetails } from './tool-event-details.ts';
+import { applyProviderEvent } from './context-telemetry.ts';
 import { listFiles, readFile } from './files.ts';
 import { AgentModeReviewHost } from './review.ts';
 import { createProviderAdapter, MODEL, type ProviderAdapter } from './provider.ts';
@@ -93,6 +94,8 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
         const result = await provider.run({ chat, cwd, prompt: contextualPrompt, onDelta: delta => append('assistant', delta), onReasoning: delta => append('reasoning', delta),
           onEvent(method, params) {
             if (disposed) return;
+            const telemetry = applyProviderEvent(store.contextTelemetry(chatId), method, params);
+            if (telemetry) { store.setContextTelemetry(chatId, telemetry); emit({ type: 'contextTelemetry', chatId, telemetry }); }
             const item = params.item && typeof params.item === 'object' ? params.item as Record<string, unknown> : params;
             const type = String(item.type ?? '');
             if (type === 'agentMessage' || type === 'reasoning' || type === 'userMessage' || !method.startsWith('item/')) return;
@@ -182,6 +185,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
         const result = store.updateChat(chatId, patch); state(); return result;
       }
       case 'chat.send': return send(id(p.id), text(p.text, 'message', 262144), id(p.requestId));
+      case 'chat.contextTelemetry': { const chatId = id(p.id); chatFor(chatId); return store.contextTelemetry(chatId); }
       case 'chat.stop': { const chatId = id(p.id); chatFor(chatId); const run = runs.get(chatId); if (!run) return; run.stopped = true; store.updateChat(chatId, {status: 'stopping'}); settleApprovals(chatId); state(); await provider.stop(chatId); return; }
       case 'approval.respond': { const approvalId = id(p.id); if (typeof p.approved !== 'boolean') throw new Error('Invalid approval decision.'); const pending = approvals.get(approvalId); if (!pending) throw new Error('This approval is no longer pending.'); approvals.delete(approvalId); clearTimeout(pending.timer); pending.resolve(p.approved); return; }
       case 'project.create': { const name = text(p.name,'project name',256).trim(); if (!name) throw new Error('Name the Project.'); if (!Array.isArray(p.folderIds) || p.folderIds.length > 100) throw new Error('Invalid Project folders.'); const result = store.createProject(name, text(p.goal,'goal',32768), [...new Set(p.folderIds.map(id))]); state(); return result; }

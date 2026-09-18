@@ -1,6 +1,7 @@
 import type {
   Chat,
   ChangedFile,
+  ContextTelemetry,
   FileEntry,
   ProviderInfo,
   Snapshot,
@@ -39,6 +40,8 @@ export interface AppState {
   snapshot: Snapshot | null;
   activeChatId: string | null;
   timelines: Record<string, Loadable<TimelineItem[]>>;
+  /** Latest context-window telemetry per chat; live events overwrite restored rows. */
+  contextTelemetry: Record<string, ContextTelemetry>;
   /** In-flight sends keyed by chat id; cleared when the run event arrives or fails. */
   sending: Record<string, boolean>;
   notices: Notice[];
@@ -68,6 +71,7 @@ let state: AppState = {
   snapshot: null,
   activeChatId: null,
   timelines: {},
+  contextTelemetry: {},
   sending: {},
   notices: [],
   tabs: savedWorkspace.tabs,
@@ -155,6 +159,8 @@ export async function boot(): Promise<void> {
           [event.chatId]: { phase: 'ready', value: event.items },
         },
       });
+    } else if (event.type === 'contextTelemetry') {
+      set({ contextTelemetry: { ...state.contextTelemetry, [event.chatId]: event.telemetry } });
     } else if (event.type === 'notice') pushNotice(event.message);
   });
   try {
@@ -177,6 +183,7 @@ function applySnapshot(snapshot: Snapshot): void {
       : (snapshot.activeChatId ?? snapshot.chats.find((c) => !c.archived)?.id ?? null);
   set({ snapshot, activeChatId });
   if (activeChatId && !state.timelines[activeChatId]) void loadTimeline(activeChatId);
+  if (activeChatId) void loadContextTelemetry(activeChatId);
 }
 
 export function activeChat(): Chat | null {
@@ -188,6 +195,7 @@ export function activeChat(): Chat | null {
 
 export async function selectChat(id: string): Promise<void> {
   set({ activeChatId: id, screen: 'work' });
+  void loadContextTelemetry(id);
   const cached = state.timelines[id];
   if (cached?.phase === 'ready') {
     // Cached view renders immediately, but the host must still learn the
@@ -202,6 +210,17 @@ export async function selectChat(id: string): Promise<void> {
     return;
   }
   await loadTimeline(id);
+}
+
+/** Restore persisted telemetry once per chat; never clobbers a live update. */
+async function loadContextTelemetry(id: string): Promise<void> {
+  if (state.contextTelemetry[id]) return;
+  try {
+    const telemetry = await invoke('chat.contextTelemetry', { id });
+    if (!state.contextTelemetry[id]) set({ contextTelemetry: { ...state.contextTelemetry, [id]: telemetry } });
+  } catch {
+    // Meter simply stays hidden; telemetry is non-critical.
+  }
 }
 
 async function loadTimeline(id: string): Promise<void> {

@@ -7,7 +7,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { chmodSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
-import type { Chat, ChatStatus, Folder, Project, Snapshot, TimelineItem } from '../shared/protocol.ts';
+import type { Chat, ChatStatus, ContextTelemetry, Folder, Project, Snapshot, TimelineItem } from '../shared/protocol.ts';
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS folders (
@@ -27,6 +27,9 @@ CREATE INDEX IF NOT EXISTS timeline_chat ON timeline (chat_id, seq);
 CREATE TABLE IF NOT EXISTS receipts (
   request_id TEXT PRIMARY KEY, chat_id TEXT NOT NULL, run_id TEXT NOT NULL, created_at TEXT NOT NULL, fingerprint TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS context_telemetry (
+  chat_id TEXT PRIMARY KEY, used_tokens INTEGER, window_tokens INTEGER,
+  source TEXT, compacted INTEGER NOT NULL DEFAULT 0, updated_at TEXT);
 `;
 
 interface ChatRow {
@@ -202,6 +205,34 @@ export class AgentStore {
 
   setActiveChat(id: string): void {
     this.db.prepare("INSERT INTO meta (key, value) VALUES ('activeChatId', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(id);
+  }
+
+  /** Persist the latest reliable telemetry for a chat (upsert, additive migration-safe). */
+  setContextTelemetry(chatId: string, t: ContextTelemetry): void {
+    this.db.prepare(
+      'INSERT INTO context_telemetry (chat_id, used_tokens, window_tokens, source, compacted, updated_at) VALUES (?, ?, ?, ?, ?, ?) '
+      + 'ON CONFLICT(chat_id) DO UPDATE SET used_tokens = excluded.used_tokens, window_tokens = excluded.window_tokens, source = excluded.source, compacted = excluded.compacted, updated_at = excluded.updated_at',
+    ).run(chatId, t.usedTokens, t.windowTokens, t.source, t.compacted ? 1 : 0, t.updatedAt);
+  }
+
+  /**
+   * Last persisted telemetry, restored as source 'restored'. Rows written by
+   * a corrupted or future schema degrade to Unavailable, never to zero.
+   */
+  contextTelemetry(chatId: string): ContextTelemetry {
+    const row = this.db.prepare('SELECT * FROM context_telemetry WHERE chat_id = ?').get(chatId) as
+      | { used_tokens: number | null; window_tokens: number | null; source: string | null; compacted: number; updated_at: string | null }
+      | undefined;
+    if (!row) return { usedTokens: null, windowTokens: null, source: null, compacted: false, updatedAt: null };
+    const used = typeof row.used_tokens === 'number' && Number.isInteger(row.used_tokens) && row.used_tokens >= 0 ? row.used_tokens : null;
+    const window = typeof row.window_tokens === 'number' && Number.isInteger(row.window_tokens) && row.window_tokens > 0 ? row.window_tokens : null;
+    return {
+      usedTokens: used,
+      windowTokens: window,
+      source: used !== null || window !== null || row.compacted === 1 ? 'restored' : null,
+      compacted: row.compacted === 1,
+      updatedAt: typeof row.updated_at === 'string' ? row.updated_at : null,
+    };
   }
 
   timeline(chatId: string): TimelineItem[] {

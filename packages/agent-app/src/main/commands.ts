@@ -11,6 +11,7 @@ const COMMANDS = {
   'chat.update': true,
   'chat.send': true,
   'chat.stop': true,
+  'chat.contextTelemetry': true,
   'approval.respond': true,
   'project.create': true,
   'workspace.watch': true,

@@ -1,0 +1,10 @@
+.context-meter { display:inline-flex; align-items:center; gap:6px; font-size:11px; color:var(--text-faint); }
+.context-meter-track { position:relative; width:72px; height:4px; border-radius:2px; background:var(--bg-hover); border:1px solid var(--hairline); overflow:hidden; }
+.context-meter-fill { position:absolute; inset:0 auto 0 0; border-radius:2px; background:var(--accent); }
+.context-high .context-meter-fill { background:var(--warn); }
+.context-critical .context-meter-fill { background:var(--danger); }
+.context-critical .context-meter-label { color:var(--danger); }
+.context-unknown .context-meter-track { background:repeating-linear-gradient(45deg, var(--bg-hover) 0 4px, transparent 4px 8px); }
+.context-meter-label { min-width:28px; text-align:right; font-variant-numeric:tabular-nums; }
+.context-meter-badge { padding:1px 5px; border:1px solid var(--hairline); border-radius:4px; color:var(--warn); }
+.context-meter-restored { color:var(--text-faint); }
