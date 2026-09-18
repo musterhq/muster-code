@@ -28,7 +28,7 @@ export function ToolCard({item}: {item: TimelineItem}) {
   const p = classifyTool(item.data);
   const running = item.status === 'running';
   const failed = item.status === 'failed';
-  const state = running ? p.runningVerb : failed ? 'Failed' : p.verb;
+  const state = running ? p.runningVerb : failed ? 'Failed' : item.status === 'interrupted' ? 'Interrupted' : item.status === 'cancelled' ? 'Cancelled' : item.status === 'completed' ? p.verb : 'Tool';
   const raw = p.subject || 'Tool';
   const output = item.text.startsWith(raw) ? item.text.slice(raw.length).replace(/^\n/, '') : item.text;
   const bodyId = `tool-body-${item.id}`;
@@ -40,7 +40,7 @@ export function ToolCard({item}: {item: TimelineItem}) {
       <button className="command-head" aria-expanded={open} aria-controls={bodyId} onClick={()=>setOpen(v=>!v)}>
         {running ? <span className="tool-run-glyph" aria-hidden="true" /> : <Terminal size={14} aria-hidden="true" />}
         <span className="command-label" title={command}>{command}</span>
-        <span className="command-state">{running ? 'Running' : failed ? 'Failed' : 'Ran'}</span>
+        <span className="command-state">{state}</span>
         {open ? <ChevronDown size={12}/> : <ChevronRight size={12}/>}
       </button>
       {open ? <div className="command-body" id={bodyId}>
