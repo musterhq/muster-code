@@ -768,7 +768,7 @@ textarea:focus-visible {
 /* Short, interruptible shell transitions; native drag regions remain independent. */
 .nav-content { height:100%; }
 .nav, .workspace {
-  transition: width 180ms cubic-bezier(.2,.8,.2,1), padding 180ms cubic-bezier(.2,.8,.2,1), opacity 140ms ease, display 180ms allow-discrete;
+  transition: width 180ms cubic-bezier(.2,.8,.2,1), min-width 180ms cubic-bezier(.2,.8,.2,1), padding 180ms cubic-bezier(.2,.8,.2,1), opacity 140ms ease, display 180ms allow-discrete;
 }
 .nav[hidden] { padding-left:0; padding-right:0; opacity:0; }
 .workspace { overflow:clip; }
@@ -777,7 +777,7 @@ textarea:focus-visible {
 .app[data-nav-resizing='true'] .nav, .app[data-nav-resizing='true'] .nav-toggle,
 .workspace[data-resizing='true'] { transition:none; }
 @starting-style {
-  .nav:not([hidden]), .workspace:not([hidden]) { width:0 !important; opacity:0; }
+  .nav:not([hidden]), .workspace:not([hidden]) { width:0 !important; min-width:0 !important; opacity:0; }
 }
 @media (prefers-reduced-motion:reduce) {
   .nav,.workspace,.nav-toggle { transition:none; }
