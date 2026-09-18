@@ -1,0 +1,23 @@
+import { createRequire } from 'node:module';
+import assert from 'node:assert/strict';
+const require = createRequire(import.meta.url);
+const {parseHTML} = require('linkedom');
+const {window} = parseHTML('<html><body><div id="root"></div></body></html>');
+Object.assign(globalThis,{window, document:window.document, HTMLElement:window.HTMLElement, Element:window.Element, localStorage:{getItem(){return null},setItem(){}},requestAnimationFrame:(cb:any)=>setTimeout(cb,0),cancelAnimationFrame:clearTimeout, ResizeObserver:class {observe(){}unobserve(){}disconnect(){}}});
+Object.defineProperty(window.HTMLElement.prototype,'scrollHeight',{get(){return 800}});
+Object.defineProperty(window.HTMLElement.prototype,'clientHeight',{get(){return 500}});
+Object.defineProperty(window.HTMLElement.prototype,'offsetHeight',{get(){return 70}});
+Object.defineProperty(window.HTMLElement.prototype,'offsetWidth',{get(){return 800}});
+window.HTMLElement.prototype.getBoundingClientRect=()=>({height:500,width:800,top:0,left:0,bottom:500,right:800});
+window.HTMLElement.prototype.scrollTo=function({top}:any){this.scrollTop=top};
+const chats=['a','b'].map(id=>({id,title:id,pinned:false,archived:false,draft:'',status:'completed',updatedAt:'',model:'test',mode:'agent'}));
+window.muster={subscribe(){return()=>{}},async invoke(c:string,p:any){if(c==='app.snapshot')return {chats,folders:[],projects:[],version:1,activeChatId:'a'};if(c==='chat.select')return [{id:p.id+'1',chatId:p.id,kind:'assistant',text:'Chat '+p.id,createdAt:''}];}};
+const React=await import('react');
+const {createRoot}=await import('react-dom/client');
+const {App}=await import('../src/renderer/App');
+const store=await import('../src/renderer/store');
+const errors: unknown[] = [];
+const root=createRoot(document.getElementById('root')!, {onUncaughtError:error=>errors.push(error)});root.render(<App/>);await store.boot();
+for(const id of ['a','b','a','b','a']){await store.selectChat(id);await new Promise(r=>setTimeout(r,80));assert.equal(document.querySelectorAll('.timeline').length,1, 'exactly one mounted transcript after selecting '+id);assert.equal(document.querySelectorAll('.composer').length,1);assert.match(document.querySelector('.timeline')!.textContent!,new RegExp('Chat '+id));assert.doesNotMatch(document.querySelector('.timeline')!.textContent!,new RegExp('Chat '+(id==='a'?'b':'a')));assert.deepEqual(errors,[]);}
+root.unmount();
+console.log("PASS: repeated chat switching keeps one transcript and composer, with no stale messages or render errors");

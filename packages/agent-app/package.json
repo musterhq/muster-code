@@ -10,7 +10,8 @@
     "start": "node scripts/build.mjs && electron .",
     "dev": "node scripts/build.mjs --watch",
     "typecheck": "tsc --noEmit",
-    "test": "node --test 'tests/*.test.ts'"
+    "test": "node --test 'tests/*.test.ts'",
+    "test:renderer": "node scripts/test-renderer.mjs"
   },
   "dependencies": {
     "@base-ui/react": "1.8.0",
@@ -28,6 +29,7 @@
     "@types/react-dom": "19.3.0",
     "electron": "44.4.2",
     "esbuild": "0.28.2",
+    "linkedom": "^0.18.13",
     "typescript": "7.0.2"
   }
 }

@@ -319,9 +319,9 @@ export function ChatView(): React.ReactElement {
           <p>No messages yet. Say what you want done in {folder?.name ?? 'this workspace'}.</p>
         </div>
       ) : (
-        <Timeline key={chat.id} items={timeline.value ?? []} />
+        <Timeline key={`timeline:${chat.id}`} items={timeline.value ?? []} />
       )}
-      <Composer key={chat.id} chat={chat} />
+      <Composer key={`composer:${chat.id}`} chat={chat} />
       <footer className="chat-context"><Monitor size={12}/><span>This Mac</span>{folder && <span title={folder.path}>{folder.name}</span>}</footer>
     </div>
   );
