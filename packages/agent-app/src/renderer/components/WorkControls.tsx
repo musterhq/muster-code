@@ -1,6 +1,7 @@
+import {transitionLayout} from '../layoutMotion';
 import React, {useEffect,useRef,useState} from 'react';
 import {Files,MoreHorizontal,PanelRight,Pin} from 'lucide-react';
-import {activeChat,openFilesTab,pickFolder,setResourcesHidden,updateChat} from '../store';
+import {getState,activeChat,openFilesTab,pickFolder,setResourcesHidden,updateChat} from '../store';
 import {useStore} from '../useStore';
 import './work-controls.css';
 import {WorkspaceOverview} from './WorkspaceOverview';
@@ -23,11 +24,11 @@ export function WorkControls(){
  const browse=()=>{close();if(folder)openFilesTab(folder.id,folder.name);else void pickFolder();};
  return <div className="work-controls" ref={root} onBlur={e=>{if(!e.currentTarget.contains(e.relatedTarget as Node))setOpen(false);}}>
   <button ref={trigger} className="icon-button" aria-label="Conversation actions" title="Conversation actions" aria-expanded={open} onClick={()=>setOpen(value=>!value)}><MoreHorizontal size={17}/></button>
-  <button className="icon-button" aria-label={!state.resourcesHidden?'Hide resource pane':'Show resource pane'} title={!state.resourcesHidden?'Hide resource pane':'Show resource pane'} aria-pressed={!state.resourcesHidden} onClick={()=>{setResourcesHidden(!state.resourcesHidden);}}><PanelRight size={16}/></button>
+  <button className="icon-button" aria-label={!state.resourcesHidden?'Hide resource pane':'Show resource pane'} title={!state.resourcesHidden?'Hide resource pane':'Show resource pane'} aria-pressed={!state.resourcesHidden} onClick={()=>{transitionLayout(()=>setResourcesHidden(!getState().resourcesHidden));}}><PanelRight size={16}/></button>
   {<div hidden={!open} className="work-actions" role="group" aria-label="Conversation actions">
    <WorkspaceOverview compact onNavigate={()=>close()}/>
    <button onClick={browse}><Files size={14}/>{folder?'Files and changes':'Open folder…'}</button>
-   {<button onClick={()=>{setResourcesHidden(!state.resourcesHidden);close(true);}}><PanelRight size={14}/>{state.resourcesHidden?'Show resources':'Hide resources'}</button>}
+   {<button onClick={()=>{transitionLayout(()=>setResourcesHidden(!getState().resourcesHidden));close(true);}}><PanelRight size={14}/>{state.resourcesHidden?'Show resources':'Hide resources'}</button>}
    {chat&&<button onClick={()=>{void updateChat(chat.id,{pinned:!chat.pinned});close(true);}}><Pin size={14}/>{chat.pinned?'Unpin chat':'Pin chat'}</button>}
   </div>}
  </div>;

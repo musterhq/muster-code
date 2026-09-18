@@ -1,5 +1,6 @@
+import {transitionLayout} from './layoutMotion';
 import {PanelLeft} from 'lucide-react';
-import React, { useCallback, useRef,useEffect,useState } from 'react';
+import React, { useCallback, useRef,useEffect } from 'react';
 import {WorkControls} from './components/WorkControls';
 import { ChatView } from './components/ChatView';
 import { Sidebar } from './components/Sidebar';
@@ -22,15 +23,13 @@ import { focusComposer,isChord } from './focus';
 export function App(): React.ReactElement {
   const state = useStore();
   const dragging = useRef(false);
-  const [navResizing,setNavResizing]=useState(false);
   useEffect(()=>{
-    const toggle=(event:KeyboardEvent)=>{if(isChord(event,'b')){event.preventDefault();setNavHidden(!getState().navHidden);}};
+    const toggle=(event:KeyboardEvent)=>{if(isChord(event,'b')){event.preventDefault();transitionLayout(()=>setNavHidden(!getState().navHidden));}};
     window.addEventListener('keydown',toggle);return()=>window.removeEventListener('keydown',toggle);
   },[]);
 
   const onSeparatorPointerDown = useCallback((e: React.PointerEvent) => {
     dragging.current = true;
-    setNavResizing(true);
     (e.target as HTMLElement).setPointerCapture(e.pointerId);
   }, []);
   const onSeparatorPointerMove = useCallback((e: React.PointerEvent) => {
@@ -39,7 +38,6 @@ export function App(): React.ReactElement {
   const onSeparatorPointerUp = useCallback((e: React.PointerEvent) => {
     if (!dragging.current) return;
     dragging.current = false;
-    setNavResizing(false);
     (e.target as HTMLElement).releasePointerCapture(e.pointerId);
     persistNavWidth();
   }, []);
@@ -69,8 +67,8 @@ export function App(): React.ReactElement {
   }
 
   return (
-    <div className="app" data-nav-hidden={state.navHidden} data-nav-resizing={navResizing}>
-      <button type="button" className="nav-toggle icon-button" style={{left:state.navHidden?100:state.navWidth-38}} aria-label={state.navHidden?'Show left sidebar':'Hide left sidebar'} title={state.navHidden?'Show left sidebar (⌘B)':'Hide left sidebar (⌘B)'} aria-expanded={!state.navHidden} aria-keyshortcuts="Meta+B Control+B" onClick={()=>setNavHidden(!state.navHidden)}><PanelLeft size={16}/></button>
+    <div className="app" data-nav-hidden={state.navHidden}>
+      <button type="button" className="nav-toggle icon-button" style={{left:state.navHidden?100:state.navWidth-38}} aria-label={state.navHidden?'Show left sidebar':'Hide left sidebar'} title={state.navHidden?'Show left sidebar (⌘B)':'Hide left sidebar (⌘B)'} aria-expanded={!state.navHidden} aria-keyshortcuts="Meta+B Control+B" onClick={()=>transitionLayout(()=>setNavHidden(!getState().navHidden))}><PanelLeft size={16}/></button>
       <nav
         className="nav"
         hidden={state.navHidden}
