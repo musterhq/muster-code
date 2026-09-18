@@ -217,8 +217,8 @@ export class AgentStore {
     return item;
   }
 
-  updateItem(id: string, text: string, status?: string): void {
-    this.db.prepare('UPDATE timeline SET text = ?, status = ? WHERE id = ?').run(text, status ?? null, id);
+  updateItem(id: string, text: string, status?: string, data?: Record<string, unknown>): void {
+    this.db.prepare('UPDATE timeline SET text = ?, status = ?, data = COALESCE(?, data) WHERE id = ?').run(text, status ?? null, data ? JSON.stringify(data) : null, id);
   }
 
   item(id: string): TimelineItem | undefined {

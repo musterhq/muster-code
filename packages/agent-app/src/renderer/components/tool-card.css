@@ -1,5 +1,6 @@
-.tool-row-card { border: 1px solid var(--hairline); border-radius: 9px; background: #1d1d1d; overflow: hidden; }
+.tool-row-card { border-radius: 5px; overflow: hidden; }
 .tool-row-head { display: flex; align-items: center; gap: 8px; padding: 7px 12px; width: 100%; color: var(--text-dim); text-align: left; font-size: 12px; }
+.tool-row-head:hover { background:var(--bg-hover); }
 .tool-row-subject { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 11px/1.6 var(--mono); color: var(--text-faint); }
 .tool-row-state { flex: none; font-size: 11px; color: var(--text-faint); }
 .is-failed .tool-row-state { color: #e5534b; }
@@ -11,3 +12,12 @@
 .tool-run-glyph { flex: none; width: 6px; height: 6px; border-radius: 50%; background: currentColor; animation: tool-run-pulse 1.2s ease-in-out infinite; }
 @keyframes tool-run-pulse { 0%, 100% { opacity: .25; transform: scale(.75); } 50% { opacity: 1; transform: scale(1); } }
 @media (prefers-reduced-motion: reduce) { .tool-run-glyph { animation: none; opacity: .7; } }
+.tool-glyph { display:inline-flex; flex:none; align-items:center; }
+.tool-metadata { white-space:pre-wrap; overflow-wrap:anywhere; max-height:300px; overflow:auto; font:11px/1.6 var(--mono); color:var(--text-faint); user-select:text; }
+.tool-details { color:var(--text-faint); font-size:11px; overflow-wrap:anywhere; }
+.tool-details dl { display:grid; grid-template-columns:auto 1fr; gap:4px 12px; }
+.tool-details dd { margin:0; user-select:text; }
+.tool-details summary { cursor:pointer; padding:5px 0; }
+.tool-details summary:focus-visible { outline:2px solid var(--accent); }
+.tool-child-ids { padding-top:6px; user-select:text; }
+@media (prefers-reduced-motion: no-preference) { .tool-glyph.is-active { animation:tool-run-pulse 1.2s ease-in-out infinite; } }

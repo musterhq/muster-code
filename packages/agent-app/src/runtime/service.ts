@@ -6,6 +6,7 @@ import { discoverLocalProviders } from './provider-discovery.ts';
 import { CustomProviders } from './custom-providers.ts';
 import { AgentStore } from './store.ts';
 import { WorkspaceWatchService } from './workspace-watch.ts';
+import { toolEventDetails } from './tool-event-details.ts';
 import { listFiles, readFile } from './files.ts';
 import { AgentModeReviewHost } from './review.ts';
 import { createProviderAdapter, MODEL, type ProviderAdapter } from './provider.ts';
@@ -100,17 +101,18 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
             if (method === 'item/started' || method === 'item/completed') {
               if (!toolIds.has(itemId)) seal();
               const finished = method.endsWith('completed');
-              const status = !finished ? 'running' : item.status === 'failed' || (typeof item.exitCode === 'number' && item.exitCode !== 0) ? 'failed' : item.status === 'interrupted' ? 'interrupted' : 'completed';
-              const label = detail(item.command ?? item.title ?? item.name ?? item.type);
+              const status = !finished ? 'running' : item.status === 'failed' || item.error != null || item.success === false || (typeof item.exitCode === 'number' && item.exitCode !== 0) ? 'failed' : item.status === 'interrupted' ? 'interrupted' : item.status === 'cancelled' || item.status === 'declined' ? 'cancelled' : 'completed';
+              const label = detail(item.command ?? item.title ?? item.name ?? item.tool ?? item.query ?? item.type);
               const output = detail(item.aggregatedOutput ?? item.output ?? '');
               const body = label + (output ? '\n' + output : '');
               let local = toolIds.get(itemId);
-              if (!local) { local = store.appendItem(chatId, 'tool', body, status, {providerItemId: itemId, type, name: label}).id; toolIds.set(itemId, local); }
-              else store.updateItem(local, body, status);
+              const metadata = {...toolEventDetails(item),providerItemId:itemId,type,name:label};
+              if (!local) { local = store.appendItem(chatId, 'tool', body, status, metadata).id; toolIds.set(itemId, local); }
+              else store.updateItem(local, body, status, {...store.item(local)?.data,...metadata});
               scheduleTimeline(chatId);
             } else if (method.endsWith('/outputDelta')) {
               const local = toolIds.get(itemId); const previous = local ? store.item(local) : undefined;
-              if (previous) { store.updateItem(previous.id, (previous.text + String(params.delta ?? '')).slice(-131072), 'running'); scheduleTimeline(chatId); }
+              if (previous?.status === 'running') { store.updateItem(previous.id, (previous.text + String(params.delta ?? '')).slice(-131072), 'running'); scheduleTimeline(chatId); }
             }
           },
           async onRequest(method, params) {

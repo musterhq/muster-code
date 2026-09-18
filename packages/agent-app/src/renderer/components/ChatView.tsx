@@ -4,6 +4,7 @@ import React, {
   useCallback,
   useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
 } from 'react';
@@ -19,6 +20,8 @@ import {
 import { useStore } from '../useStore';
 import { StatusDot } from './StatusDot';
 import { ToolCard } from './ToolCard';
+import { ActivityGroup } from './ActivityGroup';
+import { groupActivity, type TranscriptEntry } from './activityGrouping';
 import { CopyButton, MessageBody } from './MessageBody';
 
 const DRAFT_DEBOUNCE_MS = 250;
@@ -52,8 +55,9 @@ function Collapsible({
   );
 }
 
-function TimelineCard({ item }: { item: TimelineItem }): React.ReactElement {
+function TimelineCard({ item }: { item: TranscriptEntry }): React.ReactElement {
   switch (item.kind) {
+    case 'activity': return <ActivityGroup items={item.items}/>;
     case 'user':
       return (
         <div className="msg msg-user">
@@ -110,14 +114,15 @@ function TimelineCard({ item }: { item: TimelineItem }): React.ReactElement {
 }
 
 function Timeline({ items }: { items: TimelineItem[] }): React.ReactElement {
+  const rows=useMemo(()=>groupActivity(items),[items]);
   const scrollRef = useRef<HTMLDivElement>(null);
   const atBottom = useRef(true);
   const virtualizer = useVirtualizer({
-    count: items.length,
+    count: rows.length,
     getScrollElement: () => scrollRef.current,
     estimateSize: () => 72,
     overscan: 8,
-    getItemKey: (index) => items[index].id,
+    getItemKey: (index) => rows[index].id,
   });
   const totalSize = virtualizer.getTotalSize();
 
@@ -130,10 +135,10 @@ function Timeline({ items }: { items: TimelineItem[] }): React.ReactElement {
   // Follow the tail only while the reader is at the bottom; a reader scrolled
   // up keeps their anchor as new items stream in.
   useLayoutEffect(() => {
-    if (atBottom.current && items.length > 0) {
-      virtualizer.scrollToIndex(items.length - 1, { align: 'end' });
+    if (atBottom.current && rows.length > 0) {
+      virtualizer.scrollToIndex(rows.length - 1, { align: 'end' });
     }
-  }, [items.length, totalSize, virtualizer]);
+  }, [rows.length, totalSize, virtualizer]);
 
   return (
     <div className="timeline" ref={scrollRef} onScroll={onScroll}>
@@ -149,7 +154,7 @@ function Timeline({ items }: { items: TimelineItem[] }): React.ReactElement {
             className="timeline-row"
             style={{ transform: `translateY(${v.start}px)` }}
           >
-            <TimelineCard item={items[v.index]} />
+            <TimelineCard item={rows[v.index]} />
           </div>
         ))}
       </div>
