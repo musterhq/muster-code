@@ -771,9 +771,22 @@ textarea:focus-visible {
 .workspace { overflow:clip; }
 .workspace[hidden] { display:none; border-left-width:0; }
 .nav-toggle { transition:color 120ms ease; }
-.app { view-transition-name: shell; }
-::view-transition-group(shell) { animation-duration:160ms; animation-timing-function:cubic-bezier(.2,.8,.2,1); }
-::view-transition-old(shell),::view-transition-new(shell) { animation-duration:160ms; mix-blend-mode:normal; }
+.nav { view-transition-name:navigation; }
+.center { view-transition-name:conversation; }
+.workspace { view-transition-name:resources; }
+.nav-toggle { view-transition-name:navigation-toggle; }
+::view-transition-group(*) { animation-duration:240ms; animation-timing-function:cubic-bezier(.22,1,.36,1); }
+::view-transition-old(*),::view-transition-new(*) { animation-duration:240ms; animation-timing-function:cubic-bezier(.22,1,.36,1); mix-blend-mode:normal; }
+::view-transition-old(root) { display:none; }
+::view-transition-new(root) { animation:none; }
+::view-transition-old(navigation):only-child { animation:pane-left-out 240ms cubic-bezier(.22,1,.36,1) both; }
+::view-transition-new(navigation):only-child { animation:pane-left-in 240ms cubic-bezier(.22,1,.36,1) both; }
+::view-transition-old(resources):only-child { animation:pane-right-out 240ms cubic-bezier(.22,1,.36,1) both; }
+::view-transition-new(resources):only-child { animation:pane-right-in 240ms cubic-bezier(.22,1,.36,1) both; }
+@keyframes pane-left-in { from { transform:translateX(-100%); opacity:0; } to { transform:translateX(0); opacity:1; } }
+@keyframes pane-left-out { from { transform:translateX(0); opacity:1; } to { transform:translateX(-100%); opacity:0; } }
+@keyframes pane-right-in { from { transform:translateX(100%); opacity:0; } to { transform:translateX(0); opacity:1; } }
+@keyframes pane-right-out { from { transform:translateX(0); opacity:1; } to { transform:translateX(100%); opacity:0; } }
 ::view-transition { pointer-events:none; }
 @media (prefers-reduced-motion:reduce) {
   ::view-transition-group(*),::view-transition-old(*),::view-transition-new(*) { animation:none; }
