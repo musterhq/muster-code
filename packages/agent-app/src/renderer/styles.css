@@ -64,6 +64,7 @@ textarea:focus-visible {
 .app {
   display: flex;
   height: 100%;
+  overflow: hidden;
 }
 
 .nav {

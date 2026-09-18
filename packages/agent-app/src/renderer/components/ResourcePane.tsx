@@ -20,10 +20,14 @@ export function ResourcePane() {
   const maxWidth = Math.max(280, viewport-navWidth-360);
   const effectiveWidth = Math.min(maxWidth, Math.max(280,width));
   const persist = () => {try{localStorage.setItem(KEY,String(latest.current));}catch{}};
+  const toggleMaximized = () => {
+    setMaximized(value=>!value);
+    requestAnimationFrame(()=>document.querySelector<HTMLButtonElement>('.resource-maximize, .resource-compact-open')?.focus());
+  };
   // Preserve a readable conversation at the native window's minimum size.
   // Resource references stay in the store while their surface is collapsed.
   if (viewport - navWidth < 640 && !maximized) {
-    return <button className="icon-button resource-compact-open" aria-label={`Open resources (${tabs.length})`} onClick={()=>setMaximized(true)}>
+    return <button className="icon-button resource-compact-open" aria-label={`Open resources (${tabs.length})`} onClick={toggleMaximized}>
       <Maximize2 size={14}/>
     </button>;
   }
@@ -36,7 +40,7 @@ export function ResourcePane() {
       onPointerCancel={()=>{drag.current=null;}}
       onDoubleClick={()=>{const value=Math.round(viewport/3);latest.current=value;setWidth(value);persist();}}
       onKeyDown={e=>{if(e.key!=='ArrowLeft'&&e.key!=='ArrowRight')return;e.preventDefault();const delta=(e.shiftKey?32:8)*(e.key==='ArrowLeft'?1:-1);const value=Math.min(maxWidth,Math.max(280,effectiveWidth+delta));latest.current=value;setWidth(value);persist();}} />}
-    <button className="icon-button resource-maximize" aria-label={maximized?'Restore resource pane':'Maximize resource pane'} aria-pressed={maximized} onClick={()=>setMaximized(v=>!v)}>
+    <button className="icon-button resource-maximize" aria-label={maximized?'Restore resource pane':'Maximize resource pane'} aria-pressed={maximized} onClick={toggleMaximized}>
       {maximized?<Minimize2 size={13}/>:<Maximize2 size={13}/>}</button>
     <Workspace />
   </aside>;
