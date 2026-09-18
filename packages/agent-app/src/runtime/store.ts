@@ -224,8 +224,8 @@ export class AgentStore {
       | { used_tokens: number | null; window_tokens: number | null; source: string | null; compacted: number; updated_at: string | null }
       | undefined;
     if (!row) return { usedTokens: null, windowTokens: null, source: null, compacted: false, updatedAt: null };
-    const used = typeof row.used_tokens === 'number' && Number.isInteger(row.used_tokens) && row.used_tokens >= 0 ? row.used_tokens : null;
-    const window = typeof row.window_tokens === 'number' && Number.isInteger(row.window_tokens) && row.window_tokens > 0 ? row.window_tokens : null;
+    const used = typeof row.used_tokens === 'number' && Number.isInteger(row.used_tokens) && row.used_tokens >= 0 && row.used_tokens <= 50_000_000 ? row.used_tokens : null;
+    const window = typeof row.window_tokens === 'number' && Number.isInteger(row.window_tokens) && row.window_tokens > 0 && row.window_tokens <= 50_000_000 ? row.window_tokens : null;
     return {
       usedTokens: used,
       windowTokens: window,

@@ -212,14 +212,19 @@ export async function selectChat(id: string): Promise<void> {
   await loadTimeline(id);
 }
 
+const pendingContextTelemetry = new Set<string>();
+
 /** Restore persisted telemetry once per chat; never clobbers a live update. */
 async function loadContextTelemetry(id: string): Promise<void> {
-  if (state.contextTelemetry[id]) return;
+  if (state.contextTelemetry[id] || pendingContextTelemetry.has(id)) return;
+  pendingContextTelemetry.add(id);
   try {
     const telemetry = await invoke('chat.contextTelemetry', { id });
     if (!state.contextTelemetry[id]) set({ contextTelemetry: { ...state.contextTelemetry, [id]: telemetry } });
   } catch {
-    // Meter simply stays hidden; telemetry is non-critical.
+    // Unknown stays unavailable; retry on the next selection.
+  } finally {
+    pendingContextTelemetry.delete(id);
   }
 }
 

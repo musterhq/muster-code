@@ -1,4 +1,5 @@
 import React from 'react';
+import {Popover} from '@base-ui/react/popover';
 import type { ContextTelemetry } from '../../shared/protocol';
 import './context-meter.css';
 
@@ -27,7 +28,8 @@ export function ContextMeter({ telemetry }: { telemetry: ContextTelemetry }): Re
       : 'Context usage Unavailable';
   const level = percent === null ? 'unknown' : percent >= 90 ? 'critical' : percent >= 70 ? 'high' : 'normal';
   return (
-    <div className={`context-meter context-${level}`} role="status" aria-label={detail} title={detail}>
+    <Popover.Root>
+    <Popover.Trigger className={`context-meter context-${level}`} aria-label={detail} title="Context usage">
       <span className="context-meter-track" aria-hidden="true">
         {percent !== null && <span className="context-meter-fill" style={{ width: `${percent}%` }} />}
       </span>
@@ -36,6 +38,19 @@ export function ContextMeter({ telemetry }: { telemetry: ContextTelemetry }): Re
       </span>
       {compacted && <span className="context-meter-badge" title="Older history was compacted to free context.">Compacted</span>}
       {source === 'restored' && <span className="context-meter-badge context-meter-restored" title="Last known usage from a previous session.">Restored</span>}
-    </div>
+    </Popover.Trigger>
+    <Popover.Portal>
+      <Popover.Positioner side="top" align="end" sideOffset={10} className="context-positioner">
+        <Popover.Popup className="context-popup">
+          <Popover.Title>Context window</Popover.Title>
+          <Popover.Description>{percent === null ? 'The provider has not reported complete context usage yet.' : `${percent}% of the reported context window is in use.`}</Popover.Description>
+          <dl><div><dt>Tokens used</dt><dd>{usedTokens?.toLocaleString() ?? 'Unavailable'}</dd></div><div><dt>Window size</dt><dd>{windowTokens?.toLocaleString() ?? 'Unavailable'}</dd></div></dl>
+          {source === 'restored' && <p>Last recorded usage from the previous session. Updates when the provider reports new usage.</p>}
+          {compacted && <p>Earlier history was compacted. The next usage report will update this estimate.</p>}
+          <p className="context-note">Latest reported context usage, not cumulative billing usage.</p>
+        </Popover.Popup>
+      </Popover.Positioner>
+    </Popover.Portal>
+    </Popover.Root>
   );
 }

@@ -40,17 +40,16 @@ export function windowSize(value: unknown): number | null {
 
 /**
  * Occupancy from a codex `tokenUsage` record (the `last` per-turn usage).
- * Mirrors codex-rs `tokens_in_context_window`: totalTokens minus reasoning
- * output (reasoning is not retained in the window). `cachedInputTokens` is a
+ * Current codex-rs tokens_in_context_window uses the latest raw totalTokens.
+ * See https://github.com/openai/codex/blob/main/codex-rs/tui/src/token_usage.rs. `cachedInputTokens` is a
  * subset of `inputTokens`, never added. Falls back to input + output when
  * totalTokens is absent. Null when nothing reliable is present.
  */
 export function occupancyFromUsage(raw: unknown): number | null {
   const usage = asRecord(raw);
   if (!usage) return null;
-  const reasoning = tokenCount(usage.reasoningOutputTokens) ?? 0;
   const total = tokenCount(usage.totalTokens);
-  if (total !== null) return Math.max(0, total - reasoning);
+  if (total !== null) return total;
   const input = tokenCount(usage.inputTokens);
   if (input === null) return null;
   const output = tokenCount(usage.outputTokens) ?? 0;

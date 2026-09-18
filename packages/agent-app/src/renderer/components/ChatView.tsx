@@ -21,6 +21,7 @@ import { useStore } from '../useStore';
 import {captureAnchor,isAtBottom,recallPosition,rememberPosition,resolveAnchorIndex} from './chatContinuity';
 import './chat-continuity.css';
 import {TurnChanges} from './TurnChanges';
+import {ContextMeter} from './ContextMeter';
 import { StatusDot } from './StatusDot';
 import { ToolCard } from './ToolCard';
 import { ActivityGroup } from './ActivityGroup';
@@ -313,7 +314,7 @@ export function ChatView(): React.ReactElement {
           {chat.title}
         </span>
         <span className="chat-head-meta">
-          {folder && <span title={folder.path}>{folder.name}</span>}
+          {folder && <span className="chat-folder-context" title={folder.path}>{folder.name}</span>}
           <span className="chat-head-model">{chat.model}</span>
           <span className="chat-head-mode">{chat.mode}</span>
         </span>
@@ -343,7 +344,7 @@ export function ChatView(): React.ReactElement {
       )}
       <TurnChanges key={`changes:${chat.id}`} chat={chat} items={timeline.value??[]}/>
       <Composer key={`composer:${chat.id}`} chat={chat} />
-      <footer className="chat-context"><Monitor size={12}/><span>This Mac</span>{folder && <span title={folder.path}>{folder.name}</span>}</footer>
+      <footer className="chat-context"><Monitor size={12}/><span>This Mac</span>{folder && <span className="chat-folder-context" title={folder.path}>{folder.name}</span>}<ContextMeter telemetry={state.contextTelemetry[chat.id]??{usedTokens:null,windowTokens:null,source:null,compacted:false,updatedAt:null}}/></footer>
     </div>
   );
 }

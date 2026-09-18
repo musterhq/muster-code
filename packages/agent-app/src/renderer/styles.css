@@ -745,7 +745,7 @@ textarea:focus-visible {
 .composer-options select { border: 0; background: transparent; color: var(--text-dim); font: inherit; padding: 3px 0; cursor: pointer; }
 .composer-options select:disabled { cursor: default; opacity: .55; }
 .chat-context { width: min(calc(100% - 64px), 740px); margin: 0 auto 12px; display: flex; gap: 8px; align-items: center; color: var(--text-faint); font-size: 11px; }
-.chat-context span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat-context .chat-folder-context { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .msg-actions { justify-content: flex-start; }
 @media (prefers-reduced-motion: reduce) { .msg-actions { transition: none; } }
 .resource-separator { position: absolute; width: 5px; top: 42px; bottom: 0; left: -3px; cursor: col-resize; z-index: 2; touch-action: none; }

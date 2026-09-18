@@ -8,8 +8,8 @@ import {AgentStore} from '../src/runtime/store.ts';
 
 const now=()=>'2026-09-18T00:00:00.000Z';
 
-test('occupancy mirrors codex window residency: total minus reasoning, cached never added',()=>{
-  assert.equal(occupancyFromUsage({totalTokens:1200,reasoningOutputTokens:200,cachedInputTokens:900}),1000);
+test('occupancy mirrors codex window residency: latest total, cached and reasoning never double counted',()=>{
+  assert.equal(occupancyFromUsage({totalTokens:1200,reasoningOutputTokens:200,cachedInputTokens:900}),1200);
   assert.equal(occupancyFromUsage({inputTokens:800,outputTokens:150}),950);
   assert.equal(occupancyFromUsage({inputTokens:-5}),null);
   assert.equal(occupancyFromUsage('garbage'),null);
