@@ -2,6 +2,8 @@ import { createHash } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import { basename, join } from 'node:path';
 import type { AgentEvent, Chat, Commands, TimelineItem } from '../shared/protocol.ts';
+import { discoverLocalProviders } from './provider-discovery.ts';
+import { CustomProviders } from './custom-providers.ts';
 import { AgentStore } from './store.ts';
 import { listFiles, readFile } from './files.ts';
 import { AgentModeReviewHost } from './review.ts';
@@ -29,6 +31,7 @@ interface PendingApproval { chatId: string; resolve(approved: boolean): void; ti
 
 export function createAgentService(options: { dataDir: string; onEvent(event: AgentEvent): void; provider?: ProviderAdapter }) {
   const store = new AgentStore(options.dataDir);
+  const customProviders = new CustomProviders(options.dataDir);
   const provider = options.provider ?? createProviderAdapter();
   const runs = new Map<string, ActiveRun>();
   const approvals = new Map<string, PendingApproval>();
@@ -130,7 +133,16 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
   }
   async function dispatch(command: string, input: unknown): Promise<unknown> {
     if (command === 'app.snapshot') return store.snapshot();
-    if (command === 'providers.list') return provider.info();
+    if (command === 'providers.list') {
+      const detected = await discoverLocalProviders();
+      const runtime = provider.info();
+      return [...detected.map(({identity, credentialPresent, ...p}) => {
+        const runnable = runtime.find(r => r.id === p.id);
+        return {...p, source: p.id === 'hybrow' ? 'Local Hybrow profile' : p.id === 'codex' ? 'Local Codex sign-in' : p.id === 'claude-code' ? 'Local Claude Code configuration' : p.id === 'opencode' ? 'Local OpenCode configuration' : 'Host environment',
+          canReveal: Boolean(identity), available: Boolean(runnable?.available), models: runnable?.models ?? [],
+          ...(runnable?.available ? {status: 'ready', detail: 'Hybrow is enabled for chat execution. Uses your existing local profile; availability and limits depend on the upstream account.'} : {})};
+      }), ...customProviders.list()];
+    }
     const p = object(input);
     switch (command) {
       case 'folder.add': { const path = await fs.realpath(text(p.path, 'folder path')); if (!(await fs.stat(path)).isDirectory()) throw new Error('Choose a folder.'); const result = store.addFolder(path, basename(path)); state(); return result; }
@@ -152,7 +164,10 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
       case 'files.read': return readFile(folderFor(p.folderId).path, text(p.path,'path'));
       case 'git.changes': { const root = folderFor(p.folderId).path; const result = await new AgentModeReviewHost(() => root).listChanges(); if (result.error) throw new Error(result.error); return result.files; }
       case 'git.diff': { const root = folderFor(p.folderId).path; const result = await new AgentModeReviewHost(() => root).readChange(text(p.path,'path')); if (result.error) throw new Error(result.error); return {path: result.path, before: result.before, after: result.after, truncated: result.truncated}; }
-      case 'providers.reveal': throw new Error('This provider does not expose a verified account label. Credentials remain private.');
+      case 'providers.save': return customProviders.save({name:p.name,endpoint:p.endpoint,apiKeyEnv:p.apiKeyEnv});
+      case 'providers.remove': { const key=id(p.id); if(!key.startsWith('custom_')) throw new Error('Discovered connections are managed in their original app.'); customProviders.remove(key); return; }
+      case 'providers.check': return customProviders.check(id(p.id));
+      case 'providers.reveal': { const key=id(p.id); const info=(await discoverLocalProviders()).find(row=>row.id===key); if(!info?.identity) throw new Error('This connection has no account label to reveal.'); return {identity:info.identity}; }
       default: throw new Error('Unsupported command.');
     }
   }
@@ -163,6 +178,6 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
     let deadline: ReturnType<typeof setTimeout> | undefined;
     await Promise.race([Promise.allSettled([...runs.values()].map(run => run.promise)), new Promise(resolve => { deadline = setTimeout(resolve, 2000); })]);
     if (deadline) clearTimeout(deadline);
-    disposed = true; for (const timer of timers.values()) clearTimeout(timer); timers.clear(); store.close();
+    disposed = true; for (const timer of timers.values()) clearTimeout(timer); timers.clear(); customProviders.close(); store.close();
   }};
 }

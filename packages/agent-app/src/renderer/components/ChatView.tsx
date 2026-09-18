@@ -182,7 +182,10 @@ function Composer({ chat }: { chat: Chat }): React.ReactElement {
 
   useEffect(
     () => () => {
-      if (timer.current) clearTimeout(timer.current);
+      if (timer.current) {
+        clearTimeout(timer.current);
+        void updateChat(chatIdRef.current, { draft: textRef.current });
+      }
     },
     [],
   );

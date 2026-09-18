@@ -57,7 +57,7 @@ test('codex api key auth mode classified without key leakage', async () => {
 
 test('CODEX_HOME env overrides default codex path', async () => {
   const home = await fixtureHome();
-  const alt = await fixtureHome({ 'auth.json': JSON.stringify({ tokens: {} }) });
+  const alt = await fixtureHome({ 'auth.json': JSON.stringify({ tokens: {access_token: 'fixture'} }) });
   const results = await discoverLocalProviders({ home, env: { CODEX_HOME: alt } });
   assert.equal(byId(results, 'codex').status, 'configured');
 });

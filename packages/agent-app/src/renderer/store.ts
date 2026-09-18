@@ -18,7 +18,7 @@ export interface Loadable<T> {
 
 export interface WorkspaceTab {
   id: string;
-  kind: 'files' | 'file' | 'diff' | 'providers';
+  kind: 'files' | 'file' | 'diff';
   folderId?: string;
   path?: string;
   title: string;
@@ -30,6 +30,7 @@ export interface Notice {
 }
 
 export interface AppState {
+  screen: 'work' | 'providers';
   bridgeAvailable: boolean;
   boot: Loadable<true>;
   snapshot: Snapshot | null;
@@ -56,6 +57,7 @@ export const NAV_MIN = 180;
 export const NAV_MAX = 320;
 
 let state: AppState = {
+  screen: 'work',
   bridgeAvailable: getBridge() !== null,
   boot: { phase: 'idle' },
   snapshot: null,
@@ -156,6 +158,7 @@ function applySnapshot(snapshot: Snapshot): void {
       ? state.activeChatId
       : (snapshot.activeChatId ?? snapshot.chats.find((c) => !c.archived)?.id ?? null);
   set({ snapshot, activeChatId });
+  if (activeChatId && !state.timelines[activeChatId]) void loadTimeline(activeChatId);
 }
 
 export function activeChat(): Chat | null {
@@ -166,8 +169,7 @@ export function activeChat(): Chat | null {
 // Chats
 
 export async function selectChat(id: string): Promise<void> {
-  if (state.activeChatId === id) return;
-  set({ activeChatId: id });
+  set({ activeChatId: id, screen: 'work' });
   const cached = state.timelines[id];
   if (cached?.phase === 'ready') {
     // Cached view renders immediately, but the host must still learn the
@@ -330,9 +332,10 @@ export function openFilesTab(folderId: string, folderName: string): void {
 }
 
 export function openProvidersTab(): void {
-  openTab({ id: 'providers', kind: 'providers', title: 'Providers' });
-  void loadProviders();
+  set({ screen: 'providers', revealed: {} });
+  void loadProviders(true);
 }
+export function closeSettings(): void { set({ screen: 'work', revealed: {} }); }
 
 export function dirKey(folderId: string, path: string): string {
   return `${folderId}\u0000${path}`;
@@ -407,7 +410,8 @@ export async function openDiff(folderId: string, path: string): Promise<void> {
 // Providers
 
 export async function loadProviders(force = false): Promise<void> {
-  if (!force && (state.providers.phase === 'ready' || state.providers.phase === 'loading')) return;
+  if (state.providers.phase === 'loading') return;
+  if (!force && state.providers.phase === 'ready') return;
   set({ providers: { phase: 'loading', value: state.providers.value } });
   try {
     const providers = await invoke('providers.list', undefined);

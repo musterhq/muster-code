@@ -1,6 +1,7 @@
 import React, { useCallback, useRef } from 'react';
 import { ChatView } from './components/ChatView';
 import { Sidebar } from './components/Sidebar';
+import { ProvidersScreen } from './components/ProvidersScreen';
 import { Workspace } from './components/Workspace';
 import {
   NAV_DEFAULT,
@@ -80,7 +81,7 @@ export function App(): React.ReactElement {
         }}
       />
       <main className="center">
-        {state.boot.phase === 'loading' || state.boot.phase === 'idle' ? (
+        {state.screen === 'providers' ? <ProvidersScreen /> : state.boot.phase === 'loading' || state.boot.phase === 'idle' ? (
           <div className="center-loading" role="status">
             Loading workspace…
           </div>
@@ -88,7 +89,7 @@ export function App(): React.ReactElement {
           <ChatView />
         )}
       </main>
-      {state.tabs.length > 0 && (
+      {state.screen === 'work' && state.tabs.length > 0 && (
         <aside className="workspace" aria-label="Resources">
           <Workspace />
         </aside>

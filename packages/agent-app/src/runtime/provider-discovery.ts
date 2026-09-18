@@ -24,16 +24,21 @@ const MAX_BYTES = 1024 * 1024;
 
 /** Read a regular file up to 1 MiB; null if absent/not a regular file, throws on other errors. */
 async function readBounded(path: string): Promise<string | null> {
-  let stat;
+  // Read from one open descriptor with a hard cap, including concurrent growth.
+  const info = await fs.lstat(path).catch((e: NodeJS.ErrnoException) => { if (e.code === 'ENOENT') return null; throw e; });
+  if (!info) return null;
+  if (!info.isFile()) return null;
+  const handle = await fs.open(path, 'r');
   try {
-    stat = await fs.stat(path);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
-    throw error;
-  }
-  if (!stat.isFile()) return null;
-  if (stat.size > MAX_BYTES) throw new Error('file exceeds 1 MiB bound');
-  return fs.readFile(path, 'utf8');
+    const stat = await handle.stat();
+    if (!stat.isFile()) return null;
+    if (stat.size > MAX_BYTES) throw new Error('file exceeds 1 MiB bound');
+    const buffer = Buffer.alloc(MAX_BYTES + 1);
+    let count = 0;
+    while (count < buffer.length) { const r = await handle.read(buffer,count,buffer.length-count,null); if (!r.bytesRead) break; count += r.bytesRead; }
+    if (count > MAX_BYTES) throw new Error('file exceeds 1 MiB bound');
+    return buffer.subarray(0,count).toString('utf8');
+  } finally { await handle.close(); }
 }
 
 async function exists(path: string): Promise<boolean> {
@@ -64,16 +69,16 @@ async function discoverCodex(home: string, env: NodeJS.ProcessEnv): Promise<Disc
     const raw = await readBounded(source);
     if (raw === null) {
       const installed = await exists(join(codexHome, 'config.toml'));
-      return entry({ ...base, status: installed ? 'installed' : 'not-detected', detail: installed ? 'config.toml present, no auth.json; not signed in' : 'no auth.json found' });
+      return entry({ ...base, status: installed ? 'installed' : 'not-detected', detail: installed ? 'Local configuration found. File-based credentials were not detected; sign-in may be stored by the system.' : 'no auth.json found' });
     }
     const auth = JSON.parse(raw) as Record<string, unknown>;
-    const hasTokens = typeof auth.tokens === 'object' && auth.tokens !== null;
-    const hasApiKey = typeof auth.OPENAI_API_KEY === 'string' && auth.OPENAI_API_KEY.length > 0;
+    const hasTokens = typeof auth?.tokens === 'object' && auth.tokens !== null && typeof (auth.tokens as Record<string, unknown>).access_token === 'string' && Boolean((auth.tokens as Record<string, unknown>).access_token);
+    const hasApiKey = typeof auth?.OPENAI_API_KEY === 'string' && auth.OPENAI_API_KEY.length > 0;
     if (hasTokens) return entry({ ...base, status: 'configured', credentialPresent: true, identityMasked: 'ChatGPT account on file', detail: 'auth.json holds ChatGPT sign-in tokens (auth mode: chatgpt); not verified' });
     if (hasApiKey) return entry({ ...base, status: 'configured', credentialPresent: true, identityMasked: 'API key on file', detail: 'auth.json holds an OpenAI API key (auth mode: apikey); not verified' });
     return entry({ ...base, status: 'installed', detail: 'auth.json present but holds no recognized credential' });
   } catch (error) {
-    return entry({ ...base, status: 'error', detail: `auth.json unreadable: ${(error as Error).message.includes('JSON') ? 'malformed JSON' : (error as Error).message}` });
+    return entry({ ...base, status: 'error', detail: `auth.json unreadable: ${(error as Error).message === 'file exceeds 1 MiB bound' ? 'file exceeds 1 MiB bound' : 'invalid or inaccessible configuration'}` });
   }
 }
 
@@ -90,14 +95,14 @@ async function discoverClaude(home: string, env: NodeJS.ProcessEnv): Promise<Dis
     if (raw !== null) {
       const meta = JSON.parse(raw) as Record<string, unknown>;
       const account = meta.oauthAccount as Record<string, unknown> | undefined;
-      if (account && isEmail(account.emailAddress)) identity = account.emailAddress;
+      if (account && isEmail(account.emailAddress) && account.emailAddress.length <= 254) identity = account.emailAddress;
     }
   } catch {
     metaError = '.claude.json unreadable (malformed or over 1 MiB)';
   }
   if (!credentialPresent && identity === undefined) {
     const installed = await exists(configDir) || await exists(metaPath);
-    return entry({ ...base, status: installed ? 'installed' : 'not-detected', detail: installed ? 'config directory present, no credentials; not signed in' : 'no Claude Code files found' });
+    return entry({ ...base, status: installed ? 'installed' : 'not-detected', detail: installed ? 'Local configuration found. File-based credentials were not detected; sign-in may be stored in Keychain.' : 'no Claude Code files found' });
   }
   return entry({
     ...base,
@@ -133,11 +138,12 @@ async function discoverOpenCode(home: string, env: NodeJS.ProcessEnv): Promise<D
       return entry({ ...base, status: hasConfig ? 'installed' : 'not-detected', source: hasConfig ? configPath : authPath, detail: hasConfig ? 'opencode.json present, no auth.json; not signed in' : 'no OpenCode files found' });
     }
     const auth = JSON.parse(raw) as Record<string, unknown>;
+    if (!auth || Array.isArray(auth) || typeof auth !== 'object') throw new Error('Invalid auth configuration');
     const providers = Object.keys(auth);
     if (providers.length === 0) return entry({ ...base, status: 'installed', detail: 'auth.json present but empty' });
     return entry({ ...base, status: 'configured', credentialPresent: true, identityMasked: 'Credentials on file', detail: `auth.json holds credentials for ${providers.length} provider(s); not verified` });
   } catch (error) {
-    return entry({ ...base, status: 'error', detail: `auth.json unreadable: ${(error as Error).message.includes('JSON') ? 'malformed JSON' : (error as Error).message}` });
+    return entry({ ...base, status: 'error', detail: `auth.json unreadable: ${(error as Error).message === 'file exceeds 1 MiB bound' ? 'file exceeds 1 MiB bound' : 'invalid or inaccessible configuration'}` });
   }
 }
 

@@ -1,6 +1,4 @@
 import {
-  Eye,
-  EyeOff,
   File as FileIcon,
   Folder as FolderIcon,
   FolderOpen,
@@ -8,8 +6,7 @@ import {
   RefreshCw,
   X,
 } from 'lucide-react';
-import React, { useEffect, useMemo, useRef, useState } from 'react';
-import type { ProviderInfo } from '../../shared/protocol';
+import React, { useEffect, useMemo, useState } from 'react';
 import { buildDiffRows, diffStats, foldContext, type DiffRow } from '../diffModel';
 import {
   activateTab,
@@ -17,16 +14,12 @@ import {
   dirKey,
   loadDir,
   loadGitChanges,
-  loadProviders,
   openDiff,
   openFile,
-  remaskProvider,
-  revealProvider,
   type WorkspaceTab,
 } from '../store';
 import { useStore } from '../useStore';
 
-const REMASK_MS = 30_000;
 
 // ---------------------------------------------------------------------------
 // File tree
@@ -292,107 +285,6 @@ function DiffTab({ tab }: { tab: WorkspaceTab }): React.ReactElement {
 }
 
 // ---------------------------------------------------------------------------
-// Providers
-
-function ProviderCard({ provider }: { provider: ProviderInfo }): React.ReactElement {
-  const state = useStore();
-  const revealed = state.revealed[provider.id];
-  const remaskTimer = useRef<number | null>(null);
-
-  // Remask on 30s timeout; also on unmount.
-  useEffect(() => {
-    if (remaskTimer.current) window.clearTimeout(remaskTimer.current);
-    if (revealed !== undefined) {
-      remaskTimer.current = window.setTimeout(() => remaskProvider(provider.id), REMASK_MS);
-    }
-    return () => {
-      if (remaskTimer.current) window.clearTimeout(remaskTimer.current);
-    };
-  }, [revealed, provider.id]);
-
-  useEffect(() => () => remaskProvider(provider.id), [provider.id]);
-
-  return (
-    <div className={`provider-card${provider.available ? '' : ' provider-unavailable'}`}>
-      <div className="provider-head">
-        <span className="provider-name">{provider.name}</span>
-        {!provider.available && <span className="provider-badge">Unavailable</span>}
-      </div>
-      <div className="provider-identity-row">
-        <span
-          className={`provider-identity${revealed === undefined ? ' provider-masked' : ''}`}
-          aria-label={revealed === undefined ? 'Identity hidden' : 'Identity revealed'}
-        >
-          {revealed ?? provider.identityMasked}
-        </span>
-        {revealed === undefined ? (
-          <button
-            type="button"
-            className="icon-button"
-            aria-label={`Reveal ${provider.name} identity`}
-            onClick={() => void revealProvider(provider.id)}
-            onBlur={() => remaskProvider(provider.id)}
-          >
-            <Eye size={13} />
-          </button>
-        ) : (
-          <button
-            type="button"
-            className="icon-button"
-            aria-label={`Hide ${provider.name} identity`}
-            onClick={() => remaskProvider(provider.id)}
-            onBlur={() => remaskProvider(provider.id)}
-          >
-            <EyeOff size={13} />
-          </button>
-        )}
-      </div>
-      {provider.error && <div className="provider-error">{provider.error}</div>}
-      {provider.models.length > 0 && (
-        <ul className="provider-models">
-          {provider.models.map((m) => (
-            <li key={m.id}>{m.name}</li>
-          ))}
-        </ul>
-      )}
-    </div>
-  );
-}
-
-function ProvidersTab(): React.ReactElement {
-  const state = useStore();
-  const providers = state.providers;
-
-  useEffect(() => {
-    void loadProviders();
-  }, []);
-
-  if (providers.phase === 'loading' || providers.phase === 'idle') {
-    return <div className="pane-loading">Loading providers…</div>;
-  }
-  if (providers.phase === 'error') {
-    return (
-      <div className="pane-error">
-        <p>{providers.error}</p>
-        <button type="button" onClick={() => void loadProviders(true)}>
-          Retry
-        </button>
-      </div>
-    );
-  }
-  const list = providers.value ?? [];
-  return (
-    <div className="providers-view">
-      {list.length === 0 ? (
-        <div className="tree-empty">No providers configured.</div>
-      ) : (
-        list.map((p) => <ProviderCard key={p.id} provider={p} />)
-      )}
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
 // Shell
 
 function TabBody({ tab }: { tab: WorkspaceTab }): React.ReactElement {
@@ -403,8 +295,6 @@ function TabBody({ tab }: { tab: WorkspaceTab }): React.ReactElement {
       return <FileTab tab={tab} />;
     case 'diff':
       return <DiffTab tab={tab} />;
-    case 'providers':
-      return <ProvidersTab />;
   }
 }
 

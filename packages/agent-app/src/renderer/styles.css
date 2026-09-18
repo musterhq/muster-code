@@ -650,3 +650,45 @@ textarea:focus-visible {
 .chat-head button, .chat-head select { -webkit-app-region: no-drag; }
 ::selection { background: #404040; color: var(--text); }
 @media (prefers-reduced-transparency: reduce) { .nav { background: #222222; } }
+
+/* Dedicated provider settings route: resource tabs keep their work context. */
+.settings-screen { display: flex; flex-direction: column; min-height: 0; height: 100%; }
+.settings-topbar { height: 48px; flex: none; display: flex; align-items: center; gap: 24px; padding: 0 24px; border-bottom: 1px solid var(--hairline); color: var(--text-faint); -webkit-app-region: drag; }
+.settings-back { display: inline-flex; align-items: center; gap: 8px; color: var(--text-dim); -webkit-app-region: no-drag; }
+.settings-back:hover { color: var(--text); }
+.settings-scroll { flex: 1; min-height: 0; overflow: auto; }
+.settings-content { max-width: 850px; margin: 0 auto; padding: 36px clamp(20px,4vw,52px) 56px; }
+.settings-title { display: flex; align-items: center; justify-content: space-between; gap: 20px; }
+.settings-title h1 { margin: 0 0 7px; font-size: 24px; font-weight: 600; letter-spacing: -.5px; }
+.settings-title p { margin: 0; color: var(--text-dim); }
+.settings-button { display: inline-flex; align-items: center; justify-content: center; gap: 7px; padding: 7px 12px; border-radius: 7px; border: 1px solid var(--hairline); background: var(--text); color: var(--bg); font-size: 12px; white-space: nowrap; }
+.settings-button.secondary { background: var(--bg-raised); color: var(--text-dim); }
+.settings-button:hover { opacity: .86; }
+.settings-button:disabled { opacity: .45; cursor: default; }
+.discovery-bar { display: flex; align-items: center; gap: 22px; margin: 24px 0; padding: 16px 0; border-top: 1px solid var(--hairline); border-bottom: 1px solid var(--hairline); }
+.discovery-bar p { margin: 0; flex: 1; color: var(--text-faint); font-size: 12px; }
+.provider-group { margin-top: 28px; }
+.settings-section-label { font-size: 12px; color: var(--text-faint); font-weight: 500; margin: 0 0 12px; }
+.settings-provider { border: 1px solid var(--hairline); border-radius: 10px; background: var(--bg-raised); padding: 18px; margin-bottom: 10px; }
+.settings-provider-top { display: flex; align-items: center; gap: 12px; }
+.provider-symbol { display: grid; place-items: center; width: 36px; height: 36px; border: 1px solid var(--hairline); border-radius: 9px; color: var(--text-dim); }
+.provider-heading { flex: 1; min-width: 0; }
+.provider-heading h2 { font-size: 14px; font-weight: 550; margin: 0 0 2px; }
+.provider-source { color: var(--text-faint); font-size: 11px; overflow-wrap: anywhere; }
+.connection-status { font-size: 11px; color: var(--text-faint); }
+.connection-status.is-ready { color: var(--ok); }
+.provider-detail { margin: 14px 0 0; color: var(--text-dim); font-size: 12px; line-height: 1.65; }
+.provider-model-toggle { display: inline-flex; align-items: center; gap: 5px; margin-top: 12px; font-size: 12px; color: var(--text-dim); }
+.settings-models { padding-left: 20px; font: 12px/1.8 var(--mono); color: var(--text-dim); max-height: 220px; overflow: auto; }
+.connection-address { font: 11px/1.6 var(--mono); color: var(--text-dim); overflow-wrap: anywhere; margin-top: 10px; user-select: text; }
+.provider-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 16px; font-size: 12px; }
+.settings-error { color: var(--danger); font-size: 12px; overflow-wrap: anywhere; }
+.settings-footnote { margin-top: 28px; color: var(--text-faint); font-size: 11px; line-height: 1.7; }
+.add-connection { padding: 22px; border: 1px solid var(--hairline); border-radius: 10px; background: var(--bg-raised); }
+.add-connection header { display: flex; align-items: center; justify-content: space-between; }
+.add-connection h2 { margin: 0; font-size: 16px; font-weight: 550; }
+.add-connection p { color: var(--text-dim); font-size: 12px; }
+.add-connection label { display: block; font-size: 12px; margin-top: 18px; }
+.add-connection input { display: block; width: 100%; margin-top: 7px; padding: 9px 10px; border: 1px solid var(--hairline); border-radius: 6px; background: var(--bg); color: var(--text); font: inherit; }
+.add-connection input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.optional, .field-help { color: var(--text-faint); }

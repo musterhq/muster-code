@@ -7,7 +7,7 @@ export interface Project { id: string; name: string; goal: string; folderIds: st
 export interface Snapshot { folders: Folder[]; chats: Chat[]; projects: Project[]; activeChatId?: string; version: number }
 export interface FileEntry { name: string; path: string; kind: 'file' | 'directory' }
 export interface ChangedFile { path: string; previousPath?: string; status: string; adds?: number; dels?: number }
-export interface ProviderInfo { id: string; name: string; available: boolean; identityMasked: string; models: { id: string; name: string }[]; error?: string }
+export interface ProviderInfo { id: string; name: string; available: boolean; identityMasked: string; models: { id: string; name: string }[]; error?: string; status?: 'ready' | 'configured' | 'installed' | 'not-detected' | 'error'; source?: string; detail?: string; canReveal?: boolean; custom?: boolean; endpoint?: string; apiKeyEnv?: string; checkedAt?: string }
 export type AgentEvent = { type: 'snapshot'; snapshot: Snapshot } | { type: 'timeline'; chatId: string; items: TimelineItem[] } | { type: 'notice'; message: string };
 export interface Commands {
  'app.snapshot': { input: undefined; output: Snapshot };
@@ -25,6 +25,9 @@ export interface Commands {
  'git.changes': { input: {folderId: string}; output: ChangedFile[] };
  'git.diff': { input: {folderId: string; path: string}; output: {path: string; before: string; after: string; truncated: boolean} };
  'providers.list': { input: undefined; output: ProviderInfo[] };
+ 'providers.save': { input: {name: string; endpoint: string; apiKeyEnv?: string}; output: ProviderInfo };
+ 'providers.remove': { input: {id: string}; output: void };
+ 'providers.check': { input: {id: string}; output: ProviderInfo };
  'providers.reveal': { input: {id: string}; output: {identity: string} };
 }
 export interface AgentBridge {

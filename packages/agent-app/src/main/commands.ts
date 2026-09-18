@@ -19,6 +19,9 @@ const COMMANDS = {
   'git.diff': true,
   'providers.list': true,
   'providers.reveal': true,
+  'providers.save': true,
+  'providers.remove': true,
+  'providers.check': true,
 } as const satisfies Record<keyof Commands, true>;
 
 export type CommandName = keyof typeof COMMANDS;
