@@ -102,17 +102,27 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
               if (!toolIds.has(itemId)) seal();
               const finished = method.endsWith('completed');
               const status = !finished ? 'running' : item.status === 'failed' || item.error != null || item.success === false || (typeof item.exitCode === 'number' && item.exitCode !== 0) ? 'failed' : item.status === 'interrupted' ? 'interrupted' : item.status === 'cancelled' || item.status === 'declined' ? 'cancelled' : 'completed';
-              const label = detail(item.command ?? item.title ?? item.name ?? item.tool ?? item.query ?? item.type);
-              const output = detail(item.aggregatedOutput ?? item.output ?? '');
-              const body = label + (output ? '\n' + output : '');
               let local = toolIds.get(itemId);
-              const metadata = {...toolEventDetails(item),providerItemId:itemId,type,name:label};
+              const previous = local ? store.item(local) : undefined;
+              const label = detail(item.command ?? item.title ?? item.name ?? item.tool ?? item.query ?? previous?.data?.name ?? item.type);
+              const streamed = typeof previous?.data?.output === 'string' ? previous.data.output : '';
+              const supplied = item.aggregatedOutput ?? item.output;
+              const finalOutput = supplied == null ? '' : detail(supplied);
+              // Some harnesses finish with only the last output chunk. Preserve an
+              // already received stream when it contains that final suffix.
+              const output = (supplied == null || (streamed && streamed.endsWith(finalOutput)) ? streamed : finalOutput).slice(-131072);
+              const body = label + (output ? '\n' + output : '');
+              const metadata = {...toolEventDetails(item),providerItemId:itemId,type:type || previous?.data?.type,name:label,output};
               if (!local) { local = store.appendItem(chatId, 'tool', body, status, metadata).id; toolIds.set(itemId, local); }
               else store.updateItem(local, body, status, {...store.item(local)?.data,...metadata});
               scheduleTimeline(chatId);
             } else if (method.endsWith('/outputDelta')) {
               const local = toolIds.get(itemId); const previous = local ? store.item(local) : undefined;
-              if (previous?.status === 'running') { store.updateItem(previous.id, (previous.text + String(params.delta ?? '')).slice(-131072), 'running'); scheduleTimeline(chatId); }
+              if (previous?.status === 'running') {
+                const output = (String(previous.data?.output ?? '') + String(params.delta ?? '')).slice(-131072);
+                store.updateItem(previous.id, String(previous.data?.name ?? '') + '\n' + output, 'running', {...previous.data, output});
+                scheduleTimeline(chatId);
+              }
             }
           },
           async onRequest(method, params) {

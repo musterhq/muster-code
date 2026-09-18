@@ -51,6 +51,7 @@ export interface AppState {
   diffs: Record<string, Loadable<{ before: string; after: string; truncated: boolean }>>;
   gitChanges: Record<string, Loadable<ChangedFile[]>>;
   navWidth: number;
+  resourcesHidden: boolean;
 }
 
 const NAV_KEY = 'muster.navWidth';
@@ -76,6 +77,7 @@ let state: AppState = {
   fileBodies: {},
   diffs: {},
   gitChanges: {},
+  resourcesHidden: localStorage.getItem('muster.resourcesHidden')==='true',
   navWidth: clampNav(Number(localStorage.getItem(NAV_KEY)) || NAV_DEFAULT),
 };
 
@@ -317,12 +319,18 @@ export async function pickFolder(): Promise<void> {
 // ---------------------------------------------------------------------------
 // Workspace tabs
 
+export function setResourcesHidden(hidden:boolean):void {
+  set({resourcesHidden:hidden});
+  try{localStorage.setItem('muster.resourcesHidden',String(hidden));}catch{}
+}
+
 export function openTab(tab: WorkspaceTab): void {
   const existing = state.tabs.find((t) => t.id === tab.id);
   if (!existing && state.tabs.length >= MAX_TABS) { pushNotice('Close a resource tab before opening another.'); return; }
   set({
     tabs: existing ? state.tabs : [...state.tabs, tab],
     activeTabId: tab.id,
+    resourcesHidden: false,
   });
 }
 
@@ -342,7 +350,7 @@ export function closeTab(id: string): void {
 
 export function activateTab(id: string): void {
   if (!state.tabs.some(tab=>tab.id===id)) return;
-  set({ activeTabId: id });
+  set({ activeTabId: id, resourcesHidden: false });
 }
 
 /** Lazily reconnect a restored tab; missing paths remain recoverable errors. */

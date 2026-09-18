@@ -1,0 +1,6 @@
+.work-controls { position:absolute; top:8px; right:12px; z-index:4; display:flex; gap:6px; -webkit-app-region:no-drag; }
+.work-actions { position:absolute; right:0; top:34px; min-width:190px; padding:5px; background:var(--bg-raised); border:1px solid var(--hairline); border-radius:9px; box-shadow:0 8px 24px #0005; }
+.work-actions button { display:flex; align-items:center; gap:9px; width:100%; padding:8px; border-radius:5px; color:var(--text-dim); text-align:left; font-size:12px; }
+.work-actions button:hover, .work-actions button:focus-visible { background:var(--bg-hover); color:var(--text); }
+.center { position:relative; }
+.chat-head { padding-right:92px; }

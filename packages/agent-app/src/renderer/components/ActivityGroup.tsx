@@ -18,7 +18,7 @@ export function ActivityGroup({items}:{items:TimelineItem[]}) {
   const label=summarizeActivity(items);
   if(items.length===1)return <ToolCard item={items[0]}/>;
   return <section className="activity-group" aria-label="Agent activity">
-    <button className="activity-summary" aria-expanded={open} aria-controls={id} onClick={()=>{setOpen(!open);remember(key,!open,page);}} title={label}>
+    <button className="activity-summary" aria-expanded={open} aria-controls={open?id:undefined} onClick={()=>{setOpen(!open);remember(key,!open,page);}} title={label}>
       <ToolGlyph kind={classifyTool(currentItem?.data).kind} running={active}/>
       <span>{label}</span>{open?<ChevronDown size={12}/>:<ChevronRight size={12}/>}</button>
     {open&&<div id={id} className="activity-details">

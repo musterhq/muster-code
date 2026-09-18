@@ -31,7 +31,9 @@ export function summarizeActivity(items:TimelineItem[]):string {
   const count=(n:number,one:string,many=one+'s')=>`${n} ${n===1?one:many}`;
   const parts=[read.size?`Read ${count(read.size,'file')}`:'',edited.size?`edited ${count(edited.size,'file')}`:'',searches?`${count(searches,'search','searches')}`:'',commands?`ran ${count(commands,'command')}`:'',agents?`${count(agents,'agent action')}`:'',tools?`${count(tools,'tool call')}`:''].filter(Boolean);
   const failed=unique.filter(item=>item.status==='failed').length;
-  const interrupted=unique.filter(item=>item.status==='interrupted'||item.status==='cancelled').length;
+  const interrupted=unique.filter(item=>item.status==='interrupted').length;
+  const cancelled=unique.filter(item=>item.status==='cancelled').length;
+  if(cancelled)parts.push(`${cancelled} cancelled`);
   if(failed)parts.push(`${failed} failed`);if(interrupted)parts.push(`${interrupted} interrupted`);
   const summary=parts.join(', ');
   return summary?summary[0].toUpperCase()+summary.slice(1):'Activity';

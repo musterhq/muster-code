@@ -1,4 +1,5 @@
 import React, { useCallback, useRef } from 'react';
+import {WorkControls} from './components/WorkControls';
 import { ChatView } from './components/ChatView';
 import { Sidebar } from './components/Sidebar';
 import { ProvidersScreen } from './components/ProvidersScreen';
@@ -85,6 +86,7 @@ export function App(): React.ReactElement {
         }}
       />
       <main className="center">
+        {state.screen==='work'&&<WorkControls/>}
         {state.screen === 'projects' ? <ProjectsScreen onBack={closeSettings} onStartChat={(projectId, folderId)=>void createChat(folderId, projectId).then(() => focusComposer())} /> : state.screen === 'providers' ? <ProvidersScreen /> : state.boot.phase === 'loading' || state.boot.phase === 'idle' ? (
           <div className="center-loading" role="status">
             Loading workspace…

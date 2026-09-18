@@ -50,14 +50,14 @@ export function ToolCard({item}: {item: TimelineItem}) {
   const state = running ? p.runningVerb : failed ? 'Failed' : item.status === 'interrupted' ? 'Interrupted' : item.status === 'cancelled' ? 'Cancelled' : item.status === 'completed' ? p.verb : 'Tool';
   const raw = p.subject || 'Tool';
   const prefix=typeof item.data?.name==='string'?item.data.name:raw;
-  const output = item.text.startsWith(prefix) ? item.text.slice(prefix.length).replace(/^\n/, '') : item.text;
+  const output = typeof item.data?.output==='string'?item.data.output:item.text.startsWith(prefix) ? item.text.slice(prefix.length).replace(/^\n/, '') : item.text;
   const bodyId = `tool-body-${item.id}`;
 
 
   const subject=p.kind==='command'?commandLabel(raw):(p.kind==='read'||p.kind==='edit')?p.subject.split(', ').map(path=>path.split('/').filter(Boolean).at(-1)||path).join(', '):p.subject;
   const duration=typeof item.data?.durationMs==='number'&&item.status!=='running'?item.data.durationMs:null;
   return <div className={`tool-row-card kind-${p.kind}${running ? ' is-running' : ''}${failed ? ' is-failed' : ''}`}>
-    <button className="tool-row-head" aria-expanded={open} aria-controls={bodyId} onClick={()=>setOpen(v=>!v)}>
+    <button className="tool-row-head" aria-expanded={open} aria-controls={open?bodyId:undefined} onClick={()=>setOpen(v=>!v)}>
       <ToolGlyph kind={p.kind} running={running}/>
       <span className="tool-row-state">{state}</span>
       {subject ? <span className="tool-row-subject" title={p.subject}>{subject}</span> : <span className="tool-row-subject" />}

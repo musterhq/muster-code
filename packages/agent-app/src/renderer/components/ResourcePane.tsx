@@ -10,7 +10,7 @@ function initialWidth() {
 }
 
 export function ResourcePane() {
-  const {navWidth, tabs} = useStore();
+  const {navWidth, tabs, resourcesHidden} = useStore();
   const [width, setWidth] = useState(initialWidth);
   const [maximized, setMaximized] = useState(false);
   const [viewport, setViewport] = useState(window.innerWidth);
@@ -26,6 +26,7 @@ export function ResourcePane() {
   };
   // Preserve a readable conversation at the native window's minimum size.
   // Resource references stay in the store while their surface is collapsed.
+  if (resourcesHidden)return null;
   if (viewport - navWidth < 640 && !maximized) {
     return <button className="icon-button resource-compact-open" aria-label={`Open resources (${tabs.length})`} onClick={toggleMaximized}>
       <Maximize2 size={14}/>
