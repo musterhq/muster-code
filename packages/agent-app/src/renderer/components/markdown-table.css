@@ -1,0 +1,14 @@
+/* Table rhythm/behavior adapted from T3 Code (MIT); see THIRD_PARTY_NOTICES.md. */
+.md-table { min-width:0; max-width:100%; margin:12px 0; }
+.md-table-scroll { max-width:100%; overflow-x:auto; overscroll-behavior-x:contain; scrollbar-width:thin; }
+.md-body .md-table table { display:table; width:100%; min-width:max-content; margin:0; border-collapse:collapse; overflow-wrap:normal; word-break:normal; font-size:12px; }
+.md-body .md-table th, .md-body .md-table td { border:0; border-bottom:1px solid var(--hairline); padding:7px 12px; vertical-align:top; background:transparent; }
+.md-body .md-table thead th { padding-block:9px; font-weight:600; white-space:nowrap; color:var(--text); }
+.md-body .md-table tbody td { color:var(--text-dim); }
+.md-table[data-wrap='false'] th, .md-table[data-wrap='false'] td { overflow:hidden; max-width:384px; text-overflow:ellipsis; white-space:nowrap; }
+.md-table[data-wrap='true'] td { max-width:384px; white-space:normal; overflow-wrap:anywhere; }
+.md-table-toolbar { display:flex; align-items:center; justify-content:space-between; position:relative; margin-top:3px; min-height:24px; }
+.md-table-feedback { flex:1; text-align:right; padding-right:6px; color:var(--text-faint); font-size:11px; }
+.md-table-copy-menu { position:absolute; right:0; bottom:28px; z-index:5; min-width:160px; padding:4px; border:1px solid var(--hairline); border-radius:7px; background:var(--bg-raised); box-shadow:0 6px 20px #0004; }
+.md-table-copy-menu button { display:block; width:100%; padding:7px 10px; text-align:left; font-size:12px; border-radius:4px; }
+.md-table-copy-menu button:hover { background:var(--bg-hover); }

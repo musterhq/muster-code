@@ -1,6 +1,7 @@
 import { Check, Copy, X } from 'lucide-react';
 import React, { useEffect, useRef, useState } from 'react';
 import ReactMarkdown, { type Components } from 'react-markdown';
+import {MarkdownTable} from './MarkdownTable';
 import remarkGfm from 'remark-gfm';
 
 import './message-body.css';
@@ -90,6 +91,7 @@ function Pre({ children }: { children?: React.ReactNode }): React.ReactElement {
 
 const components: Components = {
   pre: Pre,
+  table: ({node: _node, ...props}) => <MarkdownTable {...props}/>,
   a: ({ children, href }) => (
     <a href={href} rel="noreferrer noopener">
       {children}

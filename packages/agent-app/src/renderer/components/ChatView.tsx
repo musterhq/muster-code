@@ -124,7 +124,8 @@ function Timeline({ items, chatId }: { items: TimelineItem[]; chatId:string }): 
   const restoring=useRef(Boolean(saved.current));
   const [away,setAway]=useState(Boolean(saved.current));
   const [unread,setUnread]=useState(false);
-  const lastItems=useRef(items);
+  const revision=`${items.length}:${items.at(-1)?.id}:${items.at(-1)?.status}:${items.at(-1)?.text.length}`;
+  const lastRevision=useRef(revision);
   const virtualizer = useVirtualizer({
     count: rows.length,
     getScrollElement: () => scrollRef.current,
@@ -149,7 +150,7 @@ function Timeline({ items, chatId }: { items: TimelineItem[]; chatId:string }): 
     saved.current=null;
     return()=>cancelAnimationFrame(frame);
   },[chatId,virtualizer]);
-  useEffect(()=>{if(items!==lastItems.current&&!atBottom.current)setUnread(true);lastItems.current=items;},[items]);
+  useEffect(()=>{if(revision!==lastRevision.current&&!atBottom.current)setUnread(true);lastRevision.current=revision;},[revision]);
 
   const onScroll = useCallback(() => {
     const el = scrollRef.current;
