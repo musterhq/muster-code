@@ -26,9 +26,6 @@ export const COALESCE_MS = 150;
 /** Any path containing one of these segments is dropped (dir or file). */
 const IGNORED_SEGMENTS: Record<string, true> = {
   node_modules: true,
-  dist: true,
-  build: true,
-  out: true,
   '.DS_Store': true,
 };
 /** Direct `.git/` children whose changes matter to review; plus `.git/refs/**`. */
@@ -72,6 +69,7 @@ export class WorkspaceWatchService {
   readonly #onError: WatchErrorHandler;
   readonly #entries = new Map<string, WatchEntry>();
   #disposed = false;
+  readonly #pending = new Map<string, symbol>();
 
   constructor(
     onChanged: ChangeHandler,
@@ -90,8 +88,14 @@ export class WorkspaceWatchService {
    */
   async watch(folderId: string, root: string): Promise<void> {
     if (this.#disposed) throw new Error('WorkspaceWatchService is disposed.');
+    const roots = new Set([...this.#entries.keys(), ...this.#pending.keys()]);
+    if (!roots.has(folderId) && roots.size >= MAX_WATCHED_ROOTS) throw new Error(`Watch limit of ${MAX_WATCHED_ROOTS} roots reached`);
+    const token = Symbol(folderId);
+    this.#pending.set(folderId, token);
+    try {
     const real = await fs.realpath(root); // canonical: rejects dangling paths, resolves symlinks
     if (!(await fs.stat(real)).isDirectory()) throw new Error(`Watch root is not a directory: ${root}`);
+    if (this.#disposed || this.#pending.get(folderId) !== token) throw new Error('Watch was cancelled.');
     if (!this.#entries.has(folderId) && this.#entries.size >= MAX_WATCHED_ROOTS) {
       throw new Error(`Watch limit of ${MAX_WATCHED_ROOTS} roots reached; unwatch a folder first.`);
     }
@@ -101,13 +105,14 @@ export class WorkspaceWatchService {
     } catch (error) {
       throw new Error(`Recursive fs.watch unavailable for ${real}: ${(error as Error).message}`);
     }
-    this.unwatch(folderId); // replace the old root only after the new watcher opened
+    const previous = this.#entries.get(folderId);
+    if (previous) closeEntry(previous); // replace only after the new watcher opened
     const entry: WatchEntry = { watcher, timer: null };
     watcher.on('change', (_event, filename) => {
-      if (entry.timer !== null || !isRelevant(filename)) return; // coalesce: one pending trailing notify
+      if (this.#disposed || this.#entries.get(folderId) !== entry || entry.timer !== null || !isRelevant(filename)) return; // coalesce: one pending trailing notify
       entry.timer = setTimeout(() => {
         entry.timer = null;
-        this.#onChanged(folderId);
+        if (!this.#disposed && this.#entries.get(folderId) === entry) this.#onChanged(folderId);
       }, COALESCE_MS);
     });
     watcher.on('error', (error) => {
@@ -116,10 +121,12 @@ export class WorkspaceWatchService {
       this.#onError(folderId, error); // explicit: watching has stopped for this folder
     });
     this.#entries.set(folderId, entry);
+    } finally { if (this.#pending.get(folderId) === token) this.#pending.delete(folderId); }
   }
 
   /** Stop watching `folderId`; drops any pending coalesced notification. No-op for unknown ids. */
   unwatch(folderId: string): void {
+    this.#pending.delete(folderId);
     const entry = this.#entries.get(folderId);
     if (!entry) return;
     this.#entries.delete(folderId);
@@ -129,6 +136,7 @@ export class WorkspaceWatchService {
   /** Close every watcher and timer; the instance rejects further watch() calls. Idempotent. */
   dispose(): void {
     this.#disposed = true;
+    this.#pending.clear();
     for (const entry of this.#entries.values()) closeEntry(entry);
     this.#entries.clear();
   }

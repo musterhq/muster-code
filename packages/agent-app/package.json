@@ -10,7 +10,7 @@
     "start": "node scripts/build.mjs && electron .",
     "dev": "node scripts/build.mjs --watch",
     "typecheck": "tsc --noEmit",
-    "test": "node --test 'tests/*.test.ts'",
+    "test": "node --experimental-transform-types --test 'tests/*.test.ts'",
     "test:renderer": "node scripts/test-renderer.mjs"
   },
   "dependencies": {

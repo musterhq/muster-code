@@ -8,7 +8,7 @@ export interface Snapshot { folders: Folder[]; chats: Chat[]; projects: Project[
 export interface FileEntry { name: string; path: string; kind: 'file' | 'directory' }
 export interface ChangedFile { path: string; previousPath?: string; status: string; adds?: number; dels?: number }
 export interface ProviderInfo { id: string; name: string; available: boolean; identityMasked: string; models: { id: string; name: string }[]; error?: string; status?: 'ready' | 'configured' | 'installed' | 'not-detected' | 'error'; source?: string; detail?: string; canReveal?: boolean; custom?: boolean; endpoint?: string; apiKeyEnv?: string; checkedAt?: string }
-export type AgentEvent = {type:'chatSelected'; chatId:string} | { type: 'snapshot'; snapshot: Snapshot } | { type: 'timeline'; chatId: string; items: TimelineItem[] } | { type: 'notice'; message: string };
+export type AgentEvent = {type:'workspaceChanged';folderId:string} | {type:'chatSelected'; chatId:string} | { type: 'snapshot'; snapshot: Snapshot } | { type: 'timeline'; chatId: string; items: TimelineItem[] } | { type: 'notice'; message: string };
 export interface Commands {
  'app.snapshot': { input: undefined; output: Snapshot };
  'folder.add': { input: {path: string}; output: Folder };
@@ -20,6 +20,7 @@ export interface Commands {
  'chat.stop': { input: {id: string}; output: void };
  'approval.respond': { input: {id: string; approved: boolean}; output: void };
  'project.create': { input: {name: string; goal: string; folderIds: string[]}; output: Project };
+ 'workspace.watch': { input: {folderIds:string[]}; output: void };
  'files.list': { input: {folderId: string; path?: string}; output: FileEntry[] };
  'files.read': { input: {folderId: string; path: string}; output: {path: string; text: string; truncated: boolean} };
  'git.changes': { input: {folderId: string}; output: ChangedFile[] };

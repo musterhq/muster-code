@@ -13,6 +13,7 @@ const COMMANDS = {
   'chat.stop': true,
   'approval.respond': true,
   'project.create': true,
+  'workspace.watch': true,
   'files.list': true,
   'files.read': true,
   'git.changes': true,

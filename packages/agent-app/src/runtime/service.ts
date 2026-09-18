@@ -5,6 +5,7 @@ import type { AgentEvent, Chat, Commands, TimelineItem } from '../shared/protoco
 import { discoverLocalProviders } from './provider-discovery.ts';
 import { CustomProviders } from './custom-providers.ts';
 import { AgentStore } from './store.ts';
+import { WorkspaceWatchService } from './workspace-watch.ts';
 import { listFiles, readFile } from './files.ts';
 import { AgentModeReviewHost } from './review.ts';
 import { createProviderAdapter, MODEL, type ProviderAdapter } from './provider.ts';
@@ -39,6 +40,11 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
   let disposed = false;
   store.recoverOrphanedRuns();
   const emit = (event: AgentEvent) => { if (!disposed) options.onEvent(event); };
+  const watchedFolders = new Set<string>();
+  const watcher = new WorkspaceWatchService(
+    folderId => emit({type:'workspaceChanged',folderId}),
+    (folderId,error) => { watchedFolders.delete(folderId); emit({type:'notice',message:`Live file updates stopped: ${error.message}`}); },
+  );
   const state = () => emit({ type: 'snapshot', snapshot: store.snapshot() });
   const timeline = (chatId: string) => emit({ type: 'timeline', chatId, items: store.timeline(chatId) });
   const scheduleTimeline = (chatId: string) => {
@@ -76,7 +82,8 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
     const append = (kind: 'assistant' | 'reasoning', delta: string) => {
       if (disposed || !runs.has(chatId) || !delta) return;
       if (kind === 'assistant') producedAssistant = true;
-      if (!segment || segment.kind !== kind) segment = store.appendItem(chatId, kind, '', 'running');
+      if (segment && segment.kind !== kind) seal();
+      if (!segment) segment = store.appendItem(chatId, kind, '', 'running');
       segment = {...segment, text: segment.text + delta}; store.updateItem(segment.id, segment.text, 'running'); scheduleTimeline(chatId);
     };
     const seal = () => { if (segment) store.updateItem(segment.id, segment.text, 'completed'); segment = undefined; };
@@ -91,13 +98,15 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
             const itemId = String(item.id ?? params.itemId ?? '');
             if (!itemId) return;
             if (method === 'item/started' || method === 'item/completed') {
-              seal();
+              if (!toolIds.has(itemId)) seal();
+              const finished = method.endsWith('completed');
+              const status = !finished ? 'running' : item.status === 'failed' || (typeof item.exitCode === 'number' && item.exitCode !== 0) ? 'failed' : item.status === 'interrupted' ? 'interrupted' : 'completed';
               const label = detail(item.command ?? item.title ?? item.name ?? item.type);
               const output = detail(item.aggregatedOutput ?? item.output ?? '');
               const body = label + (output ? '\n' + output : '');
               let local = toolIds.get(itemId);
-              if (!local) { local = store.appendItem(chatId, 'tool', body, method.endsWith('completed') ? 'completed' : 'running', {providerItemId: itemId, type, name: label}).id; toolIds.set(itemId, local); }
-              else store.updateItem(local, body, method.endsWith('completed') ? 'completed' : 'running');
+              if (!local) { local = store.appendItem(chatId, 'tool', body, status, {providerItemId: itemId, type, name: label}).id; toolIds.set(itemId, local); }
+              else store.updateItem(local, body, status);
               scheduleTimeline(chatId);
             } else if (method.endsWith('/outputDelta')) {
               const local = toolIds.get(itemId); const previous = local ? store.item(local) : undefined;
@@ -164,6 +173,19 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
       case 'chat.stop': { const chatId = id(p.id); chatFor(chatId); const run = runs.get(chatId); if (!run) return; run.stopped = true; store.updateChat(chatId, {status: 'stopping'}); settleApprovals(chatId); state(); await provider.stop(chatId); return; }
       case 'approval.respond': { const approvalId = id(p.id); if (typeof p.approved !== 'boolean') throw new Error('Invalid approval decision.'); const pending = approvals.get(approvalId); if (!pending) throw new Error('This approval is no longer pending.'); approvals.delete(approvalId); clearTimeout(pending.timer); pending.resolve(p.approved); return; }
       case 'project.create': { const name = text(p.name,'project name',256).trim(); if (!name) throw new Error('Name the Project.'); if (!Array.isArray(p.folderIds) || p.folderIds.length > 100) throw new Error('Invalid Project folders.'); const result = store.createProject(name, text(p.goal,'goal',32768), [...new Set(p.folderIds.map(id))]); state(); return result; }
+      case 'workspace.watch': {
+        if (!Array.isArray(p.folderIds) || p.folderIds.length > 32) throw new Error('Invalid watched folders.');
+        const folders = [...new Set(p.folderIds.map(id))].map(folderFor);
+        const desired = new Set(folders.map(folder=>folder.id));
+        for (const folderId of watchedFolders) if (!desired.has(folderId)) { watcher.unwatch(folderId); watchedFolders.delete(folderId); }
+        await Promise.all(folders.map(async folder => {
+          if (watchedFolders.has(folder.id)) return;
+          watchedFolders.add(folder.id);
+          try { await watcher.watch(folder.id,folder.path); }
+          catch (error) { if (watchedFolders.has(folder.id)) { watchedFolders.delete(folder.id); emit({type:'notice',message:`Live file updates unavailable for ${folder.name}: ${(error as Error).message}`}); } }
+        }));
+        return;
+      }
       case 'files.list': return listFiles(folderFor(p.folderId).path, text(p.path ?? '', 'path'));
       case 'files.read': return readFile(folderFor(p.folderId).path, text(p.path,'path'));
       case 'git.changes': { const root = folderFor(p.folderId).path; const result = await new AgentModeReviewHost(() => root).listChanges(); if (result.error) throw new Error(result.error); return result.files; }
@@ -177,6 +199,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
   }
   return {invoke, async dispose() {
     if (disposed) return;
+    watcher.dispose(); watchedFolders.clear();
     for (const [chatId, run] of runs) { run.stopped = true; settleApprovals(chatId); }
     provider.dispose();
     let deadline: ReturnType<typeof setTimeout> | undefined;

@@ -132,3 +132,26 @@ test('dispose closes everything and rejects further watches', async (t) => {
   assert.deepEqual(changed, []);
   await assert.rejects(svc.watch('f2', root), /disposed/);
 });
+
+
+test('dispose and unwatch cancel asynchronous watcher creation', async (t) => {
+  const root = await makeRoot(t);
+  const first = makeService(t);
+  const opening = first.svc.watch('f1', root);
+  first.svc.dispose();
+  await assert.rejects(opening, /cancelled/);
+  const second = makeService(t);
+  const pending = second.svc.watch('f1', root);
+  second.svc.unwatch('f1');
+  await assert.rejects(pending, /cancelled/);
+});
+
+test('source folders named build are not silently excluded', async (t) => {
+  const root = await makeRoot(t);
+  await mkdir(join(root, 'build'));
+  const { svc, changed } = makeService(t);
+  await svc.watch('f1', root);
+  await settle(changed);
+  await writeFile(join(root, 'build', 'source.ts'), 'export const source = true;');
+  await waitFor(() => changed.length > 0);
+});

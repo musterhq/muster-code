@@ -99,6 +99,7 @@ function set(patch: Partial<AppState>): void {
   state = { ...state, ...patch };
   if ('tabs' in patch || 'activeTabId' in patch) saveWorkspace(localStorage, {tabs:state.tabs, activeTabId:state.activeTabId});
   for (const l of listeners) l();
+  if ('tabs' in patch && state.boot.phase === 'ready') syncResourceWatches();
 }
 
 function pushNotice(message: string): void {
@@ -125,6 +126,7 @@ function errorText(cause: unknown): string {
 // Boot & events
 
 let unsubscribe: (() => void) | null = null;
+let removeFocusRefresh: (()=>void) | undefined;
 
 export async function boot(): Promise<void> {
   if (!state.bridgeAvailable) {
@@ -133,8 +135,13 @@ export async function boot(): Promise<void> {
   }
   set({ boot: { phase: 'loading' } });
   unsubscribe?.();
+  removeFocusRefresh?.();
+  const refreshVisible = () => { for (const folderId of new Set(state.tabs.map(tab=>tab.folderId))) if(folderId) void refreshResources(folderId); };
+  window.addEventListener('focus',refreshVisible);
+  removeFocusRefresh = () => window.removeEventListener('focus',refreshVisible);
   unsubscribe = subscribe((event) => {
     if (event.type === 'snapshot') applySnapshot(event.snapshot);
+    else if (event.type === 'workspaceChanged') void refreshResources(event.folderId);
     else if (event.type === 'chatSelected') void selectChat(event.chatId).then(()=>focusComposer());
     else if (event.type === 'timeline') {
       set({
@@ -149,6 +156,7 @@ export async function boot(): Promise<void> {
     const snapshot = await invoke('app.snapshot', undefined);
     applySnapshot(snapshot);
     set({ boot: { phase: 'ready', value: true } });
+    syncResourceWatches();
     if (state.activeChatId) void loadTimeline(state.activeChatId);
   } catch (cause) {
     set({ boot: { phase: 'error', error: errorText(cause) } });
@@ -397,7 +405,9 @@ export async function openFile(folderId: string, path: string): Promise<void> {
 }
 
 export async function loadGitChanges(folderId: string): Promise<void> {
-  set({ gitChanges: { ...state.gitChanges, [folderId]: { phase: 'loading' } } });
+  const previous = state.gitChanges[folderId];
+  if (previous?.phase === 'loading') return;
+  set({ gitChanges: { ...state.gitChanges, [folderId]: { phase: 'loading', value: previous?.value } } });
   try {
     const changes = await invoke('git.changes', { folderId });
     set({ gitChanges: { ...state.gitChanges, [folderId]: { phase: 'ready', value: changes } } });
@@ -426,6 +436,53 @@ export async function openDiff(folderId: string, path: string): Promise<void> {
   } catch (cause) {
     set({ diffs: { ...state.diffs, [id]: { phase: 'error', error: errorText(cause) } } });
   }
+}
+
+// Coalesce changes while a resource read is in flight. No polling loop, and
+// inactive tabs retain only their reference so reopening fetches current data.
+const refreshing = new Set<string>();
+const refreshAgain = new Set<string>();
+let watchedSignature = '';
+function syncResourceWatches(): void {
+  const folderIds = [...new Set(state.tabs.map(t=>t.folderId).filter((id): id is string=>Boolean(id)))].sort();
+  const signature = folderIds.join(',');
+  if (signature === watchedSignature) return;
+  watchedSignature = signature;
+  void invoke('workspace.watch', {folderIds}).catch(cause=>{watchedSignature='';pushNotice(errorText(cause));});
+}
+
+async function refreshResources(folderId: string): Promise<void> {
+  if (!state.tabs.some(tab=>tab.folderId===folderId)) return;
+  if (refreshing.has(folderId)) { refreshAgain.add(folderId); return; }
+  refreshing.add(folderId);
+  try {
+    do {
+      refreshAgain.delete(folderId);
+      const active = state.tabs.find(tab=>tab.id===state.activeTabId && tab.folderId===folderId);
+      const tabIds = new Set(state.tabs.filter(tab=>tab.folderId===folderId).map(tab=>tab.id));
+      const fileBodies = Object.fromEntries(Object.entries(state.fileBodies).filter(([id])=>!tabIds.has(id)||id===active?.id));
+      const diffs = Object.fromEntries(Object.entries(state.diffs).filter(([id])=>!tabIds.has(id)||id===active?.id));
+      const files = active?.kind === 'files' ? state.files : Object.fromEntries(Object.entries(state.files).filter(([key])=>!key.startsWith(folderId+'\0')));
+      const {[folderId]: stale, ...otherGitChanges} = state.gitChanges;
+      set({fileBodies,diffs,files,gitChanges:active?.kind==='files'?state.gitChanges:otherGitChanges});
+      if (!active) continue;
+      if (active.kind === 'files') { const paths=[...new Set(['',...Object.keys(files).filter(key=>key.startsWith(folderId+'\0')).map(key=>key.slice(folderId.length+1))])].slice(0,64); await Promise.all([...paths.map(path=>loadDir(folderId,path)),loadGitChanges(folderId)]); continue; }
+      try {
+        if (active.kind === 'file') {
+          const value = await invoke('files.read',{folderId,path:active.path!});
+          if (state.tabs.some(tab=>tab.id===active.id)) set({fileBodies:{...state.fileBodies,[active.id]:{phase:'ready',value}}});
+        } else {
+          const value = await invoke('git.diff',{folderId,path:active.path!});
+          if (state.tabs.some(tab=>tab.id===active.id)) set({diffs:{...state.diffs,[active.id]:{phase:'ready',value}}});
+        }
+      } catch(cause) {
+        if (state.tabs.some(tab=>tab.id===active.id)) {
+          const key = active.kind === 'file' ? 'fileBodies' : 'diffs';
+          set({[key]:{...state[key],[active.id]:{phase:'error',error:errorText(cause)}}});
+        }
+      }
+    } while (refreshAgain.has(folderId));
+  } finally { refreshing.delete(folderId); refreshAgain.delete(folderId); }
 }
 
 // ---------------------------------------------------------------------------

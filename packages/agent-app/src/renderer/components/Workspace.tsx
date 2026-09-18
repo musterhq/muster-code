@@ -40,7 +40,7 @@ function DirEntries({
     if (!entries) void loadDir(folderId, path);
   }, [entries, folderId, path]);
 
-  if (!entries || entries.phase === 'loading' || entries.phase === 'idle') {
+  if (!entries || (entries.phase === 'loading' && !entries.value) || entries.phase === 'idle') {
     return <div className="tree-loading">Loading…</div>;
   }
   if (entries.phase === 'error') {
@@ -111,7 +111,7 @@ function FilesTab({ tab }: { tab: WorkspaceTab }): React.ReactElement {
             <RefreshCw size={12} />
           </button>
         </header>
-        {!changes || changes.phase === 'loading' || changes.phase === 'idle' ? (
+        {!changes || (changes.phase === 'loading' && !changes.value) || changes.phase === 'idle' ? (
           <div className="tree-loading">Loading…</div>
         ) : changes.phase === 'error' ? (
           <div className="tree-error">{changes.error}</div>
