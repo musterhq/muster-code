@@ -9,6 +9,7 @@ const COMMANDS = {
   'chat.create': true,
   'chat.select': true,
   'chat.update': true,
+  'chat.movePin': true,
   'chat.send': true,
   'chat.stop': true,
   'chat.contextTelemetry': true,

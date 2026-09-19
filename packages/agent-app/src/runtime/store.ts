@@ -16,7 +16,7 @@ CREATE TABLE IF NOT EXISTS projects (
   id TEXT PRIMARY KEY, name TEXT NOT NULL, goal TEXT NOT NULL, folder_ids TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS chats (
   id TEXT PRIMARY KEY, folder_id TEXT, project_id TEXT, title TEXT NOT NULL,
-  pinned INTEGER NOT NULL DEFAULT 0, archived INTEGER NOT NULL DEFAULT 0,
+  pinned INTEGER NOT NULL DEFAULT 0, pin_order INTEGER, archived INTEGER NOT NULL DEFAULT 0,
   draft TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'idle',
   updated_at TEXT NOT NULL, provider_thread_id TEXT, model TEXT NOT NULL,
   mode TEXT NOT NULL DEFAULT 'agent', error TEXT);
@@ -34,7 +34,7 @@ CREATE TABLE IF NOT EXISTS context_telemetry (
 
 interface ChatRow {
   id: string; folder_id: string | null; project_id: string | null; title: string;
-  pinned: number; archived: number; draft: string; status: string; updated_at: string;
+  pinned: number; pin_order: number | null; archived: number; draft: string; status: string; updated_at: string;
   provider_thread_id: string | null; model: string; mode: string; error: string | null;
 }
 interface TimelineRow {
@@ -49,6 +49,7 @@ function rowToChat(row: ChatRow): Chat {
     ...(row.project_id ? { projectId: row.project_id } : {}),
     title: row.title,
     pinned: row.pinned === 1,
+    ...(row.pin_order === null ? {} : { pinOrder: row.pin_order }),
     archived: row.archived === 1,
     draft: row.draft,
     status: row.status as ChatStatus,
@@ -83,6 +84,9 @@ export class AgentStore {
     chmodSync(join(dataDir, 'muster-agent.sqlite'), 0o600);
     this.db.exec('PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=3000;');
     this.db.exec(SCHEMA);
+    // Additive migration for databases created before pin ordering existed.
+    const chatColumns = this.db.prepare("SELECT name FROM pragma_table_info('chats')").all() as { name: string }[];
+    if (!chatColumns.some((c) => c.name === 'pin_order')) this.db.exec('ALTER TABLE chats ADD COLUMN pin_order INTEGER');
   }
 
   /** Run `fn` inside a transaction; rolls back on throw. */
@@ -184,7 +188,8 @@ export class AgentStore {
 
   updateChat(id: string, patch: Partial<Pick<Chat, 'title' | 'pinned' | 'archived' | 'draft' | 'mode' | 'status' | 'providerThreadId' | 'error'>>): Chat {
     return this.tx(() => {
-      if (!this.chat(id)) throw new Error(`Unknown chat: ${id}`);
+      const current = this.chat(id);
+      if (!current) throw new Error(`Unknown chat: ${id}`);
       const sets: string[] = ['updated_at = ?'];
       const values: (string | number | null)[] = [now()];
       const map: Record<string, string> = {
@@ -197,9 +202,41 @@ export class AgentStore {
       for (const key of ['pinned', 'archived'] as const) {
         if (patch[key] !== undefined) { sets.push(`${key} = ?`); values.push(patch[key] ? 1 : 0); }
       }
+      if (patch.pinned !== undefined && patch.pinned !== current.pinned) {
+        // Pin appends to the end of the pinned list; unpin clears the slot.
+        sets.push('pin_order = ?');
+        if (patch.pinned) {
+          const row = this.db.prepare('SELECT MAX(pin_order) AS m FROM chats WHERE pinned = 1').get() as { m: number | null };
+          values.push((row.m ?? 0) + 1);
+        } else {
+          values.push(null);
+        }
+      }
       this.db.prepare(`UPDATE chats SET ${sets.join(', ')} WHERE id = ?`).run(...values, id);
       this.bumpVersion();
       return this.chat(id)!;
+    });
+  }
+
+  /** Swap a pinned chat with its neighbor in pin order. No-op at list edges. */
+  movePin(id: string, direction: 'up' | 'down'): void {
+    this.tx(() => {
+      const chat = this.chat(id);
+      if (!chat) throw new Error(`Unknown chat: ${id}`);
+      if (!chat.pinned) throw new Error('Chat is not pinned.');
+      if (chat.archived) throw new Error('Restore this chat before moving its pin.');
+      const pinned = (this.db.prepare(
+        'SELECT id, pin_order FROM chats WHERE pinned = 1 AND archived = 0 ORDER BY pin_order IS NULL, pin_order, updated_at DESC',
+      ).all() as { id: string; pin_order: number | null }[]);
+      const index = pinned.findIndex((r) => r.id === id);
+      const other = direction === 'up' ? index - 1 : index + 1;
+      if (other < 0 || other >= pinned.length) return;
+      // Normalize to dense 1..n slots so legacy NULL orders become swappable.
+      const set = this.db.prepare('UPDATE chats SET pin_order = ? WHERE id = ?');
+      pinned.forEach((r, i) => set.run(i + 1, r.id));
+      set.run(other + 1, pinned[index].id);
+      set.run(index + 1, pinned[other].id);
+      this.bumpVersion();
     });
   }
 

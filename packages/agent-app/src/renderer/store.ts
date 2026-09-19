@@ -297,6 +297,14 @@ export async function updateChat(
   }
 }
 
+export async function movePin(id: string, direction: 'up' | 'down'): Promise<void> {
+  try {
+    await invoke('chat.movePin', { id, direction });
+  } catch (cause) {
+    pushNotice(errorText(cause));
+  }
+}
+
 const draftTimers = new Map<string, number>();
 const draftWrites = new Map<string, Promise<boolean>>();
 

@@ -1,7 +1,9 @@
 import {
   Archive,
   ArchiveRestore,
+  ChevronDown,
   ChevronRight,
+  ChevronUp,
   FolderOpen,
   FolderPlus,
   Layers,
@@ -23,6 +25,7 @@ import {
   openProjectsScreen,
   pickFolder,
   selectChat,
+  movePin,
   updateChat,
 } from '../store';
 import { useStore } from '../useStore';
@@ -33,6 +36,11 @@ import './sidebar-disclosure.css';
 
 function chatOrder(a: Chat, b: Chat): number {
   if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
+  if (a.pinned && b.pinned) {
+    // Legacy pins may lack pinOrder; sink them below explicitly ordered pins.
+    if ((a.pinOrder === undefined) !== (b.pinOrder === undefined)) return a.pinOrder === undefined ? 1 : -1;
+    if (a.pinOrder !== undefined && b.pinOrder !== undefined && a.pinOrder !== b.pinOrder) return a.pinOrder - b.pinOrder;
+  }
   return b.updatedAt.localeCompare(a.updatedAt);
 }
 
@@ -82,6 +90,26 @@ function ChatRow({ chat }: { chat: Chat }): React.ReactElement {
         </button>
       )}
       <span className="chat-row-actions">
+        {chat.pinned && (
+          <>
+            <button
+              type="button"
+              className="icon-button"
+              aria-label="Move pin up"
+              onClick={() => void movePin(chat.id, 'up')}
+            >
+              <ChevronUp size={13} />
+            </button>
+            <button
+              type="button"
+              className="icon-button"
+              aria-label="Move pin down"
+              onClick={() => void movePin(chat.id, 'down')}
+            >
+              <ChevronDown size={13} />
+            </button>
+          </>
+        )}
         <button
           type="button"
           className="icon-button"

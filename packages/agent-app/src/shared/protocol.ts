@@ -1,7 +1,7 @@
 /** The only renderer capability surface. Main validates every command and sender. */
 export type ChatStatus = 'idle' | 'running' | 'stopping' | 'completed' | 'failed' | 'interrupted';
 export interface Folder { id: string; path: string; name: string }
-export interface Chat { id: string; folderId?: string; projectId?: string; title: string; pinned: boolean; archived: boolean; draft: string; status: ChatStatus; updatedAt: string; providerThreadId?: string; model: string; mode: 'ask' | 'plan' | 'agent'; error?: string }
+export interface Chat { id: string; folderId?: string; projectId?: string; title: string; pinned: boolean; pinOrder?: number; archived: boolean; draft: string; status: ChatStatus; updatedAt: string; providerThreadId?: string; model: string; mode: 'ask' | 'plan' | 'agent'; error?: string }
 export interface TimelineItem { id: string; chatId: string; kind: 'user' | 'assistant' | 'reasoning' | 'tool' | 'approval' | 'notice'; text: string; status?: string; createdAt: string; data?: Record<string, unknown> }
 export interface Project { id: string; name: string; goal: string; folderIds: string[] }
 export interface Snapshot { folders: Folder[]; chats: Chat[]; projects: Project[]; activeChatId?: string; version: number }
@@ -22,6 +22,7 @@ export interface Commands {
  'chat.create': { input: {folderId?: string; projectId?: string}; output: Chat };
  'chat.select': { input: {id: string}; output: TimelineItem[] };
  'chat.update': { input: {id: string; title?: string; pinned?: boolean; archived?: boolean; draft?: string; mode?: Chat['mode']}; output: Chat };
+ 'chat.movePin': { input: {id: string; direction: 'up' | 'down'}; output: void };
  'chat.send': { input: {id: string; text: string; requestId: string}; output: {runId: string} };
  'chat.stop': { input: {id: string}; output: void };
  'approval.respond': { input: {id: string; approved: boolean}; output: void };

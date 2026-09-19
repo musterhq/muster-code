@@ -187,6 +187,11 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
         if (p.mode !== undefined) { if (!['ask','plan','agent'].includes(String(p.mode))) throw new Error('Invalid mode.'); if (chat.status === 'running' || chat.status === 'stopping') throw new Error('Stop this run before changing mode.'); patch.mode = p.mode as Chat['mode']; }
         const result = store.updateChat(chatId, patch); state(); return result;
       }
+      case 'chat.movePin': {
+        const chatId = id(p.id); chatFor(chatId);
+        if (p.direction !== 'up' && p.direction !== 'down') throw new Error('Invalid direction.');
+        store.movePin(chatId, p.direction); state(); return;
+      }
       case 'chat.send': return send(id(p.id), text(p.text, 'message', 262144), id(p.requestId));
       case 'chat.contextTelemetry': { const chatId = id(p.id); chatFor(chatId); return store.contextTelemetry(chatId); }
       case 'chat.stop': { const chatId = id(p.id); chatFor(chatId); const run = runs.get(chatId); if (!run) return; run.stopped = true; store.updateChat(chatId, {status: 'stopping'}); settleApprovals(chatId); state(); await provider.stop(chatId); return; }
