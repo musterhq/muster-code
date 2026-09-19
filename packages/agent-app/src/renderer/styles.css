@@ -753,6 +753,9 @@ textarea:focus-visible {
 .composer-options { display: flex; align-items: center; gap: 12px; font-size: 11px; color: var(--text-faint); }
 .composer-options select { border: 0; background: transparent; color: var(--text-dim); font: inherit; padding: 3px 0; cursor: pointer; }
 .composer-options select:disabled { cursor: default; opacity: .55; }
+.composer { flex-shrink: 0; }
+.composer-error { grid-column: 1 / -1; color: var(--danger); font-size: 12px; overflow-wrap: anywhere; }
+.composer-error button { text-decoration: underline; margin-left: 6px; }
 .chat-context { width: min(calc(100% - 64px), 740px); margin: 0 auto 12px; display: flex; gap: 8px; align-items: center; color: var(--text-faint); font-size: 11px; }
 .chat-context .chat-folder-context { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .msg-actions { justify-content: flex-start; }

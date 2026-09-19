@@ -44,6 +44,8 @@ export interface AppState {
   contextTelemetry: Record<string, ContextTelemetry>;
   /** In-flight sends keyed by chat id; cleared when the run event arrives or fails. */
   sending: Record<string, boolean>;
+  composerDrafts: Record<string, { text: string; revision: number; error?: string }>;
+  sendErrors: Record<string, string>;
   notices: Notice[];
   tabs: WorkspaceTab[];
   activeTabId: string | null;
@@ -74,6 +76,8 @@ let state: AppState = {
   timelines: {},
   contextTelemetry: {},
   sending: {},
+  composerDrafts: {},
+  sendErrors: {},
   notices: [],
   tabs: savedWorkspace.tabs,
   activeTabId: savedWorkspace.activeTabId,
@@ -183,7 +187,10 @@ function applySnapshot(snapshot: Snapshot): void {
     state.activeChatId && snapshot.chats.some((c) => c.id === state.activeChatId)
       ? state.activeChatId
       : (snapshot.activeChatId ?? snapshot.chats.find((c) => !c.archived)?.id ?? null);
-  set({ snapshot, activeChatId });
+  set({ snapshot: { ...snapshot, chats: snapshot.chats.map(chat => {
+    const draft = state.composerDrafts[chat.id];
+    return draft ? { ...chat, draft: draft.text } : chat;
+  }) }, activeChatId });
   if (activeChatId && !state.timelines[activeChatId]) void loadTimeline(activeChatId);
   if (activeChatId) void loadContextTelemetry(activeChatId);
 }
@@ -290,6 +297,52 @@ export async function updateChat(
   }
 }
 
+const draftTimers = new Map<string, number>();
+const draftWrites = new Map<string, Promise<boolean>>();
+
+/** Local edit identity survives composer unmounts and delayed send replies. */
+export function setComposerDraft(id: string, text: string): void {
+  const previous = state.composerDrafts[id];
+  set({
+    composerDrafts: { ...state.composerDrafts, [id]: { text, revision: (previous?.revision ?? 0) + 1 } },
+    snapshot: state.snapshot ? { ...state.snapshot, chats: state.snapshot.chats.map(chat => chat.id === id ? { ...chat, draft: text } : chat) } : null,
+  });
+  clearTimeout(draftTimers.get(id));
+  draftTimers.set(id, window.setTimeout(() => void flushComposerDraft(id), 250));
+}
+
+/** Serialize saves per chat; a late save can never overwrite a newer edit. */
+export function flushComposerDraft(id: string): Promise<boolean> {
+  clearTimeout(draftTimers.get(id));
+  draftTimers.delete(id);
+  const writing = draftWrites.get(id);
+  if (writing) return writing;
+  const save = (async () => {
+    let draft = state.composerDrafts[id];
+    while (draft) {
+      try {
+        await invoke('chat.update', { id, draft: draft.text });
+      } catch (cause) {
+        if (state.composerDrafts[id]?.revision !== draft.revision) {
+          draft = state.composerDrafts[id];
+          continue;
+        }
+        set({ composerDrafts: { ...state.composerDrafts, [id]: { ...draft, error: errorText(cause) } } });
+        return false;
+      }
+      if (state.composerDrafts[id]?.revision === draft.revision) {
+        if (draft.error) set({ composerDrafts: { ...state.composerDrafts, [id]: { text: draft.text, revision: draft.revision } } });
+        return true;
+      }
+      draft = state.composerDrafts[id];
+    }
+    return true;
+  })();
+  const result = save.finally(() => { draftWrites.delete(id); });
+  draftWrites.set(id, result);
+  return result;
+}
+
 /**
  * One pending request ID per chat/draft. A retry after an ambiguous IPC
  * failure reuses the same ID so the host can dedupe; a changed draft gets a
@@ -298,17 +351,26 @@ export async function updateChat(
 const pendingSends: Record<string, { requestId: string; text: string }> = {};
 
 export async function sendMessage(id: string, text: string): Promise<boolean> {
-  if (state.sending[id]) return false;
+  if (state.sending[id] || !text.trim()) return false;
+  const submittedDraft = state.composerDrafts[id];
   const pending = pendingSends[id];
   const requestId =
     pending && pending.text === text ? pending.requestId : crypto.randomUUID();
   pendingSends[id] = { requestId, text };
-  set({ sending: { ...state.sending, [id]: true } });
+  const { [id]: _previousError, ...sendErrors } = state.sendErrors;
+  set({ sending: { ...state.sending, [id]: true }, sendErrors });
   try {
+    if (!(await flushComposerDraft(id))) throw new Error('Draft could not be saved. Retry after resolving the storage error.');
     await invoke('chat.send', { id, text, requestId });
     delete pendingSends[id];
+    const currentDraft = state.composerDrafts[id];
+    if (currentDraft === submittedDraft || (submittedDraft && currentDraft?.revision === submittedDraft.revision)) {
+      setComposerDraft(id, '');
+    }
+    await flushComposerDraft(id);
     return true;
   } catch (cause) {
+    set({ sendErrors: { ...state.sendErrors, [id]: errorText(cause) } });
     pushNotice(errorText(cause));
     return false;
   } finally {

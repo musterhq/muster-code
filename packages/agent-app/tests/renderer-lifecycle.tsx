@@ -1,5 +1,6 @@
 import { createRequire } from 'node:module';
 import assert from 'node:assert/strict';
+import { setTimeout as delay } from 'node:timers/promises';
 const require = createRequire(import.meta.url);
 const {parseHTML} = require('linkedom');
 const {window} = parseHTML('<html><body><div id="root"></div></body></html>');
@@ -7,6 +8,7 @@ window.innerWidth=1280;
 window.innerHeight=840;
 const persisted = new Map<string,string>();
 Object.assign(globalThis,{window, document:window.document, HTMLElement:window.HTMLElement, Element:window.Element, localStorage:{getItem(key:string){return persisted.get(key)??null},setItem(key:string,value:string){persisted.set(key,value)}},requestAnimationFrame:(cb:any)=>setTimeout(cb,0),cancelAnimationFrame:clearTimeout, ResizeObserver:class {observe(){}unobserve(){}disconnect(){}}});
+Object.assign(globalThis, { getComputedStyle: () => ({ minHeight: '26px', maxHeight: '200px', borderTopWidth: '0px', borderBottomWidth: '0px', lineHeight: '20px', paddingTop: '3px', paddingBottom: '3px' }) });
 Object.defineProperty(window.HTMLElement.prototype,'scrollHeight',{get(){return 800}});
 Object.defineProperty(window.HTMLElement.prototype,'clientHeight',{get(){return 500}});
 Object.defineProperty(window.HTMLElement.prototype,'offsetHeight',{get(){return 70}});
@@ -79,4 +81,54 @@ restoredRoot.render(<React.StrictMode><App/></React.StrictMode>);await new Promi
 const restoredGroup=Array.from(document.querySelectorAll<HTMLButtonElement>('.nav-disclosure')).find(el=>el.textContent==='Chats')!;
 assert.equal(restoredGroup.getAttribute('aria-expanded'),'false','collapse survives full component remount');
 assert.deepEqual(errors,[]);restoredRoot.unmount();
+
+// Deferred acknowledgement must preserve edits made in either mounted chat.
+let rejectSend: (error: Error) => void = () => {};
+let acceptSend: (result: { runId: string }) => void = () => {};
+const requests: { id: string; text: string; requestId: string }[] = [];
+const durableDrafts: Record<string, string> = {};
+const previousInvoke = window.muster.invoke;
+window.muster.invoke = async (command: string, params: { id: string; draft: string; text: string; requestId: string }) => {
+  if (command === 'chat.update') { durableDrafts[params.id] = params.draft; return; }
+  if (command === 'chat.send') {
+    requests.push(params);
+    const deferred = Promise.withResolvers<{ runId: string }>();
+    acceptSend = deferred.resolve;
+    rejectSend = deferred.reject;
+    return deferred.promise;
+  }
+  return previousInvoke(command, params);
+};
+store.setComposerDraft('a', '  first draft\n');
+const firstSend = store.sendMessage('a', '  first draft\n');
+await delay(0);
+assert.equal(await store.sendMessage('a', '  first draft\n'), false, 'double activation cannot dispatch a second request');
+store.setComposerDraft('a', 'newer text');
+store.setComposerDraft('b', 'other chat draft');
+rejectSend(new Error('Transport disconnected'));
+assert.equal(await firstSend, false);
+assert.equal(store.getState().composerDrafts.a.text, 'newer text', 'late failure never replaces newer input');
+assert.equal(store.getState().composerDrafts.b.text, 'other chat draft', 'failure never writes another chat');
+await store.flushComposerDraft('a');
+await store.flushComposerDraft('b');
+assert.equal(durableDrafts.a, 'newer text');
+assert.equal(durableDrafts.b, 'other chat draft');
+
+store.setComposerDraft('a', '  first draft\n');
+const retrySend = store.sendMessage('a', '  first draft\n');
+await delay(0);
+assert.equal(requests[1].requestId, requests[0].requestId, 'ambiguous retry reuses durable send identity');
+assert.equal(requests[1].text, '  first draft\n', 'submission preserves whitespace');
+store.setComposerDraft('a', 'text entered during retry');
+acceptSend({ runId: 'accepted-original' });
+assert.equal(await retrySend, true);
+assert.equal(durableDrafts.a, 'text entered during retry', 'late success preserves the newer durable draft');
+
+const finalSend = store.sendMessage('a', 'text entered during retry');
+await delay(0);
+acceptSend({ runId: 'accepted-next' });
+assert.equal(await finalSend, true);
+assert.equal(durableDrafts.a, '', 'only acknowledged unchanged draft is cleared');
+assert.equal(requests.length, 3, 'double activation produced no extra turn');
+console.log('PASS: send failure, ambiguous retry, duplicate activation and late success retain the correct per-chat draft');
 console.log("PASS: repeated chat switching keeps one transcript and composer, with no stale messages or render errors");

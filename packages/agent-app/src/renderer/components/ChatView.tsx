@@ -1,4 +1,4 @@
-import { ArrowUp, Brain, Check, ChevronDown, ChevronRight, Monitor, Square, X } from 'lucide-react';
+import { ArrowUp, Brain, Check, ChevronDown, ChevronRight, Monitor, X } from 'lucide-react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import React, {
   useCallback,
@@ -13,9 +13,6 @@ import {
   activeChat,
   respondApproval,
   retryTimeline,
-  sendMessage,
-  stopChat,
-  updateChat,
 } from '../store';
 import { useStore } from '../useStore';
 import {captureAnchor,isAtBottom,recallPosition,rememberPosition,resolveAnchorIndex} from './chatContinuity';
@@ -30,7 +27,7 @@ import { CopyButton, MessageBody } from './MessageBody';
 
 import {Collapsible as Disclosure} from '@base-ui/react/collapsible';
 import {useDisclosure} from './useDisclosure';
-const DRAFT_DEBOUNCE_MS = 250;
+import { Composer } from './Composer';
 
 function ReasoningDisclosure({item}:{item:TimelineItem}):React.ReactElement {
   const [open,setOpen]=useDisclosure('reasoning:'+item.id);
@@ -178,117 +175,6 @@ function Timeline({ items, chatId }: { items: TimelineItem[]; chatId:string }): 
   );
 }
 
-function Composer({ chat }: { chat: Chat }): React.ReactElement {
-  const state = useStore();
-  const [text, setText] = useState(chat.draft);
-  const chatIdRef = useRef(chat.id);
-  const timer = useRef<number | null>(null);
-  const textRef = useRef(text);
-  textRef.current = text;
-
-  // Swap drafts when the active chat changes; flush the outgoing draft first.
-  useEffect(() => {
-    if (chatIdRef.current !== chat.id) {
-      const prevId = chatIdRef.current;
-      if (timer.current) {
-        clearTimeout(timer.current);
-        timer.current = null;
-        void updateChat(prevId, { draft: textRef.current });
-      }
-      chatIdRef.current = chat.id;
-      setText(chat.draft);
-    }
-  }, [chat.id, chat.draft]);
-
-  useEffect(
-    () => () => {
-      if (timer.current) {
-        clearTimeout(timer.current);
-        void updateChat(chatIdRef.current, { draft: textRef.current });
-      }
-    },
-    [],
-  );
-
-  const scheduleDraftSave = (value: string) => {
-    if (timer.current) clearTimeout(timer.current);
-    const id = chat.id;
-    timer.current = window.setTimeout(() => {
-      timer.current = null;
-      void updateChat(id, { draft: value });
-    }, DRAFT_DEBOUNCE_MS);
-  };
-
-  const running = chat.status === 'running' || chat.status === 'stopping';
-  const sending = Boolean(state.sending[chat.id]);
-
-  const submit = async () => {
-    const value = text.trim();
-    if (!value || sending || running) return;
-    if (timer.current) {
-      clearTimeout(timer.current);
-      timer.current = null;
-    }
-    setText('');
-    const ok = await sendMessage(chat.id, value);
-    if (ok) {
-      void updateChat(chat.id, { draft: '' });
-    } else {
-      // Failed send keeps the text so nothing is lost.
-      setText(value);
-    }
-  };
-
-  return (
-    <div className="composer">
-      <textarea
-        className="composer-input"
-        aria-label="Message"
-        placeholder={running ? 'Agent is working…' : 'Send a follow-up…'}
-        value={text}
-        rows={Math.min(8, Math.max(1, text.split('\n').length))}
-        onChange={(e) => {
-          setText(e.target.value);
-          scheduleDraftSave(e.target.value);
-        }}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-            e.preventDefault();
-            void submit();
-          }
-        }}
-      />
-      <div className="composer-options">
-        <select aria-label="Chat mode" value={chat.mode} disabled={running || sending}
-          onChange={e=>void updateChat(chat.id,{mode:e.target.value as Chat['mode']})}>
-          <option value="agent">Agent</option><option value="ask">Ask</option><option value="plan">Plan</option>
-        </select>
-        <span title={chat.model}>Fable 5</span>
-      </div>
-      {running ? (
-        <button
-          type="button"
-          className="composer-stop"
-          aria-label="Stop run"
-          disabled={chat.status === 'stopping'}
-          onClick={() => void stopChat(chat.id)}
-        >
-          <Square size={14} />
-        </button>
-      ) : (
-        <button
-          type="button"
-          className="composer-send"
-          aria-label="Send message (Cmd+Enter)"
-          disabled={!text.trim() || sending}
-          onClick={() => void submit()}
-        >
-          <ArrowUp size={15} />
-        </button>
-      )}
-    </div>
-  );
-}
 
 export function ChatView(): React.ReactElement {
   const state = useStore();
