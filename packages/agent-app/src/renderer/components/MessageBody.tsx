@@ -97,7 +97,7 @@ const components: Components = {
   a: ({ children, href }) => <ResourceLink href={href}>{children}</ResourceLink>,
 };
 
-export function MessageBody({ text, resourceContext }: { text: string; resourceContext?: ResourceContext }): React.ReactElement {
+function MessageBodyContent({ text, resourceContext }: { text: string; resourceContext?: ResourceContext }): React.ReactElement {
   const renderers = React.useMemo<Components>(() => resourceContext ? {
     ...components,
     a: ({ children, href }) => <ResourceLink href={href} context={resourceContext}>{children}</ResourceLink>,
@@ -117,3 +117,11 @@ export function MessageBody({ text, resourceContext }: { text: string; resourceC
     </div>
   );
 }
+
+// Composer drafts and streaming updates in another message must not reparse an
+// unchanged Markdown document. Link previews still subscribe to scope changes.
+export const MessageBody = React.memo(MessageBodyContent, (previous, next) =>
+  previous.text === next.text &&
+  previous.resourceContext?.folderId === next.resourceContext?.folderId &&
+  previous.resourceContext?.path === next.resourceContext?.path,
+);
