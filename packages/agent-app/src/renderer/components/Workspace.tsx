@@ -20,6 +20,7 @@ import {
   type WorkspaceTab,
 } from '../store';
 import { useStore } from '../useStore';
+import {FileTab} from './FileTab';
 import {WorkspaceOverview} from './WorkspaceOverview';
 
 
@@ -150,46 +151,6 @@ function FilesTab({ tab }: { tab: WorkspaceTab }): React.ReactElement {
 
 // ---------------------------------------------------------------------------
 // File contents
-
-function FileTab({ tab }: { tab: WorkspaceTab }): React.ReactElement {
-  const state = useStore();
-  const body = state.fileBodies[tab.id];
-  const code = useRef<HTMLDivElement>(null);
-  useEffect(()=>{if(tab.line&&body?.phase==='ready')code.current?.querySelector(`[data-line="${tab.line}"]`)?.scrollIntoView({block:"center"});},[tab.line,body?.phase]);
-  if (!body || body.phase === 'loading' || body.phase === 'idle') {
-    return <div className="pane-loading">Loading {tab.path}…</div>;
-  }
-  if (body.phase === 'error') {
-    return (
-      <div className="pane-error">
-        <p>{body.error}</p>
-        <button type="button" onClick={() => void openFile(tab.folderId!, tab.path!)}>
-          Retry
-        </button>
-      </div>
-    );
-  }
-  const { text, truncated } = body.value!;
-  const lines = text === '' ? [] : text.split('\n');
-  return (
-    <div className="file-view" ref={code}>
-      <div className="file-path">{tab.path}</div>
-      <div className="code-scroll">
-        <table className="code-table">
-          <tbody>
-            {lines.map((line, i) => (
-              <tr key={i} data-line={i+1} className={i+1===tab.line?'file-line-target':undefined}>
-                <td className="code-no">{i + 1}</td>
-                <td className="code-line">{line}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      {truncated && <div className="pane-truncated">File truncated by the host.</div>}
-    </div>
-  );
-}
 
 // ---------------------------------------------------------------------------
 // Diff

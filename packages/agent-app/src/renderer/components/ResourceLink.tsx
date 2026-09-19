@@ -6,12 +6,13 @@ import {activeChat,openFile,notifyError} from '../store';
 import {invoke} from '../bridge';
 import {useStore} from '../useStore';
 import {resourceReference} from './resourceReference';
-export function ResourceLink({href,children}:{href?:string;children?:React.ReactNode}){
+export type ResourceContext = { folderId: string; path: string };
+export function ResourceLink({href,children,context}:{href?:string;children?:React.ReactNode;context?:ResourceContext}){
  const state=useStore(),chat=activeChat();
  const project=state.snapshot?.projects.find(p=>p.id===chat?.projectId);
  const ids=project?.folderIds??(chat?.folderId?[chat.folderId]:[]);
- const folders=(state.snapshot?.folders??[]).filter(f=>ids.includes(f.id));
- const ref=href?resourceReference(href,folders,chat?.folderId):null;
+ const folders=(state.snapshot?.folders??[]).filter(f=>context ? f.id===context.folderId : ids.includes(f.id));
+ const ref=href?resourceReference(href,folders,context?.folderId??chat?.folderId,context?.path):null;
  if(ref)return <FileReference key={`${ref.folderId}:${ref.path}:${ref.line??0}`} reference={ref}>{children}</FileReference>;
  if(href&&/^https?:/i.test(href))return <a href={href} title={href} onClick={e=>{e.preventDefault();void invoke('link.open',{url:href}).catch(notifyError);}} rel="noreferrer noopener">{children}</a>;
  return <span className="md-unavailable-link" title="This reference is outside the conversation’s folders or is unsupported.">{children}</span>;

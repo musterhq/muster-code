@@ -9,3 +9,10 @@ test('local links stay scoped, decode paths and preserve line targets',()=>{
  for(const path of ['../private','/work/app2/secret','/work/app/../../secret','%00a','javascript:alert(1)','https://x/a','//host/a','%ZZ'])assert.equal(resourceReference(path,folders,'a'),null,path);
  assert.equal(resourceReference('ambiguous.ts',folders),null);
 });
+
+test('document links resolve from document directory within its registered folder',()=>{
+ assert.equal(resourceReference('../src/My%20File.ts#L8',folders,'a','docs/guide.md')?.path,'src/My File.ts');
+ assert.equal(resourceReference('child.md',folders,'a','docs/guide.md')?.path,'docs/child.md');
+ assert.equal(resourceReference('../../private',folders,'a','docs/guide.md'),null);
+ assert.equal(resourceReference('/work/app/src/a.ts',folders,'a','docs/guide.md')?.path,'src/a.ts');
+});

@@ -2,7 +2,7 @@ import {copyText} from '../clipboard';
 import { Check, Copy, X } from 'lucide-react';
 import React, { useEffect, useRef, useState } from 'react';
 import ReactMarkdown, { type Components } from 'react-markdown';
-import {ResourceLink} from './ResourceLink';
+import {ResourceLink, type ResourceContext} from './ResourceLink';
 import {MarkdownTable} from './MarkdownTable';
 import remarkGfm from 'remark-gfm';
 
@@ -97,14 +97,20 @@ const components: Components = {
   a: ({ children, href }) => <ResourceLink href={href}>{children}</ResourceLink>,
 };
 
-export function MessageBody({ text }: { text: string }): React.ReactElement {
+export function MessageBody({ text, resourceContext }: { text: string; resourceContext?: ResourceContext }): React.ReactElement {
+  const renderers = React.useMemo<Components>(() => resourceContext ? {
+    ...components,
+    a: ({ children, href }) => <ResourceLink href={href} context={resourceContext}>{children}</ResourceLink>,
+    // Opening a local document must not trigger remote requests or arbitrary file reads.
+    img: ({alt}) => <span className="md-unavailable-link">[Image: {alt || 'image'} — preview unavailable]</span>,
+  } : components, [resourceContext?.folderId, resourceContext?.path]);
   return (
     <div className="md-body">
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         skipHtml
         urlTransform={safeUrl}
-        components={components}
+        components={renderers}
       >
         {text}
       </ReactMarkdown>

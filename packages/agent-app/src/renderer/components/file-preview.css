@@ -1,0 +1,14 @@
+.file-view { min-height: 0; min-width: 0; }
+.file-head { display: flex; align-items: center; flex-shrink: 0; border-bottom: 1px solid var(--hairline); gap: 8px; }
+.file-head .file-path { min-width: 0; flex: 1; }
+.file-view-switch { display: flex; gap: 2px; margin-right: 8px; }
+.file-view-switch button { display: inline-flex; align-items: center; gap: 5px; padding: 4px 7px; border-radius: 5px; font-size: 11px; color: var(--text-dim); transition: color 120ms, background-color 120ms; }
+.file-view-switch button:hover:not(:disabled), .file-view-switch button[aria-pressed='true'] { color: var(--text); background: var(--bg-hover); }
+.file-view-switch button:disabled { opacity: .45; cursor: default; }
+.file-markdown { overflow: auto; min-height: 0; padding: 20px 22px; flex: 1; user-select: text; }
+.file-markdown .md-body { max-width: 80ch; margin-inline: auto; }
+.file-markdown .md-body h1 { font-size: 22px; }
+.file-markdown .md-body h2 { font-size: 18px; }
+.file-markdown .md-body h3 { font-size: 15px; }
+.file-empty { padding: 12px; color: var(--text-dim); }
+@media (prefers-reduced-motion: reduce) { .file-view-switch button { transition: none; } }
