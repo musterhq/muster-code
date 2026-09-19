@@ -30,6 +30,7 @@ export interface Commands {
  'workspace.watch': { input: {folderIds:string[]}; output: void };
  'files.list': { input: {folderId: string; path?: string}; output: FileEntry[] };
  'files.read': { input: {folderId: string; path: string}; output: {path: string; text: string; truncated: boolean} };
+ 'files.asset': { input: {folderId: string; path: string}; output: {mime: string; dataUrl: string; size: number; width: number; height: number} };
  'git.changes': { input: {folderId: string}; output: ChangedFile[] };
  'git.diff': { input: {folderId: string; path: string}; output: {path: string; before: string; after: string; truncated: boolean} };
  'providers.list': { input: undefined; output: ProviderInfo[] };

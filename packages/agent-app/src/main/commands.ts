@@ -18,6 +18,7 @@ const COMMANDS = {
   'workspace.watch': true,
   'files.list': true,
   'files.read': true,
+  'files.asset': true,
   'git.changes': true,
   'link.open': true,
   'clipboard.write': true,

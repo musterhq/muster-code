@@ -10,6 +10,7 @@ import {appendCommandOutput,finishCommandOutput} from './command-output-buffer.t
 import { toolEventDetails } from './tool-event-details.ts';
 import { applyProviderEvent } from './context-telemetry.ts';
 import { listFiles, readFile } from './files.ts';
+import { readAsset } from './file-assets.ts';
 import { AgentModeReviewHost } from './review.ts';
 import { createProviderAdapter, MODEL, type ProviderAdapter } from './provider.ts';
 
@@ -212,6 +213,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
       }
       case 'files.list': return listFiles(folderFor(p.folderId).path, text(p.path ?? '', 'path'));
       case 'files.read': return readFile(folderFor(p.folderId).path, text(p.path,'path'));
+      case 'files.asset': return readAsset(folderFor(p.folderId).path, text(p.path,'path'));
       case 'git.changes': { const root = folderFor(p.folderId).path; const result = await new AgentModeReviewHost(() => root).listChanges(); if (result.error) throw new Error(result.error); return result.files; }
       case 'git.diff': { const root = folderFor(p.folderId).path; const result = await new AgentModeReviewHost(() => root).readChange(text(p.path,'path')); if (result.error) throw new Error(result.error); return {path: result.path, before: result.before, after: result.after, truncated: result.truncated}; }
       case 'providers.save': return customProviders.save({name:p.name,endpoint:p.endpoint,apiKeyEnv:p.apiKeyEnv});
