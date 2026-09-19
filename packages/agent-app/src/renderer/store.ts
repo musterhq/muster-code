@@ -1,5 +1,6 @@
 import type {
   Chat,
+  Commands,
   ChangedFile,
   ContextTelemetry,
   FileEntry,
@@ -7,6 +8,7 @@ import type {
   Snapshot,
   TimelineItem,
 } from '../shared/protocol';
+import {filePresentation} from './components/filePresentation';
 import { BridgeError, getBridge, invoke, subscribe } from './bridge';
 import { focusComposer } from './focus';
 import { MAX_TABS, readWorkspace, saveWorkspace } from './workspacePersistence';
@@ -33,6 +35,8 @@ export interface Notice {
   message: string;
 }
 
+export type FileBody = {text: string; truncated: boolean; asset?: Commands['files.asset']['output']};
+
 export interface AppState {
   screen: 'work' | 'providers' | 'projects';
   bridgeAvailable: boolean;
@@ -53,7 +57,7 @@ export interface AppState {
   /** Revealed provider identities; entries expire via remask timers in the view. */
   revealed: Record<string, string>;
   files: Record<string, Loadable<FileEntry[]>>;
-  fileBodies: Record<string, Loadable<{ text: string; truncated: boolean }>>;
+  fileBodies: Record<string, Loadable<FileBody>>;
   diffs: Record<string, Loadable<{ before: string; after: string; truncated: boolean }>>;
   gitChanges: Record<string, Loadable<ChangedFile[]>>;
   navWidth: number;
@@ -496,17 +500,25 @@ export async function loadDir(folderId: string, path: string): Promise<void> {
   }
 }
 
+async function readFileBody(folderId: string, path: string): Promise<FileBody> {
+  if (filePresentation(path) === 'image') return {text: '', truncated: false, asset: await invoke('files.asset',{folderId,path})};
+  return invoke('files.read',{folderId,path});
+}
+
 export async function openFile(folderId: string, path: string, line?: number): Promise<void> {
   const id = `file:${folderId}:${path}`;
   openTab({ id, kind: 'file', folderId, path, line, title: path.split('/').pop() ?? path });
   if (state.fileBodies[id]?.phase === 'ready' || state.fileBodies[id]?.phase === 'loading') return;
   set({ fileBodies: { ...state.fileBodies, [id]: { phase: 'loading' } } });
   try {
-    const body = await invoke('files.read', { folderId, path });
+    const body = await readFileBody(folderId, path);
+    if (!state.tabs.some(tab => tab.id === id)) return;
+    // Keep at most one decoded-image payload cached; inactive image tabs reload on demand.
+    const bodies = body.asset ? Object.fromEntries(Object.entries(state.fileBodies).filter(([key,value]) => key === id || !value.value?.asset)) : state.fileBodies;
     set({
       fileBodies: {
-        ...state.fileBodies,
-        [id]: { phase: 'ready', value: { text: body.text, truncated: body.truncated } },
+        ...bodies,
+        [id]: { phase: 'ready', value: body },
       },
     });
   } catch (cause) {
@@ -582,7 +594,7 @@ async function refreshResources(folderId: string): Promise<void> {
       if (active.kind === 'files') { const paths=[...new Set(['',...Object.keys(files).filter(key=>key.startsWith(folderId+'\0')).map(key=>key.slice(folderId.length+1))])].slice(0,64); await Promise.all([...paths.map(path=>loadDir(folderId,path)),loadGitChanges(folderId)]); continue; }
       try {
         if (active.kind === 'file') {
-          const value = await invoke('files.read',{folderId,path:active.path!});
+          const value = await readFileBody(folderId,active.path!);
           if (state.tabs.some(tab=>tab.id===active.id)) set({fileBodies:{...state.fileBodies,[active.id]:{phase:'ready',value}}});
         } else {
           const value = await invoke('git.diff',{folderId,path:active.path!});

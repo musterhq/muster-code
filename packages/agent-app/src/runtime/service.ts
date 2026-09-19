@@ -9,7 +9,7 @@ import { WorkspaceWatchService } from './workspace-watch.ts';
 import {appendCommandOutput,finishCommandOutput} from './command-output-buffer.ts';
 import { toolEventDetails } from './tool-event-details.ts';
 import { applyProviderEvent } from './context-telemetry.ts';
-import { listFiles, readFile } from './files.ts';
+import { listFiles, readFile, searchFiles } from './files.ts';
 import { readAsset } from './file-assets.ts';
 import { AgentModeReviewHost } from './review.ts';
 import { createProviderAdapter, MODEL, type ProviderAdapter } from './provider.ts';
@@ -212,6 +212,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
         return;
       }
       case 'files.list': return listFiles(folderFor(p.folderId).path, text(p.path ?? '', 'path'));
+      case 'files.search': return searchFiles(folderFor(p.folderId).path, text(p.path ?? '', 'path'), text(p.query,'query',256));
       case 'files.read': return readFile(folderFor(p.folderId).path, text(p.path,'path'));
       case 'files.asset': return readAsset(folderFor(p.folderId).path, text(p.path,'path'));
       case 'git.changes': { const root = folderFor(p.folderId).path; const result = await new AgentModeReviewHost(() => root).listChanges(); if (result.error) throw new Error(result.error); return result.files; }

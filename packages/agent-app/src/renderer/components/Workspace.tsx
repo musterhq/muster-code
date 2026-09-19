@@ -20,75 +20,13 @@ import {
   type WorkspaceTab,
 } from '../store';
 import { useStore } from '../useStore';
+import {FileTree} from './FileTree';
 import {FileTab} from './FileTab';
 import {WorkspaceOverview} from './WorkspaceOverview';
 
 
 // ---------------------------------------------------------------------------
 // File tree
-
-function DirEntries({
-  folderId,
-  path,
-}: {
-  folderId: string;
-  path: string;
-}): React.ReactElement {
-  const state = useStore();
-  const entries = state.files[dirKey(folderId, path)];
-  const [open, setOpen] = useState<Record<string, boolean>>({});
-
-  useEffect(() => {
-    if (!entries) void loadDir(folderId, path);
-  }, [entries, folderId, path]);
-
-  if (!entries || (entries.phase === 'loading' && !entries.value) || entries.phase === 'idle') {
-    return <div className="tree-loading">Loading…</div>;
-  }
-  if (entries.phase === 'error') {
-    return (
-      <div className="tree-error">
-        <span>{entries.error}</span>
-        <button type="button" onClick={() => void loadDir(folderId, path)}>
-          Retry
-        </button>
-      </div>
-    );
-  }
-  const items = entries.value ?? [];
-  if (items.length === 0) return <div className="tree-empty">Empty</div>;
-  return (
-    <ul className="tree" role="group">
-      {items.map((entry) =>
-        entry.kind === 'directory' ? (
-          <li key={entry.path}>
-            <button
-              type="button"
-              className="tree-row"
-              aria-expanded={Boolean(open[entry.path])}
-              onClick={() => setOpen((o) => ({ ...o, [entry.path]: !o[entry.path] }))}
-            >
-              {open[entry.path] ? <FolderOpen size={13} /> : <FolderIcon size={13} />}
-              <span>{entry.name}</span>
-            </button>
-            {open[entry.path] && <DirEntries folderId={folderId} path={entry.path} />}
-          </li>
-        ) : (
-          <li key={entry.path}>
-            <button
-              type="button"
-              className="tree-row"
-              onClick={() => void openFile(folderId, entry.path)}
-            >
-              <FileIcon size={13} />
-              <span>{entry.name}</span>
-            </button>
-          </li>
-        ),
-      )}
-    </ul>
-  );
-}
 
 function FilesTab({ tab }: { tab: WorkspaceTab }): React.ReactElement {
   const state = useStore();
@@ -143,7 +81,7 @@ function FilesTab({ tab }: { tab: WorkspaceTab }): React.ReactElement {
       </section>
       {tab.kind==='files'&&<section className="files-browser">
         <header className="files-section-head">Files</header>
-        <DirEntries folderId={folderId} path="" />
+        <FileTree folderId={folderId} path="" />
       </section>}
     </div>
   );

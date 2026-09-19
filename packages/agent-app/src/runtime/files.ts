@@ -1,5 +1,5 @@
 /** Scoped folder browsing: bounded listings and bounded text reads. */
-import { promises as fs } from 'node:fs';
+import { promises as fs, type Dir } from 'node:fs';
 import { join, relative } from 'node:path';
 import type { FileEntry } from '../shared/protocol.ts';
 import { resolveInside } from './paths.ts';
@@ -50,4 +50,33 @@ export async function readFile(root: string, rel: string): Promise<{ path: strin
   } finally {
     await handle.close();
   }
+}
+
+/** Bounded on-demand search; never indexes the workspace in the background. */
+export async function searchFiles(root: string, rel: string, query: string): Promise<{entries: FileEntry[]; truncated: boolean}> {
+  if (!query.trim() || query.length > 256) throw new Error('Enter a file name of 1–256 characters.');
+  await resolveInside(root, rel);
+  const pending = [rel], entries: FileEntry[] = [];
+  const needle = query.trim().toLowerCase();
+  let inspected = 0, directories = 0, partial = false;
+  while (pending.length && directories < 200 && inspected < 10_000) {
+    const path = pending.shift()!;
+    let directory: Dir;
+    try {directory = await fs.opendir(await resolveInside(root,path));}
+    catch (error) {if (!directories) throw error; partial = true; continue;}
+    directories++;
+    for await (const entry of directory) {
+      if (++inspected > 10_000) return {entries,truncated:true};
+      if (entry.name === '.git') continue;
+      // Do not walk symlinks: no cycles or unexpected traversal during search.
+      if (entry.isSymbolicLink()) {partial = true; continue;}
+      const child = join(path,entry.name);
+      if (entry.isDirectory()) {if(pending.length < 200) pending.push(child); else partial = true;}
+      else if (entry.isFile() && child.toLowerCase().includes(needle)) {
+        entries.push({name:entry.name,path:child,kind:'file'});
+        if (entries.length === 100) return {entries,truncated:true};
+      }
+    }
+  }
+  return {entries,truncated:partial || pending.length > 0};
 }

@@ -17,6 +17,7 @@ const COMMANDS = {
   'project.create': true,
   'workspace.watch': true,
   'files.list': true,
+  'files.search': true,
   'files.read': true,
   'files.asset': true,
   'git.changes': true,

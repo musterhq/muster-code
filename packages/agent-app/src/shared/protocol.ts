@@ -29,6 +29,7 @@ export interface Commands {
  'project.create': { input: {name: string; goal: string; folderIds: string[]}; output: Project };
  'workspace.watch': { input: {folderIds:string[]}; output: void };
  'files.list': { input: {folderId: string; path?: string}; output: FileEntry[] };
+ 'files.search': { input: {folderId: string; path?: string; query: string}; output: {entries: FileEntry[]; truncated: boolean} };
  'files.read': { input: {folderId: string; path: string}; output: {path: string; text: string; truncated: boolean} };
  'files.asset': { input: {folderId: string; path: string}; output: {mime: string; dataUrl: string; size: number; width: number; height: number} };
  'git.changes': { input: {folderId: string}; output: ChangedFile[] };
