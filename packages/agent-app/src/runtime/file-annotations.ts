@@ -1,5 +1,5 @@
 import { DatabaseSync } from 'node:sqlite';
-import { chmodSync } from 'node:fs';
+import { chmodSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 
@@ -16,13 +16,13 @@ export interface FileAnnotation {
 
 // Validation helpers
 function validateId(value: string, label: string): void {
-  if (!value || value.length > 128) throw new Error(`${label} must be 1–128 chars`);
+  if (typeof value !== 'string' || !value || value.includes('\0') || value.length > 128) throw new Error(`${label} must be 1–128 chars`);
 }
 
 function validatePath(value: string): void {
-  if (!value) throw new Error('path must be non-empty');
+  if (typeof value !== 'string' || !value) throw new Error('path must be non-empty');
   if (value.length > 4096) throw new Error('path max 4096 chars');
-  if (value.startsWith('/')) throw new Error('path must be relative');
+  if (value.split('/').some(part=>part==='..'||part==='.') || value.includes('\\') || value.startsWith('/')) throw new Error('path must be relative');
   if (value.includes('\0')) throw new Error('path must not contain NUL');
   // no leading . / absolute / NUL — also reject leading ".."
   if (value === '.' || value.startsWith('./') || value.startsWith('../') || value === '..')
@@ -30,20 +30,20 @@ function validatePath(value: string): void {
 }
 
 function validateRevision(value: string): void {
-  if (!/^[0-9a-f]{64}$/.test(value)) throw new Error('revision must be 64 hex chars (sha256)');
+  if (typeof value !== 'string' || !/^[0-9a-f]{64}$/.test(value)) throw new Error('revision must be 64 hex chars (sha256)');
 }
 
 function validateLocation(value: string): void {
-  if (!value) throw new Error('location must be non-empty');
+  if (typeof value !== 'string' || !value.trim()) throw new Error('location must be non-empty');
   if (value.length > 256) throw new Error('location max 256 chars');
 }
 
 function validateQuote(value: string): void {
-  if (value.length > 2000) throw new Error('quote max 2000 chars');
+  if (typeof value !== 'string' || value.length > 2000) throw new Error('quote max 2000 chars');
 }
 
 function validateNote(value: string): void {
-  if (!value) throw new Error('note must be non-empty');
+  if (typeof value !== 'string' || !value.trim()) throw new Error('note must be non-empty');
   if (value.length > 4000) throw new Error('note max 4000 chars');
 }
 
@@ -51,6 +51,7 @@ export class FileAnnotations {
   private db: DatabaseSync;
 
   constructor(dataDir: string) {
+    mkdirSync(dataDir,{recursive:true,mode:0o700});
     const dbPath = join(dataDir, 'annotations.sqlite');
     this.db = new DatabaseSync(dbPath);
     try { chmodSync(dbPath, 0o600); } catch { /* new file: sqlite creates it, chmod after */ }
@@ -82,7 +83,12 @@ export class FileAnnotations {
         WHERE folderId = ? AND path = ?
         ORDER BY createdAt ASC, id ASC`
     );
-    return stmt.all(folderId, path) as FileAnnotation[];
+    return stmt.all(folderId, path) as unknown as FileAnnotation[];
+  }
+
+  move(folderId: string, from: string, to: string): void {
+    validateId(folderId, 'folderId'); validatePath(from); validatePath(to);
+    this.db.prepare('UPDATE annotations SET path = ? WHERE folderId = ? AND path = ?').run(to, folderId, from);
   }
 
   add(input: Omit<FileAnnotation, 'id' | 'createdAt'>): FileAnnotation {

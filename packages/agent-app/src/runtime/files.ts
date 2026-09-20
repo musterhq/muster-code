@@ -6,6 +6,7 @@ import { resolveInside } from './paths.ts';
 
 const MAX_ENTRIES = 2_000;
 const MAX_TEXT_BYTES = 512 * 1024;
+const MAX_TABLE_BYTES = 4 * 1024 * 1024;
 
 function looksBinary(buffer: Buffer): boolean {
   const probe = buffer.subarray(0, 8_192);
@@ -14,9 +15,11 @@ function looksBinary(buffer: Buffer): boolean {
 
 export async function listFiles(root: string, rel: string): Promise<FileEntry[]> {
   const abs = await resolveInside(root, rel);
-  const dirents = await fs.readdir(abs, { withFileTypes: true });
+  const realRoot = await fs.realpath(root);
+  const logicalPath = relative(realRoot,abs);
+  const dirents = await fs.opendir(abs);
   const entries: FileEntry[] = [];
-  for (const dirent of dirents) {
+  for await (const dirent of dirents) {
     if (dirent.name === '.git') continue;
     if (!dirent.isFile() && !dirent.isDirectory() && !dirent.isSymbolicLink()) continue;
     let kind: FileEntry['kind'] = dirent.isDirectory() ? 'directory' : 'file';
@@ -29,7 +32,7 @@ export async function listFiles(root: string, rel: string): Promise<FileEntry[]>
         continue;
       }
     }
-    entries.push({ name: dirent.name, path: relative(root, join(abs, dirent.name)), kind });
+    entries.push({ name: dirent.name, path: join(logicalPath,dirent.name), kind });
     if (entries.length >= MAX_ENTRIES) break;
   }
   entries.sort((a, b) => (a.kind === b.kind ? a.name.localeCompare(b.name) : a.kind === 'directory' ? -1 : 1));
@@ -42,11 +45,22 @@ export async function readFile(root: string, rel: string): Promise<{ path: strin
   if (!stat.isFile()) throw new Error(`Not a file: ${rel}`);
   const handle = await fs.open(abs, 'r');
   try {
-    const buffer = Buffer.alloc(Math.min(stat.size, MAX_TEXT_BYTES + 1));
-    const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
-    const shown = buffer.subarray(0, Math.min(bytesRead, MAX_TEXT_BYTES));
-    if (looksBinary(shown)) throw new Error(`Binary file (no text preview): ${rel}`);
-    return { path: rel, text: shown.toString('utf8'), truncated: bytesRead > MAX_TEXT_BYTES };
+    const table = /\.(csv|tsv)$/i.test(rel);
+    const limit = table ? MAX_TABLE_BYTES : MAX_TEXT_BYTES;
+    const buffer = Buffer.alloc(Math.min(stat.size, limit + 1));
+    let bytesRead = 0;
+    while (bytesRead < buffer.length) {
+      const chunk = await handle.read(buffer, bytesRead, buffer.length - bytesRead, bytesRead);
+      if (!chunk.bytesRead) break;
+      bytesRead += chunk.bytesRead;
+    }
+    const shown = buffer.subarray(0, Math.min(bytesRead, limit));
+    // Excel Unicode Text exports have a UTF-16 BOM. Never guess binary encoding.
+    const utf16 = table && shown.length >= 2 && (shown[0] === 255 && shown[1] === 254 ? 'utf-16le' : shown[0] === 254 && shown[1] === 255 ? 'utf-16be' : '');
+    if (!utf16 && looksBinary(shown)) throw new Error(`Binary file (no text preview): ${rel}`);
+    const text = utf16 ? new TextDecoder(utf16).decode(shown) : shown.toString('utf8');
+    return { path: rel, text, truncated: bytesRead > limit };
+
   } finally {
     await handle.close();
   }

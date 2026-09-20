@@ -1,0 +1,11 @@
+.message-meta { display:flex; align-items:center; gap:9px; min-height:25px; margin-top:3px; color:var(--text-tertiary,#858585); font-size:11px; line-height:1.35; opacity:0; transition:opacity 130ms ease; }
+.msg-assistant:hover .message-meta,.msg-assistant:focus-within .message-meta,.user-message-row:hover .message-meta,.user-message-row:focus-within .message-meta,.message-meta:focus-within,.message-meta[data-feedback] { opacity:1; }
+.user-message-row .message-meta { justify-content:flex-end; margin-top:-7px; margin-bottom:7px; padding-inline:4px; }
+.message-meta time { font-variant-numeric:tabular-nums; cursor:default; }
+.message-copy { display:inline-flex; align-items:center; justify-content:center; width:26px; height:25px; padding:0; border:0; border-radius:5px; background:transparent; color:inherit; cursor:pointer; transition:color 130ms ease,background 130ms ease; }
+.message-copy:hover { color:var(--text-primary,#ddd); background:rgb(255 255 255 / 4%); }
+.message-copy:focus-visible { outline:2px solid var(--focus-ring,#8aabde); outline-offset:2px; }
+.message-copy:disabled { cursor:wait; }
+.message-copy-feedback { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip-path:inset(50%); white-space:nowrap; }
+@media (hover:none) { .message-meta {opacity:1;} }
+@media (prefers-reduced-motion:reduce) { .message-meta,.message-copy {transition:none;} }

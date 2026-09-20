@@ -5,6 +5,7 @@ import ReactMarkdown, { type Components } from 'react-markdown';
 import {ResourceLink, type ResourceContext} from './ResourceLink';
 import {MarkdownTable} from './MarkdownTable';
 import remarkGfm from 'remark-gfm';
+import { createIncrementalMarkdownPlugin } from '../markdown-incremental';
 
 import './message-body.css';
 
@@ -98,6 +99,7 @@ const components: Components = {
 };
 
 function MessageBodyContent({ text, resourceContext }: { text: string; resourceContext?: ResourceContext }): React.ReactElement {
+  const remarkPlugins = React.useMemo(() => [remarkGfm, createIncrementalMarkdownPlugin()], []);
   const renderers = React.useMemo<Components>(() => resourceContext ? {
     ...components,
     a: ({ children, href }) => <ResourceLink href={href} context={resourceContext}>{children}</ResourceLink>,
@@ -107,7 +109,7 @@ function MessageBodyContent({ text, resourceContext }: { text: string; resourceC
   return (
     <div className="md-body">
       <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
+        remarkPlugins={remarkPlugins}
         skipHtml
         urlTransform={safeUrl}
         components={renderers}

@@ -1,0 +1,27 @@
+.hindsight-panel { margin-top: 28px; padding-top: 24px; border-top: 1px solid var(--border, #333); font-size: 13px; }
+.hindsight-heading, .hindsight-heading > div { display:flex; align-items:center; gap:8px; }
+.hindsight-heading { justify-content:space-between; }
+.hindsight-heading svg { color:#b6a1d5; }
+.hindsight-heading h2 { margin:0; font-size:16px; font-weight:550; }
+.hindsight-description, .hindsight-submit > span { color:var(--text-muted, #999); }
+.hindsight-connection { display:flex; flex-direction:column; gap:6px; padding:14px 0; color:var(--text-muted, #999); }
+.hindsight-connection > span, .hindsight-connection > code { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.hindsight-connection p { margin:0; line-height:1.5; }
+.hindsight-status[data-connection=verified] { color:#8dc3a1; }
+.hindsight-status[data-connection=failed] { color:#d5ad83; }
+.hindsight-modes { display:flex; gap:4px; margin:14px 0; }
+.hindsight-modes button { border:0; background:transparent; color:var(--text-muted, #999); border-radius:7px; padding:7px 12px; cursor:pointer; transition:background-color 120ms ease,color 120ms ease; }
+.hindsight-modes button[aria-pressed=true] { background:#ffffff0c; color:var(--text, #ddd); }
+.hindsight-modes button:hover:not(:disabled) { background:#ffffff09; }
+.hindsight-panel form { display:grid; gap:14px; }
+.hindsight-panel label { display:grid; gap:7px; }
+.hindsight-panel textarea, .hindsight-panel input { box-sizing:border-box; width:100%; background:var(--input-bg, #202020); color:inherit; border:1px solid var(--border, #333); border-radius:8px; padding:10px 12px; font:inherit; line-height:1.5; }
+.hindsight-panel textarea { resize:vertical; min-height:68px; max-height:260px; }
+.hindsight-panel :is(button,input,textarea):focus-visible { outline:2px solid var(--focus, #8ca6c7); outline-offset:2px; }
+.hindsight-panel button:disabled { opacity:.5; cursor:default; }
+.hindsight-submit { display:flex; align-items:center; justify-content:space-between; gap:12px; }
+.hindsight-results { margin-top:18px; overflow-wrap:anywhere; }
+.hindsight-results p { white-space:pre-wrap; line-height:1.6; }
+.hindsight-results article { border-bottom:1px solid var(--border, #333); padding:10px 0; }
+.hindsight-results small { color:var(--text-muted, #999); }
+@media(prefers-reduced-motion:reduce) { .hindsight-modes button { transition:none; } }

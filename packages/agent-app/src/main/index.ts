@@ -1,9 +1,17 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, screen, session, shell, clipboard } from 'electron';
 import path from 'node:path';
+import {createRequire} from 'node:module';
+import {ProcessSessions} from '../runtime/process-sessions.ts';
+import {ScopedComputers} from '../runtime/scoped-computers.ts';
+import {DesktopWorkspaces,commandAuthority,computerAuthority} from './desktop-workspaces.ts';
 import { pathToFileURL } from 'node:url';
 import type { AgentEvent, Commands, Snapshot } from '../shared/protocol.ts';
 import { isCommandName } from './commands.ts';
+import { fileOperation, mutablePath } from '../runtime/file-operations.ts';
+import {BrowserWorkspaceController} from './browser-workspace.ts';
+import {NativePreviewController} from './native-preview.ts';
 import { buildMenu } from './menu.ts';
+import { createQuitCoordinator, withinDeadline } from './quit-coordinator.ts';
 import { loadAgentService, type AgentService } from './service-loader.ts';
 import { clampGeometry, DEFAULT_GEOMETRY, MIN_HEIGHT, MIN_WIDTH, WindowStateStore, type WindowGeometry } from './window-state.ts';
 
@@ -25,8 +33,8 @@ async function main(): Promise<void> {
   let window: BrowserWindow | null = null;
   let service: AgentService | null = null;
   let runningChats = 0;
-  let quitting = false;
-  let disposed = false;
+  let disposal: Promise<void> | undefined;
+  let shutdownStarted = false;
 
   const stateStore = new WindowStateStore(app.getPath('userData'));
 
@@ -62,6 +70,13 @@ async function main(): Promise<void> {
   };
   const loaded = loadAgentService({ dataDir, onEvent });
   service = loaded.service;
+  const processes = new ProcessSessions(path.join(dataDir,'process-sessions.json'),async input=>commandAuthority(await loaded.service.invoke('app.snapshot',undefined),dataDir,input),onEvent);
+  const computers = new ScopedComputers({
+    appData:dataDir,
+    resolveScope:async scope=>computerAuthority(await loaded.service.invoke('app.snapshot',undefined),scope),
+    loadCore:async()=>createRequire(__filename)(path.join(__dirname,'../runtime/scoped-computer-core.cjs')),
+  });
+  const desktopWork = new DesktopWorkspaces(loaded.service,processes,computers);
 
   // --- Window --------------------------------------------------------------
   const saved = await stateStore.load();
@@ -98,6 +113,11 @@ async function main(): Promise<void> {
       backgroundThrottling: false,
     },
   });
+  const nativePreview = new NativePreviewController(window);
+  const browserWorkspace = new BrowserWorkspaceController(window, onEvent);
+  window.on('hide',()=>nativePreview.hide());
+  window.on('closed',()=>nativePreview.hide());
+  window.webContents.on('did-start-loading',()=>{nativePreview.hide();processes.detachAll();});
   if (geometry.maximized) window.maximize();
   window.once('ready-to-show', () => window?.show());
   const syncPainting = () => {
@@ -139,8 +159,36 @@ async function main(): Promise<void> {
     if (!isTrustedSender(event.senderFrame, event.sender.id)) {
       throw new Error('Rejected IPC from untrusted sender.');
     }
+    if(shutdownStarted)throw new Error('Muster is stopping and saving work.');
     if (!isCommandName(command)) {
       throw new Error('Unknown command.');
+    }
+    switch(command) {
+      case 'browser.open': return browserWorkspace.open(input as Commands['browser.open']['input']);
+      case 'browser.navigate': return browserWorkspace.navigate(input as Commands['browser.navigate']['input']);
+      case 'browser.position': return browserWorkspace.position(input as Commands['browser.position']['input'], () => nativePreview.hide());
+      case 'browser.hide': return browserWorkspace.hide(input as Commands['browser.hide']['input']);
+      case 'browser.close': return browserWorkspace.close((input as Commands['browser.close']['input'])?.owner);
+      case 'browser.back': return browserWorkspace.back((input as Commands['browser.back']['input'])?.owner);
+      case 'browser.forward': return browserWorkspace.forward((input as Commands['browser.forward']['input'])?.owner);
+      case 'browser.reload': return browserWorkspace.reload((input as Commands['browser.reload']['input'])?.owner);
+      case 'browser.stop': return browserWorkspace.stop((input as Commands['browser.stop']['input'])?.owner);
+      case 'browser.status': return browserWorkspace.status((input as Commands['browser.status']['input'])?.owner);
+    }
+    if(command==='files.nativeAvailable')return nativePreview.available();
+    if(command==='files.nativeHide'){const owner=(input as {owner:string})?.owner;if(typeof owner!=='string')throw new Error('Invalid preview owner.');nativePreview.hide(owner);return;}
+    if(command==='files.nativePosition'){const request=input as Commands['files.nativePosition']['input'];nativePreview.position(request?.owner,request?.bounds);return;}
+    if(command==='files.nativeShow'){
+      browserWorkspace.hideAll(true);
+      const request=input as Commands['files.nativeShow']['input'];
+      if(!request || typeof request.folderId!=='string')throw new Error('Invalid preview request.');
+      return nativePreview.show(request,async()=>{
+        if(!service)throw new Error('Agent service unavailable.');
+        const snapshot=await service.invoke('app.snapshot',undefined);
+        const folder=snapshot.folders.find(f=>f.id===request.folderId);
+        if(!folder)throw new Error('Folder does not exist.');
+        return folder.path;
+      });
     }
     if(command === 'clipboard.write'){
       const text=(input as {text?:unknown})?.text;
@@ -158,7 +206,22 @@ async function main(): Promise<void> {
       return pickFolder();
     }
     if (!service) throw new Error('Agent service is unavailable.');
-    return service.invoke(command, input as Commands[typeof command]['input']);
+    if (command === 'files.trash' || command === 'files.reveal') {
+      const request = input as {folderId?:unknown;path?:unknown};
+      if (!request || typeof request.folderId !== 'string' || typeof request.path !== 'string') throw new Error('Invalid file action.');
+      const snapshot = await service.invoke('app.snapshot', undefined);
+      const folder = snapshot.folders.find(item => item.id === request.folderId);
+      if (!folder) throw new Error('Folder does not exist.');
+      const relative = request.path;
+      await fileOperation(folder.path, async () => {
+        const absolute = await mutablePath(folder.path, relative, true);
+        if (command === 'files.reveal') shell.showItemInFolder(absolute);
+        else await shell.trashItem(absolute);
+      });
+      if (command === 'files.trash') onEvent({type:'workspaceChanged',folderId:folder.id});
+      return;
+    }
+    return desktopWork.invoke(command, input as Commands[typeof command]['input']);
   });
 
   async function pickFolder(): Promise<Commands['folder.pick']['output']> {
@@ -176,7 +239,7 @@ async function main(): Promise<void> {
   const send = (event: AgentEvent) => window?.webContents.send('muster:event', event);
   Menu.setApplicationMenu(buildMenu(() => window, {
     newChat: async () => {
-      if (!service) return;
+      if (!service || shutdownStarted) return;
       try {
         const chat = await service.invoke('chat.create', {});
         const snapshot = await service.invoke('app.snapshot', undefined) as Snapshot;
@@ -187,6 +250,7 @@ async function main(): Promise<void> {
       }
     },
     addFolder: () => {
+      if(shutdownStarted)return;
       void pickFolder().then((folder) => {
         if (folder) send({ type: 'notice', message: `Added folder ${folder.name}` });
       }).catch((error: Error) => send({ type: 'notice', message: `Could not add folder: ${error.message}` }));
@@ -215,25 +279,45 @@ async function main(): Promise<void> {
   window.on('move', scheduleSave);
 
   // --- Lifecycle: never silently cancel long-running work -------------------
+  const quit = createQuitCoordinator({
+    confirm: async () => {
+      if(shutdownStarted)return true;
+      const snapshot=await loaded.service.invoke('app.snapshot',undefined);
+      return (runningChats===0&&!computers.hasActiveWork()&&!snapshot.chats.some(chat=>processes.hasRunning(chat.id)))||await confirmQuit();
+    },
+    prepare: async () => {
+      shutdownStarted=true;
+      if (saveTimer) clearTimeout(saveTimer);
+      if (window && !window.isDestroyed()) await stateStore.save(captureGeometry());
+      if (service) {
+        disposal ??= (async()=>{
+          // A failing command/container cleanup must never skip provider cancellation.
+          const outcomes=await Promise.allSettled([desktopWork.dispose(),loaded.service.dispose()]);
+          const failure=outcomes.find(result=>result.status==='rejected');
+          if(failure?.status==='rejected')throw failure.reason;
+        })().catch(error=>{disposal=undefined;throw error;});
+        await withinDeadline(disposal, 5000);
+        browserWorkspace.dispose();
+        nativePreview.hide();
+      }
+    },
+    exit: () => app.quit(),
+    onError: () => dialog.showErrorBox('Muster has not quit', 'Work could not finish stopping or saving yet. The app stayed open. Try Quit again shortly; do not assume background work has stopped.'),
+  });
   window.on('close', (event) => {
     // On macOS closing the window keeps the app (and agent runs) alive.
     // Elsewhere close quits, so it gets the same confirmation as quit.
-    if (quitting) return;
+    if (quit.allowed) return;
+    event.preventDefault();
+    if (quit.pending) return;
     if (isMac) {
-      event.preventDefault();
       if (saveTimer) clearTimeout(saveTimer);
       void stateStore.save(captureGeometry());
       window?.hide();
       return;
     }
-    if (runningChats === 0) return;
-    event.preventDefault();
-    void confirmQuit().then((ok) => {
-      if (ok) {
-        quitting = true;
-        window?.close();
-      }
-    });
+    // Keep the window alive until geometry and runtime checkpointing finish.
+    app.quit();
   });
   window.on('closed', () => {
     window = null;
@@ -244,22 +328,9 @@ async function main(): Promise<void> {
   });
 
   app.on('before-quit', (event) => {
-    if (quitting) return;
+    if (quit.allowed) return;
     event.preventDefault();
-    void (async () => {
-      if (runningChats > 0 && !(await confirmQuit())) return;
-      quitting = true;
-      if (saveTimer) clearTimeout(saveTimer);
-      if (window && !window.isDestroyed()) await stateStore.save(captureGeometry());
-      if (service && !disposed) {
-        disposed = true;
-        // Give the runtime a bounded chance to checkpoint before exit.
-        const { promise: deadline, resolve: expire } = Promise.withResolvers<void>();
-        setTimeout(expire, 5000);
-        await Promise.race([service.dispose().catch(() => {}), deadline]);
-      }
-      app.quit();
-    })();
+    void quit.request();
   });
 
   async function confirmQuit(): Promise<boolean> {
@@ -268,8 +339,8 @@ async function main(): Promise<void> {
       buttons: ['Quit and Stop Work', 'Cancel'],
       defaultId: 1,
       cancelId: 1,
-      message: runningChats === 1 ? 'An agent is still working.' : `${runningChats} agents are still working.`,
-      detail: 'Quitting stops in-progress runs. Progress already saved is kept.',
+      message: 'Muster has work running.',
+      detail: 'Quitting stops agent runs and owned background commands. Scoped computer workspaces and saved progress are kept.',
     };
     const { response } = window && !window.isDestroyed()
       ? await dialog.showMessageBox(window, opts)

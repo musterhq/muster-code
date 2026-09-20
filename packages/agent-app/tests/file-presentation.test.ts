@@ -19,7 +19,7 @@ test('CSV handles quoted separators, escaped quotes, multiline fields and BOM/CR
 test('malformed and oversized tables fail visibly or expose their preview bound', () => {
   for (const input of ['"unfinished','a"b,c','"a"unexpected']) assert.throws(() => parseDelimited(input, ','));
   assert.throws(() => parseDelimited(Array(101).fill('x').join(','), ','), /100 columns/);
-  const result = parseDelimited(Array(501).fill('a,b').join('\n'), ',');
-  assert.equal(result.rows.length,500);
+  const result = parseDelimited(Array(2001).fill('a,b').join('\n'), ',');
+  assert.equal(result.rows.length,2000);
   assert.equal(result.limited,true);
 });

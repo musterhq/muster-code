@@ -25,7 +25,7 @@ export function WorkControls(){
  return <div className="work-controls" ref={root} onBlur={e=>{if(!e.currentTarget.contains(e.relatedTarget as Node))setOpen(false);}}>
   <button ref={trigger} className="icon-button" aria-label="Conversation actions" title="Conversation actions" aria-expanded={open} onClick={()=>setOpen(value=>!value)}><MoreHorizontal size={17}/></button>
   <button className="icon-button" aria-label={!state.resourcesHidden?'Hide resource pane':'Show resource pane'} title={!state.resourcesHidden?'Hide resource pane':'Show resource pane'} aria-pressed={!state.resourcesHidden} onClick={()=>{transitionLayout(()=>setResourcesHidden(!getState().resourcesHidden));}}><PanelRight size={16}/></button>
-  {<div hidden={!open} className="work-actions" role="group" aria-label="Conversation actions">
+  {<div hidden={!open} className="work-actions" data-native-preview-overlay role="group" aria-label="Conversation actions">
    <WorkspaceOverview compact onNavigate={()=>close()}/>
    <button onClick={browse}><Files size={14}/>{folder?'Files and changes':'Open folder…'}</button>
    {<button onClick={()=>{transitionLayout(()=>setResourcesHidden(!getState().resourcesHidden));close(true);}}><PanelRight size={14}/>{state.resourcesHidden?'Show resources':'Hide resources'}</button>}

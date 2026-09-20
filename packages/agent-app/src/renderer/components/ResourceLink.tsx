@@ -2,7 +2,7 @@ import React,{useEffect,useState} from 'react';
 import {PreviewCard} from '@base-ui/react/preview-card';
 import {FileText} from 'lucide-react';
 import './resource-link.css';
-import {activeChat,openFile,notifyError} from '../store';
+import {activeChat,openFile,openBrowserTab} from '../store';
 import {invoke} from '../bridge';
 import {useStore} from '../useStore';
 import {resourceReference} from './resourceReference';
@@ -14,7 +14,7 @@ export function ResourceLink({href,children,context}:{href?:string;children?:Rea
  const folders=(state.snapshot?.folders??[]).filter(f=>context ? f.id===context.folderId : ids.includes(f.id));
  const ref=href?resourceReference(href,folders,context?.folderId??chat?.folderId,context?.path):null;
  if(ref)return <FileReference key={`${ref.folderId}:${ref.path}:${ref.line??0}`} reference={ref}>{children}</FileReference>;
- if(href&&/^https?:/i.test(href))return <a href={href} title={href} onClick={e=>{e.preventDefault();void invoke('link.open',{url:href}).catch(notifyError);}} rel="noreferrer noopener">{children}</a>;
+ if(href&&/^https?:/i.test(href))return <a href={href} title={href} onClick={e=>{e.preventDefault();openBrowserTab(href);}} rel="noreferrer noopener">{children}</a>;
  return <span className="md-unavailable-link" title="This reference is outside the conversation’s folders or is unsupported.">{children}</span>;
 }
 
@@ -33,7 +33,7 @@ function FileReference({reference,children}:{reference:NonNullable<ReturnType<ty
  },[open,reference.folderId,reference.path,reference.line]);
  return <PreviewCard.Root open={open} onOpenChange={setOpen}>
   <PreviewCard.Trigger render={<button type="button"/>} className="md-resource-link" aria-label={`${reference.path}${reference.line?':'+reference.line:''} — Open in adjoining pane`} delay={450} closeDelay={120} onClick={()=>{setOpen(false);void openFile(reference.folderId,reference.path,reference.line);}}>{children}</PreviewCard.Trigger>
-  <PreviewCard.Portal><PreviewCard.Positioner side="top" sideOffset={8} className="file-preview-positioner"><PreviewCard.Popup className="file-reference-preview">
+  <PreviewCard.Portal><PreviewCard.Positioner side="top" sideOffset={8} className="file-preview-positioner"><PreviewCard.Popup className="file-reference-preview" data-native-preview-overlay>
    <header><FileText size={14}/><span>{reference.path}{reference.line?':'+reference.line:''}</span></header>
    {preview?.text&&<pre>{preview.text}</pre>}
    <p>{preview?preview.note??'Open in adjoining pane':'Loading preview…'}</p>

@@ -15,7 +15,15 @@ export function classifyTool(data:Record<string,unknown>|undefined):ToolPresenta
  if(type==='fileRead')return {kind:'read',verb:'Read',runningVerb:'Reading',subject:string(data?.path)||subject};
  if(type==='webSearch')return {kind:'search',verb:'Searched',runningVerb:'Searching',subject:string(data?.query)||subject};
  if(type==='todoList')return {kind:'list',verb:'Updated plan',runningVerb:'Updating plan',subject};
- if(type==='collabAgentToolCall')return {kind:'subagent',verb:data?.tool==='wait'?'Waited for agents':'Agent action',runningVerb:data?.tool==='wait'?'Waiting for agents':'Working with agents',subject:string(data?.prompt)||string(data?.tool)||subject};
+ if(type==='collabAgentToolCall'){
+  let named='';
+  const raw=data?.receiverAgents;
+  try {
+   const parsed=typeof raw==='string'?JSON.parse(raw):raw;
+   if(Array.isArray(parsed)) named=parsed.map(entry=>entry&&typeof entry==='object'&&typeof entry.name==='string'?entry.name:'').filter(Boolean).slice(0,3).join(', ');
+  } catch {}
+  return {kind:'subagent',verb:data?.tool==='wait'?'Waited for agents':'Agent action',runningVerb:data?.tool==='wait'?'Waiting for agents':'Working with agents',subject:named||string(data?.prompt)||string(data?.tool)||subject};
+ }
  if(type==='mcpToolCall'||type==='dynamicToolCall')return {kind:'mcp',verb:'Used',runningVerb:'Using',subject:string(data?.title)||[string(data?.server)||string(data?.namespace),string(data?.tool)].filter(Boolean).join(' / ')||subject};
  return {kind:'generic',verb:'Ran tool',runningVerb:'Running tool',subject};
 }

@@ -17,6 +17,8 @@ export function validateEndpoint(input: unknown): string {
 /** Only connection metadata is persisted. API keys stay in the host environment. */
 export class CustomProviders {
   private db: DatabaseSync;
+  private checks = new Map<string,AbortController>();
+  private closed = false;
   constructor(dataDir: string, private env = process.env, private request: typeof fetch = fetch) {
     const file = join(dataDir, 'provider-connections.sqlite');
     this.db = new DatabaseSync(file); chmodSync(file, 0o600);
@@ -29,26 +31,40 @@ export class CustomProviders {
       detail: row.checkedAt ? 'Model discovery succeeded. This connection is saved; chat execution for custom providers is not enabled yet.' : 'Saved locally. Check connection to discover models. Chat execution for custom providers is not enabled yet.'};
   }
   list(): ProviderInfo[] { return (this.db.prepare('SELECT * FROM connections ORDER BY name').all() as unknown as Connection[]).map(row => this.info(row)); }
-  save(input: {name: unknown; endpoint: unknown; apiKeyEnv?: unknown}): ProviderInfo {
+  save(input: {id?:unknown;name: unknown; endpoint: unknown; apiKeyEnv?: unknown}): ProviderInfo {
     if (typeof input.name !== 'string' || !input.name.trim() || input.name.length > 100 || /[\x00-\x1f]/.test(input.name)) throw new Error('Enter a provider name (up to 100 characters).');
     const endpoint = validateEndpoint(input.endpoint);
     const apiKeyEnv = input.apiKeyEnv ?? '';
     if (typeof apiKeyEnv !== 'string' || (apiKeyEnv && !/^[A-Z][A-Z0-9_]{1,127}$/.test(apiKeyEnv))) throw new Error('Enter an environment variable name, not the API key itself.');
-    const id = `custom_${randomUUID()}`;
-    try { this.db.prepare('INSERT INTO connections VALUES (?,?,?,?,?,NULL)').run(id, input.name.trim(), endpoint, apiKeyEnv, '[]'); }
+    const id = input.id === undefined ? `custom_${randomUUID()}` : input.id;
+    if (typeof id !== 'string' || !/^custom_[a-zA-Z0-9-]+$/.test(id)) throw new Error('Invalid connection.');
+    if (input.id !== undefined && !this.db.prepare('SELECT id FROM connections WHERE id=?').get(id)) throw new Error('Connection no longer exists.');
+    this.cancel(id);
+    try {
+      if (input.id === undefined) this.db.prepare('INSERT INTO connections VALUES (?,?,?,?,?,NULL)').run(id, input.name.trim(), endpoint, apiKeyEnv, '[]');
+      else this.db.prepare('UPDATE connections SET name=?,endpoint=?,apiKeyEnv=?,models=CASE WHEN endpoint=? AND apiKeyEnv=? THEN models ELSE ? END,checkedAt=CASE WHEN endpoint=? AND apiKeyEnv=? THEN checkedAt ELSE NULL END WHERE id=?').run(input.name.trim(),endpoint,apiKeyEnv,endpoint,apiKeyEnv,'[]',endpoint,apiKeyEnv,id);
+    }
     catch (error) { if (String(error).includes('UNIQUE')) throw new Error('That endpoint is already configured.'); throw new Error('Could not save this connection.'); }
     return this.list().find(row => row.id === id)!;
   }
-  remove(id: string): void { this.db.prepare('DELETE FROM connections WHERE id=?').run(id); }
+  remove(id: string): void { this.cancel(id); this.db.prepare('DELETE FROM connections WHERE id=?').run(id); }
+  cancel(id: string): void {this.checks.get(id)?.abort();}
   async check(id: string): Promise<ProviderInfo> {
+    if (this.closed) throw new Error('Provider settings are closing.');
+    if (this.checks.has(id)) throw new Error('This connection is already being checked.');
+    if (this.checks.size >= 3) throw new Error('Wait for another connection check to finish.');
     const row = this.db.prepare('SELECT * FROM connections WHERE id=?').get(id) as Connection | undefined;
     if (!row) throw new Error('Connection not found.');
     const token = row.apiKeyEnv ? this.env[row.apiKeyEnv] : undefined;
     if (row.apiKeyEnv && !token) throw new Error('The configured API key environment variable is not available to Muster. Restart after setting it, then check again.');
     const endpoint = validateEndpoint(row.endpoint);
+    const controller = new AbortController();
+    this.checks.set(id,controller);
+    const timer = setTimeout(()=>controller.abort(new Error('Connection check timed out.')),8000);
+    try {
     let response: Response;
-    try { response = await this.request(`${endpoint}/models`, {redirect:'error', signal:AbortSignal.timeout(8000), headers: token ? {Authorization: `Bearer ${token}`} : {}}); }
-    catch { throw new Error('Could not reach this endpoint within 8 seconds. Check its URL and whether the service is running.'); }
+    try { response = await this.request(`${endpoint}/models`, {redirect:'error', signal:controller.signal, headers: token ? {Authorization: `Bearer ${token}`} : {}}); }
+    catch { throw new Error(controller.signal.aborted ? 'Connection check cancelled or timed out. Saved settings were kept.' : 'Could not reach this endpoint. Check its URL and whether the service is running.'); }
     if (!response.ok) { await response.body?.cancel(); throw new Error(`The endpoint returned HTTP ${response.status}. Check the connection and its credentials.`); }
     // Stream with a hard cap: an untrusted endpoint cannot consume unbounded RAM.
     let raw = ''; let bytes = 0; const reader = response.body?.getReader(); const decoder = new TextDecoder();
@@ -58,8 +74,11 @@ export class CustomProviders {
     const items = (data as {data?: unknown})?.data;
     if (!Array.isArray(items)) throw new Error('The endpoint did not return an OpenAI-compatible model catalog.');
     const models = items.slice(0,500).filter(m => m && typeof m.id === 'string' && m.id.length <= 200 && !/[\x00-\x1f]/.test(m.id)).map(m => ({id:m.id,name:m.id}));
-    this.db.prepare('UPDATE connections SET models=?,checkedAt=? WHERE id=?').run(JSON.stringify(models),new Date().toISOString(),id);
+    if (controller.signal.aborted || this.closed) throw new Error('Connection check cancelled. Saved settings were kept.');
+    const changed = this.db.prepare('UPDATE connections SET models=?,checkedAt=? WHERE id=? AND endpoint=? AND apiKeyEnv=?').run(JSON.stringify(models),new Date().toISOString(),id,endpoint,row.apiKeyEnv);
+    if (!changed.changes) throw new Error('Connection changed during discovery. Check the updated connection again.');
     return this.list().find(p=>p.id===id)!;
+    } finally {clearTimeout(timer);if (this.checks.get(id) === controller) this.checks.delete(id);}
   }
-  close():void { this.db.close(); }
+  close():void {this.closed = true;for (const controller of this.checks.values()) controller.abort();this.db.close();}
 }

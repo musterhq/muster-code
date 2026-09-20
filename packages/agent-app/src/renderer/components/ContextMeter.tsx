@@ -41,7 +41,7 @@ export function ContextMeter({ telemetry }: { telemetry: ContextTelemetry }): Re
     </Popover.Trigger>
     <Popover.Portal>
       <Popover.Positioner side="top" align="end" sideOffset={10} className="context-positioner">
-        <Popover.Popup className="context-popup">
+        <Popover.Popup className="context-popup" data-native-preview-overlay>
           <Popover.Title>Context window</Popover.Title>
           <Popover.Description>{percent === null ? 'The provider has not reported complete context usage yet.' : `${percent}% of the reported context window is in use.`}</Popover.Description>
           <dl><div><dt>Tokens used</dt><dd>{usedTokens?.toLocaleString() ?? 'Unavailable'}</dd></div><div><dt>Window size</dt><dd>{windowTokens?.toLocaleString() ?? 'Unavailable'}</dd></div></dl>

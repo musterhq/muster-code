@@ -145,3 +145,48 @@ test('oversized file rejected as error, not read', async () => {
   assert.equal(codex.status, 'error');
   assert.match(codex.detail, /1 MiB/);
 });
+
+test('credential discovery refuses a file replaced between inspection and open', async t => {
+  const home = await fixtureHome({ '.codex/auth.json': '{"tokens":{"access_token":"original-fixture"}}' });
+  t.after(() => fs.rm(home, {recursive:true,force:true}));
+  const target = join(home,'.codex','auth.json');
+  const replacement = join(home,'replacement.json');
+  await fs.writeFile(replacement, '{"OPENAI_API_KEY":"replacement-fixture"}');
+  const originalOpen = fs.open.bind(fs);
+  let swapped = false;
+  t.mock.method(fs, 'open', async (...args: Parameters<typeof fs.open>) => {
+    if (args[0] === target && !swapped) {
+      swapped = true;
+      await fs.rename(replacement, target);
+    }
+    return originalOpen(...args);
+  });
+  const result = byId(await discoverLocalProviders({home,env:{}}),'codex');
+  assert.equal(swapped,true);
+  assert.equal(result.status,'error');
+  assert.equal(result.credentialPresent,false);
+  assert.ok(!JSON.stringify(result).includes('replacement-fixture'));
+});
+
+test('credential discovery refuses a symlink introduced immediately before open', async t => {
+  const home = await fixtureHome({ '.codex/auth.json': '{}' });
+  t.after(() => fs.rm(home, {recursive:true,force:true}));
+  const target = join(home,'.codex','auth.json');
+  const other = join(home,'unrelated.json');
+  await fs.writeFile(other,'{"tokens":{"access_token":"unrelated-fixture"}}');
+  const originalOpen = fs.open.bind(fs);
+  let swapped = false;
+  t.mock.method(fs, 'open', async (...args: Parameters<typeof fs.open>) => {
+    if (args[0] === target && !swapped) {
+      swapped = true;
+      await fs.unlink(target);
+      await fs.symlink(other,target);
+    }
+    return originalOpen(...args);
+  });
+  const result = byId(await discoverLocalProviders({home,env:{}}),'codex');
+  assert.equal(swapped,true);
+  assert.equal(result.status,'error');
+  assert.equal(result.credentialPresent,false);
+  assert.ok(!JSON.stringify(result).includes('unrelated-fixture'));
+});

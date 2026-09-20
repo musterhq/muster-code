@@ -15,19 +15,24 @@ import {
   retryTimeline,
 } from '../store';
 import { useStore } from '../useStore';
-import {captureAnchor,isAtBottom,recallPosition,rememberPosition,resolveAnchorIndex} from './chatContinuity';
+import {captureAnchor,isAtBottom,recallPosition,rememberPosition,resolveAnchorIndex,type ReadingAnchor} from './chatContinuity';
+import {createTimelineProjection,turnAtRow} from './timeline-navigation-model';
+import {TimelineNavigation} from './TimelineNavigation';
+import {MessageMeta} from './MessageMeta';
 import './chat-continuity.css';
 import {TurnChanges} from './TurnChanges';
 import {ContextMeter} from './ContextMeter';
 import { StatusDot } from './StatusDot';
 import { ToolCard } from './ToolCard';
 import { ActivityGroup } from './ActivityGroup';
-import { groupActivity, type TranscriptEntry } from './activityGrouping';
-import { CopyButton, MessageBody } from './MessageBody';
+import { type TranscriptEntry } from './activityGrouping';
+import { MessageBody } from './MessageBody';
 
 import {Collapsible as Disclosure} from '@base-ui/react/collapsible';
 import {useDisclosure} from './useDisclosure';
 import { Composer } from './Composer';
+import {RecoveryNotice} from './RecoveryNotice';
+import { PendingQuestion } from './PendingQuestion';
 
 function ReasoningDisclosure({item}:{item:TimelineItem}):React.ReactElement {
   const [open,setOpen]=useDisclosure('reasoning:'+item.id);
@@ -47,17 +52,15 @@ function TimelineCard({ item }: { item: TranscriptEntry }): React.ReactElement {
     case 'activity': return <ActivityGroup items={item.items}/>;
     case 'user':
       return (
-        <div className="msg msg-user">
+        <div className="user-message-row"><div className="msg msg-user">
           <div className="msg-text">{item.text}</div>
-        </div>
+        </div><MessageMeta text={item.text} createdAt={item.createdAt} label="Copy message"/></div>
       );
     case 'assistant':
       return (
         <div className="msg msg-assistant">
           <MessageBody text={item.text} />
-          <div className="msg-actions">
-            <CopyButton getText={() => item.text} label="Copy response" />
-          </div>
+          <MessageMeta text={item.text} createdAt={item.createdAt} label="Copy response"/>
         </div>
       );
     case 'reasoning': return <ReasoningDisclosure item={item}/>;
@@ -90,19 +93,28 @@ function TimelineCard({ item }: { item: TranscriptEntry }): React.ReactElement {
         </div>
       );
     }
+    case 'question': return <PendingQuestion item={item} />;
     case 'notice':
       return <div className="timeline-notice">{item.text}</div>;
   }
 }
 
-function Timeline({ items, chatId }: { items: TimelineItem[]; chatId:string }): React.ReactElement {
-  const rows=useMemo(()=>groupActivity(items),[items]);
+export function Timeline({ items, chatId }: { items: TimelineItem[]; chatId:string }): React.ReactElement {
+  const project=useMemo(()=>createTimelineProjection(),[]);
+  const {rows,turns,rowIndexes}=useMemo(()=>project(items),[items,project]);
+  const rowsRef=useRef(rows);rowsRef.current=rows;
+  const turnsRef=useRef(turns);turnsRef.current=turns;
+  const rowIndexesRef=useRef(rowIndexes);rowIndexesRef.current=rowIndexes;
   const scrollRef = useRef<HTMLDivElement>(null);
   const saved=useRef(recallPosition(chatId));
   const atBottom = useRef(!saved.current);
   const restoring=useRef(Boolean(saved.current));
   const [away,setAway]=useState(Boolean(saved.current));
   const [unread,setUnread]=useState(false);
+  const [currentTurn,setCurrentTurn]=useState<string|undefined>(turns.at(-1)?.id);
+  const [backCount,setBackCount]=useState(0),[navigationNotice,setNavigationNotice]=useState('');
+  const backPositions=useRef<ReadingAnchor[]>([]);
+  const navigationFrame=useRef<number|undefined>(undefined);
   const revision=`${items.length}:${items.at(-1)?.id}:${items.at(-1)?.status}:${items.at(-1)?.text.length}`;
   const lastRevision=useRef(revision);
   const virtualizer = useVirtualizer({
@@ -114,7 +126,40 @@ function Timeline({ items, chatId }: { items: TimelineItem[]; chatId:string }): 
   });
   virtualizer.shouldAdjustScrollPositionOnItemSizeChange=(item,_delta,instance)=>!atBottom.current&&item.start<(instance.scrollOffset??0);
   const totalSize = virtualizer.getTotalSize();
-  const jumpToLatest=()=>{restoring.current=false;atBottom.current=true;setAway(false);setUnread(false);rememberPosition(chatId,null);virtualizer.scrollToIndex(rows.length-1,{align:'end'});};
+  const saveReadingPosition=useCallback(()=>{
+    const el=scrollRef.current;if(!el)return;
+    const anchor=captureAnchor(virtualizer.getVirtualItems(),el.scrollTop);
+    if(anchor){backPositions.current=[...backPositions.current.slice(-19),anchor];setBackCount(backPositions.current.length);}
+  },[virtualizer]);
+  const updateCurrentTurn=useCallback(()=>{
+    const el=scrollRef.current;if(!el)return;
+    const anchor=captureAnchor(virtualizer.getVirtualItems(),el.scrollTop);
+    const row=anchor?rowIndexesRef.current.get(anchor.itemId):undefined;
+    if(row!==undefined)setCurrentTurn(turnAtRow(turnsRef.current,row));
+  },[virtualizer]);
+  const goToAnchor=useCallback((anchor:ReadingAnchor)=>{
+    const index=rowIndexesRef.current.get(anchor.itemId);
+    if(index===undefined){setNavigationNotice('That reading position is no longer in the loaded conversation.');return;}
+    if(navigationFrame.current!==undefined)cancelAnimationFrame(navigationFrame.current);
+    restoring.current=true;atBottom.current=false;setAway(true);setNavigationNotice('');
+    setCurrentTurn(turnAtRow(turnsRef.current,index));rememberPosition(chatId,anchor);
+    virtualizer.scrollToIndex(index,{align:'start',behavior:'auto'});
+    navigationFrame.current=requestAnimationFrame(()=>{
+      const offset=virtualizer.getOffsetForIndex(index,'start')?.[0];
+      if(offset!=null)virtualizer.scrollToOffset(Math.max(0,offset+anchor.offset),{behavior:'auto'});
+      navigationFrame.current=requestAnimationFrame(()=>{navigationFrame.current=undefined;restoring.current=false;updateCurrentTurn();});
+    });
+  },[chatId,virtualizer,updateCurrentTurn]);
+  const jumpToTurn=useCallback((id:string)=>{if(!rowIndexesRef.current.has(id))return;saveReadingPosition();goToAnchor({itemId:id,offset:0});},[saveReadingPosition,goToAnchor]);
+  const jumpBack=useCallback(()=>{const anchor=backPositions.current.pop();setBackCount(backPositions.current.length);if(anchor)goToAnchor(anchor);},[goToAnchor]);
+  const jumpToLatest=useCallback(()=>{
+    if(!atBottom.current)saveReadingPosition();
+    if(navigationFrame.current!==undefined)cancelAnimationFrame(navigationFrame.current);
+    navigationFrame.current=undefined;restoring.current=false;atBottom.current=true;setAway(false);setUnread(false);setNavigationNotice('');
+    rememberPosition(chatId,null);setCurrentTurn(turnsRef.current.at(-1)?.id);
+    if(rowsRef.current.length)virtualizer.scrollToIndex(rowsRef.current.length-1,{align:'end',behavior:'auto'});
+  },[chatId,virtualizer,saveReadingPosition]);
+  useEffect(()=>()=>{if(navigationFrame.current!==undefined)cancelAnimationFrame(navigationFrame.current);},[]);
   useLayoutEffect(()=>{
     const anchor=saved.current;
     if(!anchor)return;
@@ -125,6 +170,7 @@ function Timeline({ items, chatId }: { items: TimelineItem[]; chatId:string }): 
       const offset=virtualizer.getOffsetForIndex(index,'start')?.[0];
       if(offset!=null)virtualizer.scrollToOffset(Math.max(0,offset+anchor.offset));
       restoring.current=false;
+      updateCurrentTurn();
     });
     saved.current=null;
     return()=>cancelAnimationFrame(frame);
@@ -138,19 +184,22 @@ function Timeline({ items, chatId }: { items: TimelineItem[]; chatId:string }): 
     atBottom.current = isAtBottom(el.scrollTop,el.scrollHeight,el.clientHeight);
     setAway(!atBottom.current);
     if(atBottom.current)setUnread(false);
+    updateCurrentTurn();
     rememberPosition(chatId,atBottom.current?null:captureAnchor(virtualizer.getVirtualItems(),el.scrollTop));
-  }, [chatId,virtualizer]);
+  }, [chatId,virtualizer,updateCurrentTurn]);
 
   // Follow the tail only while the reader is at the bottom; a reader scrolled
   // up keeps their anchor as new items stream in.
   useLayoutEffect(() => {
     if (atBottom.current && rows.length > 0) {
       virtualizer.scrollToIndex(rows.length - 1, { align: 'end' });
+      setCurrentTurn(turnsRef.current.at(-1)?.id);
     }
   }, [rows.length, totalSize, virtualizer]);
 
   return (
-    <div className="timeline-shell">
+    <div className={`timeline-shell${turns.length?' timeline-with-navigation':''}`}>
+    <TimelineNavigation turns={turns} currentId={currentTurn} canGoBack={backCount>0} onTurn={jumpToTurn} onBack={jumpBack} onLatest={jumpToLatest}/>
     <div className="timeline" ref={scrollRef} onScroll={onScroll}>
       <div
         className="timeline-inner"
@@ -171,6 +220,7 @@ function Timeline({ items, chatId }: { items: TimelineItem[]; chatId:string }): 
       </div>
     </div>
     {away&&<button className="jump-latest" onClick={jumpToLatest} aria-label={unread?'New activity — jump to latest':'Jump to latest'}><ArrowUp size={14} style={{transform:'rotate(180deg)'}}/>{unread&&<span>New activity</span>}</button>}
+    {navigationNotice&&<div className="turn-navigation-status" role="status">{navigationNotice}</div>}
     </div>
   );
 }
@@ -205,11 +255,7 @@ export function ChatView(): React.ReactElement {
           <span className="chat-head-mode">{chat.mode}</span>
         </span>
       </header>
-      {chat.error && (
-        <div className="chat-error-banner" role="alert">
-          {chat.error}
-        </div>
-      )}
+      <RecoveryNotice key={`${chat.id}:${chat.providerThreadId ?? ""}:${chat.providerTurnId ?? ""}:${chat.recovery?.kind ?? ""}`} chat={chat}/>
       {timeline.phase === 'loading' || timeline.phase === 'idle' ? (
         <div className="chat-loading" role="status">
           Loading conversation…

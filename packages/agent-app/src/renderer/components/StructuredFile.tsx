@@ -30,6 +30,6 @@ export const StructuredFile = React.memo(function StructuredFile({text, kind}: {
     <MarkdownTable><thead><tr>{table.rows[0].map((cell,i)=><th key={i}>{cell}</th>)}</tr></thead>
       <tbody>{table.rows.slice(1).map((row,i)=><tr key={i}>{row.map((cell,j)=><td key={j}>{cell}</td>)}</tr>)}</tbody>
     </MarkdownTable>
-    {table.limited && <p className="pane-truncated">Showing the first 500 rows. View source for the available file content.</p>}
+    {table.limited && <p className="pane-truncated">Preview row or cell limit reached. View source for the available file content.</p>}
   </div>;
 });

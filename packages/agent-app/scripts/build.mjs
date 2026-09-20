@@ -1,4 +1,5 @@
 import * as esbuild from 'esbuild';
+import {execFileSync} from 'node:child_process';
 import { cpSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -22,10 +23,32 @@ const common = {
 };
 
 const runtimeRoot = process.env.MUSTER_RUNTIME_SOURCE_ROOT || path.resolve(root, '../../../muster');
-const coreEntry = path.join(runtimeRoot, 'packages/core/src/codex-app-server.ts');
+// Allow an isolated, reviewed transport worktree without replacing unrelated
+// memory/runtime source or modifying the user's existing runtime checkout.
+const coreEntry = process.env.MUSTER_CORE_CLIENT_ENTRY || path.join(runtimeRoot, 'packages/core/src/codex-app-server.ts');
 if (!existsSync(coreEntry)) throw new Error('Headless Muster runtime source unavailable. Set MUSTER_RUNTIME_SOURCE_ROOT to the sibling muster checkout.');
+const sandboxRoot = process.env.MUSTER_SANDBOX_SOURCE_ROOT || runtimeRoot;
+const sandboxEntry = path.join(sandboxRoot, 'packages/core/src/local-docker-sandbox.ts');
+const scopeEntry = path.join(sandboxRoot, 'packages/core/src/scoped-runtime.ts');
+if (!existsSync(sandboxEntry) || !existsSync(scopeEntry)) throw new Error('Scoped computer source unavailable. Set MUSTER_SANDBOX_SOURCE_ROOT to the reviewed isolated runtime checkout.');
 const builds = [
+  {
+    ...common,
+    stdin: {contents: `export {LocalDockerSandbox} from ${JSON.stringify(sandboxEntry)}; export {resolveScopedRuntime,ensureRuntime} from ${JSON.stringify(scopeEntry)};`, resolveDir:root, sourcefile:'scoped-computer-entry.ts', loader:'ts'},
+    outfile:dist('runtime','scoped-computer-core.cjs'), platform:'node', format:'cjs', target:'node24',
+    define:{...common.define,'import.meta.url':'__musterModuleUrl'},
+    banner:{js:'const __musterModuleUrl = require("node:url").pathToFileURL(__filename).href;'},
+  },
   { ...common, entryPoints: [coreEntry], outfile: dist('runtime', 'core-client.cjs'), platform: 'node', format: 'cjs', target: 'node24' },
+  ...['memory', 'hindsight'].map(name => ({
+    ...common,
+    entryPoints: [path.join(runtimeRoot, `packages/core/src/${name}.ts`)],
+    outfile: dist('runtime', `core-${name}.cjs`),
+    platform: 'node', format: 'cjs', target: 'node24',
+    // Preserve the core's ESM createRequire boundary without rewriting its source.
+    define: {...common.define, 'import.meta.url': '__musterModuleUrl'},
+    banner: {js: 'const __musterModuleUrl = require("node:url").pathToFileURL(__filename).href;'},
+  })),
   {
     ...common,
     entryPoints: [src('main', 'index.ts')],
@@ -66,8 +89,9 @@ const hasRenderer = existsSync(src('renderer', 'main.tsx'));
 if (hasRenderer) {
   builds.push({
     ...common,
-    entryPoints: [src('renderer', 'main.tsx')],
-    outfile: dist('renderer', 'main.js'),
+    entryPoints: [src('renderer', 'main.tsx'),src('renderer','diff-worker.ts')],
+    outdir: dist('renderer'),
+    splitting: true,
     platform: 'browser',
     format: 'esm',
     target: 'es2022',
@@ -78,6 +102,10 @@ if (hasRenderer) {
 
 function copyRendererStatic() {
   mkdirSync(dist('renderer'), { recursive: true });
+  cpSync(path.join(root,'node_modules/pdfjs-dist/build/pdf.worker.mjs'),dist('renderer','pdf.worker.mjs'));
+  cpSync(path.join(root,'node_modules/pdfjs-dist/LICENSE'),dist('renderer','pdfjs-LICENSE.txt'));
+  cpSync(path.join(root,'node_modules/exceljs/LICENSE'),dist('renderer','exceljs-LICENSE.txt'));
+  for (const name of ['t3code-MIT.txt','muster-core-MIT.txt','qm-MIT.txt']) cpSync(path.join(root,'licenses',name),dist('renderer',name));
   if (hasRenderer) {
     for (const name of ['index.html', 'styles.css']) {
       if (existsSync(src('renderer', name))) cpSync(src('renderer', name), dist('renderer', name));
@@ -100,9 +128,10 @@ function copyRendererStatic() {
 `);
 }
 
+execFileSync(process.execPath,[path.join(root,'scripts/build-quick-look.mjs')],{stdio:'inherit'});
 copyRendererStatic();
 mkdirSync(dist('runtime', 'resources'), {recursive: true});
-for (const name of ['codex-hybrow-gateway.sh', 'codex-profile.cjs']) cpSync(path.resolve(root, '../builtin/resources', name), dist('runtime', 'resources', name));
+for (const name of ['codex-hybrow-gateway.sh', 'codex-openai-direct.sh', 'codex-profile.cjs']) cpSync(path.resolve(root, '../builtin/resources', name), dist('runtime', 'resources', name));
 
 if (watch) {
   const contexts = await Promise.all(builds.map((options) => esbuild.context(options)));

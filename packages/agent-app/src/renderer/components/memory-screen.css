@@ -1,0 +1,29 @@
+/* Memory screen. Reuses .settings-screen shell classes from styles.css. */
+.memory-empty { margin: 16px 0 0; color: var(--text-faint); font-size: 13px; }
+.memory-error { margin: 8px 0 0; color: var(--danger, #e5484d); font-size: 13px; }
+
+.memory-search { display: flex; align-items: center; gap: 8px; margin-top: 20px; padding: 7px 10px; border: 1px solid var(--hairline); border-radius: var(--radius); background: var(--bg-raised); color: var(--text-faint); }
+.memory-search input { flex: 1; background: transparent; border: none; outline: none; color: var(--text); font-size: 13px; }
+.memory-search .icon-button { color: var(--text-faint); }
+
+.memory-list { list-style: none; margin: 16px 0 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.memory-item { padding: 10px 12px; border: 1px solid var(--hairline); border-radius: var(--radius); background: var(--bg-raised); }
+.memory-item-summary { font-size: 13px; color: var(--text); white-space: pre-wrap; }
+.memory-item-meta { margin-top: 6px; display: flex; flex-wrap: wrap; gap: 10px; font-size: 11px; color: var(--text-faint); }
+.memory-item-scope { font-family: var(--font-mono, monospace); }
+
+.new-memory { margin-top: 24px; padding: 18px 20px; border: 1px solid var(--hairline); border-radius: var(--radius); background: var(--bg-raised); display: flex; flex-direction: column; gap: 12px; }
+.new-memory header { display: flex; align-items: center; justify-content: space-between; }
+.new-memory h2 { margin: 0; font-size: 15px; font-weight: 600; }
+.new-memory label { display: flex; flex-direction: column; gap: 6px; font-size: 12px; color: var(--text-dim); }
+.new-memory textarea, .new-memory input[type='text'] { background: var(--bg); color: var(--text); border: 1px solid var(--hairline); border-radius: var(--radius); padding: 7px 9px; font-size: 13px; font-family: inherit; }
+.new-memory textarea { resize: vertical; }
+.new-memory .optional { color: var(--text-faint); font-weight: 400; }
+.memory-scope-note { margin: 0; font-size: 12px; color: var(--text-faint); }
+.new-memory-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.settings-button.ghost { background: transparent; border: 1px solid var(--hairline); }
+
+.memory-scope-picker {display:flex;gap:12px;align-items:center;margin-top:18px;color:var(--text-dim);font-size:13px;}
+.memory-scope-picker select {max-width:70%;background:var(--bg-raised);color:var(--text);border:1px solid var(--hairline);border-radius:6px;padding:6px;}
+.local-memory-heading {font-size:16px;font-weight:550;margin:28px 0 0;}
+.memory-search input:focus-visible {outline:2px solid var(--focus,#8ca6c7);outline-offset:3px;}

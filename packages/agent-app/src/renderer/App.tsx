@@ -6,6 +6,8 @@ import { ChatView } from './components/ChatView';
 import { Sidebar } from './components/Sidebar';
 import { ProvidersScreen } from './components/ProvidersScreen';
 import { ProjectsScreen } from './components/ProjectsScreen';
+import { MemoryScreen } from './components/MemoryScreen';
+import { PluginsScreen } from './components/PluginsScreen';
 import { ResourcePane } from './components/ResourcePane';
 import {
   NAV_DEFAULT,
@@ -96,7 +98,7 @@ export function App(): React.ReactElement {
         }}
       />}
       <main className="center">
-        {state.screen === 'projects' ? <ProjectsScreen onBack={closeSettings} onStartChat={(projectId, folderId)=>void createChat(folderId, projectId).then(() => focusComposer())} /> : state.screen === 'providers' ? <ProvidersScreen /> : state.boot.phase === 'loading' || state.boot.phase === 'idle' ? (
+        {state.screen === 'projects' ? <ProjectsScreen onBack={closeSettings} onStartChat={(projectId, folderId)=>void createChat(folderId, projectId).then(() => focusComposer())} /> : state.screen === 'providers' ? <ProvidersScreen /> : state.screen === 'plugins' ? <PluginsScreen /> : state.screen === 'memory' ? <MemoryScreen key={state.memoryFolderId ?? 'personal'} /> : state.boot.phase === 'loading' || state.boot.phase === 'idle' ? (
           <div className="center-loading" role="status">
             Loading workspace…
           </div>

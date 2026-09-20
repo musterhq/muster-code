@@ -17,8 +17,9 @@
  */
 import { constants, promises as fs } from 'node:fs';
 import { extname, join, basename } from 'node:path';
-import { tmpdir } from 'node:os';
+import { tmpdir, homedir } from 'node:os';
 import { createHash } from 'node:crypto';
+import {pathToFileURL} from 'node:url';
 import { spawn } from 'node:child_process';
 import { resolveInside } from './paths.ts';
 
@@ -45,6 +46,7 @@ let cache: CacheEntry | null = null;
 // --- Conversion queue (cap 4) ---
 
 let queueDepth = 0;
+let conversionTail:Promise<unknown>=Promise.resolve();
 
 function acquireQueue(): void {
   if (queueDepth >= QUEUE_CAP) throw new Error('Document conversion queue full; try again shortly.');
@@ -62,7 +64,7 @@ const inFlight = new Map<string, Promise<DocumentPreview>>();
 // --- soffice discovery ---
 
 const CANDIDATE_PATHS = [
-  '/Users/dhairya/.cache/codex-runtimes/codex-primary-runtime/dependencies/native/libreoffice-headless/libreoffice/LibreOfficeDev.app/Contents/MacOS/soffice',
+  join(homedir(),'.cache/codex-runtimes/codex-primary-runtime/dependencies/native/libreoffice-headless/libreoffice/LibreOfficeDev.app/Contents/MacOS/soffice'),
   '/Applications/LibreOffice.app/Contents/MacOS/soffice',
   '/Applications/LibreOfficeDev.app/Contents/MacOS/soffice',
   '/usr/bin/libreoffice',
@@ -94,15 +96,15 @@ const REGISTRY_XCU = `<?xml version="1.0" encoding="UTF-8"?>
            xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
   <item oor:path="/org.openoffice.Office.Common/Security/Scripting">
     <prop oor:name="MacroSecurityLevel" oor:op="fuse" oor:type="xs:int"><value>3</value></prop>
-  </item>
-  <item oor:path="/org.openoffice.Office.Common/Filter/GraphicExportFilter/Options">
-    <prop oor:name="ExternalLinks" oor:op="fuse" oor:type="xs:boolean"><value>false</value></prop>
+    <prop oor:name="DisableMacrosExecution" oor:op="fuse" oor:type="xs:boolean"><value>true</value></prop>
+    <prop oor:name="BlockUntrustedRefererLinks" oor:op="fuse" oor:type="xs:boolean"><value>true</value></prop>
   </item>
 </oor:items>
 `;
 
 async function writeRegistryDisableMacros(profileDir: string): Promise<void> {
-  const regDir = join(profileDir, 'registrymodifications.xcu');
+  const regDir = join(profileDir, 'user', 'registrymodifications.xcu');
+  await fs.mkdir(join(profileDir,'user'),{recursive:true});
   await fs.writeFile(regDir, REGISTRY_XCU, 'utf8');
 }
 
@@ -110,7 +112,9 @@ async function writeRegistryDisableMacros(profileDir: string): Promise<void> {
 
 function runSoffice(soffice: string, args: string[]): Promise<void> {
   const { promise, resolve, reject } = Promise.withResolvers<void>();
-  const child = spawn(soffice, args, { stdio: 'ignore', detached: false });
+  // Deny network to document parsers on the supported macOS host. This is not a full filesystem sandbox.
+  const isolated=process.platform==='darwin';
+  const child = spawn(isolated?'/usr/bin/sandbox-exec':soffice, isolated?['-p','(version 1)(allow default)(deny network*)',soffice,...args]:args, { stdio: 'ignore', detached: process.platform !== 'win32' });
   const timer = setTimeout(() => {
     try { process.kill(-child.pid!, 'SIGKILL'); } catch { /* already dead */ }
     try { child.kill('SIGKILL'); } catch { /* already dead */ }
@@ -172,10 +176,10 @@ async function convertOffice(sourceBuf: Buffer, sourceExt: string): Promise<Buff
     const inputFile = join(inDir, `doc${sourceExt}`);
     await fs.writeFile(inputFile, sourceBuf);
 
-    const userInstall = `file://${profileDir}`;
+    const userInstall = pathToFileURL(profileDir).href;
     await runSoffice(soffice, [
       '--headless',
-      `--env:UserInstallation=${userInstall}`,
+      `-env:UserInstallation=${userInstall}`,
       '--convert-to', 'pdf',
       '--outdir', outDir,
       inputFile,
@@ -221,10 +225,10 @@ async function doRead(root: string, rel: string): Promise<DocumentPreview> {
   const sourceFormat = ext.slice(1); // strip leading dot
 
   // Cache hit (single-slot)
-  if (cache && cache.revision === revision) return cache.preview;
+  if (cache && cache.revision === revision+ext) return cache.preview;
 
   // In-flight dedup
-  const existing = inFlight.get(revision);
+  const existing = inFlight.get(revision+ext);
   if (existing) return existing;
 
   const work = (async (): Promise<DocumentPreview> => {
@@ -241,7 +245,9 @@ async function doRead(root: string, rel: string): Promise<DocumentPreview> {
       } else {
         acquireQueue();
         try {
-          pdfBuf = await convertOffice(sourceBuf, ext);
+          const conversion=conversionTail.catch(()=>{}).then(()=>convertOffice(sourceBuf,ext));
+          conversionTail=conversion.then(()=>{},()=>{});
+          pdfBuf=await conversion;
         } finally {
           releaseQueue();
         }
@@ -257,14 +263,16 @@ async function doRead(root: string, rel: string): Promise<DocumentPreview> {
       };
 
       // Update single-slot cache
-      cache = { revision, preview };
+      cache = { revision:revision+ext, preview };
       return preview;
     } finally {
-      inFlight.delete(revision);
+      inFlight.delete(revision+ext);
     }
   })();
 
-  inFlight.set(revision, work);
+  inFlight.set(revision+ext, work);
+  // PDF-only reads can settle before insertion; remove in a microtask after insertion too.
+  void work.then(()=>inFlight.delete(revision+ext),()=>inFlight.delete(revision+ext));
   return work;
 }
 

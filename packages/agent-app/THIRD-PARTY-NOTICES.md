@@ -1,0 +1,16 @@
+# Third-party notices
+
+## PDF.js
+Mozilla PDF.js (https://github.com/mozilla/pdf.js), Apache License 2.0. PDF text layer metric CSS adapted from pdfjs-dist/web/pdf_viewer.css. Full license is distributed in dist/renderer/pdfjs-LICENSE.txt.
+
+## ExcelJS
+ExcelJS (https://github.com/exceljs/exceljs), MIT license. Used for local read-only XLSX parsing; not loaded by the renderer. See node_modules/exceljs/LICENSE.
+
+## SSF
+SheetJS SSF (https://github.com/SheetJS/SSF), Apache License 2.0. Used for bounded spreadsheet number and date display formatting. See node_modules/ssf/LICENSE.
+
+## T3 Code incremental Markdown parser
+T3 Code (https://github.com/pingdotgg/t3code), MIT license. `src/renderer/markdown-incremental.ts` is copied from `apps/web/src/markdown-incremental.ts` at commit `56a9bf2bd7d3dcdae722a5de84578909dc11aeda`; full license text is distributed in `licenses/t3code-MIT.txt`.
+
+## Scoped local computer runtime
+Muster core local Docker sandbox and scoped runtime, MIT Copyright (c) 2026 Muster contributors. The scoped-computer contract is adapted from QM, MIT Copyright (c) 2026 QM contributors. Full license texts are included in `licenses/muster-core-MIT.txt` and `licenses/qm-MIT.txt` and distributed alongside the renderer.

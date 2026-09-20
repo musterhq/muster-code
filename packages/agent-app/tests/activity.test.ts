@@ -29,4 +29,7 @@ test('metadata is bounded and typed; mixed or unreported shell actions stay comm
  const changes=toolEventDetails({type:'fileChange',changes:[{path:'a.ts',diff:'+one',unexpected:'omit'}]});
  assert.equal(classifyTool(changes).kind,'edit');assert.deepEqual(changes.changes,[{path:'a.ts',diff:'+one'}]);
  assert.equal(String(toolEventDetails({prompt:'x'.repeat(40000)}).prompt).length,32768);
+ const agent=toolEventDetails({agentNickname:'Mira',agentRole:'reviewer',unrelatedSecret:'omit'});
+ assert.deepEqual(agent,{agentNickname:'Mira',agentRole:'reviewer'});
+ assert.equal(String(toolEventDetails({agentNickname:'x'.repeat(1000)}).agentNickname).length,256);
 });

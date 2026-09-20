@@ -6,8 +6,7 @@ import {
   RefreshCw,
   X,
 } from 'lucide-react';
-import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { buildDiffRows, diffStats, foldContext, type DiffRow } from '../diffModel';
+import React, { useEffect, useRef } from 'react';
 import {
   activateTab,
   closeTab,
@@ -23,6 +22,12 @@ import { useStore } from '../useStore';
 import {FileTree} from './FileTree';
 import {FileTab} from './FileTab';
 import {WorkspaceOverview} from './WorkspaceOverview';
+import {GitActions} from './GitActions';
+import {DiffView} from './DiffView';
+import {ScopedComputerTab} from './ScopedComputerTab';
+import {ProcessesTab} from './ProcessesTab';
+import {BrowserTab} from './BrowserTab';
+import {SubagentsTab} from './SubagentsTab';
 
 
 // ---------------------------------------------------------------------------
@@ -39,6 +44,7 @@ function FilesTab({ tab }: { tab: WorkspaceTab }): React.ReactElement {
 
   return (
     <div className="files-tab">
+      <GitActions folderId={folderId}/>
       <section className="files-changes">
         <header className="files-section-head">
           <span>Changes</span>
@@ -91,115 +97,26 @@ function FilesTab({ tab }: { tab: WorkspaceTab }): React.ReactElement {
 // File contents
 
 // ---------------------------------------------------------------------------
-// Diff
-
-function DiffRowView({ row }: { row: Exclude<DiffRow, { type: 'fold' }> }): React.ReactElement {
-  const cls = row.type === 'add' ? 'diff-add' : row.type === 'del' ? 'diff-del' : 'diff-ctx';
-  return (
-    <tr className={cls}>
-      <td className="code-no">{row.type !== 'add' ? row.oldNo : ''}</td>
-      <td className="code-no">{row.type !== 'del' ? row.newNo : ''}</td>
-      <td className="code-line">
-        {'spans' in row && row.spans
-          ? row.spans.map((s, i) => (
-              <span key={i} className={s.changed ? 'diff-char' : undefined}>
-                {s.text}
-              </span>
-            ))
-          : row.text}
-      </td>
-    </tr>
-  );
-}
-
-function DiffTab({ tab }: { tab: WorkspaceTab }): React.ReactElement {
-  const state = useStore();
-  const diff = state.diffs[tab.id];
-  const [full, setFull] = useState(false);
-  const [expanded, setExpanded] = useState<Record<number, boolean>>({});
-
-  const rows = useMemo(() => {
-    if (diff?.phase !== 'ready' || !diff.value) return null;
-    const all = buildDiffRows(diff.value.before, diff.value.after);
-    return { all, folded: foldContext(all), stats: diffStats(all) };
-  }, [diff]);
-
-  if (!diff || diff.phase === 'loading' || diff.phase === 'idle') {
-    return <div className="pane-loading">Computing diff…</div>;
-  }
-  if (diff.phase === 'error') {
-    return (
-      <div className="pane-error">
-        <p>{diff.error}</p>
-        <button type="button" onClick={() => void openDiff(tab.folderId!, tab.path!)}>
-          Retry
-        </button>
-      </div>
-    );
-  }
-  const display = full ? rows!.all : rows!.folded;
-  return (
-    <div className="diff-view">
-      <header className="diff-head">
-        <span className="file-path">{tab.path}</span>
-        <span className="diff-stats">
-          <span className="diff-stat-add">+{rows!.stats.adds}</span>
-          <span className="diff-stat-del">−{rows!.stats.dels}</span>
-        </span>
-        <button type="button" className="diff-toggle" onClick={() => setFull((v) => !v)}>
-          {full ? 'Collapse context' : 'Full file'}
-        </button>
-      </header>
-      <div className="code-scroll">
-        <table className="code-table diff-table">
-          <tbody>
-            {display.map((row, i) =>
-              row.type === 'fold' ? (
-                expanded[i] ? (
-                  <React.Fragment key={i}>
-                    {row.rows.map((r, j) => (
-                      <DiffRowView key={j} row={r as Exclude<DiffRow, { type: 'fold' }>} />
-                    ))}
-                  </React.Fragment>
-                ) : (
-                  <tr key={i} className="diff-fold">
-                    <td colSpan={3}>
-                      <button
-                        type="button"
-                        onClick={() => setExpanded((e) => ({ ...e, [i]: true }))}
-                      >
-                        ⋯ {row.count} unchanged lines
-                      </button>
-                    </td>
-                  </tr>
-                )
-              ) : (
-                <DiffRowView key={i} row={row} />
-              ),
-            )}
-          </tbody>
-        </table>
-      </div>
-      {diff.value!.truncated && (
-        <div className="pane-truncated">Diff truncated by the host.</div>
-      )}
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
 // Shell
 
-function TabBody({ tab }: { tab: WorkspaceTab }): React.ReactElement {
+function TabBody({ tab, visible }: { tab: WorkspaceTab; visible:boolean }): React.ReactElement {
   useEffect(() => hydrateTab(tab), [tab.id]);
   switch (tab.kind) {
+    case 'computer':
+      return <ScopedComputerTab scope={tab.scope!}/>;
+    case 'processes':
+      return <ProcessesTab chatId={tab.chatId!} active={visible}/>;
+    case 'browser':
+      return <BrowserTab owner={tab.id} profileId={tab.browserProfileId ?? 'personal'} initialUrl={tab.url} active={visible}/>;
     case 'files':
     case 'changes':
       return <FilesTab tab={tab} />;
     case 'file':
       return <FileTab tab={tab} />;
     case 'diff':
-      return <DiffTab tab={tab} />;
+      return <DiffView tab={tab} />;
+    case 'subagents':
+      return <SubagentsTab tab={tab} />;
   }
 }
 
@@ -261,7 +178,7 @@ export function Workspace(): React.ReactElement | null {
         ))}
       </div>
       <div className="workspace-body" role="tabpanel" id="active-resource-panel" aria-labelledby={`resource-tab-${active.id}`}>
-        <TabBody key={active.id} tab={active} />
+        <TabBody key={active.id} tab={active} visible={!state.resourcesHidden && state.screen==='work'} />
       </div>
     </>
   );

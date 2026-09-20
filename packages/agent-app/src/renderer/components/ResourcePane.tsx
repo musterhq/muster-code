@@ -18,7 +18,7 @@ export function ResourcePane() {
   const drag = useRef<{x:number; width:number} | null>(null);
   const latest = useRef(width); latest.current = width;
   useEffect(()=>{const onResize=()=>setViewport(window.innerWidth);window.addEventListener('resize',onResize);return()=>window.removeEventListener('resize',onResize);},[]);
-  const maxWidth = Math.max(280, viewport-(navHidden?0:navWidth)-360);
+  const maxWidth = Math.max(280, viewport-(navHidden?0:navWidth)-480);
   const effectiveWidth = Math.min(maxWidth, Math.max(280,width));
   const persist = () => {try{localStorage.setItem(KEY,String(latest.current));}catch{}};
   const toggleMaximized = () => {
@@ -27,7 +27,7 @@ export function ResourcePane() {
   };
   // Preserve a readable conversation at the native window's minimum size.
   // Resource references stay in the store while their surface is collapsed.
-  if (!resourcesHidden && viewport - (navHidden?0:navWidth) < 640 && !maximized) {
+  if (!resourcesHidden && viewport - (navHidden?0:navWidth) < 800 && !maximized) {
     return <button className="icon-button resource-compact-open" aria-label={`Open resources (${tabs.length})`} onClick={toggleMaximized}>
       <Maximize2 size={14}/>
     </button>;

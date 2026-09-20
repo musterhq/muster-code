@@ -5,10 +5,13 @@ export function toolEventDetails(item: Record<string, unknown>): Record<string, 
     if (typeof item[key] === 'string') result[key] = item[key].slice(0, 32768);
   }
   for (const key of ['durationMs','exitCode']) if (typeof item[key] === 'number' && Number.isFinite(item[key]) && (key === 'exitCode' || item[key] >= 0)) result[key] = item[key];
+  for (const key of ['agentNickname', 'agentRole']) {
+    if (typeof item[key] === 'string') result[key] = item[key].slice(0, 256);
+  }
   if (Array.isArray(item.commandActions)) result.commandActions = item.commandActions.slice(0,256).filter(isObject).map(action=>pick(action,['outputSource','type','command','path','name','query']));
   if (Array.isArray(item.changes)) result.changes = item.changes.slice(0,256).filter(isObject).map(change=>pick(change,['path','diff','kind']));
   if (Array.isArray(item.receiverThreadIds)) result.receiverThreadIds = item.receiverThreadIds.filter((v):v is string=>typeof v==='string').slice(0,256).map(v=>v.slice(0,256));
-  for (const key of ['arguments','result','error','agentsStates','contentItems','appContext']) {
+  for (const key of ['arguments','result','error','agentsStates','receiverAgents','contentItems','appContext']) {
     if (item[key] != null) {
       try { const json = JSON.stringify(item[key]); result[key] = json.length <= 32768 ? json : json.slice(0,32768)+'\n[Details truncated]'; } catch {}
     }

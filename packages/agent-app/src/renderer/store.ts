@@ -5,12 +5,17 @@ import type {
   ContextTelemetry,
   FileEntry,
   ProviderInfo,
+  SkillEntry,
+  MemoryEntry,
   Snapshot,
   TimelineItem,
 } from '../shared/protocol';
+import type {ScopedComputerRef} from '../shared/scoped-computer-protocol';
+import {browserURL} from '../shared/browser-protocol';
 import {filePresentation} from './components/filePresentation';
 import { BridgeError, getBridge, invoke, subscribe } from './bridge';
 import { focusComposer } from './focus';
+import { TimelineReplica } from './timeline-replica';
 import { MAX_TABS, readWorkspace, saveWorkspace } from './workspacePersistence';
 
 export type LoadPhase = 'idle' | 'loading' | 'ready' | 'error';
@@ -23,11 +28,15 @@ export interface Loadable<T> {
 
 export interface WorkspaceTab {
   id: string;
-  kind: 'files' | 'changes' | 'file' | 'diff';
+  kind: 'files' | 'changes' | 'file' | 'diff' | 'subagents' | 'browser' | 'computer' | 'processes';
+  scope?:ScopedComputerRef;
+  browserProfileId?: string;
+  url?: string;
   folderId?: string;
   path?: string;
   title: string;
   line?: number;
+  chatId?: string;
 }
 
 export interface Notice {
@@ -35,10 +44,10 @@ export interface Notice {
   message: string;
 }
 
-export type FileBody = {text: string; truncated: boolean; asset?: Commands['files.asset']['output']};
+export type FileBody = {native?: boolean; text: string; truncated: boolean; asset?: Commands['files.asset']['output']; document?:Commands['files.document']['output']; workbook?:Commands['files.workbook']['output']};
 
 export interface AppState {
-  screen: 'work' | 'providers' | 'projects';
+  screen: 'work' | 'providers' | 'projects' | 'plugins' | 'memory';
   bridgeAvailable: boolean;
   boot: Loadable<true>;
   snapshot: Snapshot | null;
@@ -54,6 +63,7 @@ export interface AppState {
   tabs: WorkspaceTab[];
   activeTabId: string | null;
   providers: Loadable<ProviderInfo[]>;
+  skills: Loadable<SkillEntry[]>;
   /** Revealed provider identities; entries expire via remask timers in the view. */
   revealed: Record<string, string>;
   files: Record<string, Loadable<FileEntry[]>>;
@@ -63,6 +73,9 @@ export interface AppState {
   navWidth: number;
   resourcesHidden: boolean;
   navHidden: boolean;
+  memory: Loadable<MemoryEntry[]>;
+  memorySearch: string;
+  memoryFolderId: string | undefined;
 }
 
 const NAV_KEY = 'muster.navWidth';
@@ -73,6 +86,9 @@ export const NAV_MAX = 320;
 const savedWorkspace = readWorkspace(localStorage);
 let state: AppState = {
   screen: 'work',
+  memory: {phase: 'idle'},
+  memorySearch: '',
+  memoryFolderId: undefined,
   bridgeAvailable: getBridge() !== null,
   boot: { phase: 'idle' },
   snapshot: null,
@@ -86,6 +102,7 @@ let state: AppState = {
   tabs: savedWorkspace.tabs,
   activeTabId: savedWorkspace.activeTabId,
   providers: { phase: 'idle' },
+  skills: { phase: 'idle' },
   revealed: {},
   files: {},
   fileBodies: {},
@@ -96,6 +113,11 @@ let state: AppState = {
   navWidth: clampNav(Number(localStorage.getItem(NAV_KEY)) || NAV_DEFAULT),
 };
 
+// Keep a small warm cache while durable transcripts remain in SQLite. Open
+// subagent resources and the selected chat are protected independently.
+const timelineAccess = new Map<string, number>();
+let timelineAccessSequence = 0;
+const INACTIVE_TIMELINE_CACHE_LIMIT = 8;
 const listeners = new Set<() => void>();
 let noticeSeq = 0;
 
@@ -114,7 +136,16 @@ export function subscribeStore(listener: () => void): () => void {
 
 function set(patch: Partial<AppState>): void {
   state = { ...state, ...patch };
-  if ('tabs' in patch || 'activeTabId' in patch) saveWorkspace(localStorage, {tabs:state.tabs, activeTabId:state.activeTabId});
+  if ('timelines' in patch || 'activeChatId' in patch || 'tabs' in patch) {
+    const protectedIds = new Set([state.activeChatId, ...state.tabs.map(tab=>tab.chatId), ...timelineReads.keys()]);
+    const inactive = Object.keys(state.timelines).filter(id=>!protectedIds.has(id)).sort((a,b)=>(timelineAccess.get(b)??0)-(timelineAccess.get(a)??0));
+    if (inactive.length > INACTIVE_TIMELINE_CACHE_LIMIT) {
+      const timelines={...state.timelines};
+      for(const id of inactive.slice(INACTIVE_TIMELINE_CACHE_LIMIT)) {delete timelines[id];timelineReplicas.delete(id);timelineAccess.delete(id);}
+      state={...state,timelines};
+    }
+  }
+  if ('tabs'  in patch || 'activeTabId' in patch) saveWorkspace(localStorage, {tabs:state.tabs, activeTabId:state.activeTabId});
   for (const l of listeners) l();
   if ('tabs' in patch && state.boot.phase === 'ready') syncResourceWatches();
 }
@@ -146,6 +177,17 @@ function errorText(cause: unknown): string {
 
 let unsubscribe: (() => void) | null = null;
 let removeFocusRefresh: (()=>void) | undefined;
+const timelineReplicas = new Map<string, TimelineReplica>();
+const timelineReads = new Map<string, Promise<void>>();
+function timelineReplica(chatId: string): TimelineReplica {
+  let replica = timelineReplicas.get(chatId);
+  if (!replica) { replica = new TimelineReplica(); timelineReplicas.set(chatId, replica); }
+  return replica;
+}
+function publishTimeline(chatId: string): void {
+  const value = timelineReplicas.get(chatId)?.value;
+  if (value) set({timelines: {...state.timelines, [chatId]: {phase: 'ready', value: value.items}}});
+}
 
 export async function boot(): Promise<void> {
   if (!state.bridgeAvailable) {
@@ -155,14 +197,35 @@ export async function boot(): Promise<void> {
   set({ boot: { phase: 'loading' } });
   unsubscribe?.();
   removeFocusRefresh?.();
-  const refreshVisible = () => { for (const folderId of new Set(state.tabs.map(tab=>tab.folderId))) if(folderId) void refreshResources(folderId); };
+  let refreshingFocus = false;
+  const refreshVisible = () => {
+    for (const folderId of new Set(state.tabs.map(tab=>tab.folderId))) if(folderId) void refreshResources(folderId);
+    // Main intentionally suppresses events for a hidden window. Reconcile its
+    // durable state on focus rather than relying on another token arriving.
+    if (refreshingFocus) return;
+    refreshingFocus = true;
+    void invoke('app.snapshot', undefined).then(snapshot => {
+      applySnapshot(snapshot);
+      if (state.activeChatId) return readTimeline(state.activeChatId);
+    }).catch(cause => pushNotice(errorText(cause))).finally(() => { refreshingFocus = false; });
+  };
   window.addEventListener('focus',refreshVisible);
   removeFocusRefresh = () => window.removeEventListener('focus',refreshVisible);
   unsubscribe = subscribe((event) => {
     if (event.type === 'snapshot') applySnapshot(event.snapshot);
+    else if (event.type === 'fileMoved') remapFileTab(event.folderId, event.from, event.to);
     else if (event.type === 'workspaceChanged') void refreshResources(event.folderId);
     else if (event.type === 'chatSelected') void selectChat(event.chatId).then(()=>focusComposer());
-    else if (event.type === 'timeline') {
+    else if (event.type === 'timelinePatch') {
+      // Unopened chats need no transcript allocation. Their sidebar status is
+      // supplied by snapshots; selecting one fetches its durable baseline.
+      if (event.chatId !== state.activeChatId && !state.timelines[event.chatId]) return;
+      const replica = timelineReplica(event.chatId);
+      replica.patch(event.patch);
+      publishTimeline(event.chatId);
+      if (replica.needsSnapshot) void readTimeline(event.chatId);
+    } else if (event.type === 'timeline') {
+      timelineReplicas.delete(event.chatId);
       set({
         timelines: {
           ...state.timelines,
@@ -207,22 +270,10 @@ export function activeChat(): Chat | null {
 // Chats
 
 export async function selectChat(id: string): Promise<void> {
+  timelineAccess.set(id, ++timelineAccessSequence);
   set({ activeChatId: id, screen: 'work' });
   void loadContextTelemetry(id);
-  const cached = state.timelines[id];
-  if (cached?.phase === 'ready') {
-    // Cached view renders immediately, but the host must still learn the
-    // active chat (persistence + active ID would diverge otherwise). Refresh
-    // the cache from the authoritative response; keep cache on failure.
-    try {
-      const items = await invoke('chat.select', { id });
-      set({ timelines: { ...state.timelines, [id]: { phase: 'ready', value: items } } });
-    } catch (cause) {
-      pushNotice(errorText(cause));
-    }
-    return;
-  }
-  await loadTimeline(id);
+  await readTimeline(id, true);
 }
 
 const pendingContextTelemetry = new Set<string>();
@@ -241,18 +292,37 @@ async function loadContextTelemetry(id: string): Promise<void> {
   }
 }
 
-async function loadTimeline(id: string): Promise<void> {
-  const cached = state.timelines[id];
-  if (cached?.phase === 'ready' || cached?.phase === 'loading') return;
-  set({ timelines: { ...state.timelines, [id]: { phase: 'loading' } } });
-  try {
-    const items = await invoke('chat.select', { id });
-    set({ timelines: { ...state.timelines, [id]: { phase: 'ready', value: items } } });
-  } catch (cause) {
-    set({
-      timelines: { ...state.timelines, [id]: { phase: 'error', error: errorText(cause) } },
-    });
+async function readTimeline(id: string, select = false): Promise<void> {
+  timelineAccess.set(id, ++timelineAccessSequence);
+  const existing = timelineReads.get(id);
+  if (existing) {
+    await existing;
+    if (select && state.activeChatId === id) await readTimeline(id, true);
+    return;
   }
+  if (!state.timelines[id]?.value) set({timelines: {...state.timelines, [id]: {phase: 'loading'}}});
+  let succeeded = false;
+  const task = (async () => {
+    try {
+      const snapshot = await invoke('chat.timeline', {id, select});
+      timelineReplica(id).snapshot(snapshot);
+      publishTimeline(id);
+      succeeded = true;
+    } catch (cause) {
+      if (state.timelines[id]?.value) pushNotice(errorText(cause));
+      else set({timelines: {...state.timelines, [id]: {phase: 'error', error: errorText(cause)}}});
+    }
+  })();
+  timelineReads.set(id, task);
+  try { await task; } finally { timelineReads.delete(id); }
+  // Only a genuine missing revision schedules recovery; failed reads do not
+  // create a retry loop. New events or the explicit Retry action can retry.
+  if (succeeded && timelineReplicas.get(id)?.needsSnapshot) void readTimeline(id);
+}
+
+async function loadTimeline(id: string): Promise<void> {
+  if (state.timelines[id]?.phase === 'ready') return;
+  await readTimeline(id);
 }
 
 export function retryTimeline(id: string): void {
@@ -272,8 +342,8 @@ export async function createChat(folderId?: string, projectId?: string): Promise
 
 export async function updateChat(
   id: string,
-  patch: { title?: string; pinned?: boolean; archived?: boolean; draft?: string; mode?: Chat['mode'] },
-): Promise<void> {
+  patch: { title?: string; pinned?: boolean; archived?: boolean; draft?: string; mode?: Chat['mode']; model?: string },
+): Promise<boolean> {
   // Optimistic local apply so pin/rename/archive feel immediate; the returned
   // chat (and subsequent snapshots) reconcile. On failure, restore the prior
   // chat so the UI does not show unpersisted state.
@@ -288,6 +358,7 @@ export async function updateChat(
   }
   try {
     await invoke('chat.update', { id, ...patch });
+    return true;
   } catch (cause) {
     if (state.snapshot && prior) {
       set({
@@ -298,6 +369,7 @@ export async function updateChat(
       });
     }
     pushNotice(errorText(cause));
+    return false;
   }
 }
 
@@ -407,6 +479,16 @@ export async function respondApproval(id: string, approved: boolean): Promise<vo
   }
 }
 
+export async function respondQuestion(id: string, answers: Record<string, {answers: string[]}>): Promise<boolean> {
+  try {
+    await invoke('question.respond', { id, answers });
+    return true;
+  } catch (cause) {
+    pushNotice(errorText(cause));
+    return false;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Folders & projects
 
@@ -437,7 +519,17 @@ export function openTab(tab: WorkspaceTab): void {
   });
 }
 
+const closingBrowserTabs = new Set<string>();
 export function closeTab(id: string): void {
+  if (state.tabs.find(tab => tab.id === id)?.kind === 'browser') {
+    if (closingBrowserTabs.has(id)) return;
+    closingBrowserTabs.add(id);
+    void invoke('browser.close', {owner:id}).then(() => removeTab(id)).catch(error => pushNotice(`Browser could not close. Its tab was kept so you can retry. ${error instanceof Error ? error.message : String(error)}`)).finally(() => closingBrowserTabs.delete(id));
+    return;
+  }
+  removeTab(id);
+}
+function removeTab(id: string): void {
   const index = state.tabs.findIndex(t=>t.id===id);
   const tabs = state.tabs.filter((t) => t.id !== id);
   const { [id]: _body, ...fileBodies } = state.fileBodies;
@@ -449,6 +541,17 @@ export function closeTab(id: string): void {
     activeTabId:
       state.activeTabId === id ? (tabs[Math.min(index,tabs.length-1)]?.id ?? null) : state.activeTabId,
   });
+}
+
+function remapFileTab(folderId: string, from: string, to: string): void {
+  const oldId = `file:${folderId}:${from}`, newId = `file:${folderId}:${to}`;
+  if (!state.tabs.some(tab => tab.id === oldId)) return;
+  const alreadyOpen = state.tabs.some(tab => tab.id === newId);
+  const tabs = state.tabs.flatMap(tab => tab.id !== oldId ? [tab] : alreadyOpen ? [] : [{...tab,id:newId,path:to,title:to.split('/').pop() || to}]);
+  const {[oldId]: oldBody, ...fileBodies} = state.fileBodies;
+  // Re-read the destination: the preview format may change with its extension.
+  delete fileBodies[newId];
+  set({tabs,fileBodies,activeTabId:state.activeTabId === oldId ? newId : state.activeTabId});
 }
 
 export function activateTab(id: string): void {
@@ -463,6 +566,7 @@ export function hydrateTab(tab: WorkspaceTab): void {
     if (!state.gitChanges[tab.folderId!]) void loadGitChanges(tab.folderId!);
   } else if (tab.kind === 'file' && !state.fileBodies[tab.id]) void openFile(tab.folderId!, tab.path!);
   else if (tab.kind === 'diff' && !state.diffs[tab.id]) void openDiff(tab.folderId!, tab.path!);
+  else if (tab.kind === 'subagents' && tab.chatId && !state.timelines[tab.chatId]) void readTimeline(tab.chatId);
 }
 
 export function openFilesTab(folderId: string, folderName: string): void {
@@ -476,12 +580,84 @@ export function openChangesTab(folderId: string, folderName: string): void {
   void loadGitChanges(folderId);
 }
 
+export function openSubagentsTab(chatId: string, folderId: string | undefined, folderName: string): void {
+  openTab({id:`subagents:${chatId}`, kind:'subagents', ...(folderId ? {folderId} : {}), chatId, title:`Subagents · ${folderName}`});
+}
+
+export function openComputerTab(scope:ScopedComputerRef,label:string):void {
+  openTab({id:`computer:${scope.kind}:${scope.id}`,kind:'computer',scope,title:`Computer · ${label}`});
+}
+export function openProcessesTab(chatId:string,label:string):void {
+  openTab({id:`processes:${chatId}`,kind:'processes',chatId,title:`Commands · ${label}`});
+}
+
+export function openBrowserTab(url = 'about:blank'): void {
+  try { url = browserURL(url); } catch(error) { notifyError(error); return; }
+  openTab({id:`browser:${crypto.randomUUID()}`,kind:'browser',browserProfileId:'personal',url,title:'Browser'});
+}
+
 export function openProvidersTab(): void {
   set({ screen: 'providers', revealed: {} });
   void loadProviders(true);
 }
 export function openProjectsScreen(): void { set({ screen: 'projects', revealed: {} }); }
 export function closeSettings(): void { set({ screen: 'work', revealed: {} }); }
+
+export function openPluginsScreen(): void {
+  set({ screen: 'plugins', revealed: {} });
+  void loadSkills();
+}
+
+export async function loadSkills(force = false): Promise<void> {
+  if (state.skills.phase === 'loading') return;
+  if (!force && state.skills.phase === 'ready') return;
+  set({ skills: { phase: 'loading', value: state.skills.value } });
+  try {
+    const folderPaths = (state.snapshot?.folders ?? []).map(folder => folder.path);
+    const value = await invoke('plugins.list', { folderPaths });
+    set({ skills: { phase: 'ready', value } });
+  } catch (cause) {
+    set({ skills: { phase: 'error', error: errorText(cause) } });
+  }
+}
+
+/** Scope is server-resolved: folderId comes from the active chat's folder, never a raw path. */
+export function openMemoryScreen(folderId: string | undefined): void {
+  set({ screen: 'memory', memoryFolderId: folderId, memorySearch: '' });
+  void loadMemory();
+}
+
+let memoryRequest = 0;
+export async function loadMemory(): Promise<void> {
+  const ticket = ++memoryRequest, folderId = state.memoryFolderId;
+  set({ memory: { phase: 'loading' } });
+  try {
+    const items = await invoke('memory.list', { folderId });
+    if (ticket === memoryRequest && folderId === state.memoryFolderId) set({ memory: { phase: 'ready', value: items } });
+  } catch (cause) {
+    if (ticket === memoryRequest && folderId === state.memoryFolderId) set({ memory: { phase: 'error', error: errorText(cause) } });
+  }
+}
+export function setMemorySearch(query: string): void { set({ memorySearch: query }); }
+export async function runMemorySearch(): Promise<void> {
+  const query = state.memorySearch.trim();
+  if (!query) return loadMemory();
+  const ticket = ++memoryRequest, folderId = state.memoryFolderId;
+  set({ memory: { phase: 'loading' } });
+  try {
+    const items = await invoke('memory.search', { folderId, query });
+    if (ticket === memoryRequest && folderId === state.memoryFolderId) set({ memory: { phase: 'ready', value: items } });
+  } catch (cause) {
+    if (ticket === memoryRequest && folderId === state.memoryFolderId) set({ memory: { phase: 'error', error: errorText(cause) } });
+  }
+}
+/** Scope is captured with the form; never substitute a subsequently selected folder. */
+export async function saveMemory(input: Commands['memory.add']['input']): Promise<void> {
+  await invoke('memory.add', input);
+  if (state.screen === 'memory' && state.memoryFolderId === input.folderId) {
+    if (state.memorySearch.trim()) await runMemorySearch(); else await loadMemory();
+  }
+}
 
 export function dirKey(folderId: string, path: string): string {
   return `${folderId}\u0000${path}`;
@@ -501,6 +677,9 @@ export async function loadDir(folderId: string, path: string): Promise<void> {
 }
 
 async function readFileBody(folderId: string, path: string): Promise<FileBody> {
+  if (['document','workbook'].includes(filePresentation(path)) && await invoke('files.nativeAvailable',undefined).catch(()=>false)) return {native:true,text:'',truncated:false};
+  if (filePresentation(path) === 'document') return {text:'',truncated:false,document:await invoke('files.document',{folderId,path})};
+  if (filePresentation(path) === 'workbook') return {text:'',truncated:false,workbook:await invoke('files.workbook',{folderId,path})};
   if (filePresentation(path) === 'image') return {text: '', truncated: false, asset: await invoke('files.asset',{folderId,path})};
   return invoke('files.read',{folderId,path});
 }
@@ -514,7 +693,7 @@ export async function openFile(folderId: string, path: string, line?: number): P
     const body = await readFileBody(folderId, path);
     if (!state.tabs.some(tab => tab.id === id)) return;
     // Keep at most one decoded-image payload cached; inactive image tabs reload on demand.
-    const bodies = body.asset ? Object.fromEntries(Object.entries(state.fileBodies).filter(([key,value]) => key === id || !value.value?.asset)) : state.fileBodies;
+    const bodies = body.asset || body.document || body.workbook ? Object.fromEntries(Object.entries(state.fileBodies).filter(([key,value]) => key === id || !(value.value?.asset || value.value?.document || value.value?.workbook))) : state.fileBodies;
     set({
       fileBodies: {
         ...bodies,

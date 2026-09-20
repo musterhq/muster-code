@@ -5,7 +5,7 @@
  * an account email taken from explicit account metadata. A local credential
  * means "configured", not a verified or active entitlement.
  */
-import { promises as fs } from 'node:fs';
+import { promises as fs, constants } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
@@ -28,10 +28,13 @@ async function readBounded(path: string): Promise<string | null> {
   const info = await fs.lstat(path).catch((e: NodeJS.ErrnoException) => { if (e.code === 'ENOENT') return null; throw e; });
   if (!info) return null;
   if (!info.isFile()) return null;
-  const handle = await fs.open(path, 'r');
+  // Do not follow a replacement symlink or block on a replacement FIFO after
+  // the lstat. Verify the opened identity before reading any credential bytes.
+  const handle = await fs.open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
   try {
     const stat = await handle.stat();
     if (!stat.isFile()) return null;
+    if (stat.dev !== info.dev || stat.ino !== info.ino) throw new Error('Configuration changed during discovery. Retry discovery.');
     if (stat.size > MAX_BYTES) throw new Error('file exceeds 1 MiB bound');
     const buffer = Buffer.alloc(MAX_BYTES + 1);
     let count = 0;

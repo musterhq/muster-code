@@ -7,7 +7,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { chmodSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
-import type { Chat, ChatStatus, ContextTelemetry, Folder, Project, Snapshot, TimelineItem } from '../shared/protocol.ts';
+import type { Chat, ChatRecovery, ChatStatus, ContextTelemetry, Folder, Project, Snapshot, TimelineItem } from '../shared/protocol.ts';
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS folders (
@@ -19,11 +19,17 @@ CREATE TABLE IF NOT EXISTS chats (
   pinned INTEGER NOT NULL DEFAULT 0, pin_order INTEGER, archived INTEGER NOT NULL DEFAULT 0,
   draft TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'idle',
   updated_at TEXT NOT NULL, provider_thread_id TEXT, model TEXT NOT NULL,
-  mode TEXT NOT NULL DEFAULT 'agent', error TEXT);
+  mode TEXT NOT NULL DEFAULT 'agent', error TEXT, provider_turn_id TEXT, recovery TEXT, permission_mode TEXT, provider_id TEXT NOT NULL DEFAULT 'hybrow', provider_binding_id TEXT, provider_thread_provider_id TEXT, provider_thread_binding_id TEXT);
 CREATE TABLE IF NOT EXISTS timeline (
   seq INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT NOT NULL UNIQUE, chat_id TEXT NOT NULL,
   kind TEXT NOT NULL, text TEXT NOT NULL, status TEXT, created_at TEXT NOT NULL, data TEXT);
 CREATE INDEX IF NOT EXISTS timeline_chat ON timeline (chat_id, seq);
+CREATE TABLE IF NOT EXISTS timeline_cursors (
+  chat_id TEXT PRIMARY KEY, revision INTEGER NOT NULL DEFAULT 0);
+CREATE TABLE IF NOT EXISTS timeline_changes (
+  chat_id TEXT NOT NULL, seq INTEGER NOT NULL, revision INTEGER NOT NULL,
+  PRIMARY KEY (chat_id, seq));
+CREATE INDEX IF NOT EXISTS timeline_changes_chat_revision ON timeline_changes (chat_id, revision);
 CREATE TABLE IF NOT EXISTS receipts (
   request_id TEXT PRIMARY KEY, chat_id TEXT NOT NULL, run_id TEXT NOT NULL, created_at TEXT NOT NULL, fingerprint TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
@@ -35,7 +41,7 @@ CREATE TABLE IF NOT EXISTS context_telemetry (
 interface ChatRow {
   id: string; folder_id: string | null; project_id: string | null; title: string;
   pinned: number; pin_order: number | null; archived: number; draft: string; status: string; updated_at: string;
-  provider_thread_id: string | null; model: string; mode: string; error: string | null;
+  provider_id: string; provider_binding_id: string | null; provider_thread_provider_id: string | null; provider_thread_binding_id: string | null; provider_thread_id: string | null; provider_turn_id: string | null; recovery: string | null; model: string; mode: string; permission_mode: string | null; error: string | null;
 }
 interface TimelineRow {
   id: string; chat_id: string; kind: string; text: string; status: string | null;
@@ -54,11 +60,26 @@ function rowToChat(row: ChatRow): Chat {
     draft: row.draft,
     status: row.status as ChatStatus,
     updatedAt: row.updated_at,
+    providerId: row.provider_id ?? 'hybrow',
+    ...(row.provider_binding_id ? {providerBindingId:row.provider_binding_id} : {}),
+    ...(row.provider_thread_provider_id ? {providerThreadProviderId:row.provider_thread_provider_id} : {}),
+    ...(row.provider_thread_binding_id ? {providerThreadBindingId:row.provider_thread_binding_id} : {}),
     ...(row.provider_thread_id ? { providerThreadId: row.provider_thread_id } : {}),
+    ...(row.provider_turn_id ? { providerTurnId: row.provider_turn_id } : {}),
+    ...(row.recovery ? { recovery: readRecovery(row.recovery) } : {}),
     model: row.model,
     mode: row.mode as Chat['mode'],
+    ...(row.permission_mode ? {permissionMode: row.permission_mode as Chat['permissionMode']} : {}),
     ...(row.error ? { error: row.error } : {}),
   };
+}
+
+function readRecovery(value: string): ChatRecovery {
+  try {
+    const parsed = JSON.parse(value) as ChatRecovery;
+    if (parsed && ['admission-rejected','recovery-needed','failed','cancelled'].includes(parsed.kind) && typeof parsed.retryable === 'boolean' && typeof parsed.reason === 'string') return parsed;
+  } catch { /* Unknown recovery state must not silently unlock dispatch. */ }
+  return {kind:'recovery-needed',retryable:false,reason:'Saved provider recovery information is unavailable. Check the existing provider thread before continuing.'};
 }
 
 function rowToItem(row: TimelineRow): TimelineItem {
@@ -84,9 +105,54 @@ export class AgentStore {
     chmodSync(join(dataDir, 'muster-agent.sqlite'), 0o600);
     this.db.exec('PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=3000;');
     this.db.exec(SCHEMA);
+    this.migrateTimelineChanges();
+    this.ensureTimelineTriggers();
+    // Existing timelines start at an empty delta baseline. Triggers above
+    // govern all subsequent inserts/updates and roll back with their tx.
+    this.db.exec("INSERT OR IGNORE INTO timeline_cursors (chat_id, revision) SELECT DISTINCT chat_id, 0 FROM timeline");
     // Additive migration for databases created before pin ordering existed.
     const chatColumns = this.db.prepare("SELECT name FROM pragma_table_info('chats')").all() as { name: string }[];
     if (!chatColumns.some((c) => c.name === 'pin_order')) this.db.exec('ALTER TABLE chats ADD COLUMN pin_order INTEGER');
+    if (!chatColumns.some((c) => c.name === 'provider_turn_id')) this.db.exec('ALTER TABLE chats ADD COLUMN provider_turn_id TEXT');
+    if (!chatColumns.some((c) => c.name === 'recovery')) this.db.exec('ALTER TABLE chats ADD COLUMN recovery TEXT');
+    if (!chatColumns.some((c) => c.name === 'permission_mode')) this.db.exec('ALTER TABLE chats ADD COLUMN permission_mode TEXT');
+    if (!chatColumns.some((c) => c.name === 'provider_id')) this.db.exec("ALTER TABLE chats ADD COLUMN provider_id TEXT NOT NULL DEFAULT 'hybrow'");
+    for (const column of ['provider_binding_id','provider_thread_provider_id','provider_thread_binding_id']) if (!chatColumns.some(c=>c.name===column)) this.db.exec(`ALTER TABLE chats ADD COLUMN ${column} TEXT`);
+  }
+
+  /** Migrate the pre-release append-only journal to one row per timeline item. */
+  private migrateTimelineChanges(): void {
+    const columns = this.db.prepare("SELECT name, pk FROM pragma_table_info('timeline_changes')").all() as { name: string; pk: number }[];
+    const oldShape = columns.some((column) => column.name === 'revision' && column.pk === 2) && columns.some((column) => column.name === 'seq' && column.pk === 0);
+    if (!oldShape) return;
+    this.tx(() => {
+    this.db.exec('DROP TRIGGER IF EXISTS timeline_revision_insert; DROP TRIGGER IF EXISTS timeline_revision_update;');
+    this.db.exec('DROP INDEX IF EXISTS timeline_changes_chat_revision;');
+    this.db.exec('ALTER TABLE timeline_changes RENAME TO timeline_changes_legacy;');
+    this.db.exec('CREATE TABLE timeline_changes (chat_id TEXT NOT NULL, seq INTEGER NOT NULL, revision INTEGER NOT NULL, PRIMARY KEY (chat_id, seq));');
+    this.db.exec('CREATE INDEX timeline_changes_chat_revision ON timeline_changes (chat_id, revision);');
+    this.db.exec('INSERT INTO timeline_changes (chat_id, seq, revision) SELECT chat_id, seq, MAX(revision) FROM timeline_changes_legacy GROUP BY chat_id, seq;');
+    this.db.exec('DROP TABLE timeline_changes_legacy;');
+    });
+  }
+
+  private ensureTimelineTriggers(): void {
+    this.db.exec(`
+      CREATE TRIGGER IF NOT EXISTS timeline_revision_insert AFTER INSERT ON timeline BEGIN
+        INSERT INTO timeline_cursors (chat_id, revision) VALUES (NEW.chat_id, 1)
+          ON CONFLICT(chat_id) DO UPDATE SET revision = revision + 1;
+        INSERT INTO timeline_changes (chat_id, seq, revision)
+          SELECT NEW.chat_id, NEW.seq, revision FROM timeline_cursors WHERE chat_id = NEW.chat_id
+          ON CONFLICT(chat_id, seq) DO UPDATE SET revision = excluded.revision;
+      END;
+      CREATE TRIGGER IF NOT EXISTS timeline_revision_update AFTER UPDATE OF kind, text, status, data, created_at ON timeline BEGIN
+        INSERT INTO timeline_cursors (chat_id, revision) VALUES (NEW.chat_id, 1)
+          ON CONFLICT(chat_id) DO UPDATE SET revision = revision + 1;
+        INSERT INTO timeline_changes (chat_id, seq, revision)
+          SELECT NEW.chat_id, NEW.seq, revision FROM timeline_cursors WHERE chat_id = NEW.chat_id
+          ON CONFLICT(chat_id, seq) DO UPDATE SET revision = excluded.revision;
+      END;
+    `);
   }
 
   /** Run `fn` inside a transaction; rolls back on throw. */
@@ -158,7 +224,7 @@ export class AgentStore {
     });
   }
 
-  createChat(input: { folderId?: string; projectId?: string; model: string; mode: Chat['mode'] }): Chat {
+  createChat(input: { folderId?: string; projectId?: string; model: string; mode: Chat['mode']; permissionMode?: Chat['permissionMode'] }): Chat {
     return this.tx(() => {
       if (input.folderId && !this.folder(input.folderId)) throw new Error(`Unknown folder: ${input.folderId}`);
       if (input.projectId) {
@@ -173,8 +239,8 @@ export class AgentStore {
       }
       const id = randomUUID();
       this.db.prepare(
-        'INSERT INTO chats (id, folder_id, project_id, title, updated_at, model, mode) VALUES (?, ?, ?, ?, ?, ?, ?)',
-      ).run(id, input.folderId ?? null, input.projectId ?? null, 'New chat', now(), input.model, input.mode);
+        'INSERT INTO chats (id, folder_id, project_id, title, updated_at, model, mode, permission_mode) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+      ).run(id, input.folderId ?? null, input.projectId ?? null, 'New chat', now(), input.model, input.mode, input.permissionMode ?? null);
       this.db.prepare("INSERT INTO meta (key, value) VALUES ('activeChatId', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(id);
       this.bumpVersion();
       return this.chat(id)!;
@@ -186,19 +252,20 @@ export class AgentStore {
     return row ? rowToChat(row) : undefined;
   }
 
-  updateChat(id: string, patch: Partial<Pick<Chat, 'title' | 'pinned' | 'archived' | 'draft' | 'mode' | 'status' | 'providerThreadId' | 'error'>>): Chat {
+  updateChat(id: string, patch: Partial<Pick<Chat, 'title' | 'pinned' | 'archived' | 'draft' | 'model' | 'mode' | 'permissionMode' | 'status' | 'providerId' | 'providerBindingId'>> & {providerThreadId?:string|null; providerThreadProviderId?:string|null; providerThreadBindingId?:string|null; providerTurnId?: string | null; recovery?: ChatRecovery | null; error?: string | null}): Chat {
     return this.tx(() => {
       const current = this.chat(id);
       if (!current) throw new Error(`Unknown chat: ${id}`);
       const sets: string[] = ['updated_at = ?'];
       const values: (string | number | null)[] = [now()];
       const map: Record<string, string> = {
-        title: 'title', draft: 'draft', mode: 'mode', status: 'status', error: 'error', providerThreadId: 'provider_thread_id',
+        title: 'title', draft: 'draft', model: 'model', mode: 'mode', permissionMode: 'permission_mode', status: 'status', error: 'error', providerId:'provider_id', providerBindingId:'provider_binding_id', providerThreadProviderId:'provider_thread_provider_id', providerThreadBindingId:'provider_thread_binding_id', providerThreadId: 'provider_thread_id', providerTurnId: 'provider_turn_id',
       };
       for (const [key, column] of Object.entries(map)) {
         const value = (patch as Record<string, unknown>)[key];
         if (value !== undefined) { sets.push(`${column} = ?`); values.push(value as string | null); }
       }
+      if (patch.recovery !== undefined) { sets.push('recovery = ?'); values.push(patch.recovery === null ? null : JSON.stringify(patch.recovery)); }
       for (const key of ['pinned', 'archived'] as const) {
         if (patch[key] !== undefined) { sets.push(`${key} = ?`); values.push(patch[key] ? 1 : 0); }
       }
@@ -276,6 +343,25 @@ export class AgentStore {
     return (this.db.prepare('SELECT * FROM timeline WHERE chat_id = ? ORDER BY seq').all(chatId) as unknown as TimelineRow[]).map(rowToItem);
   }
 
+  /** Full ordered timeline plus its per-chat cursor, including empty chats. */
+  timelineSnapshot(chatId: string): { items: TimelineItem[]; revision: number } {
+    const items = this.timeline(chatId);
+    const row = this.db.prepare('SELECT revision FROM timeline_cursors WHERE chat_id = ?').get(chatId) as { revision: number } | undefined;
+    return { items, revision: row?.revision ?? 0 };
+  }
+
+  /** Return each row changed after `since`, ordered by its original sequence. */
+  timelineChanges(chatId: string, since: number): { items: TimelineItem[]; revision: number } {
+    if (!Number.isSafeInteger(since) || since < 0) throw new Error('Invalid timeline revision cursor.');
+    const cursor = this.db.prepare('SELECT revision FROM timeline_cursors WHERE chat_id = ?').get(chatId) as { revision: number } | undefined;
+    const revision = cursor?.revision ?? 0;
+    if (since > revision) throw new Error(`Timeline revision ${since} is ahead of current revision ${revision}.`);
+    const rows = this.db.prepare(
+      'SELECT t.* FROM timeline t JOIN timeline_changes c ON c.chat_id = t.chat_id AND c.seq = t.seq WHERE t.chat_id = ? AND c.revision > ? ORDER BY t.seq',
+    ).all(chatId, since) as unknown as TimelineRow[];
+    return { items: rows.map(rowToItem), revision };
+  }
+
   appendItem(chatId: string, kind: TimelineItem['kind'], text: string, status?: string, data?: Record<string, unknown>): TimelineItem {
     const item: TimelineItem = {
       id: randomUUID(), chatId, kind, text, ...(status ? { status } : {}), createdAt: now(), ...(data ? { data } : {}),
@@ -312,11 +398,12 @@ export class AgentStore {
       }
       const chat = this.chat(chatId);
       if (!chat) throw new Error(`Unknown chat: ${chatId}`);
+      if (chat.recovery?.kind === 'recovery-needed') throw new Error('This chat needs its provider status checked before another message can be sent.');
       if (chat.status === 'running' || chat.status === 'stopping') throw new Error('Chat is already running; stop it first.');
       const runId = randomUUID();
       this.db.prepare('INSERT INTO receipts (request_id, chat_id, run_id, created_at, fingerprint) VALUES (?, ?, ?, ?, ?)').run(requestId, chatId, runId, now(), createHash('sha256').update(text).digest('hex'));
       this.appendItem(chatId, 'user', text);
-      const sets: Record<string, unknown> = { status: 'running', draft: '', error: null };
+      const sets: Record<string, unknown> = { status: 'running', draft: '', error: null, providerTurnId: null, recovery: null };
       if (chat.title === 'New chat') sets.title = text.split('\n')[0]!.slice(0, 60).trim() || 'New chat';
       this.updateChatRaw(chatId, sets);
       this.bumpVersion();
@@ -325,7 +412,7 @@ export class AgentStore {
   }
 
   private updateChatRaw(id: string, sets: Record<string, unknown>): void {
-    const columns: Record<string, string> = { status: 'status', draft: 'draft', error: 'error', title: 'title' };
+    const columns: Record<string, string> = { status: 'status', draft: 'draft', error: 'error', title: 'title', providerTurnId:'provider_turn_id', recovery:'recovery' };
     const clauses: string[] = ['updated_at = ?'];
     const values: (string | null)[] = [now()];
     for (const [key, column] of Object.entries(columns)) {
@@ -339,8 +426,9 @@ export class AgentStore {
     return this.tx(() => {
       const rows = this.db.prepare("SELECT id FROM chats WHERE status IN ('running', 'stopping')").all() as unknown as { id: string }[];
       for (const { id } of rows) {
-        this.updateChatRaw(id, { status: 'interrupted' });
-        this.appendItem(id, 'notice', 'This run was interrupted by an app restart.', 'interrupted');
+        const recovery: ChatRecovery = {kind:'recovery-needed',retryable:false,reason:'Muster restarted before this attempt settled. The provider may still be working; check its saved turn before sending another message.'};
+        this.updateChatRaw(id, { status: 'failed', error: recovery.reason, recovery:JSON.stringify(recovery) });
+        this.appendItem(id, 'notice', recovery.reason, 'recovery-needed', {recovery});
       }
       if (rows.length > 0) this.bumpVersion();
       return rows.map((row) => row.id);

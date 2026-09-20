@@ -4,7 +4,7 @@
  * untrusted. Modeled on the reviewed agent-mode-review resolveInside.
  */
 import { promises as fs } from 'node:fs';
-import { resolve, sep } from 'node:path';
+import { dirname, resolve, sep } from 'node:path';
 
 /** Resolve `rel` inside `root`, rejecting lexical and symlink escapes. */
 export async function resolveInside(root: string, rel: string): Promise<string> {
@@ -23,7 +23,25 @@ export async function resolveInside(root: string, rel: string): Promise<string> 
     }
     return real;
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return candidate; // deleted file: lexically contained
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      // A missing leaf can still have an existing symlink parent outside root.
+      let parent = dirname(candidate);
+      while (parent !== realRoot) {
+        try {
+          const real = await fs.realpath(parent);
+          if (real !== realRoot && !real.startsWith(realRoot + sep)) throw new Error('Path resolves outside folder root.');
+          break;
+        } catch (parentError) {
+          if ((parentError as NodeJS.ErrnoException).code !== 'ENOENT') throw parentError;
+          const link = await fs.lstat(parent).catch(error=>{if((error as NodeJS.ErrnoException).code==='ENOENT')return undefined;throw error;});
+          if (link?.isSymbolicLink()) throw new Error('Path contains an unresolved symlink.');
+          const next = dirname(parent);
+          if (next === parent) throw new Error('Folder root is unavailable.');
+          parent = next;
+        }
+      }
+      return candidate;
+    }
     throw error;
   }
 }

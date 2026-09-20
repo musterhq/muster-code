@@ -26,7 +26,9 @@ function splitKeepingLines(text: string): string[] {
 }
 
 function charSpans(oldLine: string, newLine: string): { del: CharSpan[]; add: CharSpan[] } {
-  const parts = diffWordsWithSpace(oldLine, newLine);
+  if (oldLine.length + newLine.length > 4000) return {del:[{text:oldLine,changed:true}],add:[{text:newLine,changed:true}]};
+  const parts = diffWordsWithSpace(oldLine, newLine, {timeout:10,maxEditLength:200});
+  if (!parts) return {del:[{text:oldLine,changed:true}],add:[{text:newLine,changed:true}]};
   const del: CharSpan[] = [];
   const add: CharSpan[] = [];
   for (const part of parts) {
@@ -40,11 +42,13 @@ function charSpans(oldLine: string, newLine: string): { del: CharSpan[]; add: Ch
   return { del, add };
 }
 
-export function buildDiffRows(before: string, after: string): DiffRow[] {
+export function buildDiffRows(before: string, after: string, ignoreWhitespace = false): DiffRow[] {
   const rows: DiffRow[] = [];
   let oldNo = 1;
   let newNo = 1;
-  const changes = diffLines(before, after);
+  const changes = diffLines(before, after, {timeout:1000,maxEditLength:2000,ignoreWhitespace});
+  if (!changes) throw new Error('This change is too complex for the inline preview. Open the file or use Git to review it.');
+  let wordBudget = 200;
   for (let i = 0; i < changes.length; i++) {
     const change = changes[i];
     const lines = splitKeepingLines(change.value);
@@ -57,7 +61,7 @@ export function buildDiffRows(before: string, after: string): DiffRow[] {
       for (let j = 0; j < lines.length; j++) {
         const paired = nextLines && j < nextLines.length ? nextLines[j] : null;
         if (paired !== null) {
-          const { del, add } = charSpans(lines[j], paired);
+          const { del, add } = wordBudget-- > 0 ? charSpans(lines[j], paired) : {del:[{text:lines[j],changed:true}],add:[{text:paired,changed:true}]};
           delRows.push({ type: 'del', oldNo: oldNo++, text: lines[j], spans: del });
           addRows.push({ type: 'add', newNo: newNo++, text: paired, spans: add });
         } else {

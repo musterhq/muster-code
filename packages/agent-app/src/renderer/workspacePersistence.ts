@@ -1,9 +1,13 @@
+import type {ScopedComputerRef} from '../shared/scoped-computer-protocol';
 export interface SavedTab {
   id: string;
-  kind: 'files' | 'changes' | 'file' | 'diff';
+  kind: 'files' | 'changes' | 'file' | 'diff' | 'subagents' | 'browser' | 'computer' | 'processes';
+  scope?:ScopedComputerRef;
+  browserProfileId?: string;
   folderId?: string;
   path?: string;
   title: string;
+  chatId?: string;
 }
 export interface SavedWorkspace { tabs: SavedTab[]; activeTabId: string | null }
 const KEY = 'muster.workspace.v1';
@@ -19,12 +23,30 @@ export function readWorkspace(storage: Pick<Storage, 'getItem'>): SavedWorkspace
     if (parsed.version !== 1 || !Array.isArray(parsed.tabs)) return empty();
     const tabs: SavedTab[] = [];
     for (const t of parsed.tabs.slice(0, MAX_TABS)) {
-      if (!t || !['files','changes','file','diff'].includes(t.kind) || typeof t.folderId !== 'string' || t.folderId.length > 128) continue;
+      if (t?.kind === 'computer' || t?.kind === 'processes') {
+        const validId=(id:unknown):id is string=>typeof id==='string' && /^[a-zA-Z0-9_-]{1,128}$/.test(id);
+        if(typeof t.title!=='string'||t.title.length>4096)continue;
+        if(t.kind==='computer' && ['chat','project'].includes(t.scope?.kind) && validId(t.scope?.id)){
+          const scope:ScopedComputerRef={kind:t.scope.kind,id:t.scope.id}, id=`computer:${scope.kind}:${scope.id}`;
+          if(!tabs.some(tab=>tab.id===id))tabs.push({id,kind:'computer',scope,title:t.title});
+        }else if(t.kind==='processes' && validId(t.chatId)){
+          const id=`processes:${t.chatId}`;if(!tabs.some(tab=>tab.id===id))tabs.push({id,kind:'processes',chatId:t.chatId,title:t.title});
+        }
+        continue;
+      }
+      if (t?.kind === 'browser') {
+        if (typeof t.id==='string' && /^browser:[a-zA-Z0-9_-]{1,128}$/.test(t.id) && typeof t.browserProfileId==='string' && /^[a-zA-Z0-9_-]{1,64}$/.test(t.browserProfileId) && !tabs.some(tab=>tab.id===t.id)) tabs.push({id:t.id,kind:'browser',browserProfileId:t.browserProfileId,title:'Browser'});
+        continue;
+      }
+      if (!t || !['files','changes','file','diff','subagents'].includes(t.kind)) continue;
+      const folderRequired = t.kind !== 'subagents';
+      if (folderRequired && (typeof t.folderId !== 'string' || !t.folderId || t.folderId.length > 128)) continue;
+      if (t.kind === 'subagents' && (typeof t.chatId !== 'string' || !t.chatId || t.chatId.length > 256)) continue;
       if (typeof t.title !== 'string' || t.title.length > 4096) continue;
-      if (!['files','changes'].includes(t.kind) && (typeof t.path !== 'string' || !t.path || t.path.length > 8192)) continue;
-      const id = ['files','changes'].includes(t.kind) ? `${t.kind}:${t.folderId}` : `${t.kind}:${t.folderId}:${t.path}`;
+      if (!['files','changes','subagents'].includes(t.kind) && (typeof t.path !== 'string' || !t.path || t.path.length > 8192)) continue;
+      const id = t.kind === 'subagents' ? `subagents:${t.chatId}` : ['files','changes'].includes(t.kind) ? `${t.kind}:${t.folderId}` : `${t.kind}:${t.folderId}:${t.path}`;
       if (tabs.some(tab => tab.id === id)) continue;
-      tabs.push({id, kind:t.kind, folderId:t.folderId, ...(!['files','changes'].includes(t.kind) ? {path:t.path}:{}), title:t.title});
+      tabs.push({id, kind:t.kind, ...(typeof t.folderId==='string' ? {folderId:t.folderId}:{}), ...(!['files','changes','subagents'].includes(t.kind) ? {path:t.path}:{}), ...(typeof t.chatId==='string' ? {chatId:t.chatId.slice(0,256)}:{}), title:t.title});
     }
     return {tabs, activeTabId:tabs.some(t=>t.id===parsed.activeTabId) ? parsed.activeTabId : tabs[0]?.id ?? null};
   } catch { return empty(); }
@@ -32,7 +54,7 @@ export function readWorkspace(storage: Pick<Storage, 'getItem'>): SavedWorkspace
 
 export function saveWorkspace(storage: Pick<Storage, 'setItem'>, workspace: SavedWorkspace): boolean {
   try {
-    storage.setItem(KEY, JSON.stringify({version:1, tabs:workspace.tabs.slice(0,MAX_TABS), activeTabId:workspace.activeTabId}));
+    storage.setItem(KEY, JSON.stringify({version:1, tabs:workspace.tabs.slice(0,MAX_TABS).map(tab=>tab.kind==='browser'?{id:tab.id,kind:tab.kind,browserProfileId:tab.browserProfileId,title:'Browser'}:tab), activeTabId:workspace.activeTabId}));
     return true;
   } catch { return false; }
 }
