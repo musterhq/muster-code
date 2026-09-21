@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import {getEventListeners} from 'node:events';
 import {createProviderAdapter, ProviderPreDispatchError, type CoreClient, type ProviderInput, type ProviderResult} from '../src/runtime/provider.ts';
-import {coreBudgetOptions, classifyProviderFailure, requestWhileOwned} from '../src/runtime/provider-run-lifecycle.ts';
+import {admissionRetryDelayMs, coreBudgetOptions, classifyProviderFailure, MAX_ADMISSION_RETRIES, requestWhileOwned, shouldRetryAdmission} from '../src/runtime/provider-run-lifecycle.ts';
 
 const deferred = <T>() => {
   let resolve!: (value: T) => void;
@@ -43,6 +43,17 @@ test('503 is admission-retryable only with explicit no-dispatch evidence', () =>
     assert.equal(classifyProviderFailure({...base, dispatchState}, evidence)?.retryable, false);
   }
   assert.equal(classifyProviderFailure({...base, dispatchState: 'not-dispatched'}, {...evidence, activity: true})?.retryable, false);
+});
+
+test('bounded admission retry never applies after provider acceptance', () => {
+  const safe = {status:'failed' as const, dispatchState:'not-dispatched' as const, recovery:{kind:'admission-rejected' as const, retryable:true, reason:'capacity'}};
+  assert.equal(shouldRetryAdmission(safe), true);
+  assert.equal(MAX_ADMISSION_RETRIES, 2);
+  assert.equal(admissionRetryDelayMs(1), 250);
+  assert.equal(admissionRetryDelayMs(2, 10_000), 4_000);
+  assert.equal(shouldRetryAdmission({...safe, dispatchState:'unknown'}), false);
+  assert.equal(shouldRetryAdmission({...safe, turnId:'turn'}), false);
+  assert.equal(shouldRetryAdmission({...safe, recovery:{...safe.recovery, retryable:false}}), false);
 });
 
 test('stopping one chat preserves another; duplicate attempts stay rejected until real settlement', async () => {

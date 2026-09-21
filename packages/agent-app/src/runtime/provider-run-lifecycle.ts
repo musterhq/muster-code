@@ -44,6 +44,23 @@ export interface DispatchResult {
   turnId?: string;
   failure?: {statusCode?: number};
 }
+/** Automatic retries are deliberately limited to failures proven not to have
+ * created a provider turn. A timeout or an unknown dispatch state must go
+ * through reconciliation instead; replaying those prompts could duplicate
+ * commands or file edits. */
+export const MAX_ADMISSION_RETRIES = 2;
+export function shouldRetryAdmission(result: DispatchResult & { recovery?: ProviderRecovery }): boolean {
+  return result.status === 'failed'
+    && result.dispatchState === 'not-dispatched'
+    && !result.turnId
+    && result.recovery?.kind === 'admission-rejected'
+    && result.recovery.retryable;
+}
+export function admissionRetryDelayMs(attempt: number, retryAfterMs?: number): number {
+  const serverDelay = Number.isSafeInteger(retryAfterMs) && (retryAfterMs ?? 0) > 0 ? retryAfterMs! : 0;
+  const exponential = Math.min(4_000, 250 * (2 ** Math.max(0, attempt - 1)));
+  return Math.min(4_000, Math.max(100, serverDelay || exponential));
+}
 export function classifyProviderFailure(result: DispatchResult, evidence: { activity: boolean; terminal: boolean; cancelled: boolean }): ProviderRecovery | undefined {
   const definitelyNotDispatched = result.dispatchState === 'not-dispatched' && !result.turnId && !evidence.activity;
   if (evidence.cancelled) return {
