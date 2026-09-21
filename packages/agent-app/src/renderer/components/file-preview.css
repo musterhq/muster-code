@@ -176,3 +176,4 @@
 .native-preview-toolbar [role=group]{display:flex;gap:4px;}
 .native-preview-toolbar button{padding:5px 9px;border-radius:5px;color:inherit;}
 .native-preview-toolbar button[aria-pressed=true]{background:var(--bg-hover,#303030);color:var(--text-primary,#eee);}
+.file-error-detail{color:var(--text-faint);font-size:12px;}

@@ -1,5 +1,17 @@
 export type FilePresentation = 'markdown' | 'json' | 'csv' | 'tsv' | 'image' | 'text' | 'document' | 'workbook';
 
+/** Turn host/bridge failures into actionable, non-leaky viewer copy. */
+export function friendlyFileError(error: unknown): string {
+  const raw = error instanceof Error ? error.message : String(error);
+  if (/ENOENT|no such file|cannot find the path|realpath/i.test(raw)) {
+    return 'This workspace folder is no longer available. Reopen the folder, then retry this resource.';
+  }
+  if (/EACCES|EPERM|permission denied|not permitted/i.test(raw)) {
+    return 'Muster could not read this resource with the current access. Reopen it with an allowed workspace.';
+  }
+  return raw.replace(/^BridgeError:\s*/i, '').trim() || 'The resource could not be opened.';
+}
+
 /** One dispatch point; viewers share navigation, scope, refresh and failure UI. */
 export function filePresentation(path: string): FilePresentation {
   const extension = path.split('.').pop()?.toLowerCase();

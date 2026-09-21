@@ -2,7 +2,7 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {markdownFragmentId, markdownHeadingId} from '../src/renderer/components/markdownAnchors.ts';
 import {resourceReference} from '../src/renderer/components/resourceReference.ts';
-import {filePresentation} from '../src/renderer/components/filePresentation.ts';
+import {filePresentation, friendlyFileError} from '../src/renderer/components/filePresentation.ts';
 
 const folders=[{id:'workspace',name:'Workspace',path:'/tmp/workspace'}];
 
@@ -25,4 +25,10 @@ test('workspace Markdown references accept section fragments and retain line lin
 
 test('MDX files use the bounded Markdown preview path',()=>{
   assert.equal(filePresentation('docs/guide.MDX'),'markdown');
+});
+
+test('stale or denied resources produce actionable viewer copy without leaking host paths',()=>{
+  assert.equal(friendlyFileError("BridgeError: ENOENT: no such file or directory, realpath '/private/tmp/fixture'"), 'This workspace folder is no longer available. Reopen the folder, then retry this resource.');
+  assert.equal(friendlyFileError('Error: EACCES: permission denied'), 'Muster could not read this resource with the current access. Reopen it with an allowed workspace.');
+  assert.equal(friendlyFileError('BridgeError: malformed workbook'), 'malformed workbook');
 });

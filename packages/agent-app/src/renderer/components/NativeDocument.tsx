@@ -1,6 +1,6 @@
 import React,{useEffect,useRef,useState} from 'react';
 import {invoke} from '../bridge';
-import {filePresentation} from './filePresentation';
+import {filePresentation, friendlyFileError} from './filePresentation';
 import {PdfFile} from './PdfFile';
 import {WorkbookFile} from './WorkbookFile';
 import {FileAnnotations} from './FileAnnotations';
@@ -45,7 +45,7 @@ export function NativeDocument({folderId,path,revision}:{folderId:string;path:st
     if(!reader)return;
     let active=true;setLoading(true);setError('');
     const read=filePresentation(path)==='workbook'?invoke('files.workbook',{folderId,path}).then(workbook=>({text:'',truncated:false,workbook})):invoke('files.document',{folderId,path}).then(document=>({text:'',truncated:false,document}));
-    void read.then(value=>{if(active)setBody(value);}).catch(e=>{if(active)setError(String(e));}).finally(()=>{if(active)setLoading(false);});
+    void read.then(value=>{if(active)setBody(value);}).catch(e=>{if(active)setError(friendlyFileError(e));}).finally(()=>{if(active)setLoading(false);});
     return()=>{active=false;};
   },[reader,folderId,path,revision]);
   const version=body?.document?.revision??body?.workbook?.revision;
