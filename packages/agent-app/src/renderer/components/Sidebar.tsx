@@ -43,9 +43,12 @@ import { readCollapsed, saveCollapsed } from '../sidebarDisclosure';
 import { StatusDot } from './StatusDot';
 import {chatGroup,compareChats,isChatRunning,isChatSort,readChatSort,saveChatSort,selectionReveal,type ChatSort} from '../chatNavigation';
 import './sidebar-disclosure.css';
+import {useProcessSummary} from '../processSummary';
+import {isActiveProcess} from '../../shared/process-protocol';
 
 function ChatRow({ chat }: { chat: Chat }): React.ReactElement {
   const state = useStore();
+  const {summary: processSummary} = useProcessSummary();
   const [renaming, setRenaming] = useState(false);
   const [title, setTitle] = useState(chat.title);
   const [renameError,setRenameError]=useState('');
@@ -54,6 +57,8 @@ function ChatRow({ chat }: { chat: Chat }): React.ReactElement {
   const rowButton=useRef<HTMLButtonElement>(null),moreButton=useRef<HTMLButtonElement>(null),renameInput=useRef<HTMLInputElement>(null);
   const renameCancelled=useRef(false),renamePending=useRef(false);
   const active = state.activeChatId === chat.id;
+  const activeProcesses = processSummary?.sessions.filter(session => session.chatId === chat.id && isActiveProcess(session.status)).length ?? 0;
+  const pendingAttention = state.snapshot?.attention?.chats.find(item => item.chatId === chat.id)?.requests.length ?? 0;
 
   const beginRename=()=>{renameCancelled.current=false;setTitle(chat.title);setRenameError('');setRenaming(true);};
   const finishRename=()=>{renameCancelled.current=true;setRenaming(false);requestAnimationFrame(()=>rowButton.current?.focus());};
@@ -110,6 +115,10 @@ function ChatRow({ chat }: { chat: Chat }): React.ReactElement {
           <span className="chat-title" title={chat.title}>
             {chat.title}
           </span>
+          {(activeProcesses > 0 || pendingAttention > 0) && <span className="chat-row-status" aria-label={[activeProcesses ? `${activeProcesses} local command${activeProcesses === 1 ? '' : 's'} running` : '', pendingAttention ? `${pendingAttention} request${pendingAttention === 1 ? '' : 's'} need input` : ''].filter(Boolean).join(', ')} title={[activeProcesses ? `${activeProcesses} running` : '', pendingAttention ? `${pendingAttention} need input` : ''].filter(Boolean).join(' · ')}>
+            {activeProcesses > 0 && <span className="chat-running-badge" aria-hidden="true">{activeProcesses}</span>}
+            {pendingAttention > 0 && <span className="chat-attention-badge" aria-hidden="true">{pendingAttention}</span>}
+          </span>}
           {chat.draft && <span className="chat-draft-dot" title="Unsent draft" />}
         </button>
       )}

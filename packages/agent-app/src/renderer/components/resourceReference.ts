@@ -4,7 +4,12 @@ export type ResourceReference={folderId:string;path:string;line?:number;absolute
 export function resourceReference(href:string,folders:Folder[],primaryId?:string,documentPath?:string):ResourceReference|null{
  let path:string;try{path=decodeURIComponent(href);}catch{return null;}
  if(/[\u0000-\u001f\u007f]/.test(path)||path.startsWith('//'))return null;
- const suffix=path.match(/(?::|#L)(\d+)(?::\d+|(?:-L?\d+))?$/);
+ // Keep familiar Markdown `file.md#section` links useful: opening the local
+ // artifact is preferable to rendering an inert unsupported link. Line
+ // fragments retain their exact source navigation behavior.
+ const namedFragment=path.indexOf('#');
+ if(namedFragment>=0&&!/^#L\d+(?::\d+|-L?\d+)?$/i.test(path.slice(namedFragment))) path=path.slice(0,namedFragment);
+ const suffix=path.match(/(?::|#L)(\d+)(?::\d+|(?:-L?\d+))?$/i);
  const line=suffix?Number(suffix[1]):undefined;if(suffix)path=path.slice(0,-suffix[0].length);
  if(path.includes('#')||path.includes('?')||/^[a-z][a-z0-9+.-]*:/i.test(path))return null;
  const absolute=path.startsWith('/');

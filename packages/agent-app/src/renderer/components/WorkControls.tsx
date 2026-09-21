@@ -5,6 +5,7 @@ import {getState,activeChat,openFilesTab,pickFolder,setResourcesHidden,updateCha
 import {useStore} from '../useStore';
 import './work-controls.css';
 import {WorkspaceOverview} from './WorkspaceOverview';
+import {PendingAttention} from './PendingAttention';
 
 /** Always reachable from the conversation, including with the resource pane hidden. */
 export function WorkControls(){
@@ -23,6 +24,7 @@ export function WorkControls(){
  },[open]);
  const browse=()=>{close();if(folder)openFilesTab(folder.id,folder.name);else void pickFolder();};
  return <div className="work-controls" ref={root} onBlur={e=>{if(!e.currentTarget.contains(e.relatedTarget as Node))setOpen(false);}}>
+  <PendingAttention/>
   <button ref={trigger} className="icon-button" aria-label="Conversation actions" title="Conversation actions" aria-expanded={open} onClick={()=>setOpen(value=>!value)}><MoreHorizontal size={17}/></button>
   <button className="icon-button" aria-label={!state.resourcesHidden?'Hide resource pane':'Show resource pane'} title={!state.resourcesHidden?'Hide resource pane':'Show resource pane'} aria-pressed={!state.resourcesHidden} onClick={()=>{transitionLayout(()=>setResourcesHidden(!getState().resourcesHidden));}}><PanelRight size={16}/></button>
   {<div hidden={!open} className="work-actions" data-native-preview-overlay role="group" aria-label="Conversation actions">

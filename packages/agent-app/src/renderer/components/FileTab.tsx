@@ -12,7 +12,7 @@ import {NativeDocument} from './NativeDocument';
 import {PdfFile} from './PdfFile';
 import {WorkbookFile} from './WorkbookFile';
 import {FileAnnotations} from './FileAnnotations';
-import {parseDelimited} from './filePresentation';
+import {friendlyFileError, parseDelimited} from './filePresentation';
 
 // Keep Markdown parsing bounded independently of the host's file-read limit.
 const MARKDOWN_LIMIT = 64 * 1024;
@@ -56,7 +56,8 @@ export function FileTab({tab}: {tab: WorkspaceTab}): React.ReactElement {
     return <div className="pane-loading">Loading {tab.path}…</div>;
   }
   if (body.phase === 'error') return <div className="pane-error">
-    <p>{body.error}</p>
+    <p role="alert">{friendlyFileError(body.error)}</p>
+    <p className="file-error-detail">The saved tab is still open; retry after the workspace is available.</p>
     <button type="button" onClick={() => void openFile(tab.folderId!, tab.path!, tab.line)}>Retry</button>
   </div>;
   const {text, truncated, asset, document, workbook} = body.value!;

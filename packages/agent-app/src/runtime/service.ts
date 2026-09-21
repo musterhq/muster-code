@@ -23,7 +23,7 @@ import {gitStatus, mutateGit} from './git-local.ts';
 import {createEntry, moveFile} from './file-operations.ts';
 import { createProviderAdapter, MODEL, ProviderPreDispatchError, type ProviderAdapter } from './provider.ts';
 import { discoverSkills } from './plugin-library.ts';
-import {providerAccessPolicy} from './provider-run-lifecycle.ts';
+import {admissionRetryDelayMs, MAX_ADMISSION_RETRIES, providerAccessPolicy, shouldRetryAdmission} from './provider-run-lifecycle.ts';
 import {reconcileProviderTurn, type ReconciliationInput, type ReconciliationResult} from './provider-reconciliation.ts';
 
 function object(value: unknown): Record<string, unknown> {
@@ -215,7 +215,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
           const current=store.chat(chatId);
           store.updateChat(chatId,{providerThreadId:threadId,providerThreadProviderId:chat.providerId??'hybrow',providerThreadBindingId:chat.providerBindingId??null,...(turnId ? {providerTurnId:turnId} : current?.providerThreadId !== threadId ? {providerTurnId:null} : {})}); state();
         };
-        const result = await provider.run({ chat: {...chat,providerTurnId:undefined,recovery:undefined}, cwd, prompt: contextualPrompt, onDelta: delta => append('assistant', delta), onReasoning: delta => append('reasoning', delta),
+        const providerInput: Parameters<ProviderAdapter['run']>[0] = { chat: {...chat,providerTurnId:undefined,recovery:undefined}, cwd, prompt: contextualPrompt, onDelta: delta => append('assistant', delta), onReasoning: delta => append('reasoning', delta),
           onThreadReady: threadId => persistIdentity(threadId),
           onTurnAccepted: identity => persistIdentity(identity.threadId,identity.turnId),
           onEvent(method, params) {
@@ -316,7 +316,25 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
             });
             return {decision: approved ? 'accept' : 'decline'};
           },
-        });
+        };
+        let result: Awaited<ReturnType<ProviderAdapter['run']>>;
+        let admissionAttempt = 0;
+        while (true) {
+          result = await provider.run(providerInput);
+          if (!shouldRetryAdmission(result) || admissionAttempt >= MAX_ADMISSION_RETRIES || run.stopped || closing || disposed) break;
+          admissionAttempt += 1;
+          const delay = admissionRetryDelayMs(admissionAttempt, result.failure?.retryAfterMs);
+          const retryItem = store.appendItem(chatId, 'notice', `Provider admission is unavailable. Retrying in ${Math.ceil(delay / 1000)}s (${admissionAttempt}/${MAX_ADMISSION_RETRIES})…`, 'retrying', { recovery: result.recovery, attempt: admissionAttempt, delayMs: delay });
+          timeline(chatId);
+          await new Promise<void>(resolve => setTimeout(resolve, delay));
+          if (run.stopped || closing || disposed) {
+            store.updateItem(retryItem.id, retryItem.text, 'interrupted', retryItem.data);
+            timeline(chatId);
+            break;
+          }
+          store.updateItem(retryItem.id, retryItem.text, 'completed', retryItem.data);
+          timeline(chatId);
+        }
         if (disposed) return;
         seal();
         if (!producedAssistant && result.finalMessage) store.appendItem(chatId, 'assistant', result.finalMessage, 'completed');

@@ -110,6 +110,23 @@ test('missing accepted turn cannot unlock; tagged predispatch rejection does not
   const checked=await service.invoke('chat.reconcile',{id:chat.id});assert.equal(checked.resolved,false);assert.match(checked.reason,/identity/);
 });
 
+test('service retries only confirmed pre-dispatch admission failures and exposes the retry activity',async t=>{
+  const dataDir=await directory(t), events:string[]=[]; let calls=0;
+  const provider:ProviderAdapter={info,run:async()=>{
+    calls++;
+    if(calls<3) return {status:'failed',finalMessage:'',dispatchState:'not-dispatched',errorMessage:'503 Chat admission capacity is temporarily unavailable.',failure:{kind:'rpc-rejected' as const,statusCode:503,retryAfterMs:100},recovery:{kind:'admission-rejected' as const,retryable:true,reason:'Provider admission is temporarily unavailable. No turn was dispatched; retry manually later.'}};
+    return {status:'completed',finalMessage:'recovered',dispatchState:'dispatched',threadId:'thread',turnId:'turn'};
+  },stop:async()=>true,dispose(){}};
+  const service=createAgentService({dataDir,provider,onEvent:event=>{if(event.type==='timelinePatch')events.push(event.patch.items.map(item=>item.text).join('\n'));}});t.after(()=>service.dispose());
+  const chat=await service.invoke('chat.create',{});
+  await service.invoke('chat.send',{id:chat.id,text:'retry this',requestId:'retry'});
+  await new Promise(resolve=>setTimeout(resolve,500));
+  const snapshot=await service.invoke('app.snapshot',undefined), result=snapshot.chats.find(item=>item.id===chat.id)!;
+  assert.equal(calls,3); assert.equal(result.status,'completed'); assert.equal(result.recovery,undefined);
+  assert.ok(events.some(text=>/Retrying in/.test(text)));
+  const store=new AgentStore(dataDir); assert.equal(store.timeline(chat.id).filter(item=>item.kind==='notice').length,2); assert.equal(store.timeline(chat.id).at(-1)?.text,'recovered'); store.close();
+});
+
 test('dispose waits for owned callbacks before closing DB and prevents fresh dispatch',async t=>{
   const dataDir=await directory(t),started=Promise.withResolvers<void>(),finish=Promise.withResolvers<ProviderResult>();
   let input:ProviderInput|undefined;

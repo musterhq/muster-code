@@ -6,15 +6,21 @@ import {activeChat,openFile,openBrowserTab} from '../store';
 import {invoke} from '../bridge';
 import {useStore} from '../useStore';
 import {resourceReference} from './resourceReference';
+import {markdownFragmentId} from './markdownAnchors';
 export type ResourceContext = { folderId: string; path: string };
 export function ResourceLink({href,children,context}:{href?:string;children?:React.ReactNode;context?:ResourceContext}){
  const state=useStore(),chat=activeChat();
  const project=state.snapshot?.projects.find(p=>p.id===chat?.projectId);
  const ids=project?.folderIds??(chat?.folderId?[chat.folderId]:[]);
  const folders=(state.snapshot?.folders??[]).filter(f=>context ? f.id===context.folderId : ids.includes(f.id));
+ const fragment=href?.startsWith('#') ? markdownFragmentId(href) : null;
+ if(fragment && context)return <a className="md-resource-link" href={`#${fragment}`} onClick={event=>{
+  event.preventDefault();
+  document.getElementById(fragment)?.scrollIntoView({block:'start',behavior:'smooth'});
+ }} title="Jump to this section">{children}</a>;
  const ref=href?resourceReference(href,folders,context?.folderId??chat?.folderId,context?.path):null;
  if(ref)return <FileReference key={`${ref.folderId}:${ref.path}:${ref.line??0}`} reference={ref}>{children}</FileReference>;
- if(href&&/^https?:/i.test(href))return <a href={href} title={href} onClick={e=>{e.preventDefault();openBrowserTab(href);}} rel="noreferrer noopener">{children}</a>;
+ if(href&&/^(https?|mailto):/i.test(href))return <a href={href} title={href} onClick={e=>{if(/^https?:/i.test(href)){e.preventDefault();openBrowserTab(href);}}} rel="noreferrer noopener">{children}</a>;
  return <span className="md-unavailable-link" title="This reference is outside the conversation’s folders or is unsupported.">{children}</span>;
 }
 

@@ -43,6 +43,10 @@
 .chat-menu-separator { height:1px; background:var(--hairline); margin:4px 5px; }
 .chat-sort-check { display:inline-flex; width:14px; }
 .chat-row[data-running] .chat-title { color:var(--text); }
+.chat-row-status { display:inline-flex; align-items:center; gap:3px; flex:0 0 auto; color:var(--text-dim); font-size:10px; font-variant-numeric:tabular-nums; }
+.chat-running-badge,.chat-attention-badge { display:inline-flex; align-items:center; justify-content:center; min-width:16px; height:16px; padding:0 4px; border-radius:5px; }
+.chat-running-badge { color:#9fc1df; background:#79a9d414; }
+.chat-attention-badge { color:#e8c98a; background:#d6a62d1f; }
 .chat-row-main:focus-visible,.chat-row-actions button:focus-visible { outline:1px solid var(--text-faint); outline-offset:2px; border-radius:4px; }
 .chat-row-actions:has([aria-expanded='true']) { display:flex; }
 .chat-rename-error { position:absolute; top:100%; left:8px; right:8px; z-index:1; padding:5px 7px; border:1px solid var(--hairline); border-radius:5px; background:var(--bg-raised); color:#dfab9d; font-size:11px; }
