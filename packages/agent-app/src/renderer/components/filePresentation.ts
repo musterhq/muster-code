@@ -5,7 +5,7 @@ export function filePresentation(path: string): FilePresentation {
   const extension = path.split('.').pop()?.toLowerCase();
   if (extension === 'xlsx') return 'workbook';
   if (['pdf','doc','docx','ppt','pptx','xls','odt','odp','ods'].includes(extension ?? '')) return 'document';
-  if (extension === 'md' || extension === 'markdown') return 'markdown';
+  if (extension === 'md' || extension === 'markdown' || extension === 'mdx') return 'markdown';
   if (extension === 'json' || extension === 'geojson') return 'json';
   if (extension === 'csv' || extension === 'tsv') return extension;
   if (['png','jpg','jpeg','gif','webp'].includes(extension ?? '')) return 'image';

@@ -6,6 +6,7 @@ import {ResourceLink, type ResourceContext} from './ResourceLink';
 import {MarkdownTable} from './MarkdownTable';
 import remarkGfm from 'remark-gfm';
 import { createIncrementalMarkdownPlugin } from '../markdown-incremental';
+import {markdownHeadingId} from './markdownAnchors';
 
 import './message-body.css';
 
@@ -92,20 +93,62 @@ function Pre({ children }: { children?: React.ReactNode }): React.ReactElement {
   return <pre>{children}</pre>;
 }
 
+function Heading({
+  level,
+  children,
+  node: _node,
+  id: providedId,
+  ...props
+}: {
+  level: 1 | 2 | 3 | 4 | 5 | 6;
+  children?: React.ReactNode;
+  node?: unknown;
+} & React.HTMLAttributes<HTMLHeadingElement>): React.ReactElement {
+  const tag = `h${level}` as keyof React.JSX.IntrinsicElements;
+  const id = providedId ?? markdownHeadingId(codeText(children));
+  return React.createElement(tag, {
+    ...props,
+    id,
+    tabIndex: -1,
+  }, children);
+}
+
 const components: Components = {
   pre: Pre,
   table: ({node: _node, ...props}) => <MarkdownTable {...props}/>,
   a: ({ children, href }) => <ResourceLink href={href}>{children}</ResourceLink>,
+  h1: ({node, children, ...props}) => <Heading level={1} node={node} {...props}>{children}</Heading>,
+  h2: ({node, children, ...props}) => <Heading level={2} node={node} {...props}>{children}</Heading>,
+  h3: ({node, children, ...props}) => <Heading level={3} node={node} {...props}>{children}</Heading>,
+  h4: ({node, children, ...props}) => <Heading level={4} node={node} {...props}>{children}</Heading>,
+  h5: ({node, children, ...props}) => <Heading level={5} node={node} {...props}>{children}</Heading>,
+  h6: ({node, children, ...props}) => <Heading level={6} node={node} {...props}>{children}</Heading>,
 };
 
 function MessageBodyContent({ text, resourceContext }: { text: string; resourceContext?: ResourceContext }): React.ReactElement {
   const remarkPlugins = React.useMemo(() => [remarkGfm, createIncrementalMarkdownPlugin()], []);
-  const renderers = React.useMemo<Components>(() => resourceContext ? {
-    ...components,
-    a: ({ children, href }) => <ResourceLink href={href} context={resourceContext}>{children}</ResourceLink>,
-    // Opening a local document must not trigger remote requests or arbitrary file reads.
-    img: ({alt}) => <span className="md-unavailable-link">[Image: {alt || 'image'} — preview unavailable]</span>,
-  } : components, [resourceContext?.folderId, resourceContext?.path]);
+  const renderers = React.useMemo<Components>(() => {
+    // ReactMarkdown renders duplicate headings in one pass. Keep fragment targets
+    // deterministic while avoiding collisions that would jump to the wrong section.
+    const headingCounts = new Map<string, number>();
+    const heading = (level: 1 | 2 | 3 | 4 | 5 | 6) => ({node, children, ...props}: any) => {
+      const base = markdownHeadingId(codeText(children));
+      const occurrence = headingCounts.get(base) ?? 0;
+      headingCounts.set(base, occurrence + 1);
+      const id = occurrence === 0 ? base : `${base}-${occurrence + 1}`;
+      return <Heading level={level} node={node} id={id} {...props}>{children}</Heading>;
+    };
+    return {
+      ...components,
+      h1: heading(1), h2: heading(2), h3: heading(3),
+      h4: heading(4), h5: heading(5), h6: heading(6),
+      ...(resourceContext ? {
+        a: ({ children, href }: any) => <ResourceLink href={href} context={resourceContext}>{children}</ResourceLink>,
+        // Opening a local document must not trigger remote requests or arbitrary file reads.
+        img: ({alt}: any) => <span className="md-unavailable-link">[Image: {alt || 'image'} — preview unavailable]</span>,
+      } : {}),
+    } as Components;
+  }, [text, resourceContext?.folderId, resourceContext?.path]);
   return (
     <div className="md-body">
       <ReactMarkdown
