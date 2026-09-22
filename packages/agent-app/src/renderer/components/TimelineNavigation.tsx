@@ -25,12 +25,13 @@ export const TimelineNavigation=memo(function TimelineNavigation({turns,currentI
     if(next!==undefined){event.preventDefault();focus(next);}
   };
   if(!turns.length&&!onSearch)return null;
-  return <nav className="turn-navigation" aria-label="Conversation turns" onKeyDown={event=>{if(event.key==='Escape'){setDismissed(true);setHovered(undefined);}}} onBlur={event=>{if(!event.currentTarget.contains(event.relatedTarget)){setFocused(undefined);setWindowFocus(undefined);}}} onMouseLeave={()=>setHovered(undefined)}>
+  return <>
     {onSearch&&searchOpen&&<div className="timeline-search">
       <label className="timeline-search-field"><Search size={13}/><input ref={searchInput} aria-label="Find in conversation" type="search" value={searchQuery??''} placeholder="Find" onChange={event=>onSearch(event.target.value)} onKeyDown={event=>{if(event.key==='Enter'){event.preventDefault();onSearchStep?.(event.shiftKey?-1:1);}if(event.key==='Escape'){event.preventDefault();onSearch('');setSearchOpen(false);}}}/></label>
       {!!searchQuery&&<><span className="timeline-search-count" aria-live="polite">{searchCount?`${(searchIndex??-1)+1} of ${searchCount}`:'No matches'}</span><button type="button" aria-label="Previous match" title="Previous match" disabled={!searchCount} onClick={()=>onSearchStep?.(-1)}><ChevronLeft size={13}/></button><button type="button" aria-label="Next match" title="Next match" disabled={!searchCount} onClick={()=>onSearchStep?.(1)}><ChevronRight size={13}/></button></>}
       <button type="button" aria-label="Close conversation search" title="Close search" onClick={()=>{onSearch('');setSearchOpen(false);}}><X size={12}/></button>
     </div>}
+    <nav className="turn-navigation" aria-label="Conversation turns" onKeyDown={event=>{if(event.key==='Escape'){setDismissed(true);setHovered(undefined);}}} onBlur={event=>{if(!event.currentTarget.contains(event.relatedTarget)){setFocused(undefined);setWindowFocus(undefined);}}} onMouseLeave={()=>setHovered(undefined)}>
     <div className="turn-rail">
       {start>0&&<button type="button" className="turn-page" aria-label="Earlier conversation turns" onClick={()=>focus(Math.max(0,start-1))}><ChevronUp size={12}/></button>}
       {turns.slice(start,end).map((turn,offset)=>{const turnIndex=start+offset;return <button type="button" key={turn.id} ref={node=>{if(node)buttons.current.set(turn.id,node);else buttons.current.delete(turn.id);}}
@@ -45,6 +46,7 @@ export const TimelineNavigation=memo(function TimelineNavigation({turns,currentI
       <button type="button" disabled={!canGoBack} onClick={onBack} aria-label="Back to previous reading position" title="Previous reading position"><Undo2 size={13}/></button>
       <button type="button" onClick={onLatest} aria-label="Go to latest conversation activity" title="Latest activity"><ArrowDown size={13}/></button>
     </div>
-    {preview&&<div id="turn-navigation-preview" role="tooltip" className="turn-preview" data-native-preview-overlay><div className="turn-preview-label">Turn {turns.indexOf(preview)+1} · loaded conversation</div><p className="turn-preview-user">{preview.prompt||'User message'}</p><p>{preview.response||'No assistant prose in this turn yet.'}</p><span>Click or press Enter to jump</span></div>}
-  </nav>;
+      {preview&&<div id="turn-navigation-preview" role="tooltip" className="turn-preview" data-native-preview-overlay><div className="turn-preview-label">Turn {turns.indexOf(preview)+1} · loaded conversation</div><p className="turn-preview-user">{preview.prompt||'User message'}</p><p>{preview.response||'No assistant prose in this turn yet.'}</p><span>Click or press Enter to jump</span></div>}
+    </nav>
+  </>;
 });
