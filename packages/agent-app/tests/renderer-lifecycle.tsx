@@ -73,23 +73,16 @@ store.closeTab(store.getState().activeTabId!);
 await store.openFile('folder','table.csv'); await delay(60);
 assert.match(document.querySelector('.workbook-grid')!.textContent!,/Alpha/);
 store.closeTab(store.getState().activeTabId!);
-// Spreadsheet reader is dependable by default; Quick Look is an explicit alternate.
+// Spreadsheet reader is dependable by default; blank native Quick Look is not offered for XLSX.
 await store.openFile('folder','preview-workbook.xlsx'); await delay(80);
 assert.match(document.querySelector('.workbook-grid')!.textContent!,/Alpha/);
 assert.equal(document.querySelector('[data-cell="0:0"]')?.getAttribute('tabindex'),'0','first non-empty cell is keyboard reachable on load');
 assert.match(document.querySelector('.workbook-formula')!.textContent!,/Name.*A1/,'A1 and its value are selected on load');
-const nativePreviewButton=Array.from(document.querySelectorAll<HTMLButtonElement>('.native-preview-toolbar button')).find(button=>button.textContent==='macOS Quick Look')!;
 const excelPreviewButton=Array.from(document.querySelectorAll<HTMLButtonElement>('.native-preview-toolbar button')).find(button=>button.textContent==='Excel preview')!;
 assert.equal(excelPreviewButton.getAttribute('aria-pressed'),'true','the full-sheet Excel renderer is the default');
-assert.equal(nativePreviewButton.getAttribute('aria-pressed'),'false','system preview is available but not forced as the renderer');
-nativePreviewButton.click(); await delay(30);
-assert.equal(nativePreviewButton.getAttribute('aria-pressed'),'true');
-assert.ok(nativePreviewCalls.some(call=>call.command==='files.nativeShow'&&call.input.folderId==='folder'&&call.input.path==='preview-workbook.xlsx'));
-const readerButton=Array.from(document.querySelectorAll<HTMLButtonElement>('.native-preview-toolbar button')).find(button=>button.textContent==='Excel preview')!;
-readerButton.click(); await delay(30);
-assert.ok(document.querySelector('.workbook-grid'),'returning from macOS preview restores the workbook reader');
+assert.equal(document.querySelector('.native-preview-toolbar button')?.textContent,'Excel preview','unsupported blank Quick Look is not presented as an XLSX preview');
+assert.equal(nativePreviewCalls.some(call=>call.command==='files.nativeShow'&&call.input.path==='preview-workbook.xlsx'),false,'opening a spreadsheet never covers its working in-app grid with an empty native surface');
 store.closeTab(store.getState().activeTabId!); await delay(20);
-assert.ok(nativePreviewCalls.some(call=>call.command==='files.nativeHide'),'closing the file releases its native preview surface');
 // Resource tabs are isolated by chat, project, and repository. Switching to
 // another conversation cannot leave an earlier workbook visible in the pane.
 await store.openFile('folder-a','preview-workbook.xlsx'); await delay(60);

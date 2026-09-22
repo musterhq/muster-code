@@ -53,7 +53,7 @@ export function NativeDocument({folderId,path,revision}:{folderId:string;path:st
   },[reader,folderId,path,revision]);
   const version=body?.document?.revision??body?.workbook?.revision;
   return <div className="native-document">
-    <div className="native-preview-toolbar"><div role="group" aria-label="Preview renderer"><button aria-pressed={!reader} onClick={()=>{setError('');setReader(false);}}>{workbookPreview?'macOS Quick Look':'macOS preview'}</button><button aria-pressed={reader} onClick={()=>setReader(true)}>{workbookPreview?'Excel preview':'Reader & annotations'}</button></div><span>Local · read only</span></div>
+    <div className="native-preview-toolbar"><div role="group" aria-label="Preview renderer">{!workbookPreview && <button aria-pressed={!reader} onClick={()=>{setError('');setReader(false);}}>macOS preview</button>}<button aria-pressed={reader} onClick={()=>setReader(true)}>{workbookPreview?'Excel preview':'Reader & annotations'}</button></div><span>Local · read only</span></div>
     {error && <div className="pane-error" role="alert"><p>{error}</p>{!reader && <button onClick={()=>setReader(true)}>Open in reader</button>}</div>}
     {!reader && !error ? <NativeSurface folderId={folderId} path={path} revision={revision} onError={setError}/> : reader && loading ? <div className="pane-loading">Preparing document…</div> : reader && body?.document ? <PdfFile document={body.document} onLocation={setLocation}/> : reader && body?.workbook ? <WorkbookFile workbook={body.workbook} onLocation={(value,selected)=>{setLocation(value);setQuote(selected??'');}}/> : null}
     {reader && version && <FileAnnotations folderId={folderId} path={path} revision={version} location={location} quote={quote}/>}
