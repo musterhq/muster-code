@@ -682,17 +682,22 @@ textarea:focus-visible {
 .discovery-bar p { margin: 0; flex: 1; color: var(--text-faint); font-size: 12px; }
 .provider-group { margin-top: 28px; }
 .settings-section-label { font-size: 12px; color: var(--text-faint); font-weight: 500; margin: 0 0 12px; }
+.provider-group-help { margin: -5px 0 12px; color: var(--text-faint); font-size: 11px; }
 .settings-provider { border: 1px solid var(--hairline); border-radius: 10px; background: var(--bg-raised); padding: 18px; margin-bottom: 10px; }
 .settings-provider-top { display: flex; align-items: center; gap: 12px; }
 .provider-symbol { display: grid; place-items: center; width: 36px; height: 36px; border: 1px solid var(--hairline); border-radius: 9px; color: var(--text-dim); }
 .provider-heading { flex: 1; min-width: 0; }
 .provider-heading h2 { font-size: 14px; font-weight: 550; margin: 0 0 2px; }
 .provider-source { color: var(--text-faint); font-size: 11px; overflow-wrap: anywhere; }
-.connection-status { font-size: 11px; color: var(--text-faint); }
+.connection-status { max-width: 210px; flex: none; text-align: right; font-size: 11px; line-height: 1.45; color: var(--text-faint); }
 .connection-status.is-ready { color: var(--ok); }
 .provider-detail { margin: 14px 0 0; color: var(--text-dim); font-size: 12px; line-height: 1.65; }
+.provider-catalog { display: grid; grid-template-columns: max-content 1fr; align-items: baseline; column-gap: 12px; row-gap: 2px; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--hairline); font-size: 11px; }
+.provider-catalog-label { color: var(--text-faint); }
+.provider-catalog-state { color: var(--text-dim); }
 .provider-model-toggle { display: inline-flex; align-items: center; gap: 5px; margin-top: 12px; font-size: 12px; color: var(--text-dim); }
 .settings-models { padding-left: 20px; font: 12px/1.8 var(--mono); color: var(--text-dim); max-height: 220px; overflow: auto; }
+.provider-repair { margin: 12px 0 0; color: var(--text-faint); font-size: 11px; line-height: 1.6; }
 .connection-address { font: 11px/1.6 var(--mono); color: var(--text-dim); overflow-wrap: anywhere; margin-top: 10px; user-select: text; }
 .provider-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 16px; font-size: 12px; }
 .settings-error { color: var(--danger); font-size: 12px; overflow-wrap: anywhere; }
@@ -705,6 +710,7 @@ textarea:focus-visible {
 .add-connection input { display: block; width: 100%; margin-top: 7px; padding: 9px 10px; border: 1px solid var(--hairline); border-radius: 6px; background: var(--bg); color: var(--text); font: inherit; }
 .add-connection input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .optional, .field-help { color: var(--text-faint); }
+@media (max-width: 640px) { .settings-provider-top { align-items: flex-start; } .connection-status { max-width: 130px; } .settings-title { align-items: flex-start; } .settings-title .settings-button { flex: none; } .provider-catalog { grid-template-columns: 1fr; gap: 3px; } }
 
 /* Reference-aligned chat hierarchy; expensive materials remain native-only. */
 .nav { padding-top: 48px; overflow: hidden; }
