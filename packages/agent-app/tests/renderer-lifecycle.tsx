@@ -177,8 +177,11 @@ assert.match(tableRoot.querySelector('[data-selected="true"]')!.textContent!,/ro
 tableReact.render(<WorkbookFile workbook={{...workbook,revision:'two',sheets:[{...workbook.sheets[0],rows:[['short','refresh']]}]}} onLocation={value=>{selection=value;}}/>);await delay(40);
 assert.match(tableRoot.querySelector('.workbook-pages')!.textContent!,/1–1 of 1 rows/);
 assert.match(tableRoot.querySelector('.workbook-grid')!.textContent!,/refresh/);
-assert.ok(tableRoot.querySelectorAll('.workbook-grid tbody tr[aria-hidden="true"]').length>0,'sheet surface fills the viewport with blank Excel rows after used data');
+assert.ok(tableRoot.querySelectorAll('.workbook-grid tbody tr').length>1,'sheet surface fills the viewport with addressable blank Excel rows after used data');
 assert.equal(tableRoot.querySelector('[data-selected="true"]')?.getAttribute('data-selected'),'true','refreshed sheet selects its first available cell');
+(tableRoot.querySelector('[data-cell="15:7"]') as HTMLButtonElement).click();await delay(20);
+assert.equal(tableRoot.querySelector('.workbook-grid td[data-selected="true"] button')?.getAttribute('aria-label'),'H16 (blank)','visible empty worksheet cells remain selectable and announce their address');
+assert.match(tableRoot.querySelector('.workbook-grid thead')!.textContent!,/H/,'worksheet column letters continue across the visible blank grid');
 (tableRoot.querySelector('[aria-label="Wrap cell text"]') as HTMLButtonElement).click();await delay(20);
 assert.equal(tableRoot.querySelector('.workbook-grid')!.getAttribute('data-wrap'),'true');
 tableReact.unmount();tableRoot.remove();

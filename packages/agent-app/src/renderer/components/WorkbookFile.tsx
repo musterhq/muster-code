@@ -70,11 +70,16 @@ export const WorkbookFile = React.memo(function WorkbookFile({workbook, onLocati
   const start = anchor ?? selected;
   const range = selected && start ? `${columnName(start.c)}${start.r + 1}${start.r === selected.r && start.c === selected.c ? '' : ':' + address}` : '';
   function choose(position: CellPosition, extend = false, focus = true) {
-    if (!sheet || !columns || !sheet.rows.length) return;
-    const next = {r: Math.max(0, Math.min(sheet.rows.length - 1, position.r)), c: Math.max(0, Math.min(columns - 1, position.c))};
+    if (!sheet) return;
+    const lastVisibleRow = currentPage * pageSize + displayRows - 1;
+    const lastVisibleColumn = displayColumns - 1;
+    const next = {
+      r: Math.max(0, Math.min(Math.max(sheet.rows.length - 1, lastVisibleRow), position.r)),
+      c: Math.max(0, Math.min(Math.max(columns - 1, lastVisibleColumn), position.c)),
+    };
     focusCell.current = focus;
     setSelected(next); if (!extend || !anchor) setAnchor(extend && selected ? selected : next);
-    setPage(Math.floor(next.r / pageSize)); setDestination(''); setError(''); setNotice('');
+    setPage(Math.min(lastPage, Math.floor(next.r / pageSize))); setDestination(''); setError(''); setNotice('');
     onLocation(`${sheet.name}!${columnName(next.c)}${next.r + 1}`, sheet.rows[next.r]?.[next.c] ?? '');
   }
   async function copy(all = false) {
@@ -121,19 +126,18 @@ export const WorkbookFile = React.memo(function WorkbookFile({workbook, onLocati
       }
       event.preventDefault(); choose(next, event.shiftKey && event.key !== 'Enter');
     }}>
-      <table aria-label={sheet.name} aria-rowcount={sheet.rows.length + 1} aria-colcount={columns + 1} style={{minWidth: (48 + displayColumns * 144) * zoom / 100}}>
+      <table aria-label={sheet.name} aria-rowcount={Math.max(sheet.rows.length + 1, currentPage * pageSize + displayRows + 1)} aria-colcount={displayColumns + 1} style={{minWidth: (48 + displayColumns * 144) * zoom / 100}}>
         <colgroup><col style={{width:48 * zoom / 100}}/>{Array.from({length:displayColumns},(_,c)=><col key={c} style={{width:144 * zoom / 100}}/>)}</colgroup>
-        <thead><tr><th aria-label="Row"/>{Array.from({length:displayColumns},(_,c)=><th key={c} scope="col" aria-hidden={c >= columns || undefined}>{c < columns ? columnName(c) : ''}</th>)}</tr></thead>
+        <thead><tr><th aria-label="Row"/>{Array.from({length:displayColumns},(_,c)=><th key={c} scope="col">{columnName(c)}</th>)}</tr></thead>
         <tbody>{Array.from({length:displayRows},(_,i)=>{
           const row=pageRows[i];
-          if (!row) return <tr key={`blank-${currentPage}-${i}`} aria-hidden="true"><th scope="row">&nbsp;</th>{Array.from({length:displayColumns},(_,c)=><td key={c}/>)}</tr>;
           const r=currentPage*pageSize+i;
           return <tr key={r} aria-rowindex={r+2}><th scope="row">{r+1}</th>{Array.from({length:displayColumns},(_,c)=>{
-            if (c >= columns) return <td key={c} aria-hidden="true"/>;
             const inRange=!!(selected && start && r>=Math.min(start.r,selected.r) && r<=Math.max(start.r,selected.r) && c>=Math.min(start.c,selected.c) && c<=Math.max(start.c,selected.c));
             const active=selected?.r===r && selected.c===c;
             const type=sheet.types?.[r]?.[c] ?? 'text';
-            return <td key={c} data-type={type} data-selected={active} data-in-range={inRange}><button data-cell={`${r}:${c}`} tabIndex={active || (!selected && i===0 && c===0) ? 0 : -1} title={row[c] ?? ''} aria-label={`${columnName(c)}${r+1} (${type}): ${row[c]??''}`} onFocus={()=>{if(!selected)choose({r,c},false,false);}} onClick={event=>choose({r,c},event.shiftKey)}>{row[c] || '\u00a0'}</button></td>;
+            const cell=row?.[c] ?? '';
+            return <td key={c} data-type={type} data-selected={active} data-in-range={inRange}><button data-cell={`${r}:${c}`} tabIndex={active || (!selected && i===0 && c===0) ? 0 : -1} title={cell} aria-label={`${columnName(c)}${r+1}${cell ? ` (${type}): ${cell}` : ' (blank)'}`} onFocus={()=>{if(!selected)choose({r,c},false,false);}} onClick={event=>choose({r,c},event.shiftKey)}>{cell || '\u00a0'}</button></td>;
           })}</tr>;
         })}</tbody></table>
     </div>
