@@ -16,6 +16,7 @@ import {
   loadGitChanges,
   openDiff,
   openFile,
+  updateBrowserTabUrl,
   type WorkspaceTab,
 } from '../store';
 import { useStore } from '../useStore';
@@ -107,7 +108,7 @@ function TabBody({ tab, visible }: { tab: WorkspaceTab; visible:boolean }): Reac
     case 'processes':
       return <ProcessesTab chatId={tab.chatId!} active={visible}/>;
     case 'browser':
-      return <BrowserTab owner={tab.id} profileId={tab.browserProfileId ?? 'personal'} initialUrl={tab.url} active={visible}/>;
+      return <BrowserTab owner={tab.id} profileId={tab.browserProfileId ?? 'personal'} initialUrl={tab.url} active={visible} onUrlChange={url=>updateBrowserTabUrl(tab.id,url)}/>;
     case 'files':
     case 'changes':
       return <FilesTab tab={tab} />;

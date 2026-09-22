@@ -1,9 +1,11 @@
 import type {ScopedComputerRef} from '../shared/scoped-computer-protocol';
+import {browserURL} from '../shared/browser-protocol';
 export interface SavedTab {
   id: string;
   kind: 'files' | 'changes' | 'file' | 'diff' | 'subagents' | 'browser' | 'computer' | 'processes';
   scope?:ScopedComputerRef;
   browserProfileId?: string;
+  url?: string;
   folderId?: string;
   path?: string;
   title: string;
@@ -35,7 +37,11 @@ export function readWorkspace(storage: Pick<Storage, 'getItem'>): SavedWorkspace
         continue;
       }
       if (t?.kind === 'browser') {
-        if (typeof t.id==='string' && /^browser:[a-zA-Z0-9_-]{1,128}$/.test(t.id) && typeof t.browserProfileId==='string' && /^[a-zA-Z0-9_-]{1,64}$/.test(t.browserProfileId) && !tabs.some(tab=>tab.id===t.id)) tabs.push({id:t.id,kind:'browser',browserProfileId:t.browserProfileId,title:'Browser'});
+        if (typeof t.id==='string' && /^browser:[a-zA-Z0-9_-]{1,128}$/.test(t.id) && typeof t.browserProfileId==='string' && /^[a-zA-Z0-9_-]{1,64}$/.test(t.browserProfileId) && !tabs.some(tab=>tab.id===t.id)) {
+          let url='about:blank';
+          try {if(t.url!==undefined)url=browserURL(t.url);} catch {}
+          tabs.push({id:t.id,kind:'browser',browserProfileId:t.browserProfileId,url,title:'Browser'});
+        }
         continue;
       }
       if (!t || !['files','changes','file','diff','subagents'].includes(t.kind)) continue;
@@ -54,7 +60,12 @@ export function readWorkspace(storage: Pick<Storage, 'getItem'>): SavedWorkspace
 
 export function saveWorkspace(storage: Pick<Storage, 'setItem'>, workspace: SavedWorkspace): boolean {
   try {
-    storage.setItem(KEY, JSON.stringify({version:1, tabs:workspace.tabs.slice(0,MAX_TABS).map(tab=>tab.kind==='browser'?{id:tab.id,kind:tab.kind,browserProfileId:tab.browserProfileId,title:'Browser'}:tab), activeTabId:workspace.activeTabId}));
+    storage.setItem(KEY, JSON.stringify({version:1, tabs:workspace.tabs.slice(0,MAX_TABS).map(tab=>{
+      if(tab.kind!=='browser')return tab;
+      let url='about:blank';
+      try {if(tab.url!==undefined)url=browserURL(tab.url);} catch {}
+      return {id:tab.id,kind:tab.kind,browserProfileId:tab.browserProfileId,url,title:'Browser'};
+    }), activeTabId:workspace.activeTabId}));
     return true;
   } catch { return false; }
 }

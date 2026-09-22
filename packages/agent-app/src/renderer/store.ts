@@ -601,6 +601,15 @@ export function openBrowserTab(url = 'about:blank'): void {
   openTab({id:`browser:${crypto.randomUUID()}`,kind:'browser',browserProfileId:'personal',url,title:'Browser'});
 }
 
+/** Persist only the latest validated main-frame URL for an existing browser tab. */
+export function updateBrowserTabUrl(id:string,value:string):void {
+  let url:string;
+  try {url=browserURL(value);} catch {return;}
+  const tab=state.tabs.find(candidate=>candidate.id===id);
+  if(!tab || tab.kind!=='browser' || tab.url===url)return;
+  set({tabs:state.tabs.map(candidate=>candidate.id===id?{...candidate,url}:candidate)});
+}
+
 export function openProvidersTab(): void {
   set({ screen: 'providers', revealed: {} });
   void loadProviders(true);
