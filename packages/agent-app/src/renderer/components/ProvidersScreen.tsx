@@ -3,6 +3,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import type { ProviderInfo } from '../../shared/protocol';
 import { invoke } from '../bridge';
 import { closeSettings, loadProviders, remaskProvider, revealProvider } from '../store';
+import { restoreFocus } from '../focus';
 import { useStoreSelector } from '../useStore';
 
 const statusLabel = (p: ProviderInfo) => p.available ? 'Ready for chats' : p.status === 'configured' ? 'Profile detected · unavailable for chats' : p.status === 'installed' ? 'Installed · sign-in not detected' : p.status === 'error' ? 'Needs attention' : p.status === 'not-detected' ? 'Not detected' : 'Unavailable';
@@ -56,10 +57,12 @@ function AddConnection({onClose,provider}:{onClose:()=>void;provider?:ProviderIn
 export function ProvidersScreen() {
   const providers = useStoreSelector(state=>state.providers);const [adding,setAdding]=useState(false);
   const back = useRef<HTMLButtonElement>(null);
-  useEffect(()=>{back.current?.focus();void loadProviders();},[]);
-  useEffect(()=>{const onKey=(e:KeyboardEvent)=>{if(e.key==='Escape'){e.preventDefault();if(adding)setAdding(false);else closeSettings();}};window.addEventListener('keydown',onKey);return()=>window.removeEventListener('keydown',onKey);},[adding]);
+  const launcher = useRef<Element|null>(null);
+  useEffect(()=>{launcher.current=document.activeElement;back.current?.focus();void loadProviders();},[]);
+  const leave=()=>{closeSettings();restoreFocus(launcher.current);};
+  useEffect(()=>{const onKey=(e:KeyboardEvent)=>{if(e.key==='Escape'){e.preventDefault();if(adding)setAdding(false);else leave();}};window.addEventListener('keydown',onKey);return()=>window.removeEventListener('keydown',onKey);},[adding]);
   const list=providers.value ?? [];const ready=list.filter(p=>p.available);const localProfiles=list.filter(p=>!p.custom&&!p.available&&p.status!=='not-detected');const custom=list.filter(p=>p.custom&&!p.available);const absent=list.filter(p=>!p.custom&&p.status==='not-detected');
-  return <section className="settings-screen" aria-label="Providers settings"><header className="settings-topbar"><button ref={back} className="settings-back" onClick={closeSettings}><ArrowLeft size={15}/>Back to work</button><span>Settings</span></header><div className="settings-scroll"><div className="settings-content"><div className="settings-title"><div><h1>Accounts &amp; providers</h1><p>Local sign-ins, provider profiles, and compatible model endpoints.</p></div><button className="settings-button" onClick={()=>setAdding(true)}><Plus size={14}/>Add provider</button></div>
+  return <section className="settings-screen" aria-label="Providers settings"><header className="settings-topbar"><button ref={back} className="settings-back" onClick={leave}><ArrowLeft size={15}/>Back to work</button><span>Settings</span></header><div className="settings-scroll"><div className="settings-content"><div className="settings-title"><div><h1>Accounts &amp; providers</h1><p>Local sign-ins, provider profiles, and compatible model endpoints.</p></div><button className="settings-button" onClick={()=>setAdding(true)}><Plus size={14}/>Add provider</button></div>
     <div className="discovery-bar"><p>Muster detects supported local sign-ins and configuration. A detected login does not verify a paid subscription or its remaining limits.</p><button className="settings-button secondary" disabled={providers.phase==='loading'} onClick={()=>void loadProviders(true)}><RefreshCw size={14}/>{providers.phase==='loading'?'Scanning…':'Scan again'}</button></div>
     {adding && <AddConnection onClose={()=>setAdding(false)}/>}
     {providers.phase==='error' && <p role="alert" className="settings-error">{providers.error}</p>}

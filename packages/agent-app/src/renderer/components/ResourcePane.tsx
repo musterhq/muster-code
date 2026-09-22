@@ -10,7 +10,7 @@ function initialWidth() {
   return Math.round(window.innerWidth / 3);
 }
 
-export function ResourcePane() {
+export function ResourcePane({suspended=false}:{suspended?:boolean}) {
   const {navWidth, navHidden, tabs, resourcesHidden} = useStore();
   const [width, setWidth] = useState(initialWidth);
   const [maximized, setMaximized] = useState(false);
@@ -27,13 +27,14 @@ export function ResourcePane() {
   };
   // Preserve a readable conversation at the native window's minimum size.
   // Resource references stay in the store while their surface is collapsed.
-  if (!resourcesHidden && viewport - (navHidden?0:navWidth) < 800 && !maximized) {
+  if (!suspended && !resourcesHidden && viewport - (navHidden?0:navWidth) < 800 && !maximized) {
     return <button className="icon-button resource-compact-open" aria-label={`Open resources (${tabs.length})`} onClick={toggleMaximized}>
       <Maximize2 size={14}/>
     </button>;
   }
-  return <aside className="workspace" aria-label="Resources" data-maximized={!resourcesHidden&&maximized} hidden={resourcesHidden}
-    style={{width:resourcesHidden?0:maximized ? `calc(100% - ${navHidden?0:navWidth}px)` : effectiveWidth,minWidth:resourcesHidden?0:280,maxWidth:'none',position:'relative'}}>
+  const hidden=resourcesHidden||suspended;
+  return <aside className="workspace" aria-label="Resources" aria-hidden={hidden} data-maximized={!hidden&&maximized} hidden={hidden}
+    style={{width:hidden?0:maximized ? `calc(100% - ${navHidden?0:navWidth}px)` : effectiveWidth,minWidth:hidden?0:280,maxWidth:'none',position:'relative'}}>
     {!maximized && <div className="resource-separator" role="separator" aria-label="Resize resources" aria-orientation="vertical" aria-valuemin={280} aria-valuemax={maxWidth} aria-valuenow={effectiveWidth} tabIndex={0}
       onPointerDown={e=>{drag.current={x:e.clientX,width:effectiveWidth};e.currentTarget.setPointerCapture(e.pointerId);}}
       onPointerMove={e=>{if(drag.current){const value=Math.min(maxWidth,Math.max(280,drag.current.width+drag.current.x-e.clientX));latest.current=value;setWidth(value);}}}
