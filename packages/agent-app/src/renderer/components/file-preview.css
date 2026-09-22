@@ -1,9 +1,10 @@
-.file-view { min-height: 0; min-width: 0; container-type: inline-size; }
-.file-head { display: flex; align-items: center; flex-shrink: 0; border-bottom: 1px solid var(--hairline); gap: 8px; }
+.file-view { min-height: 0; min-width: 0; container-type: inline-size; background: color-mix(in srgb, var(--bg) 94%, #080909); }
+.file-head { display: flex; align-items: center; flex-shrink: 0; border-bottom: 1px solid var(--hairline); gap: 8px; background: color-mix(in srgb, var(--bg) 82%, transparent); }
 .file-head .file-path { min-width: 0; flex: 1; }
 .file-view-switch { display: flex; gap: 2px; margin-right: 8px; }
-.file-view-switch button { display: inline-flex; align-items: center; gap: 5px; padding: 4px 7px; border-radius: 5px; font-size: 11px; color: var(--text-dim); transition: color 120ms, background-color 120ms; }
+.file-view-switch button { display: inline-flex; align-items: center; gap: 5px; padding: 4px 7px; border-radius: 5px; font-size: 11px; color: var(--text-dim); transition: color 160ms cubic-bezier(.2,.75,.25,1), background-color 160ms cubic-bezier(.2,.75,.25,1), transform 160ms cubic-bezier(.2,.75,.25,1); }
 .file-view-switch button:hover:not(:disabled), .file-view-switch button[aria-pressed='true'] { color: var(--text); background: var(--bg-hover); }
+.file-view-switch button:hover:not(:disabled) { transform: translateY(-1px); }
 .file-view-switch button:disabled { opacity: .45; cursor: default; }
 .file-markdown { overflow: auto; min-height: 0; padding: 24px 24px 40px; flex: 1; user-select: text; font-size: 14px; line-height: 1.6; }
 .file-markdown .md-body { max-width: 80ch; margin-inline: auto; }
@@ -13,19 +14,19 @@
 .file-markdown .md-body p { margin-block: 16px; }
 .file-markdown .md-body h2, .file-markdown .md-body h3 { margin-top: 28px; margin-bottom: 12px; }
 .file-content-layout { display: flex; flex: 1; min-width: 0; min-height: 0; position: relative; }
-.file-document { display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; }
+.file-document { display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; background: color-mix(in srgb, var(--bg) 96%, #080909); }
 .file-breadcrumbs { display: flex; align-items: center; gap: 5px; min-width: 0; flex: 1; padding: 8px 10px; overflow: auto; scrollbar-width: none; font-size: 12px; white-space: nowrap; color: var(--text-dim); }
 .file-breadcrumbs svg { flex-shrink: 0; }
 .file-breadcrumbs button:hover { color: var(--text); }
 .file-breadcrumbs [aria-current] { color: var(--text); }
 .file-tree-toggle { margin-right: 8px; flex-shrink: 0; }
-.file-navigator { width: 200px; max-width: 38%; flex-shrink: 0; overflow: auto; border-left: 1px solid var(--hairline); background: var(--bg); padding: 8px; }
+.file-navigator { width: 200px; max-width: 38%; flex-shrink: 0; overflow: auto; border-left: 1px solid var(--hairline); background: color-mix(in srgb, var(--bg-raised) 82%, var(--bg)); padding: 8px; }
 .file-navigator header { display: flex; align-items: center; gap: 6px; padding: 6px; font-size: 12px; }
 .file-navigator header button { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.file-navigator .tree-row[aria-current] { background: var(--bg-active); color: var(--text); }
+.file-navigator .tree-row[aria-current] { background: color-mix(in srgb, var(--accent) 17%, var(--bg-raised)); color: var(--text); box-shadow: inset 2px 0 color-mix(in srgb, var(--accent) 72%, white 8%); }
 .file-navigator-parent { text-align: left; padding: 6px; font-size: 11px; color: var(--text-dim); overflow-wrap: anywhere; }
 @container (max-width: 540px) {
-  .file-navigator { position: absolute; right: 0; top: 0; bottom: 0; width: 230px; max-width: 85%; z-index: 3; box-shadow: -8px 0 24px #0003; }
+  .file-navigator { position: absolute; right: 0; top: 0; bottom: 0; width: 230px; max-width: 85%; z-index: 3; box-shadow: -12px 0 30px #0005; }
   .file-head { flex-wrap: wrap; gap: 0; }
   .file-breadcrumbs { flex-basis: 100%; }
   .file-view-switch { margin-left: auto; margin-bottom: 5px; }
@@ -47,7 +48,7 @@
 .image-file-toolbar { display: flex; gap: 8px; align-items: center; justify-content: center; padding: 8px; border-bottom: 1px solid var(--hairline); font-size: 11px; color: var(--text-dim); }
 .image-file-toolbar button { border-radius: 4px; padding: 3px 5px; }
 .image-file-toolbar button[aria-pressed='true'] { background: var(--bg-active); color: var(--text); }
-.image-file-canvas { position: relative; flex: 1; min-height: 0; overflow: auto; padding: 16px; }
+.image-file-canvas { position: relative; flex: 1; min-height: 0; overflow: auto; padding: 20px; background: radial-gradient(ellipse at 50% 40%, color-mix(in srgb, var(--bg-raised) 82%, transparent), transparent 72%); }
 .image-file-canvas[data-fit='true'] { display: flex; align-items: center; justify-content: center; }
 .image-file-canvas img { display: block; flex-shrink: 0; }
 .image-file-canvas[data-fit='true'] img { max-width: 100%; max-height: 100%; object-fit: contain; }
@@ -61,11 +62,11 @@
 .tree-row > svg { flex-shrink:0; }
 .tree-row > span { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; min-width:0; }
 .pdf-file,.workbook-file {display:flex;flex-direction:column;min-height:0;flex:1;overflow:hidden;}
-.document-toolbar {display:flex;gap:8px;align-items:center;flex-wrap:wrap;flex-shrink:0;padding:8px;border-bottom:1px solid var(--hairline);font-size:11px;}
+.document-toolbar {display:flex;gap:8px;align-items:center;flex-wrap:wrap;flex-shrink:0;padding:9px 12px;border-bottom:1px solid var(--hairline);font-size:11px;background:color-mix(in srgb,var(--bg-raised) 76%,var(--bg));}
 .document-toolbar button,.document-toolbar select,.workbook-pages button {border:1px solid var(--hairline);border-radius:5px;padding:4px 6px;background:var(--bg);color:var(--text-dim);}
 .document-toolbar input {width:42px;color:var(--text);background:var(--bg);border:1px solid var(--hairline);border-radius:3px;padding:3px;}
-.pdf-scroll {position:relative;flex:1;min-height:0;overflow:auto;padding:16px;background:#161616;}
-.pdf-page {position:relative;width:max-content;margin:auto;background:white;box-shadow:0 2px 12px #0005;}
+.pdf-scroll {position:relative;flex:1;min-height:0;overflow:auto;padding:28px 24px 36px;background:radial-gradient(ellipse at 50% 0%,#252626 0%,#181919 58%,#151616 100%);scrollbar-gutter:stable;}
+.pdf-page {position:relative;width:max-content;margin:0 auto 24px;background:white;border-radius:2px;box-shadow:0 1px 2px #0008,0 14px 36px #0007,0 0 0 1px #ffffff12;}
 .pdf-page canvas {display:block;}
 .document-loading {position:sticky;top:0;z-index:2;background:var(--bg);padding:8px;font-size:12px;}
 .textLayer {position:absolute;inset:0;overflow:clip;opacity:1;line-height:1;text-size-adjust:none;forced-color-adjust:none;transform-origin:0 0;caret-color:CanvasText;z-index:1;}
@@ -78,7 +79,7 @@
 .pdf-password {padding:12px;display:flex;gap:8px;}
 .workbook-formula {display:flex;gap:10px;border-bottom:1px solid var(--hairline);padding:8px;min-height:34px;font-size:12px;}
 .workbook-formula code {flex:1;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;user-select:text;}
-.workbook-grid {flex:1;min-height:0;overflow:auto;}
+.workbook-grid {flex:1;min-height:0;overflow:auto;scrollbar-gutter:stable;}
 .workbook-grid table {border-collapse:separate;border-spacing:0;font-size:12px;table-layout:fixed;}
 .workbook-grid th {position:sticky;top:0;background:var(--bg);color:var(--text-dim);font-weight:400;z-index:1;}
 .workbook-grid tbody th {left:0;z-index:1;min-width:40px;}
@@ -86,7 +87,7 @@
 .workbook-grid td button {min-width:100px;max-width:280px;width:100%;text-align:left;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding:5px 8px;display:block;}
 .workbook-grid td[data-selected='true'] {box-shadow:inset 0 0 0 2px var(--accent);background:var(--bg-active);}
 .workbook-pages,.workbook-sheets {display:flex;gap:8px;align-items:center;padding:6px 10px;border-top:1px solid var(--hairline);font-size:11px;overflow:auto;flex-shrink:0;}
-.workbook-sheets button {white-space:nowrap;padding:6px 10px;border-radius:4px;}
+.workbook-sheets button {white-space:nowrap;padding:6px 10px;border-radius:4px;transition:background-color 150ms cubic-bezier(.2,.75,.25,1),color 150ms cubic-bezier(.2,.75,.25,1);}
 .workbook-sheets [aria-selected='true'] {background:var(--bg-active);color:var(--text);}
 .workbook-file > .file-format-note,.pdf-file > .file-format-note {padding:6px 10px;margin:0;}
 .file-annotations {border-top:1px solid var(--hairline);flex-shrink:0;font-size:12px;}
@@ -107,7 +108,7 @@
 
 /* The sheet owns its scroll surface; tools stay visible while navigating cells. */
 .workbook-toolbar {display:flex;align-items:center;gap:6px;padding:8px 10px;border-bottom:1px solid var(--hairline);flex-wrap:wrap;flex-shrink:0;font-size:12px;}
-.workbook-toolbar button,.workbook-formula button {display:inline-flex;align-items:center;justify-content:center;gap:5px;min-height:28px;padding:4px 7px;border-radius:5px;color:var(--text-dim);white-space:nowrap;}
+.workbook-toolbar button,.workbook-formula button {display:inline-flex;align-items:center;justify-content:center;gap:5px;min-height:28px;padding:4px 7px;border-radius:5px;color:var(--text-dim);white-space:nowrap;transition:background-color 150ms cubic-bezier(.2,.75,.25,1),color 150ms cubic-bezier(.2,.75,.25,1),transform 150ms cubic-bezier(.2,.75,.25,1);}
 .workbook-toolbar button:hover:not(:disabled),.workbook-formula button:hover {background:var(--bg-hover);color:var(--text);}
 .workbook-toolbar button[aria-pressed='true'] {background:var(--bg-active);color:var(--text);}
 .workbook-toolbar button:disabled {opacity:.4;}
@@ -137,6 +138,9 @@
 
 /* A familiar worksheet surface inside the dark application, not a chat table. */
 .office-sheet {--sheet-paper:#fff;--sheet-ink:#242424;--sheet-border:#dedede;--sheet-header:#f5f5f5;--sheet-green:#217346;--sheet-selection:#e6f1eb;background:var(--sheet-paper);color:var(--sheet-ink);color-scheme:light;}
+.file-document > .office-sheet {margin:14px 16px 0;border:1px solid #ffffff20;border-bottom:0;border-radius:8px 8px 0 0;box-shadow:0 10px 32px #0003;}
+.file-document > .office-sheet > .workbook-grid {overscroll-behavior:contain;}
+.file-document > .office-sheet > .file-format-note {border-radius:0 0 7px 7px;}
 .office-sheet .workbook-toolbar {background:#fafafa;border-color:var(--sheet-border);gap:4px;min-height:44px;padding-inline:12px;}
 .office-sheet .workbook-toolbar input {color:var(--sheet-ink);}
 .office-sheet .workbook-address,.office-sheet .workbook-find {background:#fff;border-color:#d0d0d0;border-radius:3px;}
@@ -177,9 +181,14 @@
 .office-sheet button:focus-visible,.office-sheet input:focus-visible,.office-sheet select:focus-visible {outline:2px solid var(--sheet-green);outline-offset:-2px;}
 
 .native-document{display:flex;flex:1;flex-direction:column;min-height:0;overflow:hidden;}
-.native-preview-surface{flex:1;min-height:0;background:var(--bg-primary,#171717);}
-.native-preview-toolbar{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;padding:7px 12px;border-bottom:1px solid var(--border,#303030);color:var(--text-secondary,#aaa);font-size:11px;}
+.native-preview-surface{flex:1;min-height:0;margin:14px;border:1px solid #ffffff12;border-radius:8px;background:radial-gradient(ellipse at 50% 0%,#252626 0%,#181919 58%,#151616 100%);}
+.native-preview-toolbar{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;padding:8px 12px;border-bottom:1px solid var(--border,#303030);color:var(--text-secondary,#aaa);font-size:11px;background:color-mix(in srgb,var(--bg-raised) 78%,var(--bg));}
 .native-preview-toolbar [role=group]{display:flex;gap:4px;}
 .native-preview-toolbar button{padding:5px 9px;border-radius:5px;color:inherit;}
 .native-preview-toolbar button[aria-pressed=true]{background:var(--bg-hover,#303030);color:var(--text-primary,#eee);}
+.native-preview-toolbar button,.document-toolbar button,.document-toolbar select,.workbook-pages button,.workbook-sheets button,.annotation-toggle,.file-tree-toggle {transition:background-color 160ms cubic-bezier(.2,.75,.25,1),color 160ms cubic-bezier(.2,.75,.25,1),border-color 160ms cubic-bezier(.2,.75,.25,1),transform 160ms cubic-bezier(.2,.75,.25,1);}
+.document-toolbar button:hover:not(:disabled),.native-preview-toolbar button:hover,.workbook-pages button:hover:not(:disabled),.workbook-sheets button:hover {transform:translateY(-1px);}
+.file-head button:focus-visible,.document-toolbar :is(button,select,input):focus-visible,.workbook-toolbar :is(button,input,select):focus-visible,.workbook-pages button:focus-visible,.workbook-sheets button:focus-visible,.annotation-toggle:focus-visible {outline:2px solid color-mix(in srgb,var(--accent) 72%,white 8%);outline-offset:2px;}
+.file-view-switch button:focus-visible {outline:2px solid color-mix(in srgb,var(--accent) 72%,white 8%);outline-offset:2px;}
+@media (prefers-reduced-motion:reduce) { .file-view-switch button,.workbook-toolbar button,.workbook-formula button,.workbook-sheets button,.native-preview-toolbar button,.document-toolbar button,.document-toolbar select,.workbook-pages button,.annotation-toggle,.file-tree-toggle { transition:none; transform:none; } }
 .file-error-detail{color:var(--text-faint);font-size:12px;}

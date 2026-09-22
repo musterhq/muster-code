@@ -15,3 +15,22 @@
 .diff-pagination button:disabled{opacity:.3}
 
 .diff-view .code-table{font-size:var(--diff-font-size,12px);user-select:text}
+.diff-view { background: color-mix(in srgb,var(--bg) 96%,#080909); }
+.diff-head { background: color-mix(in srgb,var(--bg) 82%,transparent); }
+.diff-controls { gap:6px; padding:8px 12px; border-bottom-color:var(--hairline); background:color-mix(in srgb,var(--bg-raised) 68%,var(--bg)); }
+.diff-controls select,.diff-toggle { min-height:27px; border:1px solid var(--hairline); border-radius:5px; background:color-mix(in srgb,var(--bg-raised) 75%,var(--bg)); color:var(--text-dim); transition:background-color 160ms cubic-bezier(.2,.75,.25,1),color 160ms cubic-bezier(.2,.75,.25,1),border-color 160ms cubic-bezier(.2,.75,.25,1),transform 160ms cubic-bezier(.2,.75,.25,1); }
+.diff-controls select:hover,.diff-toggle:hover { background:var(--bg-hover);color:var(--text);border-color:color-mix(in srgb,var(--hairline) 50%,var(--text-faint)); }
+.diff-toggle { color:var(--text-dim);padding-inline:8px; }
+.diff-view .code-scroll { background:color-mix(in srgb,var(--bg) 96%,#080909); scrollbar-gutter:stable; }
+.diff-view .code-table { line-height:1.65; }
+.diff-view .code-no { padding-block:1px; }
+.diff-view .code-line { padding-block:1px; }
+.diff-view .diff-add { background:color-mix(in srgb,var(--add-bg) 84%,var(--bg)); }
+.diff-view .diff-del { background:color-mix(in srgb,var(--del-bg) 84%,var(--bg)); }
+.diff-view .diff-fold button { padding-block:5px;color:var(--text-dim); }
+.diff-view .diff-fold button:hover { background:var(--bg-active); }
+.diff-view :is(button,select,input):focus-visible { outline:2px solid color-mix(in srgb,var(--accent) 72%,white 8%);outline-offset:2px; }
+.diff-pagination { background:color-mix(in srgb,var(--bg-raised) 68%,var(--bg));border-color:var(--hairline); }
+.diff-pagination button:not(:disabled):hover { background:var(--bg-hover);color:var(--text); }
+.diff-view button,.diff-view select { transition:background-color 160ms cubic-bezier(.2,.75,.25,1),color 160ms cubic-bezier(.2,.75,.25,1),border-color 160ms cubic-bezier(.2,.75,.25,1); }
+@media (prefers-reduced-motion:reduce) { .diff-view button,.diff-view select { transition:none; } }
