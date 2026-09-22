@@ -6,6 +6,7 @@ import type {
   FileEntry,
   ProviderInfo,
   SkillEntry,
+  PluginEntry,
   MemoryEntry,
   Snapshot,
   TimelineItem,
@@ -64,6 +65,8 @@ export interface AppState {
   activeTabId: string | null;
   providers: Loadable<ProviderInfo[]>;
   skills: Loadable<SkillEntry[]>;
+  plugins: Loadable<PluginEntry[]>;
+  pluginView: 'skills'|'plugins';
   /** Revealed provider identities; entries expire via remask timers in the view. */
   revealed: Record<string, string>;
   files: Record<string, Loadable<FileEntry[]>>;
@@ -103,6 +106,8 @@ let state: AppState = {
   activeTabId: savedWorkspace.activeTabId,
   providers: { phase: 'idle' },
   skills: { phase: 'idle' },
+  plugins: { phase: 'idle' },
+  pluginView: 'skills',
   revealed: {},
   files: {},
   fileBodies: {},
@@ -603,9 +608,14 @@ export function openProvidersTab(): void {
 export function openProjectsScreen(): void { set({ screen: 'projects', revealed: {} }); }
 export function closeSettings(): void { set({ screen: 'work', revealed: {} }); }
 
-export function openPluginsScreen(): void {
-  set({ screen: 'plugins', revealed: {} });
-  void loadSkills();
+export function openPluginsScreen(pluginView:'skills'|'plugins'='skills'): void {
+  set({ screen: 'plugins', pluginView, revealed: {} });
+  if(pluginView==='skills')void loadSkills(); else void loadPlugins();
+}
+
+export function setPluginView(pluginView:'skills'|'plugins'):void {
+  set({pluginView});
+  if(pluginView==='skills')void loadSkills(); else void loadPlugins();
 }
 
 export async function loadSkills(force = false): Promise<void> {
@@ -619,6 +629,14 @@ export async function loadSkills(force = false): Promise<void> {
   } catch (cause) {
     set({ skills: { phase: 'error', error: errorText(cause) } });
   }
+}
+
+export async function loadPlugins(force=false):Promise<void>{
+  if(state.plugins.phase==='loading')return;
+  if(!force&&state.plugins.phase==='ready')return;
+  set({plugins:{phase:'loading',value:state.plugins.value}});
+  try{set({plugins:{phase:'ready',value:await invoke('plugins.inventory',undefined)}});}
+  catch(cause){set({plugins:{phase:'error',error:errorText(cause)}});}
 }
 
 /** Scope is server-resolved: folderId comes from the active chat's folder, never a raw path. */

@@ -27,6 +27,8 @@ export interface GitLocalStatus {branch:string;detached:boolean;unborn:boolean;r
 export interface ProviderInfo { id: string; driver?: string; bindingId?: string; name: string; available: boolean; identityMasked: string; models: { id: string; name: string }[]; error?: string; status?: 'ready' | 'configured' | 'installed' | 'not-detected' | 'error'; source?: string; detail?: string; canReveal?: boolean; custom?: boolean; endpoint?: string; apiKeyEnv?: string; checkedAt?: string }
 /** Read-only local skill inventory. Skills are inspected, never installed or executed here. */
 export interface SkillEntry { id: string; name: string; provenance: string; path: string; readme: string | null; readError: string | null }
+/** Metadata-only installed plugin inventory. Executable config and secrets never cross into the renderer. */
+export interface PluginEntry { id:string; name:string; version:string; provenance:string; path:string; skills:string[]; mcpServers:Array<{name:string;transport:'local'|'remote'|'unknown'}>; apps:Array<{name:string;id:string;required:boolean;category?:string}>; readError:string|null }
 /** 'live' = from a provider event this session; 'restored' = loaded from SQLite after restart. */
 export type ContextSource = 'live' | 'restored';
 /** Context-window occupancy telemetry. Unknown values are null ("Unavailable"), never zero. */
@@ -91,6 +93,7 @@ export interface Commands extends BrowserCommands, ScopedComputerCommands, Proce
  'providers.reveal': { input: {id: string}; output: {identity: string} };
   'chat.contextTelemetry': { input: {id: string}; output: ContextTelemetry };
   'plugins.list': { input: { folderPaths?: string[] }; output: SkillEntry[] };
+  'plugins.inventory': { input: undefined; output: PluginEntry[] };
 }
 export interface AgentBridge {
  invoke<K extends keyof Commands>(command: K, input: Commands[K]['input']): Promise<Commands[K]['output']>;

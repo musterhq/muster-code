@@ -22,7 +22,7 @@ import { AgentModeReviewHost } from './review.ts';
 import {gitStatus, mutateGit} from './git-local.ts';
 import {createEntry, moveFile} from './file-operations.ts';
 import { createProviderAdapter, MODEL, ProviderPreDispatchError, type ProviderAdapter } from './provider.ts';
-import { discoverSkills } from './plugin-library.ts';
+import { discoverPlugins, discoverSkills } from './plugin-library.ts';
 import {providerAccessPolicy} from './provider-run-lifecycle.ts';
 import {reconcileProviderTurn, type ReconciliationInput, type ReconciliationResult} from './provider-reconciliation.ts';
 
@@ -357,6 +357,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
         ...detected.filter(entry=>!runtime.some(runnable=>runnable.id===entry.id)).map(({identity,credentialPresent,...entry})=>({...entry,available:false,models:[],canReveal:Boolean(identity),source:'Local configuration discovery',detail:`${entry.detail}. No runnable adapter is enabled for this entry.`})),
         ...customProviders.list()];
     }
+    if (command === 'plugins.inventory') return discoverPlugins();
     const p = object(input);
     switch (command) {
       case 'folder.add': { const path = await fs.realpath(text(p.path, 'folder path')); if (!(await fs.stat(path)).isDirectory()) throw new Error('Choose a folder.'); const result = store.addFolder(path, basename(path)); state(); return result; }

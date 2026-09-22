@@ -117,7 +117,7 @@ export function Composer({ chat }: { chat: Chat }): React.ReactElement {
   const commandsOpen = menu === 'commands' || typedCommands;
   const commands = filterComposerCommands(typedCommands ? slashQuery ?? '' : commandQuery);
   const choicesDisabled = running || sending || settingsChanging || modelChanging || recoveryNeeded;
-  const commandDisabled = (id:ComposerCommandId) => id==='plugins' || (id==='reference'?!folderId:['agent','ask','plan','access','model'].includes(id)&&choicesDisabled);
+  const commandDisabled = (id:ComposerCommandId) => id==='reference'?!folderId:['agent','ask','plan','access','model'].includes(id)&&choicesDisabled;
   const enabledCommands=commands.flatMap((command,index)=>commandDisabled(command.id)?[]:[index]);
   const requestedCommand=Math.min(commandIndex,Math.max(0,commands.length-1));
   const selectedCommand=enabledCommands.includes(requestedCommand)?requestedCommand:enabledCommands[0]??0;
@@ -348,7 +348,8 @@ export function Composer({ chat }: { chat: Chat }): React.ReactElement {
     consumeCommand(source);setMenu(null);setDismissedSlash(text);setModelOpen(false);setReferenceOpen(false);
     if(id==='reference'){setReferenceQuery('');setReferenceOpen(true);}
     else if(id==='browser')openBrowserTab();
-    else if(id==='skills')openPluginsScreen();
+    else if(id==='skills')openPluginsScreen('skills');
+    else if(id==='plugins')openPluginsScreen('plugins');
     else if(id==='providers')openProvidersTab();
     else if(id==='model')setModelOpen(true);
     else if(id==='access')setMenu('access');

@@ -76,6 +76,7 @@ const COMMANDS = {
   'providers.check': true,
   'providers.cancelCheck': true,
   'plugins.list': true,
+  'plugins.inventory': true,
   'memory.list': true,
   'memory.add': true,
   'memory.search': true,
