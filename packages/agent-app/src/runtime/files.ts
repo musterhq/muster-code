@@ -7,6 +7,11 @@ import { resolveInside } from './paths.ts';
 const MAX_ENTRIES = 2_000;
 const MAX_TEXT_BYTES = 512 * 1024;
 const MAX_TABLE_BYTES = 4 * 1024 * 1024;
+const OFFICE_EXTENSIONS = /\.(?:docx?|dotx?|xlsx?|xlsm|xlsb|pptx?|potx?|ppsx|od[tp])$/i;
+
+function isOfficeOwnerFile(name: string): boolean {
+  return name.startsWith('~$') && OFFICE_EXTENSIONS.test(name.slice(2));
+}
 
 function looksBinary(buffer: Buffer): boolean {
   const probe = buffer.subarray(0, 8_192);
@@ -21,6 +26,9 @@ export async function listFiles(root: string, rel: string): Promise<FileEntry[]>
   const entries: FileEntry[] = [];
   for await (const dirent of dirents) {
     if (dirent.name === '.git') continue;
+    // Office creates a small `~$...` lock/owner file while a workbook or
+    // document is open. It is implementation noise, not a user document.
+    if (isOfficeOwnerFile(dirent.name)) continue;
     if (!dirent.isFile() && !dirent.isDirectory() && !dirent.isSymbolicLink()) continue;
     let kind: FileEntry['kind'] = dirent.isDirectory() ? 'directory' : 'file';
     if (dirent.isSymbolicLink()) {
@@ -82,6 +90,7 @@ export async function searchFiles(root: string, rel: string, query: string): Pro
     for await (const entry of directory) {
       if (++inspected > 10_000) return {entries,truncated:true};
       if (entry.name === '.git') continue;
+      if (isOfficeOwnerFile(entry.name)) continue;
       // Do not walk symlinks: no cycles or unexpected traversal during search.
       if (entry.isSymbolicLink()) {partial = true; continue;}
       const child = join(path,entry.name);

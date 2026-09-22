@@ -8,8 +8,9 @@ export const WorkbookFile = React.memo(function WorkbookFile({workbook, onLocati
   workbook: WorkbookPreview; onLocation: (location: string, quote?: string) => void; delimited?: boolean;
 }) {
   const [sheetName, setSheetName] = useState(workbook.sheets[0]?.name ?? '');
-  const [selected, setSelected] = useState<CellPosition | null>(null);
-  const [anchor, setAnchor] = useState<CellPosition | null>(null);
+  const firstCell = workbook.sheets[0]?.rows[0]?.length ? {r:0,c:0} : null;
+  const [selected, setSelected] = useState<CellPosition | null>(()=>firstCell);
+  const [anchor, setAnchor] = useState<CellPosition | null>(()=>firstCell);
   const [page, setPage] = useState(0), [error, setError] = useState(''), [notice, setNotice] = useState('');
   const [zoom, setZoom] = useState(100), [gridlines, setGridlines] = useState(true);
   const [wrap, setWrap] = useState(false), [query, setQuery] = useState(''), [destination, setDestination] = useState('');
@@ -29,7 +30,9 @@ export const WorkbookFile = React.memo(function WorkbookFile({workbook, onLocati
   }, [sheet, query]);
   const activeMatch = matches.findIndex(p => p.r === selected?.r && p.c === selected?.c);
   useEffect(() => {
-    setSelected(null); setAnchor(null); setError(''); setNotice(''); setDestination('');
+    const activeSheet=workbook.sheets.find(s=>s.name===sheetName)??workbook.sheets[0];
+    const first=activeSheet?.rows[0]?.length?{r:0,c:0}:null;
+    setSelected(first); setAnchor(first); setError(''); setNotice(''); setDestination('');
     setPage(p => Math.min(p, lastPage));
   }, [workbook.revision, sheet?.name, lastPage]);
   useLayoutEffect(() => {
@@ -107,7 +110,7 @@ export const WorkbookFile = React.memo(function WorkbookFile({workbook, onLocati
         })}</tbody></table> : <div className="file-empty">This sheet is empty.</div>}
     </div>
     <div className="workbook-pages"><span>{sheet.rows.length ? `${currentPage*pageSize+1}–${Math.min((currentPage+1)*pageSize,sheet.rows.length)} of ${sheet.rows.length.toLocaleString()} rows · ${columns} columns` : 'Empty sheet'}</span><button aria-label="Previous rows" disabled={currentPage===0} onClick={()=>{setPage(currentPage-1);setSelected(null);setAnchor(null);onLocation(sheet.name);}}><ChevronLeft size={14}/></button><button aria-label="Next rows" disabled={currentPage===lastPage} onClick={()=>{setPage(currentPage+1);setSelected(null);setAnchor(null);onLocation(sheet.name);}}><ChevronRight size={14}/></button><span className="workbook-copy-status" role="status">{notice}</span><label className="workbook-zoom">Zoom<select aria-label="Sheet zoom" value={zoom} onChange={event => setZoom(Number(event.target.value))}>{[75,90,100,110,125,150,200].map(value => <option key={value} value={value}>{value}%</option>)}</select></label></div>
-    {<div className="workbook-sheets" role="tablist" aria-label="Worksheets">{workbook.sheets.map(s=><button key={s.name} role="tab" aria-selected={s.name===sheet.name} onKeyDown={event=>{if(event.key==='ArrowLeft'||event.key==='ArrowRight'){event.preventDefault();const buttons=Array.from(event.currentTarget.parentElement!.querySelectorAll<HTMLButtonElement>('button'));const next=buttons[(buttons.indexOf(event.currentTarget)+(event.key==='ArrowLeft'?-1:1)+buttons.length)%buttons.length];next.click();next.focus();}}} onClick={()=>{setSheetName(s.name);setSelected(null);setAnchor(null);setPage(0);setQuery('');onLocation(s.name);}}>{s.name}</button>)}</div>}
+    {<div className="workbook-sheets" role="tablist" aria-label="Worksheets">{workbook.sheets.map(s=><button key={s.name} role="tab" aria-selected={s.name===sheet.name} onKeyDown={event=>{if(event.key==='ArrowLeft'||event.key==='ArrowRight'){event.preventDefault();const buttons=Array.from(event.currentTarget.parentElement!.querySelectorAll<HTMLButtonElement>('button'));const next=buttons[(buttons.indexOf(event.currentTarget)+(event.key==='ArrowLeft'?-1:1)+buttons.length)%buttons.length];next.click();next.focus();}}} onClick={()=>{setSheetName(s.name);const first=s.rows[0]?.length?{r:0,c:0}:null;setSelected(first);setAnchor(first);setPage(0);setQuery('');onLocation(s.name);}}>{s.name}</button>)}</div>}
     <p className="file-format-note">{delimited ? 'Read-only table' : 'Read-only values · formulas are shown, never executed'}{workbook.limited && ' · Preview limit reached; additional data is not shown.'}</p>
     {error && <p className="workbook-error" role="alert">{error}</p>}
   </div>;

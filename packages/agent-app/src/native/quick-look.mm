@@ -84,17 +84,20 @@ static napi_value show(napi_env env, napi_callback_info info) {
         [g_preview setFrame:frame];
         g_url = url;
         g_preview.previewItem = url;
+        [g_preview refreshPreviewItem];
       } else {
         removePreview();
         g_host = host;
         g_url = url;
         g_preview = [[QLPreviewView alloc] initWithFrame:frame style:QLPreviewViewStyleNormal];
         if (!g_preview) { g_host = nil; g_url = nil; return fail(env, "Unable to create Quick Look preview."); }
+        g_preview.autostarts = YES;
         g_preview.autoresizingMask = NSViewNotSizable;
         g_preview.wantsLayer = YES;
         g_preview.layer.masksToBounds = YES;
         g_preview.previewItem = url;
         [host addSubview:g_preview positioned:NSWindowAbove relativeTo:nil];
+        [g_preview refreshPreviewItem];
       }
     }
   } @catch (NSException *exception) {
