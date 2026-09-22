@@ -3,6 +3,7 @@ import {normalizeCodeLanguage} from './codeLanguage';
 
 type Token = {content: string; color?: string};
 type WorkerResult = {rows: Token[][] | null};
+type HighlightedSnapshot = {sourceLines: string[]; rows: Token[][]};
 type Pending = {resolve: (result: WorkerResult) => void; reject: (error: Error) => void};
 
 let worker: Worker | undefined;
@@ -39,8 +40,8 @@ function requestHighlight(source: string, language: string): Promise<WorkerResul
 }
 
 /** Lazy worker rendering keeps TextMate initialization and tokenization off the UI thread. */
-export function useHighlightedTokens(source: string, language: string, delay = 220): Token[][] | null {
-  const [highlighted, setHighlighted] = useState<{language: string; rows: Token[][]} | null>(null);
+export function useHighlightedTokens(source: string, language: string, delay = 220): HighlightedSnapshot | null {
+  const [highlighted, setHighlighted] = useState<{language: string; sourceLines: string[]; rows: Token[][]} | null>(null);
   const normalizedLanguage = normalizeCodeLanguage(language);
   useEffect(() => {
     let active = true;
@@ -51,31 +52,30 @@ export function useHighlightedTokens(source: string, language: string, delay = 2
     const timer = window.setTimeout(() => {
       void requestHighlight(source, normalizedLanguage).then(result => {
         if (!active) return;
-        if (result.rows) setHighlighted({language: normalizedLanguage, rows: result.rows});
+        if (result.rows) setHighlighted({language: normalizedLanguage, sourceLines: source.split('\n'), rows: result.rows});
         else setHighlighted(null);
       }).catch(() => {if (active) setHighlighted(null);});
     }, delay);
     return () => {active = false; window.clearTimeout(timer);};
   }, [source, normalizedLanguage, delay]);
-  return highlighted?.language === normalizedLanguage ? highlighted.rows : null;
+  return highlighted?.language === normalizedLanguage ? highlighted : null;
 }
 
-export function HighlightedCode({source, language, className}: {source: string; language: string; className?: string}): React.ReactElement {
-  const rows = useHighlightedTokens(source, language);
-  if (!rows) return <code className={className}>{source}</code>;
+export const HighlightedCode = React.memo(function HighlightedCode({source, language, className}: {source: string; language: string; className?: string}): React.ReactElement {
+  const highlighted = useHighlightedTokens(source, language);
+  if (!highlighted) return <code className={className}>{source}</code>;
   const lines = source.split('\n');
-  const lineCount = Math.max(lines.length, rows.length);
-  return <code className={className}>{Array.from({length: lineCount}, (_, index) => <React.Fragment key={index}>{index > 0 && '\n'}{(rows[index] ?? [{content: lines[index] ?? ''}]).map((token, tokenIndex) => token.color
+  return <code className={className}>{lines.map((line, index) => <React.Fragment key={index}>{index > 0 && '\n'}{((highlighted.sourceLines[index]===line ? highlighted.rows[index] : undefined) ?? [{content: line}]).map((token, tokenIndex) => token.color
     ? <span key={tokenIndex} style={{color: token.color}}>{token.content}</span>
     : <React.Fragment key={tokenIndex}>{token.content}</React.Fragment>)}</React.Fragment>)}</code>;
-}
+});
 
 export function HighlightedSourceTable({source, language, targetLine}: {source: string; language: string; targetLine?: number}): React.ReactElement {
-  const rows = useHighlightedTokens(source, language, 0);
+  const highlighted = useHighlightedTokens(source, language, 0);
   const lines = source === '' ? [] : source.split('\n');
   return <table className="code-table source-code-table"><tbody>{lines.map((line, index) => <tr key={index} data-line={index + 1} className={index + 1 === targetLine ? 'file-line-target' : undefined}>
     <td className="code-no">{index + 1}</td>
-    <td className="code-line">{(rows?.[index] ?? [{content: line}]).map((token, tokenIndex) => token.color
+    <td className="code-line">{((highlighted?.sourceLines[index]===line ? highlighted.rows[index] : undefined) ?? [{content: line}]).map((token, tokenIndex) => token.color
       ? <span key={tokenIndex} style={{color: token.color}}>{token.content}</span>
       : <React.Fragment key={tokenIndex}>{token.content}</React.Fragment>)}</td>
   </tr>)}</tbody></table>;
