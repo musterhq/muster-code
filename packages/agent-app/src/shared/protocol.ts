@@ -41,8 +41,8 @@ export interface Commands extends BrowserCommands, ScopedComputerCommands, Proce
  'memory.inspect': { input: {folderId?: string}; output: {available: boolean; objectCount: number; checks: Array<{label: string; status: string; detail: string}>; error?: string} };
  'hindsight.status': {input: {folderId?: string}; output: HindsightStatus};
  'hindsight.retain': {input: {folderId?: string; content: string; source: string}; output: {bankId: string; success: boolean; itemsCount: number; isAsync: boolean; operationId?: string}};
- 'hindsight.recall': {input: {folderId?: string; query: string}; output: {bankId: string; results: readonly {id?: string; text: string; type?: string; score?: number}[]}};
- 'hindsight.reflect': {input: {folderId?: string; query: string}; output: {bankId: string; text: string}};
+ 'hindsight.recall': {input: {folderId?: string; query: string; budget?: 'low' | 'mid' | 'high'; maxTokens?: number; types?: Array<'world' | 'experience' | 'observation'>; tags?: string[]}; output: {bankId: string; results: readonly {id?: string; text: string; type?: string; score?: number}[]}};
+ 'hindsight.reflect': {input: {folderId?: string; query: string; context?: string; budget?: 'low' | 'mid' | 'high'; maxTokens?: number}; output: {bankId: string; text: string}};
  'clipboard.write': {input:{text:string};output:void};
  'link.open': {input:{url:string};output:void};
  'app.snapshot': { input: undefined; output: Snapshot };

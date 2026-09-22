@@ -510,8 +510,8 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
       case 'memory.inspect': { const context = memoryContext(p.folderId); try { const r = await inspectMemoryStore(context.cwd); return {available:true,objectCount:r.jsonl.objectCount,checks:r.checks}; } catch(e) { return {available:false,objectCount:0,checks:[],error:e instanceof Error?e.message:String(e)}; } }
       case 'hindsight.status': return hindsightClient().status(p.folderId === undefined ? 'personal' : id(p.folderId));
       case 'hindsight.retain': return hindsightClient().retain({folderId: p.folderId === undefined ? 'personal' : id(p.folderId), items: [{content: text(p.content, 'content', 32768)}], provenance: [text(p.source, 'source', 512)], async: false});
-      case 'hindsight.recall': return hindsightClient().recall({folderId: p.folderId === undefined ? 'personal' : id(p.folderId), query: text(p.query, 'query', 8192), budget: 'low', maxTokens: 2048});
-      case 'hindsight.reflect': return hindsightClient().reflect({folderId: p.folderId === undefined ? 'personal' : id(p.folderId), query: text(p.query, 'query', 8192), budget: 'low', maxTokens: 2048});
+      case 'hindsight.recall': return hindsightClient().recall({folderId: p.folderId === undefined ? 'personal' : id(p.folderId), query: text(p.query, 'query', 8192), budget: p.budget as 'low'|'mid'|'high'|undefined ?? 'low', maxTokens: typeof p.maxTokens === 'number' ? p.maxTokens : 2048, types: p.types as ('world'|'experience'|'observation')[]|undefined, tags: p.tags as string[]|undefined});
+      case 'hindsight.reflect': return hindsightClient().reflect({folderId: p.folderId === undefined ? 'personal' : id(p.folderId), query: text(p.query, 'query', 8192), context: p.context === undefined ? undefined : text(p.context, 'context', 32768), budget: p.budget as 'low'|'mid'|'high'|undefined ?? 'low', maxTokens: typeof p.maxTokens === 'number' ? p.maxTokens : 2048});
       case 'plugins.list': {
         const allowedFolders = new Set(store.snapshot().folders.map(folder => folder.path));
         const folderPaths = Array.isArray(p.folderPaths)

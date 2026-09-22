@@ -10,6 +10,14 @@
 .hindsight-status[data-connection=verified] { color:#8dc3a1; }
 .hindsight-status[data-connection=failed] { color:#d5ad83; }
 .hindsight-modes { display:flex; gap:4px; margin:14px 0; }
+.hindsight-detail { display:flex; justify-content:flex-end; gap:6px; margin:-8px 0 14px; }
+.hindsight-detail button { border:1px solid var(--border,#333); border-radius:7px; padding:5px 9px; background:transparent; color:var(--text-muted,#999); cursor:pointer; }
+.hindsight-detail button[aria-pressed=true] { color:var(--text,#ddd); border-color:var(--focus,#8ca6c7); }
+.hindsight-advanced { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; padding:12px; border:1px solid var(--border,#333); border-radius:8px; }
+.hindsight-advanced select { background:var(--input-bg,#202020); color:inherit; border:1px solid var(--border,#333); border-radius:7px; padding:8px; font:inherit; }
+.hindsight-advanced fieldset { grid-column:1/-1; display:flex; gap:14px; border:1px solid var(--border,#333); border-radius:7px; }
+.hindsight-advanced fieldset label { display:flex; align-items:center; gap:5px; }
+.hindsight-advanced input[type=checkbox] { width:auto; }
 .hindsight-modes button { border:0; background:transparent; color:var(--text-muted, #999); border-radius:7px; padding:7px 12px; cursor:pointer; transition:background-color 120ms ease,color 120ms ease; }
 .hindsight-modes button[aria-pressed=true] { background:#ffffff0c; color:var(--text, #ddd); }
 .hindsight-modes button:hover:not(:disabled) { background:#ffffff09; }
