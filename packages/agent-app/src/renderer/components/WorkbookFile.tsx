@@ -15,12 +15,34 @@ export const WorkbookFile = React.memo(function WorkbookFile({workbook, onLocati
   const [zoom, setZoom] = useState(100), [gridlines, setGridlines] = useState(true);
   const [wrap, setWrap] = useState(false), [query, setQuery] = useState(''), [destination, setDestination] = useState('');
   const grid = useRef<HTMLDivElement>(null), focusCell = useRef(false);
+  const [viewport, setViewport] = useState({rows: 16, columns: 8});
   const sheet = workbook.sheets.find(s => s.name === sheetName) ?? workbook.sheets[0];
   const columns = useMemo(() => sheet?.rows.reduce((n, row) => Math.max(n, row.length), 0) ?? 0, [sheet]);
   // Cap rendered cells, not just rows: wide workbooks stay responsive.
   const pageSize = Math.min(100, Math.max(1, Math.floor(2000 / Math.max(1, columns))));
   const lastPage = Math.max(0, Math.ceil((sheet?.rows.length ?? 0) / pageSize) - 1);
   const currentPage = Math.min(page, lastPage);
+  useEffect(() => {
+    const element = grid.current;
+    if (!element) return;
+    const measure = () => {
+      const width = Number(element.clientWidth) || 0, height = Number(element.clientHeight) || 0;
+      // DOM test hosts (and hidden tabs) can report zero size. Keep the
+      // conservative first-paint grid until the pane has real dimensions.
+      if (width < 1 || height < 1) return;
+      const scale = zoom / 100;
+      const next = {
+        rows: Math.max(1, Math.ceil(Math.max(0, height - 30 * scale) / (32 * scale)) + 1),
+        columns: Math.max(1, Math.ceil(Math.max(0, width - 48 * scale) / (144 * scale)) + 1),
+      };
+      setViewport(previous => previous.rows === next.rows && previous.columns === next.columns ? previous : next);
+    };
+    measure();
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [zoom, workbook.revision, sheet?.name]);
   const matches = useMemo(() => {
     const result: CellPosition[] = [], needle = query.trim().toLocaleLowerCase();
     if (needle && sheet) sheet.rows.forEach((row, r) => row.forEach((value, c) => {
@@ -67,6 +89,9 @@ export const WorkbookFile = React.memo(function WorkbookFile({workbook, onLocati
     const index = activeMatch < 0 ? (direction > 0 ? 0 : matches.length - 1) : (activeMatch + direction + matches.length) % matches.length;
     choose(matches[index], false, false);
   }
+  const displayColumns = Math.max(columns, viewport.columns);
+  const pageRows = sheet?.rows.slice(currentPage * pageSize, (currentPage + 1) * pageSize) ?? [];
+  const displayRows = Math.max(pageRows.length, viewport.rows);
   return <div className="workbook-file office-sheet" style={{'--sheet-scale':zoom/100} as React.CSSProperties}>
     <div className="workbook-toolbar" role="toolbar" aria-label="Spreadsheet tools">
       <form className="workbook-address" onSubmit={event => {
@@ -96,18 +121,21 @@ export const WorkbookFile = React.memo(function WorkbookFile({workbook, onLocati
       }
       event.preventDefault(); choose(next, event.shiftKey && event.key !== 'Enter');
     }}>
-      {sheet.rows.length && columns ? <table aria-label={sheet.name} aria-rowcount={sheet.rows.length + 1} aria-colcount={columns + 1} style={{minWidth: (48 + columns * 144) * zoom / 100}}>
-        <colgroup><col style={{width:48 * zoom / 100}}/>{Array.from({length:columns},(_,c)=><col key={c} style={{width:144 * zoom / 100}}/>)}</colgroup>
-        <thead><tr><th aria-label="Row"/>{Array.from({length:columns},(_,c)=><th key={c} scope="col">{columnName(c)}</th>)}</tr></thead>
-        <tbody>{sheet.rows.slice(currentPage*pageSize,(currentPage+1)*pageSize).map((row,i)=>{
+      <table aria-label={sheet.name} aria-rowcount={sheet.rows.length + 1} aria-colcount={columns + 1} style={{minWidth: (48 + displayColumns * 144) * zoom / 100}}>
+        <colgroup><col style={{width:48 * zoom / 100}}/>{Array.from({length:displayColumns},(_,c)=><col key={c} style={{width:144 * zoom / 100}}/>)}</colgroup>
+        <thead><tr><th aria-label="Row"/>{Array.from({length:displayColumns},(_,c)=><th key={c} scope="col" aria-hidden={c >= columns || undefined}>{c < columns ? columnName(c) : ''}</th>)}</tr></thead>
+        <tbody>{Array.from({length:displayRows},(_,i)=>{
+          const row=pageRows[i];
+          if (!row) return <tr key={`blank-${currentPage}-${i}`} aria-hidden="true"><th scope="row">&nbsp;</th>{Array.from({length:displayColumns},(_,c)=><td key={c}/>)}</tr>;
           const r=currentPage*pageSize+i;
-          return <tr key={r} aria-rowindex={r+2}><th scope="row">{r+1}</th>{Array.from({length:columns},(_,c)=>{
+          return <tr key={r} aria-rowindex={r+2}><th scope="row">{r+1}</th>{Array.from({length:displayColumns},(_,c)=>{
+            if (c >= columns) return <td key={c} aria-hidden="true"/>;
             const inRange=!!(selected && start && r>=Math.min(start.r,selected.r) && r<=Math.max(start.r,selected.r) && c>=Math.min(start.c,selected.c) && c<=Math.max(start.c,selected.c));
             const active=selected?.r===r && selected.c===c;
             const type=sheet.types?.[r]?.[c] ?? 'text';
             return <td key={c} data-type={type} data-selected={active} data-in-range={inRange}><button data-cell={`${r}:${c}`} tabIndex={active || (!selected && i===0 && c===0) ? 0 : -1} title={row[c] ?? ''} aria-label={`${columnName(c)}${r+1} (${type}): ${row[c]??''}`} onFocus={()=>{if(!selected)choose({r,c},false,false);}} onClick={event=>choose({r,c},event.shiftKey)}>{row[c] || '\u00a0'}</button></td>;
           })}</tr>;
-        })}</tbody></table> : <div className="file-empty">This sheet is empty.</div>}
+        })}</tbody></table>
     </div>
     <div className="workbook-pages"><span>{sheet.rows.length ? `${currentPage*pageSize+1}–${Math.min((currentPage+1)*pageSize,sheet.rows.length)} of ${sheet.rows.length.toLocaleString()} rows · ${columns} columns` : 'Empty sheet'}</span><button aria-label="Previous rows" disabled={currentPage===0} onClick={()=>{setPage(currentPage-1);setSelected(null);setAnchor(null);onLocation(sheet.name);}}><ChevronLeft size={14}/></button><button aria-label="Next rows" disabled={currentPage===lastPage} onClick={()=>{setPage(currentPage+1);setSelected(null);setAnchor(null);onLocation(sheet.name);}}><ChevronRight size={14}/></button><span className="workbook-copy-status" role="status">{notice}</span><label className="workbook-zoom">Zoom<select aria-label="Sheet zoom" value={zoom} onChange={event => setZoom(Number(event.target.value))}>{[75,90,100,110,125,150,200].map(value => <option key={value} value={value}>{value}%</option>)}</select></label></div>
     {<div className="workbook-sheets" role="tablist" aria-label="Worksheets">{workbook.sheets.map(s=><button key={s.name} role="tab" aria-selected={s.name===sheet.name} onKeyDown={event=>{if(event.key==='ArrowLeft'||event.key==='ArrowRight'){event.preventDefault();const buttons=Array.from(event.currentTarget.parentElement!.querySelectorAll<HTMLButtonElement>('button'));const next=buttons[(buttons.indexOf(event.currentTarget)+(event.key==='ArrowLeft'?-1:1)+buttons.length)%buttons.length];next.click();next.focus();}}} onClick={()=>{setSheetName(s.name);const first=s.rows[0]?.length?{r:0,c:0}:null;setSelected(first);setAnchor(first);setPage(0);setQuery('');onLocation(s.name);}}>{s.name}</button>)}</div>}
