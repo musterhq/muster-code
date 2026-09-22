@@ -9,6 +9,8 @@ export const TimelineNavigation=memo(function TimelineNavigation({turns,currentI
   searchQuery?:string;onSearch?:(query:string)=>void;searchCount?:number;searchIndex?:number;onSearchStep?:(direction:1|-1)=>void;
 }){
   const [focused,setFocused]=useState<string>(),[hovered,setHovered]=useState<string>(),[dismissed,setDismissed]=useState(false);
+  const [searchOpen,setSearchOpen]=useState(Boolean(searchQuery));
+  const searchInput=useRef<HTMLInputElement>(null);
   const [windowFocus,setWindowFocus]=useState<string>();
   const buttons=useRef(new Map<string,HTMLButtonElement>()),focusNext=useRef<string|undefined>(undefined);
   const currentIndex=Math.max(0,turns.findIndex(turn=>turn.id===currentId));
@@ -24,9 +26,10 @@ export const TimelineNavigation=memo(function TimelineNavigation({turns,currentI
   };
   if(!turns.length&&!onSearch)return null;
   return <nav className="turn-navigation" aria-label="Conversation turns" onKeyDown={event=>{if(event.key==='Escape'){setDismissed(true);setHovered(undefined);}}} onBlur={event=>{if(!event.currentTarget.contains(event.relatedTarget)){setFocused(undefined);setWindowFocus(undefined);}}} onMouseLeave={()=>setHovered(undefined)}>
-    {onSearch&&<div className="timeline-search">
-      <label className="timeline-search-field"><Search size={13}/><input aria-label="Find in conversation" type="search" value={searchQuery??''} placeholder="Find" onChange={event=>onSearch(event.target.value)} onKeyDown={event=>{if(event.key==='Enter'){event.preventDefault();onSearchStep?.(event.shiftKey?-1:1);}if(event.key==='Escape'){event.preventDefault();onSearch('');event.currentTarget.blur();}}}/></label>
-      {!!searchQuery&&<><span className="timeline-search-count" aria-live="polite">{searchCount?`${(searchIndex??-1)+1} of ${searchCount}`:'No matches'}</span><button type="button" aria-label="Previous match" title="Previous match" disabled={!searchCount} onClick={()=>onSearchStep?.(-1)}><ChevronLeft size={13}/></button><button type="button" aria-label="Next match" title="Next match" disabled={!searchCount} onClick={()=>onSearchStep?.(1)}><ChevronRight size={13}/></button><button type="button" aria-label="Clear search" title="Clear search" onClick={()=>onSearch('')}><X size={12}/></button></>}
+    {onSearch&&searchOpen&&<div className="timeline-search">
+      <label className="timeline-search-field"><Search size={13}/><input ref={searchInput} aria-label="Find in conversation" type="search" value={searchQuery??''} placeholder="Find" onChange={event=>onSearch(event.target.value)} onKeyDown={event=>{if(event.key==='Enter'){event.preventDefault();onSearchStep?.(event.shiftKey?-1:1);}if(event.key==='Escape'){event.preventDefault();onSearch('');setSearchOpen(false);}}}/></label>
+      {!!searchQuery&&<><span className="timeline-search-count" aria-live="polite">{searchCount?`${(searchIndex??-1)+1} of ${searchCount}`:'No matches'}</span><button type="button" aria-label="Previous match" title="Previous match" disabled={!searchCount} onClick={()=>onSearchStep?.(-1)}><ChevronLeft size={13}/></button><button type="button" aria-label="Next match" title="Next match" disabled={!searchCount} onClick={()=>onSearchStep?.(1)}><ChevronRight size={13}/></button></>}
+      <button type="button" aria-label="Close conversation search" title="Close search" onClick={()=>{onSearch('');setSearchOpen(false);}}><X size={12}/></button>
     </div>}
     <div className="turn-rail">
       {start>0&&<button type="button" className="turn-page" aria-label="Earlier conversation turns" onClick={()=>focus(Math.max(0,start-1))}><ChevronUp size={12}/></button>}
@@ -38,6 +41,7 @@ export const TimelineNavigation=memo(function TimelineNavigation({turns,currentI
       {end<turns.length&&<button type="button" className="turn-page" aria-label="Later conversation turns" onClick={()=>focus(end)}><ChevronDown size={12}/></button>}
     </div>
     <div className="turn-navigation-actions">
+      {onSearch&&<button type="button" aria-label="Find in conversation" title="Find in conversation" aria-expanded={searchOpen} onClick={()=>{setSearchOpen(true);requestAnimationFrame(()=>searchInput.current?.focus());}}><Search size={13}/></button>}
       <button type="button" disabled={!canGoBack} onClick={onBack} aria-label="Back to previous reading position" title="Previous reading position"><Undo2 size={13}/></button>
       <button type="button" onClick={onLatest} aria-label="Go to latest conversation activity" title="Latest activity"><ArrowDown size={13}/></button>
     </div>

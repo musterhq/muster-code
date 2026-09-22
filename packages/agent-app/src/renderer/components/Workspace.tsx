@@ -120,10 +120,10 @@ function TabBody({ tab, visible }: { tab: WorkspaceTab; visible:boolean }): Reac
   }
 }
 
-export function Workspace(): React.ReactElement | null {
+export function Workspace({headerAction}: {headerAction?:React.ReactNode}): React.ReactElement | null {
   const state = useStore();
   const tabButtons = useRef(new Map<string, HTMLButtonElement>());
-  if (state.tabs.length === 0) return <WorkspaceOverview/>;
+  if (state.tabs.length === 0) return <><div className="workspace-head workspace-head-empty">{headerAction}</div><WorkspaceOverview/></>;
   const active = state.tabs.find((t) => t.id === state.activeTabId) ?? state.tabs[0];
   const focusTab = (id: string) => requestAnimationFrame(() => tabButtons.current.get(id)?.focus());
   const closeAndFocus = (id: string) => {
@@ -144,7 +144,7 @@ export function Workspace(): React.ReactElement | null {
   };
   return (
     <>
-      <div className="workspace-tabs" role="tablist" aria-label="Open resources">
+      <div className="workspace-head"><div className="workspace-tabs" role="tablist" aria-label="Open resources">
         {state.tabs.map((tab) => (
           <div
             key={tab.id}
@@ -176,7 +176,7 @@ export function Workspace(): React.ReactElement | null {
             </button>
           </div>
         ))}
-      </div>
+      </div>{headerAction}</div>
       <div className="workspace-body" role="tabpanel" id="active-resource-panel" aria-labelledby={`resource-tab-${active.id}`}>
         <TabBody key={active.id} tab={active} visible={!state.resourcesHidden && state.screen==='work'} />
       </div>

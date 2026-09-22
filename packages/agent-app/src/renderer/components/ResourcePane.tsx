@@ -41,8 +41,7 @@ export function ResourcePane() {
       onPointerCancel={()=>{drag.current=null;}}
       onDoubleClick={()=>{const value=Math.round(viewport/3);latest.current=value;setWidth(value);persist();}}
       onKeyDown={e=>{if(e.key!=='ArrowLeft'&&e.key!=='ArrowRight')return;e.preventDefault();const delta=(e.shiftKey?32:8)*(e.key==='ArrowLeft'?1:-1);const value=Math.min(maxWidth,Math.max(280,effectiveWidth+delta));latest.current=value;setWidth(value);persist();}} />}
-    <button className="icon-button resource-maximize" aria-label={maximized?'Restore resource pane':'Maximize resource pane'} aria-pressed={maximized} onClick={toggleMaximized}>
-      {maximized?<Minimize2 size={13}/>:<Maximize2 size={13}/>}</button>
-    <Workspace />
+    <Workspace headerAction={<button className="icon-button resource-maximize" aria-label={maximized?'Restore resource pane':'Maximize resource pane'} aria-pressed={maximized} onClick={toggleMaximized}>
+      {maximized?<Minimize2 size={13}/>:<Maximize2 size={13}/>}</button>} />
   </aside>;
 }
