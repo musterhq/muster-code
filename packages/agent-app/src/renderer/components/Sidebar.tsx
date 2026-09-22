@@ -19,10 +19,13 @@ import {
   MoreHorizontal,
   ArrowDownWideNarrow,
   Check,
+  MessageCircle,
+  Terminal,
 } from 'lucide-react';
 import {Collapsible} from '@base-ui/react/collapsible';
 import {Menu} from '@base-ui/react/menu';
 import {ContextMenu} from '@base-ui/react/context-menu';
+import {PreviewCard} from '@base-ui/react/preview-card';
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { Chat, Folder } from '../../shared/protocol';
 import {
@@ -32,6 +35,7 @@ import {
   openPluginsScreen,
   openProjectsScreen,
   openMemoryScreen,
+  openProcessesTab,
   pickFolder,
   selectChat,
   movePin,
@@ -54,11 +58,13 @@ function ChatRow({ chat }: { chat: Chat }): React.ReactElement {
   const [renameError,setRenameError]=useState('');
   const [renameBusy,setRenameBusy]=useState(false);
   const [menuOpen,setMenuOpen]=useState(false);
-  const rowButton=useRef<HTMLButtonElement>(null),moreButton=useRef<HTMLButtonElement>(null),renameInput=useRef<HTMLInputElement>(null);
+  const rowButton=useRef<HTMLElement|null>(null),moreButton=useRef<HTMLButtonElement>(null),renameInput=useRef<HTMLInputElement>(null);
   const renameCancelled=useRef(false),renamePending=useRef(false);
   const active = state.activeChatId === chat.id;
   const activeProcesses = processSummary?.sessions.filter(session => session.chatId === chat.id && isActiveProcess(session.status)).length ?? 0;
   const pendingAttention = state.snapshot?.attention?.chats.find(item => item.chatId === chat.id)?.requests.length ?? 0;
+  const folder=state.snapshot?.folders.find(item=>item.id===chat.folderId);
+  const updated=relativeTime(chat.updatedAt);
 
   const beginRename=()=>{renameCancelled.current=false;setTitle(chat.title);setRenameError('');setRenaming(true);};
   const finishRename=()=>{renameCancelled.current=true;setRenaming(false);requestAnimationFrame(()=>rowButton.current?.focus());};
@@ -74,6 +80,9 @@ function ChatRow({ chat }: { chat: Chat }): React.ReactElement {
   const menuItems=()=> <>
     <Menu.Item onClick={()=>void updateChat(chat.id,{pinned:!chat.pinned})}>{chat.pinned?<PinOff size={14}/>:<Pin size={14}/>}<span>{chat.pinned?'Unpin chat':'Pin chat'}</span></Menu.Item>
     <Menu.Item onClick={beginRename}><Pencil size={14}/><span>Rename chat</span></Menu.Item>
+    <Menu.Separator className="chat-menu-separator"/>
+    <Menu.Item onClick={()=>openProcessesTab(chat.id,chat.title)}><Terminal size={14}/><span>Open command activity</span></Menu.Item>
+    {folder&&<Menu.Item onClick={()=>openFilesTab(folder.id,folder.name)}><FolderOpen size={14}/><span>Open files and changes</span></Menu.Item>}
     {chat.pinned&&!chat.archived&&<><Menu.Separator className="chat-menu-separator"/><Menu.Item onClick={()=>void movePin(chat.id,'up')}><ChevronUp size={14}/><span>Move pin up</span></Menu.Item><Menu.Item onClick={()=>void movePin(chat.id,'down')}><ChevronDown size={14}/><span>Move pin down</span></Menu.Item></>}
     <Menu.Separator className="chat-menu-separator"/>
     <Menu.Item onClick={()=>void updateChat(chat.id,{archived:!chat.archived})}>{chat.archived?<ArchiveRestore size={14}/>:<Archive size={14}/>}<span>{chat.archived?'Restore chat':'Archive chat'}</span></Menu.Item>
@@ -81,7 +90,7 @@ function ChatRow({ chat }: { chat: Chat }): React.ReactElement {
   const finalFocus=()=>renameInput.current??rowButton.current??document.querySelector<HTMLElement>('.nav-scroll');
 
   return (
-    <ContextMenu.Root><ContextMenu.Trigger className={`chat-row${active ? ' is-active' : ''}`} data-chat-id={chat.id} data-running={isChatRunning(chat)||undefined}>
+    <PreviewCard.Root><ContextMenu.Root><ContextMenu.Trigger className={`chat-row${active ? ' is-active' : ''}`} data-chat-id={chat.id} data-running={isChatRunning(chat)||undefined}>
       {renaming ? (
         <input
           ref={renameInput}
@@ -102,10 +111,13 @@ function ChatRow({ chat }: { chat: Chat }): React.ReactElement {
           }}
         />
       ) : (
-        <button
-          ref={rowButton}
+        <PreviewCard.Trigger
+          ref={(element:HTMLAnchorElement|null)=>{rowButton.current=element;}}
+          render={<button/>}
           type="button"
           className="chat-row-main"
+          delay={520}
+          closeDelay={80}
           aria-current={active?'page':undefined}
           onKeyDown={event=>{if(event.key==='ContextMenu'||(event.shiftKey&&event.key==='F10')){event.preventDefault();moreButton.current?.click();}}}
           onClick={() => void selectChat(chat.id)}
@@ -120,7 +132,7 @@ function ChatRow({ chat }: { chat: Chat }): React.ReactElement {
             {pendingAttention > 0 && <span className="chat-attention-badge" aria-hidden="true">{pendingAttention}</span>}
           </span>}
           {chat.draft && <span className="chat-draft-dot" title="Unsent draft" />}
-        </button>
+        </PreviewCard.Trigger>
       )}
       {renameError&&renaming&&<span className="chat-rename-error" role="alert">{renameError}</span>}
       {!renaming&&<span className="chat-row-actions"><Menu.Root open={menuOpen} onOpenChange={setMenuOpen}>
@@ -128,19 +140,39 @@ function ChatRow({ chat }: { chat: Chat }): React.ReactElement {
         <Menu.Portal><Menu.Positioner side="bottom" align="end" sideOffset={4} className="chat-menu-positioner"><Menu.Popup className="chat-menu" finalFocus={finalFocus}>{menuItems()}</Menu.Popup></Menu.Positioner></Menu.Portal>
       </Menu.Root></span>}
     </ContextMenu.Trigger><ContextMenu.Portal><ContextMenu.Positioner className="chat-menu-positioner"><ContextMenu.Popup className="chat-menu" finalFocus={finalFocus}>{menuItems()}</ContextMenu.Popup></ContextMenu.Positioner></ContextMenu.Portal></ContextMenu.Root>
+    {!renaming&&<PreviewCard.Portal><PreviewCard.Positioner side="right" align="start" sideOffset={8} className="chat-preview-positioner"><PreviewCard.Popup className="chat-preview-card">
+      <div className="chat-preview-title"><span>{chat.title}</span><StatusDot status={chat.status} showLabel={isChatRunning(chat)}/></div>
+      <div className="chat-preview-meta"><span>{folder?.name??'Personal chat'}</span><span>{updated}</span></div>
+      {(activeProcesses>0||pendingAttention>0)&&<div className="chat-preview-activity">{activeProcesses>0&&<span>{activeProcesses} command{activeProcesses===1?'':'s'} running</span>}{pendingAttention>0&&<span>{pendingAttention} request{pendingAttention===1?'':'s'} need input</span>}</div>}
+    </PreviewCard.Popup></PreviewCard.Positioner></PreviewCard.Portal>}
+    </PreviewCard.Root>
   );
 }
 
-function GroupHead({ title, tooltip, chats=[], children }: {
+function relativeTime(value:string):string {
+  const timestamp=new Date(value).getTime();
+  if(!Number.isFinite(timestamp))return 'Updated recently';
+  const elapsed=Math.max(0,Date.now()-timestamp);
+  const minutes=Math.floor(elapsed/60000);
+  if(minutes<1)return 'Updated now';
+  if(minutes<60)return `Updated ${minutes}m ago`;
+  const hours=Math.floor(minutes/60);
+  if(hours<24)return `Updated ${hours}h ago`;
+  return `Updated ${Math.floor(hours/24)}d ago`;
+}
+
+function GroupHead({ title, tooltip, chats=[], children, icon }: {
   title: string;
   tooltip?: string;
   chats?: Chat[];
   children?: React.ReactNode;
+  icon?: React.ReactNode;
 }): React.ReactElement {
   return (
     <header className="nav-section-head">
       <Collapsible.Trigger className="nav-disclosure">
         <ChevronRight size={13} className="nav-chevron"/>
+        {icon&&<span className="nav-section-icon" aria-hidden="true">{icon}</span>}
         <span className="nav-section-title" title={tooltip ?? title}>
           {title}
         </span>
@@ -159,7 +191,7 @@ function FolderSection({ folder, chats, open, onToggle }: {
 }): React.ReactElement {
   return (
     <Collapsible.Root className="nav-section" open={open} onOpenChange={value=>onToggle(`folder:${folder.id}`,value)}>
-      <GroupHead title={folder.name} tooltip={folder.path} chats={chats}>
+      <GroupHead title={folder.name} tooltip={folder.path} chats={chats} icon={<FolderOpen size={12}/> }>
         <button
           type="button"
           className="icon-button"
@@ -285,7 +317,7 @@ export function Sidebar(): React.ReactElement {
       <div className="nav-scroll" ref={nav} tabIndex={-1}>
         {pinned.length > 0 && (
           <Collapsible.Root className="nav-section" open={isOpen('pinned')} onOpenChange={value=>toggleGroup('pinned',value)}>
-            <GroupHead title="Pinned" chats={pinned}/>
+            <GroupHead title="Pinned" chats={pinned} icon={<Pin size={12}/>}/>
             <Collapsible.Panel className="nav-group-panel">{pinned.map((chat) => (
               <ChatRow key={chat.id} chat={chat} />
             ))}</Collapsible.Panel>
@@ -296,7 +328,7 @@ export function Sidebar(): React.ReactElement {
           const gid = `project:${project.id}`;
           return (
             <Collapsible.Root className="nav-section" key={project.id} open={isOpen(gid)} onOpenChange={value=>toggleGroup(gid,value)}>
-              <GroupHead title={project.name} tooltip={project.goal} chats={chats}>
+              <GroupHead title={project.name} tooltip={project.goal} chats={chats} icon={<Layers size={12}/> }>
                 <button
                   type="button"
                   className="icon-button"
@@ -325,7 +357,7 @@ export function Sidebar(): React.ReactElement {
         ))}
         {orphanChats.length > 0 && (
           <Collapsible.Root className="nav-section" open={isOpen('chats')} onOpenChange={value=>toggleGroup('chats',value)}>
-            <GroupHead title="Chats" chats={orphanChats}/>
+            <GroupHead title="Chats" chats={orphanChats} icon={<MessageCircle size={12}/>}/>
             <Collapsible.Panel className="nav-group-panel">{orphanChats
               .map((chat) => (
                 <ChatRow key={chat.id} chat={chat} />
@@ -340,7 +372,7 @@ export function Sidebar(): React.ReactElement {
         )}
         {archived.length > 0 && (
           <Collapsible.Root className="nav-section" open={showArchived||(searching&&query.trim()!=='')} onOpenChange={setShowArchived}>
-            <GroupHead title={`Archived (${archived.length})`} chats={archived}/>
+            <GroupHead title={`Archived (${archived.length})`} chats={archived} icon={<Archive size={12}/>}/>
             <Collapsible.Panel className="nav-group-panel">{archived.map((chat) => <ChatRow key={chat.id} chat={chat} />)}</Collapsible.Panel>
           </Collapsible.Root>
         )}

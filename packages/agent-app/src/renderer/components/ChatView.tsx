@@ -99,7 +99,7 @@ function TimelineCard({ item }: { item: TranscriptEntry }): React.ReactElement {
   }
 }
 
-export function Timeline({ items, chatId }: { items: TimelineItem[]; chatId:string }): React.ReactElement {
+export function Timeline({ items, chatId, onScrolled }: { items: TimelineItem[]; chatId:string; onScrolled?: (scrolled:boolean)=>void }): React.ReactElement {
   const project=useMemo(()=>createTimelineProjection(),[]);
   const {rows,turns,rowIndexes}=useMemo(()=>project(items),[items,project]);
   const rowsRef=useRef(rows);rowsRef.current=rows;
@@ -109,6 +109,7 @@ export function Timeline({ items, chatId }: { items: TimelineItem[]; chatId:stri
   const saved=useRef(recallPosition(chatId));
   const atBottom = useRef(!saved.current);
   const restoring=useRef(Boolean(saved.current));
+  const scrolledState=useRef(false);
   const [away,setAway]=useState(Boolean(saved.current));
   const [unread,setUnread]=useState(false);
   const [currentTurn,setCurrentTurn]=useState<string|undefined>(turns.at(-1)?.id);
@@ -192,12 +193,14 @@ export function Timeline({ items, chatId }: { items: TimelineItem[]; chatId:stri
     const el = scrollRef.current;
     if (!el) return;
     if(restoring.current)return;
+    const scrolled=el.scrollTop>4;
+    if(scrolled!==scrolledState.current){scrolledState.current=scrolled;onScrolled?.(scrolled);}
     atBottom.current = isAtBottom(el.scrollTop,el.scrollHeight,el.clientHeight);
     setAway(!atBottom.current);
     if(atBottom.current)setUnread(false);
     updateCurrentTurn();
     rememberPosition(chatId,atBottom.current?null:captureAnchor(virtualizer.getVirtualItems(),el.scrollTop));
-  }, [chatId,virtualizer,updateCurrentTurn]);
+  }, [chatId,virtualizer,updateCurrentTurn,onScrolled]);
 
   // Follow the tail only while the reader is at the bottom; a reader scrolled
   // up keeps their anchor as new items stream in.
@@ -240,6 +243,8 @@ export function Timeline({ items, chatId }: { items: TimelineItem[]; chatId:stri
 export function ChatView(): React.ReactElement {
   const state = useStore();
   const chat = activeChat();
+  const [scrolled,setScrolled]=useState(false);
+  useEffect(()=>setScrolled(false),[chat?.id]);
 
   if (!chat) {
     return (
@@ -255,15 +260,13 @@ export function ChatView(): React.ReactElement {
 
   return (
     <div className="chat">
-      <header className="chat-head">
-        <StatusDot status={chat.status} />
+      <header className="chat-head" data-scrolled={scrolled||undefined}>
+        <StatusDot status={chat.status} showLabel={chat.status==='running'||chat.status==='stopping'||chat.status==='failed'||chat.status==='interrupted'} />
         <span className="chat-head-title" title={chat.title}>
           {chat.title}
         </span>
         <span className="chat-head-meta">
           {folder && <span className="chat-folder-context" title={folder.path}>{folder.name}</span>}
-          <span className="chat-head-model">{chat.model}</span>
-          <span className="chat-head-mode">{chat.mode}</span>
         </span>
       </header>
       <RecoveryNotice key={`${chat.id}:${chat.providerThreadId ?? ""}:${chat.providerTurnId ?? ""}:${chat.recovery?.kind ?? ""}`} chat={chat}/>
@@ -283,7 +286,7 @@ export function ChatView(): React.ReactElement {
           <p>No messages yet. Say what you want done in {folder?.name ?? 'this workspace'}.</p>
         </div>
       ) : (
-        <Timeline key={`timeline:${chat.id}`} items={timeline.value ?? []} chatId={chat.id} />
+        <Timeline key={`timeline:${chat.id}`} items={timeline.value ?? []} chatId={chat.id} onScrolled={setScrolled} />
       )}
       <TurnChanges key={`changes:${chat.id}`} chat={chat} items={timeline.value??[]}/>
       <Composer key={`composer:${chat.id}`} chat={chat} />

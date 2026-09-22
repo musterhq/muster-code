@@ -12,6 +12,14 @@ mkdirSync(path.dirname(app),{recursive:true});
 execFileSync('ditto',[path.resolve(electron,'../../..'),app]);
 const plist=path.join(app,'Contents/Info.plist');
 for(const [key,value] of Object.entries({CFBundleIdentifier:'dev.themuster.agent.preview',CFBundleName:'Muster Agent',CFBundleDisplayName:'Muster Agent',CFBundleShortVersionString:'0.2.0'})) execFileSync('/usr/libexec/PlistBuddy',['-c',`Set :${key} ${value}`,plist]);
+for(const command of [
+  'Delete :CFBundleURLTypes',
+  'Add :CFBundleURLTypes array',
+  'Add :CFBundleURLTypes:0 dict',
+  'Add :CFBundleURLTypes:0:CFBundleURLName string dev.themuster.agent.chat',
+  'Add :CFBundleURLTypes:0:CFBundleURLSchemes array',
+  'Add :CFBundleURLTypes:0:CFBundleURLSchemes:0 string muster',
+]) { try { execFileSync('/usr/libexec/PlistBuddy',['-c',command,plist],{stdio:'pipe'}); } catch (error) { if(!command.startsWith('Delete'))throw error; } }
 const resources=path.join(app,'Contents/Resources/app');mkdirSync(resources,{recursive:true});
 cpSync(path.join(root,'dist'),path.join(resources,'dist'),{recursive:true});
 writeFileSync(path.join(resources,'package.json'),JSON.stringify({name:'muster-agent',productName:'Muster Agent',version:'0.2.0',main:'dist/main/index.cjs'}));

@@ -14,6 +14,7 @@ import { buildMenu } from './menu.ts';
 import { createQuitCoordinator, withinDeadline } from './quit-coordinator.ts';
 import { loadAgentService, type AgentService } from './service-loader.ts';
 import { clampGeometry, DEFAULT_GEOMETRY, MIN_HEIGHT, MIN_WIDTH, WindowStateStore, type WindowGeometry } from './window-state.ts';
+import {chatIdFromArgs,chatIdFromLink} from './chat-links.ts';
 
 app.setName('Muster Agent');
 app.setPath('userData', app.commandLine.getSwitchValue('user-data-dir') || path.join(app.getPath('appData'), 'Muster Agent'));
@@ -35,15 +36,23 @@ async function main(): Promise<void> {
   let runningChats = 0;
   let disposal: Promise<void> | undefined;
   let shutdownStarted = false;
+  let pendingChatId=chatIdFromArgs(process.argv);
+  let openLinkedChat: (id:string)=>Promise<void> = async id=>{pendingChatId=id;};
 
   const stateStore = new WindowStateStore(app.getPath('userData'));
 
-  app.on('second-instance', () => {
+  app.on('second-instance', (_event,argv) => {
+    const linked=chatIdFromArgs(argv);if(linked)void openLinkedChat(linked);
     if (window) {
       if (window.isMinimized()) window.restore();
       window.show();
       window.focus();
     }
+  });
+
+  app.on('open-url',(event,url)=>{
+    event.preventDefault();
+    const linked=chatIdFromLink(url);if(linked)void openLinkedChat(linked);
   });
 
   app.on('activate', () => {
@@ -57,6 +66,7 @@ async function main(): Promise<void> {
   // Match the dark renderer with the dark native sidebar material.
   nativeTheme.themeSource = 'dark';
   await app.whenReady();
+  app.setAsDefaultProtocolClient('muster');
 
   // --- Agent service -------------------------------------------------------
   const dataDir = path.join(app.getPath('userData'), 'agent-data');
@@ -70,6 +80,20 @@ async function main(): Promise<void> {
   };
   const loaded = loadAgentService({ dataDir, onEvent });
   service = loaded.service;
+  openLinkedChat=async id=>{
+    if(!service||!window||window.isDestroyed()||window.webContents.isLoading()) { pendingChatId=id; return; }
+    const snapshot=await service.invoke('app.snapshot',undefined);
+    if(!snapshot.chats.some(chat=>chat.id===id)) {
+      onEvent({type:'notice',message:'This local chat link is not available in this Muster profile.'});
+      pendingChatId=null;return;
+    }
+    const items=await service.invoke('chat.select',{id});
+    onEvent({type:'snapshot',snapshot:{...snapshot,activeChatId:id}});
+    onEvent({type:'chatSelected',chatId:id});
+    onEvent({type:'timeline',chatId:id,items});
+    pendingChatId=null;
+    if(window.isMinimized())window.restore();window.show();window.focus();
+  };
   const processes = new ProcessSessions(path.join(dataDir,'process-sessions.json'),async input=>commandAuthority(await loaded.service.invoke('app.snapshot',undefined),dataDir,input),onEvent);
   const computers = new ScopedComputers({
     appData:dataDir,
@@ -354,4 +378,5 @@ async function main(): Promise<void> {
       send({ type: 'notice', message: 'Agent runtime not built; UI is in shell-only mode.' }));
   }
   await window.loadFile(rendererEntry);
+  if(pendingChatId)await openLinkedChat(pendingChatId);
 }
