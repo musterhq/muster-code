@@ -8,6 +8,7 @@ Object.assign(globalThis,{window,document:window.document,HTMLElement:window.HTM
 const calls:{command:string;input:any}[]=[];
 const providers=[
   {id:'hybrow',name:'Hybrow OmniRoute',available:true,status:'ready',source:'Existing local provider profile',identityMasked:'Gateway profile · account hidden',models:[{id:'codex/gpt-5.6-terra',name:'GPT 5.6 Terra'}],detail:'Local model catalog configured.'},
+  {id:'custom_ready',name:'Available local API',available:true,status:'ready',source:'Added in Muster',identityMasked:'No account metadata',custom:true,endpoint:'http://127.0.0.1:8081/v1',models:[{id:'fixture-ready',name:'fixture-ready'}],detail:'Available.'},
   {id:'codex',name:'Codex CLI (ChatGPT)',available:false,status:'configured',source:'Local configuration discovery',identityMasked:'ChatGPT account on file',models:[],detail:'auth.json holds ChatGPT sign-in tokens (auth mode: chatgpt); not verified. No runnable adapter is enabled for this entry.'},
   {id:'custom_123',name:'Local compatible server',available:false,status:'configured',source:'Added in Muster',identityMasked:'No account metadata',custom:true,endpoint:'http://127.0.0.1:8080/v1',apiKeyEnv:'LOCAL_KEY',models:[{id:'fixture',name:'fixture'}],detail:'Model discovery succeeded. Chat execution is not enabled yet.'},
   {id:'claude-code',name:'Claude Code',available:false,status:'not-detected',source:'Local configuration discovery',identityMasked:'',models:[],detail:'no Claude Code files found'},
@@ -28,6 +29,8 @@ assert.match(document.body.textContent!,/No runnable model catalog reported/);
 assert.match(document.body.textContent!,/Supported providers not detected/);
 assert.match(document.body.textContent!,/Discovered · not available to chats/);
 assert.match(document.body.textContent!,/Credentials from LOCAL_KEY/);
+assert.equal(Array.from(document.querySelectorAll('.settings-provider h2')).filter(node=>node.textContent==='Available local API').length,1,'an available custom endpoint appears only in Ready for chats');
+assert.equal(Array.from(document.querySelectorAll('.settings-provider h2')).filter(node=>node.textContent==='Local compatible server').length,1,'an unavailable custom endpoint appears only in Compatible endpoints');
 assert.ok(calls.some(call=>call.command==='providers.list'));
 root.unmount();
 console.log('Provider settings checks passed: default provenance, truthful availability, detected and absent profiles, and custom endpoint catalog status.');
