@@ -1,11 +1,12 @@
 import React,{memo,useLayoutEffect,useRef,useState} from 'react';
-import {ArrowDown,ChevronUp,ChevronDown,Undo2} from 'lucide-react';
+import {ArrowDown,ChevronUp,ChevronDown,Undo2,Search,ChevronLeft,ChevronRight,X} from 'lucide-react';
 import {railWindow,type TurnSummary} from './timeline-navigation-model';
 import './timeline-navigation.css';
 
-export const TimelineNavigation=memo(function TimelineNavigation({turns,currentId,canGoBack,onTurn,onBack,onLatest}:{
+export const TimelineNavigation=memo(function TimelineNavigation({turns,currentId,canGoBack,onTurn,onBack,onLatest,searchQuery,onSearch,searchCount,searchIndex,onSearchStep}:{
   turns:readonly TurnSummary[];currentId?:string;canGoBack:boolean;
   onTurn:(id:string)=>void;onBack:()=>void;onLatest:()=>void;
+  searchQuery?:string;onSearch?:(query:string)=>void;searchCount?:number;searchIndex?:number;onSearchStep?:(direction:1|-1)=>void;
 }){
   const [focused,setFocused]=useState<string>(),[hovered,setHovered]=useState<string>(),[dismissed,setDismissed]=useState(false);
   const [windowFocus,setWindowFocus]=useState<string>();
@@ -21,8 +22,12 @@ export const TimelineNavigation=memo(function TimelineNavigation({turns,currentI
     const next=event.key==='ArrowDown'?index+1:event.key==='ArrowUp'?index-1:event.key==='Home'?0:event.key==='End'?turns.length-1:event.key==='PageDown'?index+20:event.key==='PageUp'?index-20:undefined;
     if(next!==undefined){event.preventDefault();focus(next);}
   };
-  if(!turns.length)return null;
-  return <nav className="turn-navigation" aria-label="Conversation turns" onKeyDown={event=>{if(event.key==='Escape'){setDismissed(true);setHovered(undefined);event.stopPropagation();}}} onBlur={event=>{if(!event.currentTarget.contains(event.relatedTarget)){setFocused(undefined);setWindowFocus(undefined);}}} onMouseLeave={()=>setHovered(undefined)}>
+  if(!turns.length&&!onSearch)return null;
+  return <nav className="turn-navigation" aria-label="Conversation turns" onKeyDown={event=>{if(event.key==='Escape'){setDismissed(true);setHovered(undefined);}}} onBlur={event=>{if(!event.currentTarget.contains(event.relatedTarget)){setFocused(undefined);setWindowFocus(undefined);}}} onMouseLeave={()=>setHovered(undefined)}>
+    {onSearch&&<div className="timeline-search">
+      <label className="timeline-search-field"><Search size={13}/><input aria-label="Find in conversation" type="search" value={searchQuery??''} placeholder="Find" onChange={event=>onSearch(event.target.value)} onKeyDown={event=>{if(event.key==='Enter'){event.preventDefault();onSearchStep?.(event.shiftKey?-1:1);}if(event.key==='Escape'){event.preventDefault();onSearch('');event.currentTarget.blur();}}}/></label>
+      {!!searchQuery&&<><span className="timeline-search-count" aria-live="polite">{searchCount?`${(searchIndex??-1)+1} of ${searchCount}`:'No matches'}</span><button type="button" aria-label="Previous match" title="Previous match" disabled={!searchCount} onClick={()=>onSearchStep?.(-1)}><ChevronLeft size={13}/></button><button type="button" aria-label="Next match" title="Next match" disabled={!searchCount} onClick={()=>onSearchStep?.(1)}><ChevronRight size={13}/></button><button type="button" aria-label="Clear search" title="Clear search" onClick={()=>onSearch('')}><X size={12}/></button></>}
+    </div>}
     <div className="turn-rail">
       {start>0&&<button type="button" className="turn-page" aria-label="Earlier conversation turns" onClick={()=>focus(Math.max(0,start-1))}><ChevronUp size={12}/></button>}
       {turns.slice(start,end).map((turn,offset)=>{const turnIndex=start+offset;return <button type="button" key={turn.id} ref={node=>{if(node)buttons.current.set(turn.id,node);else buttons.current.delete(turn.id);}}

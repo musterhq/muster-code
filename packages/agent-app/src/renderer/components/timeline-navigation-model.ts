@@ -2,6 +2,17 @@ import type {TranscriptEntry} from './activityGrouping.ts';
 import type {TimelineItem} from '../../shared/protocol';
 
 export interface TurnSummary {id:string;rowIndex:number;prompt:string;response:string}
+export interface TranscriptMatch {rowIndex:number;offset:number}
+/** Search loaded prose and grouped activity without depending on virtualized DOM. */
+export function findTranscriptMatches(rows:readonly TranscriptEntry[],query:string):TranscriptMatch[] {
+  const needle=query.trim().toLocaleLowerCase();if(!needle)return [];
+  const matches:TranscriptMatch[]=[];
+  for(let rowIndex=0;rowIndex<rows.length;rowIndex++){
+    const row=rows[rowIndex],texts=row.kind==='activity'?row.items.map(item=>item.text):'text' in row?[row.text]:[];
+    for(const text of texts){const offset=text.toLocaleLowerCase().indexOf(needle);if(offset>=0){matches.push({rowIndex,offset});break;}}
+  }
+  return matches;
+}
 const preview=(text:string,limit:number)=>{
   const normalized=text.slice(0,2000).replace(/\s+/g,' ').trim();
   return normalized.length>limit?normalized.slice(0,limit-1)+'…':normalized;

@@ -16,7 +16,7 @@ import {
 } from '../store';
 import { useStore } from '../useStore';
 import {captureAnchor,isAtBottom,recallPosition,rememberPosition,resolveAnchorIndex,type ReadingAnchor} from './chatContinuity';
-import {createTimelineProjection,turnAtRow} from './timeline-navigation-model';
+import {createTimelineProjection,findTranscriptMatches,turnAtRow} from './timeline-navigation-model';
 import {TimelineNavigation} from './TimelineNavigation';
 import {MessageMeta} from './MessageMeta';
 import './chat-continuity.css';
@@ -112,6 +112,11 @@ export function Timeline({ items, chatId }: { items: TimelineItem[]; chatId:stri
   const [away,setAway]=useState(Boolean(saved.current));
   const [unread,setUnread]=useState(false);
   const [currentTurn,setCurrentTurn]=useState<string|undefined>(turns.at(-1)?.id);
+  const [searchQuery,setSearchQuery]=useState('');
+  const [searchIndex,setSearchIndex]=useState(-1);
+  const searchOrigin=useRef(false);
+  const searchMatches=useMemo(()=>findTranscriptMatches(rows,searchQuery),[rows,searchQuery]);
+  useEffect(()=>{setSearchIndex(-1);if(!searchQuery.trim())searchOrigin.current=false;},[searchQuery]);
   const [backCount,setBackCount]=useState(0),[navigationNotice,setNavigationNotice]=useState('');
   const backPositions=useRef<ReadingAnchor[]>([]);
   const navigationFrame=useRef<number|undefined>(undefined);
@@ -137,7 +142,7 @@ export function Timeline({ items, chatId }: { items: TimelineItem[]; chatId:stri
     const row=anchor?rowIndexesRef.current.get(anchor.itemId):undefined;
     if(row!==undefined)setCurrentTurn(turnAtRow(turnsRef.current,row));
   },[virtualizer]);
-  const goToAnchor=useCallback((anchor:ReadingAnchor)=>{
+  const goToAnchor=useCallback((anchor:ReadingAnchor,smooth=false)=>{
     const index=rowIndexesRef.current.get(anchor.itemId);
     if(index===undefined){setNavigationNotice('That reading position is no longer in the loaded conversation.');return;}
     if(navigationFrame.current!==undefined)cancelAnimationFrame(navigationFrame.current);
@@ -146,11 +151,17 @@ export function Timeline({ items, chatId }: { items: TimelineItem[]; chatId:stri
     virtualizer.scrollToIndex(index,{align:'start',behavior:'auto'});
     navigationFrame.current=requestAnimationFrame(()=>{
       const offset=virtualizer.getOffsetForIndex(index,'start')?.[0];
-      if(offset!=null)virtualizer.scrollToOffset(Math.max(0,offset+anchor.offset),{behavior:'auto'});
+      if(offset!=null)virtualizer.scrollToOffset(Math.max(0,offset+anchor.offset),{behavior:smooth?'smooth':'auto'});
       navigationFrame.current=requestAnimationFrame(()=>{navigationFrame.current=undefined;restoring.current=false;updateCurrentTurn();});
     });
   },[chatId,virtualizer,updateCurrentTurn]);
   const jumpToTurn=useCallback((id:string)=>{if(!rowIndexesRef.current.has(id))return;saveReadingPosition();goToAnchor({itemId:id,offset:0});},[saveReadingPosition,goToAnchor]);
+  const stepSearch=useCallback((direction:1|-1)=>{
+    if(!searchMatches.length)return;
+    if(!searchOrigin.current){saveReadingPosition();searchOrigin.current=true;}
+    const next=searchIndex<0?(direction>0?0:searchMatches.length-1):(searchIndex+direction+searchMatches.length)%searchMatches.length;
+    setSearchIndex(next);const match=searchMatches[next];goToAnchor({itemId:rowsRef.current[match.rowIndex].id,offset:-8},true);
+  },[searchMatches,searchIndex,saveReadingPosition,goToAnchor]);
   const jumpBack=useCallback(()=>{const anchor=backPositions.current.pop();setBackCount(backPositions.current.length);if(anchor)goToAnchor(anchor);},[goToAnchor]);
   const jumpToLatest=useCallback(()=>{
     if(!atBottom.current)saveReadingPosition();
@@ -199,7 +210,7 @@ export function Timeline({ items, chatId }: { items: TimelineItem[]; chatId:stri
 
   return (
     <div className={`timeline-shell${turns.length?' timeline-with-navigation':''}`}>
-    <TimelineNavigation turns={turns} currentId={currentTurn} canGoBack={backCount>0} onTurn={jumpToTurn} onBack={jumpBack} onLatest={jumpToLatest}/>
+    <TimelineNavigation turns={turns} currentId={currentTurn} canGoBack={backCount>0} onTurn={jumpToTurn} onBack={jumpBack} onLatest={jumpToLatest} searchQuery={searchQuery} onSearch={setSearchQuery} searchCount={searchMatches.length} searchIndex={searchIndex} onSearchStep={stepSearch}/>
     <div className="timeline" ref={scrollRef} onScroll={onScroll}>
       <div
         className="timeline-inner"

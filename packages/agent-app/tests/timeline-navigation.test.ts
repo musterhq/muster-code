@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
-import {createTimelineProjection,summarizeTurns,turnAtRow,railWindow,MAX_RAIL_TURNS} from '../src/renderer/components/timeline-navigation-model.ts';
+import {createTimelineProjection,findTranscriptMatches,summarizeTurns,turnAtRow,railWindow,MAX_RAIL_TURNS} from '../src/renderer/components/timeline-navigation-model.ts';
 import {groupActivity} from '../src/renderer/components/activityGrouping.ts';
 import type {TimelineItem} from '../src/shared/protocol.ts';
 const item=(id:string,kind:TimelineItem['kind'],text:string):TimelineItem=>({id,kind,text,chatId:'chat',createdAt:'2026-09-19T10:00:00Z'});
@@ -23,6 +23,11 @@ test('large histories keep every turn reachable while bounding the rail window',
   const turns=summarizeTurns(Array.from({length:10000},(_,i)=>item('u'+i,'user','Turn '+i)));
   for(const index of [0,1,32,100,5000,9999]){const range=railWindow(turns.length,index);assert.ok(range.end-range.start<=MAX_RAIL_TURNS);assert.ok(range.start<=index&&range.end>index);assert.equal(turnAtRow(turns,index),'u'+index);}
   assert.deepEqual(railWindow(0,0),{start:0,end:0});assert.deepEqual(railWindow(2,0),{start:0,end:2});
+});
+test('conversation search finds loaded user, assistant, and grouped activity rows case-insensitively',()=>{
+  const rows=groupActivity([item('u','user','Find me here'),item('a','assistant','Answer has Find'),item('t1','tool','first FIND'),item('t2','tool','also find')]);
+  assert.deepEqual(findTranscriptMatches(rows,'find'),[{rowIndex:0,offset:0},{rowIndex:1,offset:11},{rowIndex:2,offset:6}]);
+  assert.deepEqual(findTranscriptMatches(rows,'  absent  '),[]);assert.deepEqual(findTranscriptMatches(rows,'  '),[]);
 });
 test('the combined projection reuses immutable previews/indexes and correctly rebuilds historical edits',()=>{
   const project=createTimelineProjection();let reads=0;
