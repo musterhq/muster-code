@@ -12,17 +12,20 @@ export interface SavedTab {
   chatId?: string;
 }
 export interface SavedWorkspace { tabs: SavedTab[]; activeTabId: string | null }
-const KEY = 'muster.workspace.v1';
 export const MAX_TABS = 24;
 const empty = (): SavedWorkspace => ({tabs: [], activeTabId: null});
 
+function storageKey(scope: string): string {
+  return `muster.workspace.v2:${encodeURIComponent(scope)}`;
+}
+
 /** Persist references only. File contents and provider output stay in the runtime. */
-export function readWorkspace(storage: Pick<Storage, 'getItem'>): SavedWorkspace {
+export function readWorkspace(storage: Pick<Storage, 'getItem'>, scope = 'personal'): SavedWorkspace {
   try {
-    const raw = storage.getItem(KEY);
+    const raw = storage.getItem(storageKey(scope));
     if (!raw || raw.length > 262144) return empty();
     const parsed = JSON.parse(raw);
-    if (parsed.version !== 1 || !Array.isArray(parsed.tabs)) return empty();
+    if (parsed.version !== 2 || parsed.scope !== scope || !Array.isArray(parsed.tabs)) return empty();
     const tabs: SavedTab[] = [];
     for (const t of parsed.tabs.slice(0, MAX_TABS)) {
       if (t?.kind === 'computer' || t?.kind === 'processes') {
@@ -58,9 +61,9 @@ export function readWorkspace(storage: Pick<Storage, 'getItem'>): SavedWorkspace
   } catch { return empty(); }
 }
 
-export function saveWorkspace(storage: Pick<Storage, 'setItem'>, workspace: SavedWorkspace): boolean {
+export function saveWorkspace(storage: Pick<Storage, 'setItem'>, workspace: SavedWorkspace, scope = 'personal'): boolean {
   try {
-    storage.setItem(KEY, JSON.stringify({version:1, tabs:workspace.tabs.slice(0,MAX_TABS).map(tab=>{
+    storage.setItem(storageKey(scope), JSON.stringify({version:2, scope, tabs:workspace.tabs.slice(0,MAX_TABS).map(tab=>{
       if(tab.kind!=='browser')return tab;
       let url='about:blank';
       try {if(tab.url!==undefined)url=browserURL(tab.url);} catch {}

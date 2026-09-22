@@ -61,6 +61,8 @@ export interface AppState {
   composerDrafts: Record<string, { text: string; revision: number; error?: string }>;
   sendErrors: Record<string, string>;
   notices: Notice[];
+  /** Stable identity for this chat's independent resource tab set. */
+  workspaceScope: string;
   tabs: WorkspaceTab[];
   activeTabId: string | null;
   providers: Loadable<ProviderInfo[]>;
@@ -86,7 +88,14 @@ export const NAV_DEFAULT = 224;
 export const NAV_MIN = 180;
 export const NAV_MAX = 320;
 
-const savedWorkspace = readWorkspace(localStorage);
+function workspaceScope(snapshot: Snapshot | null, chatId: string | null): string {
+  if (!chatId) return 'personal';
+  const chat = snapshot?.chats.find(candidate => candidate.id === chatId);
+  return chat
+    ? `chat:${chat.id}|project:${chat.projectId ?? ''}|folder:${chat.folderId ?? ''}`
+    : `chat:${chatId}`;
+}
+
 let state: AppState = {
   screen: 'work',
   memory: {phase: 'idle'},
@@ -102,8 +111,11 @@ let state: AppState = {
   composerDrafts: {},
   sendErrors: {},
   notices: [],
-  tabs: savedWorkspace.tabs,
-  activeTabId: savedWorkspace.activeTabId,
+  // Resource tabs are restored only after the host identifies the active
+  // chat. Never paint a previous chat's files while boot is resolving.
+  tabs: [],
+  activeTabId: null,
+  workspaceScope: 'personal',
   providers: { phase: 'idle' },
   skills: { phase: 'idle' },
   plugins: { phase: 'idle' },
@@ -114,7 +126,7 @@ let state: AppState = {
   diffs: {},
   gitChanges: {},
   navHidden: localStorage.getItem('muster.navHidden')==='true',
-  resourcesHidden: localStorage.getItem('muster.resourcesHidden')==='true' || (localStorage.getItem('muster.resourcesHidden')===null && savedWorkspace.tabs.length===0),
+  resourcesHidden: localStorage.getItem('muster.resourcesHidden')==='true' || localStorage.getItem('muster.resourcesHidden')===null,
   navWidth: clampNav(Number(localStorage.getItem(NAV_KEY)) || NAV_DEFAULT),
 };
 
@@ -140,7 +152,23 @@ export function subscribeStore(listener: () => void): () => void {
 }
 
 function set(patch: Partial<AppState>): void {
-  state = { ...state, ...patch };
+  const priorScope = state.workspaceScope;
+  const nextState = { ...state, ...patch };
+  const nextScope = workspaceScope(nextState.snapshot, nextState.activeChatId);
+  const scopeChanged = priorScope !== nextScope;
+  if (scopeChanged) {
+    saveWorkspace(localStorage, {tabs:state.tabs,activeTabId:state.activeTabId}, priorScope);
+    const restored = readWorkspace(localStorage, nextScope);
+    nextState.tabs = restored.tabs;
+    nextState.activeTabId = restored.activeTabId;
+    nextState.workspaceScope = nextScope;
+    nextState.fileBodies = {};
+    nextState.diffs = {};
+    if (state.boot.phase === 'idle' && localStorage.getItem('muster.resourcesHidden') === null && restored.tabs.length > 0) {
+      nextState.resourcesHidden = false;
+    }
+  }
+  state = nextState;
   if ('timelines' in patch || 'activeChatId' in patch || 'tabs' in patch) {
     const protectedIds = new Set([state.activeChatId, ...state.tabs.map(tab=>tab.chatId), ...timelineReads.keys()]);
     const inactive = Object.keys(state.timelines).filter(id=>!protectedIds.has(id)).sort((a,b)=>(timelineAccess.get(b)??0)-(timelineAccess.get(a)??0));
@@ -150,9 +178,9 @@ function set(patch: Partial<AppState>): void {
       state={...state,timelines};
     }
   }
-  if ('tabs'  in patch || 'activeTabId' in patch) saveWorkspace(localStorage, {tabs:state.tabs, activeTabId:state.activeTabId});
+  if ('tabs' in patch || 'activeTabId' in patch) saveWorkspace(localStorage, {tabs:state.tabs, activeTabId:state.activeTabId}, state.workspaceScope);
   for (const l of listeners) l();
-  if ('tabs' in patch && state.boot.phase === 'ready') syncResourceWatches();
+  if (('tabs' in patch || scopeChanged) && state.boot.phase === 'ready') syncResourceWatches();
 }
 
 export function notifyError(cause: unknown): void { pushNotice(errorText(cause)); }
