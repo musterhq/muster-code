@@ -48,6 +48,7 @@ const COMMANDS = {
   'project.create': true,
   'project.tasks.list': true,
   'project.tasks.create': true,
+  'project.tasks.start': true,
   'project.tasks.updateStatus': true,
   'project.tasks.addEvidence': true,
   'project.decisions.list': true,

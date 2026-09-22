@@ -17,7 +17,7 @@ export interface TimelineSnapshot { items: TimelineItem[]; revision: number }
 export interface TimelinePatch extends TimelineSnapshot { after: number }
 export interface Project { id: string; name: string; goal: string; folderIds: string[] }
 export type TaskStatus = 'todo' | 'running' | 'blocked' | 'implemented' | 'verified';
-export interface ProjectTask { id:string; projectId:string; title:string; status:TaskStatus; dependencies:string[]; acceptance:string; evidence:string[]; revision:number; createdAt:string; updatedAt:string }
+export interface ProjectTask { id:string; projectId:string; title:string; status:TaskStatus; dependencies:string[]; acceptance:string; evidence:string[]; runChatId?:string; runRequestId?:string; runError?:string; revision:number; createdAt:string; updatedAt:string }
 export interface ProjectDecision { id:string; projectId:string; title:string; rationale:string; author:string; scope:string; relatedTaskIds:string[]; status:'active'|'superseded'; supersededById:string|null; createdAt:string; updatedAt:string }
 export interface ProjectActivity { id:string; projectId:string; actor:string; kind:string; summary:string; refId:string|null; createdAt:string }
 export interface BoundedList<T> { items:T[]; truncated:boolean }
@@ -40,7 +40,7 @@ export interface PluginEntry { id:string; name:string; version:string; provenanc
 export type ContextSource = 'live' | 'restored';
 /** Context-window occupancy telemetry. Unknown values are null ("Unavailable"), never zero. */
 export interface ContextTelemetry { usedTokens: number | null; windowTokens: number | null; source: ContextSource | null; compacted: boolean; updatedAt: string | null }
-export type AgentEvent = ProcessEvent | BrowserEvent | {type:'fileMoved';folderId:string;from:string;to:string} | {type:'workspaceChanged';folderId:string} | {type:'chatSelected'; chatId:string} | { type: 'snapshot'; snapshot: Snapshot } | { type: 'timeline'; chatId: string; items: TimelineItem[] } | { type: 'timelinePatch'; chatId: string; patch: TimelinePatch } | { type: 'notice'; message: string } | { type: 'contextTelemetry'; chatId: string; telemetry: ContextTelemetry };
+export type AgentEvent = ProcessEvent | BrowserEvent | {type:'fileMoved';folderId:string;from:string;to:string} | {type:'workspaceChanged';folderId:string} | {type:'projectChanged';projectId:string;taskId:string} | {type:'chatSelected'; chatId:string} | { type: 'snapshot'; snapshot: Snapshot } | { type: 'timeline'; chatId: string; items: TimelineItem[] } | { type: 'timelinePatch'; chatId: string; patch: TimelinePatch } | { type: 'notice'; message: string } | { type: 'contextTelemetry'; chatId: string; telemetry: ContextTelemetry };
 export interface MemoryEntry { id: string; kind: string; summary: string; sourceUri?: string; observedAt: string; confidence: number; provenance: string[]; scopes: Array<{kind: string; id: string}>; redactionState: 'none' | 'redacted' | 'hashed' | 'blocked'; links?: string[] }
 export interface HindsightStatus { configured: boolean; endpoint?: string; bankId?: string; error?: string; revision?: number; connection?: 'unchecked' | 'verified' | 'failed'; checkedAt?: string; connectionError?: string }
 export interface Commands extends BrowserCommands, ScopedComputerCommands, ProcessCommands {
@@ -73,6 +73,7 @@ export interface Commands extends BrowserCommands, ScopedComputerCommands, Proce
  'project.create': { input: {name: string; goal: string; folderIds: string[]}; output: Project };
  'project.tasks.list': {input:{projectId:string};output:BoundedList<ProjectTask>};
  'project.tasks.create': {input:{projectId:string;title:string;acceptance:string;dependencies:string[]};output:ProjectTask};
+ 'project.tasks.start': {input:{projectId:string;id:string;revision:number;requestId:string;folderId?:string};output:{task:ProjectTask;chatId:string;runId:string}};
  'project.tasks.updateStatus': {input:{projectId:string;id:string;status:TaskStatus;evidence?:string[];revision:number};output:ProjectTask};
  'project.tasks.addEvidence': {input:{projectId:string;id:string;entries:string[];revision:number};output:ProjectTask};
  'project.decisions.list': {input:{projectId:string};output:BoundedList<ProjectDecision>};

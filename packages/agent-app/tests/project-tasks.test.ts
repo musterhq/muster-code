@@ -13,10 +13,12 @@ test('task graph rejects missing and cross-project edges; running waits for veri
   assert.throws(()=>create(f.store,'p1','Self',['self']),/not found/);
   assert.throws(()=>create(f.store,'p1','Cross',[other.id]),/belong to this project/);
   assert.deepEqual(f.store.createTask({projectId:'p1',title:'Duplicate',acceptance:'',dependencies:[b.id,b.id]}).dependencies,[b.id]);
-  assert.throws(()=>f.store.updateTaskStatus({projectId:'p1',id:b.id,status:'running',revision:0}),/not yet verified/);
+  assert.throws(()=>f.store.assertCanStartTask({projectId:'p1',id:b.id,revision:0}),/not yet verified/);
+  assert.throws(()=>f.store.updateTaskStatus({projectId:'p1',id:b.id,status:'running',revision:0}),/real agent run/);
   assert.throws(()=>f.store.updateTaskStatus({projectId:'p2',id:a.id,status:'blocked',revision:0}),/different project/);
   const done=f.store.updateTaskStatus({projectId:'p1',id:a.id,status:'verified',revision:0,evidence:['focused test passed']});
-  assert.equal(done.status,'verified');assert.equal(f.store.updateTaskStatus({projectId:'p1',id:b.id,status:'running',revision:0}).status,'running');
+  assert.equal(done.status,'verified');assert.equal(f.store.assertCanStartTask({projectId:'p1',id:b.id,revision:0}).status,'todo');
+  assert.equal(f.store.startTask({projectId:'p1',id:b.id,revision:0,requestId:'real-run',chatId:'linked-chat'}).status,'running');
  }finally{f.close()}
 });
 

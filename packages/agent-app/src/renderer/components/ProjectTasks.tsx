@@ -2,6 +2,8 @@ import { AlertTriangle, CheckCircle2, Circle, Clipboard, Plus, X } from 'lucide-
 import React, { useEffect, useState } from 'react';
 import type { BoundedList, Folder, Project, ProjectActivity, ProjectDecision, ProjectExport, ProjectTask, TaskStatus } from '../../shared/protocol';
 import { invoke } from '../bridge';
+import { selectChat } from '../store';
+import { useStore } from '../useStore';
 
 const STATUS_LABEL: Record<TaskStatus, string> = {
   todo: 'To do',
@@ -47,6 +49,8 @@ export function ProjectTasks({ project, folders }: { project: Project; folders: 
     return () => { cancelled = true; };
   }, [projectId, reloadKey]);
 
+  useEffect(()=>window.muster?.subscribe(event=>{if(event.type==='projectChanged'&&event.projectId===projectId)setReloadKey(k=>k+1)}),[projectId]);
+
   const reload = () => setReloadKey(k => k + 1);
 
   if (loadError) return <div className="project-tasks-error" role="alert">{loadError} <button type="button" className="settings-button secondary" onClick={reload}>Retry</button></div>;
@@ -55,7 +59,7 @@ export function ProjectTasks({ project, folders }: { project: Project; folders: 
   async function exportProject(){setExportState('');try{const data:ProjectExport=await invoke('project.export',{projectId});await invoke('clipboard.write',{text:JSON.stringify(data,null,2)});setExportState(`${project.name} export copied with ${folders.length} attached folder${folders.length===1?'':'s'}.`)}catch(err){setExportState(err instanceof Error?`Export failed: ${err.message}`:'Export failed.');}}
 
   return <div className="project-tasks">
-    <div className="project-tasks-export"><p>Tasks are durable tracking records. “Marked running” is a status you set; it does not start an agent.</p><button type="button" className="settings-button secondary" onClick={()=>void exportProject()}><Clipboard size={13}/>Copy project export</button>{exportState&&<span role="status">{exportState}</span>}</div>
+    <div className="project-tasks-export"><p>Tasks stay linked to their agent chat, folder, run status, and verification evidence.</p><button type="button" className="settings-button secondary" onClick={()=>void exportProject()}><Clipboard size={13}/>Copy project export</button>{exportState&&<span role="status">{exportState}</span>}</div>
     <section aria-label="Tasks">
       <div className="project-tasks-header">
         <h3 className="settings-section-label">Tasks</h3>
@@ -64,7 +68,7 @@ export function ProjectTasks({ project, folders }: { project: Project; folders: 
       {addingTask && <NewTaskForm projectId={projectId} tasks={tasks} onClose={() => setAddingTask(false)} onCreated={() => { setAddingTask(false); reload(); }}/>}
       {tasks.length === 0 && !addingTask && <p className="projects-empty">No tasks yet. Add one to track implementation work with explicit acceptance criteria.</p>}
       {tasks.length > 0 && <ul className="project-task-list">
-        {tasks.map(t => <TaskRow key={t.id} task={t} tasks={tasks} projectId={projectId} onChanged={reload}/>)}
+        {tasks.map(t => <TaskRow key={t.id} task={t} tasks={tasks} projectId={projectId} folders={folders} onChanged={reload} onOpenChat={chatId=>void selectChat(chatId)}/>)}
       </ul>}
       {taskList.truncated && <p className="projects-empty" role="status">Showing the first 200 tasks. Export the Project for the bounded view; older tasks remain stored.</p>}
     </section>
@@ -138,12 +142,16 @@ function NewTaskForm({ projectId, tasks, onClose, onCreated }: { projectId: stri
   </form>;
 }
 
-function TaskRow({ task, tasks, projectId, onChanged }: { task: ProjectTask; tasks: ProjectTask[]; projectId:string; onChanged: () => void }) {
+function TaskRow({ task, tasks, projectId, folders, onChanged, onOpenChat }: { task: ProjectTask; tasks: ProjectTask[]; projectId:string; folders:Folder[]; onChanged: () => void; onOpenChat:(chatId:string)=>void }) {
+  const state=useStore();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [evidenceDraft, setEvidenceDraft] = useState('');
   const [showEvidenceForm, setShowEvidenceForm] = useState(false);
+  const [executionFolderId,setExecutionFolderId]=useState(folders.length===1?folders[0]!.id:'');
   const depTitles = task.dependencies.map(id => tasks.find(t => t.id === id)?.title ?? id);
+  const runChat=task.runChatId?state.snapshot?.chats.find(chat=>chat.id===task.runChatId):undefined;
+  const agentActive=runChat?.status==='running'||runChat?.status==='stopping';
 
   async function setStatus(status: TaskStatus, evidence?: string[]):Promise<boolean> {
     setError(''); setBusy(true);
@@ -165,6 +173,14 @@ function TaskRow({ task, tasks, projectId, onChanged }: { task: ProjectTask; tas
     }
     if (await setStatus('verified', entries)) { setShowEvidenceForm(false); setEvidenceDraft(''); }
   }
+  async function startAgentRun(){
+    if(folders.length>1&&!executionFolderId){setError('Choose the Project folder for this run.');return;}
+    setBusy(true);setError('');
+    try{const result=await invoke('project.tasks.start',{projectId,id:task.id,revision:task.revision,requestId:crypto.randomUUID(),...(executionFolderId?{folderId:executionFolderId}:{})});onChanged();onOpenChat(result.chatId);}
+    catch(err){setError(err instanceof Error?err.message:'Could not start the Project task.');onChanged();}
+    finally{setBusy(false);}
+  }
+  async function stopAgentRun(){if(!runChat)return;setBusy(true);setError('');try{await invoke('chat.stop',{id:runChat.id});onChanged();}catch(err){setError(err instanceof Error?err.message:'Could not stop the task chat.');}finally{setBusy(false);}}
 
   const nextActions: { label: string; status: TaskStatus }[] = [];
   if (task.status === 'todo' || task.status === 'blocked') nextActions.push({ label: 'Start', status: 'running' });
@@ -175,16 +191,22 @@ function TaskRow({ task, tasks, projectId, onChanged }: { task: ProjectTask; tas
     <div className="project-task-row-top">
       <StatusIcon status={task.status}/>
       <span className="project-task-title">{task.title}</span>
-      <span className="project-task-status-label">{STATUS_LABEL[task.status]}</span>
+      <span className="project-task-status-label">{task.status==='running'&&agentActive?'Agent running':STATUS_LABEL[task.status]}</span>
     </div>
     {task.acceptance && <p className="project-task-acceptance">{task.acceptance}</p>}
     {depTitles.length > 0 && <p className="project-task-deps">Depends on: {depTitles.join(', ')}</p>}
     {task.evidence.length > 0 && <ul className="project-task-evidence">{task.evidence.map((e, i) => <li key={i}>{e}</li>)}</ul>}
+    {task.runError&&<p className="field-error" role="status">{task.runError}</p>}
     {error && <p className="field-error" role="alert">{error}</p>}
     <div className="project-task-row-actions">
-      {nextActions.filter(a => a.status !== 'implemented').map(a =>
+      {(task.status==='todo'||task.status==='blocked')&&folders.length>1&&<label className="task-execution-folder"><span>Run in folder</span><select aria-label={`Run ${task.title} in folder`} value={executionFolderId} onChange={e=>setExecutionFolderId(e.target.value)} disabled={busy}><option value="">Choose folder…</option>{folders.map(folder=><option key={folder.id} value={folder.id}>{folder.name}</option>)}</select></label>}
+      {(task.status==='todo'||task.status==='blocked')&&folders.length===0&&<span className="project-task-run-hint">Attach a Project folder before running this task.</span>}
+      {(task.status==='todo'||task.status==='blocked')&&folders.length>0&&<button type="button" className="settings-button secondary" disabled={busy} onClick={()=>void startAgentRun()}>{busy?'Starting…':task.runChatId?'Run again':'Run in agent chat'}</button>}
+      {task.runChatId&&<button type="button" className="settings-button secondary" disabled={busy||!runChat} onClick={()=>onOpenChat(task.runChatId!)}>{agentActive?'Open running chat':'Open linked chat'}</button>}
+      {agentActive&&<button type="button" className="settings-button secondary" disabled={busy} onClick={()=>void stopAgentRun()}>Stop agent run</button>}
+      {nextActions.filter(a => a.status !== 'implemented'&&!(task.status==='todo'||task.status==='blocked')&&!(agentActive&&task.status==='running')).map(a =>
         <button key={a.status} type="button" className="settings-button secondary" disabled={busy} onClick={() => void setStatus(a.status)}>{a.label}</button>)}
-      {task.status === 'running' && <button type="button" className="settings-button secondary" disabled={busy} onClick={() => void setStatus('implemented')}>Mark implemented</button>}
+      {task.status === 'running'&&!agentActive&&<button type="button" className="settings-button secondary" disabled={busy} onClick={() => void setStatus('implemented')}>Mark implemented</button>}
       {(task.status === 'implemented' || task.status === 'verified') && !showEvidenceForm &&
         <button type="button" className="settings-button" disabled={busy} onClick={() => setShowEvidenceForm(true)}>{task.status === 'verified' ? 'Add evidence' : 'Verify with evidence'}</button>}
     </div>
