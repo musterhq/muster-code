@@ -137,7 +137,8 @@
 
 /* A familiar worksheet surface inside the dark application, not a chat table. */
 .office-sheet {--sheet-paper:#fff;--sheet-ink:#242424;--sheet-border:#dedede;--sheet-header:#f5f5f5;--sheet-green:#217346;--sheet-selection:#e6f1eb;background:var(--sheet-paper);color:var(--sheet-ink);color-scheme:light;}
-.file-document > .office-sheet {margin:14px 16px 0;border:1px solid #ffffff20;border-bottom:0;border-radius:8px 8px 0 0;box-shadow:0 10px 32px #0003;}
+.file-document:has(> .office-sheet) {padding:14px 16px 0;}
+.file-document > .office-sheet {min-height:0;margin:0;border:1px solid #ffffff20;border-bottom:0;border-radius:8px 8px 0 0;box-shadow:0 10px 32px #0003;}
 .file-document > .office-sheet > .workbook-grid {overscroll-behavior:contain;}
 .file-document > .office-sheet > .file-format-note {border-radius:0 0 7px 7px;}
 .office-sheet .workbook-toolbar {background:#fafafa;border-color:var(--sheet-border);gap:4px;min-height:44px;padding-inline:12px;}

@@ -9,7 +9,7 @@
   --bg-hover: rgb(255 255 255 / 5.5%);
   --bg-active: rgb(255 255 255 / 8%);
   --hairline: rgb(255 255 255 / 6%);
-  --nav-material: rgb(23 23 23 / 56%);
+  --nav-material: rgb(19 19 19 / 46%);
   --nav-solid: #1a1a1a;
   --text: #e8e8e8;
   --text-dim: rgb(232 232 232 / 72%);
@@ -124,7 +124,7 @@ textarea:focus-visible {
   display: flex;
   flex-direction: column;
   background: var(--bg);
-  border-left: 1px solid rgb(255 255 255 / 3.5%);
+  border-left: 0;
 }
 
 .workspace {
