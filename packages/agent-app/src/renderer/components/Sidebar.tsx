@@ -1,30 +1,24 @@
 import {
   Archive,
-  ArchiveRestore,
   Brain,
   Blocks,
   ChevronDown,
   ChevronRight,
-  ChevronUp,
   FolderOpen,
   FolderPlus,
   Layers,
   KeyRound,
   MessageSquarePlus,
-  Pencil,
   Pin,
-  PinOff,
   Search,
   Settings2,
   MoreHorizontal,
   ArrowDownWideNarrow,
   Check,
   MessageCircle,
-  Terminal,
 } from 'lucide-react';
 import {Collapsible} from '@base-ui/react/collapsible';
 import {Menu} from '@base-ui/react/menu';
-import {ContextMenu} from '@base-ui/react/context-menu';
 import {PreviewCard} from '@base-ui/react/preview-card';
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { Chat, Folder } from '../../shared/protocol';
@@ -40,6 +34,8 @@ import {
   selectChat,
   movePin,
   updateChat,
+  notifyError,
+  notifySuccess,
 } from '../store';
 import { useStore } from '../useStore';
 import { focusComposer, isChord, restoreFocus } from '../focus';
@@ -49,6 +45,7 @@ import {chatGroup,compareChats,isChatRunning,isChatSort,readChatSort,saveChatSor
 import './sidebar-disclosure.css';
 import {useProcessSummary} from '../processSummary';
 import {isActiveProcess} from '../../shared/process-protocol';
+import {invoke} from '../bridge';
 
 function ChatRow({ chat }: { chat: Chat }): React.ReactElement {
   const state = useStore();
@@ -57,14 +54,33 @@ function ChatRow({ chat }: { chat: Chat }): React.ReactElement {
   const [title, setTitle] = useState(chat.title);
   const [renameError,setRenameError]=useState('');
   const [renameBusy,setRenameBusy]=useState(false);
-  const [menuOpen,setMenuOpen]=useState(false);
-  const rowButton=useRef<HTMLElement|null>(null),moreButton=useRef<HTMLButtonElement>(null),renameInput=useRef<HTMLInputElement>(null);
+  const rowButton=useRef<HTMLElement|null>(null),renameInput=useRef<HTMLInputElement>(null);
   const renameCancelled=useRef(false),renamePending=useRef(false);
   const active = state.activeChatId === chat.id;
   const activeProcesses = processSummary?.sessions.filter(session => session.chatId === chat.id && isActiveProcess(session.status)).length ?? 0;
   const pendingAttention = state.snapshot?.attention?.chats.find(item => item.chatId === chat.id)?.requests.length ?? 0;
   const folder=state.snapshot?.folders.find(item=>item.id===chat.folderId);
   const updated=relativeTime(chat.updatedAt);
+  const copyLocalLink=async()=>{try{await invoke('clipboard.write',{text:`muster://chat/${encodeURIComponent(chat.id)}`});notifySuccess('Local chat link copied');}catch(error){notifyError(error);}};
+
+  const showNativeMenu=async(x:number,y:number)=>{
+    try {
+      const action=await invoke('chat.contextMenu',{id:chat.id,x,y});
+      if(action==='pin')await updateChat(chat.id,{pinned:!chat.pinned});
+      else if(action==='rename')beginRename();
+      else if(action==='activity')openProcessesTab(chat.id,chat.title);
+      else if(action==='files'&&folder)openFilesTab(folder.id,folder.name);
+      else if(action==='copy-link')await copyLocalLink();
+      else if(action==='pin-up')await movePin(chat.id,'up');
+      else if(action==='pin-down')await movePin(chat.id,'down');
+      else if(action==='archive')await updateChat(chat.id,{archived:!chat.archived});
+    } catch(error) { notifyError(error); }
+  };
+  const openNativeMenuAtPointer=(event:React.MouseEvent<HTMLButtonElement>)=>{
+    event.preventDefault();event.stopPropagation();
+    const rect=event.currentTarget.getBoundingClientRect();
+    void showNativeMenu(rect.right,rect.bottom);
+  };
 
   const beginRename=()=>{renameCancelled.current=false;setTitle(chat.title);setRenameError('');setRenaming(true);};
   const finishRename=()=>{renameCancelled.current=true;setRenaming(false);requestAnimationFrame(()=>rowButton.current?.focus());};
@@ -77,20 +93,8 @@ function ChatRow({ chat }: { chat: Chat }): React.ReactElement {
     try {if(await updateChat(chat.id,{title:next}))finishRename();else {setRenameError('The title was not saved. Try again.');renameInput.current?.focus();}}
     finally {renamePending.current=false;setRenameBusy(false);}
   };
-  const menuItems=()=> <>
-    <Menu.Item onClick={()=>void updateChat(chat.id,{pinned:!chat.pinned})}>{chat.pinned?<PinOff size={14}/>:<Pin size={14}/>}<span>{chat.pinned?'Unpin chat':'Pin chat'}</span></Menu.Item>
-    <Menu.Item onClick={beginRename}><Pencil size={14}/><span>Rename chat</span></Menu.Item>
-    <Menu.Separator className="chat-menu-separator"/>
-    <Menu.Item onClick={()=>openProcessesTab(chat.id,chat.title)}><Terminal size={14}/><span>Open command activity</span></Menu.Item>
-    {folder&&<Menu.Item onClick={()=>openFilesTab(folder.id,folder.name)}><FolderOpen size={14}/><span>Open files and changes</span></Menu.Item>}
-    {chat.pinned&&!chat.archived&&<><Menu.Separator className="chat-menu-separator"/><Menu.Item onClick={()=>void movePin(chat.id,'up')}><ChevronUp size={14}/><span>Move pin up</span></Menu.Item><Menu.Item onClick={()=>void movePin(chat.id,'down')}><ChevronDown size={14}/><span>Move pin down</span></Menu.Item></>}
-    <Menu.Separator className="chat-menu-separator"/>
-    <Menu.Item onClick={()=>void updateChat(chat.id,{archived:!chat.archived})}>{chat.archived?<ArchiveRestore size={14}/>:<Archive size={14}/>}<span>{chat.archived?'Restore chat':'Archive chat'}</span></Menu.Item>
-  </>;
-  const finalFocus=()=>renameInput.current??rowButton.current??document.querySelector<HTMLElement>('.nav-scroll');
-
   return (
-    <PreviewCard.Root><ContextMenu.Root><ContextMenu.Trigger className={`chat-row${active ? ' is-active' : ''}`} data-chat-id={chat.id} data-running={isChatRunning(chat)||undefined}>
+    <PreviewCard.Root><div className={`chat-row${active ? ' is-active' : ''}`} data-chat-id={chat.id} data-running={isChatRunning(chat)||undefined} onContextMenu={event=>{event.preventDefault();void showNativeMenu(event.clientX,event.clientY);}}>
       {renaming ? (
         <input
           ref={renameInput}
@@ -119,9 +123,8 @@ function ChatRow({ chat }: { chat: Chat }): React.ReactElement {
           delay={520}
           closeDelay={80}
           aria-current={active?'page':undefined}
-          onKeyDown={event=>{if(event.key==='ContextMenu'||(event.shiftKey&&event.key==='F10')){event.preventDefault();moreButton.current?.click();}}}
-          onClick={() => void selectChat(chat.id)}
-          onDoubleClick={beginRename}
+          onKeyDown={event=>{if(event.key==='ContextMenu'||(event.shiftKey&&event.key==='F10')){event.preventDefault();const rect=event.currentTarget.getBoundingClientRect();void showNativeMenu(rect.left,rect.bottom);}}}
+          onClick={() => { if(state.activeChatId!==chat.id)void selectChat(chat.id); }}
         >
           <StatusDot status={chat.status} />
           <span className="chat-title" title={chat.title}>
@@ -135,11 +138,8 @@ function ChatRow({ chat }: { chat: Chat }): React.ReactElement {
         </PreviewCard.Trigger>
       )}
       {renameError&&renaming&&<span className="chat-rename-error" role="alert">{renameError}</span>}
-      {!renaming&&<span className="chat-row-actions"><Menu.Root open={menuOpen} onOpenChange={setMenuOpen}>
-        <Menu.Trigger ref={moreButton} className="icon-button" aria-label={`Actions for ${chat.title}`}><MoreHorizontal size={15}/></Menu.Trigger>
-        <Menu.Portal><Menu.Positioner side="bottom" align="end" sideOffset={4} className="chat-menu-positioner"><Menu.Popup className="chat-menu" finalFocus={finalFocus}>{menuItems()}</Menu.Popup></Menu.Positioner></Menu.Portal>
-      </Menu.Root></span>}
-    </ContextMenu.Trigger><ContextMenu.Portal><ContextMenu.Positioner className="chat-menu-positioner"><ContextMenu.Popup className="chat-menu" finalFocus={finalFocus}>{menuItems()}</ContextMenu.Popup></ContextMenu.Positioner></ContextMenu.Portal></ContextMenu.Root>
+      {!renaming&&<span className="chat-row-actions"><button type="button" className="icon-button" aria-label={`Actions for ${chat.title}`} onClick={openNativeMenuAtPointer}><MoreHorizontal size={15}/></button></span>}
+    </div>
     {!renaming&&<PreviewCard.Portal><PreviewCard.Positioner side="right" align="start" sideOffset={8} className="chat-preview-positioner"><PreviewCard.Popup className="chat-preview-card">
       <div className="chat-preview-title"><span>{chat.title}</span><StatusDot status={chat.status} showLabel={isChatRunning(chat)}/></div>
       <div className="chat-preview-meta"><span>{folder?.name??'Personal chat'}</span><span>{updated}</span></div>

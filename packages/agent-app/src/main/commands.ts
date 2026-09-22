@@ -33,6 +33,7 @@ const COMMANDS = {
   'folder.pick': true,
   'chat.create': true,
   'chat.select': true,
+  'chat.contextMenu': true,
   'chat.timeline': true,
   'chat.update': true,
   'chat.setPermissionMode': true,

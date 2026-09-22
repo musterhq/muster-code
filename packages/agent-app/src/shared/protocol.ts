@@ -59,6 +59,7 @@ export interface Commands extends BrowserCommands, ScopedComputerCommands, Proce
  'folder.pick': { input: undefined; output: Folder | null };
  'chat.create': { input: {folderId?: string; projectId?: string}; output: Chat };
  'chat.select': { input: {id: string}; output: TimelineItem[] };
+ 'chat.contextMenu': {input:{id:string;x:number;y:number};output:'pin'|'rename'|'activity'|'files'|'copy-link'|'pin-up'|'pin-down'|'archive'|null};
  'chat.timeline': { input: {id: string; select?: boolean}; output: TimelineSnapshot };
  'chat.update': { input: {id: string; title?: string; pinned?: boolean; archived?: boolean; draft?: string; mode?: Chat['mode']; model?: string}; output: Chat };
  'chat.selectProvider': {input: {id: string; providerId: string; model: string}; output: Chat};

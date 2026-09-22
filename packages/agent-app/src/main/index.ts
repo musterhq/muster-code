@@ -188,6 +188,35 @@ async function main(): Promise<void> {
       throw new Error('Unknown command.');
     }
     switch(command) {
+      case 'chat.contextMenu': {
+        const request=input as Commands['chat.contextMenu']['input'];
+        if(!request||typeof request.id!=='string'||request.id.length>256||!Number.isFinite(request.x)||!Number.isFinite(request.y))throw new Error('Invalid chat menu request.');
+        if(!service||!window||window.isDestroyed())throw new Error('Agent service is unavailable.');
+        const snapshot=await service.invoke('app.snapshot',undefined);
+        const chat=snapshot.chats.find(item=>item.id===request.id);
+        if(!chat)throw new Error('Chat no longer exists.');
+        const folder=chat.folderId?snapshot.folders.find(item=>item.id===chat.folderId):undefined;
+        type Action=Commands['chat.contextMenu']['output'];
+        const options:Electron.MenuItemConstructorOptions[]=[];
+        const item=(label:string,action:Exclude<Action,null>)=>options.push({label,click:()=>finish(action)});
+        let finish:(action:Action)=>void=()=>{};
+        if(chat.pinned&&!chat.archived){item('Unpin Chat','pin');options.push({type:'separator'});}
+        else item('Pin Chat','pin');
+        item('Rename…','rename');
+        options.push({type:'separator'});
+        item('Open Command Activity','activity');
+        if(folder)item('Open Files and Changes','files');
+        item('Copy Local Chat Link','copy-link');
+        if(chat.pinned&&!chat.archived){options.push({type:'separator'});item('Move Pin Up','pin-up');item('Move Pin Down','pin-down');}
+        options.push({type:'separator'});
+        item(chat.archived?'Restore Chat':'Archive Chat','archive');
+        const nativeMenu=Menu.buildFromTemplate(options);
+        const scale=window.webContents.getZoomFactor()||1;
+        return await new Promise<Action>(resolve=>{
+          finish=resolve;
+          nativeMenu.popup({window:window!,x:Math.round(request.x/scale),y:Math.round(request.y/scale),callback:()=>resolve(null)});
+        });
+      }
       case 'browser.open': return browserWorkspace.open(input as Commands['browser.open']['input']);
       case 'browser.navigate': return browserWorkspace.navigate(input as Commands['browser.navigate']['input']);
       case 'browser.position': return browserWorkspace.position(input as Commands['browser.position']['input'], () => nativePreview.hide());

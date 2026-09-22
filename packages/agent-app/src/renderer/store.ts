@@ -156,6 +156,7 @@ function set(patch: Partial<AppState>): void {
 }
 
 export function notifyError(cause: unknown): void { pushNotice(errorText(cause)); }
+export function notifySuccess(message: string): void { pushNotice(message); }
 
 function pushNotice(message: string): void {
   const notice = { id: ++noticeSeq, message };
