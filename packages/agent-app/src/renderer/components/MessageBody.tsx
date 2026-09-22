@@ -7,6 +7,7 @@ import {MarkdownTable} from './MarkdownTable';
 import remarkGfm from 'remark-gfm';
 import { createIncrementalMarkdownPlugin } from '../markdown-incremental';
 import {markdownHeadingId} from './markdownAnchors';
+import {HighlightedCode} from './HighlightedCode';
 
 import './message-body.css';
 
@@ -86,7 +87,7 @@ function Pre({ children }: { children?: React.ReactNode }): React.ReactElement {
           <span className="md-code-lang">{lang ?? 'text'}</span>
           <CopyButton getText={() => text} label="Copy code" />
         </div>
-        <pre className="md-code-body">{children}</pre>
+        <pre className="md-code-body"><HighlightedCode source={text} language={lang ?? 'text'}/></pre>
       </div>
     );
   }

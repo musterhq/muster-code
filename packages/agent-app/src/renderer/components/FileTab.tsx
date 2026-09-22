@@ -12,6 +12,8 @@ import {NativeDocument} from './NativeDocument';
 import {PdfFile} from './PdfFile';
 import {WorkbookFile} from './WorkbookFile';
 import {FileAnnotations} from './FileAnnotations';
+import {HighlightedSourceTable} from './HighlightedCode';
+import {codeLanguageFromPath} from './codeLanguage';
 import {friendlyFileError, parseDelimited} from './filePresentation';
 
 // Keep Markdown parsing bounded independently of the host's file-read limit.
@@ -88,10 +90,7 @@ export function FileTab({tab}: {tab: WorkspaceTab}): React.ReactElement {
       {kind === 'markdown' ? <MessageBody text={text} resourceContext={{folderId: tab.folderId!, path: tab.path!}}/> : <StructuredFile text={text} kind={kind as 'json'|'csv'|'tsv'}/>}
       {!text && <p className="file-empty">This document is empty.</p>}
     </div> : <div className="code-scroll" role="region" aria-label={`Source of ${tab.path}`} tabIndex={0}>
-      <table className="code-table"><tbody>{(text === '' ? [] : text.split('\n')).map((line, i) =>
-        <tr key={i} data-line={i+1} className={i+1 === tab.line ? 'file-line-target' : undefined}>
-          <td className="code-no">{i+1}</td><td className="code-line">{line}</td>
-        </tr>)}</tbody></table>
+      <HighlightedSourceTable source={text} language={codeLanguageFromPath(tab.path ?? '')} targetLine={tab.line}/>
       {!text && <p className="file-empty">This file is empty.</p>}
     </div>}
     {richText && !previewAllowed && !truncated && <div className="pane-truncated">Showing source: Document preview is limited to 65,536 characters.</div>}

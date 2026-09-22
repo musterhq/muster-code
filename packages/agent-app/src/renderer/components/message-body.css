@@ -70,6 +70,8 @@
   padding: 10px;
   overflow-x: auto;
   user-select: text;
+  tab-size: 2;
+  font-variant-ligatures: none;
 }
 .md-code-body code { background: none; border: 0; padding: 0; }
 
