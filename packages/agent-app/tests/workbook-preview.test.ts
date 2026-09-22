@@ -30,6 +30,8 @@ test('workbook uses cached values, formats display values, and does not repeat m
   await book.xlsx.writeFile(join(dir,'display.xlsx'));
   const result=await readWorkbook(dir,'display.xlsx'), row=result.sheets[0].rows;
   assert.deepEqual(row[0].slice(0,6),['$1,234.50','12.5%','2024-01-02','Rich text','OpenAI','#DIV/0!']);
+  assert.deepEqual(result.sheets[0].types?.[0].slice(0,6),['number','number','date','text','text','error']);
+  assert.deepEqual(result.sheets[0].types?.[1].slice(0,3),['text','text','number']);
   assert.deepEqual(row[1].slice(0,3),['merged','','2,469']);
  } finally { await rm(dir,{recursive:true,force:true}); }
 });

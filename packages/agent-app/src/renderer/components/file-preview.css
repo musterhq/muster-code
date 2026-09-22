@@ -119,10 +119,11 @@
 .workbook-formula {align-items:flex-start;flex-shrink:0;min-height:38px;padding:5px 10px;}
 .workbook-fx {font-family:Georgia,serif;font-style:italic;color:var(--text-faint);padding:4px;}
 .workbook-formula code {min-width:0;font-family:var(--mono);white-space:pre-wrap;overflow:auto;overflow-wrap:anywhere;max-height:100px;line-height:1.5;padding:4px 0;}
-.workbook-grid table {width:100%;font-size:13px;}
+.workbook-grid table {font-size:13px;}
 .workbook-grid th {height:30px;background:var(--bg-raised);}
-.workbook-grid thead th:first-child {left:0;z-index:3;}
-.workbook-grid tbody th {position:sticky;top:auto;}
+.workbook-grid thead th {position:sticky;top:0;z-index:2;}
+.workbook-grid thead th:first-child {left:0;z-index:4;}
+.workbook-grid tbody th {position:sticky;top:auto;left:0;z-index:1;}
 .workbook-grid td {height:32px;vertical-align:top;}
 .workbook-grid td button {font:inherit;line-height:20px;min-height:32px;min-width:0;max-width:none;padding:6px 10px;width:100%;}
 .workbook-grid td button:focus-visible {outline:2px solid var(--accent);outline-offset:-2px;border-radius:0;}
@@ -151,11 +152,16 @@
 .office-sheet .workbook-grid[data-gridlines='false'] {background-image:none;}
 .office-sheet .workbook-grid table {background:#fff;font-family:Arial,sans-serif;font-size:calc(13px * var(--sheet-scale));color:var(--sheet-ink);}
 .office-sheet .workbook-grid th {background:var(--sheet-header);color:#555;border-color:#d6d6d6;height:calc(30px * var(--sheet-scale));}
+.office-sheet .workbook-grid thead th {box-shadow:0 1px #d6d6d6;}
+.office-sheet .workbook-grid tbody th {box-shadow:1px 0 #d6d6d6;}
 .office-sheet .workbook-grid td {height:calc(32px * var(--sheet-scale));border-color:var(--sheet-border);}
 .office-sheet .workbook-grid td button {color:var(--sheet-ink);height:100%;font-size:inherit;line-height:calc(20px * var(--sheet-scale));padding:calc(6px * var(--sheet-scale)) calc(10px * var(--sheet-scale));min-height:calc(32px * var(--sheet-scale));}
 .office-sheet .workbook-grid[data-gridlines='false'] td {border-color:transparent;}
 .office-sheet .workbook-grid td[data-in-range='true'] {background:var(--sheet-selection);}
 .office-sheet .workbook-grid td[data-selected='true'] {box-shadow:inset 0 0 0 2px var(--sheet-green);background:#fff;}
+.office-sheet .workbook-grid td[data-type='number'] button,.office-sheet .workbook-grid td[data-type='date'] button {text-align:right;font-variant-numeric:tabular-nums;}
+.office-sheet .workbook-grid td[data-type='boolean'] button {color:#555;}
+.office-sheet .workbook-grid td[data-type='error'] button {color:#c13b32;}
 .office-sheet .workbook-grid td button:focus-visible {outline-color:var(--sheet-green);}
 .office-sheet .workbook-pages {background:#f6f6f6;border-color:var(--sheet-border);color:#555;min-height:36px;}
 .office-sheet .workbook-pages > span:first-child,.office-sheet .workbook-copy-status {color:#555;}

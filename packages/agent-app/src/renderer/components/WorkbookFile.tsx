@@ -94,14 +94,15 @@ export const WorkbookFile = React.memo(function WorkbookFile({workbook, onLocati
       event.preventDefault(); choose(next, event.shiftKey && event.key !== 'Enter');
     }}>
       {sheet.rows.length && columns ? <table aria-label={sheet.name} aria-rowcount={sheet.rows.length + 1} aria-colcount={columns + 1} style={{minWidth: (48 + columns * 144) * zoom / 100}}>
-        <colgroup><col style={{width:48 * zoom / 100}}/>{Array.from({length:columns},(_,c)=><col key={c}/>)}</colgroup>
+        <colgroup><col style={{width:48 * zoom / 100}}/>{Array.from({length:columns},(_,c)=><col key={c} style={{width:144 * zoom / 100}}/>)}</colgroup>
         <thead><tr><th aria-label="Row"/>{Array.from({length:columns},(_,c)=><th key={c} scope="col">{columnName(c)}</th>)}</tr></thead>
         <tbody>{sheet.rows.slice(currentPage*pageSize,(currentPage+1)*pageSize).map((row,i)=>{
           const r=currentPage*pageSize+i;
           return <tr key={r} aria-rowindex={r+2}><th scope="row">{r+1}</th>{Array.from({length:columns},(_,c)=>{
             const inRange=!!(selected && start && r>=Math.min(start.r,selected.r) && r<=Math.max(start.r,selected.r) && c>=Math.min(start.c,selected.c) && c<=Math.max(start.c,selected.c));
             const active=selected?.r===r && selected.c===c;
-            return <td key={c} data-selected={active} data-in-range={inRange}><button data-cell={`${r}:${c}`} tabIndex={active || (!selected && i===0 && c===0) ? 0 : -1} title={row[c] ?? ''} aria-label={`${columnName(c)}${r+1}: ${row[c]??''}`} onFocus={()=>{if(!selected)choose({r,c},false,false);}} onClick={event=>choose({r,c},event.shiftKey)}>{row[c] || '\u00a0'}</button></td>;
+            const type=sheet.types?.[r]?.[c] ?? 'text';
+            return <td key={c} data-type={type} data-selected={active} data-in-range={inRange}><button data-cell={`${r}:${c}`} tabIndex={active || (!selected && i===0 && c===0) ? 0 : -1} title={row[c] ?? ''} aria-label={`${columnName(c)}${r+1} (${type}): ${row[c]??''}`} onFocus={()=>{if(!selected)choose({r,c},false,false);}} onClick={event=>choose({r,c},event.shiftKey)}>{row[c] || '\u00a0'}</button></td>;
           })}</tr>;
         })}</tbody></table> : <div className="file-empty">This sheet is empty.</div>}
     </div>

@@ -18,7 +18,8 @@ export interface Project { id: string; name: string; goal: string; folderIds: st
 export interface Snapshot { folders: Folder[]; chats: Chat[]; projects: Project[]; activeChatId?: string; version: number; attention?: PendingAttentionSummary }
 export interface FileEntry { name: string; path: string; kind: 'file' | 'directory' }
 export interface DocumentPreview {base64:string;revision:string;sourceFormat:string;converted:boolean;size:number}
-export interface WorkbookPreview {revision:string;sheets:{name:string;rows:string[][];formulas:Record<string,string>;limited:boolean}[];limited:boolean}
+export type WorkbookCellType = 'text'|'number'|'date'|'boolean'|'error';
+export interface WorkbookPreview {revision:string;sheets:{name:string;rows:string[][];types?:WorkbookCellType[][];formulas:Record<string,string>;limited:boolean}[];limited:boolean}
 export interface FileAnnotation {id:string;folderId:string;path:string;revision:string;location:string;quote:string;note:string;createdAt:string}
 export interface ChangedFile { path: string; previousPath?: string; status: string; adds?: number; dels?: number }
 export interface GitLocalFile {path:string;previousPath?:string;index:string;worktree:string;staged:boolean;untracked:boolean;conflict:boolean}

@@ -14,7 +14,7 @@ import {WorkbookFile} from './WorkbookFile';
 import {FileAnnotations} from './FileAnnotations';
 import {HighlightedSourceTable} from './HighlightedCode';
 import {codeLanguageFromPath} from './codeLanguage';
-import {friendlyFileError, parseDelimited} from './filePresentation';
+import {friendlyFileError, parseDelimited, delimitedCellType} from './filePresentation';
 
 // Keep Markdown parsing bounded independently of the host's file-read limit.
 const MARKDOWN_LIMIT = 64 * 1024;
@@ -45,7 +45,7 @@ export function FileTab({tab}: {tab: WorkspaceTab}): React.ReactElement {
     if (!isDelimited || body?.phase !== 'ready') return {workbook: null, error: ''};
     try {
       const parsed = parseDelimited(body.value?.text ?? '', kind === 'csv' ? ',' : '\t');
-      return {workbook: {revision:textRevision, sheets:[{name:tab.title,rows:parsed.rows,formulas:{},limited:parsed.limited}],limited:parsed.limited}, error:''};
+      return {workbook: {revision:textRevision, sheets:[{name:tab.title,rows:parsed.rows,types:parsed.rows.map(row=>row.map(delimitedCellType)),formulas:{},limited:parsed.limited}],limited:parsed.limited}, error:''};
     } catch (error) {return {workbook:null,error:error instanceof Error ? error.message : String(error)};}
   }, [body?.value?.text, body?.phase, kind, isDelimited, textRevision, tab.title]);
   useEffect(() => { if (tab.line) setMode('source'); }, [tab.id, tab.line]);

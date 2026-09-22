@@ -3,7 +3,21 @@ import {inflateRawSync} from 'node:zlib';
 import {createHash} from 'node:crypto';
 import {resolveInside} from './paths.ts';
 import {formatPreviewCell} from './workbook-format.ts';
-import type {WorkbookPreview} from '../shared/protocol.ts';
+import type {WorkbookCellType,WorkbookPreview} from '../shared/protocol.ts';
+
+function cellType(value:unknown):WorkbookCellType {
+  if(value instanceof Date)return 'date';
+  if(typeof value==='number')return 'number';
+  if(typeof value==='boolean')return 'boolean';
+  if(value && typeof value==='object') {
+    const item=value as Record<string,unknown>;
+    if(typeof item.error==='string')return 'error';
+    if('formula' in item || 'sharedFormula' in item)return cellType(item.result);
+    if('hyperlink' in item)return 'text';
+    if('richText' in item)return 'text';
+  }
+  return 'text';
+}
 
 /** Preflight central-directory sizes before allowing the XLSX parser to inflate. */
 export function checkWorkbookZip(data:Buffer):void {
@@ -45,21 +59,21 @@ export async function readWorkbook(root:string,rel:string):Promise<WorkbookPrevi
   const sheets:WorkbookPreview['sheets']=[];
   let remaining=20000,characters=0;
   for(const sheet of book.worksheets.slice(0,20)) {
-    const rows:string[][]=[],formulas:Record<string,string>={};
+    const rows:string[][]=[],types:WorkbookCellType[][]=[],formulas:Record<string,string>={};
     const columnCount=Math.min(sheet.columnCount,100),rowCount=Math.min(sheet.rowCount,2000);
     for(let r=1;r<=rowCount && remaining>=columnCount;r++) {
-      const row:string[]=[];
+      const row:string[]=[],typeRow:WorkbookCellType[]=[];
       for(let c=1;c<=columnCount;c++) {
         const cell=sheet.getCell(r,c);remaining--;
         // ExcelJS resolves non-master merged cells to their master; preview them once.
         const value=(cell.isMerged && cell.master!==cell ? '' : formatPreviewCell(cell,Boolean(book.properties.date1904))).slice(0,4000);characters+=value.length;
         if(characters>2_000_000)throw new Error('Workbook text exceeds preview budget.');
-        row.push(value);
+        row.push(value);typeRow.push(cellType(cell.value));
         if(cell.formula)formulas[cell.address]=cell.formula.slice(0,4000);
       }
-      rows.push(row);
+      rows.push(row);types.push(typeRow);
     }
-    sheets.push({name:sheet.name,rows,formulas,limited:sheet.rowCount>rows.length || sheet.columnCount>100});
+    sheets.push({name:sheet.name,rows,types,formulas,limited:sheet.rowCount>rows.length || sheet.columnCount>100});
     if(remaining<=0)break;
   }
   return {revision:createHash('sha256').update(bytes).digest('hex'),sheets,limited:sheets.length<book.worksheets.length || sheets.some(s=>s.limited)};

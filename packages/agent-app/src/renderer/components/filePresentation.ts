@@ -50,3 +50,12 @@ export function parseDelimited(text: string, separator: ',' | '\t'): {rows: stri
   if (value || row.length || closed) {cell(); rows.push(row);}
   return {rows, limited: false};
 }
+
+/** Conservative display typing for plain-text tables. Preserve identifiers such as 0017 as text. */
+export function delimitedCellType(value:string):'text'|'number'|'date'|'boolean'|'error' {
+  if (/^(?:true|false)$/i.test(value)) return 'boolean';
+  if (/^#[A-Z0-9/?!]+!?$/i.test(value)) return 'error';
+  if (/^\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?)?$/.test(value) && !Number.isNaN(Date.parse(value))) return 'date';
+  if (/^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?$/.test(value) && Number.isFinite(Number(value))) return 'number';
+  return 'text';
+}
