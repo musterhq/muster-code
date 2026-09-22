@@ -21,7 +21,8 @@ export interface ProjectTask { id:string; projectId:string; title:string; status
 export interface ProjectDecision { id:string; projectId:string; title:string; rationale:string; author:string; scope:string; relatedTaskIds:string[]; status:'active'|'superseded'; supersededById:string|null; createdAt:string; updatedAt:string }
 export interface ProjectActivity { id:string; projectId:string; actor:string; kind:string; summary:string; refId:string|null; createdAt:string }
 export interface BoundedList<T> { items:T[]; truncated:boolean }
-export interface ProjectExport { schemaVersion:1; exportedAt:string; project:Project; folders:Folder[]; tasks:BoundedList<ProjectTask>; decisions:BoundedList<ProjectDecision>; activity:BoundedList<ProjectActivity> }
+export interface ProjectChatReference { id:string; title:string; folderId?:string; providerId:string; model:string; mode:Chat['mode']; permissionMode?:ChatPermissionMode; status:ChatStatus; updatedAt:string; recovery?:ChatRecovery }
+export interface ProjectExport { schemaVersion:2; exportedAt:string; project:Project; folders:Folder[]; chats:BoundedList<ProjectChatReference>; tasks:BoundedList<ProjectTask>; decisions:BoundedList<ProjectDecision>; activity:BoundedList<ProjectActivity> }
 export interface Snapshot { folders: Folder[]; chats: Chat[]; projects: Project[]; activeChatId?: string; version: number; attention?: PendingAttentionSummary }
 export interface FileEntry { name: string; path: string; kind: 'file' | 'directory' }
 export interface DocumentPreview {base64:string;revision:string;sourceFormat:string;converted:boolean;size:number}
@@ -81,6 +82,7 @@ export interface Commands extends BrowserCommands, ScopedComputerCommands, Proce
  'project.decisions.supersede': {input:{projectId:string;id:string;replacementId:string};output:ProjectDecision};
  'project.activity.list': {input:{projectId:string;limit?:number};output:BoundedList<ProjectActivity>};
  'project.export': {input:{projectId:string};output:ProjectExport};
+ 'project.export.file': {input:{projectId:string};output:{saved:boolean;fileName?:string;truncated?:boolean}};
  'workspace.watch': { input: {folderIds:string[]}; output: void };
  'files.list': { input: {folderId: string; path?: string}; output: FileEntry[] };
  'files.create': {input:{folderId:string;path:string;kind:'file'|'directory'};output:void};

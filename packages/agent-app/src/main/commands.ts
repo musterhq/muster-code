@@ -56,6 +56,7 @@ const COMMANDS = {
   'project.decisions.supersede': true,
   'project.activity.list': true,
   'project.export': true,
+  'project.export.file': true,
   'workspace.watch': true,
   'files.list': true,
   'files.create': true,

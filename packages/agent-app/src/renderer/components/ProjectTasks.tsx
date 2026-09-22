@@ -1,4 +1,4 @@
-import { AlertTriangle, CheckCircle2, Circle, Clipboard, Plus, X } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, Circle, Clipboard, Download, Plus, X } from 'lucide-react';
 import React, { useEffect, useState } from 'react';
 import type { BoundedList, Folder, Project, ProjectActivity, ProjectDecision, ProjectExport, ProjectTask, TaskStatus } from '../../shared/protocol';
 import { invoke } from '../bridge';
@@ -21,10 +21,9 @@ function StatusIcon({ status }: { status: TaskStatus }) {
 }
 
 /**
- * Durable task/decision/activity panel for a project. Owns its own load/error/empty
- * states independently of chat state; nothing here executes or schedules agents —
- * status transitions are human-recorded readiness signals only, pending executor
- * integration.
+ * Durable Project task, decision, activity and export panel. Agent execution is
+ * delegated to the linked chat runtime; this component records verification
+ * separately and never treats a completed run as verified.
  */
 export function ProjectTasks({ project, folders }: { project: Project; folders: Folder[] }) {
   const projectId=project.id;
@@ -56,10 +55,11 @@ export function ProjectTasks({ project, folders }: { project: Project; folders: 
   if (loadError) return <div className="project-tasks-error" role="alert">{loadError} <button type="button" className="settings-button secondary" onClick={reload}>Retry</button></div>;
   if (!taskList || !decisionList || !activityList) return <p className="projects-empty" role="status">Loading project work…</p>;
   const tasks=taskList.items, decisions=decisionList.items, activity=activityList.items;
-  async function exportProject(){setExportState('');try{const data:ProjectExport=await invoke('project.export',{projectId});await invoke('clipboard.write',{text:JSON.stringify(data,null,2)});setExportState(`${project.name} export copied with ${folders.length} attached folder${folders.length===1?'':'s'}.`)}catch(err){setExportState(err instanceof Error?`Export failed: ${err.message}`:'Export failed.');}}
+  async function exportProject(){setExportState('');try{const data:ProjectExport=await invoke('project.export',{projectId});await invoke('clipboard.write',{text:JSON.stringify(data,null,2)});setExportState(`${project.name} export copied with ${folders.length} attached folder${folders.length===1?'':'s'} and ${data.chats.items.length} chat reference${data.chats.items.length===1?'':'s'}.${data.chats.truncated||data.tasks.truncated||data.decisions.truncated||data.activity.truncated?' Some lists are capped; JSON includes per-list truncation flags.':''}`)}catch(err){setExportState(err instanceof Error?`Export failed: ${err.message}`:'Export failed.');}}
+  async function saveProjectExport(){setExportState('');try{const result=await invoke('project.export.file',{projectId});if(!result.saved)return;setExportState(`Saved ${result.fileName}${result.truncated?' (one or more lists are capped).':''}`)}catch(err){setExportState(err instanceof Error?`Save failed: ${err.message}`:'Save failed.');}}
 
   return <div className="project-tasks">
-    <div className="project-tasks-export"><p>Tasks stay linked to their agent chat, folder, run status, and verification evidence.</p><button type="button" className="settings-button secondary" onClick={()=>void exportProject()}><Clipboard size={13}/>Copy project export</button>{exportState&&<span role="status">{exportState}</span>}</div>
+    <div className="project-tasks-export"><p>Project exports include folder, chat, task, decision, activity, and recovery references; they do not copy conversation transcripts.</p><div className="project-export-actions"><button type="button" className="settings-button secondary" onClick={()=>void exportProject()}><Clipboard size={13}/>Copy JSON</button><button type="button" className="settings-button secondary" onClick={()=>void saveProjectExport()}><Download size={13}/>Save JSON…</button></div>{exportState&&<span role="status">{exportState}</span>}</div>
     <section aria-label="Tasks">
       <div className="project-tasks-header">
         <h3 className="settings-section-label">Tasks</h3>

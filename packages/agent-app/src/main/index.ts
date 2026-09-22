@@ -1,5 +1,6 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, screen, session, shell, clipboard } from 'electron';
 import path from 'node:path';
+import { writeProjectExportFile, projectExportFilename } from './project-export-file.ts';
 import {createRequire} from 'node:module';
 import {ProcessSessions} from '../runtime/process-sessions.ts';
 import {ScopedComputers} from '../runtime/scoped-computers.ts';
@@ -242,6 +243,16 @@ async function main(): Promise<void> {
         if(!folder)throw new Error('Folder does not exist.');
         return folder.path;
       });
+    }
+    if(command==='project.export.file'){
+      if(!service||!window||window.isDestroyed())throw new Error('Agent service is unavailable.');
+      const projectId=(input as Commands['project.export.file']['input'])?.projectId;
+      if(typeof projectId!=='string'||projectId.length>256)throw new Error('Invalid Project export request.');
+      const data=await service.invoke('project.export',{projectId});
+      const result=await dialog.showSaveDialog(window,{title:'Save Project export',defaultPath:path.join(app.getPath('documents'),projectExportFilename(data.project.name)),filters:[{name:'Muster Project export',extensions:['json']}]});
+      if(result.canceled||!result.filePath)return {saved:false};
+      await writeProjectExportFile(result.filePath,JSON.stringify(data,null,2)+'\n');
+      return {saved:true,fileName:path.basename(result.filePath),truncated:data.chats.truncated||data.tasks.truncated||data.decisions.truncated||data.activity.truncated};
     }
     if(command === 'clipboard.write'){
       const text=(input as {text?:unknown})?.text;

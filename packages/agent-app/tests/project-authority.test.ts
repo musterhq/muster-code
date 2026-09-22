@@ -21,6 +21,6 @@ test('Project commands enforce target Project, derive authorship, and export att
  assert.equal(decision.author,'main');
  await assert.rejects(service.invoke('project.decisions.supersede',{projectId:p2.id,id:decision.id,replacementId:decision.id}),/different project/);
  const exported=await service.invoke('project.export',{projectId:p1.id});
- assert.deepEqual(exported.project.folderIds,[folder.id]);assert.equal(exported.folders[0]?.path,await realpath(folderPath));assert.equal(exported.tasks.items[0]?.id,task.id);assert.equal(exported.schemaVersion,1);
+ assert.deepEqual(exported.project.folderIds,[folder.id]);assert.equal(exported.folders[0]?.path,await realpath(folderPath));assert.equal(exported.tasks.items[0]?.id,task.id);assert.equal(exported.chats.items.length,0);assert.equal(exported.schemaVersion,2);
  await assert.rejects(service.invoke('project.tasks.list',{projectId:'missing'}),/Project not found/);
 });

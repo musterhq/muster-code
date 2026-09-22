@@ -27,6 +27,8 @@ test('Project task start creates one scoped agent chat and settles as implemente
  assert.equal(finished.status,'implemented',JSON.stringify(finished));assert.equal(finished.runChatId,started.chatId);assert.equal(calls,1);
  const linked=(await service.invoke('app.snapshot',undefined)).chats.find(chat=>chat.id===started.chatId)!;
  assert.equal(linked.projectId,project.id);assert.equal(linked.folderId,folder.id);assert.match(linked.title,/Build a feature/);
+ const exported=await service.invoke('project.export',{projectId:project.id});
+ assert.equal(exported.schemaVersion,2);assert.equal(exported.chats.items[0]?.id,started.chatId);assert.equal(exported.chats.items[0]?.status,'completed');assert.equal('draft' in (exported.chats.items[0]??{}),false,'exports include safe chat/recovery references, not prompt drafts');
  const replay=await service.invoke('project.tasks.start',{projectId:project.id,id:task.id,revision:0,requestId:'project-task-request',folderId:folder.id});
  assert.equal(replay.chatId,started.chatId);assert.equal(replay.runId,started.runId);assert.equal(calls,1,'repeated request identity never starts duplicate provider work');
 });

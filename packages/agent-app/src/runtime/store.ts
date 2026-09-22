@@ -95,6 +95,7 @@ function rowToItem(row: TimelineRow): TimelineItem {
 }
 
 const now = (): string => new Date().toISOString();
+const PROJECT_CHAT_EXPORT_LIMIT = 201;
 
 export class AgentStore {
   private readonly db: DatabaseSync;
@@ -222,6 +223,12 @@ export class AgentStore {
       if (Array.isArray(parsed) && parsed.every(value => typeof value === 'string')) folderIds = parsed;
     } catch { /* Corrupt legacy folder list degrades to an empty attachment set. */ }
     return { id: row.id, name: row.name, goal: row.goal, folderIds };
+  }
+
+  /** Read only the latest bounded chat references for one Project export. */
+  projectChats(id: string): Chat[] {
+    const rows = this.db.prepare('SELECT * FROM chats WHERE project_id = ? ORDER BY updated_at DESC LIMIT ?').all(id, PROJECT_CHAT_EXPORT_LIMIT) as unknown as ChatRow[];
+    return rows.map(rowToChat);
   }
 
   createProject(name: string, goal: string, folderIds: string[]): Project {
