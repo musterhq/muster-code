@@ -4,16 +4,17 @@ import {invoke,subscribe} from '../bridge';
 import {browserAddress,type BrowserState} from '../../shared/browser-protocol';
 import './browser-tab.css';
 
-export interface BrowserTabProps {owner:string;profileId:string;profileName?:string;initialUrl?:string;active?:boolean}
+export interface BrowserTabProps {owner:string;profileId:string;profileName?:string;initialUrl?:string;active?:boolean;onUrlChange?:(url:string)=>void}
 /** The native view is a separate sandboxed renderer. This component owns only its
  * toolbar and geometry lease; hiding/unmounting never destroys page history.
  */
-export function BrowserTab({owner,profileId,profileName='Personal',initialUrl='about:blank',active=true}:BrowserTabProps) {
+export function BrowserTab({owner,profileId,profileName='Personal',initialUrl='about:blank',active=true,onUrlChange}:BrowserTabProps) {
   const [browser,setBrowser]=useState<BrowserState>();
   const [address,setAddress]=useState(initialUrl==='about:blank'?'':initialUrl);
   const [error,setError]=useState(''),[ready,setReady]=useState(false),[attempt,setAttempt]=useState(0);
   const host=useRef<HTMLDivElement>(null),editing=useRef(false),current=useRef<BrowserState|undefined>(undefined);
   const mountURL=useRef(initialUrl);mountURL.current=initialUrl;
+  const urlChange=useRef(onUrlChange);urlChange.current=onUrlChange;
   const apply=useRef<(state:BrowserState)=>void>(()=>{});
   const epoch=useRef(0);
 
@@ -26,8 +27,10 @@ export function BrowserTab({owner,profileId,profileName='Personal',initialUrl='a
     current.current=undefined;setBrowser(undefined);setReady(false);setError('');
     const accept=(next:BrowserState)=>{
       if(disposed || next.owner!==owner || next.profileId!==profileId || (current.current && next.revision<current.current.revision))return;
+      const priorURL=current.current?.url ?? mountURL.current;
       current.current=next;setBrowser(next);
       if(!editing.current)setAddress(next.url==='about:blank'?'':next.url);
+      if(next.url!==priorURL)urlChange.current?.(next.url);
       schedule();
     };
     apply.current=accept;

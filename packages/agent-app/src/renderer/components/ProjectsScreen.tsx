@@ -5,6 +5,7 @@ import { invoke } from '../bridge';
 import { selectChat } from '../store';
 import { restoreFocus } from '../focus';
 import { useStore } from '../useStore';
+import { ProjectTasks } from './ProjectTasks';
 // @ts-ignore -- side-effect CSS import; esbuild bundles it into dist/renderer/main.css
 import './projects-screen.css';
 
@@ -95,5 +96,6 @@ function ProjectOverview({ project, folders, chats, onStartChat, onOpenChat }: {
     <h3 className="settings-section-label">Project chats</h3>
     {chats.length === 0 ? <p className="projects-empty">No chats in this project yet.</p>
       : <ul className="project-chats">{chats.map(c => <li key={c.id}><button type="button" onClick={() => onOpenChat(c.id)}><span className="project-chat-title">{c.title || 'Untitled chat'}</span><span className="projects-item-meta">{new Date(c.updatedAt).toLocaleString()}</span></button></li>)}</ul>}
+    <ProjectTasks project={project} folders={attached}/>
   </article>;
 }

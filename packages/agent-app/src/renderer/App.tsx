@@ -69,7 +69,7 @@ export function App(): React.ReactElement {
   }
 
   return (
-    <div className="app" data-nav-hidden={state.navHidden}>
+    <div className="app" data-nav-hidden={state.navHidden} data-screen={state.screen}>
       <button type="button" className="nav-toggle icon-button" style={{left:state.navHidden?100:state.navWidth-38}} aria-label={state.navHidden?'Show left sidebar':'Hide left sidebar'} title={state.navHidden?'Show left sidebar (⌘B)':'Hide left sidebar (⌘B)'} aria-expanded={!state.navHidden} aria-keyshortcuts="Meta+B Control+B" onClick={()=>transitionLayout(()=>setNavHidden(!getState().navHidden))}><PanelLeft size={16}/></button>
       <nav
         className="nav"
@@ -97,19 +97,20 @@ export function App(): React.ReactElement {
           persistNavWidth();
         }}
       />}
-      <main className="center">
-        {state.screen === 'projects' ? <ProjectsScreen onBack={closeSettings} onStartChat={(projectId, folderId)=>void createChat(folderId, projectId).then(() => focusComposer())} /> : state.screen === 'providers' ? <ProvidersScreen /> : state.screen === 'plugins' ? <PluginsScreen /> : state.screen === 'memory' ? <MemoryScreen key={state.memoryFolderId ?? 'personal'} /> : state.boot.phase === 'loading' || state.boot.phase === 'idle' ? (
-          <div className="center-loading" role="status">
-            Loading workspace…
-          </div>
-        ) : (
-          <ChatView />
-        )}
+      <main className="center" data-screen={state.screen}>
+        <div className="work-surface" hidden={state.screen!=='work'} inert={state.screen!=='work'} aria-hidden={state.screen!=='work'}>
+          {state.boot.phase === 'loading' || state.boot.phase === 'idle' ? (
+            <div className="center-loading" role="status">
+              Loading workspace…
+            </div>
+          ) : (
+            <ChatView />
+          )}
+        </div>
+        {state.screen === 'projects' ? <ProjectsScreen onBack={closeSettings} onStartChat={(projectId, folderId)=>void createChat(folderId, projectId).then(() => focusComposer())} /> : state.screen === 'providers' ? <ProvidersScreen /> : state.screen === 'plugins' ? <PluginsScreen /> : state.screen === 'memory' ? <MemoryScreen key={state.memoryFolderId ?? 'personal'} /> : null}
         {state.screen==='work'&&<WorkControls/>}
       </main>
-      {state.screen === 'work' && (
-        <ResourcePane />
-      )}
+      <ResourcePane suspended={state.screen!=='work'} />
       {state.notices.length > 0 && (
         <div className="notices" role="log" aria-live="polite">
           {state.notices.map((n) => (

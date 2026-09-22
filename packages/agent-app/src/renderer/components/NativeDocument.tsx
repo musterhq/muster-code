@@ -1,6 +1,6 @@
 import React,{useEffect,useRef,useState} from 'react';
 import {invoke} from '../bridge';
-import {filePresentation} from './filePresentation';
+import {filePresentation, friendlyFileError} from './filePresentation';
 import {PdfFile} from './PdfFile';
 import {WorkbookFile} from './WorkbookFile';
 import {FileAnnotations} from './FileAnnotations';
@@ -39,13 +39,15 @@ function NativeSurface({folderId,path,revision,onError}:{folderId:string;path:st
 }
 
 export function NativeDocument({folderId,path,revision}:{folderId:string;path:string;revision:object}) {
+  // Keep the format-aware reader as the dependable default. macOS Quick Look
+  // remains an explicit in-app renderer because support and layout vary by file.
   const [reader,setReader]=useState(true),[error,setError]=useState(''),[body,setBody]=useState<FileBody|null>(null),[loading,setLoading]=useState(false),[location,setLocation]=useState('Document'),[quote,setQuote]=useState('');
   useEffect(()=>{setBody(null);setError('');},[revision]);
   useEffect(()=>{
     if(!reader)return;
     let active=true;setLoading(true);setError('');
     const read=filePresentation(path)==='workbook'?invoke('files.workbook',{folderId,path}).then(workbook=>({text:'',truncated:false,workbook})):invoke('files.document',{folderId,path}).then(document=>({text:'',truncated:false,document}));
-    void read.then(value=>{if(active)setBody(value);}).catch(e=>{if(active)setError(String(e));}).finally(()=>{if(active)setLoading(false);});
+    void read.then(value=>{if(active)setBody(value);}).catch(e=>{if(active)setError(friendlyFileError(e));}).finally(()=>{if(active)setLoading(false);});
     return()=>{active=false;};
   },[reader,folderId,path,revision]);
   const version=body?.document?.revision??body?.workbook?.revision;

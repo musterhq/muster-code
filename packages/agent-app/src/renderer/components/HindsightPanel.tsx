@@ -11,6 +11,12 @@ export function HindsightPanel({ folderId }: { folderId?: string }): React.React
   const [status, setStatus] = useState<HindsightStatus>();
   const [statusBusy, setStatusBusy] = useState(false);
   const [mode, setMode] = useState<Mode>('recall');
+  const [detail, setDetail] = useState<'basic' | 'advanced'>('basic');
+  const [budget, setBudget] = useState<'low' | 'mid' | 'high'>('low');
+  const [maxTokens, setMaxTokens] = useState(2048);
+  const [types, setTypes] = useState<Array<'world' | 'experience' | 'observation'>>(['world', 'experience', 'observation']);
+  const [tags, setTags] = useState('');
+  const [context, setContext] = useState('');
   const [query, setQuery] = useState('');
   const [content, setContent] = useState('');
   const [source, setSource] = useState('');
@@ -47,14 +53,16 @@ export function HindsightPanel({ folderId }: { folderId?: string }): React.React
         const result = await invoke('hindsight.retain', { folderId, content: content.trim(), source: source.trim() });
         if (ticket !== generation.current) return;
         if (!result.success) throw new Error('Hindsight did not confirm that this memory was retained. Your text is preserved.');
-        setNotice(result.isAsync ? `Retention queued${result.operationId ? ` · ${result.operationId}` : ''}.` : 'Hindsight confirmed this memory was retained.');
+        setNotice(result.isAsync
+          ? `Retention queued · ${result.itemsCount} item(s) · bank ${result.bankId}${result.operationId ? ` · operation ${result.operationId}` : ''}.`
+          : `Hindsight confirmed retention of ${result.itemsCount} item(s) · bank ${result.bankId}.`);
         if (!result.isAsync) { setContent(''); setSource(''); }
       } else if (mode === 'recall') {
-        const result = await invoke('hindsight.recall', { folderId, query: query.trim() });
-        if (ticket === generation.current) setRecall(result);
+        const result = await invoke('hindsight.recall', { folderId, query: query.trim(), ...(detail === 'advanced' ? {budget, maxTokens, types, tags: tags.split(',').map(tag=>tag.trim()).filter(Boolean)} : {}) });
+        if (ticket === generation.current) { setRecall(result); setNotice(`Recall completed · bank ${result.bankId} · ${result.results.length} result(s).`); }
       } else {
-        const result = await invoke('hindsight.reflect', { folderId, query: query.trim() });
-        if (ticket === generation.current) setReflection(result.text);
+        const result = await invoke('hindsight.reflect', { folderId, query: query.trim(), ...(detail === 'advanced' ? {budget, maxTokens, context: context.trim() || undefined} : {}) });
+        if (ticket === generation.current) { setReflection(result.text); setNotice(`Reflection completed · bank ${result.bankId}.`); }
       }
     } catch (cause) {
       if (ticket === generation.current) setError(`${cause instanceof Error ? cause.message : String(cause)}${mode === 'retain' ? ' The request was not retried; its outcome may need checking before submitting again.' : ''}`);
@@ -76,7 +84,7 @@ export function HindsightPanel({ folderId }: { folderId?: string }): React.React
   const enabled = status?.configured && !status.error;
   return <section className="hindsight-panel" aria-label="Hindsight memory">
     <header className="hindsight-heading"><div><Brain size={18} aria-hidden="true"/><h2>Hindsight</h2></div><button type="button" className="icon-button" disabled={busy || statusBusy} onClick={() => void refresh()} title="Reread Muster's environment configuration; no connection test is sent" aria-label="Refresh Hindsight configuration"><RefreshCw size={14}/></button></header>
-    <p className="hindsight-description">Retain information, recall relevant memories, or reflect on what this scope knows.</p>
+    <p className="hindsight-description">Retain information, recall relevant memories, or reflect on what this scope knows. Requests are explicit and scoped to the selected folder or personal bank.</p>
     {statusBusy && <p role="status">Reading configuration…</p>}
     {status && <div className="hindsight-connection">
       <span className="hindsight-status" data-connection={enabled ? status.connection ?? 'unchecked' : 'unavailable'}>{!enabled ? 'Not available' : status.connection === 'verified' ? 'Connection verified by last request' : status.connection === 'failed' ? 'Configured · last request failed' : 'Configured · connection not verified'}</span>
@@ -91,15 +99,21 @@ export function HindsightPanel({ folderId }: { folderId?: string }): React.React
     <div className="hindsight-modes" role="group" aria-label="Memory operation">
       {(['recall', 'reflect', 'retain'] as const).map(value => <button type="button" key={value} disabled={busy} aria-pressed={mode === value} onClick={() => { setMode(value); setError(''); setNotice(''); setRecall(undefined); setReflection(''); }}>{value[0].toUpperCase() + value.slice(1)}</button>)}
     </div>
+    <div className="hindsight-detail" role="group" aria-label="Request detail"><button type="button" aria-pressed={detail==='basic'} disabled={busy} onClick={()=>setDetail('basic')}>Basic</button><button type="button" aria-pressed={detail==='advanced'} disabled={busy} onClick={()=>setDetail('advanced')}>Advanced</button></div>
     <form onSubmit={event => void submit(event)}>
       {mode === 'retain' ? <><label>Information to remember<textarea value={content} onChange={event => setContent(event.target.value)} maxLength={32768} rows={4} required disabled={busy} placeholder="A fact, decision or observation…"/></label><label>Source<input value={source} onChange={event => setSource(event.target.value)} maxLength={512} required disabled={busy} placeholder="Where this information came from"/></label></>
         : <label>{mode === 'recall' ? 'Search this memory bank' : 'Question for this memory bank'}<textarea value={query} onChange={event => setQuery(event.target.value)} maxLength={8192} required rows={2} disabled={busy} placeholder={mode === 'recall' ? 'What should Muster recall?' : 'What can we learn from these memories?'}/></label>}
+      {detail === 'advanced' && mode !== 'retain' && <div className="hindsight-advanced">
+        <label>Retrieval budget<select value={budget} disabled={busy} onChange={event=>setBudget(event.target.value as typeof budget)}><option value="low">Low</option><option value="mid">Medium</option><option value="high">High</option></select></label>
+        <label>Maximum response tokens<select value={maxTokens} disabled={busy} onChange={event=>setMaxTokens(Number(event.target.value))}><option value={1024}>1,024</option><option value={2048}>2,048</option><option value={4096}>4,096</option></select></label>
+        {mode === 'recall' ? <><fieldset><legend>Memory types</legend>{(['world','experience','observation'] as const).map(type=><label key={type}><input type="checkbox" checked={types.includes(type)} disabled={busy} onChange={event=>setTypes(current=>event.target.checked?[...current,type]:current.filter(value=>value!==type))}/>{type}</label>)}</fieldset><label>Tags, comma separated<input value={tags} maxLength={2048} disabled={busy} onChange={event=>setTags(event.target.value)} placeholder="optional filters"/></label></> : <label>Context<input value={context} maxLength={8192} disabled={busy} onChange={event=>setContext(event.target.value)} placeholder="Optional context for this reflection"/></label>}
+      </div>}
       <div className="hindsight-submit"><span>{mode === 'retain' ? 'Only the text and source above are sent.' : 'Uses a bounded retrieval budget.'}</span><button type="submit" className="settings-button" disabled={!enabled || busy || statusBusy || (mode === 'retain' ? !content.trim() || !source.trim() : !query.trim())}>{busy ? 'Working…' : mode === 'retain' ? 'Retain memory' : mode === 'recall' ? 'Recall' : 'Reflect'}</button></div>
     </form>
     {busy && <p role="status">Waiting for Hindsight…</p>}
     {error && <p className="memory-error" role="alert">{error}</p>}
     {notice && <p role="status">{notice}</p>}
-    {recall && <div className="hindsight-results" aria-label="Recalled memories"><p role="status">{recall.results.length ? `${recall.results.length} recalled memories` : 'No memories matched this query.'}</p>{recall.results.map((entry, index) => <article key={`${entry.id ?? index}-${index}`}><p>{entry.text}</p><small>{[entry.type, entry.id].filter(Boolean).join(' · ')}</small></article>)}</div>}
+    {recall && <div className="hindsight-results" aria-label="Recalled memories"><p role="status">{recall.results.length ? `${recall.results.length} recalled memories` : 'No memories matched this query.'}</p>{recall.results.map((entry, index) => <article key={`${entry.id ?? index}-${index}`}><p>{entry.text}</p><small>{[entry.type, entry.id, entry.score === undefined ? '' : `score ${entry.score}`].filter(Boolean).join(' · ')}</small></article>)}</div>}
     {reflection && <div className="hindsight-results" aria-label="Memory reflection"><p>{reflection}</p></div>}
   </section>;
 }

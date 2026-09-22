@@ -26,14 +26,24 @@ test('invalid subagent persistence without a chat id is discarded', () => {
 });
 
 
-test('browser persistence retains the profile but excludes page addresses and titles', () => {
+test('browser persistence restores the latest validated address and profile without page titles', () => {
   let saved='';
   const tab={id:'browser:test-1',kind:'browser' as const,browserProfileId:'personal',title:'Private page title',url:'https://example.com/?token=private'};
   assert.equal(saveWorkspace({setItem:(_key,value)=>{saved=value;}},{tabs:[tab],activeTabId:tab.id}),true);
-  assert.equal(saved.includes('token'),false);
+  assert.equal(saved.includes('https://example.com/?token=private'),true);
   assert.equal(saved.includes('Private page'),false);
   const restored=readWorkspace({getItem:()=>saved});
-  assert.deepEqual(restored.tabs,[{id:tab.id,kind:'browser',browserProfileId:'personal',title:'Browser'}]);
+  assert.deepEqual(restored.tabs,[{id:tab.id,kind:'browser',browserProfileId:'personal',url:'https://example.com/?token=private',title:'Browser'}]);
+});
+
+test('browser persistence replaces credential-bearing or invalid addresses with a blank page',()=>{
+  let saved='';
+  const tab={id:'browser:test-1',kind:'browser' as const,browserProfileId:'personal',title:'Browser',url:'https://user:secret@example.test/private'};
+  assert.equal(saveWorkspace({setItem:(_key,value)=>{saved=value;}},{tabs:[tab],activeTabId:tab.id}),true);
+  assert.equal(saved.includes('secret'),false);
+  assert.equal(readWorkspace({getItem:()=>saved}).tabs[0]?.url,'about:blank');
+  const restored=readWorkspace(storage({version:1,tabs:[{...tab,url:'file:///etc/passwd'}]}));
+  assert.equal(restored.tabs[0]?.url,'about:blank');
 });
 
 test('browser persistence rejects malformed owners and profile paths', () => {

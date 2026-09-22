@@ -1,5 +1,6 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, screen, session, shell, clipboard } from 'electron';
 import path from 'node:path';
+import { writeProjectExportFile, projectExportFilename } from './project-export-file.ts';
 import {createRequire} from 'node:module';
 import {ProcessSessions} from '../runtime/process-sessions.ts';
 import {ScopedComputers} from '../runtime/scoped-computers.ts';
@@ -14,6 +15,7 @@ import { buildMenu } from './menu.ts';
 import { createQuitCoordinator, withinDeadline } from './quit-coordinator.ts';
 import { loadAgentService, type AgentService } from './service-loader.ts';
 import { clampGeometry, DEFAULT_GEOMETRY, MIN_HEIGHT, MIN_WIDTH, WindowStateStore, type WindowGeometry } from './window-state.ts';
+import {chatIdFromArgs,chatIdFromLink} from './chat-links.ts';
 
 app.setName('Muster Agent');
 app.setPath('userData', app.commandLine.getSwitchValue('user-data-dir') || path.join(app.getPath('appData'), 'Muster Agent'));
@@ -35,15 +37,23 @@ async function main(): Promise<void> {
   let runningChats = 0;
   let disposal: Promise<void> | undefined;
   let shutdownStarted = false;
+  let pendingChatId=chatIdFromArgs(process.argv);
+  let openLinkedChat: (id:string)=>Promise<void> = async id=>{pendingChatId=id;};
 
   const stateStore = new WindowStateStore(app.getPath('userData'));
 
-  app.on('second-instance', () => {
+  app.on('second-instance', (_event,argv) => {
+    const linked=chatIdFromArgs(argv);if(linked)void openLinkedChat(linked);
     if (window) {
       if (window.isMinimized()) window.restore();
       window.show();
       window.focus();
     }
+  });
+
+  app.on('open-url',(event,url)=>{
+    event.preventDefault();
+    const linked=chatIdFromLink(url);if(linked)void openLinkedChat(linked);
   });
 
   app.on('activate', () => {
@@ -57,6 +67,7 @@ async function main(): Promise<void> {
   // Match the dark renderer with the dark native sidebar material.
   nativeTheme.themeSource = 'dark';
   await app.whenReady();
+  app.setAsDefaultProtocolClient('muster');
 
   // --- Agent service -------------------------------------------------------
   const dataDir = path.join(app.getPath('userData'), 'agent-data');
@@ -70,6 +81,20 @@ async function main(): Promise<void> {
   };
   const loaded = loadAgentService({ dataDir, onEvent });
   service = loaded.service;
+  openLinkedChat=async id=>{
+    if(!service||!window||window.isDestroyed()||window.webContents.isLoading()) { pendingChatId=id; return; }
+    const snapshot=await service.invoke('app.snapshot',undefined);
+    if(!snapshot.chats.some(chat=>chat.id===id)) {
+      onEvent({type:'notice',message:'This local chat link is not available in this Muster profile.'});
+      pendingChatId=null;return;
+    }
+    const items=await service.invoke('chat.select',{id});
+    onEvent({type:'snapshot',snapshot:{...snapshot,activeChatId:id}});
+    onEvent({type:'chatSelected',chatId:id});
+    onEvent({type:'timeline',chatId:id,items});
+    pendingChatId=null;
+    if(window.isMinimized())window.restore();window.show();window.focus();
+  };
   const processes = new ProcessSessions(path.join(dataDir,'process-sessions.json'),async input=>commandAuthority(await loaded.service.invoke('app.snapshot',undefined),dataDir,input),onEvent);
   const computers = new ScopedComputers({
     appData:dataDir,
@@ -164,6 +189,35 @@ async function main(): Promise<void> {
       throw new Error('Unknown command.');
     }
     switch(command) {
+      case 'chat.contextMenu': {
+        const request=input as Commands['chat.contextMenu']['input'];
+        if(!request||typeof request.id!=='string'||request.id.length>256||!Number.isFinite(request.x)||!Number.isFinite(request.y))throw new Error('Invalid chat menu request.');
+        if(!service||!window||window.isDestroyed())throw new Error('Agent service is unavailable.');
+        const snapshot=await service.invoke('app.snapshot',undefined);
+        const chat=snapshot.chats.find(item=>item.id===request.id);
+        if(!chat)throw new Error('Chat no longer exists.');
+        const folder=chat.folderId?snapshot.folders.find(item=>item.id===chat.folderId):undefined;
+        type Action=Commands['chat.contextMenu']['output'];
+        const options:Electron.MenuItemConstructorOptions[]=[];
+        const item=(label:string,action:Exclude<Action,null>)=>options.push({label,click:()=>finish(action)});
+        let finish:(action:Action)=>void=()=>{};
+        if(chat.pinned&&!chat.archived){item('Unpin Chat','pin');options.push({type:'separator'});}
+        else item('Pin Chat','pin');
+        item('Rename…','rename');
+        options.push({type:'separator'});
+        item('Open Command Activity','activity');
+        if(folder)item('Open Files and Changes','files');
+        item('Copy Local Chat Link','copy-link');
+        if(chat.pinned&&!chat.archived){options.push({type:'separator'});item('Move Pin Up','pin-up');item('Move Pin Down','pin-down');}
+        options.push({type:'separator'});
+        item(chat.archived?'Restore Chat':'Archive Chat','archive');
+        const nativeMenu=Menu.buildFromTemplate(options);
+        const scale=window.webContents.getZoomFactor()||1;
+        return await new Promise<Action>(resolve=>{
+          finish=resolve;
+          nativeMenu.popup({window:window!,x:Math.round(request.x/scale),y:Math.round(request.y/scale),callback:()=>resolve(null)});
+        });
+      }
       case 'browser.open': return browserWorkspace.open(input as Commands['browser.open']['input']);
       case 'browser.navigate': return browserWorkspace.navigate(input as Commands['browser.navigate']['input']);
       case 'browser.position': return browserWorkspace.position(input as Commands['browser.position']['input'], () => nativePreview.hide());
@@ -189,6 +243,16 @@ async function main(): Promise<void> {
         if(!folder)throw new Error('Folder does not exist.');
         return folder.path;
       });
+    }
+    if(command==='project.export.file'){
+      if(!service||!window||window.isDestroyed())throw new Error('Agent service is unavailable.');
+      const projectId=(input as Commands['project.export.file']['input'])?.projectId;
+      if(typeof projectId!=='string'||projectId.length>256)throw new Error('Invalid Project export request.');
+      const data=await service.invoke('project.export',{projectId});
+      const result=await dialog.showSaveDialog(window,{title:'Save Project export',defaultPath:path.join(app.getPath('documents'),projectExportFilename(data.project.name)),filters:[{name:'Muster Project export',extensions:['json']}]});
+      if(result.canceled||!result.filePath)return {saved:false};
+      await writeProjectExportFile(result.filePath,JSON.stringify(data,null,2)+'\n');
+      return {saved:true,fileName:path.basename(result.filePath),truncated:data.chats.truncated||data.tasks.truncated||data.decisions.truncated||data.activity.truncated};
     }
     if(command === 'clipboard.write'){
       const text=(input as {text?:unknown})?.text;
@@ -354,4 +418,5 @@ async function main(): Promise<void> {
       send({ type: 'notice', message: 'Agent runtime not built; UI is in shell-only mode.' }));
   }
   await window.loadFile(rendererEntry);
+  if(pendingChatId)await openLinkedChat(pendingChatId);
 }

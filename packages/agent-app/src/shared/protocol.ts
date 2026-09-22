@@ -1,6 +1,7 @@
 import type {PendingAttentionSummary} from './attention-protocol.ts';
 import type {ScopedComputerCommands} from './scoped-computer-protocol.ts';
 import type {ProcessCommands,ProcessEvent} from './process-protocol.ts';
+export const MAX_ATTACHED_SKILL_BYTES = 48 * 1024;
 import type {BrowserCommands, BrowserEvent} from './browser-protocol.ts';
 /** The only renderer capability surface. Main validates every command and sender. */
 export type ChatPermissionMode = 'read-only' | 'workspace' | 'full';
@@ -15,10 +16,18 @@ export interface TimelineItem { id: string; chatId: string; kind: 'user' | 'assi
 export interface TimelineSnapshot { items: TimelineItem[]; revision: number }
 export interface TimelinePatch extends TimelineSnapshot { after: number }
 export interface Project { id: string; name: string; goal: string; folderIds: string[] }
+export type TaskStatus = 'todo' | 'running' | 'blocked' | 'implemented' | 'verified';
+export interface ProjectTask { id:string; projectId:string; title:string; status:TaskStatus; dependencies:string[]; acceptance:string; evidence:string[]; runChatId?:string; runRequestId?:string; runError?:string; revision:number; createdAt:string; updatedAt:string }
+export interface ProjectDecision { id:string; projectId:string; title:string; rationale:string; author:string; scope:string; relatedTaskIds:string[]; status:'active'|'superseded'; supersededById:string|null; createdAt:string; updatedAt:string }
+export interface ProjectActivity { id:string; projectId:string; actor:string; kind:string; summary:string; refId:string|null; createdAt:string }
+export interface BoundedList<T> { items:T[]; truncated:boolean }
+export interface ProjectChatReference { id:string; title:string; folderId?:string; providerId:string; model:string; mode:Chat['mode']; permissionMode?:ChatPermissionMode; status:ChatStatus; updatedAt:string; recovery?:ChatRecovery }
+export interface ProjectExport { schemaVersion:2; exportedAt:string; project:Project; folders:Folder[]; chats:BoundedList<ProjectChatReference>; tasks:BoundedList<ProjectTask>; decisions:BoundedList<ProjectDecision>; activity:BoundedList<ProjectActivity> }
 export interface Snapshot { folders: Folder[]; chats: Chat[]; projects: Project[]; activeChatId?: string; version: number; attention?: PendingAttentionSummary }
 export interface FileEntry { name: string; path: string; kind: 'file' | 'directory' }
 export interface DocumentPreview {base64:string;revision:string;sourceFormat:string;converted:boolean;size:number}
-export interface WorkbookPreview {revision:string;sheets:{name:string;rows:string[][];formulas:Record<string,string>;limited:boolean}[];limited:boolean}
+export type WorkbookCellType = 'text'|'number'|'date'|'boolean'|'error';
+export interface WorkbookPreview {revision:string;sheets:{name:string;rows:string[][];types?:WorkbookCellType[][];formulas:Record<string,string>;limited:boolean}[];limited:boolean}
 export interface FileAnnotation {id:string;folderId:string;path:string;revision:string;location:string;quote:string;note:string;createdAt:string}
 export interface ChangedFile { path: string; previousPath?: string; status: string; adds?: number; dels?: number }
 export interface GitLocalFile {path:string;previousPath?:string;index:string;worktree:string;staged:boolean;untracked:boolean;conflict:boolean}
@@ -26,11 +35,13 @@ export interface GitLocalStatus {branch:string;detached:boolean;unborn:boolean;r
 export interface ProviderInfo { id: string; driver?: string; bindingId?: string; name: string; available: boolean; identityMasked: string; models: { id: string; name: string }[]; error?: string; status?: 'ready' | 'configured' | 'installed' | 'not-detected' | 'error'; source?: string; detail?: string; canReveal?: boolean; custom?: boolean; endpoint?: string; apiKeyEnv?: string; checkedAt?: string }
 /** Read-only local skill inventory. Skills are inspected, never installed or executed here. */
 export interface SkillEntry { id: string; name: string; provenance: string; path: string; readme: string | null; readError: string | null }
+/** Metadata-only installed plugin inventory. Executable config and secrets never cross into the renderer. */
+export interface PluginEntry { id:string; name:string; version:string; provenance:string; path:string; skills:string[]; mcpServers:Array<{name:string;transport:'local'|'remote'|'unknown'}>; apps:Array<{name:string;id:string;required:boolean;category?:string}>; readError:string|null }
 /** 'live' = from a provider event this session; 'restored' = loaded from SQLite after restart. */
 export type ContextSource = 'live' | 'restored';
 /** Context-window occupancy telemetry. Unknown values are null ("Unavailable"), never zero. */
 export interface ContextTelemetry { usedTokens: number | null; windowTokens: number | null; source: ContextSource | null; compacted: boolean; updatedAt: string | null }
-export type AgentEvent = ProcessEvent | BrowserEvent | {type:'fileMoved';folderId:string;from:string;to:string} | {type:'workspaceChanged';folderId:string} | {type:'chatSelected'; chatId:string} | { type: 'snapshot'; snapshot: Snapshot } | { type: 'timeline'; chatId: string; items: TimelineItem[] } | { type: 'timelinePatch'; chatId: string; patch: TimelinePatch } | { type: 'notice'; message: string } | { type: 'contextTelemetry'; chatId: string; telemetry: ContextTelemetry };
+export type AgentEvent = ProcessEvent | BrowserEvent | {type:'fileMoved';folderId:string;from:string;to:string} | {type:'workspaceChanged';folderId:string} | {type:'projectChanged';projectId:string;taskId:string} | {type:'chatSelected'; chatId:string} | { type: 'snapshot'; snapshot: Snapshot } | { type: 'timeline'; chatId: string; items: TimelineItem[] } | { type: 'timelinePatch'; chatId: string; patch: TimelinePatch } | { type: 'notice'; message: string } | { type: 'contextTelemetry'; chatId: string; telemetry: ContextTelemetry };
 export interface MemoryEntry { id: string; kind: string; summary: string; sourceUri?: string; observedAt: string; confidence: number; provenance: string[]; scopes: Array<{kind: string; id: string}>; redactionState: 'none' | 'redacted' | 'hashed' | 'blocked'; links?: string[] }
 export interface HindsightStatus { configured: boolean; endpoint?: string; bankId?: string; error?: string; revision?: number; connection?: 'unchecked' | 'verified' | 'failed'; checkedAt?: string; connectionError?: string }
 export interface Commands extends BrowserCommands, ScopedComputerCommands, ProcessCommands {
@@ -40,8 +51,8 @@ export interface Commands extends BrowserCommands, ScopedComputerCommands, Proce
  'memory.inspect': { input: {folderId?: string}; output: {available: boolean; objectCount: number; checks: Array<{label: string; status: string; detail: string}>; error?: string} };
  'hindsight.status': {input: {folderId?: string}; output: HindsightStatus};
  'hindsight.retain': {input: {folderId?: string; content: string; source: string}; output: {bankId: string; success: boolean; itemsCount: number; isAsync: boolean; operationId?: string}};
- 'hindsight.recall': {input: {folderId?: string; query: string}; output: {bankId: string; results: readonly {id?: string; text: string; type?: string; score?: number}[]}};
- 'hindsight.reflect': {input: {folderId?: string; query: string}; output: {bankId: string; text: string}};
+ 'hindsight.recall': {input: {folderId?: string; query: string; budget?: 'low' | 'mid' | 'high'; maxTokens?: number; types?: Array<'world' | 'experience' | 'observation'>; tags?: string[]}; output: {bankId: string; results: readonly {id?: string; text: string; type?: string; score?: number}[]}};
+ 'hindsight.reflect': {input: {folderId?: string; query: string; context?: string; budget?: 'low' | 'mid' | 'high'; maxTokens?: number}; output: {bankId: string; text: string}};
  'clipboard.write': {input:{text:string};output:void};
  'link.open': {input:{url:string};output:void};
  'app.snapshot': { input: undefined; output: Snapshot };
@@ -49,17 +60,29 @@ export interface Commands extends BrowserCommands, ScopedComputerCommands, Proce
  'folder.pick': { input: undefined; output: Folder | null };
  'chat.create': { input: {folderId?: string; projectId?: string}; output: Chat };
  'chat.select': { input: {id: string}; output: TimelineItem[] };
+ 'chat.contextMenu': {input:{id:string;x:number;y:number};output:'pin'|'rename'|'activity'|'files'|'copy-link'|'pin-up'|'pin-down'|'archive'|null};
  'chat.timeline': { input: {id: string; select?: boolean}; output: TimelineSnapshot };
  'chat.update': { input: {id: string; title?: string; pinned?: boolean; archived?: boolean; draft?: string; mode?: Chat['mode']; model?: string}; output: Chat };
  'chat.selectProvider': {input: {id: string; providerId: string; model: string}; output: Chat};
  'chat.setPermissionMode': {input: {id: string; permissionMode: ChatPermissionMode; acknowledgeFullAccess?: boolean}; output: Chat};
  'chat.movePin': { input: {id: string; direction: 'up' | 'down'}; output: void };
- 'chat.send': { input: {id: string; text: string; requestId: string}; output: {runId: string} };
+ 'chat.send': { input: {id: string; text: string; requestId: string; skillId?: string}; output: {runId: string} };
  'chat.stop': { input: {id: string}; output: void };
  'chat.reconcile': {input: {id: string}; output: {chat: Chat; resolved: boolean; reason: string}};
  'approval.respond': { input: {id: string; approved: boolean}; output: void };
  'question.respond': { input: {id: string; answers: Record<string, {answers: string[]}>}; output: void };
  'project.create': { input: {name: string; goal: string; folderIds: string[]}; output: Project };
+ 'project.tasks.list': {input:{projectId:string};output:BoundedList<ProjectTask>};
+ 'project.tasks.create': {input:{projectId:string;title:string;acceptance:string;dependencies:string[]};output:ProjectTask};
+ 'project.tasks.start': {input:{projectId:string;id:string;revision:number;requestId:string;folderId?:string};output:{task:ProjectTask;chatId:string;runId:string}};
+ 'project.tasks.updateStatus': {input:{projectId:string;id:string;status:TaskStatus;evidence?:string[];revision:number};output:ProjectTask};
+ 'project.tasks.addEvidence': {input:{projectId:string;id:string;entries:string[];revision:number};output:ProjectTask};
+ 'project.decisions.list': {input:{projectId:string};output:BoundedList<ProjectDecision>};
+ 'project.decisions.create': {input:{projectId:string;title:string;rationale:string;scope:string;relatedTaskIds:string[]};output:ProjectDecision};
+ 'project.decisions.supersede': {input:{projectId:string;id:string;replacementId:string};output:ProjectDecision};
+ 'project.activity.list': {input:{projectId:string;limit?:number};output:BoundedList<ProjectActivity>};
+ 'project.export': {input:{projectId:string};output:ProjectExport};
+ 'project.export.file': {input:{projectId:string};output:{saved:boolean;fileName?:string;truncated?:boolean}};
  'workspace.watch': { input: {folderIds:string[]}; output: void };
  'files.list': { input: {folderId: string; path?: string}; output: FileEntry[] };
  'files.create': {input:{folderId:string;path:string;kind:'file'|'directory'};output:void};
@@ -90,6 +113,7 @@ export interface Commands extends BrowserCommands, ScopedComputerCommands, Proce
  'providers.reveal': { input: {id: string}; output: {identity: string} };
   'chat.contextTelemetry': { input: {id: string}; output: ContextTelemetry };
   'plugins.list': { input: { folderPaths?: string[] }; output: SkillEntry[] };
+  'plugins.inventory': { input: undefined; output: PluginEntry[] };
 }
 export interface AgentBridge {
  invoke<K extends keyof Commands>(command: K, input: Commands[K]['input']): Promise<Commands[K]['output']>;

@@ -6,6 +6,7 @@ import type {
   FileEntry,
   ProviderInfo,
   SkillEntry,
+  PluginEntry,
   MemoryEntry,
   Snapshot,
   TimelineItem,
@@ -64,6 +65,8 @@ export interface AppState {
   activeTabId: string | null;
   providers: Loadable<ProviderInfo[]>;
   skills: Loadable<SkillEntry[]>;
+  plugins: Loadable<PluginEntry[]>;
+  pluginView: 'skills'|'plugins';
   /** Revealed provider identities; entries expire via remask timers in the view. */
   revealed: Record<string, string>;
   files: Record<string, Loadable<FileEntry[]>>;
@@ -103,6 +106,8 @@ let state: AppState = {
   activeTabId: savedWorkspace.activeTabId,
   providers: { phase: 'idle' },
   skills: { phase: 'idle' },
+  plugins: { phase: 'idle' },
+  pluginView: 'skills',
   revealed: {},
   files: {},
   fileBodies: {},
@@ -151,6 +156,7 @@ function set(patch: Partial<AppState>): void {
 }
 
 export function notifyError(cause: unknown): void { pushNotice(errorText(cause)); }
+export function notifySuccess(message: string): void { pushNotice(message); }
 
 function pushNotice(message: string): void {
   const notice = { id: ++noticeSeq, message };
@@ -432,20 +438,20 @@ export function flushComposerDraft(id: string): Promise<boolean> {
  * failure reuses the same ID so the host can dedupe; a changed draft gets a
  * fresh ID. Cleared only on acknowledged success.
  */
-const pendingSends: Record<string, { requestId: string; text: string }> = {};
+const pendingSends: Record<string, { requestId: string; text: string; skillId?: string }> = {};
 
-export async function sendMessage(id: string, text: string): Promise<boolean> {
+export async function sendMessage(id: string, text: string, skillId?: string): Promise<boolean> {
   if (state.sending[id] || !text.trim()) return false;
   const submittedDraft = state.composerDrafts[id];
   const pending = pendingSends[id];
   const requestId =
-    pending && pending.text === text ? pending.requestId : crypto.randomUUID();
-  pendingSends[id] = { requestId, text };
+    pending && pending.text === text && pending.skillId === skillId ? pending.requestId : crypto.randomUUID();
+  pendingSends[id] = { requestId, text, ...(skillId ? { skillId } : {}) };
   const { [id]: _previousError, ...sendErrors } = state.sendErrors;
   set({ sending: { ...state.sending, [id]: true }, sendErrors });
   try {
     if (!(await flushComposerDraft(id))) throw new Error('Draft could not be saved. Retry after resolving the storage error.');
-    await invoke('chat.send', { id, text, requestId });
+    await invoke('chat.send', { id, text, requestId, ...(skillId ? { skillId } : {}) });
     delete pendingSends[id];
     const currentDraft = state.composerDrafts[id];
     if (currentDraft === submittedDraft || (submittedDraft && currentDraft?.revision === submittedDraft.revision)) {
@@ -596,6 +602,15 @@ export function openBrowserTab(url = 'about:blank'): void {
   openTab({id:`browser:${crypto.randomUUID()}`,kind:'browser',browserProfileId:'personal',url,title:'Browser'});
 }
 
+/** Persist only the latest validated main-frame URL for an existing browser tab. */
+export function updateBrowserTabUrl(id:string,value:string):void {
+  let url:string;
+  try {url=browserURL(value);} catch {return;}
+  const tab=state.tabs.find(candidate=>candidate.id===id);
+  if(!tab || tab.kind!=='browser' || tab.url===url)return;
+  set({tabs:state.tabs.map(candidate=>candidate.id===id?{...candidate,url}:candidate)});
+}
+
 export function openProvidersTab(): void {
   set({ screen: 'providers', revealed: {} });
   void loadProviders(true);
@@ -603,22 +618,35 @@ export function openProvidersTab(): void {
 export function openProjectsScreen(): void { set({ screen: 'projects', revealed: {} }); }
 export function closeSettings(): void { set({ screen: 'work', revealed: {} }); }
 
-export function openPluginsScreen(): void {
-  set({ screen: 'plugins', revealed: {} });
-  void loadSkills();
+export function openPluginsScreen(pluginView:'skills'|'plugins'='skills'): void {
+  set({ screen: 'plugins', pluginView, revealed: {} });
+  if(pluginView==='skills')void loadSkills(); else void loadPlugins();
 }
 
-export async function loadSkills(force = false): Promise<void> {
+export function setPluginView(pluginView:'skills'|'plugins'):void {
+  set({pluginView});
+  if(pluginView==='skills')void loadSkills(); else void loadPlugins();
+}
+
+export async function loadSkills(force = false, folderPaths?: string[]): Promise<void> {
   if (state.skills.phase === 'loading') return;
   if (!force && state.skills.phase === 'ready') return;
   set({ skills: { phase: 'loading', value: state.skills.value } });
   try {
-    const folderPaths = (state.snapshot?.folders ?? []).map(folder => folder.path);
-    const value = await invoke('plugins.list', { folderPaths });
+    const allowedFolders = folderPaths ?? (state.snapshot?.folders ?? []).map(folder => folder.path);
+    const value = await invoke('plugins.list', { folderPaths: allowedFolders });
     set({ skills: { phase: 'ready', value } });
   } catch (cause) {
     set({ skills: { phase: 'error', error: errorText(cause) } });
   }
+}
+
+export async function loadPlugins(force=false):Promise<void>{
+  if(state.plugins.phase==='loading')return;
+  if(!force&&state.plugins.phase==='ready')return;
+  set({plugins:{phase:'loading',value:state.plugins.value}});
+  try{set({plugins:{phase:'ready',value:await invoke('plugins.inventory',undefined)}});}
+  catch(cause){set({plugins:{phase:'error',error:errorText(cause)}});}
 }
 
 /** Scope is server-resolved: folderId comes from the active chat's folder, never a raw path. */

@@ -12,7 +12,9 @@ import {NativeDocument} from './NativeDocument';
 import {PdfFile} from './PdfFile';
 import {WorkbookFile} from './WorkbookFile';
 import {FileAnnotations} from './FileAnnotations';
-import {parseDelimited} from './filePresentation';
+import {HighlightedSourceTable} from './HighlightedCode';
+import {codeLanguageFromPath} from './codeLanguage';
+import {friendlyFileError, parseDelimited, delimitedCellType} from './filePresentation';
 
 // Keep Markdown parsing bounded independently of the host's file-read limit.
 const MARKDOWN_LIMIT = 64 * 1024;
@@ -43,7 +45,7 @@ export function FileTab({tab}: {tab: WorkspaceTab}): React.ReactElement {
     if (!isDelimited || body?.phase !== 'ready') return {workbook: null, error: ''};
     try {
       const parsed = parseDelimited(body.value?.text ?? '', kind === 'csv' ? ',' : '\t');
-      return {workbook: {revision:textRevision, sheets:[{name:tab.title,rows:parsed.rows,formulas:{},limited:parsed.limited}],limited:parsed.limited}, error:''};
+      return {workbook: {revision:textRevision, sheets:[{name:tab.title,rows:parsed.rows,types:parsed.rows.map(row=>row.map(delimitedCellType)),formulas:{},limited:parsed.limited}],limited:parsed.limited}, error:''};
     } catch (error) {return {workbook:null,error:error instanceof Error ? error.message : String(error)};}
   }, [body?.value?.text, body?.phase, kind, isDelimited, textRevision, tab.title]);
   useEffect(() => { if (tab.line) setMode('source'); }, [tab.id, tab.line]);
@@ -56,7 +58,8 @@ export function FileTab({tab}: {tab: WorkspaceTab}): React.ReactElement {
     return <div className="pane-loading">Loading {tab.path}…</div>;
   }
   if (body.phase === 'error') return <div className="pane-error">
-    <p>{body.error}</p>
+    <p role="alert">{friendlyFileError(body.error)}</p>
+    <p className="file-error-detail">The saved tab is still open; retry after the workspace is available.</p>
     <button type="button" onClick={() => void openFile(tab.folderId!, tab.path!, tab.line)}>Retry</button>
   </div>;
   const {text, truncated, asset, document, workbook} = body.value!;
@@ -87,10 +90,7 @@ export function FileTab({tab}: {tab: WorkspaceTab}): React.ReactElement {
       {kind === 'markdown' ? <MessageBody text={text} resourceContext={{folderId: tab.folderId!, path: tab.path!}}/> : <StructuredFile text={text} kind={kind as 'json'|'csv'|'tsv'}/>}
       {!text && <p className="file-empty">This document is empty.</p>}
     </div> : <div className="code-scroll" role="region" aria-label={`Source of ${tab.path}`} tabIndex={0}>
-      <table className="code-table"><tbody>{(text === '' ? [] : text.split('\n')).map((line, i) =>
-        <tr key={i} data-line={i+1} className={i+1 === tab.line ? 'file-line-target' : undefined}>
-          <td className="code-no">{i+1}</td><td className="code-line">{line}</td>
-        </tr>)}</tbody></table>
+      <HighlightedSourceTable source={text} language={codeLanguageFromPath(tab.path ?? '')} targetLine={tab.line}/>
       {!text && <p className="file-empty">This file is empty.</p>}
     </div>}
     {richText && !previewAllowed && !truncated && <div className="pane-truncated">Showing source: Document preview is limited to 65,536 characters.</div>}

@@ -89,7 +89,7 @@ const hasRenderer = existsSync(src('renderer', 'main.tsx'));
 if (hasRenderer) {
   builds.push({
     ...common,
-    entryPoints: [src('renderer', 'main.tsx'),src('renderer','diff-worker.ts')],
+    entryPoints: [src('renderer', 'main.tsx'),src('renderer','diff-worker.ts'),src('renderer','syntax-highlight-worker.ts')],
     outdir: dist('renderer'),
     splitting: true,
     platform: 'browser',

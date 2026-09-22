@@ -1,0 +1,29 @@
+import assert from 'node:assert/strict';
+import { createRequire } from 'node:module';
+import { parseHTML } from 'linkedom';
+import React from 'react';
+import { createRoot } from 'react-dom/client';
+import { setTimeout as delay } from 'node:timers/promises';
+
+const require=createRequire(import.meta.url);(globalThis as any).require=require;
+const {window}=parseHTML('<html><body><div id="root"></div></body></html>');
+(window.document as any).oninput=null;(window as any).getSelection=()=>({anchorNode:null,anchorOffset:0,focusNode:null,focusOffset:0,rangeCount:0});
+Object.assign(globalThis,{window,document:window.document,Node:window.Node,HTMLElement:window.HTMLElement,HTMLButtonElement:window.HTMLButtonElement,Element:window.Element,MutationObserver:window.MutationObserver,ResizeObserver:class{observe(){}disconnect(){}},localStorage:{getItem(){return null;},setItem(){}},requestAnimationFrame:(callback:any)=>setTimeout(callback,0),cancelAnimationFrame:clearTimeout,getComputedStyle:()=>({minHeight:'26px',maxHeight:'200px',borderTopWidth:'0px',borderBottomWidth:'0px',lineHeight:'20px',paddingTop:'3px',paddingBottom:'3px',getPropertyValue:()=>'',display:'block',visibility:'visible',position:'static',overflow:'visible',animationName:'none',transitionDuration:'0s',transitionDelay:'0s'})});
+window.HTMLElement.prototype.focus=function(){this.dispatchEvent(new window.Event('focusin',{bubbles:true}));};
+(window.HTMLElement.prototype as any).attachEvent=function(){};(window.HTMLElement.prototype as any).detachEvent=function(){};
+window.HTMLElement.prototype.getBoundingClientRect=()=>({height:200,width:600,top:0,left:0,right:600,bottom:200,x:0,y:0} as any);
+Object.defineProperty(window.HTMLElement.prototype,'scrollHeight',{get:()=>40});Object.defineProperty(window.HTMLElement.prototype,'clientWidth',{get:()=>600});
+const chat:any={id:'skill-chat',title:'Skill test',folderId:'folder',draft:'Original request',pinned:false,archived:false,status:'completed',updatedAt:'',mode:'agent',providerId:'hybrow',model:'shared-model'};
+const calls:any[]=[];const listeners=new Set<(event:any)=>void>();const snapshot=()=>({chats:[chat],folders:[{id:'folder',name:'Workspace',path:'/workspace'}],projects:[],version:1,activeChatId:chat.id});
+(window as any).muster={subscribe(listener:any){listeners.add(listener);return()=>listeners.delete(listener);},async invoke(command:string,input:any){calls.push({command,input});if(command==='app.snapshot')return snapshot();if(command==='chat.timeline')return {items:[],revision:1};if(command==='providers.list')return [];if(command==='plugins.list')return [{id:'/Users/test/.agents/skills/review',name:'review',provenance:'~/.agents/skills',path:'/Users/test/.agents/skills/review',readme:'Use the review checklist.',readError:null}];if(command==='chat.send')return {runId:'run'};return undefined;}};
+const {Composer}=await import('../src/renderer/components/Composer');const {useStore}=await import('../src/renderer/useStore');const store=await import('../src/renderer/store');
+const root=createRoot(document.getElementById('root')!);function Harness(){const state=useStore();return state.snapshot?<Composer chat={state.snapshot.chats[0]}/>:null;}
+await store.boot();root.render(<Harness/>);await delay(40);
+const click=async(selector:string)=>{const button=document.querySelector(selector) as HTMLButtonElement;assert.ok(button,selector);button.click();await delay(35);};
+await click('[aria-label="Add context or open tools"]');Array.from(document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')).find(button=>button.textContent?.includes('Attach a skill'))!.click();await delay(70);
+Array.from(document.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]')).find(button=>button.textContent?.includes('review'))!.click();await delay(25);
+assert.equal(store.getState().composerDrafts[chat.id]?.text??chat.draft,'Original request');assert.ok(document.querySelector('[aria-label="Remove selected skill"]'));
+await click('[aria-label="Send message (Enter)"]');
+const send=calls.find(call=>call.command==='chat.send');assert.equal(send.input.text,'Original request');assert.equal(send.input.skillId,'/Users/test/.agents/skills/review');assert.equal(document.querySelector('[aria-label="Remove selected skill"]'),null);
+assert.deepEqual(calls.find(call=>call.command==='plugins.list')?.input,{folderPaths:['/workspace']},'composer scopes workspace skills to the active chat folder');
+root.unmount();console.log('Skill composer check passed: selected skill is sent separately while visible draft remains unchanged.');

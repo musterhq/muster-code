@@ -1,26 +1,27 @@
-.browser-tab { display:flex; flex-direction:column; height:100%; min-width:0; min-height:0; background:var(--bg); color:var(--text); }
-.browser-toolbar { display:flex; align-items:center; gap:8px; padding:9px 10px; border-bottom:1px solid var(--hairline); }
+.browser-tab { display:flex; flex-direction:column; height:100%; min-width:0; min-height:0; background:color-mix(in srgb,var(--bg) 96%,#080909); color:var(--text); }
+.browser-toolbar { display:flex; align-items:center; gap:8px; padding:9px 10px; border-bottom:1px solid var(--hairline); background:color-mix(in srgb,var(--bg-raised) 72%,var(--bg)); }
 .browser-navigation { display:flex; gap:2px; flex:none; }
-.browser-icon { display:grid; place-items:center; width:27px; height:28px; border-radius:5px; color:var(--text-dim); }
+.browser-icon { display:grid; place-items:center; width:27px; height:28px; border-radius:5px; color:var(--text-dim); transition:background-color 160ms cubic-bezier(.2,.75,.25,1),color 160ms cubic-bezier(.2,.75,.25,1); }
 .browser-icon:hover:not(:disabled) { background:var(--bg-hover); color:var(--text); }
 .browser-icon:disabled { opacity:.35; cursor:default; }
-.browser-address-form { display:flex; align-items:center; gap:7px; flex:1; min-width:0; padding:4px 7px; border:1px solid var(--hairline); border-radius:6px; color:var(--text-faint); background:var(--bg-raised); }
+.browser-address-form { display:flex; align-items:center; gap:7px; flex:1; min-width:0; padding:4px 9px; border:1px solid var(--hairline); border-radius:7px; color:var(--text-faint); background:color-mix(in srgb,var(--bg) 70%,transparent); transition:border-color 160ms cubic-bezier(.2,.75,.25,1),background-color 160ms cubic-bezier(.2,.75,.25,1),box-shadow 160ms cubic-bezier(.2,.75,.25,1); }
 .browser-address-form > svg { flex:none; }
 .browser-address-form input { flex:1; width:0; min-width:0; padding:2px 0; border:0; border-radius:0; background:transparent; color:var(--text); font-size:12px; outline:none; user-select:text; }
-.browser-address-form:focus-within { outline:1px solid var(--accent); }
+.browser-address-form:focus-within { border-color:color-mix(in srgb,var(--accent) 62%,var(--hairline)); background:color-mix(in srgb,var(--bg-raised) 86%,var(--bg)); box-shadow:0 0 0 2px color-mix(in srgb,var(--accent) 15%,transparent); }
 .browser-address-form button { padding:2px 4px; font-size:11px; color:var(--text-dim); border-radius:3px; }
 .browser-address-form button:disabled { opacity:.35; cursor:default; }
-.browser-tab button:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+.browser-tab button:focus-visible { outline:2px solid color-mix(in srgb,var(--accent) 72%,white 8%); outline-offset:2px; }
 .browser-load-status { flex:none; min-height:23px; padding:4px 12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:10px; color:var(--text-faint); }
 .browser-error { flex:none; padding:9px 12px; border-bottom:1px solid var(--hairline); }
 .browser-error p { margin:0 0 7px; font-size:12px; color:var(--danger); overflow-wrap:anywhere; user-select:text; }
 .browser-error button { padding:4px 8px; border:1px solid var(--hairline); border-radius:5px; font-size:11px; }
 .browser-notice { flex:none; margin:0; padding:7px 12px; font-size:11px; color:var(--text-faint); border-bottom:1px solid var(--hairline); }
-.browser-surface { position:relative; flex:1; min-width:0; min-height:0; overflow:hidden; }
+.browser-surface { position:relative; flex:1; min-width:0; min-height:0; overflow:hidden; background:color-mix(in srgb,var(--bg) 96%,#080909); }
 .browser-empty { display:flex; flex-direction:column; align-items:center; justify-content:center; gap:8px; height:100%; padding:20px; text-align:center; color:var(--text-faint); }
 .browser-empty p { font-size:13px; margin:0; color:var(--text-dim); }
 .browser-empty span { font-size:12px; }
-.browser-profile { display:flex; align-items:center; gap:6px; flex:none; padding:6px 10px; border-top:1px solid var(--hairline); color:var(--text-faint); font-size:10px; }
+.browser-profile { display:flex; align-items:center; gap:6px; flex:none; padding:7px 10px; border-top:1px solid var(--hairline); color:var(--text-faint); font-size:10px; background:color-mix(in srgb,var(--bg-raised) 62%,var(--bg)); }
 .browser-profile > svg { flex:none; }
 .browser-profile > span:last-child { margin-left:auto; }
 @media (max-width:600px) { .browser-toolbar { gap:4px; padding:7px; } .browser-profile > span:last-child { display:none; } }
+@media (prefers-reduced-motion:reduce) { .browser-icon,.browser-address-form { transition:none; } }

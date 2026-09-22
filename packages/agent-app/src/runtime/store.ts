@@ -95,6 +95,7 @@ function rowToItem(row: TimelineRow): TimelineItem {
 }
 
 const now = (): string => new Date().toISOString();
+const PROJECT_CHAT_EXPORT_LIMIT = 201;
 
 export class AgentStore {
   private readonly db: DatabaseSync;
@@ -209,6 +210,25 @@ export class AgentStore {
   folder(id: string): Folder | undefined {
     const row = this.db.prepare('SELECT id, path, name FROM folders WHERE id = ?').get(id) as Folder | undefined;
     return row ? { id: row.id, path: row.path, name: row.name } : undefined;
+  }
+
+  project(id: string): Project | undefined {
+    const row = this.db.prepare('SELECT id, name, goal, folder_ids FROM projects WHERE id = ?').get(id) as
+      | { id: string; name: string; goal: string; folder_ids: string }
+      | undefined;
+    if (!row) return undefined;
+    let folderIds: string[] = [];
+    try {
+      const parsed: unknown = JSON.parse(row.folder_ids);
+      if (Array.isArray(parsed) && parsed.every(value => typeof value === 'string')) folderIds = parsed;
+    } catch { /* Corrupt legacy folder list degrades to an empty attachment set. */ }
+    return { id: row.id, name: row.name, goal: row.goal, folderIds };
+  }
+
+  /** Read only the latest bounded chat references for one Project export. */
+  projectChats(id: string): Chat[] {
+    const rows = this.db.prepare('SELECT * FROM chats WHERE project_id = ? ORDER BY updated_at DESC LIMIT ?').all(id, PROJECT_CHAT_EXPORT_LIMIT) as unknown as ChatRow[];
+    return rows.map(rowToChat);
   }
 
   createProject(name: string, goal: string, folderIds: string[]): Project {
@@ -389,11 +409,11 @@ export class AgentStore {
    * Idempotent send: persists the receipt + user message + running status in
    * one transaction. Returns the existing runId when the requestId was seen.
    */
-  recordSend(chatId: string, requestId: string, text: string): { runId: string; replay: boolean } {
+  recordSend(chatId: string, requestId: string, text: string, fingerprint = createHash('sha256').update(text).digest('hex')): { runId: string; replay: boolean } {
     return this.tx(() => {
       const existing = this.receipt(requestId);
       if (existing) {
-        if (existing.chatId !== chatId || existing.fingerprint !== createHash('sha256').update(text).digest('hex')) throw new Error('requestId conflicts with the original request.');
+        if (existing.chatId !== chatId || existing.fingerprint !== fingerprint) throw new Error('requestId conflicts with the original request.');
         return { runId: existing.runId, replay: true };
       }
       const chat = this.chat(chatId);
@@ -401,7 +421,7 @@ export class AgentStore {
       if (chat.recovery?.kind === 'recovery-needed') throw new Error('This chat needs its provider status checked before another message can be sent.');
       if (chat.status === 'running' || chat.status === 'stopping') throw new Error('Chat is already running; stop it first.');
       const runId = randomUUID();
-      this.db.prepare('INSERT INTO receipts (request_id, chat_id, run_id, created_at, fingerprint) VALUES (?, ?, ?, ?, ?)').run(requestId, chatId, runId, now(), createHash('sha256').update(text).digest('hex'));
+      this.db.prepare('INSERT INTO receipts (request_id, chat_id, run_id, created_at, fingerprint) VALUES (?, ?, ?, ?, ?)').run(requestId, chatId, runId, now(), fingerprint);
       this.appendItem(chatId, 'user', text);
       const sets: Record<string, unknown> = { status: 'running', draft: '', error: null, providerTurnId: null, recovery: null };
       if (chat.title === 'New chat') sets.title = text.split('\n')[0]!.slice(0, 60).trim() || 'New chat';

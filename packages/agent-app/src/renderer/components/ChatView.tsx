@@ -16,7 +16,7 @@ import {
 } from '../store';
 import { useStore } from '../useStore';
 import {captureAnchor,isAtBottom,recallPosition,rememberPosition,resolveAnchorIndex,type ReadingAnchor} from './chatContinuity';
-import {createTimelineProjection,turnAtRow} from './timeline-navigation-model';
+import {createTimelineProjection,findTranscriptMatches,turnAtRow} from './timeline-navigation-model';
 import {TimelineNavigation} from './TimelineNavigation';
 import {MessageMeta} from './MessageMeta';
 import './chat-continuity.css';
@@ -99,7 +99,7 @@ function TimelineCard({ item }: { item: TranscriptEntry }): React.ReactElement {
   }
 }
 
-export function Timeline({ items, chatId }: { items: TimelineItem[]; chatId:string }): React.ReactElement {
+export function Timeline({ items, chatId, onScrolled }: { items: TimelineItem[]; chatId:string; onScrolled?: (scrolled:boolean)=>void }): React.ReactElement {
   const project=useMemo(()=>createTimelineProjection(),[]);
   const {rows,turns,rowIndexes}=useMemo(()=>project(items),[items,project]);
   const rowsRef=useRef(rows);rowsRef.current=rows;
@@ -109,9 +109,15 @@ export function Timeline({ items, chatId }: { items: TimelineItem[]; chatId:stri
   const saved=useRef(recallPosition(chatId));
   const atBottom = useRef(!saved.current);
   const restoring=useRef(Boolean(saved.current));
+  const scrolledState=useRef(false);
   const [away,setAway]=useState(Boolean(saved.current));
   const [unread,setUnread]=useState(false);
   const [currentTurn,setCurrentTurn]=useState<string|undefined>(turns.at(-1)?.id);
+  const [searchQuery,setSearchQuery]=useState('');
+  const [searchIndex,setSearchIndex]=useState(-1);
+  const searchOrigin=useRef(false);
+  const searchMatches=useMemo(()=>findTranscriptMatches(rows,searchQuery),[rows,searchQuery]);
+  useEffect(()=>{setSearchIndex(-1);if(!searchQuery.trim())searchOrigin.current=false;},[searchQuery]);
   const [backCount,setBackCount]=useState(0),[navigationNotice,setNavigationNotice]=useState('');
   const backPositions=useRef<ReadingAnchor[]>([]);
   const navigationFrame=useRef<number|undefined>(undefined);
@@ -137,7 +143,7 @@ export function Timeline({ items, chatId }: { items: TimelineItem[]; chatId:stri
     const row=anchor?rowIndexesRef.current.get(anchor.itemId):undefined;
     if(row!==undefined)setCurrentTurn(turnAtRow(turnsRef.current,row));
   },[virtualizer]);
-  const goToAnchor=useCallback((anchor:ReadingAnchor)=>{
+  const goToAnchor=useCallback((anchor:ReadingAnchor,smooth=false)=>{
     const index=rowIndexesRef.current.get(anchor.itemId);
     if(index===undefined){setNavigationNotice('That reading position is no longer in the loaded conversation.');return;}
     if(navigationFrame.current!==undefined)cancelAnimationFrame(navigationFrame.current);
@@ -146,11 +152,17 @@ export function Timeline({ items, chatId }: { items: TimelineItem[]; chatId:stri
     virtualizer.scrollToIndex(index,{align:'start',behavior:'auto'});
     navigationFrame.current=requestAnimationFrame(()=>{
       const offset=virtualizer.getOffsetForIndex(index,'start')?.[0];
-      if(offset!=null)virtualizer.scrollToOffset(Math.max(0,offset+anchor.offset),{behavior:'auto'});
+      if(offset!=null)virtualizer.scrollToOffset(Math.max(0,offset+anchor.offset),{behavior:smooth?'smooth':'auto'});
       navigationFrame.current=requestAnimationFrame(()=>{navigationFrame.current=undefined;restoring.current=false;updateCurrentTurn();});
     });
   },[chatId,virtualizer,updateCurrentTurn]);
   const jumpToTurn=useCallback((id:string)=>{if(!rowIndexesRef.current.has(id))return;saveReadingPosition();goToAnchor({itemId:id,offset:0});},[saveReadingPosition,goToAnchor]);
+  const stepSearch=useCallback((direction:1|-1)=>{
+    if(!searchMatches.length)return;
+    if(!searchOrigin.current){saveReadingPosition();searchOrigin.current=true;}
+    const next=searchIndex<0?(direction>0?0:searchMatches.length-1):(searchIndex+direction+searchMatches.length)%searchMatches.length;
+    setSearchIndex(next);const match=searchMatches[next];goToAnchor({itemId:rowsRef.current[match.rowIndex].id,offset:-8},true);
+  },[searchMatches,searchIndex,saveReadingPosition,goToAnchor]);
   const jumpBack=useCallback(()=>{const anchor=backPositions.current.pop();setBackCount(backPositions.current.length);if(anchor)goToAnchor(anchor);},[goToAnchor]);
   const jumpToLatest=useCallback(()=>{
     if(!atBottom.current)saveReadingPosition();
@@ -181,12 +193,14 @@ export function Timeline({ items, chatId }: { items: TimelineItem[]; chatId:stri
     const el = scrollRef.current;
     if (!el) return;
     if(restoring.current)return;
+    const scrolled=el.scrollTop>4;
+    if(scrolled!==scrolledState.current){scrolledState.current=scrolled;onScrolled?.(scrolled);}
     atBottom.current = isAtBottom(el.scrollTop,el.scrollHeight,el.clientHeight);
     setAway(!atBottom.current);
     if(atBottom.current)setUnread(false);
     updateCurrentTurn();
     rememberPosition(chatId,atBottom.current?null:captureAnchor(virtualizer.getVirtualItems(),el.scrollTop));
-  }, [chatId,virtualizer,updateCurrentTurn]);
+  }, [chatId,virtualizer,updateCurrentTurn,onScrolled]);
 
   // Follow the tail only while the reader is at the bottom; a reader scrolled
   // up keeps their anchor as new items stream in.
@@ -199,7 +213,7 @@ export function Timeline({ items, chatId }: { items: TimelineItem[]; chatId:stri
 
   return (
     <div className={`timeline-shell${turns.length?' timeline-with-navigation':''}`}>
-    <TimelineNavigation turns={turns} currentId={currentTurn} canGoBack={backCount>0} onTurn={jumpToTurn} onBack={jumpBack} onLatest={jumpToLatest}/>
+    <TimelineNavigation turns={turns} currentId={currentTurn} canGoBack={backCount>0} onTurn={jumpToTurn} onBack={jumpBack} onLatest={jumpToLatest} searchQuery={searchQuery} onSearch={setSearchQuery} searchCount={searchMatches.length} searchIndex={searchIndex} onSearchStep={stepSearch}/>
     <div className="timeline" ref={scrollRef} onScroll={onScroll}>
       <div
         className="timeline-inner"
@@ -229,6 +243,8 @@ export function Timeline({ items, chatId }: { items: TimelineItem[]; chatId:stri
 export function ChatView(): React.ReactElement {
   const state = useStore();
   const chat = activeChat();
+  const [scrolled,setScrolled]=useState(false);
+  useEffect(()=>setScrolled(false),[chat?.id]);
 
   if (!chat) {
     return (
@@ -244,15 +260,13 @@ export function ChatView(): React.ReactElement {
 
   return (
     <div className="chat">
-      <header className="chat-head">
-        <StatusDot status={chat.status} />
+      <header className="chat-head" data-scrolled={scrolled||undefined}>
+        <StatusDot status={chat.status} showLabel={chat.status==='running'||chat.status==='stopping'||chat.status==='failed'||chat.status==='interrupted'} />
         <span className="chat-head-title" title={chat.title}>
           {chat.title}
         </span>
         <span className="chat-head-meta">
           {folder && <span className="chat-folder-context" title={folder.path}>{folder.name}</span>}
-          <span className="chat-head-model">{chat.model}</span>
-          <span className="chat-head-mode">{chat.mode}</span>
         </span>
       </header>
       <RecoveryNotice key={`${chat.id}:${chat.providerThreadId ?? ""}:${chat.providerTurnId ?? ""}:${chat.recovery?.kind ?? ""}`} chat={chat}/>
@@ -272,7 +286,7 @@ export function ChatView(): React.ReactElement {
           <p>No messages yet. Say what you want done in {folder?.name ?? 'this workspace'}.</p>
         </div>
       ) : (
-        <Timeline key={`timeline:${chat.id}`} items={timeline.value ?? []} chatId={chat.id} />
+        <Timeline key={`timeline:${chat.id}`} items={timeline.value ?? []} chatId={chat.id} onScrolled={setScrolled} />
       )}
       <TurnChanges key={`changes:${chat.id}`} chat={chat} items={timeline.value??[]}/>
       <Composer key={`composer:${chat.id}`} chat={chat} />

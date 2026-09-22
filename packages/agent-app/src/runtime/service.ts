@@ -22,9 +22,10 @@ import { AgentModeReviewHost } from './review.ts';
 import {gitStatus, mutateGit} from './git-local.ts';
 import {createEntry, moveFile} from './file-operations.ts';
 import { createProviderAdapter, MODEL, ProviderPreDispatchError, type ProviderAdapter } from './provider.ts';
-import { discoverSkills } from './plugin-library.ts';
+import { discoverPlugins, discoverSkills, resolveAttachedSkill } from './plugin-library.ts';
 import {providerAccessPolicy} from './provider-run-lifecycle.ts';
 import {reconcileProviderTurn, type ReconciliationInput, type ReconciliationResult} from './provider-reconciliation.ts';
+import { ProjectTaskStore, type TaskStatus } from './project-tasks.ts';
 
 function object(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Invalid command input.');
@@ -49,6 +50,7 @@ interface PendingQuestionRequest { chatId: string; createdAt: string; providerKe
 
 export function createAgentService(options: { dataDir: string; onEvent(event: AgentEvent): void; provider?: ProviderAdapter; reconcileProvider?: (input: ReconciliationInput) => Promise<ReconciliationResult> }) {
   const store = new AgentStore(options.dataDir);
+  const projectTasks = new ProjectTaskStore(options.dataDir);
   const customProviders = new CustomProviders(options.dataDir);
   const annotations = new FileAnnotations(options.dataDir);
   const provider = options.provider ?? createProviderAdapter();
@@ -116,6 +118,15 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
     if (!timers.has(chatId)) timers.set(chatId, setTimeout(() => { timers.delete(chatId); if (!disposed) timeline(chatId); }, 33));
   };
   const chatFor = (chatId: string): Chat => { const chat = store.chat(chatId); if (!chat) throw new Error('Chat does not exist.'); return chat; };
+  projectTasks.recoverUnlinkedRuns();
+  for(const task of projectTasks.listRunningTasks()){
+    if(!task.runRequestId)continue;
+    if(!task.runChatId){projectTasks.failTaskStart({projectId:task.projectId,id:task.id,requestId:task.runRequestId,chatId:'',reason:'The saved Project task run has no linked chat. Reopen it before starting new work.'});continue;}
+    const linked=store.chat(task.runChatId);
+    if(!linked){projectTasks.failTaskStart({projectId:task.projectId,id:task.id,requestId:task.runRequestId,chatId:task.runChatId,reason:'The linked agent chat is missing. Reopen the task and inspect Project activity before retrying.'});continue;}
+    if(linked.status==='completed'||linked.status==='failed'||linked.status==='interrupted')projectTasks.settleRunForChat(linked.id,linked.status,linked.error);
+    else if(linked.status==='idle')projectTasks.failTaskStart({projectId:task.projectId,id:task.id,requestId:task.runRequestId,chatId:task.runChatId,reason:'The app stopped before the linked agent chat accepted its request. Open the chat to review the saved draft.'});
+  }
   const folderFor = (folderId: unknown) => { const folder = store.folder(id(folderId)); if (!folder) throw new Error('Folder does not exist.'); return folder; };
   const memoryContext = (folderId: unknown) => {
     if (folderId === undefined || folderId === null) return {cwd: options.dataDir, scopes: [{kind:'user',id:'local'}]};
@@ -158,19 +169,26 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
     if (!entry) throw new Error(`Model ${model} is unavailable through the configured provider. Choose an available model.`);
     return entry;
   }
-  async function send(chatId: string, prompt: string, requestId: string) {
+  async function send(chatId: string, prompt: string, requestId: string, skillId?: string) {
     let chat = chatFor(chatId);
+    const folder = chat.folderId ? folderFor(chat.folderId) : undefined;
+    const attachedSkill = skillId === undefined ? undefined : await resolveAttachedSkill(skillId, folder ? [folder.path] : []);
+    if (skillId !== undefined && !attachedSkill) throw new Error('The selected skill is unavailable or outside this chat’s allowed skill roots. Refresh the skill list and try again.');
+    const fingerprint = attachedSkill
+      ? createHash('sha256').update(JSON.stringify({ text: prompt, skillId: attachedSkill.id, skillDigest: attachedSkill.digest })).digest('hex')
+      : createHash('sha256').update(prompt).digest('hex');
     const receipt = store.receipt(requestId);
-    if (receipt) { if (receipt.chatId !== chatId || receipt.fingerprint !== createHash('sha256').update(prompt).digest('hex')) throw new Error('Request identity conflicts with its original message.'); return {runId: receipt.runId}; }
+    if (receipt) { if (receipt.chatId !== chatId || receipt.fingerprint !== fingerprint) throw new Error('Request identity conflicts with its original message.'); return {runId: receipt.runId}; }
     if (chat.recovery?.kind === 'recovery-needed') throw new Error('This attempt may still be running at the provider. Check its status before sending another message. Your draft is retained.');
     if (!prompt.trim()) throw new Error('Write a message first.');
     if (chat.archived) throw new Error('Restore this chat before sending.');
     if (providerSelections.has(chatId)) throw new Error('Wait for the provider selection to finish.');
     validateRunnableModel(chat.model,chat.providerId??'hybrow');
-    const folder = chat.folderId ? folderFor(chat.folderId) : undefined;
     const project = chat.projectId ? store.snapshot().projects.find(p => p.id === chat.projectId) : undefined;
-    const contextualPrompt = project
-      ? `Project: ${project.name}\nShared goal: ${project.goal || '(not set)'}\n\nCurrent user request:\n${prompt}`
+    const context = project ? `Project: ${project.name}\nShared goal: ${project.goal || '(not set)'}` : '';
+    const skillContext = attachedSkill ? `Selected skill: ${attachedSkill.name} (${attachedSkill.provenance})\n\nApply these user-selected skill instructions to the current request:\n<skill-instructions>\n${attachedSkill.content}\n</skill-instructions>` : '';
+    const contextualPrompt = context || skillContext
+      ? `${[context, skillContext].filter(Boolean).join('\n\n')}\n\nCurrent user request:\n${prompt}`
       : prompt;
     const cwd = folder?.path ?? join(options.dataDir, 'scratch', chatId);
     if (folder) { if (!(await fs.stat(cwd)).isDirectory()) throw new Error('Selected folder is unavailable.'); }
@@ -193,7 +211,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
       chat=store.updateChat(chatId,{providerId:selectedProvider.id,providerBindingId:bindingId,...(!nativeMatches?{providerThreadId:null,providerTurnId:null,providerThreadProviderId:null,providerThreadBindingId:null}:{})});
     }
     const access = providerAccessPolicy(chat);
-    const accepted = store.recordSend(chatId, requestId, prompt);
+    const accepted = store.recordSend(chatId, requestId, prompt, fingerprint);
     if (accepted.replay) return {runId: accepted.runId};
     const run: ActiveRun = {cwd, stopped: false}; runs.set(chatId, run); state(); timeline(chatId);
     let segment: TimelineItem | undefined;
@@ -336,10 +354,52 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
         }
       } finally {
         settleApprovals(chatId); settleQuestions(chatId); runs.delete(chatId);
-        if (!disposed) { const timer = timers.get(chatId); if (timer) clearTimeout(timer); timers.delete(chatId); timeline(chatId); state(); }
+        if (!disposed) { const timer = timers.get(chatId); if (timer) clearTimeout(timer); timers.delete(chatId); timeline(chatId); const finalChat=store.chat(chatId);if(finalChat&&(finalChat.status==='completed'||finalChat.status==='failed'||finalChat.status==='interrupted')){const task=projectTasks.settleRunForChat(chatId,finalChat.status,finalChat.error);if(task)emit({type:'projectChanged',projectId:task.projectId,taskId:task.id});}state(); }
       }
     })();
     return {runId: accepted.runId};
+  }
+  const startingProjectTasks=new Map<string,Promise<Commands['project.tasks.start']['output']>>();
+  async function startProjectTask(input:Commands['project.tasks.start']['input']):Promise<Commands['project.tasks.start']['output']>{
+    const projectId=id(input?.projectId),taskId=id(input?.id),requestId=id(input?.requestId),project=store.snapshot().projects.find(item=>item.id===projectId);
+    if(!project)throw new Error('Project not found.');
+    const task=projectTasks.assertTaskProject(projectId,taskId);
+    if(!Number.isSafeInteger(input.revision)||input.revision<0)throw new Error('Invalid revision.');
+    const inFlightKey=`${projectId}:${taskId}:${requestId}`,inFlight=startingProjectTasks.get(inFlightKey);
+    if(inFlight)return inFlight;
+    if(task.runRequestId===requestId&&task.runChatId){const receipt=store.receipt(requestId);if(!receipt)throw new Error('This task start has no confirmed provider receipt. Open its linked chat and inspect it before retrying.');return {task,chatId:task.runChatId,runId:receipt.runId};}
+    if(task.status==='running')throw new Error('This task already has an active run. Open its linked chat.');
+    if(task.runChatId&&task.runRequestId){const previous=store.chat(task.runChatId);if(previous&&(previous.status==='running'||previous.status==='stopping'||previous.recovery?.kind==='recovery-needed'))throw new Error('The prior agent attempt may still be active. Open its linked chat and resolve its status before running this task again.');}
+    if(project.folderIds.length===0)throw new Error('Attach a folder to this Project before starting an agent task.');
+    let folderId=input.folderId===undefined?undefined:id(input.folderId);
+    if(folderId&&!project.folderIds.includes(folderId))throw new Error('Choose a folder attached to this Project.');
+    if(!folderId&&project.folderIds.length===1)folderId=project.folderIds[0];
+    if(!folderId&&project.folderIds.length>1)throw new Error('Choose the folder this task should work in.');
+    const run=startProjectTaskOnce({projectId,taskId,revision:input.revision,requestId,folderId});
+    startingProjectTasks.set(inFlightKey,run);
+    try{return await run;}finally{if(startingProjectTasks.get(inFlightKey)===run)startingProjectTasks.delete(inFlightKey);}
+  }
+  async function startProjectTaskOnce(input:{projectId:string;taskId:string;revision:number;requestId:string;folderId?:string}):Promise<Commands['project.tasks.start']['output']>{
+    const project=store.snapshot().projects.find(item=>item.id===input.projectId)!;
+    const task=projectTasks.assertTaskProject(input.projectId,input.taskId);
+    projectTasks.assertCanStartTask({projectId:input.projectId,id:input.taskId,revision:input.revision});
+    const folder=input.folderId?store.folder(input.folderId):undefined;
+    const prompt=`Project task: ${task.title}\nTask ID: ${task.id}\nAcceptance criteria:\n${task.acceptance||'(not specified)'}\n\nWork only within the selected Project folder. Implement the task, report concrete changes and relevant verification, and do not claim the task is verified. Ask before expanding scope or taking an irreversible action.`;
+    const chat=store.createChat({folderId:folder?.id,projectId:project.id,model:MODEL,mode:'agent'});
+    store.updateChat(chat.id,{title:`Task · ${task.title}`.slice(0,256),draft:prompt});
+    let claimed:import('./project-tasks.ts').ProjectTask;
+    try{claimed=projectTasks.startTask({projectId:input.projectId,id:input.taskId,revision:input.revision,requestId:input.requestId,chatId:chat.id});}
+    catch(error){store.updateChat(chat.id,{archived:true});state();throw error;}
+    if(claimed.runChatId!==chat.id){store.updateChat(chat.id,{archived:true});state();const receipt=store.receipt(input.requestId);if(receipt&&claimed.runChatId)return {task:claimed,chatId:claimed.runChatId,runId:receipt.runId};throw new Error('This task start is already being reconciled. Open its linked chat before trying again.');}
+    emit({type:'projectChanged',projectId:input.projectId,taskId:input.taskId});state();
+    try{const result=await send(chat.id,prompt,input.requestId);return {task:claimed,chatId:chat.id,runId:result.runId};}
+    catch(error){
+      const receipt=store.receipt(input.requestId);
+      if(receipt)return {task:claimed,chatId:chat.id,runId:receipt.runId};
+      const reason=error instanceof Error?error.message:'The agent run could not be dispatched.';
+      projectTasks.failTaskStart({projectId:input.projectId,id:input.taskId,requestId:input.requestId,chatId:chat.id,reason});
+      emit({type:'projectChanged',projectId:input.projectId,taskId:input.taskId});state();throw error;
+    }
   }
   async function invoke<K extends keyof Commands>(command: K, input: Commands[K]['input']): Promise<Commands[K]['output']> {
     if (disposed || closing) throw new Error('Agent runtime is stopping or closed.');
@@ -357,6 +417,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
         ...detected.filter(entry=>!runtime.some(runnable=>runnable.id===entry.id)).map(({identity,credentialPresent,...entry})=>({...entry,available:false,models:[],canReveal:Boolean(identity),source:'Local configuration discovery',detail:`${entry.detail}. No runnable adapter is enabled for this entry.`})),
         ...customProviders.list()];
     }
+    if (command === 'plugins.inventory') return discoverPlugins();
     const p = object(input);
     switch (command) {
       case 'folder.add': { const path = await fs.realpath(text(p.path, 'folder path')); if (!(await fs.stat(path)).isDirectory()) throw new Error('Choose a folder.'); const result = store.addFolder(path, basename(path)); state(); return result; }
@@ -405,7 +466,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
         if (p.direction !== 'up' && p.direction !== 'down') throw new Error('Invalid direction.');
         store.movePin(chatId, p.direction); state(); return;
       }
-      case 'chat.send': return send(id(p.id), text(p.text, 'message', 262144), id(p.requestId));
+      case 'chat.send': return send(id(p.id), text(p.text, 'message', 262144), id(p.requestId), p.skillId === undefined ? undefined : text(p.skillId, 'skill id', 4096));
       case 'chat.contextTelemetry': { const chatId = id(p.id); chatFor(chatId); return store.contextTelemetry(chatId); }
       case 'chat.stop': { const chatId = id(p.id); chatFor(chatId); const run = runs.get(chatId); if (!run) return; run.stopped = true; store.updateChat(chatId, {status: 'stopping'}); settleApprovals(chatId); settleQuestions(chatId); state(); await provider.stop(chatId); return; }
       case 'chat.reconcile': {
@@ -448,6 +509,16 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
         finishQuestion(questionId, pending, {...answers}, 'answered', receiptAnswers); return;
       }
       case 'project.create': { const name = text(p.name,'project name',256).trim(); if (!name) throw new Error('Name the Project.'); if (!Array.isArray(p.folderIds) || p.folderIds.length > 100) throw new Error('Invalid Project folders.'); const result = store.createProject(name, text(p.goal,'goal',32768), [...new Set(p.folderIds.map(id))]); state(); return result; }
+      case 'project.tasks.list': { const projectId=id(p.projectId); if(!store.project(projectId)) throw new Error('Project not found.'); return projectTasks.listTasks(projectId); }
+      case 'project.tasks.create': { const projectId=id(p.projectId); if(!store.project(projectId)) throw new Error('Project not found.'); if(!Array.isArray(p.dependencies)||p.dependencies.length>50) throw new Error('Invalid dependencies.'); return projectTasks.createTask({projectId,title:text(p.title,'task title',500),acceptance:text(p.acceptance,'acceptance criteria',4000),dependencies:[...new Set(p.dependencies.map(id))]}); }
+      case 'project.tasks.start': return startProjectTask({projectId:id(p.projectId),id:id(p.id),revision:Number(p.revision),requestId:id(p.requestId),...(p.folderId===undefined?{}:{folderId:id(p.folderId)})});
+      case 'project.tasks.updateStatus': { const projectId=id(p.projectId); if(!store.project(projectId)) throw new Error('Project not found.'); const taskId=id(p.id); if(!['todo','running','blocked','implemented','verified'].includes(String(p.status))) throw new Error('Invalid task status.'); if(!Number.isSafeInteger(p.revision)||Number(p.revision)<0) throw new Error('Invalid revision.'); const evidence=p.evidence===undefined?undefined:Array.isArray(p.evidence)&&p.evidence.length<=50?p.evidence.map(e=>text(e,'evidence',2000)):(()=>{throw new Error('Invalid evidence.');})(); return projectTasks.updateTaskStatus({projectId,id:taskId,status:p.status as TaskStatus,evidence,revision:Number(p.revision)}); }
+      case 'project.tasks.addEvidence': { const projectId=id(p.projectId); if(!store.project(projectId)) throw new Error('Project not found.'); if(!Array.isArray(p.entries)||p.entries.length<1||p.entries.length>50) throw new Error('Provide 1–50 evidence entries.'); if(!Number.isSafeInteger(p.revision)||Number(p.revision)<0) throw new Error('Invalid revision.'); return projectTasks.addEvidence({projectId,id:id(p.id),entries:p.entries.map(e=>text(e,'evidence',2000)),revision:Number(p.revision)}); }
+      case 'project.decisions.list': { const projectId=id(p.projectId); if(!store.project(projectId)) throw new Error('Project not found.'); return projectTasks.listDecisions(projectId); }
+      case 'project.decisions.create': { const projectId=id(p.projectId); if(!store.project(projectId)) throw new Error('Project not found.'); if(!Array.isArray(p.relatedTaskIds)||p.relatedTaskIds.length>50) throw new Error('Invalid related tasks.'); return projectTasks.createDecision({projectId,title:text(p.title,'decision title',500),rationale:text(p.rationale,'rationale',8000),scope:text(p.scope,'scope',500),relatedTaskIds:[...new Set(p.relatedTaskIds.map(id))]}); }
+      case 'project.decisions.supersede': { const projectId=id(p.projectId); if(!store.project(projectId)) throw new Error('Project not found.'); return projectTasks.supersedeDecision({projectId,id:id(p.id),replacementId:id(p.replacementId)}); }
+      case 'project.activity.list': { const projectId=id(p.projectId); if(!store.project(projectId)) throw new Error('Project not found.'); const limit=p.limit===undefined?100:Number(p.limit); if(!Number.isSafeInteger(limit)||limit<1||limit>200) throw new Error('Invalid limit.'); return projectTasks.listActivity(projectId,limit); }
+      case 'project.export': { const projectId=id(p.projectId), project=store.project(projectId); if(!project) throw new Error('Project not found.'); const folders=project.folderIds.map(folderId=>store.folder(folderId)).filter((folder):folder is NonNullable<typeof folder>=>Boolean(folder)); const chats=store.projectChats(projectId).map(({id,title,folderId,providerId,model,mode,permissionMode,status,updatedAt,recovery})=>({id,title,...(folderId?{folderId}:{}),providerId:providerId??'hybrow',model,mode,...(permissionMode?{permissionMode}:{}),status,updatedAt,...(recovery?{recovery}:{} )})); return projectTasks.exportProject(project,folders,chats); }
       case 'workspace.watch': {
         if (!Array.isArray(p.folderIds) || p.folderIds.length > 32) throw new Error('Invalid watched folders.');
         const folders = [...new Set(p.folderIds.map(id))].map(folderFor);
@@ -510,8 +581,8 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
       case 'memory.inspect': { const context = memoryContext(p.folderId); try { const r = await inspectMemoryStore(context.cwd); return {available:true,objectCount:r.jsonl.objectCount,checks:r.checks}; } catch(e) { return {available:false,objectCount:0,checks:[],error:e instanceof Error?e.message:String(e)}; } }
       case 'hindsight.status': return hindsightClient().status(p.folderId === undefined ? 'personal' : id(p.folderId));
       case 'hindsight.retain': return hindsightClient().retain({folderId: p.folderId === undefined ? 'personal' : id(p.folderId), items: [{content: text(p.content, 'content', 32768)}], provenance: [text(p.source, 'source', 512)], async: false});
-      case 'hindsight.recall': return hindsightClient().recall({folderId: p.folderId === undefined ? 'personal' : id(p.folderId), query: text(p.query, 'query', 8192), budget: 'low', maxTokens: 2048});
-      case 'hindsight.reflect': return hindsightClient().reflect({folderId: p.folderId === undefined ? 'personal' : id(p.folderId), query: text(p.query, 'query', 8192), budget: 'low', maxTokens: 2048});
+      case 'hindsight.recall': return hindsightClient().recall({folderId: p.folderId === undefined ? 'personal' : id(p.folderId), query: text(p.query, 'query', 8192), budget: p.budget as 'low'|'mid'|'high'|undefined ?? 'low', maxTokens: typeof p.maxTokens === 'number' ? p.maxTokens : 2048, types: p.types as ('world'|'experience'|'observation')[]|undefined, tags: p.tags as string[]|undefined});
+      case 'hindsight.reflect': return hindsightClient().reflect({folderId: p.folderId === undefined ? 'personal' : id(p.folderId), query: text(p.query, 'query', 8192), context: p.context === undefined ? undefined : text(p.context, 'context', 32768), budget: p.budget as 'low'|'mid'|'high'|undefined ?? 'low', maxTokens: typeof p.maxTokens === 'number' ? p.maxTokens : 2048});
       case 'plugins.list': {
         const allowedFolders = new Set(store.snapshot().folders.map(folder => folder.path));
         const folderPaths = Array.isArray(p.folderPaths)
@@ -534,7 +605,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
       // tracked callbacks settle, even if main times out and keeps the app open.
       hindsight?.dispose();
       await Promise.allSettled([...invocations,...[...runs.values()].flatMap(run => run.promise ? [run.promise] : [])]);
-      disposed = true; for (const timer of timers.values()) clearTimeout(timer); timers.clear(); customProviders.close(); annotations.close(); store.close();
+      disposed = true; for (const timer of timers.values()) clearTimeout(timer); timers.clear(); customProviders.close(); annotations.close(); projectTasks.close(); store.close();
     })();
     return disposal;
   }};

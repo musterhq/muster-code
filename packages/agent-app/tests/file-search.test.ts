@@ -3,7 +3,18 @@ import assert from 'node:assert/strict';
 import {mkdtemp,mkdir,writeFile,symlink,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
-import {searchFiles} from '../src/runtime/files.ts';
+import {listFiles,searchFiles} from '../src/runtime/files.ts';
+
+test('Office owner lock files stay out of browsing and search', async t => {
+  const root = await mkdtemp(join(tmpdir(),'muster-office-lock-'));
+  t.after(async()=>{await rm(root,{recursive:true,force:true});});
+  await mkdir(join(root,'docs'));
+  await writeFile(join(root,'docs','~$preview-workbook.xlsx'),'lock');
+  await writeFile(join(root,'docs','~$notes.txt'),'ordinary text');
+  await writeFile(join(root,'docs','preview-workbook.xlsx'),'workbook');
+  assert.deepEqual((await listFiles(root,'docs')).map(file=>file.name).sort(),['preview-workbook.xlsx','~$notes.txt']);
+  assert.equal((await searchFiles(root,'','~$preview')).entries.length,0);
+});
 
 test('file search finds nested paths, bounds results and never follows outside links', async t => {
   const root = await mkdtemp(join(tmpdir(),'muster-search-'));

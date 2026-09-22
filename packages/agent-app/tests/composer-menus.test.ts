@@ -7,8 +7,11 @@ test('slash detection recognizes unfinished commands without stealing paths, pro
   for(const text of ['/Users/project','Please /plan','/ask question','https://example.test','/plan\n'])assert.equal(readSlashQuery(text,text.length),null);
   assert.equal(readSlashQuery('/plan',1,5),null);assert.equal(readSlashQuery('/plan',2),null);
 });
-test('command search points to concrete actions and treats plugins as local skill discovery',()=>{
-  assert.deepEqual(filterComposerCommands('plugins').map(command=>command.id),['skills']);
+test('command search distinguishes local skills from installed plugin inventory',()=>{
+  assert.deepEqual(filterComposerCommands('plugins').map(command=>command.id),['plugins']);
+  assert.equal(COMPOSER_COMMANDS.find(command=>command.id==='plugins')?.description,'Inspect skills, MCP servers and apps');
+  for(const id of ['reference','skills','browser','providers','model','agent','ask','plan','access'])
+    assert.ok(COMPOSER_COMMANDS.some(command=>command.id===id),`missing composer control: ${id}`);
   assert.ok(filterComposerCommands('web').some(command=>command.id==='browser'));
   assert.ok(filterComposerCommands('/plan').some(command=>command.id==='plan'));
   assert.equal(filterComposerCommands('nonexistent-action').length,0);

@@ -7,6 +7,7 @@ import './workspace-overview.css';
 import {GitActions} from './GitActions';
 import {EMPTY_ACTIVITY_ITEMS, getSubagentActivity, subagentState} from '../subagentActivity';
 import {SubagentCounts, SubagentStatus} from './SubagentsTab';
+import {ProcessActivitySummary} from './ProcessActivitySummary';
 
 /** Empty pane and compact activity share real workspace state. */
 export function WorkspaceOverview({compact=false, onNavigate=()=>{}}: {compact?:boolean; onNavigate?:()=>void}) {
@@ -33,6 +34,7 @@ export function WorkspaceOverview({compact=false, onNavigate=()=>{}}: {compact?:
   return <div className={`workspace-overview${compact ? ' is-compact' : ''}`}>
     <div className="workspace-launchers"><button onClick={() => run(() => openBrowserTab())}><Globe size={18} aria-hidden="true"/><span>Browser</span></button></div>
     {chat && <div className="workspace-launchers"><button onClick={()=>run(()=>openProcessesTab(chat.id,chat.title))}><Terminal size={18} aria-hidden="true"/><span>Background commands</span></button><button onClick={()=>run(()=>openComputerTab(project?{kind:'project',id:project.id}:{kind:'chat',id:chat.id},project?.name??chat.title))}><Monitor size={18} aria-hidden="true"/><span>Scoped computer</span></button></div>}
+    {chat && <ProcessActivitySummary chatId={chat.id} />}
     {chat && <section className="workspace-overview-section workspace-chat-activity" aria-label="Conversation subagents">
       <header><span>Subagents</span><button className="workspace-inline-link" aria-label={`View all subagents for ${chat.title || 'this conversation'}`} onClick={openAgents}>View all</button></header>
       {agents.length > 0 && <>
