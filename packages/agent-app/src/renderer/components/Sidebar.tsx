@@ -3,7 +3,6 @@ import {
   ArchiveRestore,
   Brain,
   Blocks,
-  Puzzle,
   ChevronDown,
   ChevronRight,
   ChevronUp,
@@ -347,16 +346,12 @@ export function Sidebar(): React.ReactElement {
         )}
       </div>
       <footer className="nav-footer">
-        <button type="button" className="tool-button" onClick={()=>openPluginsScreen('skills')}>
-          <Blocks size={15} /><span>Local skills</span>
+        <button type="button" className="nav-footer-action" onClick={()=>openPluginsScreen('skills')}>
+          <Blocks size={15} aria-hidden="true"/><span>Skills &amp; plugins</span>
         </button>
-        <button type="button" className="tool-button" onClick={()=>openPluginsScreen('plugins')}>
-          <Puzzle size={15} /><span>Plugins</span>
+        <button type="button" className="nav-footer-action" onClick={openProvidersTab}>
+          <Settings2 size={15} aria-hidden="true"/><span>Accounts &amp; providers</span>
         </button>
-        <button type="button" className="tool-button" onClick={openProvidersTab}>
-          <Settings2 size={15} /><span>Providers</span>
-        </button>
-        <span className="nav-footer-label">Muster</span>
       </footer>
     </div>
   );

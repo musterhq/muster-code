@@ -27,6 +27,8 @@ const store=await import('../src/renderer/store'),{Sidebar}=await import('../src
 const errors:unknown[]=[];const root=createRoot(document.getElementById('root')!,{onUncaughtError:error=>errors.push(error)});
 await store.boot();root.render(<Sidebar/>);await delay(60);
 assert.deepEqual(errors,[]);assert.ok(document.querySelector('[aria-label="1 active chats"]'),'running group count remains visible when collapsed');
+const footerLabels=Array.from(document.querySelectorAll<HTMLElement>('.nav-footer-action')).map(button=>button.textContent);
+assert.deepEqual(footerLabels,['Skills & plugins','Accounts & providers'],'sidebar utilities remain legible at the minimum navigation width');
 const group=document.querySelector('.nav-disclosure') as HTMLButtonElement;group.click();await delay(30);assert.equal(group.getAttribute('aria-expanded'),'false');
 await store.selectChat('two');await delay(45);
 assert.equal(group.getAttribute('aria-expanded'),'true');assert.equal(scrolls.at(-1),'two');
