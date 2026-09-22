@@ -1,9 +1,10 @@
-export type ComposerCommandId='reference'|'browser'|'skills'|'providers'|'model'|'access'|'agent'|'ask'|'plan';
+export type ComposerCommandId='reference'|'browser'|'skills'|'plugins'|'providers'|'model'|'access'|'agent'|'ask'|'plan';
 export interface ComposerCommand {id:ComposerCommandId;command:string;label:string;description:string;keywords:string}
 export const COMPOSER_COMMANDS:readonly ComposerCommand[]=[
   {id:'reference',command:'file',label:'Reference a workspace file',description:'Add a file path to your message',keywords:'reference mention workspace'},
   {id:'browser',command:'browser',label:'Browse web',description:'Open the Personal browser',keywords:'web website'},
-  {id:'skills',command:'skills',label:'Local skills',description:'Inspect installed skill sources',keywords:'plugins instructions inventory'},
+  {id:'skills',command:'skills',label:'Local skills',description:'Inspect installed skill sources',keywords:'instructions inventory skill discovery'},
+  {id:'plugins',command:'plugins',label:'Plugin management',description:'Unavailable in this build',keywords:'extensions install marketplace'},
   {id:'providers',command:'providers',label:'Providers & models',description:'Manage available model providers',keywords:'settings connection models'},
   {id:'model',command:'model',label:'Choose a model',description:'Use an available model for this chat',keywords:'provider'},
   {id:'access',command:'access',label:'Set agent access',description:'Choose what future Agent turns may do',keywords:'permissions readonly workspace full'},

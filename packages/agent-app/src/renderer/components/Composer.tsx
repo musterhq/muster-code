@@ -1,4 +1,4 @@
-import { ArrowUp, BookOpen, Bot, Check, ChevronDown, Cpu, FileText, FolderCheck, Globe, ListChecks, LockKeyhole, MessageCircle, Plus, Search, ShieldAlert, SlidersHorizontal, Slash, Square, Star, X } from 'lucide-react';
+import { ArrowUp, BookOpen, Bot, Check, ChevronDown, Cpu, FileText, FolderCheck, Globe, ListChecks, LockKeyhole, MessageCircle, Plus, Puzzle, Search, ShieldAlert, SlidersHorizontal, Slash, Square, Star, X } from 'lucide-react';
 import { Dialog } from '@base-ui/react/dialog';
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { Chat, Commands } from '../../shared/protocol';
@@ -8,7 +8,7 @@ import { useStore } from '../useStore';
 import { COMPOSER_COMMANDS, configuredAccess, effectiveAccess, filterComposerCommands, insertWorkspaceReference, menuIndex, readSlashQuery, type ComposerAccess, type ComposerCommandId } from './composerMenus';
 import './composer.css';
 
-const COMMAND_ICONS = {reference:FileText,browser:Globe,skills:BookOpen,providers:SlidersHorizontal,model:Cpu,access:LockKeyhole,agent:Bot,ask:MessageCircle,plan:ListChecks};
+const COMMAND_ICONS = {reference:FileText,browser:Globe,skills:BookOpen,plugins:Puzzle,providers:SlidersHorizontal,model:Cpu,access:LockKeyhole,agent:Bot,ask:MessageCircle,plan:ListChecks};
 const ACCESS = [{id:'read-only',label:'Read-only',description:'Read files without changing them',Icon:LockKeyhole},{id:'workspace',label:'Workspace',description:'Edit workspace files; ask before escalation',Icon:FolderCheck},{id:'full',label:'Full access',description:'Unrestricted filesystem, commands and network',Icon:ShieldAlert}] as const;
 const MODEL_FAVORITES_KEY = 'muster.composer.model-favorites.v1';
 
@@ -73,6 +73,8 @@ export function Composer({ chat }: { chat: Chat }): React.ReactElement {
   const folderId = referenceFolderId && referenceFolders.some(folder => folder.id === referenceFolderId) ? referenceFolderId : chat.folderId ?? folderIds[0];
   const composerRoot = useRef<HTMLDivElement>(null);
   const plusTrigger = useRef<HTMLButtonElement>(null);
+  const commandTrigger = useRef<HTMLButtonElement>(null);
+  const menuReturnFocus = useRef<HTMLElement | null>(null);
   const accessTrigger = useRef<HTMLButtonElement>(null);
   const cancelFull = useRef<HTMLButtonElement>(null);
   const [menu, setMenu] = useState<'plus'|'commands'|'mode'|'access'|null>(null);
@@ -115,7 +117,7 @@ export function Composer({ chat }: { chat: Chat }): React.ReactElement {
   const commandsOpen = menu === 'commands' || typedCommands;
   const commands = filterComposerCommands(typedCommands ? slashQuery ?? '' : commandQuery);
   const choicesDisabled = running || sending || settingsChanging || modelChanging || recoveryNeeded;
-  const commandDisabled = (id:ComposerCommandId) => id==='reference'?!folderId:['agent','ask','plan','access','model'].includes(id)&&choicesDisabled;
+  const commandDisabled = (id:ComposerCommandId) => id==='plugins' || (id==='reference'?!folderId:['agent','ask','plan','access','model'].includes(id)&&choicesDisabled);
   const enabledCommands=commands.flatMap((command,index)=>commandDisabled(command.id)?[]:[index]);
   const requestedCommand=Math.min(commandIndex,Math.max(0,commands.length-1));
   const selectedCommand=enabledCommands.includes(requestedCommand)?requestedCommand:enabledCommands[0]??0;
@@ -132,7 +134,7 @@ export function Composer({ chat }: { chat: Chat }): React.ReactElement {
     const dismiss=()=>{setMenu(null);setDismissedSlash(currentDraft.current.text);};
     const pointer=(event:PointerEvent)=>{if(!composerRoot.current?.contains(event.target as Node))dismiss();};
     const focus=(event:FocusEvent)=>{if(!composerRoot.current?.contains(event.target as Node) || (event.target===input.current && menu && menu!=='commands'))dismiss();};
-    const key=(event:KeyboardEvent)=>{if(event.key==='Escape' && !event.defaultPrevented){event.preventDefault();dismiss();input.current?.focus();}};
+    const key=(event:KeyboardEvent)=>{if(event.key==='Escape' && !event.defaultPrevented){event.preventDefault();dismiss();(menuReturnFocus.current??input.current)?.focus();}};
     document.addEventListener('pointerdown',pointer);document.addEventListener('keydown',key);document.addEventListener('focusin',focus);
     return()=>{document.removeEventListener('pointerdown',pointer);document.removeEventListener('keydown',key);document.removeEventListener('focusin',focus);};
   },[menu,typedCommands]);
@@ -308,6 +310,7 @@ export function Composer({ chat }: { chat: Chat }): React.ReactElement {
 
   const showMenu = (next:'plus'|'commands'|'mode'|'access') => {
     setReferenceOpen(false);setModelOpen(false);setSettingsError('');
+    menuReturnFocus.current=next==='plus'?plusTrigger.current:next==='commands'?commandTrigger.current:next==='access'?accessTrigger.current:composerRoot.current?.querySelector<HTMLButtonElement>('.composer-choice:not(.composer-access)')??null;
     setMenu(menu===next?null:next);setCommandQuery('');setCommandIndex(0);
   };
   const consumeCommand = (source:string|undefined) => {
@@ -361,7 +364,7 @@ export function Composer({ chat }: { chat: Chat }): React.ReactElement {
   };
   const navigateCommands = (event:React.KeyboardEvent<HTMLElement>) => {
     if(event.nativeEvent.isComposing || composing.current || event.metaKey || event.ctrlKey || event.altKey || event.shiftKey)return false;
-    if(event.key==='Escape'){event.preventDefault();setMenu(null);setDismissedSlash(text);input.current?.focus();return true;}
+    if(event.key==='Escape'){event.preventDefault();setMenu(null);setDismissedSlash(text);(menu==='commands'?menuReturnFocus.current:input.current)?.focus();return true;}
     if(!commands.length)return false;
     if(event.key==='ArrowDown'||event.key==='ArrowUp'){
       event.preventDefault();setCommandIndex(enabledCommands[menuIndex(enabledCommands.indexOf(selectedCommand),enabledCommands.length,event.key==='ArrowDown'?'next':'previous')]??0);return true;
@@ -428,7 +431,7 @@ export function Composer({ chat }: { chat: Chat }): React.ReactElement {
       onKeyDown={onKeyDown} />
     {commandsOpen && <div className="composer-command-popover" data-browser-overlay>
       {menu==='commands' && <label className="composer-command-search"><Search size={13}/><input autoFocus type="search" aria-label="Search commands" placeholder="Search commands…" value={commandQuery} onChange={event=>setCommandQuery(event.target.value)} onKeyDown={navigateCommands} aria-controls="composer-command-options" aria-activedescendant={commands.length?`composer-command-${commands[selectedCommand].id}`:undefined}/></label>}
-      <div id="composer-command-options" role="listbox" aria-label="Composer commands">{commands.map((command,index)=>{const Icon=COMMAND_ICONS[command.id];return <button id={`composer-command-${command.id}`} key={command.id} type="button" role="option" aria-selected={index===selectedCommand} disabled={commandDisabled(command.id)} onMouseDown={event=>event.preventDefault()} onMouseEnter={()=>setCommandIndex(index)} onClick={()=>runCommand(command.id)}><Icon size={15}/><span><strong>{command.label}</strong><small>{command.description}</small></span><kbd>/{command.command}</kbd></button>;})}</div>
+      <div id="composer-command-options" role="listbox" aria-label="Composer commands">{commands.map((command,index)=>{const Icon=COMMAND_ICONS[command.id];return <button id={`composer-command-${command.id}`} key={command.id} className={`composer-menu-item is-${command.id}`} type="button" role="option" aria-selected={index===selectedCommand} disabled={commandDisabled(command.id)} onMouseDown={event=>event.preventDefault()} onMouseEnter={()=>setCommandIndex(index)} onClick={()=>runCommand(command.id)}><Icon size={15}/><span><strong>{command.label}</strong><small>{command.description}</small></span><kbd>/{command.command}</kbd></button>;})}</div>
       {!commands.length&&<p className="composer-menu-note">No matching commands.</p>}
       <p className="composer-command-hint">↑↓ to choose · Enter to run · Esc to dismiss</p>
     </div>}
@@ -436,8 +439,8 @@ export function Composer({ chat }: { chat: Chat }): React.ReactElement {
       <div className="composer-reference" ref={referenceRoot}>
         <button ref={plusTrigger} type="button" className="composer-option-icon" aria-label="Add context or open tools" aria-haspopup="menu" aria-expanded={menu==='plus'} title="Add context or open tools" onClick={()=>showMenu('plus')}><Plus size={16}/></button>
         {menu==='plus' && <div className="composer-menu-popover" role="menu" aria-label="Context and tools" onKeyDown={navigateMenu}>
-          {(['reference','browser','skills','providers'] as const).map(id=>{const command=COMPOSER_COMMANDS.find(command=>command.id===id)!;const Icon=COMMAND_ICONS[id];return <button key={id} type="button" role="menuitem" disabled={commandDisabled(id)} title={id==='reference'&&!folderId?'Open a workspace folder to reference files':command.description} onClick={()=>runCommand(id)}><Icon size={15}/><span><strong>{command.label}</strong><small>{command.description}</small></span></button>;})}
-          <button type="button" role="menuitem" onClick={()=>{setMenu('commands');setCommandQuery('');}}><Slash size={14}/><span><strong>Commands</strong><small>Find actions and chat modes</small></span><kbd>/</kbd></button>
+          {(['reference','skills','plugins','browser','providers','model','agent','ask','plan','access'] as const).map(id=>{const command=COMPOSER_COMMANDS.find(command=>command.id===id)!;const Icon=COMMAND_ICONS[id];return <button key={id} className={`composer-menu-item is-${id}`} type="button" role="menuitem" disabled={commandDisabled(id)} title={id==='reference'&&!folderId?'Open a workspace folder to reference files':command.description} onClick={()=>runCommand(id)}><Icon size={15}/><span><strong>{command.label}</strong><small>{command.description}</small></span></button>;})}
+          <button type="button" role="menuitem" onClick={()=>{menuReturnFocus.current=plusTrigger.current;setMenu('commands');setCommandQuery('');}}><Slash size={14}/><span><strong>Commands</strong><small>Find actions and chat modes</small></span><kbd>/</kbd></button>
         </div>}
         {referenceOpen && folderId && <div className="composer-reference-popover" role="dialog" aria-label="Reference a workspace file">
           {referenceFolders.length>1 && <label className="composer-reference-folder">Workspace<select aria-label="Reference workspace folder" value={folderId} onChange={event=>setReferenceFolderId(event.target.value)}>{referenceFolders.map(folder=><option key={folder.id} value={folder.id}>{folder.name}</option>)}</select></label>}
@@ -449,7 +452,7 @@ export function Composer({ chat }: { chat: Chat }): React.ReactElement {
             : <ul className="composer-reference-results">{referenceResult.entries.map(entry => <li key={entry.path}><button type="button" title={entry.path} onKeyDown={navigateReferences} onClick={() => addReference(entry.path)}><FileText size={13} /><span>{entry.path}</span></button></li>)}</ul>}
         </div>}
       </div>
-      <button type="button" className="composer-option-icon" aria-label="Open commands" aria-haspopup="listbox" aria-expanded={commandsOpen} title="Commands (/)" onClick={()=>showMenu('commands')}><Slash size={13}/></button>
+      <button ref={commandTrigger} type="button" className="composer-option-icon" aria-label="Open commands" aria-haspopup="listbox" aria-expanded={commandsOpen} title="Commands (/)" onClick={()=>showMenu('commands')}><Slash size={13}/></button>
       <div className="composer-picker-root">
         <button type="button" className="composer-choice" aria-label={`Chat mode: ${chat.mode}`} aria-haspopup="menu" aria-expanded={menu==='mode'} disabled={choicesDisabled} onClick={()=>showMenu('mode')}><ModeIcon size={13}/><span>{chat.mode==='agent'?'Agent':chat.mode==='ask'?'Ask':'Plan'}</span><ChevronDown size={11}/></button>
         {menu==='mode' && <div className="composer-menu-popover" role="menu" aria-label="Chat mode" onKeyDown={navigateMenu}>{(['agent','ask','plan'] as const).map(mode=>{const command=COMPOSER_COMMANDS.find(command=>command.id===mode)!;const Icon=COMMAND_ICONS[mode];return <button key={mode} type="button" role="menuitemradio" aria-checked={chat.mode===mode} disabled={choicesDisabled} onClick={()=>void chooseMode(mode)}><Icon size={15}/><span><strong>{command.label}</strong><small>{command.description}</small></span>{chat.mode===mode&&<Check size={13}/>}</button>;})}</div>}

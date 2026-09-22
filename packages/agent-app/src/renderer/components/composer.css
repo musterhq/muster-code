@@ -274,6 +274,7 @@
 .composer-model-glyph { color:var(--accent); }
 .composer-option-icon:focus-visible,.composer-choice:focus-visible { outline:1px solid var(--accent); outline-offset:2px; }
 .composer-menu-popover,.composer-command-popover { position:absolute; z-index:8; bottom:calc(100% + 8px); left:0; width:min(310px,calc(100cqw - 18px)); padding:5px; border:1px solid var(--hairline); border-radius:9px; background:var(--bg-raised); box-shadow:0 10px 30px #0006; }
+.composer-menu-popover { max-height:min(360px,calc(100vh - 120px)); overflow:auto; overscroll-behavior:contain; }
 .composer-command-popover { left:9px; right:9px; width:auto; }
 .composer-menu-popover > button,.composer-command-popover [role='option'] { display:flex; align-items:center; gap:9px; width:100%; padding:8px; border-radius:5px; color:var(--text-dim); text-align:left; font-size:12px; }
 .composer-menu-popover > button > svg,.composer-command-popover [role='option'] > svg { flex:none; color:var(--text-faint); }
@@ -283,6 +284,15 @@
 .composer-menu-popover button:hover:not(:disabled),.composer-menu-popover button:focus-visible,.composer-command-popover [aria-selected='true']:not(:disabled) { background:var(--bg-active); color:var(--text); outline:none; }
 .composer-menu-popover button:focus-visible,.composer-command-popover button:focus-visible { outline:1px solid var(--accent); outline-offset:-1px; }
 .composer-menu-popover button:disabled,.composer-command-popover button:disabled { opacity:.4; cursor:default; }
+.composer-menu-item.is-reference > svg { color:#75a8f8; }
+.composer-menu-item.is-skills > svg { color:#b28af4; }
+.composer-menu-item.is-plugins > svg { color:var(--text-faint); }
+.composer-menu-item.is-browser > svg { color:#68c7ad; }
+.composer-menu-item.is-providers > svg,.composer-menu-item.is-model > svg { color:#78a8e8; }
+.composer-menu-item.is-agent > svg { color:#d6a66e; }
+.composer-menu-item.is-ask > svg { color:#71b8d2; }
+.composer-menu-item.is-plan > svg { color:#9a9de6; }
+.composer-menu-item.is-access > svg { color:var(--warn); }
 .composer-menu-popover kbd,.composer-command-popover kbd { flex:none; color:var(--text-faint); font:10px var(--mono); }
 .composer-menu-note { margin:6px 8px; color:var(--text-faint); font-size:11px; line-height:1.5; }
 .composer-command-popover [role='listbox'] { max-height:280px; overflow:auto; }
