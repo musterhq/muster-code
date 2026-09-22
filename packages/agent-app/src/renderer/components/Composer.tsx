@@ -1,4 +1,4 @@
-import { ArrowUp, BookOpen, Bot, Check, ChevronDown, Cpu, FileText, FolderCheck, Globe, ListChecks, LockKeyhole, MessageCircle, Plus, Search, ShieldAlert, SlidersHorizontal, Slash, Square, X } from 'lucide-react';
+import { ArrowUp, BookOpen, Bot, Check, ChevronDown, Cpu, FileText, FolderCheck, Globe, ListChecks, LockKeyhole, MessageCircle, Plus, Search, ShieldAlert, SlidersHorizontal, Slash, Square, Star, X } from 'lucide-react';
 import { Dialog } from '@base-ui/react/dialog';
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { Chat, Commands } from '../../shared/protocol';
@@ -10,6 +10,14 @@ import './composer.css';
 
 const COMMAND_ICONS = {reference:FileText,browser:Globe,skills:BookOpen,providers:SlidersHorizontal,model:Cpu,access:LockKeyhole,agent:Bot,ask:MessageCircle,plan:ListChecks};
 const ACCESS = [{id:'read-only',label:'Read-only',description:'Read files without changing them',Icon:LockKeyhole},{id:'workspace',label:'Workspace',description:'Edit workspace files; ask before escalation',Icon:FolderCheck},{id:'full',label:'Full access',description:'Unrestricted filesystem, commands and network',Icon:ShieldAlert}] as const;
+const MODEL_FAVORITES_KEY = 'muster.composer.model-favorites.v1';
+
+function readModelFavorites(): string[] {
+  try {
+    const value = JSON.parse(window.localStorage.getItem(MODEL_FAVORITES_KEY) ?? '[]');
+    return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
+  } catch { return []; }
+}
 
 /** A plain Enter inside a fenced block is editing, not submission. */
 function insideFence(text: string, caret: number): boolean {
@@ -91,12 +99,16 @@ export function Composer({ chat }: { chat: Chat }): React.ReactElement {
   const [referenceLoading, setReferenceLoading] = useState(false);
   const referenceRoot = useRef<HTMLDivElement>(null);
   const [modelOpen, setModelOpen] = useState(false);
+  const [modelQuery, setModelQuery] = useState('');
+  const [modelFavorites, setModelFavorites] = useState<string[]>(readModelFavorites);
   const [modelError, setModelError] = useState('');
   const [modelChanging, setModelChanging] = useState(false);
   const modelPending = useRef(false);
   const modelRoot = useRef<HTMLDivElement>(null);
   const modelTrigger = useRef<HTMLButtonElement>(null);
   const modelOptions = (state.providers.value ?? []).filter(provider => provider.available).flatMap(provider => provider.models.map(model => ({ ...model, provider: provider.name, providerId: provider.id })));
+  const visibleModels = modelOptions.filter(model => `${model.name} ${model.id} ${model.provider}`.toLowerCase().includes(modelQuery.trim().toLowerCase()))
+    .sort((a,b) => Number(modelFavorites.includes(`${b.providerId}:${b.id}`))-Number(modelFavorites.includes(`${a.providerId}:${a.id}`)) || a.provider.localeCompare(b.provider) || a.name.localeCompare(b.name));
   const selectedModel = modelOptions.find(model => model.id === chat.model && model.providerId === (chat.providerId ?? 'hybrow'));
   const slashQuery = readSlashQuery(text,caret);
   const typedCommands = !composing.current && slashQuery !== null && dismissedSlash !== text && menu === null && !referenceOpen && !modelOpen && !fullConfirm;
@@ -111,7 +123,7 @@ export function Composer({ chat }: { chat: Chat }): React.ReactElement {
   useEffect(() => {setCommandIndex(0);}, [commandQuery,slashQuery]);
   useEffect(() => {
     setMenu(null);setReferenceOpen(false);setReferenceFolderId(chat.folderId ?? folderIds[0]);
-    setFullConfirm(false);setSettingsError('');setDismissedSlash(null);setCaret(text.length);recall.current=null;
+    setFullConfirm(false);setSettingsError('');setDismissedSlash(null);setCaret(text.length);recall.current=null;setModelQuery('');
     settingsRequest.current++;modelRequest.current++;settingsPending.current=false;modelPending.current=false;setSettingsChanging(false);setModelChanging(false);
   }, [chat.id]);
   useEffect(() => {if(running || sending){setFullConfirm(false);setMenu(null);}},[running,sending]);
@@ -224,7 +236,15 @@ export function Composer({ chat }: { chat: Chat }): React.ReactElement {
     } finally {if(request===modelRequest.current){modelPending.current = false;setModelChanging(false);}}
   };
 
-  const onModelKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>) => {
+  const toggleModelFavorite = (key: string) => {
+    setModelFavorites(current => {
+      const next = current.includes(key) ? current.filter(item => item !== key) : [...current, key];
+      try { window.localStorage.setItem(MODEL_FAVORITES_KEY, JSON.stringify(next)); } catch { /* Favorites remain usable for this session. */ }
+      return next;
+    });
+  };
+
+  const onModelKeyDown = (event: React.KeyboardEvent<HTMLElement>) => {
     if (!modelOpen || !modelOptions.length) return;
     if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
     event.preventDefault();
@@ -445,11 +465,13 @@ export function Composer({ chat }: { chat: Chat }): React.ReactElement {
         <button ref={modelTrigger} type="button" className="composer-model-button" aria-label={`Model: ${selectedModel?.name ?? modelLabel}`} aria-haspopup="listbox" aria-expanded={modelOpen} disabled={choicesDisabled || state.providers.phase === 'loading'} title={selectedModel?`${selectedModel.provider} · ${selectedModel.id}`:chat.model || 'The active model was not reported'} onKeyDown={onModelKeyDown} onClick={() => { setMenu(null);setReferenceOpen(false);setModelError(''); setModelOpen(value => !value); }}>
           <Cpu size={12} className="composer-model-glyph" aria-hidden="true"/><span className="composer-model">{selectedModel?.name ?? modelLabel}</span><ChevronDown size={12} aria-hidden="true" />
         </button>
-        {modelOpen && <div className="composer-model-popover" role="listbox" aria-label="Available models">
+        {modelOpen && <div className="composer-model-popover" aria-label="Available models">
+          <label className="composer-model-search"><Search size={13}/><input autoFocus type="search" aria-label="Search models" placeholder="Search models or providers…" value={modelQuery} onChange={event=>setModelQuery(event.target.value)} onKeyDown={onModelKeyDown} /></label>
           {state.providers.phase === 'error' ? <p className="composer-model-note composer-model-error">{state.providers.error ?? 'Models could not be loaded.'}</p>
             : state.providers.phase === 'loading' ? <p className="composer-model-note" role="status">Loading models…</p>
               : modelOptions.length === 0 ? <p className="composer-model-note">No runnable models reported.</p>
-                : modelOptions.map(model => <button type="button" role="option" aria-selected={model.id === chat.model && model.providerId === (chat.providerId ?? 'hybrow')} disabled={modelChanging} key={`${model.providerId}:${model.id}`} title={`${model.provider} · ${model.id}`} onKeyDown={onModelKeyDown} onClick={() => void chooseModel(model.id,model.providerId)}><span><strong>{model.name}</strong><small>{model.provider}</small></span>{model.id === chat.model && model.providerId === (chat.providerId ?? 'hybrow') && <Check size={13} aria-hidden="true" />}</button>)}
+                : visibleModels.length === 0 ? <p className="composer-model-note">No models match this search.</p>
+                : <div role="listbox" aria-label="Available models">{visibleModels.map(model => {const key=`${model.providerId}:${model.id}`;const selected=model.id===chat.model&&model.providerId===(chat.providerId??'hybrow');return <div className="composer-model-row" key={key}><button type="button" role="option" aria-selected={selected} disabled={modelChanging} title={`${model.provider} · ${model.id}`} onKeyDown={onModelKeyDown} onClick={() => void chooseModel(model.id,model.providerId)}><span><strong>{model.name}</strong><small>{model.provider}</small></span>{selected&&<Check size={13} aria-hidden="true" />}</button><button type="button" className="composer-model-favorite" aria-label={`${modelFavorites.includes(key)?'Remove':'Add'} ${model.name} ${model.provider} ${modelFavorites.includes(key)?'from':'to'} favorites`} aria-pressed={modelFavorites.includes(key)} title={modelFavorites.includes(key)?'Remove favorite':'Add favorite'} onClick={()=>toggleModelFavorite(key)}><Star size={13} fill={modelFavorites.includes(key)?'currentColor':'none'}/></button></div>;})}</div>}
         </div>}
         {modelError && <span className="composer-model-error" role="alert">{modelError}</span>}
       </div>

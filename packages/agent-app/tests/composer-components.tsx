@@ -58,7 +58,16 @@ assert.equal(store.getState().tabs.at(-1)?.kind,'browser');
 assert.equal(store.getState().composerDrafts.chat?.text??chat.draft,'Keep my draft');
 // Provider binding is atomic even when two providers advertise the same model ID.
 await click('[aria-label="Model: Shared model"]');
-const modelChoices=Array.from(document.querySelectorAll<HTMLButtonElement>('[role="option"]'));
+const modelSearch=document.querySelector<HTMLInputElement>('[aria-label="Search models"]')!;
+assert.ok(modelSearch);
+modelSearch.value='openai';modelSearch.dispatchEvent(new window.Event('input',{bubbles:true}));await delay(35);
+let modelChoices=Array.from(document.querySelectorAll<HTMLButtonElement>('[role="option"]'));
+assert.equal(modelChoices.length,1,'search includes provider identity');
+const favorite=document.querySelector<HTMLButtonElement>('[aria-label^="Add Shared model OpenAI Direct"]')!;assert.ok(favorite);favorite.click();await delay(20);
+assert.equal(favorite.getAttribute('aria-pressed'),'true');
+modelSearch.value='';modelSearch.dispatchEvent(new window.Event('input',{bubbles:true}));await delay(35);
+modelChoices=Array.from(document.querySelectorAll<HTMLButtonElement>('[role="option"]'));
+assert.equal(modelChoices.length,2,'same model id remains selectable from both providers');
 modelChoices.find(button=>button.textContent?.includes('OpenAI Direct'))!.click();await delay(40);
 assert.ok(calls.some(call=>call.command==='chat.selectProvider'&&call.input.providerId==='openai-direct'&&call.input.model==='shared-model'));
 // Access is unchanged until an explicit full-access confirmation is accepted.
