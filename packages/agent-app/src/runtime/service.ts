@@ -22,7 +22,7 @@ import { AgentModeReviewHost } from './review.ts';
 import {gitStatus, mutateGit} from './git-local.ts';
 import {createEntry, moveFile} from './file-operations.ts';
 import { createProviderAdapter, MODEL, ProviderPreDispatchError, type ProviderAdapter } from './provider.ts';
-import { discoverPlugins, discoverSkills } from './plugin-library.ts';
+import { discoverPlugins, discoverSkills, resolveAttachedSkill } from './plugin-library.ts';
 import {providerAccessPolicy} from './provider-run-lifecycle.ts';
 import {reconcileProviderTurn, type ReconciliationInput, type ReconciliationResult} from './provider-reconciliation.ts';
 
@@ -158,19 +158,26 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
     if (!entry) throw new Error(`Model ${model} is unavailable through the configured provider. Choose an available model.`);
     return entry;
   }
-  async function send(chatId: string, prompt: string, requestId: string) {
+  async function send(chatId: string, prompt: string, requestId: string, skillId?: string) {
     let chat = chatFor(chatId);
+    const folder = chat.folderId ? folderFor(chat.folderId) : undefined;
+    const attachedSkill = skillId === undefined ? undefined : await resolveAttachedSkill(skillId, folder ? [folder.path] : []);
+    if (skillId !== undefined && !attachedSkill) throw new Error('The selected skill is unavailable or outside this chat’s allowed skill roots. Refresh the skill list and try again.');
+    const fingerprint = attachedSkill
+      ? createHash('sha256').update(JSON.stringify({ text: prompt, skillId: attachedSkill.id, skillDigest: attachedSkill.digest })).digest('hex')
+      : createHash('sha256').update(prompt).digest('hex');
     const receipt = store.receipt(requestId);
-    if (receipt) { if (receipt.chatId !== chatId || receipt.fingerprint !== createHash('sha256').update(prompt).digest('hex')) throw new Error('Request identity conflicts with its original message.'); return {runId: receipt.runId}; }
+    if (receipt) { if (receipt.chatId !== chatId || receipt.fingerprint !== fingerprint) throw new Error('Request identity conflicts with its original message.'); return {runId: receipt.runId}; }
     if (chat.recovery?.kind === 'recovery-needed') throw new Error('This attempt may still be running at the provider. Check its status before sending another message. Your draft is retained.');
     if (!prompt.trim()) throw new Error('Write a message first.');
     if (chat.archived) throw new Error('Restore this chat before sending.');
     if (providerSelections.has(chatId)) throw new Error('Wait for the provider selection to finish.');
     validateRunnableModel(chat.model,chat.providerId??'hybrow');
-    const folder = chat.folderId ? folderFor(chat.folderId) : undefined;
     const project = chat.projectId ? store.snapshot().projects.find(p => p.id === chat.projectId) : undefined;
-    const contextualPrompt = project
-      ? `Project: ${project.name}\nShared goal: ${project.goal || '(not set)'}\n\nCurrent user request:\n${prompt}`
+    const context = project ? `Project: ${project.name}\nShared goal: ${project.goal || '(not set)'}` : '';
+    const skillContext = attachedSkill ? `Selected skill: ${attachedSkill.name} (${attachedSkill.provenance})\n\nApply these user-selected skill instructions to the current request:\n<skill-instructions>\n${attachedSkill.content}\n</skill-instructions>` : '';
+    const contextualPrompt = context || skillContext
+      ? `${[context, skillContext].filter(Boolean).join('\n\n')}\n\nCurrent user request:\n${prompt}`
       : prompt;
     const cwd = folder?.path ?? join(options.dataDir, 'scratch', chatId);
     if (folder) { if (!(await fs.stat(cwd)).isDirectory()) throw new Error('Selected folder is unavailable.'); }
@@ -193,7 +200,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
       chat=store.updateChat(chatId,{providerId:selectedProvider.id,providerBindingId:bindingId,...(!nativeMatches?{providerThreadId:null,providerTurnId:null,providerThreadProviderId:null,providerThreadBindingId:null}:{})});
     }
     const access = providerAccessPolicy(chat);
-    const accepted = store.recordSend(chatId, requestId, prompt);
+    const accepted = store.recordSend(chatId, requestId, prompt, fingerprint);
     if (accepted.replay) return {runId: accepted.runId};
     const run: ActiveRun = {cwd, stopped: false}; runs.set(chatId, run); state(); timeline(chatId);
     let segment: TimelineItem | undefined;
@@ -406,7 +413,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
         if (p.direction !== 'up' && p.direction !== 'down') throw new Error('Invalid direction.');
         store.movePin(chatId, p.direction); state(); return;
       }
-      case 'chat.send': return send(id(p.id), text(p.text, 'message', 262144), id(p.requestId));
+      case 'chat.send': return send(id(p.id), text(p.text, 'message', 262144), id(p.requestId), p.skillId === undefined ? undefined : text(p.skillId, 'skill id', 4096));
       case 'chat.contextTelemetry': { const chatId = id(p.id); chatFor(chatId); return store.contextTelemetry(chatId); }
       case 'chat.stop': { const chatId = id(p.id); chatFor(chatId); const run = runs.get(chatId); if (!run) return; run.stopped = true; store.updateChat(chatId, {status: 'stopping'}); settleApprovals(chatId); settleQuestions(chatId); state(); await provider.stop(chatId); return; }
       case 'chat.reconcile': {

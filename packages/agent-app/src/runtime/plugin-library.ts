@@ -2,6 +2,8 @@
 import { promises as fs } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, join } from 'node:path';
+import { createHash } from 'node:crypto';
+import { MAX_ATTACHED_SKILL_BYTES } from '../shared/protocol.ts';
 
 export interface SkillEntry {
   id: string;
@@ -77,6 +79,24 @@ export async function discoverSkills(folderPaths: string[] = []): Promise<SkillE
     }
   }
   return output;
+}
+
+/** Resolve one renderer-selected skill again inside runtime-owned roots. */
+export async function resolveAttachedSkill(skillId: string, folderPaths: string[] = []): Promise<(SkillEntry & { content: string; digest: string }) | null> {
+  if (!skillId || skillId.length > 4096 || skillId.includes('\0')) return null;
+  const leaf = basename(skillId);
+  if (!leaf || leaf === '.' || leaf === '..') return null;
+  for (const source of ROOTS(folderPaths)) {
+    let root: string;
+    try { root = await fs.realpath(source.path); } catch { continue; }
+    const candidate = await contained(join(root, leaf), root);
+    if (!candidate || candidate !== skillId) continue;
+    try { if (!(await fs.stat(candidate)).isDirectory()) continue; } catch { continue; }
+    const read = await readSkill(candidate, root);
+    if (read.readError || !read.readme?.trim() || Buffer.byteLength(read.readme, 'utf8') > MAX_ATTACHED_SKILL_BYTES) return null;
+    return { id: candidate, name: leaf, provenance: source.provenance, path: candidate, readme: read.readme, readError: null, content: read.readme, digest: createHash('sha256').update(read.readme, 'utf8').digest('hex') };
+  }
+  return null;
 }
 
 function record(value: unknown): Record<string, unknown> | null {

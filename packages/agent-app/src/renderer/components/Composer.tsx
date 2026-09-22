@@ -1,9 +1,9 @@
 import { ArrowUp, BookOpen, Bot, Check, ChevronDown, Cpu, FileText, FolderCheck, Globe, ListChecks, LockKeyhole, MessageCircle, Plus, Puzzle, Search, ShieldAlert, SlidersHorizontal, Slash, Square, Star, X } from 'lucide-react';
 import { Dialog } from '@base-ui/react/dialog';
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import type { Chat, Commands } from '../../shared/protocol';
+import { MAX_ATTACHED_SKILL_BYTES, type Chat, type Commands } from '../../shared/protocol';
 import { invoke } from '../bridge';
-import { flushComposerDraft, loadProviders, openBrowserTab, openPluginsScreen, openProvidersTab, sendMessage, setComposerDraft, stopChat, updateChat } from '../store';
+import { flushComposerDraft, loadProviders, loadSkills, openBrowserTab, openPluginsScreen, openProvidersTab, sendMessage, setComposerDraft, stopChat, updateChat } from '../store';
 import { useStore } from '../useStore';
 import { COMPOSER_COMMANDS, configuredAccess, effectiveAccess, filterComposerCommands, insertWorkspaceReference, menuIndex, readSlashQuery, type ComposerAccess, type ComposerCommandId } from './composerMenus';
 import './composer.css';
@@ -77,7 +77,8 @@ export function Composer({ chat }: { chat: Chat }): React.ReactElement {
   const menuReturnFocus = useRef<HTMLElement | null>(null);
   const accessTrigger = useRef<HTMLButtonElement>(null);
   const cancelFull = useRef<HTMLButtonElement>(null);
-  const [menu, setMenu] = useState<'plus'|'commands'|'mode'|'access'|null>(null);
+  const [menu, setMenu] = useState<'plus'|'commands'|'mode'|'access'|'skill-picker'|null>(null);
+  const [selectedSkillId, setSelectedSkillId] = useState<string>();
   const [commandQuery, setCommandQuery] = useState('');
   const [commandIndex, setCommandIndex] = useState(0);
   const [caret, setCaret] = useState(text.length);
@@ -112,6 +113,9 @@ export function Composer({ chat }: { chat: Chat }): React.ReactElement {
   const visibleModels = modelOptions.filter(model => `${model.name} ${model.id} ${model.provider}`.toLowerCase().includes(modelQuery.trim().toLowerCase()))
     .sort((a,b) => Number(modelFavorites.includes(`${b.providerId}:${b.id}`))-Number(modelFavorites.includes(`${a.providerId}:${a.id}`)) || a.provider.localeCompare(b.provider) || a.name.localeCompare(b.name));
   const selectedModel = modelOptions.find(model => model.id === chat.model && model.providerId === (chat.providerId ?? 'hybrow'));
+  const activeFolderPath = referenceFolders.find(folder=>folder.id===chat.folderId)?.path;
+  const localSkillPrefix = activeFolderPath ? `${activeFolderPath.replace(/\/$/,'')}/.agents/skills/` : undefined;
+  const attachableSkills = (state.skills.value ?? []).filter(skill => skill.provenance.startsWith('~/') || Boolean(localSkillPrefix && skill.path.startsWith(localSkillPrefix)));
   const slashQuery = readSlashQuery(text,caret);
   const typedCommands = !composing.current && slashQuery !== null && dismissedSlash !== text && menu === null && !referenceOpen && !modelOpen && !fullConfirm;
   const commandsOpen = menu === 'commands' || typedCommands;
@@ -124,7 +128,7 @@ export function Composer({ chat }: { chat: Chat }): React.ReactElement {
 
   useEffect(() => {setCommandIndex(0);}, [commandQuery,slashQuery]);
   useEffect(() => {
-    setMenu(null);setReferenceOpen(false);setReferenceFolderId(chat.folderId ?? folderIds[0]);
+    setMenu(null);setSelectedSkillId(undefined);setReferenceOpen(false);setReferenceFolderId(chat.folderId ?? folderIds[0]);
     setFullConfirm(false);setSettingsError('');setDismissedSlash(null);setCaret(text.length);recall.current=null;setModelQuery('');
     settingsRequest.current++;modelRequest.current++;settingsPending.current=false;modelPending.current=false;setSettingsChanging(false);setModelChanging(false);
   }, [chat.id]);
@@ -277,7 +281,8 @@ export function Composer({ chat }: { chat: Chat }): React.ReactElement {
   const submit = () => {
     if (!text.trim() || composing.current || sending || running || modelPending.current || settingsPending.current || chat.archived || recoveryNeeded) return;
     recall.current = null;
-    void sendMessage(chat.id, text);
+    const skillId = selectedSkillId;
+    void sendMessage(chat.id, text, skillId).then(sent => { if (sent && currentDraft.current.chatId === chat.id) setSelectedSkillId(undefined); });
   };
 
   const addReference = (path: string) => {
@@ -437,11 +442,20 @@ export function Composer({ chat }: { chat: Chat }): React.ReactElement {
       <p className="composer-command-hint">↑↓ to choose · Enter to run · Esc to dismiss</p>
     </div>}
     <div className="composer-options" role="toolbar" aria-label="Message options">
+      {selectedSkillId&&<span className="composer-skill-chip" title={state.skills.value?.find(skill=>skill.id===selectedSkillId)?.path}><BookOpen size={12}/><span>{state.skills.value?.find(skill=>skill.id===selectedSkillId)?.name??'Selected skill'}</span><button type="button" aria-label="Remove selected skill" onClick={()=>setSelectedSkillId(undefined)}><X size={12}/></button></span>}
       <div className="composer-reference" ref={referenceRoot}>
         <button ref={plusTrigger} type="button" className="composer-option-icon" aria-label="Add context or open tools" aria-haspopup="menu" aria-expanded={menu==='plus'} title="Add context or open tools" onClick={()=>showMenu('plus')}><Plus size={16}/></button>
         {menu==='plus' && <div className="composer-menu-popover" role="menu" aria-label="Context and tools" onKeyDown={navigateMenu}>
           {(['reference','skills','plugins','browser','providers','model','agent','ask','plan','access'] as const).map(id=>{const command=COMPOSER_COMMANDS.find(command=>command.id===id)!;const Icon=COMMAND_ICONS[id];return <button key={id} className={`composer-menu-item is-${id}`} type="button" role="menuitem" disabled={commandDisabled(id)} title={id==='reference'&&!folderId?'Open a workspace folder to reference files':command.description} onClick={()=>runCommand(id)}><Icon size={15}/><span><strong>{command.label}</strong><small>{command.description}</small></span></button>;})}
+          <button type="button" className="composer-menu-item is-skill-attach" role="menuitem" onClick={()=>{setMenu('skill-picker');if(state.skills.phase==='idle'||state.skills.phase==='error')void loadSkills();}}><BookOpen size={15}/><span><strong>Attach a skill</strong><small>Apply one local skill to the next run</small></span></button>
           <button type="button" role="menuitem" onClick={()=>{menuReturnFocus.current=plusTrigger.current;setMenu('commands');setCommandQuery('');}}><Slash size={14}/><span><strong>Commands</strong><small>Find actions and chat modes</small></span><kbd>/</kbd></button>
+        </div>}
+        {menu==='skill-picker' && <div className="composer-menu-popover composer-skill-picker" role="dialog" aria-label="Attach a local skill" onKeyDown={event=>{if(event.key==='Escape'){event.preventDefault();setMenu(null);plusTrigger.current?.focus();}else navigateMenu(event);}}>
+          <div className="composer-skill-heading"><strong>Attach one skill</strong><small>Resolved again from allowed local roots when you send.</small></div>
+          {state.skills.phase==='loading'&&<p className="composer-menu-note" role="status">Finding local skills…</p>}
+          {state.skills.phase==='error'&&<p className="composer-reference-error" role="alert">{state.skills.error}</p>}
+          {state.skills.phase==='ready'&&!attachableSkills.length&&<p className="composer-menu-note">No skills are available to this chat.</p>}
+          {state.skills.phase==='ready'&&attachableSkills.map(skill=>{const usable=!skill.readError&&Boolean(skill.readme?.trim())&&new TextEncoder().encode(skill.readme ?? '').byteLength<=MAX_ATTACHED_SKILL_BYTES;return <button key={skill.id} className="composer-menu-item" type="button" role="menuitemradio" aria-checked={selectedSkillId===skill.id} disabled={!usable} title={usable?`${skill.provenance} · ${skill.path}`:skill.readError??'Skill is empty or exceeds the 48 KB attachment limit'} onClick={()=>{setSelectedSkillId(skill.id);setMenu(null);requestAnimationFrame(()=>input.current?.focus());}}><BookOpen size={14}/><span><strong>{skill.name}</strong><small>{usable?skill.provenance:skill.readError??'Unavailable or too large'}</small></span>{selectedSkillId===skill.id&&<Check size={13}/>}</button>;})}
         </div>}
         {referenceOpen && folderId && <div className="composer-reference-popover" role="dialog" aria-label="Reference a workspace file">
           {referenceFolders.length>1 && <label className="composer-reference-folder">Workspace<select aria-label="Reference workspace folder" value={folderId} onChange={event=>setReferenceFolderId(event.target.value)}>{referenceFolders.map(folder=><option key={folder.id} value={folder.id}>{folder.name}</option>)}</select></label>}

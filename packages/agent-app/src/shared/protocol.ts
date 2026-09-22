@@ -1,6 +1,7 @@
 import type {PendingAttentionSummary} from './attention-protocol.ts';
 import type {ScopedComputerCommands} from './scoped-computer-protocol.ts';
 import type {ProcessCommands,ProcessEvent} from './process-protocol.ts';
+export const MAX_ATTACHED_SKILL_BYTES = 48 * 1024;
 import type {BrowserCommands, BrowserEvent} from './browser-protocol.ts';
 /** The only renderer capability surface. Main validates every command and sender. */
 export type ChatPermissionMode = 'read-only' | 'workspace' | 'full';
@@ -57,7 +58,7 @@ export interface Commands extends BrowserCommands, ScopedComputerCommands, Proce
  'chat.selectProvider': {input: {id: string; providerId: string; model: string}; output: Chat};
  'chat.setPermissionMode': {input: {id: string; permissionMode: ChatPermissionMode; acknowledgeFullAccess?: boolean}; output: Chat};
  'chat.movePin': { input: {id: string; direction: 'up' | 'down'}; output: void };
- 'chat.send': { input: {id: string; text: string; requestId: string}; output: {runId: string} };
+ 'chat.send': { input: {id: string; text: string; requestId: string; skillId?: string}; output: {runId: string} };
  'chat.stop': { input: {id: string}; output: void };
  'chat.reconcile': {input: {id: string}; output: {chat: Chat; resolved: boolean; reason: string}};
  'approval.respond': { input: {id: string; approved: boolean}; output: void };

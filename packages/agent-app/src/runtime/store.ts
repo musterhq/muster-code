@@ -389,11 +389,11 @@ export class AgentStore {
    * Idempotent send: persists the receipt + user message + running status in
    * one transaction. Returns the existing runId when the requestId was seen.
    */
-  recordSend(chatId: string, requestId: string, text: string): { runId: string; replay: boolean } {
+  recordSend(chatId: string, requestId: string, text: string, fingerprint = createHash('sha256').update(text).digest('hex')): { runId: string; replay: boolean } {
     return this.tx(() => {
       const existing = this.receipt(requestId);
       if (existing) {
-        if (existing.chatId !== chatId || existing.fingerprint !== createHash('sha256').update(text).digest('hex')) throw new Error('requestId conflicts with the original request.');
+        if (existing.chatId !== chatId || existing.fingerprint !== fingerprint) throw new Error('requestId conflicts with the original request.');
         return { runId: existing.runId, replay: true };
       }
       const chat = this.chat(chatId);
@@ -401,7 +401,7 @@ export class AgentStore {
       if (chat.recovery?.kind === 'recovery-needed') throw new Error('This chat needs its provider status checked before another message can be sent.');
       if (chat.status === 'running' || chat.status === 'stopping') throw new Error('Chat is already running; stop it first.');
       const runId = randomUUID();
-      this.db.prepare('INSERT INTO receipts (request_id, chat_id, run_id, created_at, fingerprint) VALUES (?, ?, ?, ?, ?)').run(requestId, chatId, runId, now(), createHash('sha256').update(text).digest('hex'));
+      this.db.prepare('INSERT INTO receipts (request_id, chat_id, run_id, created_at, fingerprint) VALUES (?, ?, ?, ?, ?)').run(requestId, chatId, runId, now(), fingerprint);
       this.appendItem(chatId, 'user', text);
       const sets: Record<string, unknown> = { status: 'running', draft: '', error: null, providerTurnId: null, recovery: null };
       if (chat.title === 'New chat') sets.title = text.split('\n')[0]!.slice(0, 60).trim() || 'New chat';

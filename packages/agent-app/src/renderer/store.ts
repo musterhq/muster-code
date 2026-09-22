@@ -437,20 +437,20 @@ export function flushComposerDraft(id: string): Promise<boolean> {
  * failure reuses the same ID so the host can dedupe; a changed draft gets a
  * fresh ID. Cleared only on acknowledged success.
  */
-const pendingSends: Record<string, { requestId: string; text: string }> = {};
+const pendingSends: Record<string, { requestId: string; text: string; skillId?: string }> = {};
 
-export async function sendMessage(id: string, text: string): Promise<boolean> {
+export async function sendMessage(id: string, text: string, skillId?: string): Promise<boolean> {
   if (state.sending[id] || !text.trim()) return false;
   const submittedDraft = state.composerDrafts[id];
   const pending = pendingSends[id];
   const requestId =
-    pending && pending.text === text ? pending.requestId : crypto.randomUUID();
-  pendingSends[id] = { requestId, text };
+    pending && pending.text === text && pending.skillId === skillId ? pending.requestId : crypto.randomUUID();
+  pendingSends[id] = { requestId, text, ...(skillId ? { skillId } : {}) };
   const { [id]: _previousError, ...sendErrors } = state.sendErrors;
   set({ sending: { ...state.sending, [id]: true }, sendErrors });
   try {
     if (!(await flushComposerDraft(id))) throw new Error('Draft could not be saved. Retry after resolving the storage error.');
-    await invoke('chat.send', { id, text, requestId });
+    await invoke('chat.send', { id, text, requestId, ...(skillId ? { skillId } : {}) });
     delete pendingSends[id];
     const currentDraft = state.composerDrafts[id];
     if (currentDraft === submittedDraft || (submittedDraft && currentDraft?.revision === submittedDraft.revision)) {
