@@ -25,4 +25,5 @@ Array.from(document.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]'
 assert.equal(store.getState().composerDrafts[chat.id]?.text??chat.draft,'Original request');assert.ok(document.querySelector('[aria-label="Remove selected skill"]'));
 await click('[aria-label="Send message (Enter)"]');
 const send=calls.find(call=>call.command==='chat.send');assert.equal(send.input.text,'Original request');assert.equal(send.input.skillId,'/Users/test/.agents/skills/review');assert.equal(document.querySelector('[aria-label="Remove selected skill"]'),null);
+assert.deepEqual(calls.find(call=>call.command==='plugins.list')?.input,{folderPaths:['/workspace']},'composer scopes workspace skills to the active chat folder');
 root.unmount();console.log('Skill composer check passed: selected skill is sent separately while visible draft remains unchanged.');

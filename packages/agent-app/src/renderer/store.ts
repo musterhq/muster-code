@@ -627,13 +627,13 @@ export function setPluginView(pluginView:'skills'|'plugins'):void {
   if(pluginView==='skills')void loadSkills(); else void loadPlugins();
 }
 
-export async function loadSkills(force = false): Promise<void> {
+export async function loadSkills(force = false, folderPaths?: string[]): Promise<void> {
   if (state.skills.phase === 'loading') return;
   if (!force && state.skills.phase === 'ready') return;
   set({ skills: { phase: 'loading', value: state.skills.value } });
   try {
-    const folderPaths = (state.snapshot?.folders ?? []).map(folder => folder.path);
-    const value = await invoke('plugins.list', { folderPaths });
+    const allowedFolders = folderPaths ?? (state.snapshot?.folders ?? []).map(folder => folder.path);
+    const value = await invoke('plugins.list', { folderPaths: allowedFolders });
     set({ skills: { phase: 'ready', value } });
   } catch (cause) {
     set({ skills: { phase: 'error', error: errorText(cause) } });

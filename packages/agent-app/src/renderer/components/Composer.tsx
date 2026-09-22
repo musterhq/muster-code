@@ -114,8 +114,7 @@ export function Composer({ chat }: { chat: Chat }): React.ReactElement {
     .sort((a,b) => Number(modelFavorites.includes(`${b.providerId}:${b.id}`))-Number(modelFavorites.includes(`${a.providerId}:${a.id}`)) || a.provider.localeCompare(b.provider) || a.name.localeCompare(b.name));
   const selectedModel = modelOptions.find(model => model.id === chat.model && model.providerId === (chat.providerId ?? 'hybrow'));
   const activeFolderPath = referenceFolders.find(folder=>folder.id===chat.folderId)?.path;
-  const localSkillPrefix = activeFolderPath ? `${activeFolderPath.replace(/\/$/,'')}/.agents/skills/` : undefined;
-  const attachableSkills = (state.skills.value ?? []).filter(skill => skill.provenance.startsWith('~/') || Boolean(localSkillPrefix && skill.path.startsWith(localSkillPrefix)));
+  const attachableSkills = state.skills.value ?? [];
   const slashQuery = readSlashQuery(text,caret);
   const typedCommands = !composing.current && slashQuery !== null && dismissedSlash !== text && menu === null && !referenceOpen && !modelOpen && !fullConfirm;
   const commandsOpen = menu === 'commands' || typedCommands;
@@ -447,7 +446,7 @@ export function Composer({ chat }: { chat: Chat }): React.ReactElement {
         <button ref={plusTrigger} type="button" className="composer-option-icon" aria-label="Add context or open tools" aria-haspopup="menu" aria-expanded={menu==='plus'} title="Add context or open tools" onClick={()=>showMenu('plus')}><Plus size={16}/></button>
         {menu==='plus' && <div className="composer-menu-popover" role="menu" aria-label="Context and tools" onKeyDown={navigateMenu}>
           {(['reference','skills','plugins','browser','providers','model','agent','ask','plan','access'] as const).map(id=>{const command=COMPOSER_COMMANDS.find(command=>command.id===id)!;const Icon=COMMAND_ICONS[id];return <button key={id} className={`composer-menu-item is-${id}`} type="button" role="menuitem" disabled={commandDisabled(id)} title={id==='reference'&&!folderId?'Open a workspace folder to reference files':command.description} onClick={()=>runCommand(id)}><Icon size={15}/><span><strong>{command.label}</strong><small>{command.description}</small></span></button>;})}
-          <button type="button" className="composer-menu-item is-skill-attach" role="menuitem" onClick={()=>{setMenu('skill-picker');if(state.skills.phase==='idle'||state.skills.phase==='error')void loadSkills();}}><BookOpen size={15}/><span><strong>Attach a skill</strong><small>Apply one local skill to the next run</small></span></button>
+          <button type="button" className="composer-menu-item is-skill-attach" role="menuitem" onClick={()=>{setMenu('skill-picker');void loadSkills(true,activeFolderPath?[activeFolderPath]:[]);}}><BookOpen size={15}/><span><strong>Attach a skill</strong><small>Apply one local skill to the next run</small></span></button>
           <button type="button" role="menuitem" onClick={()=>{menuReturnFocus.current=plusTrigger.current;setMenu('commands');setCommandQuery('');}}><Slash size={14}/><span><strong>Commands</strong><small>Find actions and chat modes</small></span><kbd>/</kbd></button>
         </div>}
         {menu==='skill-picker' && <div className="composer-menu-popover composer-skill-picker" role="dialog" aria-label="Attach a local skill" onKeyDown={event=>{if(event.key==='Escape'){event.preventDefault();setMenu(null);plusTrigger.current?.focus();}else navigateMenu(event);}}>
