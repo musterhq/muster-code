@@ -211,6 +211,19 @@ export class AgentStore {
     return row ? { id: row.id, path: row.path, name: row.name } : undefined;
   }
 
+  project(id: string): Project | undefined {
+    const row = this.db.prepare('SELECT id, name, goal, folder_ids FROM projects WHERE id = ?').get(id) as
+      | { id: string; name: string; goal: string; folder_ids: string }
+      | undefined;
+    if (!row) return undefined;
+    let folderIds: string[] = [];
+    try {
+      const parsed: unknown = JSON.parse(row.folder_ids);
+      if (Array.isArray(parsed) && parsed.every(value => typeof value === 'string')) folderIds = parsed;
+    } catch { /* Corrupt legacy folder list degrades to an empty attachment set. */ }
+    return { id: row.id, name: row.name, goal: row.goal, folderIds };
+  }
+
   createProject(name: string, goal: string, folderIds: string[]): Project {
     return this.tx(() => {
       for (const folderId of folderIds) {

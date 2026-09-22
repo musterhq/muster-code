@@ -25,6 +25,7 @@ import { createProviderAdapter, MODEL, ProviderPreDispatchError, type ProviderAd
 import { discoverPlugins, discoverSkills, resolveAttachedSkill } from './plugin-library.ts';
 import {providerAccessPolicy} from './provider-run-lifecycle.ts';
 import {reconcileProviderTurn, type ReconciliationInput, type ReconciliationResult} from './provider-reconciliation.ts';
+import { ProjectTaskStore, type TaskStatus } from './project-tasks.ts';
 
 function object(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Invalid command input.');
@@ -49,6 +50,7 @@ interface PendingQuestionRequest { chatId: string; createdAt: string; providerKe
 
 export function createAgentService(options: { dataDir: string; onEvent(event: AgentEvent): void; provider?: ProviderAdapter; reconcileProvider?: (input: ReconciliationInput) => Promise<ReconciliationResult> }) {
   const store = new AgentStore(options.dataDir);
+  const projectTasks = new ProjectTaskStore(options.dataDir);
   const customProviders = new CustomProviders(options.dataDir);
   const annotations = new FileAnnotations(options.dataDir);
   const provider = options.provider ?? createProviderAdapter();
@@ -456,6 +458,15 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
         finishQuestion(questionId, pending, {...answers}, 'answered', receiptAnswers); return;
       }
       case 'project.create': { const name = text(p.name,'project name',256).trim(); if (!name) throw new Error('Name the Project.'); if (!Array.isArray(p.folderIds) || p.folderIds.length > 100) throw new Error('Invalid Project folders.'); const result = store.createProject(name, text(p.goal,'goal',32768), [...new Set(p.folderIds.map(id))]); state(); return result; }
+      case 'project.tasks.list': { const projectId=id(p.projectId); if(!store.project(projectId)) throw new Error('Project not found.'); return projectTasks.listTasks(projectId); }
+      case 'project.tasks.create': { const projectId=id(p.projectId); if(!store.project(projectId)) throw new Error('Project not found.'); if(!Array.isArray(p.dependencies)||p.dependencies.length>50) throw new Error('Invalid dependencies.'); return projectTasks.createTask({projectId,title:text(p.title,'task title',500),acceptance:text(p.acceptance,'acceptance criteria',4000),dependencies:[...new Set(p.dependencies.map(id))]}); }
+      case 'project.tasks.updateStatus': { const projectId=id(p.projectId); if(!store.project(projectId)) throw new Error('Project not found.'); const taskId=id(p.id); if(!['todo','running','blocked','implemented','verified'].includes(String(p.status))) throw new Error('Invalid task status.'); if(!Number.isSafeInteger(p.revision)||Number(p.revision)<0) throw new Error('Invalid revision.'); const evidence=p.evidence===undefined?undefined:Array.isArray(p.evidence)&&p.evidence.length<=50?p.evidence.map(e=>text(e,'evidence',2000)):(()=>{throw new Error('Invalid evidence.');})(); return projectTasks.updateTaskStatus({projectId,id:taskId,status:p.status as TaskStatus,evidence,revision:Number(p.revision)}); }
+      case 'project.tasks.addEvidence': { const projectId=id(p.projectId); if(!store.project(projectId)) throw new Error('Project not found.'); if(!Array.isArray(p.entries)||p.entries.length<1||p.entries.length>50) throw new Error('Provide 1–50 evidence entries.'); if(!Number.isSafeInteger(p.revision)||Number(p.revision)<0) throw new Error('Invalid revision.'); return projectTasks.addEvidence({projectId,id:id(p.id),entries:p.entries.map(e=>text(e,'evidence',2000)),revision:Number(p.revision)}); }
+      case 'project.decisions.list': { const projectId=id(p.projectId); if(!store.project(projectId)) throw new Error('Project not found.'); return projectTasks.listDecisions(projectId); }
+      case 'project.decisions.create': { const projectId=id(p.projectId); if(!store.project(projectId)) throw new Error('Project not found.'); if(!Array.isArray(p.relatedTaskIds)||p.relatedTaskIds.length>50) throw new Error('Invalid related tasks.'); return projectTasks.createDecision({projectId,title:text(p.title,'decision title',500),rationale:text(p.rationale,'rationale',8000),scope:text(p.scope,'scope',500),relatedTaskIds:[...new Set(p.relatedTaskIds.map(id))]}); }
+      case 'project.decisions.supersede': { const projectId=id(p.projectId); if(!store.project(projectId)) throw new Error('Project not found.'); return projectTasks.supersedeDecision({projectId,id:id(p.id),replacementId:id(p.replacementId)}); }
+      case 'project.activity.list': { const projectId=id(p.projectId); if(!store.project(projectId)) throw new Error('Project not found.'); const limit=p.limit===undefined?100:Number(p.limit); if(!Number.isSafeInteger(limit)||limit<1||limit>200) throw new Error('Invalid limit.'); return projectTasks.listActivity(projectId,limit); }
+      case 'project.export': { const projectId=id(p.projectId), project=store.project(projectId); if(!project) throw new Error('Project not found.'); const folders=project.folderIds.map(folderId=>store.folder(folderId)).filter((folder):folder is NonNullable<typeof folder>=>Boolean(folder)); return projectTasks.exportProject(project,folders); }
       case 'workspace.watch': {
         if (!Array.isArray(p.folderIds) || p.folderIds.length > 32) throw new Error('Invalid watched folders.');
         const folders = [...new Set(p.folderIds.map(id))].map(folderFor);
@@ -542,7 +553,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
       // tracked callbacks settle, even if main times out and keeps the app open.
       hindsight?.dispose();
       await Promise.allSettled([...invocations,...[...runs.values()].flatMap(run => run.promise ? [run.promise] : [])]);
-      disposed = true; for (const timer of timers.values()) clearTimeout(timer); timers.clear(); customProviders.close(); annotations.close(); store.close();
+      disposed = true; for (const timer of timers.values()) clearTimeout(timer); timers.clear(); customProviders.close(); annotations.close(); projectTasks.close(); store.close();
     })();
     return disposal;
   }};

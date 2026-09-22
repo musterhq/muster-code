@@ -16,6 +16,12 @@ export interface TimelineItem { id: string; chatId: string; kind: 'user' | 'assi
 export interface TimelineSnapshot { items: TimelineItem[]; revision: number }
 export interface TimelinePatch extends TimelineSnapshot { after: number }
 export interface Project { id: string; name: string; goal: string; folderIds: string[] }
+export type TaskStatus = 'todo' | 'running' | 'blocked' | 'implemented' | 'verified';
+export interface ProjectTask { id:string; projectId:string; title:string; status:TaskStatus; dependencies:string[]; acceptance:string; evidence:string[]; revision:number; createdAt:string; updatedAt:string }
+export interface ProjectDecision { id:string; projectId:string; title:string; rationale:string; author:string; scope:string; relatedTaskIds:string[]; status:'active'|'superseded'; supersededById:string|null; createdAt:string; updatedAt:string }
+export interface ProjectActivity { id:string; projectId:string; actor:string; kind:string; summary:string; refId:string|null; createdAt:string }
+export interface BoundedList<T> { items:T[]; truncated:boolean }
+export interface ProjectExport { schemaVersion:1; exportedAt:string; project:Project; folders:Folder[]; tasks:BoundedList<ProjectTask>; decisions:BoundedList<ProjectDecision>; activity:BoundedList<ProjectActivity> }
 export interface Snapshot { folders: Folder[]; chats: Chat[]; projects: Project[]; activeChatId?: string; version: number; attention?: PendingAttentionSummary }
 export interface FileEntry { name: string; path: string; kind: 'file' | 'directory' }
 export interface DocumentPreview {base64:string;revision:string;sourceFormat:string;converted:boolean;size:number}
@@ -64,6 +70,15 @@ export interface Commands extends BrowserCommands, ScopedComputerCommands, Proce
  'approval.respond': { input: {id: string; approved: boolean}; output: void };
  'question.respond': { input: {id: string; answers: Record<string, {answers: string[]}>}; output: void };
  'project.create': { input: {name: string; goal: string; folderIds: string[]}; output: Project };
+ 'project.tasks.list': {input:{projectId:string};output:BoundedList<ProjectTask>};
+ 'project.tasks.create': {input:{projectId:string;title:string;acceptance:string;dependencies:string[]};output:ProjectTask};
+ 'project.tasks.updateStatus': {input:{projectId:string;id:string;status:TaskStatus;evidence?:string[];revision:number};output:ProjectTask};
+ 'project.tasks.addEvidence': {input:{projectId:string;id:string;entries:string[];revision:number};output:ProjectTask};
+ 'project.decisions.list': {input:{projectId:string};output:BoundedList<ProjectDecision>};
+ 'project.decisions.create': {input:{projectId:string;title:string;rationale:string;scope:string;relatedTaskIds:string[]};output:ProjectDecision};
+ 'project.decisions.supersede': {input:{projectId:string;id:string;replacementId:string};output:ProjectDecision};
+ 'project.activity.list': {input:{projectId:string;limit?:number};output:BoundedList<ProjectActivity>};
+ 'project.export': {input:{projectId:string};output:ProjectExport};
  'workspace.watch': { input: {folderIds:string[]}; output: void };
  'files.list': { input: {folderId: string; path?: string}; output: FileEntry[] };
  'files.create': {input:{folderId:string;path:string;kind:'file'|'directory'};output:void};
