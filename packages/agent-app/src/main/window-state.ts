@@ -45,6 +45,22 @@ export function clampGeometry(geometry: WindowGeometry, displays: DisplayBounds[
   return out;
 }
 
+export type DisplayChangePlan =
+  | { kind: 'keep' }
+  | { kind: 'resize'; width: number; height: number }
+  /** The window no longer touches any display: shrink to fit and let the shell centre it on the primary display. */
+  | { kind: 'center'; width: number; height: number };
+
+/** Re-clamp a live window after a display is unplugged or rescaled. Maximized/full-screen windows are the OS's job. */
+export function planDisplayChange(current: WindowGeometry, displays: DisplayBounds[]): DisplayChangePlan {
+  if (current.maximized || displays.length === 0) return { kind: 'keep' };
+  const clamped = clampGeometry(current, displays);
+  const sized = clamped.width !== current.width || clamped.height !== current.height;
+  const onScreen = clamped.x !== undefined && clamped.y !== undefined;
+  if (!onScreen) return { kind: 'center', width: clamped.width, height: clamped.height };
+  return sized ? { kind: 'resize', width: clamped.width, height: clamped.height } : { kind: 'keep' };
+}
+
 export function parseGeometry(raw: string): WindowGeometry | null {
   try {
     const data = JSON.parse(raw) as Partial<WindowGeometry> | null;

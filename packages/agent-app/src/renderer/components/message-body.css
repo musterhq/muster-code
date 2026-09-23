@@ -1,9 +1,9 @@
 /* Markdown message body. Imported only by MessageBody.tsx; palette comes from
    the app-level vars in styles.css. */
 
-.md-body { overflow-wrap: anywhere; line-height: 1.55; }
+.md-body { position: relative; overflow-wrap: anywhere; line-height: 1.55; }
 .md-body > :first-child { margin-top: 0; }
-.md-body > :last-child { margin-bottom: 0; }
+.md-body > :last-child,.md-body > :has(+ :is(.md-quote,.md-quote-note):last-child) { margin-bottom: 0; }
 
 .md-body p,
 .md-body ul,
@@ -115,45 +115,101 @@
 .md-body input[type='checkbox'] { accent-color:var(--accent); margin-right:6px; }
 .file-line-target { background:var(--bg-active); }
 
-/* Keep the conversation readable as prose. Only the user's own turn is a
-   softly surfaced bubble; assistant output and tools stay on the canvas. */
+/* Codex document rhythm. Prose sits on the canvas at 15px/1.6; headings step
+   by weight more than size; code, tables and quotes are quiet surfaces. Only
+   the user's own turn is a bubble (right-aligned, soft fill, 18px radius). */
 .timeline-row .msg-assistant {
   max-width: 760px;
-  padding: 5px 8px 8px;
-  color: color-mix(in srgb, var(--text) 96%, transparent);
-  line-height: 1.62;
+  padding: 4px 8px 6px;
+  color: color-mix(in srgb, var(--text) 95%, transparent);
 }
-.timeline-row .user-message-row { display:flex; flex-direction:column; align-items:flex-end; }
+.timeline-row .msg-assistant > .md-body { font-size: 15px; line-height: 1.6; letter-spacing: -0.003em; }
+.md-body p, .md-body ul, .md-body ol, .md-body blockquote { margin-block: 0.7em; }
+.md-body h1, .md-body h2, .md-body h3, .md-body h4, .md-body h5, .md-body h6 { margin: 1.35em 0 0.5em; line-height: 1.3; color: var(--text); letter-spacing: -0.01em; }
+.md-body h1 { font-size: 1.4em; font-weight: 600; }
+.md-body h2 { font-size: 1.2em; font-weight: 600; }
+.md-body h3 { font-size: 1.05em; font-weight: 600; }
+.md-body h4, .md-body h5, .md-body h6 { font-size: 1em; font-weight: 600; color: color-mix(in srgb, var(--text) 90%, transparent); }
+.md-body strong { font-weight: 600; color: var(--text); }
+.md-body ul, .md-body ol { padding-left: 1.5em; }
+.md-body li { margin: 0.28em 0; padding-left: 0.15em; }
+.md-body li::marker { color: var(--text-faint); }
+.md-body li > p { margin-block: 0.3em; }
+.md-body li > ul, .md-body li > ol { margin: 0.2em 0; }
+.md-body hr { margin: 1.4em 0; border-top-color: color-mix(in srgb, var(--text) 9%, transparent); }
+.md-body a { color: var(--accent); text-decoration: underline; text-decoration-color: color-mix(in srgb, var(--accent) 35%, transparent); text-decoration-thickness: 1px; text-underline-offset: 3px; }
+.md-body a:hover { text-decoration-color: currentColor; }
+.md-body a:focus-visible, .md-resource-link:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; border-radius: 2px; }
+.md-body blockquote { padding: 0 0 0 14px; border-left: 2px solid color-mix(in srgb, var(--text) 14%, transparent); color: var(--text-dim); }
+.md-body code { font-family: var(--mono); font-size: 0.87em; }
+.md-body :not(pre) > code { padding: 0.12em 0.38em; border: 0; border-radius: 5px; background: color-mix(in srgb, var(--text) 8%, transparent); color: color-mix(in srgb, var(--text) 94%, transparent); white-space: break-spaces; }
+.md-body a > code { color: inherit; }
+
+/* Code blocks: one soft surface (same family as the diff block); language + copy in a slim header. */
+.md-body pre { margin: 0.9em 0; }
+.md-code { margin: 0.9em 0; border: 1px solid color-mix(in srgb, var(--text) 5.5%, transparent); border-radius: 10px; background: color-mix(in srgb, var(--text) 2.2%, var(--bg)); overflow: hidden; }
+.md-code-head { min-height: 32px; padding: 0 6px 0 14px; border: 0; background: none; }
+.md-code-lang { color: var(--text-faint); font: 11.5px/1 var(--ui); letter-spacing: 0; text-transform: none; }
+.md-code-body { margin: 0; padding: 0 14px 12px; font-size: 12.5px; line-height: 1.6; }
+.md-code .md-copy { opacity: .7; }
+.md-code:hover .md-copy, .md-code .md-copy:focus-visible { opacity: 1; }
+
+/* Tables: light horizontal rules, no zebra, no boxed header. */
+.md-body th, .md-body td { border: 0; border-bottom: 1px solid color-mix(in srgb, var(--text) 8%, transparent); padding: 8px 12px; }
+.md-body th { background: none; font-weight: 600; }
+
+.msg-actions { min-height: 25px; transition: opacity 150ms ease; }
+.md-copy { transition: color 130ms ease, background-color 130ms ease, opacity 130ms ease; }
+
+.timeline-row .user-message-row { display: flex; flex-direction: column; align-items: flex-end; }
 .timeline-row .msg-user {
-  width:fit-content;
-  max-width:min(82%, 660px);
-  margin:4px 0 0 auto;
-  padding:9px 13px;
-  border:1px solid color-mix(in srgb, var(--text) 5%, transparent);
-  border-radius:13px 13px 4px 13px;
-  background:color-mix(in srgb, var(--text) 6%, var(--bg-raised));
-  color:var(--text);
-  font-size:13px;
-  line-height:1.58;
-  box-shadow:inset 0 1px 0 rgb(255 255 255 / 2%);
+  width: fit-content;
+  max-width: min(78%, 620px);
+  margin: 10px 0 0 auto;
+  padding: 9px 16px;
+  border: 0;
+  border-radius: 18px;
+  background: color-mix(in srgb, var(--accent) 13%, var(--bg-raised));
+  color: var(--text);
+  font-size: 15px;
+  line-height: 1.55;
+  box-shadow: none;
 }
-.timeline-row .msg-assistant > .md-body { font-size:13px; }
-.md-body p,.md-body ul,.md-body ol,.md-body table,.md-body blockquote { margin-block:9px; }
-.md-body h1,.md-body h2,.md-body h3,.md-body h4,.md-body h5,.md-body h6 { line-height:1.35; }
-.md-body pre { margin:10px 0; }
-.md-code { border-radius:8px; border-color:color-mix(in srgb,var(--text) 8%,transparent); background:color-mix(in srgb,var(--bg-raised) 94%,#000); }
-.md-code-head { min-height:30px; border-color:color-mix(in srgb,var(--text) 6%,transparent); background:rgb(255 255 255 / 1.5%); }
-.md-code-lang { font-family:var(--mono); font-size:10px; letter-spacing:.015em; }
-.md-code-body { font-size:11px; line-height:1.65; }
-.md-body :not(pre) > code { border-color:color-mix(in srgb,var(--text) 7%,transparent); background:rgb(255 255 255 / 4%); }
-.md-body th,.md-body td { border-color:color-mix(in srgb,var(--text) 8%,transparent); }
-.md-body th { background:rgb(255 255 255 / 4%); }
-.md-body a { text-decoration-thickness:1px; text-underline-offset:3px; }
-.md-body a:focus-visible,.md-resource-link:focus-visible { outline:1px solid var(--accent); outline-offset:2px; border-radius:2px; }
-.msg-actions { min-height:25px; transition:opacity 150ms ease; }
-.md-copy { transition:color 130ms ease,background-color 130ms ease; }
-@media (max-width:620px) {
-  .timeline-row .msg-user { max-width:92%; }
-  .timeline-row .msg-assistant { padding-inline:2px; }
+.timeline-row .msg-user .msg-text { white-space: pre-wrap; overflow-wrap: anywhere; }
+/* F18: a sent @file mention renders as the same chip the composer showed, not dead "@path" text. */
+/* Same tint, ring and radius as the composer's .token-chip (composer.css); only the button chrome is reset
+   so the chip keeps the bubble's text metrics and wraps like the composer's inline chip. */
+.mention-chip { display: inline; margin: 0; padding: 0; border: 0; font: inherit; line-height: inherit; letter-spacing: inherit; text-align: inherit; white-space: inherit; cursor: pointer; }
+.mention-chip:hover { background: color-mix(in oklab, var(--chip) 24%, transparent); }
+.mention-chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+@media (max-width: 620px) {
+  .timeline-row .msg-user { max-width: 92%; }
+  .timeline-row .msg-assistant { padding-inline: 2px; }
 }
-@media (prefers-reduced-motion:reduce) { .msg-actions,.md-copy { transition:none; } }
+@media (prefers-reduced-motion: reduce) { .msg-actions, .md-copy { transition: none; } }
+
+/* Long user turns clamp to 12 lines; find and copy still use the full text. */
+.timeline-row .msg-user.is-clamped .msg-text { max-height:calc(12 * 1.55em); overflow:hidden; mask-image:linear-gradient(#000 calc(100% - 3em),transparent); }
+.msg-user-more { display:block; margin:5px 0 0 auto; padding:0; color:var(--text-faint); font-size:12px; }
+.msg-user-more:hover { color:var(--text); }
+.msg-user-more:focus-visible { outline:1px solid var(--accent); outline-offset:2px; border-radius:3px; }
+.msg-attachments { display:flex; flex-wrap:wrap; justify-content:flex-end; gap:6px; max-width:min(82%, 660px); margin:4px 0 0 auto; }
+/* Both are real buttons (click or Enter/Space opens the attachment in the resource pane); reset the button chrome first. */
+.msg-attachment-open,.msg-attachment-chip { padding:0; border:0; margin:0; background:none; font:inherit; color:inherit; cursor:pointer; transition:transform 120ms ease; }
+.msg-attachment-open:hover,.msg-attachment-chip:hover,.msg-attachment-open:focus-visible,.msg-attachment-chip:focus-visible { transform:translateY(-1px); }
+.msg-attachment-open:focus-visible,.msg-attachment-chip:focus-visible { outline:1px solid var(--accent); outline-offset:2px; border-radius:9px; }
+.msg-attachment-thumb { display:block; width:auto; max-width:180px; height:96px; object-fit:cover; border-radius:9px; border:1px solid color-mix(in srgb,var(--text) 8%,transparent); background:var(--bg-raised); transition:border-color 120ms ease; }
+.msg-attachment-thumb.is-pdf { width:72px; object-fit:cover; object-position:top; background:#fff; }
+.msg-attachment-open:hover .msg-attachment-thumb,.msg-attachment-open:focus-visible .msg-attachment-thumb { border-color:color-mix(in srgb,var(--accent) 45%,transparent); }
+.msg-attachment-chip { display:inline-flex; align-items:center; gap:6px; max-width:220px; height:28px; padding:0 10px; border-radius:8px; border:1px solid color-mix(in srgb,var(--text) 7%,transparent); background:color-mix(in srgb,var(--text) 4%,var(--bg-raised)); color:var(--text-dim); font-size:12px; }
+.msg-attachment-chip:hover,.msg-attachment-chip:focus-visible { border-color:color-mix(in srgb,var(--accent) 45%,transparent); }
+.msg-attachment-chip > span { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.msg-attachment-chip > svg { flex:none; color:var(--text-faint); }
+@media (prefers-reduced-motion:reduce) { .msg-attachment-open,.msg-attachment-chip,.msg-attachment-thumb { transition:none; } }
+
+/* Quote in reply (CMP-18): floats above the selected assistant text. */
+.md-quote { position: absolute; z-index: 5; display: inline-flex; align-items: center; gap: 5px; height: 26px; padding: 0 9px; border: 1px solid color-mix(in srgb, var(--text) 12%, transparent); border-radius: 8px; background: var(--bg-raised); box-shadow: 0 4px 14px #0006; color: var(--text); font: 500 12px/1 var(--ui); translate: -50% calc(-100% - 6px); white-space: nowrap; }
+.md-quote:hover { background: color-mix(in srgb, var(--text) 8%, var(--bg-raised)); }
+.md-quote-note { position: absolute; right: 0; bottom: -18px; color: var(--text-faint); font-size: 11px; }
+/* Tool output header: Add to chat sits beside Copy on the right. */
+.tool-result > header .tool-add-context { margin-left: auto; }

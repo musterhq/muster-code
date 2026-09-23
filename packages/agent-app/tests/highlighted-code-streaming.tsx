@@ -4,17 +4,19 @@ import {setTimeout as delay} from 'node:timers/promises';
 
 const require=createRequire(import.meta.url),{parseHTML}=require('linkedom');
 const {window}=parseHTML('<html><body><div id="root"></div></body></html>');
+let created=0,terminated=0;
 class HighlightWorker {
   onmessage?: (event:{data:{id:number;rows:{content:string;color?:string}[][]}})=>void;
   onerror?: ()=>void;
+  constructor() {created++;}
   postMessage({id,source}:{id:number;source:string}) {
     setTimeout(()=>this.onmessage?.({data:{id,rows:source.split('\n').map(line=>[{content:line,color:'#abcdef'}])}}),0);
   }
-  terminate() {}
+  terminate() {terminated++;}
 }
 Object.assign(globalThis,{window,document:window.document,HTMLElement:window.HTMLElement,Element:window.Element,Node:window.Node,Worker:HighlightWorker});
 const React=await import('react'),{createRoot}=await import('react-dom/client');
-const {HighlightedCode,HighlightedSourceTable}=await import('../src/renderer/components/HighlightedCode');
+const {HighlightedCode,HighlightedSourceTable,releaseHighlightWorker,HIGHLIGHT_WORKER_IDLE_MS}=await import('../src/renderer/components/HighlightedCode');
 const root=createRoot(document.getElementById('root')!);
 
 function render(source:string) {
@@ -39,5 +41,15 @@ assert.equal(document.querySelector('code')?.textContent,'first\nsecond');
 render('first');
 await delay(20);
 assert.equal(document.querySelector('code')?.textContent,'first','deleted lines disappear immediately');
+await delay(260);
+assert.equal(created,1,'one shared worker serves every code block');
+assert.equal(terminated,0,'the worker stays warm between requests inside the idle window');
+assert.equal(HIGHLIGHT_WORKER_IDLE_MS,60_000);
+releaseHighlightWorker();
+assert.equal(terminated,1,'idle release terminates the shared worker');
+render('const y = 2;');
+await delay(260);
+assert.equal(created,2,'the next request recreates the worker lazily');
+assert.ok(document.querySelector('code span[style]'),'highlighting resumes after a release');
 root.unmount();
 console.log('PASS: streaming code and source tables never display stale highlighted text');

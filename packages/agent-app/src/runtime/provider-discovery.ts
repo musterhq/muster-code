@@ -60,6 +60,24 @@ function maskEmail(email: string): string {
   return `${email[0]}***${email.slice(at)}`;
 }
 
+function chatgptEmail(idToken: unknown): string | undefined {
+  if (typeof idToken !== 'string' || idToken.length > 16384) return undefined;
+  try {
+    const claims = JSON.parse(Buffer.from(idToken.split('.')[1] ?? '', 'base64url').toString('utf8')) as Record<string, unknown>;
+    const profile = claims['https://api.openai.com/profile'] as Record<string, unknown> | undefined;
+    const email = claims.email ?? profile?.email;
+    return isEmail(email) && email.length <= 254 ? email : undefined;
+  } catch { return undefined; }
+}
+
+/** The ChatGPT account email in `<codexHome>/auth.json` (the id_token's public claim), for an explicit reveal only. */
+export async function codexAccountEmail(codexHome: string): Promise<string | undefined> {
+  try {
+    const raw = await readBounded(join(codexHome, 'auth.json'));
+    return raw === null ? undefined : chatgptEmail(((JSON.parse(raw) as {tokens?: {id_token?: unknown}}).tokens)?.id_token);
+  } catch { return undefined; }
+}
+
 function entry(base: Omit<DiscoveredProvider, 'identityMasked' | 'credentialPresent'> & Partial<DiscoveredProvider>): DiscoveredProvider {
   return { identityMasked: '', credentialPresent: false, ...base };
 }
@@ -77,7 +95,12 @@ async function discoverCodex(home: string, env: NodeJS.ProcessEnv): Promise<Disc
     const auth = JSON.parse(raw) as Record<string, unknown>;
     const hasTokens = typeof auth?.tokens === 'object' && auth.tokens !== null && typeof (auth.tokens as Record<string, unknown>).access_token === 'string' && Boolean((auth.tokens as Record<string, unknown>).access_token);
     const hasApiKey = typeof auth?.OPENAI_API_KEY === 'string' && auth.OPENAI_API_KEY.length > 0;
-    if (hasTokens) return entry({ ...base, status: 'configured', credentialPresent: true, identityMasked: 'ChatGPT account on file', detail: 'auth.json holds ChatGPT sign-in tokens (auth mode: chatgpt); not verified' });
+    if (hasTokens) {
+      // Same treatment as Claude Code: show the signed-in account masked, revealable on demand. Only the
+      // id_token's public email claim is decoded; tokens themselves never leave this function.
+      const identity = chatgptEmail((auth.tokens as Record<string, unknown>).id_token);
+      return entry({ ...base, status: 'configured', credentialPresent: true, identity, identityMasked: identity ? maskEmail(identity) : 'ChatGPT account on file', detail: 'auth.json holds ChatGPT sign-in tokens (auth mode: chatgpt); not verified' });
+    }
     if (hasApiKey) return entry({ ...base, status: 'configured', credentialPresent: true, identityMasked: 'API key on file', detail: 'auth.json holds an OpenAI API key (auth mode: apikey); not verified' });
     return entry({ ...base, status: 'installed', detail: 'auth.json present but holds no recognized credential' });
   } catch (error) {

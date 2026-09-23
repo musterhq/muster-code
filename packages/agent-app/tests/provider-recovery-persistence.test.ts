@@ -12,6 +12,8 @@ import type {Chat,ChatRecovery} from '../src/shared/protocol.ts';
 
 const recovery: ChatRecovery={kind:'recovery-needed',retryable:false,reason:'Provider cancellation could not be confirmed; inspect the existing turn.'};
 const info: ProviderAdapter['info']=()=>[{id:'hybrow',name:'Fixture',available:true,identityMasked:'fixture',models:[{id:'claude/claude-fable-5',name:'Fixture'}]}];
+/** The send path awaits several context contributors (memory, folder files) before dispatch; drain them with real timers. */
+const drain=async()=>{for(let i=0;i<20;i++)await new Promise<void>(resolve=>setTimeout(resolve,2));};
 async function directory(t: TestContext) {const path=await mkdtemp(join(tmpdir(),'muster-recovery-'));t.after(()=>rm(path,{recursive:true,force:true}));return path;}
 
 test('send receipt clears prior turn atomically and orphan recovery preserves actual accepted identity',async t=>{
@@ -28,7 +30,7 @@ test('send receipt clears prior turn atomically and orphan recovery preserves ac
   assert.deepEqual(store.recoverOrphanedRuns(),[chat.id]);
   const restored=store.chat(chat.id)!;
   assert.equal(restored.providerThreadId,'thread');assert.equal(restored.providerTurnId,'accepted-turn');
-  assert.equal(restored.recovery?.kind,'recovery-needed');assert.equal(restored.status,'failed');
+  assert.equal(restored.recovery?.kind,'recovery-needed');assert.equal(restored.status,'interrupted');
   assert.throws(()=>store.recordSend(chat.id,'different-request','hello'),/status checked/);
   assert.equal(store.recordSend(chat.id,'request-one','hello').runId,receipt.runId);
   assert.equal(store.timeline(chat.id).at(-1)?.data?.recovery && true,true);
@@ -103,9 +105,9 @@ test('missing accepted turn cannot unlock; tagged predispatch rejection does not
   const service=createAgentService({dataDir,provider,onEvent(){},reconcileProvider:async()=>{assert.fail('missing identity must not query');}});t.after(()=>service.dispose());
   const chat=await service.invoke('chat.create',{});
   await service.invoke('chat.send',{id:chat.id,text:'one',requestId:'one'});
-  await new Promise(resolve=>setImmediate(resolve));
+  await drain();
   assert.equal((await service.invoke('app.snapshot',undefined)).chats[0]?.recovery?.kind,'failed');
-  await service.invoke('chat.send',{id:chat.id,text:'two',requestId:'two'});await new Promise(resolve=>setImmediate(resolve));assert.equal(called,2);
+  await service.invoke('chat.send',{id:chat.id,text:'two',requestId:'two'});await drain();assert.equal(called,2);
   const store=new AgentStore(dataDir);store.updateChat(chat.id,{recovery,providerTurnId:null});store.close();
   const checked=await service.invoke('chat.reconcile',{id:chat.id});assert.equal(checked.resolved,false);assert.match(checked.reason,/identity/);
 });
@@ -123,7 +125,7 @@ test('dispose waits for owned callbacks before closing DB and prevents fresh dis
   const store=new AgentStore(dataDir);assert.equal(store.chat(chat.id)?.providerTurnId,'late-turn');assert.equal(store.chat(chat.id)?.recovery?.kind,'recovery-needed');store.close();
 });
 
-test('unresolved provider work blocks another chat in the same folder but preserves its draft',async t=>{
+test('unresolved provider work in one chat no longer blocks another chat in the same folder',async t=>{
   const dataDir=await directory(t);let calls=0;
   const provider:ProviderAdapter={info,run:async()=>{calls++;return {status:'completed',finalMessage:'done'};},stop:async()=>true,dispose(){}};
   const service=createAgentService({dataDir,provider,onEvent(){}});t.after(()=>service.dispose());
@@ -131,6 +133,8 @@ test('unresolved provider work blocks another chat in the same folder but preser
   const first=await service.invoke('chat.create',{folderId:folder.id}),second=await service.invoke('chat.create',{folderId:folder.id});
   await service.invoke('chat.update',{id:second.id,draft:'keep this draft'});
   const store=new AgentStore(dataDir);store.updateChat(first.id,{status:'failed',providerThreadId:'remote-thread',providerTurnId:'remote-turn',recovery});store.close();
-  await assert.rejects(service.invoke('chat.send',{id:second.id,text:'new work',requestId:'new-work'}),/Another chat in this folder/);
-  assert.equal(calls,0);assert.equal((await service.invoke('app.snapshot',undefined)).chats.find(chat=>chat.id===second.id)?.draft,'keep this draft');
+  await service.invoke('chat.send',{id:second.id,text:'new work',requestId:'new-work'});
+  for(let i=0;i<100&&calls===0;i++)await new Promise(r=>setTimeout(r,2));
+  assert.equal(calls,1,'parallel chats in one folder run independently');
+  assert.ok((await service.invoke('chat.timeline',{id:second.id})).items.some(item=>item.data?.kind==='folder-unresolved'),'the second chat is told another chat has unresolved work here');
 });

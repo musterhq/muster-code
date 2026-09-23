@@ -13,7 +13,7 @@
   background:color-mix(in srgb,var(--bg-raised,#242424) 93%,transparent);
   -webkit-backdrop-filter:blur(12px) saturate(120%);
   backdrop-filter:blur(12px) saturate(120%);
-  box-shadow:0 12px 30px -14px #000b,inset 0 1px 0 rgb(255 255 255 / 2%);
+  box-shadow:0 12px 30px -14px #000b,inset 0 1px 0 rgb(var(--fg-rgb) / 2%);
 }
 .timeline-search { border-radius:9px; }
 .timeline-search:focus-within { border-color:color-mix(in srgb,var(--accent,#8aabde) 48%,var(--hairline,#444)); }
@@ -28,3 +28,12 @@
  .turn-tick,.turn-tick span,.turn-page,.turn-navigation-actions button { transition:none; }
  .turn-preview { animation:none; }
 }
+
+/* Find-in-conversation marks (CSS Custom Highlight API: no DOM mutation of rendered prose). */
+::highlight(chat-find) { background-color:color-mix(in srgb,var(--warn) 30%,transparent); color:inherit; }
+::highlight(chat-find-active) { background-color:color-mix(in srgb,var(--warn) 78%,transparent); color:var(--bg); }
+
+/* At rest the rail is only the turn dashes (Codex); find, back and latest appear while the rail is hovered or focused. */
+.turn-navigation-actions { opacity:0; visibility:hidden; transition:opacity 120ms ease, visibility 0s linear 120ms; }
+.turn-navigation:is(:hover,:focus-within) .turn-navigation-actions { opacity:1; visibility:visible; transition-delay:0s; }
+@media (hover:none) { .turn-navigation-actions { opacity:1; visibility:visible; } }

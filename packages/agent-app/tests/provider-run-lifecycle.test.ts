@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import {getEventListeners} from 'node:events';
 import {createProviderAdapter, ProviderPreDispatchError, type CoreClient, type ProviderInput, type ProviderResult} from '../src/runtime/provider.ts';
-import {coreBudgetOptions, classifyProviderFailure, requestWhileOwned} from '../src/runtime/provider-run-lifecycle.ts';
+import {coreBudgetOptions, classifyProviderFailure, requestWhileOwned, lifecycleDiagnostic, LEGACY_CORE_TURN_CEILING_MS, DEFAULT_AGENT_PROVIDER_BUDGETS} from '../src/runtime/provider-run-lifecycle.ts';
 
 const deferred = <T>() => {
   let resolve!: (value: T) => void;
@@ -59,7 +59,7 @@ test('stopping one chat preserves another; duplicate attempts stay rejected unti
   assert.ok(f.cleared.every(owner => owner === f.runs[0]!.args.transportOwner));
   await assert.rejects(f.adapter.run(input('a')), /already owns/);
   f.runs[0]!.result.resolve({...complete, status: 'failed', errorMessage: 'closed'});
-  assert.equal((await a).recovery?.kind, 'recovery-needed');
+  assert.equal((await a).recovery?.kind, 'cancelled');  // A user Stop (or dispose) settles as cancelled, never as an unresolved failure.
   assert.equal(await stopped, true);
   assert.equal(await again, true);
   f.runs[1]!.result.resolve(complete);
@@ -120,7 +120,7 @@ test('dispose is terminal and late startup cannot escape adapter ownership', asy
   await assert.rejects(f.adapter.run(input('b')), /disposed/);
   (f.runs[0]!.args.onEvent as ProviderInput['onEvent'])('turn/started', {threadId: 'thread', turn: {id: 'turn'}});
   f.runs[0]!.result.resolve({...complete, status: 'failed', errorMessage: 'closed'});
-  assert.equal((await run).recovery?.kind, 'recovery-needed');
+  assert.equal((await run).recovery?.kind, 'cancelled');  // A user Stop (or dispose) settles as cancelled, never as an unresolved failure.
   await f.adapter.stop('a');
   assert.equal(f.adapter.info()[0]!.available, false);
 });
@@ -203,7 +203,7 @@ test('opt-in core receives independent budgets, cancellation and real identity h
   f.runs[0]!.result.reject(new Error('closed'));
   const result = await run;
   assert.equal(result.threadId,'real-thread'); assert.equal(result.turnId,'real-turn');
-  assert.equal(result.recovery?.kind,'recovery-needed');
+  assert.equal(result.recovery?.kind,'cancelled');  // A user Stop (or dispose) settles as cancelled, never as an unresolved failure.
   await stopped; f.adapter.dispose();
 });
 
@@ -215,12 +215,12 @@ test('preflight errors are tagged with definite no-dispatch evidence', async () 
 });
 
 
-test('Agent Mode opts into a finite four-hour turn while legacy core defaults stay untouched', async () => {
-  assert.deepEqual(coreBudgetOptions(undefined,true),{budgets:{idleMs:180_000,requestMs:30_000,turnMs:14_400_000}});
-  assert.deepEqual(coreBudgetOptions({idleMs:2000,turnMs:undefined},true),{budgets:{idleMs:2000,requestMs:30_000,turnMs:14_400_000}});
+test('Agent Mode imposes no turn or idle cutoff of its own while legacy core defaults stay untouched', async () => {
+  assert.deepEqual(coreBudgetOptions(undefined,true),{budgets:{idleMs:2_147_483_647,requestMs:30_000,turnMs:2_147_483_647}});
+  assert.deepEqual(coreBudgetOptions({idleMs:2000,turnMs:undefined},true),{budgets:{idleMs:2000,requestMs:30_000,turnMs:2_147_483_647}});
   assert.deepEqual(coreBudgetOptions(),{});
   const f = fixture(true); const run = f.adapter.run(input('a'));
-  assert.deepEqual(f.runs[0]!.args.budgets,{idleMs:180_000,requestMs:30_000,turnMs:14_400_000});
+  assert.deepEqual(f.runs[0]!.args.budgets,{idleMs:2_147_483_647,requestMs:30_000,turnMs:2_147_483_647});
   assert.equal('timeoutMs' in f.runs[0]!.args,false);
   f.runs[0]!.result.resolve(complete); await run; f.adapter.dispose();
 });
@@ -241,4 +241,50 @@ test('provider dispatch uses selected access and still clamps Full in Ask/Plan',
     assert.ok((f.runs[0]!.args.configOverrides as string[]).includes(`sandbox_workspace_write.network_access=${networkAccess}`));
     f.runs[0]!.result.resolve(complete); await run; f.adapter.dispose();
   }
+});
+
+test('lifecycle-aware core gets no Muster turn cutoff; the diagnostic names the 24-minute legacy ceiling otherwise', () => {
+  const supported = coreBudgetOptions(undefined, true);
+  assert.equal(supported.budgets?.turnMs, 2_147_483_647);
+  assert.equal(supported.budgets?.turnMs, DEFAULT_AGENT_PROVIDER_BUDGETS.turnMs);
+  assert.equal(supported.budgets?.idleMs, 2_147_483_647);
+  assert.equal('timeoutMs' in supported, false);
+  assert.equal(LEGACY_CORE_TURN_CEILING_MS, 1_440_000);
+  assert.match(lifecycleDiagnostic(true), /no turn or idle cutoff/);
+  assert.doesNotMatch(lifecycleDiagnostic(true), /1440000/);
+  assert.match(lifecycleDiagnostic(false), /1440000ms \(24m\)/);
+  assert.match(lifecycleDiagnostic(false), /CODEX_RUN_LIFECYCLE_VERSION/);
+  assert.match(lifecycleDiagnostic(false), /MUSTER_CORE_CLIENT_ENTRY/);
+  // The legacy path can never carry a turn budget; the ceiling is the core's.
+  assert.throws(() => coreBudgetOptions({turnMs: DEFAULT_AGENT_PROVIDER_BUDGETS.turnMs}, false), /unsupported/);
+});
+
+test('a never-dispatched failure keeps the real provider error and is safe to retry', () => {
+  const recovery = classifyProviderFailure({status: 'failed', dispatchState: 'not-dispatched', errorMessage: 'codex app-server exited: thread is loaded by another process'}, {activity: false, terminal: false, cancelled: false});
+  assert.equal(recovery?.kind, 'failed');
+  assert.equal(recovery?.retryable, true);
+  assert.match(recovery?.reason ?? '', /thread is loaded by another process/);
+  assert.doesNotMatch(recovery?.reason ?? '', /No automatic retry/);
+});
+
+test('a user stop settles as cancelled even when the provider never confirmed the interrupt', () => {
+  const recovery = classifyProviderFailure({status: 'failed', dispatchState: 'dispatched', turnId: 't', errorMessage: 'closed'}, {activity: true, terminal: false, cancelled: true});
+  assert.equal(recovery?.kind, 'cancelled');
+});
+
+test('a permission or mode change closes the stale warm app-server before the next send', async () => {
+  const f = fixture();
+  const first = f.adapter.run(input('a'));
+  f.runs[0]!.result.resolve(complete);
+  await first;
+  const clearedBefore = f.cleared.length;
+  const second = f.adapter.run({...input('a'), chat: {...input('a').chat, mode: 'plan'}});
+  assert.ok(f.cleared.length > clearedBefore, 'the old app-server (other sandbox) is closed before dispatch');
+  f.runs[1]!.result.resolve(complete);
+  await second;
+  const clearedAfter = f.cleared.length;
+  const third = f.adapter.run({...input('a'), chat: {...input('a').chat, mode: 'plan'}});
+  assert.equal(f.cleared.length, clearedAfter, 'an unchanged config keeps the warm process');
+  f.runs[2]!.result.resolve(complete);
+  await third; f.adapter.dispose();
 });

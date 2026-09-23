@@ -1,0 +1,220 @@
+/** Run with node tests/run-git-history-components.mjs: History tab (commit list, detail, file diff, compare), conflict resolver + banner, blame gutter, clone sheet. */
+import assert from 'node:assert/strict';
+import {createRequire} from 'node:module';
+import {setTimeout as delay} from 'node:timers/promises';
+const require=createRequire(import.meta.url),{parseHTML}=require('linkedom');
+const {window}=parseHTML('<html><body><div id="root"></div></body></html>');
+(window.document as any).oninput=null;
+const saved=new Map<string,string>();
+const storage={getItem:(key:string)=>saved.get(key)??null,setItem:(key:string,value:string)=>{saved.set(key,value);},removeItem:(key:string)=>{saved.delete(key);}};
+Object.assign(globalThis,{window,document:window.document,HTMLElement:window.HTMLElement,Element:window.Element,Node:window.Node,MutationObserver:window.MutationObserver,ResizeObserver:class{observe(){}disconnect(){}unobserve(){}},requestAnimationFrame:(fn:any)=>setTimeout(fn,0),cancelAnimationFrame:clearTimeout,localStorage:storage,sessionStorage:storage});
+const styles=()=>({getPropertyValue:()=>'',direction:'ltr',position:'static',overflow:'visible',overflowX:'visible',overflowY:'visible',display:'block',animationName:'none',transitionProperty:'none',transitionDuration:'0s',animationDuration:'0s',paddingTop:'0px',paddingBottom:'0px',paddingLeft:'0px',paddingRight:'0px'});
+Object.assign(globalThis,{getComputedStyle:styles});window.getComputedStyle=styles;
+window.HTMLElement.prototype.getBoundingClientRect=()=>({x:0,y:0,width:600,height:400,left:0,top:0,right:600,bottom:400});
+window.HTMLElement.prototype.getClientRects=function(){return [this.getBoundingClientRect()];};
+window.HTMLElement.prototype.scrollIntoView=function(){};
+(window.document as any).hasFocus=()=>true;
+// Worker-backed syntax highlighting is unavailable here; the views fall back to plain text.
+(globalThis as any).Worker=class{constructor(){throw new Error('no worker');}};
+
+const calls:{command:string;input:any}[]=[];
+const listeners=new Set<(event:any)=>void>();
+const emit=(event:any)=>{for(const listener of [...listeners])listener(event);};
+const sha=(n:number)=>String(n).padStart(40,'a');
+const commits=Array.from({length:150},(_,i)=>({sha:sha(i),short:sha(i).slice(0,7),author:i%2?'Ada':'Grace',email:'a@b',authoredAt:new Date(Date.now()-i*3600e3).toISOString(),subject:`Commit ${i}`,parents:i<149?[sha(i+1)]:[],refs:i===0?['main','tag: v1']:[],head:i===0}));
+let conflictFiles=[{path:'src/app.ts',status:'UU',description:'Both modified',resolved:false}];
+let conflictWrites:any[]=[];
+const working='import x\n<<<<<<< HEAD\nconst a = 1;\n=======\nconst a = 2;\n>>>>>>> topic\nexport {a}\n';
+window.muster={subscribe(fn:any){listeners.add(fn);return()=>{listeners.delete(fn);};},async invoke(command:string,input:any){
+  calls.push({command,input});
+  if(command==='app.snapshot')return {version:1,chats:[],folders:[{id:'f',name:'Repo',path:'/repo'}],projects:[]};
+  if(command==='workspace.watch')return;
+  if(command==='git.info')return {branch:'main',detached:false,fetchedAt:null,hasRemote:true,worktree:null};
+  if(command==='git.log'){const skip=input.skip??0;return {commits:commits.slice(skip,skip+100),hasMore:skip+100<commits.length,skip};}
+  if(command==='git.commitDetail'){const c=commits.find(c=>c.sha===input.sha)!;return {commit:c,body:`${c.subject}\n\nLonger body.`,base:c.parents[0]??null,files:[{path:'src/app.ts',status:'M',adds:1,dels:1,binary:false},{path:'img.png',status:'A',adds:null,dels:null,binary:true}],truncated:false};}
+  if(command==='git.refDiff')return {path:input.path,before:'const a = 1;\nconst b = 2;\n',after:'const a = 2;\nconst b = 2;\n',truncated:false,binary:false};
+  if(command==='git.branches')return {current:'main',detached:false,local:[{name:'main'},{name:'topic'}],recent:[],truncated:false};
+  if(command==='git.compare')return {base:{ref:input.base,sha:sha(5)},head:{ref:input.head,sha:sha(1)},mergeBase:sha(5),ahead:4,behind:0,files:[{path:'src/app.ts',status:'M',adds:3,dels:1,binary:false}],truncated:false};
+  if(command==='git.blame')return {path:input.path,lines:[sha(3),sha(3),'0000000000000000000000000000000000000000'],commits:{[sha(3)]:{sha:sha(3),short:sha(3).slice(0,7),author:'Ada',authoredAt:new Date(Date.now()-86400e3*2).toISOString(),summary:'Commit 3',uncommitted:false},'0000000000000000000000000000000000000000':{sha:'0000000000000000000000000000000000000000',short:'0000000',author:'You',authoredAt:'',summary:'Uncommitted changes',uncommitted:true}},truncated:false};
+  if(command==='git.conflicts')return {operation:'merge',currentLabel:'main',incomingLabel:'topic',incomingSubject:'topic change',files:conflictFiles,canContinue:conflictFiles.length===0};
+  if(command==='git.conflictFile')return {path:input.path,status:'UU',base:'import x\nconst a = 0;\nexport {a}\n',ours:'import x\nconst a = 1;\nexport {a}\n',theirs:'import x\nconst a = 2;\nexport {a}\n',working,revision:'rev1',truncated:false};
+  if(command==='git.conflictWrite'){conflictWrites.push(input);if(input.markResolved)conflictFiles=[];return {operation:'merge',currentLabel:'main',incomingLabel:'topic',incomingSubject:'topic change',files:conflictFiles,canContinue:conflictFiles.length===0};}
+  if(command==='git.conflictContinue')return {state:{operation:null,currentLabel:'main',incomingLabel:'incoming',incomingSubject:null,files:[],canContinue:false},status:{branch:'main',detached:false,unborn:false,revision:'r2',files:[],truncated:false,stagedCount:0,conflicted:false}};
+  if(command==='git.changes')return [];
+  if(command==='git.clone.defaultDestination')return {path:'/home/me/Code/repo',name:'repo'};
+  if(command==='git.clone.start'){if(input.url==='/fails/at/once'){emit({type:'gitClone',id:'clone-fast',phase:'progress',percent:0,message:'Cloning into repo…'});emit({type:'gitClone',id:'clone-fast',phase:'failed',error:'repository does not exist'});return {id:'clone-fast',destination:'/home/me/Code/repo',name:'repo'};}return {id:'clone-1',destination:input.destination??'/home/me/Code/repo',name:'repo'};}
+  if(command==='git.clone.cancel')return;
+  if(command==='clipboard.write')return;
+  return undefined;
+}};
+const React=await import('react');
+const {createRoot}=await import('react-dom/client');
+(globalThis as any).IS_REACT_ACT_ENVIRONMENT=false;
+const store=await import('../src/renderer/store');
+const draft=await import('../src/renderer/newChatDraft');
+const {GitHistoryTab}=await import('../src/renderer/components/GitHistoryTab');
+const {ConflictTab,GitConflictBanner}=await import('../src/renderer/components/ConflictTab');
+const {BlameView}=await import('../src/renderer/components/BlameView');
+const {CloneRepositorySheet,openCloneSheet,closeCloneSheet}=await import('../src/renderer/components/CloneRepositorySheet');
+await store.boot();
+const host=document.getElementById('root')!;
+const text=(selector:string,root:ParentNode=host)=>Array.from(root.querySelectorAll(selector)).map(node=>node.textContent??'');
+const click=(el:Element|null|undefined,what:string)=>{assert.ok(el,`${what} exists`);(el as HTMLElement).click();};
+const type=(input:HTMLInputElement|HTMLTextAreaElement,value:string)=>{const setter=Object.getOwnPropertyDescriptor(Object.getPrototypeOf(input),'value')?.set;setter?setter.call(input,value):(input.value=value);input.dispatchEvent(new window.Event('input',{bubbles:true}));};
+const called=(command:string)=>calls.filter(c=>c.command===command);
+
+// --- History tab: virtualised commit list, paging, detail, file diff ---------------------------------
+let root=createRoot(host);
+root.render(<GitHistoryTab tab={{id:'history:f',kind:'history',folderId:'f',title:'History · Repo'}}/>);
+await delay(150);
+assert.ok(host.querySelector('[data-testid="git-history"]'),'the history tab renders');
+let rows=text('.git-history-row');
+assert.ok(rows.length>0&&rows.length<150,`rows are virtualised (${rows.length} painted of 150 known)`);
+assert.match(rows[0],/aaaaaaa.*Commit 0.*HEAD.*main.*v1.*Grace/,'row: short sha · subject · HEAD/branch/tag badges · author: '+rows[0]);
+await delay(60);
+assert.deepEqual(Array.from(host.querySelectorAll('.git-history-row')[0].querySelectorAll('.git-ref')).map(chip=>chip.getAttribute('data-ref-kind')),['head','current','tag'],'HEAD, the checked-out branch and the tag are coloured by kind');
+assert.ok(host.querySelector('.git-history-row svg.git-graph circle.git-graph-dot'),'each row has its lane dot');
+assert.equal(called('git.log')[0].input.skip,0);
+assert.equal(text('.git-history-placeholder')[0],'Select a commit to see what it changed.');
+click(host.querySelectorAll('.git-history-row')[1],'second commit row');
+await delay(150);
+assert.equal(called('git.commitDetail').at(-1)?.input.sha,sha(1));
+const detail=host.querySelector('[data-testid="commit-detail"]')!;
+assert.equal(text('.git-history-detail-subject',detail)[0],'Commit 1');
+assert.match(text('.git-history-body',detail)[0],/Longer body/,'the message body is shown without repeating the subject');
+let files=text('.git-history-file-list .change-row',detail);
+assert.equal(files.length,2);
+assert.match(files[0],/app\.ts.*src.*\+1.*−1.*M/,files[0]);
+assert.match(files[1],/img\.png.*Binary.*A/,files[1]);
+const badges=Array.from(detail.querySelectorAll('.git-history-file-list .git-status')).map(badge=>badge.className);
+assert.deepEqual(badges,['git-status git-tone-modified','git-status git-tone-added'],'commit files use the shared status colours');
+click(detail.querySelectorAll('.git-history-file-list .change-row')[0],'file row');
+await delay(250);
+const refDiff=called('git.refDiff').at(-1)!;
+assert.deepEqual(refDiff.input,{folderId:'f',base:sha(2),head:sha(1),path:'src/app.ts'},'the diff is the commit against its first parent');
+assert.ok(host.querySelector('[data-testid="ref-file-diff"]'),'the file diff opens under the list');
+assert.ok(host.querySelector('[data-testid="ref-file-diff"] .fde[role="table"]'),'the existing inline diff editor (DiffEditorView) renders the file');
+assert.match(host.querySelector('[data-testid="ref-file-diff"]')?.textContent??'',/const a = 1;.*const a = 2;/s,'removed and added lines are woven in');
+// Compare mode: any two refs through the same file list + diff.
+click(Array.from(host.querySelectorAll('.git-history-modes button')).find(b=>b.textContent?.includes('Compare')),'Compare mode');
+await delay(120);
+const compare=host.querySelector('[data-testid="git-compare"]')!;
+const base=compare.querySelector<HTMLInputElement>('input[aria-label="Base ref"]')!,head=compare.querySelector<HTMLInputElement>('input[aria-label="Head ref"]')!;
+assert.equal(base.value,'main','base defaults to main');assert.equal(head.value,'HEAD');
+type(base,'v1');type(head,'topic');
+await delay(40);
+assert.equal(compare.querySelector<HTMLButtonElement>('.git-compare-submit')!.disabled,false,'Compare is enabled once both refs are typed');
+compare.querySelector('form')!.dispatchEvent(new window.Event('submit',{bubbles:true,cancelable:true}));
+await delay(150);
+assert.deepEqual(called('git.compare').at(-1)?.input,{folderId:'f',base:'v1',head:'topic'});
+assert.match(text('.git-compare-result .git-history-meta')[0],/v1.*topic.*4 ahead, 0 behind/);
+assert.equal(text('.git-compare-result .change-row').length,1);
+root.unmount();host.textContent='';
+
+// --- Conflict banner + per-file resolver ----------------------------------------------------------------
+root=createRoot(host);
+root.render(<GitConflictBanner folderId="f"/>);
+await delay(120);
+const banner=host.querySelector('[data-testid="conflict-banner"]')!;
+assert.match(banner.textContent??'',/Merge in progress.*main.*topic.*src\/app\.ts.*Both modified.*Resolve/);
+const cont=Array.from(banner.querySelectorAll('button')).find(b=>b.textContent==='Continue') as HTMLButtonElement;
+assert.equal(cont.disabled,true,'Continue waits for every file');
+click(banner.querySelector('.git-conflict-resolve'),'Resolve');
+assert.ok(store.getState().tabs.some(t=>t.kind==='conflict'&&t.path==='src/app.ts'),'Resolve opens the conflict tab');
+root.unmount();host.textContent='';
+
+root=createRoot(host);
+root.render(<ConflictTab tab={{id:'conflict:f:src/app.ts',kind:'conflict',folderId:'f',path:'src/app.ts',title:'Resolve: app.ts'}}/>);
+await delay(150);
+assert.equal(text('[data-testid="conflict-progress"]')[0],'0 of 1 resolved');
+let blocks=host.querySelectorAll('[data-testid="conflict-block"]');
+assert.equal(blocks.length,1);
+assert.match(blocks[0].textContent??'',/Current.*HEAD.*const a = 1;.*Incoming.*topic.*const a = 2;/s,'both sides are shown with their labels');
+const mark=()=>Array.from(host.querySelectorAll<HTMLButtonElement>('.conflict-foot button')).find(b=>/Mark/.test(b.textContent??''))!;
+assert.equal(mark().disabled,true,'Mark resolved waits for a choice');
+click(Array.from(blocks[0].querySelectorAll('button')).find(b=>b.textContent==='Accept both'),'Accept both');
+await delay(40);
+assert.equal(text('[data-testid="conflict-progress"]')[0],'1 of 1 resolved');
+assert.match(host.querySelector('[data-testid="conflict-block"]')?.textContent??'',/Kept both.*const a = 1;\nconst a = 2;/s);
+click(Array.from(host.querySelector('[data-testid="conflict-block"]')!.querySelectorAll('button')).find(b=>/Undo/.test(b.textContent??'')),'Undo');
+await delay(40);
+assert.equal(text('[data-testid="conflict-progress"]')[0],'0 of 1 resolved','undo brings the conflict back');
+click(Array.from(host.querySelectorAll('[data-testid="conflict-block"] button')).find(b=>b.textContent==='Edit'),'Edit');
+await delay(40);
+const area=host.querySelector<HTMLTextAreaElement>('.conflict-edit textarea')!;
+// linkedom mirrors React's controlled textarea value onto defaultValue rather than value.
+assert.equal(area.value||area.textContent||(area as any).defaultValue,'const a = 1;\nconst a = 2;','Edit starts from both sides');
+type(area,'const a = 3;');
+click(Array.from(host.querySelectorAll('.conflict-edit-actions button')).find(b=>b.textContent==='Use this text'),'Use this text');
+await delay(40);
+assert.equal(mark().disabled,false);
+click(mark(),'Mark resolved');
+await delay(150);
+assert.equal(conflictWrites.length,1);
+assert.deepEqual(conflictWrites[0],{folderId:'f',path:'src/app.ts',content:'import x\nconst a = 3;\nexport {a}\n',revision:'rev1',markResolved:true},'the resolved file is written and staged in one call');
+assert.ok(!store.getState().tabs.some(t=>t.kind==='conflict'),'the resolver tab closes once the file is marked');
+root.unmount();host.textContent='';
+
+// --- Blame gutter ---------------------------------------------------------------------------------------
+root=createRoot(host);
+root.render(<BlameView folderId="f" path="src/app.ts" source={'line one\nline two\nline three'}/>);
+await delay(150);
+const blameRows=host.querySelectorAll('.blame-table tr');
+assert.equal(blameRows.length,3);
+assert.match(blameRows[0].textContent??'',/aaaaaaa.*Ada.*2d.*1.*line one/,'first line of a run carries sha · author · age');
+assert.equal(blameRows[1].querySelector('.blame-note'),null,'continuation lines stay blank');
+assert.match(blameRows[2].textContent??'',/Uncommitted.*3.*line three/);
+click(blameRows[0].querySelector('.blame-note'),'annotation');
+const historyTab=store.getState().tabs.find(t=>t.id==='git:f');
+assert.equal(historyTab?.kind,'git','blame opens the folder\'s one Git tab');
+assert.equal(historyTab?.gitView,'history','…on its History segment');
+assert.equal(historyTab?.sha,sha(3),'clicking an annotation opens History on that commit');
+root.unmount();host.textContent='';
+
+// --- Clone sheet ------------------------------------------------------------------------------------------
+root=createRoot(host);
+root.render(<CloneRepositorySheet/>);
+await delay(40);
+assert.equal(document.querySelector('[data-testid="clone-sheet"]'),null,'closed until asked');
+openCloneSheet();
+await delay(60);
+const sheet=()=>document.querySelector('[data-testid="clone-sheet"]')!;
+assert.ok(sheet(),'the sheet opens');
+const urlInput=sheet().querySelector<HTMLInputElement>('input[aria-label="Repository URL"]')!;
+type(urlInput,'https://github.com/o/repo.git');
+await delay(400);
+assert.equal(called('git.clone.defaultDestination').at(-1)?.input.url,'https://github.com/o/repo.git');
+assert.equal(sheet().querySelector<HTMLInputElement>('input[aria-label="Destination folder"]')!.value,'/home/me/Code/repo','~/Code/<repo> is suggested');
+sheet().querySelector('form')!.dispatchEvent(new window.Event('submit',{bubbles:true,cancelable:true}));
+await delay(80);
+assert.deepEqual(called('git.clone.start').at(-1)?.input,{url:'https://github.com/o/repo.git',destination:'/home/me/Code/repo'});
+emit({type:'gitClone',id:'clone-1',phase:'progress',percent:43,message:'Receiving objects:  50% (10/20)'});
+await delay(40);
+assert.match(sheet().querySelector('[data-testid="clone-progress"]')?.textContent??'','Receiving objects'.length?/Receiving objects/:/x/);
+assert.equal(sheet().querySelector('[role="progressbar"]')?.getAttribute('aria-valuenow'),'43');
+assert.match(text('.composer-confirm-actions button',sheet()).join('|'),/Cancel clone/);
+emit({type:'gitClone',id:'clone-1',phase:'done',path:'/home/me/Code/repo',folder:{id:'f2',path:'/home/me/Code/repo',name:'repo'}});
+await delay(60);
+assert.equal(document.querySelector('[data-testid="clone-sheet"]'),null,'the sheet closes when the clone lands');
+assert.equal(draft.getNewChatDraft().open,true,'a new-chat draft opens');
+assert.equal(draft.getNewChatDraft().target.folderId,'f2','…targeting the cloned folder');
+// A failed clone keeps the sheet open with the reason.
+openCloneSheet();await delay(60);
+type(sheet().querySelector<HTMLInputElement>('input[aria-label="Repository URL"]')!,'git@github.com:o/r.git');
+await delay(40);
+sheet().querySelector('form')!.dispatchEvent(new window.Event('submit',{bubbles:true,cancelable:true}));
+await delay(80);
+emit({type:'gitClone',id:'clone-1',phase:'failed',error:'The remote rejected your credentials.'});
+await delay(40);
+assert.match(sheet().querySelector('[role="alert"]')?.textContent??'',/rejected your credentials/);
+// A clone that fails before git.clone.start even answers (its events arrive first) still ends: no stuck "Cloning…".
+const urlField=sheet().querySelector<HTMLInputElement>('input[aria-label="Repository URL"]')!;
+type(urlField,'/fails/at/once');await delay(40);
+sheet().querySelector('form')!.dispatchEvent(new window.Event('submit',{bubbles:true,cancelable:true}));
+await delay(80);
+assert.match(sheet().querySelector('[role="alert"]')?.textContent??'',/does not exist/);
+assert.equal(sheet().querySelector('[data-testid="clone-progress"]'),null,'no progress bar left spinning');
+closeCloneSheet();
+root.unmount();
+console.log('PASS: virtualised paged history with badges, commit detail + per-file ref diff, compare picker; conflict banner with Continue/Abort and per-hunk accept/edit/undo writing the resolved file; blame gutter opening History; clone sheet with suggested destination, streamed progress, landing in a new-chat draft');
+process.exit(0);

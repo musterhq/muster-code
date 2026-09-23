@@ -1,0 +1,31 @@
+/* Transcript chrome: live tail, per-turn "Worked for" header, folded rows, live region. */
+.shimmer-text {
+  color:var(--text-faint);
+  background:linear-gradient(90deg,var(--text-faint) 0%,var(--text-faint) 40%,var(--text) 50%,var(--text-faint) 60%,var(--text-faint) 100%);
+  background-size:250% 100%;
+  -webkit-background-clip:text; background-clip:text;
+  -webkit-text-fill-color:transparent;
+  animation:shimmer-text 2.2s linear infinite;
+}
+@keyframes shimmer-text { from { background-position:100% 0; } to { background-position:-150% 0; } }
+@media (prefers-reduced-motion:reduce) { .shimmer-text { animation:none; background:none; -webkit-text-fill-color:currentColor; color:var(--text-dim); } }
+
+.timeline-tail { display:flex; align-items:center; height:40px; padding-block:0; }
+.working-tail { display:flex; align-items:baseline; gap:10px; min-width:0; padding:0 8px; font-size:13.5px; color:var(--text-faint); }
+.working-tail > span:first-child { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.working-tail.is-approval .shimmer-text, .working-tail.is-approval > span { color:var(--warn); }
+.working-tail-time { flex:none; font-size:11px; font-variant-numeric:tabular-nums; color:var(--text-faint); }
+.working-tail.is-approval > span:first-child { color:var(--warn); }
+
+.turn-worked { display:flex; align-items:center; gap:4px; width:100%; margin-top:14px; padding:4px 8px; border-radius:6px; color:var(--text-faint); font-size:13px; text-align:left; font-variant-numeric:tabular-nums; transition:color 130ms ease; }
+.turn-worked.is-live { cursor:default; }
+.turn-worked-summary { min-width:0; white-space:pre; overflow:hidden; text-overflow:ellipsis; color:color-mix(in srgb,var(--text-faint) 85%,transparent); }
+.turn-worked::after { content:""; flex:1; min-width:24px; height:1px; margin-left:8px; background:var(--hairline); }
+button.turn-worked:hover,button.turn-worked:focus-visible { color:var(--text); }
+.turn-worked:focus-visible { outline:1px solid color-mix(in srgb,var(--accent) 55%,transparent); outline-offset:-1px; }
+.turn-worked-chevron { flex:none; transition:transform 180ms cubic-bezier(.2,.8,.2,1); }
+.turn-worked[aria-expanded='true'] .turn-worked-chevron { transform:rotate(90deg); }
+.timeline-row.is-folded { padding-block:0; }
+
+.turn-live-region { position:absolute; width:1px; height:1px; overflow:hidden; clip-path:inset(50%); white-space:nowrap; }
+@media (prefers-reduced-motion:reduce) { .turn-worked,.turn-worked-chevron { transition:none; } }

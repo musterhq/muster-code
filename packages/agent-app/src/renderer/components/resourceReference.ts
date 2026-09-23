@@ -22,3 +22,19 @@ export function resourceReference(href:string,folders:Folder[],primaryId?:string
  if(!parts.length)return null;
  path=parts.join('/');return {folderId:folder.id,path,absolute:folder.path.replace(/\/$/,'')+'/'+path,...(line&&line<=10000000?{line}:{})};
 }
+
+export type ExternalReference={path:string;line?:number};
+/** TRN-12: an absolute, ~/ or file:// reference that is not inside the conversation's folders. The host
+ *  re-normalizes and checks it; relative references have no anchor outside a folder and stay inert. */
+export function externalReference(href:string):ExternalReference|null{
+ let path:string;try{path=decodeURIComponent(href);}catch{return null;}
+ if(!path||path.length>4096||/[\u0000-\u001f\u007f]/.test(path))return null;
+ if(/^file:\/\//i.test(path)){try{const url=new URL(path);if(url.host&&url.host!=='localhost')return null;path=decodeURIComponent(url.pathname);}catch{return null;}}
+ else if(/^[a-z][a-z0-9+.-]*:/i.test(path)||path.startsWith('//'))return null;
+ const suffix=path.match(/(?::|#L)(\d+)(?::\d+|(?:-L?\d+))?$/i);
+ const line=suffix?Number(suffix[1]):undefined;if(suffix)path=path.slice(0,-suffix[0].length);
+ if(path.includes('#')||path.includes('?'))path=path.replace(/[#?].*$/,'');
+ if(!(path.startsWith('/')||path==='~'||path.startsWith('~/')))return null;
+ if(path.split('/').includes('..'))return null;
+ return {path,...(line&&line<=10000000?{line}:{})};
+}

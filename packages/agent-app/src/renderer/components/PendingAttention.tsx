@@ -5,6 +5,7 @@ import type {PendingAttentionSummary} from '../../shared/attention-protocol';
 import {selectChat} from '../store';
 import {useStoreSelector} from '../useStore';
 import './pending-attention.css';
+import { plural } from '../../shared/wording.ts';
 
 export function PendingAttentionList({attention, onOpenTask}: {attention?: PendingAttentionSummary; onOpenTask(chatId:string):void}) {
   if (!attention?.totalRequests) return null;
@@ -12,7 +13,7 @@ export function PendingAttentionList({attention, onOpenTask}: {attention?: Pendi
     <div className="pending-attention__heading"><BellDot size={14} aria-hidden="true"/><strong>Needs input</strong><span role="status" aria-live="polite" aria-atomic="true">{attention.totalRequests} pending</span></div>
     <p>Open a task to review and answer.</p>
     <ul>{attention.chats.map(chat => {
-      const counts = [chat.approvalCount ? `${chat.approvalCount} approval${chat.approvalCount === 1 ? '' : 's'}` : '', chat.questionCount ? `${chat.questionCount} question${chat.questionCount === 1 ? '' : 's'}` : ''].filter(Boolean).join(' · ');
+      const counts = [chat.approvalCount ? `${plural(chat.approvalCount, 'approval')}` : '', chat.questionCount ? `${plural(chat.questionCount, 'question')}` : ''].filter(Boolean).join(' · ');
       return <li key={chat.chatId}><button type="button" onClick={() => onOpenTask(chat.chatId)} aria-label={`Open task ${chat.chatTitle}: ${counts}`}>
         <span className="pending-attention__task"><strong title={chat.chatTitle}>{chat.chatTitle}</strong><span>{counts}</span></span><ArrowUpRight size={14} aria-hidden="true"/>
       </button></li>;

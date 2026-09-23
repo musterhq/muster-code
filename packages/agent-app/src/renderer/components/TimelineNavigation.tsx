@@ -1,4 +1,4 @@
-import React,{memo,useLayoutEffect,useRef,useState} from 'react';
+import React,{memo,useEffect,useLayoutEffect,useRef,useState} from 'react';
 import {ArrowDown,ChevronUp,ChevronDown,Undo2,Search,ChevronLeft,ChevronRight,X} from 'lucide-react';
 import {railWindow,type TurnSummary} from './timeline-navigation-model';
 import './timeline-navigation.css';
@@ -24,6 +24,9 @@ export const TimelineNavigation=memo(function TimelineNavigation({turns,currentI
     const next=event.key==='ArrowDown'?index+1:event.key==='ArrowUp'?index-1:event.key==='Home'?0:event.key==='End'?turns.length-1:event.key==='PageDown'?index+20:event.key==='PageUp'?index-20:undefined;
     if(next!==undefined){event.preventDefault();focus(next);}
   };
+  const openSearch=()=>{setSearchOpen(true);requestAnimationFrame(()=>{searchInput.current?.focus();searchInput.current?.select?.();});};
+  // ⌘F (menu/shortcut owner) dispatches this; the mounted conversation opens and focuses its find field.
+  useEffect(()=>{if(!onSearch)return;window.addEventListener('muster:find-in-chat',openSearch);return()=>window.removeEventListener('muster:find-in-chat',openSearch);},[Boolean(onSearch)]);
   if(!turns.length&&!onSearch)return null;
   return <>
     {onSearch&&searchOpen&&<div className="timeline-search">
@@ -42,7 +45,7 @@ export const TimelineNavigation=memo(function TimelineNavigation({turns,currentI
       {end<turns.length&&<button type="button" className="turn-page" aria-label="Later conversation turns" onClick={()=>focus(end)}><ChevronDown size={12}/></button>}
     </div>
     <div className="turn-navigation-actions">
-      {onSearch&&<button type="button" aria-label="Find in conversation" title="Find in conversation" aria-expanded={searchOpen} onClick={()=>{setSearchOpen(true);requestAnimationFrame(()=>searchInput.current?.focus());}}><Search size={13}/></button>}
+      {onSearch&&<button type="button" aria-label="Find in conversation" title="Find in conversation" aria-expanded={searchOpen} onClick={openSearch}><Search size={13}/></button>}
       <button type="button" disabled={!canGoBack} onClick={onBack} aria-label="Back to previous reading position" title="Previous reading position"><Undo2 size={13}/></button>
       <button type="button" onClick={onLatest} aria-label="Go to latest conversation activity" title="Latest activity"><ArrowDown size={13}/></button>
     </div>

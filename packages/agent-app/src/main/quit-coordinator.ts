@@ -33,3 +33,26 @@ export async function withinDeadline(work: Promise<void>, timeoutMs: number): Pr
     })]);
   } finally { if (timer) clearTimeout(timer); }
 }
+
+/** UX-25: what Quit does while work is running. 'background' keeps the process (and every run) alive with
+ *  no window in front; 'stop' stops runs and quits; 'cancel' changes nothing. */
+export type QuitChoice = 'background' | 'stop' | 'cancel';
+export interface QuitPrompt { buttons: string[]; defaultId: number; cancelId: number; message: string; detail: string; choices: QuitChoice[] }
+
+export function quitPrompt(work: {runs: number; commands: boolean}): QuitPrompt {
+  const runs = work.runs === 1 ? '1 agent run is' : work.runs > 1 ? `${work.runs} agent runs are` : '';
+  const what = runs && work.commands ? `${runs} running, with background commands.` : runs ? `${runs} running.` : 'Background commands are running.';
+  return {
+    buttons: ['Keep Working in Background', 'Stop Work and Quit', 'Cancel'],
+    choices: ['background', 'stop', 'cancel'],
+    // Neither default loses work: Return keeps working with the window closed, Escape cancels.
+    defaultId: 0,
+    cancelId: 2,
+    message: 'Muster has work running.',
+    detail: `${what} Keep working closes the window and lets them finish; click the Dock icon to return. Stop Work and Quit stops agent runs and owned background commands. Scoped computer workspaces and saved progress are kept either way.`,
+  };
+}
+
+export function quitChoice(prompt: QuitPrompt, response: number): QuitChoice {
+  return prompt.choices[response] ?? 'cancel';
+}

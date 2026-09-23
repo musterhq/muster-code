@@ -1,119 +1,152 @@
-import { Brain, RefreshCw } from 'lucide-react';
+import { ChevronDown, Square, X } from 'lucide-react';
 import React, { useEffect, useRef, useState } from 'react';
-import type { Commands, HindsightStatus } from '../../shared/protocol';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import type { MemoryRecallExcluded, MemoryRecord, MemoryStatusView } from '../../shared/domains/memory-protocol';
 import { invoke } from '../bridge';
 import './hindsight-panel.css';
 
-type Mode = 'recall' | 'reflect' | 'retain';
-type Recall = Commands['hindsight.recall']['output'];
-/** Explicit memory operations. No automatic upload of chats or workspace files. */
-export function HindsightPanel({ folderId }: { folderId?: string }): React.ReactElement {
-  const [status, setStatus] = useState<HindsightStatus>();
-  const [statusBusy, setStatusBusy] = useState(false);
+type Mode = 'recall' | 'reflect';
+type Budget = 'low' | 'mid' | 'high';
+type RecallType = 'world' | 'experience' | 'observation';
+const TYPES: readonly RecallType[] = ['world', 'experience', 'observation'];
+const safeLink = (url: string) => /^(https?:|mailto:)/i.test(url) ? url : '';
+const errorText = (cause: unknown) => cause instanceof Error ? cause.message : String(cause);
+let requestSequence = 0;
+
+function Evidence({ records }: { records: readonly MemoryRecord[] }): React.ReactElement {
+  return <ol className="recall-evidence">{records.map((record, index) => <li key={`${record.id}-${index}`}>
+    <p>{record.text}</p>
+    <small>{[record.kind, record.observedAt ? new Date(record.observedAt).toLocaleString() : 'undated', record.provenance[0], record.score === undefined ? '' : `score ${record.score.toFixed(2)}`].filter(Boolean).join(' · ')}</small>
+    {record.why && <small className="recall-why">Matched: {record.why}</small>}
+  </li>)}</ol>;
+}
+
+/** "3 recalled memories; 2 left out: 1 undated, 1 outside the time range". Filters apply to what the engine returned. */
+export function recallNotice(count: number, excluded?: MemoryRecallExcluded): string {
+  const head = count ? `${count} recalled ${count === 1 ? 'memory' : 'memories'}` : 'No memories matched this query and its filters.';
+  if (!excluded) return count ? head : 'No memories matched this query.';
+  const parts = [excluded.noEntity ? `${excluded.noEntity} not mentioning the entities` : '', excluded.outsideRange ? `${excluded.outsideRange} outside the time range` : '', excluded.untimed ? `${excluded.untimed} undated (a time filter needs a date)` : ''].filter(Boolean);
+  return parts.length ? `${head} Left out: ${parts.join(', ')}.` : head;
+}
+const splitList = (value: string) => value.split(',').map(item => item.trim()).filter(Boolean);
+
+/** Recall and Reflect against the selected scope's Hindsight bank. Requests are explicit; mounting sends none. */
+export function HindsightPanel({ folderId, onClose, onConfigure }: { folderId?: string; onClose?: () => void; onConfigure?: () => void }): React.ReactElement {
+  const [status, setStatus] = useState<MemoryStatusView>();
   const [mode, setMode] = useState<Mode>('recall');
-  const [detail, setDetail] = useState<'basic' | 'advanced'>('basic');
-  const [budget, setBudget] = useState<'low' | 'mid' | 'high'>('low');
+  const [options, setOptions] = useState(false);
+  const [budget, setBudget] = useState<Budget>('low');
   const [maxTokens, setMaxTokens] = useState(2048);
-  const [types, setTypes] = useState<Array<'world' | 'experience' | 'observation'>>(['world', 'experience', 'observation']);
+  const [types, setTypes] = useState<RecallType[]>([...TYPES]);
   const [tags, setTags] = useState('');
+  const [entities, setEntities] = useState('');
+  const [from, setFrom] = useState('');
+  const [to, setTo] = useState('');
+  const [validAt, setValidAt] = useState('');
   const [context, setContext] = useState('');
   const [query, setQuery] = useState('');
-  const [content, setContent] = useState('');
-  const [source, setSource] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
-  const [recall, setRecall] = useState<Recall>();
-  const [reflection, setReflection] = useState('');
+  const [records, setRecords] = useState<MemoryRecord[]>();
+  const [reflection, setReflection] = useState<{ text: string; sources: MemoryRecord[] }>();
   const generation = useRef(0);
-  const pending = useRef<number | null>(null);
+  const active = useRef<string | null>(null);
+  const input = useRef<HTMLTextAreaElement>(null);
 
-  const refresh = async () => {
-    const ticket = ++generation.current;
-    setRecall(undefined); setReflection(''); setNotice(''); setError('');
-    setStatusBusy(true);
-    try { const next = await invoke('hindsight.status', { folderId }); if (ticket === generation.current) setStatus(next); }
-    catch (cause) { if (ticket === generation.current) setStatus({ configured: false, error: String(cause instanceof Error ? cause.message : cause) }); }
-    finally { if (ticket === generation.current) setStatusBusy(false); }
+  const readStatus = async (ticket: number) => {
+    try { const next = await invoke('memory.status', folderId ? { folderId } : {}); if (ticket === generation.current) setStatus(next); }
+    catch (cause) { if (ticket === generation.current) setStatus({ connection: 'not-configured', error: errorText(cause) }); }
   };
   useEffect(() => {
-    pending.current = null;
-    setStatus(undefined); setBusy(false); setQuery(''); setContent(''); setSource('');
-    void refresh();
-    return () => { generation.current++; };
+    const ticket = ++generation.current;
+    active.current = null;
+    setStatus(undefined); setBusy(false); setQuery(''); setRecords(undefined); setReflection(undefined); setError(''); setNotice('');
+    void readStatus(ticket);
+    input.current?.focus();
+    return () => {
+      generation.current++;
+      // Leaving the scope cancels its reflection instead of letting it finish unseen.
+      if (active.current) void invoke('memory.reflect.cancel', { requestId: active.current }).catch(() => {});
+    };
   }, [folderId]);
 
+  const configured = status !== undefined && status.connection !== 'not-configured';
+  const cancel = () => { if (active.current) void invoke('memory.reflect.cancel', { requestId: active.current }).catch(() => {}); };
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
-    if (pending.current !== null || statusBusy || !status?.configured || status.error) return;
+    const text = query.trim();
+    if (busy || !configured || !text) return;
     const ticket = generation.current;
-    pending.current = ticket; setBusy(true); setError(''); setNotice(''); setRecall(undefined); setReflection('');
+    setBusy(true); setError(''); setNotice(''); setRecords(undefined); setReflection(undefined);
     try {
-      if (mode === 'retain') {
-        const result = await invoke('hindsight.retain', { folderId, content: content.trim(), source: source.trim() });
-        if (ticket !== generation.current) return;
-        if (!result.success) throw new Error('Hindsight did not confirm that this memory was retained. Your text is preserved.');
-        setNotice(result.isAsync
-          ? `Retention queued · ${result.itemsCount} item(s) · bank ${result.bankId}${result.operationId ? ` · operation ${result.operationId}` : ''}.`
-          : `Hindsight confirmed retention of ${result.itemsCount} item(s) · bank ${result.bankId}.`);
-        if (!result.isAsync) { setContent(''); setSource(''); }
-      } else if (mode === 'recall') {
-        const result = await invoke('hindsight.recall', { folderId, query: query.trim(), ...(detail === 'advanced' ? {budget, maxTokens, types, tags: tags.split(',').map(tag=>tag.trim()).filter(Boolean)} : {}) });
-        if (ticket === generation.current) { setRecall(result); setNotice(`Recall completed · bank ${result.bankId} · ${result.results.length} result(s).`); }
+      if (mode === 'recall') {
+        const filters = options ? { ...(splitList(entities).length ? { entities: splitList(entities) } : {}), ...(from ? { from } : {}), ...(to ? { to: `${to}T23:59:59.999Z` } : {}), ...(validAt ? { validAt: `${validAt}T23:59:59.999Z` } : {}) } : {};
+        const result = await invoke('memory.recall', { ...(folderId ? { folderId } : {}), query: text, ...(options ? { budget, maxTokens, types, tags: splitList(tags), ...filters } : {}) });
+        if (ticket === generation.current) { setRecords(result.records); setNotice(recallNotice(result.records.length, result.excluded)); }
       } else {
-        const result = await invoke('hindsight.reflect', { folderId, query: query.trim(), ...(detail === 'advanced' ? {budget, maxTokens, context: context.trim() || undefined} : {}) });
-        if (ticket === generation.current) { setReflection(result.text); setNotice(`Reflection completed · bank ${result.bankId}.`); }
+        const requestId = `reflect-${Date.now().toString(36)}-${++requestSequence}`;
+        active.current = requestId;
+        const result = await invoke('memory.reflect', { ...(folderId ? { folderId } : {}), query: text, requestId, ...(options ? { budget, maxTokens, ...(context.trim() ? { context: context.trim() } : {}) } : {}) });
+        if (ticket === generation.current) {
+          if (result.cancelled) setNotice('Reflection cancelled.');
+          else setReflection({ text: result.text, sources: result.sources });
+        }
       }
     } catch (cause) {
-      if (ticket === generation.current) setError(`${cause instanceof Error ? cause.message : String(cause)}${mode === 'retain' ? ' The request was not retried; its outcome may need checking before submitting again.' : ''}`);
+      if (ticket === generation.current) setError(errorText(cause));
     } finally {
-      // Read evidence from the real operation; status never sends a test query.
-      if (ticket === generation.current) {
-        try {
-          const next = await invoke('hindsight.status', { folderId });
-          if (ticket === generation.current) {
-            setStatus(next);
-            if (next.revision !== status.revision) { setRecall(undefined); setReflection(''); setNotice(''); }
-          }
-        } catch { /* Preserve operation results when status is unavailable. */ }
-      }
-      if (pending.current === ticket) pending.current = null;
-      if (ticket === generation.current) setBusy(false);
+      if (ticket === generation.current) { active.current = null; setBusy(false); void readStatus(ticket); }
     }
   };
-  const enabled = status?.configured && !status.error;
-  return <section className="hindsight-panel" aria-label="Hindsight memory">
-    <header className="hindsight-heading"><div><Brain size={18} aria-hidden="true"/><h2>Hindsight</h2></div><button type="button" className="icon-button" disabled={busy || statusBusy} onClick={() => void refresh()} title="Reread Muster's environment configuration; no connection test is sent" aria-label="Refresh Hindsight configuration"><RefreshCw size={14}/></button></header>
-    <p className="hindsight-description">Retain information, recall relevant memories, or reflect on what this scope knows. Requests are explicit and scoped to the selected folder or personal bank.</p>
-    {statusBusy && <p role="status">Reading configuration…</p>}
-    {status && <div className="hindsight-connection">
-      <span className="hindsight-status" data-connection={enabled ? status.connection ?? 'unchecked' : 'unavailable'}>{!enabled ? 'Not available' : status.connection === 'verified' ? 'Connection verified by last request' : status.connection === 'failed' ? 'Configured · last request failed' : 'Configured · connection not verified'}</span>
-      {status.checkedAt && <small>Last request: {new Date(status.checkedAt).toLocaleString()}</small>}
-      {status.connectionError && <p role="status">{status.connectionError}</p>}
-      {status.endpoint && <span title={status.endpoint}>{status.endpoint}</span>}
-      {status.bankId && <code title={status.bankId}>{status.bankId}</code>}
-      {status.error && <p>{status.error}</p>}
-      {!status.configured && <p>Start or connect a Hindsight service and set <code>HINDSIGHT_API_URL</code> for Muster. Local memory remains available.</p>}
-      <p>Refresh rereads the environment available to Muster. Restart Muster after changing variables in your shell. A recall, retain or reflect request verifies access to this memory bank.</p>
-    </div>}
-    <div className="hindsight-modes" role="group" aria-label="Memory operation">
-      {(['recall', 'reflect', 'retain'] as const).map(value => <button type="button" key={value} disabled={busy} aria-pressed={mode === value} onClick={() => { setMode(value); setError(''); setNotice(''); setRecall(undefined); setReflection(''); }}>{value[0].toUpperCase() + value.slice(1)}</button>)}
-    </div>
-    <div className="hindsight-detail" role="group" aria-label="Request detail"><button type="button" aria-pressed={detail==='basic'} disabled={busy} onClick={()=>setDetail('basic')}>Basic</button><button type="button" aria-pressed={detail==='advanced'} disabled={busy} onClick={()=>setDetail('advanced')}>Advanced</button></div>
-    <form onSubmit={event => void submit(event)}>
-      {mode === 'retain' ? <><label>Information to remember<textarea value={content} onChange={event => setContent(event.target.value)} maxLength={32768} rows={4} required disabled={busy} placeholder="A fact, decision or observation…"/></label><label>Source<input value={source} onChange={event => setSource(event.target.value)} maxLength={512} required disabled={busy} placeholder="Where this information came from"/></label></>
-        : <label>{mode === 'recall' ? 'Search this memory bank' : 'Question for this memory bank'}<textarea value={query} onChange={event => setQuery(event.target.value)} maxLength={8192} required rows={2} disabled={busy} placeholder={mode === 'recall' ? 'What should Muster recall?' : 'What can we learn from these memories?'}/></label>}
-      {detail === 'advanced' && mode !== 'retain' && <div className="hindsight-advanced">
-        <label>Retrieval budget<select value={budget} disabled={busy} onChange={event=>setBudget(event.target.value as typeof budget)}><option value="low">Low</option><option value="mid">Medium</option><option value="high">High</option></select></label>
-        <label>Maximum response tokens<select value={maxTokens} disabled={busy} onChange={event=>setMaxTokens(Number(event.target.value))}><option value={1024}>1,024</option><option value={2048}>2,048</option><option value={4096}>4,096</option></select></label>
-        {mode === 'recall' ? <><fieldset><legend>Memory types</legend>{(['world','experience','observation'] as const).map(type=><label key={type}><input type="checkbox" checked={types.includes(type)} disabled={busy} onChange={event=>setTypes(current=>event.target.checked?[...current,type]:current.filter(value=>value!==type))}/>{type}</label>)}</fieldset><label>Tags, comma separated<input value={tags} maxLength={2048} disabled={busy} onChange={event=>setTags(event.target.value)} placeholder="optional filters"/></label></> : <label>Context<input value={context} maxLength={8192} disabled={busy} onChange={event=>setContext(event.target.value)} placeholder="Optional context for this reflection"/></label>}
-      </div>}
-      <div className="hindsight-submit"><span>{mode === 'retain' ? 'Only the text and source above are sent.' : 'Uses a bounded retrieval budget.'}</span><button type="submit" className="settings-button" disabled={!enabled || busy || statusBusy || (mode === 'retain' ? !content.trim() || !source.trim() : !query.trim())}>{busy ? 'Working…' : mode === 'retain' ? 'Retain memory' : mode === 'recall' ? 'Recall' : 'Reflect'}</button></div>
-    </form>
-    {busy && <p role="status">Waiting for Hindsight…</p>}
+
+  const label = status === undefined ? 'Checking…' : status.connection === 'connected' ? 'Connected' : status.connection === 'local-only' ? 'Last request failed' : status.connection === 'unchecked' ? 'Configured' : 'Not configured';
+  return <section className="hindsight-panel" aria-label="Recall and Reflect" onKeyDown={event => { if (event.key === 'Escape' && onClose && !event.defaultPrevented) { event.preventDefault(); event.stopPropagation(); if (busy) cancel(); else onClose(); } }}>
+    <header className="hindsight-heading">
+      <h2>Recall and Reflect</h2>
+      <span className="memory-status-pill" data-connection={status?.connection ?? 'checking'}>{label}</span>
+      {onClose && <button type="button" className="icon-button" aria-label="Close Recall and Reflect" onClick={onClose}><X size={14} /></button>}
+    </header>
+    {status?.connection === 'not-configured' ? <div className="hindsight-unconfigured">
+      <p>Recall and Reflect search this scope's memory engine by meaning. {status.error}</p>
+      {onConfigure && <button type="button" className="settings-button secondary" onClick={onConfigure}>Set up memory engine</button>}
+    </div> : <>
+      {status?.connection === 'local-only' && status.error && <p className="hindsight-warning" role="status">{status.error}</p>}
+      <div className="hindsight-modes" role="tablist" aria-label="Memory operation">
+        {(['recall', 'reflect'] as const).map(value => <button type="button" role="tab" key={value} disabled={busy} aria-selected={mode === value} onClick={() => { setMode(value); setError(''); setNotice(''); setRecords(undefined); setReflection(undefined); }}>{value === 'recall' ? 'Recall' : 'Reflect'}</button>)}
+      </div>
+      <form onSubmit={event => void submit(event)}>
+        <textarea ref={input} aria-label={mode === 'recall' ? 'What to recall' : 'Question to reflect on'} value={query} onChange={event => setQuery(event.target.value)} maxLength={8192} rows={3} disabled={busy}
+          placeholder={mode === 'recall' ? 'What do we know about…' : 'What have we learned about…'}
+          onKeyDown={event => { if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); } }} />
+        <button type="button" className="hindsight-options-toggle" aria-expanded={options} onClick={() => setOptions(open => !open)}><ChevronDown size={13} aria-hidden="true" />Options</button>
+        {options && <div className="hindsight-advanced">
+          <label>Budget<select value={budget} disabled={busy} onChange={event => setBudget(event.target.value as Budget)}><option value="low">Low</option><option value="mid">Medium</option><option value="high">High</option></select></label>
+          <label>Max tokens<select value={maxTokens} disabled={busy} onChange={event => setMaxTokens(Number(event.target.value))}><option value={1024}>1,024</option><option value={2048}>2,048</option><option value={4096}>4,096</option></select></label>
+          {mode === 'recall' ? <>
+            <fieldset><legend>Types</legend>{TYPES.map(type => <label key={type}><input type="checkbox" checked={types.includes(type)} disabled={busy} onChange={event => setTypes(current => event.target.checked ? [...current, type] : current.filter(value => value !== type))} />{type}</label>)}</fieldset>
+            <label className="wide">Tags<input value={tags} maxLength={2048} disabled={busy} onChange={event => setTags(event.target.value)} placeholder="folder:…, chat:… (comma separated)" /></label>
+            <label className="wide">Entities<input type="text" value={entities} maxLength={2048} disabled={busy} onChange={event => setEntities(event.target.value)} placeholder="People, services or files the memory must mention (comma separated)" /></label>
+            <label>From<input type="date" value={from} max={to || undefined} disabled={busy || Boolean(validAt)} onChange={event => setFrom(event.target.value)} /></label>
+            <label>To<input type="date" value={to} min={from || undefined} disabled={busy || Boolean(validAt)} onChange={event => setTo(event.target.value)} /></label>
+            <label title="What was true then: memories observed after this day are left out, and the newest one before it comes first">Valid at<input type="date" value={validAt} disabled={busy} onChange={event => { setValidAt(event.target.value); if (event.target.value) { setFrom(''); setTo(''); } }} /></label>
+          </> : <label className="wide">Context<input value={context} maxLength={8192} disabled={busy} onChange={event => setContext(event.target.value)} placeholder="Optional background for this question" /></label>}
+        </div>}
+        <div className="hindsight-submit">
+          {busy && mode === 'reflect'
+            ? <button type="button" className="settings-button secondary" onClick={cancel}><Square size={12} />Cancel</button>
+            : <button type="submit" className="settings-button" disabled={!configured || busy || !query.trim()}>{busy ? 'Recalling…' : mode === 'recall' ? 'Recall' : 'Reflect'}</button>}
+        </div>
+      </form>
+    </>}
+    {busy && <p className="hindsight-busy" role="status">{mode === 'recall' ? 'Recalling…' : 'Reflecting…'}</p>}
     {error && <p className="memory-error" role="alert">{error}</p>}
-    {notice && <p role="status">{notice}</p>}
-    {recall && <div className="hindsight-results" aria-label="Recalled memories"><p role="status">{recall.results.length ? `${recall.results.length} recalled memories` : 'No memories matched this query.'}</p>{recall.results.map((entry, index) => <article key={`${entry.id ?? index}-${index}`}><p>{entry.text}</p><small>{[entry.type, entry.id, entry.score === undefined ? '' : `score ${entry.score}`].filter(Boolean).join(' · ')}</small></article>)}</div>}
-    {reflection && <div className="hindsight-results" aria-label="Memory reflection"><p>{reflection}</p></div>}
+    {notice && <p className="hindsight-notice" role="status">{notice}</p>}
+    {records && records.length > 0 && <div className="hindsight-results" aria-label="Recalled memories"><Evidence records={records} /></div>}
+    {reflection && <div className="hindsight-results" aria-label="Memory reflection">
+      <div className="md-body hindsight-answer"><ReactMarkdown remarkPlugins={[remarkGfm]} skipHtml urlTransform={safeLink}>{reflection.text}</ReactMarkdown></div>
+      {reflection.sources.length > 0 && <><h3>Based on {reflection.sources.length} {reflection.sources.length === 1 ? 'memory' : 'memories'}</h3><Evidence records={reflection.sources} /></>}
+    </div>}
   </section>;
 }

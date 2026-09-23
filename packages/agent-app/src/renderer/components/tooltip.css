@@ -1,0 +1,11 @@
+/* UX-07 shared tooltip. Token-driven, so it follows the light/dark theme. */
+.tip-positioner { z-index: 1000; }
+.tip { display: inline-flex; align-items: center; gap: 8px; max-width: min(320px, calc(100vw - 16px)); padding: 5px 8px; border-radius: 7px; border: 1px solid var(--hairline); background: var(--bg-menu); color: var(--text); font-size: var(--font-caption); line-height: 1.35; box-shadow: 0 6px 20px -8px rgb(0 0 0 / 45%); pointer-events: none; transform-origin: var(--transform-origin); transition: opacity 110ms ease, transform 110ms cubic-bezier(.2,.75,.25,1); overflow-wrap: anywhere; }
+.tip[data-starting-style], .tip[data-ending-style] { opacity: 0; transform: scale(.97); }
+.tip[data-instant] { transition: none; }
+.tip-keys { display: inline-flex; gap: 3px; flex: none; }
+.tip-keys kbd { min-width: 18px; padding: 0 4px; border-radius: 4px; background: var(--bg-active); color: var(--text-dim); font: 500 11px/17px var(--ui); text-align: center; }
+.tip-reason { color: var(--text-faint); }
+.tip-anchor { display: inline-flex; }
+@media (prefers-reduced-motion: reduce) { .tip { transition: none; } }
+:root[data-motion='reduce'] .tip { transition: none; }

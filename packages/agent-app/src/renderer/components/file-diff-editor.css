@@ -1,0 +1,87 @@
+/* Cursor-style inline diff editor: an editor pane, not a snippet. The file's own
+   line numbers in a sticky gutter, syntax colour, removed lines in red and added
+   lines in green tint in place, a coloured bar on the gutter edge of every change,
+   folded unchanged code, and Keep/Undo floating on each change block. */
+.fde {
+  --fde-bg: color-mix(in srgb, var(--text) 1.8%, var(--bg));
+  --fde-gutter: 52px;
+  --fde-mark: 16px;
+  --fde-add: rgb(70 190 120 / 12%);
+  --fde-add-strong: rgb(70 190 120 / 28%);
+  --fde-add-bar: #4cc27f;
+  --fde-del: rgb(242 96 114 / 12%);
+  --fde-del-strong: rgb(242 96 114 / 28%);
+  --fde-del-bar: #f06b7c;
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--text) 7%, transparent);
+  border-radius: 10px;
+  background: var(--fde-bg);
+}
+.fde-head { display: flex; align-items: center; gap: 10px; min-height: 36px; padding: 0 6px 0 12px; border-bottom: 1px solid color-mix(in srgb, var(--text) 6%, transparent); background: color-mix(in srgb, var(--text) 2.5%, var(--bg)); font-size: 12.5px; }
+.fde-path { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-dim); font: 12px/1.4 var(--mono); text-align: left; direction: ltr; }
+button.fde-path { cursor: pointer; }
+.fde-head-actions { display: inline-flex; align-items: center; gap: 4px; margin-left: auto; }
+.fde-head-actions > button, .fde-hunk-actions > button, .fde-foot > button { display: inline-flex; align-items: center; gap: 4px; height: 24px; padding: 0 9px; border-radius: 6px; color: var(--text-dim); font: 12px/1 var(--ui); white-space: nowrap; transition: background-color 120ms ease, color 120ms ease; }
+.fde-head-actions > button:hover:not(:disabled), .fde-foot > button:hover { background: var(--bg-hover); color: var(--text); }
+.fde-head-actions > button.is-primary, .fde-hunk-actions > button.is-primary { color: var(--text); background: color-mix(in srgb, var(--ok) 20%, transparent); }
+.fde-head-actions > button.is-primary:hover:not(:disabled), .fde-hunk-actions > button.is-primary:hover:not(:disabled) { background: color-mix(in srgb, var(--ok) 32%, transparent); }
+.fde-head-actions > button:disabled, .fde-hunk-actions > button:disabled { opacity: .45; cursor: default; }
+.fde-icon { width: 26px; padding: 0 !important; justify-content: center; }
+
+.fde-scroll { overflow: auto; overscroll-behavior: contain; scrollbar-width: thin; }
+.fde-body { width: max-content; min-width: 100%; padding: 4px 0; font: 12.5px/1.68 var(--mono); font-variant-ligatures: none; tab-size: 4; color: color-mix(in srgb, var(--text) 88%, transparent); }
+.fde .inline-diff-row { position: relative; display: grid; grid-template-columns: var(--fde-gutter) var(--fde-mark) minmax(max-content, 1fr); white-space: pre; }
+.fde-num { position: sticky; left: 0; z-index: 1; padding: 0 10px 0 4px; background: var(--fde-bg); color: color-mix(in srgb, var(--text-faint) 72%, transparent); text-align: right; font-variant-numeric: tabular-nums; user-select: none; }
+.fde-mark { text-align: center; user-select: none; color: transparent; }
+.fde-code { padding: 0 20px 0 2px; font: inherit; white-space: pre; user-select: text; }
+.fde .inline-diff-row.is-add { background: var(--fde-add); }
+.fde .inline-diff-row.is-del { background: var(--fde-del); }
+/* The change bar on the gutter edge, and a tinted gutter, as in the editor. */
+.fde .inline-diff-row.is-add .fde-num { background: linear-gradient(var(--fde-add), var(--fde-add)), var(--fde-bg); box-shadow: inset -2px 0 0 var(--fde-add-bar); color: color-mix(in srgb, var(--fde-add-bar) 75%, var(--text-faint)); }
+.fde .inline-diff-row.is-del .fde-num { background: linear-gradient(var(--fde-del), var(--fde-del)), var(--fde-bg); box-shadow: inset -2px 0 0 var(--fde-del-bar); color: color-mix(in srgb, var(--fde-del-bar) 75%, var(--text-faint)); }
+.fde .inline-diff-row.is-add .fde-mark { color: var(--fde-add-bar); }
+.fde .inline-diff-row.is-del .fde-mark { color: var(--fde-del-bar); }
+.fde .inline-diff-row .diff-char { border-radius: 3px; padding-block: 1px; }
+.fde .inline-diff-row.is-add .diff-char { background: var(--fde-add-strong); }
+.fde .inline-diff-row.is-del .diff-char { background: var(--fde-del-strong); }
+
+/* Keep / Undo float at the top-right of each change block. */
+.fde-hunk-actions { position: absolute; top: 1px; right: 8px; z-index: 2; display: inline-flex; gap: 2px; padding: 2px; border-radius: 8px; background: var(--bg-raised); box-shadow: 0 0 0 1px color-mix(in srgb, var(--text) 9%, transparent), 0 4px 12px rgb(0 0 0 / 28%); font-family: var(--ui); transform: translateY(-2px); }
+.fde-hunk-actions > button { height: 22px; padding: 0 8px; font-size: 11.5px; }
+.fde-hunk-actions > button:hover:not(:disabled) { background: var(--bg-hover); color: var(--text); }
+
+/* Folded unchanged code. */
+.fde-gap { position: sticky; left: 0; display: flex; align-items: center; gap: 10px; width: 100%; min-height: 26px; margin: 3px 0; padding: 0 12px 0 calc(var(--fde-gutter) - 22px); background: color-mix(in srgb, var(--text) 3.2%, transparent); color: var(--text-faint); font: 12px/1.4 var(--ui); text-align: left; white-space: nowrap; }
+.fde-gap > span { width: 16px; text-align: center; letter-spacing: 1px; }
+button.fde-gap { cursor: pointer; transition: color 120ms ease, background-color 120ms ease; }
+button.fde-gap:hover { color: var(--text); background: color-mix(in srgb, var(--text) 5%, transparent); }
+button.fde-gap:focus-visible, .fde-head-actions > button:focus-visible, .fde-hunk-actions > button:focus-visible, .fde-foot > button:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
+.fde-gap:first-child { margin-top: -4px; }
+.fde-empty { padding: 10px 14px; color: var(--text-faint); font: 12.5px/1.4 var(--ui); }
+.fde-notice { padding: 7px 12px; background: color-mix(in srgb, var(--warn) 9%, transparent); color: var(--text-dim); font: 12px/1.45 var(--ui); }
+.fde-foot { display: flex; justify-content: flex-end; gap: 4px; padding: 3px 6px; border-top: 1px solid color-mix(in srgb, var(--text) 5%, transparent); }
+.fde-foot > button { height: 22px; font-size: 11.5px; color: var(--text-faint); }
+@media (prefers-reduced-motion: reduce) { .fde button { transition: none; } }
+
+/* Soft wrap (default in the conversation): long lines fold inside the editor, no sideways clipping. */
+.fde.is-wrap .fde-body { width: auto; }
+.fde.is-wrap .inline-diff-row { grid-template-columns: var(--fde-gutter) var(--fde-mark) minmax(0, 1fr); }
+.fde.is-wrap .fde-code { white-space: pre-wrap; overflow-wrap: anywhere; }
+.fde.is-wrap .fde-gap { position: static; }
+
+/* A reviewed file: the actions bar and the editor share one frame. */
+.fde-card { overflow: hidden; border: 1px solid color-mix(in srgb, var(--text) 7%, transparent); border-radius: 10px; background: var(--fde-bg, color-mix(in srgb, var(--text) 1.8%, var(--bg))); }
+.fde-card > .fde { border: 0; border-radius: 0; }
+.fde-head.is-actions { min-height: 34px; }
+.fde-head-label { color: var(--text-faint); font-size: 12px; }
+.fde-stack { display: flex; flex-direction: column; gap: 6px; }
+.fde-note { margin: 2px 0; color: var(--text-faint); font-size: 12.5px; line-height: 1.5; }
+.fde-loading { min-height: 40px; padding: 10px 12px; border-radius: 10px; background: color-mix(in srgb, var(--text) 2%, var(--bg)); color: var(--text-faint); font-size: 12.5px; }
+.fde-link { padding: 0; color: var(--text-dim); font: inherit; text-decoration: underline; text-decoration-color: color-mix(in srgb, currentColor 35%, transparent); text-underline-offset: 3px; }
+.fde-link:hover { color: var(--text); }
+.fde-edit-label { display: flex; align-items: center; gap: 8px; padding: 2px 2px 0; color: var(--text-faint); font-size: 12px; }
+
+/* Diff tab in a folder without Git: the agent's edits, full height. */
+.agent-edit-diff-body { flex: 1; min-height: 0; overflow: auto; padding: 12px; }
+.agent-edit-diff-scope { margin-left: auto; color: var(--text-faint); font-size: 12px; white-space: nowrap; }

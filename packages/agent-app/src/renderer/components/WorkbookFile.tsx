@@ -1,11 +1,12 @@
 import React, {useEffect, useLayoutEffect, useMemo, useRef, useState} from 'react';
-import {ChevronLeft, ChevronRight, Copy, Search, WrapText, Grid2X2} from 'lucide-react';
+import {ChevronLeft, ChevronRight, Copy, Search, WrapText, Grid2X2, Maximize2, Minimize2} from 'lucide-react';
 import type {WorkbookPreview} from '../../shared/protocol';
 import {copyText} from '../clipboard';
 import {columnName, parseCellAddress, rangeText, type CellPosition} from '../workbook-grid';
 
-export const WorkbookFile = React.memo(function WorkbookFile({workbook, onLocation, delimited = false}: {
+export const WorkbookFile = React.memo(function WorkbookFile({workbook, onLocation, delimited = false, fullPage = false, onToggleFullPage}: {
   workbook: WorkbookPreview; onLocation: (location: string, quote?: string) => void; delimited?: boolean;
+  fullPage?: boolean; onToggleFullPage?: () => void;
 }) {
   const [sheetName, setSheetName] = useState(workbook.sheets[0]?.name ?? '');
   const firstCell = workbook.sheets[0]?.rows[0]?.length ? {r:0,c:0} : null;
@@ -108,6 +109,7 @@ export const WorkbookFile = React.memo(function WorkbookFile({workbook, onLocati
       <button aria-label="Wrap cell text" aria-pressed={wrap} title="Wrap cell text" onClick={() => setWrap(v => !v)}><WrapText size={15}/></button>
       <button aria-label="Show gridlines" aria-pressed={gridlines} title="Show gridlines" onClick={() => setGridlines(value => !value)}><Grid2X2 size={15}/></button>
       <button aria-label="Copy sheet" title="Copy displayed sheet as tab-separated values" disabled={!sheet.rows.length} onClick={() => void copy(true)}><Copy size={14}/><span>Copy sheet</span></button>
+      {onToggleFullPage && <button className="workbook-full-page" aria-label={fullPage ? 'Return Excel preview to split view' : 'Expand Excel preview to full page'} aria-pressed={fullPage} title={fullPage ? 'Return to split view' : 'Expand to full page'} onClick={onToggleFullPage}>{fullPage ? <Minimize2 size={15}/> : <Maximize2 size={15}/>}</button>}
     </div>
     <div className="workbook-formula"><span className="workbook-fx" aria-hidden>fx</span><code tabIndex={0} aria-label="Cell contents">{address ? (sheet.formulas[address] ? '=' + sheet.formulas[address] : value) || '(empty)' : 'Select a cell to see its full value'}</code>{selected && <button onClick={() => void copy()} title="Copy selection (⌘C)"><Copy size={13}/>{range}</button>}</div>
     <div className="workbook-grid" ref={grid} tabIndex={-1} role="region" aria-label={`${sheet.name} cells`} data-wrap={wrap} data-gridlines={gridlines} onKeyDown={event => {

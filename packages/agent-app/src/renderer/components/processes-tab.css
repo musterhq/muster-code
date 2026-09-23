@@ -1,4 +1,38 @@
 .processes-tab { height:100%; overflow:auto; padding:18px; color:var(--text); }
+.processes-tab.terminal-pane { display:flex; flex-direction:column; padding:0; overflow:hidden; }
+.terminal-pane-body { display:flex; flex-direction:column; flex:1; min-height:0; }
+.processes-commands { flex:1; min-height:0; overflow:auto; padding:14px 18px 18px; }
+.terminal-panel { display:flex; flex-direction:column; flex:1; min-height:0; }
+.terminal-strip { display:flex; align-items:center; gap:8px; flex:none; min-width:0; padding:4px 8px; border-bottom:1px solid var(--hairline); }
+.terminal-chips { display:flex; align-items:center; gap:2px; flex:1; min-width:0; overflow-x:auto; scrollbar-width:none; }
+.terminal-chip { display:flex; align-items:center; flex:none; border-radius:5px; color:var(--text-faint); }
+.terminal-chip:hover { background:var(--bg-hover); color:var(--text-dim); }
+.terminal-chip.is-active { background:var(--bg-active); color:var(--text); }
+.terminal-chip > button:first-child { display:flex; align-items:center; gap:5px; height:24px; padding:0 4px 0 8px; font-size:var(--font-caption); white-space:nowrap; }
+.terminal-chip.is-exited > button:first-child,.terminal-chip.is-ended > button:first-child { color:var(--text-faint); }
+.terminal-chip-state { font-size:10px; color:var(--text-faint); }
+.terminal-chip-close { display:grid; place-items:center; width:20px; height:20px; margin-right:2px; border-radius:4px; color:var(--text-faint); opacity:0; }
+.terminal-chip:hover .terminal-chip-close,.terminal-chip.is-active .terminal-chip-close,.terminal-chip-close:focus-visible { opacity:1; }
+.terminal-chip-close:hover { background:var(--bg-hover); color:var(--text); }
+.terminal-tools { display:flex; align-items:center; gap:2px; flex:none; }
+.terminal-tool { display:grid; place-items:center; flex:none; width:24px; height:24px; border-radius:5px; color:var(--text-faint); }
+.terminal-tool:hover:not(:disabled) { background:var(--bg-hover); color:var(--text); }
+/* C3.b4: the agent may read this chat's terminal */
+.terminal-tool.is-on { color:var(--accent); }
+.terminal-owner { flex:none; padding:1px 6px; border:1px solid var(--hairline); border-radius:999px; color:var(--text-faint); font-size:10px; line-height:14px; font-weight:400; }
+.terminal-owner.is-agent { color:var(--accent); border-color:color-mix(in srgb, var(--accent) 35%, transparent); }
+.terminal-tools .terminal-owner { margin-right:4px; }
+.terminal-ended { flex:none; margin:0; padding:6px 12px; border-bottom:1px solid var(--hairline); color:var(--text-dim); font-size:11px; line-height:1.5; }
+.terminal-ended button { margin-left:4px; color:var(--text); text-decoration:underline; text-underline-offset:2px; }
+.terminal-error { flex:none; margin:0; padding:6px 12px; }
+.terminal-body { display:flex; flex-direction:column; flex:1; min-height:0; }
+.terminal-empty { padding:14px 18px; }
+.terminal-start { display:inline-flex; align-items:center; gap:5px; margin-top:10px; padding:5px 10px; border:1px solid var(--hairline); border-radius:5px; color:var(--text-dim); font-size:11px; }
+.terminal-start:hover { background:var(--bg-hover); color:var(--text); }
+.agent-command-text { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:0; font:11px/1.5 var(--mono); color:var(--text-dim); }
+.agent-command-actions { display:flex; gap:6px; margin-bottom:6px; }
+.agent-command-actions button { display:flex; align-items:center; gap:5px; padding:3px 7px; border:1px solid var(--hairline); border-radius:5px; color:var(--text-dim); font-size:10px; }
+.agent-command-actions button:hover:not(:disabled) { background:var(--bg-hover); color:var(--text); }
 .processes-header { display:flex; justify-content:space-between; align-items:flex-start; gap:12px; padding-bottom:12px; border-bottom:1px solid var(--hairline); }
 .processes-header h2 { margin:0 0 4px; font-size:14px; font-weight:500; }
 .processes-header p { margin:0; font-size:11px; color:var(--text-faint); }
@@ -40,3 +74,29 @@
 .process-disclosure-trigger[aria-expanded='true'] .process-chevron { transform:rotate(90deg); }
 @media(prefers-reduced-motion:no-preference) { .process-panel { transition:height 200ms cubic-bezier(.2,.8,.2,1); } }
 @media(prefers-reduced-motion:reduce) { .process-chevron { transition:none; } }
+/* S3-E: one-level Terminal — header, compact list (shells, commands, agent commands/servers), selected shell. */
+.terminal-pane-head { display:flex; align-items:center; gap:8px; flex:none; min-width:0; padding:6px 8px 6px 12px; border-bottom:1px solid var(--hairline); }
+.terminal-pane-head h2 { margin:0; font-size:12px; font-weight:500; color:var(--text); }
+.terminal-pane-count { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--text-faint); font-size:11px; font-variant-numeric:tabular-nums; }
+.terminal-port-note { flex:none; margin:0; padding:6px 12px; border-bottom:1px solid var(--hairline); color:var(--warn, var(--text-dim)); font-size:11px; line-height:1.5; }
+.terminal-launcher { flex:none; max-height:45%; overflow:auto; padding:8px 10px; border-bottom:1px solid var(--hairline); }
+.terminal-launcher .process-saved-actions { margin-bottom:8px; }
+.terminal-list { flex:none; max-height:38%; overflow:auto; border-bottom:1px solid var(--hairline); }
+.terminal-list:empty { display:none; }
+.terminal-list .process-row { border:0; border-radius:0; border-bottom:1px solid var(--hairline); }
+.terminal-list > [role='listitem']:last-child .process-row { border-bottom:0; }
+.terminal-list .process-row-header { gap:6px; padding:0 6px 0 10px; min-height:30px; }
+.terminal-list .process-disclosure-trigger { gap:6px; padding:6px 0; }
+.terminal-list .process-disclosure-trigger strong { font-size:11px; }
+.terminal-list .process-details { padding:0 10px 8px; }
+.terminal-shell-row.is-selected { background:var(--bg-active); }
+.terminal-shell-row.is-selected .process-disclosure-trigger { color:var(--text); }
+.terminal-list-note { margin:0; padding:6px 12px; }
+.terminal-list-note button { color:var(--text); text-decoration:underline; text-underline-offset:2px; }
+.terminal-ports { display:flex; align-items:center; gap:3px; flex:none; }
+.terminal-port { display:inline-flex; align-items:center; gap:3px; height:18px; padding:0 5px; border:1px solid var(--hairline); border-radius:999px; color:var(--text-dim); font:10px/1 var(--mono); font-variant-numeric:tabular-nums; }
+.terminal-port:hover { background:var(--bg-hover); color:var(--text); border-color:color-mix(in srgb, var(--accent) 35%, var(--hairline)); }
+.terminal-row-error { margin:0; padding:0 10px 6px; }
+.terminal-shell-tools { display:flex; align-items:center; gap:2px; flex:none; padding:3px 8px 3px 12px; border-bottom:1px solid var(--hairline); }
+.terminal-shell-name { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--text-faint); font-size:11px; }
+.terminal-pane .terminal-pane-body { overflow:hidden; }

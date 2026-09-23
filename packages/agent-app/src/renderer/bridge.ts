@@ -1,4 +1,5 @@
 import type { AgentBridge, AgentEvent, Commands } from '../shared/protocol';
+import { markTransportOffline, recordTransport } from './connectionHealth.ts';
 
 /**
  * Single access point to the preload bridge. Every capability shown in the UI
@@ -24,10 +25,14 @@ export async function invoke<K extends keyof Commands>(
   input: Commands[K]['input'],
 ): Promise<Commands[K]['output']> {
   const bridge = getBridge();
-  if (!bridge) throw new BridgeError(command, 'Agent runtime is not connected');
+  if (!bridge) { markTransportOffline('Agent runtime is not connected'); throw new BridgeError(command, 'Agent runtime is not connected'); }
   try {
-    return await bridge.invoke(command, input);
+    const result = await bridge.invoke(command, input);
+    recordTransport({ok: true});
+    return result;
   } catch (cause) {
+    // PER-14: only channel failures change transport health; a command's own error does not.
+    recordTransport({ok: false, error: cause});
     throw new BridgeError(command, cause);
   }
 }

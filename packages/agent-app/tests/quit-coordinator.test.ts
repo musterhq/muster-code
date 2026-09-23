@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {createQuitCoordinator,withinDeadline} from '../src/main/quit-coordinator.ts';
+import {createQuitCoordinator,quitChoice,quitPrompt,withinDeadline} from '../src/main/quit-coordinator.ts';
 
 test('repeated quit shares confirmation and cannot bypass pending checkpoint', async () => {
   const checkpoint=Promise.withResolvers<void>();
@@ -26,4 +26,16 @@ test('deadline keeps exit blocked; the same underlying disposal can finish for r
   const quit=createQuitCoordinator({confirm:async()=>true,prepare:()=>withinDeadline(disposal.promise,5),exit:()=>{exits++;},onError:()=>{errors++;}});
   await quit.request();assert.equal(errors,1);assert.equal(exits,0);assert.equal(quit.allowed,false);
   disposal.resolve();await quit.request();assert.equal(exits,1);assert.equal(quit.allowed,true);
+});
+
+test('quit with running work offers keep-in-background, stop-and-quit and cancel; no default loses work', () => {
+  const prompt = quitPrompt({runs: 2, commands: true});
+  assert.deepEqual(prompt.buttons, ['Keep Working in Background', 'Stop Work and Quit', 'Cancel']);
+  assert.equal(quitChoice(prompt, prompt.defaultId), 'background', 'Return keeps work running');
+  assert.equal(quitChoice(prompt, prompt.cancelId), 'cancel', 'Escape cancels');
+  assert.equal(quitChoice(prompt, 1), 'stop');
+  assert.equal(quitChoice(prompt, 9), 'cancel', 'an unknown response never quits');
+  assert.match(prompt.detail, /2 agent runs are running, with background commands/);
+  assert.match(quitPrompt({runs: 1, commands: false}).detail, /^1 agent run is running\./);
+  assert.match(quitPrompt({runs: 0, commands: true}).detail, /^Background commands are running\./);
 });

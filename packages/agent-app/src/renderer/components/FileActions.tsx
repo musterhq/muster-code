@@ -1,9 +1,11 @@
-import React, {useRef, useState} from 'react';
+import React, {useRef, useState, useSyncExternalStore} from 'react';
 import {Menu} from '@base-ui/react/menu';
 import {Dialog} from '@base-ui/react/dialog';
-import {Copy, FilePlus, FolderPlus, FolderOpen, MoreHorizontal, Pencil, Trash2, X} from 'lucide-react';
+import {Check, Copy, Download, EyeOff, FilePlus, FolderPlus, FolderOpen, MoreHorizontal, Pencil, Trash2, X} from 'lucide-react';
 import {invoke} from '../bridge';
-import {loadDir, openFile} from '../store';
+import {closeTab, getState, loadDir, openFile, pushNotice, setShowHiddenFiles} from '../store';
+import {showHiddenFiles, subscribeShowHidden} from '../fileTreePrefs';
+import {useStoreSelector} from '../useStore';
 import './file-actions.css';
 
 type Action = 'file' | 'directory' | 'move' | 'trash';
@@ -12,6 +14,7 @@ const messageOf = (cause: unknown) => cause instanceof Error ? cause.message : S
 
 export const FileActions = React.memo(function FileActions({folderId, path, kind, root = false}: {folderId:string;path:string;kind:'file'|'directory';root?:boolean}) {
   const [menu, setMenu] = useState(false);
+  const showHidden = useSyncExternalStore(subscribeShowHidden, showHiddenFiles);
   const [action, setAction] = useState<Action | null>(null);
   const [value, setValue] = useState('');
   const [error, setError] = useState('');
@@ -20,13 +23,20 @@ export const FileActions = React.memo(function FileActions({folderId, path, kind
   const trigger = useRef<HTMLButtonElement>(null);
   const input = useRef<HTMLInputElement>(null);
   const name = path.split('/').pop() || 'folder';
+  const folderPath = useStoreSelector(state => state.snapshot?.folders.find(f => f.id === folderId)?.path);
   const begin = (next: Action) => {
     setMenu(false); setError(''); setValue(next === 'move' ? path : ''); setAction(next);
   };
-  const direct = async (command: 'clipboard.write'|'files.reveal') => {
+  /** W6-D: copy the file anywhere via the native save dialog (main confines the source to the folder). */
+  const saveCopy = async () => {
+    setError('');
+    try { const result = await invoke('files.saveCopy',{folderId,path}); if (result.saved) pushNotice(`Saved a copy as “${result.fileName}”.`, {kind: 'info'}); }
+    catch(cause) {setError(messageOf(cause));}
+  };
+  const direct = async (command: 'clipboard.write'|'files.reveal', text?: string) => {
     setError('');
     try {
-      if (command === 'clipboard.write') await invoke(command,{text:path});
+      if (command === 'clipboard.write') await invoke(command,{text:text ?? path});
       else await invoke(command,{folderId,path});
     } catch(cause) {setError(messageOf(cause));}
   };
@@ -38,6 +48,14 @@ export const FileActions = React.memo(function FileActions({folderId, path, kind
       if (action === 'trash') {
         await invoke('files.trash',{folderId,path});
         void loadDir(folderId,parentOf(path));
+        // Trashing a folder takes every file under it with it.
+        const prefix = kind === 'directory' ? `${path}/` : path;
+        for (const tab of getState().tabs) {
+          if (tab.folderId === folderId && tab.kind === 'file' && tab.path && (tab.path === path || tab.path.startsWith(prefix))) {
+            closeTab(tab.id);
+            pushNotice(`“${tab.path.split('/').pop()}” was moved to Trash; its tab was closed.`, {kind: 'info'});
+          }
+        }
       } else if (action === 'move') {
         if (!value.trim()) throw new Error('Enter a destination path.');
         await invoke('files.move',{folderId,from:path,to:value});
@@ -62,10 +80,15 @@ export const FileActions = React.memo(function FileActions({folderId, path, kind
         {kind === 'directory' && <><Menu.Item onClick={() => begin('file')}><FilePlus size={14}/>New file</Menu.Item><Menu.Item onClick={() => begin('directory')}><FolderPlus size={14}/>New folder</Menu.Item></>}
         {!root && <>
           <Menu.Item onClick={() => void direct('clipboard.write')}><Copy size={14}/>Copy relative path</Menu.Item>
+          {folderPath && <Menu.Item onClick={() => void direct('clipboard.write', `${folderPath.replace(/[\\/]+$/,'')}/${path}`)}><Copy size={14}/>Copy absolute path</Menu.Item>}
           <Menu.Item onClick={() => void direct('files.reveal')}><FolderOpen size={14}/>Reveal in file manager</Menu.Item>
-          {kind === 'file' && <Menu.Item onClick={() => begin('move')}><Pencil size={14}/>Rename or move…</Menu.Item>}
+          {kind === 'file' && <Menu.Item onClick={() => void saveCopy()}><Download size={14}/>Save a copy…</Menu.Item>}
+          <Menu.Item onClick={() => begin('move')}><Pencil size={14}/>Rename or move…</Menu.Item>
           <Menu.Item className="file-action-destructive" onClick={() => begin('trash')}><Trash2 size={14}/>Move to Trash…</Menu.Item>
         </>}
+        {root && <Menu.CheckboxItem className="file-action-check" checked={showHidden} onCheckedChange={setShowHiddenFiles} title="List .git, .DS_Store and other version-control or system files the tree leaves out. Other dotfiles are always shown.">
+          {showHidden ? <Check size={14}/> : <EyeOff size={14}/>}Show .git and system files
+        </Menu.CheckboxItem>}
       </Menu.Popup></Menu.Positioner></Menu.Portal>
     </Menu.Root>
     {error && !action && <span className="file-action-inline-error" role="alert">{error}</span>}

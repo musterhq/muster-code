@@ -8,7 +8,24 @@ type Pending = {resolve: (result: WorkerResult) => void; reject: (error: Error) 
 
 let worker: Worker | undefined;
 let nextId = 0;
+let idleTimer: ReturnType<typeof setTimeout> | undefined;
 const pending = new Map<number, Pending>();
+/** The worker (grammars, wasm engine, token cache) is released after this long without a request. */
+export const HIGHLIGHT_WORKER_IDLE_MS = 60_000;
+
+/** Terminate the shared highlight worker; the next request recreates it lazily. */
+export function releaseHighlightWorker(): void {
+  if (idleTimer) clearTimeout(idleTimer);
+  idleTimer = undefined;
+  worker?.terminate();
+  worker = undefined;
+}
+function scheduleIdleRelease(): void {
+  if (idleTimer) clearTimeout(idleTimer);
+  idleTimer = undefined;
+  if (pending.size) return;
+  idleTimer = setTimeout(() => { idleTimer = undefined; if (!pending.size) releaseHighlightWorker(); }, HIGHLIGHT_WORKER_IDLE_MS);
+}
 
 function getWorker(): Worker {
   if (worker) return worker;
@@ -20,12 +37,12 @@ function getWorker(): Worker {
     if (!task) return;
     pending.delete(event.data.id);
     task.resolve({rows: event.data.rows});
+    scheduleIdleRelease();
   };
   worker.onerror = () => {
     for (const task of pending.values()) task.reject(new Error('Syntax highlighting unavailable'));
     pending.clear();
-    worker?.terminate();
-    worker = undefined;
+    releaseHighlightWorker();
   };
   return worker;
 }
@@ -34,8 +51,9 @@ function requestHighlight(source: string, language: string): Promise<WorkerResul
   return new Promise((resolve, reject) => {
     const id = ++nextId;
     pending.set(id, {resolve, reject});
+    if (idleTimer) { clearTimeout(idleTimer); idleTimer = undefined; }
     try { getWorker().postMessage({id, source, language: normalizeCodeLanguage(language)}); }
-    catch (error) {pending.delete(id); reject(error instanceof Error ? error : new Error(String(error)));}
+    catch (error) {pending.delete(id); reject(error instanceof Error ? error : new Error(String(error))); scheduleIdleRelease();}
   });
 }
 

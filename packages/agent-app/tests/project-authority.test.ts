@@ -18,7 +18,7 @@ test('Project commands enforce target Project, derive authorship, and export att
  const task=await service.invoke('project.tasks.create',{projectId:p1.id,title:'Ship slice',acceptance:'observable',dependencies:[]});
  await assert.rejects(service.invoke('project.tasks.updateStatus',{projectId:p2.id,id:task.id,status:'blocked',revision:0}),/different project/);
  const decision=await service.invoke('project.decisions.create',{projectId:p1.id,title:'Use local state',rationale:'privacy',scope:'project',relatedTaskIds:[task.id],author:'forged client'} as never);
- assert.equal(decision.author,'main');
+ assert.equal(decision.author,'user');
  await assert.rejects(service.invoke('project.decisions.supersede',{projectId:p2.id,id:decision.id,replacementId:decision.id}),/different project/);
  const exported=await service.invoke('project.export',{projectId:p1.id});
  assert.deepEqual(exported.project.folderIds,[folder.id]);assert.equal(exported.folders[0]?.path,await realpath(folderPath));assert.equal(exported.tasks.items[0]?.id,task.id);assert.equal(exported.chats.items.length,0);assert.equal(exported.schemaVersion,2);

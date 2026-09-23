@@ -55,7 +55,7 @@ test('explicit access selection persists across restart, controls real sends, an
   } finally {await service.dispose();await rm(dataDir,{recursive:true,force:true});}
 });
 
-test('access changes are rejected during a run; read-only Agent declines expansion requests', async () => {
+test('access changes during a run apply to the next turn; the live read-only turn still declines expansion', async () => {
   const dataDir=await mkdtemp(join(tmpdir(),'muster-access-running-'));
   let release!:()=>void; const held=new Promise<void>(resolve=>{release=resolve;});
   let approval: unknown='not requested';
@@ -67,9 +67,8 @@ test('access changes are rejected during a run; read-only Agent declines expansi
   try {
     const chat=await service.invoke('chat.create',{});
     await service.invoke('chat.setPermissionMode',{id:chat.id,permissionMode:'read-only'});
-    await service.invoke('chat.send',{id:chat.id,text:'inspect',requestId:randomUUID()});
-    await assert.rejects(service.invoke('chat.setPermissionMode',{id:chat.id,permissionMode:'full',acknowledgeFullAccess:true}),/Stop this run/);
-    assert.equal((await service.invoke('app.snapshot',undefined)).chats[0]!.permissionMode,'read-only');
+    await service.invoke('chat.send',{id:chat.id,text:'inspect',requestId:randomUUID()}); await flush();
+    assert.equal((await service.invoke('chat.setPermissionMode',{id:chat.id,permissionMode:'full',acknowledgeFullAccess:true})).permissionMode,'full');
     assert.equal(approval,undefined);
     assert.equal((await service.invoke('chat.select',{id:chat.id})).some(item=>item.kind==='approval'),false);
   } finally {release();await service.dispose();await rm(dataDir,{recursive:true,force:true});}

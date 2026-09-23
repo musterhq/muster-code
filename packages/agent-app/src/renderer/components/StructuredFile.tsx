@@ -21,7 +21,7 @@ export const StructuredFile = React.memo(function StructuredFile({text, kind}: {
     try {return {value: kind === 'json' ? JSON.parse(text) : parseDelimited(text, kind === 'csv' ? ',' : '\t'), error: ''};}
     catch (error) {return {value: null, error: error instanceof Error ? error.message : String(error)};}
   }, [text,kind]);
-  if (result.error) return <div className="pane-error" role="status"><p>Cannot preview this {kind.toUpperCase()} file: {result.error}</p><p>Use Source to inspect the original content.</p></div>;
+  if (result.error) return <div className="pane-error" role="status"><p>Cannot preview this {kind.toUpperCase()} file: {result.error}</p><p>Use View source to inspect the original content.</p></div>;
   if (kind === 'json') return <div className="structured-file" aria-label="JSON structure"><JsonNode value={result.value}/></div>;
   const table = result.value as ReturnType<typeof parseDelimited>;
   if (!table.rows.length) return <p className="file-empty">This table is empty.</p>;

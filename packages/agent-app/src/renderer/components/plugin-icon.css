@@ -1,0 +1,8 @@
+/* CS-C3-2: plugin logos stay legible in dark AND light theme.
+   composer.css inverts black-only marks unconditionally; on the light surface they are already legible, so undo it there.
+   White-only marks (drawn for dark backgrounds) are inverted on the light surface instead. */
+:root[data-theme='light'] img.item-icon.is-monochrome { filter: none; }
+:root[data-theme='light'] img.item-icon.is-monochrome-light { filter: invert(1) brightness(.35); }
+/* A manifest dark logo (interface.logoDark) ships as a second <img>: exactly one of the pair shows. */
+:root[data-theme='light'] img.item-icon.is-theme-dark,
+:root:not([data-theme='light']) img.item-icon.is-theme-light { display: none; }

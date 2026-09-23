@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
-import {createTimelineProjection,findTranscriptMatches,summarizeTurns,turnAtRow,railWindow,MAX_RAIL_TURNS} from '../src/renderer/components/timeline-navigation-model.ts';
+import {createTimelineProjection,findTranscriptMatches,summarizeTurns,turnAtRow,railWindow,MAX_RAIL_TURNS,MAX_TRANSCRIPT_MATCHES} from '../src/renderer/components/timeline-navigation-model.ts';
 import {groupActivity} from '../src/renderer/components/activityGrouping.ts';
 import type {TimelineItem} from '../src/shared/protocol.ts';
 const item=(id:string,kind:TimelineItem['kind'],text:string):TimelineItem=>({id,kind,text,chatId:'chat',createdAt:'2026-09-19T10:00:00Z'});
@@ -26,7 +26,7 @@ test('large histories keep every turn reachable while bounding the rail window',
 });
 test('conversation search finds loaded user, assistant, and grouped activity rows case-insensitively',()=>{
   const rows=groupActivity([item('u','user','Find me here'),item('a','assistant','Answer has Find'),item('t1','tool','first FIND'),item('t2','tool','also find')]);
-  assert.deepEqual(findTranscriptMatches(rows,'find'),[{rowIndex:0,offset:0},{rowIndex:1,offset:11},{rowIndex:2,offset:6}]);
+  assert.deepEqual(findTranscriptMatches(rows,'find'),[{rowIndex:0,offset:0,itemId:'u',occurrence:0},{rowIndex:1,offset:11,itemId:'a',occurrence:0},{rowIndex:2,offset:6,itemId:'t1',occurrence:0},{rowIndex:2,offset:5,itemId:'t2',occurrence:1}]);
   assert.deepEqual(findTranscriptMatches(rows,'  absent  '),[]);assert.deepEqual(findTranscriptMatches(rows,'  '),[]);
 });
 test('the combined projection reuses immutable previews/indexes and correctly rebuilds historical edits',()=>{
@@ -42,4 +42,12 @@ test('the combined projection reuses immutable previews/indexes and correctly re
   assert.equal(edited.turns[0].response,'Edited old answer');assert.equal(edited.turns[1],first.turns[1]);
   const regrouped=project([rows[0],done,rows[2],item('notice','notice','Boundary'),...rows.slice(3)]);
   assert.equal(regrouped.turns[1].rowIndex,5);assert.notEqual(regrouped.rowIndexes,edited.rowIndexes);
+});
+test('search counts every occurrence, not matching rows, and never overlaps a hit',()=>{
+  const rows=groupActivity([item('u','user','log log LOG'),item('a','assistant','aaaa'),item('t','tool','no hit')]);
+  assert.equal(findTranscriptMatches(rows,'log').length,3);
+  assert.deepEqual(findTranscriptMatches(rows,'log').map(match=>match.occurrence),[0,1,2]);
+  assert.deepEqual(findTranscriptMatches(rows,'aa').map(match=>match.offset),[0,2],'non-overlapping like browser find');
+  const huge=groupActivity([item('big','assistant','x '.repeat(20000))]);
+  assert.equal(findTranscriptMatches(huge,'x').length,MAX_TRANSCRIPT_MATCHES,'bounded for pathological queries');
 });

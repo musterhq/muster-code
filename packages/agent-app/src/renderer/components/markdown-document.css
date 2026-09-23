@@ -1,0 +1,39 @@
+/* Rendered documents in the resource pane (Codex's reading view): document typography, not chat typography. */
+.file-markdown { position: relative; flex: 1; min-height: 0; overflow: auto; padding: 18px 24px 56px; user-select: text; font-size: 15px; line-height: 1.6; color: var(--text); scroll-padding-top: 16px; }
+.file-markdown > .md-body, .file-markdown > .structured-file { max-width: 860px; margin-inline: auto; }
+.file-markdown .md-body > :first-child { margin-top: 0; }
+.file-markdown .md-body p { margin-block: 0 14px; }
+.file-markdown .md-body p:has(> strong:first-child) { margin-bottom: 4px; }
+.file-markdown .md-body strong { font-weight: 650; color: var(--text); }
+.file-markdown .md-body :is(h1, h2, h3, h4, h5, h6) { color: var(--text); font-weight: 600; letter-spacing: -.01em; line-height: 1.3; }
+.file-markdown .md-body h1 { font-size: 26px; margin: 0 40px 26px 0; }
+.file-markdown .md-body h2 { font-size: 21px; margin: 38px 0 18px; }
+.file-markdown .md-body h3 { font-size: 17px; margin: 28px 0 12px; }
+.file-markdown .md-body :is(h4, h5, h6) { font-size: 15px; margin: 22px 0 10px; }
+.file-markdown .md-body :is(ul, ol) { margin-block: 0 16px; padding-left: 26px; }
+.file-markdown .md-body ul { list-style-type: '-\00a0\00a0'; }
+.file-markdown .md-body ul ul { list-style-type: '◦\00a0\00a0'; }
+.file-markdown .md-body li { margin: 4px 0; padding-left: 2px; }
+.file-markdown .md-body li::marker { color: var(--text-dim); }
+.file-markdown .md-body :is(li > ul, li > ol) { margin: 4px 0; }
+.file-markdown .md-body blockquote { margin: 0 0 16px; padding: 2px 0 2px 14px; border-left: 2px solid var(--hairline); color: var(--text-dim); }
+.file-markdown .md-body hr { margin: 28px 0; }
+.file-markdown .md-body pre { margin: 0 0 16px; }
+.file-markdown .md-body :not(pre) > code { font-size: .88em; }
+/* Tables: thin rules, bold header row, no zebra or fill; body text keeps full contrast. */
+.file-markdown .md-body .md-table { margin: 6px 0 20px; }
+.file-markdown .md-body .md-table table { font-size: 14px; line-height: 1.45; }
+.file-markdown .md-body .md-table :is(th, td) { padding: 10px 14px; border-bottom: 1px solid color-mix(in srgb, var(--text) 9%, transparent); background: transparent; }
+.file-markdown .md-body .md-table thead th { padding-block: 10px; font-weight: 600; color: var(--text); white-space: nowrap; border-bottom-color: color-mix(in srgb, var(--text) 14%, transparent); }
+.file-markdown .md-body .md-table tbody td { color: var(--text); }
+.file-markdown .md-body .md-table tbody tr:last-child td { border-bottom: 0; }
+/* Floating copy: pinned to the document's top-right corner while it scrolls. */
+.file-markdown-copy { position: sticky; top: 0; float: right; z-index: 2; width: 28px; height: 28px; margin: -4px -10px 0 8px; border-radius: 7px; color: var(--text-faint); background: color-mix(in srgb, var(--bg) 80%, transparent); transition: color 120ms ease, background-color 120ms ease; }
+.file-markdown-copy:hover { color: var(--text); background: var(--bg-hover); }
+.file-markdown-copy:focus-visible { outline: 2px solid color-mix(in srgb, var(--accent) 72%, white 8%); outline-offset: 1px; }
+@container (max-width: 540px) {
+  .file-markdown { padding: 16px 16px 40px; font-size: 14px; }
+  .file-markdown .md-body h1 { font-size: 22px; }
+  .file-markdown .md-body h2 { font-size: 18px; }
+}
+@media (prefers-reduced-motion: reduce) { .file-markdown-copy { transition: none; } }

@@ -254,3 +254,20 @@ test('local HTTP failure and recovery are recorded only after real bank requests
   assert.ok(service.status('folder').checkedAt);
   assert.equal(requests,2);
 });
+
+test('in-app settings win over the environment and switch clients without leaking the key', () => {
+  let app: {endpoint?: string; apiKey?: string} | undefined;
+  const configs: {baseUrl: string; apiKey?: string}[] = [];
+  const service = new HindsightService({core, env:{HINDSIGHT_API_URL:'http://env.local', HINDSIGHT_API_KEY:'env-secret'}, readConfig:() => app, resolveFolderScope:()=>({kind:'workspace',id:'w'}), createClient:config => { configs.push(config); return fakeClient([]); }});
+  assert.equal(service.status('w').endpoint, 'http://env.local');
+  assert.equal(service.configSource(), 'environment');
+  app = {endpoint:'http://app.local', apiKey:'app-secret'};
+  service.refresh();
+  const status = service.status('w');
+  assert.equal(status.endpoint, 'http://app.local');
+  assert.equal(service.configSource(), 'app');
+  assert.equal(configs.at(-1)!.apiKey, 'app-secret');
+  assert.equal(JSON.stringify(status).includes('secret'), false);
+  const bare = new HindsightService({core, env:{}, readConfig:() => undefined, resolveFolderScope:()=>({kind:'workspace',id:'w'})});
+  assert.match(bare.status('w').error ?? '', /Memory settings/);
+});

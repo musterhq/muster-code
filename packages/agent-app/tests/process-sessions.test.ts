@@ -5,8 +5,11 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {setTimeout as delay} from 'node:timers/promises';
 import {ProcessSessions} from '../src/runtime/process-sessions.ts';
+import {ResourceScheduler} from '../src/runtime/resource-scheduler.ts';
 import {MAX_COMMAND_OUTPUT} from '../src/runtime/command-output-buffer.ts';
 import {isActiveProcess,mergeProcessSnapshot,mergeProcessSummary,type ProcessEvent,type ProcessSnapshot} from '../src/shared/process-protocol.ts';
+/** These fixtures run several 'test'-purpose commands at once; keep them independent of this machine's load (PER-06 has its own test). */
+const roomy=()=>({resources:new ResourceScheduler({sample:()=>({freeBytes:16*2**30,totalBytes:24*2**30,load1:0,cpus:8}),policy:{maxHeavy:8}})});
 
 async function fixture() {
   const directory=await fs.mkdtemp(join(tmpdir(),'muster-owned-process-'));
@@ -18,7 +21,7 @@ async function fixture() {
     if(operation==='read'&&blockedRead){const blocked=blockedRead;blockedRead=undefined;await blocked;}
     if(!owners.has(chatId))throw new Error('Unknown conversation');
     return {cwd:directory,fullAccessAcknowledged:full};
-  },event=>events.push(event));
+  },event=>events.push(event),undefined,roomy());
   await registry.ready();
   return {registry,directory,file,events,operations,owners,setFull(value:boolean){full=value;},blockNextRead(){let release!:()=>void;blockedRead=new Promise<void>(resolve=>{release=resolve;});return release;},async close(){await registry.dispose();await fs.rm(directory,{recursive:true,force:true});}};
 }
@@ -113,7 +116,7 @@ test('restart marks prior live records lost without spawning, durable retries re
     saved.sessions[0].status='running';saved.receipts[0].session.status='running';
     await fs.writeFile(f.file,JSON.stringify(saved));
     let launches=0;
-    restored=new ProcessSessions(f.file,async({operation})=>{if(operation==='start')launches++;return {cwd:f.directory,fullAccessAcknowledged:true};},()=>{});
+    restored=new ProcessSessions(f.file,async({operation})=>{if(operation==='start')launches++;return {cwd:f.directory,fullAccessAcknowledged:true};},()=>{},undefined,roomy());
     await restored.ready();
     const recovered=(await restored.list({chatId:'chat'})).sessions[0];
     assert.equal(recovered.status,'lost');assert.equal(recovered.generation,started.generation+1);
@@ -177,7 +180,7 @@ test('inactive history is bounded while durable receipts prevent replay of prune
     const duplicate=await f.registry.start(firstInput);
     assert.equal(duplicate.processId,first.processId);assert.equal(duplicate.output,'');assert.match(duplicate.error??'',/no longer retained/);
     await f.registry.dispose();
-    restored=new ProcessSessions(f.file,async()=>({cwd:f.directory,fullAccessAcknowledged:true}),()=>{});
+    restored=new ProcessSessions(f.file,async()=>({cwd:f.directory,fullAccessAcknowledged:true}),()=>{},undefined,roomy());
     const afterRestart=await restored.start(firstInput);
     assert.equal(afterRestart.processId,first.processId);assert.equal((await restored.list({chatId:'chat'})).sessions.length,32);
   }finally{await restored?.dispose();await f.close();}
@@ -252,7 +255,7 @@ test('global lifecycle broadcasts exclude an owner removed before command comple
 test('unreadable startup history blocks commands but does not trap Quit or rewrite saved bytes',async()=>{
   const directory=await fs.mkdtemp(join(tmpdir(),'muster-corrupt-process-')),file=join(directory,'commands.json');
   const bytes='{invalid saved command history\n';await fs.writeFile(file,bytes);
-  const registry=new ProcessSessions(file,async()=>({cwd:directory,fullAccessAcknowledged:true}),()=>{});
+  const registry=new ProcessSessions(file,async()=>({cwd:directory,fullAccessAcknowledged:true}),()=>{},undefined,roomy());
   try{
     await assert.rejects(registry.ready(),/invalid/);
     await assert.rejects(registry.start(command('must-not-launch','console.log("not run")')),/invalid/);

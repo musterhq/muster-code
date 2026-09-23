@@ -15,7 +15,8 @@ const routes=():ProviderInstance[]=>[
   {info:{id:'openai-direct',name:'Direct',available:true,bindingId:'direct-account',identityMasked:'Hidden',models:[{id:'gpt-5.6-terra',name:'Terra'}]},command:'/fixture/direct',env:{CODEX_HOME:'/fixture/direct-home'},sessionsRoot:'/fixture/direct-home/sessions'},
 ];
 const completed={status:'completed' as const,finalMessage:'done',threadId:'native-thread',turnId:'native-turn'};
-const flush=()=>new Promise<void>(resolve=>setImmediate(resolve));
+/** The send path awaits several context contributors before dispatch; drain them all. */
+const flush=async()=>{for(let i=0;i<20;i++)await new Promise<void>(resolve=>setTimeout(resolve,2));};
 const request=(extra:Partial<ProviderInput['chat']>={}):ProviderInput=>({chat:{id:'chat',mode:'agent',...extra} as ProviderInput['chat'],cwd:'/fixture',prompt:'test',onDelta(){},onReasoning(){},onEvent(){},async onRequest(){return undefined;}});
 
 test('adapter selects the exact route and scopes native continuation to provider and account',async()=>{
@@ -103,7 +104,10 @@ test('configured instances use validated catalogs and opaque account binding wit
   const authFile=join(codexHome,'auth.json');await writeFile(authFile,JSON.stringify({tokens:{account_id:'PRIVATE-ACCOUNT-A',access_token:'PRIVATE-ACCESS-TOKEN'}}));
   const options={directory,home,env:{CODEX_HOME:codexHome,MUSTER_CODEX_COMMAND:cli}};
   const first=configuredProviderInstances(options);assert.ok(first.every(route=>route.info.available));
-  assert.deepEqual(first[0]?.info.models.map(model=>model.id),['claude/claude-fable-5']);assert.deepEqual(first[1]?.info.models.map(model=>model.id),['gpt-5.6-terra']);
+  // PRO-04: the gateway offers what its catalog lists (no hardcoded allowlist); a direct route reports what it cannot run, with the reason.
+  assert.deepEqual(first[0]?.info.models.map(model=>model.id),['gpt-5.6-terra','claude/claude-fable-5','invented/model']);assert.deepEqual(first[1]?.info.models.map(model=>model.id),['gpt-5.6-terra']);
+  assert.equal(first[0]?.info.excludedModels,undefined);
+  assert.deepEqual(first[1]?.info.excludedModels?.map(entry=>entry.id),['claude/claude-fable-5','invented/model']);assert.ok(first[1]?.info.excludedModels?.every(entry=>/OpenAI model ids only/.test(entry.reason)));
   assert.doesNotMatch(JSON.stringify(first.map(route=>route.info)),/PRIVATE-|auth\.json|access_token/);
   await writeFile(authFile,JSON.stringify({tokens:{account_id:'PRIVATE-ACCOUNT-A',access_token:'REFRESHED-TOKEN'}}));
   assert.equal(configuredProviderInstances(options)[1]?.info.bindingId,first[1]?.info.bindingId);

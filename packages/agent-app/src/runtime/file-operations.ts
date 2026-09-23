@@ -59,7 +59,20 @@ export async function moveFile(root: string, from: string, to: string): Promise<
     const target = await mutablePath(root, to);
     if (source === target) return;
     const before = await fs.lstat(source);
-    if (!before.isFile()) throw new Error('Folder moves are not available yet. Reveal the folder to move it in your file manager.');
+    if (before.isDirectory()) {
+      // Directories cannot be hardlinked; verify the destination is free, then rename
+      // (same volume only, and this is not atomic against a concurrent create — best effort).
+      let exists = true;
+      try { await fs.lstat(target); } catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') exists = false; else throw error; }
+      if (exists) throw new Error('Destination already exists. Nothing was replaced.');
+      try { await fs.rename(source, target); }
+      catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'EXDEV') throw new Error('Move within the same disk, or use your file manager.');
+        throw error;
+      }
+      return;
+    }
+    if (!before.isFile()) throw new Error('Only files and folders can be moved from the file pane.');
     // Exclusive creation: unlike rename(), link() never replaces an existing target.
     // Same-volume only; cross-volume moves fail without changing the source.
     try { await fs.link(source, target); }

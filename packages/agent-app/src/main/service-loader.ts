@@ -10,6 +10,8 @@ export interface AgentService {
 export interface ServiceOptions {
   dataDir: string;
   onEvent: (event: AgentEvent) => void;
+  /** Live user-owned process groups (terminals, Commands tab); the agent is told never to stop them. */
+  userProcesses?: () => readonly { pgid: number; label: string; chatId: string; cwd?: string }[];
 }
 
 /** A missing or broken runtime is a startup failure, never a fake empty app. */

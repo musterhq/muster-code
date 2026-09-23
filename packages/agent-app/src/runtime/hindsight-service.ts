@@ -97,8 +97,12 @@ interface HindsightCoreModule {
   readonly hindsightBankId: (scope: MemoryScope) => string;
 }
 
+/** In-app settings (memory-config.json). They win over the environment, which a Finder-launched app does not inherit. */
+export interface HindsightAppConfig { readonly endpoint?: string; readonly apiKey?: string }
+
 export interface HindsightServiceOptions {
   readonly env?: Record<string, string | undefined>;
+  readonly readConfig?: () => HindsightAppConfig | undefined;
   readonly resolveFolderScope: HindsightScopeResolver;
   readonly createClient?: (config: HindsightConfig) => HindsightClientLike;
   /** Test seam; production loads the bundled core-hindsight.cjs boundary. */
@@ -176,11 +180,23 @@ export class HindsightService {
     this.refreshConfiguration();
   }
 
+  private source: 'app' | 'environment' | 'none' = 'none';
+
+  /** Where the active endpoint came from: in-app settings first, then the environment. */
+  configSource(): 'app' | 'environment' | 'none' { return this.source; }
+
+  /** Rereads settings and environment; operations already in flight keep their client. */
+  refresh(): void { this.refreshConfiguration(); }
+
   private refreshConfiguration(): void {
     if (this.disposed) return;
     const env = this.options.env ?? process.env;
+    let app: HindsightAppConfig | undefined;
+    try { app = this.options.readConfig?.(); } catch { app = undefined; }
+    const appUrl = app?.endpoint?.trim();
+    this.source = appUrl ? 'app' : env[URL_ENV]?.trim() ? 'environment' : 'none';
     try {
-      const config = this.core.resolveHindsightConfig({ [URL_ENV]: env[URL_ENV], [KEY_ENV]: env[KEY_ENV] });
+      const config = this.core.resolveHindsightConfig(appUrl ? { [URL_ENV]: appUrl, [KEY_ENV]: app?.apiKey } : { [URL_ENV]: env[URL_ENV], [KEY_ENV]: env[KEY_ENV] });
       const endpoint = new URL(config.baseUrl);
       if (endpoint.username || endpoint.password || endpoint.search || endpoint.hash) throw new Error('Invalid base URL.');
       if (this.current?.config.baseUrl === config.baseUrl && this.current.config.apiKey === config.apiKey) return;
@@ -193,9 +209,11 @@ export class HindsightService {
       if (this.current) this.revision++;
       this.current = undefined;
       // Config errors can contain the supplied URL/key; never forward them.
-      this.configurationError = env[URL_ENV]
-        ? 'Hindsight configuration is invalid or unavailable. Check its service base URL and API key environment variables.'
-        : 'Hindsight is not configured. Set HINDSIGHT_API_URL for Muster.';
+      this.configurationError = this.source === 'app'
+        ? 'The Hindsight endpoint in Memory settings is invalid. Use an http(s) URL without credentials, a query or a fragment.'
+        : this.source === 'environment'
+          ? 'Hindsight configuration is invalid or unavailable. Check its service base URL and API key environment variables.'
+          : 'Hindsight is not configured. Add its endpoint in Memory settings.';
     }
   }
 

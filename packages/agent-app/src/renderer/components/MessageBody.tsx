@@ -1,5 +1,6 @@
 import {copyText} from '../clipboard';
-import { Check, Copy, X } from 'lucide-react';
+import { Check, Copy, Quote, X } from 'lucide-react';
+import {addComposerContext} from '../composerContext';
 import React, { useEffect, useRef, useState } from 'react';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import {ResourceLink, type ResourceContext} from './ResourceLink';
@@ -8,6 +9,7 @@ import remarkGfm from 'remark-gfm';
 import { createIncrementalMarkdownPlugin } from '../markdown-incremental';
 import {markdownHeadingId} from './markdownAnchors';
 import {HighlightedCode} from './HighlightedCode';
+import {inferMarkdownCodeLanguages} from './codeLanguage';
 
 import './message-body.css';
 
@@ -80,7 +82,8 @@ function Pre({ children }: { children?: React.ReactNode }): React.ReactElement {
   const child = Array.isArray(children) ? children[0] : children;
   if (React.isValidElement<{ className?: string; children?: React.ReactNode }>(child)) {
     const lang = /language-([\w+-]+)/.exec(child.props.className ?? '')?.[1];
-    const text = codeText(child.props.children);
+    // The fence's closing newline is not a code line (QA: a blank line trailed every block).
+    const text = codeText(child.props.children).replace(/\r?\n$/, '');
     return (
       <div className="md-code">
         <div className="md-code-head">
@@ -126,8 +129,41 @@ const components: Components = {
   h6: ({node, children, ...props}) => <Heading level={6} node={node} {...props}>{children}</Heading>,
 };
 
+/**
+ * CMP-18: selecting text in an assistant reply offers "Quote", which adds it to the composer
+ * as a quote chip that links back to the message. Its own state, so the Markdown never re-renders.
+ */
+function SelectionQuote({ container }: { container: React.RefObject<HTMLDivElement | null> }): React.ReactElement | null {
+  const [offer, setOffer] = useState<{ text: string; itemId: string; left: number; top: number } | null>(null);
+  const [note, setNote] = useState('');
+  useEffect(() => {
+    const body = container.current;
+    if (!body) return;
+    const read = () => {
+      const selection = window.getSelection?.(), value = selection?.toString().trim() ?? '';
+      const row = body.closest<HTMLElement>('[data-item-id]');
+      if (!selection || !value || !selection.rangeCount || !row || !body.closest('.msg-assistant') || !body.contains(selection.anchorNode) || !body.contains(selection.focusNode)) { setOffer(null); return; }
+      const rect = selection.getRangeAt(0).getBoundingClientRect(), box = body.getBoundingClientRect();
+      setNote(''); setOffer({ text: value, itemId: row.dataset.itemId ?? '', left: Math.max(0, Math.min(rect.left - box.left + rect.width / 2, box.width)), top: Math.max(0, rect.top - box.top) });
+    };
+    const clear = () => { if (!window.getSelection?.()?.toString().trim()) setOffer(null); };
+    body.addEventListener('mouseup', read); body.addEventListener('keyup', read);
+    document.addEventListener('selectionchange', clear);
+    return () => { body.removeEventListener('mouseup', read); body.removeEventListener('keyup', read); document.removeEventListener('selectionchange', clear); };
+  }, [container]);
+  if (!offer) return note ? <span className="md-quote-note" role="status">{note}</span> : null;
+  const quote = () => {
+    const words = offer.text.replace(/\s+/g, ' ');
+    const label = `“${words.length > 48 ? `${words.slice(0, 47)}…` : words}”`;
+    if (addComposerContext({ type: 'quote', label, text: offer.text, source: { kind: 'assistant', itemId: offer.itemId, at: new Date().toISOString() } })) { window.getSelection?.()?.removeAllRanges(); setOffer(null); return; }
+    copyText(offer.text.split('\n').map(line => `> ${line}`).join('\n')).then(() => { setOffer(null); setNote('Quote copied'); }, () => setNote('Could not quote'));
+  };
+  return <button type="button" className="md-quote" style={{ left: offer.left, top: offer.top }} onMouseDown={event => event.preventDefault()} onClick={quote} aria-label="Quote in reply" title="Quote in reply"><Quote size={12} />Quote</button>;
+}
+
 function MessageBodyContent({ text, resourceContext }: { text: string; resourceContext?: ResourceContext }): React.ReactElement {
   const remarkPlugins = React.useMemo(() => [remarkGfm, createIncrementalMarkdownPlugin()], []);
+  const renderedText = React.useMemo(() => inferMarkdownCodeLanguages(text), [text]);
   const renderers = React.useMemo<Components>(() => {
     // ReactMarkdown renders duplicate headings in one pass. Keep fragment targets
     // deterministic while avoiding collisions that would jump to the wrong section.
@@ -150,16 +186,18 @@ function MessageBodyContent({ text, resourceContext }: { text: string; resourceC
       } : {}),
     } as Components;
   }, [text, resourceContext?.folderId, resourceContext?.path]);
+  const body = useRef<HTMLDivElement>(null);
   return (
-    <div className="md-body">
+    <div className="md-body" ref={body}>
       <ReactMarkdown
         remarkPlugins={remarkPlugins}
         skipHtml
         urlTransform={safeUrl}
         components={renderers}
       >
-        {text}
+        {renderedText}
       </ReactMarkdown>
+      <SelectionQuote container={body} />
     </div>
   );
 }

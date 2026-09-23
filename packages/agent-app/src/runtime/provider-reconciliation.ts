@@ -2,6 +2,7 @@ import {createRequire} from 'node:module';
 import {existsSync} from 'node:fs';
 import {join} from 'node:path';
 import {configuredProviderInstances,type ProviderInstance} from './provider-instances.ts';
+import {isAdapterProvider} from './adapters/index.ts';
 
 export interface ReconciliationInput {threadId: string; turnId: string; cwd: string; providerId?:string; providerBindingId?:string}
 export interface ReconciliationResult {resolved: boolean; reason: string; terminalStatus?: 'completed' | 'failed' | 'interrupted'}
@@ -19,6 +20,9 @@ const queryGateway: ProviderStatusQuery = async (method,params,options) => {
 /** One read-only request, with exact persisted identity matching. No retries or prompts. */
 export async function reconcileProviderTurn(input: ReconciliationInput, query: ProviderStatusQuery = queryGateway, runtimeDirectory?: string, instances?:ProviderInstance[]): Promise<ReconciliationResult> {
   if (!input.threadId || !input.turnId) return {resolved:false,reason:'Muster did not receive a complete provider thread and turn identity. Automatic verification is unavailable; inspect the existing provider work before continuing.'};
+  // Claude Code/OpenCode runs are child processes of this app and HTTP routes are single
+  // streamed requests: once Muster restarted or the attempt settled, nothing is still running.
+  if (isAdapterProvider(input.providerId??'hybrow')) return {resolved:true,terminalStatus:'interrupted',reason:'This provider runs inside Muster, so the unfinished attempt ended with it. Check the chat folder for partial changes, then send a new message; nothing was resent.'};
   try {
     const route=(instances??configuredProviderInstances({directory:runtimeDirectory})).find(instance=>instance.info.id===(input.providerId??'hybrow'));
     if(!route?.info.available || !input.providerBindingId || route.info.bindingId!==input.providerBindingId) return {resolved:false,reason:'The saved provider account or profile binding is unavailable or has changed. Restore that binding before verifying this attempt; no alternate provider was queried.'};

@@ -32,10 +32,11 @@ test('browser persistence restores the latest validated address and profile with
   let saved='';
   const tab={id:'browser:test-1',kind:'browser' as const,browserProfileId:'personal',title:'Private page title',url:'https://example.com/?token=private'};
   assert.equal(saveWorkspace({setItem:(_key,value)=>{saved=value;}},{tabs:[tab],activeTabId:tab.id}),true);
-  assert.equal(saved.includes('https://example.com/?token=private'),true);
+  // BRW-06: credential-bearing parameters never reach plaintext storage; main's encrypted vault restores the full URL.
+  assert.equal(saved.includes('token=private'),false);
   assert.equal(saved.includes('Private page'),false);
   const restored=readWorkspace({getItem:()=>saved});
-  assert.deepEqual(restored.tabs,[{id:tab.id,kind:'browser',browserProfileId:'personal',url:'https://example.com/?token=private',title:'Browser'}]);
+  assert.deepEqual(restored.tabs,[{id:tab.id,kind:'browser',browserProfileId:'personal',url:'https://example.com/',title:'Browser'}]);
 });
 
 test('browser persistence replaces credential-bearing or invalid addresses with a blank page',()=>{
@@ -67,6 +68,19 @@ test('command and computer tabs restore scoped identities without caller handles
     {kind:'processes',chatId:'../../private',title:'invalid'},
   ], null)));
   assert.deepEqual(workspace.tabs.map(tab=>tab.id),['processes:chat-a','computer:project:project-a']);
+  assert.equal(workspace.tabs[0].title,'Terminal','S3-E: a saved "Commands" tab comes back under its one name');
+});
+
+test('attachment tabs restore their chat-scoped id and file name, and are discarded without a valid attachment id',()=>{
+  const workspace=readWorkspace(storage(scoped([
+    {kind:'attachment',chatId:'chat-a',attachmentId:'att-1',path:'shot.png',title:'shot.png'},
+    {kind:'attachment',chatId:'chat-a',attachmentId:'att-1',path:'shot.png',title:'shot.png'},
+    {kind:'attachment',chatId:'chat-a',title:'missing attachment id'},
+    {kind:'attachment',chatId:'chat-a',attachmentId:'att-2',path:'',title:'empty path'},
+  ], 'attachment:chat-a:att-1')));
+  assert.deepEqual(workspace.tabs.map(tab=>tab.id),['attachment:chat-a:att-1'],'the duplicate and the two invalid rows are dropped');
+  assert.equal(workspace.tabs[0]?.path,'shot.png');
+  assert.equal(workspace.activeTabId,'attachment:chat-a:att-1');
 });
 
 test('resource tabs persist under isolated chat/project/repository scopes',()=>{
@@ -79,6 +93,32 @@ test('resource tabs persist under isolated chat/project/repository scopes',()=>{
   assert.deepEqual(readWorkspace(storage,'chat:chat-a|project:project-a|folder:repo-a'),a);
   assert.deepEqual(readWorkspace(storage,'chat:chat-b|project:project-b|folder:repo-b'),b);
   assert.deepEqual(readWorkspace(storage,'chat:chat-a|project:project-b|folder:repo-b'),{tabs:[],activeTabId:null});
+});
+
+test('pinned survives a save/restore round trip; unpinned tabs stay unmarked',()=>{
+  const values=new Map<string,string>();
+  const storage={getItem:(key:string)=>values.get(key)??null,setItem:(key:string,value:string)=>{values.set(key,value);}} as unknown as Storage;
+  const workspace={tabs:[
+    {id:'file:repo-a:a.ts',kind:'file' as const,folderId:'repo-a',path:'a.ts',title:'a.ts',pinned:true},
+    {id:'file:repo-a:b.ts',kind:'file' as const,folderId:'repo-a',path:'b.ts',title:'b.ts'},
+  ],activeTabId:'file:repo-a:a.ts'};
+  assert.equal(saveWorkspace(storage,workspace,'personal'),true);
+  const restored=readWorkspace(storage,'personal');
+  assert.equal(restored.tabs[0]?.pinned,true);
+  assert.equal(restored.tabs[1]?.pinned,undefined);
+});
+
+test('pinned survives a save/restore round trip for browser, computer and processes tabs too',()=>{
+  const values=new Map<string,string>();
+  const storage={getItem:(key:string)=>values.get(key)??null,setItem:(key:string,value:string)=>{values.set(key,value);}} as unknown as Storage;
+  const workspace={tabs:[
+    {id:'browser:test-1',kind:'browser' as const,browserProfileId:'personal',url:'https://example.com/',title:'Browser',pinned:true},
+    {id:'computer:project:project-a',kind:'computer' as const,scope:{kind:'project' as const,id:'project-a'},title:'Computer',pinned:true},
+    {id:'processes:chat-a',kind:'processes' as const,chatId:'chat-a',title:'Commands',pinned:true},
+  ],activeTabId:'browser:test-1'};
+  assert.equal(saveWorkspace(storage,workspace,'personal'),true);
+  const restored=readWorkspace(storage,'personal');
+  assert.deepEqual(restored.tabs.map(tab=>tab.pinned),[true,true,true]);
 });
 
 test('the old shared resource-tab list is not restored into an arbitrary chat',()=>{

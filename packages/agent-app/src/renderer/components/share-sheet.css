@@ -1,0 +1,10 @@
+.share-sheet .share-formats { display: grid; gap: 4px; margin: 0 0 12px; }
+.share-sheet .share-formats label, .share-sheet .share-redact { display: flex; align-items: center; gap: 8px; min-height: 32px; padding: 0 10px; border-radius: 8px; color: var(--text); font-size: 13px; cursor: default; }
+.share-sheet .share-formats label.is-selected { background: var(--hover, #ffffff12); }
+.share-sheet .share-formats label:hover { background: var(--hover, #ffffff12); }
+.share-sheet .share-hint { margin-left: auto; padding-left: 12px; color: var(--text-dim); font-size: 12px; }
+.share-sheet .share-redact > span { display: flex; flex: 1; min-width: 0; flex-wrap: wrap; }
+.share-sheet .share-link { display: grid; gap: 4px; margin: 12px 0 14px; padding-top: 12px; border-top: 1px solid var(--hairline); }
+.share-sheet .share-link button { justify-self: start; height: 28px; padding: 0 10px; border: 1px solid var(--hairline); border-radius: 8px; color: var(--text); font-size: 13px; }
+.share-sheet .share-link .share-hint { margin-left: 0; padding-left: 0; }
+.share-sheet .share-error { margin: 0 0 12px; color: var(--danger, #e5484d); font-size: 12px; }

@@ -24,6 +24,7 @@ test('inactive task attention groups live requests with exact IDs and no private
  const a=await service.invoke('chat.create',{}),b=await service.invoke('chat.create',{});
  await service.invoke('chat.setPermissionMode',{id:a.id,permissionMode:'workspace'});
  await service.invoke('chat.send',{id:a.id,text:'ask',requestId:randomUUID()});
+ await until(async()=>(await service.invoke('app.snapshot',undefined)).attention?.totalRequests===2);
  await service.invoke('chat.timeline',{id:b.id,select:true});
  const snapshot=await service.invoke('app.snapshot',undefined),attention=snapshot.attention!;
  assert.equal(snapshot.activeChatId,b.id);assert.equal(attention.totalRequests,2);
@@ -44,6 +45,7 @@ test('inactive task attention groups live requests with exact IDs and no private
 test('late answer cannot consume a replacement request with the same provider identity',async t=>{
  const {service}=await fixture(t,async input=>{await input.onRequest('item/tool/requestUserInput',payload);await input.onRequest('item/tool/requestUserInput',payload);return{status:'completed',finalMessage:'done'};});
  const chat=await service.invoke('chat.create',{});await service.invoke('chat.send',{id:chat.id,text:'ask',requestId:randomUUID()});
+ await until(async()=>!!(await service.invoke('app.snapshot',undefined)).attention?.chats[0]);
  const first=(await service.invoke('app.snapshot',undefined)).attention!.chats[0].requests[0].itemId;
  await service.invoke('question.respond',{id:first,answers:{secret:{answers:['one']}}});
  await until(async()=>!!(await service.invoke('app.snapshot',undefined)).attention?.chats[0]);
@@ -59,6 +61,7 @@ test('expiration clears both handler kinds and publishes the empty summary',asyn
  const chat=await service.invoke('chat.create',{});await service.invoke('chat.setPermissionMode',{id:chat.id,permissionMode:'workspace'});
  t.mock.timers.enable({apis:['setTimeout']});
  await service.invoke('chat.send',{id:chat.id,text:'ask',requestId:randomUUID()});
+ await until(async()=>(await service.invoke('app.snapshot',undefined)).attention?.totalRequests===2);
  assert.equal((await service.invoke('app.snapshot',undefined)).attention?.totalRequests,2);
  t.mock.timers.tick(600_000);
  assert.equal((await service.invoke('app.snapshot',undefined)).attention?.totalRequests,0);
@@ -98,6 +101,7 @@ test('stop clears approvals and questions before returning and rejects new callb
  });
  const chat=await service.invoke('chat.create',{});await service.invoke('chat.setPermissionMode',{id:chat.id,permissionMode:'workspace'});
  await service.invoke('chat.send',{id:chat.id,text:'ask',requestId:randomUUID()});
+ await until(async()=>(await service.invoke('app.snapshot',undefined)).attention?.totalRequests===2);
  assert.equal((await service.invoke('app.snapshot',undefined)).attention?.totalRequests,2);
  await service.invoke('chat.stop',{id:chat.id});
  assert.equal((await service.invoke('app.snapshot',undefined)).attention?.totalRequests,0);

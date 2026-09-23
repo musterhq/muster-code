@@ -118,10 +118,9 @@ test('accepts symlink staying inside root', async () => {
 });
 
 test('rejects unsupported extensions without touching content', async () => {
-  await fs.writeFile(join(root, 'vector.svg'), '<svg xmlns="http://www.w3.org/2000/svg"/>');
   await fs.writeFile(join(root, 'doc.pdf'), '%PDF-1.4');
   await fs.writeFile(join(root, 'tool.exe'), Buffer.from([0x4d, 0x5a]));
-  for (const name of ['vector.svg', 'doc.pdf', 'tool.exe', 'noext']) {
+  for (const name of ['doc.pdf', 'tool.exe', 'noext', 'photo.heic']) {
     await assert.rejects(readAsset(root, name), /Unsupported image type/);
   }
 });
@@ -169,4 +168,47 @@ test('rejects truncated and corrupt images', async () => {
 test('rejects directories named like images', async () => {
   await fs.mkdir(join(root, 'dir.png'));
   await assert.rejects(readAsset(root, 'dir.png'), /EISDIR|Not a file/);
+});
+
+test('SVG is served as image/svg+xml with its declared size; scripts stay inert behind <img>', async () => {
+  const svg = '<?xml version="1.0"?>\n<!-- logo -->\n<svg xmlns="http://www.w3.org/2000/svg" width="120" height="40px"><script>alert(1)</script></svg>';
+  await fs.writeFile(join(root, 'logo.svg'), svg);
+  const result = await readAsset(root, 'logo.svg');
+  assert.equal(result.mime, 'image/svg+xml');
+  assert.ok(result.dataUrl.startsWith('data:image/svg+xml;base64,'));
+  assert.deepEqual([result.width, result.height], [120, 40]);
+  await fs.writeFile(join(root, 'box.svg'), '<svg viewBox="0 0 24 16" xmlns="http://www.w3.org/2000/svg"/>');
+  assert.deepEqual(Object.values(await readAsset(root, 'box.svg')).slice(3), [24, 16]);
+  await fs.writeFile(join(root, 'bare.svg'), '<svg xmlns="http://www.w3.org/2000/svg"></svg>');
+  assert.equal((await readAsset(root, 'bare.svg')).width, 0, 'no intrinsic size is measured by the renderer');
+  await fs.writeFile(join(root, 'fake.svg'), '<html><body>not svg</body></html>');
+  await assert.rejects(readAsset(root, 'fake.svg'), /Not a supported raster image/);
+});
+
+test('BMP and AVIF decode their dimensions', async () => {
+  const bmp = Buffer.alloc(58); bmp.write('BM', 0, 'latin1'); bmp.writeUInt32LE(58, 2); bmp.writeUInt32LE(40, 14); bmp.writeInt32LE(5, 18); bmp.writeInt32LE(-3, 22);
+  await fs.writeFile(join(root, 'old.bmp'), bmp);
+  const decodedBmp = await readAsset(root, 'old.bmp');
+  assert.deepEqual([decodedBmp.mime, decodedBmp.width, decodedBmp.height], ['image/bmp', 5, 3]);
+  const ftyp = Buffer.alloc(24); ftyp.writeUInt32BE(24, 0); ftyp.write('ftypavif', 4, 'latin1'); ftyp.write('mif1avif', 16, 'latin1');
+  const ispe = Buffer.alloc(20); ispe.writeUInt32BE(20, 0); ispe.write('ispe', 4, 'latin1'); ispe.writeUInt32BE(640, 12); ispe.writeUInt32BE(480, 16);
+  await fs.writeFile(join(root, 'next.avif'), Buffer.concat([ftyp, ispe]));
+  const decodedAvif = await readAsset(root, 'next.avif');
+  assert.deepEqual([decodedAvif.mime, decodedAvif.width, decodedAvif.height], ['image/avif', 640, 480]);
+});
+
+test('audio and video play from a signature-checked data URL', async () => {
+  const wav = Buffer.alloc(44); wav.write('RIFF', 0, 'latin1'); wav.write('WAVE', 8, 'latin1');
+  await fs.writeFile(join(root, 'take.wav'), wav);
+  assert.equal((await readAsset(root, 'take.wav')).mime, 'audio/wav');
+  const mp4 = Buffer.alloc(32); mp4.writeUInt32BE(32, 0); mp4.write('ftypisom', 4, 'latin1');
+  await fs.writeFile(join(root, 'clip.mp4'), mp4);
+  const video = await readAsset(root, 'clip.mp4');
+  assert.equal(video.mime, 'video/mp4');
+  assert.ok(video.dataUrl.startsWith('data:video/mp4;base64,'));
+  await fs.writeFile(join(root, 'liar.mp3'), wav);
+  await assert.rejects(readAsset(root, 'liar.mp3'), /Not a supported audio\/mpeg file/);
+  const big = join(root, 'big.mov');
+  const handle = await fs.open(big, 'w'); await handle.truncate(16 * 1024 * 1024 + 1); await handle.close();
+  await assert.rejects(readAsset(root, 'big.mov'), /Media file exceeds 16 MiB limit/);
 });

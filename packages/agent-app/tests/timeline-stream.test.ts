@@ -15,7 +15,7 @@ test('runtime streams changed rows and the renderer replica matches durable hist
   let finish!: () => void;
   const completed = new Promise<void>(resolve => { finish = resolve; });
   const provider: ProviderAdapter = {
-    info: () => [{id: 'test', name: 'test', available: true, identityMasked: 'test', models: []}],
+    info: () => [{id: 'hybrow', name: 'Hybrow OmniRoute', available: true, identityMasked: 'test', models: [{id: 'claude/claude-fable-5', name: 'Fable'}]}],
     stop: async () => true, dispose() {},
     async run(input) {
       input.onDelta('Before command.');

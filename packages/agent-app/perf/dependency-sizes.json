@@ -1,0 +1,1969 @@
+{
+  "generatedAt": "2026-09-23T18:05:51.553Z",
+  "note": "Minified bytes each package contributes to the shipped bundles (renderer chunks are lazy where split). Regenerate with node scripts/dependency-report.mjs and commit with any dependency change.",
+  "totals": {
+    "renderer": 6803544,
+    "main": 232667,
+    "preload": 1037,
+    "runtime": 1806915
+  },
+  "packages": [
+    {
+      "name": "@shikijs/langs",
+      "bytes": 2812176,
+      "targets": {
+        "renderer": 2812176
+      },
+      "version": "4.2.0",
+      "license": "MIT",
+      "licenseFile": "LICENSE",
+      "direct": true
+    },
+    {
+      "name": "(app source)",
+      "bytes": 2746567,
+      "targets": {
+        "renderer": 1725236,
+        "main": 232179,
+        "preload": 1023,
+        "runtime": 788129
+      },
+      "version": "0.2.0",
+      "license": "UNLICENSED",
+      "licenseFile": null,
+      "direct": false
+    },
+    {
+      "name": "@shikijs/engine-oniguruma",
+      "bytes": 628935,
+      "targets": {
+        "renderer": 628935
+      },
+      "version": "4.2.0",
+      "license": "MIT",
+      "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
+      "name": "pdfjs-dist",
+      "bytes": 431360,
+      "targets": {
+        "renderer": 431360
+      },
+      "version": "6.3.289",
+      "license": "Apache-2.0",
+      "licenseFile": "LICENSE",
+      "direct": true
+    },
+    {
+      "name": "@xterm/xterm",
+      "bytes": 347279,
+      "targets": {
+        "renderer": 347279
+      },
+      "version": "6.0.0",
+      "license": "MIT",
+      "licenseFile": "LICENSE",
+      "direct": true
+    },
+    {
+      "name": "exceljs",
+      "bytes": 250978,
+      "targets": {
+        "runtime": 250978
+      },
+      "version": "4.4.0",
+      "license": "MIT",
+      "licenseFile": "LICENSE",
+      "direct": true
+    },
+    {
+      "name": "react-dom",
+      "bytes": 209895,
+      "targets": {
+        "renderer": 209895
+      },
+      "version": "19.3.0",
+      "license": "MIT",
+      "licenseFile": "LICENSE",
+      "direct": true
+    },
+    {
+      "name": "@base-ui/react",
+      "bytes": 162946,
+      "targets": {
+        "renderer": 162946
+      },
+      "version": "1.8.0",
+      "license": "MIT",
+      "licenseFile": "LICENSE",
+      "direct": true
+    },
+    {
+      "name": "readable-stream",
+      "bytes": 160949,
+      "targets": {
+        "runtime": 160949
+      },
+      "version": "2.3.8",
+      "license": "MIT",
+      "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
+      "name": "bluebird",
+      "bytes": 87240,
+      "targets": {
+        "runtime": 87240
+      },
+      "version": "3.4.7",
+      "license": "MIT",
+      "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
+      "name": "lucide-react",
+      "bytes": 58198,
+      "targets": {
+        "renderer": 58198
+      },
+      "version": "1.47.0",
+      "license": "ISC",
+      "licenseFile": "LICENSE",
+      "direct": true
+    },
+    {
+      "name": "pako",
+      "bytes": 46463,
+      "targets": {
+        "runtime": 46463
+      },
+      "version": "1.0.11",
+      "license": "(MIT AND Zlib)",
+      "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
+      "name": "jszip",
+      "bytes": 43569,
+      "targets": {
+        "runtime": 43569
+      },
+      "version": "3.10.2",
+      "license": "(MIT OR GPL-3.0-or-later)",
+      "licenseFile": "LICENSE.markdown",
+      "direct": false
+    },
+    {
+      "name": "@shikijs/vscode-textmate",
+      "bytes": 42486,
+      "targets": {
+        "renderer": 42486
+      },
+      "version": "10.0.2",
+      "license": "MIT",
+      "licenseFile": "LICENSE.md",
+      "direct": false
+    },
+    {
+      "name": "@xterm/addon-search",
+      "bytes": 38081,
+      "targets": {
+        "renderer": 38081
+      },
+      "version": "0.16.0",
+      "license": "MIT",
+      "licenseFile": "LICENSE",
+      "direct": true
+    },
+    {
+      "name": "micromark-core-commonmark",
+      "bytes": 27289,
+      "targets": {
+        "renderer": 27289
+      },
+      "version": "2.0.3",
+      "license": "MIT",
+      "licenseFile": "license",
+      "direct": false
+    },
+    {
+      "name": "ssf",
+      "bytes": 25023,
+      "targets": {
+        "runtime": 25023
+      },
+      "version": "0.11.2",
+      "license": "Apache-2.0",
+      "licenseFile": "LICENSE",
+      "direct": true
+    },
+    {
+      "name": "async",
+      "bytes": 24084,
+      "targets": {
+        "runtime": 24084
+      },
+      "version": "3.2.6",
+      "license": "MIT",
+      "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
+      "name": "@tanstack/virtual-core",
+      "bytes": 23842,
+      "targets": {
+        "renderer": 23842
+      },
+      "version": "3.17.11",
+      "license": "MIT",
+      "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
+      "name": "saxes",
+      "bytes": 23733,
+      "targets": {
+        "runtime": 23733
+      },
+      "version": "5.0.1",
+      "license": "ISC",
+      "licenseFile": null,
+      "direct": false
+    },
+    {
+      "name": "fstream",
+      "bytes": 22251,
+      "targets": {
+        "runtime": 22251
+      },
+      "version": "1.0.12",
+      "license": "ISC",
+      "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
+      "name": "big-integer",
+      "bytes": 22120,
+      "targets": {
+        "runtime": 22120
+      },
+      "version": "1.6.52",
+      "license": "Unlicense",
+      "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
+      "name": "string_decoder",
+      "bytes": 22024,
+      "targets": {
+        "runtime": 22024
+      },
+      "version": "1.1.1",
+      "license": "MIT",
+      "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
+      "name": "diff",
+      "bytes": 19658,
+      "targets": {
+        "renderer": 16725,
+        "runtime": 2933
+      },
+      "version": "9.0.0",
+      "license": "BSD-3-Clause",
+      "licenseFile": "LICENSE",
+      "direct": true
+    },
+    {
+      "name": "unzipper",
+      "bytes": 18333,
+      "targets": {
+        "runtime": 18333
+      },
+      "version": "0.10.14",
+      "license": "MIT",
+      "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
+      "name": "@fast-csv/parse",
+      "bytes": 18235,
+      "targets": {
+        "runtime": 18235
+      },
+      "version": "4.3.6",
+      "license": "MIT",
+      "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
+      "name": "property-information",
+      "bytes": 18229,
+      "targets": {
+        "renderer": 18229
+      },
+      "version": "7.2.0",
+      "license": "MIT",
+      "licenseFile": "license",
+      "direct": false
+    },
+    {
+      "name": "minimatch",
+      "bytes": 17862,
+      "targets": {
+        "runtime": 17862
+      },
+      "version": "5.1.9",
+      "license": "ISC",
+      "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
+      "name": "@shikijs/core",
+      "bytes": 16901,
+      "targets": {
+        "renderer": 16901
+      },
+      "version": "4.2.0",
+      "license": "MIT",
+      "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
+      "name": "glob",
+      "bytes": 16519,
+      "targets": {
+        "runtime": 16519
+      },
+      "version": "7.2.3",
+      "license": "ISC",
+      "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
+      "name": "compress-commons",
+      "bytes": 16430,
+      "targets": {
+        "runtime": 16430
+      },
+      "version": "4.1.2",
+      "license": "MIT",
+      "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
+      "name": "archiver",
+      "bytes": 14099,
+      "targets": {
+        "runtime": 14099
+      },
+      "version": "5.3.2",
+      "license": "MIT",
+      "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
+      "name": "dayjs",
+      "bytes": 13499,
+      "targets": {
+        "runtime": 13499
+      },
+      "version": "1.11.23",
+      "license": "MIT",
+      "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
+      "name": "@base-ui/utils",
+      "bytes": 13483,
+      "targets": {
+        "renderer": 13483
+      },
+      "version": "0.4.0",
+      "license": "MIT",
+      "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
+      "name": "@shikijs/primitive",
+      "bytes": 13335,
+      "targets": {
+        "renderer": 13335
+      },
+      "version": "4.2.0",
+      "license": "MIT",
+      "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
+      "name": "lodash.groupby",
+      "bytes": 12637,
+      "targets": {
+        "runtime": 12637
+      },
+      "version": "4.6.0",
+      "license": "MIT",
+      "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
+      "name": "mdast-util-to-markdown",
+      "bytes": 11487,
+      "targets": {
+        "renderer": 11487
+      },
+      "version": "2.1.2",
+      "license": "MIT",
+      "licenseFile": "license",
+      "direct": false
+    },
+    {
+      "name": "graceful-fs",
+      "bytes": 10910,
+      "targets": {
+        "runtime": 10910
+      },
+      "version": "4.2.11",
+      "license": "ISC",
+      "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
+      "name": "tar-stream",
+      "bytes": 10829,
+      "targets": {
+        "runtime": 10829
+      },
+      "version": "2.2.0",
+      "license": "MIT",
+      "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
+      "name": "mdast-util-to-hast",
+      "bytes": 10735,
+      "targets": {
+        "renderer": 10735
+      },
+      "version": "13.2.1",
+      "license": "MIT",
+      "licenseFile": "license",
+      "direct": false
+    },
+    {
+      "name": "uuid",
+      "bytes": 10598,
+      "targets": {
+        "runtime": 10598
+      },
+      "version": "11.1.1",
+      "license": "MIT",
+      "licenseFile": "LICENSE.md",
+      "direct": false
+    },
+    {
+      "name": "lodash.isequal",
+      "bytes": 10507,
+      "targets": {
+        "runtime": 10507
+      },
+      "version": "4.5.0",
+      "license": "MIT",
+      "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
+      "name": "mdast-util-from-markdown",
+      "bytes": 10233,
+      "targets": {
+        "renderer": 10233
+      },
+      "version": "2.0.3",
+      "license": "MIT",
+      "licenseFile": "license",
+      "direct": false
+    },
+    {
+      "name": "micromark",
+      "bytes": 9396,
+      "targets": {
+        "renderer": 9396
+      },
+      "version": "4.0.2",
+      "license": "MIT",
+      "licenseFile": "license",
+      "direct": false
+    },
+    {
+      "name": "@shikijs/themes",
+      "bytes": 9074,
+      "targets": {
+        "renderer": 9074
+      },
+      "version": "4.2.0",
+      "license": "MIT",
+      "licenseFile": "LICENSE",
+      "direct": true
+    },
+    {
+      "name": "react",
+      "bytes": 8394,
+      "targets": {
+        "renderer": 8394
+      },
+      "version": "19.3.0",
+      "license": "MIT",
+      "licenseFile": "LICENSE",
+      "direct": true
+    },
+    {
+      "name": "hast-util-to-html",
+      "bytes": 7876,
+      "targets": {
+        "renderer": 7876
+      },
+      "version": "9.0.5",
+      "license": "MIT",
+      "licenseFile": "license",
+      "direct": false
+    },
+    {
+      "name": "@fast-csv/format",
+      "bytes": 7714,
+      "targets": {
+        "runtime": 7714
+      },
+      "version": "4.3.5",
+      "license": "MIT",
+      "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
+      "name": "@floating-ui/dom",
+      "bytes": 7140,
+      "targets": {
+        "renderer": 7140
+      },
+      "version": "1.8.0",
+      "license": "MIT",
+      "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
+      "name": "archiver-utils",
+      "bytes": 6785,
+      "targets": {
+        "runtime": 6785
+      },
+      "version": "2.1.0",
+      "license": "MIT",
+      "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
+      "name": "@floating-ui/core",
+      "bytes": 6475,
+      "targets": {
+        "renderer": 6475
+      },
+      "version": "1.8.0",
+      "license": "MIT",
+      "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
+      "name": "brace-expansion",
+      "bytes": 6280,
+      "targets": {
+        "runtime": 6280
+      },
+      "version": "2.1.7",
+      "license": "MIT",
+      "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
+      "name": "tmp",
+      "bytes": 6127,
+      "targets": {
+        "runtime": 6127
+      },
+      "version": "0.2.7",
+      "license": "MIT",
+      "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
+      "name": "hast-util-to-jsx-runtime",
+      "bytes": 5854,
+      "targets": {
+        "renderer": 5854
+      },
+      "version": "2.3.6",
+      "license": "MIT",
+      "licenseFile": "license",
+      "direct": false
+    },
+    {
+      "name": "bl",
+      "bytes": 5654,
+      "targets": {
+        "runtime": 5654
+      },
+      "version": "4.1.0",
+      "license": "MIT",
+      "licenseFile": "LICENSE.md",
+      "direct": false
+    },
+    {
+      "name": "lodash.union",
+      "bytes": 5649,
+      "targets": {
+        "runtime": 5649
+      },
+      "version": "4.6.0",
+      "license": "MIT",
+      "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
+      "name": "micromark-extension-gfm-table",
+      "bytes": 5638,
+      "targets": {
+        "renderer": 5638
+      },
+      "version": "2.1.2",
+      "license": "MIT",
+      "licenseFile": "license",
+      "direct": false
+    },
+    {
+      "name": "lodash.difference",
+      "bytes": 5561,
+      "targets": {
+        "runtime": 5561
+      },
+      "version": "4.5.0",
+      "license": "MIT",
+      "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
+      "name": "vfile",
+      "bytes": 5145,
+      "targets": {
+        "renderer": 5145
+      },
+      "version": "6.0.3",
+      "license": "MIT",
+      "licenseFile": "license",
+      "direct": false
+    },
+    {
+      "name": "safe-buffer",
+      "bytes": 4707,
+      "targets": {
+        "runtime": 4707
+      },
+      "version": "5.1.2",
+      "license": "MIT",
+      "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
+      "name": "lodash.uniq",
+      "bytes": 4509,
+      "targets": {
+        "runtime": 4509
+      },
+      "version": "4.5.0",
+      "license": "MIT",
+      "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
+      "name": "unified",
+      "bytes": 4168,
+      "targets": {
+        "renderer": 4168
+      },
+      "version": "11.0.5",
+      "license": "MIT",
+      "licenseFile": "license",
+      "direct": false
+    },
+    {
+      "name": "xmlchars",
+      "bytes": 4149,
+      "targets": {
+        "runtime": 4149
+      },
+      "version": "2.2.0",
+      "license": "MIT",
+      "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
+      "name": "micromark-extension-gfm-footnote",
+      "bytes": 4029,
+      "targets": {
+        "renderer": 4029
+      },
+      "version": "2.1.0",
+      "license": "MIT",
+      "licenseFile": "license",
+      "direct": false
+    },
+    {
+      "name": "binary",
+      "bytes": 4029,
+      "targets": {
+        "runtime": 4029
+      },
+      "version": "0.3.0",
+      "license": "MIT",
+      "licenseFile": null,
+      "direct": false
+    },
+    {
+      "name": "traverse",
+      "bytes": 3920,
+      "targets": {
+        "runtime": 3920
+      },
+      "version": "0.3.9",
+      "license": "MIT/X11",
+      "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
+      "name": "rimraf",
+      "bytes": 3917,
+      "targets": {
+        "runtime": 3917
+      },
+      "version": "2.7.1",
+      "license": "ISC",
+      "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
+      "name": "@floating-ui/utils",
+      "bytes": 3849,
+      "targets": {
+        "renderer": 3849
+      },
+      "version": "0.2.12",
+      "license": "MIT",
+      "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
+      "name": "micromark-extension-gfm-autolink-literal",
+      "bytes": 3733,
+      "targets": {
+        "renderer": 3733
+      },
+      "version": "2.1.0",
+      "license": "MIT",
+      "licenseFile": "license",
+      "direct": false
+    },
+    {
+      "name": "scheduler",
+      "bytes": 3713,
+      "targets": {
+        "renderer": 3713
+      },
+      "version": "0.28.0",
+      "license": "MIT",
+      "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
+      "name": "micromark-util-subtokenize",
+      "bytes": 3533,
+      "targets": {
+        "renderer": 3533
+      },
+      "version": "2.1.0",
+      "license": "MIT",
+      "licenseFile": "license",
+      "direct": false
+    },
+    {
+      "name": "buffer-crc32",
+      "bytes": 3508,
+      "targets": {
+        "runtime": 3508
+      },
+      "version": "0.2.13",
+      "license": "MIT",
+      "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
+      "name": "character-entities-html4",
+      "bytes": 3481,
+      "targets": {
+        "renderer": 3481
+      },
+      "version": "2.1.0",
+      "license": "MIT",
+      "licenseFile": "license",
+      "direct": false
+    },
+    {
+      "name": "lie",
+      "bytes": 3450,
+      "targets": {
+        "runtime": 3450
+      },
+      "version": "3.3.0",
+      "license": "MIT",
+      "licenseFile": "license.md",
+      "direct": false
+    },
+    {
+      "name": "readdir-glob",
+      "bytes": 3214,
+      "targets": {
+        "runtime": 3214
+      },
+      "version": "1.1.3",
+      "license": "Apache-2.0",
+      "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
+      "name": "fs.realpath",
+      "bytes": 3096,
+      "targets": {
+        "runtime": 3096
+      },
+      "version": "1.0.0",
+      "license": "ISC",
+      "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
+      "name": "@ungap/structured-clone",
+      "bytes": 3056,
+      "targets": {
+        "renderer": 3056
+      },
+      "version": "1.4.0",
+      "license": "ISC",
+      "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
+      "name": "buffers",
+      "bytes": 3030,
+      "targets": {
+        "runtime": 3030
+      },
+      "version": "0.1.1",
+      "license": "UNKNOWN",
+      "licenseFile": null,
+      "direct": false
+    },
+    {
+      "name": "@floating-ui/react-dom",
+      "bytes": 2815,
+      "targets": {
+        "renderer": 2815
+      },
+      "version": "2.1.9",
+      "license": "MIT",
+      "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
+      "name": "react-markdown",
+      "bytes": 2803,
+      "targets": {
+        "renderer": 2803
+      },
+      "version": "10.1.0",
+      "license": "MIT",
+      "licenseFile": "license",
+      "direct": true
+    },
+    {
+      "name": "lodash.defaults",
+      "bytes": 2618,
+      "targets": {
+        "runtime": 2618
+      },
+      "version": "4.2.0",
+      "license": "MIT",
+      "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
+      "name": "@xterm/addon-web-links",
+      "bytes": 2357,
+      "targets": {
+        "renderer": 2357
+      },
+      "version": "0.12.0",
+      "license": "MIT",
+      "licenseFile": "LICENSE",
+      "direct": true
+    },
+    {
+      "name": "mdast-util-gfm-autolink-literal",
+      "bytes": 2097,
+      "targets": {
+        "renderer": 2097
+      },
+      "version": "2.0.1",
+      "license": "MIT",
+      "licenseFile": "license",
+      "direct": false
+    },
+    {
+      "name": "crc-32",
+      "bytes": 1928,
+      "targets": {
+        "runtime": 1928
+      },
+      "version": "1.2.2",
+      "license": "Apache-2.0",
+      "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
+      "name": "zip-stream",
+      "bytes": 1928,
+      "targets": {
+        "runtime": 1928
+      },
+      "version": "4.1.1",
+      "license": "MIT",
+      "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
+      "name": "@tanstack/react-virtual",
+      "bytes": 1840,
+      "targets": {
+        "renderer": 1840
+      },
+      "version": "3.14.13",
+      "license": "MIT",
+      "licenseFile": "LICENSE",
+      "direct": true
+    },
+    {
+      "name": "chainsaw",
+      "bytes": 1785,
+      "targets": {
+        "runtime": 1785
+      },
+      "version": "0.1.0",
+      "license": "MIT/X11",
+      "licenseFile": null,
+      "direct": false
+    },
+    {
+      "name": "mdast-util-gfm-table",
+      "bytes": 1774,
+      "targets": {
+        "renderer": 1774
+      },
+      "version": "2.0.0",
+      "license": "MIT",
+      "licenseFile": "license",
+      "direct": false
+    },
+    {
+      "name": "setimmediate",
+      "bytes": 1743,
+      "targets": {
+        "runtime": 1743
+      },
+      "version": "1.0.5",
+      "license": "MIT",
+      "licenseFile": "LICENSE.txt",
+      "direct": false
+    },
+    {
+      "name": "use-sync-external-store",
+      "bytes": 1691,
+      "targets": {
+        "renderer": 1691
+      },
+      "version": "1.7.0",
+      "license": "MIT",
+      "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
+      "name": "stringify-entities",
+      "bytes": 1662,
+      "targets": {
+        "renderer": 1662
+      },
+      "version": "4.0.4",
+      "license": "MIT",
+      "licenseFile": "license",
+      "direct": false
+    },
+    {
+      "name": "fast-csv",
+      "bytes": 1651,
+      "targets": {
+        "runtime": 1651
+      },
+      "version": "4.3.6",
+      "license": "MIT",
+      "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
+      "name": "mdast-util-gfm-footnote",
+      "bytes": 1645,
+      "targets": {
+        "renderer": 1645
+      },
+      "version": "2.1.0",
+      "license": "MIT",
+      "licenseFile": "license",
+      "direct": false
+    },
+    {
+      "name": "inline-style-parser",
+      "bytes": 1641,
+      "targets": {
+        "renderer": 1641
+      },
+      "version": "0.2.7",
+      "license": "MIT",
+      "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
+      "name": "markdown-table",
+      "bytes": 1571,
+      "targets": {
+        "renderer": 1571
+      },
+      "version": "3.0.4",
+      "license": "MIT",
+      "licenseFile": "license",
+      "direct": false
+    },
+    {
+      "name": "micromark-extension-gfm-strikethrough",
+      "bytes": 1553,
+      "targets": {
+        "renderer": 1553
+      },
+      "version": "2.1.0",
+      "license": "MIT",
+      "licenseFile": "license",
+      "direct": false
+    },
+    {
+      "name": "end-of-stream",
+      "bytes": 1474,
+      "targets": {
+        "runtime": 1474
+      },
+      "version": "1.4.5",
+      "license": "MIT",
+      "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
+      "name": "vfile-message",
+      "bytes": 1353,
+      "targets": {
+        "renderer": 1353
+      },
+      "version": "4.0.3",
+      "license": "MIT",
+      "licenseFile": "license",
+      "direct": false
+    },
+    {
+      "name": "lodash.flatten",
+      "bytes": 1251,
+      "targets": {
+        "runtime": 1251
+      },
+      "version": "4.4.0",
+      "license": "MIT",
+      "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
+      "name": "extend",
+      "bytes": 1202,
+      "targets": {
+        "renderer": 1202
+      },
+      "version": "3.0.2",
+      "license": "MIT",
+      "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
+      "name": "crc32-stream",
+      "bytes": 1199,
+      "targets": {
+        "runtime": 1199
+      },
+      "version": "4.0.3",
+      "license": "MIT",
+      "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
+      "name": "@xterm/addon-fit",
+      "bytes": 1191,
+      "targets": {
+        "renderer": 1191
+      },
+      "version": "0.11.0",
+      "license": "MIT",
+      "licenseFile": "LICENSE",
+      "direct": true
+    },
+    {
+      "name": "mdast-util-find-and-replace",
+      "bytes": 1174,
+      "targets": {
+        "renderer": 1174
+      },
+      "version": "3.0.2",
+      "license": "MIT",
+      "licenseFile": "license",
+      "direct": false
+    },
+    {
+      "name": "mdast-util-gfm-task-list-item",
+      "bytes": 1147,
+      "targets": {
+        "renderer": 1147
+      },
+      "version": "2.0.0",
+      "license": "MIT",
+      "licenseFile": "license",
+      "direct": false
+    },
+    {
+      "name": "core-util-is",
+      "bytes": 1087,
+      "targets": {
+        "runtime": 1087
+      },
+      "version": "1.0.3",
+      "license": "MIT",
+      "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
+      "name": "immediate",
+      "bytes": 934,
+      "targets": {
+        "runtime": 934
+      },
+      "version": "3.0.6",
+      "license": "MIT",
+      "licenseFile": "LICENSE.txt",
+      "direct": false
+    },
+    {
+      "name": "micromark-factory-destination",
+      "bytes": 925,
+      "targets": {
+        "renderer": 925
+      },
+      "version": "2.0.1",
+      "license": "MIT",
+      "licenseFile": "license",
+      "direct": false
+    },
+    {
+      "name": "buffer-indexof-polyfill",
+      "bytes": 906,
+      "targets": {
+        "runtime": 906
+      },
+      "version": "1.0.2",
+      "license": "MIT",
+      "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
+      "name": "duplexer2",
+      "bytes": 902,
+      "targets": {
+        "runtime": 902
+      },
+      "version": "0.1.4",
+      "license": "BSD-3-Clause",
+      "licenseFile": "LICENSE.md",
+      "direct": false
+    },
+    {
+      "name": "mkdirp",
+      "bytes": 899,
+      "targets": {
+        "runtime": 899
+      },
+      "version": "0.5.6",
+      "license": "MIT",
+      "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
+      "name": "lodash.isfunction",
+      "bytes": 873,
+      "targets": {
+        "runtime": 873
+      },
+      "version": "3.0.9",
+      "license": "MIT",
+      "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
+      "name": "character-entities-legacy",
+      "bytes": 839,
+      "targets": {
+        "renderer": 839
+      },
+      "version": "3.0.0",
+      "license": "MIT",
+      "licenseFile": "license",
+      "direct": false
+    },
+    {
+      "name": "micromark-extension-gfm-task-list-item",
+      "bytes": 827,
+      "targets": {
+        "renderer": 827
+      },
+      "version": "2.1.0",
+      "license": "MIT",
+      "licenseFile": "license",
+      "direct": false
+    },
+    {
+      "name": "unist-util-visit-parents",
+      "bytes": 824,
+      "targets": {
+        "renderer": 824
+      },
+      "version": "6.0.2",
+      "license": "MIT",
+      "licenseFile": "license",
+      "direct": false
+    },
+    {
+      "name": "style-to-js",
+      "bytes": 779,
+      "targets": {
+        "renderer": 779
+      },
+      "version": "1.1.21",
+      "license": "MIT",
+      "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
+      "name": "trough",
+      "bytes": 767,
+      "targets": {
+        "renderer": 767
+      },
+      "version": "2.2.0",
+      "license": "MIT",
+      "licenseFile": "license",
+      "direct": false
+    },
+    {
+      "name": "unist-util-is",
+      "bytes": 766,
+      "targets": {
+        "renderer": 766
+      },
+      "version": "6.0.1",
+      "license": "MIT",
+      "licenseFile": "license",
+      "direct": false
+    },
+    {
+      "name": "lodash.escaperegexp",
+      "bytes": 738,
+      "targets": {
+        "runtime": 738
+      },
+      "version": "4.1.2",
+      "license": "MIT",
+      "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
+      "name": "process-nextick-args",
+      "bytes": 716,
+      "targets": {
+        "runtime": 716
+      },
+      "version": "2.0.1",
+      "license": "MIT",
+      "licenseFile": "license.md",
+      "direct": false
+    },
+    {
+      "name": "once",
+      "bytes": 674,
+      "targets": {
+        "runtime": 674
+      },
+      "version": "1.4.0",
+      "license": "ISC",
+      "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
+      "name": "lazystream",
+      "bytes": 657,
+      "targets": {
+        "runtime": 657
+      },
+      "version": "1.0.1",
+      "license": "MIT",
+      "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
+      "name": "micromark-factory-label",
+      "bytes": 635,
+      "targets": {
+        "renderer": 635
+      },
+      "version": "2.0.1",
+      "license": "MIT",
+      "licenseFile": "license",
+      "direct": false
+    },
+    {
+      "name": "lodash.isplainobject",
+      "bytes": 623,
+      "targets": {
+        "runtime": 623
+      },
+      "version": "4.0.6",
+      "license": "MIT",
+      "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
+      "name": "balanced-match",
+      "bytes": 618,
+      "targets": {
+        "runtime": 618
+      },
+      "version": "1.0.2",
+      "license": "MIT",
+      "licenseFile": "LICENSE.md",
+      "direct": false
+    },
+    {
+      "name": "mdast-util-gfm-strikethrough",
+      "bytes": 606,
+      "targets": {
+        "renderer": 606
+      },
+      "version": "2.0.0",
+      "license": "MIT",
+      "licenseFile": "license",
+      "direct": false
+    },
+    {
+      "name": "micromark-factory-title",
+      "bytes": 595,
+      "targets": {
+        "renderer": 595
+      },
+      "version": "2.0.1",
+      "license": "MIT",
+      "licenseFile": "license",
+      "direct": false
+    },
+    {
+      "name": "micromark-util-html-tag-name",
+      "bytes": 528,
+      "targets": {
+        "renderer": 528
+      },
+      "version": "2.0.1",
+      "license": "MIT",
+      "licenseFile": "license",
+      "direct": false
+    },
+    {
+      "name": "mdast-util-to-string",
+      "bytes": 500,
+      "targets": {
+        "renderer": 500
+      },
+      "version": "4.0.0",
+      "license": "MIT",
+      "licenseFile": "license",
+      "direct": false
+    },
+    {
+      "name": "micromark-util-sanitize-uri",
+      "bytes": 487,
+      "targets": {
+        "renderer": 487
+      },
+      "version": "2.0.1",
+      "license": "MIT",
+      "licenseFile": "license",
+      "direct": false
+    },
+    {
+      "name": "inherits",
+      "bytes": 472,
+      "targets": {
+        "runtime": 472
+      },
+      "version": "2.0.4",
+      "license": "ISC",
+      "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
+      "name": "inflight",
+      "bytes": 450,
+      "targets": {
+        "runtime": 450
+      },
+      "version": "1.0.6",
+      "license": "ISC",
+      "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
+      "name": "micromark-util-character",
+      "bytes": 433,
+      "targets": {
+        "renderer": 433
+      },
+      "version": "2.1.1",
+      "license": "MIT",
+      "licenseFile": "license",
+      "direct": false
+    },
+    {
+      "name": "style-to-object",
+      "bytes": 417,
+      "targets": {
+        "renderer": 417
+      },
+      "version": "1.0.14",
+      "license": "MIT",
+      "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
+      "name": "wrappy",
+      "bytes": 415,
+      "targets": {
+        "runtime": 415
+      },
+      "version": "1.0.2",
+      "license": "ISC",
+      "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
+      "name": "trim-lines",
+      "bytes": 412,
+      "targets": {
+        "renderer": 412
+      },
+      "version": "3.0.1",
+      "license": "MIT",
+      "licenseFile": "license",
+      "direct": false
+    },
+    {
+      "name": "normalize-path",
+      "bytes": 372,
+      "targets": {
+        "runtime": 372
+      },
+      "version": "3.0.0",
+      "license": "MIT",
+      "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
+      "name": "micromark-util-combine-extensions",
+      "bytes": 369,
+      "targets": {
+        "renderer": 369
+      },
+      "version": "2.0.1",
+      "license": "MIT",
+      "licenseFile": "license",
+      "direct": false
+    },
+    {
+      "name": "unist-util-position",
+      "bytes": 349,
+      "targets": {
+        "renderer": 349
+      },
+      "version": "5.0.0",
+      "license": "MIT",
+      "licenseFile": "license",
+      "direct": false
+    },
+    {
+      "name": "path-is-absolute",
+      "bytes": 317,
+      "targets": {
+        "runtime": 317
+      },
+      "version": "1.0.1",
+      "license": "MIT",
+      "licenseFile": "license",
+      "direct": false
+    },
+    {
+      "name": "unist-util-stringify-position",
+      "bytes": 310,
+      "targets": {
+        "renderer": 310
+      },
+      "version": "4.0.0",
+      "license": "MIT",
+      "licenseFile": "license",
+      "direct": false
+    },
+    {
+      "name": "html-url-attributes",
+      "bytes": 301,
+      "targets": {
+        "renderer": 301
+      },
+      "version": "3.0.1",
+      "license": "MIT",
+      "licenseFile": "license",
+      "direct": false
+    },
+    {
+      "name": "micromark-util-chunked",
+      "bytes": 299,
+      "targets": {
+        "renderer": 299
+      },
+      "version": "2.0.1",
+      "license": "MIT",
+      "licenseFile": "license",
+      "direct": false
+    },
+    {
+      "name": "zwitch",
+      "bytes": 278,
+      "targets": {
+        "renderer": 278
+      },
+      "version": "2.0.4",
+      "license": "MIT",
+      "licenseFile": "license",
+      "direct": false
+    },
+    {
+      "name": "micromark-util-decode-string",
+      "bytes": 262,
+      "targets": {
+        "renderer": 262
+      },
+      "version": "2.0.1",
+      "license": "MIT",
+      "licenseFile": "license",
+      "direct": false
+    },
+    {
+      "name": "remark-gfm",
+      "bytes": 260,
+      "targets": {
+        "renderer": 260
+      },
+      "version": "4.0.1",
+      "license": "MIT",
+      "licenseFile": "license",
+      "direct": true
+    },
+    {
+      "name": "concat-map",
+      "bytes": 237,
+      "targets": {
+        "runtime": 237
+      },
+      "version": "0.0.1",
+      "license": "MIT",
+      "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
+      "name": "mdast-util-phrasing",
+      "bytes": 218,
+      "targets": {
+        "renderer": 218
+      },
+      "version": "4.1.0",
+      "license": "MIT",
+      "licenseFile": "license",
+      "direct": false
+    },
+    {
+      "name": "is-plain-obj",
+      "bytes": 212,
+      "targets": {
+        "renderer": 212
+      },
+      "version": "4.1.0",
+      "license": "MIT",
+      "licenseFile": "license",
+      "direct": false
+    },
+    {
+      "name": "lodash.isboolean",
+      "bytes": 212,
+      "targets": {
+        "runtime": 212
+      },
+      "version": "3.0.3",
+      "license": "MIT",
+      "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
+      "name": "micromark-util-decode-numeric-character-reference",
+      "bytes": 207,
+      "targets": {
+        "renderer": 207
+      },
+      "version": "2.0.2",
+      "license": "MIT",
+      "licenseFile": "license",
+      "direct": false
+    },
+    {
+      "name": "unist-util-visit",
+      "bytes": 205,
+      "targets": {
+        "renderer": 205
+      },
+      "version": "5.1.0",
+      "license": "MIT",
+      "licenseFile": "license",
+      "direct": false
+    },
+    {
+      "name": "listenercount",
+      "bytes": 201,
+      "targets": {
+        "runtime": 201
+      },
+      "version": "1.0.1",
+      "license": "ISC",
+      "licenseFile": "LICENSE.md",
+      "direct": false
+    },
+    {
+      "name": "longest-streak",
+      "bytes": 199,
+      "targets": {
+        "renderer": 199
+      },
+      "version": "3.1.0",
+      "license": "MIT",
+      "licenseFile": "license",
+      "direct": false
+    },
+    {
+      "name": "remark-parse",
+      "bytes": 192,
+      "targets": {
+        "renderer": 192
+      },
+      "version": "11.0.0",
+      "license": "MIT",
+      "licenseFile": "license",
+      "direct": false
+    },
+    {
+      "name": "micromark-factory-space",
+      "bytes": 187,
+      "targets": {
+        "renderer": 187
+      },
+      "version": "2.0.1",
+      "license": "MIT",
+      "licenseFile": "license",
+      "direct": false
+    },
+    {
+      "name": "estree-util-is-identifier-name",
+      "bytes": 184,
+      "targets": {
+        "renderer": 184
+      },
+      "version": "3.0.0",
+      "license": "MIT",
+      "licenseFile": "license",
+      "direct": false
+    },
+    {
+      "name": "micromark-factory-whitespace",
+      "bytes": 172,
+      "targets": {
+        "renderer": 172
+      },
+      "version": "2.0.1",
+      "license": "MIT",
+      "licenseFile": "license",
+      "direct": false
+    },
+    {
+      "name": "ccount",
+      "bytes": 172,
+      "targets": {
+        "renderer": 172
+      },
+      "version": "2.0.1",
+      "license": "MIT",
+      "licenseFile": "license",
+      "direct": false
+    },
+    {
+      "name": "decode-named-character-reference",
+      "bytes": 163,
+      "targets": {
+        "renderer": 163
+      },
+      "version": "1.3.0",
+      "license": "MIT",
+      "licenseFile": "license",
+      "direct": false
+    },
+    {
+      "name": "html-void-elements",
+      "bytes": 162,
+      "targets": {
+        "renderer": 162
+      },
+      "version": "3.0.0",
+      "license": "MIT",
+      "licenseFile": "license",
+      "direct": false
+    },
+    {
+      "name": "escape-string-regexp",
+      "bytes": 147,
+      "targets": {
+        "renderer": 147
+      },
+      "version": "5.0.0",
+      "license": "MIT",
+      "licenseFile": "license",
+      "direct": false
+    },
+    {
+      "name": "remark-rehype",
+      "bytes": 146,
+      "targets": {
+        "renderer": 146
+      },
+      "version": "11.1.2",
+      "license": "MIT",
+      "licenseFile": "license",
+      "direct": false
+    },
+    {
+      "name": "hast-util-whitespace",
+      "bytes": 138,
+      "targets": {
+        "renderer": 138
+      },
+      "version": "3.0.0",
+      "license": "MIT",
+      "licenseFile": "license",
+      "direct": false
+    },
+    {
+      "name": "comma-separated-tokens",
+      "bytes": 128,
+      "targets": {
+        "renderer": 128
+      },
+      "version": "2.0.3",
+      "license": "MIT",
+      "licenseFile": "license",
+      "direct": false
+    },
+    {
+      "name": "micromark-util-resolve-all",
+      "bytes": 124,
+      "targets": {
+        "renderer": 124
+      },
+      "version": "2.0.1",
+      "license": "MIT",
+      "licenseFile": "license",
+      "direct": false
+    },
+    {
+      "name": "isarray",
+      "bytes": 118,
+      "targets": {
+        "runtime": 118
+      },
+      "version": "1.0.0",
+      "license": "MIT",
+      "licenseFile": null,
+      "direct": false
+    },
+    {
+      "name": "mdast-util-gfm",
+      "bytes": 110,
+      "targets": {
+        "renderer": 110
+      },
+      "version": "3.1.0",
+      "license": "MIT",
+      "licenseFile": "license",
+      "direct": false
+    },
+    {
+      "name": "micromark-util-normalize-identifier",
+      "bytes": 99,
+      "targets": {
+        "renderer": 99
+      },
+      "version": "2.0.1",
+      "license": "MIT",
+      "licenseFile": "license",
+      "direct": false
+    },
+    {
+      "name": "fs-constants",
+      "bytes": 79,
+      "targets": {
+        "runtime": 79
+      },
+      "version": "1.0.0",
+      "license": "MIT",
+      "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
+      "name": "@shikijs/types",
+      "bytes": 75,
+      "targets": {
+        "renderer": 75
+      },
+      "version": "4.2.0",
+      "license": "MIT",
+      "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
+      "name": "lodash.isundefined",
+      "bytes": 71,
+      "targets": {
+        "runtime": 71
+      },
+      "version": "3.0.1",
+      "license": "MIT",
+      "licenseFile": "LICENSE.txt",
+      "direct": false
+    },
+    {
+      "name": "lodash.isnil",
+      "bytes": 68,
+      "targets": {
+        "runtime": 68
+      },
+      "version": "4.0.0",
+      "license": "MIT",
+      "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
+      "name": "micromark-util-classify-character",
+      "bytes": 67,
+      "targets": {
+        "renderer": 67
+      },
+      "version": "2.0.1",
+      "license": "MIT",
+      "licenseFile": "license",
+      "direct": false
+    },
+    {
+      "name": "util-deprecate",
+      "bytes": 59,
+      "targets": {
+        "runtime": 59
+      },
+      "version": "1.0.2",
+      "license": "MIT",
+      "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
+      "name": "micromark-extension-gfm",
+      "bytes": 54,
+      "targets": {
+        "renderer": 54
+      },
+      "version": "3.0.0",
+      "license": "MIT",
+      "licenseFile": "license",
+      "direct": false
+    },
+    {
+      "name": "space-separated-tokens",
+      "bytes": 41,
+      "targets": {
+        "renderer": 41
+      },
+      "version": "2.0.2",
+      "license": "MIT",
+      "licenseFile": "license",
+      "direct": false
+    },
+    {
+      "name": "bail",
+      "bytes": 28,
+      "targets": {
+        "renderer": 28
+      },
+      "version": "2.0.2",
+      "license": "MIT",
+      "licenseFile": "license",
+      "direct": false
+    }
+  ],
+  "unbundledDirectDependencies": [
+    {
+      "name": "node-pty",
+      "reason": "native, shipped from node_modules by the packager"
+    }
+  ]
+}

@@ -1,15 +1,16 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { getSubagentActivity, hasSubagentActivity, projectSubagentActivity, subagentState } from '../src/renderer/subagentActivity.ts';
+import { childTimelineItems, formatElapsed, getSubagentActivity, hasSubagentActivity, phaseCounts, phaseGlyph, projectSubagentActivity, selectSubagent, selectedSubagent, subagentPhase, subagentState, subscribeSubagentSelection } from '../src/renderer/subagentActivity.ts';
 import type { TimelineItem } from '../src/shared/protocol.ts';
 
+const T0 = '2026-01-01T00:00:00Z';
 const item = (id: string, data: Record<string, unknown>, createdAt = '2026-01-01T00:00:00Z'): TimelineItem => ({id, chatId:'chat', kind:'tool', text:'', createdAt, data});
 
 test('projects named agents and keeps lifecycle state optional', () => {
   const rows = projectSubagentActivity([item('a', {
     type:'collabAgentToolCall', receiverThreadIds:['thread-123456789'], receiverAgents:JSON.stringify([{threadId:'thread-123456789',name:'Reviewer',role:'review'}]), agentsStates:JSON.stringify({'thread-123456789':{status:'inProgress'}}), model:'codex/model', prompt:'Review it',
   })]);
-  assert.deepEqual(rows[0], {id:'thread-123456789',threadId:'thread-123456789',name:'Reviewer',state:'inProgress',model:'codex/model',role:'review',prompt:'Review it'});
+  assert.deepEqual(rows[0], {id:'thread-123456789',threadId:'thread-123456789',name:'Reviewer',state:'inProgress',model:'codex/model',role:'review',prompt:'Review it',startedAt:T0,updatedAt:T0});
 });
 
 test('merges repeated and out-of-order reports without duplicate rows', () => {
@@ -63,7 +64,7 @@ test('does not promote parent tools, status, output, or sender into child activi
     item('shell', {type:'commandExecution', receiverThreadIds:['fake'], status:'running'}),
     item('collab', {type:'collabAgentToolCall', senderThreadId:'parent', receiverThreadIds:['parent','child'], status:'completed', result:'Parent acknowledgement', agentsStates:{parent:{status:'running'}}}),
   ]);
-  assert.deepEqual(rows, [{id:'child',threadId:'child',name:'child'}]);
+  assert.deepEqual(rows, [{id:'child',threadId:'child',name:'child',startedAt:T0,updatedAt:T0}]);
 });
 
 test('keyed state-only reports create exact identities and override stale receiver state', () => {
@@ -82,8 +83,8 @@ test('broadcast metadata is not attributed to every parallel child', () => {
     agentsStates:{a:{status:'running'}, b:{status:'queued'}},
   })]);
   assert.deepEqual(rows, [
-    {id:'a',threadId:'a',name:'a',state:'running'},
-    {id:'b',threadId:'b',name:'b',state:'queued'},
+    {id:'a',threadId:'a',name:'a',state:'running',startedAt:T0,updatedAt:T0},
+    {id:'b',threadId:'b',name:'b',state:'queued',startedAt:T0,updatedAt:T0},
   ]);
 });
 
@@ -91,7 +92,7 @@ test('handles invalid retained JSON and states without inventing success', () =>
   const rows = projectSubagentActivity([item('truncated', {
     type:'collabAgentToolCall', receiverThreadIds:['child','child'], receiverAgents:'[{[Details truncated]', agentsStates:'{"child":', status:'completed',
   })]);
-  assert.deepEqual(rows, [{id:'child',threadId:'child',name:'child'}]);
+  assert.deepEqual(rows, [{id:'child',threadId:'child',name:'child',startedAt:T0,updatedAt:T0}]);
 });
 
 test('anonymous record matching keeps original positions when sender is excluded', () => {
@@ -127,4 +128,74 @@ test('aggregates explicit lifecycle states and shares immutable timeline project
   assert.equal(next.counts.working, 2);
   assert.equal(next.counts.done, 0);
   assert.equal(summary.counts.done, 1, 'new snapshots cannot mutate old cached results');
+});
+
+test('reports bound the elapsed window: first report starts it, the latest ends it', () => {
+  const rows = projectSubagentActivity([
+    item('spawn', {type:'collabAgentToolCall', receiverThreadIds:['c'], agentsStates:{c:'running'}}, '2026-01-01T00:00:01Z'),
+    item('undated', {type:'collabAgentToolCall', receiverThreadIds:['c']}, ''),
+    item('done', {type:'collabAgentToolCall', receiverThreadIds:['c'], agentsStates:{c:{status:'completed', message:'ok'}}}, '2026-01-01T00:01:05Z'),
+  ]);
+  assert.equal(rows[0].startedAt, '2026-01-01T00:00:01Z');
+  assert.equal(rows[0].updatedAt, '2026-01-01T00:01:05Z');
+  assert.equal(formatElapsed(64_000), '1m 04s');
+  assert.equal(formatElapsed(9_999), '9s');
+  assert.equal(formatElapsed(3_723_000), '1h 02m');
+  assert.equal(formatElapsed(-5), '0s');
+});
+
+test('separates running, completed, verified and failed; the child thread overrides a stale report', () => {
+  assert.deepEqual(subagentPhase({state:'running'}), {kind:'running', label:'Running'});
+  assert.deepEqual(subagentPhase({state:'completed'}), {kind:'completed', label:'Completed'});
+  assert.deepEqual(subagentPhase({state:'completed', result:'All green'}), {kind:'verified', label:'Reported back'});
+  assert.equal(subagentPhase({state:'errored', result:'partial'}).kind, 'failed', 'a failed child with output is not verified');
+  assert.equal(subagentPhase({state:'cancelled'}).label, 'Cancelled');
+  assert.equal(subagentPhase({state:'pendingInit'}).kind, 'waiting');
+  assert.equal(subagentPhase({state:'completed'}, 'running').kind, 'running', 'a resumed child runs again');
+  assert.equal(subagentPhase({state:'running'}, 'interrupted').label, 'Interrupted');
+  assert.equal(subagentPhase({state:'running', result:'x'}, 'completed').kind, 'verified');
+  assert.equal(subagentPhase({state:'failed'}, 'completed').kind, 'failed', 'a reported failure is not hidden by the thread');
+  assert.equal(subagentPhase({}).kind, 'unknown');
+  assert.deepEqual(phaseCounts([{id:'a',threadId:'a',name:'a',state:'running'},{id:'b',threadId:'b',name:'b',state:'done',result:'r'},{id:'c',threadId:'c',name:'c',state:'done'},{id:'d',threadId:'d',name:'d',state:'failed'}]),
+    {running:1, waiting:0, completed:1, verified:1, failed:1, unknown:0});
+  assert.deepEqual(['running','completed','verified','failed','waiting'].map(kind => phaseGlyph(kind as never)), ['working','done','done','failed','idle']);
+});
+
+test('child rows are grouped by the provider thread id, never by position', () => {
+  const rows: TimelineItem[] = [
+    item('p1', {type:'commandExecution', command:'ls'}),
+    item('c1', {type:'commandExecution', command:'npm test', threadId:'child-a'}),
+    item('x1', {type:'commandExecution', command:'cat', threadId:'child-b'}),
+    item('c2', {type:'fileChange', threadId:'child-a'}),
+    item('r', {type:'collabAgentToolCall', threadId:'child-a', receiverThreadIds:['child-a']}),
+  ];
+  assert.deepEqual(childTimelineItems(rows, 'child-a').map(row => row.id), ['c1','c2']);
+  assert.deepEqual(childTimelineItems(rows, 'none'), []);
+});
+
+test('selection is per conversation and notifies only on change', () => {
+  let calls = 0;
+  const off = subscribeSubagentSelection(() => calls++);
+  selectSubagent('chat-a', 'child');
+  selectSubagent('chat-a', 'child');
+  assert.equal(selectedSubagent('chat-a'), 'child');
+  assert.equal(selectedSubagent('chat-b'), null);
+  selectSubagent('chat-a', null);
+  assert.equal(selectedSubagent('chat-a'), null);
+  assert.equal(calls, 2);
+  off();
+  selectSubagent('chat-a', 'other');
+  assert.equal(calls, 2);
+  selectSubagent('chat-a', null);
+});
+
+test('DOGFOOD F51: a failed child keeps the provider\'s reason; a recovered child drops it', () => {
+  const failed = getSubagentActivity([item('r1', {type:'collabAgentToolCall', receiverThreadIds:['c'], agentsStates:{c:{status:'errored', message:'Out of context window'}}})]).agents[0];
+  assert.equal(failed.error, 'Out of context window');
+  assert.equal(subagentPhase(failed).kind, 'failed');
+  const recovered = getSubagentActivity([item('r1', {type:'collabAgentToolCall', receiverThreadIds:['c'], agentsStates:{c:{status:'errored', message:'Out of context window'}}}), item('r2', {type:'collabAgentToolCall', receiverThreadIds:['c'], agentsStates:{c:{status:'running'}}}, '2026-01-01T00:01:00Z')]).agents[0];
+  assert.equal(recovered.error, undefined);
+  const nested = getSubagentActivity([item('r3', {type:'collabAgentToolCall', receiverAgents:[{threadId:'d', status:'failed', error:{message:'model refused'}}]})]).agents[0];
+  assert.equal(nested.error, 'model refused');
+  assert.equal(getSubagentActivity([item('r4', {type:'collabAgentToolCall', receiverThreadIds:['e'], agentsStates:{e:{status:'completed', message:'done'}}})]).agents[0].error, undefined, 'a result is not an error');
 });

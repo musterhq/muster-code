@@ -1,0 +1,2 @@
+.status-dot[data-status='waiting'], .status-dot[data-status='reconnecting'] { color: var(--warn); }
+.status-dot[data-status='queued'] { color: var(--text-faint); }

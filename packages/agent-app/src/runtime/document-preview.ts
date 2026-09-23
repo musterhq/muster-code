@@ -42,6 +42,8 @@ const OFFICE_EXTS: Record<string, true> = { '.doc': true, '.docx': true, '.ppt':
 
 interface CacheEntry { revision: string; preview: DocumentPreview }
 let cache: CacheEntry | null = null;
+// A converted PDF (up to ~43 MB as base64) must not live in the main process forever.
+let cacheTimer: ReturnType<typeof setTimeout> | undefined;
 
 // --- Conversion queue (cap 4) ---
 
@@ -63,28 +65,34 @@ const inFlight = new Map<string, Promise<DocumentPreview>>();
 
 // --- soffice discovery ---
 
-const CANDIDATE_PATHS = [
-  join(homedir(),'.cache/codex-runtimes/codex-primary-runtime/dependencies/native/libreoffice-headless/libreoffice/LibreOfficeDev.app/Contents/MacOS/soffice'),
+/** Standard installs first; the Codex-bundled headless build is only a last resort. */
+export const CANDIDATE_PATHS = [
   '/Applications/LibreOffice.app/Contents/MacOS/soffice',
+  join(homedir(),'Applications/LibreOffice.app/Contents/MacOS/soffice'),
   '/Applications/LibreOfficeDev.app/Contents/MacOS/soffice',
-  '/usr/bin/libreoffice',
-  '/usr/bin/soffice',
-  '/usr/local/bin/libreoffice',
+  '/opt/homebrew/bin/soffice',
   '/usr/local/bin/soffice',
-  'soffice',
+  '/usr/local/bin/libreoffice',
+  '/usr/bin/soffice',
+  '/usr/bin/libreoffice',
+  '/snap/bin/libreoffice',
+  join(homedir(),'.cache/codex-runtimes/codex-primary-runtime/dependencies/native/libreoffice-headless/libreoffice/LibreOfficeDev.app/Contents/MacOS/soffice'),
 ];
 
-async function findSoffice(): Promise<string> {
+/** Renderers match this prefix to fall back to macOS Quick Look (filePresentation.LIBREOFFICE_MISSING). */
+export const LIBREOFFICE_MISSING = 'LibreOffice not installed';
+
+export async function findSoffice(candidates: readonly string[] = CANDIDATE_PATHS): Promise<string> {
   const env = process.env['MUSTER_SOFFICE_PATH'];
   if (env) {
     try { await fs.access(env, constants.X_OK); return env; } catch { /* fall through */ }
     throw new Error(`MUSTER_SOFFICE_PATH is set to "${env}" but it is not executable.`);
   }
-  for (const p of CANDIDATE_PATHS) {
+  for (const p of candidates) {
     try { await fs.access(p, constants.X_OK); return p; } catch { /* continue */ }
   }
   throw new Error(
-    'LibreOffice (soffice) not found. Install LibreOffice or set MUSTER_SOFFICE_PATH to the soffice executable path.'
+    `${LIBREOFFICE_MISSING}: Word, PowerPoint and OpenDocument files need LibreOffice for the in-app reader. Install LibreOffice or set MUSTER_SOFFICE_PATH to the soffice executable.`
   );
 }
 
@@ -264,6 +272,7 @@ async function doRead(root: string, rel: string): Promise<DocumentPreview> {
 
       // Update single-slot cache
       cache = { revision:revision+ext, preview };
+      clearTimeout(cacheTimer); cacheTimer = setTimeout(() => { cache = null; }, 60_000); cacheTimer.unref?.();
       return preview;
     } finally {
       inFlight.delete(revision+ext);

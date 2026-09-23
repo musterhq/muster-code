@@ -8,13 +8,24 @@ export interface ProviderBudgets {
   turnMs?: number;
   taskMs?: number;
 }
-/** Agent Mode opts into a finite four-hour turn while preserving the existing
- * three-minute idle watchdog. Other core callers keep their legacy defaults. */
+/** The largest budget the core accepts (≈24.8 days): effectively no limit. */
+export const UNLIMITED_MS = 2_147_483_647;
+/** Agent Mode never cuts a turn off: no absolute turn ceiling and no silence
+ * watchdog (long, quiet builds and subagent waits are normal). A run ends when it
+ * finishes or the user stops it. Only individual RPC requests keep a timeout. */
 export const DEFAULT_AGENT_PROVIDER_BUDGETS = Object.freeze({
-  idleMs: 180_000,
+  idleMs: UNLIMITED_MS,
   requestMs: 30_000,
-  turnMs: 4 * 60 * 60_000,
+  turnMs: UNLIMITED_MS,
 });
+/** Ceiling the core applies when budgets are unsupported: max(idle*8, 15min) with its legacy 180s idle default. */
+export const LEGACY_CORE_TURN_CEILING_MS = Math.max(180_000 * 8, 15 * 60_000);
+/** One line that states which ceiling a turn really runs under; for logs and diagnostics. */
+export function lifecycleDiagnostic(lifecycleSupported: boolean): string {
+  const minutes = (ms: number) => `${Math.round(ms / 60_000)}m`;
+  if (lifecycleSupported) return `Core run lifecycle v1: no turn or idle cutoff (runs end when finished or stopped); request timeout ${Math.round(DEFAULT_AGENT_PROVIDER_BUDGETS.requestMs / 1000)}s; cancellation is native.`;
+  return `Bundled core has no CODEX_RUN_LIFECYCLE_VERSION: only the idle timeout is honoured and every turn is killed at the legacy ceiling of ${LEGACY_CORE_TURN_CEILING_MS}ms (${minutes(LEGACY_CORE_TURN_CEILING_MS)}). Rebuild dist/runtime/core-client.cjs with MUSTER_CORE_CLIENT_ENTRY pointing at a lifecycle-aware core.`;
+}
 export function coreBudgetOptions(budgets?: ProviderBudgets, lifecycleSupported = false): { timeoutMs?: number; budgets?: Omit<ProviderBudgets, 'taskMs'> } {
   for (const [name, value] of Object.entries(budgets ?? {})) {
     if (value === undefined) continue;
@@ -44,11 +55,15 @@ export interface DispatchResult {
   turnId?: string;
   failure?: {statusCode?: number};
 }
-export function classifyProviderFailure(result: DispatchResult, evidence: { activity: boolean; terminal: boolean; cancelled: boolean }): ProviderRecovery | undefined {
+export function classifyProviderFailure(result: DispatchResult, evidence: { activity: boolean; terminal: boolean; cancelled: boolean; resetEta?: string }): ProviderRecovery | undefined {
   const definitelyNotDispatched = result.dispatchState === 'not-dispatched' && !result.turnId && !evidence.activity;
+  // A user Stop is a normal ending, never a failure. The native app-server is
+  // local and owned by this chat: once it is interrupted (or closed after the
+  // grace period) nothing keeps running for this turn, so the chat settles idle
+  // and the composer stays usable (F42/F43).
   if (evidence.cancelled) return {
-    kind: definitelyNotDispatched || evidence.terminal ? 'cancelled' : 'recovery-needed', retryable: false,
-    reason: definitelyNotDispatched || evidence.terminal ? 'Stopped. This attempt will not resume automatically.' : 'Stopped locally. Provider cancellation could not be confirmed; inspect the existing thread before continuing.',
+    kind: 'cancelled', retryable: false,
+    reason: definitelyNotDispatched || evidence.terminal ? 'Stopped. This attempt will not resume automatically.' : 'Stopped. The provider process for this turn was shut down.',
   };
   if (result.status !== 'failed') return undefined;
   if (!definitelyNotDispatched && !evidence.terminal) return {
@@ -57,9 +72,12 @@ export function classifyProviderFailure(result: DispatchResult, evidence: { acti
   };
   if (definitelyNotDispatched && ([503, 429].includes(result.failure?.statusCode ?? 0) || /(?:\b(?:503|429)\b|chat admission capacity is temporarily unavailable)/i.test(result.errorMessage ?? ''))) return {
     kind: 'admission-rejected', retryable: true,
-    reason: 'Provider admission is temporarily unavailable. No turn was dispatched; retry manually later.',
+    reason: `Provider admission is temporarily unavailable. No turn was dispatched; retry manually later.${evidence.resetEta ? ` ${evidence.resetEta}` : ''}`,
   };
-  return { kind: 'failed', retryable: false, reason: 'The provider attempt failed. No automatic retry was made.' };
+  // Keep the provider's own words: a generic sentence hid the real cause (F19/F45/F55).
+  // A turn that provably never dispatched is safe to resend, so it is retryable.
+  const detail = (result.errorMessage ?? '').replace(/\s+/g, ' ').trim().slice(0, 600);
+  return { kind: 'failed', retryable: definitelyNotDispatched, reason: detail ? `The provider attempt failed: ${detail}` : 'The provider attempt failed.' };
 }
 
 /** Resolves a pending host approval as declined on cancellation and always

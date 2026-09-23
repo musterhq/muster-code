@@ -2,14 +2,22 @@ import type {TranscriptEntry} from './activityGrouping.ts';
 import type {TimelineItem} from '../../shared/protocol';
 
 export interface TurnSummary {id:string;rowIndex:number;prompt:string;response:string}
-export interface TranscriptMatch {rowIndex:number;offset:number}
-/** Search loaded prose and grouped activity without depending on virtualized DOM. */
+export interface TranscriptMatch {rowIndex:number;offset:number;itemId:string;occurrence:number}
+export const MAX_TRANSCRIPT_MATCHES=5000;
+/** Every occurrence in loaded prose and grouped activity, without depending on virtualized DOM.
+ * `occurrence` is the ordinal within its row so the rendered row can mark the same hit. */
 export function findTranscriptMatches(rows:readonly TranscriptEntry[],query:string):TranscriptMatch[] {
   const needle=query.trim().toLocaleLowerCase();if(!needle)return [];
   const matches:TranscriptMatch[]=[];
   for(let rowIndex=0;rowIndex<rows.length;rowIndex++){
-    const row=rows[rowIndex],texts=row.kind==='activity'?row.items.map(item=>item.text):'text' in row?[row.text]:[];
-    for(const text of texts){const offset=text.toLocaleLowerCase().indexOf(needle);if(offset>=0){matches.push({rowIndex,offset});break;}}
+    const row=rows[rowIndex],items=row.kind==='activity'?row.items:[row];let occurrence=0;
+    for(const item of items){
+      const text=item.text.toLocaleLowerCase();
+      for(let offset=text.indexOf(needle);offset>=0;offset=text.indexOf(needle,offset+needle.length)){
+        matches.push({rowIndex,offset,itemId:item.id,occurrence:occurrence++});
+        if(matches.length>=MAX_TRANSCRIPT_MATCHES)return matches;
+      }
+    }
   }
   return matches;
 }

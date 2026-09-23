@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
-import {chatGroup,compareChats,isChatRunning,readChatSort,saveChatSort,selectionReveal} from '../src/renderer/chatNavigation.ts';
+import {chatGroup,compareChats,isChatRunning,newChatTarget,readChatSort,rovingStop,rovingTarget,saveChatSort,selectionReveal} from '../src/renderer/chatNavigation.ts';
 import type {Chat} from '../src/shared/protocol.ts';
 const chat=(id:string,patch:Partial<Chat>={}):Chat=>({id,title:id,status:'completed',updatedAt:'2026-09-19T00:00:00Z',pinned:false,archived:false,draft:'',model:'fixture',mode:'agent',...patch});
 const snapshot={folders:[{id:'folder',name:'Folder',path:'/fixture'}],projects:[{id:'project',name:'Project',goal:'',folderIds:['folder']}]};
@@ -38,4 +38,32 @@ test('sort preference survives reload and malformed/unavailable storage falls ba
   saved='unexpected';assert.equal(readChatSort(storage),'recent');
   assert.equal(readChatSort({getItem:()=>{throw Error('denied');}}),'recent');
   assert.equal(saveChatSort({setItem:()=>{throw Error('quota');}},'name'),false);
+});
+
+test('roving focus steps through visible rows, clamps at the edges and jumps with Home/End',()=>{
+  const ids=['a','b','c'];
+  assert.equal(rovingTarget(ids,'a','ArrowDown'),'b');
+  assert.equal(rovingTarget(ids,'c','ArrowDown'),'c');
+  assert.equal(rovingTarget(ids,'a','ArrowUp'),'a');
+  assert.equal(rovingTarget(ids,'b','Home'),'a');
+  assert.equal(rovingTarget(ids,'a','End'),'c');
+  assert.equal(rovingTarget(ids,null,'ArrowDown'),'a');
+  assert.equal(rovingTarget(ids,'gone','ArrowUp'),'c');
+  assert.equal(rovingTarget(ids,'a','Enter'),null);
+  assert.equal(rovingTarget([],null,'ArrowDown'),null);
+});
+
+test('exactly one row owns the tab stop, preferring focus, then selection, then the first row',()=>{
+  assert.equal(rovingStop(['a','b'],'b','a'),'b');
+  assert.equal(rovingStop(['a','b'],'collapsed','b'),'b');
+  assert.equal(rovingStop(['a','b'],null,'hidden'),'a');
+  assert.equal(rovingStop([],null,'a'),null);
+});
+
+test('new chats land in the active folder/project, dropping references the runtime would reject',()=>{
+  assert.deepEqual(newChatTarget(chat('p',{projectId:'project',folderId:'folder'}),snapshot),{folderId:'folder',projectId:'project'});
+  assert.deepEqual(newChatTarget(chat('f',{folderId:'folder'}),snapshot),{folderId:'folder'});
+  assert.deepEqual(newChatTarget(chat('s',{projectId:'removed',folderId:'removed'}),snapshot),{});
+  assert.deepEqual(newChatTarget(chat('m',{projectId:'project',folderId:'other'}),{...snapshot,folders:[...snapshot.folders,{id:'other',name:'Other',path:'/other'}]}),{folderId:'other'});
+  assert.deepEqual(newChatTarget(null,snapshot),{});
 });

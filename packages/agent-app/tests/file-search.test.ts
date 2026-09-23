@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {mkdtemp,mkdir,writeFile,symlink,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
-import {listFiles,searchFiles} from '../src/runtime/files.ts';
+import {listFiles,quickOpen,scoreQuickOpen,searchFiles} from '../src/runtime/files.ts';
 
 test('Office owner lock files stay out of browsing and search', async t => {
   const root = await mkdtemp(join(tmpdir(),'muster-office-lock-'));
@@ -31,4 +31,42 @@ test('file search finds nested paths, bounds results and never follows outside l
   await Promise.all(Array.from({length:101},(_,i)=>writeFile(join(root,'docs',`entry-${i}.txt`),'')));
   const limited=await searchFiles(root,'docs','entry-');
   assert.equal(limited.entries.length,100);assert.equal(limited.truncated,true);
+});
+
+test('listings sort directories first in natural order before truncating at 2000 entries', async t => {
+  const root = await mkdtemp(join(tmpdir(),'muster-list-sort-'));
+  t.after(async()=>{await rm(root,{recursive:true,force:true});});
+  await Promise.all(Array.from({length:2100},(_,i)=>writeFile(join(root,`file${i}.txt`),'')));
+  await mkdir(join(root,'zeta')); await mkdir(join(root,'alpha'));
+  const entries = await listFiles(root,'');
+  assert.equal(entries.length,2000);
+  assert.deepEqual(entries.slice(0,2).map(entry=>entry.name),['alpha','zeta']);
+  assert.deepEqual(entries.slice(2,5).map(entry=>entry.name),['file0.txt','file1.txt','file2.txt'],'natural order: file2 before file10');
+  assert.equal(entries[entries.length-1].name,'file1997.txt','the first 1998 files in order, not an arbitrary subset');
+});
+
+test('quick-open scoring rejects non-subsequences and ranks filename/boundary matches above buried ones', async () => {
+  assert.equal(scoreQuickOpen('src/renderer/store.ts','xyz'),null,'not a subsequence');
+  const storeScore = scoreQuickOpen('src/renderer/store.ts','store')!;
+  const deepScore = scoreQuickOpen('src/renderer/components/deep/nested/store.ts','store')!;
+  assert.ok(storeScore>0 && deepScore>0);
+  assert.ok(storeScore>deepScore,'a shorter path with the same filename match ranks higher');
+  const boundaryScore = scoreQuickOpen('a/ws.ts','ws')!;
+  const midWordScore = scoreQuickOpen('axws.ts','ws')!;
+  assert.ok(boundaryScore>midWordScore,'a match starting at a path/word boundary outranks one that does not');
+});
+
+test('quick-open excludes node_modules/.git/dist/build and orders results by score', async t => {
+  const root = await mkdtemp(join(tmpdir(),'muster-quickopen-'));
+  t.after(async()=>{await rm(root,{recursive:true,force:true});});
+  await mkdir(join(root,'src'),{recursive:true});
+  await mkdir(join(root,'node_modules','pkg'),{recursive:true});
+  await mkdir(join(root,'dist'),{recursive:true});
+  await writeFile(join(root,'src','store.ts'),'');
+  await writeFile(join(root,'src','storekeeper.ts'),'');
+  await writeFile(join(root,'node_modules','pkg','store.js'),'');
+  await writeFile(join(root,'dist','store.js'),'');
+  const {results} = {results: await quickOpen(root,'store')};
+  assert.deepEqual(results.map(r=>r.path).sort(),['src/store.ts','src/storekeeper.ts'].sort());
+  assert.ok(results[0].score>=results[1].score);
 });

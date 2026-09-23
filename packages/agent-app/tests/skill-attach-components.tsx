@@ -10,6 +10,7 @@ const {window}=parseHTML('<html><body><div id="root"></div></body></html>');
 (window.document as any).oninput=null;(window as any).getSelection=()=>({anchorNode:null,anchorOffset:0,focusNode:null,focusOffset:0,rangeCount:0});
 Object.assign(globalThis,{window,document:window.document,Node:window.Node,HTMLElement:window.HTMLElement,HTMLButtonElement:window.HTMLButtonElement,Element:window.Element,MutationObserver:window.MutationObserver,ResizeObserver:class{observe(){}disconnect(){}},localStorage:{getItem(){return null;},setItem(){}},requestAnimationFrame:(callback:any)=>setTimeout(callback,0),cancelAnimationFrame:clearTimeout,getComputedStyle:()=>({minHeight:'26px',maxHeight:'200px',borderTopWidth:'0px',borderBottomWidth:'0px',lineHeight:'20px',paddingTop:'3px',paddingBottom:'3px',getPropertyValue:()=>'',display:'block',visibility:'visible',position:'static',overflow:'visible',animationName:'none',transitionDuration:'0s',transitionDelay:'0s'})});
 window.HTMLElement.prototype.focus=function(){this.dispatchEvent(new window.Event('focusin',{bubbles:true}));};
+(window.HTMLTextAreaElement.prototype as any).setSelectionRange=function(start:number,end:number){this.selectionStart=start;this.selectionEnd=end;};
 (window.HTMLElement.prototype as any).attachEvent=function(){};(window.HTMLElement.prototype as any).detachEvent=function(){};
 window.HTMLElement.prototype.getBoundingClientRect=()=>({height:200,width:600,top:0,left:0,right:600,bottom:200,x:0,y:0} as any);
 Object.defineProperty(window.HTMLElement.prototype,'scrollHeight',{get:()=>40});Object.defineProperty(window.HTMLElement.prototype,'clientWidth',{get:()=>600});
@@ -20,10 +21,13 @@ const {Composer}=await import('../src/renderer/components/Composer');const {useS
 const root=createRoot(document.getElementById('root')!);function Harness(){const state=useStore();return state.snapshot?<Composer chat={state.snapshot.chats[0]}/>:null;}
 await store.boot();root.render(<Harness/>);await delay(40);
 const click=async(selector:string)=>{const button=document.querySelector(selector) as HTMLButtonElement;assert.ok(button,selector);button.click();await delay(35);};
-await click('[aria-label="Add context or open tools"]');Array.from(document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')).find(button=>button.textContent?.includes('Attach a skill'))!.click();await delay(70);
-Array.from(document.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]')).find(button=>button.textContent?.includes('review'))!.click();await delay(25);
-assert.equal(store.getState().composerDrafts[chat.id]?.text??chat.draft,'Original request');assert.ok(document.querySelector('[aria-label="Remove selected skill"]'));
-await click('[aria-label="Send message (Enter)"]');
-const send=calls.find(call=>call.command==='chat.send');assert.equal(send.input.text,'Original request');assert.equal(send.input.skillId,'/Users/test/.agents/skills/review');assert.equal(document.querySelector('[aria-label="Remove selected skill"]'),null);
+await click('[data-testid="composer-plus"]');await delay(40);
+const skillOption=Array.from(document.querySelectorAll<HTMLButtonElement>('[data-testid="composer-row"]')).find(button=>button.textContent?.includes('review'))!;assert.ok(skillOption,'skills are listed in the + menu');
+skillOption.click();await delay(25);
+assert.equal(store.getState().composerDrafts[chat.id]?.text??chat.draft,'Original request $review ');assert.equal(document.querySelector('[data-testid="token-chip"]')?.textContent,'$review');
+assert.equal(store.getState().screen,'work','picking a skill never navigates');
+await click('[data-testid="composer-primary"]');
+const send=calls.find(call=>call.command==='chat.send');assert.equal(send.input.text,'Original request $review ');assert.equal(send.input.skillId,'/Users/test/.agents/skills/review');
+await delay(30);assert.equal(document.querySelector('[data-testid="token-chip"]'),null,'chips clear after an acknowledged send');
 assert.deepEqual(calls.find(call=>call.command==='plugins.list')?.input,{folderPaths:['/workspace']},'composer scopes workspace skills to the active chat folder');
-root.unmount();console.log('Skill composer check passed: selected skill is sent separately while visible draft remains unchanged.');
+root.unmount();console.log('Skill composer check passed: a + menu skill inserts a $skill chip and its id is sent structurally.');

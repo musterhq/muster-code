@@ -1,4 +1,7 @@
 .git-actions { min-width: 0; margin-top: 8px; font-size: 12px; }
+/* A folder that isn't (or isn't yet) a Git repository: one quiet, non-interactive line — no red, no Retry. */
+.git-actions-neutral { display: flex; align-items: center; gap: 8px; padding: 7px 6px; color: var(--text-faint); }
+.git-actions-neutral svg { flex: none; }
 .git-actions-trigger { display: flex; align-items: center; gap: 8px; width: 100%; border: 0; background: transparent; color: var(--text-dim); padding: 7px 6px; text-align: left; cursor: pointer; border-radius: 5px; }
 .git-actions-trigger .tool-chevron { margin-left: auto; }
 .git-actions-trigger[data-panel-open] .tool-chevron { transform: rotate(90deg); }
@@ -16,6 +19,13 @@
 .git-file-link:hover { text-decoration: underline; }
 .git-actions form { display: grid; gap: 8px; }
 .git-actions textarea { width: 100%; box-sizing: border-box; resize: vertical; min-height: 50px; max-height: 150px; border: 1px solid var(--hairline); background: var(--bg-raised); color: var(--text); border-radius: 6px; padding: 8px; font: inherit; }
-.git-actions form > button { justify-self: end; background: var(--bg-raised); border: 1px solid var(--hairline); border-radius: 6px; color: var(--text); padding: 6px 10px; cursor: pointer; font: inherit; }
+.git-commit-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 6px; }
+.git-commit-row button { background: var(--bg-raised); border: 1px solid var(--hairline); border-radius: 6px; color: var(--text); padding: 6px 10px; cursor: pointer; font: inherit; white-space: nowrap; }
+.git-commit-row button:hover:not(:disabled) { background: var(--bg-hover); }
+.git-commit-row .is-primary { background: var(--text); border-color: transparent; color: var(--bg); }
+.git-commit-row .is-primary:hover:not(:disabled) { background: color-mix(in srgb, var(--text) 88%, transparent); }
+.git-amend { display: inline-flex; align-items: center; gap: 6px; margin-right: auto; color: var(--text-dim); cursor: pointer; user-select: none; }
+.git-amend input { margin: 0; accent-color: var(--accent); }
+.git-amend:has(input:disabled) { opacity: .45; cursor: default; }
 .git-actions button:disabled { opacity: .45; cursor: default; }
 .git-actions :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }

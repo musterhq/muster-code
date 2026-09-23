@@ -27,7 +27,7 @@ export class NativePreviewController {
   }
   async show(input:{owner:string;folderId:string;path:string;bounds:PreviewBounds},folderRoot:()=>Promise<string>):Promise<void> {
     this.validOwner(input?.owner);
-    if(typeof input.path!=='string'||input.path.length>4096 || !/\.(docx?|xlsx?|pptx?|pdf|odt|ods|odp|rtf)$/i.test(input.path))throw new Error('Unsupported native document format.');
+    if(typeof input.path!=='string'||input.path.length>4096 || !/\.(docx?|xlsx?|xlsm|xlsb|pptx?|pdf|odt|ods|odp|rtf|numbers|key|pages|heic|heif|tiff?)$/i.test(input.path))throw new Error('Unsupported native document format.');
     const sequence=++this.sequence;this.owner=input.owner;this.file='';this.binding?.hide();
     const root=await folderRoot();
     const file=await resolveInside(root,input.path),stat=await fs.stat(file);

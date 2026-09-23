@@ -13,3 +13,9 @@
 .pending-question-submit:disabled { cursor: default; opacity: .5; }
 .pending-question-status { display: inline-block; margin-left: 8px; color: var(--text-faint); font-size: 11px; }
 .pending-question-error { margin: 8px 0 0; color: var(--danger); font-size: 11px; }
+.pending-question.is-settled { border-color: var(--hairline); background: transparent; }
+.pending-question-actions { display: flex; gap: 8px; }
+.pending-question-dismiss { border: 0; border-radius: 5px; padding: 6px 10px; background: transparent; color: var(--text-dim); font: inherit; font-size: 11px; }
+.pending-question-dismiss:hover, .pending-question-dismiss:focus-visible { background: var(--bg-hover); color: var(--text); }
+.pending-question-outcome { display: flex; flex-direction: column; gap: 3px; margin: 0; font-size: 11px; color: var(--text-faint); }
+.pending-question-outcome strong { font-weight: 500; color: var(--text-dim); }

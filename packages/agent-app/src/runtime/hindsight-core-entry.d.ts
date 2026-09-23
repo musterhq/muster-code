@@ -17,8 +17,10 @@ declare module '#muster-core/hindsight' {
   export interface HindsightRecallInput extends HindsightScopeAuthorization { readonly query: string; readonly types?: readonly ('world'|'experience'|'observation')[]; readonly budget?: 'low'|'mid'|'high'; readonly maxTokens?: number; readonly tags?: readonly string[]; readonly signal?: AbortSignal }
   export interface HindsightReflectInput extends HindsightScopeAuthorization { readonly query: string; readonly context?: string; readonly budget?: 'low'|'mid'|'high'; readonly maxTokens?: number; readonly signal?: AbortSignal }
   export interface HindsightRetainResult { readonly bankId: string; readonly success: boolean; readonly itemsCount: number; readonly isAsync: boolean; readonly operationId?: string }
-  export interface HindsightRecallResult { readonly bankId: string; readonly results: readonly { readonly id?: string; readonly text: string; readonly type?: string; readonly score?: number }[] }
-  export interface HindsightReflectResult { readonly bankId: string; readonly text: string }
+  /** Provenance fields are optional: an engine or core that does not return them leaves them undefined. */
+  export interface HindsightRecallEntry { readonly id?: string; readonly text: string; readonly type?: string; readonly score?: number; readonly occurredAt?: string; readonly mentionedAt?: string; readonly documentId?: string; readonly context?: string; readonly tags?: readonly string[] }
+  export interface HindsightRecallResult { readonly bankId: string; readonly results: readonly HindsightRecallEntry[] }
+  export interface HindsightReflectResult { readonly bankId: string; readonly text: string; readonly basedOn?: readonly HindsightRecallEntry[] }
   export class HindsightClient {
     constructor(config: HindsightConfig);
     retain(input: HindsightRetainInput): Promise<HindsightRetainResult>;

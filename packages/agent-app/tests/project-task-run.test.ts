@@ -7,11 +7,13 @@ import {createAgentService} from '../src/runtime/service.ts';
 import {ProjectTaskStore} from '../src/runtime/project-tasks.ts';
 import {MODEL,type ProviderAdapter} from '../src/runtime/provider.ts';
 
+async function until(check:()=>boolean|Promise<boolean>,label='condition'){for(let i=0;i<1500;i++){if(await check())return;await new Promise(resolve=>setTimeout(resolve,2));}assert.fail(`${label} not reached`);}
+
 test('Project task start creates one scoped agent chat and settles as implemented with the linked identity',async t=>{
  const dataDir=await mkdtemp(join(tmpdir(),'muster-project-run-')),folderPath=join(dataDir,'source');await mkdir(folderPath);
- let calls=0,projectChanges=0,projectChanged:(projectId:string,taskId:string)=>void=()=>{};const settled=new Promise<void>(resolve=>{projectChanged=()=>{if(++projectChanges>=2)resolve()}});
+ let calls=0;
  const provider:ProviderAdapter={info:()=>[{id:'hybrow',name:'Hybrow',available:true,identityMasked:'configured',models:[{id:MODEL,name:MODEL}]}],stop:async()=>true,dispose(){},async run(input){calls++;assert.ok(input.cwd.endsWith('/source'));assert.match(input.prompt,/Acceptance criteria:[\s\S]*visible behavior/);return {status:'completed',finalMessage:'Implemented the task.'}}};
- const service=createAgentService({dataDir,provider,onEvent(event){if(event.type==='projectChanged')projectChanged(event.projectId,event.taskId)}});
+ const service=createAgentService({dataDir,provider,onEvent(){}});
  t.after(async()=>{await service.dispose();await rm(dataDir,{recursive:true,force:true})});
  const folder=await service.invoke('folder.add',{path:folderPath}),project=await service.invoke('project.create',{name:'Demo',goal:'ship safely',folderIds:[folder.id]});
  const dependency=await service.invoke('project.tasks.create',{projectId:project.id,title:'Prerequisite',acceptance:'done',dependencies:[]});
@@ -19,10 +21,11 @@ test('Project task start creates one scoped agent chat and settles as implemente
  const chatsBeforeBlockedStart=(await service.invoke('app.snapshot',undefined)).chats.length;
  await assert.rejects(service.invoke('project.tasks.start',{projectId:project.id,id:task.id,revision:0,requestId:'blocked-attempt'}),/not yet verified/);
  assert.equal((await service.invoke('app.snapshot',undefined)).chats.length,chatsBeforeBlockedStart,'blocked dependencies do not create orphan chats');
- await service.invoke('project.tasks.updateStatus',{projectId:project.id,id:dependency.id,status:'verified',revision:0,evidence:['reviewed']});
+ await service.invoke('project.tasks.updateStatus',{projectId:project.id,id:dependency.id,status:'implemented',revision:0});
+ await service.invoke('project.tasks.updateStatus',{projectId:project.id,id:dependency.id,status:'verified',revision:1,evidence:['reviewed']});
  const started=await service.invoke('project.tasks.start',{projectId:project.id,id:task.id,revision:0,requestId:'project-task-request',folderId:folder.id});
  assert.equal(started.task.status,'running');assert.equal(started.task.runChatId,started.chatId);
- await settled;
+ await until(async()=>(await service.invoke('project.tasks.list',{projectId:project.id})).items.find(item=>item.id===task.id)?.status==='implemented','task settled');
  const tasks=await service.invoke('project.tasks.list',{projectId:project.id}),finished=tasks.items.find(item=>item.id===task.id)!;
  assert.equal(finished.status,'implemented',JSON.stringify(finished));assert.equal(finished.runChatId,started.chatId);assert.equal(calls,1);
  const linked=(await service.invoke('app.snapshot',undefined)).chats.find(chat=>chat.id===started.chatId)!;

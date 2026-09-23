@@ -33,6 +33,10 @@ function profileOverrides(profile, text) {
     if (string('model_providers.hybrow.base_url') !== 'https://router.hybrowlabs.com/v1' || string('model_providers.hybrow.wire_api') !== 'responses') throw new Error('Hybrow requires the approved Responses endpoint.');
     if (!string('model_providers.hybrow.auth.command') || !Array.isArray(string('model_providers.hybrow.auth.args'))) throw new Error('Hybrow requires the existing authentication helper.');
   }
+  // A per-session sub-agent cap in the profile is not forwarded: Muster imposes no
+  // worker limit of its own, so Codex's own default applies (a cap of 1 made every
+  // second worker fail as "Agent failed", F51).
+  values.delete('agents.max_concurrent_threads_per_session');
   return [...values].map(([key, value]) => key + '=' + value).concat(provider === 'openai' ? ['forced_login_method="chatgpt"'] : ['model_providers.hybrow.requires_openai_auth=false']);
 }
 

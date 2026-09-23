@@ -15,7 +15,7 @@ import { test, before, after } from 'node:test';
 import { promises as fs } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { readDocument } from '../src/runtime/document-preview.ts';
+import { readDocument, findSoffice, CANDIDATE_PATHS, LIBREOFFICE_MISSING } from '../src/runtime/document-preview.ts';
 
 let root: string;
 let outside: string;
@@ -128,4 +128,33 @@ test('mocked converter error: no temp dirs leaked', async () => {
   const after = await fs.readdir(tmpdir());
   const leaked = after.filter(e => e.startsWith('muster-docprev-') && !before.includes(e));
   assert.equal(leaked.length, 0, `Leaked temp dirs: ${leaked.join(', ')}`);
+});
+
+test('missing LibreOffice throws a distinguishable error the renderer can fall back on', async () => {
+  const saved = process.env['MUSTER_SOFFICE_PATH'];
+  delete process.env['MUSTER_SOFFICE_PATH'];
+  try {
+    await assert.rejects(() => findSoffice(['/nonexistent/a/soffice', '/nonexistent/b/soffice']), (error: Error) => error.message.startsWith(LIBREOFFICE_MISSING));
+  } finally {
+    if (saved !== undefined) process.env['MUSTER_SOFFICE_PATH'] = saved;
+  }
+});
+
+test('standard soffice installs are probed before the Codex runtime copy', () => {
+  const codex = CANDIDATE_PATHS.findIndex(path => path.includes('codex-runtimes'));
+  const app = CANDIDATE_PATHS.indexOf('/Applications/LibreOffice.app/Contents/MacOS/soffice');
+  assert.ok(app >= 0 && codex > app);
+  assert.equal(codex, CANDIDATE_PATHS.length - 1, 'the bundled Codex runtime is the last resort');
+});
+
+test('an executable candidate is returned in order', async () => {
+  const saved = process.env['MUSTER_SOFFICE_PATH'];
+  delete process.env['MUSTER_SOFFICE_PATH'];
+  const bin = join(root, 'fake-soffice');
+  await fs.writeFile(bin, '#!/bin/sh\n', { mode: 0o755 });
+  try {
+    assert.equal(await findSoffice(['/nonexistent/soffice', bin]), bin);
+  } finally {
+    if (saved !== undefined) process.env['MUSTER_SOFFICE_PATH'] = saved;
+  }
 });

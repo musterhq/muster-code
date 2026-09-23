@@ -14,6 +14,27 @@ const cache = new Map<string, { rows: Token[][]; size: number }>();
 const languageLoads = new Map<string, Promise<void>>();
 let cacheBytes = 0;
 let highlighterPromise: ReturnType<typeof createHighlighterCore> | undefined;
+/** One shared worker serves every code block. Grammars load lazily; after an
+ * idle period, or once too many grammars are resident, the highlighter,
+ * grammars and token cache are released (the next request rebuilds lazily). */
+export const IDLE_RELEASE_MS = 3 * 60_000;
+export const MAX_LOADED_LANGUAGES = 12;
+let inFlight = 0;
+let idleTimer: ReturnType<typeof setTimeout> | undefined;
+
+function releaseHighlighter(force = false): void {
+  if (inFlight && !force) return;
+  const pending = highlighterPromise;
+  highlighterPromise = undefined;
+  languageLoads.clear();
+  cache.clear();
+  cacheBytes = 0;
+  void pending?.then(instance => instance.dispose()).catch(() => {});
+}
+function scheduleIdleRelease(): void {
+  if (idleTimer) clearTimeout(idleTimer);
+  idleTimer = setTimeout(() => { idleTimer = undefined; releaseHighlighter(); }, IDLE_RELEASE_MS);
+}
 
 // Each grammar is a separate async chunk. This preserves broad source support
 // without pulling Shiki's complete language bundle into the renderer build.
@@ -84,9 +105,14 @@ function highlighter() {
   return highlighterPromise;
 }
 
-async function loadLanguage(instance: Awaited<ReturnType<typeof createHighlighterCore>>, language: string): Promise<void> {
+async function loadLanguage(instance: Awaited<ReturnType<typeof createHighlighterCore>>, language: string): Promise<Awaited<ReturnType<typeof createHighlighterCore>>> {
   let loading = languageLoads.get(language);
   if (!loading) {
+    // Bound resident grammars (and their compiled regexes) in long sessions.
+    if (languageLoads.size >= MAX_LOADED_LANGUAGES && inFlight <= 1) {
+      releaseHighlighter(true); // Only this request is in flight.
+      instance = await highlighter();
+    }
     const loader = LANGUAGE_LOADERS[language];
     if (!loader) throw new Error(`Unsupported syntax language: ${language}`);
     loading = loader().then(module => instance.loadLanguage(...(module.default as Parameters<typeof instance.loadLanguage>))).then(() => undefined);
@@ -94,6 +120,7 @@ async function loadLanguage(instance: Awaited<ReturnType<typeof createHighlighte
     loading.catch(() => languageLoads.delete(language));
   }
   await loading;
+  return instance;
 }
 
 self.onmessage = async (event: MessageEvent<HighlightRequest>) => {
@@ -113,9 +140,10 @@ self.onmessage = async (event: MessageEvent<HighlightRequest>) => {
     return;
   }
 
+  inFlight++;
+  if (idleTimer) { clearTimeout(idleTimer); idleTimer = undefined; }
   try {
-    const instance = await highlighter();
-    await loadLanguage(instance, language);
+    const instance = await loadLanguage(await highlighter(), language);
     const result = instance.codeToTokens(source, { lang: language as never, theme: 'dark-plus' });
     const rows: Token[][] = result.tokens.map(line => line.map(token => ({content: token.content, color: token.color})));
     // Account for the source in the map key, token strings/colors, and the
@@ -138,5 +166,8 @@ self.onmessage = async (event: MessageEvent<HighlightRequest>) => {
     // Unsupported grammars, invalid snippets, and highlighter failures all keep
     // source readable; syntax color is an enhancement, never a file-open gate.
     self.postMessage({ id, rows: null } satisfies HighlightResponse);
+  } finally {
+    inFlight--;
+    if (!inFlight) scheduleIdleRelease();
   }
 };

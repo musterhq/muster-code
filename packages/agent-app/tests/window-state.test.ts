@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { clampGeometry, DEFAULT_GEOMETRY, MIN_HEIGHT, MIN_WIDTH, parseGeometry } from '../src/main/window-state.ts';
+import { clampGeometry, DEFAULT_GEOMETRY, MIN_HEIGHT, MIN_WIDTH, parseGeometry, planDisplayChange } from '../src/main/window-state.ts';
 
 const display = { x: 0, y: 0, width: 1920, height: 1080 };
 
@@ -39,4 +39,14 @@ test('parseGeometry rejects malformed input', () => {
   assert.deepEqual(parseGeometry('{"width":800,"height":600,"maximized":1}'), {
     x: undefined, y: undefined, width: 800, height: 600, maximized: false,
   });
+});
+
+test('display changes re-clamp a live window: keep, resize, or centre after its display is unplugged', () => {
+  const external = { x: 1920, y: 0, width: 2560, height: 1440 };
+  const onExternal = { x: 2200, y: 100, width: 1600, height: 1000, maximized: false };
+  assert.deepEqual(planDisplayChange(onExternal, [display, external]), { kind: 'keep' });
+  assert.deepEqual(planDisplayChange(onExternal, [display]), { kind: 'center', width: 1600, height: 1000 }, 'the window was entirely on the removed display');
+  assert.deepEqual(planDisplayChange({ x: 100, y: 100, width: 2400, height: 1000, maximized: false }, [display]), { kind: 'resize', width: 1920, height: 1000 }, 'a resolution drop shrinks an oversize window in place');
+  assert.deepEqual(planDisplayChange(onExternal, []), { kind: 'keep' }, 'no displays at all is transient; leave the window alone');
+  assert.deepEqual(planDisplayChange({ ...onExternal, maximized: true }, [display]), { kind: 'keep' }, 'the OS re-lays maximized windows');
 });

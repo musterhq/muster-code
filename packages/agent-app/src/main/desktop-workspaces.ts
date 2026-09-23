@@ -1,7 +1,7 @@
 import {mkdir} from 'node:fs/promises';
 import path from 'node:path';
 import type {Commands,Snapshot} from '../shared/protocol.ts';
-import type {ScopedComputerRef} from '../shared/scoped-computer-protocol.ts';
+import {isScopedComputerCommand,type ScopedComputerRef} from '../shared/scoped-computer-protocol.ts';
 import type {AgentService} from './service-loader.ts';
 import type {ProcessSessions,ProcessAuthorize} from '../runtime/process-sessions.ts';
 import type {ScopedComputers} from '../runtime/scoped-computers.ts';
@@ -10,6 +10,7 @@ import type {ScopedComputers} from '../runtime/scoped-computers.ts';
 export async function commandAuthority(snapshot:Snapshot,appData:string,input:Parameters<ProcessAuthorize>[0]) {
   const chat=snapshot.chats.find(item=>item.id===input.chatId);
   if(!chat)throw new Error('This conversation no longer exists.');
+  if(input.operation==='terminal')return terminalCwd(snapshot,appData,chat,input.folderId);
   if(input.operation!=='start')return {};
   if(chat.archived)throw new Error('Restore this conversation before starting a command.');
   if(chat.status==='running'||chat.status==='stopping')throw new Error('Wait for the current agent attempt before starting a host command.');
@@ -22,6 +23,19 @@ export async function commandAuthority(snapshot:Snapshot,appData:string,input:Pa
   const cwd=folder?.path??path.join(appData,'command-workspaces',chat.id);
   if(!folder)await mkdir(cwd,{recursive:true,mode:0o700});
   return {cwd,fullAccessAcknowledged:true};
+}
+/** A user-driven PTY needs no Full access (the user types every command); it opens in
+ * the requested registered folder, the chat's folder, or the chat's scratch directory. */
+async function terminalCwd(snapshot:Snapshot,appData:string,chat:Snapshot['chats'][number],folderId?:string) {
+  if(chat.archived)throw new Error('Restore this conversation before opening a terminal.');
+  const id=folderId??chat.folderId;
+  const folder=id?snapshot.folders.find(item=>item.id===id):undefined;
+  if(id&&!folder)throw new Error('The terminal folder no longer exists.');
+  if(folder)return {cwd:folder.path};
+  if(!/^[a-zA-Z0-9:_-]{1,160}$/.test(chat.id))throw new Error('Invalid terminal conversation.');
+  const cwd=path.join(appData,'command-workspaces',chat.id);
+  await mkdir(cwd,{recursive:true,mode:0o700});
+  return {cwd};
 }
 export function computerAuthority(snapshot:Snapshot,scope:ScopedComputerRef) {
   const record=scope.kind==='project'?snapshot.projects.find(item=>item.id===scope.id):scope.kind==='chat'?snapshot.chats.find(item=>item.id===scope.id):undefined;
@@ -59,14 +73,18 @@ export class DesktopWorkspaces {
       case 'processes.attach': return this.processes.attach(p);
       case 'processes.detach': return this.processes.detach(p);
       case 'processes.stop': return this.processes.stop(p);
-      case 'computer.inspect': return this.computers.inspect(p?.scope);
-      case 'computer.start': return this.computers.start(p?.scope);
-      case 'computer.stop': return this.computers.stop(p?.scope);
-      case 'computer.destroy': return this.computers.destroy(p?.scope);
-      case 'computer.exec': return this.computers.exec(p);
-      case 'computer.execution': return this.computers.execution(p?.scope,p?.executionId);
-      case 'computer.cancel': return this.computers.cancel(p?.scope,p?.executionId);
+      case 'processes.outputPage': return this.processes.outputPage(p);
+      case 'processes.ports': return this.processes.ports(p);
+      case 'processes.stopListener': return this.processes.stopListener(p);
+      // Terminals are user-driven: no Full-access gate and no per-chat serial gate.
+      case 'terminal.create': return this.processes.terminals.create({chatId:p?.chatId,...(p?.folderId!==undefined?{folderId:p.folderId}:{}),cols:p?.cols,rows:p?.rows,...(p?.host!==undefined?{host:p.host}:{})});
+      case 'terminal.input': return this.processes.terminals.input({id:p?.id,data:p?.data});
+      case 'terminal.resize': return this.processes.terminals.resize({id:p?.id,cols:p?.cols,rows:p?.rows});
+      case 'terminal.kill': return this.processes.terminals.kill({id:p?.id});
+      case 'terminal.list': return this.processes.terminals.list({chatId:p?.chatId});
+      case 'terminal.snapshot': return this.processes.terminals.snapshot({id:p?.id});
     }
+    if(isScopedComputerCommand(command))return this.computers.dispatch(command,p);
     const policyChange=command==='chat.setPermissionMode'||command==='chat.selectProvider'||(command==='chat.update'&&(p?.mode!==undefined||p?.model!==undefined));
     if(policyChange||command==='chat.send')return this.serial(p?.id,async()=>{
       if(policyChange&&this.processes.hasRunning(p.id))throw new Error('Stop this conversation’s background commands before changing access, mode or provider.');
