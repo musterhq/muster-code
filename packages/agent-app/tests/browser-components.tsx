@@ -54,6 +54,8 @@ const persisted:string[]=[];
 const root=createRoot(document.getElementById('root')!,{onUncaughtError:error=>errors.push(error)});
 const props={owner:'browser:one',profileId:'personal',onUrlChange:(url:string)=>persisted.push(url)};
 root.render(<BrowserTab {...props}/>);await delay(60);
+// BrowserTab is split into its own chunk; a slow runner can take longer than the first delay to load it.
+for(let end=Date.now()+5000;Date.now()<end&&!errors.length&&!/Browse a website/.test(document.body.textContent??'');)await delay(20);
 assert.deepEqual(errors,[]);
 assert.match(document.body.textContent!,/Browse a website/);
 // The store records 'personal'; the tab binds to the active chat's folder profile and remembers it.

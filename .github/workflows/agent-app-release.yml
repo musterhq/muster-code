@@ -85,7 +85,9 @@ jobs:
           npx tsc --noEmit
           npm run build
           npm test
-          npm run test:renderer
+          # The renderer DOM suites are architecture-independent JavaScript (linkedom, no native code); main's
+          # CI and the arm64 build run them on this same commit. Slower Intel runners only add timing noise.
+          if [ "${{ matrix.arch }}" = arm64 ]; then npm run test:renderer; fi
 
       - name: Prepare signing identity
         id: signing
