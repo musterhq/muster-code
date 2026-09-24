@@ -3,6 +3,27 @@
 All notable changes to Muster Agent. Each `## <version>` section becomes the notes of the
 `agent-v<version>` GitHub Release (`.github/workflows/agent-app-release.yml`).
 
+## 0.2.3
+
+- The conversation and the composer sit centred between the sidebar and the summary card, as in Codex,
+  instead of drifting under the card on wide windows.
+- Files mentioned in replies are links: `src/app.py:342` or "fleet_status.py (line 134)" opens the file at
+  that line, with a coloured file-type icon. Names that match no file in the chat's folders stay plain text.
+  Links read in a clearer blue.
+- New models on an account appear without a relaunch: the list refreshes when the window regains focus and
+  whenever the model picker opens (for example GPT-6 Sol and Luna on a ChatGPT sign-in).
+- Routers with a model catalog also offer their own agents and auto routes (for example Hybrow OmniRouter's
+  planner, advisor, executor and smol). Every other model the router serves is loaded too, off by default;
+  switch any on under Settings › Models › "more models on this router".
+- Updates are checked every hour and when you come back to the window.
+- Model lists over 1 MB (large routers) load correctly; image, audio and video models are left out of chat pickers.
+- Computer use picture-in-picture, Codex-style: live window cards stacked under the summary card (one per
+  app or page the agent is using), with just close and take-control. Activity rows show each app's icon and
+  summarise as "Used Mail, Notes and the browser, …".
+- Every agent can use the in-app browser: Claude Code (direct) now gets Muster's browser, terminal and other
+  tools, like Codex-based models. Saying "in-app browser", "the browser" or "here" means the right-pane browser.
+- In Ask for approval mode the in-app browser no longer asks per step (desktop computer use still asks).
+
 ## 0.2.2
 
 - Thinking opens: models that show their reasoning as text (Claude-style thinking through a gateway)
