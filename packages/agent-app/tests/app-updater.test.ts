@@ -111,6 +111,8 @@ test('install waits for the app to exit, swaps the bundle and keeps the old one 
   assert.equal(readFileSync(path.join(target,'Contents/marker'),'utf8'),'old','nothing is replaced while the app runs');
   for(let end=Date.now()+15000;Date.now()<end&&readFileSync(path.join(target,'Contents/marker'),'utf8')!=='new';)await new Promise(r=>setTimeout(r,100));
   assert.equal(readFileSync(path.join(target,'Contents/marker'),'utf8'),'new','the new bundle is in place');
+  // Cleanup follows the swap in the same script; give it a moment on a slow runner.
+  for(let end=Date.now()+10000;Date.now()<end&&(existsSync(`${target}.previous`)||existsSync(path.join(root,'pending','0.3.0')));)await new Promise(r=>setTimeout(r,100));
   assert.equal(existsSync(`${target}.previous`),false,'the old copy is cleaned up');
   assert.equal(existsSync(path.join(root,'pending','0.3.0')),false,'the staged download is removed');
 });
