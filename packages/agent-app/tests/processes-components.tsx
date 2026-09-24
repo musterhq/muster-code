@@ -53,6 +53,7 @@ for(let end=Date.now()+3000;Date.now()<end&&!count('terminal.create');)await del
 assert.equal(count('terminal.create'),1,`terminal.create never sent; calls=${calls.map(c=>c.command).join(',')}`);
 const create=calls.find(call=>call.command==='terminal.create')!.input;
 assert.equal(create.chatId,'chat');assert.ok(Number.isInteger(create.cols)&&create.cols>=20&&Number.isInteger(create.rows)&&create.rows>=5);
+for(let end=Date.now()+3000;Date.now()<end&&!document.querySelector('.terminal-shell-row.is-selected .terminal-owner');)await delay(10);
 assert.equal(document.querySelectorAll('.terminal-shell-row').length,1);
 assert.match(document.querySelector('.terminal-shell-row')?.textContent??'',/zsh 1/);
 assert.equal(document.querySelector('.terminal-shell-row .terminal-owner')?.textContent,'You');
