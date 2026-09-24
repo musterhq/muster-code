@@ -1,6 +1,6 @@
 import {copyText} from '../clipboard';
 import { advanceFade, createFadeState, rehypeStreamFade, type FadeState } from '../markdown-fade';
-import { Check, Copy, Quote, X } from 'lucide-react';
+import { Check, Code, Copy, Quote, WrapText, X } from 'lucide-react';
 import {addComposerContext} from '../composerContext';
 import React, { useEffect, useRef, useState } from 'react';
 import ReactMarkdown, { type Components } from 'react-markdown';
@@ -79,8 +79,25 @@ function codeText(children: React.ReactNode): string {
   return '';
 }
 
+const LANGUAGE_NAMES: Record<string, string> = {
+  text: 'Plain text', txt: 'Plain text', plaintext: 'Plain text', plain: 'Plain text',
+  ts: 'TypeScript', typescript: 'TypeScript', tsx: 'TSX', js: 'JavaScript', javascript: 'JavaScript', jsx: 'JSX', mjs: 'JavaScript', cjs: 'JavaScript',
+  sh: 'Shell', shell: 'Shell', bash: 'Bash', zsh: 'Zsh', console: 'Terminal', shellsession: 'Terminal', ps1: 'PowerShell', powershell: 'PowerShell',
+  py: 'Python', python: 'Python', rb: 'Ruby', ruby: 'Ruby', go: 'Go', rs: 'Rust', rust: 'Rust', java: 'Java', kt: 'Kotlin', kotlin: 'Kotlin', swift: 'Swift',
+  c: 'C', h: 'C', cpp: 'C++', 'c++': 'C++', cs: 'C#', csharp: 'C#', php: 'PHP', sql: 'SQL', json: 'JSON', jsonc: 'JSON', yaml: 'YAML', yml: 'YAML', toml: 'TOML',
+  ini: 'INI', xml: 'XML', html: 'HTML', css: 'CSS', scss: 'SCSS', md: 'Markdown', markdown: 'Markdown', diff: 'Diff', patch: 'Diff', dockerfile: 'Dockerfile',
+  graphql: 'GraphQL', proto: 'Protocol Buffers', lua: 'Lua', r: 'R', scala: 'Scala', dart: 'Dart', elixir: 'Elixir', ex: 'Elixir', vue: 'Vue', svelte: 'Svelte', make: 'Makefile', makefile: 'Makefile',
+};
+/** The fence's language as people say it ("Plain text", "TypeScript"), not its short tag. */
+export function languageLabel(lang?: string): string {
+  if (!lang) return 'Plain text';
+  const key = lang.toLowerCase();
+  return LANGUAGE_NAMES[key] ?? (lang.length <= 4 ? lang.toUpperCase() : lang[0]!.toUpperCase() + lang.slice(1));
+}
+
 function Pre({ children }: { children?: React.ReactNode }): React.ReactElement {
   const child = Array.isArray(children) ? children[0] : children;
+  const [wrap, setWrap] = useState(false);
   if (React.isValidElement<{ className?: string; children?: React.ReactNode }>(child)) {
     const lang = /language-([\w+-]+)/.exec(child.props.className ?? '')?.[1];
     // The fence's closing newline is not a code line (QA: a blank line trailed every block).
@@ -88,10 +105,13 @@ function Pre({ children }: { children?: React.ReactNode }): React.ReactElement {
     return (
       <div className="md-code">
         <div className="md-code-head">
-          <span className="md-code-lang">{lang ?? 'text'}</span>
-          <CopyButton getText={() => text} label="Copy code" />
+          <span className="md-code-lang"><Code size={13} aria-hidden="true" />{languageLabel(lang)}</span>
+          <span className="md-code-actions">
+            <button type="button" className="md-copy md-code-wrap" aria-pressed={wrap} aria-label={wrap ? 'Stop wrapping lines' : 'Wrap long lines'} title={wrap ? 'Stop wrapping lines' : 'Wrap long lines'} onClick={() => setWrap(value => !value)}><WrapText size={13} aria-hidden="true" /></button>
+            <CopyButton getText={() => text} label="Copy code" />
+          </span>
         </div>
-        <pre className="md-code-body"><HighlightedCode source={text} language={lang ?? 'text'}/></pre>
+        <pre className={`md-code-body${wrap ? ' is-wrapped' : ''}`}><HighlightedCode source={text} language={lang ?? 'text'}/></pre>
       </div>
     );
   }

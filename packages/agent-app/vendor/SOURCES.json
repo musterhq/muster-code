@@ -7,11 +7,11 @@
       "branch": null,
       "commit": null,
       "sourcePath": "muster-core-pr97-integration-20260922",
-      "note": "Source checkout is not a git repository; the sha256 values below are the only provenance.",
+      "note": "Source checkout is not a git repository; the sha256 values below are the only provenance. Local edit 2026-09-24: forwards item/reasoning/textDelta (visible provider reasoning) when an item streams no summary; not yet upstream.",
       "uncommittedFiles": [],
       "syncedAt": "2026-09-24T03:37:22.809Z",
       "files": {
-        "packages/core/src/codex-app-server.ts": "eb5eb41d014a9b2983ac068ad811e0d5e0e7999d59f852b73d868809f5732b62"
+        "packages/core/src/codex-app-server.ts": "4a5f67bbc38da9cd3bf6dc1e4d82724b71e6af246d7d08f86099f2af50c8f22f"
       }
     },
     "muster-runtime": {

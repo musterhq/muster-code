@@ -47,7 +47,8 @@ export interface CodexAppServerRunInput {
   /** Start a fresh provider thread while retaining the already-warm app-server process. */
   readonly rotateThread?: boolean;
   readonly onDelta?: (text: string) => void;
-  /** Provider-visible reasoning summary deltas. Raw hidden reasoning is never forwarded. */
+  /** Provider-visible reasoning: summary deltas, or the reasoning text a provider chose to expose when it sends no
+   *  summary. Hidden reasoning never reaches the app-server, so it is never forwarded. */
   readonly onReasoningDelta?: (text: string) => void;
   /**
    * Every `item/*` and `turn/*` notification, raw. This is how an IDE paints
@@ -970,6 +971,8 @@ class CodexAppServerClient {
     }
     let finalMessage = "";
     let firstDeltaMs: number | undefined;
+    /** Reasoning items that stream a summary; their raw text (if any) is then not shown twice. */
+    const summarizedReasoning = new Set<string>();
     let tokenUsage: CodexAppServerRunResult["tokenUsage"] | undefined;
     // Raw events remain observable for multi-agent graph consumers, but the
     // synthesized parent turn must never consume a child's output. Older
@@ -1039,7 +1042,15 @@ class CodexAppServerClient {
         if (method === "item/reasoning/summaryTextDelta") {
           if (!belongsToActiveTurn(params)) continue;
           const delta = stringValue(params.delta) ?? "";
-          if (delta) input.onReasoningDelta?.(delta);
+          if (delta) { summarizedReasoning.add(stringValue(params.itemId) ?? ""); input.onReasoningDelta?.(delta); }
+          continue;
+        }
+        // Reasoning text the provider chose to show (Claude-style thinking through a gateway, open models). Models whose
+        // reasoning is hidden never send it; an item that already streams a summary keeps the summary only.
+        if (method === "item/reasoning/textDelta") {
+          if (!belongsToActiveTurn(params)) continue;
+          const delta = stringValue(params.delta) ?? "";
+          if (delta && !summarizedReasoning.has(stringValue(params.itemId) ?? "")) input.onReasoningDelta?.(delta);
           continue;
         }
         if (method === "item/completed") {

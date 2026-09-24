@@ -127,6 +127,10 @@
 .timeline-row .msg-assistant > .md-body { font-size: var(--chat-font-size); font-weight: 430; line-height: 1.625; letter-spacing: 0; }
 .md-body p, .md-body ul, .md-body ol, .md-body blockquote { margin-block: 0.7em; }
 .timeline-row .msg-assistant > .md-body > :is(p, ul, ol, blockquote) { margin-block: 1em; }
+/* Lists read as one block: no gap between items, bullets in the text colour. */
+.timeline-row .msg-assistant > .md-body li { margin: 0; }
+.timeline-row .msg-assistant > .md-body li::marker { color: color-mix(in srgb, var(--text) 80%, transparent); }
+.timeline-row .msg-assistant > .md-body :is(h1, h2, h3, h4, h5, h6) + :is(ul, ol, p) { margin-top: 0.5em; }
 
 /* Streaming: each newly arrived stretch of text fades in (MessageBody `animate`). */
 .md-fade { animation: md-fade-in 150ms cubic-bezier(.37, .55, .86, .88) both; }
@@ -154,9 +158,12 @@
 
 /* Code blocks: one soft surface (same family as the diff block); language + copy in a slim header. */
 .md-body pre { margin: 0.9em 0; }
-.md-code { margin: 0.9em 0; border: 1px solid color-mix(in srgb, var(--text) 5.5%, transparent); border-radius: var(--radius-10); background: color-mix(in srgb, var(--text) 2.2%, var(--bg)); overflow: hidden; }
-.md-code-head { min-height: 32px; padding: 0 6px 0 14px; border: 0; background: none; }
-.md-code-lang { color: var(--text-faint); font: var(--fs-12)/1 var(--ui); letter-spacing: 0; text-transform: none; }
+.md-code { margin: 1em 0; border: 1px solid color-mix(in srgb, var(--text) 6%, transparent); border-radius: var(--radius-16); background: color-mix(in srgb, var(--text) 3%, var(--bg)); overflow: hidden; }
+.md-code-head { display: flex; align-items: center; justify-content: space-between; min-height: 38px; padding: 0 8px 0 16px; border: 0; background: none; }
+.md-code-lang { display: inline-flex; align-items: center; gap: 7px; color: var(--text-dim); font: var(--fs-13)/1 var(--ui); letter-spacing: 0; text-transform: none; }
+.md-code-actions { display: inline-flex; align-items: center; gap: 2px; }
+.md-code-wrap[aria-pressed='true'] { color: var(--text); background: color-mix(in srgb, var(--text) 8%, transparent); }
+.md-code-body.is-wrapped, .md-code-body.is-wrapped code { white-space: pre-wrap; overflow-wrap: anywhere; }
 .md-code-body { margin: 0; padding: 0 14px 12px; font-size: var(--fs-13); line-height: 1.6; }
 .md-code .md-copy { opacity: .7; }
 .md-code:hover .md-copy, .md-code .md-copy:focus-visible { opacity: 1; }

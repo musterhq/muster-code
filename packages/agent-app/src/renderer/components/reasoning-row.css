@@ -1,7 +1,7 @@
 /* Codex "Thinking" / "Thought for 12s": a faint label on the prose edge; open, the
    reasoning reads like a quieter message indented under it. */
 .reasoning-row { min-width: 0; }
-.reasoning-trigger, .reasoning-row.is-empty { position: relative; display: flex; align-items: center; gap: 6px; width: 100%; min-height: 30px; padding: 4px 8px; color: var(--text-faint); font-size: var(--fs-14); line-height: 1.4; text-align: left; border-radius: var(--radius-6); transition: color 130ms ease; }
+.reasoning-trigger, .reasoning-row.is-empty { position: relative; display: flex; align-items: center; gap: 6px; width: 100%; min-height: 28px; padding: 3px 8px; color: var(--text-faint); font-size: var(--fs-14); line-height: 1.4; text-align: left; border-radius: var(--radius-6); transition: color 130ms ease; }
 .reasoning-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .reasoning-trigger:hover, .reasoning-trigger:focus-visible, .reasoning-row[data-open] > .reasoning-trigger { color: var(--text-dim); }
 .reasoning-trigger:hover > .tool-chevron, .reasoning-trigger:focus-visible > .tool-chevron { opacity: .9; }
