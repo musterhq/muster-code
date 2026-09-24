@@ -44,10 +44,9 @@ jobs:
       fail-fast: true
       matrix:
         include:
+          # Apple silicon only for now. Intel (runner: macos-15-intel, arch: x64) is paused; Intel Macs run from a clone.
           - runner: macos-15
             arch: arm64
-          - runner: macos-15-intel
-            arch: x64
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
     defaults:
@@ -191,7 +190,6 @@ jobs:
             echo "| Mac | File |"
             echo "| --- | --- |"
             echo "| Apple silicon (M1 and later) | \`Muster-Agent-${VERSION}-arm64.dmg\` (or \`.zip\`) |"
-            echo "| Intel | \`Muster-Agent-${VERSION}-x64.dmg\` (or \`.zip\`) |"
             echo
             echo "Open the disk image and drag **Muster Agent** to **Applications**. Checksums are in \`SHA256SUMS\`."
             if [[ "$MODES" != "developer-id-notarized " ]]; then
