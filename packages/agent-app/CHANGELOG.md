@@ -3,6 +3,16 @@
 All notable changes to Muster Agent. Each `## <version>` section becomes the notes of the
 `agent-v<version>` GitHub Release (`.github/workflows/agent-app-release.yml`).
 
+## 0.2.2
+
+- Thinking opens: models that show their reasoning as text (Claude-style thinking through a gateway)
+  now fill "Thought for …", so you can click it and read what the model considered. Models with
+  hidden reasoning still show their summary only.
+- Tighter transcript: one-line activity (thinking, tools, notices) stacks closely, and only a turn's
+  last reply carries the copy, time and actions row.
+- Code blocks: a "</> Plain text" / "TypeScript" style label, a wrap toggle beside Copy, rounder corners.
+- Lists in replies read as one block, with bullets in the text colour.
+
 ## 0.2.1
 
 - Chat replies read more like a native assistant: 14px text by default (Settings › Appearance › Chat text
