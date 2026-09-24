@@ -1,48 +1,54 @@
 /* Computer-use picture-in-picture (floats over the conversation) and the right-pane viewer. */
-.pip { position:fixed; z-index:40; display:flex; flex-direction:column; min-width:220px; max-width:480px; border:1px solid var(--hairline); border-radius:var(--radius-10); background:var(--bg-raised); box-shadow:var(--shadow-popover), 0 1px 2px color-mix(in srgb, var(--shadow-ink) 20%, transparent); overflow:hidden; font-size:var(--fs-11); color:var(--text-dim); transition:left 180ms ease, top 180ms ease; }
-.pip.is-dragging { transition:none; opacity:.92; cursor:grabbing; }
-.pip-head { display:flex; align-items:center; gap:6px; padding:5px 6px 5px 9px; cursor:grab; user-select:none; color:var(--text-faint); border-bottom:1px solid var(--hairline); touch-action:none; }
-.pip-head > svg { flex:none; }
-.pip-title { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--text); font-weight:500; }
+/* Codex stack: frameless live thumbnails, one per app or page, fanned with the newest in front. It floats at
+   the conversation's right under the summary card (ComputerPip measures the card; top/right/width inline). */
+.pip-stack { position:fixed; z-index:40; display:flex; flex-direction:column; gap:8px; font-size:var(--fs-11); color:var(--text-dim); transition:top 180ms ease, right 180ms ease; -webkit-app-region:no-drag; }
+.pip-cards { position:relative; }
+.pip-card { --depth:0; position:absolute; left:0; right:0; bottom:0; display:block; aspect-ratio:16 / 10; padding:0; border:0; border-radius:var(--radius-12); background:var(--media-bg); overflow:hidden; cursor:zoom-in;
+  box-shadow:0 0 0 1px rgb(var(--fg-rgb) / 7%), 0 10px 28px color-mix(in srgb, var(--shadow-ink) 30%, transparent), 0 2px 6px color-mix(in srgb, var(--shadow-ink) 18%, transparent);
+  transform-origin:top center; transform:translateY(calc(var(--depth) * -9px)) scale(calc(1 - var(--depth) * .055)); transition:transform 200ms ease, filter 160ms ease, box-shadow 160ms ease; }
+.pip-card img { display:block; width:100%; height:100%; object-fit:cover; object-position:top center; pointer-events:none; }
+.pip-card:not(.is-front) { filter:brightness(.82) saturate(.85); }
+.pip-card:not(.is-front):hover { filter:none; }
+.pip-card.is-front:hover { box-shadow:0 0 0 1px rgb(var(--fg-rgb) / 14%), 0 14px 34px color-mix(in srgb, var(--shadow-ink) 34%, transparent), 0 2px 6px color-mix(in srgb, var(--shadow-ink) 18%, transparent); }
+.pip-card:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+.pip-card.is-user { box-shadow:0 0 0 2px var(--accent), 0 10px 28px color-mix(in srgb, var(--shadow-ink) 30%, transparent); }
+/* Freshness: dimmed, never a text label. A stale or dropped feed also gets a small dot in the corner. */
+.pip-stack.is-stale .pip-card.is-front img { filter:saturate(.6) brightness(.92); }
+.pip-stack.is-disconnected .pip-card.is-front img { filter:grayscale(.7) brightness(.8); }
+.pip-stack.is-ended .pip-card.is-front img { filter:grayscale(.35); }
+.pip-card-status { position:absolute; right:8px; bottom:8px; width:8px; height:8px; border-radius:50%; background:var(--warn); box-shadow:0 0 0 2px color-mix(in srgb, var(--shadow-ink) 45%, transparent); }
+.pip-card-status.is-disconnected, .pip-card-status.is-failed { background:var(--danger); }
+.pip-empty { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; background:var(--bg-raised); }
+/* Two small round controls over the front card's top-left: hide and take control. */
+.pip-controls { position:absolute; left:7px; z-index:10; display:flex; gap:4px; }
+.pip-control { display:inline-grid; place-items:center; width:22px; height:22px; padding:0; border:0; border-radius:50%; background:var(--media-scrim); color:var(--on-media); cursor:pointer; backdrop-filter:blur(8px); -webkit-backdrop-filter:blur(8px); opacity:.88; transition:opacity 120ms ease, background-color 120ms ease; }
+.pip-stack:hover .pip-control, .pip-control:focus-visible { opacity:1; }
+.pip-control:hover:not(:disabled) { background:color-mix(in srgb, var(--media-scrim) 70%, var(--shadow-ink)); }
+.pip-control:disabled { opacity:.5; cursor:default; }
+.pip-control:focus-visible { outline:2px solid var(--accent); outline-offset:1px; }
+.pip-control.is-user { background:var(--accent); color:var(--on-accent); }
+.pip-action { display:inline-flex; align-items:center; gap:4px; padding:2px 8px; border:1px solid var(--hairline); border-radius:var(--radius-6); background:transparent; color:var(--text-dim); font-size:var(--fs-11); line-height:1.5; cursor:pointer; }
+.pip-action:hover:not(:disabled) { color:var(--text); background:var(--bg-hover); }
+.pip-action:disabled { opacity:.5; cursor:default; }
+.pip-action.is-primary { border-color:color-mix(in srgb, var(--accent) 60%, transparent); color:var(--accent); }
 .pip-fresh { flex:none; display:inline-flex; align-items:center; gap:4px; padding:1px 6px; border-radius:var(--radius-full); font-size:var(--fs-10); font-variant-numeric:tabular-nums; background:var(--bg-hover); color:var(--text-faint); }
 .pip-fresh::before { content:''; width:6px; height:6px; border-radius:50%; background:currentColor; }
 .pip-fresh.is-live { color:var(--ok); }
 .pip-fresh.is-stale { color:var(--warn); }
 .pip-fresh.is-disconnected { color:var(--danger); }
-.pip-controls { flex:none; display:flex; gap:2px; opacity:0; transition:opacity 120ms ease; }
-.pip:hover .pip-controls, .pip:focus-within .pip-controls { opacity:1; }
-.pip-controls .icon-button { width:20px; height:20px; }
-.pip-frame { position:relative; display:block; width:100%; aspect-ratio:16 / 10; padding:0; border:0; background: var(--media-bg); cursor:zoom-in; overflow:hidden; }
-.pip-frame img { display:block; width:100%; height:100%; object-fit:contain; }
-.pip.is-stale .pip-frame img { filter:saturate(.7); }
-.pip.is-disconnected .pip-frame img, .pip.is-ended .pip-frame img { filter:grayscale(.6) brightness(.85); }
-.pip-empty { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; color:var(--text-faint); }
-.pip-badge { position:absolute; left:8px; bottom:8px; padding:2px 7px; border-radius:var(--radius-full); background:color-mix(in srgb, var(--accent) 85%, var(--shadow-ink)); color:var(--on-accent); font-size:var(--fs-10); font-weight:500; }
-.pip-foot { display:flex; align-items:center; gap:8px; padding:5px 9px 3px; }
-.pip-label { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--text-dim); }
-.pip-label.is-error, .computer-viewer-label.is-error { color:var(--danger); }
-.pip-owner { flex:none; color:var(--text-faint); }
-.pip[data-owner='user'] .pip-owner { color:var(--accent); }
-.pip-actions { display:flex; gap:4px; padding:2px 9px 7px; }
-.pip-action { display:inline-flex; align-items:center; gap:4px; padding:2px 8px; border:1px solid var(--hairline); border-radius:var(--radius-6); background:transparent; color:var(--text-dim); font-size:var(--fs-11); line-height:1.5; cursor:pointer; }
-.pip-action:hover:not(:disabled) { color:var(--text); background:var(--bg-hover); }
-.pip-action:disabled { opacity:.5; cursor:default; }
-.pip-action.is-primary { border-color:color-mix(in srgb, var(--accent) 60%, transparent); color:var(--accent); }
-.pip-resize { position:absolute; bottom:0; width:14px; height:14px; cursor:ew-resize; touch-action:none; }
-.pip.corner-top-right .pip-resize, .pip.corner-bottom-right .pip-resize { left:0; cursor:nesw-resize; }
-.pip.corner-top-left .pip-resize, .pip.corner-bottom-left .pip-resize { right:0; cursor:nwse-resize; }
-.pip-resize:focus-visible { outline:1px solid var(--accent); border-radius:var(--radius-4); }
-.pip-permission { display:flex; flex-direction:column; gap:3px; margin:0 9px 8px; padding:6px 8px; border-radius:var(--radius-6); background:color-mix(in srgb, var(--warn) 14%, transparent); color:var(--text-dim); font-size:var(--fs-11); }
+.computer-viewer-label.is-error { color:var(--danger); }
+.pip-permission { display:flex; flex-direction:column; gap:3px; padding:7px 9px; border:1px solid var(--hairline); border-radius:var(--radius-10); background:var(--bg-raised); box-shadow:var(--shadow-sm); color:var(--text-dim); font-size:var(--fs-11); }
 .pip-link { padding:0; border:0; background:none; color:var(--accent); font:inherit; text-align:left; cursor:pointer; text-decoration:underline; text-underline-offset:2px; }
-/* Minimized pill. */
-.pip-pill { position:fixed; z-index:40; display:inline-flex; align-items:center; gap:6px; max-width:280px; padding:4px 10px 4px 8px; border:1px solid var(--hairline); border-radius:var(--radius-full); background:var(--bg-raised); box-shadow:var(--shadow-sm); color:var(--text-dim); font-size:var(--fs-11); cursor:pointer; transition:left 180ms ease, top 180ms ease; }
+/* Hidden: a small pill in the same spot brings the stack back. */
+.pip-pill { position:fixed; z-index:40; display:inline-flex; align-items:center; gap:6px; max-width:240px; padding:4px 10px 4px 8px; border:1px solid var(--hairline); border-radius:var(--radius-full); background:var(--bg-raised); box-shadow:var(--shadow-sm); color:var(--text-dim); font-size:var(--fs-11); cursor:pointer; transition:top 180ms ease, right 180ms ease; }
 .pip-pill:hover { color:var(--text); }
 .pip-dot { width:7px; height:7px; border-radius:50%; background:var(--text-faint); flex:none; }
 .pip-pill.is-live .pip-dot { background:var(--ok); box-shadow:0 0 0 3px color-mix(in srgb, var(--ok) 25%, transparent); }
 .pip-pill.is-stale .pip-dot { background:var(--warn); }
 .pip-pill.is-disconnected .pip-dot { background:var(--danger); }
-.pip-pill-title { font-weight:500; color:var(--text); white-space:nowrap; }
-.pip-pill-label { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.pip-pill-title { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-weight:500; color:var(--text); }
+.pip-pill-count { flex:none; color:var(--text-faint); font-variant-numeric:tabular-nums; }
+@media (prefers-reduced-motion: reduce) { .pip-stack, .pip-card, .pip-pill { transition:none; } }
 /* Right-pane viewer. */
 .computer-viewer { display:flex; flex-direction:column; flex:1; min-height:0; height:100%; }
 .computer-viewer-head { display:flex; align-items:center; gap:6px; padding:6px 8px 6px 12px; border-bottom:1px solid var(--hairline); font-size:var(--fs-12); color:var(--text-dim); }
