@@ -15,6 +15,14 @@
   --text-dim: rgb(232 232 232 / 72%);
   --text-faint: rgb(232 232 232 / 48%);
   --accent: #91abc2;
+  /* Links and file references in replies; file-type hues for their icons. */
+  --link: #7cb7ff;
+  --file-blue: #6aa8ff;
+  --file-yellow: #e6c35c;
+  --file-green: #8fd16a;
+  --file-red: #f07a6b;
+  --file-purple: #c79bf2;
+  --file-teal: #5cc8c4;
   --danger: #fc6b83;
   --ok: #80b898;
   --warn: #f1b467;
@@ -100,6 +108,13 @@
   --nav-material: rgb(244 244 244 / 55%);
   --nav-solid: #f2f2f2;
   --text: #1d1d1f;
+  --link: #0a64d6;
+  --file-blue: #1f6feb;
+  --file-yellow: #a07800;
+  --file-green: #2f8a18;
+  --file-red: #c2412d;
+  --file-purple: #8a4fd0;
+  --file-teal: #13837f;
   --text-dim: rgb(29 29 31 / 74%);
   --text-faint: rgb(29 29 31 / 52%);
   --accent: #3b6a93;

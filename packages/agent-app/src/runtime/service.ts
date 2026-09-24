@@ -590,9 +590,9 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
               });
             }
             if (isElicitationRequest(method)) {
-              const policy = elicitationPolicy(access.permissionMode);
-              if (policy !== 'ask') return elicitationResult(policy === 'accept');
               const server = elicitationServer(params);
+              const policy = elicitationPolicy(access.permissionMode, server);
+              if (policy !== 'ask') return elicitationResult(policy === 'accept');
               const text = elicitationText(params);
               const item = store.appendItem(chatId, 'approval', `${server || 'Computer use'} asks: ${text}`, 'pending', { method, kind: 'mcp', elicitation: true, reason: text, ...(server ? { server } : {}) });
               const approvalId = item.id;

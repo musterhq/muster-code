@@ -16,8 +16,10 @@ export type PricingInput = Omit<ModelPricing, 'source'>;
 export interface ExcludedModel { id: string; name: string; reason: string }
 /** User-editable visibility policy. Keys are modelKey(providerId, model). Hidden models stay runnable
  *  (a chat already on one keeps working); they are only left out of the model picker. */
-export interface ModelPolicy { hidden: string[]; pricing: Record<string, PricingInput> }
-export const EMPTY_MODEL_POLICY: ModelPolicy = Object.freeze({ hidden: [], pricing: {} }) as ModelPolicy;
+/** `hidden`: models the user switched off. `shown`: models that are off by default (a router's third-party
+ *  models) that the user switched on. */
+export interface ModelPolicy { hidden: string[]; shown: string[]; pricing: Record<string, PricingInput> }
+export const EMPTY_MODEL_POLICY: ModelPolicy = Object.freeze({ hidden: [], shown: [], pricing: {} }) as ModelPolicy;
 
 export const modelKey = (providerId: string, model: string): string => `${providerId}::${model}`;
 export function splitModelKey(key: string): { providerId: string; model: string } | undefined {
@@ -51,10 +53,11 @@ export function catalogPricing(entry: Record<string, unknown>): ModelPricing | u
 }
 /** Known keys with valid values survive; anything else in a stored file is dropped. */
 export function normalizeModelPolicy(raw: unknown): ModelPolicy {
-  const out: ModelPolicy = { hidden: [], pricing: {} };
+  const out: ModelPolicy = { hidden: [], shown: [], pricing: {} };
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return out;
   const v = raw as Record<string, unknown>;
   if (Array.isArray(v.hidden)) out.hidden = [...new Set(v.hidden.filter(isModelKey))].slice(0, 2000);
+  if (Array.isArray(v.shown)) out.shown = [...new Set(v.shown.filter(isModelKey))].slice(0, 5000);
   if (v.pricing && typeof v.pricing === 'object' && !Array.isArray(v.pricing)) {
     for (const [key, value] of Object.entries(v.pricing).slice(0, 2000)) {
       if (!isModelKey(key)) continue;
@@ -63,7 +66,11 @@ export function normalizeModelPolicy(raw: unknown): ModelPolicy {
   }
   return out;
 }
-export const isModelHidden = (policy: ModelPolicy, providerId: string, model: string): boolean => policy.hidden.includes(modelKey(providerId, model));
+/** Hidden when switched off, or when off by default (`hiddenByDefault`) and not switched on. */
+export const isModelHidden = (policy: ModelPolicy, providerId: string, model: string, hiddenByDefault = false): boolean => {
+  const key = modelKey(providerId, model);
+  return policy.hidden.includes(key) || (hiddenByDefault && !(policy.shown ?? []).includes(key));
+};
 /** The user's price wins over the catalog's; null when neither declares one. */
 export function effectivePricing(policy: ModelPolicy, providerId: string, model: string, catalog?: ModelPricing): ModelPricing | null {
   const user = policy.pricing[modelKey(providerId, model)];
@@ -71,11 +78,11 @@ export function effectivePricing(policy: ModelPolicy, providerId: string, model:
 }
 
 /** Picker rows after the visibility policy. The chat's current model is never hidden from its own picker. */
-export function applyVisibility<T extends { id: string; providerId: string }>(models: readonly T[], policy: ModelPolicy, selected?: { providerId: string; model: string }): { shown: T[]; hidden: T[] } {
+export function applyVisibility<T extends { id: string; providerId: string; hiddenByDefault?: boolean }>(models: readonly T[], policy: ModelPolicy, selected?: { providerId: string; model: string }): { shown: T[]; hidden: T[] } {
   const shown: T[] = [], hidden: T[] = [];
   for (const model of models) {
     const current = selected && selected.providerId === model.providerId && selected.model === model.id;
-    (isModelHidden(policy, model.providerId, model.id) && !current ? hidden : shown).push(model);
+    (isModelHidden(policy, model.providerId, model.id, model.hiddenByDefault) && !current ? hidden : shown).push(model);
   }
   return { shown, hidden };
 }

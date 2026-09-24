@@ -11,11 +11,20 @@ export const CLAUDE_CODE_MODELS = [CLAUDE_CODE_DEFAULT, ...CLAUDE_CODE_ALIASES];
 /** read-only (and every Ask/Plan chat) → plan; workspace → acceptEdits; full → bypassPermissions. */
 export const claudePermissionMode = (mode: AdapterRunInput['permissionMode']) => mode === 'full' ? 'bypassPermissions' : mode === 'workspace' ? 'acceptEdits' : 'plan';
 
+function mcpArgs(servers: AdapterRunInput['mcpServers']): string[] {
+  const names = Object.keys(servers ?? {});
+  if (!names.length) return [];
+  return ['--mcp-config', JSON.stringify({mcpServers: servers}), '--allowedTools', ...names.map(name => `mcp__${name}`)];
+}
+
 export function claudeArgs(input: AdapterRunInput, sessionId: string): string[] {
   const alias = input.model.replace(/^claude-code\//, '');
   return ['-p', '--output-format', 'stream-json', '--verbose', '--include-partial-messages',
     // Images travel as content blocks in a stream-json user message; text-only turns keep the plain stdin prompt.
     ...(input.images?.length ? ['--input-format', 'stream-json'] : []),
+    // Muster's own tool servers (in-app browser, terminal, mailbox…): loaded alongside the user's, and allowed, since
+    // they are first-party and each enforces its own lease and scope. Both flags are variadic, so a flag follows them.
+    ...mcpArgs(input.mcpServers),
     '--permission-mode', claudePermissionMode(input.permissionMode),
     ...(alias && alias !== 'default' ? ['--model', alias] : []),
     ...(input.reasoningEffort ? ['--effort', input.reasoningEffort] : []),

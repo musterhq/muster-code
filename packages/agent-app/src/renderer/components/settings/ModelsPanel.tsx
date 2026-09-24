@@ -1,6 +1,6 @@
-import React, {useEffect, useState} from 'react';
+import React, {useMemo, useEffect, useState} from 'react';
 import {RotateCcw} from 'lucide-react';
-import {effectivePricing, formatUsd, isModelHidden, modelBadges, modelKey, type PricingInput} from '../../../shared/model-catalog';
+import {effectivePricing, formatUsd, isModelHidden, modelBadges, modelKey, type ModelPolicy, type PricingInput} from '../../../shared/model-catalog';
 import {loadProviders, notifyError} from '../../store';
 import {useStore} from '../../useStore';
 import {resetModelPolicy, setModelHidden, setModelPricing, useModelPolicy} from '../../modelPolicy';
@@ -41,11 +41,12 @@ export function ModelsPanel(): React.ReactElement {
     {state.providers.phase === 'error' && <p className="models-error" role="alert">{state.providers.error ?? 'Models could not be loaded.'}</p>}
     {state.providers.phase === 'ready' && !runnable.length && <p className="settings-muted">No provider is ready yet. Models appear here once a provider’s catalog loads.</p>}
     {runnable.map(provider => {
-      const shown = provider.models.filter(model => !isModelHidden(policy, provider.id, model.id)).length;
+      const extra = provider.models.filter(model => model.hiddenByDefault), regular = provider.models.filter(model => !model.hiddenByDefault);
+      const shown = provider.models.filter(model => !isModelHidden(policy, provider.id, model.id, model.hiddenByDefault)).length;
       return <section key={provider.id} className="models-provider" aria-label={provider.name}>
         <h3 className="preference-group-title">{provider.name}<span className="settings-muted">{shown} of {provider.models.length} shown in the picker</span></h3>
         <div className="preference-group">
-          {provider.models.map(model => {
+          {regular.map(model => {
             const key = modelKey(provider.id, model.id), hidden = isModelHidden(policy, provider.id, model.id);
             const pricing = effectivePricing(policy, provider.id, model.id, model.pricing);
             return <div key={key} className="preference-row models-row" role="group" aria-label={model.name}>
@@ -64,6 +65,7 @@ export function ModelsPanel(): React.ReactElement {
             </div>;
           })}
         </div>
+        {!!extra.length && <RouterModels providerId={provider.id} models={extra} policy={policy} onToggle={toggle}/>}
         {!!provider.excludedModels?.length && <details className="models-excluded">
           <summary>{provider.excludedModels.length} catalog {provider.excludedModels.length === 1 ? 'entry is' : 'entries are'} not offered</summary>
           <ul>{provider.excludedModels.map(entry => <li key={entry.id}><strong>{entry.name}</strong>{entry.name !== entry.id && <span className="models-id">{entry.id}</span>}<span>{entry.reason}</span></li>)}</ul>
@@ -83,3 +85,36 @@ export function ModelsPanel(): React.ReactElement {
     <p className="settings-muted models-footnote">Hidden models stay runnable: a chat already using one keeps it, and it still shows in that chat’s picker. Nothing is ever switched for you.</p>
   </div>;
 }
+
+type RouterModel = {id: string; name: string; group?: string; hiddenByDefault?: boolean};
+/** A router's third-party models: loaded, off in the picker by default, switchable one by one. Grouped by where the
+ *  router gets them; a group's rows are built only when it is opened or a search matches, so 1,400 models stay cheap. */
+function RouterModels({providerId, models, policy, onToggle}: {providerId: string; models: RouterModel[]; policy: ModelPolicy; onToggle: (key: string, hidden: boolean) => void}): React.ReactElement {
+  const [query, setQuery] = useState(''), [open, setOpen] = useState<ReadonlySet<string>>(new Set());
+  const on = models.filter(model => !isModelHidden(policy, providerId, model.id, true)).length;
+  const groups = useMemo(() => {
+    const byGroup = new Map<string, RouterModel[]>();
+    for (const model of models) { const group = model.group ?? 'other'; byGroup.set(group, [...(byGroup.get(group) ?? []), model]); }
+    return [...byGroup.entries()].sort((a, b) => b[1].length - a[1].length);
+  }, [models]);
+  const needle = query.trim().toLowerCase();
+  const row = (model: RouterModel) => {
+    const key = modelKey(providerId, model.id), hidden = isModelHidden(policy, providerId, model.id, true);
+    return <div key={key} className="preference-row models-row models-row-compact" role="group" aria-label={model.name}>
+      <span className="preference-copy"><strong>{model.name}</strong>{model.name !== model.id && <span className="models-id">{model.id}</span>}</span>
+      <span className="preference-control models-controls"><button type="button" role="switch" className="preference-switch" aria-label={`Show ${model.name} in the model picker`} aria-checked={!hidden} onClick={() => onToggle(key, !hidden)}><span /></button></span>
+    </div>;
+  };
+  const matches = needle ? models.filter(model => model.id.toLowerCase().includes(needle) || model.name.toLowerCase().includes(needle)).slice(0, 200) : [];
+  return <details className="models-router">
+    <summary>{models.length} more models on this router · off by default{on ? ` · ${on} on` : ''}</summary>
+    <p className="settings-muted">The router also serves these third-party models. Switch any on to add it to the model picker.</p>
+    <input type="search" className="models-router-search" placeholder="Search router models" aria-label="Search router models" value={query} onChange={event => setQuery(event.target.value)} />
+    {needle ? <div className="preference-group">{matches.length ? matches.map(row) : <p className="settings-muted">No router model matches “{query}”.</p>}</div>
+      : groups.map(([group, items]) => <details key={group} className="models-router-group" open={open.has(group)} onToggle={event => { const isOpen = (event.currentTarget as HTMLDetailsElement).open; setOpen(current => { const next = new Set(current); if (isOpen) next.add(group); else next.delete(group); return next; }); }}>
+        <summary>{group}<span className="settings-muted">{items.length}</span></summary>
+        {open.has(group) && <div className="preference-group">{items.map(row)}</div>}
+      </details>)}
+  </details>;
+}
+

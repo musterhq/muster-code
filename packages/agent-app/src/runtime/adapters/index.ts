@@ -7,7 +7,7 @@ import {validateEndpoint} from '../custom-providers.ts';
 import {providerDataDir, type ProviderInstance} from '../provider-instances.ts';
 import {claudeCodeAdapter, type Spawn} from './claude-code.ts';
 import {claudeCodeModels} from './claude-models.ts';
-import {ANTHROPIC_API, anthropicAdapter, CHAT_ONLY, fetchModelList, openAICompatibleAdapter} from './http-chat.ts';
+import {ANTHROPIC_API, anthropicAdapter, CHAT_ONLY, listChatModels, openAICompatibleAdapter} from './http-chat.ts';
 import {openCodeAdapter, openCodeCapabilities, probe} from './opencode.ts';
 import {ConversationMemory, findBinary, Validator} from './shared.ts';
 import {ENV_KEY_PROVIDERS, localServers} from '../env-providers.ts';
@@ -50,8 +50,8 @@ export function createAdapterCatalog(options: AdapterCatalogOptions = {}): Adapt
   const claudeAuth = new Validator(options.claudeSignIn ?? (() => claudeSignIn({env: env(), home})), 60_000);
   const openCodeCheck = new Validator(() => openCodeCapabilities(openCodeBinary()!, options.spawn));
   const openAIBase = () => { try { return env().OPENAI_BASE_URL ? validateEndpoint(env().OPENAI_BASE_URL) : 'https://api.openai.com/v1'; } catch { return 'https://api.openai.com/v1'; } };
-  const openAICheck = new Validator(async () => (await fetchModelList(`${openAIBase()}/models`, {authorization: `Bearer ${env().OPENAI_API_KEY}`}, 'OpenAI', request)).filter(model => OPENAI_CHAT.test(model.id) && !OPENAI_EXCLUDE.test(model.id)).sort((a, b) => b.id.localeCompare(a.id)));
-  const anthropicCheck = new Validator(async () => fetchModelList(`${ANTHROPIC_API}/models?limit=100`, {'x-api-key': env().ANTHROPIC_API_KEY ?? '', 'anthropic-version': '2023-06-01'}, 'Anthropic', request));
+  const openAICheck = new Validator(async () => (await listChatModels(`${openAIBase()}/models`, {authorization: `Bearer ${env().OPENAI_API_KEY}`}, 'OpenAI', request)).filter(model => OPENAI_CHAT.test(model.id) && !OPENAI_EXCLUDE.test(model.id)).sort((a, b) => b.id.localeCompare(a.id)));
+  const anthropicCheck = new Validator(async () => listChatModels(`${ANTHROPIC_API}/models?limit=100`, {'x-api-key': env().ANTHROPIC_API_KEY ?? '', 'anthropic-version': '2023-06-01'}, 'Anthropic', request));
   // info() runs on every send and listing; a PATH walk is re-done at most every 5s.
   const found = new Map<string, {at: number; key: string; value?: string}>();
   const binary = (name: string, override: string | undefined, candidate: string) => {
@@ -63,11 +63,11 @@ export function createAdapterCatalog(options: AdapterCatalogOptions = {}): Adapt
   const claudeBinary = () => binary('claude', env().MUSTER_CLAUDE_COMMAND, join(home, '.claude/local/claude'));
   const openCodeBinary = () => binary('opencode', env().MUSTER_OPENCODE_COMMAND, join(home, '.opencode/bin/opencode'));
   // Other well-known API-key variables: OpenAI-compatible endpoints, models from their own /models list.
-  const envChecks = new Map(ENV_KEY_PROVIDERS.filter(key => key.kind === 'openai-compatible').map(key => [key.id, new Validator(async () => fetchModelList(`${endpointFor(key)}/models`, {authorization: `Bearer ${env()[key.env]}`}, key.name, request))]));
+  const envChecks = new Map(ENV_KEY_PROVIDERS.filter(key => key.kind === 'openai-compatible').map(key => [key.id, new Validator(async () => listChatModels(`${endpointFor(key)}/models`, {authorization: `Bearer ${env()[key.env]}`}, key.name, request))]));
   const endpointFor = (key: (typeof ENV_KEY_PROVIDERS)[number]) => { const override = key.baseEnv ? env()[key.baseEnv] : undefined; try { return override ? validateEndpoint(override) : key.endpoint; } catch { return key.endpoint; } };
   // Local servers answer fast or not at all; a server that is not running is simply not listed.
   const localChecks = new Map<string, Validator<Array<{id: string; name: string}>>>();
-  const localCheck = (bindingId: string, label: string, endpoint: string, key: string | undefined) => { let found = localChecks.get(bindingId); if (!found) { if (localChecks.size >= 16) localChecks.delete(localChecks.keys().next().value!); found = new Validator(async () => fetchModelList(`${endpoint}/models`, key ? {authorization: `Bearer ${key}`} : {}, label, request, 1500), 60_000); localChecks.set(bindingId, found); } return found; };
+  const localCheck = (bindingId: string, label: string, endpoint: string, key: string | undefined) => { let found = localChecks.get(bindingId); if (!found) { if (localChecks.size >= 16) localChecks.delete(localChecks.keys().next().value!); found = new Validator(async () => listChatModels(`${endpoint}/models`, key ? {authorization: `Bearer ${key}`} : {}, label, request, 1500), 60_000); localChecks.set(bindingId, found); } return found; };
   const hasOmniRoute = () => existsSync(env().OMNIROUTE_HOME || join(home, '.omniroute')) || Object.keys(env()).some(name => name.startsWith('OMNIROUTE_'));
   const codexEndpoints = options.codexEndpoints ?? (() => { try { return configuredProviderInstances({env: env(), home}).map(row => row.info.endpoint ?? '').filter(Boolean); } catch { return []; } });
   const origin = (url: string) => { try { const parsed = new URL(url); return `${parsed.hostname === 'localhost' ? '127.0.0.1' : parsed.hostname}:${parsed.port}`; } catch { return url; } };

@@ -20,6 +20,8 @@ export interface ReleaseCandidate {release:UpdateRelease;zip:GitHubAsset;sums:Gi
 
 const TAG_PREFIX='agent-v';
 const VERSION=/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/;
+/** Background checks run hourly; focusing the window also checks when the last look is over 10 minutes old. */
+export const CHECK_EVERY_MS=60*60_000;
 export const REPO_PATTERN=/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 
 /** Newest release above `current` that carries this Mac's zip and SHA256SUMS. Stable skips prereleases. */
@@ -116,8 +118,14 @@ export class AppUpdater {
   private schedule(delay:number):void {
     this.stop();
     if(!this.status.autoCheck||!this.repo)return;
-    this.timer=setTimeout(()=>{void this.check({quiet:true}).finally(()=>this.schedule(6*60*60_000));},delay);
+    this.timer=setTimeout(()=>{void this.check({quiet:true}).finally(()=>this.schedule(CHECK_EVERY_MS));},delay);
     this.timer.unref?.();
+  }
+  /** Coming back to the window re-checks when the last look is older than `minAgeMs` (automatic checks only). */
+  checkIfStale(minAgeMs=10*60_000):void {
+    if(!this.repo||!this.status.autoCheck)return;
+    const last=this.status.checkedAt?Date.parse(this.status.checkedAt):0;
+    if(Date.now()-last>=minAgeMs)void this.check({quiet:true});
   }
   async setAutoCheck(enabled:boolean):Promise<UpdateStatus> {
     if(!this.repo)return this.snapshot();

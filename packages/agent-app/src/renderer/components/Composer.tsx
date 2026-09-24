@@ -9,7 +9,7 @@ import { runMenuAction } from '../menuActions';
 import { discardAttachment, listAttachments, previewAttachment, readFileBase64, runtimeMessage, stageAttachment } from '../composerBridge';
 import { applyVisibility, modelBadges } from '../../shared/model-catalog';
 import { useModelPolicy } from '../modelPolicy';
-import { createChat, flushComposerDraft, getState, loadPlugins, loadProviders, loadSkills, notifyError, notifySuccess, openAppSettings, openBrowserTab, openFile, openPluginsScreen, openProjectsScreen, openTab, selectChat, sendMessage, setComposerDraft, setFollowUpMode, snapshotRevision, stopChat, updateChat } from '../store';
+import { createChat, flushComposerDraft, getState, loadPlugins, loadProviders, loadSkills, refreshProvidersQuietly, notifyError, notifySuccess, openAppSettings, openBrowserTab, openFile, openPluginsScreen, openProjectsScreen, openTab, selectChat, sendMessage, setComposerDraft, setFollowUpMode, snapshotRevision, stopChat, updateChat } from '../store';
 import { ADD_CONTEXT_EVENT, loadComposerMemory, normalizeContextChip, saveComposerMemory, serializeContext, type ContextChip } from '../composerContext';
 import { setTerminalDock, setTerminalPaneView, terminalDock } from '../processSummary';
 import { ChipMirror, ContextStrip, TokenCard } from './ComposerTokens';
@@ -252,6 +252,8 @@ export function Composer({ chat }: { chat: Chat }): React.ReactElement {
   const [forceStop, setForceStop] = useState(false);
   const [popoverAnchor, setPopoverAnchor] = useState<{ left: number; bottom: number } | null>(null);
   const [modelOpen, setModelOpen] = useState(false);
+  // Opening the picker re-reads the provider list quietly, so a model newly added to an account shows up.
+  useEffect(() => { if (modelOpen) void refreshProvidersQuietly(5_000); }, [modelOpen]);
   const [modelQuery, setModelQuery] = useState('');
   const [modelTab, setModelTab] = useState<string>('all');
   const [modelFavorites, setModelFavorites] = useState<string[]>(() => readLocal(MODEL_FAVORITES_KEY, [], isStrings));

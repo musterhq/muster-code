@@ -1,4 +1,5 @@
 import {copyText} from '../clipboard';
+import { remarkFileLinks } from '../markdown-file-links';
 import { advanceFade, createFadeState, rehypeStreamFade, type FadeState } from '../markdown-fade';
 import { Check, Code, Copy, Quote, WrapText, X } from 'lucide-react';
 import {addComposerContext} from '../composerContext';
@@ -141,7 +142,7 @@ function Heading({
 const components: Components = {
   pre: Pre,
   table: ({node: _node, ...props}) => <MarkdownTable {...props}/>,
-  a: ({ children, href }) => <ResourceLink href={href}>{children}</ResourceLink>,
+  a: ({ children, href, ...props }: any) => <ResourceLink href={href} auto={props['data-auto-file'] === 'true'}>{children}</ResourceLink>,
   h1: ({node, children, ...props}) => <Heading level={1} node={node} {...props}>{children}</Heading>,
   h2: ({node, children, ...props}) => <Heading level={2} node={node} {...props}>{children}</Heading>,
   h3: ({node, children, ...props}) => <Heading level={3} node={node} {...props}>{children}</Heading>,
@@ -182,8 +183,9 @@ function SelectionQuote({ container }: { container: React.RefObject<HTMLDivEleme
   return <button type="button" className="md-quote" style={{ left: offer.left, top: offer.top }} onMouseDown={event => event.preventDefault()} onClick={quote} aria-label="Quote in reply" title="Quote in reply"><Quote size={12} />Quote</button>;
 }
 
-function MessageBodyContent({ text, resourceContext, animate = false }: { text: string; resourceContext?: ResourceContext; animate?: boolean }): React.ReactElement {
-  const remarkPlugins = React.useMemo(() => [remarkGfm, createIncrementalMarkdownPlugin()], []);
+function MessageBodyContent({ text, resourceContext, animate = false, linkFiles = false }: { text: string; resourceContext?: ResourceContext; animate?: boolean; linkFiles?: boolean }): React.ReactElement {
+  // Replies link the files they mention (markdown-file-links.ts); documents and previews render as written.
+  const remarkPlugins = React.useMemo(() => linkFiles ? [remarkGfm, createIncrementalMarkdownPlugin(), remarkFileLinks] : [remarkGfm, createIncrementalMarkdownPlugin()], [linkFiles]);
   const renderedText = React.useMemo(() => inferMarkdownCodeLanguages(text), [text]);
   // Streaming fade (markdown-fade.ts): text that arrives after the first render fades in.
   const fade = useRef<FadeState | null>(null);
@@ -233,6 +235,7 @@ function MessageBodyContent({ text, resourceContext, animate = false }: { text: 
 export const MessageBody = React.memo(MessageBodyContent, (previous, next) =>
   previous.text === next.text &&
   previous.animate === next.animate &&
+  previous.linkFiles === next.linkFiles &&
   previous.resourceContext?.folderId === next.resourceContext?.folderId &&
   previous.resourceContext?.path === next.resourceContext?.path,
 );

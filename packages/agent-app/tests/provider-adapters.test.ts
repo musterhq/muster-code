@@ -261,3 +261,16 @@ test('Claude Code edits: honest pre-run patch, then the applied structuredPatch 
   assert.equal(claudeResultPatch({type:'create',filePath:'/w/n.ts',content:'one\ntwo\n',structuredPatch:[]}),'@@ -0,0 +1,2 @@\n+one\n+two');
   assert.equal(claudeResultPatch({structuredPatch:[]}),undefined);
 });
+
+test('Claude Code gets Muster\'s own tool servers (in-app browser, terminal…) and may use them', async () => {
+  const {mcpServersFromOverrides}=await import('../src/runtime/adapters/shared.ts');
+  const servers=mcpServersFromOverrides({'mcp_servers.muster_browser.command':'/app/browser-mcp','mcp_servers.muster_browser.env.MUSTER_CHAT_ID':'c1','mcp_servers.muster_browser.tool_timeout_sec':120,'mcp_servers.half.env.X':'1','model_reasoning_summary':'detailed'});
+  assert.deepEqual(servers,{muster_browser:{command:'/app/browser-mcp',env:{MUSTER_CHAT_ID:'c1'}}},'Codex-only keys and servers without a command are dropped');
+  const args=claudeArgs({chat:{id:'c1'} as any,cwd:'/w',prompt:'p',model:'claude-code/sonnet',permissionMode:'workspace',mcpServers:servers,signal:new AbortController().signal,onThreadReady(){},onTurnAccepted(){},onDelta(){},onReasoning(){},onEvent(){}},'s1');
+  const at=args.indexOf('--mcp-config');
+  assert.ok(at>0);assert.deepEqual(JSON.parse(args[at+1]!),{mcpServers:servers});
+  assert.equal(args[at+2],'--allowedTools');assert.equal(args[at+3],'mcp__muster_browser');
+  assert.ok(args[at+4]!.startsWith('--'),'a flag closes the variadic lists');
+  assert.equal(claudeArgs({chat:{id:'c1'} as any,cwd:'/w',prompt:'p',model:'claude-code/sonnet',permissionMode:'workspace',signal:new AbortController().signal,onThreadReady(){},onTurnAccepted(){},onDelta(){},onReasoning(){},onEvent(){}},'s1').includes('--mcp-config'),false);
+});
+

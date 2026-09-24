@@ -420,6 +420,7 @@ async function main(): Promise<void> {
     quit:()=>app.quit(),
   });
   void updater.start();
+  app.on('browser-window-focus', () => updater.checkIfStale());
 
   const isTrustedSender = (frame: Electron.WebFrameMain | null, senderId: number): boolean =>
     window !== null && !window.isDestroyed() &&

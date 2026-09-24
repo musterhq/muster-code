@@ -1,7 +1,7 @@
 import React,{useEffect,useState} from 'react';
 import {PreviewCard} from '@base-ui/react/preview-card';
 import {Menu} from '@base-ui/react/menu';
-import {Copy, Eye, ExternalLink, FileText, FolderOpen, FolderPlus} from 'lucide-react';
+import {Braces, Copy, Eye, ExternalLink, FileCode2, FileImage, FileSpreadsheet, FileText, FolderOpen, FolderPlus, Settings2, SquareTerminal} from 'lucide-react';
 import {ArtifactViewer} from './ArtifactViewer';
 import type {ExternalFileInfo, OpenWithApp} from '../../shared/domains/files-protocol';
 import {notifyError, notifySuccess} from '../store';
@@ -13,11 +13,13 @@ import {externalReference, resourceReference} from './resourceReference';
 import {markdownFragmentId} from './markdownAnchors';
 import {Tip} from './Tooltip';
 export type ResourceContext = { folderId: string; path: string };
-export function ResourceLink({href,children,context}:{href?:string;children?:React.ReactNode;context?:ResourceContext}){
+export function ResourceLink({href,children,context,auto=false}:{href?:string;children?:React.ReactNode;context?:ResourceContext;auto?:boolean}){
  const state=useStore(),chat=activeChat();
  const project=state.snapshot?.projects.find(p=>p.id===chat?.projectId);
  const ids=project?.folderIds??(chat?.folderId?[chat.folderId]:[]);
  const folders=(state.snapshot?.folders??[]).filter(f=>context ? f.id===context.folderId : ids.includes(f.id));
+ // A path the reply mentioned (markdown-file-links.ts): a link only once it resolves to one real file here.
+ if(auto&&href)return <AutoFileLink href={href} folders={folders}>{children}</AutoFileLink>;
  const fragment=href?.startsWith('#') ? markdownFragmentId(href) : null;
  if(fragment && context)return <a className="md-resource-link" href={`#${fragment}`} onClick={event=>{
   event.preventDefault();
@@ -45,7 +47,7 @@ function FileReference({reference,children}:{reference:NonNullable<ReturnType<ty
   return()=>{live=false;};
  },[open,reference.folderId,reference.path,reference.line]);
  return <PreviewCard.Root open={open} onOpenChange={setOpen}>
-  <PreviewCard.Trigger render={<button type="button"/>} className="md-resource-link" aria-label={`${reference.path}${reference.line?':'+reference.line:''} — Open in adjoining pane`} delay={450} closeDelay={120} onClick={()=>{setOpen(false);void openFile(reference.folderId,reference.path,reference.line);}}>{children}</PreviewCard.Trigger>
+  <PreviewCard.Trigger render={<button type="button"/>} className="md-resource-link md-file-link" aria-label={`${reference.path}${reference.line?':'+reference.line:''} — Open in adjoining pane`} delay={450} closeDelay={120} onClick={()=>{setOpen(false);void openFile(reference.folderId,reference.path,reference.line);}}><FileGlyph path={reference.path}/>{children}</PreviewCard.Trigger>
   <PreviewCard.Portal><PreviewCard.Positioner side="top" sideOffset={8} className="file-preview-positioner"><PreviewCard.Popup className="file-reference-preview" data-native-preview-overlay>
    <header><FileText size={14}/><span>{reference.path}{reference.line?':'+reference.line:''}</span></header>
    {preview?.text&&<pre>{preview.text}</pre>}
@@ -86,3 +88,58 @@ function ExternalFileReference({path,line,chatId,children}:{path:string;line?:nu
   </Menu.Popup></Menu.Positioner></Menu.Portal>
  </Menu.Root></>;
 }
+
+/** File-type glyph for a file link: an icon and a hue by extension (tokens in styles.css). */
+const FILE_KINDS:Array<[RegExp,React.ComponentType<{size?:number}>,string]>=[
+ [/\.(tsx?|go|c|h|cc|cpp|hpp|cs|sql|dart)$/i,FileCode2,'blue'],
+ [/\.(py|pyi|ipynb)$/i,FileCode2,'teal'],
+ [/\.(jsx?|mjs|cjs)$/i,FileCode2,'yellow'],
+ [/\.(rs|rb|java|kts?|scala|erl|exs?|html?|php)$/i,FileCode2,'red'],
+ [/\.(css|scss|less|swift|vue|svelte|graphql|gql|proto)$/i,FileCode2,'purple'],
+ [/\.(sh|bash|zsh|fish|ps1)$/i,SquareTerminal,'green'],
+ [/\.(jsonc?|lock)$/i,Braces,'yellow'],
+ [/\.(ya?ml|toml|ini|cfg|conf|env|tf|tfvars|hcl|plist|xml)$/i,Settings2,'red'],
+ [/(^|\/)(Dockerfile|Makefile|Procfile|Gemfile|Rakefile|Justfile|Caddyfile|Brewfile)$/,Settings2,'blue'],
+ [/\.(csv|tsv|xlsx)$/i,FileSpreadsheet,'green'],
+ [/\.(png|jpe?g|gif|svg)$/i,FileImage,'purple'],
+];
+export function FileGlyph({path}:{path:string}):React.ReactElement{
+ const kind=FILE_KINDS.find(([test])=>test.test(path));
+ const Icon=kind?.[1]??FileText;
+ return <span className="md-file-glyph" data-hue={kind?.[2]??'text'} aria-hidden="true"><Icon size={13}/></span>;
+}
+
+/** Mentions resolved per folder and path, shared by every reply in the window. */
+const autoResolved=new Map<string,Promise<string|null>>();
+const clean=(path:string)=>path.replace(/^\.\//,'');
+function resolveMention(folderId:string,path:string):Promise<string|null>{
+ const key=`${folderId}\0${path}`;
+ let pending=autoResolved.get(key);
+ if(!pending){
+  const target=clean(path),name=target.split('/').pop()!;
+  pending=invoke('files.quickOpen',{folderId,query:name}).then(({results})=>{
+   const exact=results.find(r=>r.path===target);if(exact)return exact.path;
+   const suffix=results.filter(r=>r.path.endsWith('/'+target));if(suffix.length===1)return suffix[0]!.path;
+   // A bare file name links only when exactly one file in the folder has it.
+   const named=target.includes('/')?[]:results.filter(r=>r.path.split('/').pop()===name);
+   return named.length===1?named[0]!.path:null;
+  },()=>null);
+  autoResolved.set(key,pending);
+ }
+ return pending;
+}
+/** A path the reply mentioned. It reads as plain text until it resolves to a single real file in this
+ *  conversation's folders; a guess that matches nothing never turns into a dead link. */
+function AutoFileLink({href,folders,children}:{href:string;folders:{id:string;path:string}[];children?:React.ReactNode}){
+ const match=/^(.*?)(?::(\d+))?$/.exec(href),path=match?.[1]??href,line=match?.[2]?Number(match[2]):undefined;
+ const [found,setFound]=useState<{folderId:string;path:string;absolute:string}|null>(null);
+ const key=folders.map(f=>f.id).join(',');
+ useEffect(()=>{
+  let live=true;setFound(null);
+  void (async()=>{for(const folder of folders){const hit=await resolveMention(folder.id,path);if(hit){if(live)setFound({folderId:folder.id,path:hit,absolute:`${folder.path}/${hit}`});return;}}})();
+  return()=>{live=false;};
+ },[path,key]);
+ if(!found)return <>{children}</>;
+ return <FileReference reference={{...found,...(line?{line}:{})}}>{children}</FileReference>;
+}
+

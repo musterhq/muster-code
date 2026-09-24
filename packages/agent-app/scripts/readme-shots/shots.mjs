@@ -17,9 +17,26 @@ const composerType = async (ctx, text) => {
 const chord = (key) => `window.dispatchEvent(new KeyboardEvent('keydown',{key:'${key}',metaKey:true,bubbles:true,cancelable:true}));`;
 
 export const SHOTS = [
+  // Local only: file mentions become links with file-type glyphs; bold facts and tables.
+  {name: 'compare-links', local: true, opts: {replyMarkdown: "Deployment on **staging** is complete. The API was **untouched**.\n\nThe due-date job lives in `src/jobs/reminders.ts:18`, and the board badge is in web/src/components/TaskCard.tsx (line 40). The model change is in `src/models/task.ts`; see also package.json and `docs/missing-file.md`.\n\n| Area | Result |\n| --- | --- |\n| Tests | **31 passed**, browser console has zero errors |\n| Job | `src/jobs/index.ts` registers reminders on a one-minute tick |\n| Badge | `DueBadge.tsx` still to be written |\n", userText: 'Ship due-date reminders to staging and tell me what changed.'}, async run(ctx) {
+    await showMainTurn(ctx); await ctx.sleep(1500);
+  }},
   // Local comparison only (not in the README): the same long reply Codex rendered, in Muster's renderer.
   {name: 'compare-reply', local: true, opts: {replyMarkdown: "**Breaker Testing**\n\nThe deployed build was tested on `10.0.4.21` with temporary `rocky` and `kedar` users:\n\n- `status --refresh`: passed for both users.\n- `status --refresh-all`: passed.\n- `analyze-logs --refresh`: passed.\n- `preflight --check`: passed.\n- Concurrent state imports: passed; final state remained `0660` and shared.\n- Separate user-owned `0600` SSH keys: passed.\n- Invalid config, missing config, missing restore, and unsafe timer installation: safely rejected.\n- `destroy` without `--force` and confirmation: refused without changes.\n- Services remained active throughout.\n- Permission tests: `97 passed`.\n\n**Real Findings**\n\n- `rotation-status` correctly returned a critical finding: the configured backup timer is inactive.\n- `memory` reported `NOAUTH`, indicating an authentication binding/configuration issue, not a filesystem permission issue.\n- `bigkeys` required confirmation and safely cancelled without input.\n- `support --cluster` found duplicate historical configs in runtime backup directories.\n- `rebalance --dry-run` correctly rejected the standalone Redis topology because rebalance is only supported for Redis Cluster or Sentinel.\n- Recovery and DR status require an explicit `--config`.\n\nProduction state remains intact:\n\n```\nossmgr-ui-api.service    active\nossmgr-ui-worker.service active\nstate files              0660\n```", userText: 'check with all sorts of commands like status, analyze log, rotation status, and other commands, what if they try to break the system be the breaker try different combinations of commands'}, async run(ctx) {
     await showMainTurn(ctx); await ctx.sleep(900);
+  }},
+  // Local only: Codex-style computer-use PiP, a stack of live window cards under the summary card.
+  {name: 'pip-stack', local: true, opts: {computerUse: true}, async run(ctx) { await ctx.sleep(1800); }},
+  {name: 'pip-stack-nocard', local: true, opts: {computerUse: true}, async run(ctx) { await ctx.store(`s.setSummaryHidden(true)`); await ctx.sleep(1800); }},
+  {name: 'pip-stack-stale', local: true, opts: {computerUse: 'stale'}, async run(ctx) { await ctx.sleep(3500); }},
+  {name: 'pip-stack-control', local: true, opts: {computerUse: true}, async run(ctx) { await ctx.sleep(1200); await ctx.click('.pip-control', 'Take control'); await ctx.sleep(900); await ctx.evaluate(`const b=document.querySelector('.pip-stack').getBoundingClientRect();window.__clip={x:b.left-40,y:b.top-40,width:b.width+80,height:b.height+80};`); }},
+  {name: 'pip-pill', local: true, opts: {computerUse: true}, async run(ctx) { await ctx.sleep(1200); await ctx.click('.pip-control', 'Hide'); await ctx.sleep(900); }},
+  {name: 'pip-activity-collapsed', local: true, opts: {computerUse: 'done'}, async run(ctx) { await ctx.sleep(1500); }},
+  {name: 'pip-activity', local: true, opts: {computerUse: 'done'}, async run(ctx) {
+    await ctx.store(`s.setSummaryHidden(true)`); await ctx.sleep(1200);
+    await ctx.click('.activity-summary'); await ctx.sleep(700);
+    await ctx.evaluate(`const g=document.querySelector('.activity-group');const t=document.querySelector('.timeline');if(g&&t)t.scrollTop+=g.getBoundingClientRect().top-t.getBoundingClientRect().top-80;`);
+    await ctx.sleep(500);
   }},
   {name: 'hero', async run(ctx) {
     await ctx.store(`await s.openDiff('f-taskboard','src/models/task.ts')`);

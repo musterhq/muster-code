@@ -1,0 +1,7 @@
+/* App marks (computer-use rows, the PiP stack): a rounded tile tinted per app, a white glyph or initial. */
+.app-glyph { flex: none; display: inline-grid; place-items: center; width: var(--app-size, 16px); height: var(--app-size, 16px); border-radius: var(--radius-4); background: linear-gradient(180deg, hsl(var(--app-hue) var(--app-sat) 62%), hsl(var(--app-hue) var(--app-sat) 46%)); color: var(--on-media); box-shadow: inset 0 0 0 0.5px color-mix(in srgb, var(--shadow-ink) 30%, transparent); line-height: 0; }
+.app-glyph > svg { display: block; }
+.app-glyph-letter { font-size: var(--fs-10); font-weight: 700; line-height: 1; letter-spacing: 0; }
+.app-glyph.is-active { animation: app-glyph-pulse 1.6s ease-in-out infinite; }
+@keyframes app-glyph-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .55; } }
+@media (prefers-reduced-motion: reduce) { .app-glyph.is-active { animation: none; } }

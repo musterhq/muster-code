@@ -10,13 +10,14 @@ import {openTerminalTab} from './ProcessesTab';
 import './tool-card.css';
 import {Collapsible} from '@base-ui/react/collapsible';
 import {invoke} from '../bridge';
-import {computerAction} from '../../shared/computer-use';
+import {computerAction,type ComputerAction} from '../../shared/computer-use';
 import {openViewer,toolImageUrl,toolShots,type PipSource,type ToolShot} from '../computerUse';
 import {itemPatches} from '../patchModel';
 import {FileChangeView} from './FileDiffEditor';
 import {DiffStat} from './DiffStat';
 import {MessageBody} from './MessageBody';
 import {Tip} from './Tooltip';
+import {AppGlyph} from './AppGlyph';
 
 type Glyph = React.ComponentType<{size?: number; strokeWidth?: number; 'aria-hidden'?: boolean | 'true'}>;
 /** Codex transcript glyphs: thin, monochrome, one per verb. */
@@ -138,6 +139,11 @@ function PlanToolLink({chatId,text}:{chatId:string;text:string}) {
   return <p className="tool-plan-link"><span>{summary||'Plan'}</span><button type="button" className="tool-row-action" onClick={view}>View plan</button></p>;
 }
 
+/** The object of a computer-use step without the " in Mail" suffix the app icon already says; "Looked at Mail" when there is no object. */
+function computerStepSubject(action:ComputerAction):string {
+  if(action.object)return action.object;
+  return action.target==='computer'&&action.app&&action.verb!=='Listed apps'?action.app:'';
+}
 export function ToolCard({item,reveal=false}: {item: TimelineItem;reveal?:boolean}) {
   const [open, setOpen] = useDisclosure('tool:'+item.id);
   useEffect(()=>{if(reveal&&!open)setOpen(true);},[reveal]);
@@ -155,7 +161,8 @@ export function ToolCard({item,reveal=false}: {item: TimelineItem;reveal?:boolea
   const state = waiting ? APPROVAL_WAIT_LABEL : running ? p.runningVerb : item.status==='completed'||failed||item.status==='interrupted'||item.status==='cancelled' ? p.verb : 'Tool';
   const images=p.images??[];
   const files=images.length>1?[]:p.kind==='edit'?p.files??[]:p.kind==='read'?(p.paths??(p.subject?[p.subject]:[])).map(path=>({path})):[];
-  const subject=p.kind==='command'?commandLabel(raw):images.length>1?'':p.subject;
+  // Codex: a computer-use step carries its app's icon, so the line reads as the step alone ("Clicked “Send”").
+  const subject=p.kind==='command'?commandLabel(raw):images.length>1?'':p.computer?computerStepSubject(p.computer):p.subject;
   const steps=p.plan?planSteps(item.data):[];
   const live=p.kind==='command'&&running&&!open?output.replace(/\s+$/,'').split('\n').filter(line=>line.trim()).slice(-4):[];
   const excerpt=open?[]:outcome.excerpt;
@@ -168,7 +175,7 @@ export function ToolCard({item,reveal=false}: {item: TimelineItem;reveal?:boolea
     <div className="tool-row-head">
       {/* The trigger covers the whole row; file links sit above it so they stay separate buttons. */}
       <Collapsible.Trigger className="tool-row-hit" aria-label={label} title={p.subject||undefined}/>
-      <ToolGlyph kind={p.kind} running={running} image={images.length>0}/>
+      {p.computer?<AppGlyph app={p.computer.app} target={p.computer.target} running={running}/>:<ToolGlyph kind={p.kind} running={running} image={images.length>0}/>}
       <span className="tool-row-text">
         <span className="tool-row-state">{state}</span>
         {files.length?<> <span className="tool-row-files"><FileLinks item={item} files={files}/></span></>:subject?<> <span className="tool-row-subject">{subject}</span></>:null}

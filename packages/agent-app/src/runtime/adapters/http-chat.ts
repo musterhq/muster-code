@@ -95,7 +95,10 @@ export function anthropicAdapter(options: Omit<HttpOptions, 'endpoint' | 'label'
 }
 
 /** GET a JSON model list with a timeout and a 1 MiB cap. */
-export async function fetchModelList(url: string, headers: Record<string, string>, label: string, request: Fetch = fetch, timeoutMs = 8000): Promise<Array<{id: string; name: string}>> {
+/** One `/models` entry. `owner` is the router's `owned_by` (a router's own agents and combos report "combo");
+ *  `chat` is false for image, audio, video and moderation models, which a chat cannot run. */
+export interface ListedModel { id: string; name: string; owner?: string; chat?: boolean }
+export async function fetchModelList(url: string, headers: Record<string, string>, label: string, request: Fetch = fetch, timeoutMs = 8000): Promise<ListedModel[]> {
   const controller = new AbortController(), timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     let response: Response;
@@ -103,13 +106,23 @@ export async function fetchModelList(url: string, headers: Record<string, string
     catch { throw new Error(`Could not reach ${label} to list models.`); }
     if (!response.ok) throw new Error(await responseError(response, label));
     const reader = response.body?.getReader(), decoder = new TextDecoder(); let raw = '';
-    if (reader) try { for (;;) { const {done, value} = await reader.read(); if (done) break; raw += decoder.decode(value, {stream: true}); if (raw.length > 1024 * 1024) throw new Error(`${label} model list is too large.`); } } finally { await reader.cancel().catch(() => {}); }
+    if (reader) try { for (;;) { const {done, value} = await reader.read(); if (done) break; raw += decoder.decode(value, {stream: true}); if (raw.length > 8 * 1024 * 1024) throw new Error(`${label} model list is too large.`); } } finally { await reader.cancel().catch(() => {}); }
     let data: unknown; try { data = JSON.parse(raw); } catch { throw new Error(`${label} did not return a model list.`); }
     const items = (data as {data?: unknown}).data;
     if (!Array.isArray(items)) throw new Error(`${label} did not return a model list.`);
-    return items.slice(0, 500).flatMap(item => {
-      const id = item && typeof item === 'object' ? (item as {id?: unknown}).id : undefined, name = (item as {display_name?: unknown})?.display_name;
-      return typeof id === 'string' && id.length <= 200 && !/[\x00-\x1f]/.test(id) ? [{id, name: typeof name === 'string' && name.length <= 160 ? name.replace(/[\x00-\x1f]/g, '') : id}] : [];
+    return items.slice(0, 5000).flatMap(item => {
+      const entry = item && typeof item === 'object' ? item as Record<string, unknown> : {};
+      const id = entry.id, name = entry.display_name;
+      if (typeof id !== 'string' || id.length > 200 || /[\x00-\x1f]/.test(id)) return [];
+      const output = Array.isArray(entry.output_modalities) ? entry.output_modalities : undefined;
+      const tools = entry.capabilities && typeof entry.capabilities === 'object' ? (entry.capabilities as {tool_calling?: unknown}).tool_calling : undefined;
+      const chat = !(typeof entry.type === 'string' && entry.type !== 'model') && !(output && !output.includes('text')) && tools !== false;
+      return [{id, name: typeof name === 'string' && name.length <= 160 ? name.replace(/[\x00-\x1f]/g, '') : id, ...(typeof entry.owned_by === 'string' ? {owner: entry.owned_by.slice(0, 64)} : {}), chat}];
     });
   } finally { clearTimeout(timer); }
+}
+
+/** The chat-capable models of a `/models` listing, as the picker shows them (id and name only). */
+export async function listChatModels(...args: Parameters<typeof fetchModelList>): Promise<Array<{id: string; name: string}>> {
+  return (await fetchModelList(...args)).filter(model => model.chat !== false).map(({id, name}) => ({id, name}));
 }

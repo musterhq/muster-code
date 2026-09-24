@@ -31,7 +31,7 @@ export function createModelsDomain(ctx: DomainContext): DomainModule {
   let cached: ModelPolicy | undefined;
   const read = (): ModelPolicy => {
     if (cached) return cached;
-    try { cached = normalizeModelPolicy((JSON.parse(readFileSync(file(), 'utf8')) as { policy?: unknown }).policy); } catch { cached = { hidden: [], pricing: {} }; }
+    try { cached = normalizeModelPolicy((JSON.parse(readFileSync(file(), 'utf8')) as { policy?: unknown }).policy); } catch { cached = { hidden: [], shown: [], pricing: {} }; }
     return cached;
   };
   const write = (policy: ModelPolicy): ModelPolicy => {
@@ -145,8 +145,10 @@ export function createModelsDomain(ctx: DomainContext): DomainModule {
       'models.policy.setHidden': input => {
         if (!isModelKey(input.key)) throw new Error('Choose a model.');
         if (typeof input.hidden !== 'boolean') throw new Error('hidden must be true or false.');
-        const current = read(), hidden = current.hidden.filter(key => key !== input.key);
-        return write({ ...current, hidden: input.hidden ? [...hidden, input.key as string] : hidden });
+        const current = read(), key = input.key as string;
+        const hidden = current.hidden.filter(entry => entry !== key), shown = current.shown.filter(entry => entry !== key);
+        // Switching on also records the choice in `shown`, so a model that is off by default stays on.
+        return write({ ...current, hidden: input.hidden ? [...hidden, key] : hidden, shown: input.hidden ? shown : [...shown, key] });
       },
       'models.policy.setPricing': input => {
         if (!isModelKey(input.key)) throw new Error('Choose a model.');
@@ -154,7 +156,7 @@ export function createModelsDomain(ctx: DomainContext): DomainModule {
         if (input.pricing === null) delete pricing[input.key as string]; else pricing[input.key as string] = validatePricing(input.pricing);
         return write({ ...current, pricing });
       },
-      'models.policy.reset': () => write({ hidden: [], pricing: {} }),
+      'models.policy.reset': () => write({ hidden: [], shown: [], pricing: {} }),
       'models.usage.chat': input => {
         const chatId = id(input.chatId, 'chat');
         if (typeof ctx.store?.chat === 'function' && !ctx.store.chat(chatId)) throw new Error('Chat not found.');

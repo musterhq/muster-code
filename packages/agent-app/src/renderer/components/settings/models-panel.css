@@ -17,3 +17,10 @@
 .models-excluded li { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0; }
 .models-excluded li span:last-child { flex-basis: 100%; color: var(--text-faint); }
 .models-unready, .models-footnote { margin: 12px 0 0; font-size: var(--fs-12); }
+/* A router's third-party models: one collapsed section, grouped by source, with search. */
+.models-router { margin: 10px 0 0; }
+.models-router > summary { cursor: pointer; color: var(--text-dim); font-size: var(--fs-13); padding: 6px 0; }
+.models-router > p { margin: 4px 0 8px; font-size: var(--fs-12); }
+.models-router-search { width: 100%; margin: 0 0 8px; padding: 7px 10px; border: 1px solid var(--hairline); border-radius: var(--radius-8); background: transparent; color: var(--text); font-size: var(--fs-13); }
+.models-router-group > summary { display: flex; justify-content: space-between; gap: 8px; cursor: pointer; padding: 6px 2px; color: var(--text-dim); font-size: var(--fs-13); }
+.models-row-compact { min-height: 40px; padding-block: 6px; }

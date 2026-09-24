@@ -2,11 +2,12 @@ import React,{useEffect,useId,useMemo,useRef,useState} from 'react';
 import {ChevronRight} from 'lucide-react';
 import type {TimelineItem} from '../../shared/protocol';
 import {ImageThumbs,ToolCard,ToolGlyph} from './ToolCard';
-import {activityKind,segmentActivity,subagentRowLabel,subagentRowReason,summarizeActivity,viewedImages,type ActivitySegment} from './activityGrouping';
+import {activityApp,activityKind,segmentActivity,subagentRowLabel,subagentRowReason,summarizeActivity,viewedImages,type ActivitySegment} from './activityGrouping';
 import {AgentGlyph} from '../agentIdentity';
 import {selectSubagent} from '../subagentActivity';
 import {getState,openSubagentsTab} from '../store';
 import './activity-group.css';
+import {AppGlyph} from './AppGlyph';
 import {Collapsible} from '@base-ui/react/collapsible';
 
 const disclosures=new Map<string,{open:boolean;page:number;manual:boolean}>();
@@ -39,11 +40,11 @@ function ToolGroup({items,reveal,live}:{items:TimelineItem[];reveal?:string;live
   useEffect(()=>{if(revealIndex<0)return;setOpen(true);setPage(Math.floor(revealIndex/PAGE));},[reveal,revealIndex]);
   const changePage=(value:number)=>{setPage(value);remember(key,open,value,manual.current);};
   const lastPage=Math.max(0,Math.ceil(items.length/PAGE)-1),current=Math.min(page,lastPage);
-  const label=summarizeActivity(items),glyph=activityKind(items),images=useMemo(()=>viewedImages(items),[items]);
+  const label=summarizeActivity(items),glyph=activityKind(items),app=activityApp(items),images=useMemo(()=>viewedImages(items),[items]);
   if(items.length===1)return <ToolCard item={items[0]} reveal={revealIndex===0}/>;
   return <Collapsible.Root open={open} onOpenChange={value=>{manual.current=true;setOpen(value);remember(key,value,page,true);}} className="activity-group" role="region" aria-label="Agent activity">
     <Collapsible.Trigger className="activity-summary" title={label}>
-      <ToolGlyph kind={glyph.kind} running={active} image={glyph.image}/>
+      {app?<AppGlyph app={app.app} target={app.target} running={active}/>:<ToolGlyph kind={glyph.kind} running={active} image={glyph.image}/>}
       <span className="activity-summary-text">{label}</span><ChevronRight className="tool-chevron" size={13} aria-hidden="true"/></Collapsible.Trigger>
     {!open&&images.length>0&&<ImageThumbs item={items[0]} paths={images}/>}
     <Collapsible.Panel className="activity-disclosure"><div id={id} className="activity-details">

@@ -127,7 +127,7 @@ test('elicitations: method detection, prompt text, access-level policy and the r
   assert.equal(elicitationText({elicitation:{prompt:'Nested'}}),'Nested');
   assert.match(elicitationText({requestedSchema:{type:'object'}}),/"type": "object"/);
   assert.equal(elicitationText({}),'An MCP server asks for permission.');
-  assert.equal(elicitationPolicy('full'),'accept');assert.equal(elicitationPolicy('workspace'),'ask');assert.equal(elicitationPolicy('read-only'),'decline');assert.equal(elicitationPolicy(undefined),'decline');
+  assert.equal(elicitationPolicy('full'),'accept');assert.equal(elicitationPolicy('workspace'),'ask');assert.equal(elicitationPolicy('read-only'),'decline');assert.equal(elicitationPolicy('workspace','muster_browser'),'accept','the in-app browser runs without a card in workspace mode');assert.equal(elicitationPolicy('workspace','computer-use'),'ask','desktop computer use still asks');assert.equal(elicitationPolicy('read-only','muster_browser'),'decline');assert.equal(elicitationPolicy(undefined),'decline');
   assert.deepEqual(elicitationResult(true),{action:'accept',content:{}});assert.deepEqual(elicitationResult(false),{action:'decline',content:null});
 });
 

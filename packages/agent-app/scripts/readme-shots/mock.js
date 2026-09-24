@@ -20,6 +20,43 @@ if (OPTS.replyMarkdown) {
     {id: 'cmp-2', chatId: activeChatId, kind: 'assistant', text: OPTS.replyMarkdown, status: 'completed', createdAt: at(1)},
   ];
 }
+// Computer use (local shots): the agent drives Mail, Notes and a staging page; each step carries a fake window
+// picture (inline SVG) so the PiP stack and the transcript rows have real frames to show.
+const fakeWindow = ({title, accent, kind}) => {
+  const rows = (x, y, n, w, gap = 30, fill = '#e7e9ee') => Array.from({length: n}, (_, i) => `<rect x="${x}" y="${y + i * gap}" width="${w - (i % 3) * 60}" height="12" rx="6" fill="${fill}"/>`).join('');
+  const chrome = `<rect width="1280" height="800" fill="#ffffff"/><rect width="1280" height="52" fill="#f3f4f6"/><circle cx="26" cy="26" r="7" fill="#ff5f57"/><circle cx="48" cy="26" r="7" fill="#febc2e"/><circle cx="70" cy="26" r="7" fill="#28c840"/>`;
+  let body = '';
+  if (kind === 'browser') body = `<rect x="120" y="12" width="760" height="28" rx="14" fill="#ffffff" stroke="#dcdfe4"/><text x="140" y="31" font-family="Helvetica" font-size="15" fill="#555">${title}</text><rect y="52" width="1280" height="64" fill="${accent}"/><text x="40" y="94" font-family="Helvetica" font-weight="bold" font-size="24" fill="#fff">Taskboard UAT</text><rect x="40" y="150" width="760" height="240" rx="12" fill="#f5f7fb" stroke="#e3e6ec"/><text x="70" y="200" font-family="Helvetica" font-weight="bold" font-size="26" fill="#1c2230">Solution #482: due-date reminders</text>${rows(70, 236, 4, 620)}<rect x="840" y="150" width="400" height="520" rx="12" fill="#f5f7fb" stroke="#e3e6ec"/>${rows(870, 190, 12, 320, 36)}<rect x="40" y="420" width="760" height="250" rx="12" fill="#fff4f2" stroke="#f3c6bd"/><text x="70" y="468" font-family="Helvetica" font-weight="bold" font-size="22" fill="#b3361e">Failed to load solution details</text>${rows(70, 500, 4, 600, 30, '#f6d8d1')}`;
+  else if (kind === 'mail') body = `<text x="560" y="33" font-family="Helvetica" font-weight="bold" font-size="16" fill="#444">Inbox</text><rect y="52" width="300" height="748" fill="#f7f8fa"/>${Array.from({length: 7}, (_, i) => `<rect x="12" y="${68 + i * 96}" width="276" height="84" rx="10" fill="${i === 1 ? accent : '#ffffff'}"/><rect x="28" y="${86 + i * 96}" width="150" height="12" rx="6" fill="${i === 1 ? '#ffffff' : '#c8ccd4'}"/><rect x="28" y="${110 + i * 96}" width="220" height="10" rx="5" fill="${i === 1 ? '#dbe8ff' : '#e3e6ec'}"/>`).join('')}<text x="340" y="110" font-family="Helvetica" font-weight="bold" font-size="28" fill="#1c2230">UAT: solution page won't load</text><text x="340" y="146" font-family="Helvetica" font-size="16" fill="#6b7280">QA Team · 09:12</text>${rows(340, 190, 10, 820, 34)}`;
+  else body = `<rect y="52" width="260" height="748" fill="#fbf6e6"/>${rows(24, 84, 12, 200, 44, '#efe3bb')}<text x="300" y="110" font-family="Helvetica" font-weight="bold" font-size="30" fill="#1c2230">${title}</text>${rows(300, 150, 14, 880, 36)}`;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="800" viewBox="0 0 1280 800">${chrome}${body}</svg>`;
+  return {dataUrl: 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg), mime: 'image/svg+xml', width: 1280, height: 800, bytes: svg.length};
+};
+const PAGE = 'https://uat.taskboard.dev/solutions/482';
+if (OPTS.computerUse) {
+  const at = (seconds) => new Date(Date.now() - seconds * 1000).toISOString();
+  const cu = (id, server, tool, args, seconds, extra = {}) => ({id, chatId: activeChatId, kind: 'tool', text: '', status: 'completed', createdAt: at(seconds), data: {type: 'mcpToolCall', server, tool, arguments: JSON.stringify(args), ...extra}});
+  const mail = fakeWindow({title: 'Inbox', accent: '#2f6fed', kind: 'mail'});
+  const notes = fakeWindow({title: 'UAT checklist', accent: '#e8b100', kind: 'notes'});
+  const page = fakeWindow({title: 'uat.taskboard.dev/solutions/482', accent: '#3a5bd9', kind: 'browser'});
+  timelines[activeChatId] = [
+    {id: 'cu-u', chatId: activeChatId, kind: 'user', text: 'QA says the UAT solution page will not load. Read their report in Mail, then check the page and tell me what is wrong.', status: 'completed', createdAt: at(200)},
+    cu('cu-1', 'computer-use', 'open_app', {app: 'Mail'}, 190),
+    cu('cu-2', 'computer-use', 'screenshot', {app: 'Mail'}, 186, {images: [mail]}),
+    cu('cu-3', 'computer-use', 'click', {app: 'Mail', element: 'UAT: solution page won\'t load'}, 180),
+    {id: 'cu-4', chatId: activeChatId, kind: 'tool', text: '', status: 'completed', createdAt: at(170), data: {type: 'commandExecution', command: "sed -n '1,120p' src/api/solutions.ts", commandActions: [{type: 'read', path: 'src/api/solutions.ts', name: 'solutions.ts'}], exitCode: 0, durationMs: 80}},
+    cu('cu-5', 'computer-use', 'screenshot', {app: 'Notes'}, 150, {images: [notes]}),
+    cu('cu-6', 'muster_browser', 'browser_navigate', {url: PAGE}, 60, {images: [page]}),
+    cu('cu-7', 'muster_browser', 'browser_snapshot', {}, 40),
+    {id: 'cu-8', chatId: activeChatId, kind: 'tool', text: '', status: 'completed', createdAt: at(30), data: {type: 'commandExecution', command: `curl -sI ${PAGE}`, commandActions: [], exitCode: 0, durationMs: 300, output: 'HTTP/2 500\n'}},
+    {...cu('cu-9', 'muster_browser', 'browser_click', {element: 'Retry loading details', ref: 'e41'}, 1), status: OPTS.computerUse === 'done' ? 'completed' : 'running'},
+  ];
+  if (OPTS.computerUse === 'done') timelines[activeChatId].push({id: 'cu-a', chatId: activeChatId, kind: 'assistant', text: 'The solution page returns **HTTP 500**: `GET /api/solutions/482` throws because the solution has no owner. QA\'s report in Mail matches.', status: 'completed', createdAt: at(0.5)});
+  const hero = FX.chats.find(c => c.id === activeChatId); if (hero && OPTS.computerUse !== 'done') hero.status = 'running';
+  // The agent's browser pushes live frames, so the front card reads as live.
+  if (OPTS.computerUse === true) setInterval(() => emit({type: 'computerFrame', frame: {chatId: activeChatId, owner: `browser:agent-${activeChatId}`, profileId: 'personal', dataUrl: page.dataUrl, width: 1280, height: 800, url: PAGE, title: 'uat.taskboard.dev', action: 'Clicking “Retry loading details”', at: Date.now()}}), 400);
+}
+window.__emitShotEvent = (event) => emit(event);
 const snapshot = () => ({folders, chats: FX.chats, projects, activeChatId, version: 1, attention: {totalRequests: 0, chats: []}});
 const text = (path) => files[path]?.after ?? files[path]?.before ?? `// ${path}\n`;
 const blob = (s) => { let h = 0; for (const c of s) h = (h * 31 + c.charCodeAt(0)) >>> 0; return h.toString(16).padStart(8, '0') + 'a3f1c9e2b7d4'; };
@@ -176,6 +213,7 @@ const handlers = {
   'ci.repair.list': () => [],
   'artifacts.sideChat.list': () => ({sideChats: []}),
   'computer.permissions': () => ({platform: 'darwin', accessibility: 'granted', screen: 'granted'}),
+  'computer.control': ({chatId, owner}) => { setTimeout(() => emit({type: 'computerControl', chatId, owner}), 0); return {chatId, owner}; },
   'settings.terminalShells': () => ({shells: [{id: 'zsh', label: 'zsh', path: '/bin/zsh'}, {id: 'bash', label: 'bash', path: '/bin/bash'}], selected: {file: '/bin/zsh'}}),
   'github.pr.checks': () => ({headSha: commits[0].sha, items: [], summary: {passed: 4, failed: 0, pending: 1, skipped: 0}}),
 
