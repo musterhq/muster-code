@@ -1,0 +1,59 @@
+name: Muster Agent CI
+
+# packages/agent-app is a standalone npm project (its own package-lock.json); this job uses only that directory.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "packages/agent-app/**"
+      - ".github/workflows/agent-app-ci.yml"
+  pull_request:
+    paths:
+      - "packages/agent-app/**"
+      - ".github/workflows/agent-app-ci.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: agent-app-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    working-directory: packages/agent-app
+
+env:
+  NODE_OPTIONS: --max-old-space-size=2048
+  # Tests and the build do not load node-pty inside Electron; node-pty's N-API prebuilds cover anything else.
+  MUSTER_SKIP_NATIVE_REBUILD: "1"
+
+jobs:
+  verify:
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: packages/agent-app/.nvmrc
+          cache: npm
+          cache-dependency-path: packages/agent-app/package-lock.json
+
+      - name: Install
+        run: npm ci --no-audit --no-fund
+
+      - name: Typecheck
+        run: npx tsc --noEmit
+
+      # Some runtime tests load the bundled core from dist/, so build before testing.
+      - name: Build
+        run: npm run build
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Renderer tests
+        run: npm run test:renderer

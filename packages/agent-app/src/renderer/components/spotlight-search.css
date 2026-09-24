@@ -1,0 +1,167 @@
+/* Spotlight-style search palette (⌘K / Sidebar "Search chats"). Same liquid-glass material as
+   .chat-menu / .chat-preview-card (sidebar-disclosure.css): translucent tint + blur + saturate,
+   a hairline border and a faint inset top highlight, with a solid fallback for reduced transparency. */
+
+.spotlight-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  /* Lighter than the composer's modal scrim (--scrim) so the blurred app content still reads through the glass. */
+  background: color-mix(in srgb, var(--scrim) 55%, transparent);
+  transition: opacity 120ms ease;
+}
+.spotlight-backdrop[data-starting-style],
+.spotlight-backdrop[data-ending-style] { opacity: 0; }
+
+.spotlight-panel {
+  position: fixed;
+  left: 50%;
+  top: max(64px, 20vh);
+  translate: -50% 0;
+  z-index: 201;
+  display: flex;
+  flex-direction: column;
+  width: min(600px, calc(100vw - 48px));
+  max-height: min(calc(100vh - max(64px, 20vh) - 32px), 560px);
+  padding: 6px;
+  border: 1px solid rgb(var(--fg-rgb) / 9%);
+  border-radius: var(--radius-16);
+  background:
+    linear-gradient(180deg, rgb(var(--fg-rgb) / 3.5%), transparent 40%),
+    color-mix(in srgb, var(--bg-menu) 90%, transparent);
+  -webkit-backdrop-filter: blur(20px) saturate(140%);
+  backdrop-filter: blur(20px) saturate(140%);
+  box-shadow: 0 24px 64px color-mix(in srgb, var(--shadow-ink) 50%, transparent), inset 0 1px rgb(var(--fg-rgb) / 6%);
+  color: var(--text);
+  outline: 0;
+  transform-origin: center top;
+  transition: opacity 120ms ease, transform 120ms ease;
+}
+.spotlight-panel[data-starting-style],
+.spotlight-panel[data-ending-style] { opacity: 0; transform: translateY(-6px) scale(.98); }
+
+@media (prefers-reduced-motion: reduce) {
+  .spotlight-backdrop, .spotlight-panel { transition: none; }
+}
+/* Reduced-transparency fallback: match .chat-menu/.chat-preview-card's own fallback (solid raised surface, no blur). */
+@media (prefers-reduced-transparency: reduce) {
+  .spotlight-panel { background: var(--bg-raised); -webkit-backdrop-filter: none; backdrop-filter: none; }
+}
+:root[data-transparency='reduce'] .spotlight-panel { background: var(--bg-raised); -webkit-backdrop-filter: none; backdrop-filter: none; }
+
+.spotlight-search-field {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex: none;
+  padding: 11px 12px;
+  color: var(--text-faint);
+  border-bottom: 1px solid var(--hairline);
+}
+.spotlight-search-field input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: var(--fs-15);
+  outline: 0;
+}
+.spotlight-search-field input::placeholder { color: var(--text-faint); }
+
+.spotlight-results {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  min-height: 0;
+  padding: 6px 4px 8px;
+}
+
+.spotlight-empty { padding: 20px 10px; text-align: center; color: var(--text-faint); font-size: var(--fs-13); }
+
+.spotlight-section + .spotlight-section { margin-top: 4px; }
+.spotlight-section-label {
+  padding: 7px 10px 4px;
+  color: var(--text-faint);
+  font-size: var(--fs-11);
+  font-weight: 500;
+}
+
+.spotlight-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 34px;
+  padding: 6px 10px;
+  border-radius: var(--radius-8);
+  color: var(--text-dim);
+  text-align: left;
+  cursor: default;
+}
+.spotlight-row[data-active] { background: var(--bg-active); color: var(--text); }
+.spotlight-row-icon { display: inline-flex; flex: none; align-items: center; justify-content: center; width: 16px; color: var(--text-faint); }
+.spotlight-row[data-active] .spotlight-row-icon { color: var(--text-dim); }
+.spotlight-row-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.spotlight-row-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-14);
+}
+.spotlight-row-title mark {
+  background: none;
+  color: var(--accent);
+  font-weight: 600;
+}
+/* NAV-12: a message-content match (chat.search) shown under the title, same muted tone as the location. */
+.spotlight-row-snippet {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-faint);
+  font-size: var(--fs-12);
+}
+.spotlight-row-location {
+  flex: none;
+  max-width: 34%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-faint);
+  font-size: var(--fs-12);
+}
+.spotlight-shortcut {
+  flex: none;
+  min-width: 20px;
+  padding: 1px 6px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-6);
+  background: var(--bg);
+  color: var(--text-faint);
+  font: var(--fs-11)/1.6 var(--ui);
+  text-align: center;
+}
+.spotlight-row[data-active] .spotlight-shortcut { color: var(--text-dim); border-color: rgb(var(--fg-rgb) / 12%); }
+
+@media (hover: hover) {
+  .spotlight-row:hover { background: var(--bg-hover); color: var(--text); }
+  .spotlight-row:hover .spotlight-row-icon { color: var(--text-dim); }
+}
+
+/* NAV-11: matched query terms inside a message snippet. */
+.spotlight-row-snippet mark { background: none; color: var(--text-dim); font-weight: 600; }
+/* NAV-12: a command that cannot run here stays listed, dimmed, with its prerequisite as the detail line. */
+.spotlight-row.is-disabled { color: var(--text-faint); }
+.spotlight-row.is-disabled .spotlight-row-title { opacity: 0.7; }
+.spotlight-status:empty { display: none; }
+.spotlight-status { margin: 0; padding: 6px 12px 4px; border-top: 1px solid var(--hairline); color: var(--text-dim); font-size: var(--fs-12); }
+.spotlight-results .resource-state { padding: 20px 10px; }

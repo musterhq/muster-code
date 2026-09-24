@@ -1,0 +1,31 @@
+import assert from 'node:assert/strict';
+import {test} from 'node:test';
+import {mkdtemp,mkdir,writeFile,symlink,rm} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
+import {decodeCommandOutput,recoverCommandOutputs,readOwnedCommandOutputs} from '../src/runtime/command-output-recovery.ts';
+const envelope=(out:string)=>`Chunk ID: test\nWall time: 2 seconds\nProcess exited with code 0\nOriginal token count: 4\nOutput:\n${out}`;
+const record=(call='call',turn='turn',output=envelope('first\nlast\n'))=>JSON.stringify({type:'response_item',payload:{type:'function_call_output',call_id:call,output,internal_chat_message_metadata_passthrough:{turn_id:turn}}});
+const command={itemId:'call',turnId:'turn',output:'last\n'};
+test('recovers missing prefix only for matching turn and call, never appends duplicate output',()=>{
+ assert.equal(recoverCommandOutputs(record(),[command]).get('call'),'first\nlast\n');
+ assert.equal(recoverCommandOutputs(record('other')+'\n'+record('call','other'),[command]).size,0);
+ assert.equal(recoverCommandOutputs(record(),[{...command,output:'different\n'}]).size,0);
+ assert.equal(recoverCommandOutputs(record(),[{...command,output:'first\nlast\n'}]).size,0);
+ assert.equal(decodeCommandOutput('arbitrary Output:\nnot authoritative'),null);
+ assert.equal(decodeCommandOutput(envelope('Warning: truncated output')),null);
+ assert.equal(recoverCommandOutputs('{broken\n'+record(),[command]).get('call'),'first\nlast\n');
+});
+test('owned file identity and containment required; bounded tail recovers recent matching command',async t=>{
+ const root=await mkdtemp(join(tmpdir(),'muster-output-'));t.after(()=>rm(root,{recursive:true,force:true}));
+ const sessions=join(root,'sessions');await mkdir(sessions);
+ const meta=(id:string)=>JSON.stringify({type:'session_meta',payload:{id}})+'\n';
+ const file=join(sessions,'owned.jsonl');await writeFile(file,meta('thread')+'x'.repeat(3*1024*1024)+'\n'+record()+'\n');
+ const input={sessionsRoot:sessions,sessionPath:file,threadId:'thread',commands:[command]};
+ assert.equal((await readOwnedCommandOutputs(input)).get('call'),'first\nlast\n');
+ assert.equal((await readOwnedCommandOutputs({...input,threadId:'wrong'})).size,0);
+ const outside=join(root,'outside.jsonl');await writeFile(outside,meta('thread')+record());
+ assert.equal((await readOwnedCommandOutputs({...input,sessionPath:outside})).size,0);
+ const link=join(sessions,'linked.jsonl');await symlink(outside,link);
+ assert.equal((await readOwnedCommandOutputs({...input,sessionPath:link})).size,0);
+});

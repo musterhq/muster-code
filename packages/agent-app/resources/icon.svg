@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <!-- Muster Agent app icon: the Muster mark (src/renderer/components/BrandMark.tsx) on a macOS squircle-ish tile.
+       Rebuild resources/icon.icns with scripts/make-icon.sh after editing. -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#23232B"/>
+      <stop offset="1" stop-color="#121217"/>
+    </linearGradient>
+  </defs>
+  <rect x="100" y="100" width="824" height="824" rx="185" fill="url(#bg)"/>
+  <g transform="translate(272 272) scale(0.9375)" fill="none" stroke="#EDEDF2" stroke-width="44" stroke-linecap="butt">
+    <path d="M204 0 V104 A100 100 0 0 1 104 204 H0"/>
+    <path d="M308 0 V104 A100 100 0 0 0 408 204 H512"/>
+    <path d="M204 512 V408 A100 100 0 0 0 104 308 H0"/>
+    <path d="M308 512 V408 A100 100 0 0 1 408 308 H512"/>
+    <circle cx="256" cy="256" r="50" stroke="none" fill="#5B4BFF"/>
+  </g>
+</svg>

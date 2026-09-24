@@ -1,0 +1,99 @@
+.subagents-tab { padding:20px; overflow:auto; height:100%; min-width:0; color:var(--text); }
+.subagents-tab.is-detail { padding:0; overflow:hidden; display:flex; flex-direction:column; }
+.subagents-header { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; border-bottom:1px solid var(--hairline); padding-bottom:14px; margin-bottom:12px; }
+.subagents-header > div { min-width:0; }
+.subagents-header h2 { font-size:var(--fs-14); font-weight:500; margin:0 0 4px; }
+.subagents-header p { font-size:var(--fs-12); color:var(--text-faint); margin:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.subagents-count { flex:none; font-size:var(--fs-11); color:var(--text-faint); padding:2px 7px; border:1px solid var(--hairline); border-radius:var(--radius-6); font-variant-numeric:tabular-nums; }
+.subagent-counts { display:flex; flex-wrap:wrap; gap:4px 12px; font-size:var(--fs-11); color:var(--text-faint); font-variant-numeric:tabular-nums; }
+.subagent-counts .is-failed { color:var(--danger); }
+.subagents-provenance { color:var(--text-faint); font-size:var(--fs-11); line-height:1.5; margin:8px 0 16px; }
+.subagents-list { display:grid; gap:8px; max-width:760px; }
+/* List: one card per child; the head opens its transcript. */
+.subagent-card { min-width:0; border:1px solid var(--hairline); border-radius:var(--radius); padding:4px; transition:border-color 130ms ease; }
+.subagent-card:hover { border-color:rgb(var(--fg-rgb) / 10%); }
+.subagent-open { display:flex; align-items:center; gap:10px; width:100%; min-width:0; padding:7px 8px; border-radius:var(--radius-6); text-align:left; color:var(--text); transition:background-color 130ms ease; }
+.subagent-open:hover { background:var(--bg-hover); }
+.subagent-open:focus-visible { outline:2px solid var(--accent); outline-offset:-2px; }
+.subagent-open-text { display:flex; flex-direction:column; gap:2px; flex:1; min-width:0; }
+.subagent-open-text strong { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:var(--fs-13); font-weight:500; }
+.subagent-open-chevron { flex:none; color:var(--text-faint); opacity:.6; }
+.subagent-open:hover .subagent-open-chevron { opacity:1; }
+.subagent-avatar { display:grid; place-items:center; flex:none; }
+.subagent-avatar .agent-glyph { width:20px; height:20px; font-size:var(--fs-11); }
+.subagent-meta { color:var(--text-faint); font-size:var(--fs-11); min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-variant-numeric:tabular-nums; }
+.subagent-state { display:inline-flex; align-items:center; gap:4px; margin-left:auto; min-width:0; max-width:55%; color:var(--text-faint); font-size:var(--fs-11); overflow-wrap:anywhere; }
+.subagent-state svg { flex:none; }
+.subagent-state.is-working { color:var(--text-dim); }
+.subagent-state.is-failed { color:var(--danger); }
+.subagent-state.is-done { color:var(--ok); }
+.subagent-phase { display:inline-flex; align-items:center; gap:4px; flex:none; padding:2px 7px; border-radius:var(--radius-full); font-size:var(--fs-11); color:var(--text-faint); background:rgb(var(--fg-rgb) / 4%); white-space:nowrap; }
+.subagent-phase svg { flex:none; }
+.subagent-phase.is-running { color:var(--text-dim); }
+.subagent-phase.is-completed { color:var(--text-dim); }
+.subagent-phase.is-verified { color:var(--ok); background:color-mix(in srgb,var(--ok) 12%,transparent); }
+.subagent-phase.is-failed { color:var(--danger); background:color-mix(in srgb,var(--danger) 12%,transparent); }
+.subagent-phase.is-waiting { color:var(--warn); }
+.subagent-detail { margin:0 0 0 36px; min-width:0; }
+.subagent-detail-trigger { display:flex; align-items:center; gap:6px; width:100%; min-height:26px; padding:3px 2px; text-align:left; color:var(--text-faint); font-size:var(--fs-12); border-radius:var(--radius-4); }
+.subagent-detail-trigger:hover { color:var(--text); }
+.subagent-detail-trigger:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+.subagent-detail-trigger > svg { flex:none; transition:transform 180ms cubic-bezier(.2,.8,.2,1); }
+.subagent-detail-trigger[aria-expanded='true'] > svg { transform:rotate(90deg); }
+.subagent-detail-panel { height:var(--collapsible-panel-height); overflow:hidden; }
+.subagent-detail-panel[data-starting-style], .subagent-detail-panel[data-ending-style] { height:0; }
+.subagent-detail-panel[data-open][data-ending-style] { height:var(--collapsible-panel-height); }
+.subagent-detail-body { padding:5px 0 10px 18px; user-select:text; overflow-wrap:anywhere; }
+/* Detail: Codex-style child thread with a back arrow in the right pane. */
+.subagent-view { display:flex; flex-direction:column; flex:1; min-height:0; }
+.subagent-view-head { display:flex; align-items:center; gap:8px; min-width:0; padding:8px 12px; border-bottom:1px solid var(--hairline); }
+.subagent-back, .subagent-more { display:grid; place-items:center; flex:none; width:26px; height:26px; border-radius:var(--radius-6); color:var(--text-faint); transition:background-color 120ms ease,color 120ms ease; }
+.subagent-back:hover, .subagent-more:hover, .subagent-more[data-popup-open] { background:var(--bg-hover); color:var(--text); }
+.subagent-back:focus-visible, .subagent-more:focus-visible { outline:2px solid var(--accent); outline-offset:-2px; }
+.subagent-view-title { flex:1; min-width:0; }
+.subagent-view-title h2 { margin:0; font-size:var(--fs-13); font-weight:500; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.subagent-view-title p { margin:1px 0 0; font-size:var(--fs-11); color:var(--text-faint); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.subagent-elapsed { display:inline-flex; align-items:center; gap:4px; flex:none; font-size:var(--fs-11); color:var(--text-faint); font-variant-numeric:tabular-nums; }
+.subagent-steer { flex:none; display:inline-flex; }
+.subagent-steer button { display:inline-flex; align-items:center; gap:5px; height:24px; padding:0 8px; border:1px solid var(--hairline); border-radius:var(--radius-6); font-size:var(--fs-11); color:var(--text-faint); }
+.subagent-steer button:disabled { opacity:.5; cursor:default; }
+.subagent-menu-positioner { z-index:100; }
+.subagent-menu { min-width:170px; padding:5px; background:var(--bg-raised); border:1px solid rgb(var(--fg-rgb) / 10%); border-radius:var(--radius-10); box-shadow:var(--shadow-popover); color:var(--text); transform-origin:var(--transform-origin); transition:opacity 120ms ease,transform 120ms ease; }
+.subagent-menu[data-starting-style], .subagent-menu[data-ending-style] { opacity:0; transform:translateY(-3px) scale(.98); }
+.subagent-menu [role=menuitem] { display:flex; align-items:center; gap:9px; padding:7px 9px; border-radius:var(--radius-6); font-size:var(--fs-12); cursor:default; outline:0; }
+.subagent-menu [data-highlighted] { background:var(--bg-active); }
+.subagent-transcript { flex:1; min-height:0; overflow:auto; padding:14px 16px 24px; display:flex; flex-direction:column; gap:4px; font-size:var(--font-ui); user-select:text; overflow-anchor:none; }
+.subagent-user { display:flex; justify-content:flex-end; }
+.subagent-user .msg-user { width:auto; max-width:88%; margin:4px 0 8px; white-space:pre-wrap; overflow-wrap:anywhere; }
+.subagent-transcript .msg-assistant { padding:4px 0; }
+.subagent-report { margin-top:10px; padding:10px 12px; border:1px solid color-mix(in srgb,var(--ok) 22%,transparent); border-radius:var(--radius); font-size:var(--fs-13); }
+.subagent-report > span { display:inline-flex; align-items:center; gap:5px; margin-bottom:4px; color:var(--ok); font-size:var(--fs-11); }
+.subagents-empty { text-align:center; color:var(--text-faint); padding:48px 20px; }
+.subagents-empty p { font-size:var(--fs-13); margin:10px 0 5px; }
+.subagents-empty span { font-size:var(--fs-12); line-height:1.5; }
+.subagents-status { color:var(--text-faint); font-size:var(--fs-12); overflow-wrap:anywhere; }
+.subagents-status.is-error { color:var(--danger); }
+.subagents-retry { color:var(--text-dim); font-size:var(--fs-12); border:1px solid var(--hairline); border-radius:var(--radius-6); padding:5px 10px; margin-bottom:12px; }
+.subagents-retry:hover { background:var(--bg-hover); }
+.subagents-retry:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+@media (prefers-reduced-motion:no-preference) { .subagent-detail-panel { transition:height 200ms cubic-bezier(.2,.8,.2,1); } }
+@media (prefers-reduced-motion:reduce) { .subagent-detail-trigger > svg, .subagent-card, .subagent-open, .subagent-menu, .subagent-back, .subagent-more { transition:none; } }
+
+/* TRN-10: per-subagent Stop and Steer, and the reason a worker failed (DOGFOOD F51). */
+.subagent-steer { gap:6px; }
+.subagent-steer button:not(:disabled) { color:var(--text-dim); cursor:pointer; }
+.subagent-steer button:not(:disabled):hover { background:var(--bg-hover); color:var(--text); }
+.subagent-steer button[aria-pressed="true"] { background:var(--bg-hover); color:var(--text); }
+.subagent-card-actions { display:flex; justify-content:flex-end; padding:0 6px 4px; }
+.subagent-stop { display:inline-flex; align-items:center; gap:5px; height:22px; padding:0 8px; border:1px solid var(--hairline); border-radius:var(--radius-6); font-size:var(--fs-11); color:var(--text-dim); }
+.subagent-stop:not(:disabled):hover { border-color:color-mix(in srgb, var(--danger) 45%, var(--hairline)); color:var(--danger); }
+.subagent-failure { display:flex; align-items:flex-start; gap:6px; margin:2px 8px 6px; font-size:var(--fs-12); line-height:1.4; color:color-mix(in srgb, var(--danger) 80%, var(--text-dim)); overflow-wrap:anywhere; }
+.subagent-failure > svg { flex:none; margin-top:2px; }
+.subagent-failure.is-unreported { color:var(--text-faint); }
+.subagent-view > .subagent-failure { margin:8px 14px 0; }
+.subagent-steer-form { display:flex; flex-direction:column; gap:6px; margin:8px 14px 0; padding:8px; border:1px solid var(--hairline); border-radius:var(--radius); background:var(--bg-elevated, var(--bg)); }
+.subagent-steer-form textarea { width:100%; min-height:44px; resize:vertical; border:0; background:transparent; color:var(--text); font:inherit; font-size:var(--fs-13); outline:none; }
+.subagent-steer-actions { display:flex; justify-content:flex-end; gap:6px; }
+.subagent-steer-actions button { display:inline-flex; align-items:center; gap:5px; height:24px; padding:0 10px; border:1px solid var(--hairline); border-radius:var(--radius-6); font-size:var(--fs-12); color:var(--text-dim); }
+.subagent-steer-actions button.is-primary { background:var(--accent); border-color:var(--accent); color:var(--on-accent); }
+.subagent-steer-actions button:disabled { opacity:.5; cursor:default; }

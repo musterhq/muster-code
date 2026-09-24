@@ -1,0 +1,160 @@
+/* One colour system for Git state (see gitStatus.ts). Every Git colour in the app is one of these tokens,
+   with a dark value (default) and a light value (:root[data-theme='light'], >= 4.5:1 on white). Surfaces
+   pick a tone with a class (`git-tone-modified`, `is-merged`, …) and never hard-code a hue. */
+:root {
+  /* File status letters and dots */
+  --git-modified: #e2b86b;
+  --git-added: #6fc28b;
+  --git-untracked: #6fc28b;
+  --git-deleted: #f0707e;
+  --git-renamed: #6aaef0;
+  --git-conflict: #ff8a4c;
+  --git-ignored: rgb(232 232 232 / 36%);
+  /* Line counts */
+  --git-add: #6fc28b;
+  --git-del: #f0707e;
+  /* Staged vs unstaged sections */
+  --git-staged: #6fc28b;
+  --git-unstaged: #e2b86b;
+  /* Refs */
+  --git-ref-head: #91abc2;
+  --git-ref-current: #91abc2;
+  --git-ref-local: #7cc7bf;
+  --git-ref-remote: #b7a3e3;
+  --git-ref-tag: #e59cc4;
+  /* Ahead / behind / diverged */
+  --git-ahead: #6fc28b;
+  --git-behind: #e2b86b;
+  --git-diverged: #f0707e;
+  /* Pull requests and reviews (GitHub convention) */
+  --pr-open: #3fb950;
+  --pr-draft: #8b949e;
+  --pr-merged: #a371f7;
+  --pr-closed: #f85149;
+  --review-approved: #3fb950;
+  --review-changes: #f85149;
+  --review-commented: #8b949e;
+  /* CI checks */
+  --ci-success: #3fb950;
+  --ci-failure: #f85149;
+  --ci-pending: #d29922;
+  --ci-skipped: #8b949e;
+  /* Commit graph lanes */
+  --git-lane-0: #6aaef0;
+  --git-lane-1: #6fc28b;
+  --git-lane-2: #e2b86b;
+  --git-lane-3: #c792ea;
+  --git-lane-4: #f07178;
+  --git-lane-5: #56c7d6;
+}
+:root[data-theme='light'] {
+  --git-modified: #9a6700;
+  --git-added: #1a7f37;
+  --git-untracked: #1a7f37;
+  --git-deleted: #cf222e;
+  --git-renamed: #0969da;
+  --git-conflict: #bc4c00;
+  --git-ignored: rgb(29 29 31 / 42%);
+  --git-add: #1a7f37;
+  --git-del: #cf222e;
+  --git-staged: #1a7f37;
+  --git-unstaged: #9a6700;
+  --git-ref-head: #3b6a93;
+  --git-ref-current: #3b6a93;
+  --git-ref-local: #0f766e;
+  --git-ref-remote: #6f42c1;
+  --git-ref-tag: #b3246b;
+  --git-ahead: #1a7f37;
+  --git-behind: #9a6700;
+  --git-diverged: #cf222e;
+  --pr-open: #1a7f37;
+  --pr-draft: #59636e;
+  --pr-merged: #8250df;
+  --pr-closed: #cf222e;
+  --review-approved: #1a7f37;
+  --review-changes: #cf222e;
+  --review-commented: #59636e;
+  --ci-success: #1a7f37;
+  --ci-failure: #cf222e;
+  --ci-pending: #9a6700;
+  --ci-skipped: #59636e;
+  --git-lane-0: #0969da;
+  --git-lane-1: #1a7f37;
+  --git-lane-2: #9a6700;
+  --git-lane-3: #8250df;
+  --git-lane-4: #cf222e;
+  --git-lane-5: #0e7c86;
+}
+
+/* Tone hooks: a surface sets the class, the badge/dot reads --git-tone. */
+.git-tone-modified { --git-tone: var(--git-modified); }
+.git-tone-added { --git-tone: var(--git-added); }
+.git-tone-untracked { --git-tone: var(--git-untracked); }
+.git-tone-deleted { --git-tone: var(--git-deleted); }
+.git-tone-renamed { --git-tone: var(--git-renamed); }
+.git-tone-conflict { --git-tone: var(--git-conflict); }
+.git-tone-ignored { --git-tone: var(--git-ignored); }
+
+/* Status letter: a tinted square chip, same everywhere (rows, PR files, diff headers). */
+.git-status { flex: none; display: inline-flex; align-items: center; justify-content: center; gap: 2px; min-width: 16px; height: 16px; padding: 0 3px; border-radius: var(--radius-4); background: color-mix(in srgb, var(--git-tone, var(--text-faint)) 15%, transparent); color: var(--git-tone, var(--text-faint)); font: 600 var(--fs-11)/1 var(--mono); letter-spacing: 0; }
+.git-status.git-tone-conflict { padding: 0 4px 0 3px; }
+.git-status.git-tone-ignored { background: transparent; }
+.git-dot { flex: none; display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--git-tone, var(--text-faint)); }
+/* A deleted file's name reads struck through; an ignored one is faint. */
+.git-name-deleted { text-decoration: line-through; text-decoration-color: color-mix(in srgb, var(--git-deleted) 60%, transparent); }
+.git-name-ignored { color: var(--git-ignored); }
+
+/* +/- counts: one weight and numeric style wherever they appear. */
+.git-add, .git-del { font-variant-numeric: tabular-nums; font-weight: 500; letter-spacing: -.01em; white-space: nowrap; }
+.git-add { color: var(--git-add); }
+.git-del { color: var(--git-del); }
+
+/* Ref chips: HEAD filled, current branch outlined in the accent, local/remote/tag each a subtle hue. */
+.git-ref { flex: none; display: inline-flex; align-items: center; gap: 3px; max-width: 160px; height: 17px; padding: 0 6px; border: 1px solid color-mix(in srgb, var(--ref-tone) 38%, transparent); border-radius: var(--radius-10); background: color-mix(in srgb, var(--ref-tone) 10%, transparent); color: var(--ref-tone); font-size: var(--fs-11); font-weight: 500; line-height: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.git-ref > svg { flex: none; }
+.git-ref.is-head { --ref-tone: var(--git-ref-head); background: color-mix(in srgb, var(--ref-tone) 22%, transparent); }
+.git-ref.is-current { --ref-tone: var(--git-ref-current); border-color: color-mix(in srgb, var(--ref-tone) 70%, transparent); }
+.git-ref.is-local { --ref-tone: var(--git-ref-local); }
+.git-ref.is-remote { --ref-tone: var(--git-ref-remote); border-style: dashed; }
+.git-ref.is-tag { --ref-tone: var(--git-ref-tag); }
+
+/* Ahead/behind */
+.git-sync { flex: none; display: inline-flex; align-items: center; gap: 4px; font-size: var(--fs-11); font-weight: 500; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.git-sync-up { color: var(--git-ahead); }
+.git-sync-down { color: var(--git-behind); }
+.git-sync.is-diverged .git-sync-up, .git-sync.is-diverged .git-sync-down { color: var(--git-diverged); }
+
+/* PR state, review state, check state */
+.pr-state { --state-tone: var(--pr-open); }
+.pr-state.is-open { --state-tone: var(--pr-open); }
+.pr-state.is-draft { --state-tone: var(--pr-draft); }
+.pr-state.is-merged { --state-tone: var(--pr-merged); }
+.pr-state.is-closed { --state-tone: var(--pr-closed); }
+.review-state.is-approved { --state-tone: var(--review-approved); }
+.review-state.is-changes { --state-tone: var(--review-changes); }
+.review-state.is-commented, .review-state.is-dismissed { --state-tone: var(--review-commented); }
+.ci-state.is-success { --state-tone: var(--ci-success); }
+.ci-state.is-failure { --state-tone: var(--ci-failure); }
+.ci-state.is-pending { --state-tone: var(--ci-pending); }
+.ci-state.is-skipped { --state-tone: var(--ci-skipped); }
+.git-state-icon { flex: none; color: var(--state-tone); }
+.git-state-pill { flex: none; display: inline-flex; align-items: center; gap: 4px; height: 20px; padding: 0 8px; border-radius: var(--radius-full); background: color-mix(in srgb, var(--state-tone) 16%, transparent); color: var(--state-tone); font-size: var(--fs-12); font-weight: 550; white-space: nowrap; }
+.git-state-pill.is-small { height: 17px; padding: 0 6px; font-size: var(--fs-11); }
+.ci-state.is-pending .git-spin { animation: git-spin 1s linear infinite; }
+@keyframes git-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .ci-state.is-pending .git-spin { animation: none; } }
+
+/* Commit graph lanes (History). */
+.git-graph { flex: none; display: block; overflow: visible; }
+.git-graph line, .git-graph path { fill: none; stroke-width: 1.6; stroke-linecap: round; }
+.git-graph .git-graph-dot { stroke-width: 1.8; }
+.git-lane-0 { --lane: var(--git-lane-0); }
+.git-lane-1 { --lane: var(--git-lane-1); }
+.git-lane-2 { --lane: var(--git-lane-2); }
+.git-lane-3 { --lane: var(--git-lane-3); }
+.git-lane-4 { --lane: var(--git-lane-4); }
+.git-lane-5 { --lane: var(--git-lane-5); }
+.git-graph [class*='git-lane-'] { stroke: var(--lane); }
+.git-graph .git-graph-dot { fill: var(--lane); }
+.git-graph .git-graph-dot.is-merge { fill: var(--bg); }
+.git-dot.ci-state, .git-dot.pr-state { background: var(--state-tone); }

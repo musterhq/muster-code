@@ -1,0 +1,65 @@
+.turn-changes { position:relative; flex:none; width:min(calc(100% - 64px),740px); margin:0 auto 8px; display:flex; justify-content:center; }
+.changes-pill { display:inline-flex; align-items:center; gap:6px; height:32px; padding:0 14px; border:1px solid color-mix(in srgb,var(--text) 7%,transparent); border-radius:var(--radius-full); background:var(--bg-raised); color:var(--text-dim); font-size:var(--fs-13); line-height:1; white-space:nowrap; box-shadow:var(--shadow-sm); transition:background-color 140ms ease,color 140ms ease,border-color 140ms ease; }
+.changes-pill:hover,.changes-pill[aria-expanded='true'] { background:color-mix(in srgb,var(--text) 5%,var(--bg-raised)); color:var(--text); }
+.changes-pill:focus-visible { outline:1px solid var(--accent); outline-offset:1px; }
+.changes-pill>svg { flex:none; }
+.changes-pill-stats { display:inline-flex; gap:4px; font-variant-numeric:tabular-nums; }
+.changes-pill-adds { color:var(--ok); }
+.changes-pill-dels { color:var(--danger); }
+/* TRN-18: review completion is shown apart from execution. */
+.changes-pill-phase { display:inline-flex; align-items:center; gap:4px; padding-left:8px; margin-left:2px; border-left:1px solid var(--hairline); color:var(--text-faint); font-size:var(--fs-12); }
+.changes-pill-phase.is-ready { color:var(--text-dim); }
+.changes-pill-spin { animation:changes-pill-spin 900ms linear infinite; }
+@keyframes changes-pill-spin { to { transform:rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .changes-pill-spin { animation:none; } }
+.changes-pill-chevron { transition:transform 160ms ease; }
+.changes-pill[aria-expanded='true'] .changes-pill-chevron { transform:rotate(180deg); }
+@media (prefers-reduced-motion: reduce) { .changes-pill,.changes-pill-chevron { transition:none; } }
+.turn-change-list { position:absolute; bottom:38px; left:50%; transform:translateX(-50%); width:min(740px,calc(100vw - 48px)); max-height:min(62vh,680px); overflow:auto; padding:8px; z-index:4; border:1px solid var(--hairline); border-radius:var(--radius-12); background:var(--bg-raised); box-shadow:var(--shadow-popover); }
+.turn-change-heading { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:5px 8px 9px; font-size:var(--fs-11); color:var(--text-faint); }
+.turn-change-open-all,.turn-change-open { display:inline-flex; flex:none; align-items:center; gap:4px; height:22px; padding:0 7px; border-radius:var(--radius-6); color:var(--text-faint); font:var(--fs-11)/1 var(--ui); white-space:nowrap; }
+.turn-change-open-all:hover,.turn-change-open:hover { background:var(--bg-hover); color:var(--text); }
+.turn-change-list.is-compact { width:min(420px,calc(100vw - 48px)); }
+.turn-change-list.is-compact .turn-change-files { flex-direction:column; overflow:visible; padding-bottom:2px; }
+.turn-change-list.is-compact .turn-change-files button { max-width:none; }
+.turn-change-list.is-compact .turn-change-files button:disabled { opacity:.5; }
+.turn-change-net { padding:6px 10px; border-top:1px solid var(--hairline); color:var(--text-faint); font:var(--fs-11)/1.4 var(--ui); }
+.turn-change-files { display:flex; gap:5px; overflow-x:auto; padding:0 0 8px; }
+.turn-change-files button { display:flex; flex:none; align-items:center; gap:8px; max-width:260px; padding:6px 9px; border:1px solid transparent; border-radius:var(--radius-8); color:var(--text-dim); font-size:var(--fs-12); text-align:left; }
+.turn-change-files button:hover { background:var(--bg-hover); }
+.turn-change-files button[aria-pressed='true'] { border-color:var(--hairline); background:color-mix(in srgb,var(--bg-hover) 72%,transparent); color:var(--text); }
+.turn-change-files button>span:first-child { min-width:0; overflow:hidden; text-overflow:ellipsis; }
+.turn-change-preview { overflow:hidden; border:1px solid color-mix(in srgb,var(--text) 9%,transparent); border-radius:var(--radius-8); background:var(--bg); }
+.turn-change-preview>header { display:flex; align-items:center; gap:12px; min-height:31px; padding:4px 10px; border-bottom:1px solid var(--hairline); color:var(--text-dim); font:var(--fs-11)/1.4 var(--mono); }
+.turn-change-preview>header>span:first-child { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.turn-change-state { flex:none; color:var(--text-faint); font:var(--fs-11)/1.4 var(--ui); }
+.turn-change-state.is-running { color:var(--accent); }
+.turn-change-state.is-completed { color:var(--ok); }
+.turn-change-preview .fde { border:0; border-radius:0; }
+.turn-change-unavailable { margin:0; padding:12px; color:var(--text-faint); font-size:var(--fs-12); }
+.change-adds { color:var(--git-add); font-weight:500; font-variant-numeric:tabular-nums; }.change-dels { color:var(--git-del); font-weight:500; font-variant-numeric:tabular-nums; }
+.turn-change-edit-label { display:flex; align-items:center; gap:8px; padding:6px 10px 4px; color:var(--text-faint); font:var(--fs-11)/1.4 var(--ui); border-top:1px solid var(--hairline); }
+.turn-change-edit-label>span:first-child { flex:1; }
+/* Keep / Undo per file and for the whole turn; the file chip shows Kept/Undone and Viewed. */
+.turn-change-actions { display:inline-flex; flex:none; align-items:center; gap:4px; }
+.turn-change-actions.is-turn { margin-left:auto; }
+.turn-change-actions button { display:inline-flex; align-items:center; gap:3px; height:22px; padding:0 7px; border:1px solid var(--hairline); border-radius:var(--radius-6); color:var(--text-dim); font:var(--fs-11)/1 var(--ui); white-space:nowrap; transition:background-color 140ms ease,color 140ms ease; }
+.turn-change-actions button:hover:not(:disabled) { background:var(--bg-hover); color:var(--text); }
+.turn-change-actions button.is-primary { border-color:color-mix(in srgb,var(--ok) 42%,var(--hairline)); color:var(--text); }
+.turn-change-actions button:disabled { opacity:.45; }
+.turn-change-file-row { display:flex; align-items:center; gap:6px; }
+.turn-change-file-row>button { flex:1; min-width:0; }
+.turn-change-state.is-kept,.turn-change-state.is-proposed { color:var(--text-dim); }
+.turn-change-state.is-kept { color:var(--ok); }
+.turn-change-state.is-undone { color:var(--text-faint); text-decoration:line-through; }
+.turn-change-state.is-updating { color:var(--accent); }
+.turn-change-state.is-applied { color:var(--ok); }
+.turn-change-files button[data-state='undone']>span:first-child { text-decoration:line-through; color:var(--text-faint); }
+.turn-change-viewed { display:inline-flex; color:var(--text-faint); }
+.turn-change-viewed.is-changed { color:var(--warn); }
+.turn-change-notice { margin:0 0 8px; padding:6px 9px; border-radius:var(--radius-6); background:color-mix(in srgb,var(--warn) 9%,transparent); color:var(--text-dim); font:var(--fs-11)/1.4 var(--ui); }
+@media (prefers-reduced-motion: reduce) { .turn-change-actions button { transition:none; } }
+/* TRN-18: failed review preparation — shown beside the pill with Retry, never as "Ready to review". */
+.changes-pill-failed { display:inline-flex; align-items:center; gap:4px; margin-left:6px; color:var(--danger); font-size:var(--fs-12); min-width:0; max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.changes-pill-retry { display:inline-flex; align-items:center; gap:3px; margin-left:4px; padding:1px 6px; border:1px solid var(--hairline); border-radius:var(--radius); background:transparent; color:var(--text); font:inherit; font-size:var(--fs-12); }
+.changes-pill-retry:hover { background:var(--bg-hover); }

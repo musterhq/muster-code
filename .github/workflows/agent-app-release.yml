@@ -1,0 +1,225 @@
+name: Muster Agent Release
+
+# Builds packages/agent-app for Apple silicon and Intel and publishes a GitHub Release.
+# Tags: agent-v<version> (e.g. agent-v0.2.0; agent-v0.2.0-beta.1 is published as a prerelease).
+# The IDE's release.yml only reacts to v* tags, so the two products never trigger each other.
+#
+# Signing, chosen per run from repository secrets (never printed):
+#   Developer ID  MUSTER_SIGN_IDENTITY + MUSTER_SIGN_P12_BASE64 + MUSTER_SIGN_P12_PASSWORD
+#                 (+ MUSTER_NOTARY_APPLE_ID, MUSTER_NOTARY_TEAM_ID, MUSTER_NOTARY_PASSWORD to notarize)
+#   Self-signed   MUSTER_SELF_SIGN_P12_BASE64 + MUSTER_SELF_SIGN_P12_PASSWORD ("Muster Agent Self-Signed")
+#   Ad hoc        no secrets
+# Anything short of a notarized Developer ID build is published as a prerelease.
+on:
+  push:
+    tags:
+      - "agent-v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to build and publish (e.g. agent-v0.2.0)"
+        required: true
+        type: string
+      prerelease:
+        description: "Mark the release as a prerelease"
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: agent-app-release-${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+env:
+  TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+  NODE_OPTIONS: --max-old-space-size=2048
+
+jobs:
+  build:
+    name: build (${{ matrix.arch }})
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - runner: macos-15
+            arch: arm64
+          - runner: macos-15-intel
+            arch: x64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: packages/agent-app
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: refs/tags/${{ env.TAG }}
+
+      - name: Check tag against package.json
+        id: version
+        run: |
+          VERSION="$(node -p "require('./package.json').version")"
+          TAG_VERSION="${TAG#agent-v}"
+          if [[ "$TAG" != agent-v* || ( "$TAG_VERSION" != "$VERSION" && "$TAG_VERSION" != "$VERSION"-* ) ]]; then
+            echo "::error::Tag $TAG does not match packages/agent-app/package.json version $VERSION (expected agent-v$VERSION)."
+            exit 1
+          fi
+          [[ "$(uname -m)" == "${{ matrix.arch }}" || ( "$(uname -m)" == "x86_64" && "${{ matrix.arch }}" == "x64" ) ]] || { echo "::error::Runner is $(uname -m), expected ${{ matrix.arch }}"; exit 1; }
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: packages/agent-app/.nvmrc
+          cache: npm
+          cache-dependency-path: packages/agent-app/package-lock.json
+
+      - name: Install
+        # postinstall downloads Electron and rebuilds node-pty for it (Xcode is on the runner).
+        run: npm ci --no-audit --no-fund
+
+      - name: Verify
+        run: |
+          npx tsc --noEmit
+          npm run build
+          npm test
+          npm run test:renderer
+
+      - name: Prepare signing identity
+        id: signing
+        env:
+          DEVID_IDENTITY: ${{ secrets.MUSTER_SIGN_IDENTITY }}
+          DEVID_P12: ${{ secrets.MUSTER_SIGN_P12_BASE64 }}
+          DEVID_P12_PASSWORD: ${{ secrets.MUSTER_SIGN_P12_PASSWORD }}
+          SELF_P12: ${{ secrets.MUSTER_SELF_SIGN_P12_BASE64 }}
+          SELF_P12_PASSWORD: ${{ secrets.MUSTER_SELF_SIGN_P12_PASSWORD }}
+          NOTARY_APPLE_ID: ${{ secrets.MUSTER_NOTARY_APPLE_ID }}
+        run: |
+          umask 077
+          P12="$RUNNER_TEMP/muster-sign.p12" PW="$RUNNER_TEMP/muster-sign.pw"
+          if [[ -n "$DEVID_IDENTITY" && -n "$DEVID_P12" ]]; then
+            printf '%s' "$DEVID_P12" | base64 --decode > "$P12"
+            printf '%s' "$DEVID_P12_PASSWORD" > "$PW"
+            echo "MUSTER_SIGN_IDENTITY=$DEVID_IDENTITY" >> "$GITHUB_ENV"
+            if [[ -n "$NOTARY_APPLE_ID" ]]; then MODE=developer-id-notarized; else MODE=developer-id; fi
+          elif [[ -n "$SELF_P12" ]]; then
+            printf '%s' "$SELF_P12" | base64 --decode > "$P12"
+            printf '%s' "$SELF_P12_PASSWORD" > "$PW"
+            echo "MUSTER_SIGN_IDENTITY=Muster Agent Self-Signed" >> "$GITHUB_ENV"
+            MODE=self-signed
+          else
+            MODE=adhoc
+          fi
+          if [[ "$MODE" != adhoc ]]; then
+            # package-release.mjs imports the PKCS#12 into this throwaway keychain (random password,
+            # partition list for codesign, added to the search list for the run) and deletes it afterwards.
+            { echo "MUSTER_SIGN_P12=$P12"; echo "MUSTER_SIGN_P12_PASSWORD_FILE=$PW"; echo "MUSTER_SIGN_KEYCHAIN=$RUNNER_TEMP/muster-sign.keychain-db"; } >> "$GITHUB_ENV"
+          fi
+          echo "mode=$MODE" >> "$GITHUB_OUTPUT"
+          echo "Signing mode: $MODE"
+
+      - name: Package
+        env:
+          MUSTER_UPDATE_CHANNEL: ${{ contains(env.TAG, '-') && 'beta' || 'stable' }}
+          MUSTER_NOTARY_APPLE_ID: ${{ steps.signing.outputs.mode == 'developer-id-notarized' && secrets.MUSTER_NOTARY_APPLE_ID || '' }}
+          MUSTER_NOTARY_TEAM_ID: ${{ steps.signing.outputs.mode == 'developer-id-notarized' && secrets.MUSTER_NOTARY_TEAM_ID || '' }}
+          MUSTER_NOTARY_PASSWORD: ${{ steps.signing.outputs.mode == 'developer-id-notarized' && secrets.MUSTER_NOTARY_PASSWORD || '' }}
+        run: |
+          node scripts/package-release.mjs
+          echo "${{ steps.signing.outputs.mode }}" > "release-dist/signing-${{ matrix.arch }}.txt"
+          ls -lh release-dist
+
+      - name: Remove signing material
+        if: always()
+        run: |
+          security delete-keychain "$RUNNER_TEMP/muster-sign.keychain-db" 2>/dev/null || true
+          rm -f "$RUNNER_TEMP/muster-sign.p12" "$RUNNER_TEMP/muster-sign.pw"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: muster-agent-${{ matrix.arch }}
+          path: |
+            packages/agent-app/release-dist/Muster-Agent-${{ steps.version.outputs.version }}-${{ matrix.arch }}.zip
+            packages/agent-app/release-dist/Muster-Agent-${{ steps.version.outputs.version }}-${{ matrix.arch }}.dmg
+            packages/agent-app/release-dist/signing-${{ matrix.arch }}.txt
+          if-no-files-found: error
+          retention-days: 14
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: refs/tags/${{ env.TAG }}
+          sparse-checkout: |
+            packages/agent-app/package.json
+            packages/agent-app/CHANGELOG.md
+          sparse-checkout-cone-mode: false
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: muster-agent-*
+          path: out
+          merge-multiple: true
+
+      - name: Checksums and release notes
+        id: notes
+        env:
+          PRERELEASE_INPUT: ${{ github.event_name == 'workflow_dispatch' && inputs.prerelease || false }}
+        run: |
+          VERSION="$(node -p "require('./packages/agent-app/package.json').version")"
+          cd out
+          MODES="$(cat signing-*.txt | sort -u | tr '\n' ' ')"
+          rm -f signing-*.txt
+          sha256sum Muster-Agent-* > SHA256SUMS
+          cat SHA256SUMS
+          PRERELEASE=false
+          [[ "$PRERELEASE_INPUT" == "true" || "$TAG" == *-* || "$MODES" != "developer-id-notarized " ]] && PRERELEASE=true
+          {
+            awk -v v="$VERSION" '
+              $0 ~ "^## \\[?" v "([^0-9.-]|$)" {on=1; next}
+              on && /^## / {exit}
+              on {print}
+            ' ../packages/agent-app/CHANGELOG.md 2>/dev/null | tee ../changelog-section.md
+            echo
+            echo "## Download"
+            echo
+            echo "| Mac | File |"
+            echo "| --- | --- |"
+            echo "| Apple silicon (M1 and later) | \`Muster-Agent-${VERSION}-arm64.dmg\` (or \`.zip\`) |"
+            echo "| Intel | \`Muster-Agent-${VERSION}-x64.dmg\` (or \`.zip\`) |"
+            echo
+            echo "Open the disk image and drag **Muster Agent** to **Applications**. Checksums are in \`SHA256SUMS\`."
+            if [[ "$MODES" != "developer-id-notarized " ]]; then
+              echo
+              echo "This build is not notarized by Apple (signing: ${MODES% }). The first time, right-click **Muster Agent** in Applications and choose **Open**, or run:"
+              echo
+              echo '```sh'
+              echo 'xattr -dr com.apple.quarantine "/Applications/Muster Agent.app"'
+              echo '```'
+            fi
+            echo
+            echo "Muster Agent needs a model provider sign-in; it detects the ones already on your Mac on first run."
+          } > ../release-notes.md
+          # No CHANGELOG section for this version: let GitHub generate notes from merged PRs/commits.
+          if grep -q '[^[:space:]]' ../changelog-section.md; then echo "generate=false" >> "$GITHUB_OUTPUT"; else echo "generate=true" >> "$GITHUB_OUTPUT"; fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "prerelease=$PRERELEASE" >> "$GITHUB_OUTPUT"
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.TAG }}
+          name: Muster Agent ${{ steps.notes.outputs.version }}
+          body_path: release-notes.md
+          generate_release_notes: ${{ steps.notes.outputs.generate == 'true' }}
+          prerelease: ${{ steps.notes.outputs.prerelease == 'true' }}
+          make_latest: false
+          files: |
+            out/Muster-Agent-*.zip
+            out/Muster-Agent-*.dmg
+            out/SHA256SUMS

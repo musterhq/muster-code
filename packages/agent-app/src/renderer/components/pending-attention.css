@@ -1,0 +1,20 @@
+.pending-attention { margin: 8px; padding: 10px; border: 1px solid var(--hairline); border-radius: var(--radius-10); }
+.pending-attention__heading { display: flex; align-items: center; gap: 6px; font-size: var(--fs-12); }
+.pending-attention__heading > span { margin-left: auto; color: var(--text-dim); font-size: var(--fs-11); }
+.pending-attention p { margin: 6px 0; font-size: var(--fs-11); color: var(--text-dim); }
+.pending-attention ul { list-style: none; margin: 0; padding: 0; max-height: 220px; overflow-y: auto; }
+.pending-attention li + li { border-top: 1px solid var(--hairline); }
+.pending-attention li button { display: flex; align-items: center; gap: 8px; width: 100%; padding: 8px 3px; border: 0; border-radius: var(--radius-4); background: transparent; color: inherit; cursor: pointer; text-align: left; }
+.pending-attention li button:hover { background: var(--bg-hover); }
+.pending-attention li button:focus-visible { outline: 2px solid currentColor; outline-offset: -2px; }
+.pending-attention__task { display: flex; flex-direction: column; flex: 1; min-width: 0; gap: 3px; font-size: var(--fs-12); }
+.pending-attention__task strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+.pending-attention__task > span { color: var(--text-dim); font-size: var(--fs-11); }
+
+.pending-attention-trigger { display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-height: 28px; padding: 3px 7px; border: 1px solid var(--hairline); border-radius: var(--radius-6); color: var(--text); background: var(--bg-raised); font-size: var(--fs-11); cursor: pointer; }
+.pending-attention-trigger:hover { background: var(--bg-hover); }
+.pending-attention-trigger:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
+.pending-attention-positioner { z-index: 100; }
+.pending-attention-popup { width: min(310px,calc(100vw - 24px)); background: var(--bg-raised); color: var(--text); border: 1px solid var(--hairline); border-radius: var(--radius-10); box-shadow: var(--shadow-popover); }
+.pending-attention-popup .pending-attention { margin: 0; border: 0; }
+.pending-attention-popup__title { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }

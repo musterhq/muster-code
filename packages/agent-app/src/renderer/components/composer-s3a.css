@@ -1,0 +1,97 @@
+/* S3-A composer completeness: pending-question panel, /status and /mcp cards, Terminals pill, plugin prompt hint,
+   Full-access "Don't ask again". Kept apart from composer.css so concurrent edits there never collide. */
+
+/* Attached tab above the card, in the goal-strip slot (COMPOSER-SPEC A1 / B11). */
+.composer-question, .composer-info {
+  box-sizing: border-box;
+  width: min(calc(100% - 72px), 708px);
+  max-height: min(24rem, 40vh);
+  overflow: auto;
+  margin: 12px auto 0;
+  padding: 8px 10px 10px;
+  border: 1px solid color-mix(in srgb, var(--text) 6%, transparent);
+  border-bottom: 0;
+  border-radius: var(--radius-16) var(--radius-16) 0 0;
+  background: color-mix(in srgb, var(--text) 5%, var(--bg));
+  color: var(--text-dim);
+  font-size: var(--fs-13);
+}
+.composer-question + div.composer, .composer-info + div.composer { margin-top: 0; }
+.composer-question.is-collapsed { padding-bottom: 6px; }
+.composer-question-head, .composer-info-head { display: flex; align-items: center; gap: 6px; min-height: 24px; }
+.composer-question-title { flex: 1; min-width: 0; overflow: hidden; color: var(--text-faint); font-size: var(--fs-12); text-overflow: ellipsis; white-space: nowrap; }
+.composer-question-count { flex: none; color: var(--text-faint); font-size: var(--fs-12); font-variant-numeric: tabular-nums; }
+.composer-question-icon, .composer-info-close { display: inline-grid; place-items: center; width: 24px; height: 24px; border-radius: var(--radius-6); color: var(--text-faint); }
+.composer-question-icon svg { transition: transform 140ms ease; }
+.composer-question.is-collapsed .composer-question-icon svg { transform: rotate(180deg); }
+.composer-question-dismiss { display: inline-flex; align-items: center; gap: 4px; height: 24px; padding: 0 8px; border-radius: var(--radius-6); color: var(--text-faint); font: inherit; font-size: var(--fs-12); }
+.composer-question-icon:hover, .composer-question-dismiss:hover:not(:disabled), .composer-info-close:hover { background: var(--bg-hover); color: var(--text); }
+.composer-question-text { margin: 4px 2px 8px; color: var(--text); font-size: var(--fs-14); line-height: 1.45; }
+.composer-question-options { display: flex; flex-direction: column; gap: 2px; }
+.composer-question-option { display: flex; align-items: center; gap: 10px; min-height: 36px; padding: 8px 10px; border-radius: var(--radius-8); color: var(--text); font: inherit; text-align: left; }
+.composer-question-option:hover:not(:disabled) { background: var(--bg-hover); }
+.composer-question-option.is-selected { background: var(--bg-active); }
+.composer-question-option-text { display: flex; flex: 1; flex-direction: column; gap: 2px; min-width: 0; font-size: var(--fs-14); }
+.composer-question-option-text small { color: var(--text-faint); font-size: var(--fs-12); }
+.composer-question-option kbd { flex: none; min-width: 18px; height: 18px; padding: 0 4px; border: 1px solid var(--hairline); border-radius: var(--radius-6); color: var(--text-faint); font: var(--fs-11)/16px var(--ui); text-align: center; }
+.composer-question-check { flex: none; color: var(--accent); }
+.composer-question-note { margin: 6px 2px 0; color: var(--text-faint); font-size: var(--fs-12); }
+.composer-question-actions { display: flex; align-items: center; justify-content: flex-end; gap: 6px; margin-top: 8px; }
+.composer-question-error { flex: 1; min-width: 0; color: var(--danger); font-size: var(--fs-12); }
+.composer-question-previous, .composer-question-next { height: 28px; padding: 0 12px; border-radius: var(--radius-16); font: inherit; font-size: var(--fs-13); }
+.composer-question-previous { color: var(--text-dim); }
+.composer-question-previous:hover:not(:disabled) { background: var(--bg-hover); color: var(--text); }
+.composer-question-next { background: var(--send); color: var(--send-fg); }
+.composer-question-next:disabled, .composer-question-option:disabled { opacity: .55; }
+/* Secret questions: the textarea reads as a password field. */
+div.composer .composer-input.is-secret { -webkit-text-security: disc; }
+
+/* /status and /mcp */
+.composer-info-head { color: var(--text); font-size: var(--fs-13); }
+.composer-info-head > span { flex: 1; }
+.composer-info-head > svg { color: var(--text-faint); }
+.composer-info-link { height: 22px; padding: 0 8px; border-radius: var(--radius-6); color: var(--accent); font: inherit; font-size: var(--fs-12); }
+.composer-info-link:hover { background: var(--bg-hover); }
+.composer-info-rows { display: grid; gap: 6px; margin: 8px 2px 0; }
+.composer-info-rows > div { display: grid; grid-template-columns: 110px 1fr; gap: 8px; align-items: baseline; }
+.composer-info-rows dt { color: var(--text-faint); }
+.composer-info-rows dd { display: flex; align-items: center; gap: 6px; min-width: 0; margin: 0; color: var(--text); }
+.composer-info-rows > div.is-block dd { display: block; }
+.composer-info-rows code { overflow: hidden; font: var(--fs-12)/1.4 var(--mono, ui-monospace, monospace); text-overflow: ellipsis; white-space: nowrap; }
+.composer-info-copy { display: inline-grid; place-items: center; width: 20px; height: 20px; border-radius: var(--radius-6); color: var(--text-faint); }
+.composer-info-copy:hover { background: var(--bg-hover); color: var(--text); }
+.composer-info-list { display: flex; flex-direction: column; gap: 4px; margin: 8px 0 0; padding: 0; list-style: none; }
+.composer-info-list li { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 4px 2px; }
+.composer-info-list strong { color: var(--text); font-weight: 500; }
+.composer-info-meta { color: var(--text-faint); }
+.composer-info-state { margin-left: auto; color: var(--text-dim); }
+.composer-info-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--text-faint); }
+.composer-info-dot.is-ok { background: var(--ok); }
+.composer-info-dot.is-warn { background: var(--warn); }
+.composer-info-subhead { margin: 8px 2px 0; color: var(--text-faint); font-size: var(--fs-12); }
+.composer-info-note { margin: 8px 2px 0; color: var(--text-faint); }
+.composer-info-note.is-error { color: var(--danger); }
+
+/* Terminals pill in the composer toolbar (CS-A1-3). */
+.composer-terminals { display: inline-flex; flex: none; align-items: center; gap: 5px; height: 24px; padding: 0 8px; border-radius: var(--radius-12); background: color-mix(in srgb, var(--ok) 12%, transparent); color: var(--ok); font-size: var(--fs-13); white-space: nowrap; }
+.composer-terminals:hover { background: color-mix(in srgb, var(--ok) 20%, transparent); }
+:root[data-theme='light'] .composer-terminals { color: var(--ok); }
+@container (max-width: 520px) { .composer-terminals > span { display: none; } }
+
+/* Plugin defaultPrompt hint after the chip (CS-B3-6); the placeholder colour, never part of the text. */
+.composer-ghost-hint { color: var(--text); opacity: .5; }
+
+/* Full access "Don't ask again for this folder" (CS-B7-3) and its Settings list. */
+.composer-access-remember { display: flex; align-items: flex-start; gap: 8px; margin: -6px 0 16px; color: var(--text); font-size: var(--fs-13); cursor: pointer; }
+.composer-access-remember input { margin: 2px 0 0; accent-color: var(--access-full); }
+.composer-access-remember span { display: flex; flex-direction: column; gap: 2px; }
+.composer-access-remember small { color: var(--text-faint); font-size: var(--fs-12); }
+.full-access-skips { display: flex; flex-direction: column; gap: 4px; margin: 0; padding: 0; list-style: none; }
+.full-access-skips li { display: flex; align-items: center; gap: 6px; font-size: var(--fs-13); }
+.full-access-skips li > svg { color: var(--access-full); }
+.full-access-skips li > span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.full-access-skips button { height: 24px; padding: 0 9px; border: 1px solid var(--hairline); border-radius: var(--radius-6); color: var(--text); font: inherit; font-size: var(--fs-12); }
+.full-access-skips button:hover { background: var(--bg-hover); }
+.full-access-skips-empty { margin: 0; color: var(--text-faint); font-size: var(--fs-12); }
+
+@media (prefers-reduced-motion: reduce) { .composer-question-icon svg { transition: none; } }

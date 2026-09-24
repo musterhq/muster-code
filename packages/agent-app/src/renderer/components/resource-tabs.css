@@ -1,0 +1,232 @@
+/* Resource tab strip: icons, horizontal overflow, edge fades, hover-only close. */
+
+.workspace-head > .workspace-tabs-shell { position: relative; flex: 0 1 auto; min-width: 0; display: flex; align-items: stretch; }
+/* The header action area (Resources N + maximize) keeps its own width and is never covered by tabs. */
+.workspace-head > :not(.workspace-tabs-shell) { flex: none; }
+
+.workspace-tabs-shell > .workspace-tabs {
+  flex: 0 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: stretch;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  overscroll-behavior-x: contain;
+}
+.workspace-tabs-shell > .workspace-tabs::-webkit-scrollbar { display: none; width: 0; height: 0; }
+
+/* Soft fades on the sides that still hide tabs; toggled by data attributes from the strip's scroll/resize observers. */
+.workspace-tabs-shell::before,
+.workspace-tabs-shell::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 28px;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 120ms ease;
+  z-index: 2;
+}
+.workspace-tabs-shell::before { left: 0; background: linear-gradient(to right, var(--bg) 20%, transparent); }
+.workspace-tabs-shell::after { right: 0; background: linear-gradient(to left, var(--bg) 20%, transparent); }
+.workspace-tabs-shell[data-fade-start='true']::before,
+.workspace-tabs-shell[data-fade-end='true']::after { opacity: 1; }
+
+.workspace-tabs .workspace-tab {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 90px;
+  max-width: 180px;
+  padding: 0 4px 0 10px;
+  color: var(--text-dim);
+  white-space: nowrap;
+  position: relative;
+}
+.workspace-tabs .workspace-tab:hover { background: var(--bg-hover); }
+.workspace-tabs .workspace-tab.is-active { color: var(--text); }
+.workspace-tabs .workspace-tab.is-active::after {
+  content: '';
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  bottom: 0;
+  height: 1px;
+  background: var(--text-dim);
+}
+
+.workspace-tabs .workspace-tab-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 0;
+  font-size: var(--font-caption);
+  text-align: left;
+  overflow: hidden;
+}
+.workspace-tab-icon { flex: none; width: 13px; height: 13px; color: var(--text-faint); }
+.workspace-tab.is-active .workspace-tab-icon:not([data-tone]) { color: var(--text-dim); }
+.workspace-tab-title { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Close stays in the layout (no reflow) but is only shown on hover, keyboard focus, or the active tab. */
+.workspace-tabs .workspace-tab-close { flex: none; width: 18px; height: 18px; opacity: 0; transition: opacity 90ms ease; }
+.workspace-tabs .workspace-tab:hover .workspace-tab-close,
+.workspace-tabs .workspace-tab:focus-within .workspace-tab-close,
+.workspace-tabs .workspace-tab.is-active .workspace-tab-close { opacity: 1; }
+@media (hover: none) { .workspace-tabs .workspace-tab-close { opacity: 1; } }
+
+/* '+' sits right after the last tab; the remaining header width stays empty until the header actions. */
+.workspace-head > .resource-add-trigger { flex: none; align-self: center; width: 26px; height: 26px; margin: 0 auto 0 4px; color: var(--text-faint); border-radius: var(--radius-6); }
+.workspace-head > .resource-add-trigger:hover, .workspace-head > .resource-add-trigger[data-popup-open] { color: var(--text); background: var(--bg-hover); }
+.resource-add-trigger:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
+.resource-add-positioner { z-index: 100; }
+.resource-add-popup { width: min(340px, calc(100vw - 32px)); max-height: min(440px, var(--available-height, 440px)); display: flex; flex-direction: column; padding: 5px; background: var(--bg-raised); border: 1px solid rgb(var(--fg-rgb) / 10%); border-radius: var(--radius-10); box-shadow: var(--shadow-popover); color: var(--text); transform-origin: var(--transform-origin); transition: opacity 120ms ease, transform 120ms ease; outline: 0; }
+.resource-add-popup[data-starting-style], .resource-add-popup[data-ending-style] { opacity: 0; transform: translateY(-3px) scale(.98); }
+.resource-add-search { display: flex; align-items: center; gap: 8px; padding: 7px 9px 9px; margin-bottom: 4px; border-bottom: 1px solid var(--hairline); color: var(--text-faint); }
+.resource-add-search input { flex: 1; min-width: 0; border: 0; background: transparent; color: var(--text); font: inherit; font-size: var(--font-control); outline: 0; }
+.resource-add-search input::placeholder { color: var(--text-faint); }
+.resource-add-list { overflow-y: auto; min-height: 0; overscroll-behavior: contain; }
+.resource-add-group + .resource-add-group { margin-top: 4px; padding-top: 4px; border-top: 1px solid var(--hairline); }
+.resource-add-heading { display: flex; align-items: center; gap: 5px; padding: 4px 9px 3px; font-size: var(--fs-11); color: var(--text-faint); }
+.resource-add-option { display: flex; align-items: center; gap: 9px; min-height: 30px; padding: 5px 9px; border-radius: var(--radius-6); font-size: var(--font-caption); color: var(--text-dim); cursor: default; }
+.resource-add-option > svg { flex: none; color: var(--text-faint); }
+.resource-add-option[data-active='true'] { background: var(--bg-active); color: var(--text); }
+.resource-add-option[aria-disabled='true'] { opacity: .45; }
+.resource-add-label { flex: none; max-width: 60%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.resource-add-detail { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: right; color: var(--text-faint); font-size: var(--fs-11); }
+.resource-add-note { padding: 6px 9px; font-size: var(--fs-11); color: var(--text-faint); }
+.resource-add-note.is-error { color: var(--danger); }
+.resource-add-note button { color: var(--text-dim); text-decoration: underline; }
+@media (prefers-reduced-motion: reduce) { .resource-add-popup { transition: none; } }
+
+/* Changes list: name, folder, +/− counts, rename arrow and binary marker. */
+.change-row { gap: 7px; font-size: var(--font-caption); }
+.change-row .change-path { display: flex; align-items: baseline; gap: 6px; white-space: nowrap; }
+.change-dir, .change-previous { min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--text-faint); font-size: var(--fs-11); }
+.change-arrow { flex: none; align-self: center; color: var(--text-faint); }
+.change-counts { display: inline-flex; gap: 5px; flex: none; font-family: var(--mono); font-size: var(--fs-11); font-variant-numeric: tabular-nums; }
+.change-adds { color: var(--git-add); font-weight: 500; }
+.change-dels { color: var(--git-del); font-weight: 500; }
+.change-binary { flex: none; padding: 0 5px; border: 1px solid var(--hairline); border-radius: var(--radius-4); font-size: var(--fs-10); color: var(--text-faint); }
+/* A collapsed untracked directory (e.g. an un-gitignored node_modules/) with too many loose files to list one by one. */
+.change-group-name { color: var(--text-dim); font-weight: 500; }
+.change-group-count { flex: none; padding: 0 6px; border-radius: var(--radius-8); background: var(--bg-hover); color: var(--text-faint); font-size: var(--fs-11); font-variant-numeric: tabular-nums; }
+.change-group-files { margin-left: 18px; border-left: 1px solid var(--hairline); padding-left: 6px; }
+
+/* Codex-style compact tabs: short truncated titles, the active tab is a soft pill rather than an underline. */
+.workspace-tabs .workspace-tab { min-width: 72px; max-width: 150px; margin-block: 6px; padding: 0 3px 0 9px; border-radius: var(--radius-8); }
+.workspace-tabs .workspace-tab + .workspace-tab { margin-left: 2px; }
+.workspace-tabs .workspace-tab.is-active { background: var(--bg-active); }
+.workspace-tabs .workspace-tab.is-active::after { content: none; }
+.workspace-tabs .workspace-tab-label { padding: 4px 0; }
+img.workspace-tab-favicon { border-radius: var(--radius-2); object-fit: contain; }
+
+/* Preview tab: italic title, replaced in place by the next single-click (WRK-15). */
+.workspace-tabs .workspace-tab.is-preview .workspace-tab-title { font-style: italic; }
+/* Pinned tabs drop the close affordance's reserved width slightly and show a pin glyph instead when not hovered. */
+.workspace-tabs .workspace-tab.is-pinned .workspace-tab-close { opacity: 0; }
+.workspace-tabs .workspace-tab.is-pinned:hover .workspace-tab-close,
+.workspace-tabs .workspace-tab.is-pinned.is-active .workspace-tab-close { opacity: 1; }
+.workspace-tab-dirty-dot { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--text-dim); margin-right: 1px; }
+
+/* Drag-to-reorder: dragged tab dims, the drop target shows an insertion line on the side the pointer is over. */
+.workspace-tabs .workspace-tab.is-dragging { opacity: .45; }
+.workspace-tabs .workspace-tab.drop-before::before,
+.workspace-tabs .workspace-tab.drop-after::after {
+  content: '';
+  position: absolute;
+  top: 4px;
+  bottom: 4px;
+  width: 2px;
+  background: var(--accent);
+  border-radius: var(--radius-2);
+  z-index: 1;
+}
+.workspace-tabs .workspace-tab.drop-before::before { left: -1px; }
+.workspace-tabs .workspace-tab.drop-after::after { right: -1px; }
+
+/* Tab context menu: same visual language as the file-action menu. */
+.tab-context-menu { min-width: 180px; padding: 4px; background: var(--bg-raised); border: 1px solid rgb(var(--fg-rgb) / 10%); border-radius: var(--radius-10); box-shadow: var(--shadow-popover); color: var(--text); outline: 0; }
+.tab-context-menu [role="menuitem"] { display: flex; align-items: center; gap: 8px; min-height: 30px; padding: 5px 9px; border-radius: var(--radius-6); font-size: var(--font-caption); color: var(--text-dim); cursor: default; }
+.tab-context-menu [role="menuitem"][data-highlighted] { background: var(--bg-active); color: var(--text); }
+.tab-context-menu [role="menuitem"][aria-disabled='true'] { opacity: .45; }
+.tab-context-menu-sep { height: 1px; margin: 4px 6px; background: var(--hairline); }
+
+/* Cmd+P quick open: a centered dialog reusing the '+' menu's list styling. */
+.quick-open-popup { position: fixed; left: 50%; top: 18vh; translate: -50% 0; z-index: 111; width: min(520px, calc(100vw - 40px)); max-height: min(60vh, 480px); transition: opacity 150ms ease, transform 150ms ease; }
+.quick-open-popup[data-starting-style], .quick-open-popup[data-ending-style] { opacity: 0; transform: translateY(-6px) scale(.98); }
+@media (prefers-reduced-motion: reduce) { .quick-open-popup { transition: none; } }
+
+/* Content search panel in the Files tab: snippet rows, click to jump to the line. */
+.file-content-search { display: flex; flex-direction: column; gap: 6px; min-height: 0; }
+.file-content-search-controls { display: flex; align-items: center; gap: 6px; }
+.file-content-search-controls label.file-search { flex: 1; }
+.file-content-search-toggle { flex: none; font-size: var(--fs-11); padding: 3px 7px; border-radius: var(--radius-6); border: 1px solid var(--hairline); background: transparent; color: var(--text-faint); cursor: pointer; }
+.file-content-search-toggle[aria-pressed='true'] { color: var(--text); background: var(--bg-active); border-color: transparent; }
+.file-content-search-results { overflow-y: auto; min-height: 0; }
+.file-content-search-file { padding: 4px 6px 2px; font-size: var(--fs-11); color: var(--text-faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.file-content-search-hit { display: flex; align-items: baseline; gap: 8px; width: 100%; padding: 3px 8px; border-radius: var(--radius-6); font-size: var(--fs-12); text-align: left; color: var(--text-dim); }
+.file-content-search-hit:hover, .file-content-search-hit:focus-visible { background: var(--bg-hover); color: var(--text); }
+.file-content-search-line { flex: none; font-family: var(--mono); font-size: var(--fs-10); color: var(--text-faint); min-width: 2em; text-align: right; }
+.file-content-search-snippet { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: pre; font-family: var(--mono); }
+
+/* ---------------------------------------------------------------------------
+   Codex-quality pane chrome (2026-09-23 rebuild)
+   Header matches the chat header (44px); the tab strip owns all spare width and scrolls,
+   never clipping its first or last tab; '+' follows the last tab; maximize sits at the far end. */
+.workspace-head { min-height: 44px; height: 44px; align-items: center; padding: 0 6px 0 6px; gap: 2px; }
+.workspace-head > .workspace-tabs-shell { flex: 0 1 auto; align-self: stretch; }
+.workspace-tabs-shell > .workspace-tabs { min-height: 0; height: 100%; align-items: center; padding: 0 2px; scroll-padding-inline: 24px; }
+.workspace-tabs .workspace-tab { height: 30px; margin-block: 0; min-width: 64px; max-width: 168px; padding: 0 2px 0 9px; border-radius: var(--radius-8); transition: background-color 120ms ease, color 120ms ease; }
+.workspace-tabs .workspace-tab + .workspace-tab { margin-left: 2px; }
+.workspace-tabs .workspace-tab-label { padding: 0; height: 100%; font-size: var(--fs-13); }
+.workspace-tabs .workspace-tab.is-active { background: var(--bg-active); color: var(--text); }
+.workspace-tabs .workspace-tab:not(.is-active):hover { background: var(--bg-hover); color: var(--text); }
+.workspace-tab-icon { width: 14px; height: 14px; }
+img.workspace-tab-favicon { width: 14px; height: 14px; }
+/* Close appears on hover/focus (and on the active tab), always in the same 20px slot so titles never jump. */
+.workspace-tabs .workspace-tab-close { width: 20px; height: 20px; border-radius: var(--radius-6); color: var(--text-faint); }
+.workspace-tabs .workspace-tab-close:hover { color: var(--text); background: rgb(var(--fg-rgb) / 8%); }
+.workspace-tabs-shell::before, .workspace-tabs-shell::after { width: 24px; }
+.workspace-head > .resource-add-trigger { width: 28px; height: 28px; margin: 0 auto 0 2px; border-radius: var(--radius-8); }
+.workspace-head .resource-maximize { width: 28px; height: 28px; margin: 0; border-radius: var(--radius-8); color: var(--text-dim); background: transparent; }
+.workspace-head .resource-maximize:hover { color: var(--text); background: var(--bg-hover); }
+.workspace-head-empty { justify-content: flex-end; }
+.resource-separator { top: 0; width: 7px; left: -4px; transition: background-color 120ms ease; }
+.workspace[data-resizing='true'] { user-select: none; }
+.workspace[data-resizing='true'] .resource-separator { background: color-mix(in srgb, var(--accent) 45%, transparent); }
+.workspace[data-resizing='true'] iframe, .workspace[data-resizing='true'] webview { pointer-events: none; }
+
+/* Empty pane: Codex's 2x2 tiles, centred, with one quiet line for anything unavailable. */
+.resource-empty { flex: 1; min-height: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; padding: 24px 16px; }
+.resource-empty .resource-launchers { flex: none; padding: 0; grid-template-columns: repeat(2, 122px); grid-auto-rows: 98px; gap: 14px; }
+.resource-empty .resource-launchers[data-count='1'] { grid-template-columns: 122px; }
+.resource-empty .resource-launchers button { gap: 12px; border-radius: var(--radius-12); font-size: var(--fs-13); }
+.resource-launchers-attach { margin: 2px 0 0; padding: 4px 10px; border: 1px solid var(--hairline); border-radius: var(--radius); background: transparent; color: var(--text-dim); font: inherit; font-size: var(--font-caption); cursor: default; }
+.resource-launchers-attach:hover { color: var(--text); background: var(--bg-hover); }
+.resource-launchers-attach:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.resource-launchers-note { max-width: 258px; margin: 0; text-align: center; font-size: var(--fs-12); line-height: 1.5; color: var(--text-faint); }
+
+/* Neutral (non-error) resource state, e.g. a folder that is not a Git repository. */
+.resource-neutral { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; min-height: 200px; padding: 32px 20px; text-align: center; color: var(--text-faint); }
+.resource-neutral strong { color: var(--text-dim); font-size: var(--fs-13); font-weight: 500; }
+.resource-neutral span { max-width: 260px; font-size: var(--fs-12); line-height: 1.5; }
+.resource-neutral svg { color: var(--text-faint); margin-bottom: 2px; }
+
+/* Files and Changes tabs: consistent 12px gutters, section heads in sentence case. */
+.files-tab { padding: 8px 10px 16px; gap: 6px; }
+.files-tab .files-section-head { min-height: 30px; padding: 4px 4px 4px 6px; gap: 6px; text-transform: none; letter-spacing: 0; font-size: var(--fs-12); font-weight: 500; color: var(--text-dim); }
+.files-tab .files-section-head > span:first-child { display: inline-flex; align-items: center; gap: 6px; margin-right: auto; }
+.files-section-count { min-width: 16px; padding: 0 5px; border-radius: var(--radius-8); background: var(--bg-hover); color: var(--text-faint); font-size: var(--fs-11); font-variant-numeric: tabular-nums; text-align: center; }
+.files-tab .files-section-head .icon-button { width: 24px; height: 24px; border-radius: var(--radius-6); }
+.files-explorer .tree-row { min-height: 26px; border-radius: var(--radius-6); font-size: var(--fs-13); }
+.files-explorer .tree-row[aria-current] { background: var(--bg-active); color: var(--text); }
+.changes-tab .change-row { min-height: 28px; border-radius: var(--radius-6); }
+@media (prefers-reduced-motion: reduce) { .workspace-tabs .workspace-tab, .resource-separator { transition: none; } }

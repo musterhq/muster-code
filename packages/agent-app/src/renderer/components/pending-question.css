@@ -1,0 +1,21 @@
+.pending-question { max-width: 720px; border: 1px solid var(--warn); border-radius: var(--radius); padding: 12px; background: color-mix(in srgb, var(--warn) 7%, transparent); }
+.pending-question h3 { margin: 0 0 10px; font-size: var(--fs-13); font-weight: 600; }
+.pending-question fieldset { min-width: 0; margin: 0 0 12px; padding: 0; border: 0; }
+.pending-question legend { margin-bottom: 4px; font-size: var(--fs-12); font-weight: 600; }
+.pending-question fieldset p { margin: 0 0 8px; color: var(--text-dim); font-size: var(--fs-12); }
+.pending-question-option { display: flex; align-items: flex-start; gap: 7px; margin: 6px 0; font-size: var(--fs-12); }
+.pending-question-option span { display: flex; flex-direction: column; gap: 2px; }
+.pending-question-option small { color: var(--text-faint); }
+.pending-question-custom { display: flex; flex-direction: column; gap: 4px; margin-top: 9px; color: var(--text-faint); font-size: var(--fs-11); }
+.pending-question-custom input { width: 100%; box-sizing: border-box; border: 1px solid var(--hairline); border-radius: var(--radius-6); padding: 6px 8px; background: var(--bg); color: var(--text); font: inherit; }
+.pending-question-submit { border: 1px solid var(--hairline); border-radius: var(--radius-6); padding: 6px 10px; color: var(--text); font: inherit; font-size: var(--fs-11); }
+.pending-question-submit:hover:not(:disabled), .pending-question-submit:focus-visible { background: var(--bg-active); }
+.pending-question-submit:disabled { cursor: default; opacity: .5; }
+.pending-question-status { display: inline-block; margin-left: 8px; color: var(--text-faint); font-size: var(--fs-11); }
+.pending-question-error { margin: 8px 0 0; color: var(--danger); font-size: var(--fs-11); }
+.pending-question.is-settled { border-color: var(--hairline); background: transparent; }
+.pending-question-actions { display: flex; gap: 8px; }
+.pending-question-dismiss { border: 0; border-radius: var(--radius-6); padding: 6px 10px; background: transparent; color: var(--text-dim); font: inherit; font-size: var(--fs-11); }
+.pending-question-dismiss:hover, .pending-question-dismiss:focus-visible { background: var(--bg-hover); color: var(--text); }
+.pending-question-outcome { display: flex; flex-direction: column; gap: 3px; margin: 0; font-size: var(--fs-11); color: var(--text-faint); }
+.pending-question-outcome strong { font-weight: 500; color: var(--text-dim); }

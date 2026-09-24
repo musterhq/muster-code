@@ -1,0 +1,20 @@
+/* Table rhythm/behavior adapted from T3 Code (MIT); see THIRD-PARTY-NOTICES.md. */
+.md-table { position:relative; min-width:0; max-width:100%; margin:0.9em 0; }
+.md-table-scroll { max-width:100%; overflow-x:auto; overscroll-behavior-x:contain; scrollbar-width:thin; }
+.md-body .md-table table { display:table; width:100%; min-width:max-content; margin:0; border-collapse:collapse; overflow-wrap:normal; word-break:normal; font-size:0.92em; }
+.md-body .md-table th, .md-body .md-table td { border:0; border-bottom:1px solid color-mix(in srgb,var(--text) 8%,transparent); padding:8px 12px; vertical-align:top; background:transparent; }
+.md-body .md-table th:first-child, .md-body .md-table td:first-child { padding-left:0; }
+.md-body .md-table tbody tr:last-child td { border-bottom:0; }
+.md-body .md-table thead th { padding-block:9px; font-weight:600; white-space:nowrap; color:var(--text); }
+.md-body .md-table tbody td { color:var(--text-dim); }
+.md-table[data-wrap='false'] th, .md-table[data-wrap='false'] td { overflow:hidden; max-width:384px; text-overflow:ellipsis; white-space:nowrap; }
+.md-table[data-wrap='true'] td { max-width:384px; white-space:normal; overflow-wrap:anywhere; }
+/* Wrap/copy float at the table's top-right on hover or focus; no toolbar row under every table. */
+.md-table-toolbar { position:absolute; top:4px; right:0; z-index:2; display:flex; align-items:center; gap:2px; padding:2px; border-radius:var(--radius-8); background:var(--bg-raised); box-shadow:0 0 0 1px color-mix(in srgb,var(--text) 7%,transparent); opacity:0; pointer-events:none; transition:opacity 130ms ease; }
+.md-table:hover .md-table-toolbar, .md-table:focus-within .md-table-toolbar { opacity:1; pointer-events:auto; }
+@media (hover:none) { .md-table-toolbar { opacity:1; pointer-events:auto; } }
+.md-table-feedback { padding:0 4px; color:var(--text-faint); font-size:var(--fs-11); }
+.md-table-feedback:empty { display:none; }
+.md-table-copy-menu { position:absolute; right:0; top:30px; z-index:5; min-width:160px; padding:4px; border:1px solid var(--hairline); border-radius:var(--radius-8); background:var(--bg-raised); box-shadow:var(--shadow-sm); }
+.md-table-copy-menu button { display:block; width:100%; padding:7px 10px; text-align:left; font-size:var(--fs-12); border-radius:var(--radius-4); }
+.md-table-copy-menu button:hover { background:var(--bg-hover); }

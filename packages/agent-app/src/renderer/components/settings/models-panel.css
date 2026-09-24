@@ -1,0 +1,19 @@
+.models-provider .preference-group-title { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.models-provider .preference-group-title .settings-muted { font-size: var(--fs-11); font-weight: 400; text-transform: none; letter-spacing: 0; }
+.models-row .preference-copy { min-width: 0; }
+.models-id { color: var(--text-faint); font-family: var(--font-mono, ui-monospace, monospace); font-size: var(--fs-11); }
+.models-badges { display: flex; flex-wrap: wrap; gap: 4px; margin: 2px 0; }
+.models-badge { padding: 0 6px; border: 1px solid var(--hairline); border-radius: var(--radius-4); color: var(--text-dim); font-size: var(--fs-11); line-height: 17px; }
+.models-badge.is-unknown { border-style: dashed; color: var(--text-faint); }
+.models-controls { display: flex; align-items: center; gap: 8px; }
+.models-price-form { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px; margin-top: 8px; }
+.models-price-form label { display: flex; flex-direction: column; gap: 3px; color: var(--text-faint); font-size: var(--fs-11); }
+.models-price-form input { width: 110px; padding: 4px 6px; border: 1px solid var(--hairline); border-radius: var(--radius-6); background: var(--bg); color: var(--text); font: inherit; font-size: var(--fs-12); font-variant-numeric: tabular-nums; }
+.models-price-actions { display: flex; gap: 6px; }
+.models-error { flex-basis: 100%; margin: 4px 0 0; color: var(--danger); font-size: var(--fs-12); }
+.models-excluded { margin: 8px 0 0; color: var(--text-dim); font-size: var(--fs-12); }
+.models-excluded summary { cursor: pointer; color: var(--text-faint); }
+.models-excluded ul { margin: 6px 0 0; padding-left: 16px; }
+.models-excluded li { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0; }
+.models-excluded li span:last-child { flex-basis: 100%; color: var(--text-faint); }
+.models-unready, .models-footnote { margin: 12px 0 0; font-size: var(--fs-12); }

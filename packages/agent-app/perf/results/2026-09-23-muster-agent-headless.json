@@ -1,0 +1,70 @@
+{
+  "benchmark": "muster-agent-perf",
+  "version": 1,
+  "mode": "headless",
+  "label": "muster-agent",
+  "runs": 21,
+  "at": "2026-09-23T18:08:09.601Z",
+  "durationMs": 1016,
+  "seed": {
+    "chats": 50,
+    "transcriptItems": 5000
+  },
+  "machine": {
+    "host": "e76209b8",
+    "platform": "darwin-arm64",
+    "os": "27.0.0",
+    "cpu": "Apple M3",
+    "cores": 8,
+    "memoryGB": 24,
+    "loadAverage1m": 3.71,
+    "node": "v24.13.0",
+    "revision": "3218695",
+    "dirty": true
+  },
+  "results": {
+    "startup.dataOpen": {
+      "n": 21,
+      "medianMs": 1.008,
+      "p95Ms": 1.233,
+      "minMs": 0.949,
+      "maxMs": 1.275
+    },
+    "startup.runtimeCompile": {
+      "n": 21,
+      "medianMs": 18.376,
+      "p95Ms": 19.459,
+      "minMs": 18.006,
+      "maxMs": 20.211,
+      "bytes": 1792667
+    },
+    "startup.rendererEntryBytes": {
+      "bytes": 812956,
+      "note": "size only; compile/paint cost is in --mode=app"
+    },
+    "chatSwitch.dataLong": {
+      "n": 21,
+      "medianMs": 9.266,
+      "p95Ms": 10.762,
+      "minMs": 8.71,
+      "maxMs": 11.307,
+      "items": 5000
+    },
+    "chatSwitch.dataShort": {
+      "n": 21,
+      "medianMs": 0.046,
+      "p95Ms": 0.057,
+      "minMs": 0.042,
+      "maxMs": 0.093,
+      "items": 20
+    },
+    "transcript.patch": {
+      "n": 21,
+      "medianMs": 0.001,
+      "p95Ms": 0.003,
+      "minMs": 0.001,
+      "maxMs": 0.007,
+      "note": "per streaming update (100 updates per sample)"
+    }
+  }
+}

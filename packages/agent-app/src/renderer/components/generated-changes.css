@@ -1,0 +1,3 @@
+/* F59: lockfile/generated lines, counted apart from authored changes; muted so they never dominate. */
+.changes-generated { display:inline-flex; align-items:baseline; gap:4px; color:var(--text-faint); font-size:.92em; font-weight:400; white-space:nowrap; font-variant-numeric:tabular-nums; }
+.changes-generated-stats { opacity:.85; }

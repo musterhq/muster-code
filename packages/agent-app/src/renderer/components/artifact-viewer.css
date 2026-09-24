@@ -1,0 +1,9 @@
+.file-dialog.artifact-viewer { width:min(820px,calc(100vw - 40px)); max-height:calc(100vh - 80px); display:flex; flex-direction:column; }
+.artifact-viewer-title { display:flex; align-items:center; gap:7px; min-width:0; font-size:var(--fs-13); font-weight:600; margin:0; }
+.artifact-viewer-title span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-family:var(--mono); font-weight:500; }
+.artifact-viewer-close { border:0; background:transparent; color:var(--text-faint); padding:4px; border-radius:var(--radius-6); cursor:pointer; }
+.artifact-viewer-close:hover { color:var(--text); background:rgb(var(--fg-rgb) / 7%); }
+.file-dialog > p.artifact-viewer-note { margin:6px 0 10px; }
+.artifact-viewer-status { font-size:var(--fs-12); color:var(--text-faint); padding:8px 0; }
+.artifact-viewer-body { flex:1; min-height:0; overflow:auto; margin:0; padding:10px 12px; border-radius:var(--radius-8); border:1px solid var(--hairline); background:rgb(var(--fg-rgb) / 3%); font:var(--fs-12)/1.55 var(--mono); white-space:pre; }
+.artifact-viewer-line[data-current] { background:color-mix(in srgb,var(--accent) 18%,transparent); }

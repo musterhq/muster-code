@@ -1,0 +1,4 @@
+.plugin-ui { display:flex; flex-direction:column; height:100%; min-height:0; min-width:0; }
+.plugin-ui-note { margin:0; padding:7px 14px; font-size:var(--fs-12); color:var(--text-faint); border-bottom:1px solid var(--hairline); }
+.plugin-ui-frame { flex:1; width:100%; min-height:120px; border:0; background:var(--bg); }
+.plugin-ui-launchers { display:flex; flex-wrap:wrap; gap:6px; margin:-4px 0 16px; }

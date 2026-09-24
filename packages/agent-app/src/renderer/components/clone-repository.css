@@ -1,0 +1,21 @@
+/* GIT-10: the Clone repository sheet (shares the composer-confirm shell). */
+.clone-sheet { width: min(520px, calc(100vw - 40px)); }
+.clone-form { display: grid; gap: 12px; }
+.clone-field { display: grid; gap: 4px; }
+.clone-field > span { font-size: var(--fs-11); font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--text-faint); }
+.clone-field input { width: 100%; box-sizing: border-box; height: 30px; padding: 0 9px; border: 1px solid var(--hairline); border-radius: var(--radius-8); background: var(--bg-raised); color: var(--text); font: inherit; font-size: var(--fs-13); }
+.clone-field input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.clone-field input:disabled { opacity: .6; }
+.clone-destination { display: flex; gap: 6px; }
+.clone-destination input { flex: 1; min-width: 0; font-family: var(--mono); font-size: var(--fs-12); }
+.clone-choose { display: inline-flex; align-items: center; gap: 5px; height: 30px; padding: 0 10px; border: 1px solid var(--hairline); border-radius: var(--radius-8); background: var(--bg-raised); color: var(--text-dim); font: inherit; font-size: var(--fs-13); cursor: pointer; white-space: nowrap; }
+.clone-choose:hover:not(:disabled) { background: var(--bg-hover); color: var(--text); }
+.clone-choose:disabled { opacity: .45; cursor: default; }
+.clone-error { margin: 0; font-size: var(--fs-13); }
+.clone-progress { display: grid; gap: 6px; }
+.clone-bar { height: 4px; border-radius: var(--radius-2); background: color-mix(in srgb, var(--text) 10%, transparent); overflow: hidden; }
+.clone-bar-fill { height: 100%; border-radius: var(--radius-2); background: var(--accent); transition: width 200ms ease; }
+.clone-bar[data-indeterminate] .clone-bar-fill { animation: clone-indeterminate 1.2s ease-in-out infinite; }
+@keyframes clone-indeterminate { 0% { margin-left: 0; width: 20%; } 50% { margin-left: 60%; width: 40%; } 100% { margin-left: 0; width: 20%; } }
+.clone-message { color: var(--text-dim); font-family: var(--mono); font-size: var(--fs-12); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.clone-hint { display: flex; align-items: center; gap: 6px; margin: 14px 0 0; color: var(--text-faint); font-size: var(--fs-12); }

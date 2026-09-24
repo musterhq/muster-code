@@ -1,0 +1,52 @@
+/* Goal strip: a tab attached above the composer card (Codex "Pursuing goal … 4h 11m 50s"). */
+.goal-strip {
+  width: min(calc(100% - 72px), 708px);
+  margin: 12px auto 0;
+  padding: 0 6px 0 12px;
+  border: 1px solid color-mix(in srgb, var(--text) 6%, transparent);
+  border-bottom: 0;
+  border-radius: var(--radius-12) var(--radius-12) 0 0;
+  background: color-mix(in srgb, var(--text) 5%, var(--bg));
+  color: var(--text-dim);
+  font-size: var(--fs-13);
+  animation: goal-strip-in 140ms ease-out both;
+}
+.goal-strip + div.composer { margin-top: 0; }
+.goal-strip-row { display: flex; align-items: center; gap: 7px; min-height: 32px; min-width: 0; }
+.goal-strip-icon { flex: none; color: var(--text-faint); }
+.goal-strip-label { flex: none; color: var(--text); white-space: nowrap; }
+.goal-strip-text { flex: 1; min-width: 0; overflow: hidden; color: var(--text-dim); text-overflow: ellipsis; white-space: nowrap; }
+.goal-strip-time { flex: none; color: var(--text-faint); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.goal-strip-actions { display: flex; flex: none; gap: 1px; }
+.goal-strip-actions button { display: inline-grid; place-items: center; width: 24px; height: 24px; border-radius: var(--radius-6); color: var(--text-faint); }
+.goal-strip-actions button:hover:not(:disabled) { background: var(--bg-hover); color: var(--text); }
+.goal-strip-actions button:disabled { opacity: .4; cursor: default; }
+.goal-strip button:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
+.goal-strip.is-paused .goal-strip-label { color: var(--text-dim); }
+.goal-strip.is-warn .goal-strip-label,.goal-strip.is-warn .goal-strip-icon { color: var(--warn); }
+.goal-strip.is-ok .goal-strip-label,.goal-strip.is-ok .goal-strip-icon { color: var(--ok); }
+.goal-strip-details { padding: 2px 4px 10px 20px; }
+.goal-strip-details p { margin: 0 0 8px; max-height: 160px; overflow: auto; color: var(--text); font-size: var(--fs-13); line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
+.goal-strip-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; color: var(--text-faint); font-size: var(--fs-12); }
+.goal-strip-meta button { display: inline-flex; align-items: center; gap: 4px; margin-left: auto; padding: 3px 8px; border-radius: var(--radius-6); color: var(--text-dim); font-size: var(--fs-12); }
+.goal-strip-meta button:hover { background: var(--bg-hover); color: var(--text); }
+.goal-strip-budget { display: inline-flex; align-items: center; gap: 6px; }
+.goal-strip-budget input { width: 96px; padding: 2px 6px; border: 1px solid var(--border); border-radius: var(--radius-6); background: transparent; color: var(--text); font: inherit; font-variant-numeric: tabular-nums; }
+.goal-strip-budget input:focus { outline: none; border-color: var(--accent, var(--text-dim)); }
+.goal-strip-error { margin: 0 0 8px 20px; color: var(--danger); font-size: var(--fs-12); }
+.goal-strip-note { margin: -4px 0 8px 20px; color: var(--text-faint); font-size: var(--fs-12); }
+.goal-strip-details .goal-strip-note { margin: -2px 0 8px; color: var(--text-dim); }
+/* Editor ------------------------------------------------------------------ */
+.goal-editor { padding-top: 6px; }
+.goal-editor .goal-strip-row { align-items: flex-start; }
+.goal-editor .goal-strip-icon { margin-top: 5px; }
+.goal-editor textarea { flex: 1; min-width: 0; min-height: 40px; max-height: 140px; padding: 2px 4px; border: 0; outline: 0; resize: none; background: transparent; color: var(--text); font: inherit; font-size: var(--fs-13); line-height: 19px; }
+.goal-editor textarea::placeholder { color: var(--text-faint); }
+.goal-editor-footer { display: flex; align-items: center; gap: 6px; padding: 4px 0 8px 20px; color: var(--text-faint); font-size: var(--fs-12); }
+.goal-editor-footer > span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.goal-editor-footer button { flex: none; height: 24px; padding: 0 10px; border: 1px solid var(--hairline); border-radius: var(--radius-12); color: var(--text-dim); font-size: var(--fs-12); }
+.goal-editor-footer button:hover:not(:disabled) { color: var(--text); background: var(--bg-hover); }
+.goal-editor-footer button.is-primary { border-color: transparent; background: var(--text); color: var(--bg); }
+.goal-editor-footer button:disabled { opacity: .45; cursor: default; }
+@keyframes goal-strip-in { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .goal-strip { animation: none; } }

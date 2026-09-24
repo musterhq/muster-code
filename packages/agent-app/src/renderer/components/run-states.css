@@ -1,0 +1,20 @@
+.reconnecting-pill { display: inline-flex; align-items: center; gap: 6px; padding: 2px 8px; border-radius: var(--radius-full); color: var(--text-dim); font-size: var(--fs-12); white-space: nowrap; }
+.reconnecting-pill > svg { color: var(--warn); }
+.compaction-row { display: flex; align-items: center; gap: 8px; min-height: 30px; padding: 4px 8px; color: var(--text-dim); font-size: var(--fs-14); }
+.compaction-row .tool-glyph { width: 16px; color: var(--text-faint); }
+.compaction-rule { height: 1px; background: var(--hairline); }
+.compaction-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.compaction-note { grid-column: 1 / -1; justify-self: center; font-size: var(--fs-11); }
+.compaction-row.is-failed { color: var(--danger); }
+.plan-card { max-width: 720px; border: 1px solid var(--hairline); border-radius: var(--radius); background: var(--bg-raised); overflow: hidden; }
+.plan-card header { display: flex; align-items: center; gap: 6px; padding: 8px 12px; border-bottom: 1px solid var(--hairline); font-size: var(--font-caption); color: var(--text-dim); }
+.plan-card header strong { font-weight: 600; color: var(--text); }
+.plan-card-body { padding: 4px 12px; }
+.plan-card-note { padding: 2px 12px 4px; border-top: 1px dashed var(--hairline); color: var(--text-dim); font-size: var(--fs-13); }
+.plan-card-empty { margin: 0; padding: 4px 0 8px; color: var(--text-faint); font-size: var(--fs-13); }
+.plan-card footer { display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-top: 1px solid var(--hairline); }
+.plan-card footer span { color: var(--text-faint); font-size: var(--fs-11); }
+.plan-card-execute { display: inline-flex; align-items: center; gap: 5px; padding: 5px 12px; border: 0; border-radius: var(--radius-6); background: var(--text); color: var(--bg); font: inherit; font-size: var(--font-caption); font-weight: 500; cursor: pointer; }
+.plan-card-execute:hover:not(:disabled) { opacity: .9; }
+.plan-card-execute:disabled { opacity: .5; cursor: default; }
+.plan-card-error { margin: 0; padding: 0 12px 8px; color: var(--danger); font-size: var(--fs-11); }

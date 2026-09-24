@@ -1,0 +1,22 @@
+/* Draft new chat (Codex empty state): centred mark and prompt, target picker in the prompt and the composer. */
+.new-chat-hero { gap: 18px; padding-bottom: 8vh; }
+.new-chat-mark { color: var(--text-faint); }
+.new-chat-target-title { display: inline; padding: 0; border: 0; background: none; color: inherit; font: inherit; cursor: pointer; text-decoration: underline dotted; text-decoration-thickness: 1px; text-underline-offset: 5px; text-decoration-color: var(--text-faint); border-radius: var(--radius-4); transition: text-decoration-color 120ms ease; }
+.new-chat-target-title:hover,.new-chat-target-title[data-popup-open] { text-decoration-color: var(--text-dim); }
+.new-chat-target-title:focus-visible { outline: 2px solid color-mix(in srgb, var(--accent) 70%, transparent); outline-offset: 2px; }
+.new-chat-target-chip { display: inline-flex; align-items: center; gap: 5px; max-width: 260px; height: 28px; padding: 0 8px; border-radius: var(--radius-8); color: var(--text-dim); font-size: var(--fs-14); white-space: nowrap; }
+.new-chat-target-chip > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.new-chat-target-chip > svg { flex: none; }
+.new-chat-target-chip > svg:last-child { color: var(--text-faint); }
+.new-chat-target-chip:hover,.new-chat-target-chip[data-popup-open] { background: var(--bg-hover); color: var(--text); }
+.new-chat-target-menu { max-width: min(360px, calc(100vw - 24px)); max-height: min(420px, var(--available-height, 420px)); overflow-y: auto; }
+.new-chat-target-group { padding: 8px 9px 4px; color: var(--text-faint); font-size: var(--font-caption); }
+.new-chat-target-label { display: flex; flex: 1; flex-direction: column; min-width: 0; }
+.new-chat-target-label > span,.new-chat-target-label > small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.new-chat-target-label > small { color: var(--text-faint); font-size: var(--fs-12); }
+@media (prefers-reduced-motion: reduce) { .new-chat-target-title { transition: none; } }
+
+/* W6-E: first-run import link under the hero prompt. */
+.new-chat-import{margin-top:6px;background:none;border:0;padding:2px 4px;font:inherit;font-size:var(--fs-12);color:var(--text-faint);cursor:pointer;border-radius:var(--radius-6)}
+.new-chat-import:hover{color:var(--text);text-decoration:underline}
+.new-chat-import:focus-visible{outline:2px solid var(--accent);outline-offset:2px}

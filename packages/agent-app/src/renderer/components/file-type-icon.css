@@ -1,0 +1,10 @@
+/* File-type tones reuse the :root palette; muted so the tree reads as text first. */
+.file-type-icon { flex: none; color: var(--text-faint); }
+.file-type-icon[data-tone='folder'] { color: var(--text-dim); }
+.file-type-icon[data-tone='accent'] { color: color-mix(in srgb, var(--accent) 88%, var(--text-faint)); }
+.file-type-icon[data-tone='ok'] { color: color-mix(in srgb, var(--ok) 88%, var(--text-faint)); }
+.file-type-icon[data-tone='warn'] { color: color-mix(in srgb, var(--warn) 84%, var(--text-faint)); }
+.file-type-icon[data-tone='danger'] { color: color-mix(in srgb, var(--danger) 82%, var(--text-faint)); }
+.file-type-icon[data-tone='orange'] { color: color-mix(in srgb, var(--warn) 62%, var(--danger)); }
+.file-type-icon[data-tone='violet'] { color: color-mix(in srgb, var(--accent) 55%, var(--danger)); }
+.file-type-icon[data-tone='dim'] { color: var(--text-faint); }

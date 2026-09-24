@@ -1,0 +1,13 @@
+/* GIT-11 blame gutter: one annotation per run of lines from the same commit, muted, mono sha. */
+.blame-view { min-width: 0; }
+.blame-table .blame-cell { width: 1%; min-width: 180px; max-width: 240px; padding: 0 8px 0 10px; border-right: 1px solid var(--hairline); vertical-align: top; white-space: nowrap; user-select: none; }
+.blame-table tr:not(.blame-run-start) .blame-cell { box-shadow: none; }
+.blame-table tr.blame-run-start:not(:first-child) td { border-top: 1px solid color-mix(in srgb, var(--hairline) 70%, transparent); }
+.blame-note { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; height: 100%; padding: 0; border: 0; background: transparent; color: var(--text-faint); font: inherit; font-size: var(--fs-11); line-height: inherit; cursor: pointer; }
+.blame-note:hover { color: var(--text); }
+.blame-note:hover .blame-sha { color: var(--accent); }
+.blame-note.is-uncommitted { color: var(--warn); cursor: default; font-style: italic; }
+.blame-sha { font-family: var(--mono); color: var(--text-dim); }
+.blame-author { overflow: hidden; text-overflow: ellipsis; max-width: 110px; }
+.blame-age { margin-left: auto; font-variant-numeric: tabular-nums; }
+.blame-table .code-no { user-select: none; }

@@ -1,0 +1,22 @@
+/* Shared loading / empty / error states for resource views. */
+.resource-state { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding: 28px 24px; color: var(--text-faint); font-size: var(--font-caption); text-align: center; }
+.resource-state p { margin: 0; max-width: 46ch; line-height: 1.5; overflow-wrap: anywhere; }
+.resource-state-error > p:first-child { color: var(--text-dim); }
+.resource-state-detail { color: var(--text-faint); }
+.resource-state.is-compact { align-items: stretch; justify-content: flex-start; gap: 6px; padding: 6px 8px; text-align: left; }
+.resource-state.is-compact.resource-state-error > p:first-child { color: var(--danger); }
+.resource-state-loading { align-items: stretch; justify-content: flex-start; gap: 9px; min-height: 64px; }
+.resource-state-loading.is-compact { min-height: 0; gap: 7px; padding: 6px 8px; }
+.resource-skeleton { display: block; height: 10px; border-radius: var(--radius-4); background: linear-gradient(90deg, var(--bg-hover) 0%, var(--bg-active) 50%, var(--bg-hover) 100%); background-size: 200% 100%; animation: resource-skeleton 1.2s ease-in-out infinite; }
+@keyframes resource-skeleton { from { background-position: 100% 0; } to { background-position: -100% 0; } }
+.resource-state-actions { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; }
+.resource-state.is-compact .resource-state-actions { justify-content: flex-start; }
+.resource-state-actions button { display: inline-flex; align-items: center; gap: 5px; padding: 4px 9px; border: 1px solid var(--hairline); border-radius: var(--radius-6); background: var(--bg-hover); color: var(--text-dim); font-size: var(--fs-11); transition: background-color 140ms ease, color 140ms ease; }
+.resource-state-actions button:hover { background: var(--bg-active); color: var(--text); }
+.resource-state-actions button:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+@media (prefers-reduced-motion: reduce) { .resource-skeleton { animation: none; } .resource-state-actions button { transition: none; } }
+.resource-state-title { color: var(--text-dim); font-weight: 560; }
+.resource-state-icon { display: inline-flex; color: var(--text-faint); }
+/* Partial: data is shown above; this is a quiet inline note, never a blocking panel. */
+.resource-state-partial { flex-direction: row; flex-wrap: wrap; justify-content: flex-start; gap: 8px; padding: 8px 10px; text-align: left; }
+.resource-state-partial .resource-state-actions { justify-content: flex-start; }

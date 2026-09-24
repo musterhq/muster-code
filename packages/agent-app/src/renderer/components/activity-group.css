@@ -1,0 +1,32 @@
+/* Group summary rows ("Edited 3 files, ran 2 commands") share the tool row's
+   metrics: glyph on the prose edge, 13.5px muted text, chevron after the text. */
+.activity-summary { position: relative; display: flex; align-items: center; gap: 8px; width: 100%; min-height: 30px; padding: 4px 8px; color: var(--text-dim); text-align: left; font-size: var(--fs-14); line-height: 1.4; border-radius: var(--radius-6); transition: color 130ms ease; }
+.activity-summary-text { flex: 0 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.activity-summary > svg { flex: none; }
+.activity-summary:hover, .activity-summary:focus-visible, .activity-group[data-open] > .activity-summary { color: var(--text); }
+.activity-summary:hover .tool-glyph, .activity-group[data-open] > .activity-summary .tool-glyph { color: var(--text-dim); }
+.activity-summary:hover > .tool-chevron, .activity-summary:focus-visible > .tool-chevron { opacity: .9; }
+.activity-summary[aria-expanded='true'] > .tool-chevron { opacity: .9; transform: rotate(90deg); }
+.activity-summary:focus-visible { outline: 1px solid color-mix(in srgb, var(--accent) 55%, transparent); outline-offset: -1px; }
+/* Expanded: the rows sit under the summary on a faint rail aligned with the glyph. */
+.activity-details { display: flex; flex-direction: column; margin: 0 0 4px 15px; padding: 2px 0 2px 4px; border-left: 1px solid color-mix(in srgb, var(--text) 6%, transparent); }
+.activity-details .tool-row-card { --row-inset: 8px; }
+.activity-group > .tool-thumbs { margin-left: 32px; }
+.activity-pages { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 8px; color: var(--text-faint); font-size: var(--fs-12); }
+.activity-pages button { height: 26px; padding: 0 10px; border: 1px solid var(--hairline); border-radius: var(--radius-8); color: var(--text-dim); transition: background-color 120ms ease, color 120ms ease; }
+.activity-pages button:hover:not(:disabled) { background: var(--bg-hover); color: var(--text); }
+.activity-pages button:disabled { opacity: .35; cursor: default; }
+
+/* Codex subagent lifecycle rows: coloured identity marks, same row typography. */
+.subagent-row { cursor: pointer; }
+.activity-summary > span.agent-glyph-stack { flex: none; display: inline-flex; align-items: center; overflow: visible; }
+.agent-glyph-stack > .agent-glyph + .agent-glyph { margin-left: 3px; }
+.agent-glyph { position: relative; flex: none; display: inline-grid; place-items: center; width: 16px; height: 16px; line-height: 0; }
+.agent-glyph > svg { display: block; width: 15px; height: 15px; }
+.agent-glyph.is-working::after { content: ''; position: absolute; inset: -3px; border-radius: 50%; border: 1.5px solid hsl(var(--agent-hue) 60% 64% / 55%); animation: agent-glyph-pulse 1.6s ease-in-out infinite; }
+@keyframes agent-glyph-pulse { 0%, 100% { opacity: .2; transform: scale(.88); } 50% { opacity: .85; transform: scale(1.06); } }
+.subagent-row.is-failed > .activity-summary-text { color: color-mix(in srgb, var(--danger) 80%, var(--text-dim)); }
+/* DOGFOOD F51: a failed worker says why, dimmed and clipped to one line (full text in the tooltip). */
+.subagent-row-reason { min-width: 0; flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-dim); font-size: var(--fs-12); }
+.subagent-row:has(.subagent-row-reason) > .activity-summary-text { flex: 0 1 auto; }
+@media (prefers-reduced-motion: reduce) { .activity-summary, .activity-pages button { transition: none; } .agent-glyph.is-working::after { animation: none; opacity: .6; } }

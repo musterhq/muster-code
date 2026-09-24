@@ -1,0 +1,9 @@
+/* R3: compact in-place fault for one area; the rest of the window keeps working. */
+.area-fault { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 8px; padding: 8px 10px; border: 1px solid var(--hairline); border-radius: var(--radius); background: var(--bg-raised); color: var(--text-dim); font-size: var(--font-caption); min-width: 0; }
+.area-fault[data-area-scope="app"] { margin: 48px auto; max-width: 520px; }
+.area-fault-icon { color: var(--danger); flex: none; display: inline-flex; }
+.area-fault-text { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
+.area-fault-actions { display: inline-flex; gap: 4px; flex: none; }
+.area-fault-actions button { font: inherit; font-size: var(--font-caption); padding: 2px 8px; border-radius: var(--radius); border: 1px solid var(--hairline); background: transparent; color: var(--text); cursor: default; }
+.area-fault-actions button:hover { background: var(--bg-hover); }
+.area-fault-status { color: var(--text-faint); }

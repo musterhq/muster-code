@@ -1,0 +1,119 @@
+/* Settings shell: section nav on the left, one page at a time on the right. Reuses .settings-* from styles.css. */
+.settings-shell { flex: 1; min-height: 0; display: flex; }
+.settings-nav { flex: none; width: 216px; display: flex; flex-direction: column; gap: 10px; padding: 16px 10px; border-right: 1px solid var(--hairline); overflow: auto; }
+.settings-search { display: flex; align-items: center; gap: 6px; min-height: var(--control-compact); padding: 0 6px 0 9px; border: 1px solid var(--hairline); border-radius: var(--radius-8); background: var(--bg-raised); color: var(--text-faint); }
+.settings-search:focus-within { border-color: color-mix(in srgb, var(--accent) 55%, var(--hairline)); }
+.settings-search input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--text); font: inherit; font-size: var(--font-control); }
+.settings-search input::-webkit-search-cancel-button { display: none; }
+.settings-nav-list { display: grid; gap: 1px; }
+.settings-nav-item { display: flex; align-items: center; gap: 9px; min-height: 30px; padding: 5px 9px; border-radius: var(--radius-8); color: var(--text-dim); font-size: var(--font-control); text-align: left; }
+.settings-nav-item svg { flex: none; color: var(--text-faint); }
+.settings-nav-item:hover { background: var(--bg-hover); color: var(--text); }
+.settings-nav-item[aria-current='page'] { background: var(--bg-active); color: var(--text); }
+.settings-nav-item[aria-current='page'] svg { color: var(--text-dim); }
+.settings-nav-empty { margin: 4px 9px; color: var(--text-faint); font-size: var(--font-caption); }
+.settings-pane { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+.settings-pane .settings-content { max-width: 760px; padding-top: 28px; }
+
+/* Providers and Plugins render their own screens inside the pane; the shell already owns Back and the title bar. */
+.settings-embed { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.settings-embed > .settings-screen { flex: 1; }
+.settings-embed-providers > .settings-screen > .settings-topbar { display: none; }
+.settings-embed-plugins > .settings-screen > .settings-topbar { height: 44px; padding-left: 24px; -webkit-app-region: no-drag; }
+.settings-embed-plugins > .settings-screen > .settings-topbar .settings-back { display: none; }
+.app[data-nav-hidden='true'] .settings-embed .settings-topbar { padding-left: 24px; }
+.app[data-nav-hidden='true'] .settings-embed .settings-topbar::before { content: none; }
+
+.preference-group { margin-top: 22px; border: 1px solid var(--hairline); border-radius: var(--radius-10); background: var(--bg-raised); overflow: hidden; }
+.preference-group > .preference-group-title { margin: 0; padding: 12px 16px 0; }
+.preference-group-title { margin: 28px 0 0; color: var(--text-faint); font-size: var(--font-caption); font-weight: 500; }
+.preference-group-title + .preference-group { margin-top: 10px; }
+.preference-row { display: flex; align-items: center; gap: 16px; min-height: 64px; padding: 14px 16px; }
+.preference-row + .preference-row, .preference-row + .storage-confirm, .storage-confirm + .preference-row { border-top: 1px solid var(--hairline); }
+.preference-copy { display: grid; gap: 3px; flex: 1; min-width: 0; }
+.preference-copy strong { font-size: var(--font-control); font-weight: 550; color: var(--text); }
+.preference-copy > span { max-width: 560px; color: var(--text-faint); font-size: var(--font-caption); line-height: 1.5; }
+.preference-copy > .preference-scope { color: color-mix(in srgb, var(--text-faint) 80%, transparent); font-size: var(--fs-11); }
+.preference-control { flex: none; display: inline-flex; align-items: center; gap: 8px; }
+/* UX-01: the one switch style in the app. Plugins/MCP toggles (.plugins-switch) share it: accent when on,
+   hairline track when off, the same knob travel, pressed, disabled and focus states. */
+.preference-switch, .plugins-switch { position: relative; flex: none; width: 32px; height: 18px; padding: 0; border: 0; border-radius: var(--radius-10); background: var(--bg-active); box-shadow: inset 0 0 0 1px var(--hairline); transition: background-color 140ms ease, box-shadow 140ms ease; }
+.preference-switch span, .plugins-switch span { position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%; background: var(--text-dim); transition: transform 140ms cubic-bezier(.2,.75,.25,1), background-color 140ms ease; }
+.preference-switch[aria-checked='true'], .plugins-switch[aria-checked='true'] { background: var(--accent); box-shadow: none; }
+.preference-switch[aria-checked='true'] span, .plugins-switch[aria-checked='true'] span { transform: translateX(14px); background: var(--bg); }
+.preference-switch:hover:not(:disabled), .plugins-switch:hover:not(:disabled) { box-shadow: inset 0 0 0 1px var(--hairline-strong, var(--hairline)); }
+.preference-switch:active:not(:disabled) span, .plugins-switch:active:not(:disabled) span { width: 16px; }
+.preference-switch[aria-checked='true']:active:not(:disabled) span, .plugins-switch[aria-checked='true']:active:not(:disabled) span { transform: translateX(12px); }
+.preference-switch:disabled, .plugins-switch:disabled { opacity: .45; cursor: default; }
+.preference-switch:focus-visible, .plugins-switch:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.preference-segmented { display: inline-flex; padding: 2px; gap: 2px; border: 1px solid var(--hairline); border-radius: var(--radius-8); background: var(--bg); }
+.preference-segmented button { min-height: 24px; padding: 2px 9px; border-radius: var(--radius-6); color: var(--text-faint); font-size: var(--font-caption); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.preference-segmented button:hover { color: var(--text); }
+.preference-segmented button[aria-checked='true'] { background: var(--bg-active); color: var(--text); }
+.settings-button.danger { background: var(--danger); border-color: transparent; color: var(--bg); }
+
+.settings-panel { margin-top: 18px; }
+.settings-panel-actions { display: flex; align-items: center; gap: 8px; }
+.settings-panel-meta { flex: 1; min-width: 0; color: var(--text-faint); font-size: var(--font-caption); }
+.settings-facts { display: grid; grid-template-columns: max-content 1fr; gap: 8px 18px; margin: 0; padding: 12px 16px 14px; font-size: var(--font-caption); }
+.settings-facts dt { color: var(--text-faint); }
+.settings-facts dd { margin: 0; color: var(--text-dim); overflow-wrap: anywhere; user-select: text; }
+.settings-warn { color: var(--warn) !important; }
+.settings-path { font: var(--fs-11)/1.5 var(--mono); color: var(--text-dim); overflow-wrap: anywhere; user-select: text; }
+.settings-muted { color: var(--text-faint); }
+.settings-table { width: 100%; margin-top: 8px; border-collapse: collapse; font-size: var(--font-caption); color: var(--text-dim); }
+.preference-group > .settings-table { margin: 6px 0 0; }
+.settings-table th { color: var(--text-faint); font-weight: 500; text-align: left; }
+.settings-table th, .settings-table td { padding: 7px 16px; border-top: 1px solid var(--hairline); }
+.settings-table thead th { border-top: 0; }
+.settings-table .numeric { text-align: right; font-variant-numeric: tabular-nums; }
+.settings-table tfoot th, .settings-table tfoot td { color: var(--text); }
+.shortcuts-table { margin-top: 22px; border: 1px solid var(--hairline); border-radius: var(--radius-10); border-collapse: separate; border-spacing: 0; background: var(--bg-raised); overflow: hidden; }
+.shortcut-keys { display: inline-flex; gap: 3px; }
+.shortcut-keys kbd { min-width: 20px; padding: 1px 5px; border: 1px solid var(--hairline); border-radius: var(--radius-6); background: var(--bg); color: var(--text-dim); font: var(--fs-11)/1.5 var(--ui); text-align: center; }
+
+/* The Memory section's inline config form reuses memory-screen.css's card; flatten it into the row list here. */
+.preference-group > .memory-settings { margin: 0; padding: 14px 16px 16px; border: 0; border-top: 1px solid var(--hairline); border-radius: 0; background: color-mix(in srgb, var(--bg) 55%, var(--bg-raised)); }
+
+.storage-bar { display: block; height: 4px; max-width: 360px; margin: 3px 0 1px; border-radius: var(--radius-2); background: var(--bg-active); overflow: hidden; }
+.storage-bar > span { display: block; height: 100%; border-radius: inherit; background: var(--accent); }
+.storage-confirm { padding: 12px 16px 14px; background: color-mix(in srgb, var(--bg) 55%, var(--bg-raised)); font-size: var(--font-caption); color: var(--text-dim); }
+.storage-confirm p { margin: 0 0 8px; }
+.storage-items { display: grid; gap: 4px; margin: 0 0 12px; padding: 0; list-style: none; }
+.storage-items li { display: flex; gap: 10px; justify-content: space-between; min-width: 0; }
+.storage-items code { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: var(--fs-11)/1.5 var(--mono); }
+.storage-items span { flex: none; color: var(--text-faint); }
+.storage-confirm-actions { display: flex; gap: 8px; }
+
+@media (max-width: 720px) {
+  .settings-shell { flex-direction: column; }
+  .settings-nav { width: auto; flex-direction: row; align-items: center; padding: 8px 12px; border-right: 0; border-bottom: 1px solid var(--hairline); overflow-x: auto; }
+  .settings-search { flex: none; width: 160px; }
+  .settings-nav-list { display: flex; }
+  .settings-nav-item { white-space: nowrap; }
+  .preference-row { flex-wrap: wrap; }
+}
+@media (prefers-reduced-motion: reduce) { .preference-switch, .preference-switch span, .plugins-switch, .plugins-switch span { transition: none; } }
+/* PRO-10: per-setting provenance and "Reset to inherited". */
+.preference-provenance { display: inline-flex; align-items: center; gap: 6px; margin-left: 8px; }
+.preference-provenance-label { padding: 0 5px; border: 1px solid var(--hairline); border-radius: var(--radius-4); font-size: var(--fs-11); line-height: 15px; color: var(--text-faint); }
+.preference-provenance:not([data-level='built-in']) .preference-provenance-label { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
+.preference-provenance button { padding: 0; border: 0; background: none; color: var(--text-dim); font: inherit; font-size: var(--fs-11); cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
+.preference-provenance button:hover { color: var(--text); }
+.preference-control > .preference-provenance { margin-left: 0; }
+/* CR-18 Integrated terminal shell picker */
+.terminal-shell-picker { display: inline-flex; flex-direction: column; align-items: flex-end; gap: 6px; max-width: 100%; }
+.terminal-shell-custom { display: inline-flex; gap: 6px; align-items: center; }
+.terminal-shell-path { width: 220px; min-height: var(--control-standard); padding: 5px 8px; border-radius: var(--radius-8); border: 1px solid var(--hairline); background: var(--bg-raised); color: var(--text); font: inherit; font-size: var(--font-control); font-family: var(--font-mono, ui-monospace, monospace); }
+.terminal-shell-note { color: var(--text-dim); font-size: var(--font-caption); max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Settings inside the app sidebar: one sidebar, the sections list replaces the chat list. */
+.settings-sidebar { display:flex; flex-direction:column; min-height:0; height:100%; }
+.settings-sidebar-inner { display:flex; flex-direction:column; gap:8px; min-height:0; padding:4px 0; }
+.settings-sidebar .settings-nav { width:auto; border:0; padding:0; background:transparent; }
+.settings-sidebar-back { align-self:flex-start; margin:0 0 4px; }
+.settings-sidebar .settings-nav { flex-direction:column; align-items:stretch; overflow:auto; }
+
+/* The chat list wrapper must not break the sidebar flex column (footer stays pinned to the bottom). */
+.nav-chats { display: contents; }
+.nav-chats[hidden] { display: none; }

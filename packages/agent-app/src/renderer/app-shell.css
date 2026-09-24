@@ -1,0 +1,38 @@
+/* App shell chrome beside the traffic lights: back/forward and the menu rename form. */
+.nav-history { position: absolute; top: 10px; z-index: 20; display: flex; gap: 2px; -webkit-app-region: no-drag; view-transition-name: navigation-history; }
+.nav-history .icon-button { color: var(--text-faint); }
+.nav-history .icon-button:not(:disabled):hover { color: var(--text); }
+.nav-history .icon-button:disabled { opacity: .38; cursor: default; background: none; transform: none; }
+/* With the sidebar hidden the toggle and history sit in the header; keep the drag region and title clear of them. */
+.app[data-nav-hidden='true'] .chat-head { padding-left: 196px; }
+.app[data-nav-hidden='true'] .chat-head::before { left: 196px; }
+.app[data-nav-hidden='true'] .settings-topbar { padding-left: 196px; }
+.app[data-nav-hidden='true'] .settings-topbar::before { left: 196px; }
+
+.menu-rename { position: fixed; top: 56px; left: 50%; transform: translateX(-50%); z-index: 40; display: grid; gap: 6px; min-width: 320px; max-width: min(520px, calc(100vw - 32px)); padding: 10px 12px 12px; border: 1px solid var(--hairline); border-radius: var(--radius-10); background: var(--bg-raised); box-shadow: 0 12px 32px color-mix(in srgb, var(--shadow-ink) 40%, transparent); -webkit-app-region: no-drag; }
+.menu-rename label { color: var(--text-faint); font-size: var(--font-caption); }
+.menu-rename-row { display: flex; align-items: center; gap: 4px; }
+.menu-rename-row input { flex: 1; min-width: 0; min-height: var(--control-compact); padding: 4px 8px; border: 1px solid var(--hairline); border-radius: var(--radius); background: var(--bg); color: var(--text); font: inherit; font-size: var(--font-control); }
+.menu-rename-row input:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
+@media (prefers-reduced-transparency: reduce) { .menu-rename { background: var(--nav-solid); } }
+
+/* PER-01: placeholder while a demand-loaded screen/tab chunk loads (normally pre-warmed on idle). */
+.lazy-screen-fallback{flex:1 1 auto;min-width:0;min-height:0;background:transparent}
+
+/* PER-03 (render-skipping for long lists): offscreen sidebar chat rows and file-tree rows skip style,
+   layout and paint. Rows stay in the DOM, so Up/Down, Shift-range selection, find-in-page and the
+   accessibility tree keep working; 'auto' remembers each row's last real height so scrolling never jumps. */
+.nav .chat-row, .tree-item-line { content-visibility: auto; contain-intrinsic-size: auto var(--sidebar-row-h, 30px); }
+.tree-item-line { contain-intrinsic-size: auto 26px; }
+
+/* UX-06: one pressed state for the remaining list/tab controls (icon/tool buttons already have theirs);
+   disabled controls never react. */
+.tree-row:active:not(:disabled), .workspace-tab:active, .preference-segmented button:active:not(:disabled) { background: var(--bg-active); }
+.icon-button:disabled:active, .tool-button:disabled:active { transform: none; background: none; }
+
+/* UX-10: Settings / Projects / Memory / Automations arrive with a short opacity-only fade (no movement,
+   so nothing jitters under the pointer); none under reduced motion. */
+@media (prefers-reduced-motion: no-preference) {
+  :root:not([data-motion='reduce']) main.center:not([data-screen='work']) > :not(.work-surface) { animation: screen-fade-in 140ms cubic-bezier(.2,.75,.25,1) both; }
+}
+@keyframes screen-fade-in { from { opacity: 0; } to { opacity: 1; } }

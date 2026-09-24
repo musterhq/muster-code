@@ -1,0 +1,435 @@
+/* Composer: Codex-parity card, toolbar, popovers and inline chips (COMPOSER-SPEC A–C). */
+:root {
+  --composer-bg: color-mix(in srgb, var(--text) 9%, var(--bg));
+  --menu-bg: color-mix(in srgb, var(--text) 6%, var(--bg));
+  --menu-hover: color-mix(in srgb, var(--text) 12%, var(--bg));
+  --access-full: #ff8549;
+  --mention: #63a8f8;
+  --send: #3c66bf;
+  --send-fg: #fff;
+}
+:root[data-theme='light'] {
+  --access-full: #c2410c;
+  --mention: #1f6fd1;
+}
+
+/* Card ------------------------------------------------------------------- */
+div.composer {
+  container-type: inline-size;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  width: min(calc(100% - 40px), 740px);
+  margin: 16px auto 10px;
+  flex-shrink: 0;
+  align-items: stretch;
+  padding: 0;
+  border: 1px solid color-mix(in srgb, var(--text) 6%, transparent);
+  border-radius: var(--radius-16);
+  corner-shape: superellipse(1.1);
+  background: var(--composer-bg);
+  box-shadow: inset 0 1px 0 rgb(var(--fg-rgb) / 3%);
+  transition: border-color 160ms ease;
+}
+div.composer:focus-within { border-color: color-mix(in srgb, var(--text) 12%, transparent); }
+div.composer.is-archived { opacity: .6; }
+div.composer.is-dragging { outline: 1px solid color-mix(in srgb, var(--accent) 70%, transparent); background: color-mix(in srgb, var(--accent) 8%, var(--composer-bg)); }
+
+.composer-field { position: relative; min-width: 0; }
+div.composer .composer-input {
+  display: block;
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  min-height: 52px;
+  max-height: 200px;
+  margin: 0;
+  padding: 14px 16px 6px;
+  border: 0;
+  border-radius: var(--radius-16) var(--radius-16) 0 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: var(--fs-14);
+  line-height: 20px;
+  resize: none;
+  outline: none;
+}
+div.composer .composer-input::placeholder { color: var(--text); opacity: .5; }
+/* With chips the mirror paints the text; the textarea keeps caret, selection and input. */
+.composer-field.has-chips .composer-input { color: transparent; caret-color: var(--text); }
+.composer-field.has-chips .composer-input::selection { color: transparent; background: color-mix(in srgb, var(--accent) 35%, transparent); }
+.composer-mirror {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  padding: 14px 16px 6px;
+  color: var(--text);
+  font: inherit;
+  font-size: var(--fs-14);
+  line-height: 20px;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  pointer-events: none;
+}
+
+/* Inline chips never change text metrics: colour, background and an outset shadow only. */
+.token-chip {
+  --chip: hsl(var(--h, 212) var(--s, 55%) var(--hue-l));
+  border-radius: .5em;
+  background: color-mix(in oklab, var(--chip) 14%, transparent);
+  box-shadow: 0 0 0 .16em color-mix(in oklab, var(--chip) 14%, transparent), 0 0 0 calc(.16em + 1px) color-mix(in oklab, var(--chip) 30%, transparent);
+  color: color-mix(in oklab, var(--chip) 30%, var(--text));
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+}
+.token-chip.is-selected { outline: 2px solid var(--accent); outline-offset: 2px; }
+.token-chip-lead { position: relative; color: transparent; }
+.token-chip-lead > .item-icon { position: absolute; left: 50%; top: 50%; translate: -50% -50%; }
+.token-chip-remove { position: absolute; z-index: 3; display: inline-grid; place-items: center; width: 14px; height: 14px; border-radius: 50%; background: var(--text); color: var(--bg); box-shadow: var(--shadow-xs); }
+
+/* Icons (C3/C8) ---------------------------------------------------------- */
+.item-icon { flex: none; width: 16px; height: 16px; border-radius: var(--radius-4); object-fit: contain; }
+.item-icon.is-round { border-radius: 50%; }
+.item-icon.is-skill { border-radius: var(--radius-4); }
+.item-monogram { display: inline-grid; place-items: center; background: hsl(var(--h) 55% 58%); color: var(--on-tint); font: 650 var(--fs-10)/1 var(--ui); letter-spacing: -.02em; }
+.item-monogram.is-skill { clip-path: polygon(0 0, 72% 0, 100% 28%, 100% 100%, 0 100%); }
+/* Black-only manifest marks (GitHub, Notion) on the dark surface. */
+img.item-icon.is-monochrome { filter: invert(1) brightness(.9); }
+.is-hued { color: hsl(var(--h) 55% var(--hue-l)); }
+svg.is-skill { color: var(--pink); }
+
+/* Toolbar (A3) ----------------------------------------------------------- */
+div.composer .composer-options {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  height: 42px;
+  padding: 0 8px 8px 7px;
+  color: var(--text-dim);
+  font-size: var(--fs-14);
+}
+.composer-toolbar-left { display: flex; align-items: center; gap: 4px; min-width: 0; overflow-x: auto; scrollbar-width: none; }
+.composer-toolbar-left::-webkit-scrollbar { display: none; }
+.composer-toolbar-right { display: flex; flex: none; align-items: center; gap: 6px; }
+.composer-picker-root { position: relative; min-width: 0; }
+.composer-plus { flex: none; display: inline-grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; background: color-mix(in srgb, var(--text) 14%, var(--bg)); color: var(--text); transition: background-color 120ms ease; }
+.composer-plus:hover,.composer-plus[aria-expanded='true'] { background: color-mix(in srgb, var(--text) 18%, var(--bg)); }
+.composer-access { display: inline-flex; align-items: center; gap: 5px; height: 28px; padding: 0 8px; border-radius: var(--radius-8); color: var(--text-dim); font-size: var(--fs-14); white-space: nowrap; }
+.composer-access:hover:not(:disabled),.composer-access[aria-expanded='true'] { background: var(--bg-hover); color: var(--text); }
+.composer-access.is-full,.composer-access.is-full:hover:not(:disabled) { color: var(--access-full); }
+.composer-access.is-muted { opacity: .55; }
+.composer-access:disabled { cursor: default; }
+.composer-access svg { flex: none; }
+.composer-plan-chip { display: inline-flex; flex: none; align-items: center; gap: 4px; height: 24px; padding: 0 4px 0 8px; border-radius: var(--radius-12); background: color-mix(in srgb, var(--violet) 12%, transparent); color: var(--violet); font-size: var(--fs-13); }
+.composer-plan-chip button { display: inline-grid; place-items: center; width: 16px; height: 16px; border-radius: 50%; color: inherit; }
+.composer-plan-chip button:hover:not(:disabled) { background: color-mix(in srgb, var(--violet) 22%, transparent); }
+.composer-run-spinner { color: var(--text-faint); }
+.composer-model-picker { position: relative; min-width: 0; }
+.composer-model-button { display: inline-flex; align-items: center; gap: 4px; min-width: 0; max-width: 240px; height: 28px; padding: 0 6px; border-radius: var(--radius-8); color: var(--text); font: inherit; font-size: var(--fs-14); }
+.composer-model-button:hover:not(:disabled),.composer-model-button[aria-expanded='true'] { background: var(--bg-hover); }
+.composer-model-button:disabled { cursor: default; opacity: .6; }
+.composer-model-button > svg { flex: none; color: var(--text-faint); }
+.composer-model { min-width: 0; max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.composer-effort-label { flex: none; color: var(--text-dim); }
+.composer-model-error { color: var(--danger); font-size: var(--fs-11); }
+.composer-model-picker > .composer-model-error { position: absolute; top: calc(100% + 3px); right: 0; width: max-content; max-width: 240px; }
+.composer-options button:focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
+
+/* Primary button state machine (B9/B10). */
+div.composer .composer-send,div.composer .composer-stop {
+  position: relative;
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--send);
+  color: var(--send-fg);
+  transition: opacity 140ms ease, transform 140ms ease, background-color 140ms ease;
+}
+div.composer .composer-send:disabled { opacity: .3; cursor: default; }
+div.composer .composer-stop.is-ghost { background: color-mix(in srgb, var(--text) 14%, var(--bg)); color: var(--text); }
+div.composer .composer-stop.is-stopping:disabled { opacity: 1; cursor: progress; }
+div.composer .composer-stop.is-stopping > span { position: absolute; right: calc(100% + 6px); white-space: nowrap; color: var(--danger); font-size: var(--fs-12); }
+.composer-stop-ring { position: absolute; inset: 1px; opacity: .8; }
+div.composer .composer-send:not(:disabled):hover,div.composer .composer-stop:not(:disabled):hover { transform: scale(1.05); }
+div.composer .composer-send:not(:disabled):active,div.composer .composer-stop:not(:disabled):active { transform: scale(.96); }
+.composer-spin { animation: attachment-spin 900ms linear infinite; }
+
+/* Popovers (A4) ---------------------------------------------------------- */
+.composer-popover {
+  position: absolute;
+  z-index: 8;
+  bottom: calc(100% + 7px);
+  max-height: min(320px, 50vh);
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding: 4px 0 6px;
+  border: 1px solid color-mix(in srgb, var(--text) 6%, transparent);
+  border-radius: var(--radius-16);
+  background: var(--menu-bg);
+  box-shadow: 0 16px 40px -16px color-mix(in srgb, var(--shadow-ink) 80%, transparent);
+  animation: composer-menu-in 120ms ease-out both;
+}
+.composer-popover:focus { outline: none; }
+.composer-plus-popover { left: -1px; right: -1px; }
+.composer-caret-popover { left: 9px; width: min(380px, 100cqw); }
+.composer-caret-popover.is-slash { width: min(400px, 100cqw); }
+.composer-menu-section { padding: 10px 14px 4px; color: var(--text-faint); font-size: var(--fs-13); }
+.composer-row { display: flex; align-items: center; gap: 8px; width: calc(100% - 12px); height: 29px; margin: 0 6px; padding: 0 8px; border-radius: var(--radius-10); color: var(--text); font-size: var(--fs-14); text-align: left; white-space: nowrap; }
+.composer-row[aria-selected='true']:not(:disabled) { background: var(--menu-hover); }
+.composer-row:disabled { opacity: .4; cursor: default; }
+.composer-row-icon { display: inline-grid; flex: none; place-items: center; width: 16px; height: 16px; color: var(--text-dim); }
+/* Capped to 55% only when a description sits beside it (so the description keeps room); alone, a label
+   (e.g. a model name with no provider sub-label) can use the row's full width before it ellipsizes. */
+.composer-row-label { flex: none; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+.composer-row-label:has(+ .composer-row-description) { max-width: 55%; }
+.composer-row-label.is-mono { font: var(--fs-13) var(--mono); }
+.composer-row-description { flex: 1; min-width: 0; margin-left: 2px; overflow: hidden; color: var(--text-faint); font-size: var(--fs-13); text-overflow: ellipsis; }
+.composer-row-badge { flex: none; height: 16px; margin-left: auto; padding: 0 5px; border-radius: var(--radius-6); background: var(--bg-hover); color: var(--text-faint); font-size: var(--fs-11); line-height: 16px; }
+.composer-row[aria-checked='true'] .composer-row-icon { color: var(--violet); }
+.composer-command-tile { display: inline-grid; place-items: center; width: 16px; height: 16px; border-radius: var(--radius-6); background: hsl(var(--h, 0) 55% 62% / 16%); color: hsl(var(--h, 0) 55% var(--hue-l)); }
+.composer-command-tile.is-access { background: color-mix(in srgb, var(--access-full) 16%, transparent); color: var(--access-full); }
+.composer-command-tile.is-stop { background: color-mix(in srgb, var(--danger) 16%, transparent); color: var(--danger); }
+.composer-terminal-tile { display: inline-grid; place-items: center; width: 16px; height: 16px; border-radius: var(--radius-4); background: var(--media-bg); color: var(--ok); }
+.composer-menu-note { margin: 8px 14px; color: var(--text-faint); font-size: var(--fs-12); line-height: 1.5; }
+.composer-plus-filter { display: flex; align-items: center; gap: 6px; margin: 6px 14px 0; color: var(--text-dim); font-size: var(--fs-12); }
+.composer-command-hint { margin: 4px 0 0; padding: 7px 14px 1px; border-top: 1px solid var(--hairline); color: var(--text-faint); font-size: var(--fs-11); }
+
+/* Access menu and confirmation (B7). */
+.composer-access-menu { width: 280px; }
+.composer-access-menu [role='menuitemradio'] > svg:first-child { flex: none; }
+.ui-menu.composer-access-menu [role='menuitemradio'].is-full > svg:first-child { color: var(--access-full); }
+.composer-access-menu [role='menuitemradio']:disabled { opacity: .45; }
+.composer-access-menu span { display: flex; flex: 1; flex-direction: column; gap: 2px; min-width: 0; }
+.composer-access-menu strong { font-weight: 500; font-size: var(--fs-13); }
+.composer-access-menu small { color: var(--text-faint); font-size: var(--fs-12); line-height: 1.35; }
+.composer-access-backdrop { position: fixed; inset: 0; z-index: 110; background:  var(--scrim); transition: opacity 150ms ease; }
+.composer-access-dialog { position: fixed; left: 50%; top: 50%; z-index: 111; translate: -50% -50%; width: min(440px, calc(100vw - 40px)); padding: 20px; border: 1px solid var(--hairline); border-radius: var(--radius-16); background: var(--menu-bg); color: var(--text); box-shadow: var(--shadow-dialog); transition: opacity 150ms ease, transform 150ms ease; }
+.composer-access-dialog h2 { margin: 0 0 14px; font-size: var(--fs-15); font-weight: 550; }
+.composer-access-dialog ul { display: flex; flex-direction: column; gap: 12px; margin: 0 0 20px; padding: 0; list-style: none; }
+.composer-access-dialog li { display: flex; gap: 10px; }
+.composer-access-dialog li > svg { flex: none; margin-top: 2px; color: var(--text-dim); }
+.composer-access-dialog li span { display: flex; flex-direction: column; gap: 2px; }
+.composer-access-dialog li strong { font-size: var(--fs-13); font-weight: 500; }
+.composer-access-dialog li small { color: var(--text-faint); font-size: var(--fs-12); line-height: 1.45; }
+.composer-access-dialog > div { display: flex; justify-content: flex-end; gap: 8px; }
+.composer-access-dialog button { height: 30px; padding: 0 14px; border: 1px solid var(--hairline); border-radius: var(--radius-16); font-size: var(--fs-13); }
+.composer-access-dialog button:last-child { border-color: transparent; background: var(--access-full); color: var(--on-tint); font-weight: 550; }
+.composer-access-dialog button:disabled { opacity: .5; cursor: default; }
+.composer-access-dialog button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.composer-access-dialog[data-starting-style],.composer-access-dialog[data-ending-style] { opacity: 0; transform: translateY(5px) scale(.98); }
+.composer-access-backdrop[data-starting-style],.composer-access-backdrop[data-ending-style] { opacity: 0; }
+.composer-reference-error { margin: 0 0 12px; color: var(--danger); font-size: var(--fs-12); }
+/* F6: what Full access covers (this chat, and the default for new chats in its folder). */
+.composer-access-scope { margin: -6px 0 16px; color: var(--text-dim); font-size: var(--fs-12); line-height: 1.45; }
+
+/* Model picker (B5). */
+.composer-model-popover { right: -1px; display: flex; width: min(340px, 100cqw); max-height: min(380px, 60vh); padding: 0; overflow: hidden; }
+.composer-model-rail { display: flex; flex: none; flex-direction: column; align-items: center; gap: 4px; width: 44px; padding: 8px 0; border-right: 1px solid var(--hairline); overflow-x: hidden; overflow-y: auto; }
+.composer-model-rail button { position: relative; display: inline-grid; place-items: center; width: 28px; height: 28px; border-radius: var(--radius-8); color: var(--text-dim); }
+.composer-model-rail button:hover { background: var(--bg-hover); color: var(--text); }
+.composer-model-rail button[aria-selected='true'] { background: var(--menu-hover); color: var(--text); }
+/* Inset indicator: an outward bar (right: -8px) overflowed the scrolling rail and caused horizontal scroll. */
+.composer-model-rail button[aria-selected='true']::after { content: ''; position: absolute; left: 2px; top: 7px; bottom: 7px; width: 2px; border-radius: var(--radius-2); background: var(--accent); }
+.composer-model-pane { display: flex; flex: 1; flex-direction: column; min-width: 0; }
+.composer-model-search { display: flex; flex: none; align-items: center; gap: 6px; padding: 9px 12px; border-bottom: 1px solid var(--hairline); color: var(--text-faint); }
+.composer-model-search input { width: 100%; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--text); font: inherit; font-size: var(--fs-13); }
+.composer-model-list { flex: 1; min-height: 0; overflow-y: auto; padding: 2px 0 6px; }
+.composer-model-list .composer-menu-section { padding: 8px 12px 3px; font-size: var(--fs-12); }
+.composer-model-row { display: flex; align-items: center; margin: 0 6px; }
+.composer-model-row > button[role='option'] { display: flex; flex: 1; align-items: center; gap: 8px; min-width: 0; height: 29px; padding: 0 8px; border-radius: var(--radius-10); color: var(--text); font-size: var(--fs-13); text-align: left; white-space: nowrap; }
+.composer-model-row > button[role='option'] > svg { flex: none; margin-left: auto; color: var(--text); }
+.composer-model-row > button[role='option']:hover:not(:disabled),.composer-model-row > button[role='option']:focus-visible { background: var(--menu-hover); outline: none; }
+.composer-model-row > button[role='option']:disabled { opacity: .55; cursor: default; }
+.composer-model-favorite { display: inline-grid; flex: none; place-items: center; width: 24px; height: 24px; border-radius: var(--radius-6); color: var(--text-faint); opacity: 0; }
+.composer-model-row:hover .composer-model-favorite,.composer-model-favorite:focus-visible,.composer-model-favorite[aria-pressed='true'] { opacity: 1; }
+.composer-model-favorite[aria-pressed='true'] { color: var(--accent); }
+.composer-model-note { margin: 8px 12px; color: var(--text-faint); font-size: var(--fs-12); }
+.composer-model-note.composer-model-error { color: var(--danger); }
+.composer-effort { flex: none; padding: 8px 12px 10px; border-top: 1px solid var(--hairline); }
+.composer-effort-title { display: block; margin-bottom: 6px; color: var(--text-faint); font-size: var(--fs-12); }
+.composer-effort-segments { display: flex; height: 28px; padding: 2px; border-radius: var(--radius-8); background: var(--bg-hover); }
+.composer-effort-segments button { flex: 1; border-radius: var(--radius-6); color: var(--text-dim); font-size: var(--fs-12); font-weight: 500; white-space: nowrap; }
+/* Raised surface (own bg + hairline ring + shadow) and bolder full-contrast text, not just a faint tint,
+   so the checked segment reads clearly against the unchecked track in both themes. */
+.composer-effort-segments button[aria-checked='true'] { background: var(--bg-raised); color: var(--text); font-weight: 600; box-shadow: var(--shadow-xs), inset 0 0 0 1px color-mix(in srgb, var(--text) 14%, transparent); }
+.composer-effort-segments button:focus-visible { outline: 1px solid var(--accent); }
+
+/* Status, errors, queue, paste, drop ------------------------------------- */
+div.composer .composer-status { padding: 0 16px 8px; color: var(--text-faint); font-size: var(--fs-11); }
+div.composer .composer-error { padding: 0 16px 10px; color: var(--danger); font-size: var(--fs-12); overflow-wrap: anywhere; }
+.composer-queue { margin: 8px 8px 0; padding: 4px; border: 1px dashed var(--hairline); border-radius: var(--radius-12); color: var(--text-dim); font-size: var(--fs-13); }
+.composer-queue ol { display: flex; flex-direction: column; gap: 2px; margin: 0; padding: 0; list-style: none; }
+.composer-queue li { display: flex; align-items: center; gap: 7px; min-height: 30px; padding: 2px 4px 2px 7px; border-radius: var(--radius-8); }
+.composer-queue li:hover,.composer-queue li:focus-within { background: var(--bg-hover); }
+.composer-queue li.is-busy { opacity: .6; }
+.composer-queue-glyph { flex: none; color: var(--text-faint); }
+.composer-queue-text { flex: 1; min-width: 0; overflow: hidden; padding: 4px 0; color: inherit; text-align: left; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-13); cursor: text; }
+.composer-queue-edit { flex: 1; min-width: 0; padding: 4px 6px; border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent); border-radius: var(--radius-6); outline: 0; background: var(--bg); color: var(--text); font: inherit; font-size: var(--fs-12); }
+.composer-queue-files { display: inline-flex; flex: none; align-items: center; gap: 4px; max-width: 45%; overflow: hidden; }
+/* One clickable chip per queued file (mirrors .composer-queue-chip); click or Enter/Space opens it in the resource pane. */
+.composer-queue-file { display: inline-flex; flex: none; align-items: center; gap: 4px; height: 20px; max-width: 120px; padding: 0 6px; border: 0; border-radius: var(--radius-6); background: var(--bg-hover); color: var(--text-dim); font: inherit; font-size: var(--fs-12); white-space: nowrap; cursor: pointer; transition: color 120ms ease, background 120ms ease; }
+.composer-queue-file:hover,.composer-queue-file:focus-visible { color: var(--text); background: var(--menu-hover); }
+.composer-queue-file:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
+.composer-queue-file svg { flex: none; }
+.composer-queue-file span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.composer-queue-actions { display: flex; gap: 1px; opacity: 0; transition: opacity 120ms ease; }
+.composer-queue li:hover .composer-queue-actions,.composer-queue li:focus-within .composer-queue-actions { opacity: 1; }
+.composer-queue-actions button { display: inline-grid; place-items: center; width: 24px; height: 24px; border-radius: var(--radius-6); color: var(--text-faint); }
+.composer-queue-actions button:hover:not(:disabled) { background: var(--menu-hover); color: var(--text); }
+.composer-queue-actions button:disabled { opacity: .35; cursor: default; }
+.composer-queue-actions button:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
+.composer-queue-error { margin: 4px 7px 0; color: var(--danger); font-size: var(--fs-11); }
+.composer-queue-banner { display: flex; align-items: center; gap: 8px; min-height: 28px; padding: 0 4px 0 7px; color: var(--text-dim); font-size: var(--fs-12); }
+.composer-queue-banner span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.composer-queue-banner button,.composer-queue-labelled { display: inline-flex !important; align-items: center; gap: 4px; width: auto !important; height: 22px; padding: 0 8px; border-radius: var(--radius-12); color: var(--text-dim); font-size: var(--fs-12); }
+.composer-queue-banner button { border: 1px solid var(--hairline); }
+.composer-queue-banner button:hover:not(:disabled) { background: var(--menu-hover); color: var(--text); }
+.composer-queue.is-paused ol { opacity: .72; }
+.composer-queue-grip { flex: none; margin-right: -3px; color: var(--text-faint); opacity: 0; cursor: grab; transition: opacity 120ms ease; }
+.composer-queue li:hover .composer-queue-grip { opacity: 1; }
+.composer-queue li[draggable="true"] { cursor: grab; }
+.composer-queue li.is-dragging { opacity: .4; }
+.composer-queue li.is-drop-before { box-shadow: inset 0 2px 0 var(--accent); }
+.composer-queue li.is-drop-after { box-shadow: inset 0 -2px 0 var(--accent); }
+.composer-queue li.is-failed .composer-queue-text { color: var(--text); }
+.composer-queue-glyph.is-failed { color: var(--danger); }
+.composer-queue li.is-failed .composer-queue-actions { opacity: 1; }
+/* Sketch tiles reopen on click; the wrapper only listens. */
+.composer-attachments { display: contents; }
+.composer-send.is-continuing { opacity: .75; }
+/* Confirmations (Replace current goal?, Send message?, Resume paused goal?) */
+.composer-confirm { position: fixed; left: 50%; top: 50%; z-index: 111; translate: -50% -50%; width: min(420px, calc(100vw - 40px)); padding: 20px; border: 1px solid var(--hairline); border-radius: var(--radius-16); background: var(--menu-bg); color: var(--text); box-shadow: var(--shadow-dialog); animation: composer-confirm-in 150ms ease-out both; }
+.composer-confirm h2 { margin: 0 0 6px; font-size: var(--fs-15); font-weight: 550; }
+.composer-confirm > p { margin: 0 0 18px; color: var(--text-dim); font-size: var(--fs-13); line-height: 1.45; }
+.composer-confirm-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.composer-confirm-actions button { height: 30px; padding: 0 14px; border: 1px solid var(--hairline); border-radius: var(--radius-16); color: var(--text); font-size: var(--fs-13); }
+.composer-confirm-actions button:hover:not(:disabled) { background: var(--bg-hover); }
+.composer-confirm-actions button.is-primary { border-color: transparent; background: var(--text); color: var(--bg); font-weight: 550; }
+.composer-confirm-actions button:disabled { opacity: .5; cursor: default; }
+.composer-confirm-actions button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+@keyframes composer-confirm-in { from { opacity: 0; transform: translateY(5px) scale(.98); } to { opacity: 1; transform: none; } }
+.composer-paste-offer { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 8px 8px 0; padding: 7px 8px 7px 10px; border: 1px solid var(--hairline); border-radius: var(--radius-12); background: var(--bg-hover); color: var(--text-dim); font-size: var(--fs-12); }
+.composer-paste-offer > svg { color: var(--accent); }
+.composer-paste-offer > span { flex: 1; min-width: 120px; }
+.composer-paste-offer button { padding: 4px 9px; border: 1px solid var(--hairline); border-radius: var(--radius-8); color: var(--text); font-size: var(--fs-12); }
+.composer-paste-offer button:first-of-type { border-color: transparent; background: var(--text); color: var(--bg); }
+.composer-paste-offer button:last-child { display: inline-flex; padding: 4px; border: 0; color: var(--text-faint); }
+.composer-drop { position: absolute; inset: 3px; z-index: 9; display: flex; align-items: center; justify-content: center; gap: 7px; border-radius: var(--radius-16); background: color-mix(in srgb, var(--composer-bg) 88%, var(--accent)); color: var(--text); font-size: var(--fs-13); pointer-events: none; }
+
+/* Project pill, project picker, record icon, mid-run hints (C2). */
+.composer-project { display: inline-flex; flex: none; align-items: center; gap: 5px; max-width: 180px; height: 24px; padding: 0 8px; border-radius: var(--radius-12); background: color-mix(in srgb, var(--violet) 12%, transparent); color: var(--violet); font-size: var(--fs-13); }
+.composer-project > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.composer-project:hover,.composer-project[aria-expanded='true'] { background: color-mix(in srgb, var(--violet) 20%, transparent); }
+.composer-project-popover { left: -1px; width: min(360px, 100cqw); }
+.composer-capture-popover { left: -1px; width: min(360px, 100cqw); }
+.composer-capture-thumb { width: 16px; height: 16px; border-radius: var(--radius-4); object-fit: cover; }
+.composer-project-hint { margin: 6px 14px 0; color: var(--text-faint); font-size: var(--fs-12); }
+.composer-record-icon { color: var(--danger); fill: color-mix(in srgb, var(--danger) 35%, transparent); }
+.composer-access-note { margin: 4px 9px 3px; color: var(--text-faint); font-size: var(--fs-12); }
+.composer-queue-chips { display: inline-flex; flex: none; align-items: center; gap: 4px; max-width: 45%; overflow: hidden; }
+.composer-queue-chip { display: inline-flex; flex: none; align-items: center; gap: 4px; height: 20px; padding: 0 6px; border-radius: var(--radius-6); background: var(--bg-hover); color: var(--text-dim); font-size: var(--fs-12); white-space: nowrap; }
+.composer-queue-chip.is-skill { color: var(--pink); }
+.composer-queue-chip .item-icon { border-radius: var(--radius-4); }
+
+/* Compact widths (A3). */
+@container (max-width: 520px) { .composer-access-label { display: none; } .composer-project { max-width: 110px; } }
+@container (max-width: 460px) { .composer-effort-label { display: none; } .composer-model { max-width: 110px; } }
+
+@keyframes composer-menu-in { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: translateY(0); } }
+@media (prefers-reduced-motion: reduce) {
+  div.composer,.composer-plus,.composer-queue-actions,div.composer .composer-send,div.composer .composer-stop,.composer-access-dialog,.composer-access-backdrop { transition: none; }
+  .composer-popover { animation: none; }
+  .composer-spin { animation: none; }
+  .composer-confirm { animation: none; }
+  div.composer .composer-send:not(:disabled):hover,div.composer .composer-stop:not(:disabled):hover,div.composer .composer-send:not(:disabled):active,div.composer .composer-stop:not(:disabled):active { transform: none; }
+}
+
+/* Token hover card: what a chip refers to (plugin skills/MCP, skill source, file path). */
+.token-card { position: absolute; z-index: 4; translate: 0 calc(-100% - 6px); display: grid; gap: 2px; max-width: 300px; padding: 7px 9px; border: 1px solid color-mix(in srgb, var(--text) 10%, transparent); border-radius: var(--radius-10); background: var(--menu-bg); box-shadow: var(--shadow-sm); font-size: var(--fs-12); pointer-events: none; }
+.token-card-kind { color: hsl(var(--h, 212) var(--s, 55%) var(--hue-l)); font-size: var(--fs-11); font-weight: 600; letter-spacing: .02em; text-transform: uppercase; }
+.token-card[style*='--chip'] .token-card-kind { color: var(--chip); }
+.token-card strong { color: var(--text); font-weight: 560; }
+.token-card small { overflow: hidden; color: var(--text-dim); text-overflow: ellipsis; white-space: nowrap; }
+
+/* Typed context chips above the textarea (CMP-17). */
+.composer-context { display: grid; gap: 6px; padding: 10px 12px 0; }
+.composer-context-list { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.context-chip { --chip: hsl(var(--h, 212) var(--s, 55%) var(--hue-l)); display: inline-flex; align-items: center; max-width: 100%; height: 24px; border: 1px solid color-mix(in oklab, var(--chip) 26%, transparent); border-radius: var(--radius-8); background: color-mix(in oklab, var(--chip) 10%, transparent); font-size: var(--fs-12); }
+.context-chip.is-open { border-color: color-mix(in oklab, var(--chip) 50%, transparent); }
+.context-chip.is-stale { border-style: dashed; opacity: .7; }
+.context-chip-main { display: inline-flex; align-items: center; gap: 6px; min-width: 0; height: 100%; padding: 0 4px 0 5px; color: var(--text); }
+.context-chip-main:disabled { cursor: default; }
+.context-chip-icon { display: inline-grid; flex: none; place-items: center; width: 16px; height: 16px; border-radius: var(--radius-4); background: color-mix(in oklab, var(--chip) 24%, transparent); color: color-mix(in oklab, var(--chip) 60%, var(--text)); }
+.context-chip-label { overflow: hidden; max-width: 220px; text-overflow: ellipsis; white-space: nowrap; }
+.context-chip-source { overflow: hidden; max-width: 180px; color: var(--text-faint); text-overflow: ellipsis; white-space: nowrap; }
+.context-chip-remove { display: inline-grid; place-items: center; width: 20px; height: 100%; border-radius: 0 var(--radius-8) var(--radius-8) 0; color: var(--text-faint); }
+.context-chip-remove:hover { color: var(--text); background: var(--bg-hover); }
+.context-preview { overflow: hidden; border: 1px solid color-mix(in srgb, var(--text) 8%, transparent); border-radius: var(--radius-10); background: color-mix(in srgb, var(--bg) 60%, transparent); }
+.context-preview header { display: flex; align-items: center; justify-content: space-between; height: 26px; padding: 0 8px; color: var(--text-faint); font-size: var(--fs-12); }
+.context-preview header button { color: var(--text-dim); font-size: var(--fs-12); }
+.context-preview header button:hover { color: var(--text); }
+.context-preview pre { overflow: auto; max-height: 132px; margin: 0; padding: 0 8px 8px; color: var(--text-dim); font: var(--fs-12)/1.5 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+/* The quoted message flashes when "Show source" scrolls to it. */
+.timeline-row.is-context-source .msg-assistant { border-radius: var(--radius-8); background: color-mix(in srgb, var(--accent) 12%, transparent); transition: background-color 400ms ease; }
+
+/* Dictation (CMP-14): Codex puts the mic left of send. */
+.composer-mic { display: inline-grid; flex: none; place-items: center; width: 28px; height: 28px; border-radius: 50%; color: var(--text-dim); }
+.composer-mic:hover:not(:disabled) { background: var(--bg-hover); color: var(--text); }
+.composer-mic.is-listening { background: color-mix(in srgb, var(--danger) 18%, transparent); color: var(--danger); animation: composer-listening 1.4s ease-in-out infinite; }
+@keyframes composer-listening { 50% { box-shadow: 0 0 0 4px color-mix(in srgb, var(--danger) 14%, transparent); } }
+.composer-status.is-dictation { color: var(--text-dim); }
+
+/* CMP-19 prompt stashes */
+.composer-stash-popover { left: 0; width: min(420px, calc(100vw - 32px)); display: flex; flex-direction: column; max-height: min(380px, 60vh); padding: 0 0 4px; }
+.composer-stash-head { display: flex; align-items: center; justify-content: space-between; padding: 8px 8px 4px 14px; }
+.composer-stash-title { font-size: var(--fs-12); font-weight: 600; color: var(--text-dim); }
+.composer-stash-list { list-style: none; margin: 0; padding: 4px; overflow: auto; min-height: 0; }
+.composer-stash-row { display: flex; align-items: flex-start; gap: 4px; border-radius: var(--radius-10); }
+.composer-stash-row:hover, .composer-stash-row:focus-within { background: var(--menu-hover); }
+.composer-stash-restore { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; padding: 6px 8px; border: 0; background: transparent; color: var(--text); font: inherit; text-align: left; cursor: pointer; border-radius: var(--radius-10); }
+.composer-stash-restore:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.composer-stash-name { font-size: var(--fs-13); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.composer-stash-meta { font-size: var(--fs-11); color: var(--text-faint); }
+.composer-stash-preview { font-size: var(--fs-12); color: var(--text-dim); overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; white-space: pre-wrap; }
+.composer-stash-actions { display: flex; align-items: center; gap: 2px; padding: 5px 4px 0 0; }
+.composer-stash-icon, .composer-stash-danger { display: inline-flex; align-items: center; gap: 4px; height: 24px; min-width: 24px; justify-content: center; padding: 0 6px; border: 0; border-radius: var(--radius-8); background: transparent; color: var(--text-faint); font: inherit; font-size: var(--fs-12); cursor: pointer; }
+.composer-stash-icon:hover { background: var(--bg-hover); color: var(--text); }
+.composer-stash-danger { color: var(--danger); }
+.composer-stash-danger:hover { background: color-mix(in srgb, var(--danger) 14%, transparent); }
+.composer-stash-rename { flex: 1; margin: 4px; padding: 4px 8px; border: 1px solid var(--accent); border-radius: var(--radius-8); background: var(--bg); color: var(--text); font: inherit; font-size: var(--fs-13); }
+.composer-stash-empty { padding: 10px 12px; font-size: var(--fs-12); color: var(--text-faint); }
+.composer-stash-error { margin: 4px 12px; font-size: var(--fs-12); color: var(--danger); }
+/* PRO-05: capability badges under each model name; undeclared capabilities read "unknown", never guessed. */
+.composer-model-row > button[role='option']:has(.composer-model-badges) { flex-wrap: wrap; height: auto; min-height: 29px; row-gap: 2px; padding: 4px 8px; }
+.composer-model-badges { display: flex; flex-basis: 100%; flex-wrap: wrap; gap: 4px; }
+.composer-model-badge { padding: 0 5px; border: 1px solid var(--hairline); border-radius: var(--radius-4); color: var(--text-dim); font-size: var(--fs-11); line-height: 15px; white-space: nowrap; }
+.composer-model-badge.is-unsupported { color: var(--text-faint); }
+.composer-model-badge.is-unknown { color: var(--text-faint); border-style: dashed; }
+.composer-model-hidden button { padding: 0; border: 0; background: none; color: var(--accent); font: inherit; cursor: pointer; }
+.composer-model-hidden button:hover { text-decoration: underline; }
+/* CUA-08: region step of the capture picker. */
+.composer-capture-popover.is-region { width: min(520px, 100cqw); }
+.capture-region { display: grid; gap: 8px; padding: 6px 8px 8px; }
+.capture-region-head { display: flex; align-items: center; gap: 6px; font-size: var(--fs-12); color: var(--text); min-width: 0; }
+.capture-region-head span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.capture-region-stage { position: relative; justify-self: start; width: fit-content; max-width: 100%; cursor: crosshair; user-select: none; touch-action: none; border: 1px solid var(--hairline); border-radius: var(--radius-6); overflow: hidden; max-height: 320px; }
+.capture-region-stage img { display: block; width: auto; height: auto; max-width: 100%; max-height: 320px; pointer-events: none; }
+.capture-region-box { position: absolute; border: 1.5px solid var(--accent); background: color-mix(in srgb, var(--accent) 16%, transparent); box-shadow: 0 0 0 9999px color-mix(in srgb, var(--shadow-ink) 35%, transparent); pointer-events: none; }
+.capture-region-hint, .capture-region-note { margin: 0; font-size: var(--fs-12); color: var(--text-faint); }
+.capture-region-ax { display: flex; align-items: center; gap: 6px; font-size: var(--fs-12); color: var(--text-dim); }
+.capture-region-ax.is-disabled { color: var(--text-faint); }
+.capture-region-link { margin-left: auto; font-size: var(--fs-12); color: var(--accent); }
+.capture-region-actions { display: flex; justify-content: flex-end; gap: 6px; }
+.capture-region-actions button { display: inline-flex; align-items: center; gap: 5px; padding: 4px 10px; border: 1px solid var(--hairline); border-radius: var(--radius-6); font-size: var(--fs-12); color: var(--text); }
+.capture-region-actions button.is-primary { background: var(--primary-bg); color: var(--primary-fg); border-color: transparent; }
+.capture-region-actions button:disabled { opacity: .4; }
+
+/* DF-F32: the chosen model cannot read the staged image(s). */
+.composer-image-warning{margin:0 12px 4px;font-size:var(--fs-12);color:var(--warn)}
