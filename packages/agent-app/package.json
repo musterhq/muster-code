@@ -19,7 +19,8 @@
     "rebuild:native": "node scripts/postinstall.mjs --force",
     "postinstall": "node scripts/postinstall.mjs",
     "vendor:sync": "node scripts/vendor-sync.mjs",
-    "package": "node scripts/package-release.mjs"
+    "package": "node scripts/package-release.mjs",
+    "shots": "node --max-old-space-size=1536 scripts/readme-shots/shoot.mjs"
   },
   "dependencies": {
     "@base-ui/react": "1.8.0",

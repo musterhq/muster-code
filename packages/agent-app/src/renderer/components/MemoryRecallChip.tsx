@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Brain, RotateCcw, X } from 'lucide-react';
 import type { MemoryRecallChipItem, MemoryRecallPreview } from '../../shared/domains/memory-protocol';
 import { invoke } from '../bridge';
@@ -14,7 +15,8 @@ export function MemoryRecallChip({ chatId, text }: { chatId: string; text: strin
   const [preview, setPreview] = useState<MemoryRecallPreview | null>(null);
   const [open, setOpen] = useState(false);
   const [revision, setRevision] = useState(0);
-  const wrap = useRef<HTMLSpanElement>(null);
+  const wrap = useRef<HTMLSpanElement>(null), pop = useRef<HTMLDivElement>(null);
+  const [anchor, setAnchor] = useState<{ left: number; bottom: number } | null>(null);
   const asked = useRef('');
   useEffect(() => {
     let live = true;
@@ -30,10 +32,13 @@ export function MemoryRecallChip({ chatId, text }: { chatId: string; text: strin
   useEffect(() => { setOpen(false); }, [chatId]);
   useEffect(() => {
     if (!open) return;
-    const down = (event: MouseEvent) => { if (wrap.current && !wrap.current.contains(event.target as Node)) setOpen(false); };
+    const down = (event: MouseEvent) => { const target = event.target as Node; if (wrap.current && !wrap.current.contains(target) && !pop.current?.contains(target)) setOpen(false); };
+    // The popover is portalled (the composer toolbar scrolls sideways and would clip it), so it follows the chip.
+    const place = () => { const rect = wrap.current?.getBoundingClientRect(); if (rect) setAnchor({ left: rect.left, bottom: window.innerHeight - rect.top + 6 }); };
+    place(); window.addEventListener('resize', place); window.addEventListener('scroll', place, true);
     const key = (event: KeyboardEvent) => { if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); setOpen(false); } };
     document.addEventListener('mousedown', down); document.addEventListener('keydown', key, true);
-    return () => { document.removeEventListener('mousedown', down); document.removeEventListener('keydown', key, true); };
+    return () => { document.removeEventListener('mousedown', down); document.removeEventListener('keydown', key, true); window.removeEventListener('resize', place); window.removeEventListener('scroll', place, true); };
   }, [open]);
   if (!preview?.enabled || (!preview.records.length && !preview.excluded.length)) return null;
   const toggle = (item: MemoryRecallChipItem, excluded: boolean) => {
@@ -46,7 +51,7 @@ export function MemoryRecallChip({ chatId, text }: { chatId: string; text: strin
       aria-label={`Memory for the next turn: ${label}${preview.excluded.length ? `, ${preview.excluded.length} removed` : ''}`} title="What the next turn will recall" onClick={() => setOpen(value => !value)}>
       <Brain size={13} aria-hidden="true" /><span>{label}</span>
     </button>
-    {open && <div className="composer-popover memory-recall-popover" role="dialog" aria-label="Recalled for the next turn">
+    {open && anchor && createPortal(<div ref={pop} className="composer-popover memory-recall-popover" role="dialog" aria-label="Recalled for the next turn" style={{ left: anchor.left, bottom: anchor.bottom }}>
       <p className="memory-recall-heading">Recalled for the next turn</p>
       {count ? <ul>{preview.records.map(item => <li key={item.id}>
         <span className="memory-recall-text">{item.text}</span>{item.scope && <span className="memory-recall-scope">{item.scope}</span>}
@@ -57,6 +62,6 @@ export function MemoryRecallChip({ chatId, text }: { chatId: string; text: strin
         <Tip label="Recall it again"><button type="button" className="icon-button" aria-label={`Restore: ${(item.text || 'removed note').slice(0, 60)}`} onClick={() => toggle(item, false)}><RotateCcw size={12} /></button></Tip>
       </li>)}</ul></>}
       {preview.engine && <p className="memory-recall-note">The memory engine adds its own matches when you send.</p>}
-    </div>}
+    </div>, document.body)}
   </span>;
 }

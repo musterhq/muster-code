@@ -17,7 +17,9 @@ already have. Native macOS app, built on Electron.
 
 <br/>
 
-<!-- screenshot pending: <img src="../../docs/images/muster-agent-hero.png" alt="Muster Agent: a chat with an agent on the left and the live diff of its edits on the right" width="100%"/> -->
+<img src="../../docs/images/muster-agent-hero.png" alt="Muster Agent: a chat with an agent on the left and the live diff of its edits on the right" width="100%"/>
+
+<sub>A chat on the left and the live diff of the agent's edit on the right. Undo any change before you keep it.</sub>
 
 </div>
 
@@ -42,18 +44,51 @@ Code-OSS and no editor extension host. The product overview is in the
   tab with history and compare, parallel chats, skills, plugins and MCP, automations, import of
   past agent sessions, and Spotlight search.
 
-<!-- screenshots pending
+## Tour
+
+What each part of the app looks like, and what to look for. The screenshots use a made-up project,
+*taskboard*, a small TypeScript API and web board.
+
 <table>
 <tr>
-<td width="50%"><img src="../../docs/images/muster-agent-memory.png" alt="Memory screen"/></td>
-<td width="50%"><img src="../../docs/images/muster-agent-providers.png" alt="Provider setup"/></td>
+<td width="50%" valign="top"><img src="../../docs/images/muster-agent-timeline.png" alt="One turn, opened up"/><br/><b>One turn, opened up.</b> The agent's reasoning, the files it read and searched, each edit with its +/- counts, and the test run with its output and exit code.</td>
+<td width="50%" valign="top"><img src="../../docs/images/muster-agent-inline-diff.png" alt="Inline diffs in the chat"/><br/><b>Inline diffs in the chat.</b> Each edited file shows as a diff in the conversation. Keep or Undo one change, or the whole file.</td>
 </tr>
 <tr>
-<td width="50%"><img src="../../docs/images/muster-agent-terminal.png" alt="Integrated terminal"/></td>
-<td width="50%"><img src="../../docs/images/muster-agent-settings.png" alt="Settings"/></td>
+<td width="50%" valign="top"><img src="../../docs/images/muster-agent-memory.png" alt="Memory"/><br/><b>Memory.</b> Personal and folder notes with where they came from, a note suggested by the last run to keep or dismiss, and search.</td>
+<td width="50%" valign="top"><img src="../../docs/images/muster-agent-recall.png" alt="Recall preview"/><br/><b>Recall preview.</b> Before you send, the composer lists the notes the next turn will recall for this draft; remove any you don’t want in this chat.</td>
+</tr>
+<tr>
+<td width="50%" valign="top"><img src="../../docs/images/muster-agent-providers.png" alt="Accounts and providers"/><br/><b>Accounts and providers.</b> Found on first launch and ready for chats, each with its endpoint, model catalog and a health check.</td>
+<td width="50%" valign="top"><img src="../../docs/images/muster-agent-providers-local.png" alt="Local model servers"/><br/><b>Local model servers.</b> Ollama and LM Studio on this Mac, next to API keys from your environment.</td>
+</tr>
+<tr>
+<td width="50%" valign="top"><img src="../../docs/images/muster-agent-model-picker.png" alt="Model picker"/><br/><b>Model picker.</b> Every ready provider's models with context size, image support and reasoning level, switchable per chat.</td>
+<td width="50%" valign="top"><img src="../../docs/images/muster-agent-sandbox.png" alt="A scoped computer"/><br/><b>A scoped computer.</b> A disposable Linux container with no network, live memory, CPU and process use against its limits, services, command history and files.</td>
+</tr>
+<tr>
+<td width="50%" valign="top"><img src="../../docs/images/muster-agent-environment-menu.png" alt="Where a chat runs"/><br/><b>Where a chat runs.</b> This Mac, a sandbox, or a new worktree so a parallel chat doesn't touch your checkout.</td>
+<td width="50%" valign="top"><img src="../../docs/images/muster-agent-terminal.png" alt="Terminal panel"/><br/><b>Terminal panel.</b> Real shells under the chat, one tab per shell, with the dev server and the test run side by side.</td>
+</tr>
+<tr>
+<td width="50%" valign="top"><img src="../../docs/images/muster-agent-git-changes.png" alt="Git changes"/><br/><b>Git changes.</b> Uncommitted files colour-coded by status, with the chat that changed each one, and the commit box.</td>
+<td width="50%" valign="top"><img src="../../docs/images/muster-agent-git-history.png" alt="Git history"/><br/><b>Git history.</b> The commit graph with branches, tags and remotes. Pick a commit to see its message and files.</td>
+</tr>
+<tr>
+<td width="50%" valign="top"><img src="../../docs/images/muster-agent-projects.png" alt="Projects"/><br/><b>Projects.</b> Tasks with owners, priorities and dependencies. Ready tasks go to agents in parallel, and you verify the results.</td>
+<td width="50%" valign="top"><img src="../../docs/images/muster-agent-spotlight.png" alt="Spotlight search"/><br/><b>Spotlight search.</b> ⌘K finds chats, message text and files from anywhere in the app.</td>
+</tr>
+<tr>
+<td width="50%" valign="top"><img src="../../docs/images/muster-agent-skills.png" alt="Skills and plugins"/><br/><b>Skills and plugins.</b> Local skills by scope, each switched on or off. Plugins and MCP servers have their own tabs.</td>
+<td width="50%" valign="top"><img src="../../docs/images/muster-agent-automations.png" alt="Automations"/><br/><b>Automations.</b> Runs on a schedule, when a repository event such as a failed check happens, or when files change.</td>
+</tr>
+<tr>
+<td width="50%" valign="top"><img src="../../docs/images/muster-agent-updates.png" alt="Updates"/><br/><b>Updates.</b> A new version downloads in the background. Update and relaunch installs it; the same button sits at the bottom of the sidebar.</td>
+<td width="50%" valign="top"><img src="../../docs/images/muster-agent-hero-light.png" alt="Light theme"/><br/><b>Light theme.</b> Every screen follows the macOS appearance, or pick light or dark in Settings.</td>
 </tr>
 </table>
--->
+
+To regenerate these screenshots, run `npm run shots` (see [Screenshots](#screenshots)).
 
 ## Install
 
@@ -198,7 +233,18 @@ npm run test:renderer   # renderer tests (scripts/test-renderer.mjs)
 npm run rebuild:native  # rebuild node-pty for Electron (needs Xcode CLT)
 npm run vendor:sync  # refresh vendor/ from MUSTER_* checkouts
 npm run package      # release build: release-dist/Muster-Agent-<version>-<arch>.zip/.dmg + SHA256SUMS
+npm run shots        # regenerate the README screenshots in docs/images
 ```
+
+## Screenshots
+
+`npm run shots` rebuilds the renderer into a temporary folder, loads it in headless Google Chrome
+with a fictional preload bridge, and saves each screen to `docs/images/muster-agent-<name>.png`.
+Nothing launches Electron or touches your chats: every chat, file, memory and provider shown comes
+from `scripts/readme-shots/fixtures.js` (the made-up *taskboard* project), and `mock.js` answers
+the renderer's commands from it. `scripts/readme-shots/shots.mjs` lists the shots and how each
+screen is reached. Run one or a few with `npm run shots -- hero memory`. Set `CHROME` if Chrome is
+not in `/Applications`.
 
 ## Security model
 

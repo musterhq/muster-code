@@ -17,7 +17,9 @@ computers, and the model providers you already have, all in one window.
 
 <br/>
 
-<!-- screenshot pending: <img src="docs/images/muster-agent-hero.png" alt="Muster Agent: a chat with an agent on the left and the live diff of its edits on the right" width="100%"/> -->
+<img src="docs/images/muster-agent-hero.png" alt="Muster Agent: a chat with an agent on the left and the live diff of its edits on the right" width="100%"/>
+
+<sub>A chat on the left and the live diff of the agent's edit on the right. Undo any change before you keep it.</sub>
 
 </div>
 
@@ -41,9 +43,53 @@ around:
 - **It is a real workbench.** Live diffs with Keep/Undo, a terminal, a browser, git history and
   parallel chats sit next to the conversation, so you rarely have to switch windows.
 
+## Tour
+
+What each part of the app looks like, and what to look for. The screenshots use a made-up project,
+*taskboard*, a small TypeScript API and web board.
+
+<table>
+<tr>
+<td width="50%" valign="top"><img src="docs/images/muster-agent-timeline.png" alt="One turn, opened up"/><br/><b>One turn, opened up.</b> The agent's reasoning, the files it read and searched, each edit with its +/- counts, and the test run with its output and exit code.</td>
+<td width="50%" valign="top"><img src="docs/images/muster-agent-inline-diff.png" alt="Inline diffs in the chat"/><br/><b>Inline diffs in the chat.</b> Each edited file shows as a diff in the conversation. Keep or Undo one change, or the whole file.</td>
+</tr>
+<tr>
+<td width="50%" valign="top"><img src="docs/images/muster-agent-memory.png" alt="Memory"/><br/><b>Memory.</b> Personal and folder notes with where they came from, a note suggested by the last run to keep or dismiss, and search.</td>
+<td width="50%" valign="top"><img src="docs/images/muster-agent-recall.png" alt="Recall preview"/><br/><b>Recall preview.</b> Before you send, the composer lists the notes the next turn will recall for this draft; remove any you don’t want in this chat.</td>
+</tr>
+<tr>
+<td width="50%" valign="top"><img src="docs/images/muster-agent-providers.png" alt="Accounts and providers"/><br/><b>Accounts and providers.</b> Found on first launch and ready for chats, each with its endpoint, model catalog and a health check.</td>
+<td width="50%" valign="top"><img src="docs/images/muster-agent-providers-local.png" alt="Local model servers"/><br/><b>Local model servers.</b> Ollama and LM Studio on this Mac, next to API keys from your environment.</td>
+</tr>
+<tr>
+<td width="50%" valign="top"><img src="docs/images/muster-agent-model-picker.png" alt="Model picker"/><br/><b>Model picker.</b> Every ready provider's models with context size, image support and reasoning level, switchable per chat.</td>
+<td width="50%" valign="top"><img src="docs/images/muster-agent-sandbox.png" alt="A scoped computer"/><br/><b>A scoped computer.</b> A disposable Linux container with no network, live memory, CPU and process use against its limits, services, command history and files.</td>
+</tr>
+<tr>
+<td width="50%" valign="top"><img src="docs/images/muster-agent-environment-menu.png" alt="Where a chat runs"/><br/><b>Where a chat runs.</b> This Mac, a sandbox, or a new worktree so a parallel chat doesn't touch your checkout.</td>
+<td width="50%" valign="top"><img src="docs/images/muster-agent-terminal.png" alt="Terminal panel"/><br/><b>Terminal panel.</b> Real shells under the chat, one tab per shell, with the dev server and the test run side by side.</td>
+</tr>
+<tr>
+<td width="50%" valign="top"><img src="docs/images/muster-agent-git-changes.png" alt="Git changes"/><br/><b>Git changes.</b> Uncommitted files colour-coded by status, with the chat that changed each one, and the commit box.</td>
+<td width="50%" valign="top"><img src="docs/images/muster-agent-git-history.png" alt="Git history"/><br/><b>Git history.</b> The commit graph with branches, tags and remotes. Pick a commit to see its message and files.</td>
+</tr>
+<tr>
+<td width="50%" valign="top"><img src="docs/images/muster-agent-projects.png" alt="Projects"/><br/><b>Projects.</b> Tasks with owners, priorities and dependencies. Ready tasks go to agents in parallel, and you verify the results.</td>
+<td width="50%" valign="top"><img src="docs/images/muster-agent-spotlight.png" alt="Spotlight search"/><br/><b>Spotlight search.</b> ⌘K finds chats, message text and files from anywhere in the app.</td>
+</tr>
+<tr>
+<td width="50%" valign="top"><img src="docs/images/muster-agent-skills.png" alt="Skills and plugins"/><br/><b>Skills and plugins.</b> Local skills by scope, each switched on or off. Plugins and MCP servers have their own tabs.</td>
+<td width="50%" valign="top"><img src="docs/images/muster-agent-automations.png" alt="Automations"/><br/><b>Automations.</b> Runs on a schedule, when a repository event such as a failed check happens, or when files change.</td>
+</tr>
+<tr>
+<td width="50%" valign="top"><img src="docs/images/muster-agent-updates.png" alt="Updates"/><br/><b>Updates.</b> A new version downloads in the background. Update and relaunch installs it; the same button sits at the bottom of the sidebar.</td>
+<td width="50%" valign="top"><img src="docs/images/muster-agent-hero-light.png" alt="Light theme"/><br/><b>Light theme.</b> Every screen follows the macOS appearance, or pick light or dark in Settings.</td>
+</tr>
+</table>
+
 ## Memory
 
-<!-- screenshot pending: <img src="docs/images/muster-agent-memory.png" alt="The Memory screen: saved notes for a folder with search and scope" width="100%"/> -->
+<img src="docs/images/muster-agent-memory.png" alt="The Memory screen: saved notes for a folder with search and scope" width="100%"/>
 
 Agents that learn, not just agents that chat.
 
@@ -51,6 +97,8 @@ Agents that learn, not just agents that chat.
   so one repo's conventions never leak into another.
 - **Recall preview.** A chip in the composer shows which notes the next turn will recall for the
   draft you are typing. Open it to inspect them, or leave one out of this chat.
+
+  <img src="docs/images/muster-agent-recall.png" alt="The recall list open above the composer: three notes the next turn will use, each removable" width="80%"/>
 - **Auto-save after runs.** Choose *Never*, *Ask after runs*, or *Save after completed runs*.
   Recall runs automatically before each turn, and you can turn it off.
 - **You're in control.** Browse, search, add and delete memories in the Memory screen. Deletions
@@ -63,6 +111,10 @@ Agents that learn, not just agents that chat.
 
 Give an agent a computer of its own instead of your laptop.
 
+<img src="docs/images/muster-agent-sandbox.png" alt="A chat next to its scoped computer: resource limits and live use, services, read-only layers, command history and files" width="100%"/>
+
+<sub>The chat runs in a disposable sandbox. Look for <i>No network</i>, the memory, CPU and process meters, and the commands it ran.</sub>
+
 - **Scoped computers.** A chat (session) or a folder (workspace) gets its own Docker container,
   with its own history, files and services.
 - **Safe defaults.** No network unless you allow egress. Defaults are 512 MiB of memory, 1 CPU and
@@ -73,7 +125,7 @@ Give an agent a computer of its own instead of your laptop.
 
 ## Your providers
 
-<!-- screenshot pending: <img src="docs/images/muster-agent-providers.png" alt="Provider setup: detected sign-ins, gateways, API keys and local model servers" width="100%"/> -->
+<img src="docs/images/muster-agent-providers.png" alt="Provider setup: detected sign-ins, gateways, API keys and local model servers" width="100%"/>
 
 Muster Agent detects what is already on your Mac and uses it as-is:
 
@@ -88,9 +140,17 @@ Muster Agent detects what is already on your Mac and uses it as-is:
 Models come from each provider's own `/models` endpoint. There is no hard-coded model list. If
 nothing is found, guided setup walks you through adding a provider.
 
+<img src="docs/images/muster-agent-model-picker.png" alt="The model picker: providers down the side, models with context size, image support and reasoning level" width="100%"/>
+
+<sub>Pick any ready provider's model per chat, with its context size, image support and reasoning level.</sub>
+
 ## Built for low RAM
 
 Agent sessions get long. Muster Agent keeps what it holds in memory bounded:
+
+<img src="docs/images/muster-agent-timeline.png" alt="An agent turn opened up: reasoning, reads, edits and a test run with its output" width="100%"/>
+
+<sub>Tool rows fold into one line per step and long output shows only its tail until you ask for more.</sub>
 
 - **Virtualized timelines.** Chat history, tool output and git history render only the rows on screen.
 - **Incremental streaming.** Streaming Markdown re-parses only the part still being written, so
@@ -107,7 +167,7 @@ Agent sessions get long. Muster Agent keeps what it holds in memory bounded:
 
 ## Features
 
-<!-- screenshot pending: <img src="docs/images/muster-agent-terminal.png" alt="The integrated terminal panel under a chat" width="100%"/> -->
+<img src="docs/images/muster-agent-terminal.png" alt="The integrated terminal panel under a chat" width="100%"/>
 
 | | | |
 | --- | --- | --- |
@@ -115,7 +175,7 @@ Agent sessions get long. Muster Agent keeps what it holds in memory bounded:
 | **Git tab**<br/>Commit history, and compare any two refs. | **Parallel chats and projects**<br/>Several chats in one checkout, with overlap detection and "Run in a worktree". | **Skills, plugins and MCP**<br/>Install plugins, write skills, connect MCP servers. |
 | **Automations**<br/>Scheduled runs, or runs triggered by new pull requests, pushes and failed CI checks. | **Import past sessions**<br/>Bring in conversations from other agent tools and chat exports, read-only. | **Spotlight search**<br/>Search chats, messages, files and folders. Type `>` for commands. |
 
-<!-- screenshot pending: <img src="docs/images/muster-agent-settings.png" alt="Settings" width="100%"/> -->
+<p align="center"><img src="docs/images/muster-agent-updates.png" alt="Settings, Updates: version 0.2.1 is ready with an Update and relaunch button" width="60%"/></p>
 
 ## Install
 
