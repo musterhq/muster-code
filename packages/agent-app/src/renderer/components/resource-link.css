@@ -12,3 +12,14 @@
 .external-reference-menu { max-width:min(420px,calc(100vw - 32px)); }
 .external-reference-head { padding:6px 10px 4px; font:var(--fs-11)/1.4 var(--mono); color:var(--text-faint); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .external-reference-note { padding:4px 10px 6px; font-size:var(--fs-12); color:var(--text-faint); }
+
+/* File references in replies read like Codex: link blue, a file-type glyph, no underline until hover. */
+.md-body .md-file-link { display: inline; padding: 0; border: 0; background: none; color: var(--link); font: inherit; text-align: inherit; cursor: pointer; text-decoration: none; }
+.md-body .md-file-link:hover { text-decoration: underline; text-decoration-color: color-mix(in srgb, var(--link) 45%, transparent); text-underline-offset: 3px; }
+.md-file-glyph { display: inline-flex; margin-right: 3px; vertical-align: -2px; color: var(--text-dim); }
+.md-file-glyph[data-hue='blue'] { color: var(--file-blue); }
+.md-file-glyph[data-hue='yellow'] { color: var(--file-yellow); }
+.md-file-glyph[data-hue='green'] { color: var(--file-green); }
+.md-file-glyph[data-hue='red'] { color: var(--file-red); }
+.md-file-glyph[data-hue='purple'] { color: var(--file-purple); }
+.md-file-glyph[data-hue='teal'] { color: var(--file-teal); }

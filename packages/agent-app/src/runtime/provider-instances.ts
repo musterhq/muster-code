@@ -8,7 +8,7 @@ import type {ProviderInfo} from '../shared/protocol.ts';
 import {catalogPricing,type ExcludedModel} from '../shared/model-catalog.ts';
 import type {RunnableAdapter, Validation} from './adapters/types.ts';
 import {findBinary, locateCli, Validator} from './adapters/shared.ts';
-import {fetchModelList} from './adapters/http-chat.ts';
+import {fetchModelList,type ListedModel} from './adapters/http-chat.ts';
 
 export interface ProviderInstance {
   info: ProviderInfo;
@@ -48,6 +48,15 @@ const directModel=(id:string)=>/^(?:gpt-[a-zA-Z0-9.-]+|o[1-9][a-zA-Z0-9.-]*)$/.t
 const MAX_CATALOG_ENTRIES=500;
 /** PRO-04: the catalog decides what a route offers (this replaced a hardcoded gateway allowlist). Every entry
  * that is left out is returned in `excluded` with the reason, so nothing disappears silently. */
+/** A router's own agents and combos ("combo" owner), named for the picker: "intelligent-planner" reads
+ *  "Intelligent planner", "auto/best-coding" reads "Auto · best coding". */
+export function routerAgents(listed:readonly ListedModel[]):Models {
+  const pretty=(id:string)=>{const [head,...rest]=id.split('/');const words=(text:string)=>text.replace(/[-_:]+/g,' ').trim();
+    const first=words(rest.length?head!:id);const title=first.charAt(0).toUpperCase()+first.slice(1);return rest.length?`${title} · ${words(rest.join('/'))}`:title;};
+  // Named agents (planner, advisor, executor…) first, then auto/… routes.
+  const combos=listed.filter(entry=>entry.owner==='combo'&&entry.chat!==false);
+  return [...combos.filter(entry=>!entry.id.includes('/')),...combos.filter(entry=>entry.id.includes('/'))].slice(0,200).map(entry=>({id:entry.id,name:entry.name&&entry.name!==entry.id?entry.name:pretty(entry.id)}));
+}
 export function catalogModels(family:'openai-direct'|'gateway'|(string&{}),list:readonly unknown[]):{models:ProviderInfo['models'];excluded:ExcludedModel[]} {
   const models:ProviderInfo['models']=[],excluded:ExcludedModel[]=[];
   list.slice(0,MAX_CATALOG_ENTRIES).forEach((raw,index)=>{
@@ -258,7 +267,7 @@ function routeIds(routes:CodexRouteSpec[]):string[] {
 /** A gateway with no model catalog lists its models from `<base_url>/models`, the way it would authenticate a run:
  * its `env_key` variable, its own `auth.command` helper (the one Codex runs), or nothing for a local endpoint. */
 type Models=ProviderInfo['models'];
-const listings=new Map<string,Validator<Models>>();
+const listings=new Map<string,Validator<ListedModel[]>>();
 const settleListeners=new Set<()=>void>();
 /** Called when a model listing settles, so a cached instance list is rebuilt with its result. */
 export function onProviderListingSettled(listener:()=>void):()=>void {settleListeners.add(listener);return ()=>settleListeners.delete(listener);}
@@ -270,11 +279,11 @@ async function helperToken(command:{command:string;args:string[];timeoutMs?:numb
     if(error||!token)reject(new Error('The provider’s auth helper did not return a token.'));else resolve(token);
   }));
 }
-function listing(route:CodexRouteSpec,env:NodeJS.ProcessEnv,fetcher:typeof fetch|undefined):Validation<Models> {
+function listing(route:CodexRouteSpec,env:NodeJS.ProcessEnv,fetcher:typeof fetch|undefined):Validation<ListedModel[]> {
   const base=route.baseUrl!.replace(/\/+$/,''),key=JSON.stringify([base,route.envKey??'',route.authCommand?.command??'',route.envKey?createHash('sha256').update(env[route.envKey]??'').digest('hex'):'']);
   let found=listings.get(key);
   if(!found){
-    found=new Validator<Models>(async()=>{
+    found=new Validator<ListedModel[]>(async()=>{
       const token=route.envKey?env[route.envKey]:route.authCommand?await helperToken(route.authCommand,env):undefined;
       if(route.envKey&&!token)throw new Error(`${route.envKey} is not set in Muster’s environment.`);
       const models=await fetchModelList(`${base}/models`,token?{authorization:`Bearer ${token}`}:{},route.name??route.modelProvider,fetcher);
@@ -376,12 +385,29 @@ function homeInstances({fs,directory,codexHome,cli,node,env,track,validator,fetc
       if(!list)return fail('Codex has not listed this account’s models yet. Run `codex` once, or set model_catalog_json in config.toml.');
     }
     let models:Models,excluded:ExcludedModel[]=[];
-    if(list)({models,excluded}=catalogModels(route.kind==='chatgpt'?'openai-direct':'gateway',list));
+    if(list){
+      ({models,excluded}=catalogModels(route.kind==='chatgpt'?'openai-direct':'gateway',list));
+      // A gateway with a hand-written catalog also offers the router's own agents and combos (owned_by "combo":
+      // planner, advisor, executor, auto routes), read live so new ones appear without editing the catalog.
+      // While the listing loads, or if it fails, the catalog alone is offered.
+      if(route.kind==='gateway'&&route.baseUrl){
+        const live=listing(route,env,fetcher);
+        if(live.status==='ok'){
+          for(const entry of routerAgents(live.value!))if(!models.some(model=>model.id===entry.id))models.push(entry);
+          // Everything else the router serves is loaded too, off in the picker until switched on in Settings › Models.
+          const known=new Set(models.map(model=>model.id));
+          for(const entry of live.value!)if(entry.chat!==false&&entry.owner!=='combo'&&!known.has(entry.id)){known.add(entry.id);models.push({id:entry.id,name:entry.name,hiddenByDefault:true,...(entry.owner?{group:entry.owner}:{})});}
+        }
+      }
+    }
     else if(route.baseUrl){
       const listed=listing(route,env,fetcher);
       if(listed.status==='pending')return {info:{...base,status:'configured',detail:`Listing models from ${route.baseUrl}… Scan again in a moment. ${mcpDetail(mcp)}`},command,env:childEnv,sessionsRoot};
       if(listed.status==='error')return fail(`${listed.reason} Add model_catalog_json to the profile to list models without asking the endpoint.`,'error');
-      models=listed.value!;catalogSource=`${route.baseUrl}/models`;
+      const runnable=listed.value!.filter(entry=>entry.chat!==false);
+      models=runnable.slice(0,MAX_CATALOG_ENTRIES).map(({id,name})=>({id,name}));catalogSource=`${route.baseUrl}/models`;
+      if(listed.value!.length>runnable.length)excluded.push({id:'non-chat-models',name:`${listed.value!.length-runnable.length} image, audio and other models`,reason:'These models cannot run a chat.'});
+      if(runnable.length>MAX_CATALOG_ENTRIES)excluded.push({id:'listing-overflow',name:`${runnable.length-MAX_CATALOG_ENTRIES} more models`,reason:`Only the first ${MAX_CATALOG_ENTRIES} listed models are offered; add model_catalog_json to choose.`});
     } else return fail(`[model_providers.${route.modelProvider}] has no base_url and no model catalog.`);
     if(!models.length)return fail('The provider reported no models Muster can run.','error');
     // Direct account identity is stable across token refresh. Never expose the

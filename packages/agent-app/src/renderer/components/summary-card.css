@@ -151,10 +151,17 @@
    the full column width, as in Codex. The scrollbar stays at the edge (padding is inside the scroller).
    'overlay-open' (the compact card expanded) gets the same transcript-only gutter; the folded pill
    (the compact default) needs none. 'float' already has the margin. */
+.center[data-summary='float'] .chat > .timeline-shell > .timeline,
+.center[data-summary='float'] .chat > .chat-empty,
 .center[data-summary='reserve'] .chat > .timeline-shell > .timeline,
 .center[data-summary='reserve'] .chat > .chat-empty,
 .center[data-summary='overlay-open'] .chat > .timeline-shell > .timeline,
 .center[data-summary='overlay-open'] .chat > .chat-empty { padding-right: var(--summary-reserve); }
+/* Like Codex, the conversation is centred in the room left of the card, not under the whole window: the
+   composer, changes bar and footer shift with the transcript so every column edge lines up. `translate`
+   moves them without reflowing; the composer is capped so it never runs under the card. */
+.center:is([data-summary='float'], [data-summary='reserve']) .chat > :not(.chat-head, .timeline-shell, .chat-empty, .chat-loading, .chat-error) { translate: calc(var(--summary-reserve) / -2) 0; }
+.center:is([data-summary='float'], [data-summary='reserve']) .chat > :is(div.composer, .turn-changes) { max-width: calc(100% - var(--summary-reserve) - 40px); }
 /* The folded pill ('overlay') sits in the transcript's top-right corner: push the first message below it
    (card gap 10px + pill 32px + 8px) so it never clips the opening bubble. Scrolled content may pass
    under it. Transcript scroller only; the composer and header are untouched. */

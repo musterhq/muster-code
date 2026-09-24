@@ -116,3 +116,14 @@ test('install waits for the app to exit, swaps the bundle and keeps the old one 
   assert.equal(existsSync(`${target}.previous`),false,'the old copy is cleaned up');
   assert.equal(existsSync(path.join(root,'pending','0.3.0')),false,'the staged download is removed');
 });
+
+test('coming back to the window re-checks only when the last look is stale', async () => {
+  let calls=0;
+  const {updater}=harness((async()=>{calls++;return json([]);}) as typeof fetch);
+  updater.checkIfStale();await new Promise(r=>setTimeout(r,20));
+  assert.equal(calls,1,'never checked: check now');
+  updater.checkIfStale();await new Promise(r=>setTimeout(r,20));
+  assert.equal(calls,1,'just checked: not again');
+  updater.checkIfStale(0);await new Promise(r=>setTimeout(r,20));
+  assert.equal(calls,2,'stale: check again');
+});

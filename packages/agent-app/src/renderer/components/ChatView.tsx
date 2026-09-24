@@ -126,7 +126,7 @@ function TimelineCard({ item, nextAt, reveal, turn, tail=false, actions, editing
       if (plan) return <PlanCard item={item}/>;
       return (
         <div className="msg msg-assistant">
-          <MessageBody text={item.text} animate />
+          <MessageBody text={item.text} animate linkFiles />
           {meta&&<MessageMeta text={item.text} createdAt={item.createdAt} label="Copy response" actions={actions}/>}
         </div>
       );

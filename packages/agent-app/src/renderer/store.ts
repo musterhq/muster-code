@@ -1464,6 +1464,20 @@ export async function refreshResources(folderId: string): Promise<void> {
 // ---------------------------------------------------------------------------
 // Providers
 
+/** New models on an account (a ChatGPT plan gaining a model, a gateway catalog changing) appear without a relaunch:
+ *  the list is re-read quietly, with no loading state, when the window regains focus (at most once a minute) and
+ *  whenever the model picker opens. The runtime memoises the scan on the files it read, so an unchanged list is cheap. */
+let lastQuietRefresh = 0;
+export async function refreshProvidersQuietly(minIntervalMs = 60_000): Promise<void> {
+  if (state.providers.phase !== 'ready' || Date.now() - lastQuietRefresh < minIntervalMs) return;
+  lastQuietRefresh = Date.now();
+  try {
+    const providers = await invoke('providers.list', undefined);
+    if (JSON.stringify(providers) !== JSON.stringify(state.providers.phase === 'ready' ? state.providers.value : null)) set({ providers: { phase: 'ready', value: providers } });
+  } catch { /* keep the list we have */ }
+}
+if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') window.addEventListener('focus', () => { void refreshProvidersQuietly(); });
+
 export async function loadProviders(force = false): Promise<void> {
   if (state.providers.phase === 'loading') return;
   if (!force && state.providers.phase === 'ready') return;
