@@ -3,6 +3,19 @@
 All notable changes to Muster Agent. Each `## <version>` section becomes the notes of the
 `agent-v<version>` GitHub Release (`.github/workflows/agent-app-release.yml`).
 
+## 0.2.1
+
+- Chat replies read more like a native assistant: 14px text by default (Settings › Appearance › Chat text
+  size, 13–16px), slightly heavier and softer, with a line between paragraphs. New text fades in while a reply
+  streams; Reduce motion turns it off.
+- Response style (Settings › Chat): Automatic asks Codex-based models for the Friendly personality unless your
+  Codex config sets one, so answers explain what was done and why. Choose Friendly or Pragmatic to override.
+- Memory for teams: on a shared Hindsight server, personal memory is now one bank per person (only a hash of
+  your identity is sent) and a git repository's memory is shared by everyone working on it. Folders without
+  a remote stay private. The Memory screen says whether a scope is shared with your team or private to you.
+  IT can set each person's identity with MUSTER_MEMORY_IDENTITY.
+- The memory recall list above the message box opens fully instead of being clipped.
+
 ## 0.2.0
 
 First downloadable build of Muster Agent, the standalone desktop app for running coding agents on
