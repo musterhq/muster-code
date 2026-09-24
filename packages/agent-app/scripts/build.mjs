@@ -22,20 +22,31 @@ const common = {
   absWorkingDir: root,
 };
 
-const runtimeRoot = process.env.MUSTER_RUNTIME_SOURCE_ROOT || path.resolve(root, '../../../muster');
-// Core client entry resolution, in order: MUSTER_CORE_CLIENT_ENTRY, then
-// runtimeRoot/packages/core/src/codex-app-server.ts. Agent Mode needs a core
-// that exports CODEX_RUN_LIFECYCLE_VERSION=1 (independent idle/request/turn
-// budgets, AbortSignal cancellation, `images` localImage input) and
-// steerActiveCodexTurn. A core without them makes provider.ts fall back to the
-// legacy timeoutMs path, whose ceiling max(180000*8, 15min) kills every turn at
-// 1,440,000ms (24 minutes). Known-good source as of 2026-09-22:
-//   MUSTER_CORE_CLIENT_ENTRY=/private/tmp/muster-core-pr97-integration-20260922/packages/core/src/codex-app-server.ts
-// That checkout also carries memory.ts/hindsight.ts (MUSTER_RUNTIME_SOURCE_ROOT)
-// but not local-docker-sandbox.ts, so keep MUSTER_SANDBOX_SOURCE_ROOT on the
-// reviewed scoped-computer checkout (e.g. /private/tmp/muster-scoped-computer-app-20260920).
-const coreEntry = process.env.MUSTER_CORE_CLIENT_ENTRY || path.join(runtimeRoot, 'packages/core/src/codex-app-server.ts');
-if (!existsSync(coreEntry)) throw new Error(`Headless Muster runtime source unavailable at ${coreEntry}. Set MUSTER_CORE_CLIENT_ENTRY to a lifecycle-aware codex-app-server.ts, or MUSTER_RUNTIME_SOURCE_ROOT to the muster checkout.`);
+// External Muster core sources. Each group resolves, in order: its env var (a developer's own
+// checkout), then the snapshot vendored in vendor/<group> (see vendor/README.md; refresh it with
+// `npm run vendor:sync`). A fresh clone therefore builds with no env vars and no sibling checkouts.
+//   MUSTER_CORE_CLIENT_ENTRY    -> the codex-app-server.ts file itself, else vendor/muster-core
+//   MUSTER_RUNTIME_SOURCE_ROOT  -> checkout root with packages/core/src/{memory,hindsight}.ts, else vendor/muster-runtime
+//   MUSTER_SANDBOX_SOURCE_ROOT  -> checkout root with packages/core/src/{local-docker-sandbox,scoped-runtime}.ts, else vendor/muster-sandbox
+// Agent Mode needs a core that exports CODEX_RUN_LIFECYCLE_VERSION=1 (independent idle/request/turn
+// budgets, AbortSignal cancellation, `images` localImage input) and steerActiveCodexTurn. A core
+// without them makes provider.ts fall back to the legacy timeoutMs path, whose ceiling
+// max(180000*8, 15min) kills every turn at 1,440,000ms (24 minutes); assertCoreLifecycle() refuses it.
+const vendorRoot = (group) => path.join(root, 'vendor', group);
+/** Resolve one source group and say where it came from, so a stale override is obvious in the log. */
+function sourceFrom(envName, group, vendored) {
+  const fromEnv = process.env[envName];
+  console.log(`[muster sources] ${group}: ${fromEnv ? `${envName}=${fromEnv}` : `vendor/${group}`}`);
+  return fromEnv ? path.resolve(fromEnv) : path.join(vendorRoot(group), vendored);
+}
+const sourceRoot = (envName, group) => sourceFrom(envName, group, '');
+// MUSTER_CORE_CLIENT_ENTRY names the entry file itself, not a checkout root.
+const coreEntry = sourceFrom('MUSTER_CORE_CLIENT_ENTRY', 'muster-core', 'packages/core/src/codex-app-server.ts');
+if (!existsSync(coreEntry)) throw new Error(`Headless Muster core client unavailable at ${coreEntry}. Unset MUSTER_CORE_CLIENT_ENTRY to use vendor/muster-core, or point it at a lifecycle-aware codex-app-server.ts.`);
+const runtimeRoot = sourceRoot('MUSTER_RUNTIME_SOURCE_ROOT', 'muster-runtime');
+for (const name of ['memory', 'hindsight']) {
+  if (!existsSync(path.join(runtimeRoot, `packages/core/src/${name}.ts`))) throw new Error(`Muster runtime source has no packages/core/src/${name}.ts under ${runtimeRoot}. Unset MUSTER_RUNTIME_SOURCE_ROOT to use vendor/muster-runtime.`);
+}
 const CORE_LIFECYCLE_MARKERS = ['CODEX_RUN_LIFECYCLE_VERSION', 'steerActiveCodexTurn'];
 /** Refuse to ship a core client that would put every turn under the 24-minute legacy ceiling. */
 function assertCoreLifecycle() {
@@ -61,10 +72,10 @@ function assertLazyStylesLinked(metafile) {
   }
   if (missing.size) throw new Error(`Lazy renderer chunks carry stylesheets main.css does not include:\n  ${[...missing].join('\n  ')}`);
 }
-const sandboxRoot = process.env.MUSTER_SANDBOX_SOURCE_ROOT || runtimeRoot;
+const sandboxRoot = sourceRoot('MUSTER_SANDBOX_SOURCE_ROOT', 'muster-sandbox');
 const sandboxEntry = path.join(sandboxRoot, 'packages/core/src/local-docker-sandbox.ts');
 const scopeEntry = path.join(sandboxRoot, 'packages/core/src/scoped-runtime.ts');
-if (!existsSync(sandboxEntry) || !existsSync(scopeEntry)) throw new Error('Scoped computer source unavailable. Set MUSTER_SANDBOX_SOURCE_ROOT to the reviewed isolated runtime checkout.');
+if (!existsSync(sandboxEntry) || !existsSync(scopeEntry)) throw new Error(`Scoped computer source unavailable under ${sandboxRoot}. Unset MUSTER_SANDBOX_SOURCE_ROOT to use vendor/muster-sandbox, or point it at the reviewed isolated runtime checkout.`);
 const builds = [
   {
     ...common,

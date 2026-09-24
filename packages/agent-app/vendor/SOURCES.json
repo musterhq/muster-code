@@ -1,0 +1,61 @@
+{
+  "groups": {
+    "muster-core": {
+      "purpose": "Lifecycle-aware Codex app-server client (CODEX_RUN_LIFECYCLE_VERSION=1, steerActiveCodexTurn) -> dist/runtime/core-client.cjs",
+      "env": "MUSTER_CORE_CLIENT_ENTRY",
+      "remote": null,
+      "branch": null,
+      "commit": null,
+      "sourcePath": "/private/tmp/muster-core-pr97-integration-20260922",
+      "note": "Source checkout is not a git repository; the sha256 values below are the only provenance.",
+      "uncommittedFiles": [],
+      "syncedAt": "2026-09-24T03:37:22.809Z",
+      "files": {
+        "packages/core/src/codex-app-server.ts": "eb5eb41d014a9b2983ac068ad811e0d5e0e7999d59f852b73d868809f5732b62"
+      }
+    },
+    "muster-runtime": {
+      "purpose": "Memory and Hindsight stores -> dist/runtime/core-memory.cjs, core-hindsight.cjs",
+      "env": "MUSTER_RUNTIME_SOURCE_ROOT",
+      "remote": "https://github.com/Dkm0315/muster.git",
+      "branch": "cursor/hindsight-scheduler-foundation",
+      "commit": "9a567c908d429cd887a83f961febe1078ceabd8f",
+      "sourcePath": null,
+      "note": "Clean at the recorded commit.",
+      "uncommittedFiles": [],
+      "syncedAt": "2026-09-24T03:37:22.839Z",
+      "files": {
+        "packages/core/src/config.ts": "a1313829014044b6870c5db88deacaf86731357f24c1fe6b47244b01acd769fa",
+        "packages/core/src/hindsight.ts": "26a8eab3bae7ee16c34dc33d5e6d6cb0390a3229312e83a99fd6093df59378a5",
+        "packages/core/src/memory.ts": "b4f06ffb3791817fe96d7eef0057c346a22b66afbc0e695e038efc6428285068",
+        "packages/core/src/profiles.ts": "56165449ed062df307ac94a1267f9cfc5a2fecfbf99d797cd57f199f9b98841c",
+        "packages/core/src/providers-catalog.ts": "2108f5454a48a009b188f055ea77725077728d7da50030532ca6b7d0b721c5ff",
+        "packages/core/src/store.ts": "b89e4b0f95954164ee74caec1e0e67346970c41e92cad8ef1479c5d1d13f47a4"
+      }
+    },
+    "muster-sandbox": {
+      "purpose": "Local Docker sandbox and scoped runtime -> dist/runtime/scoped-computer-core.cjs",
+      "env": "MUSTER_SANDBOX_SOURCE_ROOT",
+      "remote": "https://github.com/Dkm0315/muster.git",
+      "branch": "(detached HEAD)",
+      "commit": "215b8d3ec53b3762b8fe53f67af15f4c5b31f998",
+      "sourcePath": null,
+      "note": "Includes uncommitted working-tree changes in the files listed under uncommittedFiles.",
+      "uncommittedFiles": [
+        "packages/core/src/local-docker-sandbox.ts",
+        "packages/core/src/scoped-runtime.ts"
+      ],
+      "syncedAt": "2026-09-24T03:37:22.868Z",
+      "files": {
+        "packages/core/src/agent-graph.ts": "4d612e2a9b24a690674ec90ce0ef01517b7561afc56117a60e3a2ae3ee8c7138",
+        "packages/core/src/config.ts": "a1313829014044b6870c5db88deacaf86731357f24c1fe6b47244b01acd769fa",
+        "packages/core/src/local-docker-sandbox.ts": "21bfa9b69af18ca9558922528f23b46e8abf9a68a0ad48acb800a57968196913",
+        "packages/core/src/memory.ts": "b4f06ffb3791817fe96d7eef0057c346a22b66afbc0e695e038efc6428285068",
+        "packages/core/src/profiles.ts": "56165449ed062df307ac94a1267f9cfc5a2fecfbf99d797cd57f199f9b98841c",
+        "packages/core/src/providers-catalog.ts": "2108f5454a48a009b188f055ea77725077728d7da50030532ca6b7d0b721c5ff",
+        "packages/core/src/scoped-runtime.ts": "50ac40748d0e108de54713a2979413dd88e58e40748685bd3b7bfc40a6029871",
+        "packages/core/src/store.ts": "b89e4b0f95954164ee74caec1e0e67346970c41e92cad8ef1479c5d1d13f47a4"
+      }
+    }
+  }
+}
