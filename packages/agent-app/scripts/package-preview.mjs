@@ -30,7 +30,9 @@ for(const command of [
 // PER-09: the build's update channel (src/main/update-channel.ts). The feed URL is optional and never a secret.
 const channel=process.env.MUSTER_UPDATE_CHANNEL?.trim()||'preview';
 if(!['stable','beta','preview'].includes(channel)) throw new Error(`MUSTER_UPDATE_CHANNEL must be stable, beta or preview (got "${channel}").`);
-for(const [key,value] of Object.entries({MusterUpdateChannel:channel,...(process.env.MUSTER_UPDATE_BASE_URL?{MusterUpdateBaseURL:process.env.MUSTER_UPDATE_BASE_URL}:{})})){
+const updateRepo=(process.env.MUSTER_UPDATE_REPO??'').trim();
+if(updateRepo&&!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(updateRepo)) throw new Error('MUSTER_UPDATE_REPO must look like owner/repo.');
+for(const [key,value] of Object.entries({MusterUpdateChannel:channel,...(process.env.MUSTER_UPDATE_BASE_URL?{MusterUpdateBaseURL:process.env.MUSTER_UPDATE_BASE_URL}:{}),...(updateRepo?{MusterUpdateRepo:updateRepo}:{})})){
   if(key==='MusterUpdateBaseURL'&&!/^https:\/\/[^\s@]+$/.test(value)) throw new Error('MUSTER_UPDATE_BASE_URL must be an https URL without credentials.');
   plistBuddy(`Delete :${key}`,{optional:true});plistBuddy(`Add :${key} string ${value}`);
 }

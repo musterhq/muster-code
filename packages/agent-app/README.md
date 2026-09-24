@@ -1,20 +1,69 @@
-# @muster/agent-app
+<div align="center">
 
-Standalone Muster Code agent desktop app. Plain Electron — no Code-OSS, no
-VS Code extension host.
+# Muster Agent
 
-## Download Muster Agent
+**The agentic development client that remembers.**
 
-1. Open the [Muster Agent releases](https://github.com/musterhq/muster-code/releases?q=agent-v) and pick the
-   newest `Muster Agent <version>` (while the repository is private you need a GitHub account with access).
-2. Download the file for your Mac (Apple menu > About This Mac shows the chip):
-   - Apple silicon (M1 and later): `Muster-Agent-<version>-arm64.dmg`
-   - Intel: no download yet — run from a clone (see "Run Muster Agent on another Mac")
+Coding agents in your folders, with long-term memory, sandboxed computers and the providers you
+already have. Native macOS app, built on Electron.
 
-   A `.zip` of the same app is attached too, and `SHA256SUMS` lets you check the download
+[![Latest release](https://img.shields.io/github/v/release/musterhq/muster-code?filter=agent-v*&label=release&color=2f6feb)](https://github.com/musterhq/muster-code/releases/latest)
+[![macOS 14+ · Apple silicon](https://img.shields.io/badge/macOS-14%2B%20·%20Apple%20silicon-111?logo=apple)](https://github.com/musterhq/muster-code/releases/latest)
+[![GitHub stars](https://img.shields.io/github/stars/musterhq/muster-code?style=flat&color=f5c518)](https://github.com/musterhq/muster-code/stargazers)
+
+### [⬇ Download for macOS (Apple silicon)](https://github.com/musterhq/muster-code/releases/latest)
+
+<sub><code>Muster-Agent-&lt;version&gt;-arm64.dmg</code> from the latest release · Intel Macs: <a href="#run-muster-agent-on-another-mac-from-source">run from a clone</a></sub>
+
+<br/>
+
+<!-- screenshot pending: <img src="../../docs/images/muster-agent-hero.png" alt="Muster Agent: a chat with an agent on the left and the live diff of its edits on the right" width="100%"/> -->
+
+</div>
+
+This package is `@muster/agent-app`, the Muster Agent desktop app. It is plain Electron, with no
+Code-OSS and no editor extension host. The product overview is in the
+[repository README](../../README.md). This page is the short pitch plus developer notes.
+
+## Why Muster Agent
+
+- **Memory.** Personal and per-folder memory backed by the Hindsight memory engine. A recall preview
+  in the composer shows which notes the next turn will use. Auto-save after runs is *Never*, *Ask
+  after runs* or *Save after completed runs*.
+- **Sandboxing.** Docker-backed scoped computers per chat or per folder: no network unless you allow
+  egress, 512 MiB / 1 CPU / 256 processes by default, allowlisted environment and tools.
+- **Your providers.** Detected on first launch, with no second sign-in: your ChatGPT and Claude
+  CLI sign-ins, OpenAI-compatible gateways from your local agent CLI config, ten well-known API-key
+  environment variables, Ollama and LM Studio, or any custom OpenAI-compatible endpoint.
+- **Built for low RAM.** Virtualized chat, tool-output and git-history lists. Incremental Markdown
+  streaming. Screens that load on first use. One terminal emulator per shell, moved rather than
+  rebuilt. Bounded command output. Diff and highlight workers that shut down when idle.
+- **A full workbench.** Live diffs with Keep/Undo, an integrated terminal, a built-in browser, a git
+  tab with history and compare, parallel chats, skills, plugins and MCP, automations, import of
+  past agent sessions, and Spotlight search.
+
+<!-- screenshots pending
+<table>
+<tr>
+<td width="50%"><img src="../../docs/images/muster-agent-memory.png" alt="Memory screen"/></td>
+<td width="50%"><img src="../../docs/images/muster-agent-providers.png" alt="Provider setup"/></td>
+</tr>
+<tr>
+<td width="50%"><img src="../../docs/images/muster-agent-terminal.png" alt="Integrated terminal"/></td>
+<td width="50%"><img src="../../docs/images/muster-agent-settings.png" alt="Settings"/></td>
+</tr>
+</table>
+-->
+
+## Install
+
+1. Download the newest `Muster-Agent-<version>-arm64.dmg` from
+   [the latest release](https://github.com/musterhq/muster-code/releases/latest) (all releases are
+   [tagged `agent-v…`](https://github.com/musterhq/muster-code/releases?q=agent-v)). A `.zip` of the
+   same app is attached too, and `SHA256SUMS` lets you check the download
    (`shasum -a 256 -c SHA256SUMS --ignore-missing`).
-3. Open the disk image and drag **Muster Agent** onto **Applications**.
-4. First open. Builds are signed with the self-signed "Muster Agent Self-Signed" identity: the identity
+2. Open the disk image and drag **Muster Agent** onto **Applications**.
+3. First open. Builds are signed with the self-signed "Muster Agent Self-Signed" identity: the identity
    stays the same from one release to the next, so macOS keeps the permissions you grant (Screen
    Recording, Accessibility) across updates, but the app is not notarized by Apple. macOS therefore
    blocks the first launch: right-click **Muster Agent** in Applications and choose **Open**, then
@@ -25,12 +74,14 @@ VS Code extension host.
    xattr -dr com.apple.quarantine "/Applications/Muster Agent.app"
    ```
 
-What it needs: macOS 14 (Sonoma) or later and a model provider sign-in. On first run Muster Agent
-detects the providers already signed in on your Mac (Codex, Claude Code, OpenCode, or a configured
-gateway) and uses them; if it finds none, guided setup walks you through adding one. Docker Desktop
-(sandboxes) is optional.
+4. Updates: the app checks GitHub Releases, verifies the download against its published SHA-256 and
+   code signature, and accepts it only if it is signed by the same identity. The update installs
+   when you restart.
 
-## Build and run Muster Agent from source
+What it needs: macOS 14 (Sonoma) or later and a model provider. The download is Apple silicon only
+for now; Intel Macs run from a clone (below). Docker Desktop (sandboxes) is optional.
+
+## Run Muster Agent on another Mac (from source)
 
 A fresh clone builds and runs with no sibling checkouts and no environment variables: the few
 Muster core sources the app bundles are vendored in `packages/agent-app/vendor/` (see its README).
@@ -44,14 +95,11 @@ Muster core sources the app bundles are vendored in `packages/agent-app/vendor/`
 - git.
 - Xcode Command Line Tools (`xcode-select --install`), used to compile node-pty for the integrated
   terminal. Without them the install still succeeds and falls back to node-pty's prebuilt binary.
-- GitHub access to `musterhq/muster-code`. The repository is private, so the other Mac must be signed
-  in to an account with access (`gh auth login`, an SSH key, or a credential helper) before cloning.
 
 ### One command
 
 ```sh
 git clone https://github.com/musterhq/muster-code.git && cd muster-code \
-  && git checkout claude/muster-agent-completion-20260924 \
   && cd packages/agent-app && npm ci && npm start
 ```
 
@@ -60,7 +108,6 @@ installed, git, Xcode tools), then run `npm ci` and `npm start`:
 
 ```sh
 git clone https://github.com/musterhq/muster-code.git && cd muster-code \
-  && git checkout claude/muster-agent-completion-20260924 \
   && ./packages/agent-app/scripts/run-mac.sh
 ```
 
@@ -70,11 +117,10 @@ the app; later runs only need `npm start` from `packages/agent-app`.
 
 ### First launch
 
-Muster Agent looks for providers you are already signed in to on that Mac (Codex, Claude Code,
-OpenCode, or a configured gateway) and uses them directly. If it finds none, it opens guided setup
-to sign in or add one. Settings and chats live in `~/Library/Application Support/Muster Agent`;
-pass `--user-data-dir=/some/dir` (for example `npx electron . --user-data-dir=/tmp/muster-test`) to
-run an isolated profile.
+Muster Agent looks for providers you are already signed in to on that Mac and uses them directly.
+If it finds none, it opens guided setup to sign in or add one. Settings and chats live in
+`~/Library/Application Support/Muster Agent`; pass `--user-data-dir=/some/dir` (for example
+`npx electron . --user-data-dir=/tmp/muster-test`) to run an isolated profile.
 
 ### Optional capabilities
 
@@ -148,6 +194,7 @@ npm start            # build then launch Electron
 npm run dev          # rebuild on change
 npm run typecheck    # tsc --noEmit
 npm test             # node --test 'tests/*.test.ts'
+npm run test:renderer   # renderer tests (scripts/test-renderer.mjs)
 npm run rebuild:native  # rebuild node-pty for Electron (needs Xcode CLT)
 npm run vendor:sync  # refresh vendor/ from MUSTER_* checkouts
 npm run package      # release build: release-dist/Muster-Agent-<version>-<arch>.zip/.dmg + SHA256SUMS

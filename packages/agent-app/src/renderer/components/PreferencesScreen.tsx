@@ -6,6 +6,7 @@ import type {MemoryAutoRetain,MemoryConfigView} from '../../shared/domains/memor
 import {invoke} from '../bridge';
 import {activeChat,closeSettings,notifyError,notifySuccess,openMemoryScreen,resetSettings,setFollowUpMode,setPluginView,setSetting,setSettingsSection,setSummaryHidden,type SettingsSection} from '../store';
 import {setTerminalDock,subscribeTerminalDock,terminalDock} from '../processSummary';
+import {checkForUpdates,installUpdate,setAutoCheckUpdates,updateSummary,useUpdateStatus} from '../updates';
 import {DEFAULT_DIFF_PREFERENCES,clearGlobalDiffPreferences,hasGlobalDiffPreferences,saveGlobalDiffPreferences,useDiffPreferences,type DiffPreferences} from '../diff-preferences';
 import {useStore,useStoreSelector} from '../useStore';
 import {restoreFocus} from '../focus';
@@ -131,6 +132,29 @@ function GeneralSection({settings,set}:{settings:AppSettings;set:Setter}):React.
         {confirmReset?<><button type="button" className="settings-button danger" onClick={()=>{setConfirmReset(false);void resetSettings();}}>Reset settings</button><button type="button" className="settings-button secondary" onClick={()=>setConfirmReset(false)}>Cancel</button></>
           :<button type="button" className="settings-button secondary" onClick={()=>setConfirmReset(true)}><RotateCcw size={14}/>Reset…</button>}
       </Row>
+    </div>
+    <UpdatesGroup/>
+  </>;
+}
+
+/** Self-update (src/main/app-updater.ts): version, status, a manual check, restart-to-update and the automatic toggle. */
+function UpdatesGroup():React.ReactElement|null {
+  const status=useUpdateStatus();
+  const [busy,setBusy]=useState(false);
+  if(!status)return null;
+  const act=async(action:()=>Promise<unknown>):Promise<void>=>{setBusy(true);try{await action();}catch(cause){notifyError(cause);}finally{setBusy(false);}};
+  const working=busy||status.phase==='checking'||status.phase==='downloading'||status.phase==='installing';
+  return <>
+    <h3 className="preference-group-title">Updates</h3>
+    <div className="preference-group">
+      <Row title={`Muster Agent ${status.current}`} scope={`This Mac · ${status.channel} channel`} description={updateSummary(status)}>
+        {status.phase==='ready'
+          ?<button type="button" className="settings-button" disabled={busy} onClick={()=>void act(installUpdate)}><RotateCcw size={14}/>Update and relaunch</button>
+          :status.phase!=='disabled'&&<button type="button" className="settings-button secondary" disabled={working} onClick={()=>void act(checkForUpdates)}>{status.phase==='checking'?'Checking…':'Check for updates'}</button>}
+      </Row>
+      {status.phase!=='disabled'&&<Row title="Check for updates automatically" scope="This Mac" description="Checks GitHub Releases shortly after launch and every few hours, downloads a newer version in the background and verifies its checksum and signature. Nothing installs until you restart.">
+        <Switch label="Check for updates automatically" checked={status.autoCheck} onChange={value=>void act(()=>setAutoCheckUpdates(value))}/>
+      </Row>}
     </div>
   </>;
 }
