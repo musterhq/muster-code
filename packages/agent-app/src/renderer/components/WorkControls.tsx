@@ -1,6 +1,6 @@
 import {transitionLayout} from '../layoutMotion';
-import React, {useEffect,useRef,useState} from 'react';
-import {Check,GitBranch,ListTodo,LoaderCircle,MoreHorizontal,PanelRight,Share2,X} from 'lucide-react';
+import React, {useEffect,useRef,useState,useSyncExternalStore} from 'react';
+import {Check,GitBranch,ListTodo,LoaderCircle,MoreHorizontal,PanelBottom,PanelRight,Share2,X} from 'lucide-react';
 import {forkChat} from '../messageActions';
 import {getState,activeChat,setResourcesHidden,toggleSummary,updateChat,notifyError} from '../store';
 import {openChatMenu} from '../chatMenu';
@@ -10,6 +10,18 @@ import {invoke} from '../bridge';
 import './work-controls.css';
 import {PendingAttention} from './PendingAttention';
 import {Tip} from './Tooltip';
+import {toggleTerminal} from './ProcessesTab';
+import {subscribeTerminalDock,terminalDock} from '../processSummary';
+
+const MAC=typeof navigator!=='undefined'&&/Mac/.test(navigator.platform);
+
+/** Header toggle for the conversation's terminal: the bottom panel by default, or the right-pane Terminal tab
+ * when Settings › "Default terminal location" is Right. Same action as ⌘J and ⌃`. */
+function TerminalToggle({chatId,title}:{chatId:string;title:string}){
+ const dock=useSyncExternalStore(subscribeTerminalDock,terminalDock);
+ const open=dock.placement==='panel'&&dock.open,label=open?'Hide terminal':'Show terminal';
+ return <Tip label={label} shortcut={MAC?'⌘J':'Ctrl+J'}><button className="icon-button" aria-label={label} aria-pressed={dock.placement==='panel'?open:undefined} onClick={()=>toggleTerminal(chatId,title)}><PanelBottom size={16}/></button></Tip>;
+}
 
 /**
  * Header entry to the summary card: the only control that hides or shows it, at every width. The card
@@ -68,6 +80,7 @@ export function WorkControls(){
   {chat&&<SummaryToggle/>}
   {chat&&<Tip label="Fork into a new chat" disabledReason="Forking…"><button className="icon-button" aria-label="Fork conversation" disabled={forking} aria-busy={forking||undefined} onClick={()=>void fork()}>{forking?<LoaderCircle size={16}/>:<GitBranch size={16}/>}</button></Tip>}
   {chat&&<Tip label="Conversation actions"><button ref={trigger} className="icon-button" aria-label="Conversation actions" aria-haspopup="menu" aria-expanded={menuOpen} onClick={()=>void openMenu()} onKeyDown={event=>{if(event.key==='ArrowDown'){event.preventDefault();void openMenu();}}}><MoreHorizontal size={17}/></button></Tip>}
+  {chat&&<TerminalToggle chatId={chat.id} title={chat.title}/>}
   <Tip label={state.resourcesHidden?'Show resource pane':'Hide resource pane'}><button className="icon-button" aria-label={state.resourcesHidden?'Show resource pane':'Hide resource pane'} aria-pressed={!state.resourcesHidden} onClick={()=>{transitionLayout(()=>setResourcesHidden(!getState().resourcesHidden));}}><PanelRight size={16}/></button></Tip>
   {renaming&&<form className="work-rename" onSubmit={event=>{event.preventDefault();void saveRename();}} data-native-preview-overlay>
    <label htmlFor="work-rename-title">Rename chat</label>

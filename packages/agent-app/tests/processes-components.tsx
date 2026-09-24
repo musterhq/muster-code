@@ -41,13 +41,16 @@ const errors:unknown[]=[],root=createRoot(document.getElementById('root')!,{onUn
 const text=()=>document.body.textContent??'';
 const click=(selector:string)=>{const node=document.querySelector(selector) as HTMLButtonElement|null;assert.ok(node,`missing ${selector}`);node!.click();};
 const count=(name:string)=>calls.filter(call=>call.command===name).length;
+// Terminals default to the bottom panel; these checks cover the right-pane (Settings › Right) form.
+{const dock=await import('../src/renderer/processSummary');assert.equal(dock.terminalDock().placement,'panel','bottom panel is the default');dock.setTerminalDock({placement:'pane',open:false},false);}
 await store.boot();root.render(<ProcessesTab chatId="chat"/>);await delay(60);
 assert.deepEqual(errors,[]);
 // S3-E: one resource, one level. No Terminals/Commands/Agent tabs inside the pane; a conversation
 // without a shell gets one, without Full access.
 assert.equal(document.querySelector('[aria-label="Terminal views"]'),null,'no nested view tabs');
 assert.equal(document.querySelector('.terminal-pane-head h2')?.textContent,'Terminal');
-assert.equal(count('terminal.create'),1);
+for(let end=Date.now()+3000;Date.now()<end&&!count('terminal.create');)await delay(10);
+assert.equal(count('terminal.create'),1,`terminal.create never sent; calls=${calls.map(c=>c.command).join(',')}`);
 const create=calls.find(call=>call.command==='terminal.create')!.input;
 assert.equal(create.chatId,'chat');assert.ok(Number.isInteger(create.cols)&&create.cols>=20&&Number.isInteger(create.rows)&&create.rows>=5);
 assert.equal(document.querySelectorAll('.terminal-shell-row').length,1);

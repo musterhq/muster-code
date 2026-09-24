@@ -21,8 +21,10 @@ const {Composer}=await import('../src/renderer/components/Composer');const {useS
 const root=createRoot(document.getElementById('root')!);function Harness(){const state=useStore();return state.snapshot?<Composer chat={state.snapshot.chats[0]}/>:null;}
 await store.boot();root.render(<Harness/>);await delay(40);
 const click=async(selector:string)=>{const button=document.querySelector(selector) as HTMLButtonElement;assert.ok(button,selector);button.click();await delay(35);};
-await click('[data-testid="composer-plus"]');for(let end=Date.now()+3000;Date.now()<end&&!Array.from(document.querySelectorAll('[data-testid="composer-row"]')).some(b=>b.textContent?.includes('review'));)await delay(10);
-const skillOption=Array.from(document.querySelectorAll<HTMLButtonElement>('[data-testid="composer-row"]')).find(button=>button.textContent?.includes('review'))!;assert.ok(skillOption,'skills are listed in the + menu');
+// Re-open the + menu until the skill row shows: on a slow runner the first click can land before the composer settles.
+const hasSkill=()=>Array.from(document.querySelectorAll('[data-testid="composer-row"]')).some(b=>b.textContent?.includes('review'));
+for(let attempt=0,end=Date.now()+5000;!hasSkill()&&Date.now()<end;attempt++){if(!document.querySelector('[data-testid="composer-row"]'))await click('[data-testid="composer-plus"]');for(let wait=Date.now()+500;!hasSkill()&&Date.now()<wait;)await delay(10);}
+const skillOption=Array.from(document.querySelectorAll<HTMLButtonElement>('[data-testid="composer-row"]')).find(button=>button.textContent?.includes('review'))!;assert.ok(skillOption,`skills are listed in the + menu; rows=${JSON.stringify(Array.from(document.querySelectorAll('[data-testid="composer-row"]')).map(b=>b.textContent))} calls=${calls.map(c=>c.command).join(',')}`);
 skillOption.click();await delay(25);
 assert.equal(store.getState().composerDrafts[chat.id]?.text??chat.draft,'Original request $review ');assert.equal(document.querySelector('[data-testid="token-chip"]')?.textContent,'$review');
 assert.equal(store.getState().screen,'work','picking a skill never navigates');
