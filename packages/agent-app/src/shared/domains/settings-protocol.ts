@@ -8,14 +8,22 @@ export type ThemePreference = 'system' | 'dark' | 'light';
 export const THEME_PREFERENCES = ['system', 'dark', 'light'] as const;
 
 /** Every persisted preference. Only these keys are accepted, stored, exported or imported; none are secret. */
+export const RESPONSE_STYLES = ['auto', 'friendly', 'pragmatic'] as const;
+export type ResponseStyle = typeof RESPONSE_STYLES[number];
+export const CHAT_TEXT_SIZES = [13, 14, 15, 16] as const;
+export type ChatTextSize = typeof CHAT_TEXT_SIZES[number];
 export interface AppSettings {
   'general.sendKey': SendKey;
   'general.spellcheck': boolean;
   'appearance.theme': ThemePreference;
   'appearance.textSize': number;
+  /** Reply prose size in px; the rest of the UI follows appearance.textSize. */
+  'appearance.chatTextSize': ChatTextSize;
   'appearance.reducedMotion': AccessibilityOverride;
   'appearance.reducedTransparency': AccessibilityOverride;
   'chat.inlineDiffs': boolean;
+  /** How Codex-backed agents write: `personality` in Codex config. Automatic uses your Codex config's personality, else Friendly (as the desktop app does). */
+  'chat.responseStyle': ResponseStyle;
   /** The model new chats start with, unless their Project sets one. Null follows the app's built-in default. */
   'general.defaultModel': ModelPreference | null;
   /** CHAT-16: archive chats idle for this many days (0 = never). Pinned, running, snoozed and needs-attention chats are never auto-archived. */
@@ -53,9 +61,11 @@ export const SETTING_DEFAULTS: AppSettings = {
   'general.spellcheck': true,
   'appearance.theme': 'dark',
   'appearance.textSize': 100,
+  'appearance.chatTextSize': 14,
   'appearance.reducedMotion': 'system',
   'appearance.reducedTransparency': 'system',
   'chat.inlineDiffs': true,
+  'chat.responseStyle': 'auto',
   'general.defaultModel': null,
   'chats.autoArchiveDays': 0,
   'notifications.runs': 'all',
@@ -85,9 +95,11 @@ const CHECKS: { [K in SettingKey]: { valid(value: unknown): value is AppSettings
   'general.spellcheck': { valid: bool, expected: 'true or false' },
   'appearance.theme': { valid: oneOf<ThemePreference>(THEME_PREFERENCES), expected: '"system", "dark" or "light"' },
   'appearance.textSize': { valid: (value): value is number => typeof value === 'number' && (TEXT_SIZES as readonly number[]).includes(value), expected: `one of ${TEXT_SIZES.join(', ')}` },
+  'appearance.chatTextSize': { valid: (value): value is ChatTextSize => typeof value === 'number' && (CHAT_TEXT_SIZES as readonly number[]).includes(value), expected: `one of ${CHAT_TEXT_SIZES.join(', ')}` },
   'appearance.reducedMotion': { valid: oneOf<AccessibilityOverride>(['system', 'reduce']), expected: '"system" or "reduce"' },
   'appearance.reducedTransparency': { valid: oneOf<AccessibilityOverride>(['system', 'reduce']), expected: '"system" or "reduce"' },
   'chat.inlineDiffs': { valid: bool, expected: 'true or false' },
+  'chat.responseStyle': { valid: oneOf<ResponseStyle>(RESPONSE_STYLES), expected: '"auto", "friendly" or "pragmatic"' },
   'general.defaultModel': { valid: modelPreference, expected: 'null or {providerId, model, effort?}' },
   'notifications.runs': { valid: oneOf<RunNotifications>(['all', 'failures', 'off']), expected: '"all", "failures" or "off"' },
   'notifications.attention': { valid: bool, expected: 'true or false' },

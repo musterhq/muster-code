@@ -1,4 +1,5 @@
 import {copyText} from '../clipboard';
+import { advanceFade, createFadeState, rehypeStreamFade, type FadeState } from '../markdown-fade';
 import { Check, Copy, Quote, X } from 'lucide-react';
 import {addComposerContext} from '../composerContext';
 import React, { useEffect, useRef, useState } from 'react';
@@ -161,9 +162,13 @@ function SelectionQuote({ container }: { container: React.RefObject<HTMLDivEleme
   return <button type="button" className="md-quote" style={{ left: offer.left, top: offer.top }} onMouseDown={event => event.preventDefault()} onClick={quote} aria-label="Quote in reply" title="Quote in reply"><Quote size={12} />Quote</button>;
 }
 
-function MessageBodyContent({ text, resourceContext }: { text: string; resourceContext?: ResourceContext }): React.ReactElement {
+function MessageBodyContent({ text, resourceContext, animate = false }: { text: string; resourceContext?: ResourceContext; animate?: boolean }): React.ReactElement {
   const remarkPlugins = React.useMemo(() => [remarkGfm, createIncrementalMarkdownPlugin()], []);
   const renderedText = React.useMemo(() => inferMarkdownCodeLanguages(text), [text]);
+  // Streaming fade (markdown-fade.ts): text that arrives after the first render fades in.
+  const fade = useRef<FadeState | null>(null);
+  fade.current = animate ? (fade.current ? advanceFade(fade.current, renderedText) : createFadeState(renderedText)) : null;
+  const rehypePlugins = React.useMemo(() => [rehypeStreamFade(() => fade.current)], []);
   const renderers = React.useMemo<Components>(() => {
     // ReactMarkdown renders duplicate headings in one pass. Keep fragment targets
     // deterministic while avoiding collisions that would jump to the wrong section.
@@ -191,6 +196,7 @@ function MessageBodyContent({ text, resourceContext }: { text: string; resourceC
     <div className="md-body" ref={body}>
       <ReactMarkdown
         remarkPlugins={remarkPlugins}
+        rehypePlugins={rehypePlugins}
         skipHtml
         urlTransform={safeUrl}
         components={renderers}
@@ -206,6 +212,7 @@ function MessageBodyContent({ text, resourceContext }: { text: string; resourceC
 // unchanged Markdown document. Link previews still subscribe to scope changes.
 export const MessageBody = React.memo(MessageBodyContent, (previous, next) =>
   previous.text === next.text &&
+  previous.animate === next.animate &&
   previous.resourceContext?.folderId === next.resourceContext?.folderId &&
   previous.resourceContext?.path === next.resourceContext?.path,
 );

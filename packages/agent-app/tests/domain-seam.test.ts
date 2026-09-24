@@ -50,7 +50,7 @@ test('a domain handler is reachable and contributors shape the provider run',asy
   const input=inputs[0]!;
   assert.match(input.prompt,/<context source="test ctx">\nnote for hello in /);
   assert.match(input.prompt,/Current user request:\nhello$/);
-  assert.equal(input.reasoningEffort,'high');assert.deepEqual(input.configOverrides,{'features.demo':true});assert.equal(input.developerInstructions,'Be brief.');
+  assert.equal(input.reasoningEffort,'high');{const {personality,...rest}=input.configOverrides ?? {};assert.deepEqual(rest,{'features.demo':true});assert.ok(personality===undefined||personality==='friendly','the settings domain adds the response style (unless the Codex config sets one)');}assert.equal(input.developerInstructions,'Be brief.');
   assert.equal(started,1);assert.deepEqual(settled,['completed']);
   const notice=(await service.invoke('chat.timeline',{id:chat.id})).items.find(item=>item.data?.kind==='context-sources')!;
   assert.deepEqual(notice.data?.sources,['test ctx']);

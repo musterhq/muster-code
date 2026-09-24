@@ -23,6 +23,7 @@ export function installSystemThemeListener(preference: () => ThemePreference | u
 export function applyDocumentPreferences(settings: AppSettings, root: HTMLElement = document.documentElement): void {
   root.setAttribute('data-theme', resolveTheme(settings['appearance.theme']));
   root.setAttribute('data-motion', settings['appearance.reducedMotion']);
+  root.setAttribute('data-chat-text', String(settings['appearance.chatTextSize'] ?? 14));
   root.setAttribute('data-transparency', settings['appearance.reducedTransparency']);
   root.setAttribute('data-send-key', settings['general.sendKey']);
   root.setAttribute('spellcheck', String(settings['general.spellcheck']));

@@ -47,7 +47,7 @@ const where = (d: Declaration) => `${d.file} ${d.selector} { ${d.property}: ${d.
 const DOCUMENT_EMULATION = /\.office-sheet|\.workbook-zoom|\.textLayer|\.pdf-page/;
 const exempt = (d: Declaration) => d.file.endsWith('file-preview.css') && DOCUMENT_EMULATION.test(d.selector);
 
-const TOKEN_SIZE = /^var\(--(?:fs-\d+|font-(?:ui|control|caption)|sidebar-(?:font|label|badge)|diff-font-size\s*,\s*var\(--fs-\d+\))\)$/;
+const TOKEN_SIZE = /^var\(--(?:fs-\d+|font-(?:ui|control|caption)|chat-font-size|sidebar-(?:font|label|badge)|diff-font-size\s*,\s*var\(--fs-\d+\))\)$/;
 function fontSizeOk(value: string): boolean {
   const v = value.replace(/\s*!important$/, '').trim();
   if (TOKEN_SIZE.test(v)) return true;
