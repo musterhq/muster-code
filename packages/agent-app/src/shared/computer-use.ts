@@ -11,7 +11,7 @@ const COMPUTER_USE_TOOL = /^(listApps|list_apps|snapshot|getAppState|get_app_sta
 const BROWSER_SERVER = /^muster[_-]browser$/i;
 
 export const BROWSER_TOOLS = ['browser_navigate', 'browser_snapshot', 'browser_click', 'browser_type', 'browser_press_key', 'browser_hover', 'browser_select_option', 'browser_scroll', 'browser_screenshot', 'browser_go_back', 'browser_reload', 'browser_wait_for', 'browser_console_messages'] as const;
-export const BROWSER_NOTE = `Muster has an in-app browser shown to the user in the right pane. For web pages prefer the ${BROWSER_MCP} MCP tools (${BROWSER_TOOLS.join(', ')}). Flow: browser_navigate, browser_snapshot, act on [ref=eN], re-snapshot. The user watches this browser live and may take control; if a tool says the user has control, stop and wait for them.`;
+export const BROWSER_NOTE = `Muster has an in-app browser shown to the user in the right pane. For web pages prefer the ${BROWSER_MCP} MCP tools (${BROWSER_TOOLS.join(', ')}). When the user says "in-app browser", "the browser", "Muster's browser", "here" or "in the side pane", or asks to open, check or test a page or local app URL without naming another browser, use ${BROWSER_MCP}: not Safari or Chrome, not the computer-use plugin, and not curl. Flow: browser_navigate, browser_snapshot, act on [ref=eN], re-snapshot. The user watches this browser live and may take control; if a tool says the user has control, stop and wait for them.`;
 export const COMPUTER_USE_NOTE = 'For macOS desktop apps (outside the in-app browser) use the signed-in Codex computer-use plugin (computer-use / unified-computer-use): listApps, snapshot, click, type, scroll, then confirm consequential actions. Use the visualize plugin to save screenshots and embed them as ![alt](path) in the reply. Do not invent a second computer-use path.';
 export const READ_ONLY_NOTE = 'This chat is read-only: do not drive the computer or the browser beyond reading pages and taking screenshots.';
 
@@ -118,9 +118,13 @@ export function elicitationText(params: Record<string, unknown>): string {
 export function elicitationServer(params: Record<string, unknown>): string {
   return (str(params.serverName) || str(params.server) || str(params.mcpServer)).slice(0, 128);
 }
-/** Full access answers for the user; workspace asks with an approval card; read-only declines. */
-export function elicitationPolicy(permissionMode: ChatPermissionMode | undefined): 'accept' | 'ask' | 'decline' {
-  return permissionMode === 'full' ? 'accept' : permissionMode === 'workspace' ? 'ask' : 'decline';
+/** Full access answers for the user; workspace asks with an approval card; read-only declines. Muster's own in-app
+ *  browser is first-party, shown live in the right pane and stops the moment the user takes control, so in workspace
+ *  mode its steps run without a card (as Codex's built-in browser does). Desktop computer use still asks. */
+export function elicitationPolicy(permissionMode: ChatPermissionMode | undefined, server = ''): 'accept' | 'ask' | 'decline' {
+  if (permissionMode === 'full') return 'accept';
+  if (permissionMode === 'workspace') return BROWSER_SERVER.test(server) ? 'accept' : 'ask';
+  return 'decline';
 }
 export function elicitationResult(approved: boolean): Record<string, unknown> {
   return approved ? {action: 'accept', content: {}} : {action: 'decline', content: null};

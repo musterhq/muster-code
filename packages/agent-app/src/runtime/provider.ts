@@ -10,6 +10,7 @@ import {currentProviderUsage, formatResetEta} from './provider-usage.ts';
 import {connectorPolicy, leanCodexFeatureOverrides} from './context-budget.ts';
 import type { Chat, ProviderInfo } from '../shared/protocol.ts';
 import {NativeUnavailableError} from './codex-native.ts';
+import {mcpServersFromOverrides} from './adapters/shared.ts';
 
 /** Identity of the test-only route `createProviderAdapter({available})` builds. */
 export const FIXTURE_PROVIDER = {id: 'fixture', bindingId: 'fixture-binding', model: 'fixture-model'} as const;
@@ -174,6 +175,7 @@ export function createProviderAdapter(options: { core?: CoreClient; available?: 
         ...(input.images?.length ? {images: input.images} : {}), ...(input.reasoningEffort ? {reasoningEffort: input.reasoningEffort} : {}),
         ...(resumeThreadId ? {resumeThreadId} : {}),
         instructions: runInstructions(input.chat.mode, input.developerInstructions),
+        ...(Object.keys(mcpServersFromOverrides(input.configOverrides)).length ? {mcpServers: mcpServersFromOverrides(input.configOverrides)} : {}),
         onThreadReady: threadId => { if (live()) input.onThreadReady?.(threadId); },
         onTurnAccepted: identity => { activity = true; if (live()) input.onTurnAccepted?.({...identity, dispatchState: 'dispatched'}); },
         onDelta: text => { activity = true; if (live()) input.onDelta(text); },
