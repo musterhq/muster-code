@@ -54,7 +54,7 @@ export function summarizeActivity(items:readonly TimelineItem[]):string {
   const unique=[...new Map(items.map(item=>[item.id,item])).values()];
   const running=unique.findLast(item=>item.status==='running');
   if(running){const p=classifyTool(running.data);return `${awaitingApproval(running)?APPROVAL_WAIT_LABEL:p.runningVerb}${p.subject?' '+p.subject:''}`;}
-  const read=new Set<string>(),edited=new Set<string>(),viewed=new Set<string>();let searches=0,commands=0,tools=0,agents=0;
+  const read=new Set<string>(),edited=new Set<string>(),viewed=new Set<string>(),used=new Set<string>();let searches=0,commands=0,tools=0,agents=0;
   for(const item of unique.filter(item=>item.status==='completed')){
     const p=classifyTool(item.data);
     if(p.images?.length) {for(const path of p.images)viewed.add(path);}
@@ -63,11 +63,12 @@ export function summarizeActivity(items:readonly TimelineItem[]):string {
     else if(p.kind==='search') searches++;
     else if(p.kind==='command') commands++;
     else if(p.kind==='subagent') agents++;
+    else if(p.kind==='computer'&&p.computer) used.add(p.computer.target==='browser'?'the browser':p.computer.app||'the computer');
     else tools++;
   }
   const count=(n:number,one:string,many=one+'s')=>`${n} ${n===1?one:many}`;
-  // Codex order: what changed first, then what was looked at, then what ran.
-  const parts=[edited.size?`edited ${count(edited.size,'file')}`:'',read.size?`read ${count(read.size,'file')}`:'',viewed.size?`viewed ${count(viewed.size,'image')}`:'',searches?`${count(searches,'search','searches')}`:'',commands?`ran ${count(commands,'command')}`:'',agents?`${count(agents,'agent action')}`:'',tools?`${count(tools,'tool call')}`:''].filter(Boolean);
+  // Codex order: the apps it drove ("Used Chrome integration"), what changed, what was looked at, then what ran.
+  const parts=[used.size?`used ${namesLabel([...used])}`:'',edited.size?`edited ${count(edited.size,'file')}`:'',read.size?`read ${count(read.size,'file')}`:'',viewed.size?`viewed ${count(viewed.size,'image')}`:'',searches?`${count(searches,'search','searches')}`:'',commands?`ran ${count(commands,'command')}`:'',agents?`${count(agents,'agent action')}`:'',tools?`${count(tools,'tool call')}`:''].filter(Boolean);
   const failed=unique.filter(item=>item.status==='failed').length;
   const interrupted=unique.filter(item=>item.status==='interrupted').length;
   const cancelled=unique.filter(item=>item.status==='cancelled').length;
@@ -85,6 +86,14 @@ export function activityKind(items:readonly TimelineItem[]):{kind:ReturnType<typ
   for(const kind of ['edit','read','search','command','subagent','mcp','computer','list'] as const){const hit=kinds.find(p=>p.kind===kind&&!(kind==='read'&&p.images?.length));if(hit)return {kind,image:false};}
   if(kinds.some(p=>p.images?.length))return {kind:'read',image:true};
   return {kind:kinds[0]?.kind??'generic',image:false};
+}
+/** The app a group drove (Codex shows its icon on the summary row): the running step's, else the newest. */
+export function activityApp(items:readonly TimelineItem[]):{app:string;target:'computer'|'browser'}|undefined {
+  const running=items.findLast(item=>item.status==='running');
+  const pick=(item:TimelineItem|undefined)=>{const action=item?classifyTool(item.data).computer:undefined;return action?{app:action.app,target:action.target}:undefined;};
+  if(running)return pick(running);
+  for(let index=items.length-1;index>=0;index--){const hit=pick(items[index]);if(hit)return hit;}
+  return undefined;
 }
 /** Paths of every image a group only viewed, for its thumbnail strip. */
 export function viewedImages(items:readonly TimelineItem[]):string[] {

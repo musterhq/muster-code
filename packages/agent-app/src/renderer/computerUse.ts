@@ -8,6 +8,8 @@ import {subscribe} from './bridge.ts';
 
 export type Corner = 'top-right' | 'top-left' | 'bottom-right' | 'bottom-left';
 export const PIP_MIN = 220, PIP_MAX = 480, PIP_DEFAULT = 300;
+/** Cards in the PiP stack: one per app, window or page the agent used lately (Codex). */
+export const PIP_STACK_MAX = 4;
 /** CUA-09: a frame older than this is stale; older than the second, the feed is disconnected. */
 export const STALE_MS = 2000, DISCONNECTED_MS = 10_000;
 /** The PiP goes away this long after the last computer-use activity once the run is idle. */
@@ -31,6 +33,26 @@ export function cornerPosition(corner: Corner, area: {left: number; top: number;
   const x = corner.endsWith('right') ? area.left + area.width - inset.right - size.width : area.left + inset.left;
   const y = corner.startsWith('bottom') ? area.top + area.height - inset.bottom - size.height : area.top + inset.top;
   return {x: Math.max(area.left, Math.round(x)), y: Math.max(area.top, Math.round(y))};
+}
+export interface Box {left: number; top: number; right: number; bottom: number; width: number; height: number}
+/** Stack metrics: gap under the summary card, inset from the conversation edge, how far each older card peeks. */
+export const STACK_GAP = 10, STACK_EDGE = 14, STACK_PEEK = 9, STACK_WIDTH = 280;
+/** The stack's cards are 16:10; each older card peeks above the one in front of it. */
+export const stackHeight = (width: number, count: number) => Math.round(width * 0.625) + STACK_PEEK * Math.max(0, Math.min(count, PIP_STACK_MAX) - 1);
+export const stackWidth = (card: Box | undefined) => Math.round(Math.min(320, Math.max(PIP_MIN, card?.width ?? STACK_WIDTH)));
+/** Codex: the stack floats at the conversation's right, just under the summary card; beside the card when
+ * there is no room under it, and under the chat header (where the card would be) when the card is hidden.
+ * `right` is the CSS distance from the viewport's right edge. */
+export function stackAnchor(center: Box | undefined, card: Box | undefined, vars: {top: number; bottom: number}, size: {width: number; height: number}, viewportWidth: number): {right: number; top: number} {
+  if (!center) return {right: STACK_EDGE, top: 56};
+  const floor = center.bottom - vars.bottom;
+  let right: number, top: number;
+  if (card) {
+    const below = card.bottom + STACK_GAP;
+    if (below + size.height <= floor) { right = viewportWidth - card.right; top = below; }
+    else { right = viewportWidth - card.left + STACK_GAP; top = card.top; }
+  } else { right = viewportWidth - center.right + STACK_EDGE; top = center.top + vars.top; }
+  return {right: Math.max(0, Math.round(right)), top: Math.round(Math.max(center.top, top))};
 }
 export type Freshness = 'live' | 'stale' | 'disconnected' | 'ended';
 export function frameFreshness(ageMs: number, running: boolean): Freshness {
@@ -71,6 +93,38 @@ export function pickSource(frame: PipSource | undefined, shot: PipSource | undef
   // A transcript step newer than the last frame still wins its label, but keeps the fresher picture.
   return shot.at > frame.at ? {...shot, image: shot.image ?? frame.image, owner: frame.owner, profileId: frame.profileId, url: shot.url ?? frame.url} : frame;
 }
+/** Which card a source belongs to: a browser page by host, a desktop app by name. */
+export function sourceKey(source: Pick<PipSource, 'target' | 'app' | 'url'>): string {
+  if (source.target === 'browser') return `browser:${source.url ? hostOf(source.url) : (source.app || 'browser').toLowerCase()}`;
+  return `app:${(source.app || 'screen').toLowerCase()}`;
+}
+/** The chat's recently used apps and pages, newest first, each with its own newest step and screenshot.
+ * Browser steps without a URL belong to the page the last navigation opened. Bounded scan of the tail. */
+export function recentComputerSources(items: readonly TimelineItem[], limit = 400, max = PIP_STACK_MAX): PipSource[] {
+  const byKey = new Map<string, PipSource>();
+  let page = '';
+  for (let index = Math.max(0, items.length - limit); index < items.length; index++) {
+    const item = items[index]!;
+    if (item.kind !== 'tool') continue;
+    const action = computerAction(item.data);
+    if (!action) continue;
+    if (action.target === 'browser' && action.url) page = action.url;
+    const url = action.url || (action.target === 'browser' ? page : '');
+    const running = item.status === 'running';
+    const step: PipSource = {chatId: item.chatId, target: action.target, app: action.app, label: running ? `${action.runningVerb}${action.label.slice(action.verb.length)}` : action.label, at: Date.parse(item.createdAt) || 0, itemId: item.id, running, ...(item.status === 'failed' ? {failed: errorText(item.data) || 'The last step failed.'} : {}), ...(url ? {url} : {})};
+    const key = sourceKey(step), prior = byKey.get(key), image = shots(item.data).at(-1) ?? prior?.image;
+    byKey.delete(key);
+    byKey.set(key, {...step, ...(image ? {image} : {})});
+  }
+  return [...byKey.values()].sort((a, b) => b.at - a.at).slice(0, max);
+}
+/** Pushed browser frames and transcript steps, one card per source (pickSource per match), newest first. */
+export function mergeSources(frames: readonly PipSource[], steps: readonly PipSource[], max = PIP_STACK_MAX): PipSource[] {
+  const byKey = new Map<string, PipSource>();
+  for (const step of steps) byKey.set(sourceKey(step), step);
+  for (const frame of frames) { const key = sourceKey(frame); byKey.set(key, pickSource(frame, byKey.get(key))!); }
+  return [...byKey.values()].sort((a, b) => b.at - a.at).slice(0, max);
+}
 export function pipShouldShow(source: PipSource | undefined, running: boolean, now: number): boolean {
   return !!source && (running || now - source.at < HIDE_AFTER_MS);
 }
@@ -84,6 +138,8 @@ const PLACEMENT_KEY = 'muster.computerPip';
 interface ViewerTarget {chatId: string; live: boolean; source?: PipSource}
 interface ComputerUiState {
   frames: Record<string, PipSource>;
+  /** chatId → the last few distinct pages the agent's browser pushed frames for, newest first. */
+  recentFrames: Record<string, PipSource[]>;
   control: Record<string, ComputerControlOwner>;
   placement: PipPlacement;
   minimized: boolean;
@@ -99,7 +155,7 @@ function loadPlacement(): PipPlacement {
   } catch {}
   return {corner: 'top-right', width: PIP_DEFAULT};
 }
-let ui: ComputerUiState = {frames: {}, control: {}, placement: typeof localStorage === 'undefined' ? {corner: 'top-right', width: PIP_DEFAULT} : loadPlacement(), minimized: false, docked: false, viewer: null, browsers: {}};
+let ui: ComputerUiState = {frames: {}, recentFrames: {}, control: {}, placement: typeof localStorage === 'undefined' ? {corner: 'top-right', width: PIP_DEFAULT} : loadPlacement(), minimized: false, docked: false, viewer: null, browsers: {}};
 const listeners = new Set<() => void>();
 function set(patch: Partial<ComputerUiState>): void { ui = {...ui, ...patch}; for (const listener of listeners) listener(); }
 export function computerUi(): ComputerUiState { return ui; }
@@ -118,10 +174,13 @@ export const closeViewer = () => set({viewer: null, docked: false});
 export function applyComputerEvent(event: {type: string; [key: string]: unknown}): void {
   if (event.type === 'computerFrame') {
     const frame = event.frame as ComputerFrame;
-    const frames = {...ui.frames, [frame.chatId]: frameSource(frame)};
-    const ids = Object.keys(frames);
-    if (ids.length > 16) delete frames[ids.sort((a, b) => frames[a]!.at - frames[b]!.at)[0]!];
-    set({frames});
+    const source = frameSource(frame), key = sourceKey(source);
+    const frames = {...ui.frames, [frame.chatId]: source};
+    const ids = Object.keys(frames).filter(id => id !== frame.chatId);
+    if (ids.length >= 16) delete frames[ids.sort((a, b) => frames[a]!.at - frames[b]!.at)[0]!];
+    const recentFrames = {...ui.recentFrames, [frame.chatId]: [source, ...(ui.recentFrames[frame.chatId] ?? []).filter(prior => sourceKey(prior) !== key)].slice(0, PIP_STACK_MAX)};
+    for (const id of Object.keys(recentFrames)) if (!frames[id]) delete recentFrames[id];
+    set({frames, recentFrames});
   } else if (event.type === 'computerControl') set({control: bounded({...ui.control, [String(event.chatId)]: event.owner as ComputerControlOwner})});
   else if (event.type === 'computerBrowserOpened') set({browsers: bounded({...ui.browsers, [String(event.chatId)]: {owner: String(event.owner), profileId: String(event.profileId), url: String(event.url)}})});
 }

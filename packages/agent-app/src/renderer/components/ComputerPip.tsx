@@ -1,6 +1,6 @@
 /** Codex-style computer-use picture-in-picture (CUA-01/02/03/07/09) and the right-pane screenshot viewer (CUA-06). */
-import React,{useCallback,useEffect,useMemo,useRef,useState} from 'react';
-import {AppWindow,Download,ExternalLink,Eye,EyeOff,Globe,Hand,Maximize2,Minimize2,PanelRight,Paperclip,Play,Square,X} from 'lucide-react';
+import React,{useEffect,useMemo,useState} from 'react';
+import {AppWindow,Download,ExternalLink,Eye,Globe,Hand,Minimize2,Paperclip,Play,Square,X} from 'lucide-react';
 import {invoke} from '../bridge';
 import {getState,notifyError,notifySuccess,openTab,stopChat} from '../store';
 import {useStoreSelector} from '../useStore';
@@ -8,11 +8,11 @@ import {stageAttachment} from '../composerBridge';
 import {rememberProfile} from './BrowserTab';
 import {ImageFile} from './ImageFile';
 import type {ComputerPermissions} from '../../shared/domains/computer-protocol';
-import {PIP_MAX,PIP_MIN,clampPipWidth,closeViewer,cornerPosition,formatAge,frameFreshness,hostOf,latestComputerShot,openViewer,pickSource,pipShouldShow,screenshotName,setDocked,setMinimized,setPlacement,snapCorner,toolImageUrl,useComputerUi,wireComputerEvents,type Freshness,type PipSource} from '../computerUse';
+import {PIP_STACK_MAX,STACK_PEEK,STACK_WIDTH,closeViewer,formatAge,frameFreshness,hostOf,mergeSources,openViewer,pipShouldShow,recentComputerSources,screenshotName,setDocked,setMinimized,sourceKey,stackAnchor,stackHeight,stackWidth,toolImageUrl,useComputerUi,wireComputerEvents,type Box,type Freshness,type PipSource} from '../computerUse';
+import {AppGlyph} from './AppGlyph';
 import './pip.css';
 import {Tip} from './Tooltip';
 
-const INSET={top:12,right:16,bottom:12,left:16};
 const loadImage=(id:string)=>invoke('computer.image',{id});
 const FRESH_LABEL:Record<Freshness,string>={live:'Live',stale:'Stale',disconnected:'Disconnected',ended:'Ended'};
 
@@ -28,20 +28,27 @@ function useShotUrl(source:PipSource|undefined):string|undefined {
   },[key]);
   return shot?.dataUrl??url;
 }
-/** The newest source of one chat: a pushed browser frame or the transcript's newest computer-use step. */
-function useChatSource(chatId:string|null):{source?:PipSource;running:boolean} {
+/** The chat's recently used apps and pages (pushed browser frames and transcript steps), newest first. */
+function useChatSources(chatId:string|null):{sources:PipSource[];source?:PipSource;running:boolean} {
   const ui=useComputerUi();
   const items=useStoreSelector(state=>chatId?state.timelines[chatId]?.value:undefined);
   const status=useStoreSelector(state=>state.snapshot?.chats.find(chat=>chat.id===chatId)?.status);
-  const shot=useMemo(()=>items?latestComputerShot(items):undefined,[items]);
-  return {source:chatId?pickSource(ui.frames[chatId],shot):undefined,running:status==='running'||status==='stopping'};
+  const steps=useMemo(()=>items?recentComputerSources(items):[],[items]);
+  const recent=chatId?ui.recentFrames[chatId]:undefined,latest=chatId?ui.frames[chatId]:undefined;
+  const frames=useMemo(()=>recent??(latest?[latest]:[]),[recent,latest]);
+  const sources=useMemo(()=>chatId?mergeSources(frames,steps):[],[chatId,frames,steps]);
+  return {sources,source:sources[0],running:status==='running'||status==='stopping'};
+}
+/** The newest source of one chat, for the right-pane live viewer. */
+function useChatSource(chatId:string|null):{source?:PipSource;running:boolean} {
+  const {source,running}=useChatSources(chatId);
+  return {source,running};
 }
 function useNow(active:boolean,everyMs=1000):number {
   const [now,setNow]=useState(()=>Date.now());
   useEffect(()=>{if(!active)return;setNow(Date.now());const timer=window.setInterval(()=>setNow(Date.now()),everyMs);return()=>window.clearInterval(timer);},[active,everyMs]);
   return now;
 }
-const conversationArea=()=>{const el=document.querySelector<HTMLElement>('.center .chat')??document.querySelector<HTMLElement>('.chat');const r=el?.getBoundingClientRect();return r&&r.width>0?{left:r.left,top:r.top,width:r.width,height:r.height}:{left:0,top:0,width:window.innerWidth,height:window.innerHeight};};
 
 /** Opens the page the agent is looking at in the in-app browser: its own tab when one exists, else a new tab. */
 export function visitSource(source:PipSource):void {
@@ -98,12 +105,60 @@ function ControlButtons({source,owner,running,compact=false}:{source:PipSource;o
   </>;
 }
 
-/** Floating live thumbnail over the conversation; one per window, showing the active chat's own activity. */
+/** Where the stack sits now: measured from the summary card and the conversation (see stackAnchor). */
+const rectOf=(el:Element|null|undefined):Box|undefined=>{
+  if(!el)return undefined;const r=el.getBoundingClientRect();
+  return r.width>0&&r.height>0?{left:r.left,top:r.top,right:r.right,bottom:r.bottom,width:r.width,height:r.height}:undefined;
+};
+function measureStack(count:number):{right:number;top:number;width:number} {
+  if(typeof document==='undefined')return {right:14,top:56,width:STACK_WIDTH};
+  const center=document.querySelector<HTMLElement>('main.center')??document.querySelector<HTMLElement>('.center');
+  const card=rectOf(center?.querySelector('.summary-card:not([hidden])')),box=rectOf(center);
+  const css=center?getComputedStyle(center):undefined;
+  const px=(name:string,fallback:number)=>{const value=parseFloat(css?.getPropertyValue(name)??'');return Number.isFinite(value)?value:fallback;};
+  const width=stackWidth(card);
+  return {...stackAnchor(box,card,{top:px('--summary-top',56),bottom:px('--summary-bottom',16)},{width,height:stackHeight(width,count)},window.innerWidth),width};
+}
+function useStackAnchor(active:boolean,count:number) {
+  const [anchor,setAnchor]=useState(()=>measureStack(count));
+  useEffect(()=>{
+    if(!active)return;
+    const update=()=>setAnchor(prev=>{const next=measureStack(count);return prev.right===next.right&&prev.top===next.top&&prev.width===next.width?prev:next;});
+    update();
+    window.addEventListener('resize',update);
+    // The summary card folds, grows and hides without a window resize; a light poll follows it.
+    const timer=window.setInterval(update,700);
+    const center=document.querySelector('main.center');
+    const observer=typeof ResizeObserver==='undefined'||!center?undefined:new ResizeObserver(update);
+    if(center)observer?.observe(center);
+    return()=>{window.removeEventListener('resize',update);window.clearInterval(timer);observer?.disconnect();};
+  },[active,count]);
+  return anchor;
+}
+
+/** One live thumbnail in the stack: frameless, the newest in front, older ones peeking above it. */
+function PipCard({source,depth,count,freshness,owner,now}:{source:PipSource;depth:number;count:number;freshness:Freshness;owner:'agent'|'user';now:number}) {
+  const url=useShotUrl(source);
+  const front=depth===0,title=sourceTitle(source);
+  const age=source.at?formatAge(now-source.at):'';
+  const status=front&&source.failed?'failed':front&&(freshness==='stale'||freshness==='disconnected')?freshness:undefined;
+  const tip=[title,source.failed?`Failed: ${source.failed}`:source.label,front&&age?`Last frame ${age}`:''].filter(Boolean).join(' · ');
+  const open=()=>{if(front){openViewer({chatId:source.chatId,live:true});setDocked(true);}else openViewer({chatId:source.chatId,live:false,source});};
+  return <button type="button" className={`pip-card${front?' is-front':''}${front&&owner==='user'?' is-user':''}`} style={{'--depth':depth,zIndex:count-depth} as React.CSSProperties}
+    title={tip} aria-label={`Open ${title} full size: ${source.failed?`failed, ${source.failed}`:source.label}`} data-status={status} onClick={open}>
+    {url?<img src={url} alt="" draggable={false} decoding="async"/>:<span className="pip-empty"><AppGlyph app={source.app} target={source.target} size={26}/></span>}
+    {status&&<span className={`pip-card-status is-${status}`} aria-hidden="true"/>}
+  </button>;
+}
+const sourceTitle=(source:PipSource)=>source.target==='browser'?(source.url?hostOf(source.url):source.app&&source.app!=='Browser'?source.app:'Browser'):source.app||'Computer';
+
+/** Codex-style picture-in-picture: a frameless stack of live window thumbnails at the conversation's right,
+ *  under the summary card; one card per app or page the agent used lately, the newest in front. */
 export function ComputerPip() {
   const chatId=useStoreSelector(state=>state.activeChatId);
   const screen=useStoreSelector(state=>state.screen);
   const ui=useComputerUi();
-  const {source,running}=useChatSource(chatId);
+  const {sources,source,running}=useChatSources(chatId);
   // RUN-X1: the agent's browser tab shows in the right pane as soon as it opens, for the chat the user is looking at.
   useEffect(()=>wireComputerEvents(event=>{
     if(event.type!=='computerBrowserOpened'||event.chatId!==getState().activeChatId)return;
@@ -111,71 +166,30 @@ export function ComputerPip() {
   }),[]);
   const now=useNow(!!source);
   const shown=screen==='work'&&!ui.docked&&pipShouldShow(source,running,now);
-  const url=useShotUrl(shown?source:undefined);
-  const perms=usePermissions(shown&&source?.target==='computer');
-  const ref=useRef<HTMLElement>(null);
-  const [size,setSize]=useState({width:ui.placement.width,height:Math.round(ui.placement.width*0.625)+30});
-  const [dragging,setDragging]=useState<{x:number;y:number}|null>(null);
-  const [area,setArea]=useState(conversationArea);
-  useEffect(()=>{if(!shown)return;const update=()=>setArea(conversationArea());update();window.addEventListener('resize',update);const timer=window.setInterval(update,1500);return()=>{window.removeEventListener('resize',update);window.clearInterval(timer);};},[shown]);
-  useEffect(()=>{const el=ref.current;if(!el||!shown)return;const observer=new ResizeObserver(entries=>{const box=entries[0]?.contentRect;if(box)setSize({width:Math.round(box.width),height:Math.round(box.height)});});observer.observe(el);return()=>observer.disconnect();},[shown,ui.minimized]);
-  const drag=useRef<{startX:number;startY:number;originX:number;originY:number;moved:boolean}|null>(null);
-  const resize=useRef<{startX:number;width:number}|null>(null);
-  const position=useMemo(()=>cornerPosition(ui.placement.corner,area,size,INSET),[ui.placement.corner,area,size]);
-  const onHeadPointerDown=(event:React.PointerEvent)=>{
-    if(event.button!==0||(event.target as HTMLElement).closest('button'))return;
-    drag.current={startX:event.clientX,startY:event.clientY,originX:position.x,originY:position.y,moved:false};
-    event.currentTarget.setPointerCapture(event.pointerId);
-  };
-  const onHeadPointerMove=(event:React.PointerEvent)=>{
-    const d=drag.current;if(!d)return;
-    const dx=event.clientX-d.startX,dy=event.clientY-d.startY;
-    if(!d.moved&&Math.hypot(dx,dy)<4)return;
-    d.moved=true;setDragging({x:d.originX+dx,y:d.originY+dy});
-  };
-  const onHeadPointerUp=(event:React.PointerEvent)=>{
-    const d=drag.current;drag.current=null;
-    if(event.currentTarget.hasPointerCapture(event.pointerId))event.currentTarget.releasePointerCapture(event.pointerId);
-    if(!d?.moved){setDragging(null);return;}
-    const center={x:d.originX+(event.clientX-d.startX)+size.width/2,y:d.originY+(event.clientY-d.startY)+size.height/2};
-    setPlacement({corner:snapCorner(center,area)});setDragging(null);
-  };
-  const onResizePointerDown=(event:React.PointerEvent)=>{event.stopPropagation();resize.current={startX:event.clientX,width:ui.placement.width};event.currentTarget.setPointerCapture(event.pointerId);};
-  const onResizePointerMove=(event:React.PointerEvent)=>{const r=resize.current;if(!r)return;const sign=ui.placement.corner.endsWith('right')?-1:1;setPlacement({width:clampPipWidth(r.width+sign*(event.clientX-r.startX))});};
-  const onResizePointerUp=(event:React.PointerEvent)=>{resize.current=null;if(event.currentTarget.hasPointerCapture(event.pointerId))event.currentTarget.releasePointerCapture(event.pointerId);};
-  const openFull=useCallback(()=>{if(source)openViewer({chatId:source.chatId,live:true});},[source]);
+  const perms=usePermissions(shown&&sources.some(card=>card.target==='computer'));
+  const cards=useMemo(()=>sources.slice(0,PIP_STACK_MAX),[sources]);
+  const anchor=useStackAnchor(shown,ui.minimized?1:cards.length);
+  const [busy,setBusy]=useState(false);
   if(!shown||!source)return null;
   const owner=ui.control[source.chatId]??'agent';
   const freshness=frameFreshness(now-source.at,running);
-  const title=source.app||(source.target==='browser'?'Browser':'Computer');
-  const style:React.CSSProperties=dragging?{left:dragging.x,top:dragging.y,width:ui.placement.width}:{left:position.x,top:position.y,width:ui.placement.width};
-  if(ui.minimized) return <button type="button" ref={ref as React.RefObject<HTMLButtonElement|null>} className={`pip-pill is-${freshness}`} style={{left:position.x,top:position.y}} title="Show the live view" aria-label={`Show computer use: ${source.label}`} onClick={()=>setMinimized(false)}>
-    <span className="pip-dot" aria-hidden="true"/><span className="pip-pill-title">{title}</span><span className="pip-pill-label">{source.label}</span>
+  const title=sourceTitle(source);
+  const setOwner=async(next:'agent'|'user')=>{setBusy(true);try{await invoke('computer.control',{chatId:source.chatId,owner:next});}catch(cause){notifyError(cause);}finally{setBusy(false);}};
+  if(ui.minimized) return <button type="button" className={`pip-pill is-${freshness}`} style={{top:anchor.top,right:anchor.right}} title={`Show the live view · ${source.label}`} aria-label={`Show computer use: ${source.label}`} onClick={()=>setMinimized(false)}>
+    <span className="pip-dot" aria-hidden="true"/><AppGlyph app={source.app} target={source.target} size={14}/><span className="pip-pill-title">{title}</span>{cards.length>1&&<span className="pip-pill-count">+{cards.length-1}</span>}
   </button>;
-  return <div ref={ref as React.RefObject<HTMLDivElement|null>} className={`pip is-${freshness}${dragging?' is-dragging':''} corner-${ui.placement.corner}`} style={style} role="region" aria-label={`Computer use: ${title}`} data-owner={owner}>
-    <div className="pip-head" onPointerDown={onHeadPointerDown} onPointerMove={onHeadPointerMove} onPointerUp={onHeadPointerUp} onPointerCancel={()=>{drag.current=null;setDragging(null);}}>
-      {source.target==='browser'?<Globe size={12} aria-hidden="true"/>:<AppWindow size={12} aria-hidden="true"/>}
-      <span className="pip-title" title={source.url||title}>{title}</span>
-      <span className={`pip-fresh is-${freshness}`} title={source.at?`Last frame ${formatAge(now-source.at)}`:undefined}>{FRESH_LABEL[freshness]}{freshness==='stale'||freshness==='disconnected'?` · ${formatAge(now-source.at)}`:''}</span>
-      <span className="pip-controls">
-        <Tip label="Open full size in the right pane"><button type="button" className="icon-button" aria-label="Expand" onClick={openFull}><Maximize2 size={12}/></button></Tip>
-        <Tip label="Dock in the right pane"><button type="button" className="icon-button" aria-label="Dock to right pane" onClick={()=>{openViewer({chatId:source.chatId,live:true});setDocked(true);}}><PanelRight size={12}/></button></Tip>
-        <Tip label="Collapse to a pill"><button type="button" className="icon-button" aria-label="Hide" onClick={()=>setMinimized(true)}><EyeOff size={12}/></button></Tip>
-      </span>
+  const peek=STACK_PEEK*(cards.length-1);
+  return <div className={`pip-stack is-${freshness}`} style={{top:anchor.top,right:anchor.right,width:anchor.width}} role="region" aria-label={`Computer use: ${cards.map(sourceTitle).join(', ')}`} data-owner={owner} data-count={cards.length}>
+    <div className="pip-cards" style={{height:stackHeight(anchor.width,cards.length)}}>
+      {cards.map((card,depth)=><PipCard key={sourceKey(card)} source={card} depth={depth} count={cards.length} freshness={freshness} owner={owner} now={now}/>)}
     </div>
-    <button type="button" className="pip-frame" aria-label="Open the latest screenshot full size" onClick={openFull}>
-      {url?<img src={url} alt={source.label} draggable={false} decoding="async"/>:<span className="pip-empty">{source.running?'Waiting for the first frame…':'No screenshot yet'}</span>}
-      {owner==='user'&&<span className="pip-badge">You have control</span>}
-    </button>
-    <div className="pip-foot">
-      <span className={`pip-label${source.failed?' is-error':''}`} title={source.failed||source.label}>{source.failed?`Failed: ${source.failed}`:source.label}</span>
-      <span className="pip-owner" title={owner==='agent'?'The agent is driving':'You are driving; the agent waits'}>{owner==='agent'?'Agent':'You'}</span>
+    <div className="pip-controls" style={{top:peek+6}}>
+      <Tip label="Hide the live view"><button type="button" className="pip-control" aria-label="Hide the live view" onClick={()=>setMinimized(true)}><X size={12} strokeWidth={2.2}/></button></Tip>
+      {owner==='agent'
+        ?<Tip label="Take control"><button type="button" className="pip-control" aria-label="Take control" disabled={busy} onClick={()=>void setOwner('user')}><Hand size={12} strokeWidth={2.2}/></button></Tip>
+        :<Tip label="Hand control back to the agent"><button type="button" className="pip-control is-user" aria-label="Hand control back" disabled={busy} onClick={()=>void setOwner('agent')}><Play size={12} strokeWidth={2.2}/></button></Tip>}
     </div>
-    <div className="pip-actions"><ControlButtons source={source} owner={owner} running={running}/></div>
     <PermissionNotice perms={perms}/>
-    <div className="pip-resize" role="separator" aria-label="Resize the live view" aria-orientation="vertical" aria-valuemin={PIP_MIN} aria-valuemax={PIP_MAX} aria-valuenow={ui.placement.width} tabIndex={0}
-      onPointerDown={onResizePointerDown} onPointerMove={onResizePointerMove} onPointerUp={onResizePointerUp} onPointerCancel={()=>{resize.current=null;}}
-      onKeyDown={event=>{if(event.key!=='ArrowLeft'&&event.key!=='ArrowRight')return;event.preventDefault();setPlacement({width:ui.placement.width+(event.key==='ArrowRight'?16:-16)});}}/>
   </div>;
 }
 
