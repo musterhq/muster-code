@@ -339,7 +339,7 @@ export function MemoryScreen(): React.ReactElement {
             {state.snapshot?.folders.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}
             {state.snapshot?.projects.filter(item => !item.archived).map(item => <option key={`project:${item.id}`} value={`project:${item.id}`}>{item.name}</option>)}
           </select></label>
-          <span className="memory-status-pill" data-connection={connection ?? 'checking'} title={status?.error ?? status?.endpoint ?? ''}>{connection === 'not-configured' ? 'Memory engine (Hindsight) · not set up' : connection === 'local-only' ? 'Memory engine (Hindsight) · unreachable, local only' : `Memory engine (Hindsight) · ${statusLabel(status).toLowerCase()}`}</span>
+          <span className="memory-status-pill" data-connection={connection ?? 'checking'} title={status?.error ?? status?.endpoint ?? ''}>{connection === 'not-configured' ? 'Memory engine (Hindsight) · not set up' : connection === 'local-only' ? 'Memory engine (Hindsight) · unreachable, local only' : `Memory engine (Hindsight) · ${statusLabel(status).toLowerCase()}${status?.sharing === 'team' ? ' · shared with your team' : status?.sharing ? ' · private to you' : ''}`}</span>
           <span className="memory-toolbar-spacer" />
           <button type="button" className="settings-button secondary" aria-pressed={panel === 'advanced'} onClick={() => setPanel(value => value === 'advanced' ? null : 'advanced')}><Layers size={14} />Advanced</button>
           <button type="button" className="settings-button secondary" aria-pressed={panel === 'settings'} onClick={() => setPanel(value => value === 'settings' ? null : 'settings')}><Settings2 size={14} />{connection === 'not-configured' ? 'Configure' : 'Settings'}</button>

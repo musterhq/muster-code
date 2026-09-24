@@ -1,4 +1,5 @@
 import { addMemory, listMemory, searchMemory, inspectMemoryStore, isVisibleInScopes, projectMemoryScope } from './memory-adapter.ts';
+import { createMemoryIdentity } from './memory-identity.ts';
 import { HindsightService } from './hindsight-service.ts';
 import { MemoryConfigStore, MemoryTombstones, electronSecretBox } from './memory-context.ts';
 import { createHash } from 'node:crypto';
@@ -140,13 +141,14 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
     } catch { return null; }
   }
   let hindsight: HindsightService | undefined;
+  const memoryIdentity = createMemoryIdentity();
   // Legacy hindsight.* commands honour the in-app Memory settings too, not only environment variables.
   let secretBox: ReturnType<typeof electronSecretBox> | null = null;
   const memoryConfig = new MemoryConfigStore(options.dataDir, () => secretBox === null ? secretBox = electronSecretBox() : secretBox);
   const hindsightClient = () => hindsight ??= new HindsightService({readConfig: () => memoryConfig.hindsight(), resolveFolderScope(folderId) {
-    if (folderId === 'personal') return {kind: 'user', id: 'local'};
-    const folder = folderFor(folderId);
-    return {kind: 'workspace', id: folder.id};
+    // Same banks as the memory domain (memory-identity.ts): per person, per repository, private otherwise.
+    if (folderId === 'personal') return memoryIdentity.personal();
+    return memoryIdentity.folder(folderFor(folderId));
   }});
   const runs = new Map<string, ActiveRun>();
   const reconciliations = new Set<string>();
