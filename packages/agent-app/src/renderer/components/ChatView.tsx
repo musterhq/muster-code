@@ -112,7 +112,7 @@ interface TurnHeaderProps {durationMs:number|null;open:boolean;onToggle:()=>void
 /** A live turn's header: "Working for …" since its user message. */
 interface LiveTurnProps {live:string}
 interface EditingProps {onSubmit:(text:string,mode:EditResendMode,restoreFiles?:Array<{path:string;afterHash:string}>)=>Promise<boolean>;onCancel:()=>void}
-function TimelineCard({ item, nextAt, reveal, turn, tail=false, actions, editing, plan=false }: { item: TranscriptEntry; nextAt?:string; reveal?:string; turn?:TurnHeaderProps|LiveTurnProps; tail?:boolean; actions?:MessageActions; editing?:EditingProps; plan?:boolean }): React.ReactElement {
+function TimelineCard({ item, nextAt, reveal, turn, tail=false, actions, editing, plan=false, meta=true }: { item: TranscriptEntry; nextAt?:string; reveal?:string; turn?:TurnHeaderProps|LiveTurnProps; tail?:boolean; actions?:MessageActions; editing?:EditingProps; plan?:boolean; meta?:boolean }): React.ReactElement {
   switch (item.kind) {
     case 'activity': return <ActivityGroup items={item.items} reveal={reveal} live={tail}/>;
     case 'user':
@@ -127,7 +127,7 @@ function TimelineCard({ item, nextAt, reveal, turn, tail=false, actions, editing
       return (
         <div className="msg msg-assistant">
           <MessageBody text={item.text} animate />
-          <MessageMeta text={item.text} createdAt={item.createdAt} label="Copy response" actions={actions}/>
+          {meta&&<MessageMeta text={item.text} createdAt={item.createdAt} label="Copy response" actions={actions}/>}
         </div>
       );
     case 'reasoning': return <ReasoningRow item={item} nextAt={nextAt} reveal={reveal===item.id}/>;
@@ -162,6 +162,10 @@ export function Timeline({ items, chatId, onScrolled, running, planMode=false }:
   const live=running??items.some(item=>item.status==='running');
   // Plan mode: the settled final answer of the latest turn is the plan.
   const planId=useMemo(()=>planCardId(items,planMode,live),[items,planMode,live]);
+  // Only a turn's last reply carries the copy/time/actions row (as Codex does); interim replies sit close together.
+  const finalReplies=useMemo(()=>{const last=new Set<string>();let candidate:string|undefined;
+    for(const row of rows){if(row.kind==='user'){if(candidate)last.add(candidate);candidate=undefined;}else if(row.kind==='assistant')candidate=row.id;}
+    if(candidate)last.add(candidate);return last;},[rows]);
   const turnModel=useMemo(()=>describeTurns(rows,live),[rows,live]);
   // Per turn: its tool items, a Codex summary for the folded header, and whether it edited files.
   const turnWork=useMemo(()=>{
@@ -354,9 +358,10 @@ export function Timeline({ items, chatId, onScrolled, running, planMode=false }:
             data-item-id={row.id}
             ref={virtualizer.measureElement}
             className={hidden?'timeline-row is-folded':'timeline-row'}
+            data-kind={row.kind}
             style={{ transform: `translateY(${v.start}px)` }}
           >
-            {!hidden&&<AreaBoundary area="this message" scope="item" resetKey={row}><TimelineCard item={row} plan={row.kind==='assistant'&&row.id===planId} actions={actionsFor(row)} editing={editingFor(row)} tail={live&&v.index===rows.length-1} nextAt={row.kind==='reasoning'?rowStart(rows[v.index+1]):undefined}
+            {!hidden&&<AreaBoundary area="this message" scope="item" resetKey={row}><TimelineCard item={row} meta={row.kind!=='assistant'||finalReplies.has(row.id)} plan={row.kind==='assistant'&&row.id===planId} actions={actionsFor(row)} editing={editingFor(row)} tail={live&&v.index===rows.length-1} nextAt={row.kind==='reasoning'?rowStart(rows[v.index+1]):undefined}
               reveal={activeMatch?.rowIndex===v.index?activeMatch.itemId:undefined}
               turn={info&&info.complete&&info.work>0?{durationMs:info.durationMs,open:isTurnOpen(info.id),onToggle:()=>setTurn(info.id,!isTurnOpen(info.id)),summary:turnWork.get(info.id)?.summary}:info&&!info.complete&&live&&info.id===turnModel.last?{live:rowStart(row)??''}:undefined}/></AreaBoundary>}
             {(()=>{

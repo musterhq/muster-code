@@ -478,6 +478,8 @@ textarea:focus-visible {
   width: 100%;
   padding: 8px 32px;
 }
+/* One-line activity (thinking, tools, notices) stacks tightly; replies and messages keep their breathing room. */
+.timeline-row:is([data-kind='reasoning'], [data-kind='tool'], [data-kind='activity'], [data-kind='notice']) { padding-block: 1px; }
 
 .msg { max-width: 720px; }
 .msg-user {
