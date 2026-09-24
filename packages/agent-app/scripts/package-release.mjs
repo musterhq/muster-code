@@ -83,7 +83,11 @@ const channel = process.env.MUSTER_UPDATE_CHANNEL?.trim() || 'stable';
 if (!['stable', 'beta', 'preview'].includes(channel)) throw new Error(`MUSTER_UPDATE_CHANNEL must be stable, beta or preview (got "${channel}").`);
 const feed = process.env.MUSTER_UPDATE_BASE_URL?.trim();
 if (feed && !/^https:\/\/[^\s@]+$/.test(feed)) throw new Error('MUSTER_UPDATE_BASE_URL must be an https URL without credentials.');
-setKeys(plist, {MusterUpdateChannel: channel, ...(feed ? {MusterUpdateBaseURL: feed} : {})});
+// Self-update source (src/main/app-updater.ts): the GitHub repository whose agent-v* releases this build follows.
+// CI sets GITHUB_REPOSITORY; a local build can set MUSTER_UPDATE_REPO. Without either the app never checks.
+const updateRepo = (process.env.MUSTER_UPDATE_REPO ?? process.env.GITHUB_REPOSITORY ?? '').trim();
+if (updateRepo && !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(updateRepo)) throw new Error(`MUSTER_UPDATE_REPO must look like owner/repo (got "${updateRepo}").`);
+setKeys(plist, {MusterUpdateChannel: channel, ...(feed ? {MusterUpdateBaseURL: feed} : {}), ...(updateRepo ? {MusterUpdateRepo: updateRepo} : {})});
 
 const resourcesDir = path.join(app, 'Contents/Resources');
 rmSync(path.join(resourcesDir, 'default_app.asar'), {force: true}); // Electron's sample app

@@ -9,7 +9,7 @@ name: Muster Agent Release
 #                 (+ MUSTER_NOTARY_APPLE_ID, MUSTER_NOTARY_TEAM_ID, MUSTER_NOTARY_PASSWORD to notarize)
 #   Self-signed   MUSTER_SELF_SIGN_P12_BASE64 + MUSTER_SELF_SIGN_P12_PASSWORD ("Muster Agent Self-Signed")
 #   Ad hoc        no secrets
-# Anything short of a notarized Developer ID build is published as a prerelease.
+# Stable versions are published as the latest release whatever the signing mode; -beta/-rc versions are prereleases.
 on:
   push:
     tags:
@@ -121,11 +121,13 @@ jobs:
 
       - name: Package
         env:
-          MUSTER_UPDATE_CHANNEL: ${{ contains(env.TAG, '-') && 'beta' || 'stable' }}
           MUSTER_NOTARY_APPLE_ID: ${{ steps.signing.outputs.mode == 'developer-id-notarized' && secrets.MUSTER_NOTARY_APPLE_ID || '' }}
           MUSTER_NOTARY_TEAM_ID: ${{ steps.signing.outputs.mode == 'developer-id-notarized' && secrets.MUSTER_NOTARY_TEAM_ID || '' }}
           MUSTER_NOTARY_PASSWORD: ${{ steps.signing.outputs.mode == 'developer-id-notarized' && secrets.MUSTER_NOTARY_PASSWORD || '' }}
         run: |
+          # Channel from the version, not the tag prefix: agent-v0.2.0 is stable, agent-v0.3.0-beta.1 is beta.
+          VERSION_FROM_TAG="${TAG#agent-v}"
+          if [[ "$VERSION_FROM_TAG" == *-* ]]; then export MUSTER_UPDATE_CHANNEL=beta; else export MUSTER_UPDATE_CHANNEL=stable; fi
           node scripts/package-release.mjs
           echo "${{ steps.signing.outputs.mode }}" > "release-dist/signing-${{ matrix.arch }}.txt"
           ls -lh release-dist
@@ -177,7 +179,10 @@ jobs:
           sha256sum Muster-Agent-* > SHA256SUMS
           cat SHA256SUMS
           PRERELEASE=false
-          [[ "$PRERELEASE_INPUT" == "true" || "$TAG" == *-* || "$MODES" != "developer-id-notarized " ]] && PRERELEASE=true
+          # Stable versions publish as the repository's latest release (shown in the sidebar) whatever the signing mode;
+          # only -beta/-rc versions or an explicit request are prereleases.
+          VERSION_FROM_TAG="${TAG#agent-v}"
+          [[ "$PRERELEASE_INPUT" == "true" || "$VERSION_FROM_TAG" == *-* ]] && PRERELEASE=true
           {
             awk -v v="$VERSION" '
               $0 ~ "^## \\[?" v "([^0-9.-]|$)" {on=1; next}
@@ -216,7 +221,7 @@ jobs:
           body_path: release-notes.md
           generate_release_notes: ${{ steps.notes.outputs.generate == 'true' }}
           prerelease: ${{ steps.notes.outputs.prerelease == 'true' }}
-          make_latest: false
+          make_latest: ${{ steps.notes.outputs.prerelease != 'true' }}
           files: |
             out/Muster-Agent-*.zip
             out/Muster-Agent-*.dmg

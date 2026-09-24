@@ -1,3 +1,4 @@
+import type {UpdateCommands,UpdateEvent} from './update-protocol.ts';
 import type {PendingAttentionSummary} from './attention-protocol.ts';
 import type {ScopedComputerCommands, ScopedComputerEvent} from './scoped-computer-protocol.ts';
 import type {ProcessCommands,ProcessEvent} from './process-protocol.ts';
@@ -113,10 +114,10 @@ export type ContextSource = 'live' | 'restored';
 /** Context-window occupancy telemetry. Unknown values are null ("Unavailable"), never zero. */
 export interface ContextBreakdownEntry { label: string; tokens: number }
 export interface ContextTelemetry { usedTokens: number | null; windowTokens: number | null; source: ContextSource | null; compacted: boolean; updatedAt: string | null; /** Only when the provider reports one; never estimated. */ breakdown?: ContextBreakdownEntry[] }
-export type AgentEvent = DomainEvent | ProcessEvent | BrowserEvent | ScopedComputerEvent | {type:'fileMoved';folderId:string;from:string;to:string} | {type:'workspaceChanged';folderId:string} | {type:'projectChanged';projectId:string;taskId:string;seq?:number} | {type:'chatSelected'; chatId:string} | {type:'chatWoke'; chatId:string; title:string; reason:WakeReason} | { type: 'snapshot'; snapshot: Snapshot } | { type: 'timeline'; chatId: string; items: TimelineItem[] } | { type: 'timelinePatch'; chatId: string; patch: TimelinePatch } | { type: 'notice'; message: string } | { type: 'contextTelemetry'; chatId: string; telemetry: ContextTelemetry };
+export type AgentEvent = DomainEvent | ProcessEvent | BrowserEvent | ScopedComputerEvent | UpdateEvent | {type:'fileMoved';folderId:string;from:string;to:string} | {type:'workspaceChanged';folderId:string} | {type:'projectChanged';projectId:string;taskId:string;seq?:number} | {type:'chatSelected'; chatId:string} | {type:'chatWoke'; chatId:string; title:string; reason:WakeReason} | { type: 'snapshot'; snapshot: Snapshot } | { type: 'timeline'; chatId: string; items: TimelineItem[] } | { type: 'timelinePatch'; chatId: string; patch: TimelinePatch } | { type: 'notice'; message: string } | { type: 'contextTelemetry'; chatId: string; telemetry: ContextTelemetry };
 export interface MemoryEntry { id: string; kind: string; summary: string; sourceUri?: string; observedAt: string; confidence: number; provenance: string[]; scopes: Array<{kind: string; id: string}>; redactionState: 'none' | 'redacted' | 'hashed' | 'blocked'; links?: string[] }
 export interface HindsightStatus { configured: boolean; endpoint?: string; bankId?: string; error?: string; revision?: number; connection?: 'unchecked' | 'verified' | 'failed'; checkedAt?: string; connectionError?: string }
-export interface Commands extends DomainCommands, BrowserCommands, ScopedComputerCommands, ProcessCommands {
+export interface Commands extends DomainCommands, BrowserCommands, ScopedComputerCommands, ProcessCommands, UpdateCommands {
  'memory.list': { input: {folderId?: string}; output: MemoryEntry[] };
  'memory.search': { input: {folderId?: string; query: string; limit?: number}; output: MemoryEntry[] };
  'memory.add': { input: {folderId?: string; summary: string; kind?: string; provenance: string[]; scopes: Array<{kind: string; id: string}>}; output: MemoryEntry };

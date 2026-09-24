@@ -15,7 +15,7 @@ import {chatMenuTemplate,folderMenuTemplate,projectMenuTemplate,popupChoice,type
 import {attentionAllowed,createSettleTracker,notificationPrefs,notificationsMuted,wantedNotices,type NotificationPrefs} from './chat-notifications.ts';
 import { isCommandName } from './commands.ts';
 import { fileOperation, mutablePath } from '../runtime/file-operations.ts';
-import { existsSync, promises as fs } from 'node:fs';
+import { existsSync, readFileSync, promises as fs } from 'node:fs';
 import { resolveInside } from '../runtime/paths.ts';
 import {BrowserWorkspaceController} from './browser-workspace.ts';
 import {BrowserBridge} from './agent-tools/browser-bridge.ts';
@@ -23,6 +23,8 @@ import {TERMINAL_MCP_LAUNCHER_ENV,TERMINAL_READ_MAX_BYTES,TerminalToolHost} from
 import {accessibilityText,captureSource,captureSources,computerPermissions} from './computer-capture.ts';
 import {NativePreviewController} from './native-preview.ts';
 import { buildMenuTemplate } from './menu.ts';
+import {AppUpdater,bundlePathOf,plistString} from './app-updater.ts';
+import {resolveUpdateChannel} from './update-channel.ts';
 import { createQuitCoordinator, quitChoice, quitPrompt, withinDeadline } from './quit-coordinator.ts';
 import { loadAgentService, type AgentService } from './service-loader.ts';
 import { clampGeometry, DEFAULT_GEOMETRY, MIN_HEIGHT, MIN_WIDTH, planDisplayChange, WindowStateStore, type WindowGeometry } from './window-state.ts';
@@ -402,6 +404,23 @@ async function main(): Promise<void> {
   session.defaultSession.setPermissionRequestHandler((_wc, _permission, callback) => callback(false));
 
   // --- IPC: single validated entry point -----------------------------------
+  // --- Self-update (src/main/app-updater.ts) --------------------------------
+  const bundle=bundlePathOf(process.execPath);
+  // Any .app bundle (release or preview) carries its own keys; a dev `electron .` run has no MusterUpdateRepo.
+  const infoPlist=bundle?(()=>{try{return readFileSync(path.join(bundle,'Contents/Info.plist'),'utf8');}catch{return '';}})():'';
+  const updater=new AppUpdater({
+    current:plistString(infoPlist,'CFBundleShortVersionString')??app.getVersion(),
+    arch:process.arch,
+    exe:process.execPath,
+    repo:plistString(infoPlist,'MusterUpdateRepo'),
+    channel:resolveUpdateChannel({bundle:plistString(infoPlist,'MusterUpdateChannel'),env:process.env}),
+    settingsFile:path.join(app.getPath('userData'),'updates.json'),
+    stagingDir:path.join(app.getPath('userData'),'pending-update'),
+    emit:status=>{if(window&&!window.isDestroyed())window.webContents.send('muster:event',{type:'updateStatus',status} satisfies AgentEvent);},
+    quit:()=>app.quit(),
+  });
+  void updater.start();
+
   const isTrustedSender = (frame: Electron.WebFrameMain | null, senderId: number): boolean =>
     window !== null && !window.isDestroyed() &&
     senderId === window.webContents.id &&
@@ -417,6 +436,14 @@ async function main(): Promise<void> {
       throw new Error('Unknown command.');
     }
     switch(command) {
+      case 'updates.status': return updater.snapshot();
+      case 'updates.check': return updater.check();
+      case 'updates.setAutoCheck': {
+        const request=input as Commands['updates.setAutoCheck']['input'];
+        if(!request||typeof request.enabled!=='boolean')throw new Error('Invalid update setting.');
+        return updater.setAutoCheck(request.enabled);
+      }
+      case 'updates.install': return updater.install();
       case 'chat.contextMenu': {
         const request=input as Commands['chat.contextMenu']['input'];
         if(!request||typeof request.id!=='string'||request.id.length>256||!Number.isFinite(request.x)||!Number.isFinite(request.y)||(request.surface!==undefined&&request.surface!=='sidebar'&&request.surface!=='header'))throw new Error('Invalid chat menu request.');

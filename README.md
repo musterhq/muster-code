@@ -1,35 +1,150 @@
-# Muster Code
+<div align="center">
 
-Private. The standalone, Codex-first coding environment around muster: the reference IDE as the bar, every VS Code feature, your Codex threads pinned, the board in the editor.
+# Muster Agent
 
-## Download Muster Agent
+**The agentic development client that remembers.**
 
-1. Open the [Muster Agent releases](https://github.com/musterhq/muster-code/releases?q=agent-v) and pick the
-   newest `Muster Agent <version>` (while the repository is private you need a GitHub account with access).
-2. Download the file for your Mac (Apple menu > About This Mac shows the chip):
-   - Apple silicon (M1 and later): `Muster-Agent-<version>-arm64.dmg`
-   - Intel: no download yet — run from a clone (see "Run Muster Agent on another Mac")
+A native macOS app where coding agents work in your folders, with long-term memory, sandboxed
+computers, and the model providers you already have, all in one window.
 
+[![Latest release](https://img.shields.io/github/v/release/musterhq/muster-code?filter=agent-v*&label=release&color=2f6feb)](https://github.com/musterhq/muster-code/releases/latest)
+[![macOS 14+ · Apple silicon](https://img.shields.io/badge/macOS-14%2B%20·%20Apple%20silicon-111?logo=apple)](https://github.com/musterhq/muster-code/releases/latest)
+[![GitHub stars](https://img.shields.io/github/stars/musterhq/muster-code?style=flat&color=f5c518)](https://github.com/musterhq/muster-code/stargazers)
+
+### [⬇ Download for macOS (Apple silicon)](https://github.com/musterhq/muster-code/releases/latest)
+
+<sub>Grab <code>Muster-Agent-&lt;version&gt;-arm64.dmg</code> from the latest release · Intel Macs: <a href="#run-muster-agent-on-another-mac-from-source">run from a clone</a></sub>
+
+<br/>
+
+<!-- screenshot pending: <img src="docs/images/muster-agent-hero.png" alt="Muster Agent: a chat with an agent on the left and the live diff of its edits on the right" width="100%"/> -->
+
+</div>
+
+---
+
+## Why Muster Agent
+
+Most agent apps start every chat from zero, run commands straight on your machine, and lock you
+into one vendor's models. Muster Agent is an **agentic development client (ADC)** built the other way
+around:
+
+- **It remembers.** Long-term memory, backed by the Hindsight memory engine, carries what the agent
+  learned about you and each project into the next chat. You can see what will be recalled before
+  you send.
+- **It keeps agents contained.** Each chat or folder can get its own Docker-backed computer with no
+  network by default, capped memory, CPU and process counts, and only the grants you give it.
+- **It uses the providers you already have.** On first launch it finds your existing sign-ins,
+  gateways, API keys and local model servers. You don't sign in again.
+- **It stays light.** Long chats, terminals and diffs are virtualized and kept in bounded buffers,
+  so memory use stays bounded as a session grows.
+- **It is a real workbench.** Live diffs with Keep/Undo, a terminal, a browser, git history and
+  parallel chats sit next to the conversation, so you rarely have to switch windows.
+
+## Memory
+
+<!-- screenshot pending: <img src="docs/images/muster-agent-memory.png" alt="The Memory screen: saved notes for a folder with search and scope" width="100%"/> -->
+
+Agents that learn, not just agents that chat.
+
+- **Personal and per-folder memory.** Notes live in your Personal scope or with a folder or project,
+  so one repo's conventions never leak into another.
+- **Recall preview.** A chip in the composer shows which notes the next turn will recall for the
+  draft you are typing. Open it to inspect them, or leave one out of this chat.
+- **Auto-save after runs.** Choose *Never*, *Ask after runs*, or *Save after completed runs*.
+  Recall runs automatically before each turn, and you can turn it off.
+- **You're in control.** Browse, search, add and delete memories in the Memory screen. Deletions
+  are tracked until the engine confirms them.
+- **Powered by Hindsight.** Point Muster at a Hindsight endpoint in Memory settings (for example
+  `http://localhost:8888`), or set `HINDSIGHT_API_URL` / `HINDSIGHT_API_KEY`. A key saved in settings is
+  stored encrypted.
+
+## Sandboxing
+
+Give an agent a computer of its own instead of your laptop.
+
+- **Scoped computers.** A chat (session) or a folder (workspace) gets its own Docker container,
+  with its own history, files and services.
+- **Safe defaults.** No network unless you allow egress. Defaults are 512 MiB of memory, 1 CPU and
+  256 processes, adjustable per computer. At most two computers run at once.
+- **Explicit grants.** Environment variables and tool access are allowlisted. Extra folders can be
+  mounted read-only.
+- **Optional.** Install Docker Desktop to turn sandboxes on. Without it, everything else works normally.
+
+## Your providers
+
+<!-- screenshot pending: <img src="docs/images/muster-agent-providers.png" alt="Provider setup: detected sign-ins, gateways, API keys and local model servers" width="100%"/> -->
+
+Muster Agent detects what is already on your Mac and uses it as-is:
+
+| Source | What it picks up |
+| --- | --- |
+| **Subscription sign-ins** | Your ChatGPT and Claude sign-ins from the command-line tools already on this Mac |
+| **Routers and gateways** | OpenAI-compatible gateways already configured in your local agent CLI config |
+| **API keys in your environment** | `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY`, `GROQ_API_KEY`, `MISTRAL_API_KEY`, `DEEPSEEK_API_KEY`, `GEMINI_API_KEY`, `XAI_API_KEY`, `TOGETHER_API_KEY`, `FIREWORKS_API_KEY` |
+| **Local models** | Ollama and LM Studio on this Mac, on their default ports or the ports their config names |
+| **Anything else** | Add a custom OpenAI-compatible endpoint |
+
+Models come from each provider's own `/models` endpoint. There is no hard-coded model list. If
+nothing is found, guided setup walks you through adding a provider.
+
+## Built for low RAM
+
+Agent sessions get long. Muster Agent keeps what it holds in memory bounded:
+
+- **Virtualized timelines.** Chat history, tool output and git history render only the rows on screen.
+- **Incremental streaming.** Streaming Markdown re-parses only the part still being written, so
+  finished code blocks are not re-parsed on every token. The timeline syncs as a snapshot plus
+  ordered deltas, and completed rows keep their identity.
+- **Panes load when you open them.** Settings, Projects, Memory, Automations, git history, pull
+  requests and computer tabs load on first use. They are preloaded when the app is idle.
+- **One terminal emulator per shell.** It moves between the bottom panel and the side tab instead of
+  being rebuilt. Scrollback is capped at 5,000 lines.
+- **Bounded command output.** Each command keeps up to 128 KB, and finished commands share a 2 MB
+  budget. Older output keeps only its tail.
+- **Workers that go away.** Diffing and syntax highlighting run in web workers, off the UI thread.
+  Idle workers are shut down and recreated on demand.
+
+## Features
+
+<!-- screenshot pending: <img src="docs/images/muster-agent-terminal.png" alt="The integrated terminal panel under a chat" width="100%"/> -->
+
+| | | |
+| --- | --- | --- |
+| **Live diffs**<br/>Review each edit as it lands. Keep or Undo per hunk or per file, or view whole-file inline diffs. | **Integrated terminal**<br/>A bottom panel with real shells and search. | **Built-in browser**<br/>Preview your app, read its console and pick elements for the agent. |
+| **Git tab**<br/>Commit history, and compare any two refs. | **Parallel chats and projects**<br/>Several chats in one checkout, with overlap detection and "Run in a worktree". | **Skills, plugins and MCP**<br/>Install plugins, write skills, connect MCP servers. |
+| **Automations**<br/>Scheduled runs, or runs triggered by new pull requests, pushes and failed CI checks. | **Import past sessions**<br/>Bring in conversations from other agent tools and chat exports, read-only. | **Spotlight search**<br/>Search chats, messages, files and folders. Type `>` for commands. |
+
+<!-- screenshot pending: <img src="docs/images/muster-agent-settings.png" alt="Settings" width="100%"/> -->
+
+## Install
+
+1. **Download** the newest `Muster-Agent-<version>-arm64.dmg` from
+   [the latest release](https://github.com/musterhq/muster-code/releases/latest). All Muster Agent
+   releases are [tagged `agent-v…`](https://github.com/musterhq/muster-code/releases?q=agent-v).
    A `.zip` of the same app is attached too, and `SHA256SUMS` lets you check the download
    (`shasum -a 256 -c SHA256SUMS --ignore-missing`).
-3. Open the disk image and drag **Muster Agent** onto **Applications**.
-4. First open. Builds are signed with the self-signed "Muster Agent Self-Signed" identity: the identity
-   stays the same from one release to the next, so macOS keeps the permissions you grant (Screen
-   Recording, Accessibility) across updates, but the app is not notarized by Apple. macOS therefore
-   blocks the first launch: right-click **Muster Agent** in Applications and choose **Open**, then
-   **Open** again (on recent macOS: System Settings > Privacy & Security > **Open Anyway**). Or clear
-   the quarantine flag once in Terminal:
+2. **Drag** **Muster Agent** onto **Applications**.
+3. **First open: right-click, then Open.** Builds are signed with the self-signed "Muster Agent
+   Self-Signed" identity but are not notarized by Apple, so macOS blocks the first launch.
+   Right-click **Muster Agent** in Applications, choose **Open**, then **Open** again (on recent macOS:
+   System Settings > Privacy & Security > **Open Anyway**). Or clear the quarantine flag once:
 
    ```sh
    xattr -dr com.apple.quarantine "/Applications/Muster Agent.app"
    ```
 
-What it needs: macOS 14 (Sonoma) or later and a model provider sign-in. On first run Muster Agent
-detects the providers already signed in on your Mac (Codex, Claude Code, OpenCode, or a configured
-gateway) and uses them; if it finds none, guided setup walks you through adding one. Docker Desktop
-(sandboxes) is optional.
+   The signing identity stays the same from one release to the next, so macOS keeps the permissions
+   you grant (Screen Recording, Accessibility) across updates.
+4. **Updates arrive automatically.** The app checks GitHub Releases, verifies the download against
+   its published SHA-256 and code signature, and accepts it only if it is signed by the same
+   identity. The update installs when you restart.
 
-## Build and run Muster Agent from source
+**Requirements:** macOS 14 (Sonoma) or later and a model provider (see [Your providers](#your-providers)).
+The download is **Apple silicon only** for now. Intel Macs run from a clone (below). Docker Desktop is
+optional and only needed for sandboxes.
+
+## Run Muster Agent on another Mac (from source)
 
 A fresh clone builds and runs with no sibling checkouts and no environment variables: the few
 Muster core sources the app bundles are vendored in `packages/agent-app/vendor/` (see its README).
@@ -43,14 +158,11 @@ Muster core sources the app bundles are vendored in `packages/agent-app/vendor/`
 - git.
 - Xcode Command Line Tools (`xcode-select --install`), used to compile node-pty for the integrated
   terminal. Without them the install still succeeds and falls back to node-pty's prebuilt binary.
-- GitHub access to `musterhq/muster-code`. The repository is private, so the other Mac must be signed
-  in to an account with access (`gh auth login`, an SSH key, or a credential helper) before cloning.
 
 ### One command
 
 ```sh
 git clone https://github.com/musterhq/muster-code.git && cd muster-code \
-  && git checkout claude/muster-agent-completion-20260924 \
   && cd packages/agent-app && npm ci && npm start
 ```
 
@@ -59,7 +171,6 @@ installed, git, Xcode tools), then run `npm ci` and `npm start`:
 
 ```sh
 git clone https://github.com/musterhq/muster-code.git && cd muster-code \
-  && git checkout claude/muster-agent-completion-20260924 \
   && ./packages/agent-app/scripts/run-mac.sh
 ```
 
@@ -69,11 +180,10 @@ the app; later runs only need `npm start` from `packages/agent-app`.
 
 ### First launch
 
-Muster Agent looks for providers you are already signed in to on that Mac (Codex, Claude Code,
-OpenCode, or a configured gateway) and uses them directly. If it finds none, it opens guided setup
-to sign in or add one. Settings and chats live in `~/Library/Application Support/Muster Agent`;
-pass `--user-data-dir=/some/dir` (for example `npx electron . --user-data-dir=/tmp/muster-test`) to
-run an isolated profile.
+Muster Agent looks for providers you are already signed in to on that Mac and uses them directly.
+If it finds none, it opens guided setup to sign in or add one. Settings and chats live in
+`~/Library/Application Support/Muster Agent`; pass `--user-data-dir=/some/dir` (for example
+`npx electron . --user-data-dir=/tmp/muster-test`) to run an isolated profile.
 
 ### Optional capabilities
 
@@ -107,15 +217,23 @@ are covered in `packages/agent-app/docs/RELEASE.md`.
   `MUSTER_CORE_CLIENT_ENTRY`, `MUSTER_RUNTIME_SOURCE_ROOT` and `MUSTER_SANDBOX_SOURCE_ROOT`; the
   build log prints which source each bundle used. `npm run vendor:sync` refreshes `vendor/` from them.
 
-## Shape
+## What's in this repository
 
-- `product/` — the distribution overlay (branding, Open VSX gallery, Muster as the default chat agent, proposed-API grants).
-- `packages/builtin/` — the built-in Muster layer: default chat participant, Codex thread sessions, model provider, threads view, board, live diff, inline completions. Bundled into the app as `muster.muster-code`.
-- `packages/agent-app/` — Muster Agent, the standalone Electron agent app (see the section above).
-- `scripts/assemble.sh` — builds `dist/Muster Code.app` from a prebuilt Code-OSS binary + overlay + built-in layer. No VS Code compile.
+This repository holds two apps: **Muster Agent** (above) and **Muster Code**, a Code-OSS-based IDE
+with the Muster agent built in.
+
+- `packages/agent-app/` — Muster Agent, the standalone Electron agent app. Developer notes are in
+  [its README](packages/agent-app/README.md).
+- `product/` — the Muster Code distribution overlay (branding, Open VSX gallery, Muster as the
+  default chat agent, proposed-API grants).
+- `packages/builtin/` — the built-in Muster layer for Muster Code: default chat participant, agent
+  thread sessions, model provider, threads view, board, live diff, inline completions. Bundled into
+  the app as `muster.muster-code`.
+- `scripts/assemble.sh` — builds `dist/Muster Code.app` from a prebuilt Code-OSS binary + overlay +
+  built-in layer, with no editor compile step.
 - Engine: `@musterhq/core` (the open-source muster) linked from the sibling checkout.
 
-## Build
+### Build Muster Code
 
 ```
 pnpm install
@@ -125,4 +243,4 @@ open "dist/Muster Code.app"
 
 Dev launch (isolated profile): `MUSTER_CODE_DEV_SOCK=/tmp/mc-dev.sock "dist/Muster Code.app/Contents/MacOS/Muster Code" --user-data-dir /tmp/mc-udd /tmp/mc-sample`
 
-Base: Code-OSS 1.126 (Electron 42, Node 24 with node:sqlite), from the VSCodium release binaries.
+Base: Code-OSS 1.126 (Electron 42, Node 24 with node:sqlite), from prebuilt Code-OSS release binaries.
