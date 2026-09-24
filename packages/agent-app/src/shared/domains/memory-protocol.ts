@@ -17,7 +17,10 @@ export interface MemoryConfigView {
 /** apiKey: omitted keeps the stored key, '' removes it. */
 export interface MemoryConfigInput { endpoint: string; apiKey?: string; autoRecall: boolean; autoRetain: MemoryAutoRetain }
 
-export interface MemoryStatusView { connection: MemoryConnection; endpoint?: string; bankId?: string; checkedAt?: string; error?: string }
+/** Who shares this scope's memories on the Hindsight server: only you (Personal, or a folder without a git remote),
+ *  or everyone working on the same repository (memory-identity.ts). */
+export type MemorySharing = 'personal' | 'team' | 'private';
+export interface MemoryStatusView { connection: MemoryConnection; endpoint?: string; bankId?: string; checkedAt?: string; error?: string; sharing?: MemorySharing }
 
 export interface MemoryTestResult { ok: boolean; stage: 'config' | 'network' | 'auth' | 'service' | 'ok'; message: string; latencyMs?: number }
 

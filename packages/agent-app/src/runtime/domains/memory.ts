@@ -13,6 +13,7 @@ import { redactSecrets } from '../secret-redaction.ts';
 import { applyRecallFilters, compileRunContext, validateRecallFilters, type RunContextDecision, type RunContextRepo } from '../memory-context.ts';
 import { MemoryConfigStore, MemoryTombstones, electronSecretBox, isDuplicateOffer, localMemoryExists, matchesQuery, rankLocal, recordOffer, suggestRunSummary, OFFER_DEDUPE_WINDOW_MS, type OfferRecord, type SecretBox } from '../memory-context.ts';
 import { MemoryJobs } from '../memory-jobs.ts';
+import { createMemoryIdentity, type MemoryIdentity } from '../memory-identity.ts';
 import type { DomainContext, DomainFactory, DomainModule, PromptContributor } from './types.ts';
 
 const ENGINE_BASELINE = '0.10.0';
@@ -40,6 +41,8 @@ export interface MemoryDomainOptions {
   /** Test seams passed to HindsightService. */
   core?: HindsightServiceOptions['core'];
   createClient?: HindsightServiceOptions['createClient'];
+  /** Which Hindsight bank each scope maps to (memory-identity.ts); tests inject one without git. */
+  identity?: MemoryIdentity;
 }
 
 const str = (value: unknown, field: string, max: number, required = true): string => {
@@ -115,11 +118,21 @@ function memoryDomain(context: DomainContext, options: MemoryDomainOptions): Dom
   };
   const archiveDir = join(context.dataDir, 'memory-archives');
 
-  /** `project:<id>` is a Project's own bank (PRJ-X5); anything else is a workspace folder, or Personal when omitted. */
+  /** The Hindsight bank for a scope (memory-identity.ts): Personal per person, a git folder per repository (shared by the
+   *  team), a Project per repository and name; folders without a remote stay private. Local memory keeps its own scopes.
+   *  `project:<id>` is a Project's own bank (PRJ-X5); anything else is a workspace folder, or Personal when omitted. */
+  const identity = options.identity ?? createMemoryIdentity({ env: env as NodeJS.ProcessEnv });
   const resolveScope = (folderId: string): { kind: string; id: string } | undefined => {
-    if (folderId === 'personal') return { kind: 'user', id: 'local' };
-    if (folderId.startsWith('project:')) { const project = context.store.project(folderId.slice(8)); return project ? { kind: 'project', id: project.id } : undefined; }
-    try { return { kind: 'workspace', id: context.folderFor(folderId).id }; } catch { return undefined; }
+    if (folderId === 'personal') return identity.personal();
+    if (folderId.startsWith('project:')) {
+      const project = context.store.project(folderId.slice(8)) as { id: string; name?: string; primaryFolderId?: string | null; folderIds?: string[] } | undefined;
+      if (!project) return undefined;
+      const primaryId = project.primaryFolderId ?? project.folderIds?.[0];
+      let primary: { id: string; path: string } | undefined;
+      try { primary = primaryId ? context.folderFor(primaryId) : undefined; } catch { primary = undefined; }
+      return identity.project({ id: project.id, name: project.name ?? project.id }, primary);
+    }
+    try { return identity.folder(context.folderFor(folderId)); } catch { return undefined; }
   };
   let hindsight: HindsightService | undefined, unavailable = false;
   const service = (): HindsightService | undefined => {
@@ -424,6 +437,13 @@ function memoryDomain(context: DomainContext, options: MemoryDomainOptions): Dom
     return writeArchive('backup', scope, lines, counts, EXPORT_PARTS, reason);
   };
 
+  const sharingOf = (folderId?: string): MemoryStatusView['sharing'] => {
+    try {
+      if (!folderId || folderId === 'personal') return 'personal';
+      if (folderId.startsWith('project:')) { const scope = resolveScope(folderId); return scope?.id.startsWith('repo-') ? 'team' : 'private'; }
+      return identity.describe(context.folderFor(folderId));
+    } catch { return undefined; }
+  };
   const status = (folderId?: string): MemoryStatusView => {
     const current = service();
     if (!current) return { connection: 'not-configured', error: 'Hindsight is unavailable in this build. Local memory still works.' };
@@ -434,6 +454,7 @@ function memoryDomain(context: DomainContext, options: MemoryDomainOptions): Dom
       ...(value.endpoint ? { endpoint: value.endpoint } : {}), ...(value.bankId ? { bankId: value.bankId } : {}),
       ...(value.checkedAt ? { checkedAt: value.checkedAt } : {}),
       ...(value.connectionError ?? value.error ? { error: value.connectionError ?? value.error } : {}),
+      ...(sharingOf(folderId) ? { sharing: sharingOf(folderId)! } : {}),
     };
   };
   const view = () => { service()?.refresh(); return config.view(service()?.configSource() ?? (config.hindsight() ? 'app' : env.HINDSIGHT_API_URL?.trim() ? 'environment' : 'none')); };

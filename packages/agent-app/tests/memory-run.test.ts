@@ -6,6 +6,9 @@ import {join} from 'node:path';
 import {AgentStore} from '../src/runtime/store.ts';
 import {createDomainHooks} from '../src/runtime/domains/hooks.ts';
 import {createMemoryDomainWith,type MemoryDomainOptions} from '../src/runtime/domains/memory.ts';
+import {createMemoryIdentity} from '../src/runtime/memory-identity.ts';
+/** Deterministic bank identity: no git, a fixed person. */
+const identity=createMemoryIdentity({env:{},git:()=>undefined,user:()=>'tester@host'});
 import {formatRecall,isDuplicateOffer,rankLocal,recordOffer,suggestRunSummary,type OfferRecord} from '../src/runtime/memory-context.ts';
 import type {DomainContext} from '../src/runtime/domains/types.ts';
 import type {AgentEvent,MemoryEntry,TimelineItem} from '../src/shared/protocol.ts';
@@ -53,11 +56,11 @@ async function fixture(t: TestContext, options: {client?: Partial<HindsightClien
     reflect: async () => ({bankId: 'bank', text: 'answer'}),
     ...options.client,
   } as HindsightClientLike;
-  const domain = createMemoryDomainWith({env: options.env ?? {HINDSIGHT_API_URL: 'http://memory.local'}, core, createClient: () => client, secretBox: () => box, recallTimeoutMs: 150, fetch: options.fetch})(context);
+  const domain = createMemoryDomainWith({env: options.env ?? {HINDSIGHT_API_URL: 'http://memory.local'}, identity, core, createClient: () => client, secretBox: () => box, recallTimeoutMs: 150, fetch: options.fetch})(context);
   t.after(() => domain.dispose?.());
   const call = async (command: string, input: Record<string, unknown> = {}): Promise<any> => domain.handlers[command]!(input);
   /** A second domain over the same database and data dir — an app restart. The first stops listening. */
-  const restart = () => { domain.dispose?.(); const next = createMemoryDomainWith({env: options.env ?? {HINDSIGHT_API_URL: 'http://memory.local'}, core, createClient: () => client, secretBox: () => box, recallTimeoutMs: 150, fetch: options.fetch})(context); t.after(() => next.dispose?.()); return next; };
+  const restart = () => { domain.dispose?.(); const next = createMemoryDomainWith({env: options.env ?? {HINDSIGHT_API_URL: 'http://memory.local'}, identity, core, createClient: () => client, secretBox: () => box, recallTimeoutMs: 150, fetch: options.fetch})(context); t.after(() => next.dispose?.()); return next; };
   return {dataDir, store, folder, chat, entries, added, retained, events, runtime, call, restart};
 }
 
@@ -86,7 +89,7 @@ test('Hindsight results join local notes with provenance, and auto-recall off co
   assert.deepEqual(result.sources, ['Memory (1)']);
   assert.match(result.text, /hindsight · world · id h1\] The API uses cursor pagination/);
   assert.equal(calls[0]!.budget, 'low'); assert.equal(calls[0]!.maxTokens, 1200);
-  assert.deepEqual(calls[0]!.scope, {kind: 'workspace', id: f.folder.id});
+  assert.deepEqual(calls[0]!.scope, identity.folder(f.folder), 'the bank comes from the folder identity (private here: no git remote)');
   await f.call('memory.config.set', {endpoint: '', autoRecall: false, autoRetain: 'ask'});
   assert.equal(f.runtime.hasRunHooks(), false, 'no contributor once recall is off, so runs dispatch in the same tick');
   assert.equal((await f.runtime.contributePrompt({chat: f.chat, prompt: 'Add pagination'})).text, '');

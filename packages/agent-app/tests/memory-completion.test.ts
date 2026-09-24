@@ -6,6 +6,9 @@ import { join } from 'node:path';
 import { AgentStore } from '../src/runtime/store.ts';
 import { createDomainHooks } from '../src/runtime/domains/hooks.ts';
 import { createMemoryDomainWith, type MemoryDomainOptions } from '../src/runtime/domains/memory.ts';
+import { createMemoryIdentity } from '../src/runtime/memory-identity.ts';
+/** Deterministic bank identity: no git, a fixed person. */
+const identity = createMemoryIdentity({ env: {}, git: () => undefined, user: () => 'tester@host' });
 import { compileRunContext, freshnessOf } from '../src/runtime/memory-context.ts';
 import type { DomainContext } from '../src/runtime/domains/types.ts';
 import type { MemoryEntry } from '../src/shared/protocol.ts';
@@ -52,7 +55,7 @@ async function fixture(t: TestContext, options: { recall?: Entry[]; fetch?: type
     recall: async (input: Record<string, unknown>) => { recalls.push(input); return { bankId: 'bank', results: options.recall ?? [] }; },
     reflect: async () => ({ bankId: 'bank', text: options.reflectText ?? 'answer' }),
   } as unknown as HindsightClientLike;
-  const domain = createMemoryDomainWith({ env: { HINDSIGHT_API_URL: 'http://memory.local' }, core, createClient: () => client, fetch: options.fetch ?? ((async () => { throw new Error('offline'); }) as typeof fetch) })(context);
+  const domain = createMemoryDomainWith({ env: { HINDSIGHT_API_URL: 'http://memory.local' }, identity, core, createClient: () => client, fetch: options.fetch ?? ((async () => { throw new Error('offline'); }) as typeof fetch) })(context);
   t.after(() => domain.dispose?.());
   const call = async (command: string, input: Record<string, unknown> = {}): Promise<any> => domain.handlers[command]!(input);
   return { dataDir, store, folder, entries, call, runtime, recalls };
@@ -152,7 +155,7 @@ test('MEM-13: recall filters by entity and time, explains matches, and handles c
   const plain = await call('memory.recall', { folderId: folder.id, query: 'x', tags: ['team:a'] });
   assert.equal(plain.records.length, 4); assert.equal(plain.excluded, undefined);
   assert.deepEqual(recalls.at(-1)!.tags, ['team:a'], 'tags pass to the engine as a filter');
-  assert.equal((recalls.at(-1)!.scope as { id: string }).id, folder.id, 'tags never change the authorized scope');
+  assert.equal((recalls.at(-1)!.scope as { id: string }).id, identity.folder(folder).id, 'tags never change the authorized scope');
   await assert.rejects(call('memory.recall', { folderId: folder.id, query: 'x', from: '2026-05-01', to: '2026-01-01' }), /from must not be later than to/);
   await assert.rejects(call('memory.recall', { folderId: folder.id, query: 'x', validAt: 'yesterday-ish' }), /validAt must be an ISO date/);
   const browsed = await call('memory.browse', { folderId: folder.id, entities: ['nothing'] });
@@ -167,6 +170,12 @@ function engineFetch(handler: (url: string, init?: RequestInit) => Response | Pr
   }) as typeof fetch;
 }
 
+test('the Memory screen says who shares a scope: Personal and folders without a remote are private, a repository is the team', async t => {
+  const { folder, call } = await fixture(t);
+  assert.equal((await call('memory.status', {})).sharing, 'personal');
+  assert.equal((await call('memory.status', { folderId: folder.id })).sharing, 'private', 'no git remote in this fixture: private to you');
+});
+
 test('MEM-14: document deletion suppresses recall at once and reconciles with the engine when it supports deletion', async t => {
   const deletes: string[] = [];
   const { folder, call } = await fixture(t, {
@@ -175,7 +184,7 @@ test('MEM-14: document deletion suppresses recall at once and reconciles with th
   });
   const result = await call('memory.document.delete', { folderId: folder.id, documentId: 'doc-1' });
   assert.equal(result.engine, 'deleted'); assert.equal(result.pending, undefined);
-  assert.deepEqual(deletes, [`DELETE http://memory.local/v1/default/banks/bank-workspace-${folder.id}/documents/doc-1`]);
+  assert.deepEqual(deletes, [`DELETE http://memory.local/v1/default/banks/bank-workspace-${identity.folder(folder).id}/documents/doc-1`]);
   const recalled = await call('memory.recall', { folderId: folder.id, query: 'document' });
   assert.deepEqual(recalled.records.map((r: MemoryRecord) => r.id), ['x2']);
   const again = await call('memory.document.delete', { folderId: folder.id, documentId: 'doc-1' });
