@@ -32,7 +32,7 @@ const store=await import('../src/renderer/store');
 const errors: unknown[] = [];
 const root=createRoot(document.getElementById('root')!, {onUncaughtError:error=>errors.push(error)});root.render(<React.StrictMode><App/></React.StrictMode>);await store.boot();
 for(const id of ['a','b','a','b','a']){await store.selectChat(id);for(let attempt=0;attempt<40&&!document.querySelector('.timeline')?.textContent?.includes('Chat '+id);attempt++)await delay(25);assert.equal(document.querySelectorAll('.timeline').length,1, 'exactly one mounted transcript after selecting '+id);assert.equal(document.querySelectorAll('.composer').length,1);assert.deepEqual(errors,[]);assert.match(document.querySelector('.timeline')!.textContent!,new RegExp('Chat '+id),JSON.stringify({timeline:store.getState().timelines[id],html:document.querySelector('.timeline')!.innerHTML}));assert.doesNotMatch(document.querySelector('.timeline')!.textContent!,new RegExp('Chat '+(id==='a'?'b':'a')));assert.deepEqual(errors,[]);}
-assert.equal(document.querySelector('.md-code-lang')?.textContent,'javascript','generic code blocks near an edited path use that file extension’s syntax highlighter');
+assert.equal(document.querySelector('.md-code-lang')?.textContent,'JavaScript','generic code blocks near an edited path use that file extension’s syntax highlighter (shown by its display name)');
 const streamingNode = document.querySelector('.timeline');
 emit({type:'timelinePatch',chatId:'a',patch:{after:1,revision:2,items:[{id:'a1',chatId:'a',kind:'assistant',text:'Chat a live update',createdAt:''}]}});
 await delay(60);

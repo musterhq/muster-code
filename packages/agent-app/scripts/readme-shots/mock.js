@@ -12,6 +12,14 @@ const unknown = window.__unknownCommands = new Set();
 const {ROOT, INFRA, folders, projects, files, patches, stat, timelines, providers, memories, ago, edited} = FX;
 const folderOf = (id) => folders.find(f => f.id === id) ?? folders[0];
 const activeChatId = OPTS.activeChatId ?? 'c-hero';
+// A single exchange for side-by-side typography checks: `replyMarkdown` (and optional `userText`) replace the active chat.
+if (OPTS.replyMarkdown) {
+  const at = (minutes) => new Date(Date.now() - minutes * 60_000).toISOString();
+  timelines[activeChatId] = [
+    {id: 'cmp-1', chatId: activeChatId, kind: 'user', text: OPTS.userText ?? 'Check it.', status: 'completed', createdAt: at(9)},
+    {id: 'cmp-2', chatId: activeChatId, kind: 'assistant', text: OPTS.replyMarkdown, status: 'completed', createdAt: at(1)},
+  ];
+}
 const snapshot = () => ({folders, chats: FX.chats, projects, activeChatId, version: 1, attention: {totalRequests: 0, chats: []}});
 const text = (path) => files[path]?.after ?? files[path]?.before ?? `// ${path}\n`;
 const blob = (s) => { let h = 0; for (const c of s) h = (h * 31 + c.charCodeAt(0)) >>> 0; return h.toString(16).padStart(8, '0') + 'a3f1c9e2b7d4'; };

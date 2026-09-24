@@ -100,7 +100,7 @@ async function main() {
       if (r.exceptionDetails) throw new Error(r.exceptionDetails.exception?.description ?? r.exceptionDetails.text);
       return r.result.value;
     };
-    const selected = SHOTS.filter(s => !only.length || only.includes(s.name));
+    const selected = SHOTS.filter(s => only.length ? only.includes(s.name) : !s.local);
     for (const shot of selected) {
       const script = await cdp.call('Page.addScriptToEvaluateOnNewDocument', {source: `window.__SHOT=${JSON.stringify(shot.name)};window.__SHOT_OPTS=${JSON.stringify(shot.opts ?? {})};\n${fixtures}\n${mock}`});
       logs.length = 0;
