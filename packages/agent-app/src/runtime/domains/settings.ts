@@ -6,6 +6,7 @@ import { basename, dirname, join, sep } from 'node:path';
 import {
   MAX_SETTINGS_IMPORT_BYTES, SETTING_DEFAULTS, diagnosticsText, isModelPreference, resolveChatDefaults, type ModelPreference, type ResolvedChatDefaults, redactDiagnostics, SETTING_KEYS, isSettingKey, normalizeSettings, parseSettingsImport, settingsExport, validateSetting,
   type AppSettings, type CleanableCategory, type CleanupItem, type CleanupPreview, type DiagnosticsReport, type ProcessMetric, type SettingKey, type StorageCategory, type StorageCategoryId, type StorageReport,
+  type ResponseStyle,
 } from '../../shared/domains/settings-protocol.ts';
 import type { DomainContext, DomainModule } from './types.ts';
 import { availableShells, loginShell, resolveTerminalShell } from '../terminal-shell.ts';
@@ -76,6 +77,16 @@ const FRESH_MS = 10 * 60_000;
 const PROJECT_ID = /^[A-Za-z0-9_-]{1,128}$/;
 
 /** Settings domain: whitelisted preferences in dataDir/settings.json, diagnostics, storage usage and guarded cleanup. */
+/** `auto` follows a personality the user set in their Codex config (sent as-is by Codex), else Friendly, the
+ *  desktop app's default. An explicit choice always wins. Undefined means "send nothing". */
+export function resolvePersonality(style: ResponseStyle | undefined, codexConfig: string): 'friendly' | 'pragmatic' | undefined {
+  if (style === 'friendly' || style === 'pragmatic') return style;
+  return /^\s*(?:model_)?personality\s*=/m.test(codexConfig) ? undefined : 'friendly';
+}
+const codexConfigText = (): string => {
+  try { return readFileSync(join(process.env.CODEX_HOME || join(homedir(), '.codex'), 'config.toml'), 'utf8'); } catch { return ''; }
+};
+
 export function createSettingsDomain(ctx: DomainContext, electron: ElectronApi | undefined = loadElectron()): DomainModule {
   const file = () => join(ctx.dataDir, 'settings.json');
   const logPath = () => join(ctx.dataDir, 'logs', 'runtime.log');
@@ -186,6 +197,11 @@ export function createSettingsDomain(ctx: DomainContext, electron: ElectronApi |
     return resolveChatDefaults({ project, folder, user: read()['general.defaultModel'], providers: catalog.providers, builtin: catalog.builtin });
   };
   // Built-in results add nothing: chat.create keeps its own fallback, exactly as before defaults existed.
+  // Response style: Codex's `personality` config, passed as a per-run override so replies read like the desktop app's.
+  const offResponseStyle = ctx.hooks?.addRunOptionsContributor?.(async () => {
+    const personality = resolvePersonality(read()['chat.responseStyle'], codexConfigText());
+    return personality ? { configOverrides: { personality } } : {};
+  });
   ctx.hooks?.setChatDefaults(input => {
     const resolved = resolveDefaults(input);
     return resolved.source === 'runtime' ? undefined : { providerId: resolved.providerId, model: resolved.model, ...(resolved.effort ? { effort: resolved.effort } : {}) };
@@ -338,7 +354,7 @@ export function createSettingsDomain(ctx: DomainContext, electron: ElectronApi |
         return { removed, bytes };
       },
     },
-    dispose() { electron?.app.off('browser-window-created', onWindow); ctx.hooks?.setChatDefaults(undefined); },
+    dispose() { electron?.app.off('browser-window-created', onWindow); ctx.hooks?.setChatDefaults(undefined); offResponseStyle?.(); },
   };
 
   async function importSettings(path: string) {

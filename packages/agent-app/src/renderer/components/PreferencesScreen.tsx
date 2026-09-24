@@ -1,7 +1,7 @@
 import React,{useEffect,useId,useLayoutEffect,useMemo,useRef,useState,useSyncExternalStore} from 'react';
 import {createPortal} from 'react-dom';
 import {Activity,ArrowLeft,Boxes,Brain,CalendarClock,Cpu,Download,HardDrive,Keyboard,MessageSquare,Palette,Puzzle,RotateCcw,Search,Server,SlidersHorizontal,Upload,X} from 'lucide-react';
-import {AUTO_ARCHIVE_DAYS,TERMINAL_SHELL_NAMES,TEXT_SIZES,type AccessibilityOverride,type AppSettings,type SettingKey,type TerminalShellOption} from '../../shared/domains/settings-protocol';
+import {AUTO_ARCHIVE_DAYS,CHAT_TEXT_SIZES,TERMINAL_SHELL_NAMES,TEXT_SIZES,type AccessibilityOverride,type ChatTextSize,type AppSettings,type SettingKey,type TerminalShellOption} from '../../shared/domains/settings-protocol';
 import type {MemoryAutoRetain,MemoryConfigView} from '../../shared/domains/memory-protocol';
 import {invoke} from '../bridge';
 import {activeChat,closeSettings,notifyError,notifySuccess,openMemoryScreen,resetSettings,setFollowUpMode,setPluginView,setSetting,setSettingsSection,setSummaryHidden,type SettingsSection} from '../store';
@@ -299,6 +299,9 @@ export function PreferencesScreen():React.ReactElement {
             <Row setting="appearance.textSize" title="Text size" scope="This Mac · whole window" description={`Scales text and controls. ${MAC?'⌘+ and ⌘−':'Ctrl++ and Ctrl+−'} adjust it until the window reloads.`}>
               <Segmented label="Text size" value={settings['appearance.textSize']} options={TEXT_SIZES.map(size=>({value:size as number,label:`${size}%`}))} onChange={value=>set('appearance.textSize',value)}/>
             </Row>
+            <Row setting="appearance.chatTextSize" title="Chat text size" scope="This Mac · replies in every chat" description="The size of the agent’s replies. The rest of the window follows Text size.">
+              <Segmented label="Chat text size" value={settings['appearance.chatTextSize']} options={CHAT_TEXT_SIZES.map(size=>({value:size as number,label:`${size}px`}))} onChange={value=>set('appearance.chatTextSize',value as ChatTextSize)}/>
+            </Row>
             <Row setting="appearance.reducedMotion" title="Reduce motion" scope="This Mac · overrides the system" description="Turn off slide and fade animations, including panel transitions.">
               <Segmented label="Reduce motion" value={settings['appearance.reducedMotion']} options={OVERRIDES} onChange={value=>set('appearance.reducedMotion',value)}/>
             </Row>
@@ -313,6 +316,9 @@ export function PreferencesScreen():React.ReactElement {
             <div className="preference-group">
               <Row title="Follow-up behavior" scope="This Mac · while a chat runs" description={`Queue follow-ups while Muster runs or steer the current run. Press ${MAC?'⌘':'Ctrl+'}Enter to do the opposite for one message.`}>
                 <Segmented label="Follow-up behavior" value={state.followUpMode} options={[{value:'queue',label:'Queue'},{value:'steer',label:'Steer'}]} onChange={setFollowUpMode}/>
+              </Row>
+              <Row setting="chat.responseStyle" title="Response style" scope="New runs · Codex-based models" description={settings['chat.responseStyle']==='pragmatic'?'Short, direct answers that stick to the result.':settings['chat.responseStyle']==='friendly'?'Explains what it did and why, in a warmer tone.':'Uses the personality set in your Codex config, otherwise Friendly.'}>
+                <Segmented label="Response style" value={settings['chat.responseStyle']} options={[{value:'auto',label:'Automatic'},{value:'friendly',label:'Friendly'},{value:'pragmatic',label:'Pragmatic'}]} onChange={value=>set('chat.responseStyle',value)}/>
               </Row>
               <Row setting="chat.inlineDiffs" title="Show file diffs inline" scope="All chats" description="Show syntax-coloured code additions and removals in the conversation. The files-changed pill and the Changes tab stay available either way.">
                 <Switch label="Show file diffs inline" checked={settings['chat.inlineDiffs']} onChange={value=>set('chat.inlineDiffs',value)}/>
