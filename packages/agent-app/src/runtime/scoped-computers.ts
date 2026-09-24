@@ -91,7 +91,7 @@ export interface ScopedComputerOptions {
   tarBin?:string;
 }
 interface Receipt {requestId:string;executionId:string;fingerprint:string;state:ScopedComputerExecution['state'];exitCode:number|null;computerStopped:boolean}
-interface RecordData {version:1;id:string;scope:ScopedComputerRef;handle:ComputerHandle|null;receipts:Receipt[];active?:{executionId:string;requestId:string;pgid?:number;ephemeral?:boolean};network?:ScopedComputerNetwork;limits?:ScopedComputerLimits;layers?:ScopedComputerLayer[]}
+interface RecordData {version:1;id:string;scope:ScopedComputerRef;handle:ComputerHandle|null;receipts:Receipt[];active?:{executionId:string;requestId:string;pgid?:number;ephemeral?:boolean;owner?:string};network?:ScopedComputerNetwork;limits?:ScopedComputerLimits;layers?:ScopedComputerLayer[]}
 interface Context {id:string;scope:ScopedComputerRef;label:string;descriptor:ComputerDescriptor;recordPath:string;historyPath:string;core:ComputerCore;backend:ComputerBackend;network:ScopedComputerNetwork;limits:ScopedComputerLimits;layers:(ScopedComputerLayer&{source:string})[]}
 /** SBX-15 persisted service entry; `pgid` lets a service that outlived the app be found (and stopped) again. */
 interface ServiceEntry extends Omit<ScopedComputerService,'output'> {pgid?:number;/** What the user asked for; restart policies only act on services meant to be running. */desired:'running'|'stopped'}
@@ -156,6 +156,8 @@ async function measure(path:string):Promise<{bytes:number;files:number;truncated
 
 /** A local Docker boundary with app-owned durable paths and no renderer-supplied handles or mounts. */
 export class ScopedComputers {
+  /** Identifies this runtime instance in persisted records, so a stale instance never settles work another one took over. */
+  private readonly instanceId=randomUUID();
   private closed=false;
   private initialized?:Promise<{root:string;installation:string}>;
   private dependency?:Promise<{core:ComputerCore;backend:ComputerBackend}>;
@@ -269,7 +271,7 @@ export class ScopedComputers {
     const expected=this.expectedHandle(context);
     if(data.version!==1||data.id!==context.id||refKey(data.scope)!==refKey(context.scope))integrity();
     if(data.handle&&(data.handle.id!==expected.id||data.handle.ownerDigest!==expected.ownerDigest||typeof data.handle.image!=='string'||typeof data.handle.createdAt!=='string'))integrity();
-    if(data.active&&(typeof data.active.executionId!=='string'||typeof data.active.requestId!=='string'||(data.active.pgid!==undefined&&(!Number.isInteger(data.active.pgid)||data.active.pgid<2))||(data.active.ephemeral!==undefined&&data.active.ephemeral!==true)))integrity();
+    if(data.active&&(typeof data.active.executionId!=='string'||typeof data.active.requestId!=='string'||(data.active.pgid!==undefined&&(!Number.isInteger(data.active.pgid)||data.active.pgid<2))||(data.active.ephemeral!==undefined&&data.active.ephemeral!==true)||(data.active.owner!==undefined&&typeof data.active.owner!=='string')))integrity();
     if(data.network!==undefined&&data.network!=='none'&&data.network!=='egress')integrity();
     data.receipts??=[];
     if(!Array.isArray(data.receipts)||data.receipts.length>MAX_RECEIPTS)integrity();
@@ -452,7 +454,7 @@ export class ScopedComputers {
     for(const [id,old] of this.executions){if(this.executions.size<100)break;if(old.settled&&old.result.state!=='recovery-needed')this.executions.delete(id);}
     if(this.executions.size>=100)throw new ComputerInputError('Too many unresolved executions. Stop an existing computer before starting more work.');
     if(this.closed)throw new ComputerInputError('Scoped computers are shutting down.');
-    const executionId=randomUUID(),startedAt=new Date().toISOString();record.active={executionId,requestId:input.requestId,...(input.ephemeral?{ephemeral:true as const}:{})};if(!input.ephemeral)record.receipts.push({executionId,requestId:input.requestId,fingerprint,state:'running',exitCode:null,computerStopped:false});await this.saveRecord(context,record);
+    const executionId=randomUUID(),startedAt=new Date().toISOString();record.active={executionId,requestId:input.requestId,owner:this.instanceId,...(input.ephemeral?{ephemeral:true as const}:{})};if(!input.ephemeral)record.receipts.push({executionId,requestId:input.requestId,fingerprint,state:'running',exitCode:null,computerStopped:false});await this.saveRecord(context,record);
     if(this.closed){delete record.active;record.receipts.at(-1)!.state='cancelled';await this.saveRecord(context,record);throw new ComputerInputError('Scoped computers are shutting down.');}
     const execution:Execution={clientAbort:new AbortController(),context,scopeKey:key,requestId:input.requestId,container:record.handle.id,pending:{stdout:'',stderr:''},result:{executionId,computerId:context.id,state:'running',stdout:'',stderr:'',stdoutTruncated:false,stderrTruncated:false,exitCode:null,computerStopped:false,command:input.command,startedAt},done:Promise.resolve()};
     this.executions.set(executionId,execution);
@@ -487,9 +489,12 @@ export class ScopedComputers {
       else if(execution.stopKind){r.state=execution.stopKind;r.reason=execution.stopKind==='timed-out'?'Stopped at its time limit. The sandbox kept running.':r.computerStopped?'Cancelled by stopping the whole sandbox; its workspace is kept.':'Cancelled. The sandbox kept running.';}
       else if(outcome.error){r.state='failed';r.reason=outcome.error==='docker-missing'?classify(Object.assign(new Error(),{name:'DockerMissingError'})).reason:'The command could not be started in the sandbox.';}
       else r.state=outcome.exitCode===0?'completed':'failed';
-      try {const latest=await this.record(context);if(latest?.active?.executionId===r.executionId){const receipt=latest.receipts.find(item=>item.executionId===r.executionId);if(receipt)Object.assign(receipt,{state:r.state,exitCode:r.exitCode,computerStopped:r.computerStopped});if(r.state!=='recovery-needed')delete latest.active;await this.saveRecord(context,latest);}}
-      catch {r.state='recovery-needed';r.reason='The execution ended, but its durable completion could not be recorded. Stop the computer before more work.';}
-      await this.writeHistory(context,execution).catch(()=>{});
+      // Only the instance that still owns the execution may settle it: after a restart another instance may have
+      // already ended it (e.g. cancelled the orphan), and a stale exit here must not overwrite that outcome.
+      let owned=false,recordFailed=false;
+      try {const latest=await this.record(context);if(latest?.active?.executionId===r.executionId&&(!latest.active.owner||latest.active.owner===this.instanceId)){owned=true;const receipt=latest.receipts.find(item=>item.executionId===r.executionId);if(receipt)Object.assign(receipt,{state:r.state,exitCode:r.exitCode,computerStopped:r.computerStopped});if(r.state!=='recovery-needed')delete latest.active;await this.saveRecord(context,latest);}}
+      catch {recordFailed=true;r.state='recovery-needed';r.reason='The execution ended, but its durable completion could not be recorded. Stop the computer before more work.';}
+      if(owned||recordFailed)await this.writeHistory(context,execution).catch(()=>{});
       execution.settled=true;
       this.emit({type:'computerExecution',computerId:context.id,execution:{...r}});
       for(const [id,old] of this.executions){if(this.executions.size<=100)break;if(old.result.state!=='running'&&old.result.state!=='recovery-needed')this.executions.delete(id);}
@@ -557,6 +562,8 @@ export class ScopedComputers {
       // Restored from a previous session: end its process group by the persisted id when the container still runs it.
       if(!execution&&record.active.pgid&&record.handle)try {
         const alive=(await context.backend.inspect(record.handle,context.descriptor)).running;
+        // Take ownership before signalling, so the instance that started it cannot record its exit as a failure.
+        record.active.owner=this.instanceId;await this.saveRecord(context,record);
         if(!alive||(await this.runner.killGroup(record.handle.id,record.active.pgid)).code===0){
           if(receipt)Object.assign(receipt,{state:'cancelled',computerStopped:!alive});delete record.active;await this.saveRecord(context,record);
           const runs=await this.readHistory(context),run=runs.find(item=>item.executionId===executionId);
