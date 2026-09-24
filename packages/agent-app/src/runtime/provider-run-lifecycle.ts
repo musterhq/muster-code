@@ -102,7 +102,7 @@ export async function requestWhileOwned<T>(signal: AbortSignal, request: () => P
 export function providerAccessPolicy(chat: Pick<Chat, 'mode' | 'permissionMode'>): {
   permissionMode: ChatPermissionMode;
   sandbox: 'read-only' | 'workspace-write' | 'danger-full-access';
-  approvalPolicy: 'never' | 'on-request';
+  approvalPolicy: 'never' | 'on-request' | 'untrusted';
   networkAccess: boolean;
 } {
   if (chat.permissionMode !== undefined && !['read-only', 'workspace', 'full'].includes(chat.permissionMode)) throw new Error('Invalid chat access policy.');
@@ -110,7 +110,8 @@ export function providerAccessPolicy(chat: Pick<Chat, 'mode' | 'permissionMode'>
   return {
     permissionMode,
     sandbox: permissionMode === 'full' ? 'danger-full-access' : permissionMode === 'workspace' ? 'workspace-write' : 'read-only',
-    approvalPolicy: permissionMode === 'workspace' ? 'on-request' : 'never',
+    // R5: Full still asks (and Muster auto-accepts) so a command that would stop the user's own processes can be held for approval.
+    approvalPolicy: permissionMode === 'workspace' ? 'on-request' : permissionMode === 'full' ? 'untrusted' : 'never',
     networkAccess: permissionMode === 'full',
   };
 }

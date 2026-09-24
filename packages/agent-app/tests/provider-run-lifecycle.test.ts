@@ -229,7 +229,7 @@ test('provider dispatch uses selected access and still clamps Full in Ask/Plan',
   for (const [mode,permissionMode,sandbox,approvalPolicy,networkAccess] of [
     ['agent','workspace','workspace-write','on-request',false],
     ['agent','read-only','read-only','never',false],
-    ['agent','full','danger-full-access','never',true],
+    ['agent','full','danger-full-access','untrusted',true],
     ['ask','full','read-only','never',false],
     ['plan','full','read-only','never',false],
   ] as const) {

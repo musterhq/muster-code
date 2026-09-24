@@ -159,8 +159,15 @@ export function timeLabel(at: string): string {
 }
 
 /** TRN-18: after a turn ends, re-read the chat's baselines and the latest turn's review, so "Ready to review" means the diff is current. */
+/** Rejects when either read fails (load() keeps the error on the entry instead of throwing), so the turn pill
+ *  can show a failed preparation with Retry instead of "Ready to review" (TRN-18). */
 export async function prepareTurnReview(chatId: string, folderId: string): Promise<void> {
   await refreshChatBaselines(chatId);
-  const info = latestBaseline((entries.get(`baselines:${chatId}`)?.value as ReviewBaselineInfo[] | undefined) ?? [], folderId);
-  if (info) await refreshReviewChanges(folderId, {runId: info.runId});
+  const baselines = entries.get(`baselines:${chatId}`);
+  if (baselines?.error) throw new Error(baselines.error);
+  const info = latestBaseline((baselines?.value as ReviewBaselineInfo[] | undefined) ?? [], folderId);
+  if (!info) return;
+  await refreshReviewChanges(folderId, {runId: info.runId});
+  const changes = entries.get(changesKey(folderId, {runId: info.runId}));
+  if (changes?.error) throw new Error(changes.error);
 }

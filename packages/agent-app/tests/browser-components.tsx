@@ -10,6 +10,9 @@ const storage=new Map<string,string>();
 Object.assign(globalThis,{window,document:window.document,HTMLElement:window.HTMLElement,Element:window.Element,Node:window.Node,MutationObserver:window.MutationObserver,ResizeObserver:class{observe(){}disconnect(){}},requestAnimationFrame:(callback:any)=>setTimeout(callback,0),cancelAnimationFrame:clearTimeout,
   localStorage:{getItem:(key:string)=>storage.get(key)??null,setItem:(key:string,value:string)=>{storage.set(key,String(value));},removeItem:(key:string)=>{storage.delete(key);}},
   CustomEvent:window.CustomEvent});
+// Base UI menus (toolbar Viewport / Profile) read computed style while positioning and animating.
+const styles=()=>({getPropertyValue:()=>'',direction:'ltr',position:'static',overflow:'visible',overflowX:'visible',overflowY:'visible',display:'block',animationName:'none',transitionProperty:'none',transitionDuration:'0s',animationDuration:'0s'});
+Object.assign(globalThis,{getComputedStyle:styles});(window as any).getComputedStyle=styles;
 window.HTMLElement.prototype.getBoundingClientRect=()=>({x:400,y:80,width:500,height:600,top:80,left:400,right:900,bottom:680});
 window.HTMLElement.prototype.getClientRects=function(){return this.closest('[hidden]')?[]:[this.getBoundingClientRect()];};
 const calls:{command:string;input:any}[]=[],listeners=new Set<(event:BrowserEvent)=>void>();

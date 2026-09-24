@@ -13,6 +13,7 @@ import {CANVAS_KINDS, type Canvas, type CanvasKind, type CanvasVersion} from '..
 import {MessageBody} from './MessageBody';
 import {ResourceState} from './ResourceState';
 import './canvas-tab.css';
+import {Tip} from './Tooltip';
 
 const SAVE_DELAY_MS = 700;
 type View = 'edit' | 'split' | 'preview';
@@ -106,12 +107,12 @@ export function CanvasTab({tab}: {tab: WorkspaceTab}): React.ReactElement {
         </button>)}
       </div>}
       <span className="canvas-status" role="status" data-state={remote ? 'conflict' : dirty ? 'dirty' : 'saved'}>{status}</span>
-      <button type="button" className="icon-button" aria-label="Ask about this canvas in a side chat" title="Ask in side chat (uses your selection)" onClick={askSelection}><MessagesSquare size={14}/></button>
-      <button type="button" className={`icon-button${history ? ' is-active' : ''}`} aria-pressed={history} aria-label="Version history" title="Version history" onClick={() => setHistory(value => !value)}><History size={14}/></button>
-      <button type="button" className="icon-button" aria-label="Delete canvas" title="Delete canvas" onClick={() => {
+      <Tip label="Ask in side chat (uses your selection)"><button type="button" className="icon-button" aria-label="Ask about this canvas in a side chat" onClick={askSelection}><MessagesSquare size={14}/></button></Tip>
+      <Tip label="Version history"><button type="button" className={`icon-button${history ? ' is-active' : ''}`} aria-pressed={history} aria-label="Version history" onClick={() => setHistory(value => !value)}><History size={14}/></button></Tip>
+      <Tip label="Delete canvas"><button type="button" className="icon-button" aria-label="Delete canvas" onClick={() => {
         if (!window.confirm(`Delete “${canvas.title}” and its ${canvas.version} version${canvas.version === 1 ? '' : 's'}?`)) return;
         void invoke('artifacts.canvas.delete', {id}).then(() => closeTab(tab.id), notifyError);
-      }}><Trash2 size={14}/></button>
+      }}><Trash2 size={14}/></button></Tip>
     </div>
     {remote && <div className="canvas-conflict" role="alert">
       <span>{remote.updatedBy === 'agent' ? 'The agent' : 'Someone'} saved version {remote.version} while you were editing.</span>

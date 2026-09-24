@@ -5,6 +5,7 @@ import {PdfThumbnailRail} from './PdfThumbnailRail';
 import type {PDFDocumentProxy,PDFDocumentLoadingTask,RenderTask,TextLayer} from 'pdfjs-dist';
 import type {DocumentPreview} from '../../shared/protocol';
 import {openBrowserTab} from '../store';
+import {Tip} from './Tooltip';
 
 type PdfLibrary=typeof import('pdfjs-dist');
 type Size=readonly [number,number];
@@ -154,7 +155,7 @@ export function PdfFile({document,onLocation}:{document:DocumentPreview;onLocati
   const zoomValue=scale===null?'fit':String(scale);
   return <div className="pdf-file">
     <div className="document-toolbar" role="group" aria-label="Document navigation">
-      <button type="button" className="document-step pdf-rail-toggle" aria-label="Page thumbnails" aria-pressed={rail} title={rail?'Hide page thumbnails':'Show page thumbnails'} disabled={!pdf||locked} onClick={toggleRail}><PanelLeft size={14}/></button>
+      <Tip label={rail?'Hide page thumbnails':'Show page thumbnails'}><button type="button" className="document-step pdf-rail-toggle" aria-label="Page thumbnails" aria-pressed={rail} disabled={!pdf||locked} onClick={toggleRail}><PanelLeft size={14}/></button></Tip>
       <button type="button" className="document-step" aria-label="Previous page" disabled={!pdf || page<=1} onClick={()=>jump(page-1)}><ChevronUp size={14}/></button>
       <button type="button" className="document-step" aria-label="Next page" disabled={!pdf || page>=pdf.numPages} onClick={()=>jump(page+1)}><ChevronDown size={14}/></button>
       <label className="document-page-field"><input aria-label="Page number" type="number" min={1} max={pdf?.numPages??1} value={page} onChange={event=>{const next=Number(event.target.value);if(pdf && Number.isInteger(next) && next>=1 && next<=pdf.numPages)jump(next);}}/><span>of {pdf?.numPages??'…'}</span></label>

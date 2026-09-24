@@ -55,7 +55,7 @@ export function OpenInMenu({folderId, path}: {folderId: string; path: string}): 
     </button>
     <Menu.Root>
       <Menu.Trigger className="open-in-more" disabled={!apps} aria-label="Choose app to open with"><ChevronDown size={13}/></Menu.Trigger>
-      <Menu.Portal><Menu.Positioner side="bottom" align="end" sideOffset={4} className="file-action-positioner"><Menu.Popup className="file-action-menu open-in-menu">
+      <Menu.Portal><Menu.Positioner side="bottom" align="end" sideOffset={4} className="file-action-positioner"><Menu.Popup className="ui-menu file-action-menu open-in-menu">
         {apps?.map(app => <Menu.Item key={app.id} onClick={() => open(app)}>
           <AppIcon app={app}/><span className="open-in-name">{app.id === 'finder' ? 'Reveal in Finder' : app.name}</span>{app.id === primary?.id && <Check size={13} aria-label="Default" className="open-in-check"/>}
         </Menu.Item>)}

@@ -11,6 +11,7 @@ import {GitRefChip, GitStatusBadge} from './GitStatus';
 import {ResourceState} from './ResourceState';
 import {cleanIpcError, gitErrorMessage, isNotGitRepository} from './resourceErrors';
 import './conflict-view.css';
+import {Tip} from './Tooltip';
 
 const OPERATION_LABEL = {merge: 'Merge', rebase: 'Rebase', 'cherry-pick': 'Cherry-pick', revert: 'Revert'} as const;
 
@@ -198,7 +199,7 @@ export function ConflictTab({tab}: {tab: WorkspaceTab}): React.ReactElement {
       <span className="conflict-head-path" title={`${folder?.name ?? ''}/${path}`}>{path}</span>
       {file && <span className="conflict-head-kind">{status}</span>}
       {file && conflictBlocks.length > 0 && <span className="conflict-head-count" data-testid="conflict-progress">{resolvedCount} of {conflictBlocks.length} resolved</span>}
-      <button type="button" className="icon-button" aria-label="Reload conflict" title="Reload from disk" disabled={!!busy} onClick={load}><RefreshCw size={12}/></button>
+      <Tip label="Reload from disk"><button type="button" className="icon-button" aria-label="Reload conflict" disabled={!!busy} onClick={load}><RefreshCw size={12}/></button></Tip>
     </header>
     {error && <p className="git-action-error conflict-error" role="alert"><TriangleAlert size={12} aria-hidden="true"/>{gitErrorMessage(error) ?? error}</p>}
     {notice && <p className="conflict-notice" role="status">{notice}</p>}

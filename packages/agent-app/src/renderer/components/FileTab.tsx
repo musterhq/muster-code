@@ -28,6 +28,7 @@ import {InlineFileSource, type InlineFileReview} from './InlineFileSource';
 import {friendlyFileError, parseDelimited, delimitedCellType} from './filePresentation';
 import {ResourceState} from './ResourceState';
 import {FileExitActions, FileFallback, HtmlPreview, MediaFile, QuickLookFile} from './FilePreviews';
+import {Tip} from './Tooltip';
 
 // Keep Markdown parsing bounded independently of the host's file-read limit.
 const MARKDOWN_LIMIT = 64 * 1024;
@@ -68,8 +69,8 @@ function FileCopyMenu({folderPath, path, contents}: {folderPath?: string; path: 
   return <>
     {copied && <span className="file-copy-status" role="status">{copied}</span>}
     <Menu.Root>
-      <Menu.Trigger className="icon-button file-copy-path" aria-label="Copy path or contents" title="Copy"><Copy size={14}/></Menu.Trigger>
-      <Menu.Portal><Menu.Positioner side="bottom" align="end" sideOffset={4} className="file-action-positioner"><Menu.Popup className="file-action-menu">
+      <Tip label="Copy"><Menu.Trigger className="icon-button file-copy-path" aria-label="Copy path or contents"><Copy size={14}/></Menu.Trigger></Tip>
+      <Menu.Portal><Menu.Positioner side="bottom" align="end" sideOffset={4} className="file-action-positioner"><Menu.Popup className="ui-menu file-action-menu">
         <Menu.Item onClick={() => copy(path, 'Relative path copied')}>Copy relative path</Menu.Item>
         <Menu.Item disabled={!absolute} onClick={() => copy(absolute, 'Absolute path copied')}>Copy absolute path</Menu.Item>
         {contents !== undefined && <Menu.Item disabled={!contents} onClick={() => copy(contents, 'Contents copied')}>Copy contents</Menu.Item>}
@@ -81,9 +82,9 @@ function FileCopyMenu({folderPath, path, contents}: {folderPath?: string; path: 
 /** Codex's floating copy control on a rendered document: copies the Markdown source. */
 function DocumentCopyButton({text}: {text: string}): React.ReactElement {
   const [copied, copy] = useCopied();
-  return <button type="button" className="icon-button file-markdown-copy" aria-label={copied ? copied : 'Copy document'} title="Copy document" onClick={() => copy(text, 'Copied')}>
+  return <Tip label="Copy document"><button type="button" className="icon-button file-markdown-copy" aria-label={copied ? copied : 'Copy document'} onClick={() => copy(text, 'Copied')}>
     {copied ? <Check size={14}/> : <Copy size={14}/>}
-  </button>;
+  </button></Tip>;
 }
 
 /**
@@ -283,7 +284,7 @@ function FindBar({find, matchCount}: {find: FileFind; matchCount: number}): Reac
     <span className="file-find-count">{matchCount ? `${Math.min(find.index + 1, matchCount)}/${matchCount}` : find.query ? '0/0' : ''}</span>
     <button type="button" className="icon-button" aria-label="Previous match" disabled={!matchCount} onClick={() => go(-1)}><ChevronUp size={13}/></button>
     <button type="button" className="icon-button" aria-label="Next match" disabled={!matchCount} onClick={() => go(1)}><ChevronDown size={13}/></button>
-    <button type="button" className={`icon-button${find.wrap ? ' is-active' : ''}`} aria-label="Wrap around" aria-pressed={find.wrap} title="Wrap around" onClick={() => find.setWrap(v => !v)}><WrapText size={13}/></button>
+    <Tip label="Wrap around"><button type="button" className={`icon-button${find.wrap ? ' is-active' : ''}`} aria-label="Wrap around" aria-pressed={find.wrap} onClick={() => find.setWrap(v => !v)}><WrapText size={13}/></button></Tip>
     <button type="button" className="icon-button" aria-label="Close find" onClick={() => find.setOpen(false)}><XIcon size={13}/></button>
   </div>;
 }
@@ -463,12 +464,12 @@ export function FileTab({tab, onToggleResourceMaximize, resourceMaximized=false}
       {selectionStatus && <span className="file-copy-status" role="status">{selectionStatus}</span>}
       <FileCopyMenu folderPath={folder?.path} path={tab.path ?? ''} contents={ready && !truncated && !ready.document && !ready.workbook && !ready.asset && !ready.native ? text : undefined}/>
       {tab.folderId && tab.path && <OpenInMenu folderId={tab.folderId} path={tab.path}/>}
-      {canEdit && !preview && !editing && <button type="button" className={`icon-button file-blame-toggle${blaming ? ' is-active' : ''}`} aria-pressed={blaming} aria-label={blaming ? 'Hide blame' : 'Show blame'} title={blaming ? 'Hide blame' : 'Blame: who last changed each line'} onClick={() => setBlaming(value => !value)}>
+      {canEdit && !preview && !editing && <Tip label={blaming ? 'Hide blame' : 'Blame: who last changed each line'}><button type="button" className={`icon-button file-blame-toggle${blaming ? ' is-active' : ''}`} aria-pressed={blaming} aria-label={blaming ? 'Hide blame' : 'Show blame'} onClick={() => setBlaming(value => !value)}>
         <BlameIcon size={14}/>
-      </button>}
-      {canEdit && <button type="button" className={`icon-button file-edit-toggle${editing ? ' is-active' : ''}`} aria-pressed={editing} aria-label={editing ? 'Stop editing' : 'Edit file'} title={editing ? 'Stop editing' : 'Edit file'} onClick={() => setEditing(value => !value)}>
+      </button></Tip>}
+      {canEdit && <Tip label={editing ? 'Stop editing' : 'Edit file'}><button type="button" className={`icon-button file-edit-toggle${editing ? ' is-active' : ''}`} aria-pressed={editing} aria-label={editing ? 'Stop editing' : 'Edit file'} onClick={() => setEditing(value => !value)}>
         <Pencil size={14}/>
-      </button>}
+      </button></Tip>}
     </div>
     {find.open && !editing && <FindBar find={find} matchCount={fileFindMatches.length}/>}
     <div className="file-content-layout">

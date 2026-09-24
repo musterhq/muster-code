@@ -68,7 +68,7 @@ export function ReviewBaselineMenu({folderId, value, onChange}: {folderId: strin
         <History size={12} aria-hidden="true"/><span className="review-baseline-prefix">Compare against</span><span className="review-baseline-value">{label}</span><ChevronDown size={12} aria-hidden="true"/>
       </Menu.Trigger>
     </Tip>
-    <Menu.Portal><Menu.Positioner side="bottom" align="start" sideOffset={4} className="review-baseline-positioner"><Menu.Popup className="review-baseline-menu">
+    <Menu.Portal><Menu.Positioner side="bottom" align="start" sideOffset={4} className="review-baseline-positioner"><Menu.Popup className="ui-menu review-baseline-menu">
       <Menu.RadioGroup value={current} onValueChange={value => pick(String(value))}>
         <Menu.Group>
           <Menu.GroupLabel className="review-baseline-group">Agent turns</Menu.GroupLabel>

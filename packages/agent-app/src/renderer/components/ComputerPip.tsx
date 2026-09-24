@@ -10,6 +10,7 @@ import {ImageFile} from './ImageFile';
 import type {ComputerPermissions} from '../../shared/domains/computer-protocol';
 import {PIP_MAX,PIP_MIN,clampPipWidth,closeViewer,cornerPosition,formatAge,frameFreshness,hostOf,latestComputerShot,openViewer,pickSource,pipShouldShow,screenshotName,setDocked,setMinimized,setPlacement,snapCorner,toolImageUrl,useComputerUi,wireComputerEvents,type Freshness,type PipSource} from '../computerUse';
 import './pip.css';
+import {Tip} from './Tooltip';
 
 const INSET={top:12,right:16,bottom:12,left:16};
 const loadImage=(id:string)=>invoke('computer.image',{id});
@@ -157,9 +158,9 @@ export function ComputerPip() {
       <span className="pip-title" title={source.url||title}>{title}</span>
       <span className={`pip-fresh is-${freshness}`} title={source.at?`Last frame ${formatAge(now-source.at)}`:undefined}>{FRESH_LABEL[freshness]}{freshness==='stale'||freshness==='disconnected'?` · ${formatAge(now-source.at)}`:''}</span>
       <span className="pip-controls">
-        <button type="button" className="icon-button" aria-label="Expand" title="Open full size in the right pane" onClick={openFull}><Maximize2 size={12}/></button>
-        <button type="button" className="icon-button" aria-label="Dock to right pane" title="Dock in the right pane" onClick={()=>{openViewer({chatId:source.chatId,live:true});setDocked(true);}}><PanelRight size={12}/></button>
-        <button type="button" className="icon-button" aria-label="Hide" title="Collapse to a pill" onClick={()=>setMinimized(true)}><EyeOff size={12}/></button>
+        <Tip label="Open full size in the right pane"><button type="button" className="icon-button" aria-label="Expand" onClick={openFull}><Maximize2 size={12}/></button></Tip>
+        <Tip label="Dock in the right pane"><button type="button" className="icon-button" aria-label="Dock to right pane" onClick={()=>{openViewer({chatId:source.chatId,live:true});setDocked(true);}}><PanelRight size={12}/></button></Tip>
+        <Tip label="Collapse to a pill"><button type="button" className="icon-button" aria-label="Hide" onClick={()=>setMinimized(true)}><EyeOff size={12}/></button></Tip>
       </span>
     </div>
     <button type="button" className="pip-frame" aria-label="Open the latest screenshot full size" onClick={openFull}>
@@ -199,8 +200,8 @@ export function ComputerViewer() {
       {target.live&&<span className={`pip-fresh is-${freshness}`}>{FRESH_LABEL[freshness]}{source&&(freshness==='stale'||freshness==='disconnected')?` · ${formatAge(now-source.at)}`:''}</span>}
       <span className="computer-viewer-spacer"/>
       {target.live&&source&&<ControlButtons source={source} owner={owner} running={live.running} compact/>}
-      {target.live&&<button type="button" className="icon-button" aria-label="Undock to picture-in-picture" title="Back to picture-in-picture" onClick={()=>{setDocked(false);closeViewer();}}><Minimize2 size={13}/></button>}
-      <button type="button" className="icon-button" aria-label="Close" title="Close" onClick={closeViewer}><X size={13}/></button>
+      {target.live&&<Tip label="Back to picture-in-picture"><button type="button" className="icon-button" aria-label="Undock to picture-in-picture" onClick={()=>{setDocked(false);closeViewer();}}><Minimize2 size={13}/></button></Tip>}
+      <Tip label="Close"><button type="button" className="icon-button" aria-label="Close" onClick={closeViewer}><X size={13}/></button></Tip>
     </header>
     {source&&<div className="computer-viewer-bar">
       <span className={`computer-viewer-label${source.failed?' is-error':''}`}>{source.failed?`Failed: ${source.failed}`:source.label}</span>

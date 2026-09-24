@@ -14,6 +14,7 @@ import {insertWorkspaceReference} from './composerMenus';
 import {ConfirmSheet} from './ConfirmSheet';
 import {clearSelection,extendSelectionByArrow,isToggleClick,keepSelected,selectAll,selectionKeyAction,selectRange,toggleSelection,topLevelPaths,withFallbackAnchor,type MultiSelectState} from '../multiSelect';
 import { plural } from '../../shared/wording.ts';
+import {Tip} from './Tooltip';
 
 /** runtime/files.ts returns at most this many entries per directory (sorted first). */
 const HOST_LISTING_LIMIT = 2000;
@@ -253,12 +254,12 @@ export const FileTree = React.memo(function FileTreeView({
       <div className="tree-selection-bar" role="toolbar" aria-label="Selected files" onKeyDown={event => { if (event.key === 'Escape') { event.preventDefault(); setSelectionState(clearSelection()); } }}>
         <span className="tree-selection-count">{selectionState.selected.size} selected</span>
         <span className="tree-selection-actions">
-          <button type="button" className="icon-button" aria-label="Copy selected paths" title="Copy paths" onClick={copySelectedPaths}><Copy size={14}/></button>
-          <button type="button" className="icon-button" aria-label="Reveal selected files" title="Reveal in file manager" onClick={revealSelected}><RevealIcon size={14}/></button>
-          <button type="button" className="icon-button" aria-label="Attach selected files to the composer" title="Attach to composer" onClick={attachSelectedToComposer}><Paperclip size={14}/></button>
-          <button type="button" className="icon-button tree-selection-danger" aria-label="Delete selected files" title="Delete" onClick={()=>setConfirmDeleteSelected(true)}><Trash2 size={14}/></button>
+          <Tip label="Copy paths"><button type="button" className="icon-button" aria-label="Copy selected paths" onClick={copySelectedPaths}><Copy size={14}/></button></Tip>
+          <Tip label="Reveal in file manager"><button type="button" className="icon-button" aria-label="Reveal selected files" onClick={revealSelected}><RevealIcon size={14}/></button></Tip>
+          <Tip label="Attach to composer"><button type="button" className="icon-button" aria-label="Attach selected files to the composer" onClick={attachSelectedToComposer}><Paperclip size={14}/></button></Tip>
+          <Tip label="Delete"><button type="button" className="icon-button tree-selection-danger" aria-label="Delete selected files" onClick={()=>setConfirmDeleteSelected(true)}><Trash2 size={14}/></button></Tip>
         </span>
-        <button type="button" className="icon-button" aria-label="Clear selection" title="Clear selection (Esc)" onClick={()=>setSelectionState(clearSelection())}><X size={14}/></button>
+        <Tip label="Clear selection" shortcut="Esc"><button type="button" className="icon-button" aria-label="Clear selection" onClick={()=>setSelectionState(clearSelection())}><X size={14}/></button></Tip>
       </div>
     )}
     {path === '' && <div className="file-tree-actions"><FileActions folderId={folderId} path="" kind="directory" root/></div>}

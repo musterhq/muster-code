@@ -6,6 +6,7 @@ import { Workspace } from './Workspace';
 import { ComputerPip, ComputerViewer } from './ComputerPip';
 import { useComputerUi } from '../computerUse';
 import { dragPaneWidth } from '../paneResize';
+import {Tip} from './Tooltip';
 
 const KEY = 'muster.resourceWidth';
 function initialWidth() {
@@ -54,8 +55,8 @@ export function ResourcePane({suspended=false}:{suspended?:boolean}) {
       onDoubleClick={()=>{latest.current=Math.round(viewport/3);setWidth(latest.current);persist();}}
       onKeyDown={e=>{if(e.key!=='ArrowLeft'&&e.key!=='ArrowRight')return;e.preventDefault();const delta=(e.shiftKey?32:8)*(e.key==='ArrowLeft'?1:-1);const value=Math.min(maxWidth,Math.max(280,effectiveWidth+delta));latest.current=value;setWidth(value);persist();}} />}
     <div className="right-pane-content">
-      {viewer ? <ComputerViewer/> : <Workspace onToggleResourceMaximize={toggleMaximized} resourceMaximized={maximized} headerAction={<button className="icon-button resource-maximize" aria-label={maximized?'Restore resource pane':'Maximize resource pane'} title={maximized?'Restore':'Maximize'} aria-pressed={maximized} onClick={toggleMaximized}>
-        {maximized?<Minimize2 size={14}/>:<Maximize2 size={14}/>}</button>} />}
+      {viewer ? <ComputerViewer/> : <Workspace onToggleResourceMaximize={toggleMaximized} resourceMaximized={maximized} headerAction={<Tip label={maximized?'Restore':'Maximize'}><button className="icon-button resource-maximize" aria-label={maximized?'Restore resource pane':'Maximize resource pane'} aria-pressed={maximized} onClick={toggleMaximized}>
+        {maximized?<Minimize2 size={14}/>:<Maximize2 size={14}/>}</button></Tip>} />}
     </div>
   </aside></>;
 }

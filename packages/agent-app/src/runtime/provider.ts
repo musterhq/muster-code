@@ -66,6 +66,9 @@ export interface ProviderAdapter {
   /** Events the chat's live session reports while Muster has no run in flight: turns the app-server starts
    *  itself (native goal continuations, native queue dispatch) and goal/queue notifications. */
   onIdleEvent?(listener: (chatId: string, method: string, params: Record<string, unknown>) => void): () => void;
+  /** SBX-13: after a sleep, idle warm sessions may hold dead sockets. Marks them for re-check (a fresh app-server that
+   *  resumes the same thread) before the next send and re-probes provider availability. Returns how many were marked. */
+  markStale?(): number;
 }
 export interface CoreClient {
   CODEX_RUN_LIFECYCLE_VERSION?: number;
@@ -86,6 +89,8 @@ interface OwnedSession {
   signature?: string;
   /** Conversation mode of the last turn dispatched on this session. */
   mode?: Chat['mode'];
+  /** SBX-13: set on wake; the next run replaces this idle app-server instead of trusting it. */
+  stale?: boolean;
   stop?: Promise<boolean>; closeTimer?: ReturnType<typeof setTimeout>;
   /** A turn the app-server started on its own while no Muster run was in flight (goal continuation, queued item). */
   idleTurnId?: string;
@@ -197,6 +202,12 @@ export function createProviderAdapter(options: { core?: CoreClient; available?: 
   return {
     info() { return instances().map(instance=>({...instance.info,available:!disposed&&instance.info.available})); },
     async ready() { await catalog?.ready(); },
+    markStale() {
+      revalidateProviderInstances();
+      let marked = 0;
+      for (const session of sessions.values()) if (!session.active && !session.stop && !session.liveTurns.size && !session.workOverflow) { session.stale = true; marked++; }
+      return marked;
+    },
     async run(input) {
       if (disposed) throw new ProviderPreDispatchError('Provider adapter has been disposed.');
       let previous = sessions.get(input.chat.id);
@@ -243,7 +254,7 @@ export function createProviderAdapter(options: { core?: CoreClient; available?: 
       // tool search would otherwise receive inline on every request, stay off unless this chat asked for a connector.
       const featureOverrides = leanCodexFeatureOverrides({toolSearch: route.info.models.find(entry => entry.id === model0)?.toolSearch, connectorsRequested: connectorChats.has(input.chat.id), policy: connectorPolicy()});
       const signature = JSON.stringify([access, model0, input.reasoningEffort ?? 'medium', input.configOverrides ?? {}, featureOverrides, input.cwd, route.command]);
-      if (previous?.signature !== undefined && previous.signature !== signature && !previous.liveTurns.size && !previous.workOverflow) close(previous);
+      if (previous && ((previous.signature !== undefined && previous.signature !== signature) || previous.stale) && !previous.liveTurns.size && !previous.workOverflow) close(previous);
       if (!previous && sessions.size >= 64) {
         // Bound retained observers without evicting known background work.
         for (const [id, idle] of sessions) {

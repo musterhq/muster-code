@@ -3,6 +3,7 @@ import {ArrowUp,Check,Copy,GitBranch,LoaderCircle,Pencil,RotateCcw,TriangleAlert
 import type {EditRestoreFile,EditRestorePreview,EditResendMode,EditResendOptions} from '../../shared/protocol';
 import {copyText} from '../clipboard';
 import './message-meta.css';
+import {Tip} from './Tooltip';
 
 const clock=new Intl.DateTimeFormat(undefined,{hour:'2-digit',minute:'2-digit',hourCycle:'h23'});
 const fullDate=new Intl.DateTimeFormat(undefined,{dateStyle:'full',timeStyle:'long'});
@@ -12,7 +13,7 @@ function ActionButton({label,icon,run}:{label:string;icon:React.ReactNode;run:()
   const [busy,setBusy]=useState(false),alive=useRef(true);
   useEffect(()=>{alive.current=true;return()=>{alive.current=false;};},[]);
   const click=async()=>{if(busy)return;setBusy(true);try{await run();}finally{if(alive.current)setBusy(false);}};
-  return <button type="button" className="message-copy" aria-label={label} title={label} disabled={busy} aria-busy={busy||undefined} onClick={()=>void click()}>{busy?<LoaderCircle size={13}/>:icon}</button>;
+  return <Tip label={label}><button type="button" className="message-copy" aria-label={label} disabled={busy} aria-busy={busy||undefined} onClick={()=>void click()}>{busy?<LoaderCircle size={13}/>:icon}</button></Tip>;
 }
 export const MessageMeta=memo(function MessageMeta({text,createdAt,label='Copy message',actions}:{text:string;createdAt:string;label?:string;actions?:MessageActions}) {
   const [status,setStatus]=useState<'idle'|'pending'|'copied'|'error'>('idle');
@@ -32,7 +33,7 @@ export const MessageMeta=memo(function MessageMeta({text,createdAt,label='Copy m
     <button type="button" className="message-copy" aria-label={status==='copied'?`${label} — copied`:label} title={feedback||label} disabled={status==='pending'} onClick={()=>void copy()}>
       {status==='copied'?<Check size={13}/>:status==='error'?<TriangleAlert size={13}/>:status==='pending'?<LoaderCircle size={13}/>:<Copy size={13}/>}
     </button>
-    {actions?.onEdit&&<button type="button" className="message-copy" aria-label="Edit message" title="Edit message" onClick={actions.onEdit}><Pencil size={13}/></button>}
+    {actions?.onEdit&&<Tip label="Edit message"><button type="button" className="message-copy" aria-label="Edit message" onClick={actions.onEdit}><Pencil size={13}/></button></Tip>}
     {actions?.onRetry&&<ActionButton label="Retry" icon={<RotateCcw size={13}/>} run={actions.onRetry}/>}
     {actions?.onFork&&<ActionButton label="Fork from here" icon={<GitBranch size={13}/>} run={actions.onFork}/>}
     <span className="message-copy-feedback" role="status" aria-live="polite">{feedback}</span>

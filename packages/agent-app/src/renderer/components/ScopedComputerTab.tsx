@@ -6,6 +6,7 @@ import {COMPUTER_STATE_LABEL,formatBytes,runLabel,terminalText,TIMEOUTS} from '.
 import {SandboxControls} from './SandboxControls';
 import './scoped-computer.css';
 import { plural } from '../../shared/wording.ts';
+import {Tip} from './Tooltip';
 
 type Segment={stream:'stdout'|'stderr';text:string};
 interface RunView {id:string;command:string;state:ScopedComputerExecution['state'];exitCode:number|null;segments:Segment[];reason?:string;restored?:boolean;truncated:boolean}
@@ -126,7 +127,7 @@ function SandboxView({scope}:{scope:ScopedComputerRef}) {
       <div className="sbx-title"><h2>{scratch?'Scratch sandbox':'Sandbox'}{computer?.label?` · ${computer.label}`:''}</h2><p>Linux container (Docker) · not this Mac{scratch?' · disposable':''}</p></div>
       <span className={`sbx-state is-${tone}`} role="status"><span className="sbx-dot" aria-hidden="true"/>{stateLabel}</span>
       <button className={`sbx-net${network==='egress'?' is-on':''}`} disabled={!!busy||!!active||!computer||state==='recovery-needed'} title={network==='egress'?'Internet access is on. Click to turn it off (recreates the container).':'No network. Click to allow internet access (recreates the container).'} onClick={()=>void openConfirm(network==='egress'?'none':'egress')}><Globe size={12} aria-hidden="true"/>{network==='egress'?'Internet on':'No network'}</button>
-      <button className="icon-button" aria-label="Refresh sandbox status" title="Refresh" disabled={!!busy} onClick={()=>{void refresh();void loadFiles();}}><RefreshCw size={13}/></button>
+      <Tip label="Refresh"><button className="icon-button" aria-label="Refresh sandbox status" disabled={!!busy} onClick={()=>{void refresh();void loadFiles();}}><RefreshCw size={13}/></button></Tip>
     </header>
     <div className="sbx-bar">
       {state==='running'
@@ -189,8 +190,8 @@ const RunBlock=memo(function RunBlock({run,busy,onStop}:{run:RunView;busy:boolea
     <div className="sbx-run-head">
       <span className="sbx-prompt" aria-hidden="true">$</span><code>{run.command}</code>
       <span className={`sbx-run-state is-${tone}`}>{run.state==='running'&&<span className="sbx-spinner" aria-hidden="true"/>}{runLabel(run)}</span>
-      {run.state==='running'&&<button className="icon-button" aria-label="Stop this command" title="Stop this command (the sandbox keeps running)" disabled={busy} onClick={onStop}><Square size={11}/></button>}
-      <button className="icon-button" aria-label="Copy command and output" title={copied?'Copied':'Copy'} onClick={copy}>{copied?<Check size={12}/>:<Copy size={12}/>}</button>
+      {run.state==='running'&&<Tip label="Stop this command (the sandbox keeps running)"><button className="icon-button" aria-label="Stop this command" disabled={busy} onClick={onStop}><Square size={11}/></button></Tip>}
+      <Tip label={copied?'Copied':'Copy'}><button className="icon-button" aria-label="Copy command and output" onClick={copy}>{copied?<Check size={12}/>:<Copy size={12}/>}</button></Tip>
     </div>
     {run.truncated&&<p className="sbx-run-note">Earlier output was trimmed; the latest output is shown.</p>}
     {text.some(segment=>segment.text)&&<pre>{text.map((segment,index)=><span key={index} className={segment.stream==='stderr'?'is-stderr':undefined}>{segment.text}</span>)}</pre>}
@@ -203,13 +204,13 @@ function FilesPane({files,busy,onOpen,onImport,onExport}:{files:{path:string;ent
   return <aside className="sbx-files" aria-label="Sandbox files">
     <div className="sbx-files-head">
       <nav aria-label="Folder" className="sbx-crumbs"><button onClick={()=>onOpen('')}>workspace</button>{parts.map((part,index)=><React.Fragment key={index}><ChevronRight size={10} aria-hidden="true"/><button onClick={()=>onOpen(parts.slice(0,index+1).join('/'))}>{part}</button></React.Fragment>)}</nav>
-      <button className="icon-button" aria-label="Import files from this Mac" title="Import files from this Mac" disabled={busy} onClick={onImport}><Upload size={12}/></button>
+      <Tip label="Import files from this Mac"><button className="icon-button" aria-label="Import files from this Mac" disabled={busy} onClick={onImport}><Upload size={12}/></button></Tip>
     </div>
     <ul>
       {files.path&&<li><button className="sbx-file" onClick={()=>onOpen(parts.slice(0,-1).join('/'))}><CornerLeftUp size={12} aria-hidden="true"/><span>..</span></button></li>}
       {files.entries.map(entry=>{const Icon=entry.kind==='directory'?Folder:entry.kind==='symlink'?Link2:File;return <li key={entry.path}>
         <button className="sbx-file" disabled={entry.kind!=='directory'} title={entry.kind==='symlink'?'Links are not followed':entry.name} onClick={()=>onOpen(entry.path)}><Icon size={12} aria-hidden="true"/><span>{entry.name}</span>{entry.kind==='file'&&<small>{formatBytes(entry.size)}</small>}</button>
-        {entry.kind!=='symlink'&&<button className="icon-button sbx-export" aria-label={`Export ${entry.name} to this Mac`} title="Export to this Mac" disabled={busy} onClick={()=>onExport(entry.path)}><Download size={12}/></button>}
+        {entry.kind!=='symlink'&&<Tip label="Export to this Mac"><button className="icon-button sbx-export" aria-label={`Export ${entry.name} to this Mac`} disabled={busy} onClick={()=>onExport(entry.path)}><Download size={12}/></button></Tip>}
       </li>;})}
     </ul>
     {!files.entries.length&&<p className="sbx-empty">{files.path?'This folder is empty.':'No files in /workspace yet. Import files or create them with a command.'}</p>}

@@ -17,6 +17,7 @@ import type {FileRunAction} from '../../shared/domains/files-protocol';
 import './processes-tab.css';
 import './process-saved-actions.css';
 import { ResourceState } from './ResourceState';
+import {Tip} from './Tooltip';
 
 const PURPOSES=[{id:'command',label:'Command',Icon:SquareTerminal},{id:'test',label:'Test',Icon:FlaskConical},{id:'build',label:'Build',Icon:Hammer},{id:'server',label:'Server',Icon:Globe},{id:'task',label:'Task',Icon:Wrench}] as const;
 const STATUS={starting:'Starting',running:'Running',stopping:'Stopping',exited:'Finished',failed:'Failed',stopped:'Stopped',lost:'Connection lost'} as const;
@@ -106,7 +107,7 @@ function SavedActions({folderId,command,canStart,onRun,onFill}:{folderId?:string
   return <div className="process-saved-actions" role="group" aria-label="Saved commands">
     {actions.map(action=><span key={action.id} className="process-saved-action">
       <button type="button" disabled={!canStart} title={action.command} onClick={()=>onRun(action)}>{action.label}</button>
-      <button type="button" className="process-saved-action-edit" aria-label={`Edit ${action.label} before running`} title="Fill into the command box" onClick={()=>onFill(action)}><Pencil size={11}/></button>
+      <Tip label="Fill into the command box"><button type="button" className="process-saved-action-edit" aria-label={`Edit ${action.label} before running`} onClick={()=>onFill(action)}><Pencil size={11}/></button></Tip>
       <button type="button" className="process-saved-action-remove" aria-label={`Remove saved command ${action.label}`} onClick={()=>remove(action)}><Trash2 size={11}/></button>
     </span>)}
     <button type="button" className="process-saved-action-add" disabled={!command.trim()||saving} title="Save the current command" onClick={()=>void save()}><Plus size={11}/>Save as…</button>
@@ -265,10 +266,10 @@ function ShellTools({chatId,shells}:{chatId:string;shells:Shells}) {
   const [copied,copy]=useCopied(),[added,addToChat]=useAddToChat();
   const current=shells.current;if(!current)return null;
   return <>
-    <button type="button" className="terminal-tool" aria-label="Find in terminal" title="Find (⌘F)" onClick={()=>openTerminalFind(current.id)}><Search size={13}/></button>
-    <button type="button" className="terminal-tool" aria-label={added==='added'?'Added to chat':added==='copied'?'Copied: no chat composer open':'Add to chat'} title="Add the selection, or recent output, to the chat" onClick={()=>{const output=terminalText(current.id);if(!output.trim()){shells.setError('No output yet to add');return;}shells.setError('');const label=shells.labelOf(current);addToChat(label,output,{kind:'terminal',chatId,terminalId:current.id,title:label,...(current.cwd?{cwd:current.cwd}:{})});}}>{added?<Check size={13}/>:<MessageSquarePlus size={13}/>}</button>
-    <button type="button" className="terminal-tool" aria-label={copied?'Copied':'Copy output'} title="Copy selection, or all output" onClick={()=>copy(terminalText(current.id))}>{copied?<Check size={13}/>:<Copy size={13}/>}</button>
-    <button type="button" className="terminal-tool" aria-label="Clear terminal" title="Clear (⌘K)" onClick={()=>clearTerminal(current.id)}><Eraser size={13}/></button>
+    <Tip label="Find" shortcut="⌘F"><button type="button" className="terminal-tool" aria-label="Find in terminal" onClick={()=>openTerminalFind(current.id)}><Search size={13}/></button></Tip>
+    <Tip label="Add the selection, or recent output, to the chat"><button type="button" className="terminal-tool" aria-label={added==='added'?'Added to chat':added==='copied'?'Copied: no chat composer open':'Add to chat'} onClick={()=>{const output=terminalText(current.id);if(!output.trim()){shells.setError('No output yet to add');return;}shells.setError('');const label=shells.labelOf(current);addToChat(label,output,{kind:'terminal',chatId,terminalId:current.id,title:label,...(current.cwd?{cwd:current.cwd}:{})});}}>{added?<Check size={13}/>:<MessageSquarePlus size={13}/>}</button></Tip>
+    <Tip label="Copy selection, or all output"><button type="button" className="terminal-tool" aria-label={copied?'Copied':'Copy output'} onClick={()=>copy(terminalText(current.id))}>{copied?<Check size={13}/>:<Copy size={13}/>}</button></Tip>
+    <Tip label="Clear" shortcut="⌘K"><button type="button" className="terminal-tool" aria-label="Clear terminal" onClick={()=>clearTerminal(current.id)}><Eraser size={13}/></button></Tip>
     <TerminalAgentAccess chatId={chatId}/>
   </>;
 }
@@ -295,9 +296,9 @@ export function TerminalsPanel({chatId,active,actions}:{chatId:string;active:boo
           <button type="button" role="tab" aria-selected={row.id===current?.id} title={`${row.cwd}${row.status==='running'?'':row.status==='ended'?' · ended when Muster quit':` · exited ${row.exitCode??''}`}`} onClick={()=>shells.select(row.id)}>
             <SquareTerminal size={12} aria-hidden="true"/><span>{label}</span>{row.status!=='running'&&<span className="terminal-chip-state">{row.status==='ended'?'Ended':'Exited'}</span>}
           </button>
-          <button type="button" className="terminal-chip-close" aria-label={`Close ${label}`} title={row.status==='running'?'Close and end this shell':'Remove'} onClick={()=>void shells.close(row)}><X size={11}/></button>
+          <Tip label={row.status==='running'?'Close and end this shell':'Remove'}><button type="button" className="terminal-chip-close" aria-label={`Close ${label}`} onClick={()=>void shells.close(row)}><X size={11}/></button></Tip>
         </div>;})}
-        <button type="button" className="terminal-tool" aria-label="New terminal" title={archived?'Restore this conversation to open a terminal':'New terminal'} disabled={creating||archived} onClick={()=>void shells.create()}><Plus size={13}/></button>
+        <Tip label={archived?'Restore this conversation to open a terminal':'New terminal'}><button type="button" className="terminal-tool" aria-label="New terminal" disabled={creating||archived} onClick={()=>void shells.create()}><Plus size={13}/></button></Tip>
       </div>
       {current&&<div className="terminal-tools"><Owner who={current.owner}/><ShellTools chatId={chatId} shells={shells}/></div>}
       {actions&&<div className="terminal-tools">{actions}</div>}
@@ -357,7 +358,7 @@ function ShellRow({row,label,selected,ports,onSelect,onClose}:{row:TerminalInfo;
     <div className="process-row-header">
       <button type="button" className="process-disclosure-trigger" aria-pressed={selected} title={row.cwd} onClick={onSelect}><SquareTerminal size={15} aria-hidden="true"/><strong>{label}</strong><Owner who={row.owner}/><span className="process-state">{row.status==='running'?<CircleDot size={12} aria-hidden="true"/>:<CircleX size={12} aria-hidden="true"/>}{state}</span></button>
       <PortChips ports={ports}/>
-      <button type="button" className="process-stop" aria-label={`Close ${label}`} title={row.status==='running'?'Close and end this shell':'Remove'} onClick={onClose}><X size={11}/></button>
+      <Tip label={row.status==='running'?'Close and end this shell':'Remove'}><button type="button" className="process-stop" aria-label={`Close ${label}`} onClick={onClose}><X size={11}/></button></Tip>
     </div>
   </article>;
 }
@@ -390,11 +391,11 @@ export function ProcessesTab({chatId,active=true}:{chatId:string;active?:boolean
     <header className="terminal-pane-head">
       <h2>Terminal</h2><span className="terminal-pane-count" role="status">{running} running{total>running?` · ${total-running} finished`:''}</span>
       <div className="terminal-tools">
-        <button type="button" className="terminal-tool" aria-label="New terminal" title={shells.archived?'Restore this conversation to open a terminal':'New shell'} disabled={shells.creating||shells.archived} onClick={newShell}><Plus size={13}/></button>
-        <button type="button" className="terminal-tool" aria-label="Run a command" aria-expanded={launcher} title="Run a command with captured output" onClick={()=>setLauncher(value=>!value)}><Play size={13}/></button>
-        <button type="button" className="terminal-tool" aria-label="Refresh" title="Refresh commands and ports" disabled={commands.loading} onClick={()=>{commands.retry();void refreshListeningPorts(chatId);}}><RefreshCw size={13}/></button>
-        {inPane?<button type="button" className="terminal-tool" aria-label="Move terminals to the bottom panel" title="Move shells to the bottom panel (⌃`)" onClick={()=>setTerminalDock({placement:'panel',open:true})}><PanelBottom size={13}/></button>
-          :<button type="button" className="terminal-tool" aria-label="Show terminals here" title="Show shells here instead of the bottom panel" onClick={()=>setTerminalDock({placement:'pane',open:false})}><PanelRight size={13}/></button>}
+        <Tip label={shells.archived?'Restore this conversation to open a terminal':'New shell'}><button type="button" className="terminal-tool" aria-label="New terminal" disabled={shells.creating||shells.archived} onClick={newShell}><Plus size={13}/></button></Tip>
+        <Tip label="Run a command with captured output"><button type="button" className="terminal-tool" aria-label="Run a command" aria-expanded={launcher} onClick={()=>setLauncher(value=>!value)}><Play size={13}/></button></Tip>
+        <Tip label="Refresh commands and ports"><button type="button" className="terminal-tool" aria-label="Refresh" disabled={commands.loading} onClick={()=>{commands.retry();void refreshListeningPorts(chatId);}}><RefreshCw size={13}/></button></Tip>
+        {inPane?<Tip label="Move shells to the bottom panel" shortcut="⌃`"><button type="button" className="terminal-tool" aria-label="Move terminals to the bottom panel" onClick={()=>setTerminalDock({placement:'panel',open:true})}><PanelBottom size={13}/></button></Tip>
+          :<Tip label="Show shells here instead of the bottom panel"><button type="button" className="terminal-tool" aria-label="Show terminals here" onClick={()=>setTerminalDock({placement:'pane',open:false})}><PanelRight size={13}/></button></Tip>}
       </div>
     </header>
     {agentPorts.length>0&&<p className="terminal-port-note" role="status">The agent is listening on {agentPorts.map(port=>`:${port.port}`).join(', ')}. A server you start on the same port will fail or move to another one.</p>}

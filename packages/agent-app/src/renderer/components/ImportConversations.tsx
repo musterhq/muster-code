@@ -15,6 +15,7 @@ import { ModalSheet } from './ModalSheet';
 import { cleanIpcError } from './resourceErrors';
 import './import-conversations.css';
 import { plural } from '../../shared/wording.ts';
+import {Tip} from './Tooltip';
 
 // One sheet, mounted once in App; every entry point flips this flag.
 let open = false, requestedSource: ImportSource | undefined;
@@ -159,7 +160,7 @@ function ImportDialog(): React.ReactElement {
                 </span>
               </span>
             </label>
-            <button type="button" className="import-open import-preview-toggle" disabled={busy} aria-expanded={preview?.id === item.id} aria-controls="import-preview" aria-label={`Preview ${item.title}`} title="Preview the first messages" onClick={() => void showPreview(item.id)}><Eye size={12} aria-hidden="true"/></button>
+            <Tip label="Preview the first messages"><button type="button" className="import-open import-preview-toggle" disabled={busy} aria-expanded={preview?.id === item.id} aria-controls="import-preview" aria-label={`Preview ${item.title}`} onClick={() => void showPreview(item.id)}><Eye size={12} aria-hidden="true"/></button></Tip>
             {(item.musterChatId ?? item.importedChatId) && <button type="button" className="import-open" disabled={busy} onClick={() => void openChat((item.musterChatId ?? item.importedChatId)!)}>Open</button>}
           </li>;
         })}

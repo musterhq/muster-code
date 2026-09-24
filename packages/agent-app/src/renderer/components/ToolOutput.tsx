@@ -8,6 +8,7 @@ import {CopyButton} from './MessageBody';
 import {useDisclosure} from './useDisclosure';
 import {InlineDiff} from './InlineDiff';
 import {useVirtualizer} from '@tanstack/react-virtual';
+import {Tip} from './Tooltip';
 
 /** Commands preview 4 lines (Codex); patches preview 40 so an edit reads inline before 'Show full output'. */
 export const PREVIEW_LINES=4,PATCH_PREVIEW_LINES=40;
@@ -32,7 +33,7 @@ export function AddOutputToChat({text,id,language,path,root}:{text:string;id:str
   if(addComposerContext({type:language==='diff'?'selection':'terminal',label,text:excerpt,source:{kind:'tool',itemId:id,...(path?{path}:{}),language:language==='plaintext'?'console':language,at:new Date().toISOString()}})){setState('added');return;}
   void copyText(excerpt).then(()=>setState('copied'),()=>{});
  };
- return <button type="button" className="md-copy tool-add-context" aria-label={state==='added'?'Added to chat':state==='copied'?'Copied: no chat composer open':'Add to chat'} title="Add output (or the selected part) to the chat" onMouseDown={event=>event.preventDefault()} onClick={add}>{state?<Check size={13}/>:<MessageSquarePlus size={13}/>}</button>;
+ return <Tip label="Add output (or the selected part) to the chat"><button type="button" className="md-copy tool-add-context" aria-label={state==='added'?'Added to chat':state==='copied'?'Copied: no chat composer open':'Add to chat'} onMouseDown={event=>event.preventDefault()} onClick={add}>{state?<Check size={13}/>:<MessageSquarePlus size={13}/>}</button></Tip>;
 }
 /** Progressive output preview; source text remains literal, never interpreted as UI. */
 export function ToolOutput({text,id,language='plaintext',sourceTruncated=false,path,chatId}:{text:string;id:string;language?:string;sourceTruncated?:boolean;path?:string;chatId?:string}){

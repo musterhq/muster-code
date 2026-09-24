@@ -6,8 +6,8 @@
   position: fixed;
   inset: 0;
   z-index: 200;
-  /* Lighter than the composer's modal scrim (#0007) so the blurred app content still reads through the glass. */
-  background: rgb(0 0 0 / 22%);
+  /* Lighter than the composer's modal scrim (--scrim) so the blurred app content still reads through the glass. */
+  background: color-mix(in srgb, var(--scrim) 55%, transparent);
   transition: opacity 120ms ease;
 }
 .spotlight-backdrop[data-starting-style],
@@ -25,13 +25,13 @@
   max-height: min(calc(100vh - max(64px, 20vh) - 32px), 560px);
   padding: 6px;
   border: 1px solid rgb(var(--fg-rgb) / 9%);
-  border-radius: 14px;
+  border-radius: var(--radius-16);
   background:
     linear-gradient(180deg, rgb(var(--fg-rgb) / 3.5%), transparent 40%),
-    rgb(38 38 38 / 90%);
+    color-mix(in srgb, var(--bg-menu) 90%, transparent);
   -webkit-backdrop-filter: blur(20px) saturate(140%);
   backdrop-filter: blur(20px) saturate(140%);
-  box-shadow: 0 24px 64px rgb(0 0 0 / 50%), inset 0 1px rgb(var(--fg-rgb) / 6%);
+  box-shadow: 0 24px 64px color-mix(in srgb, var(--shadow-ink) 50%, transparent), inset 0 1px rgb(var(--fg-rgb) / 6%);
   color: var(--text);
   outline: 0;
   transform-origin: center top;
@@ -65,7 +65,7 @@
   background: transparent;
   color: var(--text);
   font: inherit;
-  font-size: 15px;
+  font-size: var(--fs-15);
   outline: 0;
 }
 .spotlight-search-field input::placeholder { color: var(--text-faint); }
@@ -78,13 +78,13 @@
   padding: 6px 4px 8px;
 }
 
-.spotlight-empty { padding: 20px 10px; text-align: center; color: var(--text-faint); font-size: 13px; }
+.spotlight-empty { padding: 20px 10px; text-align: center; color: var(--text-faint); font-size: var(--fs-13); }
 
 .spotlight-section + .spotlight-section { margin-top: 4px; }
 .spotlight-section-label {
   padding: 7px 10px 4px;
   color: var(--text-faint);
-  font-size: 11px;
+  font-size: var(--fs-11);
   font-weight: 500;
 }
 
@@ -95,7 +95,7 @@
   width: 100%;
   min-height: 34px;
   padding: 6px 10px;
-  border-radius: 8px;
+  border-radius: var(--radius-8);
   color: var(--text-dim);
   text-align: left;
   cursor: default;
@@ -115,7 +115,7 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 13.5px;
+  font-size: var(--fs-14);
 }
 .spotlight-row-title mark {
   background: none;
@@ -128,7 +128,7 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--text-faint);
-  font-size: 11.5px;
+  font-size: var(--fs-12);
 }
 .spotlight-row-location {
   flex: none;
@@ -137,17 +137,17 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--text-faint);
-  font-size: 12px;
+  font-size: var(--fs-12);
 }
 .spotlight-shortcut {
   flex: none;
   min-width: 20px;
   padding: 1px 6px;
   border: 1px solid var(--hairline);
-  border-radius: 5px;
+  border-radius: var(--radius-6);
   background: var(--bg);
   color: var(--text-faint);
-  font: 11px/1.6 var(--ui);
+  font: var(--fs-11)/1.6 var(--ui);
   text-align: center;
 }
 .spotlight-row[data-active] .spotlight-shortcut { color: var(--text-dim); border-color: rgb(var(--fg-rgb) / 12%); }
@@ -163,5 +163,5 @@
 .spotlight-row.is-disabled { color: var(--text-faint); }
 .spotlight-row.is-disabled .spotlight-row-title { opacity: 0.7; }
 .spotlight-status:empty { display: none; }
-.spotlight-status { margin: 0; padding: 6px 12px 4px; border-top: 1px solid var(--hairline); color: var(--text-dim); font-size: 12px; }
+.spotlight-status { margin: 0; padding: 6px 12px 4px; border-top: 1px solid var(--hairline); color: var(--text-dim); font-size: var(--fs-12); }
 .spotlight-results .resource-state { padding: 20px 10px; }

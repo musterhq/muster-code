@@ -50,5 +50,7 @@ export interface DomainContext {
 }
 
 export type DomainHandler = (input: Record<string, unknown>) => unknown;
-export interface DomainModule { handlers: Record<string, DomainHandler>; dispose?(): void | Promise<void> }
+/** SBX-13: sleep/wake, fanned out by the runtime's power coordinator (see power-events.ts). */
+export type DomainPowerEvent = { state: 'suspend'; at: number } | { state: 'resume'; at: number; sleptMs: number; suspendedAt: number | null };
+export interface DomainModule { handlers: Record<string, DomainHandler>; dispose?(): void | Promise<void>; power?(event: DomainPowerEvent): void | Promise<void> }
 export type DomainFactory = (context: DomainContext) => DomainModule;

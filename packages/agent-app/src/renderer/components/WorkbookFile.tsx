@@ -3,6 +3,7 @@ import {ChevronLeft, ChevronRight, Copy, Search, WrapText, Grid2X2, Maximize2, M
 import type {WorkbookPreview} from '../../shared/protocol';
 import {copyText} from '../clipboard';
 import {columnName, parseCellAddress, rangeText, type CellPosition} from '../workbook-grid';
+import {Tip} from './Tooltip';
 
 export const WorkbookFile = React.memo(function WorkbookFile({workbook, onLocation, delimited = false, fullPage = false, onToggleFullPage}: {
   workbook: WorkbookPreview; onLocation: (location: string, quote?: string) => void; delimited?: boolean;
@@ -106,10 +107,10 @@ export const WorkbookFile = React.memo(function WorkbookFile({workbook, onLocati
       }}><input aria-label="Go to cell" placeholder={address || 'A1'} value={destination} onChange={e => setDestination(e.target.value)} title="Type a cell address and press Enter"/></form>
       <label className="workbook-find"><Search size={14}/><input aria-label="Find in sheet" placeholder="Find in sheet…" value={query} onChange={e => setQuery(e.target.value)} onKeyDown={e => {if (e.key === 'Enter') {e.preventDefault(); findNext(e.shiftKey ? -1 : 1);} if (e.key === 'Escape') setQuery('');}}/></label>
       {query && <><span className="workbook-match-count" role="status">{activeMatch < 0 ? matches.length : `${activeMatch + 1} / ${matches.length}`} {matches.length === 1 ? 'match' : 'matches'}</span><button aria-label="Previous match" disabled={!matches.length} onClick={() => findNext(-1)}><ChevronLeft size={14}/></button><button aria-label="Next match" disabled={!matches.length} onClick={() => findNext()}><ChevronRight size={14}/></button></>}
-      <button aria-label="Wrap cell text" aria-pressed={wrap} title="Wrap cell text" onClick={() => setWrap(v => !v)}><WrapText size={15}/></button>
-      <button aria-label="Show gridlines" aria-pressed={gridlines} title="Show gridlines" onClick={() => setGridlines(value => !value)}><Grid2X2 size={15}/></button>
+      <Tip label="Wrap cell text"><button aria-label="Wrap cell text" aria-pressed={wrap} onClick={() => setWrap(v => !v)}><WrapText size={15}/></button></Tip>
+      <Tip label="Show gridlines"><button aria-label="Show gridlines" aria-pressed={gridlines} onClick={() => setGridlines(value => !value)}><Grid2X2 size={15}/></button></Tip>
       <button aria-label="Copy sheet" title="Copy displayed sheet as tab-separated values" disabled={!sheet.rows.length} onClick={() => void copy(true)}><Copy size={14}/><span>Copy sheet</span></button>
-      {onToggleFullPage && <button className="workbook-full-page" aria-label={fullPage ? 'Return Excel preview to split view' : 'Expand Excel preview to full page'} aria-pressed={fullPage} title={fullPage ? 'Return to split view' : 'Expand to full page'} onClick={onToggleFullPage}>{fullPage ? <Minimize2 size={15}/> : <Maximize2 size={15}/>}</button>}
+      {onToggleFullPage && <Tip label={fullPage ? 'Return to split view' : 'Expand to full page'}><button className="workbook-full-page" aria-label={fullPage ? 'Return Excel preview to split view' : 'Expand Excel preview to full page'} aria-pressed={fullPage} onClick={onToggleFullPage}>{fullPage ? <Minimize2 size={15}/> : <Maximize2 size={15}/>}</button></Tip>}
     </div>
     <div className="workbook-formula"><span className="workbook-fx" aria-hidden>fx</span><code tabIndex={0} aria-label="Cell contents">{address ? (sheet.formulas[address] ? '=' + sheet.formulas[address] : value) || '(empty)' : 'Select a cell to see its full value'}</code>{selected && <button onClick={() => void copy()} title="Copy selection (⌘C)"><Copy size={13}/>{range}</button>}</div>
     <div className="workbook-grid" ref={grid} tabIndex={-1} role="region" aria-label={`${sheet.name} cells`} data-wrap={wrap} data-gridlines={gridlines} onKeyDown={event => {

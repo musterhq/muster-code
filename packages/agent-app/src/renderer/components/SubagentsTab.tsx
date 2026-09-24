@@ -18,6 +18,7 @@ import { useDisclosure } from './useDisclosure';
 import { MessageBody } from './MessageBody';
 import { ActivityGroup } from './ActivityGroup';
 import './subagents-tab.css';
+import {Tip} from './Tooltip';
 
 export function SubagentStatus({state}: {state?: string}) {
   const {kind, label} = subagentState(state);
@@ -210,7 +211,7 @@ function SubagentDetail({agent, chatId, parentItems, parentModel, controls}: {ag
   const copyId = () => copyText(agent.threadId).then(() => notifySuccess('Thread ID copied'), notifyError);
   return <section className="subagent-view" aria-label={`${agent.name} transcript`} onKeyDown={event => { if (event.key === 'Escape' && !event.defaultPrevented) { event.preventDefault(); back(); } }}>
     <header className="subagent-view-head">
-      <button type="button" className="subagent-back" onClick={back} aria-label="Back to subagents" title="Back to subagents"><ArrowLeft size={15} /></button>
+      <Tip label="Back to subagents"><button type="button" className="subagent-back" onClick={back} aria-label="Back to subagents"><ArrowLeft size={15} /></button></Tip>
       <span className="subagent-avatar"><AgentGlyph name={agent.name} state={phaseGlyph(phase.kind)} /></span>
       <div className="subagent-view-title">
         <h2 title={agent.name}>{agent.name}</h2>
@@ -224,7 +225,7 @@ function SubagentDetail({agent, chatId, parentItems, parentModel, controls}: {ag
       </span>
       <Menu.Root>
         <Menu.Trigger className="subagent-more" aria-label={`More actions for ${agent.name}`}><MoreHorizontal size={15} /></Menu.Trigger>
-        <Menu.Portal><Menu.Positioner side="bottom" align="end" sideOffset={4} className="subagent-menu-positioner"><Menu.Popup className="subagent-menu">
+        <Menu.Portal><Menu.Positioner side="bottom" align="end" sideOffset={4} className="subagent-menu-positioner"><Menu.Popup className="ui-menu subagent-menu">
           <Menu.Item onClick={() => void copyId()}><Copy size={14} />Copy thread ID</Menu.Item>
         </Menu.Popup></Menu.Positioner></Menu.Portal>
       </Menu.Root>

@@ -1,23 +1,23 @@
 /* CHAT-15 snooze sheet */
 .snooze-sheet .snooze-presets { display: grid; gap: 4px; margin: 0 0 14px; }
-.snooze-sheet .snooze-presets button { display: flex; justify-content: space-between; align-items: center; gap: 12px; height: 32px; padding: 0 10px; border-radius: 8px; color: var(--text); font-size: 13px; text-align: left; }
-.snooze-sheet .snooze-presets button:hover, .snooze-sheet .snooze-presets button:focus-visible { background: var(--hover, #ffffff12); }
-.snooze-sheet .snooze-hint { color: var(--text-dim); font-size: 12px; }
-.snooze-sheet .snooze-custom label { display: grid; gap: 6px; margin-bottom: 14px; color: var(--text-dim); font-size: 12px; }
-.snooze-sheet .snooze-custom input { height: 30px; padding: 0 8px; border: 1px solid var(--hairline); border-radius: 8px; background: transparent; color: var(--text); font: inherit; font-size: 13px; color-scheme: light dark; }
-.snooze-sheet .snooze-error { margin: -8px 0 12px; color: var(--danger, #e5484d); font-size: 12px; }
+.snooze-sheet .snooze-presets button { display: flex; justify-content: space-between; align-items: center; gap: 12px; height: 32px; padding: 0 10px; border-radius: var(--radius-8); color: var(--text); font-size: var(--fs-13); text-align: left; }
+.snooze-sheet .snooze-presets button:hover, .snooze-sheet .snooze-presets button:focus-visible { background: var(--bg-hover); }
+.snooze-sheet .snooze-hint { color: var(--text-dim); font-size: var(--fs-12); }
+.snooze-sheet .snooze-custom label { display: grid; gap: 6px; margin-bottom: 14px; color: var(--text-dim); font-size: var(--fs-12); }
+.snooze-sheet .snooze-custom input { height: 30px; padding: 0 8px; border: 1px solid var(--hairline); border-radius: var(--radius-8); background: transparent; color: var(--text); font: inherit; font-size: var(--fs-13); color-scheme: light dark; }
+.snooze-sheet .snooze-error { margin: -8px 0 12px; color: var(--danger); font-size: var(--fs-12); }
 /* Snoozed rows show when they wake instead of their age. */
-.chat-row-wake { color: var(--text-dim); font-size: 11px; white-space: nowrap; }
+.chat-row-wake { color: var(--text-dim); font-size: var(--fs-11); white-space: nowrap; }
 
 /* UX-12 / UX-23 / NAV-05 drag reorder: a stable 2px insertion marker drawn on the row edge (no layout shift, so nothing
    jumps while dragging and there is no second animation after the drop). */
 .nav-scroll [data-drop='before'], .nav-scroll [data-drop='after'] { position: relative; }
 .nav-scroll [data-drop='before']::before, .nav-scroll [data-drop='after']::after {
-  content: ''; position: absolute; left: 6px; right: 6px; height: 2px; border-radius: 1px; background: var(--accent, #3b82f6); pointer-events: none; z-index: 2;
+  content: ''; position: absolute; left: 6px; right: 6px; height: 2px; border-radius: var(--radius-2); background: var(--accent); pointer-events: none; z-index: 2;
 }
 .nav-scroll [data-drop='before']::before { top: -1px; }
 .nav-scroll [data-drop='after']::after { bottom: -1px; }
 .nav-scroll [data-dragging='true'] { opacity: 0.45; }
-.nav-drag-badge { position: fixed; top: -1000px; left: -1000px; display: inline-flex; align-items: center; gap: 6px; max-width: 240px; padding: 4px 10px; border-radius: 999px; background: var(--menu-bg, #222); color: var(--text, #fff); font-size: 12px; box-shadow: 0 6px 18px #0006; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; pointer-events: none; }
-.nav-drag-badge b { font-weight: 550; color: var(--accent, #3b82f6); }
-.nav-drag-hint { margin: 0 10px 6px; padding: 6px 10px; border-radius: 8px; background: var(--menu-bg, #222); color: var(--text-dim); font-size: 12px; line-height: 1.35; }
+.nav-drag-badge { position: fixed; top: -1000px; left: -1000px; display: inline-flex; align-items: center; gap: 6px; max-width: 240px; padding: 4px 10px; border-radius: var(--radius-full); background: var(--menu-bg); color: var(--text); font-size: var(--fs-12); box-shadow: 0 6px 18px color-mix(in srgb, var(--shadow-ink) 40%, transparent); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; pointer-events: none; }
+.nav-drag-badge b { font-weight: 550; color: var(--accent); }
+.nav-drag-hint { margin: 0 10px 6px; padding: 6px 10px; border-radius: var(--radius-8); background: var(--menu-bg); color: var(--text-dim); font-size: var(--fs-12); line-height: 1.35; }

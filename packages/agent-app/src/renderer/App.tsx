@@ -7,6 +7,7 @@ import { Sidebar } from './components/Sidebar';
 import { SpotlightSearchHost } from './components/SpotlightSearch';
 import { ParallelRunHost } from './components/ParallelRunGuard';
 import { ImportConversationsHost } from './components/ImportConversations';
+import { SetupGuideHost } from './components/SetupGuide';
 import { ResourcePane } from './components/ResourcePane';
 import {LazyAutomationsScreen,LazyBoundary,LazyMemoryScreen,LazyPreferencesScreen,LazyProjectsScreen,preloadScreens} from './lazyScreens';
 import { SummaryCard } from './components/SummaryCard';
@@ -111,6 +112,7 @@ export function App(): React.ReactElement {
       <SpotlightSearchHost/>
       <ParallelRunHost/>
       <ImportConversationsHost/>
+      <SetupGuideHost/>
       {!state.navHidden&&<div
         className="nav-separator"
         role="separator"

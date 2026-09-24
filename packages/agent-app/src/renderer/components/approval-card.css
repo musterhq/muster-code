@@ -4,13 +4,13 @@
 .approval-origin { margin-left: auto; color: var(--text-faint); }
 .approval-reason { margin: 0 0 8px; color: var(--text-dim); font-size: var(--font-caption); }
 .approval-command { margin-bottom: 10px; border: 1px solid var(--hairline); border-radius: var(--radius); background: var(--bg); overflow: hidden; }
-.approval-cwd { padding: 4px 8px; border-bottom: 1px solid var(--hairline); color: var(--text-faint); font: 11px var(--mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.approval-command pre { margin: 0; padding: 8px; max-height: 240px; overflow: auto; font: 12px/1.5 var(--mono); white-space: pre-wrap; word-break: break-word; }
+.approval-cwd { padding: 4px 8px; border-bottom: 1px solid var(--hairline); color: var(--text-faint); font: var(--fs-11) var(--mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.approval-command pre { margin: 0; padding: 8px; max-height: 240px; overflow: auto; font: var(--fs-12)/1.5 var(--mono); white-space: pre-wrap; word-break: break-word; }
 .approval-diffs { display: flex; flex-direction: column; gap: 8px; margin-bottom: 10px; }
 .approval-diff { border: 1px solid var(--hairline); border-radius: var(--radius); overflow: hidden; }
 .approval-diff .fde-scroll { max-height: 280px; }
-.approval-diff-path { display: flex; gap: 6px; padding: 4px 8px; border-bottom: 1px solid var(--hairline); font: 11px var(--mono); color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.approval-diff-path { display: flex; gap: 6px; padding: 4px 8px; border-bottom: 1px solid var(--hairline); font: var(--fs-11) var(--mono); color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .approval-diff-path span { color: var(--text-faint); text-transform: capitalize; }
 .approval-actions button:disabled { opacity: .55; cursor: default; }
 .approval-card .approval-resolved { text-transform: none; }
-.approval-error { margin: 8px 0 0; color: var(--danger); font-size: 11px; }
+.approval-error { margin: 8px 0 0; color: var(--danger); font-size: var(--fs-11); }

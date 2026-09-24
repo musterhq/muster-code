@@ -5,6 +5,7 @@ import {focusComposer} from '../focus';
 import {useStoreSelector} from '../useStore';
 import {openTerminalTab,TerminalsPanel} from './ProcessesTab';
 import './terminal-dock.css';
+import {Tip} from './Tooltip';
 
 const maxHeight=()=>Math.max(DOCK_MIN,Math.round((typeof window!=='undefined'&&Number(window.innerHeight)||800)*0.7));
 const clamp=(value:number)=>Math.round(Math.max(DOCK_MIN,Math.min(maxHeight(),value)));
@@ -48,8 +49,8 @@ export function TerminalDock({chatId}:{chatId:string}) {
       onDoubleClick={()=>setTerminalDock({height:clamp(260)})}
       onKeyDown={event=>{const step=event.shiftKey?64:16,next=event.key==='ArrowUp'?height+step:event.key==='ArrowDown'?height-step:null;if(next===null)return;event.preventDefault();setTerminalDock({height:clamp(next)});}}/>
     <TerminalsPanel key={chatId} chatId={chatId} active actions={<>
-      <button type="button" className="terminal-tool" aria-label="Move terminals to the right pane" title="Move to right pane" onClick={()=>{setTerminalDock({placement:'pane',open:false});openTerminalTab(chatId,title,'terminals');}}><PanelRight size={13}/></button>
-      <button type="button" className="terminal-tool" aria-label="Hide terminal panel" title="Hide panel (⌃`)" onClick={hide}><X size={13}/></button>
+      <Tip label="Move to right pane"><button type="button" className="terminal-tool" aria-label="Move terminals to the right pane" onClick={()=>{setTerminalDock({placement:'pane',open:false});openTerminalTab(chatId,title,'terminals');}}><PanelRight size={13}/></button></Tip>
+      <Tip label="Hide panel" shortcut="⌃`"><button type="button" className="terminal-tool" aria-label="Hide terminal panel" onClick={hide}><X size={13}/></button></Tip>
     </>}/>
   </section>;
 }

@@ -219,7 +219,7 @@ export function createAutomationsDomain(ctx: DomainContext): DomainModule {
   }
 
   function tick(): void {
-    if (disposed) return;
+    if (disposed || suspended) return;
     const now = automationTiming.now();
     const automations = rows();
     if (!automations.length) return;
@@ -244,11 +244,13 @@ export function createAutomationsDomain(ctx: DomainContext): DomainModule {
       drainQueue(automation.id);
     }
   }
-  let timer: ReturnType<typeof setTimeout> | undefined;
+  let timer: ReturnType<typeof setTimeout> | undefined, suspended = false;
   const loop = (delay: number) => {
+    if (timer) clearTimeout(timer);
     timer = setTimeout(() => {
+      timer = undefined;
       try { tick(); } catch (error) { console.error('automations: tick failed', error); }
-      if (!disposed) loop(automationTiming.tickMs);
+      if (!disposed && !suspended) loop(automationTiming.tickMs);
     }, delay);
     timer.unref?.();
   };
@@ -425,6 +427,21 @@ export function createAutomationsDomain(ctx: DomainContext): DomainModule {
         const current = existing(raw.id), limit = typeof raw.limit === 'number' && Number.isInteger(raw.limit) ? Math.min(Math.max(raw.limit, 1), AUTOMATION_HISTORY) : 50;
         return (db.prepare('SELECT * FROM automation_runs WHERE automation_id = ? ORDER BY scheduled_for DESC LIMIT ?').all(current.id, limit) as unknown as RunRow[]).map(toRun);
       },
+    },
+    /** SBX-13: asleep, no tick runs. On wake one tick runs now: the cursor coalesces every occurrence that fell due
+     *  during the sleep into one catch-up run (or one "missed" entry), so a long sleep never replays a burst. */
+    power(event) {
+      if (disposed) return;
+      if (event.state === 'suspend') {
+        suspended = true;
+        if (timer) { clearTimeout(timer); timer = undefined; }
+        repoPoller?.suspend();
+        return;
+      }
+      suspended = false;
+      try { tick(); } catch (error) { console.error('automations: tick failed', error); }
+      if (!disposed) loop(automationTiming.tickMs);
+      repoPoller?.resume();
     },
     dispose() {
       disposed = true;

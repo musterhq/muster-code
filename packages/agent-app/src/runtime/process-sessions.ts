@@ -5,6 +5,7 @@ import {dirname,isAbsolute,join} from 'node:path';
 import {appendCommandOutput,MAX_COMMAND_OUTPUT,safeTailStart,trimFinishedOutputs} from './command-output-buffer.ts';
 import {TerminalSessions,type TerminalLaunch,type TerminalOptions} from './terminal-sessions.ts';
 import {OutputLog} from './output-log.ts';
+import type {UserProcessTarget} from './user-process-guard.ts';
 import {attributeListeners,ListeningPorts,type OwnedGroup,type ProcessRow} from './listening-ports.ts';
 import {sharedResourceScheduler,type ResourceLease,type ResourceScheduler} from './resource-scheduler.ts';
 import {isActiveProcess,type ProcessEvent,type ProcessOutputPage,type ProcessOutputPageInput,type ProcessLease,type ProcessListSnapshot,type ProcessMetadata,type ProcessRef,type ProcessSnapshot,type ProcessStart,type ProcessSummarySnapshot,type ProcessPortsSnapshot} from '../shared/process-protocol.ts';
@@ -166,6 +167,22 @@ export class ProcessSessions {
     const groups:{pgid:number;label:string;chatId:string;cwd?:string}[]=[];
     for(const [processId,handle] of this.handles){const session=this.sessions.get(processId);if(!handle.finished&&handle.child.pid&&session)groups.push({pgid:handle.child.pid,label:session.label,chatId:session.chatId});}
     return [...groups,...this.terminals.userProcessGroups()];
+  }
+  /** R5: user groups enriched with their listening ports, member PIDs and process names, for the kill guard. */
+  async userProcessTargets():Promise<(UserProcessTarget&{chatId:string})[]> {
+    const groups=this.userProcessGroups();
+    if(!groups.length)return [];
+    const owned=this.ownedGroups(),targets=new Map(groups.map(group=>[group.pgid,{...group,pids:[] as number[],pgids:[] as number[],ports:[] as number[],names:[] as string[]}]));
+    let scan;try{scan=await this.listeningPorts.scan(false);}catch{return groups;}
+    const key=(source:unknown)=>JSON.stringify(source);
+    for(const row of attributeListeners(scan,{root:this.portRoot,groups:owned,workspaces:new Map()})){
+      const leader=owned.find(group=>key(group.source)===key(row.source))?.pgid,target=leader===undefined?undefined:targets.get(leader);
+      if(!target)continue;
+      target.ports.push(row.port);target.pids.push(row.pid);if(row.pgid!==target.pgid)target.pgids.push(row.pgid);
+    }
+    for(const target of targets.values())for(const process of scan.processes.values())
+      if(process.pgid===target.pgid||target.pgids.includes(process.pgid)){target.pids.push(process.pid);target.names.push(process.comm.slice(process.comm.lastIndexOf('/')+1));}
+    return [...targets.values()];
   }
   /** Every live user-owned group with the row it belongs to (Terminal shells and Commands-tab commands). */
   private ownedGroups():OwnedGroup[] {

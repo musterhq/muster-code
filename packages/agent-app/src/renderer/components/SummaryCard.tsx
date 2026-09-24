@@ -28,6 +28,7 @@ import {CheckLogDisclosure, CiRepairControls, useCiRepair} from './CiRepair';
 import {ciRepairActive} from '../../shared/domains/ci-protocol';
 import type {GitHubChecks} from '../../shared/domains/github-protocol';
 import { plural } from '../../shared/wording.ts';
+import {Tip} from './Tooltip';
 
 type Folder = {id: string; name: string; path: string};
 type PullRequests = Awaited<ReturnType<typeof fetchPullRequests>>;
@@ -268,7 +269,7 @@ function FolderSection({folder, chat, project, activity}: {folder: Folder; chat:
     <header className="summary-section-head" title={folder.path}>
       <span>{folder.name}</span>
       {worktree && <span className="summary-badge" title={`Worktree of ${worktree.mainPath}`}>Worktree</span>}
-      <button type="button" className="summary-head-action" aria-label={`Browse ${folder.name} files`} title="Browse files" onClick={() => openFilesTab(folder.id, folder.name)}><Plus size={14}/></button>
+      <Tip label="Browse files"><button type="button" className="summary-head-action" aria-label={`Browse ${folder.name} files`} onClick={() => openFilesTab(folder.id, folder.name)}><Plus size={14}/></button></Tip>
     </header>
     <Row icon={<DiffIcon size={15}/>} label="Changes" detail={changeDetail} onClick={() => openChangesTab(folder.id, folder.name)} title="Review changes"/>
     <EnvironmentMenu chat={chat} project={project} folder={folder} info={isRepo ? info : undefined} environment={environment} className="summary-row" side="bottom" align="end"
@@ -476,9 +477,9 @@ export function SummaryCard() {
           {compact && <div className="summary-card-bar">
             <span className="summary-card-title">Summary</span>
             {stats}
-            <button type="button" className="summary-collapse" aria-expanded={true} aria-controls={bodyId} aria-label="Collapse summary" title="Collapse summary" onClick={toggleCollapsed}>
+            <Tip label="Collapse summary"><button type="button" className="summary-collapse" aria-expanded={true} aria-controls={bodyId} aria-label="Collapse summary" onClick={toggleCollapsed}>
               <ChevronUp size={14} aria-hidden="true"/>
-            </button>
+            </button></Tip>
           </div>}
           <div className="summary-card-body" id={bodyId}>{sections}</div>
         </>}

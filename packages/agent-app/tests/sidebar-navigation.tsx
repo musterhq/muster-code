@@ -84,11 +84,11 @@ assert.ok(document.querySelector('[data-chat-id="loose"]')!.classList.contains('
 assert.equal(document.querySelector('[data-chat-id="loose"] .status-dot')?.getAttribute('aria-label'),'Unread · Completed');
 assert.ok(document.querySelector('[data-chat-id="loose"] .status-unread-dot'),'with a blue dot in the glyph slot');
 assert.ok(!document.querySelector('[data-chat-id="one"] .status-unread-dot'),'read rows keep the quiet glyph');
-for(const button of Array.from(document.querySelectorAll<HTMLButtonElement>('.nav-inner button'))){if(!button.textContent?.trim())assert.ok(button.title,`icon-only button ${button.getAttribute('aria-label')} has a tooltip`);}
+for(const button of Array.from(document.querySelectorAll<HTMLButtonElement>('.nav-inner button'))){if(!button.textContent?.trim())assert.ok(button.title||button.dataset.tip,`icon-only button ${button.getAttribute('aria-label')} has a tooltip`);}
 (document.querySelector('[aria-label="Pin one"]') as HTMLButtonElement).click();await delay(40);
 assert.ok(calls.some(call=>call.command==='chat.update'&&call.input.id==='one'&&call.input.pinned===true),'the inline hover Pin action pins through the chat service');
 assert.deepEqual(sections(),['Pinned','Folders','Projects','Chats','Archived (1)'],'pinned leads the hierarchy');
-assert.equal(document.querySelector('[aria-label="Unpin one"]')?.getAttribute('title'),'Unpin','the pinned row offers Unpin in the same reserved slot');
+assert.equal(document.querySelector('[aria-label="Unpin one"]')?.getAttribute('data-tip'),'Unpin','the pinned row offers Unpin in the same reserved slot');
 assert.equal(document.querySelectorAll('.chat-row-main[tabindex="0"]').length,1,'exactly one chat row is a tab stop');
 const main=(id:string)=>document.querySelector(`[data-chat-id="${id}"] .chat-row-main`)!;
 const key=(target:Element,init:Record<string,unknown>)=>{const event=new window.Event('keydown',{bubbles:true,cancelable:true});Object.assign(event,init);target.dispatchEvent(event);return event;};
@@ -185,7 +185,7 @@ goalField.value='Ship the beta';(goalField as any)._valueTracker?.setValue('');g
 // CHAT-08: Full access chosen + confirmed in the draft must carry acknowledgeFullAccess (the mock throws otherwise) —
 // this used to be silently dropped on send.
 (document.querySelector('[data-testid="new-chat"] .composer-access') as HTMLButtonElement).click();await delay(20);
-(Array.from(document.querySelectorAll<HTMLButtonElement>('[data-testid="new-chat"] [role="menuitemradio"]')).find(button=>button.textContent?.includes('Full access'))!).click();await delay(20);
+(Array.from(document.querySelectorAll<HTMLButtonElement>('.composer-access-menu [role="menuitemradio"]')).find(button=>button.textContent?.includes('Full access'))!).click();await delay(20);
 // F6/F13: the draft uses the same Full-access dialog as a running chat, and it states its scope.
 assert.ok(document.querySelector('[data-testid="full-access-confirm"]'),'the shared Full-access confirmation');
 assert.equal(document.querySelectorAll('[data-testid="full-access-confirm"] li').length,3,'same three-row list as the in-chat dialog');

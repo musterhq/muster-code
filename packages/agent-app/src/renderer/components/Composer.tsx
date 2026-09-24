@@ -34,13 +34,16 @@ import { RecordSkill, type SkillDraft } from './RecordSkill';
 import { SKETCH_FILE_NAME, SketchPad, type SketchStroke } from './SketchPad';
 import { ConfirmSheet } from './ConfirmSheet';
 import { ACCESS_OPTIONS, FullAccessConfirm } from './FullAccessConfirm';
-import { COMPOSER_COMMANDS, EFFORT_LABELS, SKILL_RECORDER_PROMPT, followUpAction, skillDraft, terminalText, MAX_ATTACHMENT_BYTES, MAX_ATTACHMENTS, attachmentKey, attachmentName, imageBlindModel, imageBlindWarning, chipPayload, chipToken, classifyPaste, configuredAccess, effectiveAccess, findChipRanges, findTokenRanges, formatBytes, insertToken, menuIndex, nextEffort, previewLimit, rankSections, readMentionQuery, readSlashQuery, saveFolderAccess, scoreItem, scoreQueryMatch, INIT_PROMPT, reviewPrompt, pendingQuestionItem, questionDigit, pluginPromptHint, terminalsPillLabel, skipsFullAccessConfirm, setFullAccessSkip, type ChipRange, type ComposerAccess, type ComposerChip, type ComposerCommandId, type TokenVocabulary } from './composerMenus';
+import { COMPOSER_COMMANDS, EFFORT_LABELS, SKILL_RECORDER_PROMPT, followUpAction, skillDraft, terminalText, MAX_ATTACHMENT_BYTES, MAX_ATTACHMENTS, attachmentKey, attachmentName, imageBlindModel, imageBlindWarning, chipPayload, chipToken, classifyPaste, configuredAccess, effectiveAccess, findChipRanges, findTokenRanges, formatBytes, insertToken, nextEffort, previewLimit, rankSections, readMentionQuery, readSlashQuery, saveFolderAccess, scoreItem, scoreQueryMatch, INIT_PROMPT, reviewPrompt, pendingQuestionItem, questionDigit, pluginPromptHint, terminalsPillLabel, skipsFullAccessConfirm, setFullAccessSkip, type ChipRange, type ComposerAccess, type ComposerChip, type ComposerCommandId, type TokenVocabulary } from './composerMenus';
 import { QueuedMessages } from './QueuedMessages';
 import { CheckoutQueueBanner, isCheckoutQueued, sendWithCheckoutGuard } from './ParallelRunGuard';
 import { StashesPopover, usePromptStash } from './PromptStashes';
 import './composer.css';
 import './composer-s3a.css';
 import { plural } from '../../shared/wording.ts';
+import {Tip} from './Tooltip';
+import { Menu, MenuPopup } from './AppMenu';
+import {ConnectModelPrompt,useNoProvider} from './SetupGuide';
 
 const ACCESS = ACCESS_OPTIONS;
 const COMMAND_ICONS: Record<ComposerCommandId, LucideIcon> = {plan:Lightbulb,goal:Goal,project:FolderKanban,sketch:PenLine,terminal:SquareTerminal,model:Cpu,reasoning:Brain,access:CircleAlert,new:SquarePen,browser:Globe,stop:Square,compact:Shrink,fork:GitBranch,rename:Pencil,status:Gauge,mcp:Server,init:FilePlus,review:GitCompare};
@@ -66,7 +69,8 @@ const NO_QUEUE: QueuedMessage[] = [];
 /** Web Speech dictation (Chromium exposes the prefixed constructor); the mic hides when absent. */
 type Recognition = { continuous: boolean; interimResults: boolean; lang: string; start(): void; stop(): void; abort(): void;
   onresult: ((event: { resultIndex: number; results: ArrayLike<ArrayLike<{ transcript: string }> & { isFinal: boolean }> }) => void) | null; onerror: ((event: { error: string }) => void) | null; onend: (() => void) | null };
-const speechRecognition = (): (new () => Recognition) | undefined => typeof window === 'undefined' ? undefined : (window as unknown as Record<string, new () => Recognition>).SpeechRecognition ?? (window as unknown as Record<string, new () => Recognition>).webkitSpeechRecognition;
+// CMP-14: Electron exposes the constructor but ships no speech service (every start fails), so the mic stays hidden there.
+const speechRecognition = (): (new () => Recognition) | undefined => typeof window === 'undefined' || /\bElectron\//.test(navigator.userAgent ?? '') ? undefined : (window as unknown as Record<string, new () => Recognition>).SpeechRecognition ?? (window as unknown as Record<string, new () => Recognition>).webkitSpeechRecognition;
 const DICTATION_ERRORS: Record<string, string> = { 'not-allowed': 'Microphone access was denied', 'service-not-allowed': 'Dictation is not available on this system', 'no-speech': 'No speech heard', network: 'Dictation needs a network connection', 'audio-capture': 'No microphone found' };
 /** Paused goals the user chose to keep paused ("Keep paused"); not asked again this session. */
 const resumeDeclined = new Set<string>();
@@ -172,6 +176,9 @@ export function Composer({ chat }: { chat: Chat }): React.ReactElement {
   const stopping = chat.status === 'stopping';
   const sending = Boolean(state.sending[chat.id]);
   const sendError = state.sendErrors[chat.id];
+  // R9: no runnable provider at all → the connect actions, not a raw send error.
+  const noProvider = useNoProvider();
+  const [connectAsk, setConnectAsk] = useState(false);
   const project = state.snapshot?.projects.find(project => project.id === chat.projectId);
   const folderIds = project?.folderIds ?? (chat.folderId ? [chat.folderId] : []);
   const referenceFolders = (state.snapshot?.folders ?? []).filter(folder => folderIds.includes(folder.id));
@@ -414,7 +421,8 @@ export function Composer({ chat }: { chat: Chat }): React.ReactElement {
   const anyPopover = Boolean(menu || modelOpen || slash || mention);
   useEffect(() => {
     if (!anyPopover) return;
-    const inside = (target: EventTarget | null) => Boolean(composerRoot.current?.contains(target as Node));
+    // The access menu is a Base UI Menu portalled to <body>; it still counts as inside the composer.
+    const inside = (target: EventTarget | null) => Boolean(composerRoot.current?.contains(target as Node) || (target as Element | null)?.closest?.('.composer-access-menu'));
     const close = () => { setMenu(null); setModelOpen(false); setDismissed(currentDraft.current.text); };
     const within = (target: Node, ...nodes: (HTMLElement | null)[]) => nodes.some(node => node?.contains(target));
     const pointer = (event: PointerEvent) => {
@@ -506,6 +514,7 @@ export function Composer({ chat }: { chat: Chat }): React.ReactElement {
   const submit = (confirmed = false) => {
     // While the agent waits on a question, the composer text is its custom answer (the arrow is Next/Submit too).
     if (questionFlow && !questionFlow.collapsed) { void answerQuestion(); return; }
+    if (noProvider && !running) { setConnectAsk(true); return; }
     if (!hasPayload || composing.current || sending || modelPending.current || settingsPending.current || chat.archived || recoveryNeeded) return;
     if (staging) { flash('Waiting for attachments to finish uploading'); return; }
     if (running) { void followUp(false); return; }
@@ -1007,15 +1016,6 @@ export function Composer({ chat }: { chat: Chat }): React.ReactElement {
     else if (event.key === 'Backspace') { event.preventDefault(); setPlusQuery(value => value.slice(0, -1)); setPlusActive(0); }
     else if (event.key.length === 1 && !event.metaKey && !event.ctrlKey && !event.altKey) { event.preventDefault(); setPlusQuery(value => value + event.key); setPlusActive(0); }
   };
-  const navigateMenu = (event: React.KeyboardEvent<HTMLElement>) => {
-    if (event.key === 'Escape') { event.preventDefault(); setMenu(null); accessTrigger.current?.focus(); return; }
-    const direction = ({ ArrowDown: 'next', ArrowUp: 'previous', Home: 'first', End: 'last' } as const)[event.key as 'ArrowDown'];
-    if (!direction || event.metaKey || event.ctrlKey || event.altKey) return;
-    const buttons = event.currentTarget.querySelectorAll<HTMLButtonElement>('button:not(:disabled)');
-    if (!buttons.length) return;
-    event.preventDefault(); const index = [...buttons].indexOf(document.activeElement as HTMLButtonElement);
-    buttons[menuIndex(index, buttons.length, direction)]?.focus();
-  };
 
   const onKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (composing.current || event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return;
@@ -1115,7 +1115,7 @@ export function Composer({ chat }: { chat: Chat }): React.ReactElement {
   /** Codex shows "Continuing goal…" on the submit button while an active goal is about to take its next turn. */
   const continuingGoal = chat.goal?.status === 'active' && !running && !sending && !hasPayload && !queue.length;
   const followUpVerb = followUpAction(state.followUpMode, false) === 'steer' ? 'Steer' : 'Queue', invertVerb = followUpVerb === 'Steer' ? 'Queue' : 'Steer';
-  return <>{questionSlot ?? infoSlot ?? goalSlot}<div ref={composerRoot} data-testid="composer" className={`composer${dragging ? ' is-dragging' : ''}${chat.archived ? ' is-archived' : ''}`} aria-busy={sending}
+  return <>{questionSlot ?? infoSlot ?? goalSlot}{noProvider && !running && <ConnectModelPrompt emphasis={connectAsk} />}<div ref={composerRoot} data-testid="composer" className={`composer${dragging ? ' is-dragging' : ''}${chat.archived ? ' is-archived' : ''}`} aria-busy={sending}
     onDragEnter={event => { if (hasFiles(event)) { event.preventDefault(); setDragging(true); } }}
     onDragOver={event => { if (hasFiles(event)) { event.preventDefault(); event.dataTransfer.dropEffect = 'copy'; if (!dragging) setDragging(true); } }}
     onDragLeave={event => { if (!composerRoot.current?.contains(event.relatedTarget as Node | null)) setDragging(false); }}
@@ -1170,10 +1170,10 @@ export function Composer({ chat }: { chat: Chat }): React.ReactElement {
     {menu === 'capture' && <CaptureSourcePicker sources={captureSources} onCapture={chooseCapture} onClose={() => { setMenu(null); restoreCaret(); }} />}
     {modelOpen && <div ref={modelPopover} data-testid="composer-popover" className="composer-popover composer-model-popover" data-browser-overlay aria-label="Select model" role="dialog">
       <div className="composer-model-rail" role="tablist" aria-label="Providers">
-        {modelFavorites.length > 0 && <button type="button" role="tab" aria-selected={modelTab === 'favorites'} aria-label="Favorites" title="Favorites" onClick={() => setModelTab('favorites')}><Star size={14} /></button>}
-        <button type="button" role="tab" aria-selected={modelTab === 'all'} aria-label="All providers" title="All providers" onClick={() => setModelTab('all')}><Cpu size={14} /></button>
-        {providers.map(provider => <button key={provider.id} type="button" role="tab" aria-selected={modelTab === provider.id} aria-label={provider.name} title={provider.name} onClick={() => setModelTab(provider.id)}>
-          <ProviderLogo id={provider.id} name={provider.name} endpoint={provider.endpoint} size={18} /></button>)}
+        {modelFavorites.length > 0 && <Tip label="Favorites"><button type="button" role="tab" aria-selected={modelTab === 'favorites'} aria-label="Favorites" onClick={() => setModelTab('favorites')}><Star size={14} /></button></Tip>}
+        <Tip label="All providers"><button type="button" role="tab" aria-selected={modelTab === 'all'} aria-label="All providers" onClick={() => setModelTab('all')}><Cpu size={14} /></button></Tip>
+        {providers.map(provider => <Tip key={provider.id} label={provider.name}><button type="button" role="tab" aria-selected={modelTab === provider.id} aria-label={provider.name} onClick={() => setModelTab(provider.id)}>
+          <ProviderLogo id={provider.id} name={provider.name} endpoint={provider.endpoint} size={18} /></button></Tip>)}
       </div>
       <div className="composer-model-pane">
         <label className="composer-model-search"><Search size={13} /><input autoFocus type="search" aria-label="Search models" placeholder="Search models…" value={modelQuery} onChange={event => setModelQuery(event.target.value)} onKeyDown={onModelKeyDown} /></label>
@@ -1189,7 +1189,7 @@ export function Composer({ chat }: { chat: Chat }): React.ReactElement {
                         <button type="button" role="option" aria-selected={selected} disabled={modelChanging || settingsBlocked || (running && model.providerId !== currentProvider)} title={running && model.providerId !== currentProvider ? `Switch to ${model.provider} after this run` : `${model.provider} · ${model.id}`} onClick={() => void chooseModel(model.id, model.providerId)}>
                           <span className="composer-row-label">{model.name}</span>{modelTab !== 'all' && <span className="composer-row-description">{model.provider}</span>}{selected && <Check size={13} aria-hidden="true" />}
                           <span className="composer-model-badges">{modelBadges(model).map(badge => <span key={badge.id} className={`composer-model-badge${badge.known ? '' : ' is-unknown'}${badge.supported === false ? ' is-unsupported' : ''}`} title={badge.title}>{badge.label}</span>)}</span></button>
-                        <button type="button" className="composer-model-favorite" aria-label={`${favorite ? 'Remove' : 'Add'} ${model.name} ${model.provider} ${favorite ? 'from' : 'to'} favorites`} aria-pressed={favorite} title={favorite ? 'Remove favorite' : 'Add favorite'} onClick={() => toggleModelFavorite(key)}><Star size={12} fill={favorite ? 'currentColor' : 'none'} /></button>
+                        <Tip label={favorite ? 'Remove favorite' : 'Add favorite'}><button type="button" className="composer-model-favorite" aria-label={`${favorite ? 'Remove' : 'Add'} ${model.name} ${model.provider} ${favorite ? 'from' : 'to'} favorites`} aria-pressed={favorite} onClick={() => toggleModelFavorite(key)}><Star size={12} fill={favorite ? 'currentColor' : 'none'} /></button></Tip>
                       </div>; })}
                   </React.Fragment>)}
         </div>
@@ -1203,16 +1203,18 @@ export function Composer({ chat }: { chat: Chat }): React.ReactElement {
         </div>}
       </div>
     </div>}
-      {menu === 'access' && <div ref={accessMenu} data-testid="composer-popover" className="composer-popover composer-access-menu" role="menu" aria-label="Permissions" onKeyDown={navigateMenu}>
-        {ACCESS.map(option => <button key={option.id} type="button" role="menuitemradio" className={`is-${option.id}`} aria-checked={selectedAccess === option.id} disabled={settingsBlocked} onClick={() => void chooseAccess(option.id)}>
-          <option.Icon size={15} aria-hidden="true" /><span><strong>{option.label}</strong><small>{option.description}</small></span>{selectedAccess === option.id && <Check size={13} aria-hidden="true" />}</button>)}
-        {running && <p className="composer-access-note">Applies to the next turn</p>}
-      </div>}
     <div className="composer-options" role="toolbar" aria-label="Message options">
       <div className="composer-toolbar-left">
-        <button ref={plusTrigger} data-testid="composer-plus" type="button" className="composer-plus" aria-label="Add files and more" aria-haspopup="menu" aria-expanded={menu === 'plus'} title="Add files and more" onClick={openPlus}><Plus size={16} /></button>
-        <button ref={accessTrigger} data-testid="composer-access" type="button" className={`composer-access is-${shownAccess}${planMode ? ' is-muted' : ''}`} aria-label={`Access: ${accessOption.label}`} aria-haspopup="menu" aria-expanded={menu === 'access'} disabled={settingsBlocked}
-            title={planMode ? 'Plan mode runs read-only' : running ? 'Change permissions · applies to the next turn' : 'Change permissions'} onClick={openAccess}><accessOption.Icon size={14} aria-hidden="true" /><span className="composer-access-label">{accessOption.label}</span></button>
+        <Tip label="Add files and more"><button ref={plusTrigger} data-testid="composer-plus" type="button" className="composer-plus" aria-label="Add files and more" aria-haspopup="menu" aria-expanded={menu === 'plus'} onClick={openPlus}><Plus size={16} /></button></Tip>
+        <Menu.Root open={menu === 'access'} onOpenChange={open => { if (open) { if (menu !== 'access') openAccess(); } else if (menu === 'access') setMenu(null); }}>
+        <Menu.Trigger ref={accessTrigger} data-testid="composer-access" className={`composer-access is-${shownAccess}${planMode ? ' is-muted' : ''}`} aria-label={`Access: ${accessOption.label}`} aria-haspopup="menu" aria-expanded={menu === 'access'} disabled={settingsBlocked}
+            title={planMode ? 'Plan mode runs read-only' : running ? 'Change permissions · applies to the next turn' : 'Change permissions'}><accessOption.Icon size={14} aria-hidden="true" /><span className="composer-access-label">{accessOption.label}</span></Menu.Trigger>
+        <MenuPopup ref={accessMenu} data-testid="composer-popover" side="top" align="start" sideOffset={6} className="composer-access-menu" aria-label="Permissions" finalFocus={accessTrigger}>
+        <Menu.RadioGroup value={selectedAccess}>{ACCESS.map(option => <Menu.RadioItem key={option.id} value={option.id} render={<button type="button" />} nativeButton className={`is-${option.id}`} disabled={settingsBlocked} onClick={() => void chooseAccess(option.id)}>
+          <option.Icon size={15} aria-hidden="true" /><span><strong>{option.label}</strong><small>{option.description}</small></span>{selectedAccess === option.id && <Check size={13} aria-hidden="true" />}</Menu.RadioItem>)}</Menu.RadioGroup>
+        {running && <p className="composer-access-note">Applies to the next turn</p>}
+        </MenuPopup>
+        </Menu.Root>
         {project && <button type="button" data-testid="composer-project" className="composer-project" aria-label={`Project: ${project.name}`} aria-haspopup="dialog" aria-expanded={menu === 'project'} title={project.goal ? `${project.name} · ${project.goal}` : project.name}
           onClick={() => { setModelOpen(false); setMenu(menu === 'project' ? null : 'project'); }}><FolderKanban size={13} aria-hidden="true" /><span>{project.name}</span></button>}
         {runningTerminals.shells + runningTerminals.commands > 0 && <button type="button" data-testid="composer-terminals" className="composer-terminals" title="Show running terminals" onClick={openTerminals}>
@@ -1232,18 +1234,18 @@ export function Composer({ chat }: { chat: Chat }): React.ReactElement {
           </ProviderUsageHover>
           {modelError && <span className="composer-model-error" role="alert">{modelError}</span>}
         </div>
-        {Speech && <button type="button" data-testid="composer-mic" className={`composer-mic${dictation ? ' is-listening' : ''}`} aria-label={dictation ? 'Stop dictation' : 'Dictate'} aria-pressed={Boolean(dictation)} title={dictation ? 'Stop dictation' : 'Dictate'} disabled={chat.archived} onClick={toggleDictation}><Mic size={15} /></button>}
-        {running && hasPayload && <button type="button" className="composer-stop is-ghost" aria-label="Stop" title="Stop" disabled={stopping} onClick={() => void stopChat(chat.id)}><Square size={11} fill="currentColor" /></button>}
+        {Speech && <Tip label={dictation ? 'Stop dictation' : 'Dictate'}><button type="button" data-testid="composer-mic" className={`composer-mic${dictation ? ' is-listening' : ''}`} aria-label={dictation ? 'Stop dictation' : 'Dictate'} aria-pressed={Boolean(dictation)} disabled={chat.archived} onClick={toggleDictation}><Mic size={15} /></button></Tip>}
+        {running && hasPayload && <Tip label="Stop"><button type="button" className="composer-stop is-ghost" aria-label="Stop" disabled={stopping} onClick={() => void stopChat(chat.id)}><Square size={11} fill="currentColor" /></button></Tip>}
         {running && hasPayload
-          ? <button data-testid="composer-primary" type="button" className="composer-send" aria-label={`${followUpVerb} (Enter) · ${invertVerb} ⌘Enter`} title={`${followUpVerb} (Enter) · ${invertVerb} (⌘Enter)`} disabled={queueing || staging || chat.archived || recoveryNeeded} onClick={event => void followUp(event.metaKey || event.ctrlKey)}><ArrowUp size={15} strokeWidth={2.25} /></button>
+          ? <Tip label={`${followUpVerb} (Enter) · ${invertVerb} (⌘Enter)`}><button data-testid="composer-primary" type="button" className="composer-send" aria-label={`${followUpVerb} (Enter) · ${invertVerb} ⌘Enter`} disabled={queueing || staging || chat.archived || recoveryNeeded} onClick={event => void followUp(event.metaKey || event.ctrlKey)}><ArrowUp size={15} strokeWidth={2.25} /></button></Tip>
           : running ? stopping
             ? <button data-testid="composer-primary" type="button" className="composer-stop is-stopping" aria-label={forceStop ? 'Force stop' : 'Stopping run'} disabled={!forceStop} title={forceStop ? 'The run has not stopped yet. Stop it again.' : 'Stopping…'} onClick={() => void stopChat(chat.id)}>
               <LoaderCircle size={26} className="composer-stop-ring composer-spin" aria-hidden="true" /><Square size={10} fill="currentColor" />{forceStop && <span>Force stop</span>}</button>
-            : <button data-testid="composer-primary" type="button" className="composer-stop" aria-label="Stop" title="Stop" onClick={() => void stopChat(chat.id)}><Square size={11} fill="currentColor" /></button>
-            : continuingGoal ? <button data-testid="composer-primary" type="button" className="composer-send is-continuing" aria-label="Continuing goal…" title="Continuing goal…" disabled><LoaderCircle size={15} className="composer-spin" /></button>
-            : <button data-testid="composer-primary" type="button" className="composer-send" aria-label={sending ? 'Sending' : modEnter ? 'Send (⌘Enter)' : 'Send (Enter)'}
-              title={recoveryNeeded ? 'Check the existing provider attempt before sending again' : chat.archived ? 'Restore this chat before sending' : sending ? 'Sending message…' : staging ? 'Waiting for attachments to upload' : sendError ? 'Retry message' : modEnter ? 'Send (⌘Enter) · New line (Enter) · New chat in background (⌥Enter)' : 'Send (Enter) · New line (Shift+Enter) · New chat in background (⌥Enter)'}
-              disabled={primaryDisabled} onClick={() => submit()}>{sending ? <LoaderCircle size={15} className="composer-spin" /> : <ArrowUp size={15} strokeWidth={2.25} />}</button>}
+            : <Tip label="Stop"><button data-testid="composer-primary" type="button" className="composer-stop" aria-label="Stop" onClick={() => void stopChat(chat.id)}><Square size={11} fill="currentColor" /></button></Tip>
+            : continuingGoal ? <Tip label="Continuing goal…"><button data-testid="composer-primary" type="button" className="composer-send is-continuing" aria-label="Continuing goal…" disabled><LoaderCircle size={15} className="composer-spin" /></button></Tip>
+            : <Tip label={recoveryNeeded ? 'Check the existing provider attempt before sending again' : chat.archived ? 'Restore this chat before sending' : sending ? 'Sending message…' : staging ? 'Waiting for attachments to upload' : sendError ? 'Retry message' : modEnter ? 'Send (⌘Enter) · New line (Enter) · New chat in background (⌥Enter)' : 'Send (Enter) · New line (Shift+Enter) · New chat in background (⌥Enter)'}><button data-testid="composer-primary" type="button" className="composer-send" aria-label={sending ? 'Sending' : modEnter ? 'Send (⌘Enter)' : 'Send (Enter)'}
+             
+              disabled={primaryDisabled} onClick={() => submit()}>{sending ? <LoaderCircle size={15} className="composer-spin" /> : <ArrowUp size={15} strokeWidth={2.25} />}</button></Tip>}
       </div>
     </div>
     {settingsError && !fullConfirm && <div className="composer-error" role="alert">{settingsError}</div>}

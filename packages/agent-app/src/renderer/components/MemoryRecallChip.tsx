@@ -4,6 +4,7 @@ import type { MemoryRecallChipItem, MemoryRecallPreview } from '../../shared/dom
 import { invoke } from '../bridge';
 import { notifyError } from '../store';
 import './memory-recall-chip.css';
+import {Tip} from './Tooltip';
 
 const DEBOUNCE_MS = 450;
 
@@ -49,11 +50,11 @@ export function MemoryRecallChip({ chatId, text }: { chatId: string; text: strin
       <p className="memory-recall-heading">Recalled for the next turn</p>
       {count ? <ul>{preview.records.map(item => <li key={item.id}>
         <span className="memory-recall-text">{item.text}</span>{item.scope && <span className="memory-recall-scope">{item.scope}</span>}
-        <button type="button" className="icon-button" aria-label={`Leave out: ${item.text.slice(0, 60)}`} title="Leave out of this chat’s recall" onClick={() => toggle(item, true)}><X size={12} /></button>
+        <Tip label="Leave out of this chat’s recall"><button type="button" className="icon-button" aria-label={`Leave out: ${item.text.slice(0, 60)}`} onClick={() => toggle(item, true)}><X size={12} /></button></Tip>
       </li>)}</ul> : <p className="memory-recall-note">No notes match this draft.</p>}
       {preview.excluded.length > 0 && <><p className="memory-recall-heading">Left out in this chat</p><ul className="is-excluded">{preview.excluded.map(item => <li key={item.id}>
         <span className="memory-recall-text">{item.text || 'Removed note'}</span>
-        <button type="button" className="icon-button" aria-label={`Restore: ${(item.text || 'removed note').slice(0, 60)}`} title="Recall it again" onClick={() => toggle(item, false)}><RotateCcw size={12} /></button>
+        <Tip label="Recall it again"><button type="button" className="icon-button" aria-label={`Restore: ${(item.text || 'removed note').slice(0, 60)}`} onClick={() => toggle(item, false)}><RotateCcw size={12} /></button></Tip>
       </li>)}</ul></>}
       {preview.engine && <p className="memory-recall-note">The memory engine adds its own matches when you send.</p>}
     </div>}

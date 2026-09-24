@@ -5,6 +5,8 @@ import {getState,subscribeStore} from '../store';
 import {stageAttachment,runtimeMessage} from '../composerBridge';
 import {BROWSER_VIEWPORTS,browserAddress,browserScopeProfile,type BrowserConsoleEntry,type BrowserProfile,type BrowserState,type BrowserViewport} from '../../shared/browser-protocol';
 import './browser-tab.css';
+import {Tip} from './Tooltip';
+import {Menu,MenuPopup} from './AppMenu';
 
 export interface BrowserTabProps {owner:string;profileId:string;profileName?:string;initialUrl?:string;active?:boolean;onUrlChange?:(url:string)=>void}
 
@@ -46,20 +48,13 @@ const hostOf=(url:string)=>{try{return new URL(url).host;}catch{return url;}};
 const message=(cause:unknown)=>cause instanceof Error?cause.message:String(cause);
 
 type MenuId='viewport'|'profile';
-/** Toolbar popover. role="menu" also detaches the native page while it is open. */
+/** Toolbar menu on the shared Base UI primitive. Its role="menu" popup also detaches the native page while open. */
 function ToolbarMenu({id,open,onOpen,label,button,children}:{id:MenuId;open:MenuId|null;onOpen:(id:MenuId|null)=>void;label:string;button:React.ReactNode;children:React.ReactNode}) {
-  const root=useRef<HTMLDivElement>(null),shown=open===id;
-  useEffect(()=>{
-    if(!shown)return;
-    const away=(event:MouseEvent)=>{if(!root.current?.contains(event.target as Node))onOpen(null);};
-    const key=(event:KeyboardEvent)=>{if(event.key==='Escape')onOpen(null);};
-    document.addEventListener('mousedown',away,true);document.addEventListener('keydown',key,true);
-    return()=>{document.removeEventListener('mousedown',away,true);document.removeEventListener('keydown',key,true);};
-  },[shown,onOpen]);
-  return <div className="browser-menu-anchor" ref={root}>
-    <button className={`browser-icon browser-menu-button${shown?' is-open':''}`} aria-haspopup="menu" aria-expanded={shown} aria-label={label} title={label} onClick={()=>onOpen(shown?null:id)}>{button}</button>
-    {shown && <div className="browser-menu" role="menu" aria-label={label}>{children}</div>}
-  </div>;
+  const shown=open===id;
+  return <Menu.Root open={shown} onOpenChange={next=>onOpen(next?id:null)}>
+    <Tip label={label}><Menu.Trigger className={`browser-icon browser-menu-button${shown?' is-open':''}`} aria-label={label}>{button}</Menu.Trigger></Tip>
+    <MenuPopup align="end" className="browser-menu" aria-label={label}>{children}</MenuPopup>
+  </Menu.Root>;
 }
 
 /** The native view is a separate sandboxed renderer. This component owns only its
@@ -244,9 +239,9 @@ export function BrowserTab({owner,profileId:requestedProfile,initialUrl='about:b
   return <div className="browser-tab" aria-label="Embedded browser">
     <div className="browser-toolbar">
       <div className="browser-navigation" role="group" aria-label="Browser navigation">
-        <button className="browser-icon" disabled={!ready || !browser?.canGoBack} aria-label="Go back" title="Go back" onClick={()=>void action('browser.back')}><ArrowLeft size={15}/></button>
-        <button className="browser-icon" disabled={!ready || !browser?.canGoForward} aria-label="Go forward" title="Go forward" onClick={()=>void action('browser.forward')}><ArrowRight size={15}/></button>
-        <button className="browser-icon" disabled={!ready} aria-label={browser?.loading?'Stop loading':'Reload page'} title={browser?.loading?'Stop loading':'Reload page'} onClick={()=>void action(browser?.loading?'browser.stop':'browser.reload')}>{browser?.loading?<Square size={13}/>:<RotateCw size={14}/>}</button>
+        <Tip label="Go back"><button className="browser-icon" disabled={!ready || !browser?.canGoBack} aria-label="Go back" onClick={()=>void action('browser.back')}><ArrowLeft size={15}/></button></Tip>
+        <Tip label="Go forward"><button className="browser-icon" disabled={!ready || !browser?.canGoForward} aria-label="Go forward" onClick={()=>void action('browser.forward')}><ArrowRight size={15}/></button></Tip>
+        <Tip label={browser?.loading?'Stop loading':'Reload page'}><button className="browser-icon" disabled={!ready} aria-label={browser?.loading?'Stop loading':'Reload page'} onClick={()=>void action(browser?.loading?'browser.stop':'browser.reload')}>{browser?.loading?<Square size={13}/>:<RotateCw size={14}/>}</button></Tip>
       </div>
       <form className="browser-address-form" onSubmit={event=>void navigate(event)}>
         {browser?.certificateError?<ShieldAlert size={14} className="is-danger" aria-label="Certificate error"/>:<Globe size={14} aria-hidden="true"/>}
@@ -254,29 +249,29 @@ export function BrowserTab({owner,profileId:requestedProfile,initialUrl='about:b
         <button type="submit" disabled={!ready || !address.trim()} aria-label="Navigate to website">Go</button>
       </form>
       <div className="browser-tools" role="group" aria-label="Page tools">
-        <button className="browser-icon" disabled={!tools} aria-label="Pick element for chat" title="Pick an element and add it to the chat" onClick={()=>void pickElement()}><Crosshair size={14}/></button>
-        <button className="browser-icon" disabled={!tools} aria-label="Capture region for chat" title="Drag a region to attach a screenshot (Shift-click: visible page)" onClick={event=>void capture(!event.shiftKey)}><Camera size={14}/></button>
+        <Tip label="Pick an element and add it to the chat"><button className="browser-icon" disabled={!tools} aria-label="Pick element for chat" onClick={()=>void pickElement()}><Crosshair size={14}/></button></Tip>
+        <Tip label="Drag a region to attach a screenshot (Shift-click: visible page)"><button className="browser-icon" disabled={!tools} aria-label="Capture region for chat" onClick={event=>void capture(!event.shiftKey)}><Camera size={14}/></button></Tip>
         <button className={`browser-icon${consoleOpen?' is-on':''}`} disabled={!ready} aria-pressed={consoleOpen} aria-label={`Console${browser?.consoleErrors?`, ${browser.consoleErrors} errors`:''}`} title="Console and network errors" onClick={()=>setConsoleOpen(value=>!value)}>
           <SquareTerminal size={14}/>{!!browser?.consoleErrors && <span className="browser-badge" aria-hidden="true">{browser.consoleErrors>99?'99+':browser.consoleErrors}</span>}
         </button>
         <ToolbarMenu id="viewport" open={menu} onOpen={setMenu} label={`Viewport: ${viewportLabel(viewport)}`} button={VIEWPORT_ICON[viewport]}>
-          {(['fill','mobile','tablet','desktop'] as const).map(preset=><button key={preset} role="menuitemradio" aria-checked={viewport===preset} disabled={!ready} onClick={()=>void setViewport(preset)}>
+          <Menu.RadioGroup value={viewport}>{(['fill','mobile','tablet','desktop'] as const).map(preset=><Menu.RadioItem key={preset} value={preset} closeOnClick disabled={!ready} onClick={()=>void setViewport(preset)}>
             <span className="browser-menu-icon">{VIEWPORT_ICON[preset]}</span><span className="browser-menu-label">{viewportLabel(preset)}</span>{viewport===preset && <Check size={13} className="browser-menu-check"/>}
-          </button>)}
+          </Menu.RadioItem>)}</Menu.RadioGroup>
         </ToolbarMenu>
         <ToolbarMenu id="profile" open={menu} onOpen={setMenu} label={`Browser profile: ${profileLabel}`} button={<><UserRound size={14}/><span className="browser-profile-name">{profileLabel}</span><ChevronDown size={11}/></>}>
-          <p className="browser-menu-heading">Browser profile</p>
-          {profileChoices.map(id=><button key={id} role="menuitemradio" aria-checked={id===profileId} onClick={()=>switchProfile(id)}>
+          <div className="ui-menu-label">Browser profile</div>
+          <Menu.RadioGroup value={profileId}>{profileChoices.map(id=><Menu.RadioItem key={id} value={id} closeOnClick onClick={()=>switchProfile(id)}>
             <span className="browser-menu-icon">{id===profileId?<Check size={13}/>:null}</span><span className="browser-menu-label">{browserProfileLabel(id)}</span>
             <span className="browser-menu-detail">{id==='personal'?'All chats':id.startsWith('project-')?'Project':id.startsWith('folder-')?'Folder':''}</span>
-          </button>)}
-          <div className="browser-menu-separator" role="separator"/>
-          <button role="menuitem" className={confirmClear?'is-danger':''} onClick={()=>void clearData()}>
+          </Menu.RadioItem>)}</Menu.RadioGroup>
+          <Menu.Separator className="browser-menu-separator"/>
+          <Menu.Item className={confirmClear?'is-danger':''} closeOnClick={false} onClick={()=>void clearData()}>
             <span className="browser-menu-icon"><X size={13}/></span><span className="browser-menu-label">{confirmClear?`Sign out of every site in ${profileLabel}`:'Clear site data…'}</span>
-          </button>
+          </Menu.Item>
           <p className="browser-menu-note">Sign-ins and cookies stay in <code>{profileId}</code>. Other profiles can't read them. Switching reloads this tab in the chosen profile.</p>
         </ToolbarMenu>
-        <button className="browser-icon" disabled={!ready || !page} aria-label="Open in default browser" title="Open in your default browser" onClick={openExternal}><ExternalLink size={14}/></button>
+        <Tip label="Open in your default browser"><button className="browser-icon" disabled={!ready || !page} aria-label="Open in default browser" onClick={openExternal}><ExternalLink size={14}/></button></Tip>
       </div>
     </div>
     <div className="browser-load-status" role="status" aria-live="polite">

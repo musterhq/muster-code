@@ -1,17 +1,17 @@
 /* Record a skill dialog. */
-.record-skill-dialog { position: fixed; left: 50%; top: 50%; z-index: 111; translate: -50% -50%; width: min(560px, calc(100vw - 32px)); max-height: calc(100vh - 48px); overflow: auto; padding: 18px 20px; border: 1px solid var(--hairline); border-radius: 16px; background: var(--menu-bg); color: var(--text); box-shadow: 0 20px 60px #0007; }
-.record-skill-dialog h2 { margin: 0 0 4px; font-size: 15px; font-weight: 550; }
-.record-skill-dialog > p { margin: 0 0 14px; color: var(--text-faint); font-size: 12px; }
+.record-skill-dialog { position: fixed; left: 50%; top: 50%; z-index: 111; translate: -50% -50%; width: min(560px, calc(100vw - 32px)); max-height: calc(100vh - 48px); overflow: auto; padding: 18px 20px; border: 1px solid var(--hairline); border-radius: var(--radius-16); background: var(--menu-bg); color: var(--text); box-shadow: var(--shadow-dialog); }
+.record-skill-dialog h2 { margin: 0 0 4px; font-size: var(--fs-15); font-weight: 550; }
+.record-skill-dialog > p { margin: 0 0 14px; color: var(--text-faint); font-size: var(--fs-12); }
 .record-skill-dialog form { display: flex; flex-direction: column; gap: 10px; }
-.record-skill-dialog label { display: flex; flex-direction: column; gap: 5px; color: var(--text-dim); font-size: 12px; }
-.record-skill-dialog input,.record-skill-dialog textarea { width: 100%; padding: 7px 9px; border: 1px solid var(--hairline); border-radius: 8px; outline: 0; background: var(--bg); color: var(--text); font: inherit; font-size: 13px; }
-.record-skill-dialog textarea { min-height: 180px; resize: vertical; font: 12.5px/1.5 var(--mono); }
+.record-skill-dialog label { display: flex; flex-direction: column; gap: 5px; color: var(--text-dim); font-size: var(--fs-12); }
+.record-skill-dialog input,.record-skill-dialog textarea { width: 100%; padding: 7px 9px; border: 1px solid var(--hairline); border-radius: var(--radius-8); outline: 0; background: var(--bg); color: var(--text); font: inherit; font-size: var(--fs-13); }
+.record-skill-dialog textarea { min-height: 180px; resize: vertical; font: var(--fs-13)/1.5 var(--mono); }
 .record-skill-dialog input:focus,.record-skill-dialog textarea:focus { border-color: color-mix(in srgb, var(--accent) 55%, transparent); }
-.record-skill-path { margin: -4px 0 0; color: var(--text-faint); font: 11.5px var(--mono); }
+.record-skill-path { margin: -4px 0 0; color: var(--text-faint); font: var(--fs-12) var(--mono); }
 .record-skill-path strong { color: var(--text-dim); font-weight: 500; }
-.record-skill-error { margin: 0; color: var(--danger); font-size: 12px; }
+.record-skill-error { margin: 0; color: var(--danger); font-size: var(--fs-12); }
 .record-skill-footer { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
-.record-skill-footer button { height: 30px; padding: 0 14px; border: 1px solid var(--hairline); border-radius: 15px; color: var(--text); font-size: 13px; }
+.record-skill-footer button { height: 30px; padding: 0 14px; border: 1px solid var(--hairline); border-radius: var(--radius-16); color: var(--text); font-size: var(--fs-13); }
 .record-skill-footer button.is-primary { border-color: transparent; background: var(--text); color: var(--bg); font-weight: 550; }
 .record-skill-footer button:disabled { opacity: .45; cursor: default; }
 .record-skill-footer button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }

@@ -1,13 +1,13 @@
 /* Codex "Thinking" / "Thought for 12s": a faint label on the prose edge; open, the
    reasoning reads like a quieter message indented under it. */
 .reasoning-row { min-width: 0; }
-.reasoning-trigger, .reasoning-row.is-empty { position: relative; display: flex; align-items: center; gap: 6px; width: 100%; min-height: 30px; padding: 4px 8px; color: var(--text-faint); font-size: 13.5px; line-height: 1.4; text-align: left; border-radius: 6px; transition: color 130ms ease; }
+.reasoning-trigger, .reasoning-row.is-empty { position: relative; display: flex; align-items: center; gap: 6px; width: 100%; min-height: 30px; padding: 4px 8px; color: var(--text-faint); font-size: var(--fs-14); line-height: 1.4; text-align: left; border-radius: var(--radius-6); transition: color 130ms ease; }
 .reasoning-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .reasoning-trigger:hover, .reasoning-trigger:focus-visible, .reasoning-row[data-open] > .reasoning-trigger { color: var(--text-dim); }
 .reasoning-trigger:hover > .tool-chevron, .reasoning-trigger:focus-visible > .tool-chevron { opacity: .9; }
 .reasoning-trigger[aria-expanded='true'] > .tool-chevron { opacity: .9; transform: rotate(90deg); }
 .reasoning-trigger:focus-visible { outline: 1px solid color-mix(in srgb, var(--accent) 55%, transparent); outline-offset: -1px; }
 .reasoning-body { margin: 0 8px 8px 8px; padding: 2px 0 2px 14px; border-left: 1px solid color-mix(in srgb, var(--text) 8%, transparent); color: var(--text-dim); overflow-anchor: none; }
-.reasoning-body .md-body { font-size: 14px; line-height: 1.6; color: inherit; }
+.reasoning-body .md-body { font-size: var(--fs-14); line-height: 1.6; color: inherit; }
 .reasoning-body .md-body strong { color: color-mix(in srgb, var(--text) 82%, transparent); font-weight: 600; }
 @media (prefers-reduced-motion: reduce) { .reasoning-trigger { transition: none; } }

@@ -96,7 +96,7 @@
 .git-tone-ignored { --git-tone: var(--git-ignored); }
 
 /* Status letter: a tinted square chip, same everywhere (rows, PR files, diff headers). */
-.git-status { flex: none; display: inline-flex; align-items: center; justify-content: center; gap: 2px; min-width: 16px; height: 16px; padding: 0 3px; border-radius: 4px; background: color-mix(in srgb, var(--git-tone, var(--text-faint)) 15%, transparent); color: var(--git-tone, var(--text-faint)); font: 600 10.5px/1 var(--mono); letter-spacing: 0; }
+.git-status { flex: none; display: inline-flex; align-items: center; justify-content: center; gap: 2px; min-width: 16px; height: 16px; padding: 0 3px; border-radius: var(--radius-4); background: color-mix(in srgb, var(--git-tone, var(--text-faint)) 15%, transparent); color: var(--git-tone, var(--text-faint)); font: 600 var(--fs-11)/1 var(--mono); letter-spacing: 0; }
 .git-status.git-tone-conflict { padding: 0 4px 0 3px; }
 .git-status.git-tone-ignored { background: transparent; }
 .git-dot { flex: none; display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--git-tone, var(--text-faint)); }
@@ -110,7 +110,7 @@
 .git-del { color: var(--git-del); }
 
 /* Ref chips: HEAD filled, current branch outlined in the accent, local/remote/tag each a subtle hue. */
-.git-ref { flex: none; display: inline-flex; align-items: center; gap: 3px; max-width: 160px; height: 17px; padding: 0 6px; border: 1px solid color-mix(in srgb, var(--ref-tone) 38%, transparent); border-radius: 9px; background: color-mix(in srgb, var(--ref-tone) 10%, transparent); color: var(--ref-tone); font-size: 10.5px; font-weight: 500; line-height: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.git-ref { flex: none; display: inline-flex; align-items: center; gap: 3px; max-width: 160px; height: 17px; padding: 0 6px; border: 1px solid color-mix(in srgb, var(--ref-tone) 38%, transparent); border-radius: var(--radius-10); background: color-mix(in srgb, var(--ref-tone) 10%, transparent); color: var(--ref-tone); font-size: var(--fs-11); font-weight: 500; line-height: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .git-ref > svg { flex: none; }
 .git-ref.is-head { --ref-tone: var(--git-ref-head); background: color-mix(in srgb, var(--ref-tone) 22%, transparent); }
 .git-ref.is-current { --ref-tone: var(--git-ref-current); border-color: color-mix(in srgb, var(--ref-tone) 70%, transparent); }
@@ -119,7 +119,7 @@
 .git-ref.is-tag { --ref-tone: var(--git-ref-tag); }
 
 /* Ahead/behind */
-.git-sync { flex: none; display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 500; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.git-sync { flex: none; display: inline-flex; align-items: center; gap: 4px; font-size: var(--fs-11); font-weight: 500; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .git-sync-up { color: var(--git-ahead); }
 .git-sync-down { color: var(--git-behind); }
 .git-sync.is-diverged .git-sync-up, .git-sync.is-diverged .git-sync-down { color: var(--git-diverged); }
@@ -138,8 +138,8 @@
 .ci-state.is-pending { --state-tone: var(--ci-pending); }
 .ci-state.is-skipped { --state-tone: var(--ci-skipped); }
 .git-state-icon { flex: none; color: var(--state-tone); }
-.git-state-pill { flex: none; display: inline-flex; align-items: center; gap: 4px; height: 20px; padding: 0 8px; border-radius: 999px; background: color-mix(in srgb, var(--state-tone) 16%, transparent); color: var(--state-tone); font-size: 11.5px; font-weight: 550; white-space: nowrap; }
-.git-state-pill.is-small { height: 17px; padding: 0 6px; font-size: 10.5px; }
+.git-state-pill { flex: none; display: inline-flex; align-items: center; gap: 4px; height: 20px; padding: 0 8px; border-radius: var(--radius-full); background: color-mix(in srgb, var(--state-tone) 16%, transparent); color: var(--state-tone); font-size: var(--fs-12); font-weight: 550; white-space: nowrap; }
+.git-state-pill.is-small { height: 17px; padding: 0 6px; font-size: var(--fs-11); }
 .ci-state.is-pending .git-spin { animation: git-spin 1s linear infinite; }
 @keyframes git-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .ci-state.is-pending .git-spin { animation: none; } }

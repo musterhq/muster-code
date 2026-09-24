@@ -13,6 +13,7 @@ import { useStore } from '../useStore';
 import { notifyError } from '../store';
 import { relativeTime } from './ProjectTasks';
 import './mailbox-inbox.css';
+import {Tip} from './Tooltip';
 
 type Scope = { chatId: string; projectId?: undefined } | { projectId: string; chatId?: undefined };
 const REPLY_WINDOWS: { label: string; ms: number }[] = [{ label: '15 min', ms: 15 * 60_000 }, { label: '1 hour', ms: 3_600_000 }, { label: '1 day', ms: 86_400_000 }];
@@ -136,7 +137,7 @@ export function MailboxInbox({ chatId, projectId, title }: { chatId?: string; pr
     <header className="mailbox-header">
       <div><h2><InboxIcon size={14} aria-hidden="true" />Inbox</h2><p>{title ?? (chatId ? 'Mail for this chat rides into its next turn.' : 'Mail between this project’s agents and you.')}</p></div>
       {list && <span className="mailbox-counts" aria-label={`${list.unacked} unacknowledged, ${list.pending} queued`}>{list.unacked} unacknowledged · {list.pending} queued</span>}
-      <button type="button" className="mailbox-icon" onClick={reload} aria-label="Refresh inbox" title="Refresh"><RefreshCw size={13} /></button>
+      <Tip label="Refresh"><button type="button" className="mailbox-icon" onClick={reload} aria-label="Refresh inbox"><RefreshCw size={13} /></button></Tip>
     </header>
     <Compose scope={scope} onSent={reload} />
     {error && <div className="mailbox-error" role="alert">Inbox unavailable: {error} <button type="button" onClick={reload}>Retry</button></div>}

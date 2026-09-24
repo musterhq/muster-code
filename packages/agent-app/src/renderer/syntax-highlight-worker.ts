@@ -1,11 +1,15 @@
 import { createHighlighterCore } from 'shiki/core';
 import { createOnigurumaEngine } from 'shiki/engine/oniguruma';
 import darkPlus from '@shikijs/themes/dark-plus';
+import lightPlus from '@shikijs/themes/light-plus';
 import { normalizeCodeLanguage } from './components/codeLanguage';
 
 type HighlightRequest = { id: number; source: string; language: string };
 type Token = { content: string; color?: string };
 type HighlightResponse = { id: number; rows: Token[][] | null };
+/** `light-dark()` follows the document's color-scheme, so cached tokens stay right when the theme switches. */
+const themedColor = (light: string | undefined, dark: string | undefined): string | undefined =>
+  light && dark ? (light === dark ? dark : `light-dark(${light}, ${dark})`) : dark ?? light;
 
 const MAX_INPUT = 96 * 1024;
 const MAX_CACHE_ENTRIES = 24;
@@ -98,7 +102,7 @@ function resolveLanguage(value: string): string | undefined {
 
 function highlighter() {
   highlighterPromise ??= createHighlighterCore({
-    themes: [darkPlus],
+    themes: [darkPlus, lightPlus],
     langs: [],
     engine: createOnigurumaEngine(import('shiki/wasm')),
   });
@@ -144,8 +148,9 @@ self.onmessage = async (event: MessageEvent<HighlightRequest>) => {
   if (idleTimer) { clearTimeout(idleTimer); idleTimer = undefined; }
   try {
     const instance = await loadLanguage(await highlighter(), language);
-    const result = instance.codeToTokens(source, { lang: language as never, theme: 'dark-plus' });
-    const rows: Token[][] = result.tokens.map(line => line.map(token => ({content: token.content, color: token.color})));
+    // UX-19: one token colour per theme, resolved by the page's color-scheme (dark / light appearance).
+    const themed = instance.codeToTokensWithThemes(source, { lang: language as never, themes: { light: 'light-plus', dark: 'dark-plus' } });
+    const rows: Token[][] = themed.map(line => line.map(token => ({content: token.content, color: themedColor(token.variants.light?.color, token.variants.dark?.color)})));
     // Account for the source in the map key, token strings/colors, and the
     // array/object overhead. This is an estimate, but bounds real retained
     // memory more usefully than counting source characters alone.

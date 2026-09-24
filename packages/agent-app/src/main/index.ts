@@ -1,4 +1,4 @@
-import { app, BrowserWindow, desktopCapturer, dialog, ipcMain, Menu, nativeTheme, Notification, protocol, safeStorage, screen, session, shell, clipboard, systemPreferences } from 'electron';
+import { app, BrowserWindow, desktopCapturer, dialog, ipcMain, Menu, nativeTheme, Notification, powerMonitor, protocol, safeStorage, screen, session, shell, clipboard, systemPreferences } from 'electron';
 import {execFile} from 'node:child_process';
 import {BrowserSessionVault} from './browser-session-vault.ts';
 import {PLUGIN_SCHEME,PluginUiRegistry} from './plugin-ui.ts';
@@ -169,7 +169,8 @@ async function main(): Promise<void> {
     }
   };
   let userProcessGroups: () => ReturnType<ProcessSessions['userProcessGroups']> = () => [];
-  const loaded = loadAgentService({ dataDir, onEvent, userProcesses: () => userProcessGroups() });
+  let userProcessTargets: () => ReturnType<ProcessSessions['userProcessTargets']> = async () => userProcessGroups();
+  const loaded = loadAgentService({ dataDir, onEvent, userProcesses: () => userProcessGroups(), userProcessTargets: () => userProcessTargets() });
   service = loaded.service;
   void service.invoke('settings.get', {}).then(result => { notifyPrefs = notificationPrefs(result.values); applyBadge(pendingAttention); }, () => {});
   openLinkedChat=async id=>{
@@ -195,6 +196,7 @@ async function main(): Promise<void> {
     tails:chatId=>processes.terminals.agentTails(chatId,TERMINAL_READ_MAX_BYTES*2)});
   void terminalTools.start().then(launcher=>{process.env[TERMINAL_MCP_LAUNCHER_ENV]=launcher;},error=>console.warn(`Agent terminal tool unavailable: ${error instanceof Error?error.message:String(error)}`));
   userProcessGroups = () => processes.userProcessGroups();
+  userProcessTargets = () => processes.userProcessTargets();
   const computers = new ScopedComputers({
     appData:dataDir,
     resolveScope:async scope=>computerAuthority(await loaded.service.invoke('app.snapshot',undefined),scope),
@@ -223,6 +225,16 @@ async function main(): Promise<void> {
     ],
   });
   const desktopWork = new DesktopWorkspaces(loaded.service,processes,computers);
+  // SBX-13: sleep/wake. The runtime pauses timers that would misfire, then on wake fires due work once and re-checks
+  // provider sessions; sandboxes are re-inspected here because ScopedComputers lives in main. Lock/unlock are no-ops.
+  const forwardPower=(state:'suspend'|'resume'|'lock-screen'|'unlock-screen')=>{
+    void loaded.service.power?.({state}).catch(error=>console.warn(`power ${state} failed:`,error instanceof Error?error.message:error));
+    if(state==='resume')void computers.recheckAfterWake().catch(()=>undefined);
+  };
+  powerMonitor.on('suspend',()=>forwardPower('suspend'));
+  powerMonitor.on('resume',()=>forwardPower('resume'));
+  powerMonitor.on('lock-screen',()=>forwardPower('lock-screen'));
+  powerMonitor.on('unlock-screen',()=>forwardPower('unlock-screen'));
   const syncNativeTheme=(theme:ReturnType<typeof themeFromSettingsResult>):void=>{
     if(!applyThemeSource(nativeTheme,theme))return;
     if(process.platform!=='darwin'&&window&&!window.isDestroyed())window.setBackgroundColor(windowBackground(nativeTheme.shouldUseDarkColors));

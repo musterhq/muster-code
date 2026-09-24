@@ -1,4 +1,4 @@
 /* GIT-02 additions to the Repository panel (git-actions.css is shared; these rules are scoped to the new controls). */
-.git-partial { flex:none; padding:1px 5px; border:1px solid var(--hairline); border-radius:4px; color:var(--warn); font-size:10px; white-space:nowrap; }
-.git-stage-all { display:inline-flex; align-items:center; gap:4px; margin:0 0 8px; padding:4px 9px; border:1px solid var(--hairline); border-radius:6px; background:var(--bg-raised); color:var(--text-dim); font:inherit; cursor:pointer; }
+.git-partial { flex:none; padding:1px 5px; border:1px solid var(--hairline); border-radius:var(--radius-4); color:var(--warn); font-size:var(--fs-10); white-space:nowrap; }
+.git-stage-all { display:inline-flex; align-items:center; gap:4px; margin:0 0 8px; padding:4px 9px; border:1px solid var(--hairline); border-radius:var(--radius-6); background:var(--bg-raised); color:var(--text-dim); font:inherit; cursor:pointer; }
 .git-stage-all:hover:not(:disabled) { background:var(--bg-hover); color:var(--text); }

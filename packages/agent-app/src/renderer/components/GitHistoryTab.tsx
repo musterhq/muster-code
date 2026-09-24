@@ -224,7 +224,7 @@ function ComparePane({folderId, reloadKey}: {folderId: string; reloadKey: number
   return <div className="git-compare" data-testid="git-compare">
     <form className="git-compare-form" onSubmit={compare}>
       <label className="git-compare-field"><Tip label="The starting point, usually the branch you will merge into"><span>Base</span></Tip><input type="text" list={listId} value={base} placeholder="main" spellCheck={false} maxLength={256} onChange={event => setBase(event.target.value)} aria-label="Base ref"/></label>
-      <button type="button" className="icon-button" aria-label="Swap base and head" title="Swap" onClick={swap}><ArrowLeftRight size={13}/></button>
+      <Tip label="Swap"><button type="button" className="icon-button" aria-label="Swap base and head" onClick={swap}><ArrowLeftRight size={13}/></button></Tip>
       <label className="git-compare-field"><Tip label="What changed on top of the base, usually your branch"><span>Head</span></Tip><input type="text" list={listId} value={head} placeholder="HEAD" spellCheck={false} maxLength={256} onChange={event => setHead(event.target.value)} aria-label="Head ref"/></label>
       <datalist id={listId}>{['HEAD', ...branches].map(name => <option key={name} value={name}/>)}</datalist>
       <button type="submit" className="git-compare-submit" disabled={!base.trim() || !head.trim() || result?.busy}>{result?.busy ? 'Comparing…' : 'Compare'}</button>

@@ -171,8 +171,13 @@ export function createGoalsDomain(ctx: DomainContext): DomainModule {
     write({ ...goal, turns: goal.turns + 1 });
     await dispatch(id, goalContinuation(goal.text), 'Continuing goal…').catch(() => undefined);
   };
+  /** SBX-13: while the Mac sleeps no continuation timer is armed; each paused goal continues once on wake. */
+  let asleep = false;
+  const sleeping = new Set<string>();
   const schedule = (id: string, delay = goalTiming.continueDelayMs) => {
     cancel(id);
+    if (asleep) { sleeping.add(id); return; }
+    sleeping.delete(id);
     timers.set(id, setTimeout(() => { void continueGoal(id); }, delay));
   };
   /** The assistant text of the turn that just settled (everything after the last user message). */
@@ -361,6 +366,18 @@ export function createGoalsDomain(ctx: DomainContext): DomainModule {
         db.prepare('DELETE FROM chat_goals WHERE chat_id = ?').run(id); syncHooks(); ctx.emitSnapshot();
       },
     },
-    dispose() { disposed = true; unhook?.(); unhook = undefined; for (const timer of timers.values()) clearTimeout(timer); timers.clear(); },
+    power(event) {
+      if (disposed) return;
+      if (event.state === 'suspend') {
+        asleep = true;
+        for (const id of [...timers.keys()]) { cancel(id); sleeping.add(id); }
+        return;
+      }
+      asleep = false;
+      const due = [...sleeping]; sleeping.clear();
+      // continueGoal re-checks that the goal is still active and the chat idle, so a goal paused meanwhile stays put.
+      for (const id of due) schedule(id);
+    },
+    dispose() { disposed = true; unhook?.(); unhook = undefined; for (const timer of timers.values()) clearTimeout(timer); timers.clear(); sleeping.clear(); },
   };
 }

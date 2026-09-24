@@ -1,6 +1,6 @@
 /* Composer footer: environment ▾ · branch ▾ … context. Shares the .chat-context row layout. */
 .env-footer { gap: 2px; min-width: 0; }
-.env-footer-trigger { display: inline-flex; align-items: center; gap: 5px; min-width: 0; max-width: 240px; height: 24px; padding: 0 6px; border-radius: 6px; color: var(--text-faint); font-size: var(--font-caption); transition: background-color 120ms ease, color 120ms ease; }
+.env-footer-trigger { display: inline-flex; align-items: center; gap: 5px; min-width: 0; max-width: 240px; height: 24px; padding: 0 6px; border-radius: var(--radius-6); color: var(--text-faint); font-size: var(--font-caption); transition: background-color 120ms ease, color 120ms ease; }
 .env-footer-trigger > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .env-footer-trigger > svg { flex: none; }
 .env-footer-trigger:hover, .env-footer-trigger[data-popup-open] { background: var(--bg-hover); color: var(--text-dim); }
@@ -12,10 +12,10 @@
 .env-footer-trigger.is-warn { color: var(--warn); }
 
 .env-menu-positioner { z-index: 100; }
-.env-menu { min-width: 240px; max-width: min(320px, calc(100vw - 32px)); padding: 5px; background: var(--bg-raised); border: 1px solid rgb(var(--fg-rgb) / 10%); border-radius: 10px; box-shadow: 0 10px 32px #0006; color: var(--text); font-size: var(--font-caption); transform-origin: var(--transform-origin); transition: opacity 120ms ease, transform 120ms ease; outline: 0; }
+.env-menu { min-width: 240px; max-width: min(320px, calc(100vw - 32px)); padding: 5px; background: var(--bg-raised); border: 1px solid rgb(var(--fg-rgb) / 10%); border-radius: var(--radius-10); box-shadow: var(--shadow-popover); color: var(--text); font-size: var(--font-caption); transform-origin: var(--transform-origin); transition: opacity 120ms ease, transform 120ms ease; outline: 0; }
 .env-menu[data-starting-style], .env-menu[data-ending-style] { opacity: 0; transform: translateY(3px) scale(.98); }
-.env-menu-label { padding: 5px 9px 3px; color: var(--text-faint); font-size: 11px; }
-.env-menu-item { display: flex; align-items: center; gap: 9px; min-height: 30px; padding: 5px 9px; border-radius: 6px; color: var(--text-dim); cursor: default; outline: 0; }
+.env-menu-label { padding: 5px 9px 3px; color: var(--text-faint); font-size: var(--fs-11); }
+.env-menu-item { display: flex; align-items: center; gap: 9px; min-height: 30px; padding: 5px 9px; border-radius: var(--radius-6); color: var(--text-dim); cursor: default; outline: 0; }
 .env-menu-item > svg { flex: none; color: var(--text-faint); }
 .env-menu-item[data-highlighted] { background: var(--bg-active); color: var(--text); }
 .env-menu-item[data-disabled] { opacity: .45; }
@@ -26,15 +26,15 @@
 .env-menu-item[data-highlighted] > .env-menu-hint { opacity: 1; }
 .env-menu-separator { height: 1px; margin: 4px 2px; background: var(--hairline); }
 .env-menu-item > .env-menu-warn { color: var(--warn); }
-.env-menu-note { display: flex; align-items: center; gap: 6px; padding: 3px 9px 5px; color: var(--text-faint); font-size: 11px; line-height: 1.4; }
+.env-menu-note { display: flex; align-items: center; gap: 6px; padding: 3px 9px 5px; color: var(--text-faint); font-size: var(--fs-11); line-height: 1.4; }
 .env-menu-note > svg { flex: none; }
 
 /* Apply-to-host review sheet: file list left, unified diff right. */
-.sandbox-apply { position: fixed; left: 50%; top: 50%; z-index: 111; translate: -50% -50%; display: flex; flex-direction: column; width: min(920px, calc(100vw - 40px)); max-height: min(720px, calc(100vh - 40px)); padding: 20px; border: 1px solid var(--hairline); border-radius: 16px; background: var(--menu-bg); color: var(--text); box-shadow: 0 20px 60px #0007; }
-.sandbox-apply h2 { margin: 0 0 6px; font-size: 15px; font-weight: 550; }
-.sandbox-apply > p { margin: 0 0 14px; color: var(--text-dim); font-size: 13px; line-height: 1.45; }
+.sandbox-apply { position: fixed; left: 50%; top: 50%; z-index: 111; translate: -50% -50%; display: flex; flex-direction: column; width: min(920px, calc(100vw - 40px)); max-height: min(720px, calc(100vh - 40px)); padding: 20px; border: 1px solid var(--hairline); border-radius: var(--radius-16); background: var(--menu-bg); color: var(--text); box-shadow: var(--shadow-dialog); }
+.sandbox-apply h2 { margin: 0 0 6px; font-size: var(--fs-15); font-weight: 550; }
+.sandbox-apply > p { margin: 0 0 14px; color: var(--text-dim); font-size: var(--fs-13); line-height: 1.45; }
 .sandbox-apply-body { display: grid; grid-template-columns: minmax(200px, 280px) 1fr; gap: 12px; min-height: 240px; flex: 1; min-width: 0; overflow: hidden; margin-bottom: 14px; }
-.sandbox-apply-list { margin: 0; padding: 0; list-style: none; overflow: auto; border: 1px solid var(--hairline); border-radius: 8px; font-size: var(--font-caption); }
+.sandbox-apply-list { margin: 0; padding: 0; list-style: none; overflow: auto; border: 1px solid var(--hairline); border-radius: var(--radius-8); font-size: var(--font-caption); }
 .sandbox-apply-list li { display: flex; align-items: center; gap: 6px; padding: 0 6px; }
 .sandbox-apply-list li.is-current { background: var(--bg-active); }
 .sandbox-apply-list li > button { display: flex; flex: 1; align-items: center; gap: 8px; min-width: 0; height: 28px; padding: 0 4px; color: var(--text-dim); text-align: left; }
@@ -44,8 +44,8 @@
 .sandbox-apply-status.is-added { color: var(--ok); }
 .sandbox-apply-status.is-modified { color: var(--warn); }
 .sandbox-apply-status.is-deleted { color: var(--danger); }
-.sandbox-apply-more { padding: 6px 8px; color: var(--text-faint); font-size: 11px; }
-.sandbox-apply-diff { min-width: 0; overflow: auto; border: 1px solid var(--hairline); border-radius: 8px; }
+.sandbox-apply-more { padding: 6px 8px; color: var(--text-faint); font-size: var(--fs-11); }
+.sandbox-apply-diff { min-width: 0; overflow: auto; border: 1px solid var(--hairline); border-radius: var(--radius-8); }
 .sandbox-apply-empty { display: flex; align-items: center; justify-content: center; gap: 8px; min-height: 120px; color: var(--text-faint); font-size: var(--font-caption); }
 @media (max-width: 720px) { .sandbox-apply-body { grid-template-columns: 1fr; } .sandbox-apply-list { max-height: 160px; } }
 .env-menu-spin { animation: env-menu-spin .9s linear infinite; }

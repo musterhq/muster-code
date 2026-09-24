@@ -1476,6 +1476,12 @@ export async function loadProviders(force = false): Promise<void> {
   }
 }
 
+/** R9: the runtime pushes a fresh provider list at launch, on focus and after a sign-in file changes. */
+export function applyProviders(providers: ProviderInfo[]): void {
+  if (!Array.isArray(providers)) return;
+  set({ providers: { phase: 'ready', value: providers } });
+}
+
 export async function revealProvider(id: string): Promise<void> {
   try {
     const { identity } = await invoke('providers.reveal', { id });

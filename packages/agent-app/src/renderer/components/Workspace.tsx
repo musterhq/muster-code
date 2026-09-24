@@ -63,6 +63,7 @@ import {PluginUiTab} from './PluginUiTab';
 import {ensureArtifactSync, openSideChat, selectedText, sideChatBindingForTab} from '../artifacts';
 import {QuickOpenHost} from './QuickOpen';
 import type {FileContentMatch} from '../../shared/domains/files-protocol';
+import {Tip} from './Tooltip';
 
 
 // ---------------------------------------------------------------------------
@@ -171,9 +172,9 @@ function FilesTab({tab}: {tab: WorkspaceTab}): React.ReactElement {
     <section className="files-browser">
       <header className="files-section-head">
         <span>Files</span>
-        <button type="button" className="icon-button" aria-pressed={searching} aria-label={searching ? 'Browse files' : 'Search file contents'} title={searching ? 'Browse files' : 'Search file contents'} onClick={() => setSearching(v => !v)}>
+        <Tip label={searching ? 'Browse files' : 'Search file contents'}><button type="button" className="icon-button" aria-pressed={searching} aria-label={searching ? 'Browse files' : 'Search file contents'} onClick={() => setSearching(v => !v)}>
           {searching ? <X size={12}/> : <Search size={12}/>}
-        </button>
+        </button></Tip>
       </header>
       {searching ? <FileContentSearch folderId={folderId} onOpen={() => setSearching(false)}/> : <FileTree folderId={folderId} path="" activePath={highlighted}/>}
     </section>
@@ -470,7 +471,7 @@ function TabContextMenu({tab, isLast, onClose, children}: {tab: WorkspaceTab; is
   };
   return <Menu.Root open={anchor !== null} onOpenChange={next => { if (!next) setAnchor(null); }}>
     {React.cloneElement(children, {onContextMenu} as React.HTMLAttributes<HTMLElement>)}
-    <Menu.Portal><Menu.Positioner anchor={anchor} side="bottom" align="start" sideOffset={2} className="file-action-positioner"><Menu.Popup className="tab-context-menu">
+    <Menu.Portal><Menu.Positioner anchor={anchor} side="bottom" align="start" sideOffset={2} className="file-action-positioner"><Menu.Popup className="ui-menu tab-context-menu">
       <Menu.Item onClick={() => onClose(tab.id)}><XCircle size={13}/>Close</Menu.Item>
       <Menu.Item onClick={() => closeOtherTabs(tab.id)}>Close Others</Menu.Item>
       <Menu.Item disabled={isLast} onClick={() => closeTabsToRight(tab.id)}>Close to the Right</Menu.Item>

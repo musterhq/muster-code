@@ -1,5 +1,5 @@
 import React,{useEffect,useMemo,useRef,useState} from 'react';
-import {ExternalLink,Check,Undo2,Eye,Loader2} from 'lucide-react';
+import {ExternalLink,Check,Undo2,Eye,Loader2,AlertCircle,RotateCw} from 'lucide-react';
 import type {TimelineItem} from '../../shared/protocol';
 import {FileChangeView,useFileReview} from './FileDiffEditor';
 import {collectFileChanges,latestTurnItems,type FileChangeEntry} from '../turnFileChanges';
@@ -69,10 +69,21 @@ export function TurnChanges({items,inline=true,folder}:{items:TimelineItem[];inl
   wasLive.current=false;
   setReadiness(prev=>advanceReviewReadiness(prev,'settled'));
   let alive=true;
-  const done=()=>{if(alive)setReadiness(prev=>advanceReviewReadiness(prev,'prepared'));};
-  if(chatId&&folder)prepareTurnReview(chatId,folder.id).then(done,done);else done();
+  runPreparation(()=>alive);
   return()=>{alive=false;};
  },[live]);
+ // TRN-18: a failed read shows the failure and a Retry, never "Ready to review".
+ const [prepareError,setPrepareError]=useState('');
+ const preparation=useRef(0);
+ function runPreparation(alive:()=>boolean):void{
+  const attempt=++preparation.current;
+  const current=()=>alive()&&attempt===preparation.current;
+  setPrepareError('');
+  const done=()=>{if(current())setReadiness(prev=>advanceReviewReadiness(prev,'prepared'));};
+  const failed=(cause:unknown)=>{if(!current())return;setPrepareError(cause instanceof Error?cause.message:String(cause));setReadiness(prev=>advanceReviewReadiness(prev,'failed'));};
+  if(chatId&&folder)prepareTurnReview(chatId,folder.id).then(done,failed);else done();
+ }
+ const retryPreparation=()=>{setReadiness(prev=>advanceReviewReadiness(prev,'retry'));runPreparation(()=>true);};
  useEffect(()=>{if(!open)return;const down=(e:PointerEvent)=>{if(!root.current?.contains(e.target as Node))setOpen(false);};document.addEventListener('pointerdown',down);return()=>document.removeEventListener('pointerdown',down);},[open]);
  if(!entries.length)return null;
  const reviewable=(path:string)=>Boolean(folder&&relative(path)!==undefined);
@@ -110,6 +121,7 @@ export function TurnChanges({items,inline=true,folder}:{items:TimelineItem[];inl
    <GeneratedChanges generated={split.generated}/>
    {(readiness==='preparing'||readiness==='ready')&&<span className={`changes-pill-phase is-${readiness}`} role="status">{readiness==='preparing'&&<Loader2 size={11} className="changes-pill-spin" aria-hidden="true"/>}{REVIEW_READINESS_LABEL[readiness]}</span>}
   </button>
+  {readiness==='failed'&&<span className="changes-pill-failed" role="alert" title={prepareError||undefined}><AlertCircle size={11} aria-hidden="true"/>{REVIEW_READINESS_LABEL.failed}{prepareError?`: ${prepareError}`:''}<button type="button" className="changes-pill-retry" onClick={retryPreparation}><RotateCw size={11} aria-hidden="true"/>Retry</button></span>}
   {open&&<div className={`turn-change-list${inline?'':' is-compact'}`} role="region" aria-label={inline?'Inline file changes in the latest turn':'Files changed in the latest turn'}>
    <div className="turn-change-heading"><span>{inline?'Latest turn · inline code review':'Latest turn · open a file to review its diff'}</span>{pending.length>0&&<span className="turn-change-actions is-turn"><button type="button" disabled={busy||running} title="Revert every file in this turn to its pre-turn state" onClick={()=>void act(pending.map(entry=>entry.path),'undo')}><Undo2 size={11} aria-hidden="true"/>Undo all</button><button type="button" className="is-primary" disabled={busy||running} title="Accept every change in this turn" onClick={()=>void act(pending.map(entry=>entry.path),'keep')}><Check size={11} aria-hidden="true"/>Keep all</button></span>}{folder&&<button type="button" className="turn-change-open-all" onClick={()=>{setOpen(false);openChangesTab(folder.id,folder.name);}}><ExternalLink size={11} aria-hidden="true"/>Changes tab</button>}</div>
    <div className="turn-change-files" aria-label="Changed files">

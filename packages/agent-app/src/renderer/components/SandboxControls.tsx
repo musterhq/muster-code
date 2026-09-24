@@ -3,6 +3,7 @@ import {Archive,Cpu,Layers,Play,Plus,RotateCw,Server,Square,Trash2} from 'lucide
 import {SCOPED_COMPUTER_LIMIT_BOUNDS,type ScopedComputerEvent,type ScopedComputerExportManifest,type ScopedComputerLayer,type ScopedComputerLayerId,type ScopedComputerLayerSource,type ScopedComputerLimits,type ScopedComputerRef,type ScopedComputerRestartPolicy,type ScopedComputerService,type ScopedComputerServices,type ScopedComputerStatus,type ScopedComputerUsage} from '../../shared/scoped-computer-protocol';
 import {invoke,subscribe} from '../bridge';
 import {formatBytes} from '../scopedComputerText';
+import {Tip} from './Tooltip';
 
 const message=(cause:unknown)=>cause instanceof Error?cause.message:String(cause);
 export const MEMORY_CHOICES=[256,512,1024,2048,4096,8192,16384];
@@ -111,7 +112,7 @@ function ServicesSection({scope,computer,disabled,act}:{scope:ScopedComputerRef;
           <span className={`sbx-pill is-${service.state}`}>{SERVICE_STATE_LABEL[service.state]}</span>
           <span className="sbx-service-meta" title={stale?'Last started before the most recent sandbox restart':'Started in the current sandbox boot'}>{RESTART_LABEL[service.restart]} · boot {service.bootGeneration}{stale?' (earlier)':''}{service.restarts?` · ${service.restarts} restart${service.restarts===1?'':'s'}`:''}</span>
           {up?<button className="icon-button" aria-label={`Stop ${service.name}`} disabled={disabled} onClick={()=>void act('service',()=>invoke('computer.services.stop',{scope,serviceId:service.id}),load)}><Square size={11}/></button>
-            :<button className="icon-button" aria-label={`Start ${service.name}`} disabled={disabled||!running} title={running?'Start':'Start the sandbox first'} onClick={()=>void act('service',()=>invoke('computer.services.start',{scope,serviceId:service.id}),load)}>{service.startedAt?<RotateCw size={11}/>:<Play size={11}/>}</button>}
+            :<Tip label={running?'Start':'Start the sandbox first'}><button className="icon-button" aria-label={`Start ${service.name}`} disabled={disabled||!running} onClick={()=>void act('service',()=>invoke('computer.services.start',{scope,serviceId:service.id}),load)}>{service.startedAt?<RotateCw size={11}/>:<Play size={11}/>}</button></Tip>}
           {service.role!=='browser'&&<button className="icon-button" aria-label={`Remove ${service.name}`} disabled={disabled} onClick={()=>void act('service',()=>invoke('computer.services.remove',{scope,serviceId:service.id}),setData)}><Trash2 size={11}/></button>}
         </div>
         <code className="sbx-service-command">{service.cwd&&service.cwd!=='/workspace'?`cd ${service.cwd} && `:''}{service.command.split('\n')[0]}</code>

@@ -16,6 +16,7 @@ import {itemPatches} from '../patchModel';
 import {FileChangeView} from './FileDiffEditor';
 import {DiffStat} from './DiffStat';
 import {MessageBody} from './MessageBody';
+import {Tip} from './Tooltip';
 
 type Glyph = React.ComponentType<{size?: number; strokeWidth?: number; 'aria-hidden'?: boolean | 'true'}>;
 /** Codex transcript glyphs: thin, monochrome, one per verb. */
@@ -183,7 +184,7 @@ export function ToolCard({item,reveal=false}: {item: TimelineItem;reveal?:boolea
     <Collapsible.Panel className="activity-disclosure"><div className="tool-row-body" id={`tool-body-${item.id}`}>
       {edit&&<EditDiffs item={item}/>}
       {p.subject&&!p.plan&&!edit&&!images.length ? <div className="tool-row-source"><code>{p.kind==='command'?commandLabel(p.subject):p.subject}</code>
-        <button type="button" className="icon-button" aria-label={copied ? 'Copied' : p.kind==='command'?'Copy command':'Copy'} title={p.kind==='command'?'Copy command':'Copy'} onClick={()=>copy(p.subject)}>{copied ? <Check size={13}/> : <Copy size={13}/>}</button>
+        <Tip label={p.kind==='command'?'Copy command':'Copy'}><button type="button" className="icon-button" aria-label={copied ? 'Copied' : p.kind==='command'?'Copy command':'Copy'} onClick={()=>copy(p.subject)}>{copied ? <Check size={13}/> : <Copy size={13}/>}</button></Tip>
         {p.kind==='command'&&<button type="button" className="tool-row-action" onClick={()=>{const chat=getState().snapshot?.chats.find(chat=>chat.id===item.chatId);openTerminalTab(item.chatId,chat?.title||'Conversation','agent');}}>Open in Terminal</button>}
       </div> : null}
       {steps.length>0&&<PlanChecklist steps={steps}/>}

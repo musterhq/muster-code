@@ -6,6 +6,7 @@ import { runtimeMessage } from '../composerBridge';
 import { ConfirmSheet } from './ConfirmSheet';
 import { formatElapsed, goalElapsed, goalHeadline, goalStopNote } from './composerMenus';
 import './goal-strip.css';
+import {Tip} from './Tooltip';
 
 /** Ticks once a second, only while the goal's clock runs. */
 function useNow(active: boolean): number {
@@ -50,11 +51,11 @@ export function GoalStrip({ goal, onEdit }: { goal: ChatGoal; onEdit(): void }):
       {tokens && <span className="goal-strip-time goal-strip-tokens" aria-label="Tokens used" data-testid="goal-tokens">{tokens}</span>}
       <span className="goal-strip-time" aria-label={goal.status === 'complete' ? 'Time to achieve' : 'Time pursuing'}>{elapsed}</span>
       <span className="goal-strip-actions">
-        <button type="button" aria-label="Clear goal" title="Clear goal" disabled={busy} onClick={() => void act('goals.clear')}><Trash2 size={13} /></button>
+        <Tip label="Clear goal"><button type="button" aria-label="Clear goal" disabled={busy} onClick={() => void act('goals.clear')}><Trash2 size={13} /></button></Tip>
         {goal.status === 'active'
-          ? <button type="button" aria-label="Pause goal" title="Pause goal" disabled={busy} onClick={() => void act('goals.pause')}><CirclePause size={13} /></button>
-          : <button type="button" aria-label="Resume goal" title={goalResumable(goal) ? 'Resume goal' : 'Pursue again'} disabled={busy} onClick={() => void act('goals.resume')}><CirclePlay size={13} /></button>}
-        <button type="button" aria-label={expanded ? 'Collapse goal' : 'Expand goal'} aria-expanded={expanded} title={expanded ? 'Collapse' : 'Show full goal'} onClick={() => setExpanded(value => !value)}>{expanded ? <Minimize2 size={13} /> : <Maximize2 size={13} />}</button>
+          ? <Tip label="Pause goal"><button type="button" aria-label="Pause goal" disabled={busy} onClick={() => void act('goals.pause')}><CirclePause size={13} /></button></Tip>
+          : <Tip label={goalResumable(goal) ? 'Resume goal' : 'Pursue again'}><button type="button" aria-label="Resume goal" disabled={busy} onClick={() => void act('goals.resume')}><CirclePlay size={13} /></button></Tip>}
+        <Tip label={expanded ? 'Collapse' : 'Show full goal'}><button type="button" aria-label={expanded ? 'Collapse goal' : 'Expand goal'} aria-expanded={expanded} onClick={() => setExpanded(value => !value)}>{expanded ? <Minimize2 size={13} /> : <Maximize2 size={13} />}</button></Tip>
       </span>
     </div>
     {note && !expanded && <p className="goal-strip-note">{note}</p>}

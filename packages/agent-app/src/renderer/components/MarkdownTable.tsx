@@ -4,6 +4,7 @@ import {Check,Copy,Maximize2,Minimize2} from 'lucide-react';
 import './markdown-table.css';
 
 import {serializeTable} from './tableSerialization';
+import {Tip} from './Tooltip';
 
 /** Interaction reference: T3 Code ChatMarkdown's scroll/wrap/copy table workflow. */
 export function MarkdownTable({children,...props}:React.ComponentProps<'table'>){
@@ -20,7 +21,7 @@ export function MarkdownTable({children,...props}:React.ComponentProps<'table'>)
  return <div className="md-table" ref={root} data-wrap={wrap} onKeyDown={e=>{if(e.key==='Escape'){setMenu(false);copyButton.current?.focus();}}} onBlur={e=>{if(!e.currentTarget.contains(e.relatedTarget as Node))setMenu(false);}}>
   <div className="md-table-scroll" tabIndex={0} role="region" aria-label="Message table"><table ref={table} {...props}>{children}</table></div>
   <div className="md-table-toolbar">
-   <button className="md-copy" aria-label={wrap?'Collapse table cells':'Expand table cells'} title={wrap?'Collapse table cells':'Expand table cells'} aria-pressed={wrap} onClick={()=>setWrap(v=>!v)}>{wrap?<Minimize2 size={13}/>:<Maximize2 size={13}/>}</button>
+   <Tip label={wrap?'Collapse table cells':'Expand table cells'}><button className="md-copy" aria-label={wrap?'Collapse table cells':'Expand table cells'} aria-pressed={wrap} onClick={()=>setWrap(v=>!v)}>{wrap?<Minimize2 size={13}/>:<Maximize2 size={13}/>}</button></Tip>
    <span className="md-table-feedback" role="status">{feedback}</span>
    <button ref={copyButton} className="md-copy" aria-label="Copy table" title="Copy table" aria-expanded={menu} onClick={()=>setMenu(v=>!v)}>{feedback==='Copied'?<Check size={13}/>:<Copy size={13}/>}</button>
    {menu&&<div className="md-table-copy-menu" role="group" aria-label="Copy table format"><button onClick={()=>void copy('markdown')}>Copy as Markdown</button><button onClick={()=>void copy('csv')}>Copy as CSV</button></div>}

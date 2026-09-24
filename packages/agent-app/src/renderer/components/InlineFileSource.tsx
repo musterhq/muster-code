@@ -4,6 +4,7 @@ import {useHighlightedTokens} from './HighlightedCode';
 import {codeLanguageFromPath} from './codeLanguage';
 import {buildInlineFileDiff, type CumulativeFileDiff} from '../inlineFileDiffModel';
 import './inline-file-diff.css';
+import {Tip} from './Tooltip';
 
 /** Cumulative review of the file against a turn baseline, with the actions the host has wired. */
 export interface InlineFileReview {
@@ -50,9 +51,9 @@ export function InlineFileSource({source,path,patch,status,unavailableReason,rev
       <span className="inline-file-review-count">{review!.running?'Agent editing · ':''}{hunks.length} {hunks.length===1?'change':'changes'} <span>since {review!.label}</span></span>
       {review!.model.kept>0&&<span className="inline-file-review-kept">{review!.model.kept} kept</span>}
       <span className="inline-file-review-nav">
-        <button type="button" className="icon-button" aria-label="Previous change" title="Previous change" onClick={()=>go(current-1)}><ChevronUp size={13}/></button>
+        <Tip label="Previous change"><button type="button" className="icon-button" aria-label="Previous change" onClick={()=>go(current-1)}><ChevronUp size={13}/></button></Tip>
         <span>{Math.min(current+1,hunks.length)}/{hunks.length}</span>
-        <button type="button" className="icon-button" aria-label="Next change" title="Next change" onClick={()=>go(current+1)}><ChevronDown size={13}/></button>
+        <Tip label="Next change"><button type="button" className="icon-button" aria-label="Next change" onClick={()=>go(current+1)}><ChevronDown size={13}/></button></Tip>
       </span>
       <button type="button" className="inline-file-review-action" disabled={disabled} title={lock??'Revert every change in this file to the baseline'} onClick={review!.onUndoAll}><Undo2 size={12} aria-hidden="true"/>Undo all</button>
       {review!.onKeep&&<button type="button" className="inline-file-review-action is-primary" disabled={disabled} title={lock??'Accept every change in this file'} onClick={()=>review!.onKeep!(['*'])}><Check size={12} aria-hidden="true"/>Keep all</button>}
@@ -75,7 +76,7 @@ export function InlineFileSource({source,path,patch,status,unavailableReason,rev
         <span className="file-hunk-stats">{hunk.adds>0&&<span className="change-adds">+{hunk.adds}</span>}{hunk.dels>0&&<span className="change-dels">−{hunk.dels}</span>}</span>
         <button type="button" disabled={disabled} title={lock??'Revert this change'} onClick={()=>{setCurrent(hunkIndex);review!.onUndo(hunk.id);}}><Undo2 size={11} aria-hidden="true"/>Undo</button>
         {review!.onKeep&&<button type="button" className="is-primary" disabled={disabled} title={lock??'Accept this change'} onClick={()=>{setCurrent(hunkIndex);review!.onKeep!([hunk.id]);}}><Check size={11} aria-hidden="true"/>Keep</button>}
-        {hunks.length>1&&<button type="button" aria-label="Next change" title="Next change" onClick={()=>go(hunkIndex+1)}><ChevronDown size={11} aria-hidden="true"/></button>}
+        {hunks.length>1&&<Tip label="Next change"><button type="button" aria-label="Next change" onClick={()=>go(hunkIndex+1)}><ChevronDown size={11} aria-hidden="true"/></button></Tip>}
       </div></td></tr></React.Fragment>;
     })}</tbody></table>
   </div>;

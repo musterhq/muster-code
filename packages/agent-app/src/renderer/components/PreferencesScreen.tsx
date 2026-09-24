@@ -18,6 +18,7 @@ import {DefaultModelPicker} from './settings/DefaultModelPicker';
 import {SETTINGS_SECTIONS,filterSections} from './settings/sections';
 import {MENU_SHORTCUTS,acceleratorKeys} from './settings/shortcuts';
 import {openImportConversations} from './ImportConversations';
+import {SetupChecklist} from './SetupGuide';
 import {AutomationsScreen} from './AutomationsScreen';
 import {ModelsPanel} from './settings/ModelsPanel';
 import {EnvironmentsPanel} from './settings/EnvironmentsPanel';
@@ -89,6 +90,11 @@ function GeneralSection({settings,set}:{settings:AppSettings;set:Setter}):React.
   const exportFile=async():Promise<void>=>{setBusy('export');try{const {path}=await invoke('settings.export',{});if(path)notifySuccess(`Settings exported to ${path.split('/').pop()}`);}catch(cause){notifyError(cause,exportFile);}finally{setBusy(null);}};
   const importFile=async():Promise<void>=>{setBusy('import');try{const result=await invoke('settings.import',{});if(!result.cancelled)notifySuccess(`Imported ${result.applied.length} ${result.applied.length===1?'setting':'settings'}${result.ignored.length?` · ignored ${result.ignored.length} unknown`:''} · previous settings backed up`);}catch(cause){notifyError(cause);}finally{setBusy(null);}};
   return <>
+    <h3 className="preference-group-title">Setup checklist</h3>
+    <div className="preference-group">
+      <Row title="Setup checklist" scope="This Mac · checked live" description="Models, folders and optional capabilities. Reopen the guided setup at any step."/>
+      <SetupChecklist/>
+    </div>
     <div className="preference-group">
       <Row setting="general.defaultModel" title="Default model" scope="New chats · a Project can override this" description="New chats start with this model and reasoning level; each chat can still switch in the composer. If its provider stops being ready, new chats use the built-in default.">
         <DefaultModelPicker label="Default model" value={settings['general.defaultModel']} emptyLabel="Built-in default" onChange={value=>set('general.defaultModel',value)}/>

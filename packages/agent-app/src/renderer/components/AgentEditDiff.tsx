@@ -7,6 +7,7 @@ import {resolveToolPath} from './toolPresentation';
 import {FileChangeView} from './FileDiffEditor';
 import {DiffStat} from './DiffStat';
 import type {TimelineItem} from '../../shared/protocol';
+import {Tip} from './Tooltip';
 
 const NO_ITEMS:TimelineItem[]=[];
 
@@ -30,7 +31,7 @@ export function AgentEditDiff({folderId,path}:{folderId:string;path:string}):Rea
       <span className="file-path" title={path}>{path}</span>
       {entry&&<DiffStat adds={entry.adds} dels={entry.dels} className="diff-stats"/>}
       <span className="agent-edit-diff-scope">{entry?'Agent edits in this chat':'Not a Git repository'}</span>
-      <button className="icon-button" aria-label="Open current file" title="Open current file" onClick={()=>void openFile(folderId,path)}><FileText size={14}/></button>
+      <Tip label="Open current file"><button className="icon-button" aria-label="Open current file" onClick={()=>void openFile(folderId,path)}><FileText size={14}/></button></Tip>
     </header>
     {entry
       ?<div className="agent-edit-diff-body"><FileChangeView path={path} kind={entry.kind} target={{folderId,path}} patches={patches} maxHeight={null} truncated={entry.patches.some(patch=>patch.truncated)}/></div>

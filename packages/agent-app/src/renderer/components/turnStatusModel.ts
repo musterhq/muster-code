@@ -100,10 +100,13 @@ export function createThrottledAnnouncer(emit:(text:string)=>void,{interval=3000
  * review (baseline list and diff) is re-read ('preparing', "Preparing review…"), and only then is it 'ready'
  * ("Ready to review"). Events out of order (a stale 'prepared', a 'settled' never seen live) change nothing.
  */
-export type ReviewReadiness = 'working'|'preparing'|'ready'|undefined;
-export function advanceReviewReadiness(prev:ReviewReadiness,event:'live'|'settled'|'prepared'):ReviewReadiness {
+export type ReviewReadiness = 'working'|'preparing'|'ready'|'failed'|undefined;
+/** TRN-18: a failed preparation is its own state ('failed', with Retry), never 'Ready to review'. */
+export function advanceReviewReadiness(prev:ReviewReadiness,event:'live'|'settled'|'prepared'|'failed'|'retry'):ReviewReadiness {
   if(event==='live')return 'working';
   if(event==='settled')return prev==='working'?'preparing':prev;
+  if(event==='failed')return prev==='preparing'?'failed':prev;
+  if(event==='retry')return prev==='failed'?'preparing':prev;
   return prev==='preparing'?'ready':prev;
 }
-export const REVIEW_READINESS_LABEL={preparing:'Preparing review…',ready:'Ready to review'} as const;
+export const REVIEW_READINESS_LABEL={preparing:'Preparing review…',ready:'Ready to review',failed:'Couldn’t prepare review'} as const;

@@ -1,34 +1,34 @@
 /* GIT-08: failing-check logs and the "Fix failing checks" repair task (PR tab and summary card). */
 .ci-muted { color: var(--text-faint); }
-.ci-error { margin: 4px 0 0; color: var(--danger); font-size: 12px; }
+.ci-error { margin: 4px 0 0; color: var(--danger); font-size: var(--fs-12); }
 .ci-spin { animation: ci-spin 900ms linear infinite; flex: none; }
 @keyframes ci-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .ci-spin { animation: none; } }
 
 .ci-log { margin: 0 0 6px 22px; }
 .ci-log.is-compact { margin: 2px 0 4px; }
-.ci-log-toggle { display: inline-flex; align-items: center; gap: 4px; padding: 2px 4px; border-radius: 4px; color: var(--text-faint); font: 11px/1.3 var(--ui); }
+.ci-log-toggle { display: inline-flex; align-items: center; gap: 4px; padding: 2px 4px; border-radius: var(--radius-4); color: var(--text-faint); font: var(--fs-11)/1.3 var(--ui); }
 .ci-log-toggle:hover { background: var(--bg-hover); color: var(--text); }
 .ci-log-body { margin-top: 4px; }
-.ci-log-body .ci-muted { display: flex; align-items: center; gap: 6px; margin: 4px 0; font-size: 11px; }
-.ci-log-text { max-height: 260px; overflow: auto; margin: 0; padding: 8px 10px; border: 1px solid var(--hairline); border-radius: 6px; background: var(--bg); color: var(--text-dim); font: 11px/1.45 var(--mono); white-space: pre-wrap; word-break: break-word; }
-.ci-log.is-compact .ci-log-text { max-height: 160px; font-size: 10.5px; }
-.ci-annotations { list-style: none; margin: 6px 0 0; padding: 0; display: grid; gap: 3px; font-size: 11px; color: var(--text-dim); }
+.ci-log-body .ci-muted { display: flex; align-items: center; gap: 6px; margin: 4px 0; font-size: var(--fs-11); }
+.ci-log-text { max-height: 260px; overflow: auto; margin: 0; padding: 8px 10px; border: 1px solid var(--hairline); border-radius: var(--radius-6); background: var(--bg); color: var(--text-dim); font: var(--fs-11)/1.45 var(--mono); white-space: pre-wrap; word-break: break-word; }
+.ci-log.is-compact .ci-log-text { max-height: 160px; font-size: var(--fs-11); }
+.ci-annotations { list-style: none; margin: 6px 0 0; padding: 0; display: grid; gap: 3px; font-size: var(--fs-11); color: var(--text-dim); }
 .ci-annotations li { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ci-annotations li.is-failure code { color: var(--danger); }
 .ci-annotations li.is-warning code { color: var(--warn, var(--text)); }
-.ci-annotations code { font: 10.5px/1.3 var(--mono); }
+.ci-annotations code { font: var(--fs-11)/1.3 var(--mono); }
 
-.ci-repair { display: grid; gap: 6px; margin: 0 0 10px; padding: 8px 10px; border: 1px solid var(--hairline); border-radius: 8px; background: color-mix(in srgb, var(--bg-raised) 70%, transparent); }
+.ci-repair { display: grid; gap: 6px; margin: 0 0 10px; padding: 8px 10px; border: 1px solid var(--hairline); border-radius: var(--radius-8); background: color-mix(in srgb, var(--bg-raised) 70%, transparent); }
 .ci-repair.is-compact { margin: 6px 0 8px; padding: 6px 8px; }
-.ci-repair-status { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; margin: 0; font-size: 12px; color: var(--text); }
+.ci-repair-status { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; margin: 0; font-size: var(--fs-12); color: var(--text); }
 .ci-repair-message { flex-basis: 100%; color: var(--text-dim); }
 .ci-repair[data-phase='succeeded'] .ci-repair-status strong { color: var(--ok); }
 .ci-repair[data-phase='exhausted'] .ci-repair-status strong, .ci-repair[data-phase='failed'] .ci-repair-status strong { color: var(--danger); }
 .ci-repair-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 6px; }
 .ci-repair-actions:empty { display: none; }
-.ci-attempts { display: inline-flex; align-items: center; gap: 6px; color: var(--text-faint); font-size: 11px; }
-.ci-attempts select { font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--hairline); border-radius: 5px; padding: 2px 4px; }
+.ci-attempts { display: inline-flex; align-items: center; gap: 6px; color: var(--text-faint); font-size: var(--fs-11); }
+.ci-attempts select { font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--hairline); border-radius: var(--radius-6); padding: 2px 4px; }
 
 .summary-pr-checks { display: grid; gap: 2px; margin: 0 0 6px; }
 .summary-pr-check { display: flex; align-items: center; gap: 6px; min-width: 0; color: var(--text-dim); }

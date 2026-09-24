@@ -1,12 +1,12 @@
 /* Recall and Reflect drawer. Status pill and buttons come from memory-screen.css and styles.css. */
 .hindsight-panel { display: flex; flex-direction: column; gap: 12px; padding: 16px 18px 24px; font-size: var(--font-control); }
 .hindsight-heading { display: flex; align-items: center; gap: 10px; }
-.hindsight-heading h2 { margin: 0; font-size: 14px; font-weight: 600; }
+.hindsight-heading h2 { margin: 0; font-size: var(--fs-14); font-weight: 600; }
 .hindsight-heading .icon-button { margin-left: auto; }
 .hindsight-unconfigured p, .hindsight-warning, .hindsight-notice, .hindsight-busy { margin: 0; color: var(--text-dim); font-size: var(--font-caption); line-height: 1.5; }
 .hindsight-warning { color: var(--warn); }
-.hindsight-modes { display: inline-flex; gap: 2px; padding: 2px; border-radius: 8px; background: var(--bg-hover); align-self: flex-start; }
-.hindsight-modes button { border: 0; background: transparent; color: var(--text-dim); border-radius: 6px; padding: 4px 12px; font-size: var(--font-caption); transition: background-color 120ms ease, color 120ms ease; }
+.hindsight-modes { display: inline-flex; gap: 2px; padding: 2px; border-radius: var(--radius-8); background: var(--bg-hover); align-self: flex-start; }
+.hindsight-modes button { border: 0; background: transparent; color: var(--text-dim); border-radius: var(--radius-6); padding: 4px 12px; font-size: var(--font-caption); transition: background-color 120ms ease, color 120ms ease; }
 .hindsight-modes button[aria-selected=true] { background: var(--bg-active); color: var(--text); }
 .hindsight-panel form { display: flex; flex-direction: column; gap: 10px; }
 .hindsight-panel textarea, .hindsight-panel input:not([type=checkbox]), .hindsight-panel select { box-sizing: border-box; width: 100%; background: var(--bg); color: var(--text); border: 1px solid var(--hairline); border-radius: var(--radius); padding: 7px 9px; font: inherit; font-size: var(--font-control); line-height: 1.5; }
@@ -14,10 +14,10 @@
 .hindsight-options-toggle { align-self: flex-start; display: inline-flex; align-items: center; gap: 4px; border: 0; background: transparent; color: var(--text-faint); font-size: var(--font-caption); padding: 2px 0; }
 .hindsight-options-toggle svg { transition: transform 120ms ease; transform: rotate(-90deg); }
 .hindsight-options-toggle[aria-expanded=true] svg { transform: none; }
-.hindsight-advanced { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; padding: 10px; border: 1px solid var(--hairline); border-radius: 8px; }
+.hindsight-advanced { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; padding: 10px; border: 1px solid var(--hairline); border-radius: var(--radius-8); }
 .hindsight-advanced label { display: flex; flex-direction: column; gap: 5px; font-size: var(--font-caption); color: var(--text-dim); }
 .hindsight-advanced .wide, .hindsight-advanced fieldset { grid-column: 1 / -1; }
-.hindsight-advanced fieldset { display: flex; flex-wrap: wrap; gap: 12px; margin: 0; padding: 6px 8px 8px; border: 1px solid var(--hairline); border-radius: 6px; font-size: var(--font-caption); color: var(--text-dim); }
+.hindsight-advanced fieldset { display: flex; flex-wrap: wrap; gap: 12px; margin: 0; padding: 6px 8px 8px; border: 1px solid var(--hairline); border-radius: var(--radius-6); font-size: var(--font-caption); color: var(--text-dim); }
 .hindsight-advanced fieldset label { flex-direction: row; align-items: center; gap: 5px; }
 .hindsight-submit { display: flex; justify-content: flex-end; }
 .hindsight-panel :is(button, input, textarea, select):focus-visible { outline: 2px solid color-mix(in srgb, var(--accent) 70%, transparent); outline-offset: 2px; }

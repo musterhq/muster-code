@@ -1,49 +1,49 @@
 .tree-item-line{display:flex;align-items:center;position:relative;min-width:0}
 .tree-item-line>.tree-row{flex:1;min-width:0}
-.file-action-trigger{display:flex;align-items:center;justify-content:center;flex:none;width:24px;height:24px;border:0;border-radius:5px;background:transparent;color:var(--text-faint);opacity:0;transition:opacity 120ms ease,background-color 120ms ease;cursor:pointer}
+.file-action-trigger{display:flex;align-items:center;justify-content:center;flex:none;width:24px;height:24px;border:0;border-radius:var(--radius-6);background:transparent;color:var(--text-faint);opacity:0;transition:opacity 120ms ease,background-color 120ms ease;cursor:pointer}
 .tree-item-line:hover>.file-action-trigger,.tree-item-line:focus-within>.file-action-trigger,.file-action-trigger[data-popup-open],.file-tree-actions>.file-action-trigger{opacity:1}
 .file-action-trigger:hover{background:rgb(var(--fg-rgb) / .05);color:var(--text)}
 .file-action-trigger:focus-visible,.file-action-menu [role=menuitem]:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
 .file-tree-actions{display:flex;align-items:center;justify-content:flex-end;min-height:24px}
 .file-action-positioner{z-index:100}
-.file-action-menu{min-width:190px;padding:5px;background:var(--bg-menu);border:1px solid rgb(var(--fg-rgb) / .1);border-radius:10px;box-shadow:0 8px 28px #0005;color:var(--text);transform-origin:var(--transform-origin);transition:opacity 120ms ease,transform 120ms ease}
+.file-action-menu{min-width:190px;padding:5px;background:var(--bg-menu);border:1px solid rgb(var(--fg-rgb) / .1);border-radius:var(--radius-10);box-shadow:var(--shadow-popover);color:var(--text);transform-origin:var(--transform-origin);transition:opacity 120ms ease,transform 120ms ease}
 .file-action-menu[data-starting-style],.file-action-menu[data-ending-style]{opacity:0;transform:translateY(-3px) scale(.98)}
-.file-action-menu [role=menuitem]{display:flex;align-items:center;gap:9px;padding:7px 9px;border-radius:5px;font-size:12px;cursor:default;outline:0}
+.file-action-menu [role=menuitem]{display:flex;align-items:center;gap:9px;padding:7px 9px;border-radius:var(--radius-6);font-size:var(--fs-12);cursor:default;outline:0}
 .file-action-menu [data-highlighted]{background:rgb(var(--fg-rgb) / .07)}
-.file-action-destructive{color:#ed9292!important}
-.file-action-inline-error{font-size:11px;color:#ed9292;overflow-wrap:anywhere;max-width:220px}
-.file-dialog-backdrop{position:fixed;inset:0;background:#0007;z-index:110;transition:opacity 150ms ease}
-.file-dialog{position:fixed;left:50%;top:50%;translate:-50% -50%;width:min(440px,calc(100vw - 40px));box-sizing:border-box;padding:20px;border-radius:14px;border:1px solid rgb(var(--fg-rgb) / 7.8%);background:var(--bg-menu);color:var(--text);box-shadow:0 20px 60px #0006;z-index:111;transition:opacity 150ms ease,transform 150ms ease}
+.file-action-destructive{color:var(--danger)!important}
+.file-action-inline-error{font-size:var(--fs-11);color:var(--danger);overflow-wrap:anywhere;max-width:220px}
+.file-dialog-backdrop{position:fixed;inset:0;background: var(--scrim);z-index:110;transition:opacity 150ms ease}
+.file-dialog{position:fixed;left:50%;top:50%;translate:-50% -50%;width:min(440px,calc(100vw - 40px));box-sizing:border-box;padding:20px;border-radius:var(--radius-16);border:1px solid rgb(var(--fg-rgb) / 7.8%);background:var(--bg-menu);color:var(--text);box-shadow:var(--shadow-dialog);z-index:111;transition:opacity 150ms ease,transform 150ms ease}
 .file-dialog[data-starting-style],.file-dialog[data-ending-style]{opacity:0;transform:translateY(5px) scale(.98)}
 .file-dialog-backdrop[data-starting-style],.file-dialog-backdrop[data-ending-style]{opacity:0}
 .file-dialog-heading{display:flex;align-items:center;justify-content:space-between;gap:12px}
-.file-dialog-heading h2{font-size:15px;font-weight:600;margin:0}
-.file-dialog>p{font-size:12px;line-height:1.55;color:var(--text-faint);overflow-wrap:anywhere;margin:12px 0 16px}
-.file-dialog label{font-size:12px;display:grid;gap:7px}
-.file-dialog input{box-sizing:border-box;width:100%;font:inherit;color:inherit;background:rgb(var(--fg-rgb) / 2%);border:1px solid rgb(var(--fg-rgb) / 12.2%);border-radius:7px;padding:9px}
+.file-dialog-heading h2{font-size:var(--fs-15);font-weight:600;margin:0}
+.file-dialog>p{font-size:var(--fs-12);line-height:1.55;color:var(--text-faint);overflow-wrap:anywhere;margin:12px 0 16px}
+.file-dialog label{font-size:var(--fs-12);display:grid;gap:7px}
+.file-dialog input{box-sizing:border-box;width:100%;font:inherit;color:inherit;background:rgb(var(--fg-rgb) / 2%);border:1px solid rgb(var(--fg-rgb) / 12.2%);border-radius:var(--radius-8);padding:9px}
 .file-dialog input:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
 .file-dialog footer{display:flex;justify-content:flex-end;gap:8px;margin-top:20px}
-.file-dialog footer button{font:inherit;font-size:12px;padding:7px 13px;border:1px solid rgb(var(--fg-rgb) / 7.8%);background:rgb(var(--fg-rgb) / 3.1%);color:inherit;border-radius:7px;cursor:pointer}
+.file-dialog footer button{font:inherit;font-size:var(--fs-12);padding:7px 13px;border:1px solid rgb(var(--fg-rgb) / 7.8%);background:rgb(var(--fg-rgb) / 3.1%);color:inherit;border-radius:var(--radius-8);cursor:pointer}
 .file-dialog footer button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .file-dialog footer button:disabled{opacity:.45;cursor:default}
 .file-dialog footer .file-action-primary{background:var(--primary-bg);color:var(--primary-fg)}
-.file-action-error{font-size:12px;line-height:1.5;color:#ed9292;overflow-wrap:anywhere}
+.file-action-error{font-size:var(--fs-12);line-height:1.5;color:var(--danger);overflow-wrap:anywhere}
 @media(prefers-reduced-motion:reduce){.file-action-trigger,.file-action-menu,.file-dialog,.file-dialog-backdrop{transition:none}}
 @media(hover:none){.file-action-trigger{opacity:1}}
-.tree-row[role=treeitem]:focus-visible{outline:2px solid color-mix(in srgb,var(--accent) 72%,white 8%);outline-offset:-2px}
+.tree-row[role=treeitem]:focus-visible{outline:2px solid var(--focus-ring);outline-offset:-2px}
 .tree-row[role=treeitem][aria-selected=true]{color:var(--text)}
-.tree-more{color:var(--text-faint);font-size:12px}
-.tree-limit{padding:4px 8px;font-size:11px;color:var(--warn)}
+.tree-more{color:var(--text-faint);font-size:var(--fs-12)}
+.tree-limit{padding:4px 8px;font-size:var(--fs-11);color:var(--warn)}
 .tree-nested-empty{margin:0;padding-left:34px}
 /* "Open ⌄" split button: app icon + label, chevron lists every installed app that can open the file. */
-.open-in{display:inline-flex;align-items:stretch;flex:none;height:26px;border:1px solid var(--hairline);border-radius:7px;background:color-mix(in srgb,var(--bg-raised) 70%,transparent);transition:border-color 120ms ease}
+.open-in{display:inline-flex;align-items:stretch;flex:none;height:26px;border:1px solid var(--hairline);border-radius:var(--radius-8);background:color-mix(in srgb,var(--bg-raised) 70%,transparent);transition:border-color 120ms ease}
 .open-in:hover{border-color:color-mix(in srgb,var(--text-faint) 45%,var(--hairline))}
-.open-in button{display:inline-flex;align-items:center;gap:6px;border:0;background:transparent;color:var(--text);font-size:12px;cursor:default}
-.open-in-primary{padding:0 8px 0 7px;border-radius:6px 0 0 6px}
-.open-in-more{padding:0 6px;border-left:1px solid var(--hairline)!important;border-radius:0 6px 6px 0;color:var(--text-dim)!important}
+.open-in button{display:inline-flex;align-items:center;gap:6px;border:0;background:transparent;color:var(--text);font-size:var(--fs-12);cursor:default}
+.open-in-primary{padding:0 8px 0 7px;border-radius:var(--radius-6) 0 0 var(--radius-6)}
+.open-in-more{padding:0 6px;border-left:1px solid var(--hairline)!important;border-radius:0 var(--radius-6) var(--radius-6) 0;color:var(--text-dim)!important}
 .open-in button:hover:not(:disabled),.open-in-more[data-popup-open]{background:var(--bg-hover)}
 .open-in button:disabled{opacity:.55}
-.open-in button:focus-visible{outline:2px solid color-mix(in srgb,var(--accent) 72%,white 8%);outline-offset:1px}
+.open-in button:focus-visible{outline:2px solid var(--focus-ring);outline-offset:1px}
 .open-in[data-loading] .open-in-primary .open-in-icon{opacity:.5}
 .open-in-icon{flex:none;width:16px;height:16px;object-fit:contain;color:var(--text-dim)}
 .open-in-menu{min-width:210px}
@@ -52,10 +52,10 @@
 .open-in-check{flex:none;color:var(--text-dim)}
 .open-in-status{align-self:center;margin-left:6px;max-width:220px;overflow:hidden;text-overflow:ellipsis}
 @media(prefers-reduced-motion:reduce){.open-in{transition:none}}
-.file-action-menu [role=menuitemcheckbox]{display:flex;align-items:center;gap:9px;padding:7px 9px;border-radius:5px;font-size:12px;cursor:default;outline:0}
+.file-action-menu [role=menuitemcheckbox]{display:flex;align-items:center;gap:9px;padding:7px 9px;border-radius:var(--radius-6);font-size:var(--fs-12);cursor:default;outline:0}
 .file-action-menu [role=menuitemcheckbox]:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
 /* Git status on Files tree rows (WRK-06): a letter for files, a dot for folders with changes inside. */
-.tree-row>.tree-git-badge{flex:none;margin-left:auto;padding-left:6px;font-size:10px;font-weight:600;line-height:1;overflow:visible;color:var(--git-tone)}
+.tree-row>.tree-git-badge{flex:none;margin-left:auto;padding-left:6px;font-size:var(--fs-10);font-weight:600;line-height:1;overflow:visible;color:var(--git-tone)}
 .tree-row>.tree-git-folder{width:6px;height:6px;padding:0;border-radius:50%;background:var(--git-tone);opacity:.8}
 .tree-git-modified{--git-tone:var(--git-modified)}
 .tree-git-added{--git-tone:var(--git-added)}

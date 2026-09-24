@@ -25,6 +25,9 @@ import './composer.css';
 import './sidebar-disclosure.css';
 import './new-chat.css';
 import {sendWithCheckoutGuard} from './ParallelRunGuard';
+import {ConnectModelPrompt,useNoProvider} from './SetupGuide';
+import {Tip} from './Tooltip';
+import {MenuPopup} from './AppMenu';
 
 const KIND_ICON={none:MessageCircle,folder:FolderOpen,project:Layers} as const;
 /** Same access options (and Full-access confirmation) an in-chat Composer uses, so the toolbars match. */
@@ -32,7 +35,8 @@ const ACCESS=ACCESS_OPTIONS;
 /** Minimal Web Speech dictation, same shape Composer uses; kept local since Composer's type is not exported. */
 type Recognition={continuous:boolean;interimResults:boolean;lang:string;start():void;stop():void;abort():void;
   onresult:((event:{resultIndex:number;results:ArrayLike<ArrayLike<{transcript:string}>&{isFinal:boolean}>})=>void)|null;onerror:((event:{error:string})=>void)|null;onend:(()=>void)|null};
-const speechRecognition=():(new()=>Recognition)|undefined=>typeof window==='undefined'?undefined:(window as unknown as Record<string,new()=>Recognition>).SpeechRecognition??(window as unknown as Record<string,new()=>Recognition>).webkitSpeechRecognition;
+// CMP-14: no speech service inside Electron; hide the mic rather than show a control that always fails.
+const speechRecognition=():(new()=>Recognition)|undefined=>typeof window==='undefined'||/\bElectron\//.test(navigator.userAgent??'')?undefined:(window as unknown as Record<string,new()=>Recognition>).SpeechRecognition??(window as unknown as Record<string,new()=>Recognition>).webkitSpeechRecognition;
 const MENU_LIMIT=8;
 /** Last-resort mirror of runtime/provider.ts's MODEL/providerId, used only until (or if) `chat.defaults` answers. */
 const RUNTIME_DEFAULT={providerId:'hybrow',id:'claude/claude-fable-5'} as const;
@@ -49,7 +53,7 @@ function TargetMenu({current,options,variant}:{current:TargetOption;options:Targ
     <Menu.Trigger className={variant==='title'?'new-chat-target-title':'new-chat-target-chip'} aria-label={`Start in: ${current.label}`} title={current.detail?`${current.label} · ${current.detail}`:current.label}>
       {variant==='chip'&&<Icon size={13} aria-hidden="true"/>}<span>{current.label}</span>{variant==='chip'&&<ChevronDown size={12} aria-hidden="true"/>}
     </Menu.Trigger>
-    <Menu.Portal><Menu.Positioner side={variant==='title'?'bottom':'top'} align="center" sideOffset={6} className="chat-menu-positioner"><Menu.Popup className="chat-menu new-chat-target-menu">
+    <Menu.Portal><Menu.Positioner side={variant==='title'?'bottom':'top'} align="center" sideOffset={6} className="chat-menu-positioner"><Menu.Popup className="ui-menu chat-menu new-chat-target-menu">
       <Menu.RadioGroup value={current.key} onValueChange={value=>{const next=options.find(option=>option.key===value);if(next)setNewChatTarget(next.target);setOpen(false);}}>
         {groups.map(([label,kind])=>{
           const rows=options.filter(option=>option.kind===kind);
@@ -115,6 +119,8 @@ export function NewChatScreen():React.ReactElement {
   const [captureSources,setCaptureSources]=useState<ComputerCaptureSource[]>([]);
   const [capturePickerOpen,setCapturePickerOpen]=useState(false);
 
+  const noProvider=useNoProvider();
+  const [connectAsk,setConnectAsk]=useState(false);
   const busy=draft.busy||starting;
   const canSend=!!draft.text.trim()&&!busy;
   const providers=(state.providers.value??[]).filter(provider=>provider.available);
@@ -171,7 +177,7 @@ export function NewChatScreen():React.ReactElement {
   // Outside click or Escape closes whichever toolbar popover is open (mirrors Composer's popovers).
   useEffect(()=>{
     if(!toolMenu)return;
-    const inside=(target:EventTarget|null)=>Boolean((target as Element)?.closest?.('.composer-plus,.composer-access,.composer-model-button,.composer-popover'));
+    const inside=(target:EventTarget|null)=>Boolean((target as Element)?.closest?.('.composer-plus,.composer-access,.composer-access-menu,.composer-model-button,.composer-popover'));
     const onPointer=(event:PointerEvent)=>{if(!inside(event.target))setToolMenu(null);};
     const onKey=(event:KeyboardEvent)=>{if(event.key==='Escape'){event.preventDefault();setToolMenu(null);}};
     document.addEventListener('pointerdown',onPointer);document.addEventListener('keydown',onKey);
@@ -350,6 +356,8 @@ export function NewChatScreen():React.ReactElement {
   const handleSubmit=async(background=false)=>{
     const text=draft.text.trim();
     if(!text||busy)return;
+    // R9: with no model connected, point at the connect actions instead of creating a chat that cannot run.
+    if(noProvider){setConnectAsk(true);return;}
     const target=resolveTarget(draft.target,state.snapshot).target;
     // CHAT-17: retrying the same background message reuses the chat (and requestId) its failed attempt created. If that
     // send really landed (only the reply was lost), the runtime answers the same requestId with the original run.
@@ -444,6 +452,7 @@ export function NewChatScreen():React.ReactElement {
       {/* W6-E: on first run (no chats yet) bring existing Codex / Claude Code sessions in from here, not only from Settings or ⌘K. */}
       {state.snapshot&&state.snapshot.chats.length===0&&<button type="button" className="new-chat-import" data-testid="new-chat-import" onClick={()=>openImportConversations()}>Import conversations from Codex or Claude Code…</button>}
     </div>
+    {noProvider&&<ConnectModelPrompt emphasis={connectAsk}/>}
     <div ref={composerRoot} className="composer new-chat-composer" aria-busy={busy}>
       {attachments.length>0&&<div className="composer-attachments"><AttachmentStrip chatId={undefined} items={attachments} onRemove={removeAttachment} onRetry={()=>{}}
         onOpen={item=>{if(!sketches.current.has(item.localId))return false;openSketch(item.localId);return true;}}/></div>}
@@ -470,11 +479,6 @@ export function NewChatScreen():React.ReactElement {
       {projectPickerOpen&&<ProjectPicker projects={projects} currentId={current.target.projectId} moves={true}
         onChoose={project=>chooseProjectTarget(project)} onCreate={()=>{setProjectPickerOpen(false);}} onClose={()=>setProjectPickerOpen(false)}/>}
       {capturePickerOpen&&<CaptureSourcePicker sources={captureSources} onCapture={chooseCapture} onClose={()=>setCapturePickerOpen(false)}/>}
-      {toolMenu==='access'&&<div className="composer-popover composer-access-menu" role="menu" aria-label="Permissions">
-        {ACCESS.map(option=><button key={option.id} type="button" role="menuitemradio" className={`is-${option.id}`} aria-checked={access===option.id} onClick={()=>chooseAccess(option.id)}>
-          <option.Icon size={15} aria-hidden="true"/><span><strong>{option.label}</strong><small>{option.description}</small></span>{access===option.id&&<Check size={13} aria-hidden="true"/>}
-        </button>)}
-      </div>}
       {toolMenu==='model'&&<div className="composer-popover composer-model-popover" role="dialog" aria-label="Select model">
         <div className="composer-model-pane">
           <div className="composer-model-list" role="listbox" aria-label="Available models">
@@ -513,10 +517,16 @@ export function NewChatScreen():React.ReactElement {
       </div>}
       <div className="composer-options" role="toolbar" aria-label="Message options">
         <div className="composer-toolbar-left">
-          <button type="button" className="composer-plus" aria-label="Add files and more" aria-haspopup="menu" aria-expanded={toolMenu==='plus'} title="Add files and more" disabled={busy}
-            onClick={()=>{setToolMenu(current=>current==='plus'?null:'plus');setPopoverActive(0);setPlusQuery('');void loadSkills();void loadPlugins();}}><Plus size={16}/></button>
-          <button type="button" className={`composer-access is-${access}`} aria-label={`Access: ${accessOption.label}`} aria-haspopup="menu" aria-expanded={toolMenu==='access'} title="Change permissions" disabled={busy}
-            onClick={()=>setToolMenu(current=>current==='access'?null:'access')}><accessOption.Icon size={14} aria-hidden="true"/><span className="composer-access-label">{accessOption.label}</span></button>
+          <Tip label="Add files and more"><button type="button" className="composer-plus" aria-label="Add files and more" aria-haspopup="menu" aria-expanded={toolMenu==='plus'} disabled={busy}
+            onClick={()=>{setToolMenu(current=>current==='plus'?null:'plus');setPopoverActive(0);setPlusQuery('');void loadSkills();void loadPlugins();}}><Plus size={16}/></button></Tip>
+          <Menu.Root open={toolMenu==='access'} onOpenChange={open=>setToolMenu(current=>open?'access':current==='access'?null:current)}>
+            <Menu.Trigger className={`composer-access is-${access}`} aria-label={`Access: ${accessOption.label}`} title="Change permissions" disabled={busy}><accessOption.Icon size={14} aria-hidden="true"/><span className="composer-access-label">{accessOption.label}</span></Menu.Trigger>
+            <MenuPopup side="top" align="start" sideOffset={6} className="composer-access-menu" aria-label="Permissions">
+              <Menu.RadioGroup value={access}>{ACCESS.map(option=><Menu.RadioItem key={option.id} value={option.id} render={<button type="button"/>} nativeButton closeOnClick className={`is-${option.id}`} onClick={()=>chooseAccess(option.id)}>
+                <option.Icon size={15} aria-hidden="true"/><span><strong>{option.label}</strong><small>{option.description}</small></span>{access===option.id&&<Check size={13} aria-hidden="true"/>}
+              </Menu.RadioItem>)}</Menu.RadioGroup>
+            </MenuPopup>
+          </Menu.Root>
           <TargetMenu current={current} options={options} variant="chip"/>
           {planMode&&<span className="composer-plan-chip"><Lightbulb size={12} aria-hidden="true"/>Plan mode</span>}
         </div>
@@ -527,10 +537,10 @@ export function NewChatScreen():React.ReactElement {
               <span className="composer-model">{modelName}</span>{modelEfforts.length>0&&<span className="composer-effort-label">{EFFORT_LABELS[effort??defaultEffort]}</span>}<ChevronDown size={12} aria-hidden="true"/>
             </button>
           </div>
-          {Speech&&<button type="button" className={`composer-mic${listening?' is-listening':''}`} aria-label={listening?'Stop dictation':'Dictate'} aria-pressed={listening} title={listening?'Stop dictation':'Dictate'} disabled={busy} onClick={toggleDictation}><Mic size={15}/></button>}
-          <button type="button" className="composer-send" aria-label={busy?'Starting chat':modEnter?'Send (⌘Enter)':'Send (Enter)'} title={busy?'Starting chat…':modEnter?'Start chat (⌘Enter) · Start in background and stay here (⌥Enter)':'Start chat (Enter) · Start in background and stay here (⌥Enter)'} disabled={!canSend} onClick={()=>void handleSubmit()}>
+          {Speech&&<Tip label={listening?'Stop dictation':'Dictate'}><button type="button" className={`composer-mic${listening?' is-listening':''}`} aria-label={listening?'Stop dictation':'Dictate'} aria-pressed={listening} disabled={busy} onClick={toggleDictation}><Mic size={15}/></button></Tip>}
+          <Tip label={busy?'Starting chat…':modEnter?'Start chat (⌘Enter) · Start in background and stay here (⌥Enter)':'Start chat (Enter) · Start in background and stay here (⌥Enter)'}><button type="button" className="composer-send" aria-label={busy?'Starting chat':modEnter?'Send (⌘Enter)':'Send (Enter)'} disabled={!canSend} onClick={()=>void handleSubmit()}>
             {busy?<LoaderCircle size={15} className="composer-spin"/>:<ArrowUp size={15} strokeWidth={2.25}/>}
-          </button>
+          </button></Tip>
         </div>
       </div>
       {(draft.error||startError)&&<div className="composer-error" role="alert">Chat could not start: {draft.error||startError} Your message is kept.</div>}

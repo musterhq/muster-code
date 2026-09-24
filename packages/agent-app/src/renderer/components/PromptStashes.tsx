@@ -13,6 +13,7 @@ import type { ContextChip } from '../composerContext';
 import type { ComposerAttachment } from './AttachmentStrip';
 import type { ComposerChip } from './composerMenus';
 import { plural } from '../../shared/wording.ts';
+import {Tip} from './Tooltip';
 
 /** ⌘K "Stashes" (or any surface) asks the focused composer to open its stash list. */
 export const OPEN_STASHES_EVENT = 'muster:composer-open-stashes';
@@ -182,8 +183,8 @@ export function StashesPopover({ onRestore, onClose }: { onRestore(id: string): 
                 <button type="button" className="composer-stash-icon" aria-label="Keep stash" onClick={() => setConfirming(null)}><Undo2 size={13} /></button>
               </span>
             : <span className="composer-stash-actions">
-                <button type="button" className="composer-stash-icon" disabled={busy} aria-label={`Rename ${item.name}`} title="Rename" onClick={() => setRenaming({ id: item.id, value: item.name })}><Pencil size={13} /></button>
-                <button type="button" className="composer-stash-icon" disabled={busy} aria-label={`Delete ${item.name}`} title="Delete" onClick={() => setConfirming(item.id)}><Trash2 size={13} /></button>
+                <Tip label="Rename"><button type="button" className="composer-stash-icon" disabled={busy} aria-label={`Rename ${item.name}`} onClick={() => setRenaming({ id: item.id, value: item.name })}><Pencil size={13} /></button></Tip>
+                <Tip label="Delete"><button type="button" className="composer-stash-icon" disabled={busy} aria-label={`Delete ${item.name}`} onClick={() => setConfirming(item.id)}><Trash2 size={13} /></button></Tip>
               </span>}
         </li>)}
     </ul>

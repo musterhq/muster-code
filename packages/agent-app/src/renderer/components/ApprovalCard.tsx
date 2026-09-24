@@ -45,7 +45,7 @@ export function ApprovalCard({item}:{item:TimelineItem}):React.ReactElement {
     {data.kind==='mcp'&&<div className="approval-command"><div className="approval-cwd">{data.tool??item.text}</div>{data.args&&<pre><code>{data.args}</code></pre>}</div>}
     {pending?<div className="approval-actions">
       <button type="button" className="approval-approve" disabled={!!busy} aria-busy={busy==='accept'||undefined} onClick={()=>void respond('accept')}><Check size={13} aria-hidden="true"/> Approve</button>
-      <button type="button" className="approval-approve" disabled={!!busy} aria-busy={busy==='acceptForSession'||undefined} onClick={()=>void respond('acceptForSession')} title="Don’t ask again for this in the current provider session"><CheckCheck size={13} aria-hidden="true"/> Approve for this session</button>
+      {!data.protectsUserProcess&&<button type="button" className="approval-approve" disabled={!!busy} aria-busy={busy==='acceptForSession'||undefined} onClick={()=>void respond('acceptForSession')} title="Don’t ask again for this in the current provider session"><CheckCheck size={13} aria-hidden="true"/> Approve for this session</button>}
       <button type="button" className="approval-deny" disabled={!!busy} aria-busy={busy==='decline'||undefined} onClick={()=>void respond('decline')}><X size={13} aria-hidden="true"/> Deny</button>
     </div>:<div className="approval-resolved" role="status">{outcome}</div>}
     {restart&&!pending&&<p className="approval-reason">Muster restarted while this request was open, so the provider stopped waiting for it.</p>}

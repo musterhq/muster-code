@@ -16,7 +16,7 @@ const flush = () => new Promise<void>(resolve=>setImmediate(resolve));
 
 test('access maps to real sandbox/approval values and Ask/Plan always remain read-only', () => {
   assert.deepEqual(providerAccessPolicy({mode:'agent'}),{permissionMode:'workspace',sandbox:'workspace-write',approvalPolicy:'on-request',networkAccess:false});
-  assert.deepEqual(providerAccessPolicy({mode:'agent',permissionMode:'full'}),{permissionMode:'full',sandbox:'danger-full-access',approvalPolicy:'never',networkAccess:true});
+  assert.deepEqual(providerAccessPolicy({mode:'agent',permissionMode:'full'}),{permissionMode:'full',sandbox:'danger-full-access',approvalPolicy:'untrusted',networkAccess:true});
   for (const mode of ['agent','ask','plan'] as const) {
     const policy=providerAccessPolicy({mode,permissionMode:mode==='agent'?'read-only':'full'});
     assert.equal(policy.sandbox,'read-only'); assert.equal(policy.approvalPolicy,'never'); assert.equal(policy.networkAccess,false);

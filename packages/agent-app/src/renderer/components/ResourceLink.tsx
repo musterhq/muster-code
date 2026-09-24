@@ -11,6 +11,7 @@ import {invoke} from '../bridge';
 import {useStore} from '../useStore';
 import {externalReference, resourceReference} from './resourceReference';
 import {markdownFragmentId} from './markdownAnchors';
+import {Tip} from './Tooltip';
 export type ResourceContext = { folderId: string; path: string };
 export function ResourceLink({href,children,context}:{href?:string;children?:React.ReactNode;context?:ResourceContext}){
  const state=useStore(),chat=activeChat();
@@ -71,8 +72,8 @@ function ExternalFileReference({path,line,chatId,children}:{path:string;line?:nu
  const addFolder=act(async()=>{if(!info)return;const folder=await invoke('folder.add',{path:info.folderPath});notifySuccess(`Added ${folder.name} to Muster`);});
  const label=`${path}${line?`:${line}`:''}`;
  return <>{viewing&&chatId&&<ArtifactViewer chatId={chatId} path={info?.path??path} line={line} onClose={()=>setViewing(false)}/>}<Menu.Root onOpenChange={onOpenChange}>
-  <Menu.Trigger className="md-resource-link md-external-link" aria-label={`${label} — outside this conversation’s folders; choose an action`} title="Outside this conversation’s folders">{children}<ExternalLink size={11} aria-hidden="true" className="md-external-glyph"/></Menu.Trigger>
-  <Menu.Portal><Menu.Positioner side="bottom" align="start" sideOffset={4} className="file-action-positioner"><Menu.Popup className="file-action-menu external-reference-menu" data-native-preview-overlay>
+  <Tip label="Outside this conversation’s folders"><Menu.Trigger className="md-resource-link md-external-link" aria-label={`${label} — outside this conversation’s folders; choose an action`}>{children}<ExternalLink size={11} aria-hidden="true" className="md-external-glyph"/></Menu.Trigger></Tip>
+  <Menu.Portal><Menu.Positioner side="bottom" align="start" sideOffset={4} className="file-action-positioner"><Menu.Popup className="ui-menu file-action-menu external-reference-menu" data-native-preview-overlay>
    <div className="external-reference-head" title={label}>{info?.path ?? path}{line?`:${line}`:''}</div>
    {failed&&<div className="external-reference-note" role="alert">{failed}</div>}
    {!info&&!failed&&<div className="external-reference-note">Checking…</div>}

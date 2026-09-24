@@ -627,6 +627,14 @@ export function createProjectsDomain(ctx: DomainContext): DomainModule {
       'project.coordinator.apply': input => { const projectId = project(input), p = proposal(projectId, input.key); applyOps(projectId, p.ops); open().tasks.markProposal(projectId, p.key, 'applied'); open().tasks.record(projectId, 'coordinator.applied', `Applied ${plural(p.ops.length, 'coordinator change')}`, open().tasks.coordinator(projectId)); changed(projectId); return { ...p, state: 'applied' }; },
       'project.coordinator.dismiss': input => { const projectId = project(input), p = proposal(projectId, input.key); open().tasks.markProposal(projectId, p.key, 'dismissed'); changed(projectId); return { ...p, state: 'dismissed' }; },
     },
+    /** SBX-13: the scheduler tick pauses in sleep and runs once on wake (no queued interval burst). */
+    power(event) {
+      if (disposed || !scheduler) return;
+      if (timer) { clearInterval(timer); timer = undefined; }
+      if (event.state === 'suspend') return;
+      void background();
+      timer = setInterval(() => void background(), TICK_MS); timer.unref?.();
+    },
     dispose() { team.dispose(); codexSync.dispose(); disposed = true; if (timer) clearInterval(timer); timer = undefined; tasks?.close(); tasks = undefined; scheduler = undefined; db = undefined; },
   };
 }

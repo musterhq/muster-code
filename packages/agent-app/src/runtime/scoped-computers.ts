@@ -1069,6 +1069,13 @@ export class ScopedComputers {
     }
     return Promise.reject(new ComputerInputError('Unknown computer command.'));
   }
+  /** SBX-13: after a sleep Docker Desktop's VM may have restarted. Re-inspects every computer with in-flight work so its
+   *  saved state (running, stopped, recovery-needed) is re-derived from Docker rather than trusted from before the sleep. */
+  async recheckAfterWake():Promise<ScopedComputerStatus[]> {
+    if(this.closed)return [];
+    const settled=await Promise.allSettled([...this.observedActiveScopes.values()].map(context=>this.inspect(context.scope)));
+    return settled.flatMap(result=>result.status==='fulfilled'?[result.value]:[]);
+  }
   hasActiveWork():boolean {return this.pending.size>0||this.observedActiveScopes.size>0||[...this.executions.values()].some(execution=>!execution.settled||execution.result.state==='recovery-needed');}
   dispose():Promise<void> {
     if(this.disposal)return this.disposal;this.closed=true;

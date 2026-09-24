@@ -9,7 +9,7 @@
 .app[data-nav-hidden='true'] .settings-topbar { padding-left: 196px; }
 .app[data-nav-hidden='true'] .settings-topbar::before { left: 196px; }
 
-.menu-rename { position: fixed; top: 56px; left: 50%; transform: translateX(-50%); z-index: 40; display: grid; gap: 6px; min-width: 320px; max-width: min(520px, calc(100vw - 32px)); padding: 10px 12px 12px; border: 1px solid var(--hairline); border-radius: 10px; background: var(--bg-raised); box-shadow: 0 12px 32px rgb(0 0 0 / 40%); -webkit-app-region: no-drag; }
+.menu-rename { position: fixed; top: 56px; left: 50%; transform: translateX(-50%); z-index: 40; display: grid; gap: 6px; min-width: 320px; max-width: min(520px, calc(100vw - 32px)); padding: 10px 12px 12px; border: 1px solid var(--hairline); border-radius: var(--radius-10); background: var(--bg-raised); box-shadow: 0 12px 32px color-mix(in srgb, var(--shadow-ink) 40%, transparent); -webkit-app-region: no-drag; }
 .menu-rename label { color: var(--text-faint); font-size: var(--font-caption); }
 .menu-rename-row { display: flex; align-items: center; gap: 4px; }
 .menu-rename-row input { flex: 1; min-width: 0; min-height: var(--control-compact); padding: 4px 8px; border: 1px solid var(--hairline); border-radius: var(--radius); background: var(--bg); color: var(--text); font: inherit; font-size: var(--font-control); }

@@ -23,6 +23,7 @@ import { exactTime } from '../relativeTime.ts';
 // @ts-ignore -- side-effect CSS import; esbuild bundles it into dist/renderer/main.css
 import './projects-screen.css';
 import { ProjectDefaultModel } from './settings/ProjectDefaultModel';
+import {Tip} from './Tooltip';
 
 const message = (err: unknown, fallback: string) => err instanceof Error ? err.message : fallback;
 const fromSnapshot = (p: Project): ProjectDetails => ({ ...p, primaryFolderId: p.folderIds[0] ?? null, archived: false, archivedAt: null });
@@ -145,7 +146,7 @@ function InlineText({ value, label, placeholder, multiline, maxLength, className
     if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); cancelled.current = true; setEditing(false); setError(''); requestAnimationFrame(() => display.current?.focus()); }
     else if (e.key === 'Enter' && (!multiline || e.metaKey || e.ctrlKey)) { e.preventDefault(); void commit(); }
   };
-  if (!editing) return <button ref={display} type="button" className={`project-inline ${className}${value ? '' : ' is-empty'}`} aria-label={`Edit ${label.toLowerCase()}`} title={`Edit ${label.toLowerCase()}`} onClick={begin}>{value || placeholder}</button>;
+  if (!editing) return <Tip label={`Edit ${label.toLowerCase()}`}><button ref={display} type="button" className={`project-inline ${className}${value ? '' : ' is-empty'}`} aria-label={`Edit ${label.toLowerCase()}`} onClick={begin}>{value || placeholder}</button></Tip>;
   return <div className={`project-inline-edit ${className}`}>
     {multiline ? <textarea ref={field} aria-label={label} rows={3} maxLength={maxLength} value={draft} disabled={busy} placeholder={placeholder} onChange={e => setDraft(e.target.value)} onKeyDown={keys} onBlur={() => void commit()}/>
       : <input ref={field} aria-label={label} maxLength={maxLength} value={draft} disabled={busy} placeholder={placeholder} onChange={e => setDraft(e.target.value)} onKeyDown={keys} onBlur={() => void commit()}/>}
@@ -205,7 +206,7 @@ function ProjectDetail({ project, allFolders, chats, onUpdated, onStartChat, onO
         {!project.archived && <button type="button" className="settings-button" onClick={() => onStartChat(folders[0]?.id)} title={folders[0] ? `New chat in ${folders[0].name} (primary)` : 'New chat in a private scratch folder'}><SquarePen size={14}/>New chat</button>}
         <Menu.Root>
           <Menu.Trigger className="icon-button project-more" aria-label="Project actions"><MoreHorizontal size={16}/></Menu.Trigger>
-          <Menu.Portal><Menu.Positioner side="bottom" align="end" sideOffset={4} className="project-menu-positioner"><Menu.Popup className="project-menu">
+          <Menu.Portal><Menu.Positioner side="bottom" align="end" sideOffset={4} className="project-menu-positioner"><Menu.Popup className="ui-menu project-menu">
             <Menu.Item onClick={() => setEditing(true)}><Settings2 size={14}/>Edit project…</Menu.Item>
             <Menu.Separator className="project-menu-separator"/>
             <Menu.Item onClick={() => void copyProjectExport(project, folders.length).then(setStatus)}><Clipboard size={14}/>Copy export JSON</Menu.Item>
@@ -268,9 +269,9 @@ function FoldersTab({ project, folders, allFolders, chats, highlight, onUpdated,
         <FolderOpen size={15} aria-hidden="true"/>
         <span className="project-folder-text"><span className="project-folder-name">{f.name}{primary && <span className="project-badge">Primary</span>}</span><code>{f.path}</code></span>
         <span className="project-folder-actions">
-          {!project.archived && <button type="button" className="icon-button" aria-label={`New chat in ${f.name}`} title={`New chat in ${f.name}`} onClick={() => onStartChat(f.id)}><SquarePen size={14}/></button>}
-          {!primary && <button type="button" className="icon-button" aria-label={`Make ${f.name} primary`} title="Make primary" disabled={Boolean(busy)} onClick={() => void run(`primary:${f.id}`, () => invoke('project.update', { id: project.id, primaryFolderId: f.id }))}><Star size={14}/></button>}
-          <button type="button" className="icon-button" aria-label={`Remove ${f.name} from project`} title={busyChat ? `"${busyChat.title}" is running here. Stop it first.` : 'Remove from project'} disabled={Boolean(busy) || Boolean(busyChat)} onClick={() => void run(`remove:${f.id}`, () => invoke('project.unlinkFolder', { id: project.id, folderId: f.id }))}><X size={14}/></button>
+          {!project.archived && <Tip label={`New chat in ${f.name}`}><button type="button" className="icon-button" aria-label={`New chat in ${f.name}`} onClick={() => onStartChat(f.id)}><SquarePen size={14}/></button></Tip>}
+          {!primary && <Tip label="Make primary"><button type="button" className="icon-button" aria-label={`Make ${f.name} primary`} disabled={Boolean(busy)} onClick={() => void run(`primary:${f.id}`, () => invoke('project.update', { id: project.id, primaryFolderId: f.id }))}><Star size={14}/></button></Tip>}
+          <Tip label={busyChat ? `"${busyChat.title}" is running here. Stop it first.` : 'Remove from project'}><button type="button" className="icon-button" aria-label={`Remove ${f.name} from project`} disabled={Boolean(busy) || Boolean(busyChat)} onClick={() => void run(`remove:${f.id}`, () => invoke('project.unlinkFolder', { id: project.id, folderId: f.id }))}><X size={14}/></button></Tip>
         </span>
       </li>; })}</ul>}
     <div className="project-folder-add">
@@ -305,7 +306,7 @@ function ChatsTab({ project, chats, folders, onOpenChat, onStartChat, onStatus }
       </button>
       <Menu.Root>
         <Menu.Trigger className="icon-button project-chat-more" aria-label={`Actions for ${c.title || 'Untitled chat'}`}><MoreHorizontal size={14}/></Menu.Trigger>
-        <Menu.Portal><Menu.Positioner side="bottom" align="end" sideOffset={4} className="project-menu-positioner"><Menu.Popup className="project-menu">
+        <Menu.Portal><Menu.Positioner side="bottom" align="end" sideOffset={4} className="project-menu-positioner"><Menu.Popup className="ui-menu project-menu">
           <Menu.Item onClick={() => setTransfer({ chatId: c.id, projectId: null, mode: 'move', projectName: project.name })}>Move out of project…</Menu.Item>
           <Menu.Item onClick={() => setTransfer({ chatId: c.id, projectId: null, mode: 'copy', projectName: project.name })}>Copy out of project…</Menu.Item>
         </Menu.Popup></Menu.Positioner></Menu.Portal>

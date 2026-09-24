@@ -38,7 +38,8 @@ export function Tip({label, shortcut, disabledReason, side = 'bottom', children}
   // Wrap whenever a reason may apply, so toggling `disabled` never remounts (and never drops focus from) the button.
   const trigger = disabledReason ? <span className="tip-anchor">{children}</span> : children;
   return <Tooltip.Root>
-    <Tooltip.Trigger render={trigger}/>
+    {/* data-tip mirrors a plain-text label on the trigger, so tests and audits can see which controls carry a tip. */}
+    <Tooltip.Trigger render={trigger} data-tip={typeof label === 'string' ? label : undefined}/>
     <Tooltip.Portal>
       <Tooltip.Positioner side={side} sideOffset={6} collisionPadding={8} className="tip-positioner">
         <Tooltip.Popup className="tip">

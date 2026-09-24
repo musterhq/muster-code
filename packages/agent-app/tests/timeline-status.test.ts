@@ -121,3 +121,22 @@ test('TRN-18: review readiness runs working → preparing → ready and ignores 
   assert.equal(advanceReviewReadiness('working', 'prepared'), 'working', 'a stale preparation does not end a live run');
   assert.equal(advanceReviewReadiness('ready', 'live'), 'working', 'the next turn starts over');
 });
+
+test('TRN-18: a failed review preparation is an error state with Retry, never "Ready to review"', async () => {
+  const {advanceReviewReadiness, REVIEW_READINESS_LABEL} = await import('../src/renderer/components/turnStatusModel.ts');
+  let phase = advanceReviewReadiness(advanceReviewReadiness(undefined, 'live'), 'settled');
+  assert.equal(phase, 'preparing');
+  phase = advanceReviewReadiness(phase, 'failed');
+  assert.equal(phase, 'failed');
+  assert.equal(REVIEW_READINESS_LABEL[phase], 'Couldn’t prepare review');
+  assert.notEqual(REVIEW_READINESS_LABEL[phase], REVIEW_READINESS_LABEL.ready);
+  assert.equal(advanceReviewReadiness(phase, 'prepared'), 'failed', 'a late success from the failed attempt does not flip to ready');
+  phase = advanceReviewReadiness(phase, 'retry');
+  assert.equal(phase, 'preparing', 'Retry re-enters Preparing review…');
+  assert.equal(advanceReviewReadiness(phase, 'prepared'), 'ready', 'a successful retry is Ready to review');
+  assert.equal(advanceReviewReadiness('ready', 'failed'), 'ready', 'a stale failure does not undo a ready review');
+  assert.equal(advanceReviewReadiness('ready', 'retry'), 'ready');
+  const source = (await import('node:fs')).readFileSync(new URL('../src/renderer/components/TurnChanges.tsx', import.meta.url), 'utf8');
+  assert.match(source, /prepareTurnReview\(chatId,folder\.id\)\.then\(done,failed\)/, 'rejection goes to failed, not done');
+  assert.match(source, /changes-pill-retry/, 'the failed state renders a Retry button');
+});

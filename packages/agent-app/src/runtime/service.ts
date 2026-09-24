@@ -28,6 +28,7 @@ import { isElicitationRequest, elicitationPolicy, elicitationResult, elicitation
 import { createProviderAdapter, MODEL, ProviderPreDispatchError, type ProviderAdapter, type ProviderResult } from './provider.ts';
 import { discoverPlugins, discoverSkills, invokedPluginContext, resolveAttachedSkill, resolveInvokedPlugins } from './plugin-library.ts';
 import {providerAccessPolicy} from './provider-run-lifecycle.ts';
+import {parseKillIntent, userProcessThreat, type UserProcessTarget, type UserProcessThreat} from './user-process-guard.ts';
 import {reconcileProviderTurn, type ReconciliationInput, type ReconciliationResult} from './provider-reconciliation.ts';
 import { ProjectTaskStore, type TaskStatus } from './project-tasks.ts';
 import { ChatQueue, queueActionAfter } from './chat-queue.ts';
@@ -40,6 +41,7 @@ import { ContextLedger, HISTORY_WINDOW_EVENT, requestsConnectors, type ContextBl
 import { createDomainHooks } from './domains/hooks.ts';
 import { createDomains } from './domains/index.ts';
 import type { DomainFactory } from './domains/types.ts';
+import { createPowerEvents, isPowerState, type PowerOutcome, type PowerState } from './power-events.ts';
 import { ARCHIVE_RUNNING_WARNING, MAX_ATTACHMENTS_PER_MESSAGE, MAX_ATTACHMENT_BYTES, MAX_QUEUED_MESSAGES, MAX_QUEUED_TEXT, REASONING_EFFORTS, type ReasoningEffort } from '../shared/protocol.ts';
 import type { ChatGoal } from '../shared/domains/goals-protocol.ts';
 import { createSkill } from './skill-authoring.ts';
@@ -113,7 +115,7 @@ export function userProcessNote(groups: readonly UserProcessGroup[], cwd: string
   return ['User-owned processes (started by the user in Muster, not by you). Never signal, kill or restart these process groups or their children, and do not free ports they hold; if a port is taken, use another port or ask:',
     ...relevant.map(group => `- process group ${group.pgid}: ${group.label.replace(/[\x00-\x1f]/g, ' ').slice(0, 80)}${group.cwd ? ` (cwd ${group.cwd.slice(0, 200)})` : ''}`)].join('\n');
 }
-export function createAgentService(options: { dataDir: string; onEvent(event: AgentEvent): void; userProcesses?: () => readonly UserProcessGroup[]; provider?: ProviderAdapter; reconcileProvider?: (input: ReconciliationInput) => Promise<ReconciliationResult>; domains?: readonly DomainFactory[] }) {
+export function createAgentService(options: { dataDir: string; onEvent(event: AgentEvent): void; userProcesses?: () => readonly UserProcessGroup[]; userProcessTargets?: () => Promise<readonly UserProcessTarget[]>; provider?: ProviderAdapter; reconcileProvider?: (input: ReconciliationInput) => Promise<ReconciliationResult>; domains?: readonly DomainFactory[] }) {
   const store = new AgentStore(options.dataDir);
   const queue = new ChatQueue(store);
   const attachments = new ChatAttachments(store.database(), options.dataDir);
@@ -126,6 +128,16 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
   const customProviders = new CustomProviders(options.dataDir);
   const annotations = new FileAnnotations(options.dataDir);
   const provider = options.provider ?? createProviderAdapter();
+  /** R5: whether an agent command would stop a process the user started in Muster (terminal shell or Commands-tab command). */
+  async function guardUserProcesses(command: unknown): Promise<UserProcessThreat | null> {
+    try {
+      if (!parseKillIntent(command)) return null;
+      let groups: readonly UserProcessTarget[] = [];
+      try { groups = await (options.userProcessTargets?.() ?? Promise.resolve(options.userProcesses?.() ?? [])); }
+      catch { try { groups = options.userProcesses?.() ?? []; } catch { /* process registry unavailable */ } }
+      return userProcessThreat(command, groups);
+    } catch { return null; }
+  }
   let hindsight: HindsightService | undefined;
   // Legacy hindsight.* commands honour the in-app Memory settings too, not only environment variables.
   let secretBox: ReturnType<typeof electronSecretBox> | null = null;
@@ -577,9 +589,13 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
               });
               return elicitationResult(decision !== 'decline');
             }
-            if (access.permissionMode !== 'workspace' || !/^item\/(commandExecution|fileChange|mcpToolCall)\/requestApproval$/.test(method)) return undefined;
+            if ((access.permissionMode !== 'workspace' && access.permissionMode !== 'full') || !/^item\/(commandExecution|fileChange|mcpToolCall)\/requestApproval$/.test(method)) return undefined;
+            // R5: a command that would signal the user's own processes always becomes a card. Full access asks the
+            // provider about every non-trusted command (approvalPolicy 'untrusted') so it can be stopped here; the rest is accepted at once.
+            const threat = method === 'item/commandExecution/requestApproval' ? await guardUserProcesses(params.command) : null;
+            if (access.permissionMode === 'full' && !threat) return {decision: 'accept'};
             const change = typeof params.itemId === 'string' && toolIds.has(params.itemId) ? store.item(toolIds.get(params.itemId)!)?.data?.changes : params.changes;
-            const data = approvalData(method, params, change);
+            const data: ApprovalData = {...approvalData(method, params, change), ...(threat ? {reason: threat.message, protectsUserProcess: true} : {})};
             const toolItemId = typeof params.itemId === 'string' ? toolIds.get(params.itemId) : undefined;
             const item = store.appendItem(chatId, 'approval', detail(params.command ?? params.reason ?? params.changes ?? data.tool ?? data.kind), 'pending', {...data, ...(toolItemId ? {toolItemId} : {})});
             const approvalId = item.id;
@@ -594,7 +610,8 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
               pending = {chatId, createdAt:item.createdAt, resolve, timer};
               approvals.set(approvalId, pending); wakeForAttention(chatId); state();
             });
-            return {decision};
+            // Never let the provider remember a stop-the-user's-process approval for the rest of the session.
+            return {decision: threat && decision === 'acceptForSession' ? 'accept' : decision};
           },
         });
         const retried = await withAdmissionRetry(attempt, {signal: run.retry.signal, onWait(wait) {
@@ -1462,6 +1479,17 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
   }, options.domains);
   // --- CHAT-15 snooze and wake · CHAT-16 auto-archive ------------------------------------------------
   let snoozeTimer: ReturnType<typeof setTimeout> | undefined;
+  // --- SBX-13 sleep/wake: main forwards Electron powerMonitor events through power() below -------------
+  const power = createPowerEvents({log: message => console.warn(message), participants: [
+    // Snoozes are absolute instants: pause the timer in sleep, wake every due one once on resume.
+    {name: 'snoozes', suspend() { if (snoozeTimer) clearTimeout(snoozeTimer); snoozeTimer = undefined; }, resume() { scheduleSnoozes(); }},
+    // Automations (cursor-coalesced catch-up), repo-trigger baselines, goal continuations, project ticks.
+    {name: 'domains', suspend: ({at}) => domains.power({state: 'suspend', at}), resume: ({at, sleptMs, suspendedAt}) => domains.power({state: 'resume', at, sleptMs, suspendedAt})},
+    // Warm app-servers may hold sockets that died in sleep: the next send re-checks them. Running turns are left alone.
+    {name: 'providers', resume() { provider.markStale?.(); }},
+    // A fresh snapshot lets the renderer resync views instead of guessing from the silence that spanned the sleep.
+    {name: 'views', resume() { if (!disposed && !closing) state(); }},
+  ]});
   /** One state transition per wake however timer, activity, restart and manual wake race: store.wakeChat is conditional.
    *  Timed and activity wakes mark the chat unread (unless it is on screen) and carry one notification; manual wakes neither. */
   function wake(chatId: string, reason: WakeReason): boolean {
@@ -1480,7 +1508,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
   function scheduleSnoozes(): void {
     if (snoozeTimer) clearTimeout(snoozeTimer);
     snoozeTimer = undefined;
-    if (disposed || closing) return;
+    if (disposed || closing || power.suspended()) return;
     const {due, next} = store.dueSnoozes(new Date());
     let woke = false;
     for (const chatId of due) woke = wake(chatId, 'time') || woke;
@@ -1511,7 +1539,13 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
   scheduleSnoozes();
   queueMicrotask(() => { void sweepIdleChats(); });
   archiveTimer = setInterval(() => { void sweepIdleChats(); }, 60 * 60_000); archiveTimer.unref?.();
-  return {invoke, dispose(): Promise<void> {
+  /** SBX-13: lock-screen / unlock-screen are accepted and ignored. */
+  function powerEvent(input: {state: PowerState}): Promise<PowerOutcome> {
+    if (!isPowerState(input?.state)) return Promise.reject(new Error('Unknown power state.'));
+    if (disposed || closing) return Promise.resolve({state: input.state, handled: false, failures: []});
+    return power.handle(input.state);
+  }
+  return {invoke, power: powerEvent, dispose(): Promise<void> {
     if (disposal) return disposal;
     closing = true;
     if (snoozeTimer) clearTimeout(snoozeTimer);

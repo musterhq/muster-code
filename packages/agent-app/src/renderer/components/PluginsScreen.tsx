@@ -17,6 +17,7 @@ import './plugins-screen.css';
 import './plugin-ui.css';
 import { plural } from '../../shared/wording.ts';
 import { ResourceState } from './ResourceState';
+import {Tip} from './Tooltip';
 
 type Tab = 'discover' | 'installed' | 'sources' | 'mcp';
 type Kind = 'all' | 'plugin' | 'skill';
@@ -106,7 +107,7 @@ export function PluginsScreen(): React.ReactElement {
     <header className="settings-topbar">
       <button ref={back} type="button" className="settings-back" onClick={leave}><ArrowLeft size={15} />Back to app</button>
       <span className="plugins-topbar-title">Skills & plugins</span>
-      <button type="button" className="tool-button plugins-refresh" disabled={refreshing} onClick={() => void changed()} title="Refresh" aria-label="Refresh"><RefreshCw size={14} className={refreshing ? 'spinning' : ''} /></button>
+      <Tip label="Refresh"><button type="button" className="tool-button plugins-refresh" disabled={refreshing} onClick={() => void changed()} aria-label="Refresh"><RefreshCw size={14} className={refreshing ? 'spinning' : ''} /></button></Tip>
     </header>
     <div className="plugins-toolbar">
       <div className="plugins-view-tabs" role="tablist" aria-label="Marketplace">
@@ -304,9 +305,9 @@ function SourcesPanel({ sources, pending, failed, onAdd, onSync, onRemove }: { s
           <td><code>{source.pinnedCommit?.slice(0, 10) ?? (source.kind === 'local' ? 'live' : '—')}</code></td>
           <td>{busy ?? source.packages ?? '—'}</td>
           <td className="plugins-source-actions">{confirm === source.id ? <><button type="button" className="plugins-link is-danger" onClick={() => { setConfirm(null); onRemove(source.id); }}>{removeVerb}</button><button type="button" className="plugins-link" onClick={() => setConfirm(null)}>Keep</button></> : <>
-            <button type="button" className="tool-button" disabled={!!busy} title="Sync at pin" aria-label={`Sync ${source.label}`} onClick={() => onSync(source.id)}><RefreshCw size={13} className={busy ? 'spinning' : ''} /></button>
+            <Tip label="Sync at pin"><button type="button" className="tool-button" disabled={!!busy} aria-label={`Sync ${source.label}`} onClick={() => onSync(source.id)}><RefreshCw size={13} className={busy ? 'spinning' : ''} /></button></Tip>
             {source.kind === 'git' && <button type="button" className="plugins-link" disabled={!!busy} title="Fetch the remote HEAD and pin it" onClick={() => onSync(source.id, true)}>Check for updates</button>}
-            <button type="button" className="tool-button" disabled={!!busy} aria-label={`${removeVerb} ${source.label}`} title={source.detected ? 'Hide this detected source; it will not reappear on its own' : undefined} onClick={() => setConfirm(source.id)}><Trash2 size={13} /></button></>}</td>
+            <Tip label={source.detected ? 'Hide this detected source; it will not reappear on its own' : undefined}><button type="button" className="tool-button" disabled={!!busy} aria-label={`${removeVerb} ${source.label}`} onClick={() => setConfirm(source.id)}><Trash2 size={13} /></button></Tip></>}</td>
         </tr>; })}</tbody></table>}
   </div>;
 }

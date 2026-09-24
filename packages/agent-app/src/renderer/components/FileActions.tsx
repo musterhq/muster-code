@@ -76,7 +76,7 @@ export const FileActions = React.memo(function FileActions({folderId, path, kind
   return <>
     <Menu.Root open={menu} onOpenChange={setMenu}>
       <Menu.Trigger ref={trigger} className="file-action-trigger" aria-label={root ? 'Folder actions' : `Actions for ${name}`}><MoreHorizontal size={15}/></Menu.Trigger>
-      <Menu.Portal><Menu.Positioner side="bottom" align="end" sideOffset={4} className="file-action-positioner"><Menu.Popup className="file-action-menu">
+      <Menu.Portal><Menu.Positioner side="bottom" align="end" sideOffset={4} className="file-action-positioner"><Menu.Popup className="ui-menu file-action-menu">
         {kind === 'directory' && <><Menu.Item onClick={() => begin('file')}><FilePlus size={14}/>New file</Menu.Item><Menu.Item onClick={() => begin('directory')}><FolderPlus size={14}/>New folder</Menu.Item></>}
         {!root && <>
           <Menu.Item onClick={() => void direct('clipboard.write')}><Copy size={14}/>Copy relative path</Menu.Item>

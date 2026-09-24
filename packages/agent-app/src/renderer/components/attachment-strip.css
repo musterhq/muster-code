@@ -1,5 +1,5 @@
 .attachment-strip { display:flex; flex-wrap:wrap; gap:8px; margin:0; padding:12px 14px 0; list-style:none; }
-.attachment-chip { position:relative; display:flex; align-items:center; height:64px; border:1px solid color-mix(in srgb,var(--text) 10%,transparent); border-radius:10px; background:color-mix(in srgb,var(--bg-active) 70%,transparent); color:var(--text-dim); animation:attachment-in 140ms cubic-bezier(.2,.8,.2,1) both; }
+.attachment-chip { position:relative; display:flex; align-items:center; height:64px; border:1px solid color-mix(in srgb,var(--text) 10%,transparent); border-radius:var(--radius-10); background:color-mix(in srgb,var(--bg-active) 70%,transparent); color:var(--text-dim); animation:attachment-in 140ms cubic-bezier(.2,.8,.2,1) both; }
 .attachment-chip.is-image { min-width:48px; max-width:112px; overflow:hidden; }
 .attachment-chip.is-failed { border-color:color-mix(in srgb,var(--danger) 55%,transparent); }
 /* The tile's open target: a reset button for a staged file (click or Enter/Space opens it in the resource pane), or a
@@ -7,18 +7,18 @@
 .attachment-open { display:flex; align-items:center; width:100%; height:100%; min-width:0; padding:0; border:0; margin:0; background:none; color:inherit; font:inherit; text-align:left; }
 button.attachment-open { cursor:pointer; transition:transform 120ms ease; }
 button.attachment-open:hover,button.attachment-open:focus-visible { transform:translateY(-1px); }
-button.attachment-open:focus-visible { outline:1px solid var(--accent); outline-offset:-2px; border-radius:9px; }
-.attachment-chip:has(button.attachment-open:hover),.attachment-chip:has(button.attachment-open:focus-visible) { border-color:color-mix(in srgb,var(--accent) 45%,transparent); box-shadow:0 2px 8px rgb(0 0 0 / 14%); }
+button.attachment-open:focus-visible { outline:1px solid var(--accent); outline-offset:-2px; border-radius:var(--radius-10); }
+.attachment-chip:has(button.attachment-open:hover),.attachment-chip:has(button.attachment-open:focus-visible) { border-color:color-mix(in srgb,var(--accent) 45%,transparent); box-shadow:0 2px 8px color-mix(in srgb, var(--shadow-ink) 14%, transparent); }
 .attachment-thumb { display:block; width:auto; min-width:48px; max-width:112px; height:100%; object-fit:cover; }
 .attachment-chip.is-staging .attachment-thumb,.attachment-chip.is-failed .attachment-thumb { opacity:.45; }
 .attachment-file { display:flex; align-items:center; gap:9px; max-width:220px; padding:0 30px 0 11px; }
 .attachment-icon { flex:none; color:var(--accent); }
-.attachment-pdf-thumb { flex:none; display:block; width:34px; height:44px; object-fit:cover; object-position:top; border-radius:3px; background:#fff; box-shadow:0 0 0 1px color-mix(in srgb,var(--text) 12%,transparent); }
-.attachment-icon.is-hued { color:hsl(var(--h) 55% 62%); }
+.attachment-pdf-thumb { flex:none; display:block; width:34px; height:44px; object-fit:cover; object-position:top; border-radius:var(--radius-4); background: var(--paper); box-shadow:0 0 0 1px color-mix(in srgb,var(--text) 12%,transparent); }
+.attachment-icon.is-hued { color:hsl(var(--h) 55% var(--hue-l)); }
 .attachment-chip.is-failed .attachment-icon { color:var(--danger); }
 .attachment-meta { display:flex; flex-direction:column; gap:3px; min-width:0; }
-.attachment-meta strong { overflow:hidden; color:var(--text); font-size:12px; font-weight:500; text-overflow:ellipsis; white-space:nowrap; }
-.attachment-meta small { overflow:hidden; color:var(--text-faint); font-size:11px; text-overflow:ellipsis; white-space:nowrap; }
+.attachment-meta strong { overflow:hidden; color:var(--text); font-size:var(--fs-12); font-weight:500; text-overflow:ellipsis; white-space:nowrap; }
+.attachment-meta small { overflow:hidden; color:var(--text-faint); font-size:var(--fs-11); text-overflow:ellipsis; white-space:nowrap; }
 .attachment-chip.is-failed .attachment-meta small { color:var(--danger); }
 .attachment-busy { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; color:var(--text); pointer-events:none; }
 .attachment-chip:not(.is-image) .attachment-busy { inset:auto 30px auto auto; }
@@ -27,8 +27,8 @@ button.attachment-open:focus-visible { outline:1px solid var(--accent); outline-
 .attachment-chip:hover .attachment-remove,.attachment-remove:focus-visible,.attachment-chip.is-failed .attachment-remove { opacity:1; }
 .attachment-remove:hover { color:var(--text); }
 .attachment-remove:focus-visible,.attachment-retry:focus-visible { outline:1px solid var(--accent); outline-offset:1px; }
-.attachment-retry { display:inline-flex; align-items:center; gap:4px; margin-right:30px; padding:3px 7px; border-radius:6px; color:var(--text); background:rgb(var(--fg-rgb) / 7%); font-size:11px; }
-.attachment-chip.is-image .attachment-retry { position:absolute; inset:auto 4px 4px 4px; justify-content:center; margin:0; padding:2px 0; font-size:10px; }
+.attachment-retry { display:inline-flex; align-items:center; gap:4px; margin-right:30px; padding:3px 7px; border-radius:var(--radius-6); color:var(--text); background:rgb(var(--fg-rgb) / 7%); font-size:var(--fs-11); }
+.attachment-chip.is-image .attachment-retry { position:absolute; inset:auto 4px 4px 4px; justify-content:center; margin:0; padding:2px 0; font-size:var(--fs-10); }
 .attachment-chip.is-image .attachment-retry span { display:none; }
 .attachment-retry:hover { background:rgb(var(--fg-rgb) / 12%); }
 @keyframes attachment-in { from { opacity:0; transform:scale(.96); } to { opacity:1; transform:scale(1); } }

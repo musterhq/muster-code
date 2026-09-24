@@ -9,6 +9,7 @@ import './mcp-servers.css';
 import { plural } from '../../shared/wording.ts';
 import { agoLabel } from '../relativeTime.ts';
 import { ResourceState } from './ResourceState';
+import {Tip} from './Tooltip';
 
 const message = (error: unknown) => error instanceof Error ? error.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '') : String(error);
 const STAGES: McpStage[] = ['spawn', 'initialize', 'tools'];
@@ -102,11 +103,11 @@ export function McpServers(): React.ReactElement {
             </span>
             {busy[server.id] ? <span className="plugins-card-state">{busy[server.id]}</span> : <span className="mcp-actions">
               <button type="button" className="plugins-secondary" onClick={() => void test(server)}>Test</button>
-              <button type="button" className="tool-button" title="Tools" aria-label={`Tools of ${server.name}`} aria-pressed={panel?.kind === 'tools'} onClick={() => void togglePanel(server, 'tools')}><Wrench size={14} /></button>
-              <button type="button" className="tool-button" title="Logs" aria-label={`Logs of ${server.name}`} aria-pressed={panel?.kind === 'logs'} onClick={() => void togglePanel(server, 'logs')}><FileText size={14} /></button>
-              {!detected && <button type="button" className="tool-button" title="Edit" aria-label={`Edit ${server.name}`} onClick={() => { setEditing({ id: server.id, draft: toDraft(server) }); setFormError(null); }}><Pencil size={14} /></button>}
-              {server.enabled ? <button type="button" className="tool-button" title="Revoke" aria-label={`Revoke ${server.name}`} onClick={() => setRevoking(server)}><ShieldOff size={14} /></button> : <span className="tool-button mcp-action-slot" aria-hidden="true" />}
-              {!detected && <button type="button" className="tool-button" title="Remove" aria-label={`Remove ${server.name}`} onClick={() => setRemoving(server)}><Trash2 size={14} /></button>}
+              <Tip label="Tools"><button type="button" className="tool-button" aria-label={`Tools of ${server.name}`} aria-pressed={panel?.kind === 'tools'} onClick={() => void togglePanel(server, 'tools')}><Wrench size={14} /></button></Tip>
+              <Tip label="Logs"><button type="button" className="tool-button" aria-label={`Logs of ${server.name}`} aria-pressed={panel?.kind === 'logs'} onClick={() => void togglePanel(server, 'logs')}><FileText size={14} /></button></Tip>
+              {!detected && <Tip label="Edit"><button type="button" className="tool-button" aria-label={`Edit ${server.name}`} onClick={() => { setEditing({ id: server.id, draft: toDraft(server) }); setFormError(null); }}><Pencil size={14} /></button></Tip>}
+              {server.enabled ? <Tip label="Revoke"><button type="button" className="tool-button" aria-label={`Revoke ${server.name}`} onClick={() => setRevoking(server)}><ShieldOff size={14} /></button></Tip> : <span className="tool-button mcp-action-slot" aria-hidden="true" />}
+              {!detected && <Tip label="Remove"><button type="button" className="tool-button" aria-label={`Remove ${server.name}`} onClick={() => setRemoving(server)}><Trash2 size={14} /></button></Tip>}
               <button type="button" role="switch" aria-checked={server.enabled} aria-label={`${server.enabled ? 'Disable' : 'Enable'} ${server.name}`} className="plugins-switch" onClick={() => void act(server.id, server.enabled ? 'Disabling…' : 'Enabling…', () => invoke('mcp.servers.update', { id: server.id, enabled: !server.enabled }))}><span /></button>
             </span>}
           </div>

@@ -13,6 +13,7 @@ import type {TimelineItem} from '../../shared/protocol';
 import {MessageBody} from './MessageBody';
 import {ResourceState} from './ResourceState';
 import './side-chat.css';
+import {Tip} from './Tooltip';
 
 function openBinding(binding: SideChatBinding): void {
   if (binding.kind === 'file') void openFile(binding.folderId, binding.path, binding.line);
@@ -47,9 +48,9 @@ export function SideChatTab({tab}: {tab: WorkspaceTab}): React.ReactElement {
         <strong>{side?.label ?? tab.title}</strong>
         {binding?.excerpt && <details><summary>Selection · {binding.excerpt.split('\n').length} line{binding.excerpt.split('\n').length === 1 ? '' : 's'}</summary><pre>{binding.excerpt}</pre></details>}
       </div>
-      {binding && <button type="button" className="icon-button" aria-label="Open the resource" title="Open the resource" onClick={() => openBinding(binding)}><ExternalLink size={13}/></button>}
-      <button type="button" className="icon-button" aria-label="Promote to a full chat" title="Promote to a full chat" disabled={side?.promotedAt !== undefined} onClick={() => void promoteSideChat(chatId)}><Maximize2 size={13}/></button>
-      <button type="button" className="icon-button" aria-label="Discard side chat" title="Discard side chat" onClick={() => { if (!rows.length || window.confirm('Discard this side chat and its messages?')) void discardSideChat(chatId); }}><Trash2 size={13}/></button>
+      {binding && <Tip label="Open the resource"><button type="button" className="icon-button" aria-label="Open the resource" onClick={() => openBinding(binding)}><ExternalLink size={13}/></button></Tip>}
+      <Tip label="Promote to a full chat"><button type="button" className="icon-button" aria-label="Promote to a full chat" disabled={side?.promotedAt !== undefined} onClick={() => void promoteSideChat(chatId)}><Maximize2 size={13}/></button></Tip>
+      <Tip label="Discard side chat"><button type="button" className="icon-button" aria-label="Discard side chat" onClick={() => { if (!rows.length || window.confirm('Discard this side chat and its messages?')) void discardSideChat(chatId); }}><Trash2 size={13}/></button></Tip>
     </header>
     <div className="side-chat-list" ref={list} aria-live="polite">
       {timeline?.phase === 'error' && <p className="side-chat-note" role="alert">{timeline.error}</p>}

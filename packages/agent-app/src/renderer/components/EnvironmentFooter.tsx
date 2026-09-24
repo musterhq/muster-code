@@ -118,7 +118,7 @@ export function EnvironmentMenu({chat, project, folder, info, environment, class
     <Menu.Trigger className={className} aria-label="Where this chat runs">{children}</Menu.Trigger>
     <Menu.Portal>
       <Menu.Positioner side={side} align={align} sideOffset={6} className="env-menu-positioner">
-        <Menu.Popup className="env-menu" data-native-preview-overlay finalFocus={() => { const keep = !handoff.current; handoff.current = false; return keep; }}>
+        <Menu.Popup className="ui-menu env-menu" data-native-preview-overlay finalFocus={() => { const keep = !handoff.current; handoff.current = false; return keep; }}>
           <Menu.Group>
             <Menu.GroupLabel className="env-menu-label">Run this chat on</Menu.GroupLabel>
             <Menu.Item className="env-menu-item" disabled={busy} title={lock ?? 'The chat’s folder on this computer'} onClick={() => { if (inSandbox) void setEnvironment(chat.id, 'host'); }}>

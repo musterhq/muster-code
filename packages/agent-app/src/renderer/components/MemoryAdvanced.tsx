@@ -7,6 +7,8 @@ import type {
 import { invoke } from '../bridge';
 import { compactAge, exactTime } from '../relativeTime';
 import { useStore } from '../useStore';
+import { Menu, MenuPopup } from './AppMenu';
+import { Tip } from './Tooltip';
 
 const errorText = (cause: unknown) => cause instanceof Error ? cause.message : String(cause);
 const REFRESH_LABEL: Record<MemoryModelRefresh, string> = { manual: 'Manual', daily: 'Daily', weekly: 'Weekly', 'after-consolidation': 'After consolidation' };
@@ -37,8 +39,13 @@ function ShareToProject({ record, onShared }: { record: MemoryRecord; onShared: 
   };
   return (
     <span className="memory-share">
-      <button type="button" className="icon-button" aria-label="Share to a project" aria-expanded={open} disabled={busy} onClick={() => setOpen(value => !value)}><Share2 size={13} /></button>
-      {open && <ul className="memory-share-menu" role="menu">{projects.map(project => <li key={project.id}><button type="button" role="menuitem" onClick={() => void share(project.id)}>{project.name}</button></li>)}</ul>}
+      <Menu.Root open={open} onOpenChange={setOpen}>
+        <Tip label="Share to a project"><Menu.Trigger className="icon-button" aria-label="Share to a project" disabled={busy}><Share2 size={13} /></Menu.Trigger></Tip>
+        <MenuPopup align="end" className="memory-share-menu" aria-label="Share to a project">
+          <div className="ui-menu-label">Share to project</div>
+          {projects.map(project => <Menu.Item key={project.id} onClick={() => void share(project.id)}><Layers size={14} aria-hidden="true" /><span>{project.name}</span></Menu.Item>)}
+        </MenuPopup>
+      </Menu.Root>
     </span>
   );
 }

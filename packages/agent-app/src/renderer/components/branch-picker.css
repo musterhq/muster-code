@@ -1,16 +1,16 @@
 /* Branch switcher popover: shared by the summary card branch row and the composer footer. */
 .branch-picker-positioner { z-index: 100; }
-.branch-picker { width: min(320px, calc(100vw - 32px)); max-height: min(420px, var(--available-height, 420px)); display: flex; flex-direction: column; padding: 5px; background: var(--bg-raised); border: 1px solid rgb(var(--fg-rgb) / 10%); border-radius: 10px; box-shadow: 0 10px 32px #0006; color: var(--text); font-size: var(--font-caption); transform-origin: var(--transform-origin); transition: opacity 120ms ease, transform 120ms ease; outline: 0; }
+.branch-picker { width: min(320px, calc(100vw - 32px)); max-height: min(420px, var(--available-height, 420px)); display: flex; flex-direction: column; padding: 5px; background: var(--bg-raised); border: 1px solid rgb(var(--fg-rgb) / 10%); border-radius: var(--radius-10); box-shadow: var(--shadow-popover); color: var(--text); font-size: var(--font-caption); transform-origin: var(--transform-origin); transition: opacity 120ms ease, transform 120ms ease; outline: 0; }
 .branch-picker[data-starting-style], .branch-picker[data-ending-style] { opacity: 0; transform: translateY(-3px) scale(.98); }
 .branch-picker-search { display: flex; align-items: center; gap: 8px; padding: 6px 8px 8px; margin-bottom: 4px; border-bottom: 1px solid var(--hairline); color: var(--text-faint); }
 .branch-picker-search input { flex: 1; min-width: 0; border: 0; background: transparent; color: var(--text); font: inherit; font-size: var(--font-control); outline: 0; }
 .branch-picker-search input::placeholder { color: var(--text-faint); }
-.branch-picker-back { display: grid; place-items: center; width: 20px; height: 20px; margin: -2px; border-radius: 5px; color: var(--text-faint); }
+.branch-picker-back { display: grid; place-items: center; width: 20px; height: 20px; margin: -2px; border-radius: var(--radius-6); color: var(--text-faint); }
 .branch-picker-back:hover { background: var(--bg-hover); color: var(--text); }
 .branch-picker-list { overflow-y: auto; min-height: 0; overscroll-behavior: contain; }
 .branch-picker-group + .branch-picker-group { margin-top: 4px; padding-top: 4px; border-top: 1px solid var(--hairline); }
-.branch-picker-heading { padding: 5px 9px 3px; color: var(--text-faint); font-size: 11px; }
-.branch-picker-option { display: flex; align-items: center; gap: 9px; min-height: 30px; padding: 5px 9px; border-radius: 6px; color: var(--text-dim); cursor: default; }
+.branch-picker-heading { padding: 5px 9px 3px; color: var(--text-faint); font-size: var(--fs-11); }
+.branch-picker-option { display: flex; align-items: center; gap: 9px; min-height: 30px; padding: 5px 9px; border-radius: var(--radius-6); color: var(--text-dim); cursor: default; }
 .branch-picker-option > svg { flex: none; color: var(--text-faint); }
 .branch-picker-option[data-active='true'] { background: var(--bg-active); color: var(--text); }
 .branch-picker-option[aria-disabled='true'] { opacity: .45; }
@@ -23,10 +23,10 @@
 .branch-picker-confirm { padding: 8px 9px 6px; line-height: 1.45; }
 .branch-picker-confirm p { margin: 0 0 8px; color: var(--text-dim); }
 .branch-picker-confirm b { color: var(--text); font-weight: 500; }
-.branch-picker-confirm ul { margin: 0 0 10px; padding: 0; list-style: none; font-family: var(--mono); font-size: 11px; color: var(--text-dim); }
+.branch-picker-confirm ul { margin: 0 0 10px; padding: 0; list-style: none; font-family: var(--mono); font-size: var(--fs-11); color: var(--text-dim); }
 .branch-picker-confirm li { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .branch-picker-buttons { display: flex; justify-content: flex-end; gap: 6px; }
-.branch-picker-buttons button { display: inline-flex; align-items: center; gap: 6px; min-height: 28px; padding: 0 11px; border: 1px solid var(--hairline); border-radius: 7px; color: var(--text-dim); font-size: var(--font-caption); }
+.branch-picker-buttons button { display: inline-flex; align-items: center; gap: 6px; min-height: 28px; padding: 0 11px; border: 1px solid var(--hairline); border-radius: var(--radius-8); color: var(--text-dim); font-size: var(--font-caption); }
 .branch-picker-buttons button:hover:not(:disabled) { background: var(--bg-hover); color: var(--text); }
 .branch-picker-buttons .is-primary { background: var(--text); border-color: transparent; color: var(--bg); }
 .branch-picker-buttons .is-primary:hover:not(:disabled) { background: color-mix(in srgb, var(--text) 88%, transparent); color: var(--bg); }
@@ -38,4 +38,4 @@
 
 /* Git colour tokens (git-colors.css): the checked-out branch in the accent, a deleted upstream in red. */
 .branch-picker-current { color: var(--git-ref-current); }
-.branch-picker-gone { color: var(--git-diverged); font-size: 10.5px; margin-right: 4px; }
+.branch-picker-gone { color: var(--git-diverged); font-size: var(--fs-11); margin-right: 4px; }

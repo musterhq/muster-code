@@ -5,12 +5,12 @@
 .tool-row-head {
   position: relative; display: flex; align-items: center; gap: var(--row-gap);
   width: 100%; min-height: 30px; padding: 4px 8px 4px var(--row-inset);
-  color: var(--text-dim); font-size: 13.5px; line-height: 1.4; text-align: left;
+  color: var(--text-dim); font-size: var(--fs-14); line-height: 1.4; text-align: left;
   transition: color 130ms ease;
 }
 .tool-row-head:hover, .tool-row-head:has(.tool-row-hit:focus-visible), .tool-row-card[data-open] > .tool-row-head { color: var(--text); }
 /* Whole-row disclosure hit area; content is inert except real file links layered above it. */
-.tool-row-hit { position: absolute; inset: 0; z-index: 0; border-radius: 6px; color: inherit; }
+.tool-row-hit { position: absolute; inset: 0; z-index: 0; border-radius: var(--radius-6); color: inherit; }
 .tool-row-hit:focus-visible { outline: 1px solid color-mix(in srgb, var(--accent) 60%, transparent); outline-offset: -1px; }
 .tool-row-hit:disabled { cursor: default; }
 .tool-row-head > :not(.tool-row-hit) { position: relative; pointer-events: none; }
@@ -26,19 +26,19 @@
 .tool-row-subject, .tool-row-files { color: inherit; font: inherit; }
 .tool-row-sep { color: var(--text-faint); }
 .tool-file-link, .tool-file-name { font: inherit; color: inherit; padding: 0; }
-.tool-file-link { text-decoration: underline; text-decoration-color: color-mix(in srgb, currentColor 34%, transparent); text-decoration-thickness: 1px; text-underline-offset: 3px; border-radius: 3px; cursor: pointer; }
+.tool-file-link { text-decoration: underline; text-decoration-color: color-mix(in srgb, currentColor 34%, transparent); text-decoration-thickness: 1px; text-underline-offset: 3px; border-radius: var(--radius-4); cursor: pointer; }
 .tool-file-link:hover { color: var(--text); text-decoration-color: currentColor; }
 .tool-file-link:focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
 
 /* +a -d: small, tabular, muted colour. */
-.diff-stat { display: inline-flex; flex: none; gap: 4px; font-size: 12.5px; font-variant-numeric: tabular-nums; letter-spacing: -.01em; }
+.diff-stat { display: inline-flex; flex: none; gap: 4px; font-size: var(--fs-13); font-variant-numeric: tabular-nums; letter-spacing: -.01em; }
 .diff-stat-add { color: var(--git-add); font-weight: 500; }
 .diff-stat-del { color: var(--git-del); font-weight: 500; }
 .tool-row-stat { margin-left: 5px; }
 .tool-row-text .tool-row-stat { display: inline-flex; vertical-align: baseline; }
 .tool-row-outcome { flex: none; color: var(--text-faint); }
 .tool-row-outcome.is-error { color: var(--danger); }
-.tool-row-duration { flex: none; color: var(--text-faint); font-size: 12px; font-variant-numeric: tabular-nums; }
+.tool-row-duration { flex: none; color: var(--text-faint); font-size: var(--fs-12); font-variant-numeric: tabular-nums; }
 
 /* Chevron follows the text (not the far edge) and appears on hover/focus/open. */
 .tool-chevron { flex: none; color: var(--text-faint); opacity: 0; transition: opacity 140ms ease, transform 180ms cubic-bezier(.2,.8,.2,1); }
@@ -49,26 +49,26 @@
 /* Details: indented under the text, calm surfaces, no heavy frames. */
 .tool-row-body { margin: 2px 0 10px calc(var(--row-inset) + var(--row-glyph) + var(--row-gap)); padding: 0; border: 0; background: none; }
 .tool-row-source { display: flex; gap: 8px; align-items: flex-start; margin: 0 0 6px; color: var(--text-dim); }
-.tool-row-source code { flex: 1; min-width: 0; padding-top: 3px; font: 12px/1.55 var(--mono); overflow-wrap: anywhere; user-select: text; }
+.tool-row-source code { flex: 1; min-width: 0; padding-top: 3px; font: var(--fs-12)/1.55 var(--mono); overflow-wrap: anywhere; user-select: text; }
 .tool-row-source button { flex: none; }
-.tool-row-action { flex: none; height: 24px; padding: 0 8px; border: 1px solid var(--hairline); border-radius: 6px; color: var(--text-dim); font-size: 12px; }
+.tool-row-action { flex: none; height: 24px; padding: 0 8px; border: 1px solid var(--hairline); border-radius: var(--radius-6); color: var(--text-dim); font-size: var(--fs-12); }
 .tool-row-action:hover { color: var(--text); background: var(--bg-hover); }
-.tool-row-excerpt { margin: 0 0 6px calc(var(--row-inset) + var(--row-glyph) + var(--row-gap)); padding: 2px 0 2px 10px; border-left: 1px solid color-mix(in srgb, var(--text) 9%, transparent); font: 11.5px/1.55 var(--mono); color: var(--text-faint); white-space: pre-wrap; overflow-wrap: anywhere; max-height: calc(4 * 1.55em + 4px); overflow: hidden; user-select: text; }
+.tool-row-excerpt { margin: 0 0 6px calc(var(--row-inset) + var(--row-glyph) + var(--row-gap)); padding: 2px 0 2px 10px; border-left: 1px solid color-mix(in srgb, var(--text) 9%, transparent); font: var(--fs-12)/1.55 var(--mono); color: var(--text-faint); white-space: pre-wrap; overflow-wrap: anywhere; max-height: calc(4 * 1.55em + 4px); overflow: hidden; user-select: text; }
 .tool-row-excerpt.is-error { color: color-mix(in srgb, var(--danger) 78%, var(--text-dim)); border-left-color: color-mix(in srgb, var(--danger) 40%, transparent); }
 .tool-edit-diffs { display: flex; flex-direction: column; gap: 8px; margin-bottom: 4px; }
-.tool-edit-diff-path { display: flex; align-items: center; gap: 8px; padding: 0 2px 4px; color: var(--text-dim); font: 12px/1.4 var(--mono); }
+.tool-edit-diff-path { display: flex; align-items: center; gap: 8px; padding: 0 2px 4px; color: var(--text-dim); font: var(--fs-12)/1.4 var(--mono); }
 .tool-edit-diff-path > span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* "Viewed 4 images": thumbnails under the row, each opens the image. */
 .tool-thumbs { display: flex; gap: 8px; margin: 2px 0 8px calc(var(--row-inset) + var(--row-glyph) + var(--row-gap)); overflow-x: auto; scrollbar-width: none; }
-.tool-thumb { display: grid; place-items: center; flex: none; width: 92px; height: 92px; padding: 0; overflow: hidden; border: 1px solid color-mix(in srgb, var(--text) 8%, transparent); border-radius: 8px; background: color-mix(in srgb, var(--text) 3%, var(--bg)); color: var(--text-faint); cursor: pointer; transition: border-color 130ms ease, transform 130ms ease; }
+.tool-thumb { display: grid; place-items: center; flex: none; width: 92px; height: 92px; padding: 0; overflow: hidden; border: 1px solid color-mix(in srgb, var(--text) 8%, transparent); border-radius: var(--radius-8); background: color-mix(in srgb, var(--text) 3%, var(--bg)); color: var(--text-faint); cursor: pointer; transition: border-color 130ms ease, transform 130ms ease; }
 .tool-thumb img { width: 100%; height: 100%; object-fit: cover; }
 .tool-thumb:hover, .tool-thumb:focus-visible { border-color: color-mix(in srgb, var(--text) 22%, transparent); }
 .tool-thumb:focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
 .tool-thumb.is-missing { cursor: default; }
 
 /* Plans render as a checklist, not JSON. */
-.tool-plan { list-style: none; margin: 2px 0 8px calc(var(--row-inset, 8px) + 24px); padding: 0; display: flex; flex-direction: column; gap: 3px; font-size: 13px; color: var(--text-dim); }
+.tool-plan { list-style: none; margin: 2px 0 8px calc(var(--row-inset, 8px) + 24px); padding: 0; display: flex; flex-direction: column; gap: 3px; font-size: var(--fs-13); color: var(--text-dim); }
 .tool-plan li { display: flex; align-items: flex-start; gap: 8px; line-height: 1.5; }
 .tool-plan li > svg { flex: none; margin-top: 3px; color: var(--text-faint); }
 .tool-plan li.is-completed { color: var(--text-faint); }
@@ -84,8 +84,8 @@
 @media (prefers-reduced-motion: no-preference) { .tool-glyph.is-active { animation: tool-run-pulse 1.4s ease-in-out infinite; } }
 @media (prefers-reduced-motion: reduce) { .tool-run-glyph { animation: none; opacity: .7; } }
 
-.tool-metadata { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 300px; overflow: auto; font: 11.5px/1.55 var(--mono); color: var(--text-faint); user-select: text; }
-.tool-details { color: var(--text-faint); font-size: 12px; overflow-wrap: anywhere; }
+.tool-metadata { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 300px; overflow: auto; font: var(--fs-12)/1.55 var(--mono); color: var(--text-faint); user-select: text; }
+.tool-details { color: var(--text-faint); font-size: var(--fs-12); overflow-wrap: anywhere; }
 .tool-details dl { display: grid; grid-template-columns: auto 1fr; gap: 3px 12px; margin: 4px 0; }
 .tool-details dl:empty { display: none; }
 .tool-details dd { margin: 0; user-select: text; }
@@ -102,21 +102,21 @@
 @media (prefers-reduced-motion: no-preference) { .activity-disclosure { transition: height 200ms cubic-bezier(.2,.8,.2,1); } }
 
 /* Command output and tool results: one soft surface, same family as the diff block. */
-.tool-result { min-width: 0; overflow: hidden; margin: 4px 0 6px; border: 1px solid color-mix(in srgb, var(--text) 5.5%, transparent); border-radius: 10px; background: color-mix(in srgb, var(--text) 2.2%, var(--bg)); }
-.tool-result > header { display: flex; align-items: center; justify-content: space-between; min-height: 28px; padding: 3px 6px 0 12px; color: var(--text-faint); font-size: 11.5px; }
-.tool-result-text { margin: 0; padding: 4px 12px 10px; overflow: auto; max-height: 420px; white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.6 var(--mono); color: var(--text-dim); user-select: text; }
+.tool-result { min-width: 0; overflow: hidden; margin: 4px 0 6px; border: 1px solid color-mix(in srgb, var(--text) 5.5%, transparent); border-radius: var(--radius-10); background: color-mix(in srgb, var(--text) 2.2%, var(--bg)); }
+.tool-result > header { display: flex; align-items: center; justify-content: space-between; min-height: 28px; padding: 3px 6px 0 12px; color: var(--text-faint); font-size: var(--fs-12); }
+.tool-result-text { margin: 0; padding: 4px 12px 10px; overflow: auto; max-height: 420px; white-space: pre-wrap; overflow-wrap: anywhere; font: var(--fs-12)/1.6 var(--mono); color: var(--text-dim); user-select: text; }
 .tool-result[data-preview='true'] .tool-result-text { mask-image: linear-gradient(#000 50%, transparent); }
-.tool-result-expand { display: block; padding: 5px 12px 9px; color: var(--text-faint); font-size: 12px; }
+.tool-result-expand { display: block; padding: 5px 12px 9px; color: var(--text-faint); font-size: var(--fs-12); }
 .tool-result-expand:hover { color: var(--text); }
-.tool-detail-trigger { display: flex; align-items: center; gap: 6px; width: 100%; padding: 6px 0; color: var(--text-faint); font-size: 12px; text-align: left; }
+.tool-detail-trigger { display: flex; align-items: center; gap: 6px; width: 100%; padding: 6px 0; color: var(--text-faint); font-size: var(--fs-12); text-align: left; }
 .tool-detail-trigger:hover { color: var(--text-dim); }
 .tool-detail-trigger span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tool-detail-trigger > .tool-chevron { opacity: .7; }
-.tool-output-limit { margin: 0; padding: 3px 12px; color: var(--text-faint); font-size: 11.5px; }
+.tool-output-limit { margin: 0; padding: 3px 12px; color: var(--text-faint); font-size: var(--fs-12); }
 @media (prefers-reduced-motion: reduce) { .tool-row-head, .tool-glyph, .tool-chevron, .tool-details summary, .tool-thumb { transition: none; } }
 
 /* ExitPlanMode row: a one-line summary pointing at the Plan card instead of repeating the plan. */
-.tool-plan-link { display: flex; align-items: center; gap: 8px; margin: 0 0 6px; color: var(--text-dim); font-size: 12.5px; }
+.tool-plan-link { display: flex; align-items: center; gap: 8px; margin: 0 0 6px; color: var(--text-dim); font-size: var(--fs-13); }
 .tool-plan-link span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tool-plan-link button { flex: none; }
 .tool-plan-full { margin: 0 0 6px; }

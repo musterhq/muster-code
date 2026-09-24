@@ -83,8 +83,9 @@ export const repoWatchKey = (watch: {folderId: string; branch?: string}) => `${w
 
 /** Polls each watched (folder, branch) on its own timer with exponential backoff. */
 export class RepoPoller {
-  private readonly watches = new Map<string, {watch: RepoWatch; previous?: RepoSnapshot; failures: number; timer?: unknown; busy: boolean}>();
+  private readonly watches = new Map<string, {watch: RepoWatch; previous?: RepoSnapshot; failures: number; timer?: unknown; busy: boolean; rebaseline?: boolean}>();
   private disposed = false;
+  private paused = false;
   constructor(private readonly options: RepoPollerOptions) {}
   private set(fn: () => void, ms: number): unknown { if (this.options.setTimer) return this.options.setTimer(fn, ms); const timer = setTimeout(fn, ms); timer.unref?.(); return timer; }
   private clear(timer: unknown): void { if (timer === undefined) return; if (this.options.clearTimer) this.options.clearTimer(timer); else clearTimeout(timer as ReturnType<typeof setTimeout>); }
@@ -95,20 +96,21 @@ export class RepoPoller {
     if (current) { current.watch = watch; return; }
     const entry = {watch, failures: 0, busy: false} as {watch: RepoWatch; previous?: RepoSnapshot; failures: number; timer?: unknown; busy: boolean};
     this.watches.set(key, entry);
-    entry.timer = this.set(() => void this.poll(key), 0);
+    if (!this.paused) entry.timer = this.set(() => void this.poll(key), 0);
   }
   unwatch(key: string): void { const entry = this.watches.get(key); if (!entry) return; this.clear(entry.timer); this.watches.delete(key); }
   /** Runs one poll now (tests; also the scheduled path). */
   async poll(key: string): Promise<void> {
     const entry = this.watches.get(key);
-    if (!entry || entry.busy || this.disposed) return;
+    if (!entry || entry.busy || this.disposed || this.paused) return;
     entry.busy = true; entry.timer = undefined;
     let delay = this.options.baseMs;
     try {
       const next = await this.options.read(entry.watch);
       if (this.watches.get(key) !== entry) return;
-      const events = entry.previous ? diffRepoSnapshots(entry.previous, next) : [];
-      entry.previous = next; entry.failures = 0;
+      // After a sleep the first read is a fresh baseline: what changed during the gap is not replayed as a burst.
+      const events = entry.previous && !entry.rebaseline ? diffRepoSnapshots(entry.previous, next) : [];
+      entry.previous = next; entry.failures = 0; entry.rebaseline = false;
       if (events.length) this.options.onEvents(entry.watch, events);
     } catch (error) {
       entry.failures++;
@@ -117,7 +119,20 @@ export class RepoPoller {
       this.options.onError?.(entry.watch, error, delay);
     } finally {
       entry.busy = false;
-      if (!this.disposed && this.watches.get(key) === entry) entry.timer = this.set(() => void this.poll(key), delay);
+      if (!this.disposed && !this.paused && this.watches.get(key) === entry) entry.timer = this.set(() => void this.poll(key), delay);
+    }
+  }
+  /** SBX-13: the Mac is going to sleep. Timers stop; baselines are kept until resume replaces them. */
+  suspend(): void { this.paused = true; for (const entry of this.watches.values()) { this.clear(entry.timer); entry.timer = undefined; } }
+  /** SBX-13: back from sleep. Each watch polls once now and takes that read as its new baseline (no history replay);
+   *  failure backoff resets because the network that failed may simply have been asleep. */
+  resume(): void {
+    if (this.disposed) return;
+    this.paused = false;
+    for (const [key, entry] of this.watches) {
+      entry.rebaseline = true; entry.failures = 0;
+      this.clear(entry.timer); entry.timer = undefined;
+      if (!entry.busy) entry.timer = this.set(() => void this.poll(key), 0);
     }
   }
   dispose(): void { this.disposed = true; for (const entry of this.watches.values()) this.clear(entry.timer); this.watches.clear(); }

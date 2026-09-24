@@ -21,6 +21,7 @@ import './pull-request.css';
 import {CheckLogDisclosure, CiRepairControls, useCiRepair} from './CiRepair';
 import {useStoreSelector} from '../useStore';
 import { plural } from '../../shared/wording.ts';
+import {Tip} from './Tooltip';
 
 // ---------------------------------------------------------------------------
 // Data
@@ -184,7 +185,7 @@ function PullRequestView({folderId, number, jump}: {folderId: string; number: nu
     <header className="pr-header">
       <div className="pr-title-row">
         <h2 className="pr-title">{value.title || `Pull request #${value.number}`} <span className="pr-muted">#{value.number}</span></h2>
-        <button type="button" className="icon-button" aria-label="Refresh pull request" title="Refresh" disabled={pr.loading} onClick={refreshAll}><RefreshCw size={13} className={pr.loading ? 'pr-spin' : undefined}/></button>
+        <Tip label="Refresh"><button type="button" className="icon-button" aria-label="Refresh pull request" disabled={pr.loading} onClick={refreshAll}><RefreshCw size={13} className={pr.loading ? 'pr-spin' : undefined}/></button></Tip>
         <button type="button" className="pr-button is-quiet" onClick={() => openBrowserTab(value.url)} title="Open on GitHub"><ArrowUpRight size={12} aria-hidden="true"/>Open in browser</button>
       </div>
       <div className="pr-meta">

@@ -1,11 +1,11 @@
 /* WRK-18: saved per-folder Run/Test/Dev commands above the ad-hoc command launcher. */
 .process-saved-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-bottom: 8px; }
-.process-saved-action { display: inline-flex; align-items: stretch; border: 1px solid var(--hairline); border-radius: 6px; overflow: hidden; }
-.process-saved-action > button { display: inline-flex; align-items: center; gap: 5px; padding: 4px 8px; font-size: 12px; color: var(--text-dim); background: var(--bg-hover); }
+.process-saved-action { display: inline-flex; align-items: stretch; border: 1px solid var(--hairline); border-radius: var(--radius-6); overflow: hidden; }
+.process-saved-action > button { display: inline-flex; align-items: center; gap: 5px; padding: 4px 8px; font-size: var(--fs-12); color: var(--text-dim); background: var(--bg-hover); }
 .process-saved-action > button:first-child:hover:not(:disabled) { background: var(--bg-active); color: var(--text); }
 .process-saved-action > button:disabled { opacity: .5; }
 .process-saved-action-edit, .process-saved-action-remove { padding: 4px 6px !important; border-left: 1px solid var(--hairline); color: var(--text-faint) !important; }
 .process-saved-action-edit:hover, .process-saved-action-remove:hover { color: var(--text) !important; }
-.process-saved-action-add { display: inline-flex; align-items: center; gap: 4px; padding: 4px 8px; border: 1px dashed var(--hairline); border-radius: 6px; font-size: 12px; color: var(--text-faint); background: transparent; }
+.process-saved-action-add { display: inline-flex; align-items: center; gap: 4px; padding: 4px 8px; border: 1px dashed var(--hairline); border-radius: var(--radius-6); font-size: var(--fs-12); color: var(--text-faint); background: transparent; }
 .process-saved-action-add:hover:not(:disabled) { color: var(--text-dim); border-color: var(--text-faint); }
 .process-saved-action-add:disabled { opacity: .5; }

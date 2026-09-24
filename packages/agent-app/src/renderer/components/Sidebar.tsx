@@ -83,6 +83,7 @@ import { plural } from '../../shared/wording.ts';
 import { ResourceState } from './ResourceState';
 import { ProjectHoverCard } from './ProjectHoverCard';
 import { ConfirmProjectAction, EditProjectDialog, toProjectDetails } from './ProjectEditDialog';
+import {Tip} from './Tooltip';
 
 const snapshotChats=(snapshot:ReturnType<typeof useStore>['snapshot']):Chat[]=>snapshot?.chats.filter(chat=>!chat.archived)??[];
 const IS_MAC=typeof navigator!=='undefined'&&/mac/i.test(navigator.platform||navigator.userAgent||'');
@@ -195,10 +196,10 @@ function ChatRow({ chat, now, tabbable, onFocusRow, selected, selectionMode, onR
           : age&&<time className="chat-row-age" dateTime={chat.updatedAt} title={exact}>{age}</time>}
         <span className="chat-row-actions">
           {snoozed
-            ? <button type="button" className="icon-button" tabIndex={tab} aria-label={`Wake ${chat.title} now`} title={`${wakes} · Wake now`} onClick={()=>void wakeChat(chat.id)}><AlarmClockOff size={14}/></button>
-            : <button type="button" className="icon-button" tabIndex={tab} aria-label={chat.pinned?`Unpin ${chat.title}`:`Pin ${chat.title}`} title={chat.pinned?'Unpin':'Pin'} onClick={togglePin}>{chat.pinned?<PinOff size={14}/>:<Pin size={14}/>}</button>}
-          <button type="button" className="icon-button" tabIndex={tab} aria-label={chat.archived?`Unarchive ${chat.title}`:`Archive ${chat.title}`} title={chat.archived?'Unarchive':'Archive'} onClick={toggleArchive}>{chat.archived?<ArchiveRestore size={14}/>:<Archive size={14}/>}</button>
-          <button type="button" className="icon-button" tabIndex={tab} aria-label={`Actions for ${chat.title}`} title="More actions" onClick={openNativeMenuAtPointer}><MoreHorizontal size={15}/></button>
+            ? <Tip label={`${wakes} · Wake now`}><button type="button" className="icon-button" tabIndex={tab} aria-label={`Wake ${chat.title} now`} onClick={()=>void wakeChat(chat.id)}><AlarmClockOff size={14}/></button></Tip>
+            : <Tip label={chat.pinned?'Unpin':'Pin'}><button type="button" className="icon-button" tabIndex={tab} aria-label={chat.pinned?`Unpin ${chat.title}`:`Pin ${chat.title}`} onClick={togglePin}>{chat.pinned?<PinOff size={14}/>:<Pin size={14}/>}</button></Tip>}
+          <Tip label={chat.archived?'Unarchive':'Archive'}><button type="button" className="icon-button" tabIndex={tab} aria-label={chat.archived?`Unarchive ${chat.title}`:`Archive ${chat.title}`} onClick={toggleArchive}>{chat.archived?<ArchiveRestore size={14}/>:<Archive size={14}/>}</button></Tip>
+          <Tip label="More actions"><button type="button" className="icon-button" tabIndex={tab} aria-label={`Actions for ${chat.title}`} onClick={openNativeMenuAtPointer}><MoreHorizontal size={15}/></button></Tip>
         </span>
       </span>}
     </div>
@@ -475,18 +476,18 @@ export function Sidebar(): React.ReactElement {
         <div className="nav-selection-bar" role="toolbar" aria-label="Selected chats" onKeyDown={event=>{if(event.key==='Escape'){event.preventDefault();setSelection(clearSelection());}}}>
           <span className="nav-selection-count">{selection.selected.size} selected</span>
           <span className="nav-selection-actions">
-            <button type="button" className="icon-button" aria-label="Mark selected chats as read" title="Mark read" onClick={markSelectedRead}><MailOpen size={14}/></button>
+            <Tip label="Mark read"><button type="button" className="icon-button" aria-label="Mark selected chats as read" onClick={markSelectedRead}><MailOpen size={14}/></button></Tip>
             <Menu.Root>
-              <Menu.Trigger className="icon-button" aria-label="Move selected chats to a project" title="Move to project"><FolderKanban size={14}/></Menu.Trigger>
-              <Menu.Portal><Menu.Positioner side="bottom" align="start" sideOffset={4} className="chat-menu-positioner"><Menu.Popup className="chat-menu">
+              <Tip label="Move to project"><Menu.Trigger className="icon-button" aria-label="Move selected chats to a project"><FolderKanban size={14}/></Menu.Trigger></Tip>
+              <Menu.Portal><Menu.Positioner side="bottom" align="start" sideOffset={4} className="chat-menu-positioner"><Menu.Popup className="ui-menu chat-menu">
                 <Menu.Item onClick={()=>moveSelectedToProject(null)}>No project</Menu.Item>
                 {snapshot.projects.map(project=><Menu.Item key={project.id} onClick={()=>moveSelectedToProject(project.id)}>{project.name}</Menu.Item>)}
               </Menu.Popup></Menu.Positioner></Menu.Portal>
             </Menu.Root>
-            <button type="button" className="icon-button" aria-label="Archive selected chats" title="Archive" onClick={archiveSelected}><Archive size={14}/></button>
-            <button type="button" className="icon-button nav-selection-danger" aria-label="Delete selected chats" title="Delete" onClick={()=>setConfirmDelete(true)}><Trash2 size={14}/></button>
+            <Tip label="Archive"><button type="button" className="icon-button" aria-label="Archive selected chats" onClick={archiveSelected}><Archive size={14}/></button></Tip>
+            <Tip label="Delete"><button type="button" className="icon-button nav-selection-danger" aria-label="Delete selected chats" onClick={()=>setConfirmDelete(true)}><Trash2 size={14}/></button></Tip>
           </span>
-          <button type="button" className="icon-button" aria-label="Clear selection" title="Clear selection (Esc)" onClick={()=>setSelection(clearSelection())}><X size={14}/></button>
+          <Tip label="Clear selection" shortcut="Esc"><button type="button" className="icon-button" aria-label="Clear selection" onClick={()=>setSelection(clearSelection())}><X size={14}/></button></Tip>
         </div>
       )}
       <SnoozeSheet/>
@@ -503,9 +504,9 @@ export function Sidebar(): React.ReactElement {
         <section className="nav-block" aria-label="Folders" {...folderDrag.containerProps}>
           <div className="nav-heading">
             <span className="nav-heading-title">Folders</span>
-            <Menu.Root><Menu.Trigger className="icon-button nav-sort-trigger" aria-label="Sort chats" title={`Sort chats: ${sort==='recent'?'Recent activity':sort==='name'?'Name':'Active first'}`}><ArrowDownWideNarrow size={14}/></Menu.Trigger><Menu.Portal><Menu.Positioner side="bottom" align="end" sideOffset={4} className="chat-menu-positioner"><Menu.Popup className="chat-menu"><Menu.RadioGroup value={sort} onValueChange={value=>{if(isChatSort(value))setSort(value);}}>{([['recent','Recent activity'],['name','Name'],['active','Active first']] as const).map(([value,label])=><Menu.RadioItem key={value} value={value}><span className="chat-sort-check">{sort===value&&<Check size={14}/>}</span><span>{label}</span></Menu.RadioItem>)}</Menu.RadioGroup></Menu.Popup></Menu.Positioner></Menu.Portal></Menu.Root>
-            <button type="button" className="icon-button" aria-label="Clone repository" title="Clone repository…" onClick={() => openCloneSheet()}><GitBranch size={14} strokeWidth={1.75} /></button>
-            <button type="button" className="icon-button" aria-label="Add folder" title="Add folder" onClick={() => void addFolderToDraft()}><Plus size={15} strokeWidth={1.75} /></button>
+            <Menu.Root><Tip label={`Sort chats: ${sort==='recent'?'Recent activity':sort==='name'?'Name':'Active first'}`}><Menu.Trigger className="icon-button nav-sort-trigger" aria-label="Sort chats"><ArrowDownWideNarrow size={14}/></Menu.Trigger></Tip><Menu.Portal><Menu.Positioner side="bottom" align="end" sideOffset={4} className="chat-menu-positioner"><Menu.Popup className="ui-menu chat-menu"><Menu.RadioGroup value={sort} onValueChange={value=>{if(isChatSort(value))setSort(value);}}>{([['recent','Recent activity'],['name','Name'],['active','Active first']] as const).map(([value,label])=><Menu.RadioItem key={value} value={value}><span className="chat-sort-check">{sort===value&&<Check size={14}/>}</span><span>{label}</span></Menu.RadioItem>)}</Menu.RadioGroup></Menu.Popup></Menu.Positioner></Menu.Portal></Menu.Root>
+            <Tip label="Clone repository…"><button type="button" className="icon-button" aria-label="Clone repository" onClick={() => openCloneSheet()}><GitBranch size={14} strokeWidth={1.75} /></button></Tip>
+            <Tip label="Add folder"><button type="button" className="icon-button" aria-label="Add folder" onClick={() => void addFolderToDraft()}><Plus size={15} strokeWidth={1.75} /></button></Tip>
           </div>
           {folderGroups.map(({folder,gid,chats}) => {
             const mark=folderDrag.itemProps(folder.id),dropMark={'data-drop':mark['data-drop'],'data-dragging':mark['data-dragging']};
@@ -517,10 +518,10 @@ export function Sidebar(): React.ReactElement {
                 {folder.missing
                   ? <button type="button" className="nav-relink" title={`${folder.path} was moved or deleted. Choose its new location.`} onClick={()=>void folderMenu(folder,0,0,'relink')}>Relink</button>
                   : <>
-                    <button type="button" className="icon-button" aria-label={`Browse files in ${folder.name}`} title="Browse files" onClick={() => openFilesTab(folder.id, folder.name)}><Files size={13} /></button>
-                    <button type="button" className="icon-button" aria-label={`New chat in ${folder.name}`} title={`New chat in ${folder.name}`} onClick={() => openNewChat({folderId:folder.id})}><SquarePen size={13} /></button>
+                    <Tip label="Browse files"><button type="button" className="icon-button" aria-label={`Browse files in ${folder.name}`} onClick={() => openFilesTab(folder.id, folder.name)}><Files size={13} /></button></Tip>
+                    <Tip label={`New chat in ${folder.name}`}><button type="button" className="icon-button" aria-label={`New chat in ${folder.name}`} onClick={() => openNewChat({folderId:folder.id})}><SquarePen size={13} /></button></Tip>
                   </>}
-                <button type="button" className="icon-button" aria-label={`Actions for folder ${folder.name}`} title="Folder actions" onClick={event=>{const rect=event.currentTarget.getBoundingClientRect();void folderMenu(folder,rect.left,rect.bottom+4);}}><MoreHorizontal size={14}/></button>
+                <Tip label="Folder actions"><button type="button" className="icon-button" aria-label={`Actions for folder ${folder.name}`} onClick={event=>{const rect=event.currentTarget.getBoundingClientRect();void folderMenu(folder,rect.left,rect.bottom+4);}}><MoreHorizontal size={14}/></button></Tip>
               </GroupHead>}
               <Collapsible.Panel className="nav-group-panel is-nested-chats">{chats.length?rows(chats,context):<p className="nav-folder-empty">No chats</p>/* QA-#7 */}</Collapsible.Panel>
             </Collapsible.Root>
@@ -535,23 +536,23 @@ export function Sidebar(): React.ReactElement {
         <section className="nav-block" aria-label="Projects">
           <div className="nav-heading">
             <span className="nav-heading-title">Projects</span>
-            <span className="nav-heading-actions"><button type="button" className="icon-button" aria-label="Open projects" title="Open projects" onClick={openProjectsScreen}><LayoutGrid size={14}/></button><button type="button" className="icon-button" aria-label="New project" title="New project" onClick={()=>requestNewProject(openProjectsScreen)}><Plus size={15} strokeWidth={1.75}/></button></span>
+            <span className="nav-heading-actions"><Tip label="Open projects"><button type="button" className="icon-button" aria-label="Open projects" onClick={openProjectsScreen}><LayoutGrid size={14}/></button></Tip><Tip label="New project"><button type="button" className="icon-button" aria-label="New project" onClick={()=>requestNewProject(openProjectsScreen)}><Plus size={15} strokeWidth={1.75}/></button></Tip></span>
           </div>
           {projectGroups.map(({project,gid,chats}) => (
             <Collapsible.Root className="nav-section" key={project.id} open={isOpen(gid)} onOpenChange={value=>toggleGroup(gid,value)}>
               <PreviewCard.Root><PreviewCard.Trigger render={<div/>} className="nav-project-hover" delay={600} closeDelay={120}>
               <GroupHead nested title={project.name} tooltip={project.name} chats={chats} icon={<Layers size={13}/>} onContextMenu={event=>{event.preventDefault();void openProjectMenu(project.id,event.clientX,event.clientY,mode=>setProjectEdit({id:project.id,mode}));}}>
-                <button
+                <Tip label={project.folderIds.length ? `New chat in ${project.name}` : 'Add a folder in Projects'}><button
                   type="button"
                   className="icon-button"
                   aria-label={`New chat in project ${project.name}`}
-                  title={project.folderIds.length ? `New chat in ${project.name}` : 'Add a folder in Projects'}
+                 
                   onClick={() => project.folderIds.length
                     ? openNewChat({folderId:project.primaryFolderId ?? project.folderIds[0], projectId:project.id})
                     : openProject(project.id)}
                 >
                   <SquarePen size={13} />
-                </button>
+                </button></Tip>
               </GroupHead>
               </PreviewCard.Trigger>
               <PreviewCard.Portal><PreviewCard.Positioner side="right" align="start" sideOffset={8} className="chat-preview-positioner"><PreviewCard.Popup className="chat-preview-card project-hover-card">
@@ -571,7 +572,7 @@ export function Sidebar(): React.ReactElement {
         {orphanChats.length > 0 && (
           <Collapsible.Root className="nav-section" open={isOpen('chats')} onOpenChange={value=>toggleGroup('chats',value)}>
             <GroupHead title="Chats" chats={orphanChats} icon={<MessageCircle size={12}/>}>
-              <button type="button" className="icon-button" aria-label="New chat without a folder" title="New chat without a folder" onClick={()=>openNewChat({})}><SquarePen size={13}/></button>
+              <Tip label="New chat without a folder"><button type="button" className="icon-button" aria-label="New chat without a folder" onClick={()=>openNewChat({})}><SquarePen size={13}/></button></Tip>
             </GroupHead>
             <Collapsible.Panel className="nav-group-panel">{rows(orphanChats,context)}</Collapsible.Panel>
           </Collapsible.Root>

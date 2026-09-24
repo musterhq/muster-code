@@ -2,6 +2,7 @@ import { Eraser, PenLine, Trash2, Undo2 } from 'lucide-react';
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { ModalSheet } from './ModalSheet';
 import './sketch-pad.css';
+import {Tip} from './Tooltip';
 
 const WIDTH = 640, HEIGHT = 400, PAPER = '#ffffff';
 export const SKETCH_COLORS = [{ name: 'Ink', value: '#1f1f1f' }, { name: 'Red', value: '#e5484d' }, { name: 'Blue', value: '#3e63dd' }, { name: 'Green', value: '#30a46c' }, { name: 'Orange', value: '#f76b15' }] as const;
@@ -87,8 +88,8 @@ export function SketchPad({ open, initial, onClose, onAttach }: { open: boolean;
         <span className="sketch-divider" />
         {SKETCH_COLORS.map(swatch => <button key={swatch.value} type="button" className="sketch-swatch" aria-label={swatch.name} aria-pressed={!erasing && color === swatch.value} style={{ '--swatch': swatch.value } as React.CSSProperties} onClick={() => { setColor(swatch.value); setErasing(false); }} />)}
         <span className="sketch-divider" />
-        <button type="button" aria-label="Undo" title="Undo (⌘Z)" disabled={!strokes.length} onClick={() => setStrokes(current => current.slice(0, -1))}><Undo2 size={14} /></button>
-        <button type="button" aria-label="Clear sketch" title="Clear" disabled={!strokes.length} onClick={() => setStrokes([])}><Trash2 size={14} /></button>
+        <Tip label="Undo" shortcut="⌘Z"><button type="button" aria-label="Undo" disabled={!strokes.length} onClick={() => setStrokes(current => current.slice(0, -1))}><Undo2 size={14} /></button></Tip>
+        <Tip label="Clear"><button type="button" aria-label="Clear sketch" disabled={!strokes.length} onClick={() => setStrokes([])}><Trash2 size={14} /></button></Tip>
       </div>
       <canvas ref={canvas} className={`sketch-canvas${erasing ? ' is-erasing' : ''}`} width={WIDTH} height={HEIGHT} aria-label="Sketch canvas" role="img"
         onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={end} onPointerCancel={end} onLostPointerCapture={end} />

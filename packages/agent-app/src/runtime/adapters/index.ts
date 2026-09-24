@@ -9,6 +9,7 @@ import {claudeCodeAdapter, CLAUDE_CODE_MODELS, type Spawn} from './claude-code.t
 import {ANTHROPIC_API, anthropicAdapter, CHAT_ONLY, fetchModelList, openAICompatibleAdapter} from './http-chat.ts';
 import {openCodeAdapter, openCodeCapabilities, probe} from './opencode.ts';
 import {ConversationMemory, findBinary, Validator} from './shared.ts';
+import {claudeAuthStamp, claudeSignIn} from './claude-auth.ts';
 import type {RunnableAdapter, Validation} from './types.ts';
 
 export type {RunnableAdapter} from './types.ts';
@@ -23,6 +24,8 @@ export interface AdapterCatalogOptions {
   customs?: () => CustomConnection[];
   /** Folder for stateless-provider conversation history; defaults to memory only. */
   historyDir?: () => string | undefined;
+  /** R9: resolves when Claude Code is signed in, rejects with the reason when not. Never runs `claude`. */
+  claudeSignIn?: () => Promise<string>;
 }
 export interface AdapterCatalog { instances(): ProviderInstance[]; ready(): Promise<void> }
 
@@ -35,6 +38,8 @@ export function createAdapterCatalog(options: AdapterCatalogOptions = {}): Adapt
   const adapters = new Map<string, RunnableAdapter>();
   const adapter = (key: string, make: () => RunnableAdapter) => { let found = adapters.get(key); if (!found) { found = make(); adapters.set(key, found); } return found; };
   const claudeCheck = new Validator(async () => (await probe(claudeBinary()!, ['--version'], options.spawn)).trim().split('\n')[0]!.slice(0, 80));
+  // An installed but signed-out Claude Code is not offered as ready. Re-checked at once when its account files change.
+  const claudeAuth = new Validator(options.claudeSignIn ?? (() => claudeSignIn({env: env(), home})), 60_000);
   const openCodeCheck = new Validator(() => openCodeCapabilities(openCodeBinary()!, options.spawn));
   const openAIBase = () => { try { return env().OPENAI_BASE_URL ? validateEndpoint(env().OPENAI_BASE_URL) : 'https://api.openai.com/v1'; } catch { return 'https://api.openai.com/v1'; } };
   const openAICheck = new Validator(async () => (await fetchModelList(`${openAIBase()}/models`, {authorization: `Bearer ${env().OPENAI_API_KEY}`}, 'OpenAI', request)).filter(model => OPENAI_CHAT.test(model.id) && !OPENAI_EXCLUDE.test(model.id)).sort((a, b) => b.id.localeCompare(a.id)));
@@ -59,13 +64,20 @@ export function createAdapterCatalog(options: AdapterCatalogOptions = {}): Adapt
     return route({...base, status: 'configured', detail: 'Checking this provider… Scan again in a moment.'});
   };
 
+  /** The version check, held back to "not signed in" (or "checking") until the sign-in check passes. */
+  const claudeReady = (claude: string): Validation<string> => {
+    const version = claudeCheck.current(claude);
+    if (version.status !== 'ok') return version;
+    const auth = claudeAuth.current(`${claude}|${claudeAuthStamp({env: env(), home})}`);
+    return auth.status === 'ok' ? version : auth.status === 'error' ? {status: 'error', reason: auth.reason!, checkedAt: auth.checkedAt!} : {status: 'pending'};
+  };
   function instances(): ProviderInstance[] {
     const e = env(), rows: ProviderInstance[] = [];
     const claude = claudeBinary();
     if (claude) {
       const bindingId = hash('claude-code', claude);
       rows.push(gate({id: 'claude-code', name: 'Claude Code', driver: 'claude-code-cli', bindingId, identityMasked: 'Claude Code sign-in', models: [], available: false, source: claude},
-        claudeCheck.current(claude), version => ({models: CLAUDE_CODE_MODELS, detail: `Runs Claude Code ${version} in the chat folder with its own tools, settings and MCP servers. Read-only and Plan chats use plan mode.`}),
+        claudeReady(claude), version => ({models: CLAUDE_CODE_MODELS, detail: `Runs Claude Code ${version} in the chat folder with its own tools, settings and MCP servers. Read-only and Plan chats use plan mode.`}),
         () => adapter(`claude:${bindingId}`, () => claudeCodeAdapter({binary: claude, env: e, spawn: options.spawn}))));
     }
     const openCode = openCodeBinary();
@@ -98,5 +110,6 @@ export function createAdapterCatalog(options: AdapterCatalogOptions = {}): Adapt
     }
     return rows;
   }
-  return {instances, async ready() { instances(); await Promise.all(validators.map(check => check.settled())); }};
+  // The sign-in check starts only once the version check passed, so settle twice.
+  return {instances, async ready() { instances(); await Promise.all(validators.map(check => check.settled())); instances(); await claudeAuth.settled(); }};
 }

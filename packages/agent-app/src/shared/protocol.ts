@@ -57,7 +57,7 @@ export interface PendingQuestion { id: string; header: string; question: string;
 export interface PendingQuestionData { method: 'item/tool/requestUserInput'; questions: PendingQuestion[] }
 export interface TimelineItem { id: string; chatId: string; kind: 'user' | 'assistant' | 'reasoning' | 'tool' | 'approval' | 'question' | 'notice'; text: string; status?: string; createdAt: string; data?: Record<string, unknown> }
 /** `data` of an approval item. `kind` picks the card body; every field is optional because providers omit them. */
-export interface ApprovalData { method: string; kind: 'command' | 'fileChange' | 'mcp'; command?: string; cwd?: string; reason?: string; diff?: Array<{path: string; diff?: string; kind?: string}>; server?: string; tool?: string; args?: string; expiredReason?: 'restart' }
+export interface ApprovalData { method: string; kind: 'command' | 'fileChange' | 'mcp'; command?: string; cwd?: string; reason?: string; diff?: Array<{path: string; diff?: string; kind?: string}>; server?: string; tool?: string; args?: string; expiredReason?: 'restart'; /** R5: the command would stop a process the user started; never approvable for the whole session. */ protectsUserProcess?: boolean }
 /** `acceptForSession` maps to the codex app-server decision of the same name: later identical requests in this session are not asked again. */
 export type ApprovalDecision = 'accept' | 'acceptForSession' | 'decline';
 export interface TimelineSnapshot { items: TimelineItem[]; revision: number }

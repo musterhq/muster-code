@@ -9,6 +9,7 @@ import { getState, notifyError, notifySuccess } from '../store';
 import { fileVisual } from './fileVisual';
 import { PluginIcon } from './PluginIcon';
 import { plural } from '../../shared/wording.ts';
+import {Tip} from './Tooltip';
 
 const leaf = (id: string) => id.replace(/\/+$/, '').split('/').pop() || id;
 /** Attachment ids on a queued message carry no name client-side; fetched once per id and cached (module-lifetime,
@@ -149,8 +150,8 @@ export function QueuedMessages({ chatId, items, paused, running = false, skills 
             {failed
               ? <button type="button" className="composer-queue-labelled" aria-label="Retry" title="Try sending this queued message again" disabled={Boolean(busy)} onClick={() => steer(item)}><RotateCw size={11} />Retry</button>
               : <button type="button" className="composer-queue-labelled" aria-label="Steer" title={running ? 'Submit without interrupting the model' : 'Send now'} disabled={Boolean(busy)} onClick={() => steer(item)}><CornerDownRight size={11} />Steer</button>}
-            {editing?.id !== item.id && <button type="button" aria-label="Edit message" title="Edit message" onClick={() => edit(item)}><Pencil size={12} /></button>}
-            <button type="button" aria-label="Delete queued message" title="Delete queued message" disabled={Boolean(busy)} onClick={() => void run(item.id, () => queueRemove(chatId, item.id)).then(removed => { if (removed) notifySuccess('Queued message deleted', { label: 'Undo', run: () => restoreQueuedMessage(chatId, item, index) }); })}><Trash2 size={12} /></button>
+            {editing?.id !== item.id && <Tip label="Edit message"><button type="button" aria-label="Edit message" onClick={() => edit(item)}><Pencil size={12} /></button></Tip>}
+            <Tip label="Delete queued message"><button type="button" aria-label="Delete queued message" disabled={Boolean(busy)} onClick={() => void run(item.id, () => queueRemove(chatId, item.id)).then(removed => { if (removed) notifySuccess('Queued message deleted', { label: 'Undo', run: () => restoreQueuedMessage(chatId, item, index) }); })}><Trash2 size={12} /></button></Tip>
           </span>
         </li>;
       })}

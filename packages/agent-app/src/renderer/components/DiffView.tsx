@@ -18,6 +18,7 @@ import {codeLanguageFromPath} from './codeLanguage';
 import {cleanDiffMessage,isCleanDiff} from '../diffCleanState';
 import {useHighlightedTokens} from './HighlightedCode';
 import './diff-view.css';
+import {Tip} from './Tooltip';
 
 type Line = Exclude<DiffRow,{type:'fold'}>;
 /** `fallback` marks a model computed on the main thread because the worker was unavailable. */
@@ -295,8 +296,8 @@ export const DiffView = React.memo(function DiffView({tab}:{tab:WorkspaceTab}) {
   if (failure) return <div className="diff-view"><header className="diff-head"><span className="file-path" title={path}>{path}</span>{baselineControl}</header><div className="pane-error"><p>{failure}</p><button onClick={() => {if (legacy && diff?.phase === 'error') void openDiff(folderId,path);else {setRetry(value=>value+1);setReload(value=>value+1);}}}>Retry</button><button onClick={() => void openFile(folderId,path)}>Open file</button></div></div>;
   const head = <header className="diff-head">
       <div className="diff-file-nav" role="group" aria-label="Changed files">
-        <button className="icon-button" disabled={fileIndex<=0} aria-label="Previous file" title="Previous changed file (Alt+↑ or [)" onClick={()=>goFile(-1)}><ChevronLeft size={14}/></button>
-        <button className="icon-button" disabled={fileIndex<0||fileIndex>=siblings.length-1} aria-label="Next file" title="Next changed file (Alt+↓ or ])" onClick={()=>goFile(1)}><ChevronRight size={14}/></button>
+        <Tip label="Previous changed file (Alt+↑ or [)"><button className="icon-button" disabled={fileIndex<=0} aria-label="Previous file" onClick={()=>goFile(-1)}><ChevronLeft size={14}/></button></Tip>
+        <Tip label="Next changed file (Alt+↓ or ])"><button className="icon-button" disabled={fileIndex<0||fileIndex>=siblings.length-1} aria-label="Next file" onClick={()=>goFile(1)}><ChevronRight size={14}/></button></Tip>
       </div>
       <span className="file-path" title={reviewed?.previousPath?`${reviewed.previousPath} → ${path}`:path}>{reviewed?.previousPath&&<><span className="diff-previous-path">{reviewed.previousPath}</span><ArrowRight size={11} aria-label="renamed to" className="diff-rename-arrow"/></>}{path}</span>
       {reviewed?.mode&&<span className="diff-mode" title="File mode change">{MODE_LABEL[reviewed.mode.old??'']??reviewed.mode.old??'none'} → {MODE_LABEL[reviewed.mode.new??'']??reviewed.mode.new??'none'}</span>}
@@ -333,7 +334,7 @@ export const DiffView = React.memo(function DiffView({tab}:{tab:WorkspaceTab}) {
     {notice}
     <div className="diff-controls">{computing && <span role="status">Updating…</span>}
       {status && <span role="status">{status}</span>}
-      {actionable && <span className="diff-hunk-nav" role="group" aria-label="Changes"><button type="button" className="icon-button" aria-label="Previous change" title="Previous change" onClick={()=>goHunk(-1)}><ChevronUp size={13}/></button><span>{Math.min(currentHunk+1,order.size)}/{order.size}</span><button type="button" className="icon-button" aria-label="Next change" title="Next change" onClick={()=>goHunk(1)}><ChevronDown size={13}/></button></span>}
+      {actionable && <span className="diff-hunk-nav" role="group" aria-label="Changes"><Tip label="Previous change"><button type="button" className="icon-button" aria-label="Previous change" onClick={()=>goHunk(-1)}><ChevronUp size={13}/></button></Tip><span>{Math.min(currentHunk+1,order.size)}/{order.size}</span><Tip label="Next change"><button type="button" className="icon-button" aria-label="Next change" onClick={()=>goHunk(1)}><ChevronDown size={13}/></button></Tip></span>}
       <div className="diff-segmented" role="radiogroup" aria-label="Diff layout">
         <button type="button" role="radio" data-layout="unified" aria-checked={!preferences.split} onClick={()=>{if(preferences.split)updatePreferences({...preferences,split:false});}}>Unified</button>
         <button type="button" role="radio" data-layout="split" aria-checked={preferences.split} title={layoutHint || 'Side by side'} onClick={()=>{if(!preferences.split)updatePreferences({...preferences,split:true});}}>Split</button>

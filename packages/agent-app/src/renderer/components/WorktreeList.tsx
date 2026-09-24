@@ -6,6 +6,7 @@ import {createChat, notifyError} from '../store';
 import {useStore} from '../useStore';
 import {formatBytes} from '../gitSummary';
 import {folderRunning} from './BranchPicker';
+import {Tip} from './Tooltip';
 
 /** Worktrees of a folder's repository: open a chat in one, see size and state, retire clean ones. Hidden when there is only the main checkout. */
 export function WorktreeList({folderId}: {folderId: string}): React.ReactElement | null {
@@ -61,10 +62,10 @@ export function WorktreeList({folderId}: {folderId: string}): React.ReactElement
         {entry.main ? <Laptop size={13} aria-hidden="true"/> : <FolderGit2 size={13} aria-hidden="true"/>}
         <span className="worktree-name">{entry.branch ?? 'detached'}</span>
         {facts && <span className="worktree-facts">{facts}</span>}
-        {!entry.current && !entry.prunable && <button className="icon-button" aria-label={`New chat in ${entry.branch ?? entry.path}`} title="New chat here" onClick={() => void openChat(entry)}><SquarePen size={13}/></button>}
+        {!entry.current && !entry.prunable && <Tip label="New chat here"><button className="icon-button" aria-label={`New chat in ${entry.branch ?? entry.path}`} onClick={() => void openChat(entry)}><SquarePen size={13}/></button></Tip>}
         {!entry.main && (confirming
           ? <button className="worktree-confirm" disabled={!!busy} onClick={() => void remove(entry)} onBlur={() => setConfirm('')} autoFocus>Remove</button>
-          : <button className="icon-button" disabled={!!blocked || !!busy} aria-label={`Remove worktree ${entry.branch ?? entry.path}`} title={blocked || 'Remove worktree (the branch is kept)'} onClick={() => setConfirm(entry.path)}><Trash2 size={13}/></button>)}
+          : <Tip label={blocked || 'Remove worktree (the branch is kept)'}><button className="icon-button" disabled={!!blocked || !!busy} aria-label={`Remove worktree ${entry.branch ?? entry.path}`} onClick={() => setConfirm(entry.path)}><Trash2 size={13}/></button></Tip>)}
       </div>;
     })}
   </div>;

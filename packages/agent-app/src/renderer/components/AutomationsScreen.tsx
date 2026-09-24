@@ -10,6 +10,7 @@ import { useStore } from '../useStore';
 // @ts-ignore -- side-effect CSS import; esbuild bundles it into dist/renderer/main.css
 import './automations.css';
 import { ResourceState } from './ResourceState';
+import {Tip} from './Tooltip';
 
 const errorText = (cause: unknown) => cause instanceof Error ? cause.message : String(cause);
 const LOCAL_TZ = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
@@ -137,7 +138,7 @@ function Editor({ editing, onDone }: { editing: AutomationView | null; onDone: (
           {draft.repeat === 'repo' && draft.repoEvents.includes('push') && <label>Branch<input type="text" className="automation-mono" value={draft.repoBranch} placeholder="default branch" spellCheck={false} onChange={event => patch({ repoBranch: event.target.value })} /></label>}
           {draft.repeat !== 'interval' && draft.repeat !== 'watch' && draft.repeat !== 'repo' && <label className="automation-grow">Time zone<input type="text" list="automation-time-zones" value={draft.timezone} spellCheck={false} onChange={event => patch({ timezone: event.target.value })} /></label>}
         </div>
-        {draft.repeat === 'daily' && <div className="automation-days" role="group" aria-label="Days">{DAY_LETTERS.map((letter, day) => <button key={day} type="button" aria-label={DAY_NAMES[day]} title={DAY_NAMES[day]} aria-pressed={draft.days.includes(day)} onClick={() => toggleDay(day)}>{letter}</button>)}</div>}
+        {draft.repeat === 'daily' && <div className="automation-days" role="group" aria-label="Days">{DAY_LETTERS.map((letter, day) => <Tip key={day} label={DAY_NAMES[day]}><button type="button" aria-label={DAY_NAMES[day]} aria-pressed={draft.days.includes(day)} onClick={() => toggleDay(day)}>{letter}</button></Tip>)}</div>}
         {draft.repeat === 'repo' && <div className="automation-days automation-repo-events" role="group" aria-label="Repository events">{REPO_TRIGGER_EVENTS.map(event => <button key={event} type="button" aria-pressed={draft.repoEvents.includes(event)} onClick={() => patch({ repoEvents: draft.repoEvents.includes(event) ? draft.repoEvents.filter(item => item !== event) : [...draft.repoEvents, event] })}>{REPO_EVENT_LABEL[event]}</button>)}</div>}
         {draft.repeat === 'repo' && <p className="automation-help">Checks GitHub about once a minute through the GitHub CLI (slower after errors or rate limits). Events that arrive together start one run, and the run is told what happened.</p>}
         {draft.repeat === 'watch' && <p className="automation-help">Runs after files in the folder change, at most once a minute. Changes the run makes itself never trigger another.</p>}
@@ -258,12 +259,12 @@ function AutomationRow({ automation, open, now, onToggle, onEdit }: { automation
           {automation.lastRun && <span className="automation-run-status" data-status={automation.lastRun.status} title={`Last run ${exactTime(automation.lastRun.endedAt ?? automation.lastRun.scheduledFor)}`}>{STATUS[automation.lastRun.status]} {compactAge(automation.lastRun.endedAt ?? automation.lastRun.scheduledFor, now)}</span>}
         </button>
         <div className="automation-item-actions">
-          <button type="button" className="icon-button" aria-label={`Run ${automation.name} now`} title="Run now" disabled={busy !== null} onClick={() => void act('run')}><Play size={14} /></button>
-          <button type="button" className="icon-button" aria-label={automation.paused ? `Resume ${automation.name}` : `Pause ${automation.name}`} title={automation.paused ? 'Resume' : 'Pause'} disabled={busy !== null} onClick={() => void act('pause')}>{automation.paused ? <CalendarClock size={14} /> : <Pause size={14} />}</button>
-          <button type="button" className="icon-button" aria-label={`Edit ${automation.name}`} title="Edit" onClick={onEdit}><Pencil size={14} /></button>
+          <Tip label="Run now"><button type="button" className="icon-button" aria-label={`Run ${automation.name} now`} disabled={busy !== null} onClick={() => void act('run')}><Play size={14} /></button></Tip>
+          <Tip label={automation.paused ? 'Resume' : 'Pause'}><button type="button" className="icon-button" aria-label={automation.paused ? `Resume ${automation.name}` : `Pause ${automation.name}`} disabled={busy !== null} onClick={() => void act('pause')}>{automation.paused ? <CalendarClock size={14} /> : <Pause size={14} />}</button></Tip>
+          <Tip label="Edit"><button type="button" className="icon-button" aria-label={`Edit ${automation.name}`} onClick={onEdit}><Pencil size={14} /></button></Tip>
           {confirming
             ? <><button type="button" className="automation-confirm" onClick={() => setConfirming(false)}>Keep</button><button type="button" className="automation-confirm danger" disabled={busy !== null} onClick={() => void act('delete')}>Delete</button></>
-            : <button type="button" className="icon-button" aria-label={`Delete ${automation.name}`} title="Delete" onClick={() => void act('delete')}><Trash2 size={14} /></button>}
+            : <Tip label="Delete"><button type="button" className="icon-button" aria-label={`Delete ${automation.name}`} onClick={() => void act('delete')}><Trash2 size={14} /></button></Tip>}
         </div>
       </div>
       {open && <div className="automation-detail">

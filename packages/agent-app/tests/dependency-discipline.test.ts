@@ -7,11 +7,11 @@ function sources(dir:string):string[] {
   return readdirSync(new URL(`../${dir}`,import.meta.url),{withFileTypes:true}).flatMap(entry=>entry.isDirectory()?sources(`${dir}/${entry.name}`):/\.(ts|tsx)$/.test(entry.name)?[`${dir}/${entry.name}`]:[]);
 }
 
-test('PER-10: Shiki ships one theme and per-language chunks, never its full bundles',()=>{
+test('PER-10: Shiki ships one dark/light theme pair and per-language chunks, never its full bundles',()=>{
   const offenders=sources('src').filter(file=>/from ['"](shiki|shiki\/bundle\/[^'"]+|@shikijs\/themes|@shikijs\/langs)['"]/.test(read(file)));
   assert.deepEqual(offenders,[],'no whole-bundle Shiki imports');
   const worker=read('src/renderer/syntax-highlight-worker.ts');
-  assert.deepEqual([...worker.matchAll(/@shikijs\/themes\/([\w-]+)/g)].map(match=>match[1]),['dark-plus']);
+  assert.deepEqual([...worker.matchAll(/@shikijs\/themes\/([\w-]+)/g)].map(match=>match[1]),['dark-plus','light-plus'],'one paired theme per appearance (UX-19)');
   assert.ok([...worker.matchAll(/import\('@shikijs\/langs\/[\w-]+'\)/g)].length<=60,'language grammars stay an explicit, lazily loaded list');
 });
 
