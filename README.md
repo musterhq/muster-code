@@ -8,7 +8,7 @@ Private. The standalone, Codex-first coding environment around muster: the refer
    newest `Muster Agent <version>` (while the repository is private you need a GitHub account with access).
 2. Download the file for your Mac (Apple menu > About This Mac shows the chip):
    - Apple silicon (M1 and later): `Muster-Agent-<version>-arm64.dmg`
-   - Intel: `Muster-Agent-<version>-x64.dmg`
+   - Intel: no download yet — run from a clone (see "Run Muster Agent on another Mac")
 
    A `.zip` of the same app is attached too, and `SHA256SUMS` lets you check the download
    (`shasum -a 256 -c SHA256SUMS --ignore-missing`).
