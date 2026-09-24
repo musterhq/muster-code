@@ -77,7 +77,7 @@ export function exportChat(source: ExportSource, format: ChatExportFormat, optio
   if (format === 'json') {
     const text = JSON.stringify({
       schemaVersion: 1, exportedAt, redacted: redact,
-      chat: { id: chat.id, title: clean(chat.title), status: chat.status, model: chat.model, provider: chat.providerId ?? 'hybrow', mode: chat.mode, updatedAt: chat.updatedAt, ...(folder ? { folder: folder.name } : {}), ...(project ? { project: project.name } : {}) },
+      chat: { id: chat.id, title: clean(chat.title), status: chat.status, model: chat.model, provider: chat.providerId ?? '', mode: chat.mode, updatedAt: chat.updatedAt, ...(folder ? { folder: folder.name } : {}), ...(project ? { project: project.name } : {}) },
       items: entries, omitted,
     }, null, 2) + '\n';
     return { text, omitted, fileName };

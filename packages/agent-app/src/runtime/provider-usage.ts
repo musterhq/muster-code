@@ -95,16 +95,13 @@ export function sessionRateLimits(sessionsRoot: string): Map<string, ProviderUsa
   return found;
 }
 
-const CODEX_FAMILY = /^(hybrow|openai-direct|codex)(?:_[0-9a-f]{10})?$/;
 /** Best current usage for one provider: live app-server data when present and newer, else the
- * newest session-log snapshot (same combining rule as domains/providers.ts's `usageFor`, including
- * the hybrow gateway special case: direct ChatGPT runs log as "openai", gateway runs under their
- * own id, so for a hybrow-family provider the newest non-"openai" rollout is used instead). No
- * caching here (callers are rare: building an admission-rejected reason). */
-export function currentProviderUsage(providerId: string, sessionsRoot: string): ProviderUsage | undefined {
-  const family = CODEX_FAMILY.exec(providerId)?.[1];
+ * newest session-log snapshot (same combining rule as domains/providers.ts's `usageFor`). Codex logs each
+ * rollout under the route's `model_provider` id from the user's config ("openai" for a ChatGPT sign-in),
+ * so that id picks the rollout. No caching here (callers are rare: building an admission-rejected reason). */
+export function currentProviderUsage(providerId: string, sessionsRoot: string, modelProvider = 'openai'): ProviderUsage | undefined {
   const logs = sessionRateLimits(sessionsRoot);
-  const logged = family === 'hybrow' ? [...logs].find(([name]) => name !== 'openai')?.[1] : logs.get('openai');
+  const logged = logs.get(modelProvider);
   const live = liveProviderUsage(providerId);
   const best = live && (!logged || live.updatedAt >= logged.updatedAt) ? live : logged;
   return best && {...best, providerId};

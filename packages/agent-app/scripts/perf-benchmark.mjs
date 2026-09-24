@@ -40,7 +40,7 @@ async function measure(fn,count=runs){const samples=[];for(let i=0;i<count;i++){
 async function seed(dir){
   const {AgentStore}=await import('../src/runtime/store.ts');
   const store=new AgentStore(dir),folder=store.addFolder(root,'agent-app');
-  const chats=[];for(let i=0;i<CHATS;i++)chats.push(store.createChat({folderId:folder.id,model:'claude/claude-fable-5',mode:'agent'}));
+  const chats=[];for(let i=0;i<CHATS;i++)chats.push(store.createChat({folderId:folder.id,model:'benchmark-model',mode:'agent'}));
   const long=chats[0].id,paragraph='Performance benchmark paragraph with `code`, **bold** text and a [link](https://example.test). '.repeat(4);
   store.tx(()=>{for(let i=0;i<TRANSCRIPT;i++){
     const kind=i%10===0?'user':i%10===5?'tool':i%3===0?'reasoning':'assistant';

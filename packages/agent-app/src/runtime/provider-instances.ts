@@ -1,11 +1,14 @@
 import {createRequire} from 'node:module';
 import {createHash} from 'node:crypto';
+import {execFile} from 'node:child_process';
 import * as nodeFs from 'node:fs';
 import {homedir} from 'node:os';
 import {join,isAbsolute} from 'node:path';
 import type {ProviderInfo} from '../shared/protocol.ts';
 import {catalogPricing,type ExcludedModel} from '../shared/model-catalog.ts';
-import type {RunnableAdapter} from './adapters/types.ts';
+import type {RunnableAdapter, Validation} from './adapters/types.ts';
+import {findBinary, locateCli, Validator} from './adapters/shared.ts';
+import {fetchModelList} from './adapters/http-chat.ts';
 
 export interface ProviderInstance {
   info: ProviderInfo;
@@ -16,8 +19,8 @@ export interface ProviderInstance {
   adapter?: RunnableAdapter;
 }
 /** The subset of node:fs this module touches; tests inject a counting wrapper. */
-export type ProviderInstanceFs=Pick<typeof nodeFs,'openSync'|'fstatSync'|'readSync'|'closeSync'|'existsSync'|'accessSync'|'statSync'>;
-export interface ProviderInstanceOptions {accountsFile?:string;directory?:string;home?:string;env?:NodeJS.ProcessEnv;fs?:Partial<ProviderInstanceFs>;now?:()=>number}
+export type ProviderInstanceFs=Pick<typeof nodeFs,'openSync'|'fstatSync'|'readSync'|'closeSync'|'existsSync'|'accessSync'|'statSync'|'readdirSync'>;
+export interface ProviderInstanceOptions {accountsFile?:string;directory?:string;home?:string;env?:NodeJS.ProcessEnv;fs?:Partial<ProviderInstanceFs>;now?:()=>number;/** Model listing for gateways without a catalog (tests). */fetch?:typeof fetch}
 const {constants}=nodeFs;
 const MAX_BYTES=1024*1024;
 function boundedFile(fs:ProviderInstanceFs,file:string):string {
@@ -45,7 +48,7 @@ const directModel=(id:string)=>/^(?:gpt-[a-zA-Z0-9.-]+|o[1-9][a-zA-Z0-9.-]*)$/.t
 const MAX_CATALOG_ENTRIES=500;
 /** PRO-04: the catalog decides what a route offers (this replaced a hardcoded gateway allowlist). Every entry
  * that is left out is returned in `excluded` with the reason, so nothing disappears silently. */
-export function catalogModels(family:'hybrow'|'openai-direct',list:readonly unknown[]):{models:ProviderInfo['models'];excluded:ExcludedModel[]} {
+export function catalogModels(family:'openai-direct'|'gateway'|(string&{}),list:readonly unknown[]):{models:ProviderInfo['models'];excluded:ExcludedModel[]} {
   const models:ProviderInfo['models']=[],excluded:ExcludedModel[]=[];
   list.slice(0,MAX_CATALOG_ENTRIES).forEach((raw,index)=>{
     const entry=raw&&typeof raw==='object'&&!Array.isArray(raw)?raw as Record<string,unknown>:undefined;
@@ -169,70 +172,233 @@ function maskedEmail(idToken:unknown):string|undefined {
   } catch {return undefined;}
 }
 
-/** Existing validated launchers and explicit local catalogs only. This does not
- * authenticate, start a process, probe a model or verify upstream entitlement.
- * The default CODEX_HOME keeps the ids `hybrow`/`openai-direct`; each extra account
- * adds `hybrow_<hash>` (when it has a gateway profile) and `openai-direct_<hash>`. */
+/** A Codex route found in the user's own Codex configuration. Nothing here is assumed: the provider id,
+ * its display name, endpoint and model catalog all come from `<CODEX_HOME>/config.toml`, the profile files
+ * beside it (`<name>.config.toml`) and Codex's own model cache. */
+interface CodexRouteSpec {
+  modelProvider: string;
+  kind: 'chatgpt' | 'gateway';
+  /** Profile file stem, when the route comes from `<name>.config.toml`; else the table lives in config.toml. */
+  profile?: string;
+  name?: string; baseUrl?: string; envKey?: string; authCommand?: {command: string; args: string[]; timeoutMs?: number};
+  catalogPath?: string;
+  /** Profile text or config table, hashed into the binding so an edited route needs reselection. */
+  fingerprint: string;
+  invalid?: string;
+}
+interface CodexToml {values: Map<string,string>; multiline: Set<string>}
+interface CodexProfileModule {profileOverrides(profile:string,text:string):string[]; parseToml(text:string):CodexToml}
+const RESERVED=/^(?:claude-code|opencode|codex|openai-direct|env-.*|local-.*|custom_.*)$/;
+const PROFILE_FILE=/^([A-Za-z0-9_.-]{1,64})\.config\.toml$/;
+const MAX_PROFILES=32;
+const tomlString=(toml:CodexToml,key:string):string|undefined=>{const raw=toml.values.get(key);if(raw===undefined)return undefined;try {const value=JSON.parse(raw) as unknown;return typeof value==='string'?value:undefined;} catch {return undefined;}};
+const tomlArray=(toml:CodexToml,key:string):string[]|undefined=>{const raw=toml.values.get(key);if(raw===undefined)return undefined;try {const value=JSON.parse(raw) as unknown;return Array.isArray(value)&&value.every(item=>typeof item==='string')?value as string[]:undefined;} catch {return undefined;}};
+const tomlNumber=(toml:CodexToml,key:string):number|undefined=>{const value=Number(toml.values.get(key));return Number.isFinite(value)&&value>0?value:undefined;};
+/** The provider table `[model_providers.<id>]` of a parsed Codex TOML file. */
+function providerTable(toml:CodexToml,id:string):Pick<CodexRouteSpec,'name'|'baseUrl'|'envKey'|'authCommand'>&{defined:boolean} {
+  const at=`model_providers.${id}.`,command=tomlString(toml,`${at}auth.command`);
+  return {defined:[...toml.values.keys()].some(key=>key.startsWith(at)),name:tomlString(toml,`${at}name`),baseUrl:tomlString(toml,`${at}base_url`),envKey:tomlString(toml,`${at}env_key`),
+    ...(command?{authCommand:{command,args:tomlArray(toml,`${at}auth.args`)??[],...(tomlNumber(toml,`${at}auth.timeout_ms`)?{timeoutMs:tomlNumber(toml,`${at}auth.timeout_ms`)}:{})}}:{})};
+}
+/** Ids of every `[model_providers.<id>]` table in a parsed Codex TOML file. */
+function providerIds(toml:CodexToml):string[] {
+  const ids=new Set<string>();
+  for(const key of [...toml.values.keys(),...toml.multiline]){const match=/^model_providers\.([A-Za-z0-9_-]{1,64})\./.exec(key);if(match)ids.add(match[1]!);}
+  return [...ids];
+}
+const humanize=(id:string)=>id.split(/[-_]+/).filter(Boolean).map(word=>word[0]!.toUpperCase()+word.slice(1)).join(' ')||id;
+
+/** Every Codex route in one CODEX_HOME: each profile file, each provider table in config.toml no profile covers,
+ * and the ChatGPT sign-in (OpenAI's own provider) when Codex has one. */
+function codexRoutes(fs:ProviderInstanceFs,codexHome:string,track:(file:string)=>string,validator:CodexProfileModule|undefined,signedIn:boolean):CodexRouteSpec[] {
+  const routes:CodexRouteSpec[]=[];
+  let config:CodexToml={values:new Map(),multiline:new Set()},configText='';
+  try {configText=boundedFile(fs,track(join(codexHome,'config.toml')));config=validator?.parseToml(configText)??config;} catch {/* no config.toml, or not parseable */}
+  const topProvider=tomlString(config,'model_provider')??'openai',topCatalog=tomlString(config,'model_catalog_json');
+  let names:string[]=[];
+  try {track(codexHome);names=(fs.readdirSync(codexHome) as string[]).filter(name=>PROFILE_FILE.test(name)&&name!=='config.toml').sort().slice(0,MAX_PROFILES);} catch {names=[];}
+  for(const name of names){
+    const profile=PROFILE_FILE.exec(name)![1]!;
+    let text:string;
+    try {text=boundedFile(fs,track(join(codexHome,name)));} catch {continue;}
+    let toml:CodexToml|undefined;try {toml=validator?.parseToml(text);} catch {toml=undefined;}
+    const modelProvider=toml?tomlString(toml,'model_provider'):undefined;
+    if(!modelProvider||!/^[A-Za-z0-9_-]{1,64}$/.test(modelProvider)){
+      // A TOML file that names no provider is not a route; one that cannot be parsed still shows why.
+      if(!toml&&/^\s*model_provider\s*=/m.test(text))routes.push({modelProvider:profile.replace(/[^A-Za-z0-9_-]/g,'-'),kind:'gateway',profile,fingerprint:text,invalid:'The profile could not be read as TOML.'});
+      continue;
+    }
+    let invalid:string|undefined;
+    try {validator?.profileOverrides(profile,text);} catch (error) {invalid=error instanceof Error?error.message:'The profile did not validate.';}
+    const table=providerTable(toml!,modelProvider),fromConfig=table.defined?table:providerTable(config,modelProvider);
+    routes.push({modelProvider,kind:modelProvider==='openai'?'chatgpt':'gateway',profile,name:fromConfig.name,baseUrl:fromConfig.baseUrl,envKey:fromConfig.envKey,...(fromConfig.authCommand?{authCommand:fromConfig.authCommand}:{}),catalogPath:tomlString(toml!,'model_catalog_json'),fingerprint:text,...(invalid?{invalid}:{})});
+  }
+  for(const id of providerIds(config)){
+    if(id==='openai'||routes.some(route=>route.modelProvider===id&&!route.invalid))continue;
+    const table=providerTable(config,id);
+    routes.push({modelProvider:id,kind:'gateway',...table,catalogPath:topProvider===id?topCatalog:undefined,fingerprint:JSON.stringify([id,table])});
+  }
+  // OpenAI's own provider needs no table: a Codex sign-in is enough.
+  if(signedIn&&!routes.some(route=>route.modelProvider==='openai'&&!route.invalid))routes.push({modelProvider:'openai',kind:'chatgpt',catalogPath:topProvider==='openai'?topCatalog:undefined,fingerprint:'openai'});
+  return routes;
+}
+
+/** Stable provider ids: OpenAI's own route is `openai-direct`; a gateway keeps its Codex provider id (so a chat
+ * bound to it keeps working), prefixed when it would collide with another Muster route. */
+function routeIds(routes:CodexRouteSpec[]):string[] {
+  const used=new Set<string>();
+  return routes.map(route=>{
+    let id=route.modelProvider==='openai'?'openai-direct':RESERVED.test(route.modelProvider)?`codex-${route.modelProvider}`:route.modelProvider;
+    if(used.has(id)&&route.profile)id=`${id}-${route.profile.replace(/[^A-Za-z0-9-]/g,'-')}`;
+    while(used.has(id))id=`${id}-2`;
+    used.add(id);return id;
+  });
+}
+
+/** A gateway with no model catalog lists its models from `<base_url>/models`, the way it would authenticate a run:
+ * its `env_key` variable, its own `auth.command` helper (the one Codex runs), or nothing for a local endpoint. */
+type Models=ProviderInfo['models'];
+const listings=new Map<string,Validator<Models>>();
+const settleListeners=new Set<()=>void>();
+/** Called when a model listing settles, so a cached instance list is rebuilt with its result. */
+export function onProviderListingSettled(listener:()=>void):()=>void {settleListeners.add(listener);return ()=>settleListeners.delete(listener);}
+/** Resolves once no model listing is in flight. */
+export async function providerListingsSettled():Promise<void> {await Promise.all([...listings.values()].map(listing=>listing.settled()));}
+async function helperToken(command:{command:string;args:string[];timeoutMs?:number},env:NodeJS.ProcessEnv):Promise<string> {
+  return new Promise((resolve,reject)=>execFile(command.command,command.args,{timeout:Math.min(command.timeoutMs??5000,15_000),maxBuffer:64*1024,env,encoding:'utf8'},(error,stdout)=>{
+    const token=String(stdout??'').trim().split('\n')[0]??'';
+    if(error||!token)reject(new Error('The provider’s auth helper did not return a token.'));else resolve(token);
+  }));
+}
+function listing(route:CodexRouteSpec,env:NodeJS.ProcessEnv,fetcher:typeof fetch|undefined):Validation<Models> {
+  const base=route.baseUrl!.replace(/\/+$/,''),key=JSON.stringify([base,route.envKey??'',route.authCommand?.command??'',route.envKey?createHash('sha256').update(env[route.envKey]??'').digest('hex'):'']);
+  let found=listings.get(key);
+  if(!found){
+    found=new Validator<Models>(async()=>{
+      const token=route.envKey?env[route.envKey]:route.authCommand?await helperToken(route.authCommand,env):undefined;
+      if(route.envKey&&!token)throw new Error(`${route.envKey} is not set in Muster’s environment.`);
+      const models=await fetchModelList(`${base}/models`,token?{authorization:`Bearer ${token}`}:{},route.name??route.modelProvider,fetcher);
+      return models;
+    });
+    if(listings.size>=32)listings.delete(listings.keys().next().value!);
+    listings.set(key,found);
+  }
+  const before=found.current(key);
+  if(before.status==='pending')void found.settled().then(()=>{invalidateProviderInstances();for(const listener of settleListeners)listener();});
+  return before;
+}
+
+/** Node for the launcher: MUSTER_PROVIDER_NODE, a `node` on PATH or in a standard location, else Electron itself run as Node. */
+export function providerNode(env:NodeJS.ProcessEnv=process.env,home:string=homedir()):{node:string;env:Record<string,string>} {
+  if(env.MUSTER_PROVIDER_NODE)return {node:env.MUSTER_PROVIDER_NODE,env:{}};
+  const found=findBinary('node',env,home);
+  if(found)return {node:found,env:{}};
+  return process.versions.electron?{node:process.execPath,env:{ELECTRON_RUN_AS_NODE:'1'}}:{node:process.execPath,env:{}};
+}
+/** The Codex CLI: MUSTER_CODEX_COMMAND, else `codex` on PATH, a standard install location, or a ChatGPT/Codex app bundle. */
+export const codexCli=(env:NodeJS.ProcessEnv,home:string):string|undefined=>env.MUSTER_CODEX_COMMAND||locateCli('codex',env,home);
+
+/** The launcher's own profile validator and TOML reader: bundled beside the launcher, or (running from source) the
+ *  app's own resources/ copy. Only this file decides what a valid profile is. */
+function profileModule(directory:string):CodexProfileModule|undefined {
+  // Bundled: dist/runtime/resources. From source (tests run ESM, where __dirname is undefined): packages/agent-app/resources.
+  const here=typeof __dirname==='string'?__dirname:join(process.cwd(),'src','runtime');
+  for(const file of [join(directory,'resources','codex-profile.cjs'),join(here,'resources','codex-profile.cjs'),join(here,'..','..','resources','codex-profile.cjs')]){
+    try {return createRequire(join(directory,'provider-instances.cjs'))(file) as CodexProfileModule;} catch {/* next location */}
+  }
+  return undefined;
+}
+/** Routes read from the user's Codex configuration. This does not authenticate, start Codex, or verify upstream
+ * entitlement; a gateway without a catalog is asked for its model list (see `listing`). The default CODEX_HOME
+ * keeps plain ids; each extra account adds `<id>_<hash>`. */
 export function configuredProviderInstances(options:ProviderInstanceOptions={}):ProviderInstance[] {
-  const directory=options.directory??__dirname,home=options.home??homedir(),env=options.env??process.env;
+  const directory=options.directory??(typeof __dirname==='string'?__dirname:join(process.cwd(),'src','runtime')),home=options.home??homedir(),env=options.env??process.env;
   const fs:ProviderInstanceFs=options.fs?{...nodeFs,...options.fs}:nodeFs;
   const at=(options.now??Date.now)();
   const codexHome=env.CODEX_HOME||join(home,'.codex');
-  const cli=env.MUSTER_CODEX_COMMAND||join(home,'.local/bin/codex');
+  const cli=codexCli(env,home);
   const accountsFile=options.accountsFile??(registeredDataDir?providerAccountsFile(registeredDataDir):undefined);
-  const key=JSON.stringify([directory,codexHome,cli,env.MUSTER_PROVIDER_NODE??'',accountsFile??'']);
+  const key=JSON.stringify([directory,codexHome,cli??'',env.MUSTER_PROVIDER_NODE??'',accountsFile??'',env.PATH??'']);
   const memo=memos.get(key);
   if(memo&&fresh(fs,memo,at))return memo.value;
   const files=new Map<string,Stamp>();
   const track=(file:string)=>{if(!files.has(file))files.set(file,stamp(fs,file));return file;};
-  const node=env.MUSTER_PROVIDER_NODE||['/opt/homebrew/bin/node','/usr/local/bin/node'].find(candidate=>fs.existsSync(candidate))||'node';
-  track(cli);
+  const node=providerNode(env,home);
+  if(cli)track(cli);
+  const validator=profileModule(directory);
+  const context={fs,directory,cli,node,env,track,validator,fetch:options.fetch};
   const extra=accountsFile?readAccounts(fs,track(accountsFile)).filter(account=>account.codexHome!==codexHome):[];
-  const value=[...homeInstances({fs,directory,codexHome,cli,node,env,track}),...extra.flatMap(account=>homeInstances({fs,directory,codexHome:account.codexHome,cli,node,env,track,account}))];
+  const value=[...homeInstances({...context,codexHome}),...extra.flatMap(account=>homeInstances({...context,codexHome:account.codexHome,account}))];
   if(!memo&&memos.size>=MAX_MEMOS)memos.delete(memos.keys().next().value!);
   memos.set(key,{checkedAt:at,files,value});
   return value;
 }
-function homeInstances({fs,directory,codexHome,cli,node,env,track,account}:{fs:ProviderInstanceFs;directory:string;codexHome:string;cli:string;node:string;env:NodeJS.ProcessEnv;track(file:string):string;account?:ProviderAccount}):ProviderInstance[] {
+interface HomeContext {fs:ProviderInstanceFs;directory:string;codexHome:string;cli?:string;node:{node:string;env:Record<string,string>};env:NodeJS.ProcessEnv;track(file:string):string;validator?:CodexProfileModule;fetch?:typeof fetch;account?:ProviderAccount}
+function homeInstances({fs,directory,codexHome,cli,node,env,track,validator,fetch:fetcher,account}:HomeContext):ProviderInstance[] {
   let mcp:string[]=[];
   try {mcp=mcpServerNames(boundedFile(fs,track(join(codexHome,'config.toml'))));} catch {mcp=[];}
   const suffix=account?`_${accountHash(account.codexHome)}`:'';
-  let email:string|undefined;
-  if(account)try {email=maskedEmail((JSON.parse(boundedFile(fs,track(join(codexHome,'auth.json')))) as {tokens?:{id_token?:unknown}}).tokens?.id_token);} catch {email=undefined;}
-  const profiles=([['hybrow','hybrow-gateway','Hybrow OmniRoute'],['openai-direct','openai-direct','OpenAI Direct']] as const)
-    .filter(([,profile])=>!account||profile==='openai-direct'||(()=>{try {return fs.statSync(track(join(codexHome,`${profile}.config.toml`)),{throwIfNoEntry:false})?.isFile()===true;} catch {return false;}})());
-  return profiles.map<ProviderInstance>(([family,profile,label])=>{
-    const id=`${family}${suffix}`,name=account?`${label} · ${account.label??email??`account ${suffix.slice(1,7)}`}`:label;
-    const command=track(join(directory,'resources',`codex-${profile}.sh`));
-    const profilePath=track(join(codexHome,`${profile}.config.toml`));
-    const childEnv={MUSTER_PROVIDER_NODE:node,CODEX_HOME:codexHome,...(env.MUSTER_CODEX_COMMAND?{MUSTER_CODEX_COMMAND:env.MUSTER_CODEX_COMMAND}:{})};
-    const base={id,name,driver:'codex-app-server',identityMasked:family==='hybrow'?'Gateway profile · account hidden':email??'ChatGPT account · hidden',models:[],available:false,...(account?{source:`Codex account at ${account.codexHome}`}:{})} satisfies ProviderInfo;
-    try {
-      fs.accessSync(command,constants.X_OK);
-      fs.accessSync(cli,constants.X_OK);
-      const profileText=boundedFile(fs,profilePath);
-      const validator=createRequire(join(directory,'provider-instances.cjs'))(join(directory,'resources','codex-profile.cjs')) as {profileOverrides(profile:string,text:string):string[]};
-      const overrides=validator.profileOverrides(profile,profileText);
-      const catalogField=overrides.find(value=>value.startsWith('model_catalog_json='));
-      const catalogPath=JSON.parse(catalogField?.slice('model_catalog_json='.length)??'null') as unknown;
-      if(typeof catalogPath!=='string'||!isAbsolute(catalogPath))throw new Error('A configured absolute model catalog is required.');
-      const catalog=JSON.parse(boundedFile(fs,track(catalogPath))) as {models?:unknown};
-      if(!Array.isArray(catalog.models))throw new Error('A model catalog is required.');
-      const {models,excluded}=catalogModels(family,catalog.models);
-      if(!models.length)throw new Error('No supported models in configured catalog.');
-      // Direct account identity is stable across token refresh. Never expose the
-      // account ID or token; opaque binding detects configuration/account change.
-      let accountId='gateway-account-not-reported';
-      if(family==='openai-direct'){
-        const auth=JSON.parse(boundedFile(fs,track(join(codexHome,'auth.json')))) as {tokens?:{account_id?:unknown;access_token?:unknown}};
-        if(typeof auth.tokens?.account_id!=='string'||!auth.tokens.account_id||typeof auth.tokens.access_token!=='string'||!auth.tokens.access_token)throw new Error('A locally identifiable ChatGPT sign-in is required.');
-        accountId=auth.tokens.account_id;
-      }
-      const bindingId=createHash('sha256').update(JSON.stringify([family,codexHome,cli,profileText,accountId])).digest('hex');
-      return {info:{...base,models,...(excluded.length?{excludedModels:excluded}:{}),available:true,status:'ready',bindingId,detail:`Executable profile and local model catalog configured. ${mcpDetail(mcp)} Upstream access is checked only when you run.`},command,env:childEnv,sessionsRoot:join(codexHome,'sessions')};
-    } catch {
-      const error=account?`This account needs an executable ${profile}.config.toml with a local model catalog${family==='openai-direct'?' and a ChatGPT sign-in (auth.json)':''} in ${codexHome}. No provider fallback will be used.`:'The executable, validated profile, local model catalog or identifiable account is unavailable. No provider fallback will be used.';
-      return {info:{...base,status:'configured',error,detail:`${error} ${mcpDetail(mcp)}`},command,env:childEnv,sessionsRoot:join(codexHome,'sessions')};
+  let auth:{tokens?:{id_token?:unknown;account_id?:unknown;access_token?:unknown};OPENAI_API_KEY?:unknown}|undefined;
+  try {auth=JSON.parse(boundedFile(fs,track(join(codexHome,'auth.json'))));} catch {auth=undefined;}
+  const email=account?maskedEmail(auth?.tokens?.id_token):undefined;
+  // A sign-in held outside auth.json (Keychain, the ChatGPT app's own CLI) still leaves Codex's model cache behind, which
+  // Codex only writes after an authenticated model listing: then the ChatGPT route is offered without asking to sign in.
+  let cached=false;try {cached=fs.statSync(track(join(codexHome,'models_cache.json')),{throwIfNoEntry:false})?.isFile()===true;} catch {cached=false;}
+  const signedIn=Boolean(auth)||(!account&&Boolean(cli)&&cached);
+  const routes=codexRoutes(fs,codexHome,track,validator,signedIn);
+  const ids=routeIds(routes);
+  const names=routes.map(route=>route.kind==='chatgpt'?'OpenAI (ChatGPT sign-in)':route.name?.replace(/[\x00-\x1f]/g,'').slice(0,80)||humanize(route.modelProvider));
+  const command=track(join(directory,'resources','codex-launch.sh'));
+  return routes.map<ProviderInstance>((route,index)=>{
+    const id=`${ids[index]}${suffix}`;
+    const duplicate=names.filter(name=>name===names[index]).length>1&&route.profile;
+    const label=duplicate?`${names[index]} (${route.profile})`:names[index]!;
+    const name=account?`${label} · ${account.label??email??`account ${suffix.slice(1,7)}`}`:label;
+    const catalogPath=route.catalogPath&&isAbsolute(route.catalogPath)?route.catalogPath:undefined;
+    const childEnv:Record<string,string>={MUSTER_PROVIDER_NODE:node.node,...node.env,CODEX_HOME:codexHome,...(cli?{MUSTER_CODEX_COMMAND:cli}:{}),
+      ...(route.profile?{MUSTER_CODEX_PROFILE:route.profile}:{MUSTER_CODEX_PROVIDER:route.modelProvider,...(catalogPath?{MUSTER_CODEX_CATALOG:catalogPath}:{})})};
+    const codex={modelProvider:route.modelProvider,kind:route.kind,...(route.profile?{profile:route.profile}:{}),...(account?{account:suffix.slice(1)}:{})} satisfies NonNullable<ProviderInfo['codex']>;
+    const source=route.profile?`Codex profile ${route.profile}.config.toml${account?` in ${account.codexHome}`:''}`:route.kind==='chatgpt'?`Codex sign-in${account?` at ${account.codexHome}`:''}`:`[model_providers.${route.modelProvider}] in Codex config.toml${account?` at ${account.codexHome}`:''}`;
+    const base={id,name,driver:'codex-app-server',codex,identityMasked:route.kind==='gateway'?'Gateway · account hidden':email??'ChatGPT account · hidden',models:[],available:false,source,...(route.baseUrl?{endpoint:route.baseUrl}:{})} satisfies ProviderInfo;
+    const sessionsRoot=join(codexHome,'sessions');
+    const fail=(error:string,status:'configured'|'error'='configured'):ProviderInstance=>({info:{...base,status,error,detail:`${error} No provider fallback will be used. ${mcpDetail(mcp)}`},command,env:childEnv,sessionsRoot});
+    if(route.invalid)return fail(`${route.profile}.config.toml did not validate: ${route.invalid}`,'error');
+    try {fs.accessSync(command,constants.X_OK);} catch {return fail('Muster’s bundled Codex launcher is missing. Reinstall Muster.','error');}
+    if(!cli)return fail('The Codex CLI was not found. Install it, or set MUSTER_CODEX_COMMAND to its path.');
+    try {fs.accessSync(cli,constants.X_OK);} catch {return fail(`The Codex CLI at ${cli} is not executable.`);}
+    let list:unknown[]|undefined,incremental=false,catalogSource='';
+    if(catalogPath){
+      try {const catalog=JSON.parse(boundedFile(fs,track(catalogPath))) as {models?:unknown;reports_incremental_input?:unknown};if(Array.isArray(catalog.models)){list=catalog.models;incremental=catalog.reports_incremental_input===true;catalogSource='its model catalog';}} catch {list=undefined;}
+      if(!list)return fail(`The model catalog ${catalogPath} is missing, unreadable or has no "models" array.`);
+    } else if(route.kind==='chatgpt'){
+      // Codex keeps the model list of a ChatGPT sign-in in its own cache.
+      try {const cache=JSON.parse(boundedFile(fs,track(join(codexHome,'models_cache.json')))) as {models?:unknown};if(Array.isArray(cache.models)){list=cache.models;catalogSource='Codex’s model cache';}} catch {list=undefined;}
+      if(!list)return fail('Codex has not listed this account’s models yet. Run `codex` once, or set model_catalog_json in config.toml.');
     }
+    let models:Models,excluded:ExcludedModel[]=[];
+    if(list)({models,excluded}=catalogModels(route.kind==='chatgpt'?'openai-direct':'gateway',list));
+    else if(route.baseUrl){
+      const listed=listing(route,env,fetcher);
+      if(listed.status==='pending')return {info:{...base,status:'configured',detail:`Listing models from ${route.baseUrl}… Scan again in a moment. ${mcpDetail(mcp)}`},command,env:childEnv,sessionsRoot};
+      if(listed.status==='error')return fail(`${listed.reason} Add model_catalog_json to the profile to list models without asking the endpoint.`,'error');
+      models=listed.value!;catalogSource=`${route.baseUrl}/models`;
+    } else return fail(`[model_providers.${route.modelProvider}] has no base_url and no model catalog.`);
+    if(!models.length)return fail('The provider reported no models Muster can run.','error');
+    // Direct account identity is stable across token refresh. Never expose the
+    // account ID or token; the opaque binding detects configuration/account change.
+    let accountId='gateway-account-not-reported';
+    if(route.kind==='chatgpt'){
+      const tokenAccount=auth?.tokens?.account_id,apiKey=typeof auth?.OPENAI_API_KEY==='string'&&auth.OPENAI_API_KEY?createHash('sha256').update(auth.OPENAI_API_KEY).digest('hex'):undefined;
+      if(route.profile==='openai-direct'&&(typeof tokenAccount!=='string'||!tokenAccount||typeof auth?.tokens?.access_token!=='string'||!auth.tokens.access_token))return fail('A locally identifiable ChatGPT sign-in is required. Run `codex login`.');
+      accountId=typeof tokenAccount==='string'&&tokenAccount?tokenAccount:apiKey??'codex-sign-in';
+    }
+    const bindingId=createHash('sha256').update(JSON.stringify([route.modelProvider,route.profile??'',codexHome,cli,route.fingerprint,accountId])).digest('hex');
+    return {info:{...base,models,...(excluded.length?{excludedModels:excluded}:{}),...(incremental?{incrementalInput:true}:{}),available:true,status:'ready',bindingId,detail:`Runs through the Codex CLI with ${catalogSource}. ${mcpDetail(mcp)} Upstream access is checked only when you run.`},command,env:childEnv,sessionsRoot};
   });
+}
+
+/** The Codex route behind a provider id, from the current instance list; undefined for non-Codex routes. */
+export function codexRouteFor(id:string,options:ProviderInstanceOptions={}):{codex:NonNullable<ProviderInfo['codex']>;codexHome:string;sessionsRoot:string;instance:ProviderInstance}|undefined {
+  const instance=configuredProviderInstances(options).find(row=>row.info.id===id&&row.info.codex);
+  return instance?{codex:instance.info.codex!,codexHome:instance.env.CODEX_HOME!,sessionsRoot:instance.sessionsRoot,instance}:undefined;
 }

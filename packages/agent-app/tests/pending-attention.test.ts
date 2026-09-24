@@ -7,7 +7,9 @@ import {randomUUID} from 'node:crypto';
 import {setTimeout as delay} from 'node:timers/promises';
 import {createAgentService} from '../src/runtime/service.ts';
 import {AgentStore} from '../src/runtime/store.ts';
-import {MODEL,type ProviderAdapter,type ProviderInput} from '../src/runtime/provider.ts';
+import {type ProviderAdapter,type ProviderInput} from '../src/runtime/provider.ts';
+/** A fixture model id: tests never depend on a particular provider's catalog. */
+const MODEL='fixture-model';
 import type {AgentEvent} from '../src/shared/protocol.ts';
 const payload={itemId:'reused-provider-id',questions:[{id:'secret',question:'PRIVATE QUESTION',isSecret:true,options:[{label:'PRIVATE OPTION'}]}]};
 const adapter=(run:ProviderAdapter['run']):ProviderAdapter=>({info:()=>[{id:'hybrow',name:'Hybrow',available:true,identityMasked:'Hidden',models:[]}],run,stop:async()=>true,dispose(){}});

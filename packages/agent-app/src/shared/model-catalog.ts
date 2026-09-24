@@ -143,16 +143,15 @@ export interface UsageReport {
   /** Project reports: chats in the Project that reported usage. */
   chats?: number;
 }
-/** Gateways whose token reports carry only incremental input tokens (the Hybrow OmniRoute gateway). */
-export const reportsIncrementalInput = (providerId: string): boolean => /^hybrow(?:_[0-9a-f]{10})?$/.test(providerId);
-export const INCREMENTAL_INPUT_NOTE = 'The Hybrow gateway reports only incremental input tokens, not the full prompt each request carried, so input totals and cost estimates for its chats are lower bounds.';
-export function summarizeUsage(scope: UsageReport['scope'], id: string, rows: UsageRow[], updatedAt: string | null): UsageReport {
+export const INCREMENTAL_INPUT_NOTE = 'A gateway used here reports only incremental input tokens, not the full prompt each request carried, so input totals and cost estimates for its chats are lower bounds.';
+/** `incremental` says which providers report only incremental input tokens (a route's catalog declares it; nothing is assumed). */
+export function summarizeUsage(scope: UsageReport['scope'], id: string, rows: UsageRow[], updatedAt: string | null, incremental: (providerId: string) => boolean = () => false): UsageReport {
   let totals = ZERO_USAGE, cost: number | null = null, unpriced = 0;
   for (const row of rows) {
     totals = addUsage(totals, row.totals);
     if (row.costUsd === null) unpriced += usageTokens(row.totals); else cost = (cost ?? 0) + row.costUsd;
   }
-  return { scope, id, rows, totals, costUsd: cost, unpricedTokens: unpriced, incrementalInput: rows.some(row => reportsIncrementalInput(row.providerId)), updatedAt };
+  return { scope, id, rows, totals, costUsd: cost, unpricedTokens: unpriced, incrementalInput: rows.some(row => incremental(row.providerId)), updatedAt };
 }
 /** "$1.23", "$1.23 + unpriced" when some tokens have no known price, or "—" when none do. */
 export function costLabel(report: Pick<UsageReport, 'costUsd' | 'unpricedTokens'>): string {

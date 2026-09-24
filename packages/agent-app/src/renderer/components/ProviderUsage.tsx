@@ -1,10 +1,16 @@
 import React, { useEffect, useState } from 'react';
 import type { ProviderUsage, ProviderUsageWindow } from '../../shared/domains/providers-protocol';
+import type { ProviderInfo } from '../../shared/protocol';
 import { invoke, subscribe } from '../bridge';
+import { getState } from '../store';
 
-const CODEX = /^(hybrow|openai-direct|codex)(?:_[0-9a-f]{10})?$/;
-/** Only Codex-backed routes report rate-limit windows. */
-export const reportsUsage = (providerId: string | undefined) => Boolean(providerId && CODEX.test(providerId));
+/** Only routes that run through the Codex CLI (a ChatGPT sign-in or any gateway from the user's Codex config) report
+ *  rate-limit windows. A bare id is looked up in the loaded provider list; `codex` is the plain Codex CLI sign-in. */
+export const reportsUsage = (provider: string | Pick<ProviderInfo, 'id' | 'codex'> | undefined): boolean => {
+  if (!provider) return false;
+  const row = typeof provider === 'string' ? getState().providers.value?.find(entry => entry.id === provider) : provider;
+  return Boolean(row?.codex) || (typeof provider === 'string' ? provider : provider.id) === 'codex';
+};
 export const windowName = (minutes: number | null) => !minutes ? 'Window' : minutes >= 10_080 && minutes % 10_080 === 0 ? 'Weekly' : minutes >= 1440 ? `${Math.round(minutes / 1440)}-day` : `${Math.round(minutes / 60)}-hour`;
 export function resetLabel(iso: string | null, now = Date.now()): string {
   if (!iso) return 'reset time not reported';

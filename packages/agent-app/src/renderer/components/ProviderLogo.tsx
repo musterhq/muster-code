@@ -1,5 +1,4 @@
 import React from 'react';
-import { BrandMark } from './BrandMark';
 import { PluginIcon } from './PluginIcon';
 
 /** Single-colour brand glyphs (currentColor), path data taken verbatim from simple-icons. */
@@ -32,17 +31,15 @@ const BRAND_GLYPHS = {
 
 type BrandKey = keyof typeof BRAND_GLYPHS;
 
-/** Muster's own Codex/ChatGPT identity check (kept identical to ProvidersScreen's CODEX regex, minus hybrow —
- * hybrow is Muster's own gateway and gets the Muster mark, not the OpenAI glyph it proxies). */
+/** OpenAI's own routes: the ChatGPT sign-in through Codex (`openai-direct`, per account) and the Codex CLI row. */
 const OPENAI_ID = /^(openai-direct|codex)(?:_[0-9a-f]{10})?$/;
 
 /**
- * Resolves a provider's id/name/endpoint to a known brand glyph. Returns `'hybrow'` for Muster's own gateway
- * (rendered with {@link BrandMark}), a {@link BrandKey} for a recognized third-party brand, or `undefined` when
- * nothing matches — callers should fall back to the deterministic monogram rather than guess a shape.
+ * Resolves a provider's id/name/endpoint to a known brand glyph: a {@link BrandKey} for a recognized brand, or
+ * `undefined` when nothing matches. A gateway from the user's own config (any name) gets the deterministic monogram
+ * rather than a guessed shape or Muster's mark.
  */
-export function providerBrand(id: string, name?: string, endpoint?: string): BrandKey | 'hybrow' | undefined {
-  if (id === 'hybrow') return 'hybrow';
+export function providerBrand(id: string, name?: string, endpoint?: string): BrandKey | undefined {
   if (OPENAI_ID.test(id) || id === 'env-openai') return 'openai';
   if (id === 'claude-code') return 'claude';
   if (id === 'env-anthropic') return 'anthropic';
@@ -60,7 +57,7 @@ export function providerBrand(id: string, name?: string, endpoint?: string): Bra
 }
 
 export interface ProviderLogoProps {
-  /** Provider id (e.g. `hybrow`, `claude-code`, `codex`) or a custom connection's id. */
+  /** Provider id (e.g. `openai-direct`, `claude-code`, a gateway id from the user's Codex config) or a custom connection's id. */
   id: string;
   /** Display name, used both for brand sniffing on custom connections and as the monogram fallback's seed text. */
   name: string;
@@ -71,13 +68,12 @@ export interface ProviderLogoProps {
 }
 
 /**
- * A provider's real brand glyph (single-colour, currentColor), or the Muster mark for Muster's own gateway.
+ * A provider's real brand glyph (single-colour, currentColor).
  * Unrecognized providers — mainly custom, user-named connections — fall back to {@link PluginIcon}'s deterministic
  * monogram rather than a made-up shape.
  */
 export function ProviderLogo({ id, name, endpoint, size = 18, className }: ProviderLogoProps): React.ReactElement {
   const brand = providerBrand(id, name, endpoint);
-  if (brand === 'hybrow') return <BrandMark size={size} className={className} />;
   if (brand) {
     const glyph = BRAND_GLYPHS[brand];
     return <svg width={size} height={size} viewBox={glyph.viewBox} fill="currentColor" className={className} aria-hidden="true" focusable="false"><path d={glyph.path} /></svg>;

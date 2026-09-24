@@ -36,7 +36,7 @@ test('the Codex route sends the lean overrides; a connector request keeps apps o
   const runs:Record<string,unknown>[]=[];
   const core:CoreClient={CODEX_RUN_LIFECYCLE_VERSION:1,async runCodexAppServer(args){runs.push(args);return {status:'completed',finalMessage:'ok',threadId:'thread',turnId:`turn-${runs.length}`,dispatchState:'dispatched'} as ProviderResult;},async callCodexConversation(){return {};},async interruptActiveCodexTurn(){return false;},clearCodexAppServerSessions(){}};
   const adapter=createProviderAdapter({core,available:()=>true,command:'/unused'});
-  const input=(prompt:string,connectorsRequested=false):ProviderInput=>({chat:{id:'c1',mode:'agent'} as ProviderInput['chat'],cwd:'/unused',prompt,...(connectorsRequested?{connectorsRequested}:{}),onDelta(){},onReasoning(){},onEvent(){},async onRequest(){return undefined;}});
+  const input=(prompt:string,connectorsRequested=false):ProviderInput=>({chat:{id:'c1',mode:'agent',providerId:'fixture'} as ProviderInput['chat'],cwd:'/unused',prompt,...(connectorsRequested?{connectorsRequested}:{}),onDelta(){},onReasoning(){},onEvent(){},async onRequest(){return undefined;}});
   const overrides=()=>runs.at(-1)!.configOverrides as string[];
   await adapter.run(input(REQUEST));
   assert.ok(overrides().includes('features.apps=false'));assert.ok(overrides().includes('features.recommended_plugins=false'));assert.ok(overrides().includes('features.goals=false'));

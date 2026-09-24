@@ -178,7 +178,7 @@ export function createSettingsDomain(ctx: DomainContext, electron: ElectronApi |
   };
   /** Project default → folder default → user default → built-in; a level whose provider or model is no longer ready is skipped. */
   const resolveDefaults = (input: { folderId?: string; projectId?: string }): ResolvedChatDefaults => {
-    const catalog = ctx.modelCatalog?.() ?? { providers: [], builtin: { providerId: 'hybrow', model: '' } };
+    const catalog = ctx.modelCatalog?.() ?? { providers: [], builtin: { providerId: '', model: '' } };
     livingProjectDefaults(); // drops defaults of Projects deleted since the last read
     const projectId = input.projectId ?? (input.folderId ? projectForFolder(input.folderId) : undefined);
     const project = projectId ? projectDefault(projectId) : undefined;

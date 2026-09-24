@@ -5,16 +5,20 @@ import type {ProviderInfo} from '../../shared/protocol.ts';
 import {activeCustomProviders, customRunnable, CUSTOM_CHAT_ONLY, type CustomConnection} from '../custom-providers.ts';
 import {validateEndpoint} from '../custom-providers.ts';
 import {providerDataDir, type ProviderInstance} from '../provider-instances.ts';
-import {claudeCodeAdapter, CLAUDE_CODE_MODELS, type Spawn} from './claude-code.ts';
+import {claudeCodeAdapter, type Spawn} from './claude-code.ts';
+import {claudeCodeModels} from './claude-models.ts';
 import {ANTHROPIC_API, anthropicAdapter, CHAT_ONLY, fetchModelList, openAICompatibleAdapter} from './http-chat.ts';
 import {openCodeAdapter, openCodeCapabilities, probe} from './opencode.ts';
 import {ConversationMemory, findBinary, Validator} from './shared.ts';
+import {ENV_KEY_PROVIDERS, localServers} from '../env-providers.ts';
+import {configuredProviderInstances} from '../provider-instances.ts';
+import {existsSync} from 'node:fs';
 import {claudeAuthStamp, claudeSignIn} from './claude-auth.ts';
 import type {RunnableAdapter, Validation} from './types.ts';
 
 export type {RunnableAdapter} from './types.ts';
 /** Provider ids served by these adapters; their runs never leave remote work behind. */
-export const isAdapterProvider = (id: string) => id === 'claude-code' || id === 'opencode' || id === 'env-openai' || id === 'env-anthropic' || id.startsWith('custom_');
+export const isAdapterProvider = (id: string) => id === 'claude-code' || id === 'opencode' || id.startsWith('env-') || id.startsWith('local-') || id.startsWith('custom_');
 const hash = (...parts: unknown[]) => createHash('sha256').update(JSON.stringify(parts)).digest('hex');
 const OPENAI_CHAT = /^(?:gpt-|chatgpt-|o[1-9])/, OPENAI_EXCLUDE = /(?:audio|realtime|tts|transcribe|image|search|embedding|instruct|moderation|dall-e|codex)/;
 
@@ -26,6 +30,10 @@ export interface AdapterCatalogOptions {
   historyDir?: () => string | undefined;
   /** R9: resolves when Claude Code is signed in, rejects with the reason when not. Never runs `claude`. */
   claudeSignIn?: () => Promise<string>;
+  /** Endpoints the user's Codex routes already reach; a local server behind one is not offered twice. */
+  codexEndpoints?: () => string[];
+  /** Probe local model servers (Ollama, LM Studio, an installed OmniRoute) on localhost. Default true outside tests. */
+  localProbes?: boolean;
 }
 export interface AdapterCatalog { instances(): ProviderInstance[]; ready(): Promise<void> }
 
@@ -54,7 +62,17 @@ export function createAdapterCatalog(options: AdapterCatalogOptions = {}): Adapt
   };
   const claudeBinary = () => binary('claude', env().MUSTER_CLAUDE_COMMAND, join(home, '.claude/local/claude'));
   const openCodeBinary = () => binary('opencode', env().MUSTER_OPENCODE_COMMAND, join(home, '.opencode/bin/opencode'));
-  const validators = [claudeCheck, openCodeCheck, openAICheck, anthropicCheck];
+  // Other well-known API-key variables: OpenAI-compatible endpoints, models from their own /models list.
+  const envChecks = new Map(ENV_KEY_PROVIDERS.filter(key => key.kind === 'openai-compatible').map(key => [key.id, new Validator(async () => fetchModelList(`${endpointFor(key)}/models`, {authorization: `Bearer ${env()[key.env]}`}, key.name, request))]));
+  const endpointFor = (key: (typeof ENV_KEY_PROVIDERS)[number]) => { const override = key.baseEnv ? env()[key.baseEnv] : undefined; try { return override ? validateEndpoint(override) : key.endpoint; } catch { return key.endpoint; } };
+  // Local servers answer fast or not at all; a server that is not running is simply not listed.
+  const localChecks = new Map<string, Validator<Array<{id: string; name: string}>>>();
+  const localCheck = (bindingId: string, label: string, endpoint: string, key: string | undefined) => { let found = localChecks.get(bindingId); if (!found) { if (localChecks.size >= 16) localChecks.delete(localChecks.keys().next().value!); found = new Validator(async () => fetchModelList(`${endpoint}/models`, key ? {authorization: `Bearer ${key}`} : {}, label, request, 1500), 60_000); localChecks.set(bindingId, found); } return found; };
+  const hasOmniRoute = () => existsSync(env().OMNIROUTE_HOME || join(home, '.omniroute')) || Object.keys(env()).some(name => name.startsWith('OMNIROUTE_'));
+  const codexEndpoints = options.codexEndpoints ?? (() => { try { return configuredProviderInstances({env: env(), home}).map(row => row.info.endpoint ?? '').filter(Boolean); } catch { return []; } });
+  const origin = (url: string) => { try { const parsed = new URL(url); return `${parsed.hostname === 'localhost' ? '127.0.0.1' : parsed.hostname}:${parsed.port}`; } catch { return url; } };
+  const localProbes = options.localProbes ?? !process.env.NODE_TEST_CONTEXT;
+  const validators = (): Array<Validator<unknown>> => [claudeCheck, openCodeCheck, openAICheck, anthropicCheck, ...envChecks.values(), ...localChecks.values()] as Array<Validator<unknown>>;
 
   const route = (info: ProviderInfo, run?: RunnableAdapter): ProviderInstance => ({info, command: '', env: {}, sessionsRoot: '', ...(run ? {adapter: run} : {})});
   /** Pending and failed checks stay visible but unavailable; nothing falls back to another provider. */
@@ -71,13 +89,15 @@ export function createAdapterCatalog(options: AdapterCatalogOptions = {}): Adapt
     const auth = claudeAuth.current(`${claude}|${claudeAuthStamp({env: env(), home})}`);
     return auth.status === 'ok' ? version : auth.status === 'error' ? {status: 'error', reason: auth.reason!, checkedAt: auth.checkedAt!} : {status: 'pending'};
   };
+  /** Anthropic's live model list, when ANTHROPIC_API_KEY is set (shares the env-anthropic check; the key is only hashed). */
+  const liveAnthropic = () => { const key = env().ANTHROPIC_API_KEY; if (!key) return undefined; const check = anthropicCheck.current(hash('env-anthropic', hash(key))); return check.status === 'ok' ? check.value : undefined; };
   function instances(): ProviderInstance[] {
     const e = env(), rows: ProviderInstance[] = [];
     const claude = claudeBinary();
     if (claude) {
       const bindingId = hash('claude-code', claude);
       rows.push(gate({id: 'claude-code', name: 'Claude Code', driver: 'claude-code-cli', bindingId, identityMasked: 'Claude Code sign-in', models: [], available: false, source: claude},
-        claudeReady(claude), version => ({models: CLAUDE_CODE_MODELS, detail: `Runs Claude Code ${version} in the chat folder with its own tools, settings and MCP servers. Read-only and Plan chats use plan mode.`}),
+        claudeReady(claude), version => ({models: claudeCodeModels({home, env: e, dataDir: providerDataDir(), live: liveAnthropic()}), detail: `Runs Claude Code ${version} in the chat folder with its own tools, settings and MCP servers. Read-only and Plan chats use plan mode.`}),
         () => adapter(`claude:${bindingId}`, () => claudeCodeAdapter({binary: claude, env: e, spawn: options.spawn}))));
     }
     const openCode = openCodeBinary();
@@ -99,6 +119,26 @@ export function createAdapterCatalog(options: AdapterCatalogOptions = {}): Adapt
         anthropicCheck.current(bindingId), models => ({models, detail: `${CHAT_ONLY}. Streams the Messages API with ANTHROPIC_API_KEY from Muster’s environment.`}),
         () => adapter(`anthropic:${bindingId}`, () => anthropicAdapter({apiKey: () => env().ANTHROPIC_API_KEY, fetch: request, memory: memory('env-anthropic')}))));
     }
+    for (const key of ENV_KEY_PROVIDERS) {
+      if (key.kind !== 'openai-compatible' || !e[key.env]) continue;
+      const base = endpointFor(key), bindingId = hash(key.id, base, hash(e[key.env]));
+      rows.push(gate({id: key.id, name: `${key.name} API key (environment)`, driver: 'openai-chat-completions', bindingId, identityMasked: 'Key set in environment', models: [], available: false, source: `env:${key.env}`, endpoint: base},
+        envChecks.get(key.id)!.current(bindingId), models => ({models, detail: `${CHAT_ONLY}. Streams chat completions with ${key.env} from Muster’s environment.`}),
+        () => adapter(`${key.id}:${bindingId}`, () => openAICompatibleAdapter({endpoint: base, apiKey: () => env()[key.env], label: key.name, fetch: request, memory: memory(key.id)}))));
+    }
+    if (localProbes) {
+      const taken = new Set(codexEndpoints().map(origin));
+      for (const server of localServers(e, home, hasOmniRoute())) {
+        if (taken.has(origin(server.endpoint))) continue;
+        const key = server.keyEnv ? e[server.keyEnv] : undefined, bindingId = hash(server.id, server.endpoint, key ? hash(key) : '');
+        const check = localCheck(bindingId, server.name, server.endpoint, key).current(bindingId);
+        // Not running (or nothing loaded): not offered, and no error row for software the user may not have.
+        if (check.status !== 'ok' || !check.value?.length) continue;
+        rows.push(route({id: server.id, name: server.name, driver: 'openai-chat-completions', bindingId, identityMasked: 'Local server', models: check.value, available: true, status: 'ready', source: server.endpoint, endpoint: server.endpoint,
+          detail: `${CHAT_ONLY}. Local OpenAI-compatible server; models from its own /models list.`},
+          adapter(`${server.id}:${bindingId}`, () => openAICompatibleAdapter({endpoint: server.endpoint, apiKey: () => server.keyEnv ? env()[server.keyEnv] : undefined, label: server.name, fetch: request, memory: memory(server.id)}))));
+      }
+    }
     const store = options.customs ? undefined : activeCustomProviders();
     store?.claim();
     for (const connection of options.customs?.() ?? store?.connections() ?? []) {
@@ -111,5 +151,5 @@ export function createAdapterCatalog(options: AdapterCatalogOptions = {}): Adapt
     return rows;
   }
   // The sign-in check starts only once the version check passed, so settle twice.
-  return {instances, async ready() { instances(); await Promise.all(validators.map(check => check.settled())); instances(); await claudeAuth.settled(); }};
+  return {instances, async ready() { instances(); await Promise.all(validators().map(check => check.settled())); instances(); await claudeAuth.settled(); }};
 }

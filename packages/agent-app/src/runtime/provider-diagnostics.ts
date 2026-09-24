@@ -11,6 +11,7 @@ import { delimiter, isAbsolute, join } from 'node:path';
 import type { ProviderInfo } from '../shared/protocol.ts';
 import type { ProviderDiagnosis, ProviderStage } from '../shared/domains/providers-protocol.ts';
 import { accountHash, parseProviderAccounts, providerAccountsFile, providerDataDir } from './provider-instances.ts';
+import { ENV_KEY_PROVIDERS } from './env-providers.ts';
 
 export interface DiagnoseOptions { home?: string; env?: NodeJS.ProcessEnv; directory?: string; now?: () => number; version?: (cli: string) => Promise<string | null>; dataDir?: string }
 type Step = Omit<ProviderDiagnosis, 'id' | 'version' | 'checkedAt' | 'diagnostics'>;
@@ -46,30 +47,38 @@ export function authStage(text: string | null, now: number, login: string, requi
   return ok(typeof exp === 'number' && exp * 1000 < now ? 'Signed in; the access token refreshes on the next run.' : 'Signed in.');
 }
 
-const CODEX = /^(hybrow|openai-direct|codex)(?:_([0-9a-f]{10}))?$/;
-export function codexHomeFor(id: string, env: NodeJS.ProcessEnv, home: string, dataDir = providerDataDir()): string | undefined {
-  const match = CODEX.exec(id); if (!match) return undefined;
-  const base = env.CODEX_HOME || join(home, '.codex');
-  if (!match[2]) return base;
+/** Codex-run routes carry `codex` metadata; `codex` itself is the plain Codex CLI sign-in row. */
+const isCodexRoute = (p: Pick<ProviderInfo, 'id' | 'codex'>) => p.id === 'codex' || Boolean(p.codex);
+/** The CODEX_HOME behind a Codex route: the default home, or the extra account its `codex.account` hash names. */
+export function codexHomeFor(p: Pick<ProviderInfo, 'id' | 'codex'>, env: NodeJS.ProcessEnv, home: string, dataDir = providerDataDir()): string | undefined {
+  if (!isCodexRoute(p)) return undefined;
+  const base = env.CODEX_HOME || join(home, '.codex'), account = p.codex?.account;
+  if (!account) return base;
   if (!dataDir) return undefined;
-  try { return parseProviderAccounts(readSmall(providerAccountsFile(dataDir))).find(account => accountHash(account.codexHome) === match[2])?.codexHome; } catch { return undefined; }
+  try { return parseProviderAccounts(readSmall(providerAccountsFile(dataDir))).find(entry => accountHash(entry.codexHome) === account)?.codexHome; } catch { return undefined; }
 }
 
-function codexSteps(id: string, options: Required<Pick<DiagnoseOptions, 'home' | 'env' | 'directory'>> & {now: number; dataDir?: string}): {step: Step; cli?: string; facts: string[]} {
-  const {env, home, directory, now} = options, family = CODEX.exec(id)![1]!, facts: string[] = [];
-  const codexHome = codexHomeFor(id, env, home, options.dataDir);
+function codexSteps(p: ProviderInfo, options: Required<Pick<DiagnoseOptions, 'home' | 'env' | 'directory'>> & {now: number; dataDir?: string}): {step: Step; cli?: string; facts: string[]} {
+  const {env, home, directory, now} = options, facts: string[] = [];
+  const family = p.id === 'codex' || !p.codex ? 'codex' : p.codex.kind;
+  const codexHome = codexHomeFor(p, env, home, options.dataDir);
   if (!codexHome) return {step: {stage: 'profile-invalid', summary: 'This extra Codex account is no longer listed in provider-accounts.json.', hint: 'Add the account again, then scan again.'}, facts};
   const login = codexHome === join(home, '.codex') ? 'codex login' : `CODEX_HOME=${JSON.stringify(codexHome)} codex login`;
   facts.push(`codexHome: ${codexHome}`);
-  const cli = family === 'codex' ? which('codex', env, [join(home, '.local/bin'), '/opt/homebrew/bin', '/usr/local/bin']) : env.MUSTER_CODEX_COMMAND || join(home, '.local/bin/codex');
+  const cli = env.MUSTER_CODEX_COMMAND || which('codex', env, [join(home, '.local/bin'), '/opt/homebrew/bin', '/usr/local/bin']);
   facts.push(`cli: ${cli ?? 'not found'}`);
-  if (!cli || !executable(cli)) return {step: {stage: 'executable-missing', summary: `The Codex CLI was not found${cli ? ` at ${cli}` : ' on PATH'}.`, hint: family === 'codex' ? 'Install the Codex CLI, then scan again.' : 'Install the Codex CLI to ~/.local/bin/codex, or set MUSTER_CODEX_COMMAND to its path, then restart Muster.', command: 'npm install -g @openai/codex'}, facts};
+  if (!cli || !executable(cli)) return {step: {stage: 'executable-missing', summary: `The Codex CLI was not found${cli ? ` at ${cli}` : ' on PATH'}.`, hint: 'Install the Codex CLI (or set MUSTER_CODEX_COMMAND to its path), then scan again.', command: 'npm install -g @openai/codex'}, facts};
   const authFile = join(codexHome, 'auth.json');
   const readAuth = () => { try { return readSmall(authFile); } catch { return null; } };
   if (family === 'codex') return {step: authStage(readAuth(), now, login, false), cli, facts};
-  const profile = family === 'hybrow' ? 'hybrow-gateway' : 'openai-direct';
-  const launcher = join(directory, 'resources', `codex-${profile}.sh`);
+  const launcher = join(directory, 'resources', 'codex-launch.sh');
   if (!executable(launcher)) return {step: {stage: 'executable-missing', summary: 'Muster’s bundled Codex launcher is missing or not executable.', hint: 'Reinstall Muster to restore its launcher scripts.'}, cli, facts};
+  const profile = p.codex?.profile;
+  // Routes from config.toml or the plain ChatGPT sign-in have no profile file: their own status says what is missing.
+  if (!profile) {
+    if (family === 'chatgpt') { const signIn = authStage(readAuth(), now, login, false); if (signIn.stage !== 'ok') return {step: signIn, cli, facts}; }
+    return {step: p.available ? ok('Codex CLI and configuration are in place. Upstream access is checked when you run.') : {stage: p.error ? stageForMessage(p.error) : 'profile-invalid', summary: p.error ?? p.detail ?? 'Unavailable.'}, cli, facts};
+  }
   const profilePath = join(codexHome, `${profile}.config.toml`);
   facts.push(`profile: ${profilePath}`);
   let text: string;
@@ -85,7 +94,7 @@ function codexSteps(id: string, options: Required<Pick<DiagnoseOptions, 'home' |
   try { const catalog = JSON.parse(readSmall(catalogPath)) as {models?: unknown}; if (!Array.isArray(catalog.models) || !catalog.models.length) throw new Error('empty'); }
   catch { return {step: {stage: 'catalog-unreadable', summary: 'The local model catalog is missing, unreadable or lists no models.', hint: `Check ${catalogPath}: it must be JSON with a non-empty "models" array.`}, cli, facts}; }
   // The gateway authenticates upstream itself; only the direct route needs a local ChatGPT sign-in.
-  if (family === 'openai-direct') return {step: authStage(readAuth(), now, login, true), cli, facts};
+  if (family === 'chatgpt') return {step: authStage(readAuth(), now, login, profile === 'openai-direct'), cli, facts};
   return {step: ok('Launcher, profile and model catalog are in place. Upstream access is checked when you run.'), cli, facts};
 }
 
@@ -98,8 +107,9 @@ function otherSteps(p: ProviderInfo, env: NodeJS.ProcessEnv, home: string): {ste
     if (p.status === 'error') return {step: {stage: 'profile-invalid', summary: p.detail ?? `${p.name} configuration is unreadable.`, hint: `Run \`${login}\` to rewrite it.`, command: login}, cli, facts: [`cli: ${cli}`]};
     return {step: ok('Signed in locally. Upstream access is checked when you run.'), cli, facts: [`cli: ${cli}`]};
   }
-  if (p.id === 'env-openai' || p.id === 'env-anthropic') {
-    const key = p.id === 'env-openai' ? 'OPENAI_API_KEY' : 'ANTHROPIC_API_KEY';
+  const envKey = ENV_KEY_PROVIDERS.find(entry => entry.id === p.id);
+  if (envKey) {
+    const key = envKey.env;
     if (!env[key]) return {step: {stage: 'auth-missing', summary: `${key} is not set in Muster’s environment.`, hint: `Export ${key} in your shell profile (~/.zshrc). Muster reads your login shell environment at startup; restart Muster afterwards.`}, facts: []};
     if (p.error) return {step: {stage: stageForMessage(p.error), summary: p.error}, facts: []};
     return {step: ok(`${key} is set.`), facts: []};
@@ -144,7 +154,7 @@ export function cliVersion(cli: string): Promise<string | null> {
 export async function diagnoseProvider(p: ProviderInfo, options: DiagnoseOptions = {}): Promise<ProviderDiagnosis> {
   const env = options.env ?? process.env, home = options.home ?? homedir(), now = (options.now ?? Date.now)();
   const directory = options.directory ?? (typeof __dirname === 'string' ? __dirname : process.cwd());
-  const run = CODEX.test(p.id) ? codexSteps(p.id, {env, home, directory, now, ...(options.dataDir ? {dataDir: options.dataDir} : {})}) : otherSteps(p, env, home);
+  const run = isCodexRoute(p) ? codexSteps(p, {env, home, directory, now, ...(options.dataDir ? {dataDir: options.dataDir} : {})}) : otherSteps(p, env, home);
   const version = run.cli ? await (options.version ?? cliVersion)(run.cli) : null;
   const checkedAt = new Date(now).toISOString();
   const report = [`Muster provider diagnostics`, `provider: ${p.name} (${p.id})`, `status: ${p.status ?? 'unknown'}${p.available ? ' · available' : ''}`, `stage: ${run.step.stage}`, `summary: ${run.step.summary}`,

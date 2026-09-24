@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "updated": "2026-09-24",
+  "note": "Versioned Claude models offered through Claude Code (passed as `claude --model <id>`). Override with <data dir>/anthropic-models.json or ~/.muster/anthropic-models.json (same shape). Claude Code has no model-list command, so this file plus the user's own settings and a live /v1/models list (when ANTHROPIC_API_KEY is set) are the sources.",
+  "models": [
+    { "id": "claude-fable-5-1", "displayName": "Claude Fable 5.1", "contextWindow": 1000000, "images": true, "reasoningLevels": ["low", "medium", "high", "xhigh"], "defaultReasoningLevel": "high" },
+    { "id": "claude-opus-5-5", "displayName": "Claude Opus 5.5", "contextWindow": 1000000, "images": true, "reasoningLevels": ["low", "medium", "high", "xhigh"], "defaultReasoningLevel": "medium" },
+    { "id": "claude-sonnet-5", "displayName": "Claude Sonnet 5", "contextWindow": 1000000, "images": true, "reasoningLevels": ["low", "medium", "high", "xhigh"], "defaultReasoningLevel": "high" },
+    { "id": "claude-haiku-4-5", "displayName": "Claude Haiku 4.5", "contextWindow": 200000, "images": true }
+  ]
+}

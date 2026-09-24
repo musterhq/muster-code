@@ -8,6 +8,9 @@
 import { promises as fs, constants } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { ENV_KEY_PROVIDERS } from './env-providers.ts';
+import { execFile } from 'node:child_process';
+import { locateCli } from './adapters/shared.ts';
 
 export interface DiscoveredProvider {
   id: string;
@@ -82,13 +85,37 @@ function entry(base: Omit<DiscoveredProvider, 'identityMasked' | 'credentialPres
   return { identityMasked: '', credentialPresent: false, ...base };
 }
 
-async function discoverCodex(home: string, env: NodeJS.ProcessEnv): Promise<DiscoveredProvider> {
+/** `codex login status` (exit 0 and "Logged in…") → a short label; undefined when absent, signed out, or unsupported.
+ *  Never interactive: stdin is closed, it times out after 4s, and an older CLI without the subcommand just fails. */
+const loginStatusCache = new Map<string, { at: number; value: Promise<string | undefined> }>();
+export function codexLoginStatus(home: string, env: NodeJS.ProcessEnv, run: typeof execFile = execFile): Promise<string | undefined> {
+  const cli = env.MUSTER_CODEX_COMMAND || locateCli('codex', env, home);
+  if (!cli) return Promise.resolve(undefined);
+  const key = `${cli}\0${env.CODEX_HOME ?? ''}`, hit = loginStatusCache.get(key);
+  if (hit && Date.now() - hit.at < 60_000) return hit.value;
+  const value = new Promise<string | undefined>(resolve => {
+    const child = run(cli, ['login', 'status'], { timeout: 4000, maxBuffer: 64 * 1024, encoding: 'utf8', env: { ...env, HOME: home, CODEX_HOME: env.CODEX_HOME || join(home, '.codex') } }, (error, stdout, stderr) => {
+      const out = `${stdout ?? ''}\n${stderr ?? ''}`;
+      if (error || !/logged in/i.test(out) || /not logged in/i.test(out)) { resolve(undefined); return; }
+      resolve(/api key/i.test(out) ? 'API key sign-in (Codex)' : 'ChatGPT sign-in (Codex)');
+    });
+    child.stdin?.end();
+  });
+  loginStatusCache.set(key, { at: Date.now(), value });
+  return value;
+}
+
+async function discoverCodex(home: string, env: NodeJS.ProcessEnv, loginStatus: LoginStatus): Promise<DiscoveredProvider> {
   const codexHome = env.CODEX_HOME || join(home, '.codex');
   const source = join(codexHome, 'auth.json');
   const base = { id: 'codex', name: 'Codex CLI (ChatGPT)', source };
   try {
     const raw = await readBounded(source);
     if (raw === null) {
+      // No auth.json: the sign-in may live in the Keychain (or belong to the ChatGPT app's bundled CLI). Ask the CLI
+      // itself, non-interactively; a signed-in Codex is reused and never asked to sign in again.
+      const status = await loginStatus(home, env);
+      if (status) return entry({ ...base, status: 'configured', credentialPresent: true, identityMasked: status, detail: '`codex login status` reports a sign-in; not verified' });
       const installed = await exists(join(codexHome, 'config.toml'));
       return entry({ ...base, status: installed ? 'installed' : 'not-detected', detail: installed ? 'Local configuration found. File-based credentials were not detected; sign-in may be stored by the system.' : 'no auth.json found' });
     }
@@ -140,15 +167,54 @@ async function discoverClaude(home: string, env: NodeJS.ProcessEnv): Promise<Dis
   });
 }
 
-async function discoverHybrow(home: string, env: NodeJS.ProcessEnv): Promise<DiscoveredProvider> {
+/** `[model_providers.<id>]` tables (with their `name`) and a profile's own `model_provider`, read line by line. */
+function codexProviderTables(text: string): { selected?: string; tables: Map<string, string | undefined> } {
+  const tables = new Map<string, string | undefined>(); let current: string | undefined, selected: string | undefined, top = true;
+  for (const line of text.split(/\r?\n/)) {
+    const header = /^\s*\[\s*model_providers\.(?:"([^"]{1,64})"|([A-Za-z0-9_-]{1,64}))(\.[^\]]*)?\s*\]/.exec(line);
+    if (header) { top = false; current = header[1] ?? header[2]; if (current && !tables.has(current)) tables.set(current, undefined); if (header[3]) current = undefined; continue; }
+    if (/^\s*\[/.test(line)) { top = false; current = undefined; continue; }
+    const field = /^\s*(model_provider|name)\s*=\s*"([^"\n]{1,120})"/.exec(line);
+    if (!field) continue;
+    if (top && field[1] === 'model_provider') selected = field[2];
+    else if (current && field[1] === 'name') tables.set(current, field[2]!.replace(/[\x00-\x1f]/g, ''));
+  }
+  return { selected, tables };
+}
+
+/** Every gateway the user's Codex configuration names: `[model_providers.*]` tables in config.toml and the
+ *  `<name>.config.toml` profiles beside it. Ids and names come from that configuration, never from Muster. */
+async function discoverCodexGateways(home: string, env: NodeJS.ProcessEnv): Promise<DiscoveredProvider[]> {
   const codexHome = env.CODEX_HOME || join(home, '.codex');
-  const gateway = join(codexHome, 'hybrow-gateway.config.toml');
-  const omniroute = join(home, '.omniroute');
-  const base = { id: 'hybrow', name: 'OmniRoute / Hybrow Gateway', source: gateway };
-  const [hasGateway, hasOmniroute] = await Promise.all([exists(gateway), exists(omniroute)]);
-  if (hasGateway) return entry({ ...base, status: 'configured', credentialPresent: true, identityMasked: 'Gateway config on file', detail: 'hybrow-gateway.config.toml present; not verified' });
-  if (hasOmniroute) return entry({ ...base, source: omniroute, status: 'installed', detail: '~/.omniroute present, no gateway config' });
-  return entry({ ...base, status: 'not-detected', detail: 'no gateway or OmniRoute config found' });
+  let names: string[] = [];
+  try { names = (await fs.readdir(codexHome)).filter(name => /^[A-Za-z0-9_.-]{1,64}\.config\.toml$/.test(name) && name !== 'config.toml').sort().slice(0, 32); } catch { names = []; }
+  const rows = new Map<string, DiscoveredProvider>();
+  for (const file of ['config.toml', ...names]) {
+    const source = join(codexHome, file);
+    let text: string | null;
+    try { text = await readBounded(source); } catch { continue; }
+    if (text === null) continue;
+    const { selected, tables } = codexProviderTables(text);
+    const ids = new Set([...tables.keys(), ...(file !== 'config.toml' && selected ? [selected] : [])]);
+    for (const id of ids) {
+      if (id === 'openai' || rows.has(id)) continue;
+      rows.set(id, entry({ id, name: tables.get(id) || id, source, status: 'configured', credentialPresent: true, identityMasked: 'Gateway in Codex config', detail: `[model_providers.${id}] in ${file}; not verified` }));
+    }
+  }
+  return [...rows.values()];
+}
+
+/** OmniRoute, found by its own data folder or OMNIROUTE_* environment. Labelled by the name the user's Codex config
+ *  gives it when a gateway there points at it; the runtime route (if any) replaces this row. */
+async function discoverOmniRoute(home: string, env: NodeJS.ProcessEnv, gateways: DiscoveredProvider[]): Promise<DiscoveredProvider | undefined> {
+  const dir = env.OMNIROUTE_HOME || join(home, '.omniroute');
+  const envNames = Object.keys(env).filter(name => name.startsWith('OMNIROUTE_') && env[name]);
+  const hasDir = await exists(dir);
+  if (!hasDir && !envNames.length) return undefined;
+  if (gateways.some(row => /omni-?route/i.test(`${row.id} ${row.name}`))) return undefined;
+  return entry({ id: 'omniroute', name: 'OmniRoute', source: hasDir ? dir : `env:${envNames[0]}`, status: envNames.length || await exists(join(dir, '.env')) ? 'configured' : 'installed',
+    credentialPresent: Boolean(env.OMNIROUTE_API_KEY), identityMasked: env.OMNIROUTE_API_KEY ? 'Key set in environment' : '',
+    detail: hasDir ? 'OmniRoute data folder found; Muster lists its models from the local router when it is running' : `${envNames.join(', ')} set in the environment` });
 }
 
 async function discoverOpenCode(home: string, env: NodeJS.ProcessEnv): Promise<DiscoveredProvider> {
@@ -185,19 +251,20 @@ function discoverEnvKey(env: NodeJS.ProcessEnv, key: string, id: string, name: s
   });
 }
 
-/** Discover locally configured providers. Read-only; never returns secret material. */
-export async function discoverLocalProviders(options?: { home?: string; env?: NodeJS.ProcessEnv }): Promise<DiscoveredProvider[]> {
+type LoginStatus = (home: string, env: NodeJS.ProcessEnv) => Promise<string | undefined>;
+/** Discover locally configured providers. Read-only; never returns secret material. `loginStatus` asks a CLI whether it is
+ *  signed in (default: `codex login status`; test runs inject it so they never run a real CLI). */
+export async function discoverLocalProviders(options?: { home?: string; env?: NodeJS.ProcessEnv; loginStatus?: LoginStatus }): Promise<DiscoveredProvider[]> {
   const home = options?.home ?? homedir();
   const env = options?.env ?? process.env;
-  const results = await Promise.all([
-    discoverCodex(home, env),
+  const loginStatus: LoginStatus = options?.loginStatus ?? (process.env.NODE_TEST_CONTEXT ? async () => undefined : (h, e) => codexLoginStatus(h, e));
+  const [codex, claude, gateways, openCode] = await Promise.all([
+    discoverCodex(home, env, loginStatus),
     discoverClaude(home, env),
-    discoverHybrow(home, env),
+    discoverCodexGateways(home, env),
     discoverOpenCode(home, env),
   ]);
-  results.push(
-    discoverEnvKey(env, 'OPENAI_API_KEY', 'env-openai', 'OpenAI API key (environment)'),
-    discoverEnvKey(env, 'ANTHROPIC_API_KEY', 'env-anthropic', 'Anthropic API key (environment)'),
-  );
-  return results;
+  const omniroute = await discoverOmniRoute(home, env, gateways);
+  return [codex, claude, ...gateways, ...(omniroute ? [omniroute] : []), openCode,
+    ...ENV_KEY_PROVIDERS.map(key => discoverEnvKey(env, key.env, key.id, `${key.name} API key (environment)`))];
 }

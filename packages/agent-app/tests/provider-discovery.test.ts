@@ -45,13 +45,15 @@ test('codex-family diagnosis stops at the first failing stage with a fix', async
   await mkdir(join(directory, 'resources'), {recursive: true}); await mkdir(codexHome); await mkdir(join(home, 'bin'));
   const base = {name: 'OpenAI Direct', available: false, identityMasked: '', models: []};
   const env = {MUSTER_CODEX_COMMAND: cli, PATH: ''};
-  const run = (id: string) => diagnoseProvider({...base, id}, {home, env, directory, now: () => NOW, version: async () => 'codex-cli 9.9.9', dataDir: home});
+  // Codex routes are recognised by their `codex` metadata (from the user's config), never by a provider-id pattern.
+  const routes: Record<string, {modelProvider: string; kind: 'chatgpt' | 'gateway'; profile: string}> = {'openai-direct': {modelProvider: 'openai', kind: 'chatgpt', profile: 'openai-direct'}, 'team-gateway': {modelProvider: 'team-gateway', kind: 'gateway', profile: 'team-gateway'}};
+  const run = (id: string) => diagnoseProvider({...base, id, codex: routes[id]}, {home, env, directory, now: () => NOW, version: async () => 'codex-cli 9.9.9', dataDir: home});
   let result = await run('openai-direct');
   assert.equal(result.stage, 'executable-missing'); assert.equal(result.version, null);
   await writeFile(cli, '#!/bin/sh\necho codex-cli\n'); await chmod(cli, 0o755);
   result = await run('openai-direct');
   assert.equal(result.stage, 'executable-missing'); assert.match(result.summary, /launcher/);
-  await writeFile(join(directory, 'resources', 'codex-openai-direct.sh'), '#!/bin/sh\n'); await chmod(join(directory, 'resources', 'codex-openai-direct.sh'), 0o755);
+  await writeFile(join(directory, 'resources', 'codex-launch.sh'), '#!/bin/sh\n'); await chmod(join(directory, 'resources', 'codex-launch.sh'), 0o755);
   result = await run('openai-direct');
   assert.equal(result.stage, 'profile-invalid'); assert.equal(result.version, 'codex-cli 9.9.9');
   const catalog = join(home, 'models.json');
@@ -71,9 +73,8 @@ test('codex-family diagnosis stops at the first failing stage with a fix', async
   result = await run('openai-direct');
   assert.equal(result.stage, 'ok'); assert.match(result.diagnostics, /stage: ok/);
   // The gateway authenticates upstream itself, so no local sign-in is required.
-  await writeFile(join(directory, 'resources', 'codex-hybrow-gateway.sh'), '#!/bin/sh\n'); await chmod(join(directory, 'resources', 'codex-hybrow-gateway.sh'), 0o755);
-  await writeFile(join(codexHome, 'hybrow-gateway.config.toml'), 'ok = true\n'); await rm(join(codexHome, 'auth.json'));
-  assert.equal((await run('hybrow')).stage, 'ok');
+  await writeFile(join(codexHome, 'team-gateway.config.toml'), 'ok = true\n'); await rm(join(codexHome, 'auth.json'));
+  assert.equal((await run('team-gateway')).stage, 'ok');
 });
 
 test('custom endpoint and environment-key diagnosis', async () => {

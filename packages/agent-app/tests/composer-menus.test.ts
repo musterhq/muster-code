@@ -187,7 +187,8 @@ test('CS-B2-4: pasted clipboard images are named like Codex screenshots; real na
 test('DF-F32: the composer knows before sending that the chosen model cannot read images', async () => {
   const {imageBlindModel,imageBlindWarning}=await import('../src/renderer/components/composerMenus.ts');
   const providers=[{id:'hybrow',models:[{id:'text-only',name:'Text Only',images:false},{id:'vision',name:'Vision'}]},{id:'claude',models:[{id:'text-only',name:'Other',images:true}]}];
-  assert.equal(imageBlindModel(providers,undefined,'text-only'),'Text Only');
+  assert.equal(imageBlindModel(providers,'hybrow','text-only'),'Text Only');
+  assert.equal(imageBlindModel(providers,undefined,'text-only'),null,'an unbound chat assumes no provider');
   assert.equal(imageBlindModel(providers,'hybrow','vision'),null);
   assert.equal(imageBlindModel(providers,'claude','text-only'),null);
   assert.equal(imageBlindModel(providers,'hybrow',undefined),null);

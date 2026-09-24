@@ -22,9 +22,9 @@ export async function reconcileProviderTurn(input: ReconciliationInput, query: P
   if (!input.threadId || !input.turnId) return {resolved:false,reason:'Muster did not receive a complete provider thread and turn identity. Automatic verification is unavailable; inspect the existing provider work before continuing.'};
   // Claude Code/OpenCode runs are child processes of this app and HTTP routes are single
   // streamed requests: once Muster restarted or the attempt settled, nothing is still running.
-  if (isAdapterProvider(input.providerId??'hybrow')) return {resolved:true,terminalStatus:'interrupted',reason:'This provider runs inside Muster, so the unfinished attempt ended with it. Check the chat folder for partial changes, then send a new message; nothing was resent.'};
+  if (isAdapterProvider(input.providerId??'')) return {resolved:true,terminalStatus:'interrupted',reason:'This provider runs inside Muster, so the unfinished attempt ended with it. Check the chat folder for partial changes, then send a new message; nothing was resent.'};
   try {
-    const route=(instances??configuredProviderInstances({directory:runtimeDirectory})).find(instance=>instance.info.id===(input.providerId??'hybrow'));
+    const route=(instances??configuredProviderInstances({directory:runtimeDirectory})).find(instance=>instance.info.id===input.providerId);
     if(!route?.info.available || !input.providerBindingId || route.info.bindingId!==input.providerBindingId) return {resolved:false,reason:'The saved provider account or profile binding is unavailable or has changed. Restore that binding before verifying this attempt; no alternate provider was queried.'};
     const response = await query('thread/read',{threadId:input.threadId,includeTurns:true},{
       command:route.command,cwd:input.cwd,timeoutMs:5000,

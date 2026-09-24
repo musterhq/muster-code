@@ -820,8 +820,16 @@ export class ScopedComputers {
     this.serviceRuns.delete(key);
     const file=await this.readServices(context),entry=file.services.find(item=>item.id===serviceId);if(!entry)return;
     Object.assign(entry,{endedAt:new Date().toISOString(),lastExitCode:outcome.exitCode});delete entry.pgid;
-    let up=false;try {const record=await this.record(context);if(record?.handle)up=(await context.backend.inspect(record.handle,context.descriptor)).running;}catch {}
+    let up=false,handle:ComputerHandle|null=null;try {const record=await this.record(context);if(record?.handle){handle=record.handle;up=(await context.backend.inspect(record.handle,context.descriptor)).running;}}catch {}
     if(!up){entry.state='lost';entry.reason='The sandbox stopped while this service was running.';await this.writeServices(context,file);return;}
+    // A container restart (e.g. `docker restart`) ends the exec with 137 and is back up before we look: that is a reboot,
+    // not a service failure. Hand it to boot sync so the counter moves and each service follows its policy.
+    const probe=await this.runner.docker(['inspect','-f','{{.State.StartedAt}}',handle!.id],{timeoutMs:10_000}).catch(()=>null);
+    const startedAt=probe?.code===0?probe.stdout.trim():'';
+    if(startedAt&&file.containerStartedAt&&startedAt!==file.containerStartedAt){
+      Object.assign(entry,{state:'lost',reason:'Stopped when the sandbox restarted.'});await this.writeServices(context,file);
+      await this.syncBoot(context,handle!);return;
+    }
     const failed=outcome.exitCode!==0;
     entry.state=failed?'failed':'exited';entry.reason=outcome.error?'The service could not be started in the sandbox.':failed?`Exited with code ${outcome.exitCode??'unknown'}.`:'Exited.';
     if(entry.desired==='running'&&(entry.restart==='always'||(entry.restart==='on-failure'&&failed)))this.scheduleRestart(context,entry);

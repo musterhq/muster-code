@@ -10,7 +10,9 @@ import {AgentStore} from '../src/runtime/store.ts';
 import {createDomainHooks} from '../src/runtime/domains/hooks.ts';
 import {createProjectsDomain} from '../src/runtime/domains/projects.ts';
 import type {DomainContext} from '../src/runtime/domains/types.ts';
-import {MODEL,type ProviderAdapter} from '../src/runtime/provider.ts';
+import {type ProviderAdapter} from '../src/runtime/provider.ts';
+/** A fixture model id: tests never depend on a particular provider's catalog. */
+const MODEL='fixture-model';
 import {ACTIVITY_CATEGORY_SQL} from '../src/runtime/project-tasks.ts';
 import {activityCategory,activityWindowStart,composeAccess,memberAccess,type ProjectMember} from '../src/shared/domains/project-team-protocol.ts';
 

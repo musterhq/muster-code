@@ -6,7 +6,7 @@
       "remote": null,
       "branch": null,
       "commit": null,
-      "sourcePath": "/private/tmp/muster-core-pr97-integration-20260922",
+      "sourcePath": "muster-core-pr97-integration-20260922",
       "note": "Source checkout is not a git repository; the sha256 values below are the only provenance.",
       "uncommittedFiles": [],
       "syncedAt": "2026-09-24T03:37:22.809Z",
@@ -27,7 +27,7 @@
       "files": {
         "packages/core/src/config.ts": "a1313829014044b6870c5db88deacaf86731357f24c1fe6b47244b01acd769fa",
         "packages/core/src/hindsight.ts": "26a8eab3bae7ee16c34dc33d5e6d6cb0390a3229312e83a99fd6093df59378a5",
-        "packages/core/src/memory.ts": "b4f06ffb3791817fe96d7eef0057c346a22b66afbc0e695e038efc6428285068",
+        "packages/core/src/memory.ts": "562090bf16964dec5c7fdf56c928c2730adedab3321a10f732f05925a55e15e9",
         "packages/core/src/profiles.ts": "56165449ed062df307ac94a1267f9cfc5a2fecfbf99d797cd57f199f9b98841c",
         "packages/core/src/providers-catalog.ts": "2108f5454a48a009b188f055ea77725077728d7da50030532ca6b7d0b721c5ff",
         "packages/core/src/store.ts": "b89e4b0f95954164ee74caec1e0e67346970c41e92cad8ef1479c5d1d13f47a4"
@@ -49,8 +49,8 @@
       "files": {
         "packages/core/src/agent-graph.ts": "4d612e2a9b24a690674ec90ce0ef01517b7561afc56117a60e3a2ae3ee8c7138",
         "packages/core/src/config.ts": "a1313829014044b6870c5db88deacaf86731357f24c1fe6b47244b01acd769fa",
-        "packages/core/src/local-docker-sandbox.ts": "21bfa9b69af18ca9558922528f23b46e8abf9a68a0ad48acb800a57968196913",
-        "packages/core/src/memory.ts": "b4f06ffb3791817fe96d7eef0057c346a22b66afbc0e695e038efc6428285068",
+        "packages/core/src/local-docker-sandbox.ts": "dd1df6c1b5a83acb707b088c2f138fd9caa1c0d6a62edf34bf4ad01c75462a08",
+        "packages/core/src/memory.ts": "562090bf16964dec5c7fdf56c928c2730adedab3321a10f732f05925a55e15e9",
         "packages/core/src/profiles.ts": "56165449ed062df307ac94a1267f9cfc5a2fecfbf99d797cd57f199f9b98841c",
         "packages/core/src/providers-catalog.ts": "2108f5454a48a009b188f055ea77725077728d7da50030532ca6b7d0b721c5ff",
         "packages/core/src/scoped-runtime.ts": "50ac40748d0e108de54713a2979413dd88e58e40748685bd3b7bfc40a6029871",

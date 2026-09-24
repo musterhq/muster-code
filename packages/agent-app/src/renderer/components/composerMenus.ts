@@ -336,7 +336,7 @@ export function attachmentName(file:{name?:string;type?:string},kind:string,now:
  *  composer can warn while the image is still staged — not only after sending, when the runtime withholds it. */
 export function imageBlindModel(providers:readonly {id:string;models:readonly {id:string;name:string;images?:boolean}[]}[],providerId:string|undefined,model:string|undefined):string|null{
   if(!model)return null;
-  const entry=providers.find(provider=>provider.id===(providerId??'hybrow'))?.models.find(item=>item.id===model);
+  const entry=providers.find(provider=>provider.id===providerId)?.models.find(item=>item.id===model);
   return entry?.images===false?entry.name||entry.id:null;
 }
 export const imageBlindWarning=(model:string)=>`${model} can’t read images. Attached images won’t be sent; pick a model that accepts images to include them.`;

@@ -74,12 +74,12 @@ function harness(t:TestContext,fake:Awaited<ReturnType<typeof fakeAppServer>>,cl
   const owners=new Set<string>();
   t.after(()=>{adapter.dispose();for(const owner of owners)counted.clearAll(owner);});
   // The service persists the thread the provider reports; a later send resumes it.
-  const chat={id:'mode-change',mode:'agent',permissionMode:'workspace'} as Chat;
+  const chat={id:'mode-change',mode:'agent',providerId:'fixture',permissionMode:'workspace'} as Chat;
   const send=async(change:Partial<Chat>={})=>{
     Object.assign(chat,change);
     const before={calls:counted.calls.length,log:fake.entries().length};
     const input:ProviderInput={chat:{...chat},cwd:fake.root,prompt:'hello',onDelta(){},onReasoning(){},onEvent(){},async onRequest(){return undefined;},
-      onThreadReady(threadId){Object.assign(chat,{providerThreadId:threadId,providerThreadProviderId:'hybrow',providerThreadBindingId:'fixture-hybrow'});}};
+      onThreadReady(threadId){Object.assign(chat,{providerThreadId:threadId,providerThreadProviderId:'fixture',providerThreadBindingId:'fixture-binding'});}};
     const result=await adapter.run(input);
     for(const call of counted.calls)owners.add(String(call.transportOwner));
     return {result,dispatches:counted.calls.length-before.calls,events:fake.entries().slice(before.log)};

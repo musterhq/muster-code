@@ -8,7 +8,7 @@ import { importLoginShellEnv } from '../login-shell-env.ts';
 import { codexHomeFor, diagnoseProvider } from '../provider-diagnostics.ts';
 import { codexAccountEmail, discoverLocalProviders } from '../provider-discovery.ts';
 import { accountHash, configuredProviderInstances, invalidateProviderInstances, parseProviderAccounts, providerAccountsFile, removeProviderAccount, saveProviderAccount } from '../provider-instances.ts';
-import { existsSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { isAbsolute } from 'node:path';
 import { liveProviderUsage, onProviderUsage, sessionRateLimits } from '../provider-usage.ts';
 import { SecretStore } from '../secret-store.ts';
@@ -16,7 +16,6 @@ import { CLI_TOOLS, createCliMaintenance, isCliTool, type CliMaintenance } from 
 import type { DomainContext, DomainModule } from './types.ts';
 
 const id = (value: unknown, field = 'id'): string => { if (typeof value !== 'string' || !/^[A-Za-z0-9_.-]{1,160}$/.test(value)) throw new Error(`Invalid ${field}.`); return value; };
-const CODEX = /^(hybrow|openai-direct|codex)(?:_([0-9a-f]{10}))?$/;
 const USAGE_TTL_MS = 30_000;
 
 export interface ProvidersDomainOptions { cli?: CliMaintenance; secrets?: SecretStore; shellEnv?: boolean; list?: () => Promise<ProviderInfo[]>; home?: string; env?: NodeJS.ProcessEnv; /** Launcher directory for configuredProviderInstances (tests). */ directory?: string }
@@ -49,11 +48,10 @@ export function createProvidersDomain(context: DomainContext, options: Providers
     if (!found) { found = sessionRateLimits(root); usageCache.roots.set(root, found); }
     return found;
   };
-  const usageFor = (providerId: string, sessionsRoot: string): ProviderUsage | undefined => {
-    const family = CODEX.exec(providerId)?.[1];
+  const usageFor = (providerId: string, sessionsRoot: string, modelProvider = 'openai'): ProviderUsage | undefined => {
     const logs = sessionUsage(sessionsRoot);
-    // Direct ChatGPT runs record model_provider "openai"; gateway runs record their own provider id.
-    const logged = family === 'hybrow' ? [...logs].find(([name]) => name !== 'openai')?.[1] : logs.get('openai');
+    // Codex records each rollout under the route's model_provider id ("openai" for a ChatGPT sign-in, a gateway's own id otherwise).
+    const logged = logs.get(modelProvider);
     const live = liveProviderUsage(providerId);
     const best = live && (!logged || live.updatedAt >= logged.updatedAt) ? live : logged;
     return best && {...best, providerId};
@@ -61,9 +59,9 @@ export function createProvidersDomain(context: DomainContext, options: Providers
   const accountsFile = providerAccountsFile(context.dataDir);
   const storedAccounts = () => { try { return parseProviderAccounts(readFileSync(accountsFile, 'utf8')); } catch { return []; } };
   const accountRows = (): { accounts: ProviderAccountRow[] } => {
-    const instances = configuredProviderInstances({env, home, accountsFile, ...(options.directory ? {directory: options.directory} : {})}).filter(row => CODEX.test(row.info.id) && !row.info.id.startsWith('codex'));
+    const instances = configuredProviderInstances({env, home, accountsFile, ...(options.directory ? {directory: options.directory} : {})}).filter(row => row.info.codex);
     const row = (id: string, label: string, suffix: string, removable: boolean): ProviderAccountRow => {
-      const mine = instances.filter(instance => (CODEX.exec(instance.info.id)?.[2] ?? '') === suffix);
+      const mine = instances.filter(instance => (instance.info.codex?.account ?? '') === suffix);
       return {id, label, providerIds: mine.map(instance => instance.info.id), ready: mine.some(instance => instance.info.available), removable};
     };
     const main = env.CODEX_HOME || join(home, '.codex');
@@ -76,7 +74,8 @@ export function createProvidersDomain(context: DomainContext, options: Providers
     let directory = false; try { directory = statSync(path).isDirectory(); } catch { directory = false; }
     if (!directory) throw new Error('That folder does not exist.');
     if (path === (env.CODEX_HOME || join(home, '.codex'))) throw new Error('That is already the default sign-in.');
-    if (!['auth.json', 'openai-direct.config.toml', 'hybrow-gateway.config.toml'].some(name => existsSync(join(path, name)))) throw new Error('No Codex sign-in was found there. Run `CODEX_HOME=<folder> codex login` first.');
+    let profiles: string[] = []; try { profiles = readdirSync(path).filter(name => name.endsWith('.config.toml')); } catch { profiles = []; }
+    if (!existsSync(join(path, 'auth.json')) && !existsSync(join(path, 'config.toml')) && !profiles.length) throw new Error('No Codex sign-in was found there. Run `CODEX_HOME=<folder> codex login` first.');
     return path;
   };
   return {
@@ -100,7 +99,8 @@ export function createProvidersDomain(context: DomainContext, options: Providers
       'providers.diagnose': async input => diagnoseProvider(await provider(id(input.id)), {env, home}),
       'providers.identity': async input => {
         const key = id(input.id);
-        const codexHome = codexHomeFor(key, env, home);
+        const listed = key === 'codex' ? {id: key} : (await list()).find(row => row.id === key);
+        const codexHome = listed ? codexHomeFor(listed, env, home) : undefined;
         const identity = codexHome ? await codexAccountEmail(codexHome) : key === 'claude-code' ? (await discoverLocalProviders({home, env})).find(row => row.id === key)?.identity : undefined;
         if (!identity) throw new Error(codexHome ? 'No ChatGPT account email is on file for this sign-in.' : 'This connection has no account email to reveal.');
         return {identity};
@@ -109,8 +109,8 @@ export function createProvidersDomain(context: DomainContext, options: Providers
         const only = input.id === undefined ? undefined : id(input.id);
         const rows: ProviderUsage[] = [];
         for (const instance of configuredProviderInstances({env, home})) {
-          if (!CODEX.test(instance.info.id) || (only && instance.info.id !== only)) continue;
-          const usage = usageFor(instance.info.id, instance.sessionsRoot);
+          if (!instance.info.codex || (only && instance.info.id !== only)) continue;
+          const usage = usageFor(instance.info.id, instance.sessionsRoot, instance.info.codex.modelProvider);
           if (usage) rows.push(usage);
         }
         if (only === 'codex' || (!only && !rows.some(row => row.providerId === 'openai-direct'))) {

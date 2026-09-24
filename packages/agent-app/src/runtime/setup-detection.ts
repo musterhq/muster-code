@@ -28,12 +28,13 @@ export interface SetupDetectionDeps {
   now?(): number;
 }
 
-const CODEX_FAMILY = /^(hybrow|openai-direct|codex)(?:_[0-9a-f]{10})?$/;
-/** Which CLI a provider id runs through, if any. The Hybrow gateway runs through the Codex CLI too. */
-export function cliForProvider(providerId: string): CliTool | undefined {
-  if (CODEX_FAMILY.test(providerId)) return 'codex';
-  if (providerId === 'claude-code') return 'claude';
-  if (providerId === 'opencode') return 'opencode';
+/** Which CLI a provider runs through, if any. Every route from the user's Codex config (a ChatGPT sign-in or any
+ *  gateway they configured) runs through the Codex CLI. */
+export function cliForProvider(provider: string | Pick<ProviderInfo, 'id' | 'codex' | 'driver'>): CliTool | undefined {
+  const row = typeof provider === 'string' ? {id: provider} as Pick<ProviderInfo, 'id' | 'codex' | 'driver'> : provider;
+  if (row.codex || row.driver === 'codex-app-server' || row.id === 'codex') return 'codex';
+  if (row.id === 'claude-code') return 'claude';
+  if (row.id === 'opencode') return 'opencode';
   return undefined;
 }
 const DISCOVERY_ID: Record<CliTool, string> = { codex: 'codex', claude: 'claude-code', opencode: 'opencode' };
@@ -55,7 +56,7 @@ export function summarizeClis(statuses: readonly CliStatus[], discovered: readon
   return order.map(tool => {
     const status = statuses.find(row => row.tool === tool);
     const found = discovered.find(row => row.id === DISCOVERY_ID[tool]);
-    const ready = providers.some(provider => provider.available && cliForProvider(provider.id) === tool);
+    const ready = providers.some(provider => provider.available && cliForProvider(provider) === tool);
     const installed = Boolean(status?.installed.path);
     const signedIn = found?.status === 'configured' && found.credentialPresent || ready;
     // Codex and Claude Code can keep the sign-in in the Keychain; with config files present but no credential file,
@@ -80,7 +81,7 @@ export function summarizeClis(statuses: readonly CliStatus[], discovered: readon
 export function summarizeConnections(providers: readonly ProviderInfo[]): SetupConnection[] {
   const rows: SetupConnection[] = [];
   for (const provider of providers) {
-    const kind: SetupConnection['kind'] | undefined = provider.custom ? 'custom' : /^hybrow(?:_[0-9a-f]{10})?$/.test(provider.id) ? 'gateway' : provider.id.startsWith('env-') ? 'env' : undefined;
+    const kind: SetupConnection['kind'] | undefined = provider.custom ? 'custom' : provider.codex?.kind === 'gateway' ? 'gateway' : provider.id.startsWith('env-') ? 'env' : provider.id.startsWith('local-') ? 'local' : undefined;
     if (!kind) continue;
     if (!provider.available && (provider.status === 'not-detected' || provider.status === undefined && kind !== 'custom')) continue;
     rows.push({ id: provider.id, name: provider.name, kind, ready: provider.available, detail: provider.available ? 'Ready for chats.' : provider.error ?? provider.detail ?? 'Not available for chats yet.' });
@@ -134,7 +135,7 @@ export async function detectSetup(deps: SetupDetectionDeps): Promise<SetupStatus
     checkedAt: new Date(now()).toISOString(), platform: deps.platform ?? process.platform,
     clis: summarizeClis(statuses, discovered, providers),
     connections: summarizeConnections(providers),
-    readyProviders: providers.filter(provider => provider.available).map(provider => ({ id: provider.id, name: provider.name })),
+    readyProviders: providers.filter(provider => provider.available).map(provider => { const cli = cliForProvider(provider); return { id: provider.id, name: provider.name, ...(cli ? { cli } : {}) }; }),
     git, docker,
   };
 }

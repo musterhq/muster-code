@@ -4,7 +4,9 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {test} from 'node:test';
 import {createAgentService} from '../src/runtime/service.ts';
-import {MODEL,type ProviderAdapter} from '../src/runtime/provider.ts';
+import {type ProviderAdapter} from '../src/runtime/provider.ts';
+/** A fixture model id: tests never depend on a particular provider's catalog. */
+const MODEL='fixture-model';
 
 // Exercises the richer project.tasks.dispatch path (used by both the "Run in agent chat" button and the
 // scheduler), as distinct from the legacy project.tasks.start covered in project-task-run.test.ts.

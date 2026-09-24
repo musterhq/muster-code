@@ -72,7 +72,7 @@ test('provider: native calls go to the chat-owned session; app-server-started tu
     async callCodexConversation(key,method,params){calls.push([key,method,params]);return {ok:true};},async interruptActiveCodexTurn(){return true;},clearCodexAppServerSessions(){}};
   const adapter=createProviderAdapter({core,available:()=>true,command:'/unused'});
   const events:string[]=[];adapter.onIdleEvent!((chatId,method)=>events.push(`${chatId}:${method}`));
-  const run:ProviderInput={chat:{id:'chat-1',mode:'agent',model:'claude/claude-fable-5'} as ProviderInput['chat'],cwd:'/unused',prompt:'p',onDelta(){},onReasoning(){},onEvent(){},async onRequest(){return undefined;}};
+  const run:ProviderInput={chat:{id:'chat-1',mode:'agent',providerId:'fixture',model:'fixture-model'} as ProviderInput['chat'],cwd:'/unused',prompt:'p',onDelta(){},onReasoning(){},onEvent(){},async onRequest(){return undefined;}};
   assert.equal(adapter.nativeThread!('chat-1'),undefined);
   await assert.rejects(adapter.nativeCall!('chat-1','thread/goal/get',{}),NativeUnavailableError);
   const pending=adapter.run(run);await new Promise(done=>setImmediate(done));
@@ -85,9 +85,9 @@ test('provider: native calls go to the chat-owned session; app-server-started tu
   on('turn/started',{threadId:'thread-1',turn:{id:'turn-2'}});
   assert.deepEqual(events,['chat-1:turn/started']);
   resolve({status:'completed',finalMessage:'',dispatchState:'dispatched',threadId:'thread-1',turnId:'turn-1'});await pending;
-  assert.deepEqual(adapter.nativeThread!('chat-1'),{threadId:'thread-1',providerId:'hybrow',bindingId:'fixture-hybrow'});
+  assert.deepEqual(adapter.nativeThread!('chat-1'),{threadId:'thread-1',providerId:'fixture',bindingId:'fixture-binding'});
   await adapter.nativeCall!('chat-1','thread/goal/get',{threadId:'thread-1'});
-  assert.deepEqual(calls.at(-1)!.slice(0,2),['agent:chat-1:hybrow:fixture-hybrow','thread/goal/get']);
+  assert.deepEqual(calls.at(-1)!.slice(0,2),['agent:chat-1:fixture:fixture-binding','thread/goal/get']);
   on('thread/goal/updated',{threadId:'thread-1',goal:{}});
   assert.ok(events.includes('chat-1:thread/goal/updated'),'between runs every notification is routed');
   assert.equal(await adapter.stop('chat-1'),true);

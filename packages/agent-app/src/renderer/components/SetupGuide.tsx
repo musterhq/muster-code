@@ -164,7 +164,7 @@ function ConnectStep({status,reload,addConnection}:{status:SetupStatus|null;relo
   return <>
     <p className="setup-lede">{status.readyProviders.length?'A model is ready. Pick which one new chats use, or connect another.':'Sign in with a CLI you use, or add an API connection. Muster detects the sign-in automatically.'}</p>
     <ul className="setup-list" aria-label="Model providers">
-      {status.clis.map(cli=>{const tone=cliState(cli);const providerId=status.readyProviders.find(p=>p.id===PROVIDER_FOR[cli.tool])?.id??status.readyProviders.find(p=>cli.tool==='codex'?/^(openai-direct|hybrow)/.test(p.id):p.id===PROVIDER_FOR[cli.tool])?.id;
+      {status.clis.map(cli=>{const tone=cliState(cli);const providerId=status.readyProviders.find(p=>p.id===PROVIDER_FOR[cli.tool])?.id??status.readyProviders.find(p=>p.cli===cli.tool)?.id;
         const isDefault=Boolean(providerId&&defaultModel&&typeof defaultModel==='object'&&(defaultModel as {providerId:string}).providerId===providerId);
         return <li key={cli.tool} className="setup-row" data-tool={cli.tool}>
           <ProviderLogo id={PROVIDER_FOR[cli.tool]} name={cli.label} size={18}/>

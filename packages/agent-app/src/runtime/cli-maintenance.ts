@@ -12,6 +12,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync 
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import type { CliStatus, CliTool, CliUpdateResult } from '../shared/domains/providers-protocol.ts';
+import { locateCli } from './adapters/shared.ts';
 
 export const CLI_TOOLS: Record<CliTool, { label: string; pkg: string; bin: string; envVar: string; defaultPath: (home: string) => string }> = {
   codex: { label: 'Codex CLI', pkg: '@openai/codex', bin: 'codex', envVar: 'MUSTER_CODEX_COMMAND', defaultPath: home => join(home, '.local/bin/codex') },
@@ -90,8 +91,8 @@ export function createCliMaintenance(deps: CliMaintenanceDeps) {
   const externalPath = (name: CliTool): string | null => {
     const configured = original.get(name);
     if (configured) return existsSync(configured) ? configured : null;
-    const fallback = CLI_TOOLS[name].defaultPath(home);
-    return existsSync(fallback) ? fallback : null;
+    // The user's own install anywhere Muster can see it (PATH, version managers, a desktop app bundle), not only the default path.
+    return locateCli(CLI_TOOLS[name].bin, env, home, [CLI_TOOLS[name].defaultPath(home)]) ?? null;
   };
 
   async function status(name: CliTool): Promise<CliStatus> {

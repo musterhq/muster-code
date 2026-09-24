@@ -495,18 +495,18 @@ export async function probeMemorySearchLatency(input: MemoryLatencyProbeInput, c
 }
 
 export function parseMemoryScope(value: string): MemoryScope {
-  const raw = requiredString(value, "parseMemoryScope", "value", 'a "kind:id" string, for example user:dhairya.');
+  const raw = requiredString(value, "parseMemoryScope", "value", 'a "kind:id" string, for example user:alex.');
   const [kind, ...rest] = raw.split(":");
   const id = rest.join(":");
   if (!isScopeKind(kind) || !id.trim()) {
-    throw new Error(`Invalid memory scope "${raw}". Use kind:id, for example user:dhairya or tenant:oxygenhr.`);
+    throw new Error(`Invalid memory scope "${raw}". Use kind:id, for example user:alex or tenant:acme.`);
   }
   return { kind, id: normalizeScopeId(kind, id) };
 }
 
 export function formatMemoryScope(scope: MemoryScope): string {
   if (!isScopeObject(scope)) {
-    throw new Error(`formatMemoryScope requires scope: an object like { kind: "user", id: "dhairya" }, received ${describeValue(scope)}.`);
+    throw new Error(`formatMemoryScope requires scope: an object like { kind: "user", id: "alex" }, received ${describeValue(scope)}.`);
   }
   return `${scope.kind}:${scope.id}`;
 }
@@ -1053,14 +1053,14 @@ function stringList(value: unknown, entryPoint: string, field: string, expectati
 
 function scopeArray(value: unknown, entryPoint: string, field: string): MemoryScope[] {
   if (!Array.isArray(value)) {
-    throw new Error(`${entryPoint} requires ${field}: an array of memory scopes like { kind: "user", id: "dhairya" }, received ${describeValue(value)}.`);
+    throw new Error(`${entryPoint} requires ${field}: an array of memory scopes like { kind: "user", id: "alex" }, received ${describeValue(value)}.`);
   }
   return value as MemoryScope[];
 }
 
 function requiredScopes(value: unknown, entryPoint: string, field: string): MemoryScope[] {
   const scopes = normalizeScopes(scopeArray(value, entryPoint, field));
-  if (!scopes.length) throw new Error(`${entryPoint} requires ${field}: at least one memory scope like { kind: "user", id: "dhairya" }.`);
+  if (!scopes.length) throw new Error(`${entryPoint} requires ${field}: at least one memory scope like { kind: "user", id: "alex" }.`);
   return scopes;
 }
 

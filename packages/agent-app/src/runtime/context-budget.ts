@@ -1,7 +1,7 @@
 /**
  * Per-turn context budget: what Muster adds to a provider turn, and how it stays small.
  *
- * Measured (2026-09-23, Hybrow → Codex app-server → Claude Fable): a one-line first message cost
+ * Measured (2026-09-23, a gateway route → Codex app-server → a large hosted model): a one-line first message cost
  * 72.8k input tokens. Muster's own text was ~0.4k of that; the rest was what the Codex app-server
  * inherits from ~/.codex — above all the ChatGPT connector ("apps") tool schemas, which a model
  * without Codex's deferred `tool_search` (catalog `supports_search_tool: false`) receives inline on

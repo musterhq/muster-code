@@ -34,22 +34,21 @@ export interface CliStatus {
 }
 /** PRO-X2: one Codex sign-in (CODEX_HOME). `default` is the home new chats use unless a default model names another account. */
 export interface ProviderAccountRow {
-  /** 'default' for the main CODEX_HOME, else the 10-hex account hash used in provider ids (`openai-direct_<hash>`). */
+  /** 'default' for the main CODEX_HOME, else the 10-hex account hash used in provider ids (`<id>_<hash>`). */
   id: string; label: string;
-  /** Provider ids this account contributes, e.g. ['hybrow', 'openai-direct'] or ['openai-direct_<hash>']. */
+  /** Provider ids this account contributes: its ChatGPT route and any gateway its Codex config names. */
   providerIds: string[];
   ready: boolean; removable: boolean;
 }
-const CODEX_FAMILY = /^(hybrow|openai-direct)(?:_([0-9a-f]{10}))?$/;
 /** The account whose provider new chats use: the one listing `providerId`, else the default sign-in. */
 export function activeAccountId(accounts: readonly ProviderAccountRow[], providerId: string | undefined): string {
   return accounts.find(account => providerId && account.providerIds.includes(providerId))?.id ?? 'default';
 }
-/** Switching accounts keeps the provider family (gateway or direct) when the target account has it, else its direct route. */
+/** Switching accounts keeps the same route (same id without its account suffix) when the target account has it, else its ChatGPT route, else its first route. */
 export function accountProviderId(target: ProviderAccountRow, currentProviderId: string | undefined): string | undefined {
-  const family = CODEX_FAMILY.exec(currentProviderId ?? '')?.[1] ?? 'openai-direct';
+  const base = (currentProviderId ?? '').replace(/_[0-9a-f]{10}$/, '') || 'openai-direct';
   const suffix = target.id === 'default' ? '' : `_${target.id}`;
-  return [`${family}${suffix}`, `openai-direct${suffix}`, `hybrow${suffix}`].find(id => target.providerIds.includes(id));
+  return [`${base}${suffix}`, `openai-direct${suffix}`].find(id => target.providerIds.includes(id)) ?? target.providerIds[0];
 }
 export interface CliUpdateResult { outcome: 'updated' | 'deferred' | 'failed'; status: CliStatus }
 export interface ProvidersCommands {

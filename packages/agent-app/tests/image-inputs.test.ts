@@ -88,7 +88,7 @@ test('Codex app-server route passes images to the core, and the bundled core sen
   const calls:Record<string,unknown>[]=[];
   const adapter=createProviderAdapter({available:()=>true,command:'/bin/fake-codex',core:{CODEX_RUN_LIFECYCLE_VERSION:1,async runCodexAppServer(input){calls.push(input);return {status:'completed',finalMessage:'',threadId:'t',turnId:'u'};},async callCodexConversation(){return {};},async interruptActiveCodexTurn(){return true;},clearCodexAppServerSessions(){}}});
   try {
-    await adapter.run({chat:{id:'c',mode:'agent',model:'claude/claude-fable-5'} as ProviderInput['chat'],cwd:root,prompt:'p',images:[path],onDelta(){},onReasoning(){},onEvent(){},async onRequest(){return undefined;}});
+    await adapter.run({chat:{id:'c',mode:'agent',providerId:'fixture',model:'fixture-model'} as ProviderInput['chat'],cwd:root,prompt:'p',images:[path],onDelta(){},onReasoning(){},onEvent(){},async onRequest(){return undefined;}});
     assert.deepEqual(calls[0]?.images,[path]);
   } finally {adapter.dispose();}
 
@@ -117,8 +117,8 @@ rl.on('line',line=>{const m=JSON.parse(line);if(m.id===undefined)return;
 test('a Codex catalog model without image input_modalities is listed as image-blind',async t=>{
   const root=await directory(t),directoryPath=join(root,'runtime'),cli=join(root,'cli'),catalog=join(root,'catalog.json'),home=join(root,'home');
   await mkdir(join(directoryPath,'resources'),{recursive:true});await mkdir(home);await writeFile(cli,'#!/bin/sh\n',{mode:0o700});
-  await copyFile(join(import.meta.dirname,'../../builtin/resources/codex-profile.cjs'),join(directoryPath,'resources/codex-profile.cjs'));
-  for(const profile of ['hybrow-gateway','openai-direct'])await writeFile(join(directoryPath,'resources',`codex-${profile}.sh`),'#!/bin/sh\n',{mode:0o700});
+  await copyFile(join(import.meta.dirname,'../resources/codex-profile.cjs'),join(directoryPath,'resources/codex-profile.cjs'));
+  await writeFile(join(directoryPath,'resources','codex-launch.sh'),'#!/bin/sh\n',{mode:0o700});
   await writeFile(catalog,JSON.stringify({models:[{slug:'gpt-5.6-terra',input_modalities:['text','image']},{slug:'gpt-5.6-luna',input_modalities:['text']},{slug:'gpt-6-astra'}]}));
   await writeFile(join(home,'openai-direct.config.toml'),`model_provider="openai"\nmodel_catalog_json=${JSON.stringify(catalog)}\n`);
   await writeFile(join(home,'auth.json'),JSON.stringify({tokens:{account_id:'A',access_token:'T'}}));

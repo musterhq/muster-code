@@ -94,11 +94,11 @@ test('provider steer targets the chat-owned core session and stops after settlem
   const core:CoreClient={CODEX_RUN_LIFECYCLE_VERSION:1,runCodexAppServer:()=>new Promise(done=>{resolve=done;}),async callCodexConversation(){return {};},async interruptActiveCodexTurn(){return true;},clearCodexAppServerSessions(){},
     async steerActiveCodexTurn(text,owner,key){calls.push([text,owner,key]);return true;}};
   const adapter=createProviderAdapter({core,available:()=>true,command:'/unused'});
-  const input:ProviderInput={chat:{id:'chat-1',mode:'agent',model:'claude/claude-fable-5'} as ProviderInput['chat'],cwd:'/unused',prompt:'p',onDelta(){},onReasoning(){},onEvent(){},async onRequest(){return undefined;}};
+  const input:ProviderInput={chat:{id:'chat-1',mode:'agent',providerId:'fixture',model:'fixture-model'} as ProviderInput['chat'],cwd:'/unused',prompt:'p',onDelta(){},onReasoning(){},onEvent(){},async onRequest(){return undefined;}};
   assert.equal(await adapter.steer!('chat-1','early'),false);
   const pending=adapter.run(input);await new Promise(done=>setImmediate(done));
   assert.equal(await adapter.steer!('chat-1','mid-run'),true);
-  assert.equal(calls.length,1);assert.equal(calls[0]![0],'mid-run');assert.match(calls[0]![1],/chat-1/);assert.equal(calls[0]![2],'agent:chat-1:hybrow:fixture-hybrow');
+  assert.equal(calls.length,1);assert.equal(calls[0]![0],'mid-run');assert.match(calls[0]![1],/chat-1/);assert.equal(calls[0]![2],'agent:chat-1:fixture:fixture-binding');
   resolve({status:'completed',finalMessage:'',dispatchState:'dispatched',threadId:'t',turnId:'u'});await pending;
   assert.equal(await adapter.steer!('chat-1','late'),false);
   adapter.dispose();

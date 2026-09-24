@@ -182,10 +182,11 @@ export function createImportDomain(context: DomainContext): DomainModule {
     if (!chat) {
       const defaults = await context.invoke('chat.defaults', { ...(folder ? { folderId: folder.id } : {}) }).catch(() => undefined);
       const builtin = context.modelCatalog?.().builtin;
-      const model = defaults?.model || builtin?.model || 'default', providerId = defaults?.providerId || builtin?.providerId || 'hybrow';
+      const model = defaults?.model || builtin?.model || 'default', providerId = defaults?.providerId || builtin?.providerId || '';
       const provider = context.modelCatalog?.().providers.find(entry => entry.id === providerId);
       chat = store.createChat({ ...(folder ? { folderId: folder.id } : {}), model, mode: 'agent' });
-      chat = store.updateChat(chat.id, { providerId, providerBindingId: provider?.bindingId ?? providerId });
+      // No ready provider on this machine: the imported chat stays unbound and asks for a model when continued.
+      if (providerId) chat = store.updateChat(chat.id, { providerId, providerBindingId: provider?.bindingId ?? providerId });
       if (previousActive) store.setActiveChat(previousActive);
     } else {
       if (chat.status === 'running' || chat.status === 'stopping') throw new Error('This chat is working; wait for it to finish before importing again.');

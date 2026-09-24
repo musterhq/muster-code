@@ -2,14 +2,11 @@ import {spawn as nodeSpawn, type ChildProcess} from 'node:child_process';
 import {randomUUID} from 'node:crypto';
 import {jsonLines, loadImages, text} from './shared.ts';
 import type {AdapterRunInput, AdapterRunResult, RunnableAdapter} from './types.ts';
+import {CLAUDE_CODE_ALIASES, CLAUDE_CODE_DEFAULT} from './claude-models.ts';
 
 export type Spawn = (command: string, args: string[], options: {cwd: string; env: NodeJS.ProcessEnv; stdio: ['pipe', 'pipe', 'pipe']}) => ChildProcess;
-export const CLAUDE_CODE_MODELS = [
-  {id: 'claude-code/default', name: 'Claude Code default'},
-  {id: 'claude-code/opus', name: 'Claude Opus'},
-  {id: 'claude-code/sonnet', name: 'Claude Sonnet'},
-  {id: 'claude-code/haiku', name: 'Claude Haiku'},
-].map(model => ({...model, efforts: ['low', 'medium', 'high', 'xhigh'] as ('low' | 'medium' | 'high' | 'xhigh')[]}));
+/** Claude Code's default and family aliases only; the versioned list comes from claude-models.ts. */
+export const CLAUDE_CODE_MODELS = [CLAUDE_CODE_DEFAULT, ...CLAUDE_CODE_ALIASES];
 
 /** read-only (and every Ask/Plan chat) → plan; workspace → acceptEdits; full → bypassPermissions. */
 export const claudePermissionMode = (mode: AdapterRunInput['permissionMode']) => mode === 'full' ? 'bypassPermissions' : mode === 'workspace' ? 'acceptEdits' : 'plan';

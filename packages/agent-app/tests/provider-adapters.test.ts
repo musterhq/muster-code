@@ -197,8 +197,8 @@ test('extra CODEX_HOME accounts become separate providers with their own binding
   const root=await mkdtemp(join(tmpdir(),'muster-accounts-'));t.after(()=>rm(root,{recursive:true,force:true}));
   const directory=join(root,'runtime'),cli=join(root,'cli'),catalog=join(root,'catalog.json'),main=join(root,'main'),work=join(root,'work');
   await mkdir(join(directory,'resources'),{recursive:true});await writeFile(cli,'#!/bin/sh\n',{mode:0o700});
-  await copyFile(join(import.meta.dirname,'../../builtin/resources/codex-profile.cjs'),join(directory,'resources/codex-profile.cjs'));
-  for(const profile of ['hybrow-gateway','openai-direct'])await writeFile(join(directory,'resources',`codex-${profile}.sh`),'#!/bin/sh\n',{mode:0o700});
+  await copyFile(join(import.meta.dirname,'../resources/codex-profile.cjs'),join(directory,'resources/codex-profile.cjs'));
+  await writeFile(join(directory,'resources','codex-launch.sh'),'#!/bin/sh\n',{mode:0o700});
   await writeFile(catalog,JSON.stringify({models:[{slug:'gpt-5.6-terra'}]}));
   const idToken=`x.${Buffer.from(JSON.stringify({email:'work@example.com'})).toString('base64url')}.y`;
   for(const [home,account] of [[main,'A'],[work,'B']] as const){
@@ -213,7 +213,7 @@ test('extra CODEX_HOME accounts become separate providers with their own binding
   const direct=routes.find(r=>r.info.id==='openai-direct')!,extra=routes.find(r=>r.info.id===`openai-direct_${accountHash(work)}`)!;
   assert.ok(direct&&extra);assert.equal(routes.some(r=>r.info.id.startsWith('hybrow_')),false);
   assert.equal(direct.info.available,true);assert.equal(extra.info.available,true);
-  assert.equal(extra.info.name,'OpenAI Direct · Work');assert.equal(extra.info.identityMasked,'w***@example.com');
+  assert.equal(extra.info.name,'OpenAI (ChatGPT sign-in) · Work');assert.equal(extra.info.identityMasked,'w***@example.com');
   assert.notEqual(extra.info.bindingId,direct.info.bindingId);assert.equal(extra.env.CODEX_HOME,work);
   assert.match(extra.info.detail??'',/Inherits 2 MCP servers from Codex config \(github, figma\)/);
   assert.match(direct.info.detail??'',/No MCP servers are configured/);

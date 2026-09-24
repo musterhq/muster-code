@@ -24,3 +24,7 @@ export const listMemory: CoreMemory['listMemory'] = (...args) => engine().listMe
 export const searchMemory: CoreMemory['searchMemory'] = (...args) => engine().searchMemory(...args);
 export const inspectMemoryStore: CoreMemory['inspectMemoryStore'] = (...args) => engine().inspectMemoryStore(...args);
 export const isVisibleInScopes: CoreMemory['isVisibleInScopes'] = (...args) => engine().isVisibleInScopes(...args);
+
+/** A Project bank's scope as the memory core accepts it. The core has no 'project' scope kind (it throws "Invalid memory
+ *  scope kind: project"); the bank is already isolated by its own store folder, so a workspace scope names it. */
+export const projectMemoryScope = (projectId: string): MemoryScope => ({kind: 'workspace', id: `project-${projectId}`});

@@ -15,7 +15,9 @@ import {nothingSignedIn, resumeStep, setupChecklist, shouldAutoOpenSetup, skipSt
 
 async function directory(t: TestContext) { const path = await mkdtemp(join(tmpdir(), 'muster-setup-')); t.after(() => rm(path, {recursive: true, force: true})); return path; }
 const cli = (tool: CliStatus['tool'], path: string | null, managed = false): CliStatus => ({tool, label: tool === 'codex' ? 'Codex CLI' : tool === 'claude' ? 'Claude Code' : 'OpenCode', package: 'x', installed: {path, version: path ? '1.2.3' : null, managed}, latest: null, checkedAt: null, updateAvailable: false, managed: {current: null, previous: null, versions: []}, pending: null, activeSessions: 0, busy: false, canRollback: false, rollbackTarget: null});
-const provider = (id: string, available: boolean, models = 2, extra: Partial<ProviderInfo> = {}): ProviderInfo => ({id, name: id === 'openai-direct' ? 'OpenAI Direct' : id, available, identityMasked: '', models: Array.from({length: available ? models : 0}, (_, i) => ({id: `${id}-m${i}`, name: `M${i}`})), status: available ? 'ready' : 'configured', ...extra});
+// Codex routes carry the `codex` metadata the runtime attaches from the user's config (a ChatGPT sign-in, or a gateway).
+const codexMeta = (id: string): Partial<ProviderInfo> => id.startsWith('openai-direct') ? {codex: {modelProvider: 'openai', kind: 'chatgpt'}} : id.startsWith('hybrow') ? {codex: {modelProvider: 'hybrow', kind: 'gateway'}} : {};
+const provider = (id: string, available: boolean, models = 2, extra: Partial<ProviderInfo> = {}): ProviderInfo => ({id, name: id === 'openai-direct' ? 'OpenAI Direct' : id, available, identityMasked: '', models: Array.from({length: available ? models : 0}, (_, i) => ({id: `${id}-m${i}`, name: `M${i}`})), status: available ? 'ready' : 'configured', ...codexMeta(id), ...extra});
 const EMPTY = {step: 'welcome' as const, startedAt: null, completedAt: null, dismissedAt: null, skipped: []};
 
 test('CLI rows: installed, signed in and ready come from CLI status, discovery and the provider list; no secrets', () => {
@@ -29,7 +31,9 @@ test('CLI rows: installed, signed in and ready come from CLI status, discovery a
   assert.equal(rows[0]!.loginCommand, 'codex login');
   assert.equal(loginCommand('codex', {installed: {path: "/data/managed cli/codex/1.0.0/node_modules/.bin/codex", version: '1.0.0', managed: true}}), "'/data/managed cli/codex/1.0.0/node_modules/.bin/codex' login", 'a managed copy is named by its quoted path');
   assert.equal(loginCommand('claude'), 'claude auth login');
-  assert.equal(cliForProvider('hybrow_0123456789'), 'codex');
+  assert.equal(cliForProvider(provider('hybrow_0123456789', true)), 'codex', 'any route from the Codex config runs through the Codex CLI');
+  assert.equal(cliForProvider('hybrow'), undefined, 'a bare id is never assumed to be a Codex gateway');
+  assert.equal(cliForProvider({id: 'omniroute', codex: {modelProvider: 'omniroute', kind: 'gateway'}}), 'codex');
   assert.equal(cliForProvider('custom_x'), undefined);
 });
 
@@ -66,7 +70,7 @@ test('docker: not installed, installed but stopped, running, and a timeout never
 
 test('detectSetup survives a failing part and reports ready providers', async () => {
   const status = await detectSetup({providers: async () => [provider('openai-direct', true)], cliStatus: async () => { throw new Error('boom'); }, discovered: async () => [], env: {PATH: ''}, exists: () => false, platform: 'linux', run: async () => ({ok: false, stdout: '', stderr: ''})});
-  assert.deepEqual(status.readyProviders, [{id: 'openai-direct', name: 'OpenAI Direct'}]);
+  assert.deepEqual(status.readyProviders, [{id: 'openai-direct', name: 'OpenAI Direct', cli: 'codex'}]);
   assert.equal(status.clis.length, 3);
   assert.equal(status.docker.installed, false);
   assert.equal(nothingSignedIn(status), false);

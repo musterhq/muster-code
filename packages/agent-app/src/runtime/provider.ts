@@ -1,9 +1,8 @@
 import { createRequire } from 'node:module';
 import { randomUUID } from 'node:crypto';
-import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
-import {configuredProviderInstances,type ProviderInstance,revalidateProviderInstances} from './provider-instances.ts';
+import {configuredProviderInstances,providerListingsSettled,providerNode,type ProviderInstance,revalidateProviderInstances} from './provider-instances.ts';
 import {createAdapterCatalog,type AdapterCatalog} from './adapters/index.ts';
 import {readOwnedCommandOutputs} from './command-output-recovery.ts';
 import {coreBudgetOptions, classifyProviderFailure, lifecycleDiagnostic, requestWhileOwned, providerAccessPolicy, type ProviderBudgets, type ProviderRecovery} from './provider-run-lifecycle.ts';
@@ -12,10 +11,11 @@ import {connectorPolicy, leanCodexFeatureOverrides} from './context-budget.ts';
 import type { Chat, ProviderInfo } from '../shared/protocol.ts';
 import {NativeUnavailableError} from './codex-native.ts';
 
+/** Identity of the test-only route `createProviderAdapter({available})` builds. */
+export const FIXTURE_PROVIDER = {id: 'fixture', bindingId: 'fixture-binding', model: 'fixture-model'} as const;
 /** The legacy-core turn ceiling is logged once, so a killed long turn is never a silent failure. */
 let lifecycleWarned = false;
 
-export const MODEL = 'claude/claude-fable-5';
 export class ProviderPreDispatchError extends Error {
   readonly dispatchState = 'not-dispatched' as const;
 }
@@ -130,9 +130,10 @@ export function createProviderAdapter(options: { core?: CoreClient; available?: 
   // Start CLI probes and model listings now so the first providers.list is already settled.
   catalog?.instances();
   const client = () => core ??= createRequire(__filename)(join(__dirname, 'core-client.cjs')) as CoreClient;
+  // `available` is a test seam: one Codex-style route with a fixed identity, no configuration read.
   const instances = ():ProviderInstance[] => options.instances?.() ?? (options.available ? [{
-    info:{id:'hybrow',name:'Hybrow OmniRoute',available:options.available(),identityMasked:'Account hidden',bindingId:'fixture-hybrow',models:[{id:MODEL,name:'Claude Fable 5'}]},
-    command:options.command??join(__dirname,'resources','codex-hybrow-gateway.sh'),env:{},sessionsRoot:join(process.env.CODEX_HOME||join(homedir(),'.codex'),'sessions'),
+    info:{id:FIXTURE_PROVIDER.id,name:'Fixture provider',driver:'codex-app-server',available:options.available(),identityMasked:'Account hidden',bindingId:FIXTURE_PROVIDER.bindingId,models:[{id:FIXTURE_PROVIDER.model,name:'Fixture model'}]},
+    command:options.command??join(__dirname,'resources','codex-launch.sh'),env:{},sessionsRoot:join(process.env.CODEX_HOME||join(homedir(),'.codex'),'sessions'),
   }] : [...configuredProviderInstances(), ...catalog?.instances() ?? []]);
   const close = (session: OwnedSession) => core?.clearCodexAppServerSessions(session.owner);
   const cancel = (id: string, session: OwnedSession): Promise<boolean> => {
@@ -201,7 +202,7 @@ export function createProviderAdapter(options: { core?: CoreClient; available?: 
   }
   return {
     info() { return instances().map(instance=>({...instance.info,available:!disposed&&instance.info.available})); },
-    async ready() { await catalog?.ready(); },
+    async ready() { await Promise.all([catalog?.ready(), options.instances || options.available ? undefined : providerListingsSettled()]); },
     markStale() {
       revalidateProviderInstances();
       let marked = 0;
@@ -213,8 +214,10 @@ export function createProviderAdapter(options: { core?: CoreClient; available?: 
       let previous = sessions.get(input.chat.id);
       if (previous?.active || previous?.stop || adapterRuns.has(input.chat.id)) throw new ProviderPreDispatchError('This chat already owns a provider attempt. Wait for it to settle before continuing.');
       revalidateProviderInstances();
-      const route = beforeDispatch(() => instances().find(instance=>instance.info.id===(input.chat.providerId??'hybrow')));
-      if (!route?.info.available) throw new ProviderPreDispatchError('The selected provider is unavailable. No alternate provider was used.');
+      if (!input.chat.providerId) throw new ProviderPreDispatchError('No model is connected for this chat. Connect a model, then pick it in the composer.');
+      const route = beforeDispatch(() => instances().find(instance=>instance.info.id===input.chat.providerId));
+      if (!route) throw new ProviderPreDispatchError(`The provider “${input.chat.providerId}” is not available on this Mac. Pick another model. No alternate provider was used.`);
+      if (!route.info.available) throw new ProviderPreDispatchError('The selected provider is unavailable. No alternate provider was used.');
       if (input.chat.model && !route.info.models.some(model=>model.id===input.chat.model)) throw new ProviderPreDispatchError('This model is unavailable through the selected provider.');
       const bindingId=route.info.bindingId??route.info.id;
       if (input.chat.providerBindingId && input.chat.providerBindingId!==bindingId) throw new ProviderPreDispatchError('The selected provider account or profile changed. Select it again before running.');
@@ -247,13 +250,14 @@ export function createProviderAdapter(options: { core?: CoreClient; available?: 
       // one still held it; that first turn failed instantly. (Retry worked only
       // because the failure closed every process of this owner.) Close the stale
       // process first so exactly one app-server owns the thread.
-      const model0 = input.chat.model || MODEL;
+      const model0 = input.chat.model || route.info.models[0]?.id;
+      if (!model0) throw new ProviderPreDispatchError('The selected provider reports no models.');
       // Mirrors the core's scope key (instruction-only changes are already evicted by the core).
       if (input.connectorsRequested) connectorChats.add(input.chat.id);
       // Context budget: Codex features Muster does not use, and connector (apps) tool schemas a model without deferred
       // tool search would otherwise receive inline on every request, stay off unless this chat asked for a connector.
       const featureOverrides = leanCodexFeatureOverrides({toolSearch: route.info.models.find(entry => entry.id === model0)?.toolSearch, connectorsRequested: connectorChats.has(input.chat.id), policy: connectorPolicy()});
-      const signature = JSON.stringify([access, model0, input.reasoningEffort ?? 'medium', input.configOverrides ?? {}, featureOverrides, input.cwd, route.command]);
+      const signature = JSON.stringify([access, model0, input.reasoningEffort ?? 'medium', input.configOverrides ?? {}, featureOverrides, input.cwd, route.command, route.info.id, route.env]);
       if (previous && ((previous.signature !== undefined && previous.signature !== signature) || previous.stale) && !previous.liveTurns.size && !previous.workOverflow) close(previous);
       if (!previous && sessions.size >= 64) {
         // Bound retained observers without evicting known background work.
@@ -275,16 +279,16 @@ export function createProviderAdapter(options: { core?: CoreClient; available?: 
         return true;
       };
       try {
-        const node = process.env.MUSTER_PROVIDER_NODE || ['/opt/homebrew/bin/node', '/usr/local/bin/node'].find(existsSync) || 'node';
+        const node = providerNode();
         const commands=new Map<string,{params:Record<string,unknown>;item:Record<string,unknown>;turnId:string;output:string}>();
-        const model = input.chat.model || MODEL;
+        const model = model0;
         const reasoning = input.reasoningEffort ?? 'medium';
         const developerInstructions = runInstructions(input.chat.mode, input.developerInstructions);
         const extraOverrides = Object.entries(input.configOverrides ?? {}).filter(([name]) => /^[A-Za-z0-9_.-]{1,128}$/.test(name) && !/^(sandbox|approval_policy)/.test(name)).map(([name, value]) => `${name}=${JSON.stringify(value)}`);
         const result=await client().runCodexAppServer({
           prompt: input.prompt, cwd: input.cwd, command: route.command, model, reasoning,
           ...(input.images?.length ? { images: input.images } : {}),
-          env: { MUSTER_PROVIDER_NODE: node, ...route.env }, transportOwner: session.owner, cacheKey: session.key,
+          env: { MUSTER_PROVIDER_NODE: node.node, ...node.env, ...route.env }, transportOwner: session.owner, cacheKey: session.key,
           ...budgetOptions,
           ...(lifecycleSupported ? {
             signal: session.controller.signal,
@@ -365,7 +369,7 @@ export function createProviderAdapter(options: { core?: CoreClient; available?: 
         const terminal = !!result.threadId && !!result.turnId && session.terminalTurns.has(`${result.threadId}\0${result.turnId}`);
         // A resets-in-N-min ETA, when the provider is near capacity, is appended to an
         // admission-rejected reason so the user knows roughly when to retry instead of guessing.
-        const resetEta = formatResetEta(currentProviderUsage(route.info.id, route.sessionsRoot));
+        const resetEta = formatResetEta(currentProviderUsage(route.info.id, route.sessionsRoot, route.info.codex?.modelProvider));
         const recovery = classifyProviderFailure(result, { activity: session.activity, terminal, cancelled: session.controller.signal.aborted, resetEta });
         if (result.status === 'failed') session.retired = true;
         return { ...result, ...(session.controller.signal.aborted ? { status: 'failed' as const, errorMessage: recovery?.reason } : {}), ...(recovery ? { recovery } : {}) };
@@ -373,7 +377,7 @@ export function createProviderAdapter(options: { core?: CoreClient; available?: 
         session.retired = true;
         close(session);
         const result: ProviderResult = { status: 'failed', finalMessage: '', errorMessage: error instanceof Error ? error.message : String(error), dispatchState: 'unknown', ...(session.threadId ? { threadId: session.threadId } : {}), ...(session.turnId ? { turnId: session.turnId } : {}) };
-        return { ...result, recovery: classifyProviderFailure(result, { activity: session.activity, terminal: false, cancelled: session.controller.signal.aborted, resetEta: formatResetEta(currentProviderUsage(route.info.id, route.sessionsRoot)) }) };
+        return { ...result, recovery: classifyProviderFailure(result, { activity: session.activity, terminal: false, cancelled: session.controller.signal.aborted, resetEta: formatResetEta(currentProviderUsage(route.info.id, route.sessionsRoot, route.info.codex?.modelProvider)) }) };
       } finally {
         session.active = false;
         if (session.retired) session.controller.abort();

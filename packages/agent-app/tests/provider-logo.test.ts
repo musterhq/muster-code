@@ -14,7 +14,8 @@ await build({entryPoints: [new URL('../src/renderer/components/ProviderLogo.tsx'
 const {providerBrand} = await import(`file://${outfile}`) as {providerBrand: (id: string, name?: string, endpoint?: string) => string | undefined};
 
 test('built-in providers map to their own marks', () => {
-  assert.equal(providerBrand('hybrow'), 'hybrow');
+  assert.equal(providerBrand('hybrow'), undefined, 'a gateway id from the user config gets the monogram, never an assumed mark');
+  assert.equal(providerBrand('omniroute', 'OmniRoute'), undefined);
   assert.equal(providerBrand('codex'), 'openai');
   assert.equal(providerBrand('codex_0123456789'), 'openai');
   assert.equal(providerBrand('claude-code'), 'claude');

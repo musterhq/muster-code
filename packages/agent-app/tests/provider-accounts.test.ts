@@ -12,6 +12,9 @@ test('PRO-X2: accounts list/add/remove without exposing paths or identities', as
   t.after(() => rm(root, { recursive: true, force: true }));
   const dataDir = join(root, 'data'), home = join(root, 'home'), work = join(root, 'work'), empty = join(root, 'empty');
   await mkdir(dataDir); await mkdir(join(home, '.codex'), { recursive: true }); await mkdir(work); await mkdir(empty);
+  // The default sign-in's routes come from its own config: a gateway profile (any provider id) and a ChatGPT sign-in.
+  await writeFile(join(home, '.codex', 'hybrow-gateway.config.toml'), 'model_provider = "hybrow"\n[model_providers.hybrow]\nbase_url = "https://gateway.example/v1"\n');
+  await writeFile(join(home, '.codex', 'auth.json'), JSON.stringify({ tokens: { account_id: 'A', access_token: 'T' } }));
   await writeFile(join(work, 'auth.json'), JSON.stringify({ tokens: { account_id: 'B', access_token: 'T', id_token: `x.${Buffer.from(JSON.stringify({ email: 'work@example.com' })).toString('base64url')}.y` } }));
   const context = { dataDir, emit() {}, db() { throw new Error('no db'); }, hooks: undefined, invoke: async () => [] } as never;
   const domain = createProvidersDomain(context, { shellEnv: false, secrets: { close() {} } as never, cli: {} as never, env: { CODEX_HOME: join(home, '.codex') }, home, directory: join(root, 'runtime') });

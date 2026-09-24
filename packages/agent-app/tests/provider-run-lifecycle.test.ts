@@ -10,7 +10,7 @@ const deferred = <T>() => {
   const promise = new Promise<T>((done, fail) => { resolve = done; reject = fail; });
   return {promise, resolve, reject};
 };
-const input = (id: string): ProviderInput => ({chat: {id, mode: 'agent'} as ProviderInput['chat'], cwd: '/unused', prompt: 'test', onDelta() {}, onReasoning() {}, onEvent() {}, async onRequest() {return undefined;}});
+const input = (id: string): ProviderInput => ({chat: {id, mode: 'agent', providerId: 'fixture'} as ProviderInput['chat'], cwd: '/unused', prompt: 'test', onDelta() {}, onReasoning() {}, onEvent() {}, async onRequest() {return undefined;}});
 function fixture(lifecycle = false) {
   const runs: {args: Record<string, unknown>; result: ReturnType<typeof deferred<ProviderResult>>}[] = [];
   const cleared: string[] = [];

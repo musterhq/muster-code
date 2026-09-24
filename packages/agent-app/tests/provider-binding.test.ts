@@ -86,7 +86,7 @@ test('unknown stored providers are retained and never silently fall back',async 
   let calls=0;const provider:ProviderAdapter={info:()=>routes().map(r=>r.info),async run(){calls++;return completed;},async stop(){return true;},dispose(){}};
   const service=createAgentService({dataDir,provider,onEvent(){}});try{
     assert.equal((await service.invoke('app.snapshot',undefined)).chats[0]?.providerId,'removed-provider');
-    await assert.rejects(service.invoke('chat.send',{id:chat.id,text:'hello',requestId:randomUUID()}),/unavailable/);assert.equal(calls,0);
+    await assert.rejects(service.invoke('chat.send',{id:chat.id,text:'hello',requestId:randomUUID()}),/not available on this Mac/);assert.equal(calls,0);
     assert.equal((await service.invoke('app.snapshot',undefined)).chats[0]?.draft,'preserve');
   }finally{await service.dispose();}
 });
@@ -96,8 +96,8 @@ test('configured instances use validated catalogs and opaque account binding wit
   const directory=join(home,'runtime'),codexHome=join(home,'codex'),cli=join(home,'cli');
   await mkdir(join(directory,'resources'),{recursive:true});await mkdir(codexHome);
   await writeFile(cli,'#!/bin/sh\nexit 1\n',{mode:0o700});
-  await copyFile(resolve('../builtin/resources/codex-profile.cjs'),join(directory,'resources/codex-profile.cjs'));
-  for(const profile of ['hybrow-gateway','openai-direct'])await writeFile(join(directory,'resources',`codex-${profile}.sh`),'#!/bin/sh\nexit 1\n',{mode:0o700});
+  await copyFile(resolve('resources/codex-profile.cjs'),join(directory,'resources/codex-profile.cjs'));
+  await writeFile(join(directory,'resources','codex-launch.sh'),'#!/bin/sh\nexit 1\n',{mode:0o700});
   const catalog=join(home,'catalog.json');await writeFile(catalog,JSON.stringify({models:[{slug:'gpt-5.6-terra',display_name:'Terra'},{slug:'claude/claude-fable-5'},{slug:'invented/model'}]}));
   await writeFile(join(codexHome,'openai-direct.config.toml'),`model_provider="openai"\nmodel_catalog_json=${JSON.stringify(catalog)}\n`);
   await writeFile(join(codexHome,'hybrow-gateway.config.toml'),`model_provider="hybrow"\nmodel_catalog_json=${JSON.stringify(catalog)}\n[model_providers.hybrow]\nbase_url="https://router.hybrowlabs.com/v1"\nwire_api="responses"\n[model_providers.hybrow.auth]\ncommand="existing-helper"\nargs=[]\n`);

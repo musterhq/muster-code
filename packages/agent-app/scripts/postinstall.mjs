@@ -7,7 +7,7 @@
 // A failed automatic rebuild never fails the install: node-pty ships N-API prebuilds for darwin-arm64 and
 // darwin-x64, which Electron can load, so the app still starts; the warning says how to retry.
 import {spawnSync} from 'node:child_process';
-import {existsSync} from 'node:fs';
+import {chmodSync, existsSync, readdirSync} from 'node:fs';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 
@@ -21,6 +21,15 @@ if (!forced && !process.env.ELECTRON_SKIP_BINARY_DOWNLOAD && existsSync(path.joi
   log('Fetching the Electron binary...');
   const fetched = spawnSync(process.execPath, ['-e', "require('electron')"], {cwd: root, stdio: 'inherit'});
   if (fetched.status !== 0) console.warn('[muster postinstall] WARNING: could not download the Electron binary; `npm start` will retry.');
+}
+
+// npm unpacks node-pty's prebuilt spawn-helper without its execute bit, so every PTY fails with
+// "posix_spawnp failed" unless it is restored. Always do this, rebuild or not.
+for (const dir of ['prebuilds', path.join('build', 'Release')]) {
+  const base = path.join(root, 'node_modules', 'node-pty', dir);
+  if (!existsSync(base)) continue;
+  const helpers = dir === 'prebuilds' ? readdirSync(base).map(arch => path.join(base, arch, 'spawn-helper')) : [path.join(base, 'spawn-helper')];
+  for (const helper of helpers) if (existsSync(helper)) { try { chmodSync(helper, 0o755); } catch (error) { console.warn(`[muster postinstall] could not mark ${helper} executable: ${error.message}`); } }
 }
 
 if (!forced && process.env.MUSTER_SKIP_NATIVE_REBUILD) {

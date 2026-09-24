@@ -5,7 +5,9 @@ import {join} from 'node:path';
 import {test} from 'node:test';
 import {createAgentService} from '../src/runtime/service.ts';
 import {ProjectTaskStore} from '../src/runtime/project-tasks.ts';
-import {MODEL,type ProviderAdapter} from '../src/runtime/provider.ts';
+import {type ProviderAdapter} from '../src/runtime/provider.ts';
+/** A fixture model id: tests never depend on a particular provider's catalog. */
+const MODEL='fixture-model';
 
 async function until(check:()=>boolean|Promise<boolean>,label='condition'){for(let i=0;i<1500;i++){if(await check())return;await new Promise(resolve=>setTimeout(resolve,2));}assert.fail(`${label} not reached`);}
 
@@ -44,9 +46,9 @@ test('pre-dispatch failure preserves a linked task chat and draft without claimi
  await assert.rejects(service.invoke('project.tasks.start',{projectId:emptyProject.id,id:emptyTask.id,revision:0,requestId:'missing-scope'}),/Attach a folder/);
  assert.equal((await service.invoke('app.snapshot',undefined)).chats.length,0,'a Project with no execution scope does not create an unscoped chat');
  const folder=await service.invoke('folder.add',{path:folderPath}),project=await service.invoke('project.create',{name:'Unavailable',goal:'',folderIds:[folder.id]}),task=await service.invoke('project.tasks.create',{projectId:project.id,title:'Keep draft',acceptance:'preserve it',dependencies:[]});
- await assert.rejects(service.invoke('project.tasks.start',{projectId:project.id,id:task.id,revision:0,requestId:'pre-dispatch-failure'}),/unavailable through the configured provider/);
+ await assert.rejects(service.invoke('project.tasks.start',{projectId:project.id,id:task.id,revision:0,requestId:'pre-dispatch-failure'}),/No model is connected/);
  const saved=(await service.invoke('project.tasks.list',{projectId:project.id})).items[0]!;
- assert.equal(saved.status,'blocked');assert.ok(saved.runChatId);assert.match(saved.runError??'',/unavailable through/);
+ assert.equal(saved.status,'blocked');assert.ok(saved.runChatId);assert.match(saved.runError??'',/No model is connected/);
  const chat=(await service.invoke('app.snapshot',undefined)).chats.find(item=>item.id===saved.runChatId)!;
  assert.match(chat.draft,/preserve it/);assert.equal(chat.status,'idle');
 });

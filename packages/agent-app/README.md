@@ -3,7 +3,34 @@
 Standalone Muster Code agent desktop app. Plain Electron — no Code-OSS, no
 VS Code extension host.
 
-## Run Muster Agent on another Mac
+## Download Muster Agent
+
+1. Open the [Muster Agent releases](https://github.com/musterhq/muster-code/releases?q=agent-v) and pick the
+   newest `Muster Agent <version>` (while the repository is private you need a GitHub account with access).
+2. Download the file for your Mac (Apple menu > About This Mac shows the chip):
+   - Apple silicon (M1 and later): `Muster-Agent-<version>-arm64.dmg`
+   - Intel: `Muster-Agent-<version>-x64.dmg`
+
+   A `.zip` of the same app is attached too, and `SHA256SUMS` lets you check the download
+   (`shasum -a 256 -c SHA256SUMS --ignore-missing`).
+3. Open the disk image and drag **Muster Agent** onto **Applications**.
+4. First open. Builds are signed with the self-signed "Muster Agent Self-Signed" identity: the identity
+   stays the same from one release to the next, so macOS keeps the permissions you grant (Screen
+   Recording, Accessibility) across updates, but the app is not notarized by Apple. macOS therefore
+   blocks the first launch: right-click **Muster Agent** in Applications and choose **Open**, then
+   **Open** again (on recent macOS: System Settings > Privacy & Security > **Open Anyway**). Or clear
+   the quarantine flag once in Terminal:
+
+   ```sh
+   xattr -dr com.apple.quarantine "/Applications/Muster Agent.app"
+   ```
+
+What it needs: macOS 14 (Sonoma) or later and a model provider sign-in. On first run Muster Agent
+detects the providers already signed in on your Mac (Codex, Claude Code, OpenCode, or a configured
+gateway) and uses them; if it finds none, guided setup walks you through adding one. Docker Desktop
+(sandboxes) is optional.
+
+## Build and run Muster Agent from source
 
 A fresh clone builds and runs with no sibling checkouts and no environment variables: the few
 Muster core sources the app bundles are vendored in `packages/agent-app/vendor/` (see its README).
@@ -60,8 +87,15 @@ run an isolated profile.
 
 ```sh
 cd packages/agent-app
-npm run build && node scripts/package-preview.mjs   # -> release/Muster Agent Preview.app
+npm run build && node scripts/package-preview.mjs   # -> release/Muster Agent Preview.app (dev preview)
+node scripts/package-release.mjs                    # -> release-dist/Muster Agent.app, Muster-Agent-<version>-<arch>.zip/.dmg, SHA256SUMS
 ```
+
+`package-release.mjs` makes the distributable build for this Mac's architecture: a clean production
+build, the bundle renamed to Muster Agent (`dev.themuster.agent`, version from `package.json`, app
+icon from `resources/icon.icns`), only built files inside, then the zip, disk image and checksums.
+Releases are published by `.github/workflows/agent-app-release.yml` when an `agent-v<version>` tag is
+pushed; see `docs/RELEASE.md`.
 
 Without `MUSTER_SIGN_IDENTITY` the bundle is ad hoc signed, so Gatekeeper blocks a copy moved to
 another Mac: right-click the app and choose Open the first time, or clear the quarantine flag with
@@ -116,6 +150,7 @@ npm run typecheck    # tsc --noEmit
 npm test             # node --test 'tests/*.test.ts'
 npm run rebuild:native  # rebuild node-pty for Electron (needs Xcode CLT)
 npm run vendor:sync  # refresh vendor/ from MUSTER_* checkouts
+npm run package      # release build: release-dist/Muster-Agent-<version>-<arch>.zip/.dmg + SHA256SUMS
 ```
 
 ## Security model

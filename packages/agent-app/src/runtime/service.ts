@@ -1,4 +1,4 @@
-import { addMemory, listMemory, searchMemory, inspectMemoryStore, isVisibleInScopes } from './memory-adapter.ts';
+import { addMemory, listMemory, searchMemory, inspectMemoryStore, isVisibleInScopes, projectMemoryScope } from './memory-adapter.ts';
 import { HindsightService } from './hindsight-service.ts';
 import { MemoryConfigStore, MemoryTombstones, electronSecretBox } from './memory-context.ts';
 import { createHash } from 'node:crypto';
@@ -25,7 +25,7 @@ import { AgentModeReviewHost } from './review.ts';
 import {dirtyFileCount, gitStatus, mutateGit, pushGit, listPullRequests, compareUrl} from './git-local.ts';
 import {createEntry, moveFile} from './file-operations.ts';
 import { isElicitationRequest, elicitationPolicy, elicitationResult, elicitationText, elicitationServer } from '../shared/computer-use.ts';
-import { createProviderAdapter, MODEL, ProviderPreDispatchError, type ProviderAdapter, type ProviderResult } from './provider.ts';
+import { createProviderAdapter, ProviderPreDispatchError, type ProviderAdapter, type ProviderResult } from './provider.ts';
 import { discoverPlugins, discoverSkills, invokedPluginContext, resolveAttachedSkill, resolveInvokedPlugins } from './plugin-library.ts';
 import {providerAccessPolicy} from './provider-run-lifecycle.ts';
 import {parseKillIntent, userProcessThreat, type UserProcessTarget, type UserProcessThreat} from './user-process-guard.ts';
@@ -44,6 +44,7 @@ import type { DomainFactory } from './domains/types.ts';
 import { createPowerEvents, isPowerState, type PowerOutcome, type PowerState } from './power-events.ts';
 import { ARCHIVE_RUNNING_WARNING, MAX_ATTACHMENTS_PER_MESSAGE, MAX_ATTACHMENT_BYTES, MAX_QUEUED_MESSAGES, MAX_QUEUED_TEXT, REASONING_EFFORTS, type ReasoningEffort } from '../shared/protocol.ts';
 import type { ChatGoal } from '../shared/domains/goals-protocol.ts';
+import { firstReadyModel } from '../shared/domains/settings-protocol.ts';
 import { createSkill } from './skill-authoring.ts';
 import { exportChat, isChatExportFormat } from './chat-export.ts';
 import { redactSecrets } from './secret-redaction.ts';
@@ -269,7 +270,9 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
     if (typeof folderId === 'string' && folderId.startsWith('project:')) {
       const projectId = folderId.slice(8), project = store.project(projectId);
       if (!project) throw new Error('Project does not exist.');
-      return {cwd: join(options.dataDir, 'project-memory', project.id), scopes: [{kind:'project', id: project.id}]};
+      // The memory core knows no 'project' scope kind ("Invalid memory scope kind: project"): a Project bank is its own
+      // store (its own cwd) addressed with a core workspace scope, so list/search/add/inspect all work for it.
+      return {cwd: join(options.dataDir, 'project-memory', project.id), scopes: [projectMemoryScope(project.id)]};
     }
     const folder = folderFor(folderId);
     // Private memory never lives inside the user's repository (a commit or PR could publish it).
@@ -279,7 +282,8 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
     if (!Array.isArray(value) || value.length !== expected.length) throw new Error('Memory scopes must match the selected context.');
     const actual = value.map((entry) => {
       const candidate = object(entry);
-      return {kind: text(candidate.kind, 'scope kind', 32), id: text(candidate.id, 'scope id', 128)};
+      const scope = {kind: text(candidate.kind, 'scope kind', 32), id: text(candidate.id, 'scope id', 128)};
+      return scope.kind === 'project' ? projectMemoryScope(scope.id) : scope;
     });
     if (actual.some((scope, index) => scope.kind !== expected[index]!.kind || scope.id !== expected[index]!.id)) throw new Error('Memory scopes must match the selected context.');
     return actual;
@@ -319,10 +323,20 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
   function settleQuestions(chatId: string) {
     for (const [itemId, pending] of questions) if (pending.chatId === chatId) finishQuestion(itemId, pending, null, 'interrupted');
   }
-  function validateRunnableModel(model: string, providerId = 'hybrow') {
-    const entry = provider.info().find(candidate => candidate.id === providerId && candidate.available && (candidate.models.some(candidateModel => candidateModel.id === model) || (candidate.models.length === 0 && model === MODEL)));
-    if (!entry) throw new Error(`Model ${model} is unavailable through the configured provider. Choose an available model.`);
+  function validateRunnableModel(model: string, providerId: string | undefined) {
+    if (!providerId) throw new Error('No model is connected yet. Connect a model (Settings › Providers), then pick it in the composer.');
+    const listed = provider.info().filter(candidate => candidate.id === providerId);
+    if (!listed.length) throw new Error(`The provider “${providerId}” is not available on this Mac. Pick another model for this chat.`);
+    // A provider that reports no model list runs whatever model the chat names; the provider checks it at dispatch.
+    const entry = listed.find(candidate => candidate.available && (candidate.models.some(candidateModel => candidateModel.id === model) || candidate.models.length === 0));
+    if (!entry) throw new Error(`Model ${model || '(none)'} is unavailable through the configured provider. Choose an available model.`);
     return entry;
+  }
+  /** Provider and model for a chat nobody chose one for: Project → folder → user default, else the first ready provider. */
+  function newChatModel(input: { folderId?: string; projectId?: string }): { providerId: string; model: string; effort?: ReasoningEffort } {
+    const defaults = domainHooks.chatDefaults(input);
+    if (defaults.providerId && defaults.model?.trim()) return { providerId: defaults.providerId, model: defaults.model.trim(), ...(defaults.effort ? { effort: defaults.effort } : {}) };
+    return firstReadyModel(provider.info());
   }
   async function send(chatId: string, prompt: string, requestId: string, skill?: string | string[], attachmentIds: string[] = [], invoked: {pluginIds?: string[]; effort?: ReasoningEffort; reuseUserItemId?: string} = {}) {
     let chat = chatFor(chatId);
@@ -348,7 +362,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
     if (!prompt.trim() && attachmentIds.length === 0) throw new Error('Write a message first.');
     if (chat.archived) throw new Error('Restore this chat before sending.');
     if (providerSelections.has(chatId)) throw new Error('Wait for the provider selection to finish.');
-    validateRunnableModel(chat.model,chat.providerId??'hybrow');
+    validateRunnableModel(chat.model,chat.providerId);
     const project = chat.projectId ? store.snapshot().projects.find(p => p.id === chat.projectId) : undefined;
     const context = project ? `Project: ${project.name}\nShared goal: ${project.goal || '(not set)'}` : '';
     const skillContext = [...attachedSkills.map(entry => `Selected skill: ${entry.name} (${entry.provenance})\n\nApply these user-selected skill instructions to the current request:\n<skill-instructions>\n${entry.content}\n</skill-instructions>`), invokedPluginContext(plugins)].filter(Boolean).join('\n\n');
@@ -363,7 +377,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
     if (chat.archived) throw new Error('Restore this chat before sending.');
     if (chat.recovery?.kind === 'recovery-needed') throw new Error('Check the unresolved provider attempt before sending. Your draft is retained.');
     if (providerSelections.has(chatId)) throw new Error('Wait for the provider selection to finish.');
-    const selectedProvider=validateRunnableModel(chat.model,chat.providerId??'hybrow');
+    const selectedProvider=validateRunnableModel(chat.model,chat.providerId);
     const bindingId=selectedProvider.bindingId??selectedProvider.id;
     if (chat.providerBindingId && chat.providerBindingId!==bindingId) throw new Error('The selected provider account or profile changed. Select it again before sending. Your draft is retained.');
     const nativeMatches=chat.providerThreadProviderId===selectedProvider.id && chat.providerThreadBindingId===bindingId;
@@ -420,7 +434,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
           const current=store.chat(chatId);
           // The new provider thread now holds the digest; later sends continue it natively.
           if (digest) store.clearDigest(chatId);
-          store.updateChat(chatId,{providerThreadId:threadId,providerThreadProviderId:chat.providerId??'hybrow',providerThreadBindingId:chat.providerBindingId??null,...(turnId ? {providerTurnId:turnId} : current?.providerThreadId !== threadId ? {providerTurnId:null} : {})}); state();
+          store.updateChat(chatId,{providerThreadId:threadId,providerThreadProviderId:chat.providerId,providerThreadBindingId:chat.providerBindingId??null,...(turnId ? {providerTurnId:turnId} : current?.providerThreadId !== threadId ? {providerTurnId:null} : {})}); state();
         };
         // No registered hooks: dispatch in the same tick, exactly as before the seam existed.
         const hooked = domainHooks.hasRunHooks();
@@ -869,7 +883,8 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
     projectTasks.assertCanStartTask({projectId:input.projectId,id:input.taskId,revision:input.revision});
     const folder=input.folderId?store.folder(input.folderId):undefined;
     const prompt=`Project task: ${task.title}\nTask ID: ${task.id}\nAcceptance criteria:\n${task.acceptance||'(not specified)'}\n\nWork only within the selected Project folder. Implement the task, report concrete changes and relevant verification, and do not claim the task is verified. Ask before expanding scope or taking an irreversible action.`;
-    const chat=store.createChat({folderId:folder?.id,projectId:project.id,model:MODEL,mode:'agent'});
+    const initial=newChatModel({...(folder?{folderId:folder.id}:{}),projectId:project.id});
+    const chat=store.createChat({folderId:folder?.id,projectId:project.id,model:initial.model,providerId:initial.providerId,mode:'agent'});
     store.updateChat(chat.id,{title:`Task · ${task.title}`.slice(0,256),draft:prompt});
     let claimed:import('./project-tasks.ts').ProjectTask;
     try{claimed=projectTasks.startTask({projectId:input.projectId,id:input.taskId,revision:input.revision,requestId:input.requestId,chatId:chat.id});}
@@ -900,8 +915,12 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
       // OpenAI Direct signs in with the same ~/.codex/auth.json the Codex CLI entry reads: show that account
       // masked and revealable, exactly like Claude Code, instead of a generic "hidden" label.
       const account = (entry: (typeof runtime)[number]) => { const shared = entry.id === 'openai-direct' ? detected.find(row => row.id === 'codex' && row.identity) : undefined; return shared ? {identityMasked: shared.identityMasked, canReveal: true} : {canReveal: false}; };
-      return [...runtime.map(entry=>({...entry,...account(entry),source:'Existing local provider profile'})),
-        ...detected.filter(entry=>!runtime.some(runnable=>runnable.id===entry.id)).map(({identity,credentialPresent,...entry})=>({...entry,available:false,models:[],canReveal:Boolean(identity),source:'Local configuration discovery',detail:`${entry.detail}. No runnable adapter is enabled for this entry.`})),
+      // Keep the list to what the user actually has: an environment-key route without its key is an "add a key" option,
+      // not a provider; and the Codex CLI discovery row is redundant once OpenAI (ChatGPT sign-in) runs on the same auth.
+      const chatgptReady = runtime.some(entry => entry.id === 'openai-direct' && entry.available);
+      const shown = (entry: {id: string; available?: boolean}) => !(entry.id.startsWith('env-') && !entry.available) && !(entry.id === 'codex' && chatgptReady);
+      return [...runtime.filter(shown).map(entry=>({...entry,...account(entry),source:entry.codex&&entry.source?entry.source:'Existing local provider profile'})),
+        ...detected.filter(entry=>!runtime.some(runnable=>runnable.id===entry.id)&&shown(entry)).map(({identity,credentialPresent,...entry})=>({...entry,available:false,models:[],canReveal:Boolean(identity),source:'Local configuration discovery',detail:`${entry.detail}. No runnable adapter is enabled for this entry.`})),
         ...customProviders.list()];
     }
     if (command === 'plugins.inventory') return discoverPlugins();
@@ -917,12 +936,14 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
         const legacyAsk = defaults.mode === 'ask';
         const mode = defaults.mode === 'plan' ? 'plan' : 'agent';
         const permissionMode = defaults.permissionMode && ['read-only','workspace'].includes(defaults.permissionMode) ? defaults.permissionMode : legacyAsk ? 'read-only' : undefined;
-        let result = store.createChat({folderId, projectId, model: defaults.model?.trim() || MODEL, mode, ...(permissionMode ? {permissionMode} : {})});
-        if (defaults.providerId && /^[a-zA-Z0-9_-]{1,128}$/.test(defaults.providerId)) {
+        // Nothing chosen anywhere: the first ready provider. Nothing ready: an unbound chat that shows "Connect a model".
+        const initial = defaults.providerId && defaults.model?.trim() ? {providerId: defaults.providerId, model: defaults.model.trim()} : firstReadyModel(provider.info());
+        let result = store.createChat({folderId, projectId, model: initial.model, ...(initial.providerId ? {providerId: initial.providerId} : {}), mode, ...(permissionMode ? {permissionMode} : {})});
+        if (initial.providerId && /^[a-zA-Z0-9_-]{1,128}$/.test(initial.providerId)) {
           // Bind the default provider exactly as chat.selectProvider would, so the first send needs no reselection.
           let bindingId: string | undefined;
-          try { const selected = validateRunnableModel(result.model, defaults.providerId); bindingId = selected.bindingId ?? selected.id; } catch { /* resolver already checked readiness; keep the id only */ }
-          result = store.updateChat(result.id, {providerId: defaults.providerId, ...(bindingId ? {providerBindingId: bindingId} : {})});
+          try { const selected = validateRunnableModel(result.model, initial.providerId); bindingId = selected.bindingId ?? selected.id; } catch { /* resolver already checked readiness; keep the id only */ }
+          if (bindingId) result = store.updateChat(result.id, {providerBindingId: bindingId});
         }
         // The default's reasoning effort applies until the composer picks another one for this chat.
         if (defaults.effort && REASONING_EFFORTS.includes(defaults.effort)) efforts.set(result.id, defaults.effort);
@@ -961,7 +982,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
         for (const flag of ['pinned', 'archived'] as const) if (p[flag] !== undefined) { if (typeof p[flag] !== 'boolean') throw new Error(`Invalid ${flag}.`); patch[flag] = p[flag]; }
         if (p.mode !== undefined) { if (!['ask','plan','agent'].includes(String(p.mode))) throw new Error('Invalid mode.'); if (chat.status === 'running' || chat.status === 'stopping') throw new Error('Stop this run before changing mode.'); if (p.mode === 'ask') { patch.mode = 'agent'; if (!chat.permissionMode) patch.permissionMode = 'read-only'; } else patch.mode = p.mode as Chat['mode']; }
         // Mid-run model changes are allowed: the in-flight turn keeps the model it was dispatched with; the next turn uses this one.
-        if (p.model !== undefined) { const model = text(p.model, 'model', 256).trim(); if (!model) throw new Error('Choose a model.'); if (providerSelections.has(chatId)) throw new Error('Wait for the provider selection to finish.'); validateRunnableModel(model,chat.providerId??'hybrow'); patch.model = model; }
+        if (p.model !== undefined) { const model = text(p.model, 'model', 256).trim(); if (!model) throw new Error('Choose a model.'); if (providerSelections.has(chatId)) throw new Error('Wait for the provider selection to finish.'); validateRunnableModel(model,chat.providerId); patch.model = model; }
         if (p.folderId !== undefined) attachFolder(chat, id(p.folderId));
         if (p.projectId !== undefined) moveToProject(chat, p.projectId === null ? null : id(p.projectId));
         // An archived chat never wakes into the sidebar later: archiving clears its snooze without a notification.
@@ -1009,14 +1030,14 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
       case 'chat.selectProvider': {
         const chatId=id(p.id),providerId=id(p.providerId),model=text(p.model,'model',256).trim(),chat=chatFor(chatId);
         // Another model on the same provider account applies to the next turn without touching the live one.
-        if ((chat.providerId??'hybrow')===providerId && !providerSelections.has(chatId) && chat.recovery?.kind!=='recovery-needed') {
+        if ((chat.providerId)===providerId && !providerSelections.has(chatId) && chat.recovery?.kind!=='recovery-needed') {
           const selected=validateRunnableModel(model,providerId);
           if (!chat.providerBindingId || chat.providerBindingId===(selected.bindingId??selected.id)) { const updated=chat.model===model?chat:store.updateChat(chatId,{model}); state(); return updated; }
         }
         if (providerSelections.has(chatId) || reconciliations.has(chatId) || runs.has(chatId) || chat.status==='running' || chat.status==='stopping' || provider.hasActiveWork?.(chatId)) throw new Error('Wait for this chat and its background work before changing providers.');
         if (chat.recovery?.kind==='recovery-needed') throw new Error('Resolve the existing provider attempt before switching providers.');
         const selected=validateRunnableModel(model,providerId),bindingId=selected.bindingId??selected.id;
-        const changed=(chat.providerId??'hybrow')!==providerId || chat.providerBindingId!==bindingId;
+        const changed=(chat.providerId)!==providerId || chat.providerBindingId!==bindingId;
         providerSelections.add(chatId);
         try {
           if (changed) await provider.release?.(chatId);
@@ -1305,7 +1326,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
         const cwd=chat.folderId ? folderFor(chat.folderId).path : join(options.dataDir,'scratch',chatId);
         reconciliations.add(chatId);
         try {
-          const result=await (options.reconcileProvider ?? reconcileProviderTurn)({threadId:chat.providerThreadId,turnId:chat.providerTurnId,cwd,providerId:chat.providerThreadProviderId??chat.providerId??'hybrow',providerBindingId:chat.providerThreadBindingId});
+          const result=await (options.reconcileProvider ?? reconcileProviderTurn)({threadId:chat.providerThreadId,turnId:chat.providerTurnId,cwd,providerId:chat.providerThreadProviderId??chat.providerId,providerBindingId:chat.providerThreadBindingId});
           if (disposed) throw new Error('Agent runtime is closed.');
           const current=chatFor(chatId);
           if (runs.has(chatId) || current.providerThreadId !== chat.providerThreadId || current.providerTurnId !== chat.providerTurnId || current.recovery?.kind !== 'recovery-needed') return {chat:current,resolved:current.recovery?.kind !== 'recovery-needed',reason:'The attempt state changed while checking. Review its current status.'};
@@ -1363,7 +1384,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
       case 'project.decisions.create': { const projectId=id(p.projectId); if(!store.project(projectId)) throw new Error('Project not found.'); if(!Array.isArray(p.relatedTaskIds)||p.relatedTaskIds.length>50) throw new Error('Invalid related tasks.'); return projectTasks.createDecision({projectId,title:text(p.title,'decision title',500),rationale:text(p.rationale,'rationale',8000),scope:text(p.scope,'scope',500),relatedTaskIds:[...new Set(p.relatedTaskIds.map(id))]}); }
       case 'project.decisions.supersede': { const projectId=id(p.projectId); if(!store.project(projectId)) throw new Error('Project not found.'); return projectTasks.supersedeDecision({projectId,id:id(p.id),replacementId:id(p.replacementId)}); }
       case 'project.activity.list': { const projectId=id(p.projectId); if(!store.project(projectId)) throw new Error('Project not found.'); const limit=p.limit===undefined?100:Number(p.limit); if(!Number.isSafeInteger(limit)||limit<1||limit>200) throw new Error('Invalid limit.'); return projectTasks.listActivity(projectId,limit); }
-      case 'project.export': { const projectId=id(p.projectId), project=store.project(projectId); if(!project) throw new Error('Project not found.'); const folders=project.folderIds.map(folderId=>store.folder(folderId)).filter((folder):folder is NonNullable<typeof folder>=>Boolean(folder)); const chats=store.projectChats(projectId).map(({id,title,folderId,providerId,model,mode,permissionMode,status,updatedAt,recovery})=>({id,title,...(folderId?{folderId}:{}),providerId:providerId??'hybrow',model,mode,...(permissionMode?{permissionMode}:{}),status,updatedAt,...(recovery?{recovery}:{} )})); return projectTasks.exportProject(project,folders,chats); }
+      case 'project.export': { const projectId=id(p.projectId), project=store.project(projectId); if(!project) throw new Error('Project not found.'); const folders=project.folderIds.map(folderId=>store.folder(folderId)).filter((folder):folder is NonNullable<typeof folder>=>Boolean(folder)); const chats=store.projectChats(projectId).map(({id,title,folderId,providerId,model,mode,permissionMode,status,updatedAt,recovery})=>({id,title,...(folderId?{folderId}:{}),providerId:providerId??'',model,mode,...(permissionMode?{permissionMode}:{}),status,updatedAt,...(recovery?{recovery}:{} )})); return projectTasks.exportProject(project,folders,chats); }
       case 'workspace.watch': {
         if (!Array.isArray(p.folderIds) || p.folderIds.length > 32) throw new Error('Invalid watched folders.');
         const folders = [...new Set(p.folderIds.map(id))].map(folderFor);
@@ -1473,7 +1494,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
   const domains = createDomains({
     dataDir: options.dataDir, store, db: () => store.database(), emit, emitSnapshot: state,
     folderFor: folderId => folderFor(folderId), invoke, hooks: domainHooks.hooks,
-    modelCatalog: () => ({providers: provider.info(), builtin: {providerId: 'hybrow', model: MODEL}}),
+    modelCatalog: () => { const providers = provider.info(); return {providers, builtin: firstReadyModel(providers)}; },
     modelCatalogReady: firstProviderProbe,
     ...(native ? {native} : {}),
   }, options.domains);

@@ -12,15 +12,15 @@ async function fixture(t:{after(fn:()=>Promise<void>):void}) {
   const directory=join(home,'runtime'),codexHome=join(home,'codex'),cli=join(home,'cli'),catalog=join(home,'catalog.json'),auth=join(codexHome,'auth.json');
   await mkdir(join(directory,'resources'),{recursive:true});await mkdir(codexHome);
   await writeFile(cli,'#!/bin/sh\nexit 1\n',{mode:0o700});
-  await copyFile(join(import.meta.dirname,'../../builtin/resources/codex-profile.cjs'),join(directory,'resources/codex-profile.cjs'));
-  for(const profile of ['hybrow-gateway','openai-direct'])await writeFile(join(directory,'resources',`codex-${profile}.sh`),'#!/bin/sh\nexit 1\n',{mode:0o700});
+  await copyFile(join(import.meta.dirname,'../resources/codex-profile.cjs'),join(directory,'resources/codex-profile.cjs'));
+  await writeFile(join(directory,'resources','codex-launch.sh'),'#!/bin/sh\nexit 1\n',{mode:0o700});
   await writeFile(catalog,JSON.stringify({models:[{slug:'gpt-5.6-terra'},{slug:'claude/claude-fable-5'}]}));
   await writeFile(join(codexHome,'openai-direct.config.toml'),`model_provider="openai"\nmodel_catalog_json=${JSON.stringify(catalog)}\n`);
   await writeFile(join(codexHome,'hybrow-gateway.config.toml'),`model_provider="hybrow"\nmodel_catalog_json=${JSON.stringify(catalog)}\n[model_providers.hybrow]\nbase_url="https://router.hybrowlabs.com/v1"\nwire_api="responses"\n[model_providers.hybrow.auth]\ncommand="existing-helper"\nargs=[]\n`);
   await writeFile(auth,JSON.stringify({tokens:{account_id:'ACCOUNT-A',access_token:'TOKEN'}}));
   // Age every file so the recently-written guard does not defeat the stat throttle.
   const old=new Date(Date.now()-60_000);
-  for(const file of [cli,catalog,auth,join(codexHome,'openai-direct.config.toml'),join(codexHome,'hybrow-gateway.config.toml'),...['hybrow-gateway','openai-direct'].map(p=>join(directory,'resources',`codex-${p}.sh`))])await utimes(file,old,old);
+  for(const file of [cli,catalog,auth,join(codexHome,'openai-direct.config.toml'),join(codexHome,'hybrow-gateway.config.toml'),join(directory,'resources','codex-launch.sh'),codexHome])await utimes(file,old,old);
   const counts={opens:0,stats:0};
   const counting:Partial<ProviderInstanceFs>={openSync:(...args:Parameters<typeof fs.openSync>)=>{counts.opens++;return fs.openSync(...args);},statSync:((...args:Parameters<typeof fs.statSync>)=>{counts.stats++;return fs.statSync(...args);}) as ProviderInstanceFs['statSync']};
   let clock=Date.now();

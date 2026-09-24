@@ -3,10 +3,10 @@
  * at launch, when the window regains focus (`refresh`), and whenever one of the sign-in or profile files a CLI
  * writes changes: `codex login` rewriting ~/.codex/auth.json, Claude Code updating ~/.claude.json, OpenCode's
  * auth.json, a gateway profile or its model catalog. The watch is a stat poll of a fixed list of paths (mtime, size,
- * inode only): no file here is opened for its contents except the two Codex profile TOMLs, and only to find the
- * model catalog path they name. Credentials are never read; readiness comes from the regular provider list.
+ * inode only): no file here is opened for its contents except the Codex config and profile TOMLs, and only to find
+ * the model catalog path they name. Credentials are never read; readiness comes from the regular provider list.
  */
-import { readFileSync, statSync } from 'node:fs';
+import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { isAbsolute, join } from 'node:path';
 import type { ProviderInfo } from '../shared/protocol.ts';
@@ -18,12 +18,17 @@ export function watchedProviderPaths(options: { home?: string; env?: NodeJS.Proc
   const codexHome = env.CODEX_HOME || join(home, '.codex');
   const claudeDir = env.CLAUDE_CONFIG_DIR || join(home, '.claude');
   const data = env.XDG_DATA_HOME || join(home, '.local', 'share'), config = env.XDG_CONFIG_HOME || join(home, '.config');
-  const profiles = [join(codexHome, 'hybrow-gateway.config.toml'), join(codexHome, 'openai-direct.config.toml')];
+  // Every Codex profile beside config.toml (any name) and the catalogs they, or config.toml, name. The Codex home
+  // itself is watched so a profile that appears or disappears is noticed.
+  let profiles: string[] = [];
+  try { profiles = readdirSync(codexHome).filter(name => /^[A-Za-z0-9_.-]{1,64}\.config\.toml$/.test(name)).sort().slice(0, 32).map(name => join(codexHome, name)); } catch { profiles = []; }
+  const configs = [join(codexHome, 'config.toml'), ...profiles];
+  const omniroute = env.OMNIROUTE_HOME || join(home, '.omniroute');
   return [
-    join(codexHome, 'auth.json'), join(codexHome, 'config.toml'), ...profiles, ...profiles.map(catalogPathIn).filter((path): path is string => !!path),
+    codexHome, join(codexHome, 'auth.json'), join(codexHome, 'models_cache.json'), ...configs, ...configs.map(catalogPathIn).filter((path): path is string => !!path),
     join(claudeDir, '.credentials.json'), env.CLAUDE_CONFIG_DIR ? join(env.CLAUDE_CONFIG_DIR, '.claude.json') : join(home, '.claude.json'),
     join(data, 'opencode', 'auth.json'), join(config, 'opencode', 'opencode.json'),
-    join(home, '.omniroute'),
+    omniroute, join(omniroute, '.env'),
     // A CLI appearing (installed by the user or as a Muster-managed copy) makes its provider listable.
     join(home, '.local/bin/codex'), join(home, '.claude/local/claude'), join(home, '.opencode/bin/opencode'),
     '/opt/homebrew/bin/codex', '/opt/homebrew/bin/claude', '/opt/homebrew/bin/opencode', '/usr/local/bin/codex', '/usr/local/bin/claude', '/usr/local/bin/opencode',
@@ -35,7 +40,7 @@ export function watchedProviderPaths(options: { home?: string; env?: NodeJS.Proc
 export function catalogPathIn(profile: string): string | undefined {
   try {
     const info = statSync(profile);
-    if (!info.isFile() || info.size > 256 * 1024) return undefined;
+    if (!info.isFile() || info.size > 1024 * 1024) return undefined;
     const match = /^\s*model_catalog_json\s*=\s*"([^"\n]{1,1024})"/m.exec(readFileSync(profile, 'utf8'));
     return match && isAbsolute(match[1]!) ? match[1] : undefined;
   } catch { return undefined; }

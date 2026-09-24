@@ -33,7 +33,7 @@ export function ContextMeter({ telemetry }: { telemetry: ContextTelemetry }): Re
   const running = useStoreSelector(state => { const chat = state.snapshot?.chats.find(c => c.id === state.activeChatId); return !chat || chat.status === 'running' || chat.status === 'stopping'; });
   const catalogWindow = useStoreSelector(state => {
     const chat = state.snapshot?.chats.find(c => c.id === state.activeChatId);
-    return chat ? state.providers.value?.find(p => p.id === (chat.providerId ?? 'hybrow'))?.models.find(m => m.id === chat.model)?.contextWindow : undefined;
+    return chat ? state.providers.value?.find(p => p.id === chat.providerId)?.models.find(m => m.id === chat.model)?.contextWindow : undefined;
   });
   const [compacting, setCompacting] = useState(false), [compactError, setCompactError] = useState('');
   const { compacted, source } = telemetry;

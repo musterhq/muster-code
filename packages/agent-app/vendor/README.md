@@ -17,12 +17,15 @@ MUSTER_SANDBOX_SOURCE_ROOT=/path/to/scoped-checkout \
 npm run vendor:sync
 ```
 
+Local patch (2026-09-24): the example memory scopes in both `memory.ts` copies use a neutral `user:alex` /
+`tenant:acme` instead of a real person's name; make the same change upstream before the next sync.
+
 Only groups whose env var is set are refreshed. The file list is computed by esbuild from each entry's
 transitive imports. Exact hashes are in `SOURCES.json`.
 
 | Directory | Override env var | Origin | Synced | Files |
 | --- | --- | --- | --- | --- |
-| `vendor/muster-core` | `MUSTER_CORE_CLIENT_ENTRY` | local checkout, not a git repository (`/private/tmp/muster-core-pr97-integration-20260922`) | 2026-09-24 | `packages/core/src/codex-app-server.ts` |
+| `vendor/muster-core` | `MUSTER_CORE_CLIENT_ENTRY` | local checkout, not a git repository (`muster-core-pr97-integration-20260922`) | 2026-09-24 | `packages/core/src/codex-app-server.ts` |
 | `vendor/muster-runtime` | `MUSTER_RUNTIME_SOURCE_ROOT` | https://github.com/Dkm0315/muster.git<br>branch `cursor/hindsight-scheduler-foundation`<br>commit `9a567c908d429cd887a83f961febe1078ceabd8f` | 2026-09-24 | `packages/core/src/config.ts`<br>`packages/core/src/hindsight.ts`<br>`packages/core/src/memory.ts`<br>`packages/core/src/profiles.ts`<br>`packages/core/src/providers-catalog.ts`<br>`packages/core/src/store.ts` |
 | `vendor/muster-sandbox` | `MUSTER_SANDBOX_SOURCE_ROOT` | https://github.com/Dkm0315/muster.git<br>branch `(detached HEAD)`<br>commit `215b8d3ec53b3762b8fe53f67af15f4c5b31f998`<br>**plus uncommitted changes:** `packages/core/src/local-docker-sandbox.ts`, `packages/core/src/scoped-runtime.ts` | 2026-09-24 | `packages/core/src/agent-graph.ts`<br>`packages/core/src/config.ts`<br>`packages/core/src/local-docker-sandbox.ts`<br>`packages/core/src/memory.ts`<br>`packages/core/src/profiles.ts`<br>`packages/core/src/providers-catalog.ts`<br>`packages/core/src/scoped-runtime.ts`<br>`packages/core/src/store.ts` |
 

@@ -5,7 +5,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test, type TestContext } from 'node:test';
 import { createAgentService } from '../src/runtime/service.ts';
-import { MODEL, type ProviderAdapter, type ProviderInput } from '../src/runtime/provider.ts';
+import {type ProviderAdapter, type ProviderInput } from '../src/runtime/provider.ts';
+/** A fixture model id: tests never depend on a particular provider's catalog. */
+const MODEL='fixture-model';
 
 async function setup(t: TestContext) {
   const dataDir = await mkdtemp(join(tmpdir(), 'muster-project-knowledge-')), folderPath = join(dataDir, 'source');

@@ -24,8 +24,8 @@ export interface SetupCli {
   loginCommand: string;
   detail: string;
 }
-/** A connection that is not a CLI sign-in: the Hybrow gateway, a connection added in Muster, or an env API key. */
-export interface SetupConnection { id: string; name: string; kind: 'gateway' | 'custom' | 'env'; ready: boolean; detail: string }
+/** A connection that is not a CLI sign-in: a gateway from the user's Codex config, a connection added in Muster, an env API key, or a local model server. */
+export interface SetupConnection { id: string; name: string; kind: 'gateway' | 'custom' | 'env' | 'local'; ready: boolean; detail: string }
 export interface SetupDocker {
   installed: boolean;
   /** null when not installed, or when the check timed out. */
@@ -39,7 +39,8 @@ export interface SetupStatus {
   clis: SetupCli[];
   connections: SetupConnection[];
   /** Every provider Muster can run a chat with right now. Empty means "Connect a model to start". */
-  readyProviders: { id: string; name: string }[];
+  /** `cli` names the CLI the provider runs through, so the guide can pair a CLI row with its ready route. */
+  readyProviders: { id: string; name: string; cli?: CliTool }[];
   git: SetupGit;
   docker: SetupDocker;
 }

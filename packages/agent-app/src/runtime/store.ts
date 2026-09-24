@@ -21,7 +21,7 @@ CREATE TABLE IF NOT EXISTS chats (
   pinned INTEGER NOT NULL DEFAULT 0, pin_order INTEGER, archived INTEGER NOT NULL DEFAULT 0,
   draft TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'idle',
   updated_at TEXT NOT NULL, provider_thread_id TEXT, model TEXT NOT NULL,
-  mode TEXT NOT NULL DEFAULT 'agent', error TEXT, provider_turn_id TEXT, recovery TEXT, permission_mode TEXT, provider_id TEXT NOT NULL DEFAULT 'hybrow', provider_binding_id TEXT, provider_thread_provider_id TEXT, provider_thread_binding_id TEXT);
+  mode TEXT NOT NULL DEFAULT 'agent', error TEXT, provider_turn_id TEXT, recovery TEXT, permission_mode TEXT, provider_id TEXT NOT NULL DEFAULT '', provider_binding_id TEXT, provider_thread_provider_id TEXT, provider_thread_binding_id TEXT);
 CREATE TABLE IF NOT EXISTS timeline (
   seq INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT NOT NULL UNIQUE, chat_id TEXT NOT NULL,
   kind TEXT NOT NULL, text TEXT NOT NULL, status TEXT, created_at TEXT NOT NULL, data TEXT);
@@ -70,7 +70,7 @@ function rowToChat(row: ChatRow): Chat {
     draft: row.draft,
     status: row.status as ChatStatus,
     updatedAt: row.updated_at,
-    providerId: row.provider_id ?? 'hybrow',
+    providerId: row.provider_id ?? '',
     ...(row.provider_binding_id ? {providerBindingId:row.provider_binding_id} : {}),
     ...(row.provider_thread_provider_id ? {providerThreadProviderId:row.provider_thread_provider_id} : {}),
     ...(row.provider_thread_binding_id ? {providerThreadBindingId:row.provider_thread_binding_id} : {}),
@@ -162,7 +162,7 @@ export class AgentStore {
     if (!chatColumns.some((c) => c.name === 'provider_turn_id')) this.db.exec('ALTER TABLE chats ADD COLUMN provider_turn_id TEXT');
     if (!chatColumns.some((c) => c.name === 'recovery')) this.db.exec('ALTER TABLE chats ADD COLUMN recovery TEXT');
     if (!chatColumns.some((c) => c.name === 'permission_mode')) this.db.exec('ALTER TABLE chats ADD COLUMN permission_mode TEXT');
-    if (!chatColumns.some((c) => c.name === 'provider_id')) this.db.exec("ALTER TABLE chats ADD COLUMN provider_id TEXT NOT NULL DEFAULT 'hybrow'");
+    if (!chatColumns.some((c) => c.name === 'provider_id')) this.db.exec("ALTER TABLE chats ADD COLUMN provider_id TEXT NOT NULL DEFAULT ''");
     for (const column of ['provider_binding_id','provider_thread_provider_id','provider_thread_binding_id','last_viewed_at']) if (!chatColumns.some(c=>c.name===column)) this.db.exec(`ALTER TABLE chats ADD COLUMN ${column} TEXT`);
     if (!chatColumns.some(c=>c.name==='unread')) this.db.exec('ALTER TABLE chats ADD COLUMN unread INTEGER NOT NULL DEFAULT 0');
     for (const column of ['title_source','origin_chat_id','origin_item_id']) if (!chatColumns.some(c=>c.name===column)) this.db.exec(`ALTER TABLE chats ADD COLUMN ${column} TEXT`);
@@ -349,7 +349,7 @@ export class AgentStore {
     });
   }
 
-  createChat(input: { folderId?: string; projectId?: string; model: string; mode: Chat['mode']; permissionMode?: Chat['permissionMode'] }): Chat {
+  createChat(input: { folderId?: string; projectId?: string; model: string; providerId?: string; mode: Chat['mode']; permissionMode?: Chat['permissionMode'] }): Chat {
     return this.tx(() => {
       if (input.folderId && !this.folder(input.folderId)) throw new Error(`Unknown folder: ${input.folderId}`);
       if (input.projectId) {
@@ -364,8 +364,8 @@ export class AgentStore {
       }
       const id = randomUUID();
       this.db.prepare(
-        "INSERT INTO chats (id, folder_id, project_id, title, updated_at, model, mode, permission_mode, title_source) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'default')",
-      ).run(id, input.folderId ?? null, input.projectId ?? null, DEFAULT_CHAT_TITLE, now(), input.model, input.mode, input.permissionMode ?? null);
+        "INSERT INTO chats (id, folder_id, project_id, title, updated_at, model, mode, permission_mode, provider_id, title_source) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'default')",
+      ).run(id, input.folderId ?? null, input.projectId ?? null, DEFAULT_CHAT_TITLE, now(), input.model, input.mode, input.permissionMode ?? null, input.providerId ?? '');
       this.db.prepare("INSERT INTO meta (key, value) VALUES ('activeChatId', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(id);
       this.bumpVersion();
       return this.chat(id)!;
@@ -706,7 +706,7 @@ export class AgentStore {
       const id = randomUUID(), source = titleSource(origin);
       this.db.prepare(
         'INSERT INTO chats (id, folder_id, project_id, title, updated_at, model, mode, permission_mode, provider_id, title_source, origin_chat_id, origin_item_id, resume_digest) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)',
-      ).run(id, origin.folder_id, origin.project_id, origin.title, now(), origin.model, origin.mode, origin.permission_mode, origin.provider_id ?? 'hybrow', source, originId, fromItemId ?? null);
+      ).run(id, origin.folder_id, origin.project_id, origin.title, now(), origin.model, origin.mode, origin.permission_mode, origin.provider_id ?? '', source, originId, fromItemId ?? null);
       const rows = this.db.prepare('SELECT * FROM timeline WHERE chat_id = ? AND seq <= ? ORDER BY seq').all(originId, through) as unknown as TimelineRow[];
       const insert = this.db.prepare('INSERT INTO timeline (id, chat_id, kind, text, status, created_at, data) VALUES (?, ?, ?, ?, ?, ?, ?)');
       for (const row of rows) {

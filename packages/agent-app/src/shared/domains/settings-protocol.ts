@@ -130,7 +130,13 @@ function effortFor(model: ProviderInfo['models'][number] | undefined, chosen: Re
   if (chosen && allowed.includes(chosen)) return chosen;
   return model?.defaultEffort && allowed.includes(model.defaultEffort) ? model.defaultEffort : undefined;
 }
-/** Project default, then the user default, then the runtime's built-in model. A level whose provider or model is gone is skipped silently. */
+/** The runtime default when nothing was chosen: the first ready provider and its first model. Empty ids when no
+ *  provider is ready on this machine: the UI then shows "Connect a model" instead of assuming any provider. */
+export function firstReadyModel(providers: readonly ProviderInfo[]): { providerId: string; model: string } {
+  const ready = providers.find(entry => entry.available && entry.models.length) ?? providers.find(entry => entry.available);
+  return ready ? { providerId: ready.id, model: ready.models[0]?.id ?? '' } : { providerId: '', model: '' };
+}
+/** Project default, then folder, then the user default, then the first ready provider (`builtin`). A level whose provider or model is gone is skipped silently. */
 export function resolveChatDefaults(input: { project?: ModelPreference | null; folder?: ModelPreference | null; user?: ModelPreference | null; providers: readonly ProviderInfo[]; builtin: { providerId: string; model: string } }): ResolvedChatDefaults {
   for (const [source, preference] of [['project', input.project], ['folder', input.folder], ['user', input.user]] as const) {
     const hit = usable(preference, input.providers, input.builtin);

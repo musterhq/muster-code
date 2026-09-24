@@ -123,11 +123,16 @@ test('malformed configs produce error status without raw data', async () => {
   assert.ok(!JSON.stringify(results).includes('GARBAGE-MARKER'), 'raw malformed data leaked');
 });
 
-test('hybrow gateway config detected; omniroute dir alone is installed', async () => {
-  const configured = await fixtureHome({ '.codex/hybrow-gateway.config.toml': 'port = 1' });
-  assert.equal(byId(await discoverLocalProviders({ home: configured, env: {} }), 'hybrow').status, 'configured');
+test('gateways come from the Codex config under their own ids; an OmniRoute folder alone is installed', async () => {
+  const configured = await fixtureHome({ '.codex/team.config.toml': 'model_provider = "team-gw"\n[model_providers.team-gw]\nname = "Team Gateway"\n', '.codex/config.toml': '[model_providers.other]\nbase_url = "http://localhost:4000/v1"\n' });
+  const rows = await discoverLocalProviders({ home: configured, env: {}, loginStatus: async () => undefined });
+  assert.equal(byId(rows, 'team-gw').name, 'Team Gateway');
+  assert.equal(byId(rows, 'other').status, 'configured');
+  assert.ok(!rows.some(row => row.id === 'hybrow'), 'no gateway is assumed');
+  const nothing = await fixtureHome({ '.codex/misc.config.toml': 'port = 1' });
+  assert.ok(!(await discoverLocalProviders({ home: nothing, env: {}, loginStatus: async () => undefined })).some(row => row.status === 'configured' && row.id !== 'codex'));
   const dirOnly = await fixtureHome({ '.omniroute/config': '' });
-  assert.equal(byId(await discoverLocalProviders({ home: dirOnly, env: {} }), 'hybrow').status, 'installed');
+  assert.equal(byId(await discoverLocalProviders({ home: dirOnly, env: {}, loginStatus: async () => undefined }), 'omniroute').status, 'installed');
 });
 
 test('env API keys detected by presence, value never serialized', async () => {

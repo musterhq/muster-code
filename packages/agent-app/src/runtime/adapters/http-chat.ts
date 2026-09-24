@@ -95,8 +95,8 @@ export function anthropicAdapter(options: Omit<HttpOptions, 'endpoint' | 'label'
 }
 
 /** GET a JSON model list with a timeout and a 1 MiB cap. */
-export async function fetchModelList(url: string, headers: Record<string, string>, label: string, request: Fetch = fetch): Promise<Array<{id: string; name: string}>> {
-  const controller = new AbortController(), timer = setTimeout(() => controller.abort(), 8000);
+export async function fetchModelList(url: string, headers: Record<string, string>, label: string, request: Fetch = fetch, timeoutMs = 8000): Promise<Array<{id: string; name: string}>> {
+  const controller = new AbortController(), timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     let response: Response;
     try { response = await request(url, {redirect: 'error', signal: controller.signal, headers}); }

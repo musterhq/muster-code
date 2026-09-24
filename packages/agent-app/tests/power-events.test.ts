@@ -79,7 +79,7 @@ test('provider: wake marks idle warm app-servers stale; the next send replaces t
     async runCodexAppServer(args){resumed.push((args as {threadId?:unknown}).threadId);return {status:'completed',finalMessage:'ok',dispatchState:'dispatched',threadId:'thread-1',turnId:'turn'};},
     async callCodexConversation(){return {};},async interruptActiveCodexTurn(){return true;},clearCodexAppServerSessions(owner){cleared.push(owner);}};
   const adapter=createProviderAdapter({core,available:()=>true,command:'/unused'});
-  const input=(threadId?:string):ProviderInput=>({chat:{id:'chat-1',mode:'agent',model:'claude/claude-fable-5',...(threadId?{providerThreadId:threadId,providerThreadProviderId:'hybrow',providerThreadBindingId:'fixture-hybrow'}:{})} as ProviderInput['chat'],cwd:'/unused',prompt:'p',onDelta(){},onReasoning(){},onEvent(){},async onRequest(){return undefined;}});
+  const input=(threadId?:string):ProviderInput=>({chat:{id:'chat-1',mode:'agent',providerId:'fixture',model:'fixture-model',...(threadId?{providerThreadId:threadId,providerThreadProviderId:'fixture',providerThreadBindingId:'fixture-binding'}:{})} as ProviderInput['chat'],cwd:'/unused',prompt:'p',onDelta(){},onReasoning(){},onEvent(){},async onRequest(){return undefined;}});
   await adapter.run(input());await adapter.run(input('thread-1'));
   assert.equal(cleared.length,0,'an unchanged config keeps the warm app-server');
   assert.equal(adapter.markStale!(),1);

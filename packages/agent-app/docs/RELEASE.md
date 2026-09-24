@@ -1,5 +1,35 @@
 # Muster Agent release lifecycle (PER-09)
 
+## Publishing a release (GitHub)
+
+1. Bump `version` in `packages/agent-app/package.json` and add a `## <version>` section to
+   `CHANGELOG.md` (it becomes the release notes; without one GitHub generates them).
+2. Tag and push: `git tag agent-v<version> && git push origin agent-v<version>`
+   (`agent-v<version>-beta.1` style tags publish a prerelease on the beta channel).
+   Or run **Muster Agent Release** from the Actions tab with an existing tag.
+3. `.github/workflows/agent-app-release.yml` builds on `macos-15` (arm64) and `macos-15-intel` (x64):
+   `npm ci`, typecheck, unit and renderer tests, then `scripts/package-release.mjs`. It publishes the
+   GitHub Release "Muster Agent <version>" with `Muster-Agent-<version>-{arm64,x64}.{dmg,zip}` and
+   `SHA256SUMS`. The IDE's `release.yml` reacts only to `v*` tags.
+
+Signing is chosen from repository secrets (never printed; the PKCS#12 goes into a throwaway keychain
+that is deleted at the end of the job):
+
+| Mode | Secrets | Result |
+| --- | --- | --- |
+| Developer ID + notarization | `MUSTER_SIGN_IDENTITY`, `MUSTER_SIGN_P12_BASE64`, `MUSTER_SIGN_P12_PASSWORD`, `MUSTER_NOTARY_APPLE_ID`, `MUSTER_NOTARY_TEAM_ID`, `MUSTER_NOTARY_PASSWORD` (app-specific password) | Opens normally; full release |
+| Self-signed | `MUSTER_SELF_SIGN_P12_BASE64`, `MUSTER_SELF_SIGN_P12_PASSWORD` (identity "Muster Agent Self-Signed") | Stable identity (macOS keeps granted permissions across updates), not notarized; prerelease |
+| Ad hoc | none | Not notarized; prerelease |
+
+Unnotarized builds need right-click > Open the first time, or
+`xattr -dr com.apple.quarantine "/Applications/Muster Agent.app"`.
+
+Locally, `node scripts/package-release.mjs` does the same for this Mac's architecture into
+`release-dist/`. `MUSTER_SIGN_P12=<file.p12> MUSTER_SIGN_P12_PASSWORD_FILE=<file>` signs with a
+PKCS#12 through a temporary keychain (never the login keychain). Self-signed builds use
+`scripts/macos/entitlements-self-signed.plist`, which adds `disable-library-validation` because a
+self-signed certificate has no Team ID.
+
 ## Build and package
 
 ```sh

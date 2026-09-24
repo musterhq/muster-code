@@ -160,7 +160,7 @@ test('provider steer sends expectedTurnId and maps Codex turn/steer errors',asyn
     async callCodexConversation(_key,method,params){calls.push({method,params});if(error)throw error;return {turnId:'turn-1'};},
     async interruptActiveCodexTurn(){return true;},clearCodexAppServerSessions(){},async steerActiveCodexTurn(text){legacy.push(text);return true;}};
   const adapter=createProviderAdapter({core,available:()=>true,command:'/unused'});
-  const input:ProviderInput={chat:{id:'chat-1',mode:'agent',model:'claude/claude-fable-5'} as ProviderInput['chat'],cwd:'/unused',prompt:'p',onDelta(){},onReasoning(){},onEvent(){},async onRequest(){return undefined;}};
+  const input:ProviderInput={chat:{id:'chat-1',mode:'agent',providerId:'fixture',model:'fixture-model'} as ProviderInput['chat'],cwd:'/unused',prompt:'p',onDelta(){},onReasoning(){},onEvent(){},async onRequest(){return undefined;}};
   const pending=adapter.run(input);await new Promise(done=>setImmediate(done));
   assert.equal(await adapter.steer!('chat-1','mid-run'),true);
   assert.deepEqual(calls[0],{method:'turn/steer',params:{threadId:'thread-1',expectedTurnId:'turn-1',input:[{type:'text',text:'mid-run'}]}});

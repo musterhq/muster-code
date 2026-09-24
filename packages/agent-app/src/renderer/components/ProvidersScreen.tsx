@@ -14,12 +14,11 @@ import './providers-screen.css';
 import { CliMaintenance } from './CliMaintenance';
 
 const statusLabel = (p: ProviderInfo) => p.available ? 'Ready for chats' : p.status === 'configured' ? 'Profile detected · unavailable for chats' : p.status === 'installed' ? 'Installed · sign-in not detected' : p.status === 'error' ? 'Needs attention' : p.status === 'not-detected' ? 'Not detected' : 'Unavailable';
-/** A real brand glyph when the provider is recognized (Codex/OpenAI, Claude, Hybrow, Anthropic, OpenCode, …);
+/** A real brand glyph when the provider is recognized (Codex/OpenAI, Claude, Anthropic, OpenCode, Ollama, …);
  * otherwise the previous status-shaped glyph, so an unbranded custom endpoint still reads as custom/ready/unset. */
 const providerIcon = (p: ProviderInfo) => providerBrand(p.id, p.name, p.endpoint) ? <ProviderLogo id={p.id} name={p.name} endpoint={p.endpoint} size={18}/> : p.custom ? <Server size={18}/> : p.available ? <Sparkles size={18}/> : <ShieldCheck size={18}/>;
-const CODEX = /^(hybrow|openai-direct|codex)(?:_[0-9a-f]{10})?$/;
 /** The account type shown beside the fixed mask. Never derived from the identity itself. */
-export const identityKind = (p: ProviderInfo): string | undefined => p.status === 'not-detected' || p.status === 'installed' ? undefined : CODEX.test(p.id) ? 'ChatGPT account' : p.id === 'claude-code' ? 'Claude account' : undefined;
+export const identityKind = (p: ProviderInfo): string | undefined => p.status === 'not-detected' || p.status === 'installed' ? undefined : p.codex?.kind === 'chatgpt' || p.id === 'codex' ? 'ChatGPT account' : p.id === 'claude-code' ? 'Claude account' : undefined;
 export const MASK = '••••••';
 export const STAGE_LABEL: Record<ProviderStage, string> = {ok: 'Checks passed', 'executable-missing': 'Executable missing', 'profile-invalid': 'Profile invalid', 'catalog-unreadable': 'Catalog unreadable', 'auth-missing': 'Sign-in missing', 'auth-expired': 'Sign-in expired', transport: 'Connection failed'};
 const errorText = (e: unknown, fallback: string) => e instanceof Error ? e.message : fallback;
@@ -76,8 +75,8 @@ export function ProviderAccounts() {
   const providers = useStoreSelector(state => state.providers.value);
   useEffect(() => { let live = true; invoke('providers.accounts.list', {}).then(r => { if (live) setAccounts(Array.isArray(r?.accounts) ? r.accounts : []); }, e => { if (live) setError(errorText(e, 'Could not list accounts.')); }); return () => { live = false; }; }, []);
   if (!accounts?.length) return error ? <p className="settings-error" role="alert">{error}</p> : null;
-  // Built-in default for new chats is the default sign-in's gateway route.
-  const active = activeAccountId(accounts, defaultModel?.providerId ?? 'hybrow');
+  // With no default chosen, new chats use the first ready provider; the default sign-in is the active account.
+  const active = activeAccountId(accounts, defaultModel?.providerId);
   async function act(key: string, work: () => Promise<void>) { setBusy(key); setError(''); try { await work(); } catch (e) { setError(errorText(e, 'Could not update accounts.')); } finally { setBusy(undefined); } }
   const use = (account: ProviderAccountRow) => act(account.id, async () => {
     const current = await invoke('chat.defaults', {});
@@ -231,18 +230,19 @@ function ProviderCard({ provider: p }: {provider: ProviderInfo}) {
   const editButton = useRef<HTMLButtonElement>(null);
   const checking = useRef(false);
   const kind = identityKind(p);
+  const defaultModel = useStoreSelector(state => state.settings['general.defaultModel']);
   useEffect(()=>()=>{if(checking.current)void invoke('providers.cancelCheck',{id:p.id}).catch(()=>{});},[p.id]);
   async function check() {if(checking.current)return;checking.current=true;setBusy(true);setError('');try {await invoke('providers.check',{id:p.id}); await loadProviders(true);} catch(e) {setError(errorText(e,'Connection check failed.'));} finally {checking.current=false;setBusy(false);}}
   async function remove() {setBusy(true);setError('');try {await invoke('providers.remove',{id:p.id}); await loadProviders(true);} catch(e) {setError(errorText(e,'Could not remove connection.'));} finally {setBusy(false);}}
   return <article className="settings-provider">
-    <div className="settings-provider-top"><div className="provider-symbol" aria-hidden="true">{providerIcon(p)}</div><div className="provider-heading"><h2>{p.name}</h2><span className="provider-source">{p.source ?? 'Local configuration'}{p.id === 'hybrow' ? ' · default for new chats' : ''}</span></div><span className={`connection-status ${p.available ? 'is-ready' : ''}`}>{statusLabel(p)}</span></div>
+    <div className="settings-provider-top"><div className="provider-symbol" aria-hidden="true">{providerIcon(p)}</div><div className="provider-heading"><h2>{p.name}</h2><span className="provider-source">{p.source ?? 'Local configuration'}{defaultModel?.providerId === p.id ? ' · default for new chats' : ''}</span></div><span className={`connection-status ${p.available ? 'is-ready' : ''}`}>{statusLabel(p)}</span></div>
     <p className="provider-detail">{p.detail ?? p.error ?? 'Configured locally. Subscription and usage limits have not been verified.'}</p>
     {kind && <IdentityField provider={p} kind={kind}/>}
     {p.endpoint && <div className="connection-address">{p.endpoint}</div>}
     {p.apiKeyEnv && <div className="provider-source">Credentials from <code>{p.apiKeyEnv}</code></div>}
     {p.checkedAt && <div className="provider-source">Last checked {new Date(p.checkedAt).toLocaleString()}</div>}
     <div className="provider-catalog"><span className="provider-catalog-label">Model catalog</span>{p.models.length > 0 ? <><span className="provider-catalog-state">{p.available ? 'Available to select in chats' : 'Discovered · not available to chats'}</span><button type="button" className="provider-model-toggle" aria-expanded={expanded} onClick={()=>setExpanded(!expanded)}><ChevronDown size={13} style={{transform:expanded?'rotate(180deg)':undefined}}/>{p.models.length} {p.models.length === 1 ? 'model' : 'models'}</button>{expanded && <ul className="settings-models">{p.models.map(m=><li key={m.id}>{m.name}</li>)}</ul>}</> : <span className="provider-catalog-state">No runnable model catalog reported</span>}</div>
-    {reportsUsage(p.id) && p.status !== 'not-detected' && <UsageSection provider={p}/>}
+    {reportsUsage(p) && p.status !== 'not-detected' && <UsageSection provider={p}/>}
     {p.custom && <SecretField provider={p}/>}
     <Diagnosis provider={p} auto={p.status !== 'not-detected'}/>
     {editing && <AddConnection provider={p} onClose={()=>{setEditing(false);requestAnimationFrame(()=>editButton.current?.focus());}}/>}

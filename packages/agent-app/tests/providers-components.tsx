@@ -9,16 +9,16 @@ Object.assign(globalThis,{window,document:window.document,HTMLElement:window.HTM
 (window.HTMLElement.prototype as any).attachEvent=function(){};(window.HTMLElement.prototype as any).detachEvent=function(){};
 const calls:{command:string;input:any}[]=[];
 const providers=[
-  {id:'hybrow',name:'Hybrow OmniRoute',available:true,status:'ready',source:'Existing local provider profile',identityMasked:'g***@gmail.com',models:[{id:'codex/gpt-5.6-terra',name:'GPT 5.6 Terra'}],detail:'Local model catalog configured.'},
+  {id:'hybrow',name:'Hybrow OmniRoute',codex:{modelProvider:'hybrow',kind:'gateway'},available:true,status:'ready',source:'Existing local provider profile',identityMasked:'g***@gmail.com',models:[{id:'codex/gpt-5.6-terra',name:'GPT 5.6 Terra'}],detail:'Local model catalog configured.'},
   {id:'custom_ready',name:'Available local API',available:true,status:'ready',source:'Added in Muster',identityMasked:'No account metadata',custom:true,endpoint:'http://127.0.0.1:8081/v1',models:[{id:'fixture-ready',name:'fixture-ready'}],detail:'Available.'},
   {id:'codex',name:'Codex CLI (ChatGPT)',available:false,status:'configured',source:'Local configuration discovery',identityMasked:'ChatGPT account on file',models:[],detail:'auth.json holds ChatGPT sign-in tokens (auth mode: chatgpt); not verified. No runnable adapter is enabled for this entry.'},
   {id:'custom_123',name:'Local compatible server',available:false,status:'configured',source:'Added in Muster',identityMasked:'No account metadata',custom:true,endpoint:'http://127.0.0.1:8080/v1',apiKeyEnv:'LOCAL_KEY',models:[{id:'fixture',name:'fixture'}],detail:'Model discovery succeeded. Chat execution is not enabled yet.'},
-  {id:'openai-direct_abcdef0123',name:'OpenAI Direct · Work',available:true,status:'ready',source:'Codex account',identityMasked:'w***@example.com',models:[{id:'gpt-5.6-terra',name:'GPT 5.6 Terra'}],detail:'Ready.'},
+  {id:'openai-direct_abcdef0123',name:'OpenAI Direct · Work',codex:{modelProvider:'openai',kind:'chatgpt',account:'abcdef0123'},available:true,status:'ready',source:'Codex account',identityMasked:'w***@example.com',models:[{id:'gpt-5.6-terra',name:'GPT 5.6 Terra'}],detail:'Ready.'},
   {id:'claude-code',name:'Claude Code',available:false,status:'not-detected',source:'Local configuration discovery',identityMasked:'',models:[],detail:'no Claude Code files found'},
 ];
 const diagnosis=(id:string)=>id==='codex'?{id,stage:'auth-expired',summary:'The ChatGPT sign-in expired.',hint:'Run `codex login` in Terminal to sign in again.',command:'codex login',version:'codex-cli 0.99.0',checkedAt:'2026-09-22T12:00:00Z',diagnostics:'stage: auth-expired\nhome: ~'}:{id,stage:'ok',summary:'Ready.',version:null,checkedAt:'2026-09-22T12:00:00Z',diagnostics:'stage: ok'};
 window.muster={subscribe(){return()=>{}},async invoke(command:string,input:any){calls.push({command,input});if(command==='providers.list')return providers;if(command==='providers.check')return providers[2];if(command==='providers.cancelCheck')return;
-  if(command==='providers.identity')return {identity:'grawish06@gmail.com'};
+  if(command==='providers.identity')return {identity:'reveal-me@example.org'};
   if(command==='providers.diagnose')return diagnosis(input.id);
   if(command==='providers.usage')return input.id==='hybrow'?[{providerId:'hybrow',primary:{usedPercent:42,windowMinutes:300,resetsAt:new Date(Date.now()+20*60_000).toISOString()},secondary:{usedPercent:8,windowMinutes:10080,resetsAt:null},source:'live',updatedAt:new Date().toISOString()}]:[];
   if(command==='providers.secret.status')return {stored:input.providerId==='custom_123',updatedAt:'2026-09-20T00:00:00Z',secureStorage:true};
@@ -37,7 +37,7 @@ const root=createRoot(document.getElementById('root')!,{onUncaughtError:error=>e
 root.render(<ProvidersScreen/>);await delay(60);
 assert.deepEqual(errors,[]);
 assert.match(document.body.textContent!,/Accounts & providers/);
-assert.match(document.body.textContent!,/default for new chats/);
+assert.doesNotMatch(document.body.textContent!,/default for new chats/,'no provider is marked default until the user picks one');
 assert.match(document.body.textContent!,/Ready for chats/);
 assert.match(document.body.textContent!,/Profile detected · unavailable for chats/);
 assert.match(document.body.textContent!,/No runnable model catalog reported/);
@@ -50,18 +50,19 @@ assert.ok(calls.some(call=>call.command==='providers.list'));
 
 // PRO-09: the masked field holds a fixed placeholder; no character of the identity (or the runtime's partial mask) is in the DOM.
 const html=()=>document.body.innerHTML;
-for(const leak of ['g***','@gmail','grawish'])assert.ok(!html().includes(leak),`masked DOM leaks ${leak}`);
-const field=()=>Array.from(document.querySelectorAll('.provider-identity-field')).find(node=>node.getAttribute('aria-label')!.includes('Hybrow')) as HTMLButtonElement|undefined;
+for(const leak of ['g***','w***','reveal-me'])assert.ok(!html().includes(leak),`masked DOM leaks ${leak}`);
+const field=()=>Array.from(document.querySelectorAll('.provider-identity-field')).find(node=>node.getAttribute('aria-label')!.includes('OpenAI Direct · Work')) as HTMLButtonElement|undefined;
 assert.ok(field(),'the whole identity field is the reveal button');
 assert.equal(field()!.getAttribute('aria-pressed'),'false');
 assert.match(field()!.textContent!,/••••••.*ChatGPT account/);
 assert.ok(!calls.some(call=>call.command==='providers.identity'),'the identity is not fetched until reveal');
 field()!.click();await delay(30);
-assert.ok(calls.some(call=>call.command==='providers.identity'&&call.input.id==='hybrow'));
-assert.match(field()!.textContent!,/grawish06@gmail\.com/);
+assert.ok(calls.some(call=>call.command==='providers.identity'&&call.input.id==='openai-direct_abcdef0123'));
+assert.match(field()!.textContent!,/reveal-me@example\.org/);
 assert.equal(field()!.getAttribute('aria-pressed'),'true');
 field()!.click();await delay(30);
-assert.ok(!html().includes('grawish'),'hiding drops the identity from the DOM');
+assert.ok(!html().includes('reveal-me'),'hiding drops the identity from the DOM');
+assert.ok(!Array.from(document.querySelectorAll('.provider-identity-field')).some(node=>node.getAttribute('aria-label')!.includes('Hybrow')),'a gateway is not presented as a ChatGPT account');
 
 // PRO-03/PRO-11: staged diagnosis with a fix, CLI version and redacted diagnostics.
 const codexCard=Array.from(document.querySelectorAll('.settings-provider')).find(node=>node.querySelector('h2')?.textContent==='Codex CLI (ChatGPT)')!;

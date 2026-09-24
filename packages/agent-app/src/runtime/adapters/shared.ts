@@ -131,4 +131,15 @@ export function findBinary(name: string, env: NodeJS.ProcessEnv, home: string, c
   return undefined;
 }
 
+/** Desktop apps that ship their own CLI inside the bundle (the ChatGPT and Codex apps carry `codex` in
+ *  Contents/Resources). A signed-in desktop app's CLI is reused as-is, so its sign-in is never asked for again. */
+const APP_BUNDLES: Record<string, string[]> = { codex: ['ChatGPT.app', 'Codex.app'] };
+export function appBundleBinaries(name: string, home: string, roots: string[] = ['/Applications', join(home, 'Applications')]): string[] {
+  return (APP_BUNDLES[name] ?? []).flatMap(app => roots.flatMap(root => [join(root, app, 'Contents', 'Resources', name), join(root, app, 'Contents', 'Resources', 'bin', name)]));
+}
+/** A CLI on PATH, in a standard install location, a version-manager shim, or inside a desktop app bundle. */
+export function locateCli(name: string, env: NodeJS.ProcessEnv, home: string, preferred: string[] = []): string | undefined {
+  return findBinary(name, env, home, preferred) ?? findBinary(name, {PATH: ''}, home, appBundleBinaries(name, home, env.MUSTER_APP_ROOTS ? env.MUSTER_APP_ROOTS.split(delimiter) : undefined));
+}
+
 export const text = (value: unknown): string => typeof value === 'string' ? value : '';

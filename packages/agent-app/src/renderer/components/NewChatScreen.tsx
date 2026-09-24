@@ -28,6 +28,7 @@ import {sendWithCheckoutGuard} from './ParallelRunGuard';
 import {ConnectModelPrompt,useNoProvider} from './SetupGuide';
 import {Tip} from './Tooltip';
 import {MenuPopup} from './AppMenu';
+import {firstReadyModel} from '../../shared/domains/settings-protocol';
 
 const KIND_ICON={none:MessageCircle,folder:FolderOpen,project:Layers} as const;
 /** Same access options (and Full-access confirmation) an in-chat Composer uses, so the toolbars match. */
@@ -39,7 +40,6 @@ type Recognition={continuous:boolean;interimResults:boolean;lang:string;start():
 const speechRecognition=():(new()=>Recognition)|undefined=>typeof window==='undefined'||/\bElectron\//.test(navigator.userAgent??'')?undefined:(window as unknown as Record<string,new()=>Recognition>).SpeechRecognition??(window as unknown as Record<string,new()=>Recognition>).webkitSpeechRecognition;
 const MENU_LIMIT=8;
 /** Last-resort mirror of runtime/provider.ts's MODEL/providerId, used only until (or if) `chat.defaults` answers. */
-const RUNTIME_DEFAULT={providerId:'hybrow',id:'claude/claude-fable-5'} as const;
 /** The `/` commands that make sense before a chat exists (mirrors Composer's COMMAND_ICONS, not exported there). */
 const COMMAND_ICONS:Partial<Record<ComposerCommandId,typeof Lightbulb>>={plan:Lightbulb,goal:GoalGlyph,project:FolderKanban,sketch:PenLine,model:Cpu,reasoning:Brain,access:CircleAlert};
 /** Small duplicates of Composer's own pure row helpers (not exported there) so the draft's / and @ menus match. */
@@ -127,9 +127,11 @@ export function NewChatScreen():React.ReactElement {
   const modelOptions=providers.flatMap(provider=>provider.models.map(model=>({...model,provider:provider.name,providerId:provider.id})));
   // F9: with nothing picked, show exactly what chat.create will resolve for this target (user/project default,
   // else the runtime default) — never the first list entry, which the created chat would not use.
-  const createdModel=chosenModel??resolvedDefault??RUNTIME_DEFAULT;
+  // Before chat.defaults answers: the same first-ready-provider rule the runtime applies (empty when nothing is ready).
+  const firstReady=firstReadyModel(providers);
+  const createdModel=chosenModel??resolvedDefault??{providerId:firstReady.providerId,id:firstReady.model};
   const displayModel=modelOptions.find(model=>model.providerId===createdModel.providerId&&model.id===createdModel.id);
-  const modelName=displayModel?.name??(state.providers.phase==='loading'?'Loading…':createdModel.id.split('/').pop()||'No model');
+  const modelName=displayModel?.name??(state.providers.phase==='loading'?'Loading…':(createdModel.providerId?createdModel.id.split('/').pop()||'No model':'Connect a model'));
   const modelEfforts=displayModel?.efforts??[];
   const defaultEffort:ReasoningEffort=(!chosenModel&&resolvedDefault?.effort)||displayModel?.defaultEffort||'medium';
   const accessOption=ACCESS.find(option=>option.id===access)!;
@@ -366,7 +368,7 @@ export function NewChatScreen():React.ReactElement {
     let chatId=prior?.chatId??unusedChatIn(target);
     // F9: a reused (unused) chat may predate the current default; it must still start on the model the draft shows.
     const reused=chatId?state.snapshot?.chats.find(chat=>chat.id===chatId):undefined;
-    const modelToApply=chosenModel??(reused&&resolvedDefault&&(reused.model!==resolvedDefault.id||(reused.providerId??'hybrow')!==resolvedDefault.providerId)?resolvedDefault:null);
+    const modelToApply=chosenModel??(reused&&resolvedDefault&&(reused.model!==resolvedDefault.id||(reused.providerId??'')!==resolvedDefault.providerId)?resolvedDefault:null);
     // The effort the draft shows (explicit pick, else the resolved default's) is seeded into the new chat's composer.
     const seedEffort=effort??(!chosenModel?resolvedDefault?.effort:undefined);
     if(!hasExtras&&!modelToApply&&!background&&!seedEffort){void submitNewChat();return;}

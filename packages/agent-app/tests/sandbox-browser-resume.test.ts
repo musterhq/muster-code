@@ -80,7 +80,7 @@ test('SBX-13: the first send after moving a chat into the sandbox never reuses t
   };
   const adapter = createProviderAdapter({core, available: () => true, command: '/unused'});
   const complete: ProviderResult = {status: 'completed', finalMessage: 'ok'} as ProviderResult;
-  const base = (extra: Partial<ProviderInput> = {}): ProviderInput => ({chat: {id: 'c', mode: 'agent', permissionMode: 'read-only'} as ProviderInput['chat'], cwd: '/host/project', prompt: 'p', onDelta() {}, onReasoning() {}, onEvent() {}, async onRequest() { return undefined; }, ...extra});
+  const base = (extra: Partial<ProviderInput> = {}): ProviderInput => ({chat: {id: 'c', mode: 'agent', providerId: 'fixture', permissionMode: 'read-only'} as ProviderInput['chat'], cwd: '/host/project', prompt: 'p', onDelta() {}, onReasoning() {}, onEvent() {}, async onRequest() { return undefined; }, ...extra});
   const first = adapter.run(base()); runs[0]!.resolve(complete); await first;
   const before = cleared.length;
   // Same access policy; only the sandbox run options (cwd + muster_sandbox MCP override) change.

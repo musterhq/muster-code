@@ -76,11 +76,12 @@ test('PRO-06: cost is estimated only with a known price; unknown shows —', () 
   assert.equal(formatUsd(2.8), '$2.80');
   const priced = {providerId: 'openai-direct', model: 'gpt-6', totals, pricing: {inputPerMTok: 1, outputPerMTok: 1, source: 'user' as const}, costUsd: 1.1};
   const unpriced = {providerId: 'hybrow', model: 'codex/x', totals: {...ZERO_USAGE, inputTokens: 10, outputTokens: 5, requests: 1}, pricing: null, costUsd: null};
-  const mixed = summarizeUsage('chat', 'c', [priced, unpriced], null);
+  const mixed = summarizeUsage('chat', 'c', [priced, unpriced], null, id => id === 'hybrow');
   assert.equal(mixed.costUsd, 1.1);
   assert.equal(mixed.unpricedTokens, 15);
   assert.equal(costLabel(mixed), '$1.10 + unpriced');
-  assert.equal(mixed.incrementalInput, true, 'a Hybrow gateway row flags the incremental-input caveat');
+  assert.equal(mixed.incrementalInput, true, 'a row from a route whose catalog declares incremental input flags the caveat');
+  assert.equal(summarizeUsage('chat', 'c', [priced, unpriced], null).incrementalInput, false, 'nothing is assumed about a provider id');
   assert.match(INCREMENTAL_INPUT_NOTE, /only incremental input tokens/);
   assert.equal(costLabel(summarizeUsage('chat', 'c', [unpriced], null)), '—');
 });
@@ -110,7 +111,7 @@ function modelsContext(dataDir: string, options: {tasks?: Array<{id: string; tit
     store: {chat: (id: string) => ['c1', 'c2', 'c3'].includes(id) ? {id} : undefined},
     hooks: {onProviderEvent: (fn: typeof providerEvent) => { providerEvent = fn; return () => { providerEvent = undefined; }; }, onRunStarted: (fn: typeof runStarted) => { runStarted = fn; return () => {}; }, onRunSettled: () => () => {}},
     invoke: async (command: string) => { if (command === 'project.tasks.list') return {items: options.tasks ?? [], truncated: false}; throw new Error(`unexpected ${command}`); },
-    modelCatalog: () => ({providers: [{id: 'openai-direct', name: 'OpenAI Direct', available: true, identityMasked: '', models: [{id: 'gpt-6', name: 'GPT-6', pricing: {inputPerMTok: 2, outputPerMTok: 10, source: 'catalog'}}]}], builtin: {providerId: 'hybrow', model: 'm'}}),
+    modelCatalog: () => ({providers: [{id: 'openai-direct', name: 'OpenAI Direct', available: true, identityMasked: '', models: [{id: 'gpt-6', name: 'GPT-6', pricing: {inputPerMTok: 2, outputPerMTok: 10, source: 'catalog'}}]}, {id: 'hybrow', name: 'Gateway', available: true, identityMasked: '', incrementalInput: true, models: []}], builtin: {providerId: 'openai-direct', model: 'gpt-6'}}),
   } as unknown as DomainContext;
   const send = (chat: {id: string; providerId: string; model: string; projectId?: string}, total: [number, number], last: [number, number]) => providerEvent!({chat: chat as any, method: 'thread/tokenUsage/updated', params: {threadId: `thread-${chat.id}`, tokenUsage: {total: {inputTokens: total[0], outputTokens: total[1]}, last: {inputTokens: last[0], outputTokens: last[1]}}}});
   return {ctx, events, send, start: (chat: any) => runStarted!({chat, runId: 'r', cwd: '/'})};
@@ -138,7 +139,7 @@ test('PRO-06/PRJ-14: chat and Project reports sum usage per model with catalog o
   assert.equal(chat.incrementalInput, false);
   const gateway = await call(domain, 'models.usage.chat', {chatId: 'c2'});
   assert.equal(gateway.costUsd, null, 'no price known → cost is null (shown as —)');
-  assert.equal(gateway.incrementalInput, true, 'Hybrow usage carries the incremental-input caveat');
+  assert.equal(gateway.incrementalInput, true, 'usage through a route whose catalog declares incremental input carries the caveat');
   await assert.rejects(call(domain, 'models.usage.chat', {chatId: 'nope'}), /Chat not found/);
 
   let project = await call(domain, 'models.usage.project', {projectId: 'p1'});

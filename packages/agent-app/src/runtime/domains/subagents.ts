@@ -99,7 +99,7 @@ export function createSubagentsDomain(context: DomainContext, deps: SubagentsDep
 
   async function read(chat: Chat, threadId: string): Promise<SubagentTranscript> {
     const params: ReadParams = { threadId, includeTurns:true };
-    const liveRoute = route(chat, chat.providerId ?? 'hybrow');
+    const liveRoute = route(chat, chat.providerId ?? '');
     let response: Record<string, unknown> | undefined, source: SubagentTranscript['source'] = 'live';
     if (liveRoute) {
       const key = `agent:${chat.id}:${liveRoute.info.id}:${liveRoute.info.bindingId ?? liveRoute.info.id}`;
@@ -108,7 +108,7 @@ export function createSubagentsDomain(context: DomainContext, deps: SubagentsDep
     }
     if (!response) {
       // Never fall back to another account: the saved thread lives on its own binding.
-      const saved = route(chat, chat.providerThreadProviderId ?? chat.providerId ?? 'hybrow');
+      const saved = route(chat, chat.providerThreadProviderId ?? chat.providerId ?? '');
       if (!saved?.info.available || (chat.providerThreadBindingId && (saved.info.bindingId ?? saved.info.id) !== chat.providerThreadBindingId)) throw new Error('The provider account that ran this subagent is unavailable.');
       const query = core().queryCodexAppServer;
       if (typeof query !== 'function' || !existsSync(saved.command)) throw new Error('Reading saved subagent threads is unavailable in this build.');
@@ -135,14 +135,14 @@ export function createSubagentsDomain(context: DomainContext, deps: SubagentsDep
   }
   /** Only a Codex app-server route owns child threads Muster can address; CLI and API adapters run subagents out of reach. */
   function capabilities(chat: Chat): SubagentControlCapabilities {
-    if (route(chat, chat.providerId ?? 'hybrow')) return { stop:true, steer:true };
+    if (route(chat, chat.providerId ?? '')) return { stop:true, steer:true };
     return { stop:false, steer:false, reason:'This chat’s provider runs subagents inside its own process, so Muster cannot stop or steer one on its own. Stop or steer the parent chat instead.' };
   }
   const SESSION_CLOSED = 'The parent chat’s provider session has closed, so this subagent can no longer be stopped or steered. Send the parent a message to direct it.';
   async function control(chat: Chat, threadId: string, action: 'stop' | 'steer', text: string): Promise<SubagentControlResult> {
     const able = capabilities(chat);
     if (!able[action]) return { ok:false, reason:able.reason };
-    const live = route(chat, chat.providerId ?? 'hybrow')!;
+    const live = route(chat, chat.providerId ?? '')!;
     const key = `agent:${chat.id}:${live.info.id}:${live.info.bindingId ?? live.info.id}`;
     const call = (method: 'thread/read' | 'turn/interrupt' | 'turn/steer', params: Record<string, unknown>, timeoutMs: number) => core().callCodexConversation(key, method, params, { requireOwner:true, timeoutMs });
     const message = (error: unknown) => error instanceof Error ? error.message : String(error);

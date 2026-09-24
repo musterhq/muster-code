@@ -418,6 +418,9 @@ export class LocalDockerSandbox {
     const run = await dockerExec(this.dockerBin, [
       "run",
       "-d",
+      // PID 1 is otherwise `sleep infinity`, which never reaps: every orphaned process (a killed command's children,
+      // anything backgrounded) stays a zombie and eats the pids limit until forks fail. docker-init reaps them.
+      "--init",
       "--name",
       containerName,
       "--label",

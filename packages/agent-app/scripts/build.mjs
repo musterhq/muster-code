@@ -182,7 +182,10 @@ function copyRendererStatic() {
 execFileSync(process.execPath,[path.join(root,'scripts/build-quick-look.mjs')],{stdio:'inherit'});
 copyRendererStatic();
 mkdirSync(dist('runtime', 'resources'), {recursive: true});
-for (const name of ['codex-hybrow-gateway.sh', 'codex-openai-direct.sh', 'codex-profile.cjs']) cpSync(path.resolve(root, '../builtin/resources', name), dist('runtime', 'resources', name));
+// One generic launcher: the route (profile file or config.toml provider) comes from the user's own Codex config.
+// Vendored in packages/agent-app/resources so the app builds from its own directory alone (no packages/builtin).
+// The app owns these (generic, any provider); packages/builtin keeps the IDE's own launcher untouched.
+for (const name of ['codex-launch.sh', 'codex-profile.cjs']) cpSync(path.join(root, 'resources', name), dist('runtime', 'resources', name));
 
 if (watch) {
   const contexts = await Promise.all(builds.map((options) => esbuild.context(options)));

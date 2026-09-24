@@ -267,8 +267,8 @@ export function Composer({ chat }: { chat: Chat }): React.ReactElement {
   const imageBlind = imageBlindModel(providers, chat.providerId, chat.model);
   // PRO-04: the user's visibility policy trims the picker; the chat's own model always stays listed.
   const modelPolicy = useModelPolicy();
-  const { shown: pickerModels, hidden: hiddenModels } = applyVisibility(modelOptions, modelPolicy, { providerId: chat.providerId ?? 'hybrow', model: chat.model });
-  const selectedModel = modelOptions.find(model => model.id === chat.model && model.providerId === (chat.providerId ?? 'hybrow'));
+  const { shown: pickerModels, hidden: hiddenModels } = applyVisibility(modelOptions, modelPolicy, { providerId: chat.providerId ?? '', model: chat.model });
+  const selectedModel = modelOptions.find(model => model.id === chat.model && model.providerId === chat.providerId);
   const modelEfforts = selectedModel?.efforts ?? REASONING_EFFORTS;
   const storedEffort = efforts[chat.id];
   const effort: ReasoningEffort = storedEffort && modelEfforts.includes(storedEffort) ? storedEffort : selectedModel?.defaultEffort ?? 'medium';
@@ -306,7 +306,7 @@ export function Composer({ chat }: { chat: Chat }): React.ReactElement {
   /** Access and model may change mid-run (they apply to the next turn); plan mode waits for the run. */
   const settingsBlocked = sending || settingsChanging || modelChanging || recoveryNeeded;
   const choicesDisabled = running || settingsBlocked;
-  const currentProvider = chat.providerId ?? 'hybrow';
+  const currentProvider = chat.providerId ?? '';
 
   const closeInfo = React.useCallback(() => { setPanel(current => current?.kind === 'info' ? null : current); requestAnimationFrame(() => input.current?.focus()); }, []);
   const flash = (message: string) => {
@@ -592,7 +592,7 @@ export function Composer({ chat }: { chat: Chat }): React.ReactElement {
       const created = reused ?? await invoke('chat.create', { ...(chat.folderId ? { folderId: chat.folderId } : {}), ...(chat.projectId ? { projectId: chat.projectId } : {}) });
       const requestId = attempt?.requestId ?? crypto.randomUUID();
       backgroundAttempt.current = { key, chatId: created.id, requestId };
-      if (created.model !== chat.model || (created.providerId ?? 'hybrow') !== currentProvider) await invoke('chat.selectProvider', { id: created.id, providerId: currentProvider, model: chat.model });
+      if (created.model !== chat.model || (created.providerId ?? '') !== currentProvider) await invoke('chat.selectProvider', { id: created.id, providerId: currentProvider, model: chat.model });
       await invoke('chat.send', { id: created.id, text: body, requestId, ...extras });
       backgroundAttempt.current = null;
       if (currentDraft.current.chatId === chat.id) { recall.current = null; clearIfUnchanged(value); setChips(() => []); setContext(() => []); }
@@ -1098,7 +1098,11 @@ export function Composer({ chat }: { chat: Chat }): React.ReactElement {
 
   const errorId = `composer-error-${chat.id}`;
   const descriptionIds = draft?.error || sendError || queueError ? errorId : undefined;
-  const modelName = selectedModel?.name ?? humanizeModel(chat.model);
+  // No provider bound (nothing was ready when the chat was made), or a provider this Mac does not have (a chat from
+  // another machine or a removed gateway): say so on the pill instead of pretending a model is selected.
+  const providerMissing = Boolean(chat.providerId) && state.providers.phase !== 'loading' && Array.isArray(state.providers.value) && !state.providers.value.some(entry => entry.id === chat.providerId);
+  const modelName = !chat.providerId ? 'Connect a model' : providerMissing ? 'Not on this Mac · pick a model' : selectedModel?.name ?? humanizeModel(chat.model);
+  const modelTitle = !chat.providerId ? 'No model is connected for this chat yet. Pick one, or connect a provider in Settings › Providers.' : providerMissing ? `The provider “${chat.providerId}” this chat used is not available on this Mac. Pick another model to continue.` : 'Select model';
   const primaryDisabled = !hasPayload || staging || sending || modelChanging || settingsChanging || chat.archived || recoveryNeeded;
   const answering = Boolean(questionFlow && !questionFlow.collapsed);
   const placeholder = dictation ? (dictation.interim || 'Listening…') : chat.archived ? 'Restore this chat to continue' : answering ? (questionFlow!.question.options.length ? 'Type your own answer, or leave blank to use the selected option' : 'Type your answer') : !providers.length && state.providers.phase === 'ready' ? 'Enable a provider to send a message' : running ? 'Working…' : planMode ? 'Describe your task to generate a plan…' : 'Do anything';
@@ -1184,7 +1188,7 @@ export function Composer({ chat }: { chat: Chat }): React.ReactElement {
                 : !visibleModels.length ? <p className="composer-model-note">No models match this search.</p>
                   : providerGroups.map(group => <React.Fragment key={group.provider?.id ?? 'list'}>
                     {group.provider && <div className="composer-menu-section" role="presentation">{group.provider.name}</div>}
-                    {group.models.map(model => { const key = favoriteKey(model), favorite = modelFavorites.includes(key), selected = model.id === chat.model && model.providerId === (chat.providerId ?? 'hybrow');
+                    {group.models.map(model => { const key = favoriteKey(model), favorite = modelFavorites.includes(key), selected = model.id === chat.model && model.providerId === chat.providerId;
                       return <div className="composer-model-row" key={key}>
                         <button type="button" role="option" aria-selected={selected} disabled={modelChanging || settingsBlocked || (running && model.providerId !== currentProvider)} title={running && model.providerId !== currentProvider ? `Switch to ${model.provider} after this run` : `${model.provider} · ${model.id}`} onClick={() => void chooseModel(model.id, model.providerId)}>
                           <span className="composer-row-label">{model.name}</span>{modelTab !== 'all' && <span className="composer-row-description">{model.provider}</span>}{selected && <Check size={13} aria-hidden="true" />}
@@ -1226,9 +1230,9 @@ export function Composer({ chat }: { chat: Chat }): React.ReactElement {
       <div className="composer-toolbar-right">
         {running && <LoaderCircle size={14} className="composer-run-spinner composer-spin" aria-label="Working" />}
         <div className="composer-model-picker">
-          <ProviderUsageHover providerId={chat.providerId ?? 'hybrow'}>
+          <ProviderUsageHover providerId={chat.providerId || undefined}>
           <button ref={modelTrigger} data-testid="composer-model" type="button" className="composer-model-button" aria-label={`Model: ${modelName}`} aria-haspopup="dialog" aria-expanded={modelOpen} disabled={state.providers.phase === 'loading' && !modelOptions.length}
-            title="Select model" onClick={() => { setMenu(null); setModelError(''); setModelOpen(value => !value); }}>
+            title={modelTitle} data-provider-missing={providerMissing || !chat.providerId ? 'true' : undefined} onClick={() => { setMenu(null); setModelError(''); setModelOpen(value => !value); }}>
             <span className="composer-model">{modelName}</span>{modelEfforts.length > 0 && <span className="composer-effort-label">{EFFORT_LABELS[effort]}</span>}<ChevronDown size={12} aria-hidden="true" />
           </button>
           </ProviderUsageHover>

@@ -104,7 +104,8 @@ for (const group of selected) {
     branch: commit ? (git(checkout, 'branch', '--show-current') || '(detached HEAD)') : null,
     commit: commit || null,
     // A non-git source has no remote to point at; keep where it was copied from (a machine-local path).
-    sourcePath: commit ? null : checkout,
+    // Only the folder name: an absolute path would record one machine's layout in the repository.
+    sourcePath: commit ? null : path.basename(checkout),
     note: commit ? (dirty.length ? 'Includes uncommitted working-tree changes in the files listed under uncommittedFiles.' : 'Clean at the recorded commit.')
       : 'Source checkout is not a git repository; the sha256 values below are the only provenance.',
     uncommittedFiles: dirty,

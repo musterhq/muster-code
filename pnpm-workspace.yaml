@@ -1,2 +1,5 @@
 packages:
   - packages/*
+  # Muster Agent (packages/agent-app) is a standalone npm project with its own package-lock.json,
+  # CI (.github/workflows/agent-app-ci.yml) and release (agent-app-release.yml). Keep it out of the IDE workspace.
+  - "!packages/agent-app"

@@ -52,6 +52,7 @@ export function createModelsDomain(ctx: DomainContext): DomainModule {
   };
   /** The Project task each running chat works for, resolved once per run. */
   const runTasks = new Map<string, { taskId: string; projectId: string }>();
+  const incremental = (providerId: string): boolean => ctx.modelCatalog?.().providers.some(provider => provider.id === providerId && provider.incrementalInput === true) ?? false;
   const catalogPrice = (providerId: string, model: string): ModelPricing | undefined =>
     ctx.modelCatalog?.().providers.find(provider => provider.id === providerId)?.models.find(entry => entry.id === model)?.pricing;
 
@@ -81,7 +82,7 @@ export function createModelsDomain(ctx: DomainContext): DomainModule {
 
   const offEvent = ctx.hooks?.onProviderEvent?.(({ chat, method, params }) => {
     if (method !== 'thread/tokenUsage/updated') return;
-    if (record({ chatId: chat.id, providerId: chat.providerId ?? 'hybrow', model: chat.model, ...(chat.projectId ? { projectId: chat.projectId } : {}), threadId: chat.providerThreadId ?? null, method, params }))
+    if (record({ chatId: chat.id, providerId: chat.providerId ?? '', model: chat.model, ...(chat.projectId ? { projectId: chat.projectId } : {}), threadId: chat.providerThreadId ?? null, method, params }))
       ctx.emit({ type: 'modelUsageChanged', chatId: chat.id, ...(chat.projectId ? { projectId: chat.projectId } : {}) });
   });
   const offStart = ctx.hooks?.onRunStarted?.(async ({ chat }) => {
@@ -116,7 +117,7 @@ export function createModelsDomain(ctx: DomainContext): DomainModule {
   };
   const chatReport = (chatId: string): UsageReport => {
     const rows = (db()?.prepare('SELECT * FROM model_usage WHERE chat_id = ?').all(chatId) ?? []) as unknown as UsageRowDb[];
-    return summarizeUsage('chat', chatId, merge(priced(rows)), latest(rows));
+    return summarizeUsage('chat', chatId, merge(priced(rows)), latest(rows), incremental);
   };
   const projectReport = async (projectId: string): Promise<UsageReport> => {
     const handle = db(), rows: UsageRowDb[] = [];
@@ -128,12 +129,12 @@ export function createModelsDomain(ctx: DomainContext): DomainModule {
       const seen = new Set<string>();
       for (const row of [...byProject, ...byChat]) { const key = `${row.chat_id}\u0000${row.task_id}\u0000${row.provider_id}\u0000${row.model}`; if (!seen.has(key)) { seen.add(key); rows.push(row); } }
     }
-    const all = priced(rows), report = summarizeUsage('project', projectId, merge(all), latest(rows));
+    const all = priced(rows), report = summarizeUsage('project', projectId, merge(all), latest(rows), incremental);
     let titles = new Map<string, string>();
     try { titles = new Map(taskItems(await ctx.invoke('project.tasks.list', { projectId })).map(task => [task.id, task.title])); } catch { /* titles fall back */ }
     const byTask = new Map<string, UsageRow[]>();
     for (const row of all) if (row.taskId) byTask.set(row.taskId, [...(byTask.get(row.taskId) ?? []), row]);
-    report.tasks = [...byTask].map(([taskId, taskRows]) => { const summary = summarizeUsage('project', taskId, taskRows, null); return { taskId, title: titles.get(taskId) ?? 'Deleted task', totals: summary.totals, costUsd: summary.costUsd, unpricedTokens: summary.unpricedTokens }; });
+    report.tasks = [...byTask].map(([taskId, taskRows]) => { const summary = summarizeUsage('project', taskId, taskRows, null, incremental); return { taskId, title: titles.get(taskId) ?? 'Deleted task', totals: summary.totals, costUsd: summary.costUsd, unpricedTokens: summary.unpricedTokens }; });
     report.chats = new Set(rows.map(row => row.chat_id)).size;
     return report;
   };
