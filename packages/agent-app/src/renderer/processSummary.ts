@@ -68,7 +68,8 @@ function readDock():TerminalDockState {
   for(const store of [()=>sessionStorage,()=>localStorage]){
     try{const value=JSON.parse(store().getItem(DOCK_KEY)??'null');if(value&&(value.placement==='pane'||value.placement==='panel'))return {placement:value.placement,open:value.open===true,height:Number.isFinite(value.height)?Math.max(DOCK_MIN,Math.min(2000,value.height)):DOCK_DEFAULT};}catch{}
   }
-  return {placement:'pane',open:false,height:DOCK_DEFAULT};
+  // Terminals open in the bottom panel under the conversation by default (Codex/Cursor layout).
+  return {placement:'panel',open:false,height:DOCK_DEFAULT};
 }
 let dock:TerminalDockState|undefined;const dockListeners=new Set<()=>void>();
 export const terminalDock=():TerminalDockState=>dock??=readDock();

@@ -41,7 +41,7 @@ const folders=[{id:'f1',name:'muster-code',path:'/Users/me/code/muster-code'},{i
 const project={id:'p',name:'Muster Code',goal:'Ship it',folderIds:['f1','f2'],primaryFolderId:'f1',archived:false,archivedAt:null};
 
 const names=()=>[...document.querySelectorAll('.project-edit-folder-name')].map(e=>e.textContent);
-const until=async(ok:()=>boolean,ms=3000)=>{const end=Date.now()+ms;while(!ok()&&Date.now()<end)await delay(10);};
+const until=async(ok:()=>boolean,ms=3000)=>{const end=Date.now()+ms;while(!ok()&&Date.now()<end)await delay(10);if(!ok())throw new Error(`timed out; folders=${JSON.stringify(names())} picker=${!!document.querySelector('.project-edit-picker')} calls=${calls.map(c=>c.command).join(',')}`);};
 // IMG-2026-09-19T1315: Edit project — name, Source folders with Primary and ×, Add folder, Save sends one project.update.
 let saved:any=null,archive=0;
 root.render(<EditProjectDialog project={project} allFolders={folders} open onClose={()=>{}} onSaved={p=>{saved=p;}} onArchive={()=>{archive++;}}/>);
@@ -53,7 +53,9 @@ assert.match(dialog!.textContent??'',/Edit project/);
 assert.equal((dialog!.querySelector('.project-edit-name input') as any).value,'Muster Code');
 assert.deepEqual([...dialog!.querySelectorAll('.project-edit-folder-name')].map(e=>e.textContent),['muster-code','muster']);
 assert.equal(dialog!.querySelectorAll('.project-edit-primary').length,1);
-click(button(/^Remove muster from project$/,dialog!));await until(()=>names().join()==='muster-code');
+// The dialog's open effect can land after a first click on a slow runner and restore the folder list; click again until it sticks.
+for(let end=Date.now()+3000;names().join()!=='muster-code'&&Date.now()<end;){const remove=button(/^Remove muster from project$/);if(remove)click(remove);await delay(50);}
+await until(()=>names().join()==='muster-code');
 click(button(/^Add folder$/,dialog!));await until(()=>!!document.querySelector('.project-edit-picker'));
 assert.match(document.querySelector('.project-edit-picker')?.textContent??'',/site.*~\/code\/site/);
 click([...document.querySelectorAll('.project-edit-picker button')].find(b=>/site/.test(b.textContent??'')));await until(()=>names().join()==='muster-code,site');
