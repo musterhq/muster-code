@@ -7,6 +7,10 @@
 A native macOS app where coding agents work in your folders, with long-term memory, sandboxed
 computers, and the model providers you already have, all in one window.
 
+
+https://github.com/user-attachments/assets/9602a60c-2faf-4138-92a1-7d850d0b44ab
+
+
 [![Latest release](https://img.shields.io/github/v/release/musterhq/muster-code?filter=agent-v*&label=release&color=2f6feb)](https://github.com/musterhq/muster-code/releases/latest)
 [![macOS 14+ · Apple silicon](https://img.shields.io/badge/macOS-14%2B%20·%20Apple%20silicon-111?logo=apple)](https://github.com/musterhq/muster-code/releases/latest)
 [![GitHub stars](https://img.shields.io/github/stars/musterhq/muster-code?style=flat&color=f5c518)](https://github.com/musterhq/muster-code/stargazers)
