@@ -336,14 +336,21 @@ export class AgentStore {
     return rows.map(rowToChat);
   }
 
-  createProject(name: string, goal: string, folderIds: string[]): Project {
+  /** Creates a Project with its source folders and primary in one transaction; an unknown folder or primary writes nothing. */
+  createProject(name: string, goal: string, folderIds: string[], primaryFolderId?: string | null): Project {
     return this.tx(() => {
       for (const folderId of folderIds) {
         if (!this.folder(folderId)) throw new Error(`Unknown folder: ${folderId}`);
       }
-      const project: Project = { id: randomUUID(), name, goal, folderIds };
-      this.db.prepare('INSERT INTO projects (id, name, goal, folder_ids) VALUES (?, ?, ?, ?)')
-        .run(project.id, name, goal, JSON.stringify(folderIds));
+      if (primaryFolderId && !folderIds.includes(primaryFolderId)) throw new Error('The primary folder must be attached to the Project.');
+      const primary = primaryFolderId ?? folderIds[0] ?? null;
+      // Primary first, so every `folderIds[0]` default (chat.create, snapshots) follows the choice.
+      const ordered = primary ? [primary, ...folderIds.filter(f => f !== primary)] : folderIds;
+      const project: Project = { id: randomUUID(), name, goal, folderIds: ordered, primaryFolderId: primary };
+      // primary_folder_id is added lazily by the projects domain; write it when the column exists.
+      const hasPrimary = (this.db.prepare("SELECT 1 AS present FROM pragma_table_info('projects') WHERE name = 'primary_folder_id'").get() as { present: number } | undefined) !== undefined;
+      if (hasPrimary) this.db.prepare('INSERT INTO projects (id, name, goal, folder_ids, primary_folder_id) VALUES (?, ?, ?, ?, ?)').run(project.id, name, goal, JSON.stringify(ordered), primary);
+      else this.db.prepare('INSERT INTO projects (id, name, goal, folder_ids) VALUES (?, ?, ?, ?)').run(project.id, name, goal, JSON.stringify(ordered));
       this.bumpVersion();
       return project;
     });

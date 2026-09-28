@@ -119,3 +119,16 @@
 .project-memory-meta { flex: none; color: var(--text-faint); font-size: var(--fs-12); white-space: nowrap; }
 
 @media (prefers-reduced-motion: reduce) { .project-edit-make-primary { transition: none; } }
+
+/* New project: Sources. Ticked Muster folders plus Choose folder… / Clone repository…, in the Edit dialog's folder list. */
+.new-project-sources > ul { max-height: 320px; overflow-y: auto; }
+.new-project-sources .optional { margin-left: 6px; color: var(--text-faint); font-size: var(--fs-12); font-weight: 400; }
+.new-project-sources > ul > li.is-selected { background: color-mix(in srgb, var(--accent) 8%, transparent); }
+.new-project .new-project-source { flex: 1; min-width: 0; flex-direction: row; align-items: center; gap: 10px; min-height: 42px; color: var(--text-faint); font-size: var(--fs-13); cursor: pointer; }
+.new-project-source input { flex: none; margin: 0; accent-color: var(--accent); }
+.new-project-source .project-edit-folder-name { flex: 0 1 auto; }
+.new-project-source code { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-faint); font-family: var(--mono); font-size: var(--fs-11); }
+.new-project-sources .project-edit-make-primary { opacity: 1; }
+.new-project-sources > ul > li.new-project-source-actions { gap: 0; padding: 0; }
+.new-project-source-actions .project-edit-add { flex: 1; width: auto; margin-left: 0; }
+.new-project-source-actions .project-edit-add + .project-edit-add { border-left: 1px solid var(--hairline); }

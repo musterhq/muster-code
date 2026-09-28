@@ -11,6 +11,7 @@ import { restoreFocus } from '../focus';
 import { onOpenProject, takePendingProject } from '../projectFocus';
 import { useStore } from '../useStore';
 import { ConfirmProjectAction, EditProjectDialog } from './ProjectEditDialog';
+import { NewProjectForm } from './NewProjectForm';
 import { ProjectOverview, type ProjectTab } from './ProjectOverview';
 import { MailboxInbox } from './MailboxInbox';
 import { copyProjectExport, ProjectDecisionSection, ProjectTaskSection, relativeTime, saveProjectExport, useProjectWork, type TaskFilter } from './ProjectTasks';
@@ -85,39 +86,6 @@ export function ProjectsScreen({ onBack, onStartChat }: { onBack: () => void; on
       </div>
     </div>
   </section>;
-}
-
-function NewProjectForm({ folders, onClose, onCreated }: { folders: Folder[]; onClose: () => void; onCreated: (p: Project) => void }) {
-  const [name, setName] = useState('');
-  const [goal, setGoal] = useState('');
-  const [folderIds, setFolderIds] = useState<string[]>([]);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState('');
-  const first = useRef<HTMLInputElement>(null);
-  useEffect(() => first.current?.focus(), []);
-  function toggle(id: string) { setFolderIds(ids => ids.includes(id) ? ids.filter(f => f !== id) : [...ids, id]); }
-  async function submit(e: React.FormEvent) {
-    e.preventDefault();
-    if (busy) return;
-    setError(''); setBusy(true);
-    try { onCreated(await invoke('project.create', { name: name.trim(), goal: goal.trim(), folderIds })); }
-    catch (err) { setError(message(err, 'Could not create the project.')); }
-    finally { setBusy(false); }
-  }
-  return <form className="new-project" onSubmit={e => void submit(e)} aria-label="New project" onKeyDown={e => { if (e.key === 'Escape') { e.stopPropagation(); e.preventDefault(); if (!busy) onClose(); } }}>
-    <header><h2>New project</h2><button type="button" className="icon-button" aria-label="Cancel new project" disabled={busy} onClick={onClose}><X size={16}/></button></header>
-    <label>Name<input ref={first} required maxLength={200} value={name} onChange={e => setName(e.target.value)} placeholder="My project" disabled={busy}/></label>
-    <label>Shared goal <span className="optional">shown to every chat in the project</span><textarea rows={3} maxLength={4000} value={goal} onChange={e => setGoal(e.target.value)} placeholder="What should this project achieve?" disabled={busy}/></label>
-    <fieldset className="projects-folder-picker" disabled={busy}><legend>Folders <span className="optional">optional — link more later; the first is primary</span></legend>
-      {folders.length === 0 && <p className="field-help">No folders are open yet. You can link folders from the project's Folders tab.</p>}
-      {folders.map(f => <label key={f.id} className="projects-folder-option"><input type="checkbox" checked={folderIds.includes(f.id)} onChange={() => toggle(f.id)}/><span>{f.name}</span><code>{f.path}</code></label>)}
-    </fieldset>
-    {error && <p role="alert" className="settings-error">{error}</p>}
-    <div className="provider-actions">
-      <button type="submit" className="settings-button" disabled={busy || !name.trim()}>{busy ? 'Creating…' : 'Create project'}</button>
-      <button type="button" className="settings-button secondary" disabled={busy} onClick={onClose}>Cancel</button>
-    </div>
-  </form>;
 }
 
 /** Click-to-edit text. Enter (⌘Enter when multiline) or blur saves; Escape cancels without leaving the screen. */

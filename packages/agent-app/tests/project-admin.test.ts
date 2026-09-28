@@ -96,3 +96,21 @@ test('overview rollup counts task states, needs-input chats, and maps internal a
  assert.deepEqual(r,{running:1,blocked:1,needsInput:1,implemented:1,verified:2,todo:1,total:6});
  assert.equal(actorLabel('main'),'You');assert.equal(actorLabel('user'),'You');assert.equal(actorLabel('agent'),'Agent');assert.equal(actorLabel('system'),'Muster');
 });
+
+test('project.create links several source folders with a chosen primary in one call and writes nothing on a bad folder',async t=>{
+ const {service,folder}=await fixture(t);const a=await folder('a'),b=await folder('b'),c=await folder('c');
+ const before=(await service.invoke('app.snapshot',undefined)).projects.length;
+ await assert.rejects(service.invoke('project.create',{name:'Bad',goal:'',folderIds:[a.id,'missing']}),/Unknown folder/);
+ await assert.rejects(service.invoke('project.create',{name:'Bad',goal:'',folderIds:[a.id],primaryFolderId:b.id}),/must be attached/);
+ assert.equal((await service.invoke('app.snapshot',undefined)).projects.length,before,'a refused create leaves no half-made project');
+ const p=await service.invoke('project.create',{name:'Multi',goal:'g',folderIds:[a.id,b.id,c.id,b.id],primaryFolderId:c.id});
+ assert.deepEqual(p.folderIds,[c.id,a.id,b.id],'deduplicated, primary first');assert.equal(p.primaryFolderId,c.id);
+ const listed=(await service.invoke('project.list',undefined)).find(x=>x.id===p.id)!;
+ assert.deepEqual(listed.folderIds,[c.id,a.id,b.id]);assert.equal(listed.primaryFolderId,c.id);
+ const snap=(await service.invoke('app.snapshot',undefined)).projects.find(x=>x.id===p.id)!;
+ assert.deepEqual(snap.folderIds,[c.id,a.id,b.id]);
+ const plain=await service.invoke('project.create',{name:'Default',goal:'',folderIds:[b.id,a.id]});
+ assert.equal(plain.primaryFolderId,b.id,'without a choice the first source is primary');
+ const empty=await service.invoke('project.create',{name:'Scratch',goal:'',folderIds:[]});
+ assert.deepEqual(empty.folderIds,[]);assert.equal(empty.primaryFolderId,null,'a project with no sources stays valid');
+});

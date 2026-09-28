@@ -226,7 +226,7 @@ export interface Commands extends DomainCommands, BrowserCommands, ScopedCompute
  /** Declines the provider request (a cancel, never empty answers). */
  'question.dismiss': { input: {id: string}; output: void };
  'question.respond': { input: {id: string; answers: Record<string, {answers: string[]}>}; output: void };
- 'project.create': { input: {name: string; goal: string; folderIds: string[]}; output: Project };
+ 'project.create': { input: {name: string; goal: string; folderIds: string[]; primaryFolderId?: string | null}; output: Project };
  'project.tasks.list': {input:{projectId:string};output:BoundedList<ProjectTask>};
  'project.tasks.create': {input:{projectId:string;title:string;acceptance:string;dependencies:string[]};output:ProjectTask};
  'project.tasks.start': {input:{projectId:string;id:string;revision:number;requestId:string;folderId?:string};output:{task:ProjectTask;chatId:string;runId:string}};

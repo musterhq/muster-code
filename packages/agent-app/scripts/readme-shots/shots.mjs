@@ -81,6 +81,16 @@ export const SHOTS = [
     // Stop above the page footer.
     await ctx.evaluate(`const f=[...document.querySelectorAll('.settings-scroll *')].find(e=>e.children.length===0&&e.textContent.trim()==='Provider CLIs');const cut=f?Math.min(1000,f.getBoundingClientRect().top-12):1000;window.__clip={x:0,y:0,width:1600,height:cut};`);
   }},
+  // Local only: New project with its Sources: two Muster folders ticked, one added with Choose folder…, primary moved.
+  {name: 'new-project-sources', local: true, async run(ctx) {
+    await ctx.store(`s.openProjectsScreen()`); await ctx.sleep(1200);
+    await ctx.click('.project-rail-new'); await ctx.sleep(500);
+    await ctx.evaluate(`document.querySelector('form.new-project input[type=text]').focus()`); await ctx.type('Taskboard 0.5');
+    await ctx.evaluate(`document.querySelector('form.new-project textarea').focus()`); await ctx.type('Ship recurring tasks across the app, infra and docs.');
+    for (const name of ['taskboard-infra', 'taskboard']) { await ctx.evaluate(`[...document.querySelectorAll('.new-project-source')].find(l=>l.textContent.includes(${JSON.stringify(name)})&&!l.textContent.includes(${JSON.stringify(name)}+'-')).querySelector('input').click()`); await ctx.sleep(200); }
+    await ctx.click('.new-project-source-actions button', 'Choose folder'); await ctx.sleep(500);
+    await ctx.click('.project-edit-make-primary', 'Make primary'); await ctx.sleep(400);
+  }, clipSelector: '.new-project', clipPad: 24},
   {name: 'projects', async run(ctx) { await ctx.store(`s.openProjectsScreen()`); await ctx.sleep(1500); await ctx.evaluate(`[...document.querySelectorAll('button,[role=tab],a')].find(b=>/^Tasks\\s*\\d/.test(b.textContent.trim())).click()`); await ctx.sleep(900); }},
   {name: 'model-picker', async run(ctx) { await showMainTurn(ctx); await ctx.click('button', 'Frontier Large'); await ctx.sleep(800); }},
   {name: 'sandbox', opts: {sandbox: true}, async run(ctx) {

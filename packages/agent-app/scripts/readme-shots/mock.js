@@ -157,6 +157,8 @@ const handlers = {
   'files.quickOpen': ({folderId, query}) => ({results: folderId === 'f-infra' ? [] : [...Object.keys(files), 'src/jobs/reminders.test.ts', 'src/jobs/index.ts', 'web/src/components/DueBadge.tsx'].filter(p => p.toLowerCase().includes(String(query ?? '').toLowerCase().slice(0, 6))).map((path, i) => ({path, score: 100 - i}))}),
   'git.changes': ({folderId}) => folderId === 'f-infra' ? [] : reviewFiles.map(({path, status, adds, dels}) => ({path, status, adds, dels})),
   'git.status': ({folderId}) => gitStatus(folderId),
+  // New project → Sources → Choose folder…: the native picker answers with a folder the fixtures do not list yet.
+  'folder.pick': () => ({id: 'f-docs', path: FX.HOME + '/Code/taskboard-docs', name: 'taskboard-docs'}),
   'git.diff': ({path}) => ({path, before: files[path]?.before ?? '', after: files[path]?.after ?? '', truncated: false}),
   'git.info': ({folderId}) => ({branch: gitStatus(folderId).branch, detached: false, fetchedAt: ago(20), hasRemote: true, worktree: null}),
   'git.branches': () => ({current: 'feat/due-reminders', detached: false, local: [{name: 'feat/due-reminders', upstream: 'origin/feat/due-reminders', ahead: 2, behind: 0, worktreePath: ROOT, committedAt: ago(20)}, {name: 'main', upstream: 'origin/main', ahead: 0, behind: 0, committedAt: ago(60 * 9)}, {name: 'feat/keyset-pagination', upstream: 'origin/feat/keyset-pagination', ahead: 1, behind: 3, committedAt: ago(60 * 3)}], recent: ['main', 'feat/keyset-pagination'], truncated: false}),
