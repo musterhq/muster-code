@@ -79,6 +79,7 @@ try {
   await invoke('terminal.kill', {id: terminal.id});
   const updates = await invoke('updates.status', undefined);
   console.log(`updates: ${updates.phase} (current ${updates.current})`);
+  if (process.env.SMOKE_EXPECT_UPDATES === '1' && updates.phase === 'disabled') fail('updates are disabled: the packaged build has no update source.');
   if (!process.exitCode) console.log('SMOKE OK');
 } catch (error) {
   fail(error instanceof Error ? error.message : String(error));

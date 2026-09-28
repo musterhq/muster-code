@@ -64,15 +64,19 @@ jobs:
 
       - name: Package
         shell: bash
-        run: npx electron-builder ${{ matrix.target }} --publish never
+        run: npx electron-builder ${{ matrix.target }} --publish never -c.extraMetadata.musterUpdateRepo=${{ github.repository }} -c.extraMetadata.musterUpdateChannel=stable
 
       - name: Smoke test (Linux)
         if: matrix.os == 'linux'
         run: xvfb-run -a node scripts/smoke-packaged.mjs
+        env:
+          SMOKE_EXPECT_UPDATES: '1'
 
       - name: Smoke test (Windows)
         if: matrix.os == 'windows'
         run: node scripts/smoke-packaged.mjs
+        env:
+          SMOKE_EXPECT_UPDATES: '1'
 
       - name: List artifacts
         shell: bash

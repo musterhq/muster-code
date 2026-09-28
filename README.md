@@ -12,12 +12,12 @@ https://github.com/user-attachments/assets/9602a60c-2faf-4138-92a1-7d850d0b44ab
 
 
 [![Latest release](https://img.shields.io/github/v/release/musterhq/muster-code?filter=agent-v*&label=release&color=2f6feb)](https://github.com/musterhq/muster-code/releases/latest)
-[![macOS 14+ · Apple silicon](https://img.shields.io/badge/macOS-14%2B%20·%20Apple%20silicon-111?logo=apple)](https://github.com/musterhq/muster-code/releases/latest)
+[![macOS · Windows · Linux](https://img.shields.io/badge/macOS%20·%20Windows%20·%20Linux-download-111)](https://github.com/musterhq/muster-code/releases/latest)
 [![GitHub stars](https://img.shields.io/github/stars/musterhq/muster-code?style=flat&color=f5c518)](https://github.com/musterhq/muster-code/stargazers)
 
-### [⬇ Download for macOS (Apple silicon)](https://github.com/musterhq/muster-code/releases/latest)
+### [⬇ Download Muster Agent](https://github.com/musterhq/muster-code/releases/latest)
 
-<sub>Grab <code>Muster-Agent-&lt;version&gt;-arm64.dmg</code> from the latest release · Intel Macs: <a href="#run-muster-agent-on-another-mac-from-source">run from a clone</a></sub>
+<sub>macOS (Apple silicon) <code>.dmg</code> · Windows 10/11 installer <code>-win-x64-setup.exe</code> · Linux <code>.AppImage</code> / <code>.deb</code> · Intel Macs: <a href="#run-muster-agent-on-another-mac-from-source">run from a clone</a></sub>
 
 <br/>
 
@@ -205,8 +205,29 @@ Agent sessions get long. Muster Agent keeps what it holds in memory bounded:
    identity. The update installs when you restart.
 
 **Requirements:** macOS 14 (Sonoma) or later and a model provider (see [Your providers](#your-providers)).
-The download is **Apple silicon only** for now. Intel Macs run from a clone (below). Docker Desktop is
+The macOS download is **Apple silicon only** for now. Intel Macs run from a clone (below). Docker Desktop is
 optional and only needed for sandboxes.
+
+### Windows
+
+1. **Download** `Muster-Agent-<version>-win-x64-setup.exe` from
+   [the latest release](https://github.com/musterhq/muster-code/releases/latest) and run it. It installs for
+   your user (no admin needed) and adds a Start menu shortcut. A portable `-win-x64.zip` is attached too.
+2. The installer is not code-signed yet, so SmartScreen may warn: choose **More info → Run anyway**.
+3. Terminals open PowerShell. Muster finds Codex and Claude Code whether they came from npm (`codex.cmd`) or a
+   native installer. Computer use and Quick Look previews are macOS-only; everything else works.
+4. **Updates:** Muster tells you when a new version is out; **Download update** opens the release page.
+
+### Linux
+
+1. **AppImage** (any x64 distro): download `Muster-Agent-<version>-linux-x86_64.AppImage`, then
+   `chmod +x Muster-Agent-*.AppImage` and run it.
+2. **Debian / Ubuntu:** `sudo apt install ./Muster-Agent-<version>-linux-amd64.deb`, then open **Muster Agent**
+   from your app menu. A `-linux-x64.tar.gz` is attached too.
+3. Sandboxes use Docker Engine. Computer use and Quick Look previews are macOS-only.
+4. **Updates:** Muster tells you when a new version is out; **Download update** opens the release page.
+
+Every file's checksum is in `SHA256SUMS` on the release.
 
 ## Run Muster Agent on another Mac (from source)
 
