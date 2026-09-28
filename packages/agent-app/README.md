@@ -8,12 +8,12 @@ Coding agents in your folders, with long-term memory, sandboxed computers and th
 already have. Native macOS app, built on Electron.
 
 [![Latest release](https://img.shields.io/github/v/release/musterhq/muster-code?filter=agent-v*&label=release&color=2f6feb)](https://github.com/musterhq/muster-code/releases/latest)
-[![macOS 14+ · Apple silicon](https://img.shields.io/badge/macOS-14%2B%20·%20Apple%20silicon-111?logo=apple)](https://github.com/musterhq/muster-code/releases/latest)
+[![macOS · Windows · Linux](https://img.shields.io/badge/macOS%20·%20Windows%20·%20Linux-download-111)](https://github.com/musterhq/muster-code/releases/latest)
 [![GitHub stars](https://img.shields.io/github/stars/musterhq/muster-code?style=flat&color=f5c518)](https://github.com/musterhq/muster-code/stargazers)
 
-### [⬇ Download for macOS (Apple silicon)](https://github.com/musterhq/muster-code/releases/latest)
+### [⬇ Download Muster Agent](https://github.com/musterhq/muster-code/releases/latest)
 
-<sub><code>Muster-Agent-&lt;version&gt;-arm64.dmg</code> from the latest release · Intel Macs: <a href="#run-muster-agent-on-another-mac-from-source">run from a clone</a></sub>
+<sub>macOS (Apple silicon) <code>.dmg</code> · Windows 10/11 installer <code>-win-x64-setup.exe</code> · Linux <code>.AppImage</code> / <code>.deb</code> · Intel Macs: <a href="#run-muster-agent-on-another-mac-from-source">run from a clone</a></sub>
 
 <br/>
 
@@ -113,8 +113,13 @@ To regenerate these screenshots, run `npm run shots` (see [Screenshots](#screens
    code signature, and accepts it only if it is signed by the same identity. The update installs
    when you restart.
 
-What it needs: macOS 14 (Sonoma) or later and a model provider. The download is Apple silicon only
-for now; Intel Macs run from a clone (below). Docker Desktop (sandboxes) is optional.
+What it needs: macOS 14 (Sonoma) or later, Windows 10/11 (x64) or a 64-bit Linux, and a model provider.
+The macOS download is Apple silicon only for now; Intel Macs run from a clone (below). Windows: run the
+`-win-x64-setup.exe` installer. Linux: the `.AppImage` (`chmod +x`, then run) or the `.deb`. Docker
+(sandboxes) is optional. Computer use and Quick Look previews are macOS-only.
+
+Packaging for Windows and Linux: `npm run package:win` / `npm run package:linux` (electron-builder, config in
+`electron-builder.yml`); `node scripts/smoke-packaged.mjs` launches the packaged app and runs a terminal command.
 
 ## Run Muster Agent on another Mac (from source)
 

@@ -779,10 +779,16 @@ class CodexAppServerClient {
     this.developerInstructions = input.developerInstructions;
     this.sandbox = input.sandbox ?? "workspace-write";
     const args = buildCodexAppServerArgs(input);
-    this.child = spawn(input.command, args, {
+    const env: Record<string, string | undefined> = { ...process.env, ...(input.env ?? {}), RUST_LOG: process.env.RUST_LOG ?? "warn" };
+    // A JS launcher (Windows cannot exec a shell script) runs through Node: MUSTER_PROVIDER_NODE when the host
+    // provides one, else this process's executable (Electron runs as Node with ELECTRON_RUN_AS_NODE).
+    const script = /\.(?:c|m)?js$/i.test(input.command);
+    if (script && !env.MUSTER_PROVIDER_NODE && process.versions.electron) env.ELECTRON_RUN_AS_NODE = "1";
+    this.child = spawn(script ? env.MUSTER_PROVIDER_NODE || process.execPath : input.command, script ? [input.command, ...args] : args, {
       cwd: input.cwd,
-      env: { ...process.env, ...(input.env ?? {}), RUST_LOG: process.env.RUST_LOG ?? "warn" },
+      env,
       stdio: ["pipe", "pipe", "pipe"],
+      windowsHide: true,
     });
     this.child.stdout.on("data", (chunk: Buffer) => this.readStdout(chunk.toString("utf8")));
     this.child.stderr.on("data", (chunk: Buffer) => this.readStderr(chunk.toString("utf8")));

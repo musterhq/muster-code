@@ -1,6 +1,6 @@
 import {spawn as nodeSpawn, type ChildProcess} from 'node:child_process';
 import {randomUUID} from 'node:crypto';
-import {jsonLines, text} from './shared.ts';
+import {cliSpawn, jsonLines, text} from './shared.ts';
 import type {Spawn} from './claude-code.ts';
 import type {AdapterRunResult, RunnableAdapter} from './types.ts';
 
@@ -8,7 +8,8 @@ import type {AdapterRunResult, RunnableAdapter} from './types.ts';
 export function probe(binary: string, args: string[], spawn: Spawn = nodeSpawn as unknown as Spawn, timeoutMs = 5000): Promise<string> {
   return new Promise((resolve, reject) => {
     let out = '', child: ChildProcess;
-    try { child = spawn(binary, args, {cwd: process.cwd(), env: process.env, stdio: ['pipe', 'pipe', 'pipe']}); } catch (error) { reject(error); return; }
+    const launch = cliSpawn(binary, args);
+    try { child = spawn(launch.command, launch.args, {cwd: process.cwd(), env: launch.env, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true}); } catch (error) { reject(error); return; }
     const timer = setTimeout(() => { child.kill('SIGKILL'); reject(new Error(`${binary} did not answer within ${timeoutMs / 1000}s.`)); }, timeoutMs);
     child.stdin?.end();
     const take = (chunk: Buffer | string) => { if (out.length < 256 * 1024) out += String(chunk); };
@@ -60,7 +61,8 @@ export function openCodeAdapter(options: {binary: string; env?: NodeJS.ProcessEn
         // After the message: `--file` is an array option and would swallow a following positional.
         ...(input.images ?? []).flatMap(path => ['--file', path])];
       let child: ChildProcess;
-      try { child = spawn(options.binary, args, {cwd: input.cwd, env: options.env ?? process.env, stdio: ['pipe', 'pipe', 'pipe']}); }
+      const launch = cliSpawn(options.binary, args, options.env ?? process.env);
+      try { child = spawn(launch.command, launch.args, {cwd: input.cwd, env: launch.env, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true}); }
       catch (error) { resolve({status: 'failed', finalMessage: '', dispatchState: 'not-dispatched', errorMessage: `OpenCode could not start: ${error instanceof Error ? error.message : String(error)}`}); return; }
       let session = input.resumeThreadId, settled = false, failure = '', stderr = '', answer = '', killer: ReturnType<typeof setTimeout> | undefined;
       const started = new Set<string>();

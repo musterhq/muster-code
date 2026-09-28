@@ -12,6 +12,7 @@ import type { ProviderInfo } from '../shared/protocol.ts';
 import type { ProviderDiagnosis, ProviderStage } from '../shared/domains/providers-protocol.ts';
 import { accountHash, parseProviderAccounts, providerAccountsFile, providerDataDir } from './provider-instances.ts';
 import { ENV_KEY_PROVIDERS } from './env-providers.ts';
+import { CODEX_LAUNCHER, cliSpawn } from './adapters/shared.ts';
 
 export interface DiagnoseOptions { home?: string; env?: NodeJS.ProcessEnv; directory?: string; now?: () => number; version?: (cli: string) => Promise<string | null>; dataDir?: string }
 type Step = Omit<ProviderDiagnosis, 'id' | 'version' | 'checkedAt' | 'diagnostics'>;
@@ -71,7 +72,7 @@ function codexSteps(p: ProviderInfo, options: Required<Pick<DiagnoseOptions, 'ho
   const authFile = join(codexHome, 'auth.json');
   const readAuth = () => { try { return readSmall(authFile); } catch { return null; } };
   if (family === 'codex') return {step: authStage(readAuth(), now, login, false), cli, facts};
-  const launcher = join(directory, 'resources', 'codex-launch.sh');
+  const launcher = join(directory, 'resources', CODEX_LAUNCHER);
   if (!executable(launcher)) return {step: {stage: 'executable-missing', summary: 'Muster’s bundled Codex launcher is missing or not executable.', hint: 'Reinstall Muster to restore its launcher scripts.'}, cli, facts};
   const profile = p.codex?.profile;
   // Routes from config.toml or the plain ChatGPT sign-in have no profile file: their own status says what is missing.
@@ -143,7 +144,7 @@ const versions = new Map<string, {stamp: string; value: Promise<string | null>}>
 export function cliVersion(cli: string): Promise<string | null> {
   let stamp = ''; try { const s = statSync(cli); stamp = `${s.mtimeMs}:${s.size}`; } catch { return Promise.resolve(null); }
   const hit = versions.get(cli); if (hit?.stamp === stamp) return hit.value;
-  const value = new Promise<string | null>(resolve => execFile(cli, ['--version'], {timeout: 3000, maxBuffer: 64 * 1024, encoding: 'utf8'}, (error, stdout) => {
+  const value = new Promise<string | null>(resolve => execFile(cliSpawn(cli, ['--version']).command, cliSpawn(cli, ['--version']).args, {timeout: 3000, maxBuffer: 64 * 1024, encoding: 'utf8', env: cliSpawn(cli, []).env, windowsHide: true}, (error, stdout) => {
     const line = !error && typeof stdout === 'string' ? stdout.trim().split('\n')[0]!.slice(0, 120) : '';
     resolve(line || null);
   }));

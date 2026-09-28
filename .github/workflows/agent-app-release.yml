@@ -148,8 +148,70 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+  build-other:
+    name: build (${{ matrix.os }})
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - os: linux
+            runner: ubuntu-latest
+            target: --linux
+          - os: windows
+            runner: windows-latest
+            target: --win
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: packages/agent-app
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: refs/tags/${{ env.TAG }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: packages/agent-app/.nvmrc
+          cache: npm
+          cache-dependency-path: packages/agent-app/package-lock.json
+      - name: Linux build tools
+        if: matrix.os == 'linux'
+        working-directory: .
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends build-essential python3 xvfb libgtk-3-0 libnss3 libxss1 libgbm1 libasound2t64 rpm fakeroot
+      - name: Install
+        run: npm ci --no-audit --no-fund
+      - name: Verify
+        shell: bash
+        run: |
+          npx tsc --noEmit
+          npm run build
+      - name: Package
+        shell: bash
+        # The update source is this repository (forks publish and update from their own).
+        run: npx electron-builder ${{ matrix.target }} --publish never -c.extraMetadata.musterUpdateRepo=${{ github.repository }} -c.extraMetadata.musterUpdateChannel=${{ contains(env.TAG, '-') && 'beta' || 'stable' }}
+      - name: Smoke test (Linux)
+        if: matrix.os == 'linux'
+        run: xvfb-run -a node scripts/smoke-packaged.mjs
+        env:
+          SMOKE_EXPECT_UPDATES: '1'
+      - name: Smoke test (Windows)
+        if: matrix.os == 'windows'
+        run: node scripts/smoke-packaged.mjs
+        env:
+          SMOKE_EXPECT_UPDATES: '1'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: muster-agent-${{ matrix.os }}
+          if-no-files-found: error
+          path: |
+            packages/agent-app/release-dist/*.AppImage
+            packages/agent-app/release-dist/*.deb
+            packages/agent-app/release-dist/*.tar.gz
+            packages/agent-app/release-dist/*-setup.exe
+            packages/agent-app/release-dist/*-win-*.zip
+
   publish:
-    needs: build
+    needs: [build, build-other]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -196,7 +258,23 @@ jobs:
             echo "| --- | --- |"
             echo "| Apple silicon (M1 and later) | \`Muster-Agent-${VERSION}-arm64.dmg\` (or \`.zip\`) |"
             echo
-            echo "Open the disk image and drag **Muster Agent** to **Applications**. Checksums are in \`SHA256SUMS\`."
+            echo "Open the disk image and drag **Muster Agent** to **Applications**."
+            echo
+            echo "| Windows | File |"
+            echo "| --- | --- |"
+            echo "| Windows 10/11 (x64) | \`Muster-Agent-${VERSION}-win-x64-setup.exe\` (or the portable \`-win-x64.zip\`) |"
+            echo
+            echo "Run the installer; it installs for your user, no admin needed. It is not code-signed yet, so Windows SmartScreen may warn: choose **More info → Run anyway**."
+            echo
+            echo "| Linux | File |"
+            echo "| --- | --- |"
+            echo "| AppImage (any distro, x64) | \`Muster-Agent-${VERSION}-linux-x86_64.AppImage\` |"
+            echo "| Debian / Ubuntu | \`Muster-Agent-${VERSION}-linux-amd64.deb\` |"
+            echo "| Archive | \`Muster-Agent-${VERSION}-linux-x64.tar.gz\` |"
+            echo
+            echo "AppImage: \`chmod +x\` the file, then run it. Debian/Ubuntu: \`sudo apt install ./Muster-Agent-${VERSION}-linux-amd64.deb\`."
+            echo
+            echo "Checksums for every file are in \`SHA256SUMS\`."
             if [[ "$MODES" != "developer-id-notarized " ]]; then
               echo
               echo "This build is not notarized by Apple (signing: ${MODES% }). The first time, right-click **Muster Agent** in Applications and choose **Open**, or run:"
@@ -206,7 +284,7 @@ jobs:
               echo '```'
             fi
             echo
-            echo "Muster Agent needs a model provider sign-in; it detects the ones already on your Mac on first run."
+            echo "Muster Agent needs a model provider sign-in; it detects the ones already on your computer on first run."
           } > ../release-notes.md
           # No CHANGELOG section for this version: let GitHub generate notes from merged PRs/commits.
           if grep -q '[^[:space:]]' ../changelog-section.md; then echo "generate=false" >> "$GITHUB_OUTPUT"; else echo "generate=true" >> "$GITHUB_OUTPUT"; fi
@@ -225,4 +303,8 @@ jobs:
           files: |
             out/Muster-Agent-*.zip
             out/Muster-Agent-*.dmg
+            out/Muster-Agent-*.exe
+            out/Muster-Agent-*.AppImage
+            out/Muster-Agent-*.deb
+            out/Muster-Agent-*.tar.gz
             out/SHA256SUMS

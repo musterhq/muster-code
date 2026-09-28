@@ -408,16 +408,19 @@ async function main(): Promise<void> {
   const bundle=bundlePathOf(process.execPath);
   // Any .app bundle (release or preview) carries its own keys; a dev `electron .` run has no MusterUpdateRepo.
   const infoPlist=bundle?(()=>{try{return readFileSync(path.join(bundle,'Contents/Info.plist'),'utf8');}catch{return '';}})():'';
+  // Windows and Linux builds carry their update source in the packaged package.json (electron-builder extraMetadata).
+  const packagedMeta:{musterUpdateRepo?:string;musterUpdateChannel?:string}=app.isPackaged?(()=>{try{return JSON.parse(readFileSync(path.join(app.getAppPath(),'package.json'),'utf8'));}catch{return {};}})():{};
   const updater=new AppUpdater({
     current:plistString(infoPlist,'CFBundleShortVersionString')??app.getVersion(),
     arch:process.arch,
     exe:process.execPath,
-    repo:plistString(infoPlist,'MusterUpdateRepo'),
-    channel:resolveUpdateChannel({bundle:plistString(infoPlist,'MusterUpdateChannel'),env:process.env}),
+    repo:plistString(infoPlist,'MusterUpdateRepo')??packagedMeta.musterUpdateRepo,
+    channel:resolveUpdateChannel({bundle:plistString(infoPlist,'MusterUpdateChannel')??packagedMeta.musterUpdateChannel,env:process.env}),
     settingsFile:path.join(app.getPath('userData'),'updates.json'),
     stagingDir:path.join(app.getPath('userData'),'pending-update'),
     emit:status=>{if(window&&!window.isDestroyed())window.webContents.send('muster:event',{type:'updateStatus',status} satisfies AgentEvent);},
     quit:()=>app.quit(),
+    openExternal:url=>{void shell.openExternal(url);},
   });
   void updater.start();
   app.on('browser-window-focus', () => updater.checkIfStale());

@@ -12,7 +12,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync 
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import type { CliStatus, CliTool, CliUpdateResult } from '../shared/domains/providers-protocol.ts';
-import { locateCli } from './adapters/shared.ts';
+import { cliSpawn, locateCli } from './adapters/shared.ts';
 
 export const CLI_TOOLS: Record<CliTool, { label: string; pkg: string; bin: string; envVar: string; defaultPath: (home: string) => string }> = {
   codex: { label: 'Codex CLI', pkg: '@openai/codex', bin: 'codex', envVar: 'MUSTER_CODEX_COMMAND', defaultPath: home => join(home, '.local/bin/codex') },
@@ -58,7 +58,7 @@ export interface CliMaintenanceDeps {
 }
 
 const run = (file: string, args: string[], timeout: number): Promise<string> => new Promise((resolve, reject) => {
-  execFile(file, args, { timeout, maxBuffer: 1024 * 1024, encoding: 'utf8' }, (error, stdout, stderr) => error ? reject(new Error((stderr || error.message).trim().split('\n').slice(-3).join(' ').slice(0, 400))) : resolve(stdout));
+  execFile(cliSpawn(file, args).command, cliSpawn(file, args).args, { timeout, maxBuffer: 1024 * 1024, encoding: 'utf8', env: cliSpawn(file, []).env, windowsHide: true }, (error, stdout, stderr) => error ? reject(new Error((stderr || error.message).trim().split('\n').slice(-3).join(' ').slice(0, 400))) : resolve(stdout));
 });
 
 export function createCliMaintenance(deps: CliMaintenanceDeps) {

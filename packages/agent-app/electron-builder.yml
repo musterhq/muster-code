@@ -1,0 +1,43 @@
+# Windows and Linux packaging (macOS keeps scripts/package-release.mjs: its .app, signing and DMG are tuned there).
+#   npx electron-builder --linux   ->  release-dist/Muster-Agent-<version>-<arch>.AppImage, .deb, .tar.gz
+#   npx electron-builder --win     ->  release-dist/Muster-Agent-<version>-<arch>-setup.exe, .zip
+# Only the built app ships: dist/ (esbuild bundles every dependency except electron and node-pty) and node-pty.
+appId: dev.themuster.agent
+productName: Muster Agent
+executableName: muster-agent
+directories:
+  output: release-dist
+  buildResources: resources
+files:
+  - dist/**
+  - "!dist/tests/**"
+  - "!**/*.map"
+  - package.json
+  - node_modules/node-pty/**
+  - "!node_modules/node-pty/{src,deps,scripts,typings,third_party}/**"
+  - "!node_modules/node-pty/**/*.{md,ts,cc,h,gyp,gypi}"
+# Not packed into app.asar: the runtime spawns launchers from dist/ (as the macOS build does).
+asar: false
+npmRebuild: true
+nodeGypRebuild: false
+artifactName: "Muster-Agent-${version}-${os}-${arch}.${ext}"
+publish: null
+extraMetadata:
+  main: dist/main/index.cjs
+linux:
+  target: [AppImage, deb, tar.gz]
+  category: Development
+  icon: resources/icon.png
+  synopsis: Agentic development client with memory and sandboxing
+  maintainer: Muster <hello@themuster.dev>
+  executableArgs: []
+deb:
+  depends: [libgtk-3-0, libnss3, libxss1, libasound2 | libasound2t64, libgbm1]
+win:
+  target: [nsis, zip]
+  icon: resources/icon.png
+nsis:
+  oneClick: true
+  perMachine: false
+  artifactName: "Muster-Agent-${version}-${os}-${arch}-setup.${ext}"
+  shortcutName: Muster Agent

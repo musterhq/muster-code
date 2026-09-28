@@ -1,10 +1,10 @@
 import {spawn as nodeSpawn, type ChildProcess} from 'node:child_process';
 import {randomUUID} from 'node:crypto';
-import {jsonLines, loadImages, text} from './shared.ts';
+import {cliSpawn, jsonLines, loadImages, text} from './shared.ts';
 import type {AdapterRunInput, AdapterRunResult, RunnableAdapter} from './types.ts';
 import {CLAUDE_CODE_ALIASES, CLAUDE_CODE_DEFAULT} from './claude-models.ts';
 
-export type Spawn = (command: string, args: string[], options: {cwd: string; env: NodeJS.ProcessEnv; stdio: ['pipe', 'pipe', 'pipe']}) => ChildProcess;
+export type Spawn = (command: string, args: string[], options: {cwd: string; env: NodeJS.ProcessEnv; stdio: ['pipe', 'pipe', 'pipe']; windowsHide?: boolean}) => ChildProcess;
 /** Claude Code's default and family aliases only; the versioned list comes from claude-models.ts. */
 export const CLAUDE_CODE_MODELS = [CLAUDE_CODE_DEFAULT, ...CLAUDE_CODE_ALIASES];
 
@@ -108,7 +108,8 @@ export function claudeCodeAdapter(options: {binary: string; env?: NodeJS.Process
       // would silently switch billing. That key has its own Anthropic API row.
       const env = {...(options.env ?? process.env)}; delete env.ANTHROPIC_API_KEY;
       let child: ChildProcess;
-      try { child = spawn(options.binary, claudeArgs(input, sessionId), {cwd: input.cwd, env, stdio: ['pipe', 'pipe', 'pipe']}); }
+      const launch = cliSpawn(options.binary, claudeArgs(input, sessionId), env);
+      try { child = spawn(launch.command, launch.args, {cwd: input.cwd, env: launch.env, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true}); }
       catch (error) { resolve({status: 'failed', finalMessage: '', dispatchState: 'not-dispatched', errorMessage: `Claude Code could not start: ${error instanceof Error ? error.message : String(error)}`}); return; }
       let accepted = false, settled = false, final: {ok: boolean; text: string} | undefined, stderr = '', streamedText = false;
       let pending = 1, inputClosed = false;

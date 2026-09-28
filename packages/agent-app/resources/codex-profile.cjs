@@ -1,5 +1,5 @@
 const { readFileSync, existsSync, statSync } = require('node:fs');
-const { join, delimiter, isAbsolute } = require('node:path');
+const { join, delimiter, dirname, isAbsolute } = require('node:path');
 const { homedir } = require('node:os');
 const { spawn } = require('node:child_process');
 const { createInterface } = require('node:readline');
@@ -116,6 +116,17 @@ function providerOverrides(provider, catalog) {
   return ['model_provider=' + JSON.stringify(provider), ...(catalog ? ['model_catalog_json=' + JSON.stringify(catalog)] : [])];
 }
 
+/** The JS entry an npm `.cmd` shim runs, e.g. `"%dp0%\\node_modules\\@openai\\codex\\bin\\codex.js" %*`. */
+function npmShimEntry(shim) {
+  try {
+    const text = readFileSync(shim, 'utf8');
+    const match = /"%~?dp0%\\?([^"]+?\.(?:c|m)?js)"/i.exec(text) || /%~?dp0%\\?(\S+?\.(?:c|m)?js)/i.exec(text);
+    if (!match) return undefined;
+    const entry = join(dirname(shim), match[1].replace(/\\/g, '/'));
+    return existsSync(entry) ? entry : undefined;
+  } catch { return undefined; }
+}
+
 /** A small `exec /real/path "$@"` launcher whose target is gone (an app update moved it): executable, but every run fails. */
 function brokenWrapper(file) {
   try {
@@ -133,6 +144,17 @@ function codexCommand(env = process.env) {
   if (env.MUSTER_CODEX_COMMAND) return env.MUSTER_CODEX_COMMAND;
   const home = homedir();
   const dirs = [...(env.PATH || '').split(delimiter).filter(Boolean), join(home, '.local/bin'), '/opt/homebrew/bin', '/usr/local/bin', join(home, '.npm-global/bin'), join(home, '.bun/bin')];
+  if (process.platform === 'win32') {
+    // Windows: a native codex.exe, or an npm shim (codex.cmd) resolved to the package's JS entry (run through Node).
+    const winDirs = [...dirs, join(env.APPDATA || join(home, 'AppData/Roaming'), 'npm'), join(env.LOCALAPPDATA || join(home, 'AppData/Local'), 'Programs/codex')];
+    for (const dir of winDirs) {
+      const exe = join(dir, 'codex.exe');
+      if (existsSync(exe)) return exe;
+      const shim = join(dir, 'codex.cmd');
+      if (existsSync(shim)) { const entry = npmShimEntry(shim); if (entry) return entry; }
+    }
+    return undefined;
+  }
   const bundles = ['/Applications', join(home, 'Applications')].flatMap(root => ['ChatGPT.app', 'Codex.app'].flatMap(app => [join(root, app, 'Contents/Resources/codex-cli/bin/codex'), join(root, app, 'Contents/Resources/codex')]));
   return [...dirs.map(dir => join(dir, 'codex')), ...bundles].find(file => isAbsolute(file) && existsSync(file) && !brokenWrapper(file));
 }
@@ -163,7 +185,10 @@ function launch(selection, args) {
   if (!command || !existsSync(command)) throw new Error('Codex CLI not found. Install it, or set MUSTER_CODEX_COMMAND to its executable.');
   // Profile identity overrides win over CLI input, while MCP and approval
   // configuration remains intact. No --profile flag: app-server rejects it.
-  const child = spawn(command, [...args, ...overrides.flatMap(value => ['-c', value])], { stdio: ['pipe', 'pipe', 'ignore'] });
+  const codexArgs = [...args, ...overrides.flatMap(value => ['-c', value])];
+  // A JS entry (a resolved npm shim on Windows) runs through this Node; a native binary runs directly.
+  const script = /\.(?:c|m)?js$/i.test(command);
+  const child = spawn(script ? process.execPath : command, script ? [command, ...codexArgs] : codexArgs, { stdio: ['pipe', 'pipe', 'ignore'], windowsHide: true });
   const pending = new Map();
   const resumes = new Map();
   const write = message => process.stdout.write(JSON.stringify(message) + '\n');
