@@ -35,6 +35,8 @@ function receiptSnapshot(value:ProcessSnapshot):ProcessSnapshot {
 }
 /** Do not pass provider tokens, API keys, SSH agents or arbitrary app variables to a shell. */
 function commandEnvironment():NodeJS.ProcessEnv {
+  // Windows programs need the Windows environment (SystemRoot, PATHEXT, TEMP, USERPROFILE…) to run.
+  if(process.platform==='win32')return {...process.env,TERM:'dumb',NO_COLOR:'1'};
   const env:NodeJS.ProcessEnv={PATH:process.env.PATH??'/usr/bin:/bin',TERM:'dumb',NO_COLOR:'1'};
   for(const key of ['HOME','USER','LOGNAME','TMPDIR','LANG','LC_ALL'])if(process.env[key])env[key]=process.env[key];
   return env;

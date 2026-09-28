@@ -59,5 +59,13 @@
   "overrides": {
     "uuid": "^11.1.0"
   },
-  "author": "Muster"
+  "author": {
+    "name": "Muster",
+    "email": "hello@themuster.dev"
+  },
+  "homepage": "https://github.com/musterhq/muster-code",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/musterhq/muster-code.git"
+  }
 }

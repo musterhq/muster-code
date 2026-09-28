@@ -34,6 +34,8 @@ export {loginShell};
 /** The user's own shell: a login shell rebuilds PATH from their profile. App-injected
  * variables (provider tokens, Electron flags) are not inherited; colour is left on. */
 export function terminalEnvironment(shell:string):NodeJS.ProcessEnv {
+  // Windows shells need the whole Windows environment (SystemRoot, USERPROFILE, PATHEXT, TEMP…) to start at all.
+  if(process.platform==='win32')return {...process.env,TERM:'xterm-256color',COLORTERM:'truecolor',TERM_PROGRAM:'Muster'};
   const env:NodeJS.ProcessEnv={PATH:process.env.PATH??'/usr/bin:/bin:/usr/sbin:/sbin',TERM:'xterm-256color',COLORTERM:'truecolor',TERM_PROGRAM:'Muster',SHELL:shell,LANG:process.env.LANG||'en_US.UTF-8'};
   for(const key of ['HOME','USER','LOGNAME','TMPDIR','LC_ALL','LC_CTYPE','SSH_AUTH_SOCK'])if(process.env[key])env[key]=process.env[key];
   return env;
