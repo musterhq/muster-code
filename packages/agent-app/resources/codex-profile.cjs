@@ -76,8 +76,11 @@ function catalogIds(path) {
     return Array.isArray(models) ? new Set(models.map(entry => entry && (entry.slug ?? entry.model ?? entry.id)).filter(id => typeof id === 'string')) : undefined;
   } catch { return undefined; }
 }
-/** OpenAI's own route runs OpenAI model ids; any other provider runs what its catalog lists (anything when no catalog is readable). */
-const modelMatches = (provider, model, ids) => typeof model === 'string' && (provider === 'openai' ? OPENAI_MODEL.test(model) : !ids || ids.has(model));
+/** OpenAI's own route runs OpenAI model ids. A gateway runs its catalog's models and also what the router itself serves
+ *  (its agents and combos such as `intelligent-planner` or `auto/best-coding`, which a hand-written catalog does not
+ *  list), so any well-formed id is passed through: the router answers an unknown one with its own error. */
+const ROUTER_MODEL = /^[A-Za-z0-9._:/+ -]{1,200}$/;
+const modelMatches = (provider, model, ids) => typeof model === 'string' && (provider === 'openai' ? OPENAI_MODEL.test(model) : (ids ? ids.has(model) : false) || ROUTER_MODEL.test(model));
 
 /** Validated `-c key=value` overrides for a profile file. The profile names its provider; the file name
  *  `openai-direct` is reserved for OpenAI's own ChatGPT route. */
@@ -213,7 +216,7 @@ function selection(argv, env) {
   throw new Error('No Codex route selected. Set MUSTER_CODEX_PROFILE or MUSTER_CODEX_PROVIDER.');
 }
 
-module.exports = { profileOverrides, providerOverrides, parseToml, codexCommand };
+module.exports = { profileOverrides, providerOverrides, parseToml, codexCommand, modelMatches };
 if (require.main === module) {
   try { const chosen = selection(process.argv, process.env); launch(chosen.selection, chosen.args); }
   catch (error) { process.stderr.write(error.message + '\n'); process.exitCode = 1; }
