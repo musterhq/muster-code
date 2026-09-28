@@ -10,7 +10,14 @@ import {TERMINAL_SHELL_NAMES,type TerminalShellName,type TerminalShellOption} fr
 /** The user's login shell ($SHELL), else the platform default. */
 export function loginShell():string {
   const shell=process.env.SHELL;
-  return shell&&isAbsolute(shell)&&!shell.includes('\0')?shell:process.platform==='darwin'?'/bin/zsh':'/bin/bash';
+  return shell&&isAbsolute(shell)&&!shell.includes('\0')?shell:process.platform==='darwin'?'/bin/zsh':process.platform==='win32'?windowsShell():'/bin/bash';
+}
+/** Windows: PowerShell (always present), else the command interpreter. */
+function windowsShell():string {
+  const root=process.env.SystemRoot||'C:\\Windows';
+  const powershell=`${root}\\System32\\WindowsPowerShell\\v1.0\\powershell.exe`;
+  try{if(statSync(powershell).isFile())return powershell;}catch{/* fall through */}
+  return process.env.ComSpec||`${root}\\System32\\cmd.exe`;
 }
 const COMMON_DIRS=['/bin','/usr/bin','/usr/local/bin','/opt/homebrew/bin','/opt/local/bin','/run/current-system/sw/bin'];
 const LABELS:Record<TerminalShellName,string>={zsh:'zsh',bash:'bash',fish:'fish'};

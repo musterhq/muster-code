@@ -1,0 +1,90 @@
+name: Muster Agent Windows & Linux
+
+# Builds, packages and smoke-tests the Windows and Linux apps (macOS is covered by agent-app-ci.yml).
+on:
+  pull_request:
+    paths:
+      - "packages/agent-app/**"
+      - ".github/workflows/agent-app-cross-platform.yml"
+  push:
+    branches: [main]
+    paths:
+      - "packages/agent-app/**"
+  workflow_dispatch:
+
+concurrency:
+  group: agent-app-xplat-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    working-directory: packages/agent-app
+
+jobs:
+  package:
+    name: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: linux
+            runner: ubuntu-latest
+            target: --linux
+          - os: windows
+            runner: windows-latest
+            target: --win
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    env:
+      NODE_OPTIONS: --max-old-space-size=4096
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: packages/agent-app/.nvmrc
+          cache: npm
+          cache-dependency-path: packages/agent-app/package-lock.json
+
+      - name: Linux build tools
+        if: matrix.os == 'linux'
+        working-directory: .
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends build-essential python3 xvfb libgtk-3-0 libnss3 libxss1 libgbm1 libasound2t64 rpm fakeroot
+
+      - name: Install
+        run: npm ci --no-audit --no-fund
+
+      - name: Typecheck and build
+        run: |
+          npx tsc --noEmit
+          npm run build
+
+      - name: Package
+        shell: bash
+        run: npx electron-builder ${{ matrix.target }} --publish never
+
+      - name: Smoke test (Linux)
+        if: matrix.os == 'linux'
+        run: xvfb-run -a node scripts/smoke-packaged.mjs
+
+      - name: Smoke test (Windows)
+        if: matrix.os == 'windows'
+        run: node scripts/smoke-packaged.mjs
+
+      - name: List artifacts
+        shell: bash
+        run: ls -la release-dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: muster-agent-${{ matrix.os }}
+          if-no-files-found: error
+          path: |
+            packages/agent-app/release-dist/*.AppImage
+            packages/agent-app/release-dist/*.deb
+            packages/agent-app/release-dist/*.tar.gz
+            packages/agent-app/release-dist/*-setup.exe
+            packages/agent-app/release-dist/*.zip

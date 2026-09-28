@@ -124,11 +124,40 @@ export function jsonLines(stream: Readable, onValue: (value: Record<string, unkn
 /** First executable named `name` in explicit candidates, then PATH (plus common user bin dirs Electron's PATH lacks). */
 export function findBinary(name: string, env: NodeJS.ProcessEnv, home: string, candidates: string[] = []): string | undefined {
   const dirs = [...(env.PATH ?? '').split(delimiter).filter(Boolean), join(home, '.local/bin'), '/opt/homebrew/bin', '/usr/local/bin', join(home, '.npm-global/bin'), join(home, '.bun/bin'), join(home, '.local/share/mise/shims')];
-  for (const file of [...candidates, ...dirs.map(dir => join(dir, name))]) {
+  const names = process.platform === 'win32' ? [`${name}.exe`, `${name}.cmd`, name] : [name];
+  for (const file of [...candidates, ...dirs.flatMap(dir => names.map(entry => join(dir, entry)))]) {
     if (!isAbsolute(file)) continue;
-    try { accessSync(file, constants.X_OK); if (statSync(file).isFile() && !brokenWrapper(file)) return file; } catch { /* next */ }
+    try {
+      accessSync(file, constants.X_OK);
+      if (!statSync(file).isFile() || brokenWrapper(file)) continue;
+      // An npm shim (`codex.cmd`) cannot be spawned without a shell: run the package's JS entry instead.
+      if (/\.cmd$/i.test(file)) { const entry = npmShimEntry(file); if (entry) return entry; continue; }
+      return file;
+    } catch { /* next */ }
   }
   return undefined;
+}
+
+/** The JS file an npm `.cmd` shim runs (`"%dp0%\node_modules\@openai\codex\bin\codex.js" %*`), if it exists. */
+export function npmShimEntry(shim: string): string | undefined {
+  try {
+    const text = readFileSync(shim, 'utf8');
+    const match = /"%(?:~?dp0|dp0)%\\?([^"]+?\.(?:c|m)?js)"/i.exec(text) ?? /%~?dp0%\\?(\S+?\.(?:c|m)?js)/i.exec(text);
+    if (!match) return undefined;
+    const entry = join(dirname(shim), match[1]!.replace(/\\/g, '/'));
+    return existsSync(entry) ? entry : undefined;
+  } catch { return undefined; }
+}
+
+/** The Codex route launcher in `<dir>/resources`: the shell wrapper on macOS/Linux, the Node script itself on Windows
+ *  (which cannot exec a shell script; the core runs `.cjs` launchers through Node). */
+export const CODEX_LAUNCHER = process.platform === 'win32' ? 'codex-profile.cjs' : 'codex-launch.sh';
+
+/** How to start a located CLI: native binaries directly, a JS entry (a resolved npm shim) through Node. Inside
+ *  Electron, Node is this executable with ELECTRON_RUN_AS_NODE, so no separate Node install is needed. */
+export function cliSpawn(file: string, args: readonly string[], env: NodeJS.ProcessEnv = process.env): {command: string; args: string[]; env: NodeJS.ProcessEnv} {
+  if (!/\.(?:c|m)?js$/i.test(file)) return {command: file, args: [...args], env};
+  return {command: process.execPath, args: [file, ...args], env: process.versions.electron ? {...env, ELECTRON_RUN_AS_NODE: '1'} : env};
 }
 
 /** A small launcher script (`exec /path/to/real "$@"`) whose target is gone, e.g. a wrapper pointing into an app

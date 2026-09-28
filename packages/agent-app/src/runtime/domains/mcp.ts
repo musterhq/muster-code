@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import { killTree, shellCommand } from '../process-tree.ts';
 import { createHash, randomUUID } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import { readFileSync } from 'node:fs';
@@ -254,9 +255,10 @@ export function createMcpDomain(ctx: DomainContext): DomainModule {
   /** Runs one enabled hook under its timeout and output cap; the process group is killed on timeout or abort. */
   const runHook = (hook: McpHook & { path: string }, payload: Record<string, unknown>, signal?: AbortSignal) => new Promise<McpHookRun>(resolve => {
     const started = Date.now(), cap = hook.maxOutputKb * 1024;
-    const child = spawn('/bin/sh', ['-c', hook.command], { cwd: hook.path, env: { ...process.env, CLAUDE_PLUGIN_ROOT: hook.path, MUSTER_PLUGIN_ROOT: hook.path }, stdio: ['pipe', 'pipe', 'pipe'], detached: true });
+    const shell = shellCommand(hook.command);
+    const child = spawn(shell.file, shell.args, { cwd: hook.path, env: { ...process.env, CLAUDE_PLUGIN_ROOT: hook.path, MUSTER_PLUGIN_ROOT: hook.path }, stdio: ['pipe', 'pipe', 'pipe'], ...shell.options });
     let output = Buffer.alloc(0), truncated = false, timedOut = false, done = false;
-    const kill = () => { try { process.kill(-child.pid!, 'SIGKILL'); } catch { child.kill('SIGKILL'); } };
+    const kill = () => { try { killTree(child.pid!, 'SIGKILL'); } catch { child.kill('SIGKILL'); } };
     const take = (chunk: Buffer) => { if (output.length >= cap) { truncated = true; return; } output = Buffer.concat([output, chunk]); if (output.length > cap) { output = output.subarray(0, cap); truncated = true; } };
     child.stdout.on('data', take); child.stderr.on('data', take);
     child.stdin.on('error', () => {}); child.stdin.end(JSON.stringify(payload));

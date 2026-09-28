@@ -10,7 +10,7 @@ import {currentProviderUsage, formatResetEta} from './provider-usage.ts';
 import {connectorPolicy, leanCodexFeatureOverrides} from './context-budget.ts';
 import type { Chat, ProviderInfo } from '../shared/protocol.ts';
 import {NativeUnavailableError} from './codex-native.ts';
-import {mcpServersFromOverrides} from './adapters/shared.ts';
+import {CODEX_LAUNCHER, mcpServersFromOverrides} from './adapters/shared.ts';
 
 /** Identity of the test-only route `createProviderAdapter({available})` builds. */
 export const FIXTURE_PROVIDER = {id: 'fixture', bindingId: 'fixture-binding', model: 'fixture-model'} as const;
@@ -134,7 +134,7 @@ export function createProviderAdapter(options: { core?: CoreClient; available?: 
   // `available` is a test seam: one Codex-style route with a fixed identity, no configuration read.
   const instances = ():ProviderInstance[] => options.instances?.() ?? (options.available ? [{
     info:{id:FIXTURE_PROVIDER.id,name:'Fixture provider',driver:'codex-app-server',available:options.available(),identityMasked:'Account hidden',bindingId:FIXTURE_PROVIDER.bindingId,models:[{id:FIXTURE_PROVIDER.model,name:'Fixture model'}]},
-    command:options.command??join(__dirname,'resources','codex-launch.sh'),env:{},sessionsRoot:join(process.env.CODEX_HOME||join(homedir(),'.codex'),'sessions'),
+    command:options.command??join(__dirname,'resources',CODEX_LAUNCHER),env:{},sessionsRoot:join(process.env.CODEX_HOME||join(homedir(),'.codex'),'sessions'),
   }] : [...configuredProviderInstances(), ...catalog?.instances() ?? []]);
   const close = (session: OwnedSession) => core?.clearCodexAppServerSessions(session.owner);
   const cancel = (id: string, session: OwnedSession): Promise<boolean> => {

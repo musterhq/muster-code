@@ -20,7 +20,9 @@
     "postinstall": "node scripts/postinstall.mjs",
     "vendor:sync": "node scripts/vendor-sync.mjs",
     "package": "node scripts/package-release.mjs",
-    "shots": "node --max-old-space-size=1536 scripts/readme-shots/shoot.mjs"
+    "shots": "node --max-old-space-size=1536 scripts/readme-shots/shoot.mjs",
+    "package:linux": "node scripts/build.mjs && electron-builder --linux --publish never",
+    "package:win": "node scripts/build.mjs && electron-builder --win --publish never"
   },
   "dependencies": {
     "@base-ui/react": "1.8.0",
@@ -51,9 +53,11 @@
     "electron": "44.4.2",
     "esbuild": "0.28.2",
     "linkedom": "^0.18.13",
-    "typescript": "7.0.2"
+    "typescript": "7.0.2",
+    "electron-builder": "26.15.3"
   },
   "overrides": {
     "uuid": "^11.1.0"
-  }
+  },
+  "author": "Muster"
 }

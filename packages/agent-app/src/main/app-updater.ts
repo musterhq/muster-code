@@ -25,7 +25,9 @@ export const CHECK_EVERY_MS=60*60_000;
 export const REPO_PATTERN=/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 
 /** Newest release above `current` that carries this Mac's zip and SHA256SUMS. Stable skips prereleases. */
-export function pickRelease(releases:readonly GitHubRelease[],current:string,channel:UpdateChannel,arch:string):ReleaseCandidate|undefined {
+/** macOS installs in place, so a release counts only with this Mac's zip and SHA256SUMS. On Windows and Linux the
+ *  update is offered as a download (`zip`/`sums` stay undefined) and any newer release counts. */
+export function pickRelease(releases:readonly GitHubRelease[],current:string,channel:UpdateChannel,arch:string,platform:string=process.platform):ReleaseCandidate|undefined {
   let best:ReleaseCandidate|undefined;
   for(const release of releases){
     if(release.draft||!release.tag_name.startsWith(TAG_PREFIX))continue;
@@ -34,8 +36,8 @@ export function pickRelease(releases:readonly GitHubRelease[],current:string,cha
     if(!VERSION.test(version)||compareVersions(version,current)<=0)continue;
     if(best&&compareVersions(version,best.release.version)<=0)continue;
     const zip=release.assets.find(asset=>asset.name===`Muster-Agent-${version}-${arch}.zip`),sums=release.assets.find(asset=>asset.name==='SHA256SUMS');
-    if(!zip||!sums)continue;
-    best={release:{version,notes:(release.body??'').trim(),pageUrl:release.html_url,...(release.published_at?{publishedAt:release.published_at}:{})},zip,sums};
+    if(platform==='darwin'&&(!zip||!sums))continue;
+    best={release:{version,notes:(release.body??'').trim(),pageUrl:release.html_url,...(release.published_at?{publishedAt:release.published_at}:{})},zip:zip!,sums:sums!};
   }
   return best;
 }
@@ -84,6 +86,10 @@ export interface UpdaterOptions {
   quit:()=>void;
   fetch?:typeof fetch;
   pid?:number;
+  /** Where this copy runs; only macOS installs updates in place. */
+  platform?:string;
+  /** Opens a URL in the default browser (Windows/Linux updates download from the release page). */
+  openExternal?:(url:string)=>void;
   /** Relaunch command; tests pass /usr/bin/true so nothing opens. */
   relaunch?:string;
 }
@@ -148,11 +154,13 @@ export class AppUpdater {
       if(!response.ok)throw new Error(response.status===403?'GitHub is rate-limiting update checks. Try again later.':`GitHub answered ${response.status} for the release list.`);
       const releases=await response.json() as GitHubRelease[];
       const checkedAt=new Date().toISOString();
-      const candidate=pickRelease(Array.isArray(releases)?releases:[],this.options.current,this.options.channel,this.options.arch);
+      const candidate=pickRelease(Array.isArray(releases)?releases:[],this.options.current,this.options.channel,this.options.arch,this.options.platform??process.platform);
       if(!candidate){this.candidate=undefined;this.set({phase:'up-to-date',checkedAt},true);return this.snapshot();}
       this.candidate=candidate;
       this.set({phase:'available',latest:candidate.release,checkedAt},true);
       this.busy=false;
+      // Windows and Linux: the update is a download from the release page (install() opens it).
+      if((this.options.platform??process.platform)!=='darwin')return this.snapshot();
       await this.download();
     }catch(cause){
       this.set({phase:'error',message:cause instanceof Error?cause.message:String(cause),checkedAt:new Date().toISOString(),...(this.candidate?{latest:this.candidate.release}:{})},true);
@@ -218,6 +226,8 @@ export class AppUpdater {
 
   /** Quits, swaps the bundle once this process has exited, and reopens the new version. */
   async install():Promise<UpdateStatus> {
+    // Windows and Linux: open the release page to download the installer or AppImage.
+    if((this.options.platform??process.platform)!=='darwin'){if(this.status.latest)this.options.openExternal?.(this.status.latest.pageUrl);return this.snapshot();}
     if(this.status.phase!=='ready'||!this.staged||!existsSync(this.staged))return this.snapshot();
     const bundle=bundlePathOf(this.options.exe);
     const blocker=await installBlocker(bundle);

@@ -418,6 +418,7 @@ async function main(): Promise<void> {
     stagingDir:path.join(app.getPath('userData'),'pending-update'),
     emit:status=>{if(window&&!window.isDestroyed())window.webContents.send('muster:event',{type:'updateStatus',status} satisfies AgentEvent);},
     quit:()=>app.quit(),
+    openExternal:url=>{void shell.openExternal(url);},
   });
   void updater.start();
   app.on('browser-window-focus', () => updater.checkIfStale());

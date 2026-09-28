@@ -6,7 +6,7 @@ import type {MemoryAutoRetain,MemoryConfigView} from '../../shared/domains/memor
 import {invoke} from '../bridge';
 import {activeChat,closeSettings,notifyError,notifySuccess,openMemoryScreen,resetSettings,setFollowUpMode,setPluginView,setSetting,setSettingsSection,setSummaryHidden,type SettingsSection} from '../store';
 import {setTerminalDock,subscribeTerminalDock,terminalDock} from '../processSummary';
-import {checkForUpdates,installUpdate,setAutoCheckUpdates,updateSummary,useUpdateStatus} from '../updates';
+import {checkForUpdates,installUpdate,INSTALLS_IN_PLACE,setAutoCheckUpdates,updateSummary,useUpdateStatus} from '../updates';
 import {DEFAULT_DIFF_PREFERENCES,clearGlobalDiffPreferences,hasGlobalDiffPreferences,saveGlobalDiffPreferences,useDiffPreferences,type DiffPreferences} from '../diff-preferences';
 import {useStore,useStoreSelector} from '../useStore';
 import {restoreFocus} from '../focus';
@@ -148,7 +148,9 @@ function UpdatesGroup():React.ReactElement|null {
     <h3 className="preference-group-title">Updates</h3>
     <div className="preference-group">
       <Row title={`Muster Agent ${status.current}`} scope={`This Mac · ${status.channel} channel`} description={updateSummary(status)}>
-        {status.phase==='ready'
+        {status.phase==='available'&&!INSTALLS_IN_PLACE
+          ?<button type="button" className="settings-button" disabled={busy} onClick={()=>void act(installUpdate)}>Download update</button>
+          :status.phase==='ready'
           ?<button type="button" className="settings-button" disabled={busy} onClick={()=>void act(installUpdate)}><RotateCcw size={14}/>Update and relaunch</button>
           :status.phase!=='disabled'&&<button type="button" className="settings-button secondary" disabled={working} onClick={()=>void act(checkForUpdates)}>{status.phase==='checking'?'Checking…':'Check for updates'}</button>}
       </Row>

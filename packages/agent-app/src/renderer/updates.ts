@@ -19,6 +19,9 @@ export const checkForUpdates=():Promise<UpdateStatus>=>invoke('updates.check',un
 export const setAutoCheckUpdates=(enabled:boolean):Promise<UpdateStatus>=>invoke('updates.setAutoCheck',{enabled}).then(next=>{publish(next);return next;});
 export const installUpdate=():Promise<UpdateStatus>=>invoke('updates.install',undefined).then(next=>{publish(next);return next;});
 
+/** Only macOS installs updates in place; Windows and Linux download the new version from the release page. */
+export const INSTALLS_IN_PLACE = typeof navigator !== 'undefined' && /Mac/.test(navigator.platform);
+
 /** One line for Settings and tooltips. */
 export function updateSummary(value:UpdateStatus):string {
   switch(value.phase){
@@ -26,7 +29,7 @@ export function updateSummary(value:UpdateStatus):string {
     case 'idle':return value.autoCheck?'Checks for updates automatically.':'Automatic checks are off.';
     case 'checking':return 'Checking for updates…';
     case 'up-to-date':return 'You’re on the latest version.';
-    case 'available':return `Version ${value.latest?.version} is available. Preparing the download…`;
+    case 'available':return INSTALLS_IN_PLACE?`Version ${value.latest?.version} is available. Preparing the download…`:`Version ${value.latest?.version} is available. Download it to update.`;
     case 'downloading':return `Downloading ${value.latest?.version}${value.progress!==undefined?` · ${Math.round(value.progress*100)}%`:''}…`;
     case 'ready':return `Version ${value.latest?.version} is ready. Choose Update and relaunch to install it.`;
     case 'installing':return 'Restarting to install the update…';

@@ -7,7 +7,7 @@ import {join,isAbsolute} from 'node:path';
 import type {ProviderInfo} from '../shared/protocol.ts';
 import {catalogPricing,type ExcludedModel} from '../shared/model-catalog.ts';
 import type {RunnableAdapter, Validation} from './adapters/types.ts';
-import {findBinary, locateCli, Validator} from './adapters/shared.ts';
+import {CODEX_LAUNCHER, findBinary, locateCli, Validator} from './adapters/shared.ts';
 import {fetchModelList,type ListedModel} from './adapters/http-chat.ts';
 
 export interface ProviderInstance {
@@ -357,7 +357,7 @@ function homeInstances({fs,directory,codexHome,cli,node,env,track,validator,fetc
   const routes=codexRoutes(fs,codexHome,track,validator,signedIn);
   const ids=routeIds(routes);
   const names=routes.map(route=>route.kind==='chatgpt'?'OpenAI (ChatGPT sign-in)':route.name?.replace(/[\x00-\x1f]/g,'').slice(0,80)||humanize(route.modelProvider));
-  const command=track(join(directory,'resources','codex-launch.sh'));
+  const command=track(join(directory,'resources',CODEX_LAUNCHER));
   return routes.map<ProviderInstance>((route,index)=>{
     const id=`${ids[index]}${suffix}`;
     const duplicate=names.filter(name=>name===names[index]).length>1&&route.profile;

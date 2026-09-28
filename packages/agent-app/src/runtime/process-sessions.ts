@@ -1,4 +1,5 @@
 import {spawn,type ChildProcess} from 'node:child_process';
+import {killTree, shellCommand, WINDOWS} from './process-tree.ts';
 import {createHash,randomUUID} from 'node:crypto';
 import {promises as fs} from 'node:fs';
 import {dirname,isAbsolute,join} from 'node:path';
@@ -260,7 +261,6 @@ export class ProcessSessions {
     const authority=await this.allowed(input.chatId,'start');
     if(!authority.fullAccessAcknowledged)throw new Error('Host commands require explicitly acknowledged Full access in Agent mode. Workspace access cannot sandbox a host shell.');
     if(typeof authority.cwd!=='string'||!isAbsolute(authority.cwd)||authority.cwd.includes('\0'))throw new Error('The command workspace is unavailable.');
-    if(process.platform==='win32')throw new Error('Owned process groups currently require macOS or Linux.');
     if(this.closing)throw new Error('Command workspace is closing.');
     if([...this.sessions.values()].filter(session=>isActiveProcess(session.status)).length>=MAX_OWNED_PROCESSES)throw new Error('Stop a running command before starting another (maximum 4).');
     if(this.receipts.size>=MAX_RECEIPTS)throw new Error('The durable command receipt limit has been reached. No command was started.');
@@ -292,7 +292,8 @@ export class ProcessSessions {
     const authority={cwd};
     if(this.closing||this.cancelled.has(session.processId)){this.releaseHeavy(session.processId);session.status='stopped';this.cancelled.delete(session.processId);this.publish(session);await this.save();return clone(session);}
     let child:ChildProcess;
-    try{child=input.args?spawn(input.command,input.args,{cwd:authority.cwd,env:commandEnvironment(),stdio:['ignore','pipe','pipe'],detached:true}):spawn('/bin/sh',['-c',input.command],{cwd:authority.cwd,env:commandEnvironment(),stdio:['ignore','pipe','pipe'],detached:true});}
+    const shell=shellCommand(input.command);
+    try{child=input.args?spawn(input.command,input.args,{cwd:authority.cwd,env:commandEnvironment(),stdio:['ignore','pipe','pipe'],detached:!WINDOWS,windowsHide:true}):spawn(shell.file,shell.args,{cwd:authority.cwd,env:commandEnvironment(),stdio:['ignore','pipe','pipe'],...shell.options});}
     catch{this.releaseHeavy(session.processId);session.status='failed';session.error='The command could not be started.';this.publish(session);await this.save();return clone(session);}
     let resolve!:()=>void;const done=new Promise<void>(accept=>{resolve=accept;});
     const handle:Handle={child,stopping:false,finished:false,done,resolve};this.handles.set(session.processId,handle);
@@ -338,7 +339,7 @@ export class ProcessSessions {
   }
   private signal(handle:Handle,signal:NodeJS.Signals='SIGTERM'):void {
     if(handle.finished||!handle.child.pid)return;
-    try{process.kill(-handle.child.pid,signal);}catch(error){if((error as NodeJS.ErrnoException).code!=='ESRCH')throw new Error('The owned command could not be stopped.');}
+    try{killTree(handle.child.pid,signal);}catch(error){if((error as NodeJS.ErrnoException).code!=='ESRCH')throw new Error('The owned command could not be stopped.');}
   }
   private settleClosedGroup(session:ProcessSnapshot,handle:Handle):void {
     if(!handle.closed||handle.finished)return;

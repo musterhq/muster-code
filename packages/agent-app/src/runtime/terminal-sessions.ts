@@ -1,4 +1,5 @@
 import {randomUUID} from 'node:crypto';
+import {killTree} from './process-tree.ts';
 import {promises as fs} from 'node:fs';
 import {basename,dirname,isAbsolute} from 'node:path';
 import {stripAnsi,TerminalRing} from './command-output-buffer.ts';
@@ -211,7 +212,7 @@ export class TerminalSessions {
     // A remote PTY has no local pid: the app-server's process/kill ends it.
     if(!pid){try{entry.pty?.kill(signal);}catch{}return;}
     // The PTY child leads its own session and process group; end the whole group.
-    try{process.kill(-pid,signal);}catch{try{entry.pty?.kill(signal);}catch{}}
+    try{killTree(pid,signal);}catch{try{entry.pty?.kill(signal);}catch{}}
   }
   /** Close: hang up the shell (and its jobs), escalate to SIGKILL, and wait for the reap. */
   async kill(input:{id:string}):Promise<void> {
