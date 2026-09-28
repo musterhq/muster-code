@@ -113,7 +113,7 @@ export const PROCESS_OWNERSHIP_RULE = 'Process ownership: only stop, kill or res
 const runInstructions = (mode: Chat['mode'], extra?: string) => [modeInstructions(mode), mode === 'agent' ? PROCESS_OWNERSHIP_RULE : undefined, extra].filter(Boolean).join('\n\n') || undefined;
 /** Test runners construct many services; they opt into real CLI/API adapters by passing a catalog. */
 const defaultCatalog = () => process.env.NODE_TEST_CONTEXT && process.env.MUSTER_PROVIDER_ADAPTERS !== '1' ? undefined : createAdapterCatalog();
-interface AdapterRun {controller: AbortController; completed: Promise<void>}
+interface AdapterRun {controller: AbortController; completed: Promise<void>; /** Set by adapters that accept mid-turn messages (Claude Code). */ steer?: (text: string) => boolean}
 
 export function createProviderAdapter(options: { core?: CoreClient; available?: () => boolean; command?: string; instances?:()=>ProviderInstance[]; catalog?: AdapterCatalog } = {}): ProviderAdapter {
   // Each warm chat keeps a node proxy + codex app-server (~300 MB) alive; core defaults (8 chats, 30 min) held 1-2.5 GB idle.
@@ -181,6 +181,7 @@ export function createProviderAdapter(options: { core?: CoreClient; available?: 
         onDelta: text => { activity = true; if (live()) input.onDelta(text); },
         onReasoning: text => { activity = true; if (live()) input.onReasoning(text); },
         onEvent: (method, params) => { activity = true; if (live()) input.onEvent(method, params); },
+        onSteerable: send => { owned.steer = send; },
       });
       const cancelled = owned.controller.signal.aborted || disposed;
       const notDispatched = result.dispatchState === 'not-dispatched' && !activity;
@@ -417,6 +418,9 @@ export function createProviderAdapter(options: { core?: CoreClient; available?: 
       session.controller.abort();close(session);sessions.delete(id);
     },
     async steer(id, text) {
+      // Adapter runs (Claude Code…) that accept mid-turn messages steer through their own channel.
+      const adapterRun = adapterRuns.get(id);
+      if (adapterRun) return adapterRun.steer?.(text) === true;
       const session = sessions.get(id);
       if (disposed || !session?.active || session.stop || session.controller.signal.aborted || !core) return false;
       // Codex `turn/steer` always names the turn it expects, so a steer never lands in a newer turn.

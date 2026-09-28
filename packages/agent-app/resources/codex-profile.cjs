@@ -113,12 +113,25 @@ function providerOverrides(provider, catalog) {
   return ['model_provider=' + JSON.stringify(provider), ...(catalog ? ['model_catalog_json=' + JSON.stringify(catalog)] : [])];
 }
 
+/** A small `exec /real/path "$@"` launcher whose target is gone (an app update moved it): executable, but every run fails. */
+function brokenWrapper(file) {
+  try {
+    if (statSync(file).size > 4096) return false;
+    const head = readFileSync(file, 'utf8');
+    if (!head.startsWith('#!')) return false;
+    const target = /^\s*exec\s+(?:"([^"]+)"|'([^']+)'|(\/[^\s"';]+))/m.exec(head);
+    const path = target && (target[1] || target[2] || target[3]);
+    return !!path && isAbsolute(path) && !existsSync(path);
+  } catch { return false; }
+}
+
 /** The Codex CLI: MUSTER_CODEX_COMMAND, else the first `codex` on PATH or in a standard install location. */
 function codexCommand(env = process.env) {
   if (env.MUSTER_CODEX_COMMAND) return env.MUSTER_CODEX_COMMAND;
   const home = homedir();
   const dirs = [...(env.PATH || '').split(delimiter).filter(Boolean), join(home, '.local/bin'), '/opt/homebrew/bin', '/usr/local/bin', join(home, '.npm-global/bin'), join(home, '.bun/bin')];
-  return dirs.map(dir => join(dir, 'codex')).find(file => isAbsolute(file) && existsSync(file));
+  const bundles = ['/Applications', join(home, 'Applications')].flatMap(root => ['ChatGPT.app', 'Codex.app'].flatMap(app => [join(root, app, 'Contents/Resources/codex-cli/bin/codex'), join(root, app, 'Contents/Resources/codex')]));
+  return [...dirs.map(dir => join(dir, 'codex')), ...bundles].find(file => isAbsolute(file) && existsSync(file) && !brokenWrapper(file));
 }
 
 function route(selection) {

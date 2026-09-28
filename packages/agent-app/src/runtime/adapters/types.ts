@@ -23,6 +23,8 @@ export interface AdapterRunInput {
   onDelta(text: string): void;
   onReasoning(text: string): void;
   onEvent(method: string, params: Record<string, unknown>): void;
+  /** Adapters that can take a message mid-turn hand back a sender; it returns false once the run can no longer accept one. */
+  onSteerable?(send: (text: string) => boolean): void;
 }
 export interface AdapterRunResult {
   status: 'completed' | 'failed';

@@ -50,8 +50,8 @@ test('Claude Code receives the image as a base64 content block over stream-json 
   assert.equal(text?.type,'text');assert.equal(text?.text,'describe the mockup');
   fake.finish();
   assert.equal((await running).status,'completed');
-  // Text-only turns keep the plain prompt and no input-format flag.
-  assert.equal(claudeStdin({prompt:'hi'}),'hi');
+  // Text-only turns are a stream-json user message too, so a steer can follow on the same stdin.
+  assert.deepEqual(JSON.parse(claudeStdin({prompt:'hi'})),{type:'user',message:{role:'user',content:[{type:'text',text:'hi'}]}});
 });
 
 test('OpenCode attaches images with --file after the message, and a build without --file marks models image-blind',async t=>{

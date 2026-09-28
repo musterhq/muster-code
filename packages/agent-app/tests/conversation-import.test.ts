@@ -420,3 +420,24 @@ test('transcript lines longer than the cap are skipped without being buffered wh
   for await(const value of fileLines(path))all.push(value.length>10?`len:${value.length}`:value);
   assert.deepEqual(all,['short','len:5000','after','len:3000']);
 });
+
+test('a long Codex session imports whole: 25,000 messages, well past the old 20,000-item cap',async t=>{
+  const f=await fixtures(t);useEnv(t,f.codexHome,f.claudeDir);
+  const LONG_ID='019f0000-0000-7000-8000-00000000abcd',rows:unknown[]=[];
+  const at=(n:number)=>new Date(Date.UTC(2026,8,21,0,0,0)+n*1000).toISOString();
+  rows.push({timestamp:at(0),ordinal:0,type:'session_meta',payload:{session_id:LONG_ID,id:LONG_ID,timestamp:at(0),cwd:f.project,originator:'codex_cli_rs',cli_version:'0.128.0',source:'cli',model_provider:'openai'}});
+  for(let i=1;i<=12_500;i++){
+    rows.push({timestamp:at(i),ordinal:2*i,type:'response_item',payload:{type:'message',role:'user',content:[{type:'input_text',text:`question ${i}`}]}});
+    rows.push({timestamp:at(i),ordinal:2*i+1,type:'response_item',payload:{type:'message',role:'assistant',content:[{type:'output_text',text:`answer ${i}`}]}});
+  }
+  await writeLines(join(f.codexHome,'sessions','2026','09','21',`rollout-2026-09-21T00-00-00-${LONG_ID}.jsonl`),rows,new Date('2026-09-21T04:00:00Z'));
+  const service=createAgentService({dataDir:join(f.root,'data'),provider:codexProvider([]),onEvent(){}});t.after(()=>service.dispose());
+  await call(service,'import.list',{source:'codex',refresh:true});
+  const result=await call<ImportRunResult>(service,'import.run',{ids:[`codex:${LONG_ID}`],continueInMuster:false});
+  assert.equal(result.failed.length,0);
+  assert.equal(result.chats[0]!.messageCount,25_000);
+  const all=await items(service,result.chats[0]!.chatId);
+  assert.equal(all.filter(item=>item.kind==='user'||item.kind==='assistant').length,25_000);
+  assert.ok(all.some(item=>item.text==='answer 12500'),'the last message is there');
+  assert.ok(!all.some(item=>/Import stopped after/.test(item.text)),'no truncation notice');
+});

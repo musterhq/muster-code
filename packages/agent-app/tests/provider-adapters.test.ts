@@ -79,8 +79,8 @@ test('Claude Code adapter runs in the chat folder and maps stream-json to timeli
   const running=adapter.run(input);
   await new Promise(resolve=>setImmediate(resolve));
   assert.equal(call?.command,'/bin/claude');assert.equal(call?.cwd,'/work');assert.equal(call?.env.ANTHROPIC_API_KEY,undefined);
-  assert.deepEqual(call?.args.slice(0,8),['-p','--output-format','stream-json','--verbose','--include-partial-messages','--permission-mode','plan','--model']);
-  assert.ok(call?.args.includes('--effort'));assert.ok(call?.args.includes('--session-id'));assert.equal(fake.stdin(),'hello');
+  assert.deepEqual(call?.args.slice(0,10),['-p','--output-format','stream-json','--verbose','--include-partial-messages','--input-format','stream-json','--permission-mode','plan','--model']);
+  assert.ok(call?.args.includes('--effort'));assert.ok(call?.args.includes('--session-id'));assert.deepEqual(JSON.parse(fake.stdin()),{type:'user',message:{role:'user',content:[{type:'text',text:'hello'}]}},'the prompt goes in as a stream-json user message');
   fake.emit({type:'system',subtype:'init',session_id:'s'},
     {type:'stream_event',event:{type:'content_block_delta',delta:{type:'text_delta',text:'Looking'}}},
     {type:'assistant',message:{content:[{type:'text',text:'Looking'},{type:'tool_use',id:'t1',name:'Bash',input:{command:'ls'}}],usage:{input_tokens:10,output_tokens:3}}},
@@ -102,7 +102,7 @@ test('Claude Code resume, permission mapping, stop and failures',async()=>{
   const base=capture({resumeThreadId:'saved',permissionMode:'full',model:'claude-code/default'}).input;
   const args=claudeArgs(base,'unused');
   assert.ok(args.includes('--resume'));assert.ok(!args.includes('--session-id'));assert.ok(!args.includes('--model'));assert.equal(args[args.indexOf('--permission-mode')+1],'bypassPermissions');
-  assert.equal(claudeArgs({...base,permissionMode:'workspace'},'x')[6],'acceptEdits');
+  {const a=claudeArgs({...base,permissionMode:'workspace'},'x');assert.equal(a[a.indexOf('--permission-mode')+1],'acceptEdits');}
   assert.equal(claudeToolItem('e','Edit',{file_path:'/w/a',old_string:'a',new_string:'b'},'/w').type,'fileChange');
   assert.equal(claudeToolItem('m','mcp__github__search',{q:1},'/w').server,'github');
   assert.equal(claudeToolItem('t','TodoWrite',{todos:[{content:'x',status:'pending'}]},'/w').type,'todoList');
@@ -274,3 +274,39 @@ test('Claude Code gets Muster\'s own tool servers (in-app browser, terminal…) 
   assert.equal(claudeArgs({chat:{id:'c1'} as any,cwd:'/w',prompt:'p',model:'claude-code/sonnet',permissionMode:'workspace',signal:new AbortController().signal,onThreadReady(){},onTurnAccepted(){},onDelta(){},onReasoning(){},onEvent(){}},'s1').includes('--mcp-config'),false);
 });
 
+
+test('Claude Code takes a steer mid-turn: the message joins the run, stdin closes after the last result, a late steer is refused',async()=>{
+  const fake=fakeChild();let ended=false;fake.child.stdin.on('finish',()=>{ended=true;});
+  const adapter=claudeCodeAdapter({binary:'/bin/claude',spawn:(()=>fake.child as unknown as ChildProcess) as Spawn});
+  let send:((text:string)=>boolean)|undefined;
+  const {input}=capture({onSteerable:fn=>{send=fn;}});
+  const running=adapter.run(input);
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.ok(send,'the adapter offers a steer channel');
+  fake.emit({type:'system',subtype:'init',session_id:'s'},{type:'assistant',message:{content:[{type:'text',text:'Counting'}]}});
+  assert.equal(send!('Also say BANANA'),true);
+  const lines=fake.stdin().trim().split('\n').map(line=>JSON.parse(line));
+  assert.deepEqual(lines.map(line=>line.message.content[0].text),['hello','Also say BANANA']);
+  fake.emit({type:'result',subtype:'success',result:'1 2 3'});
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(ended,false,'one result per message: the run waits for the steer’s answer');
+  fake.emit({type:'result',subtype:'success',result:'1 2 3 BANANA'});
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(ended,true,'stdin closes after the last result');
+  assert.equal(send!('too late'),false);
+  fake.close(0);
+  const result=await running;
+  assert.equal(result.status,'completed');assert.equal(result.finalMessage,'1 2 3 BANANA');
+});
+
+test('a codex wrapper whose target an app update removed is skipped, and ChatGPT’s new codex-cli/bin location is searched',async()=>{
+  const {brokenWrapper,appBundleBinaries,findBinary}=await import('../src/runtime/adapters/shared.ts');
+  const {mkdtempSync,writeFileSync,chmodSync,mkdirSync}=await import('node:fs');const {tmpdir}=await import('node:os');const {join}=await import('node:path');
+  const dir=mkdtempSync(join(tmpdir(),'muster-cli-'));
+  const real=join(dir,'real-codex');writeFileSync(real,'#!/bin/sh\necho ok\n');chmodSync(real,0o755);
+  const broken=join(dir,'a','codex');mkdirSync(join(dir,'a'));writeFileSync(broken,'#!/bin/zsh\nexec /Applications/Gone.app/Contents/Resources/codex "$@"\n');chmodSync(broken,0o755);
+  const good=join(dir,'b','codex');mkdirSync(join(dir,'b'));writeFileSync(good,`#!/bin/zsh\nexec ${real} "$@"\n`);chmodSync(good,0o755);
+  assert.equal(brokenWrapper(broken),true);assert.equal(brokenWrapper(good),false);assert.equal(brokenWrapper(real),false);
+  assert.equal(findBinary('codex',{PATH:`${join(dir,'a')}:${join(dir,'b')}`},join(dir,'nohome')),good,'the dead wrapper earlier on PATH is passed over');
+  assert.ok(appBundleBinaries('codex','/h',['/Applications']).includes('/Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex'));
+});
