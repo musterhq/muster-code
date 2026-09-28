@@ -3,6 +3,14 @@
 All notable changes to Muster Agent. Each `## <version>` section becomes the notes of the
 `agent-v<version>` GitHub Release (`.github/workflows/agent-app-release.yml`).
 
+## 0.2.5
+
+- Muster Agent for Windows and Linux. Windows 10/11 (x64): a per-user installer (`-win-x64-setup.exe`) or a
+  portable zip. Linux (x64): an AppImage, a `.deb` for Debian/Ubuntu and a tar.gz. Terminals open PowerShell on
+  Windows and your shell on Linux; Codex, Claude Code and OpenCode are found whether they came from npm or a
+  native installer. Computer use and Quick Look previews stay macOS-only.
+- On Windows and Linux, Muster tells you when a new version is out and **Download update** opens the release page.
+
 ## 0.2.4
 
 - Projects: creating a project lets you pick one or more sources: tick existing folders, choose a folder,
