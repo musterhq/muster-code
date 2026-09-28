@@ -3,6 +3,20 @@
 All notable changes to Muster Agent. Each `## <version>` section becomes the notes of the
 `agent-v<version>` GitHub Release (`.github/workflows/agent-app-release.yml`).
 
+## 0.2.4
+
+- Projects: creating a project lets you pick one or more sources: tick existing folders, choose a folder,
+  or clone a repository. The first is the primary (where chats and task runs start); change it any time.
+- Model picker: one compact picker everywhere (composer, new chat, automations, default models). One-line rows
+  with only known capabilities, it opens on your current model's provider, and a router's auto routes fold into
+  one "Auto routes" group.
+- Steer works for Claude Code: a message sent while it works joins the running turn instead of being queued.
+- Imports bring in whole sessions: the old 20,000-item cut-off is gone.
+- Codex keeps working after a ChatGPT app update that moves its bundled CLI: a stale `codex` wrapper is skipped
+  and the new location is found.
+- Router agents work: picking Intelligent planner, Advisor, Executor or an auto route on a router no longer fails
+  with "Selected model does not match the provider".
+
 ## 0.2.3
 
 - The conversation and the composer sit centred between the sidebar and the summary card, as in Codex,
