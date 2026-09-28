@@ -17,8 +17,14 @@ let open = false;
 let background = false;
 const listeners = new Set<() => void>();
 const notify = () => { for (const listener of listeners) listener(); };
-export function openCloneSheet(): void { if (!open || background) { open = true; background = false; notify(); } }
-export function closeCloneSheet(): void { if (open || background) { open = false; background = false; notify(); } }
+// A caller that wants the cloned folder itself (New project's Sources) takes it here instead of the New-chat draft.
+let onLanded: ((folder: Folder) => void) | null = null;
+export function openCloneSheet(options?: {onLanded?: (folder: Folder) => void}): void { onLanded = options?.onLanded ?? null; if (!open || background) { open = true; background = false; notify(); } }
+/** Drop a landing handler (its owner unmounted); a clone still running lands the usual way. */
+export function releaseCloneLanding(handler: (folder: Folder) => void): void { if (onLanded === handler) onLanded = null; }
+export function closeCloneSheet(): void { onLanded = null; if (open || background) { open = false; background = false; notify(); } }
+/** A failed clone comes back to the front, still aimed at whoever asked for it. */
+function reopenCloneSheet(): void { if (!open || background) { open = true; background = false; notify(); } }
 function backgroundCloneSheet(): void { if (open) { open = false; background = true; notify(); } }
 const view = () => open ? 'open' : background ? 'background' : 'closed';
 export function useCloneSheetOpen(): boolean { return useCloneSheetView() === 'open'; }
@@ -74,7 +80,7 @@ function CloneForm({hidden}: {hidden: boolean}): React.ReactElement {
       cloneId.current = null; setClone(null); setCancelling(false); setError(event.phase === 'cancelled' ? '' : event.error);
       setRetry(event.phase === 'failed' ? lastRequest.current : null);
       // A clone that fails while the user drafts comes back to the front with its reason and Retry.
-      if (event.phase === 'failed') openCloneSheet(); else if (!open) closeCloneSheet();
+      if (event.phase === 'failed') reopenCloneSheet(); else if (!open) closeCloneSheet();
     }
   };
   const applyRef = useRef(apply); applyRef.current = apply;
@@ -84,9 +90,10 @@ function CloneForm({hidden}: {hidden: boolean}): React.ReactElement {
     else if (cloneId.current === null && (event.phase !== 'progress' || !early.current.has(event.id))) { early.current.set(event.id, event); if (early.current.size > 16) early.current.delete(early.current.keys().next().value!); }
   }), []);
   const landed = (folder: Folder) => {
+    const handler = onLanded; onLanded = null;
     closeCloneSheet();
     notifySuccess(`Cloned ${folder.name}`);
-    openNewChat({folderId: folder.id});
+    if (handler) handler(folder); else openNewChat({folderId: folder.id});
   };
   const run = async (request: CloneRequest) => {
     if (clone) return;
@@ -143,11 +150,11 @@ function CloneForm({hidden}: {hidden: boolean}): React.ReactElement {
       </div>}
       <div className="composer-confirm-actions">
         <button type="button" onClick={cancel} disabled={cancelling}>{clone ? 'Cancel clone' : 'Cancel'}</button>
-        {clone && !cancelling && <button type="button" onClick={draftWhileCloning}>Draft a chat meanwhile</button>}
+        {clone && !cancelling && !onLanded && <button type="button" onClick={draftWhileCloning}>Draft a chat meanwhile</button>}
         {!clone && retry && <button type="button" className="is-primary" title={`Clone ${retry.url} again${retry.destination ? ` into ${retry.destination}` : ''}`} onClick={() => void run(retry)}>Retry</button>}
         <button type="submit" className={retry && !clone ? undefined : 'is-primary'} disabled={!!clone || !url.trim()}>{clone ? 'Cloning…' : 'Clone'}</button>
       </div>
     </form>
-    <p className="clone-hint"><GitBranch size={11} aria-hidden="true"/>The default branch is checked out; a new chat opens in the folder once it lands.</p>
+    <p className="clone-hint"><GitBranch size={11} aria-hidden="true"/>{onLanded ? 'The default branch is checked out; the folder is added to the project once it lands.' : 'The default branch is checked out; a new chat opens in the folder once it lands.'}</p>
   </ModalSheet>;
 }

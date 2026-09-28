@@ -230,36 +230,12 @@ div.composer .composer-send:not(:disabled):active,div.composer .composer-stop:no
 .composer-access-scope { margin: -6px 0 16px; color: var(--text-dim); font-size: var(--fs-12); line-height: 1.45; }
 
 /* Model picker (B5). */
-.composer-model-popover { right: -1px; display: flex; width: min(340px, 100cqw); max-height: min(380px, 60vh); padding: 0; overflow: hidden; }
-.composer-model-rail { display: flex; flex: none; flex-direction: column; align-items: center; gap: 4px; width: 44px; padding: 8px 0; border-right: 1px solid var(--hairline); overflow-x: hidden; overflow-y: auto; }
-.composer-model-rail button { position: relative; display: inline-grid; place-items: center; width: 28px; height: 28px; border-radius: var(--radius-8); color: var(--text-dim); }
-.composer-model-rail button:hover { background: var(--bg-hover); color: var(--text); }
-.composer-model-rail button[aria-selected='true'] { background: var(--menu-hover); color: var(--text); }
+.composer-model-popover { right: -1px; display: flex; width: min(360px, 100cqw); max-height: min(420px, 60vh); padding: 0; overflow: hidden; }
+/* With a provider rail the height stays put across tabs, so the search box never jumps under the pointer. */
+.composer-model-popover:has(.model-picker.has-rail) { height: min(420px, 60vh); }
 /* Inset indicator: an outward bar (right: -8px) overflowed the scrolling rail and caused horizontal scroll. */
-.composer-model-rail button[aria-selected='true']::after { content: ''; position: absolute; left: 2px; top: 7px; bottom: 7px; width: 2px; border-radius: var(--radius-2); background: var(--accent); }
-.composer-model-pane { display: flex; flex: 1; flex-direction: column; min-width: 0; }
-.composer-model-search { display: flex; flex: none; align-items: center; gap: 6px; padding: 9px 12px; border-bottom: 1px solid var(--hairline); color: var(--text-faint); }
-.composer-model-search input { width: 100%; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--text); font: inherit; font-size: var(--fs-13); }
-.composer-model-list { flex: 1; min-height: 0; overflow-y: auto; padding: 2px 0 6px; }
-.composer-model-list .composer-menu-section { padding: 8px 12px 3px; font-size: var(--fs-12); }
-.composer-model-row { display: flex; align-items: center; margin: 0 6px; }
-.composer-model-row > button[role='option'] { display: flex; flex: 1; align-items: center; gap: 8px; min-width: 0; height: 29px; padding: 0 8px; border-radius: var(--radius-10); color: var(--text); font-size: var(--fs-13); text-align: left; white-space: nowrap; }
-.composer-model-row > button[role='option'] > svg { flex: none; margin-left: auto; color: var(--text); }
-.composer-model-row > button[role='option']:hover:not(:disabled),.composer-model-row > button[role='option']:focus-visible { background: var(--menu-hover); outline: none; }
-.composer-model-row > button[role='option']:disabled { opacity: .55; cursor: default; }
-.composer-model-favorite { display: inline-grid; flex: none; place-items: center; width: 24px; height: 24px; border-radius: var(--radius-6); color: var(--text-faint); opacity: 0; }
-.composer-model-row:hover .composer-model-favorite,.composer-model-favorite:focus-visible,.composer-model-favorite[aria-pressed='true'] { opacity: 1; }
-.composer-model-favorite[aria-pressed='true'] { color: var(--accent); }
-.composer-model-note { margin: 8px 12px; color: var(--text-faint); font-size: var(--fs-12); }
-.composer-model-note.composer-model-error { color: var(--danger); }
-.composer-effort { flex: none; padding: 8px 12px 10px; border-top: 1px solid var(--hairline); }
-.composer-effort-title { display: block; margin-bottom: 6px; color: var(--text-faint); font-size: var(--fs-12); }
-.composer-effort-segments { display: flex; height: 28px; padding: 2px; border-radius: var(--radius-8); background: var(--bg-hover); }
-.composer-effort-segments button { flex: 1; border-radius: var(--radius-6); color: var(--text-dim); font-size: var(--fs-12); font-weight: 500; white-space: nowrap; }
 /* Raised surface (own bg + hairline ring + shadow) and bolder full-contrast text, not just a faint tint,
    so the checked segment reads clearly against the unchecked track in both themes. */
-.composer-effort-segments button[aria-checked='true'] { background: var(--bg-raised); color: var(--text); font-weight: 600; box-shadow: var(--shadow-xs), inset 0 0 0 1px color-mix(in srgb, var(--text) 14%, transparent); }
-.composer-effort-segments button:focus-visible { outline: 1px solid var(--accent); }
 
 /* Status, errors, queue, paste, drop ------------------------------------- */
 div.composer .composer-status { padding: 0 16px 8px; color: var(--text-faint); font-size: var(--fs-11); }
@@ -407,13 +383,6 @@ div.composer .composer-error { padding: 0 16px 10px; color: var(--danger); font-
 .composer-stash-empty { padding: 10px 12px; font-size: var(--fs-12); color: var(--text-faint); }
 .composer-stash-error { margin: 4px 12px; font-size: var(--fs-12); color: var(--danger); }
 /* PRO-05: capability badges under each model name; undeclared capabilities read "unknown", never guessed. */
-.composer-model-row > button[role='option']:has(.composer-model-badges) { flex-wrap: wrap; height: auto; min-height: 29px; row-gap: 2px; padding: 4px 8px; }
-.composer-model-badges { display: flex; flex-basis: 100%; flex-wrap: wrap; gap: 4px; }
-.composer-model-badge { padding: 0 5px; border: 1px solid var(--hairline); border-radius: var(--radius-4); color: var(--text-dim); font-size: var(--fs-11); line-height: 15px; white-space: nowrap; }
-.composer-model-badge.is-unsupported { color: var(--text-faint); }
-.composer-model-badge.is-unknown { color: var(--text-faint); border-style: dashed; }
-.composer-model-hidden button { padding: 0; border: 0; background: none; color: var(--accent); font: inherit; cursor: pointer; }
-.composer-model-hidden button:hover { text-decoration: underline; }
 /* CUA-08: region step of the capture picker. */
 .composer-capture-popover.is-region { width: min(520px, 100cqw); }
 .capture-region { display: grid; gap: 8px; padding: 6px 8px 8px; }

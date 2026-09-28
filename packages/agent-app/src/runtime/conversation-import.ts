@@ -30,7 +30,9 @@ export const MAX_EXPORT_BYTES = 64 * 1024 * 1024;
 export const MAX_MESSAGE_TEXT = 64 * 1024;
 export const MAX_TOOL_OUTPUT = 16 * 1024;
 export const MAX_REASONING_TEXT = 16 * 1024;
-export const MAX_ITEMS_PER_SESSION = 20_000;
+/** A safety ceiling, not a working limit: imports stream in batches and the transcript is virtualised, so long
+ *  sessions come in whole. Only a runaway file stops here (with a notice saying where the rest stays). */
+export const MAX_ITEMS_PER_SESSION = 500_000;
 
 const record = (value: unknown): Record<string, unknown> | undefined => value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
 const str = (value: unknown): string => typeof value === 'string' ? value : '';

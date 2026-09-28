@@ -16,7 +16,26 @@ const composerType = async (ctx, text) => {
 };
 const chord = (key) => `window.dispatchEvent(new KeyboardEvent('keydown',{key:'${key}',metaKey:true,bubbles:true,cancelable:true}));`;
 
+/** Clip to the union of these elements' boxes (plus padding), for popover close-ups. */
+const clipAround = (ctx, selectors, pad = 20) => ctx.evaluate(`const boxes=${JSON.stringify(selectors)}.flatMap(s=>[...document.querySelectorAll(s)]).map(e=>e.getBoundingClientRect()).filter(b=>b.width&&b.height);if(!boxes.length)return null;const x=Math.max(0,Math.min(...boxes.map(b=>b.left))-${pad}),y=Math.max(0,Math.min(...boxes.map(b=>b.top))-${pad});window.__clip={x,y,width:Math.min(1600,Math.max(...boxes.map(b=>b.right))+${pad})-x,height:Math.min(1000,Math.max(...boxes.map(b=>b.bottom))+${pad})-y};return window.__clip;`);
+const PICKER = ['.composer-model-popover', '.default-model-menu', '.model-picker'];
+const realistic = {realisticModels: true};
+const openComposerPicker = async (ctx) => { await showMainTurn(ctx); await ctx.click('[data-testid=composer-model]'); await ctx.sleep(700); };
+const openNewChatPicker = async (ctx) => { await ctx.evaluate(`window.__shots.newChat.openNewChat()`); await ctx.sleep(900); await ctx.click('.composer-model-button'); await ctx.sleep(700); };
+const openSettingsPicker = async (ctx) => { await ctx.store(`s.openAppSettings('general')`); await ctx.sleep(1400); await ctx.click('.default-model-trigger'); await ctx.sleep(700); };
+
 export const SHOTS = [
+  // Local only (model picker QA): the shared picker with a realistic route mix, in every place a model is chosen.
+  {name: 'picker-composer', local: true, opts: realistic, async run(ctx) { await openComposerPicker(ctx); await clipAround(ctx, ['.composer', ...PICKER]); }},
+  {name: 'picker-composer-all', local: true, opts: realistic, async run(ctx) { await openComposerPicker(ctx); await ctx.click('[role=tab][aria-label="All providers"]'); await ctx.sleep(500); await clipAround(ctx, ['.composer', ...PICKER]); }},
+  {name: 'picker-composer-routes', local: true, opts: realistic, async run(ctx) { await openComposerPicker(ctx); await ctx.click('.model-picker-routes'); await ctx.sleep(300); await ctx.evaluate(`document.querySelector('.model-picker-routes').scrollIntoView({block:'start'})`); await ctx.sleep(300); await clipAround(ctx, ['.composer', ...PICKER]); }},
+  {name: 'picker-composer-search', local: true, opts: realistic, async run(ctx) { await openComposerPicker(ctx); await ctx.type('gpt 6'); await ctx.sleep(500); await clipAround(ctx, ['.composer', ...PICKER]); }},
+  {name: 'picker-composer-light', local: true, opts: {...realistic, theme: 'light'}, async run(ctx) { await openComposerPicker(ctx); await clipAround(ctx, ['.composer', ...PICKER]); }},
+  {name: 'picker-newchat', local: true, opts: realistic, async run(ctx) { await openNewChatPicker(ctx); await clipAround(ctx, ['.new-chat-composer, .composer', ...PICKER]); }},
+  {name: 'picker-settings', local: true, opts: realistic, async run(ctx) { await openSettingsPicker(ctx); await clipAround(ctx, ['.default-model-trigger', ...PICKER]); }},
+  {name: 'picker-settings-light', local: true, opts: {...realistic, theme: 'light'}, async run(ctx) { await openSettingsPicker(ctx); await clipAround(ctx, ['.default-model-trigger', ...PICKER]); }},
+  {name: 'picker-automations', local: true, opts: realistic, async run(ctx) { await ctx.store(`s.openAutomationsScreen()`); await ctx.sleep(1400); await ctx.click('button', 'New automation'); await ctx.sleep(800); await ctx.click('.default-model-trigger'); await ctx.sleep(700); await clipAround(ctx, ['.default-model-trigger', ...PICKER]); }},
+
   // Local only: file mentions become links with file-type glyphs; bold facts and tables.
   {name: 'compare-links', local: true, opts: {replyMarkdown: "Deployment on **staging** is complete. The API was **untouched**.\n\nThe due-date job lives in `src/jobs/reminders.ts:18`, and the board badge is in web/src/components/TaskCard.tsx (line 40). The model change is in `src/models/task.ts`; see also package.json and `docs/missing-file.md`.\n\n| Area | Result |\n| --- | --- |\n| Tests | **31 passed**, browser console has zero errors |\n| Job | `src/jobs/index.ts` registers reminders on a one-minute tick |\n| Badge | `DueBadge.tsx` still to be written |\n", userText: 'Ship due-date reminders to staging and tell me what changed.'}, async run(ctx) {
     await showMainTurn(ctx); await ctx.sleep(1500);
@@ -81,6 +100,16 @@ export const SHOTS = [
     // Stop above the page footer.
     await ctx.evaluate(`const f=[...document.querySelectorAll('.settings-scroll *')].find(e=>e.children.length===0&&e.textContent.trim()==='Provider CLIs');const cut=f?Math.min(1000,f.getBoundingClientRect().top-12):1000;window.__clip={x:0,y:0,width:1600,height:cut};`);
   }},
+  // Local only: New project with its Sources: two Muster folders ticked, one added with Choose folder…, primary moved.
+  {name: 'new-project-sources', local: true, async run(ctx) {
+    await ctx.store(`s.openProjectsScreen()`); await ctx.sleep(1200);
+    await ctx.click('.project-rail-new'); await ctx.sleep(500);
+    await ctx.evaluate(`document.querySelector('form.new-project input[type=text]').focus()`); await ctx.type('Taskboard 0.5');
+    await ctx.evaluate(`document.querySelector('form.new-project textarea').focus()`); await ctx.type('Ship recurring tasks across the app, infra and docs.');
+    for (const name of ['taskboard-infra', 'taskboard']) { await ctx.evaluate(`[...document.querySelectorAll('.new-project-source')].find(l=>l.textContent.includes(${JSON.stringify(name)})&&!l.textContent.includes(${JSON.stringify(name)}+'-')).querySelector('input').click()`); await ctx.sleep(200); }
+    await ctx.click('.new-project-source-actions button', 'Choose folder'); await ctx.sleep(500);
+    await ctx.click('.project-edit-make-primary', 'Make primary'); await ctx.sleep(400);
+  }, clipSelector: '.new-project', clipPad: 24},
   {name: 'projects', async run(ctx) { await ctx.store(`s.openProjectsScreen()`); await ctx.sleep(1500); await ctx.evaluate(`[...document.querySelectorAll('button,[role=tab],a')].find(b=>/^Tasks\\s*\\d/.test(b.textContent.trim())).click()`); await ctx.sleep(900); }},
   {name: 'model-picker', async run(ctx) { await showMainTurn(ctx); await ctx.click('button', 'Frontier Large'); await ctx.sleep(800); }},
   {name: 'sandbox', opts: {sandbox: true}, async run(ctx) {

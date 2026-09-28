@@ -1,5 +1,5 @@
 import { AlertCircle, ArrowLeft, CalendarClock, ChevronRight, MessageSquare, Pause, Pencil, Play, Plus, Trash2 } from 'lucide-react';
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import type { ChatPermissionMode } from '../../shared/protocol';
 import { AUTOMATION_AWAKE_NOTE, REPO_TRIGGER_EVENTS, type RepoTriggerEvent, type AutomationCatchUp, type AutomationMode, type AutomationOverlap, type AutomationPreview, type AutomationRun, type AutomationSaveInput, type AutomationSchedule, type AutomationView } from '../../shared/domains/automations-protocol';
 import { invoke } from '../bridge';
@@ -11,6 +11,13 @@ import { useStore } from '../useStore';
 import './automations.css';
 import { ResourceState } from './ResourceState';
 import {Tip} from './Tooltip';
+import {DefaultModelPicker} from './settings/DefaultModelPicker';
+
+/** A draft's `providerId::model` as the picker's value (null: the folder default). */
+const modelPreference = (value: string): {providerId: string; model: string} | null => {
+  const at = value.indexOf('::');
+  return at > 0 && at < value.length - 2 ? {providerId: value.slice(0, at), model: value.slice(at + 2)} : null;
+};
 
 const errorText = (cause: unknown) => cause instanceof Error ? cause.message : String(cause);
 const LOCAL_TZ = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
@@ -94,7 +101,6 @@ function Editor({ editing, onDone }: { editing: AutomationView | null; onDone: (
   const name = useRef<HTMLInputElement>(null);
   const patch = (next: Partial<Draft>) => setDraft(current => ({ ...current, ...next }));
   useEffect(() => { name.current?.focus(); void loadProviders(); }, []);
-  const models = useMemo(() => (state.providers.value ?? []).filter(provider => provider.available).flatMap(provider => provider.models.map(model => ({ value: `${provider.id}::${model.id}`, label: `${provider.name} · ${model.name}` }))), [state.providers.value]);
   const previewKey = JSON.stringify([scheduleOf(draft), draft.timezone, targetOf(draft), draft.permissionMode]);
   useEffect(() => {
     let live = true;
@@ -162,7 +168,9 @@ function Editor({ editing, onDone }: { editing: AutomationView | null; onDone: (
           <label>Folder<select value={draft.folderId} onChange={event => patch({ folderId: event.target.value })}><option value="">No folder</option>{folders.map(folder => <option key={folder.id} value={folder.id}>{folder.name}</option>)}</select></label>
           {projects.length > 0 && <label>Project<select value={draft.projectId} onChange={event => patch({ projectId: event.target.value })}><option value="">None</option>{projects.map(project => <option key={project.id} value={project.id}>{project.name}</option>)}</select></label>}
           <label>Mode<select value={draft.mode} onChange={event => patch({ mode: event.target.value as AutomationMode })}><option value="agent">Agent</option><option value="plan">Plan</option><option value="ask">Ask</option></select></label>
-          <label className="automation-grow">Model<select value={draft.model} onChange={event => patch({ model: event.target.value })}><option value="">Folder default</option>{models.map(model => <option key={model.value} value={model.value}>{model.label}</option>)}{draft.model && !models.some(model => model.value === draft.model) && <option value={draft.model}>{draft.model.split('::').slice(1).join('::')}</option>}</select></label>
+          <div className="automation-grow automation-field"><span>Model</span>
+            <DefaultModelPicker label="Automation model" value={modelPreference(draft.model)} emptyLabel="Folder default" showEffort={false}
+              onChange={value => patch({ model: value ? `${value.providerId}::${value.model}` : '' })} /></div>
         </div> : <div className="automation-row">
           <label className="automation-grow">Chat<select value={draft.chatId} onChange={event => patch({ chatId: event.target.value })}><option value="" disabled>Choose a chat</option>{chats.map(chat => <option key={chat.id} value={chat.id}>{chat.title}</option>)}</select></label>
         </div>}

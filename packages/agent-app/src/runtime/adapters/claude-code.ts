@@ -20,8 +20,9 @@ function mcpArgs(servers: AdapterRunInput['mcpServers']): string[] {
 export function claudeArgs(input: AdapterRunInput, sessionId: string): string[] {
   const alias = input.model.replace(/^claude-code\//, '');
   return ['-p', '--output-format', 'stream-json', '--verbose', '--include-partial-messages',
-    // Images travel as content blocks in a stream-json user message; text-only turns keep the plain stdin prompt.
-    ...(input.images?.length ? ['--input-format', 'stream-json'] : []),
+    // The turn arrives as stream-json user messages on stdin (images as content blocks); stdin stays open while the
+    // turn runs so a steer can join it as another user message.
+    '--input-format', 'stream-json',
     // Muster's own tool servers (in-app browser, terminal, mailbox…): loaded alongside the user's, and allowed, since
     // they are first-party and each enforces its own lease and scope. Both flags are variadic, so a flag follows them.
     ...mcpArgs(input.mcpServers),
@@ -87,8 +88,9 @@ const resultText = (content: unknown): string => typeof content === 'string' ? c
 
 /** The turn's stdin: the plain prompt, or with images one stream-json user message whose
  *  image content blocks carry the attachment bytes (the model sees them directly). */
+export const claudeUserMessage = (text: string): string => JSON.stringify({type: 'user', message: {role: 'user', content: [{type: 'text', text}]}}) + '\n';
 export function claudeStdin(input: Pick<AdapterRunInput, 'prompt' | 'images'>): string {
-  if (!input.images?.length) return input.prompt;
+  if (!input.images?.length) return claudeUserMessage(input.prompt);
   const images = loadImages(input.images);
   const skipped = input.images.length - images.length;
   const content = [...images.map(image => ({type: 'image', source: {type: 'base64', media_type: image.mediaType, data: image.data}})),
@@ -109,6 +111,8 @@ export function claudeCodeAdapter(options: {binary: string; env?: NodeJS.Process
       try { child = spawn(options.binary, claudeArgs(input, sessionId), {cwd: input.cwd, env, stdio: ['pipe', 'pipe', 'pipe']}); }
       catch (error) { resolve({status: 'failed', finalMessage: '', dispatchState: 'not-dispatched', errorMessage: `Claude Code could not start: ${error instanceof Error ? error.message : String(error)}`}); return; }
       let accepted = false, settled = false, final: {ok: boolean; text: string} | undefined, stderr = '', streamedText = false;
+      let pending = 1, inputClosed = false;
+      const closeInput = () => { if (inputClosed) return; inputClosed = true; try { child.stdin?.end(); } catch { /* already closed */ } };
       const tools = new Map<string, Record<string, unknown>>();
       const accept = () => { if (!accepted) { accepted = true; input.onThreadReady(sessionId); input.onTurnAccepted({threadId: sessionId, turnId}); } };
       const threadFor = (parent: unknown) => typeof parent === 'string' && parent ? `${sessionId}:${parent}` : sessionId;
@@ -164,7 +168,11 @@ export function claudeCodeAdapter(options: {binary: string; env?: NodeJS.Process
           }
           return;
         }
-        if (type === 'result') final = {ok: event.is_error !== true && event.subtype === 'success', text: text(event.result)};
+        if (type === 'result') {
+          final = {ok: event.is_error !== true && event.subtype === 'success', text: text(event.result)};
+          // Each user message (the prompt, then any steers) ends in one result; the last one closes stdin so the run ends.
+          if (--pending <= 0) closeInput();
+        }
       });
       child.on('error', error => finish({status: 'failed', finalMessage: '', dispatchState: accepted ? 'dispatched' : 'not-dispatched', ...(accepted ? {threadId: sessionId, turnId} : {}), errorMessage: `Claude Code could not start: ${error.message}`}));
       child.on('close', code => {
@@ -176,7 +184,12 @@ export function claudeCodeAdapter(options: {binary: string; env?: NodeJS.Process
         finish({status: 'failed', finalMessage: '', dispatchState: accepted ? 'dispatched' : 'not-dispatched', ...identity, errorMessage: reason.replace(/[\x00-\x1f]+/g, ' ').slice(0, 400)});
       });
       child.stdin?.on('error', () => {});
-      child.stdin?.end(claudeStdin(input));
+      child.stdin?.write(claudeStdin(input));
+      input.onSteerable?.(message => {
+        if (settled || inputClosed || !child.stdin || input.signal.aborted) return false;
+        pending++;
+        try { child.stdin.write(claudeUserMessage(message)); return true; } catch { pending--; return false; }
+      });
     });
   }};
 }

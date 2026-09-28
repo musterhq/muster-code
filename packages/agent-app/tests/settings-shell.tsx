@@ -73,11 +73,11 @@ assert.ok(calls.some(call=>call.command==='settings.set'&&call.input.key==='gene
 const modelTrigger=document.querySelector('.default-model-trigger') as HTMLButtonElement;
 assert.match(modelTrigger.textContent!,/Built-in default/);
 modelTrigger.click();await delay(10);
-const modelOptions=()=>Array.from(document.querySelectorAll('.default-model-list [role="option"]')) as HTMLButtonElement[];
+const modelOptions=()=>Array.from(document.querySelectorAll('.model-picker-list [role="option"]')) as HTMLButtonElement[];
 assert.deepEqual(modelOptions().map(el=>el.textContent),['Built-in default','GPT-6'],'only ready providers\' models are offered');
 modelOptions()[1]!.click();await delay(10);
 assert.deepEqual(settingsValues['general.defaultModel'],{providerId:'codex',model:'gpt-6'});
-const low=Array.from(document.querySelectorAll('.default-model-segments button')).find(el=>el.textContent==='Light') as HTMLButtonElement;
+const low=Array.from(document.querySelectorAll('.model-picker-segments button')).find(el=>el.textContent==='Light') as HTMLButtonElement;
 low.click();await delay(10);
 assert.deepEqual(settingsValues['general.defaultModel'],{providerId:'codex',model:'gpt-6',effort:'low'},'reasoning effort saves with the model');
 assert.match((document.querySelector('.default-model-trigger') as HTMLElement).textContent!,/GPT-6.*Light/);
@@ -87,7 +87,7 @@ assert.match((document.querySelector('.default-model-trigger') as HTMLElement).t
   let focused:any=null;const originalFocus=window.HTMLElement.prototype.focus;
   window.HTMLElement.prototype.focus=function(){focused=this;};
   Object.defineProperty(window.document,'activeElement',{configurable:true,get:()=>focused??window.document.body});
-  const listKey=(name:string)=>{const target=focused??document.querySelector('.default-model-list')!;const event=new window.Event('keydown',{bubbles:true,cancelable:true});Object.defineProperty(event,'key',{value:name});target.dispatchEvent(event);};
+  const listKey=(name:string)=>{const target=focused??document.querySelector('.model-picker-list')!;const event=new window.Event('keydown',{bubbles:true,cancelable:true});Object.defineProperty(event,'key',{value:name});target.dispatchEvent(event);};
   const focusedOption=()=>modelOptions().indexOf(focused);
   modelTrigger.click();await delay(10); // close
   modelTrigger.click();await delay(10); // reopen

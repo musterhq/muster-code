@@ -183,21 +183,26 @@ assert.equal(chat.mode,'plan');assert.ok(document.querySelector('.composer-plan-
 assert.equal(byTest('composer-access')!.getAttribute('title'),'Plan mode runs read-only');
 assert.equal(byTest('composer-input')!.getAttribute('placeholder'),'Describe your task to generate a plan…');
 await key(byTest('composer-input')!,'Tab',{shiftKey:true});await delay(30);assert.equal(chat.mode,'agent','Shift+Tab toggles plan off');
-// Model picker: provider rail, grouped list, reasoning effort in the trigger.
+// Model picker (shared ModelPicker): provider rail, opens scoped to the chat's provider, search spans every provider.
 await click('[data-testid="composer-model"]');
-assert.deepEqual(Array.from(document.querySelectorAll('.composer-model-rail [role="tab"]')).map(tab=>tab.getAttribute('aria-label')),['All providers','Hybrow','OpenAI Direct']);
-assert.deepEqual(Array.from(document.querySelectorAll('.composer-model-list .composer-menu-section')).map(node=>node.textContent),['Hybrow','OpenAI Direct']);
+const railTabs=()=>Array.from(document.querySelectorAll('.model-picker-rail [role="tab"]')).map(tab=>tab.getAttribute('aria-label'));
+assert.deepEqual(railTabs(),['All providers','Hybrow','OpenAI Direct']);
+assert.equal(document.querySelector('.model-picker-rail [aria-selected="true"]')?.getAttribute('aria-label'),'Hybrow','opens on the current model\'s provider');
+assert.deepEqual(Array.from(document.querySelectorAll('.model-picker-list .model-picker-section')).map(node=>node.textContent),['Hybrow']);
 const modelSearch=document.querySelector<HTMLInputElement>('[aria-label="Search models"]')!;
 await type(modelSearch,'openai');
-let modelChoices=Array.from(document.querySelectorAll<HTMLButtonElement>('.composer-model-list [role="option"]'));
-assert.equal(modelChoices.length,1,'search includes provider identity');
+let modelChoices=Array.from(document.querySelectorAll<HTMLButtonElement>('.model-picker-list [role="option"]'));
+assert.equal(modelChoices.length,1,'search spans providers and includes provider identity');
 const favorite=document.querySelector<HTMLButtonElement>('[aria-label^="Add Shared model OpenAI Direct"]')!;assert.ok(favorite);favorite.click();await delay(20);
-assert.equal(favorite.getAttribute('aria-pressed'),'true');
+assert.equal(document.querySelector('[aria-label^="Remove Shared model OpenAI Direct"]')?.getAttribute('aria-pressed'),'true');
+assert.deepEqual(railTabs(),['All providers','Favorites','Hybrow','OpenAI Direct'],'a favorite adds the Favorites tab');
 await type(modelSearch,'');
 (Array.from(document.querySelectorAll<HTMLButtonElement>('[aria-label="Reasoning effort"] [role="radio"]')).find(button=>button.textContent==='High')!).click();await delay(20);
 assert.match(byTest('composer-model')!.textContent??'',/Shared modelHigh/);
 assert.equal(byTest('composer-model')!.querySelector('.composer-effort-label')?.textContent,'High');
-modelChoices=Array.from(document.querySelectorAll<HTMLButtonElement>('.composer-model-list [role="option"]'));
+assert.equal(document.querySelectorAll('.model-picker-list [role="option"]').length,1,'still scoped to Hybrow');
+(document.querySelector('.model-picker-rail [aria-label="All providers"]') as HTMLButtonElement).click();await delay(20);
+modelChoices=Array.from(document.querySelectorAll<HTMLButtonElement>('.model-picker-list [role="option"]'));
 assert.equal(modelChoices.length,2,'same model id remains selectable from both providers');
 modelChoices.find(button=>button.title.startsWith('OpenAI Direct'))!.click();await delay(40);
 assert.ok(calls.some(call=>call.command==='chat.selectProvider'&&call.input.providerId==='openai-direct'&&call.input.model==='shared-model'));

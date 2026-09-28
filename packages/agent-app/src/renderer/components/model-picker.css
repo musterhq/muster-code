@@ -1,0 +1,45 @@
+/* The shared model picker (ModelPicker.tsx): composer, new chat, default-model pickers and automations.
+   Hosts size the shell (.composer-model-popover, .default-model-menu); the picker fills it. */
+.model-picker { display: flex; flex: 1; min-width: 0; min-height: 0; max-height: inherit; }
+.model-picker-rail { display: flex; flex: none; flex-direction: column; align-items: center; gap: 4px; width: 44px; padding: 8px 0; border-right: 1px solid var(--hairline); overflow-x: hidden; overflow-y: auto; }
+.model-picker-rail button { position: relative; display: inline-grid; flex: none; place-items: center; width: 28px; height: 28px; border-radius: var(--radius-8); color: var(--text-dim); }
+.model-picker-rail button:hover { background: var(--bg-hover); color: var(--text); }
+.model-picker-rail button[aria-selected='true'] { background: var(--menu-hover); color: var(--text); }
+.model-picker-rail button:focus-visible { outline: 1px solid var(--accent); }
+/* The selected bar sits inside its button, so the scrolling rail never scrolls sideways. */
+.model-picker-rail button[aria-selected='true']::after { content: ''; position: absolute; left: 2px; top: 7px; bottom: 7px; width: 2px; border-radius: var(--radius-2); background: var(--accent); }
+.model-picker-pane { display: flex; flex: 1; flex-direction: column; min-width: 0; min-height: 0; }
+/* Two classes: a host form's `label` rule (e.g. automations' column labels) must not restyle the search row. */
+.model-picker .model-picker-search { display: flex; flex: none; flex-direction: row; align-items: center; gap: 6px; padding: 9px 12px; border-bottom: 1px solid var(--hairline); color: var(--text-faint); font-size: var(--fs-13); }
+.model-picker-search input { width: 100%; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--text); font: inherit; font-size: var(--fs-13); }
+.model-picker-list { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 2px 0 6px; }
+.model-picker-group { display: grid; }
+.model-picker-section { overflow: hidden; padding: 8px 14px 3px; color: var(--text-faint); font-size: var(--fs-12); text-overflow: ellipsis; white-space: nowrap; }
+.model-picker-row { display: flex; align-items: center; margin: 0 6px; }
+.model-picker-row > button[role='option'] { display: flex; flex: 1; align-items: center; gap: 6px; min-width: 0; height: 30px; padding: 0 8px; border-radius: var(--radius-8); color: var(--text); font-size: var(--fs-13); text-align: left; white-space: nowrap; }
+.model-picker-row > button[role='option']:hover:not(:disabled), .model-picker-row > button[role='option']:focus-visible { background: var(--menu-hover); outline: none; }
+.model-picker-row > button[role='option']:disabled { opacity: .55; cursor: default; }
+.model-picker-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.model-picker-badges { display: inline-flex; flex: none; align-items: center; gap: 4px; color: var(--text-faint); font-size: var(--fs-11); font-variant-numeric: tabular-nums; }
+.model-picker-badge { display: inline-flex; align-items: center; }
+.model-picker-check { display: inline-grid; flex: none; place-items: center; width: 14px; color: var(--text); }
+.model-picker-favorite { display: inline-grid; flex: none; place-items: center; width: 24px; height: 24px; border-radius: var(--radius-6); color: var(--text-faint); opacity: 0; }
+.model-picker-row:hover .model-picker-favorite, .model-picker-favorite:focus-visible, .model-picker-favorite[aria-pressed='true'] { opacity: 1; }
+.model-picker-favorite[aria-pressed='true'] { color: var(--accent); }
+.model-picker-routes { display: flex; align-items: center; gap: 6px; height: 28px; margin: 2px 6px 0; padding: 0 8px; border-radius: var(--radius-8); color: var(--text-dim); font-size: var(--fs-12); text-align: left; }
+.model-picker-routes:hover, .model-picker-routes:focus-visible { background: var(--menu-hover); color: var(--text); outline: none; }
+.model-picker-routes > svg { flex: none; transition: transform 120ms ease-out; }
+.model-picker-routes[aria-expanded='true'] > svg { transform: rotate(90deg); }
+.model-picker-count { margin-left: auto; color: var(--text-faint); font-variant-numeric: tabular-nums; }
+.model-picker-note { flex: none; margin: 8px 12px; color: var(--text-faint); font-size: var(--fs-12); }
+.model-picker-note.is-error { color: var(--danger); }
+.model-picker-hidden { margin: 0; padding: 7px 12px; border-top: 1px solid var(--hairline); }
+.model-picker-hidden button { padding: 0; border: 0; background: none; color: var(--accent); font: inherit; cursor: pointer; }
+.model-picker-hidden button:hover { text-decoration: underline; }
+.model-picker-effort { flex: none; padding: 8px 12px 10px; border-top: 1px solid var(--hairline); }
+.model-picker-effort-title { display: block; margin-bottom: 6px; color: var(--text-faint); font-size: var(--fs-12); }
+.model-picker-segments { display: flex; height: 28px; padding: 2px; border-radius: var(--radius-8); background: var(--bg-hover); }
+.model-picker-segments button { flex: 1; border-radius: var(--radius-6); color: var(--text-dim); font-size: var(--fs-12); font-weight: 500; white-space: nowrap; }
+.model-picker-segments button[aria-checked='true'] { background: var(--bg-raised); color: var(--text); font-weight: 600; box-shadow: var(--shadow-xs), inset 0 0 0 1px color-mix(in srgb, var(--text) 14%, transparent); }
+.model-picker-segments button:focus-visible { outline: 1px solid var(--accent); }
+@media (prefers-reduced-motion: reduce) { .model-picker-routes > svg { transition: none; } }

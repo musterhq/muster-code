@@ -14,7 +14,9 @@ const folders = [
 const projects = [
   {id: 'p-launch', name: 'Taskboard 0.4 launch', goal: 'Ship due-date reminders, pagination and the new board view by Friday.', folderIds: ['f-taskboard', 'f-infra'], primaryFolderId: 'f-taskboard'},
 ];
-const chat = (id, title, extra = {}) => ({id, title, pinned: false, archived: false, draft: '', status: 'completed', updatedAt: ago(extra.age ?? 30), model: 'frontier-large', providerId: 'gateway', mode: 'agent', permissionMode: 'workspace', titleSource: 'generated', ...extra});
+// `realisticModels` (model-picker shots): chats run on the Hybrow route's "advisor" agent.
+const REALISTIC = Boolean(window.__SHOT_OPTS && window.__SHOT_OPTS.realisticModels);
+const chat = (id, title, extra = {}) => ({id, title, pinned: false, archived: false, draft: '', status: 'completed', updatedAt: ago(extra.age ?? 30), model: REALISTIC ? 'advisor' : 'frontier-large', providerId: REALISTIC ? 'hybrow' : 'gateway', mode: 'agent', permissionMode: 'workspace', titleSource: 'generated', ...extra});
 const chats = [
   chat('c-hero', 'Add due-date reminders to tasks', {folderId: 'f-taskboard', age: 2}),
   chat('c-flaky', 'Fix flaky session-expiry test', {folderId: 'f-taskboard', age: 45}),
@@ -251,7 +253,7 @@ const timelines = {
 
 // ---- providers -----------------------------------------------------------------------------------
 const efforts = ['low', 'medium', 'high', 'xhigh'];
-const providers = [
+const demoProviders = [
   {id: 'gateway', name: 'Team gateway (OpenAI-compatible)', available: true, status: 'ready', identityMasked: 'al••@taskboard.dev', source: 'config.toml', endpoint: 'https://llm.taskboard.dev/v1', checkedAt: ago(3),
     models: [
       {id: 'frontier-large', name: 'Frontier Large', efforts, defaultEffort: 'medium', contextWindow: 400000, images: true, toolSearch: true},
@@ -267,6 +269,45 @@ const providers = [
   {id: 'lmstudio', name: 'Local: LM Studio', available: true, status: 'ready', identityMasked: 'localhost:1234', source: 'Detected', endpoint: 'http://localhost:1234/v1', checkedAt: ago(1),
     models: [{id: 'small-coder-24b', name: 'small-coder-24b', contextWindow: 131072, toolSearch: false}]},
 ];
+
+// A realistic route mix (model-picker shots): a Hybrow OmniRoute gateway with 5 catalog models, ~45 router
+// agents and combos (named agents plus auto/… routes, no declared capabilities) and ~1300 third-party models
+// that are off by default; an OmniRoute Auto gateway; the ChatGPT sign-in with GPT-6 models; Claude Code.
+const words = ['best', 'fast', 'cheap', 'chat', 'coding', 'chaos', 'vision', 'long', 'reasoning', 'agentic', 'review', 'plan', 'docs', 'sql', 'web'];
+const autoRoutes = [];
+for (let i = 0; autoRoutes.length < 38; i++) { const a = words[i % words.length], b = words[(Math.floor(i / words.length) + i + 1) % words.length]; const id = a === b ? `auto/${a}` : `auto/${a}-${b}`; if (!autoRoutes.includes(id)) autoRoutes.push(id); }
+const pretty = (id) => { const [head, ...rest] = id.split('/'); const w = t => t.replace(/[-_:]+/g, ' ').trim(); const first = w(rest.length ? head : id); const title = first.charAt(0).toUpperCase() + first.slice(1); return rest.length ? `${title} · ${w(rest.join('/'))}` : title; };
+const namedAgents = ['advisor', 'executor', 'intelligent-planner', 'smol', 'slow', 'vision'];
+const vendors = ['anthropic', 'openai', 'google', 'meta', 'mistral', 'qwen', 'deepseek', 'moonshot', 'xai', 'cohere', 'nvidia', 'microsoft', 'amazon'];
+const thirdParty = Array.from({length: 1300}, (_, i) => { const v = vendors[i % vendors.length]; return {id: `${v}/model-${String(i).padStart(4, '0')}`, name: `${v} model ${i}`, hiddenByDefault: true, group: v}; });
+const realisticProviders = [
+  {id: 'hybrow', name: 'Hybrow OmniRoute (explicit models)', available: true, status: 'ready', identityMasked: 'hy••@hybrow.dev', source: 'config.toml', endpoint: 'https://omniroute.hybrow.dev/v1', checkedAt: ago(3),
+    models: [
+      {id: 'claude/claude-fable-5', name: 'Claude Fable 5', efforts, defaultEffort: 'high', contextWindow: 1000000, images: true, toolSearch: true},
+      {id: 'openai/gpt-6', name: 'GPT-6', efforts, defaultEffort: 'medium', contextWindow: 400000, images: true, toolSearch: true},
+      {id: 'google/gemini-4-pro', name: 'Gemini 4 Pro', efforts: ['low', 'high'], defaultEffort: 'high', contextWindow: 2000000, images: true},
+      {id: 'moonshot/kimi-coding', name: 'Kimi Coding', contextWindow: 262144, images: false, toolSearch: false},
+      {id: 'deepseek/deepseek-v4', name: 'DeepSeek V4', efforts: ['medium', 'high'], contextWindow: 163840, images: false},
+      ...namedAgents.map(id => ({id, name: pretty(id)})),
+      ...autoRoutes.map(id => ({id, name: pretty(id)})),
+      ...thirdParty,
+    ]},
+  {id: 'omniroute-auto', name: 'OmniRoute Auto', available: true, status: 'ready', identityMasked: 'hy••@hybrow.dev', source: 'config.toml', endpoint: 'https://omniroute.hybrow.dev/auto/v1', checkedAt: ago(3),
+    models: [{id: 'auto', name: 'Auto'}, {id: 'auto/best-coding', name: 'Auto · best coding'}, {id: 'auto/fast', name: 'Auto · fast'}]},
+  {id: 'openai-direct', name: 'ChatGPT', available: true, status: 'ready', identityMasked: 'a••x@example.com', source: 'Signed in', checkedAt: ago(10),
+    models: [
+      {id: 'gpt-6', name: 'GPT-6', efforts, defaultEffort: 'medium', contextWindow: 400000, images: true, toolSearch: true},
+      {id: 'gpt-6-codex', name: 'GPT-6 Codex', efforts, defaultEffort: 'high', contextWindow: 400000, images: true, toolSearch: true},
+      {id: 'gpt-6-mini', name: 'GPT-6 Mini', efforts: ['low', 'medium', 'high'], defaultEffort: 'low', contextWindow: 400000, images: true, toolSearch: true},
+    ]},
+  {id: 'claude-code', name: 'Claude Code', available: true, status: 'ready', identityMasked: 'a••x@example.com', source: 'Signed in', checkedAt: ago(10),
+    models: [
+      {id: 'claude-opus-5-5', name: 'Claude Opus 5.5', efforts: ['low', 'medium', 'high', 'xhigh'], defaultEffort: 'high', contextWindow: 1000000, images: true},
+      {id: 'claude-fable-5', name: 'Claude Fable 5', efforts: ['low', 'medium', 'high'], defaultEffort: 'medium', contextWindow: 200000, images: true},
+      {id: 'claude-haiku-5', name: 'Claude Haiku 5', contextWindow: 200000, images: true},
+    ]},
+];
+const providers = REALISTIC ? realisticProviders : demoProviders;
 
 // ---- memory --------------------------------------------------------------------------------------
 const mem = (id, summary, kind, scope, extra = {}) => ({id, kind, summary, observedAt: ago(extra.age ?? 600), confidence: extra.confidence ?? 0.9, provenance: [extra.source ?? 'chat:c-hero'], scopes: [scope], redactionState: 'none', ...extra});

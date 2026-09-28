@@ -70,6 +70,8 @@
 .automation-row { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; }
 .automation-row > label { flex: 0 1 auto; }
 .automation-row > .automation-grow { flex: 1 1 200px; }
+.automation-field { display: flex; flex-direction: column; gap: 6px; min-width: 0; color: var(--text-dim); font-size: var(--font-caption); }
+.automation-field .default-model { align-self: flex-start; max-width: 100%; }
 .automation-inline { display: inline-flex; align-items: center; gap: 8px; color: var(--text-faint); }
 .automation-inline input { width: 88px; }
 .automation-mono { font-family: var(--mono) !important; }

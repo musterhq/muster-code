@@ -8,7 +8,7 @@ import {resolveTarget,targetOptions,type TargetOption} from '../chatNavigation';
 import {readFileBase64,stageAttachment} from '../composerBridge';
 import {focusComposer} from '../focus';
 import {closeNewChat,getNewChatDraft,setNewChatTarget,setNewChatText,submitNewChat,unusedChatIn,useNewChatDraft} from '../newChatDraft';
-import {loadPlugins,loadProviders,loadSkills,notifyError,notifySuccess,openPluginsScreen,selectChat,sendMessage,setComposerDraft,type SendExtras} from '../store';
+import {loadPlugins,loadProviders,loadSkills,notifyError,notifySuccess,openAppSettings,openPluginsScreen,selectChat,sendMessage,setComposerDraft,type SendExtras} from '../store';
 import {useStore} from '../useStore';
 import {AttachmentStrip,type ComposerAttachment} from './AttachmentStrip';
 import {baseFileName,buildAddRows,buildMentionRows,buildSlashRows,ComposerMenuList,firstRow,nextRow,pluginLabel,skillUsable,type MenuRow} from './ComposerMenu';
@@ -18,6 +18,7 @@ import {CaptureSourcePicker,type CaptureResult} from './CaptureSourcePicker';
 import {accessibilityAttachment} from '../captureRegion';
 import {ACCESS_OPTIONS,FullAccessConfirm} from './FullAccessConfirm';
 import {attachmentKey,attachmentName,imageBlindModel,imageBlindWarning,chipPayload,chipToken,COMPOSER_COMMANDS,EFFORT_LABELS,findTokenRanges,formatBytes,insertToken,MAX_ATTACHMENT_BYTES,MAX_ATTACHMENTS,readFolderAccess,readMentionQuery,readSlashQuery,saveFolderAccess,scoreItem,setFullAccessSkip,skipsFullAccessConfirm,SKILL_RECORDER_PROMPT,type ComposerAccess,type ComposerChip,type ComposerCommandId} from './composerMenus';
+import {ModelPicker} from './ModelPicker';
 import {ProjectPicker} from './ProjectPicker';
 import {openImportConversations} from './ImportConversations';
 import {SKETCH_FILE_NAME,SketchPad,type SketchStroke} from './SketchPad';
@@ -481,34 +482,11 @@ export function NewChatScreen():React.ReactElement {
       {projectPickerOpen&&<ProjectPicker projects={projects} currentId={current.target.projectId} moves={true}
         onChoose={project=>chooseProjectTarget(project)} onCreate={()=>{setProjectPickerOpen(false);}} onClose={()=>setProjectPickerOpen(false)}/>}
       {capturePickerOpen&&<CaptureSourcePicker sources={captureSources} onCapture={chooseCapture} onClose={()=>setCapturePickerOpen(false)}/>}
-      {toolMenu==='model'&&<div className="composer-popover composer-model-popover" role="dialog" aria-label="Select model">
-        <div className="composer-model-pane">
-          <div className="composer-model-list" role="listbox" aria-label="Available models">
-            {state.providers.phase==='loading'&&!modelOptions.length?<p className="composer-model-note" role="status">Loading models…</p>
-              :!modelOptions.length?<p className="composer-model-note">No runnable models reported.</p>
-              :providers.map(provider=>{
-                const models=modelOptions.filter(model=>model.providerId===provider.id);
-                if(!models.length)return null;
-                return <React.Fragment key={provider.id}>
-                  <div className="composer-menu-section" role="presentation">{provider.name}</div>
-                  {models.map(model=>{
-                    const selected=createdModel.providerId===model.providerId&&createdModel.id===model.id;
-                    return <div className="composer-model-row" key={`${model.providerId}:${model.id}`}>
-                      <button type="button" role="option" aria-selected={selected} onClick={()=>{setChosenModel({providerId:model.providerId,id:model.id});setEffort(null);}}>
-                        <span className="composer-row-label">{model.name}</span>{selected&&<Check size={13} aria-hidden="true"/>}
-                      </button>
-                    </div>;
-                  })}
-                </React.Fragment>;
-              })}
-          </div>
-          {modelEfforts.length>0&&<div className="composer-effort">
-            <span className="composer-effort-title">Reasoning</span>
-            <div className="composer-effort-segments" role="radiogroup" aria-label="Reasoning effort">
-              {modelEfforts.map(value=><button key={value} type="button" role="radio" aria-checked={(effort??defaultEffort)===value} onClick={()=>setEffort(value)}>{EFFORT_LABELS[value]}</button>)}
-            </div>
-          </div>}
-        </div>
+      {toolMenu==='model'&&<div data-testid="composer-popover" className="composer-popover composer-model-popover" role="dialog" aria-label="Select model">
+        <ModelPicker providers={providers} selected={createdModel.providerId?{providerId:createdModel.providerId,model:createdModel.id}:null} phase={state.providers.phase} error={state.providers.error}
+          onSelect={model=>{setChosenModel({providerId:model.providerId,id:model.id});setEffort(null);}}
+          onManageHidden={()=>{setToolMenu(null);openAppSettings('models');}}
+          efforts={modelEfforts} effort={effort??defaultEffort} onEffort={setEffort}/>
       </div>}
       {goalOpen&&<div className="composer-popover new-chat-goal-popover" role="dialog" aria-label="Goal">
         <p className="composer-menu-note">Muster keeps working when the chat is idle until the goal is achieved.</p>

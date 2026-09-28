@@ -76,8 +76,11 @@ function catalogIds(path) {
     return Array.isArray(models) ? new Set(models.map(entry => entry && (entry.slug ?? entry.model ?? entry.id)).filter(id => typeof id === 'string')) : undefined;
   } catch { return undefined; }
 }
-/** OpenAI's own route runs OpenAI model ids; any other provider runs what its catalog lists (anything when no catalog is readable). */
-const modelMatches = (provider, model, ids) => typeof model === 'string' && (provider === 'openai' ? OPENAI_MODEL.test(model) : !ids || ids.has(model));
+/** OpenAI's own route runs OpenAI model ids. A gateway runs its catalog's models and also what the router itself serves
+ *  (its agents and combos such as `intelligent-planner` or `auto/best-coding`, which a hand-written catalog does not
+ *  list), so any well-formed id is passed through: the router answers an unknown one with its own error. */
+const ROUTER_MODEL = /^[A-Za-z0-9._:/+ -]{1,200}$/;
+const modelMatches = (provider, model, ids) => typeof model === 'string' && (provider === 'openai' ? OPENAI_MODEL.test(model) : (ids ? ids.has(model) : false) || ROUTER_MODEL.test(model));
 
 /** Validated `-c key=value` overrides for a profile file. The profile names its provider; the file name
  *  `openai-direct` is reserved for OpenAI's own ChatGPT route. */
@@ -113,12 +116,25 @@ function providerOverrides(provider, catalog) {
   return ['model_provider=' + JSON.stringify(provider), ...(catalog ? ['model_catalog_json=' + JSON.stringify(catalog)] : [])];
 }
 
+/** A small `exec /real/path "$@"` launcher whose target is gone (an app update moved it): executable, but every run fails. */
+function brokenWrapper(file) {
+  try {
+    if (statSync(file).size > 4096) return false;
+    const head = readFileSync(file, 'utf8');
+    if (!head.startsWith('#!')) return false;
+    const target = /^\s*exec\s+(?:"([^"]+)"|'([^']+)'|(\/[^\s"';]+))/m.exec(head);
+    const path = target && (target[1] || target[2] || target[3]);
+    return !!path && isAbsolute(path) && !existsSync(path);
+  } catch { return false; }
+}
+
 /** The Codex CLI: MUSTER_CODEX_COMMAND, else the first `codex` on PATH or in a standard install location. */
 function codexCommand(env = process.env) {
   if (env.MUSTER_CODEX_COMMAND) return env.MUSTER_CODEX_COMMAND;
   const home = homedir();
   const dirs = [...(env.PATH || '').split(delimiter).filter(Boolean), join(home, '.local/bin'), '/opt/homebrew/bin', '/usr/local/bin', join(home, '.npm-global/bin'), join(home, '.bun/bin')];
-  return dirs.map(dir => join(dir, 'codex')).find(file => isAbsolute(file) && existsSync(file));
+  const bundles = ['/Applications', join(home, 'Applications')].flatMap(root => ['ChatGPT.app', 'Codex.app'].flatMap(app => [join(root, app, 'Contents/Resources/codex-cli/bin/codex'), join(root, app, 'Contents/Resources/codex')]));
+  return [...dirs.map(dir => join(dir, 'codex')), ...bundles].find(file => isAbsolute(file) && existsSync(file) && !brokenWrapper(file));
 }
 
 function route(selection) {
@@ -200,7 +216,7 @@ function selection(argv, env) {
   throw new Error('No Codex route selected. Set MUSTER_CODEX_PROFILE or MUSTER_CODEX_PROVIDER.');
 }
 
-module.exports = { profileOverrides, providerOverrides, parseToml, codexCommand };
+module.exports = { profileOverrides, providerOverrides, parseToml, codexCommand, modelMatches };
 if (require.main === module) {
   try { const chosen = selection(process.argv, process.env); launch(chosen.selection, chosen.args); }
   catch (error) { process.stderr.write(error.message + '\n'); process.exitCode = 1; }

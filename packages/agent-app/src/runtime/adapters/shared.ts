@@ -1,5 +1,5 @@
 import {randomUUID} from 'node:crypto';
-import {accessSync, constants, mkdirSync, readFileSync, renameSync, statSync, writeFileSync} from 'node:fs';
+import {accessSync, constants, existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync} from 'node:fs';
 import {delimiter, dirname, extname, isAbsolute, join} from 'node:path';
 import type {Readable} from 'node:stream';
 import type {Validation} from './types.ts';
@@ -126,16 +126,30 @@ export function findBinary(name: string, env: NodeJS.ProcessEnv, home: string, c
   const dirs = [...(env.PATH ?? '').split(delimiter).filter(Boolean), join(home, '.local/bin'), '/opt/homebrew/bin', '/usr/local/bin', join(home, '.npm-global/bin'), join(home, '.bun/bin'), join(home, '.local/share/mise/shims')];
   for (const file of [...candidates, ...dirs.map(dir => join(dir, name))]) {
     if (!isAbsolute(file)) continue;
-    try { accessSync(file, constants.X_OK); if (statSync(file).isFile()) return file; } catch { /* next */ }
+    try { accessSync(file, constants.X_OK); if (statSync(file).isFile() && !brokenWrapper(file)) return file; } catch { /* next */ }
   }
   return undefined;
+}
+
+/** A small launcher script (`exec /path/to/real "$@"`) whose target is gone, e.g. a wrapper pointing into an app
+ *  bundle that an update reorganised. Such a file is executable but fails every run, so it is skipped. */
+export function brokenWrapper(file: string): boolean {
+  try {
+    if (statSync(file).size > 4096) return false;
+    const head = readFileSync(file, 'utf8');
+    if (!head.startsWith('#!')) return false;
+    const target = /^\s*exec\s+(?:"([^"]+)"|'([^']+)'|(\/[^\s"';]+))/m.exec(head);
+    const path = target?.[1] ?? target?.[2] ?? target?.[3];
+    return !!path && isAbsolute(path) && !existsSync(path);
+  } catch { return false; }
 }
 
 /** Desktop apps that ship their own CLI inside the bundle (the ChatGPT and Codex apps carry `codex` in
  *  Contents/Resources). A signed-in desktop app's CLI is reused as-is, so its sign-in is never asked for again. */
 const APP_BUNDLES: Record<string, string[]> = { codex: ['ChatGPT.app', 'Codex.app'] };
 export function appBundleBinaries(name: string, home: string, roots: string[] = ['/Applications', join(home, 'Applications')]): string[] {
-  return (APP_BUNDLES[name] ?? []).flatMap(app => roots.flatMap(root => [join(root, app, 'Contents', 'Resources', name), join(root, app, 'Contents', 'Resources', 'bin', name)]));
+  // ChatGPT.app moved its CLI to Resources/codex-cli/bin in September 2026; older builds kept it in Resources.
+  return (APP_BUNDLES[name] ?? []).flatMap(app => roots.flatMap(root => [join(root, app, 'Contents', 'Resources', `${name}-cli`, 'bin', name), join(root, app, 'Contents', 'Resources', name), join(root, app, 'Contents', 'Resources', 'bin', name)]));
 }
 /** A CLI on PATH, in a standard install location, a version-manager shim, or inside a desktop app bundle. */
 export function locateCli(name: string, env: NodeJS.ProcessEnv, home: string, preferred: string[] = []): string | undefined {

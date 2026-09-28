@@ -2,4 +2,5 @@
 // open screens the way the menus do. Only used by scripts/readme-shots/shoot.mjs.
 import '../../src/renderer/main.tsx';
 import * as store from '../../src/renderer/store';
-(window as unknown as {__shots: unknown}).__shots = {store};
+import * as newChat from '../../src/renderer/newChatDraft';
+(window as unknown as {__shots: unknown}).__shots = {store, newChat};

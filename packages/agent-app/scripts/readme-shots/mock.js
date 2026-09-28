@@ -61,7 +61,7 @@ const snapshot = () => ({folders, chats: FX.chats, projects, activeChatId, versi
 const text = (path) => files[path]?.after ?? files[path]?.before ?? `// ${path}\n`;
 const blob = (s) => { let h = 0; for (const c of s) h = (h * 31 + c.charCodeAt(0)) >>> 0; return h.toString(16).padStart(8, '0') + 'a3f1c9e2b7d4'; };
 
-const settings = {'appearance.theme': OPTS.theme ?? 'dark', 'chat.inlineDiffs': true, 'general.defaultModel': {providerId: 'gateway', model: 'frontier-large', effort: 'medium'}};
+const settings = {'appearance.theme': OPTS.theme ?? 'dark', 'chat.inlineDiffs': true, 'general.defaultModel': OPTS.realisticModels ? {providerId: 'openai-direct', model: 'gpt-6-codex', effort: 'high'} : {providerId: 'gateway', model: 'frontier-large', effort: 'medium'}};
 const updateStatus = {phase: 'ready', current: '0.2.0', channel: 'stable', autoCheck: true, latest: {version: '0.2.1', notes: '- Faster timeline scrolling on long chats\n- Memory recall shows where each note came from\n- Fixes a terminal resize glitch', pageUrl: 'https://example.com/releases/0.2.1', publishedAt: ago(60 * 20)}, checkedAt: ago(12)};
 
 // ---- git ------------------------------------------------------------------------------------
@@ -157,6 +157,8 @@ const handlers = {
   'files.quickOpen': ({folderId, query}) => ({results: folderId === 'f-infra' ? [] : [...Object.keys(files), 'src/jobs/reminders.test.ts', 'src/jobs/index.ts', 'web/src/components/DueBadge.tsx'].filter(p => p.toLowerCase().includes(String(query ?? '').toLowerCase().slice(0, 6))).map((path, i) => ({path, score: 100 - i}))}),
   'git.changes': ({folderId}) => folderId === 'f-infra' ? [] : reviewFiles.map(({path, status, adds, dels}) => ({path, status, adds, dels})),
   'git.status': ({folderId}) => gitStatus(folderId),
+  // New project → Sources → Choose folder…: the native picker answers with a folder the fixtures do not list yet.
+  'folder.pick': () => ({id: 'f-docs', path: FX.HOME + '/Code/taskboard-docs', name: 'taskboard-docs'}),
   'git.diff': ({path}) => ({path, before: files[path]?.before ?? '', after: files[path]?.after ?? '', truncated: false}),
   'git.info': ({folderId}) => ({branch: gitStatus(folderId).branch, detached: false, fetchedAt: ago(20), hasRemote: true, worktree: null}),
   'git.branches': () => ({current: 'feat/due-reminders', detached: false, local: [{name: 'feat/due-reminders', upstream: 'origin/feat/due-reminders', ahead: 2, behind: 0, worktreePath: ROOT, committedAt: ago(20)}, {name: 'main', upstream: 'origin/main', ahead: 0, behind: 0, committedAt: ago(60 * 9)}, {name: 'feat/keyset-pagination', upstream: 'origin/feat/keyset-pagination', ahead: 1, behind: 3, committedAt: ago(60 * 3)}], recent: ['main', 'feat/keyset-pagination'], truncated: false}),
@@ -207,7 +209,8 @@ const handlers = {
   'setup.status': () => ({checkedAt: ago(1), platform: 'darwin', clis: [], connections: providers.map(p => ({id: p.id, name: p.name, kind: p.id === 'ollama' || p.id === 'lmstudio' ? 'local' : p.id === 'openrouter' ? 'env' : 'gateway', ready: true, detail: p.identityMasked})), readyProviders: providers.map(p => ({id: p.id, name: p.name})), git: {available: true, version: '2.47.0', detail: 'git 2.47.0'}, docker: {installed: true, running: true, version: '28.1.1', detail: 'Running'}}),
   'setup.progress': () => ({step: 'done', startedAt: ago(60 * 24 * 20), completedAt: ago(60 * 24 * 20), dismissedAt: null, skipped: []}),
   'setup.refresh': () => ({providers}),
-  'models.policy.get': () => ({hidden: [], pricing: {}}),
+  'models.policy.get': () => ({hidden: [], shown: [], pricing: {}}),
+  'chat.defaults': () => { const d = settings['general.defaultModel']; return {providerId: d.providerId, model: d.model, ...(d.effort ? {effort: d.effort} : {}), source: 'user'}; },
   'sandbox.chatEnvironment.get': ({chatId}) => OPTS.sandbox ? {chatId, env: 'sandbox', mode: 'copy', ready: true, browser: 'host', workspacePath: `${FX.HOME}/Library/Application Support/Muster/sandboxes/${chatId}/workspace`, seededAt: ago(9)} : {chatId, env: 'host', mode: 'copy', ready: true, browser: 'host'},
   'processes.ports': ({chatId}) => ({chatId, ports: OPTS.ports ? [{id: 'port-1', port: 5173, address: '127.0.0.1', name: 'node', owner: 'user', source: {kind: 'terminal', id: 't1'}}, {id: 'port-2', port: 4000, address: '127.0.0.1', name: 'node', owner: 'agent', source: {kind: 'agent'}}] : [], supported: true, scannedAt: ago(0)}),
   'ci.repair.list': () => [],
