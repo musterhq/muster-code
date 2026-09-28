@@ -16,7 +16,26 @@ const composerType = async (ctx, text) => {
 };
 const chord = (key) => `window.dispatchEvent(new KeyboardEvent('keydown',{key:'${key}',metaKey:true,bubbles:true,cancelable:true}));`;
 
+/** Clip to the union of these elements' boxes (plus padding), for popover close-ups. */
+const clipAround = (ctx, selectors, pad = 20) => ctx.evaluate(`const boxes=${JSON.stringify(selectors)}.flatMap(s=>[...document.querySelectorAll(s)]).map(e=>e.getBoundingClientRect()).filter(b=>b.width&&b.height);if(!boxes.length)return null;const x=Math.max(0,Math.min(...boxes.map(b=>b.left))-${pad}),y=Math.max(0,Math.min(...boxes.map(b=>b.top))-${pad});window.__clip={x,y,width:Math.min(1600,Math.max(...boxes.map(b=>b.right))+${pad})-x,height:Math.min(1000,Math.max(...boxes.map(b=>b.bottom))+${pad})-y};return window.__clip;`);
+const PICKER = ['.composer-model-popover', '.default-model-menu', '.model-picker'];
+const realistic = {realisticModels: true};
+const openComposerPicker = async (ctx) => { await showMainTurn(ctx); await ctx.click('[data-testid=composer-model]'); await ctx.sleep(700); };
+const openNewChatPicker = async (ctx) => { await ctx.evaluate(`window.__shots.newChat.openNewChat()`); await ctx.sleep(900); await ctx.click('.composer-model-button'); await ctx.sleep(700); };
+const openSettingsPicker = async (ctx) => { await ctx.store(`s.openAppSettings('general')`); await ctx.sleep(1400); await ctx.click('.default-model-trigger'); await ctx.sleep(700); };
+
 export const SHOTS = [
+  // Local only (model picker QA): the shared picker with a realistic route mix, in every place a model is chosen.
+  {name: 'picker-composer', local: true, opts: realistic, async run(ctx) { await openComposerPicker(ctx); await clipAround(ctx, ['.composer', ...PICKER]); }},
+  {name: 'picker-composer-all', local: true, opts: realistic, async run(ctx) { await openComposerPicker(ctx); await ctx.click('[role=tab][aria-label="All providers"]'); await ctx.sleep(500); await clipAround(ctx, ['.composer', ...PICKER]); }},
+  {name: 'picker-composer-routes', local: true, opts: realistic, async run(ctx) { await openComposerPicker(ctx); await ctx.click('.model-picker-routes'); await ctx.sleep(300); await ctx.evaluate(`document.querySelector('.model-picker-routes').scrollIntoView({block:'start'})`); await ctx.sleep(300); await clipAround(ctx, ['.composer', ...PICKER]); }},
+  {name: 'picker-composer-search', local: true, opts: realistic, async run(ctx) { await openComposerPicker(ctx); await ctx.type('gpt 6'); await ctx.sleep(500); await clipAround(ctx, ['.composer', ...PICKER]); }},
+  {name: 'picker-composer-light', local: true, opts: {...realistic, theme: 'light'}, async run(ctx) { await openComposerPicker(ctx); await clipAround(ctx, ['.composer', ...PICKER]); }},
+  {name: 'picker-newchat', local: true, opts: realistic, async run(ctx) { await openNewChatPicker(ctx); await clipAround(ctx, ['.new-chat-composer, .composer', ...PICKER]); }},
+  {name: 'picker-settings', local: true, opts: realistic, async run(ctx) { await openSettingsPicker(ctx); await clipAround(ctx, ['.default-model-trigger', ...PICKER]); }},
+  {name: 'picker-settings-light', local: true, opts: {...realistic, theme: 'light'}, async run(ctx) { await openSettingsPicker(ctx); await clipAround(ctx, ['.default-model-trigger', ...PICKER]); }},
+  {name: 'picker-automations', local: true, opts: realistic, async run(ctx) { await ctx.store(`s.openAutomationsScreen()`); await ctx.sleep(1400); await ctx.click('button', 'New automation'); await ctx.sleep(800); await ctx.click('.default-model-trigger'); await ctx.sleep(700); await clipAround(ctx, ['.default-model-trigger', ...PICKER]); }},
+
   // Local only: file mentions become links with file-type glyphs; bold facts and tables.
   {name: 'compare-links', local: true, opts: {replyMarkdown: "Deployment on **staging** is complete. The API was **untouched**.\n\nThe due-date job lives in `src/jobs/reminders.ts:18`, and the board badge is in web/src/components/TaskCard.tsx (line 40). The model change is in `src/models/task.ts`; see also package.json and `docs/missing-file.md`.\n\n| Area | Result |\n| --- | --- |\n| Tests | **31 passed**, browser console has zero errors |\n| Job | `src/jobs/index.ts` registers reminders on a one-minute tick |\n| Badge | `DueBadge.tsx` still to be written |\n", userText: 'Ship due-date reminders to staging and tell me what changed.'}, async run(ctx) {
     await showMainTurn(ctx); await ctx.sleep(1500);

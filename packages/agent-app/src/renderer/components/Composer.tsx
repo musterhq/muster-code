@@ -1,4 +1,4 @@
-import { ArrowUp, AtSign, BookmarkPlus, Boxes, Brain, Check, ChevronDown, CircleAlert, CircleDot, Cpu, FilePlus, FileText, Folder, FolderKanban, Gauge, GitBranch, GitCompare, Globe, Goal, Lightbulb, LoaderCircle, MessageSquarePlus, Monitor, MessagesSquare, Mic, Paperclip, PenLine, Pencil, Plus, Search, Server, Shrink, Sparkles, Square, SquarePen, SquareTerminal, Star, X, type LucideIcon } from 'lucide-react';
+import { ArrowUp, AtSign, BookmarkPlus, Boxes, Brain, Check, ChevronDown, CircleAlert, CircleDot, Cpu, FilePlus, FileText, Folder, FolderKanban, Gauge, GitBranch, GitCompare, Globe, Goal, Lightbulb, LoaderCircle, MessageSquarePlus, Monitor, MessagesSquare, Mic, Paperclip, PenLine, Pencil, Plus, Search, Server, Shrink, Sparkles, Square, SquarePen, SquareTerminal, X, type LucideIcon } from 'lucide-react';
 import { MemoryRecallChip } from './MemoryRecallChip';
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { MAX_ATTACHED_SKILL_BYTES, REASONING_EFFORTS, type Chat, type FileEntry, type PluginEntry, type Project, type QueuedMessage, type ReasoningEffort, type SkillEntry } from '../../shared/protocol';
@@ -7,8 +7,7 @@ import { invoke } from '../bridge';
 import { forkChat } from '../messageActions';
 import { runMenuAction } from '../menuActions';
 import { discardAttachment, listAttachments, previewAttachment, readFileBase64, runtimeMessage, stageAttachment } from '../composerBridge';
-import { applyVisibility, modelBadges } from '../../shared/model-catalog';
-import { useModelPolicy } from '../modelPolicy';
+import { ModelPicker } from './ModelPicker';
 import { createChat, flushComposerDraft, getState, loadPlugins, loadProviders, loadSkills, refreshProvidersQuietly, notifyError, notifySuccess, openAppSettings, openBrowserTab, openFile, openPluginsScreen, openProjectsScreen, openTab, selectChat, sendMessage, setComposerDraft, setFollowUpMode, snapshotRevision, stopChat, updateChat } from '../store';
 import { ADD_CONTEXT_EVENT, loadComposerMemory, normalizeContextChip, saveComposerMemory, serializeContext, type ContextChip } from '../composerContext';
 import { setTerminalDock, setTerminalPaneView, terminalDock } from '../processSummary';
@@ -26,7 +25,6 @@ import { useRunningTerminals } from './composerTerminals';
 import type { McpServer } from '../../shared/domains/mcp-protocol';
 import { useWorkspaceSearch } from './ContextPicker';
 import { PluginIcon } from './PluginIcon';
-import { ProviderLogo } from './ProviderLogo';
 import { fileVisual } from './fileVisual';
 import { GoalEditor, GoalStrip } from './GoalStrip';
 import { ProjectPicker } from './ProjectPicker';
@@ -58,7 +56,6 @@ async function terminalSources(chatId: string): Promise<TerminalSource[]> {
     read: async () => terminalText(session.output) }));
   return [...shellRows, ...commandRows];
 }
-const MODEL_FAVORITES_KEY = 'muster.composer.model-favorites.v1';
 const EFFORT_KEY = 'muster.composer.effort.v1';
 const PLUGIN_MRU_KEY = 'muster.composer.plugin-mru.v1';
 const MENU_LIMIT = 8;
@@ -254,9 +251,6 @@ export function Composer({ chat }: { chat: Chat }): React.ReactElement {
   const [modelOpen, setModelOpen] = useState(false);
   // Opening the picker re-reads the provider list quietly, so a model newly added to an account shows up.
   useEffect(() => { if (modelOpen) void refreshProvidersQuietly(5_000); }, [modelOpen]);
-  const [modelQuery, setModelQuery] = useState('');
-  const [modelTab, setModelTab] = useState<string>('all');
-  const [modelFavorites, setModelFavorites] = useState<string[]>(() => readLocal(MODEL_FAVORITES_KEY, [], isStrings));
   const [efforts, setEfforts] = useState<Record<string, ReasoningEffort>>(() => effortMemory ??= readLocal(EFFORT_KEY, {}, isRecord));
   const [pluginMru, setPluginMru] = useState<string[]>(() => readLocal(PLUGIN_MRU_KEY, [], isStrings));
   const [modelError, setModelError] = useState('');
@@ -267,17 +261,10 @@ export function Composer({ chat }: { chat: Chat }): React.ReactElement {
   const providers = (state.providers.value ?? []).filter(provider => provider.available);
   const modelOptions = providers.flatMap(provider => provider.models.map(model => ({ ...model, provider: provider.name, providerId: provider.id })));
   const imageBlind = imageBlindModel(providers, chat.providerId, chat.model);
-  // PRO-04: the user's visibility policy trims the picker; the chat's own model always stays listed.
-  const modelPolicy = useModelPolicy();
-  const { shown: pickerModels, hidden: hiddenModels } = applyVisibility(modelOptions, modelPolicy, { providerId: chat.providerId ?? '', model: chat.model });
   const selectedModel = modelOptions.find(model => model.id === chat.model && model.providerId === chat.providerId);
   const modelEfforts = selectedModel?.efforts ?? REASONING_EFFORTS;
   const storedEffort = efforts[chat.id];
   const effort: ReasoningEffort = storedEffort && modelEfforts.includes(storedEffort) ? storedEffort : selectedModel?.defaultEffort ?? 'medium';
-  const favoriteKey = (model: { providerId: string; id: string }) => `${model.providerId}:${model.id}`;
-  const visibleModels = pickerModels.filter(model => (modelTab === 'all' || (modelTab === 'favorites' ? modelFavorites.includes(favoriteKey(model)) : model.providerId === modelTab))
-    && `${model.name} ${model.id} ${model.provider}`.toLowerCase().includes(modelQuery.trim().toLowerCase()))
-    .sort((a, b) => a.provider.localeCompare(b.provider) || Number(modelFavorites.includes(favoriteKey(b))) - Number(modelFavorites.includes(favoriteKey(a))) || a.name.localeCompare(b.name));
   const skills = state.skills.value ?? [];
   const plugins = [...(state.plugins.value ?? [])].sort((a, b) => {
     const rank = (plugin: PluginEntry) => { const index = pluginMru.indexOf(plugin.name); return index < 0 ? Infinity : index; };
@@ -395,7 +382,7 @@ export function Composer({ chat }: { chat: Chat }): React.ReactElement {
     return () => { live = false; };
   }, [chat.id]);
   useEffect(() => {
-    setMenu(null); setFullConfirm(false); setSettingsError(''); setDismissed(null); setCaret(text.length); recall.current = null; setModelQuery(''); setLargePaste(null);
+    setMenu(null); setFullConfirm(false); setSettingsError(''); setDismissed(null); setCaret(text.length); recall.current = null; setLargePaste(null);
     settingsRequest.current++; modelRequest.current++; settingsPending.current = false; modelPending.current = false; setSettingsChanging(false); setModelChanging(false);
   }, [chat.id]);
   useEffect(() => { if (running || sending) { setFullConfirm(false); setMenu(current => current === 'plus' ? current : null); } }, [running, sending]);
@@ -490,18 +477,6 @@ export function Composer({ chat }: { chat: Chat }): React.ReactElement {
     effortMemory = next; setEfforts(next); writeLocal(EFFORT_KEY, next);
     if (running) flash('Reasoning applies to the next turn');
   };
-  const toggleModelFavorite = (key: string) => {
-    setModelFavorites(current => { const next = current.includes(key) ? current.filter(item => item !== key) : [...current, key]; writeLocal(MODEL_FAVORITES_KEY, next); return next; });
-  };
-  const onModelKeyDown = (event: React.KeyboardEvent<HTMLElement>) => {
-    if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
-    const buttons = modelPopover.current?.querySelectorAll<HTMLButtonElement>('[role="option"]:not(:disabled)');
-    if (!buttons?.length) return;
-    event.preventDefault();
-    const current = document.activeElement instanceof HTMLButtonElement ? [...buttons].indexOf(document.activeElement) : -1;
-    buttons[event.key === 'ArrowDown' ? (current + 1) % buttons.length : (current <= 0 ? buttons.length - 1 : current - 1)]?.focus();
-  };
-
   /** Sent attachments leave the strip without being discarded: the runtime now owns them. */
   const dropSent = (ids: string[]) => {
     for (const item of attachmentsRef.current) if (item.ref && ids.includes(item.ref.id) && item.previewUrl?.startsWith('blob:')) URL.revokeObjectURL(item.previewUrl);
@@ -891,7 +866,7 @@ export function Composer({ chat }: { chat: Chat }): React.ReactElement {
     else if (id === 'project') { savedSelection.current = null; setMenu('project'); }
     else if (id === 'sketch') openSketch();
     else if (id === 'terminal') void attachTerminal();
-    else if (id === 'model' || id === 'reasoning') { setModelTab('all'); setModelOpen(true); }
+    else if (id === 'model' || id === 'reasoning') setModelOpen(true);
     else if (id === 'access') setMenu('access');
     else if (id === 'new') void createChat(chat.folderId, chat.projectId);
     else if (id === 'browser') openBrowserTab();
@@ -1109,7 +1084,6 @@ export function Composer({ chat }: { chat: Chat }): React.ReactElement {
   const answering = Boolean(questionFlow && !questionFlow.collapsed);
   const placeholder = dictation ? (dictation.interim || 'Listening…') : chat.archived ? 'Restore this chat to continue' : answering ? (questionFlow!.question.options.length ? 'Type your own answer, or leave blank to use the selected option' : 'Type your answer') : !providers.length && state.providers.phase === 'ready' ? 'Enable a provider to send a message' : running ? 'Working…' : planMode ? 'Describe your task to generate a plan…' : 'Do anything';
   const caretPopoverId = slash ? 'composer-slash-options' : 'composer-mention-options';
-  const providerGroups = modelTab === 'all' ? providers.map(provider => ({ provider, models: visibleModels.filter(model => model.providerId === provider.id) })).filter(group => group.models.length) : [{ provider: undefined, models: visibleModels }];
   const hovered = chipHover ? tokenRanges[chipHover.index] : undefined;
 
   const questionSlot = questionFlow ? <ComposerQuestionPanel key={`question:${questionFlow.item.id}`} flow={questionFlow} typed={text} onNext={() => void answerQuestion()} onFocusInput={() => requestAnimationFrame(() => input.current?.focus())} /> : null;
@@ -1175,39 +1149,13 @@ export function Composer({ chat }: { chat: Chat }): React.ReactElement {
       onCreate={() => { setMenu(null); openProjectsScreen(); }} onClose={() => { setMenu(null); restoreCaret(); }} />}
     {menu === 'capture' && <CaptureSourcePicker sources={captureSources} onCapture={chooseCapture} onClose={() => { setMenu(null); restoreCaret(); }} />}
     {modelOpen && <div ref={modelPopover} data-testid="composer-popover" className="composer-popover composer-model-popover" data-browser-overlay aria-label="Select model" role="dialog">
-      <div className="composer-model-rail" role="tablist" aria-label="Providers">
-        {modelFavorites.length > 0 && <Tip label="Favorites"><button type="button" role="tab" aria-selected={modelTab === 'favorites'} aria-label="Favorites" onClick={() => setModelTab('favorites')}><Star size={14} /></button></Tip>}
-        <Tip label="All providers"><button type="button" role="tab" aria-selected={modelTab === 'all'} aria-label="All providers" onClick={() => setModelTab('all')}><Cpu size={14} /></button></Tip>
-        {providers.map(provider => <Tip key={provider.id} label={provider.name}><button type="button" role="tab" aria-selected={modelTab === provider.id} aria-label={provider.name} onClick={() => setModelTab(provider.id)}>
-          <ProviderLogo id={provider.id} name={provider.name} endpoint={provider.endpoint} size={18} /></button></Tip>)}
-      </div>
-      <div className="composer-model-pane">
-        <label className="composer-model-search"><Search size={13} /><input autoFocus type="search" aria-label="Search models" placeholder="Search models…" value={modelQuery} onChange={event => setModelQuery(event.target.value)} onKeyDown={onModelKeyDown} /></label>
-        <div className="composer-model-list" role="listbox" aria-label="Available models" onKeyDown={onModelKeyDown}>
-          {state.providers.phase === 'error' ? <p className="composer-model-note composer-model-error">{state.providers.error ?? 'Models could not be loaded.'}</p>
-            : state.providers.phase === 'loading' && !modelOptions.length ? <p className="composer-model-note" role="status">Loading models…</p>
-              : !modelOptions.length ? <p className="composer-model-note">No runnable models reported.</p>
-                : !visibleModels.length ? <p className="composer-model-note">No models match this search.</p>
-                  : providerGroups.map(group => <React.Fragment key={group.provider?.id ?? 'list'}>
-                    {group.provider && <div className="composer-menu-section" role="presentation">{group.provider.name}</div>}
-                    {group.models.map(model => { const key = favoriteKey(model), favorite = modelFavorites.includes(key), selected = model.id === chat.model && model.providerId === chat.providerId;
-                      return <div className="composer-model-row" key={key}>
-                        <button type="button" role="option" aria-selected={selected} disabled={modelChanging || settingsBlocked || (running && model.providerId !== currentProvider)} title={running && model.providerId !== currentProvider ? `Switch to ${model.provider} after this run` : `${model.provider} · ${model.id}`} onClick={() => void chooseModel(model.id, model.providerId)}>
-                          <span className="composer-row-label">{model.name}</span>{modelTab !== 'all' && <span className="composer-row-description">{model.provider}</span>}{selected && <Check size={13} aria-hidden="true" />}
-                          <span className="composer-model-badges">{modelBadges(model).map(badge => <span key={badge.id} className={`composer-model-badge${badge.known ? '' : ' is-unknown'}${badge.supported === false ? ' is-unsupported' : ''}`} title={badge.title}>{badge.label}</span>)}</span></button>
-                        <Tip label={favorite ? 'Remove favorite' : 'Add favorite'}><button type="button" className="composer-model-favorite" aria-label={`${favorite ? 'Remove' : 'Add'} ${model.name} ${model.provider} ${favorite ? 'from' : 'to'} favorites`} aria-pressed={favorite} onClick={() => toggleModelFavorite(key)}><Star size={12} fill={favorite ? 'currentColor' : 'none'} /></button></Tip>
-                      </div>; })}
-                  </React.Fragment>)}
-        </div>
-        {hiddenModels.length > 0 && <p className="composer-model-note composer-model-hidden">{hiddenModels.length} hidden by your model settings · <button type="button" onClick={() => { setModelOpen(false); openAppSettings('models'); }}>Manage</button></p>}
-        {running && <p className="composer-model-note">Applies to the next turn · other providers after this run</p>}
-        {modelEfforts.length > 0 && <div className="composer-effort">
-          <span className="composer-effort-title">Reasoning</span>
-          <div className="composer-effort-segments" role="radiogroup" aria-label="Reasoning effort">
-            {modelEfforts.map(value => <button key={value} type="button" role="radio" aria-checked={effort === value} onClick={() => chooseEffort(value)}>{EFFORT_LABELS[value]}</button>)}
-          </div>
-        </div>}
-      </div>
+      <ModelPicker providers={providers} selected={chat.providerId ? { providerId: chat.providerId, model: chat.model } : null} phase={state.providers.phase} error={state.providers.error}
+        onSelect={model => void chooseModel(model.id, model.providerId)}
+        optionDisabled={model => modelChanging || settingsBlocked || (running && model.providerId !== currentProvider)}
+        optionTitle={model => running && model.providerId !== currentProvider ? `Switch to ${model.provider} after this run` : undefined}
+        onManageHidden={() => { setModelOpen(false); openAppSettings('models'); }}
+        notes={running && <p className="model-picker-note">Applies to the next turn · other providers after this run</p>}
+        efforts={modelEfforts} effort={effort} onEffort={chooseEffort} />
     </div>}
     <div className="composer-options" role="toolbar" aria-label="Message options">
       <div className="composer-toolbar-left">

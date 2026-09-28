@@ -61,7 +61,7 @@ const trigger2=document.querySelector('.default-model-trigger') as HTMLButtonEle
 assert.ok(trigger2,'Retry loads the picker');
 assert.match(trigger2.textContent??'',/Use my default/);
 trigger2.click();await delay(20);
-const pickModel=(name:string)=>(Array.from(document.querySelectorAll('.default-model-list [role="option"]')).find(option=>option.textContent===name) as HTMLButtonElement).click();
+const pickModel=(name:string)=>(Array.from(document.querySelectorAll('.model-picker-list [role="option"]')).find(option=>option.textContent===name) as HTMLButtonElement).click();
 pickModel('Model A');await delay(5);
 pickModel('Model B');await delay(5);
 assert.equal(sets.length,2);
