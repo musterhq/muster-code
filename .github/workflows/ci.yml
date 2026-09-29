@@ -39,7 +39,8 @@ jobs:
           git -C "$MUSTER_DIR" fetch -q --depth 1 https://github.com/musterhq/muster "$MUSTER_REF"
           git -C "$MUSTER_DIR" checkout -q FETCH_HEAD
           cd "$MUSTER_DIR"
-          pnpm install --filter @musterhq/core...
+          pnpm install --filter "@musterhq/core..." --filter .
+          pnpm exec tsc -p capability-packs/frappe/tsconfig.json
           pnpm --filter @musterhq/core build
 
       - name: Install
