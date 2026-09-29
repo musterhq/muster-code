@@ -2,7 +2,7 @@
  *  the New task sheet, and Paperclip routines for the Automations screen. Built from the app's form and sheet components. */
 import { Check, Link2 } from 'lucide-react';
 import React, { useEffect, useRef, useState } from 'react';
-import type { PaperclipConfigView, PaperclipMode, PaperclipTestResult, WorkspaceList, WorkspaceSnapshot } from '../../shared/domains/paperclip-protocol';
+import type { PaperclipConfigView, PaperclipImportReport, PaperclipMode, PaperclipTestResult, WorkspaceList, WorkspaceSnapshot } from '../../shared/domains/paperclip-protocol';
 import { PAPERCLIP_LOCAL_URL } from '../../shared/domains/paperclip-protocol';
 import { NAMES } from '../../shared/workspace-names';
 import { invoke } from '../bridge';
@@ -34,7 +34,8 @@ export function ConnectionPanel({ onSaved, compact = false }: { onSaved?: (view:
   const [token, setToken] = useState('');
   const [company, setCompany] = useState<string>('');
   const [test, setTest] = useState<PaperclipTestResult | null>(null);
-  const [busy, setBusy] = useState<'test' | 'save' | null>(null);
+  const [busy, setBusy] = useState<'test' | 'save' | 'import' | null>(null);
+  const [imported, setImported] = useState<PaperclipImportReport | null>(null);
   const [error, setError] = useState('');
   useEffect(() => {
     let live = true;
@@ -57,6 +58,15 @@ export function ConnectionPanel({ onSaved, compact = false }: { onSaved?: (view:
       const view = await invoke('paperclip.config.set', { mode, ...(mode === 'custom' ? { baseUrl: url } : {}), ...(token ? { token } : {}), companyId: company || null });
       setConfig(view); setToken(''); notifySuccess(mode === 'off' ? 'Paperclip unlinked. Projects show Muster’s own work.' : 'Paperclip linked. Its projects appear under Projects, tagged Paperclip.');
       await refreshWorkspace(true); onSaved?.(view);
+    } catch (cause) { setError(errorText(cause)); } finally { setBusy(null); }
+  };
+  /** One-shot copy into Muster's own Projects (GET only). Safe to repeat: it updates what it made. */
+  const runImport = async () => {
+    setBusy('import'); setError(''); setImported(null);
+    try {
+      const report = await invoke('paperclip.import', { mode, ...(mode === 'custom' ? { baseUrl: url, ...(token ? { token } : {}) } : {}), ...(company ? { companyId: company } : {}) });
+      setImported(report); notifySuccess(`Imported ${report.company}: ${report.tasks.created + report.tasks.updated} tasks in ${report.projects.created + report.projects.updated} projects.`);
+      await refreshWorkspace(true);
     } catch (cause) { setError(errorText(cause)); } finally { setBusy(null); }
   };
   const removeToken = async () => {
@@ -82,8 +92,13 @@ export function ConnectionPanel({ onSaved, compact = false }: { onSaved?: (view:
     {test && mode === 'custom' && <p className="ws-connection-detect" data-ok={test.ok ? 'true' : 'false'} role="status">{test.ok && <Check size={13} aria-hidden="true"/>}{test.message}{test.latencyMs !== undefined ? ` · ${test.latencyMs} ms` : ''}</p>}
     {mode !== 'off' && companies.length > 0 && <label className="project-edit-goal"><span>Company</span><select className="ws-select is-field" value={company} onChange={e => setCompany(e.target.value)}>{companies.map(c => <option key={c.id} value={c.id}>{c.name}{c.prefix ? ` (${c.prefix})` : ''}</option>)}</select></label>}
     {error && <p role="alert" className="settings-error">{error}</p>}
+    {imported && <div className="ws-import-report" role="status">
+      <p><Check size={13} aria-hidden="true"/>Imported {imported.company}: {imported.projects.created} new and {imported.projects.updated} updated projects, {imported.tasks.created} new and {imported.tasks.updated} updated tasks, {imported.comments} comments, {imported.agents} Roster places, {imported.history} decisions{imported.needsYou ? ` (${imported.needsYou} need you, in the Inbox)` : ''}.</p>
+      {imported.notes.map(n => <p key={n} className="ws-faint">{n}</p>)}
+    </div>}
     <div className="project-edit-actions">
       {mode !== 'off' && <button type="button" className="settings-button secondary" disabled={busy !== null || (mode === 'custom' && !url.trim())} onClick={() => void runTest()}>{busy === 'test' ? 'Testing…' : 'Test connection'}</button>}
+      {mode !== 'off' && <button type="button" className="settings-button secondary" title="Copy its projects, tasks, threads and Roster into Muster, reading with GET only. Safe to repeat." disabled={busy !== null || (mode === 'custom' && !url.trim())} onClick={() => void runImport()}>{busy === 'import' ? 'Importing…' : 'Import from Paperclip'}</button>}
       <span className="project-edit-spacer"/>
       <button type="button" className="settings-button" disabled={busy !== null || (mode === 'custom' && !url.trim())} onClick={() => void save()}>{busy === 'save' ? 'Saving…' : 'Save'}</button>
     </div>

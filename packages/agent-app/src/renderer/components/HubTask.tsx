@@ -6,7 +6,7 @@
  * Comments render with the app's own Markdown; the thread is virtualised.
  */
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { ArrowDown, ArrowRight, ArrowUp, Brain, CircleHelp, GitBranch, PanelRight, ShieldCheck, Waypoints, X } from 'lucide-react';
+import { ArrowDown, ArrowRight, ArrowUp, Brain, CircleHelp, GitBranch, PanelRight, Play, ShieldCheck, Waypoints, X } from 'lucide-react';
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { LedgerEntry, ThreadCard, WorkspaceComment, WorkspaceMemory, WorkspaceSnapshot, WorkspaceStatus, WorkspaceTaskDetail } from '../../shared/domains/paperclip-protocol';
 import { PRIORITY_NAME, STATUS_LABEL, WORKSPACE_STATUSES } from '../../shared/domains/paperclip-protocol';
@@ -14,7 +14,7 @@ import { NAMES } from '../../shared/workspace-names';
 import { invoke } from '../bridge';
 import { onTasksChanged } from '../hubStore';
 import { agoLabel, exactTime } from '../relativeTime';
-import { notifyError, notifySuccess } from '../store';
+import { closeSettings, notifyError, notifySuccess, selectChat } from '../store';
 import { LiveCount, Monogram, Receipt, RUN_STATE_LABEL, StateChip, TaskStatusIcon, duration, explainRunError, runTone } from './HubParts';
 import { MessageBody } from './MessageBody';
 import { ResourceState } from './ResourceState';
@@ -218,6 +218,7 @@ function Properties({ detail, snapshot, onOpenTask, onClose, onChanged }: { deta
         <Row label="Last run">{lastRun ? <span className="ws-inline" title={explainRunError(lastRun.error) ?? undefined}><StateChip tone={runTone(lastRun.status)}>{RUN_STATE_LABEL[lastRun.status]}</StateChip><span className="ws-ellipsis" title={exactTime(lastRun.createdAt)}>{lastRun.finishedAt ? `${duration(lastRun.startedAt, lastRun.finishedAt) || '0s'} · ${agoLabel(lastRun.finishedAt)}` : agoLabel(lastRun.createdAt)}</span></span> : <span className="ws-faint">None</span>}</Row>
         <Row label="Runs">{detail.runs.length || <span className="ws-faint">None</span>}</Row>
       </dl>
+      {task.source === 'local' && !task.live && task.status !== 'done' && task.status !== 'cancelled' && <StartRun taskId={task.id} owner={task.assigneeLabel} onStarted={onChanged}/>}
       <h3 className="ws-prop-group">About</h3>
       <dl>
         <Row label="Originating">{task.origin ? <span className="ws-inline"><Monogram name={task.origin}/><span className="ws-ellipsis">{task.origin}</span></span> : <span className="ws-faint">Unknown</span>}</Row>
@@ -248,4 +249,18 @@ export function MemorySection({ taskId }: { taskId: string }): React.ReactElemen
         <p className="ws-memory-note">{memory.note}{memory.engine === 'not-configured' ? ' Connect Hindsight in Settings › Memory to recall team memory too.' : memory.engine === 'local-only' ? ' Hindsight did not answer; showing local memory only.' : ''}</p>
       </>}
   </section>;
+}
+
+/** Muster tasks start only when you start them: on the owner's runner, in a new worktree of the project's folder. */
+function StartRun({ taskId, owner, onStarted }: { taskId: string; owner: string | null; onStarted: () => void }): React.ReactElement {
+  const [busy, setBusy] = useState(false);
+  const start = async () => {
+    setBusy(true);
+    try {
+      const run = await invoke('paperclip.task.start', { taskId });
+      notifySuccess(`${owner ?? 'The agent'} started on ${run.branch} in its own worktree.`, { label: 'Open chat', run: () => { void selectChat(run.chatId); closeSettings(); } });
+      onStarted();
+    } catch (cause) { notifyError(cause); } finally { setBusy(false); }
+  };
+  return <Tip label="Runs on the owner’s runner in a new worktree of the project folder; your checkout is never touched."><button type="button" className="settings-button ws-start-run" disabled={busy} onClick={() => void start()}><Play size={13}/>{busy ? 'Starting…' : `Start ${owner ?? 'the agent'} in a worktree`}</button></Tip>;
 }

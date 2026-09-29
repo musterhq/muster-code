@@ -319,3 +319,8 @@ button.ws-row:disabled { cursor: default; }
 .ws-project-outputs { display: flex; flex-direction: column; height: 520px; min-height: 0; }
 .ws-page-fill > .ws-project-outputs { flex: 1; height: auto; }
 .ws-page-fill > .ws-project-tasks { overflow-y: auto; flex: 0 1 auto; }
+
+.ws-import-report { display: flex; flex-direction: column; gap: 4px; padding: 10px 12px; border: 1px solid color-mix(in srgb, var(--ok) 35%, var(--hairline)); border-radius: var(--radius-10); background: color-mix(in srgb, var(--ok) 6%, transparent); font-size: var(--fs-12); }
+.ws-import-report p { display: flex; align-items: flex-start; gap: 6px; margin: 0; color: var(--text-dim); line-height: 1.45; }
+.ws-import-report svg { flex: none; margin-top: 2px; color: var(--ok); }
+.ws-start-run { margin-top: 8px; width: 100%; }
