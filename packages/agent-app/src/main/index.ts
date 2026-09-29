@@ -32,8 +32,10 @@ import {chatIdFromArgs,chatIdFromLink} from './chat-links.ts';
 import {attentionBadge,createCrashTracker,isRendererCrash} from './app-shell.ts';
 import {MENU_CHANNEL,MENU_CLOSE_CHANNEL,type MenuAction} from '../shared/menu-protocol.ts';
 import {installProcessGuard} from './process-guard.ts';
+import {passwordStoreSwitch} from './linux-launch.ts';
 
 app.setName('Muster Agent');
+{const store=passwordStoreSwitch(process.env,process.argv);if(store)app.commandLine.appendSwitch('password-store',store);}
 app.setPath('userData', app.commandLine.getSwitchValue('user-data-dir') || path.join(app.getPath('appData'), 'Muster Agent'));
 // EXT-10: plugin UI gets its own standard origin (registered before ready), served only through PluginUiRegistry.
 protocol.registerSchemesAsPrivileged([{scheme: PLUGIN_SCHEME, privileges: {standard: true, secure: true, supportFetchAPI: false, corsEnabled: true}}]);

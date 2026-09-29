@@ -9,13 +9,17 @@ import { redactSecrets } from './secret-redaction.ts';
 
 export interface SecretBox { isEncryptionAvailable(): boolean; encryptString(text: string): Buffer; decryptString(data: Buffer): string }
 
-/** Electron's safeStorage when the runtime runs inside Electron's main process; undefined in plain Node. */
+/** Electron's safeStorage when the runtime runs inside Electron's main process; undefined in plain Node.
+ *  On Linux without a Secret Service (gnome-keyring, KWallet, KeePassXC) Electron still reports encryption as available
+ *  but uses a hard-coded key ("basic_text"); that is plaintext in effect, so it counts as unavailable. */
 export function electronSecretBox(): SecretBox | undefined {
   try {
-    const box = (createRequire(typeof __filename === 'string' ? __filename : join(process.cwd(), 'index.js'))('electron') as { safeStorage?: SecretBox }).safeStorage;
-    return box && typeof box.encryptString === 'function' && box.isEncryptionAvailable() ? box : undefined;
+    const box = (createRequire(typeof __filename === 'string' ? __filename : join(process.cwd(), 'index.js'))('electron') as { safeStorage?: SecretBox & { getSelectedStorageBackend?: () => string } }).safeStorage;
+    if (!box || typeof box.encryptString !== 'function' || !box.isEncryptionAvailable()) return undefined;
+    return weakBackend(box.getSelectedStorageBackend?.()) ? undefined : box;
   } catch { return undefined; }
 }
+export const weakBackend = (backend: string | undefined): boolean => backend === 'basic_text' || backend === 'unknown';
 
 const RETAIN: readonly MemoryAutoRetain[] = ['never', 'ask', 'verified'];
 interface StoredConfig { version: 1; endpoint: string; apiKey?: string; autoRecall: boolean; autoRetain: MemoryAutoRetain }

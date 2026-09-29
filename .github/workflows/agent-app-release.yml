@@ -193,11 +193,24 @@ jobs:
         shell: bash
         # The update source is this repository (forks publish and update from their own).
         run: npx electron-builder ${{ matrix.target }} --publish never -c.extraMetadata.musterUpdateRepo=${{ github.repository }} -c.extraMetadata.musterUpdateChannel=${{ contains(env.TAG, '-') && 'beta' || 'stable' }}
-      - name: Smoke test (Linux)
+      - name: Smoke test (Linux, no --no-sandbox flag)
         if: matrix.os == 'linux'
         run: xvfb-run -a node scripts/smoke-packaged.mjs
         env:
           SMOKE_EXPECT_UPDATES: '1'
+
+      - name: Smoke test (Linux AppImage, no --no-sandbox flag)
+        if: matrix.os == 'linux'
+        run: |
+          chmod +x release-dist/*.AppImage
+          APPIMAGE_EXTRACT_AND_RUN=1 xvfb-run -a node scripts/smoke-packaged.mjs "$(ls "$PWD"/release-dist/*.AppImage)"
+        env:
+          SMOKE_EXPECT_UPDATES: '1'
+          SMOKE_PORT: '9478'
+
+      - name: Verify Linux packages (desktop entry, AppArmor, launcher)
+        if: matrix.os == 'linux'
+        run: bash scripts/verify-linux-package.sh
       - name: Smoke test (Windows)
         if: matrix.os == 'windows'
         run: node scripts/smoke-packaged.mjs
