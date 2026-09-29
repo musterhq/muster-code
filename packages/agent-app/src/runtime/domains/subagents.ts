@@ -83,6 +83,24 @@ export function normalizeChildThread(chatId: string, threadId: string, thread: R
   };
 }
 
+/**
+ * A child of a CLI provider (Claude Code Task/Agent) as its saved transcript: rows the run stored under the child thread id,
+ * with the state its parent's collab report last gave it. Nothing here asks a provider; the CLI keeps no thread to read.
+ */
+export function claudeChildTranscript(chatId: string, threadId: string, parentItems: readonly TimelineItem[], rows: readonly TimelineItem[]): SubagentTranscript {
+  let status: SubagentTranscriptStatus = 'unknown', name: string | undefined, role: string | undefined, model: string | undefined, startedAt: string | undefined, updatedAt: string | undefined;
+  for (const item of parentItems) {
+    const data = item.data;
+    if (item.kind !== 'tool' || data?.type !== 'collabAgentToolCall' || !(Array.isArray(data.receiverThreadIds) && data.receiverThreadIds.includes(threadId))) continue;
+    const states = parsed(data.agentsStates), state = isRecord(states) && isRecord(states[threadId]) ? str((states[threadId] as Record<string, unknown>).status) : undefined;
+    if (state === 'running') status = 'running'; else if (state === 'completed') status = 'completed'; else if (state === 'failed') status = 'failed'; else if (state === 'interrupted') status = 'interrupted';
+    const agents = parsed(data.receiverAgents), agent = Array.isArray(agents) ? agents.find(entry => isRecord(entry) && entry.threadId === threadId) : undefined;
+    if (isRecord(agent)) { name = str(agent.name) ?? name; role = str(agent.role) ?? role; model = str(agent.model) ?? model; }
+    startedAt ??= item.createdAt; updatedAt = item.createdAt;
+  }
+  return {threadId, status, items: rows.slice(-MAX_ITEMS).map(row => ({...row, chatId, text: clip(row.text)})), ...(name ? {name} : {}), ...(role ? {role} : {}), ...(model ? {model} : {}), ...(startedAt ? {startedAt} : {}), ...(updatedAt ? {updatedAt} : {}), source: 'live'};
+}
+
 /** Subagents domain. Handlers are keyed by the command names in shared/domains/subagents-protocol.ts. */
 export function createSubagentsDomain(context: DomainContext, deps: SubagentsDeps = {}): DomainModule {
   let loaded: TranscriptCore | undefined;
@@ -184,6 +202,9 @@ export function createSubagentsDomain(context: DomainContext, deps: SubagentsDep
       },
       'subagents.transcript': async input => {
         const { chat, threadId } = child(input), chatId = chat.id;
+        // Claude Code runs its subagents in-process: the transcript is what this run stored, not a provider thread to read.
+        const saved = context.store.subagentItems(chatId, threadId);
+        if (saved.length || (chat.providerThreadId && threadId.startsWith(`${chat.providerThreadId}:`))) return claudeChildTranscript(chatId, threadId, context.store.timeline(chatId), saved);
         const key = `${chatId}\0${threadId}`, hit = cache.get(key);
         if (hit && now() - hit.at < (hit.value.status === 'running' || hit.value.status === 'unknown' ? COLD_RUNNING_TTL : COLD_SETTLED_TTL)) return hit.value;
         const pending = inflight.get(key);

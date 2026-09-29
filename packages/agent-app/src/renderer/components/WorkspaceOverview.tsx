@@ -9,7 +9,7 @@ import {isNotGitRepository} from './resourceErrors';
 import {WorktreeList} from './WorktreeList';
 import {openSandbox, sandboxTarget} from '../sandboxScope';
 import {EMPTY_ACTIVITY_ITEMS, getSubagentActivity, selectSubagent, subagentState} from '../subagentActivity';
-import {SubagentCounts, SubagentStatus} from './SubagentsTab';
+import {BackgroundTag, SubagentCounts, SubagentStatus} from './SubagentsTab';
 import {ProcessActivitySummary} from './ProcessActivitySummary';
 import type {TimelineItem} from '../../shared/protocol';
 import {classifyTool} from './toolPresentation';
@@ -74,7 +74,7 @@ export function WorkspaceOverview({compact=false, onNavigate=()=>{}, className='
       {agents.length > 0 && <>
         <SubagentCounts counts={counts} />
         <div className="workspace-subagent-summary">{visibleAgents.map(agent => <button key={agent.id} title={agent.name} className="workspace-subagent-chip" aria-label={`View ${agent.name}, ${subagentState(agent.state).label}, in subagents`} onClick={()=>{if(chat)selectSubagent(chat.id,agent.threadId);openAgents();}}>
-          <span className="workspace-subagent-name">{agent.name}</span><SubagentStatus state={agent.state} />
+          <span className="workspace-subagent-name">{agent.name}</span>{agent.background && <BackgroundTag />}<SubagentStatus state={agent.state} />
         </button>)}</div>
         {agents.length > visibleAgents.length && <button className="workspace-inline-link workspace-subagent-more" onClick={openAgents}>View {agents.length - visibleAgents.length} more</button>}
         <p className="workspace-status">Last reported states · includes saved history</p>

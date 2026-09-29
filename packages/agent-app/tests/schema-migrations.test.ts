@@ -53,11 +53,11 @@ test('PER-08: AgentStore versions its schema; a fresh store needs no backup, an 
   try{
     const fresh=new AgentStore(dir);
     assert.equal(fresh.schemaMigration.fresh,true);assert.equal(fresh.schemaMigration.backup,undefined);
-    assert.equal(schemaVersion(fresh.database()),1);
+    assert.equal(schemaVersion(fresh.database()),2);
     fresh.database().exec('PRAGMA user_version = 0');fresh.close();
     const upgraded=new AgentStore(dir);
     assert.ok(upgraded.schemaMigration.backup&&existsSync(upgraded.schemaMigration.backup));
-    assert.deepEqual(upgraded.schemaMigration.applied,['1:adopt versioned schema']);
+    assert.deepEqual(upgraded.schemaMigration.applied,['1:adopt versioned schema','2:subagent transcripts']);
     upgraded.close();
   }finally{rmSync(dir,{recursive:true,force:true});}
 });

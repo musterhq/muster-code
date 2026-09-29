@@ -66,6 +66,7 @@ export function toolEventDetails(item: Record<string, unknown>): Record<string, 
   for (const key of ['outputSource','type','command','cwd','title','name','path','query','server','tool','namespace','prompt','model','senderThreadId']) {
     if (typeof item[key] === 'string') result[key] = item[key].slice(0, 32768);
   }
+  if (item.background === true) result.background = true;
   for (const key of ['durationMs','exitCode']) if (typeof item[key] === 'number' && Number.isFinite(item[key]) && (key === 'exitCode' || item[key] >= 0)) result[key] = item[key];
   for (const key of ['agentNickname', 'agentRole']) {
     if (typeof item[key] === 'string') result[key] = item[key].slice(0, 256);

@@ -11,6 +11,7 @@ import { discoverLocalProviders } from './provider-discovery.ts';
 import { CustomProviders } from './custom-providers.ts';
 import { AgentStore } from './store.ts';
 import { WorkspaceWatchService } from './workspace-watch.ts';
+import {claudeChildRow,claudeChildThread} from './subagent-rows.ts';
 import {appendCommandOutput,finishCommandOutput,stripAnsi} from './command-output-buffer.ts';
 import {OutputLog} from './output-log.ts';
 import {ProjectEventLog} from './project-event-log.ts';
@@ -477,6 +478,9 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
             const telemetry = isForeignThreadEvent(params, store.chat(chatId)?.providerThreadId) ? null : applyProviderEvent(store.contextTelemetry(chatId), method, params);
             if (telemetry) { store.setContextTelemetry(chatId, telemetry); emit({ type: 'contextTelemetry', chatId, telemetry }); }
             domainHooks.providerEvent({ chat, method, params });
+            // A subagent inside a CLI provider (Claude Code Task): its rows live in its own transcript, never in the parent's.
+            const ownThread = store.chat(chatId)?.providerThreadId, child = claudeChildThread(params, ownThread);
+            if (child) { const row = claudeChildRow(method, params); if (row) store.upsertSubagentItem(chatId, child, row); return; }
             if (method === HISTORY_WINDOW_EVENT) { if (typeof params.retainedUserTurns === 'number') retainedTurns = params.retainedUserTurns; return; }
             if (method === 'thread/compacted') { seal(); compactionCompleted(chatId); compactedInRun = true; }
             const item = params.item && typeof params.item === 'object' ? params.item as Record<string, unknown> : params;

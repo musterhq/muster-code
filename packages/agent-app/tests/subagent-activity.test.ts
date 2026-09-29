@@ -199,3 +199,13 @@ test('DOGFOOD F51: a failed child keeps the provider\'s reason; a recovered chil
   assert.equal(nested.error, 'model refused');
   assert.equal(getSubagentActivity([item('r4', {type:'collabAgentToolCall', receiverThreadIds:['e'], agentsStates:{e:{status:'completed', message:'done'}}})]).agents[0].error, undefined, 'a result is not an error');
 });
+
+test('a Claude Code Task projects as a background child with its live state', () => {
+  const item = (state: string, status = 'completed') => ({id:'c1', chatId:'chat', kind:'tool' as const, text:'', status, createdAt:'2026-01-01T00:00:00Z', data:{type:'collabAgentToolCall', background:true, receiverThreadIds:['s:t1'],
+    receiverAgents:JSON.stringify([{threadId:'s:t1', name:'Map it', role:'Explore', prompt:'Map it'}]), agentsStates:JSON.stringify({'s:t1':{status:state, ...(state === 'completed' ? {message:'Two files.'} : {})}})}});
+  const running = getSubagentActivity([item('running')]).agents;
+  assert.equal(running.length, 1);
+  assert.equal(running[0]!.id, 's:t1');assert.equal(running[0]!.background, true);assert.equal(subagentState(running[0]!.state).kind, 'working');
+  const done = getSubagentActivity([item('running'), item('completed')]).agents[0]!;
+  assert.equal(subagentState(done.state).kind, 'done');assert.equal(done.result, 'Two files.');
+});
