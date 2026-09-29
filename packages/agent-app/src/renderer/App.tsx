@@ -9,7 +9,7 @@ import { ParallelRunHost } from './components/ParallelRunGuard';
 import { ImportConversationsHost } from './components/ImportConversations';
 import { SetupGuideHost } from './components/SetupGuide';
 import { ResourcePane } from './components/ResourcePane';
-import {LazyAutomationsScreen,LazyBoundary,LazyMemoryScreen,LazyPreferencesScreen,LazyProjectsScreen,preloadScreens} from './lazyScreens';
+import {LazyAutomationsScreen,LazyBoundary,LazyHubScreen,LazyMemoryScreen,LazyPreferencesScreen,LazyProjectsScreen,preloadScreens} from './lazyScreens';
 import { SummaryCard } from './components/SummaryCard';
 import { AreaBoundary } from './components/AreaBoundary';
 import {Tip,TipProvider} from './components/Tooltip';
@@ -146,7 +146,7 @@ export function App(): React.ReactElement {
         </div>
         {/* 'providers' and 'plugins' are no longer standalone screens: openProvidersTab()/openPluginsScreen()
             route through Settings so their entry points always land in the same shell, at their section. */}
-        {state.screen!=='work'&&<LazyBoundary label={state.screen}>{state.screen === 'projects' ? <LazyProjectsScreen onBack={closeSettings} onStartChat={(projectId:string, folderId:string)=>void createChat(folderId, projectId).then(() => focusComposer())} /> : state.screen === 'memory' ? <LazyMemoryScreen key={state.memoryFolderId ?? 'personal'} /> : state.screen === 'settings' ? <LazyPreferencesScreen/> : state.screen === 'automations' ? <LazyAutomationsScreen/> : null}</LazyBoundary>}
+        {state.screen!=='work'&&<LazyBoundary label={state.screen}>{state.screen === 'projects' ? <LazyProjectsScreen onBack={closeSettings} onStartChat={(projectId:string, folderId:string)=>void createChat(folderId, projectId).then(() => focusComposer())} /> : state.screen === 'memory' ? <LazyMemoryScreen key={state.memoryFolderId ?? 'personal'} /> : state.screen === 'settings' ? <LazyPreferencesScreen/> : state.screen === 'automations' ? <LazyAutomationsScreen/> : state.screen === 'hub' ? <LazyHubScreen/> : null}</LazyBoundary>}
         {state.screen==='work'&&<WorkControls/>}
         {state.screen==='work'&&state.boot.phase==='ready'&&<AreaBoundary area="the summary card" scope="card"><SummaryCard/></AreaBoundary>}
       </main>

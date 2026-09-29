@@ -12,6 +12,7 @@ import './automations.css';
 import { ResourceState } from './ResourceState';
 import {Tip} from './Tooltip';
 import {DefaultModelPicker} from './settings/DefaultModelPicker';
+import { PaperclipRoutines } from './HubSetup';
 
 /** A draft's `providerId::model` as the picker's value (null: the folder default). */
 const modelPreference = (value: string): {providerId: string; model: string} | null => {
@@ -40,8 +41,8 @@ const PRESETS: { label: string; apply: Partial<Draft> }[] = [
   { label: 'Weekdays at 9', apply: { repeat: 'daily', time: '09:00', days: [1, 2, 3, 4, 5] } },
   { label: 'Mondays at 10', apply: { repeat: 'daily', time: '10:00', days: [1] } },
 ];
-function blankDraft(folderId = ''): Draft {
-  return { name: '', prompt: '', repeat: 'daily', minutes: 60, time: '09:00', days: [1, 2, 3, 4, 5], expr: '0 9 * * 1-5', watchFolderId: folderId, timezone: LOCAL_TZ, repoEvents: ['check-failed'], repoBranch: '', targetKind: 'new', folderId, projectId: '', model: '', mode: 'agent', chatId: '', permissionMode: 'workspace', overlap: 'skip', catchUp: 'one', acknowledged: false };
+function blankDraft(folderId = '', projectId = ''): Draft {
+  return { name: '', prompt: '', repeat: 'daily', minutes: 60, time: '09:00', days: [1, 2, 3, 4, 5], expr: '0 9 * * 1-5', watchFolderId: folderId, timezone: LOCAL_TZ, repoEvents: ['check-failed'], repoBranch: '', targetKind: 'new', folderId, projectId, model: '', mode: 'agent', chatId: '', permissionMode: 'workspace', overlap: 'skip', catchUp: 'one', acknowledged: false };
 }
 function draftOf(automation: AutomationView): Draft {
   const draft = { ...blankDraft(), name: automation.name, prompt: automation.prompt, timezone: automation.timezone, permissionMode: automation.permissionMode, overlap: automation.overlap, catchUp: automation.catchUp };
@@ -84,16 +85,27 @@ function duration(run: AutomationRun): string | null {
 }
 function useNow(): number {
   const [now, setNow] = useState(Date.now());
-  useEffect(() => { const timer = setInterval(() => setNow(Date.now()), 30_000); return () => clearInterval(timer); }, []);
+  // Relative times tick every 30 s, and only while the window is visible: a hidden window keeps no timer.
+  useEffect(() => {
+    let timer: ReturnType<typeof setInterval> | null = null;
+    const sync = () => {
+      if (document.visibilityState === 'hidden') { if (timer) clearInterval(timer); timer = null; return; }
+      setNow(Date.now());
+      timer ??= setInterval(() => setNow(Date.now()), 30_000);
+    };
+    sync();
+    document.addEventListener('visibilitychange', sync);
+    return () => { document.removeEventListener('visibilitychange', sync); if (timer) clearInterval(timer); };
+  }, []);
   return now;
 }
 const openChat = (chatId: string) => void selectChat(chatId).then(() => focusComposer());
 
-function Editor({ editing, onDone }: { editing: AutomationView | null; onDone: (saved?: AutomationView) => void }): React.ReactElement {
+function Editor({ editing, onDone, projectId }: { editing: AutomationView | null; onDone: (saved?: AutomationView) => void; projectId?: string | null }): React.ReactElement {
   const state = useStore(), snapshot = state.snapshot;
   const folders = snapshot?.folders ?? [], projects = (snapshot?.projects ?? []).filter(project => !project.archived);
   const chats = (snapshot?.chats ?? []).filter(chat => !chat.archived);
-  const [draft, setDraft] = useState<Draft>(() => editing ? draftOf(editing) : blankDraft(folders[0]?.id ?? ''));
+  const [draft, setDraft] = useState<Draft>(() => editing ? draftOf(editing) : projectId ? blankDraft(projects.find(p => p.id === projectId)?.folderIds[0] ?? folders[0]?.id ?? '', projectId) : blankDraft(folders[0]?.id ?? ''));
   const [preview, setPreview] = useState<AutomationPreview | null>(null);
   const [previewError, setPreviewError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -285,19 +297,51 @@ function AutomationRow({ automation, open, now, onToggle, onEdit }: { automation
   );
 }
 
-/** Automations (Codex "Scheduled"): recurring agent work with pause, run now and per-run history. */
-export function AutomationsScreen(): React.ReactElement {
+/** Whether an automation works for a Project: it targets the Project, one of its folders, or one of its chats. */
+export function automationInProject(automation: AutomationView, project: { id: string; folderIds: string[] }, chatProject: (chatId: string) => string | undefined): boolean {
+  const { target, schedule } = automation;
+  if (target.kind === 'new' && (target.projectId === project.id || (target.folderId && project.folderIds.includes(target.folderId)))) return true;
+  if (target.kind === 'chat' && chatProject(target.chatId) === project.id) return true;
+  return (schedule.kind === 'watch' || schedule.kind === 'repo') && project.folderIds.includes(schedule.folderId);
+}
+
+/** The automation list with its editor. The Automations screen shows every automation; the Projects workspace's
+ *  Routines page scopes it to one Project (`projectId`), and new automations start in that Project. */
+export function AutomationsPanel({ projectId = null, extra, header }: { projectId?: string | null; extra?: React.ReactNode; header: (newButton: React.ReactNode) => React.ReactNode }): React.ReactElement {
   const state = useStore(), now = useNow();
   const [editing, setEditing] = useState<AutomationView | 'new' | null>(null);
   const [open, setOpen] = useState<string | null>(null);
-  const back = useRef<HTMLButtonElement>(null), launcher = useRef<Element | null>(null);
-  useEffect(() => { launcher.current = document.activeElement; back.current?.focus(); void loadAutomations(); }, []);
-  const automations = state.automations.value ?? [];
-  const leave = () => { closeSettings(); restoreFocus(launcher.current); };
+  useEffect(() => { void loadAutomations(); }, []);
+  const project = projectId ? state.snapshot?.projects.find(p => p.id === projectId) : undefined;
+  const chatProject = (chatId: string) => state.snapshot?.chats.find(c => c.id === chatId)?.projectId;
+  const automations = (state.automations.value ?? []).filter(a => !project || automationInProject(a, project, chatProject));
   const done = (saved?: AutomationView) => {
     setEditing(null);
     if (saved) { setOpen(saved.id); notifySuccess(saved.version > 1 ? `Saved ${saved.name}` : `Created ${saved.name}`); }
   };
+  return <>
+    {header(editing === null ? <button className="settings-button" onClick={() => setEditing('new')}><Plus size={14} />New automation</button> : null)}
+    {editing !== null && <Editor key={editing === 'new' ? 'new' : editing.id} editing={editing === 'new' ? null : editing} onDone={done} projectId={projectId} />}
+    {state.automations.phase === 'error' && !automations.length
+      ? <ResourceState kind="error" message="Automations could not be loaded." detail={state.automations.error} onRetry={() => void loadAutomations(true)}/>
+      : state.automations.phase !== 'ready' && !automations.length ? <ResourceState kind="loading" label="Loading automations"/>
+      : automations.length === 0 && editing === null ? <div className="automation-empty">
+          <CalendarClock size={20} aria-hidden="true" />
+          <p>{project ? `No automations for ${project.name} yet. Schedule a prompt for this project, or trigger one when a pull request opens, a check fails or files change.` : 'No automations yet. Schedule a prompt to run every hour, on weekdays at 9, or whenever files change, in a fresh chat or one you pick.'}</p>
+          <button type="button" className="settings-button secondary" onClick={() => setEditing('new')}><Plus size={14} />New automation</button>
+        </div>
+      : <ul className="automation-list" aria-label="Automations">
+          {automations.map(automation => <AutomationRow key={automation.id} automation={automation} now={now} open={open === automation.id} onToggle={() => setOpen(open === automation.id ? null : automation.id)} onEdit={() => setEditing(automation)} />)}
+        </ul>}
+    {extra}
+  </>;
+}
+
+/** Automations (Codex "Scheduled"): recurring agent work with pause, run now and per-run history. */
+export function AutomationsScreen(): React.ReactElement {
+  const back = useRef<HTMLButtonElement>(null), launcher = useRef<Element | null>(null);
+  useEffect(() => { launcher.current = document.activeElement; back.current?.focus(); }, []);
+  const leave = () => { closeSettings(); restoreFocus(launcher.current); };
   return (
     <section className="settings-screen automations-screen" aria-label="Automations" onKeyDown={event => {
       if (event.key !== 'Escape' || event.defaultPrevented) return;
@@ -308,25 +352,13 @@ export function AutomationsScreen(): React.ReactElement {
         <span>Automations</span>
       </header>
       <div className="settings-scroll"><div className="settings-content">
-        <div className="settings-title">
+        <AutomationsPanel header={newButton => <div className="settings-title">
           <div>
             <h1>Automations</h1>
             <p>Recurring agent work on a schedule or when files change. {AUTOMATION_AWAKE_NOTE.split('. ')[0]}.</p>
           </div>
-          {editing === null && <button className="settings-button" onClick={() => setEditing('new')}><Plus size={14} />New automation</button>}
-        </div>
-        {editing !== null && <Editor key={editing === 'new' ? 'new' : editing.id} editing={editing === 'new' ? null : editing} onDone={done} />}
-        {state.automations.phase === 'error' && !automations.length
-          ? <ResourceState kind="error" message="Automations could not be loaded." detail={state.automations.error} onRetry={() => void loadAutomations(true)}/>
-          : state.automations.phase !== 'ready' && !automations.length ? <ResourceState kind="loading" label="Loading automations"/>
-          : automations.length === 0 && editing === null ? <div className="automation-empty">
-              <CalendarClock size={20} aria-hidden="true" />
-              <p>No automations yet. Schedule a prompt to run every hour, on weekdays at 9, or whenever files change, in a fresh chat or one you pick.</p>
-              <button type="button" className="settings-button secondary" onClick={() => setEditing('new')}><Plus size={14} />New automation</button>
-            </div>
-          : <ul className="automation-list" aria-label="Automations">
-              {automations.map(automation => <AutomationRow key={automation.id} automation={automation} now={now} open={open === automation.id} onToggle={() => setOpen(open === automation.id ? null : automation.id)} onEdit={() => setEditing(automation)} />)}
-            </ul>}
+          {newButton}
+        </div>} extra={<PaperclipRoutines/>} />
       </div></div>
     </section>
   );
