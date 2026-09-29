@@ -5,9 +5,26 @@ All notable changes to Muster Agent. Each `## <version>` section becomes the not
 
 ## Unreleased
 
+## 0.2.6
+
 - Intel Macs get their own download (`Muster-Agent-<version>-x64.dmg` / `.zip`) and update to the Intel build automatically.
 - Installing an update no longer hangs on "Installing" when you cancel the quit prompt or choose Keep Working in
   Background; the update stays ready and can be installed again.
+- Windows: agent tools work. The terminal, browser, sandbox, canvas, mailbox and MCP-server tools are started
+  through Windows launchers instead of shell scripts Windows could not run.
+- Claude Code subagents are reviewable like Codex ones: each appears on the summary card and in the Subagents tab
+  with its own transcript, live state and a Background tag. Children left running by a crash show as interrupted,
+  and a background child that never reports is stopped after 30 minutes.
+- Linux: the AppImage and tar.gz start on Ubuntu 23.10+ and other systems that restrict user namespaces; the
+  Chromium sandbox stays on whenever it can (always for the `.deb`). The app groups correctly in docks and
+  taskbars, handles `muster://` links, and the `.deb` declares its dependencies.
+- Linux: API keys and browser sign-ins are only saved with a real keyring (GNOME Keyring, KWallet, including on
+  MATE and LXQt), never with Chromium's insecure fallback. Keys saved under that fallback must be entered again.
+- Linux: Docker Engine is found with rootless sockets, `DOCKER_HOST` and snap installs, and agent CLIs installed
+  via npm prefixes, snap, Linuxbrew, Volta or pnpm are detected.
+- Sandboxed chats tell the agent truthfully that its own shell still runs on your computer under the chat's
+  access level, and to use the sandbox tools instead.
+- Muster Agent is now open source under the MIT license.
 
 ## 0.2.5
 
