@@ -5,6 +5,8 @@ All notable changes to Muster Agent. Each `## <version>` section becomes the not
 
 ## Unreleased
 
+## 0.2.9
+
 - Every project now opens on one page laid out like Paperclip's, whether you made it in Muster or brought it from Paperclip. The header shows the title, repository and open count, and the tabs are Tasks, Roster, Outputs, Settings and Budget.
 - Tasks is a list or a board. You can search, filter by status, owner and priority, sort, and group by status, owner or parent. Subtasks nest under their parent and collapse. Keys carry the project's prefix (OSS-1), and a number is never reused.
 - New task sets an owner (an agent on the Roster, or you), a priority and a parent. **Assign & start** begins the owner's first run on its runner and model, with its instructions, in a new worktree. Your checkout is never touched.
