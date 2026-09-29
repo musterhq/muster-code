@@ -1,4 +1,4 @@
-import { app, BrowserWindow, desktopCapturer, dialog, ipcMain, Menu, nativeTheme, Notification, powerMonitor, protocol, safeStorage, screen, session, shell, clipboard, systemPreferences } from 'electron';
+import { app, BrowserWindow, desktopCapturer, dialog, ipcMain, Menu, nativeTheme, Notification, powerMonitor, protocol, screen, session, shell, clipboard, systemPreferences } from 'electron';
 import {execFile} from 'node:child_process';
 import {BrowserSessionVault} from './browser-session-vault.ts';
 import {PLUGIN_SCHEME,PluginUiRegistry} from './plugin-ui.ts';
@@ -33,6 +33,7 @@ import {attentionBadge,createCrashTracker,isRendererCrash} from './app-shell.ts'
 import {MENU_CHANNEL,MENU_CLOSE_CHANNEL,type MenuAction} from '../shared/menu-protocol.ts';
 import {installProcessGuard} from './process-guard.ts';
 import {passwordStoreSwitch} from './linux-launch.ts';
+import {electronSecretBox} from '../runtime/memory-context.ts';
 
 app.setName('Muster Agent');
 {const store=passwordStoreSwitch(process.env,process.argv);if(store)app.commandLine.appendSwitch('password-store',store);}
@@ -283,8 +284,9 @@ async function main(): Promise<void> {
     },
   });
   const nativePreview = new NativePreviewController(window);
-  // BRW-06: tab history (auth-bearing URLs, page state) survives restarts only as safeStorage ciphertext.
-  const browserWorkspace = new BrowserWorkspaceController(window, onEvent, undefined, {vault: new BrowserSessionVault(path.join(app.getPath('userData'), 'browser-sessions.json'), () => safeStorage)});
+  // BRW-06: tab history (auth-bearing URLs, page state) survives restarts only as safeStorage ciphertext. electronSecretBox refuses
+  // Linux's hard-coded-key backends (basic_text/unknown), so there tab history is simply not persisted (nothing is written).
+  const browserWorkspace = new BrowserWorkspaceController(window, onEvent, undefined, {vault: new BrowserSessionVault(path.join(app.getPath('userData'), 'browser-sessions.json'), electronSecretBox)});
   window.on('close', () => browserWorkspace.persistSessions());
   const pluginUi = new PluginUiRegistry();
   if (!protocol.isProtocolHandled(PLUGIN_SCHEME)) protocol.handle(PLUGIN_SCHEME, async request => {

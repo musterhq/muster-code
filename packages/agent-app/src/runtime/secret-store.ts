@@ -52,7 +52,10 @@ export class SecretStore {
   secureStorage(): boolean { return Boolean(this.box()); }
   status(id: string): ProviderSecretStatus {
     const entry = ID.test(id) ? this.read().secrets[id] : undefined;
-    return {stored: Boolean(entry), updatedAt: entry?.updatedAt ?? null, secureStorage: this.secureStorage()};
+    // A key saved earlier under Linux's hard-coded-key backend cannot be decrypted now (that backend is refused), so it reads
+    // as "not set" and the UI asks for it again rather than showing a key that would not work.
+    const secure = this.secureStorage(), usable = Boolean(entry) && secure;
+    return {stored: usable, updatedAt: usable ? entry!.updatedAt : null, secureStorage: secure};
   }
   set(id: string, value: unknown): ProviderSecretStatus {
     if (!ID.test(id)) throw new Error('Invalid connection.');
