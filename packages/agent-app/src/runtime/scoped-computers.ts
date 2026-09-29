@@ -1,4 +1,5 @@
 import {createHash,randomUUID} from 'node:crypto';
+import {DOCKER_CANDIDATES,dockerSocketCandidates} from './setup-detection.ts';
 import {constants,existsSync} from 'node:fs';
 import {cp,lstat,mkdir,open,readdir,realpath,rename,rm,writeFile} from 'node:fs/promises';
 import {createRequire} from 'node:module';
@@ -180,7 +181,7 @@ export class ScopedComputers {
   constructor(private options:ScopedComputerOptions) {
     if(!isAbsolute(options.appData))throw new ComputerInputError('Computer app data must be an absolute path.');
     this.image=options.image??SANDBOX_IMAGE;
-    this.dockerBin=options.dockerBin??['/usr/local/bin/docker','/opt/homebrew/bin/docker'].find(existsSync)??'docker';
+    this.dockerBin=options.dockerBin??DOCKER_CANDIDATES.find(existsSync)??'docker';
     registerAgentSandboxHost(this);
   }
   private get runner():SandboxRunner {return this.runnerInstance??=this.options.runner??createDockerRunner(this.dockerBin);}
@@ -205,7 +206,7 @@ export class ScopedComputers {
       try {core=adaptBundledComputerCore(await (this.options.loadCore?.()??Promise.resolve(createRequire(__filename)(join(__dirname,'scoped-computer-core.cjs')))),this.dockerBin);
         if(typeof core.LocalDockerSandbox!=='function'||typeof core.resolveScopedRuntime!=='function'||typeof core.ensureRuntime!=='function')throw Error();
       }catch{const error=new Error('Missing scoped computer dependency');error.name='ComputerDependencyError';throw error;}
-      const socket=[join(homedir(),'.docker/run/docker.sock'),'/var/run/docker.sock'].find(existsSync)??join(homedir(),'.docker/run/docker.sock');
+      const socket=dockerSocketCandidates(process.env,homedir(),process.getuid?.()).find(existsSync)??join(homedir(),'.docker/run/docker.sock');
       const dockerHost=this.options.dockerHost??`unix://${socket}`;
       if(!/^unix:\/\/\/[^\0\r\n?#]+$/.test(dockerHost))throw new ComputerInputError('A local Docker socket is required.');
       const backend=new core.LocalDockerSandbox({dockerBin:this.dockerBin,dockerHost,managementTimeoutMs:3000,durableProvisioning:true,image:this.image});

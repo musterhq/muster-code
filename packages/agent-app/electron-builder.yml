@@ -24,15 +24,28 @@ artifactName: "Muster-Agent-${version}-${os}-${arch}.${ext}"
 publish: null
 extraMetadata:
   main: dist/main/index.cjs
+  # Electron's app_id / WM_CLASS on Linux; the .desktop entry's StartupWMClass is derived from it.
+  desktopName: muster-agent.desktop
+afterPack: scripts/after-pack.cjs
+protocols:
+  - name: Muster
+    schemes: [muster]
 linux:
   target: [AppImage, deb, tar.gz]
   category: Development
   icon: resources/icon.png
   synopsis: Agentic development client with memory and sandboxing
   maintainer: Muster <hello@themuster.dev>
+  # Explicit: an unset value makes the AppImage menu entry launch with --no-sandbox.
   executableArgs: []
+  syncDesktopName: true
+  desktop:
+    entry:
+      Keywords: agent;ai;coding;terminal;
 deb:
-  depends: [libgtk-3-0, libnss3, libxss1, libasound2 | libasound2t64, libgbm1]
+  # libsecret + a Secret Service provider back safeStorage (API keys); xdg-utils opens links; libnotify4 for notifications.
+  depends: [libgtk-3-0 | libgtk-3-0t64, libnss3, libxss1, libasound2 | libasound2t64, libgbm1, libsecret-1-0, xdg-utils, libnotify4]
+  recommends: [gnome-keyring | kwalletmanager | keepassxc]
 win:
   target: [nsis, zip]
   icon: resources/icon.png

@@ -1,5 +1,5 @@
 /**
- * API keys entered in Muster. Values are encrypted with Electron safeStorage (Keychain-backed on macOS)
+ * API keys entered in Muster. Values are encrypted with Electron safeStorage (Keychain on macOS, the Secret Service keyring on Linux)
  * and written to dataDir/secrets.json as ciphertext only. Without OS encryption nothing is stored:
  * a plaintext fallback would silently downgrade the guarantee. Values never leave the runtime.
  */
@@ -52,12 +52,15 @@ export class SecretStore {
   secureStorage(): boolean { return Boolean(this.box()); }
   status(id: string): ProviderSecretStatus {
     const entry = ID.test(id) ? this.read().secrets[id] : undefined;
-    return {stored: Boolean(entry), updatedAt: entry?.updatedAt ?? null, secureStorage: this.secureStorage()};
+    // A key saved earlier under Linux's hard-coded-key backend cannot be decrypted now (that backend is refused), so it reads
+    // as "not set" and the UI asks for it again rather than showing a key that would not work.
+    const secure = this.secureStorage(), usable = Boolean(entry) && secure;
+    return {stored: usable, updatedAt: usable ? entry!.updatedAt : null, secureStorage: secure};
   }
   set(id: string, value: unknown): ProviderSecretStatus {
     if (!ID.test(id)) throw new Error('Invalid connection.');
     const key = validSecret(value), box = this.box();
-    if (!box) throw new Error('Secure storage is unavailable on this Mac, so the key was not saved. Use an environment variable instead.');
+    if (!box) throw new Error('Secure storage is unavailable on this computer, so the key was not saved. On Linux, install and unlock a keyring (gnome-keyring, KWallet or KeePassXC), or use an environment variable instead.');
     const current = this.read();
     this.write({version: 1, secrets: {...current.secrets, [id]: {cipher: box.encryptString(key).toString('base64'), updatedAt: new Date().toISOString()}}});
     this.plain.set(id, key);

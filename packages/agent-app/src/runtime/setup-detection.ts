@@ -108,17 +108,28 @@ export async function detectGit(deps: Pick<SetupDetectionDeps, 'run' | 'env' | '
   return result.ok ? { available: true, version, detail: `Git ${version ?? ''}`.trim() } : { available: false, version: null, detail: 'Git is installed but did not run.' };
 }
 
-export const DOCKER_CANDIDATES = ['/usr/local/bin/docker', '/opt/homebrew/bin/docker', '/Applications/Docker.app/Contents/Resources/bin/docker'];
-export async function detectDocker(deps: Pick<SetupDetectionDeps, 'run' | 'env' | 'exists'>): Promise<SetupDocker> {
-  const run = deps.run ?? defaultRun, exists = deps.exists ?? existsSync, env = deps.env ?? process.env;
+export const DOCKER_CANDIDATES = ['/usr/local/bin/docker', '/opt/homebrew/bin/docker', '/Applications/Docker.app/Contents/Resources/bin/docker', '/usr/bin/docker', '/snap/bin/docker'];
+/** Unix sockets a local Docker daemon listens on, most specific first: DOCKER_HOST, Docker Desktop, rootful Engine, rootless Engine. */
+export function dockerSocketCandidates(env: NodeJS.ProcessEnv, home: string, uid: number | undefined): string[] {
+  const fromEnv = /^unix:\/\/(\/[^\0\r\n?#]+)$/.exec(env.DOCKER_HOST ?? '')?.[1];
+  const runtime = env.XDG_RUNTIME_DIR && env.XDG_RUNTIME_DIR.startsWith('/') ? env.XDG_RUNTIME_DIR : uid === undefined ? undefined : `/run/user/${uid}`;
+  return [...new Set([...(fromEnv ? [fromEnv] : []), `${home}/.docker/run/docker.sock`, '/var/run/docker.sock', '/run/docker.sock', ...(runtime ? [`${runtime}/docker.sock`] : [])])];
+}
+export async function detectDocker(deps: Pick<SetupDetectionDeps, 'run' | 'env' | 'exists'> & { platform?: string }): Promise<SetupDocker> {
+  const run = deps.run ?? defaultRun, exists = deps.exists ?? existsSync, env = deps.env ?? process.env, platform = deps.platform ?? process.platform;
   const bin = DOCKER_CANDIDATES.find(path => exists(path)) ?? which('docker', env);
-  if (!bin) return { installed: false, running: null, version: null, detail: 'Docker is not installed. Sandboxes run agents in an isolated Linux container and need Docker Desktop.' };
+  const linux = platform === 'linux';
+  const engine = linux ? 'Docker Engine' : 'Docker Desktop';
+  if (!bin) return { installed: false, running: null, version: null, detail: linux ? 'Docker is not installed. Sandboxes run agents in an isolated Linux container and need Docker Engine (docs.docker.com/engine/install).' : 'Docker is not installed. Sandboxes run agents in an isolated Linux container and need Docker Desktop.' };
+  // Rootless Engine listens under $XDG_RUNTIME_DIR; the CLI's default context only looks at /var/run/docker.sock.
+  const socket = linux && !env.DOCKER_HOST ? dockerSocketCandidates(env, homedir(), process.getuid?.()).find(path => exists(path)) : undefined;
+  const host = socket && socket !== '/var/run/docker.sock' && !exists('/var/run/docker.sock') ? ['--host', `unix://${socket}`] : [];
   // `docker version` asks the daemon for its version; it never starts Docker Desktop.
-  const result = await run(bin, ['version', '--format', '{{.Server.Version}}'], 4_000);
+  const result = await run(bin, [...host, 'version', '--format', '{{.Server.Version}}'], 4_000);
   const version = result.ok ? extractVersion(result.stdout) ?? (result.stdout.trim().slice(0, 40) || null) : null;
   if (result.ok && version) return { installed: true, running: true, version, detail: `Docker ${version} is running.` };
   if (result.timedOut) return { installed: true, running: null, version: null, detail: 'Docker did not answer in time. It may still be starting.' };
-  return { installed: true, running: false, version: null, detail: 'Docker Desktop is installed but not running. Start it to use sandboxes.' };
+  return { installed: true, running: false, version: null, detail: linux ? 'Docker is installed but its daemon is not reachable. Start it (for example `sudo systemctl start docker`) and make sure your user may use the socket.' : 'Docker Desktop is installed but not running. Start it to use sandboxes.' };
 }
 
 /** Everything the first run and the Setup checklist show. A part that fails reads as "not detected", never as a crash. */

@@ -27,15 +27,21 @@ const exe = executable();
 if (!existsSync(exe)) throw new Error(`Packaged executable not found: ${exe}`);
 const profile = mkdtempSync(path.join(os.tmpdir(), 'muster-smoke-'));
 const workspace = path.join(profile, 'workspace'); mkdirSync(workspace);
-const args = [`--remote-debugging-port=${PORT}`, `--user-data-dir=${path.join(profile, 'user-data')}`, ...(process.platform === 'linux' ? ['--no-sandbox'] : [])];
-console.log(`launching ${exe}`);
-const child = spawn(exe, args, {stdio: ['ignore', 'pipe', 'pipe'], env: {...process.env, HOME: process.platform === 'win32' ? process.env.HOME : profile}});
-child.stdout.on('data', d => process.stdout.write(`[app] ${d}`));
-child.stderr.on('data', d => process.stdout.write(`[app] ${d}`));
+const args = [`--remote-debugging-port=${PORT}`, `--user-data-dir=${path.join(profile, 'user-data')}`, ...(process.platform === 'linux' && process.env.SMOKE_NO_SANDBOX === '1' ? ['--no-sandbox'] : [])];
+// Linux launches WITHOUT --no-sandbox by default: the packaged launcher must start the app the way a user's double-click does
+// (falling back itself only where user namespaces are restricted). SMOKE_NO_SANDBOX=1 restores the old flag.
+console.log(`launching ${exe}${process.env.SMOKE_NO_SANDBOX === '1' ? ' (--no-sandbox)' : ''}`);
+// Own process group on Unix: an AppImage's launcher spawns the real app, and the whole tree must die with the smoke test.
+const child = spawn(exe, args, {detached: process.platform !== 'win32', stdio: ['ignore', 'pipe', 'pipe'], env: {...process.env, HOME: process.platform === 'win32' ? process.env.HOME : profile}});
+let appOutput = '';
+const relay = d => { appOutput += d; process.stdout.write(`[app] ${d}`); };
+child.stdout.on('data', relay);
+child.stderr.on('data', relay);
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 async function page() {
   for (let i = 0; i < 90; i++) {
+    if (child.exitCode !== null) throw new Error(`The app exited (code ${child.exitCode}) before opening a window.`);
     try {
       const list = await (await fetch(`http://127.0.0.1:${PORT}/json/list`)).json();
       const target = list.find(t => t.type === 'page');
@@ -131,12 +137,16 @@ try {
   const updates = await invoke('updates.status', undefined);
   console.log(`updates: ${updates.phase} (current ${updates.current})`);
   if (process.env.SMOKE_EXPECT_UPDATES === '1' && updates.phase === 'disabled') fail('updates are disabled: the packaged build has no update source.');
+  // The installed deb must keep the sandbox ON (its AppArmor profile grants user namespaces): no launcher fallback notice.
+  if (process.env.SMOKE_EXPECT_SANDBOX === '1' && /starting with --no-sandbox/.test(appOutput)) fail('the launcher fell back to --no-sandbox; the installed package should keep the sandbox on.');
   if (!process.exitCode) console.log('SMOKE OK');
 } catch (error) {
   fail(error instanceof Error ? error.message : String(error));
 } finally {
   try { ws?.close(); } catch { /* closed */ }
-  child.kill();
+  try { if (process.platform !== 'win32' && child.pid) process.kill(-child.pid, 'SIGKILL'); else child.kill(); } catch { child.kill(); }
+  child.stdout.destroy(); child.stderr.destroy();
   await sleep(1500);
   try { rmSync(profile, {recursive: true, force: true}); } catch { /* Windows may still hold files */ }
+  process.exit(process.exitCode ?? 0);
 }

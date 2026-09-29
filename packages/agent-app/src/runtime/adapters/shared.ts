@@ -121,9 +121,15 @@ export function jsonLines(stream: Readable, onValue: (value: Record<string, unkn
   stream.on('end', () => { const line = buffer; buffer = ''; if (!skipping && line.trim()) try { const value = JSON.parse(line) as unknown; if (value && typeof value === 'object' && !Array.isArray(value)) onValue(value as Record<string, unknown>); } catch { /* partial line */ } });
 }
 
+/** `<prefix>/bin` of a configured npm global prefix (`npm config set prefix`, exported as npm_config_prefix). */
+function npmPrefixBin(env: NodeJS.ProcessEnv): string[] {
+  const prefix = env.npm_config_prefix ?? env.NPM_CONFIG_PREFIX;
+  return prefix && isAbsolute(prefix) ? [join(prefix, 'bin')] : [];
+}
+
 /** First executable named `name` in explicit candidates, then PATH (plus common user bin dirs Electron's PATH lacks). */
 export function findBinary(name: string, env: NodeJS.ProcessEnv, home: string, candidates: string[] = []): string | undefined {
-  const dirs = [...(env.PATH ?? '').split(delimiter).filter(Boolean), join(home, '.local/bin'), '/opt/homebrew/bin', '/usr/local/bin', join(home, '.npm-global/bin'), join(home, '.bun/bin'), join(home, '.local/share/mise/shims')];
+  const dirs = [...(env.PATH ?? '').split(delimiter).filter(Boolean), join(home, '.local/bin'), '/opt/homebrew/bin', '/usr/local/bin', join(home, '.npm-global/bin'), join(home, '.bun/bin'), join(home, '.local/share/mise/shims'), ...(process.platform === 'win32' ? [] : npmPrefixBin(env)), '/snap/bin', '/home/linuxbrew/.linuxbrew/bin', join(home, '.volta/bin'), join(home, '.local/share/pnpm')];
   const names = process.platform === 'win32' ? [`${name}.exe`, `${name}.cmd`, name] : [name];
   for (const file of [...candidates, ...dirs.flatMap(dir => names.map(entry => join(dir, entry)))]) {
     if (!isAbsolute(file)) continue;
