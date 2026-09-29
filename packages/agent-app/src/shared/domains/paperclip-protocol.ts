@@ -48,6 +48,8 @@ export interface WorkspaceAgent {
   capabilities: string | null;
   /** Muster agents pause through their Project's scheduler; Paperclip agents pause one by one. */
   pausable: boolean;
+  /** A Muster Roster member: the project it belongs to, its member id, runner and instructions. */
+  projectId?: string | null; memberId?: string | null; runner?: { providerId: string; model: string } | null; instructions?: string;
 }
 export interface WorkspaceProject {
   id: string; name: string; status: string; description: string; source: WorkspaceSource;
@@ -140,8 +142,31 @@ export interface WorkspaceBadge { connected: boolean; inbox: number; liveRuns: n
 export interface PaperclipImportReport {
   company: string; projects: { created: number; updated: number }; tasks: { created: number; updated: number; skipped: number };
   comments: number; agents: number; history: number; needsYou: number; notes: string[];
+  /** Paperclip projects imported into a Muster project you already had. */
+  filled?: { paperclip: string; muster: string }[];
 }
-export interface TaskCreateInput { title: string; description: string; projectId: string | null; assigneeId: string | null }
+/** `start`: Assign & start — the owner's first run starts at once, in a new worktree of the project's folder. */
+export interface TaskCreateInput { title: string; description: string; projectId: string | null; assigneeId: string | null; priority?: WorkspacePriority; parentId?: string | null; start?: boolean }
+export interface TaskStartResult { chatId: string; runId: string; worktree: string; branch: string }
+
+/** The Dashboard (#132): aggregated in SQL over the Ledger (live receipts + imported history) and project tasks and runs,
+ *  plus the linked Paperclip's runs when there is one. `spend.usd` is null when nothing was priced (never a fake $0). */
+export interface DashboardDay { day: string; succeeded: number; failed: number; other: number }
+export interface DashboardData {
+  days: string[];
+  runs: DashboardDay[];
+  tasksByDay: { day: string; counts: Partial<Record<WorkspaceStatus, number>> }[];
+  spend: { usd: number | null; pricedTurns: number; unpricedTurns: number; since: string; source: string };
+  activity: { id: string; actor: string; summary: string; at: string; projectId: string | null; projectName: string | null; source: WorkspaceSource; refId: string | null }[];
+  generatedAt: string;
+}
+
+/** Import planning: each Paperclip project with the Muster project it would fill. `suggestion` matches by an earlier
+ *  import, the same folder, the same repository remote, or the same name. */
+export interface ImportPlanProject { id: string; name: string; repo: string | null; localFolder: string | null; taskCount: number; mappedTo: string | null; suggestion: { projectId: string; reason: 'imported' | 'folder' | 'repository' | 'name' } | null }
+export interface ImportPlan { company: { id: string; name: string } | null; companies: WorkspaceCompany[]; projects: ImportPlanProject[]; muster: { id: string; name: string; folders: string[] }[] }
+/** Per Paperclip project: a Muster project id to fill, 'new', or 'skip'. Missing means the suggestion, else new. */
+export type ImportTargets = Record<string, string>;
 
 export interface PaperclipCommands {
   'paperclip.config.get': { input: Record<string, never>; output: PaperclipConfigView };
@@ -153,7 +178,11 @@ export interface PaperclipCommands {
   'paperclip.task': { input: { id: string }; output: WorkspaceTaskDetail };
   'paperclip.comment': { input: { taskId: string; body: string }; output: WorkspaceComment };
   'paperclip.task.update': { input: { taskId: string; status: WorkspaceStatus }; output: WorkspaceTask };
-  'paperclip.task.create': { input: TaskCreateInput; output: WorkspaceTask };
+  'paperclip.task.create': { input: TaskCreateInput; output: WorkspaceTask & { started?: TaskStartResult; startError?: string } };
+  /** `projectId`: one project's runs and spend (the Budget tab). */
+  'paperclip.dashboard': { input: { utcOffsetMinutes?: number; projectId?: string }; output: DashboardData };
+  /** What an import would fill: Paperclip projects and suggested Muster matches. GET only; changes nothing. */
+  'paperclip.import.plan': { input: { mode?: PaperclipMode; baseUrl?: string; token?: string; companyId?: string }; output: ImportPlan };
   'paperclip.agent.pause': { input: { id: string }; output: { ok: true } };
   'paperclip.agent.resume': { input: { id: string }; output: { ok: true } };
   /** Pauses every Paperclip agent or every Muster project scheduler. Returns how many changed. */
@@ -176,9 +205,9 @@ export interface PaperclipCommands {
   /** Answers a Needs-you card from the thread or the Inbox (Paperclip confirmations: accept, or reject with a reason). */
   'paperclip.interaction.respond': { input: { taskId: string; interactionId: string; accept: boolean; reason?: string }; output: { ok: true } };
   /** Copies a Paperclip company into Muster's Projects with GET requests only. Idempotent. Nothing starts running. */
-  'paperclip.import': { input: { mode?: PaperclipMode; baseUrl?: string; token?: string; companyId?: string }; output: PaperclipImportReport };
+  'paperclip.import': { input: { mode?: PaperclipMode; baseUrl?: string; token?: string; companyId?: string; targets?: ImportTargets }; output: PaperclipImportReport };
   /** Starts a Muster task's first run on its Roster agent's runner, in a new worktree of the project's folder (never the checkout itself). */
-  'paperclip.task.start': { input: { taskId: string }; output: { chatId: string; runId: string; worktree: string; branch: string } };
+  'paperclip.task.start': { input: { taskId: string }; output: TaskStartResult };
 }
 /** Coalesced: at most one per second while watched (every 5 s otherwise, for the badge). `taskIds` lets an open thread refetch only when it changed. */
 export type PaperclipEvent = { type: 'projectsWorkspaceChanged'; scopes: ('tasks' | 'runs' | 'agents' | 'inbox' | 'config')[]; taskIds: string[] };
@@ -186,7 +215,7 @@ export const PAPERCLIP_COMMANDS = {
   'paperclip.config.get': true, 'paperclip.config.set': true, 'paperclip.test': true, 'paperclip.snapshot': true, 'paperclip.task': true,
   'paperclip.comment': true, 'paperclip.task.update': true, 'paperclip.task.create': true, 'paperclip.agent.pause': true, 'paperclip.agent.resume': true,
   'paperclip.pauseAll': true, 'paperclip.resumeAll': true, 'paperclip.run.cancel': true, 'paperclip.memory': true, 'paperclip.list': true,
-  'paperclip.watch': true, 'paperclip.badge': true, 'paperclip.ledger': true, 'paperclip.ledger.backfill': true, 'paperclip.inbox.dismiss': true, 'paperclip.inbox.dismissed': true, 'paperclip.interaction.respond': true, 'paperclip.import': true, 'paperclip.task.start': true,
+  'paperclip.watch': true, 'paperclip.badge': true, 'paperclip.ledger': true, 'paperclip.ledger.backfill': true, 'paperclip.inbox.dismiss': true, 'paperclip.inbox.dismissed': true, 'paperclip.interaction.respond': true, 'paperclip.import': true, 'paperclip.task.start': true, 'paperclip.dashboard': true, 'paperclip.import.plan': true,
 } as const satisfies Record<keyof PaperclipCommands, true>;
 
 export const OPEN_STATUSES: readonly WorkspaceStatus[] = ['backlog', 'todo', 'in_progress', 'in_review', 'blocked'];

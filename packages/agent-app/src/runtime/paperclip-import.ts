@@ -9,9 +9,10 @@
  * Idempotent: every imported row is recorded as "imported from Paperclip <id>", so running it again updates what it
  * made instead of duplicating it. Secrets are never read into Muster: agent env values are not imported at all.
  */
+import { realpathSync } from 'node:fs';
 import type { DatabaseSync } from 'node:sqlite';
 import type { ProjectDetails, ProjectTaskView, TaskState } from '../shared/domains/projects-protocol.ts';
-import type { PaperclipImportReport } from '../shared/domains/paperclip-protocol.ts';
+import type { ImportPlan, ImportTargets, PaperclipImportReport } from '../shared/domains/paperclip-protocol.ts';
 import type { Folder } from '../shared/protocol.ts';
 import { normalizeRemote } from './memory-identity.ts';
 import type { Invoke } from './workspace-local.ts';
@@ -109,6 +110,47 @@ export interface ImportDeps {
   /** Paperclip runs on this Mac, so its folder paths are this Mac's. A remote Paperclip's paths are never linked or read. */
   local: boolean;
   codexHome?(agent: Json): { provider?: string; model?: string } | null;
+  /** Normalised origin remote of a local folder (github.com/org/repo), for matching a Paperclip project to a Muster one. */
+  remoteOf?(path: string): Promise<string | undefined>;
+  /** Per Paperclip project: fill this Muster project, create a new one ('new'), or leave it out ('skip'). */
+  targets?: ImportTargets;
+}
+
+const nameKey = (name: string) => name.toLowerCase().normalize('NFKD').replace(/[^a-z0-9]+/g, '');
+/** A path as this Mac resolves it (~ expanded, symlinks such as /var → /private/var followed), for matching folders. */
+const home = (path: string) => { const expanded = path.replace(/^~(?=\/|$)/, process.env.HOME ?? '~').replace(/\/+$/, ''); try { return realpathSync(expanded); } catch { return expanded; } };
+/**
+ * What an import would fill, read with GET only: each Paperclip project, the Muster project it maps to (an earlier
+ * import), and otherwise a suggested match — the same folder, the same repository remote, or the same name (so
+ * "OSS Manager" in Paperclip finds the founder's "OSSMANAGER" whose folder is ~/Documents/redis-automation).
+ */
+export async function planImport(companyId: string | null, deps: Pick<ImportDeps, 'get' | 'invoke' | 'store' | 'folders' | 'remoteOf'>): Promise<ImportPlan> {
+  const companies = arr(await deps.get('/companies')).filter(c => c.status !== 'archived');
+  const company = companies.find(c => c.id === companyId) ?? companies[0];
+  const listed = companies.map(c => ({ id: String(c.id), name: str(c.name) ?? 'Paperclip', prefix: str(c.issuePrefix) ?? '' }));
+  const muster = (await deps.invoke('project.list', undefined)).filter(p => !p.archived);
+  const folderPath = new Map(deps.folders().map(f => [f.id, f.path]));
+  const musterRows = muster.map(p => ({ id: p.id, name: p.name, folders: p.folderIds.map(id => folderPath.get(id)).filter((x): x is string => Boolean(x)) }));
+  if (!company) return { company: null, companies: listed, projects: [], muster: musterRows };
+  const base = `/companies/${encodeURIComponent(String(company.id))}`;
+  const [projectsJson, issuesJson] = await Promise.all([deps.get(`${base}/projects`), deps.get(`${base}/issues?view=compact&limit=500`).catch(() => [])]);
+  const remotes = new Map<string, string | undefined>();
+  const remote = async (path: string) => { if (!remotes.has(path)) remotes.set(path, await deps.remoteOf?.(path).catch(() => undefined)); return remotes.get(path); };
+  const counts = new Map<string, number>();
+  for (const i of arr(issuesJson)) { const pid = str(i.projectId); if (pid) counts.set(pid, (counts.get(pid) ?? 0) + 1); }
+  const projects: ImportPlan['projects'] = [];
+  for (const p of arr(projectsJson)) {
+    const id = String(p.id), codebase = obj(p.codebase), name = str(p.name) ?? 'Paperclip project', localFolder = str(codebase.localFolder), repoUrl = str(codebase.repoUrl);
+    const repo = repoUrl ? normalizeRemote(repoUrl) ?? repoUrl : null;
+    const mapped = deps.store.map('project', id)?.musterId;
+    const mappedTo = mapped && muster.some(m => m.id === mapped) ? mapped : null;
+    let suggestion: ImportPlan['projects'][number]['suggestion'] = mappedTo ? { projectId: mappedTo, reason: 'imported' } : null;
+    if (!suggestion && localFolder) { const want = home(localFolder); const hit = musterRows.find(m => m.folders.some(f => home(f) === want)); if (hit) suggestion = { projectId: hit.id, reason: 'folder' }; }
+    if (!suggestion && repo) for (const m of musterRows) { for (const f of m.folders) if ((await remote(f)) === repo) { suggestion = { projectId: m.id, reason: 'repository' }; break; } if (suggestion) break; }
+    if (!suggestion) { const hit = musterRows.find(m => nameKey(m.name) === nameKey(name)); if (hit) suggestion = { projectId: hit.id, reason: 'name' }; }
+    projects.push({ id, name, repo, localFolder, taskCount: counts.get(id) ?? 0, mappedTo, suggestion });
+  }
+  return { company: { id: String(company.id), name: str(company.name) ?? 'Paperclip' }, companies: listed, projects, muster: musterRows };
 }
 
 export async function importFromPaperclip(companyId: string, deps: ImportDeps): Promise<PaperclipImportReport> {
@@ -131,9 +173,21 @@ export async function importFromPaperclip(companyId: string, deps: ImportDeps): 
     let folderId: string | null = null;
     if (localFolder && deps.local && deps.exists(localFolder)) folderId = deps.folders().find(f => f.path === localFolder)?.id ?? (await invoke('folder.add', { path: localFolder })).id;
     else if (localFolder && !deps.local) report.notes.push(`${name}: its folder (${localFolder}) is on the Paperclip server, not this Mac. Link your own checkout to the project yourself.`);
-    const mapped = store.map('project', sourceId);
-    let project: ProjectDetails | undefined = mapped ? existing.get(mapped.musterId) : undefined;
-    if (project) {
+    const mapped = store.map('project', sourceId), target = deps.targets?.[sourceId];
+    if (target === 'skip') { report.notes.push(`${name}: left out of this import.`); continue; }
+    // Filling a project you already made: keep its name and goal (unless it has none), add the folder and the repository.
+    const into = target && target !== 'new' ? existing.get(target) : undefined;
+    if (target && target !== 'new' && !into) throw new Error(`The Muster project chosen for ${name} no longer exists.`);
+    let project: ProjectDetails | undefined = into ?? (mapped ? existing.get(mapped.musterId) : undefined);
+    if (into) {
+      project = await invoke('project.update', { id: into.id, ...(into.goal.trim() ? {} : { goal }), ...(folderId && !into.folderIds.includes(folderId) ? { folderIds: [...into.folderIds, folderId] } : {}) });
+      if (repoUrl) {
+        const sources = await invoke('project.sources.list', { projectId: into.id }).then(r => r.sources).catch(() => []);
+        if (!sources.some(x => x.ref === repoUrl)) await invoke('project.sources.save', { projectId: into.id, kind: 'url', title: 'Repository', ref: repoUrl, note: defaultRef ? `Default branch: ${defaultRef}` : '', enabled: true }).catch(() => undefined);
+      }
+      report.projects.updated++;
+      (report.filled ??= []).push({ paperclip: name, muster: project.name });
+    } else if (project) {
       project = await invoke('project.update', { id: project.id, name, goal, ...(folderId && !project.folderIds.includes(folderId) ? { folderIds: [...project.folderIds, folderId] } : {}) });
       report.projects.updated++;
     } else {
@@ -160,7 +214,9 @@ export async function importFromPaperclip(companyId: string, deps: ImportDeps): 
       byAgent.set(agentId, memberId);
     }
     for (const a of agents) {
-      const agentId = String(a.id), key = `${sourceProject}:${agentId}`, boss = str(a.reportsTo);
+      const agentId = String(a.id), key = `${sourceProject}:${agentId}`, boss = str(a.reportsTo), runner = runnerFor(a, deps.codexHome);
+      // The Roster profile lives on the member itself (title, reporting line, runner), like an agent added in Muster.
+      await invoke('project.members.update', { projectId, id: byAgent.get(agentId)!, title: str(a.title), reportsTo: boss ? byAgent.get(boss) ?? null : null, ...(runner.providerId && runner.model ? { runner: { providerId: runner.providerId, model: runner.model } } : {}) }).catch(() => undefined);
       store.setMap('member', key, byAgent.get(agentId)!, projectId, {
         memberId: byAgent.get(agentId), sourceAgentId: agentId, name: agentName.get(agentId), title: str(a.title), role: str(a.role) ?? 'general', capabilities: str(a.capabilities),
         reportsToMemberId: boss ? byAgent.get(boss) ?? null : null, runner: runnerFor(a, deps.codexHome), status: str(a.status), gitIdentity: gitIdentity(agentName.get(agentId)!, report.company),

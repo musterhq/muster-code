@@ -27,8 +27,9 @@ import { arr, buildInbox, mapAgent, mapAttention, mapComment, mapCompany, mapGoa
 import { activeSecretStore, SecretStore } from '../secret-store.ts';
 import { attachTurnLedger, TurnLedger } from '../turn-ledger.ts';
 import { importLedgerHistory, paperclipHistory, type HistoryResult } from '../ledger-history.ts';
-import { LocalWorkspace, memberAgentId, type Invoke, type LocalPart } from '../workspace-local.ts';
-import { importFromPaperclip, SqliteImportStore } from '../paperclip-import.ts';
+import { LocalWorkspace, type Invoke, type LocalPart } from '../workspace-local.ts';
+import { importFromPaperclip, planImport, SqliteImportStore } from '../paperclip-import.ts';
+import { buildDashboard, DASHBOARD_DAYS, ledgerAggregates, monthStart } from '../workspace-dashboard.ts';
 import type { DomainContext, DomainModule } from './types.ts';
 
 export const PAPERCLIP_SECRET_ID = 'paperclip-board-token';
@@ -444,6 +445,59 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
     return { connected: Boolean(snap.paperclip), inbox: urgent.length, liveRuns: snap.counts.liveRuns, mail, chatIds: [...new Set(urgent.flatMap(i => i.chatIds ?? []))] };
   };
 
+  /** Starts a Muster task's first run on its owner's runner, in a new worktree of the project's folder (never the checkout). */
+  const startTask = async (taskId: string) => {
+    if (await owner('task', taskId) === 'paperclip') throw new Error('This task runs in Paperclip. Import it first to run it in Muster.');
+    const { project, view: task } = await local.projectFor(taskId);
+    const source = folders().find(f => f.id === project.primaryFolderId);
+    if (!source) throw new Error('Link the project’s folder first: runs happen in a worktree of it.');
+    const meta = imports()?.projectMeta(project.id), base = typeof meta?.defaultRef === 'string' ? meta.defaultRef : undefined;
+    const branch = `muster/${task.key.toLowerCase().replace(/[^a-z0-9-]+/g, '-')}`;
+    // A worktree of its own: the run never touches the project's checkout. Starting again reuses this task's worktree.
+    const reuse = (await context.invoke('git.worktree.list', { folderId: source.id }).catch(() => [])).find(w => !w.main && !w.prunable && (w.branch === branch || w.branch === `refs/heads/${branch}`));
+    const worktree = reuse ? { folder: await context.invoke('folder.add', { path: reuse.path }), path: reuse.path, branch } : await context.invoke('git.worktree.create', { folderId: source.id, branch, ...(base ? { base } : {}) });
+    try {
+      if (!project.folderIds.includes(worktree.folder.id)) await context.invoke('project.linkFolder', { id: project.id, folderId: worktree.folder.id });
+      // The run uses its owner's runner and model (set on the Roster member); the project's default model is left alone.
+      const fresh = (await context.invoke('project.work', { projectId: project.id, activityLimit: 1 })).tasks.items.find(t => t.id === taskId);
+      if (!fresh) throw new Error('That task no longer exists.');
+      const run = await context.invoke('project.tasks.dispatch', { projectId: project.id, id: taskId, revision: fresh.revision, folderId: worktree.folder.id });
+      queueEmit(['tasks', 'runs'], taskId);
+      return { ...run, worktree: worktree.path, branch: worktree.branch };
+    } catch (cause) {
+      // Nothing ran: take back the worktree and folder this Start made (the branch stays, and a reused worktree is kept).
+      if (!reuse) {
+        await context.invoke('project.unlinkFolder', { id: project.id, folderId: worktree.folder.id }).catch(() => undefined);
+        await context.invoke('git.worktree.remove', { folderId: source.id, path: worktree.path }).catch(() => undefined);
+        await context.invoke('folder.remove', { id: worktree.folder.id }).catch(() => undefined);
+      }
+      throw cause;
+    }
+  };
+
+  // --- the Dashboard (#132) -------------------------------------------------------------------------------------------------
+  const dashboard = async (offset: number, projectId?: string) => {
+    const now = Date.now(), since = new Date(now - (DASHBOARD_DAYS + 1) * 86_400_000).toISOString();
+    ledger();
+    const c = connection();
+    let paperclip: Parameters<typeof buildDashboard>[0]['paperclip'] = null;
+    if (c && (!projectId || await owner('project', projectId) === 'paperclip')) {
+      await paperclipPart(false);
+      if (built) {
+        const base = `/companies/${encodeURIComponent(built.companyId)}`;
+        const [runs, activity] = await Promise.all([c.get<unknown>(`${base}/heartbeat-runs?limit=200`).catch(() => []), c.get<unknown>(`${base}/activity?limit=12`).catch(() => [])]);
+        const inProject = projectId ? new Set(built.part.tasks.filter(t => t.projectId === projectId).map(t => t.id)) : null;
+        paperclip = { receipts: arr(runs).map(r => mapReceipt(r, built!.agents)).filter(r => !inProject || (r.taskId !== null && inProject.has(r.taskId))), tasks: built.part.tasks.filter(t => !projectId || t.projectId === projectId), activity: mapRows('audit', activity), name: companies.find(x => x.id === built?.companyId)?.name ?? 'Paperclip' };
+      }
+    }
+    const [aggregates, stats] = [
+      ledgerAggregates(context.db(), { since, monthStart: monthStart(now, offset), offset, skipImportedPaperclip: paperclip !== null, ...(projectId ? { projectId } : {}) }),
+      // Task aggregates are app-wide; a project's Budget uses its runs and spend only.
+      projectId ? null : await context.invoke('project.stats', { days: DASHBOARD_DAYS + 1, utcOffsetMinutes: offset, activityLimit: 12 }).catch(() => null),
+    ];
+    return buildDashboard({ now, offset, ledger: aggregates, local: stats, paperclip });
+  };
+
   const text = (value: unknown, label: string, max: number) => { if (typeof value !== 'string' || !value.trim()) throw new Error(`${label} is required.`); if (value.length > max) throw new Error(`${label} is too long.`); return value; };
   const id = (value: unknown) => { if (typeof value !== 'string' || !/^[\w:.-]{1,128}$/.test(value)) throw new Error('Unknown item.'); return value; };
   const sourceOf = (value: unknown): WorkspaceSource => value === 'paperclip' ? 'paperclip' : 'local';
@@ -504,9 +558,19 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
       },
       'paperclip.task.create': async input => {
         const projectId = typeof input.projectId === 'string' && input.projectId ? id(input.projectId) : null;
-        if (!projectId || await owner('project', projectId) === 'local') { const task = await local.createTask(input as never); queueEmit(['tasks']); return task; }
+        if (!projectId || await owner('project', projectId) === 'local') {
+          const task = await local.createTask(input as never);
+          queueEmit(['tasks']);
+          // Assign & start: the owner's first run, on its runner, in a new worktree of the project's folder.
+          if (input.start !== true) return task;
+          if (task.assigneeId === 'user:local') return { ...task, startError: 'You own this task. Assign it to an agent on the Roster to start it.' };
+          try { return { ...task, started: await startTask(task.id) }; }
+          catch (cause) { return { ...task, startError: cause instanceof Error ? cause.message : String(cause) }; }
+        }
         const title = text(input.title, 'Title', 500), c = api();
         const body: Json = { title, status: 'todo', description: typeof input.description === 'string' ? input.description.slice(0, 20_000) : '', projectId };
+        if (typeof input.priority === 'string' && ['critical', 'high', 'medium', 'low'].includes(input.priority)) body.priority = input.priority;
+        if (typeof input.parentId === 'string' && input.parentId) body.parentId = id(input.parentId);
         if (typeof input.assigneeId === 'string' && input.assigneeId && !input.assigneeId.startsWith('user:')) body.assigneeAgentId = id(input.assigneeId);
         const created = await c.send<Json>('POST', `/companies/${encodeURIComponent(built!.companyId)}/issues`, body);
         queueEmit(['tasks', 'inbox']);
@@ -549,42 +613,23 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
         if (!target) throw new Error('That Paperclip has no companies to import.');
         // GET only: the importer is handed nothing that can write to Paperclip.
         // Folder paths and CODEX_HOME are this Mac's only when Paperclip runs here; a remote server's paths are never touched.
-        const report = await importFromPaperclip(target, { get: path => reader.get<unknown>(path), invoke: context.invoke as Invoke, store, folders, exists: path => existsSync(path), local: mode === 'local', ...(mode === 'local' ? { codexHome: codexHomeOf } : {}) });
+        const targets = input.targets && typeof input.targets === 'object' ? Object.fromEntries(Object.entries(input.targets).filter(([k, v]) => /^[\w:.-]{1,128}$/.test(k) && typeof v === 'string').map(([k, v]) => [k, v === 'new' || v === 'skip' ? v : id(v)])) : undefined;
+        const report = await importFromPaperclip(target, { get: path => reader.get<unknown>(path), invoke: context.invoke as Invoke, store, folders, exists: path => existsSync(path), local: mode === 'local', remoteOf, ...(targets ? { targets } : {}), ...(mode === 'local' ? { codexHome: codexHomeOf } : {}) });
         queueEmit(['tasks', 'agents', 'inbox']);
         // The imported runs show in the Ledger as imported history (#190).
         try { if (ledger().importHistory(paperclipHistory(context.db()))) queueEmit(['runs']); } catch { /* the Ledger never fails an import */ }
         return report;
       },
-      'paperclip.task.start': async input => {
-        const taskId = id(input.taskId);
-        if (await owner('task', taskId) === 'paperclip') throw new Error('This task runs in Paperclip. Import it first to run it in Muster.');
-        const { project, view: task } = await local.projectFor(taskId);
-        const source = folders().find(f => f.id === project.primaryFolderId);
-        if (!source) throw new Error('Link the project’s folder first: runs happen in a worktree of it.');
-        const meta = imports()?.projectMeta(project.id), base = typeof meta?.defaultRef === 'string' ? meta.defaultRef : undefined;
-        const branch = `muster/${task.key.toLowerCase().replace(/[^a-z0-9-]+/g, '-')}`;
-        // A worktree of its own: the run never touches the project's checkout. Starting again reuses this task's worktree.
-        const reuse = (await context.invoke('git.worktree.list', { folderId: source.id }).catch(() => [])).find(w => !w.main && !w.prunable && (w.branch === branch || w.branch === `refs/heads/${branch}`));
-        const worktree = reuse ? { folder: await context.invoke('folder.add', { path: reuse.path }), path: reuse.path, branch } : await context.invoke('git.worktree.create', { folderId: source.id, branch, ...(base ? { base } : {}) });
-        try {
-          if (!project.folderIds.includes(worktree.folder.id)) await context.invoke('project.linkFolder', { id: project.id, folderId: worktree.folder.id });
-          const roster = imports()?.roster(project.id) ?? [];
-          const runner = roster.find(r => memberAgentId(String(r.memberId)) === task.assigneeId)?.runner as { providerId?: string | null; model?: string | null } | undefined;
-          if (runner?.providerId && runner.model) await context.invoke('settings.projectModel.set', { projectId: project.id, value: { providerId: runner.providerId, model: runner.model } }).catch(() => undefined);
-          const fresh = (await context.invoke('project.work', { projectId: project.id, activityLimit: 1 })).tasks.items.find(t => t.id === taskId);
-          if (!fresh) throw new Error('That task no longer exists.');
-          const run = await context.invoke('project.tasks.dispatch', { projectId: project.id, id: taskId, revision: fresh.revision, folderId: worktree.folder.id });
-          queueEmit(['tasks', 'runs'], taskId);
-          return { ...run, worktree: worktree.path, branch: worktree.branch };
-        } catch (cause) {
-          // Nothing ran: take back the worktree and folder this Start made (the branch stays, and a reused worktree is kept).
-          if (!reuse) {
-            await context.invoke('project.unlinkFolder', { id: project.id, folderId: worktree.folder.id }).catch(() => undefined);
-            await context.invoke('git.worktree.remove', { folderId: source.id, path: worktree.path }).catch(() => undefined);
-            await context.invoke('folder.remove', { id: worktree.folder.id }).catch(() => undefined);
-          }
-          throw cause;
-        }
+      'paperclip.task.start': input => startTask(id(input.taskId)),
+      'paperclip.dashboard': input => dashboard(typeof input.utcOffsetMinutes === 'number' ? Math.max(-840, Math.min(840, input.utcOffsetMinutes)) : 0, typeof input.projectId === 'string' && input.projectId ? id(input.projectId) : undefined),
+      'paperclip.import.plan': async input => {
+        const mode = input.mode === 'local' || input.mode === 'custom' ? input.mode : config.mode === 'off' ? 'local' : config.mode;
+        const baseUrl = typeof input.baseUrl === 'string' ? input.baseUrl : config.baseUrl;
+        const reader = new PaperclipClient(endpointFor(mode, baseUrl, typeof input.token === 'string' && input.token ? input.token : tokenFor(baseUrl)), options.fetch);
+        const store = imports();
+        if (!store) throw new Error('The import store is unavailable.');
+        // GET only, and nothing is written: a preview of what the import would fill.
+        return planImport(typeof input.companyId === 'string' ? id(input.companyId) : config.companyId, { get: path => reader.get<unknown>(path), invoke: context.invoke as Invoke, store, folders, remoteOf });
       },
       'paperclip.memory': input => memoryFor(id(input.taskId)),
       'paperclip.list': input => {

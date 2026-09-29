@@ -24,6 +24,19 @@ export const NAMES = {
   receipts: 'Receipts',
   timeline: 'Timeline',
   newTask: 'New task',
+  /** Paperclip "dashboard": live agents, metric tiles, 14-day charts, recent activity and tasks. */
+  dashboard: 'Dashboard',
+  /** Paperclip "configuration" on a project. */
+  settings: 'Settings',
+  budget: 'Budget',
+  /** A project's mailbox (renamed from "Inbox" so it never clashes with the app-wide Inbox, #186). */
+  mail: 'Mail',
+  skills: 'Skills',
+  /** Sidebar group headings. */
+  work: 'Work',
+  org: 'Org',
+  /** Paperclip "hire an agent". */
+  addAgent: 'Add agent',
   paperclip: 'Paperclip',
 } as const;
 

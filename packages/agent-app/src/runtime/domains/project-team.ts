@@ -6,7 +6,7 @@
 import type { Chat, ChatPermissionMode } from '../../shared/protocol.ts';
 import {
   ACTIVITY_CATEGORIES, activityWindowStart, composeAccess, DEFAULT_AGENT_ID, LOCAL_OWNER_ID, MEMBER_ROLES, memberAccess, ROLE_LABEL,
-  type AccessPolicy, type ActivityCategory, type ActivityPage, type ActivityWindow, type ChatTransferMode, type ChatTransferPreview, type MemberAccess, type MemberKind, type MemberRole, type ProjectMember,
+  type AccessPolicy, type TeamSettings, type ActivityCategory, type ActivityPage, type ActivityWindow, type ChatTransferMode, type ChatTransferPreview, type MemberAccess, type MemberKind, type MemberRole, type ProjectMember,
 } from '../../shared/domains/project-team-protocol.ts';
 import type { ProjectDetails, TaskOwner } from '../../shared/domains/projects-protocol.ts';
 import { plural } from '../../shared/wording.ts';
@@ -67,6 +67,13 @@ export function createProjectTeam(ctx: DomainContext, deps: ProjectTeamDeps) {
     if (input.maxPermission !== undefined) { if (input.maxPermission !== null && !MODES.includes(input.maxPermission as ChatPermissionMode)) throw new Error('Invalid permission cap.'); out.maxPermission = input.maxPermission as ChatPermissionMode | null; }
     const folders = grantList(input.folderIds, 'folder id'); if (folders !== undefined) out.folderIds = folders;
     if (input.secrets !== undefined) { if (!Array.isArray(input.secrets) || input.secrets.some(s => typeof s !== 'string')) throw new Error('Invalid secret grants.'); out.secrets = input.secrets as string[]; }
+    if (input.title !== undefined) { if (input.title !== null && typeof input.title !== 'string') throw new Error('Invalid title.'); out.title = input.title as string | null; }
+    if (input.reportsTo !== undefined) out.reportsTo = input.reportsTo === null || input.reportsTo === '' ? null : id(input.reportsTo, 'reporting line');
+    if (input.runner !== undefined) {
+      const r = input.runner as { providerId?: unknown; model?: unknown } | null;
+      out.runner = r === null ? null : r && typeof r.providerId === 'string' && typeof r.model === 'string' ? { providerId: r.providerId, model: r.model } : (() => { throw new Error('Choose a runner and a model.'); })();
+    }
+    if (input.instructions !== undefined) { if (typeof input.instructions !== 'string') throw new Error('Invalid instructions.'); out.instructions = input.instructions; }
     return out;
   };
   const project = (input: Record<string, unknown>) => { const projectId = id(input.projectId, 'project id'); deps.details(projectId); return projectId; };
@@ -77,11 +84,15 @@ export function createProjectTeam(ctx: DomainContext, deps: ProjectTeamDeps) {
     if (before.maxPermission !== after.maxPermission) out.push(after.maxPermission ? `capped at ${MODE_LABEL[after.maxPermission]}` : 'no personal access cap');
     if (JSON.stringify(before.folderIds) !== JSON.stringify(after.folderIds)) out.push(after.folderIds === null ? 'every Project folder' : `${after.folderIds.length} of ${plural(total, 'folder')}`);
     if (JSON.stringify(before.secrets) !== JSON.stringify(after.secrets)) out.push(after.secrets.length ? `lends ${plural(after.secrets.length, 'secret')}` : 'lends no secrets');
+    if ((before.title ?? null) !== (after.title ?? null)) out.push(after.title ? `title ${after.title}` : 'no title');
+    if ((before.reportsTo ?? null) !== (after.reportsTo ?? null)) out.push(after.reportsTo ? 'new reporting line' : 'reports to nobody');
+    if (JSON.stringify(before.runner ?? null) !== JSON.stringify(after.runner ?? null)) out.push(after.runner ? `runs on ${after.runner.model}` : 'uses the project default model');
+    if ((before.instructions ?? '') !== (after.instructions ?? '')) out.push('instructions updated');
     return out;
   };
   function listMembers(projectId: string) {
     const p = policy(projectId), all = members().list(projectId);
-    return { members: all, access: Object.fromEntries(all.map(m => [m.id, memberAccess(m, p)])), policy: p };
+    return { members: all, access: Object.fromEntries(all.map(m => [m.id, memberAccess(m, p)])), policy: p, settings: members().settings(projectId) };
   }
 
   // ── PRJ-11: filtered activity ─────────────────────────────────────────────
@@ -217,9 +228,29 @@ export function createProjectTeam(ctx: DomainContext, deps: ProjectTeamDeps) {
     'project.members.add': input => {
       const projectId = project(input), kind = input.kind as MemberKind, role = input.role as MemberRole;
       if (typeof input.name !== 'string') throw new Error('Name the member.');
-      const m = members().add(projectId, { ...patchFrom(input), name: input.name, kind, role });
-      record(projectId, 'member.added', `Added ${m.name} as ${ROLE_LABEL[m.role]}`, m.id);
+      // A project that requires approval turns an agent hire into a pending request: an approval card, no access until approved.
+      const pending = kind === 'agent' && members().settings(projectId).requireHireApproval;
+      const m = members().add(projectId, { ...patchFrom(input), name: input.name, kind, role, pending });
+      const as = kind === 'agent' && m.title ? m.title : ROLE_LABEL[m.role];
+      if (pending) record(projectId, 'member.hire-requested', `Asked to add ${m.name} as ${as}: waiting for approval`, m.id);
+      else record(projectId, 'member.added', `Added ${m.name} as ${as}`, m.id);
       return m;
+    },
+    'project.members.decide': input => {
+      const projectId = project(input), m = members().decide(projectId, id(input.id, 'member id'), input.approve === true);
+      record(projectId, input.approve === true ? 'member.hire-approved' : 'member.hire-rejected', input.approve === true ? `Approved adding ${m.name}${m.title ? ` as ${m.title}` : ''}` : `Declined adding ${m.name}`, m.id);
+      return m;
+    },
+    'project.team.settings': input => members().settings(project(input)),
+    'project.team.settings.set': input => {
+      const projectId = project(input), patch: Partial<TeamSettings> = {};
+      if (input.requireHireApproval !== undefined) patch.requireHireApproval = input.requireHireApproval === true;
+      if (input.keyPrefix !== undefined) patch.keyPrefix = input.keyPrefix === null || input.keyPrefix === '' ? null : String(input.keyPrefix).trim().toUpperCase();
+      if (input.monthlyBudgetUsd !== undefined) patch.monthlyBudgetUsd = input.monthlyBudgetUsd === null || input.monthlyBudgetUsd === '' ? null : Number(input.monthlyBudgetUsd);
+      const next = members().setSettings(projectId, patch);
+      record(projectId, 'project.team-settings', `Updated project settings: ${Object.keys(patch).map(k => k === 'requireHireApproval' ? `approval to add agents ${next.requireHireApproval ? 'on' : 'off'}` : k === 'keyPrefix' ? `task keys ${next.keyPrefix ?? 'from the name'}` : `monthly budget ${next.monthlyBudgetUsd === null ? 'off' : `$${next.monthlyBudgetUsd}`}`).join(', ')}`);
+      deps.changed(projectId, '', true);
+      return next;
     },
     'project.members.update': input => {
       const projectId = project(input), { before, after } = members().update(projectId, id(input.id, 'member id'), patchFrom(input)), said = describeChanges(before, after, projectId);
@@ -239,6 +270,8 @@ export function createProjectTeam(ctx: DomainContext, deps: ProjectTeamDeps) {
   };
   return {
     handlers, runAccess,
+    /** A member with their Roster profile (runner, instructions), for task dispatch. */
+    member: (projectId: string, memberId: string) => members().get(projectId, memberId),
     purge(projectId: string) { members().purge(projectId); },
     dispose() { disposed = true; unsubscribe?.(); team?.close(); team = undefined; },
   };
