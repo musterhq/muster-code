@@ -29,10 +29,12 @@ jobs:
       # packages/builtin depends on "link:../../../muster/packages/core", i.e. a sibling checkout of
       # github.com/musterhq/muster next to this repo. The npm release of @musterhq/core lags that source and
       # lacks the Codex app-server API builtin imports, so build core from a pinned commit instead.
+      # This commit is the head of musterhq/muster#97 (Codex app-server lifecycle budgets: turnId, dispatchState,
+      # requireOwner), which builtin/src/codex.ts already uses; repoint to main once #97 merges.
       # Bump MUSTER_REF together with any builtin change that needs newer core APIs.
       - name: Build @musterhq/core (sibling checkout)
         env:
-          MUSTER_REF: 53130e359d9ea7a6e76bf6674ae270f021ef679f
+          MUSTER_REF: 042f827706d8503374d1026b2b4ba9227d48ddcb
         run: |
           MUSTER_DIR="$(dirname "$GITHUB_WORKSPACE")/muster"
           git init -q "$MUSTER_DIR"
