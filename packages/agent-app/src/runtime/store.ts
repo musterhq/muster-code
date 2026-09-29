@@ -668,6 +668,26 @@ export class AgentStore {
     this.db.prepare("UPDATE subagent_items SET status = ? WHERE chat_id = ? AND status = 'running'").run(status, chatId);
   }
 
+  /** A spawn report that still says a child is running, in a run that no longer exists, is settled as interrupted. */
+  interruptRunningChildren(chatId: string): void {
+    const endedAt = now();
+    for (const item of this.timeline(chatId)) {
+      const data = item.data;
+      if (item.kind !== 'tool' || data?.type !== 'collabAgentToolCall' || data.agentsStates == null) continue;
+      const wasText = typeof data.agentsStates === 'string';
+      let states: unknown = data.agentsStates;
+      if (wasText) { try { states = JSON.parse(data.agentsStates as string); } catch { continue; } }
+      if (!states || typeof states !== 'object' || Array.isArray(states)) continue;
+      let changed = false;
+      const next: Record<string, unknown> = {};
+      for (const [id, value] of Object.entries(states as Record<string, unknown>)) {
+        const info = value && typeof value === 'object' ? value as Record<string, unknown> : undefined;
+        if (info?.status === 'running' || info?.status === 'inProgress') { next[id] = {...info, status: 'interrupted', endedAt}; changed = true; } else next[id] = value;
+      }
+      if (changed) this.updateItem(item.id, item.text, item.status === 'running' ? 'interrupted' : item.status, {...data, agentsStates: wasText ? JSON.stringify(next) : next});
+    }
+  }
+
   item(id: string): TimelineItem | undefined {
     const row = this.db.prepare('SELECT * FROM timeline WHERE id = ?').get(id) as TimelineRow | undefined;
     return row ? rowToItem(row) : undefined;
@@ -850,6 +870,7 @@ export class AgentStore {
         this.updateChatRaw(id, { status: 'interrupted', error: recovery.reason, recovery:JSON.stringify(recovery) });
         this.appendItem(id, 'notice', recovery.reason, 'recovery-needed', {recovery});
         this.settleSubagentItems(id);
+        this.interruptRunningChildren(id);
       }
       if (rows.length > 0) this.bumpVersion();
       return rows.map((row) => row.id);

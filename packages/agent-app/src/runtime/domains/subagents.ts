@@ -92,11 +92,12 @@ export function claudeChildTranscript(chatId: string, threadId: string, parentIt
   for (const item of parentItems) {
     const data = item.data;
     if (item.kind !== 'tool' || data?.type !== 'collabAgentToolCall' || !(Array.isArray(data.receiverThreadIds) && data.receiverThreadIds.includes(threadId))) continue;
-    const states = parsed(data.agentsStates), state = isRecord(states) && isRecord(states[threadId]) ? str((states[threadId] as Record<string, unknown>).status) : undefined;
+    const states = parsed(data.agentsStates), info = isRecord(states) && isRecord(states[threadId]) ? states[threadId] as Record<string, unknown> : undefined, state = str(info?.status);
     if (state === 'running') status = 'running'; else if (state === 'completed') status = 'completed'; else if (state === 'failed') status = 'failed'; else if (state === 'interrupted') status = 'interrupted';
     const agents = parsed(data.receiverAgents), agent = Array.isArray(agents) ? agents.find(entry => isRecord(entry) && entry.threadId === threadId) : undefined;
     if (isRecord(agent)) { name = str(agent.name) ?? name; role = str(agent.role) ?? role; model = str(agent.model) ?? model; }
     startedAt ??= item.createdAt; updatedAt = item.createdAt;
+    startedAt = str(info?.startedAt) ?? startedAt; updatedAt = str(info?.endedAt) ?? updatedAt;
   }
   return {threadId, status, items: rows.slice(-MAX_ITEMS).map(row => ({...row, chatId, text: clip(row.text)})), ...(name ? {name} : {}), ...(role ? {role} : {}), ...(model ? {model} : {}), ...(startedAt ? {startedAt} : {}), ...(updatedAt ? {updatedAt} : {}), source: 'live'};
 }

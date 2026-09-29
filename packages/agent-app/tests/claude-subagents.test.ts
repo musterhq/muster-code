@@ -14,19 +14,20 @@ import {claudeChildRow,claudeChildThread} from '../src/runtime/subagent-rows.ts'
 import {AgentStore} from '../src/runtime/store.ts';
 import {schemaVersion} from '../src/runtime/schema-migrations.ts';
 import type {TimelineItem} from '../src/shared/protocol.ts';
+import {getSubagentActivity} from '../src/renderer/subagentActivity.ts';
 
 /** Real `claude -p --output-format stream-json --verbose` runs (Claude Code 2.1.x), redacted. */
 const fixture=(name:string)=>readFileSync(new URL(`./fixtures/${name}`,import.meta.url),'utf8').trim().split('\n').map(line=>JSON.parse(line) as Record<string,any>);
 
 type Ev={method:string;params:Record<string,any>};
-function harness(){
+function harness(options:{backgroundTimeoutMs?:number}={}){
   const child=new EventEmitter() as EventEmitter&{stdout:PassThrough;stderr:PassThrough;stdin:PassThrough;kill():boolean};
   child.stdout=new PassThrough();child.stderr=new PassThrough();child.stdin=new PassThrough();child.kill=()=>true;
   const events:Ev[]=[];let deltas='';let sessionId='';
   const input:AdapterRunInput={chat:{id:'chat',mode:'agent'} as AdapterRunInput['chat'],cwd:'/work',prompt:'go',model:'claude-code/sonnet',permissionMode:'full',signal:new AbortController().signal,
     onThreadReady:id=>{sessionId=id;},onTurnAccepted:()=>{},onDelta:t=>{deltas+=t;},onReasoning:()=>{},onEvent:(method,params)=>events.push({method,params})};
   const spawn:Spawn=()=>child as unknown as ChildProcess;
-  const running=claudeCodeAdapter({binary:'/bin/claude',spawn}).run(input);
+  const running=claudeCodeAdapter({binary:'/bin/claude',spawn,...options}).run(input);
   const emit=(...lines:unknown[])=>{for(const line of lines)child.stdout.write(JSON.stringify(line)+'\n');};
   const tick=()=>new Promise(resolve=>setTimeout(resolve,15));
   const close=(code=0)=>{child.stdout.end();child.stderr.end();setImmediate(()=>child.emit('close',code));};
@@ -174,4 +175,56 @@ test('a Claude child transcript combines saved rows with the state its spawn rep
   assert.equal(claudeChildTranscript('chat','s:t',[report('interrupted')],rows).status,'interrupted');
   assert.equal(claudeChildTranscript('chat','s:t',[],rows).status,'unknown');
   void DatabaseSync;
+});
+
+test('a finished child reports its own start and end from the stream, so elapsed is not 0s',async()=>{
+  const h=harness();
+  h.emit(...fixture('claude-subagent-foreground.jsonl'));h.close();await h.running;
+  const info=(e:Ev)=>Object.values(JSON.parse(JSON.stringify(e.params.item.agentsStates)))[0] as {startedAt:string;endedAt?:string};
+  const spawns=collab(h.events),first=info(spawns[0]!),done=info(spawns.at(-1)!);
+  assert.equal(first.endedAt,undefined,'a running child has no end yet');
+  assert.equal(Date.parse(done.endedAt!)-Date.parse(done.startedAt),4812,'the notification\'s duration_ms');
+  const report=(agentsStates:unknown,createdAt:string):TimelineItem=>({id:'r'+createdAt,chatId:'chat',kind:'tool',text:'',createdAt,status:'completed',data:{type:'collabAgentToolCall',receiverThreadIds:['s:t'],agentsStates:JSON.stringify(agentsStates)}});
+  const items=[report({'s:t':{status:'running',startedAt:done.startedAt}},'2026-01-01T00:00:00Z'),report({'s:t':{status:'completed',startedAt:done.startedAt,endedAt:done.endedAt}},'2026-01-01T00:00:00Z')];
+  const row=getSubagentActivity(items).agents[0]!;
+  assert.equal(Date.parse(row.updatedAt!)-Date.parse(row.startedAt!),4812,'both reports share one created_at, yet elapsed is the real duration');
+  const transcript=claudeChildTranscript('chat','s:t',items.map(i=>({...i,data:{...i.data,receiverThreadIds:['s:t']}})),[]);
+  assert.equal(Date.parse(transcript.updatedAt!)-Date.parse(transcript.startedAt!),4812);
+});
+
+test('a child persisted as running is interrupted when the app restarts after a crash',()=>{
+  const dir=mkdtempSync(join(tmpdir(),'muster-crash-'));
+  try{
+    const first=new AgentStore(dir);
+    const chat=first.createChat({model:'claude-code/sonnet',providerId:'claude-code',mode:'agent'});
+    first.updateChat(chat.id,{status:'running'} as never);
+    for(const text of [true,false]){
+      const states={'s:t':{status:'running',startedAt:'2026-01-01T00:00:00.000Z'},'s:d':{status:'completed'}};
+      first.appendItem(chat.id,'tool','spawn','running',{type:'collabAgentToolCall',receiverThreadIds:['s:t','s:d'],agentsStates:text?JSON.stringify(states):states});
+    }
+    first.close();
+    const store=new AgentStore(dir);
+    assert.deepEqual(store.recoverOrphanedRuns(),[chat.id]);
+    for(const item of store.timeline(chat.id).filter(i=>i.data?.type==='collabAgentToolCall')){
+      const states=typeof item.data!.agentsStates==='string'?JSON.parse(item.data!.agentsStates):item.data!.agentsStates;
+      assert.equal(states['s:t'].status,'interrupted');assert.ok(states['s:t'].endedAt);assert.equal(states['s:d'].status,'completed');
+      assert.equal(item.status,'interrupted');
+    }
+    assert.equal(getSubagentActivity(store.timeline(chat.id)).agents.find(a=>a.threadId==='s:t')!.state,'interrupted');
+    store.close();
+  }finally{rmSync(dir,{recursive:true,force:true});}
+});
+
+test('a background child that never reports back is interrupted after the timeout and stdin is released',async()=>{
+  const lines=fixture('claude-subagent-background.jsonl');
+  const at=lines.findIndex(e=>e.subtype==='task_notification');
+  const h=harness({backgroundTimeoutMs:40});
+  h.emit(...lines.slice(0,at));
+  h.emit({type:'result',subtype:'success',is_error:false,result:'launched'});await h.tick();
+  assert.equal(h.child.stdin.writableEnded,false,'still waiting inside the bound');
+  await new Promise(resolve=>setTimeout(resolve,80));
+  assert.equal(h.child.stdin.writableEnded,true,'stdin released after the bound');
+  const last=collab(h.events).at(-1)!;
+  assert.equal(state(last).status,'interrupted');assert.match(state(last).message!,/Timed out/);assert.equal(last.method,'item/completed');
+  h.close();await h.running;
 });

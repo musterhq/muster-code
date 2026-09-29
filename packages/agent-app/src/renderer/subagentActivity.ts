@@ -146,6 +146,10 @@ export function getSubagentActivity(items: readonly TimelineItem[]): SubagentSum
       if (error) row.error = error;
       else if (state && subagentState(state).kind !== 'failed') delete row.error;
       if (item.createdAt) { row.startedAt ??= item.createdAt; row.updatedAt = item.createdAt; }
+      // The provider's own clock, when its report carries one, beats the row's creation time (which never moves).
+      const began = text(stateInfo?.startedAt), ended = text(stateInfo?.endedAt);
+      if (began) row.startedAt = began;
+      if (ended) row.updatedAt = ended;
       rows.set(id, row);
     }
   }
