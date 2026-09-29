@@ -421,7 +421,7 @@ test("command tools render as >_ cards and spawned children appear in the transc
 test("pasted images stay as chips and are not left in the textarea", () => {
   const h = harness(); h.state("one");
   h.emit({ type: "insert", text: "@image:%2Ftmp%2Fshot.png " });
-  assert.equal((h.document.getElementById("input") as HTMLTextAreaElement).value, "");
+  assert.equal((h.document.getElementById("input") as unknown as { value: string }).value, "");
   assert.ok(h.document.querySelector(".ctx.image"));
   h.evaluate('input.value="See this"; send()');
   const sent = h.posted.filter((m) => m.type === "send").at(-1);
