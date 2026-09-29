@@ -82,10 +82,13 @@ export interface WorkspaceSnapshot {
 /** `runId`: the agent turn that wrote it, so the thread can show that turn's Receipt under the message. */
 export interface WorkspaceComment { id: string; author: { kind: 'agent' | 'user' | 'system'; id: string | null; label: string }; body: string; createdAt: string; runId?: string | null }
 
-/** One agent turn in the Ledger. Muster entries are hash-chained (`prevHash` → `hash`); Paperclip runs carry Paperclip's own usage and no chain. */
+/** One agent turn in the Ledger. Muster entries are hash-chained (`prevHash` → `hash`); Paperclip runs carry Paperclip's own usage and no chain.
+ *  `history` entries are imported history (#190): turns that ran before the Ledger existed, rebuilt from saved chats and
+ *  imported Paperclip activity. They are never part of the chain (no seq, no hash), so `verify()` covers live receipts only. */
+export type LedgerSource = WorkspaceSource | 'history';
 export interface LedgerFile { path: string; status: 'added' | 'modified' | 'deleted'; before: string | null; after: string | null; added: number | null; removed: number | null }
 export interface LedgerEntry {
-  id: string; seq: number | null; source: WorkspaceSource; chatId: string | null; runId: string; taskId: string | null; projectId: string | null;
+  id: string; seq: number | null; source: LedgerSource; chatId: string | null; runId: string; taskId: string | null; projectId: string | null;
   trigger: string; agent: string; provider: string | null; model: string | null;
   tokens: { input: number; cached: number; output: number; reasoning: number } | null; costUsd: number | null;
   tools: { name: string; count: number }[]; approvals: number;
@@ -165,6 +168,11 @@ export interface PaperclipCommands {
   'paperclip.badge': { input: Record<string, never>; output: WorkspaceBadge };
   /** The Ledger: Muster's hash-chained turn entries (verified on read) and the linked Paperclip's runs. */
   'paperclip.ledger': { input: { limit?: number }; output: LedgerView };
+  /** Imports past turns into the Ledger as imported history (once per chat; running it again adds nothing). Also runs on its own, in the background, after startup. */
+  'paperclip.ledger.backfill': { input: Record<string, never>; output: { chats: number; turns: number } };
+  /** Inbox Dismiss: hides one item until it changes (`at` is the item's time, so a new failure shows again). The chat or task itself is kept. */
+  'paperclip.inbox.dismiss': { input: { id: string; at: string }; output: { ok: true } };
+  'paperclip.inbox.dismissed': { input: Record<string, never>; output: { items: { id: string; at: string }[] } };
   /** Answers a Needs-you card from the thread or the Inbox (Paperclip confirmations: accept, or reject with a reason). */
   'paperclip.interaction.respond': { input: { taskId: string; interactionId: string; accept: boolean; reason?: string }; output: { ok: true } };
   /** Copies a Paperclip company into Muster's Projects with GET requests only. Idempotent. Nothing starts running. */
@@ -178,7 +186,7 @@ export const PAPERCLIP_COMMANDS = {
   'paperclip.config.get': true, 'paperclip.config.set': true, 'paperclip.test': true, 'paperclip.snapshot': true, 'paperclip.task': true,
   'paperclip.comment': true, 'paperclip.task.update': true, 'paperclip.task.create': true, 'paperclip.agent.pause': true, 'paperclip.agent.resume': true,
   'paperclip.pauseAll': true, 'paperclip.resumeAll': true, 'paperclip.run.cancel': true, 'paperclip.memory': true, 'paperclip.list': true,
-  'paperclip.watch': true, 'paperclip.badge': true, 'paperclip.ledger': true, 'paperclip.interaction.respond': true, 'paperclip.import': true, 'paperclip.task.start': true,
+  'paperclip.watch': true, 'paperclip.badge': true, 'paperclip.ledger': true, 'paperclip.ledger.backfill': true, 'paperclip.inbox.dismiss': true, 'paperclip.inbox.dismissed': true, 'paperclip.interaction.respond': true, 'paperclip.import': true, 'paperclip.task.start': true,
 } as const satisfies Record<keyof PaperclipCommands, true>;
 
 export const OPEN_STATUSES: readonly WorkspaceStatus[] = ['backlog', 'todo', 'in_progress', 'in_review', 'blocked'];

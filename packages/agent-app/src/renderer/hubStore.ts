@@ -113,3 +113,32 @@ export function useInboxBadge(): WorkspaceBadge | null {
   }, []);
   return useSyncExternalStore(l => { badgeListeners.add(l); return () => badgeListeners.delete(l); }, () => badge);
 }
+
+// --- Inbox dismissals (#189) ---------------------------------------------------------------------------------------------
+// Read once, then kept here: Dismiss updates this map at once and saves in the background. Shared by the Inbox and the badge.
+let dismissals: ReadonlyMap<string, string> = new Map();
+let dismissalsLoaded = false;
+const dismissalListeners = new Set<() => void>();
+const setDismissals = (next: ReadonlyMap<string, string>) => { dismissals = next; for (const l of dismissalListeners) l(); };
+export function useInboxDismissals(): ReadonlyMap<string, string> {
+  useEffect(() => {
+    if (dismissalsLoaded) return;
+    dismissalsLoaded = true;
+    void invoke('paperclip.inbox.dismissed', {}).then(result => {
+      if (!result?.items?.length) return;
+      const next = new Map(dismissals);
+      for (const item of result.items) if (!next.has(item.id)) next.set(item.id, item.at);
+      setDismissals(next);
+    }, () => { dismissalsLoaded = false; });
+  }, []);
+  return useSyncExternalStore(l => { dismissalListeners.add(l); return () => dismissalListeners.delete(l); }, () => dismissals);
+}
+/** Hides an Inbox item until it changes. The chat, task or mail it points at is kept. */
+export function dismissInboxItem(item: { id: string; at: string }): Promise<void> {
+  const previous = dismissals.get(item.id);
+  setDismissals(new Map(dismissals).set(item.id, item.at));
+  return invoke('paperclip.inbox.dismiss', { id: item.id, at: item.at }).then(() => undefined, cause => {
+    if (dismissals.get(item.id) === item.at) { const next = new Map(dismissals); if (previous === undefined) next.delete(item.id); else next.set(item.id, previous); setDismissals(next); }
+    throw cause;
+  });
+}
