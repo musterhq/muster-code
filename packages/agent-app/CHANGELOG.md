@@ -3,6 +3,12 @@
 All notable changes to Muster Agent. Each `## <version>` section becomes the notes of the
 `agent-v<version>` GitHub Release (`.github/workflows/agent-app-release.yml`).
 
+## Unreleased
+
+- Intel Macs get their own download (`Muster-Agent-<version>-x64.dmg` / `.zip`) and update to the Intel build automatically.
+- Installing an update no longer hangs on "Installing" when you cancel the quit prompt or choose Keep Working in
+  Background; the update stays ready and can be installed again.
+
 ## 0.2.5
 
 - Muster Agent for Windows and Linux. Windows 10/11 (x64): a per-user installer (`-win-x64-setup.exe`) or a

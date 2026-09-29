@@ -13,7 +13,7 @@ already have. Native macOS app, built on Electron.
 
 ### [⬇ Download Muster Agent](https://github.com/musterhq/muster-code/releases/latest)
 
-<sub>macOS (Apple silicon) <code>.dmg</code> · Windows 10/11 installer <code>-win-x64-setup.exe</code> · Linux <code>.AppImage</code> / <code>.deb</code> · Intel Macs: <a href="#run-muster-agent-on-another-mac-from-source">run from a clone</a></sub>
+<sub>macOS (Apple silicon and Intel) <code>.dmg</code> · Windows 10/11 installer <code>-win-x64-setup.exe</code> · Linux <code>.AppImage</code> / <code>.deb</code></sub>
 
 <br/>
 
@@ -92,7 +92,7 @@ To regenerate these screenshots, run `npm run shots` (see [Screenshots](#screens
 
 ## Install
 
-1. Download the newest `Muster-Agent-<version>-arm64.dmg` from
+1. Download the newest `Muster-Agent-<version>-arm64.dmg` (Apple silicon) or `-x64.dmg` (Intel) from
    [the latest release](https://github.com/musterhq/muster-code/releases/latest) (all releases are
    [tagged `agent-v…`](https://github.com/musterhq/muster-code/releases?q=agent-v)). A `.zip` of the
    same app is attached too, and `SHA256SUMS` lets you check the download
@@ -114,7 +114,7 @@ To regenerate these screenshots, run `npm run shots` (see [Screenshots](#screens
    when you restart.
 
 What it needs: macOS 14 (Sonoma) or later, Windows 10/11 (x64) or a 64-bit Linux, and a model provider.
-The macOS download is Apple silicon only for now; Intel Macs run from a clone (below). Windows: run the
+The macOS download comes in Apple silicon (`-arm64`) and Intel (`-x64`) builds; building from a clone (below) also works on either. Windows: run the
 `-win-x64-setup.exe` installer. Linux: the `.AppImage` (`chmod +x`, then run) or the `.deb`. Docker
 (sandboxes) is optional. Computer use and Quick Look previews are macOS-only.
 

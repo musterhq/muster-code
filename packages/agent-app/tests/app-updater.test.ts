@@ -19,6 +19,19 @@ test('pickRelease takes the newest agent release above the current one that has 
   assert.equal(pickRelease([release('0.3.0',{assets:[asset('Muster-Agent-0.3.0-arm64.zip')]})],'0.2.0','stable','arm64'),undefined,'SHA256SUMS is required');
 });
 
+test('pickRelease matches the running architecture in a release that ships both Mac builds', () => {
+  const both=(version:string)=>release(version,{assets:[asset(`Muster-Agent-${version}-arm64.zip`),asset(`Muster-Agent-${version}-arm64.dmg`),asset(`Muster-Agent-${version}-x64.zip`),asset(`Muster-Agent-${version}-x64.dmg`),asset('SHA256SUMS')]});
+  const releases=[both('0.3.0'),release('0.4.0'),release('0.5.0',{assets:[asset('Muster-Agent-0.5.0-x64.zip'),asset('SHA256SUMS')]})];
+  const arm=pickRelease(releases,'0.2.0','stable','arm64','darwin'),intel=pickRelease(releases,'0.2.0','stable','x64','darwin');
+  assert.equal(arm?.release.version,'0.4.0','arm64 takes the newest release that has an arm64 zip');
+  assert.equal(arm?.zip.name,'Muster-Agent-0.4.0-arm64.zip');
+  assert.equal(intel?.release.version,'0.5.0','x64 takes the newest release that has an x64 zip');
+  assert.equal(intel?.zip.name,'Muster-Agent-0.5.0-x64.zip');
+  assert.equal(pickRelease([both('0.3.0')],'0.2.0','stable','x64','darwin')?.zip.name,'Muster-Agent-0.3.0-x64.zip','never the dmg or the other architecture');
+  assert.equal(pickRelease([release('0.3.0')],'0.2.0','stable','x64','darwin'),undefined,'an arm64-only release is not offered to Intel');
+  assert.equal(pickRelease([release('0.3.0')],'0.2.0','stable','ia32','darwin'),undefined);
+});
+
 test('checksumFor reads shasum lines and ignores other files', () => {
   const sums=`${'a'.repeat(64)}  Muster-Agent-0.3.0-arm64.dmg\n${'B'.repeat(64)} *Muster-Agent-0.3.0-arm64.zip\n`;
   assert.equal(checksumFor(sums,'Muster-Agent-0.3.0-arm64.zip'),'b'.repeat(64));
@@ -126,4 +139,24 @@ test('coming back to the window re-checks only when the last look is stale', asy
   assert.equal(calls,1,'just checked: not again');
   updater.checkIfStale(0);await new Promise(r=>setTimeout(r,20));
   assert.equal(calls,2,'stale: check again');
+});
+
+test('cancelInstall stops the waiting installer and returns the verified update to ready', async () => {
+  const {spawn}=await import('node:child_process');
+  const root=mkdtempSync(path.join(tmpdir(),'muster-updater-cancel-'));
+  const target=path.join(root,'Applications','Muster Agent.app'),staged=path.join(root,'pending','0.3.0','app','Muster Agent.app');
+  for(const [dir,label] of [[target,'old'],[staged,'new']] as const){mkdirSync(path.join(dir,'Contents/MacOS'),{recursive:true});writeFileSync(path.join(dir,'Contents/marker'),label);}
+  const running=spawn('/bin/sleep',['2']);
+  const events:UpdateStatus[]=[];
+  const updater=new AppUpdater({current:'0.2.0',arch:'arm64',exe:path.join(target,'Contents/MacOS/Muster Agent'),repo:'o/r',channel:'stable',settingsFile:path.join(root,'updates.json'),stagingDir:path.join(root,'pending'),emit:status=>events.push(status),quit:()=>{},pid:running.pid,relaunch:'/usr/bin/true',platform:'darwin'});
+  Object.assign(updater as any,{staged});(updater as any).status={...updater.snapshot(),phase:'ready'};
+  assert.equal((await updater.install()).phase,'installing');
+  updater.cancelInstall();
+  assert.equal(updater.snapshot().phase,'ready','the user can install again');
+  // The app "exits" after the installer was stopped: nothing may be swapped.
+  await new Promise(resolve=>running.once('exit',resolve));await new Promise(r=>setTimeout(r,600));
+  assert.equal(readFileSync(path.join(target,'Contents/marker'),'utf8'),'old','a cancelled install never replaces the app');
+  assert.equal(existsSync(staged),true,'the staged update is kept for the next attempt');
+  updater.cancelInstall();
+  assert.equal(events.filter(status=>status.phase==='ready').length,1,'cancelling when not installing does nothing');
 });

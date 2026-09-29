@@ -41,12 +41,16 @@ jobs:
   build:
     name: build (${{ matrix.arch }})
     strategy:
-      fail-fast: true
+      # Keep the other architecture building when one fails so its log is available; publish needs both anyway.
+      fail-fast: false
       matrix:
         include:
-          # Apple silicon only for now. Intel (runner: macos-15-intel, arch: x64) is paused; Intel Macs run from a clone.
+          # One native build per architecture: Electron, node-pty and the Quick Look addon are compiled for the runner's
+          # own CPU, and the updater picks Muster-Agent-<version>-<arch>.zip for the running architecture.
           - runner: macos-15
             arch: arm64
+          - runner: macos-15-intel
+            arch: x64
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
     defaults:
@@ -257,6 +261,7 @@ jobs:
             echo "| Mac | File |"
             echo "| --- | --- |"
             echo "| Apple silicon (M1 and later) | \`Muster-Agent-${VERSION}-arm64.dmg\` (or \`.zip\`) |"
+            echo "| Intel | \`Muster-Agent-${VERSION}-x64.dmg\` (or \`.zip\`) |"
             echo
             echo "Open the disk image and drag **Muster Agent** to **Applications**."
             echo

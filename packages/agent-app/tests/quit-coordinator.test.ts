@@ -21,6 +21,14 @@ test('cancel keeps runtime alive and a later quit can succeed',async()=>{
   allow=true;await quit.request();assert.equal(preparations,1);assert.equal(exits,1);
 });
 
+test('a declined or failed quit reports the abort so a pending update install can stand down',async()=>{
+  let aborts=0,errors=0,exits=0,allow=false,fail=false;
+  const quit=createQuitCoordinator({confirm:async()=>allow,prepare:async()=>{if(fail)throw new Error('still saving');},exit:()=>{exits++;},onError:()=>{errors++;},onAbort:()=>{aborts++;}});
+  await quit.request();assert.equal(aborts,1,'declined');assert.equal(exits,0);
+  allow=true;fail=true;await quit.request();assert.equal(aborts,2,'shutdown failed');assert.equal(errors,1);
+  fail=false;await quit.request();assert.equal(aborts,2,'a completed quit is not an abort');assert.equal(exits,1);
+});
+
 test('deadline keeps exit blocked; the same underlying disposal can finish for retry',async()=>{
   const disposal=Promise.withResolvers<void>();let exits=0,errors=0;
   const quit=createQuitCoordinator({confirm:async()=>true,prepare:()=>withinDeadline(disposal.promise,5),exit:()=>{exits++;},onError:()=>{errors++;}});
