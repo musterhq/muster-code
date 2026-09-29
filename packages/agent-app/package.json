@@ -3,7 +3,7 @@
   "version": "0.2.5",
   "private": true,
   "description": "Muster Code standalone agent desktop app (Electron, no Code-OSS extension host).",
-  "license": "UNLICENSED",
+  "license": "MIT",
   "main": "dist/main/index.cjs",
   "engines": {
     "node": ">=24.0.0 <25",
