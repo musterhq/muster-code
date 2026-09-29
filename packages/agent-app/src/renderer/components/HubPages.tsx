@@ -83,8 +83,13 @@ export function PulseBoard({ snapshot, nav, agentId, scoped = false }: { snapsho
   ];
   const act = async (key: string, fn: () => Promise<unknown>, done: string) => { setBusy(key); try { await fn(); notifySuccess(done); } catch (cause) { notifyError(cause); } finally { setBusy(null); setConfirm(null); } };
   const sources: WorkspaceSource[] = agentId ? [] : [...(snapshot.agents.some(a => a.source === 'local' && a.pausable) ? ['local' as const] : []), ...(snapshot.agents.some(a => a.source === 'paperclip') ? ['paperclip' as const] : [])];
-  const label = (s: WorkspaceSource) => scoped ? `${s === 'paperclip' ? NAMES.paperclip : 'Muster'} agents on this project` : s === 'paperclip' ? snapshot.paperclip?.company?.name ?? NAMES.paperclip : 'Muster';
-  // In a project, Pause stops exactly this project's agents; elsewhere it stops every agent of that source.
+  // Paperclip agents belong to the company, not the project: pausing one here also stops its work on every other project.
+  const running = (s: WorkspaceSource) => snapshot.agents.filter(a => a.source === s && a.pausable && a.status !== 'paused' && a.status !== 'terminated').length;
+  const paperclipAgents = (n: number) => `${n} ${NAMES.paperclip} ${n === 1 ? 'agent' : 'agents'}`;
+  const label = (s: WorkspaceSource) => scoped ? s === 'paperclip' ? `${paperclipAgents(running(s))} (company-wide)` : 'Muster agents on this project' : s === 'paperclip' ? snapshot.paperclip?.company?.name ?? NAMES.paperclip : 'Muster';
+  const confirmText = (s: WorkspaceSource) => scoped && s === 'paperclip' ? `Pause ${paperclipAgents(running(s))}? They also stop working on other projects.`
+    : `Pause every ${scoped ? 'Muster agent on this project' : `${label(s)} agent`}? Running work stops and nothing new starts until you resume.`;
+  // In a project, Pause stops the agents on this project (for Paperclip, company-wide); elsewhere every agent of that source.
   const pauseAll = (source: WorkspaceSource, paused: boolean) => scoped
     ? Promise.all(snapshot.agents.filter(a => a.source === source && a.pausable && (paused ? a.status !== 'paused' : a.status === 'paused')).map(a => invoke(paused ? 'paperclip.agent.pause' : 'paperclip.agent.resume', { id: a.id })))
     : invoke(paused ? 'paperclip.pauseAll' : 'paperclip.resumeAll', { source });
@@ -93,7 +98,7 @@ export function PulseBoard({ snapshot, nav, agentId, scoped = false }: { snapsho
       <div className="ws-page-actions">{sources.map(source => {
         const paused = snapshot.agents.filter(a => a.source === source && a.status === 'paused').length;
         return confirm === source
-          ? <span key={source} className="ws-confirm"><span className="ws-confirm-text">Pause every {label(source)} agent? Running work stops and nothing new starts until you resume.</span>
+          ? <span key={source} className="ws-confirm"><span className="ws-confirm-text">{confirmText(source)}</span>
               <button type="button" className="settings-button secondary" onClick={() => setConfirm(null)}>Keep running</button>
               <button type="button" className="settings-button danger" disabled={busy !== null} onClick={() => void act(`pause:${source}`, () => pauseAll(source, true), `Paused ${label(source)}.`)}><Pause size={13}/>Pause</button></span>
           : <span key={source} className="ws-confirm"><button type="button" className="settings-button secondary" disabled={busy !== null} onClick={() => setConfirm(source)}><Pause size={13}/>Pause {label(source)}</button>

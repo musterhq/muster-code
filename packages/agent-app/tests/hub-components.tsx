@@ -101,6 +101,13 @@ assert.equal(document.querySelectorAll('.ws-roster-line').length,2,'CEO→CTO an
 assert.equal(document.querySelectorAll('.ws-roster-talk').length,1,'CEO is talking to CTO on the live RAG-15');
 assert.match(cards[1].getAttribute('title')!,/Working on: RAG-15 Implement migration\nModel: claude-opus-5-5/,'hover shows current work and model');
 assert.match(cards[0].textContent!,/3/,'memory badge from the project’s bank');
+// Pulse: Paperclip agents belong to the company, so the project's Pause says so and warns before stopping them.
+const pause=[...document.querySelectorAll('.ws-page-actions button')].find(b=>/^Pause/.test(b.textContent!));
+assert.equal(pause?.textContent,'Pause 3 Paperclip agents (company-wide)');
+await click(pause);
+assert.deepEqual(text('.ws-confirm-text'),['Pause 3 Paperclip agents? They also stop working on other projects.']);
+await click([...document.querySelectorAll('.ws-confirm button')].find(b=>/Keep running/.test(b.textContent!)));
+assert.equal(calls.filter(c=>c.command==='paperclip.agent.pause').length,0,'nothing pauses without the confirm');
 let focused='';(window.HTMLElement.prototype as any).focus=function(){focused=this.querySelector?.('.ws-roster-name')?.textContent??'';};
 await key(cards[0],'ArrowDown');
 assert.equal(focused,'CTO','arrow keys move between cards');
