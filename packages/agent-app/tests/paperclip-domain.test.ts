@@ -188,7 +188,7 @@ test('inbox helpers: attention kinds, review/blocked tasks, recent failed runs o
 
 test('local source: Muster Projects become tasks, agents and an inbox; writes go through the existing commands',async t=>{
   const task=(id:string,state:string,extra:object={})=>({id,projectId:'p1',title:`Task ${id}`,status:'todo',state,dependencies:[],acceptance:'Done when green',evidence:[],revision:3,createdAt:`2026-09-2${id}T00:00:00.000Z`,updatedAt:now,owner:{kind:'agent',id:'agent'},priority:1,artifacts:['docs/plan.md'],attempts:[],verification:null,permissionMode:null,budgetMinutes:null,blockedBy:null,ready:false,verificationStale:false,waitingChatId:null,...extra});
-  const work={tasks:{items:[task('1','running',{attempts:[{id:'at1',chatId:'chat1',runId:'run',trigger:'user',startedAt:now,endedAt:null,status:'running',contextVersion:1}]}),task('2','needs-input'),task('3','verified'),task('4','failed',{runError:'tests failed'})],truncated:false},decisions:{items:[],truncated:false},activity:{items:[{id:'act',projectId:'p1',actor:'You',kind:'task.create',summary:'Created task',refId:'1',createdAt:'2026-09-21T00:00:00.000Z'}],truncated:false},scheduler:{paused:false},instructions:{},context:{},coordinator:{},dispatching:[]};
+  const work={tasks:{items:[task('1','running',{attempts:[{id:'at1',chatId:'chat1',runId:'run',trigger:'user',startedAt:now,endedAt:null,status:'running',contextVersion:1}]}),task('2','needs-input'),task('3','verified'),task('4','failed',{runError:'tests failed'})],truncated:false},decisions:{items:[],truncated:false},activity:{items:[{id:'act',projectId:'p1',actor:'You',kind:'task.status',summary:'Task moved to running',refId:'1',createdAt:'2026-09-21T00:00:00.000Z'}],truncated:false},scheduler:{paused:false},instructions:{},context:{},coordinator:{},dispatching:[]};
   const h=await harness(t,{invoke:(command,input)=>{
     if(command==='project.list')return [{id:'p1',name:'Launch Plan',goal:'Ship',folderIds:['f1'],primaryFolderId:'f1',archived:false,archivedAt:null}];
     if(command==='project.work')return work;if(command==='project.members.list')return {members:[{id:'m1',kind:'agent',name:'Builder',revokedAt:null}]};
@@ -204,7 +204,7 @@ test('local source: Muster Projects become tasks, agents and an inbox; writes go
   assert.deepEqual(snap.inbox.map((i:any)=>i.kind).sort(),['failed_run','question','question'],'needs-input task, a question by mail, the failed task');
   assert.ok(snap.inbox.every((i:any)=>i.group==='Launch Plan'));
   const detail=await h.call('paperclip.task',{id:'1'});
-  assert.equal(detail.description,'Done when green');assert.equal(detail.comments[0].body,'Created task');assert.equal(detail.addressee.label,'Builder');
+  assert.equal(detail.description,'Done when green');assert.equal(detail.comments[0].body,'Task moved to running');assert.equal(detail.addressee.label,'Builder');
   await h.call('paperclip.comment',{taskId:'1',body:'Use Postgres'});
   assert.deepEqual(h.invoked.find(c=>c.command==='mailbox.send')!.input,{to:{kind:'taskRun',id:'1',projectId:'p1'},body:'Use Postgres'});
   await h.call('paperclip.task.update',{taskId:'2',status:'blocked'});
