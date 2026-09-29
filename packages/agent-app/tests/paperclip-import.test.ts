@@ -118,6 +118,12 @@ test('a started task runs in its own worktree of the project folder, never the c
   await service.invoke('paperclip.config.set',{mode:'off'});
   const ws=await service.invoke('paperclip.snapshot',{});
   const rag15=ws.tasks.find(x=>x.key==='RAG-15')!;
+  // RAG-8 is done, so its dispatch is refused: Start fails, and takes back the worktree and folder it made.
+  const rag8=ws.tasks.find(x=>x.key==='RAG-8')!;
+  const foldersBefore=(await service.invoke('app.snapshot',undefined)).folders.length;
+  await assert.rejects(()=>service.invoke('paperclip.task.start',{taskId:rag8.id}));
+  assert.doesNotMatch(execFileSync('git',['-C',repo,'worktree','list'],{encoding:'utf8'}),/muster\/rag-8/,'a failed Start leaves no worktree behind');
+  assert.equal((await service.invoke('app.snapshot',undefined)).folders.length,foldersBefore,'nor a linked folder');
   // RAG-15 is blocked in Paperclip; the founder moves it back to todo before starting it.
   await service.invoke('paperclip.task.update',{taskId:rag15.id,status:'todo'});
   const started=await service.invoke('paperclip.task.start',{taskId:rag15.id});
@@ -128,6 +134,9 @@ test('a started task runs in its own worktree of the project folder, never the c
   assert.equal(folder.path,started.worktree,'the run works in the worktree');
   const branches=execFileSync('git',['-C',repo,'worktree','list'],{encoding:'utf8'});
   assert.match(branches,/muster\/rag-15/);
+  // Starting again reuses the task's worktree instead of failing on the checked-out branch; the dispatch refusal is what surfaces.
+  await assert.rejects(()=>service.invoke('paperclip.task.start',{taskId:rag15.id}),(e:Error)=>!/already checked out/.test(e.message));
+  assert.match(execFileSync('git',['-C',repo,'worktree','list'],{encoding:'utf8'}),/muster\/rag-15/,'a reused worktree is kept when a Start fails');
 });
 
 test('a company-wide approval that is also an issue approval keeps its task and project',async()=>{

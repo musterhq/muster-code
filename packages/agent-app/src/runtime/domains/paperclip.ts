@@ -531,17 +531,28 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
         if (!source) throw new Error('Link the project’s folder first: runs happen in a worktree of it.');
         const meta = imports()?.projectMeta(project.id), base = typeof meta?.defaultRef === 'string' ? meta.defaultRef : undefined;
         const branch = `muster/${task.key.toLowerCase().replace(/[^a-z0-9-]+/g, '-')}`;
-        // A worktree of its own: the run never touches the project's checkout.
-        const worktree = await context.invoke('git.worktree.create', { folderId: source.id, branch, ...(base ? { base } : {}) });
-        await context.invoke('project.linkFolder', { id: project.id, folderId: worktree.folder.id });
-        const roster = imports()?.roster(project.id) ?? [];
-        const runner = roster.find(r => memberAgentId(String(r.memberId)) === task.assigneeId)?.runner as { providerId?: string | null; model?: string | null } | undefined;
-        if (runner?.providerId && runner.model) await context.invoke('settings.projectModel.set', { projectId: project.id, value: { providerId: runner.providerId, model: runner.model } }).catch(() => undefined);
-        const fresh = (await context.invoke('project.work', { projectId: project.id, activityLimit: 1 })).tasks.items.find(t => t.id === taskId);
-        if (!fresh) throw new Error('That task no longer exists.');
-        const run = await context.invoke('project.tasks.dispatch', { projectId: project.id, id: taskId, revision: fresh.revision, folderId: worktree.folder.id });
-        queueEmit(['tasks', 'runs'], taskId);
-        return { ...run, worktree: worktree.path, branch: worktree.branch };
+        // A worktree of its own: the run never touches the project's checkout. Starting again reuses this task's worktree.
+        const reuse = (await context.invoke('git.worktree.list', { folderId: source.id }).catch(() => [])).find(w => !w.main && !w.prunable && (w.branch === branch || w.branch === `refs/heads/${branch}`));
+        const worktree = reuse ? { folder: await context.invoke('folder.add', { path: reuse.path }), path: reuse.path, branch } : await context.invoke('git.worktree.create', { folderId: source.id, branch, ...(base ? { base } : {}) });
+        try {
+          if (!project.folderIds.includes(worktree.folder.id)) await context.invoke('project.linkFolder', { id: project.id, folderId: worktree.folder.id });
+          const roster = imports()?.roster(project.id) ?? [];
+          const runner = roster.find(r => memberAgentId(String(r.memberId)) === task.assigneeId)?.runner as { providerId?: string | null; model?: string | null } | undefined;
+          if (runner?.providerId && runner.model) await context.invoke('settings.projectModel.set', { projectId: project.id, value: { providerId: runner.providerId, model: runner.model } }).catch(() => undefined);
+          const fresh = (await context.invoke('project.work', { projectId: project.id, activityLimit: 1 })).tasks.items.find(t => t.id === taskId);
+          if (!fresh) throw new Error('That task no longer exists.');
+          const run = await context.invoke('project.tasks.dispatch', { projectId: project.id, id: taskId, revision: fresh.revision, folderId: worktree.folder.id });
+          queueEmit(['tasks', 'runs'], taskId);
+          return { ...run, worktree: worktree.path, branch: worktree.branch };
+        } catch (cause) {
+          // Nothing ran: take back the worktree and folder this Start made (the branch stays, and a reused worktree is kept).
+          if (!reuse) {
+            await context.invoke('project.unlinkFolder', { id: project.id, folderId: worktree.folder.id }).catch(() => undefined);
+            await context.invoke('git.worktree.remove', { folderId: source.id, path: worktree.path }).catch(() => undefined);
+            await context.invoke('folder.remove', { id: worktree.folder.id }).catch(() => undefined);
+          }
+          throw cause;
+        }
       },
       'paperclip.memory': input => memoryFor(id(input.taskId)),
       'paperclip.list': input => {
