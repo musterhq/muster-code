@@ -5,7 +5,7 @@ import {join} from 'node:path';
 import {DatabaseSync} from 'node:sqlite';
 import {test, type TestContext} from 'node:test';
 import {createDomainHooks} from '../src/runtime/domains/hooks.ts';
-import {createSandboxDomain, MOUNT_UNSUPPORTED, SANDBOX_NOTE} from '../src/runtime/domains/sandbox.ts';
+import {createSandboxDomain, MOUNT_UNSUPPORTED, SANDBOX_NOTE, sandboxNote} from '../src/runtime/domains/sandbox.ts';
 import type {DomainContext} from '../src/runtime/domains/types.ts';
 import {registerAgentSandboxHost, type SandboxAgentTarget} from '../src/runtime/sandbox-registry.ts';
 import {runSandboxTool, SANDBOX_MCP, SandboxToolHost} from '../src/runtime/sandbox-agent-tools.ts';
@@ -127,4 +127,21 @@ test('sandbox tools: exec reports the container exit, writes and reads go to the
   const ok = await post({chatId: 'c1', tool: 'sandbox_exec', arguments: {command: 'pwd'}});
   assert.equal(ok.status, 200); assert.match((await ok.json() as any).content[0].text, /exit code: 0/); assert.equal(commands.at(-1), 'pwd');
   assert.equal(((await (await post({chatId: 'c2', tool: 'sandbox_exec', arguments: {command: 'pwd'}})).json()) as any).isError, true);
+});
+
+test('the sandbox note says truthfully what the agent\'s own shell can still do on the host (#97)', async t => {
+  // Never claim the host shell is disabled: the provider process stays on the Mac.
+  for (const access of ['read-only', 'workspace', 'full'] as const) assert.doesNotMatch(sandboxNote(access), /disabled/);
+  // Never claim enforcement either: for Claude Code read-only is a permission mode, not a sandbox (#99 review).
+  for (const access of ['read-only', 'workspace', 'full'] as const) assert.doesNotMatch(sandboxNote(access), /cannot change files|is read-only for this chat/);
+  assert.match(sandboxNote('read-only'), /still run on the user's Mac, outside the container, and this chat's access there is read-only\. Do not use them/);
+  assert.match(sandboxNote('workspace'), /access there is write access to this folder\. Do not use them/);
+  assert.match(sandboxNote('full'), /access there is full access\. Do not use them/);
+  assert.equal(SANDBOX_NOTE, sandboxNote('read-only', 'host'));
+  // The run note follows the chat's current access: raised back to Full while in the sandbox, it warns.
+  const f = await fixture(t);
+  await f.call('sandbox.chatEnvironment.set', {chatId: 'sbx-chat', env: 'sandbox', mode: 'copy'});
+  f.chats.set('sbx-chat', {...f.chats.get('sbx-chat')!, mode: 'agent', permissionMode: 'full'});
+  const options = await f.runtime.resolveRunOptions(f.chats.get('sbx-chat')!);
+  assert.equal(options.developerInstructions, sandboxNote('full', 'host'));
 });

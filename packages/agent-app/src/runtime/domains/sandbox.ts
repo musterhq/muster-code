@@ -19,17 +19,30 @@ import type { ChatBrowserPlacement, ChatEnvironmentKind, ChatEnvironmentMode, Ch
 import type { ScopedComputerRef } from '../../shared/scoped-computer-protocol.ts';
 import { currentAgentSandboxHost, type AgentSandboxHost } from '../sandbox-registry.ts';
 import { SANDBOX_MCP } from '../sandbox-agent-tools.ts';
+import { providerAccessPolicy } from '../provider-run-lifecycle.ts';
 import type { DomainContext, DomainModule } from './types.ts';
 
 export const SANDBOX_ENV_LABEL = 'Sandbox · Linux container';
 export const HOST_ENV_LABEL = 'This Mac';
 export const SANDBOX_NOT_READY = `${SANDBOX_ENV_LABEL} is not running for this chat. Start it in the Sandbox tab (or switch the chat back to ${HOST_ENV_LABEL}), then send again.`;
 export const MOUNT_UNSUPPORTED = 'Mounting the folder itself into the container is not available yet: the container core binds only its own workspace. Choose the isolated copy.';
-/** Turn note for a sandbox chat; the tools describe themselves, this fixes where work happens. */
-export const SANDBOX_NOTE = `This chat runs in ${SANDBOX_ENV_LABEL}. The working folder you see is the host side of the container's /workspace (an isolated copy of the project). Run every command with the sandbox_exec tool and make every file change with sandbox_write; the host shell and host writes are disabled for this chat. Paths passed to sandbox tools are relative to /workspace. The user applies your changes to their Mac later through a diff review. The agent browser, when available, runs on the user's Mac, not in the container.`;
 /** SBX-11: the note's browser sentence when the chat's browser runs inside the container instead. */
 export const SANDBOX_BROWSER_ENDPOINT = 'http://127.0.0.1:9222';
-export const SANDBOX_BROWSER_NOTE = SANDBOX_NOTE.replace('The agent browser, when available, runs on the user\'s Mac, not in the container.', `This chat's browser runs inside the container, not on the user's Mac: headless Chromium with its DevTools endpoint at ${SANDBOX_BROWSER_ENDPOINT} (reachable only inside the container). Drive it from sandbox_exec (for example a CDP or Playwright script); do not use host browser tools for this chat's pages.`);
+const HOST_BROWSER_SENTENCE = 'The agent browser, when available, runs on the user\'s Mac, not in the container.';
+const CONTAINER_BROWSER_SENTENCE = `This chat's browser runs inside the container, not on the user's Mac: headless Chromium with its DevTools endpoint at ${SANDBOX_BROWSER_ENDPOINT} (reachable only inside the container). Drive it from sandbox_exec (for example a CDP or Playwright script); do not use host browser tools for this chat's pages.`;
+/** What the provider's own shell can still do on the host. It is not disabled: the provider process stays on
+ * the Mac under the chat's access setting (read-only on entering the sandbox). Codex enforces that with its own
+ * sandbox; Claude Code only with a permission mode (policy, not a sandbox) — so the note never claims enforcement. */
+function hostShellSentence(access: ChatPermissionMode): string {
+  const level = access === 'read-only' ? 'read-only' : access === 'full' ? 'full access' : 'write access to this folder';
+  return `Your own shell and file tools still run on the user's Mac, outside the container, and this chat's access there is ${level}. Do not use them to run commands or change files in this chat.`;
+}
+/** Turn note for a sandbox chat; the tools describe themselves, this fixes where work happens and says truthfully what still runs on the host. */
+export function sandboxNote(access: ChatPermissionMode = 'read-only', browser: 'host' | 'sandbox' = 'host'): string {
+  return `This chat runs in ${SANDBOX_ENV_LABEL}. The working folder you see is the host side of the container's /workspace (an isolated copy of the project). Run every command with the sandbox_exec tool and make every file change with sandbox_write. ${hostShellSentence(access)} Paths passed to sandbox tools are relative to /workspace. The user applies your changes to their Mac later through a diff review. ${browser === 'sandbox' ? CONTAINER_BROWSER_SENTENCE : HOST_BROWSER_SENTENCE}`;
+}
+export const SANDBOX_NOTE = sandboxNote('read-only', 'host');
+export const SANDBOX_BROWSER_NOTE = sandboxNote('read-only', 'sandbox');
 const SKIP = new Set(['node_modules', '.DS_Store']);
 const COMPARE_SKIP = new Set(['node_modules', '.DS_Store', '.git']);
 const MAX_SEED_BYTES = 2 * 1024 ** 3, MAX_WALK = 100_000, MAX_CHANGES = 2000, MAX_DIFF = 1024 * 1024, MAX_COMPARE = 32 * 1024 * 1024;
@@ -142,7 +155,7 @@ export function createSandboxDomain(ctx: DomainContext): DomainModule {
   const unsubscribe = ctx.hooks.addRunOptionsContributor(async chat => {
     if (!inSandbox(chat.id)) return null;
     const launcher = await host().agentToolsLauncher(async chatId => scopeForChat(chatFor(chatId)));
-    return { developerInstructions: browserOf(row(chat.id)) === 'sandbox' ? SANDBOX_BROWSER_NOTE : SANDBOX_NOTE, configOverrides: { [`mcp_servers.${SANDBOX_MCP}.command`]: launcher, [`mcp_servers.${SANDBOX_MCP}.env.MUSTER_CHAT_ID`]: chat.id, [`mcp_servers.${SANDBOX_MCP}.tool_timeout_sec`]: 1830 } };
+    return { developerInstructions: sandboxNote(providerAccessPolicy(chat).permissionMode, browserOf(row(chat.id)) === 'sandbox' ? 'sandbox' : 'host'), configOverrides: { [`mcp_servers.${SANDBOX_MCP}.command`]: launcher, [`mcp_servers.${SANDBOX_MCP}.env.MUSTER_CHAT_ID`]: chat.id, [`mcp_servers.${SANDBOX_MCP}.tool_timeout_sec`]: 1830 } };
   });
 
   return {
