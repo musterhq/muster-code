@@ -386,7 +386,7 @@ console.log('PASS: errors persist and coalesce, Retry and Undo actions run once,
 assert.equal(document.documentElement.getAttribute('data-send-key'), 'enter');
 store.openAppSettings('storage');
 await delay(30);
-assert.equal(document.querySelectorAll('.settings-nav-item').length, 12);
+assert.equal(document.querySelectorAll('.settings-nav-item').length, 13);
 assert.equal(document.querySelector('.settings-nav-item[aria-current="page"]')?.textContent, 'Storage');
 store.setSettingsSection('chat');
 await delay(30);

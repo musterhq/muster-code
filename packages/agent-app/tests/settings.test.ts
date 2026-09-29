@@ -162,7 +162,7 @@ test('attachment cleanup offers nothing when the attachment index cannot be read
 });
 
 test('settings search matches labels and keywords; shortcuts mirror the app menu',async()=>{
-  assert.deepEqual(filterSections('').length,12);
+  assert.deepEqual(filterSections('').length,13);
   // PRO-07: Models, Environments and Automations are sections of the one searchable shell.
   assert.deepEqual(filterSections('sandbox container').map(section=>section.id),['environments']);
   assert.deepEqual(filterSections('cron').map(section=>section.id),['automations']);

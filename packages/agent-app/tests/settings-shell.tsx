@@ -56,7 +56,7 @@ assert.deepEqual(errors,[]);
 
 const nav=()=>Array.from(document.querySelectorAll('.settings-nav-item')) as HTMLButtonElement[];
 const navLabels=()=>nav().map(el=>el.textContent);
-assert.deepEqual(navLabels(),['General','Appearance','Chat','Providers','Models','Memory','Skills & plugins','Environments','Automations','Shortcuts','Diagnostics','Storage'],'every real section is one consistent shell, not a one-setting page');
+assert.deepEqual(navLabels(),['General','Appearance','Chat','Providers','Models','Memory','Skills & plugins','Environments','Automations','Integrations','Shortcuts','Diagnostics','Storage'],'every real section is one consistent shell, not a one-setting page');
 const go=(id:string)=>{(nav().find(el=>el.dataset.section===id) as HTMLButtonElement).click();};
 
 // General: real, live settings (not placeholders) — a send-key choice, a working export/import pair,
