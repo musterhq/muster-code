@@ -14,8 +14,11 @@ Object.assign(globalThis, {
 });
 window.HTMLElement.prototype.getBoundingClientRect = () => ({height:120,width:600,top:0,left:0,bottom:120,right:600});
 const chat = {id:'chat',title:'Background review',projectId:'project',pinned:false,archived:false,draft:'',status:'completed',updatedAt:'',model:'test',mode:'agent'};
-let snapshot = {chats:[chat,{...chat,id:'error',title:'Unavailable conversation'}],folders:[{id:'a',name:'One',path:'/one'},{id:'b',name:'Two',path:'/two'}],projects:[{id:'project',name:'Project',goal:'',folderIds:['a','b']}],version:1,activeChatId:'chat'};
+let snapshot = {chats:[chat,{...chat,id:'error',title:'Unavailable conversation'},{...chat,id:'claude',title:'Claude Code run',status:'running'}],folders:[{id:'a',name:'One',path:'/one'},{id:'b',name:'Two',path:'/two'}],projects:[{id:'project',name:'Project',goal:'',folderIds:['a','b']}],version:1,activeChatId:'chat'};
 const items = [{id:'child-report',chatId:'chat',kind:'tool',text:'',createdAt:'2026-01-01T00:00:00Z',data:{type:'collabAgentToolCall',receiverAgents:[{threadId:'alpha',name:'Reviewer',prompt:'Review the changes',result:'Earlier review result'},{threadId:'beta',name:'Researcher'},{threadId:'gamma',name:'Tester'},{threadId:'delta',name:'Planner'},{threadId:'unknown',name:'Unnamed status'}],agentsStates:{alpha:'running',beta:'pendingInit',gamma:'failed',delta:{status:'completed',message:'All checks passed'}}}}];
+// A Claude Code Task, as the adapter reports it: child id `<session>:<tool_use id>`, launched in the background, still running.
+const claudeItems = [{id:'c1',chatId:'claude',kind:'tool',text:'',status:'completed',createdAt:'2026-01-01T00:00:00Z',data:{type:'collabAgentToolCall',tool:'spawnAgent',background:true,prompt:'Map the repo',receiverThreadIds:['sess:toolu_1'],
+  receiverAgents:JSON.stringify([{threadId:'sess:toolu_1',name:'Map the repo',role:'Explore',prompt:'Map the repo'}]),agentsStates:JSON.stringify({'sess:toolu_1':{status:'running'}})}}];
 const transcriptReads:string[] = [];
 let transcriptFails = false;
 const eventListeners = new Set<(event:any)=>void>();
@@ -29,7 +32,7 @@ const controls:any[] = [];
     if(command==='app.snapshot') return snapshot;
     if(command==='chat.timeline') {
       if(input.id==='error' && failTimeline) throw new Error('Saved activity cannot be loaded');
-      return {items:input.id==='chat'?items:[],revision:1};
+      return {items:input.id==='chat'?items:input.id==='claude'?claudeItems:[],revision:1};
     }
     if(command==='subagents.transcript') {
       transcriptReads.push(input.threadId);
@@ -193,6 +196,19 @@ failTimeline = false;
 await delay(60);
 assert.match(document.querySelector('.subagents-empty')!.textContent!,/No subagents reported yet/);
 assert.equal(document.querySelector('.subagents-status.is-error'),null);
+// A Claude Code child appears like a Codex one, marked as a background agent, and opens to its own transcript.
+await store.selectChat('claude'); await delay(40);
+root.render(<><WorkspaceOverview compact/><SubagentsTab tab={{id:'subagents:claude',kind:'subagents',chatId:'claude',title:'Claude subagents'}}/></>);
+await delay(80);
+assert.equal(document.querySelectorAll('.subagent-card').length,1,'one child entry for the Task tool call');
+assert.match(document.querySelector('.subagent-card')!.textContent!,/Map the repo/);
+assert.ok(document.querySelector('.subagent-card .subagent-background'),'the card is marked Background');
+assert.ok(document.querySelector('.workspace-subagent-chip .subagent-background'),'and so is the overview entry');
+assert.ok(document.querySelector('.subagent-card .subagent-phase.is-running'),'live status comes from the child state, not the finished launch call');
+(document.querySelector('[aria-label="Open Map the repo transcript"]') as HTMLButtonElement).click();
+await delay(60);
+assert.ok(transcriptReads.includes('sess:toolu_1'),'opening it reads that child\'s transcript');
+assert.match(document.querySelector('.subagent-view-head')!.textContent!,/Background/);
 assert.deepEqual(errors,[]);
 root.unmount();
 console.log('Subagent component checks passed: restore, counts, identity hue, child transcript detail with back, polling, retry, timeline row opens child, folderless navigation, disclosure, saved-tab identity, error and retry.');

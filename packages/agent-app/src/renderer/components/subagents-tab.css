@@ -29,6 +29,7 @@
 .subagent-state.is-done { color:var(--ok); }
 .subagent-phase { display:inline-flex; align-items:center; gap:4px; flex:none; padding:2px 7px; border-radius:var(--radius-full); font-size:var(--fs-11); color:var(--text-faint); background:rgb(var(--fg-rgb) / 4%); white-space:nowrap; }
 .subagent-phase svg { flex:none; }
+.subagent-background { display:inline-flex; align-items:center; flex:none; padding:2px 7px; border-radius:var(--radius-full); font-size:var(--fs-11); color:var(--text-dim); border:1px solid rgb(var(--fg-rgb) / 12%); white-space:nowrap; }
 .subagent-phase.is-running { color:var(--text-dim); }
 .subagent-phase.is-completed { color:var(--text-dim); }
 .subagent-phase.is-verified { color:var(--ok); background:color-mix(in srgb,var(--ok) 12%,transparent); }

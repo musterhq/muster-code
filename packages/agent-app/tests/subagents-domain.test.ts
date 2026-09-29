@@ -10,7 +10,7 @@ const parentItems = [report({senderThreadId:'parent', receiverThreadIds:['parent
 const chat = {id:'chat', title:'Parent', pinned:false, archived:false, draft:'', status:'running', updatedAt:'', model:'gpt-test', mode:'agent', providerId:'hybrow', folderId:'f'};
 const instance = {info:{id:'hybrow', name:'Gateway', available:true, bindingId:'bind', models:[]}, command:process.execPath, env:{A:'1'}, sessionsRoot:'/tmp'} as unknown as ProviderInstance;
 const context = (timeline = parentItems) => ({
-  store:{chat:(id: string) => id === 'chat' ? chat : undefined, timeline:() => timeline},
+  store:{chat:(id: string) => id === 'chat' ? chat : undefined, timeline:() => timeline, subagentItems:() => []},
   folderFor:() => ({id:'f', name:'F', path:'/work'}),
 }) as unknown as DomainContext;
 const thread = (status: string) => ({thread:{id:'child', createdAt:1767225600, updatedAt:1767225665, agentNickname:'Reviewer', agentRole:'review', turns:[{id:'t1', status, items:[

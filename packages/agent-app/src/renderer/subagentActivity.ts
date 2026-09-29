@@ -9,6 +9,8 @@ export interface SubagentActivity {
   model?: string;
   role?: string;
   prompt?: string;
+  /** Launched in the background: the parent went on without waiting for it. */
+  background?: boolean;
   result?: string;
   /** Why the child failed or was stopped, when the provider said (DOGFOOD F51: failed rows showed no reason). */
   error?: string;
@@ -134,6 +136,7 @@ export function getSubagentActivity(items: readonly TimelineItem[]): SubagentSum
       const result = text(stateInfo?.message) ?? text(stateInfo?.result) ?? text(record?.result) ?? text(record?.output);
       const failed = subagentState(state).kind === 'failed' || item.status === 'failed' && ids.size === 1;
       const error = failed ? failureReason(stateInfo, record, single ? data : undefined) : undefined;
+      if (single && data.background === true || record?.background === true) row.background = true;
       if (name) row.name = name;
       if (state) row.state = state;
       if (model) row.model = model;
@@ -143,6 +146,10 @@ export function getSubagentActivity(items: readonly TimelineItem[]): SubagentSum
       if (error) row.error = error;
       else if (state && subagentState(state).kind !== 'failed') delete row.error;
       if (item.createdAt) { row.startedAt ??= item.createdAt; row.updatedAt = item.createdAt; }
+      // The provider's own clock, when its report carries one, beats the row's creation time (which never moves).
+      const began = text(stateInfo?.startedAt), ended = text(stateInfo?.endedAt);
+      if (began) row.startedAt = began;
+      if (ended) row.updatedAt = ended;
       rows.set(id, row);
     }
   }

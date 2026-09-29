@@ -65,7 +65,7 @@ export function claudeResultPatch(result: unknown): string | undefined {
   return undefined;
 }
 /** A Claude Code tool_use block as the Codex item shape the timeline already renders. */
-export function claudeToolItem(id: string, name: string, args: Record<string, unknown>, cwd: string): Record<string, unknown> {
+export function claudeToolItem(id: string, name: string, args: Record<string, unknown>, cwd: string, childThreadId?: string): Record<string, unknown> {
   const path = text(args.file_path) || text(args.notebook_path) || text(args.path);
   switch (name) {
     case 'Bash': return {id, type: 'commandExecution', command: text(args.command), cwd, ...(text(args.description) ? {title: text(args.description)} : {})};
@@ -79,13 +79,27 @@ export function claudeToolItem(id: string, name: string, args: Record<string, un
     case 'NotebookEdit': return {id, type: 'fileChange', changes: [{path, kind: 'update', diff: quoteDiff('', text(args.new_source))}]};
     case 'WebSearch': return {id, type: 'webSearch', query: text(args.query)};
     case 'TodoWrite': return {id, type: 'todoList', items: (Array.isArray(args.todos) ? args.todos : []).slice(0, 100).map(todo => ({text: text((todo as Record<string, unknown>)?.content), status: text((todo as Record<string, unknown>)?.status)}))};
-    case 'Task': case 'Agent': return {id, type: 'collabAgentToolCall', tool: 'spawnAgent', prompt: text(args.description) || text(args.prompt), receiverAgents: [{name: text(args.subagent_type) || 'agent'}]};
+    case 'Task': case 'Agent': {
+      const role = text(args.subagent_type) || 'agent', prompt = text(args.prompt) || text(args.description), title = text(args.description);
+      return {id, type: 'collabAgentToolCall', tool: 'spawnAgent', prompt, ...(args.run_in_background === true ? {background: true} : {}),
+        // The child thread is `<session>:<Task tool_use id>`: its own events carry that id as parent_tool_use_id.
+        ...(childThreadId ? {receiverThreadIds: [childThreadId], receiverAgents: [{threadId: childThreadId, ...(title ? {name: title.slice(0, 80)} : {}), role, prompt, ...(text(args.model) ? {model: text(args.model)} : {})}]}
+          : {receiverAgents: [{name: role}]})};
+    }
   }
   const mcp = /^mcp__(.+?)__(.+)$/.exec(name);
   if (mcp) return {id, type: 'mcpToolCall', server: mcp[1], tool: mcp[2], arguments: args};
   return {id, type: 'dynamicToolCall', tool: name, name, arguments: args};
 }
 const resultText = (content: unknown): string => typeof content === 'string' ? content : Array.isArray(content) ? content.map(part => part && typeof part === 'object' && (part as {type?: unknown}).type === 'text' ? text((part as {text?: unknown}).text) : '').filter(Boolean).join('\n') : '';
+
+/** How a Claude Code task_notification / task_updated status reads as a child state (killed is a stop, not a failure). */
+export /** Longest a background subagent may run after its parent's turn ended before it is marked interrupted. */
+const BACKGROUND_TIMEOUT_MS = 30 * 60_000;
+export const claudeTaskState = (status: unknown): 'completed' | 'failed' | 'interrupted' | undefined =>
+  status === 'completed' ? 'completed' : status === 'failed' || status === 'error' ? 'failed' : status === 'killed' || status === 'stopped' || status === 'cancelled' ? 'interrupted' : undefined;
+/** The subagent's own final report without the harness's hand-back frame around it. */
+const handBack = (content: string): string => { const at = content.indexOf('The report follows:\n'); return (at < 0 ? content : content.slice(at + 20)).replace(/^ {2}/gm, '').replace(/\nagentId: [\s\S]*$/, '').trim(); };
 
 /** The turn's stdin: the plain prompt, or with images one stream-json user message whose
  *  image content blocks carry the attachment bytes (the model sees them directly). */
@@ -100,7 +114,7 @@ export function claudeStdin(input: Pick<AdapterRunInput, 'prompt' | 'images'>): 
 }
 
 /** Headless Claude Code (`claude -p --output-format stream-json`) in the chat folder. */
-export function claudeCodeAdapter(options: {binary: string; env?: NodeJS.ProcessEnv; spawn?: Spawn; killGraceMs?: number}): RunnableAdapter {
+export function claudeCodeAdapter(options: {binary: string; env?: NodeJS.ProcessEnv; spawn?: Spawn; killGraceMs?: number; backgroundTimeoutMs?: number}): RunnableAdapter {
   const spawn = options.spawn ?? (nodeSpawn as unknown as Spawn);
   return {kind: 'cli', run(input) {
     return new Promise<AdapterRunResult>(resolve => {
@@ -116,9 +130,35 @@ export function claudeCodeAdapter(options: {binary: string; env?: NodeJS.Process
       let pending = 1, inputClosed = false;
       const closeInput = () => { if (inputClosed) return; inputClosed = true; try { child.stdin?.end(); } catch { /* already closed */ } };
       const tools = new Map<string, Record<string, unknown>>();
+      // Task/Agent children run inside the CLI. Each is a child thread `<session>:<tool_use id>`; its events carry that
+      // tool_use id as parent_tool_use_id. A background child outlives the tool_result that launched it.
+      type AgentRun = {childId: string; base: Record<string, unknown>; background: boolean; state: 'running' | 'completed' | 'failed' | 'interrupted'; message?: string; launched: boolean; startedAt: number; endedAt?: number};
+      const agents = new Map<string, AgentRun>(), taskTools = new Map<string, string>(), toolThreads = new Map<string, string>();
+      const backgroundRunning = () => [...agents.values()].some(run => run.background && run.state === 'running');
+      // A background child that never reports back must not hold stdin (and the chat's run) open forever.
+      let watchdog: ReturnType<typeof setTimeout> | undefined;
+      const maybeClose = () => {
+        if (pending > 0) return;
+        if (!backgroundRunning()) { clearTimeout(watchdog); watchdog = undefined; closeInput(); return; }
+        watchdog ??= setTimeout(() => {
+          for (const [id, run] of agents) if (run.background && run.state === 'running') { run.launched = true; settle(id, 'interrupted', 'Timed out waiting for this background agent to report back.'); }
+          closeInput();
+        }, options.backgroundTimeoutMs ?? BACKGROUND_TIMEOUT_MS);
+      };
+      const emitAgent = (run: AgentRun) => input.onEvent(run.launched ? 'item/completed' : 'item/started', {threadId: sessionId, turnId, item: {...run.base, ...(run.background ? {background: true} : {}),
+        agentsStates: {[run.childId]: {status: run.state, startedAt: new Date(run.startedAt).toISOString(), ...(run.endedAt ? {endedAt: new Date(run.endedAt).toISOString()} : {}), ...(run.message ? {message: run.message} : {})}},
+        ...(run.launched ? {status: run.state === 'running' ? 'completed' : run.state} : {})}});
+      // The CLI's own clock: duration_ms from the notification, else the task_updated end_time, else now.
+      const endTime = (run: AgentRun, durationMs?: unknown, endMs?: unknown): number =>
+        typeof durationMs === 'number' && durationMs >= 0 ? run.startedAt + durationMs : typeof endMs === 'number' && endMs >= run.startedAt ? endMs : Date.now();
+      const settle = (toolUseId: string, state: AgentRun['state'], message?: string) => {
+        const run = agents.get(toolUseId); if (!run || run.state !== 'running') return;
+        run.state = state; run.endedAt ??= endTime(run); if (message) run.message = message.slice(0, 32768);
+        if (run.launched) { emitAgent(run); agents.delete(toolUseId); maybeClose(); }
+      };
       const accept = () => { if (!accepted) { accepted = true; input.onThreadReady(sessionId); input.onTurnAccepted({threadId: sessionId, turnId}); } };
       const threadFor = (parent: unknown) => typeof parent === 'string' && parent ? `${sessionId}:${parent}` : sessionId;
-      const finish = (result: AdapterRunResult) => { if (settled) return; settled = true; input.signal.removeEventListener('abort', abort); clearTimeout(killer); resolve(result); };
+      const finish = (result: AdapterRunResult) => { if (settled) return; settled = true; input.signal.removeEventListener('abort', abort); clearTimeout(killer); clearTimeout(watchdog); resolve(result); };
       let killer: ReturnType<typeof setTimeout> | undefined;
       const abort = () => { child.kill('SIGINT'); killer = setTimeout(() => child.kill('SIGKILL'), options.killGraceMs ?? 3000); };
       if (input.signal.aborted) abort(); else input.signal.addEventListener('abort', abort, {once: true});
@@ -129,6 +169,25 @@ export function claudeCodeAdapter(options: {binary: string; env?: NodeJS.Process
         const type = event.type;
         if (type === 'system' && event.subtype === 'init') { accept(); return; }
         accept();
+        if (type === 'system' && (event.subtype === 'task_started' || event.subtype === 'task_notification')) {
+          const toolUseId = text(event.tool_use_id) || taskTools.get(text(event.task_id)) || '', run = agents.get(toolUseId);
+          if (event.subtype === 'task_started') {
+            if (!run) return;
+            taskTools.set(text(event.task_id), toolUseId);
+            if (event.is_backgrounded === true) run.background = true;
+            emitAgent(run);
+          } else {
+            if (run) run.endedAt = endTime(run, (event.usage as {duration_ms?: unknown} | undefined)?.duration_ms, run.endedAt);
+            settle(toolUseId, claudeTaskState(event.status) ?? 'completed', text(event.summary));
+          }
+          // task_updated patches precede the notification that carries the summary, which is what settles a child.
+          return;
+        }
+        if (type === 'system' && event.subtype === 'task_updated') {
+          const run = agents.get(taskTools.get(text(event.task_id)) ?? ''), end = (event.patch as {end_time?: unknown} | undefined)?.end_time;
+          if (run && typeof end === 'number' && end >= run.startedAt) run.endedAt = end;
+          return;
+        }
         // Claude Code summarised its own history (auto or /compact): the same signal as Codex's thread/compacted,
         // so the service notes it and re-sends static context on the next turn.
         if (type === 'system' && (event.subtype === 'compact_boundary' || event.subtype === 'compaction')) { input.onEvent('thread/compacted', {threadId: sessionId, turnId}); return; }
@@ -139,14 +198,28 @@ export function claudeCodeAdapter(options: {binary: string; env?: NodeJS.Process
           if (inner.delta?.type === 'thinking_delta' && typeof inner.delta.thinking === 'string') input.onReasoning(inner.delta.thinking);
           return;
         }
-        const message = event.message as {content?: unknown; usage?: Record<string, unknown>} | undefined;
+        const message = event.message as {id?: string; content?: unknown; usage?: Record<string, unknown>} | undefined;
         const blocks = Array.isArray(message?.content) ? message.content as Record<string, unknown>[] : [];
         if (type === 'assistant') {
-          for (const block of blocks) {
+          for (const [index, block] of blocks.entries()) {
+            // A child's own words belong to its transcript; only the parent's text streams into the chat.
+            if (event.parent_tool_use_id && (block?.type === 'text' || block?.type === 'thinking')) {
+              const body = text(block.type === 'text' ? block.text : block.thinking);
+              if (body.trim()) input.onEvent('subagent/message', {threadId: threadFor(event.parent_tool_use_id), id: `${threadFor(event.parent_tool_use_id)}:${message?.id || text(event.uuid) || 'm'}:${index}`, role: block.type === 'text' ? 'assistant' : 'reasoning', text: body});
+              continue;
+            }
             if (block?.type === 'text' && !streamedText && !event.parent_tool_use_id && typeof block.text === 'string') input.onDelta(block.text);
             if (block?.type === 'tool_use' && typeof block.id === 'string' && typeof block.name === 'string' && !tools.has(block.id)) {
-              const item = claudeToolItem(block.id, block.name, block.input && typeof block.input === 'object' ? block.input as Record<string, unknown> : {}, input.cwd);
-              if (tools.size < 4096) tools.set(block.id, item);
+              const args = block.input && typeof block.input === 'object' ? block.input as Record<string, unknown> : {};
+              if (block.name === 'Agent' || block.name === 'Task') {
+                const childId = `${sessionId}:${block.id}`, run: AgentRun = {childId, base: claudeToolItem(block.id, block.name, args, input.cwd, childId), background: args.run_in_background === true, state: 'running', launched: false, startedAt: Date.now()};
+                if (agents.size < 256) agents.set(block.id, run);
+                if (text(args.prompt)) input.onEvent('subagent/message', {threadId: childId, id: `${childId}:prompt`, role: 'user', text: text(args.prompt)});
+                emitAgent(run);
+                continue;
+              }
+              const item = claudeToolItem(block.id, block.name, args, input.cwd);
+              if (tools.size < 4096) { tools.set(block.id, item); toolThreads.set(block.id, threadFor(event.parent_tool_use_id)); }
               input.onEvent('item/started', {threadId: threadFor(event.parent_tool_use_id), turnId, item});
             }
           }
@@ -160,25 +233,37 @@ export function claudeCodeAdapter(options: {binary: string; env?: NodeJS.Process
           const results = blocks.filter(block => block?.type === 'tool_result');
           for (const block of blocks) {
             if (block?.type !== 'tool_result' || typeof block.tool_use_id !== 'string') continue;
+            const run = agents.get(block.tool_use_id);
+            if (run) {
+              const output = resultText(block.content).slice(0, 256 * 1024);
+              run.launched = true;
+              if (block.is_error) { run.state = 'failed'; run.message = output.slice(0, 4000); }
+              else if (!run.background && run.state === 'running') { run.state = 'completed'; run.message = handBack(output).slice(0, 32768); }
+              emitAgent(run);
+              if (run.state !== 'running') agents.delete(block.tool_use_id);
+              continue;
+            }
             const item = tools.get(block.tool_use_id); if (!item) continue;
             const output = resultText(block.content).slice(0, 256 * 1024);
             // `tool_use_result` describes the message's single tool result; with several it is ambiguous.
             const applied = item.type === 'fileChange' && !block.is_error && results.length === 1 ? claudeResultPatch(event.tool_use_result) : undefined;
             const changes = applied && Array.isArray(item.changes) ? (item.changes as Record<string, unknown>[]).slice(0, 1).map(change => ({...change, diff: applied})) : undefined;
-            input.onEvent('item/completed', {threadId: threadFor(event.parent_tool_use_id), turnId, item: {...item, ...(changes ? {changes} : {}), status: block.is_error ? 'failed' : 'completed', aggregatedOutput: output, ...(block.is_error ? {success: false} : {})}});
-            tools.delete(block.tool_use_id);
+            input.onEvent('item/completed', {threadId: toolThreads.get(block.tool_use_id) ?? threadFor(event.parent_tool_use_id), turnId, item: {...item, ...(changes ? {changes} : {}), status: block.is_error ? 'failed' : 'completed', aggregatedOutput: output, ...(block.is_error ? {success: false} : {})}});
+            tools.delete(block.tool_use_id); toolThreads.delete(block.tool_use_id);
           }
           return;
         }
         if (type === 'result') {
           final = {ok: event.is_error !== true && event.subtype === 'success', text: text(event.result)};
           // Each user message (the prompt, then any steers) ends in one result; the last one closes stdin so the run ends.
-          if (--pending <= 0) closeInput();
+          // A background subagent keeps the CLI alive: closing stdin now would end it before it reports back.
+          pending--; maybeClose();
         }
       });
       child.on('error', error => finish({status: 'failed', finalMessage: '', dispatchState: accepted ? 'dispatched' : 'not-dispatched', ...(accepted ? {threadId: sessionId, turnId} : {}), errorMessage: `Claude Code could not start: ${error.message}`}));
       child.on('close', code => {
-        for (const [id, item] of tools) input.onEvent('item/completed', {threadId: sessionId, turnId, item: {...item, id, status: 'interrupted'}});
+        for (const [id, item] of tools) input.onEvent('item/completed', {threadId: toolThreads.get(id) ?? sessionId, turnId, item: {...item, id, status: 'interrupted'}});
+        for (const run of agents.values()) if (run.state === 'running') { run.state = 'interrupted'; run.launched = true; run.endedAt ??= Date.now(); emitAgent(run); }
         const identity = accepted ? {threadId: sessionId, turnId} : {};
         if (input.signal.aborted) return finish({status: 'failed', finalMessage: '', dispatchState: accepted ? 'dispatched' : 'not-dispatched', ...identity, errorMessage: 'Stopped.'});
         if (final?.ok && code === 0) return finish({status: 'completed', finalMessage: final.text, dispatchState: 'dispatched', ...identity});

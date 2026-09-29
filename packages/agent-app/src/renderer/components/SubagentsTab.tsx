@@ -28,6 +28,11 @@ export function SubagentStatus({state}: {state?: string}) {
   </span>;
 }
 
+/** Marks a subagent the parent launched in the background instead of waiting for it. */
+export function BackgroundTag() {
+  return <span className="subagent-background" title="Launched in the background; the parent kept working while it ran">Background</span>;
+}
+
 export function SubagentCounts({counts}: {counts:SubagentSummary['counts']}) {
   return <div className="subagent-counts" role="group" aria-label="Last reported subagent counts">
     <span>{counts.working} working</span><span>{counts.waiting} waiting</span><span>{counts.done} done</span>
@@ -126,7 +131,7 @@ function AgentCard({agent, chatId, now, controls}: {agent:SubagentActivity; chat
     <button type="button" className="subagent-open" onClick={() => selectSubagent(chatId, agent.id)} aria-label={`Open ${agent.name} transcript`}>
       <span className="subagent-avatar"><AgentGlyph name={agent.name} state={phaseGlyph(phase.kind)} /></span>
       <span className="subagent-open-text"><strong title={agent.name}>{agent.name}</strong>{meta && <span className="subagent-meta">{meta}</span>}</span>
-      <PhaseBadge {...phase} />
+      {agent.background && <BackgroundTag />}<PhaseBadge {...phase} />
       <ChevronRight className="subagent-open-chevron" size={13} aria-hidden="true" />
     </button>
     {phase.kind === 'failed' && <FailureReason agent={agent} />}
@@ -217,7 +222,7 @@ function SubagentDetail({agent, chatId, parentItems, parentModel, controls}: {ag
         <h2 title={agent.name}>{agent.name}</h2>
         <p>{[role, model].filter(Boolean).join(' · ') || 'Subagent'}</p>
       </div>
-      <PhaseBadge {...phase} />
+      {agent.background && <BackgroundTag />}<PhaseBadge {...phase} />
       {elapsed && <span className="subagent-elapsed" aria-label={`${running ? 'Running for' : 'Ran for'} ${elapsed}`} title={running ? 'Running for' : 'Ran for'}><Clock3 size={12} aria-hidden="true" />{elapsed}</span>}
       <span className="subagent-steer">
         <button type="button" disabled={!controls.caps?.steer || !running} aria-pressed={steering} onClick={() => setSteering(value => !value)} aria-label={`Steer ${agent.name}`} title={controlHint(controls.caps, 'steer', running, agent.name)}><Send size={12} aria-hidden="true" />Steer</button>

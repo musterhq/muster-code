@@ -11,6 +11,14 @@ import { createHash, randomUUID } from 'node:crypto';
 import { DEFAULT_CHAT_TITLE, generateChatTitle } from './chat-title.ts';
 import type { Chat, ChatRecovery, ChatTitleSource, ChatStatus, ContextTelemetry, Folder, Project, QueuedMessage, Snapshot, TimelineItem } from '../shared/protocol.ts';
 
+/** Transcripts of subagents that run inside a CLI provider (Claude Code Task/Agent): rows keyed by the child thread id, never mixed into the parent timeline. */
+const SUBAGENT_ITEMS_SQL = `
+CREATE TABLE IF NOT EXISTS subagent_items (
+  seq INTEGER PRIMARY KEY AUTOINCREMENT, chat_id TEXT NOT NULL, thread_id TEXT NOT NULL, id TEXT NOT NULL,
+  kind TEXT NOT NULL, text TEXT NOT NULL, status TEXT, created_at TEXT NOT NULL, data TEXT,
+  UNIQUE (chat_id, id));
+CREATE INDEX IF NOT EXISTS subagent_items_thread ON subagent_items (chat_id, thread_id, seq);`;
+
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS folders (
   id TEXT PRIMARY KEY, path TEXT NOT NULL UNIQUE, name TEXT NOT NULL, created_at TEXT NOT NULL);
@@ -43,6 +51,7 @@ CREATE TABLE IF NOT EXISTS chat_queue (
   request_id TEXT NOT NULL UNIQUE, attachment_ids TEXT NOT NULL DEFAULT '[]', created_at TEXT NOT NULL,
   PRIMARY KEY (chat_id, id));
 CREATE INDEX IF NOT EXISTS chat_queue_order ON chat_queue (chat_id, position);
+${SUBAGENT_ITEMS_SQL}
 `;
 
 interface ChatRow {
@@ -130,6 +139,7 @@ function rowToQueued(row: QueueRow): QueuedMessage {
  * pre-versioning databases; new schema changes go here so they get a backup, a transaction and a version. */
 export const STORE_MIGRATIONS: readonly SchemaMigration[] = [
   {version: 1, name: 'adopt versioned schema', up: () => { /* Baseline: tables and columns as of 0.2.0 (created idempotently by SCHEMA). */ }},
+  {version: 2, name: 'subagent transcripts', up: db => { db.exec(SUBAGENT_ITEMS_SQL); }},
 ];
 
 const now = (): string => new Date().toISOString();
@@ -642,6 +652,42 @@ export class AgentStore {
     this.db.prepare('UPDATE timeline SET text = ?, status = ?, data = COALESCE(?, data) WHERE id = ?').run(text, status ?? null, data ? JSON.stringify(data) : null, id);
   }
 
+  /** Insert or update one row of a child thread's transcript (id is unique per chat). A repeat keeps its position and creation time. */
+  upsertSubagentItem(chatId: string, threadId: string, row: {id: string; kind: TimelineItem['kind']; text: string; status?: string; data?: Record<string, unknown>}): void {
+    this.db.prepare(`INSERT INTO subagent_items (chat_id, thread_id, id, kind, text, status, created_at, data) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT (chat_id, id) DO UPDATE SET text = excluded.text, status = excluded.status, data = COALESCE(excluded.data, data)`)
+      .run(chatId, threadId, row.id, row.kind, row.text, row.status ?? null, now(), row.data ? JSON.stringify(row.data) : null);
+  }
+  /** A child thread's saved transcript in arrival order. */
+  subagentItems(chatId: string, threadId: string): TimelineItem[] {
+    const rows = this.db.prepare('SELECT * FROM subagent_items WHERE chat_id = ? AND thread_id = ? ORDER BY seq').all(chatId, threadId) as unknown as TimelineRow[];
+    return rows.map(rowToItem);
+  }
+  /** A run that ended (or the app restarted) leaves no child row running. */
+  settleSubagentItems(chatId: string, status = 'interrupted'): void {
+    this.db.prepare("UPDATE subagent_items SET status = ? WHERE chat_id = ? AND status = 'running'").run(status, chatId);
+  }
+
+  /** A spawn report that still says a child is running, in a run that no longer exists, is settled as interrupted. */
+  interruptRunningChildren(chatId: string): void {
+    const endedAt = now();
+    for (const item of this.timeline(chatId)) {
+      const data = item.data;
+      if (item.kind !== 'tool' || data?.type !== 'collabAgentToolCall' || data.agentsStates == null) continue;
+      const wasText = typeof data.agentsStates === 'string';
+      let states: unknown = data.agentsStates;
+      if (wasText) { try { states = JSON.parse(data.agentsStates as string); } catch { continue; } }
+      if (!states || typeof states !== 'object' || Array.isArray(states)) continue;
+      let changed = false;
+      const next: Record<string, unknown> = {};
+      for (const [id, value] of Object.entries(states as Record<string, unknown>)) {
+        const info = value && typeof value === 'object' ? value as Record<string, unknown> : undefined;
+        if (info?.status === 'running' || info?.status === 'inProgress') { next[id] = {...info, status: 'interrupted', endedAt}; changed = true; } else next[id] = value;
+      }
+      if (changed) this.updateItem(item.id, item.text, item.status === 'running' ? 'interrupted' : item.status, {...data, agentsStates: wasText ? JSON.stringify(next) : next});
+    }
+  }
+
   item(id: string): TimelineItem | undefined {
     const row = this.db.prepare('SELECT * FROM timeline WHERE id = ?').get(id) as TimelineRow | undefined;
     return row ? rowToItem(row) : undefined;
@@ -823,6 +869,8 @@ export class AgentStore {
         // Interrupted, not failed: the provider may still finish the turn; RecoveryNotice checks it.
         this.updateChatRaw(id, { status: 'interrupted', error: recovery.reason, recovery:JSON.stringify(recovery) });
         this.appendItem(id, 'notice', recovery.reason, 'recovery-needed', {recovery});
+        this.settleSubagentItems(id);
+        this.interruptRunningChildren(id);
       }
       if (rows.length > 0) this.bumpVersion();
       return rows.map((row) => row.id);
