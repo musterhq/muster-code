@@ -25,9 +25,10 @@ head -1 "$work/deb/opt/Muster Agent/muster-agent" | grep -q '^#!/bin/sh' || fail
 for dep in libsecret-1-0 libnss3 libgtk-3-0 xdg-utils; do grep -q "$dep" "$work/deb-info" || fail "deb Depends lacks $dep"; done
 
 tgz=$(ls Muster-Agent-*-linux-x64.tar.gz) || fail "no .tar.gz"
-tar -tzf "$tgz" | grep -Eq '(^|/)muster-agent$' || fail "tar.gz lacks muster-agent"
-tar -tzf "$tgz" | grep -Eq '(^|/)muster-agent\.bin$' || fail "tar.gz lacks muster-agent.bin"
-tar -tzf "$tgz" | grep -Eq '(^|/)chrome-sandbox$' || fail "tar.gz lacks chrome-sandbox"
+tar -tzf "$tgz" > "$work/tar-list"
+grep -Eq '(^|/)muster-agent$' "$work/tar-list" || fail "tar.gz lacks muster-agent"
+grep -Eq '(^|/)muster-agent\.bin$' "$work/tar-list" || fail "tar.gz lacks muster-agent.bin"
+grep -Eq '(^|/)chrome-sandbox$' "$work/tar-list" || fail "tar.gz lacks chrome-sandbox"
 
 appimage=$(ls Muster-Agent-*-linux-x86_64.AppImage) || fail "no AppImage"
 [ -x "$appimage" ] || chmod +x "$appimage"
