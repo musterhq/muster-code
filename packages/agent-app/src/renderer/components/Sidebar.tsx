@@ -1,3 +1,8 @@
+import { openHub, useHubRoute, useInboxBadge, useWorkspace, type HubPage } from '../hubStore';
+import { badgeCount, buildActivity } from '../inboxModel';
+import { NAMES } from '../../shared/workspace-names';
+import type { WorkspaceProject, WorkspaceTask } from '../../shared/domains/paperclip-protocol';
+import { NewTaskSheet } from './HubSetup';
 import {
   AlarmClock,
   AlarmClockOff,
@@ -29,6 +34,9 @@ import {
   TriangleAlert,
   X,
   ArrowDownCircle,
+  Inbox as InboxIcon,
+  History as LedgerIcon,
+  Check as CheckIcon,
 } from 'lucide-react';
 import {installUpdate,INSTALLS_IN_PLACE,updateSummary,useUpdateStatus} from '../updates';
 import { requestNewProject } from '../projectIntent';
@@ -56,7 +64,7 @@ import {
   reorderFolders,
   wakeChat,
 } from '../store';
-import { useStore } from '../useStore';
+import { useStore, useStoreSelector } from '../useStore';
 import { isChord } from '../focus';
 import { readCollapsed, saveCollapsed } from '../sidebarDisclosure';
 import { StatusDot } from './StatusDot';
@@ -464,6 +472,7 @@ export function Sidebar(): React.ReactElement {
         <span className="nav-brand-word">Muster</span>
       </button>
       <div className="nav-toolbar">
+        <SidebarInbox screen={state.screen}/>
         <button type="button" className={`tool-button${draft.open?' is-active':''}`} title={activeFolder?`New chat in ${activeFolder.name} (⌘N)`:'New chat (⌘N)'} aria-keyshortcuts="Meta+N Control+N" aria-current={draft.open?'page':undefined} onClick={newChatHere}>
           <SquarePen size={15} /><span>New chat</span>
         </button>
@@ -472,6 +481,8 @@ export function Sidebar(): React.ReactElement {
         </button>
         <button type="button" className="tool-button" title="Memory for the current folder" onClick={() => openMemoryScreen(activeChat()?.folderId)}><Brain size={15}/><span>Memory</span></button>
         <button type="button" className={`tool-button${state.screen==='automations'?' is-active':''}`} title="Scheduled and file-triggered agent runs" aria-current={state.screen==='automations'?'page':undefined} onClick={openAutomationsScreen}><CalendarClock size={15}/><span>Automations</span>{runningAutomations>0&&<span className="nav-tool-count" aria-label={`${runningAutomations} running`}>{runningAutomations}</span>}</button>
+        <HubEntry screen={state.screen} page="ledger" icon={<LedgerIcon size={15}/>} label={NAMES.ledger} title="Every agent turn: receipts, timeline and costs"/>
+
       </div>
       <div className="visually-hidden" aria-live="polite">{selection.selected.size>0?`${plural(selection.selected.size, 'chat')} selected`:''}</div>
       {selection.selected.size>0 && (
@@ -563,6 +574,7 @@ export function Sidebar(): React.ReactElement {
               <Collapsible.Panel className="nav-group-panel is-nested-chats">{chats.length?rows(chats,context):<p className="nav-folder-empty">No chats</p>/* QA-#7 */}</Collapsible.Panel>
             </Collapsible.Root>
           ))}
+          <PaperclipProjects isOpen={isOpen} toggleGroup={toggleGroup}/>
           {snapshot.projects.length === 0 && <button type="button" className="nav-quiet-row" onClick={()=>requestNewProject(openProjectsScreen)}><Layers size={14} aria-hidden="true"/><span>Create a project</span></button>}
         </section>
         {orphanChats.length === 0 && (
@@ -646,4 +658,86 @@ function UpdateFooterAction():React.ReactElement|null {
     onClick={()=>void installUpdate().catch(cause=>notifyError(cause))}>
     <ArrowDownCircle size={15} aria-hidden="true"/><span>{label}</span>
   </button>;
+}
+
+/** App-wide Inbox (#115, #121): every chat and run that needs you, finished, or went wrong, plus mail and the linked
+ *  Paperclip's needs-you items. The badge (Needs you + Problems) is event-driven; nothing polls. */
+function SidebarInbox({screen}:{screen:string}):React.ReactElement {
+  const badge=useInboxBadge();
+  const route=useHubRoute();
+  const app=useStoreSelector(state=>state.snapshot);
+  // Chats that need you or went wrong come from the snapshot the sidebar already has; project and Paperclip items from the badge read.
+  const chatCount=React.useMemo(()=>badgeCount(buildActivity(app,null)),[app?.chats,app?.attention]);
+  const count=chatCount+(badge?.inbox??0);
+  const active=screen==='hub'&&route.page==='inbox';
+  return <button type="button" className={`tool-button${active?' is-active':''}`} aria-current={active?'page':undefined} title="Everything that needs you, across chats, projects and Paperclip" onClick={()=>openHub('inbox')}>
+    <InboxIcon size={15}/><span>{NAMES.inbox}</span>{count>0&&<span className="nav-tool-count" aria-label={`${count} need you`}>{count>99?'99+':count}</span>}
+  </button>;
+}
+
+function HubEntry({screen,page,icon,label,title}:{screen:string;page:HubPage;icon:React.ReactNode;label:string;title:string}):React.ReactElement {
+  const route=useHubRoute();
+  const active=screen==='hub'&&route.page===page;
+  return <button type="button" className={`tool-button${active?' is-active':''}`} aria-current={active?'page':undefined} title={title} onClick={()=>openHub(page)}>{icon}<span>{label}</span></button>;
+}
+
+/** Task glyphs in the tree: ● running or needs you, ✓ done, ○ queued. */
+function TaskGlyph({task}:{task:WorkspaceTask}):React.ReactElement {
+  const state=task.live||task.status==='in_progress'||task.status==='in_review'||task.status==='blocked'?'live':task.status==='done'?'done':task.status==='cancelled'?'cancelled':'queued';
+  return <span className="ws-tree-glyph" data-state={state} data-status={task.status} aria-label={state==='live'?(task.status==='in_review'||task.status==='blocked'?'Needs you':'Running'):state==='done'?'Done':state==='cancelled'?'Cancelled':'Queued'}>{state==='done'?<CheckIcon size={11} strokeWidth={2.5}/>:null}</span>;
+}
+
+/** The linked Paperclip's projects under Projects, tagged Paperclip, with their tasks as chat-like rows (subtasks nested). */
+function PaperclipProjects({isOpen,toggleGroup}:{isOpen:(id:string)=>boolean;toggleGroup:(id:string,open:boolean)=>void}):React.ReactElement|null {
+  const badge=useInboxBadge();
+  const {snapshot}=useWorkspace(Boolean(badge?.connected));
+  const route=useHubRoute();
+  const screen=useStoreSelector(state=>state.screen);
+  const [newTask,setNewTask]=useState<string|null>(null);
+  if(!badge?.connected||!snapshot?.paperclip) return null;
+  const projects=snapshot.projects.filter(p=>p.source==='paperclip');
+  const tasks=snapshot.tasks.filter(t=>t.source==='paperclip');
+  const rank=(t:WorkspaceTask)=>t.live?0:t.status==='in_review'||t.status==='blocked'?1:t.status==='in_progress'||t.status==='todo'?2:t.status==='backlog'?3:t.status==='done'?4:5;
+  const sort=(list:WorkspaceTask[])=>[...list].sort((a,b)=>rank(a)-rank(b)||b.updatedAt.localeCompare(a.updatedAt));
+  const row=(t:WorkspaceTask,depth:number):React.ReactNode=>{
+    const kids=sort(tasks.filter(c=>c.parentId===t.id));
+    const active=screen==='hub'&&route.page==='task'&&route.arg===t.id;
+    return <React.Fragment key={t.id}>
+      <div className={`chat-row ws-tree-row${active?' is-active':''}`} data-depth={depth}>
+        <button type="button" className="chat-row-main" title={`${t.key} · ${t.title}`} onClick={()=>openHub('task',t.id)}>
+          <TaskGlyph task={t}/><span className="chat-title">{t.title}</span><span className="ws-tree-agent">{t.assigneeLabel??''}</span>
+        </button>
+      </div>
+      {kids.map(c=>row(c,depth+1))}
+    </React.Fragment>;
+  };
+  const group=(p:WorkspaceProject)=>{
+    const ids=new Set(tasks.filter(t=>t.projectId===p.id).map(t=>t.id));
+    const top=sort(tasks.filter(t=>t.projectId===p.id&&(!t.parentId||!ids.has(t.parentId))));
+    const open=top.filter(t=>t.status!=='done'&&t.status!=='cancelled'), done=top.filter(t=>t.status==='done'||t.status==='cancelled');
+    const live=tasks.filter(t=>t.projectId===p.id&&t.live).length;
+    return <Collapsible.Root className="nav-section" key={p.id} open={isOpen(`pc:${p.id}`)} onOpenChange={value=>toggleGroup(`pc:${p.id}`,value)}>
+      <header className="nav-section-head is-nested ws-pc-head">
+        <Collapsible.Trigger className="nav-disclosure">
+          <ChevronRight size={13} className="nav-chevron"/>
+          <span className="nav-section-icon" aria-hidden="true"><Layers size={13}/></span>
+          <span className="nav-section-title" title={`${p.name}${p.repo?` · ${p.repo}`:''}`}>{p.name}</span>
+          <span className="ws-source">{NAMES.paperclip}</span>
+          {live>0&&<span className="nav-running-count" title={`${live} running`} aria-label={`${live} running`}>{live}</span>}
+        </Collapsible.Trigger>
+        <span className="nav-section-actions">
+          <Tip label={`Open ${p.name}: tasks, roster and outputs`}><button type="button" className="icon-button" aria-label={`Open project ${p.name}`} onClick={()=>openHub('project',p.id)}><LayoutGrid size={13}/></button></Tip>
+          <Tip label={`New task in ${p.name}`}><button type="button" className="icon-button" aria-label={`New task in ${p.name}`} onClick={()=>setNewTask(p.id)}><SquarePen size={13}/></button></Tip>
+        </span>
+      </header>
+      <Collapsible.Panel className="nav-group-panel is-nested-chats">
+        {top.length===0?<p className="nav-folder-empty">No tasks</p>:<>{open.map(t=>row(t,0))}{done.slice(0,3).map(t=>row(t,0))}</>}
+      </Collapsible.Panel>
+    </Collapsible.Root>;
+  };
+  return <>
+    {projects.map(group)}
+    {snapshot.paperclip.stale&&<p className="nav-folder-empty" title={snapshot.paperclip.stale}>Paperclip is offline · showing the last copy</p>}
+    <NewTaskSheet open={newTask!==null} snapshot={snapshot} projectId={newTask} onClose={()=>setNewTask(null)} onCreated={id=>openHub('task',id)}/>
+  </>;
 }

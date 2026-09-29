@@ -12,7 +12,7 @@ import { HandoffCard, SourcesCard } from './ProjectKnowledge';
 import { plural } from '../../shared/wording.ts';
 import { exactTime } from '../relativeTime.ts';
 
-export type ProjectTab = 'overview' | 'tasks' | 'agents' | 'chats' | 'changes' | 'activity' | 'decisions' | 'memory' | 'inbox' | 'environments' | 'settings';
+export type ProjectTab = 'overview' | 'tasks' | 'agents' | 'roster' | 'outputs' | 'chats' | 'changes' | 'activity' | 'decisions' | 'memory' | 'inbox' | 'environments' | 'settings';
 
 /** Versioned project rules, injected into every project chat's context packet. */
 function InstructionsCard({ projectId, instructions, onChanged }: { projectId: string; instructions: ProjectWork['instructions']; onChanged: () => void }) {

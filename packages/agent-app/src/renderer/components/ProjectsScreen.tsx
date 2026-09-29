@@ -25,6 +25,8 @@ import { exactTime } from '../relativeTime.ts';
 import './projects-screen.css';
 import { ProjectDefaultModel } from './settings/ProjectDefaultModel';
 import {Tip} from './Tooltip';
+import { ProjectOutputs, ProjectRoster } from './ProjectHub';
+import { NAMES } from '../../shared/workspace-names';
 
 const message = (err: unknown, fallback: string) => err instanceof Error ? err.message : fallback;
 const fromSnapshot = (p: Project): ProjectDetails => ({ ...p, primaryFolderId: p.folderIds[0] ?? null, archived: false, archivedAt: null });
@@ -123,7 +125,7 @@ function InlineText({ value, label, placeholder, multiline, maxLength, className
 }
 
 // PRJ-X3: work first (tasks, agents, chats, changes), then the record (activity, decisions, memory), then plumbing.
-const TABS: { id: ProjectTab; label: string }[] = [{ id: 'overview', label: 'Overview' }, { id: 'tasks', label: 'Tasks' }, { id: 'agents', label: 'Agents' }, { id: 'chats', label: 'Chats' }, { id: 'changes', label: 'Changes' },
+const TABS: { id: ProjectTab; label: string }[] = [{ id: 'overview', label: 'Overview' }, { id: 'tasks', label: 'Tasks' }, { id: 'agents', label: 'Agents' }, { id: 'roster', label: NAMES.roster }, { id: 'outputs', label: NAMES.outputs }, { id: 'chats', label: 'Chats' }, { id: 'changes', label: 'Changes' },
   { id: 'activity', label: 'Activity' }, { id: 'decisions', label: 'Decisions' }, { id: 'memory', label: 'Memory' }, { id: 'inbox', label: 'Inbox' }, { id: 'environments', label: 'Environments' }, { id: 'settings', label: 'Settings' }];
 
 function ProjectDetail({ project, allFolders, chats, onUpdated, onStartChat, onOpenChat, onLeave, onDeleted }: { project: ProjectDetails; allFolders: Folder[]; chats: Chat[]; onUpdated: (p: ProjectDetails) => void; onStartChat: (folderId?: string) => void; onOpenChat: (id: string) => void; onLeave?: () => void; onDeleted: () => void }) {
@@ -196,6 +198,8 @@ function ProjectDetail({ project, allFolders, chats, onUpdated, onStartChat, onO
       {tab === 'environments' ? <ProjectEnvironmentsSection chats={chats} folders={allFolders} onOpenChat={onOpenChat}><FoldersTab project={project} folders={folders} allFolders={allFolders} chats={chats} highlight={highlight} onUpdated={onUpdated} onStartChat={onStartChat}/></ProjectEnvironmentsSection>
         : tab === 'changes' ? <ProjectChangesSection folders={folders} onReview={f => { openChangesTab(f.id, f.name); onLeave?.(); }}/>
         : tab === 'memory' ? <ProjectMemorySection projectId={project.id} onOpenMemory={() => openMemoryScreen(`project:${project.id}`)}/>
+        : tab === 'roster' ? <section aria-label={NAMES.roster} className="project-section"><ProjectRoster projectId={project.id}/></section>
+        : tab === 'outputs' ? <section aria-label={NAMES.outputs} className="project-section"><ProjectOutputs projectId={project.id}/></section>
         : tab === 'chats' ? <ChatsTab project={project} chats={chats} folders={allFolders} onOpenChat={onOpenChat} onStartChat={onStartChat} onStatus={setStatus}/>
         : tab === 'settings' ? <section aria-label="Project settings" className="project-section"><ProjectMembersSection project={project} folders={folders}/></section>
         : tab === 'inbox' ? <MailboxInbox projectId={project.id} title="Mail between this project’s chats, its task runs and you. Agents send and reply with the mailbox tools."/>
