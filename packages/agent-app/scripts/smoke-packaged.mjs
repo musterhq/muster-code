@@ -48,10 +48,10 @@ async function page() {
 
 /** Finds the launcher Muster wrote for an agent tool (a #!/bin/sh script, or a .cmd on Windows). */
 function findLauncher(dir, stem) {
-  const wanted = process.platform === 'win32' ? `${stem}.cmd` : stem;
+  const wanted = process.platform === 'win32' ? [`${stem}.cmd`, stem] : [stem];
   for (const entry of readdirSync(dir, {withFileTypes: true})) {
     const full = path.join(dir, entry.name);
-    if (entry.isFile() && entry.name === wanted) return full;
+    if (entry.isFile() && wanted.includes(entry.name)) return full;
     if (entry.isDirectory()) { const found = findLauncher(full, stem); if (found) return found; }
   }
 }
