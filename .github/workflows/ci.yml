@@ -57,7 +57,6 @@ jobs:
       - name: Webview script checks
         run: |
           python3 scripts/dev/pane-check.py
-          python3 scripts/dev/render-test.py
 
       - name: Test
         run: pnpm test

@@ -1,10 +1,10 @@
 # Unit-test the pane's markdown renderer outside the webview: extract the pure functions from the generated script and run samples in node.
-import subprocess, tempfile, sys, re, os
-src = os.path.join(os.path.dirname(__file__), "..", "..", "packages", "builtin", "src", "agent-pane.ts")
-s = open(src).read(); i = s.index('function paneHtml(csp: string, codicon = ""): string {'); fn = s[i:].replace('function paneHtml(csp: string, codicon = ""): string {', 'function paneHtml(csp, codicon = "") {', 1)
-node = fn + '\nconst html = paneHtml("x"); const sc=[...html.matchAll(/<script>([\\s\\S]*?)<\\/script>/g)].map(m=>m[1]); require("fs").writeFileSync(process.argv[2], sc[sc.length-1]);'
-t = tempfile.NamedTemporaryFile("w", suffix=".js", delete=False); t.write(node); t.close(); m = tempfile.NamedTemporaryFile("w", suffix=".js", delete=False).name
-subprocess.run(["node", t.name, m], check=True)
+import re
+import subprocess, tempfile, sys, os
+here = os.path.dirname(os.path.abspath(__file__))
+m = tempfile.NamedTemporaryFile("w", suffix=".js", delete=False).name
+ex = subprocess.run(["node", "--import", "tsx", os.path.join(here, "extract-pane-script.ts"), m], cwd=os.path.join(here, "..", "..", "packages", "builtin"), capture_output=True, text=True)
+if ex.returncode != 0: print("extract pane script failed:", ex.stderr[:800]); sys.exit(ex.returncode)
 js = open(m).read()
 def piece(name):
     i = js.find("function " + name + "(")
