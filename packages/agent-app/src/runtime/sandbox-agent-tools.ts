@@ -7,12 +7,12 @@ import {randomBytes, timingSafeEqual} from 'node:crypto';
 import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
+import {launcherFile, nodeLauncherScript} from './launcher-script.ts';
 import type {McpToolResult, SandboxAgentTarget} from './sandbox-registry.ts';
 
 export const SANDBOX_MCP = 'muster_sandbox';
 export const SANDBOX_EXEC_MAX_MS = 30 * 60_000;
 const MAX_BODY = 4 * 1024 * 1024;
-const shellQuote = (value: string) => `'${value.replace(/'/g, `'\\''`)}'`;
 export const textResult = (text: string, isError = false): McpToolResult => ({content: [{type: 'text', text}], ...(isError ? {isError: true} : {})});
 
 export const SANDBOX_TOOL_SPECS = [
@@ -60,8 +60,8 @@ export async function runSandboxTool(target: SandboxAgentTarget, tool: string, i
 }
 
 /** Launcher script Codex runs as the MCP server (config overrides cannot carry an args array). */
-export function sandboxLauncherScript(execPath: string, script: string, endpoint: string): string {
-  return `#!/bin/sh\nELECTRON_RUN_AS_NODE=1 exec ${shellQuote(execPath)} ${shellQuote(script)} ${shellQuote(endpoint)}\n`;
+export function sandboxLauncherScript(execPath: string, script: string, endpoint: string, platform: NodeJS.Platform = process.platform): string {
+  return nodeLauncherScript(execPath, script, endpoint, platform);
 }
 /** The stdio MCP server, written as plain CommonJS at start so no build entry is needed. Tool specs are baked in. */
 export function sandboxMcpServerSource(): string {
@@ -101,7 +101,7 @@ export class SandboxToolHost {
   private token = randomBytes(32);
   private queues = new Map<string, Promise<unknown>>();
   private disposed = false;
-  constructor(private options: SandboxToolHostOptions) { this.launcher = path.join(options.dir, 'muster-sandbox-mcp'); }
+  constructor(private options: SandboxToolHostOptions) { this.launcher = launcherFile(path.join(options.dir, 'muster-sandbox-mcp')); }
   async start(): Promise<string> {
     fs.mkdirSync(this.options.dir, {recursive: true, mode: 0o700});
     const server = http.createServer((request, response) => void this.handle(request, response));

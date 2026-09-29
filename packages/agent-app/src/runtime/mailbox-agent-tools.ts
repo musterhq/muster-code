@@ -9,6 +9,7 @@ import http from 'node:http';
 import path from 'node:path';
 import type {McpToolResult} from './sandbox-registry.ts';
 import {sandboxLauncherScript, textResult} from './sandbox-agent-tools.ts';
+import {launcherFile} from './launcher-script.ts';
 
 export const MAILBOX_MCP = 'muster_mailbox';
 const MAX_BODY = 256 * 1024;
@@ -62,7 +63,7 @@ export class MailboxToolHost {
   private token = randomBytes(32);
   private queues = new Map<string, Promise<unknown>>();
   private disposed = false;
-  constructor(private options: {dir: string; execPath: string; run: MailboxToolRunner}) { this.launcher = path.join(options.dir, 'muster-mailbox-mcp'); }
+  constructor(private options: {dir: string; execPath: string; run: MailboxToolRunner}) { this.launcher = launcherFile(path.join(options.dir, 'muster-mailbox-mcp')); }
   start(): Promise<string> { return this.starting ??= this.listen(); }
   private async listen(): Promise<string> {
     fs.mkdirSync(this.options.dir, {recursive: true, mode: 0o700});

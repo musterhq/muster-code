@@ -1,6 +1,7 @@
 import {spawn as nodeSpawn, type ChildProcess} from 'node:child_process';
 import {randomUUID} from 'node:crypto';
 import {cliSpawn, jsonLines, loadImages, text} from './shared.ts';
+import {launcherSpec} from '../launcher-script.ts';
 import type {AdapterRunInput, AdapterRunResult, RunnableAdapter} from './types.ts';
 import {CLAUDE_CODE_ALIASES, CLAUDE_CODE_DEFAULT} from './claude-models.ts';
 
@@ -14,7 +15,7 @@ export const claudePermissionMode = (mode: AdapterRunInput['permissionMode']) =>
 function mcpArgs(servers: AdapterRunInput['mcpServers']): string[] {
   const names = Object.keys(servers ?? {});
   if (!names.length) return [];
-  return ['--mcp-config', JSON.stringify({mcpServers: servers}), '--allowedTools', ...names.map(name => `mcp__${name}`)];
+  return ['--mcp-config', JSON.stringify({mcpServers: Object.fromEntries(Object.entries(servers ?? {}).map(([name, spec]) => [name, spec.args ? spec : {...spec, ...launcherSpec(spec.command)}]))}), '--allowedTools', ...names.map(name => `mcp__${name}`)];
 }
 
 export function claudeArgs(input: AdapterRunInput, sessionId: string): string[] {

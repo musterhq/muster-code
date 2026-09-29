@@ -5,6 +5,7 @@ import path from 'node:path';
 import {browserScopeProfile, type BrowserState} from '../../shared/browser-protocol.ts';
 import type {AgentEvent, Snapshot} from '../../shared/protocol.ts';
 import type {ComputerControlOwner} from '../../shared/domains/computer-protocol.ts';
+import {launcherFile, nodeLauncherScript} from '../../runtime/launcher-script.ts';
 import {runBrowserTool, type AgentBrowserHost, type AgentPage} from './browser-actions.ts';
 import {BROWSER_TOOL_NAMES, textResult, type McpToolResult} from './browser-tools.ts';
 
@@ -31,11 +32,10 @@ export interface BridgeOptions {
 /** One agent tab per chat; the renderer adopts it into the right pane under the same owner. */
 export const agentBrowserOwner = (chatId: string) => `browser:agent-${chatId}`;
 const FRAME_INTERVAL_MS = 1000, FRAME_IDLE_MS = 8000, MAX_BODY = 1024 * 1024;
-const shellQuote = (value: string) => `'${value.replace(/'/g, `'\\''`)}'`;
 
 /** Launcher script Codex runs as the muster_browser MCP server (config overrides cannot carry an args array). */
-export function launcherScript(execPath: string, script: string, endpoint: string): string {
-  return `#!/bin/sh\nELECTRON_RUN_AS_NODE=1 exec ${shellQuote(execPath)} ${shellQuote(script)} ${shellQuote(endpoint)}\n`;
+export function launcherScript(execPath: string, script: string, endpoint: string, platform: NodeJS.Platform = process.platform): string {
+  return nodeLauncherScript(execPath, script, endpoint, platform);
 }
 
 /** Local HTTP endpoint (127.0.0.1, bearer token in a 0600 file) that turns MCP tool calls into browser actions. */
@@ -46,7 +46,7 @@ export class BrowserBridge {
   private pumps = new Map<string, {timer?: ReturnType<typeof setTimeout>; until: number; busy: boolean; label?: string}>();
   private queues = new Map<string, Promise<unknown>>();
   private disposed = false;
-  constructor(private options: BridgeOptions) { this.launcher = path.join(options.dir, 'muster-browser-mcp'); }
+  constructor(private options: BridgeOptions) { this.launcher = launcherFile(path.join(options.dir, 'muster-browser-mcp')); }
   async start(): Promise<string> {
     fs.mkdirSync(this.options.dir, {recursive: true, mode: 0o700});
     const server = http.createServer((request, response) => void this.handle(request, response));

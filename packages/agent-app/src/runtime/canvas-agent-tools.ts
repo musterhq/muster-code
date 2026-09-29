@@ -10,6 +10,7 @@ import http from 'node:http';
 import path from 'node:path';
 import type { McpToolResult } from './sandbox-registry.ts';
 import { sandboxLauncherScript, textResult } from './sandbox-agent-tools.ts';
+import { launcherFile } from './launcher-script.ts';
 import type { CanvasStore } from './canvases.ts';
 import type { Canvas } from '../shared/domains/artifacts-protocol.ts';
 
@@ -104,7 +105,7 @@ export class CanvasToolHost {
   private server?: http.Server;
   private token = randomBytes(32);
   private disposed = false;
-  constructor(private options: CanvasToolHostOptions) { this.launcher = path.join(options.dir, 'muster-canvas-mcp'); }
+  constructor(private options: CanvasToolHostOptions) { this.launcher = launcherFile(path.join(options.dir, 'muster-canvas-mcp')); }
   async start(): Promise<string> {
     fs.mkdirSync(this.options.dir, { recursive: true, mode: 0o700 });
     const server = http.createServer((request, response) => void this.handle(request, response));
