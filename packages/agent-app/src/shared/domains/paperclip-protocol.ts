@@ -69,8 +69,9 @@ export type InboxKind = 'review' | 'blocked' | 'approval' | 'question' | 'failed
 export interface WorkspaceInboxItem { id: string; kind: InboxKind; title: string; why: string; severity: 'high' | 'medium' | 'low'; at: string; taskId: string | null; agentId: string | null; runId: string | null; group?: string; source?: WorkspaceSource; projectId?: string | null; chatIds?: string[] }
 export interface WorkspaceGoal { id: string; title: string; status: string; level: string | null }
 export type LiveChannel = 'socket' | 'poll' | 'events' | 'off';
-/** The linked Paperclip as the snapshot saw it. `stale`: the last read failed and its rows are the last good copy. */
-export interface PaperclipLink { origin: string; company: WorkspaceCompany | null; companies: WorkspaceCompany[]; live: LiveChannel; stale?: string }
+/** The linked Paperclip as the snapshot saw it. `stale`: the last read failed; `cached` then says whether its rows are the
+ *  last good copy (true) or missing because nothing was read yet (false). */
+export interface PaperclipLink { origin: string; company: WorkspaceCompany | null; companies: WorkspaceCompany[]; live: LiveChannel; stale?: string; cached?: boolean }
 export interface WorkspaceSnapshot {
   paperclip: PaperclipLink | null;
   tasks: WorkspaceTask[]; agents: WorkspaceAgent[]; projects: WorkspaceProject[]; goals: WorkspaceGoal[];

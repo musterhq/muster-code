@@ -43,13 +43,16 @@ export function InboxPage({ snapshot, nav }: { snapshot: WorkspaceSnapshot | nul
   const act = (item: ActivityItem) => item.action.kind === 'chat' ? nav.onOpenChat(item.action.chatId) : item.action.kind === 'task' ? nav.onOpenTask(item.action.taskId) : item.action.kind === 'agent' ? nav.onOpenAgent(item.action.agentId) : undefined;
   const label = (item: ActivityItem) => item.action.kind === 'chat' ? item.bucket === 'needs' ? 'Answer' : item.bucket === 'problems' ? 'Retry' : 'Open chat' : item.action.kind === 'task' ? item.bucket === 'needs' ? 'Answer' : 'Open task' : item.action.kind === 'agent' ? 'Open agent' : '';
   const mailProject = group !== 'all' ? app?.projects.find(p => p.name === group)?.id ?? null : null;
+  // Paperclip offline: never claim "all caught up" when its items could not be read.
+  const offline = snapshot?.paperclip?.stale ? snapshot.paperclip : null;
   return <div className="ws-page">
     <PageHeader title={NAMES.inbox} detail="Every chat and run that needs you, finished, or went wrong: folders, projects and Paperclip, in one place."/>
     <div className="ws-filters" role="toolbar" aria-label="Filter the inbox">
       {BUCKETS.map(f => <button key={f.id} type="button" className="ws-filter" aria-pressed={filter === f.id} onClick={() => setFilter(f.id)}>{f.label}<span>{f.id === 'all' ? items.length : counts.get(f.id) ?? 0}</span></button>)}
       {groups.length > 1 && <select className="ws-select" aria-label="Group" value={group} onChange={e => setGroup(e.target.value)}><option value="all">Everything</option>{groups.map(g => <option key={g} value={g}>{g}</option>)}</select>}
     </div>
-    {visible.length === 0 ? <ResourceState kind="empty" icon={<Inbox size={20}/>} title={items.length ? 'Nothing here' : 'You’re all caught up'} message={items.length ? 'No items match these filters.' : 'Questions and approvals from your agents, finished turns, reviews, problems and mail land here.'}/>
+    {offline && <ResourceState kind="partial" compact message={offline.cached ? `${NAMES.paperclip} can’t be reached, so its items are from the last copy and may be out of date.` : `${NAMES.paperclip} can’t be reached, so its questions, approvals and problems are not shown.`}/>}
+    {visible.length === 0 ? <ResourceState kind="empty" icon={<Inbox size={20}/>} title={items.length ? 'Nothing here' : offline ? 'Nothing from Muster needs you' : 'You’re all caught up'} message={items.length ? 'No items match these filters.' : offline ? `${NAMES.paperclip} items will show here once it can be reached.` : 'Questions and approvals from your agents, finished turns, reviews, problems and mail land here.'}/>
       : [...byGroup].map(([name, rows]) => <section key={name} className="ws-section" aria-label={name}>
         <h2 className="ws-group-title">{name}<span>{rows.length}</span></h2>
         <ul className="ws-rows">{rows.map(item => <li key={item.id}>

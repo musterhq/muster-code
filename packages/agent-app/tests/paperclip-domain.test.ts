@@ -57,7 +57,7 @@ function paperclip(){
 function secretsFake(){const values=new Map<string,string>();return {values,store:{status:(id:string)=>({stored:values.has(id),updatedAt:null,secureStorage:true}),get:(id:string)=>values.get(id),set(id:string,v:string){values.set(id,v);return this.status(id);},clear(id:string){values.delete(id);return this.status(id);}}};}
 function fakeTimers(){const live=new Map<number,{fn:()=>void;ms:number}>();let n=0;return {live,setTimeout:((fn:()=>void,ms:number)=>{live.set(++n,{fn,ms});return n;}) as unknown as typeof setTimeout,clearTimeout:((id:number)=>{live.delete(id);}) as unknown as typeof clearTimeout,async fire(){const all=[...live];live.clear();for(const [,t] of all)await t.fn();}};}
 
-async function harness(t:TestContext,options:{socket?:SocketFactory;invoke?:(command:string,input:any)=>unknown;folders?:{id:string;name:string;path:string}[]}={}){
+async function harness(t:TestContext,options:{socket?:SocketFactory;invoke?:(command:string,input:any)=>unknown;folders?:{id:string;name:string;path:string}[];fetch?:(input:string,init?:RequestInit)=>Promise<Response>}={}){
   const dataDir=await mkdtemp(join(tmpdir(),'muster-paperclip-'));t.after(()=>rm(dataDir,{recursive:true,force:true}));
   const server=paperclip(),secrets=secretsFake(),timers=fakeTimers(),events:any[]=[],invoked:{command:string;input:any}[]=[];
   const {DatabaseSync}=await import('node:sqlite');const memory=new DatabaseSync(':memory:');t.after(()=>memory.close());
@@ -65,7 +65,7 @@ async function harness(t:TestContext,options:{socket?:SocketFactory;invoke?:(com
     async invoke(command:string,input:any){invoked.push({command,input});if(options.invoke){const r=options.invoke(command,input);if(r!==undefined)return r;}
       if(command==='mailbox.list')return {messages:[],unacked:0,pending:0};if(command==='project.list')return [];
       if(command==='memory.browse')return {records:[],status:{connection:'not-configured'}};throw new Error(`unexpected ${command}`);}} as unknown as DomainContext;
-  const domain=createPaperclipDomain(context,{fetch:server.fetch as never,secrets:()=>secrets.store as never,timers,socket:options.socket??(()=>{throw new Error('no socket');}),remoteOf:async path=>path.endsWith('oss')?'git@github.com:hybrowlabs/OSS-Manager.git':undefined});
+  const domain=createPaperclipDomain(context,{fetch:(options.fetch??server.fetch) as never,secrets:()=>secrets.store as never,timers,socket:options.socket??(()=>{throw new Error('no socket');}),remoteOf:async path=>path.endsWith('oss')?'git@github.com:hybrowlabs/OSS-Manager.git':undefined});
   t.after(()=>domain.dispose?.());
   const call=(command:string,input:Record<string,unknown>={})=>Promise.resolve(domain.handlers[command]!(input)) as Promise<any>;
   return {dataDir,server,secrets,timers,events,invoked,call};
@@ -137,6 +137,18 @@ test('the snapshot maps Paperclip into the workspace shapes, and an unchanged re
   const again=await h.call('paperclip.snapshot');
   assert.deepEqual(again.tasks,snap.tasks,'nothing changed, nothing rebuilt');
   assert.ok(h.server.calls.slice(before).filter(c=>c.url!=='/api/companies').every(c=>c.headers['if-none-match']),'every refresh is conditional');
+});
+
+test('an unreachable Paperclip says whether a last copy is shown; a fresh profile has none',async t=>{
+  let down=true;const server=paperclip();
+  const h=await harness(t,{fetch:async(input,init)=>{if(down)throw new TypeError('fetch failed');return server.fetch(input,init);}});
+  await h.call('paperclip.config.set',{mode:'local'});
+  const fresh=await h.call('paperclip.snapshot');
+  assert.ok(fresh.paperclip.stale);assert.equal(fresh.paperclip.cached,false,'nothing was ever read');
+  down=false;await h.call('paperclip.snapshot');
+  down=true;const later=await h.call('paperclip.snapshot',{refresh:true});
+  assert.ok(later.paperclip.stale);assert.equal(later.paperclip.cached,true,'the last good copy is shown');
+  assert.ok(later.tasks.some((x:any)=>x.source==='paperclip'));
 });
 
 test('the thread renders comments (deleted ones hidden) and the composer addresses the assignee; writes hit the documented endpoints',async t=>{

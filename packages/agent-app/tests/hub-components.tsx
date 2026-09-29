@@ -118,5 +118,15 @@ assert.deepEqual([hubRoute().page,hubRoute().arg],['agent','qa'],'a card opens t
 assert.deepEqual(errors,[]);
 assert.equal(intervals,0,'no intervals anywhere');
 root2.unmount();
+
+// Inbox with Paperclip unreachable on a fresh profile: say so, never "all caught up".
+const {InboxPage}=await import('../src/renderer/components/HubPages');
+const root3=createRoot(document.getElementById('root')!,{onUncaughtError:(e:unknown)=>{(errors as unknown[]).push(e);}});
+root3.render(<InboxPage snapshot={{...snapshot,inbox:[],tasks:[],projects:[],paperclip:{...snapshot.paperclip,company:null,stale:'fetch failed',cached:false}} as any} nav={{onOpenTask(){},onOpenAgent(){},onOpenChat(){}}}/>);
+await delay(120);
+assert.ok(text('.resource-state-partial p').some(t=>/Paperclip can’t be reached, so its questions, approvals and problems are not shown/.test(t)));
+assert.ok(!text('.resource-state-title').some(t=>/all caught up/.test(t)),'offline is never "all caught up"');
+root3.unmount();
+assert.deepEqual(errors,[]);
 console.log('hub-components: ok');
 process.exit(0);

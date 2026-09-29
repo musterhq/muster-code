@@ -185,9 +185,9 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
     }).finally(() => { inflight = null; });
     try {
       const part = await inflight;
-      return { part, link: { origin: originLabel(), company: companies.find(c => c.id === built?.companyId) ?? null, companies, live: live.channel, ...(lastError ? { stale: lastError } : {}) } };
+      return { part, link: { origin: originLabel(), company: companies.find(c => c.id === built?.companyId) ?? null, companies, live: live.channel, ...(lastError ? { stale: lastError, cached: true } : {}) } };
     } catch (cause) {
-      return { part: null, link: { origin: originLabel(), company: null, companies, live: 'off', stale: cause instanceof Error ? cause.message : String(cause) } };
+      return { part: null, link: { origin: originLabel(), company: null, companies, live: 'off', stale: cause instanceof Error ? cause.message : String(cause), cached: false } };
     }
   };
 

@@ -737,7 +737,7 @@ function PaperclipProjects({isOpen,toggleGroup}:{isOpen:(id:string)=>boolean;tog
   };
   return <>
     {projects.map(group)}
-    {snapshot.paperclip.stale&&<p className="nav-folder-empty" title={snapshot.paperclip.stale}>Paperclip is offline · showing the last copy</p>}
+    {snapshot.paperclip.stale&&<p className="nav-folder-empty" title={snapshot.paperclip.stale}>{snapshot.paperclip.cached?'Paperclip is offline · showing the last copy':'Paperclip can’t be reached · its projects show once it’s back'}</p>}
     <NewTaskSheet open={newTask!==null} snapshot={snapshot} projectId={newTask} onClose={()=>setNewTask(null)} onCreated={id=>openHub('task',id)}/>
   </>;
 }
