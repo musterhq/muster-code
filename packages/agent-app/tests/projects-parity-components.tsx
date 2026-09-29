@@ -92,7 +92,7 @@ const root=createRoot(document.getElementById('root')!,{onUncaughtError:e=>error
 root.render(<ProjectPage snapshot={snapshot as any} projectId="p1" nav={nav} muster={muster as any}/>);
 await delay(150);
 assert.deepEqual(errors,[]);
-assert.deepEqual(text('[role="tab"]'),['Tasks','Roster','Outputs','Settings','Budget']);
+assert.deepEqual(text('[role="tab"]'),['Dashboard','Tasks','Roster','Outputs','Ledger','Budget','Settings']);
 assert.match(text('.pp-sub')[0],/github\.com\/hybrowlabs\/oss-manager.*2 open of 3/);
 // Tasks: a nested list, keys with the project prefix, owners and ages on the right.
 const keys=()=>text('.task-row .ws-key');

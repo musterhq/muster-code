@@ -1,7 +1,8 @@
 /**
  * One project page for every project (#193), Muster-native or Paperclip, laid out like Paperclip's:
  * - a header with the title, repository and open count;
- * - tabs: Tasks · Roster · Outputs · Settings (Paperclip's Configuration) · Budget.
+ * - tabs: Dashboard · Tasks · Roster · Outputs · Ledger · Budget · Settings (Paperclip's Configuration). These live only
+ *   inside a project; the app sidebar stays Inbox, New chat, Search, Memory, Automations, then Pinned, Folders, Projects.
  * Everything the old 13-tab project screen did is still here:
  * - Tasks has the list and board;
  * - Roster merged the old Agents tab (#186);
@@ -23,7 +24,7 @@ import { NAMES } from '../../shared/workspace-names';
 import { invoke } from '../bridge';
 import { refreshWorkspace } from '../hubStore';
 import { openAppSettings, openChangesTab, openMemoryScreen, notifyError, notifySuccess } from '../store';
-import { type HubNav, ListPage } from './HubPages';
+import { type HubNav, LedgerPage, ListPage } from './HubPages';
 import { MailboxInbox } from './MailboxInbox';
 import { ProjectActivityPanel } from './ProjectActivityPanel';
 import { ConfirmProjectAction, EditProjectDialog } from './ProjectEditDialog';
@@ -40,10 +41,10 @@ import { ProjectDefaultModel } from './settings/ProjectDefaultModel';
 import { NewTaskSheet } from './HubSetup';
 import { TaskList } from './TaskList';
 import { ProjectCostSummary } from './UsageCost';
-import { RunActivityChart } from './DashboardPage';
+import { DashboardPage, RunActivityChart } from './DashboardPage';
 
-export type ProjectPageTab = 'tasks' | 'roster' | 'outputs' | 'settings' | 'budget';
-const TABS: { id: ProjectPageTab; label: string }[] = [{ id: 'tasks', label: NAMES.tasks }, { id: 'roster', label: NAMES.roster }, { id: 'outputs', label: NAMES.outputs }, { id: 'settings', label: NAMES.settings }, { id: 'budget', label: NAMES.budget }];
+export type ProjectPageTab = 'dashboard' | 'tasks' | 'roster' | 'outputs' | 'ledger' | 'budget' | 'settings';
+const TABS: { id: ProjectPageTab; label: string }[] = [{ id: 'dashboard', label: NAMES.dashboard }, { id: 'tasks', label: NAMES.tasks }, { id: 'roster', label: NAMES.roster }, { id: 'outputs', label: NAMES.outputs }, { id: 'ledger', label: NAMES.ledger }, { id: 'budget', label: NAMES.budget }, { id: 'settings', label: NAMES.settings }];
 type SettingsSection = 'general' | 'folders' | 'members' | 'mail' | 'chats' | 'knowledge' | 'runs' | 'activity';
 const SECTIONS: { id: SettingsSection; label: string }[] = [
   { id: 'general', label: 'General' }, { id: 'folders', label: 'Folders' }, { id: 'members', label: 'Members' }, { id: 'mail', label: NAMES.mail },
@@ -112,6 +113,8 @@ export function ProjectPage({ snapshot, projectId, nav, muster, initialTab = 'ta
         : tab === 'tasks' ? <TaskList snapshot={scoped} tasks={scoped.tasks} scope={projectId} onOpenTask={nav.onOpenTask} onNewTask={project?.archived ? undefined : () => setCreating(true)} emptyMessage={local ? 'No tasks yet. Create one, give it an owner from the Roster, and start it in its own worktree.' : 'No tasks in this project yet.'}/>
         : tab === 'roster' ? <RosterPanel snapshot={scoped} projectId={projectId} local={local} nav={nav}>{muster && <WorkingNow projectId={projectId} chats={muster.chats} onOpenChat={muster.onOpenChat}/>}</RosterPanel>
         : tab === 'outputs' ? <div className="pp-outputs"><ListPage kind="artifacts" embedded projectId={projectId}/>{muster && <ProjectChangesSection folders={muster.allFolders.filter(f => muster.project.folderIds.includes(f.id))} onReview={f => { openChangesTab(f.id, f.name); muster.onLeave(); }}/>}</div>
+        : tab === 'dashboard' ? <DashboardPage snapshot={scoped} nav={nav} projectId={projectId}/>
+        : tab === 'ledger' ? <LedgerPage snapshot={scoped} nav={nav} projectId={projectId}/>
         : tab === 'budget' ? <BudgetTab projectId={projectId} local={local} name={name}/>
         : muster ? <MusterSettings context={muster} section={section} onSection={setSection} onEdit={() => setEditing(true)} onArchive={() => setConfirm('archive')} onDelete={() => setConfirm('delete')} onRestore={() => void restore()} onStatus={setStatus}/>
         : <PaperclipSettings snapshot={scoped}/>}

@@ -48,18 +48,19 @@ export function agentCards(snapshot: WorkspaceSnapshot, limit = 8): { agent: Wor
     .sort((a, b) => Number(b.run.status === 'running') - Number(a.run.status === 'running') || (b.run.finishedAt ?? b.run.createdAt).localeCompare(a.run.finishedAt ?? a.run.createdAt)).slice(0, limit);
 }
 
-export function DashboardPage({ snapshot, nav }: { snapshot: WorkspaceSnapshot; nav: HubNav }): React.ReactElement {
+/** `projectId` scopes it to one project (the project page's Dashboard tab), where it renders without its own page header. */
+export function DashboardPage({ snapshot, nav, projectId }: { snapshot: WorkspaceSnapshot; nav: HubNav; projectId?: string }): React.ReactElement {
   const [data, setData] = useState<DashboardData | null>(null);
   const [error, setError] = useState('');
   const [tick, setTick] = useState(0);
   // Refetched when the workspace snapshot changes (its events), never on a timer.
-  useEffect(() => { let live = true; setError(''); invoke('paperclip.dashboard', { utcOffsetMinutes: -new Date().getTimezoneOffset() }).then(d => { if (live) setData(d); }, e => { if (live) setError(errorText(e)); }); return () => { live = false; }; }, [snapshot.fetchedAt, tick]);
+  useEffect(() => { let live = true; setError(''); invoke('paperclip.dashboard', { utcOffsetMinutes: -new Date().getTimezoneOffset(), ...(projectId ? { projectId } : {}) }).then(d => { if (live) setData(d); }, e => { if (live) setError(errorText(e)); }); return () => { live = false; }; }, [snapshot.fetchedAt, tick, projectId]);
   const tiles = dashboardTiles(snapshot, data);
   const cards = useMemo(() => agentCards(snapshot), [snapshot.runs, snapshot.agents]);
   const tasks = useMemo(() => new Map(snapshot.tasks.map(t => [t.id, t])), [snapshot.tasks]);
   const recent = useMemo(() => [...snapshot.tasks].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).slice(0, 10), [snapshot.tasks]);
-  return <div className="ws-page dash">
-    <PageHeader title={NAMES.dashboard} detail="What your agents are doing, what it costs, and how the last two weeks went, across Muster and Paperclip."/>
+  return <div className={`ws-page dash${projectId ? ' is-embedded' : ''}`}>
+    {!projectId && <PageHeader title={NAMES.dashboard} detail="What your agents are doing, what it costs, and how the last two weeks went, across Muster and Paperclip."/>}
     <section className="ws-section" aria-label="Agents">
       <h2 className="dash-label">Agents</h2>
       {cards.length === 0 ? <ResourceState kind="empty" compact icon={<Bot size={18}/>} message={snapshot.agents.some(a => a.role !== 'board') ? 'No agent has run yet. Start a task from a project and it shows here while it works.' : `No agents yet. Add one on a project’s ${NAMES.roster} tab.`}>
