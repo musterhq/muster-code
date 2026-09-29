@@ -11,6 +11,7 @@ import type {
 } from '../shared/domains/paperclip-protocol.ts';
 import { OPEN_STATUSES } from '../shared/domains/paperclip-protocol.ts';
 import type { Commands } from '../shared/protocol.ts';
+import type { SqliteImportStore } from './paperclip-import.ts';
 
 export type Invoke = <K extends keyof Commands>(command: K, input: Commands[K]['input']) => Promise<Commands[K]['output']>;
 export interface LocalPart { tasks: WorkspaceTask[]; agents: WorkspaceAgent[]; projects: WorkspaceProject[]; runs: WorkspaceRun[]; inbox: WorkspaceInboxItem[] }
@@ -32,8 +33,14 @@ const clean = (value: unknown, label: string, max: number, required = true): str
 
 interface ProjectRead { project: ProjectDetails; work: ProjectWorkState; members: ProjectMember[]; prefix: string }
 
+/** What an import from Paperclip recorded about Muster rows: task keys and parents, each project's roster, thread history. */
+export type ImportMeta = Pick<SqliteImportStore, 'taskMeta' | 'roster' | 'comments' | 'history' | 'projectMeta'>;
+export const memberAgentId = (memberId: string) => `member:${memberId}`;
+type RosterRow = { memberId: string; name: string; title: string | null; role: string; capabilities: string | null; reportsToMemberId: string | null; runner: { runtime: string; model: string | null } };
+
 export class LocalWorkspace {
-  constructor(private readonly invoke: Invoke, private readonly repoOf: (folderId: string | null) => { repo: string | null; cwd: string | null }) {}
+  constructor(private readonly invoke: Invoke, private readonly repoOf: (folderId: string | null) => { repo: string | null; cwd: string | null }, private readonly meta?: () => ImportMeta | undefined) {}
+  private roster(projectId: string): RosterRow[] { try { return (this.meta?.()?.roster(projectId) ?? []) as unknown as RosterRow[]; } catch { return []; } }
 
   private async projects(): Promise<ProjectRead[]> {
     const list = (await this.invoke('project.list', undefined)).filter(p => !p.archived);
@@ -49,9 +56,13 @@ export class LocalWorkspace {
 
   private task(read: ProjectRead, task: ProjectTaskView, index: number): WorkspaceTask {
     const agent = task.owner.kind === 'agent';
+    let imported: ReturnType<ImportMeta['taskMeta']>; try { imported = this.meta?.()?.taskMeta(task.id); } catch { imported = undefined; }
+    // An imported task is owned by a named Roster member; keep its Paperclip key (RAG-15) and parent.
+    const member = agent ? read.members.find(m => m.id === task.owner.id && m.kind === 'agent') : undefined;
     return {
-      id: task.id, key: `${read.prefix}-${index + 1}`, title: task.title, status: STATE[task.state], priority: PRIORITY[task.priority] ?? 'medium', source: 'local',
-      projectId: read.project.id, parentId: null, goalId: null, assigneeId: agent ? agentIdOf(read.project.id) : 'user:local', assigneeLabel: agent ? this.agentName(read) : 'You',
+      id: task.id, key: imported?.key ?? `${read.prefix}-${index + 1}`, title: task.title, status: STATE[task.state], priority: PRIORITY[task.priority] ?? 'medium', source: 'local',
+      projectId: read.project.id, parentId: imported?.parentTaskId ?? null, goalId: null,
+      assigneeId: member ? memberAgentId(member.id) : agent ? agentIdOf(read.project.id) : 'user:local', assigneeLabel: member ? member.name : agent ? this.agentName(read) : 'You',
       createdAt: task.createdAt, updatedAt: task.updatedAt, startedAt: task.attempts[0]?.startedAt ?? null, completedAt: task.verification?.verifiedAt ?? null,
       live: task.state === 'running' || task.attempts.some(a => a.status === 'running'), blockedByIds: task.dependencies, origin: 'You',
     };
@@ -59,7 +70,8 @@ export class LocalWorkspace {
 
   private run(read: ProjectRead, task: ProjectTaskView, attempt: ProjectTaskView['attempts'][number]): WorkspaceRun {
     const status = ATTEMPT[attempt.status] ?? 'failed';
-    return { id: attempt.id, agentId: agentIdOf(read.project.id), taskId: task.id, status, trigger: attempt.trigger, source: 'local', createdAt: attempt.startedAt, startedAt: attempt.startedAt, finishedAt: attempt.endedAt, error: attempt.error ?? null, cancellable: status === 'running', chatId: attempt.chatId };
+    const member = task.owner.kind === 'agent' ? read.members.find(m => m.id === task.owner.id && m.kind === 'agent') : undefined;
+    return { id: attempt.id, agentId: member ? memberAgentId(member.id) : agentIdOf(read.project.id), taskId: task.id, status, trigger: attempt.trigger, source: 'local', createdAt: attempt.startedAt, startedAt: attempt.startedAt, finishedAt: attempt.endedAt, error: attempt.error ?? null, cancellable: status === 'running', chatId: attempt.chatId };
   }
 
   async snapshot(): Promise<LocalPart> {
@@ -72,12 +84,23 @@ export class LocalWorkspace {
       tasks.push(...mine);
       for (const task of read.work.tasks.items) for (const attempt of task.attempts) runs.push(this.run(read, task, attempt));
       const running = mine.some(t => t.live), failed = read.work.tasks.items.some(t => t.state === 'failed');
-      agents.push({ id: agentIdOf(read.project.id), name: this.agentName(read), role: 'engineer', title: read.project.name, model: null, adapter: 'muster', source: 'local', status: read.work.scheduler.paused ? 'paused' : running ? 'running' : failed ? 'error' : 'idle', reportsTo: 'user:local', lastActiveAt: read.work.tasks.items.flatMap(t => t.attempts).map(a => a.endedAt ?? a.startedAt).sort().at(-1) ?? null, error: null, pausable: true, capabilities: read.project.goal || null });
+      const roster = this.roster(read.project.id);
+      // An imported project has a real org: each member with its title, reporting line, runner and model.
+      for (const r of roster) {
+        const owned = mine.filter(t => t.assigneeId === memberAgentId(r.memberId));
+        agents.push({ id: memberAgentId(r.memberId), name: r.name, role: r.role, title: r.title, model: r.runner.model, adapter: r.runner.runtime, source: 'local', status: read.work.scheduler.paused ? 'paused' : owned.some(t => t.live) ? 'running' : 'idle', reportsTo: r.reportsToMemberId ? memberAgentId(r.reportsToMemberId) : 'user:local', lastActiveAt: null, error: null, pausable: true, capabilities: r.capabilities });
+      }
+      if (!roster.length) agents.push({ id: agentIdOf(read.project.id), name: this.agentName(read), role: 'engineer', title: read.project.name, model: null, adapter: 'muster', source: 'local', status: read.work.scheduler.paused ? 'paused' : running ? 'running' : failed ? 'error' : 'idle', reportsTo: 'user:local', lastActiveAt: read.work.tasks.items.flatMap(t => t.attempts).map(a => a.endedAt ?? a.startedAt).sort().at(-1) ?? null, error: null, pausable: true, capabilities: read.project.goal || null });
       const where = this.repoOf(read.project.primaryFolderId);
       projects.push({ id: read.project.id, name: read.project.name, status: 'in_progress', description: read.project.goal, source: 'local', repo: where.repo, cwd: where.cwd, taskCount: mine.length, openCount: mine.filter(t => OPEN_STATUSES.includes(t.status)).length, paused: read.work.scheduler.paused, memory: null });
     }
     runs.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-    return { tasks, agents, projects, runs: runs.slice(0, 200), inbox: localInbox(reads, tasks, runs, mail?.messages ?? []) };
+    const inbox = localInbox(reads, tasks, runs, mail?.messages ?? []);
+    // Pending human-only decisions carried over from Paperclip: Needs you, never resolved here.
+    let pending: ReturnType<ImportMeta['history']> = []; try { pending = (this.meta?.()?.history() ?? []).filter(h => h.pending); } catch { pending = []; }
+    const names = new Map(reads.map(r => [r.project.id, r.project.name])), keys = new Map(tasks.map(t => [t.id, t.key]));
+    for (const h of pending) inbox.push({ id: `import:${h.sourceId}`, kind: h.kind.startsWith('approval') ? 'approval' : 'question', title: `${h.taskId && keys.get(h.taskId) ? `${keys.get(h.taskId)} · ` : ''}${h.title}`.slice(0, 200), why: 'Waiting for your decision (carried over from Paperclip).', severity: 'high', at: h.at, taskId: h.taskId, agentId: null, runId: null, projectId: h.projectId, group: (h.projectId && names.get(h.projectId)) || 'Muster', source: 'local' });
+    return { tasks, agents, projects, runs: runs.slice(0, 200), inbox };
   }
 
   private async locate(taskId: string): Promise<{ read: ProjectRead; task: ProjectTaskView; view: WorkspaceTask }> {
@@ -93,8 +116,10 @@ export class LocalWorkspace {
     const { read, task, view } = await this.locate(taskId);
     const mail = await this.invoke('mailbox.list', { projectId: read.project.id, limit: 200 }).catch(() => null);
     const chats = new Set(task.attempts.map(a => a.chatId));
+    let imported: ReturnType<ImportMeta['comments']> = []; try { imported = this.meta?.()?.comments(task.id) ?? []; } catch { imported = []; }
     const comments: WorkspaceComment[] = [
-      ...read.work.activity.items.filter(a => a.refId === task.id).map(a => ({ id: a.id, author: { kind: 'system' as const, id: null, label: a.actor || 'Muster' }, body: a.summary, createdAt: a.createdAt })),
+      ...imported.map(c => ({ id: `pc:${c.sourceId}`, author: { kind: c.authorKind === 'agent' ? 'agent' as const : 'user' as const, id: null, label: c.authorLabel }, body: c.body, createdAt: c.createdAt, runId: c.runId })),
+      ...read.work.activity.items.filter(a => a.refId === task.id && a.kind !== 'task.create').map(a => ({ id: a.id, author: { kind: 'system' as const, id: null, label: a.actor || 'Muster' }, body: a.summary, createdAt: a.createdAt })),
       ...(mail?.messages ?? []).filter(m => (m.recipient.kind === 'taskRun' && m.recipient.id === task.id) || chats.has(m.sender.chatId ?? m.sender.id) || chats.has(m.recipient.chatId ?? m.recipient.id)).map(m => mailComment(m)),
     ].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
     const agent = task.owner.kind === 'agent';
@@ -133,7 +158,9 @@ export class LocalWorkspace {
 
   /** Muster agents are Project schedulers: pausing one holds its Project's task dispatch. */
   async setPaused(agentId: string | null, paused: boolean): Promise<number> {
-    const list = (await this.invoke('project.list', undefined)).filter(p => !p.archived && (!agentId || agentIdOf(p.id) === agentId));
+    // A Roster member pauses its project's scheduler (per-member pause is a follow-up).
+    const memberProject = agentId?.startsWith('member:') ? (await this.projects()).find(r => r.members.some(m => memberAgentId(m.id) === agentId))?.project.id : undefined;
+    const list = (await this.invoke('project.list', undefined)).filter(p => !p.archived && (!agentId || agentIdOf(p.id) === agentId || p.id === memberProject));
     for (const project of list) await this.invoke('project.scheduler.set', { projectId: project.id, paused });
     return list.length;
   }

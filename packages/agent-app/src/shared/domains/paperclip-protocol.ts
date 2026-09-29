@@ -130,6 +130,11 @@ export interface WorkspaceRow {
 export interface WorkspaceList { kind: WorkspaceListKind; rows: WorkspaceRow[]; note: string }
 /** The sidebar Inbox badge: needs-you and problem items only (mail and reviews never badge). */
 export interface WorkspaceBadge { connected: boolean; inbox: number; liveRuns: number; mail: number }
+/** What an import made or updated. Re-running updates the same rows (each is recorded as imported from Paperclip <id>). */
+export interface PaperclipImportReport {
+  company: string; projects: { created: number; updated: number }; tasks: { created: number; updated: number; skipped: number };
+  comments: number; agents: number; history: number; needsYou: number; notes: string[];
+}
 export interface TaskCreateInput { title: string; description: string; projectId: string | null; assigneeId: string | null }
 
 export interface PaperclipCommands {
@@ -159,6 +164,10 @@ export interface PaperclipCommands {
   'paperclip.ledger': { input: { limit?: number }; output: LedgerView };
   /** Answers a Needs-you card from the thread or the Inbox (Paperclip confirmations: accept, or reject with a reason). */
   'paperclip.interaction.respond': { input: { taskId: string; interactionId: string; accept: boolean; reason?: string }; output: { ok: true } };
+  /** Copies a Paperclip company into Muster's Projects with GET requests only. Idempotent. Nothing starts running. */
+  'paperclip.import': { input: { mode?: PaperclipMode; baseUrl?: string; token?: string; companyId?: string }; output: PaperclipImportReport };
+  /** Starts a Muster task's first run on its Roster agent's runner, in a new worktree of the project's folder (never the checkout itself). */
+  'paperclip.task.start': { input: { taskId: string }; output: { chatId: string; runId: string; worktree: string; branch: string } };
 }
 /** Coalesced: at most one per second while watched (every 5 s otherwise, for the badge). `taskIds` lets an open thread refetch only when it changed. */
 export type PaperclipEvent = { type: 'projectsWorkspaceChanged'; scopes: ('tasks' | 'runs' | 'agents' | 'inbox' | 'config')[]; taskIds: string[] };
@@ -166,7 +175,7 @@ export const PAPERCLIP_COMMANDS = {
   'paperclip.config.get': true, 'paperclip.config.set': true, 'paperclip.test': true, 'paperclip.snapshot': true, 'paperclip.task': true,
   'paperclip.comment': true, 'paperclip.task.update': true, 'paperclip.task.create': true, 'paperclip.agent.pause': true, 'paperclip.agent.resume': true,
   'paperclip.pauseAll': true, 'paperclip.resumeAll': true, 'paperclip.run.cancel': true, 'paperclip.memory': true, 'paperclip.list': true,
-  'paperclip.watch': true, 'paperclip.badge': true, 'paperclip.ledger': true, 'paperclip.interaction.respond': true,
+  'paperclip.watch': true, 'paperclip.badge': true, 'paperclip.ledger': true, 'paperclip.interaction.respond': true, 'paperclip.import': true, 'paperclip.task.start': true,
 } as const satisfies Record<keyof PaperclipCommands, true>;
 
 export const OPEN_STATUSES: readonly WorkspaceStatus[] = ['backlog', 'todo', 'in_progress', 'in_review', 'blocked'];

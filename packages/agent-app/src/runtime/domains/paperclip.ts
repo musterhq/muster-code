@@ -13,7 +13,7 @@
  *   Hidden means no timers at all. Muster's own data needs none: its changes already arrive as events.
  */
 import { execFile } from 'node:child_process';
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { MemoryRecord } from '../../shared/domains/memory-protocol.ts';
 import {
@@ -26,7 +26,8 @@ import { PaperclipClient, PaperclipError, normalizeBaseUrl, openLiveEvents, type
 import { arr, buildInbox, mapAgent, mapAttention, mapComment, mapCompany, mapGoal, mapInteraction, mapIssue, mapProject, mapReceipt, mapRows, mapRun } from '../paperclip-map.ts';
 import { activeSecretStore, SecretStore } from '../secret-store.ts';
 import { attachTurnLedger, TurnLedger } from '../turn-ledger.ts';
-import { LocalWorkspace, mailInbox, type Invoke, type LocalPart } from '../workspace-local.ts';
+import { LocalWorkspace, memberAgentId, type Invoke, type LocalPart } from '../workspace-local.ts';
+import { importFromPaperclip, SqliteImportStore } from '../paperclip-import.ts';
 import type { DomainContext, DomainModule } from './types.ts';
 
 export const PAPERCLIP_SECRET_ID = 'paperclip-board-token';
@@ -51,6 +52,16 @@ export interface PaperclipDomainOptions {
 const gitRemote = (path: string) => new Promise<string | undefined>(resolve => {
   execFile('git', ['config', '--get', 'remote.origin.url'], { cwd: path, timeout: 1500, env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } }, (error, stdout) => resolve(error ? undefined : stdout.trim() || undefined));
 });
+/** Model and provider from a Codex agent's own config.toml (only those two keys are read; nothing else is kept). */
+const codexHomeOf = (agent: Record<string, unknown>): { provider?: string; model?: string } | null => {
+  const env = (agent.adapterConfig as { env?: Record<string, unknown> } | undefined)?.env ?? {};
+  const raw = env.CODEX_HOME, home = typeof raw === 'string' ? raw : raw && typeof raw === 'object' && typeof (raw as { value?: unknown }).value === 'string' ? (raw as { value: string }).value : null;
+  if (!home || !home.startsWith('/')) return null;
+  try {
+    const toml = readFileSync(join(home, 'config.toml'), 'utf8'), read = (key: string) => new RegExp(`^${key}\\s*=\\s*"([^"]+)"`, 'm').exec(toml)?.[1];
+    return { provider: read('model_provider'), model: read('model') };
+  } catch { return null; }
+};
 const STOP = new Set(['the', 'and', 'for', 'with', 'into', 'from', 'that', 'this', 'are', 'was', 'has', 'have', 'not', 'but', 'you', 'our', 'its', 'all', 'can', 'will', 'fix', 'add', 'make', 'use', 'new', 'task', 'issue']);
 const terms = (text: string) => new Set(text.toLowerCase().split(/[^\p{L}\p{N}_-]+/u).filter(w => w.length >= 3 && !STOP.has(w)));
 /** Ranks memories by the words they share with the task; ties go to the newest. */
@@ -96,12 +107,14 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
   const remoteOf = (path: string) => { let hit = remotes.get(path); if (!hit) { hit = (options.remoteOf ?? gitRemote)(path).then(url => url ? normalizeRemote(url) : undefined); remotes.set(path, hit); } return hit; };
   const folders = () => context.store.snapshot().folders;
   const knownRepo = new Map<string, string | null>();
+  let importStore: SqliteImportStore | undefined;
+  const imports = () => { try { return importStore ??= new SqliteImportStore(context.db()); } catch { return undefined; } };
   const local = new LocalWorkspace(context.invoke as Invoke, folderId => {
     const folder = folderId ? folders().find(f => f.id === folderId) : undefined;
     if (!folder) return { repo: null, cwd: null };
     if (!knownRepo.has(folder.path)) { knownRepo.set(folder.path, null); void remoteOf(folder.path).then(repo => knownRepo.set(folder.path, repo ?? null)); }
     return { repo: knownRepo.get(folder.path) ?? null, cwd: folder.path };
-  });
+  }, imports);
 
   /** The Muster folder whose memory a project's work recalls: same path, else same origin remote. */
   const folderFor = async (repo: string | null, cwd: string | null): Promise<{ id: string; name: string } | undefined> => {
@@ -323,6 +336,11 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
     // Handoff packets carry the memory Muster hands the next run (PRJ-18).
     const packet = await context.invoke('project.handoff.latest', { projectId: detail.task.projectId ?? '', taskId }).then(r => r.packet).catch(() => null);
     if (packet) cards.push({ kind: 'handoff', id: `handoff:${packet.id}`, at: packet.createdAt, from: 'You', to: detail.task.assigneeLabel, summary: `Handoff v${packet.version}${packet.stale ? ' (stale)' : ''} · ${packet.decisions.length} decisions · ${packet.artifacts.length} artifacts`, memory: packet.memory.map(m => ({ text: m.text, source: m.scope })) });
+    // Decisions carried over from Paperclip: read-only; pending ones are also in the Inbox as Needs you.
+    for (const h of imports()?.history(detail.task.projectId ?? undefined).filter(x => x.taskId === taskId) ?? []) {
+      if (h.kind.startsWith('approval')) cards.push({ kind: 'approval', id: `import:${h.sourceId}`, at: h.at, title: h.title, status: h.status });
+      else cards.push({ kind: 'needs', id: `import:${h.sourceId}`, at: h.at, from: null, prompt: h.title, detail: null, status: h.pending ? 'pending' : h.status === 'cancelled' || h.status === 'withdrawn' ? 'cancelled' : 'resolved', resolution: h.detail || null, interactionId: null, acceptLabel: null, rejectLabel: null });
+    }
     if (detail.task.status === 'in_review' && detail.runs.some(r => r.status === 'running')) cards.push({ kind: 'needs', id: `needs:${taskId}`, at: detail.task.updatedAt, from: detail.task.assigneeLabel, prompt: 'The agent is waiting for your answer in its run.', detail: null, status: 'pending', resolution: null, interactionId: null, acceptLabel: null, rejectLabel: null });
     return { ...detail, cards, receipts: chatIds.length ? ledger().list({ chatIds, limit: 50 }) : [] };
   };
@@ -478,6 +496,39 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
         await api().send('POST', `/issues/${encodeURIComponent(taskId)}/interactions/${encodeURIComponent(interactionId)}/${input.accept === true ? 'accept' : 'reject'}`, input.accept === true ? {} : { ...(reason ? { reason } : {}) });
         queueEmit(['tasks', 'inbox'], taskId);
         return { ok: true };
+      },
+      'paperclip.import': async input => {
+        const mode = input.mode === 'local' || input.mode === 'custom' ? input.mode : config.mode === 'off' ? 'local' : config.mode;
+        const reader = new PaperclipClient(endpointFor(mode, typeof input.baseUrl === 'string' ? input.baseUrl : config.baseUrl, typeof input.token === 'string' && input.token ? input.token : secrets().get(PAPERCLIP_SECRET_ID)), options.fetch);
+        const store = imports();
+        if (!store) throw new Error('The import store is unavailable.');
+        let target = typeof input.companyId === 'string' ? id(input.companyId) : config.companyId;
+        if (!target) target = String(arr(await reader.get<unknown>('/companies'))[0]?.id ?? '');
+        if (!target) throw new Error('That Paperclip has no companies to import.');
+        // GET only: the importer is handed nothing that can write to Paperclip.
+        const report = await importFromPaperclip(target, { get: path => reader.get<unknown>(path), invoke: context.invoke as Invoke, store, folders, exists: path => existsSync(path), codexHome: codexHomeOf });
+        queueEmit(['tasks', 'agents', 'inbox']);
+        return report;
+      },
+      'paperclip.task.start': async input => {
+        const taskId = id(input.taskId);
+        if (await owner('task', taskId) === 'paperclip') throw new Error('This task runs in Paperclip. Import it first to run it in Muster.');
+        const { project, view: task } = await local.projectFor(taskId);
+        const source = folders().find(f => f.id === project.primaryFolderId);
+        if (!source) throw new Error('Link the project’s folder first: runs happen in a worktree of it.');
+        const meta = imports()?.projectMeta(project.id), base = typeof meta?.defaultRef === 'string' ? meta.defaultRef : undefined;
+        const branch = `muster/${task.key.toLowerCase().replace(/[^a-z0-9-]+/g, '-')}`;
+        // A worktree of its own: the run never touches the project's checkout.
+        const worktree = await context.invoke('git.worktree.create', { folderId: source.id, branch, ...(base ? { base } : {}) });
+        await context.invoke('project.linkFolder', { id: project.id, folderId: worktree.folder.id });
+        const roster = imports()?.roster(project.id) ?? [];
+        const runner = roster.find(r => memberAgentId(String(r.memberId)) === task.assigneeId)?.runner as { providerId?: string | null; model?: string | null } | undefined;
+        if (runner?.providerId && runner.model) await context.invoke('settings.projectModel.set', { projectId: project.id, value: { providerId: runner.providerId, model: runner.model } }).catch(() => undefined);
+        const fresh = (await context.invoke('project.work', { projectId: project.id, activityLimit: 1 })).tasks.items.find(t => t.id === taskId);
+        if (!fresh) throw new Error('That task no longer exists.');
+        const run = await context.invoke('project.tasks.dispatch', { projectId: project.id, id: taskId, revision: fresh.revision, folderId: worktree.folder.id });
+        queueEmit(['tasks', 'runs'], taskId);
+        return { ...run, worktree: worktree.path, branch: worktree.branch };
       },
       'paperclip.memory': input => memoryFor(id(input.taskId)),
       'paperclip.list': input => {
