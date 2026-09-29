@@ -337,6 +337,21 @@ test('one snapshot merges Muster and the linked Paperclip; writes route to which
   assert.equal(badge.connected,true);assert.equal(badge.inbox,4,'blocked, question, agent error and the failed run; reviews and mail never badge');
 });
 
+test('the Inbox badge is a light read: it never browses project memory; the full snapshot still counts it',async t=>{
+  const h=await harness(t,{folders:[{id:'f1',name:'launch',path:'/work/launch'}],invoke:command=>{
+    if(command==='project.list')return [{id:'p1',name:'Launch',goal:'Ship',folderIds:['f1'],primaryFolderId:'f1',archived:false,archivedAt:null}];
+    if(command==='project.work')return {tasks:{items:[],truncated:false},decisions:{items:[]},activity:{items:[]},scheduler:{paused:false}};
+    if(command==='project.members.list')return {members:[]};
+  }});
+  await h.call('paperclip.config.set',{mode:'local',companyId:COMPANY});
+  const badge=await h.call('paperclip.badge');
+  assert.equal(badge.connected,true);
+  assert.equal(h.invoked.filter(c=>c.command==='memory.browse').length,0,'no memory.browse for the badge');
+  const snap=await h.call('paperclip.snapshot');
+  assert.ok(h.invoked.some(c=>c.command==='memory.browse'),'the full snapshot counts each project’s memories');
+  assert.deepEqual(snap.projects.find((p:any)=>p.id==='p1').memory,{label:'launch',count:0});
+});
+
 test('a Paperclip confirmation is answered from Muster: accept, or reject with a reason',async t=>{
   const h=await harness(t);
   await h.call('paperclip.config.set',{mode:'local'});

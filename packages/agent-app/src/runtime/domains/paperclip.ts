@@ -163,7 +163,8 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
     for (const agent of agentList) if (agent.status === 'active' && runs.some(r => r.agentId === agent.id && r.status === 'running')) agent.status = 'running';
     const tasks = arr(issues).map(i => mapIssue(i, agents, liveTasks));
     const company = companies.find(c => c.id === id) ?? null;
-    const projects = await Promise.all(arr(projectsJson).map(async p => { const project = mapProject(p, tasks); return { ...project, memory: await projectMemory(project) }; }));
+    // Memory counts are added per snapshot (not here), so the light badge read never browses memory.
+    const projects = arr(projectsJson).map(p => mapProject(p, tasks));
     const projectName = new Map(projects.map(p => [p.id, p.name]));
     const inbox = buildInbox(arr((attentionJson as Json).items).map(mapAttention), tasks, runs, agents).map(item => {
       const projectId = item.taskId ? tasks.find(t => t.id === item.taskId)?.projectId ?? null : null;
@@ -192,20 +193,22 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
 
   // --- the merged snapshot ---------------------------------------------------------------------------------------------
   let snapshotInflight: Promise<WorkspaceSnapshot> | null = null;
+  /** `withMemory: false` is the light read behind the Inbox badge: no memory browsing and no folder matching per project. */
+  const merge = async (refresh: boolean, withMemory: boolean): Promise<WorkspaceSnapshot> => {
+    const [mine, theirs] = await Promise.all([local.snapshot().catch(() => ({ tasks: [], agents: [], projects: [], runs: [], inbox: [] }) as LocalPart), paperclipPart(refresh)]);
+    const p = theirs.part;
+    const projects = withMemory ? await Promise.all([...mine.projects, ...(p?.projects ?? [])].map(async project => ({ ...project, memory: await projectMemory(project) }))) : [...mine.projects, ...(p?.projects ?? [])];
+    const tasks = [...mine.tasks, ...(p?.tasks ?? [])], runs = [...mine.runs, ...(p?.runs ?? [])].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+    const rank = { high: 0, medium: 1, low: 2 } as const;
+    const inbox = [...mine.inbox, ...(p?.inbox ?? [])].sort((a, b) => rank[a.severity] - rank[b.severity] || b.at.localeCompare(a.at));
+    return {
+      paperclip: theirs.link, tasks, agents: [...mine.agents, ...(p?.agents ?? [])], projects, goals: p?.goals ?? [], runs, inbox,
+      counts: { liveRuns: runs.filter(r => r.status === 'running').length, inbox: inbox.filter(i => i.kind !== 'mail').length, failedRuns: runs.filter(r => r.status === 'failed').length, openTasks: tasks.filter(t => t.status !== 'done' && t.status !== 'cancelled').length },
+      fetchedAt: new Date().toISOString(),
+    };
+  };
   const snapshot = (refresh = false): Promise<WorkspaceSnapshot> => {
-    snapshotInflight ??= (async () => {
-      const [mine, theirs] = await Promise.all([local.snapshot().catch(() => ({ tasks: [], agents: [], projects: [], runs: [], inbox: [] }) as LocalPart), paperclipPart(refresh)]);
-      const projects = await Promise.all(mine.projects.map(async p => ({ ...p, memory: await projectMemory(p) })));
-      const p = theirs.part;
-      const tasks = [...mine.tasks, ...(p?.tasks ?? [])], runs = [...mine.runs, ...(p?.runs ?? [])].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-      const rank = { high: 0, medium: 1, low: 2 } as const;
-      const inbox = [...mine.inbox, ...(p?.inbox ?? [])].sort((a, b) => rank[a.severity] - rank[b.severity] || b.at.localeCompare(a.at));
-      return {
-        paperclip: theirs.link, tasks, agents: [...mine.agents, ...(p?.agents ?? [])], projects: [...projects, ...(p?.projects ?? [])], goals: p?.goals ?? [], runs, inbox,
-        counts: { liveRuns: runs.filter(r => r.status === 'running').length, inbox: inbox.filter(i => i.kind !== 'mail').length, failedRuns: runs.filter(r => r.status === 'failed').length, openTasks: tasks.filter(t => t.status !== 'done' && t.status !== 'cancelled').length },
-        fetchedAt: new Date().toISOString(),
-      };
-    })().finally(() => { snapshotInflight = null; });
+    snapshotInflight ??= merge(refresh, true).finally(() => { snapshotInflight = null; });
     return snapshotInflight;
   };
   /** Which side owns an id (a task id or key, an agent, a run, a project). Paperclip's rows are known from its last read. */
@@ -410,7 +413,7 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
   };
 
   const badge = async (): Promise<WorkspaceBadge> => {
-    const [mail, snap] = await Promise.all([context.invoke('mailbox.list', { limit: 1 }).then(m => m.unacked).catch(() => 0), snapshot()]);
+    const [mail, snap] = await Promise.all([context.invoke('mailbox.list', { limit: 1 }).then(m => m.unacked).catch(() => 0), snapshotInflight ?? merge(false, false)]);
     return { connected: Boolean(snap.paperclip), inbox: snap.inbox.filter(i => URGENT.has(i.kind)).length, liveRuns: snap.counts.liveRuns, mail };
   };
 
