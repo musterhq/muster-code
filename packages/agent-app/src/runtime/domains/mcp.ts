@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process';
 import { killTree, shellCommand } from '../process-tree.ts';
+import { commandLauncherScript } from '../launcher-script.ts';
 import { createHash, randomUUID } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import { readFileSync } from 'node:fs';
@@ -26,7 +27,6 @@ const text = (value: unknown, label: string, max = 4096): string => {
   if (typeof value !== 'string' || !value.trim() || value.length > max || value.includes('\0')) throw new Error(`Enter a valid ${label}.`);
   return value.trim();
 };
-const quote = (value: string) => `'${value.replace(/'/g, `'\\''`)}'`;
 const clamp = (value: unknown, limits: { min: number; max: number; default: number }) => typeof value === 'number' && Number.isFinite(value) ? Math.min(limits.max, Math.max(limits.min, Math.round(value))) : limits.default;
 
 /** Tests point this at a fixture home directory. */
@@ -148,12 +148,12 @@ export function createMcpDomain(ctx: DomainContext): DomainModule {
     logs.set(id, lines.slice(-MAX_LOG_LINES));
   };
   const matches = (entry: Stored, chat: Chat) => entry.scope === 'user' || (entry.scope === 'folder' && entry.scopeId === chat.folderId) || (entry.scope === 'project' && entry.scopeId === chat.projectId);
-  const launcher = (id: string) => join(ctx.dataDir, 'mcp-launchers', `${id}.sh`);
+  const launcher = (id: string) => join(ctx.dataDir, 'mcp-launchers', `${id}${process.platform === 'win32' ? '.cmd' : '.sh'}`);
   /** Run options carry only scalars, so a stdio server with arguments starts through a small exec script. */
   const writeLauncher = async (entry: Stored) => {
     if (entry.transport !== 'stdio' || !entry.args.length) { await fs.rm(launcher(entry.id), { force: true }); return; }
     await fs.mkdir(join(ctx.dataDir, 'mcp-launchers'), { recursive: true });
-    await fs.writeFile(launcher(entry.id), `#!/bin/sh\nexec ${[entry.command!, ...entry.args].map(quote).join(' ')} "$@"\n`, { mode: 0o700 });
+    await fs.writeFile(launcher(entry.id), commandLauncherScript([entry.command!, ...entry.args]), { mode: 0o700 });
   };
 
   const parse = (input: Record<string, unknown>, prior?: Stored): Stored => {

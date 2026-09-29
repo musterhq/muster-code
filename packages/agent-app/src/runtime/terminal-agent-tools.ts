@@ -12,6 +12,7 @@ import http from 'node:http';
 import path from 'node:path';
 import type {McpToolResult} from './sandbox-registry.ts';
 import {sandboxLauncherScript,textResult} from './sandbox-agent-tools.ts';
+import {launcherFile} from './launcher-script.ts';
 import {redactSecrets} from './secret-redaction.ts';
 
 export const TERMINAL_MCP='muster_terminal';
@@ -90,7 +91,7 @@ export class TerminalToolHost {
   private starting?:Promise<string>;
   private token=randomBytes(32);
   private disposed=false;
-  constructor(private options:{dir:string;execPath:string;allowed(chatId:string):Promise<boolean>;tails(chatId:string):readonly TerminalTailInput[]}) {this.launcher=path.join(options.dir,'muster-terminal-mcp');}
+  constructor(private options:{dir:string;execPath:string;allowed(chatId:string):Promise<boolean>;tails(chatId:string):readonly TerminalTailInput[]}) {this.launcher=launcherFile(path.join(options.dir,'muster-terminal-mcp'));}
   start():Promise<string> {return this.starting??=this.listen();}
   private async listen():Promise<string> {
     fs.mkdirSync(this.options.dir,{recursive:true,mode:0o700});
