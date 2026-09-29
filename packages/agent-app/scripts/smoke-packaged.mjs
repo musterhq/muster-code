@@ -33,8 +33,10 @@ const args = [`--remote-debugging-port=${PORT}`, `--user-data-dir=${path.join(pr
 console.log(`launching ${exe}${process.env.SMOKE_NO_SANDBOX === '1' ? ' (--no-sandbox)' : ''}`);
 // Own process group on Unix: an AppImage's launcher spawns the real app, and the whole tree must die with the smoke test.
 const child = spawn(exe, args, {detached: process.platform !== 'win32', stdio: ['ignore', 'pipe', 'pipe'], env: {...process.env, HOME: process.platform === 'win32' ? process.env.HOME : profile}});
-child.stdout.on('data', d => process.stdout.write(`[app] ${d}`));
-child.stderr.on('data', d => process.stdout.write(`[app] ${d}`));
+let appOutput = '';
+const relay = d => { appOutput += d; process.stdout.write(`[app] ${d}`); };
+child.stdout.on('data', relay);
+child.stderr.on('data', relay);
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 async function page() {
@@ -135,6 +137,8 @@ try {
   const updates = await invoke('updates.status', undefined);
   console.log(`updates: ${updates.phase} (current ${updates.current})`);
   if (process.env.SMOKE_EXPECT_UPDATES === '1' && updates.phase === 'disabled') fail('updates are disabled: the packaged build has no update source.');
+  // The installed deb must keep the sandbox ON (its AppArmor profile grants user namespaces): no launcher fallback notice.
+  if (process.env.SMOKE_EXPECT_SANDBOX === '1' && /starting with --no-sandbox/.test(appOutput)) fail('the launcher fell back to --no-sandbox; the installed package should keep the sandbox on.');
   if (!process.exitCode) console.log('SMOKE OK');
 } catch (error) {
   fail(error instanceof Error ? error.message : String(error));

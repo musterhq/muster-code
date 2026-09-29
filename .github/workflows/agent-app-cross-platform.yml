@@ -81,6 +81,21 @@ jobs:
           SMOKE_EXPECT_UPDATES: '1'
           SMOKE_PORT: '9478'
 
+      - name: Smoke test (Linux .deb installed, sandbox stays ON)
+        if: matrix.os == 'linux'
+        # The runner restricts user namespaces (AppArmor), so this only passes if the deb's profile attaches to the launcher
+        # and the app boots with the sandbox on and no --no-sandbox fallback notice.
+        run: |
+          sudo apt-get install -y ./release-dist/Muster-Agent-*-linux-amd64.deb
+          ls -l /etc/apparmor.d/muster-agent
+          sysctl kernel.apparmor_restrict_unprivileged_userns || true
+          readlink -f /usr/bin/muster-agent
+          xvfb-run -a node scripts/smoke-packaged.mjs /usr/bin/muster-agent
+        env:
+          SMOKE_EXPECT_UPDATES: '1'
+          SMOKE_EXPECT_SANDBOX: '1'
+          SMOKE_PORT: '9479'
+
       - name: Verify Linux packages (desktop entry, AppArmor, launcher)
         if: matrix.os == 'linux'
         run: bash scripts/verify-linux-package.sh

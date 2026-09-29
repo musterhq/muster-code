@@ -3,14 +3,16 @@ import {test, type TestContext} from 'node:test';
 import {chmodSync, copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
+import {readFileSync, realpathSync} from 'node:fs';
 import {spawnSync} from 'node:child_process';
-import {passwordStoreSwitch} from '../src/main/linux-launch.ts';
+import {passwordStoreSwitch, runningKeyrings} from '../src/main/linux-launch.ts';
+import {SecretStore} from '../src/runtime/secret-store.ts';
 import {weakBackend} from '../src/runtime/memory-context.ts';
 import {detectDocker, dockerSocketCandidates} from '../src/runtime/setup-detection.ts';
 import {findBinary} from '../src/runtime/adapters/shared.ts';
 
 /** A fake install dir: the launcher plus a muster-agent.bin that prints its arguments, and a fake /proc. */
-function fixture(t: TestContext, proc: Record<string, string>, opts: {apparmorProfile?: boolean} = {}) {
+function fixture(t: TestContext, proc: Record<string, string>, opts: {apparmorProfile?: boolean; installedPath?: boolean; unshare?: 'ok' | 'fail'; setuid?: boolean} = {}) {
   const root = mkdtempSync(join(tmpdir(), 'muster-launcher-')); t.after(() => rmSync(root, {recursive: true, force: true}));
   const app = join(root, 'app'), procRoot = join(root, 'proc'), apparmor = join(root, 'apparmor.d');
   mkdirSync(app); mkdirSync(apparmor);
@@ -18,8 +20,11 @@ function fixture(t: TestContext, proc: Record<string, string>, opts: {apparmorPr
   writeFileSync(join(app, 'muster-agent.bin'), '#!/bin/sh\necho "ARGS:$*"\n'); chmodSync(join(app, 'muster-agent.bin'), 0o755);
   for (const [file, value] of Object.entries(proc)) { mkdirSync(join(procRoot, file, '..'), {recursive: true}); writeFileSync(join(procRoot, file), `${value}\n`); }
   if (opts.apparmorProfile) writeFileSync(join(apparmor, 'muster-agent'), 'profile');
+  const unshare = join(root, 'unshare');
+  if (opts.unshare) { writeFileSync(unshare, `#!/bin/sh\n[ "$1 $2" = "-Ur true" ] || exit 2\nexit ${opts.unshare === 'ok' ? 0 : 1}\n`); chmodSync(unshare, 0o755); }
+  if (opts.setuid) { writeFileSync(join(app, 'chrome-sandbox'), ''); chmodSync(join(app, 'chrome-sandbox'), 0o4755); }
   return (args: string[] = [], env: Record<string, string> = {}) => {
-    const run = spawnSync(join(app, 'muster-agent'), args, {encoding: 'utf8', env: {PATH: process.env.PATH!, MUSTER_PROC_ROOT: procRoot, MUSTER_APPARMOR_DIR: apparmor, ...env}});
+    const run = spawnSync(join(app, 'muster-agent'), args, {encoding: 'utf8', env: {PATH: process.env.PATH!, MUSTER_PROC_ROOT: procRoot, MUSTER_APPARMOR_DIR: apparmor, MUSTER_UNSHARE: opts.unshare ? unshare : join(root, 'no-unshare'), MUSTER_PROFILE_TARGET: opts.installedPath ? join(realpathSync(app), 'muster-agent') : '/opt/Muster Agent/muster-agent', ...env}});
     return {out: run.stdout.trim(), err: run.stderr};
   };
 }
@@ -39,8 +44,22 @@ test('launcher: falls back to --no-sandbox only when namespaces are restricted (
   assert.equal(run(['--no-sandbox']).out, 'ARGS:--no-sandbox', 'an explicit flag is not duplicated');
 });
 
-test('launcher: the deb AppArmor profile grants user namespaces, so the sandbox stays on', {skip: process.platform === 'win32'}, t => {
-  assert.equal(fixture(t, RESTRICTED, {apparmorProfile: true})(['--x']).out, 'ARGS:--x');
+test('launcher: the deb AppArmor profile grants user namespaces only to the installed path', {skip: process.platform === 'win32'}, t => {
+  assert.equal(fixture(t, RESTRICTED, {apparmorProfile: true, installedPath: true})(['--x']).out, 'ARGS:--x', 'the deb install keeps the sandbox');
+  const other = fixture(t, RESTRICTED, {apparmorProfile: true});
+  assert.equal(other(['--x']).out, 'ARGS:--no-sandbox --x', 'an AppImage/tarball next to an installed deb is not covered by the profile');
+});
+
+test('launcher: a real unshare probe decides where the sysctls cannot (seccomp, Flatpak, SELinux, namespace limits)', {skip: process.platform === 'win32'}, t => {
+  const open = {'sys/kernel/apparmor_restrict_unprivileged_userns': '0', 'sys/user/max_user_namespaces': '63000'};
+  assert.equal(fixture(t, open, {unshare: 'fail'})(['--x']).out, 'ARGS:--no-sandbox --x');
+  assert.equal(fixture(t, open, {unshare: 'ok'})(['--x']).out, 'ARGS:--x');
+  assert.equal(fixture(t, {}, {unshare: 'fail'})().out, 'ARGS:--no-sandbox', 'no sysctls at all: the probe still decides');
+  assert.equal(fixture(t, {'sys/user/max_user_namespaces': '0'}, {unshare: 'ok'})().out, 'ARGS:--no-sandbox', 'a zero limit wins without probing');
+});
+
+test('launcher: a setuid-root chrome-sandbox keeps the sandbox even when user namespaces are unavailable', {skip: process.platform === 'win32' || process.getuid?.() !== 0}, t => {
+  assert.equal(fixture(t, {'sys/user/max_user_namespaces': '0'}, {setuid: true})(['--x']).out, 'ARGS:--x');
 });
 
 test('launcher: kernels without user namespaces fall back; MUSTER_NO_SANDBOX overrides both ways', {skip: process.platform === 'win32'}, t => {
@@ -51,13 +70,26 @@ test('launcher: kernels without user namespaces fall back; MUSTER_NO_SANDBOX ove
   assert.equal(fixture(t, {})([], {MUSTER_NO_SANDBOX: '1'}).out, 'ARGS:--no-sandbox');
 });
 
-test('password store: unknown desktops ask for libsecret; known ones and explicit flags are left alone', () => {
-  assert.equal(passwordStoreSwitch({XDG_CURRENT_DESKTOP: 'sway'}, [], 'linux'), 'gnome-libsecret');
-  assert.equal(passwordStoreSwitch({}, [], 'linux'), 'gnome-libsecret');
-  assert.equal(passwordStoreSwitch({XDG_CURRENT_DESKTOP: 'ubuntu:GNOME'}, [], 'linux'), undefined);
-  assert.equal(passwordStoreSwitch({XDG_CURRENT_DESKTOP: 'KDE'}, [], 'linux'), undefined);
-  assert.equal(passwordStoreSwitch({}, ['--password-store=basic'], 'linux'), undefined);
-  assert.equal(passwordStoreSwitch({}, [], 'darwin'), undefined);
+const none = () => ({secrets: false, kwallet5: false, kwallet6: false});
+test('password store: only desktops Chromium maps itself are left alone; MATE, LXQt and window managers get a store', () => {
+  for (const desktop of ['ubuntu:GNOME', 'X-Cinnamon', 'XFCE', 'Pantheon', 'Unity', 'Deepin', 'UKUI', 'Budgie:GNOME', 'KDE', 'plasma']) assert.equal(passwordStoreSwitch({XDG_CURRENT_DESKTOP: desktop}, [], 'linux', none), undefined, desktop);
+  for (const desktop of ['MATE', 'LXQt', 'sway', 'i3', '']) assert.equal(passwordStoreSwitch({XDG_CURRENT_DESKTOP: desktop}, [], 'linux', none), 'gnome-libsecret', desktop);
+  assert.equal(passwordStoreSwitch({XDG_CURRENT_DESKTOP: 'MATE'}, ['--password-store=basic'], 'linux', none), undefined);
+  assert.equal(passwordStoreSwitch({XDG_CURRENT_DESKTOP: 'MATE'}, [], 'darwin', none), undefined);
+});
+
+test('password store: the running keyring picks the store (Secret Service first, then KWallet 6/5)', () => {
+  const env = {XDG_CURRENT_DESKTOP: 'LXQt'};
+  assert.equal(passwordStoreSwitch(env, [], 'linux', () => ({secrets: true, kwallet5: true, kwallet6: true})), 'gnome-libsecret');
+  assert.equal(passwordStoreSwitch(env, [], 'linux', () => ({secrets: false, kwallet5: true, kwallet6: false})), 'kwallet5');
+  assert.equal(passwordStoreSwitch(env, [], 'linux', () => ({secrets: false, kwallet5: true, kwallet6: true})), 'kwallet6');
+});
+
+test('keyring detection reads the session bus name list (dbus-send, then busctl)', () => {
+  const listing = '   string "org.freedesktop.secrets"\n   string "org.kde.kwalletd6"\n';
+  assert.deepEqual(runningKeyrings(() => listing), {secrets: true, kwallet5: false, kwallet6: true});
+  assert.deepEqual(runningKeyrings(cmd => cmd === 'busctl' ? 'org.kde.kwalletd5 1 kwalletd5' : undefined), {secrets: false, kwallet5: true, kwallet6: false});
+  assert.deepEqual(runningKeyrings(() => undefined), {secrets: false, kwallet5: false, kwallet6: false});
 });
 
 test('safeStorage backends that are not real encryption count as unavailable', () => {
@@ -92,4 +124,17 @@ test('CLI discovery finds an npm global prefix, snap and volta installs', {skip:
   writeFileSync(join(volta, 'claude'), '#!/bin/sh\n'); chmodSync(join(volta, 'claude'), 0o755);
   assert.equal(findBinary('codex', {PATH: '', npm_config_prefix: join(home, 'npm-prefix')}, home), join(prefixBin, 'codex'));
   assert.equal(findBinary('claude', {PATH: ''}, home), join(volta, 'claude'));
+});
+
+test('no caller uses raw safeStorage: every consumer goes through electronSecretBox (weak backends refused)', () => {
+  const main = readFileSync(join(import.meta.dirname, '..', 'src', 'main', 'index.ts'), 'utf8').replace(/\/\/.*$/gm, '');
+  assert.doesNotMatch(main, /safeStorage/);
+  assert.match(main, /new BrowserSessionVault\(.*electronSecretBox\)/);
+});
+
+test('a key saved under a now-refused backend reads as not set, so the UI asks for it again', t => {
+  const dir = mkdtempSync(join(tmpdir(), 'muster-secrets-')); t.after(() => rmSync(dir, {recursive: true, force: true}));
+  writeFileSync(join(dir, 'secrets.json'), JSON.stringify({version: 1, secrets: {openai: {cipher: 'AAAA', updatedAt: '2026-01-01T00:00:00.000Z'}}}));
+  const store = new SecretStore(dir, () => undefined); t.after(() => store.close());
+  assert.deepEqual(store.status('openai'), {stored: false, updatedAt: null, secureStorage: false});
 });
