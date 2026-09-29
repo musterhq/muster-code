@@ -1,0 +1,44 @@
+name: Bug report
+description: Something in Muster Agent is broken
+labels: ["type:bug", "needs-triage"]
+body:
+  - type: input
+    id: os
+    attributes:
+      label: Operating system
+      description: For example macOS 15.2 (Apple silicon), Windows 11, Ubuntu 24.04
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Muster Agent version
+      description: Settings > Updates, or the About dialog
+    validations:
+      required: true
+  - type: input
+    id: provider
+    attributes:
+      label: Model provider and model
+      description: For example Codex, Claude Code, OpenAI API key, Ollama
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, what you saw. Screenshots welcome.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or console output
+      description: Remove secrets and API keys before pasting.
+      render: shell
