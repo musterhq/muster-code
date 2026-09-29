@@ -5,6 +5,8 @@ All notable changes to Muster Agent. Each `## <version>` section becomes the not
 
 ## Unreleased
 
+## 0.2.8
+
 - The Inbox badge counts only what still needs you: a chat that failed, was interrupted or is waiting counts until you open it, then stays listed under Problems for three days. A turn cut short because Muster quit now reads "Interrupted when Muster quit — continue?". Every Inbox item has Dismiss; a new failure in the same chat shows again.
 - The Ledger imports your past turns after an upgrade, in the background, as Imported history: one entry per past turn with its chat, project, model, tools and outcome, plus runs brought in from Paperclip. Imported entries stay outside the verified chain. An empty Ledger explains what gets recorded and offers Import history.
 
