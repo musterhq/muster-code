@@ -34,11 +34,11 @@ export function mapIssue(i: Json, agents: ReadonlyMap<string, WorkspaceAgent>, l
     priority: PRIORITY.has(i.priority as WorkspacePriority) ? i.priority as WorkspacePriority : 'medium',
     projectId: str(i.projectId), parentId: str(i.parentId), goalId: str(i.goalId),
     assigneeId: assigneeId ?? (str(i.assigneeUserId) ? `user:${i.assigneeUserId}` : null),
-    assigneeLabel: assigneeId ? agents.get(assigneeId)?.name ?? 'Agent' : str(i.assigneeUserId) ? 'Board' : null,
+    assigneeLabel: assigneeId ? agents.get(assigneeId)?.name ?? 'Agent' : str(i.assigneeUserId) ? 'You' : null,
     createdAt: iso(i.createdAt), updatedAt: iso(i.lastActivityAt, iso(i.updatedAt)), startedAt: str(i.startedAt), completedAt: str(i.completedAt) ?? str(i.cancelledAt),
     live: Boolean(i.activeRun) || liveTaskIds.has(id),
     blockedByIds: Array.isArray(i.blockedByIssueIds) ? (i.blockedByIssueIds as unknown[]).filter((v): v is string => typeof v === 'string') : [],
-    origin: creator ? agents.get(creator)?.name ?? 'Agent' : str(i.createdByUserId) ? 'Board' : null,
+    origin: creator ? agents.get(creator)?.name ?? 'Agent' : str(i.createdByUserId) ? 'You' : null,
   };
 }
 
@@ -71,6 +71,13 @@ const ATTENTION_KIND: Record<string, InboxKind> = {
   approval: 'approval', decision: 'approval', join_request: 'approval', issue_thread_interaction: 'question', blocker_attention: 'blocked', review: 'review',
   productivity_review: 'review', failed_run: 'failed_run', agent_error_alert: 'agent_error', budget_alert: 'budget', recovery_action: 'other',
 };
+/** Muster's own words for why an item is in the Inbox; Paperclip's `whyNow` speaks of its board and issue threads. */
+const WHY: Record<string, string> = {
+  approval: 'Waiting for your approval.', decision: 'Waiting for your decision.', join_request: 'Someone asked to join. Approve or decline.',
+  issue_thread_interaction: 'An agent is waiting for your answer in the thread.', blocker_attention: 'Blocked until someone unblocks it.',
+  review: 'Waiting for your review.', productivity_review: 'Waiting for your review of recent work.', failed_run: 'The run ended with an error.',
+  agent_error_alert: 'The agent stopped with an error. Open it to see why.', budget_alert: 'An agent is close to or over its budget.', recovery_action: 'Needs a recovery step before work can go on.',
+};
 const SEVERITY = new Set(['high', 'medium', 'low']);
 export function mapAttention(item: Json): WorkspaceInboxItem {
   const subject = obj(item.subject), related = obj(item.relatedIssue);
@@ -78,7 +85,7 @@ export function mapAttention(item: Json): WorkspaceInboxItem {
   return {
     id: String(item.id ?? item.dedupKey), kind: ATTENTION_KIND[String(item.sourceKind)] ?? 'other',
     title: `${identifier ? `${identifier} · ` : ''}${str(subject.title) ?? str(related.title) ?? 'Needs attention'}`,
-    why: str(item.whyNow) ?? '', severity: SEVERITY.has(String(item.severity)) ? item.severity as 'high' : 'medium', at: iso(item.activityAt, iso(item.updatedAt)),
+    why: WHY[String(item.sourceKind)] ?? 'Needs your attention.', severity: SEVERITY.has(String(item.severity)) ? item.severity as 'high' : 'medium', at: iso(item.activityAt, iso(item.updatedAt)),
     taskId: subject.kind === 'issue' ? str(subject.id) : str(related.id), agentId: subject.kind === 'agent' ? str(subject.id) : null, runId: subject.kind === 'run' ? str(subject.id) : null,
   };
 }
@@ -112,7 +119,7 @@ export function buildInbox(attention: readonly WorkspaceInboxItem[], tasks: read
 export function mapComment(c: Json, agents: ReadonlyMap<string, WorkspaceAgent>): WorkspaceComment {
   const agentId = str(c.authorAgentId) ?? str(c.derivedAuthorAgentId);
   const kind = agentId ? 'agent' : str(c.authorUserId) || c.authorType === 'user' ? 'user' : 'system';
-  return { id: String(c.id), author: { kind, id: agentId ?? str(c.authorUserId), label: agentId ? agents.get(agentId)?.name ?? 'Agent' : kind === 'user' ? 'Board' : 'Paperclip' }, body: str(c.body) ?? '', createdAt: iso(c.createdAt), runId: str(c.createdByRunId) };
+  return { id: String(c.id), author: { kind, id: agentId ?? str(c.authorUserId), label: agentId ? agents.get(agentId)?.name ?? 'Agent' : kind === 'user' ? 'You' : 'Paperclip' }, body: str(c.body) ?? '', createdAt: iso(c.createdAt), runId: str(c.createdByRunId) };
 }
 
 /** Rows for the read-only lists (skills, artifacts, audit, routines). */

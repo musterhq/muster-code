@@ -84,7 +84,7 @@ export function ConnectionPanel({ onSaved, compact = false }: { onSaved?: (view:
     </div>
     {mode === 'custom' && <div className="ws-form">
       <label className="project-edit-goal"><span>Paperclip URL</span><span className="project-edit-name"><Link2 size={14} aria-hidden="true"/><input type="url" inputMode="url" placeholder="https://paperclip.example.com" value={url} onChange={e => setUrl(e.target.value)} spellCheck={false} autoComplete="off"/></span></label>
-      <label className="project-edit-goal"><span>Board API token</span><span className="project-edit-name"><input type="password" placeholder={config?.hasToken ? 'Stored — paste a new one to replace it' : 'pcp_board_…'} value={token} onChange={e => setToken(e.target.value)} spellCheck={false} autoComplete="off"/></span></label>
+      <label className="project-edit-goal"><span>Paperclip API token</span><span className="project-edit-name"><input type="password" placeholder={config?.hasToken ? 'Stored — paste a new one to replace it' : 'pcp_board_…'} value={token} onChange={e => setToken(e.target.value)} spellCheck={false} autoComplete="off"/></span></label>
       <p className="project-edit-hint">Create one with <code>paperclipai token board create --name Muster</code>. It is sent as <code>Authorization: Bearer</code> and stored encrypted in your {navigator.platform.includes('Mac') ? 'Keychain' : 'keyring'}; it never reaches this window.{config?.hasToken && <> <button type="button" className="ws-link" onClick={() => void removeToken()}>Remove stored token</button></>}</p>
     </div>}
     {mode === 'off' && <p className="project-edit-hint">Projects run on Muster’s own tasks, agents, mailbox and schedulers. Nothing leaves this Mac.</p>}
@@ -155,12 +155,12 @@ export function PaperclipRoutines(): React.ReactElement | null {
   }, []);
   if (!linked) return null;
   const rows = (list?.rows ?? []).filter(r => r.source === 'paperclip');
-  return <section className="ws-section automation-paperclip" aria-label="Paperclip routines">
+  return <section className="ws-section automation-paperclip" aria-label="Paperclip automations">
     <h2 className="ws-group-title">From {NAMES.paperclip}<span>{rows.length}</span></h2>
-    {!list ? <ResourceState kind="loading" compact label="Loading Paperclip routines" rows={2}/>
+    {!list ? <ResourceState kind="loading" compact label="Loading Paperclip automations" rows={2}/>
       : list.note ? <ResourceState kind="partial" compact message={list.note}/>
-      : rows.length === 0 ? <p className="automation-help">No routines on the linked Paperclip. Routines created there appear here with their schedule and last run.</p>
-      : <ul className="automation-list" aria-label="Paperclip routines">{rows.map(r => <li key={r.id} className="automation-item" data-state={r.paused ? 'paused' : 'scheduled'}>
+      : rows.length === 0 ? <p className="automation-help">No automations on the linked Paperclip. Automations created there appear here with their schedule and last run.</p>
+      : <ul className="automation-list" aria-label="Paperclip automations">{rows.map(r => <li key={r.id} className="automation-item" data-state={r.paused ? 'paused' : 'scheduled'}>
           <div className="automation-item-head"><div className="automation-item-main is-static">
             <span className="automation-state" data-state={r.paused ? 'paused' : 'scheduled'} aria-hidden="true"/>
             <span className="automation-item-text"><span className="automation-item-name">{r.title}</span><span className="automation-item-meta">{r.detail} · {r.overlap === 'queue' ? 'queues overlapping runs' : 'skips overlapping runs'}</span></span>

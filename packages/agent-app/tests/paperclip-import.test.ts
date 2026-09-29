@@ -94,7 +94,7 @@ test('importing a real company: GET only, projects, roster, tasks with keys, par
   const imported=detail.comments.filter(c=>c.id.startsWith('pc:'));
   assert.equal(imported.length,sourceComments.length);
   assert.deepEqual(imported.map(c=>c.createdAt),sourceComments.map(c=>c.createdAt),'in order, with their times');
-  assert.equal(imported[0].author.label,sourceComments[0].authorAgentId?raw.agents.find((a:Json)=>a.id===sourceComments[0].authorAgentId).name:'Board');
+  assert.equal(imported[0].author.label,sourceComments[0].authorAgentId?raw.agents.find((a:Json)=>a.id===sourceComments[0].authorAgentId).name:'You');
   // Decisions: answered ones are history; pending human-only ones are Needs you and stay unresolved.
   const pendingSource=Object.values(raw.perIssue as Json).flatMap((x:any)=>x.interactions??[]).filter((i:Json)=>i.status==='pending').length+Object.values(raw.perIssue as Json).flatMap((x:any)=>x.approvals??[]).filter((a:Json)=>a.status==='pending').length;
   assert.equal(report.needsYou,pendingSource);

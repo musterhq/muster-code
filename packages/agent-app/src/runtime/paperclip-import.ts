@@ -200,7 +200,7 @@ export async function importFromPaperclip(companyId: string, deps: ImportDeps): 
         await invoke('project.tasks.setState', { projectId, id: fresh.id, revision: fresh.revision, state: target, ...(target === 'blocked' ? { reason: 'Blocked in Paperclip' } : {}) });
       }
     } catch (cause) { report.notes.push(`${str(issue.identifier) ?? sourceId}: status kept (${cause instanceof Error ? cause.message : String(cause)})`); }
-    if (description.length > ACCEPTANCE_MAX && store.addComment({ sourceId: `description:${sourceId}`, taskId: task.id, authorKind: 'user', authorLabel: issue.createdByAgentId ? agentName.get(String(issue.createdByAgentId)) ?? 'Agent' : 'Board', body: description, createdAt: str(issue.createdAt) ?? new Date().toISOString(), runId: null })) report.comments++;
+    if (description.length > ACCEPTANCE_MAX && store.addComment({ sourceId: `description:${sourceId}`, taskId: task.id, authorKind: 'user', authorLabel: issue.createdByAgentId ? agentName.get(String(issue.createdByAgentId)) ?? 'Agent' : 'You', body: description, createdAt: str(issue.createdAt) ?? new Date().toISOString(), runId: null })) report.comments++;
   }
   for (const issue of issues) {
     const mine = taskIds.get(String(issue.id));
@@ -219,7 +219,7 @@ export async function importFromPaperclip(companyId: string, deps: ImportDeps): 
     for (const c of arr(comments)) {
       if (c.deletedAt) continue;
       const agent = str(c.authorAgentId);
-      if (store.addComment({ sourceId: String(c.id), taskId: mine.taskId, authorKind: agent ? 'agent' : 'user', authorLabel: agent ? agentName.get(agent) ?? 'Agent' : 'Board', body: str(c.body) ?? '', createdAt: str(c.createdAt) ?? '', runId: str(c.createdByRunId) })) report.comments++;
+      if (store.addComment({ sourceId: String(c.id), taskId: mine.taskId, authorKind: agent ? 'agent' : 'user', authorLabel: agent ? agentName.get(agent) ?? 'Agent' : 'You', body: str(c.body) ?? '', createdAt: str(c.createdAt) ?? '', runId: str(c.createdByRunId) })) report.comments++;
     }
     for (const i of arr(interactions)) {
       const payload = obj(i.payload), status = String(i.status ?? 'pending'), pending = status === 'pending', result = obj(i.result);

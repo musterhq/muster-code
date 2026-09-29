@@ -60,7 +60,7 @@ function Thread({ detail, snapshot, onChanged, onOpenTask, onOpenAgent, properti
   const entries = useMemo<Entry[]>(() => {
     const byRun = new Map(detail.receipts.map(r => [r.runId, r])), used = new Set<string>(), names = detail.mentionable.map(m => m.name);
     const turns: Entry[] = [
-      ...(detail.description.trim() ? [{ kind: 'turn' as const, id: 'description', at: task.createdAt, comment: { id: 'description', author: { kind: 'user' as const, id: null, label: task.origin ?? 'Board' }, body: detail.description, createdAt: task.createdAt }, to: task.assigneeLabel, receipt: null }] : []),
+      ...(detail.description.trim() ? [{ kind: 'turn' as const, id: 'description', at: task.createdAt, comment: { id: 'description', author: { kind: 'user' as const, id: null, label: task.origin ?? 'You' }, body: detail.description, createdAt: task.createdAt }, to: task.assigneeLabel, receipt: null }] : []),
       ...detail.comments.map(c => { const receipt = c.runId ? byRun.get(c.runId) ?? null : null; if (receipt) used.add(receipt.runId); return { kind: 'turn' as const, id: c.id, at: c.createdAt, comment: c, to: addressed(c.body, names, c.author.label), receipt }; }),
       ...detail.receipts.filter(r => !used.has(r.runId)).map(r => ({ kind: 'turn' as const, id: `turn:${r.runId}`, at: r.endedAt, comment: { id: `turn:${r.runId}`, author: { kind: 'agent' as const, id: null, label: r.agent }, body: '', createdAt: r.endedAt }, to: null, receipt: r })),
     ];

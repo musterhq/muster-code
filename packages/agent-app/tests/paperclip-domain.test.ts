@@ -131,6 +131,8 @@ test('the snapshot maps Paperclip into the workspace shapes, and an unchanged re
   const kinds=snap.inbox.map((i:any)=>i.kind).sort();
   assert.deepEqual(kinds,['agent_error','blocked','failed_run','question'].sort(),'attention + blocked task + failed run; the in-review task is covered by its question; failures on done work are dropped');
   assert.ok(snap.inbox.every((i:any)=>i.source==='paperclip'&&i.group));
+  assert.equal(snap.inbox.find((i:any)=>i.id==='att-1').why,'An agent is waiting for your answer in the thread.','Paperclip’s whyNow is replaced by Muster’s words for its kind');
+  assert.ok(snap.inbox.every((i:any)=>!/board/i.test(i.why)),'no Paperclip board vocabulary in the Inbox');
   const before=h.server.calls.length;
   const again=await h.call('paperclip.snapshot');
   assert.deepEqual(again.tasks,snap.tasks,'nothing changed, nothing rebuilt');
@@ -141,7 +143,7 @@ test('the thread renders comments (deleted ones hidden) and the composer address
   const h=await harness(t);
   await h.call('paperclip.config.set',{mode:'local'});
   const detail=await h.call('paperclip.task',{id:'RAG-12'});
-  assert.equal(detail.comments.length,2);assert.equal(detail.comments[0].author.label,'CTO');assert.equal(detail.comments[1].author.label,'Board');
+  assert.equal(detail.comments.length,2);assert.equal(detail.comments[0].author.label,'CTO');assert.equal(detail.comments[1].author.label,'You');
   assert.deepEqual(detail.addressee,{id:'a-cto',label:'CTO'});
   await h.call('paperclip.comment',{taskId:'RAG-12',body:'Please rebase.'});
   await h.call('paperclip.task.update',{taskId:'RAG-12',status:'in_review'});
