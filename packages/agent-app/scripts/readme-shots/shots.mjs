@@ -110,7 +110,7 @@ export const SHOTS = [
     await ctx.click('.new-project-source-actions button', 'Choose folder'); await ctx.sleep(500);
     await ctx.click('.project-edit-make-primary', 'Make primary'); await ctx.sleep(400);
   }, clipSelector: '.new-project', clipPad: 24},
-  {name: 'projects', async run(ctx) { await ctx.store(`s.openProjectsScreen()`); await ctx.sleep(1500); await ctx.evaluate(`[...document.querySelectorAll('button,[role=tab],a')].find(b=>/^Tasks\\s*\\d/.test(b.textContent.trim())).click()`); await ctx.sleep(900); }},
+  {name: 'projects', async run(ctx) { await ctx.store(`s.openProjectsScreen()`); await ctx.sleep(1500); await ctx.evaluate(`[...document.querySelectorAll('button,[role=tab],a')].find(b=>b.getAttribute('role')==='tab'&&/^Tasks$/.test(b.textContent.trim()))?.click()`); await ctx.sleep(900); }},
   {name: 'model-picker', async run(ctx) { await showMainTurn(ctx); await ctx.click('button', 'Frontier Large'); await ctx.sleep(800); }},
   {name: 'sandbox', opts: {sandbox: true}, async run(ctx) {
     await ctx.store(`s.openComputerTab({kind:'chat',id:'c-hero'},'Sandbox')`);

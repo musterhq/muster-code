@@ -35,6 +35,12 @@ import {
   X,
   ArrowDownCircle,
   Inbox as InboxIcon,
+  LayoutDashboard,
+  ListChecks,
+  FolderClosed,
+  Box,
+  Users,
+  Plug,
   History as LedgerIcon,
   Check as CheckIcon,
 } from 'lucide-react';
@@ -473,6 +479,7 @@ export function Sidebar(): React.ReactElement {
       </button>
       <div className="nav-toolbar">
         <SidebarInbox screen={state.screen}/>
+        <SidebarDashboard screen={state.screen}/>
         <button type="button" className={`tool-button${draft.open?' is-active':''}`} title={activeFolder?`New chat in ${activeFolder.name} (⌘N)`:'New chat (⌘N)'} aria-keyshortcuts="Meta+N Control+N" aria-current={draft.open?'page':undefined} onClick={newChatHere}>
           <SquarePen size={15} /><span>New chat</span>
         </button>
@@ -480,8 +487,21 @@ export function Sidebar(): React.ReactElement {
           <Search size={15} /><span>Search chats</span>
         </button>
         <button type="button" className="tool-button" title="Memory for the current folder" onClick={() => openMemoryScreen(activeChat()?.folderId)}><Brain size={15}/><span>Memory</span></button>
-        <button type="button" className={`tool-button${state.screen==='automations'?' is-active':''}`} title="Scheduled and file-triggered agent runs" aria-current={state.screen==='automations'?'page':undefined} onClick={openAutomationsScreen}><CalendarClock size={15}/><span>Automations</span>{runningAutomations>0&&<span className="nav-tool-count" aria-label={`${runningAutomations} running`}>{runningAutomations}</span>}</button>
-        <HubEntry screen={state.screen} page="ledger" icon={<LedgerIcon size={15}/>} label={NAMES.ledger} title="Every agent turn: receipts, timeline and costs"/>
+        {/* Paperclip's order (#193): Work, then Org. One sidebar; Muster's pinned chats, folders and projects follow below. */}
+        <p className="nav-tool-heading" id="nav-work">{NAMES.work}</p>
+        <div className="nav-tool-group" role="group" aria-labelledby="nav-work">
+          <HubEntry screen={state.screen} page="tasks" icon={<ListChecks size={15}/>} label={NAMES.tasks} title="Every task across your projects and Paperclip: list or board"/>
+          <button type="button" className={`tool-button${state.screen==='projects'?' is-active':''}`} title="All projects: tasks, roster, outputs, settings and budget" aria-current={state.screen==='projects'?'page':undefined} onClick={openProjectsScreen}><FolderClosed size={15}/><span>{NAMES.projects}</span></button>
+          <button type="button" className={`tool-button${state.screen==='automations'?' is-active':''}`} title="Scheduled and file-triggered agent runs" aria-current={state.screen==='automations'?'page':undefined} onClick={openAutomationsScreen}><CalendarClock size={15}/><span>{NAMES.automations}</span>{runningAutomations>0&&<span className="nav-tool-count" aria-label={`${runningAutomations} running`}>{runningAutomations}</span>}</button>
+          <HubEntry screen={state.screen} page="outputs" icon={<Box size={15}/>} label={NAMES.outputs} title="Files and documents your agents produced"/>
+        </div>
+        <p className="nav-tool-heading" id="nav-org">{NAMES.org}</p>
+        <div className="nav-tool-group" role="group" aria-labelledby="nav-org">
+          <HubEntry screen={state.screen} page="roster" icon={<Users size={15}/>} label={NAMES.roster} title="Every agent on your projects, who they report to, and what they are doing"/>
+          <button type="button" className="tool-button" title="Skills and plugins your agents can use" onClick={()=>openPluginsScreen('skills')}><Blocks size={15}/><span>{NAMES.skills}</span></button>
+          <button type="button" className="tool-button" title="Link or import a Paperclip server" onClick={()=>openAppSettings('integrations')}><Plug size={15}/><span>{NAMES.integrations}</span></button>
+          <HubEntry screen={state.screen} page="ledger" icon={<LedgerIcon size={15}/>} label={NAMES.ledger} title="Every agent turn: receipts, timeline and costs"/>
+        </div>
 
       </div>
       <div className="visually-hidden" aria-live="polite">{selection.selected.size>0?`${plural(selection.selected.size, 'chat')} selected`:''}</div>
@@ -609,9 +629,6 @@ export function Sidebar(): React.ReactElement {
         <button type="button" className="nav-footer-action" onClick={()=>openAppSettings('general')}>
           <SlidersHorizontal size={15} aria-hidden="true"/><span>Settings</span>
         </button>
-        <button type="button" className="nav-footer-action" onClick={()=>openPluginsScreen('skills')}>
-          <Blocks size={15} aria-hidden="true"/><span>Skills &amp; plugins</span>
-        </button>
         <button type="button" className="nav-footer-action" onClick={openProvidersTab}>
           <Settings2 size={15} aria-hidden="true"/><span>Accounts &amp; providers</span>
         </button>
@@ -674,6 +691,17 @@ function SidebarInbox({screen}:{screen:string}):React.ReactElement {
   const active=screen==='hub'&&route.page==='inbox';
   return <button type="button" className={`tool-button${active?' is-active':''}`} aria-current={active?'page':undefined} title="Everything that needs you, across chats, projects and Paperclip" onClick={()=>openHub('inbox')}>
     <InboxIcon size={15}/><span>{NAMES.inbox}</span>{count>0&&<span className="nav-tool-count" aria-label={`${count} need you`}>{count>99?'99+':count}</span>}
+  </button>;
+}
+
+/** Dashboard, with "● N live" while agent runs are working (from the same event-driven badge read as the Inbox). */
+function SidebarDashboard({screen}:{screen:string}):React.ReactElement {
+  const badge=useInboxBadge();
+  const route=useHubRoute();
+  const active=screen==='hub'&&route.page==='dashboard';
+  const live=badge?.liveRuns??0;
+  return <button type="button" className={`tool-button${active?' is-active':''}`} aria-current={active?'page':undefined} title="Live agents, spend, and the last two weeks" onClick={()=>openHub('dashboard')}>
+    <LayoutDashboard size={15}/><span>{NAMES.dashboard}</span>{live>0&&<span className="ws-live nav-tool-live" aria-label={`${live} live`}><span className="ws-live-dot" aria-hidden="true"/>{live} live</span>}
   </button>;
 }
 

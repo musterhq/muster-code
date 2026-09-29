@@ -180,6 +180,13 @@ export function createProjectsDomain(ctx: DomainContext): DomainModule {
   function taskLines(task: ProjectTask): string[] {
     const { tasks: store } = open(), deps = task.dependencies.map(d => store.getTask(d)).filter((d): d is ProjectTask => Boolean(d));
     const out = ['', `This chat runs Project task "${task.title}" (owner: ${task.owner.kind}, priority: ${PRIORITY_LABEL[task.priority]}).`];
+    // A Roster agent owns it: the run works as that agent, with its title, reporting line and instructions.
+    const agent = task.owner.kind === 'agent' ? team.member(task.projectId, task.owner.id) : undefined;
+    if (agent && agent.kind === 'agent' && (agent.title || agent.instructions?.trim())) {
+      const boss = agent.reportsTo ? team.member(task.projectId, agent.reportsTo) : undefined;
+      out.push(`You are ${agent.name}${agent.title ? `, ${agent.title}` : ''}${boss ? `, reporting to ${boss.name}` : ''}.`);
+      if (agent.instructions?.trim()) out.push(`${agent.name}'s instructions — follow these:`, clip(agent.instructions.trim(), 6000));
+    }
     if (deps.length) out.push('Dependency outcomes:', ...deps.map(d => { const last = d.attempts.find(a => a.status !== 'running'); return `- ${d.title}: ${d.state}${d.verification ? `, verified by ${d.verification.kind}${d.verification.command ? ` (${clip(d.verification.command, 120)})` : ''}: ${clip(d.verification.notes.replace(/\s+/g, ' '), 200)}` : ''}${d.artifacts.length ? `; artifacts: ${d.artifacts.slice(0, 5).join(', ')}` : ''}${last ? `; last run ${last.status}` : ''}`; }));
     if (task.artifacts.length) out.push(`Task artifacts: ${task.artifacts.slice(0, 10).join(', ')}`);
     return out;
@@ -370,6 +377,11 @@ export function createProjectsDomain(ctx: DomainContext): DomainModule {
     if (!grant.folderIds.includes(target)) throw new Error(`The member requesting this run has no access to ${folderName(target)}.`);
     const access = clampPermission(clampPermission(task.permissionMode, store.schedule(projectId).permissionMode), grant.permissionMode), prompt = taskPrompt(task), actor: Actor = trigger === 'user' ? 'user' : trigger;
     const chat = await ctx.invoke('chat.create', { folderId: target, projectId });
+    // The owner's runner (a Roster agent's provider and model). One that is not available here falls back to the project's default, and says so.
+    const runner = task.owner.kind === 'agent' ? team.member(projectId, task.owner.id)?.runner : null;
+    if (runner) await ctx.invoke('chat.selectProvider', { id: chat.id, providerId: runner.providerId, model: runner.model }).catch(err => {
+      store.record(projectId, 'task.runner-unavailable', `"${task.title}": ${runner.model} (${runner.providerId}) is not available here, so this run uses the project default. ${err instanceof Error ? err.message : ''}`.trim(), task.id, 'system');
+    });
     try {
       await ctx.invoke('chat.update', { id: chat.id, title: `Task · ${task.title}`.slice(0, 256), mode: 'agent', draft: prompt });
       await ctx.invoke('chat.setPermissionMode', { id: chat.id, permissionMode: access, ...(access === 'full' ? { acknowledgeFullAccess: true } : {}) });
@@ -472,6 +484,7 @@ export function createProjectsDomain(ctx: DomainContext): DomainModule {
     if (p.dependencies !== undefined) out.dependencies = ids(p.dependencies, 'dependencies');
     if (p.permissionMode !== undefined) out.permissionMode = p.permissionMode === null ? null : mode(p.permissionMode);
     if (p.budgetMinutes !== undefined) out.budgetMinutes = budget(p.budgetMinutes);
+    if (p.parentId !== undefined) out.parentId = p.parentId === null ? null : id(p.parentId, 'parent task id');
     return out;
   };
   /** Guard for manual transitions away from a live run. */
@@ -561,8 +574,15 @@ export function createProjectsDomain(ctx: DomainContext): DomainModule {
       'project.work': input => { const limit = input.activityLimit === undefined ? 100 : Number(input.activityLimit); if (!Number.isSafeInteger(limit) || limit < 1 || limit > 200) throw new Error('Invalid limit.'); return work(project(input), limit); },
       'project.tasks.add': input => {
         const projectId = project(input);
-        const t = open().tasks.createTask({ projectId, title: text(input.title, 'task title', 500), acceptance: text(input.acceptance ?? '', 'acceptance criteria', 4000), dependencies: ids(input.dependencies ?? [], 'dependencies'), ...(input.owner !== undefined ? { owner: owner(input.owner) } : {}), ...(input.priority !== undefined ? { priority: priority(input.priority) } : {}), ...(input.permissionMode != null ? { permissionMode: mode(input.permissionMode) } : {}), ...(input.budgetMinutes != null ? { budgetMinutes: budget(input.budgetMinutes) } : {}) });
+        const t = open().tasks.createTask({ projectId, title: text(input.title, 'task title', 500), acceptance: text(input.acceptance ?? '', 'acceptance criteria', 4000), dependencies: ids(input.dependencies ?? [], 'dependencies'), ...(input.owner !== undefined ? { owner: owner(input.owner) } : {}), ...(input.priority !== undefined ? { priority: priority(input.priority) } : {}), ...(input.permissionMode != null ? { permissionMode: mode(input.permissionMode) } : {}), ...(input.budgetMinutes != null ? { budgetMinutes: budget(input.budgetMinutes) } : {}), ...(input.parentId ? { parentId: id(input.parentId, 'parent task id') } : {}) });
         changed(projectId, t.id); return view(projectId, t.id);
+      },
+      'project.stats': input => {
+        const days = Math.max(1, Math.min(90, Math.floor(Number(input.days ?? 14)) || 14)), offset = Math.max(-840, Math.min(840, Math.round(Number(input.utcOffsetMinutes ?? 0)) || 0));
+        const since = new Date(Date.now() - days * 86_400_000).toISOString();
+        const stats = open().tasks.stats({ since, tzModifier: `${offset >= 0 ? '+' : ''}${offset} minutes`, activityLimit: Number(input.activityLimit ?? 12) || 12 });
+        const names = new Map((open().db.prepare('SELECT id, name FROM projects').all() as { id: string; name: string }[]).map(r => [r.id, r.name]));
+        return { ...stats, activity: stats.activity.map(a => ({ ...a, projectName: names.get(a.projectId) ?? 'Project' })) } as never;
       },
       'project.tasks.edit': input => { const projectId = project(input), taskId = id(input.id), t = open().tasks.editTask({ projectId, id: taskId, revision: revision(input.revision), patch: edit(input) }); changed(projectId, t.id); return view(projectId, t.id); },
       'project.tasks.delete': input => { const projectId = project(input), taskId = id(input.id); open().tasks.deleteTask({ projectId, id: taskId, revision: revision(input.revision) }); changed(projectId, taskId); return { deleted: true }; },

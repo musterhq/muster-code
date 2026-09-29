@@ -54,7 +54,27 @@ export interface ProjectMember {
   id: string; projectId: string; name: string; kind: MemberKind; role: MemberRole;
   maxPermission: ChatPermissionMode | null; folderIds: string[] | null; secrets: string[];
   revokedAt: string | null; local: boolean; createdAt: string; updatedAt: string;
+  /** Roster profile (agents): job title, the member they report to, the runner and model their runs use, and the
+   *  instructions every run of theirs receives. Absent on rows written before the Roster existed. */
+  title?: string | null; reportsTo?: string | null; runner?: AgentRunner | null; instructions?: string;
+  /** Set while a hire waits for approval (the project requires approval to add agents). A pending member has no access. */
+  pendingAt?: string | null;
 }
+/** Which runtime and model an agent's runs use: any configured provider (Codex, Claude Code, OpenCode, Pi, …). */
+export interface AgentRunner { providerId: string; model: string }
+/** Per-project team settings. `keyPrefix` names task keys (OSS-1); null derives it from the project name. */
+export interface TeamSettings { requireHireApproval: boolean; keyPrefix: string | null; monthlyBudgetUsd: number | null }
+export const DEFAULT_TEAM_SETTINGS: TeamSettings = { requireHireApproval: false, keyPrefix: null, monthlyBudgetUsd: null };
+/** Task key prefix from a project name: an all-caps first word ("OSS Manager" → OSS), initials of several words
+ *  ("Launch Plan" → LP), else the first three letters ("OSSMANAGER" → OSS). */
+export function keyPrefixOf(name: string): string {
+  const words = name.split(/[^\p{L}\p{N}]+/u).filter(Boolean);
+  if (!words.length) return 'P';
+  if (words.length > 1 && /^[\p{Lu}\p{N}]{2,5}$/u.test(words[0])) return words[0].toUpperCase();
+  if (words.length > 1) return words.slice(0, 3).map(w => w[0]).join('').toUpperCase();
+  return words[0].slice(0, 3).toUpperCase();
+}
+export interface RosterProfileInput { title?: string | null; reportsTo?: string | null; runner?: AgentRunner | null; instructions?: string }
 /** What a member (or a composition of members) may do right now inside the Project's access policy. */
 export interface MemberAccess {
   memberIds: string[]; active: boolean; canEdit: boolean; canDispatch: boolean; canAdmin: boolean;
@@ -75,6 +95,7 @@ const none = (memberIds: string[], reason: string): MemberAccess => ({ memberIds
 /** One member inside the Project policy: role cap ∩ member cap ∩ Project access; member folders ∩ Project folders. Revoked means nothing. */
 export function memberAccess(member: ProjectMember, policy: AccessPolicy): MemberAccess {
   if (member.revokedAt) return none([member.id], `${member.name}’s access was revoked.`);
+  if (member.pendingAt) return none([member.id], `${member.name} is waiting for approval to join.`);
   const permissionMode = lowest([ROLE_CAP[member.role], member.maxPermission ?? undefined, policy.permissionMode]);
   const folderIds = member.folderIds === null ? [...policy.folderIds] : policy.folderIds.filter(id => member.folderIds!.includes(id));
   const viewer = member.role === 'viewer';
@@ -120,10 +141,15 @@ export interface ChatTransferPreview {
 export interface ProjectTeamCommands {
   /** Filtered, paged Project activity: by category, actor and time window. Reads stored events only. */
   'project.activity.query': { input: ActivityQuery; output: ActivityPage };
-  'project.members.list': { input: { projectId: string }; output: { members: ProjectMember[]; access: Record<string, MemberAccess>; policy: AccessPolicy } };
-  'project.members.add': { input: { projectId: string; name: string; kind: MemberKind; role: MemberRole; maxPermission?: ChatPermissionMode | null; folderIds?: string[] | null; secrets?: string[] }; output: ProjectMember };
+  'project.members.list': { input: { projectId: string }; output: { members: ProjectMember[]; access: Record<string, MemberAccess>; policy: AccessPolicy; settings?: TeamSettings } };
+  /** Adding an agent when the project requires approval creates a pending hire (an approval card in the Inbox and Roster). */
+  'project.members.add': { input: { projectId: string; name: string; kind: MemberKind; role: MemberRole; maxPermission?: ChatPermissionMode | null; folderIds?: string[] | null; secrets?: string[] } & RosterProfileInput; output: ProjectMember };
   /** The last active owner cannot be demoted, and the local owner stays an owner. */
-  'project.members.update': { input: { projectId: string; id: string; name?: string; role?: MemberRole; maxPermission?: ChatPermissionMode | null; folderIds?: string[] | null; secrets?: string[] }; output: ProjectMember };
+  'project.members.update': { input: { projectId: string; id: string; name?: string; role?: MemberRole; maxPermission?: ChatPermissionMode | null; folderIds?: string[] | null; secrets?: string[] } & RosterProfileInput; output: ProjectMember };
+  /** Approves or rejects a pending hire. Rejecting revokes the pending member. */
+  'project.members.decide': { input: { projectId: string; id: string; approve: boolean }; output: ProjectMember };
+  'project.team.settings': { input: { projectId: string }; output: TeamSettings };
+  'project.team.settings.set': { input: { projectId: string } & Partial<TeamSettings>; output: TeamSettings };
   /** Revocation takes effect at once: new runs are refused and running task runs this member requested or runs are stopped. */
   'project.members.revoke': { input: { projectId: string; id: string }; output: { member: ProjectMember; stoppedRuns: number } };
   'project.members.restore': { input: { projectId: string; id: string }; output: ProjectMember };
@@ -133,6 +159,6 @@ export interface ProjectTeamCommands {
   'project.chats.transfer': { input: { chatId: string; projectId: string | null; mode: ChatTransferMode; confirm: true }; output: { chatId: string; projectId: string | null } };
 }
 export const PROJECT_TEAM_COMMANDS = {
-  'project.activity.query': true, 'project.members.list': true, 'project.members.add': true, 'project.members.update': true, 'project.members.revoke': true, 'project.members.restore': true,
+  'project.activity.query': true, 'project.members.list': true, 'project.members.add': true, 'project.members.update': true, 'project.members.revoke': true, 'project.members.restore': true, 'project.members.decide': true, 'project.team.settings': true, 'project.team.settings.set': true,
   'project.chats.preview': true, 'project.chats.transfer': true,
 } as const satisfies Record<keyof ProjectTeamCommands, true>;

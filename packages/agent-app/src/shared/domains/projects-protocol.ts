@@ -36,6 +36,10 @@ export interface ProjectTaskRecord {
   budgetMinutes: number | null;
   /** The dependency whose reopening re-blocked this task; cleared when it is verified again. */
   blockedBy: string | null;
+  /** The task this one is a subtask of (same project), or null. */
+  parentId?: string | null;
+  /** Stable per-project number: the N in a key like OSS-3. Never reused after a delete. */
+  seq?: number | null;
 }
 /** A task as the Project screen shows it: the record plus facts derived at read time. */
 export interface ProjectTaskView extends ProjectTaskRecord { ready: boolean; verificationStale: boolean; waitingChatId: string | null }
@@ -80,7 +84,15 @@ export interface ProjectWorkState {
   /** PRJ-07: the change-feed sequence this read reflects; replay project.events after it. */
   eventSeq?: number;
 }
-export interface TaskEdit { title?: string; acceptance?: string; priority?: TaskPriority; owner?: TaskOwner; artifacts?: string[]; dependencies?: string[]; permissionMode?: ChatPermissionMode | null; budgetMinutes?: number | null }
+export interface TaskEdit { title?: string; acceptance?: string; priority?: TaskPriority; owner?: TaskOwner; artifacts?: string[]; dependencies?: string[]; permissionMode?: ChatPermissionMode | null; budgetMinutes?: number | null; parentId?: string | null }
+
+/** Dashboard aggregates across active projects (SQL in the task store). Days are the caller's local calendar days. */
+export interface ProjectStats {
+  states: Partial<Record<TaskState, number>>;
+  byDay: { day: string; state: TaskState; count: number }[];
+  runsByDay: { day: string; status: AttemptStatus; count: number }[];
+  activity: (ProjectActivity & { projectName: string })[];
+}
 
 export interface ProjectsCommands extends ProjectTeamCommands {
   'project.list': { input: undefined; output: ProjectDetails[] };
@@ -96,7 +108,9 @@ export interface ProjectsCommands extends ProjectTeamCommands {
   'project.delete': { input: { id: string }; output: { deleted: true; detachedChats: number } };
   /** Everything the Project screen shows in one read: tasks with derived readiness, stale verification and waiting chats. */
   'project.work': { input: { projectId: string; activityLimit?: number }; output: ProjectWorkState };
-  'project.tasks.add': { input: { projectId: string; title: string; acceptance: string; dependencies: string[]; owner?: TaskOwner; priority?: TaskPriority; permissionMode?: ChatPermissionMode | null; budgetMinutes?: number | null }; output: ProjectTaskView };
+  'project.tasks.add': { input: { projectId: string; title: string; acceptance: string; dependencies: string[]; owner?: TaskOwner; priority?: TaskPriority; permissionMode?: ChatPermissionMode | null; budgetMinutes?: number | null; parentId?: string | null }; output: ProjectTaskView };
+  /** Dashboard aggregates over the last `days` days (default 14), bucketed by the caller's UTC offset. Read-only. */
+  'project.stats': { input: { days?: number; utcOffsetMinutes?: number; activityLimit?: number }; output: ProjectStats };
   'project.tasks.edit': { input: { projectId: string; id: string; revision: number; patch: TaskEdit }; output: ProjectTaskView };
   /** Refused while the task runs or while another task depends on it. */
   'project.tasks.delete': { input: { projectId: string; id: string; revision: number }; output: { deleted: true } };
@@ -130,7 +144,7 @@ export interface ProjectsCommands extends ProjectTeamCommands {
 }
 export type ProjectsEvent = never;
 export const PROJECTS_COMMANDS = { ...PROJECT_TEAM_COMMANDS, 'project.list': true, 'project.update': true, 'project.linkFolder': true, 'project.unlinkFolder': true, 'project.preview': true, 'project.archive': true, 'project.restore': true, 'project.delete': true,
-  'project.work': true, 'project.tasks.add': true, 'project.tasks.edit': true, 'project.tasks.delete': true, 'project.tasks.setState': true, 'project.tasks.verify': true, 'project.tasks.dispatch': true,
+  'project.work': true, 'project.tasks.add': true, 'project.stats': true, 'project.tasks.edit': true, 'project.tasks.delete': true, 'project.tasks.setState': true, 'project.tasks.verify': true, 'project.tasks.dispatch': true,
   'project.decisions.add': true, 'project.decisions.edit': true, 'project.decisions.replace': true, 'project.instructions.set': true, 'project.scheduler.set': true,
   'project.coordinator.start': true, 'project.coordinator.apply': true, 'project.coordinator.dismiss': true,
   'project.sources.list': true, 'project.sources.save': true, 'project.sources.remove': true, 'project.handoff.build': true, 'project.handoff.latest': true, 'project.handoff.ack': true, 'project.events': true } as const satisfies Record<keyof ProjectsCommands, true>;

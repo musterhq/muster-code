@@ -10,7 +10,7 @@ import type { WorkspaceAgent, WorkspaceSnapshot, WorkspaceTask } from '../../sha
 import { AGENT_STATE_LABEL, Monogram } from './HubParts';
 
 const CARD_W = 232, CARD_H = 118, H_GAP = 20, V_GAP = 56, FOREST_GAP = 72, PAD = 40;
-const RUNTIME: Record<string, string> = { claude_local: 'Claude Code', codex_local: 'Codex', opencode_local: 'OpenCode', gemini_local: 'Gemini CLI', cursor_local: 'Cursor', process: 'Process', http: 'HTTP', muster: 'Muster' };
+const RUNTIME: Record<string, string> = { claude_local: 'Claude Code', codex_local: 'Codex', opencode_local: 'OpenCode', gemini_local: 'Gemini CLI', cursor_local: 'Cursor', process: 'Process', http: 'HTTP', muster: 'Muster', codex: 'Codex', 'claude-code': 'Claude Code', opencode: 'OpenCode', pi: 'Pi' };
 export const runtimeLabel = (adapter: string | null) => adapter ? RUNTIME[adapter] ?? adapter.replace(/_/g, ' ') : '—';
 
 interface Placed { agent: WorkspaceAgent; x: number; y: number; depth: number }
