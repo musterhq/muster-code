@@ -667,7 +667,7 @@ function SidebarInbox({screen}:{screen:string}):React.ReactElement {
   const route=useHubRoute();
   const app=useStoreSelector(state=>state.snapshot);
   // Chats that need you or went wrong come from the snapshot the sidebar already has; project and Paperclip items from the badge read.
-  const chatCount=React.useMemo(()=>badgeCount(buildActivity(app,null)),[app?.chats,app?.attention]);
+  const chatCount=React.useMemo(()=>badgeCount(buildActivity(app,null,Date.now(),badge?.chatIds??[])),[app?.chats,app?.attention,badge?.chatIds]);
   const count=chatCount+(badge?.inbox??0);
   const active=screen==='hub'&&route.page==='inbox';
   return <button type="button" className={`tool-button${active?' is-active':''}`} aria-current={active?'page':undefined} title="Everything that needs you, across chats, projects and Paperclip" onClick={()=>openHub('inbox')}>

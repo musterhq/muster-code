@@ -191,7 +191,7 @@ export function localInbox(reads: readonly { project: ProjectDetails; work: Proj
     const kind = task.state === 'needs-input' ? 'question' : task.state === 'review' || task.state === 'implemented' ? 'review' : task.state === 'blocked' ? 'blocked' : task.state === 'failed' ? 'failed_run' : null;
     if (!kind) continue;
     const why = kind === 'question' ? 'The agent is waiting for your answer.' : kind === 'review' ? 'Ready for your review and verification.' : kind === 'failed_run' ? task.runError || task.attempts[0]?.error || 'The last run failed.' : 'Blocked until a dependency or you unblock it.';
-    items.push({ id: `task:${task.id}`, kind, title: `${view.key} · ${task.title}`, why, severity: kind === 'question' || task.priority <= 1 ? 'high' : 'medium', at: task.updatedAt, taskId: task.id, agentId: view.assigneeId, runId: runs.find(r => r.taskId === task.id)?.id ?? null, projectId: read.project.id, group: read.project.name, source: 'local' });
+    items.push({ id: `task:${task.id}`, kind, title: `${view.key} · ${task.title}`, why, severity: kind === 'question' || task.priority <= 1 ? 'high' : 'medium', at: task.updatedAt, taskId: task.id, agentId: view.assigneeId, runId: runs.find(r => r.taskId === task.id)?.id ?? null, projectId: read.project.id, group: read.project.name, source: 'local', chatIds: [...new Set(task.attempts.map(a => a.chatId).filter(Boolean))] });
   }
   items.push(...mailInbox(mail, new Map(reads.map(r => [r.project.id, r.project.name]))));
   const rank = { high: 0, medium: 1, low: 2 } as const;

@@ -65,7 +65,8 @@ export interface WorkspaceRun {
 }
 export type InboxKind = 'review' | 'blocked' | 'approval' | 'question' | 'failed_run' | 'agent_error' | 'mention' | 'mail' | 'budget' | 'other';
 /** `group` is the project it belongs to (the Inbox groups by it); `source` says whether it came from Paperclip or Muster. */
-export interface WorkspaceInboxItem { id: string; kind: InboxKind; title: string; why: string; severity: 'high' | 'medium' | 'low'; at: string; taskId: string | null; agentId: string | null; runId: string | null; group?: string; source?: WorkspaceSource; projectId?: string | null }
+/** `chatIds`: a Muster task's run chats. The Inbox lists and counts the task, not those chats again. */
+export interface WorkspaceInboxItem { id: string; kind: InboxKind; title: string; why: string; severity: 'high' | 'medium' | 'low'; at: string; taskId: string | null; agentId: string | null; runId: string | null; group?: string; source?: WorkspaceSource; projectId?: string | null; chatIds?: string[] }
 export interface WorkspaceGoal { id: string; title: string; status: string; level: string | null }
 export type LiveChannel = 'socket' | 'poll' | 'events' | 'off';
 /** The linked Paperclip as the snapshot saw it. `stale`: the last read failed and its rows are the last good copy. */
@@ -129,7 +130,8 @@ export interface WorkspaceRow {
 }
 export interface WorkspaceList { kind: WorkspaceListKind; rows: WorkspaceRow[]; note: string }
 /** The sidebar Inbox badge: needs-you and problem items only (mail and reviews never badge). */
-export interface WorkspaceBadge { connected: boolean; inbox: number; liveRuns: number; mail: number }
+/** `chatIds`: run chats already counted in `inbox` through their task, so the sidebar does not count them twice. */
+export interface WorkspaceBadge { connected: boolean; inbox: number; liveRuns: number; mail: number; chatIds: string[] }
 /** What an import made or updated. Re-running updates the same rows (each is recorded as imported from Paperclip <id>). */
 export interface PaperclipImportReport {
   company: string; projects: { created: number; updated: number }; tasks: { created: number; updated: number; skipped: number };

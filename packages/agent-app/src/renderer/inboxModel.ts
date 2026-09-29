@@ -18,13 +18,16 @@ export interface ActivityItem {
 const KIND_BUCKET: Record<InboxKind, InboxBucket> = { question: 'needs', approval: 'needs', review: 'review', blocked: 'problems', failed_run: 'problems', agent_error: 'problems', budget: 'problems', mail: 'mentions', mention: 'mentions', other: 'review' };
 const DONE_WINDOW_MS = 3 * 86_400_000;
 
-export function buildActivity(app: Pick<Snapshot, 'chats' | 'folders' | 'projects' | 'attention'> | null | undefined, workspace: WorkspaceSnapshot | null | undefined, now = Date.now()): ActivityItem[] {
+/** `covered`: more run chats to leave out (the sidebar passes the badge's, as it has no workspace snapshot). */
+export function buildActivity(app: Pick<Snapshot, 'chats' | 'folders' | 'projects' | 'attention'> | null | undefined, workspace: WorkspaceSnapshot | null | undefined, now = Date.now(), covered: Iterable<string> = []): ActivityItem[] {
   const items: ActivityItem[] = [];
+  // A project task's run chat is represented by its task row; listing the chat as well would count it twice.
+  const taskChats = new Set([...covered, ...(workspace?.inbox ?? []).flatMap(i => i.chatIds ?? [])]);
   const chats = app?.chats ?? [];
   const groupOf = (chat: { folderId?: string; projectId?: string }) => app?.projects.find(p => p.id === chat.projectId)?.name ?? app?.folders.find(f => f.id === chat.folderId)?.name ?? 'Chats';
   const asking = new Map((app?.attention?.chats ?? []).map(a => [a.chatId, a]));
   for (const chat of chats) {
-    if (chat.archived) continue;
+    if (chat.archived || taskChats.has(chat.id)) continue;
     const attention = asking.get(chat.id), group = groupOf(chat), open = { kind: 'chat' as const, chatId: chat.id };
     if (attention && (attention.approvalCount || attention.questionCount)) {
       const why = [attention.approvalCount ? `${attention.approvalCount} ${attention.approvalCount === 1 ? 'approval' : 'approvals'} waiting` : '', attention.questionCount ? `${attention.questionCount} ${attention.questionCount === 1 ? 'question' : 'questions'} for you` : ''].filter(Boolean).join(' · ');

@@ -414,7 +414,8 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
 
   const badge = async (): Promise<WorkspaceBadge> => {
     const [mail, snap] = await Promise.all([context.invoke('mailbox.list', { limit: 1 }).then(m => m.unacked).catch(() => 0), snapshotInflight ?? merge(false, false)]);
-    return { connected: Boolean(snap.paperclip), inbox: snap.inbox.filter(i => URGENT.has(i.kind)).length, liveRuns: snap.counts.liveRuns, mail };
+    const urgent = snap.inbox.filter(i => URGENT.has(i.kind));
+    return { connected: Boolean(snap.paperclip), inbox: urgent.length, liveRuns: snap.counts.liveRuns, mail, chatIds: [...new Set(urgent.flatMap(i => i.chatIds ?? []))] };
   };
 
   const text = (value: unknown, label: string, max: number) => { if (typeof value !== 'string' || !value.trim()) throw new Error(`${label} is required.`); if (value.length > max) throw new Error(`${label} is too long.`); return value; };

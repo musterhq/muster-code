@@ -317,6 +317,27 @@ test('inbox activity: chats that ask or fail are Needs you / Problems; finished 
   assert.equal(items.find(i=>i.id==='chat-problem:b')!.why,'Rate limited');
 });
 
+test('a project task’s run chat is counted once: the task row stands for it in the Inbox and the badge',async t=>{
+  const {buildActivity,badgeCount}=await import('../src/renderer/inboxModel.ts');
+  const chat=(id:string,status:string)=>({id,title:`Chat ${id}`,status,archived:false,updatedAt:now,pinned:false,draft:'',model:'m',mode:'agent'});
+  const app={chats:[chat('run1','failed'),chat('solo','failed')],folders:[],projects:[],attention:{totalRequests:0,chats:[]}} as any;
+  const failedTask={id:'task:t1',kind:'failed_run',title:'LP-1 · Build',why:'tests failed',severity:'medium',at:now,taskId:'t1',agentId:null,runId:'at1',group:'Launch',source:'local',chatIds:['run1']};
+  const items=buildActivity(app,{inbox:[failedTask]} as any);
+  assert.deepEqual(items.map(i=>i.id).sort(),['chat-problem:solo','ws:task:t1']);
+  assert.equal(badgeCount(items),2);
+  // The sidebar has no workspace snapshot: it leaves out the chats the badge already counted.
+  assert.equal(badgeCount(buildActivity(app,null,Date.now(),['run1'])),1);
+  // The runtime badge reports those chats.
+  const task=(id:string,state:string,extra:object={})=>({id,projectId:'p1',title:`Task ${id}`,status:'todo',state,dependencies:[],acceptance:'',evidence:[],revision:1,createdAt:now,updatedAt:now,owner:{kind:'agent',id:'agent'},priority:2,artifacts:[],attempts:[],verification:null,permissionMode:null,budgetMinutes:null,blockedBy:null,ready:false,verificationStale:false,waitingChatId:null,...extra});
+  const h=await harness(t,{invoke:command=>{
+    if(command==='project.list')return [{id:'p1',name:'Launch',goal:'Ship',folderIds:[],primaryFolderId:null,archived:false,archivedAt:null}];
+    if(command==='project.work')return {tasks:{items:[task('1','failed',{attempts:[{id:'at1',chatId:'run1',runId:'r',trigger:'user',startedAt:now,endedAt:now,status:'failed',contextVersion:1}]})],truncated:false},decisions:{items:[]},activity:{items:[]},scheduler:{paused:false}};
+    if(command==='project.members.list')return {members:[]};
+  }});
+  const badge=await h.call('paperclip.badge');
+  assert.equal(badge.inbox,1);assert.deepEqual(badge.chatIds,['run1']);
+});
+
 test('one snapshot merges Muster and the linked Paperclip; writes route to whichever side owns the task',async t=>{
   const localTask={id:'lt1',projectId:'p1',title:'Muster task',status:'todo',state:'todo',dependencies:[],acceptance:'',evidence:[],revision:1,createdAt:now,updatedAt:now,owner:{kind:'agent',id:'agent'},priority:2,artifacts:[],attempts:[],verification:null,permissionMode:null,budgetMinutes:null,blockedBy:null,ready:true,verificationStale:false,waitingChatId:null};
   const h=await harness(t,{invoke:(command,input)=>{
