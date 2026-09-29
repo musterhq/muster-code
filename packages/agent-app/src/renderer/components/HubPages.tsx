@@ -180,7 +180,7 @@ export function LedgerPage({ snapshot, nav }: { snapshot: WorkspaceSnapshot; nav
     <PageHeader title={NAMES.ledger} detail="One entry per agent turn: who ran, on which model, what it cost in tokens, which tools it used and which files it changed.">
       <div className="ws-segmented is-inline" role="tablist" aria-label="Ledger views">{TABS.map(([t, l]) => <button key={t} type="button" role="tab" aria-selected={tab === t} className="ws-segment" onClick={() => setTab(t)}><span className="ws-segment-label">{l}</span></button>)}</div>
     </PageHeader>
-    {chain && <p className="ws-chain" data-ok={chain.ok ? 'true' : 'false'}>{chain.ok ? `Muster chain verified · ${chain.entries} ${chain.entries === 1 ? 'entry' : 'entries'}${chain.entries ? ` · head ${chain.head.slice(0, 12)}` : ''}` : `Chain broken at entry #${chain.brokenAt}: an entry was changed or removed after it was written.`}</p>}
+    {chain && <p className="ws-chain" data-ok={chain.ok ? 'true' : 'false'}>{chain.ok ? chain.entries === 0 ? 'No Muster turns recorded yet' : `Muster chain verified · ${chain.entries} ${chain.entries === 1 ? 'entry' : 'entries'} · head ${chain.head.slice(0, 12)}` : `Chain broken at entry #${chain.brokenAt}: an entry was changed or removed after it was written.`}</p>}
     {tab === 'activity' ? <ListPage kind="audit" embedded/>
       : tab === 'timeline' ? <Timeline snapshot={snapshot} view={view} onOpenTask={nav.onOpenTask}/>
       : error ? <ResourceState kind="error" message="The ledger could not be read." detail={error} onRetry={() => setTick(n => n + 1)}/>

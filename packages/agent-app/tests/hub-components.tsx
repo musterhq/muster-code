@@ -47,6 +47,7 @@ const calls:{command:string;input:any}[]=[];
   if(command==='paperclip.memory')return {scope:{kind:'repository',label:'oss-manager',folderId:'f'},repo:'github.com/hybrowlabs/oss-manager',query:'x',records:[],engine:'not-configured',note:'3 memories in the oss-manager folder, none about this task yet.'};
   if(command==='paperclip.comment')return {id:'m2',author:{kind:'user',id:null,label:'Board'},body:input.body,createdAt:now};
   if(command==='paperclip.interaction.respond')return {ok:true};
+  if(command==='paperclip.ledger')return {entries:[],chain:{ok:true,entries:0,head:'0'.repeat(64),brokenAt:null}};
   if(command==='app.snapshot')return {folders:[],chats:[{id:'chat1',title:'Refactor login',status:'failed',error:'Rate limited by the provider',archived:false,updatedAt:now,pinned:false,draft:'',model:'m',mode:'agent'}],projects:[],version:1};
   return undefined;
 }};
@@ -127,6 +128,14 @@ await delay(120);
 assert.ok(text('.resource-state-partial p').some(t=>/Paperclip can’t be reached, so its questions, approvals and problems are not shown/.test(t)));
 assert.ok(!text('.resource-state-title').some(t=>/all caught up/.test(t)),'offline is never "all caught up"');
 root3.unmount();
+
+// An empty Ledger says nothing was recorded rather than "chain verified · 0 entries".
+const {LedgerPage}=await import('../src/renderer/components/HubPages');
+const root4=createRoot(document.getElementById('root')!,{onUncaughtError:(e:unknown)=>{(errors as unknown[]).push(e);}});
+root4.render(<LedgerPage snapshot={snapshot as any} nav={{onOpenTask(){},onOpenAgent(){},onOpenChat(){}}}/>);
+await delay(120);
+assert.deepEqual(text('.ws-chain'),['No Muster turns recorded yet']);
+root4.unmount();
 assert.deepEqual(errors,[]);
 console.log('hub-components: ok');
 process.exit(0);
