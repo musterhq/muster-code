@@ -55,7 +55,7 @@ export function ConnectionPanel({ onSaved, compact = false }: { onSaved?: (view:
   const save = async () => {
     setBusy('save'); setError('');
     try {
-      const view = await invoke('paperclip.config.set', { mode, ...(mode === 'custom' ? { baseUrl: url } : {}), ...(token ? { token } : {}), companyId: company || null });
+      const view = await invoke('paperclip.config.set', { mode, ...(mode === 'custom' ? { baseUrl: url, ...(token ? { token } : {}) } : {}), companyId: company || null });
       setConfig(view); setToken(''); notifySuccess(mode === 'off' ? 'Paperclip unlinked. Projects show Muster’s own work.' : 'Paperclip linked. Its projects appear under Projects, tagged Paperclip.');
       await refreshWorkspace(true); onSaved?.(view);
     } catch (cause) { setError(errorText(cause)); } finally { setBusy(null); }

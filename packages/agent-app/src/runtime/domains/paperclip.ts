@@ -37,8 +37,10 @@ const NOISY = new Set(['heartbeat.run.log', 'heartbeat.run.event', 'heartbeat.ru
 /** Needs you + Problems: the only kinds that badge. */
 const URGENT = new Set(['question', 'approval', 'blocked', 'failed_run', 'agent_error', 'budget']);
 
-interface StoredConfig { mode: PaperclipMode; baseUrl: string; companyId: string | null }
-const DEFAULT_CONFIG: StoredConfig = { mode: 'off', baseUrl: PAPERCLIP_LOCAL_URL, companyId: null };
+/** `tokenOrigin` is the origin the stored token was saved for: the token is sent to that origin and nowhere else. */
+interface StoredConfig { mode: PaperclipMode; baseUrl: string; companyId: string | null; tokenOrigin: string | null }
+const DEFAULT_CONFIG: StoredConfig = { mode: 'off', baseUrl: PAPERCLIP_LOCAL_URL, companyId: null, tokenOrigin: null };
+const originOf = (baseUrl: unknown): string | null => { try { return new URL(normalizeBaseUrl(baseUrl)).origin; } catch { return null; } };
 type Json = Record<string, unknown>;
 interface PaperclipPart { tasks: WorkspaceTask[]; agents: WorkspaceAgent[]; projects: WorkspaceProject[]; runs: WorkspaceSnapshot['runs']; inbox: WorkspaceInboxItem[]; goals: WorkspaceSnapshot['goals'] }
 
@@ -79,7 +81,7 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
   let config: StoredConfig = (() => {
     try {
       const raw = JSON.parse(readFileSync(configPath, 'utf8')) as Partial<StoredConfig>;
-      return { mode: raw.mode === 'local' || raw.mode === 'custom' ? raw.mode : 'off', baseUrl: typeof raw.baseUrl === 'string' ? raw.baseUrl : PAPERCLIP_LOCAL_URL, companyId: typeof raw.companyId === 'string' ? raw.companyId : null };
+      return { mode: raw.mode === 'local' || raw.mode === 'custom' ? raw.mode : 'off', baseUrl: typeof raw.baseUrl === 'string' ? raw.baseUrl : PAPERCLIP_LOCAL_URL, companyId: typeof raw.companyId === 'string' ? raw.companyId : null, tokenOrigin: typeof raw.tokenOrigin === 'string' ? raw.tokenOrigin : null };
     } catch { return { ...DEFAULT_CONFIG }; }
   })();
   const saveConfig = (next: StoredConfig) => {
@@ -89,14 +91,16 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
     renameSync(temp, configPath);
     config = next;
   };
-  const view = (): PaperclipConfigView => { const status = secrets().status(PAPERCLIP_SECRET_ID); return { mode: config.mode, baseUrl: config.mode === 'local' ? PAPERCLIP_LOCAL_URL : config.baseUrl, hasToken: status.stored, secureStorage: status.secureStorage, companyId: config.companyId }; };
+  /** The stored token, only for the origin it was saved for; any other URL gets none. */
+  const tokenFor = (baseUrl: unknown): string | undefined => { const origin = originOf(baseUrl); return origin && origin === config.tokenOrigin ? secrets().get(PAPERCLIP_SECRET_ID) : undefined; };
+  const view = (): PaperclipConfigView => { const status = secrets().status(PAPERCLIP_SECRET_ID); return { mode: config.mode, baseUrl: config.mode === 'local' ? PAPERCLIP_LOCAL_URL : config.baseUrl, hasToken: status.stored && config.tokenOrigin !== null && config.tokenOrigin === originOf(config.baseUrl), secureStorage: status.secureStorage, companyId: config.companyId }; };
 
   // --- the Paperclip connection ------------------------------------------------------------------------------------
   let client: PaperclipClient | null = null;
   const endpointFor = (mode: PaperclipMode, baseUrl: string, token: string | undefined) => ({ baseUrl: mode === 'local' ? PAPERCLIP_LOCAL_URL : normalizeBaseUrl(baseUrl), token: mode === 'custom' ? token : undefined });
   const connection = (): PaperclipClient | null => {
     if (config.mode === 'off') return null;
-    const endpoint = endpointFor(config.mode, config.baseUrl, secrets().get(PAPERCLIP_SECRET_ID));
+    const endpoint = endpointFor(config.mode, config.baseUrl, tokenFor(config.baseUrl));
     if (!client || client.endpoint.baseUrl !== endpoint.baseUrl || client.endpoint.token !== endpoint.token) { closeSocket(); client = new PaperclipClient(endpoint, options.fetch); built = null; }
     return client;
   };
@@ -420,9 +424,15 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
       'paperclip.config.set': input => {
         const mode = input.mode === 'local' || input.mode === 'custom' ? input.mode : 'off';
         const baseUrl = mode === 'custom' ? normalizeBaseUrl(input.baseUrl) : mode === 'local' ? PAPERCLIP_LOCAL_URL : config.baseUrl;
-        if (typeof input.token === 'string') { if (input.token === '') secrets().clear(PAPERCLIP_SECRET_ID); else secrets().set(PAPERCLIP_SECRET_ID, input.token); }
+        // A token belongs to one custom origin. This Mac needs none, so a token sent with another mode is ignored; moving
+        // to a different origin without a new token forgets the old one rather than sending it to the new host.
+        let tokenOrigin = config.tokenOrigin;
+        const forget = () => { if (secrets().status(PAPERCLIP_SECRET_ID).stored) secrets().clear(PAPERCLIP_SECRET_ID); tokenOrigin = null; };
+        if (input.token === '') forget();
+        else if (mode === 'custom' && typeof input.token === 'string') { secrets().set(PAPERCLIP_SECRET_ID, input.token); tokenOrigin = originOf(baseUrl); }
+        else if (mode === 'custom' && tokenOrigin !== originOf(baseUrl)) forget();
         const companyId = input.companyId === null ? null : typeof input.companyId === 'string' ? id(input.companyId) : config.companyId;
-        saveConfig({ mode, baseUrl, companyId });
+        saveConfig({ mode, baseUrl, companyId, tokenOrigin });
         closeSocket(); stopPoll(); built = null; client = null; companies = []; lastError = undefined;
         queueEmit(['config', 'tasks', 'runs', 'agents', 'inbox']);
         return view();
@@ -431,7 +441,8 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
         const mode = input.mode === 'local' || input.mode === 'custom' || input.mode === 'off' ? input.mode : config.mode;
         if (mode === 'off') return { ok: true, stage: 'ok', message: 'Paperclip is not linked. Projects show Muster’s own work only.' };
         let endpoint;
-        try { endpoint = endpointFor(mode, typeof input.baseUrl === 'string' ? input.baseUrl : config.baseUrl, typeof input.token === 'string' && input.token ? input.token : secrets().get(PAPERCLIP_SECRET_ID)); }
+        const baseUrl = typeof input.baseUrl === 'string' ? input.baseUrl : config.baseUrl;
+        try { endpoint = endpointFor(mode, baseUrl, typeof input.token === 'string' && input.token ? input.token : tokenFor(baseUrl)); }
         catch (cause) { return { ok: false, stage: 'config', message: cause instanceof Error ? cause.message : String(cause) }; }
         const probe = new PaperclipClient(endpoint, options.fetch), started = Date.now();
         try {
@@ -499,7 +510,8 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
       },
       'paperclip.import': async input => {
         const mode = input.mode === 'local' || input.mode === 'custom' ? input.mode : config.mode === 'off' ? 'local' : config.mode;
-        const reader = new PaperclipClient(endpointFor(mode, typeof input.baseUrl === 'string' ? input.baseUrl : config.baseUrl, typeof input.token === 'string' && input.token ? input.token : secrets().get(PAPERCLIP_SECRET_ID)), options.fetch);
+        const baseUrl = typeof input.baseUrl === 'string' ? input.baseUrl : config.baseUrl;
+        const reader = new PaperclipClient(endpointFor(mode, baseUrl, typeof input.token === 'string' && input.token ? input.token : tokenFor(baseUrl)), options.fetch);
         const store = imports();
         if (!store) throw new Error('The import store is unavailable.');
         let target = typeof input.companyId === 'string' ? id(input.companyId) : config.companyId;

@@ -97,6 +97,26 @@ test('This Mac needs no token and never sends one; bad URLs are refused before a
   assert.equal(bad.ok,false);assert.equal(bad.stage,'config');
 });
 
+test('the stored token is sent only to the origin it was saved for; a new origin or This Mac never gets it',async t=>{
+  const h=await harness(t);
+  await h.call('paperclip.config.set',{mode:'custom',baseUrl:'https://pc.example.com',token:'pcp_board_abc'});
+  const auth=async(input:Record<string,unknown>)=>{const from=h.server.calls.length;await h.call('paperclip.test',input);return h.server.calls.slice(from).map(c=>c.headers.authorization??'none');};
+  assert.deepEqual([...new Set(await auth({mode:'custom',baseUrl:'https://pc.example.com/api'}))],['Bearer pcp_board_abc'],'same origin, another path: the stored token');
+  assert.deepEqual([...new Set(await auth({mode:'custom',baseUrl:'https://other.example.net'}))],['none'],'Test connection on another host never sends the stored token');
+  assert.deepEqual([...new Set(await auth({mode:'custom',baseUrl:'http://pc.example.com'}))],['none'],'another scheme is another origin');
+  assert.deepEqual([...new Set(await auth({mode:'custom',baseUrl:'https://other.example.net',token:'pcp_typed'}))],['Bearer pcp_typed'],'a token typed for the test is used as given');
+  const moved=await h.call('paperclip.config.set',{mode:'custom',baseUrl:'https://other.example.net'});
+  assert.equal(moved.hasToken,false);assert.equal(h.secrets.values.has(PAPERCLIP_SECRET_ID),false,'changing the origin without a new token forgets the old one');
+  assert.match(await readFile(join(h.dataDir,'paperclip.json'),'utf8'),/"tokenOrigin": null/);
+  const kept=await h.call('paperclip.config.set',{mode:'custom',baseUrl:'https://other.example.net',token:'pcp_new'});
+  assert.equal(kept.hasToken,true);
+  assert.equal((await h.call('paperclip.config.set',{mode:'custom',baseUrl:'https://other.example.net/'})).hasToken,true,'same origin: the token stays');
+  assert.match(await readFile(join(h.dataDir,'paperclip.json'),'utf8'),/"tokenOrigin": "https:\/\/other.example.net"/);
+  h.secrets.values.clear();
+  const local=await h.call('paperclip.config.set',{mode:'local',token:'pcp_ignored'});
+  assert.equal(local.hasToken,false);assert.equal(h.secrets.values.size,0,'This Mac never stores a token');
+});
+
 test('the snapshot maps Paperclip into the workspace shapes, and an unchanged refresh is served from ETag 304s',async t=>{
   const h=await harness(t);
   await h.call('paperclip.config.set',{mode:'local',companyId:COMPANY});
