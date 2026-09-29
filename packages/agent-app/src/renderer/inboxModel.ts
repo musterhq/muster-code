@@ -3,6 +3,11 @@
  * tracks — each chat's pending approvals and questions (snapshot.attention), its run status and unread flag, and the
  * workspace's needs-you items (task reviews, blocked or failed work, mailbox mail, Paperclip attention when connected).
  * Nothing is stored twice; this only sorts existing state into buckets.
+ *
+ * The badge (#189) counts what still needs you: pending approvals and questions always, a chat that failed, was
+ * interrupted or is waiting only while it is unread (not opened since). Once opened, a problem stays listed under
+ * Problems for the same 3 days as Done, then drops off. Dismiss hides an item until it changes: dismissals are keyed by
+ * item id and the item's `at`, so a new failure in the same chat shows again.
  */
 import type { Snapshot } from '../shared/protocol';
 import type { InboxKind, WorkspaceSnapshot } from '../shared/domains/paperclip-protocol';
@@ -17,9 +22,13 @@ export interface ActivityItem {
 
 const KIND_BUCKET: Record<InboxKind, InboxBucket> = { question: 'needs', approval: 'needs', review: 'review', blocked: 'problems', failed_run: 'problems', agent_error: 'problems', budget: 'problems', mail: 'mentions', mention: 'mentions', other: 'review' };
 const DONE_WINDOW_MS = 3 * 86_400_000;
+/** A turn cut short because Muster quit is not a failure: it can simply be continued. */
+export const INTERRUPTED_WHY = 'Interrupted when Muster quit — continue?';
+/** Item id → the `at` it was dismissed at. */
+export type Dismissals = ReadonlyMap<string, string>;
 
 /** `covered`: more run chats to leave out (the sidebar passes the badge's, as it has no workspace snapshot). */
-export function buildActivity(app: Pick<Snapshot, 'chats' | 'folders' | 'projects' | 'attention'> | null | undefined, workspace: WorkspaceSnapshot | null | undefined, now = Date.now(), covered: Iterable<string> = []): ActivityItem[] {
+export function buildActivity(app: Pick<Snapshot, 'chats' | 'folders' | 'projects' | 'attention'> | null | undefined, workspace: WorkspaceSnapshot | null | undefined, now = Date.now(), covered: Iterable<string> = [], dismissed: Dismissals = EMPTY): ActivityItem[] {
   const items: ActivityItem[] = [];
   // A project task's run chat is represented by its task row; listing the chat as well would count it twice.
   const taskChats = new Set([...covered, ...(workspace?.inbox ?? []).flatMap(i => i.chatIds ?? [])]);
@@ -34,8 +43,8 @@ export function buildActivity(app: Pick<Snapshot, 'chats' | 'folders' | 'project
       items.push({ id: `chat-needs:${chat.id}`, bucket: 'needs', title: chat.title || 'Untitled chat', why, at: attention.requests.at(-1)?.createdAt ?? chat.updatedAt, group, unread: true, source: 'chat', kind: attention.approvalCount ? 'approval' : 'question', action: open });
     } else if (chat.status === 'waiting') {
       items.push({ id: `chat-needs:${chat.id}`, bucket: 'needs', title: chat.title || 'Untitled chat', why: 'Waiting for your input.', at: chat.updatedAt, group, unread: Boolean(chat.unread), source: 'chat', kind: 'question', action: open });
-    } else if (chat.status === 'failed' || chat.status === 'interrupted') {
-      items.push({ id: `chat-problem:${chat.id}`, bucket: 'problems', title: chat.title || 'Untitled chat', why: chat.error || (chat.status === 'failed' ? 'The last turn failed. Open the chat to retry.' : 'The last turn was interrupted. Open the chat to continue.'), at: chat.updatedAt, group, unread: Boolean(chat.unread), source: 'chat', kind: chat.status, action: open });
+    } else if ((chat.status === 'failed' || chat.status === 'interrupted') && (chat.unread || now - Date.parse(chat.updatedAt) < DONE_WINDOW_MS)) {
+      items.push({ id: `chat-problem:${chat.id}`, bucket: 'problems', title: chat.title || 'Untitled chat', why: chat.status === 'interrupted' ? INTERRUPTED_WHY : chat.error || 'The last turn failed. Open the chat to retry.', at: chat.updatedAt, group, unread: Boolean(chat.unread), source: 'chat', kind: chat.status, action: open });
     } else if (chat.status === 'completed' && now - Date.parse(chat.updatedAt) < DONE_WINDOW_MS) {
       items.push({ id: `chat-done:${chat.id}`, bucket: 'done', title: chat.title || 'Untitled chat', why: chat.unread ? 'Finished — not opened yet.' : 'Finished.', at: chat.updatedAt, group, unread: Boolean(chat.unread), source: 'chat', kind: 'completed', action: open });
     }
@@ -45,8 +54,11 @@ export function buildActivity(app: Pick<Snapshot, 'chats' | 'folders' | 'project
       source: item.source === 'paperclip' ? 'paperclip' : 'muster', kind: item.kind,
       action: item.taskId ? { kind: 'task', taskId: item.taskId } : item.agentId ? { kind: 'agent', agentId: item.agentId } : { kind: 'none' } });
   }
-  return items.sort((a, b) => Number(b.unread) - Number(a.unread) || b.at.localeCompare(a.at));
+  return items.filter(i => dismissed.get(i.id) !== i.at).sort((a, b) => Number(b.unread) - Number(a.unread) || b.at.localeCompare(a.at));
 }
+const EMPTY: Dismissals = new Map();
 
-/** What the sidebar badge shows: Needs you and Problems only. */
-export const badgeCount = (items: readonly ActivityItem[]) => items.filter(i => i.bucket === 'needs' || i.bucket === 'problems').length;
+/** Whether an item counts toward the badge: Needs you and Problems only, and a chat's own status only while unread. */
+export const badges = (item: ActivityItem) => (item.bucket === 'needs' || item.bucket === 'problems') && (item.source !== 'chat' || item.unread);
+/** What the sidebar badge shows. */
+export const badgeCount = (items: readonly ActivityItem[]) => items.filter(badges).length;

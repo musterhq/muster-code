@@ -26,6 +26,7 @@ import { PaperclipClient, PaperclipError, normalizeBaseUrl, openLiveEvents, type
 import { arr, buildInbox, mapAgent, mapAttention, mapComment, mapCompany, mapGoal, mapInteraction, mapIssue, mapProject, mapReceipt, mapRows, mapRun } from '../paperclip-map.ts';
 import { activeSecretStore, SecretStore } from '../secret-store.ts';
 import { attachTurnLedger, TurnLedger } from '../turn-ledger.ts';
+import { importLedgerHistory, paperclipHistory, type HistoryResult } from '../ledger-history.ts';
 import { LocalWorkspace, memberAgentId, type Invoke, type LocalPart } from '../workspace-local.ts';
 import { importFromPaperclip, SqliteImportStore } from '../paperclip-import.ts';
 import type { DomainContext, DomainModule } from './types.ts';
@@ -283,17 +284,41 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
   const ledger = () => ledgerStore ??= new TurnLedger(context.db());
   const offLedger = attachTurnLedger(context, ledger, entry => queueEmit(['runs'], entry.taskId ?? undefined));
   const ledgerView = async (limit: number): Promise<LedgerView> => {
-    const entries = ledger().list({ limit });
+    let entries = ledger().list({ limit });
     const c = connection();
     if (c) {
       await paperclipPart(false);
       if (built) {
         const runs = await c.get<unknown>(`/companies/${encodeURIComponent(built.companyId)}/heartbeat-runs?limit=${Math.min(limit, 200)}`).catch(() => []);
-        entries.push(...arr(runs).map(r => mapReceipt(r, built!.agents)));
+        const receipts = arr(runs).map(r => mapReceipt(r, built!.agents)), seen = new Set(receipts.map(r => r.runId));
+        // An imported Paperclip run that the linked Paperclip still reports is shown once, as Paperclip's own receipt.
+        entries = [...entries.filter(e => !(e.source === 'history' && e.chatId === null && seen.has(e.runId))), ...receipts];
       }
     }
     return { entries: entries.sort((a, b) => b.endedAt.localeCompare(a.endedAt)), chain: ledger().verify() };
   };
+  // Imported history (#190): past turns come in once, in the background, a batch per tick. It starts on the first badge
+  // read (the sidebar asks a few seconds after the window painted) or when the Ledger opens, never on the startup path.
+  const history = { run: null as Promise<HistoryResult> | null, timer: null as ReturnType<typeof setTimeout> | null, done: false, disposed: false };
+  const tick = () => new Promise<void>(resolve => setImmediate(resolve));
+  const importHistory = (): Promise<HistoryResult> => {
+    if (history.run) return history.run;
+    history.run = importLedgerHistory(context.db(), ledger(), {
+      pause: tick, stopped: () => history.disposed,
+      pricing: (providerId, model) => { try { return (context.modelCatalog?.().providers.find(p => p.id === providerId) as unknown as { models?: { id: string; pricing?: never }[] } | undefined)?.models?.find(m => m.id === model)?.pricing ?? null; } catch { return null; } },
+    }).then(result => { history.done = true; if (result.turns) queueEmit(['runs']); return result; }).catch(() => ({ chats: 0, turns: 0 })).finally(() => { history.run = null; });
+    return history.run;
+  };
+  const scheduleHistory = () => {
+    if (history.done || history.run || history.timer || history.disposed) return;
+    history.timer = timers.setTimeout(() => { history.timer = null; void importHistory(); }, 0);
+  };
+
+  // --- Inbox dismissals ------------------------------------------------------------------------------------------------
+  // Keyed by item id and the item's time: a dismissed failure stays hidden, a new one (a later time) shows again.
+  let dismissReady = false;
+  const dismissDb = () => { const db = context.db(); if (!dismissReady) { db.exec('CREATE TABLE IF NOT EXISTS inbox_dismissals (id TEXT PRIMARY KEY, at TEXT NOT NULL, dismissed_at TEXT NOT NULL)'); dismissReady = true; } return db; };
+  const dismissed = (): Map<string, string> => { try { return new Map((dismissDb().prepare('SELECT id, at FROM inbox_dismissals').all() as { id: string; at: string }[]).map(r => [r.id, r.at])); } catch { return new Map(); } };
 
   // --- memory ------------------------------------------------------------------------------------------------------------
   const memoryFor = async (taskId: string): Promise<WorkspaceMemory> => {
@@ -414,7 +439,8 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
 
   const badge = async (): Promise<WorkspaceBadge> => {
     const [mail, snap] = await Promise.all([context.invoke('mailbox.list', { limit: 1 }).then(m => m.unacked).catch(() => 0), snapshotInflight ?? merge(false, false)]);
-    const urgent = snap.inbox.filter(i => URGENT.has(i.kind));
+    const hidden = dismissed();
+    const urgent = snap.inbox.filter(i => URGENT.has(i.kind) && hidden.get(`ws:${i.id}`) !== i.at);
     return { connected: Boolean(snap.paperclip), inbox: urgent.length, liveRuns: snap.counts.liveRuns, mail, chatIds: [...new Set(urgent.flatMap(i => i.chatIds ?? []))] };
   };
 
@@ -525,6 +551,8 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
         // Folder paths and CODEX_HOME are this Mac's only when Paperclip runs here; a remote server's paths are never touched.
         const report = await importFromPaperclip(target, { get: path => reader.get<unknown>(path), invoke: context.invoke as Invoke, store, folders, exists: path => existsSync(path), local: mode === 'local', ...(mode === 'local' ? { codexHome: codexHomeOf } : {}) });
         queueEmit(['tasks', 'agents', 'inbox']);
+        // The imported runs show in the Ledger as imported history (#190).
+        try { if (ledger().importHistory(paperclipHistory(context.db()))) queueEmit(['runs']); } catch { /* the Ledger never fails an import */ }
         return report;
       },
       'paperclip.task.start': async input => {
@@ -571,10 +599,19 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
         else { ensureSocket(); if (!live.socket) schedulePoll(); }
         return { live: live.channel };
       },
-      'paperclip.badge': () => badge(),
-      'paperclip.ledger': input => ledgerView(typeof input.limit === 'number' ? Math.min(Math.max(input.limit, 1), 1000) : 200),
+      'paperclip.badge': () => { scheduleHistory(); return badge(); },
+      'paperclip.ledger': input => { scheduleHistory(); return ledgerView(typeof input.limit === 'number' ? Math.min(Math.max(input.limit, 1), 1000) : 200); },
+      'paperclip.ledger.backfill': async () => { if (history.timer) { timers.clearTimeout(history.timer); history.timer = null; } const result = await importHistory(); return { chats: result.chats, turns: result.turns }; },
+      'paperclip.inbox.dismiss': input => {
+        const itemId = typeof input.id === 'string' && /^[\w:.@-]{1,200}$/.test(input.id) ? input.id : null, at = typeof input.at === 'string' && input.at.length <= 64 ? input.at : null;
+        if (!itemId || at === null) throw new Error('Unknown item.');
+        dismissDb().prepare('INSERT INTO inbox_dismissals (id, at, dismissed_at) VALUES (?, ?, ?) ON CONFLICT(id) DO UPDATE SET at = excluded.at, dismissed_at = excluded.dismissed_at').run(itemId, at, new Date().toISOString());
+        if (itemId.startsWith('ws:')) queueEmit(['inbox']);
+        return { ok: true as const };
+      },
+      'paperclip.inbox.dismissed': () => ({ items: [...dismissed()].map(([itemId, at]) => ({ id: itemId, at })) }),
     },
-    dispose() { offLedger(); closeSocket(); stopPoll(); if (live.emitTimer) timers.clearTimeout(live.emitTimer); live.emitTimer = null; },
+    dispose() { history.disposed = true; if (history.timer) timers.clearTimeout(history.timer); history.timer = null; offLedger(); closeSocket(); stopPoll(); if (live.emitTimer) timers.clearTimeout(live.emitTimer); live.emitTimer = null; },
     power(event) { if (event.state === 'suspend') { closeSocket(); stopPoll(); } else if (live.visible) { ensureSocket(); if (!live.socket) schedulePoll(); } },
   };
 }

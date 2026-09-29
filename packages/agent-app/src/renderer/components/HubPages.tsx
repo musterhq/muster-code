@@ -2,12 +2,13 @@
  *  (Receipts, Timeline, Activity, Costs) and Outputs. Muster's own rows and the linked Paperclip's render the same way,
  *  tagged by source. */
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { Box, History, Inbox, Pause, Play, Square } from 'lucide-react';
+import { Box, History, Inbox, Pause, Play, Square, X } from 'lucide-react';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import type { LedgerView, WorkspaceAgent, WorkspaceList, WorkspaceRun, WorkspaceSnapshot, WorkspaceSource } from '../../shared/domains/paperclip-protocol';
+import type { LedgerSource, LedgerView, WorkspaceAgent, WorkspaceList, WorkspaceRun, WorkspaceSnapshot, WorkspaceSource } from '../../shared/domains/paperclip-protocol';
 import { formatUsd } from '../../shared/model-catalog';
 import { INBOX_BUCKETS, NAMES } from '../../shared/workspace-names';
 import { invoke } from '../bridge';
+import { dismissInboxItem, useInboxDismissals } from '../hubStore';
 import { buildActivity, type ActivityItem, type InboxBucket } from '../inboxModel';
 import { agoLabel, exactTime } from '../relativeTime';
 import { notifyError, notifySuccess } from '../store';
@@ -24,7 +25,9 @@ export interface HubNav { onOpenTask: (id: string) => void; onOpenAgent: (id: st
 export function PageHeader({ title, detail, children }: { title: string; detail?: React.ReactNode; children?: React.ReactNode }): React.ReactElement {
   return <header className="ws-page-head"><div className="ws-page-title"><h1>{title}</h1>{detail && <p>{detail}</p>}</div>{children && <div className="ws-page-actions">{children}</div>}</header>;
 }
-const SourceTag = ({ source }: { source: WorkspaceSource }) => source === 'paperclip' ? <span className="ws-source">{NAMES.paperclip}</span> : null;
+/** Paperclip rows, and Ledger entries imported from past chats (#190): those were never hash-chained, and say so. */
+const SourceTag = ({ source }: { source: LedgerSource }) => source === 'paperclip' ? <span className="ws-source">{NAMES.paperclip}</span>
+  : source === 'history' ? <span className="ws-source ws-source-history" title="Imported from saved chats and Paperclip activity from before the Ledger recorded turns. Not part of the verified chain.">Imported history</span> : null;
 
 // --- Inbox -----------------------------------------------------------------------------------------------------------
 const BUCKETS: { id: 'all' | InboxBucket; label: string }[] = [{ id: 'all', label: 'All' }, ...(Object.entries(INBOX_BUCKETS) as [InboxBucket, string][]).map(([id, label]) => ({ id, label }))];
@@ -34,14 +37,15 @@ export function InboxPage({ snapshot, nav }: { snapshot: WorkspaceSnapshot | nul
   const { snapshot: app } = useStore();
   const [filter, setFilter] = useState<'all' | InboxBucket>('all');
   const [group, setGroup] = useState('all');
-  const items = useMemo(() => buildActivity(app, snapshot), [app?.chats, app?.attention, app?.projects, app?.folders, snapshot?.inbox]);
+  const dismissed = useInboxDismissals();
+  const items = useMemo(() => buildActivity(app, snapshot, Date.now(), [], dismissed), [app?.chats, app?.attention, app?.projects, app?.folders, snapshot?.inbox, dismissed]);
   const groups = useMemo(() => [...new Set(items.map(i => i.group))], [items]);
   const counts = useMemo(() => { const c = new Map<string, number>(); for (const i of items) c.set(i.bucket, (c.get(i.bucket) ?? 0) + 1); return c; }, [items]);
   const visible = items.filter(i => (filter === 'all' || i.bucket === filter) && (group === 'all' || i.group === group));
   const byGroup = new Map<string, ActivityItem[]>();
   for (const item of visible) byGroup.set(item.group, [...(byGroup.get(item.group) ?? []), item]);
   const act = (item: ActivityItem) => item.action.kind === 'chat' ? nav.onOpenChat(item.action.chatId) : item.action.kind === 'task' ? nav.onOpenTask(item.action.taskId) : item.action.kind === 'agent' ? nav.onOpenAgent(item.action.agentId) : undefined;
-  const label = (item: ActivityItem) => item.action.kind === 'chat' ? item.bucket === 'needs' ? 'Answer' : item.bucket === 'problems' ? 'Retry' : 'Open chat' : item.action.kind === 'task' ? item.bucket === 'needs' ? 'Answer' : 'Open task' : item.action.kind === 'agent' ? 'Open agent' : '';
+  const label = (item: ActivityItem) => item.action.kind === 'chat' ? item.bucket === 'needs' ? 'Answer' : item.kind === 'interrupted' ? 'Continue' : item.bucket === 'problems' ? 'Retry' : 'Open chat' : item.action.kind === 'task' ? item.bucket === 'needs' ? 'Answer' : 'Open task' : item.action.kind === 'agent' ? 'Open agent' : '';
   const mailProject = group !== 'all' ? app?.projects.find(p => p.name === group)?.id ?? null : null;
   // Paperclip offline: never claim "all caught up" when its items could not be read.
   const offline = snapshot?.paperclip?.stale ? snapshot.paperclip : null;
@@ -63,6 +67,7 @@ export function InboxPage({ snapshot, nav }: { snapshot: WorkspaceSnapshot | nul
             {item.source === 'paperclip' && <span className="ws-source">{NAMES.paperclip}</span>}
             <span className="ws-row-age" title={exactTime(item.at)}>{agoLabel(item.at)}</span>
             {item.action.kind !== 'none' && <button type="button" className="settings-button secondary ws-row-action" onClick={() => act(item)}>{label(item)}</button>}
+            <Tip label="Dismiss"><button type="button" className="icon-button ws-row-dismiss" aria-label={`Dismiss ${item.title}`} onClick={() => void dismissInboxItem(item).catch(notifyError)}><X size={13} aria-hidden="true"/></button></Tip>
           </div>
         </li>)}</ul>
       </section>)}
@@ -175,17 +180,22 @@ export function LedgerPage({ snapshot, nav }: { snapshot: WorkspaceSnapshot; nav
     return [...rows.values()].sort((a, b) => (b.input + b.output) - (a.input + a.output) || b.turns - a.turns);
   }, [view]);
   const chain = view?.chain;
+  const imported = view?.entries.filter(e => e.source === 'history').length ?? 0;
+  const [importing, setImporting] = useState(false);
+  const importHistory = () => { setImporting(true); invoke('paperclip.ledger.backfill', {}).then(r => { notifySuccess(r.turns ? `Imported ${r.turns} past ${r.turns === 1 ? 'turn' : 'turns'} as history.` : 'No past turns to import.'); setTick(n => n + 1); }, notifyError).finally(() => setImporting(false)); };
   const TABS: [LedgerTab, string][] = [['receipts', NAMES.receipts], ['timeline', NAMES.timeline], ['activity', 'Activity'], ['costs', 'Costs']];
   return <div className="ws-page ws-page-fill">
     <PageHeader title={NAMES.ledger} detail="One entry per agent turn: who ran, on which model, what it cost in tokens, which tools it used and which files it changed.">
       <div className="ws-segmented is-inline" role="tablist" aria-label="Ledger views">{TABS.map(([t, l]) => <button key={t} type="button" role="tab" aria-selected={tab === t} className="ws-segment" onClick={() => setTab(t)}><span className="ws-segment-label">{l}</span></button>)}</div>
     </PageHeader>
-    {chain && <p className="ws-chain" data-ok={chain.ok ? 'true' : 'false'}>{chain.ok ? chain.entries === 0 ? 'No Muster turns recorded yet' : `Muster chain verified · ${chain.entries} ${chain.entries === 1 ? 'entry' : 'entries'} · head ${chain.head.slice(0, 12)}` : `Chain broken at entry #${chain.brokenAt}: an entry was changed or removed after it was written.`}</p>}
+    {chain && <p className="ws-chain" data-ok={chain.ok ? 'true' : 'false'}>{chain.ok ? chain.entries === 0 ? 'No Muster turns recorded yet' : `Muster chain verified · ${chain.entries} ${chain.entries === 1 ? 'entry' : 'entries'} · head ${chain.head.slice(0, 12)}` : `Chain broken at entry #${chain.brokenAt}: an entry was changed or removed after it was written.`}{imported ? ` · ${imported} imported from history (not chained)` : ''}</p>}
     {tab === 'activity' ? <ListPage kind="audit" embedded/>
       : tab === 'timeline' ? <Timeline snapshot={snapshot} view={view} onOpenTask={nav.onOpenTask}/>
       : error ? <ResourceState kind="error" message="The ledger could not be read." detail={error} onRetry={() => setTick(n => n + 1)}/>
       : !view ? <ResourceState kind="loading" label="Reading the ledger" rows={4}/>
-      : view.entries.length === 0 ? <ResourceState kind="empty" icon={<History size={20}/>} title="No turns recorded yet" message="Every agent turn Muster runs from now on writes a Receipt here, chained to the one before it."/>
+      : view.entries.length === 0 ? <ResourceState kind="empty" icon={<History size={20}/>} title="No turns recorded yet" message="Every agent turn from now on gets a receipt here. Past turns: Import history.">
+          <div className="resource-state-actions"><button type="button" className="ws-import-history" disabled={importing} onClick={importHistory}><History size={12} aria-hidden="true"/>{importing ? 'Importing…' : 'Import history'}</button></div>
+        </ResourceState>
       : tab === 'costs' ? <ul className="ws-rows">{costs.map(r => <li key={`${r.agent}|${r.model}`}><div className="ws-row is-static"><Monogram name={r.agent}/><span className="ws-row-text"><span className="ws-row-title">{r.agent}</span><span className="ws-row-meta">{r.model}</span></span><span className="ws-row-count">{r.turns} {r.turns === 1 ? 'turn' : 'turns'}</span><span className="ws-row-count">{(r.input / 1000).toFixed(1)}k in · {(r.output / 1000).toFixed(1)}k out</span><span className="ws-row-count">{r.cost !== null ? (r.cost >= 0.01 ? formatUsd(r.cost) : '< $0.01') : 'unpriced'}{r.cost !== null && r.unpriced ? ` + ${r.unpriced} unpriced` : ''}</span></div></li>)}</ul>
       : <ul className="ws-ledger">{view.entries.map(e => { const t = e.taskId ? tasks.get(e.taskId) : undefined; return <li key={e.id}>
           <div className="ws-ledger-head"><Monogram name={e.agent}/><span className="ws-ledger-agent">{e.agent}</span>{t ? <button type="button" className="ws-link" onClick={() => nav.onOpenTask(t.id)}>{t.key} · {t.title}</button> : <span className="ws-grow"/>}<SourceTag source={e.source}/><span className="ws-row-age" title={exactTime(e.endedAt)}>{agoLabel(e.endedAt)}</span></div>

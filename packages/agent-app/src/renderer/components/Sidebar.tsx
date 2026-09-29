@@ -1,4 +1,4 @@
-import { openHub, useHubRoute, useInboxBadge, useWorkspace, type HubPage } from '../hubStore';
+import { openHub, useHubRoute, useInboxBadge, useInboxDismissals, useWorkspace, type HubPage } from '../hubStore';
 import { badgeCount, buildActivity } from '../inboxModel';
 import { NAMES } from '../../shared/workspace-names';
 import type { WorkspaceProject, WorkspaceTask } from '../../shared/domains/paperclip-protocol';
@@ -667,7 +667,9 @@ function SidebarInbox({screen}:{screen:string}):React.ReactElement {
   const route=useHubRoute();
   const app=useStoreSelector(state=>state.snapshot);
   // Chats that need you or went wrong come from the snapshot the sidebar already has; project and Paperclip items from the badge read.
-  const chatCount=React.useMemo(()=>badgeCount(buildActivity(app,null,Date.now(),badge?.chatIds??[])),[app?.chats,app?.attention,badge?.chatIds]);
+  // A chat's failure or wait counts only while unread (#189); pending approvals and questions always count.
+  const dismissed=useInboxDismissals();
+  const chatCount=React.useMemo(()=>badgeCount(buildActivity(app,null,Date.now(),badge?.chatIds??[],dismissed)),[app?.chats,app?.attention,badge?.chatIds,dismissed]);
   const count=chatCount+(badge?.inbox??0);
   const active=screen==='hub'&&route.page==='inbox';
   return <button type="button" className={`tool-button${active?' is-active':''}`} aria-current={active?'page':undefined} title="Everything that needs you, across chats, projects and Paperclip" onClick={()=>openHub('inbox')}>

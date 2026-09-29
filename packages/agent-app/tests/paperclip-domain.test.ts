@@ -321,7 +321,7 @@ test('turn ledger: only project and task runs diff the tree; everyday chats pay 
 test('inbox activity: chats that ask or fail are Needs you / Problems; finished chats are Done; the badge counts only the first two',async()=>{
   const {buildActivity,badgeCount}=await import('../src/renderer/inboxModel.ts');
   const chat=(id:string,status:string,extra:object={})=>({id,title:`Chat ${id}`,status,archived:false,updatedAt:now,pinned:false,draft:'',model:'m',mode:'agent',...extra});
-  const items=buildActivity({chats:[chat('a','running'),chat('b','failed',{error:'Rate limited'}),chat('c','completed',{unread:true}),chat('d','idle'),chat('e','waiting')] as any,folders:[],projects:[],attention:{totalRequests:1,chats:[{chatId:'a',chatTitle:'Chat a',approvalCount:1,questionCount:0,requests:[{itemId:'x',kind:'approval',createdAt:now,sourceLabel:'Provider approval'}]}]}},
+  const items=buildActivity({chats:[chat('a','running'),chat('b','failed',{error:'Rate limited',unread:true}),chat('c','completed',{unread:true}),chat('d','idle'),chat('e','waiting',{unread:true})] as any,folders:[],projects:[],attention:{totalRequests:1,chats:[{chatId:'a',chatTitle:'Chat a',approvalCount:1,questionCount:0,requests:[{itemId:'x',kind:'approval',createdAt:now,sourceLabel:'Provider approval'}]}]}},
     {inbox:[{id:'m',kind:'mail',title:'Builder: Which DB?',why:'Sent you a message.',severity:'low',at:now,taskId:null,agentId:null,runId:null,group:'Launch',source:'local'},{id:'r',kind:'review',title:'X-1',why:'Review',severity:'medium',at:now,taskId:'t',agentId:null,runId:null,group:'Launch',source:'paperclip'}]} as any);
   const by=Object.fromEntries(items.map(i=>[i.id,i.bucket]));
   assert.deepEqual(by,{'chat-needs:a':'needs','chat-problem:b':'problems','chat-done:c':'done','chat-needs:e':'needs','ws:m':'mentions','ws:r':'review'});
@@ -331,7 +331,7 @@ test('inbox activity: chats that ask or fail are Needs you / Problems; finished 
 
 test('a project task’s run chat is counted once: the task row stands for it in the Inbox and the badge',async t=>{
   const {buildActivity,badgeCount}=await import('../src/renderer/inboxModel.ts');
-  const chat=(id:string,status:string)=>({id,title:`Chat ${id}`,status,archived:false,updatedAt:now,pinned:false,draft:'',model:'m',mode:'agent'});
+  const chat=(id:string,status:string)=>({id,title:`Chat ${id}`,status,archived:false,updatedAt:now,pinned:false,draft:'',model:'m',mode:'agent',unread:true});
   const app={chats:[chat('run1','failed'),chat('solo','failed')],folders:[],projects:[],attention:{totalRequests:0,chats:[]}} as any;
   const failedTask={id:'task:t1',kind:'failed_run',title:'LP-1 · Build',why:'tests failed',severity:'medium',at:now,taskId:'t1',agentId:null,runId:'at1',group:'Launch',source:'local',chatIds:['run1']};
   const items=buildActivity(app,{inbox:[failedTask]} as any);
@@ -392,4 +392,34 @@ test('a Paperclip confirmation is answered from Muster: accept, or reject with a
   await h.call('paperclip.interaction.respond',{taskId:'RAG-1',interactionId:'int-1',accept:true});
   await h.call('paperclip.interaction.respond',{taskId:'RAG-1',interactionId:'int-2',accept:false,reason:'Keep the old flow'});
   assert.deepEqual(h.server.calls.filter(c=>c.method==='POST').map(c=>`${c.url} ${JSON.stringify(c.body)}`),['/api/issues/RAG-1/interactions/int-1/accept {}','/api/issues/RAG-1/interactions/int-2/reject {"reason":"Keep the old flow"}']);
+});
+
+test('inbox dismissals persist by item id and time; a dismissed Paperclip or project item leaves the runtime badge until it changes',async t=>{
+  const h=await harness(t);
+  assert.deepEqual(await h.call('paperclip.inbox.dismissed'),{items:[]});
+  assert.deepEqual(await h.call('paperclip.inbox.dismiss',{id:'chat-problem:c1',at:'2026-09-24T10:00:00.000Z'}),{ok:true});
+  await h.call('paperclip.inbox.dismiss',{id:'chat-problem:c1',at:'2026-09-25T10:00:00.000Z'});
+  assert.deepEqual((await h.call('paperclip.inbox.dismissed')).items,[{id:'chat-problem:c1',at:'2026-09-25T10:00:00.000Z'}],'one row per item: the latest time wins');
+  await assert.rejects(async()=>h.call('paperclip.inbox.dismiss',{id:'bad id with spaces',at:now}),/Unknown item/);
+  await assert.rejects(async()=>h.call('paperclip.inbox.dismiss',{id:'x'}),/Unknown item/);
+  await h.call('paperclip.config.set',{mode:'custom',baseUrl:'https://pc.example.com/',token:'pcp_board_abc',companyId:COMPANY});
+  const snap=await h.call('paperclip.snapshot');
+  const urgent=snap.inbox.find((i:any)=>['question','approval','blocked','failed_run','agent_error','budget'].includes(i.kind));
+  assert.ok(urgent,'the fake Paperclip has an urgent item');
+  const before=(await h.call('paperclip.badge')).inbox;
+  await h.call('paperclip.inbox.dismiss',{id:`ws:${urgent.id}`,at:urgent.at});
+  assert.equal((await h.call('paperclip.badge')).inbox,before-1,'dismissed: off the badge');
+  await h.call('paperclip.inbox.dismiss',{id:`ws:${urgent.id}`,at:'1999-01-01T00:00:00.000Z'});
+  assert.equal((await h.call('paperclip.badge')).inbox,before,'a different time is a new item: it counts again');
+});
+
+test('the Ledger imports history in the background after the first badge read, and on demand; the chain still verifies',async t=>{
+  const h=await harness(t);
+  await h.call('paperclip.badge');
+  assert.ok([...h.timers.live.values()].some(x=>x.ms===0),'the import waits for a later tick, off the startup path');
+  await h.timers.fire();
+  const result=await h.call('paperclip.ledger.backfill');
+  assert.deepEqual(result,{chats:0,turns:0},'no chat tables in this bare database: nothing to import, nothing fails');
+  const view=await h.call('paperclip.ledger',{limit:10});
+  assert.deepEqual(view.chain,{ok:true,entries:0,head:'0'.repeat(64),brokenAt:null});
 });

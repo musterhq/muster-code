@@ -37,6 +37,7 @@
 .ws-name-link { color: inherit; font-weight: inherit; }
 .ws-name-link:hover { text-decoration: underline; }
 .ws-source { flex: none; padding: 0 6px; border: 1px solid var(--hairline); border-radius: var(--radius-4); color: var(--text-faint); font-size: var(--fs-10); line-height: 16px; letter-spacing: .02em; }
+.ws-source-history { border-style: dashed; }
 .ws-settings-hint { margin: 0 0 14px; max-width: 640px; }
 
 /* Chips, monograms, status glyphs --------------------------------------------------------------------------------------- */
@@ -99,6 +100,8 @@ button.ws-row:disabled { cursor: default; }
 .ws-row-action { flex: none; min-height: 28px; padding: 3px 10px; font-size: var(--fs-12); }
 .ws-unread-dot { flex: none; width: 6px; height: 6px; border-radius: 50%; }
 .ws-inbox-row.is-unread .ws-unread-dot { background: var(--link); }
+.ws-row-dismiss { flex: none; opacity: 0; }
+.ws-inbox-row:hover .ws-row-dismiss, .ws-row-dismiss:focus-visible { opacity: 1; }
 .ws-virtual { flex: 1; min-height: 0; overflow-y: auto; border: 1px solid var(--hairline); border-bottom: 0; border-radius: var(--radius-10) var(--radius-10) 0 0; contain: strict; }
 .ws-virtual-row { position: absolute; top: 0; left: 0; right: 0; border-bottom: 1px solid var(--hairline); }
 .ws-virtual-row > .ws-row { height: 100%; }

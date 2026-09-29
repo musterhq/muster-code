@@ -83,7 +83,7 @@ export function Receipt({ entry, defaultOpen = false }: { entry: LedgerEntry; de
   const parts = [
     entry.files ? `${entry.files.length} ${entry.files.length === 1 ? 'file' : 'files'}${entry.files.length ? ` +${added} −${removed}` : ''}` : null,
     entry.tests ? `${entry.tests} test ${entry.tests === 1 ? 'run' : 'runs'}` : null,
-    entry.tokens ? `${k(entry.tokens.input)} in · ${k(entry.tokens.output)} out` : 'tokens not reported',
+    entry.tokens ? `${k(entry.tokens.input)} in · ${k(entry.tokens.output)} out` : entry.source === 'history' ? 'tokens not stored per turn' : 'tokens not reported',
     costText(entry), entry.durationMs !== null ? span(entry.durationMs) : null,
   ].filter(Boolean);
   return <div className="ws-receipt" data-open={open || undefined}>
@@ -95,11 +95,12 @@ export function Receipt({ entry, defaultOpen = false }: { entry: LedgerEntry; de
     {open && <dl className="ws-receipt-body">
       <div><dt>Agent</dt><dd>{entry.agent}{entry.model ? ` · ${entry.model}` : ''}{entry.provider ? ` · ${entry.provider}` : ''}</dd></div>
       <div><dt>Trigger</dt><dd>{entry.trigger}</dd></div>
-      <div><dt>Tokens</dt><dd>{entry.tokens ? `${entry.tokens.input.toLocaleString()} in (${entry.tokens.cached.toLocaleString()} cached) · ${entry.tokens.output.toLocaleString()} out (${entry.tokens.reasoning.toLocaleString()} reasoning)` : 'Not reported by this runtime'}</dd></div>
+      <div><dt>Tokens</dt><dd>{entry.tokens ? `${entry.tokens.input.toLocaleString()} in (${entry.tokens.cached.toLocaleString()} cached) · ${entry.tokens.output.toLocaleString()} out (${entry.tokens.reasoning.toLocaleString()} reasoning)` : entry.source === 'history' ? 'Not stored per turn before the Ledger (the chat’s total is in its usage)' : 'Not reported by this runtime'}</dd></div>
       <div><dt>Tools</dt><dd>{entry.tools.length ? entry.tools.map(t => `${t.name} ×${t.count}`).join(', ') : 'None recorded'}{entry.approvals ? ` · ${entry.approvals} approvals` : ''}</dd></div>
       <div><dt>Files</dt><dd>{entry.files === null ? 'Not observed (no Git baseline for this turn)' : entry.files.length === 0 ? 'No changes' : <ul className="ws-receipt-files">{entry.files.map(f => <li key={f.path}><code>{f.status === 'added' ? '+' : f.status === 'deleted' ? '−' : '~'}</code><span>{f.path}</span>{f.added !== null && <code className="ws-diff-count">+{f.added} −{f.removed ?? 0}</code>}<code className="ws-faint">{short(f.before)} → {short(f.after)}</code></li>)}</ul>}</dd></div>
       <div><dt>Time</dt><dd>{entry.startedAt ? new Date(entry.startedAt).toLocaleString() : '—'} → {new Date(entry.endedAt).toLocaleString()}</dd></div>
       {entry.hash && <div><dt>Chain</dt><dd><code>#{entry.seq} · {short(entry.prevHash)} → {short(entry.hash)}</code></dd></div>}
+      {entry.source === 'history' && <div><dt>Chain</dt><dd>Imported history: rebuilt from saved chats, not part of the verified chain</dd></div>}
     </dl>}
   </div>;
 }

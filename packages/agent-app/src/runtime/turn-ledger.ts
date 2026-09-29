@@ -4,6 +4,10 @@
  * from disk against the review baseline (before/after blob hashes; project and task runs only), duration and outcome. Entries are hash-chained:
  * each stores sha256(previous hash + canonical entry), so editing or deleting a past entry breaks every later hash.
  * `verify()` walks the chain. Recording is observation only; it never blocks or fails a run.
+ *
+ * Imported history (#190) lives beside the chain in `turn_ledger_history`: turns that ran before the Ledger existed,
+ * rebuilt by ledger-history.ts. Those rows are unchained on purpose (source `history`, no seq or hash): the chain only
+ * vouches for what Muster observed live, so importing history never rewrites or weakens it, and `verify()` is unchanged.
  */
 import { createHash } from 'node:crypto';
 import { execFile } from 'node:child_process';
@@ -15,7 +19,7 @@ import { snapshotTree } from './review-baseline.ts';
 import type { DomainContext } from './domains/types.ts';
 
 const GENESIS = '0'.repeat(64);
-type Body = Omit<LedgerEntry, 'seq' | 'hash' | 'prevHash' | 'source'>;
+export type Body = Omit<LedgerEntry, 'seq' | 'hash' | 'prevHash' | 'source'>;
 const canonical = (value: unknown): string => JSON.stringify(value, (_key, v) => v && typeof v === 'object' && !Array.isArray(v) ? Object.fromEntries(Object.keys(v).sort().map(k => [k, (v as Record<string, unknown>)[k]])) : v);
 export const entryHash = (prevHash: string, body: Body) => createHash('sha256').update(prevHash).update('\n').update(canonical(body)).digest('hex');
 
@@ -24,7 +28,11 @@ export class TurnLedger {
     db.exec(`CREATE TABLE IF NOT EXISTS turn_ledger (seq INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT NOT NULL UNIQUE, chat_id TEXT NOT NULL, run_id TEXT NOT NULL,
       project_id TEXT, body TEXT NOT NULL, prev_hash TEXT NOT NULL, hash TEXT NOT NULL, created_at TEXT NOT NULL);
       CREATE INDEX IF NOT EXISTS turn_ledger_chat ON turn_ledger(chat_id, seq);
-      CREATE INDEX IF NOT EXISTS turn_ledger_project ON turn_ledger(project_id, seq);`);
+      CREATE INDEX IF NOT EXISTS turn_ledger_project ON turn_ledger(project_id, seq);
+      CREATE TABLE IF NOT EXISTS turn_ledger_history (id TEXT PRIMARY KEY, chat_id TEXT, project_id TEXT, body TEXT NOT NULL, ended_at TEXT NOT NULL);
+      CREATE INDEX IF NOT EXISTS turn_ledger_history_chat ON turn_ledger_history(chat_id, ended_at);
+      CREATE INDEX IF NOT EXISTS turn_ledger_history_project ON turn_ledger_history(project_id, ended_at);
+      CREATE INDEX IF NOT EXISTS turn_ledger_history_ended ON turn_ledger_history(ended_at);`);
   }
   head(): string { const row = this.db.prepare('SELECT hash FROM turn_ledger ORDER BY seq DESC LIMIT 1').get() as { hash: string } | undefined; return row?.hash ?? GENESIS; }
   append(body: Body): LedgerEntry {
@@ -33,13 +41,28 @@ export class TurnLedger {
       .run(body.id, body.chatId ?? '', body.runId, body.projectId, canonical(body), prevHash, hash, body.endedAt);
     return { ...body, seq: Number(info.lastInsertRowid), prevHash, hash, source: 'local' };
   }
+  /** Imported history: one row per past turn, keyed by its id, so importing again adds nothing. Returns how many were new. */
+  importHistory(bodies: readonly Body[]): number {
+    const insert = this.db.prepare('INSERT OR IGNORE INTO turn_ledger_history (id, chat_id, project_id, body, ended_at) VALUES (?, ?, ?, ?, ?)');
+    let added = 0;
+    for (const body of bodies) added += Number(insert.run(body.id, body.chatId, body.projectId, canonical(body), body.endedAt).changes);
+    return added;
+  }
+  /** Live receipts and imported history, newest first. */
   list(filter: { chatIds?: readonly string[]; projectId?: string; limit?: number } = {}): LedgerEntry[] {
     const limit = Math.min(Math.max(filter.limit ?? 200, 1), 1000);
     const rows = filter.chatIds?.length
       ? this.db.prepare(`SELECT * FROM turn_ledger WHERE chat_id IN (${filter.chatIds.map(() => '?').join(',')}) ORDER BY seq DESC LIMIT ?`).all(...filter.chatIds, limit)
       : filter.projectId ? this.db.prepare('SELECT * FROM turn_ledger WHERE project_id = ? ORDER BY seq DESC LIMIT ?').all(filter.projectId, limit)
       : this.db.prepare('SELECT * FROM turn_ledger ORDER BY seq DESC LIMIT ?').all(limit);
-    return (rows as { seq: number; body: string; prev_hash: string; hash: string }[]).map(r => ({ ...(JSON.parse(r.body) as Body), seq: r.seq, prevHash: r.prev_hash, hash: r.hash, source: 'local' as const }));
+    const history = filter.chatIds?.length
+      ? this.db.prepare(`SELECT body FROM turn_ledger_history WHERE chat_id IN (${filter.chatIds.map(() => '?').join(',')}) ORDER BY ended_at DESC LIMIT ?`).all(...filter.chatIds, limit)
+      : filter.projectId ? this.db.prepare('SELECT body FROM turn_ledger_history WHERE project_id = ? ORDER BY ended_at DESC LIMIT ?').all(filter.projectId, limit)
+      : this.db.prepare('SELECT body FROM turn_ledger_history ORDER BY ended_at DESC LIMIT ?').all(limit);
+    const live = (rows as { seq: number; body: string; prev_hash: string; hash: string }[]).map(r => ({ ...(JSON.parse(r.body) as Body), seq: r.seq, prevHash: r.prev_hash, hash: r.hash, source: 'local' as const }));
+    if (!history.length) return live;
+    const imported = (history as { body: string }[]).map(r => ({ ...(JSON.parse(r.body) as Body), seq: null, prevHash: null, hash: null, source: 'history' as const }));
+    return [...live, ...imported].sort((a, b) => b.endedAt.localeCompare(a.endedAt)).slice(0, limit);
   }
   /** Recomputes every hash in order. `brokenAt` is the first entry whose stored hash or link does not match. */
   verify(): { ok: boolean; entries: number; head: string; brokenAt: number | null } {
@@ -72,9 +95,11 @@ export async function filesChanged(cwd: string, beforeTree: string | null): Prom
   } catch { return null; }
 }
 
-const TOOL_TYPES = new Set(['commandExecution', 'mcpToolCall', 'dynamicToolCall', 'fileChange', 'webSearch', 'imageView']);
+export const TOOL_TYPES = new Set(['commandExecution', 'mcpToolCall', 'dynamicToolCall', 'fileChange', 'webSearch', 'imageView']);
 interface Open { startedAt: number; cwd: string; usage: UsageTotals; cursor?: UsageCursor; tools: Map<string, number>; approvals: number; tests: number }
-const TEST_COMMAND = /\b(npm|pnpm|yarn|bun)\s+(run\s+)?test\b|\bpytest\b|\bgo\s+test\b|\bcargo\s+test\b|\bnode\s+--test\b|\bvitest\b|\bjest\b|\bmake\s+test\b/;
+/** How a tool shows in a Receipt: `server/tool` for MCP, `shell` for commands, else the item type. */
+export const toolName = (type: string, server: unknown, tool: unknown) => type === 'mcpToolCall' ? `${server ?? 'mcp'}/${tool ?? 'tool'}` : type === 'commandExecution' ? 'shell' : type;
+export const TEST_COMMAND = /\b(npm|pnpm|yarn|bun)\s+(run\s+)?test\b|\bpytest\b|\bgo\s+test\b|\bcargo\s+test\b|\bnode\s+--test\b|\bvitest\b|\bjest\b|\bmake\s+test\b/;
 
 /** Wires the ledger to the run hooks. Returns an unsubscribe. Safe in bare test contexts (no hooks). */
 export function attachTurnLedger(context: DomainContext, ledger: () => TurnLedger, onAppend?: (entry: LedgerEntry) => void): () => void {
@@ -92,7 +117,7 @@ export function attachTurnLedger(context: DomainContext, ledger: () => TurnLedge
     if (event.method === 'item/started') {
       const item = (event.params.item ?? {}) as Record<string, unknown>, type = typeof item.type === 'string' ? item.type : '';
       if (!TOOL_TYPES.has(type)) return;
-      const name = type === 'mcpToolCall' ? `${item.server ?? 'mcp'}/${item.tool ?? 'tool'}` : type === 'commandExecution' ? 'shell' : type;
+      const name = toolName(type, item.server, item.tool);
       if (type === 'commandExecution' && TEST_COMMAND.test(String(item.command ?? ''))) turn.tests++;
       turn.tools.set(name, (turn.tools.get(name) ?? 0) + 1);
     }

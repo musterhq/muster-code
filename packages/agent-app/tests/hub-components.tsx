@@ -35,6 +35,8 @@ const snapshot={paperclip:{origin:'This Mac',company:{id:'c',name:'RagnarDataOps
     {id:'i2',kind:'agent_error',title:'QA',why:'continuation_task_ownership_changed',severity:'high',at:now,taskId:null,agentId:'qa',runId:null,group:'RagnarDataOps',source:'paperclip'}],
   counts:{liveRuns:1,inbox:2,failedRuns:0,openTasks:3},fetchedAt:now};
 const receipt={id:'paperclip:r1',seq:null,source:'paperclip',chatId:null,runId:'r1',taskId:'t1',projectId:null,trigger:'assignment',agent:'CEO',provider:'claude_local',model:'claude-opus-5-5',tokens:{input:12300,cached:0,output:1200,reasoning:0},costUsd:null,tools:[],approvals:0,tests:2,files:[{path:'a.ts',status:'modified',before:'1111111',after:'2222222',added:12,removed:3}],startedAt:now,endedAt:now,durationMs:64000,outcome:'succeeded',prevHash:null,hash:null};
+const historyEntry={...receipt,id:'history:chat1:u1',source:'history',chatId:'chat1',runId:'run-old',taskId:null,agent:'Refactor login',tokens:null,tests:0,files:null};
+let ledgerEntries:any[]=[];
 const calls:{command:string;input:any}[]=[];
 (window as any).muster={subscribe(){return()=>{};},async invoke(command:string,input:any){calls.push({command,input});
   if(command==='paperclip.snapshot')return snapshot;
@@ -47,8 +49,12 @@ const calls:{command:string;input:any}[]=[];
   if(command==='paperclip.memory')return {scope:{kind:'repository',label:'oss-manager',folderId:'f'},repo:'github.com/hybrowlabs/oss-manager',query:'x',records:[],engine:'not-configured',note:'3 memories in the oss-manager folder, none about this task yet.'};
   if(command==='paperclip.comment')return {id:'m2',author:{kind:'user',id:null,label:'Board'},body:input.body,createdAt:now};
   if(command==='paperclip.interaction.respond')return {ok:true};
-  if(command==='paperclip.ledger')return {entries:[],chain:{ok:true,entries:0,head:'0'.repeat(64),brokenAt:null}};
-  if(command==='app.snapshot')return {folders:[],chats:[{id:'chat1',title:'Refactor login',status:'failed',error:'Rate limited by the provider',archived:false,updatedAt:now,pinned:false,draft:'',model:'m',mode:'agent'}],projects:[],version:1};
+  if(command==='paperclip.ledger')return {entries:ledgerEntries,chain:{ok:true,entries:0,head:'0'.repeat(64),brokenAt:null}};
+  if(command==='paperclip.ledger.backfill'){ledgerEntries=[historyEntry];return {chats:1,turns:1};}
+  if(command==='paperclip.inbox.dismissed')return {items:[]};
+  if(command==='paperclip.inbox.dismiss')return {ok:true};
+  if(command==='app.snapshot')return {folders:[],chats:[{id:'chat1',title:'Refactor login',status:'failed',error:'Rate limited by the provider',archived:false,updatedAt:now,pinned:false,draft:'',model:'m',mode:'agent'},
+    {id:'chat2',title:'Quit mid-turn',status:'interrupted',unread:true,archived:false,updatedAt:now,pinned:false,draft:'',model:'m',mode:'agent'}],projects:[],version:1};
   return undefined;
 }};
 const {createRoot}=await import('react-dom/client');
@@ -135,7 +141,30 @@ const root4=createRoot(document.getElementById('root')!,{onUncaughtError:(e:unkn
 root4.render(<LedgerPage snapshot={snapshot as any} nav={{onOpenTask(){},onOpenAgent(){},onOpenChat(){}}}/>);
 await delay(120);
 assert.deepEqual(text('.ws-chain'),['No Muster turns recorded yet']);
+// #190: the empty state says what gets recorded and offers the past turns.
+assert.deepEqual(text('.resource-state-empty p:not(.resource-state-title)'),['Every agent turn from now on gets a receipt here. Past turns: Import history.']);
+await click([...document.querySelectorAll('.resource-state-empty button')].find(b=>/Import history/.test(b.textContent!)));
+await delay(120);
+assert.ok(calls.some(c=>c.command==='paperclip.ledger.backfill'),'Import history runs the backfill');
+assert.deepEqual(text('.ws-ledger .ws-source-history'),['Imported history'],'imported entries are tagged');
+assert.match(text('.ws-chain')[0],/1 imported from history \(not chained\)/);
+assert.match(text('.ws-receipt-summary')[0],/tokens not stored per turn/);
 root4.unmount();
+
+// #189: Inbox rows say an interrupted turn can be continued, and Dismiss hides a row (saved by id and time).
+await (await import('../src/renderer/store')).boot();
+const root5=createRoot(document.getElementById('root')!,{onUncaughtError:(e:unknown)=>{(errors as unknown[]).push(e);}});
+root5.render(<InboxPage snapshot={{...snapshot,inbox:[]} as any} nav={{onOpenTask(){},onOpenAgent(){},onOpenChat(){}}}/>);
+await delay(150);
+const rowOf=(title:string)=>[...document.querySelectorAll('.ws-inbox-row')].find(r=>r.querySelector('.ws-row-title')?.textContent===title);
+assert.ok(rowOf('Quit mid-turn'),'the interrupted chat is listed');
+assert.equal(rowOf('Quit mid-turn')!.querySelector('.ws-row-meta')!.textContent,'Interrupted when Muster quit — continue?');
+assert.equal(rowOf('Quit mid-turn')!.querySelector('.ws-row-action')!.textContent,'Continue');
+await click(rowOf('Refactor login')!.querySelector('.ws-row-dismiss'));
+assert.deepEqual(calls.filter(c=>c.command==='paperclip.inbox.dismiss').map(c=>c.input),[{id:'chat-problem:chat1',at:now}]);
+assert.equal(rowOf('Refactor login'),undefined,'the dismissed row is gone');
+assert.ok(rowOf('Quit mid-turn'),'other rows stay');
+root5.unmount();
 assert.deepEqual(errors,[]);
 console.log('hub-components: ok');
 process.exit(0);
