@@ -5,6 +5,14 @@ All notable changes to Muster Agent. Each `## <version>` section becomes the not
 
 ## Unreleased
 
+## 0.2.7
+
+- Projects gain an Inbox, task threads and a Ledger. The Inbox sits at the top of the sidebar and gathers everything that needs you from every chat and run: questions, approvals, finished work and problems.
+- Each project has a Roster: an org chart of its agents you can zoom, pan and navigate with the keyboard, with a runs board and Pause/Resume, plus the project's Outputs.
+- Every agent turn in a project gets a receipt (files changed, tests, tokens, time, cost) recorded in a tamper-evident Ledger with Receipts, Timeline, Activity and Costs views.
+- Link a Paperclip server (this Mac or a custom URL with an encrypted token) from Settings › Integrations, or import a Paperclip company into Muster: projects, tasks with their full threads, each project's Roster and past decisions. Import only reads from Paperclip and never copies secrets.
+- Start any imported task in its own worktree on its owner agent's runner; it never runs in your checkout and never starts on its own.
+
 ## 0.2.6
 
 - Intel Macs get their own download (`Muster-Agent-<version>-x64.dmg` / `.zip`) and update to the Intel build automatically.
