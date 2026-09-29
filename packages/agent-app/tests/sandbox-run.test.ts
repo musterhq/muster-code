@@ -132,9 +132,11 @@ test('sandbox tools: exec reports the container exit, writes and reads go to the
 test('the sandbox note says truthfully what the agent\'s own shell can still do on the host (#97)', async t => {
   // Never claim the host shell is disabled: the provider process stays on the Mac.
   for (const access of ['read-only', 'workspace', 'full'] as const) assert.doesNotMatch(sandboxNote(access), /disabled/);
-  assert.match(sandboxNote('read-only'), /still runs on the user's Mac, read-only: it can read the host copy but cannot change files/);
-  assert.match(sandboxNote('workspace'), /still runs on the user's Mac with write access to this folder; do not use it/);
-  assert.match(sandboxNote('full'), /still runs on the user's Mac with full access; do not use it/);
+  // Never claim enforcement either: for Claude Code read-only is a permission mode, not a sandbox (#99 review).
+  for (const access of ['read-only', 'workspace', 'full'] as const) assert.doesNotMatch(sandboxNote(access), /cannot change files|is read-only for this chat/);
+  assert.match(sandboxNote('read-only'), /still run on the user's Mac, outside the container, and this chat's access there is read-only\. Do not use them/);
+  assert.match(sandboxNote('workspace'), /access there is write access to this folder\. Do not use them/);
+  assert.match(sandboxNote('full'), /access there is full access\. Do not use them/);
   assert.equal(SANDBOX_NOTE, sandboxNote('read-only', 'host'));
   // The run note follows the chat's current access: raised back to Full while in the sandbox, it warns.
   const f = await fixture(t);

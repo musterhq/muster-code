@@ -30,11 +30,12 @@ export const MOUNT_UNSUPPORTED = 'Mounting the folder itself into the container 
 export const SANDBOX_BROWSER_ENDPOINT = 'http://127.0.0.1:9222';
 const HOST_BROWSER_SENTENCE = 'The agent browser, when available, runs on the user\'s Mac, not in the container.';
 const CONTAINER_BROWSER_SENTENCE = `This chat's browser runs inside the container, not on the user's Mac: headless Chromium with its DevTools endpoint at ${SANDBOX_BROWSER_ENDPOINT} (reachable only inside the container). Drive it from sandbox_exec (for example a CDP or Playwright script); do not use host browser tools for this chat's pages.`;
-/** What the provider's own shell can still do on the host. It is not disabled: the provider process
- * stays on the Mac, limited by the chat's access policy (read-only when the chat enters the sandbox). */
+/** What the provider's own shell can still do on the host. It is not disabled: the provider process stays on
+ * the Mac under the chat's access setting (read-only on entering the sandbox). Codex enforces that with its own
+ * sandbox; Claude Code only with a permission mode (policy, not a sandbox) — so the note never claims enforcement. */
 function hostShellSentence(access: ChatPermissionMode): string {
-  if (access === 'read-only') return 'Your own shell still runs on the user\'s Mac, read-only: it can read the host copy but cannot change files, so do not use it for commands or edits.';
-  return `Your own shell still runs on the user's Mac with ${access === 'full' ? 'full access' : 'write access to this folder'}; do not use it for commands or edits in this chat.`;
+  const level = access === 'read-only' ? 'read-only' : access === 'full' ? 'full access' : 'write access to this folder';
+  return `Your own shell and file tools still run on the user's Mac, outside the container, and this chat's access there is ${level}. Do not use them to run commands or change files in this chat.`;
 }
 /** Turn note for a sandbox chat; the tools describe themselves, this fixes where work happens and says truthfully what still runs on the host. */
 export function sandboxNote(access: ChatPermissionMode = 'read-only', browser: 'host' | 'sandbox' = 'host'): string {
