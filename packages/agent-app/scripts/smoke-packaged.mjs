@@ -31,7 +31,8 @@ const args = [`--remote-debugging-port=${PORT}`, `--user-data-dir=${path.join(pr
 // Linux launches WITHOUT --no-sandbox by default: the packaged launcher must start the app the way a user's double-click does
 // (falling back itself only where user namespaces are restricted). SMOKE_NO_SANDBOX=1 restores the old flag.
 console.log(`launching ${exe}${process.env.SMOKE_NO_SANDBOX === '1' ? ' (--no-sandbox)' : ''}`);
-const child = spawn(exe, args, {stdio: ['ignore', 'pipe', 'pipe'], env: {...process.env, HOME: process.platform === 'win32' ? process.env.HOME : profile}});
+// Own process group on Unix: an AppImage's launcher spawns the real app, and the whole tree must die with the smoke test.
+const child = spawn(exe, args, {detached: process.platform !== 'win32', stdio: ['ignore', 'pipe', 'pipe'], env: {...process.env, HOME: process.platform === 'win32' ? process.env.HOME : profile}});
 child.stdout.on('data', d => process.stdout.write(`[app] ${d}`));
 child.stderr.on('data', d => process.stdout.write(`[app] ${d}`));
 
@@ -139,7 +140,9 @@ try {
   fail(error instanceof Error ? error.message : String(error));
 } finally {
   try { ws?.close(); } catch { /* closed */ }
-  child.kill();
+  try { if (process.platform !== 'win32' && child.pid) process.kill(-child.pid, 'SIGKILL'); else child.kill(); } catch { child.kill(); }
+  child.stdout.destroy(); child.stderr.destroy();
   await sleep(1500);
   try { rmSync(profile, {recursive: true, force: true}); } catch { /* Windows may still hold files */ }
+  process.exit(process.exitCode ?? 0);
 }
