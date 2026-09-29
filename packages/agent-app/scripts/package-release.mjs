@@ -194,7 +194,16 @@ try {
   try {
     run('ditto', [app, path.join(dmgStage, `${PRODUCT}.app`)]);
     symlinkSync('/Applications', path.join(dmgStage, 'Applications'));
-    run('hdiutil', ['create', '-volname', `${PRODUCT} ${version}`, '-srcfolder', dmgStage, '-fs', 'HFS+', '-format', 'UDZO', '-imagekey', 'zlib-level=9', '-ov', dmgPath], {stdio: 'inherit'});
+    // hdiutil intermittently fails with "Resource busy" on CI runners (a scanner or diskimages helper still holds
+    // the staged files); a short back-off and retry is the standard remedy.
+    for (let attempt = 1; ; attempt++) {
+      try { run('hdiutil', ['create', '-volname', `${PRODUCT} ${version}`, '-srcfolder', dmgStage, '-fs', 'HFS+', '-format', 'UDZO', '-imagekey', 'zlib-level=9', '-ov', dmgPath], {stdio: 'inherit'}); break; }
+      catch (error) {
+        if (attempt >= 5) throw error;
+        console.log(`[package-release] hdiutil create failed (attempt ${attempt}/5); retrying in ${attempt * 10}s`);
+        execFileSync('sleep', [String(attempt * 10)]);
+      }
+    }
   } finally { rmSync(dmgStage, {recursive: true, force: true}); }
   if (identity) run('codesign', ['--force', developerId ? '--timestamp' : '--timestamp=none', '--sign', identity, ...(keychain ? ['--keychain', keychain] : []), dmgPath]);
   if (notaryArgs) {
