@@ -30,7 +30,7 @@ jobs:
       # github.com/musterhq/muster next to this repo. The npm release of @musterhq/core lags that source and
       # lacks the Codex app-server API builtin imports, so build core from a pinned commit instead.
       # This commit is musterhq/muster main after #97 merged (Codex app-server lifecycle budgets: turnId, dispatchState,
-      # requireOwner), which builtin/src/codex.ts already uses; repoint to main once #97 merges.
+      # requireOwner), which builtin/src/codex.ts uses.
       # Bump MUSTER_REF together with any builtin change that needs newer core APIs.
       - name: Build @musterhq/core (sibling checkout)
         env:
