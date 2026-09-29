@@ -258,6 +258,32 @@ test('turn ledger: entries chain by hash, verify catches an edited entry, and fi
   assert.equal(await filesChanged(repo,null),null,'no baseline, no file claims');
 });
 
+test('turn ledger: only project and task runs diff the tree; everyday chats pay nothing new',async t=>{
+  const {DatabaseSync}=await import('node:sqlite');
+  const {TurnLedger,attachTurnLedger}=await import('../src/runtime/turn-ledger.ts');
+  const {snapshotTree}=await import('../src/runtime/review-baseline.ts');
+  const {mkdtemp,writeFile,rm}=await import('node:fs/promises');const {execFileSync}=await import('node:child_process');
+  const repo=await mkdtemp(join(tmpdir(),'muster-ledger-'));t.after(()=>rm(repo,{recursive:true,force:true}));
+  execFileSync('git',['init','-q'],{cwd:repo});await writeFile(join(repo,'a.txt'),'one\n');
+  const db=new DatabaseSync(':memory:');t.after(()=>db.close());
+  db.exec('CREATE TABLE review_baselines (run_id TEXT PRIMARY KEY, chat_id TEXT NOT NULL, folder_id TEXT, tree_sha TEXT, created_at TEXT NOT NULL, reason TEXT)');
+  const ledger=new TurnLedger(db),appended:any[]=[];
+  const hooks:any={};
+  const context={db:()=>db,hooks:{onRunStarted:(fn:any)=>{hooks.start=fn;return()=>{};},onRunSettled:(fn:any)=>{hooks.settle=fn;return()=>{};},onProviderEvent:(fn:any)=>{hooks.event=fn;return()=>{};}}} as unknown as DomainContext;
+  const off=attachTurnLedger(context,()=>ledger,e=>appended.push(e));t.after(off);
+  const turn=async(chat:object,runId:string)=>{
+    db.prepare('INSERT INTO review_baselines VALUES (?,?,?,?,?,?)').run(runId,(chat as any).id,null,await snapshotTree(repo),now,null);
+    await hooks.start({chat,runId,cwd:repo});
+    await writeFile(join(repo,`${runId}.txt`),'new\n');
+    await hooks.settle({chat,runId,status:'completed'});
+  };
+  await turn({id:'everyday',title:'Chat'},'r-chat');
+  await turn({id:'task-run',title:'Builder',projectId:'p1'},'r-task');
+  assert.equal(appended.length,2);
+  assert.equal(appended[0].files,null,'an everyday chat never snapshots the tree at settle');
+  assert.deepEqual(appended[1].files.map((f:any)=>`${f.status}:${f.path}`),['added:r-task.txt'],'a project run records the files it changed');
+});
+
 test('inbox activity: chats that ask or fail are Needs you / Problems; finished chats are Done; the badge counts only the first two',async()=>{
   const {buildActivity,badgeCount}=await import('../src/renderer/inboxModel.ts');
   const chat=(id:string,status:string,extra:object={})=>({id,title:`Chat ${id}`,status,archived:false,updatedAt:now,pinned:false,draft:'',model:'m',mode:'agent',...extra});
