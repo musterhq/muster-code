@@ -8,7 +8,7 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {test,type TestContext} from 'node:test';
 import {createAgentService} from '../src/runtime/service.ts';
-import {gitIdentity,runnerFor} from '../src/runtime/paperclip-import.ts';
+import {gitIdentity,runnerFor,SqliteImportStore} from '../src/runtime/paperclip-import.ts';
 import type {ProviderAdapter} from '../src/runtime/provider.ts';
 
 const COMPANY='0436ce61-f1eb-44c3-96a9-eb171b93a49a';
@@ -128,4 +128,27 @@ test('a started task runs in its own worktree of the project folder, never the c
   assert.equal(folder.path,started.worktree,'the run works in the worktree');
   const branches=execFileSync('git',['-C',repo,'worktree','list'],{encoding:'utf8'});
   assert.match(branches,/muster\/rag-15/);
+});
+
+test('a company-wide approval that is also an issue approval keeps its task and project',async()=>{
+  const {DatabaseSync}=await import('node:sqlite');
+  const store=new SqliteImportStore(new DatabaseSync(':memory:'));
+  const row={sourceId:'approval:a1',kind:'approval:hire',title:'Hire QA',status:'pending',detail:'',at:'2026-09-29T00:00:00.000Z',pending:true};
+  store.putHistory({...row,taskId:'task-7',projectId:'project-b'});
+  store.putHistory({...row,taskId:null,projectId:'project-a',status:'approved',detail:'ok',pending:false});
+  assert.deepEqual(store.history().map(h=>[h.taskId,h.projectId,h.status,h.pending]),[['task-7','project-b','approved',false]],'the later company row updates the status only');
+  store.putHistory({...row,sourceId:'approval:a2',taskId:null,projectId:'project-a'});
+  store.putHistory({...row,sourceId:'approval:a2',taskId:null,projectId:null});
+  assert.equal(store.history().find(h=>h.sourceId==='approval:a2')!.projectId,'project-a','a missing project never clears one');
+});
+
+test('a remote Paperclip never makes Muster link or read a local path; the report says to link it yourself',async t=>{
+  const {service,calls}=await fixture(t);
+  await service.invoke('paperclip.config.set',{mode:'custom',baseUrl:'https://pc.example.com',companyId:COMPANY});
+  const report=await service.invoke('paperclip.import',{companyId:COMPANY});
+  assert.ok(calls.every(c=>c.method==='GET'));
+  const projects=await service.invoke('project.list',undefined);
+  assert.ok(projects.every(p=>p.folderIds.length===0),'no folder from the server is added');
+  assert.equal((await service.invoke('app.snapshot',undefined)).folders.length,0);
+  assert.ok(report.notes.some(n=>/OSS Manager: its folder .* is on the Paperclip server.*Link your own checkout/.test(n)));
 });

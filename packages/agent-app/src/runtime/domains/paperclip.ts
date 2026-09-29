@@ -518,7 +518,8 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
         if (!target) target = String(arr(await reader.get<unknown>('/companies'))[0]?.id ?? '');
         if (!target) throw new Error('That Paperclip has no companies to import.');
         // GET only: the importer is handed nothing that can write to Paperclip.
-        const report = await importFromPaperclip(target, { get: path => reader.get<unknown>(path), invoke: context.invoke as Invoke, store, folders, exists: path => existsSync(path), codexHome: codexHomeOf });
+        // Folder paths and CODEX_HOME are this Mac's only when Paperclip runs here; a remote server's paths are never touched.
+        const report = await importFromPaperclip(target, { get: path => reader.get<unknown>(path), invoke: context.invoke as Invoke, store, folders, exists: path => existsSync(path), local: mode === 'local', ...(mode === 'local' ? { codexHome: codexHomeOf } : {}) });
         queueEmit(['tasks', 'agents', 'inbox']);
         return report;
       },

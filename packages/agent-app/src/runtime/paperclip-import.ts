@@ -69,7 +69,9 @@ export class SqliteImportStore implements ImportStore {
     return Number(info.changes) > 0;
   }
   putHistory(row: { sourceId: string; kind: string; taskId: string | null; projectId: string | null; title: string; status: string; detail: string; at: string; pending: boolean }) {
-    this.db.prepare('INSERT INTO paperclip_import_history (source_id, kind, task_id, project_id, title, status, detail, at, pending) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(source_id) DO UPDATE SET status = excluded.status, detail = excluded.detail, pending = excluded.pending, task_id = excluded.task_id, project_id = excluded.project_id')
+    // The company-wide approvals list repeats per-issue approvals without their issue: never drop a task link already written.
+    this.db.prepare(`INSERT INTO paperclip_import_history (source_id, kind, task_id, project_id, title, status, detail, at, pending) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(source_id) DO UPDATE SET status = excluded.status, detail = excluded.detail, pending = excluded.pending,
+      task_id = COALESCE(excluded.task_id, task_id), project_id = CASE WHEN excluded.task_id IS NULL AND task_id IS NOT NULL THEN project_id ELSE COALESCE(excluded.project_id, project_id) END`)
       .run(row.sourceId, row.kind, row.taskId, row.projectId, row.title, row.status, row.detail, row.at, row.pending ? 1 : 0);
   }
   /** Read side for the workspace: keys, parents, members, comments and pending history, per Muster task or project. */
@@ -104,6 +106,8 @@ export interface ImportDeps {
   folders(): Folder[];
   /** Whether a local path exists (an imported project's folder is linked only when it does). */
   exists(path: string): boolean;
+  /** Paperclip runs on this Mac, so its folder paths are this Mac's. A remote Paperclip's paths are never linked or read. */
+  local: boolean;
   codexHome?(agent: Json): { provider?: string; model?: string } | null;
 }
 
@@ -125,7 +129,8 @@ export async function importFromPaperclip(companyId: string, deps: ImportDeps): 
     const sourceId = String(p.id), codebase = obj(p.codebase), name = str(p.name) ?? 'Paperclip project', goal = (str(p.description) ?? '').slice(0, 32768);
     const localFolder = str(codebase.localFolder), repoUrl = str(codebase.repoUrl), defaultRef = str(codebase.defaultRef);
     let folderId: string | null = null;
-    if (localFolder && deps.exists(localFolder)) folderId = deps.folders().find(f => f.path === localFolder)?.id ?? (await invoke('folder.add', { path: localFolder })).id;
+    if (localFolder && deps.local && deps.exists(localFolder)) folderId = deps.folders().find(f => f.path === localFolder)?.id ?? (await invoke('folder.add', { path: localFolder })).id;
+    else if (localFolder && !deps.local) report.notes.push(`${name}: its folder (${localFolder}) is on the Paperclip server, not this Mac. Link your own checkout to the project yourself.`);
     const mapped = store.map('project', sourceId);
     let project: ProjectDetails | undefined = mapped ? existing.get(mapped.musterId) : undefined;
     if (project) {
