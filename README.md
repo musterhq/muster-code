@@ -17,7 +17,7 @@ https://github.com/user-attachments/assets/9602a60c-2faf-4138-92a1-7d850d0b44ab
 
 ### [⬇ Download Muster Agent](https://github.com/musterhq/muster-code/releases/latest)
 
-<sub>macOS (Apple silicon) <code>.dmg</code> · Windows 10/11 installer <code>-win-x64-setup.exe</code> · Linux <code>.AppImage</code> / <code>.deb</code> · Intel Macs: <a href="#run-muster-agent-on-another-mac-from-source">run from a clone</a></sub>
+<sub>macOS (Apple silicon and Intel) <code>.dmg</code> · Windows 10/11 installer <code>-win-x64-setup.exe</code> · Linux <code>.AppImage</code> / <code>.deb</code></sub>
 
 <br/>
 
@@ -183,7 +183,7 @@ Agent sessions get long. Muster Agent keeps what it holds in memory bounded:
 
 ## Install
 
-1. **Download** the newest `Muster-Agent-<version>-arm64.dmg` from
+1. **Download** the newest `Muster-Agent-<version>-arm64.dmg` (Apple silicon) or `-x64.dmg` (Intel) from
    [the latest release](https://github.com/musterhq/muster-code/releases/latest). All Muster Agent
    releases are [tagged `agent-v…`](https://github.com/musterhq/muster-code/releases?q=agent-v).
    A `.zip` of the same app is attached too, and `SHA256SUMS` lets you check the download
@@ -205,7 +205,7 @@ Agent sessions get long. Muster Agent keeps what it holds in memory bounded:
    identity. The update installs when you restart.
 
 **Requirements:** macOS 14 (Sonoma) or later and a model provider (see [Your providers](#your-providers)).
-The macOS download is **Apple silicon only** for now. Intel Macs run from a clone (below). Docker Desktop is
+The macOS download comes in Apple silicon (`-arm64`) and Intel (`-x64`) builds; building from a clone (below) also works on either. Docker Desktop is
 optional and only needed for sandboxes.
 
 ### Windows

@@ -4,6 +4,8 @@ export function createQuitCoordinator(options: {
   prepare(): Promise<void>;
   exit(): void;
   onError(error: unknown): void;
+  /** Quit did not go ahead: confirmation was declined or shutdown failed. */
+  onAbort?(): void;
 }) {
   let allowed = false;
   let pending: Promise<void> | undefined;
@@ -15,11 +17,11 @@ export function createQuitCoordinator(options: {
       if (pending) return pending;
       // Defer even confirmation until pending is assigned (reentrant callers).
       pending = Promise.resolve().then(async () => {
-        if (!(await options.confirm())) return;
+        if (!(await options.confirm())) { options.onAbort?.(); return; }
         await options.prepare();
         allowed = true;
         options.exit();
-      }).catch(error => { options.onError(error); }).finally(() => { pending = undefined; });
+      }).catch(error => { options.onAbort?.(); options.onError(error); }).finally(() => { pending = undefined; });
       return pending;
     },
   };

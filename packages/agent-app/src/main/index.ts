@@ -798,6 +798,7 @@ async function main(): Promise<void> {
       }
     },
     exit: () => app.quit(),
+    onAbort: () => updater.cancelInstall(),
     onError: () => dialog.showErrorBox('Muster has not quit', 'Work could not finish stopping or saving yet. The app stayed open. Try Quit again shortly; do not assume background work has stopped.'),
   });
   window.on('close', (event) => {

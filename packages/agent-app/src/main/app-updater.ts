@@ -6,7 +6,7 @@
  * published SHA-256, passes `codesign --verify --deep --strict`, and satisfies the running app's own designated
  * requirement (so only builds signed with the same key can replace it). Nothing here holds credentials. */
 import {createHash} from 'node:crypto';
-import {execFile,spawn} from 'node:child_process';
+import {execFile,spawn,type ChildProcess} from 'node:child_process';
 import {constants,createWriteStream,existsSync,promises as fs} from 'node:fs';
 import path from 'node:path';
 import {compareVersions,type UpdateChannel} from './update-channel.ts';
@@ -99,6 +99,7 @@ export class AppUpdater {
   private candidate?:ReleaseCandidate;
   private staged?:string;
   private timer?:NodeJS.Timeout;
+  private installer?:ChildProcess;
   private busy=false;
   private readonly fetcher:typeof fetch;
   constructor(private readonly options:UpdaterOptions) {
@@ -250,8 +251,19 @@ export class AppUpdater {
       '',
     ].join('\n'),{mode:0o755});
     this.set({phase:'installing'});
-    spawn('/bin/sh',[script,String(this.options.pid??process.pid),bundle!,this.staged],{detached:true,stdio:'ignore'}).unref();
+    this.installer=spawn('/bin/sh',[script,String(this.options.pid??process.pid),bundle!,this.staged],{detached:true,stdio:'ignore'});
+    this.installer.unref();
     this.options.quit();
     return this.snapshot();
+  }
+
+  /** The quit that install() asked for did not happen (the user chose Cancel or Keep Working in Background, or
+   *  shutdown failed). Stop the waiting installer, or it would give up after five minutes and leave the update
+   *  stuck on "installing"; the verified update goes back to "ready" so it can be installed again. */
+  cancelInstall():void {
+    if(this.status.phase!=='installing')return;
+    try{this.installer?.kill('SIGTERM');}catch{}
+    this.installer=undefined;
+    this.set({phase:'ready',progress:1});
   }
 }
