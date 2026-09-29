@@ -17,6 +17,7 @@ import { AGENT_STATE_LABEL, INBOX_KIND_LABEL, Monogram, Receipt, RUN_STATE_LABEL
 import { MailboxInbox } from './MailboxInbox';
 import { ResourceState } from './ResourceState';
 import { runtimeLabel } from './RosterGraph';
+import { EditAgentButton, HireApprovalCard } from './RosterPanel';
 import { Tip } from './Tooltip';
 
 const errorText = (cause: unknown) => cause instanceof Error ? cause.message : String(cause);
@@ -142,9 +143,12 @@ export function AgentPage({ snapshot, agentId, nav }: { snapshot: WorkspaceSnaps
   return <div className="ws-page">
     <PageHeader title={agent.name} detail={<>{agent.title ?? agent.role} · {runtimeLabel(agent.adapter)}{agent.model ? ` · ${agent.model}` : ''} <SourceTag source={agent.source}/></>}>
       <StateChip tone={agentTone(agent.status)}>{AGENT_STATE_LABEL[agent.status]}</StateChip>
+      <EditAgentButton agent={agent} snapshot={snapshot}/>
       {agent.pausable && agent.status !== 'terminated' && <button type="button" className="settings-button secondary" disabled={busy} onClick={() => void toggle()}>{agent.status === 'paused' ? <><Play size={13}/>Resume</> : <><Pause size={13}/>Pause</>}</button>}
     </PageHeader>
-    {agent.capabilities && <p className="ws-agent-cap">{agent.capabilities}</p>}
+    {agent.status === 'pending' && agent.projectId && <HireApprovalCard agent={agent} snapshot={snapshot} projectId={agent.projectId}/>}
+    {agent.instructions?.trim() ? <section className="ws-section" aria-label="Instructions"><h2 className="ws-group-title">Instructions</h2><p className="ws-agent-cap ws-pre">{agent.instructions.trim()}</p></section>
+      : agent.capabilities && <p className="ws-agent-cap">{agent.capabilities}</p>}
     {agent.error && <ResourceState kind="partial" compact message={explainRunError(agent.error) ?? agent.error}/>}
     <dl className="ws-agent-facts">
       <div><dt>Reports to</dt><dd>{boss ? chip(boss) : <span className="ws-faint">Nobody</span>}</dd></div>

@@ -80,7 +80,7 @@ export type TaskFilter = 'all' | TaskState;
 const FILTERS: { id: TaskFilter; label: string }[] = [{ id: 'all', label: 'All' }, { id: 'running', label: 'Running' }, { id: 'needs-input', label: 'Needs input' }, { id: 'blocked', label: 'Blocked' }, { id: 'todo', label: 'To do' }, { id: 'review', label: 'Review' }, { id: 'implemented', label: 'Implemented' }, { id: 'verified', label: 'Verified' }, { id: 'failed', label: 'Failed' }];
 
 /** Opt-in auto-dispatch: concurrency-limited, budgeted, pause/resume, clamped to a permission mode. */
-function SchedulerControls({ projectId, scheduler, onChanged }: { projectId: string; scheduler: ProjectWork['scheduler']; onChanged: () => void }) {
+export function SchedulerControls({ projectId, scheduler, onChanged }: { projectId: string; scheduler: ProjectWork['scheduler']; onChanged: () => void }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   async function set(patch: Partial<{ autoDispatch: boolean; paused: boolean; concurrency: number; budgetMinutes: number; permissionMode: 'read-only' | 'workspace' | 'full'; acknowledgeFullAccess: boolean }>) {

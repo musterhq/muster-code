@@ -15,7 +15,7 @@ import { exactTime } from '../relativeTime.ts';
 export type ProjectTab = 'overview' | 'tasks' | 'agents' | 'roster' | 'outputs' | 'chats' | 'changes' | 'activity' | 'decisions' | 'memory' | 'inbox' | 'environments' | 'settings';
 
 /** Versioned project rules, injected into every project chat's context packet. */
-function InstructionsCard({ projectId, instructions, onChanged }: { projectId: string; instructions: ProjectWork['instructions']; onChanged: () => void }) {
+export function InstructionsCard({ projectId, instructions, onChanged }: { projectId: string; instructions: ProjectWork['instructions']; onChanged: () => void }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(instructions.text);
   const [busy, setBusy] = useState(false);
@@ -40,7 +40,7 @@ function InstructionsCard({ projectId, instructions, onChanged }: { projectId: s
 }
 
 /** The coordinator: a pinned chat that plans and delegates via fenced task commands the user approves. */
-function CoordinatorCard({ projectId, coordinator, archived, onOpenChat, onChanged }: { projectId: string; coordinator: ProjectWork['coordinator']; archived: boolean; onOpenChat: (id: string) => void; onChanged: () => void }) {
+export function CoordinatorCard({ projectId, coordinator, archived, onOpenChat, onChanged }: { projectId: string; coordinator: ProjectWork['coordinator']; archived: boolean; onOpenChat: (id: string) => void; onChanged: () => void }) {
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState('');
   const pending = coordinator.proposals.filter(p => p.state === 'pending');
