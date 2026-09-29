@@ -161,3 +161,48 @@ test('a remote Paperclip never makes Muster link or read a local path; the repor
   assert.equal((await service.invoke('app.snapshot',undefined)).folders.length,0);
   assert.ok(report.notes.some(n=>/OSS Manager: its folder .* is on the Paperclip server.*Link your own checkout/.test(n)));
 });
+
+test('import into an existing project: the plan matches OSSMANAGER by its folder (and by name), the import fills it, GET only and idempotent',async t=>{
+  const {raw,service,calls,repo}=await fixture(t);
+  // The founder's own project: three folders, one of them the checkout Paperclip's OSS Manager works in; 0 tasks.
+  const extra1=await mkdtemp(join(tmpdir(),'muster-extra-')),extra2=await mkdtemp(join(tmpdir(),'muster-extra-'));
+  t.after(async()=>{await rm(extra1,{recursive:true,force:true});await rm(extra2,{recursive:true,force:true});});
+  const folders=[await service.invoke('folder.add',{path:extra1}),await service.invoke('folder.add',{path:repo}),await service.invoke('folder.add',{path:extra2})];
+  const mine=await service.invoke('project.create',{name:'OSSMANAGER',goal:'',folderIds:folders.map(f=>f.id)});
+  const named=await service.invoke('project.create',{name:'muster',goal:'Mine',folderIds:[]});
+  await service.invoke('paperclip.config.set',{mode:'local',companyId:COMPANY});
+  const plan=await service.invoke('paperclip.import.plan',{companyId:COMPANY});
+  assert.equal(plan.company?.name,'RagnarDataOps');
+  const oss=plan.projects.find(p=>p.name==='OSS Manager')!,muster=plan.projects.find(p=>p.name==='Muster')!;
+  assert.deepEqual(oss.suggestion,{projectId:mine.id,reason:'folder'});
+  assert.equal(oss.taskCount,raw.issues.filter((i:Json)=>i.projectId===oss.id).length);
+  assert.deepEqual(muster.suggestion,{projectId:named.id,reason:'name'});
+  assert.equal(calls.filter(c=>c.method!=='GET').length,0,'planning is GET only');
+  const report=await service.invoke('paperclip.import',{companyId:COMPANY,targets:{[oss.id]:mine.id,[muster.id]:'skip'}});
+  assert.ok(calls.every(c=>c.method==='GET'),'the importer never writes to Paperclip');
+  assert.deepEqual(report.projects,{created:0,updated:1});
+  assert.deepEqual(report.filled,[{paperclip:'OSS Manager',muster:'OSSMANAGER'}]);
+  const projects=await service.invoke('project.list',undefined);
+  assert.deepEqual(projects.map(p=>p.name).sort(),['OSSMANAGER','muster'],'no project was created');
+  const filled=projects.find(p=>p.id===mine.id)!;
+  assert.equal(filled.name,'OSSMANAGER','your name is kept');
+  assert.ok(filled.goal.length>0,'an empty goal takes Paperclip’s description');
+  assert.equal(filled.folderIds.length,3,'the checkout was already linked: nothing is added twice');
+  const snap=await service.invoke('paperclip.snapshot',{});
+  const tasks=snap.tasks.filter(x=>x.projectId===mine.id);
+  assert.equal(tasks.length,oss.taskCount);
+  assert.ok(tasks.some(x=>x.key==='RAG-1'));
+  const roster=snap.agents.filter(a=>a.projectId===mine.id);
+  assert.ok(roster.length>5,'the Roster is filled');
+  assert.ok(roster.every(a=>a.name!=='Agents'),'no generic Agents row');
+  const cto=roster.find(a=>a.name==='CTO')!;
+  assert.ok(cto.title,'titles come across onto the members');
+  assert.ok(roster.some(a=>a.reportsTo===cto.id),'reporting lines come across');
+  assert.equal(snap.tasks.filter(x=>x.projectId===named.id).length,0,'the skipped project is left alone');
+  // Safe to repeat: the same targets update what the first run made.
+  const again=await service.invoke('paperclip.import',{companyId:COMPANY,targets:{[oss.id]:mine.id,[muster.id]:'skip'}});
+  assert.equal(again.tasks.created,0); assert.equal(again.tasks.updated,oss.taskCount);
+  assert.equal((await service.invoke('paperclip.snapshot',{})).tasks.filter(x=>x.projectId===mine.id).length,oss.taskCount);
+  // Once imported, the plan remembers where it went.
+  assert.deepEqual((await service.invoke('paperclip.import.plan',{companyId:COMPANY})).projects.find(p=>p.id===oss.id)!.suggestion,{projectId:mine.id,reason:'imported'});
+});

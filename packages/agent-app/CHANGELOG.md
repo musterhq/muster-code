@@ -5,6 +5,21 @@ All notable changes to Muster Agent. Each `## <version>` section becomes the not
 
 ## Unreleased
 
+- Every project now opens on one page laid out like Paperclip's, whether you made it in Muster or brought it from Paperclip. The header shows the title, repository and open count, and the tabs are Tasks, Roster, Outputs, Settings and Budget.
+- Tasks is a list or a board. You can search, filter by status, owner and priority, sort, and group by status, owner or parent. Subtasks nest under their parent and collapse. Keys carry the project's prefix (OSS-1), and a number is never reused.
+- New task sets an owner (an agent on the Roster, or you), a priority and a parent. **Assign & start** begins the owner's first run on its runner and model, with its instructions, in a new worktree. Your checkout is never touched.
+- Roster: **Add agent** takes a name, title, who it reports to, a runner and model, and instructions. If a project requires approval to add agents, a new hire waits as an approval card in the Inbox and on the Roster. The org chart draws the reporting lines. The generic "Agents" row is gone, and the old Agents tab is now "Working now" under Roster.
+- Everything from the old project screen is under Settings: General (name, goal, task keys, default model, approvals, instructions, coordinator, archive and delete), Folders, Members, Mail (the project mailbox, no longer called Inbox), Chats, Knowledge, Runs & verification, and Activity. Changes moved to Outputs.
+- Budget shows this month's spend from the Ledger against an optional monthly budget, with a soft alert at 80%.
+- Dashboard shows:
+  - live agent cards;
+  - agents enabled, tasks in progress, month spend and pending approvals;
+  - 14-day run activity, tasks by status and success rate;
+  - recent activity and recent tasks.
+  Spend with no known price reads "Unpriced", never $0.
+- Import from Paperclip first asks where each Paperclip project goes: an existing Muster project (suggested by the same folder, repository or name), a new one, or nowhere. Filling your own project keeps its name.
+- The sidebar follows Paperclip's order: Inbox and Dashboard, then Work (Tasks, Projects, Automations, Outputs), then Org (Roster, Skills, Integrations, Ledger). Your chats, folders and projects stay below.
+
 ## 0.2.8
 
 - The Inbox badge counts only what still needs you: a chat that failed, was interrupted or is waiting counts until you open it, then stays listed under Problems for three days. A turn cut short because Muster quit now reads "Interrupted when Muster quit — continue?". Every Inbox item has Dismiss; a new failure in the same chat shows again.

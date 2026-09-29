@@ -69,9 +69,13 @@ const drafts=await import('../src/renderer/newChatDraft'),{NewChatScreen}=await 
 function Shell(){const draft=drafts.useNewChatDraft();return <><Sidebar/>{draft.open&&<NewChatScreen/>}</>;}
 const errors:unknown[]=[];const root=createRoot(document.getElementById('root')!,{onUncaughtError:error=>errors.push(error)});
 await store.boot();root.render(<Shell/>);await delay(60);
+// #193: Paperclip's order in Muster's one sidebar: Inbox, Dashboard, then Work, then Org; chats, folders and projects follow.
+assert.deepEqual([...document.querySelectorAll('.nav-toolbar > .tool-button > span:first-of-type, .nav-toolbar .nav-tool-heading, .nav-tool-group .tool-button > span:first-of-type')].map(e=>e.textContent),
+  ['Inbox','Dashboard','New chat','Search chats','Memory','Work','Tasks','Projects','Automations','Outputs','Org','Roster','Skills','Integrations','Ledger']);
+assert.ok(![...document.querySelectorAll('.nav-footer-action')].some(b=>/Skills/.test(b.textContent!)),'Skills lives under Org, not twice');
 assert.deepEqual(errors,[]);assert.ok(document.querySelector('[aria-label="1 active chats"]'),'running group count remains visible when collapsed');
 const footerLabels=Array.from(document.querySelectorAll<HTMLElement>('.nav-footer-action')).map(button=>button.textContent);
-assert.deepEqual(footerLabels,['Settings','Skills & plugins','Accounts & providers'],'sidebar utilities remain legible at the minimum navigation width');
+assert.deepEqual(footerLabels,['Settings','Accounts & providers'],'sidebar utilities remain legible at the minimum navigation width');
 const sections=()=>Array.from(document.querySelector('.nav-scroll')!.children).map(el=>el.getAttribute('aria-label')??el.querySelector('.nav-section-title')?.textContent);
 assert.deepEqual(sections(),['Folders','Projects','Chats','Archived (1)'],'folders, projects, folderless chats, then archived');
 assert.ok(!document.querySelector('[data-chat-id="old"]'),'archived starts collapsed');
