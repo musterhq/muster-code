@@ -3,9 +3,14 @@
 Recommended settings (a repository admin applies these under Settings > Branches; nothing in this
 repository changes them):
 
-- Require a pull request before merging, with at least one approving review (CODEOWNERS review is on).
+- Require a pull request before merging. Do not require code-owner review: the only maintainer,
+  @Dkm0315, cannot approve their own PRs, so a required review would force an admin bypass on every merge.
+  Add a required-approvals rule only once there is a second maintainer.
 - Require status checks to pass before merging, and require branches to be up to date.
 - Block force pushes and deletion of `main`.
+
+`.github/CODEOWNERS` exists only to request a review automatically on new PRs. It is advisory, not an
+approval gate.
 
 ## Required status checks
 
@@ -14,6 +19,8 @@ These jobs run on every pull request to `main`, regardless of which files change
 | Check name | Workflow |
 | --- | --- |
 | `test` | `CI` (`.github/workflows/ci.yml`): typecheck, extension build, webview checks, tests |
+
+This is the only check to require.
 
 ## Do not require path-filtered checks
 

@@ -5,9 +5,11 @@ app for macOS, Windows and Linux) and **Muster Code** (the Code-OSS based IDE ov
 `packages/builtin`, `packages/theme`). It is one project with [musterhq/muster](https://github.com/musterhq/muster),
 the open-source Muster CLI and core. By taking part you agree to follow the [Code of Conduct](CODE_OF_CONDUCT.md).
 
-**Licensing:** to be announced; see [#81](https://github.com/musterhq/muster-code/issues/81).
-There is no CLA and no DCO sign-off: contributions are accepted under whatever license the repository
-carries (inbound = outbound).
+**Licensing:** this repository is MIT licensed (see [LICENSE](LICENSE) and
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)). There is no CLA and no DCO sign-off: by submitting a
+contribution you license it under the same MIT terms as the project (inbound = outbound).
+
+**Questions:** GitHub Discussions are not enabled; open an issue and we will answer there.
 
 ## Setup
 
@@ -24,7 +26,7 @@ npx electron . --user-data-dir=/tmp/muster-test   # isolated profile, keeps your
 The few Muster core modules the app bundles are vendored in `packages/agent-app/vendor/`; do not edit
 them by hand (see `vendor/README.md`, fix them in musterhq/muster and run `npm run vendor:sync`).
 
-The Muster Code IDE layer uses pnpm 10 and Node 22 from the repository root:
+The Muster Code IDE layer uses pnpm 10 from the repository root (Node version as in `.github/workflows/ci.yml`):
 `pnpm install && pnpm typecheck && pnpm build && pnpm test`.
 
 ## Build, typecheck and test
@@ -38,8 +40,8 @@ npm test                  # unit tests (node --test tests/*.test.ts); build firs
 npm run test:renderer     # renderer tests
 ```
 
-CI runs exactly these on every pull request (macOS, plus Windows and Linux packaging with a packaged-app
-smoke test). Run them locally before you push. For UI changes, also run the app and try the change.
+Every pull request runs the root `CI` workflow. The Muster Agent workflows (macOS verify, plus Windows and
+Linux packaging with a packaged-app smoke test) run only when a PR touches `packages/agent-app`. Run the checks locally before you push. For UI changes, also run the app and try the change.
 
 ## Branches and pull requests
 
@@ -48,7 +50,7 @@ smoke test). Run them locally before you push. For UI changes, also run the app 
    for example `fix/terminal-resize`.
 3. Keep PRs small and focused: one concern per PR, tests in the same PR.
 4. Fill in the pull request template: summary, how you tested, screenshots for any UI change.
-5. `main` requires a pull request and passing checks (see [docs/BRANCH_PROTECTION.md](docs/BRANCH_PROTECTION.md)).
+5. `main` requires a pull request and the `test` check (see [docs/BRANCH_PROTECTION.md](docs/BRANCH_PROTECTION.md)).
    A maintainer reviews and merges.
 
 ## Commit style
