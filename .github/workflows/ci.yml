@@ -22,8 +22,25 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: "22"
+          # @musterhq/core (built below) declares engines.node >=24.
+          node-version: "24"
           cache: pnpm
+
+      # packages/builtin depends on "link:../../../muster/packages/core", i.e. a sibling checkout of
+      # github.com/musterhq/muster next to this repo. The npm release of @musterhq/core lags that source and
+      # lacks the Codex app-server API builtin imports, so build core from a pinned commit instead.
+      # Bump MUSTER_REF together with any builtin change that needs newer core APIs.
+      - name: Build @musterhq/core (sibling checkout)
+        env:
+          MUSTER_REF: 53130e359d9ea7a6e76bf6674ae270f021ef679f
+        run: |
+          MUSTER_DIR="$(dirname "$GITHUB_WORKSPACE")/muster"
+          git init -q "$MUSTER_DIR"
+          git -C "$MUSTER_DIR" fetch -q --depth 1 https://github.com/musterhq/muster "$MUSTER_REF"
+          git -C "$MUSTER_DIR" checkout -q FETCH_HEAD
+          cd "$MUSTER_DIR"
+          pnpm install --filter @musterhq/core...
+          pnpm --filter @musterhq/core build
 
       - name: Install
         run: pnpm install --frozen-lockfile
