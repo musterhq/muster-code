@@ -94,7 +94,7 @@ const OWNER_ONLY_PROJECT = new Set(['project.delete', 'project.archive', 'projec
   // Work layer: a project's status and target date.
   'work.project.meta.set',
   // Wave 3: a reflection changes an agent's instructions; the setup interview starts the coordinator.
-  'insight.reflect.run', 'insight.reflect.accept', 'insight.reflect.settings.set', 'insight.setup.interview',
+  'insight.reflect.run', 'insight.reflect.accept', 'insight.reflect.settings.set', 'insight.setup.interview', 'insight.setup.testDrive',
   // Wave 4: importing into a project, starting what an import paused, and asking an agent to change a proposal.
   'org.import.apply', 'org.activate', 'project.approvals.requestRevision']);
 const AUTOMATION_BY_ID = /^automations\.(update|delete|pause|resume|runNow|runs|list)$/;

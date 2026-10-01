@@ -256,6 +256,12 @@ export function createInsightDomain(ctx: DomainContext): DomainModule {
     'studio.skill.inputs.remove': i => { if (!exists()) return { removed: true as const }; db().removeSkillInput(id(i.id)); emit(null, ['studio']); return { removed: true as const }; },
     'studio.skill.templates': () => ({ templates: [...SKILL_TEMPLATES] }),
 
+    'insight.setup.testDrive': async i => {
+      const p = project(i.projectId), memberId = id(i.memberId, 'agent id');
+      const run = await startReadOnlyRun(ctx, { projectId: p.id, memberId, title: 'Test drive', prompt: testDrivePrompt(p.name, p.goal) });
+      await sendPrompt(ctx, run.chatId, testDrivePrompt(p.name, p.goal));
+      return { chatId: run.chatId };
+    },
     'insight.setup.interview': async i => {
       const p = project(i.projectId);
       const { chatId } = await ctx.invoke('project.coordinator.start', { projectId: p.id });
@@ -269,6 +275,12 @@ export function createInsightDomain(ctx: DomainContext): DomainModule {
     handlers,
     dispose() { disposed = true; clearTimeout(boot); offSettled(); offCommand?.(); const t = timers(); for (const h of weeklyHandles.values()) t.clear(h); weeklyHandles.clear(); store?.close(); store = undefined; },
   };
+}
+
+/** The test drive: read, do not change, and say what you saw. */
+export function testDrivePrompt(name: string, goal: string): string {
+  return [`This is a test drive of you on the project “${name}”.${goal.trim() ? ` Its mission: ${clip(goal, 400)}` : ''}`,
+    'Change nothing. In under 150 words: say who you are in one line, name two or three files or folders you looked at (look first), and say what you would do first and what you would ask me before starting.'].join('\n\n');
 }
 
 /** The opening of the setup interview: a few questions, one at a time, then the mission and a first plan for you to approve. */

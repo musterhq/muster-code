@@ -98,6 +98,29 @@ export function createSearchDomain(ctx: DomainContext): DomainModule {
         push({ ...blank('comments', `${h.chatId}:${h.itemId ?? ''}`, task.title), key: task.key, source: 'local', projectId: task.projectId, projectName: projectName.get(task.projectId ?? '') ?? null, taskId: task.id, chatId: h.chatId, snippet: h.snippet, snippetRanges: (h.ranges ?? []) as [number, number][], at: task.updatedAt }, 10 + (h.matches ?? 1));
       }
     }
+    // ── comments written in Paperclip and imported, and agents' own tool comments and your notes ──────────────
+    if (want('comments') && terms.length && snapshot) {
+      const taskById = new Map(snapshot.tasks.map(t => [t.id, t]));
+      const seen = new Set(rows.filter(r => r.kind === 'comments').map(r => r.id));
+      try {
+        const like = (t: string) => `%${t.replace(/[\\%_]/g, '\\$&')}%`;
+        const sql = `SELECT source_id, task_id, author_label, body, created_at FROM paperclip_import_comments WHERE ${terms.map(() => "lower(body) LIKE ? ESCAPE '\\'").join(' AND ')} ORDER BY created_at DESC LIMIT 40`;
+        for (const c of ctx.db().prepare(sql).all(...terms.map(like)) as { source_id: string; task_id: string; author_label: string; body: string; created_at: string }[]) {
+          const task = taskById.get(c.task_id), id = `pc:${c.source_id}`; if (!task || seen.has(id)) continue;
+          const { snippet, ranges } = snippetAround(c.body, terms);
+          push({ ...blank('comments', id, task.title), key: task.key, source: 'local', projectId: task.projectId, projectName: projectName.get(task.projectId ?? '') ?? null, taskId: task.id, snippet: `${c.author_label}: ${snippet}`, snippetRanges: ranges.map(([a, b]) => [a + c.author_label.length + 2, b + c.author_label.length + 2] as [number, number]), at: c.created_at }, 5);
+        }
+      } catch { /* no import tables yet: nothing was imported */ }
+      for (const p of snapshot.projects.filter(x => x.source === 'local')) {
+        const list = await ctx.invoke('project.activity.query', { projectId: p.id, limit: 200, categories: ['tasks'] }).catch(() => null);
+        for (const a of list?.items ?? []) {
+          if ((a.kind !== 'task.agent-comment' && a.kind !== 'task.note') || !a.refId) continue;
+          const task = taskById.get(a.refId); if (!task || rank(a.summary, terms) === null) continue;
+          const { snippet, ranges } = snippetAround(a.summary, terms);
+          push({ ...blank('comments', `act:${a.id}`, task.title), key: task.key, source: 'local', projectId: p.id, projectName: p.name, taskId: task.id, snippet, snippetRanges: ranges, at: a.createdAt }, 6);
+        }
+      }
+    }
     // ── outputs and decisions ───────────────────────────────────────────────
     if (want('outputs') && terms.length) {
       const list = await ctx.invoke('paperclip.list', { kind: 'artifacts' }).catch(() => null);
