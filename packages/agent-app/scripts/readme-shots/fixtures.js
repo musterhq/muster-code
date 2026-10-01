@@ -296,12 +296,14 @@ const realisticProviders = [
     models: [{id: 'auto', name: 'Auto'}, {id: 'auto/best-coding', name: 'Auto · best coding'}, {id: 'auto/fast', name: 'Auto · fast'}]},
   {id: 'openai-direct', name: 'ChatGPT', available: true, status: 'ready', identityMasked: 'a••x@example.com', source: 'Signed in', checkedAt: ago(10),
     models: [
+      {id: 'gpt-6.1-sol', name: 'GPT-6.1 Sol', efforts, defaultEffort: 'high', contextWindow: 400000, images: true, toolSearch: true},
       {id: 'gpt-6', name: 'GPT-6', efforts, defaultEffort: 'medium', contextWindow: 400000, images: true, toolSearch: true},
       {id: 'gpt-6-codex', name: 'GPT-6 Codex', efforts, defaultEffort: 'high', contextWindow: 400000, images: true, toolSearch: true},
       {id: 'gpt-6-mini', name: 'GPT-6 Mini', efforts: ['low', 'medium', 'high'], defaultEffort: 'low', contextWindow: 400000, images: true, toolSearch: true},
     ]},
   {id: 'claude-code', name: 'Claude Code', available: true, status: 'ready', identityMasked: 'a••x@example.com', source: 'Signed in', checkedAt: ago(10),
     models: [
+      {id: 'claude-sonnet-5-5', name: 'Claude Sonnet 5.5', efforts: ['low', 'medium', 'high', 'xhigh'], defaultEffort: 'high', contextWindow: 1000000, images: true},
       {id: 'claude-opus-5-5', name: 'Claude Opus 5.5', efforts: ['low', 'medium', 'high', 'xhigh'], defaultEffort: 'high', contextWindow: 1000000, images: true},
       {id: 'claude-fable-5', name: 'Claude Fable 5', efforts: ['low', 'medium', 'high'], defaultEffort: 'medium', contextWindow: 200000, images: true},
       {id: 'claude-haiku-5', name: 'Claude Haiku 5', contextWindow: 200000, images: true},
