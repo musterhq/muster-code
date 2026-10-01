@@ -1,6 +1,5 @@
 import {createRequire} from 'node:module';
 import {createHash} from 'node:crypto';
-import {execFile} from 'node:child_process';
 import * as nodeFs from 'node:fs';
 import {homedir} from 'node:os';
 import {join,isAbsolute} from 'node:path';
@@ -9,6 +8,8 @@ import {catalogPricing,type ExcludedModel} from '../shared/model-catalog.ts';
 import type {RunnableAdapter, Validation} from './adapters/types.ts';
 import {CODEX_LAUNCHER, findBinary, locateCli, Validator} from './adapters/shared.ts';
 import {fetchModelList,type ListedModel} from './adapters/http-chat.ts';
+import {readCodexCatalog} from './codex-catalog.ts';
+import {codexAuthHeaders,inlineStringTable,type CodexProviderAuth} from './codex-provider-auth.ts';
 
 export interface ProviderInstance {
   info: ProviderInfo;
@@ -62,7 +63,7 @@ export function catalogModels(family:'openai-direct'|'gateway'|(string&{}),list:
   list.slice(0,MAX_CATALOG_ENTRIES).forEach((raw,index)=>{
     const entry=raw&&typeof raw==='object'&&!Array.isArray(raw)?raw as Record<string,unknown>:undefined;
     const model=entry?.slug??entry?.model??entry?.id;
-    if(!entry||typeof model!=='string'||!model.trim()||model.length>200||/[\x00-\x1f]/.test(model)){excluded.push({id:`entry-${index+1}`,name:`Catalog entry ${index+1}`,reason:'The catalog entry has no usable model id.'});return;}
+    if(!entry||typeof model!=='string'||!model.trim()||model.length>200||/[\x00-\x1f]/.test(model)){excluded.push({id:`entry-${index+1}`,name:`Catalog entry ${index+1}`,reason:!entry?'The catalog entry is not an object.':model===undefined?'The catalog entry has no "slug".':'The catalog entry\u2019s "slug" is not a usable model id (empty, too long or has control characters).'});return;}
     const label=entry.display_name??entry.displayName??entry.name??model;
     const name=typeof label==='string'&&label.trim()?label.replace(/[\x00-\x1f]/g,'').slice(0,160):model;
     if(models.some(m=>m.id===model)){excluded.push({id:model,name,reason:'Listed more than once in the catalog; the first entry is used.'});return;}
@@ -189,7 +190,9 @@ interface CodexRouteSpec {
   kind: 'chatgpt' | 'gateway';
   /** Profile file stem, when the route comes from `<name>.config.toml`; else the table lives in config.toml. */
   profile?: string;
-  name?: string; baseUrl?: string; envKey?: string; authCommand?: {command: string; args: string[]; timeoutMs?: number};
+  name?: string; baseUrl?: string;
+  /** How Muster's own requests (the model listing) authenticate, mirroring what Codex does for the chat itself. */
+  auth?: CodexProviderAuth;
   catalogPath?: string;
   /** Profile text or config table, hashed into the binding so an edited route needs reselection. */
   fingerprint: string;
@@ -203,12 +206,40 @@ const MAX_PROFILES=32;
 const tomlString=(toml:CodexToml,key:string):string|undefined=>{const raw=toml.values.get(key);if(raw===undefined)return undefined;try {const value=JSON.parse(raw) as unknown;return typeof value==='string'?value:undefined;} catch {return undefined;}};
 const tomlArray=(toml:CodexToml,key:string):string[]|undefined=>{const raw=toml.values.get(key);if(raw===undefined)return undefined;try {const value=JSON.parse(raw) as unknown;return Array.isArray(value)&&value.every(item=>typeof item==='string')?value as string[]:undefined;} catch {return undefined;}};
 const tomlNumber=(toml:CodexToml,key:string):number|undefined=>{const value=Number(toml.values.get(key));return Number.isFinite(value)&&value>0?value:undefined;};
-/** The provider table `[model_providers.<id>]` of a parsed Codex TOML file. */
-function providerTable(toml:CodexToml,id:string):Pick<CodexRouteSpec,'name'|'baseUrl'|'envKey'|'authCommand'>&{defined:boolean} {
-  const at=`model_providers.${id}.`,command=tomlString(toml,`${at}auth.command`);
-  return {defined:[...toml.values.keys()].some(key=>key.startsWith(at)),name:tomlString(toml,`${at}name`),baseUrl:tomlString(toml,`${at}base_url`),envKey:tomlString(toml,`${at}env_key`),
-    ...(command?{authCommand:{command,args:tomlArray(toml,`${at}auth.args`)??[],...(tomlNumber(toml,`${at}auth.timeout_ms`)?{timeoutMs:tomlNumber(toml,`${at}auth.timeout_ms`)}:{})}}:{})};
+/** A string table, written inline (`http_headers = { X = "y" }`) or as its own `[model_providers.<id>.http_headers]` table. */
+function stringTable(toml:CodexToml,key:string):Record<string,string>|undefined {
+  const inline=inlineStringTable(toml.values.get(key));
+  if(inline)return inline;
+  const out:Record<string,string>={};let found=false;
+  for(const [full] of toml.values)if(full.startsWith(`${key}.`)){const value=tomlString(toml,full);if(value!==undefined){out[full.slice(key.length+1)]=value;found=true;}}
+  return found?out:undefined;
 }
+/** The provider table `[model_providers.<id>]` of a parsed Codex TOML file. */
+function providerTable(toml:CodexToml,id:string):Pick<CodexRouteSpec,'name'|'baseUrl'|'auth'>&{defined:boolean} {
+  const at=`model_providers.${id}.`,command=tomlString(toml,`${at}auth.command`);
+  const envKey=tomlString(toml,`${at}env_key`),bearerToken=tomlString(toml,`${at}experimental_bearer_token`);
+  const httpHeaders=stringTable(toml,`${at}http_headers`),envHttpHeaders=stringTable(toml,`${at}env_http_headers`);
+  const timeoutMs=tomlNumber(toml,`${at}auth.timeout_ms`),refreshIntervalMs=tomlNumber(toml,`${at}auth.refresh_interval_ms`),cwd=tomlString(toml,`${at}auth.cwd`);
+  const auth:CodexProviderAuth={...(envKey?{envKey}:{}),...(bearerToken?{bearerToken}:{}),...(httpHeaders?{httpHeaders}:{}),...(envHttpHeaders?{envHttpHeaders}:{}),
+    ...(command?{authCommand:{command,args:tomlArray(toml,`${at}auth.args`)??[],...(timeoutMs?{timeoutMs}:{}),...(refreshIntervalMs?{refreshIntervalMs}:{}),...(cwd&&isAbsolute(cwd)?{cwd}:{})}}:{})};
+  return {defined:[...toml.values.keys()].some(key=>key.startsWith(at)),name:tomlString(toml,`${at}name`),baseUrl:tomlString(toml,`${at}base_url`),...(Object.keys(auth).length?{auth}:{})};
+}
+/** A secret-free fingerprint of a provider table: credentials are hashed, never kept in the string. */
+const tableFingerprint=(id:string,table:ReturnType<typeof providerTable>)=>JSON.stringify([id,table.name??'',table.baseUrl??'',table.auth?createHash('sha256').update(JSON.stringify(table.auth)).digest('hex'):'']);
+/** The top-level keys and `[model_providers.*]` sections of a Codex TOML file. Used when the whole file does not parse
+ *  with Muster's reader (an unrelated section, e.g. a plugin or project table, uses TOML Muster does not read): Codex
+ *  itself reads the full file, so its provider tables stay runnable. */
+function providerSectionsText(text:string):string {
+  const kept:string[]=[];let keep=true;
+  for(const line of text.split(/\r?\n/)){
+    const header=/^\s*\[(?!\[)\s*([^\[\]]+?)\s*\]\s*(?:#.*)?$/.exec(line),array=/^\s*\[\[/.test(line);
+    if(header||array)keep=!array&&/^(?:model_providers\s*\.|"model_providers"\s*\.)/.test(header![1]!);
+    if(keep)kept.push(line);
+  }
+  return kept.join('\n');
+}
+/** Provider ids named by `[model_providers.<id>]` headers, found line by line (the same scan provider discovery uses). */
+const headerProviderIds=(text:string)=>[...new Set([...text.matchAll(/^\s*\[\s*model_providers\.([A-Za-z0-9_-]{1,64})(?:\.[^\]]*)?\s*\]/gm)].map(match=>match[1]!))];
 /** Ids of every `[model_providers.<id>]` table in a parsed Codex TOML file. */
 function providerIds(toml:CodexToml):string[] {
   const ids=new Set<string>();
@@ -221,8 +252,16 @@ const humanize=(id:string)=>id.split(/[-_]+/).filter(Boolean).map(word=>word[0]!
  * and the ChatGPT sign-in (OpenAI's own provider) when Codex has one. */
 function codexRoutes(fs:ProviderInstanceFs,codexHome:string,track:(file:string)=>string,validator:CodexProfileModule|undefined,signedIn:boolean):CodexRouteSpec[] {
   const routes:CodexRouteSpec[]=[];
-  let config:CodexToml={values:new Map(),multiline:new Set()},configText='';
-  try {configText=boundedFile(fs,track(join(codexHome,'config.toml')));config=validator?.parseToml(configText)??config;} catch {/* no config.toml, or not parseable */}
+  let config:CodexToml={values:new Map(),multiline:new Set()},configText='',configError:string|undefined;
+  try {configText=boundedFile(fs,track(join(codexHome,'config.toml')));} catch {configText='';/* no config.toml */}
+  if(configText&&validator){
+    try {config=validator.parseToml(configText);}
+    catch (error) {
+      // Keep the provider tables runnable when only an unrelated section is beyond Muster's reader.
+      try {config=validator.parseToml(providerSectionsText(configText));}
+      catch {configError=`config.toml could not be read: ${error instanceof Error?error.message:'invalid TOML'}`;}
+    }
+  }
   const topProvider=tomlString(config,'model_provider')??'openai',topCatalog=tomlString(config,'model_catalog_json');
   let names:string[]=[];
   try {track(codexHome);names=(fs.readdirSync(codexHome) as string[]).filter(name=>PROFILE_FILE.test(name)&&name!=='config.toml').sort().slice(0,MAX_PROFILES);} catch {names=[];}
@@ -240,13 +279,15 @@ function codexRoutes(fs:ProviderInstanceFs,codexHome:string,track:(file:string)=
     let invalid:string|undefined;
     try {validator?.profileOverrides(profile,text);} catch (error) {invalid=error instanceof Error?error.message:'The profile did not validate.';}
     const table=providerTable(toml!,modelProvider),fromConfig=table.defined?table:providerTable(config,modelProvider);
-    routes.push({modelProvider,kind:modelProvider==='openai'?'chatgpt':'gateway',profile,name:fromConfig.name,baseUrl:fromConfig.baseUrl,envKey:fromConfig.envKey,...(fromConfig.authCommand?{authCommand:fromConfig.authCommand}:{}),catalogPath:tomlString(toml!,'model_catalog_json'),fingerprint:text,...(invalid?{invalid}:{})});
+    routes.push({modelProvider,kind:modelProvider==='openai'?'chatgpt':'gateway',profile,name:fromConfig.name,baseUrl:fromConfig.baseUrl,...(fromConfig.auth?{auth:fromConfig.auth}:{}),catalogPath:tomlString(toml!,'model_catalog_json'),fingerprint:text,...(invalid?{invalid}:{})});
   }
   for(const id of providerIds(config)){
     if(id==='openai'||routes.some(route=>route.modelProvider===id&&!route.invalid))continue;
     const table=providerTable(config,id);
-    routes.push({modelProvider:id,kind:'gateway',...table,catalogPath:topProvider===id?topCatalog:undefined,fingerprint:JSON.stringify([id,table])});
+    routes.push({modelProvider:id,kind:'gateway',name:table.name,baseUrl:table.baseUrl,...(table.auth?{auth:table.auth}:{}),catalogPath:topProvider===id?topCatalog:undefined,fingerprint:tableFingerprint(id,table)});
   }
+  // config.toml did not parse at all: its provider tables are still listed, each saying why it cannot run.
+  if(configError)for(const id of headerProviderIds(configText))if(id!=='openai'&&!routes.some(route=>route.modelProvider===id))routes.push({modelProvider:id,kind:'gateway',fingerprint:id,invalid:configError});
   // OpenAI's own provider needs no table: a Codex sign-in is enough.
   if(signedIn&&!routes.some(route=>route.modelProvider==='openai'&&!route.invalid))routes.push({modelProvider:'openai',kind:'chatgpt',catalogPath:topProvider==='openai'?topCatalog:undefined,fingerprint:'openai'});
   return routes;
@@ -273,21 +314,20 @@ const settleListeners=new Set<()=>void>();
 export function onProviderListingSettled(listener:()=>void):()=>void {settleListeners.add(listener);return ()=>settleListeners.delete(listener);}
 /** Resolves once no model listing is in flight. */
 export async function providerListingsSettled():Promise<void> {await Promise.all([...listings.values()].map(listing=>listing.settled()));}
-async function helperToken(command:{command:string;args:string[];timeoutMs?:number},env:NodeJS.ProcessEnv):Promise<string> {
-  return new Promise((resolve,reject)=>execFile(command.command,command.args,{timeout:Math.min(command.timeoutMs??5000,15_000),maxBuffer:64*1024,env,encoding:'utf8'},(error,stdout)=>{
-    const token=String(stdout??'').trim().split('\n')[0]??'';
-    if(error||!token)reject(new Error('The provider’s auth helper did not return a token.'));else resolve(token);
-  }));
-}
 function listing(route:CodexRouteSpec,env:NodeJS.ProcessEnv,fetcher:typeof fetch|undefined):Validation<ListedModel[]> {
-  const base=route.baseUrl!.replace(/\/+$/,''),key=JSON.stringify([base,route.envKey??'',route.authCommand?.command??'',route.envKey?createHash('sha256').update(env[route.envKey]??'').digest('hex'):'']);
+  const base=route.baseUrl!.replace(/\/+$/,''),auth=route.auth??{};
+  const envHash=(name:string|undefined)=>name?createHash('sha256').update(env[name]??'').digest('hex'):'';
+  const key=createHash('sha256').update(JSON.stringify([base,auth,envHash(auth.envKey),Object.values(auth.envHttpHeaders??{}).map(envHash)])).digest('hex');
   let found=listings.get(key);
   if(!found){
     found=new Validator<ListedModel[]>(async()=>{
-      const token=route.envKey?env[route.envKey]:route.authCommand?await helperToken(route.authCommand,env):undefined;
-      if(route.envKey&&!token)throw new Error(`${route.envKey} is not set in Muster’s environment.`);
-      const models=await fetchModelList(`${base}/models`,token?{authorization:`Bearer ${token}`}:{},route.name??route.modelProvider,fetcher);
-      return models;
+      const label=route.name??route.modelProvider,list=async(force:boolean)=>fetchModelList(`${base}/models`,await codexAuthHeaders(auth,env,{force}),label,fetcher);
+      try {return await list(false);}
+      catch (error) {
+        // A cached command token may have expired early: fetch a fresh one once, then report the provider's answer.
+        if(auth.authCommand&&error instanceof Error&&/HTTP 401/.test(error.message))return list(true);
+        throw error;
+      }
     });
     if(listings.size>=32)listings.delete(listings.keys().next().value!);
     listings.set(key,found);
@@ -377,8 +417,9 @@ function homeInstances({fs,directory,codexHome,cli,node,env,track,validator,fetc
     try {fs.accessSync(cli,constants.X_OK);} catch {return fail(`The Codex CLI at ${cli} is not executable.`);}
     let list:unknown[]|undefined,incremental=false,catalogSource='';
     if(catalogPath){
-      try {const catalog=JSON.parse(boundedFile(fs,track(catalogPath))) as {models?:unknown;reports_incremental_input?:unknown};if(Array.isArray(catalog.models)){list=catalog.models;incremental=catalog.reports_incremental_input===true;catalogSource='its model catalog';}} catch {list=undefined;}
-      if(!list)return fail(`The model catalog ${catalogPath} is missing, unreadable or has no "models" array.`);
+      const catalog=readCodexCatalog(track(catalogPath),fs);
+      if(!catalog.ok)return fail(catalog.error);
+      list=catalog.models;incremental=catalog.incremental;catalogSource='its model catalog';
     } else if(route.kind==='chatgpt'){
       // Codex keeps the model list of a ChatGPT sign-in in its own cache.
       try {const cache=JSON.parse(boundedFile(fs,track(join(codexHome,'models_cache.json')))) as {models?:unknown};if(Array.isArray(cache.models)){list=cache.models;catalogSource='Codex’s model cache';}} catch {list=undefined;}

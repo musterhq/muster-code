@@ -926,7 +926,8 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
       const chatgptReady = runtime.some(entry => entry.id === 'openai-direct' && entry.available);
       const shown = (entry: {id: string; available?: boolean}) => !(entry.id.startsWith('env-') && !entry.available) && !(entry.id === 'codex' && chatgptReady);
       return [...runtime.filter(shown).map(entry=>({...entry,...account(entry),source:entry.codex&&entry.source?entry.source:'Existing local provider profile'})),
-        ...detected.filter(entry=>!runtime.some(runnable=>runnable.id===entry.id)&&shown(entry)).map(({identity,credentialPresent,...entry})=>({...entry,available:false,models:[],canReveal:Boolean(identity),source:'Local configuration discovery',detail:`${entry.detail}. No runnable adapter is enabled for this entry.`})),
+        // A Codex gateway already listed as a route (its id may be prefixed, e.g. codex-<id>) is not listed again as a dead discovery row.
+        ...detected.filter(entry=>!runtime.some(runnable=>runnable.id===entry.id||(runnable.codex?.kind==='gateway'&&runnable.codex.modelProvider===entry.id&&!runnable.codex.account))&&shown(entry)).map(({identity,credentialPresent,...entry})=>({...entry,available:false,models:[],canReveal:Boolean(identity),source:'Local configuration discovery',detail:`${entry.detail}. No runnable adapter is enabled for this entry.`})),
         ...customProviders.list()];
     }
     if (command === 'plugins.inventory') return discoverPlugins();

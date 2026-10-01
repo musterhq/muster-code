@@ -28,8 +28,8 @@ test('PRO-04: the catalog decides what a route offers and every left-out entry c
     ['codex/retired', 'The provider catalog marks this model hidden.'],
     ['codex/secret', 'The provider catalog marks this model hidden.'],
     ['codex/gpt-5.6-terra', 'Listed more than once in the catalog; the first entry is used.'],
-    ['entry-6', 'The catalog entry has no usable model id.'],
-    ['entry-7', 'The catalog entry has no usable model id.'],
+    ['entry-6', 'The catalog entry has no "slug".'],
+    ['entry-7', 'The catalog entry is not an object.'],
   ]);
   const terra = gateway.models[0]!;
   assert.equal(terra.images, true, 'declared image input is recorded, not left undefined');

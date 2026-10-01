@@ -5,7 +5,7 @@ import { homedir } from 'node:os';
 import {configuredProviderInstances,providerListingsSettled,providerNode,type ProviderInstance,revalidateProviderInstances} from './provider-instances.ts';
 import {createAdapterCatalog,type AdapterCatalog} from './adapters/index.ts';
 import {readOwnedCommandOutputs} from './command-output-recovery.ts';
-import {coreBudgetOptions, classifyProviderFailure, lifecycleDiagnostic, requestWhileOwned, providerAccessPolicy, type ProviderBudgets, type ProviderRecovery} from './provider-run-lifecycle.ts';
+import {authFailureStatus, authRecovery, coreBudgetOptions, classifyProviderFailure, lifecycleDiagnostic, requestWhileOwned, providerAccessPolicy, type ProviderBudgets, type ProviderRecovery} from './provider-run-lifecycle.ts';
 import {currentProviderUsage, formatResetEta} from './provider-usage.ts';
 import {connectorPolicy, leanCodexFeatureOverrides} from './context-budget.ts';
 import type { Chat, ProviderInfo } from '../shared/protocol.ts';
@@ -190,6 +190,7 @@ export function createProviderAdapter(options: { core?: CoreClient; available?: 
       const recovery: ProviderRecovery | undefined = cancelled ? {kind: 'cancelled', retryable: false, reason: 'Stopped. This attempt will not resume automatically.'}
         : result.status === 'completed' ? undefined
         : notDispatched && (result.statusCode === 429 || result.statusCode === 503) ? {kind: 'admission-rejected', retryable: true, reason: `${result.errorMessage ?? 'The provider is at capacity.'} No turn was dispatched; retry manually later.`}
+        : authFailureStatus(result.statusCode, notDispatched ? result.errorMessage : '') ? authRecovery(route.info, authFailureStatus(result.statusCode, notDispatched ? result.errorMessage : '')!, result.errorMessage)
         : {kind: 'failed', retryable: notDispatched, reason: result.errorMessage ? `The provider attempt failed: ${result.errorMessage}` : 'The provider attempt failed.'};
       return {status: cancelled ? 'failed' : result.status, finalMessage: result.finalMessage, dispatchState: result.dispatchState,
         ...(result.threadId ? {threadId: result.threadId} : {}), ...(result.turnId ? {turnId: result.turnId} : {}),
@@ -373,14 +374,14 @@ export function createProviderAdapter(options: { core?: CoreClient; available?: 
         // A resets-in-N-min ETA, when the provider is near capacity, is appended to an
         // admission-rejected reason so the user knows roughly when to retry instead of guessing.
         const resetEta = formatResetEta(currentProviderUsage(route.info.id, route.sessionsRoot, route.info.codex?.modelProvider));
-        const recovery = classifyProviderFailure(result, { activity: session.activity, terminal, cancelled: session.controller.signal.aborted, resetEta });
+        const recovery = classifyProviderFailure(result, { activity: session.activity, terminal, cancelled: session.controller.signal.aborted, resetEta, provider: route.info });
         if (result.status === 'failed') session.retired = true;
         return { ...result, ...(session.controller.signal.aborted ? { status: 'failed' as const, errorMessage: recovery?.reason } : {}), ...(recovery ? { recovery } : {}) };
       } catch (error) {
         session.retired = true;
         close(session);
         const result: ProviderResult = { status: 'failed', finalMessage: '', errorMessage: error instanceof Error ? error.message : String(error), dispatchState: 'unknown', ...(session.threadId ? { threadId: session.threadId } : {}), ...(session.turnId ? { turnId: session.turnId } : {}) };
-        return { ...result, recovery: classifyProviderFailure(result, { activity: session.activity, terminal: false, cancelled: session.controller.signal.aborted, resetEta: formatResetEta(currentProviderUsage(route.info.id, route.sessionsRoot, route.info.codex?.modelProvider)) }) };
+        return { ...result, recovery: classifyProviderFailure(result, { activity: session.activity, terminal: false, cancelled: session.controller.signal.aborted, resetEta: formatResetEta(currentProviderUsage(route.info.id, route.sessionsRoot, route.info.codex?.modelProvider)), provider: route.info }) };
       } finally {
         session.active = false;
         if (session.retired) session.controller.abort();

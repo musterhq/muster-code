@@ -1,7 +1,7 @@
 import React, {useEffect, useRef, useState} from 'react';
 import type {Chat} from '../../shared/protocol';
 import {invoke} from '../bridge';
-import {sendMessage} from '../store';
+import {openProvidersTab, sendMessage} from '../store';
 import {useStoreSelector} from '../useStore';
 import './recovery-notice.css';
 
@@ -57,6 +57,7 @@ export function RecoveryNotice({chat}:{chat:Chat}) {
     <span>{stillRunning?'Still running at the provider. This updates when it finishes.':chat.recovery?.reason || chat.error}</span>
     {uncertain && <><p>Your draft is retained. Check the existing attempt before sending again.</p><button type="button" className="workspace-inline-link" disabled={checking || active} onClick={()=>void check()}>{checking?'Checking provider status…':stillRunning?'Check now':'Check provider status'}</button></>}
     {rejected && <><p>{draft?'No turn was dispatched; your draft is retained.':'No turn was dispatched. Write a message to retry.'}</p><button type="button" className="workspace-inline-link" aria-busy={retrying||undefined} disabled={retrying || sending || active || !draft} onClick={()=>void retry()}>{retrying?'Retrying…':'Retry now'}</button></>}
+    {chat.recovery?.auth && <button type="button" className="workspace-inline-link" data-testid="recovery-open-providers" onClick={()=>openProvidersTab()}>Open Accounts &amp; providers</button>}
     {result && <p>{result}</p>}
   </div>;
 }

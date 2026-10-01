@@ -70,5 +70,14 @@ root.render(<RecoveryNotice chat={{...base,status:'interrupted',error:'Stopped.'
 assert.equal(document.querySelector('.chat-error-banner')?.className,'chat-error-banner is-interrupted');
 assert.equal(document.querySelector('.chat-error-banner')?.getAttribute('data-recovery'),'cancelled');
 assert.equal(text(),'Stopped.');assert.ok(!button(),'Stop never asks the user to check provider status');
+// #207: rejected credentials are never retried; the banner links straight to Accounts & providers.
+const authReason='Hybrowlabs rejected the request (401). Your API key or sign-in for this provider is missing or expired. Open Accounts & providers to fix it.';
+root.render(<RecoveryNotice chat={{...base,error:authReason,recovery:{kind:'failed',retryable:false,reason:authReason,auth:{providerId:'custom_hybrow',status:401}}}}/>);await delay(20);
+assert.ok(text().includes('Hybrowlabs rejected the request (401)'));
+assert.equal(document.querySelectorAll('.chat-error-banner button').length,1,'no Retry for rejected credentials');
+assert.equal(button()?.textContent,'Open Accounts & providers');
+button()!.click();await delay(20);
+const {getState}=await import('../src/renderer/store');
+assert.equal(getState().screen,'settings');assert.equal(getState().settingsSection,'providers');
 root.unmount();assert.deepEqual(errors,[]);
 console.log('PASS: admission-rejected Retry now sends the retained draft with busy/disabled states; recovery-needed keeps the reconcile button');

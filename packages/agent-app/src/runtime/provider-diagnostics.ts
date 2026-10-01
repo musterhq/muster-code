@@ -13,6 +13,7 @@ import type { ProviderDiagnosis, ProviderStage } from '../shared/domains/provide
 import { accountHash, parseProviderAccounts, providerAccountsFile, providerDataDir } from './provider-instances.ts';
 import { ENV_KEY_PROVIDERS } from './env-providers.ts';
 import { CODEX_LAUNCHER, cliSpawn } from './adapters/shared.ts';
+import { readCodexCatalog } from './codex-catalog.ts';
 
 export interface DiagnoseOptions { home?: string; env?: NodeJS.ProcessEnv; directory?: string; now?: () => number; version?: (cli: string) => Promise<string | null>; dataDir?: string }
 type Step = Omit<ProviderDiagnosis, 'id' | 'version' | 'checkedAt' | 'diagnostics'>;
@@ -92,8 +93,8 @@ function codexSteps(p: ProviderInfo, options: Required<Pick<DiagnoseOptions, 'ho
   } catch (error) { return {step: {stage: 'profile-invalid', summary: `${profile}.config.toml did not validate${error instanceof Error && error.message.length < 160 ? `: ${error.message}` : '.'}`, hint: `Fix ${profilePath}; Muster only runs validated profiles.`}, cli, facts}; }
   if (typeof catalogPath !== 'string' || !isAbsolute(catalogPath)) return {step: {stage: 'profile-invalid', summary: 'The profile has no absolute model_catalog_json path.', hint: `Add model_catalog_json = "/absolute/path/models.json" to ${profilePath}.`}, cli, facts};
   facts.push(`catalog: ${catalogPath}`);
-  try { const catalog = JSON.parse(readSmall(catalogPath)) as {models?: unknown}; if (!Array.isArray(catalog.models) || !catalog.models.length) throw new Error('empty'); }
-  catch { return {step: {stage: 'catalog-unreadable', summary: 'The local model catalog is missing, unreadable or lists no models.', hint: `Check ${catalogPath}: it must be JSON with a non-empty "models" array.`}, cli, facts}; }
+  const catalog = readCodexCatalog(catalogPath);
+  if (!catalog.ok) return {step: {stage: 'catalog-unreadable', summary: catalog.error, hint: `Fix ${catalogPath}: Codex's catalog schema is {"models": [{"slug": "…", "display_name": "…"}]}.`}, cli, facts};
   // The gateway authenticates upstream itself; only the direct route needs a local ChatGPT sign-in.
   if (family === 'chatgpt') return {step: authStage(readAuth(), now, login, profile === 'openai-direct'), cli, facts};
   return {step: ok('Launcher, profile and model catalog are in place. Upstream access is checked when you run.'), cli, facts};
