@@ -39,3 +39,15 @@ test('M2: a task or standup automation set to Read only never starts a run with 
   assert.ok(modes.length >= 2);
   assert.deepEqual([...new Set(modes)], ['read-only']);
 });
+
+test('S1: the same message id voted in two projects makes two votes; one project cannot overwrite the other', async t => {
+  const h = await wave2(t);
+  const other = await h.s.invoke('project.create', { name: 'Other', goal: '', folderIds: [h.folder.id] });
+  await h.s.invoke('work.votes.set', { projectId: h.project.id, subject: 'message', subjectId: 'shared-id', vote: 'helpful', reason: 'mine', excerpt: 'A' });
+  await h.s.invoke('work.votes.set', { projectId: other.id, subject: 'message', subjectId: 'shared-id', vote: 'needs_work', reason: 'theirs', excerpt: 'B' });
+  const mine = (await h.s.invoke('work.votes.list', { projectId: h.project.id })).votes, theirs = (await h.s.invoke('work.votes.list', { projectId: other.id })).votes;
+  assert.deepEqual([mine.length, mine[0]!.vote, mine[0]!.reason], [1, 'helpful', 'mine']);
+  assert.deepEqual([theirs.length, theirs[0]!.vote], [1, 'needs_work']);
+  await h.s.invoke('work.votes.set', { projectId: other.id, subject: 'message', subjectId: 'shared-id', vote: null });
+  assert.equal((await h.s.invoke('work.votes.list', { projectId: h.project.id })).votes.length, 1);
+});

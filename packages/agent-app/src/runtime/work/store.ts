@@ -31,7 +31,7 @@ CREATE TABLE IF NOT EXISTS doc_threads(id TEXT PRIMARY KEY,task_id TEXT NOT NULL
 CREATE INDEX IF NOT EXISTS doc_threads_doc ON doc_threads(task_id,key);
 CREATE TABLE IF NOT EXISTS doc_comments(id TEXT PRIMARY KEY,thread_id TEXT NOT NULL,author TEXT NOT NULL,kind TEXT NOT NULL,body TEXT NOT NULL,created_at TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS doc_comments_thread ON doc_comments(thread_id,created_at);
-CREATE TABLE IF NOT EXISTS votes(id TEXT PRIMARY KEY,project_id TEXT NOT NULL,subject TEXT NOT NULL,subject_id TEXT NOT NULL,task_id TEXT,vote TEXT NOT NULL,reason TEXT NOT NULL DEFAULT '',excerpt TEXT NOT NULL DEFAULT '',created_at TEXT NOT NULL,UNIQUE(subject,subject_id));
+CREATE TABLE IF NOT EXISTS votes(id TEXT PRIMARY KEY,project_id TEXT NOT NULL,subject TEXT NOT NULL,subject_id TEXT NOT NULL,task_id TEXT,vote TEXT NOT NULL,reason TEXT NOT NULL DEFAULT '',excerpt TEXT NOT NULL DEFAULT '',created_at TEXT NOT NULL,UNIQUE(project_id,subject,subject_id));
 CREATE INDEX IF NOT EXISTS votes_project ON votes(project_id,created_at);
 CREATE TABLE IF NOT EXISTS output_state(project_id TEXT NOT NULL,output_id TEXT NOT NULL,status TEXT NOT NULL,note TEXT NOT NULL DEFAULT '',by TEXT NOT NULL,at TEXT NOT NULL,PRIMARY KEY(project_id,output_id));
 CREATE TABLE IF NOT EXISTS outputs_seen(project_id TEXT PRIMARY KEY,seen_at TEXT NOT NULL);
@@ -214,8 +214,8 @@ export class WorkStore {
   votes(projectId: string, taskId?: string): Vote[] { return this.all(`SELECT * FROM votes WHERE project_id=? ${taskId ? 'AND task_id=?' : ''} ORDER BY created_at DESC`, ...(taskId ? [projectId, taskId] : [projectId])).map(r => this.toVote(r)); }
   setVote(projectId: string, subject: VoteSubject, subjectId: string, taskId: string | null, vote: VoteKind | null, reason: string, excerpt: string): Vote | null {
     if (!vote) { this.run('DELETE FROM votes WHERE subject=? AND subject_id=? AND project_id=?', subject, subjectId, projectId); return null; }
-    this.run(`INSERT INTO votes(id,project_id,subject,subject_id,task_id,vote,reason,excerpt,created_at) VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(subject,subject_id) DO UPDATE SET vote=excluded.vote,reason=excluded.reason,excerpt=excluded.excerpt,created_at=excluded.created_at`, randomUUID(), projectId, subject, subjectId, taskId, vote, reason, excerpt, this.stamp());
-    return this.toVote(this.one('SELECT * FROM votes WHERE subject=? AND subject_id=?', subject, subjectId)!);
+    this.run(`INSERT INTO votes(id,project_id,subject,subject_id,task_id,vote,reason,excerpt,created_at) VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(project_id,subject,subject_id) DO UPDATE SET vote=excluded.vote,reason=excluded.reason,excerpt=excluded.excerpt,created_at=excluded.created_at`, randomUUID(), projectId, subject, subjectId, taskId, vote, reason, excerpt, this.stamp());
+    return this.toVote(this.one('SELECT * FROM votes WHERE project_id=? AND subject=? AND subject_id=?', projectId, subject, subjectId)!);
   }
 
   // ── outputs (G4) ────────────────────────────────────────────────────────────
