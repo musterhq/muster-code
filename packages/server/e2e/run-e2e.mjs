@@ -316,3 +316,5 @@ try {
   if (SHOTS) { try { writeFileSync(join(SHOTS, 'e2e.log'), readFileSync(LOG)); } catch {} }
   if (!KEEP) rmSync(WORK, { recursive: true, force: true }); else log(`kept ${WORK}`);
 }
+// Mock servers keep long-poll and keep-alive sockets open; everything we started is stopped above, so exit explicitly.
+process.exit(process.exitCode ?? 0);
