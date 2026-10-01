@@ -18,6 +18,8 @@ export type ChatDefaultsResolver = (input: { folderId?: string; projectId?: stri
 /** A domain command that completed without throwing. Observers must not throw or block. */
 export interface CommandCompleted { command: string; input: Record<string, unknown>; output: unknown }
 export type RunEnvironmentResolver = (chat: Chat, defaultCwd: string) => Promise<{ cwd: string }>;
+/** G13: a per-agent tool policy decision for an approval request. null: no rule applies and the usual flow decides. */
+export type ToolPolicyResolver = (chat: Chat, method: string, params: Record<string, unknown>) => { effect: 'allow' | 'ask' | 'deny'; message: string } | null;
 
 /** The add and on hooks return an unsubscribe function; the set hooks replace a single resolver (undefined clears it). */
 export interface DomainHooks {
@@ -28,6 +30,8 @@ export interface DomainHooks {
   onProviderEvent(fn: (event: ProviderEventInfo) => void): () => void;
   setChatDefaults(fn: ChatDefaultsResolver | undefined): void;
   setRunEnvironmentResolver(fn: RunEnvironmentResolver | undefined): void;
+  /** Replaces the single tool-policy resolver (undefined clears it). Optional so bare test contexts need not provide it. */
+  setToolPolicy?(fn: ToolPolicyResolver | undefined): void;
   /** Observes successful domain commands (e.g. Projects logging memory and environment writes to activity). Optional so bare test contexts need not provide it. */
   onCommand?(fn: (event: CommandCompleted) => void): () => void;
 }

@@ -87,7 +87,10 @@ export function filterEvent(v: AccessView, event: AgentEvent, snapshot: Snapshot
 const PROJECT_ID_COMMANDS = /^project\.(update|linkFolder|unlinkFolder|preview|archive|restore|delete|instructions\.set|scheduler\.set)$/;
 const CHAT_ID_COMMANDS = /^(chat\.|goals\.|subagents\.)/;
 const OWNER_ONLY_PROJECT = new Set(['project.delete', 'project.archive', 'project.restore', 'project.members.add', 'project.members.update', 'project.members.revoke',
-  'project.members.restore', 'project.members.decide', 'project.team.settings.set', 'project.update', 'project.linkFolder', 'project.unlinkFolder']);
+  'project.members.restore', 'project.members.decide', 'project.team.settings.set', 'project.update', 'project.linkFolder', 'project.unlinkFolder',
+  // Governance: run policy, agent permissions and tool rules, instruction bundles, execution policies and the secret vault.
+  'project.gov.settings.set', 'project.agent.gov.set', 'project.agent.files.save', 'project.agent.files.remove', 'project.agent.revisions.restore', 'project.tasks.policy.set',
+  'project.secrets.list', 'project.secrets.audit', 'project.secrets.save', 'project.secrets.rollback', 'project.secrets.remove', 'project.secrets.grant', 'project.secrets.decide']);
 /** Commands whose result is server-wide and not filterable per project: admins only for everyone else. */
 const ADMIN_READS = /^(paperclip\.(snapshot|dashboard|list|badge|memory|task|config\.get|inbox\.dismissed|import\.plan|watch)|settings\.(export|diagnostics|storage|storage\.preview)|providers\.diagnose|import\.|memory\.(export|archives|bank\.preview|import\.preview))/;
 

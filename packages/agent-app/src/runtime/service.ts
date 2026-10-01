@@ -613,7 +613,15 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
             // R5: a command that would signal the user's own processes always becomes a card. Full access asks the
             // provider about every non-trusted command (approvalPolicy 'untrusted') so it can be stopped here; the rest is accepted at once.
             const threat = method === 'item/commandExecution/requestApproval' ? await guardUserProcesses(params.command) : null;
-            if (access.permissionMode === 'full' && !threat) return {decision: 'accept'};
+            // G13: the agent's own tool rules. Deny refuses with a visible notice; allow answers the card (never for a stop-the-user's-process request); ask shows it even in full access.
+            const toolPolicy = (() => { const chat = store.chat(chatId); return chat ? domainHooks.toolPolicy(chat, method, params) : null; })();
+            if (toolPolicy?.effect === 'deny') {
+              store.appendItem(chatId, 'notice', toolPolicy.message, 'failed', {kind: 'tool-policy', method});
+              timeline(chatId);
+              return {decision: 'decline'};
+            }
+            if (toolPolicy?.effect === 'allow' && !threat) return {decision: 'accept'};
+            if (access.permissionMode === 'full' && !threat && toolPolicy?.effect !== 'ask') return {decision: 'accept'};
             const change = typeof params.itemId === 'string' && toolIds.has(params.itemId) ? store.item(toolIds.get(params.itemId)!)?.data?.changes : params.changes;
             const data: ApprovalData = {...approvalData(method, params, change), ...(threat ? {reason: threat.message, protectsUserProcess: true} : {})};
             const toolItemId = typeof params.itemId === 'string' ? toolIds.get(params.itemId) : undefined;

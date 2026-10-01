@@ -193,6 +193,16 @@ export function locateCli(name: string, env: NodeJS.ProcessEnv, home: string, pr
 
 export const text = (value: unknown): string => typeof value === 'string' ? value : '';
 
+/** Codex-style `shell_environment_policy.set.<NAME>` overrides as run environment (git identity, lent secrets). Only plain upper-case names. */
+export function envFromOverrides(overrides: Record<string, unknown> | undefined): Record<string, string> {
+  const env: Record<string, string> = {};
+  for (const [key, value] of Object.entries(overrides ?? {})) {
+    const match = /^shell_environment_policy\.set\.([A-Z_][A-Z0-9_]{0,63})$/.exec(key);
+    if (match && typeof value === 'string' && value.length <= 8192 && !value.includes('\0')) env[match[1]!] = value;
+  }
+  return env;
+}
+
 /** Codex-style `mcp_servers.<name>.command|args|env.<KEY>` overrides as MCP server specs (other keys are Codex-only). */
 export function mcpServersFromOverrides(overrides: Record<string, unknown> | undefined): Record<string, {command: string; args?: string[]; env?: Record<string, string>}> {
   const servers: Record<string, {command: string; args?: string[]; env?: Record<string, string>}> = {};

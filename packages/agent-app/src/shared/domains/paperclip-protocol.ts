@@ -40,6 +40,8 @@ export interface WorkspaceTask {
   blockedByIds: string[];
   /** Who opened it (board, an agent, you). */
   origin: string | null;
+  /** Hidden from lists (Hide task). Open it by key or from its parent. */
+  hidden?: boolean;
 }
 export type AgentState = 'active' | 'idle' | 'running' | 'paused' | 'error' | 'pending' | 'terminated';
 export interface WorkspaceAgent {

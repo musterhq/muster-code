@@ -121,7 +121,7 @@ export function claudeCodeAdapter(options: {binary: string; env?: NodeJS.Process
       const sessionId = input.resumeThreadId ?? randomUUID(), turnId = randomUUID();
       // The subscription row must run on the Claude sign-in; an API key in the host env
       // would silently switch billing. That key has its own Anthropic API row.
-      const env = {...(options.env ?? process.env)}; delete env.ANTHROPIC_API_KEY;
+      const env = {...(options.env ?? process.env), ...(input.env ?? {})}; delete env.ANTHROPIC_API_KEY;
       let child: ChildProcess;
       const launch = cliSpawn(options.binary, claudeArgs(input, sessionId), env);
       try { child = spawn(launch.command, launch.args, {cwd: input.cwd, env: launch.env, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true}); }

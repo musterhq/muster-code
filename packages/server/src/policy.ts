@@ -54,7 +54,7 @@ const READ_TAIL = new Set([
   'export', 'worktree.list', 'defaultDestination', 'terminalShells', 'select', 'watch', 'pullRequests', 'compareUrl', 'diagnose', 'editOptions', 'editRestorePreview',
   'recall', 'plan', 'dismissed', 'checkLog', 'directives', 'detect', 'archives', 'deletes', 'authorize',
 ]);
-const READ_EXACT = new Set(['app.snapshot', 'chat.timeline', 'workspace.watch', 'git.status', 'git.changes', 'memory.list', 'memory.search', 'memory.inspect',
+const READ_EXACT = new Set(['project.gov.state', 'project.gov.inbox', 'project.agent.gov.get', 'project.secrets.list', 'project.secrets.audit', 'app.snapshot', 'chat.timeline', 'workspace.watch', 'git.status', 'git.changes', 'memory.list', 'memory.search', 'memory.inspect',
   'hindsight.status', 'hindsight.recall', 'plugins.list', 'plugins.inventory', 'providers.list', 'settings.get', 'settings.projectModel.get',
   'settings.folderModel.get', 'project.handoff.latest', 'project.work', 'paperclip.watch', 'git.info', 'git.worktree.list', 'providers.cli.status',
   'providers.secret.status', 'chat.defaults', 'project.tasks.list', 'project.decisions.list', 'project.activity.list', 'project.activity.query',
