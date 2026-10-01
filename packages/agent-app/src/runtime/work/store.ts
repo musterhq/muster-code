@@ -117,7 +117,7 @@ export class WorkStore {
     else this.run('INSERT INTO labels(id,project_id,name,color,created_at) VALUES(?,?,?,?,?)', id, projectId, input.name, input.color, this.stamp());
     return this.label(projectId, id)!;
   }
-  removeLabel(projectId: string, id: string): void { this.tx(() => { this.run('DELETE FROM task_labels WHERE label_id=?', id); this.run('DELETE FROM labels WHERE id=? AND project_id=?', id, projectId); }); }
+  removeLabel(projectId: string, id: string): void { this.tx(() => { if (!this.label(projectId, id)) return; this.run('DELETE FROM task_labels WHERE label_id=?', id); this.run('DELETE FROM labels WHERE id=? AND project_id=?', id, projectId); }); }
   taskLabels(taskId: string): TaskLabel[] { return this.all('SELECT l.id,l.name,l.color FROM task_labels t JOIN labels l ON l.id=t.label_id WHERE t.task_id=? ORDER BY lower(l.name)', taskId).map(r => ({ id: s(r.id), name: s(r.name), color: s(r.color) as LabelColor })); }
   setTaskLabels(taskId: string, labelIds: string[]): TaskLabel[] {
     this.tx(() => { this.run('DELETE FROM task_labels WHERE task_id=?', taskId); for (const id of new Set(labelIds)) this.run('INSERT OR IGNORE INTO task_labels(task_id,label_id) VALUES(?,?)', taskId, id); });
