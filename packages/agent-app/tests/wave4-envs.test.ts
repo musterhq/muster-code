@@ -18,7 +18,9 @@ async function sshd(t: import('node:test').TestContext) {
   copyFileSync(join(dir, 'client_key.pub'), join(dir, 'authorized_keys')); for (const f of ['authorized_keys', 'client_key', 'host_key']) chmodSync(join(dir, f), 0o600);
   writeFileSync(join(dir, 'sshd_config'), `Port ${port}\nListenAddress 127.0.0.1\nHostKey ${dir}/host_key\nAuthorizedKeysFile ${dir}/authorized_keys\nPasswordAuthentication no\nKbdInteractiveAuthentication no\nPubkeyAuthentication yes\nUsePAM no\nStrictModes no\nPidFile ${dir}/sshd.pid\nLogLevel ERROR\n`);
   const child: ChildProcess = spawn(SSHD, ['-D', '-e', '-f', join(dir, 'sshd_config')], { stdio: 'ignore' }); t.after(() => { child.kill('SIGKILL'); });
-  for (let i = 0; i < 50; i++) { await wait(100); try { await new Promise<void>((res, rej) => { const s = require_net().connect(port, '127.0.0.1', () => { s.destroy(); res(); }); s.on('error', rej); }); break; } catch { /* not yet */ } }
+  let up = false;
+  for (let i = 0; i < 50 && !up; i++) { await wait(100); try { await new Promise<void>((res, rej) => { const s = require_net().connect(port, '127.0.0.1', () => { s.destroy(); res(); }); s.on('error', rej); }); up = true; } catch { /* not yet */ } }
+  if (!up) return null;
   const fp = execFileSync('ssh-keygen', ['-lf', join(dir, 'host_key.pub')], { encoding: 'utf8' }).split(' ')[1]!;
   return { dir, port, key: join(dir, 'client_key'), fingerprint: fp, user: userInfo().username };
 }
@@ -37,7 +39,7 @@ test('G21: host validation, key file checks and untrusted hosts are refused', { 
 });
 
 test('G21: scan, compare, trust; test; a chat bound to the host gets tools that run there, honour read-only, and refuse a changed host key', { skip: !haveSsh }, async t => {
-  const h = await wave1(t), s = await sshd(t);
+  const h = await wave1(t), s = await sshd(t); if (!s) return t.skip('a throwaway sshd could not start on this machine');
   const host = await h.s.invoke('ssh.hosts.save', { name: 'local sshd', host: '127.0.0.1', port: s.port, user: s.user, keyPath: s.key, remoteDir: s.dir });
   const scan = await h.s.invoke('ssh.hostkey.scan', { id: host.id }); assert.equal(scan.fingerprint, s.fingerprint); assert.equal(scan.type, 'ed25519');
   await assert.rejects(h.s.invoke('ssh.hostkey.trust', { id: host.id, fingerprint: `SHA256:${'A'.repeat(43)}` }), /not the one you confirmed/);
@@ -77,7 +79,7 @@ test('G21: scan, compare, trust; test; a chat bound to the host gets tools that 
 });
 
 test('G21: a key readable by others is refused with the fix', { skip: !haveSsh }, async t => {
-  const h = await wave1(t), s = await sshd(t); chmodSync(s.key, 0o644);
+  const h = await wave1(t), s = await sshd(t); if (!s) return t.skip('a throwaway sshd could not start on this machine'); chmodSync(s.key, 0o644);
   const host = await h.s.invoke('ssh.hosts.save', { name: 'loose', host: '127.0.0.1', port: s.port, user: s.user, keyPath: s.key });
   const scan = await h.s.invoke('ssh.hostkey.scan', { id: host.id }); await h.s.invoke('ssh.hostkey.trust', { id: host.id, fingerprint: scan.fingerprint });
   const r = await h.s.invoke('ssh.test', { id: host.id }); assert.equal(r.ok, false); assert.match(r.detail, /chmod 600/);

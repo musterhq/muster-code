@@ -64,7 +64,7 @@
 .ws-options { position: relative; }
 .ws-options > summary { list-style: none; cursor: pointer; display: inline-flex; align-items: center; gap: 4px; }
 .ws-options > summary::-webkit-details-marker { display: none; }
-.ws-options-panel { position: absolute; z-index: 20; right: 0; top: calc(100% + 4px); display: flex; flex-direction: column; gap: 10px; width: 280px; padding: 12px; border: 1px solid var(--hairline); border-radius: var(--radius-10); background: var(--bg-raised); box-shadow: var(--shadow-menu, 0 8px 24px rgb(0 0 0 / 18%)); }
+.ws-options-panel { position: absolute; z-index: 20; right: 0; top: calc(100% + 4px); display: flex; flex-direction: column; gap: 10px; width: 280px; padding: 12px; border: 1px solid var(--hairline); border-radius: var(--radius-10); background: var(--bg-raised); box-shadow: var(--shadow-popover); }
 .ws-options-panel fieldset { display: flex; flex-direction: column; gap: 6px; margin: 0; padding: 0; border: 0; font-size: var(--fs-12); }
 .ws-options-panel legend { margin-bottom: 4px; color: var(--text-dim); font-weight: 600; }
 .ws-options-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: var(--fs-12); color: var(--text-dim); }
