@@ -29,3 +29,18 @@ test('heartbeat timers follow the agent: revoke, pause and archive disarm them, 
   await h.s.invoke('project.members.restore', { projectId: h.project.id, id: cto.id }); await flush();
   assert.equal(h.clock!.pending, base, 'restored member: armed again');
 });
+
+test('S3: resuming from the wake-storm card re-arms the agent’s heartbeat', async t => {
+  const h = await wave1(t, { fakeClock: true });
+  const cto = await h.member('CTO');
+  const flush = () => h.clock!.advance(2000);
+  await h.s.invoke('project.agent.gov.set', { projectId: h.project.id, memberId: cto.id, heartbeat: { enabled: true, intervalSec: 60 } });
+  await h.s.invoke('project.gov.settings.set', { projectId: h.project.id, stormPerMinute: 2 }); await flush();
+  for (let i = 0; i < 5; i++) { const task = await h.addTask(`Storm ${i}`, { kind: 'agent', id: cto.id }); await h.s.invoke('project.agent.wake', { projectId: h.project.id, memberId: cto.id, taskId: task.id }).catch(() => undefined); }
+  await flush();
+  const breaker = (await h.gov()).breakers.find(b => b.kind === 'wake_storm' && b.state === 'open');
+  assert.ok(breaker, 'the storm paused the agent and raised a card');
+  await h.clock!.advance(5_000); const paused = h.clock!.pending; // delayed wakes have fired; only timers that outlive them remain
+  await h.s.invoke('project.breakers.resolve', { projectId: h.project.id, id: breaker!.id, action: 'resume' }); await flush();
+  assert.equal(h.clock!.pending, paused + 1, 'resumed from the card: the heartbeat is armed again');
+});

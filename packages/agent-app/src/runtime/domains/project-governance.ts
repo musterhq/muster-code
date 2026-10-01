@@ -271,7 +271,7 @@ export function createGovernance(ctx: DomainContext, deps: GovernanceDeps) {
     const name = nameOf(w.projectId, w.memberId), recent = gov().wakes(w.projectId, { limit: 12 }).filter(x => x.status === 'started');
     gov().addBreaker({ projectId: w.projectId, kind: 'wake_storm', subject: w.memberId, memberId: w.memberId, summary: `${w.count} wakes in a minute (limit ${w.perMinute}). ${name} was paused.`, evidence: recent.map(r => `${RUN_REASON_LABEL[r.reason]}${r.taskId ? ` · ${clip(tasks().getTask(r.taskId)?.title ?? '', 50)}` : ''} · ${r.createdAt}`) });
     record(w.projectId, 'task.breaker', `Wake storm: ${w.count} wakes in a minute. ${name} was paused until you resume it.`, w.memberId, 'system');
-    try { await deps.team.handlers['project.members.pause']!({ projectId: w.projectId, id: w.memberId, paused: true }); } catch { /* the default agent has nothing to pause */ }
+    try { await deps.team.handlers['project.members.pause']!({ projectId: w.projectId, id: w.memberId, paused: true }); } catch { /* the default agent has nothing to pause */ } arm(w.projectId, w.memberId);
   }
 
   const heartbeatTimers = new Map<string, unknown>();
@@ -1237,7 +1237,7 @@ export function createGovernance(ctx: DomainContext, deps: GovernanceDeps) {
       const projectId = project(input), b = gov().getBreaker(id(input.id, 'event id'));
       if (!b || b.projectId !== projectId) throw new Error('That event no longer exists.');
       if (b.state !== 'open') return b;
-      if (input.action === 'resume' && b.kind === 'wake_storm' && b.memberId) { try { await deps.team.handlers['project.members.pause']!({ projectId, id: b.memberId, paused: false }); } catch { /* already resumed */ } }
+      if (input.action === 'resume' && b.kind === 'wake_storm' && b.memberId) { try { await deps.team.handlers['project.members.pause']!({ projectId, id: b.memberId, paused: false }); } catch { /* already resumed */ } arm(projectId, b.memberId); }
       gov().setBreakerState(b.id, input.action === 'resume' ? 'resumed' : 'dismissed');
       record(projectId, 'task.breaker', input.action === 'resume' ? `Resumed after: ${b.summary}` : `Dismissed: ${b.summary}`, b.subject, 'user'); deps.changed(projectId, '', true);
       return gov().getBreaker(b.id)!;
