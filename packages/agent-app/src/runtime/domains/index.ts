@@ -25,8 +25,9 @@ import { createCiDomain } from './ci.ts';
 import { createTerminalDomain } from './terminal.ts';
 import { createSetupDomain } from './setup.ts';
 import { createPaperclipDomain } from './paperclip.ts';
+import { createMusterServerDomain } from './muster-server.ts';
 
-export const DOMAIN_FACTORIES: Record<DomainName, DomainFactory> = {models: createModelsDomain, memory: createMemoryDomain, settings: createSettingsDomain, projects: createProjectsDomain, git: createGitDomain, subagents: createSubagentsDomain, review: createReviewDomain, automations: createAutomationsDomain, computer: createComputerDomain, providers: createProvidersDomain, extensions: createExtensionsDomain, files: createFilesDomain, search: createSearchDomain, mcp: createMcpDomain, artifacts: createArtifactsDomain, goals: createGoalsDomain, mailbox: createMailboxDomain, sandbox: createSandboxDomain, 'import': createImportDomain, stashes: createStashesDomain, github: createGitHubDomain, ci: createCiDomain, terminal: createTerminalDomain, setup: createSetupDomain, paperclip: createPaperclipDomain};
+export const DOMAIN_FACTORIES: Record<DomainName, DomainFactory> = {models: createModelsDomain, memory: createMemoryDomain, settings: createSettingsDomain, projects: createProjectsDomain, git: createGitDomain, subagents: createSubagentsDomain, review: createReviewDomain, automations: createAutomationsDomain, computer: createComputerDomain, providers: createProvidersDomain, extensions: createExtensionsDomain, files: createFilesDomain, search: createSearchDomain, mcp: createMcpDomain, artifacts: createArtifactsDomain, goals: createGoalsDomain, mailbox: createMailboxDomain, sandbox: createSandboxDomain, 'import': createImportDomain, stashes: createStashesDomain, github: createGitHubDomain, ci: createCiDomain, terminal: createTerminalDomain, setup: createSetupDomain, paperclip: createPaperclipDomain, musterServer: createMusterServerDomain};
 
 /** Builds every domain (plus `extra`, used by tests) and merges their handlers. A duplicate command name is a startup error. */
 export function createDomains(context: DomainContext, extra: readonly DomainFactory[] = []) {

@@ -8,7 +8,7 @@
  *  name and part of the message. Keep in step with src/main/commands.ts (tests/resource-errors checks). */
 export const COMMAND_NAMESPACES: ReadonlySet<string> = new Set([
   'app', 'approval', 'artifacts', 'attachments', 'automations', 'browser', 'chat', 'ci', 'clipboard', 'computer', 'extensions', 'files', 'folder',
-  'git', 'github', 'goals', 'hindsight', 'import', 'link', 'mailbox', 'mcp', 'memory', 'models', 'paperclip', 'plugins', 'processes', 'project', 'providers', 'question',
+  'git', 'github', 'goals', 'hindsight', 'import', 'link', 'mailbox', 'mcp', 'memory', 'models', 'musterServer', 'paperclip', 'plugins', 'processes', 'project', 'providers', 'question',
   'review', 'sandbox', 'settings', 'setup', 'skills', 'stashes', 'subagents', 'terminal', 'terminalAccess', 'updates', 'workspace',
 ]);
 const COMMAND_PREFIX = /^([a-z][a-zA-Z]*)(?:\.[a-zA-Z][\w-]*)+:\s*/;

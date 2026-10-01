@@ -1,6 +1,6 @@
 import React,{useEffect,useId,useLayoutEffect,useMemo,useRef,useState,useSyncExternalStore} from 'react';
 import {createPortal} from 'react-dom';
-import {Activity,ArrowLeft,Boxes,Link2,Brain,CalendarClock,Cpu,Download,HardDrive,Keyboard,MessageSquare,Palette,Puzzle,RotateCcw,Search,Server,SlidersHorizontal,Upload,X} from 'lucide-react';
+import {Activity,ArrowLeft,ShieldCheck,Boxes,Link2,Brain,CalendarClock,Cpu,Download,HardDrive,Keyboard,MessageSquare,Palette,Puzzle,RotateCcw,Search,Server,SlidersHorizontal,Upload,X} from 'lucide-react';
 import {AUTO_ARCHIVE_DAYS,CHAT_TEXT_SIZES,TERMINAL_SHELL_NAMES,TEXT_SIZES,type AccessibilityOverride,type ChatTextSize,type AppSettings,type SettingKey,type TerminalShellOption} from '../../shared/domains/settings-protocol';
 import type {MemoryAutoRetain,MemoryConfigView} from '../../shared/domains/memory-protocol';
 import {invoke} from '../bridge';
@@ -18,6 +18,9 @@ import {StoragePanel} from './settings/StoragePanel';
 import {ConnectionPanel} from './HubSetup';
 import {DefaultModelPicker} from './settings/DefaultModelPicker';
 import {SETTINGS_SECTIONS,filterSections} from './settings/sections';
+import {MusterServerPanel} from './settings/MusterServerPanel';
+import {ServerSettings} from './settings/ServerSettings';
+import {isWebHost} from '../webHost.ts';
 import {MENU_SHORTCUTS,acceleratorKeys} from './settings/shortcuts';
 import {openImportConversations} from './ImportConversations';
 import {SetupChecklist} from './SetupGuide';
@@ -29,7 +32,7 @@ import {recordProvenance,settingProvenance} from './settings/provenance';
 import {ProvenanceTag} from './settings/ProvenanceTag';
 import './preferences-screen.css';
 
-const ICONS:Record<SettingsSection,React.ReactNode>={general:<SlidersHorizontal size={15}/>,appearance:<Palette size={15}/>,chat:<MessageSquare size={15}/>,providers:<Server size={15}/>,models:<Cpu size={15}/>,memory:<Brain size={15}/>,plugins:<Puzzle size={15}/>,environments:<Boxes size={15}/>,automations:<CalendarClock size={15}/>,integrations:<Link2 size={15}/>,shortcuts:<Keyboard size={15}/>,diagnostics:<Activity size={15}/>,storage:<HardDrive size={15}/>};
+const ICONS:Record<SettingsSection,React.ReactNode>={general:<SlidersHorizontal size={15}/>,appearance:<Palette size={15}/>,chat:<MessageSquare size={15}/>,providers:<Server size={15}/>,models:<Cpu size={15}/>,memory:<Brain size={15}/>,plugins:<Puzzle size={15}/>,environments:<Boxes size={15}/>,automations:<CalendarClock size={15}/>,integrations:<Link2 size={15}/>,shortcuts:<Keyboard size={15}/>,server:<ShieldCheck size={15}/>,diagnostics:<Activity size={15}/>,storage:<HardDrive size={15}/>};
 const MAC=typeof navigator!=='undefined'&&/Mac/.test(navigator.platform||navigator.userAgent||'');
 
 const resetSetting=(key:SettingKey)=>{void invoke('settings.reset',{keys:[key]}).catch(cause=>notifyError(cause));};
@@ -343,7 +346,8 @@ export function PreferencesScreen():React.ReactElement {
           {section==='shortcuts'&&<ShortcutsSection/>}
           {section==='diagnostics'&&<DiagnosticsPanel/>}
           {section==='storage'&&<StoragePanel/>}
-          {section==='integrations'&&<><h3 className="preference-group-title">Paperclip</h3><p className="project-edit-hint ws-settings-hint">Link a Paperclip server and its projects appear under Projects, tagged Paperclip, with their tasks as chats. Its agents join the Roster, its runs the Ledger, and anything that needs you lands in the Inbox.</p><ConnectionPanel compact/></>}
+          {section==='integrations'&&<><h3 className="preference-group-title">Paperclip</h3><p className="project-edit-hint ws-settings-hint">Link a Paperclip server and its projects appear under Projects, tagged Paperclip, with their tasks as chats. Its agents join the Roster, its runs the Ledger, and anything that needs you lands in the Inbox.</p><ConnectionPanel compact/>{!isWebHost()&&<><h3 className="preference-group-title">Muster Server</h3><p className="project-edit-hint ws-settings-hint">Optional. Sign in to your team’s self-hosted Muster Server and open its projects. Off until you connect.</p><MusterServerPanel/></>}</>}
+          {section==='server'&&<ServerSettings/>}
         </div></div>}
       </div>
     </div>

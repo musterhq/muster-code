@@ -1,3 +1,4 @@
+import {isWebHost} from '../webHost.ts';
 import React, {useCallback, useEffect, useRef, useState} from 'react';
 import {Menu} from '@base-ui/react/menu';
 import { AlertTriangle, Check, ChevronDown, FolderGit2, GitBranch, Globe, Laptop, Loader2, Monitor, RefreshCw, SquarePen, TerminalSquare, Upload } from 'lucide-react';
@@ -13,7 +14,8 @@ import {SandboxApplySheet} from './SandboxApplySheet';
 import './environment-footer.css';
 
 export const SANDBOX_ENV_LABEL = 'Sandbox · Linux container';
-export const HOST_ENV_LABEL = 'This Mac';
+// On Muster Server's web UI the host is the server, not the viewer's computer (#199).
+export const HOST_ENV_LABEL = isWebHost() ? 'Server' : 'This Mac';
 
 /** Where the chat's agent runs (SBX-01); refreshed on domain events, on container activity and on window focus. */
 export function useChatEnvironment(chatId: string): {environment: ChatEnvironmentStatus | undefined; refresh: () => void} {

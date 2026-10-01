@@ -1,3 +1,5 @@
+import {DesktopOnlyState} from './DesktopOnlyState';
+import {isWebHost} from '../webHost.ts';
 import React,{useEffect,useLayoutEffect,useMemo,useRef,useState,useSyncExternalStore} from 'react';
 import {EarlierOutput} from './EarlierOutput';
 import {Check,ChevronRight,CircleCheck,CircleDot,CircleHelp,CircleX,Copy,Eraser,FlaskConical,Globe,Hammer,MessageSquarePlus,PanelBottom,PanelRight,Pencil,Play,Plus,RefreshCw,Search,Square,SquareTerminal,Trash2,Wrench,X} from 'lucide-react';
@@ -287,7 +289,12 @@ function ShellBody({shells,active}:{shells:Shells;active:boolean}) {
   </>;
 }
 /** The bottom-panel form of the shells (TerminalDock): a chip strip over the emulator. */
-export function TerminalsPanel({chatId,active,actions}:{chatId:string;active:boolean;actions?:React.ReactNode}) {
+/** Terminals and host commands run on the user's own computer: Muster Server's web UI shows a desktop-only state (#199). */
+export function TerminalsPanel(props:{chatId:string;active:boolean;actions?:React.ReactNode}) {
+  return isWebHost()?<DesktopOnlyState feature="Terminals"/>:<DesktopTerminalsPanel {...props}/>;
+}
+
+function DesktopTerminalsPanel({chatId,active,actions}:{chatId:string;active:boolean;actions?:React.ReactNode}) {
   const shells=useTerminals(chatId,active,true),{terminals,current,creating,archived}=shells;
   return <div className="terminal-panel">
     <div className="terminal-strip">
@@ -365,7 +372,11 @@ function ShellRow({row,label,selected,ports,onSelect,onClose}:{row:TerminalInfo;
 
 /** S3-E: the right-pane Terminal is ONE level — a compact list of shells, your commands, and the agent's
  * commands and servers (owner, status, listening ports, actions), with the selected shell below it. */
-export function ProcessesTab({chatId,active=true}:{chatId:string;active?:boolean}) {
+export function ProcessesTab(props:{chatId:string;active?:boolean}) {
+  return isWebHost()?<DesktopOnlyState feature="Running commands on the host"/>:<DesktopProcessesTab {...props}/>;
+}
+
+function DesktopProcessesTab({chatId,active=true}:{chatId:string;active?:boolean}) {
   const focus=useSyncExternalStore(subscribeTerminalPaneView,()=>terminalPaneView(chatId));
   const dock=useSyncExternalStore(subscribeTerminalDock,terminalDock);
   const inPane=dock.placement==='pane';
