@@ -48,6 +48,8 @@ export interface ImportStore {
   addComment(row: { sourceId: string; taskId: string; authorKind: string; authorLabel: string; body: string; createdAt: string; runId: string | null }): boolean;
   putHistory(row: { sourceId: string; kind: string; taskId: string | null; projectId: string | null; title: string; status: string; detail: string; at: string; pending: boolean }): void;
   /** Imported tasks of one company (to find the ones deleted in Paperclip). */
+  /** Sets aside what an older import recorded about a project of yours before the same Paperclip project gets its own Muster project. */
+  detachProject?(sourceProjectId: string, musterProjectId: string): void;
   tasksOf?(companyId: string): { sourceId: string; musterId: string; key: string | null; data: Json }[];
 }
 
@@ -56,9 +58,42 @@ export class SqliteImportStore implements ImportStore {
   constructor(private readonly db: DatabaseSync) {
     db.exec(`CREATE TABLE IF NOT EXISTS paperclip_import_map (kind TEXT NOT NULL, source_id TEXT NOT NULL, muster_id TEXT NOT NULL, key TEXT, data TEXT NOT NULL DEFAULT '{}', updated_at TEXT NOT NULL, PRIMARY KEY (kind, source_id));
       CREATE INDEX IF NOT EXISTS paperclip_import_map_muster ON paperclip_import_map(kind, muster_id);
-      CREATE TABLE IF NOT EXISTS paperclip_import_comments (source_id TEXT PRIMARY KEY, task_id TEXT NOT NULL, author_kind TEXT NOT NULL, author_label TEXT NOT NULL, body TEXT NOT NULL, created_at TEXT NOT NULL, run_id TEXT);
+      CREATE TABLE IF NOT EXISTS paperclip_import_comments (source_id TEXT NOT NULL, task_id TEXT NOT NULL, author_kind TEXT NOT NULL, author_label TEXT NOT NULL, body TEXT NOT NULL, created_at TEXT NOT NULL, run_id TEXT, PRIMARY KEY (source_id, task_id));
       CREATE INDEX IF NOT EXISTS paperclip_import_comments_task ON paperclip_import_comments(task_id, created_at);
-      CREATE TABLE IF NOT EXISTS paperclip_import_history (source_id TEXT PRIMARY KEY, kind TEXT NOT NULL, task_id TEXT, project_id TEXT, title TEXT NOT NULL, status TEXT NOT NULL, detail TEXT NOT NULL, at TEXT NOT NULL, pending INTEGER NOT NULL DEFAULT 0);`);
+      CREATE TABLE IF NOT EXISTS paperclip_import_history (source_id TEXT NOT NULL, gen TEXT NOT NULL DEFAULT '', kind TEXT NOT NULL, task_id TEXT, project_id TEXT, title TEXT NOT NULL, status TEXT NOT NULL, detail TEXT NOT NULL, at TEXT NOT NULL, pending INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (source_id, gen));`);
+    this.migrate();
+  }
+  /** Older databases keyed a comment by the Paperclip comment id alone and a history row by its id alone, so importing the same
+   *  Paperclip issue into a second Muster task dropped (or moved) them. Both are rebuilt keyed by the Muster side as well. */
+  private migrate(): void {
+    const pk = (table: string) => (this.db.prepare(`PRAGMA table_info(${table})`).all() as { name: string; pk: number }[]).filter(c => c.pk > 0).map(c => c.name);
+    if (pk('paperclip_import_comments').join() === 'source_id') this.db.exec(`BEGIN; ALTER TABLE paperclip_import_comments RENAME TO paperclip_import_comments_old;
+      CREATE TABLE paperclip_import_comments (source_id TEXT NOT NULL, task_id TEXT NOT NULL, author_kind TEXT NOT NULL, author_label TEXT NOT NULL, body TEXT NOT NULL, created_at TEXT NOT NULL, run_id TEXT, PRIMARY KEY (source_id, task_id));
+      INSERT INTO paperclip_import_comments SELECT source_id, task_id, author_kind, author_label, body, created_at, run_id FROM paperclip_import_comments_old; DROP TABLE paperclip_import_comments_old;
+      CREATE INDEX IF NOT EXISTS paperclip_import_comments_task ON paperclip_import_comments(task_id, created_at); COMMIT;`);
+    if (!pk('paperclip_import_history').includes('gen')) this.db.exec(`BEGIN; ALTER TABLE paperclip_import_history RENAME TO paperclip_import_history_old;
+      CREATE TABLE paperclip_import_history (source_id TEXT NOT NULL, gen TEXT NOT NULL DEFAULT '', kind TEXT NOT NULL, task_id TEXT, project_id TEXT, title TEXT NOT NULL, status TEXT NOT NULL, detail TEXT NOT NULL, at TEXT NOT NULL, pending INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (source_id, gen));
+      INSERT INTO paperclip_import_history (source_id, kind, task_id, project_id, title, status, detail, at, pending) SELECT source_id, kind, task_id, project_id, title, status, detail, at, pending FROM paperclip_import_history_old; DROP TABLE paperclip_import_history_old; COMMIT;`);
+  }
+  /**
+   * The import is about to give a Paperclip project a new Muster project: what an older import recorded about the old one (its
+   * project, task and Roster rows, and its history) is set aside under "detached", still read for that project, instead of being
+   * moved onto the new project. Nothing in the old project changes.
+   */
+  detachProject(sourceProjectId: string, musterProjectId: string): void {
+    const tx = (sql: string, ...args: (string | number)[]) => this.db.prepare(sql).run(...args);
+    tx("DELETE FROM paperclip_import_map WHERE kind = 'project:detached' AND source_id = ?", sourceProjectId);
+    tx("UPDATE paperclip_import_map SET kind = 'project:detached' WHERE kind = 'project' AND source_id = ? AND muster_id = ?", sourceProjectId, musterProjectId);
+    for (const row of this.db.prepare("SELECT source_id, data FROM paperclip_import_map WHERE kind = 'task'").all() as { source_id: string; data: string }[]) {
+      if (str((JSON.parse(row.data) as Json).projectId) !== musterProjectId) continue;
+      tx("DELETE FROM paperclip_import_map WHERE kind = 'task:detached' AND source_id = ?", row.source_id);
+      tx("UPDATE paperclip_import_map SET kind = 'task:detached' WHERE kind = 'task' AND source_id = ?", row.source_id);
+    }
+    for (const row of this.db.prepare("SELECT source_id FROM paperclip_import_map WHERE kind = 'member' AND key = ?").all(musterProjectId) as { source_id: string }[]) {
+      tx("DELETE FROM paperclip_import_map WHERE kind = 'member:detached' AND source_id = ?", row.source_id);
+      tx("UPDATE paperclip_import_map SET kind = 'member:detached' WHERE kind = 'member' AND source_id = ?", row.source_id);
+    }
+    tx("UPDATE paperclip_import_history SET gen = ? WHERE project_id = ? AND gen = ''", `old:${musterProjectId}`, musterProjectId);
   }
   map(kind: string, sourceId: string) {
     const row = this.db.prepare('SELECT muster_id, data FROM paperclip_import_map WHERE kind = ? AND source_id = ?').get(kind, sourceId) as { muster_id: string; data: string } | undefined;
@@ -74,7 +109,7 @@ export class SqliteImportStore implements ImportStore {
   }
   putHistory(row: { sourceId: string; kind: string; taskId: string | null; projectId: string | null; title: string; status: string; detail: string; at: string; pending: boolean }) {
     // The company-wide approvals list repeats per-issue approvals without their issue: never drop a task link already written.
-    this.db.prepare(`INSERT INTO paperclip_import_history (source_id, kind, task_id, project_id, title, status, detail, at, pending) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(source_id) DO UPDATE SET status = excluded.status, detail = excluded.detail, pending = excluded.pending,
+    this.db.prepare(`INSERT INTO paperclip_import_history (source_id, kind, task_id, project_id, title, status, detail, at, pending) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(source_id, gen) DO UPDATE SET status = excluded.status, detail = excluded.detail, pending = excluded.pending,
       task_id = COALESCE(excluded.task_id, task_id), project_id = CASE WHEN excluded.task_id IS NULL AND task_id IS NOT NULL THEN project_id ELSE COALESCE(excluded.project_id, project_id) END`)
       .run(row.sourceId, row.kind, row.taskId, row.projectId, row.title, row.status, row.detail, row.at, row.pending ? 1 : 0);
   }
@@ -84,11 +119,12 @@ export class SqliteImportStore implements ImportStore {
   }
   /** Read side for the workspace: keys, parents, members, comments and pending history, per Muster task or project. */
   taskMeta(taskId: string): { key: string | null; parentTaskId: string | null; sourceId: string; labels: { name: string; color: string | null }[]; removed: boolean } | undefined {
-    const row = this.db.prepare("SELECT source_id, key, data FROM paperclip_import_map WHERE kind = 'task' AND muster_id = ?").get(taskId) as { source_id: string; key: string | null; data: string } | undefined;
+    const row = this.db.prepare("SELECT kind, source_id, key, data FROM paperclip_import_map WHERE kind IN ('task', 'task:detached') AND muster_id = ?").get(taskId) as { kind: string; source_id: string; key: string | null; data: string } | undefined;
     if (!row) return undefined;
     const data = JSON.parse(row.data) as Json, parent = str(data.parentSourceId);
+    const parentRow = parent ? this.db.prepare("SELECT muster_id FROM paperclip_import_map WHERE kind = ? AND source_id = ?").get(row.kind, parent) as { muster_id: string } | undefined : undefined;
     const labels = arr(data.labels).map(l => ({ name: str(l.name) ?? '', color: str(l.color) })).filter(l => l.name);
-    return { key: row.key, sourceId: row.source_id, parentTaskId: parent ? this.map('task', parent)?.musterId ?? null : null, labels, removed: Boolean(data.removedAt) };
+    return { key: row.key, sourceId: row.source_id, parentTaskId: parentRow?.muster_id ?? null, labels, removed: Boolean(data.removedAt) };
   }
   /** The imported tasks of one Paperclip company (older rows without a company are found through their project). */
   tasksOf(companyId: string): { sourceId: string; musterId: string; key: string | null; data: Json }[] {
@@ -102,14 +138,14 @@ export class SqliteImportStore implements ImportStore {
     const row = this.db.prepare("SELECT data FROM paperclip_import_map WHERE kind = 'project' AND muster_id = ?").get(projectId) as { data: string } | undefined;
     if (!row) return undefined;
     const data = JSON.parse(row.data) as Json;
-    return isImportedProject(data, projectName) ? str(data.companyName) ?? 'Paperclip' : undefined;
+    return isImportedProject(data) ? str(data.companyName) ?? 'Paperclip' : undefined;
   }
   projectMeta(projectId: string): Json | undefined {
-    const row = this.db.prepare("SELECT data FROM paperclip_import_map WHERE kind = 'project' AND muster_id = ?").get(projectId) as { data: string } | undefined;
+    const row = this.db.prepare("SELECT data FROM paperclip_import_map WHERE kind IN ('project', 'project:detached') AND muster_id = ?").get(projectId) as { data: string } | undefined;
     return row ? JSON.parse(row.data) as Json : undefined;
   }
   roster(projectId: string): Json[] {
-    return (this.db.prepare("SELECT data FROM paperclip_import_map WHERE kind = 'member' AND key = ?").all(projectId) as { data: string }[]).map(r => JSON.parse(r.data) as Json);
+    return (this.db.prepare("SELECT data FROM paperclip_import_map WHERE kind IN ('member', 'member:detached') AND key = ?").all(projectId) as { data: string }[]).map(r => JSON.parse(r.data) as Json);
   }
   comments(taskId: string): { sourceId: string; authorKind: string; authorLabel: string; body: string; createdAt: string; runId: string | null }[] {
     return (this.db.prepare('SELECT source_id, author_kind, author_label, body, created_at, run_id FROM paperclip_import_comments WHERE task_id = ? ORDER BY created_at, source_id').all(taskId) as Record<string, string | null>[])
@@ -121,9 +157,9 @@ export class SqliteImportStore implements ImportStore {
   }
 }
 
-/** Whether a map row's Muster project was made by the import (and may be updated by it), not one of yours that an older import filled.
- *  Rows from before this was recorded count as imported only while the project still carries the Paperclip name. */
-export const isImportedProject = (data: Json, projectName?: string): boolean => data.origin === 'created' || (data.origin === undefined && (projectName === undefined || projectName === str(data.name)));
+/** Whether a map row says its Muster project was made by the import (and may be updated by it). Rows from before `origin` was recorded
+ *  say nothing: the import decides those from evidence (see `ownerOf`), never from a name. */
+export const isImportedProject = (data: Json): boolean => data.origin === 'created';
 
 export interface ImportDeps {
   /** GET only. */
@@ -144,6 +180,8 @@ export interface ImportDeps {
   remoteOf?(path: string): Promise<string | undefined>;
   /** 'skip' leaves a Paperclip project out of this import. Nothing else is configurable: imports never write into your own projects. */
   targets?: ImportTargets;
+  /** The origin of the Paperclip server being read (recorded on each project, so an approval is only decided on the server it came from). */
+  serverOrigin?: string;
 }
 
 const PAGE = 1000;
@@ -180,12 +218,27 @@ export async function planImport(companyId: string | null, deps: Pick<ImportDeps
     const id = String(p.id), codebase = obj(p.codebase), name = str(p.name) ?? 'Paperclip project', localFolder = str(codebase.localFolder), repoUrl = str(codebase.repoUrl);
     const repo = repoUrl ? normalizeRemote(repoUrl) ?? repoUrl : null;
     const mapped = deps.store.map('project', id), mine = mapped ? muster.get(mapped.musterId) : undefined;
-    const existing: ImportPlan['projects'][number]['existing'] = mapped && mine ? isImportedProject(mapped.data, mine.name) ? 'imported' : 'detached' : 'new';
+    const existing: ImportPlan['projects'][number]['existing'] = mapped && mine ? await ownerOf(mapped, mine, deps.invoke) === 'imported' ? 'imported' : 'detached' : 'new';
     projects.push({ id, name, repo, localFolder, taskCount: counts.get(id) ?? 0, existing });
   }
   return { company: { id: String(company.id), name: str(company.name) ?? 'Paperclip' }, companies: listed, projects, local: deps.local };
 }
 
+/**
+ * Who a mapped Muster project belongs to, decided from evidence and never from its name: an import that made the project set its
+ * scheduler just before it added the first task, whereas a project you made and an import later filled has no scheduler record from
+ * that moment. Anything uncertain is yours, so an import never writes into it.
+ */
+export async function ownerOf(mapped: { data: Json }, project: { id: string }, invoke: Invoke): Promise<'imported' | 'own'> {
+  if (isImportedProject(mapped.data)) return 'imported';
+  if (mapped.data.origin === 'own') return 'own';
+  try {
+    const work = await invoke('project.work', { projectId: project.id, activityLimit: 1 });
+    const set = Date.parse(work.scheduler.updatedAt ?? ''), first = Math.min(...work.tasks.items.map(t => Date.parse(t.createdAt)));
+    if (Number.isFinite(set) && Number.isFinite(first) && first - set >= 0 && first - set <= 120_000) return 'imported';
+  } catch { /* no evidence */ }
+  return 'own';
+}
 const isNotFound = (cause: unknown) => (cause as { status?: unknown } | null)?.status === 404;
 const clip = (text: string, max = 60) => text.length > max ? `${text.slice(0, max - 1)}…` : text;
 
@@ -218,19 +271,26 @@ export async function importFromPaperclip(companyId: string, deps: ImportDeps): 
     let folderId: string | null = null;
     if (localFolder && deps.local && deps.exists(localFolder)) { const want = home(localFolder); folderId = deps.folders().find(f => home(f.path) === want)?.id ?? (await invoke('folder.add', { path: localFolder })).id; }
     else if (localFolder && !deps.local) report.notes.push(`${name}: its folder (${localFolder}) is on the Paperclip server, not this Mac. Link your own checkout to the project yourself.`);
-    const mapped = store.map('project', sourceId), mine = mapped ? existing.get(mapped.musterId) : undefined;
-    const ours = mapped && mine && isImportedProject(mapped.data, mine.name);
-    if (mapped && mine && !ours) report.notes.push(`${name}: an earlier import filled your project “${mine.name}”. That project is left alone now, and ${name} is imported as its own project.`);
+    let mapped = store.map('project', sourceId);
+    const mine = mapped ? existing.get(mapped.musterId) : undefined;
+    const ours = Boolean(mapped && mine && await ownerOf(mapped, mine, invoke) === 'imported');
+    if (mapped && mine && !ours) {
+      // An older import filled one of your projects: it keeps its tasks, comments, keys, history and Roster profile exactly as they were.
+      report.notes.push(`${name}: an earlier import filled your project “${mine.name}”. That project is left alone, with everything it holds, and ${name} is imported as its own project.`);
+      store.detachProject?.(sourceId, mine.id);
+      mapped = undefined;
+    }
     let project: ProjectDetails;
-    const last = obj(ours ? mapped.data.imported : undefined);
+    const last = obj(ours ? mapped!.data.imported : undefined);
     let wrote: { name: string; goal: string } = { name, goal };
-    if (ours && mine) {
+    if (ours && mine && mapped) {
       // Only the fields you have not changed since the last import follow Paperclip.
-      const nameFollows = last.name === undefined || mine.name === last.name, goalFollows = last.goal === undefined || mine.goal === last.goal;
+      // No last-imported value (the project was imported before they were recorded): anything that differs is yours, kept.
+      const nameFollows = mine.name === (last.name ?? name), goalFollows = mine.goal === (last.goal ?? goal);
       const nextName = nameFollows ? name : mine.name, nextGoal = goalFollows ? goal : mine.goal;
       if (!nameFollows && name !== last.name) conflict({ scope: 'project', label: name, field: 'name', kept: mine.name, paperclip: name });
       if (!goalFollows && goal !== last.goal) conflict({ scope: 'project', label: name, field: 'goal', kept: clip(mine.goal), paperclip: clip(goal) });
-      wrote = { name: nameFollows ? name : String(last.name), goal: goalFollows ? goal : String(last.goal) };
+      wrote = { name: nameFollows ? name : String(last.name ?? name), goal: goalFollows ? goal : String(last.goal ?? goal) };
       const patch = { ...(nextName !== mine.name ? { name: nextName } : {}), ...(nextGoal !== mine.goal ? { goal: nextGoal } : {}), ...(folderId && !mine.folderIds.includes(folderId) ? { folderIds: [...mine.folderIds, folderId] } : {}) };
       project = Object.keys(patch).length ? await invoke('project.update', { id: mine.id, ...patch }) : mine;
       report.projects.updated++;
@@ -243,7 +303,7 @@ export async function importFromPaperclip(companyId: string, deps: ImportDeps): 
       if (repoUrl) await invoke('project.sources.save', { projectId: project.id, kind: 'url', title: 'Repository', ref: repoUrl, note: defaultRef ? `Default branch: ${defaultRef}` : '', enabled: true }).catch(() => undefined);
     }
     existing.set(project.id, project);
-    store.setMap('project', sourceId, project.id, str(company.issuePrefix), { repo: repoUrl ? normalizeRemote(repoUrl) ?? repoUrl : null, repoUrl, defaultRef, localFolder, companyId, companyName: report.company, name, origin: 'created', imported: wrote, budgetUsd: mapped?.data.budgetUsd ?? null });
+    store.setMap('project', sourceId, project.id, str(company.issuePrefix), { repo: repoUrl ? normalizeRemote(repoUrl) ?? repoUrl : null, repoUrl, defaultRef, localFolder, companyId, companyName: report.company, name, origin: 'created', serverOrigin: deps.serverOrigin ?? null, imported: wrote, budgetUsd: mapped?.data.budgetUsd ?? null });
     projectIds.set(sourceId, project.id);
   }
 

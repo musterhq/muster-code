@@ -100,7 +100,7 @@ export class LocalWorkspace {
       const boss = m.reportsTo ?? r?.reportsToMemberId ?? null;
       const failed = owned.some(t => t.status === 'blocked' && read.work.tasks.items.find(x => x.id === t.id)?.state === 'failed');
       return {
-        id, name: m.name, role: r?.role ?? 'agent', title: m.title ?? r?.title ?? null, model: m.runner?.model ?? r?.runner.model ?? null, adapter: r?.runner.runtime ?? m.runner?.providerId ?? 'muster', source: 'local',
+        id, name: m.name, role: r?.role ?? 'agent', title: m.title ?? r?.title ?? null, model: m.runner?.model ?? r?.runner?.model ?? null, adapter: r?.runner?.runtime ?? m.runner?.providerId ?? 'muster', source: 'local',
         status: m.pendingAt ? 'pending' : paused || m.pausedAt ? 'paused' : owned.some(t => t.live) ? 'running' : failed ? 'error' : 'idle',
         reportsTo: boss && ids.has(boss) ? memberAgentId(boss) : 'user:local', lastActiveAt: lastActive(id), error: null, pausable: !m.pendingAt, capabilities: m.instructions?.trim() ? m.instructions.trim().split('\n')[0].slice(0, 280) : r?.capabilities ?? null,
         projectId: read.project.id, memberId: m.id, runner: m.runner ?? null, instructions: m.instructions ?? '',

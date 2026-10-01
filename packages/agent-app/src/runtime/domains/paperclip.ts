@@ -817,7 +817,7 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
         // a remote server's paths are never touched.
         const targets = input.targets && typeof input.targets === 'object' ? Object.fromEntries(Object.entries(input.targets).filter(([k, v]) => /^[\w:.-]{1,128}$/.test(k) && v === 'skip').map(([k]) => [k, 'skip' as const])) : undefined;
         const onThisMac = mode === 'local' || isLoopback(baseUrl);
-        const report = await importFromPaperclip(target, { get: path => reader.get<unknown>(path), issuePages: (company, query) => reader.issuePages(company, query), commentPages: issue => reader.commentPages(issue), invoke: context.invoke as Invoke, store, folders, exists: path => existsSync(path), local: onThisMac, remoteOf, ...(targets ? { targets } : {}), ...(onThisMac ? { codexHome: codexHomeOf } : {}) });
+        const report = await importFromPaperclip(target, { get: path => reader.get<unknown>(path), issuePages: (company, query) => reader.issuePages(company, query), commentPages: issue => reader.commentPages(issue), invoke: context.invoke as Invoke, store, folders, exists: path => existsSync(path), local: onThisMac, serverOrigin: originOf(mode === 'local' ? PAPERCLIP_LOCAL_URL : baseUrl) ?? undefined, remoteOf, ...(targets ? { targets } : {}), ...(onThisMac ? { codexHome: codexHomeOf } : {}) });
         queueEmit(['tasks', 'agents', 'inbox']);
         // The imported runs show in the Ledger as imported history (#190).
         try { if (ledger().importHistory(paperclipHistory(context.db()))) queueEmit(['runs']); } catch { /* the Ledger never fails an import */ }
