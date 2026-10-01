@@ -1,3 +1,4 @@
+import { isWebHost } from '../webHost.ts';
 import {AppWindow,Archive,ArchiveRestore,AtSign,Boxes,BookmarkPlus,CircleDot,Folder,FolderKanban,Goal,Lightbulb,ListOrdered,Monitor,Paperclip,PenLine,Server,Sparkles,SquarePen,SquareTerminal} from 'lucide-react';
 import React, { useEffect, useRef } from 'react';
 import type {FileEntry,PluginEntry,SkillEntry} from '../../shared/protocol';
@@ -131,7 +132,7 @@ export function buildAddRows<T extends { key: string; label: string }>(input: Ad
   const keep = (row: MenuRow): MenuRow[] => { const score = scoreItem(row.label, row.description, q); return score === null ? [] : [{ ...row, score }]; };
   const add: MenuRow[] = [
     { key: 'files', section: 'Add', label: 'Files and folders', icon: <Paperclip size={15} />, score: 0, run: input.onFiles },
-    ...(input.onCapture ? [{ key: 'capture', section: 'Add', label: 'Capture window', description: 'Attach a screenshot of a window or screen', icon: <Monitor size={15} />, disabled: input.captureDisabled, score: 0, run: input.onCapture } satisfies MenuRow] : []),
+    ...(input.onCapture && !isWebHost() ? [{ key: 'capture', section: 'Add', label: 'Capture window', description: 'Attach a screenshot of a window or screen', icon: <Monitor size={15} />, disabled: input.captureDisabled, score: 0, run: input.onCapture } satisfies MenuRow] : []),
     ...(input.onAttachTerminal ? (input.terminals ?? []).slice(0, 3).map(source => ({ key: `terminal:${source.key}`, section: 'Add', label: 'Attach terminal', description: source.label || 'Last 200 lines',
       icon: <span className="composer-terminal-tile"><SquareTerminal size={11} /></span>, disabled: input.terminalDisabled, score: 0, run: () => input.onAttachTerminal!(source) })) : []),
     ...(input.onProject ? [{ key: 'project', section: 'Add', label: 'Work in a project', description: 'Choose project for new chats', icon: <FolderKanban size={15} />, disabled: input.projectDisabled, score: 0, run: input.onProject } satisfies MenuRow] : []),

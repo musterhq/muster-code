@@ -1,4 +1,5 @@
 import type {SettingsSection} from '../../store';
+import {isWebHost} from '../../webHost.ts';
 
 export interface SectionInfo { id: SettingsSection; label: string; description: string; keywords: string }
 /** Order is the nav order. Keywords cover every row title in the section so search lands on the right page. */
@@ -12,14 +13,19 @@ export const SETTINGS_SECTIONS: readonly SectionInfo[] = [
   {id:'plugins', label:'Skills & plugins', description:'Installed plugins and skills with their scope.', keywords:'plugins skills extensions mcp servers apps inventory scope inheritance'},
   {id:'environments', label:'Environments', description:'Where agents run: this Mac or an isolated Linux sandbox.', keywords:'environments environment sandbox container linux docker local host this mac isolated copy worktree run location'},
   {id:'automations', label:'Automations', description:'Scheduled and file-triggered agent work.', keywords:'automations automation schedule scheduled cron recurring trigger file watch runs history'},
-  {id:'integrations', label:'Integrations', description:'Link a Paperclip server: its projects, tasks and agents appear in Muster.', keywords:'integrations paperclip connection server deployment url api token board company projects agents roster custom this mac off test link'},
+  {id:'integrations', label:'Integrations', description:'Link a Paperclip server, or connect to your team’s Muster Server.', keywords:'muster server remote connect self-hosted team sign in integrations paperclip connection server deployment url api token board company projects agents roster custom this mac off test link'},
   {id:'shortcuts', label:'Shortcuts', description:'Keyboard shortcuts from the app menus.', keywords:'keyboard shortcuts hotkeys accelerators keys bindings'},
   {id:'diagnostics', label:'Diagnostics', description:'Versions, processes and the runtime log.', keywords:'diagnostics version electron node core log memory cpu processes metrics debug support redacted'},
   {id:'storage', label:'Storage', description:'Disk use by category, with safe cleanup.', keywords:'storage disk space size attachments scratch cleanup clean delete sqlite database worktrees'},
+  // Muster Server's web UI only (#199): your account, and the admin console for owners and admins. Never in the desktop app.
+  {id:'server', label:'Server', description:'Your account and, for admins, people, invites, usage and connectors.', keywords:'server account password sign out admin people users roles invites invite link access revoke sessions usage cost per person ledger connectors slack telegram mattermost audit'},
 ];
 
+/** The Server section exists only in the web UI; the desktop app shows exactly the sections it always had. */
+export function visibleSections(web: boolean = isWebHost()): SectionInfo[] { return SETTINGS_SECTIONS.filter(section => section.id !== 'server' || web); }
+
 /** Every whitespace-separated term must appear in the label, description or keywords. */
-export function filterSections(query: string, sections: readonly SectionInfo[] = SETTINGS_SECTIONS): SectionInfo[] {
+export function filterSections(query: string, sections: readonly SectionInfo[] = visibleSections()): SectionInfo[] {
   const terms = query.toLocaleLowerCase().split(/\s+/).filter(Boolean);
   if (!terms.length) return [...sections];
   return sections.filter(section => {

@@ -1,3 +1,5 @@
+import {DesktopOnlyState} from './DesktopOnlyState';
+import {isWebHost} from '../webHost.ts';
 import React,{useCallback,useEffect,useRef,useState,useSyncExternalStore} from 'react';
 import {AppWindow,ArrowLeft,ArrowRight,Camera,Check,ChevronDown,Crosshair,Download,ExternalLink,Globe,Monitor,RotateCw,Scan,Shield,ShieldAlert,Smartphone,Square,SquareTerminal,Tablet,UserRound,X} from 'lucide-react';
 import {invoke,subscribe} from '../bridge';
@@ -60,7 +62,12 @@ function ToolbarMenu({id,open,onOpen,label,button,children}:{id:MenuId;open:Menu
 /** The native view is a separate sandboxed renderer. This component owns only its
  * toolbar and geometry lease; hiding/unmounting never destroys page history.
  */
-export function BrowserTab({owner,profileId:requestedProfile,initialUrl='about:blank',active=true,onUrlChange}:BrowserTabProps) {
+/** Muster Server's web UI shows a desktop-only state instead of the embedded browser (#199); the desktop app renders the tab. */
+export function BrowserTab(props:BrowserTabProps) {
+  return isWebHost()?<DesktopOnlyState feature="The built-in browser"/>:<DesktopBrowserTab {...props}/>;
+}
+
+function DesktopBrowserTab({owner,profileId:requestedProfile,initialUrl='about:blank',active=true,onUrlChange}:BrowserTabProps) {
   const [profile,setProfile]=useState(()=>resolveBrowserProfile(owner,requestedProfile));
   const profileId=profile.id;
   // A primitive snapshot: the tab re-renders on a folder/Project rename, not on every store change.

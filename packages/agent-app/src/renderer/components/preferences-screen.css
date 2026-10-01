@@ -117,3 +117,18 @@
 /* The chat list wrapper must not break the sidebar flex column (footer stays pinned to the bottom). */
 .nav-chats { display: contents; }
 .nav-chats[hidden] { display: none; }
+
+/* Settings › Server (Muster Server web UI only, #199) */
+.server-settings section + section { margin-top: 22px; }
+.server-inline { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.server-inline input { min-width: 0; width: 140px; height: 28px; padding: 0 8px; border-radius: var(--radius-6); border: 1px solid var(--hairline); background: transparent; color: var(--text); font: inherit; }
+.server-toolbar { margin-bottom: 8px; }
+.server-link { display: flex; align-items: center; gap: 8px; margin: 8px 0; overflow-wrap: anywhere; }
+.server-link code { padding: 4px 8px; border-radius: var(--radius-6); background: var(--bg-active); font-size: var(--fs-12); }
+.server-table { width: 100%; border-collapse: collapse; font-size: var(--fs-13); border: 1px solid var(--hairline); border-radius: var(--radius-10); overflow: hidden; }
+.server-table th { text-align: left; font-weight: 500; color: var(--text-dim); font-size: var(--fs-12); padding: 7px 10px; background: var(--bg-active); }
+.server-table td { padding: 7px 10px; border-top: 1px solid var(--hairline); vertical-align: middle; }
+.server-table td .ws-chip { margin-left: 6px; }
+.server-table tr.is-total td { font-weight: 600; }
+.desktop-only-state { display: grid; place-items: center; gap: 6px; height: 100%; min-height: 160px; padding: 24px; text-align: center; color: var(--text-dim); font-size: var(--fs-13); }
+.desktop-only-state strong { color: var(--text); font-weight: 600; }
