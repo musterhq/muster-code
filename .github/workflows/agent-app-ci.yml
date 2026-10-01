@@ -3,7 +3,7 @@ name: Muster Agent CI
 # packages/agent-app is a standalone npm project (its own package-lock.json); this job uses only that directory.
 on:
   push:
-    branches: [main]
+    branches: [main, 'release/**']
     paths:
       - "packages/agent-app/**"
       - ".github/workflows/agent-app-ci.yml"
