@@ -17,13 +17,13 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from '
 import { join } from 'node:path';
 import type { MemoryRecord } from '../../shared/domains/memory-protocol.ts';
 import {
-  budgetUse, PAPERCLIP_LOCAL_URL, WORKSPACE_PRIORITIES, WORKSPACE_STATUSES, type ApprovalDecision, type LedgerView, type LiveChannel, type PaperclipConfigView, type PaperclipLink, type PaperclipMode, type PaperclipTestResult,
+  budgetUse, PAPERCLIP_LOCAL_URL, WORKSPACE_PRIORITIES, WORKSPACE_STATUSES, type ApprovalDecision, type DashboardData, type LedgerView, type LiveChannel, type PaperclipConfigView, type PaperclipLink, type PaperclipMode, type PaperclipTestResult,
   type ThreadCard, type WorkspaceAgent, type WorkspaceApproval, type WorkspaceBadge, type WorkspaceInboxItem, type WorkspaceList, type WorkspaceListKind, type WorkspaceMemory, type WorkspaceProject,
   type WorkspacePriority, type WorkspaceRow, type WorkspaceSnapshot, type WorkspaceSource, type WorkspaceStatus, type WorkspaceTask, type WorkspaceTaskDetail,
 } from '../../shared/domains/paperclip-protocol.ts';
 import { normalizeRemote } from '../memory-identity.ts';
 import { PaperclipClient, PaperclipError, normalizeBaseUrl, openLiveEvents, type FetchLike, type LiveSocket, type SocketFactory } from '../paperclip-client.ts';
-import { arr, buildInbox, mapAgent, mapApproval, mapDocument, mapWorkProduct, mapAttention, mapComment, mapCompany, mapGoal, mapInteraction, mapIssue, mapProject, mapReceipt, mapRows, mapRun } from '../paperclip-map.ts';
+import { arr, buildInbox, mapAgent, mapApproval, mapBudgets, mapDocument, mapWorkProduct, mapAttention, mapComment, mapCompany, mapGoal, mapInteraction, mapIssue, mapProject, mapReceipt, mapRows, mapRun } from '../paperclip-map.ts';
 import { activeSecretStore, SecretStore } from '../secret-store.ts';
 import { attachTurnLedger, TurnLedger } from '../turn-ledger.ts';
 import { importLedgerHistory, paperclipHistory, type HistoryResult } from '../ledger-history.ts';
@@ -34,6 +34,8 @@ import type { DomainContext, DomainModule } from './types.ts';
 
 export const PAPERCLIP_SECRET_ID = 'paperclip-board-token';
 const POLL_MS = 15_000, POLL_MAX_MS = 60_000, EMIT_VISIBLE_MS = 1_000, EMIT_HIDDEN_MS = 5_000;
+/** Paperclip serves its issue lists from a 2 s cache that a change does not clear: a read right after an event can return the old list, so one more read follows once it has expired. */
+const SETTLE_MS = 2_400;
 /** Frames that fire many times a second while an agent works and change nothing the UI shows. */
 const NOISY = new Set(['heartbeat.run.log', 'heartbeat.run.event', 'heartbeat.run.progress', 'plugin.ui.updated']);
 /** Needs you + Problems: the only kinds that badge. */
@@ -250,7 +252,7 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
     const carried = (i: WorkspaceInboxItem): WorkspaceInboxItem => i.id.startsWith('import:approval:') && connection() ? { ...i, approvalId: i.id.slice('import:approval:'.length), approvalVerbs: ['approve', 'reject', 'request_revision'] } : i;
     const inbox = [...mine.inbox.map(carried), ...await budgetInbox(mine.projects), ...(p?.inbox ?? []).filter(i => !i.taskId || !imported.has(i.taskId))].sort((a, b) => rank[a.severity] - rank[b.severity] || b.at.localeCompare(a.at));
     return {
-      paperclip: theirs.link, tasks, agents: [...mine.agents, ...(p?.agents ?? [])], projects: projects2, goals: p?.goals ?? [], runs, inbox, ...(p ? { approvals: p.approvals, labels: p.labels } : {}),
+      paperclip: theirs.link, tasks, agents: [...mine.agents, ...(p?.agents ?? [])], projects: projects2, goals: p?.goals ?? [], runs, inbox, ...(p ? { approvals: p.approvals, labels: p.labels, agentCounts: { active: p.agents.filter(a => a.status !== 'paused' && a.status !== 'terminated' && a.status !== 'pending').length, paused: p.agents.filter(a => a.status === 'paused').length } } : {}),
       counts: { liveRuns: runs.filter(r => r.status === 'running').length, inbox: inbox.filter(i => i.kind !== 'mail').length, failedRuns: runs.filter(r => r.status === 'failed').length, openTasks: tasks.filter(t => t.status !== 'done' && t.status !== 'cancelled').length },
       fetchedAt: new Date().toISOString(),
     };
@@ -274,8 +276,8 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
   const api = (): PaperclipClient => { const c = connection(); if (!c) throw new Error('Paperclip is not linked. Link it in Settings › Integrations.'); return c; };
 
   // --- live updates -----------------------------------------------------------------------------------------------------
-  const live = { channel: 'off' as LiveChannel, visible: false, socket: null as LiveSocket | null, socketCompany: '', pollTimer: null as ReturnType<typeof setTimeout> | null, pollDelay: POLL_MS, emitTimer: null as ReturnType<typeof setTimeout> | null, pending: new Set<string>(), taskIds: new Set<string>() };
-  function closeSocket() { live.socket?.close(); live.socket = null; live.socketCompany = ''; if (live.channel === 'socket') live.channel = 'off'; }
+  const live = { channel: 'off' as LiveChannel, visible: false, socket: null as LiveSocket | null, socketCompany: '', pollTimer: null as ReturnType<typeof setTimeout> | null, settleTimer: null as ReturnType<typeof setTimeout> | null, pollDelay: POLL_MS, emitTimer: null as ReturnType<typeof setTimeout> | null, pending: new Set<string>(), taskIds: new Set<string>() };
+  function closeSocket() { if (live.settleTimer) timers.clearTimeout(live.settleTimer); live.settleTimer = null; live.socket?.close(); live.socket = null; live.socketCompany = ''; if (live.channel === 'socket') live.channel = 'off'; }
   const stopPoll = () => { if (live.pollTimer) timers.clearTimeout(live.pollTimer); live.pollTimer = null; };
   const queueEmit = (scopes: string[], taskId?: string) => {
     for (const s of scopes) live.pending.add(s);
@@ -321,6 +323,7 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
         const taskId = typeof payload.issueId === 'string' ? payload.issueId : entity === 'issue' && typeof payload.entityId === 'string' ? payload.entityId : undefined;
         if (taskId) c.invalidate(`/issues/${taskId}`);
         queueEmit(type.startsWith('heartbeat.') ? ['runs', 'tasks', 'inbox'] : type === 'agent.status' ? ['agents', 'inbox'] : ['tasks', 'inbox'], taskId);
+        if (!live.settleTimer) live.settleTimer = timers.setTimeout(() => { live.settleTimer = null; c.invalidate(`/companies/${encodeURIComponent(target)}`); queueEmit(['tasks', 'inbox']); }, SETTLE_MS);
       },
       // A live socket dropping is often the first sign Paperclip went away: tell the screens, which re-read and show it.
       // (A socket that never opened says nothing new, so a refused socket never wakes the renderer.)
@@ -604,12 +607,13 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
     const now = Date.now(), since = new Date(now - (DASHBOARD_DAYS + 1) * 86_400_000).toISOString();
     ledger();
     const c = connection();
-    let paperclip: Parameters<typeof buildDashboard>[0]['paperclip'] = null;
+    let paperclip: Parameters<typeof buildDashboard>[0]['paperclip'] = null, budgets: DashboardData['budgets'];
     if (c && (!projectId || await owner('project', projectId) === 'paperclip')) {
       await paperclipPart(false);
       if (built) {
         const base = `/companies/${encodeURIComponent(built.companyId)}`;
-        const [runs, activity] = await Promise.all([c.get<unknown>(`${base}/heartbeat-runs?limit=200`).catch(() => []), c.get<unknown>(`${base}/activity?limit=12`).catch(() => [])]);
+        const [runs, activity, overview] = await Promise.all([c.get<unknown>(`${base}/heartbeat-runs?limit=200`).catch(() => []), c.get<unknown>(`${base}/activity?limit=12`).catch(() => []), c.get<unknown>(`${base}/budgets/overview`).catch(() => null)]);
+        if (overview) budgets = { ...mapBudgets(overview), company: companies.find(x => x.id === built?.companyId)?.name ?? 'Paperclip' };
         const inProject = projectId ? new Set(built.part.tasks.filter(t => t.projectId === projectId).map(t => t.id)) : null;
         paperclip = { receipts: arr(runs).map(r => mapReceipt(r, built!.agents)).filter(r => !inProject || (r.taskId !== null && inProject.has(r.taskId))), tasks: built.part.tasks.filter(t => !projectId || t.projectId === projectId), activity: mapRows('audit', activity), name: companies.find(x => x.id === built?.companyId)?.name ?? 'Paperclip' };
       }
@@ -619,7 +623,8 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
       // A project's Dashboard tab and Budget read that project's tasks, runs and activity; a Paperclip project has none here.
       projectId && paperclip ? null : await context.invoke('project.stats', { days: DASHBOARD_DAYS + 1, utcOffsetMinutes: offset, activityLimit: 12, ...(projectId ? { projectId } : {}) }).catch(() => null),
     ];
-    return buildDashboard({ now, offset, ledger: aggregates, local: stats, paperclip });
+    const result = buildDashboard({ now, offset, ledger: aggregates, local: stats, paperclip });
+    return budgets ? { ...result, budgets } : result;
   };
 
   const text = (value: unknown, label: string, max: number) => { if (typeof value !== 'string' || !value.trim()) throw new Error(`${label} is required.`); if (value.length > max) throw new Error(`${label} is too long.`); return value; };
@@ -710,6 +715,10 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
         if (typeof input.priority === 'string' && ['critical', 'high', 'medium', 'low'].includes(input.priority)) body.priority = input.priority;
         if (typeof input.parentId === 'string' && input.parentId) body.parentId = id(input.parentId);
         if (typeof input.assigneeId === 'string' && input.assigneeId && !input.assigneeId.startsWith('user:')) body.assigneeAgentId = id(input.assigneeId);
+        // Labels, a goal and the tasks that block this one: Paperclip's own fields on create.
+        if (Array.isArray(input.labelIds) && input.labelIds.length) body.labelIds = [...new Set(input.labelIds.slice(0, 20).map(v => id(v)))];
+        if (typeof input.goalId === 'string' && input.goalId) body.goalId = id(input.goalId);
+        if (Array.isArray(input.blockedByIds) && input.blockedByIds.length) body.blockedByIssueIds = [...new Set(input.blockedByIds.slice(0, 50).map(v => id(v)))];
         const created = await c.send<Json>('POST', `/companies/${encodeURIComponent(built!.companyId)}/issues`, body);
         queueEmit(['tasks', 'inbox']);
         return mapIssue(created, built?.agents ?? new Map(), new Set());

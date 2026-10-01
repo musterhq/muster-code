@@ -105,6 +105,8 @@ export interface WorkspaceSnapshot {
   runs: WorkspaceRun[]; inbox: WorkspaceInboxItem[];
   /** The linked Paperclip's pending approvals, and its labels (for New task). */
   approvals?: WorkspaceApproval[];
+  /** The whole linked company's agents, whatever slice of them a page shows: what a company-wide Pause would stop, and what is paused. */
+  agentCounts?: { active: number; paused: number };
   labels?: { id: string; name: string; color: string | null }[];
   counts: { liveRuns: number; inbox: number; failedRuns: number; openTasks: number };
   fetchedAt: string;
@@ -225,8 +227,12 @@ export interface DashboardData {
   /** `tokens`: input + output tokens this month, priced or not (a token budget works without prices). */
   spend: { usd: number | null; pricedTurns: number; unpricedTurns: number; since: string; source: string; tokens: number };
   activity: { id: string; actor: string; summary: string; at: string; projectId: string | null; projectName: string | null; source: WorkspaceSource; refId: string | null }[];
+  /** The linked Paperclip's budget policies (company, project, agent) with this month's utilisation, and open incidents. */
+  budgets?: { policies: PaperclipBudgetPolicy[]; incidents: number; company: string };
   generatedAt: string;
 }
+/** A Paperclip budget policy. `status` is Paperclip's own (ok, warning, hard_stop). Amounts are US dollars. */
+export interface PaperclipBudgetPolicy { id: string; scope: 'company' | 'project' | 'agent'; scopeId: string; name: string; limitUsd: number; observedUsd: number; percent: number; warnPercent: number; hardStop: boolean; status: string; paused: boolean }
 
 /** Import planning: each Paperclip project with the Muster project it would fill. `suggestion` matches by an earlier
  *  import, the same folder, the same repository remote, or the same name. */

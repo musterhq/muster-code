@@ -112,7 +112,7 @@ export class PaperclipClient {
     this.generation++;
     const text = await response.text();
     if (!text) return {} as T;
-    try { return JSON.parse(text) as T; } catch { throw notPaperclip(path); }
+    try { return JSON.parse(text) as T; } catch { throw badBody(text, path); }
   }
 
   /** Forget cached bodies (after a live event says something changed, so the next read cannot be served stale). */
@@ -125,11 +125,14 @@ export class PaperclipClient {
   }
 }
 
-/** A 200 that is not JSON (a web page, a proxy's login screen) means the URL is not a Paperclip API. */
+/** A 200 that is a web page (a SPA, a proxy's login screen) means the URL is not a Paperclip API; one that is cut off or is not JSON
+ *  at all means Paperclip answered with something Muster cannot read. Either way: a sentence, never a parse error. */
 const notPaperclip = (path: string) => new PaperclipError(`This URL isn’t a Paperclip API: ${path.split('?')[0]} answered with a web page, not JSON. Check the address (use the Paperclip server’s own URL, for example https://paperclip.example.com).`, 200, 'service');
+const unreadable = (path: string) => new PaperclipError(`Paperclip sent a reply for ${path.split('?')[0]} that Muster could not read (it was cut off or damaged on the way). The last good copy stays on screen; it will refresh when Paperclip answers properly.`, 200, 'service');
+const badBody = (text: string, path: string) => /^\s*</.test(text) ? notPaperclip(path) : unreadable(path);
 async function readJson<T>(response: Response, path: string): Promise<T> {
   const text = await response.text();
-  try { return JSON.parse(text) as T; } catch { throw notPaperclip(path); }
+  try { return JSON.parse(text) as T; } catch { throw badBody(text, path); }
 }
 const short = (text: string) => { const plain = text.replace(/\s+/g, ' ').trim(); if (/^<(!doctype|html|\?xml)/i.test(plain)) return ''; try { const parsed = JSON.parse(plain) as { error?: string; message?: string }; return (parsed.error ?? parsed.message ?? '').slice(0, 200); } catch { return plain.slice(0, 200); } };
 async function errorText(response: Response): Promise<string> { const text = await response.text().catch(() => ''); const detail = text ? short(text) : ''; return detail ? ` ${detail}` : ''; }

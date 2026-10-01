@@ -1,6 +1,6 @@
 /** Paperclip JSON -> the Projects workspace shapes (shared/domains/paperclip-protocol.ts). Pure, so tests feed recorded payloads. */
 import type {
-  ApprovalDecision, ThreadCard, LedgerEntry, AgentState, InboxKind, RunState, WorkspaceAgent, WorkspaceComment, WorkspaceCompany, WorkspaceGoal, WorkspaceInboxItem, WorkspacePriority,
+  ApprovalDecision, PaperclipBudgetPolicy, ThreadCard, LedgerEntry, AgentState, InboxKind, RunState, WorkspaceAgent, WorkspaceComment, WorkspaceCompany, WorkspaceGoal, WorkspaceInboxItem, WorkspacePriority,
   WorkspaceApproval, WorkspaceProject, WorkspaceRow, WorkspaceRun, WorkspaceStatus, WorkspaceTask,
 } from '../shared/domains/paperclip-protocol.ts';
 import { OPEN_STATUSES, WORKSPACE_STATUSES } from '../shared/domains/paperclip-protocol.ts';
@@ -229,3 +229,14 @@ export const mapWorkProduct = (w: Json): ThreadCard => ({
   kind: 'workproduct', id: `workproduct:${w.id}`, at: iso(w.updatedAt, iso(w.createdAt)), type: str(w.type) ?? 'artifact', title: str(w.title) ?? 'Work product', status: str(w.status) ?? '',
   provider: str(w.provider), url: str(w.url), summary: (str(w.summary) ?? '').slice(0, 2000),
 });
+
+/** Budget policies from `/budgets/overview` (dollar budgets only: a policy in another metric is not a dollar figure). */
+export function mapBudgets(overview: unknown): { policies: PaperclipBudgetPolicy[]; incidents: number } {
+  const o = obj(overview);
+  const policies = arr(o.policies).filter(p => p.metric === 'billed_cents' && p.isActive !== false && Number(p.amount) > 0 && (p.scopeType === 'company' || p.scopeType === 'project' || p.scopeType === 'agent')).map(p => ({
+    id: String(p.policyId ?? p.id), scope: p.scopeType as 'company' | 'project' | 'agent', scopeId: String(p.scopeId), name: str(p.scopeName) ?? String(p.scopeType),
+    limitUsd: Number(p.amount) / 100, observedUsd: (Number(p.observedAmount) || 0) / 100, percent: Number(p.utilizationPercent) || 0, warnPercent: Number(p.warnPercent) || 80,
+    hardStop: p.hardStopEnabled === true, status: str(p.status) ?? 'ok', paused: p.paused === true,
+  }));
+  return { policies, incidents: arr(o.activeIncidents).length };
+}
