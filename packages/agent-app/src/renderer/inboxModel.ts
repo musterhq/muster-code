@@ -10,7 +10,7 @@
  * item id and the item's `at`, so a new failure in the same chat shows again.
  */
 import type { Snapshot } from '../shared/protocol';
-import type { InboxKind, WorkspaceSnapshot } from '../shared/domains/paperclip-protocol';
+import type { ApprovalDecision, InboxKind, WorkspaceSnapshot } from '../shared/domains/paperclip-protocol';
 import type { INBOX_BUCKETS } from '../shared/workspace-names';
 import { decisionOverdue, type InboxMeta } from '../shared/domains/work-protocol.ts';
 
@@ -21,6 +21,8 @@ export interface ActivityItem {
   source: 'chat' | 'muster' | 'paperclip'; kind: string; action: InboxAction;
   /** Workspace items: the project, task and agent they are about (decide-by, recommendations and gates need them). */
   projectId?: string | null; taskId?: string | null; agentId?: string | null;
+  /** A Paperclip approval this row stands for: Approve, Reject and Request revision act on it. */
+  approval?: { id: string; verbs: ApprovalDecision[] };
 }
 
 const KIND_BUCKET: Record<InboxKind, InboxBucket> = { question: 'needs', approval: 'needs', review: 'review', blocked: 'problems', failed_run: 'problems', agent_error: 'problems', budget: 'problems', mail: 'mentions', mention: 'mentions', other: 'review' };
@@ -54,7 +56,7 @@ export function buildActivity(app: Pick<Snapshot, 'chats' | 'folders' | 'project
   }
   for (const item of workspace?.inbox ?? []) {
     items.push({ id: `ws:${item.id}`, bucket: KIND_BUCKET[item.kind], title: item.title, why: item.why, at: item.at, group: item.group ?? workspace?.paperclip?.company?.name ?? 'Muster', unread: item.severity === 'high',
-      source: item.source === 'paperclip' ? 'paperclip' : 'muster', kind: item.kind, projectId: item.projectId ?? null, taskId: item.taskId, agentId: item.agentId,
+      source: item.source === 'paperclip' ? 'paperclip' : 'muster', kind: item.kind, projectId: item.projectId ?? null, taskId: item.taskId, agentId: item.agentId, ...(item.approvalId ? { approval: { id: item.approvalId, verbs: item.approvalVerbs ?? ['approve', 'reject', 'request_revision'] } } : {}),
       action: item.taskId ? { kind: 'task', taskId: item.taskId } : item.agentId ? { kind: 'agent', agentId: item.agentId } : { kind: 'none' } });
   }
   return items.filter(i => dismissed.get(i.id) !== i.at).sort((a, b) => Number(b.unread) - Number(a.unread) || b.at.localeCompare(a.at));

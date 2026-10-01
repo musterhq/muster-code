@@ -1,18 +1,22 @@
 /** Small shared parts of the work layer (Wave 2): label chips, pull request chips, star and hide buttons, date helpers. */
 import { Star } from 'lucide-react';
 import React from 'react';
-import type { TaskLabel, TaskPrSummary } from '../../shared/domains/work-protocol';
+import type { TaskPrSummary } from '../../shared/domains/work-protocol';
 import { Tip } from './Tooltip';
 // @ts-ignore -- side-effect CSS import; esbuild bundles it into dist/renderer/main.css
 import './work.css';
 
-export function LabelChip({ label }: { label: Pick<TaskLabel, 'name' | 'color'> }): React.ReactElement {
-  return <span className="ws-chip work-label" data-tone={label.color === 'faint' ? undefined : label.color === 'violet' ? 'violet' : label.color} data-color={label.color} title={`Label: ${label.name}`}>{label.name}</span>;
+export type ChipLabel = { id?: string; name: string; color: string | null };
+const TONES = new Set(['accent', 'ok', 'warn', 'danger', 'violet']);
+/** A Muster label (a tone name) or a Paperclip label (a colour, shown as a border). */
+export function LabelChip({ label }: { label: ChipLabel }): React.ReactElement {
+  const tone = label.color && TONES.has(label.color) ? label.color : label.color === 'faint' ? 'faint' : undefined, own = label.color && !tone;
+  return <span className="ws-chip work-label" data-tone={tone === 'violet' || tone === 'faint' ? undefined : tone} data-color={tone ?? 'faint'} style={own ? { borderColor: label.color! } : undefined} title={`Label: ${label.name}`}>{label.name}</span>;
 }
 /** Up to `max` chips, then "+n". */
-export function LabelChips({ labels, max = 3 }: { labels: readonly TaskLabel[] | undefined; max?: number }): React.ReactElement | null {
+export function LabelChips({ labels, max = 3 }: { labels: readonly ChipLabel[] | undefined; max?: number }): React.ReactElement | null {
   if (!labels?.length) return null;
-  return <span className="work-labels">{labels.slice(0, max).map(l => <LabelChip key={l.id} label={l}/>)}{labels.length > max && <span className="ws-chip" title={labels.slice(max).map(l => l.name).join(', ')}>+{labels.length - max}</span>}</span>;
+  return <span className="work-labels">{labels.slice(0, max).map(l => <LabelChip key={l.id ?? l.name} label={l}/>)}{labels.length > max && <span className="ws-chip" title={labels.slice(max).map(l => l.name).join(', ')}>+{labels.length - max}</span>}</span>;
 }
 /** A pull request chip: failing checks are red, open is blue, merged is green. */
 export function PrChip({ pr }: { pr: TaskPrSummary | null | undefined }): React.ReactElement | null {

@@ -26,10 +26,10 @@ const errorText = (cause: unknown) => cause instanceof Error ? cause.message : S
 
 // ── Labels (C6) ──────────────────────────────────────────────────────────────
 /** The labels on a task, with a menu to add or remove them and to make a new one. */
-export function TaskLabelsRow({ projectId, taskId, labels, onChanged }: { projectId: string; taskId: string; labels: readonly TaskLabel[]; onChanged: () => void }): React.ReactElement {
+export function TaskLabelsRow({ projectId, taskId, labels, onChanged }: { projectId: string; taskId: string; labels: readonly { id?: string; name: string; color: string | null }[]; onChanged: () => void }): React.ReactElement {
   const { data, reload } = useWorkLoad(projectId, ['labels'], () => invoke('work.labels.list', { projectId }));
   const [name, setName] = useState(''), [color, setColor] = useState<LabelColor>('accent'), [busy, setBusy] = useState(false);
-  const mine = new Set(labels.map(l => l.id));
+  const mine = new Set(labels.map(l => l.id).filter((x): x is string => Boolean(x)));
   const set = async (ids: string[]) => { setBusy(true); try { await invoke('work.task.labels.set', { projectId, taskId, labelIds: ids }); await refreshWorkspace(); onChanged(); } catch (cause) { notifyError(cause); } finally { setBusy(false); } };
   const create = async () => {
     const n = name.trim(); if (!n) return;
@@ -38,7 +38,7 @@ export function TaskLabelsRow({ projectId, taskId, labels, onChanged }: { projec
     catch (cause) { notifyError(cause); } finally { setBusy(false); }
   };
   return <span className="work-labels-row">
-    {labels.length ? labels.map(l => <LabelChip key={l.id} label={l}/>) : <span className="ws-faint">None</span>}
+    {labels.length ? labels.map(l => <LabelChip key={l.id ?? l.name} label={l}/>) : <span className="ws-faint">None</span>}
     <Menu.Root>
       <Tip label="Edit labels"><Menu.Trigger className="icon-button work-add" aria-label="Edit labels" disabled={busy}><Plus size={13}/></Menu.Trigger></Tip>
       <Menu.Portal><Menu.Positioner side="bottom" align="end" sideOffset={6} className="ui-menu-positioner"><Menu.Popup className="ui-menu work-label-menu">

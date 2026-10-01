@@ -17,7 +17,7 @@ import { DecisionExtras, GateActions, InboxViews, SnoozeMenu, useInboxMeta } fro
 import { agoLabel, exactTime } from '../relativeTime';
 import { notifyError, notifySuccess } from '../store';
 import { useStore } from '../useStore';
-import { AGENT_STATE_LABEL, INBOX_KIND_LABEL, Monogram, Receipt, RUN_STATE_LABEL, StateChip, TaskStatusIcon, agentTone, costText, duration, explainRunError, runTone, type Tone } from './HubParts';
+import { AGENT_STATE_LABEL, ApprovalActions, INBOX_KIND_LABEL, Monogram, Receipt, RUN_STATE_LABEL, StateChip, TaskStatusIcon, agentTone, costText, duration, explainRunError, runTone, type Tone } from './HubParts';
 import { MailboxInbox } from './MailboxInbox';
 import { ResourceState } from './ResourceState';
 import { useRuntimeLabel } from './RosterGraph';
@@ -89,6 +89,7 @@ export function InboxPage({ snapshot, nav }: { snapshot: WorkspaceSnapshot | nul
             {item.source !== 'paperclip' && !item.id.startsWith('chat-') && <SnoozeMenu item={item} snoozed={snoozedNow(item, meta)} onChanged={reloadMeta}/>}
             <Tip label="Dismiss"><button type="button" className="icon-button ws-row-dismiss" aria-label={`Dismiss ${item.title}`} onClick={() => void dismissInboxItem(item).catch(notifyError)}><X size={13} aria-hidden="true"/></button></Tip>
           </div>
+          {item.approval && <ApprovalActions approvalId={item.approval.id} verbs={item.approval.verbs}/>}
           {item.bucket === 'needs' && item.taskId && !item.id.startsWith('ws:gate:') && <DecisionExtras item={item} meta={meta.get(item.id)} agentName={item.agentId ? snapshot?.agents.find(a => a.id === item.agentId)?.name ?? null : null} onChanged={reloadMeta}/>}
         </li>)}</ul>
       </section>)}
@@ -98,7 +99,7 @@ export function InboxPage({ snapshot, nav }: { snapshot: WorkspaceSnapshot | nul
 
 // --- Pulse -------------------------------------------------------------------------------------------------------------
 /** Pulse: queued / running / recently failed runs, with Pause all and Resume all per source. */
-export function PulseBoard({ snapshot, nav, agentId, scoped = false }: { snapshot: WorkspaceSnapshot; nav: HubNav; agentId?: string; scoped?: boolean }): React.ReactElement {
+export function PulseBoard({ snapshot, nav, agentId, scoped = false, projectId }: { snapshot: WorkspaceSnapshot; nav: HubNav; agentId?: string; scoped?: boolean; projectId?: string }): React.ReactElement {
   const agents = useMemo(() => new Map(snapshot.agents.map(a => [a.id, a])), [snapshot.agents]);
   const tasks = useMemo(() => new Map(snapshot.tasks.map(t => [t.id, t])), [snapshot.tasks]);
   const [busy, setBusy] = useState<string | null>(null);
@@ -113,19 +114,21 @@ export function PulseBoard({ snapshot, nav, agentId, scoped = false }: { snapsho
   const act = async (key: string, fn: () => Promise<unknown>, done: string) => { setBusy(key); try { await fn(); notifySuccess(done); } catch (cause) { notifyError(cause); } finally { setBusy(null); setConfirm(null); } };
   const sources: WorkspaceSource[] = agentId ? [] : [...(snapshot.agents.some(a => a.source === 'local' && a.pausable) ? ['local' as const] : []), ...(snapshot.agents.some(a => a.source === 'paperclip') ? ['paperclip' as const] : [])];
   // Paperclip agents belong to the company, not the project: pausing one here also stops its work on every other project.
-  const running = (s: WorkspaceSource) => snapshot.agents.filter(a => a.source === s && a.pausable && a.status !== 'paused' && a.status !== 'terminated').length;
+  // The count is the whole company's (what Pause really stops), not just the agents on this page; a pending hire is never counted.
+  const running = (s: WorkspaceSource) => s === 'paperclip' && snapshot.agentCounts ? snapshot.agentCounts.active : snapshot.agents.filter(a => a.source === s && a.pausable && a.status !== 'paused' && a.status !== 'terminated' && a.status !== 'pending').length;
   const paperclipAgents = (n: number) => `${n} ${NAMES.paperclip} ${n === 1 ? 'agent' : 'agents'}`;
   const label = (s: WorkspaceSource) => scoped ? s === 'paperclip' ? `${paperclipAgents(running(s))} (company-wide)` : 'Muster agents on this project' : s === 'paperclip' ? snapshot.paperclip?.company?.name ?? NAMES.paperclip : 'Muster';
   const confirmText = (s: WorkspaceSource) => scoped && s === 'paperclip' ? `Pause ${paperclipAgents(running(s))}? They also stop working on other projects.`
     : `Pause every ${scoped ? 'Muster agent on this project' : `${label(s)} agent`}? Running work stops and nothing new starts until you resume.`;
-  // In a project, Pause stops the agents on this project (for Paperclip, company-wide); elsewhere every agent of that source.
-  const pauseAll = (source: WorkspaceSource, paused: boolean) => scoped
-    ? Promise.all(snapshot.agents.filter(a => a.source === source && a.pausable && (paused ? a.status !== 'paused' : a.status === 'paused')).map(a => invoke(paused ? 'paperclip.agent.pause' : 'paperclip.agent.resume', { id: a.id })))
-    : invoke(paused ? 'paperclip.pauseAll' : 'paperclip.resumeAll', { source });
+  // From a project page: Muster's Pause stops that project's agents, Paperclip's stops the company's (its agents belong to the company).
+  // Resume wakes only what that Pause paused, never an agent you paused on purpose or one waiting for approval.
+  const pauseAll = (source: WorkspaceSource, paused: boolean) => invoke(paused ? 'paperclip.pauseAll' : 'paperclip.resumeAll', { source, ...(scoped && source === 'local' && projectId ? { projectId } : {}) });
   return <section className="ws-section" aria-label={NAMES.pulse}>
     <div className="ws-section-head"><h2>{NAMES.pulse}</h2>
       <div className="ws-page-actions">{sources.map(source => {
-        const paused = snapshot.agents.filter(a => a.source === source && a.status === 'paused').length;
+        // Resume wakes only what Muster's Pause stopped, so the button counts (and enables on) exactly those.
+        const rc = snapshot.agentCounts?.resumable;
+        const paused = rc ? source === 'paperclip' ? rc.paperclip : scoped && projectId ? rc.projects[projectId] ?? 0 : rc.local + Object.values(rc.projects).reduce((n, x) => n + x, 0) : snapshot.agents.filter(a => a.source === source && a.status === 'paused').length;
         return confirm === source
           ? <span key={source} className="ws-confirm"><span className="ws-confirm-text">{confirmText(source)}</span>
               <button type="button" className="settings-button secondary" onClick={() => setConfirm(null)}>Keep running</button>
@@ -194,7 +197,7 @@ export function LedgerPage({ snapshot, nav, projectId }: { snapshot: WorkspaceSn
   const [view, setView] = useState<LedgerView | null>(null);
   const [error, setError] = useState('');
   const [tick, setTick] = useState(0);
-  useEffect(() => { let live = true; setError(''); invoke('paperclip.ledger', { limit: projectId ? 1000 : 300 }).then(v => { if (live) setView(projectId ? { ...v, entries: v.entries.filter(e => e.projectId === projectId) } : v); }, e => { if (live) setError(errorText(e)); }); return () => { live = false; }; }, [snapshot.fetchedAt, tick]);
+  useEffect(() => { let live = true; setError(''); invoke('paperclip.ledger', { limit: projectId ? 1000 : 300 }).then(v => { if (live) { const mine = new Set(snapshot.tasks.map(t => t.id)); setView(projectId ? { ...v, entries: v.entries.filter(e => e.projectId === projectId || (e.taskId !== null && mine.has(e.taskId))) } : v); } }, e => { if (live) setError(errorText(e)); }); return () => { live = false; }; }, [snapshot.fetchedAt, tick]);
   const tasks = useMemo(() => new Map(snapshot.tasks.map(t => [t.id, t])), [snapshot.tasks]);
   const costs = useMemo(() => {
     const rows = new Map<string, { agent: string; model: string; turns: number; input: number; output: number; cost: number | null; unpriced: number }>();
@@ -215,7 +218,7 @@ export function LedgerPage({ snapshot, nav, projectId }: { snapshot: WorkspaceSn
     <PageHeader title={projectId ? '' : NAMES.ledger} detail={projectId ? '' : "One entry per agent turn: who ran, on which model, what it cost in tokens, which tools it used and which files it changed."}>
       <div className="ws-segmented is-inline" role="tablist" aria-label="Ledger views">{TABS.map(([t, l]) => <button key={t} type="button" role="tab" aria-selected={tab === t} className="ws-segment" onClick={() => setTab(t)}><span className="ws-segment-label">{l}</span></button>)}</div>
     </PageHeader>
-    {chain && <p className="ws-chain" data-ok={chain.ok ? 'true' : 'false'}>{chain.ok ? chain.entries === 0 ? 'No Muster turns recorded yet' : `Muster chain verified · ${chain.entries} ${chain.entries === 1 ? 'entry' : 'entries'} · head ${chain.head.slice(0, 12)}` : `Chain broken at entry #${chain.brokenAt}: an entry was changed or removed after it was written.`}{imported ? ` · ${imported} imported from history (not chained)` : ''}</p>}
+    {chain && !(projectId && snapshot.projects[0]?.source === 'paperclip') && <p className="ws-chain" data-ok={chain.ok ? 'true' : 'false'}>{chain.ok ? chain.entries === 0 ? 'No Muster turns recorded yet' : `Muster chain verified · ${chain.entries} ${chain.entries === 1 ? 'entry' : 'entries'} · head ${chain.head.slice(0, 12)}` : `Chain broken at entry #${chain.brokenAt}: an entry was changed or removed after it was written.`}{imported ? ` · ${imported} imported from history (not chained)` : ''}</p>}
     {tab === 'activity' ? <ListPage kind="audit" embedded/>
       : tab === 'timeline' ? <GanttTimeline snapshot={snapshot} view={view} onOpenTask={nav.onOpenTask}/>
       : error ? <ResourceState kind="error" message="The ledger could not be read." detail={error} onRetry={() => setTick(n => n + 1)}/>

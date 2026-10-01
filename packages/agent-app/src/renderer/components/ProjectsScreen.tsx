@@ -88,14 +88,17 @@ function ProjectList({ projects, workspace, onOpen, onCreate }: { projects: Proj
   const [showHidden, setShowHidden] = useState(false);
   const stats = useMemo(() => new Map(workspace.map(p => [p.id, p])), [workspace]);
   const all = [
-    ...projects.filter(p => showArchived || !p.archived).map(p => { const w = stats.get(p.id); return { id: p.id, name: p.name, detail: p.goal, source: 'local' as const, archived: p.archived, paused: w?.paused ?? false, tasks: w?.taskCount ?? null, open: w?.openCount ?? null, status: (PROJECT_STATUSES.includes(w?.status as ProjectStatus) ? w!.status : 'in_progress') as ProjectStatus, targetDate: w?.targetDate ?? null, starred: Boolean(w?.starred), hidden: Boolean(w?.hidden) }; }),
-    ...workspace.filter(p => p.source === 'paperclip').map(p => ({ id: p.id, name: p.name, detail: p.description, source: 'paperclip' as const, archived: false, paused: p.paused, tasks: p.taskCount, open: p.openCount, status: 'in_progress' as ProjectStatus, targetDate: null as string | null, starred: false, hidden: false })),
+    ...projects.filter(p => showArchived || !p.archived).map(p => { const w = stats.get(p.id); return { id: p.id, name: p.name, detail: p.goal, source: 'local' as const, archived: p.archived, paused: w?.paused ?? false, tasks: w?.taskCount ?? null, open: w?.openCount ?? null, org: w?.org ?? null, edited: w?.editedHere ?? false, status: (PROJECT_STATUSES.includes(w?.status as ProjectStatus) ? w!.status : 'in_progress') as ProjectStatus, targetDate: w?.targetDate ?? null, starred: Boolean(w?.starred), hidden: Boolean(w?.hidden) }; }),
+    ...workspace.filter(p => p.source === 'paperclip').map(p => ({ id: p.id, name: p.name, detail: p.description, source: 'paperclip' as const, archived: false, paused: p.paused, tasks: p.taskCount, open: p.openCount, org: p.org ?? NAMES.paperclip, edited: false, status: 'in_progress' as ProjectStatus, targetDate: null as string | null, starred: false, hidden: false })),
   ];
   // Starred projects first; hidden ones fold away behind a toggle (the sidebar is not touched).
   const hiddenCount = all.filter(r => r.hidden).length;
   const rows = all.filter(r => showHidden || !r.hidden).sort((a, b) => Number(b.starred) - Number(a.starred) || (sort === 'name' ? a.name.localeCompare(b.name) : (b.open ?? 0) - (a.open ?? 0) || a.name.localeCompare(b.name)));
   const archived = projects.filter(p => p.archived).length;
   const mark = (id: string, patch: { starred?: boolean; hidden?: boolean }) => void invoke('work.star.set', { kind: 'project', id, ...patch }).then(() => refreshWorkspace(), notifyError);
+  // Projects you made first; each Paperclip org (imported or linked) gets its own group, named for the org.
+  const orgs = [...new Set(rows.map(r => r.org).filter((o): o is string => Boolean(o)))].sort((a, b) => a.localeCompare(b));
+  const groups = [{ org: null as string | null, rows: rows.filter(r => !r.org) }, ...orgs.map(org => ({ org: org as string | null, rows: rows.filter(r => r.org === org) }))].filter(g => g.org !== null || g.rows.length > 0 || orgs.length === 0);
   return <div className="ws-page pp-list">
     <div className="task-toolbar">
       <button type="button" className="settings-button secondary" onClick={() => setSort(s => s === 'name' ? 'recent' : 'name')}><ArrowDownUp size={14}/>Sort: {sort === 'name' ? 'Name' : 'Most open'}</button>
@@ -104,14 +107,15 @@ function ProjectList({ projects, workspace, onOpen, onCreate }: { projects: Proj
       <span className="task-toolbar-spacer"/>
       <button type="button" className="settings-button secondary" onClick={onCreate}><Plus size={14}/>New project</button>
     </div>
-    <div className="ws-section-head"><h2 className="ws-group-title">My projects</h2><span className="ws-row-count">{rows.length} {rows.length === 1 ? 'project' : 'projects'}</span></div>
     {rows.length === 0 ? <ResourceState kind="empty" icon={<FolderClosed size={20}/>} title={hiddenCount ? 'Every project is hidden' : 'No projects yet'} message={hiddenCount ? 'Use the Hidden filter to bring them back.' : 'A project holds tasks, a Roster of agents that work on them, and the folders they work in.'}>
         {!hiddenCount && <button type="button" className="settings-button" onClick={onCreate}><Plus size={14}/>New project</button>}
       </ResourceState>
-      : <ul className="ws-rows">{rows.map(r => <li key={r.id} className="pp-list-item" data-hidden={r.hidden || undefined}><button type="button" className="ws-row pp-list-row" onClick={() => r.source === 'paperclip' ? openHub('project', r.id) : onOpen(r.id)}>
+      : groups.map(group => <section key={group.org ?? 'mine'} className="ws-section" aria-label={group.org ? `${group.org} · ${NAMES.paperclip}` : 'My projects'}>
+        <div className="ws-section-head"><h2 className="ws-group-title">{group.org ? `${group.org} · ${NAMES.paperclip}` : 'My projects'}</h2><span className="ws-row-count">{group.rows.length} {group.rows.length === 1 ? 'project' : 'projects'}</span></div>
+        {group.rows.length === 0 ? <p className="ws-faint">Projects you make in Muster show here.</p> : <ul className="ws-rows">{group.rows.map(r => <li key={r.id} className="pp-list-item" data-hidden={r.hidden || undefined}><button type="button" className="ws-row pp-list-row" onClick={() => r.source === 'paperclip' ? openHub('project', r.id) : onOpen(r.id)}>
           <span className="pp-icon" aria-hidden="true"><FolderClosed size={14}/></span>
           <span className="ws-row-text"><span className="ws-row-title">{r.name}</span><span className="ws-row-meta">{r.detail || 'No goal yet'}</span></span>
-          {r.source === 'paperclip' && <span className="ws-source">{NAMES.paperclip}</span>}
+          {r.edited && <span className="ws-chip" data-tone="faint" title="You changed this project’s name or goal here. Importing from Paperclip again keeps your version.">edited here</span>}
           {r.tasks !== null && <span className="ws-row-count">{r.tasks} {r.tasks === 1 ? 'task' : 'tasks'}</span>}
           {r.targetDate && <span className="ws-chip" data-tone={isOverdue(r.status, r.targetDate) ? 'danger' : undefined} title="Target date">{dayLabel(r.targetDate)}</span>}
           <span className="ws-chip" data-tone={r.archived ? 'faint' : r.paused ? 'warn' : r.status === 'completed' ? 'ok' : r.status === 'cancelled' || r.status === 'backlog' ? 'faint' : 'accent'}>{r.archived ? 'archived' : r.paused ? 'paused' : PROJECT_STATUS_LABEL[r.status].toLowerCase()}</span>
@@ -119,5 +123,6 @@ function ProjectList({ projects, workspace, onOpen, onCreate }: { projects: Proj
         {r.source === 'local' && <><StarButton starred={r.starred} label={r.name} onToggle={() => mark(r.id, { starred: !r.starred })}/>
           <Tip label={r.hidden ? `Show ${r.name}` : `Hide ${r.name}`}><button type="button" className="icon-button" aria-pressed={r.hidden} aria-label={r.hidden ? `Show ${r.name}` : `Hide ${r.name}`} onClick={() => mark(r.id, { hidden: !r.hidden })}>{r.hidden ? <Eye size={14}/> : <EyeOff size={14}/>}</button></Tip></>}
         </li>)}</ul>}
+      </section>)}
   </div>;
 }

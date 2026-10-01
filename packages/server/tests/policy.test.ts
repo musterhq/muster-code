@@ -145,3 +145,9 @@ test('Review S4: starring or hiding needs write access to the project, and an ag
   denied(() => authorizeResource(editor, 'work.star.set', 'write', { kind: 'agent', id: 'member:m1', projectId: 'p-secret', starred: true }, snapshot));
   denied(() => authorizeResource(editor, 'work.star.set', 'write', { kind: 'agent', id: 'member:m1', starred: true }, snapshot));
 });
+
+test('review S4: Paperclip commands that spend, pause or change configuration are host (admin) commands; reads stay reads', () => {
+  for (const c of ['paperclip.approval.decide', 'paperclip.pauseAll', 'paperclip.resumeAll', 'paperclip.agent.pause', 'paperclip.agent.resume', 'paperclip.import', 'paperclip.config.set']) assert.equal(classifyCommand(c), 'host', c);
+  assert.equal(classifyCommand('project.tasks.get'), 'read');
+  assert.equal(classifyCommand('paperclip.snapshot'), 'read');
+});

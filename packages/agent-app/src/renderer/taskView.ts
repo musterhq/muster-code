@@ -134,8 +134,8 @@ export function ownerOptions(tasks: readonly WorkspaceTask[]): { id: string; lab
 export const activeFilters = (view: Pick<TaskViewState, 'quick' | 'statuses' | 'owners' | 'priorities'> & { labels?: readonly string[] }) => (view.quick !== 'all' ? 1 : 0) + view.statuses.length + view.owners.length + view.priorities.length + (view.labels?.length ?? 0);
 
 /** The labels the filter offers: every label on a task in this list, by name. */
-export const labelOptions = (tasks: readonly WorkspaceTask[]): { name: string; color: string; count: number }[] => {
-  const seen = new Map<string, { name: string; color: string; count: number }>();
+export const labelOptions = (tasks: readonly WorkspaceTask[]): { name: string; color: string | null; count: number }[] => {
+  const seen = new Map<string, { name: string; color: string | null; count: number }>();
   for (const t of tasks) for (const l of t.labels ?? []) { const e = seen.get(l.name) ?? { name: l.name, color: l.color, count: 0 }; e.count++; seen.set(l.name, e); }
   return [...seen.values()].sort((a, b) => a.name.localeCompare(b.name));
 };
