@@ -16,7 +16,9 @@ import { onTasksChanged } from '../hubStore';
 import { agoLabel, exactTime } from '../relativeTime';
 import { closeSettings, notifyError, notifySuccess, selectChat } from '../store';
 import { LiveCount, Monogram, Receipt, RUN_STATE_LABEL, StateChip, TaskStatusIcon, duration, explainRunError, runTone } from './HubParts';
+import { ApprovalCard } from './ApprovalCard';
 import { MessageBody } from './MessageBody';
+import { PendingQuestion } from './PendingQuestion';
 import { ResourceState } from './ResourceState';
 import { Tip } from './Tooltip';
 
@@ -127,9 +129,11 @@ function Card({ card, taskId, who, onOpenTask, onChanged }: { card: ThreadCard; 
   return <div className="ws-card-sys" data-kind="needs" data-status={card.status}>
     <CircleHelp size={14} aria-hidden="true"/><span className="ws-card-sys-text"><strong>{card.status === 'pending' ? 'Needs you' : 'Decision'}</strong>{card.from ? <> · {who(card.from)} asks</> : null}</span>
     <time className="ws-message-time" title={exactTime(card.at)}>{agoLabel(card.at)}</time>
-    <p className="ws-card-prompt">{card.prompt}</p>
+    {!card.pending && <p className="ws-card-prompt">{card.prompt}</p>}
     {card.detail && card.status === 'pending' && <details className="ws-card-detail"><summary>Details</summary><MessageBody text={card.detail}/></details>}
     {card.status !== 'pending' ? <p className="ws-faint ws-card-resolution">{card.status === 'cancelled' ? 'Withdrawn.' : card.resolution ?? 'Answered.'}</p>
+      : card.pending ? (card.pending.kind === 'question' ? <PendingQuestion item={card.pending}/> : <ApprovalCard item={card.pending}/>)
+      : card.chatId ? <p className="ws-faint ws-card-resolution">Answer it in <button type="button" className="ws-link" onClick={() => { void selectChat(card.chatId!); closeSettings(); }}>the run chat</button>.</p>
       : card.interactionId ? <div className="ws-card-actions">
           {rejecting && <input className="ws-card-reason" aria-label="What should change?" placeholder="What should change?" value={reason} onChange={e => setReason(e.target.value)}/>}
           <button type="button" className="settings-button secondary" disabled={busy || (rejecting && !reason.trim())} onClick={() => rejecting ? void respond(false) : setRejecting(true)}>{card.rejectLabel ?? 'Request changes'}</button>

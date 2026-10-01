@@ -8,6 +8,7 @@
  *   reaches the renderer.
  */
 import type { MemoryConnection, MemoryRecord } from './memory-protocol.ts';
+import type { TimelineItem } from '../protocol.ts';
 
 export type PaperclipMode = 'off' | 'local' | 'custom';
 export const PAPERCLIP_LOCAL_URL = 'http://127.0.0.1:3100';
@@ -108,7 +109,10 @@ export type ThreadCard =
   /** `memory`: the Muster notes carried to the next agent with the work. */
   | { kind: 'handoff'; id: string; at: string; from: string | null; to: string | null; summary: string; memory: { text: string; source: string }[] }
   | { kind: 'needs'; id: string; at: string; from: string | null; prompt: string; detail: string | null; status: 'pending' | 'resolved' | 'cancelled'; resolution: string | null;
-      /** Answerable here when set: a Paperclip confirmation, accepted or rejected in place. */ interactionId: string | null; acceptLabel: string | null; rejectLabel: string | null }
+      /** Answerable here when set: a Paperclip confirmation, accepted or rejected in place. */ interactionId: string | null; acceptLabel: string | null; rejectLabel: string | null;
+      /** A Muster run waiting on you: its chat, and the pending question or approval item there, answered in place
+       *  (question.respond / approval.respond) so the waiting run continues. */
+      chatId?: string | null; pending?: TimelineItem | null }
   | { kind: 'approval'; id: string; at: string; title: string; status: string };
 export interface WorkspaceTaskDetail {
   task: WorkspaceTask; description: string; comments: WorkspaceComment[]; runs: WorkspaceRun[];

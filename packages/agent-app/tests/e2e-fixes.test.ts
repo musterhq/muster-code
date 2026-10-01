@@ -1,0 +1,92 @@
+/** Fixes from the 0.2.10 Paperclip-parity E2E pass, through the real agent service: fresh data dir, real SQLite, real git
+ *  repos and worktrees, and a scripted provider whose turns edit a file, ask a question (E2E-ASK), ask for an approval
+ *  (E2E-APPROVE), fail (E2E-FAIL) or run until stopped (E2E-SLOW). */
+import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { test, type TestContext } from 'node:test';
+import { createAgentService } from '../src/runtime/service.ts';
+import type { ProviderAdapter, ProviderInput } from '../src/runtime/provider.ts';
+
+const wait = (ms: number) => new Promise(r => setTimeout(r, ms));
+async function until<T>(fn: () => Promise<T | undefined | null | false> | T | undefined | null | false, label: string, ms = 10_000): Promise<T> {
+  const start = Date.now();
+  while (Date.now() - start < ms) { const v = await fn(); if (v) return v as T; await wait(40); }
+  throw new Error(`timed out waiting for ${label}`);
+}
+
+async function service(t: TestContext) {
+  const dataDir = await mkdtemp(join(tmpdir(), 'muster-e2e-fixes-'));
+  const repo = join(dataDir, 'oss-repo');
+  execFileSync('git', ['init', '-q', '-b', 'main', repo]); execFileSync('git', ['-C', repo, 'config', 'user.email', 't@t']); execFileSync('git', ['-C', repo, 'config', 'user.name', 't']);
+  await writeFile(join(repo, 'README.md'), '# oss\n'); execFileSync('git', ['-C', repo, 'add', '.']); execFileSync('git', ['-C', repo, 'commit', '-qm', 'init']);
+  const answers: unknown[] = [], stopped = new Set<string>();
+  const slow = new Map<string, () => void>();
+  const provider: ProviderAdapter = {
+    info: () => [{ id: 'scripted', name: 'Scripted', available: true, identityMasked: 'configured', models: [{ id: 'scripted-model', name: 'Scripted model' }] }],
+    stop: async chatId => { stopped.add(chatId); slow.get(chatId)?.(); return true; }, dispose() {},
+    async run(input: ProviderInput) {
+      const text = `${input.developerInstructions ?? ''}\n${input.prompt}`;
+      if (/E2E-SLOW/.test(text)) {
+        await new Promise<void>(r => { slow.set(input.chat.id, r); setTimeout(r, 20_000); });
+        slow.delete(input.chat.id);
+        return stopped.has(input.chat.id) ? { status: 'failed', finalMessage: '', errorMessage: 'stopped', failure: { kind: 'aborted' }, dispatchState: 'dispatched' } : { status: 'completed', finalMessage: 'slow done', dispatchState: 'dispatched' };
+      }
+      if (/E2E-FAIL/.test(text)) return { status: 'failed', finalMessage: '', errorMessage: 'rate_limited: scripted failure', dispatchState: 'dispatched' };
+      if (/E2E-ASK/.test(text)) {
+        const answer = await input.onRequest('item/tool/requestUserInput', { itemId: `q-${input.chat.id}`, questions: [{ id: 'color', header: 'Colour', question: 'Which colour should the banner be?', options: [{ label: 'Blue' }, { label: 'Green' }] }] });
+        answers.push(answer);
+        return { status: 'completed', finalMessage: `Answered: ${JSON.stringify(answer)}` };
+      }
+      if (/E2E-APPROVE/.test(text)) {
+        const decision = await input.onRequest('item/commandExecution/requestApproval', { itemId: `a-${input.chat.id}`, command: 'rm -rf build', cwd: input.cwd, reason: 'Clean the build folder' });
+        answers.push(decision);
+        return { status: 'completed', finalMessage: `Decision: ${JSON.stringify(decision)}` };
+      }
+      await writeFile(join(input.cwd, 'E2E-NOTE.md'), 'edited\n');
+      return { status: 'completed', finalMessage: 'Wrote E2E-NOTE.md' };
+    },
+  };
+  const s = createAgentService({ dataDir, provider, onEvent() {} });
+  t.after(async () => { for (const r of slow.values()) r(); await s.dispose(); await rm(dataDir, { recursive: true, force: true }); });
+  const folder = await s.invoke('folder.add', { path: repo });
+  const project = await s.invoke('project.create', { name: 'OSSMANAGER', goal: '', folderIds: [folder.id] });
+  const member = (name: string) => s.invoke('project.members.add', { projectId: project.id, name, kind: 'agent', role: 'agent', title: name, runner: { providerId: 'scripted', model: 'scripted-model' } });
+  const state = async (taskId: string) => (await s.invoke('project.work', { projectId: project.id })).tasks.items.find(i => i.id === taskId)?.state;
+  return { s, repo, folder, project, member, state, answers, stopped, dataDir };
+}
+
+test('S14 Needs you on a Muster task: the card shows the run’s real question and answering it there resumes that run', async t => {
+  const { s, project, member, state, answers } = await service(t);
+  const qa = await member('QA');
+  const task = await s.invoke('paperclip.task.create', { title: 'Pick a banner colour', description: 'E2E-ASK', projectId: project.id, assigneeId: `member:${qa.id}`, start: true });
+  assert.ok(task.started, task.startError ?? "not started");
+  await until(async () => await state(task.id) === 'needs-input', 'needs-input');
+  const detail = await s.invoke('paperclip.task', { id: task.id });
+  const card = detail.cards.find(c => c.kind === 'needs');
+  assert.ok(card && card.kind === 'needs');
+  assert.equal(card.prompt, 'Which colour should the banner be?', 'the actual question, not a generic line');
+  assert.equal(card.chatId, task.started!.chatId);
+  assert.equal(card.pending?.kind, 'question');
+  await s.invoke('question.respond', { id: card.pending!.id, answers: { color: { answers: ['Blue'] } } });
+  await until(() => answers.length > 0, 'the run got the answer');
+  assert.deepEqual(answers[0], { answers: { color: { answers: ['Blue'] } } });
+  await until(async () => await state(task.id) !== 'needs-input' && await state(task.id) !== 'running', 'the run settled');
+  const after = await s.invoke('paperclip.task', { id: task.id });
+  assert.ok(!after.cards.some(c => c.kind === 'needs' && c.status === 'pending'), 'nothing left waiting');
+});
+
+test('S14 an approval a Muster run is waiting on is answered from the task card through approval.respond', async t => {
+  const { s, project, member, state, answers } = await service(t);
+  const qa = await member('QA');
+  const task = await s.invoke('paperclip.task.create', { title: 'Clean the build', description: 'E2E-APPROVE', projectId: project.id, assigneeId: `member:${qa.id}`, start: true });
+  assert.ok(task.started, task.startError ?? "not started");
+  const card = await until(async () => (await s.invoke('paperclip.task', { id: task.id })).cards.find(c => c.kind === 'needs' && c.pending?.kind === 'approval'), 'approval card');
+  assert.ok(card.kind === 'needs' && card.pending);
+  await s.invoke('approval.respond', { id: card.pending.id, approved: true, decision: 'accept' });
+  await until(() => answers.length > 0, 'the run got the decision');
+  assert.deepEqual(answers[0], { decision: 'accept' });
+  await until(async () => await state(task.id) !== 'running', 'the run settled');
+});

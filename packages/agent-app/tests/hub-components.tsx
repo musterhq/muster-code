@@ -41,6 +41,10 @@ const calls:{command:string;input:any}[]=[];
 (window as any).muster={subscribe(){return()=>{};},async invoke(command:string,input:any){calls.push({command,input});
   if(command==='paperclip.snapshot')return snapshot;
   if(command==='paperclip.watch')return {live:'socket'};
+  // A Muster task whose run is waiting on a question: the card carries the run's real question and answers it in place.
+  if(command==='paperclip.task'&&input.id==='t4')return {task:snapshot.tasks[2],description:'',comments:[],runs:[],addressee:{id:'qa',label:'QA'},composerNote:null,subtasks:[],blocking:[],receipts:[],mentionable:[],
+    cards:[{kind:'needs',id:'needs:q1',at:now,from:'QA',prompt:'Which colour should the banner be?',detail:null,status:'pending',resolution:null,interactionId:null,acceptLabel:null,rejectLabel:null,chatId:'c-run',
+      pending:{id:'q1',chatId:'c-run',kind:'question',text:'The provider needs your input.',status:'pending',createdAt:now,data:{method:'item/tool/requestUserInput',questions:[{id:'color',header:'Colour',question:'Which colour should the banner be?',options:[{label:'Blue'},{label:'Green'}],allowCustomAnswer:false,multiSelect:false}]}}}]};
   if(command==='paperclip.task')return {task:snapshot.tasks[0],description:'Build the **wizard**.',comments:[{id:'m1',author:{kind:'agent',id:'ceo',label:'CEO'},body:'@CTO please take the implementation.',createdAt:now,runId:'r1'}],runs:[snapshot.runs[0]],addressee:{id:'ceo',label:'CEO'},composerNote:null,subtasks:['t15'],blocking:[],
     receipts:[receipt],mentionable:[{id:'ceo',name:'CEO'},{id:'cto',name:'CTO'},{id:'qa',name:'QA'}],
     cards:[{kind:'delegated',id:'d1',at:now,from:'CEO',to:'CTO',taskId:'t15',key:'RAG-15',title:'Implement migration',brief:''},
@@ -95,6 +99,19 @@ assert.deepEqual(text('.ws-mentions button'),['CTCTO'],'typing @ offers the agen
 descriptor!.set!.call(box,'@CTO rebase onto dev');box.dispatchEvent(new window.Event('input',{bubbles:true}));await delay(40);
 document.querySelector('.ws-composer')!.dispatchEvent(new window.Event('submit',{bubbles:true,cancelable:true}));await delay(80);
 assert.deepEqual(calls.find(c=>c.command==='paperclip.comment')?.input,{taskId:'t1',body:'@CTO rebase onto dev'});
+// A Muster run's question is answered from its task card through question.respond (not "reply below").
+openHub('task','t4');await delay(150);
+{
+  const runCard=document.querySelector('.ws-card-sys[data-kind="needs"]')!;
+  assert.ok(runCard?.querySelector('.pending-question'),'the run’s question renders in the card');
+  assert.match(runCard.textContent!,/Which colour should the banner be\?/);
+  assert.ok(!/replying below/.test(runCard.textContent!),'no "reply below" for a run question');
+  const blue=runCard.querySelector('input[type="radio"]') as any;
+  const props=Object.keys(blue).find(k=>k.startsWith('__reactProps'))!;
+  blue[props].onChange({target:blue,currentTarget:blue});await delay(40);
+  await click([...runCard.querySelectorAll('button')].find(b=>/Send answer/.test(b.textContent!)));
+  assert.deepEqual(calls.find(c=>c.command==='question.respond')?.input,{id:'q1',answers:{color:{answers:['Blue']}}},'answered through question.respond');
+}
 root.unmount();await delay(30);
 assert.equal(calls.filter(c=>c.command==='paperclip.watch').at(-1)!.input.visible,false,'leaving the hub stops live updates');
 

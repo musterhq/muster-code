@@ -374,7 +374,19 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
       if (h.kind.startsWith('approval')) cards.push({ kind: 'approval', id: `import:${h.sourceId}`, at: h.at, title: h.title, status: h.status });
       else cards.push({ kind: 'needs', id: `import:${h.sourceId}`, at: h.at, from: null, prompt: h.title, detail: null, status: h.pending ? 'pending' : h.status === 'cancelled' || h.status === 'withdrawn' ? 'cancelled' : 'resolved', resolution: h.detail || null, interactionId: null, acceptLabel: null, rejectLabel: null });
     }
-    if (detail.task.status === 'in_review' && detail.runs.some(r => r.status === 'running')) cards.push({ kind: 'needs', id: `needs:${taskId}`, at: detail.task.updatedAt, from: detail.task.assigneeLabel, prompt: 'The agent is waiting for your answer in its run.', detail: null, status: 'pending', resolution: null, interactionId: null, acceptLabel: null, rejectLabel: null });
+    // A run waiting on you: its real pending question or approval, answered in place so that run continues.
+    let waiting = false;
+    for (const run of detail.runs.filter(r => r.status === 'running' && r.chatId)) {
+      const items = await context.invoke('chat.timeline', { id: run.chatId! }).then(t => t.items, () => []);
+      for (const item of items) {
+        if ((item.kind !== 'question' && item.kind !== 'approval') || item.status !== 'pending') continue;
+        waiting = true;
+        const questions = item.kind === 'question' && Array.isArray(item.data?.questions) ? (item.data.questions as { question?: unknown }[]).map(q => typeof q.question === 'string' ? q.question : '').filter(Boolean) : [];
+        cards.push({ kind: 'needs', id: `needs:${item.id}`, at: item.createdAt, from: detail.task.assigneeLabel, prompt: questions.join('\n') || item.text, detail: null, status: 'pending', resolution: null, interactionId: null, acceptLabel: null, rejectLabel: null, chatId: run.chatId ?? null, pending: item });
+      }
+    }
+    const asking = detail.runs.find(r => r.status === 'running' && r.chatId);
+    if (!waiting && detail.task.status === 'in_review' && asking) cards.push({ kind: 'needs', id: `needs:${taskId}`, at: detail.task.updatedAt, from: detail.task.assigneeLabel, prompt: 'The agent is waiting for your answer in its run.', detail: null, status: 'pending', resolution: null, interactionId: null, acceptLabel: null, rejectLabel: null, chatId: asking.chatId ?? null, pending: null });
     return { ...detail, cards, receipts: chatIds.length ? ledger().list({ chatIds, limit: 50 }) : [] };
   };
   const paperclipDetail = async (taskId: string): Promise<WorkspaceTaskDetail> => {
