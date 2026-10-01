@@ -50,6 +50,7 @@ export interface ImportStore {
   /** Imported tasks of one company (to find the ones deleted in Paperclip). */
   /** Sets aside what an older import recorded about a project of yours before the same Paperclip project gets its own Muster project. */
   detachProject?(sourceProjectId: string, musterProjectId: string): void;
+  writtenBy?(musterProjectId: string): { tasks: Set<string>; members: Set<string> };
   tasksOf?(companyId: string): { sourceId: string; musterId: string; key: string | null; data: Json }[];
 }
 
@@ -151,6 +152,13 @@ export class SqliteImportStore implements ImportStore {
     const d = JSON.parse(row.data) as Json;
     return { companyId: str(d.companyId), serverOrigin: str(d.serverOrigin) };
   }
+  /** The Muster tasks and members an import recorded for a project (ids), current or set aside. */
+  writtenBy(musterProjectId: string): { tasks: Set<string>; members: Set<string> } {
+    const tasks = new Set<string>(), members = new Set<string>();
+    for (const r of this.db.prepare("SELECT muster_id, data FROM paperclip_import_map WHERE kind IN ('task', 'task:detached')").all() as { muster_id: string; data: string }[]) if (str((JSON.parse(r.data) as Json).projectId) === musterProjectId) tasks.add(r.muster_id);
+    for (const r of this.db.prepare("SELECT muster_id FROM paperclip_import_map WHERE kind IN ('member', 'member:detached') AND key = ?").all(musterProjectId) as { muster_id: string }[]) members.add(r.muster_id);
+    return { tasks, members };
+  }
   /** Every project an import made: Muster project id to the org it came from. */
   projectOrgs(): Record<string, string> {
     const out: Record<string, string> = {};
@@ -168,9 +176,9 @@ export class SqliteImportStore implements ImportStore {
     return (this.db.prepare('SELECT source_id, author_kind, author_label, body, created_at, run_id FROM paperclip_import_comments WHERE task_id = ? ORDER BY created_at, source_id').all(taskId) as Record<string, string | null>[])
       .map(r => ({ sourceId: String(r.source_id), authorKind: String(r.author_kind), authorLabel: String(r.author_label), body: String(r.body), createdAt: String(r.created_at), runId: r.run_id }));
   }
-  history(projectId?: string): { sourceId: string; kind: string; taskId: string | null; projectId: string | null; title: string; status: string; detail: string; at: string; pending: boolean }[] {
+  history(projectId?: string): { detached: boolean; sourceId: string; kind: string; taskId: string | null; projectId: string | null; title: string; status: string; detail: string; at: string; pending: boolean }[] {
     const rows = (projectId ? this.db.prepare('SELECT * FROM paperclip_import_history WHERE project_id = ? ORDER BY at').all(projectId) : this.db.prepare('SELECT * FROM paperclip_import_history ORDER BY at').all()) as Record<string, string | number | null>[];
-    return rows.map(r => ({ sourceId: String(r.source_id), kind: String(r.kind), taskId: r.task_id === null ? null : String(r.task_id), projectId: r.project_id === null ? null : String(r.project_id), title: String(r.title), status: String(r.status), detail: String(r.detail), at: String(r.at), pending: Number(r.pending) === 1 }));
+    return rows.map(r => ({ detached: r.gen !== '', sourceId: String(r.source_id), kind: String(r.kind), taskId: r.task_id === null ? null : String(r.task_id), projectId: r.project_id === null ? null : String(r.project_id), title: String(r.title), status: String(r.status), detail: String(r.detail), at: String(r.at), pending: Number(r.pending) === 1 }));
   }
 }
 
@@ -197,6 +205,8 @@ export interface ImportDeps {
   remoteOf?(path: string): Promise<string | undefined>;
   /** 'skip' leaves a Paperclip project out of this import. Nothing else is configurable: imports never write into your own projects. */
   targets?: ImportTargets;
+  /** For a project the plan marked `ask`: yours (`mine`) or made by the earlier import (`made`). */
+  owners?: Record<string, 'mine' | 'made'>;
   /** The origin of the Paperclip server being read (recorded on each project, so an approval is only decided on the server it came from). */
   serverOrigin?: string;
 }
@@ -235,26 +245,35 @@ export async function planImport(companyId: string | null, deps: Pick<ImportDeps
     const id = String(p.id), codebase = obj(p.codebase), name = str(p.name) ?? 'Paperclip project', localFolder = str(codebase.localFolder), repoUrl = str(codebase.repoUrl);
     const repo = repoUrl ? normalizeRemote(repoUrl) ?? repoUrl : null;
     const mapped = deps.store.map('project', id), mine = mapped ? muster.get(mapped.musterId) : undefined;
-    const existing: ImportPlan['projects'][number]['existing'] = mapped && mine ? await ownerOf(mapped, mine, deps.invoke) === 'imported' ? 'imported' : 'detached' : 'new';
+    const existing: ImportPlan['projects'][number]['existing'] = mapped && mine ? await ownerOf(mapped, mine, deps).then(v => v === 'imported' ? 'imported' as const : v === 'own' ? 'detached' as const : 'ask' as const) : 'new';
     projects.push({ id, name, repo, localFolder, taskCount: counts.get(id) ?? 0, existing });
   }
   return { company: { id: String(company.id), name: str(company.name) ?? 'Paperclip' }, companies: listed, projects, local: deps.local };
 }
 
 /**
- * Who a mapped Muster project belongs to, decided from evidence and never from its name: an import that made the project set its
- * scheduler just before it added the first task, whereas a project you made and an import later filled has no scheduler record from
- * that moment. Anything uncertain is yours, so an import never writes into it.
+ * Who a mapped Muster project belongs to, from records that never change after they are written (never from a name, and never from a
+ * setting like the scheduler that moves). `own`: it holds something the import did not write (a task, a Roster member or a chat of
+ * yours), or its history began long before the import's first write. Otherwise the records are the same whether the importer made the
+ * project or filled one of yours that was empty and untouched, so it is `ask`: the plan asks you per project and the import never
+ * guesses (an unanswered project is left out).
  */
-export async function ownerOf(mapped: { data: Json }, project: { id: string }, invoke: Invoke): Promise<'imported' | 'own'> {
+export const OWNER_MAX_MS = 120_000;
+export async function ownerOf(mapped: { data: Json }, project: { id: string }, deps: { invoke: Invoke; store: ImportStore }): Promise<'imported' | 'own' | 'ask'> {
   if (isImportedProject(mapped.data)) return 'imported';
   if (mapped.data.origin === 'own') return 'own';
   try {
-    const work = await invoke('project.work', { projectId: project.id, activityLimit: 1 });
-    const set = Date.parse(work.scheduler.updatedAt ?? ''), first = Math.min(...work.tasks.items.map(t => Date.parse(t.createdAt)));
-    if (Number.isFinite(set) && Number.isFinite(first) && first - set >= 0 && first - set <= 120_000) return 'imported';
-  } catch { /* no evidence */ }
-  return 'own';
+    const written = deps.store.writtenBy?.(project.id);
+    if (!written) return 'ask';
+    const [work, team, snapshot, origin] = await Promise.all([deps.invoke('project.work', { projectId: project.id, activityLimit: 1 }), deps.invoke('project.members.list', { projectId: project.id }), deps.invoke('app.snapshot', undefined), deps.invoke('project.origin.get', { projectId: project.id })]);
+    const automatic = (m: { id: string; kind: string }) => m.id === 'agent' || m.id === 'local' || m.kind !== 'agent', members = team.members.filter(m => !automatic(m) && !m.revokedAt);
+    if (work.tasks.items.some(t => !written.tasks.has(t.id)) || members.some(m => !written.members.has(m.id)) || snapshot.chats.some(c => c.projectId === project.id)) return 'own';
+    const first = Math.min(...work.tasks.items.map(t => Date.parse(t.createdAt)), ...members.map(m => Date.parse(m.createdAt)));
+    const beginning = Math.min(...team.members.filter(automatic).map(m => Date.parse(m.createdAt)), Date.parse(origin.firstActivity?.at ?? ''));
+    if (!Number.isFinite(first) || !Number.isFinite(beginning)) return 'ask';
+    const gap = first - beginning;
+    return gap <= OWNER_MAX_MS ? 'ask' : 'own';
+  } catch { return 'ask'; }
 }
 const isNotFound = (cause: unknown) => (cause as { status?: unknown } | null)?.status === 404;
 const clip = (text: string, max = 60) => text.length > max ? `${text.slice(0, max - 1)}…` : text;
@@ -290,7 +309,13 @@ export async function importFromPaperclip(companyId: string, deps: ImportDeps): 
     else if (localFolder && !deps.local) report.notes.push(`${name}: its folder (${localFolder}) is on the Paperclip server, not this Mac. Link your own checkout to the project yourself.`);
     let mapped = store.map('project', sourceId);
     const mine = mapped ? existing.get(mapped.musterId) : undefined;
-    const ours = Boolean(mapped && mine && await ownerOf(mapped, mine, invoke) === 'imported');
+    let verdict = mapped && mine ? await ownerOf(mapped, mine, deps) : undefined;
+    if (verdict === 'ask') {
+      const said = deps.owners?.[sourceId];
+      if (!said) { report.notes.push(`${name}: left out of this import. An earlier import’s project “${mine!.name}” cannot be told from one of yours by its records: say whether it is yours or was made by the import, then import again.`); continue; }
+      verdict = said === 'made' ? 'imported' : 'own';
+    }
+    const ours = verdict === 'imported';
     if (mapped && mine && !ours) {
       // An older import filled one of your projects: it keeps its tasks, comments, keys, history and Roster profile exactly as they were.
       report.notes.push(`${name}: an earlier import filled your project “${mine.name}”. That project is left alone, with everything it holds, and ${name} is imported as its own project.`);

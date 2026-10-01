@@ -258,7 +258,7 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
     const carried = (i: WorkspaceInboxItem): WorkspaceInboxItem => i.id.startsWith('import:approval:') && linkedApproval(i.id.slice('import:'.length), i.projectId ?? null) ? { ...i, approvalId: i.id.slice('import:approval:'.length), approvalVerbs: ['approve', 'reject', 'request_revision'] } : i;
     const inbox = [...mine.inbox.map(carried), ...await budgetInbox(mine.projects), ...(p?.inbox ?? []).filter(i => !i.taskId || !imported.has(i.taskId))].sort((a, b) => rank[a.severity] - rank[b.severity] || b.at.localeCompare(a.at));
     return {
-      paperclip: theirs.link, tasks, agents: [...mine.agents, ...(p?.agents ?? [])], projects: projects2, goals: p?.goals ?? [], runs, inbox, ...(p ? { approvals: p.approvals, labels: p.labels, agentCounts: { active: p.agents.filter(a => a.status !== 'paused' && a.status !== 'terminated' && a.status !== 'pending').length, paused: p.agents.filter(a => a.status === 'paused').length, resumable: resumable(p) } } : {}),
+      paperclip: theirs.link, tasks, agents: [...mine.agents, ...(p?.agents ?? [])], projects: projects2, goals: p?.goals ?? [], runs, inbox, ...(p ? { approvals: p.approvals, labels: p.labels } : {}), agentCounts: p ?  { active: p.agents.filter(a => a.status !== 'paused' && a.status !== 'terminated' && a.status !== 'pending').length, paused: p.agents.filter(a => a.status === 'paused').length, resumable: resumable(p) } : { active: 0, paused: 0, resumable: resumable(null) },
       counts: { liveRuns: runs.filter(r => r.status === 'running').length, inbox: inbox.filter(i => i.kind !== 'mail').length, failedRuns: runs.filter(r => r.status === 'failed').length, openTasks: tasks.filter(t => t.status !== 'done' && t.status !== 'cancelled').length },
       fetchedAt: new Date().toISOString(),
     };
@@ -383,9 +383,9 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
   const forgetPaused = (scope: string, id?: string) => { if (id === undefined) pausedDb().prepare('DELETE FROM pause_all_sets WHERE scope = ?').run(scope); else pausedDb().prepare('DELETE FROM pause_all_sets WHERE scope = ? AND id = ?').run(scope, id); };
 
   /** What Resume can wake: only what Muster's Pause stopped (company-wide, all Muster projects, or one project's Roster). */
-  const resumable = (p: PaperclipPart): NonNullable<WorkspaceSnapshot['agentCounts']>['resumable'] => {
+  const resumable = (p: PaperclipPart | null): NonNullable<WorkspaceSnapshot['agentCounts']>['resumable'] => {
     const rows = (pausedDb().prepare("SELECT scope, id FROM pause_all_sets WHERE id <> ''").all() as { scope: string; id: string }[]);
-    const paused = new Set(p.agents.filter(a => a.status === 'paused').map(a => a.id)), projects: Record<string, number> = {};
+    const paused = new Set((p?.agents ?? []).filter(a => a.status === 'paused').map(a => a.id)), projects: Record<string, number> = {};
     for (const r of rows) if (r.scope.startsWith('local:')) projects[r.scope.slice(6)] = (projects[r.scope.slice(6)] ?? 0) + 1;
     return { paperclip: rows.filter(r => r.scope === `paperclip:${built?.companyId ?? ''}` && paused.has(r.id)).length, local: rows.filter(r => r.scope === 'local').length, projects };
   };
@@ -832,8 +832,9 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
         // Folder paths and CODEX_HOME are this Mac's only when Paperclip runs here (This Mac, or a Custom URL on loopback);
         // a remote server's paths are never touched.
         const targets = input.targets && typeof input.targets === 'object' ? Object.fromEntries(Object.entries(input.targets).filter(([k, v]) => /^[\w:.-]{1,128}$/.test(k) && v === 'skip').map(([k]) => [k, 'skip' as const])) : undefined;
+        const owners = input.owners && typeof input.owners === 'object' ? Object.fromEntries(Object.entries(input.owners).filter(([k, v]) => /^[\w:.-]{1,128}$/.test(k) && (v === 'mine' || v === 'made')).map(([k, v]) => [k, v as 'mine' | 'made'])) : undefined;
         const onThisMac = mode === 'local' || isLoopback(baseUrl);
-        const report = await importFromPaperclip(target, { get: path => reader.get<unknown>(path), issuePages: (company, query) => reader.issuePages(company, query), commentPages: issue => reader.commentPages(issue), invoke: context.invoke as Invoke, store, folders, exists: path => existsSync(path), local: onThisMac, serverOrigin: originOf(mode === 'local' ? PAPERCLIP_LOCAL_URL : baseUrl) ?? undefined, remoteOf, ...(targets ? { targets } : {}), ...(onThisMac ? { codexHome: codexHomeOf } : {}) });
+        const report = await importFromPaperclip(target, { get: path => reader.get<unknown>(path), issuePages: (company, query) => reader.issuePages(company, query), commentPages: issue => reader.commentPages(issue), invoke: context.invoke as Invoke, store, folders, exists: path => existsSync(path), local: onThisMac, serverOrigin: originOf(mode === 'local' ? PAPERCLIP_LOCAL_URL : baseUrl) ?? undefined, ...(owners ? { owners } : {}), remoteOf, ...(targets ? { targets } : {}), ...(onThisMac ? { codexHome: codexHomeOf } : {}) });
         queueEmit(['tasks', 'agents', 'inbox']);
         // The imported runs show in the Ledger as imported history (#190).
         try { if (ledger().importHistory(paperclipHistory(context.db()))) queueEmit(['runs']); } catch { /* the Ledger never fails an import */ }

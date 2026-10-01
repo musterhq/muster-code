@@ -72,19 +72,20 @@ export function ConnectionPanel({ onSaved, compact = false }: { onSaved?: (view:
   /** Step 1 of an import: read what it would fill (GET only) and suggest a Muster project for each Paperclip one. */
   const [plan, setPlan] = useState<ImportPlan | null>(null);
   const [targets, setTargets] = useState<Record<string, string>>({});
+  const [owners, setOwners] = useState<Record<string, 'mine' | 'made'>>({});
   const endpoint = () => ({ mode, ...(mode === 'custom' ? { baseUrl: url, ...(token ? { token } : {}) } : {}), ...(company ? { companyId: company } : {}) });
   const planImport = async () => {
     setBusy('import'); setError(''); setImported(null);
     try {
       const next = await invoke('paperclip.import.plan', endpoint());
-      setPlan(next); setTargets(Object.fromEntries(next.projects.map(p => [p.id, 'import'])));
+      setPlan(next); setTargets(Object.fromEntries(next.projects.map(p => [p.id, 'import']))); setOwners({});
     } catch (cause) { setError(errorText(cause)); } finally { setBusy(null); }
   };
   /** Step 2: one-shot copy into the chosen Muster projects (GET only). Safe to repeat: it updates what it made. */
   const runImport = async () => {
     setBusy('import'); setError(''); setImported(null);
     try {
-      const report = await invoke('paperclip.import', { ...endpoint(), targets: targets as ImportTargets });
+      const report = await invoke('paperclip.import', { ...endpoint(), targets: targets as ImportTargets, owners });
       setImported(report); setPlan(null); notifySuccess(`Imported ${report.company}: ${report.tasks.created + report.tasks.updated} tasks in ${report.projects.created + report.projects.updated} projects.`);
       await refreshWorkspace(true);
     } catch (cause) { setError(errorText(cause)); } finally { setBusy(null); }
@@ -113,7 +114,7 @@ export function ConnectionPanel({ onSaved, compact = false }: { onSaved?: (view:
     {mode === 'custom' && (test?.warning ?? plainHttpWarning(url, Boolean(token) || Boolean(config?.hasToken))) && <p className="ws-connection-detect" data-ok="false" role="alert">{test?.warning ?? plainHttpWarning(url, Boolean(token) || Boolean(config?.hasToken))}</p>}
     {mode !== 'off' && companies.length > 0 && <label className="project-edit-goal"><span>Company</span><select className="ws-select is-field" value={company} onChange={e => setCompany(e.target.value)}>{companies.map(c => <option key={c.id} value={c.id}>{c.name}{c.prefix ? ` (${c.prefix})` : ''}</option>)}</select></label>}
     {error && <p role="alert" className="settings-error">{error}</p>}
-    {plan && <ImportMapping plan={plan} targets={targets} busy={busy !== null} onChange={(id, value) => setTargets(t => ({ ...t, [id]: value }))} onCancel={() => setPlan(null)} onImport={() => void runImport()}/>}
+    {plan && <ImportMapping plan={plan} targets={targets} owners={owners} onOwner={(id, value) => setOwners(o => { const next = { ...o }; if (value) next[id] = value; else delete next[id]; return next; })} busy={busy !== null} onChange={(id, value) => setTargets(t => ({ ...t, [id]: value }))} onCancel={() => setPlan(null)} onImport={() => void runImport()}/>}
     {imported && <div className="ws-import-report" role="status">
       <p><Check size={13} aria-hidden="true"/>Imported {imported.company}: {imported.projects.created} new and {imported.projects.updated} updated projects, {imported.tasks.created} new and {imported.tasks.updated} updated tasks, {imported.comments} comments, {imported.agents} Roster places, {imported.history} decisions{imported.needsYou ? ` (${imported.needsYou} need you, in the Inbox)` : ''}.</p>
       {imported.removed > 0 && <p><Check size={13} aria-hidden="true"/>{imported.removed} {imported.removed === 1 ? 'task' : 'tasks'} removed in Paperclip: cancelled here and flagged.</p>}
@@ -131,10 +132,11 @@ export function ConnectionPanel({ onSaved, compact = false }: { onSaved?: (view:
   </div>;
 }
 
-const EXISTING_NOTE: Record<ImportPlan['projects'][number]['existing'], string> = { new: 'new project', imported: 'updated in place', detached: 'imported as its own project (your own project is left alone)' };
+const EXISTING_NOTE: Record<ImportPlan['projects'][number]['existing'], string> = { new: 'new project', imported: 'updated in place', detached: 'imported as its own project (your own project is left alone)', ask: 'an earlier import’s project: say whether it is yours' };
 /** Import plan: each Paperclip project becomes its own Paperclip project in Muster (never written into one you made), or is left out. */
-export function ImportMapping({ plan, targets, busy, onChange, onCancel, onImport }: { plan: ImportPlan; targets: Record<string, string>; busy: boolean; onChange: (paperclipId: string, target: string) => void; onCancel: () => void; onImport: () => void }): React.ReactElement {
+export function ImportMapping({ plan, targets, owners = {}, onOwner = () => undefined, busy, onChange, onCancel, onImport }: { plan: ImportPlan; targets: Record<string, string>; owners?: Record<string, 'mine' | 'made'>; onOwner?: (paperclipId: string, value: 'mine' | 'made' | '') => void; busy: boolean; onChange: (paperclipId: string, target: string) => void; onCancel: () => void; onImport: () => void }): React.ReactElement {
   const chosen = plan.projects.filter(p => targets[p.id] !== 'skip');
+  const unanswered = chosen.filter(p => p.existing === 'ask' && !owners[p.id]).length;
   return <section className="ws-import-map" aria-label="Choose which Paperclip projects to import">
     <h3>Import {plan.company?.name ?? NAMES.paperclip} into Muster</h3>
     <p className="project-edit-hint">Each Paperclip project becomes its own project here, listed under {plan.company?.name ?? NAMES.paperclip} and updated by later imports. Projects you made in Muster are never changed. What you edit here stays when you import again. Reading is GET only and safe to repeat.</p>
@@ -142,6 +144,10 @@ export function ImportMapping({ plan, targets, busy, onChange, onCancel, onImpor
       const skip = targets[p.id] === 'skip';
       return <li key={p.id}><div className="ws-row is-static ws-import-map-row">
         <span className="ws-row-text"><span className="ws-row-title">{p.name}</span><span className="ws-row-meta">{[p.repo, plan.local ? p.localFolder : null, `${p.taskCount} ${p.taskCount === 1 ? 'task' : 'tasks'}`, EXISTING_NOTE[p.existing]].filter(Boolean).join(' · ')}</span></span>
+        {p.existing === 'ask' && !skip && <><label className="sr-only" htmlFor={`import-owner-${p.id}`}>Who made the earlier project for {p.name}</label>
+          <select id={`import-owner-${p.id}`} className="ws-select" value={owners[p.id] ?? ''} disabled={busy} onChange={e => onOwner(p.id, e.target.value as 'mine' | 'made' | '')}>
+            <option value="">Whose is it?</option><option value="mine">Mine</option><option value="made">Made by the import</option>
+          </select></>}
         <label className="sr-only" htmlFor={`import-target-${p.id}`}>Import {p.name}</label>
         <select id={`import-target-${p.id}`} className="ws-select" value={skip ? 'skip' : 'import'} disabled={busy} onChange={e => onChange(p.id, e.target.value)}>
           <option value="import">{p.existing === 'imported' ? 'Update' : 'Import'}</option>
@@ -151,7 +157,7 @@ export function ImportMapping({ plan, targets, busy, onChange, onCancel, onImpor
     })}</ul>}
     <div className="project-edit-actions"><span className="project-edit-spacer"/>
       <button type="button" className="project-edit-cancel" disabled={busy} onClick={onCancel}>Cancel</button>
-      <button type="button" className="settings-button" disabled={busy || chosen.length === 0} onClick={onImport}>{busy ? 'Importing…' : `Import ${chosen.length} ${chosen.length === 1 ? 'project' : 'projects'}`}</button>
+      <button type="button" className="settings-button" disabled={busy || chosen.length === 0 || unanswered > 0} title={unanswered ? 'Say whether each earlier project is yours first' : undefined} onClick={onImport}>{busy ? 'Importing…' : `Import ${chosen.length} ${chosen.length === 1 ? 'project' : 'projects'}`}</button>
     </div>
   </section>;
 }

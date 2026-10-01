@@ -243,8 +243,9 @@ export interface PaperclipBudgetPolicy { id: string; scope: 'company' | 'project
 export interface ImportPlanProject {
   id: string; name: string; repo: string | null; localFolder: string | null; taskCount: number;
   /** `new`: becomes its own Paperclip project in Muster. `imported`: an earlier import's project, updated in place.
-   *  `detached`: an earlier import filled one of your own projects: that project is left alone and this one is imported separately. */
-  existing: 'new' | 'imported' | 'detached';
+   *  `detached`: an earlier import filled one of your own projects: that project is left alone and this one is imported separately.
+   *  `ask`: an earlier import's project cannot be told from one of yours by its records: you say which (see `owners`). */
+  existing: 'new' | 'imported' | 'detached' | 'ask';
 }
 /** `local`: Paperclip runs on this Mac, so its folders are linked; a remote server's paths are never touched. */
 export interface ImportPlan { company: { id: string; name: string } | null; companies: WorkspaceCompany[]; projects: ImportPlanProject[]; local: boolean }
@@ -294,7 +295,8 @@ export interface PaperclipCommands {
    *  questions: `answers`, sent to Paperclip's respond endpoint). Only ever sent when you answer. */
   'paperclip.interaction.respond': { input: { taskId: string; interactionId: string; accept: boolean; reason?: string; answers?: PaperclipAnswer[] }; output: { ok: true } };
   /** Copies a Paperclip company into Muster's Projects with GET requests only. Idempotent. Nothing starts running. */
-  'paperclip.import': { input: { mode?: PaperclipMode; baseUrl?: string; token?: string; companyId?: string; targets?: ImportTargets }; output: PaperclipImportReport };
+  /** `owners`: for a project the plan marked `ask`, whether it is `mine` (left alone) or `made` by the earlier import (updated). An unanswered one is skipped, never guessed. */
+  'paperclip.import': { input: { mode?: PaperclipMode; baseUrl?: string; token?: string; companyId?: string; targets?: ImportTargets; owners?: Record<string, 'mine' | 'made'> }; output: PaperclipImportReport };
   /** Starts a Muster task's first run on its Roster agent's runner, in a new worktree of the project's folder (never the checkout itself). */
   'paperclip.task.start': { input: { taskId: string }; output: TaskStartResult };
 }

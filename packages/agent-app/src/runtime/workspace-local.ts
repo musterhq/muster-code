@@ -134,7 +134,9 @@ export class LocalWorkspace {
     }
     inbox.sort((a, b) => ({ high: 0, medium: 1, low: 2 }[a.severity] - { high: 0, medium: 1, low: 2 }[b.severity]) || b.at.localeCompare(a.at));
     // Pending human-only decisions carried over from Paperclip: Needs you, never resolved here.
-    let pending: ReturnType<ImportMeta['history']> = []; try { pending = (this.meta?.()?.history() ?? []).filter(h => h.pending); } catch { pending = []; }
+    let pending: ReturnType<ImportMeta['history']> = [];
+    // A decision carried over from Paperclip shows once, even when an older project of yours and the new Paperclip project both hold a copy of it.
+    try { const seen = new Map<string, ReturnType<ImportMeta['history']>[number]>(); for (const h of (this.meta?.()?.history() ?? []).filter(x => x.pending)) { const had = seen.get(h.sourceId); if (!had || (had.detached && !h.detached)) seen.set(h.sourceId, h); } pending = [...seen.values()]; } catch { pending = []; }
     const names = new Map(reads.map(r => [r.project.id, r.project.name])), keys = new Map(tasks.map(t => [t.id, t.key]));
     for (const read of reads) for (const m of read.members) if (m.kind === 'agent' && m.pendingAt && !m.revokedAt)
       inbox.push({ id: `hire:${read.project.id}:${m.id}`, kind: 'approval', title: `Add ${m.name}${m.title ? ` as ${m.title}` : ''} to ${read.project.name}?`, why: 'A new agent is waiting for your approval before it can run.', severity: 'high', at: m.createdAt, taskId: null, agentId: memberAgentId(m.id), runId: null, projectId: read.project.id, group: read.project.name, source: 'local' });

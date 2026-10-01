@@ -111,6 +111,8 @@ export interface ProjectsCommands extends ProjectTeamCommands, ProjectGovernance
   'project.delete': { input: { id: string }; output: { deleted: true; detachedChats: number } };
   /** Everything the Project screen shows in one read: tasks with derived readiness, stale verification and waiting chats. */
   'project.work': { input: { projectId: string; activityLimit?: number }; output: ProjectWorkState };
+  /** The first thing ever recorded for a project (immutable); an import uses it, with creation times, to tell a project it made from one of yours. */
+  'project.origin.get': { input: { projectId: string }; output: { firstActivity: { kind: string; at: string } | null } };
   /** One task by id. */
   'project.tasks.get': { input: { projectId: string; id: string }; output: ProjectTaskView };
   /** `actor: 'import'`: the change is recorded as made by an import, so it never shows up as a comment in the task's thread. */
@@ -151,7 +153,7 @@ export interface ProjectsCommands extends ProjectTeamCommands, ProjectGovernance
 }
 export type ProjectsEvent = never;
 export const PROJECTS_COMMANDS = { ...PROJECT_TEAM_COMMANDS, ...PROJECT_GOVERNANCE_COMMANDS, 'project.list': true, 'project.update': true, 'project.linkFolder': true, 'project.unlinkFolder': true, 'project.preview': true, 'project.archive': true, 'project.restore': true, 'project.delete': true,
-  'project.work': true, 'project.tasks.get': true, 'project.tasks.add': true, 'project.stats': true, 'project.tasks.edit': true, 'project.tasks.delete': true, 'project.tasks.setState': true, 'project.tasks.verify': true, 'project.tasks.dispatch': true,
+  'project.work': true, 'project.tasks.get': true, 'project.origin.get': true, 'project.tasks.add': true, 'project.stats': true, 'project.tasks.edit': true, 'project.tasks.delete': true, 'project.tasks.setState': true, 'project.tasks.verify': true, 'project.tasks.dispatch': true,
   'project.decisions.add': true, 'project.decisions.edit': true, 'project.decisions.replace': true, 'project.instructions.set': true, 'project.scheduler.set': true,
   'project.coordinator.start': true, 'project.coordinator.apply': true, 'project.coordinator.dismiss': true,
   'project.sources.list': true, 'project.sources.save': true, 'project.sources.remove': true, 'project.handoff.build': true, 'project.handoff.latest': true, 'project.handoff.ack': true, 'project.events': true } as const satisfies Record<keyof ProjectsCommands, true>;

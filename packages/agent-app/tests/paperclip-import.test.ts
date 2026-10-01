@@ -227,6 +227,7 @@ test('founder decision: an import never writes into a project you made; each Pap
 test('an older import that filled one of your projects: that project is left alone and the Paperclip project is imported separately, with a note',async t=>{
   const {service,repo}=await fixture(t);
   const mine=await service.invoke('project.create',{name:'OSSMANAGER',goal:'My own goal',folderIds:[]});
+  await service.invoke('project.tasks.add',{projectId:mine.id,title:'a task of mine',acceptance:'',dependencies:[]});
   const ossId=JSON.parse(await readFile(new URL('./fixtures/paperclip-rag/company.json',import.meta.url),'utf8')).projects.find((p:Json)=>p.name==='OSS Manager').id as string;
   // What 0.2.9 left behind: the Paperclip project mapped to your own project (no origin recorded).
   await service.invoke('paperclip.config.set',{mode:'local',companyId:COMPANY});
@@ -240,7 +241,7 @@ test('an older import that filled one of your projects: that project is left alo
   assert.ok(report.notes.some(n=>/earlier import filled your project “OSSMANAGER”.*left alone/.test(n)),JSON.stringify(report.notes));
   const projects=await service.invoke('project.list',undefined);
   assert.equal(projects.find(p=>p.id===mine.id)!.goal,'My own goal');
-  assert.equal((await service.invoke('paperclip.snapshot',{})).tasks.filter(x=>x.projectId===mine.id).length,0);
+  assert.equal((await service.invoke('paperclip.snapshot',{})).tasks.filter(x=>x.projectId===mine.id).length,1,'only your own task');
   assert.equal(projects.filter(p=>p.name==='OSS Manager').length,1,'the Paperclip project got its own project');
 });
 
@@ -468,9 +469,8 @@ test('E9: delegated child tasks show as Delegated cards on an imported parent, a
 });
 
 /** What 0.2.9 / 0.3.0 left behind: a Muster project holding imported tasks, with map rows that carry no `origin`, no last-imported values,
- *  imported comments, history (an approval, a document) and a Roster member profile. `importMade`: the project was created by the import
- *  (its scheduler was set just before the first task); otherwise it is the user's own project that the import filled. */
-async function seedLegacy(t:TestContext,fx:Awaited<ReturnType<typeof fixture>>,input:{name:string;goal:string;importMade:boolean}){
+ *  imported comments, history (an approval, a document) and a Roster member profile. `ownTask`: the user also has a task of their own in it. */
+async function seedLegacy(t:TestContext,fx:Awaited<ReturnType<typeof fixture>>,input:{name:string;goal:string;ownTask?:boolean;tasks?:number}){
   const {raw,service,repo}=fx;
   await service.invoke('paperclip.config.set',{mode:'local',companyId:COMPANY});
   const {DatabaseSync}=await import('node:sqlite');
@@ -478,9 +478,9 @@ async function seedLegacy(t:TestContext,fx:Awaited<ReturnType<typeof fixture>>,i
   const store=new SqliteImportStore(db);
   const oss=raw.projects.find((p:Json)=>p.name==='OSS Manager') as Json;
   const project=await service.invoke('project.create',{name:input.name,goal:input.goal,folderIds:[]});
-  if(input.importMade)await service.invoke('project.scheduler.set',{projectId:project.id,autoDispatch:false});
+  if(input.ownTask)await service.invoke('project.tasks.add',{projectId:project.id,title:'my own task',acceptance:'',dependencies:[]});
   store.setMap('project',oss.id,project.id,'RAG',{name:'OSS Manager',companyId:COMPANY,repo:null});
-  const issues=(raw.issues as Json[]).filter(i=>i.projectId===oss.id).slice(0,3);
+  const issues=(raw.issues as Json[]).filter(i=>i.projectId===oss.id).slice(0,input.tasks??3);
   const member=await service.invoke('project.members.add',{projectId:project.id,name:'CTO',kind:'agent',role:'agent'});
   store.setMap('member',`${oss.id}:cto`,member.id,project.id,{memberId:member.id,name:'CTO',title:'Chief Technology Officer',role:'cto',runner:{runtime:'Claude Code',providerId:'claude-code',model:null,modelProvider:null}});
   const tasks:string[]=[];let comments=0;
@@ -499,9 +499,9 @@ async function seedLegacy(t:TestContext,fx:Awaited<ReturnType<typeof fixture>>,i
 
 test('upgrade M1a: your own project that shares the Paperclip project’s name is not overwritten and not moved under the org',async t=>{
   const fx=await fixture(t);
-  const seeded=await seedLegacy(t,fx,{name:'OSS Manager',goal:'My own goal',importMade:false});
+  const seeded=await seedLegacy(t,fx,{name:'OSS Manager',goal:'My own goal',ownTask:true});
   const plan=await fx.service.invoke('paperclip.import.plan',{companyId:COMPANY});
-  assert.equal(plan.projects.find(p=>p.name==='OSS Manager')!.existing,'detached','ownership comes from evidence, not from the name');
+  assert.equal(plan.projects.find(p=>p.name==='OSS Manager')!.existing,'detached','it holds a task the import did not write: yours, whatever its name');
   await fx.service.invoke('paperclip.import',{companyId:COMPANY});
   const projects=await fx.service.invoke('project.list',undefined);
   const mine=projects.find(p=>p.id===seeded.project.id)!;
@@ -512,24 +512,64 @@ test('upgrade M1a: your own project that shares the Paperclip project’s name i
   assert.ok(snap.projects.some(p=>p.id!==seeded.project.id&&p.org==='RagnarDataOps'&&p.name==='OSS Manager'));
 });
 
-test('upgrade M1b: a 0.2.9 import-made project the user renamed is still recognised as import-made: no duplicate, the rename is kept',async t=>{
-  const fx=await fixture(t);
-  const seeded=await seedLegacy(t,fx,{name:'OSS Manager',goal:'Imported goal',importMade:true});
-  await fx.service.invoke('project.update',{id:seeded.project.id,name:'Founder renamed it'});
+/** The records of a project the importer made and of an empty one of yours that the importer filled are the same, so the plan asks. */
+async function asked(t:TestContext,seed:{name:string;goal:string;tasks?:number},touch:(fx:Awaited<ReturnType<typeof fixture>>,seeded:Awaited<ReturnType<typeof seedLegacy>>)=>Promise<void>){
+  const fx=await fixture(t);const seeded=await seedLegacy(t,fx,seed);await touch(fx,seeded);
   const plan=await fx.service.invoke('paperclip.import.plan',{companyId:COMPANY});
-  assert.equal(plan.projects.find(p=>p.name==='OSS Manager')!.existing,'imported');
-  const report=await fx.service.invoke('paperclip.import',{companyId:COMPANY});
-  const projects=await fx.service.invoke('project.list',undefined);
-  assert.equal(projects.filter(p=>/OSS Manager|Founder renamed/.test(p.name)).length,1,'no duplicate project');
-  assert.equal(projects.find(p=>p.id===seeded.project.id)!.name,'Founder renamed it','the rename is kept, not overwritten');
+  assert.equal(plan.projects.find(p=>p.id===seeded.oss.id)!.existing,'ask','never guessed');
+  const unanswered=await fx.service.invoke('paperclip.import',{companyId:COMPANY});
+  assert.ok(unanswered.notes.some(n=>/cannot be told from one of yours by its records/.test(n)),JSON.stringify(unanswered.notes));
+  const after=(await fx.service.invoke('project.list',undefined)).filter(p=>p.name!=='Muster');
+  assert.equal(after.length,1,'an unanswered project is left out: no second copy, nothing changed (the company’s other project is imported as usual)');
+  assert.equal(after[0].id,seeded.project.id);
+  return {fx,seeded};
+}
+
+test('upgrade M1b: an import-made project the user renamed is asked about, and answered Made by the import it is updated in place: no duplicate, the rename kept and reported',async t=>{
+  const {fx,seeded}=await asked(t,{name:'OSS Manager',goal:'Imported goal'},async fx=>void fx);
+  await fx.service.invoke('project.update',{id:seeded.project.id,name:'Founder renamed it'});
+  const report=await fx.service.invoke('paperclip.import',{companyId:COMPANY,owners:{[seeded.oss.id]:'made'}});
+  const projects=(await fx.service.invoke('project.list',undefined)).filter(p=>p.name!=='Muster');
+  assert.equal(projects.length,1,'no duplicate project');
+  assert.equal(projects[0].name,'Founder renamed it','the rename is kept, not overwritten');
   assert.ok(report.conflicts.some(c=>c.scope==='project'&&c.field==='name'),'and reported');
-  const snap=await fx.service.invoke('paperclip.snapshot',{});
-  assert.equal(snap.projects.find(p=>p.id===seeded.project.id)!.org,'RagnarDataOps');
+  assert.equal((await fx.service.invoke('paperclip.snapshot',{})).projects.find(p=>p.id===seeded.project.id)!.org,'RagnarDataOps');
+});
+
+test('upgrade M1c: an import-made project paused (or otherwise reconfigured) after the import is still recognised: the scheduler is not evidence',async t=>{
+  const {fx,seeded}=await asked(t,{name:'OSS Manager',goal:'Imported goal'},async (fx,seeded)=>{await fx.service.invoke('project.scheduler.set',{projectId:seeded.project.id,paused:true,concurrency:4});});
+  await fx.service.invoke('paperclip.import',{companyId:COMPANY,owners:{[seeded.oss.id]:'made'}});
+  assert.equal((await fx.service.invoke('project.list',undefined)).filter(p=>p.name!=='Muster').length,1,'no duplicate');
+});
+
+test('upgrade M1d: an import-made project with no tasks (a Roster only) is handled: asked about, never duplicated',async t=>{
+  const {fx,seeded}=await asked(t,{name:'OSS Manager',goal:'Imported goal',tasks:0},async fx=>void fx);
+  assert.equal(seeded.tasks.length,0);
+  await fx.service.invoke('paperclip.import',{companyId:COMPANY,owners:{[seeded.oss.id]:'made'}});
+  assert.equal((await fx.service.invoke('project.list',undefined)).filter(p=>p.name!=='Muster').length,1,'no duplicate of the empty project');
+});
+
+test('upgrade M1e: an empty project of yours that you touched and an import filled within two minutes is asked about; answered Mine it stays yours, not under the org',async t=>{
+  const {fx,seeded}=await asked(t,{name:'OSS Manager',goal:'My own goal'},async (fx,seeded)=>{await fx.service.invoke('project.scheduler.set',{projectId:seeded.project.id,concurrency:3});});
+  const report=await fx.service.invoke('paperclip.import',{companyId:COMPANY,owners:{[seeded.oss.id]:'mine'}});
+  const projects=await fx.service.invoke('project.list',undefined);
+  assert.equal(projects.find(p=>p.id===seeded.project.id)!.goal,'My own goal');
+  assert.equal(projects.filter(p=>p.name==='OSS Manager').length,2,'the Paperclip project is its own');
+  assert.equal((await fx.service.invoke('paperclip.snapshot',{})).projects.find(p=>p.id===seeded.project.id)!.org??null,null);
+  assert.ok(report.notes.some(n=>/left alone, with everything it holds/.test(n)));
+});
+
+test('upgrade M1f: a project whose history began long before the import wrote anything is yours without asking',async t=>{
+  const fx=await fixture(t);const seeded=await seedLegacy(t,fx,{name:'OSS Manager',goal:'My own goal'});
+  const {DatabaseSync}=await import('node:sqlite');const team=new DatabaseSync(join(dirname(fx.repo),'muster-project-team.sqlite'));t.after(()=>team.close());
+  team.prepare("UPDATE project_members SET created_at = ? WHERE project_id = ? AND id = 'agent'").run(new Date(Date.now()-3_600_000).toISOString(),seeded.project.id);
+  const plan=await fx.service.invoke('paperclip.import.plan',{companyId:COMPANY});
+  assert.equal(plan.projects.find(p=>p.id===seeded.oss.id)!.existing,'detached');
 });
 
 test('upgrade M2: importing again after an older import keeps the old project’s comments, history, keys and roster, and gives the new project its own copies',async t=>{
   const fx=await fixture(t);
-  const seeded=await seedLegacy(t,fx,{name:'My OSS',goal:'Mine',importMade:false});
+  const seeded=await seedLegacy(t,fx,{name:'My OSS',goal:'Mine',ownTask:true});
   const before=seeded.counts();
   assert.ok(before.comments>0&&before.mapped===3&&before.history===3&&before.roster===1);
   await fx.service.invoke('paperclip.import',{companyId:COMPANY});
@@ -542,7 +582,11 @@ test('upgrade M2: importing again after an older import keeps the old project’
   assert.equal(key.comments.filter(c=>c.id.startsWith('pc:')).length,expected,'every comment reaches the new project’s task');
   assert.equal(key.task.key,seeded.issues[1].identifier);
   const ws=await fx.service.invoke('paperclip.snapshot',{});
-  assert.ok(ws.tasks.filter(x=>x.projectId===seeded.project.id).every(x=>x.key.startsWith('RAG-')),'your tasks keep their Paperclip keys');
+  assert.ok(ws.tasks.filter(x=>seeded.tasks.includes(x.id)).every(x=>x.key.startsWith('RAG-')),'the tasks an older import made keep their Paperclip keys');
+  // A pending decision held by both your old project and the new one shows once in the Inbox.
+  seeded.store.putHistory({sourceId:`approval:${seeded.issues[0].id}`,kind:'approval:hire',taskId:null,projectId:fresh.id,title:'Approve again',status:'pending',detail:'',at:'2026-09-30T00:00:00.000Z',pending:true});
+  const inbox=(await fx.service.invoke('paperclip.snapshot',{})).inbox.filter(i=>i.id===`import:approval:${seeded.issues[0].id}`);
+  assert.equal(inbox.length,1,'one Inbox row for one decision');
 });
 
 test('upgrade M2: deleting an imported project and importing again restores all its comments',async t=>{
@@ -608,17 +652,24 @@ test('review S3: an imported approval can be decided only on the server and comp
 
 test('review S5: tasks imported before last-imported values were recorded keep every difference as yours on the first re-import, and say so',async t=>{
   const fx=await fixture(t);
-  const seeded=await seedLegacy(t,fx,{name:'OSS Manager',goal:'Imported goal',importMade:true});
+  const seeded=await seedLegacy(t,fx,{name:'OSS Manager',goal:'Imported goal'});
   const [edited,same]=seeded.tasks;
   const item=(await fx.service.invoke('project.work',{projectId:seeded.project.id})).tasks.items.find(x=>x.id===edited)!;
   await fx.service.invoke('project.tasks.edit',{projectId:seeded.project.id,id:edited,revision:item.revision,patch:{title:'Edited before upgrading'}});
-  const report=await fx.service.invoke('paperclip.import',{companyId:COMPANY});
+  const report=await fx.service.invoke('paperclip.import',{companyId:COMPANY,owners:{[seeded.oss.id]:'made'}});
   const tasks=(await fx.service.invoke('project.work',{projectId:seeded.project.id})).tasks.items;
   assert.equal(tasks.find(x=>x.id===edited)!.title,'Edited before upgrading','your pre-upgrade edit is kept');
   assert.ok(report.conflicts.some(c=>c.scope==='task'&&c.field==='title'&&c.kept==='Edited before upgrading'),'and reported');
   assert.equal(tasks.find(x=>x.id===same)!.title,seeded.issues[1].title,'a task with no difference is untouched');
   // From then on there is a baseline: a Paperclip change to an untouched task applies.
   const issue=(fx.raw.issues as Json[]).find(i=>i.id===seeded.issues[1].id)!;issue.title='Retitled in Paperclip';
-  await fx.service.invoke('paperclip.import',{companyId:COMPANY});
+  await fx.service.invoke('paperclip.import',{companyId:COMPANY,owners:{[seeded.oss.id]:'made'}});
   assert.equal((await fx.service.invoke('project.work',{projectId:seeded.project.id})).tasks.items.find(x=>x.id===same)!.title,'Retitled in Paperclip');
+});
+
+test('review S1 nit: with no Paperclip linked the snapshot still says what Resume can wake, so the local button is disabled when nothing is recorded',async t=>{
+  const {service}=await fixture(t);
+  const snap=await service.invoke('paperclip.snapshot',{});
+  assert.equal(snap.paperclip,null);
+  assert.deepEqual(snap.agentCounts,{active:0,paused:0,resumable:{paperclip:0,local:0,projects:{}}});
 });
