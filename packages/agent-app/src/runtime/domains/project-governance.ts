@@ -62,7 +62,7 @@ export interface GovernanceDeps {
 }
 export interface WakeInfo { reason: RunReason; memberId?: string | null; note?: string | null; notes?: string[] }
 /** Tests only: a fake clock and timers for waits that would otherwise take minutes (heartbeats, retries, monitors). Unset in the app. */
-export const governanceClock: { now?: () => number; timers?: { set(fn: () => void, ms: number): unknown; clear(handle: unknown): void } } = {};
+export const governanceClock: { now?: () => number; timers?: { set(fn: () => void, ms: number): unknown; clear(handle: unknown): void }; secrets?: () => VaultStore } = {};
 
 export function createGovernance(ctx: DomainContext, deps: GovernanceDeps) {
   let store: GovernanceStore | undefined, queue: WakeQueue | undefined, vault: ProjectVault | undefined, disposed = false;
@@ -72,7 +72,7 @@ export function createGovernance(ctx: DomainContext, deps: GovernanceDeps) {
   const tasks = () => deps.tasks();
   const team = () => deps.team.store();
   const record = (projectId: string, kind: string, summary: string, refId: string | null = null, actor: Actor = 'system') => { tasks().record(projectId, kind, summary, refId, actor); };
-  const secretStore = (): VaultStore => deps.secrets?.() ?? activeSecretStore() ?? new SecretStore(ctx.dataDir);
+  const secretStore = (): VaultStore => deps.secrets?.() ?? governanceClock.secrets?.() ?? activeSecretStore() ?? new SecretStore(ctx.dataDir);
   const theVault = () => vault ??= new ProjectVault(gov(), secretStore);
 
   // ── names and lookups ───────────────────────────────────────────────────────

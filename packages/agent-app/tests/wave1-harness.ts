@@ -57,6 +57,7 @@ export async function wave1(t: TestContext, opts: Wave1Options = {}) {
   const clock = opts.fakeClock ? new FakeClock() : undefined;
   if (clock) { governanceClock.now = clock.now; governanceClock.timers = { set: clock.set, clear: clock.clear }; }
   const secrets = opts.secrets ? new SecretStore(dataDir, () => fakeBox) : undefined;
+  if (secrets) governanceClock.secrets = () => secrets;
   const calls: Call[] = [], turns = new Map<string, number>(), behaviour = new Map<string, string>(), stopped = new Set<string>(), slow = new Map<string, () => void>(), reviewCount = new Map<string, number>();
   const provider: ProviderAdapter = {
     info: () => [{ id: 'scripted', name: 'Scripted', available: true, identityMasked: 'configured', models: [{ id: 'scripted-model', name: 'Scripted model' }] }],
@@ -109,7 +110,7 @@ export async function wave1(t: TestContext, opts: Wave1Options = {}) {
         return done('Committed.');
       }
       if (/W1-APPROVE:/.test(first)) {
-        const command = /W1-APPROVE:([^\n]*)/.exec(first)?.[1]?.trim() ?? 'echo hi';
+        const command = /Project task: W1-APPROVE:([^\n]*)/.exec(first)?.[1]?.trim() ?? 'echo hi';
         const decision = await input.onRequest('item/commandExecution/requestApproval', { itemId: `a-${input.chat.id}-${turn}`, command, cwd: input.cwd, reason: 'scripted' });
         await touch('APPROVE.md', JSON.stringify(decision));
         return done(`Decision: ${JSON.stringify(decision)}`);
@@ -121,7 +122,7 @@ export async function wave1(t: TestContext, opts: Wave1Options = {}) {
     },
   };
   const s = createAgentService({ dataDir, provider, onEvent() {} });
-  t.after(async () => { for (const r of slow.values()) r(); await s.dispose(); if (clock) { governanceClock.now = undefined; governanceClock.timers = undefined; } secrets?.close?.(); await rm(dataDir, { recursive: true, force: true }); });
+  t.after(async () => { for (const r of slow.values()) r(); await s.dispose(); if (clock) { governanceClock.now = undefined; governanceClock.timers = undefined; } governanceClock.secrets = undefined; secrets?.close?.(); await rm(dataDir, { recursive: true, force: true }); });
   const folder = await s.invoke('folder.add', { path: repo });
   const project = await s.invoke('project.create', { name: 'OSSMANAGER', goal: '', folderIds: [folder.id] });
   const member = (name: string, extra: Record<string, unknown> = {}) => s.invoke('project.members.add', { projectId: project.id, name, kind: 'agent', role: 'agent', title: name, runner: { providerId: 'scripted', model: 'scripted-model' }, ...extra });
