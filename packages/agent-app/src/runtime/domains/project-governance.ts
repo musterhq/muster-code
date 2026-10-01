@@ -1014,7 +1014,7 @@ export function createGovernance(ctx: DomainContext, deps: GovernanceDeps) {
   });
   const commands = () => ({
     'project.gov.state': (input: Record<string, unknown>) => { armAll(); return governanceState(project(input)); },
-    'project.gov.inbox': (input: Record<string, unknown>) => inboxItems(project(input)),
+    'project.gov.summary': (input: Record<string, unknown>) => { const projectId = project(input), active = gov().holds(projectId, 'active'), tree = treeOf(projectId); return { items: inboxItems(projectId), hidden: gov().hidden(projectId), held: [...new Set(active.flatMap(h => subtreeIds(tree, h.rootTaskId)))] }; },
     'project.gov.settings.set': (input: Record<string, unknown>) => {
       const projectId = project(input), cur = settings(projectId), next: GovernanceSettings = { ...cur };
       if (input.runComment !== undefined) { if (!['off', 'notice', 'require'].includes(String(input.runComment))) throw new Error('Choose off, notice or require.'); next.runComment = input.runComment as GovernanceSettings['runComment']; }
