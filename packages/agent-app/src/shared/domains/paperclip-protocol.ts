@@ -48,6 +48,10 @@ export interface WorkspaceTask {
   hidden?: boolean;
   /** Under an active hold (paused or cancelled with its parent). */
   held?: boolean;
+  /** Paperclip labels (name and colour), carried on linked and imported tasks. */
+  labels?: { name: string; color: string | null }[];
+  /** An imported task whose issue no longer exists in Paperclip (cancelled here, kept for the record). */
+  removedInPaperclip?: boolean;
 }
 export type AgentState = 'active' | 'idle' | 'running' | 'paused' | 'error' | 'pending' | 'terminated';
 export interface WorkspaceAgent {
@@ -66,6 +70,10 @@ export interface WorkspaceProject {
   repo: string | null; cwd: string | null; taskCount: number; openCount: number; paused: boolean;
   /** The Muster memory bank this project's work recalls from (matched by repository), and how many notes it holds. */
   memory: { label: string; count: number } | null;
+  /** The Paperclip org (company) this project belongs to: a linked Paperclip project, or one imported from it. Muster-made projects have none. */
+  org?: string | null;
+  /** An imported project whose name or goal you changed here: a later import keeps your version. */
+  editedHere?: boolean;
 }
 export type RunState = 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled' | 'timed_out' | 'interrupted';
 export interface WorkspaceRun {
@@ -77,8 +85,16 @@ export interface WorkspaceRun {
 export type InboxKind = 'review' | 'blocked' | 'approval' | 'question' | 'failed_run' | 'agent_error' | 'mention' | 'mail' | 'budget' | 'other';
 /** `group` is the project it belongs to (the Inbox groups by it); `source` says whether it came from Paperclip or Muster. */
 /** `chatIds`: a Muster task's run chats. The Inbox lists and counts the task, not those chats again. */
-export interface WorkspaceInboxItem { id: string; kind: InboxKind; title: string; why: string; severity: 'high' | 'medium' | 'low'; at: string; taskId: string | null; agentId: string | null; runId: string | null; group?: string; source?: WorkspaceSource; projectId?: string | null; chatIds?: string[] }
-export interface WorkspaceGoal { id: string; title: string; status: string; level: string | null }
+export interface WorkspaceInboxItem { id: string; kind: InboxKind; /** A Paperclip approval this row stands for: decided from the row. */ approvalId?: string; approvalVerbs?: ApprovalDecision[]; title: string; why: string; severity: 'high' | 'medium' | 'low'; at: string; taskId: string | null; agentId: string | null; runId: string | null; group?: string; source?: WorkspaceSource; projectId?: string | null; chatIds?: string[] }
+export interface WorkspaceGoal { id: string; title: string; status: string; level: string | null; parentId?: string | null; ownerAgentId?: string | null }
+/** A Paperclip approval waiting on the board (a hire, a CEO strategy, a budget override, a board request). Decided only by you. */
+export interface WorkspaceApproval {
+  id: string; type: string; status: 'pending' | 'revision_requested'; title: string; detail: string;
+  requestedBy: string | null; agentId: string | null; issueIds: string[]; at: string;
+  /** The decisions Paperclip offers for it. */
+  verbs: ApprovalDecision[];
+}
+export type ApprovalDecision = 'approve' | 'reject' | 'request_revision';
 export type LiveChannel = 'socket' | 'poll' | 'events' | 'off';
 /** The linked Paperclip as the snapshot saw it. `stale`: the last read failed; `cached` then says whether its rows are the
  *  last good copy (true) or missing because nothing was read yet (false). */
@@ -87,6 +103,9 @@ export interface WorkspaceSnapshot {
   paperclip: PaperclipLink | null;
   tasks: WorkspaceTask[]; agents: WorkspaceAgent[]; projects: WorkspaceProject[]; goals: WorkspaceGoal[];
   runs: WorkspaceRun[]; inbox: WorkspaceInboxItem[];
+  /** The linked Paperclip's pending approvals, and its labels (for New task). */
+  approvals?: WorkspaceApproval[];
+  labels?: { id: string; name: string; color: string | null }[];
   counts: { liveRuns: number; inbox: number; failedRuns: number; openTasks: number };
   fetchedAt: string;
 }
@@ -123,7 +142,12 @@ export type ThreadCard =
       chatId?: string | null; pending?: TimelineItem | null;
       /** A Paperclip ask_user_questions interaction: its questions, answered in place through Paperclip's respond endpoint. */
       questions?: PaperclipQuestion[]; submitLabel?: string | null }
-  | { kind: 'approval'; id: string; at: string; title: string; status: string }
+  /** `approvalId`: set while it is pending in the linked Paperclip, so Approve / Reject / Request revision act on it. */
+  | { kind: 'approval'; id: string; at: string; title: string; status: string; approvalId?: string; detail?: string; requestedBy?: string | null; verbs?: ApprovalDecision[] }
+  /** A Paperclip task document (a plan is the document with key `plan`): its latest body and revision history. */
+  | { kind: 'document'; id: string; at: string; key: string; title: string; format: string; body: string; revision: number; revisions: { number: number; summary: string; at: string; by: string | null }[] }
+  /** A pull request, branch or artifact an agent produced for the task. */
+  | { kind: 'workproduct'; id: string; at: string; type: string; title: string; status: string; provider: string | null; url: string | null; summary: string }
   /** A review or approval stage of the task's execution policy (C16): who decides, the history, and the controls when it is you. */
   | { kind: 'stage'; id: string; at: string; stage: TaskStageState }
   /** An agent asking for a secret by name (G23). You enter the value in the card; the agent never sees it. */
@@ -173,11 +197,22 @@ export interface WorkspaceBadge { connected: boolean; inbox: number; liveRuns: n
 export interface PaperclipImportReport {
   company: string; projects: { created: number; updated: number }; tasks: { created: number; updated: number; skipped: number };
   comments: number; agents: number; history: number; needsYou: number; notes: string[];
-  /** Paperclip projects imported into a Muster project you already had. */
-  filled?: { paperclip: string; muster: string }[];
+  /** Imported tasks whose issue was deleted in Paperclip: cancelled here and flagged "Removed in Paperclip". */
+  removed: number;
+  /** Fields you changed in Muster since the last import: kept, with what Paperclip says now. */
+  conflicts: ImportConflict[];
+  /** Issues with no project in Paperclip: they have nowhere to go in Muster and are not imported. */
+  noProject: number;
+  /** How long the import took and how many issues it read. */
+  tookMs: number; issues: number;
 }
+export interface ImportConflict { scope: 'project' | 'task'; label: string; field: string; kept: string; paperclip: string }
 /** `start`: Assign & start — the owner's first run starts at once, in a new worktree of the project's folder. */
-export interface TaskCreateInput { title: string; description: string; projectId: string | null; assigneeId: string | null; priority?: WorkspacePriority; parentId?: string | null; start?: boolean }
+export interface TaskCreateInput {
+  title: string; description: string; projectId: string | null; assigneeId: string | null; priority?: WorkspacePriority; parentId?: string | null; start?: boolean;
+  /** Paperclip projects only: labels (ids from the snapshot's `labels`), a goal, and tasks that block this one. */
+  labelIds?: string[]; goalId?: string | null; blockedByIds?: string[];
+}
 export interface TaskStartResult { chatId: string; runId: string; worktree: string; branch: string }
 
 /** The Dashboard (#132): aggregated in SQL over the Ledger (live receipts + imported history) and project tasks and runs,
@@ -195,10 +230,16 @@ export interface DashboardData {
 
 /** Import planning: each Paperclip project with the Muster project it would fill. `suggestion` matches by an earlier
  *  import, the same folder, the same repository remote, or the same name. */
-export interface ImportPlanProject { id: string; name: string; repo: string | null; localFolder: string | null; taskCount: number; mappedTo: string | null; suggestion: { projectId: string; reason: 'imported' | 'folder' | 'repository' | 'name' } | null }
-export interface ImportPlan { company: { id: string; name: string } | null; companies: WorkspaceCompany[]; projects: ImportPlanProject[]; muster: { id: string; name: string; folders: string[] }[] }
-/** Per Paperclip project: a Muster project id to fill, 'new', or 'skip'. Missing means the suggestion, else new. */
-export type ImportTargets = Record<string, string>;
+export interface ImportPlanProject {
+  id: string; name: string; repo: string | null; localFolder: string | null; taskCount: number;
+  /** `new`: becomes its own Paperclip project in Muster. `imported`: an earlier import's project, updated in place.
+   *  `detached`: an earlier import filled one of your own projects: that project is left alone and this one is imported separately. */
+  existing: 'new' | 'imported' | 'detached';
+}
+/** `local`: Paperclip runs on this Mac, so its folders are linked; a remote server's paths are never touched. */
+export interface ImportPlan { company: { id: string; name: string } | null; companies: WorkspaceCompany[]; projects: ImportPlanProject[]; local: boolean }
+/** Per Paperclip project: 'skip' leaves it out of the import. Imports never write into a project you made in Muster. */
+export type ImportTargets = Record<string, 'skip' | 'import'>;
 
 export interface PaperclipCommands {
   'paperclip.config.get': { input: Record<string, never>; output: PaperclipConfigView };
@@ -219,9 +260,13 @@ export interface PaperclipCommands {
   'paperclip.agent.pause': { input: { id: string }; output: { ok: true } };
   'paperclip.agent.resume': { input: { id: string }; output: { ok: true } };
   /** Pauses every Paperclip agent or every Muster project scheduler. Returns how many changed. */
-  'paperclip.pauseAll': { input: { source: WorkspaceSource }; output: { changed: number } };
-  'paperclip.resumeAll': { input: { source: WorkspaceSource }; output: { changed: number } };
+  /** `projectId` (Muster only): just that project's Roster members. Paperclip's agents belong to the company, so its Pause is always company-wide. */
+  'paperclip.pauseAll': { input: { source: WorkspaceSource; projectId?: string }; output: { changed: number } };
+  /** Wakes only what Pause paused (company-wide or for that project), never an agent that was paused on purpose or is waiting for approval. */
+  'paperclip.resumeAll': { input: { source: WorkspaceSource; projectId?: string }; output: { changed: number } };
   'paperclip.run.cancel': { input: { id: string }; output: { ok: true } };
+  /** Decides a Paperclip approval (approve, reject, request revision) with an optional note. Only ever sent when you press the button. */
+  'paperclip.approval.decide': { input: { id: string; decision: ApprovalDecision; note?: string }; output: { ok: true } };
   /** What memory would be recalled for a task: its repository's bank (matched by git remote), else its project's, else personal. Read-only. */
   'paperclip.memory': { input: { taskId: string }; output: WorkspaceMemory };
   'paperclip.list': { input: { kind: WorkspaceListKind }; output: WorkspaceList };
@@ -248,7 +293,7 @@ export type PaperclipEvent = { type: 'projectsWorkspaceChanged'; scopes: ('tasks
 export const PAPERCLIP_COMMANDS = {
   'paperclip.config.get': true, 'paperclip.config.set': true, 'paperclip.test': true, 'paperclip.snapshot': true, 'paperclip.task': true,
   'paperclip.comment': true, 'paperclip.task.update': true, 'paperclip.task.create': true, 'paperclip.agent.pause': true, 'paperclip.agent.resume': true,
-  'paperclip.pauseAll': true, 'paperclip.resumeAll': true, 'paperclip.run.cancel': true, 'paperclip.memory': true, 'paperclip.list': true,
+  'paperclip.pauseAll': true, 'paperclip.resumeAll': true, 'paperclip.approval.decide': true, 'paperclip.run.cancel': true, 'paperclip.memory': true, 'paperclip.list': true,
   'paperclip.watch': true, 'paperclip.badge': true, 'paperclip.ledger': true, 'paperclip.ledger.backfill': true, 'paperclip.inbox.dismiss': true, 'paperclip.inbox.dismissed': true, 'paperclip.interaction.respond': true, 'paperclip.import': true, 'paperclip.task.start': true, 'paperclip.dashboard': true, 'paperclip.import.plan': true,
 } as const satisfies Record<keyof PaperclipCommands, true>;
 

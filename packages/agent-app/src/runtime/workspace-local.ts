@@ -38,12 +38,18 @@ interface GovRead { items: GovInboxItem[]; hidden: ReadonlySet<string>; held: Re
 interface ProjectRead { project: ProjectDetails; work: ProjectWorkState; members: ProjectMember[]; prefix: string; settings: TeamSettings; gov: GovRead }
 
 /** What an import from Paperclip recorded about Muster rows: task keys and parents, each project's roster, thread history. */
-export type ImportMeta = Pick<SqliteImportStore, 'taskMeta' | 'roster' | 'comments' | 'history' | 'projectMeta'>;
+export type ImportMeta = Pick<SqliteImportStore, 'taskMeta' | 'roster' | 'comments' | 'history' | 'projectMeta' | 'projectOrg'>;
 export const memberAgentId = (memberId: string) => `member:${memberId}`;
 type RosterRow = { memberId: string; name: string; title: string | null; role: string; capabilities: string | null; reportsToMemberId: string | null; runner: { runtime: string; model: string | null } };
 
 export class LocalWorkspace {
   constructor(private readonly invoke: Invoke, private readonly repoOf: (folderId: string | null) => { repo: string | null; cwd: string | null }, private readonly meta?: () => ImportMeta | undefined) {}
+  /** The Paperclip org a project was imported from (none for a project you made). */
+  private org(projectId: string, name: string): string | undefined { try { return this.meta?.()?.projectOrg(projectId, name); } catch { return undefined; } }
+  /** An imported project whose name or goal you changed since the last import: those stay yours when you import again. */
+  private editedHere(project: ProjectDetails): boolean {
+    try { const meta = this.meta?.()?.projectMeta(project.id), last = meta?.imported as { name?: string; goal?: string } | undefined; return Boolean(meta && last && meta.origin === 'created' && ((last.name !== undefined && last.name !== project.name) || (last.goal !== undefined && last.goal !== project.goal))); } catch { return false; }
+  }
   private roster(projectId: string): RosterRow[] { try { return (this.meta?.()?.roster(projectId) ?? []) as unknown as RosterRow[]; } catch { return []; } }
 
   private async projects(): Promise<ProjectRead[]> {
@@ -73,6 +79,7 @@ export class LocalWorkspace {
       createdAt: task.createdAt, updatedAt: task.updatedAt, startedAt: task.attempts[0]?.startedAt ?? null, completedAt: task.verification?.verifiedAt ?? null,
       live: task.state === 'running' || task.attempts.some(a => a.status === 'running'), blockedByIds: task.dependencies, origin: 'You',
       ...(read.gov.hidden.has(task.id) ? { hidden: true } : {}), ...(read.gov.held.has(task.id) ? { held: true } : {}),
+      ...(imported?.labels.length ? { labels: imported.labels } : {}), ...(imported?.removed ? { removedInPaperclip: true } : {}),
     };
   }
 
@@ -115,7 +122,7 @@ export class LocalWorkspace {
       for (const task of read.work.tasks.items) for (const attempt of task.attempts) runs.push(this.run(read, task, attempt));
       agents.push(...this.rosterAgents(read, mine));
       const where = this.repoOf(read.project.primaryFolderId);
-      projects.push({ id: read.project.id, name: read.project.name, status: 'in_progress', description: read.project.goal, source: 'local', repo: where.repo, cwd: where.cwd, taskCount: mine.length, openCount: mine.filter(t => OPEN_STATUSES.includes(t.status)).length, paused: read.work.scheduler.paused, memory: null });
+      projects.push({ id: read.project.id, name: read.project.name, status: 'in_progress', description: read.project.goal, source: 'local', repo: where.repo, cwd: where.cwd, taskCount: mine.length, openCount: mine.filter(t => OPEN_STATUSES.includes(t.status)).length, paused: read.work.scheduler.paused, memory: null, org: this.org(read.project.id, read.project.name) ?? null, ...(this.editedHere(read.project) ? { editedHere: true } : {}) });
     }
     runs.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
     const inbox = localInbox(reads, tasks, runs, mail?.messages ?? []);
@@ -160,7 +167,7 @@ export class LocalWorkspace {
     let imported: ReturnType<ImportMeta['comments']> = []; try { imported = this.meta?.()?.comments(task.id) ?? []; } catch { imported = []; }
     const comments: WorkspaceComment[] = [
       ...imported.map(c => ({ id: `pc:${c.sourceId}`, author: { kind: c.authorKind === 'agent' ? 'agent' as const : 'user' as const, id: null, label: c.authorLabel }, body: c.body, createdAt: c.createdAt, runId: c.runId })),
-      ...read.work.activity.items.filter(a => a.refId === task.id && a.kind !== 'task.create').map(a => ({ id: a.id, author: { kind: 'system' as const, id: null, label: a.actor || 'Muster' }, body: a.summary, createdAt: a.createdAt })),
+      ...read.work.activity.items.filter(a => a.refId === task.id && a.kind !== 'task.create' && a.actor !== 'import').map(a => ({ id: a.id, author: { kind: 'system' as const, id: null, label: a.actor || 'Muster' }, body: a.summary, createdAt: a.createdAt })),
       ...(mail?.messages ?? []).filter(m => (m.recipient.kind === 'taskRun' && m.recipient.id === task.id) || chats.has(m.sender.chatId ?? m.sender.id) || chats.has(m.recipient.chatId ?? m.recipient.id)).map(m => mailComment(m)),
     ].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
     const agent = task.owner.kind === 'agent';

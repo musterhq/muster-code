@@ -7,6 +7,7 @@
  *   screen is on screen and falls back to visibility-gated polling when the socket is refused.
  */
 export type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
+type Json = Record<string, unknown>;
 export interface PaperclipEndpoint { baseUrl: string; token?: string }
 export class PaperclipError extends Error {
   constructor(message: string, readonly status: number, readonly stage: 'network' | 'auth' | 'service') { super(message); this.name = 'PaperclipError'; }
@@ -14,6 +15,10 @@ export class PaperclipError extends Error {
 
 const TIMEOUT_MS = 10_000;
 const CACHE_MAX = 64;
+/** Rows per page when listing issues (Paperclip allows up to 1000) and comments (up to 500). */
+export const ISSUE_PAGE = 1000, COMMENT_PAGE = 500;
+/** A runaway guard for a server that ignores paging (a page that adds nothing new always stops the loop first). */
+const MAX_PAGES = 400;
 
 /** `https://host:port/base` with no trailing slash; refuses anything that is not http(s) or carries credentials. */
 export function normalizeBaseUrl(value: unknown): string {
@@ -31,7 +36,8 @@ export class PaperclipClient {
   private readonly cache = new Map<string, { etag: string; body: unknown }>();
   /** Bumped whenever any GET returned a new body (not a 304), so callers can skip rebuilding views. */
   generation = 0;
-  constructor(readonly endpoint: PaperclipEndpoint, private readonly fetcher: FetchLike = (input, init) => fetch(input, init)) {}
+  /** `cache: false` keeps no parsed bodies (an importer reads each page once and must not hold a large org in memory). */
+  constructor(readonly endpoint: PaperclipEndpoint, private readonly fetcher: FetchLike = (input, init) => fetch(input, init), private readonly options: { cache?: boolean } = {}) {}
 
   private headers(extra: Record<string, string> = {}): Record<string, string> {
     return { accept: 'application/json', ...(this.endpoint.token ? { authorization: `Bearer ${this.endpoint.token}` } : {}), ...extra };
@@ -63,11 +69,40 @@ export class PaperclipClient {
     const body = await readJson<T>(response, path);
     const etag = response.headers.get('etag');
     this.generation++;
-    if (etag) {
+    if (etag && this.options.cache !== false) {
       if (this.cache.size >= CACHE_MAX) this.cache.delete(this.cache.keys().next().value!);
       this.cache.set(path, { etag, body });
     }
     return body;
+  }
+
+  /**
+   * Every row of a list, one page at a time (`pageSize` rows per request). `nextPath(page, soFar)` builds the next request from
+   * the rows read so far. The loop ends on a short page, on a page that brings nothing new (a server that ignores paging), or
+   * at MAX_PAGES. Rows are yielded page by page so a caller can process and drop them.
+   */
+  async *pages<T extends { id?: unknown }>(firstPath: string, pageSize: number, nextPath: (last: T[], soFar: number) => string): AsyncGenerator<T[]> {
+    const seen = new Set<string>();
+    let path = firstPath, soFar = 0;
+    for (let n = 0; n < MAX_PAGES; n++) {
+      const raw = await this.get<unknown>(path);
+      const page = (Array.isArray(raw) ? raw : []).filter((row): row is T => Boolean(row) && typeof row === 'object');
+      const fresh = page.filter(row => { const key = typeof row.id === 'string' ? row.id : undefined; if (key === undefined) return true; if (seen.has(key)) return false; seen.add(key); return true; });
+      if (fresh.length) yield fresh;
+      soFar += page.length;
+      if (page.length < pageSize || fresh.length === 0) return;
+      path = nextPath(page, soFar);
+    }
+  }
+  /** All issues of a company (compact or full), paged by id so a change between pages cannot skip or repeat a row. */
+  issuePages(companyId: string, query: string): AsyncGenerator<Json[]> {
+    const base = `/companies/${encodeURIComponent(companyId)}/issues?${query}${query ? '&' : ''}sortField=id&sortDir=asc&limit=${ISSUE_PAGE}`;
+    return this.pages<Json>(base, ISSUE_PAGE, (_page, soFar) => `${base}&offset=${soFar}`);
+  }
+  /** All comments of an issue, oldest first, paged with Paperclip's `after` cursor. */
+  commentPages(issueId: string): AsyncGenerator<Json[]> {
+    const base = `/issues/${encodeURIComponent(issueId)}/comments?order=asc&limit=${COMMENT_PAGE}`;
+    return this.pages<Json>(base, COMMENT_PAGE, page => `${base}&after=${encodeURIComponent(String(page[page.length - 1]!.id))}`);
   }
 
   async send<T>(method: 'POST' | 'PATCH', path: string, body: unknown = {}): Promise<T> {

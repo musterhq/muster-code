@@ -386,6 +386,38 @@ export function Sidebar(): React.ReactElement {
   // S3-G: the project hover card, the native row menu and the Edit project dialog share one piece of state.
   const editedProject=projectEdit?snapshot.projects.find(project=>project.id===projectEdit.id):undefined;
   const projectGroups = snapshot.projects.map(project=>({project,gid:`project:${project.id}`,chats:inGroup(`project:${project.id}`)})).filter(group=>!group.project.archived||group.chats.length>0);
+  // Paperclip projects (imported into Muster, or linked) are grouped under their org; projects you made show as before.
+  const {snapshot:workspace}=useWorkspace();
+  const orgOfProject=new Map((workspace?.projects??[]).filter(p=>p.source==='local'&&p.org).map(p=>[p.id,p.org!]));
+  const ownProjects=projectGroups.filter(group=>!orgOfProject.has(group.project.id));
+  const projectsByOrg=new Map<string,typeof projectGroups>();
+  for(const group of projectGroups){const org=orgOfProject.get(group.project.id);if(org)projectsByOrg.set(org,[...(projectsByOrg.get(org)??[]),group]);}
+  const linkedOrg=workspace?.paperclip?.company?.name??(workspace?.projects??[]).find(p=>p.source==='paperclip')?.org??null;
+  const orgNames=[...new Set([...projectsByOrg.keys(),...(workspace?.projects.some(p=>p.source==='paperclip')&&linkedOrg?[linkedOrg]:[])])];
+  const renderProject=({project,gid,chats}:{project:typeof projectGroups[number]['project'];gid:string;chats:Chat[]})=>(
+            <Collapsible.Root className="nav-section" key={project.id} open={isOpen(gid)} onOpenChange={value=>toggleGroup(gid,value)}>
+              <PreviewCard.Root><PreviewCard.Trigger render={<div/>} className="nav-project-hover" delay={600} closeDelay={120}>
+              <GroupHead nested title={project.name} tooltip={project.name} chats={chats} icon={<Layers size={13}/>} onContextMenu={event=>{event.preventDefault();void openProjectMenu(project.id,event.clientX,event.clientY,mode=>setProjectEdit({id:project.id,mode}));}}>
+                <Tip label={project.folderIds.length ? `New chat in ${project.name}` : 'Add a folder in Projects'}><button
+                  type="button"
+                  className="icon-button"
+                  aria-label={`New chat in project ${project.name}`}
+                 
+                  onClick={() => project.folderIds.length
+                    ? openNewChat({folderId:project.primaryFolderId ?? project.folderIds[0], projectId:project.id})
+                    : openProject(project.id)}
+                >
+                  <SquarePen size={13} />
+                </button></Tip>
+                <Tip label={`Open ${project.name}: tasks, roster and outputs`}><button type="button" className="icon-button" aria-label={`Open project ${project.name}`} onClick={()=>openProject(project.id)}><LayoutGrid size={13}/></button></Tip>
+              </GroupHead>
+              </PreviewCard.Trigger>
+              <PreviewCard.Portal><PreviewCard.Positioner side="right" align="start" sideOffset={8} className="chat-preview-positioner"><PreviewCard.Popup className="chat-preview-card project-hover-card">
+                <ProjectHoverCard project={project} folders={snapshot.folders} chats={snapshot.chats.filter(chat=>chat.projectId===project.id)} onOpen={()=>openProject(project.id)} onEdit={()=>setProjectEdit({id:project.id,mode:'edit'})}/>
+              </PreviewCard.Popup></PreviewCard.Positioner></PreviewCard.Portal></PreviewCard.Root>
+              <Collapsible.Panel className="nav-group-panel is-nested-chats"><ProjectTaskRows projectId={project.id} chats={chats} renderChats={list=>list.length?rows(list,context):null}/></Collapsible.Panel>
+            </Collapsible.Root>
+  );
   // Task worktrees (Assign & start) sit under their project's task rows, not in Folders.
   const taskWorktrees = taskWorktreeFolderIds(snapshot);
   const folderGroups = snapshot.folders.filter(folder=>!taskWorktrees.has(folder.id)).map(folder=>({folder,gid:`folder:${folder.id}`,chats:inGroup(`folder:${folder.id}`)}));
@@ -554,31 +586,13 @@ export function Sidebar(): React.ReactElement {
             <span className="nav-heading-title">Projects</span>
             <span className="nav-heading-actions"><Tip label="Open projects"><button type="button" className="icon-button" aria-label="Open projects" onClick={openProjectsScreen}><LayoutGrid size={14}/></button></Tip><Tip label="New project"><button type="button" className="icon-button" aria-label="New project" onClick={()=>requestNewProject(openProjectsScreen)}><Plus size={15} strokeWidth={1.75}/></button></Tip></span>
           </div>
-          {projectGroups.map(({project,gid,chats}) => (
-            <Collapsible.Root className="nav-section" key={project.id} open={isOpen(gid)} onOpenChange={value=>toggleGroup(gid,value)}>
-              <PreviewCard.Root><PreviewCard.Trigger render={<div/>} className="nav-project-hover" delay={600} closeDelay={120}>
-              <GroupHead nested title={project.name} tooltip={project.name} chats={chats} icon={<Layers size={13}/>} onContextMenu={event=>{event.preventDefault();void openProjectMenu(project.id,event.clientX,event.clientY,mode=>setProjectEdit({id:project.id,mode}));}}>
-                <Tip label={project.folderIds.length ? `New chat in ${project.name}` : 'Add a folder in Projects'}><button
-                  type="button"
-                  className="icon-button"
-                  aria-label={`New chat in project ${project.name}`}
-                 
-                  onClick={() => project.folderIds.length
-                    ? openNewChat({folderId:project.primaryFolderId ?? project.folderIds[0], projectId:project.id})
-                    : openProject(project.id)}
-                >
-                  <SquarePen size={13} />
-                </button></Tip>
-                <Tip label={`Open ${project.name}: tasks, roster and outputs`}><button type="button" className="icon-button" aria-label={`Open project ${project.name}`} onClick={()=>openProject(project.id)}><LayoutGrid size={13}/></button></Tip>
-              </GroupHead>
-              </PreviewCard.Trigger>
-              <PreviewCard.Portal><PreviewCard.Positioner side="right" align="start" sideOffset={8} className="chat-preview-positioner"><PreviewCard.Popup className="chat-preview-card project-hover-card">
-                <ProjectHoverCard project={project} folders={snapshot.folders} chats={snapshot.chats.filter(chat=>chat.projectId===project.id)} onOpen={()=>openProject(project.id)} onEdit={()=>setProjectEdit({id:project.id,mode:'edit'})}/>
-              </PreviewCard.Popup></PreviewCard.Positioner></PreviewCard.Portal></PreviewCard.Root>
-              <Collapsible.Panel className="nav-group-panel is-nested-chats"><ProjectTaskRows projectId={project.id} chats={chats} renderChats={list=>list.length?rows(list,context):null}/></Collapsible.Panel>
-            </Collapsible.Root>
-          ))}
-          <PaperclipProjects isOpen={isOpen} toggleGroup={toggleGroup}/>
+          {ownProjects.map(renderProject)}
+          {orgNames.map(org=><div key={`org:${org}`} className="nav-org" role="group" aria-label={`${org} · ${NAMES.paperclip}`}>
+            <p className="nav-org-label" title={`${org} · ${NAMES.paperclip}`}>{org} · {NAMES.paperclip}</p>
+            {(projectsByOrg.get(org)??[]).map(renderProject)}
+            <PaperclipProjects org={org} isOpen={isOpen} toggleGroup={toggleGroup}/>
+          </div>)}
+
           {snapshot.projects.length === 0 && <button type="button" className="nav-quiet-row" onClick={()=>requestNewProject(openProjectsScreen)}><Layers size={14} aria-hidden="true"/><span>Create a project</span></button>}
         </section>
         {orphanChats.length === 0 && (
@@ -728,14 +742,15 @@ function ProjectTaskRows({projectId,chats,renderChats}:{projectId:string;chats:C
   return <>{tasks.length>0&&<TaskTree tasks={tasks}/>}{renderChats(rest)}</>;
 }
 
-function PaperclipProjects({isOpen,toggleGroup}:{isOpen:(id:string)=>boolean;toggleGroup:(id:string,open:boolean)=>void}):React.ReactElement|null {
+function PaperclipProjects({org,isOpen,toggleGroup}:{org:string;isOpen:(id:string)=>boolean;toggleGroup:(id:string,open:boolean)=>void}):React.ReactElement|null {
   const badge=useInboxBadge();
   const {snapshot}=useWorkspace(Boolean(badge?.connected));
   const route=useHubRoute();
   const screen=useStoreSelector(state=>state.screen);
   const [newTask,setNewTask]=useState<string|null>(null);
   if(!badge?.connected||!snapshot?.paperclip) return null;
-  const projects=snapshot.projects.filter(p=>p.source==='paperclip');
+  const projects=snapshot.projects.filter(p=>p.source==='paperclip'&&(p.org??snapshot.paperclip?.company?.name)===org);
+  if(!projects.length&&!snapshot.paperclip.stale) return null;
   const tasks=snapshot.tasks.filter(t=>t.source==='paperclip');
   const rank=(t:WorkspaceTask)=>t.live?0:t.status==='in_review'||t.status==='blocked'?1:t.status==='in_progress'||t.status==='todo'?2:t.status==='backlog'?3:t.status==='done'?4:5;
   const sort=(list:WorkspaceTask[])=>[...list].sort((a,b)=>rank(a)-rank(b)||b.updatedAt.localeCompare(a.updatedAt));
@@ -762,7 +777,6 @@ function PaperclipProjects({isOpen,toggleGroup}:{isOpen:(id:string)=>boolean;tog
           <ChevronRight size={13} className="nav-chevron"/>
           <span className="nav-section-icon" aria-hidden="true"><Layers size={13}/></span>
           <span className="nav-section-title" title={`${p.name}${p.repo?` · ${p.repo}`:''}`}>{p.name}</span>
-          <span className="ws-source">{NAMES.paperclip}</span>
           {live>0&&<span className="nav-running-count" title={`${live} running`} aria-label={`${live} running`}>{live}</span>}
         </Collapsible.Trigger>
         <span className="nav-section-actions">

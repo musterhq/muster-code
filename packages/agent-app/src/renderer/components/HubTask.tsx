@@ -6,7 +6,7 @@
  * Comments render with the app's own Markdown; the thread is virtualised.
  */
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { ArrowDown, ArrowRight, ArrowUp, Brain, CircleHelp, GitBranch, PanelRight, Play, ShieldCheck, Waypoints, X } from 'lucide-react';
+import { ArrowDown, ArrowRight, ArrowUp, Brain, CircleHelp, FileText, GitBranch, PanelRight, Play, ShieldCheck, Waypoints, X } from 'lucide-react';
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { LedgerEntry, PaperclipQuestion, ThreadCard, WorkspaceComment, WorkspaceMemory, WorkspacePriority, WorkspaceSnapshot, WorkspaceStatus, WorkspaceTaskDetail } from '../../shared/domains/paperclip-protocol';
 import { PRIORITY_NAME, STATUS_LABEL, WORKSPACE_PRIORITIES, WORKSPACE_STATUSES } from '../../shared/domains/paperclip-protocol';
@@ -15,7 +15,7 @@ import { invoke } from '../bridge';
 import { onTasksChanged } from '../hubStore';
 import { agoLabel, exactTime } from '../relativeTime';
 import { closeSettings, notifyError, notifySuccess, selectChat } from '../store';
-import { LiveCount, Monogram, Receipt, RUN_STATE_LABEL, StateChip, TaskStatusIcon, duration, explainRunError, runTone } from './HubParts';
+import { ApprovalActions, LiveCount, Monogram, Receipt, RUN_STATE_LABEL, StateChip, TaskStatusIcon, duration, explainRunError, runTone } from './HubParts';
 import { ApprovalCard } from './ApprovalCard';
 import { MessageBody } from './MessageBody';
 import { PendingQuestion } from './PendingQuestion';
@@ -81,7 +81,7 @@ function Thread({ detail, snapshot, onChanged, onOpenTask, onOpenAgent, properti
   const who = (name: string | null) => { const id = name ? agentByName.get(name) : undefined; return id ? <button type="button" className="ws-name-link" onClick={() => onOpenAgent(id)}>{name}</button> : <span>{name ?? 'Someone'}</span>; };
   return <section className="ws-thread" aria-label={`${task.key} conversation`}>
     <div className="ws-thread-head">
-      <TaskStatusIcon status={task.status} size={16}/><h1 className="ws-thread-title">{task.title}</h1><span className="ws-key">{task.key}</span>{task.live && <LiveCount count={1}/>}{detail.governance?.hold && <StateChip tone={detail.governance.hold.mode === 'cancel' ? 'danger' : 'warn'}>{detail.governance.hold.mode === 'cancel' ? 'Cancelled with parent' : 'On hold'}</StateChip>}
+      <TaskStatusIcon status={task.status} size={16}/><h1 className="ws-thread-title">{task.title}</h1><span className="ws-key">{task.key}</span>{task.live && <LiveCount count={1}/>}{task.removedInPaperclip && <StateChip tone="warn">Removed in Paperclip</StateChip>}{detail.governance?.hold && <StateChip tone={detail.governance.hold.mode === 'cancel' ? 'danger' : 'warn'}>{detail.governance.hold.mode === 'cancel' ? 'Cancelled with parent' : 'On hold'}</StateChip>}
       {task.source === 'paperclip' && <span className="ws-source">{NAMES.paperclip}</span>}
       {!propertiesOpen && <Tip label="Show properties"><button type="button" className="icon-button ws-thread-toggle" aria-label="Show properties" onClick={onToggleProperties}><PanelRight size={15}/></button></Tip>}
     </div>
@@ -126,7 +126,11 @@ function Card({ card, taskId, projectId, who, onOpenTask, onChanged }: { card: T
     <div className="ws-card-memory"><span className="ws-card-memory-head"><Brain size={12} aria-hidden="true"/>{card.memory.length ? `Memory carried · ${card.memory.length} ${card.memory.length === 1 ? 'note' : 'notes'}` : 'No Muster memory matched this hand-off yet'}</span>
       {card.memory.map((m, i) => <p key={i} className="ws-card-memory-note">{m.text}<span className="ws-faint"> · {m.source}</span></p>)}</div>
   </div>;
-  if (card.kind === 'approval') return <div className="ws-card-sys" data-kind="approval"><ShieldCheck size={14} aria-hidden="true"/><span className="ws-card-sys-text"><strong>Approval</strong> {card.title}</span><StateChip tone={card.status === 'approved' ? 'ok' : card.status === 'rejected' ? 'danger' : 'accent'}>{card.status}</StateChip></div>;
+  if (card.kind === 'approval') return <div className="ws-card-sys" data-kind="approval"><ShieldCheck size={14} aria-hidden="true"/><span className="ws-card-sys-text"><strong>Approval</strong> {card.title}{card.requestedBy ? <span className="ws-faint"> · asked by {who(card.requestedBy)}</span> : null}</span><StateChip tone={card.status === 'approved' ? 'ok' : card.status === 'rejected' ? 'danger' : 'accent'}>{card.status.replace('_', ' ')}</StateChip>
+    {card.detail && card.approvalId && <p className="ws-card-prompt">{card.detail}</p>}
+    {card.approvalId && <ApprovalActions approvalId={card.approvalId} verbs={card.verbs} onDecided={onChanged}/>}</div>;
+  if (card.kind === 'document') return <DocumentCard card={card}/>;
+  if (card.kind === 'workproduct') return <div className="ws-card-sys" data-kind="workproduct"><GitBranch size={14} aria-hidden="true"/><span className="ws-card-sys-text"><strong>{card.type.replace(/_/g, ' ')}</strong> {card.url ? <a className="ws-link" href={card.url} target="_blank" rel="noreferrer">{card.title}</a> : card.title}{card.provider ? <span className="ws-faint"> · {card.provider}</span> : null}{card.summary ? <span className="ws-faint"> · {card.summary}</span> : null}</span>{card.status && <StateChip tone={card.status === 'approved' || card.status === 'merged' ? 'ok' : card.status === 'failed' ? 'danger' : 'accent'}>{card.status.replace(/_/g, ' ')}</StateChip>}</div>;
   if (card.kind === 'secret') return <SecretRequestCard proposal={card.proposal} secureStorage={card.secureStorage} projectId={projectId} onChanged={onChanged}/>;
   if (card.kind === 'stage') return <StageCard stage={card.stage} taskId={taskId} projectId={projectId} onChanged={onChanged}/>;
   return <div className="ws-card-sys" data-kind="needs" data-status={card.status}>
@@ -144,6 +148,17 @@ function Card({ card, taskId, projectId, who, onOpenTask, onChanged }: { card: T
           <button type="button" className="settings-button" disabled={busy} onClick={() => void respond(true)}>{card.acceptLabel ?? 'Approve'}</button>
         </div>
       : <p className="ws-faint ws-card-resolution">Answer it by replying below.</p>}
+  </div>;
+}
+
+/** A task document; a plan is the document with key `plan`. Its latest body (with the app's Markdown) and the revision history. */
+function DocumentCard({ card }: { card: Extract<ThreadCard, { kind: 'document' }> }): React.ReactElement {
+  const plan = card.key === 'plan';
+  return <div className="ws-card-sys" data-kind="document" data-plan={plan ? 'true' : undefined}>
+    <FileText size={14} aria-hidden="true"/><span className="ws-card-sys-text"><strong>{plan ? 'Plan' : 'Document'}</strong> {card.title}<span className="ws-faint"> · revision {card.revision}</span></span>
+    <time className="ws-message-time" title={exactTime(card.at)}>{agoLabel(card.at)}</time>
+    <details className="ws-card-detail" open={plan}><summary>{plan ? 'Plan' : 'Contents'}</summary>{card.format === 'markdown' ? <MessageBody text={card.body}/> : <pre>{card.body}</pre>}</details>
+    {card.revisions.length > 1 && <details className="ws-card-detail"><summary>{card.revisions.length} revisions</summary><ol className="ws-revisions">{card.revisions.map(r => <li key={r.number}>Revision {r.number}{r.summary ? ` · ${r.summary}` : ''}<span className="ws-faint">{r.by ? ` · ${r.by}` : ''}{r.at ? ` · ${agoLabel(r.at)}` : ''}</span></li>)}</ol></details>}
   </div>;
 }
 
@@ -245,7 +260,8 @@ function Properties({ detail, snapshot, onOpenTask, onClose, onChanged }: { deta
         <Row label="Assignee">{editable ? <span className="ws-status-pick">{task.assigneeLabel && <Monogram name={task.assigneeLabel}/>}<select className="ws-select is-bare" aria-label="Assignee" value={task.assigneeId ?? ''} disabled={busy} onChange={e => void update({ assigneeId: e.target.value || null })}><option value="">Unassigned</option>{assignable.map(a => <option key={a.id} value={a.id}>{a.name}{a.title ? ` · ${a.title}` : ''}</option>)}</select></span> : task.assigneeLabel ? <span className="ws-inline"><Monogram name={task.assigneeLabel}/><span className="ws-ellipsis">{task.assigneeLabel}</span></span> : <span className="ws-faint">None</span>}</Row>
         <Row label="Project">{project ? ellipsis(project.name) : <span className="ws-faint">None</span>}</Row>
         <Row label="Priority">{editable ? <select className="ws-select is-bare" aria-label="Priority" value={task.priority} disabled={busy} onChange={e => void update({ priority: e.target.value as WorkspacePriority })}>{WORKSPACE_PRIORITIES.map(p => <option key={p} value={p}>{PRIORITY_NAME[p]}</option>)}</select> : PRIORITY_NAME[task.priority]}</Row>
-        {goal && <Row label="Goal">{ellipsis(goal.title)}</Row>}
+        {goal && <Row label="Goal">{ellipsis([goal.title, goal.parentId ? snapshot.goals.find(g => g.id === goal.parentId)?.title && `under ${snapshot.goals.find(g => g.id === goal.parentId)!.title}` : null, goal.ownerAgentId ? snapshot.agents.find(a => a.id === goal.ownerAgentId)?.name && `owner ${snapshot.agents.find(a => a.id === goal.ownerAgentId)!.name}` : null].filter(Boolean).join(' · '))}</Row>}
+        {task.labels?.length ? <Row label="Labels"><span className="ws-chips">{task.labels.map(l => <span key={l.name} className="ws-chip" data-tone="faint" style={l.color ? { borderColor: l.color } : undefined}>{l.name}</span>)}</span></Row> : null}
       </dl>
       <MemorySection taskId={task.id}/>
       <h3 className="ws-prop-group">Relationships</h3>

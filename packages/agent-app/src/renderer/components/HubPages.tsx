@@ -14,7 +14,7 @@ import { buildActivity, type ActivityItem, type InboxBucket } from '../inboxMode
 import { agoLabel, exactTime } from '../relativeTime';
 import { notifyError, notifySuccess } from '../store';
 import { useStore } from '../useStore';
-import { AGENT_STATE_LABEL, INBOX_KIND_LABEL, Monogram, Receipt, RUN_STATE_LABEL, StateChip, TaskStatusIcon, agentTone, costText, duration, explainRunError, runTone, type Tone } from './HubParts';
+import { AGENT_STATE_LABEL, ApprovalActions, INBOX_KIND_LABEL, Monogram, Receipt, RUN_STATE_LABEL, StateChip, TaskStatusIcon, agentTone, costText, duration, explainRunError, runTone, type Tone } from './HubParts';
 import { MailboxInbox } from './MailboxInbox';
 import { ResourceState } from './ResourceState';
 import { useRuntimeLabel } from './RosterGraph';
@@ -71,6 +71,7 @@ export function InboxPage({ snapshot, nav }: { snapshot: WorkspaceSnapshot | nul
             {item.action.kind !== 'none' && <button type="button" className="settings-button secondary ws-row-action" onClick={() => act(item)}>{label(item)}</button>}
             <Tip label="Dismiss"><button type="button" className="icon-button ws-row-dismiss" aria-label={`Dismiss ${item.title}`} onClick={() => void dismissInboxItem(item).catch(notifyError)}><X size={13} aria-hidden="true"/></button></Tip>
           </div>
+          {item.approval && <ApprovalActions approvalId={item.approval.id} verbs={item.approval.verbs}/>}
         </li>)}</ul>
       </section>)}
     {mailProject && <section className="ws-section" aria-label="Project mailbox"><MailboxInbox projectId={mailProject} title="This project’s mailbox: reply to your agents here."/></section>}
@@ -79,7 +80,7 @@ export function InboxPage({ snapshot, nav }: { snapshot: WorkspaceSnapshot | nul
 
 // --- Pulse -------------------------------------------------------------------------------------------------------------
 /** Pulse: queued / running / recently failed runs, with Pause all and Resume all per source. */
-export function PulseBoard({ snapshot, nav, agentId, scoped = false }: { snapshot: WorkspaceSnapshot; nav: HubNav; agentId?: string; scoped?: boolean }): React.ReactElement {
+export function PulseBoard({ snapshot, nav, agentId, scoped = false, projectId }: { snapshot: WorkspaceSnapshot; nav: HubNav; agentId?: string; scoped?: boolean; projectId?: string }): React.ReactElement {
   const agents = useMemo(() => new Map(snapshot.agents.map(a => [a.id, a])), [snapshot.agents]);
   const tasks = useMemo(() => new Map(snapshot.tasks.map(t => [t.id, t])), [snapshot.tasks]);
   const [busy, setBusy] = useState<string | null>(null);
@@ -99,10 +100,9 @@ export function PulseBoard({ snapshot, nav, agentId, scoped = false }: { snapsho
   const label = (s: WorkspaceSource) => scoped ? s === 'paperclip' ? `${paperclipAgents(running(s))} (company-wide)` : 'Muster agents on this project' : s === 'paperclip' ? snapshot.paperclip?.company?.name ?? NAMES.paperclip : 'Muster';
   const confirmText = (s: WorkspaceSource) => scoped && s === 'paperclip' ? `Pause ${paperclipAgents(running(s))}? They also stop working on other projects.`
     : `Pause every ${scoped ? 'Muster agent on this project' : `${label(s)} agent`}? Running work stops and nothing new starts until you resume.`;
-  // In a project, Pause stops the agents on this project (for Paperclip, company-wide); elsewhere every agent of that source.
-  const pauseAll = (source: WorkspaceSource, paused: boolean) => scoped
-    ? Promise.all(snapshot.agents.filter(a => a.source === source && a.pausable && (paused ? a.status !== 'paused' : a.status === 'paused')).map(a => invoke(paused ? 'paperclip.agent.pause' : 'paperclip.agent.resume', { id: a.id })))
-    : invoke(paused ? 'paperclip.pauseAll' : 'paperclip.resumeAll', { source });
+  // From a project page: Muster's Pause stops that project's agents, Paperclip's stops the company's (its agents belong to the company).
+  // Resume wakes only what that Pause paused, never an agent you paused on purpose or one waiting for approval.
+  const pauseAll = (source: WorkspaceSource, paused: boolean) => invoke(paused ? 'paperclip.pauseAll' : 'paperclip.resumeAll', { source, ...(scoped && source === 'local' && projectId ? { projectId } : {}) });
   return <section className="ws-section" aria-label={NAMES.pulse}>
     <div className="ws-section-head"><h2>{NAMES.pulse}</h2>
       <div className="ws-page-actions">{sources.map(source => {

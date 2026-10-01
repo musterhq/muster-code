@@ -12,7 +12,7 @@
 import { realpathSync } from 'node:fs';
 import type { DatabaseSync } from 'node:sqlite';
 import type { ProjectDetails, ProjectTaskView, TaskState } from '../shared/domains/projects-protocol.ts';
-import type { ImportPlan, ImportTargets, PaperclipImportReport } from '../shared/domains/paperclip-protocol.ts';
+import type { ImportConflict, ImportPlan, ImportTargets, PaperclipImportReport } from '../shared/domains/paperclip-protocol.ts';
 import type { Folder } from '../shared/protocol.ts';
 import { normalizeRemote } from './memory-identity.ts';
 import { blockerIds } from './paperclip-map.ts';
@@ -47,6 +47,8 @@ export interface ImportStore {
   setMap(kind: string, sourceId: string, musterId: string, key: string | null, data: Json): void;
   addComment(row: { sourceId: string; taskId: string; authorKind: string; authorLabel: string; body: string; createdAt: string; runId: string | null }): boolean;
   putHistory(row: { sourceId: string; kind: string; taskId: string | null; projectId: string | null; title: string; status: string; detail: string; at: string; pending: boolean }): void;
+  /** Imported tasks of one company (to find the ones deleted in Paperclip). */
+  tasksOf?(companyId: string): { sourceId: string; musterId: string; key: string | null; data: Json }[];
 }
 
 /** The import tables live in the app database beside the Projects store. */
@@ -81,11 +83,26 @@ export class SqliteImportStore implements ImportStore {
     return new Set((this.db.prepare('SELECT source_id FROM paperclip_import_map WHERE kind = ?').all(kind) as { source_id: string }[]).map(r => r.source_id));
   }
   /** Read side for the workspace: keys, parents, members, comments and pending history, per Muster task or project. */
-  taskMeta(taskId: string): { key: string | null; parentTaskId: string | null; sourceId: string } | undefined {
+  taskMeta(taskId: string): { key: string | null; parentTaskId: string | null; sourceId: string; labels: { name: string; color: string | null }[]; removed: boolean } | undefined {
     const row = this.db.prepare("SELECT source_id, key, data FROM paperclip_import_map WHERE kind = 'task' AND muster_id = ?").get(taskId) as { source_id: string; key: string | null; data: string } | undefined;
     if (!row) return undefined;
     const data = JSON.parse(row.data) as Json, parent = str(data.parentSourceId);
-    return { key: row.key, sourceId: row.source_id, parentTaskId: parent ? this.map('task', parent)?.musterId ?? null : null };
+    const labels = arr(data.labels).map(l => ({ name: str(l.name) ?? '', color: str(l.color) })).filter(l => l.name);
+    return { key: row.key, sourceId: row.source_id, parentTaskId: parent ? this.map('task', parent)?.musterId ?? null : null, labels, removed: Boolean(data.removedAt) };
+  }
+  /** The imported tasks of one Paperclip company (older rows without a company are found through their project). */
+  tasksOf(companyId: string): { sourceId: string; musterId: string; key: string | null; data: Json }[] {
+    const projectCompany = new Map((this.db.prepare("SELECT muster_id, data FROM paperclip_import_map WHERE kind = 'project'").all() as { muster_id: string; data: string }[]).map(r => [r.muster_id, str((JSON.parse(r.data) as Json).companyId)]));
+    return (this.db.prepare("SELECT source_id, muster_id, key, data FROM paperclip_import_map WHERE kind = 'task'").all() as { source_id: string; muster_id: string; key: string | null; data: string }[])
+      .map(r => ({ sourceId: r.source_id, musterId: r.muster_id, key: r.key, data: JSON.parse(r.data) as Json }))
+      .filter(r => (str(r.data.companyId) ?? projectCompany.get(String(r.data.projectId))) === companyId);
+  }
+  /** The Paperclip org a Muster project was imported from (its name), or undefined for a project you made. */
+  projectOrg(projectId: string, projectName?: string): string | undefined {
+    const row = this.db.prepare("SELECT data FROM paperclip_import_map WHERE kind = 'project' AND muster_id = ?").get(projectId) as { data: string } | undefined;
+    if (!row) return undefined;
+    const data = JSON.parse(row.data) as Json;
+    return isImportedProject(data, projectName) ? str(data.companyName) ?? 'Paperclip' : undefined;
   }
   projectMeta(projectId: string): Json | undefined {
     const row = this.db.prepare("SELECT data FROM paperclip_import_map WHERE kind = 'project' AND muster_id = ?").get(projectId) as { data: string } | undefined;
@@ -104,9 +121,17 @@ export class SqliteImportStore implements ImportStore {
   }
 }
 
+/** Whether a map row's Muster project was made by the import (and may be updated by it), not one of yours that an older import filled.
+ *  Rows from before this was recorded count as imported only while the project still carries the Paperclip name. */
+export const isImportedProject = (data: Json, projectName?: string): boolean => data.origin === 'created' || (data.origin === undefined && (projectName === undefined || projectName === str(data.name)));
+
 export interface ImportDeps {
   /** GET only. */
   get(path: string): Promise<unknown>;
+  /** All issues of the company, page by page (GET only). Defaults to one request through `get`. */
+  issuePages?(companyId: string, query: string): AsyncIterable<Json[]>;
+  /** All comments of an issue, oldest first, page by page (GET only). Defaults to one request through `get`. */
+  commentPages?(issueId: string): AsyncIterable<Json[]>;
   invoke: Invoke;
   store: ImportStore;
   folders(): Folder[];
@@ -115,85 +140,99 @@ export interface ImportDeps {
   /** Paperclip runs on this Mac, so its folder paths are this Mac's. A remote Paperclip's paths are never linked or read. */
   local: boolean;
   codexHome?(agent: Json): { provider?: string; model?: string } | null;
-  /** Normalised origin remote of a local folder (github.com/org/repo), for matching a Paperclip project to a Muster one. */
+  /** Normalised origin remote of a local folder (github.com/org/repo). */
   remoteOf?(path: string): Promise<string | undefined>;
-  /** Per Paperclip project: fill this Muster project, create a new one ('new'), or leave it out ('skip'). */
+  /** 'skip' leaves a Paperclip project out of this import. Nothing else is configurable: imports never write into your own projects. */
   targets?: ImportTargets;
+}
+
+const PAGE = 1000;
+/** The default paging for a `get` that knows nothing about pages: one request. */
+async function* single(get: (path: string) => Promise<unknown>, path: string): AsyncGenerator<Json[]> { yield arr(await get(path)); }
+/** Runs `work` over `items`, `width` at a time (comment reads overlap; the writes they make are synchronous SQLite). */
+async function eachBounded<T>(items: readonly T[], width: number, work: (item: T) => Promise<void>): Promise<void> {
+  let next = 0;
+  await Promise.all(Array.from({ length: Math.min(width, items.length) }, async () => { while (next < items.length) await work(items[next++]!); }));
 }
 
 const nameKey = (name: string) => name.toLowerCase().normalize('NFKD').replace(/[^a-z0-9]+/g, '');
 /** A path as this Mac resolves it (~ expanded, symlinks such as /var → /private/var followed), for matching folders. */
 const home = (path: string) => { const expanded = path.replace(/^~(?=\/|$)/, process.env.HOME ?? '~').replace(/\/+$/, ''); try { return realpathSync(expanded); } catch { return expanded; } };
+
 /**
- * What an import would fill, read with GET only: each Paperclip project, the Muster project it maps to (an earlier
- * import), and otherwise a suggested match — the same folder, the same repository remote, or the same name (so
- * "OSS Manager" in Paperclip finds the founder's "OSSMANAGER" whose folder is ~/Documents/redis-automation).
+ * What an import would do, read with GET only: each Paperclip project and whether it is new, already imported (updated in
+ * place), or was filled into one of your own projects by an older import (that project is now left alone). Nothing is matched
+ * to your own projects: a Paperclip project is always its own project in Muster.
  */
-export async function planImport(companyId: string | null, deps: Pick<ImportDeps, 'get' | 'invoke' | 'store' | 'folders' | 'remoteOf'>): Promise<ImportPlan> {
+export async function planImport(companyId: string | null, deps: Pick<ImportDeps, 'get' | 'issuePages' | 'invoke' | 'store' | 'local'>): Promise<ImportPlan> {
   const companies = arr(await deps.get('/companies')).filter(c => c.status !== 'archived');
   const company = companies.find(c => c.id === companyId) ?? companies[0];
   const listed = companies.map(c => ({ id: String(c.id), name: str(c.name) ?? 'Paperclip', prefix: str(c.issuePrefix) ?? '' }));
-  const muster = (await deps.invoke('project.list', undefined)).filter(p => !p.archived);
-  const folderPath = new Map(deps.folders().map(f => [f.id, f.path]));
-  const musterRows = muster.map(p => ({ id: p.id, name: p.name, folders: p.folderIds.map(id => folderPath.get(id)).filter((x): x is string => Boolean(x)) }));
-  if (!company) return { company: null, companies: listed, projects: [], muster: musterRows };
+  if (!company) return { company: null, companies: listed, projects: [], local: deps.local };
+  const muster = new Map((await deps.invoke('project.list', undefined)).filter(p => !p.archived).map(p => [p.id, p]));
   const base = `/companies/${encodeURIComponent(String(company.id))}`;
-  const [projectsJson, issuesJson] = await Promise.all([deps.get(`${base}/projects`), deps.get(`${base}/issues?view=compact&limit=500`).catch(() => [])]);
-  const remotes = new Map<string, string | undefined>();
-  const remote = async (path: string) => { if (!remotes.has(path)) remotes.set(path, await deps.remoteOf?.(path).catch(() => undefined)); return remotes.get(path); };
+  const projectsJson = await deps.get(`${base}/projects`);
+  // Task counts per project, from the (paged) compact list; only counted, never kept.
   const counts = new Map<string, number>();
-  for (const i of arr(issuesJson)) { const pid = str(i.projectId); if (pid) counts.set(pid, (counts.get(pid) ?? 0) + 1); }
+  try { for await (const page of deps.issuePages?.(String(company.id), 'view=compact') ?? single(deps.get, `${base}/issues?view=compact&limit=${PAGE}`)) for (const i of page) { const pid = str(i.projectId); if (pid) counts.set(pid, (counts.get(pid) ?? 0) + 1); } } catch { /* a count is a nicety */ }
   const projects: ImportPlan['projects'] = [];
   for (const p of arr(projectsJson)) {
     const id = String(p.id), codebase = obj(p.codebase), name = str(p.name) ?? 'Paperclip project', localFolder = str(codebase.localFolder), repoUrl = str(codebase.repoUrl);
     const repo = repoUrl ? normalizeRemote(repoUrl) ?? repoUrl : null;
-    const mapped = deps.store.map('project', id)?.musterId;
-    const mappedTo = mapped && muster.some(m => m.id === mapped) ? mapped : null;
-    let suggestion: ImportPlan['projects'][number]['suggestion'] = mappedTo ? { projectId: mappedTo, reason: 'imported' } : null;
-    if (!suggestion && localFolder) { const want = home(localFolder); const hit = musterRows.find(m => m.folders.some(f => home(f) === want)); if (hit) suggestion = { projectId: hit.id, reason: 'folder' }; }
-    if (!suggestion && repo) for (const m of musterRows) { for (const f of m.folders) if ((await remote(f)) === repo) { suggestion = { projectId: m.id, reason: 'repository' }; break; } if (suggestion) break; }
-    if (!suggestion) { const hit = musterRows.find(m => nameKey(m.name) === nameKey(name)); if (hit) suggestion = { projectId: hit.id, reason: 'name' }; }
-    projects.push({ id, name, repo, localFolder, taskCount: counts.get(id) ?? 0, mappedTo, suggestion });
+    const mapped = deps.store.map('project', id), mine = mapped ? muster.get(mapped.musterId) : undefined;
+    const existing: ImportPlan['projects'][number]['existing'] = mapped && mine ? isImportedProject(mapped.data, mine.name) ? 'imported' : 'detached' : 'new';
+    projects.push({ id, name, repo, localFolder, taskCount: counts.get(id) ?? 0, existing });
   }
-  return { company: { id: String(company.id), name: str(company.name) ?? 'Paperclip' }, companies: listed, projects, muster: musterRows };
+  return { company: { id: String(company.id), name: str(company.name) ?? 'Paperclip' }, companies: listed, projects, local: deps.local };
 }
 
+const isNotFound = (cause: unknown) => (cause as { status?: unknown } | null)?.status === 404;
+const clip = (text: string, max = 60) => text.length > max ? `${text.slice(0, max - 1)}…` : text;
+
 export async function importFromPaperclip(companyId: string, deps: ImportDeps): Promise<PaperclipImportReport> {
+  const started = Date.now();
   const { get, invoke, store } = deps;
-  const report: PaperclipImportReport = { company: '', projects: { created: 0, updated: 0 }, tasks: { created: 0, updated: 0, skipped: 0 }, comments: 0, agents: 0, history: 0, needsYou: 0, notes: [] };
+  const report: PaperclipImportReport = { company: '', projects: { created: 0, updated: 0 }, tasks: { created: 0, updated: 0, skipped: 0 }, comments: 0, agents: 0, history: 0, needsYou: 0, notes: [], removed: 0, conflicts: [], noProject: 0, tookMs: 0, issues: 0 };
+  const conflict = (c: ImportConflict) => { if (report.conflicts.length < 200) report.conflicts.push(c); };
   const base = `/companies/${encodeURIComponent(companyId)}`;
   const company = arr(await get('/companies')).find(c => c.id === companyId);
   if (!company) throw new Error('That company is not on this Paperclip.');
   report.company = str(company.name) ?? 'Paperclip';
-  const [projectsJson, agentsJson, issuesJson, goalsJson, approvalsJson] = await Promise.all([get(`${base}/projects`), get(`${base}/agents`), get(`${base}/issues?limit=500&includeBlockedBy=true`), get(`${base}/goals`).catch(() => []), get(`${base}/approvals`).catch(() => [])]);
-  const agents = arr(agentsJson).filter(a => a.status !== 'terminated'), agentName = new Map(agents.map(a => [String(a.id), str(a.name) ?? 'Agent']));
-  const issues = arr(issuesJson);
+  const prefix = str(company.issuePrefix);
+  const issuePages = (query: string) => deps.issuePages?.(companyId, query) ?? single(get, `${base}/issues?${query}&limit=${PAGE}`);
+  const commentPages = (issueId: string) => deps.commentPages?.(issueId) ?? single(get, `/issues/${encodeURIComponent(issueId)}/comments?order=asc&limit=500`);
+  const [projectsJson, agentsJson, goalsJson, approvalsJson] = await Promise.all([get(`${base}/projects`), get(`${base}/agents`), get(`${base}/goals`).catch(() => []), get(`${base}/approvals`).catch(() => [])]);
+  const allAgents = arr(agentsJson).filter(a => a.status !== 'terminated');
+  // A hire still waiting for approval is not on the Roster yet: its approval is the pending item, and it joins on a later import.
+  const waiting = allAgents.filter(a => a.status === 'pending_approval'), agents = allAgents.filter(a => a.status !== 'pending_approval');
+  const agentName = new Map(allAgents.map(a => [String(a.id), str(a.name) ?? 'Agent']));
   const existing = new Map((await invoke('project.list', undefined)).map(p => [p.id, p]));
 
-  // Projects, with their folder (linked only when it exists here) and repository as a project source.
+  // Projects, each its own Paperclip-sourced Muster project (made on the first import, updated by later ones), with its folder
+  // (linked only when it exists here) and repository. Your own projects are never written to.
   const projectIds = new Map<string, string>();
   for (const p of arr(projectsJson)) {
     const sourceId = String(p.id), codebase = obj(p.codebase), name = str(p.name) ?? 'Paperclip project', goal = (str(p.description) ?? '').slice(0, 32768);
     const localFolder = str(codebase.localFolder), repoUrl = str(codebase.repoUrl), defaultRef = str(codebase.defaultRef);
+    if (deps.targets?.[sourceId] === 'skip') { report.notes.push(`${name}: left out of this import.`); continue; }
     let folderId: string | null = null;
-    if (localFolder && deps.local && deps.exists(localFolder)) folderId = deps.folders().find(f => f.path === localFolder)?.id ?? (await invoke('folder.add', { path: localFolder })).id;
+    if (localFolder && deps.local && deps.exists(localFolder)) { const want = home(localFolder); folderId = deps.folders().find(f => home(f.path) === want)?.id ?? (await invoke('folder.add', { path: localFolder })).id; }
     else if (localFolder && !deps.local) report.notes.push(`${name}: its folder (${localFolder}) is on the Paperclip server, not this Mac. Link your own checkout to the project yourself.`);
-    const mapped = store.map('project', sourceId), target = deps.targets?.[sourceId];
-    if (target === 'skip') { report.notes.push(`${name}: left out of this import.`); continue; }
-    // Filling a project you already made: keep its name and goal (unless it has none), add the folder and the repository.
-    const into = target && target !== 'new' ? existing.get(target) : undefined;
-    if (target && target !== 'new' && !into) throw new Error(`The Muster project chosen for ${name} no longer exists.`);
-    let project: ProjectDetails | undefined = into ?? (mapped ? existing.get(mapped.musterId) : undefined);
-    if (into) {
-      project = await invoke('project.update', { id: into.id, ...(into.goal.trim() ? {} : { goal }), ...(folderId && !into.folderIds.includes(folderId) ? { folderIds: [...into.folderIds, folderId] } : {}) });
-      if (repoUrl) {
-        const sources = await invoke('project.sources.list', { projectId: into.id }).then(r => r.sources).catch(() => []);
-        if (!sources.some(x => x.ref === repoUrl)) await invoke('project.sources.save', { projectId: into.id, kind: 'url', title: 'Repository', ref: repoUrl, note: defaultRef ? `Default branch: ${defaultRef}` : '', enabled: true }).catch(() => undefined);
-      }
-      report.projects.updated++;
-      (report.filled ??= []).push({ paperclip: name, muster: project.name });
-    } else if (project) {
-      project = await invoke('project.update', { id: project.id, name, goal, ...(folderId && !project.folderIds.includes(folderId) ? { folderIds: [...project.folderIds, folderId] } : {}) });
+    const mapped = store.map('project', sourceId), mine = mapped ? existing.get(mapped.musterId) : undefined;
+    const ours = mapped && mine && isImportedProject(mapped.data, mine.name);
+    if (mapped && mine && !ours) report.notes.push(`${name}: an earlier import filled your project “${mine.name}”. That project is left alone now, and ${name} is imported as its own project.`);
+    let project: ProjectDetails;
+    const last = obj(ours ? mapped.data.imported : undefined);
+    let wrote: { name: string; goal: string } = { name, goal };
+    if (ours && mine) {
+      // Only the fields you have not changed since the last import follow Paperclip.
+      const nameFollows = last.name === undefined || mine.name === last.name, goalFollows = last.goal === undefined || mine.goal === last.goal;
+      const nextName = nameFollows ? name : mine.name, nextGoal = goalFollows ? goal : mine.goal;
+      if (!nameFollows && name !== last.name) conflict({ scope: 'project', label: name, field: 'name', kept: mine.name, paperclip: name });
+      if (!goalFollows && goal !== last.goal) conflict({ scope: 'project', label: name, field: 'goal', kept: clip(mine.goal), paperclip: clip(goal) });
+      wrote = { name: nameFollows ? name : String(last.name), goal: goalFollows ? goal : String(last.goal) };
+      const patch = { ...(nextName !== mine.name ? { name: nextName } : {}), ...(nextGoal !== mine.goal ? { goal: nextGoal } : {}), ...(folderId && !mine.folderIds.includes(folderId) ? { folderIds: [...mine.folderIds, folderId] } : {}) };
+      project = Object.keys(patch).length ? await invoke('project.update', { id: mine.id, ...patch }) : mine;
       report.projects.updated++;
     } else {
       const created = await invoke('project.create', { name, goal, folderIds: folderId ? [folderId] : [] });
@@ -203,7 +242,8 @@ export async function importFromPaperclip(companyId: string, deps: ImportDeps): 
       await invoke('project.scheduler.set', { projectId: project.id, autoDispatch: false }).catch(() => undefined);
       if (repoUrl) await invoke('project.sources.save', { projectId: project.id, kind: 'url', title: 'Repository', ref: repoUrl, note: defaultRef ? `Default branch: ${defaultRef}` : '', enabled: true }).catch(() => undefined);
     }
-    store.setMap('project', sourceId, project.id, str(company.issuePrefix), { repo: repoUrl ? normalizeRemote(repoUrl) ?? repoUrl : null, repoUrl, defaultRef, localFolder, companyId, name });
+    existing.set(project.id, project);
+    store.setMap('project', sourceId, project.id, str(company.issuePrefix), { repo: repoUrl ? normalizeRemote(repoUrl) ?? repoUrl : null, repoUrl, defaultRef, localFolder, companyId, companyName: report.company, name, origin: 'created', imported: wrote, budgetUsd: mapped?.data.budgetUsd ?? null });
     projectIds.set(sourceId, project.id);
   }
 
@@ -211,7 +251,7 @@ export async function importFromPaperclip(companyId: string, deps: ImportDeps): 
   const members = new Map<string, Map<string, string>>();
   const skipped = { identities: 0, files: 0 };
   for (const [sourceProject, projectId] of projectIds) {
-    const current = await invoke('project.members.list', { projectId }).then(r => r.members).catch(() => []);
+    const current = await invoke('project.members.list', { projectId }).then(r => r.members, () => []);
     const byAgent = new Map<string, string>();
     for (const a of agents) {
       const agentId = String(a.id), key = `${sourceProject}:${agentId}`, mapped = store.map('member', key);
@@ -253,82 +293,179 @@ export async function importFromPaperclip(companyId: string, deps: ImportDeps): 
     members.set(sourceProject, byAgent);
     report.agents += agents.length;
   }
+  if (waiting.length) report.notes.push(`${waiting.map(a => agentName.get(String(a.id))).join(', ')} ${waiting.length === 1 ? 'is' : 'are'} waiting for approval in Paperclip, so ${waiting.length === 1 ? 'it is' : 'they are'} not on the Roster yet. Approve ${waiting.length === 1 ? 'it' : 'them'} (Inbox), then import again.`);
   if (skipped.identities) report.notes.push(`${skipped.identities} agent git ${skipped.identities === 1 ? 'identity was' : 'identities were'} not applied.`);
   if (skipped.files) report.notes.push(`${skipped.files} instruction ${skipped.files === 1 ? 'file was' : 'files were'} skipped (too large, not Markdown, or refused).`);
 
-  // Tasks: create or update, then state, then blockers (every task exists by then).
-  const work = async (projectId: string) => (await invoke('project.work', { projectId, activityLimit: 1 })).tasks.items;
+  // Tasks, a page at a time: create or update (only the fields you have not changed), then state. Nothing keeps the whole org in memory
+  // but one small record per issue for the blocker and thread passes.
+  const seen = new Set<string>(), lite: { id: string; identifier: string | null; projectId: string; blockers: string[] }[] = [];
   const taskIds = new Map<string, { projectId: string; taskId: string }>();
-  for (const issue of issues) {
-    const sourceId = String(issue.id), sourceProject = str(issue.projectId), projectId = sourceProject ? projectIds.get(sourceProject) : undefined;
+  const noProject: string[] = [];
+  const get1 = (projectId: string, id: string) => invoke('project.tasks.get', { projectId, id });
+  for await (const page of issuePages('includeBlockedBy=true')) for (const issue of page) {
+    report.issues++;
+    const sourceId = String(issue.id);
+    seen.add(sourceId);
+    const sourceProject = str(issue.projectId), projectId = sourceProject ? projectIds.get(sourceProject) : undefined;
+    if (!sourceProject) { report.noProject++; if (noProject.length < 5) noProject.push(str(issue.identifier) ?? sourceId); continue; }
     if (!projectId) { report.tasks.skipped++; continue; }
+    const label = str(issue.identifier) ?? sourceId;
     const title = (str(issue.title) ?? 'Untitled').slice(0, 500), description = str(issue.description) ?? '';
     const acceptance = description.length > ACCEPTANCE_MAX ? `${description.slice(0, ACCEPTANCE_MAX - 60).trimEnd()}\n\n(Full description in the thread.)` : description;
-    const assignee = str(issue.assigneeAgentId), memberId = assignee ? members.get(sourceProject!)?.get(assignee) : undefined;
+    const assignee = str(issue.assigneeAgentId), memberId = assignee ? members.get(sourceProject)?.get(assignee) : undefined;
     const owner = memberId ? { kind: 'agent' as const, id: memberId } : { kind: 'user' as const, id: 'user' };
+    const ownerKey = `${owner.kind}:${owner.id}`;
     const priority = PRIORITY[String(issue.priority)] ?? 2;
     const mapped = store.map('task', sourceId);
-    let task: ProjectTaskView | undefined = mapped ? (await work(projectId)).find(t => t.id === mapped.musterId) : undefined;
+    let task: ProjectTaskView | undefined = mapped ? await get1(projectId, mapped.musterId).catch(() => undefined) : undefined;
+    const last = obj(mapped?.data.imported);
+    const wrote: Json = { title, acceptance, priority, owner: ownerKey, state: last.state };
     if (task) {
-      if (task.title !== title || task.acceptance !== acceptance || task.priority !== priority || task.owner.id !== owner.id || task.owner.kind !== owner.kind)
-        task = await invoke('project.tasks.edit', { projectId, id: task.id, revision: task.revision, patch: { title, acceptance, priority, owner } });
+      // A field you changed since the last import keeps your value; the rest follow Paperclip.
+      const patch: Record<string, unknown> = {};
+      const field = <T,>(name: string, current: T, incoming: T, show: (v: T) => string, apply: (v: T) => void) => {
+        const before = last[name === 'owner' ? 'owner' : name] as T | undefined;
+        if (before === undefined || current === before || current === incoming) { if (current !== incoming) apply(incoming); wrote[name] = incoming; return; }
+        wrote[name] = before;
+        if (incoming !== before) conflict({ scope: 'task', label: `${label} ${clip(title, 40)}`, field: name, kept: show(current), paperclip: show(incoming) });
+      };
+      field('title', task.title, title, v => v, v => { patch.title = v; });
+      field('acceptance', task.acceptance, acceptance, v => clip(v), v => { patch.acceptance = v; });
+      field('priority', task.priority, priority, v => ['critical', 'high', 'medium', 'low'][v] ?? String(v), v => { patch.priority = v; });
+      field('owner', `${task.owner.kind}:${task.owner.id}`, ownerKey, v => v.startsWith('agent:') ? 'an agent' : 'you', () => { patch.owner = owner; });
+      if (Object.keys(patch).length) task = await invoke('project.tasks.edit', { projectId, id: task.id, revision: task.revision, patch, actor: 'import' });
       report.tasks.updated++;
     } else {
-      task = await invoke('project.tasks.add', { projectId, title, acceptance, dependencies: [], owner, priority });
+      task = await invoke('project.tasks.add', { projectId, title, acceptance, dependencies: [], owner, priority, actor: 'import' });
       report.tasks.created++;
     }
-    store.setMap('task', sourceId, task.id, str(issue.identifier), { parentSourceId: str(issue.parentId), status: str(issue.status), projectId, fullDescription: description.length > ACCEPTANCE_MAX });
     taskIds.set(sourceId, { projectId, taskId: task.id });
+    // Status: Paperclip's, unless you moved the task here since the last import.
     const target = STATE[String(issue.status)] ?? 'todo';
-    const fresh = (await work(projectId)).find(t => t.id === task!.id)!;
+    const fresh = task;
+    const untouched = last.state === undefined || fresh.state === last.state || fresh.state === target;
     try {
-      if (target === 'verified') {
+      if (!untouched) { if (mapped?.data.status !== str(issue.status)) conflict({ scope: 'task', label: `${label} ${clip(title, 40)}`, field: 'status', kept: fresh.state, paperclip: str(issue.status) ?? '' }); }
+      else if (target === 'verified') {
         if (fresh.state !== 'verified') {
-          const ready = fresh.state === 'implemented' || fresh.state === 'review' ? fresh : await invoke('project.tasks.setState', { projectId, id: fresh.id, revision: fresh.revision, state: 'review', reason: 'Done in Paperclip' });
-          await invoke('project.tasks.verify', { projectId, id: ready.id, revision: ready.revision, kind: 'manual', notes: `Done in ${report.company}'s Paperclip (${str(issue.identifier) ?? sourceId}); imported.` });
+          const ready = fresh.state === 'implemented' || fresh.state === 'review' ? fresh : await invoke('project.tasks.setState', { projectId, id: fresh.id, revision: fresh.revision, state: 'review', reason: 'Done in Paperclip', actor: 'import' });
+          task = await invoke('project.tasks.verify', { projectId, id: ready.id, revision: ready.revision, kind: 'manual', notes: `Done in ${report.company}'s Paperclip (${label}); imported.`, actor: 'import' });
         }
       } else if (fresh.state !== target && fresh.state !== 'running' && fresh.state !== 'needs-input') {
-        await invoke('project.tasks.setState', { projectId, id: fresh.id, revision: fresh.revision, state: target, ...(target === 'blocked' ? { reason: 'Blocked in Paperclip' } : {}) });
+        task = await invoke('project.tasks.setState', { projectId, id: fresh.id, revision: fresh.revision, state: target, ...(target === 'blocked' ? { reason: 'Blocked in Paperclip' } : {}), actor: 'import' });
       }
-    } catch (cause) { report.notes.push(`${str(issue.identifier) ?? sourceId}: status kept (${cause instanceof Error ? cause.message : String(cause)})`); }
+    } catch (cause) { report.notes.push(`${label}: status kept (${cause instanceof Error ? cause.message : String(cause)})`); }
+    wrote.state = untouched ? task.state : last.state;
+    const labels = arr(issue.labels).map(l => ({ name: str(l.name) ?? '', color: str(l.color) })).filter(l => l.name);
+    store.setMap('task', sourceId, task.id, str(issue.identifier), { parentSourceId: str(issue.parentId), status: untouched ? str(issue.status) : mapped?.data.status ?? str(issue.status), projectId, fullDescription: description.length > ACCEPTANCE_MAX, companyId, labels, imported: wrote });
     if (description.length > ACCEPTANCE_MAX && store.addComment({ sourceId: `description:${sourceId}`, taskId: task.id, authorKind: 'user', authorLabel: issue.createdByAgentId ? agentName.get(String(issue.createdByAgentId)) ?? 'Agent' : 'You', body: description, createdAt: str(issue.createdAt) ?? new Date().toISOString(), runId: null })) report.comments++;
+    lite.push({ id: sourceId, identifier: str(issue.identifier), projectId, blockers: blockerIds(issue) });
   }
-  for (const issue of issues) {
-    const mine = taskIds.get(String(issue.id));
-    const blockers = blockerIds(issue).map(id => taskIds.get(id)).filter((t): t is { projectId: string; taskId: string } => Boolean(t) && t!.projectId === mine?.projectId).map(t => t.taskId);
+  if (report.noProject) report.notes.push(`${report.noProject} ${report.noProject === 1 ? 'issue has' : 'issues have'} no project in Paperclip (${noProject.join(', ')}${report.noProject > noProject.length ? ', …' : ''}), so ${report.noProject === 1 ? 'it was' : 'they were'} not imported. Give ${report.noProject === 1 ? 'it' : 'them'} a project in Paperclip and import again.`);
+
+  // Blockers (every task exists by now).
+  for (const issue of lite) {
+    const mine = taskIds.get(issue.id);
+    const blockers = issue.blockers.map(id => taskIds.get(id)).filter((t): t is { projectId: string; taskId: string } => Boolean(t) && t!.projectId === mine?.projectId).map(t => t.taskId);
     if (!mine || !blockers.length) continue;
-    const task = (await work(mine.projectId)).find(t => t.id === mine.taskId);
-    if (task && blockers.some(b => !task.dependencies.includes(b))) await invoke('project.tasks.edit', { projectId: mine.projectId, id: task.id, revision: task.revision, patch: { dependencies: [...new Set([...task.dependencies, ...blockers])] } }).catch(cause => report.notes.push(`${str(issue.identifier)}: blockers not linked (${cause instanceof Error ? cause.message : String(cause)})`));
+    const task = await get1(mine.projectId, mine.taskId).catch(() => undefined);
+    if (task && blockers.some(b => !task.dependencies.includes(b))) await invoke('project.tasks.edit', { projectId: mine.projectId, id: task.id, revision: task.revision, patch: { dependencies: [...new Set([...task.dependencies, ...blockers])] }, actor: 'import' }).catch(cause => report.notes.push(`${issue.identifier}: blockers not linked (${cause instanceof Error ? cause.message : String(cause)})`));
   }
 
-  // The thread (every comment, in order, with author and time), and decisions as read-only history.
-  for (const issue of issues) {
-    const mine = taskIds.get(String(issue.id));
-    if (!mine) continue;
-    const key = encodeURIComponent(String(issue.id));
-    const [comments, interactions, approvals] = await Promise.all([get(`/issues/${key}/comments?order=asc&limit=500`), get(`/issues/${key}/interactions`).catch(() => []), get(`/issues/${key}/approvals`).catch(() => [])]);
-    for (const c of arr(comments)) {
+  // An issue deleted in Paperclip: its imported copy is cancelled and flagged "Removed in Paperclip", never left silently live.
+  // Only issues Paperclip itself answers "not found" for count (a hidden or filtered one is left alone).
+  const wanted = new Set(projectIds.values());
+  for (const row of store.tasksOf?.(companyId) ?? []) {
+    if (seen.has(row.sourceId) || row.data.removedAt || !wanted.has(String(row.data.projectId))) continue;
+    try { await get(`/issues/${encodeURIComponent(row.sourceId)}`); continue; } catch (cause) { if (!isNotFound(cause)) continue; }
+    const projectId = String(row.data.projectId), task = await get1(projectId, row.musterId).catch(() => undefined);
+    if (!task) continue;
+    try { if (task.state !== 'cancelled') await invoke('project.tasks.setState', { projectId, id: task.id, revision: task.revision, state: 'cancelled', reason: 'Removed in Paperclip', actor: 'import' }); }
+    catch (cause) { report.notes.push(`${row.key ?? row.sourceId}: removed in Paperclip, but it could not be cancelled here (${cause instanceof Error ? cause.message : String(cause)})`); continue; }
+    store.setMap('task', row.sourceId, row.musterId, row.key, { ...row.data, removedAt: new Date().toISOString(), imported: { ...obj(row.data.imported), state: 'cancelled' } });
+    report.removed++;
+  }
+  if (report.removed) report.notes.push(`${report.removed} ${report.removed === 1 ? 'task was' : 'tasks were'} deleted in Paperclip: cancelled here and flagged “Removed in Paperclip”.`);
+  // A task that came back (restored in Paperclip) is no longer flagged.
+  for (const row of store.tasksOf?.(companyId) ?? []) if (row.data.removedAt && seen.has(row.sourceId)) store.setMap('task', row.sourceId, row.musterId, row.key, { ...row.data, removedAt: undefined });
+
+  // The thread: every comment (a page at a time), with author and time; decisions, documents and work products as read-only history.
+  const decision = (taskId: string, projectId: string, kind: string, id: unknown, title: string, status: string, detail: string, at: unknown, pending: boolean) => { store.putHistory({ sourceId: `${kind}:${String(id)}`, kind, taskId, projectId, title, status, detail, at: str(at) ?? '', pending }); report.history++; if (pending) report.needsYou++; };
+  await eachBounded(lite, 4, async issue => {
+    const mine = taskIds.get(issue.id);
+    if (!mine) return;
+    const key = encodeURIComponent(issue.id);
+    for await (const page of commentPages(issue.id)) for (const c of page) {
       if (c.deletedAt) continue;
       const agent = str(c.authorAgentId);
       if (store.addComment({ sourceId: String(c.id), taskId: mine.taskId, authorKind: agent ? 'agent' : 'user', authorLabel: agent ? agentName.get(agent) ?? 'Agent' : 'You', body: str(c.body) ?? '', createdAt: str(c.createdAt) ?? '', runId: str(c.createdByRunId) })) report.comments++;
     }
+    const [interactions, approvals, documents, products] = await Promise.all([get(`/issues/${key}/interactions`).catch(() => []), get(`/issues/${key}/approvals`).catch(() => []), get(`/issues/${key}/documents`).catch(() => []), get(`/issues/${key}/work-products`).catch(() => [])]);
     for (const i of arr(interactions)) {
-      const payload = obj(i.payload), status = String(i.status ?? 'pending'), pending = status === 'pending', result = obj(i.result);
-      store.putHistory({ sourceId: `interaction:${i.id}`, kind: String(i.kind ?? 'interaction'), taskId: mine.taskId, projectId: mine.projectId, title: str(payload.prompt) ?? str(payload.title) ?? str(i.title) ?? 'Decision', status, detail: str(result.outcome) ? `${result.outcome}${str(result.reason) ? `: ${result.reason}` : ''}` : '', at: str(i.createdAt) ?? '', pending });
-      report.history++; if (pending) report.needsYou++;
+      const payload = obj(i.payload), status = String(i.status ?? 'pending'), result = obj(i.result);
+      decision(mine.taskId, mine.projectId, 'interaction', i.id, str(payload.prompt) ?? str(payload.title) ?? str(i.title) ?? 'Decision', status, str(result.outcome) ? `${result.outcome}${str(result.reason) ? `: ${result.reason}` : ''}` : '', i.createdAt, status === 'pending');
     }
     for (const a of arr(approvals)) {
       const status = String(a.status ?? 'pending');
+      decision(mine.taskId, mine.projectId, 'approval', a.id, str(obj(a.payload).name) ?? str(obj(a.payload).title) ?? String(a.type ?? 'Approval'), status, str(a.decisionNote) ?? '', a.createdAt, status === 'pending');
       store.putHistory({ sourceId: `approval:${a.id}`, kind: `approval:${a.type ?? 'request'}`, taskId: mine.taskId, projectId: mine.projectId, title: str(obj(a.payload).name) ?? str(obj(a.payload).title) ?? String(a.type ?? 'Approval'), status, detail: str(a.decisionNote) ?? '', at: str(a.createdAt) ?? '', pending: status === 'pending' });
-      report.history++; if (status === 'pending') report.needsYou++;
     }
-  }
+    for (const d of arr(documents)) {
+      const revisions = Number(d.latestRevisionNumber) > 1 ? arr(await get(`/issues/${key}/documents/${encodeURIComponent(String(d.key))}/revisions`).catch(() => [])).map(r => ({ number: Number(r.revisionNumber) || 0, summary: str(r.changeSummary) ?? '', at: str(r.createdAt) ?? '', by: str(r.createdByAgentId) ? agentName.get(String(r.createdByAgentId)) ?? 'Agent' : str(r.createdByUserId) ? 'You' : null })).sort((a, b) => b.number - a.number).slice(0, 50) : [];
+      store.putHistory({ sourceId: `document:${d.id}`, kind: `document:${String(d.key)}`, taskId: mine.taskId, projectId: mine.projectId, title: str(d.title) ?? String(d.key), status: String(Number(d.latestRevisionNumber) || 1), detail: JSON.stringify({ format: str(d.format) ?? 'markdown', body: (str(d.body) ?? '').slice(0, 24_000), revisions }), at: str(d.updatedAt) ?? str(d.createdAt) ?? '', pending: false });
+      report.history++;
+    }
+    for (const w of arr(products)) {
+      store.putHistory({ sourceId: `work_product:${w.id}`, kind: `work_product:${String(w.type ?? 'artifact')}`, taskId: mine.taskId, projectId: mine.projectId, title: str(w.title) ?? 'Work product', status: str(w.status) ?? '', detail: JSON.stringify({ provider: str(w.provider), url: str(w.url), summary: (str(w.summary) ?? '').slice(0, 2000) }), at: str(w.updatedAt) ?? str(w.createdAt) ?? '', pending: false });
+      report.history++;
+    }
+  });
   const firstProject = [...projectIds.values()][0] ?? null;
   for (const a of arr(approvalsJson)) {
     const status = String(a.status ?? 'pending');
     store.putHistory({ sourceId: `approval:${a.id}`, kind: `approval:${a.type ?? 'request'}`, taskId: null, projectId: firstProject, title: str(obj(a.payload).name) ?? str(obj(a.payload).title) ?? String(a.type ?? 'Approval'), status, detail: str(a.decisionNote) ?? '', at: str(a.createdAt) ?? '', pending: status === 'pending' });
   }
-  for (const g of arr(goalsJson)) store.putHistory({ sourceId: `goal:${g.id}`, kind: 'goal', taskId: null, projectId: firstProject, title: str(g.title) ?? 'Goal', status: String(g.status ?? 'active'), detail: str(g.description)?.slice(0, 2000) ?? '', at: str(g.createdAt) ?? '', pending: false });
+  const goalName = new Map(arr(goalsJson).map(g => [String(g.id), str(g.title) ?? 'Goal']));
+  for (const g of arr(goalsJson)) {
+    const parent = str(g.parentId) ? goalName.get(String(g.parentId)) : null, owner = str(g.ownerAgentId) ? agentName.get(String(g.ownerAgentId)) : null;
+    const facts = [parent ? `Parent goal: ${parent}` : '', owner ? `Owner: ${owner}` : ''].filter(Boolean).join(' · ');
+    store.putHistory({ sourceId: `goal:${g.id}`, kind: 'goal', taskId: null, projectId: firstProject, title: str(g.title) ?? 'Goal', status: String(g.status ?? 'active'), detail: [str(g.description)?.slice(0, 1800), facts].filter(Boolean).join('\n').slice(0, 2000), at: str(g.createdAt) ?? '', pending: false });
+  }
+  await importRoutinesAndBudgets();
   report.notes.push('Agent environment values (including secret references) were not imported. Runs start only when you start them, each in its own worktree.');
+  report.tookMs = Date.now() - started;
   return report;
+
+  /** Paperclip routines become paused Muster automations (a schedule only; nothing runs until you resume one), and a project's
+   *  monthly budget policy becomes that project's monthly budget while you have not set one yourself. Best effort. */
+  async function importRoutinesAndBudgets(): Promise<void> {
+    try {
+      let made = 0;
+      for (const r of arr(await get(`${base}/routines`).catch(() => []))) {
+        const sourceId = String(r.id), project = str(r.projectId) ? projectIds.get(String(r.projectId)) : undefined;
+        const cron = arr(r.triggers).find(t => t.kind === 'schedule' && str(t.cronExpression) && t.enabled !== false);
+        if (!project || !cron || store.map('routine', sourceId)) continue;
+        try {
+          const made1 = await invoke('automations.create', { name: (str(r.title) ?? 'Routine').slice(0, 120), prompt: (str(r.description) ?? str(r.title) ?? 'Run this routine.').slice(0, 16_000), target: { kind: 'new', projectId: project, mode: 'agent' }, schedule: { kind: 'cron', expr: String(cron.cronExpression) }, timezone: str(cron.timezone) ?? 'UTC', permissionMode: 'workspace', overlap: r.concurrencyPolicy === 'always_enqueue' ? 'queue' : 'skip', catchUp: r.catchUpPolicy === 'skip_missed' ? 'none' : 'one' });
+          await invoke('automations.pause', { id: made1.id });
+          store.setMap('routine', sourceId, made1.id, null, { companyId });
+          made++;
+        } catch { /* a routine Muster cannot schedule is left in Paperclip */ }
+      }
+      if (made) report.notes.push(`${made} ${made === 1 ? 'routine was' : 'routines were'} added to Automations, paused. Resume one to let it run.`);
+    } catch { /* routines are optional */ }
+    try {
+      const overview = obj(await get(`${base}/budgets/overview`).catch(() => ({})));
+      for (const policy of arr(overview.policies)) {
+        if (policy.scopeType !== 'project' || policy.metric !== 'billed_cents' || !(Number(policy.amount) > 0)) continue;
+        const sourceId = String(policy.scopeId), projectId = projectIds.get(sourceId), row = store.map('project', sourceId);
+        if (!projectId || !row) continue;
+        const usd = Number(policy.amount) / 100, settings = await invoke('project.team.settings', { projectId }).catch(() => undefined);
+        if (!settings || (settings.monthlyBudgetUsd != null && settings.monthlyBudgetUsd !== row.data.budgetUsd)) continue;
+        if (settings.monthlyBudgetUsd !== usd) await invoke('project.team.settings.set', { projectId, monthlyBudgetUsd: usd });
+        store.setMap('project', sourceId, row.musterId, prefix, { ...row.data, budgetUsd: usd });
+      }
+    } catch { /* budgets are optional */ }
+  }
 }

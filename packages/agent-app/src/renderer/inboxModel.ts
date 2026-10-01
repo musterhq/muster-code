@@ -10,7 +10,7 @@
  * item id and the item's `at`, so a new failure in the same chat shows again.
  */
 import type { Snapshot } from '../shared/protocol';
-import type { InboxKind, WorkspaceSnapshot } from '../shared/domains/paperclip-protocol';
+import type { ApprovalDecision, InboxKind, WorkspaceSnapshot } from '../shared/domains/paperclip-protocol';
 import type { INBOX_BUCKETS } from '../shared/workspace-names';
 
 export type InboxBucket = keyof typeof INBOX_BUCKETS;
@@ -18,6 +18,8 @@ export type InboxAction = { kind: 'chat'; chatId: string } | { kind: 'task'; tas
 export interface ActivityItem {
   id: string; bucket: InboxBucket; title: string; why: string; at: string; group: string; unread: boolean;
   source: 'chat' | 'muster' | 'paperclip'; kind: string; action: InboxAction;
+  /** A Paperclip approval this row stands for: Approve, Reject and Request revision act on it. */
+  approval?: { id: string; verbs: ApprovalDecision[] };
 }
 
 const KIND_BUCKET: Record<InboxKind, InboxBucket> = { question: 'needs', approval: 'needs', review: 'review', blocked: 'problems', failed_run: 'problems', agent_error: 'problems', budget: 'problems', mail: 'mentions', mention: 'mentions', other: 'review' };
@@ -51,7 +53,7 @@ export function buildActivity(app: Pick<Snapshot, 'chats' | 'folders' | 'project
   }
   for (const item of workspace?.inbox ?? []) {
     items.push({ id: `ws:${item.id}`, bucket: KIND_BUCKET[item.kind], title: item.title, why: item.why, at: item.at, group: item.group ?? workspace?.paperclip?.company?.name ?? 'Muster', unread: item.severity === 'high',
-      source: item.source === 'paperclip' ? 'paperclip' : 'muster', kind: item.kind,
+      source: item.source === 'paperclip' ? 'paperclip' : 'muster', kind: item.kind, ...(item.approvalId ? { approval: { id: item.approvalId, verbs: item.approvalVerbs ?? ['approve', 'reject', 'request_revision'] } } : {}),
       action: item.taskId ? { kind: 'task', taskId: item.taskId } : item.agentId ? { kind: 'agent', agentId: item.agentId } : { kind: 'none' } });
   }
   return items.filter(i => dismissed.get(i.id) !== i.at).sort((a, b) => Number(b.unread) - Number(a.unread) || b.at.localeCompare(a.at));

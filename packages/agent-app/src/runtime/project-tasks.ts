@@ -12,9 +12,10 @@ export interface ProjectActivity {id:string;projectId:string;actor:string;kind:s
 export interface BoundedList<T> {items:T[];truncated:boolean}
 export interface ProjectExport {schemaVersion:2;exportedAt:string;project:Project;folders:Folder[];chats:BoundedList<ProjectChatReference>;tasks:BoundedList<ProjectTask>;decisions:BoundedList<ProjectDecision>;activity:BoundedList<ProjectActivity>}
 /** Who performed a write. The activity feed names them; 'user' is the person at the keyboard. */
-export type Actor = 'user'|'agent'|'system'|'scheduler'|'coordinator';
+export type Actor = 'user'|'agent'|'system'|'scheduler'|'coordinator'|'import';
 
-const MAX_ROWS=200, MAX_EVIDENCE=50, MAX_EVIDENCE_TOTAL=50_000, MAX_DEPS=50, MAX_ATTEMPTS=20, MAX_ARTIFACTS=50;
+/** A project's task list is read whole (a Paperclip import of a large org is thousands of tasks); the other lists stay at MAX_ROWS. */
+const MAX_TASK_ROWS=10_000, MAX_ROWS=200, MAX_EVIDENCE=50, MAX_EVIDENCE_TOTAL=50_000, MAX_DEPS=50, MAX_ATTEMPTS=20, MAX_ARTIFACTS=50;
 const MODES:readonly ChatPermissionMode[]=['read-only','workspace','full'];
 const now=()=>new Date().toISOString();
 const parse=(v:unknown):string[]=>{try{const r=JSON.parse(String(v));return Array.isArray(r)&&r.every(x=>typeof x==='string')?r:[]}catch{return[]}};
@@ -60,7 +61,7 @@ export class ProjectTaskStore {
  getDecision(id:string):ProjectDecision|undefined{const r=this.db.prepare('SELECT * FROM decisions WHERE id=?').get(id) as Record<string,unknown>|undefined;return r?decision(r):undefined}
  assertTaskProject(projectId:string,id:string):ProjectTask{const t=this.getTask(id);if(!t)throw Error('Task not found.');if(t.projectId!==projectId)throw Error('Task belongs to a different project.');return t}
  assertDecisionProject(projectId:string,id:string):ProjectDecision{const d=this.getDecision(id);if(!d)throw Error('Decision not found.');if(d.projectId!==projectId)throw Error('Decision belongs to a different project.');return d}
- listTasks(projectId:string):BoundedList<ProjectTask>{const rows=this.db.prepare('SELECT * FROM tasks WHERE project_id=? ORDER BY created_at,id LIMIT ?').all(projectId,MAX_ROWS+1) as Record<string,unknown>[];const byTask=new Map<string,TaskAttempt[]>();for(const r of this.db.prepare('SELECT * FROM (SELECT *,ROW_NUMBER() OVER (PARTITION BY task_id ORDER BY started_at DESC,id DESC) AS n FROM attempts WHERE project_id=?) WHERE n<=?').all(projectId,MAX_ATTEMPTS) as Record<string,unknown>[]){const list=byTask.get(String(r.task_id))??[];list.push(attempt(r));byTask.set(String(r.task_id),list)}return bounded(rows.map(r=>this.task(r,byTask.get(String(r.id))??[])),MAX_ROWS)}
+ listTasks(projectId:string):BoundedList<ProjectTask>{const rows=this.db.prepare('SELECT * FROM tasks WHERE project_id=? ORDER BY created_at,id LIMIT ?').all(projectId,MAX_TASK_ROWS+1) as Record<string,unknown>[];const byTask=new Map<string,TaskAttempt[]>();for(const r of this.db.prepare('SELECT * FROM (SELECT *,ROW_NUMBER() OVER (PARTITION BY task_id ORDER BY started_at DESC,id DESC) AS n FROM attempts WHERE project_id=?) WHERE n<=?').all(projectId,MAX_ATTEMPTS) as Record<string,unknown>[]){const list=byTask.get(String(r.task_id))??[];list.push(attempt(r));byTask.set(String(r.task_id),list)}return bounded(rows.map(r=>this.task(r,byTask.get(String(r.id))??[])),MAX_TASK_ROWS)}
  listRunningTasks():ProjectTask[]{return (this.db.prepare("SELECT * FROM tasks WHERE status IN ('running','needs-input') ORDER BY updated_at LIMIT 1000").all() as Record<string,unknown>[]).map(r=>this.task(r))}
  /** Task whose current run lives in this chat, if any. */
  taskForChat(chatId:string):ProjectTask|undefined{const r=this.db.prepare("SELECT * FROM tasks WHERE run_chat_id=? AND status IN ('running','needs-input') LIMIT 1").get(chatId) as Record<string,unknown>|undefined;return r?this.task(r):undefined}

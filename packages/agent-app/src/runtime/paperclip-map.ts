@@ -1,7 +1,7 @@
 /** Paperclip JSON -> the Projects workspace shapes (shared/domains/paperclip-protocol.ts). Pure, so tests feed recorded payloads. */
 import type {
-  ThreadCard, LedgerEntry, AgentState, InboxKind, RunState, WorkspaceAgent, WorkspaceComment, WorkspaceCompany, WorkspaceGoal, WorkspaceInboxItem, WorkspacePriority,
-  WorkspaceProject, WorkspaceRow, WorkspaceRun, WorkspaceStatus, WorkspaceTask,
+  ApprovalDecision, ThreadCard, LedgerEntry, AgentState, InboxKind, RunState, WorkspaceAgent, WorkspaceComment, WorkspaceCompany, WorkspaceGoal, WorkspaceInboxItem, WorkspacePriority,
+  WorkspaceApproval, WorkspaceProject, WorkspaceRow, WorkspaceRun, WorkspaceStatus, WorkspaceTask,
 } from '../shared/domains/paperclip-protocol.ts';
 import { OPEN_STATUSES, WORKSPACE_STATUSES } from '../shared/domains/paperclip-protocol.ts';
 import { normalizeRemote } from './memory-identity.ts';
@@ -47,6 +47,7 @@ export function mapIssue(i: Json, agents: ReadonlyMap<string, WorkspaceAgent>, l
     live: Boolean(i.activeRun) || liveTaskIds.has(id),
     blockedByIds: blockerIds(i),
     origin: creator ? agents.get(creator)?.name ?? 'Agent' : str(i.createdByUserId) ? 'You' : null,
+    ...(arr(i.labels).length ? { labels: arr(i.labels).map(l => ({ name: str(l.name) ?? '', color: str(l.color) })).filter(l => l.name) } : {}),
   };
 }
 
@@ -63,7 +64,7 @@ export function mapProject(p: Json, tasks: readonly WorkspaceTask[]): WorkspaceP
   };
 }
 
-export const mapGoal = (g: Json): WorkspaceGoal => ({ id: String(g.id), title: str(g.title) ?? 'Goal', status: str(g.status) ?? 'active', level: str(g.level) });
+export const mapGoal = (g: Json): WorkspaceGoal => ({ id: String(g.id), title: str(g.title) ?? 'Goal', status: str(g.status) ?? 'active', level: str(g.level), parentId: str(g.parentId), ownerAgentId: str(g.ownerAgentId) });
 
 const RUN_STATE: Record<string, RunState> = { queued: 'queued', scheduled_retry: 'queued', running: 'running', succeeded: 'succeeded', failed: 'failed', cancelled: 'cancelled', timed_out: 'timed_out', interrupted: 'interrupted' };
 export function mapRun(r: Json): WorkspaceRun {
@@ -95,6 +96,29 @@ export function mapAttention(item: Json): WorkspaceInboxItem {
     title: `${identifier ? `${identifier} · ` : ''}${str(subject.title) ?? str(related.title) ?? 'Needs attention'}`,
     why: WHY[String(item.sourceKind)] ?? 'Needs your attention.', severity: SEVERITY.has(String(item.severity)) ? item.severity as 'high' : 'medium', at: iso(item.activityAt, iso(item.updatedAt)),
     taskId: subject.kind === 'issue' ? str(subject.id) : str(related.id), agentId: subject.kind === 'agent' ? str(subject.id) : null, runId: subject.kind === 'run' ? str(subject.id) : null,
+    // An approval row is decided from the row: its id and the decisions Paperclip offers for it.
+    ...(item.sourceKind === 'approval' && subject.kind === 'approval' && str(subject.id) ? { approvalId: String(subject.id), approvalVerbs: verbsOf(item.decisionVerbs) } : {}),
+  };
+}
+const VERB: Record<string, ApprovalDecision> = { approve: 'approve', reject: 'reject', request_revision: 'request_revision' };
+/** The approval decisions Paperclip lists for an item; all three when it lists none. */
+const verbsOf = (value: unknown): ApprovalDecision[] => { const found = arr(value).map(v => VERB[String(v.id)]).filter((v): v is ApprovalDecision => Boolean(v)); return found.length ? found : ['approve', 'reject', 'request_revision']; };
+
+const APPROVAL_TITLE: Record<string, string> = { hire_agent: 'Hire an agent', approve_ceo_strategy: 'Approve the CEO’s strategy', budget_override_required: 'Budget override', request_board_approval: 'Board approval' };
+/** A Paperclip approval (hire, strategy, budget override, board request) waiting on the board. */
+export function mapApproval(a: Json, agents: ReadonlyMap<string, WorkspaceAgent>): WorkspaceApproval {
+  const payload = obj(a.payload), type = String(a.type ?? 'request_board_approval');
+  const name = str(payload.name), title = str(payload.title);
+  const requester = str(a.requestedByAgentId);
+  const facts = type === 'hire_agent'
+    ? [str(payload.role) && `Role: ${payload.role}`, str(payload.adapterType) && `Runner: ${String(payload.adapterType).replace(/_local$/, '')}`, str(payload.capabilities)].filter(Boolean).join('\n')
+    : [str(payload.plan), str(payload.description), str(payload.reason)].filter(Boolean).join('\n');
+  return {
+    id: String(a.id), type, status: a.status === 'revision_requested' ? 'revision_requested' : 'pending',
+    title: type === 'hire_agent' ? `Hire ${name ?? 'an agent'}${str(payload.title) ? ` as ${payload.title}` : ''}` : title ?? name ?? APPROVAL_TITLE[type] ?? 'Approval',
+    detail: facts.slice(0, 1200), requestedBy: requester ? agents.get(requester)?.name ?? 'Agent' : str(a.requestedByUserId) ? 'You' : null,
+    agentId: type === 'hire_agent' ? str(payload.agentId) : null, issueIds: arr(a.issues).map(i => str(i.id)).filter((v): v is string => Boolean(v)),
+    at: iso(a.createdAt), verbs: ['approve', 'reject', 'request_revision'],
   };
 }
 
@@ -190,3 +214,18 @@ export function mapInteraction(i: Json, agents: ReadonlyMap<string, WorkspaceAge
     ...(asking.length ? { questions: asking, submitLabel: str(payload.submitLabel) } : {}),
   };
 }
+
+/** A task document (a plan is the one with key `plan`) with its revisions, newest first. */
+export function mapDocument(d: Json, revisions: readonly Json[], agents: ReadonlyMap<string, WorkspaceAgent>): ThreadCard {
+  const by = (r: Json) => str(r.createdByAgentId) ? agents.get(String(r.createdByAgentId))?.name ?? 'Agent' : str(r.createdByUserId) ? 'You' : null;
+  return {
+    kind: 'document', id: `document:${d.id}`, at: iso(d.updatedAt, iso(d.createdAt)), key: String(d.key), title: str(d.title) ?? String(d.key), format: str(d.format) ?? 'markdown',
+    body: (str(d.body) ?? '').slice(0, 24_000), revision: Number(d.latestRevisionNumber) || 1,
+    revisions: revisions.map(r => ({ number: Number(r.revisionNumber) || 0, summary: str(r.changeSummary) ?? '', at: iso(r.createdAt), by: by(r) })).sort((a, b) => b.number - a.number).slice(0, 50),
+  };
+}
+/** A pull request, branch or artifact an agent produced for a task. */
+export const mapWorkProduct = (w: Json): ThreadCard => ({
+  kind: 'workproduct', id: `workproduct:${w.id}`, at: iso(w.updatedAt, iso(w.createdAt)), type: str(w.type) ?? 'artifact', title: str(w.title) ?? 'Work product', status: str(w.status) ?? '',
+  provider: str(w.provider), url: str(w.url), summary: (str(w.summary) ?? '').slice(0, 2000),
+});

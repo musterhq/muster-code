@@ -84,10 +84,13 @@ function ProjectList({ projects, workspace, onOpen, onCreate }: { projects: Proj
   const [showArchived, setShowArchived] = useState(false);
   const stats = useMemo(() => new Map(workspace.map(p => [p.id, p])), [workspace]);
   const rows = [
-    ...projects.filter(p => showArchived || !p.archived).map(p => ({ id: p.id, name: p.name, detail: p.goal, source: 'local' as const, archived: p.archived, paused: stats.get(p.id)?.paused ?? false, tasks: stats.get(p.id)?.taskCount ?? null, open: stats.get(p.id)?.openCount ?? null })),
-    ...workspace.filter(p => p.source === 'paperclip').map(p => ({ id: p.id, name: p.name, detail: p.description, source: 'paperclip' as const, archived: false, paused: p.paused, tasks: p.taskCount, open: p.openCount })),
+    ...projects.filter(p => showArchived || !p.archived).map(p => ({ id: p.id, name: p.name, detail: p.goal, source: 'local' as const, archived: p.archived, paused: stats.get(p.id)?.paused ?? false, tasks: stats.get(p.id)?.taskCount ?? null, open: stats.get(p.id)?.openCount ?? null, org: stats.get(p.id)?.org ?? null, edited: stats.get(p.id)?.editedHere ?? false })),
+    ...workspace.filter(p => p.source === 'paperclip').map(p => ({ id: p.id, name: p.name, detail: p.description, source: 'paperclip' as const, archived: false, paused: p.paused, tasks: p.taskCount, open: p.openCount, org: p.org ?? NAMES.paperclip, edited: false })),
   ].sort((a, b) => sort === 'name' ? a.name.localeCompare(b.name) : (b.open ?? 0) - (a.open ?? 0) || a.name.localeCompare(b.name));
   const archived = projects.filter(p => p.archived).length;
+  // Projects you made first; each Paperclip org (imported or linked) gets its own group, named for the org.
+  const orgs = [...new Set(rows.map(r => r.org).filter((o): o is string => Boolean(o)))].sort((a, b) => a.localeCompare(b));
+  const groups = [{ org: null as string | null, rows: rows.filter(r => !r.org) }, ...orgs.map(org => ({ org: org as string | null, rows: rows.filter(r => r.org === org) }))].filter(g => g.org !== null || g.rows.length > 0 || orgs.length === 0);
   return <div className="ws-page pp-list">
     <div className="task-toolbar">
       <button type="button" className="settings-button secondary" onClick={() => setSort(s => s === 'name' ? 'recent' : 'name')}><ArrowDownUp size={14}/>Sort: {sort === 'name' ? 'Name' : 'Most open'}</button>
@@ -95,16 +98,18 @@ function ProjectList({ projects, workspace, onOpen, onCreate }: { projects: Proj
       <span className="task-toolbar-spacer"/>
       <button type="button" className="settings-button secondary" onClick={onCreate}><Plus size={14}/>New project</button>
     </div>
-    <div className="ws-section-head"><h2 className="ws-group-title">My projects</h2><span className="ws-row-count">{rows.length} {rows.length === 1 ? 'project' : 'projects'}</span></div>
     {rows.length === 0 ? <ResourceState kind="empty" icon={<FolderClosed size={20}/>} title="No projects yet" message="A project holds tasks, a Roster of agents that work on them, and the folders they work in.">
         <button type="button" className="settings-button" onClick={onCreate}><Plus size={14}/>New project</button>
       </ResourceState>
-      : <ul className="ws-rows">{rows.map(r => <li key={r.id}><button type="button" className="ws-row pp-list-row" onClick={() => r.source === 'paperclip' ? openHub('project', r.id) : onOpen(r.id)}>
+      : groups.map(group => <section key={group.org ?? 'mine'} className="ws-section" aria-label={group.org ? `${group.org} · ${NAMES.paperclip}` : 'My projects'}>
+        <div className="ws-section-head"><h2 className="ws-group-title">{group.org ? `${group.org} · ${NAMES.paperclip}` : 'My projects'}</h2><span className="ws-row-count">{group.rows.length} {group.rows.length === 1 ? 'project' : 'projects'}</span></div>
+        {group.rows.length === 0 ? <p className="ws-faint">Projects you make in Muster show here.</p> : <ul className="ws-rows">{group.rows.map(r => <li key={r.id}><button type="button" className="ws-row pp-list-row" onClick={() => r.source === 'paperclip' ? openHub('project', r.id) : onOpen(r.id)}>
           <span className="pp-icon" aria-hidden="true"><FolderClosed size={14}/></span>
           <span className="ws-row-text"><span className="ws-row-title">{r.name}</span><span className="ws-row-meta">{r.detail || 'No goal yet'}</span></span>
-          {r.source === 'paperclip' && <span className="ws-source">{NAMES.paperclip}</span>}
+          {r.edited && <span className="ws-chip" data-tone="faint" title="You changed this project’s name or goal here. Importing from Paperclip again keeps your version.">edited here</span>}
           {r.tasks !== null && <span className="ws-row-count">{r.tasks} {r.tasks === 1 ? 'task' : 'tasks'}</span>}
           <span className="ws-chip" data-tone={r.archived ? 'faint' : r.paused ? 'warn' : 'accent'}>{r.archived ? 'archived' : r.paused ? 'paused' : 'in progress'}</span>
         </button></li>)}</ul>}
+      </section>)}
   </div>;
 }

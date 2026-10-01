@@ -2,7 +2,7 @@
  *  the New task sheet, and Paperclip routines for the Automations screen. Built from the app's form and sheet components. */
 import { Check, Link2, Play } from 'lucide-react';
 import React, { useEffect, useRef, useState } from 'react';
-import type { ImportPlan, PaperclipConfigView, PaperclipImportReport, PaperclipMode, PaperclipTestResult, WorkspaceList, WorkspacePriority, WorkspaceSnapshot } from '../../shared/domains/paperclip-protocol';
+import type { ImportPlan, ImportTargets, PaperclipConfigView, PaperclipImportReport, PaperclipMode, PaperclipTestResult, WorkspaceList, WorkspacePriority, WorkspaceSnapshot } from '../../shared/domains/paperclip-protocol';
 import { PAPERCLIP_LOCAL_URL, PRIORITY_NAME } from '../../shared/domains/paperclip-protocol';
 import { NAMES } from '../../shared/workspace-names';
 import { invoke } from '../bridge';
@@ -77,14 +77,14 @@ export function ConnectionPanel({ onSaved, compact = false }: { onSaved?: (view:
     setBusy('import'); setError(''); setImported(null);
     try {
       const next = await invoke('paperclip.import.plan', endpoint());
-      setPlan(next); setTargets(Object.fromEntries(next.projects.map(p => [p.id, p.suggestion?.projectId ?? 'new'])));
+      setPlan(next); setTargets(Object.fromEntries(next.projects.map(p => [p.id, 'import'])));
     } catch (cause) { setError(errorText(cause)); } finally { setBusy(null); }
   };
   /** Step 2: one-shot copy into the chosen Muster projects (GET only). Safe to repeat: it updates what it made. */
   const runImport = async () => {
     setBusy('import'); setError(''); setImported(null);
     try {
-      const report = await invoke('paperclip.import', { ...endpoint(), targets });
+      const report = await invoke('paperclip.import', { ...endpoint(), targets: targets as ImportTargets });
       setImported(report); setPlan(null); notifySuccess(`Imported ${report.company}: ${report.tasks.created + report.tasks.updated} tasks in ${report.projects.created + report.projects.updated} projects.`);
       await refreshWorkspace(true);
     } catch (cause) { setError(errorText(cause)); } finally { setBusy(null); }
@@ -116,7 +116,10 @@ export function ConnectionPanel({ onSaved, compact = false }: { onSaved?: (view:
     {plan && <ImportMapping plan={plan} targets={targets} busy={busy !== null} onChange={(id, value) => setTargets(t => ({ ...t, [id]: value }))} onCancel={() => setPlan(null)} onImport={() => void runImport()}/>}
     {imported && <div className="ws-import-report" role="status">
       <p><Check size={13} aria-hidden="true"/>Imported {imported.company}: {imported.projects.created} new and {imported.projects.updated} updated projects, {imported.tasks.created} new and {imported.tasks.updated} updated tasks, {imported.comments} comments, {imported.agents} Roster places, {imported.history} decisions{imported.needsYou ? ` (${imported.needsYou} need you, in the Inbox)` : ''}.</p>
-      {imported.filled?.map(f => <p key={f.paperclip}><Check size={13} aria-hidden="true"/>{f.paperclip} filled your project {f.muster}.</p>)}
+      {imported.removed > 0 && <p><Check size={13} aria-hidden="true"/>{imported.removed} {imported.removed === 1 ? 'task' : 'tasks'} removed in Paperclip: cancelled here and flagged.</p>}
+      {imported.conflicts.length > 0 && <details className="ws-import-conflicts"><summary>{imported.conflicts.length} {imported.conflicts.length === 1 ? 'edit of yours was' : 'edits of yours were'} kept over Paperclip’s</summary>
+        <ul>{imported.conflicts.map((c, i) => <li key={i} className="ws-faint">{c.label}: {c.field} stays “{c.kept}” (Paperclip says “{c.paperclip}”)</li>)}</ul></details>}
+      <p className="ws-faint">{imported.issues} issues read in {(imported.tookMs / 1000).toFixed(1)} s.</p>
       {imported.notes.map(n => <p key={n} className="ws-faint">{n}</p>)}
     </div>}
     <div className="project-edit-actions">
@@ -128,22 +131,20 @@ export function ConnectionPanel({ onSaved, compact = false }: { onSaved?: (view:
   </div>;
 }
 
-const MATCH_REASON: Record<NonNullable<ImportPlan['projects'][number]['suggestion']>['reason'], string> = { imported: 'imported here before', folder: 'same folder', repository: 'same repository', name: 'same name' };
-/** Import mapping: each Paperclip project fills an existing Muster project, becomes a new one, or is left out. */
+const EXISTING_NOTE: Record<ImportPlan['projects'][number]['existing'], string> = { new: 'new project', imported: 'updated in place', detached: 'imported as its own project (your own project is left alone)' };
+/** Import plan: each Paperclip project becomes its own Paperclip project in Muster (never written into one you made), or is left out. */
 export function ImportMapping({ plan, targets, busy, onChange, onCancel, onImport }: { plan: ImportPlan; targets: Record<string, string>; busy: boolean; onChange: (paperclipId: string, target: string) => void; onCancel: () => void; onImport: () => void }): React.ReactElement {
   const chosen = plan.projects.filter(p => targets[p.id] !== 'skip');
-  return <section className="ws-import-map" aria-label="Choose where each Paperclip project goes">
+  return <section className="ws-import-map" aria-label="Choose which Paperclip projects to import">
     <h3>Import {plan.company?.name ?? NAMES.paperclip} into Muster</h3>
-    <p className="project-edit-hint">Pick the Muster project each one fills. Filling a project you already made keeps its name and goal, and adds the folder, repository, tasks, threads and {NAMES.roster}. Reading is GET only and safe to repeat.</p>
+    <p className="project-edit-hint">Each Paperclip project becomes its own project here, listed under {plan.company?.name ?? NAMES.paperclip} and updated by later imports. Projects you made in Muster are never changed. What you edit here stays when you import again. Reading is GET only and safe to repeat.</p>
     {plan.projects.length === 0 ? <p className="ws-faint">This company has no projects to import.</p> : <ul className="ws-rows">{plan.projects.map(p => {
-      const target = targets[p.id] ?? 'new', match = p.suggestion && target === p.suggestion.projectId ? MATCH_REASON[p.suggestion.reason] : null;
+      const skip = targets[p.id] === 'skip';
       return <li key={p.id}><div className="ws-row is-static ws-import-map-row">
-        <span className="ws-row-text"><span className="ws-row-title">{p.name}</span><span className="ws-row-meta">{[p.repo, p.localFolder, `${p.taskCount} ${p.taskCount === 1 ? 'task' : 'tasks'}`].filter(Boolean).join(' · ')}</span></span>
-        {match && <span className="ws-chip" data-tone="ok">Matched: {match}</span>}
-        <label className="sr-only" htmlFor={`import-target-${p.id}`}>Muster project for {p.name}</label>
-        <select id={`import-target-${p.id}`} className="ws-select" value={target} disabled={busy} onChange={e => onChange(p.id, e.target.value)}>
-          {plan.muster.map(m => <option key={m.id} value={m.id}>Fill {m.name}</option>)}
-          <option value="new">New project</option>
+        <span className="ws-row-text"><span className="ws-row-title">{p.name}</span><span className="ws-row-meta">{[p.repo, plan.local ? p.localFolder : null, `${p.taskCount} ${p.taskCount === 1 ? 'task' : 'tasks'}`, EXISTING_NOTE[p.existing]].filter(Boolean).join(' · ')}</span></span>
+        <label className="sr-only" htmlFor={`import-target-${p.id}`}>Import {p.name}</label>
+        <select id={`import-target-${p.id}`} className="ws-select" value={skip ? 'skip' : 'import'} disabled={busy} onChange={e => onChange(p.id, e.target.value)}>
+          <option value="import">{p.existing === 'imported' ? 'Update' : 'Import'}</option>
           <option value="skip">Don’t import</option>
         </select>
       </div></li>;
