@@ -110,7 +110,8 @@ export interface ProjectsCommands extends ProjectTeamCommands {
   'project.work': { input: { projectId: string; activityLimit?: number }; output: ProjectWorkState };
   'project.tasks.add': { input: { projectId: string; title: string; acceptance: string; dependencies: string[]; owner?: TaskOwner; priority?: TaskPriority; permissionMode?: ChatPermissionMode | null; budgetMinutes?: number | null; parentId?: string | null }; output: ProjectTaskView };
   /** Dashboard aggregates over the last `days` days (default 14), bucketed by the caller's UTC offset. Read-only. */
-  'project.stats': { input: { days?: number; utcOffsetMinutes?: number; activityLimit?: number }; output: ProjectStats };
+  /** `projectId`: one project's tasks, runs and activity (its Dashboard tab); omitted, every project. */
+  'project.stats': { input: { days?: number; utcOffsetMinutes?: number; activityLimit?: number; projectId?: string }; output: ProjectStats };
   'project.tasks.edit': { input: { projectId: string; id: string; revision: number; patch: TaskEdit }; output: ProjectTaskView };
   /** Refused while the task runs or while another task depends on it. */
   'project.tasks.delete': { input: { projectId: string; id: string; revision: number }; output: { deleted: true } };

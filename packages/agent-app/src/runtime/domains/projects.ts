@@ -583,7 +583,7 @@ export function createProjectsDomain(ctx: DomainContext): DomainModule {
       'project.stats': input => {
         const days = Math.max(1, Math.min(90, Math.floor(Number(input.days ?? 14)) || 14)), offset = Math.max(-840, Math.min(840, Math.round(Number(input.utcOffsetMinutes ?? 0)) || 0));
         const since = new Date(Date.now() - days * 86_400_000).toISOString();
-        const stats = open().tasks.stats({ since, tzModifier: `${offset >= 0 ? '+' : ''}${offset} minutes`, activityLimit: Number(input.activityLimit ?? 12) || 12 });
+        const stats = open().tasks.stats({ since, tzModifier: `${offset >= 0 ? '+' : ''}${offset} minutes`, activityLimit: Number(input.activityLimit ?? 12) || 12, ...(input.projectId ? { projectId: project(input) } : {}) });
         const names = new Map((open().db.prepare('SELECT id, name FROM projects').all() as { id: string; name: string }[]).map(r => [r.id, r.name]));
         return { ...stats, activity: stats.activity.map(a => ({ ...a, projectName: names.get(a.projectId) ?? 'Project' })) } as never;
       },

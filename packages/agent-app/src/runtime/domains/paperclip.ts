@@ -543,8 +543,8 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
     }
     const [aggregates, stats] = [
       ledgerAggregates(context.db(), { since, monthStart: monthStart(now, offset), offset, skipImportedPaperclip: paperclip !== null, ...(projectId ? { projectId } : {}) }),
-      // Task aggregates are app-wide; a project's Budget uses its runs and spend only.
-      projectId ? null : await context.invoke('project.stats', { days: DASHBOARD_DAYS + 1, utcOffsetMinutes: offset, activityLimit: 12 }).catch(() => null),
+      // A project's Dashboard tab and Budget read that project's tasks, runs and activity; a Paperclip project has none here.
+      projectId && paperclip ? null : await context.invoke('project.stats', { days: DASHBOARD_DAYS + 1, utcOffsetMinutes: offset, activityLimit: 12, ...(projectId ? { projectId } : {}) }).catch(() => null),
     ];
     return buildDashboard({ now, offset, ledger: aggregates, local: stats, paperclip });
   };
