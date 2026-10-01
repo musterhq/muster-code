@@ -242,10 +242,10 @@ await show(<RosterList snapshot={{...snap,agents,tasks:[]}} agents={agents} nav=
 assert.deepEqual([...document.querySelectorAll('.roster-row .ws-row-title')].map(e=>e.textContent),['Beta','Alpha','Gamma'],'starred first, hidden folded away');
 assert.deepEqual([...document.querySelectorAll('.roster-tabs [role=tab]')].map(t=>t.textContent),['All3','Active2','Paused1','Starred1','Hidden1']);
 await click([...document.querySelectorAll('.roster-tabs [role=tab]')].find(t=>/^Hidden/.test(t.textContent??'')),30);assert.deepEqual([...document.querySelectorAll('.roster-row .ws-row-title')].map(e=>e.textContent),['Delta']);
-await click(button(/Show Delta/),30);assert.deepEqual(last('work.star.set')!.input,{kind:'agent',id:'d',hidden:false});
+await click(button(/Show Delta/),30);assert.deepEqual(last('work.star.set')!.input,{kind:'agent',id:'d',projectId:'p',hidden:false});
 await click([...document.querySelectorAll('.roster-tabs [role=tab]')].find(t=>/^All/.test(t.textContent??'')),30);
-await click(button(/Star Alpha/),30);assert.deepEqual(last('work.star.set')!.input,{kind:'agent',id:'a',starred:true});
-await click(button(/Hide Gamma/),30);assert.deepEqual(last('work.star.set')!.input,{kind:'agent',id:'c',hidden:true});
+await click(button(/Star Alpha/),30);assert.deepEqual(last('work.star.set')!.input,{kind:'agent',id:'a',projectId:'p',starred:true});
+await click(button(/Hide Gamma/),30);assert.deepEqual(last('work.star.set')!.input,{kind:'agent',id:'c',projectId:'p',hidden:true});
 
 // G20, G3, C22: templates fill the form, the task target and variables, the webhook secret is shown once, Run now asks for values, a gate row approves.
 const draft:any={...A.BLANK_TASK_FIELDS,projectId:'p'};const patches:any[]=[];

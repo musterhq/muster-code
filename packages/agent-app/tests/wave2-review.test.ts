@@ -68,3 +68,11 @@ test('S3: removing a label id from another project strips nothing from that proj
   await h.s.invoke('work.labels.remove', { projectId: h.project.id, id: label.id });
   assert.equal((await h.s.invoke('work.labels.list', { projectId: other.id })).labels[0]!.tasks, 1);
 });
+
+test('S4 (runtime): starring an agent through a project it is not on is refused', async t => {
+  const h = await wave2(t);
+  const cto = await h.member('CTO');
+  const other = await h.s.invoke('project.create', { name: 'Other', goal: '', folderIds: [h.folder.id] });
+  await assert.rejects(h.s.invoke('work.star.set', { kind: 'agent', id: `member:${cto.id}`, projectId: other.id, starred: true }), /not on this project/);
+  assert.deepEqual(await h.s.invoke('work.star.set', { kind: 'agent', id: `member:${cto.id}`, projectId: h.project.id, starred: true }), { starred: true, hidden: false });
+});

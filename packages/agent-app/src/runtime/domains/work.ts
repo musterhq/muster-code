@@ -254,11 +254,14 @@ export function createWorkDomain(ctx: DomainContext): DomainModule {
       emit(p.id, ['meta']); ctx.emitSnapshot();
       return meta;
     },
-    'work.star.set': i => {
+    'work.star.set': async i => {
       const kind = i.kind, ref = id(i.id), patch = { ...(typeof i.starred === 'boolean' ? { starred: i.starred } : {}), ...(typeof i.hidden === 'boolean' ? { hidden: i.hidden } : {}) };
       let out: { starred: boolean; hidden: boolean };
       if (kind === 'project') { project(ref); const m = db().setProjectMeta(ref, patch); out = { starred: m.starred, hidden: m.hidden }; }
-      else if (kind === 'agent') out = db().setAgentMeta(ref, patch);
+      else if (kind === 'agent') {
+        if (typeof i.projectId === 'string' && i.projectId) { const p = project(i.projectId); if (!ref.startsWith('member:') || !(await membersOf(p.id)).some(m => m.id === ref.slice(7))) throw new Error('That agent is not on this project.'); }
+        out = db().setAgentMeta(ref, patch);
+      }
       else throw new Error('Star a project or an agent.');
       emit(kind === 'project' ? ref : null, ['meta']);
       return out;

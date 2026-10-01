@@ -63,7 +63,7 @@ export function RosterList({ snapshot, agents, nav }: { snapshot: WorkspaceSnaps
   const doing = useMemo(() => { const m = new Map<string, string>(); for (const t of snapshot.tasks) if (t.live && t.assigneeId) m.set(t.assigneeId, `${t.key} · ${t.title}`); return m; }, [snapshot.tasks]);
   const tabs = useMemo(() => rosterTabs(agents), [agents]);
   const sorted = sortRoster(tabs[tab]);
-  const mark = (a: WorkspaceAgent, patch: { starred?: boolean; hidden?: boolean }) => void invoke('work.star.set', { kind: 'agent', id: a.id, ...patch }).then(() => refreshWorkspace(), notifyError);
+  const mark = (a: WorkspaceAgent, patch: { starred?: boolean; hidden?: boolean }) => void invoke('work.star.set', { kind: 'agent', id: a.id, ...(a.projectId ? { projectId: a.projectId } : {}), ...patch }).then(() => refreshWorkspace(), notifyError);
   return <>
     {(agents.length > 3 || tabs.starred.length > 0 || tabs.hidden.length > 0) && <div className="ws-filters roster-tabs" role="tablist" aria-label="Agent states">
       {(Object.keys(ROSTER_TAB_LABEL) as RosterTab[]).filter(t => t === 'all' || t === tab || tabs[t].length > 0).map(t => <button key={t} type="button" role="tab" aria-selected={tab === t} className="ws-filter" aria-pressed={tab === t} onClick={() => setTab(t)}>{ROSTER_TAB_LABEL[t]}<span>{tabs[t].length}</span></button>)}

@@ -167,7 +167,7 @@ export interface WorkCommands {
   /** Status and target date. Owners only on a server. */
   'work.project.meta.set': { input: { projectId: string; status?: ProjectStatus; targetDate?: string | null }; output: ProjectMeta };
   /** Star or hide an agent (by workspace agent id) or a project. Personal and local; never changes the sidebar. */
-  'work.star.set': { input: { kind: 'project' | 'agent'; id: string; starred?: boolean; hidden?: boolean }; output: { starred: boolean; hidden: boolean } };
+  'work.star.set': { input: { kind: 'project' | 'agent'; id: string; /** The project a Roster agent belongs to (required for an agent; a server checks write access to it). */ projectId?: string; starred?: boolean; hidden?: boolean }; output: { starred: boolean; hidden: boolean } };
 
   'work.labels.list': { input: { projectId: string }; output: { labels: ProjectLabel[] } };
   'work.labels.save': { input: { projectId: string; id?: string; name: string; color: LabelColor }; output: ProjectLabel };

@@ -109,6 +109,12 @@ export function authorizeResource(v: AccessView, command: string, cls: CommandCl
 
   // A workspace goal belongs to every project: only owners and admins edit it.
   if ((command === 'work.goals.save' && i.level === 'workspace') || (command === 'work.goals.remove' && i.workspace === true)) throw new PolicyError('Only owners and admins can edit workspace goals.', 403, 'forbidden');
+  // Star and hide fold things away for everyone on a server, so they need the same write access as the thing they mark: a project by its id,
+  // an agent by the project it belongs to.
+  if (command === 'work.star.set') {
+    const project = i.kind === 'project' ? (typeof i.id === 'string' ? i.id : undefined) : typeof i.projectId === 'string' ? i.projectId : undefined;
+    if (!project || !canWriteProject(v, project)) throw new PolicyError('You do not have write access to the project this belongs to.', 403, 'forbidden');
+  }
   // Automations act on a project, folder or chat named inside their target and schedule, so each of those is a write on its own. Managing
   // one by id would need its stored target resolved, which only the runtime knows: that, and listing them, is for owners and admins.
   if (command.startsWith('automations.')) {

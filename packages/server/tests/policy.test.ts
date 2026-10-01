@@ -136,3 +136,12 @@ test('Review M3: automations authorize the project, folder and chat nested in th
   authorizeResource(editor, 'automations.preview', 'read', input({}), snapshot);
   for (const c of ['automations.update', 'automations.delete', 'automations.pause', 'automations.resume', 'automations.runNow', 'automations.runs', 'automations.list']) denied(() => authorizeResource(editor, c, c === 'automations.list' || c === 'automations.runs' ? 'read' : 'write', { id: 'a' }, snapshot), 'forbidden');
 });
+
+test('Review S4: starring or hiding needs write access to the project, and an agent needs its project named', () => {
+  const editor = accessView(user('member'), grants, owners);
+  authorizeResource(editor, 'work.star.set', 'write', { kind: 'project', id: 'p-shared', starred: true }, snapshot);
+  denied(() => authorizeResource(editor, 'work.star.set', 'write', { kind: 'project', id: 'p-secret', hidden: true }, snapshot));
+  authorizeResource(editor, 'work.star.set', 'write', { kind: 'agent', id: 'member:m1', projectId: 'p-shared', starred: true }, snapshot);
+  denied(() => authorizeResource(editor, 'work.star.set', 'write', { kind: 'agent', id: 'member:m1', projectId: 'p-secret', starred: true }, snapshot));
+  denied(() => authorizeResource(editor, 'work.star.set', 'write', { kind: 'agent', id: 'member:m1', starred: true }, snapshot));
+});
