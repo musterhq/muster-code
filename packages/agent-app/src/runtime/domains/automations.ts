@@ -218,35 +218,48 @@ export function createAutomationsDomain(ctx: DomainContext): DomainModule {
     return { ok: true, run: runView(runRow(run.id) ?? run) };
   }
 
+  /** Creates a project task whose runs can never get more access than the automation was saved with, and starts it when asked. */
+  async function createCapped(input: Parameters<typeof ctx.invoke<'paperclip.task.create'>>[1], mode: ChatPermissionMode) {
+    const created = await ctx.invoke('paperclip.task.create', { ...input, start: false });
+    const t = (await ctx.invoke('project.work', { projectId: input.projectId ?? '', activityLimit: 1 })).tasks.items.find(x => x.id === created.id);
+    if (t) await ctx.invoke('project.tasks.edit', { projectId: input.projectId ?? '', id: created.id, revision: t.revision, patch: { permissionMode: mode } });
+    if (!input.start) return created;
+    try { return { ...created, started: await ctx.invoke('paperclip.task.start', { taskId: created.id }) }; }
+    catch (e) { return { ...created, startError: e instanceof Error ? e.message : String(e) }; }
+  }
   // Standup (G3): a parent task, a subtask per Roster agent, their reports collected into one digest in the parent.
-  async function runStandup(automation: AutomationRow, run: RunRow, target: Extract<AutomationTarget, { kind: 'task' }>, prompt: string, values: Record<string, string>): Promise<void> {
+  /** Standups still creating their subtasks: a fast agent must not trigger the digest before the last one exists. */
+  const creating = new Set<string>();
+  async function runStandup(automation: AutomationRow, run: RunRow, target: Extract<AutomationTarget, { kind: 'task' }>, prompt: string, values: Record<string, string>, access: ChatPermissionMode): Promise<void> {
     const members = (await ctx.invoke('project.members.list', { projectId: target.projectId })).members.filter(m => m.kind === 'agent' && m.id !== 'agent' && !m.revokedAt && !m.pendingAt && !m.pausedAt);
     if (!members.length) { finish(run.id, 'failed', 'The project has no agents on its Roster to ask. Add agents on the Roster tab.'); return; }
     const parent = await ctx.invoke('paperclip.task.create', { title: renderTemplate(target.titleTemplate ?? 'Daily standup {{date}}', values).slice(0, 200), description: 'Each agent has been asked to report. The digest replaces this text once everyone has answered.', projectId: target.projectId, assigneeId: 'user:local', ...(target.priority ? { priority: target.priority } : {}) });
     saveRunExt(run.id, { taskId: parent.id });
+    creating.add(run.id);
     let waiting = 0;
     for (const m of members) {
       try {
-        const child = await ctx.invoke('paperclip.task.create', { title: `Standup · ${m.name}`.slice(0, 200), description: prompt, projectId: target.projectId, assigneeId: `member:${m.id}`, parentId: parent.id, start: true });
+        const child = await createCapped({ title: `Standup · ${m.name}`.slice(0, 200), description: prompt, projectId: target.projectId, assigneeId: `member:${m.id}`, parentId: parent.id, start: true }, access);
         const chatId = child.started?.chatId ?? null;
         db.prepare('INSERT INTO standup_children (parent_id, child_id, chat_id, project_id, automation_id, run_id, name, done, note) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)').run(parent.id, child.id, chatId, target.projectId, automation.id, run.id, m.name, chatId ? 0 : 1, chatId ? null : child.startError ?? 'It did not start.');
         if (chatId) waiting++;
       } catch (e) { db.prepare('INSERT INTO standup_children (parent_id, child_id, chat_id, project_id, automation_id, run_id, name, done, note) VALUES (?, ?, NULL, ?, ?, ?, ?, 1, ?)').run(parent.id, randomUUID(), target.projectId, automation.id, run.id, m.name, e instanceof Error ? e.message : String(e)); }
     }
     db.prepare('UPDATE automation_runs SET reason = ? WHERE id = ?').run(`Created ${parent.key} and asked ${plural(members.length, 'agent')}.`, run.id);
+    creating.delete(run.id);
     broadcast();
-    if (!waiting) await postDigest(parent.id);
+    if (!db.prepare('SELECT 1 FROM standup_children WHERE parent_id = ? AND done = 0 LIMIT 1').get(parent.id)) await postDigest(parent.id);
   }
   /** A standup subtask's run settled. Returns true when the chat belonged to a standup. */
   async function standupSettled(chat: Chat): Promise<boolean> {
-    const child = db.prepare('SELECT * FROM standup_children WHERE chat_id = ? AND done = 0').get(chat.id) as { parent_id: string; child_id: string; project_id: string } | undefined;
+    const child = db.prepare('SELECT * FROM standup_children WHERE chat_id = ? AND done = 0').get(chat.id) as { parent_id: string; child_id: string; project_id: string; run_id: string } | undefined;
     if (!child) return false;
     // A continuation or retry may follow this settle: only a task that stopped working counts as reported.
     await new Promise(resolve => setTimeout(resolve, 400));
     const t = (await ctx.invoke('project.work', { projectId: child.project_id, activityLimit: 1 })).tasks.items.find(x => x.id === child.child_id);
     if (t && (t.state === 'running' || t.state === 'needs-input')) return true;
     db.prepare('UPDATE standup_children SET done = 1, note = ? WHERE child_id = ?').run(chat.status === 'completed' ? null : chat.error ?? 'The run did not finish.', child.child_id);
-    if (!(db.prepare('SELECT 1 FROM standup_children WHERE parent_id = ? AND done = 0 LIMIT 1').get(child.parent_id))) await postDigest(child.parent_id);
+    if (!creating.has(child.run_id) && !(db.prepare('SELECT 1 FROM standup_children WHERE parent_id = ? AND done = 0 LIMIT 1').get(child.parent_id))) await postDigest(child.parent_id);
     return true;
   }
   async function postDigest(parentId: string): Promise<void> {
@@ -330,8 +343,8 @@ export function createAutomationsDomain(ctx: DomainContext): DomainModule {
       const trigger = run.trigger === 'repo' && run.reason ? `\n\nTriggered by: ${run.reason}` : run.trigger === 'webhook' ? '\n\nTriggered by: a webhook call.' : '';
       if (value.target.kind === 'task') {
         const target = value.target;
-        if (target.mode === 'standup') { await runStandup(automation, run, target, prompt, values); broadcast(); return; }
-        const created = await ctx.invoke('paperclip.task.create', { title: renderTemplate(target.titleTemplate ?? '{{automation}} · {{date}}', values).slice(0, 200), description: `${prompt}${trigger}`.slice(0, 4000), projectId: target.projectId, assigneeId: target.assigneeId ?? null, ...(target.priority ? { priority: target.priority } : {}), start: target.start });
+        if (target.mode === 'standup') { await runStandup(automation, run, target, prompt, values, value.permissionMode); broadcast(); return; }
+        const created = await createCapped({ title: renderTemplate(target.titleTemplate ?? '{{automation}} · {{date}}', values).slice(0, 200), description: `${prompt}${trigger}`.slice(0, 4000), projectId: target.projectId, assigneeId: target.assigneeId ?? null, ...(target.priority ? { priority: target.priority } : {}), start: target.start }, value.permissionMode);
         saveRunExt(run.id, { taskId: created.id });
         if (created.started) { db.prepare('UPDATE automation_runs SET chat_id = ?, run_id = ?, reason = ? WHERE id = ?').run(created.started.chatId, created.started.runId, `Created ${created.key}.`, run.id); }
         else if (created.startError) finish(run.id, 'failed', `Created ${created.key}, but it did not start: ${created.startError}`);
