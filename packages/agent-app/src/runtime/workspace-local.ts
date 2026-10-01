@@ -133,6 +133,15 @@ export class LocalWorkspace {
     throw new Error('That task no longer exists.');
   }
 
+  /** A task's subtasks: its own children, and for an imported parent the ones the import map records under it. */
+  private children(read: ProjectRead, taskId: string): ProjectTaskView[] {
+    return read.work.tasks.items.filter(t => {
+      if (t.parentId === taskId) return true;
+      if (t.parentId) return false;
+      try { return this.meta?.()?.taskMeta(t.id)?.parentTaskId === taskId; } catch { return false; }
+    });
+  }
+
   async detail(taskId: string): Promise<WorkspaceTaskDetail> {
     const { read, task, view } = await this.locate(taskId);
     const mail = await this.invoke('mailbox.list', { projectId: read.project.id, limit: 200 }).catch(() => null);
@@ -148,7 +157,7 @@ export class LocalWorkspace {
       task: view, description: task.acceptance, comments, runs: task.attempts.map(a => this.run(read, task, a)).sort((a, b) => b.createdAt.localeCompare(a.createdAt)),
       addressee: agent ? { id: view.assigneeId ?? agentIdOf(read.project.id), label: view.assigneeLabel ?? 'Agent' } : null,
       composerNote: agent ? 'Delivered into the task run’s next turn through the project mailbox.' : 'This task is yours. Assign it to a Roster agent to message its runs.',
-      subtasks: read.work.tasks.items.filter(t => t.parentId === task.id).map(t => t.id), blocking: read.work.tasks.items.filter(t => t.dependencies.includes(task.id)).map(t => t.id), receipts: [], cards: [],
+      subtasks: this.children(read, task.id).map(t => t.id), blocking: read.work.tasks.items.filter(t => t.dependencies.includes(task.id)).map(t => t.id), receipts: [], cards: [],
       mentionable: read.members.filter(m => !m.revokedAt).map(m => ({ id: m.id, name: m.name })),
     };
   }

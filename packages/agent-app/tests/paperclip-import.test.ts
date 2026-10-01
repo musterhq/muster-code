@@ -96,6 +96,7 @@ test('importing a real company: GET only, projects, roster, tasks with keys, par
   const rag15=ws.tasks.find(x=>x.key==='RAG-15')!, rag1=ws.tasks.find(x=>x.key==='RAG-1')!;
   assert.ok(rag15&&rag1);
   assert.equal(rag15.parentId,rag1.id,'RAG-15 is a child of RAG-1');
+  assert.ok((await service.invoke('paperclip.task',{id:rag1.id})).subtasks.includes(rag15.id),'the imported parent lists its subtasks (S22)');
   assert.equal(rag15.assigneeLabel,'CTO');assert.equal(rag15.priority,'critical');
   assert.equal(ws.tasks.find(x=>x.key==='RAG-8')!.status,'done','done issues arrive verified');
   assert.equal(ws.tasks.find(x=>x.key==='RAG-11')!.status,'todo','backlog becomes todo');
