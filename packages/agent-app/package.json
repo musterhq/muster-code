@@ -1,6 +1,6 @@
 {
   "name": "@muster/agent-app",
-  "version": "0.2.9",
+  "version": "0.2.10",
   "private": true,
   "description": "Muster Code standalone agent desktop app (Electron, no Code-OSS extension host).",
   "license": "MIT",

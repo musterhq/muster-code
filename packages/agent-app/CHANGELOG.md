@@ -5,6 +5,16 @@ All notable changes to Muster Agent. Each `## <version>` section becomes the not
 
 ## Unreleased
 
+## 0.2.10
+
+- Models from OmniRoute and other providers you add in Settings work again. The API key you paste into Muster is now sent with every chat; before, chats went out without it and failed with HTTP 401.
+- A provider that rejects your key (401/403) is no longer retried. You get one clear message and an **Open Accounts & providers** button.
+- Codex-configured providers work with every way Codex gets a key: a token command (kept in memory only, refreshed, never logged), environment variables, stored tokens and custom headers.
+- Codex model catalogs are read correctly, including large and symlinked files. When one really is broken, the message names the file, the field and why.
+- One unreadable line in `config.toml` no longer hides every provider in that file, and duplicate "No runnable adapter" rows are gone.
+- Pasting a full `…/v1/chat/completions` URL no longer doubles `/v1`, and model names with slashes (like `claude/claude-opus-4.1`) are sent unchanged.
+
+
 ## 0.2.9
 
 - Every project now opens on one page laid out like Paperclip's, whether you made it in Muster or brought it from Paperclip. The header shows the title, repository and open count, and the tabs are Tasks, Roster, Outputs, Settings and Budget.
