@@ -156,6 +156,7 @@ export class WorkStore {
   }
   linkGoal(kind: 'task' | 'agent', refId: string, goalId: string | null): void { if (goalId) this.run('INSERT INTO goal_links(kind,ref_id,goal_id) VALUES(?,?,?) ON CONFLICT(kind,ref_id) DO UPDATE SET goal_id=excluded.goal_id', kind, refId, goalId); else this.run('DELETE FROM goal_links WHERE kind=? AND ref_id=?', kind, refId); }
   goalOf(kind: 'task' | 'agent', refId: string): string | null { return sn(this.one('SELECT goal_id FROM goal_links WHERE kind=? AND ref_id=?', kind, refId)?.goal_id); }
+  hasGoalLinks(): boolean { return Boolean(this.one('SELECT 1 FROM goal_links LIMIT 1')); }
   taskGoals(): Record<string, string> { const out: Record<string, string> = {}; for (const r of this.all("SELECT ref_id,goal_id FROM goal_links WHERE kind='task'")) out[s(r.ref_id)] = s(r.goal_id); return out; }
 
   // ── task documents (G5) ─────────────────────────────────────────────────────
