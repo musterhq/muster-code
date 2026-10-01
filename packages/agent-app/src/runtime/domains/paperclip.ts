@@ -17,7 +17,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from '
 import { join } from 'node:path';
 import type { MemoryRecord } from '../../shared/domains/memory-protocol.ts';
 import {
-  PAPERCLIP_LOCAL_URL, WORKSPACE_STATUSES, type LedgerView, type LiveChannel, type PaperclipConfigView, type PaperclipLink, type PaperclipMode, type PaperclipTestResult,
+  budgetUse, PAPERCLIP_LOCAL_URL, WORKSPACE_STATUSES, type LedgerView, type LiveChannel, type PaperclipConfigView, type PaperclipLink, type PaperclipMode, type PaperclipTestResult,
   type ThreadCard, type WorkspaceAgent, type WorkspaceBadge, type WorkspaceInboxItem, type WorkspaceList, type WorkspaceListKind, type WorkspaceMemory, type WorkspaceProject,
   type WorkspaceRow, type WorkspaceSnapshot, type WorkspaceSource, type WorkspaceStatus, type WorkspaceTask, type WorkspaceTaskDetail,
 } from '../../shared/domains/paperclip-protocol.ts';
@@ -42,6 +42,8 @@ const URGENT = new Set(['question', 'approval', 'blocked', 'failed_run', 'agent_
 /** `tokenOrigin` is the origin the stored token was saved for: the token is sent to that origin and nowhere else. */
 interface StoredConfig { mode: PaperclipMode; baseUrl: string; companyId: string | null; tokenOrigin: string | null }
 const DEFAULT_CONFIG: StoredConfig = { mode: 'off', baseUrl: PAPERCLIP_LOCAL_URL, companyId: null, tokenOrigin: null };
+/** A Custom URL on this Mac (127.0.0.0/8, localhost, ::1) is a local Paperclip: its folder paths are this Mac's. */
+export const isLoopback = (baseUrl: unknown): boolean => { try { const host = new URL(normalizeBaseUrl(baseUrl)).hostname.replace(/^\[|\]$/g, '').toLowerCase(); return host === 'localhost' || host.endsWith('.localhost') || host === '::1' || /^127(\.\d{1,3}){3}$/.test(host); } catch { return false; } };
 const originOf = (baseUrl: unknown): string | null => { try { return new URL(normalizeBaseUrl(baseUrl)).origin; } catch { return null; } };
 type Json = Record<string, unknown>;
 interface PaperclipPart { tasks: WorkspaceTask[]; agents: WorkspaceAgent[]; projects: WorkspaceProject[]; runs: WorkspaceSnapshot['runs']; inbox: WorkspaceInboxItem[]; goals: WorkspaceSnapshot['goals'] }
@@ -154,7 +156,7 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
   const readPaperclip = async (api: PaperclipClient): Promise<PaperclipPart> => {
     const id = await companyId(api), base = `/companies/${encodeURIComponent(id)}`;
     const [issues, agentsJson, projectsJson, goalsJson, runsJson, liveJson, attentionJson] = await Promise.all([
-      api.get<unknown>(`${base}/issues?view=compact&limit=500`), api.get<unknown>(`${base}/agents`), api.get<unknown>(`${base}/projects`),
+      api.get<unknown>(`${base}/issues?view=compact&limit=500&includeBlockedBy=true`), api.get<unknown>(`${base}/agents`), api.get<unknown>(`${base}/projects`),
       api.get<unknown>(`${base}/goals`).catch(() => []), api.get<unknown>(`${base}/heartbeat-runs?limit=60&summary=true`),
       api.get<unknown>(`${base}/live-runs`).catch(() => []), api.get<unknown>(`${base}/attention`).catch(() => ({ items: [] })),
     ]);
@@ -176,12 +178,19 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
     built = { generation: api.generation, companyId: id, part, agents };
     return part;
   };
+  /** Records the last read's outcome. Going offline (ok → stale) or coming back (stale → ok) is an update the screens
+   *  must see at once: the banner and "· offline" come from it, so it is emitted rather than waiting for a reload. */
+  const linkError = (next: string | undefined) => {
+    const changed = Boolean(next) !== Boolean(lastError);
+    lastError = next;
+    if (changed) queueEmit(['config', 'inbox', 'tasks']);
+  };
   const paperclipPart = async (refresh: boolean): Promise<{ part: PaperclipPart | null; link: PaperclipLink | null }> => {
     const api = connection();
     if (!api) return { part: null, link: null };
     if (refresh) api.invalidate();
-    inflight ??= readPaperclip(api).then(part => { lastError = undefined; ensureSocket(); return part; }, cause => {
-      lastError = cause instanceof Error ? cause.message : String(cause);
+    inflight ??= readPaperclip(api).then(part => { linkError(undefined); ensureSocket(); return part; }, cause => {
+      linkError(cause instanceof Error ? cause.message : String(cause));
       if (built) return built.part;
       throw cause;
     }).finally(() => { inflight = null; });
@@ -193,6 +202,26 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
     }
   };
 
+  // --- budget alerts -------------------------------------------------------------------------------------------------------
+  /** A Muster project at 80% or 100% of its monthly budget (dollars, or tokens when nothing is priced) needs you. One item
+   *  per level and month, so dismissing the 80% alert still lets the 100% one through. */
+  const budgetInbox = async (projects: readonly WorkspaceProject[]): Promise<WorkspaceInboxItem[]> => {
+    const items: WorkspaceInboxItem[] = [];
+    const now = Date.now(), offset = -new Date(now).getTimezoneOffset(), month = monthStart(now, offset);
+    for (const project of projects) {
+      if (project.source !== 'local') continue;
+      const settings = await context.invoke('project.team.settings', { projectId: project.id }).catch(() => null);
+      if (!settings || (settings.monthlyBudgetUsd == null && settings.monthlyBudgetTokens == null)) continue;
+      let spend; try { ledger(); spend = ledgerAggregates(context.db(), { since: month, monthStart: month, offset, skipImportedPaperclip: false, projectId: project.id }).spend; } catch { continue; }
+      const use = budgetUse({ usd: settings.monthlyBudgetUsd, tokens: settings.monthlyBudgetTokens ?? null }, { usd: spend.priced ? spend.usd : null, tokens: spend.tokens ?? 0 });
+      if (!use || use.ratio < 0.8) continue;
+      const over = use.ratio >= 1, pct = Math.round(use.ratio * 100);
+      const amount = use.unit === 'usd' ? `$${use.used.toFixed(2)} of $${use.limit.toFixed(2)}` : `${Math.round(use.used).toLocaleString('en-US')} of ${use.limit.toLocaleString('en-US')} tokens`;
+      items.push({ id: `budget:${project.id}:${month.slice(0, 7)}:${over ? 100 : 80}`, kind: 'budget', title: `${project.name} ${over ? 'is over' : 'is at'} ${pct}% of its monthly budget`, why: `${amount} this month. ${over ? 'Raise the budget or pause its agents.' : 'Soft alert at 80%.'}`, severity: over ? 'high' : 'medium', at: month, taskId: null, agentId: null, runId: null, projectId: project.id, group: project.name, source: 'local' });
+    }
+    return items;
+  };
+
   // --- the merged snapshot ---------------------------------------------------------------------------------------------
   let snapshotInflight: Promise<WorkspaceSnapshot> | null = null;
   /** `withMemory: false` is the light read behind the Inbox badge: no memory browsing and no folder matching per project. */
@@ -202,7 +231,9 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
     const projects = withMemory ? await Promise.all([...mine.projects, ...(p?.projects ?? [])].map(async project => ({ ...project, memory: await projectMemory(project) }))) : [...mine.projects, ...(p?.projects ?? [])];
     const tasks = [...mine.tasks, ...(p?.tasks ?? [])], runs = [...mine.runs, ...(p?.runs ?? [])].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
     const rank = { high: 0, medium: 1, low: 2 } as const;
-    const inbox = [...mine.inbox, ...(p?.inbox ?? [])].sort((a, b) => rank[a.severity] - rank[b.severity] || b.at.localeCompare(a.at));
+    // A Paperclip task already imported into Muster needs you once: its Muster copy stands for it in the Inbox and badge.
+    let imported = new Set<string>(); try { imported = imports()?.importedSources('task') ?? imported; } catch { /* no import store */ }
+    const inbox = [...mine.inbox, ...await budgetInbox(mine.projects), ...(p?.inbox ?? []).filter(i => !i.taskId || !imported.has(i.taskId))].sort((a, b) => rank[a.severity] - rank[b.severity] || b.at.localeCompare(a.at));
     return {
       paperclip: theirs.link, tasks, agents: [...mine.agents, ...(p?.agents ?? [])], projects, goals: p?.goals ?? [], runs, inbox,
       counts: { liveRuns: runs.filter(r => r.status === 'running').length, inbox: inbox.filter(i => i.kind !== 'mail').length, failedRuns: runs.filter(r => r.status === 'failed').length, openTasks: tasks.filter(t => t.status !== 'done' && t.status !== 'cancelled').length },
@@ -276,14 +307,16 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
         if (taskId) c.invalidate(`/issues/${taskId}`);
         queueEmit(type.startsWith('heartbeat.') ? ['runs', 'tasks', 'inbox'] : type === 'agent.status' ? ['agents', 'inbox'] : ['tasks', 'inbox'], taskId);
       },
-      onDown() { live.socket = null; live.socketCompany = ''; live.channel = 'off'; schedulePoll(); },
+      // A live socket dropping is often the first sign Paperclip went away: tell the screens, which re-read and show it.
+      // (A socket that never opened says nothing new, so a refused socket never wakes the renderer.)
+      onDown() { const wasLive = live.channel === 'socket'; live.socket = null; live.socketCompany = ''; live.channel = 'off'; if (wasLive) queueEmit(['config']); schedulePoll(); },
     }, options.socket);
   }
 
   // --- the turn ledger ---------------------------------------------------------------------------------------------------
   let ledgerStore: TurnLedger | undefined;
   const ledger = () => ledgerStore ??= new TurnLedger(context.db());
-  const offLedger = attachTurnLedger(context, ledger, entry => queueEmit(['runs'], entry.taskId ?? undefined));
+  const offLedger = attachTurnLedger(context, ledger, entry => queueEmit(['runs'], entry.taskId ?? undefined), run => local.attribution(run.projectId, run.chatId));
   const ledgerView = async (limit: number): Promise<LedgerView> => {
     let entries = ledger().list({ limit });
     const c = connection();
@@ -314,6 +347,16 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
     if (history.done || history.run || history.timer || history.disposed) return;
     history.timer = timers.setTimeout(() => { history.timer = null; void importHistory(); }, 0);
   };
+
+  // --- Pause all / Resume all ---------------------------------------------------------------------------------------------
+  // What Pause all paused, per scope ('local', or 'paperclip:<company>'), so Resume all wakes only those and never an
+  // agent you had paused on purpose. A marker row ('') records that Pause all ran even when it changed nothing.
+  let pausedReady = false;
+  const pausedDb = () => { const db = context.db(); if (!pausedReady) { db.exec('CREATE TABLE IF NOT EXISTS pause_all_sets (scope TEXT NOT NULL, id TEXT NOT NULL, PRIMARY KEY(scope, id))'); pausedReady = true; } return db; };
+  const recordPaused = (scope: string, ids: readonly string[]) => { const insert = pausedDb().prepare('INSERT OR IGNORE INTO pause_all_sets (scope, id) VALUES (?, ?)'); for (const x of ['', ...ids]) insert.run(scope, x); };
+  /** The ids Pause all paused, or null when it never ran for this scope (then Resume all wakes every paused agent). */
+  const pausedSet = (scope: string): string[] | null => { const rows = pausedDb().prepare('SELECT id FROM pause_all_sets WHERE scope = ?').all(scope) as { id: string }[]; return rows.length ? rows.map(r => r.id).filter(Boolean) : null; };
+  const forgetPaused = (scope: string, id?: string) => { if (id === undefined) pausedDb().prepare('DELETE FROM pause_all_sets WHERE scope = ?').run(scope); else pausedDb().prepare('DELETE FROM pause_all_sets WHERE scope = ? AND id = ?').run(scope, id); };
 
   // --- Inbox dismissals ------------------------------------------------------------------------------------------------
   // Keyed by item id and the item's time: a dismissed failure stays hidden, a new one (a later time) shows again.
@@ -365,7 +408,7 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
   const localDetail = async (taskId: string): Promise<WorkspaceTaskDetail> => {
     const detail = await local.detail(taskId);
     const chatIds = detail.runs.map(r => r.chatId).filter((c): c is string => Boolean(c));
-    const cards: ThreadCard[] = [];
+    const cards: ThreadCard[] = [...detail.cards];
     // Handoff packets carry the memory Muster hands the next run (PRJ-18).
     const packet = await context.invoke('project.handoff.latest', { projectId: detail.task.projectId ?? '', taskId }).then(r => r.packet).catch(() => null);
     if (packet) cards.push({ kind: 'handoff', id: `handoff:${packet.id}`, at: packet.createdAt, from: 'You', to: detail.task.assigneeLabel, summary: `Handoff v${packet.version}${packet.stale ? ' (stale)' : ''} · ${packet.decisions.length} decisions · ${packet.artifacts.length} artifacts`, memory: packet.memory.map(m => ({ text: m.text, source: m.scope })) });
@@ -374,8 +417,32 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
       if (h.kind.startsWith('approval')) cards.push({ kind: 'approval', id: `import:${h.sourceId}`, at: h.at, title: h.title, status: h.status });
       else cards.push({ kind: 'needs', id: `import:${h.sourceId}`, at: h.at, from: null, prompt: h.title, detail: null, status: h.pending ? 'pending' : h.status === 'cancelled' || h.status === 'withdrawn' ? 'cancelled' : 'resolved', resolution: h.detail || null, interactionId: null, acceptLabel: null, rejectLabel: null });
     }
-    if (detail.task.status === 'in_review' && detail.runs.some(r => r.status === 'running')) cards.push({ kind: 'needs', id: `needs:${taskId}`, at: detail.task.updatedAt, from: detail.task.assigneeLabel, prompt: 'The agent is waiting for your answer in its run.', detail: null, status: 'pending', resolution: null, interactionId: null, acceptLabel: null, rejectLabel: null });
-    return { ...detail, cards, receipts: chatIds.length ? ledger().list({ chatIds, limit: 50 }) : [] };
+    // A run waiting on you: its real pending question or approval, answered in place so that run continues.
+    let waiting = false;
+    for (const run of detail.runs.filter(r => r.status === 'running' && r.chatId)) {
+      const items = await context.invoke('chat.timeline', { id: run.chatId! }).then(t => t.items, () => []);
+      for (const item of items) {
+        if ((item.kind !== 'question' && item.kind !== 'approval') || item.status !== 'pending') continue;
+        waiting = true;
+        const questions = item.kind === 'question' && Array.isArray(item.data?.questions) ? (item.data.questions as { question?: unknown }[]).map(q => typeof q.question === 'string' ? q.question : '').filter(Boolean) : [];
+        cards.push({ kind: 'needs', id: `needs:${item.id}`, at: item.createdAt, from: detail.task.assigneeLabel, prompt: questions.join('\n') || item.text, detail: null, status: 'pending', resolution: null, interactionId: null, acceptLabel: null, rejectLabel: null, chatId: run.chatId ?? null, pending: item });
+      }
+    }
+    const asking = detail.runs.find(r => r.status === 'running' && r.chatId);
+    if (!waiting && detail.task.status === 'in_review' && asking) cards.push({ kind: 'needs', id: `needs:${taskId}`, at: detail.task.updatedAt, from: detail.task.assigneeLabel, prompt: 'The agent is waiting for your answer in its run.', detail: null, status: 'pending', resolution: null, interactionId: null, acceptLabel: null, rejectLabel: null, chatId: asking.chatId ?? null, pending: null });
+    const receipts = chatIds.length ? ledger().list({ chatIds, limit: 50 }) : [];
+    // The task is the conversation: each run's final answer is a turn in the thread, carrying that run's Receipt.
+    const comments = [...detail.comments];
+    for (const run of detail.runs) {
+      if (!run.chatId) continue;
+      const items = await context.invoke('chat.timeline', { id: run.chatId }).then(t => t.items, () => []);
+      const last = [...items].reverse().find(i => i.kind === 'assistant' && i.text.trim());
+      if (!last) continue;
+      const receipt = receipts.filter(r => r.chatId === run.chatId).sort((a, b) => b.endedAt.localeCompare(a.endedAt))[0];
+      comments.push({ id: `run:${run.id}:${last.id}`, author: { kind: 'agent', id: run.agentId, label: detail.task.assigneeLabel ?? 'Agent' }, body: last.text, createdAt: last.createdAt, runId: receipt?.runId ?? null });
+    }
+    comments.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+    return { ...detail, comments, cards, receipts };
   };
   const paperclipDetail = async (taskId: string): Promise<WorkspaceTaskDetail> => {
     const c = api();
@@ -421,7 +488,30 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
     const projects = (await context.invoke('project.list', undefined)).filter(p => !p.archived);
     const works = await Promise.all(projects.map(p => context.invoke('project.work', { projectId: p.id, activityLimit: 100 }).then(w => ({ p, w }))));
     if (kind === 'audit') return works.flatMap(({ p, w }) => w.activity.items.map(a => ({ id: `act:${a.id}`, title: a.summary, detail: `${p.name} · ${a.actor}`, status: a.kind, at: a.createdAt, source: 'local' as const, projectId: p.id })));
-    return works.flatMap(({ p, w }) => w.tasks.items.flatMap(t => t.artifacts.map((path, i) => ({ id: `art:${t.id}:${i}`, title: path.split('/').pop() || path, detail: `${p.name} · ${t.title} · ${path}`, status: null, at: t.updatedAt, source: 'local' as const, projectId: p.id }))));
+    const manual = works.flatMap(({ p, w }) => w.tasks.items.flatMap(t => t.artifacts.map((path, i) => ({ id: `art:${t.id}:${i}`, title: path.split('/').pop() || path, detail: `${p.name} · ${t.title} · ${path}`, status: null, at: t.updatedAt, source: 'local' as const, projectId: p.id }))));
+    // What the agents actually produced: the files their turns changed (from the Ledger's Receipts, newest change per
+    // path), the canvases made in the project's chats or folders, and the files attached to those chats.
+    const changed: WorkspaceRow[] = [];
+    for (const p of projects) {
+      const seen = new Set<string>();
+      for (const entry of ledger().list({ projectId: p.id, limit: 200 })) for (const file of entry.files ?? []) {
+        if (seen.has(file.path)) continue;
+        seen.add(file.path);
+        changed.push({ id: `file:${p.id}:${file.path}`, title: file.path.split('/').pop() || file.path, detail: `${p.name} · ${entry.agent} · ${file.path}`, status: file.status, at: entry.endedAt, source: 'local', projectId: p.id });
+      }
+    }
+    const chats = (context.store.snapshot().chats ?? []).filter(c => c.projectId && projects.some(p => p.id === c.projectId));
+    const projectOfChat = new Map(chats.map(c => [c.id, c.projectId!]));
+    const byId = new Map(projects.map(p => [p.id, p]));
+    const canvases = await context.invoke('artifacts.canvas.list', {}).then(r => r.canvases, () => []);
+    const drawn = canvases.flatMap(c => {
+      const projectId = (c.chatId && projectOfChat.get(c.chatId)) || projects.find(p => c.folderId && p.folderIds.includes(c.folderId))?.id;
+      const p = projectId ? byId.get(projectId) : undefined;
+      return p ? [{ id: `canvas:${c.id}`, title: c.title || 'Canvas', detail: `${p.name} · Canvas`, status: 'canvas', at: c.updatedAt, source: 'local' as const, projectId: p.id }] : [];
+    });
+    const recent = [...chats].sort((a, b) => (b.updatedAt ?? '').localeCompare(a.updatedAt ?? '')).slice(0, 50);
+    const attached = (await Promise.all(recent.map(c => context.invoke('attachments.list', { chatId: c.id }).then(list => list.filter(a => a.state === 'sent').map(a => ({ id: `attachment:${a.id}`, title: a.name, detail: `${byId.get(c.projectId!)?.name ?? 'Project'} · Attached in ${c.title || 'a chat'}`, status: 'attachment', at: c.updatedAt ?? null, source: 'local' as const, projectId: c.projectId! })), () => [])))).flat();
+    return [...manual, ...changed, ...drawn, ...attached];
   };
   const list = async (kind: WorkspaceListKind): Promise<WorkspaceList> => {
     const mine = await localRows(kind).catch(() => [] as WorkspaceRow[]);
@@ -449,6 +539,10 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
   const startTask = async (taskId: string) => {
     if (await owner('task', taskId) === 'paperclip') throw new Error('This task runs in Paperclip. Import it first to run it in Muster.');
     const { project, view: task } = await local.projectFor(taskId);
+    // Paused means nothing new starts until you resume, by hand or by the scheduler.
+    if ((await context.invoke('project.work', { projectId: project.id, activityLimit: 1 })).scheduler.paused) throw new Error(`${project.name} is paused, so nothing new starts. Resume its agents first.`);
+    const held = task.assigneeId?.startsWith('member:') ? (await context.invoke('project.members.list', { projectId: project.id })).members.find(m => m.id === task.assigneeId!.slice(7) && m.pausedAt) : undefined;
+    if (held) throw new Error(`${held.name} is paused, so nothing of theirs starts. Resume ${held.name} first.`);
     const source = folders().find(f => f.id === project.primaryFolderId);
     if (!source) throw new Error('Link the project’s folder first: runs happen in a worktree of it.');
     const meta = imports()?.projectMeta(project.id), base = typeof meta?.defaultRef === 'string' ? meta.defaultRef : undefined;
@@ -492,8 +586,8 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
     }
     const [aggregates, stats] = [
       ledgerAggregates(context.db(), { since, monthStart: monthStart(now, offset), offset, skipImportedPaperclip: paperclip !== null, ...(projectId ? { projectId } : {}) }),
-      // Task aggregates are app-wide; a project's Budget uses its runs and spend only.
-      projectId ? null : await context.invoke('project.stats', { days: DASHBOARD_DAYS + 1, utcOffsetMinutes: offset, activityLimit: 12 }).catch(() => null),
+      // A project's Dashboard tab and Budget read that project's tasks, runs and activity; a Paperclip project has none here.
+      projectId && paperclip ? null : await context.invoke('project.stats', { days: DASHBOARD_DAYS + 1, utcOffsetMinutes: offset, activityLimit: 12, ...(projectId ? { projectId } : {}) }).catch(() => null),
     ];
     return buildDashboard({ now, offset, ledger: aggregates, local: stats, paperclip });
   };
@@ -579,18 +673,22 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
       'paperclip.agent.pause': async input => { const agentId = id(input.id); if (await owner('agent', agentId) === 'local') await local.setPaused(agentId, true); else await api().send('POST', `/agents/${encodeURIComponent(agentId)}/pause`); queueEmit(['agents', 'runs']); return { ok: true }; },
       'paperclip.agent.resume': async input => { const agentId = id(input.id); if (await owner('agent', agentId) === 'local') await local.setPaused(agentId, false); else await api().send('POST', `/agents/${encodeURIComponent(agentId)}/resume`); queueEmit(['agents', 'runs']); return { ok: true }; },
       'paperclip.pauseAll': async input => {
-        if (sourceOf(input.source) === 'local') { const changed = await local.setPaused(null, true); queueEmit(['agents']); return { changed }; }
+        if (sourceOf(input.source) === 'local') { const ids = await local.pauseAll(); recordPaused('local', ids); queueEmit(['agents', 'runs', 'tasks']); return { changed: ids.length }; }
         const c = api(); await paperclipPart(true);
         const agents = (built?.part.agents ?? []).filter(a => a.status !== 'paused' && a.status !== 'terminated' && a.status !== 'pending');
-        for (const agent of agents) await c.send('POST', `/agents/${encodeURIComponent(agent.id)}/pause`);
+        const paused: string[] = [];
+        try { for (const agent of agents) { await c.send('POST', `/agents/${encodeURIComponent(agent.id)}/pause`); paused.push(agent.id); } }
+        finally { if (built) recordPaused(`paperclip:${built.companyId}`, paused); }
         queueEmit(['agents', 'runs']);
-        return { changed: agents.length };
+        return { changed: paused.length };
       },
       'paperclip.resumeAll': async input => {
-        if (sourceOf(input.source) === 'local') { const changed = await local.setPaused(null, false); queueEmit(['agents']); return { changed }; }
+        if (sourceOf(input.source) === 'local') { const changed = await local.resumeProjects(pausedSet('local')); forgetPaused('local'); queueEmit(['agents']); return { changed }; }
         const c = api(); await paperclipPart(true);
-        const agents = (built?.part.agents ?? []).filter(a => a.status === 'paused');
+        const scope = `paperclip:${built?.companyId ?? ''}`, only = pausedSet(scope);
+        const agents = (built?.part.agents ?? []).filter(a => a.status === 'paused' && (!only || only.includes(a.id)));
         for (const agent of agents) await c.send('POST', `/agents/${encodeURIComponent(agent.id)}/resume`);
+        forgetPaused(scope);
         queueEmit(['agents', 'runs']);
         return { changed: agents.length };
       },
@@ -598,6 +696,21 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
       'paperclip.interaction.respond': async input => {
         const taskId = id(input.taskId), interactionId = id(input.interactionId);
         const reason = typeof input.reason === 'string' ? input.reason.slice(0, 4000) : undefined;
+        if (Array.isArray(input.answers)) {
+          // A question set: Paperclip's respond endpoint, with exactly the options you picked (and any text you typed).
+          const answers = input.answers.slice(0, 20).map(a => {
+            const answer = a as { questionId?: unknown; optionIds?: unknown; otherText?: unknown };
+            const key = (v: unknown) => { if (typeof v !== 'string' || !v.trim() || v.length > 160 || /[\u0000-\u001f]/.test(v)) throw new Error('Unknown answer.'); return v; };
+            const optionIds = Array.isArray(answer.optionIds) ? answer.optionIds.slice(0, 129).map(key) : [];
+            const otherText = typeof answer.otherText === 'string' && answer.otherText.trim() ? answer.otherText.slice(0, 100_000) : null;
+            if (!optionIds.length && !otherText) throw new Error('Answer every question.');
+            return { questionId: key(answer.questionId), optionIds, ...(otherText ? { otherText } : {}) };
+          });
+          if (!answers.length) throw new Error('Answer every question.');
+          await api().send('POST', `/issues/${encodeURIComponent(taskId)}/interactions/${encodeURIComponent(interactionId)}/respond`, { answers });
+          queueEmit(['tasks', 'inbox'], taskId);
+          return { ok: true };
+        }
         await api().send('POST', `/issues/${encodeURIComponent(taskId)}/interactions/${encodeURIComponent(interactionId)}/${input.accept === true ? 'accept' : 'reject'}`, input.accept === true ? {} : { ...(reason ? { reason } : {}) });
         queueEmit(['tasks', 'inbox'], taskId);
         return { ok: true };
@@ -612,9 +725,11 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
         if (!target) target = String(arr(await reader.get<unknown>('/companies'))[0]?.id ?? '');
         if (!target) throw new Error('That Paperclip has no companies to import.');
         // GET only: the importer is handed nothing that can write to Paperclip.
-        // Folder paths and CODEX_HOME are this Mac's only when Paperclip runs here; a remote server's paths are never touched.
+        // Folder paths and CODEX_HOME are this Mac's only when Paperclip runs here (This Mac, or a Custom URL on loopback);
+        // a remote server's paths are never touched.
         const targets = input.targets && typeof input.targets === 'object' ? Object.fromEntries(Object.entries(input.targets).filter(([k, v]) => /^[\w:.-]{1,128}$/.test(k) && typeof v === 'string').map(([k, v]) => [k, v === 'new' || v === 'skip' ? v : id(v)])) : undefined;
-        const report = await importFromPaperclip(target, { get: path => reader.get<unknown>(path), invoke: context.invoke as Invoke, store, folders, exists: path => existsSync(path), local: mode === 'local', remoteOf, ...(targets ? { targets } : {}), ...(mode === 'local' ? { codexHome: codexHomeOf } : {}) });
+        const onThisMac = mode === 'local' || isLoopback(baseUrl);
+        const report = await importFromPaperclip(target, { get: path => reader.get<unknown>(path), invoke: context.invoke as Invoke, store, folders, exists: path => existsSync(path), local: onThisMac, remoteOf, ...(targets ? { targets } : {}), ...(onThisMac ? { codexHome: codexHomeOf } : {}) });
         queueEmit(['tasks', 'agents', 'inbox']);
         // The imported runs show in the Ledger as imported history (#190).
         try { if (ledger().importHistory(paperclipHistory(context.db()))) queueEmit(['runs']); } catch { /* the Ledger never fails an import */ }

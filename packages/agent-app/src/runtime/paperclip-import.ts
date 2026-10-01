@@ -15,6 +15,7 @@ import type { ProjectDetails, ProjectTaskView, TaskState } from '../shared/domai
 import type { ImportPlan, ImportTargets, PaperclipImportReport } from '../shared/domains/paperclip-protocol.ts';
 import type { Folder } from '../shared/protocol.ts';
 import { normalizeRemote } from './memory-identity.ts';
+import { blockerIds } from './paperclip-map.ts';
 import type { Invoke } from './workspace-local.ts';
 
 type Json = Record<string, unknown>;
@@ -74,6 +75,10 @@ export class SqliteImportStore implements ImportStore {
     this.db.prepare(`INSERT INTO paperclip_import_history (source_id, kind, task_id, project_id, title, status, detail, at, pending) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(source_id) DO UPDATE SET status = excluded.status, detail = excluded.detail, pending = excluded.pending,
       task_id = COALESCE(excluded.task_id, task_id), project_id = CASE WHEN excluded.task_id IS NULL AND task_id IS NOT NULL THEN project_id ELSE COALESCE(excluded.project_id, project_id) END`)
       .run(row.sourceId, row.kind, row.taskId, row.projectId, row.title, row.status, row.detail, row.at, row.pending ? 1 : 0);
+  }
+  /** The Paperclip ids already imported as Muster rows of this kind. */
+  importedSources(kind: string): Set<string> {
+    return new Set((this.db.prepare('SELECT source_id FROM paperclip_import_map WHERE kind = ?').all(kind) as { source_id: string }[]).map(r => r.source_id));
   }
   /** Read side for the workspace: keys, parents, members, comments and pending history, per Muster task or project. */
   taskMeta(taskId: string): { key: string | null; parentTaskId: string | null; sourceId: string } | undefined {
@@ -160,7 +165,7 @@ export async function importFromPaperclip(companyId: string, deps: ImportDeps): 
   const company = arr(await get('/companies')).find(c => c.id === companyId);
   if (!company) throw new Error('That company is not on this Paperclip.');
   report.company = str(company.name) ?? 'Paperclip';
-  const [projectsJson, agentsJson, issuesJson, goalsJson, approvalsJson] = await Promise.all([get(`${base}/projects`), get(`${base}/agents`), get(`${base}/issues?limit=500`), get(`${base}/goals`).catch(() => []), get(`${base}/approvals`).catch(() => [])]);
+  const [projectsJson, agentsJson, issuesJson, goalsJson, approvalsJson] = await Promise.all([get(`${base}/projects`), get(`${base}/agents`), get(`${base}/issues?limit=500&includeBlockedBy=true`), get(`${base}/goals`).catch(() => []), get(`${base}/approvals`).catch(() => [])]);
   const agents = arr(agentsJson).filter(a => a.status !== 'terminated'), agentName = new Map(agents.map(a => [String(a.id), str(a.name) ?? 'Agent']));
   const issues = arr(issuesJson);
   const existing = new Map((await invoke('project.list', undefined)).map(p => [p.id, p]));
@@ -265,7 +270,7 @@ export async function importFromPaperclip(companyId: string, deps: ImportDeps): 
   }
   for (const issue of issues) {
     const mine = taskIds.get(String(issue.id));
-    const blockers = (Array.isArray(issue.blockedByIssueIds) ? issue.blockedByIssueIds : []).map(id => taskIds.get(String(id))).filter((t): t is { projectId: string; taskId: string } => Boolean(t) && t!.projectId === mine?.projectId).map(t => t.taskId);
+    const blockers = blockerIds(issue).map(id => taskIds.get(id)).filter((t): t is { projectId: string; taskId: string } => Boolean(t) && t!.projectId === mine?.projectId).map(t => t.taskId);
     if (!mine || !blockers.length) continue;
     const task = (await work(mine.projectId)).find(t => t.id === mine.taskId);
     if (task && blockers.some(b => !task.dependencies.includes(b))) await invoke('project.tasks.edit', { projectId: mine.projectId, id: task.id, revision: task.revision, patch: { dependencies: [...new Set([...task.dependencies, ...blockers])] } }).catch(cause => report.notes.push(`${str(issue.identifier)}: blockers not linked (${cause instanceof Error ? cause.message : String(cause)})`));

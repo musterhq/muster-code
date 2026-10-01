@@ -18,12 +18,12 @@ export const DEFAULT_AGENT_NAME = 'Default agent';
 export type Invoke = <K extends keyof Commands>(command: K, input: Commands[K]['input']) => Promise<Commands[K]['output']>;
 export interface LocalPart { tasks: WorkspaceTask[]; agents: WorkspaceAgent[]; projects: WorkspaceProject[]; runs: WorkspaceRun[]; inbox: WorkspaceInboxItem[] }
 
-const STATE: Record<TaskState, WorkspaceStatus> = { todo: 'todo', running: 'in_progress', 'needs-input': 'in_review', blocked: 'blocked', review: 'in_review', implemented: 'in_review', verified: 'done', failed: 'blocked', cancelled: 'cancelled' };
+const STATE: Record<TaskState, WorkspaceStatus> = { backlog: 'backlog', todo: 'todo', running: 'in_progress', 'needs-input': 'in_review', blocked: 'blocked', review: 'in_review', implemented: 'in_review', verified: 'done', failed: 'blocked', cancelled: 'cancelled' };
 const PRIORITY: Record<number, WorkspacePriority> = { 0: 'critical', 1: 'high', 2: 'medium', 3: 'low' };
 const PRIORITY_IN: Record<WorkspacePriority, TaskPriority> = { critical: 0, high: 1, medium: 2, low: 3 };
 const ATTEMPT: Record<string, RunState> = { running: 'running', completed: 'succeeded', failed: 'failed', interrupted: 'interrupted', cancelled: 'cancelled' };
 /** Manual moves the local task store accepts (running and verified come only from real runs and verification). */
-const SETTABLE: Partial<Record<WorkspaceStatus, TaskState>> = { backlog: 'todo', todo: 'todo', blocked: 'blocked', in_review: 'review', cancelled: 'cancelled' };
+const SETTABLE: Partial<Record<WorkspaceStatus, TaskState>> = { backlog: 'backlog', todo: 'todo', blocked: 'blocked', in_review: 'review', cancelled: 'cancelled' };
 
 export const agentIdOf = (projectId: string) => `agent:${projectId}`;
 const clean = (value: unknown, label: string, max: number, required = true): string => {
@@ -90,7 +90,7 @@ export class LocalWorkspace {
       const failed = owned.some(t => t.status === 'blocked' && read.work.tasks.items.find(x => x.id === t.id)?.state === 'failed');
       return {
         id, name: m.name, role: r?.role ?? 'agent', title: m.title ?? r?.title ?? null, model: m.runner?.model ?? r?.runner.model ?? null, adapter: r?.runner.runtime ?? m.runner?.providerId ?? 'muster', source: 'local',
-        status: m.pendingAt ? 'pending' : paused ? 'paused' : owned.some(t => t.live) ? 'running' : failed ? 'error' : 'idle',
+        status: m.pendingAt ? 'pending' : paused || m.pausedAt ? 'paused' : owned.some(t => t.live) ? 'running' : failed ? 'error' : 'idle',
         reportsTo: boss && ids.has(boss) ? memberAgentId(boss) : 'user:local', lastActiveAt: lastActive(id), error: null, pausable: !m.pendingAt, capabilities: m.instructions?.trim() ? m.instructions.trim().split('\n')[0].slice(0, 280) : r?.capabilities ?? null,
         projectId: read.project.id, memberId: m.id, runner: m.runner ?? null, instructions: m.instructions ?? '',
       };
@@ -133,6 +133,15 @@ export class LocalWorkspace {
     throw new Error('That task no longer exists.');
   }
 
+  /** A task's subtasks: its own children, and for an imported parent the ones the import map records under it. */
+  private children(read: ProjectRead, taskId: string): ProjectTaskView[] {
+    return read.work.tasks.items.filter(t => {
+      if (t.parentId === taskId) return true;
+      if (t.parentId) return false;
+      try { return this.meta?.()?.taskMeta(t.id)?.parentTaskId === taskId; } catch { return false; }
+    });
+  }
+
   async detail(taskId: string): Promise<WorkspaceTaskDetail> {
     const { read, task, view } = await this.locate(taskId);
     const mail = await this.invoke('mailbox.list', { projectId: read.project.id, limit: 200 }).catch(() => null);
@@ -144,11 +153,14 @@ export class LocalWorkspace {
       ...(mail?.messages ?? []).filter(m => (m.recipient.kind === 'taskRun' && m.recipient.id === task.id) || chats.has(m.sender.chatId ?? m.sender.id) || chats.has(m.recipient.chatId ?? m.recipient.id)).map(m => mailComment(m)),
     ].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
     const agent = task.owner.kind === 'agent';
+    // A Delegated card per subtask: who handed which piece of this work to whom.
+    const ordered = [...read.work.tasks.items].sort((a, b) => a.createdAt.localeCompare(b.createdAt)), kids = this.children(read, task.id);
+    const delegated = kids.map(k => { const v = this.task(read, k, ordered.indexOf(k)); return { kind: 'delegated' as const, id: `delegated:${v.id}`, at: v.createdAt, from: view.assigneeLabel ?? view.origin, to: v.assigneeLabel, taskId: v.id, key: v.key, title: v.title, brief: `${v.key} · ${v.title}` }; });
     return {
       task: view, description: task.acceptance, comments, runs: task.attempts.map(a => this.run(read, task, a)).sort((a, b) => b.createdAt.localeCompare(a.createdAt)),
       addressee: agent ? { id: view.assigneeId ?? agentIdOf(read.project.id), label: view.assigneeLabel ?? 'Agent' } : null,
       composerNote: agent ? 'Delivered into the task run’s next turn through the project mailbox.' : 'This task is yours. Assign it to a Roster agent to message its runs.',
-      subtasks: read.work.tasks.items.filter(t => t.parentId === task.id).map(t => t.id), blocking: read.work.tasks.items.filter(t => t.dependencies.includes(task.id)).map(t => t.id), receipts: [], cards: [],
+      subtasks: kids.map(t => t.id), blocking: read.work.tasks.items.filter(t => t.dependencies.includes(task.id)).map(t => t.id), receipts: [], cards: delegated,
       mentionable: read.members.filter(m => !m.revokedAt).map(m => ({ id: m.id, name: m.name })),
     };
   }
@@ -160,10 +172,21 @@ export class LocalWorkspace {
   }
 
   async setStatus(taskId: string, status: WorkspaceStatus): Promise<WorkspaceTask> {
+    if (status === 'done') return this.markDone(taskId);
     const target = SETTABLE[status];
-    if (!target) throw new Error(status === 'done' ? 'Muster tasks are marked done by verifying them: the project’s Settings › Runs & verification.' : 'In Progress comes from a real run. Assign the task to an agent and start it.');
+    if (!target) throw new Error('In Progress comes from a real run. Assign the task to an agent and start it.');
     const { read, task } = await this.locate(taskId);
     await this.invoke('project.tasks.setState', { projectId: read.project.id, id: task.id, revision: task.revision, state: target });
+    return (await this.locate(taskId)).view;
+  }
+
+  /** Done is a verified task: moving one that is In Review to Done records your manual check (the verify flow).
+   *  Work that has not been reviewed yet says why it cannot be done. */
+  private async markDone(taskId: string): Promise<WorkspaceTask> {
+    const { read, task } = await this.locate(taskId);
+    if (task.state === 'verified') return (await this.locate(taskId)).view;
+    if (task.state !== 'review' && task.state !== 'implemented') throw new Error('Move it to In Review first: a Muster task is done once its finished work is verified.');
+    await this.invoke('project.tasks.verify', { projectId: read.project.id, id: task.id, revision: task.revision, kind: 'manual', notes: 'Checked and moved to Done by you.' });
     return (await this.locate(taskId)).view;
   }
 
@@ -186,13 +209,40 @@ export class LocalWorkspace {
     return (await this.locate(created.id)).view;
   }
 
-  /** Muster agents are Project schedulers: pausing one holds its Project's task dispatch. */
+  /** Pausing a Roster member holds that member only (its runs stop; the scheduler and Start skip its tasks). The
+   *  project's default runner, or every agent (`null`), pauses through the Project scheduler and stops its running work. */
   async setPaused(agentId: string | null, paused: boolean): Promise<number> {
-    // A Roster member pauses its project's scheduler (per-member pause is a follow-up).
-    const memberProject = agentId?.startsWith('member:') ? (await this.projects()).find(r => r.members.some(m => memberAgentId(m.id) === agentId))?.project.id : undefined;
-    const list = (await this.invoke('project.list', undefined)).filter(p => !p.archived && (!agentId || agentIdOf(p.id) === agentId || p.id === memberProject));
-    for (const project of list) await this.invoke('project.scheduler.set', { projectId: project.id, paused });
+    const reads = await this.projects();
+    if (agentId?.startsWith('member:')) {
+      const read = reads.find(r => r.members.some(m => memberAgentId(m.id) === agentId));
+      if (!read) throw new Error('That agent is not on a Roster.');
+      await this.invoke('project.members.pause', { projectId: read.project.id, id: agentId.slice(7), paused });
+      return 1;
+    }
+    const list = reads.filter(r => !agentId || agentIdOf(r.project.id) === agentId);
+    for (const read of list) await this.hold(read, paused);
     return list.length;
+  }
+
+  /** Pause all: holds every project that is not paused yet and stops its running work. Returns the projects it paused. */
+  async pauseAll(): Promise<string[]> {
+    const list = (await this.projects()).filter(r => !r.work.scheduler.paused);
+    for (const read of list) await this.hold(read, true);
+    return list.map(r => r.project.id);
+  }
+
+  /** Resume all: only the projects Pause all paused (`ids`), so a project paused on purpose stays paused. `null`: every one. */
+  async resumeProjects(ids: readonly string[] | null): Promise<number> {
+    const list = (await this.projects()).filter(r => r.work.scheduler.paused && (!ids || ids.includes(r.project.id)));
+    for (const read of list) await this.hold(read, false);
+    return list.length;
+  }
+
+  /** "Running work stops and nothing new starts": pausing sets the scheduler and stops every running attempt. */
+  private async hold(read: ProjectRead, paused: boolean): Promise<void> {
+    await this.invoke('project.scheduler.set', { projectId: read.project.id, paused });
+    if (!paused) return;
+    for (const task of read.work.tasks.items) for (const attempt of task.attempts) if (attempt.status === 'running') await this.invoke('chat.stop', { id: attempt.chatId }).catch(() => undefined);
   }
 
   async cancelRun(runId: string): Promise<void> {
@@ -201,6 +251,17 @@ export class LocalWorkspace {
       if (attempt) { if (attempt.status !== 'running') throw new Error('That run already ended.'); await this.invoke('chat.stop', { id: attempt.chatId }); return; }
     }
     throw new Error('That run no longer exists.');
+  }
+
+  /** The task a project run worked on (its attempt ran in `chatId`) and that task's owner, for the run's Receipt. */
+  async attribution(projectId: string, chatId: string): Promise<{ taskId: string; agent: string } | null> {
+    const work = await this.invoke('project.work', { projectId, activityLimit: 1 });
+    const task = work.tasks.items.find(t => t.attempts.some(a => a.chatId === chatId));
+    if (!task) return null;
+    if (task.owner.kind !== 'agent') return { taskId: task.id, agent: 'You' };
+    if (task.owner.id === DEFAULT_AGENT_ID) return { taskId: task.id, agent: DEFAULT_AGENT_NAME };
+    const members = await this.invoke('project.members.list', { projectId }).then(r => r.members, () => [] as ProjectMember[]);
+    return { taskId: task.id, agent: members.find(m => m.id === task.owner.id)?.name ?? DEFAULT_AGENT_NAME };
   }
 
   async projectFor(taskId: string): Promise<{ project: ProjectDetails; view: WorkspaceTask }> { const { read, view } = await this.locate(taskId); return { project: read.project, view }; }

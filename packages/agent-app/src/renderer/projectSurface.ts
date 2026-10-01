@@ -26,7 +26,7 @@ export function projectEditPatch(project: Pick<ProjectDetails, 'id' | 'name' | '
 
 /** What the hover card needs beyond the snapshot: open/running task counts and the newest activity time. */
 export interface ProjectGlance { openTasks: number; runningTasks: number; lastActivityAt: string | null }
-const OPEN = new Set(['todo', 'running', 'needs-input', 'blocked', 'review', 'implemented']);
+const OPEN = new Set(['backlog', 'todo', 'running', 'needs-input', 'blocked', 'review', 'implemented']);
 const RUNNING = new Set(['running', 'needs-input']);
 
 export function projectGlance(tasks: readonly Pick<ProjectTaskView, 'state' | 'updatedAt'>[], activityAt: string | null, chats: readonly Pick<Chat, 'updatedAt' | 'archived'>[]): ProjectGlance {

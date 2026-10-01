@@ -41,6 +41,16 @@ const calls:{command:string;input:any}[]=[];
 (window as any).muster={subscribe(){return()=>{};},async invoke(command:string,input:any){calls.push({command,input});
   if(command==='paperclip.snapshot')return snapshot;
   if(command==='paperclip.watch')return {live:'socket'};
+  // A Muster task whose run is waiting on a question: the card carries the run's real question and answers it in place.
+  if(command==='paperclip.task'&&input.id==='t15')return {task:snapshot.tasks[1],description:'',comments:[],runs:[],addressee:{id:'cto',label:'CTO'},composerNote:null,subtasks:[],blocking:[],receipts:[],mentionable:[],
+    cards:[{kind:'needs',id:'interaction:int-q',at:now,from:'CTO',prompt:'Which scope?',detail:null,status:'pending',resolution:null,interactionId:'int-q',acceptLabel:null,rejectLabel:null,submitLabel:'Send',
+      questions:[{id:'scope',prompt:'Which scope?',helpText:null,multi:false,allowOther:false,options:[{id:'mig',label:'Migration only',description:null},{id:'all',label:'Everything',description:null}]}]}]};
+  if(command==='paperclip.task'&&input.id==='t4')return {task:snapshot.tasks[2],description:'',comments:[],runs:[{id:'a9',agentId:'qa',taskId:'t4',status:'failed',trigger:'user',source:'local',createdAt:now,startedAt:now,finishedAt:now,error:'The provider attempt failed: rate_limited',cancellable:false,chatId:'c-run'}],addressee:{id:'qa',label:'QA'},composerNote:null,subtasks:[],blocking:[],receipts:[],mentionable:[],
+    cards:[{kind:'needs',id:'needs:q1',at:now,from:'QA',prompt:'Which colour should the banner be?',detail:null,status:'pending',resolution:null,interactionId:null,acceptLabel:null,rejectLabel:null,chatId:'c-run',
+      pending:{id:'q1',chatId:'c-run',kind:'question',text:'The provider needs your input.',status:'pending',createdAt:now,data:{method:'item/tool/requestUserInput',questions:[{id:'color',header:'Colour',question:'Which colour should the banner be?',options:[{label:'Blue'},{label:'Green'}],allowCustomAnswer:false,multiSelect:false}]}}},
+      // Imported issue approvals (S17): a read-only Approval card with its status.
+      {kind:'approval',id:'import:ap-1',at:now,title:'Ship the migration to production',status:'pending'},
+      {kind:'approval',id:'import:ap-2',at:now,title:'Rotate the API keys',status:'approved'}]};
   if(command==='paperclip.task')return {task:snapshot.tasks[0],description:'Build the **wizard**.',comments:[{id:'m1',author:{kind:'agent',id:'ceo',label:'CEO'},body:'@CTO please take the implementation.',createdAt:now,runId:'r1'}],runs:[snapshot.runs[0]],addressee:{id:'ceo',label:'CEO'},composerNote:null,subtasks:['t15'],blocking:[],
     receipts:[receipt],mentionable:[{id:'ceo',name:'CEO'},{id:'cto',name:'CTO'},{id:'qa',name:'QA'}],
     cards:[{kind:'delegated',id:'d1',at:now,from:'CEO',to:'CTO',taskId:'t15',key:'RAG-15',title:'Implement migration',brief:''},
@@ -95,6 +105,39 @@ assert.deepEqual(text('.ws-mentions button'),['CTCTO'],'typing @ offers the agen
 descriptor!.set!.call(box,'@CTO rebase onto dev');box.dispatchEvent(new window.Event('input',{bubbles:true}));await delay(40);
 document.querySelector('.ws-composer')!.dispatchEvent(new window.Event('submit',{bubbles:true,cancelable:true}));await delay(80);
 assert.deepEqual(calls.find(c=>c.command==='paperclip.comment')?.input,{taskId:'t1',body:'@CTO rebase onto dev'});
+// A Muster run's question is answered from its task card through question.respond (not "reply below").
+openHub('task','t4');await delay(150);
+{
+  const runCard=document.querySelector('.ws-card-sys[data-kind="needs"]')!;
+  assert.ok(runCard?.querySelector('.pending-question'),'the run’s question renders in the card');
+  assert.match(runCard.textContent!,/Which colour should the banner be\?/);
+  assert.ok(!/replying below/.test(runCard.textContent!),'no "reply below" for a run question');
+  const blue=runCard.querySelector('input[type="radio"]') as any;
+  const props=Object.keys(blue).find(k=>k.startsWith('__reactProps'))!;
+  blue[props].onChange({target:blue,currentTarget:blue});await delay(40);
+  await click([...runCard.querySelectorAll('button')].find(b=>/Send answer/.test(b.textContent!)));
+  assert.deepEqual(calls.find(c=>c.command==='question.respond')?.input,{id:'q1',answers:{color:{answers:['Blue']}}},'answered through question.respond');
+  // S37: the failed run's chat is one click away from the task.
+  const open=[...document.querySelectorAll('.ws-properties button')].find(b=>b.textContent==='Open run chat');
+  assert.ok(open,'Open run chat on the Last run');
+  await click(open);
+  assert.ok(calls.some(c=>/^chat\.(select|timeline)$/.test(c.command)&&c.input.id==='c-run'),'it opens the run chat');
+  const approvals=[...document.querySelectorAll('.ws-card-sys[data-kind="approval"]')];
+  assert.deepEqual(approvals.map(a=>a.querySelector('.ws-card-sys-text')!.textContent),['Approval Ship the migration to production','Approval Rotate the API keys']);
+  assert.deepEqual(approvals.map(a=>a.querySelector('.ws-chip')?.textContent),['pending','approved'],'each approval shows its status');
+}
+// A Paperclip question set is answered in place through Paperclip's respond endpoint.
+openHub('task','t15');await delay(150);
+{
+  const qCard=document.querySelector('.ws-card-sys[data-kind="needs"]')!;
+  assert.match(qCard.textContent!,/Which scope\?/);
+  const options=[...qCard.querySelectorAll('input[type="radio"]')] as any[];
+  assert.equal(options.length,2);
+  const props=Object.keys(options[0]).find(k=>k.startsWith('__reactProps'))!;
+  options[0][props].onChange({target:options[0],currentTarget:options[0]});await delay(40);
+  await click([...qCard.querySelectorAll('button')].find(b=>/^Send$/.test(b.textContent!)));
+  assert.deepEqual(calls.find(c=>c.command==='paperclip.interaction.respond'&&c.input.answers)?.input,{taskId:'t15',interactionId:'int-q',accept:true,answers:[{questionId:'scope',optionIds:['mig']}]});
+}
 root.unmount();await delay(30);
 assert.equal(calls.filter(c=>c.command==='paperclip.watch').at(-1)!.input.visible,false,'leaving the hub stops live updates');
 
@@ -165,6 +208,12 @@ assert.deepEqual(calls.filter(c=>c.command==='paperclip.inbox.dismiss').map(c=>c
 assert.equal(rowOf('Refactor login'),undefined,'the dismissed row is gone');
 assert.ok(rowOf('Quit mid-turn'),'other rows stay');
 root5.unmount();
+// A Roster agent opened from a project's page keeps the project as its breadcrumb, not "Inbox".
+openHub('inbox');openHub('agent','qa',{page:'project',arg:'p1'});
+const root6=createRoot(document.getElementById('root')!,{onUncaughtError:(e:unknown)=>{(errors as unknown[]).push(e);}});
+root6.render(<HubScreen/>);await delay(150);
+assert.deepEqual(text('.ws-crumb .ws-crumb-link'),['OSS Manager']);
+root6.unmount();
 assert.deepEqual(errors,[]);
 console.log('hub-components: ok');
 process.exit(0);

@@ -6,9 +6,10 @@ import {mkdtemp,readFile,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {test,type TestContext} from 'node:test';
-import {createPaperclipDomain,rankMemories,PAPERCLIP_SECRET_ID} from '../src/runtime/domains/paperclip.ts';
+import {createPaperclipDomain,isLoopback,rankMemories,PAPERCLIP_SECRET_ID} from '../src/runtime/domains/paperclip.ts';
 import {normalizeBaseUrl} from '../src/runtime/paperclip-client.ts';
-import {buildInbox,mapAttention,mapIssue,mapRoutine} from '../src/runtime/paperclip-map.ts';
+import {SqliteImportStore} from '../src/runtime/paperclip-import.ts';
+import {buildInbox,mapAttention,mapInteraction,mapIssue,mapRoutine} from '../src/runtime/paperclip-map.ts';
 import type {DomainContext} from '../src/runtime/domains/types.ts';
 import type {SocketFactory} from '../src/runtime/paperclip-client.ts';
 
@@ -68,7 +69,7 @@ async function harness(t:TestContext,options:{socket?:SocketFactory;invoke?:(com
   const domain=createPaperclipDomain(context,{fetch:(options.fetch??server.fetch) as never,secrets:()=>secrets.store as never,timers,socket:options.socket??(()=>{throw new Error('no socket');}),remoteOf:async path=>path.endsWith('oss')?'git@github.com:hybrowlabs/OSS-Manager.git':undefined});
   t.after(()=>domain.dispose?.());
   const call=(command:string,input:Record<string,unknown>={})=>Promise.resolve(domain.handlers[command]!(input)) as Promise<any>;
-  return {dataDir,server,secrets,timers,events,invoked,call};
+  return {dataDir,server,secrets,timers,events,invoked,call,memory};
 }
 
 test('a custom deployment sends its board token as a Bearer header; the token lives in the secret store, never in the config file',async t=>{
@@ -170,6 +171,27 @@ test('the thread renders comments (deleted ones hidden) and the composer address
   await assert.rejects(()=>h.call('paperclip.comment',{taskId:'../../x',body:'x'}),/Unknown item/);
 });
 
+test('Resume all wakes only the Paperclip agents Pause all paused, never one you had paused on purpose',async t=>{
+  const saved=agents.map(a=>({...a}));t.after(()=>{agents.forEach((a,i)=>Object.assign(a,saved[i]));});
+  const server=paperclip();
+  // Paperclip's agents really change status on pause/resume, and its ETags move with them.
+  const fetch=async(input:string,init:RequestInit={})=>{
+    const m=/\/api\/agents\/([^/]+)\/(pause|resume)$/.exec(new URL(input).pathname);
+    if(m&&init.method==='POST'){const a=agents.find(x=>x.id===m[1]);if(a)a.status=m[2]==='pause'?'paused':'idle';server.bump();}
+    return server.fetch(input,init);
+  };
+  const h=await harness(t,{fetch});
+  await h.call('paperclip.config.set',{mode:'local'});
+  await h.call('paperclip.snapshot');
+  assert.equal(agents.find(a=>a.id==='a-old')!.status,'paused','Old was paused before Pause all');
+  assert.deepEqual(await h.call('paperclip.pauseAll',{source:'paperclip'}),{changed:3});
+  assert.ok(agents.every(a=>a.status==='paused'));
+  assert.deepEqual(await h.call('paperclip.resumeAll',{source:'paperclip'}),{changed:3});
+  const resumed=server.calls.filter(c=>c.method==='POST'&&c.url.endsWith('/resume')).map(c=>c.url);
+  assert.deepEqual(resumed.sort(),['/api/agents/a-ceo/resume','/api/agents/a-cto/resume','/api/agents/a-qa/resume']);
+  assert.equal(agents.find(a=>a.id==='a-old')!.status,'paused','the agent paused on purpose stays paused');
+});
+
 test('live updates cost nothing while hidden: a refused socket polls only while visible, and hiding clears every timer',async t=>{
   const h=await harness(t);
   await h.call('paperclip.config.set',{mode:'local'});
@@ -203,8 +225,31 @@ test('socket events are filtered and coalesced; run-log noise never wakes the re
   await h.timers.fire();
   assert.equal(h.events.length,1);
   assert.deepEqual(h.events[0].taskIds.sort(),['i-12','i-4']);
+  h.events.length=0;
   sockets[0].onclose();
-  assert.equal(h.timers.live.size,1,'socket down while visible: fall back to a poll');
+  assert.deepEqual([...h.timers.live.values()].map(x=>x.ms).sort((a,b)=>a-b),[1000,15000],'socket down while visible: tell the screens, and fall back to a poll');
+  const poll=[...h.timers.live.entries()].find(([,x])=>x.ms===15000)!;h.timers.live.delete(poll[0]);
+  await h.timers.fire();
+  assert.deepEqual(h.events.map(e=>e.scopes),[['config']],'the socket dropping is announced at once');
+});
+
+test('going offline and coming back are announced at once, without a reload (S8)',async t=>{
+  let down=false;const server=paperclip();
+  const h=await harness(t,{fetch:async(input,init)=>{if(down)throw new TypeError('fetch failed');return server.fetch(input,init);}});
+  await h.call('paperclip.config.set',{mode:'local'});
+  await h.call('paperclip.snapshot');
+  await h.timers.fire();h.events.length=0;
+  down=true;
+  assert.ok((await h.call('paperclip.snapshot',{refresh:true})).paperclip.stale);
+  await h.timers.fire();
+  assert.equal(h.events.length,1,'ok → stale emits');assert.ok(h.events[0].scopes.includes('config'));
+  await h.call('paperclip.snapshot',{refresh:true});
+  await h.timers.fire();
+  assert.equal(h.events.length,1,'still offline: nothing new to say');
+  down=false;
+  assert.equal((await h.call('paperclip.snapshot',{refresh:true})).paperclip.stale,undefined);
+  await h.timers.fire();
+  assert.equal(h.events.length,2,'stale → ok emits');assert.ok(h.events[1].scopes.includes('config'));
 });
 
 test('Paperclip routines map onto the automation model',()=>{
@@ -243,7 +288,7 @@ test('local source: Muster Projects become tasks, agents and an inbox; writes go
   assert.deepEqual(h.invoked.find(c=>c.command==='mailbox.send')!.input,{to:{kind:'taskRun',id:'1',projectId:'p1'},body:'Use Postgres'});
   await h.call('paperclip.task.update',{taskId:'2',status:'blocked'});
   assert.deepEqual(h.invoked.find(c=>c.command==='project.tasks.setState')!.input,{projectId:'p1',id:'2',revision:3,state:'blocked'});
-  await assert.rejects(()=>h.call('paperclip.task.update',{taskId:'2',status:'done'}),/verifying/);
+  await assert.rejects(()=>h.call('paperclip.task.update',{taskId:'2',status:'done'}),/Move it to In Review first/);
   await h.call('paperclip.pauseAll',{source:'local'});
   assert.deepEqual(h.invoked.find(c=>c.command==='project.scheduler.set')!.input,{projectId:'p1',paused:true});
   await h.call('paperclip.run.cancel',{id:'at1'});
@@ -292,6 +337,25 @@ test('turn ledger: entries chain by hash, verify catches an edited entry, and fi
   assert.equal(await filesChanged(repo,null),null,'no baseline, no file claims');
 });
 
+test('turn ledger: a fresh database has the baselines table, and a files error never drops the Receipt (S42)',async t=>{
+  const {DatabaseSync}=await import('node:sqlite');
+  const {TurnLedger,attachTurnLedger}=await import('../src/runtime/turn-ledger.ts');
+  const db=new DatabaseSync(':memory:');t.after(()=>db.close());
+  const ledger=new TurnLedger(db),appended:any[]=[],hooks:any={};
+  assert.ok(db.prepare("SELECT name FROM sqlite_master WHERE name='review_baselines'").get(),'created with the ledger, before any capture');
+  const context={db:()=>db,hooks:{onRunStarted:(fn:any)=>{hooks.start=fn;return()=>{};},onRunSettled:(fn:any)=>{hooks.settle=fn;return()=>{};},onProviderEvent:(fn:any)=>{hooks.event=fn;return()=>{};}}} as unknown as DomainContext;
+  const off=attachTurnLedger(context,()=>ledger,e=>appended.push(e));t.after(off);
+  // A 0 ms project turn with no baseline captured yet: the Receipt is kept, with no file list.
+  await hooks.start({chat:{id:'c1',title:'Run',projectId:'p1'},runId:'r0',cwd:'/nonexistent'});
+  await hooks.settle({chat:{id:'c1',title:'Run',projectId:'p1'},runId:'r0',status:'completed'});
+  // Even if the table is gone, the entry is still written.
+  db.exec('DROP TABLE review_baselines');
+  await hooks.start({chat:{id:'c1',title:'Run',projectId:'p1'},runId:'r1',cwd:'/nonexistent'});
+  await hooks.settle({chat:{id:'c1',title:'Run',projectId:'p1'},runId:'r1',status:'completed'});
+  assert.deepEqual(appended.map(e=>`${e.runId}:${e.files}`),['r0:null','r1:null']);
+  assert.equal(ledger.verify().entries,2);
+});
+
 test('turn ledger: only project and task runs diff the tree; everyday chats pay nothing new',async t=>{
   const {DatabaseSync}=await import('node:sqlite');
   const {TurnLedger,attachTurnLedger}=await import('../src/runtime/turn-ledger.ts');
@@ -300,7 +364,6 @@ test('turn ledger: only project and task runs diff the tree; everyday chats pay 
   const repo=await mkdtemp(join(tmpdir(),'muster-ledger-'));t.after(()=>rm(repo,{recursive:true,force:true}));
   execFileSync('git',['init','-q'],{cwd:repo});await writeFile(join(repo,'a.txt'),'one\n');
   const db=new DatabaseSync(':memory:');t.after(()=>db.close());
-  db.exec('CREATE TABLE review_baselines (run_id TEXT PRIMARY KEY, chat_id TEXT NOT NULL, folder_id TEXT, tree_sha TEXT, created_at TEXT NOT NULL, reason TEXT)');
   const ledger=new TurnLedger(db),appended:any[]=[];
   const hooks:any={};
   const context={db:()=>db,hooks:{onRunStarted:(fn:any)=>{hooks.start=fn;return()=>{};},onRunSettled:(fn:any)=>{hooks.settle=fn;return()=>{};},onProviderEvent:(fn:any)=>{hooks.event=fn;return()=>{};}}} as unknown as DomainContext;
@@ -368,6 +431,11 @@ test('one snapshot merges Muster and the linked Paperclip; writes route to which
   assert.deepEqual(h.server.calls.filter(c=>c.method==='POST').map(c=>c.url),['/api/issues/RAG-12/comments'],'the Paperclip task goes to Paperclip, and only it');
   const badge=await h.call('paperclip.badge');
   assert.equal(badge.connected,true);assert.equal(badge.inbox,4,'blocked, question, agent error and the failed run; reviews and mail never badge');
+  // S34: once RAG-4 is imported, its Muster copy stands for it; the linked Paperclip rows are not listed or badged again.
+  new SqliteImportStore(h.memory as never).setMap('task','i-4','lt1','RAG-4',{});
+  const after=await h.call('paperclip.snapshot');
+  assert.deepEqual(after.inbox.filter((i:any)=>i.source==='paperclip'&&i.taskId==='i-4'),[],'no duplicate rows for an imported task');
+  assert.equal((await h.call('paperclip.badge')).inbox,2,'the blocked row and the failed run on RAG-4 no longer count twice');
 });
 
 test('the Inbox badge is a light read: it never browses project memory; the full snapshot still counts it',async t=>{
@@ -392,6 +460,39 @@ test('a Paperclip confirmation is answered from Muster: accept, or reject with a
   await h.call('paperclip.interaction.respond',{taskId:'RAG-1',interactionId:'int-1',accept:true});
   await h.call('paperclip.interaction.respond',{taskId:'RAG-1',interactionId:'int-2',accept:false,reason:'Keep the old flow'});
   assert.deepEqual(h.server.calls.filter(c=>c.method==='POST').map(c=>`${c.url} ${JSON.stringify(c.body)}`),['/api/issues/RAG-1/interactions/int-1/accept {}','/api/issues/RAG-1/interactions/int-2/reject {"reason":"Keep the old flow"}']);
+});
+
+test('the linked view reads Paperclip blockers from blockedBy[].id and asks for them (S22)',async t=>{
+  const issue={id:'i-5',identifier:'RAG-5',title:'x',status:'blocked',blockedBy:[{id:'i-4',identifier:'RAG-4',title:'Docs',status:'blocked'},{id:'i-3'}]};
+  assert.deepEqual(mapIssue(issue as any,new Map(),new Set()).blockedByIds,['i-4','i-3']);
+  assert.deepEqual(mapIssue({...issue,blockedBy:undefined,blockedByIssueIds:['i-9']} as any,new Map(),new Set()).blockedByIds,['i-9'],'older payloads still work');
+  const h=await harness(t);
+  await h.call('paperclip.config.set',{mode:'local'});
+  await h.call('paperclip.snapshot');
+  assert.ok(h.server.calls.some(c=>/\/issues\?.*includeBlockedBy=true/.test(c.url)),'the snapshot asks Paperclip for blockers');
+});
+
+test('a Custom URL on loopback is a Paperclip on this Mac (its folders are linked on import); other hosts are remote (S79)',()=>{
+  for(const url of ['http://127.0.0.1:3101','http://localhost:3100','http://[::1]:3100','http://127.1.2.3'])assert.equal(isLoopback(url),true,url);
+  for(const url of ['https://pc.example.com','http://10.0.0.5:3100','http://localhost.evil.com','not a url'])assert.equal(isLoopback(url),false,url);
+});
+
+test('a Paperclip question set (ask_user_questions) is answerable in place through its respond endpoint (S13)',async t=>{
+  const pending={id:'int-q',kind:'ask_user_questions',status:'pending',createdAt:now,createdByAgentId:'a-cto',payload:{version:1,submitLabel:'Send',questions:[
+    {id:'scope',prompt:'Which scope?',selectionMode:'single',allowOther:true,options:[{id:'mig',label:'Migration only'},{id:'all',label:'Everything'}]},
+    {id:'envs',prompt:'Which environments?',selectionMode:'multi',options:[{id:'dev',label:'Dev'},{id:'prod',label:'Prod'}]}]}};
+  const card=mapInteraction(pending as any,new Map([['a-cto',{name:'CTO'} as any]])) as any;
+  assert.equal(card.interactionId,'int-q','answerable, not display-only');
+  assert.equal(card.from,'CTO');assert.equal(card.submitLabel,'Send');
+  assert.deepEqual(card.questions.map((q:any)=>`${q.id}:${q.multi}:${q.allowOther}:${q.options.map((o:any)=>o.id).join('/')}`),['scope:false:true:mig/all','envs:true:false:dev/prod']);
+  assert.equal((mapInteraction({...pending,status:'answered'} as any,new Map()) as any).questions,undefined,'an answered set is history');
+  const h=await harness(t);
+  await h.call('paperclip.config.set',{mode:'local'});
+  await h.call('paperclip.snapshot');
+  assert.equal(h.server.calls.filter(c=>c.method!=='GET').length,0,'nothing is written until you answer');
+  await h.call('paperclip.interaction.respond',{taskId:'RAG-12',interactionId:'int-q',accept:true,answers:[{questionId:'scope',optionIds:[],otherText:'Only the wizard'},{questionId:'envs',optionIds:['dev','prod']}]});
+  assert.deepEqual(h.server.calls.filter(c=>c.method==='POST').map(c=>`${c.url} ${JSON.stringify(c.body)}`),['/api/issues/RAG-12/interactions/int-q/respond {"answers":[{"questionId":"scope","optionIds":[],"otherText":"Only the wizard"},{"questionId":"envs","optionIds":["dev","prod"]}]}']);
+  await assert.rejects(()=>h.call('paperclip.interaction.respond',{taskId:'RAG-12',interactionId:'int-q',accept:true,answers:[{questionId:'scope',optionIds:[]}]}),/Answer every question/);
 });
 
 test('inbox dismissals persist by item id and time; a dismissed Paperclip or project item leaves the runtime badge until it changes',async t=>{

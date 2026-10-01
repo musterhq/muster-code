@@ -60,6 +60,7 @@ export function createProjectsDomain(ctx: DomainContext): DomainModule {
       dispatch: async task => { await dispatch(task.projectId, task.id, task.revision, 'scheduler'); },
       stop: async chatId => { await ctx.invoke('chat.stop', { id: chatId }); },
       runnable: projectId => { const r = maybeRow(projectId); return Boolean(r && !r.archived); },
+      held: task => task.owner.kind === 'agent' && Boolean(team.member(task.projectId, task.owner.id)?.pausedAt),
       changed: projectId => changed(projectId),
       // PER-06: automated runs queue (stay todo) while the machine is under memory/CPU pressure or agent slots are full.
       admit: () => resources.admits('agent'),
@@ -372,6 +373,8 @@ export function createProjectsDomain(ctx: DomainContext): DomainModule {
     if (!target) throw new Error('Attach a folder to this Project before starting an agent task.');
     if (!project.folderIds.includes(target)) throw new Error('Choose a folder attached to this Project.');
     // PRJ-13: the run gets only what its requester and its agent both hold, inside the Project policy.
+    const held = task.owner.kind === 'agent' ? team.member(projectId, task.owner.id) : undefined;
+    if (held?.pausedAt) throw new Error(`${held.name} is paused, so nothing of theirs starts. Resume ${held.name} first.`);
     const grant = team.runAccess(projectId, task.owner, trigger);
     if (!grant.active || !grant.canDispatch || !grant.permissionMode) throw new Error(grant.reason ?? 'This member cannot start task runs.');
     if (!grant.folderIds.includes(target)) throw new Error(`The member requesting this run has no access to ${folderName(target)}.`);
@@ -580,7 +583,7 @@ export function createProjectsDomain(ctx: DomainContext): DomainModule {
       'project.stats': input => {
         const days = Math.max(1, Math.min(90, Math.floor(Number(input.days ?? 14)) || 14)), offset = Math.max(-840, Math.min(840, Math.round(Number(input.utcOffsetMinutes ?? 0)) || 0));
         const since = new Date(Date.now() - days * 86_400_000).toISOString();
-        const stats = open().tasks.stats({ since, tzModifier: `${offset >= 0 ? '+' : ''}${offset} minutes`, activityLimit: Number(input.activityLimit ?? 12) || 12 });
+        const stats = open().tasks.stats({ since, tzModifier: `${offset >= 0 ? '+' : ''}${offset} minutes`, activityLimit: Number(input.activityLimit ?? 12) || 12, ...(input.projectId ? { projectId: project(input) } : {}) });
         const names = new Map((open().db.prepare('SELECT id, name FROM projects').all() as { id: string; name: string }[]).map(r => [r.id, r.name]));
         return { ...stats, activity: stats.activity.map(a => ({ ...a, projectName: names.get(a.projectId) ?? 'Project' })) } as never;
       },

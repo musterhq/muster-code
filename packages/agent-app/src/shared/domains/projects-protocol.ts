@@ -15,9 +15,10 @@ export interface ProjectImpact {
 }
 
 /** Full task lifecycle. The legacy `status` field keeps the five-state view older callers understand; `state` is the truth. */
-export type TaskState = 'todo' | 'running' | 'needs-input' | 'blocked' | 'review' | 'implemented' | 'verified' | 'failed' | 'cancelled';
-export const TASK_STATES: readonly TaskState[] = ['todo', 'running', 'needs-input', 'blocked', 'review', 'implemented', 'verified', 'failed', 'cancelled'];
-export const LEGACY_STATUS: Record<TaskState, LegacyTaskStatus> = { todo: 'todo', running: 'running', 'needs-input': 'running', blocked: 'blocked', review: 'implemented', implemented: 'implemented', verified: 'verified', failed: 'blocked', cancelled: 'blocked' };
+/** `backlog`: parked, not ready to start; the scheduler never picks it up until it moves to todo. */
+export type TaskState = 'backlog' | 'todo' | 'running' | 'needs-input' | 'blocked' | 'review' | 'implemented' | 'verified' | 'failed' | 'cancelled';
+export const TASK_STATES: readonly TaskState[] = ['backlog', 'todo', 'running', 'needs-input', 'blocked', 'review', 'implemented', 'verified', 'failed', 'cancelled'];
+export const LEGACY_STATUS: Record<TaskState, LegacyTaskStatus> = { backlog: 'todo', todo: 'todo', running: 'running', 'needs-input': 'running', blocked: 'blocked', review: 'implemented', implemented: 'implemented', verified: 'verified', failed: 'blocked', cancelled: 'blocked' };
 export interface TaskOwner { kind: 'user' | 'agent'; id: string }
 /** 0 urgent, 1 high, 2 normal, 3 low. */
 export type TaskPriority = 0 | 1 | 2 | 3;
@@ -110,7 +111,8 @@ export interface ProjectsCommands extends ProjectTeamCommands {
   'project.work': { input: { projectId: string; activityLimit?: number }; output: ProjectWorkState };
   'project.tasks.add': { input: { projectId: string; title: string; acceptance: string; dependencies: string[]; owner?: TaskOwner; priority?: TaskPriority; permissionMode?: ChatPermissionMode | null; budgetMinutes?: number | null; parentId?: string | null }; output: ProjectTaskView };
   /** Dashboard aggregates over the last `days` days (default 14), bucketed by the caller's UTC offset. Read-only. */
-  'project.stats': { input: { days?: number; utcOffsetMinutes?: number; activityLimit?: number }; output: ProjectStats };
+  /** `projectId`: one project's tasks, runs and activity (its Dashboard tab); omitted, every project. */
+  'project.stats': { input: { days?: number; utcOffsetMinutes?: number; activityLimit?: number; projectId?: string }; output: ProjectStats };
   'project.tasks.edit': { input: { projectId: string; id: string; revision: number; patch: TaskEdit }; output: ProjectTaskView };
   /** Refused while the task runs or while another task depends on it. */
   'project.tasks.delete': { input: { projectId: string; id: string; revision: number }; output: { deleted: true } };

@@ -15,6 +15,8 @@ export interface SchedulerDeps {
   leaseMs?: number;
   /** PER-06: machine-aware admission. When it refuses (memory/CPU pressure, agent slots full) the task stays todo and a later tick retries. */
   admit?(task: ProjectTask): { ok: boolean; reason?: string };
+  /** True while a task's owner is paused on its own (a per-agent hold): the scheduler leaves its tasks alone. */
+  held?(task: ProjectTask): boolean;
   /** Called once per pass that deferred work, with the reason. */
   deferred?(projectId: string, reason: string): void;
 }
@@ -39,7 +41,7 @@ export class ProjectScheduler {
     const all = tasks.listTasks(projectId).items, byId = new Map(all.map(t => [t.id, t])), leased = new Set(tasks.leasedTasks(projectId, this.now()));
     const active = all.filter(t => t.state === 'running' || t.state === 'needs-input' || (leased.has(t.id) && t.state !== 'verified')).length;
     const slots = Math.max(0, s.concurrency - active);
-    return all.filter(t => t.owner.kind === 'agent' && t.state === 'todo' && !leased.has(t.id) && isReady(t, byId))
+    return all.filter(t => t.owner.kind === 'agent' && t.state === 'todo' && !leased.has(t.id) && isReady(t, byId) && !this.deps.held?.(t))
       .sort((a, b) => a.priority - b.priority || a.createdAt.localeCompare(b.createdAt)).slice(0, slots);
   }
 

@@ -8,6 +8,7 @@
  *   reaches the renderer.
  */
 import type { MemoryConnection, MemoryRecord } from './memory-protocol.ts';
+import type { TimelineItem } from '../protocol.ts';
 
 export type PaperclipMode = 'off' | 'local' | 'custom';
 export const PAPERCLIP_LOCAL_URL = 'http://127.0.0.1:3100';
@@ -108,8 +109,17 @@ export type ThreadCard =
   /** `memory`: the Muster notes carried to the next agent with the work. */
   | { kind: 'handoff'; id: string; at: string; from: string | null; to: string | null; summary: string; memory: { text: string; source: string }[] }
   | { kind: 'needs'; id: string; at: string; from: string | null; prompt: string; detail: string | null; status: 'pending' | 'resolved' | 'cancelled'; resolution: string | null;
-      /** Answerable here when set: a Paperclip confirmation, accepted or rejected in place. */ interactionId: string | null; acceptLabel: string | null; rejectLabel: string | null }
+      /** Answerable here when set: a Paperclip confirmation, accepted or rejected in place. */ interactionId: string | null; acceptLabel: string | null; rejectLabel: string | null;
+      /** A Muster run waiting on you: its chat, and the pending question or approval item there, answered in place
+       *  (question.respond / approval.respond) so the waiting run continues. */
+      chatId?: string | null; pending?: TimelineItem | null;
+      /** A Paperclip ask_user_questions interaction: its questions, answered in place through Paperclip's respond endpoint. */
+      questions?: PaperclipQuestion[]; submitLabel?: string | null }
   | { kind: 'approval'; id: string; at: string; title: string; status: string };
+/** One question of a Paperclip ask_user_questions interaction. */
+export interface PaperclipQuestion { id: string; prompt: string; helpText: string | null; multi: boolean; allowOther: boolean; options: { id: string; label: string; description: string | null }[] }
+/** An answer for Paperclip's `/interactions/:id/respond`. */
+export interface PaperclipAnswer { questionId: string; optionIds: string[]; otherText?: string | null }
 export interface WorkspaceTaskDetail {
   task: WorkspaceTask; description: string; comments: WorkspaceComment[]; runs: WorkspaceRun[];
   /** Who the composer addresses; null when nobody can receive a message (a task you own with no agent). */
@@ -156,7 +166,8 @@ export interface DashboardData {
   days: string[];
   runs: DashboardDay[];
   tasksByDay: { day: string; counts: Partial<Record<WorkspaceStatus, number>> }[];
-  spend: { usd: number | null; pricedTurns: number; unpricedTurns: number; since: string; source: string };
+  /** `tokens`: input + output tokens this month, priced or not (a token budget works without prices). */
+  spend: { usd: number | null; pricedTurns: number; unpricedTurns: number; since: string; source: string; tokens: number };
   activity: { id: string; actor: string; summary: string; at: string; projectId: string | null; projectName: string | null; source: WorkspaceSource; refId: string | null }[];
   generatedAt: string;
 }
@@ -202,8 +213,9 @@ export interface PaperclipCommands {
   /** Inbox Dismiss: hides one item until it changes (`at` is the item's time, so a new failure shows again). The chat or task itself is kept. */
   'paperclip.inbox.dismiss': { input: { id: string; at: string }; output: { ok: true } };
   'paperclip.inbox.dismissed': { input: Record<string, never>; output: { items: { id: string; at: string }[] } };
-  /** Answers a Needs-you card from the thread or the Inbox (Paperclip confirmations: accept, or reject with a reason). */
-  'paperclip.interaction.respond': { input: { taskId: string; interactionId: string; accept: boolean; reason?: string }; output: { ok: true } };
+  /** Answers a Needs-you card from the thread or the Inbox (Paperclip confirmations: accept, or reject with a reason;
+   *  questions: `answers`, sent to Paperclip's respond endpoint). Only ever sent when you answer. */
+  'paperclip.interaction.respond': { input: { taskId: string; interactionId: string; accept: boolean; reason?: string; answers?: PaperclipAnswer[] }; output: { ok: true } };
   /** Copies a Paperclip company into Muster's Projects with GET requests only. Idempotent. Nothing starts running. */
   'paperclip.import': { input: { mode?: PaperclipMode; baseUrl?: string; token?: string; companyId?: string; targets?: ImportTargets }; output: PaperclipImportReport };
   /** Starts a Muster task's first run on its Roster agent's runner, in a new worktree of the project's folder (never the checkout itself). */
@@ -217,5 +229,13 @@ export const PAPERCLIP_COMMANDS = {
   'paperclip.pauseAll': true, 'paperclip.resumeAll': true, 'paperclip.run.cancel': true, 'paperclip.memory': true, 'paperclip.list': true,
   'paperclip.watch': true, 'paperclip.badge': true, 'paperclip.ledger': true, 'paperclip.ledger.backfill': true, 'paperclip.inbox.dismiss': true, 'paperclip.inbox.dismissed': true, 'paperclip.interaction.respond': true, 'paperclip.import': true, 'paperclip.task.start': true, 'paperclip.dashboard': true, 'paperclip.import.plan': true,
 } as const satisfies Record<keyof PaperclipCommands, true>;
+
+/** How much of a monthly budget is used: in dollars when the budget and the spend are priced, else in tokens when a
+ *  token budget is set (models with no price still count). Null when no budget applies. */
+export function budgetUse(budget: { usd: number | null; tokens: number | null }, spend: { usd: number | null; tokens: number }): { unit: 'usd' | 'tokens'; used: number; limit: number; ratio: number } | null {
+  if (budget.usd !== null && budget.usd > 0 && spend.usd !== null) return { unit: 'usd', used: spend.usd, limit: budget.usd, ratio: spend.usd / budget.usd };
+  if (budget.tokens !== null && budget.tokens > 0) return { unit: 'tokens', used: spend.tokens, limit: budget.tokens, ratio: spend.tokens / budget.tokens };
+  return null;
+}
 
 export const OPEN_STATUSES: readonly WorkspaceStatus[] = ['backlog', 'todo', 'in_progress', 'in_review', 'blocked'];

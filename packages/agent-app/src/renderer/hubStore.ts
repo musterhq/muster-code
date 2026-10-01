@@ -19,8 +19,10 @@ export interface HubRoute { page: HubPage; arg: string | null; from: HubPage | n
 // --- route ---------------------------------------------------------------------------------------------------------
 let route: HubRoute = { page: 'inbox', arg: null, from: null, fromArg: null };
 const routeListeners = new Set<() => void>();
-export function openHub(page: HubPage, arg: string | null = null): void {
-  route = route.page === page ? { page, arg, from: route.from, fromArg: route.fromArg } : { page, arg, from: route.page, fromArg: route.arg };
+/** `from`: where the page was opened from when that is not the current hub page (a project's page on the Projects
+ *  screen), so the breadcrumb leads back there. */
+export function openHub(page: HubPage, arg: string | null = null, from?: { page: HubPage; arg: string | null }): void {
+  route = from ? { page, arg, from: from.page, fromArg: from.arg } : route.page === page ? { page, arg, from: route.from, fromArg: route.fromArg } : { page, arg, from: route.page, fromArg: route.arg };
   for (const l of routeListeners) l();
   openHubScreen();
 }

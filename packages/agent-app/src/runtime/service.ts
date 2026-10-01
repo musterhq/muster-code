@@ -659,7 +659,12 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
         if (disposed) return;
         seal();
         if (!producedAssistant && result.finalMessage) store.appendItem(chatId, 'assistant', result.finalMessage, 'completed');
-        const recovery: ChatRecovery | undefined = result.recovery ?? (run.stopped ? {kind:'cancelled',retryable:false,reason:'Stopped.'} : result.status === 'failed' ? {kind:'recovery-needed',retryable:false,reason:'The provider attempt did not settle with confirmed outcome. Check its saved turn before continuing; the prompt was not resent.'} : undefined);
+        // The provider's own words are kept (S36): an adapter that reports a failure with a message (rate_limited, auth…)
+        // settled that attempt as failed, which Inbox and Pulse explain in a plain sentence and which may be run again.
+        // A failure with no message at all stays unconfirmed (recovery-needed).
+        const said = (result.errorMessage ?? '').replace(/\s+/g, ' ').trim().slice(0, 600);
+        const recovery: ChatRecovery | undefined = result.recovery ?? (run.stopped ? {kind:'cancelled',retryable:false,reason:'Stopped.'}
+          : result.status === 'failed' ? (said && result.dispatchState !== 'unknown' ? {kind:'failed',retryable:false,reason:`The provider attempt failed: ${said}`} : {kind:'recovery-needed',retryable:false,reason:'The provider attempt did not settle with confirmed outcome. Check its saved turn before continuing; the prompt was not resent.'}) : undefined);
         if (result.threadId) persistIdentity(result.threadId,result.turnId);
         // Only a turn the provider actually took delivered its context blocks to the thread.
         if (result.status === 'completed' && result.dispatchState !== 'not-dispatched' && !compactedInRun) contextLedger.delivered(chatId, store.chat(chatId)?.providerThreadId, [...pendingBlocks], retainedTurns);

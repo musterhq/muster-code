@@ -78,15 +78,13 @@ export function TaskList({ snapshot, tasks, scope, showProject = false, onOpenTa
       <Menu.Root>
         <Tip label={`Sort: ${SORT_LABEL[view.sort]}`}><Menu.Trigger className="icon-button task-tool" aria-label={`Sort: ${SORT_LABEL[view.sort]}`}><ArrowDownUp size={15}/></Menu.Trigger></Tip>
         <Menu.Portal><Menu.Positioner side="bottom" align="end" sideOffset={6} className="ui-menu-positioner"><Menu.Popup className="ui-menu">
-          <Menu.GroupLabel className="ui-menu-label">Sort by</Menu.GroupLabel>
-          <Menu.RadioGroup value={view.sort} onValueChange={value => update({ sort: value as TaskSort })}>{(Object.keys(SORT_LABEL) as TaskSort[]).map(s => <Menu.RadioItem key={s} value={s}><Check size={13} className="task-check" data-on={view.sort === s || undefined}/>{SORT_LABEL[s]}</Menu.RadioItem>)}</Menu.RadioGroup>
+          <Menu.RadioGroup value={view.sort} onValueChange={value => update({ sort: value as TaskSort })}><Menu.GroupLabel className="ui-menu-label">Sort by</Menu.GroupLabel>{(Object.keys(SORT_LABEL) as TaskSort[]).map(s => <Menu.RadioItem key={s} value={s}><Check size={13} className="task-check" data-on={view.sort === s || undefined}/>{SORT_LABEL[s]}</Menu.RadioItem>)}</Menu.RadioGroup>
         </Menu.Popup></Menu.Positioner></Menu.Portal>
       </Menu.Root>
       {view.layout === 'list' && <Menu.Root>
         <Tip label={`Group: ${GROUP_LABEL[view.group]}`}><Menu.Trigger className="icon-button task-tool" aria-label={`Group: ${GROUP_LABEL[view.group]}`} data-active={view.group !== 'none' ? 'true' : undefined}><Layers size={15}/></Menu.Trigger></Tip>
         <Menu.Portal><Menu.Positioner side="bottom" align="end" sideOffset={6} className="ui-menu-positioner"><Menu.Popup className="ui-menu">
-          <Menu.GroupLabel className="ui-menu-label">Group by</Menu.GroupLabel>
-          <Menu.RadioGroup value={view.group} onValueChange={value => update({ group: value as TaskGroup, collapsed: [] })}>{groups.map(g => <Menu.RadioItem key={g} value={g}><Check size={13} className="task-check" data-on={view.group === g || undefined}/>{GROUP_LABEL[g]}</Menu.RadioItem>)}</Menu.RadioGroup>
+          <Menu.RadioGroup value={view.group} onValueChange={value => update({ group: value as TaskGroup, collapsed: [] })}><Menu.GroupLabel className="ui-menu-label">Group by</Menu.GroupLabel>{groups.map(g => <Menu.RadioItem key={g} value={g}><Check size={13} className="task-check" data-on={view.group === g || undefined}/>{GROUP_LABEL[g]}</Menu.RadioItem>)}</Menu.RadioGroup>
         </Menu.Popup></Menu.Positioner></Menu.Portal>
       </Menu.Root>}
     </div>

@@ -8,7 +8,7 @@
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { ArrowDown, ArrowRight, ArrowUp, Brain, CircleHelp, GitBranch, PanelRight, Play, ShieldCheck, Waypoints, X } from 'lucide-react';
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import type { LedgerEntry, ThreadCard, WorkspaceComment, WorkspaceMemory, WorkspaceSnapshot, WorkspaceStatus, WorkspaceTaskDetail } from '../../shared/domains/paperclip-protocol';
+import type { LedgerEntry, PaperclipQuestion, ThreadCard, WorkspaceComment, WorkspaceMemory, WorkspaceSnapshot, WorkspaceStatus, WorkspaceTaskDetail } from '../../shared/domains/paperclip-protocol';
 import { PRIORITY_NAME, STATUS_LABEL, WORKSPACE_STATUSES } from '../../shared/domains/paperclip-protocol';
 import { NAMES } from '../../shared/workspace-names';
 import { invoke } from '../bridge';
@@ -16,7 +16,9 @@ import { onTasksChanged } from '../hubStore';
 import { agoLabel, exactTime } from '../relativeTime';
 import { closeSettings, notifyError, notifySuccess, selectChat } from '../store';
 import { LiveCount, Monogram, Receipt, RUN_STATE_LABEL, StateChip, TaskStatusIcon, duration, explainRunError, runTone } from './HubParts';
+import { ApprovalCard } from './ApprovalCard';
 import { MessageBody } from './MessageBody';
+import { PendingQuestion } from './PendingQuestion';
 import { ResourceState } from './ResourceState';
 import { Tip } from './Tooltip';
 
@@ -127,9 +129,12 @@ function Card({ card, taskId, who, onOpenTask, onChanged }: { card: ThreadCard; 
   return <div className="ws-card-sys" data-kind="needs" data-status={card.status}>
     <CircleHelp size={14} aria-hidden="true"/><span className="ws-card-sys-text"><strong>{card.status === 'pending' ? 'Needs you' : 'Decision'}</strong>{card.from ? <> · {who(card.from)} asks</> : null}</span>
     <time className="ws-message-time" title={exactTime(card.at)}>{agoLabel(card.at)}</time>
-    <p className="ws-card-prompt">{card.prompt}</p>
+    {!card.pending && !card.questions?.length && <p className="ws-card-prompt">{card.prompt}</p>}
     {card.detail && card.status === 'pending' && <details className="ws-card-detail"><summary>Details</summary><MessageBody text={card.detail}/></details>}
     {card.status !== 'pending' ? <p className="ws-faint ws-card-resolution">{card.status === 'cancelled' ? 'Withdrawn.' : card.resolution ?? 'Answered.'}</p>
+      : card.questions?.length && card.interactionId ? <PaperclipQuestions taskId={taskId} interactionId={card.interactionId} questions={card.questions} submitLabel={card.submitLabel ?? null} onChanged={onChanged}/>
+      : card.pending ? (card.pending.kind === 'question' ? <PendingQuestion item={card.pending}/> : <ApprovalCard item={card.pending}/>)
+      : card.chatId ? <p className="ws-faint ws-card-resolution">Answer it in <button type="button" className="ws-link" onClick={() => { void selectChat(card.chatId!); closeSettings(); }}>the run chat</button>.</p>
       : card.interactionId ? <div className="ws-card-actions">
           {rejecting && <input className="ws-card-reason" aria-label="What should change?" placeholder="What should change?" value={reason} onChange={e => setReason(e.target.value)}/>}
           <button type="button" className="settings-button secondary" disabled={busy || (rejecting && !reason.trim())} onClick={() => rejecting ? void respond(false) : setRejecting(true)}>{card.rejectLabel ?? 'Request changes'}</button>
@@ -137,6 +142,32 @@ function Card({ card, taskId, who, onOpenTask, onChanged }: { card: ThreadCard; 
         </div>
       : <p className="ws-faint ws-card-resolution">Answer it by replying below.</p>}
   </div>;
+}
+
+/** A Paperclip question set, answered in place through Paperclip's respond endpoint (only when you press Send). Same
+ *  markup and styles as a Muster run's question card. */
+function PaperclipQuestions({ taskId, interactionId, questions, submitLabel, onChanged }: { taskId: string; interactionId: string; questions: PaperclipQuestion[]; submitLabel: string | null; onChanged: () => void }): React.ReactElement {
+  const [picked, setPicked] = useState<Record<string, string[]>>({});
+  const [other, setOther] = useState<Record<string, string>>({});
+  const [busy, setBusy] = useState(false);
+  const answered = (q: PaperclipQuestion) => (picked[q.id]?.length ?? 0) > 0 || Boolean(other[q.id]?.trim());
+  const send = async () => {
+    if (busy || !questions.every(answered)) return;
+    setBusy(true);
+    try {
+      await invoke('paperclip.interaction.respond', { taskId, interactionId, accept: true, answers: questions.map(q => ({ questionId: q.id, optionIds: picked[q.id] ?? [], ...(other[q.id]?.trim() ? { otherText: other[q.id].trim() } : {}) })) });
+      notifySuccess('Answer sent.'); onChanged();
+    } catch (cause) { notifyError(cause); setBusy(false); }
+  };
+  return <section className="pending-question" aria-label="Questions">
+    {questions.map(q => <fieldset key={q.id} disabled={busy}>
+      <p>{q.prompt}</p>
+      {q.helpText && <p className="ws-faint">{q.helpText}</p>}
+      {q.options.map(option => { const on = picked[q.id]?.includes(option.id) ?? false; return <label key={option.id} className="pending-question-option"><input type={q.multi ? 'checkbox' : 'radio'} name={`${interactionId}:${q.id}`} checked={on} onChange={() => setPicked(current => ({ ...current, [q.id]: q.multi ? (on ? (current[q.id] ?? []).filter(x => x !== option.id) : [...(current[q.id] ?? []), option.id]) : [option.id] }))}/> <span>{option.label}{option.description && <small>{option.description}</small>}</span></label>; })}
+      {q.allowOther && <label className="pending-question-custom">Other answer<input type="text" value={other[q.id] ?? ''} onChange={e => setOther(current => ({ ...current, [q.id]: e.target.value }))} placeholder="Or type a custom response"/></label>}
+    </fieldset>)}
+    <div className="pending-question-actions"><button type="button" className="pending-question-submit" disabled={busy || !questions.every(answered)} onClick={() => void send()}>{busy ? 'Sending…' : submitLabel ?? 'Send answer'}</button></div>
+  </section>;
 }
 
 function Composer({ detail, onSent }: { detail: WorkspaceTaskDetail; onSent: () => void }): React.ReactElement {
@@ -216,6 +247,7 @@ function Properties({ detail, snapshot, onOpenTask, onClose, onChanged }: { deta
       <dl>
         <Row label="Live run">{task.live ? <LiveCount count={1}/> : <span className="ws-faint">None</span>}</Row>
         <Row label="Last run">{lastRun ? <span className="ws-inline" title={explainRunError(lastRun.error) ?? undefined}><StateChip tone={runTone(lastRun.status)}>{RUN_STATE_LABEL[lastRun.status]}</StateChip><span className="ws-ellipsis" title={exactTime(lastRun.createdAt)}>{lastRun.finishedAt ? `${duration(lastRun.startedAt, lastRun.finishedAt) || '0s'} · ${agoLabel(lastRun.finishedAt)}` : agoLabel(lastRun.createdAt)}</span></span> : <span className="ws-faint">None</span>}</Row>
+        {lastRun?.chatId && <Row label="Run chat"><button type="button" className="ws-link" onClick={() => { void selectChat(lastRun.chatId!); closeSettings(); }}>Open run chat</button></Row>}
         <Row label="Runs">{detail.runs.length || <span className="ws-faint">None</span>}</Row>
       </dl>
       {task.source === 'local' && task.assigneeId !== 'user:local' && !task.live && task.status !== 'done' && task.status !== 'cancelled' && <StartRun taskId={task.id} owner={task.assigneeLabel} onStarted={onChanged}/>}

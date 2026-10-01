@@ -16,7 +16,7 @@ import { useStore } from '../useStore';
 import { AGENT_STATE_LABEL, INBOX_KIND_LABEL, Monogram, Receipt, RUN_STATE_LABEL, StateChip, TaskStatusIcon, agentTone, costText, duration, explainRunError, runTone, type Tone } from './HubParts';
 import { MailboxInbox } from './MailboxInbox';
 import { ResourceState } from './ResourceState';
-import { runtimeLabel } from './RosterGraph';
+import { useRuntimeLabel } from './RosterGraph';
 import { EditAgentButton, HireApprovalCard } from './RosterPanel';
 import { Tip } from './Tooltip';
 
@@ -132,6 +132,7 @@ export function PulseBoard({ snapshot, nav, agentId, scoped = false }: { snapsho
 
 // --- Agent page ---------------------------------------------------------------------------------------------------------
 export function AgentPage({ snapshot, agentId, nav }: { snapshot: WorkspaceSnapshot; agentId: string; nav: HubNav }): React.ReactElement {
+  const runtimeLabel = useRuntimeLabel();
   const agent = snapshot.agents.find(a => a.id === agentId);
   const [busy, setBusy] = useState(false);
   if (!agent) return <ResourceState kind="empty" message="This agent is no longer on the Roster."/>;
@@ -166,12 +167,13 @@ export function AgentPage({ snapshot, agentId, nav }: { snapshot: WorkspaceSnaps
 
 // --- Ledger ----------------------------------------------------------------------------------------------------------------
 type LedgerTab = 'receipts' | 'timeline' | 'activity' | 'costs';
-export function LedgerPage({ snapshot, nav }: { snapshot: WorkspaceSnapshot; nav: HubNav }): React.ReactElement {
+/** `projectId` shows only that project's turns (the project page's Ledger tab), without its own page title. */
+export function LedgerPage({ snapshot, nav, projectId }: { snapshot: WorkspaceSnapshot; nav: HubNav; projectId?: string }): React.ReactElement {
   const [tab, setTab] = useState<LedgerTab>('receipts');
   const [view, setView] = useState<LedgerView | null>(null);
   const [error, setError] = useState('');
   const [tick, setTick] = useState(0);
-  useEffect(() => { let live = true; setError(''); invoke('paperclip.ledger', { limit: 300 }).then(v => { if (live) setView(v); }, e => { if (live) setError(errorText(e)); }); return () => { live = false; }; }, [snapshot.fetchedAt, tick]);
+  useEffect(() => { let live = true; setError(''); invoke('paperclip.ledger', { limit: projectId ? 1000 : 300 }).then(v => { if (live) setView(projectId ? { ...v, entries: v.entries.filter(e => e.projectId === projectId) } : v); }, e => { if (live) setError(errorText(e)); }); return () => { live = false; }; }, [snapshot.fetchedAt, tick]);
   const tasks = useMemo(() => new Map(snapshot.tasks.map(t => [t.id, t])), [snapshot.tasks]);
   const costs = useMemo(() => {
     const rows = new Map<string, { agent: string; model: string; turns: number; input: number; output: number; cost: number | null; unpriced: number }>();
@@ -189,7 +191,7 @@ export function LedgerPage({ snapshot, nav }: { snapshot: WorkspaceSnapshot; nav
   const importHistory = () => { setImporting(true); invoke('paperclip.ledger.backfill', {}).then(r => { notifySuccess(r.turns ? `Imported ${r.turns} past ${r.turns === 1 ? 'turn' : 'turns'} as history.` : 'No past turns to import.'); setTick(n => n + 1); }, notifyError).finally(() => setImporting(false)); };
   const TABS: [LedgerTab, string][] = [['receipts', NAMES.receipts], ['timeline', NAMES.timeline], ['activity', 'Activity'], ['costs', 'Costs']];
   return <div className="ws-page ws-page-fill">
-    <PageHeader title={NAMES.ledger} detail="One entry per agent turn: who ran, on which model, what it cost in tokens, which tools it used and which files it changed.">
+    <PageHeader title={projectId ? '' : NAMES.ledger} detail={projectId ? '' : "One entry per agent turn: who ran, on which model, what it cost in tokens, which tools it used and which files it changed."}>
       <div className="ws-segmented is-inline" role="tablist" aria-label="Ledger views">{TABS.map(([t, l]) => <button key={t} type="button" role="tab" aria-selected={tab === t} className="ws-segment" onClick={() => setTab(t)}><span className="ws-segment-label">{l}</span></button>)}</div>
     </PageHeader>
     {chain && <p className="ws-chain" data-ok={chain.ok ? 'true' : 'false'}>{chain.ok ? chain.entries === 0 ? 'No Muster turns recorded yet' : `Muster chain verified · ${chain.entries} ${chain.entries === 1 ? 'entry' : 'entries'} · head ${chain.head.slice(0, 12)}` : `Chain broken at entry #${chain.brokenAt}: an entry was changed or removed after it was written.`}{imported ? ` · ${imported} imported from history (not chained)` : ''}</p>}

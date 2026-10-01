@@ -8,7 +8,7 @@ import { invoke } from '../bridge';
 import { restoreFocus } from '../focus';
 import { openHub, useWorkspace } from '../hubStore';
 import { onNewProjectRequest, takeNewProjectRequest } from '../projectIntent';
-import { onOpenProject, takePendingProject } from '../projectFocus';
+import { clearPendingProject, onOpenProject, peekPendingProject } from '../projectFocus';
 import { selectChat } from '../store';
 import { useStore } from '../useStore';
 import type { HubNav } from './HubPages';
@@ -35,7 +35,9 @@ export function ProjectsScreen({ onBack, onStartChat }: { onBack: () => void; on
   const [details, setDetails] = useState<ProjectDetails[] | null>(null);
   const [creating, setCreating] = useState(takeNewProjectRequest);
   useEffect(() => onNewProjectRequest(() => setCreating(true)), []);
-  const [selectedId, setSelectedId] = useState<string | null>(() => takePendingProject());
+  // Peek in the initializer and consume in an effect: a first render React throws away never loses the request.
+  const [selectedId, setSelectedId] = useState<string | null>(() => peekPendingProject());
+  useEffect(() => { clearPendingProject(selectedId); }, []);
   const back = useRef<HTMLButtonElement>(null);
   const launcher = useRef<Element | null>(null);
   useEffect(() => { launcher.current = document.activeElement; back.current?.focus(); }, []);
@@ -55,7 +57,8 @@ export function ProjectsScreen({ onBack, onStartChat }: { onBack: () => void; on
   const projects = [...(details ?? []).filter(p => known.has(p.id)), ...(snapshot?.projects ?? []).filter(p => !listed.has(p.id)).map(fromSnapshot)];
   const selected = selectedId ? projects.find(p => p.id === selectedId) ?? null : null;
   const upsert = (next: ProjectDetails) => setDetails(list => list ? list.map(p => p.id === next.id ? next : p) : list);
-  const nav: HubNav = { onOpenTask: id => openHub('task', id), onOpenAgent: id => openHub('agent', id), onOpenChat: id => { void selectChat(id); onBack(); } };
+  // An agent opened from a project's Roster keeps that project as its breadcrumb (not the hub's last page, the Inbox).
+  const nav: HubNav = { onOpenTask: id => openHub('task', id), onOpenAgent: id => openHub('agent', id, selected ? { page: 'project', arg: selected.id } : undefined), onOpenChat: id => { void selectChat(id); onBack(); } };
   const toList = () => { setCreating(false); setSelectedId(null); };
 
   return <section className="project-screen" aria-label={NAMES.projects} onKeyDown={e => {
