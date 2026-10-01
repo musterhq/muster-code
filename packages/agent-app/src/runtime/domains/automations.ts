@@ -101,7 +101,7 @@ export function createAutomationsDomain(ctx: DomainContext): DomainModule {
     CREATE TABLE IF NOT EXISTS automation_run_ext (run_id TEXT PRIMARY KEY, vars TEXT, task_id TEXT, fp TEXT);
     CREATE TABLE IF NOT EXISTS automation_gates (id TEXT PRIMARY KEY, automation_id TEXT NOT NULL, run_id TEXT NOT NULL, trigger TEXT NOT NULL, vars TEXT NOT NULL, status TEXT NOT NULL, created_at TEXT NOT NULL, decided_at TEXT);
     CREATE TABLE IF NOT EXISTS standup_children (parent_id TEXT NOT NULL, child_id TEXT NOT NULL PRIMARY KEY, chat_id TEXT, project_id TEXT NOT NULL, automation_id TEXT NOT NULL, run_id TEXT NOT NULL, name TEXT NOT NULL, done INTEGER NOT NULL DEFAULT 0, note TEXT)`);
-  let disposed = false, reconciled = false;
+  let disposed = false;
   const dispatching = new Set<string>();
   const watchState = new Map<string, { lastRun: number; quietUntil: number; timer?: ReturnType<typeof setTimeout> }>();
   let watcher: WorkspaceWatchService | undefined;
@@ -413,9 +413,16 @@ export function createAutomationsDomain(ctx: DomainContext): DomainModule {
 
   /** After a restart, a run the app never finished dispatching is failed; a dispatched one takes its chat's outcome. */
   function reconcile(): void {
-    reconciled = true;
     for (const run of db.prepare(`SELECT * FROM automation_runs WHERE status = 'running'`).all() as unknown as RunRow[]) {
       if (dispatching.has(run.id)) continue;
+      // A standup has no chat of its own: it waits on its agents' subtasks. Children whose runs are gone are closed; with none left the
+      // digest is written from what arrived, otherwise the run keeps waiting.
+      const kids = db.prepare('SELECT child_id, chat_id, parent_id FROM standup_children WHERE run_id = ? AND done = 0').all(run.id) as unknown as { child_id: string; chat_id: string | null; parent_id: string }[];
+      if (!run.run_id && kids.length) {
+        for (const k of kids) { const c = k.chat_id ? ctx.store.chat(k.chat_id) : undefined; if (!c || (c.status !== 'running' && c.status !== 'stopping')) db.prepare('UPDATE standup_children SET done = 1, note = ? WHERE child_id = ?').run('Interrupted when Muster quit.', k.child_id); }
+        if (!db.prepare('SELECT 1 FROM standup_children WHERE run_id = ? AND done = 0 LIMIT 1').get(run.id)) void postDigest(kids[0]!.parent_id);
+        continue;
+      }
       const chat = run.chat_id ? ctx.store.chat(run.chat_id) : undefined;
       if (!run.run_id || !chat) { finish(run.id, 'failed', run.run_id ? 'The run’s chat was deleted.' : 'Muster closed before this run started.'); continue; }
       if (chat.status === 'running' || chat.status === 'stopping') continue;
@@ -428,7 +435,6 @@ export function createAutomationsDomain(ctx: DomainContext): DomainModule {
     const now = automationTiming.now();
     const automations = rows();
     if (!automations.length) return;
-    if (!reconciled) reconcile();
     for (const automation of automations) {
       if (automation.paused) { drainQueue(automation.id); continue; }
       let schedule: AutomationSchedule;
@@ -459,6 +465,8 @@ export function createAutomationsDomain(ctx: DomainContext): DomainModule {
     }, delay);
     timer.unref?.();
   };
+  // Leftovers of a previous process are settled once, here, before the first tick: never by a tick that could see a live run.
+  reconcile();
   loop(automationTiming.firstTickMs);
 
   // File-watch triggers: at most one run per cooldown; changes while its own run works (or just after) never retrigger it.
