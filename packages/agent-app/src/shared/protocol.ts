@@ -13,7 +13,7 @@ export type ChatPermissionMode = 'read-only' | 'workspace' | 'full';
 export type ChatStatus = 'idle' | 'running' | 'stopping' | 'completed' | 'failed' | 'interrupted' | 'waiting' | 'queued' | 'reconnecting';
 /** `missing` is set when the folder path was not a directory at snapshot time (cached ~10s); the sidebar offers Relink. */
 export interface Folder { id: string; path: string; name: string; missing?: boolean }
-export interface ChatRecovery { kind: 'admission-rejected' | 'recovery-needed' | 'failed' | 'cancelled'; retryable: boolean; reason: string }
+export interface ChatRecovery { kind: 'admission-rejected' | 'recovery-needed' | 'failed' | 'cancelled'; retryable: boolean; reason: string; /** The provider rejected the credentials (401/403); fixed in Accounts & providers. */ auth?: {providerId: string; status: 401 | 403} }
 /** A follow-up waiting for the current run to complete. Dispatched in order through chat.send with its own requestId. */
 export interface QueuedMessage {id:string; text:string; requestId:string; attachmentIds:string[]; createdAt:string; skillIds?:string[]; pluginIds?:string[]; effort?:ReasoningEffort; /** Set when a dispatch was refused; the row offers Retry. */ error?:string}
 /** Codex limits: 100 queued items per thread, 1 MiB of text per item. */

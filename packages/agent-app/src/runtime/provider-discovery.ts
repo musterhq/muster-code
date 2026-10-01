@@ -195,7 +195,8 @@ async function discoverCodexGateways(home: string, env: NodeJS.ProcessEnv): Prom
     try { text = await readBounded(source); } catch { continue; }
     if (text === null) continue;
     const { selected, tables } = codexProviderTables(text);
-    const ids = new Set([...tables.keys(), ...(file !== 'config.toml' && selected ? [selected] : [])]);
+    // A profile file runs only the provider it selects; other tables in it are never used by Codex for that profile.
+    const ids = new Set(file === 'config.toml' ? tables.keys() : selected ? [selected] : []);
     for (const id of ids) {
       if (id === 'openai' || rows.has(id)) continue;
       rows.set(id, entry({ id, name: tables.get(id) || id, source, status: 'configured', credentialPresent: true, identityMasked: 'Gateway in Codex config', detail: `[model_providers.${id}] in ${file}; not verified` }));

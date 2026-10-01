@@ -44,7 +44,9 @@ function depth(text) {
  *  recorded (in `multiline`) so a caller can refuse them where it needs the value. */
 function parseToml(text) {
   const values = new Map(), multiline = new Set(); let section = [], skip = 0, skipKey = '', triple = '';
+  let lineNo = 0;
   for (const line of text.split(/\r?\n/)) {
+    lineNo++;
     if (triple) { if (line.includes(triple)) { triple = ''; multiline.add(skipKey); } continue; }
     if (skip > 0) { skip += depth(line); if (skip <= 0) { skip = 0; multiline.add(skipKey); } continue; }
     const trimmed = line.trim();
@@ -52,10 +54,10 @@ function parseToml(text) {
     const array = /^\[\[\s*(.+?)\s*\]\]\s*(?:#.*)?$/.exec(trimmed);
     if (array) { section = ['[[' + array[1] + ']]']; continue; }
     const table = /^\[\s*([^\[\]]+?)\s*\]\s*(?:#.*)?$/.exec(trimmed);
-    if (table) { const path = keyPath(table[1]); if (!path) throw new Error('Unsupported multiline provider profile configuration.'); section = path; continue; }
+    if (table) { const path = keyPath(table[1]); if (!path) throw new Error('Unsupported TOML table header on line ' + lineNo + '.'); section = path; continue; }
     const eq = trimmed.indexOf('=');
     const key = eq > 0 ? keyPath(trimmed.slice(0, eq).trim()) : undefined;
-    if (!key) throw new Error('Unsupported multiline provider profile configuration.');
+    if (!key) throw new Error('Unsupported TOML on line ' + lineNo + ' (expected key = value).');
     const full = [...section, ...key].join('.'), value = trimmed.slice(eq + 1).trim();
     const quotes = /^("""|''')/.exec(value)?.[1];
     if (quotes && !value.slice(3).includes(quotes)) { triple = quotes; skipKey = full; continue; }
@@ -188,7 +190,11 @@ function launch(selection, args) {
   const codexArgs = [...args, ...overrides.flatMap(value => ['-c', value])];
   // A JS entry (a resolved npm shim on Windows) runs through this Node; a native binary runs directly.
   const script = /\.(?:c|m)?js$/i.test(command);
-  const child = spawn(script ? process.execPath : command, script ? [command, ...codexArgs] : codexArgs, { stdio: ['pipe', 'pipe', 'ignore'], windowsHide: true });
+  const child = spawn(script ? process.execPath : command, script ? [command, ...codexArgs] : codexArgs, { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
+  // Codex's stderr is not forwarded (it can echo configuration). Only its tail is kept, so a catalog Codex rejects
+  // is reported with Codex's own reason (e.g. "missing field `support_verbosity`") instead of a bare exit.
+  let stderrTail = '';
+  child.stderr.on('data', chunk => { stderrTail = (stderrTail + chunk.toString('utf8')).slice(-8192); });
   const pending = new Map();
   const resumes = new Map();
   const write = message => process.stdout.write(JSON.stringify(message) + '\n');
@@ -229,8 +235,20 @@ function launch(selection, args) {
   });
   child.on('error', () => { process.stderr.write('Selected provider app-server failed to start.\n'); process.exitCode = 1; process.stdin.destroy(); });
   child.stdin.on('error', () => { process.stderr.write('Selected provider connection closed.\n'); child.kill(); });
-  child.on('exit', code => { if (code) process.stderr.write('Selected provider app-server exited; check the profile, catalog and CLI configuration.\n'); process.exit(code ?? 1); });
+  child.on('exit', code => {
+    if (code) {
+      const catalog = catalogFailure(stderrTail);
+      process.stderr.write((catalog ? catalog + '\n' : '') + 'Selected provider app-server exited; check the profile, catalog and CLI configuration.\n');
+    }
+    process.exit(code ?? 1);
+  });
   for (const signal of ['SIGTERM', 'SIGINT']) process.on(signal, () => { child.kill(signal); });
+}
+
+/** Codex's own reason for rejecting a model catalog, from its stderr; only this one line shape is ever surfaced. */
+function catalogFailure(stderr) {
+  const match = /failed to parse model_catalog_json path `([^`\n]{1,1024})` as JSON: ([^\n]{1,240})/.exec(stderr);
+  return match ? 'Codex could not read the model catalog ' + match[1] + ': ' + match[2].replace(/[\x00-\x1f]/g, ' ') : undefined;
 }
 
 /** argv[2] names a profile (per-profile scripts); otherwise MUSTER_CODEX_PROFILE or MUSTER_CODEX_PROVIDER select the route. */
@@ -241,7 +259,7 @@ function selection(argv, env) {
   throw new Error('No Codex route selected. Set MUSTER_CODEX_PROFILE or MUSTER_CODEX_PROVIDER.');
 }
 
-module.exports = { profileOverrides, providerOverrides, parseToml, codexCommand, modelMatches };
+module.exports = { profileOverrides, providerOverrides, parseToml, codexCommand, modelMatches, catalogFailure };
 if (require.main === module) {
   try { const chosen = selection(process.argv, process.env); launch(chosen.selection, chosen.args); }
   catch (error) { process.stderr.write(error.message + '\n'); process.exitCode = 1; }

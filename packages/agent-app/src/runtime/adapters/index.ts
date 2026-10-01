@@ -2,7 +2,7 @@ import {createHash} from 'node:crypto';
 import {homedir} from 'node:os';
 import {join} from 'node:path';
 import type {ProviderInfo} from '../../shared/protocol.ts';
-import {activeCustomProviders, customRunnable, CUSTOM_CHAT_ONLY, type CustomConnection} from '../custom-providers.ts';
+import {activeCustomProviders, customRunnable, resolveCustomKey, CUSTOM_CHAT_ONLY, type CustomConnection} from '../custom-providers.ts';
 import {validateEndpoint} from '../custom-providers.ts';
 import {providerDataDir, type ProviderInstance} from '../provider-instances.ts';
 import {claudeCodeAdapter, type Spawn} from './claude-code.ts';
@@ -142,11 +142,14 @@ export function createAdapterCatalog(options: AdapterCatalogOptions = {}): Adapt
     const store = options.customs ? undefined : activeCustomProviders();
     store?.claim();
     for (const connection of options.customs?.() ?? store?.connections() ?? []) {
+      // The key is resolved per request exactly as the connection check resolves it: the key pasted in Muster
+      // (Keychain) first, then the connection's environment variable. Reading only the variable sent no
+      // Authorization header for a pasted key, so every chat failed with 401 (#207).
       if (!customRunnable(connection, e)) continue;
       const bindingId = hash(connection.id, connection.endpoint, connection.apiKeyEnv);
       rows.push(route({id: connection.id, name: connection.name, driver: 'openai-chat-completions', bindingId, custom: true, endpoint: connection.endpoint, apiKeyEnv: connection.apiKeyEnv || undefined, ...(connection.checkedAt ? {checkedAt: connection.checkedAt} : {}),
         identityMasked: 'No account metadata', canReveal: false, source: 'Added in Muster', models: connection.models, available: true, status: 'ready', detail: `${CUSTOM_CHAT_ONLY}. OpenAI-compatible chat completions; model discovery succeeded.`},
-        adapter(`custom:${bindingId}`, () => openAICompatibleAdapter({endpoint: connection.endpoint, apiKey: () => connection.apiKeyEnv ? env()[connection.apiKeyEnv] : undefined, label: connection.name, fetch: request, memory: memory(connection.id)}))));
+        adapter(`custom:${bindingId}`, () => openAICompatibleAdapter({endpoint: connection.endpoint, apiKey: () => resolveCustomKey(connection, env()), label: connection.name, fetch: request, memory: memory(connection.id)}))));
     }
     return rows;
   }

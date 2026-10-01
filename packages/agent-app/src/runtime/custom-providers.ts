@@ -26,7 +26,8 @@ export function validateEndpoint(input: unknown): string {
   if (url.username || url.password || url.search || url.hash) throw new Error('Use a base URL without credentials, query parameters or fragments.');
   const local = ['localhost','127.0.0.1','[::1]'].includes(url.hostname);
   if (url.protocol !== 'https:' && !(local && url.protocol === 'http:')) throw new Error('Use HTTPS, or HTTP for a local loopback server.');
-  return url.href.replace(/\/+$/, '');
+  // A pasted request URL (…/v1/chat/completions, …/v1/models) is reduced to its base: requests append those paths.
+  return url.href.replace(/\/+$/, '').replace(/\/(?:chat\/completions|responses|models)$/i, '').replace(/\/+$/, '');
 }
 /** Only connection metadata is persisted here. Keys live in the host environment or, entered in Muster, in secret-store.ts. */
 export class CustomProviders {

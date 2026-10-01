@@ -47,6 +47,22 @@ export interface ProviderRecovery {
   /** Advisory only. This adapter never resends a prompt automatically. */
   retryable: boolean;
   reason: string;
+  /** Set when the provider rejected the credentials (HTTP 401/403): the fix is in Accounts & providers, not a retry. */
+  auth?: {providerId: string; status: 401 | 403};
+}
+
+/** 401/403 from the status code, or from provider error text ("HTTP 401", "401 Unauthorized", "invalid api key"). */
+export function authFailureStatus(statusCode: number | undefined, message = ''): 401 | 403 | undefined {
+  if (statusCode === 401 || statusCode === 403) return statusCode;
+  if (/\b403\b[^.]{0,40}\bforbidden\b|\bHTTP 403\b|\bstatus(?: code)?:? 403\b/i.test(message)) return 403;
+  if (/\bHTTP 401\b|\b401\b[^.]{0,40}\b(?:unauthori[sz]ed|authentication)\b|\bstatus(?: code)?:? 401\b|\b(?:invalid|incorrect|missing) (?:api[ _-]?key|bearer token)\b|\binvalid_api_key\b/i.test(message)) return 401;
+  return undefined;
+}
+/** The actionable, never-retried recovery for rejected credentials. The provider's own words follow, when it gave any. */
+export function authRecovery(provider: {id: string; name: string}, status: 401 | 403, detail = ''): ProviderRecovery {
+  const said = detail.replace(/\s+/g, ' ').trim().slice(0, 300);
+  return {kind: 'failed', retryable: false, auth: {providerId: provider.id, status},
+    reason: `${provider.name} rejected the request (${status}). Your API key or sign-in for this provider is missing or expired. Open Accounts & providers to fix it.${said ? ` Provider response: ${said}` : ''}`};
 }
 export interface DispatchResult {
   status: 'completed' | 'failed';
@@ -55,7 +71,7 @@ export interface DispatchResult {
   turnId?: string;
   failure?: {statusCode?: number};
 }
-export function classifyProviderFailure(result: DispatchResult, evidence: { activity: boolean; terminal: boolean; cancelled: boolean; resetEta?: string }): ProviderRecovery | undefined {
+export function classifyProviderFailure(result: DispatchResult, evidence: { activity: boolean; terminal: boolean; cancelled: boolean; resetEta?: string; provider?: {id: string; name: string} }): ProviderRecovery | undefined {
   const definitelyNotDispatched = result.dispatchState === 'not-dispatched' && !result.turnId && !evidence.activity;
   // A user Stop is a normal ending, never a failure. The native app-server is
   // local and owned by this chat: once it is interrupted (or closed after the
@@ -66,6 +82,9 @@ export function classifyProviderFailure(result: DispatchResult, evidence: { acti
     reason: definitelyNotDispatched || evidence.terminal ? 'Stopped. This attempt will not resume automatically.' : 'Stopped. The provider process for this turn was shut down.',
   };
   if (result.status !== 'failed') return undefined;
+  // Rejected credentials never succeed on a resend: no automatic retry, and say where to fix them.
+  const auth = (definitelyNotDispatched || evidence.terminal) && evidence.provider ? authFailureStatus(result.failure?.statusCode, result.errorMessage) : undefined;
+  if (auth) return authRecovery(evidence.provider!, auth, result.errorMessage);
   if (!definitelyNotDispatched && !evidence.terminal) return {
     kind: 'recovery-needed', retryable: false,
     reason: 'The provider may have accepted this turn. Inspect the existing thread before continuing; the prompt was not resent.',
