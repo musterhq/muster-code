@@ -245,3 +245,11 @@ test('an imported agent gets its instruction bundle and its git identity applied
   assert.equal(again.files.find(f=>f.name==='SOUL.md')!.text,'local edit','a re-import keeps a bundle you edited');
   assert.ok(again.revisions.length>=before);
 });
+
+test('an instruction file the import cannot keep is counted in the report, not dropped silently',async t=>{
+  const {raw,service}=await fixture(t);
+  raw.bundle={'AGENTS.md':'You are the imported agent.','HUGE.md':'x'.repeat(40_000),'notes/odd name!.md':'text'};
+  await service.invoke('paperclip.config.set',{mode:'local',companyId:COMPANY});
+  const report=await service.invoke('paperclip.import',{companyId:COMPANY});
+  assert.ok(report.notes.some(n=>/instruction files were skipped/.test(n)),JSON.stringify(report.notes));
+});

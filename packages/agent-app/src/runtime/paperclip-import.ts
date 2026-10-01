@@ -209,6 +209,7 @@ export async function importFromPaperclip(companyId: string, deps: ImportDeps): 
 
   // Each project's Roster: every active agent, with title, role, reporting line, runner, model and a git identity.
   const members = new Map<string, Map<string, string>>();
+  const skipped = { identities: 0, files: 0 };
   for (const [sourceProject, projectId] of projectIds) {
     const current = await invoke('project.members.list', { projectId }).then(r => r.members).catch(() => []);
     const byAgent = new Map<string, string>();
@@ -228,7 +229,7 @@ export async function importFromPaperclip(companyId: string, deps: ImportDeps): 
       });
       // S87: the recorded git identity is applied (commits made by this agent carry it), never left as a note.
       const identity = gitIdentity(agentName.get(agentId)!, report.company);
-      await invoke('project.agent.gov.set', { projectId, memberId: byAgent.get(agentId)!, gitIdentity: { name: identity.name, email: identity.email } }).catch(() => undefined);
+      await invoke('project.agent.gov.set', { projectId, memberId: byAgent.get(agentId)!, gitIdentity: { name: identity.name, email: identity.email } }).catch(() => { skipped.identities++; });
       // G11: the agent's instruction bundle (AGENTS.md, HEARTBEAT.md, SOUL.md, TOOLS.md…), read with GET only. A bundle already edited here is kept.
       const have = await invoke('project.agent.gov.get', { projectId, memberId: byAgent.get(agentId)! }).then(v => v.revisions.length > 0, () => true);
       if (!have) {
@@ -240,9 +241,11 @@ export async function importFromPaperclip(companyId: string, deps: ImportDeps): 
             if (!/\.md$/i.test(path)) continue;
             const detail = (await get(`/agents/${encodeURIComponent(agentId)}/instructions-bundle/file?path=${encodeURIComponent(path)}`).catch(() => null)) as { content?: unknown } | null;
             const content = typeof detail?.content === 'string' ? detail.content : '';
-            if (!content.trim() || content.length > 32_768) continue;
+            if (content.length > 32_768) { skipped.files++; continue; }
+            if (!content.trim()) continue;
             const base = path.split('/').pop()!, name = path === entry ? 'AGENTS.md' : /^[A-Za-z0-9][A-Za-z0-9._-]{0,62}\.md$/.test(base) ? base : '';
-            if (name) await invoke('project.agent.files.save', { projectId, memberId: byAgent.get(agentId)!, name, text: content, note: 'Imported from Paperclip' }).catch(() => undefined);
+            if (!name) { skipped.files++; continue; }
+            await invoke('project.agent.files.save', { projectId, memberId: byAgent.get(agentId)!, name, text: content, note: 'Imported from Paperclip' }).catch(() => { skipped.files++; });
           }
         } catch { /* no bundle on this server: the agent keeps its instructions text */ }
       }
@@ -250,6 +253,8 @@ export async function importFromPaperclip(companyId: string, deps: ImportDeps): 
     members.set(sourceProject, byAgent);
     report.agents += agents.length;
   }
+  if (skipped.identities) report.notes.push(`${skipped.identities} agent git ${skipped.identities === 1 ? 'identity was' : 'identities were'} not applied.`);
+  if (skipped.files) report.notes.push(`${skipped.files} instruction ${skipped.files === 1 ? 'file was' : 'files were'} skipped (too large, not Markdown, or refused).`);
 
   // Tasks: create or update, then state, then blockers (every task exists by then).
   const work = async (projectId: string) => (await invoke('project.work', { projectId, activityLimit: 1 })).tasks.items;
