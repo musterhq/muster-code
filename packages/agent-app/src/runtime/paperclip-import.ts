@@ -106,6 +106,8 @@ export class SqliteImportStore implements ImportStore {
   }
   addComment(row: { sourceId: string; taskId: string; authorKind: string; authorLabel: string; body: string; createdAt: string; runId: string | null }) {
     const info = this.db.prepare('INSERT OR IGNORE INTO paperclip_import_comments (source_id, task_id, author_kind, author_label, body, created_at, run_id) VALUES (?, ?, ?, ?, ?, ?, ?)').run(row.sourceId, row.taskId, row.authorKind, row.authorLabel, row.body, row.createdAt, row.runId);
+    // A comment imported earlier keeps its place, but its author is corrected if an older import got it wrong (Paperclip's own notices were "You").
+    if (Number(info.changes) === 0) this.db.prepare('UPDATE paperclip_import_comments SET author_kind = ?, author_label = ? WHERE source_id = ? AND task_id = ? AND (author_kind <> ? OR author_label <> ?)').run(row.authorKind, row.authorLabel, row.sourceId, row.taskId, row.authorKind, row.authorLabel);
     return Number(info.changes) > 0;
   }
   putHistory(row: { sourceId: string; kind: string; taskId: string | null; projectId: string | null; title: string; status: string; detail: string; at: string; pending: boolean }) {
@@ -510,7 +512,7 @@ export async function importFromPaperclip(companyId: string, deps: ImportDeps): 
     for await (const page of commentPages(issue.id)) for (const c of page) {
       if (c.deletedAt) continue;
       const agent = str(c.authorAgentId);
-      if (store.addComment({ sourceId: String(c.id), taskId: mine.taskId, authorKind: agent ? 'agent' : 'user', authorLabel: agent ? agentName.get(agent) ?? 'Agent' : 'You', body: str(c.body) ?? '', createdAt: str(c.createdAt) ?? '', runId: str(c.createdByRunId) })) report.comments++;
+      if (store.addComment({ sourceId: String(c.id), taskId: mine.taskId, authorKind: agent ? 'agent' : c.authorType === 'system' ? 'system' : 'user', authorLabel: agent ? agentName.get(agent) ?? 'Agent' : c.authorType === 'system' ? 'Paperclip' : 'You', body: str(c.body) ?? '', createdAt: str(c.createdAt) ?? '', runId: str(c.createdByRunId) })) report.comments++;
     }
     const [interactions, approvals, documents, products] = await Promise.all([get(`/issues/${key}/interactions`).catch(() => []), get(`/issues/${key}/approvals`).catch(() => []), get(`/issues/${key}/documents`).catch(() => []), get(`/issues/${key}/work-products`).catch(() => [])]);
     for (const i of arr(interactions)) {

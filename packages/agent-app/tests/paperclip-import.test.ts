@@ -699,3 +699,23 @@ test('upgrade (f): an import-made project that has a chat of yours (every task r
   await fx.service.invoke('paperclip.import',{companyId:COMPANY});
   assert.equal((await fx.service.invoke('project.list',undefined)).filter(p=>p.name!=='Muster').length,1,'no duplicate while unanswered');
 });
+
+test('system comments from Paperclip are attributed to Paperclip, not You; a re-import corrects ones already imported, without counting them as new',async t=>{
+  const {service,raw,repo}=await fixture(t);
+  const issue=(raw.issues as Json[]).find(i=>i.identifier==='RAG-15')!;
+  (raw.perIssue[issue.id].comments as Json[]).push({id:'sys-1',issueId:issue.id,body:'No live execution path: moved to blocked.',authorType:'system',authorAgentId:null,authorUserId:null,createdAt:'2026-09-30T10:00:00.000Z'});
+  await service.invoke('paperclip.config.set',{mode:'local',companyId:COMPANY});
+  const first=await service.invoke('paperclip.import',{companyId:COMPANY});
+  const ws=await service.invoke('paperclip.snapshot',{});const task=ws.tasks.find(x=>x.key==='RAG-15')!;
+  const notice=async()=>(await service.invoke('paperclip.task',{id:task.id})).comments.find(c=>c.id==='pc:sys-1')!;
+  assert.deepEqual([(await notice()).author.kind,(await notice()).author.label],['system','Paperclip']);
+  // What an earlier version stored: the same comment as "You".
+  const {DatabaseSync}=await import('node:sqlite');const db=new DatabaseSync(join(dirname(repo),'muster-agent.sqlite'));t.after(()=>db.close());
+  db.prepare("UPDATE paperclip_import_comments SET author_kind = 'user', author_label = 'You' WHERE source_id = 'sys-1'").run();
+  assert.equal((await notice()).author.label,'You');
+  const again=await service.invoke('paperclip.import',{companyId:COMPANY});
+  assert.equal(again.comments,0,'a correction is not a new comment');
+  assert.deepEqual([(await notice()).author.kind,(await notice()).author.label],['system','Paperclip'],'corrected');
+  assert.equal((await service.invoke('paperclip.import',{companyId:COMPANY})).comments,0);
+  assert.ok(first.comments>0);
+});
