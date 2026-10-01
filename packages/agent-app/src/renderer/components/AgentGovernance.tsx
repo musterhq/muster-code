@@ -80,11 +80,11 @@ function InstructionsTab({ projectId, memberId, view, onChanged }: { projectId: 
     <div className="gov-files" role="tablist" aria-label="Instruction files">
       {view.files.map(f => <button key={f.name} type="button" role="tab" aria-selected={f.name === name} className="ws-filter" onClick={() => setName(f.name)}>{f.name}{f.text.trim() ? '' : <span className="ws-faint"> · empty</span>}</button>)}
       {!known && <button type="button" role="tab" aria-selected className="ws-filter">{name} · new</button>}
-      <span className="gov-add"><input className="ws-input" aria-label="New file name" placeholder="NOTES.md" value={adding} maxLength={64} onChange={e => setAdding(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addFile(); } }}/><button type="button" className="icon-button" aria-label="Add file" disabled={!adding.trim()} onClick={addFile}><Plus size={14}/></button></span>
+      <span className="gov-add"><input type="text" className="ws-input" aria-label="New file name" placeholder="NOTES.md" value={adding} maxLength={64} onChange={e => setAdding(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addFile(); } }}/><button type="button" className="icon-button" aria-label="Add file" disabled={!adding.trim()} onClick={addFile}><Plus size={14}/></button></span>
     </div>
     <textarea className="gov-editor" aria-label={`${name} text`} rows={12} maxLength={32768} value={text} disabled={busy} placeholder={name === 'AGENTS.md' ? 'What this agent owns, how it works, and when it should ask you' : 'Write in Markdown'} onChange={e => setText(e.target.value)}/>
     <div className="gov-actions">
-      <input className="ws-input" aria-label="Revision note" placeholder="Revision note (optional)" maxLength={500} value={note} onChange={e => setNote(e.target.value)}/>
+      <input type="text" className="ws-input" aria-label="Revision note" placeholder="Revision note (optional)" maxLength={500} value={note} onChange={e => setNote(e.target.value)}/>
       {!standard.includes(name) && known && <button type="button" className="settings-button danger" disabled={busy} onClick={() => void remove()}><Trash2 size={13}/>Remove file</button>}
       <button type="button" className="settings-button" disabled={busy || (!dirty && known)} onClick={() => void save()}>{busy ? 'Saving…' : 'Save'}</button>
     </div>
@@ -166,17 +166,17 @@ function PermissionsTab({ projectId, memberId, view, onChanged }: { projectId: s
     {rules.length === 0 && <p className="ws-board-empty">No rules: the usual approval cards apply.</p>}
     <ul className="gov-rules" aria-label="Tool rules">{rules.map((r, i) => <li key={i} className="gov-rule">
       <select className="ws-select" aria-label={`Rule ${i + 1} matches`} value={r.match} onChange={e => setRule(i, { match: e.target.value as ToolRuleMatch })}><option value="command">Command</option><option value="file">File path</option><option value="mcp">Connector tool</option><option value="any">Anything</option></select>
-      <input className="ws-input" aria-label={`Rule ${i + 1} pattern`} placeholder={r.match === 'command' ? 'git push*' : r.match === 'file' ? '.env*' : r.match === 'mcp' ? 'github/*' : '*'} maxLength={300} value={r.pattern} onChange={e => setRule(i, { pattern: e.target.value })}/>
+      <input type="text" className="ws-input" aria-label={`Rule ${i + 1} pattern`} placeholder={r.match === 'command' ? 'git push*' : r.match === 'file' ? '.env*' : r.match === 'mcp' ? 'github/*' : '*'} maxLength={300} value={r.pattern} onChange={e => setRule(i, { pattern: e.target.value })}/>
       <select className="ws-select" aria-label={`Rule ${i + 1} effect`} value={r.effect} onChange={e => setRule(i, { effect: e.target.value as ToolRuleEffect })}><option value="allow">Allow</option><option value="ask">Ask me</option><option value="deny">Deny</option></select>
-      <input className="ws-input" aria-label={`Rule ${i + 1} note`} placeholder="Why (optional)" maxLength={200} value={r.note ?? ''} onChange={e => setRule(i, { note: e.target.value })}/>
+      <input type="text" className="ws-input" aria-label={`Rule ${i + 1} note`} placeholder="Why (optional)" maxLength={200} value={r.note ?? ''} onChange={e => setRule(i, { note: e.target.value })}/>
       <button type="button" className="icon-button" aria-label={`Remove rule ${i + 1}`} onClick={() => setRules(rs => rs.filter((_, j) => j !== i))}><Trash2 size={14}/></button></li>)}</ul>
     <div className="gov-actions"><button type="button" className="settings-button secondary" disabled={busy || rules.length >= 60} onClick={() => setRules(rs => [...rs, { match: 'command', pattern: '', effect: 'ask' }])}><Plus size={13}/>Add rule</button><span className="gov-grow"/>
       <button type="button" className="settings-button" disabled={busy} onClick={() => void save('rules')}>Save rules</button></div>
     <h3 className="ws-prop-group">Git identity</h3>
     <p className="project-section-note">Commits this agent makes carry this name and email, not yours. In a task’s own worktree it is written to the worktree’s config; in the main checkout (which keeps your identity) it applies to the run only.</p>
     <div className="gov-grid">
-      <label className="gov-field"><span>Name</span><input className="ws-input" aria-label="Git name" maxLength={120} placeholder="CTO Agent" value={identity.name} disabled={busy} onChange={e => setIdentity({ ...identity, name: e.target.value })}/></label>
-      <label className="gov-field"><span>Email</span><input className="ws-input" aria-label="Git email" maxLength={200} placeholder="cto@yourcompany.dev" value={identity.email} disabled={busy} onChange={e => setIdentity({ ...identity, email: e.target.value })}/></label>
+      <label className="gov-field"><span>Name</span><input type="text" className="ws-input" aria-label="Git name" maxLength={120} placeholder="CTO Agent" value={identity.name} disabled={busy} onChange={e => setIdentity({ ...identity, name: e.target.value })}/></label>
+      <label className="gov-field"><span>Email</span><input type="text" className="ws-input" aria-label="Git email" maxLength={200} placeholder="cto@yourcompany.dev" value={identity.email} disabled={busy} onChange={e => setIdentity({ ...identity, email: e.target.value })}/></label>
     </div>
     <div className="gov-actions"><span className="gov-grow"/><button type="button" className="settings-button" disabled={busy || (identity.name === (g.gitIdentity?.name ?? '') && identity.email === (g.gitIdentity?.email ?? ''))} onClick={() => void save('identity')}>Save identity</button></div>
   </div>;
