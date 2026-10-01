@@ -74,3 +74,5 @@
 .ws-options-toggle { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border: 1px solid var(--hairline); border-radius: var(--radius-full); color: var(--text-dim); font-size: var(--fs-12); }
 .ws-options-toggle:hover { background: var(--bg-hover); color: var(--text); }
 .org-team > input[type='radio'], .org-check > input[type='checkbox'], .org-agents input[type='checkbox'] { flex: none; width: 16px; height: 16px; margin: 2px 0 0; padding: 0; }
+.server-stack .preference-row, .server-connector-detail .preference-row { flex-direction: column; align-items: stretch; gap: 8px; }
+.server-stack .preference-control, .server-connector-detail .preference-control { justify-content: flex-start; }
