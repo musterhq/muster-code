@@ -1,6 +1,7 @@
 import { openHub, useHubRoute, useInboxBadge, useInboxDismissals, useWorkspace, type HubPage } from '../hubStore';
 import { badgeCount, buildActivity } from '../inboxModel';
 import { NAMES } from '../../shared/workspace-names';
+import { taskWorktreeFolderIds } from '../taskWorktrees';
 import type { WorkspaceProject, WorkspaceTask } from '../../shared/domains/paperclip-protocol';
 import { NewTaskSheet } from './HubSetup';
 import {
@@ -385,7 +386,9 @@ export function Sidebar(): React.ReactElement {
   // S3-G: the project hover card, the native row menu and the Edit project dialog share one piece of state.
   const editedProject=projectEdit?snapshot.projects.find(project=>project.id===projectEdit.id):undefined;
   const projectGroups = snapshot.projects.map(project=>({project,gid:`project:${project.id}`,chats:inGroup(`project:${project.id}`)})).filter(group=>!group.project.archived||group.chats.length>0);
-  const folderGroups = snapshot.folders.map(folder=>({folder,gid:`folder:${folder.id}`,chats:inGroup(`folder:${folder.id}`)}));
+  // Task worktrees (Assign & start) sit under their project's task rows, not in Folders.
+  const taskWorktrees = taskWorktreeFolderIds(snapshot);
+  const folderGroups = snapshot.folders.filter(folder=>!taskWorktrees.has(folder.id)).map(folder=>({folder,gid:`folder:${folder.id}`,chats:inGroup(`folder:${folder.id}`)}));
   const orphanChats = inGroup('chats');
   const archivedOpen = showArchived;
   // Visible row order drives roving focus; it mirrors the render order below.
