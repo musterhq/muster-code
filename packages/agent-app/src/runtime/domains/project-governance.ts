@@ -1006,6 +1006,10 @@ export function createGovernance(ctx: DomainContext, deps: GovernanceDeps) {
     try {
       if (command === 'project.tasks.add') { const o = output as { id?: string; projectId?: string; owner?: TaskOwner } | undefined; if (o?.id && o.projectId && o.owner?.kind === 'agent') onAssigned(o.projectId, o.id); }
       else if (command === 'project.tasks.edit') { const patch = (input.patch ?? {}) as { owner?: TaskOwner }; const o = output as { id?: string; projectId?: string } | undefined; if (patch.owner?.kind === 'agent' && o?.id && o.projectId) onAssigned(o.projectId, o.id); }
+      else if (command === 'project.members.pause' && input.paused === false && typeof input.projectId === 'string' && typeof input.id === 'string') {
+        const open = gov().openBreaker(input.projectId, 'wake_storm', input.id);
+        if (open) { gov().setBreakerState(open.id, 'resumed'); deps.changed(input.projectId); }
+      }
       else if (command === 'mailbox.send') {
         const to = input.to as { kind?: string; id?: string } | undefined, sender = (output as { sender?: { kind?: string } } | undefined)?.sender;
         if (to?.kind === 'taskRun' && typeof to.id === 'string' && sender?.kind === 'user' && typeof input.body === 'string') onCommented(to.id, input.body);

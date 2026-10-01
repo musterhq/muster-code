@@ -39,7 +39,9 @@ export function TaskList({ snapshot, tasks, scope, showProject = false, onOpenTa
   useEffect(() => { saveView(scope, view); }, [scope, view]);
   const update = (patch: Partial<TaskViewState>) => setView(v => ({ ...v, ...patch }));
   const projectName = useMemo(() => { const names = new Map(snapshot.projects.map(p => [p.id, p.name])); return (id: string | null) => (id && names.get(id)) || ''; }, [snapshot.projects]);
-  const visible = tasks;
+  const hiddenCount = useMemo(() => tasks.filter(t => t.hidden).length, [tasks]);
+  const [showHidden, setShowHidden] = useState(false);
+  const visible = useMemo(() => showHidden ? tasks : tasks.filter(t => !t.hidden), [tasks, showHidden]);
   const filtered = useMemo(() => filterTasks(visible, view), [visible, view.query, view.quick, view.statuses, view.owners, view.priorities]);
   const owners = useMemo(() => ownerOptions(visible), [visible]);
   const count = activeFilters(view);
@@ -50,6 +52,7 @@ export function TaskList({ snapshot, tasks, scope, showProject = false, onOpenTa
       <label className="task-search"><Search size={14} aria-hidden="true"/><span className="sr-only">Search tasks</span>
         <input type="search" placeholder="Search tasks…" value={view.query} onChange={e => update({ query: e.target.value })} onKeyDown={e => { if (e.key === 'Escape' && view.query) { e.preventDefault(); e.stopPropagation(); update({ query: '' }); } }}/></label>
       <span className="task-toolbar-spacer"/>
+      {hiddenCount > 0 && <button type="button" className="ws-filter" aria-pressed={showHidden} onClick={() => setShowHidden(v => !v)}>{showHidden ? 'Hide' : 'Show'} {hiddenCount} hidden</button>}
       <div className="task-toggle" role="radiogroup" aria-label="Layout">
         <Tip label="List"><button type="button" role="radio" aria-checked={view.layout === 'list'} aria-label="List" className="icon-button" onClick={() => update({ layout: 'list' })}><List size={15}/></button></Tip>
         <Tip label="Board"><button type="button" role="radio" aria-checked={view.layout === 'board'} aria-label="Board" className="icon-button" onClick={() => update({ layout: 'board' })}><Columns3 size={15}/></button></Tip>

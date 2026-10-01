@@ -21,6 +21,7 @@ import { MessageBody } from './MessageBody';
 import { PendingQuestion } from './PendingQuestion';
 import { ResourceState } from './ResourceState';
 import { Tip } from './Tooltip';
+import { GovernanceProperties, SecretRequestCard, StageCard, StopButton } from './TaskGovernance';
 
 const errorText = (cause: unknown) => cause instanceof Error ? cause.message : String(cause);
 const when = (iso: string | null) => iso ? new Date(iso).toLocaleString(undefined, { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' }) : '—';
@@ -80,14 +81,14 @@ function Thread({ detail, snapshot, onChanged, onOpenTask, onOpenAgent, properti
   const who = (name: string | null) => { const id = name ? agentByName.get(name) : undefined; return id ? <button type="button" className="ws-name-link" onClick={() => onOpenAgent(id)}>{name}</button> : <span>{name ?? 'Someone'}</span>; };
   return <section className="ws-thread" aria-label={`${task.key} conversation`}>
     <div className="ws-thread-head">
-      <TaskStatusIcon status={task.status} size={16}/><h1 className="ws-thread-title">{task.title}</h1><span className="ws-key">{task.key}</span>{task.live && <LiveCount count={1}/>}
+      <TaskStatusIcon status={task.status} size={16}/><h1 className="ws-thread-title">{task.title}</h1><span className="ws-key">{task.key}</span>{task.live && <LiveCount count={1}/>}{detail.governance?.hold && <StateChip tone={detail.governance.hold.mode === 'cancel' ? 'danger' : 'warn'}>{detail.governance.hold.mode === 'cancel' ? 'Cancelled with parent' : 'On hold'}</StateChip>}
       {task.source === 'paperclip' && <span className="ws-source">{NAMES.paperclip}</span>}
       {!propertiesOpen && <Tip label="Show properties"><button type="button" className="icon-button ws-thread-toggle" aria-label="Show properties" onClick={onToggleProperties}><PanelRight size={15}/></button></Tip>}
     </div>
     <div ref={scroller} className="ws-thread-scroll" onScroll={onScroll} role="log" aria-label="Messages">
       {entries.length === 0 ? <ResourceState kind="empty" message="No messages yet. Write to the owner below."/> : <div style={{ height: virtualizer.getTotalSize(), position: 'relative' }}>
         {virtualizer.getVirtualItems().map(item => { const e = entries[item.index]; return <div key={e.id} data-index={item.index} ref={virtualizer.measureElement} className="ws-thread-item" style={{ transform: `translateY(${item.start}px)` }}>
-          {e.kind === 'card' ? <Card card={e.card} taskId={task.id} who={who} onOpenTask={onOpenTask} onChanged={onChanged}/>
+          {e.kind === 'card' ? <Card card={e.card} taskId={task.id} projectId={task.projectId ?? ''} who={who} onOpenTask={onOpenTask} onChanged={onChanged}/>
             : <article className={`ws-message${e.comment.body ? '' : ' is-quiet'}`} aria-label={`${e.comment.author.label}${e.to ? ` to ${e.to}` : ''}, ${agoLabel(e.at)}`}>
                 <header className="ws-message-head"><Monogram name={e.comment.author.label} kind={e.comment.author.kind}/>
                   <span className="ws-message-author">{who(e.comment.author.label)}{e.to && <><ArrowRight size={12} className="ws-message-arrow" aria-hidden="true"/>{who(e.to)}</>}</span>
@@ -105,7 +106,7 @@ function Thread({ detail, snapshot, onChanged, onOpenTask, onOpenAgent, properti
 }
 
 /** System cards between turns, built from the app's card and chip styles. */
-function Card({ card, taskId, who, onOpenTask, onChanged }: { card: ThreadCard; taskId: string; who: (name: string | null) => React.ReactNode; onOpenTask: (id: string) => void; onChanged: () => void }): React.ReactElement {
+function Card({ card, taskId, projectId, who, onOpenTask, onChanged }: { card: ThreadCard; taskId: string; projectId: string; who: (name: string | null) => React.ReactNode; onOpenTask: (id: string) => void; onChanged: () => void }): React.ReactElement {
   const [busy, setBusy] = useState(false);
   const [reason, setReason] = useState('');
   const [rejecting, setRejecting] = useState(false);
@@ -126,6 +127,8 @@ function Card({ card, taskId, who, onOpenTask, onChanged }: { card: ThreadCard; 
       {card.memory.map((m, i) => <p key={i} className="ws-card-memory-note">{m.text}<span className="ws-faint"> · {m.source}</span></p>)}</div>
   </div>;
   if (card.kind === 'approval') return <div className="ws-card-sys" data-kind="approval"><ShieldCheck size={14} aria-hidden="true"/><span className="ws-card-sys-text"><strong>Approval</strong> {card.title}</span><StateChip tone={card.status === 'approved' ? 'ok' : card.status === 'rejected' ? 'danger' : 'accent'}>{card.status}</StateChip></div>;
+  if (card.kind === 'secret') return <SecretRequestCard proposal={card.proposal} secureStorage={card.secureStorage} projectId={projectId} onChanged={onChanged}/>;
+  if (card.kind === 'stage') return <StageCard stage={card.stage} taskId={taskId} projectId={projectId} onChanged={onChanged}/>;
   return <div className="ws-card-sys" data-kind="needs" data-status={card.status}>
     <CircleHelp size={14} aria-hidden="true"/><span className="ws-card-sys-text"><strong>{card.status === 'pending' ? 'Needs you' : 'Decision'}</strong>{card.from ? <> · {who(card.from)} asks</> : null}</span>
     <time className="ws-message-time" title={exactTime(card.at)}>{agoLabel(card.at)}</time>
@@ -171,6 +174,7 @@ function PaperclipQuestions({ taskId, interactionId, questions, submitLabel, onC
 }
 
 function Composer({ detail, onSent }: { detail: WorkspaceTaskDetail; onSent: () => void }): React.ReactElement {
+  const stoppable = detail.task.source === 'local' && detail.task.live && Boolean(detail.task.projectId);
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
   const [mention, setMention] = useState<{ query: string; start: number } | null>(null);
@@ -201,6 +205,7 @@ function Composer({ detail, onSent }: { detail: WorkspaceTaskDetail; onSent: () 
       }}/>
     <div className="ws-composer-foot">
       <span className="ws-composer-note">{to ? <><Monogram name={to}/>{to}</> : null}{detail.composerNote && !disabled ? <span className="ws-faint">{to ? ' · ' : ''}{detail.composerNote}</span> : null}</span>
+      {stoppable && <StopButton taskId={detail.task.id} projectId={detail.task.projectId!} onChanged={onSent}/>}
       <Tip label="Send (Enter)"><button type="submit" className="ws-send" aria-label="Send" disabled={!text.trim() || busy || disabled}><ArrowUp size={15}/></button></Tip>
     </div>
   </form>;
@@ -251,6 +256,7 @@ function Properties({ detail, snapshot, onOpenTask, onClose, onChanged }: { deta
         <Row label="Runs">{detail.runs.length || <span className="ws-faint">None</span>}</Row>
       </dl>
       {task.source === 'local' && task.assigneeId !== 'user:local' && !task.live && task.status !== 'done' && task.status !== 'cancelled' && <StartRun taskId={task.id} owner={task.assigneeLabel} onStarted={onChanged}/>}
+      {task.source === 'local' && task.projectId && detail.governance && <GovernanceProperties task={task} governance={detail.governance} projectId={task.projectId} onChanged={onChanged}/>}
       <h3 className="ws-prop-group">About</h3>
       <dl>
         <Row label="Originating">{task.origin ? <span className="ws-inline"><Monogram name={task.origin}/><span className="ws-ellipsis">{task.origin}</span></span> : <span className="ws-faint">Unknown</span>}</Row>

@@ -442,7 +442,26 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
       comments.push({ id: `run:${run.id}:${last.id}`, author: { kind: 'agent', id: run.agentId, label: detail.task.assigneeLabel ?? 'Agent' }, body: last.text, createdAt: last.createdAt, runId: receipt?.runId ?? null });
     }
     comments.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
-    return { ...detail, comments, cards, receipts };
+    // Governance: the review stage card, hold, policy, why runs started, follow-up check, stopped-subtree finding.
+    const projectId = detail.task.projectId ?? '';
+    const gov = projectId ? await context.invoke('project.gov.state', { projectId }).catch(() => null) : null;
+    let governance: WorkspaceTaskDetail['governance'];
+    if (gov) {
+      const stage = gov.stages.find(s => s.taskId === taskId) ?? null;
+      const policy = gov.policies.find(p => p.taskId === taskId)?.policy ?? null;
+      const hold = gov.holds.find(h => h.status === 'active' && h.taskIds.includes(taskId));
+      if (stage) cards.push({ kind: 'stage', id: `stage:${taskId}`, at: stage.updatedAt, stage });
+      const secrets = await context.invoke('project.secrets.list', { projectId }).catch(() => null);
+      for (const p of secrets?.proposals ?? []) if (p.taskId === taskId) cards.push({ kind: 'secret', id: `secret:${p.id}`, at: p.createdAt, proposal: p, secureStorage: secrets!.secureStorage });
+      const members = await context.invoke('project.members.list', { projectId }).then(r => r.members, () => []);
+      governance = {
+        stage, policy, effectivePolicy: policy ?? gov.settings.defaultPolicy, hold: hold ? { id: hold.id, mode: hold.mode, rootKey: hold.rootKey, rootTitle: hold.rootTitle, reason: hold.reason } : null,
+        hidden: gov.hiddenTaskIds.includes(taskId), runs: gov.runs.filter(r => r.taskId === taskId), monitor: gov.monitors.find(m => m.taskId === taskId && m.state !== 'cleared') ?? null,
+        watchdog: gov.watchdogs.find(w => w.taskId === taskId && (w.state === 'open' || w.state === 'reviewing')) ?? null,
+        agents: members.filter(m => m.kind === 'agent' && m.id !== 'agent' && !m.revokedAt && !m.pendingAt).map(m => ({ memberId: m.id, name: m.name })),
+      };
+    }
+    return { ...detail, comments, cards, receipts, ...(governance ? { governance } : {}) };
   };
   const paperclipDetail = async (taskId: string): Promise<WorkspaceTaskDetail> => {
     const c = api();
