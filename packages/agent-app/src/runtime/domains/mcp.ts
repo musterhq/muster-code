@@ -293,11 +293,11 @@ export function createMcpDomain(ctx: DomainContext): DomainModule {
       configOverrides[`${key}.startup_timeout_sec`] = 10;
       if (entry.transport === 'http') {
         configOverrides[`${key}.url`] = entry.url;
-        if (entry.auth.kind === 'bearer' && secret) configOverrides[`${key}.http_headers.Authorization`] = `Bearer ${secret}`;
+        if (entry.auth.kind === 'bearer' && secret) configOverrides[`secret.${key}.http_headers.Authorization`] = `Bearer ${secret}`;
       } else {
         configOverrides[`${key}.command`] = entry.args.length ? launcher(entry.id) : entry.command;
         for (const [name, value] of Object.entries(entry.env)) configOverrides[`${key}.env.${name}`] = value;
-        if (entry.auth.kind === 'env' && secret) configOverrides[`${key}.env.${entry.auth.name}`] = secret;
+        if (entry.auth.kind === 'env' && secret) configOverrides[`secret.${key}.env.${entry.auth.name}`] = secret;
       }
     }
     loaded.set(chat.id, new Set(active.filter(healthy).map(entry => entry.id)));
