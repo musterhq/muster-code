@@ -22,6 +22,8 @@ export interface PaperclipConfigInput { mode: PaperclipMode; baseUrl?: string; t
 export interface PaperclipTestResult {
   ok: boolean; stage: 'config' | 'network' | 'auth' | 'service' | 'ok'; message: string; latencyMs?: number;
   version?: string; deploymentMode?: string; companies?: WorkspaceCompany[];
+  /** A heads-up that does not stop the test: a token that would travel over plain http to another machine. */
+  warning?: string;
 }
 
 export type WorkspaceStatus = 'backlog' | 'todo' | 'in_progress' | 'in_review' | 'blocked' | 'done' | 'cancelled';

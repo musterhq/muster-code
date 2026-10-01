@@ -26,6 +26,15 @@ const MODES: { id: PaperclipMode; label: string; hint: string }[] = [
   { id: 'off', label: 'Off', hint: 'Muster projects only' },
 ];
 
+/** A token typed or stored for a plain-http address on another machine crosses the network in clear text. */
+export function plainHttpWarning(url: string, hasToken: boolean): string | undefined {
+  let parsed: URL;
+  try { parsed = new URL(url.trim()); } catch { return undefined; }
+  const host = parsed.hostname.replace(/^\[|\]$/g, '').toLowerCase();
+  if (parsed.protocol !== 'http:' || host === 'localhost' || host.endsWith('.localhost') || host === '::1' || /^127(\.\d{1,3}){3}$/.test(host)) return undefined;
+  return `${hasToken ? 'Your API token' : 'An API token added here'} would be sent over plain http to ${parsed.host}, readable by anyone on the network. Use an https:// address.`;
+}
+
 /** Settings › Integrations › Paperclip: This Mac / Custom deployment / Off, with Test connection and the company. */
 export function ConnectionPanel({ onSaved, compact = false }: { onSaved?: (view: PaperclipConfigView) => void; compact?: boolean }): React.ReactElement {
   const [config, setConfig] = useState<PaperclipConfigView | null>(null);
@@ -101,6 +110,7 @@ export function ConnectionPanel({ onSaved, compact = false }: { onSaved?: (view:
     {mode === 'off' && <p className="project-edit-hint">Projects run on Muster’s own tasks, agents, mailbox and schedulers. Nothing leaves this Mac.</p>}
     {detected && <p className="ws-connection-detect" data-ok={test?.ok ? 'true' : 'false'}>{test?.ok && <Check size={13} aria-hidden="true"/>}{detected}</p>}
     {test && mode === 'custom' && <p className="ws-connection-detect" data-ok={test.ok ? 'true' : 'false'} role="status">{test.ok && <Check size={13} aria-hidden="true"/>}{test.message}{test.latencyMs !== undefined ? ` · ${test.latencyMs} ms` : ''}</p>}
+    {mode === 'custom' && (test?.warning ?? plainHttpWarning(url, Boolean(token) || Boolean(config?.hasToken))) && <p className="ws-connection-detect" data-ok="false" role="alert">{test?.warning ?? plainHttpWarning(url, Boolean(token) || Boolean(config?.hasToken))}</p>}
     {mode !== 'off' && companies.length > 0 && <label className="project-edit-goal"><span>Company</span><select className="ws-select is-field" value={company} onChange={e => setCompany(e.target.value)}>{companies.map(c => <option key={c.id} value={c.id}>{c.name}{c.prefix ? ` (${c.prefix})` : ''}</option>)}</select></label>}
     {error && <p role="alert" className="settings-error">{error}</p>}
     {plan && <ImportMapping plan={plan} targets={targets} busy={busy !== null} onChange={(id, value) => setTargets(t => ({ ...t, [id]: value }))} onCancel={() => setPlan(null)} onImport={() => void runImport()}/>}

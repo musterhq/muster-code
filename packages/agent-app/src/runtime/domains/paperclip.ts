@@ -633,14 +633,17 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
         try { endpoint = endpointFor(mode, baseUrl, typeof input.token === 'string' && input.token ? input.token : tokenFor(baseUrl)); }
         catch (cause) { return { ok: false, stage: 'config', message: cause instanceof Error ? cause.message : String(cause) }; }
         const probe = new PaperclipClient(endpoint, options.fetch), started = Date.now();
+        // A token over plain http to another machine crosses the network in clear text: say so, but let the test run.
+        const warning = mode === 'custom' && new URL(endpoint.baseUrl).protocol === 'http:' && !isLoopback(endpoint.baseUrl)
+          ? `${endpoint.token ? 'Your API token' : 'An API token added here'} would be sent over plain http to ${new URL(endpoint.baseUrl).host}, readable by anyone on the network. Use an https:// address.` : undefined;
         try {
           const health = await probe.get<Json>('/health');
           const list = arr(await probe.get<unknown>('/companies')).map(mapCompany);
           const deploymentMode = typeof health.deploymentMode === 'string' ? health.deploymentMode : undefined;
-          return { ok: true, stage: 'ok', latencyMs: Date.now() - started, version: typeof health.version === 'string' ? health.version : undefined, deploymentMode, companies: list,
+          return { ok: true, stage: 'ok', ...(warning ? { warning } : {}), latencyMs: Date.now() - started, version: typeof health.version === 'string' ? health.version : undefined, deploymentMode, companies: list,
             message: `Connected to Paperclip ${health.version ?? ''} (${deploymentMode === 'local_trusted' ? 'local, no sign-in' : deploymentMode ?? 'unknown mode'}). ${list.length} ${list.length === 1 ? 'company' : 'companies'}.`.replace('  ', ' ') };
         } catch (cause) {
-          return { ok: false, stage: cause instanceof PaperclipError ? cause.stage : 'network', message: cause instanceof Error ? cause.message : String(cause), latencyMs: Date.now() - started };
+          return { ok: false, stage: cause instanceof PaperclipError ? cause.stage : 'network', ...(warning ? { warning } : {}), message: cause instanceof Error ? cause.message : String(cause), latencyMs: Date.now() - started };
         }
       },
       'paperclip.snapshot': input => snapshot(input.refresh === true),

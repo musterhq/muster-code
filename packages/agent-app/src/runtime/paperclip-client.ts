@@ -60,7 +60,7 @@ export class PaperclipClient {
     const response = await this.request('GET', path, undefined, cached ? { 'if-none-match': cached.etag } : {});
     if (response.status === 304 && cached) return cached.body as T;
     if (!response.ok) throw new PaperclipError(`Paperclip answered ${response.status} for ${path.split('?')[0]}.${await errorText(response)}`, response.status, 'service');
-    const body = await response.json() as T;
+    const body = await readJson<T>(response, path);
     const etag = response.headers.get('etag');
     this.generation++;
     if (etag) {
@@ -76,7 +76,8 @@ export class PaperclipClient {
     this.cache.clear();
     this.generation++;
     const text = await response.text();
-    return (text ? JSON.parse(text) : {}) as T;
+    if (!text) return {} as T;
+    try { return JSON.parse(text) as T; } catch { throw notPaperclip(path); }
   }
 
   /** Forget cached bodies (after a live event says something changed, so the next read cannot be served stale). */
@@ -89,7 +90,13 @@ export class PaperclipClient {
   }
 }
 
-const short = (text: string) => { const plain = text.replace(/\s+/g, ' ').trim(); try { const parsed = JSON.parse(plain) as { error?: string; message?: string }; return (parsed.error ?? parsed.message ?? '').slice(0, 200); } catch { return plain.slice(0, 200); } };
+/** A 200 that is not JSON (a web page, a proxy's login screen) means the URL is not a Paperclip API. */
+const notPaperclip = (path: string) => new PaperclipError(`This URL isn’t a Paperclip API: ${path.split('?')[0]} answered with a web page, not JSON. Check the address (use the Paperclip server’s own URL, for example https://paperclip.example.com).`, 200, 'service');
+async function readJson<T>(response: Response, path: string): Promise<T> {
+  const text = await response.text();
+  try { return JSON.parse(text) as T; } catch { throw notPaperclip(path); }
+}
+const short = (text: string) => { const plain = text.replace(/\s+/g, ' ').trim(); if (/^<(!doctype|html|\?xml)/i.test(plain)) return ''; try { const parsed = JSON.parse(plain) as { error?: string; message?: string }; return (parsed.error ?? parsed.message ?? '').slice(0, 200); } catch { return plain.slice(0, 200); } };
 async function errorText(response: Response): Promise<string> { const text = await response.text().catch(() => ''); const detail = text ? short(text) : ''; return detail ? ` ${detail}` : ''; }
 
 export interface LiveSocket { close(): void }

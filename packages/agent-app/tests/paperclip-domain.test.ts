@@ -524,3 +524,23 @@ test('the Ledger imports history in the background after the first badge read, a
   const view=await h.call('paperclip.ledger',{limit:10});
   assert.deepEqual(view.chain,{ok:true,entries:0,head:'0'.repeat(64),brokenAt:null});
 });
+
+test('A3: a URL that answers with a web page is reported as "not a Paperclip API", never a JSON parse error',async t=>{
+  const html=async()=>new Response('<!DOCTYPE html><html><body>Welcome to nginx</body></html>',{status:200,headers:{'content-type':'text/html'}});
+  const h=await harness(t,{fetch:html});
+  const result=await h.call('paperclip.test',{mode:'custom',baseUrl:'https://pc.example.com/nope'});
+  assert.equal(result.ok,false);assert.equal(result.stage,'service');
+  assert.match(result.message,/isn’t a Paperclip API/);assert.doesNotMatch(result.message,/Unexpected token|<!DOCTYPE|is not valid/);
+  const notFound=await harness(t,{fetch:async()=>new Response('<html>404</html>',{status:404})});
+  const missing=await notFound.call('paperclip.test',{mode:'custom',baseUrl:'https://pc.example.com'});
+  assert.match(missing.message,/answered 404/);assert.doesNotMatch(missing.message,/<html/);
+});
+
+test('A4: a token that would travel over plain http to another machine is warned about; https and loopback are not',async t=>{
+  const h=await harness(t);
+  const plain=await h.call('paperclip.test',{mode:'custom',baseUrl:'http://paperclip.example.com',token:'pcp_x'});
+  assert.match(plain.warning,/plain http/);assert.match(plain.warning,/Your API token/);
+  assert.equal((await h.call('paperclip.test',{mode:'custom',baseUrl:'https://paperclip.example.com',token:'pcp_x'})).warning,undefined);
+  for(const url of ['http://127.0.0.1:3100','http://localhost:3100','http://[::1]:3100'])assert.equal((await h.call('paperclip.test',{mode:'custom',baseUrl:url,token:'pcp_x'})).warning,undefined,url);
+  assert.equal((await h.call('paperclip.test',{mode:'local'})).warning,undefined);
+});
