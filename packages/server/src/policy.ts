@@ -30,7 +30,7 @@ const DESKTOP_EXACT = new Set([
 const DESKTOP_PREFIX = ['browser.', 'terminal.', 'processes.', 'computer.', 'musterServer.'];
 
 const HOST_EXACT = new Set([
-  'backups.settings.set', 'backups.run', 'backups.restore', 'backups.restore.cancel', 'backups.remove',
+  'org.export.write', 'backups.settings.set', 'backups.run', 'backups.restore', 'backups.restore.cancel', 'backups.remove',
   'settings.set', 'settings.reset', 'settings.import', 'settings.storage.cleanup', 'settings.folderModel.set',
   'providers.save', 'providers.remove', 'providers.check', 'providers.cancelCheck', 'providers.secret.set', 'providers.secret.clear',
   'providers.cli.update', 'providers.cli.rollback', 'providers.cli.cancel', 'providers.cli.check', 'providers.accounts.add', 'providers.accounts.remove',

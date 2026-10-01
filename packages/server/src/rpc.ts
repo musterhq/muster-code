@@ -41,6 +41,8 @@ export async function dispatch(ctx: RpcContext, principal: Principal, command: u
   if (typeof command === 'string' && command.startsWith('server.')) return serverCommand(ctx, principal, command, (input && typeof input === 'object' ? input : {}) as Record<string, unknown>);
   const cls = authorizeCommand(command, user.role);
   const name = command as string;
+  // A folder path would be read on the server's disk: only a zip (or a catalog team) may be imported over the network.
+  if (name.startsWith('org.import.') && (input as { source?: { kind?: string } } | undefined)?.source?.kind === 'folder') throw new PolicyError('Upload the package as a zip: the server does not read folders on behalf of a client.', 400, 'bad-input');
   if (!ctx.runtime?.running) throw new PolicyError('The agent runtime is not running on this server.', 503, 'runtime-down');
   const view = await viewFor(ctx, user);
   const snapshot: Snapshot = view.all ? ctx.runtime.cachedSnapshot() : await ctx.runtime.snapshot(true);
@@ -57,8 +59,8 @@ async function afterCommand(ctx: RpcContext, user: UserRecord, command: string, 
     const id = typeof o.id === 'string' ? o.id : typeof o.chatId === 'string' ? o.chatId : null;
     if (id) { await ctx.store.setChatOwner(id, user.id, at); ctx.bumpAccess(); }
   }
-  if (command === 'project.create' && typeof o.id === 'string') {
-    await grant(ctx, user, user, o.id, 'owner');
+  if ((command === 'project.create' && typeof o.id === 'string') || (command === 'org.import.apply' && !i.projectId && typeof o.projectId === 'string')) {
+    await grant(ctx, user, user, (o.id ?? o.projectId) as string, 'owner');
   }
   if (TURN_COMMANDS.has(command)) {
     const chatId = typeof o.chatId === 'string' ? o.chatId : typeof i.chatId === 'string' ? i.chatId : typeof i.id === 'string' && command.startsWith('chat.') ? i.id : null;
