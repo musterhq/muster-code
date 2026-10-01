@@ -17,7 +17,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from '
 import { join } from 'node:path';
 import type { MemoryRecord } from '../../shared/domains/memory-protocol.ts';
 import {
-  PAPERCLIP_LOCAL_URL, WORKSPACE_STATUSES, type LedgerView, type LiveChannel, type PaperclipConfigView, type PaperclipLink, type PaperclipMode, type PaperclipTestResult,
+  budgetUse, PAPERCLIP_LOCAL_URL, WORKSPACE_STATUSES, type LedgerView, type LiveChannel, type PaperclipConfigView, type PaperclipLink, type PaperclipMode, type PaperclipTestResult,
   type ThreadCard, type WorkspaceAgent, type WorkspaceBadge, type WorkspaceInboxItem, type WorkspaceList, type WorkspaceListKind, type WorkspaceMemory, type WorkspaceProject,
   type WorkspaceRow, type WorkspaceSnapshot, type WorkspaceSource, type WorkspaceStatus, type WorkspaceTask, type WorkspaceTaskDetail,
 } from '../../shared/domains/paperclip-protocol.ts';
@@ -202,6 +202,26 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
     }
   };
 
+  // --- budget alerts -------------------------------------------------------------------------------------------------------
+  /** A Muster project at 80% or 100% of its monthly budget (dollars, or tokens when nothing is priced) needs you. One item
+   *  per level and month, so dismissing the 80% alert still lets the 100% one through. */
+  const budgetInbox = async (projects: readonly WorkspaceProject[]): Promise<WorkspaceInboxItem[]> => {
+    const items: WorkspaceInboxItem[] = [];
+    const now = Date.now(), offset = -new Date(now).getTimezoneOffset(), month = monthStart(now, offset);
+    for (const project of projects) {
+      if (project.source !== 'local') continue;
+      const settings = await context.invoke('project.team.settings', { projectId: project.id }).catch(() => null);
+      if (!settings || (settings.monthlyBudgetUsd == null && settings.monthlyBudgetTokens == null)) continue;
+      let spend; try { ledger(); spend = ledgerAggregates(context.db(), { since: month, monthStart: month, offset, skipImportedPaperclip: false, projectId: project.id }).spend; } catch { continue; }
+      const use = budgetUse({ usd: settings.monthlyBudgetUsd, tokens: settings.monthlyBudgetTokens ?? null }, { usd: spend.priced ? spend.usd : null, tokens: spend.tokens ?? 0 });
+      if (!use || use.ratio < 0.8) continue;
+      const over = use.ratio >= 1, pct = Math.round(use.ratio * 100);
+      const amount = use.unit === 'usd' ? `$${use.used.toFixed(2)} of $${use.limit.toFixed(2)}` : `${Math.round(use.used).toLocaleString('en-US')} of ${use.limit.toLocaleString('en-US')} tokens`;
+      items.push({ id: `budget:${project.id}:${month.slice(0, 7)}:${over ? 100 : 80}`, kind: 'budget', title: `${project.name} ${over ? 'is over' : 'is at'} ${pct}% of its monthly budget`, why: `${amount} this month. ${over ? 'Raise the budget or pause its agents.' : 'Soft alert at 80%.'}`, severity: over ? 'high' : 'medium', at: month, taskId: null, agentId: null, runId: null, projectId: project.id, group: project.name, source: 'local' });
+    }
+    return items;
+  };
+
   // --- the merged snapshot ---------------------------------------------------------------------------------------------
   let snapshotInflight: Promise<WorkspaceSnapshot> | null = null;
   /** `withMemory: false` is the light read behind the Inbox badge: no memory browsing and no folder matching per project. */
@@ -213,7 +233,7 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
     const rank = { high: 0, medium: 1, low: 2 } as const;
     // A Paperclip task already imported into Muster needs you once: its Muster copy stands for it in the Inbox and badge.
     let imported = new Set<string>(); try { imported = imports()?.importedSources('task') ?? imported; } catch { /* no import store */ }
-    const inbox = [...mine.inbox, ...(p?.inbox ?? []).filter(i => !i.taskId || !imported.has(i.taskId))].sort((a, b) => rank[a.severity] - rank[b.severity] || b.at.localeCompare(a.at));
+    const inbox = [...mine.inbox, ...await budgetInbox(mine.projects), ...(p?.inbox ?? []).filter(i => !i.taskId || !imported.has(i.taskId))].sort((a, b) => rank[a.severity] - rank[b.severity] || b.at.localeCompare(a.at));
     return {
       paperclip: theirs.link, tasks, agents: [...mine.agents, ...(p?.agents ?? [])], projects, goals: p?.goals ?? [], runs, inbox,
       counts: { liveRuns: runs.filter(r => r.status === 'running').length, inbox: inbox.filter(i => i.kind !== 'mail').length, failedRuns: runs.filter(r => r.status === 'failed').length, openTasks: tasks.filter(t => t.status !== 'done' && t.status !== 'cancelled').length },

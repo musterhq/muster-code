@@ -33,7 +33,7 @@ export function monthStart(now: number, offset: number): string {
   return new Date(Date.UTC(local.getUTCFullYear(), local.getUTCMonth(), 1) - offset * 60_000).toISOString();
 }
 
-export interface LedgerAggregates { turns: { day: string; outcome: string | null; count: number }[]; spend: { usd: number; priced: number; unpriced: number } }
+export interface LedgerAggregates { turns: { day: string; outcome: string | null; count: number }[]; spend: { usd: number; priced: number; unpriced: number; tokens?: number } }
 /**
  * Two grouped queries over the Ledger. `skipImportedPaperclip`: when a Paperclip is linked its own runs are counted
  * from Paperclip, so the imported copies of them (history rows with no chat) are left out here.
@@ -45,11 +45,12 @@ export function ledgerAggregates(db: DatabaseSync, input: { since: string; month
       SELECT date(created_at, ?) AS day, json_extract(body, '$.outcome') AS outcome FROM turn_ledger WHERE created_at >= ? ${scope}
       UNION ALL SELECT date(ended_at, ?) AS day, json_extract(body, '$.outcome') AS outcome FROM turn_ledger_history WHERE ended_at >= ? ${history}
     ) GROUP BY day, outcome`).all(mod, input.since, ...p, mod, input.since, ...p) as { day: string; outcome: string | null; n: number }[]).map(r => ({ day: r.day, outcome: r.outcome, count: Number(r.n) }));
-  const spend = db.prepare(`SELECT COALESCE(SUM(cost), 0) AS usd, COALESCE(SUM(cost IS NOT NULL), 0) AS priced, COALESCE(SUM(cost IS NULL), 0) AS unpriced FROM (
-      SELECT json_extract(body, '$.costUsd') AS cost FROM turn_ledger WHERE created_at >= ? ${scope}
-      UNION ALL SELECT json_extract(body, '$.costUsd') AS cost FROM turn_ledger_history WHERE ended_at >= ? ${history}
-    )`).get(input.monthStart, ...p, input.monthStart, ...p) as { usd: number; priced: number; unpriced: number };
-  return { turns, spend: { usd: Number(spend.usd), priced: Number(spend.priced), unpriced: Number(spend.unpriced) } };
+  const tokens = `COALESCE(json_extract(body, '$.tokens.input'), 0) + COALESCE(json_extract(body, '$.tokens.output'), 0)`;
+  const spend = db.prepare(`SELECT COALESCE(SUM(cost), 0) AS usd, COALESCE(SUM(cost IS NOT NULL), 0) AS priced, COALESCE(SUM(cost IS NULL), 0) AS unpriced, COALESCE(SUM(tokens), 0) AS tokens FROM (
+      SELECT json_extract(body, '$.costUsd') AS cost, ${tokens} AS tokens FROM turn_ledger WHERE created_at >= ? ${scope}
+      UNION ALL SELECT json_extract(body, '$.costUsd') AS cost, ${tokens} AS tokens FROM turn_ledger_history WHERE ended_at >= ? ${history}
+    )`).get(input.monthStart, ...p, input.monthStart, ...p) as { usd: number; priced: number; unpriced: number; tokens: number };
+  return { turns, spend: { usd: Number(spend.usd), priced: Number(spend.priced), unpriced: Number(spend.unpriced), tokens: Number(spend.tokens) } };
 }
 
 export interface DashboardInputs {
@@ -63,11 +64,11 @@ export function buildDashboard(input: DashboardInputs): DashboardData {
   const days = dayRange(input.now, input.offset), month = monthStart(input.now, input.offset);
   const runs = new Map<string, DashboardDay>(days.map(day => [day, { day, succeeded: 0, failed: 0, other: 0 }]));
   for (const t of input.ledger.turns) { const row = runs.get(t.day); if (row) row[outcomeOf(t.outcome)] += t.count; }
-  let usd = input.ledger.spend.priced ? input.ledger.spend.usd : 0, priced = input.ledger.spend.priced, unpriced = input.ledger.spend.unpriced;
+  let usd = input.ledger.spend.priced ? input.ledger.spend.usd : 0, priced = input.ledger.spend.priced, unpriced = input.ledger.spend.unpriced, tokens = input.ledger.spend.tokens ?? 0;
   for (const r of input.paperclip?.receipts ?? []) {
     const day = localDay(r.endedAt, input.offset), row = runs.get(day);
     if (row) row[outcomeOf(r.outcome)]++;
-    if (r.endedAt >= month) { if (r.costUsd === null) unpriced++; else { usd += r.costUsd; priced++; } }
+    if (r.endedAt >= month) { if (r.costUsd === null) unpriced++; else { usd += r.costUsd; priced++; } tokens += (r.tokens?.input ?? 0) + (r.tokens?.output ?? 0); }
   }
   const tasks = new Map<string, Partial<Record<WorkspaceStatus, number>>>(days.map(day => [day, {}]));
   for (const row of input.local?.byDay ?? []) { const counts = tasks.get(row.day); if (counts) { const s = STATE[row.state] ?? 'todo'; counts[s] = (counts[s] ?? 0) + row.count; } }
@@ -79,7 +80,7 @@ export function buildDashboard(input: DashboardInputs): DashboardData {
   return {
     days, runs: [...runs.values()], tasksByDay: [...tasks].map(([day, counts]) => ({ day, counts })),
     // Turns but no prices at all: unknown, not $0.
-    spend: { usd: priced ? usd : null, pricedTurns: priced, unpricedTurns: unpriced, since: month, source: input.paperclip ? `Muster and ${input.paperclip.name}` : 'Muster' },
+    spend: { usd: priced ? usd : null, pricedTurns: priced, unpricedTurns: unpriced, tokens, since: month, source: input.paperclip ? `Muster and ${input.paperclip.name}` : 'Muster' },
     activity, generatedAt: new Date(input.now).toISOString(),
   };
 }

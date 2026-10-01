@@ -16,7 +16,7 @@ import { Archive, ArchiveRestore, Clipboard, Download, FolderClosed, MoreHorizon
 import React, { useEffect, useMemo, useState } from 'react';
 import type { Chat, Folder } from '../../shared/protocol';
 import type { DashboardData, WorkspaceSnapshot } from '../../shared/domains/paperclip-protocol';
-import { OPEN_STATUSES } from '../../shared/domains/paperclip-protocol';
+import { budgetUse, OPEN_STATUSES } from '../../shared/domains/paperclip-protocol';
 import type { ProjectDetails, TeamSettings } from '../../shared/domains/projects-protocol';
 import { DEFAULT_TEAM_SETTINGS, keyPrefixOf } from '../../shared/domains/project-team-protocol';
 import { formatUsd } from '../../shared/model-catalog';
@@ -215,16 +215,18 @@ function PaperclipSettings({ snapshot }: { snapshot: WorkspaceSnapshot }): React
   </div>;
 }
 
-/** Budget: this month's observed spend from the Ledger, a monthly budget with a soft alert at 80%, and all-time cost. */
+/** Budget: this month's observed spend from the Ledger, a monthly budget (dollars, or tokens for unpriced models) with a
+ *  soft alert at 80% (also an Inbox item, and another at 100%), and all-time cost. */
 function BudgetTab({ projectId, local, name }: { projectId: string; local: boolean; name: string }): React.ReactElement {
   const [data, setData] = useState<DashboardData | null>(null);
   const [error, setError] = useState('');
   const [settings, setSettings] = useState<TeamSettings | null>(null);
   const [draft, setDraft] = useState('');
+  const [tokenDraft, setTokenDraft] = useState('');
   useEffect(() => {
     let live = true;
     invoke('paperclip.dashboard', { utcOffsetMinutes: -new Date().getTimezoneOffset(), projectId }).then(d => { if (live) setData(d); }, e => { if (live) setError(errorText(e)); });
-    if (local) invoke('project.team.settings', { projectId }).then(s => { if (live) { setSettings(s); setDraft(s.monthlyBudgetUsd === null ? '' : String(s.monthlyBudgetUsd)); } }, () => undefined);
+    if (local) invoke('project.team.settings', { projectId }).then(s => { if (live) { setSettings(s); setDraft(s.monthlyBudgetUsd === null ? '' : String(s.monthlyBudgetUsd)); setTokenDraft(s.monthlyBudgetTokens == null ? '' : String(s.monthlyBudgetTokens)); } }, () => undefined);
     return () => { live = false; };
   }, [projectId, local]);
   const setBudget = async () => {
@@ -232,21 +234,31 @@ function BudgetTab({ projectId, local, name }: { projectId: string; local: boole
     if (value !== null && (!Number.isFinite(value) || value < 0)) { notifyError(new Error('Enter an amount in US dollars, or leave it empty for no budget.')); return; }
     try { setSettings(await invoke('project.team.settings.set', { projectId, monthlyBudgetUsd: value })); notifySuccess(value === null ? 'Budget removed.' : `Monthly budget set to ${formatUsd(value)}.`); } catch (cause) { notifyError(cause); }
   };
+  const setTokenBudget = async () => {
+    const value = tokenDraft.trim() === '' ? null : Number(tokenDraft.replace(/[,_\s]/g, ''));
+    if (value !== null && (!Number.isSafeInteger(value) || value < 1)) { notifyError(new Error('Enter a whole number of tokens, or leave it empty for no token budget.')); return; }
+    try { setSettings(await invoke('project.team.settings.set', { projectId, monthlyBudgetTokens: value })); notifySuccess(value === null ? 'Token budget removed.' : `Monthly token budget set to ${value.toLocaleString()} tokens.`); } catch (cause) { notifyError(cause); }
+  };
   if (error) return <ResourceState kind="error" message="Spend could not be read." detail={error}/>;
   if (!data) return <ResourceState kind="loading" label="Reading spend" rows={3}/>;
-  const spent = data.spend.usd, budget = settings?.monthlyBudgetUsd ?? null;
-  const ratio = budget && spent !== null ? spent / budget : 0;
-  const health = budget === null ? 'No budget' : spent === null ? 'Unpriced' : ratio >= 1 ? 'Over budget' : ratio >= 0.8 ? 'Near budget' : 'Healthy';
+  const spent = data.spend.usd, budget = settings?.monthlyBudgetUsd ?? null, tokenBudget = settings?.monthlyBudgetTokens ?? null, tokens = data.spend.tokens ?? 0;
+  const use = budgetUse({ usd: budget, tokens: tokenBudget }, { usd: spent, tokens });
+  const ratio = use?.ratio ?? 0;
+  const health = budget === null && tokenBudget === null ? 'No budget' : !use ? 'Unpriced' : ratio >= 1 ? 'Over budget' : ratio >= 0.8 ? 'Near budget' : 'Healthy';
   return <div className="pp-stack pp-budget">
     <div className="pp-budget-head"><div><p className="dash-label">Project</p><h2>{name}</h2><p className="ws-faint">Monthly budget · since {new Date(data.spend.since).toLocaleDateString(undefined, { month: 'long', day: 'numeric' })}</p></div><span className="ws-chip" data-tone={health === 'Over budget' ? 'danger' : health === 'Near budget' ? 'warn' : health === 'Healthy' ? 'ok' : undefined}>{health}</span></div>
     <div className="pp-budget-grid">
-      <div><p className="dash-label">Observed</p><p className="dash-value">{spent === null ? (data.spend.unpricedTurns ? 'Unpriced' : formatUsd(0)) : formatUsd(spent)}</p><p className="ws-faint">{data.spend.pricedTurns} priced {data.spend.pricedTurns === 1 ? 'turn' : 'turns'}{data.spend.unpricedTurns ? ` · ${data.spend.unpricedTurns} unpriced` : ''}</p></div>
-      <div><p className="dash-label">Budget</p><p className="dash-value">{budget === null ? 'Not set' : formatUsd(budget)}</p><p className="ws-faint">{budget === null ? 'No cap configured' : 'Soft alert at 80%'}</p></div>
+      <div><p className="dash-label">Observed</p><p className="dash-value">{spent === null ? (data.spend.unpricedTurns ? 'Unpriced' : formatUsd(0)) : formatUsd(spent)}</p><p className="ws-faint">{data.spend.pricedTurns} priced {data.spend.pricedTurns === 1 ? 'turn' : 'turns'}{data.spend.unpricedTurns ? ` · ${data.spend.unpricedTurns} unpriced` : ''} · {tokens.toLocaleString()} tokens</p></div>
+      <div><p className="dash-label">Budget</p><p className="dash-value">{use?.unit === 'tokens' ? `${tokenBudget!.toLocaleString()} tokens` : budget !== null ? formatUsd(budget) : tokenBudget !== null ? `${tokenBudget.toLocaleString()} tokens` : 'Not set'}</p><p className="ws-faint">{budget === null && tokenBudget === null ? 'No cap configured' : 'Soft alert at 80%, Inbox at 80% and 100%'}</p></div>
     </div>
-    {budget !== null && <div className="pp-meter" role="meter" aria-label="Budget used" aria-valuemin={0} aria-valuemax={budget} aria-valuenow={spent ?? 0}><span style={{ width: `${Math.min(100, Math.round(ratio * 100))}%` }} data-tone={ratio >= 1 ? 'danger' : ratio >= 0.8 ? 'warn' : 'ok'}/></div>}
+    {use && <div className="pp-meter" role="meter" aria-label="Budget used" aria-valuemin={0} aria-valuemax={use.limit} aria-valuenow={use.used}><span style={{ width: `${Math.min(100, Math.round(ratio * 100))}%` }} data-tone={ratio >= 1 ? 'danger' : ratio >= 0.8 ? 'warn' : 'ok'}/></div>}
     {local ? <div className="pp-inline-form"><label className="dash-label" htmlFor="pp-budget-input">Monthly budget (USD)</label>
       <input id="pp-budget-input" className="ws-input" inputMode="decimal" placeholder="No budget" value={draft} onChange={e => setDraft(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') void setBudget(); }}/>
       <button type="button" className="settings-button" onClick={() => void setBudget()}>Set budget</button></div>
+      : null}
+    {local ? <div className="pp-inline-form"><label className="dash-label" htmlFor="pp-token-budget-input">Monthly budget (tokens)</label>
+      <input id="pp-token-budget-input" className="ws-input" inputMode="numeric" placeholder={spent === null && data.spend.unpricedTurns ? 'For unpriced models' : 'No token budget'} value={tokenDraft} onChange={e => setTokenDraft(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') void setTokenBudget(); }}/>
+      <button type="button" className="settings-button secondary" onClick={() => void setTokenBudget()}>Set token budget</button></div>
       : <p className="project-edit-hint">Budgets for this project are set in {NAMES.paperclip}.</p>}
     <section className="dash-card"><RunActivityChart days={data.runs}/></section>
     {local && <section className="pp-cost"><h3 className="ws-group-title">All time</h3><div className="project-card project-cost-card"><ProjectCostSummary projectId={projectId}/></div></section>}

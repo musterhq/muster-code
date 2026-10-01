@@ -255,8 +255,9 @@ export function createProjectTeam(ctx: DomainContext, deps: ProjectTeamDeps) {
       if (input.requireHireApproval !== undefined) patch.requireHireApproval = input.requireHireApproval === true;
       if (input.keyPrefix !== undefined) patch.keyPrefix = input.keyPrefix === null || input.keyPrefix === '' ? null : String(input.keyPrefix).trim().toUpperCase();
       if (input.monthlyBudgetUsd !== undefined) patch.monthlyBudgetUsd = input.monthlyBudgetUsd === null || input.monthlyBudgetUsd === '' ? null : Number(input.monthlyBudgetUsd);
+      if (input.monthlyBudgetTokens !== undefined) patch.monthlyBudgetTokens = input.monthlyBudgetTokens === null || input.monthlyBudgetTokens === '' ? null : Number(input.monthlyBudgetTokens);
       const next = members().setSettings(projectId, patch);
-      record(projectId, 'project.team-settings', `Updated project settings: ${Object.keys(patch).map(k => k === 'requireHireApproval' ? `approval to add agents ${next.requireHireApproval ? 'on' : 'off'}` : k === 'keyPrefix' ? `task keys ${next.keyPrefix ?? 'from the name'}` : `monthly budget ${next.monthlyBudgetUsd === null ? 'off' : `$${next.monthlyBudgetUsd}`}`).join(', ')}`);
+      record(projectId, 'project.team-settings', `Updated project settings: ${Object.keys(patch).map(k => k === 'requireHireApproval' ? `approval to add agents ${next.requireHireApproval ? 'on' : 'off'}` : k === 'keyPrefix' ? `task keys ${next.keyPrefix ?? 'from the name'}` : k === 'monthlyBudgetTokens' ? `monthly token budget ${next.monthlyBudgetTokens == null ? 'off' : next.monthlyBudgetTokens.toLocaleString('en-US')}` : `monthly budget ${next.monthlyBudgetUsd === null ? 'off' : `$${next.monthlyBudgetUsd}`}`).join(', ')}`);
       deps.changed(projectId, '', true);
       return next;
     },

@@ -29,6 +29,7 @@ export class ProjectTeamStore {
     this.db = new DatabaseSync(file); chmodSync(file, 0o600);
     this.db.exec('PRAGMA journal_mode=WAL; PRAGMA busy_timeout=3000;'); this.db.exec(SCHEMA); this.db.exec(SETTINGS_SCHEMA);
     const columns = (this.db.prepare("SELECT name FROM pragma_table_info('project_members')").all() as { name: string }[]).map(c => c.name);
+    if (!(this.db.prepare("SELECT name FROM pragma_table_info('project_team_settings')").all() as { name: string }[]).some(c => c.name === 'monthly_budget_tokens')) this.db.exec('ALTER TABLE project_team_settings ADD COLUMN monthly_budget_tokens INTEGER');
     for (const [name, definition] of PROFILE_COLUMNS) if (!columns.includes(name)) this.db.exec(`ALTER TABLE project_members ADD COLUMN ${name} ${definition}`);
   }
   private row(r: Record<string, unknown>): ProjectMember {
@@ -111,15 +112,17 @@ export class ProjectTeamStore {
   settings(projectId: string): TeamSettings {
     const r = this.db.prepare('SELECT * FROM project_team_settings WHERE project_id=?').get(projectId) as Record<string, unknown> | undefined;
     if (!r) return { ...DEFAULT_TEAM_SETTINGS };
-    return { requireHireApproval: Number(r.require_hire_approval) === 1, keyPrefix: typeof r.key_prefix === 'string' && r.key_prefix ? r.key_prefix : null, monthlyBudgetUsd: r.monthly_budget_usd == null ? null : Number(r.monthly_budget_usd) };
+    return { requireHireApproval: Number(r.require_hire_approval) === 1, keyPrefix: typeof r.key_prefix === 'string' && r.key_prefix ? r.key_prefix : null, monthlyBudgetUsd: r.monthly_budget_usd == null ? null : Number(r.monthly_budget_usd), monthlyBudgetTokens: r.monthly_budget_tokens == null ? null : Number(r.monthly_budget_tokens) };
   }
   setSettings(projectId: string, patch: Partial<TeamSettings>): TeamSettings {
     const next = { ...this.settings(projectId), ...patch };
     if (next.keyPrefix !== null && !/^[A-Z][A-Z0-9]{0,7}$/.test(next.keyPrefix)) throw new Error('A task key prefix is 1–8 capital letters or digits, starting with a letter (e.g. OSS).');
     if (next.monthlyBudgetUsd !== null && (!Number.isFinite(next.monthlyBudgetUsd) || next.monthlyBudgetUsd < 0 || next.monthlyBudgetUsd > 1_000_000)) throw new Error('A monthly budget is between $0 and $1,000,000.');
-    this.db.prepare('INSERT INTO project_team_settings(project_id,require_hire_approval,key_prefix,monthly_budget_usd,updated_at) VALUES(?,?,?,?,?) ON CONFLICT(project_id) DO UPDATE SET require_hire_approval=excluded.require_hire_approval,key_prefix=excluded.key_prefix,monthly_budget_usd=excluded.monthly_budget_usd,updated_at=excluded.updated_at')
-      .run(projectId, next.requireHireApproval ? 1 : 0, next.keyPrefix, next.monthlyBudgetUsd, now());
-    return next;
+    const tokens = next.monthlyBudgetTokens ?? null;
+    if (tokens !== null && (!Number.isSafeInteger(tokens) || tokens < 1 || tokens > 1e12)) throw new Error('A token budget is a whole number of tokens, up to 1,000,000,000,000.');
+    this.db.prepare('INSERT INTO project_team_settings(project_id,require_hire_approval,key_prefix,monthly_budget_usd,monthly_budget_tokens,updated_at) VALUES(?,?,?,?,?,?) ON CONFLICT(project_id) DO UPDATE SET require_hire_approval=excluded.require_hire_approval,key_prefix=excluded.key_prefix,monthly_budget_usd=excluded.monthly_budget_usd,monthly_budget_tokens=excluded.monthly_budget_tokens,updated_at=excluded.updated_at')
+      .run(projectId, next.requireHireApproval ? 1 : 0, next.keyPrefix, next.monthlyBudgetUsd, tokens, now());
+    return { ...next, monthlyBudgetTokens: tokens };
   }
   update(projectId: string, id: string, patch: MemberPatch): { before: ProjectMember; after: ProjectMember } {
     const before = this.must(projectId, id);

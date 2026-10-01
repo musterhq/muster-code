@@ -45,7 +45,7 @@ const snapshot={paperclip:null,goals:[],
   counts:{liveRuns:1,inbox:1,failedRuns:0,openTasks:2},fetchedAt:now};
 const days=Array.from({length:14},(_,i)=>new Date(Date.now()-(13-i)*86_400_000).toISOString().slice(0,10));
 const dashboard={days,runs:days.map((day,i)=>({day,succeeded:i===13?2:0,failed:i===13?1:0,other:0})),tasksByDay:days.map((day,i)=>({day,counts:i===13?{in_review:1,blocked:1,done:1}:{}})),
-  spend:{usd:null,pricedTurns:0,unpricedTurns:3,since:now,source:'Muster'},activity:[{id:'a1',actor:'You',summary:'Added CTO as Chief Technology Officer',at:ago(2),projectId:'p1',projectName:'OSSMANAGER',source:'local',refId:null}],generatedAt:now};
+  spend:{usd:null,pricedTurns:0,unpricedTurns:3,since:now,source:'Muster',tokens:4000},activity:[{id:'a1',actor:'You',summary:'Added CTO as Chief Technology Officer',at:ago(2),projectId:'p1',projectName:'OSSMANAGER',source:'local',refId:null}],generatedAt:now};
 const project={id:'p1',name:'OSSMANAGER',goal:'',folderIds:['f1'],primaryFolderId:'f1',archived:false,archivedAt:null};
 const work={tasks:{items:[],truncated:false},decisions:{items:[],truncated:false},activity:{items:[],truncated:false},scheduler:{autoDispatch:false,paused:false,concurrency:2,budgetMinutes:30,permissionMode:'workspace',updatedAt:null},instructions:{version:0,text:'',updatedAt:null},context:{version:1,goalVersion:1,instructionsVersion:0,decisions:0,headSha:null,label:'goal v1'},coordinator:{chatId:null,proposals:[]},dispatching:[]};
 let teamSettings={requireHireApproval:false,keyPrefix:null as string|null,monthlyBudgetUsd:null as number|null};
@@ -217,8 +217,12 @@ assert.ok(text('.pp-danger h3').includes('Danger zone'));
 await click(button(/^Mail$/),100);
 assert.ok(calls.some(c=>c.command==='mailbox.list'&&c.input.projectId==='p1'),'Mail is the project mailbox (renamed from Inbox)');
 
-// --- Budget: observed spend is "Unpriced", never $0 ----------------------------------------------------------------------------
+// --- Budget: observed spend is "Unpriced", never $0; a token budget works without prices (S64) --------------------------------
+teamSettings={...teamSettings,monthlyBudgetTokens:5000} as any;
 await click([...document.querySelectorAll('[role="tab"]')].find(t=>t.textContent==='Budget'),150);
+assert.equal(text('.pp-budget-head .ws-chip')[0],'Near budget','4,000 of 5,000 tokens is past the 80% soft alert');
+assert.ok(document.querySelector('.pp-budget .pp-meter'),'the meter shows token use');
+assert.equal((document.getElementById('pp-token-budget-input') as HTMLInputElement).value,'5000');
 assert.deepEqual(calls.filter(c=>c.command==='paperclip.dashboard').at(-1)!.input.projectId,'p1');
 assert.equal(text('.pp-budget-grid .dash-value')[0],'Unpriced');
 assert.ok(!text('.pp-budget').join(' ').includes('$0.00'),'no fake $0');

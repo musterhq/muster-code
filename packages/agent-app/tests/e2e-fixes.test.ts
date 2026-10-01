@@ -47,6 +47,7 @@ async function service(t: TestContext) {
         answers.push(decision);
         return { status: 'completed', finalMessage: `Decision: ${JSON.stringify(decision)}` };
       }
+      input.onEvent('thread/tokenUsage/updated', { tokenUsage: { total: { inputTokens: 1200, cachedInputTokens: 100, outputTokens: 300, reasoningOutputTokens: 20 }, last: { inputTokens: 1200, cachedInputTokens: 100, outputTokens: 300, reasoningOutputTokens: 20 } } });
       await wait(400); // a real turn takes a moment; the review baseline is captured as it starts
       await writeFile(join(input.cwd, 'E2E-NOTE.md'), 'edited\n');
       return { status: 'completed', finalMessage: 'Wrote E2E-NOTE.md' };
@@ -270,4 +271,27 @@ test('S63 Outputs lists what the agents produced: files their runs changed, canv
   assert.equal(file.status, 'added'); assert.match(file.detail, /OSSMANAGER · CTO · E2E-NOTE\.md/);
   assert.ok(rows.some(r => r.title === 'Release plan' && r.status === 'canvas'), 'the project chat’s canvas');
   assert.ok(!rows.some(r => r.title === 'spec.txt'), 'a staged, unsent attachment is not an output yet');
+});
+
+test('S64 a token budget works with unpriced models, and the Inbox says so at 80% and at 100%', async t => {
+  const { s, project, member, state } = await service(t);
+  const cto = await member('CTO');
+  const task = await s.invoke('paperclip.task.create', { title: 'Spend some tokens', description: 'Write it', projectId: project.id, assigneeId: `member:${cto.id}`, start: true });
+  assert.ok(task.started, task.startError ?? 'not started');
+  await until(async () => await state(task.id) !== 'running' && (await s.invoke('paperclip.ledger', {})).entries.some(e => e.chatId === task.started!.chatId && e.source === 'local'), 'receipt');
+  const budget = await s.invoke('paperclip.dashboard', { utcOffsetMinutes: -new Date().getTimezoneOffset(), projectId: project.id });
+  assert.equal(budget.spend.usd, null, 'the scripted model is unpriced');
+  assert.equal(budget.spend.tokens, 1500, 'input + output tokens this month');
+  const before = (await s.invoke('paperclip.badge', {})).inbox;
+  await s.invoke('project.team.settings.set', { projectId: project.id, monthlyBudgetTokens: 1800 });
+  let items = (await s.invoke('paperclip.snapshot', {})).inbox.filter(i => i.kind === 'budget');
+  assert.deepEqual(items.map(i => i.title), ['OSSMANAGER is at 83% of its monthly budget']);
+  assert.match(items[0].why, /1,500 of 1,800 tokens/);
+  assert.equal((await s.invoke('paperclip.badge', {})).inbox, before + 1, 'it badges');
+  await s.invoke('project.team.settings.set', { projectId: project.id, monthlyBudgetTokens: 1000 });
+  items = (await s.invoke('paperclip.snapshot', {})).inbox.filter(i => i.kind === 'budget');
+  assert.deepEqual(items.map(i => `${i.severity}:${i.title}`), ['high:OSSMANAGER is over 150% of its monthly budget']);
+  await assert.rejects(() => s.invoke('project.team.settings.set', { projectId: project.id, monthlyBudgetTokens: 1.5 }), /whole number of tokens/);
+  await s.invoke('project.team.settings.set', { projectId: project.id, monthlyBudgetTokens: null });
+  assert.equal((await s.invoke('paperclip.snapshot', {})).inbox.filter(i => i.kind === 'budget').length, 0);
 });

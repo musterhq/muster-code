@@ -65,8 +65,9 @@ export interface ProjectMember {
 /** Which runtime and model an agent's runs use: any configured provider (Codex, Claude Code, OpenCode, Pi, …). */
 export interface AgentRunner { providerId: string; model: string }
 /** Per-project team settings. `keyPrefix` names task keys (OSS-1); null derives it from the project name. */
-export interface TeamSettings { requireHireApproval: boolean; keyPrefix: string | null; monthlyBudgetUsd: number | null }
-export const DEFAULT_TEAM_SETTINGS: TeamSettings = { requireHireApproval: false, keyPrefix: null, monthlyBudgetUsd: null };
+/** `monthlyBudgetTokens`: a budget in tokens (input + output), for runners whose models have no price. */
+export interface TeamSettings { requireHireApproval: boolean; keyPrefix: string | null; monthlyBudgetUsd: number | null; monthlyBudgetTokens?: number | null }
+export const DEFAULT_TEAM_SETTINGS: TeamSettings = { requireHireApproval: false, keyPrefix: null, monthlyBudgetUsd: null, monthlyBudgetTokens: null };
 /** Task key prefix from a project name: an all-caps first word ("OSS Manager" → OSS), initials of several words
  *  ("Launch Plan" → LP), else the first three letters ("OSSMANAGER" → OSS). */
 export function keyPrefixOf(name: string): string {

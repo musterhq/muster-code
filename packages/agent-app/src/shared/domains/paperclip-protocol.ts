@@ -166,7 +166,8 @@ export interface DashboardData {
   days: string[];
   runs: DashboardDay[];
   tasksByDay: { day: string; counts: Partial<Record<WorkspaceStatus, number>> }[];
-  spend: { usd: number | null; pricedTurns: number; unpricedTurns: number; since: string; source: string };
+  /** `tokens`: input + output tokens this month, priced or not (a token budget works without prices). */
+  spend: { usd: number | null; pricedTurns: number; unpricedTurns: number; since: string; source: string; tokens: number };
   activity: { id: string; actor: string; summary: string; at: string; projectId: string | null; projectName: string | null; source: WorkspaceSource; refId: string | null }[];
   generatedAt: string;
 }
@@ -228,5 +229,13 @@ export const PAPERCLIP_COMMANDS = {
   'paperclip.pauseAll': true, 'paperclip.resumeAll': true, 'paperclip.run.cancel': true, 'paperclip.memory': true, 'paperclip.list': true,
   'paperclip.watch': true, 'paperclip.badge': true, 'paperclip.ledger': true, 'paperclip.ledger.backfill': true, 'paperclip.inbox.dismiss': true, 'paperclip.inbox.dismissed': true, 'paperclip.interaction.respond': true, 'paperclip.import': true, 'paperclip.task.start': true, 'paperclip.dashboard': true, 'paperclip.import.plan': true,
 } as const satisfies Record<keyof PaperclipCommands, true>;
+
+/** How much of a monthly budget is used: in dollars when the budget and the spend are priced, else in tokens when a
+ *  token budget is set (models with no price still count). Null when no budget applies. */
+export function budgetUse(budget: { usd: number | null; tokens: number | null }, spend: { usd: number | null; tokens: number }): { unit: 'usd' | 'tokens'; used: number; limit: number; ratio: number } | null {
+  if (budget.usd !== null && budget.usd > 0 && spend.usd !== null) return { unit: 'usd', used: spend.usd, limit: budget.usd, ratio: spend.usd / budget.usd };
+  if (budget.tokens !== null && budget.tokens > 0) return { unit: 'tokens', used: spend.tokens, limit: budget.tokens, ratio: spend.tokens / budget.tokens };
+  return null;
+}
 
 export const OPEN_STATUSES: readonly WorkspaceStatus[] = ['backlog', 'todo', 'in_progress', 'in_review', 'blocked'];
