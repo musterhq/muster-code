@@ -218,7 +218,7 @@ button.ws-row:disabled { cursor: default; }
 .ws-card-sys[data-kind='needs'][data-status='pending'] > svg { color: var(--link); }
 .ws-card-sys[data-kind='handoff'] > svg { color: var(--violet); }
 .ws-card-sys[data-kind='delegated'] > svg { color: var(--accent); }
-.ws-card-prompt, .ws-card-memory, .ws-card-actions, .ws-card-detail, .ws-card-resolution { grid-column: 2 / -1; margin: 0; }
+.ws-card-prompt, .ws-card-memory, .ws-card-actions, .ws-card-detail, .ws-card-resolution, .ws-card-sys > .pending-question, .ws-card-sys > .approval-card { grid-column: 2 / -1; margin: 0; }
 .ws-card-prompt { color: var(--text); font-size: var(--chat-font-size); line-height: 1.5; }
 .ws-card-detail { color: var(--text-dim); font-size: var(--fs-13); }
 .ws-card-detail summary { cursor: pointer; color: var(--text-faint); font-size: var(--fs-12); }
