@@ -180,6 +180,8 @@ export function createGovernance(ctx: DomainContext, deps: GovernanceDeps) {
 
   /** Continues a settled task in its own chat: running again, with a prompt. Throws a sentence when it cannot. */
   async function resume(task: ProjectTask, chatId: string, prompt: string, reason: RunReason, say: string, patch: { continuations?: number; retries?: number; comment?: 'asked' } = {}): Promise<void> {
+    // A paused or archived project starts nothing, follow-ups included.
+    const frozen = projectHold(task.projectId); if (frozen) throw new Error(frozen);
     const blocked = gate(task); if (blocked) throw new Error(blocked);
     const mid = ownerMemberId(task), m = mid ? memberOf(task.projectId, mid) : undefined;
     if (m?.pausedAt) throw new Error(`${m.name} is paused.`);
@@ -399,6 +401,7 @@ export function createGovernance(ctx: DomainContext, deps: GovernanceDeps) {
   }
   /** A read-only chat for the reviewer agent, in the task's worktree. Its verdict is read from its final message. */
   async function startAgentReview(task: ProjectTask, state: TaskStageState, memberId: string, policy: ExecutionPolicy): Promise<void> {
+    const frozen = projectHold(task.projectId); if (frozen) throw new Error(frozen);
     const reviewer = memberOf(task.projectId, memberId);
     if (!reviewer || reviewer.revokedAt || reviewer.pausedAt) throw new Error(`${reviewer?.name ?? 'The reviewer'} is not available.`);
     const prev = task.runChatId ? ctx.store.chat(task.runChatId) : undefined, folderId = prev?.folderId ?? deps.details(task.projectId).primaryFolderId;
@@ -516,6 +519,7 @@ export function createGovernance(ctx: DomainContext, deps: GovernanceDeps) {
   }
   async function startWatchdogReview(watchdogId: string, memberId: string): Promise<Watchdog> {
     const w = gov().getWatchdog(watchdogId)!, projectId = w.projectId, m = memberOf(projectId, memberId);
+    const frozen = projectHold(projectId); if (frozen) throw new Error(frozen);
     if (!m || m.revokedAt || m.pendingAt || m.pausedAt) throw new Error(`${m?.name ?? 'The watchdog agent'} is not available.`);
     const root = tasks().getTask(w.taskId)!, folderId = deps.details(projectId).primaryFolderId;
     if (!folderId) throw new Error('The project has no folder.');
