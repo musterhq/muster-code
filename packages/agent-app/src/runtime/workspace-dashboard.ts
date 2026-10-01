@@ -11,7 +11,7 @@ import type { ProjectStats, TaskState } from '../shared/domains/projects-protoco
 import type { DashboardData, DashboardDay, LedgerEntry, WorkspaceRow, WorkspaceStatus, WorkspaceTask } from '../shared/domains/paperclip-protocol.ts';
 
 export const DASHBOARD_DAYS = 14;
-const STATE: Record<TaskState, WorkspaceStatus> = { todo: 'todo', running: 'in_progress', 'needs-input': 'in_review', blocked: 'blocked', review: 'in_review', implemented: 'in_review', verified: 'done', failed: 'blocked', cancelled: 'cancelled' };
+const STATE: Record<TaskState, WorkspaceStatus> = { backlog: 'backlog', todo: 'todo', running: 'in_progress', 'needs-input': 'in_review', blocked: 'blocked', review: 'in_review', implemented: 'in_review', verified: 'done', failed: 'blocked', cancelled: 'cancelled' };
 type Outcome = 'succeeded' | 'failed' | 'other';
 /** Receipt outcomes and Paperclip run states on one three-way scale. */
 export const outcomeOf = (value: string | null | undefined): Outcome => {

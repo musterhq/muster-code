@@ -228,3 +228,25 @@ test('S37 a failed task can be started again once its run settled', async t => {
   assert.ok(again.chatId && again.chatId !== task.started!.chatId, 'a new run starts; no "may still be active" dead end');
   await until(async () => await state(task.id) === 'failed', 'second run settled');
 });
+
+test('S55/S23 board moves: Backlog is a real state the scheduler skips; Done verifies reviewed work or says why not', async t => {
+  const { s, project, member, state } = await service(t);
+  const cto = await member('CTO');
+  const make = (title: string) => s.invoke('paperclip.task.create', { title, description: '', projectId: project.id, assigneeId: `member:${cto.id}` });
+  const parked = await make('Someday');
+  assert.equal((await s.invoke('paperclip.task.update', { taskId: parked.id, status: 'backlog' })).status, 'backlog', 'Backlog stays Backlog, not Todo');
+  assert.equal(await state(parked.id), 'backlog');
+  await s.invoke('project.scheduler.set', { projectId: project.id, autoDispatch: true });
+  await wait(400);
+  assert.equal(await state(parked.id), 'backlog', 'the scheduler never picks up backlog work');
+  await s.invoke('project.scheduler.set', { projectId: project.id, autoDispatch: false });
+  const fresh = await make('Not reviewed');
+  await assert.rejects(() => s.invoke('paperclip.task.update', { taskId: fresh.id, status: 'done' }), /Move it to In Review first/);
+  await assert.rejects(() => s.invoke('paperclip.task.update', { taskId: fresh.id, status: 'in_progress' }), /real run/);
+  assert.equal((await s.invoke('paperclip.task.update', { taskId: fresh.id, status: 'in_review' })).status, 'in_review');
+  const done = await s.invoke('paperclip.task.update', { taskId: fresh.id, status: 'done' });
+  assert.equal(done.status, 'done', 'reviewed work moves to Done through a recorded manual verification');
+  const view = (await s.invoke('project.work', { projectId: project.id })).tasks.items.find(i => i.id === fresh.id)!;
+  assert.equal(view.verification?.kind, 'manual');
+  assert.equal((await s.invoke('paperclip.task.update', { taskId: parked.id, status: 'todo' })).status, 'todo');
+});

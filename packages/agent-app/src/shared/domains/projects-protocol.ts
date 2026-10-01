@@ -15,9 +15,10 @@ export interface ProjectImpact {
 }
 
 /** Full task lifecycle. The legacy `status` field keeps the five-state view older callers understand; `state` is the truth. */
-export type TaskState = 'todo' | 'running' | 'needs-input' | 'blocked' | 'review' | 'implemented' | 'verified' | 'failed' | 'cancelled';
-export const TASK_STATES: readonly TaskState[] = ['todo', 'running', 'needs-input', 'blocked', 'review', 'implemented', 'verified', 'failed', 'cancelled'];
-export const LEGACY_STATUS: Record<TaskState, LegacyTaskStatus> = { todo: 'todo', running: 'running', 'needs-input': 'running', blocked: 'blocked', review: 'implemented', implemented: 'implemented', verified: 'verified', failed: 'blocked', cancelled: 'blocked' };
+/** `backlog`: parked, not ready to start; the scheduler never picks it up until it moves to todo. */
+export type TaskState = 'backlog' | 'todo' | 'running' | 'needs-input' | 'blocked' | 'review' | 'implemented' | 'verified' | 'failed' | 'cancelled';
+export const TASK_STATES: readonly TaskState[] = ['backlog', 'todo', 'running', 'needs-input', 'blocked', 'review', 'implemented', 'verified', 'failed', 'cancelled'];
+export const LEGACY_STATUS: Record<TaskState, LegacyTaskStatus> = { backlog: 'todo', todo: 'todo', running: 'running', 'needs-input': 'running', blocked: 'blocked', review: 'implemented', implemented: 'implemented', verified: 'verified', failed: 'blocked', cancelled: 'blocked' };
 export interface TaskOwner { kind: 'user' | 'agent'; id: string }
 /** 0 urgent, 1 high, 2 normal, 3 low. */
 export type TaskPriority = 0 | 1 | 2 | 3;

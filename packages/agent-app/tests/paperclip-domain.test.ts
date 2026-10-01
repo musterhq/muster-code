@@ -288,7 +288,7 @@ test('local source: Muster Projects become tasks, agents and an inbox; writes go
   assert.deepEqual(h.invoked.find(c=>c.command==='mailbox.send')!.input,{to:{kind:'taskRun',id:'1',projectId:'p1'},body:'Use Postgres'});
   await h.call('paperclip.task.update',{taskId:'2',status:'blocked'});
   assert.deepEqual(h.invoked.find(c=>c.command==='project.tasks.setState')!.input,{projectId:'p1',id:'2',revision:3,state:'blocked'});
-  await assert.rejects(()=>h.call('paperclip.task.update',{taskId:'2',status:'done'}),/verifying/);
+  await assert.rejects(()=>h.call('paperclip.task.update',{taskId:'2',status:'done'}),/Move it to In Review first/);
   await h.call('paperclip.pauseAll',{source:'local'});
   assert.deepEqual(h.invoked.find(c=>c.command==='project.scheduler.set')!.input,{projectId:'p1',paused:true});
   await h.call('paperclip.run.cancel',{id:'at1'});

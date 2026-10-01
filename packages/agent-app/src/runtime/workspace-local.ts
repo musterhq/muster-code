@@ -18,12 +18,12 @@ export const DEFAULT_AGENT_NAME = 'Default agent';
 export type Invoke = <K extends keyof Commands>(command: K, input: Commands[K]['input']) => Promise<Commands[K]['output']>;
 export interface LocalPart { tasks: WorkspaceTask[]; agents: WorkspaceAgent[]; projects: WorkspaceProject[]; runs: WorkspaceRun[]; inbox: WorkspaceInboxItem[] }
 
-const STATE: Record<TaskState, WorkspaceStatus> = { todo: 'todo', running: 'in_progress', 'needs-input': 'in_review', blocked: 'blocked', review: 'in_review', implemented: 'in_review', verified: 'done', failed: 'blocked', cancelled: 'cancelled' };
+const STATE: Record<TaskState, WorkspaceStatus> = { backlog: 'backlog', todo: 'todo', running: 'in_progress', 'needs-input': 'in_review', blocked: 'blocked', review: 'in_review', implemented: 'in_review', verified: 'done', failed: 'blocked', cancelled: 'cancelled' };
 const PRIORITY: Record<number, WorkspacePriority> = { 0: 'critical', 1: 'high', 2: 'medium', 3: 'low' };
 const PRIORITY_IN: Record<WorkspacePriority, TaskPriority> = { critical: 0, high: 1, medium: 2, low: 3 };
 const ATTEMPT: Record<string, RunState> = { running: 'running', completed: 'succeeded', failed: 'failed', interrupted: 'interrupted', cancelled: 'cancelled' };
 /** Manual moves the local task store accepts (running and verified come only from real runs and verification). */
-const SETTABLE: Partial<Record<WorkspaceStatus, TaskState>> = { backlog: 'todo', todo: 'todo', blocked: 'blocked', in_review: 'review', cancelled: 'cancelled' };
+const SETTABLE: Partial<Record<WorkspaceStatus, TaskState>> = { backlog: 'backlog', todo: 'todo', blocked: 'blocked', in_review: 'review', cancelled: 'cancelled' };
 
 export const agentIdOf = (projectId: string) => `agent:${projectId}`;
 const clean = (value: unknown, label: string, max: number, required = true): string => {
@@ -172,10 +172,21 @@ export class LocalWorkspace {
   }
 
   async setStatus(taskId: string, status: WorkspaceStatus): Promise<WorkspaceTask> {
+    if (status === 'done') return this.markDone(taskId);
     const target = SETTABLE[status];
-    if (!target) throw new Error(status === 'done' ? 'Muster tasks are marked done by verifying them: the project’s Settings › Runs & verification.' : 'In Progress comes from a real run. Assign the task to an agent and start it.');
+    if (!target) throw new Error('In Progress comes from a real run. Assign the task to an agent and start it.');
     const { read, task } = await this.locate(taskId);
     await this.invoke('project.tasks.setState', { projectId: read.project.id, id: task.id, revision: task.revision, state: target });
+    return (await this.locate(taskId)).view;
+  }
+
+  /** Done is a verified task: moving one that is In Review to Done records your manual check (the verify flow).
+   *  Work that has not been reviewed yet says why it cannot be done. */
+  private async markDone(taskId: string): Promise<WorkspaceTask> {
+    const { read, task } = await this.locate(taskId);
+    if (task.state === 'verified') return (await this.locate(taskId)).view;
+    if (task.state !== 'review' && task.state !== 'implemented') throw new Error('Move it to In Review first: a Muster task is done once its finished work is verified.');
+    await this.invoke('project.tasks.verify', { projectId: read.project.id, id: task.id, revision: task.revision, kind: 'manual', notes: 'Checked and moved to Done by you.' });
     return (await this.locate(taskId)).view;
   }
 
