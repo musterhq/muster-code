@@ -15,8 +15,15 @@ export function actionOf(method: string, params: Record<string, unknown>): ToolA
   return null;
 }
 export interface ToolVerdict { effect: ToolRuleEffect; rule: ToolRule; subject: string }
+/** Characters that chain or redirect shell commands. An allow rule never matches a command carrying one the pattern does not spell out. */
+const SHELL_CONTROL = /[;&|`$()<>\n\r]/g;
+export function allowMayMatch(rule: ToolRule, kind: ToolAction['kind'], subject: string): boolean {
+  if (rule.effect !== 'allow' || kind !== 'command') return true;
+  const extra = subject.match(SHELL_CONTROL) ?? [];
+  return extra.every(c => rule.pattern.includes(c));
+}
 /** Deny wins over ask over allow when several rules match one subject; for several subjects (a multi-file change) the strictest verdict wins. */
-export function evaluateTool(rules: readonly ToolRule[], action: ToolAction): ToolVerdict | null {
+export function evaluateTool(rules: readonly ToolRule[], action: ToolAction, opts: { allowRules?: boolean } = {}): ToolVerdict | null {
   const RANK: Record<ToolRuleEffect, number> = { deny: 3, ask: 2, allow: 1 };
   let best: ToolVerdict | null = null;
   for (const subject of action.subjects) {
@@ -24,6 +31,7 @@ export function evaluateTool(rules: readonly ToolRule[], action: ToolAction): To
     for (const rule of rules) {
       if (rule.match !== 'any' && rule.match !== action.kind) continue;
       if (!globMatches(rule.pattern, subject)) continue;
+      if (rule.effect === 'allow' && (opts.allowRules === false || !allowMayMatch(rule, action.kind, subject))) continue;
       if (!hit || RANK[rule.effect] > RANK[hit.effect]) hit = { effect: rule.effect, rule, subject };
     }
     if (hit && (!best || RANK[hit.effect] > RANK[best.effect])) best = hit;

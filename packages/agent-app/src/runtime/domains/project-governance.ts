@@ -915,13 +915,15 @@ export function createGovernance(ctx: DomainContext, deps: GovernanceDeps) {
     if (!rules.length) return null;
     const action = actionOf(method, params);
     if (!action) return null;
-    const v: ToolVerdict | null = evaluateTool(rules, action);
+    // Allow answers an approval for you, which can mean running outside the sandbox: a low-trust agent never gets that.
+    const v: ToolVerdict | null = evaluateTool(rules, action, { allowRules: agentGov(chat.projectId, memberId).capabilities.trust !== 'low-trust' });
     if (!v) return null;
     const who = nameOf(chat.projectId, memberId), shown = clip(redactSecrets(v.subject), 120);
     if (v.effect === 'deny') {
       record(chat.projectId, 'task.tool-denied', `Blocked ${who}'s ${action.kind === 'command' ? 'command' : action.kind === 'file' ? 'file change' : 'connector call'} ${shown ? `“${shown}” ` : ''}by the rule ${v.rule.match} “${v.rule.pattern}”${v.rule.note ? ` (${v.rule.note})` : ''}.`, task?.id ?? null, 'system');
       return { effect: 'deny', message: `${who}'s tool policy blocks this: rule ${v.rule.match} “${v.rule.pattern}”${v.rule.note ? ` (${v.rule.note})` : ''}.` };
     }
+    if (v.effect === 'allow') record(chat.projectId, 'task.tool-allowed', `Allowed ${who}'s ${action.kind === 'command' ? 'command' : action.kind === 'file' ? 'file change' : 'connector call'} ${shown ? `“${shown}” ` : ''}by the rule ${v.rule.match} “${v.rule.pattern}”.`, task?.id ?? null, 'system');
     return { effect: v.effect, message: '' };
   }
 
