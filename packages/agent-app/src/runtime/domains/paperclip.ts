@@ -42,6 +42,8 @@ const URGENT = new Set(['question', 'approval', 'blocked', 'failed_run', 'agent_
 /** `tokenOrigin` is the origin the stored token was saved for: the token is sent to that origin and nowhere else. */
 interface StoredConfig { mode: PaperclipMode; baseUrl: string; companyId: string | null; tokenOrigin: string | null }
 const DEFAULT_CONFIG: StoredConfig = { mode: 'off', baseUrl: PAPERCLIP_LOCAL_URL, companyId: null, tokenOrigin: null };
+/** A Custom URL on this Mac (127.0.0.0/8, localhost, ::1) is a local Paperclip: its folder paths are this Mac's. */
+export const isLoopback = (baseUrl: unknown): boolean => { try { const host = new URL(normalizeBaseUrl(baseUrl)).hostname.replace(/^\[|\]$/g, '').toLowerCase(); return host === 'localhost' || host.endsWith('.localhost') || host === '::1' || /^127(\.\d{1,3}){3}$/.test(host); } catch { return false; } };
 const originOf = (baseUrl: unknown): string | null => { try { return new URL(normalizeBaseUrl(baseUrl)).origin; } catch { return null; } };
 type Json = Record<string, unknown>;
 interface PaperclipPart { tasks: WorkspaceTask[]; agents: WorkspaceAgent[]; projects: WorkspaceProject[]; runs: WorkspaceSnapshot['runs']; inbox: WorkspaceInboxItem[]; goals: WorkspaceSnapshot['goals'] }
@@ -664,9 +666,11 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
         if (!target) target = String(arr(await reader.get<unknown>('/companies'))[0]?.id ?? '');
         if (!target) throw new Error('That Paperclip has no companies to import.');
         // GET only: the importer is handed nothing that can write to Paperclip.
-        // Folder paths and CODEX_HOME are this Mac's only when Paperclip runs here; a remote server's paths are never touched.
+        // Folder paths and CODEX_HOME are this Mac's only when Paperclip runs here (This Mac, or a Custom URL on loopback);
+        // a remote server's paths are never touched.
         const targets = input.targets && typeof input.targets === 'object' ? Object.fromEntries(Object.entries(input.targets).filter(([k, v]) => /^[\w:.-]{1,128}$/.test(k) && typeof v === 'string').map(([k, v]) => [k, v === 'new' || v === 'skip' ? v : id(v)])) : undefined;
-        const report = await importFromPaperclip(target, { get: path => reader.get<unknown>(path), invoke: context.invoke as Invoke, store, folders, exists: path => existsSync(path), local: mode === 'local', remoteOf, ...(targets ? { targets } : {}), ...(mode === 'local' ? { codexHome: codexHomeOf } : {}) });
+        const onThisMac = mode === 'local' || isLoopback(baseUrl);
+        const report = await importFromPaperclip(target, { get: path => reader.get<unknown>(path), invoke: context.invoke as Invoke, store, folders, exists: path => existsSync(path), local: onThisMac, remoteOf, ...(targets ? { targets } : {}), ...(onThisMac ? { codexHome: codexHomeOf } : {}) });
         queueEmit(['tasks', 'agents', 'inbox']);
         // The imported runs show in the Ledger as imported history (#190).
         try { if (ledger().importHistory(paperclipHistory(context.db()))) queueEmit(['runs']); } catch { /* the Ledger never fails an import */ }

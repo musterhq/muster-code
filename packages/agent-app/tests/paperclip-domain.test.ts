@@ -6,7 +6,7 @@ import {mkdtemp,readFile,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {test,type TestContext} from 'node:test';
-import {createPaperclipDomain,rankMemories,PAPERCLIP_SECRET_ID} from '../src/runtime/domains/paperclip.ts';
+import {createPaperclipDomain,isLoopback,rankMemories,PAPERCLIP_SECRET_ID} from '../src/runtime/domains/paperclip.ts';
 import {normalizeBaseUrl} from '../src/runtime/paperclip-client.ts';
 import {buildInbox,mapAttention,mapInteraction,mapIssue,mapRoutine} from '../src/runtime/paperclip-map.ts';
 import type {DomainContext} from '../src/runtime/domains/types.ts';
@@ -446,6 +446,11 @@ test('the linked view reads Paperclip blockers from blockedBy[].id and asks for 
   await h.call('paperclip.config.set',{mode:'local'});
   await h.call('paperclip.snapshot');
   assert.ok(h.server.calls.some(c=>/\/issues\?.*includeBlockedBy=true/.test(c.url)),'the snapshot asks Paperclip for blockers');
+});
+
+test('a Custom URL on loopback is a Paperclip on this Mac (its folders are linked on import); other hosts are remote (S79)',()=>{
+  for(const url of ['http://127.0.0.1:3101','http://localhost:3100','http://[::1]:3100','http://127.1.2.3'])assert.equal(isLoopback(url),true,url);
+  for(const url of ['https://pc.example.com','http://10.0.0.5:3100','http://localhost.evil.com','not a url'])assert.equal(isLoopback(url),false,url);
 });
 
 test('a Paperclip question set (ask_user_questions) is answerable in place through its respond endpoint (S13)',async t=>{
