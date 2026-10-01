@@ -51,3 +51,20 @@ test('S1: the same message id voted in two projects makes two votes; one project
   await h.s.invoke('work.votes.set', { projectId: other.id, subject: 'message', subjectId: 'shared-id', vote: null });
   assert.equal((await h.s.invoke('work.votes.list', { projectId: h.project.id })).votes.length, 1);
 });
+
+test('S2: saving a card with the id of another project\'s card is refused and returns nothing of it', async t => {
+  const h = await wave2(t);
+  const other = await h.s.invoke('project.create', { name: 'Other', goal: '', folderIds: [h.folder.id] });
+  const card = await h.s.invoke('work.summaries.save', { projectId: other.id, title: 'Secret card', query: 'status:todo', refresh: 'manual', tokenCap: 300 });
+  await assert.rejects(h.s.invoke('work.summaries.save', { projectId: h.project.id, id: card.id, title: 'x', query: '', refresh: 'manual', tokenCap: 300 }), /no longer exists/);
+});
+
+test('S3: removing a label id from another project strips nothing from that project\'s tasks', async t => {
+  const h = await wave2(t);
+  const other = await h.s.invoke('project.create', { name: 'Other', goal: '', folderIds: [h.folder.id] });
+  const label = await h.s.invoke('work.labels.save', { projectId: other.id, name: 'theirs', color: 'ok' });
+  const otherTask = await h.s.invoke('project.tasks.add', { projectId: other.id, title: 'T', acceptance: '', dependencies: [], owner: { kind: 'user', id: 'local' } });
+  await h.s.invoke('work.task.labels.set', { projectId: other.id, taskId: otherTask.id, labelIds: [label.id] });
+  await h.s.invoke('work.labels.remove', { projectId: h.project.id, id: label.id });
+  assert.equal((await h.s.invoke('work.labels.list', { projectId: other.id })).labels[0]!.tasks, 1);
+});

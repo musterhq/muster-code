@@ -445,7 +445,7 @@ export function createWorkDomain(ctx: DomainContext): DomainModule {
       const cap = Math.round(Number(i.tokenCap));
       if (!Number.isFinite(cap) || cap < SUMMARY_LIMITS.minTokenCap || cap > SUMMARY_LIMITS.maxTokenCap) throw new Error(`The token cap is ${SUMMARY_LIMITS.minTokenCap} to ${SUMMARY_LIMITS.maxTokenCap}.`);
       if (!i.id && db().countSummaries(p.id) >= SUMMARY_LIMITS.maxCards) throw new Error(`A project holds up to ${SUMMARY_LIMITS.maxCards} status cards.`);
-      if (i.id && !db().summary(id(i.id))) throw new Error('That card no longer exists.');
+      if (i.id && db().summary(id(i.id))?.projectId !== p.id) throw new Error('That card no longer exists.');
       const cardId = db().saveSummary(p.id, { ...(i.id ? { id: id(i.id) } : {}), title, query, refresh, tokenCap: cap, enabled: i.enabled !== false });
       armSummaries(); emit(p.id, ['summaries']);
       return cardView(db().summary(cardId)!);
