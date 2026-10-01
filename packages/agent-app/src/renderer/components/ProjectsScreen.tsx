@@ -57,7 +57,8 @@ export function ProjectsScreen({ onBack, onStartChat }: { onBack: () => void; on
   const projects = [...(details ?? []).filter(p => known.has(p.id)), ...(snapshot?.projects ?? []).filter(p => !listed.has(p.id)).map(fromSnapshot)];
   const selected = selectedId ? projects.find(p => p.id === selectedId) ?? null : null;
   const upsert = (next: ProjectDetails) => setDetails(list => list ? list.map(p => p.id === next.id ? next : p) : list);
-  const nav: HubNav = { onOpenTask: id => openHub('task', id), onOpenAgent: id => openHub('agent', id), onOpenChat: id => { void selectChat(id); onBack(); } };
+  // An agent opened from a project's Roster keeps that project as its breadcrumb (not the hub's last page, the Inbox).
+  const nav: HubNav = { onOpenTask: id => openHub('task', id), onOpenAgent: id => openHub('agent', id, selected ? { page: 'project', arg: selected.id } : undefined), onOpenChat: id => { void selectChat(id); onBack(); } };
   const toList = () => { setCreating(false); setSelectedId(null); };
 
   return <section className="project-screen" aria-label={NAMES.projects} onKeyDown={e => {

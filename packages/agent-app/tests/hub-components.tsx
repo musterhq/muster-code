@@ -208,6 +208,12 @@ assert.deepEqual(calls.filter(c=>c.command==='paperclip.inbox.dismiss').map(c=>c
 assert.equal(rowOf('Refactor login'),undefined,'the dismissed row is gone');
 assert.ok(rowOf('Quit mid-turn'),'other rows stay');
 root5.unmount();
+// A Roster agent opened from a project's page keeps the project as its breadcrumb, not "Inbox".
+openHub('inbox');openHub('agent','qa',{page:'project',arg:'p1'});
+const root6=createRoot(document.getElementById('root')!,{onUncaughtError:(e:unknown)=>{(errors as unknown[]).push(e);}});
+root6.render(<HubScreen/>);await delay(150);
+assert.deepEqual(text('.ws-crumb .ws-crumb-link'),['OSS Manager']);
+root6.unmount();
 assert.deepEqual(errors,[]);
 console.log('hub-components: ok');
 process.exit(0);
