@@ -244,8 +244,72 @@ jobs:
             packages/agent-app/release-dist/*-setup.exe
             packages/agent-app/release-dist/*-win-*.zip
 
+  # Muster Server ships in the same release: one Node bundle (esbuild) plus the Node 24 runtime per platform. The store is
+  # node:sqlite (built into Node), so there is no native addon to rebuild; the tarball carries the platform's own `node`.
+  server:
+    name: server (${{ matrix.platform }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            platform: darwin-arm64
+          - runner: macos-15-intel
+            platform: darwin-x64
+          - runner: ubuntu-latest
+            platform: linux-x64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 40
+    env:
+      ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+      MUSTER_SKIP_NATIVE_REBUILD: "1"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: refs/tags/${{ env.TAG }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: packages/agent-app/.nvmrc
+          cache: npm
+          cache-dependency-path: |
+            packages/agent-app/package-lock.json
+            packages/server/package-lock.json
+      - name: Check versions
+        run: |
+          APP="$(node -p "require('./packages/agent-app/package.json').version")"
+          SERVER="$(node -p "require('./packages/server/package.json').version")"
+          [[ "$APP" == "$SERVER" ]] || { echo "::error::packages/server is $SERVER but the app is $APP; bump both."; exit 1; }
+          [[ "${TAG#agent-v}" == "$APP" || "${TAG#agent-v}" == "$APP"-* ]] || { echo "::error::Tag $TAG does not match version $APP."; exit 1; }
+      - name: Build the agent runtime and renderer
+        working-directory: packages/agent-app
+        run: npm ci --no-audit --no-fund && npm run build
+      - name: Verify and build the server
+        working-directory: packages/server
+        run: |
+          npm ci --no-audit --no-fund
+          npx tsc --noEmit
+          npm test
+          npm run build
+      - name: Package
+        working-directory: packages/server
+        run: npm run package && ls -lh release-dist
+      - name: Smoke test the tarball
+        working-directory: packages/server
+        run: |
+          DIR="$RUNNER_TEMP/smoke" && mkdir -p "$DIR" && tar -xzf release-dist/muster-server-*-${{ matrix.platform }}.tar.gz -C "$DIR"
+          BIN="$(echo "$DIR"/muster-server-*/bin/muster-server)"
+          "$BIN" --version
+          echo 'smoke-test-password-1' | "$BIN" init --data-dir "$DIR/data" --username smoke --port 17999 --password-stdin
+          "$BIN" doctor --data-dir "$DIR/data"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: muster-server-${{ matrix.platform }}
+          path: packages/server/release-dist/muster-server-*.tar.gz
+          if-no-files-found: error
+          retention-days: 14
+
   publish:
-    needs: [build, build-other]
+    needs: [build, build-other, server]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -263,6 +327,12 @@ jobs:
           path: out
           merge-multiple: true
 
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: muster-server-*
+          path: out
+          merge-multiple: true
+
       - name: Checksums and release notes
         id: notes
         env:
@@ -272,7 +342,7 @@ jobs:
           cd out
           MODES="$(cat signing-*.txt | sort -u | tr '\n' ' ')"
           rm -f signing-*.txt
-          sha256sum Muster-Agent-* > SHA256SUMS
+          sha256sum Muster-Agent-* muster-server-* > SHA256SUMS
           cat SHA256SUMS
           PRERELEASE=false
           # Stable versions publish as the repository's latest release (shown in the sidebar) whatever the signing mode;
@@ -309,6 +379,14 @@ jobs:
             echo
             echo "AppImage: \`chmod +x\` the file, then run it. Debian/Ubuntu: \`sudo apt install ./Muster-Agent-${VERSION}-linux-amd64.deb\`."
             echo
+            echo "| Muster Server (self-hosted) | File |"
+            echo "| --- | --- |"
+            echo "| macOS, Apple silicon | \`muster-server-${VERSION}-darwin-arm64.tar.gz\` |"
+            echo "| macOS, Intel | \`muster-server-${VERSION}-darwin-x64.tar.gz\` |"
+            echo "| Linux x64 | \`muster-server-${VERSION}-linux-x64.tar.gz\` |"
+            echo
+            echo "Extract it, then \`bin/muster-server init\` and \`bin/muster-server start\`. It includes its own Node runtime. Docker, systemd and TLS setups are in [docs/server.md](https://github.com/${{ github.repository }}/blob/main/docs/server.md)."
+            echo
             echo "Checksums for every file are in \`SHA256SUMS\`."
             if [[ "$MODES" != "developer-id-notarized " ]]; then
               echo
@@ -342,4 +420,5 @@ jobs:
             out/Muster-Agent-*.AppImage
             out/Muster-Agent-*.deb
             out/Muster-Agent-*.tar.gz
+            out/muster-server-*.tar.gz
             out/SHA256SUMS
