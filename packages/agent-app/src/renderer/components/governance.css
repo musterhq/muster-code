@@ -1,0 +1,39 @@
+/* Governance panels (Wave 1, #117): agent bundle and runtime, project run policy, holds, secrets. Muster tokens only. */
+.gov-panel { display: flex; flex-direction: column; gap: 12px; }
+.gov-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.gov-body { display: flex; flex-direction: column; gap: 12px; }
+.gov-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; align-items: end; }
+@media (max-width: 720px) { .gov-grid { grid-template-columns: minmax(0, 1fr); } }
+.gov-field { display: flex; flex-direction: column; gap: 6px; font-size: var(--fs-12); color: var(--text-faint); min-width: 0; }
+.gov-inline { display: inline-flex; align-items: center; gap: 8px; color: var(--text-faint); }
+.gov-num { width: 80px; }
+.gov-check { align-self: center; font-size: var(--fs-13); color: var(--text); }
+.gov-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.gov-actions > .ws-input { flex: 1; min-width: 160px; }
+.gov-grow { flex: 1; }
+.gov-files { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
+.gov-add { display: inline-flex; align-items: center; gap: 4px; margin-left: auto; }
+.gov-add .ws-input { width: 140px; height: 28px; }
+.gov-editor { width: 100%; min-height: 200px; padding: 10px 12px; border: 1px solid var(--hairline); border-radius: var(--radius-10); background: var(--bg); color: var(--text); font: inherit; font-family: var(--mono); font-size: var(--fs-12); line-height: 1.5; resize: vertical; }
+.gov-editor:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.gov-list { display: flex; flex-direction: column; gap: 2px; margin: 0; padding: 0; list-style: none; }
+.gov-item { display: flex; align-items: center; gap: 8px; min-height: 32px; padding: 4px 8px; border-radius: var(--radius-8); font-size: var(--fs-13); color: var(--text-dim); }
+.gov-item:hover { background: var(--bg-hover); }
+.gov-item-title { flex: none; color: var(--text); }
+.gov-item-detail { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-12); }
+.gov-rules { display: flex; flex-direction: column; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.gov-rule { display: grid; grid-template-columns: 130px minmax(0, 1.4fr) 110px minmax(0, 1fr) 28px; gap: 6px; align-items: center; }
+@media (max-width: 720px) { .gov-rule { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } }
+.gov-result { margin: 0; padding: 8px 12px; border: 1px solid var(--hairline); border-radius: var(--radius-8); background: var(--bg-sunken); color: var(--text-dim); font-size: var(--fs-12); }
+.gov-result[data-status='refused'], .gov-result[data-status='storm'] { border-color: var(--danger); color: var(--danger); }
+.gov-result[data-status='throttled'], .gov-result[data-status='deferred'] { border-color: var(--warn); }
+.gov-card { display: flex; flex-direction: column; gap: 8px; padding: 12px; border: 1px solid var(--hairline); border-radius: var(--radius-10); background: var(--bg-raised); }
+.gov-card-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: var(--fs-13); color: var(--text); }
+.gov-card p { margin: 0; color: var(--text-dim); font-size: var(--fs-12); }
+.gov-card .ws-faint { color: var(--text-faint); }
+.gov-stage-note { width: 100%; min-height: 56px; padding: 8px 10px; border: 1px solid var(--hairline); border-radius: var(--radius-8); background: var(--bg); color: var(--text); font: inherit; font-size: var(--fs-13); resize: vertical; }
+.gov-split { display: inline-flex; position: relative; }
+.gov-menu { position: absolute; right: 0; bottom: calc(100% + 4px); z-index: 5; display: flex; flex-direction: column; min-width: 210px; padding: 4px; border: 1px solid var(--hairline); border-radius: var(--radius-10); background: var(--bg-raised); }
+.gov-menu button { padding: 6px 10px; border: 0; border-radius: var(--radius-6); background: transparent; color: var(--text); font: inherit; font-size: var(--fs-13); text-align: left; cursor: pointer; }
+.gov-menu button:hover, .gov-menu button:focus-visible { background: var(--bg-hover); }
+.gov-menu small { display: block; color: var(--text-faint); font-size: var(--fs-11); }

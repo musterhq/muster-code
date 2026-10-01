@@ -1,6 +1,7 @@
 /** The hub pages (#115): Inbox (every chat and run that needs you), Roster (org graph + Pulse), an agent's page, Ledger
  *  (Receipts, Timeline, Activity, Costs) and Outputs. Muster's own rows and the linked Paperclip's render the same way,
  *  tagged by source. */
+import { AgentGovernancePanel } from './AgentGovernance';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { Box, History, Inbox, Pause, Play, Square, X } from 'lucide-react';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
@@ -161,6 +162,7 @@ export function AgentPage({ snapshot, agentId, nav }: { snapshot: WorkspaceSnaps
         <TaskStatusIcon status={t.status}/><span className="ws-key">{t.key}</span><span className="ws-row-title ws-grow">{t.title}</span>{t.live && <span className="ws-live"><span className="ws-live-dot"/>live</span>}<span className="ws-row-age" title={exactTime(t.updatedAt)}>{agoLabel(t.updatedAt)}</span>
       </button></li>)}</ul>}
     </section>
+    {agent.source === 'local' && agent.projectId && agent.memberId && agent.memberId !== 'agent' && <AgentGovernancePanel agent={agent} snapshot={snapshot}/>}
     <PulseBoard snapshot={snapshot} nav={nav} agentId={agent.id}/>
   </div>;
 }
