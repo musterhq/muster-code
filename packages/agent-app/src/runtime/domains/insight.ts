@@ -18,7 +18,7 @@ import {
   type CostsReport, type InsightEvent, type ProfileStats, type ProviderWindow, type Reflection, type ReflectionSettings, type SkillTestRun,
 } from '../../shared/domains/insight-protocol.ts';
 import { InsightStore, INSIGHT_FILE } from '../insight/store.ts';
-import { buildCosts, buildProfile, oldestTurn, readTurns, repriceTurns, type TurnRow } from '../insight/costs.ts';
+import { buildCosts, buildProfile, ensureLedgerIndexes, oldestTurn, readGroups, repriceGroups } from '../insight/costs.ts';
 import { evidenceOf, hasSignal, parseReflection, reflectionPrompt, type ReflectionFacts } from '../insight/reflection.ts';
 import { SKILL_TEMPLATES, draftSkillFromTask, skillTestPrompt } from '../insight/skills.ts';
 import { latestAssistant, sendPrompt, startReadOnlyRun } from '../work/agent-run.ts';
@@ -60,11 +60,13 @@ export function createInsightDomain(ctx: DomainContext): DomainModule {
     for (const u of usage) if (!out.some(o => o.providerId === u.providerId)) out.push({ providerId: u.providerId, name: catalog.find(p => p.id === u.providerId)?.name ?? u.providerId, reports: true, usage: u });
     return out;
   };
-  /** The turns of a window with the user's own prices applied to the ones the Ledger could not price. */
-  const pricedTurns = async (since: string, projectId?: string): Promise<TurnRow[]> => {
+  /** The Ledger of a window, summed in SQL, with the user's own prices applied to the turns the catalog could not price. */
+  const pricedGroups = async (since: string, offsetMin: number, projectId?: string) => {
     const policy = await ctx.invoke('models.policy.get', {}).catch(() => ({ hidden: [], shown: [], pricing: {} }));
     const providers = ctx.modelCatalog?.().providers ?? [];
-    return repriceTurns(readTurns(ctx.db(), since, projectId), policy, (providerId, model) => providers.find(p => p.id === providerId)?.models.find(m => m.id === model)?.pricing);
+    ensureLedgerIndexes(ctx.db());
+    const { groups, truncated } = readGroups(ctx.db(), since, offsetMin, projectId);
+    return { groups: repriceGroups(groups, policy, (providerId, model) => providers.find(p => p.id === providerId)?.models.find(m => m.id === model)?.pricing), truncated };
   };
   const projectNames = () => new Map(ctx.store.snapshot().projects.map(p => [p.id, p.name]));
   const costs = async (i: Record<string, unknown>): Promise<CostsReport> => {
@@ -73,7 +75,8 @@ export function createInsightDomain(ctx: DomainContext): DomainModule {
     const projectId = typeof i.projectId === 'string' && i.projectId ? project(i.projectId).id : undefined;
     const since = new Date(now() - (days + 1) * DAY_MS).toISOString();
     const handle = ctx.db();
-    return buildCosts(await pricedTurns(since, projectId), { days, offsetMin: offset, now: now(), projectNames: projectNames(), windows: projectId ? [] : await providerWindows(), ledgerSince: oldestTurn(handle) });
+    const { groups, truncated } = await pricedGroups(since, offset, projectId);
+    return buildCosts(groups, {truncated,  days, offsetMin: offset, now: now(), projectNames: projectNames(), windows: projectId ? [] : await providerWindows(), ledgerSince: oldestTurn(handle) });
   };
   const profile = async (i: Record<string, unknown>): Promise<ProfileStats> => {
     const offset = typeof i.utcOffsetMinutes === 'number' && Math.abs(i.utcOffsetMinutes) <= 14 * 60 ? Math.round(i.utcOffsetMinutes) : 0;
@@ -83,7 +86,8 @@ export function createInsightDomain(ctx: DomainContext): DomainModule {
     const list = (await ctx.invoke('project.list', undefined)).filter(p => !p.archived && (!projectId || p.id === projectId)).slice(0, 12);
     const perProject = await Promise.all(list.map(async p => { const s = await ctx.invoke('project.stats', { days: 1, activityLimit: 1, projectId: p.id }).catch(() => null); const n = (k: string) => (s?.states as Record<string, number> | undefined)?.[k] ?? 0; const done = n('verified') + n('implemented'); const total = Object.values(s?.states ?? {}).reduce((a, b) => a + (b ?? 0), 0); return { projectId: p.id, name: p.name, completed: done, open: Math.max(0, total - done - n('cancelled') - n('failed')) }; }));
     const catalog = ctx.modelCatalog?.().providers ?? [];
-    return buildProfile(await pricedTurns(since, projectId), { offsetMin: offset, now: now(), states: stats.states, providerNames: new Map(catalog.map(p => [p.id, p.name])), projects: perProject.filter(p => p.completed || p.open), since: oldestTurn(handle) });
+    const { groups, truncated } = await pricedGroups(since, offset, projectId);
+    return buildProfile(groups, { truncated, offsetMin: offset, now: now(), states: stats.states, providerNames: new Map(catalog.map(p => [p.id, p.name])), projects: perProject.filter(p => p.completed || p.open), since: oldestTurn(handle) });
   };
 
   // ── Reflection Coach (G25) ───────────────────────────────────────────────────

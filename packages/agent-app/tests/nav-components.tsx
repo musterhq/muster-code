@@ -25,7 +25,8 @@ const last=(command:string)=>calls.filter(c=>c.command===command).at(-1);
 const all=(command:string)=>calls.filter(c=>c.command===command);
 let failProfile=false;
 const profile={since:'2026-09-01T00:00:00Z',tasks:{total:12,completed:7,open:4,failed:1},runs:{total:40,succeeded:33,failed:5,other:2},tokens:{input:2_400_000,output:600_000},costUsd:12.5,unpricedTurns:3,providerMix:[{provider:'openai',name:'ChatGPT',turns:30,share:0.75},{provider:'anthropic',name:'Claude',turns:10,share:0.25}],activity:Array.from({length:28},(_,i)=>({day:`2026-09-${String(i+1).padStart(2,'0')}`,runs:i%3})),activeDays:19,streak:4,topProjects:[{projectId:'p',name:'OSSMANAGER',completed:5,open:2}]};
-const costs=(days:number)=>({days,since:'2026-09-01',until:'2026-09-30',entries:9,totals:{key:'all',label:'Total',turns:9,inputTokens:90_000,outputTokens:30_000,costUsd:1.25,unpricedTurns:2},
+let cutShort=false;
+const costs=(days:number)=>({truncated:cutShort,days,since:'2026-09-01',until:'2026-09-30',entries:9,totals:{key:'all',label:'Total',turns:9,inputTokens:90_000,outputTokens:30_000,costUsd:1.25,unpricedTurns:2},
   byDay:Array.from({length:Math.min(days,7)},(_,i)=>({day:`2026-09-${String(24+i).padStart(2,'0')}`,turns:i,tokens:i*1000,costUsd:i?i*0.1:null})),
   byModel:[{key:'a|gpt-x',label:'gpt-x',turns:7,inputTokens:80_000,outputTokens:20_000,costUsd:1.2,unpricedTurns:0},{key:'a|gpt-y',label:'gpt-y',turns:2,inputTokens:10_000,outputTokens:10_000,costUsd:null,unpricedTurns:2}],
   byAgent:[{key:'CTO',label:'CTO',turns:9,inputTokens:90_000,outputTokens:30_000,costUsd:1.25,unpricedTurns:2}],
@@ -114,7 +115,7 @@ assert.match(text(),/By agent/);assert.match(text(),/CTO/);assert.match(text(),/
 assert.match(text(),/Provider limits/);assert.match(text(),/ChatGPT sign-in/);assert.match(text(),/42% used/);assert.match(text(),/71% used/);assert.match(text(),/Weekly/);assert.match(text(),/Gateway/);assert.match(text(),/No usage reported yet/);
 assert.match(text(),/goes back to/);assert.equal(last('insight.costs')!.input.days,30);
 await click(button(/^7 days$/),100);assert.equal(last('insight.costs')!.input.days,7);assert.match(text(),/Last 7 days/);
-await click(button(/Refresh costs/),100);assert.ok(all('insight.costs').length>=3);
+await click(button(/Refresh costs/),100);assert.ok(all('insight.costs').length>=3);assert.ok(!document.querySelector('[data-truncated]'),'no cut-short note when the Ledger was read whole');cutShort=true;await click(button(/Refresh costs/),140);assert.match(text(),/oldest days are missing/);cutShort=false;await click(button(/Refresh costs/),100);
 await show(<CostsPanel key="project" projectId="p"/>,140);assert.equal(last('insight.costs')!.input.projectId,'p');assert.ok(!/Provider limits/.test(text())&&!/By project/.test(text()),'a project view has no provider limits or project table');
 
 // C26: Audit Runs filter by window, outcome and agent; rows open the task.

@@ -1,42 +1,54 @@
 /**
- * Costs and your stats, read from the turn Ledger (G24, G38). Pure aggregation over the entries the Ledger already holds:
- * nothing new is recorded. A turn with no known price is counted as unpriced, never as $0.
+ * Costs and your stats, read from the turn Ledger (G24, G38). The Ledger is aggregated in SQL (one row per day, project,
+ * agent, provider, model and outcome), so opening Costs or the Dashboard never parses a Ledger body in JavaScript. A turn
+ * with no known price is counted as unpriced, never as $0.
  */
 import type { DatabaseSync } from 'node:sqlite';
 import { effectivePricing, estimateCostUsd, type ModelPolicy, type ModelPricing } from '../../shared/model-catalog.ts';
 import type { CostBucket, CostDay, CostsReport, ProfileStats, ProviderWindow } from '../../shared/domains/insight-protocol.ts';
 
+/** One turn, as the pure tests build them. The runtime never builds these: it reads groups. */
 export interface TurnRow { projectId: string | null; agent: string; provider: string | null; model: string | null; input: number; output: number; cached?: number; costUsd: number | null; endedAt: string; outcome: string; trigger?: string }
-
-const MAX_ROWS = 60_000, DAY_MS = 86_400_000;
-export const CHATS = 'Chats (not task runs)';
-const num = (v: unknown) => typeof v === 'number' && Number.isFinite(v) ? v : 0;
-
-/** Ledger turns that ended at or after `since` (live receipts and imported history), newest first, capped. */
-export function readTurns(db: DatabaseSync, since: string, projectId?: string): TurnRow[] {
-  const out: TurnRow[] = [];
-  const take = (rows: { body: string; project_id: string | null }[]) => {
-    for (const r of rows) {
-      try {
-        const b = JSON.parse(r.body) as Record<string, unknown>, t = (b.tokens ?? null) as Record<string, unknown> | null;
-        out.push({ projectId: r.project_id ?? (typeof b.projectId === 'string' ? b.projectId : null), agent: typeof b.agent === 'string' && b.agent ? b.agent : 'Agent', provider: typeof b.provider === 'string' ? b.provider : null, model: typeof b.model === 'string' ? b.model : null, input: num(t?.input), output: num(t?.output), cached: num(t?.cached), costUsd: typeof b.costUsd === 'number' && Number.isFinite(b.costUsd) ? b.costUsd : null, endedAt: String(b.endedAt ?? ''), outcome: String(b.outcome ?? ''), trigger: typeof b.trigger === 'string' ? b.trigger : undefined });
-      } catch { /* an unreadable body is skipped */ }
-    }
-  };
-  const where = projectId ? 'AND project_id = ?' : '', args = projectId ? [since, projectId, MAX_ROWS] : [since, MAX_ROWS];
-  try { take(db.prepare(`SELECT body, project_id FROM turn_ledger WHERE created_at >= ? ${where} ORDER BY seq DESC LIMIT ?`).all(...(args as never[])) as never); } catch { /* no ledger yet */ }
-  try { take(db.prepare(`SELECT body, project_id FROM turn_ledger_history WHERE ended_at >= ? ${where} ORDER BY ended_at DESC LIMIT ?`).all(...(args as never[])) as never); } catch { /* no history yet */ }
-  return out.filter(t => t.endedAt);
+/** What the SQL returns: the turns of one day, project, agent, provider, model and outcome, summed. `cost` is the sum over the priced turns; `u*` are the tokens of the unpriced ones. */
+export interface TurnGroup {
+  day: string; projectId: string | null; agent: string; provider: string | null; model: string | null; outcome: string;
+  n: number; input: number; output: number; cached: number; cost: number; pricedN: number; uInput: number; uOutput: number; uCached: number;
 }
-/** A turn the Ledger could not price (a model with no catalog price) gets the user's own price from Settings › Models, when there is one. Turns the Ledger priced keep that price. */
-export function repriceTurns(turns: readonly TurnRow[], policy: ModelPolicy, catalogPrice: (providerId: string, model: string) => ModelPricing | undefined): TurnRow[] {
-  return turns.map(t => {
-    if (t.costUsd !== null || !t.provider || !t.model || (!t.input && !t.output)) return t;
-    const pricing = effectivePricing(policy, t.provider, t.model, catalogPrice(t.provider, t.model));
-    if (!pricing) return t;
-    const cost = estimateCostUsd({ inputTokens: t.input, cachedInputTokens: t.cached ?? 0, outputTokens: t.output, reasoningOutputTokens: 0, requests: 1 }, pricing);
-    return cost === null ? t : { ...t, costUsd: cost };
-  });
+
+/** More groups than this are not read; the report then says it is truncated instead of quietly undercounting. */
+export const MAX_GROUPS = 20_000;
+const DAY_MS = 86_400_000;
+export const CHATS = 'Chats (not task runs)';
+
+/** Indexes the reports filter on. Additive: a Ledger that already has them is left alone, and a table that does not exist yet is skipped. */
+export function ensureLedgerIndexes(db: DatabaseSync): void {
+  for (const sql of ['CREATE INDEX IF NOT EXISTS turn_ledger_created ON turn_ledger(created_at)', 'CREATE INDEX IF NOT EXISTS turn_ledger_history_ended ON turn_ledger_history(ended_at)']) { try { db.exec(sql); } catch { /* no ledger yet */ } }
+}
+
+const J = (path: string) => `json_extract(body,'$.${path}')`;
+const FIELDS = `project_id AS pid,
+  CASE WHEN ${J('trigger')} IN ('chat','project chat') THEN @chats ELSE COALESCE(${J('agent')},'Agent') END AS agent,
+  ${J('provider')} AS provider, ${J('model')} AS model, COALESCE(${J('outcome')},'') AS outcome, COUNT(*) AS n,
+  SUM(COALESCE(${J('tokens.input')},0)) AS tin, SUM(COALESCE(${J('tokens.output')},0)) AS tout, SUM(COALESCE(${J('tokens.cached')},0)) AS tc,
+  SUM(COALESCE(${J('costUsd')},0)) AS cost, SUM(CASE WHEN ${J('costUsd')} IS NULL THEN 0 ELSE 1 END) AS pricedN,
+  SUM(CASE WHEN ${J('costUsd')} IS NULL THEN COALESCE(${J('tokens.input')},0) ELSE 0 END) AS uin,
+  SUM(CASE WHEN ${J('costUsd')} IS NULL THEN COALESCE(${J('tokens.output')},0) ELSE 0 END) AS uout,
+  SUM(CASE WHEN ${J('costUsd')} IS NULL THEN COALESCE(${J('tokens.cached')},0) ELSE 0 END) AS uc`;
+const offsetModifier = (offsetMin: number) => `${offsetMin >= 0 ? '+' : '-'}${Math.abs(offsetMin)} minutes`;
+
+/** Ledger turns (live receipts and imported history) that ended at or after `since`, summed per group, newest days first. */
+export function readGroups(db: DatabaseSync, since: string, offsetMin: number, projectId?: string, limit = MAX_GROUPS): { groups: TurnGroup[]; truncated: boolean } {
+  const out: TurnGroup[] = [];
+  let truncated = false;
+  for (const [table, ts] of [['turn_ledger', 'created_at'], ['turn_ledger_history', 'ended_at']] as const) {
+    const sql = `SELECT date(${ts}, @mod) AS day, ${FIELDS} FROM ${table} WHERE ${ts} >= @since ${projectId ? 'AND project_id = @project' : ''} GROUP BY 1, 2, 3, 4, 5, 6 ORDER BY day DESC LIMIT @limit`;
+    try {
+      const rows = db.prepare(sql).all({ mod: offsetModifier(offsetMin), since, chats: CHATS, limit: limit + 1, ...(projectId ? { project: projectId } : {}) }) as Record<string, unknown>[];
+      if (rows.length > limit) { truncated = true; rows.length = limit; }
+      for (const r of rows) out.push({ day: String(r.day), projectId: typeof r.pid === 'string' && r.pid ? r.pid : null, agent: String(r.agent), provider: typeof r.provider === 'string' ? r.provider : null, model: typeof r.model === 'string' ? r.model : null, outcome: String(r.outcome), n: Number(r.n), input: Number(r.tin), output: Number(r.tout), cached: Number(r.tc), cost: Number(r.cost), pricedN: Number(r.pricedN), uInput: Number(r.uin), uOutput: Number(r.uout), uCached: Number(r.uc) });
+    } catch { /* no ledger yet */ }
+  }
+  return { groups: out, truncated };
 }
 export function oldestTurn(db: DatabaseSync): string | null {
   const ends: string[] = [];
@@ -47,59 +59,84 @@ export function oldestTurn(db: DatabaseSync): string | null {
 /** The caller's calendar day (`YYYY-MM-DD`) for an instant, from its UTC offset in minutes. */
 export const dayOf = (iso: string, offsetMin: number): string => new Date(Date.parse(iso) + offsetMin * 60_000).toISOString().slice(0, 10);
 
+/** Turns grouped the way the SQL groups them (tests, and a check that the two agree). */
+export function groupTurns(turns: readonly TurnRow[], offsetMin: number): TurnGroup[] {
+  const map = new Map<string, TurnGroup>();
+  for (const t of turns) {
+    const day = dayOf(t.endedAt, offsetMin), agent = t.trigger === 'chat' || t.trigger === 'project chat' ? CHATS : t.agent;
+    const key = [day, t.projectId ?? '', agent, t.provider ?? '', t.model ?? '', t.outcome].join('\u0000');
+    const g = map.get(key) ?? { day, projectId: t.projectId, agent, provider: t.provider, model: t.model, outcome: t.outcome, n: 0, input: 0, output: 0, cached: 0, cost: 0, pricedN: 0, uInput: 0, uOutput: 0, uCached: 0 };
+    g.n++; g.input += t.input; g.output += t.output; g.cached += t.cached ?? 0;
+    if (t.costUsd === null) { g.uInput += t.input; g.uOutput += t.output; g.uCached += t.cached ?? 0; } else { g.cost += t.costUsd; g.pricedN++; }
+    map.set(key, g);
+  }
+  return [...map.values()];
+}
+
+/** The unpriced turns of a group get the user's own price from Settings › Models when there is one; the Ledger's own prices are kept. */
+export function repriceGroups(groups: readonly TurnGroup[], policy: ModelPolicy, catalogPrice: (providerId: string, model: string) => ModelPricing | undefined): TurnGroup[] {
+  return groups.map(g => {
+    const unpriced = g.n - g.pricedN;
+    if (!unpriced || !g.provider || !g.model || (!g.uInput && !g.uOutput)) return g;
+    const pricing = effectivePricing(policy, g.provider, g.model, catalogPrice(g.provider, g.model));
+    if (!pricing) return g;
+    const cost = estimateCostUsd({ inputTokens: g.uInput, cachedInputTokens: g.uCached, outputTokens: g.uOutput, reasoningOutputTokens: 0, requests: unpriced }, pricing);
+    return cost === null ? g : { ...g, cost: g.cost + cost, pricedN: g.n, uInput: 0, uOutput: 0, uCached: 0 };
+  });
+}
+
 const bucket = (key: string, label: string): CostBucket => ({ key, label, turns: 0, inputTokens: 0, outputTokens: 0, costUsd: null, unpricedTurns: 0 });
-const add = (b: CostBucket, t: TurnRow) => {
-  b.turns++; b.inputTokens += t.input; b.outputTokens += t.output;
-  if (t.costUsd === null) b.unpricedTurns++; else b.costUsd = (b.costUsd ?? 0) + t.costUsd;
+const add = (b: CostBucket, g: TurnGroup) => {
+  b.turns += g.n; b.inputTokens += g.input; b.outputTokens += g.output;
+  b.unpricedTurns += g.n - g.pricedN;
+  if (g.pricedN) b.costUsd = (b.costUsd ?? 0) + g.cost;
 };
 const byTokens = (a: CostBucket, b: CostBucket) => (b.costUsd ?? -1) - (a.costUsd ?? -1) || (b.inputTokens + b.outputTokens) - (a.inputTokens + a.outputTokens) || b.turns - a.turns;
 const round = (n: number | null) => n === null ? null : Math.round(n * 1e6) / 1e6;
 const tidy = (b: CostBucket): CostBucket => ({ ...b, costUsd: round(b.costUsd) });
 
-export function buildCosts(turns: readonly TurnRow[], o: { days: number; offsetMin: number; now: number; projectNames: ReadonlyMap<string, string>; windows: ProviderWindow[]; ledgerSince: string | null }): CostsReport {
+export function buildCosts(groups: readonly TurnGroup[], o: { days: number; offsetMin: number; now: number; projectNames: ReadonlyMap<string, string>; windows: ProviderWindow[]; ledgerSince: string | null; truncated?: boolean }): CostsReport {
   const totals = bucket('all', 'Total'), model = new Map<string, CostBucket>(), agent = new Map<string, CostBucket>(), project = new Map<string, CostBucket & { projectId: string | null }>();
   const dayMap = new Map<string, CostDay>();
   for (let i = o.days - 1; i >= 0; i--) { const d = dayOf(new Date(o.now - i * DAY_MS).toISOString(), o.offsetMin); dayMap.set(d, { day: d, turns: 0, tokens: 0, costUsd: null }); }
   const first = dayMap.keys().next().value as string;
-  for (const t of turns) {
-    const day = dayOf(t.endedAt, o.offsetMin);
-    if (day < first) continue;
-    add(totals, t);
-    const mKey = `${t.provider ?? ''}|${t.model ?? ''}`, mb = model.get(mKey) ?? bucket(mKey, t.model ?? 'Unknown model'); add(mb, t); model.set(mKey, mb);
-    // A task run belongs to the agent that ran it; a chat (yours, a coordinator's or a helper's) is one line, not one agent per chat title.
-    const who = t.trigger === 'chat' || t.trigger === 'project chat' ? CHATS : t.agent;
-    const ab = agent.get(who) ?? bucket(who, who); add(ab, t); agent.set(who, ab);
-    const pKey = t.projectId ?? '', pb = project.get(pKey) ?? { ...bucket(pKey, t.projectId ? o.projectNames.get(t.projectId) ?? 'Deleted project' : 'Chats outside projects'), projectId: t.projectId }; add(pb, t); project.set(pKey, pb);
-    const d = dayMap.get(day); if (d) { d.turns++; d.tokens += t.input + t.output; if (t.costUsd !== null) d.costUsd = (d.costUsd ?? 0) + t.costUsd; }
+  for (const g of groups) {
+    if (g.day < first) continue;
+    add(totals, g);
+    const mKey = `${g.provider ?? ''}|${g.model ?? ''}`, mb = model.get(mKey) ?? bucket(mKey, g.model ?? 'Unknown model'); add(mb, g); model.set(mKey, mb);
+    const ab = agent.get(g.agent) ?? bucket(g.agent, g.agent); add(ab, g); agent.set(g.agent, ab);
+    const pKey = g.projectId ?? '', pb = project.get(pKey) ?? { ...bucket(pKey, g.projectId ? o.projectNames.get(g.projectId) ?? 'Deleted project' : 'Chats outside projects'), projectId: g.projectId }; add(pb, g); project.set(pKey, pb);
+    const d = dayMap.get(g.day); if (d) { d.turns += g.n; d.tokens += g.input + g.output; if (g.pricedN) d.costUsd = (d.costUsd ?? 0) + g.cost; }
   }
   const sorted = <T extends CostBucket>(m: Map<string, T>) => [...m.values()].sort(byTokens).map(b => ({ ...b, costUsd: round(b.costUsd) }));
   return {
     days: o.days, since: first, until: [...dayMap.keys()].at(-1)!, entries: totals.turns, totals: tidy(totals),
     byDay: [...dayMap.values()].map(d => ({ ...d, costUsd: round(d.costUsd) })), byModel: sorted(model), byAgent: sorted(agent), byProject: sorted(project), windows: o.windows, ledgerSince: o.ledgerSince,
+    truncated: o.truncated === true,
   };
 }
 
-export function buildProfile(turns: readonly TurnRow[], o: { offsetMin: number; now: number; states: Partial<Record<string, number>>; providerNames: ReadonlyMap<string, string>; projects: { projectId: string; name: string; completed: number; open: number }[]; since: string | null }): ProfileStats {
+export function buildProfile(groups: readonly TurnGroup[], o: { offsetMin: number; now: number; states: Partial<Record<string, number>>; providerNames: ReadonlyMap<string, string>; projects: { projectId: string; name: string; completed: number; open: number }[]; since: string | null; truncated?: boolean }): ProfileStats {
   const s = o.states, n = (k: string) => s[k] ?? 0;
   const completed = n('verified') + n('implemented'), failed = n('failed'), total = Object.values(s).reduce<number>((a, b) => a + (b ?? 0), 0);
   const open = total - completed - n('cancelled') - failed;
-  const runs = { total: turns.length, succeeded: turns.filter(t => t.outcome === 'completed').length, failed: turns.filter(t => t.outcome === 'failed').length, other: 0 };
-  runs.other = runs.total - runs.succeeded - runs.failed;
-  let input = 0, output = 0, cost: number | null = null, unpriced = 0;
+  let turnsTotal = 0, input = 0, output = 0, cost: number | null = null, unpriced = 0, succeeded = 0, failedRuns = 0;
   const mix = new Map<string, number>(), perDay = new Map<string, number>();
-  for (const t of turns) {
-    input += t.input; output += t.output; if (t.costUsd === null) unpriced++; else cost = (cost ?? 0) + t.costUsd;
-    const p = t.provider ?? 'unknown'; mix.set(p, (mix.get(p) ?? 0) + 1);
-    const d = dayOf(t.endedAt, o.offsetMin); perDay.set(d, (perDay.get(d) ?? 0) + 1);
+  for (const g of groups) {
+    turnsTotal += g.n; input += g.input; output += g.output; unpriced += g.n - g.pricedN; if (g.pricedN) cost = (cost ?? 0) + g.cost;
+    if (g.outcome === 'completed') succeeded += g.n; else if (g.outcome === 'failed') failedRuns += g.n;
+    const p = g.provider ?? 'unknown'; mix.set(p, (mix.get(p) ?? 0) + g.n);
+    perDay.set(g.day, (perDay.get(g.day) ?? 0) + g.n);
   }
+  const runs = { total: turnsTotal, succeeded, failed: failedRuns, other: turnsTotal - succeeded - failedRuns };
   const activity: { day: string; runs: number }[] = [];
   for (let i = 27; i >= 0; i--) { const d = dayOf(new Date(o.now - i * DAY_MS).toISOString(), o.offsetMin); activity.push({ day: d, runs: perDay.get(d) ?? 0 }); }
   // The streak counts back from today, or from yesterday when today has no run yet.
   let streak = 0; for (let i = activity.length - 1; i >= 0; i--) { if (activity[i]!.runs > 0) streak++; else if (i === activity.length - 1) continue; else break; }
-  const providerMix = [...mix].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([provider, count]) => ({ provider, name: o.providerNames.get(provider) ?? provider, turns: count, share: turns.length ? count / turns.length : 0 }));
+  const providerMix = [...mix].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([provider, count]) => ({ provider, name: o.providerNames.get(provider) ?? provider, turns: count, share: turnsTotal ? count / turnsTotal : 0 }));
   return {
     since: o.since, tasks: { total, completed, open: Math.max(0, open), failed }, runs, tokens: { input, output }, costUsd: round(cost), unpricedTurns: unpriced,
     providerMix, activity, activeDays: activity.filter(a => a.runs > 0).length, streak,
-    topProjects: [...o.projects].sort((a, b) => b.completed - a.completed || b.open - a.open).slice(0, 5),
+    topProjects: [...o.projects].sort((a, b) => b.completed - a.completed || b.open - a.open).slice(0, 5), truncated: o.truncated === true,
   };
 }
