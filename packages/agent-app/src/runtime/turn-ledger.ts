@@ -102,7 +102,10 @@ export const toolName = (type: string, server: unknown, tool: unknown) => type =
 export const TEST_COMMAND = /\b(npm|pnpm|yarn|bun)\s+(run\s+)?test\b|\bpytest\b|\bgo\s+test\b|\bcargo\s+test\b|\bnode\s+--test\b|\bvitest\b|\bjest\b|\bmake\s+test\b/;
 
 /** Wires the ledger to the run hooks. Returns an unsubscribe. Safe in bare test contexts (no hooks). */
-export function attachTurnLedger(context: DomainContext, ledger: () => TurnLedger, onAppend?: (entry: LedgerEntry) => void): () => void {
+/** Who a project run worked for: the task whose attempt ran in this chat, and its Roster owner's name. */
+export type RunAttribution = (run: { chatId: string; projectId: string }) => Promise<{ taskId: string; agent: string } | null>;
+
+export function attachTurnLedger(context: DomainContext, ledger: () => TurnLedger, onAppend?: (entry: LedgerEntry) => void, attribute?: RunAttribution): () => void {
   const hooks = context.hooks;
   if (!hooks?.onRunStarted || !hooks.onRunSettled || !hooks.onProviderEvent) return () => undefined;
   const open = new Map<string, Open>();
@@ -132,9 +135,11 @@ export function attachTurnLedger(context: DomainContext, ledger: () => TurnLedge
       const files = run.chat.projectId ? await filesChanged(turn.cwd, baseline?.tree_sha ?? null) : null;
       const pricing = (() => { try { const provider = context.modelCatalog?.().providers.find(p => p.id === run.chat.providerId) as unknown as { models?: { id: string; pricing?: unknown }[] } | undefined; return provider?.models?.find(m => m.id === run.chat.model)?.pricing ?? null; } catch { return null; } })();
       const endedAt = new Date().toISOString();
+      // A task run is the task's: its Roster owner, the task, trigger "task" (Costs, Timeline and task links key on these).
+      const owner = run.chat.projectId && attribute ? await attribute({ chatId: run.chat.id, projectId: run.chat.projectId }).catch(() => null) : null;
       const entry = ledger().append({
-        id: `${run.chat.id}:${run.runId}`, chatId: run.chat.id, runId: run.runId, taskId: null, projectId: run.chat.projectId ?? null,
-        trigger: run.chat.projectId ? 'project chat' : 'chat', agent: run.chat.title || 'Agent', provider: run.chat.providerId ?? null, model: run.chat.model ?? null,
+        id: `${run.chat.id}:${run.runId}`, chatId: run.chat.id, runId: run.runId, taskId: owner?.taskId ?? null, projectId: run.chat.projectId ?? null,
+        trigger: owner ? 'task' : run.chat.projectId ? 'project chat' : 'chat', agent: owner?.agent || run.chat.title || 'Agent', provider: run.chat.providerId ?? null, model: run.chat.model ?? null,
         tokens: { input: turn.usage.inputTokens, cached: turn.usage.cachedInputTokens, output: turn.usage.outputTokens, reasoning: turn.usage.reasoningOutputTokens },
         costUsd: estimateCostUsd(turn.usage, pricing as never), tools: [...turn.tools].map(([name, count]) => ({ name, count })), approvals: turn.approvals, tests: turn.tests,
         files, startedAt: new Date(turn.startedAt).toISOString(), endedAt, durationMs: Date.now() - turn.startedAt, outcome: run.status,

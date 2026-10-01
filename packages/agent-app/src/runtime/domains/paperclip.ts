@@ -296,7 +296,7 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
   // --- the turn ledger ---------------------------------------------------------------------------------------------------
   let ledgerStore: TurnLedger | undefined;
   const ledger = () => ledgerStore ??= new TurnLedger(context.db());
-  const offLedger = attachTurnLedger(context, ledger, entry => queueEmit(['runs'], entry.taskId ?? undefined));
+  const offLedger = attachTurnLedger(context, ledger, entry => queueEmit(['runs'], entry.taskId ?? undefined), run => local.attribution(run.projectId, run.chatId));
   const ledgerView = async (limit: number): Promise<LedgerView> => {
     let entries = ledger().list({ limit });
     const c = connection();

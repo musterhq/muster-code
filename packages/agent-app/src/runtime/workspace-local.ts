@@ -237,6 +237,17 @@ export class LocalWorkspace {
     throw new Error('That run no longer exists.');
   }
 
+  /** The task a project run worked on (its attempt ran in `chatId`) and that task's owner, for the run's Receipt. */
+  async attribution(projectId: string, chatId: string): Promise<{ taskId: string; agent: string } | null> {
+    const work = await this.invoke('project.work', { projectId, activityLimit: 1 });
+    const task = work.tasks.items.find(t => t.attempts.some(a => a.chatId === chatId));
+    if (!task) return null;
+    if (task.owner.kind !== 'agent') return { taskId: task.id, agent: 'You' };
+    if (task.owner.id === DEFAULT_AGENT_ID) return { taskId: task.id, agent: DEFAULT_AGENT_NAME };
+    const members = await this.invoke('project.members.list', { projectId }).then(r => r.members, () => [] as ProjectMember[]);
+    return { taskId: task.id, agent: members.find(m => m.id === task.owner.id)?.name ?? DEFAULT_AGENT_NAME };
+  }
+
   async projectFor(taskId: string): Promise<{ project: ProjectDetails; view: WorkspaceTask }> { const { read, view } = await this.locate(taskId); return { project: read.project, view }; }
 }
 

@@ -163,3 +163,14 @@ test('S17 an approval imported with a task is an Approval card in its thread, wi
   const inbox = (await s.invoke('paperclip.snapshot', {})).inbox.filter(i => i.taskId === task.id && i.kind === 'approval');
   assert.equal(inbox.length, 1, 'only the pending approval needs you');
 });
+
+test('S19 a task run’s Receipt is attributed to the task and its Roster owner, not the chat title', async t => {
+  const { s, project, member, state } = await service(t);
+  const cto = await member('CTO');
+  const task = await s.invoke('paperclip.task.create', { title: 'Create HELLO.md', description: 'Write it', projectId: project.id, assigneeId: `member:${cto.id}`, start: true });
+  assert.ok(task.started, task.startError ?? 'not started');
+  await until(async () => await state(task.id) !== 'running' && (await s.invoke('paperclip.ledger', {})).entries.some(e => e.chatId === task.started!.chatId), 'receipt');
+  const entry = (await s.invoke('paperclip.ledger', {})).entries.find(e => e.chatId === task.started!.chatId)!;
+  assert.equal(entry.agent, 'CTO'); assert.equal(entry.taskId, task.id); assert.equal(entry.trigger, 'task');
+  assert.equal((await s.invoke('paperclip.ledger', {})).chain.ok, true, 'the chain still verifies');
+});
