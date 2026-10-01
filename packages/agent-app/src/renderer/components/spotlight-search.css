@@ -165,3 +165,13 @@
 .spotlight-status:empty { display: none; }
 .spotlight-status { margin: 0; padding: 6px 12px 4px; border-top: 1px solid var(--hairline); color: var(--text-dim); font-size: var(--fs-12); }
 .spotlight-results .resource-state { padding: 20px 10px; }
+
+/* G19, C34: scope tabs under the search field, and the task key on a workspace row. */
+.spotlight-scopes { display: flex; align-items: center; gap: 2px; padding: 6px 8px 2px; overflow-x: auto; scrollbar-width: none; }
+.spotlight-scopes::-webkit-scrollbar { display: none; }
+.spotlight-scope { display: inline-flex; align-items: center; gap: 5px; flex: none; padding: 2px 8px; border: 0; border-radius: var(--radius-6); background: none; color: var(--text-faint); font: 500 var(--fs-11)/1.6 var(--ui); cursor: pointer; }
+.spotlight-scope span { color: var(--text-faint); font-weight: 400; }
+.spotlight-scope[aria-selected='true'] { background: var(--bg-active); color: var(--text); }
+.spotlight-scope:focus-visible { outline: 2px solid var(--focus-ring, var(--accent)); outline-offset: -1px; }
+@media (hover: hover) { .spotlight-scope:hover { color: var(--text-dim); } }
+.spotlight-key { flex: none; padding: 1px 6px; border-radius: var(--radius-6); background: var(--bg-active); color: var(--text-dim); font: 500 var(--fs-11)/1.6 var(--ui); font-variant-numeric: tabular-nums; }

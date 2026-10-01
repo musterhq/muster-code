@@ -26,8 +26,10 @@ export interface RpcContext {
 }
 
 /** Commands that start an agent turn: the caller is recorded as the turn's actor. */
-const TURN_COMMANDS = new Set(['chat.send', 'chat.retry', 'chat.editResend', 'chat.queue.add', 'chat.queue.resume', 'chat.steer', 'chat.queue.steer',
-  'project.tasks.start', 'project.tasks.dispatch', 'automations.runNow', 'paperclip.task.start', 'ci.repair.start', 'project.coordinator.start']);
+export const TURN_COMMANDS = new Set(['chat.send', 'chat.retry', 'chat.editResend', 'chat.queue.add', 'chat.queue.resume', 'chat.steer', 'chat.queue.steer',
+  'project.tasks.start', 'project.tasks.dispatch', 'automations.runNow', 'paperclip.task.start', 'ci.repair.start', 'project.coordinator.start',
+  // Wave 3: each of these starts a read-only agent turn on the caller's behalf.
+  'insight.reflect.run', 'insight.setup.interview', 'studio.skill.test']);
 
 const str = (v: unknown, name: string): string => { if (typeof v !== 'string' || !v || v.length > 500) throw new PolicyError(`Missing or invalid "${name}".`, 400, 'bad-input'); return v; };
 const need = (user: UserRecord, role: OrgRole, what: string) => { if (ROLE_RANK[user.role] < ROLE_RANK[role]) throw new PolicyError(`Only ${role === 'admin' ? 'owners and admins' : `${role}s and above`} can ${what}.`, 403, 'forbidden'); };

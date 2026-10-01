@@ -45,6 +45,10 @@ export function catalogEfforts(entry:Record<string,unknown>):{efforts?:Effort[];
   const defaultEffort=fallback&&(!efforts.length||efforts.includes(fallback))?fallback:undefined;
   return {...(efforts.length?{efforts}:{}),...(defaultEffort?{defaultEffort}:{})};
 }
+/** Codex names its models "GPT-6.1-Sol"; Muster shows "GPT-6.1 Sol" (version joined, tier spaced). Other names pass through. */
+export const cleanGptName=(name:string):string=>name.replace(/^(GPT-\d+(?:\.\d+)*)-([A-Za-z][A-Za-z0-9]*)$/,'$1 $2');
+/** "gpt-6.1-sol" → "GPT-6.1 Sol": the label for a configured model Codex's own list does not carry. */
+export const gptNameFromId=(id:string):string=>{const m=/^gpt-(\d+(?:\.\d+)*)(?:-([a-z][a-z0-9]*))?$/.exec(id);return m?`GPT-${m[1]}${m[2]?` ${m[2]!.charAt(0).toUpperCase()}${m[2]!.slice(1)}`:''}`:id;};
 const directModel=(id:string)=>/^(?:gpt-[a-zA-Z0-9.-]+|o[1-9][a-zA-Z0-9.-]*)$/.test(id);
 const MAX_CATALOG_ENTRIES=500;
 /** PRO-04: the catalog decides what a route offers (this replaced a hardcoded gateway allowlist). Every entry
@@ -65,7 +69,8 @@ export function catalogModels(family:'openai-direct'|'gateway'|(string&{}),list:
     const model=entry?.slug??entry?.model??entry?.id;
     if(!entry||typeof model!=='string'||!model.trim()||model.length>200||/[\x00-\x1f]/.test(model)){excluded.push({id:`entry-${index+1}`,name:`Catalog entry ${index+1}`,reason:!entry?'The catalog entry is not an object.':model===undefined?'The catalog entry has no "slug".':'The catalog entry\u2019s "slug" is not a usable model id (empty, too long or has control characters).'});return;}
     const label=entry.display_name??entry.displayName??entry.name??model;
-    const name=typeof label==='string'&&label.trim()?label.replace(/[\x00-\x1f]/g,'').slice(0,160):model;
+    const cleaned=typeof label==='string'&&label.trim()?label.replace(/[\x00-\x1f]/g,'').slice(0,160):model;
+    const name=family==='openai-direct'?cleanGptName(cleaned):cleaned;
     if(models.some(m=>m.id===model)){excluded.push({id:model,name,reason:'Listed more than once in the catalog; the first entry is used.'});return;}
     if(entry.hidden===true||entry.visibility==='hide'||entry.visibility==='hidden'){excluded.push({id:model,name,reason:'The provider catalog marks this model hidden.'});return;}
     if(family==='openai-direct'&&!directModel(model)){excluded.push({id:model,name,reason:'OpenAI Direct runs OpenAI model ids only; use a gateway profile for this model.'});return;}
@@ -194,6 +199,8 @@ interface CodexRouteSpec {
   /** How Muster's own requests (the model listing) authenticate, mirroring what Codex does for the chat itself. */
   auth?: CodexProviderAuth;
   catalogPath?: string;
+  /** The top-level `model` of config.toml (ChatGPT route only): always selectable, even when Codex's list lacks it. */
+  configuredModel?: string;
   /** Profile text or config table, hashed into the binding so an edited route needs reselection. */
   fingerprint: string;
   invalid?: string;
@@ -263,6 +270,7 @@ function codexRoutes(fs:ProviderInstanceFs,codexHome:string,track:(file:string)=
     }
   }
   const topProvider=tomlString(config,'model_provider')??'openai',topCatalog=tomlString(config,'model_catalog_json');
+  const configuredModel=(()=>{const value=tomlString(config,'model')?.trim();return value&&directModel(value)&&value.length<=200?value:undefined;})();
   let names:string[]=[];
   try {track(codexHome);names=(fs.readdirSync(codexHome) as string[]).filter(name=>PROFILE_FILE.test(name)&&name!=='config.toml').sort().slice(0,MAX_PROFILES);} catch {names=[];}
   for(const name of names){
@@ -289,7 +297,7 @@ function codexRoutes(fs:ProviderInstanceFs,codexHome:string,track:(file:string)=
   // config.toml did not parse at all: its provider tables are still listed, each saying why it cannot run.
   if(configError)for(const id of headerProviderIds(configText))if(id!=='openai'&&!routes.some(route=>route.modelProvider===id))routes.push({modelProvider:id,kind:'gateway',fingerprint:id,invalid:configError});
   // OpenAI's own provider needs no table: a Codex sign-in is enough.
-  if(signedIn&&!routes.some(route=>route.modelProvider==='openai'&&!route.invalid))routes.push({modelProvider:'openai',kind:'chatgpt',catalogPath:topProvider==='openai'?topCatalog:undefined,fingerprint:'openai'});
+  if(signedIn&&!routes.some(route=>route.modelProvider==='openai'&&!route.invalid))routes.push({modelProvider:'openai',kind:'chatgpt',catalogPath:topProvider==='openai'?topCatalog:undefined,...(topProvider==='openai'&&configuredModel?{configuredModel}:{}),fingerprint:'openai'});
   return routes;
 }
 
@@ -428,6 +436,9 @@ function homeInstances({fs,directory,codexHome,cli,node,env,track,validator,fetc
     let models:Models,excluded:ExcludedModel[]=[];
     if(list){
       ({models,excluded}=catalogModels(route.kind==='chatgpt'?'openai-direct':'gateway',list));
+      // Fallback: the model the user set in Codex's config.toml stays selectable (first, so it is the default) when a stale
+      // or hand-written list does not carry it. A model the list marks hidden is respected, not resurrected.
+      if(route.kind==='chatgpt'&&route.configuredModel&&!models.some(model=>model.id===route.configuredModel)&&!excluded.some(item=>item.id===route.configuredModel))models.unshift({id:route.configuredModel,name:gptNameFromId(route.configuredModel)});
       // A gateway with a hand-written catalog also offers the router's own agents and combos (owned_by "combo":
       // planner, advisor, executor, auto routes), read live so new ones appear without editing the catalog.
       // While the listing loads, or if it fails, the catalog alone is offered.

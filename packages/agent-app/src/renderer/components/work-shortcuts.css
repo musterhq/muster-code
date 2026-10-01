@@ -1,0 +1,14 @@
+/* Keyboard shortcuts cheatsheet (C3). Muster tokens only. */
+.work-cheatsheet { width: min(640px, calc(100vw - 40px)); }
+.work-cheat-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px 24px; margin-bottom: 14px; }
+.work-cheat-grid section { min-width: 0; }
+.work-cheat-grid section:first-child { grid-column: 1 / -1; }
+.work-cheat-grid h3 { margin: 0 0 6px; color: var(--text-dim); font-size: var(--fs-11); font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; }
+.work-cheat-grid dl { display: flex; flex-direction: column; gap: 4px; margin: 0; }
+.work-cheat-grid dl > div { display: grid; grid-template-columns: minmax(84px, auto) 1fr; align-items: center; gap: 10px; font-size: var(--fs-12); }
+.work-cheat-grid dt { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+.work-cheat-grid dd { margin: 0; color: var(--text); }
+.work-cheat-grid kbd { min-width: 20px; padding: 1px 6px; border: 1px solid var(--hairline); border-radius: var(--radius-6); background: var(--bg); color: var(--text-dim); font: var(--fs-11)/1.6 var(--ui); text-align: center; }
+.work-cheat-then { color: var(--text-faint); font-size: var(--fs-11); }
+.work-cheat-toggle { margin: 4px 0 12px; }
+@media (max-width: 560px) { .work-cheat-grid { grid-template-columns: minmax(0, 1fr); } }

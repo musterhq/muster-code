@@ -1,0 +1,31 @@
+/* Set up project (C20, G31). Muster tokens only. */
+.setup-wizard { width: min(560px, calc(100vw - 40px)); }
+.setup-steps { display: flex; gap: 6px; margin: 0 0 16px; }
+.setup-step { display: inline-flex; align-items: center; gap: 6px; flex: 1; min-width: 0; padding: 0 0 6px; border-bottom: 2px solid var(--hairline); color: var(--text-faint); font-size: var(--fs-12); line-height: 18px; white-space: nowrap; }
+.setup-step[data-state='now'] { border-color: var(--link); color: var(--text); font-weight: 500; }
+.setup-step[data-state='done'] { border-color: var(--ok); color: var(--text-dim); }
+.setup-step-dot { display: inline-grid; flex: none; place-items: center; width: 17px; height: 17px; border-radius: 50%; background: var(--bg-active); font-size: var(--fs-11); font-variant-numeric: tabular-nums; }
+.setup-step[data-state='done'] .setup-step-dot { background: var(--ok); color: var(--bg); }
+.setup-templates { display: flex; flex-wrap: wrap; gap: 6px; }
+.setup-have { margin: 0; color: var(--text-dim); font-size: var(--fs-12); }
+.setup-date input { max-width: 200px; }
+.setup-modes { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.setup-mode { display: flex; flex-direction: column; gap: 4px; padding: 10px 12px; border: 1px solid var(--hairline); border-radius: var(--radius-10); background: none; color: var(--text); text-align: left; cursor: pointer; }
+.setup-mode strong { font-size: var(--fs-13); font-weight: 550; }
+.setup-mode span { color: var(--text-dim); font-size: var(--fs-12); }
+.setup-mode[data-on] { border-color: var(--link); background: var(--bg-active); }
+.setup-mode:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
+.setup-start { align-self: end; padding-bottom: 6px; }
+.setup-interview-note { margin: 0; color: var(--text-dim); font-size: var(--fs-12); }
+.setup-launch ul { display: flex; flex-direction: column; gap: 8px; margin: 0 0 14px; padding: 0; list-style: none; font-size: var(--fs-13); }
+.setup-launch li { display: flex; align-items: flex-start; gap: 8px; }
+.setup-launch li svg { flex: none; margin-top: 3px; color: var(--ok); }
+section.setup-card { display: flex; flex-direction: row; align-items: center; justify-content: space-between; gap: 16px; padding: 12px 16px; text-align: left; border: 1px solid var(--hairline); border-radius: var(--radius-10); }
+section.setup-card > div { flex: 1; min-width: 0; }
+section.setup-card p { margin: 2px 0 0; font-size: var(--fs-12); }
+section.setup-card > button { flex: none; }
+@media (max-width: 560px) { .setup-modes { grid-template-columns: minmax(0, 1fr); } .setup-step { font-size: var(--fs-11); } }
+/* A coordinator proposal reads as a short list under its heading and buttons. */
+ul.project-coordinator-list > li { flex-wrap: wrap; align-items: flex-start; }
+.project-coordinator-list .project-coordinator-ops { order: 3; flex: 1 0 100%; margin: 0; padding: 0 0 0 18px; list-style: disc; color: var(--text-dim); font-size: var(--fs-12); }
+.project-coordinator-list .project-coordinator-ops li { display: list-item; padding: 1px 0; border-top: 0; }

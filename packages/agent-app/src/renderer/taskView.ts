@@ -5,6 +5,7 @@
  */
 import type { WorkspacePriority, WorkspaceStatus, WorkspaceTask } from '../shared/domains/paperclip-protocol.ts';
 import { OPEN_STATUSES, PRIORITY_NAME, STATUS_LABEL, WORKSPACE_STATUSES } from '../shared/domains/paperclip-protocol.ts';
+import { matchesFilters, parseQuery } from '../shared/task-query.ts';
 
 export type TaskSort = 'workflow' | 'updated' | 'created' | 'priority' | 'status' | 'title' | 'key';
 export type TaskGroup = 'none' | 'status' | 'owner' | 'priority' | 'parent' | 'project';
@@ -13,9 +14,11 @@ export type QuickFilter = 'all' | 'active' | 'backlog' | 'done';
 export interface TaskViewState {
   layout: TaskLayout; query: string; quick: QuickFilter;
   statuses: WorkspaceStatus[]; owners: string[]; priorities: WorkspacePriority[];
+  /** Label names (any of). */
+  labels: string[];
   sort: TaskSort; group: TaskGroup; collapsed: string[];
 }
-export const DEFAULT_VIEW: TaskViewState = { layout: 'list', query: '', quick: 'all', statuses: [], owners: [], priorities: [], sort: 'workflow', group: 'none', collapsed: [] };
+export const DEFAULT_VIEW: TaskViewState = { layout: 'list', query: '', quick: 'all', statuses: [], owners: [], priorities: [], labels: [], sort: 'workflow', group: 'none', collapsed: [] };
 export const SORT_LABEL: Record<TaskSort, string> = { workflow: 'Workflow', updated: 'Updated', created: 'Created', priority: 'Priority', status: 'Status', title: 'Title', key: 'Key' };
 export const GROUP_LABEL: Record<TaskGroup, string> = { none: 'None', status: 'Status', owner: 'Owner', priority: 'Priority', parent: 'Parent', project: 'Project' };
 export const QUICK_LABEL: Record<QuickFilter, string> = { all: 'All', active: 'Active', backlog: 'Backlog', done: 'Done' };
@@ -43,8 +46,9 @@ export function compareTasks(sort: TaskSort): (a: WorkspaceTask, b: WorkspaceTas
 }
 
 /** Search (title or key, words in any order), the quick filter and the three facet filters. */
-export function filterTasks(tasks: readonly WorkspaceTask[], view: Pick<TaskViewState, 'query' | 'quick' | 'statuses' | 'owners' | 'priorities'>): WorkspaceTask[] {
-  const words = view.query.trim().toLowerCase().split(/\s+/).filter(Boolean);
+export function filterTasks(tasks: readonly WorkspaceTask[], view: Pick<TaskViewState, 'query' | 'quick' | 'statuses' | 'owners' | 'priorities'> & { labels?: readonly string[] }): WorkspaceTask[] {
+  // The query is free words plus field:value filters (status:, assignee:, label:, priority:, is:, pr:), see shared/task-query.ts.
+  const q = parseQuery(view.query), words = q.words;
   return tasks.filter(t => {
     if (view.quick === 'active' && !OPEN_STATUSES.includes(t.status)) return false;
     if (view.quick === 'active' && t.status === 'backlog') return false;
@@ -53,6 +57,8 @@ export function filterTasks(tasks: readonly WorkspaceTask[], view: Pick<TaskView
     if (view.statuses.length && !view.statuses.includes(t.status)) return false;
     if (view.priorities.length && !view.priorities.includes(t.priority)) return false;
     if (view.owners.length && !view.owners.includes(t.assigneeId ?? UNASSIGNED)) return false;
+    if (view.labels?.length && !t.labels?.some(l => view.labels!.includes(l.name))) return false;
+    if (q.filters.length && !matchesFilters(t, q)) return false;
     if (words.length) { const hay = `${t.key} ${t.title} ${t.assigneeLabel ?? ''}`.toLowerCase(); if (!words.every(w => hay.includes(w))) return false; }
     return true;
   });
@@ -125,7 +131,23 @@ export function ownerOptions(tasks: readonly WorkspaceTask[]): { id: string; lab
 }
 
 /** How many filters are narrowing the list (the badge on the Filter button). */
-export const activeFilters = (view: Pick<TaskViewState, 'quick' | 'statuses' | 'owners' | 'priorities'>) => (view.quick !== 'all' ? 1 : 0) + view.statuses.length + view.owners.length + view.priorities.length;
+export const activeFilters = (view: Pick<TaskViewState, 'quick' | 'statuses' | 'owners' | 'priorities'> & { labels?: readonly string[] }) => (view.quick !== 'all' ? 1 : 0) + view.statuses.length + view.owners.length + view.priorities.length + (view.labels?.length ?? 0);
+
+/** The labels the filter offers: every label on a task in this list, by name. */
+export const labelOptions = (tasks: readonly WorkspaceTask[]): { name: string; color: string | null; count: number }[] => {
+  const seen = new Map<string, { name: string; color: string | null; count: number }>();
+  for (const t of tasks) for (const l of t.labels ?? []) { const e = seen.get(l.name) ?? { name: l.name, color: l.color, count: 0 }; e.count++; seen.set(l.name, e); }
+  return [...seen.values()].sort((a, b) => a.name.localeCompare(b.name));
+};
+
+/** Named saved views (C5): a query and filters kept under a name, per list, on this device. */
+export interface SavedView { name: string; query: string; quick: QuickFilter; statuses: WorkspaceStatus[]; owners: string[]; priorities: WorkspacePriority[]; labels: string[]; sort: TaskSort; group: TaskGroup }
+export const MAX_SAVED_VIEWS = 12;
+export function loadSavedViews(scope: string): SavedView[] {
+  try { const raw = JSON.parse(globalThis.localStorage?.getItem(`muster.tasks.saved.${scope}`) ?? '[]') as unknown; return Array.isArray(raw) ? raw.filter((v): v is SavedView => Boolean(v) && typeof v === 'object' && typeof (v as SavedView).name === 'string').slice(0, MAX_SAVED_VIEWS) : []; } catch { return []; }
+}
+export function storeSavedViews(scope: string, views: readonly SavedView[]): void { try { globalThis.localStorage?.setItem(`muster.tasks.saved.${scope}`, JSON.stringify(views.slice(0, MAX_SAVED_VIEWS))); } catch { /* not remembered */ } }
+export const viewOf = (name: string, v: TaskViewState): SavedView => ({ name, query: v.query, quick: v.quick, statuses: v.statuses, owners: v.owners, priorities: v.priorities, labels: v.labels, sort: v.sort, group: v.group });
 
 /** Views are remembered per list (a project, or the app-wide Tasks page); the search text is not. */
 export function loadView(scope: string): TaskViewState {
@@ -136,7 +158,7 @@ export function loadView(scope: string): TaskViewState {
     const list = <T extends string>(value: unknown, allowed?: readonly T[]): T[] => Array.isArray(value) ? value.filter((v): v is T => typeof v === 'string' && (!allowed || allowed.includes(v as T))).slice(0, 100) : [];
     return {
       layout: pick(raw.layout, ['list', 'board'] as const, 'list'), query: '', quick: pick(raw.quick, ['all', 'active', 'backlog', 'done'] as const, 'all'),
-      statuses: list(raw.statuses, WORKSPACE_STATUSES), owners: list(raw.owners), priorities: list(raw.priorities, PRIORITIES),
+      statuses: list(raw.statuses, WORKSPACE_STATUSES), owners: list(raw.owners), priorities: list(raw.priorities, PRIORITIES), labels: list(raw.labels),
       sort: pick(raw.sort, Object.keys(SORT_LABEL) as TaskSort[], 'workflow'), group: pick(raw.group, Object.keys(GROUP_LABEL) as TaskGroup[], 'none'), collapsed: list(raw.collapsed),
     };
   } catch { return { ...DEFAULT_VIEW }; }

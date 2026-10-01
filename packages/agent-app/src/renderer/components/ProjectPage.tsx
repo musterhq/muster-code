@@ -12,10 +12,10 @@
  *   (schedules, verification, the task graph) and Activity.
  */
 import { Menu } from '@base-ui/react/menu';
-import { Archive, ArchiveRestore, Clipboard, Download, FolderClosed, MoreHorizontal, Settings2, SquarePen, Trash2 } from 'lucide-react';
+import { Archive, ArchiveRestore, Clipboard, Download, FolderClosed, ListChecks, MoreHorizontal, Settings2, SquarePen, Trash2 } from 'lucide-react';
 import React, { useEffect, useMemo, useState } from 'react';
 import type { Chat, Folder } from '../../shared/protocol';
-import type { DashboardData, WorkspaceSnapshot } from '../../shared/domains/paperclip-protocol';
+import type { DashboardData, WorkspaceProject, WorkspaceSnapshot } from '../../shared/domains/paperclip-protocol';
 import { budgetUse, OPEN_STATUSES } from '../../shared/domains/paperclip-protocol';
 import type { ProjectDetails, TeamSettings } from '../../shared/domains/projects-protocol';
 import { DEFAULT_TEAM_SETTINGS, keyPrefixOf } from '../../shared/domains/project-team-protocol';
@@ -43,13 +43,18 @@ import { NewTaskSheet } from './HubSetup';
 import { TaskList } from './TaskList';
 import { ProjectCostSummary } from './UsageCost';
 import { DashboardPage, RunActivityChart } from './DashboardPage';
+import { FeedbackSection, GoalsSection, LabelsSection, PausedBanner, ProjectStatusChips, ProjectStatusFields, StatusCards } from './WorkProject';
+import { OutputsPanel } from './WorkOutputs';
+import { ProjectSetupWizard, SetupCard } from './ProjectSetup';
+import { needsSetup } from '../setupModel';
+import { StarButton } from './WorkParts';
 
 export type ProjectPageTab = 'dashboard' | 'tasks' | 'roster' | 'outputs' | 'ledger' | 'budget' | 'settings';
 const TABS: { id: ProjectPageTab; label: string }[] = [{ id: 'dashboard', label: NAMES.dashboard }, { id: 'tasks', label: NAMES.tasks }, { id: 'roster', label: NAMES.roster }, { id: 'outputs', label: NAMES.outputs }, { id: 'ledger', label: NAMES.ledger }, { id: 'budget', label: NAMES.budget }, { id: 'settings', label: NAMES.settings }];
-type SettingsSection = 'general' | 'folders' | 'members' | 'mail' | 'chats' | 'knowledge' | 'runs' | 'governance' | 'secrets' | 'activity';
+type SettingsSection = 'general' | 'folders' | 'members' | 'mail' | 'chats' | 'knowledge' | 'runs' | 'governance' | 'secrets' | 'goals' | 'labels' | 'feedback' | 'activity';
 const SECTIONS: { id: SettingsSection; label: string }[] = [
   { id: 'general', label: 'General' }, { id: 'folders', label: 'Folders' }, { id: 'members', label: 'Members' }, { id: 'mail', label: NAMES.mail },
-  { id: 'chats', label: 'Chats' }, { id: 'knowledge', label: 'Knowledge' }, { id: 'runs', label: 'Runs & verification' }, { id: 'governance', label: 'Run policy' }, { id: 'secrets', label: 'Secrets' }, { id: 'activity', label: 'Activity' },
+  { id: 'chats', label: 'Chats' }, { id: 'knowledge', label: 'Knowledge' }, { id: 'runs', label: 'Runs & verification' }, { id: 'governance', label: 'Run policy' }, { id: 'secrets', label: 'Secrets' }, { id: 'goals', label: 'Goals' }, { id: 'labels', label: 'Labels' }, { id: 'feedback', label: 'Feedback' }, { id: 'activity', label: 'Activity' },
 ];
 const errorText = (cause: unknown) => cause instanceof Error ? cause.message : String(cause);
 
@@ -59,8 +64,9 @@ export interface MusterProjectContext {
   onUpdated: (p: ProjectDetails) => void; onStartChat: (folderId?: string) => void; onOpenChat: (id: string) => void; onLeave: () => void; onDeleted: () => void;
 }
 
-export function ProjectPage({ snapshot, projectId, nav, muster, initialTab = 'tasks' }: { snapshot: WorkspaceSnapshot | null; projectId: string; nav: HubNav; muster?: MusterProjectContext; initialTab?: ProjectPageTab }): React.ReactElement {
-  const [tab, setTab] = useState<ProjectPageTab>(initialTab);
+export function ProjectPage({ snapshot, projectId, nav, muster, initialTab = 'tasks', startSetup = false }: { snapshot: WorkspaceSnapshot | null; projectId: string; nav: HubNav; muster?: MusterProjectContext; initialTab?: ProjectPageTab; startSetup?: boolean }): React.ReactElement {
+  const [tab, setTab] = useState<ProjectPageTab>(startSetup ? 'dashboard' : initialTab);
+  const [setup, setSetup] = useState(startSetup);
   const [section, setSection] = useState<SettingsSection>('general');
   const [creating, setCreating] = useState(false);
   const [status, setStatus] = useState('');
@@ -87,13 +93,16 @@ export function ProjectPage({ snapshot, projectId, nav, muster, initialTab = 'ta
       <span className="pp-icon" aria-hidden="true"><FolderClosed size={16}/></span>
       <div className="pp-title">
         {project ? <InlineText className="pp-name" label="Project name" placeholder="Name this project" maxLength={256} value={project.name} onSave={next => save({ name: next })}/> : <h1 className="pp-name">{name}</h1>}
-        <p className="pp-sub">{where && <span className="pp-repo" title={where}>{where}</span>}<span>{open} open{scoped ? ` of ${scoped.tasks.length}` : ''}</span>{summary?.source === 'paperclip' && <span className="ws-source">{NAMES.paperclip}</span>}{project?.archived && <span className="ws-chip" data-tone="warn">Archived</span>}</p>
+        <p className="pp-sub">{where && <span className="pp-repo" title={where}>{where}</span>}<span>{open} open{scoped ? ` of ${scoped.tasks.length}` : ''}</span>{local && <ProjectStatusChips project={summary}/>}{summary?.source === 'paperclip' && <span className="ws-source">{NAMES.paperclip}</span>}{project?.archived && <span className="ws-chip" data-tone="warn">Archived</span>}</p>
+        {summary?.source === 'local' && summary.org && <p className="project-edit-hint pp-imported-note">Imported copy from {summary.org}. Paperclip changes arrive when you import again; edits here, including a task's priority or owner, stay in Muster.</p>}
       </div>
       {muster && project && <div className="pp-actions">
+        <StarButton starred={Boolean(summary?.starred)} label={project.name} onToggle={() => void invoke('work.star.set', { kind: 'project', id: project.id, starred: !summary?.starred }).then(() => refreshWorkspace(), notifyError)}/>
         {!project.archived && <button type="button" className="settings-button secondary" onClick={() => muster.onStartChat(project.folderIds[0])}><SquarePen size={14}/>New chat</button>}
         <Menu.Root>
           <Menu.Trigger className="icon-button" aria-label="Project actions"><MoreHorizontal size={16}/></Menu.Trigger>
           <Menu.Portal><Menu.Positioner side="bottom" align="end" sideOffset={4} className="ui-menu-positioner"><Menu.Popup className="ui-menu">
+            {!project.archived && <Menu.Item onClick={() => setSetup(true)}><ListChecks size={14}/>Set up project…</Menu.Item>}
             <Menu.Item onClick={() => setEditing(true)}><Settings2 size={14}/>Edit project…</Menu.Item>
             <Menu.Separator/>
             <Menu.Item onClick={() => void copyProjectExport(project, project.folderIds.length).then(setStatus)}><Clipboard size={14}/>Copy export JSON</Menu.Item>
@@ -113,14 +122,15 @@ export function ProjectPage({ snapshot, projectId, nav, muster, initialTab = 'ta
       {!scoped ? <ResourceState kind="loading" label="Loading the project" rows={5}/>
         : tab === 'tasks' ? <TaskList snapshot={scoped} tasks={scoped.tasks} scope={projectId} onOpenTask={nav.onOpenTask} onNewTask={project?.archived ? undefined : () => setCreating(true)} emptyMessage={local ? 'No tasks yet. Create one, give it an owner from the Roster, and start it in its own worktree.' : 'No tasks in this project yet.'}/>
         : tab === 'roster' ? <RosterPanel snapshot={scoped} projectId={projectId} local={local} nav={nav}>{muster && <WorkingNow projectId={projectId} chats={muster.chats} onOpenChat={muster.onOpenChat}/>}</RosterPanel>
-        : tab === 'outputs' ? <div className="pp-outputs"><ListPage kind="artifacts" embedded projectId={projectId}/>{muster && <ProjectChangesSection folders={muster.allFolders.filter(f => muster.project.folderIds.includes(f.id))} onReview={f => { openChangesTab(f.id, f.name); muster.onLeave(); }}/>}</div>
-        : tab === 'dashboard' ? <DashboardPage snapshot={scoped} nav={nav} projectId={projectId}/>
+        : tab === 'outputs' ? <div className="pp-outputs"><OutputsPanel snapshot={scoped} projectId={projectId} local={local} nav={nav}/>{muster && <ProjectChangesSection folders={muster.allFolders.filter(f => muster.project.folderIds.includes(f.id))} onReview={f => { openChangesTab(f.id, f.name); muster.onLeave(); }}/>}</div>
+        : tab === 'dashboard' ? <div className="pp-stack"><PausedBanner project={summary}/>{local && project && !project.archived && needsSetup({ tasks: scoped.tasks.length, agents: scoped.agents.filter(a => a.memberId && a.memberId !== 'agent').length }) && <SetupCard onStart={() => setSetup(true)}/>}{local && <StatusCards projectId={projectId} archived={project?.archived}/>}<DashboardPage snapshot={scoped} nav={nav} projectId={projectId}/></div>
         : tab === 'ledger' ? <LedgerPage snapshot={scoped} nav={nav} projectId={projectId}/>
         : tab === 'budget' ? <BudgetTab projectId={projectId} local={local} name={name}/>
         : muster ? <MusterSettings context={muster} snapshot={scoped} section={section} onSection={setSection} onEdit={() => setEditing(true)} onArchive={() => setConfirm('archive')} onDelete={() => setConfirm('delete')} onRestore={() => void restore()} onStatus={setStatus}/>
         : <PaperclipSettings snapshot={scoped}/>}
     </div>
     <NewTaskSheet open={creating} snapshot={snapshot} projectId={projectId} onClose={() => setCreating(false)} onCreated={() => undefined}/>
+    {muster && project && <ProjectSetupWizard open={setup} project={project} snapshot={scoped} onClose={() => setSetup(false)} onOpenChat={muster.onOpenChat} onDone={() => setTab('tasks')}/>}
     {muster && project && <>
       <EditProjectDialog project={project} allFolders={muster.allFolders} open={editing} onClose={() => setEditing(false)} onSaved={p => { muster.onUpdated(p); setStatus('Project saved.'); }} onArchive={() => { setEditing(false); setConfirm('archive'); }}/>
       <ConfirmProjectAction project={project} action={confirm} onClose={() => setConfirm(null)} onArchived={p => { muster.onUpdated(p); setStatus('Project archived. Task runs are paused.'); }} onDeleted={muster.onDeleted}/>
@@ -148,7 +158,7 @@ function MusterSettings({ context, snapshot, section, onSection, onEdit, onArchi
     <div className="pp-settings-body">
       {needsWork && error ? <ResourceState kind="error" message="This project’s work could not be loaded." detail={error} onRetry={reload}/>
         : needsWork && !work ? <ResourceState kind="loading" label="Loading project" rows={4}/>
-        : section === 'general' ? <GeneralSettings project={project} onUpdated={onUpdated} onEdit={onEdit} onArchive={onArchive} onDelete={onDelete} onRestore={onRestore} onOpenChat={onOpenChat}>
+        : section === 'general' ? <GeneralSettings project={project} meta={snapshot.projects[0]} onUpdated={onUpdated} onEdit={onEdit} onArchive={onArchive} onDelete={onDelete} onRestore={onRestore} onOpenChat={onOpenChat}>
             <InstructionsCard projectId={project.id} instructions={work!.instructions} onChanged={reload}/>
             <CoordinatorCard projectId={project.id} coordinator={work!.coordinator} archived={project.archived} onOpenChat={onOpenChat} onChanged={reload}/>
           </GeneralSettings>
@@ -162,6 +172,9 @@ function MusterSettings({ context, snapshot, section, onSection, onEdit, onArchi
             <ProjectDecisionSection projectId={project.id} work={work!} onChanged={reload}/>
           </div>
         : section === 'governance' ? <GovernanceSection projectId={project.id} snapshot={snapshot}/>
+        : section === 'goals' ? <GoalsSection projectId={project.id} snapshot={snapshot}/>
+        : section === 'labels' ? <LabelsSection projectId={project.id}/>
+        : section === 'feedback' ? <FeedbackSection projectId={project.id} snapshot={snapshot}/>
         : section === 'secrets' ? <SecretsSection projectId={project.id} snapshot={snapshot}/>
         : section === 'runs' ? <ProjectTaskSection project={project} folders={folders} work={work!} archived={project.archived} filter={filter} onFilter={setFilter} onChanged={reload}/>
         : <ProjectActivityPanel projectId={project.id} resolveRef={() => null} onOpenRef={() => undefined}/>}
@@ -170,7 +183,7 @@ function MusterSettings({ context, snapshot, section, onSection, onEdit, onArchi
 }
 
 /** General: name and goal, task keys, default model, approval to add agents, the project's rules, and the danger zone. */
-function GeneralSettings({ project, onUpdated, onEdit, onArchive, onDelete, onRestore, children }: { project: ProjectDetails; onUpdated: (p: ProjectDetails) => void; onEdit: () => void; onArchive: () => void; onDelete: () => void; onRestore: () => void; onOpenChat: (id: string) => void; children: React.ReactNode }): React.ReactElement {
+function GeneralSettings({ project, meta, onUpdated, onEdit, onArchive, onDelete, onRestore, children }: { project: ProjectDetails; meta: WorkspaceProject | undefined; onUpdated: (p: ProjectDetails) => void; onEdit: () => void; onArchive: () => void; onDelete: () => void; onRestore: () => void; onOpenChat: (id: string) => void; children: React.ReactNode }): React.ReactElement {
   const [settings, setSettings] = useState<TeamSettings | null>(null);
   const [prefix, setPrefix] = useState('');
   useEffect(() => { let live = true; invoke('project.team.settings', { projectId: project.id }).then(s => { if (live) { setSettings(s); setPrefix(s.keyPrefix ?? ''); } }, () => { if (live) setSettings({ ...DEFAULT_TEAM_SETTINGS }); }); return () => { live = false; }; }, [project.id]);
@@ -183,6 +196,7 @@ function GeneralSettings({ project, onUpdated, onEdit, onArchive, onDelete, onRe
     <dl className="pp-fields">
       <div><dt>Name</dt><dd><InlineText className="pp-field-text" label="Project name" placeholder="Name this project" maxLength={256} value={project.name} onSave={name => save({ name })}/></dd></div>
       <div><dt>Goal</dt><dd><InlineText className="pp-field-text" label="Shared goal" placeholder="Add a shared goal every chat and task run in this project can see" multiline maxLength={32768} value={project.goal} onSave={goal => save({ goal })}/></dd></div>
+      <ProjectStatusFields projectId={project.id} status={meta?.status ?? 'in_progress'} targetDate={meta?.targetDate ?? null}/>
       <div><dt>Task keys</dt><dd className="pp-inline-form">
         <input className="ws-input pp-prefix" aria-label="Task key prefix" maxLength={8} value={prefix} placeholder={keyPrefixOf(project.name)} onChange={e => setPrefix(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ''))} onKeyDown={e => { if (e.key === 'Enter') void change({ keyPrefix: prefix || null }); }}/>
         <button type="button" className="settings-button secondary" disabled={!settings || (prefix || null) === settings.keyPrefix} onClick={() => void change({ keyPrefix: prefix || null })}>Save</button>
@@ -213,7 +227,7 @@ function PaperclipSettings({ snapshot }: { snapshot: WorkspaceSnapshot }): React
       <div><dt>Local folder</dt><dd>{p.cwd ? <code>{p.cwd}</code> : <span className="ws-faint">None</span>}</dd></div>
       <div><dt>Memory</dt><dd>{p.memory ? `${p.memory.label} · ${p.memory.count} ${p.memory.count === 1 ? 'note' : 'notes'}` : <span className="ws-faint">No Muster folder matches this repository yet</span>}</dd></div>
     </dl>
-    <p className="project-edit-hint">This project lives in {snapshot.paperclip?.company?.name ?? NAMES.paperclip}; change its configuration there. To run its tasks in Muster, import it into one of your projects.</p>
+    <p className="project-edit-hint">This project lives in {snapshot.paperclip?.company?.name ?? NAMES.paperclip}; change its configuration there. To work on its tasks in Muster, import it: it becomes its own project here, under its org.</p>
     <p><button type="button" className="settings-button secondary" onClick={() => openAppSettings('integrations')}>Import into Muster…</button></p>
   </div>;
 }
@@ -245,14 +259,16 @@ function BudgetTab({ projectId, local, name }: { projectId: string; local: boole
   if (error) return <ResourceState kind="error" message="Spend could not be read." detail={error}/>;
   if (!data) return <ResourceState kind="loading" label="Reading spend" rows={3}/>;
   const spent = data.spend.usd, budget = settings?.monthlyBudgetUsd ?? null, tokenBudget = settings?.monthlyBudgetTokens ?? null, tokens = data.spend.tokens ?? 0;
-  const use = budgetUse({ usd: budget, tokens: tokenBudget }, { usd: spent, tokens });
+  // A Paperclip project's budget is Paperclip's: its policy for this project, with the company's and its agents' alongside.
+  const policy = !local ? data.budgets?.policies.find(p => p.scope === 'project' && p.scopeId === projectId) : undefined;
+  const use = policy ? { unit: 'usd' as const, used: policy.observedUsd, limit: policy.limitUsd, ratio: policy.limitUsd ? policy.observedUsd / policy.limitUsd : 0 } : budgetUse({ usd: budget, tokens: tokenBudget }, { usd: spent, tokens });
   const ratio = use?.ratio ?? 0;
-  const health = budget === null && tokenBudget === null ? 'No budget' : !use ? 'Unpriced' : ratio >= 1 ? 'Over budget' : ratio >= 0.8 ? 'Near budget' : 'Healthy';
+  const health = policy ? policy.status === 'hard_stop' || ratio >= 1 ? 'Over budget' : policy.status === 'warning' || ratio >= policy.warnPercent / 100 ? 'Near budget' : 'Healthy' : budget === null && tokenBudget === null ? 'No budget' : !use ? 'Unpriced' : ratio >= 1 ? 'Over budget' : ratio >= 0.8 ? 'Near budget' : 'Healthy';
   return <div className="pp-stack pp-budget">
     <div className="pp-budget-head"><div><p className="dash-label">Project</p><h2>{name}</h2><p className="ws-faint">Monthly budget · since {new Date(data.spend.since).toLocaleDateString(undefined, { month: 'long', day: 'numeric' })}</p></div><span className="ws-chip" data-tone={health === 'Over budget' ? 'danger' : health === 'Near budget' ? 'warn' : health === 'Healthy' ? 'ok' : undefined}>{health}</span></div>
     <div className="pp-budget-grid">
-      <div><p className="dash-label">Observed</p><p className="dash-value">{spent === null ? (data.spend.unpricedTurns ? 'Unpriced' : formatUsd(0)) : formatUsd(spent)}</p><p className="ws-faint">{data.spend.pricedTurns} priced {data.spend.pricedTurns === 1 ? 'turn' : 'turns'}{data.spend.unpricedTurns ? ` · ${data.spend.unpricedTurns} unpriced` : ''} · {tokens.toLocaleString()} tokens</p></div>
-      <div><p className="dash-label">Budget</p><p className="dash-value">{use?.unit === 'tokens' ? `${tokenBudget!.toLocaleString()} tokens` : budget !== null ? formatUsd(budget) : tokenBudget !== null ? `${tokenBudget.toLocaleString()} tokens` : 'Not set'}</p><p className="ws-faint">{budget === null && tokenBudget === null ? 'No cap configured' : 'Soft alert at 80%, Inbox at 80% and 100%'}</p></div>
+      <div><p className="dash-label">Observed</p><p className="dash-value">{policy ? formatUsd(policy.observedUsd) : spent === null ? (data.spend.unpricedTurns ? 'Unpriced' : formatUsd(0)) : formatUsd(spent)}</p><p className="ws-faint">{data.spend.pricedTurns} priced {data.spend.pricedTurns === 1 ? 'turn' : 'turns'}{data.spend.unpricedTurns ? ` · ${data.spend.unpricedTurns} unpriced` : ''} · {tokens.toLocaleString()} tokens</p></div>
+      <div><p className="dash-label">Budget</p><p className="dash-value">{policy ? formatUsd(policy.limitUsd) : use?.unit === 'tokens' ? `${tokenBudget!.toLocaleString()} tokens` : budget !== null ? formatUsd(budget) : tokenBudget !== null ? `${tokenBudget.toLocaleString()} tokens` : 'Not set'}</p><p className="ws-faint">{policy ? `${policy.hardStop ? 'Hard stop' : 'Soft alert'} at ${policy.hardStop ? 100 : policy.warnPercent}% · set in ${NAMES.paperclip}` : budget === null && tokenBudget === null ? 'No cap configured' : 'Soft alert at 80%, Inbox at 80% and 100%'}</p></div>
     </div>
     {use && <div className="pp-meter" role="meter" aria-label="Budget used" aria-valuemin={0} aria-valuemax={use.limit} aria-valuenow={use.used}><span style={{ width: `${Math.min(100, Math.round(ratio * 100))}%` }} data-tone={ratio >= 1 ? 'danger' : ratio >= 0.8 ? 'warn' : 'ok'}/></div>}
     {local ? <div className="pp-inline-form"><label className="dash-label" htmlFor="pp-budget-input">Monthly budget (USD)</label>
@@ -262,7 +278,9 @@ function BudgetTab({ projectId, local, name }: { projectId: string; local: boole
     {local ? <div className="pp-inline-form"><label className="dash-label" htmlFor="pp-token-budget-input">Monthly budget (tokens)</label>
       <input id="pp-token-budget-input" className="ws-input" inputMode="numeric" placeholder={spent === null && data.spend.unpricedTurns ? 'For unpriced models' : 'No token budget'} value={tokenDraft} onChange={e => setTokenDraft(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') void setTokenBudget(); }}/>
       <button type="button" className="settings-button secondary" onClick={() => void setTokenBudget()}>Set token budget</button></div>
-      : <p className="project-edit-hint">Budgets for this project are set in {NAMES.paperclip}.</p>}
+      : <><p className="project-edit-hint">Budgets for this project are set in {NAMES.paperclip}.</p>
+        {data.budgets && data.budgets.policies.length > 0 && <section className="pp-cost" aria-label={`${NAMES.paperclip} budgets`}><h3 className="ws-group-title">{data.budgets.company} budgets{data.budgets.incidents ? ` · ${data.budgets.incidents} open ${data.budgets.incidents === 1 ? 'incident' : 'incidents'}` : ''}</h3>
+          <ul className="ws-rows">{data.budgets.policies.map(p => <li key={p.id}><div className="ws-row is-static"><span className="ws-row-text"><span className="ws-row-title">{p.name}</span><span className="ws-row-meta">{p.scope} · {formatUsd(p.observedUsd)} of {formatUsd(p.limitUsd)} this month{p.hardStop ? ' · hard stop' : ''}</span></span><span className="ws-chip" data-tone={p.status === 'ok' ? 'ok' : p.status === 'warning' ? 'warn' : 'danger'}>{p.paused ? 'paused' : `${Math.round(p.percent)}%`}</span></div></li>)}</ul></section>}</>}
     <section className="dash-card"><RunActivityChart days={data.runs}/></section>
     {local && <section className="pp-cost"><h3 className="ws-group-title">All time</h3><div className="project-card project-cost-card"><ProjectCostSummary projectId={projectId}/></div></section>}
   </div>;

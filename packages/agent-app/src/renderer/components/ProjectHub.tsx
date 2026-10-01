@@ -43,7 +43,7 @@ export function ProjectRoster({ projectId, nav = defaultNav }: { projectId: stri
   return <div className="ws-project-roster">
     <p className="ws-project-note">{scoped.agents.filter(a => a.role !== 'board').length} agents on this project · {working} working now. Lines show who reports to whom; a dashed blue line is a live conversation.</p>
     {scoped.agents.length ? <RosterGraph snapshot={scoped} onOpenAgent={nav.onOpenAgent} onOpenTask={nav.onOpenTask}/> : <ResourceState kind="empty" message="No agents have worked on this project yet."/>}
-    <PulseBoard snapshot={scoped} nav={nav} scoped/>
+    <PulseBoard snapshot={scoped} nav={nav} scoped projectId={projectId}/>
   </div>;
 }
 

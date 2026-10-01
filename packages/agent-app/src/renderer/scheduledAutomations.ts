@@ -8,6 +8,7 @@ export function automationsForFolders(automations: readonly AutomationView[], fo
   return automations.filter(automation => {
     const { target, schedule } = automation;
     if ((schedule.kind === 'watch' || schedule.kind === 'repo') && folders.has(schedule.folderId)) return true;
+    if (target.kind === 'task') return projectId !== undefined && target.projectId === projectId;
     if (target.kind === 'new') return (target.folderId !== undefined && folders.has(target.folderId)) || (projectId !== undefined && target.projectId === projectId);
     const chat = chats.find(entry => entry.id === target.chatId);
     return Boolean(chat && ((chat.folderId && folders.has(chat.folderId)) || (projectId && chat.projectId === projectId)));

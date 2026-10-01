@@ -1,10 +1,12 @@
 import React, { useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { useHiddenSideChats } from '../artifacts';
 import { Dialog } from '@base-ui/react/dialog';
-import { ArchiveRestore, Blocks, Brain, CalendarClock, ChevronsDown, Command, Download, FileSearch as FileSearchIcon, Folder as FolderIcon, FolderOpen, GitBranch, Layers, Settings2, SlidersHorizontal, SquarePen, SquareTerminal, Search } from 'lucide-react';
+import { ArchiveRestore, Blocks, Bot, Box, Brain, CalendarClock, ChevronsDown, CircleDot, Command, Download, FileSearch as FileSearchIcon, FileText, Folder as FolderIcon, FolderOpen, GitBranch, Layers, MessageSquare, Scale, Settings2, SlidersHorizontal, SquarePen, SquareTerminal, Search } from 'lucide-react';
 import type { Chat, Folder, Project } from '../../shared/protocol';
 import { chatSlot, isMenuAction } from '../../shared/menu-protocol';
 import type { GitRepoInfo } from '../../shared/domains/git-protocol';
+import type { SearchResult, SearchRow } from '../../shared/domains/search-protocol';
+import { SEARCH_SCOPES, SEARCH_SCOPE_LABEL, parseSearch, type SearchScope } from '../../shared/search-query';
 import { invoke } from '../bridge';
 import { focusComposer, isChord } from '../focus';
 import { chatOrder } from '../navHistory';
@@ -13,6 +15,8 @@ import { addFolderToDraft, closeNewChat, getNewChatDraft, openNewChat, useNewCha
 import { toggleTerminal } from './ProcessesTab';
 import { activeChat, getState, openGitTab, openAppSettings, openAutomationsScreen, openFile, openMemoryScreen, openPluginsScreen, openProjectsScreen, openProvidersTab, selectChat, stopChat } from '../store';
 import { openProject } from '../projectFocus';
+import { openHub } from '../hubStore';
+import { openNewTask, openShortcutsCheatsheet } from './WorkShortcuts';
 import { runMenuAction, useNavHistory } from '../menuActions';
 import { COMMAND_PREFIX, commandRows, paletteEmptyState, parsePaletteQuery, type CommandContext, type CommandId, type CommandRow } from '../commandPalette';
 import { FileTypeIcon } from './FileTypeIcon';
@@ -165,11 +169,22 @@ type PaletteRow =
   | { kind: 'project'; key: string; row: SpotlightPlaceRow<Project> }
   | { kind: 'action'; key: string; row: SpotlightActionRow }
   | { kind: 'setting'; key: string; row: SpotlightSettingsRow<SectionInfo> }
-  | { kind: 'command'; key: string; row: CommandRow };
+  | { kind: 'command'; key: string; row: CommandRow }
+  | { kind: 'ws'; key: string; row: SearchRow };
 
 const SECTION_LABEL: Record<PaletteRow['kind'], string> = {
-  chat: 'Chats', more: 'Chats', file: 'Files', folder: 'Folders', project: 'Projects', action: 'Quick actions', setting: 'Settings', command: 'Commands',
+  chat: 'Chats', more: 'Chats', file: 'Files', folder: 'Folders', project: 'Projects', action: 'Quick actions', setting: 'Settings', command: 'Commands', ws: 'Tasks',
 };
+const WS_SECTION: Record<SearchRow['kind'], string> = { tasks: 'Tasks', agents: 'Agents', projects: 'Projects', documents: 'Documents', comments: 'Comments', outputs: 'Outputs', decisions: 'Decisions' };
+const WS_ICON: Record<SearchRow['kind'], React.ReactElement> = { tasks: <CircleDot size={14}/>, agents: <Bot size={14}/>, projects: <Layers size={14}/>, documents: <FileText size={14}/>, comments: <MessageSquare size={14}/>, outputs: <Box size={14}/>, decisions: <Scale size={14}/> };
+const WS_KIND_LABEL: Record<SearchRow['kind'], string> = { tasks: 'Task', agents: 'Agent', projects: 'Project', documents: 'Document', comments: 'Comment', outputs: 'Output', decisions: 'Decision' };
+/** A workspace row opens the page it belongs to: the task thread, the agent, the project or the outputs list. */
+export function openWorkspaceRow(row: Pick<SearchRow, 'kind' | 'id' | 'taskId' | 'agentId' | 'projectId' | 'source'>): void {
+  if (row.kind === 'agents' && row.agentId) { openHub('agent', row.agentId); return; }
+  if (row.kind === 'projects' || row.kind === 'decisions') { if (!row.projectId) return; if (row.source === 'paperclip') openHub('project', row.projectId); else openProject(row.projectId); return; }
+  if (row.kind === 'outputs' && !row.taskId) { openHub('outputs'); return; }
+  if (row.taskId) openHub('task', row.taskId);
+}
 
 interface ContentState { query: string; hits: ContentHit[]; more: boolean; loading: boolean }
 const NO_CONTENT: ContentState = { query: '', hits: [], more: false, loading: false };
@@ -184,9 +199,14 @@ function SpotlightSearchPanel({ onClose, initialQuery = '' }: { onClose: () => v
   const [activeIndex, setActiveIndex] = useState(0);
   const [status, setStatus] = useState('');
   const [gitInfo, setGitInfo] = useState<Record<string, GitRepoInfo | null>>({});
+  const [scopeTab, setScopeTab] = useState<SearchScope>('all');
   const inputRef = useRef<HTMLInputElement>(null);
   const listId = useId();
-  const { mode, text } = parsePaletteQuery(query);
+  const { mode, text: rawText } = parsePaletteQuery(query);
+  // G19: `in:docs words` or a scope tab limits the search; a bare task key such as OSS-12 jumps to that task.
+  const parsed = useMemo(() => parseSearch(rawText, scopeTab === 'all' ? undefined : scopeTab), [rawText, scopeTab]);
+  const scope = mode === 'search' ? parsed.scope : 'all';
+  const text = mode === 'search' ? parsed.text : rawText;
 
   // ⌘⇧P while already open switches the open panel into command mode.
   useEffect(() => {
@@ -197,11 +217,11 @@ function SpotlightSearchPanel({ onClose, initialQuery = '' }: { onClose: () => v
 
   const sort = useMemo(() => readChatSort(localStorage), []);
   const titleRows = useMemo<SpotlightChatRow[]>(() => {
-    if (!snapshot || mode !== 'search') return [];
+    if (!snapshot || mode !== 'search' || scope !== 'all') return [];
     return text
       ? searchChatRows(snapshot.chats.filter((c) => !hiddenSide.has(c.id)), snapshot.folders, snapshot.projects, text)
       : defaultChatRows(chatOrder(snapshot, sort).filter((c) => !hiddenSide.has(c.id)), snapshot.folders, snapshot.projects);
-  }, [snapshot, mode, text, sort, hiddenSide]);
+  }, [snapshot, mode, scope, text, sort, hiddenSide]);
 
   // NAV-11 message content through the runtime index: debounced, stale responses dropped, paged by "Show more".
   const [content, setContent] = useState<ContentState>(NO_CONTENT);
@@ -216,18 +236,18 @@ function SpotlightSearchPanel({ onClose, initialQuery = '' }: { onClose: () => v
   };
   useEffect(() => {
     contentToken.current++;
-    if (mode !== 'search' || text.length < 2) { setContent(NO_CONTENT); return; }
+    if (mode !== 'search' || scope !== 'all' || text.length < 2) { setContent(NO_CONTENT); return; }
     setContent({ ...NO_CONTENT, query: text, loading: true });
     const timer = window.setTimeout(() => fetchContent(text, 0), 180);
     return () => { window.clearTimeout(timer); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mode, text]);
+  }, [mode, scope, text]);
 
   // Files: quick open over the folder in view (the draft's target, else the active chat's).
   const activeFolderId = draft.open ? draft.target.folderId : activeChat()?.folderId;
   const [files, setFiles] = useState<{ query: string; paths: string[]; loading: boolean }>({ query: '', paths: [], loading: false });
   useEffect(() => {
-    if (mode !== 'search' || !text || !activeFolderId) { setFiles({ query: '', paths: [], loading: false }); return; }
+    if (mode !== 'search' || scope !== 'all' || !text || !activeFolderId) { setFiles({ query: '', paths: [], loading: false }); return; }
     let live = true;
     setFiles((prev) => ({ ...prev, loading: true }));
     const timer = window.setTimeout(() => {
@@ -237,7 +257,28 @@ function SpotlightSearchPanel({ onClose, initialQuery = '' }: { onClose: () => v
       );
     }, 120);
     return () => { live = false; window.clearTimeout(timer); };
-  }, [mode, text, activeFolderId]);
+  }, [mode, scope, text, activeFolderId]);
+
+  // C34, G19: tasks, agents, projects, documents, comments, outputs and decisions through the runtime's one search. Debounced, stale
+  // answers dropped, and a task key is looked up at once. A server that does not allow this read just shows no extra rows.
+  const [found, setFound] = useState<{ key: string; result: SearchResult | null; loading: boolean }>({ key: '', result: null, loading: false });
+  const wsQuery = mode === 'search' && (text || scope !== 'all') ? `${scope}\u0000${text}` : '';
+  useEffect(() => {
+    if (!wsQuery) { setFound({ key: '', result: null, loading: false }); return; }
+    let live = true;
+    setFound(prev => ({ ...prev, key: wsQuery, loading: true }));
+    const timer = window.setTimeout(() => {
+      void invoke('search.workspace', { query: text, scope, limit: 40 }).then(
+        result => { if (live) setFound({ key: wsQuery, result, loading: false }); },
+        () => { if (live) setFound({ key: wsQuery, result: null, loading: false }); },
+      );
+    }, parsed.identifier ? 0 : 150);
+    return () => { live = false; window.clearTimeout(timer); };
+  }, [wsQuery]);
+  const result = found.key === wsQuery ? found.result : null;
+  const pickedCounts = useRef<SearchResult['counts'] | null>(null);
+  if (result && scope === 'all') pickedCounts.current = result.counts;
+  if (!text && scope === 'all') pickedCounts.current = null;
 
   const commandContext = useMemo<CommandContext>(() => {
     const chat = activeChat();
@@ -251,6 +292,7 @@ function SpotlightSearchPanel({ onClose, initialQuery = '' }: { onClose: () => v
       canForward: history.canForward,
       slotTitles: ordered.slice(0, 9).map((c) => c.title),
       chatCount: ordered.filter((c) => !c.archived && !hiddenSide.has(c.id)).length,
+      projectCount: snapshot ? snapshot.projects.filter((p) => !p.archived).length : 0,
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [snapshot, state.screen, state.activeChatId, draft.open, history, sort, hiddenSide]);
@@ -258,10 +300,17 @@ function SpotlightSearchPanel({ onClose, initialQuery = '' }: { onClose: () => v
   const rows = useMemo<PaletteRow[]>(() => {
     if (mode === 'commands') return commandRows(text, commandContext).map((row) => ({ kind: 'command', key: `command:${row.command.id}`, row }));
     const out: PaletteRow[] = [];
+    const wsRows = result?.rows ?? [];
+    const localIds = new Set((snapshot?.projects ?? []).map((p) => p.id));
+    const ws = (kinds: SearchRow['kind'][]) => wsRows.filter((r) => kinds.includes(r.kind) && !(scope === 'all' && r.kind === 'projects' && localIds.has(r.id))).map((r): PaletteRow => ({ kind: 'ws', key: `ws:${r.kind}:${r.id}`, row: r }));
+    if (scope !== 'all') return ws([scope as SearchRow['kind']]);
+    // A task key is the answer: it leads the list.
+    for (const row of wsRows.filter((r) => r.exact)) out.push({ kind: 'ws', key: `ws:${row.kind}:${row.id}`, row });
     const hits = content.query === text ? content.hits : [];
     const chats = snapshot ? mergeContentHits(titleRows, hits, snapshot.chats, snapshot.folders, snapshot.projects, hiddenSide) : titleRows;
     for (const row of chats) out.push({ kind: 'chat', key: `chat:${row.chat.id}`, row });
     if (content.more && content.query === text) out.push({ kind: 'more', key: 'more' });
+    for (const row of ws(['tasks', 'agents', 'projects', 'documents', 'comments', 'outputs', 'decisions'])) if (!(row.kind === 'ws' && row.row.exact)) out.push(row);
     if (activeFolderId && files.query === text) for (const row of fileRows(text, files.paths)) out.push({ kind: 'file', key: `file:${row.path}`, row, folderId: activeFolderId });
     if (snapshot) {
       for (const row of folderRows(text, snapshot.folders)) out.push({ kind: 'folder', key: `folder:${row.item.id}`, row });
@@ -270,12 +319,12 @@ function SpotlightSearchPanel({ onClose, initialQuery = '' }: { onClose: () => v
     for (const row of quickActionRows(text)) out.push({ kind: 'action', key: `action:${row.action.id}`, row });
     for (const row of settingsRows(text, SETTINGS_SECTIONS)) out.push({ kind: 'setting', key: `setting:${row.entry.id}`, row });
     return out;
-  }, [mode, text, commandContext, content, titleRows, snapshot, hiddenSide, activeFolderId, files]);
+  }, [mode, scope, text, commandContext, content, titleRows, snapshot, hiddenSide, activeFolderId, files, result]);
 
   const chatRows = useMemo(() => rows.flatMap((row) => (row.kind === 'chat' ? [row.row] : [])), [rows]);
   const rowCount = rows.length;
   const effectiveIndex = rowCount === 0 ? -1 : Math.min(Math.max(activeIndex, 0), rowCount - 1);
-  const pending = mode === 'search' && ((content.loading && text.length >= 2) || (files.loading && !!activeFolderId));
+  const pending = mode === 'search' && ((content.loading && text.length >= 2) || (files.loading && !!activeFolderId) || (found.loading && !!wsQuery));
 
   // The visible set changes with every keystroke; keep the highlight sane (defaults to the top row).
   useEffect(() => { setActiveIndex(0); setStatus(''); }, [query]);
@@ -332,6 +381,15 @@ function SpotlightSearchPanel({ onClose, initialQuery = '' }: { onClose: () => v
     onClose();
     if (id === 'stop') { const chat = activeChat(); if (chat) void stopChat(chat.id); return; }
     if (id === 'projects') { openProjectsScreen(); return; }
+    if (id === 'new-task') { window.setTimeout(openNewTask, 160); return; }
+    if (id === 'show-shortcuts') { window.setTimeout(openShortcutsCheatsheet, 160); return; }
+    if (id === 'go-inbox') { openHub('inbox'); return; }
+    if (id === 'go-dashboard') { openHub('dashboard'); return; }
+    if (id === 'go-tasks') { openHub('tasks'); return; }
+    if (id === 'go-roster') { openHub('roster'); return; }
+    if (id === 'go-outputs') { openHub('outputs'); return; }
+    if (id === 'go-ledger') { openHub('ledger'); return; }
+    if (id === 'go-costs') { openHub('ledger', 'costs'); return; }
     if (id === 'git-changes' || id === 'git-history' || id === 'git-pull-request') {
       const folderId = activeChat()?.folderId;
       const folder = folderId ? getState().snapshot?.folders.find(item => item.id === folderId) : undefined;
@@ -355,6 +413,7 @@ function SpotlightSearchPanel({ onClose, initialQuery = '' }: { onClose: () => v
       case 'action': activateAction(row.row.action.id); return;
       case 'setting': onClose(); openAppSettings(row.row.entry.id); return;
       case 'command': activateCommand(row.row); return;
+      case 'ws': onClose(); openWorkspaceRow(row.row); return;
     }
   };
 
@@ -432,6 +491,18 @@ function SpotlightSearchPanel({ onClose, initialQuery = '' }: { onClose: () => v
           </span>
           <span className="spotlight-row-location">Settings</span>
         </button>;
+      case 'ws': {
+        const r = row.row;
+        return <button key={row.key} type="button" {...common} title={r.exact ? `Open ${r.key}` : undefined}>
+          <span className="spotlight-row-icon">{WS_ICON[r.kind]}</span>
+          <span className="spotlight-row-text">
+            <span className="spotlight-row-title"><Highlighted text={r.title} ranges={r.titleRanges}/></span>
+            {r.snippet && <span className="spotlight-row-snippet"><Highlighted text={r.snippet} ranges={r.snippetRanges}/></span>}
+          </span>
+          {r.key && <span className="spotlight-key">{r.key}</span>}
+          <span className="spotlight-row-location">{WS_KIND_LABEL[r.kind]}</span>
+        </button>;
+      }
       case 'command': {
         const { state: commandState, command, label, labelRanges } = row.row;
         const detail = commandState.enabled ? commandState.scope : commandState.reason;
@@ -450,11 +521,16 @@ function SpotlightSearchPanel({ onClose, initialQuery = '' }: { onClose: () => v
 
   const sections: Array<{ label: string; rows: Array<{ row: PaletteRow; index: number }> }> = [];
   rows.forEach((row, index) => {
-    const label = SECTION_LABEL[row.kind];
+    const label = row.kind === 'ws' ? WS_SECTION[row.row.kind] : SECTION_LABEL[row.kind];
     const last = sections.at(-1);
     if (last && last.label === label) last.rows.push({ row, index }); else sections.push({ label, rows: [{ row, index }] });
   });
-  const empty = paletteEmptyState(query);
+  const missingKey = mode === 'search' && parsed.identifier && result?.identifier && !result.identifier.found ? parsed.identifier.key : null;
+  const empty = missingKey && rowCount === 0
+    ? { title: `No task ${missingKey}`, message: 'Task keys look like OSS-12. Check the key, or search by words.' }
+    : scope !== 'all' && rowCount === 0 && !pending
+      ? { title: text ? `No ${SEARCH_SCOPE_LABEL[scope].toLowerCase()} match “${text.length > 60 ? `${text.slice(0, 59)}…` : text}”` : `No ${SEARCH_SCOPE_LABEL[scope].toLowerCase()} yet`, message: 'Try other words, or choose All to search everything.' }
+      : paletteEmptyState(query);
   const label = mode === 'commands' ? 'Command palette' : 'Search chats';
 
   return (
@@ -469,7 +545,7 @@ function SpotlightSearchPanel({ onClose, initialQuery = '' }: { onClose: () => v
               type="text"
               value={query}
               onChange={(event) => setQuery(event.target.value)}
-              placeholder={mode === 'commands' ? 'Run a command' : 'Search chats, messages, files, folders — type > for commands'}
+              placeholder={mode === 'commands' ? 'Run a command' : 'Search chats, tasks, agents, files — OSS-12 jumps to a task, > for commands'}
               aria-label={label}
               role="combobox"
               aria-expanded
@@ -494,6 +570,9 @@ function SpotlightSearchPanel({ onClose, initialQuery = '' }: { onClose: () => v
               }}
             />
           </label>
+          {mode === 'search' && <div className="spotlight-scopes" role="tablist" aria-label="Search in">
+            {SEARCH_SCOPES.map((s) => <button key={s} type="button" role="tab" tabIndex={-1} aria-selected={scope === s} className="spotlight-scope" onClick={() => { setScopeTab(s); inputRef.current?.focus(); }}>{SEARCH_SCOPE_LABEL[s]}{s !== 'all' && pickedCounts.current && pickedCounts.current[s] > 0 ? <span>{pickedCounts.current[s]}</span> : null}</button>)}
+          </div>}
           <div className="spotlight-results" id={listId} role="listbox" aria-label={mode === 'commands' ? 'Commands' : 'Search results'} aria-busy={pending || undefined}>
             {rowCount === 0
               ? pending
