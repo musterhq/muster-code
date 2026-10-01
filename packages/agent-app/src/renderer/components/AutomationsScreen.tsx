@@ -25,14 +25,14 @@ const LOCAL_TZ = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
 const TIME_ZONES: string[] = (() => { try { return (Intl as unknown as { supportedValuesOf(key: string): string[] }).supportedValuesOf('timeZone'); } catch { return [LOCAL_TZ]; } })();
 const DAY_LETTERS = ['S', 'M', 'T', 'W', 'T', 'F', 'S'], DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 const ACCESS: Record<ChatPermissionMode, string> = { 'read-only': 'Read only', workspace: 'Workspace', full: 'Full access' };
-const STATUS: Record<AutomationRun['status'], string> = { queued: 'Queued', running: 'Running', completed: 'Completed', failed: 'Failed', interrupted: 'Stopped', skipped: 'Skipped', missed: 'Missed' };
-const TRIGGER: Record<AutomationRun['trigger'], string> = { schedule: 'Scheduled', manual: 'Run now', 'catch-up': 'Catch-up', watch: 'Files changed', repo: 'Repository event' };
+const STATUS: Record<AutomationRun['status'], string> = { queued: 'Queued', awaiting: 'Waiting for approval', running: 'Running', completed: 'Completed', failed: 'Failed', interrupted: 'Stopped', skipped: 'Skipped', missed: 'Missed' };
+const TRIGGER: Record<AutomationRun['trigger'], string> = { schedule: 'Scheduled', manual: 'Run now', 'catch-up': 'Catch-up', watch: 'Files changed', repo: 'Repository event', webhook: 'Webhook' };
 type Repeat = 'interval' | 'daily' | 'cron' | 'watch' | 'repo';
 const REPO_EVENT_LABEL: Record<RepoTriggerEvent, string> = { 'pr-opened': 'Pull request opened', 'pr-updated': 'Pull request updated', 'check-failed': 'Check failed', push: 'Push to branch' };
 
 interface Draft {
   name: string; prompt: string; repeat: Repeat; minutes: number; time: string; days: number[]; expr: string; watchFolderId: string; timezone: string; repoEvents: RepoTriggerEvent[]; repoBranch: string;
-  targetKind: 'new' | 'chat'; folderId: string; projectId: string; model: string; mode: AutomationMode; chatId: string;
+  targetKind: 'new' | 'chat' | 'task'; folderId: string; projectId: string; model: string; mode: AutomationMode; chatId: string;
   permissionMode: ChatPermissionMode; overlap: AutomationOverlap; catchUp: AutomationCatchUp; acknowledged: boolean;
 }
 const PRESETS: { label: string; apply: Partial<Draft> }[] = [
@@ -53,6 +53,7 @@ function draftOf(automation: AutomationView): Draft {
   else if (s.kind === 'repo') Object.assign(draft, { repeat: 'repo', watchFolderId: s.folderId, repoEvents: s.events, repoBranch: s.branch ?? '' });
   else Object.assign(draft, { repeat: 'watch', watchFolderId: s.folderId });
   if (t.kind === 'chat') Object.assign(draft, { targetKind: 'chat', chatId: t.chatId });
+  else if (t.kind === 'task') Object.assign(draft, { targetKind: 'task', projectId: t.projectId });
   else Object.assign(draft, { targetKind: 'new', folderId: t.folderId ?? '', projectId: t.projectId ?? '', mode: t.mode, model: t.providerId && t.model ? `${t.providerId}::${t.model}` : '' });
   return draft;
 }
