@@ -14,7 +14,7 @@ import {compareVersions,type UpdateChannel} from './update-channel.ts';
 import type {UpdateRelease,UpdateStatus} from '../shared/update-protocol.ts';
 export type {UpdateRelease,UpdateStatus};
 
-interface GitHubAsset {name:string;browser_download_url:string;size?:number}
+interface GitHubAsset {name:string;browser_download_url:string;/** API endpoint for the asset; works when browser_download_url is down. */url?:string;size?:number}
 export interface GitHubRelease {tag_name:string;name?:string|null;body?:string|null;html_url:string;draft:boolean;prerelease:boolean;published_at?:string|null;assets:GitHubAsset[]}
 export interface ReleaseCandidate {release:UpdateRelease;zip:GitHubAsset;sums:GitHubAsset}
 
@@ -22,6 +22,12 @@ const TAG_PREFIX='agent-v';
 const VERSION=/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/;
 /** Background checks run hourly; focusing the window also checks when the last look is over 10 minutes old. */
 export const CHECK_EVERY_MS=60*60_000;
+/** Waits between attempts on one source (so 3 attempts), and the per-request limits. */
+export const RETRY_DELAYS_MS:readonly number[]=[1_000,3_000];
+const API_TIMEOUT_MS=30_000,HEADER_TIMEOUT_MS=30_000,STALL_TIMEOUT_MS=60_000;
+/** A GitHub outage the user can do nothing about: 5xx, 429, a network error or a timeout. */
+class TransientError extends Error {constructor(readonly status:number|undefined,message:string){super(message);}}
+const outage=(status?:number)=>new TransientError(status,`GitHub didn’t respond${status?` (${status})`:''}. Muster will try again automatically.`);
 export const REPO_PATTERN=/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 
 /** Newest release above `current` that carries this Mac's zip and SHA256SUMS. Stable skips prereleases. */
@@ -92,6 +98,8 @@ export interface UpdaterOptions {
   openExternal?:(url:string)=>void;
   /** Relaunch command; tests pass /usr/bin/true so nothing opens. */
   relaunch?:string;
+  /** Waits between attempts on one source; tests pass zeros. */
+  retryDelaysMs?:readonly number[];
 }
 
 export class AppUpdater {
@@ -151,7 +159,7 @@ export class AppUpdater {
     const previous=this.status.phase;
     if(!quiet||previous==='idle')this.set({phase:'checking',message:undefined});
     try{
-      const response=await this.fetcher(`https://api.github.com/repos/${repo}/releases?per_page=30`,{headers:{accept:'application/vnd.github+json','user-agent':`MusterAgent/${this.options.current}`}});
+      const response=await this.fetcher(`https://api.github.com/repos/${repo}/releases?per_page=30`,{headers:{accept:'application/vnd.github+json','user-agent':`MusterAgent/${this.options.current}`},signal:AbortSignal.timeout(API_TIMEOUT_MS)});
       if(!response.ok)throw new Error(response.status===403?'GitHub is rate-limiting update checks. Try again later.':`GitHub answered ${response.status} for the release list.`);
       const releases=await response.json() as GitHubRelease[];
       const checkedAt=new Date().toISOString();
@@ -169,29 +177,69 @@ export class AppUpdater {
     return this.snapshot();
   }
 
+  /** One request with a header timeout. `arm()` restarts a stall timer (for streaming bodies); `done()` clears it. */
+  private async attempt(url:string,headers:Record<string,string>):Promise<{response:Response;arm:()=>void;done:()=>void}> {
+    const controller=new AbortController();
+    let timer:NodeJS.Timeout|undefined;
+    const arm=(ms=STALL_TIMEOUT_MS)=>{if(timer)clearTimeout(timer);timer=setTimeout(()=>controller.abort(),ms);};
+    const done=()=>{if(timer)clearTimeout(timer);timer=undefined;};
+    arm(HEADER_TIMEOUT_MS);
+    try{
+      const response=await this.fetcher(url,{headers,signal:controller.signal});
+      if(response.ok){arm();return {response,arm,done};}
+      done();
+      return {response,arm,done};
+    }catch{done();throw outage();}
+  }
+
+  /** Fetches a release asset: browser_download_url first, then the API asset endpoint when GitHub is failing.
+   *  Each source gets bounded retries with backoff on 5xx, 429, network errors and timeouts; other 4xx fail at once. */
+  private async fetchAsset(asset:GitHubAsset,label:string):Promise<{response:Response;arm:()=>void;done:()=>void}> {
+    const ua=`MusterAgent/${this.options.current}`;
+    const sources:{url:string;headers:Record<string,string>}[]=[{url:asset.browser_download_url,headers:{'user-agent':ua}}];
+    if(asset.url)sources.push({url:asset.url,headers:{accept:'application/octet-stream','user-agent':ua}});
+    const delays=this.options.retryDelaysMs??RETRY_DELAYS_MS;
+    let last:TransientError=outage();
+    for(const source of sources){
+      for(let tries=0;tries<=delays.length;tries++){
+        if(tries>0)await new Promise<void>(resolve=>{const t=setTimeout(resolve,delays[tries-1]);t.unref?.();});
+        try{
+          const result=await this.attempt(source.url,source.headers);
+          const {status}=result.response;
+          if(result.response.ok&&result.response.body)return result;
+          if(status===429||status>=500){last=outage(status);continue;}
+          throw new Error(`${label} (${status}).`);
+        }catch(cause){
+          if(cause instanceof TransientError){last=cause;continue;}
+          throw cause;
+        }
+      }
+    }
+    throw last;
+  }
+
   private async download():Promise<void> {
     const candidate=this.candidate;
     if(!candidate||this.busy)return;
     this.busy=true;
     const {version}=candidate.release,dir=path.join(this.options.stagingDir,version);
     try{
-      const sumsResponse=await this.fetcher(candidate.sums.browser_download_url,{headers:{'user-agent':`MusterAgent/${this.options.current}`}});
-      if(!sumsResponse.ok)throw new Error(`Couldn’t read SHA256SUMS (${sumsResponse.status}).`);
-      const expected=checksumFor(await sumsResponse.text(),candidate.zip.name);
+      const sumsFetch=await this.fetchAsset(candidate.sums,'Couldn’t read SHA256SUMS');
+      const sumsText=await sumsFetch.response.text().finally(sumsFetch.done);
+      const expected=checksumFor(sumsText,candidate.zip.name);
       if(!expected)throw new Error(`SHA256SUMS has no entry for ${candidate.zip.name}.`);
       await fs.rm(dir,{recursive:true,force:true});await fs.mkdir(dir,{recursive:true});
       const zipPath=path.join(dir,candidate.zip.name);
-      const response=await this.fetcher(candidate.zip.browser_download_url,{headers:{'user-agent':`MusterAgent/${this.options.current}`}});
-      if(!response.ok||!response.body)throw new Error(`Download failed (${response.status}).`);
+      const {response,arm,done}=await this.fetchAsset(candidate.zip,'Download failed');
       const total=Number(response.headers.get('content-length'))||candidate.zip.size||0;
       const hash=createHash('sha256'),out=createWriteStream(zipPath);
       let received=0,lastEmit=0;
       this.set({phase:'downloading',progress:0});
-      for await(const chunk of response.body as unknown as AsyncIterable<Uint8Array>){
-        hash.update(chunk);received+=chunk.byteLength;
+      try{for await(const chunk of response.body as unknown as AsyncIterable<Uint8Array>){
+        arm();hash.update(chunk);received+=chunk.byteLength;
         if(!out.write(chunk))await new Promise<void>(resolve=>out.once('drain',()=>resolve()));
         if(total&&Date.now()-lastEmit>250){lastEmit=Date.now();this.set({progress:Math.min(1,received/total)});}
-      }
+      }}catch(error){out.destroy();throw error instanceof TransientError?error:outage();}finally{done();}
       await new Promise<void>((resolve,reject)=>out.end((error?:Error|null)=>error?reject(error):resolve()));
       if(hash.digest('hex')!==expected)throw new Error('The download didn’t match its published checksum, so it was discarded.');
       const unpacked=path.join(dir,'app');
