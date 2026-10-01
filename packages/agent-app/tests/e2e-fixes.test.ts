@@ -202,3 +202,16 @@ test('S29 pausing one agent holds only that agent: its run stops, Start and the 
   await until(async () => !(await s.invoke('paperclip.snapshot', {})).runs.some(r => r.status === 'running'), 'every run settled');
   await wait(300);
 });
+
+test('S36 a failed run keeps the provider’s own error, so the Inbox can say it plainly', async t => {
+  const { s, project, member, state } = await service(t);
+  const cto = await member('CTO');
+  const task = await s.invoke('paperclip.task.create', { title: 'Flaky job', description: 'E2E-FAIL', projectId: project.id, assigneeId: `member:${cto.id}`, start: true });
+  assert.ok(task.started, task.startError ?? 'not started');
+  await until(async () => await state(task.id) === 'failed', 'failed');
+  const snap = await s.invoke('paperclip.snapshot', {});
+  const item = snap.inbox.find(i => i.taskId === task.id)!;
+  assert.equal(item.kind, 'failed_run');
+  assert.match(item.why, /rate_limited: scripted failure/, 'the provider’s message, not a generic sentence');
+  assert.match(snap.runs.find(r => r.taskId === task.id)!.error ?? '', /rate_limited/);
+});
