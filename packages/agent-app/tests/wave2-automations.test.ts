@@ -84,7 +84,7 @@ test('G20: the webhook needs a stored secret, verifies the signature and timesta
   assert.equal((await post(hook.url!, null, body)).status, 401);
   assert.equal((await post(hook.url!, hook.secret, body, { sig: 'sha256=00' })).status, 401);
   const stale = await post(hook.url!, hook.secret, body, { ts: Math.floor(Date.now() / 1000) - 3600 });
-  assert.equal(stale.status, 401); assert.match(String(stale.body?.error), /five minutes/);
+  assert.equal(stale.status, 401); assert.equal(stale.body?.error, 'Not authorised.');
   assert.equal((await post(hook.url!, hook.secret, body, { method: 'GET' })).status, 405);
   assert.equal((await post(hook.url!.replace(a.id, 'nonexistent'), hook.secret, body)).status, 401);
   assert.equal((await post(hook.url!, hook.secret, 'x'.repeat(70_000))).status, 413);

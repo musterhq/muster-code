@@ -92,3 +92,31 @@ test('S5: a recommendation left working by a quit is failed when the store opens
   assert.equal(second.inboxItem('ws:task:2')!.recommendation!.state, 'ready');
   second.close();
 });
+
+const memorySecrets = () => { const m = new Map<string, string>(); return { secureStorage: () => true, set: (id: string, v: unknown) => { m.set(id, String(v)); }, get: (id: string) => m.get(id), clear: (id: string) => { m.delete(id); } }; };
+async function hookSetup(t: Parameters<typeof wave2>[0]) {
+  automationTiming.webhookPort = 0; const store = memorySecrets(); automationTiming.secrets = () => store;
+  const { signWebhook } = await import('../src/runtime/automations/webhook.ts');
+  const h = await wave2(t);
+  const a = await h.s.invoke('automations.create', { name: 'Hook', prompt: 'Report.', timezone: 'UTC', schedule: { kind: 'interval', minutes: 60 }, permissionMode: 'workspace', overlap: 'queue', catchUp: 'none', target: { kind: 'task', projectId: h.project.id, start: false, mode: 'task' }, ext: { ...ext, webhook: true } });
+  const hook = await h.s.invoke('automations.webhook.rotate', { id: a.id });
+  const call = (url: string, body: string, ts: number, sig = signWebhook(hook.secret, ts, body)) => fetch(url, { method: 'POST', headers: { 'x-muster-timestamp': String(ts), 'x-muster-signature': sig }, body }).then(async r => ({ status: r.status, body: await r.json() as Record<string, unknown> }));
+  return { h, a, hook, call };
+}
+
+test('S6: a signed request cannot be replayed after the listener stops and starts again', async t => {
+  const { h, a, hook, call } = await hookSetup(t);
+  const ts = Math.floor(Date.now() / 1000), body = '{}';
+  assert.equal((await call(hook.url!, body, ts)).status, 202);
+  await h.s.invoke('automations.pause', { id: a.id }); await h.s.invoke('automations.resume', { id: a.id });
+  const url = await until(async () => { const u = (await h.s.invoke('automations.list', undefined))[0]!.webhook?.url; if (!u) return null; try { return (await fetch(u)).status === 405 ? u : null; } catch { return null; } }, 'the listener to be back');
+  assert.equal((await call(url, body, ts)).status, 409);
+});
+
+test('S7: a wrong timestamp, a wrong signature and an unknown id all answer the same', async t => {
+  const { a, hook, call } = await hookSetup(t);
+  const ts = Math.floor(Date.now() / 1000), body = '{}';
+  const stale = await call(hook.url!, body, ts - 3600), bad = await call(hook.url!, body, ts, 'sha256=00'), unknown = await call(hook.url!.replace(a.id, 'nope'), body, ts);
+  assert.deepEqual([stale.status, bad.status, unknown.status], [401, 401, 401]);
+  assert.deepEqual(stale.body, bad.body); assert.deepEqual(bad.body, unknown.body);
+});

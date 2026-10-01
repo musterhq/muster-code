@@ -31,12 +31,13 @@ export interface WebhookDeps {
   /** The secret of an automation whose webhook is on and that is not paused, or undefined. */
   secret(automationId: string): string | undefined;
   /** Fires the automation. The result is the answer the caller gets. */
+  /** The replay memory: kept by the caller, so it outlives the listener (stop, restart) and the app. Bounded to the replay window. */
+  replay: { has(signature: string): boolean; add(signature: string, at: number): void };
   fire(automationId: string, variables: Record<string, string>): Promise<{ status: 'started' | 'queued' | 'awaiting' | 'skipped' | 'failed'; reason?: string }>;
 }
 export class WebhookListener {
   private server: http.Server | null = null;
   private hits = new Map<string, number[]>();
-  private seen = new Map<string, number>();
   private starting: Promise<number | null> | null = null;
   constructor(private deps: WebhookDeps, private preferredPort: number) {}
   get port(): number | null { const a = this.server?.address(); return a && typeof a === 'object' ? (a as AddressInfo).port : null; }
@@ -53,7 +54,7 @@ export class WebhookListener {
     }).finally(() => { this.starting = null; });
     return this.starting;
   }
-  stop(): void { this.server?.close(); this.server?.closeAllConnections?.(); this.server = null; this.hits.clear(); this.seen.clear(); }
+  stop(): void { this.server?.close(); this.server?.closeAllConnections?.(); this.server = null; this.hits.clear(); }
   private reply(res: http.ServerResponse, status: number, body: Record<string, unknown>) { res.writeHead(status, { 'content-type': 'application/json', 'cache-control': 'no-store' }); res.end(JSON.stringify(body)); }
   private async handle(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
     try {
@@ -67,16 +68,15 @@ export class WebhookListener {
       if (over) return this.reply(res, 413, { error: 'The body is too large.' });
       const body = Buffer.concat(chunks).toString('utf8');
       const secret = this.deps.secret(id);
-      // An unknown automation, a paused one and a bad signature all answer the same, so ids cannot be probed.
+      // An unknown automation, a paused one, a bad signature and a bad timestamp all answer the same, so ids cannot be probed.
       if (!secret) return this.reply(res, 401, { error: 'Not authorised.' });
       const verdict = verifyWebhook(secret, header(req, 'x-muster-timestamp'), header(req, 'x-muster-signature'), body, now);
-      if (verdict !== 'ok') return this.reply(res, 401, { error: verdict === 'stale' ? 'The timestamp is missing or more than five minutes off.' : 'Not authorised.' });
+      if (verdict !== 'ok') return this.reply(res, 401, { error: 'Not authorised.' });
       const sig = header(req, 'x-muster-signature')!;
-      for (const [k, at] of this.seen) if (now - at > WEBHOOK_LIMITS.replayMemoryMs) this.seen.delete(k);
-      if (this.seen.has(sig)) return this.reply(res, 409, { error: 'This request was already received.' });
+      if (this.deps.replay.has(sig)) return this.reply(res, 409, { error: 'This request was already received.' });
       const recent = (this.hits.get(id) ?? []).filter(t => now - t < 60_000);
       if (recent.length >= WEBHOOK_LIMITS.perMinute) return this.reply(res, 429, { error: 'Too many requests. Try again in a minute.' });
-      this.hits.set(id, [...recent, now]); this.seen.set(sig, now);
+      this.hits.set(id, [...recent, now]); this.deps.replay.add(sig, now);
       const result = await this.deps.fire(id, variablesFromBody(body));
       return this.reply(res, result.status === 'failed' ? 422 : 202, { status: result.status, ...(result.reason ? { reason: result.reason } : {}) });
     } catch { try { this.reply(res, 500, { error: 'Something went wrong.' }); } catch { /* the socket is gone */ } }

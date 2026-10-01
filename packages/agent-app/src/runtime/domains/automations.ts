@@ -4,7 +4,7 @@ import type { Chat, ChatPermissionMode } from '../../shared/protocol.ts';
 import { AUTOMATION_HISTORY, AUTOMATION_MAX, AUTOMATION_MAX_PROMPT, AUTOMATION_REPO_MAX_BACKOFF_MS, AUTOMATION_REPO_POLL_MS, AUTOMATION_WATCH_COOLDOWN_MS, type RepoTriggerEvent, PERMISSION_RANK, type Automation, type AutomationCatchUp, type AutomationInput, type AutomationOverlap, type AutomationPreview, type AutomationRun, type AutomationRunStatus, type AutomationSchedule, type AutomationTarget, type AutomationTrigger, type AutomationView, type AutomationExt, type AutomationGate, DEFAULT_EXT, VARIABLE_VALUE_MAX } from '../../shared/domains/automations-protocol.ts';
 import { AUTOMATION_TEMPLATES, builtinValues, checkVariables, renderTemplate, resolveVariables } from '../../shared/automation-templates.ts';
 import { activeSecretStore, SecretStore } from '../secret-store.ts';
-import { WebhookListener, newWebhookSecret } from '../automations/webhook.ts';
+import { WEBHOOK_LIMITS, WebhookListener, newWebhookSecret } from '../automations/webhook.ts';
 import { activityFingerprint } from '../automations/activity.ts';
 import { lastAssistantText } from '../work/agent-run.ts';
 import { describeSchedule, dueBetween, nextOccurrence, upcoming, validTimeZone, validateSchedule } from '../automation-schedule.ts';
@@ -100,6 +100,7 @@ export function createAutomationsDomain(ctx: DomainContext): DomainModule {
     CREATE TABLE IF NOT EXISTS automation_ext (automation_id TEXT PRIMARY KEY, json TEXT NOT NULL, last_fp TEXT, has_secret INTEGER NOT NULL DEFAULT 0);
     CREATE TABLE IF NOT EXISTS automation_run_ext (run_id TEXT PRIMARY KEY, vars TEXT, task_id TEXT, fp TEXT);
     CREATE TABLE IF NOT EXISTS automation_gates (id TEXT PRIMARY KEY, automation_id TEXT NOT NULL, run_id TEXT NOT NULL, trigger TEXT NOT NULL, vars TEXT NOT NULL, status TEXT NOT NULL, created_at TEXT NOT NULL, decided_at TEXT);
+    CREATE TABLE IF NOT EXISTS automation_webhook_seen (sig TEXT PRIMARY KEY, at INTEGER NOT NULL);
     CREATE TABLE IF NOT EXISTS standup_children (parent_id TEXT NOT NULL, child_id TEXT NOT NULL PRIMARY KEY, chat_id TEXT, project_id TEXT NOT NULL, automation_id TEXT NOT NULL, run_id TEXT NOT NULL, name TEXT NOT NULL, done INTEGER NOT NULL DEFAULT 0, note TEXT)`);
   let disposed = false;
   const dispatching = new Set<string>();
@@ -186,6 +187,10 @@ export function createAutomationsDomain(ctx: DomainContext): DomainModule {
     webhook = new WebhookListener({
       now: () => automationTiming.now(),
       secret: id => { const a = row(id); if (!a || a.paused || !extFor(id).webhook) return undefined; try { return secrets().get(`awh_${id}`); } catch { return undefined; } },
+      replay: {
+        has: sig => Boolean(db.prepare('SELECT 1 FROM automation_webhook_seen WHERE sig = ? AND at > ?').get(sig, automationTiming.now() - WEBHOOK_LIMITS.replayMemoryMs)),
+        add: (sig, at) => { db.prepare('INSERT OR REPLACE INTO automation_webhook_seen (sig, at) VALUES (?, ?)').run(sig, at); db.prepare('DELETE FROM automation_webhook_seen WHERE at <= ?').run(at - WEBHOOK_LIMITS.replayMemoryMs); },
+      },
       fire: fireWebhook,
     }, automationTiming.webhookPort);
     void webhook.start().then(() => broadcast());
