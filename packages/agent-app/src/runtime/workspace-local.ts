@@ -4,6 +4,7 @@
  * Project schedulers — and every write goes through the existing commands.
  */
 import type { MailboxMessage } from '../shared/domains/mailbox-protocol.ts';
+import type { GovInboxItem } from '../shared/domains/project-governance-protocol.ts';
 import type { ProjectDetails, ProjectMember, ProjectTaskView, ProjectWorkState, TaskPriority, TaskState, TeamSettings } from '../shared/domains/projects-protocol.ts';
 import { DEFAULT_AGENT_ID, DEFAULT_TEAM_SETTINGS, keyPrefixOf, LOCAL_OWNER_ID } from '../shared/domains/project-team-protocol.ts';
 import type {
@@ -33,7 +34,8 @@ const clean = (value: unknown, label: string, max: number, required = true): str
   return text;
 };
 
-interface ProjectRead { project: ProjectDetails; work: ProjectWorkState; members: ProjectMember[]; prefix: string; settings: TeamSettings }
+interface GovRead { items: GovInboxItem[]; hidden: ReadonlySet<string>; held: ReadonlySet<string> }
+interface ProjectRead { project: ProjectDetails; work: ProjectWorkState; members: ProjectMember[]; prefix: string; settings: TeamSettings; gov: GovRead }
 
 /** What an import from Paperclip recorded about Muster rows: task keys and parents, each project's roster, thread history. */
 export type ImportMeta = Pick<SqliteImportStore, 'taskMeta' | 'roster' | 'comments' | 'history' | 'projectMeta'>;
@@ -47,12 +49,13 @@ export class LocalWorkspace {
   private async projects(): Promise<ProjectRead[]> {
     const list = (await this.invoke('project.list', undefined)).filter(p => !p.archived);
     return Promise.all(list.map(async project => {
-      const [work, team] = await Promise.all([
+      const [work, team, gov] = await Promise.all([
         this.invoke('project.work', { projectId: project.id, activityLimit: 200 }),
         this.invoke('project.members.list', { projectId: project.id }).catch(() => ({ members: [] as ProjectMember[], settings: undefined })),
+        this.invoke('project.gov.summary', { projectId: project.id }).catch(() => ({ items: [] as GovInboxItem[], hidden: [] as string[], held: [] as string[] })),
       ]);
       const settings = team.settings ?? DEFAULT_TEAM_SETTINGS;
-      return { project, work, members: team.members, settings, prefix: settings.keyPrefix ?? keyPrefixOf(project.name) };
+      return { project, work, members: team.members, settings, prefix: settings.keyPrefix ?? keyPrefixOf(project.name), gov: { items: gov.items, hidden: new Set(gov.hidden), held: new Set(gov.held) } };
     }));
   }
   /** Real Roster members: agent members that are not the project's default runner and were not removed. */
@@ -69,6 +72,7 @@ export class LocalWorkspace {
       assigneeId: member ? memberAgentId(member.id) : agent ? agentIdOf(read.project.id) : 'user:local', assigneeLabel: member ? member.name : agent ? DEFAULT_AGENT_NAME : 'You',
       createdAt: task.createdAt, updatedAt: task.updatedAt, startedAt: task.attempts[0]?.startedAt ?? null, completedAt: task.verification?.verifiedAt ?? null,
       live: task.state === 'running' || task.attempts.some(a => a.status === 'running'), blockedByIds: task.dependencies, origin: 'You',
+      ...(read.gov.hidden.has(task.id) ? { hidden: true } : {}), ...(read.gov.held.has(task.id) ? { held: true } : {}),
     };
   }
 
@@ -115,6 +119,13 @@ export class LocalWorkspace {
     }
     runs.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
     const inbox = localInbox(reads, tasks, runs, mail?.messages ?? []);
+    // Governance: stages waiting on you, stopped subtrees, breakers, secret requests. A stage row replaces the plain review row of its task.
+    for (const read of reads) {
+      const staged = new Set(read.gov.items.filter(i => i.id.startsWith('stage:') && i.taskId).map(i => i.taskId!));
+      for (let i = inbox.length - 1; i >= 0; i--) if (inbox[i]!.projectId === read.project.id && inbox[i]!.taskId && staged.has(inbox[i]!.taskId!) && inbox[i]!.id.startsWith('task:')) inbox.splice(i, 1);
+      for (const g of read.gov.items) inbox.push({ id: `gov:${g.id}`, kind: g.kind, title: g.title, why: g.why, severity: g.severity, at: g.at, taskId: g.taskId, agentId: g.agentId, runId: null, projectId: read.project.id, group: read.project.name, source: 'local' });
+    }
+    inbox.sort((a, b) => ({ high: 0, medium: 1, low: 2 }[a.severity] - { high: 0, medium: 1, low: 2 }[b.severity]) || b.at.localeCompare(a.at));
     // Pending human-only decisions carried over from Paperclip: Needs you, never resolved here.
     let pending: ReturnType<ImportMeta['history']> = []; try { pending = (this.meta?.()?.history() ?? []).filter(h => h.pending); } catch { pending = []; }
     const names = new Map(reads.map(r => [r.project.id, r.project.name])), keys = new Map(tasks.map(t => [t.id, t.key]));

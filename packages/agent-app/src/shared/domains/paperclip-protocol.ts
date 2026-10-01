@@ -42,6 +42,8 @@ export interface WorkspaceTask {
   origin: string | null;
   /** Hidden from lists (Hide task). Open it by key or from its parent. */
   hidden?: boolean;
+  /** Under an active hold (paused or cancelled with its parent). */
+  held?: boolean;
 }
 export type AgentState = 'active' | 'idle' | 'running' | 'paused' | 'error' | 'pending' | 'terminated';
 export interface WorkspaceAgent {

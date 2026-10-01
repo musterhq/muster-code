@@ -199,7 +199,8 @@ export interface MonitorInput { taskId: string; dueInMinutes: number; policy: Mo
 
 export interface GovInboxItem { id: string; kind: 'review' | 'blocked' | 'approval' | 'question' | 'other'; title: string; why: string; severity: 'high' | 'medium' | 'low'; at: string; taskId: string | null; agentId: string | null; area: string }
 export interface ProjectGovernanceCommands {
-  'project.gov.inbox': { input: { projectId: string }; output: GovInboxItem[] };
+  /** The light read the workspace snapshot uses: Inbox rows for what needs you, hidden tasks, and tasks under an active hold. */
+  'project.gov.summary': { input: { projectId: string }; output: { items: GovInboxItem[]; hidden: string[]; held: string[] } };
   'project.gov.state': { input: { projectId: string }; output: GovernanceState };
   'project.gov.settings.set': { input: { projectId: string } & Partial<Omit<GovernanceSettings, 'defaultPolicy'>> & { defaultPolicy?: PolicyInput | null }; output: GovernanceSettings };
   'project.agent.gov.get': { input: { projectId: string; memberId: string }; output: AgentGovernanceView };
@@ -233,7 +234,7 @@ export interface ProjectGovernanceCommands {
   'project.secrets.audit': { input: { projectId: string; name?: string; limit?: number }; output: { events: SecretEvent[] } };
 }
 export const PROJECT_GOVERNANCE_COMMANDS = {
-  'project.gov.state': true, 'project.gov.inbox': true, 'project.gov.settings.set': true, 'project.agent.gov.get': true, 'project.agent.gov.set': true, 'project.agent.wake': true,
+  'project.gov.state': true, 'project.gov.summary': true, 'project.gov.settings.set': true, 'project.agent.gov.get': true, 'project.agent.gov.set': true, 'project.agent.wake': true,
   'project.agent.files.save': true, 'project.agent.files.remove': true, 'project.agent.revisions.restore': true,
   'project.tasks.policy.set': true, 'project.tasks.decide': true, 'project.holds.create': true, 'project.holds.release': true, 'project.tasks.hide': true, 'project.tasks.stop': true,
   'project.watchdogs.resolve': true, 'project.watchdogs.review': true, 'project.monitors.set': true, 'project.monitors.clear': true, 'project.breakers.resolve': true, 'project.recovery.resolve': true,
