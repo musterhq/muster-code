@@ -5,7 +5,7 @@
  */
 import { createHash } from 'node:crypto';
 import type { ProjectSecret } from '../../shared/domains/project-governance-protocol.ts';
-import { SECRET_NAME } from './blocks.ts';
+import { isReservedName, RESERVED_HELP, SECRET_NAME } from './blocks.ts';
 import type { GovernanceStore } from './store.ts';
 
 export interface VaultStore { secureStorage(): boolean; set(id: string, value: unknown): unknown; get(id: string): string | undefined; clear(id: string): unknown }
@@ -20,6 +20,7 @@ export function validValue(value: unknown): string {
 export function validName(name: unknown): string {
   const n = typeof name === 'string' ? name.trim().toUpperCase() : '';
   if (!SECRET_NAME.test(n)) throw new Error('A secret name is 2–64 capital letters, digits or underscores, starting with a letter (like NPM_TOKEN).');
+  if (isReservedName(n)) throw new Error(RESERVED_HELP);
   return n;
 }
 export const MAX_SECRETS = 100;

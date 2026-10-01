@@ -28,12 +28,17 @@ const s = (v: unknown, max: number): string | null => typeof v === 'string' && v
 export interface SecretRequest { name: string; purpose: string }
 /** Names are upper-case identifiers, like environment variables. */
 export const SECRET_NAME = /^[A-Z][A-Z0-9_]{1,63}$/;
+/** Names that steer the shell, the loader, git, Node or Muster's own providers. A lent secret with one of these would change how a run behaves, so they are never accepted. */
+const RESERVED = /^(?:PATH|HOME|USER|LOGNAME|SHELL|TMPDIR|TEMP|TMP|PWD|OLDPWD|IFS|BASH_ENV|ENV|LANG|TERM|EDITOR|VISUAL|PAGER|SSH_AUTH_SOCK|PYTHONPATH|PYTHONHOME|PYTHONSTARTUP|RUBYOPT|RUBYLIB|PERL5OPT|PERL5LIB|CLASSPATH|JAVA_TOOL_OPTIONS|NODE_OPTIONS|NODE_PATH|LC_[A-Z_]*|LD_[A-Z_]*|DYLD_[A-Z_]*|GIT_[A-Z_]*|NODE_[A-Z_]*|NPM_CONFIG_[A-Z_]*|XDG_[A-Z_]*|ELECTRON_[A-Z_]*|CODEX_[A-Z_]*|ANTHROPIC_[A-Z_]*|OPENAI_[A-Z_]*|CLAUDE_[A-Z_]*|MUSTER_[A-Z_]*)$/;
+export const isReservedName = (name: string): boolean => RESERVED.test(name);
+export const RESERVED_HELP = 'That name is reserved: it would change how a run starts or how git, the shell or Muster behave. Choose a name for the service, like NPM_TOKEN or DEPLOY_KEY.';
 export function secretRequests(text: string): { requests: SecretRequest[]; errors: string[] } {
   const requests: SecretRequest[] = [], errors: string[] = [];
   for (const b of parseJsonBlocks(text, 'muster-secret-request')) {
     if (b.error || !b.value) { errors.push(b.error ?? 'Unreadable request.'); continue; }
     const name = s(b.value.name, 64)?.toUpperCase().replace(/[^A-Z0-9_]/g, '_') ?? '', purpose = s(b.value.purpose, 500);
     if (!SECRET_NAME.test(name)) { errors.push('A secret name is 2–64 capital letters, digits or underscores, starting with a letter.'); continue; }
+    if (isReservedName(name)) { errors.push(`${name}: ${RESERVED_HELP}`); continue; }
     if (!purpose) { errors.push(`Say what ${name} is for.`); continue; }
     requests.push({ name, purpose });
   }
