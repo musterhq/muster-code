@@ -74,18 +74,21 @@ export class WakeQueue {
     // A run is live on this task: deliver once it ends, as one follow-up.
     if (t?.live) return this.wait(r, 'deferred', `${m!.name} is working on this task now; one follow-up starts when the run ends.`, 0);
     // Storm cap: wakes per minute across the project.
-    const settings = this.d.settings(r.projectId), since = new Date(this.d.now() - 60_000).toISOString();
-    const count = this.d.store.wakeCount(r.projectId, since);
-    if (count >= settings.stormPerMinute) {
-      await this.d.storm({ projectId: r.projectId, memberId: r.memberId, count, perMinute: settings.stormPerMinute });
-      return this.record(r, 'storm', `${count} wakes in the last minute reached the limit of ${settings.stormPerMinute}. ${m!.name} was paused until you resume it.`);
-    }
+    const storm = await this.stormed(r.projectId, r.memberId);
+    if (storm) return this.record(r, 'storm', `${storm.count} wakes in the last minute reached the limit of ${storm.perMinute}. ${m!.name} was paused until you resume it.`);
     const last = this.d.store.lastStart(r.projectId, r.memberId), gapMs = policy.minGapSec * 1000;
     const wait = last && !r.force ? Date.parse(last) + gapMs - this.d.now() : 0;
     if (wait > 0) return this.wait(r, 'throttle', `Throttled: ${m!.name} was woken ${Math.max(1, Math.round((gapMs - wait) / 1000))} s ago; this starts in ${Math.ceil(wait / 1000)} s.`, wait);
     return this.start(r, [r.reason], r.note ? [r.note] : [], null);
   }
 
+  /** The storm cap is per agent: only the agent that is storming is paused. Checked on every path that starts a run. */
+  private async stormed(projectId: string, memberId: string): Promise<{ count: number; perMinute: number } | null> {
+    const perMinute = this.d.settings(projectId).stormPerMinute, count = this.d.store.wakeCount(projectId, new Date(this.d.now() - 60_000).toISOString(), memberId);
+    if (count < perMinute) return null;
+    await this.d.storm({ projectId, memberId, count, perMinute });
+    return { count, perMinute };
+  }
   private wait(r: WakeRequest, kind: Pending['kind'], detail: string, ms: number): WakeRecord {
     const rec = this.record(r, kind === 'throttle' ? 'throttled' : 'deferred', detail), key = this.key(r.projectId, r.memberId, r.taskId);
     const p: Pending = { wakeId: rec.id, reasons: new Set([r.reason]), notes: r.note ? [r.note] : [], kind, projectId: r.projectId, memberId: r.memberId, taskId: r.taskId, force: Boolean(r.force) };
@@ -101,6 +104,8 @@ export class WakeQueue {
     const why = this.refusal(req, m, t);
     if (why) { this.d.store.updateWake(p.wakeId, { status: 'refused', detail: `Dropped: ${why}` }); this.d.changed(p.projectId); return; }
     if (t?.live) { this.pending.set(key, { ...p, kind: 'deferred', timer: undefined }); this.d.store.updateWake(p.wakeId, { status: 'deferred', detail: 'Waiting for the current run to end.' }); return; }
+    const stormFire = await this.stormed(p.projectId, p.memberId);
+    if (stormFire) { this.d.store.updateWake(p.wakeId, { status: 'storm', detail: `Dropped: ${stormFire.count} wakes in a minute reached the limit of ${stormFire.perMinute}.` }); this.d.changed(p.projectId); return; }
     try { const out = await this.d.deliver({ projectId: p.projectId, memberId: p.memberId, taskId: p.taskId, reason: req.reason, reasons: [...p.reasons], notes: p.notes }); this.d.store.updateWake(p.wakeId, { status: 'started', detail: `Started after waiting${p.reasons.size > 1 ? `; ${p.reasons.size} reasons merged` : ''}.`, chatId: out.chatId, delivered: true }); }
     catch (err) { this.d.store.updateWake(p.wakeId, { status: 'refused', detail: err instanceof Error ? err.message : 'The run could not start.' }); }
     this.d.changed(p.projectId);
@@ -124,6 +129,8 @@ export class WakeQueue {
       const req: WakeRequest = { projectId, memberId: p.memberId, taskId, reason: leadReason([...p.reasons]), force: true };
       const why = this.refusal(req, this.d.member(projectId, p.memberId), this.d.task(projectId, taskId));
       if (why) { this.d.store.updateWake(p.wakeId, { status: 'refused', detail: `Dropped: ${why}` }); continue; }
+      const stormRel = await this.stormed(projectId, p.memberId);
+      if (stormRel) { this.d.store.updateWake(p.wakeId, { status: 'storm', detail: `Dropped: ${stormRel.count} wakes in a minute reached the limit of ${stormRel.perMinute}.` }); continue; }
       try { const out = await this.d.deliver({ projectId, memberId: p.memberId, taskId, reason: req.reason, reasons: [...p.reasons], notes: p.notes }); this.d.store.updateWake(p.wakeId, { status: 'started', detail: 'Started after the previous run ended.', chatId: out.chatId, delivered: true }); }
       catch (err) { this.d.store.updateWake(p.wakeId, { status: 'refused', detail: err instanceof Error ? err.message : 'The run could not start.' }); }
     }

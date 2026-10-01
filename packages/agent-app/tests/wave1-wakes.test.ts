@@ -170,3 +170,26 @@ test('C15: an agent’s concurrency limit refuses a second start until a run fin
   assert.ok((await h.start(b.id)).chatId);
   await assert.rejects(h.s.invoke('project.agent.gov.set', { projectId: h.project.id, memberId: cto.id, heartbeat: { maxConcurrent: 99 } }), /Runs at once/);
 });
+
+test('Review fix: the storm cap counts per agent, so a quiet agent is not paused for a noisy one, and a delayed wake re-checks it', async () => {
+  const storms: string[] = [];
+  const h = queue({ settings: () => ({ ...DEFAULT_GOVERNANCE, stormPerMinute: 3 }), storm: w => { storms.push(w.memberId); } }, 0);
+  try {
+    for (let i = 0; i < 3; i++) await h.q.request({ projectId: 'p', memberId: 'noisy', taskId: `t${i}`, reason: 'assignment' });
+    const quiet = await h.q.request({ projectId: 'p', memberId: 'quiet', taskId: 'q1', reason: 'assignment' });
+    assert.equal(quiet.status, 'started', 'the quiet agent still starts');
+    const noisy = await h.q.request({ projectId: 'p', memberId: 'noisy', taskId: 't9', reason: 'assignment' });
+    assert.equal(noisy.status, 'storm'); assert.deepEqual(storms, ['noisy']);
+  } finally { h.done(); }
+  // A wake delayed by the gap is checked again when it fires.
+  const f = queue({ settings: () => ({ ...DEFAULT_GOVERNANCE, stormPerMinute: 3 }) }, 30);
+  try {
+    await f.q.request({ projectId: 'p', memberId: 'm', taskId: 't', reason: 'assignment' });
+    const waiting = await f.q.request({ projectId: 'p', memberId: 'm', taskId: 't', reason: 'comment' });
+    assert.equal(waiting.status, 'throttled');
+    for (let i = 0; i < 3; i++) f.store.addWake({ projectId: 'p', memberId: 'm', taskId: `x${i}`, reason: 'timer', status: 'started', detail: 'burst' });
+    await f.clock.advance(31_000);
+    assert.equal(f.delivered.length, 1, 'the delayed wake was not delivered into a storm');
+    assert.equal(f.store.getWake(waiting.id)!.status, 'storm');
+  } finally { f.done(); }
+});
