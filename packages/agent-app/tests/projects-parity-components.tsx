@@ -210,7 +210,7 @@ assert.ok(document.querySelectorAll('.ws-roster-line').length>=1,'with reporting
 
 // --- Settings: every old section is reachable; approvals toggle ------------------------------------------------------------------
 await click([...document.querySelectorAll('[role="tab"]')].find(t=>t.textContent==='Settings'),150);
-assert.deepEqual(text('.pp-settings-nav button'),['General','Folders','Members','Mail','Chats','Knowledge','Runs & verification','Run policy','Secrets','Activity']);
+assert.deepEqual(text('.pp-settings-nav button'),['General','Folders','Members','Mail','Chats','Knowledge','Runs & verification','Run policy','Secrets','Goals','Labels','Feedback','Activity']);
 assert.ok(text('.pp-fields dt').includes('Task keys'));
 assert.equal((document.querySelector('.pp-prefix') as HTMLInputElement).getAttribute('placeholder'),'OSS');
 const approval=document.querySelector('.pp-check input') as HTMLInputElement;
