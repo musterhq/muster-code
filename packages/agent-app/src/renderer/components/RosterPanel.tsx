@@ -17,7 +17,7 @@ import { AGENT_STATE_LABEL, Monogram, StateChip, agentTone } from './HubParts';
 import { PulseBoard, type HubNav } from './HubPages';
 import { ModalSheet } from './ModalSheet';
 import { ResourceState } from './ResourceState';
-import { RosterGraph, runtimeLabel } from './RosterGraph';
+import { RosterGraph, useRuntimeLabel } from './RosterGraph';
 import { DefaultModelPicker } from './settings/DefaultModelPicker';
 import { Tip } from './Tooltip';
 
@@ -55,6 +55,7 @@ export function RosterPanel({ snapshot, projectId, local, nav, children }: { sna
 
 /** Paperclip's agents list: a status bar, name, "title · runtime · model", who they report to, and state. */
 export function RosterList({ snapshot, agents, nav }: { snapshot: WorkspaceSnapshot; agents: readonly WorkspaceAgent[]; nav: HubNav }): React.ReactElement {
+  const runtimeLabel = useRuntimeLabel();
   const byId = useMemo(() => new Map(snapshot.agents.map(a => [a.id, a])), [snapshot.agents]);
   const doing = useMemo(() => { const m = new Map<string, string>(); for (const t of snapshot.tasks) if (t.live && t.assigneeId) m.set(t.assigneeId, `${t.key} · ${t.title}`); return m; }, [snapshot.tasks]);
   const sorted = [...agents].sort((a, b) => Number(b.status === 'running') - Number(a.status === 'running') || a.name.localeCompare(b.name));
@@ -73,6 +74,7 @@ export function RosterList({ snapshot, agents, nav }: { snapshot: WorkspaceSnaps
 
 /** A hire waiting for approval: approve to let it run, decline to remove it. Also in the Inbox as Needs you. */
 export function HireApprovalCard({ agent, snapshot, projectId }: { agent: WorkspaceAgent; snapshot: WorkspaceSnapshot; projectId: string }): React.ReactElement {
+  const runtimeLabel = useRuntimeLabel();
   const [busy, setBusy] = useState(false);
   const boss = agent.reportsTo ? snapshot.agents.find(a => a.id === agent.reportsTo) : undefined;
   const decide = async (approve: boolean) => {

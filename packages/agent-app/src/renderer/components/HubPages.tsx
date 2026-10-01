@@ -16,7 +16,7 @@ import { useStore } from '../useStore';
 import { AGENT_STATE_LABEL, INBOX_KIND_LABEL, Monogram, Receipt, RUN_STATE_LABEL, StateChip, TaskStatusIcon, agentTone, costText, duration, explainRunError, runTone, type Tone } from './HubParts';
 import { MailboxInbox } from './MailboxInbox';
 import { ResourceState } from './ResourceState';
-import { runtimeLabel } from './RosterGraph';
+import { useRuntimeLabel } from './RosterGraph';
 import { EditAgentButton, HireApprovalCard } from './RosterPanel';
 import { Tip } from './Tooltip';
 
@@ -132,6 +132,7 @@ export function PulseBoard({ snapshot, nav, agentId, scoped = false }: { snapsho
 
 // --- Agent page ---------------------------------------------------------------------------------------------------------
 export function AgentPage({ snapshot, agentId, nav }: { snapshot: WorkspaceSnapshot; agentId: string; nav: HubNav }): React.ReactElement {
+  const runtimeLabel = useRuntimeLabel();
   const agent = snapshot.agents.find(a => a.id === agentId);
   const [busy, setBusy] = useState(false);
   if (!agent) return <ResourceState kind="empty" message="This agent is no longer on the Roster."/>;

@@ -69,6 +69,7 @@ const calls:{command:string;input:any}[]=[];
   if(command==='models.usage.project')return {scope:'project',id:'p1',rows:[],totals:{input:0,cached:0,output:0,reasoning:0},costUsd:null,unpricedTokens:0,incrementalInput:false,updatedAt:null};
   if(command==='app.snapshot')return {folders:[{id:'f1',name:'redis-automation',path:'/work/oss'}],chats:[],projects:[{id:'p1',name:'OSSMANAGER',goal:'',folderIds:['f1']}],version:1};
   if(command==='project.list')return [project];
+  if(command==='providers.list')return [{id:'hybrow',name:'Hybrow Gateway',available:true,identityMasked:'',models:[{id:'planner',name:'Planner'}]}];
   return undefined;
 }};
 
@@ -189,6 +190,8 @@ assert.deepEqual(calls.filter(c=>c.command==='paperclip.task.create').at(-1)!.in
 await click([...document.querySelectorAll('[role="tab"]')].find(t=>t.textContent==='Roster'));
 assert.deepEqual(text('.roster-row .ws-row-title'),['CTO','Designer','QA'],'real members, working first; no generic "Agents" row');
 assert.ok(text('.roster-row').some(t=>/reports to.*CTO/.test(t)),'QA reports to CTO');
+assert.ok(text('.roster-row .ws-row-meta').some(t=>/Hybrow Gateway · planner/.test(t)),'the runner shows its provider’s name, not its raw id');
+assert.ok(!text('.roster-row .ws-row-meta').some(t=>/\bhybrow\b/.test(t)));
 assert.match(text('.hire-card-head')[0],/Add Designer as Product designer\?/);
 await click(button(/^Approve$/,document.querySelector('.hire-card')!),100);
 assert.deepEqual(calls.find(c=>c.command==='project.members.decide')!.input,{projectId:'p1',id:'des',approve:true});
