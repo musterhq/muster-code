@@ -410,7 +410,19 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
     }
     const asking = detail.runs.find(r => r.status === 'running' && r.chatId);
     if (!waiting && detail.task.status === 'in_review' && asking) cards.push({ kind: 'needs', id: `needs:${taskId}`, at: detail.task.updatedAt, from: detail.task.assigneeLabel, prompt: 'The agent is waiting for your answer in its run.', detail: null, status: 'pending', resolution: null, interactionId: null, acceptLabel: null, rejectLabel: null, chatId: asking.chatId ?? null, pending: null });
-    return { ...detail, cards, receipts: chatIds.length ? ledger().list({ chatIds, limit: 50 }) : [] };
+    const receipts = chatIds.length ? ledger().list({ chatIds, limit: 50 }) : [];
+    // The task is the conversation: each run's final answer is a turn in the thread, carrying that run's Receipt.
+    const comments = [...detail.comments];
+    for (const run of detail.runs) {
+      if (!run.chatId) continue;
+      const items = await context.invoke('chat.timeline', { id: run.chatId }).then(t => t.items, () => []);
+      const last = [...items].reverse().find(i => i.kind === 'assistant' && i.text.trim());
+      if (!last) continue;
+      const receipt = receipts.filter(r => r.chatId === run.chatId).sort((a, b) => b.endedAt.localeCompare(a.endedAt))[0];
+      comments.push({ id: `run:${run.id}:${last.id}`, author: { kind: 'agent', id: run.agentId, label: detail.task.assigneeLabel ?? 'Agent' }, body: last.text, createdAt: last.createdAt, runId: receipt?.runId ?? null });
+    }
+    comments.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+    return { ...detail, comments, cards, receipts };
   };
   const paperclipDetail = async (taskId: string): Promise<WorkspaceTaskDetail> => {
     const c = api();

@@ -132,3 +132,16 @@ test('S15 a Muster parent task shows a Delegated card per subtask', async t => {
   assert.deepEqual(cards.map(c => c.kind === 'delegated' ? `${c.from}>${c.to}:${c.key}:${c.taskId}` : '').sort(), [`CTO>QA:${a.key}:${a.id}`, `CTO>You:${b.key}:${b.id}`].sort());
   assert.deepEqual((await s.invoke('paperclip.task', { id: a.id })).cards.filter(c => c.kind === 'delegated'), [], 'a leaf task delegates nothing');
 });
+
+test('S20 the task thread shows each run’s final answer, with that run’s Receipt under it', async t => {
+  const { s, project, member, state } = await service(t);
+  const cto = await member('CTO');
+  const task = await s.invoke('paperclip.task.create', { title: 'Write a note', description: 'Write the note', projectId: project.id, assigneeId: `member:${cto.id}`, start: true });
+  assert.ok(task.started, task.startError ?? 'not started');
+  await until(async () => await state(task.id) !== 'running' && (await s.invoke('paperclip.task', { id: task.id })).receipts.length > 0, 'the run settled with a receipt');
+  const detail = await s.invoke('paperclip.task', { id: task.id });
+  const turn = detail.comments.find(c => c.body === 'Wrote E2E-NOTE.md');
+  assert.ok(turn, 'the agent’s answer is in the thread');
+  assert.equal(turn.author.kind, 'agent'); assert.equal(turn.author.label, 'CTO');
+  assert.equal(turn.runId, detail.receipts[0].runId, 'the Receipt sits under that message');
+});
