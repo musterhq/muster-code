@@ -9,6 +9,8 @@ import { join } from 'node:path';
 import { test, type TestContext } from 'node:test';
 import { createAgentService } from '../src/runtime/service.ts';
 import type { ProviderAdapter, ProviderInput } from '../src/runtime/provider.ts';
+import { SqliteImportStore } from '../src/runtime/paperclip-import.ts';
+import { DatabaseSync } from 'node:sqlite';
 
 const wait = (ms: number) => new Promise(r => setTimeout(r, ms));
 async function until<T>(fn: () => Promise<T | undefined | null | false> | T | undefined | null | false, label: string, ms = 10_000): Promise<T> {
@@ -144,4 +146,20 @@ test('S20 the task thread shows each run’s final answer, with that run’s Rec
   assert.ok(turn, 'the agent’s answer is in the thread');
   assert.equal(turn.author.kind, 'agent'); assert.equal(turn.author.label, 'CTO');
   assert.equal(turn.runId, detail.receipts[0].runId, 'the Receipt sits under that message');
+});
+
+test('S17 an approval imported with a task is an Approval card in its thread, with its status; a pending one is also Needs you', async t => {
+  const { s, project, dataDir } = await service(t);
+  const task = await s.invoke('paperclip.task.create', { title: 'Ship it', description: '', projectId: project.id, assigneeId: 'user:local' });
+  await s.invoke('paperclip.snapshot', {});
+  const db = new DatabaseSync(join(dataDir, 'muster-agent.sqlite'));
+  try {
+    const store = new SqliteImportStore(db);
+    store.putHistory({ sourceId: 'approval:ap-1', kind: 'approval', taskId: task.id, projectId: project.id, title: 'Ship the migration to production', status: 'pending', detail: '', at: new Date().toISOString(), pending: true });
+    store.putHistory({ sourceId: 'approval:ap-2', kind: 'approval', taskId: task.id, projectId: project.id, title: 'Rotate the API keys', status: 'approved', detail: '', at: new Date().toISOString(), pending: false });
+  } finally { db.close(); }
+  const detail = await s.invoke('paperclip.task', { id: task.id });
+  assert.deepEqual(detail.cards.filter(c => c.kind === 'approval').map(c => c.kind === 'approval' ? `${c.title}:${c.status}` : ''), ['Ship the migration to production:pending', 'Rotate the API keys:approved']);
+  const inbox = (await s.invoke('paperclip.snapshot', {})).inbox.filter(i => i.taskId === task.id && i.kind === 'approval');
+  assert.equal(inbox.length, 1, 'only the pending approval needs you');
 });

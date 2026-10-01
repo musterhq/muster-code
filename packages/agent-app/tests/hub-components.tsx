@@ -47,7 +47,10 @@ const calls:{command:string;input:any}[]=[];
       questions:[{id:'scope',prompt:'Which scope?',helpText:null,multi:false,allowOther:false,options:[{id:'mig',label:'Migration only',description:null},{id:'all',label:'Everything',description:null}]}]}]};
   if(command==='paperclip.task'&&input.id==='t4')return {task:snapshot.tasks[2],description:'',comments:[],runs:[],addressee:{id:'qa',label:'QA'},composerNote:null,subtasks:[],blocking:[],receipts:[],mentionable:[],
     cards:[{kind:'needs',id:'needs:q1',at:now,from:'QA',prompt:'Which colour should the banner be?',detail:null,status:'pending',resolution:null,interactionId:null,acceptLabel:null,rejectLabel:null,chatId:'c-run',
-      pending:{id:'q1',chatId:'c-run',kind:'question',text:'The provider needs your input.',status:'pending',createdAt:now,data:{method:'item/tool/requestUserInput',questions:[{id:'color',header:'Colour',question:'Which colour should the banner be?',options:[{label:'Blue'},{label:'Green'}],allowCustomAnswer:false,multiSelect:false}]}}}]};
+      pending:{id:'q1',chatId:'c-run',kind:'question',text:'The provider needs your input.',status:'pending',createdAt:now,data:{method:'item/tool/requestUserInput',questions:[{id:'color',header:'Colour',question:'Which colour should the banner be?',options:[{label:'Blue'},{label:'Green'}],allowCustomAnswer:false,multiSelect:false}]}}},
+      // Imported issue approvals (S17): a read-only Approval card with its status.
+      {kind:'approval',id:'import:ap-1',at:now,title:'Ship the migration to production',status:'pending'},
+      {kind:'approval',id:'import:ap-2',at:now,title:'Rotate the API keys',status:'approved'}]};
   if(command==='paperclip.task')return {task:snapshot.tasks[0],description:'Build the **wizard**.',comments:[{id:'m1',author:{kind:'agent',id:'ceo',label:'CEO'},body:'@CTO please take the implementation.',createdAt:now,runId:'r1'}],runs:[snapshot.runs[0]],addressee:{id:'ceo',label:'CEO'},composerNote:null,subtasks:['t15'],blocking:[],
     receipts:[receipt],mentionable:[{id:'ceo',name:'CEO'},{id:'cto',name:'CTO'},{id:'qa',name:'QA'}],
     cards:[{kind:'delegated',id:'d1',at:now,from:'CEO',to:'CTO',taskId:'t15',key:'RAG-15',title:'Implement migration',brief:''},
@@ -114,6 +117,9 @@ openHub('task','t4');await delay(150);
   blue[props].onChange({target:blue,currentTarget:blue});await delay(40);
   await click([...runCard.querySelectorAll('button')].find(b=>/Send answer/.test(b.textContent!)));
   assert.deepEqual(calls.find(c=>c.command==='question.respond')?.input,{id:'q1',answers:{color:{answers:['Blue']}}},'answered through question.respond');
+  const approvals=[...document.querySelectorAll('.ws-card-sys[data-kind="approval"]')];
+  assert.deepEqual(approvals.map(a=>a.querySelector('.ws-card-sys-text')!.textContent),['Approval Ship the migration to production','Approval Rotate the API keys']);
+  assert.deepEqual(approvals.map(a=>a.querySelector('.ws-chip')?.textContent),['pending','approved'],'each approval shows its status');
 }
 // A Paperclip question set is answered in place through Paperclip's respond endpoint.
 openHub('task','t15');await delay(150);
