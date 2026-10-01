@@ -93,6 +93,7 @@ const OWNER_ONLY_PROJECT = new Set(['project.delete', 'project.archive', 'projec
   'project.secrets.list', 'project.secrets.audit', 'project.secrets.save', 'project.secrets.rollback', 'project.secrets.remove', 'project.secrets.grant', 'project.secrets.decide',
   // Work layer: a project's status and target date.
   'work.project.meta.set']);
+const AUTOMATION_BY_ID = /^automations\.(update|delete|pause|resume|runNow|runs|list)$/;
 /** Commands whose result is server-wide and not filterable per project: admins only for everyone else. */
 const ADMIN_READS = /^(work\.(overlay|inbox\.state)|automations\.gate\.list|paperclip\.(snapshot|dashboard|list|badge|memory|task|config\.get|inbox\.dismissed|import\.plan|watch)|settings\.(export|diagnostics|storage|storage\.preview)|providers\.diagnose|import\.|memory\.(export|archives|bank\.preview|import\.preview))/;
 
@@ -108,6 +109,17 @@ export function authorizeResource(v: AccessView, command: string, cls: CommandCl
 
   // A workspace goal belongs to every project: only owners and admins edit it.
   if ((command === 'work.goals.save' && i.level === 'workspace') || (command === 'work.goals.remove' && i.workspace === true)) throw new PolicyError('Only owners and admins can edit workspace goals.', 403, 'forbidden');
+  // Automations act on a project, folder or chat named inside their target and schedule, so each of those is a write on its own. Managing
+  // one by id would need its stored target resolved, which only the runtime knows: that, and listing them, is for owners and admins.
+  if (command.startsWith('automations.')) {
+    if (AUTOMATION_BY_ID.test(command)) throw new PolicyError('Only owners and admins can manage, run or list automations on a server.', 403, 'forbidden');
+    const target = (i.target && typeof i.target === 'object' ? i.target : {}) as Record<string, unknown>, schedule = (i.schedule && typeof i.schedule === 'object' ? i.schedule : {}) as Record<string, unknown>;
+    const asStr = (x: unknown) => typeof x === 'string' ? x : undefined;
+    const projects = [asStr(target.projectId)].filter((x): x is string => Boolean(x)), folders = [asStr(target.folderId), asStr(schedule.folderId)].filter((x): x is string => Boolean(x)), chats = [asStr(target.chatId)].filter((x): x is string => Boolean(x));
+    for (const p of projects) if (!canWriteProject(v, p)) throw new PolicyError('You do not have write access to the project this automation acts in.', 403, 'forbidden');
+    if (folders.length) { const allowed = writableFolderIds(v, snapshot)!; if (folders.some(f => !allowed.has(f))) throw new PolicyError('You do not have write access to the folder this automation acts in.', 403, 'forbidden'); }
+    for (const id of chats) { const chat = snapshot.chats.find(c => c.id === id); if (!chat || !canWriteChat(v, chat)) throw new PolicyError('You do not have write access to the chat this automation continues.', 403, 'forbidden'); }
+  }
   let projectId = typeof i.projectId === 'string' ? i.projectId : undefined;
   if (!projectId && PROJECT_ID_COMMANDS.test(command) && typeof i.id === 'string') projectId = i.id;
   if (projectId !== undefined) {

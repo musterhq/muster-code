@@ -123,3 +123,16 @@ test('Wave 2 work-layer commands: reads are reads, shared inbox state and webhoo
   authorizeResource(viewer, 'work.labels.list', 'read', { projectId: 'p-view' }, snapshot);
   assert.throws(() => authorizeCommand('work.inbox.snooze', 'member'), /needs admin/);
 });
+
+test('Review M3: automations authorize the project, folder and chat nested in their target and schedule, and by-id management is admin only', () => {
+  const editor = accessView(user('member'), grants, owners);
+  const input = (over: Record<string, unknown>) => ({ name: 'x', prompt: 'x', timezone: 'UTC', schedule: { kind: 'interval', minutes: 60 }, target: { kind: 'task', projectId: 'p-shared', start: true, mode: 'task' }, ...over });
+  authorizeResource(editor, 'automations.create', 'write', input({}), snapshot);
+  denied(() => authorizeResource(editor, 'automations.create', 'write', input({ target: { kind: 'task', projectId: 'p-secret', start: true, mode: 'standup' } }), snapshot));
+  denied(() => authorizeResource(editor, 'automations.create', 'write', input({ target: { kind: 'new', folderId: 'f-secret', mode: 'agent' } }), snapshot));
+  denied(() => authorizeResource(editor, 'automations.update', 'write', input({ id: 'a', schedule: { kind: 'watch', folderId: 'f-secret' } }), snapshot));
+  denied(() => authorizeResource(editor, 'automations.create', 'write', input({ target: { kind: 'chat', chatId: 'c-secret' } }), snapshot));
+  denied(() => authorizeResource(editor, 'automations.preview', 'read', input({ target: { kind: 'task', projectId: 'p-secret', start: true, mode: 'task' } }), snapshot));
+  authorizeResource(editor, 'automations.preview', 'read', input({}), snapshot);
+  for (const c of ['automations.update', 'automations.delete', 'automations.pause', 'automations.resume', 'automations.runNow', 'automations.runs', 'automations.list']) denied(() => authorizeResource(editor, c, c === 'automations.list' || c === 'automations.runs' ? 'read' : 'write', { id: 'a' }, snapshot), 'forbidden');
+});
