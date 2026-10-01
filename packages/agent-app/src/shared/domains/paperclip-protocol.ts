@@ -194,7 +194,11 @@ export interface WorkspaceRow {
 export interface WorkspaceList { kind: WorkspaceListKind; rows: WorkspaceRow[]; note: string }
 /** The sidebar Inbox badge: needs-you and problem items only (mail and reviews never badge). */
 /** `chatIds`: run chats already counted in `inbox` through their task, so the sidebar does not count them twice. */
-export interface WorkspaceBadge { connected: boolean; inbox: number; liveRuns: number; mail: number; chatIds: string[] }
+export interface WorkspaceBadge {
+  connected: boolean; inbox: number; liveRuns: number; mail: number; chatIds: string[];
+  /** The linked company's name, and the org of each project an import made (Muster project id to org): the sidebar groups by these without reading the whole workspace. */
+  company?: string | null; orgs?: Record<string, string>;
+}
 /** What an import made or updated. Re-running updates the same rows (each is recorded as imported from Paperclip <id>). */
 export interface PaperclipImportReport {
   company: string; projects: { created: number; updated: number }; tasks: { created: number; updated: number; skipped: number };

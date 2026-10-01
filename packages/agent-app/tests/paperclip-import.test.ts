@@ -579,3 +579,15 @@ test('review M3: an imported agent whose runner cannot be mapped (an adapter Mus
   const started=await service.invoke('paperclip.task.start',{taskId:cto.id});
   assert.ok(started.chatId);
 });
+
+test('review S2: the light badge read carries the org of each imported project and the linked company, so the sidebar needs no workspace snapshot for grouping',async t=>{
+  const {service}=await fixture(t);
+  const own=await service.invoke('project.create',{name:'Mine',goal:'',folderIds:[]});
+  assert.deepEqual((await service.invoke('paperclip.badge',{})).orgs,{},'a user who never imported has no orgs');
+  await service.invoke('paperclip.config.set',{mode:'local',companyId:COMPANY});
+  await service.invoke('paperclip.import',{companyId:COMPANY});
+  const badge=await service.invoke('paperclip.badge',{});
+  const imported=(await service.invoke('project.list',undefined)).filter(p=>p.id!==own.id);
+  assert.deepEqual(Object.keys(badge.orgs!).sort(),imported.map(p=>p.id).sort());
+  assert.ok(Object.values(badge.orgs!).every(o=>o==='RagnarDataOps'));assert.equal(badge.company,'RagnarDataOps');assert.ok(!(own.id in badge.orgs!));
+});

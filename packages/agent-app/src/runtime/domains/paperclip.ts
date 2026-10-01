@@ -572,7 +572,8 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
     const [mail, snap] = await Promise.all([context.invoke('mailbox.list', { limit: 1 }).then(m => m.unacked).catch(() => 0), snapshotInflight ?? merge(false, false)]);
     const hidden = dismissed();
     const urgent = snap.inbox.filter(i => URGENT.has(i.kind) && hidden.get(`ws:${i.id}`) !== i.at);
-    return { connected: Boolean(snap.paperclip), inbox: urgent.length, liveRuns: snap.counts.liveRuns, mail, chatIds: [...new Set(urgent.flatMap(i => i.chatIds ?? []))] };
+    let orgs: Record<string, string> = {}; try { orgs = imports()?.projectOrgs() ?? {}; } catch { /* no import store */ }
+    return { connected: Boolean(snap.paperclip), inbox: urgent.length, liveRuns: snap.counts.liveRuns, mail, chatIds: [...new Set(urgent.flatMap(i => i.chatIds ?? []))], company: snap.paperclip?.company?.name ?? companies.find(c => c.id === (config.companyId ?? companies[0]?.id))?.name ?? null, orgs };
   };
 
   /** Starts a Muster task's first run on its owner's runner, in a new worktree of the project's folder (never the checkout). */

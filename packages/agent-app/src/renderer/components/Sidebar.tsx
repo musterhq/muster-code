@@ -373,7 +373,8 @@ export function Sidebar(): React.ReactElement {
   useEffect(()=>{if(snapshot){const ids=new Set(snapshot.chats.map(chat=>chat.id));setSelection(previous=>pruneSelection(previous,id=>ids.has(id)));}},[snapshot]);
 
   // Every hook sits above the loading return (Rules of Hooks): a hook below it crashed the app on boot.
-  const {snapshot:workspace}=useWorkspace();
+  // Only the light badge read: the org of each imported project and the linked company's name. The whole workspace is read by the rows that need it.
+  const inboxBadge=useInboxBadge();
   const [projectEdit,setProjectEdit]=useState<{id:string;mode:'edit'|'rename'|'archive'}|null>(null);
   if (!snapshot) {
     return <ResourceState kind="loading" compact label="Loading chats" rows={5}/>;
@@ -388,12 +389,11 @@ export function Sidebar(): React.ReactElement {
   const editedProject=projectEdit?snapshot.projects.find(project=>project.id===projectEdit.id):undefined;
   const projectGroups = snapshot.projects.map(project=>({project,gid:`project:${project.id}`,chats:inGroup(`project:${project.id}`)})).filter(group=>!group.project.archived||group.chats.length>0);
   // Paperclip projects (imported into Muster, or linked) are grouped under their org; projects you made show as before.
-  const orgOfProject=new Map((workspace?.projects??[]).filter(p=>p.source==='local'&&p.org).map(p=>[p.id,p.org!]));
+  const orgOfProject=new Map(Object.entries(inboxBadge?.orgs??{}));
   const ownProjects=projectGroups.filter(group=>!orgOfProject.has(group.project.id));
   const projectsByOrg=new Map<string,typeof projectGroups>();
   for(const group of projectGroups){const org=orgOfProject.get(group.project.id);if(org)projectsByOrg.set(org,[...(projectsByOrg.get(org)??[]),group]);}
-  const linkedOrg=workspace?.paperclip?.company?.name??(workspace?.projects??[]).find(p=>p.source==='paperclip')?.org??null;
-  const orgNames=[...new Set([...projectsByOrg.keys(),...(workspace?.projects.some(p=>p.source==='paperclip')&&linkedOrg?[linkedOrg]:[])])].sort((a,b)=>a.localeCompare(b));
+  const orgNames=[...new Set([...projectsByOrg.keys(),...(inboxBadge?.connected&&inboxBadge.company?[inboxBadge.company]:[])])].sort((a,b)=>a.localeCompare(b));
   const renderProject=({project,gid,chats}:{project:typeof projectGroups[number]['project'];gid:string;chats:Chat[]})=>(
             <Collapsible.Root className="nav-section" key={project.id} open={isOpen(gid)} onOpenChange={value=>toggleGroup(gid,value)}>
               <PreviewCard.Root><PreviewCard.Trigger render={<div/>} className="nav-project-hover" delay={600} closeDelay={120}>

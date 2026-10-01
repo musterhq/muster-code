@@ -46,7 +46,7 @@ const calls:{command:string;input:any}[]=[];
   if(command==='paperclip.watch')return {live};
   if(command==='paperclip.approval.decide')return {ok:true};
   if(command==='paperclip.inbox.dismissed')return {items:[]};
-  if(command==='paperclip.badge')return {connected:true,inbox:2,liveRuns:0,mail:0,chatIds:[]};
+  if(command==='paperclip.badge')return {connected:true,inbox:2,liveRuns:0,mail:0,chatIds:[],company:'RagnarDataOps',orgs:{imp:'RagnarDataOps',other:'OtherOrg'}};
   if(command==='mailbox.list')return {messages:[],unacked:0,pending:0};
   if(command==='project.list')return [{id:'mine',name:'My own project',goal:'',folderIds:[],primaryFolderId:null,archived:false,archivedAt:null},{id:'imp',name:'Data Pipeline',goal:'Ship',folderIds:[],primaryFolderId:null,archived:false,archivedAt:null},{id:'other',name:'Old import',goal:'',folderIds:[],primaryFolderId:null,archived:false,archivedAt:null}];
   if(command==='app.snapshot')return {folders:[],chats:[],projects:[{id:'mine',name:'My own project',goal:'',folderIds:[]},{id:'imp',name:'Data Pipeline',goal:'Ship',folderIds:[]},{id:'other',name:'Old import',goal:'',folderIds:[]}],version:1};

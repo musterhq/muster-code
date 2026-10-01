@@ -140,6 +140,12 @@ export class SqliteImportStore implements ImportStore {
     const data = JSON.parse(row.data) as Json;
     return isImportedProject(data) ? str(data.companyName) ?? 'Paperclip' : undefined;
   }
+  /** Every project an import made: Muster project id to the org it came from. */
+  projectOrgs(): Record<string, string> {
+    const out: Record<string, string> = {};
+    for (const r of this.db.prepare("SELECT muster_id, data FROM paperclip_import_map WHERE kind = 'project'").all() as { muster_id: string; data: string }[]) { const d = JSON.parse(r.data) as Json; if (isImportedProject(d)) out[r.muster_id] = str(d.companyName) ?? 'Paperclip'; }
+    return out;
+  }
   projectMeta(projectId: string): Json | undefined {
     const row = this.db.prepare("SELECT data FROM paperclip_import_map WHERE kind IN ('project', 'project:detached') AND muster_id = ?").get(projectId) as { data: string } | undefined;
     return row ? JSON.parse(row.data) as Json : undefined;
