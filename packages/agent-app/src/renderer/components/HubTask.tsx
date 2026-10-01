@@ -9,6 +9,7 @@ import { useVirtualizer } from '@tanstack/react-virtual';
 import { ArrowDown, ArrowRight, ArrowUp, Brain, CircleHelp, FileText, GitBranch, PanelRight, Play, ShieldCheck, Waypoints, X } from 'lucide-react';
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { LedgerEntry, PaperclipQuestion, ThreadCard, WorkspaceComment, WorkspaceMemory, WorkspacePriority, WorkspaceSnapshot, WorkspaceStatus, WorkspaceTaskDetail } from '../../shared/domains/paperclip-protocol';
+import type { Vote } from '../../shared/domains/work-protocol';
 import { PRIORITY_NAME, STATUS_LABEL, WORKSPACE_PRIORITIES, WORKSPACE_STATUSES } from '../../shared/domains/paperclip-protocol';
 import { NAMES } from '../../shared/workspace-names';
 import { invoke } from '../bridge';
@@ -22,6 +23,9 @@ import { PendingQuestion } from './PendingQuestion';
 import { ResourceState } from './ResourceState';
 import { Tip } from './Tooltip';
 import { GovernanceProperties, SecretRequestCard, StageCard, StopButton } from './TaskGovernance';
+import { TaskDocuments, TaskGoalRow, TaskLabelsRow, TaskPullRequests, VoteButtons } from './WorkTask';
+import { LabelChips } from './WorkParts';
+import { useWorkLoad } from '../workHooks';
 
 const errorText = (cause: unknown) => cause instanceof Error ? cause.message : String(cause);
 const when = (iso: string | null) => iso ? new Date(iso).toLocaleString(undefined, { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' }) : '—';
@@ -48,15 +52,17 @@ export function TaskView({ taskId, snapshot, onOpenTask, onOpenAgent }: { taskId
     return () => { live = false; };
   }, [taskId, tick, marker]);
   useEffect(() => onTasksChanged(ids => { if (ids.includes(taskId) || (detail && ids.includes(detail.task.id))) setTick(n => n + 1); }), [taskId, detail?.task.id]);
+  const projectId = detail?.task.source === 'local' ? detail.task.projectId : null;
+  const votes = useWorkLoad(projectId, ['votes'], () => projectId ? invoke('work.votes.list', { projectId, taskId: detail!.task.id }).then(r => r.votes) : Promise.resolve([]), [detail?.task.id, projectId]);
   if (error && !detail) return <ResourceState kind="error" message="This task could not be loaded." detail={error} onRetry={() => setTick(n => n + 1)}/>;
   if (!detail) return <ResourceState kind="loading" label="Loading task" rows={5}/>;
   return <div className={`ws-task${propertiesOpen ? ' has-properties' : ''}`}>
-    <Thread detail={detail} snapshot={snapshot} onChanged={() => setTick(n => n + 1)} onOpenTask={onOpenTask} onOpenAgent={onOpenAgent} propertiesOpen={propertiesOpen} onToggleProperties={() => setPropertiesOpen(v => !v)}/>
-    {propertiesOpen && <Properties detail={detail} snapshot={snapshot} onOpenTask={onOpenTask} onClose={() => setPropertiesOpen(false)} onChanged={() => setTick(n => n + 1)}/>}
+    <Thread detail={detail} snapshot={snapshot} onChanged={() => setTick(n => n + 1)} onOpenTask={onOpenTask} onOpenAgent={onOpenAgent} propertiesOpen={propertiesOpen} onToggleProperties={() => setPropertiesOpen(v => !v)} votes={votes.data ?? []} onVotesChanged={votes.reload}/>
+    {propertiesOpen && <Properties detail={detail} snapshot={snapshot} onOpenTask={onOpenTask} onClose={() => setPropertiesOpen(false)} onChanged={() => setTick(n => n + 1)} votes={votes.data ?? []} onVotesChanged={votes.reload}/>}
   </div>;
 }
 
-function Thread({ detail, snapshot, onChanged, onOpenTask, onOpenAgent, propertiesOpen, onToggleProperties }: { detail: WorkspaceTaskDetail; snapshot: WorkspaceSnapshot; onChanged: () => void; onOpenTask: (id: string) => void; onOpenAgent: (id: string) => void; propertiesOpen: boolean; onToggleProperties: () => void }): React.ReactElement {
+function Thread({ detail, snapshot, onChanged, onOpenTask, onOpenAgent, propertiesOpen, onToggleProperties, votes, onVotesChanged }: { detail: WorkspaceTaskDetail; snapshot: WorkspaceSnapshot; onChanged: () => void; onOpenTask: (id: string) => void; onOpenAgent: (id: string) => void; propertiesOpen: boolean; onToggleProperties: () => void; votes: readonly Vote[]; onVotesChanged: () => void }): React.ReactElement {
   const { task } = detail;
   const agentByName = useMemo(() => new Map(snapshot.agents.map(a => [a.name, a.id])), [snapshot.agents]);
   // Each agent turn's Receipt sits under the message that turn wrote; turns that wrote no message get a row of their own.
@@ -81,7 +87,7 @@ function Thread({ detail, snapshot, onChanged, onOpenTask, onOpenAgent, properti
   const who = (name: string | null) => { const id = name ? agentByName.get(name) : undefined; return id ? <button type="button" className="ws-name-link" onClick={() => onOpenAgent(id)}>{name}</button> : <span>{name ?? 'Someone'}</span>; };
   return <section className="ws-thread" aria-label={`${task.key} conversation`}>
     <div className="ws-thread-head">
-      <TaskStatusIcon status={task.status} size={16}/><h1 className="ws-thread-title">{task.title}</h1><span className="ws-key">{task.key}</span>{task.live && <LiveCount count={1}/>}{task.removedInPaperclip && <StateChip tone="warn">Removed in Paperclip</StateChip>}{detail.governance?.hold && <StateChip tone={detail.governance.hold.mode === 'cancel' ? 'danger' : 'warn'}>{detail.governance.hold.mode === 'cancel' ? 'Cancelled with parent' : 'On hold'}</StateChip>}
+      <TaskStatusIcon status={task.status} size={16}/><h1 className="ws-thread-title">{task.title}</h1><span className="ws-key">{task.key}</span><LabelChips labels={task.labels}/>{task.live && <LiveCount count={1}/>}{task.removedInPaperclip && <StateChip tone="warn">Removed in Paperclip</StateChip>}{detail.governance?.hold && <StateChip tone={detail.governance.hold.mode === 'cancel' ? 'danger' : 'warn'}>{detail.governance.hold.mode === 'cancel' ? 'Cancelled with parent' : 'On hold'}</StateChip>}
       {task.source === 'paperclip' && <span className="ws-source">{NAMES.paperclip}</span>}
       {!propertiesOpen && <Tip label="Show properties"><button type="button" className="icon-button ws-thread-toggle" aria-label="Show properties" onClick={onToggleProperties}><PanelRight size={15}/></button></Tip>}
     </div>
@@ -93,7 +99,8 @@ function Thread({ detail, snapshot, onChanged, onOpenTask, onOpenAgent, properti
                 <header className="ws-message-head"><Monogram name={e.comment.author.label} kind={e.comment.author.kind}/>
                   <span className="ws-message-author">{who(e.comment.author.label)}{e.to && <><ArrowRight size={12} className="ws-message-arrow" aria-hidden="true"/>{who(e.to)}</>}</span>
                   {!e.comment.body && <span className="ws-message-turn">ran a turn</span>}
-                  <time className="ws-message-time" dateTime={e.at} title={exactTime(e.at)}>{new Date(e.at).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })} · {agoLabel(e.at)}</time></header>
+                  <time className="ws-message-time" dateTime={e.at} title={exactTime(e.at)}>{new Date(e.at).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })} · {agoLabel(e.at)}</time>
+                  {task.source === 'local' && task.projectId && e.comment.author.kind === 'agent' && e.comment.body && <VoteButtons projectId={task.projectId} taskId={task.id} subject="message" subjectId={e.comment.id} excerpt={e.comment.body.slice(0, 200)} votes={votes} onChanged={onVotesChanged}/>}</header>
                 {e.comment.body && <div className="ws-message-body"><MessageBody text={e.comment.body}/></div>}
                 {e.receipt && <Receipt entry={e.receipt}/>}
               </article>}
@@ -230,7 +237,7 @@ function Row({ label, children }: { label: string; children: React.ReactNode }):
   return <div className="ws-prop"><dt>{label}</dt><dd>{children}</dd></div>;
 }
 
-function Properties({ detail, snapshot, onOpenTask, onClose, onChanged }: { detail: WorkspaceTaskDetail; snapshot: WorkspaceSnapshot; onOpenTask: (id: string) => void; onClose: () => void; onChanged: () => void }): React.ReactElement {
+function Properties({ detail, snapshot, onOpenTask, onClose, onChanged, votes, onVotesChanged }: { detail: WorkspaceTaskDetail; snapshot: WorkspaceSnapshot; onOpenTask: (id: string) => void; onClose: () => void; onChanged: () => void; votes: readonly Vote[]; onVotesChanged: () => void }): React.ReactElement {
   const { task } = detail;
   const [busy, setBusy] = useState(false);
   const byId = new Map(snapshot.tasks.map(t => [t.id, t]));
@@ -260,8 +267,7 @@ function Properties({ detail, snapshot, onOpenTask, onClose, onChanged }: { deta
         <Row label="Assignee">{editable ? <span className="ws-status-pick">{task.assigneeLabel && <Monogram name={task.assigneeLabel}/>}<select className="ws-select is-bare" aria-label="Assignee" value={task.assigneeId ?? ''} disabled={busy} onChange={e => void update({ assigneeId: e.target.value || null })}><option value="">Unassigned</option>{assignable.map(a => <option key={a.id} value={a.id}>{a.name}{a.title ? ` · ${a.title}` : ''}</option>)}</select></span> : task.assigneeLabel ? <span className="ws-inline"><Monogram name={task.assigneeLabel}/><span className="ws-ellipsis">{task.assigneeLabel}</span></span> : <span className="ws-faint">None</span>}</Row>
         <Row label="Project">{project ? ellipsis(project.name) : <span className="ws-faint">None</span>}</Row>
         <Row label="Priority">{editable ? <select className="ws-select is-bare" aria-label="Priority" value={task.priority} disabled={busy} onChange={e => void update({ priority: e.target.value as WorkspacePriority })}>{WORKSPACE_PRIORITIES.map(p => <option key={p} value={p}>{PRIORITY_NAME[p]}</option>)}</select> : PRIORITY_NAME[task.priority]}</Row>
-        {goal && <Row label="Goal">{ellipsis([goal.title, goal.parentId ? snapshot.goals.find(g => g.id === goal.parentId)?.title && `under ${snapshot.goals.find(g => g.id === goal.parentId)!.title}` : null, goal.ownerAgentId ? snapshot.agents.find(a => a.id === goal.ownerAgentId)?.name && `owner ${snapshot.agents.find(a => a.id === goal.ownerAgentId)!.name}` : null].filter(Boolean).join(' · '))}</Row>}
-        {task.labels?.length ? <Row label="Labels"><span className="ws-chips">{task.labels.map(l => <span key={l.name} className="ws-chip" data-tone="faint" style={l.color ? { borderColor: l.color } : undefined}>{l.name}</span>)}</span></Row> : null}
+        {task.source === 'local' && task.projectId ? <><Row label="Labels"><TaskLabelsRow projectId={task.projectId} taskId={task.id} labels={task.labels ?? []} onChanged={onChanged}/></Row><Row label="Goal"><TaskGoalRow projectId={task.projectId} taskId={task.id}/></Row></> : <>{goal && <Row label="Goal">{ellipsis([goal.title, goal.parentId ? snapshot.goals.find(g => g.id === goal.parentId)?.title && `under ${snapshot.goals.find(g => g.id === goal.parentId)!.title}` : null, goal.ownerAgentId ? snapshot.agents.find(a => a.id === goal.ownerAgentId)?.name && `owner ${snapshot.agents.find(a => a.id === goal.ownerAgentId)!.name}` : null].filter(Boolean).join(' · '))}</Row>}{task.labels?.length ? <Row label="Labels"><span className="ws-chips">{task.labels.map(l => <span key={l.name} className="ws-chip" data-tone="faint" style={l.color ? { borderColor: l.color } : undefined}>{l.name}</span>)}</span></Row> : null}</>}
       </dl>
       <MemorySection taskId={task.id}/>
       <h3 className="ws-prop-group">Relationships</h3>
@@ -271,6 +277,12 @@ function Properties({ detail, snapshot, onOpenTask, onClose, onChanged }: { deta
         <Row label="Blocking">{detail.blocking.length ? <span className="ws-chips">{detail.blocking.map(link)}</span> : <span className="ws-faint">None</span>}</Row>
         <Row label="Subtasks">{detail.subtasks.length ? <span className="ws-chips">{detail.subtasks.map(link)}</span> : <span className="ws-faint">None</span>}</Row>
       </dl>
+      {task.source === 'local' && task.projectId && <>
+        <h3 className="ws-prop-group">Pull requests</h3>
+        <TaskPullRequests projectId={task.projectId} taskId={task.id}/>
+        <h3 className="ws-prop-group">Documents</h3>
+        <TaskDocuments projectId={task.projectId} taskId={task.id} votes={votes} onVotesChanged={onVotesChanged}/>
+      </>}
       <h3 className="ws-prop-group">Execution</h3>
       <dl>
         <Row label="Live run">{task.live ? <LiveCount count={1}/> : <span className="ws-faint">None</span>}</Row>

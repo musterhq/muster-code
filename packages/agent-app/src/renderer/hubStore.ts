@@ -53,7 +53,7 @@ function schedule(delay = 250) {
   if (timer) return;
   timer = setTimeout(() => { timer = null; void refreshWorkspace(); }, delay);
 }
-const LOCAL_EVENTS = new Set(['projectChanged', 'mailboxChanged']);
+const LOCAL_EVENTS = new Set(['projectChanged', 'mailboxChanged', 'workChanged']);
 function onEvent(event: AgentEvent) {
   if (event.type === 'projectsWorkspaceChanged') { if (event.taskIds.length) for (const l of taskListeners) l(event.taskIds); schedule(); return; }
   if (LOCAL_EVENTS.has(event.type)) { if (event.type === 'projectChanged') for (const l of taskListeners) l([event.taskId]); schedule(400); }
@@ -91,7 +91,7 @@ export function onTasksChanged(listener: (ids: string[]) => void): () => void { 
 let badge: WorkspaceBadge | null = null;
 const badgeListeners = new Set<() => void>();
 let badgeTimer: ReturnType<typeof setTimeout> | null = null, badgeDirty = true, badgeSubscribed = false;
-const BADGE_EVENTS = new Set(['projectsWorkspaceChanged', 'projectChanged', 'mailboxChanged']);
+const BADGE_EVENTS = new Set(['projectsWorkspaceChanged', 'projectChanged', 'mailboxChanged', 'workChanged']);
 function loadBadge() {
   badgeDirty = false;
   void invoke('paperclip.badge', {}).then(next => {

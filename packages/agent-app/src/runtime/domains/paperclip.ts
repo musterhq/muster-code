@@ -245,6 +245,13 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
     const [mine, theirs] = await Promise.all([local.snapshot().catch(() => ({ tasks: [], agents: [], projects: [], runs: [], inbox: [] }) as LocalPart), paperclipPart(refresh)]);
     const p = theirs.part;
     const projects = withMemory ? await Promise.all([...mine.projects, ...(p?.projects ?? [])].map(async project => ({ ...project, memory: await projectMemory(project) }))) : [...mine.projects, ...(p?.projects ?? [])];
+    // The work layer's overlay (labels, pull request state, project status, target date, star and hide, automation approvals).
+    const over = await context.invoke('work.overlay', {}).catch(() => null);
+    if (over) {
+      for (const t of mine.tasks) { const labels = over.labels[t.id], pr = over.prs[t.id], goal = over.goals[t.id]; if (labels) t.labels = labels; if (pr) t.pr = pr; if (goal) t.goalId = goal; }
+      for (const project of projects) { const m = over.projects[project.id]; if (m && project.source === 'local') Object.assign(project, { status: m.status, targetDate: m.targetDate, starred: m.starred, hidden: m.hidden }); }
+      for (const a of mine.agents) { const m = over.agents[a.id]; if (m) Object.assign(a, m); }
+    }
     // A Paperclip project already imported into Muster is shown once, as its Muster copy (and its tasks), under the same org.
     let importedProjects = new Set<string>(); try { importedProjects = imports()?.importedSources('project') ?? importedProjects; } catch { /* no import store */ }
     const hidden = new Set((p?.projects ?? []).filter(x => importedProjects.has(x.id)).map(x => x.id));
@@ -256,7 +263,8 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
     let imported = new Set<string>(); try { imported = imports()?.importedSources('task') ?? imported; } catch { /* no import store */ }
     // An approval carried over by an import is decided in the linked Paperclip (when there is one), from its row.
     const carried = (i: WorkspaceInboxItem): WorkspaceInboxItem => i.id.startsWith('import:approval:') && linkedApproval(i.id.slice('import:'.length), i.projectId ?? null) ? { ...i, approvalId: i.id.slice('import:approval:'.length), approvalVerbs: ['approve', 'reject', 'request_revision'] } : i;
-    const inbox = [...mine.inbox.map(carried), ...await budgetInbox(mine.projects), ...(p?.inbox ?? []).filter(i => !i.taskId || !imported.has(i.taskId))].sort((a, b) => rank[a.severity] - rank[b.severity] || b.at.localeCompare(a.at));
+    const gates: WorkspaceInboxItem[] = (over?.inbox ?? []).map(g => ({ ...g, taskId: null, agentId: null, runId: null, source: 'local' as const }));
+    const inbox = [...mine.inbox.map(carried), ...gates, ...await budgetInbox(mine.projects), ...(p?.inbox ?? []).filter(i => !i.taskId || !imported.has(i.taskId))].sort((a, b) => rank[a.severity] - rank[b.severity] || b.at.localeCompare(a.at));
     return {
       paperclip: theirs.link, tasks, agents: [...mine.agents, ...(p?.agents ?? [])], projects: projects2, goals: p?.goals ?? [], runs, inbox, ...(p ? { approvals: p.approvals, labels: p.labels } : {}), agentCounts: p ?  { active: p.agents.filter(a => a.status !== 'paused' && a.status !== 'terminated' && a.status !== 'pending').length, paused: p.agents.filter(a => a.status === 'paused').length, resumable: resumable(p) } : { active: 0, paused: 0, resumable: resumable(null) },
       counts: { liveRuns: runs.filter(r => r.status === 'running').length, inbox: inbox.filter(i => i.kind !== 'mail').length, failedRuns: runs.filter(r => r.status === 'failed').length, openTasks: tasks.filter(t => t.status !== 'done' && t.status !== 'cancelled').length },
@@ -439,6 +447,9 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
   // --- the task thread ---------------------------------------------------------------------------------------------------
   const localDetail = async (taskId: string): Promise<WorkspaceTaskDetail> => {
     const detail = await local.detail(taskId);
+    // The work layer's labels, pull requests and goal for this task (the same overlay the snapshot carries).
+    const over = await context.invoke('work.overlay', {}).catch(() => null);
+    if (over) { const t = detail.task; if (over.labels[t.id]) t.labels = over.labels[t.id]; if (over.prs[t.id]) t.pr = over.prs[t.id]; if (over.goals[t.id]) t.goalId = over.goals[t.id]; }
     const chatIds = detail.runs.map(r => r.chatId).filter((c): c is string => Boolean(c));
     const cards: ThreadCard[] = [...detail.cards];
     // Handoff packets carry the memory Muster hands the next run (PRJ-18).
@@ -534,7 +545,7 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
     const projects = (await context.invoke('project.list', undefined)).filter(p => !p.archived);
     const works = await Promise.all(projects.map(p => context.invoke('project.work', { projectId: p.id, activityLimit: 100 }).then(w => ({ p, w }))));
     if (kind === 'audit') return works.flatMap(({ p, w }) => w.activity.items.map(a => ({ id: `act:${a.id}`, title: a.summary, detail: `${p.name} · ${a.actor}`, status: a.kind, at: a.createdAt, source: 'local' as const, projectId: p.id })));
-    const manual = works.flatMap(({ p, w }) => w.tasks.items.flatMap(t => t.artifacts.map((path, i) => ({ id: `art:${t.id}:${i}`, title: path.split('/').pop() || path, detail: `${p.name} · ${t.title} · ${path}`, status: null, at: t.updatedAt, source: 'local' as const, projectId: p.id }))));
+    const manual = works.flatMap(({ p, w }) => w.tasks.items.flatMap(t => t.artifacts.map((path, i) => ({ id: `art:${t.id}:${i}`, title: path.split('/').pop() || path, detail: `${p.name} · ${t.title} · ${path}`, status: null, at: t.updatedAt, source: 'local' as const, projectId: p.id, path, taskId: t.id }))));
     // What the agents actually produced: the files their turns changed (from the Ledger's Receipts, newest change per
     // path), the canvases made in the project's chats or folders, and the files attached to those chats.
     const changed: WorkspaceRow[] = [];
@@ -543,7 +554,7 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
       for (const entry of ledger().list({ projectId: p.id, limit: 200 })) for (const file of entry.files ?? []) {
         if (seen.has(file.path)) continue;
         seen.add(file.path);
-        changed.push({ id: `file:${p.id}:${file.path}`, title: file.path.split('/').pop() || file.path, detail: `${p.name} · ${entry.agent} · ${file.path}`, status: file.status, at: entry.endedAt, source: 'local', projectId: p.id });
+        changed.push({ id: `file:${p.id}:${file.path}`, title: file.path.split('/').pop() || file.path, detail: `${p.name} · ${entry.agent} · ${file.path}`, status: file.status, at: entry.endedAt, source: 'local', projectId: p.id, path: file.path, taskId: entry.taskId, agent: entry.agent });
       }
     }
     const chats = (context.store.snapshot().chats ?? []).filter(c => c.projectId && projects.some(p => p.id === c.projectId));
@@ -577,7 +588,10 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
   const badge = async (): Promise<WorkspaceBadge> => {
     const [mail, snap] = await Promise.all([context.invoke('mailbox.list', { limit: 1 }).then(m => m.unacked).catch(() => 0), snapshotInflight ?? merge(false, false)]);
     const hidden = dismissed();
-    const urgent = snap.inbox.filter(i => URGENT.has(i.kind) && hidden.get(`ws:${i.id}`) !== i.at);
+    // A snoozed item (for this very `at`, until its time) stays off the badge until it wakes.
+    const meta = new Map(((await context.invoke('work.inbox.state', {}).catch(() => ({ items: [] }))).items).map(m => [m.id, m]));
+    const asleep = (i: { id: string; at: string }) => { const m = meta.get(`ws:${i.id}`); return Boolean(m?.snoozedUntil && Date.parse(m.snoozedUntil) > Date.now() && m.snoozedFor === i.at); };
+    const urgent = snap.inbox.filter(i => URGENT.has(i.kind) && hidden.get(`ws:${i.id}`) !== i.at && !asleep(i));
     let orgs: Record<string, string> = {}; try { orgs = imports()?.projectOrgs() ?? {}; } catch { /* no import store */ }
     return { connected: Boolean(snap.paperclip), inbox: urgent.length, liveRuns: snap.counts.liveRuns, mail, chatIds: [...new Set(urgent.flatMap(i => i.chatIds ?? []))], company: snap.paperclip?.company?.name ?? companies.find(c => c.id === (config.companyId ?? companies[0]?.id))?.name ?? null, orgs };
   };

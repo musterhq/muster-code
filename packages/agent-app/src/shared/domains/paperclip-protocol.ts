@@ -10,6 +10,7 @@
 import type { MemoryConnection, MemoryRecord } from './memory-protocol.ts';
 import type { TimelineItem } from '../protocol.ts';
 import type { ExecutionPolicy, RunMeta, SecretProposal, TaskMonitor, TaskStageState, Watchdog } from './project-governance-protocol.ts';
+import type { TaskLabel, TaskPrSummary } from './work-protocol.ts';
 
 export type PaperclipMode = 'off' | 'local' | 'custom';
 export const PAPERCLIP_LOCAL_URL = 'http://127.0.0.1:3100';
@@ -48,8 +49,9 @@ export interface WorkspaceTask {
   hidden?: boolean;
   /** Under an active hold (paused or cancelled with its parent). */
   held?: boolean;
-  /** Paperclip labels (name and colour), carried on linked and imported tasks. */
-  labels?: { name: string; color: string | null }[];
+  /** Labels: Muster's own (with an id) or Paperclip's (name and colour), and the state of pull requests linked to a Muster task. */
+  labels?: { id?: string; name: string; color: string | null }[];
+  pr?: TaskPrSummary | null;
   /** An imported task whose issue no longer exists in Paperclip (cancelled here, kept for the record). */
   removedInPaperclip?: boolean;
 }
@@ -63,6 +65,8 @@ export interface WorkspaceAgent {
   pausable: boolean;
   /** A Muster Roster member: the project it belongs to, its member id, runner and instructions. */
   projectId?: string | null; memberId?: string | null; runner?: { providerId: string; model: string } | null; instructions?: string;
+  /** Star and hide (G35): Roster lists put starred agents first and fold hidden ones away. */
+  starred?: boolean; hidden?: boolean;
 }
 export interface WorkspaceProject {
   id: string; name: string; status: string; description: string; source: WorkspaceSource;
@@ -70,6 +74,8 @@ export interface WorkspaceProject {
   repo: string | null; cwd: string | null; taskCount: number; openCount: number; paused: boolean;
   /** The Muster memory bank this project's work recalls from (matched by repository), and how many notes it holds. */
   memory: { label: string; count: number } | null;
+  /** The target date (`YYYY-MM-DD`) of a Muster project, and whether it is starred or hidden in lists (Wave 2). */
+  targetDate?: string | null; starred?: boolean; hidden?: boolean;
   /** The Paperclip org (company) this project belongs to: a linked Paperclip project, or one imported from it. Muster-made projects have none. */
   org?: string | null;
   /** An imported project whose name or goal you changed here: a later import keeps your version. */
@@ -190,6 +196,8 @@ export interface WorkspaceRow {
   id: string; title: string; detail: string; status: string | null; at: string | null; source: WorkspaceSource; projectId?: string | null;
   /** Routines, mapped onto the automation model: next occurrence, last run outcome, overlap and catch-up policy. */
   nextRunAt?: string | null; lastRun?: { status: string; at: string | null } | null; overlap?: 'skip' | 'queue'; catchUp?: 'one' | 'none'; paused?: boolean;
+  /** Outputs: the file path, the task it came from and the agent that made it, when known (Wave 2). */
+  path?: string; taskId?: string | null; agent?: string | null;
 }
 export interface WorkspaceList { kind: WorkspaceListKind; rows: WorkspaceRow[]; note: string }
 /** The sidebar Inbox badge: needs-you and problem items only (mail and reviews never badge). */

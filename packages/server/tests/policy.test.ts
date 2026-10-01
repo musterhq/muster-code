@@ -104,6 +104,48 @@ test('Wave 1 governance commands: reads are reads, everything else is a write, s
   denied(() => authorizeResource(accessView(user('viewer'), [{ projectId: 'p-view', role: 'viewer' }], owners), 'project.agent.wake', 'write', { projectId: 'p-view' }, snapshot));
 });
 
+test('Wave 2 work-layer commands: reads are reads, shared inbox state and webhook secrets are admin, project status is owner, workspace goals are admin', () => {
+  for (const c of ['work.overlay', 'work.project.meta', 'work.labels.list', 'work.goals.list', 'work.docs.list', 'work.docs.get', 'work.votes.list', 'work.votes.export', 'work.outputs.state', 'work.links.list', 'work.inbox.state', 'work.summaries.list', 'work.summaries.revision', 'automations.gate.list', 'automations.templates']) assert.equal(classifyCommand(c), 'read', c);
+  for (const c of ['work.labels.save', 'work.task.labels.set', 'work.docs.save', 'work.docs.thread.add', 'work.votes.set', 'work.outputs.status', 'work.links.add', 'work.links.scan', 'work.summaries.save', 'work.summaries.refresh', 'work.star.set', 'work.goals.save', 'work.project.meta.set']) assert.equal(classifyCommand(c), 'write', c);
+  for (const c of ['automations.gate.decide', 'automations.webhook.rotate', 'work.inbox.read', 'work.inbox.snooze', 'work.inbox.decideBy', 'work.inbox.recommend']) assert.equal(classifyCommand(c), 'host', c);
+  const editor = accessView(user('member'), grants, owners), owner = accessView(user('member'), [{ projectId: 'p-shared', role: 'owner' }], owners), viewer = accessView(user('viewer'), [{ projectId: 'p-view', role: 'viewer' }], owners);
+  authorizeResource(editor, 'work.labels.save', 'write', { projectId: 'p-shared', name: 'x', color: 'ok' }, snapshot);
+  authorizeResource(editor, 'work.docs.save', 'write', { projectId: 'p-shared', taskId: 't', key: 'plan', text: 'x' }, snapshot);
+  denied(() => authorizeResource(editor, 'work.docs.save', 'write', { projectId: 'p-secret', taskId: 't', key: 'plan', text: 'x' }, snapshot));
+  denied(() => authorizeResource(editor, 'work.labels.list', 'read', { projectId: 'p-secret' }, snapshot));
+  denied(() => authorizeResource(editor, 'work.project.meta.set', 'write', { projectId: 'p-shared', status: 'planned' }, snapshot), 'forbidden');
+  authorizeResource(owner, 'work.project.meta.set', 'write', { projectId: 'p-shared', status: 'planned' }, snapshot);
+  denied(() => authorizeResource(owner, 'work.goals.save', 'write', { projectId: 'p-shared', level: 'workspace', title: 'x' }, snapshot), 'forbidden');
+  authorizeResource(owner, 'work.goals.save', 'write', { projectId: 'p-shared', level: 'project', title: 'x' }, snapshot);
+  denied(() => authorizeResource(owner, 'work.goals.remove', 'write', { projectId: 'p-shared', id: 'g', workspace: true }, snapshot), 'forbidden');
+  denied(() => authorizeResource(owner, 'work.overlay', 'read', {}, snapshot), 'forbidden');
+  denied(() => authorizeResource(viewer, 'work.labels.save', 'write', { projectId: 'p-view', name: 'x', color: 'ok' }, snapshot));
+  authorizeResource(viewer, 'work.labels.list', 'read', { projectId: 'p-view' }, snapshot);
+  assert.throws(() => authorizeCommand('work.inbox.snooze', 'member'), /needs admin/);
+});
+
+test('Review M3: automations authorize the project, folder and chat nested in their target and schedule, and by-id management is admin only', () => {
+  const editor = accessView(user('member'), grants, owners);
+  const input = (over: Record<string, unknown>) => ({ name: 'x', prompt: 'x', timezone: 'UTC', schedule: { kind: 'interval', minutes: 60 }, target: { kind: 'task', projectId: 'p-shared', start: true, mode: 'task' }, ...over });
+  authorizeResource(editor, 'automations.create', 'write', input({}), snapshot);
+  denied(() => authorizeResource(editor, 'automations.create', 'write', input({ target: { kind: 'task', projectId: 'p-secret', start: true, mode: 'standup' } }), snapshot));
+  denied(() => authorizeResource(editor, 'automations.create', 'write', input({ target: { kind: 'new', folderId: 'f-secret', mode: 'agent' } }), snapshot));
+  denied(() => authorizeResource(editor, 'automations.update', 'write', input({ id: 'a', schedule: { kind: 'watch', folderId: 'f-secret' } }), snapshot));
+  denied(() => authorizeResource(editor, 'automations.create', 'write', input({ target: { kind: 'chat', chatId: 'c-secret' } }), snapshot));
+  denied(() => authorizeResource(editor, 'automations.preview', 'read', input({ target: { kind: 'task', projectId: 'p-secret', start: true, mode: 'task' } }), snapshot));
+  authorizeResource(editor, 'automations.preview', 'read', input({}), snapshot);
+  for (const c of ['automations.update', 'automations.delete', 'automations.pause', 'automations.resume', 'automations.runNow', 'automations.runs', 'automations.list']) denied(() => authorizeResource(editor, c, c === 'automations.list' || c === 'automations.runs' ? 'read' : 'write', { id: 'a' }, snapshot), 'forbidden');
+});
+
+test('Review S4: starring or hiding needs write access to the project, and an agent needs its project named', () => {
+  const editor = accessView(user('member'), grants, owners);
+  authorizeResource(editor, 'work.star.set', 'write', { kind: 'project', id: 'p-shared', starred: true }, snapshot);
+  denied(() => authorizeResource(editor, 'work.star.set', 'write', { kind: 'project', id: 'p-secret', hidden: true }, snapshot));
+  authorizeResource(editor, 'work.star.set', 'write', { kind: 'agent', id: 'member:m1', projectId: 'p-shared', starred: true }, snapshot);
+  denied(() => authorizeResource(editor, 'work.star.set', 'write', { kind: 'agent', id: 'member:m1', projectId: 'p-secret', starred: true }, snapshot));
+  denied(() => authorizeResource(editor, 'work.star.set', 'write', { kind: 'agent', id: 'member:m1', starred: true }, snapshot));
+});
+
 test('review S4: Paperclip commands that spend, pause or change configuration are host (admin) commands; reads stay reads', () => {
   for (const c of ['paperclip.approval.decide', 'paperclip.pauseAll', 'paperclip.resumeAll', 'paperclip.agent.pause', 'paperclip.agent.resume', 'paperclip.import', 'paperclip.config.set']) assert.equal(classifyCommand(c), 'host', c);
   assert.equal(classifyCommand('project.tasks.get'), 'read');

@@ -88,7 +88,7 @@ await delay(200);
 assert.deepEqual(errors,[]);
 assert.ok(calls.some(c=>c.command==='paperclip.watch'&&c.input.visible===true),'the hub goes live on mount');
 // Inbox: Paperclip items grouped by project; plain-language errors; buckets
-assert.deepEqual(text('.ws-filter').map(t=>t.replace(/\d+$/,'')),['All','Needs you','Done','Review','Problems','Mail']);
+assert.deepEqual(text('.ws-filter').map(t=>t.replace(/\d+$/,'')),['All','Mine','Unread','Snoozed','All','Needs you','Done','Review','Problems','Mail'],'the views (Mine, Unread, Snoozed) come before the buckets');
 assert.ok(text('.ws-group-title').some(t=>t.startsWith('OSS Manager')));
 assert.ok(text('.ws-row-meta').some(t=>/reassigned while this run was working/.test(t)),'opaque error codes become plain sentences');
 // Task thread
