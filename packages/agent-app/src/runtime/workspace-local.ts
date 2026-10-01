@@ -168,7 +168,7 @@ export class LocalWorkspace {
     const chats = new Set(task.attempts.map(a => a.chatId));
     let imported: ReturnType<ImportMeta['comments']> = []; try { imported = this.meta?.()?.comments(task.id) ?? []; } catch { imported = []; }
     const comments: WorkspaceComment[] = [
-      ...imported.map(c => ({ id: `pc:${c.sourceId}`, author: { kind: c.authorKind === 'agent' ? 'agent' as const : 'user' as const, id: null, label: c.authorLabel }, body: c.body, createdAt: c.createdAt, runId: c.runId })),
+      ...imported.map(c => ({ id: `pc:${c.sourceId}`, author: { kind: c.authorKind === 'agent' ? 'agent' as const : c.authorKind === 'system' ? 'system' as const : 'user' as const, id: null, label: c.authorLabel }, body: c.body, createdAt: c.createdAt, runId: c.runId })),
       ...read.work.activity.items.filter(a => a.refId === task.id && a.kind !== 'task.create' && a.actor !== 'import').map(a => {
         // An agent's own comment (the task_comment tool) is a message from that agent, not a system notice.
         if (a.kind === 'task.note') return { id: a.id, author: { kind: 'user' as const, id: null, label: 'You' }, body: a.summary.replace(/^You: /, ''), createdAt: a.createdAt };
