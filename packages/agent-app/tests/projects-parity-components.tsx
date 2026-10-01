@@ -67,7 +67,8 @@ const calls:{command:string;input:any}[]=[];
   if(command==='settings.projectModel.get')return {value:null};
   if(command==='mailbox.list')return {messages:[],unacked:0,pending:0};
   if(command==='models.usage.project')return {scope:'project',id:'p1',rows:[],totals:{input:0,cached:0,output:0,reasoning:0},costUsd:null,unpricedTokens:0,incrementalInput:false,updatedAt:null};
-  if(command==='app.snapshot')return {folders:[{id:'f1',name:'redis-automation',path:'/work/oss'}],chats:[],projects:[],version:1};
+  if(command==='app.snapshot')return {folders:[{id:'f1',name:'redis-automation',path:'/work/oss'}],chats:[],projects:[{id:'p1',name:'OSSMANAGER',goal:'',folderIds:['f1']}],version:1};
+  if(command==='project.list')return [project];
   return undefined;
 }};
 
@@ -256,6 +257,22 @@ await click(button(/^Import 2 projects$/));
 assert.equal(imported,1);
 root3.unmount();
 
+// S44: "Open project" from the sidebar lands on the project the first time, even when React discards a first render.
+{
+  const {StrictMode,Suspense,lazy}=await import('react');
+  // A lazy sibling still loading: React throws the first render of the screen away, as a lazy chunk does in the app.
+  const Lazy=lazy(()=>new Promise<{default:()=>null}>(r=>setTimeout(()=>r({default:()=>null}),30)));
+  const {ProjectsScreen}=await import('../src/renderer/components/ProjectsScreen');
+  const {openProject}=await import('../src/renderer/projectFocus');
+  await (await import('../src/renderer/store')).boot();
+  openProject('p1');
+  const root4=createRoot(document.getElementById('root')!,{onUncaughtError:(e:unknown)=>{(errors as unknown[]).push(e);}});
+  root4.render(<StrictMode><Suspense fallback={null}><Lazy/><ProjectsScreen onBack={()=>{}} onStartChat={()=>{}}/></Suspense></StrictMode>);
+  for(let i=0;i<40&&!document.querySelector('.project-screen');i++)await delay(50);
+  await delay(150);
+  assert.match(text('.ws-crumb')[0]??'',/OSSMANAGER/,'the first open shows the project, not the list');
+  root4.unmount();
+}
 assert.deepEqual(errors,[]);
 assert.equal(intervals,0,'no intervals anywhere');
 console.log('projects-parity-components: ok');
