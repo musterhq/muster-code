@@ -6,7 +6,9 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import { wave3, until } from './wave3-harness.ts';
 import { modelKey } from '../src/shared/model-catalog.ts';
-import { buildCosts, buildProfile, dayOf, type TurnRow } from '../src/runtime/insight/costs.ts';
+import { DatabaseSync } from 'node:sqlite';
+import { TurnLedger } from '../src/runtime/turn-ledger.ts';
+import { buildCosts, buildProfile, dayOf, ensureLedgerIndexes, groupTurns, readGroups, type TurnRow } from '../src/runtime/insight/costs.ts';
 import { evidenceOf, hasSignal, parseReflection, reflectionPrompt, type ReflectionFacts } from '../src/runtime/insight/reflection.ts';
 import { draftSkillFromTask, skillTestPrompt } from '../src/runtime/insight/skills.ts';
 import { InsightStore } from '../src/runtime/insight/store.ts';
@@ -24,7 +26,7 @@ test('G24: costs aggregate by model, agent, project and day; unpriced turns are 
     turn({ endedAt: dayAgo(8) }), turn({ endedAt: dayAgo(40) }),
   ];
   const names = new Map([['p1', 'Alpha']]);
-  const r7 = buildCosts(turns, { days: 7, offsetMin: 0, now: NOW, projectNames: names, windows: [], ledgerSince: null });
+  const r7 = buildCosts(groupTurns(turns, 0), { days: 7, offsetMin: 0, now: NOW, projectNames: names, windows: [], ledgerSince: null });
   assert.equal(r7.entries, 3); assert.equal(r7.byDay.length, 7); assert.equal(r7.byDay.at(-1)!.turns, 2);
   assert.equal(r7.totals.costUsd, 0.03); assert.equal(r7.totals.unpricedTurns, 1);
   assert.deepEqual(r7.byAgent.map(b => [b.label, b.turns]), [['CTO', 2], ['QA', 1]]);
@@ -33,11 +35,11 @@ test('G24: costs aggregate by model, agent, project and day; unpriced turns are 
   assert.equal(r7.byDay.at(-1)!.costUsd, 0.01);
   // Chats are one line, not one agent per chat title.
   const chatTurns = [turn({ endedAt: dayAgo(0), agent: 'Reflection · CTO', trigger: 'project chat' }), turn({ endedAt: dayAgo(0), agent: 'Hello there', trigger: 'chat' }), turn({ endedAt: dayAgo(0), trigger: 'task' })];
-  const chatCosts = buildCosts(chatTurns, { days: 7, offsetMin: 0, now: NOW, projectNames: names, windows: [], ledgerSince: null });
+  const chatCosts = buildCosts(groupTurns(chatTurns, 0), { days: 7, offsetMin: 0, now: NOW, projectNames: names, windows: [], ledgerSince: null });
   assert.deepEqual(chatCosts.byAgent.map(b => [b.label, b.turns]), [['Chats (not task runs)', 2], ['CTO', 1]]);
-  const r30 = buildCosts(turns, { days: 30, offsetMin: 0, now: NOW, projectNames: names, windows: [], ledgerSince: null });
+  const r30 = buildCosts(groupTurns(turns, 0), { days: 30, offsetMin: 0, now: NOW, projectNames: names, windows: [], ledgerSince: null });
   assert.equal(r30.entries, 4);
-  const r90 = buildCosts(turns, { days: 90, offsetMin: 0, now: NOW, projectNames: names, windows: [], ledgerSince: null });
+  const r90 = buildCosts(groupTurns(turns, 0), { days: 90, offsetMin: 0, now: NOW, projectNames: names, windows: [], ledgerSince: null });
   assert.equal(r90.entries, 5);
   // A model with no priced turn has a null cost, and a day with only unpriced turns has a null cost.
   assert.equal(r7.byDay.find(d => d.day === dayOf(dayAgo(0), 0))!.costUsd, 0.01);
@@ -47,7 +49,7 @@ test('G24: costs aggregate by model, agent, project and day; unpriced turns are 
 
 test('G38: profile counts tasks, runs, tokens, provider mix and the activity streak', () => {
   const turns = [turn({ endedAt: dayAgo(0) }), turn({ endedAt: dayAgo(1), provider: 'openai', outcome: 'failed', costUsd: null }), turn({ endedAt: dayAgo(2), provider: 'openai' }), turn({ endedAt: dayAgo(9) })];
-  const p = buildProfile(turns, { offsetMin: 0, now: NOW, states: { verified: 3, implemented: 1, todo: 2, running: 1, failed: 1, cancelled: 1 }, providerNames: new Map([['openai', 'OpenAI']]), projects: [{ projectId: 'a', name: 'A', completed: 1, open: 0 }, { projectId: 'b', name: 'B', completed: 4, open: 2 }], since: '2026-09-01T00:00:00Z' });
+  const p = buildProfile(groupTurns(turns, 0), { offsetMin: 0, now: NOW, states: { verified: 3, implemented: 1, todo: 2, running: 1, failed: 1, cancelled: 1 }, providerNames: new Map([['openai', 'OpenAI']]), projects: [{ projectId: 'a', name: 'A', completed: 1, open: 0 }, { projectId: 'b', name: 'B', completed: 4, open: 2 }], since: '2026-09-01T00:00:00Z' });
   assert.deepEqual(p.tasks, { total: 9, completed: 4, open: 3, failed: 1 });
   assert.deepEqual(p.runs, { total: 4, succeeded: 3, failed: 1, other: 0 });
   assert.equal(p.tokens.input, 4000); assert.equal(p.unpricedTurns, 1);
@@ -55,7 +57,7 @@ test('G38: profile counts tasks, runs, tokens, provider mix and the activity str
   assert.equal(p.activity.length, 28); assert.equal(p.activeDays, 4); assert.equal(p.streak, 3);
   assert.deepEqual(p.topProjects.map(x => x.name), ['B', 'A']);
   // No run today: the streak counts back from yesterday.
-  const q = buildProfile([turn({ endedAt: dayAgo(1) }), turn({ endedAt: dayAgo(2) })], { offsetMin: 0, now: NOW, states: {}, providerNames: new Map(), projects: [], since: null });
+  const q = buildProfile(groupTurns([turn({ endedAt: dayAgo(1) }), turn({ endedAt: dayAgo(2) })], 0), { offsetMin: 0, now: NOW, states: {}, providerNames: new Map(), projects: [], since: null });
   assert.equal(q.streak, 2); assert.deepEqual(q.tasks, { total: 0, completed: 0, open: 0, failed: 0 });
 });
 
@@ -275,4 +277,41 @@ test('G31: the setup interview starts the coordinator with the interview opening
   const titles = (await h.s.invoke('project.work', { projectId: fresh.id })).tasks.items.map(x => x.title).sort();
   assert.deepEqual(titles, ['Cut the release', 'Write the plan']);
   void second;
+});
+
+test('Review S5: the Ledger is summed in SQL (same answer as grouping the turns in code), uses a created_at index, and says when it was cut short', async t => {
+  const dir = await mkdtemp(join(tmpdir(), 'muster-ledger-')); t.after(() => rm(dir, { recursive: true, force: true }));
+  const db = new DatabaseSync(join(dir, 'l.sqlite'));
+  const ledger = new TurnLedger(db);
+  const body = (i: number, over: Record<string, unknown> = {}) => ({ id: `t${i}`, chatId: `c${i}`, runId: `r${i}`, taskId: null, projectId: i % 2 ? 'p1' : 'p2', trigger: i % 5 === 0 ? 'project chat' : 'task', agent: i % 2 ? 'CTO' : 'QA', provider: 'codex', model: i % 3 ? 'gpt-x' : 'gpt-y', tokens: { input: 1000 + i, cached: 100, output: 200 + i, reasoning: 0 }, costUsd: i % 4 === 0 ? null : 0.01 * (i % 3 + 1), tools: [], approvals: 0, tests: 0, files: null, startedAt: null, endedAt: new Date(NOW - (i % 9) * 86_400_000 - i * 60_000).toISOString(), durationMs: 10, outcome: i % 7 === 0 ? 'failed' : 'completed', ...over });
+  const rows = Array.from({ length: 60 }, (_, i) => body(i));
+  for (const r of rows.slice(0, 50)) ledger.append(r as never);
+  ledger.importHistory(rows.slice(50).map(r => ({ ...r, id: `h${r.id}` })) as never);
+  const turns: TurnRow[] = rows.map(r => ({ projectId: r.projectId, agent: r.agent, provider: 'codex', model: r.model, input: r.tokens.input, output: r.tokens.output, cached: 100, costUsd: r.costUsd, endedAt: r.endedAt, outcome: r.outcome, trigger: r.trigger }));
+  const since = new Date(NOW - 30 * 86_400_000).toISOString();
+  for (const offset of [0, 330, -300]) {
+    const { groups, truncated } = readGroups(db, since, offset);
+    assert.equal(truncated, false);
+    const sql = buildCosts(groups, { days: 30, offsetMin: offset, now: NOW, projectNames: new Map(), windows: [], ledgerSince: null });
+    const code = buildCosts(groupTurns(turns, offset), { days: 30, offsetMin: offset, now: NOW, projectNames: new Map(), windows: [], ledgerSince: null });
+    assert.deepEqual(sql, code, `offset ${offset}`);
+    assert.equal(sql.entries, 60);
+  }
+  const one = readGroups(db, since, 0, 'p1');
+  assert.equal(one.groups.reduce((n, g) => n + g.n, 0), turns.filter(x => x.projectId === 'p1').length);
+  // Cut short: the flag is set and the rows that were read are the newest days.
+  const cut = readGroups(db, since, 0, undefined, 3);
+  assert.equal(cut.truncated, true); assert.ok(cut.groups.length <= 6);
+  assert.equal(buildCosts(cut.groups, { days: 30, offsetMin: 0, now: NOW, projectNames: new Map(), windows: [], ledgerSince: null, truncated: cut.truncated }).truncated, true);
+  assert.equal(buildProfile(cut.groups, { offsetMin: 0, now: NOW, states: {}, providerNames: new Map(), projects: [], since: null, truncated: cut.truncated }).truncated, true);
+  // The index the window filter uses exists, and creating it twice is harmless; the query plan uses it.
+  ensureLedgerIndexes(db); ensureLedgerIndexes(db);
+  const names = (db.prepare("SELECT name FROM sqlite_master WHERE type='index'").all() as { name: string }[]).map(r => r.name);
+  assert.ok(names.includes('turn_ledger_created') && names.includes('turn_ledger_history_ended'));
+  const plan = (db.prepare("EXPLAIN QUERY PLAN SELECT COUNT(*) FROM turn_ledger WHERE created_at >= ?").all(since) as { detail: string }[]).map(r => r.detail).join(' ');
+  assert.match(plan, /turn_ledger_created/);
+  // A database with no Ledger yet is empty, not an error.
+  const empty = new DatabaseSync(':memory:'); ensureLedgerIndexes(empty);
+  assert.deepEqual(readGroups(empty, since, 0), { groups: [], truncated: false });
+  db.close(); empty.close();
 });

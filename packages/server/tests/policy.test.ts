@@ -169,6 +169,38 @@ test('review S4: Paperclip commands that spend, pause or change configuration ar
   assert.equal(classifyCommand('paperclip.snapshot'), 'read');
 });
 
+test('Review M1: applying a coordinator proposal can set the mission, so it is owner-only like project.update', () => {
+  const editor = accessView(user('member'), grants, owners), owner = accessView(user('member'), [{ projectId: 'p-shared', role: 'owner' }], owners);
+  denied(() => authorizeResource(editor, 'project.update', 'write', { id: 'p-shared', goal: 'x' }, snapshot), 'forbidden');
+  denied(() => authorizeResource(editor, 'project.coordinator.apply', 'write', { projectId: 'p-shared', key: 'k' }, snapshot), 'forbidden');
+  authorizeResource(owner, 'project.coordinator.apply', 'write', { projectId: 'p-shared', key: 'k' }, snapshot);
+  authorizeResource(owner, 'project.update', 'write', { id: 'p-shared', goal: 'x' }, snapshot);
+});
+
+test('Review M2: Skill Studio test runs are narrowed to the projects the caller can see; admins see all', () => {
+  const run = (projectId: string) => ({ id: projectId, skill: 'release', inputId: null, input: 'x', projectId, chatId: 'c', state: 'done', result: `secret from ${projectId}`, error: null, startedAt: '', endedAt: null });
+  const out = { inputs: [{ id: 'i', skill: 'release', label: 'L', text: 'T', createdAt: '' }], runs: [run('p-shared'), run('p-secret')] };
+  const viewer = accessView(user('viewer'), [{ projectId: 'p-shared', role: 'viewer' }], owners);
+  const narrowed = filterOutput(viewer, 'studio.skill.inputs.list', out, snapshot) as typeof out;
+  assert.deepEqual(narrowed.runs.map(r => r.projectId), ['p-shared']);
+  assert.equal(narrowed.inputs.length, 1);
+  assert.ok(!JSON.stringify(narrowed).includes('secret from p-secret'));
+  assert.equal((filterOutput(accessView(user('member'), [], owners), 'studio.skill.inputs.list', out, snapshot) as typeof out).runs.length, 0);
+  const admin = accessView(user('admin'), [], owners);
+  assert.equal((filterOutput(admin, 'studio.skill.inputs.list', out, snapshot) as typeof out).runs.length, 2);
+});
+
+test('Review S1: dismissing a reflection proposal is owner-only, like running, accepting and scheduling one', () => {
+  const editor = accessView(user('member'), grants, owners), owner = accessView(user('member'), [{ projectId: 'p-shared', role: 'owner' }], owners);
+  denied(() => authorizeResource(editor, 'insight.reflect.dismiss', 'write', { projectId: 'p-shared', id: 'r' }, snapshot), 'forbidden');
+  authorizeResource(owner, 'insight.reflect.dismiss', 'write', { projectId: 'p-shared', id: 'r' }, snapshot);
+});
+
+test('Review S2: the Wave 3 commands that start an agent turn record the caller as its actor', async () => {
+  const { TURN_COMMANDS } = await import('../src/rpc.ts');
+  for (const c of ['insight.reflect.run', 'insight.setup.interview', 'studio.skill.test', 'project.coordinator.start']) assert.ok(TURN_COMMANDS.has(c), c);
+});
+
 test('Wave 4: commands that run on the server host or speak for an agent are admin-only; org and backup reads stay reads; imports cannot read server folders', () => {
   for (const c of ['ssh.hosts.list', 'ssh.hosts.save', 'ssh.hostkey.trust', 'ssh.test', 'ssh.chat.set', 'services.start', 'services.save', 'services.stop', 'backups.run', 'backups.restore', 'backups.settings.set', 'org.export.write',
     'project.remote.tasks', 'project.remote.comment', 'project.remote.state', 'project.remote.doc']) assert.equal(classifyCommand(c), 'host', c);

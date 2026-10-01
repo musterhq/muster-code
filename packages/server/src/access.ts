@@ -94,7 +94,9 @@ const OWNER_ONLY_PROJECT = new Set(['project.delete', 'project.archive', 'projec
   // Work layer: a project's status and target date.
   'work.project.meta.set',
   // Wave 3: a reflection changes an agent's instructions; the setup interview starts the coordinator.
-  'insight.reflect.run', 'insight.reflect.accept', 'insight.reflect.settings.set', 'insight.setup.interview', 'insight.setup.testDrive',
+  'insight.reflect.run', 'insight.reflect.accept', 'insight.reflect.dismiss', 'insight.reflect.settings.set', 'insight.setup.interview', 'insight.setup.testDrive',
+  // Applying a coordinator proposal can change the shared mission (its goal operation), which project.update reserves for owners.
+  'project.coordinator.apply',
   // Wave 4: importing into a project, starting what an import paused, and asking an agent to change a proposal.
   'org.import.apply', 'org.activate', 'project.approvals.requestRevision']);
 const AUTOMATION_BY_ID = /^automations\.(update|delete|pause|resume|runNow|runs|list)$/;
@@ -163,6 +165,11 @@ export function filterOutput(v: AccessView, command: string, output: unknown, sn
   if (command === 'app.snapshot') return filterSnapshot(v, output as Snapshot);
   if (command === 'project.list' && Array.isArray(output)) return output.filter(p => canSeeProject(v, (p as { id: string }).id));
   if (command === 'chat.search' && Array.isArray(output)) return output.filter(r => canSeeChat(v, snapshot.chats.find(c => c.id === (r as { chatId: string }).chatId)));
+  // Skill Studio test runs carry the reply of a read-only run in one project's folder: a member sees only the runs of projects they can see.
+  if (command === 'studio.skill.inputs.list' && output && typeof output === 'object') {
+    const list = output as { runs?: Array<{ projectId: string }> };
+    return { ...list, runs: (list.runs ?? []).filter(r => canSeeProject(v, r.projectId)) };
+  }
   if (command === 'paperclip.ledger' && output && typeof output === 'object') {
     const view = output as { entries: Array<{ chatId: string | null; projectId: string | null }> };
     return { ...view, entries: view.entries.filter(e => (e.projectId && canSeeProject(v, e.projectId)) || (e.chatId && canSeeChat(v, snapshot.chats.find(c => c.id === e.chatId)))) };

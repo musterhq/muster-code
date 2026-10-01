@@ -23,6 +23,8 @@ export interface CostsReport {
   windows: ProviderWindow[];
   /** The oldest turn the Ledger holds; the report cannot reach further back than this. */
   ledgerSince: string | null;
+  /** The Ledger held more groups than a report reads, so the oldest days are missing from it. */
+  truncated: boolean;
 }
 
 // ── Your stats (G38) ─────────────────────────────────────────────────────────
@@ -36,6 +38,8 @@ export interface ProfileStats {
   activity: { day: string; runs: number }[];
   activeDays: number; streak: number;
   topProjects: { projectId: string; name: string; completed: number; open: number }[];
+  /** The Ledger held more than a report reads, so the oldest days are missing. */
+  truncated: boolean;
 }
 
 // ── Reflection Coach (G25) ───────────────────────────────────────────────────

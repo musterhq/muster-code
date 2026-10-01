@@ -70,6 +70,7 @@ export function CostsPanel({ projectId }: { projectId?: string }): React.ReactEl
       {report.windows.length === 0 ? <p className="ws-board-empty">No provider here reports rate limits. ChatGPT sign-ins and Codex gateways do, after a run.</p>
         : <div className="costs-window-list">{report.windows.map(w => <div key={w.providerId} className="costs-window"><h4>{w.name}</h4><ProviderUsageMeters usage={w.usage ?? undefined} loaded/></div>)}</div>}
     </section>}
+    {report.truncated && <p className="costs-note" role="status" data-truncated="true">The Ledger holds more than a report reads, so the oldest days are missing from these totals. Choose a shorter period for exact numbers.</p>}
     <p className="costs-note">Costs are estimates from the Ledger{report.ledgerSince ? `, which goes back to ${new Date(report.ledgerSince).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}` : ''}. A turn on a model with no price is counted as unpriced; set your own price in Settings › Models.</p>
   </div>;
 }

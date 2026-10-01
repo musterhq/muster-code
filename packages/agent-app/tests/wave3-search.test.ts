@@ -86,3 +86,33 @@ test('G19: documents search escapes SQL wildcards and finds only the latest revi
   assert.equal((await h.s.invoke('search.workspace', { query: 'a_b', scope: 'documents' })).rows.length, 1);
   assert.equal((await h.s.invoke('search.workspace', { query: 'a%b', scope: 'documents' })).rows.length, 1);
 });
+
+test('Review S4: a palette session reuses the snapshot, outputs and decisions for 3 s, drops them when a command changes something, and skips outputs and decisions for a one-word query', async t => {
+  const { searchStats, searchClock, SEARCH_CACHE_MS } = await import('../src/runtime/domains/search.ts');
+  const h = await wave3(t);
+  let now = 1_000_000; searchClock.now = () => now; t.after(() => { searchClock.now = undefined; });
+  const a = await h.addTask('Fix the login redirect', { kind: 'user', id: 'local' });
+  const calls = (): string => `${searchStats.snapshots}/${searchStats.artifacts}/${searchStats.decisions}`;
+  const base = { ...searchStats };
+  const delta = () => [searchStats.snapshots - base.snapshots, searchStats.artifacts - base.artifacts, searchStats.decisions - base.decisions];
+  await h.s.invoke('search.workspace', { query: 'l' });
+  await h.s.invoke('search.workspace', { query: 'lo' });
+  await h.s.invoke('search.workspace', { query: 'log' });
+  assert.deepEqual(delta(), [1, 0, 0], `three keystrokes, one snapshot, no outputs or decisions for one letter (${calls()})`);
+  await h.s.invoke('search.workspace', { query: 'login red' });
+  await h.s.invoke('search.workspace', { query: 'login redi' });
+  assert.deepEqual(delta(), [1, 1, 1], 'two words look at outputs and decisions once, then reuse them');
+  // Reads (the palette's own chat.search) never drop the cache; a write does, and the new task is found at once.
+  await h.s.invoke('chat.search', { query: 'login' });
+  await h.s.invoke('search.workspace', { query: 'login redir' });
+  assert.deepEqual(delta(), [1, 1, 1]);
+  const b = await h.addTask('Fix the login timeout', { kind: 'user', id: 'local' });
+  const found = await h.s.invoke('search.workspace', { query: 'login timeout' });
+  assert.ok(found.rows.some(r => r.taskId === b.id), 'a task added a moment ago is found');
+  assert.equal(searchStats.snapshots - base.snapshots, 2);
+  // After the window the data is read again.
+  now += SEARCH_CACHE_MS + 1;
+  await h.s.invoke('search.workspace', { query: 'login timeout' });
+  assert.equal(searchStats.snapshots - base.snapshots, 3);
+  void a;
+});

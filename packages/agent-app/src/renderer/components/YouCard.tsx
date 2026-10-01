@@ -29,6 +29,7 @@ export function YouCard({ projectId }: { projectId?: string }): React.ReactEleme
   const s = stats, empty = s.runs.total === 0 && s.tasks.total === 0;
   return <section className="ws-section you" aria-label="You">
     <div className="ws-section-head"><h2 className="dash-label">{projectId ? 'Your part in this project' : 'You'}</h2>{s.since && <span className="ws-faint you-since">Since {since(s.since)}</span>}</div>
+    {s.truncated && <p className="ws-faint" role="status" data-truncated="true">The Ledger holds more than a report reads, so the oldest days are missing from these numbers.</p>}
     {empty ? <p className="ws-board-empty">Your stats start with your first task or agent run.</p> : <>
       <div className="costs-tiles you-tiles">
         <div className="dash-tile is-static"><span className="dash-tile-icon" aria-hidden="true"><CheckCheck size={15}/></span><span className="dash-value">{s.tasks.completed}</span><span className="dash-tile-label">Tasks completed</span><span className="dash-tile-detail">{s.tasks.open} open · {s.tasks.failed} failed · {s.tasks.total} in all</span></div>
