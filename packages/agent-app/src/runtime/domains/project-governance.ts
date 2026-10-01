@@ -17,7 +17,7 @@ import { clampPermission, type ProjectDetails, type ProjectTaskRecord, type Task
 import {
   BUNDLE_MAIN, BUNDLE_STANDARD, DEFAULT_CAPABILITIES, DEFAULT_GOVERNANCE, DEFAULT_MAX_REVIEW_ROUNDS, MAX_TOOL_RULES, RUN_REASON_LABEL,
   type AgentCapabilities, type AgentGovernance, type AgentGovernanceView, type BundleFile, type Decision, type ExecutionPolicy, type GovernanceSettings, type GovernanceState, type HoldMode, type HoldRelease, type Liveness,
-  type MonitorPolicy, type PolicyInput, type RecoveryAction, type RecoveryItem, type RunReason, type StopMode, type TaskHold, type TaskMonitor, type TaskStageState, type Watchdog, type WatchdogVerdict, type WakeRecord,
+  type MonitorPolicy, type PolicyInput, type RecoveryAction, type RecoveryItem, type RunReason, type SecretProposal, type StopMode, type TaskHold, type TaskMonitor, type TaskStageState, type Watchdog, type WatchdogVerdict, type WakeRecord,
 } from '../../shared/domains/project-governance-protocol.ts';
 import { budgetUse } from '../../shared/domains/paperclip-protocol.ts';
 import { redactSecrets } from '../secret-redaction.ts';
@@ -1026,6 +1026,11 @@ export function createGovernance(ctx: DomainContext, deps: GovernanceDeps) {
   }
 
   // ── secrets (G23) ───────────────────────────────────────────────────────────
+  /** A proposal with what already exists under its name, so the decision says whether it grants or replaces. */
+  function enrich(p: SecretProposal): SecretProposal {
+    const meta = gov().secretMeta(p.projectId, p.name);
+    return { ...p, existing: meta ? { version: meta.version, heldBy: secretGrants(p.projectId).get(p.name) ?? [] } : null };
+  }
   function secretGrants(projectId: string): Map<string, string[]> {
     const out = new Map<string, string[]>();
     for (const m of team().list(projectId)) for (const n of m.secrets) out.set(n, [...(out.get(n) ?? []), m.name]);
@@ -1050,7 +1055,7 @@ export function createGovernance(ctx: DomainContext, deps: GovernanceDeps) {
       settings: settings(projectId), holds: gov().holds(projectId).map(holdView).filter(h => h.status === 'active' || Date.now() - Date.parse(h.releasedAt ?? h.createdAt) < 7 * 86_400_000), hiddenTaskIds: gov().hidden(projectId),
       stages: gov().stages(projectId).filter(s => all.some(t => t.id === s.taskId)), policies: gov().policies(projectId),
       watchdogs: gov().watchdogs(projectId).map(viewWatchdog), monitors: gov().monitors(projectId).map(monitorView), breakers: gov().breakers(projectId, false).slice(0, 20),
-      recovery: recoveryItems(projectId), proposals: gov().proposals(projectId), runs: gov().runsFor(projectId, { limit: 100 }), wakes: gov().wakes(projectId, { limit: 40 }),
+      recovery: recoveryItems(projectId), proposals: gov().proposals(projectId).map(enrich), runs: gov().runsFor(projectId, { limit: 100 }), wakes: gov().wakes(projectId, { limit: 40 }),
     };
   }
   /** What needs you, as simple rows the Inbox maps: open findings, breakers, secret requests, escalated monitors and stages waiting on you. */
@@ -1113,7 +1118,7 @@ export function createGovernance(ctx: DomainContext, deps: GovernanceDeps) {
         hidden: v.hidden, runs: v.runs, monitor: gov().monitors(projectId).find(m => ids.has(m.taskId)) ? monitorView(gov().monitors(projectId).find(m => ids.has(m.taskId))!) : null,
         watchdog: gov().openWatchdogFor(taskId) ? viewWatchdog(gov().openWatchdogFor(taskId)!) : null,
         agents: team().list(projectId).filter(m => m.kind === 'agent' && m.id !== 'agent' && !m.revokedAt && !m.pendingAt).map(m => ({ memberId: m.id, name: m.name })),
-        proposals: gov().proposals(projectId).filter(p => p.taskId === taskId), secureStorage: theVault().secure(), defaultPolicy: settings(projectId).defaultPolicy, holdStatus: hold?.status ?? null,
+        proposals: gov().proposals(projectId).filter(p => p.taskId === taskId).map(enrich), secureStorage: theVault().secure(), defaultPolicy: settings(projectId).defaultPolicy, holdStatus: hold?.status ?? null,
       };
     },
     'project.gov.settings.set': (input: Record<string, unknown>) => {
@@ -1208,7 +1213,7 @@ export function createGovernance(ctx: DomainContext, deps: GovernanceDeps) {
       return gov().getBreaker(b.id)!;
     },
     'project.recovery.resolve': async (input: Record<string, unknown>) => { const projectId = project(input), a = input.action; if (!['rerun', 'block', 'cancel', 'dismiss', 'resume'].includes(String(a))) throw new Error('Choose a way to resolve this.'); await resolveRecovery(projectId, id(input.taskId, 'task id'), a as RecoveryAction); return { ok: true as const }; },
-    'project.secrets.list': (input: Record<string, unknown>) => { const projectId = project(input); expireProposals(projectId); return { secrets: theVault().list(projectId, secretGrants(projectId)), proposals: gov().proposals(projectId), secureStorage: theVault().secure() }; },
+    'project.secrets.list': (input: Record<string, unknown>) => { const projectId = project(input); expireProposals(projectId); return { secrets: theVault().list(projectId, secretGrants(projectId)), proposals: gov().proposals(projectId).map(enrich), secureStorage: theVault().secure() }; },
     'project.secrets.save': (input: Record<string, unknown>) => {
       const projectId = project(input), name = validName(input.name), existed = Boolean(gov().secretMeta(projectId, name));
       const out = theVault().save(projectId, name, input.value, { actor: 'You', ...(typeof input.description === 'string' ? { description: input.description } : {}), ...(input.expiresAt !== undefined ? { expiresAt: input.expiresAt === null || input.expiresAt === '' ? null : String(input.expiresAt) } : {}) });
@@ -1227,12 +1232,15 @@ export function createGovernance(ctx: DomainContext, deps: GovernanceDeps) {
       if (p.state !== 'pending') throw new Error('That request was already answered.');
       if (Date.parse(p.expiresAt) <= now()) { gov().setProposalState(p.id, 'expired'); throw new Error('That request expired. Ask the agent to request it again.'); }
       if (input.approve === true) {
+        const exists = Boolean(gov().secretMeta(projectId, p.name)), hasValue = typeof input.value === 'string' && input.value.trim() !== '';
+        if (exists && hasValue && input.replace !== true) throw new Error(`${p.name} already exists (held by ${(secretGrants(projectId).get(p.name) ?? []).join(', ') || 'no one'}). Grant the existing secret, or confirm that you want to replace its value for everyone who holds it.`);
+        if (exists && !hasValue) { grant(projectId, p.name, p.memberId, true, 'You'); gov().setProposalState(p.id, 'approved'); gov().addSecretEvent(projectId, p.name, 'approve', 'You', `existing secret granted to ${p.memberName}`); record(projectId, 'task.secret-approved', `You granted the existing secret ${p.name} to ${p.memberName}.`, p.taskId, 'user'); deps.changed(projectId, p.taskId ?? '', true); return enrich(gov().getProposal(p.id)!); }
         theVault().save(projectId, p.name, input.value, { description: gov().secretMeta(projectId, p.name)?.description || p.purpose, actor: 'You' });
         try { grant(projectId, p.name, p.memberId, true, 'You'); } catch { /* the agent left the Roster: the secret is still stored */ }
-        gov().setProposalState(p.id, 'approved'); gov().addSecretEvent(projectId, p.name, 'approve', 'You', `entered by you for ${p.memberName}`);
-        record(projectId, 'task.secret-approved', `You approved ${p.name} for ${p.memberName}. The agent never sees the value in chat; it receives it as an environment variable.`, p.taskId, 'user');
+        gov().setProposalState(p.id, 'approved'); gov().addSecretEvent(projectId, p.name, 'approve', 'You', exists ? `value replaced by you; granted to ${p.memberName}` : `entered by you for ${p.memberName}`);
+        record(projectId, 'task.secret-approved', `You approved ${p.name} for ${p.memberName}${exists ? ' and replaced its value' : ''}. The agent never sees the value in chat; it receives it as an environment variable.`, p.taskId, 'user');
       } else { gov().setProposalState(p.id, 'denied'); gov().addSecretEvent(projectId, p.name, 'deny', 'You', `declined for ${p.memberName}`); record(projectId, 'task.secret-approved', `You declined ${p.memberName}'s request for ${p.name}.`, p.taskId, 'user'); }
-      deps.changed(projectId, p.taskId ?? '', true); return gov().getProposal(p.id)!;
+      deps.changed(projectId, p.taskId ?? '', true); return enrich(gov().getProposal(p.id)!);
     },
     'project.secrets.audit': (input: Record<string, unknown>) => { const projectId = project(input), limit = input.limit === undefined ? 100 : Math.max(1, Math.min(500, Number(input.limit) || 100)); return { events: gov().secretEvents(projectId, typeof input.name === 'string' ? validName(input.name) : undefined, limit) }; },
   } satisfies Record<string, DomainHandler>);

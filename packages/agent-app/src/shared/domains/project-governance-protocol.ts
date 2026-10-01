@@ -180,7 +180,8 @@ export interface ProjectSecret {
 export type SecretEventKind = 'create' | 'rotate' | 'rollback' | 'remove' | 'grant' | 'revoke' | 'lend' | 'propose' | 'approve' | 'deny' | 'expire';
 export interface SecretEvent { id: string; name: string; kind: SecretEventKind; actor: string; detail: string; chatId: string | null; at: string }
 export type ProposalState = 'pending' | 'approved' | 'denied' | 'expired';
-export interface SecretProposal { id: string; projectId: string; memberId: string; memberName: string; taskId: string | null; name: string; purpose: string; state: ProposalState; createdAt: string; decidedAt: string | null; expiresAt: string }
+/** `existing`: set when a secret of that name is already in the vault, so approving must either grant it or explicitly replace its value for everyone who holds it. */
+export interface SecretProposal { existing?: { version: number; heldBy: string[] } | null; id: string; projectId: string; memberId: string; memberName: string; taskId: string | null; name: string; purpose: string; state: ProposalState; createdAt: string; decidedAt: string | null; expiresAt: string }
 
 // ── Aggregate read for the project's UI ──────────────────────────────────────
 export interface GovernanceState {
@@ -241,7 +242,8 @@ export interface ProjectGovernanceCommands {
   'project.secrets.rollback': { input: { projectId: string; name: string; version: number }; output: ProjectSecret };
   'project.secrets.remove': { input: { projectId: string; name: string }; output: { removed: true } };
   'project.secrets.grant': { input: { projectId: string; name: string; memberId: string; granted: boolean }; output: ProjectSecret };
-  'project.secrets.decide': { input: { projectId: string; id: string; approve: boolean; value?: string }; output: SecretProposal };
+  /** Approve with a value (a new secret), approve without one (grant a secret that already exists), or approve with a value and `replace: true` (rotate an existing secret for everyone who holds it). */
+  'project.secrets.decide': { input: { projectId: string; id: string; approve: boolean; value?: string; replace?: boolean }; output: SecretProposal };
   'project.secrets.audit': { input: { projectId: string; name?: string; limit?: number }; output: { events: SecretEvent[] } };
 }
 export const PROJECT_GOVERNANCE_COMMANDS = {

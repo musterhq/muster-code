@@ -127,6 +127,19 @@ await setValue(document.querySelector('input[aria-label="Type the task key to co
 click(button(/^Cancel subtree$/));await delay(20);
 assert.equal(last('project.holds.create')!.input.confirm,'OSS-1');assert.equal(last('project.holds.create')!.input.mode,'cancel');
 click(button(/Pause subtree/));await delay(20);assert.equal(last('project.holds.create')!.input.mode,'pause');
+// A request for a name that exists: grant it, or replace it only after confirming.
+proposals=[{id:'sp2',projectId:'p',memberId:'m1',memberName:'CTO',taskId:'t2',name:'NPM_TOKEN',purpose:'publish',state:'pending',createdAt:new Date().toISOString(),decidedAt:null,expiresAt:new Date(Date.now()+86400_000).toISOString(),existing:{version:2,heldBy:['QA']}}];
+root.render(<SecretsSection projectId="p" snapshot={snapshot}/>);await delay(60);
+assert.match(text(),/already exists \(version 2\), held by QA/);
+click(button(/^Grant the existing secret$/));await delay(30);
+assert.deepEqual(last('project.secrets.decide')!.input,{projectId:'p',id:'sp2',approve:true});
+proposals=[{...proposals[0],state:'pending'}];root.render(<div><SecretsSection projectId="p" snapshot={snapshot}/></div>);await delay(60);
+click(button(/^Replace the value…$/));await delay(10);
+await setValue(document.querySelector('input[aria-label="Value for NPM_TOKEN"]'),'tok_live_replacement_9999');
+assert.ok((button(/^Replace and grant$/) as any).disabled,'replace needs the confirmation box');
+{const box:any=[...document.querySelectorAll('input[type=checkbox]')].find(b=>/Replace it for everyone/.test(b.parentElement?.textContent??''));box.checked=true;click(box);await delay(10);}
+click(button(/^Replace and grant$/));await delay(30);
+assert.deepEqual(last('project.secrets.decide')!.input,{projectId:'p',id:'sp2',approve:true,value:'tok_live_replacement_9999',replace:true});
 assert.deepEqual(errors,[]);
 console.log('governance components ok');
 process.exit(0);

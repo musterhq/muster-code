@@ -12,6 +12,7 @@ import { invoke } from '../bridge';
 import { agoLabel, exactTime } from '../relativeTime';
 import { closeSettings, notifyError, notifySuccess, selectChat } from '../store';
 import { StateChip } from './HubParts';
+import { SecretDecision } from './SecretDecision';
 import { PolicyEditor } from './ProjectGovernance';
 import { Tip } from './Tooltip';
 import './governance.css';
@@ -46,24 +47,12 @@ export function StageCard({ stage, taskId, projectId, onChanged }: { stage: Task
   </div>;
 }
 
-/** An agent's request for a secret, answered in the thread: you type the value, the agent never sees it. */
+/** An agent's request for a secret, answered in the thread: you type the value (or grant the one that exists), the agent never sees it. */
 export function SecretRequestCard({ proposal: p, secureStorage, projectId, onChanged }: { proposal: SecretProposal; secureStorage: boolean; projectId: string; onChanged: () => void }): React.ReactElement {
-  const [value, setValue] = useState('');
-  const [busy, setBusy] = useState(false);
-  const decide = async (approve: boolean) => {
-    setBusy(true);
-    try { await invoke('project.secrets.decide', { projectId, id: p.id, approve, ...(approve ? { value } : {}) }); setValue(''); notifySuccess(approve ? `${p.name} approved for ${p.memberName}.` : 'Declined.'); onChanged(); }
-    catch (cause) { notifyError(cause); } finally { setBusy(false); }
-  };
   return <div className="gov-card" role="group" aria-label={`${p.memberName} asks for ${p.name}`} data-kind="secret" data-status={p.state}>
     <div className="gov-card-head"><StateChip tone={p.state === 'pending' ? 'warn' : p.state === 'approved' ? 'ok' : 'faint'}>{p.state === 'pending' ? 'Asks for a secret' : p.state === 'approved' ? 'Secret approved' : p.state === 'denied' ? 'Declined' : 'Expired'}</StateChip><strong>{p.memberName} · <code>{p.name}</code></strong></div>
     <p>{p.purpose}</p>
-    {p.state === 'pending' && <>
-      {!secureStorage && <p role="alert" className="gov-result" data-status="refused">This computer has no secure keychain, so Muster cannot store the value.</p>}
-      <p className="ws-faint">You type the value; {p.memberName} never sees it in chat. It is lent to their runs as an environment variable.</p>
-      <div className="gov-actions"><input className="ws-input" type="password" autoComplete="off" aria-label={`Value for ${p.name}`} placeholder="Paste the value" value={value} disabled={busy} onChange={e => setValue(e.target.value)}/>
-        <button type="button" className="settings-button secondary" disabled={busy} onClick={() => void decide(false)}>Decline</button>
-        <button type="button" className="settings-button" disabled={busy || !secureStorage || !value.trim()} onClick={() => void decide(true)}>Approve</button></div></>}
+    {p.state === 'pending' && <SecretDecision proposal={p} secureStorage={secureStorage} projectId={projectId} onChanged={onChanged}/>}
   </div>;
 }
 

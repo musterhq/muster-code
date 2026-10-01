@@ -16,6 +16,7 @@ import { refreshWorkspace } from '../hubStore';
 import { agoLabel, exactTime } from '../relativeTime';
 import { notifyError, notifySuccess } from '../store';
 import { StateChip } from './HubParts';
+import { SecretDecision } from './SecretDecision';
 import { ResourceState } from './ResourceState';
 import './governance.css';
 
@@ -149,10 +150,7 @@ export function SecretsSection({ projectId, snapshot }: { projectId: string; sna
     {!data.secureStorage && <p role="alert" className="gov-result" data-status="refused">This computer has no secure keychain available, so secrets cannot be stored. On Linux, install and unlock a keyring (gnome-keyring, KWallet or KeePassXC).</p>}
     {pending.length > 0 && <section className="ws-section" aria-label="Requests from agents"><h2 className="ws-group-title">Requests from agents<span>{pending.length}</span></h2>
       {pending.map(p => <div key={p.id} className="gov-card" role="group" aria-label={`${p.memberName} asks for ${p.name}`}><div className="gov-card-head"><StateChip tone="warn">Asks for a secret</StateChip><strong>{p.memberName} · <code>{p.name}</code></strong></div>
-        <p>{p.purpose}</p><p className="ws-faint">You enter the value yourself. {p.memberName} never sees it in chat; it is lent to their runs.</p>
-        <div className="gov-actions"><input className="ws-input" type="password" autoComplete="off" aria-label={`Value for ${p.name}`} placeholder="Paste the value" value={answer[p.id] ?? ''} onChange={e => setAnswer({ ...answer, [p.id]: e.target.value })}/>
-          <button type="button" className="settings-button secondary" disabled={busy} onClick={() => void run(() => invoke('project.secrets.decide', { projectId, id: p.id, approve: false }), 'Declined.')}>Decline</button>
-          <button type="button" className="settings-button" disabled={busy || !data.secureStorage || !(answer[p.id] ?? '').trim()} onClick={() => void run(async () => { await invoke('project.secrets.decide', { projectId, id: p.id, approve: true, value: answer[p.id]! }); setAnswer({ ...answer, [p.id]: '' }); }, `${p.name} approved for ${p.memberName}.`)}>Approve</button></div></div>)}</section>}
+        <p>{p.purpose}</p><SecretDecision proposal={p} secureStorage={data.secureStorage} projectId={projectId} onChanged={reload}/></div>)}</section>}
     <section className="ws-section" aria-label="Project secrets"><h2 className="ws-group-title">Secrets<span>{data.secrets.length}</span></h2>
       {data.secrets.length === 0 ? <p className="ws-board-empty">No secrets yet.</p> : <ul className="ws-rows gov-list">{data.secrets.map(s => <li key={s.name} className="gov-item" style={{ flexWrap: 'wrap' }}>
         <code className="gov-item-title">{s.name}</code><StateChip tone={s.expiresAt && Date.parse(s.expiresAt) <= Date.now() ? 'danger' : 'faint'}>{s.expiresAt && Date.parse(s.expiresAt) <= Date.now() ? 'Expired' : `v${s.version}`}</StateChip>
