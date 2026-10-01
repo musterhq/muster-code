@@ -195,3 +195,8 @@ test('Review S1: dismissing a reflection proposal is owner-only, like running, a
   denied(() => authorizeResource(editor, 'insight.reflect.dismiss', 'write', { projectId: 'p-shared', id: 'r' }, snapshot), 'forbidden');
   authorizeResource(owner, 'insight.reflect.dismiss', 'write', { projectId: 'p-shared', id: 'r' }, snapshot);
 });
+
+test('Review S2: the Wave 3 commands that start an agent turn record the caller as its actor', async () => {
+  const { TURN_COMMANDS } = await import('../src/rpc.ts');
+  for (const c of ['insight.reflect.run', 'insight.setup.interview', 'studio.skill.test', 'project.coordinator.start']) assert.ok(TURN_COMMANDS.has(c), c);
+});
