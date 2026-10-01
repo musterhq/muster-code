@@ -8,6 +8,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Check, CornerDownRight, Inbox as InboxIcon, Mail, RefreshCw, Send } from 'lucide-react';
 import type { MailboxAddress, MailboxList, MailboxMessage } from '../../shared/domains/mailbox-protocol';
 import { MAILBOX_MAX_BODY } from '../../shared/domains/mailbox-protocol';
+import { NAMES } from '../../shared/workspace-names';
 import { invoke, subscribe } from '../bridge';
 import { useStore } from '../useStore';
 import { notifyError } from '../store';
@@ -133,9 +134,10 @@ export function MailboxInbox({ chatId, projectId, title }: { chatId?: string; pr
   const scope: Scope = chatId ? { chatId } : { projectId: projectId! };
   const { list, error, reload } = useMailbox(scope);
   const messages = list?.messages ?? [];
-  return <section className="mailbox-inbox" aria-label={chatId ? 'Chat inbox' : 'Project inbox'}>
+  // A project's mailbox is Mail (#186), so it never reads as the app-wide Inbox.
+  return <section className="mailbox-inbox" aria-label={chatId ? 'Chat inbox' : `Project ${NAMES.mail.toLowerCase()}`}>
     <header className="mailbox-header">
-      <div><h2><InboxIcon size={14} aria-hidden="true" />Inbox</h2><p>{title ?? (chatId ? 'Mail for this chat rides into its next turn.' : 'Mail between this project’s agents and you.')}</p></div>
+      <div><h2><InboxIcon size={14} aria-hidden="true" />{chatId ? 'Inbox' : NAMES.mail}</h2><p>{title ?? (chatId ? 'Mail for this chat rides into its next turn.' : 'Mail between this project’s agents and you.')}</p></div>
       {list && <span className="mailbox-counts" aria-label={`${list.unacked} unacknowledged, ${list.pending} queued`}>{list.unacked} unacknowledged · {list.pending} queued</span>}
       <Tip label="Refresh"><button type="button" className="mailbox-icon" onClick={reload} aria-label="Refresh inbox"><RefreshCw size={13} /></button></Tip>
     </header>

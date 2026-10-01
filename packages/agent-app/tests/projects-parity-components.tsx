@@ -216,6 +216,7 @@ assert.ok(calls.some(c=>c.command==='project.team.settings.set'&&c.input.require
 assert.ok(text('.pp-danger h3').includes('Danger zone'));
 await click(button(/^Mail$/),100);
 assert.ok(calls.some(c=>c.command==='mailbox.list'&&c.input.projectId==='p1'),'Mail is the project mailbox (renamed from Inbox)');
+assert.equal(text('.mailbox-header h2')[0],'Mail','its heading says Mail too (S68)');
 
 // --- Budget: observed spend is "Unpriced", never $0; a token budget works without prices (S64) --------------------------------
 teamSettings={...teamSettings,monthlyBudgetTokens:5000} as any;

@@ -89,7 +89,7 @@ assert.ok(calls.filter(call => call.command === 'mailbox.list').length > lists);
 // The Project inbox lists project mail and offers a recipient picker.
 root.render(<MailboxInbox projectId="p" />);
 await delay(60);
-assert.equal(document.querySelector('[aria-label="Project inbox"]') !== null, true);
+assert.equal(document.querySelector('[aria-label="Project mail"]') !== null, true);
 assert.deepEqual(calls.filter(call => call.command === 'mailbox.list').at(-1)!.input, {projectId:'p', includeExpired:true});
 assert.ok(document.querySelector('[aria-label="Recipient"]'));
 assert.deepEqual(errors, []);
