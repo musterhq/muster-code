@@ -34,7 +34,7 @@ export class ProjectVault {
     if (o.expiresAt != null && !Number.isFinite(Date.parse(o.expiresAt))) throw new Error('Enter a valid expiry date, or leave it empty.');
     const cur = this.store.secretMeta(projectId, name);
     if (!cur && this.store.secretsMeta(projectId).length >= MAX_SECRETS) throw new Error(`A project holds up to ${MAX_SECRETS} secrets.`);
-    const version = (cur?.version ?? 0) + 1, at = new Date().toISOString();
+    const version = Math.max(0, ...(cur?.versions ?? []).map(v => v.version)) + 1, at = new Date().toISOString();
     this.secrets().set(this.id(projectId, name, version), value);
     const versions = [...(cur?.versions ?? []), { version, createdAt: at, by: o.actor }];
     for (const old of versions.splice(0, Math.max(0, versions.length - KEEP_VERSIONS))) this.secrets().clear(this.id(projectId, name, old.version));
