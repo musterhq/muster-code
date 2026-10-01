@@ -8,7 +8,7 @@
 import { EventEmitter } from 'node:events';
 import { randomBytes } from 'node:crypto';
 import type { AuditLog } from '../audit.ts';
-import { ORG_ROLES, type ApiTokenRecord, type InviteRecord, type OrgRole, type ServerStore, type SessionRecord, type UserRecord } from '../store/types.ts';
+import { ORG_ROLES, PROJECT_ROLES, type ApiTokenRecord, type InviteRecord, type OrgRole, type ServerStore, type SessionRecord, type UserRecord } from '../store/types.ts';
 import { dummyHash, hashPassword, validatePassword, verifyPassword } from './passwords.ts';
 import { LoginRateLimiter } from './rate-limit.ts';
 import { hashSecret, newId, newSecret, parseDuration, safeEqual } from './tokens.ts';
@@ -58,17 +58,25 @@ export class Accounts extends EventEmitter {
     return user;
   }
 
-  async createInvite(actor: UserRecord, input: { role?: string; expires?: string; note?: string }): Promise<{ invite: InviteRecord; token: string }> {
+  async createInvite(actor: UserRecord, input: { role?: string; expires?: string; note?: string; projectId?: string; projectRole?: string; /** The caller owns that project: they may invite people to it without being an admin. */ asProjectOwner?: boolean }): Promise<{ invite: InviteRecord; token: string }> {
+    const forProject = typeof input.projectId === 'string' && input.projectId.length > 0;
     const role = input.role ?? 'member';
     if (!isRole(role)) throw new AuthError(`Unknown role "${role}". Use owner, admin, member or viewer.`, 400);
+    const projectRole = forProject ? (input.projectRole ?? 'editor') : null;
+    if (forProject && !(PROJECT_ROLES as readonly string[]).includes(projectRole!)) throw new AuthError('Project role must be owner, editor or viewer.', 400);
+    if (RANK[actor.role] < RANK.admin) {
+      // A project owner may invite people to their own project, as a member or a viewer, never as an admin or owner of the server.
+      if (!(forProject && input.asProjectOwner)) throw new AuthError('Only owners and admins can invite people.', 403);
+      if (role !== 'member' && role !== 'viewer') throw new AuthError('A project owner can invite members and viewers.', 403);
+      if (role === 'viewer' && projectRole !== 'viewer') throw new AuthError('A viewer can only be given the viewer role in the project.', 400);
+    }
     if (role === 'owner' && actor.role !== 'owner') throw new AuthError('Only an owner can invite another owner.', 403);
-    if (RANK[actor.role] < RANK.admin) throw new AuthError('Only owners and admins can invite people.', 403);
     const ttl = parseDuration(input.expires, 7 * 86_400_000);
     const token = newSecret('mi');
     const invite: InviteRecord = { id: newId(), tokenHash: hashSecret(token), role, createdBy: actor.id, createdAt: this.iso(), expiresAt: this.iso(ttl),
-      usedAt: null, usedBy: null, revokedAt: null, note: input.note?.slice(0, 200) ?? null };
+      usedAt: null, usedBy: null, revokedAt: null, note: input.note?.slice(0, 200) ?? null, projectId: forProject ? input.projectId! : null, projectRole: projectRole as InviteRecord['projectRole'] };
     await this.store.createInvite(invite);
-    await this.audit.append({ actor: `user:${actor.id}`, action: 'auth.invite.created', target: `invite:${invite.id}`, detail: { role, expiresAt: invite.expiresAt } });
+    await this.audit.append({ actor: `user:${actor.id}`, action: 'auth.invite.created', target: `invite:${invite.id}`, detail: { role, expiresAt: invite.expiresAt, ...(forProject ? { projectId: input.projectId, projectRole } : {}) } });
     return { invite, token };
   }
 
@@ -94,8 +102,9 @@ export class Accounts extends EventEmitter {
     return user;
   }
 
-  async revokeInvite(actor: UserRecord, id: string): Promise<void> {
-    if (RANK[actor.role] < RANK.admin) throw new AuthError('Only owners and admins can revoke invites.', 403);
+  async revokeInvite(actor: UserRecord, id: string, projectOwnerOf: ReadonlySet<string> = new Set()): Promise<void> {
+    const inv = (await this.store.listInvites()).find(i => i.id === id);
+    if (RANK[actor.role] < RANK.admin && !(inv?.projectId && projectOwnerOf.has(inv.projectId))) throw new AuthError('Only owners and admins can revoke invites.', 403);
     if (!(await this.store.revokeInvite(id, this.iso()))) throw new AuthError('No pending invite with that id.', 404);
     await this.audit.append({ actor: `user:${actor.id}`, action: 'auth.invite.revoked', target: `invite:${id}` });
   }

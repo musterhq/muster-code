@@ -7,7 +7,7 @@
  * widens what an agent may do: a refusal is returned to the agent as the tool's error and written to the task's activity.
  */
 import type { ChatPermissionMode } from '../../shared/protocol.ts';
-import type { ApprovalItem, Interaction, InteractionQuestion } from '../../shared/domains/agent-tools-protocol.ts';
+import { REMOTE_PROVIDER, type ApprovalItem, type Interaction, type InteractionQuestion, type RemoteTask, type RemoteTaskDetail } from '../../shared/domains/agent-tools-protocol.ts';
 import type { AgentGovernance, RunReason, SecretProposal } from '../../shared/domains/project-governance-protocol.ts';
 import { DEFAULT_AGENT_ID, LOCAL_OWNER_ID, type ProjectMember } from '../../shared/domains/project-team-protocol.ts';
 import type { TaskOwner, TaskPriority, TaskState } from '../../shared/domains/projects-protocol.ts';
@@ -299,6 +299,20 @@ export function createTaskTools(d: TaskToolDeps) {
     void d.wake({ projectId, memberId, taskId, reason: 'decision', note: redactSecrets(note).slice(0, 1500), force: true }).catch(() => undefined);
   };
 
+  const remoteTask = (t: ProjectTask): RemoteTask => ({ id: t.id, key: d.keyOf(t), title: t.title, state: t.state, acceptance: t.acceptance, priority: t.priority, parentKey: t.parentId ? (d.tasks().getTask(t.parentId) ? d.keyOf(d.tasks().getTask(t.parentId)!) : null) : null, updatedAt: t.updatedAt });
+  /** The agent a remote call speaks for: an active agent of this project whose runner is the remote one. */
+  function remoteAgent(i: Record<string, unknown>): { projectId: string; m: ProjectMember } {
+    const projectId = String(i.projectId ?? ''), memberId = String(i.memberId ?? '');
+    if (!ID.test(projectId) || !d.exists(projectId)) throw new Error('Project not found.');
+    const m = d.team().get(projectId, memberId);
+    if (!m || m.kind !== 'agent' || m.revokedAt || m.pendingAt || m.runner?.providerId !== REMOTE_PROVIDER) throw new Error('That is not an active remote agent of this project.');
+    return { projectId, m };
+  }
+  function remoteOwned(projectId: string, m: ProjectMember, ref: unknown): ProjectTask {
+    const t = d.tasks().getTask(String(ref ?? '')); if (!t || t.projectId !== projectId) throw new Error('No such task.');
+    if (t.owner.kind !== 'agent' || t.owner.id !== m.id) throw new Error('That task is not assigned to this agent.');
+    return t;
+  }
   const handlers = {
     'project.interactions.list': (i: Record<string, unknown>) => {
       const projectId = String(i.projectId ?? ''); if (!ID.test(projectId) || !d.exists(projectId)) throw new Error('Project not found.');
@@ -369,6 +383,32 @@ export function createTaskTools(d: TaskToolDeps) {
       wakeAsker(projectId, d.store().requesterId(a.id), a.taskId, `Your proposal “${a.title}” needs changes: ${note}. Propose it again with the changes (same name for a hire).`);
       d.changed(projectId, a.taskId ?? '', true);
       return d.store().getApproval(a.id)!;
+    },
+    // ── remote agents (G28): the server's agent API acts as one Roster agent, and only on tasks that agent owns ──
+    'project.remote.tasks': (i: Record<string, unknown>) => { const { projectId, m } = remoteAgent(i); return { tasks: d.tasks().listTasks(projectId).items.filter(t => t.owner.kind === 'agent' && t.owner.id === m.id && t.state !== 'verified' && t.state !== 'cancelled').map(remoteTask) }; },
+    'project.remote.task': (i: Record<string, unknown>) => {
+      const { projectId, m } = remoteAgent(i), t = remoteOwned(projectId, m, i.id), all = d.tasks().listTasks(projectId).items;
+      const docs = d.invoke('work.docs.list', { projectId, taskId: t.id }).then(x => (x as { docs: { key: string; rev: number }[] }).docs.map(y => ({ key: y.key, rev: y.rev })));
+      return docs.then((documents): RemoteTaskDetail => ({ ...remoteTask(t), documents,
+        comments: d.tasks().listActivity(projectId, 100).items.filter(a => a.refId === t.id && /^task\.(agent-comment|answered|status|delegated)/.test(a.kind)).slice(0, 12).reverse().map(a => ({ at: a.createdAt, by: a.actor, text: a.summary.slice(0, 600) })),
+        subtasks: all.filter(x => x.parentId === t.id).slice(0, 30).map(x => ({ key: d.keyOf(x), title: x.title, state: x.state })) }));
+    },
+    'project.remote.comment': (i: Record<string, unknown>) => {
+      const { projectId, m } = remoteAgent(i), t = remoteOwned(projectId, m, i.id), body = text(i.body, 8000); if (!body) throw new Error('Write the comment (up to 8,000 characters).');
+      comment(projectId, t, m.name, body); return { ok: true as const };
+    },
+    'project.remote.state': (i: Record<string, unknown>) => {
+      const { projectId, m } = remoteAgent(i), t = remoteOwned(projectId, m, i.id), state = String(i.state) as TaskState, note = text(i.comment, 8000);
+      if (!['implemented', 'blocked', 'review'].includes(state)) throw new Error('Choose implemented, blocked or review.');
+      if (state === 'blocked' && !note) throw new Error('Say why the task is blocked.');
+      if (t.state === 'verified' || t.state === 'cancelled') throw new Error(`${d.keyOf(t)} is ${t.state === 'verified' ? 'done' : 'cancelled'}.`);
+      if (note) comment(projectId, t, m.name, note);
+      const next = d.tasks().setState({ projectId, id: t.id, revision: t.revision, state, ...(note ? { reason: note } : {}) }, 'agent'); d.changed(projectId, t.id, true); return remoteTask(next);
+    },
+    'project.remote.doc': async (i: Record<string, unknown>) => {
+      const { projectId, m } = remoteAgent(i), t = remoteOwned(projectId, m, i.id), key = text(i.key, 80), body = typeof i.text === 'string' ? i.text : null;
+      if (!key || !/^[a-z0-9][a-z0-9_-]{0,63}$/i.test(key) || body === null || body.length > 200_000) throw new Error('Give a document key and its text.');
+      const out = await d.invoke('work.docs.save', { projectId, taskId: t.id, key: key.toLowerCase(), text: body, note: text(i.note, 200) ?? '', by: m.name }) as { rev?: number }; d.changed(projectId, t.id); return { rev: out.rev ?? 1 };
     },
     'project.protocol.get': () => ({ name: TASK_PROTOCOL_NAME, text: TASK_PROTOCOL, tools: TASK_TOOL_SPECS.map(t => ({ name: t.name, description: t.description })) }),
   };

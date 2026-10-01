@@ -9,11 +9,12 @@ import type { AgentEvent, Snapshot } from '../../agent-app/src/shared/protocol.t
 import { filterEvent, type AccessView } from './access.ts';
 import { Accounts, AuthError, publicUser, type Principal } from './auth/accounts.ts';
 import { AuditLog } from './audit.ts';
+import { RemoteAgents } from './agents/remote.ts';
 import { hostAllowed, isLoopback, paths, validateBind, type Paths, type ServerConfig } from './config.ts';
 import { ConnectorRegistry, type TurnRunner } from './connectors/registry.ts';
 import { acceptUpgrade, type WsConnection } from './net/ws.ts';
 import { PolicyError } from './policy.ts';
-import { dispatch, viewFor, type RpcContext } from './rpc.ts';
+import { dispatch, grant, viewFor, type RpcContext } from './rpc.ts';
 import { RuntimeHost, resolveRuntimeDir } from './runtime-host.ts';
 import { createSecretBox, loadSecretKey, ServerSecrets, type SecretBox } from './secret-box.ts';
 import { openServerStore } from './store/sqlite.ts';
@@ -53,6 +54,7 @@ export class MusterServer {
   secrets!: ServerSecrets;
   audit!: AuditLog;
   accounts!: Accounts;
+  agents!: RemoteAgents;
   runtime: RuntimeHost | null = null;
   registry!: ConnectorRegistry;
   private http?: http.Server | https.Server;
@@ -79,6 +81,7 @@ export class MusterServer {
     this.secrets = new ServerSecrets(this.store, this.box);
     this.audit = new AuditLog(this.store);
     this.accounts = new Accounts(this.store, this.audit);
+    this.agents = new RemoteAgents(this.store, this.audit, () => this.runtime);
     this.runtimeDir = this.paths.runtime;
     this.registry = new ConnectorRegistry({ store: this.store, secrets: this.secrets, audit: this.audit, runner: null, publicUrl: () => this.publicUrl(), log: this.log });
   }
@@ -100,7 +103,7 @@ export class MusterServer {
       this.runtime = new RuntimeHost({ dataDir: this.paths.runtime, runtimeDir: runtimeBundle, box: this.box, provider: this.options.provider });
       this.runtime.start();
       await this.runtime.snapshot(true);
-      this.runtime.subscribe(event => this.fanOut(event));
+      this.runtime.subscribe(event => { this.agents.notify(event as { type: string; projectId?: unknown }); this.fanOut(event); });
       this.registry = new ConnectorRegistry({ store: this.store, secrets: this.secrets, audit: this.audit, runner: this.turnRunner(), publicUrl: () => this.publicUrl(), log: this.log });
     }
     this.accounts.on('user-revoked', (userId: string) => this.closeClients(c => c.principal.user.id === userId, 'Your access to this Muster Server was revoked.'));
@@ -137,6 +140,7 @@ export class MusterServer {
 
   async stop(): Promise<void> {
     if (this.statusTimer) clearInterval(this.statusTimer);
+    this.agents?.closeAll();
     for (const c of this.clients) c.conn.close(1001, 'server stopping');
     this.clients.clear();
     await this.registry?.stopAll().catch(() => undefined);
@@ -277,7 +281,7 @@ export class MusterServer {
   // ---------------------------------------------------------------- HTTP
   private rpcContext(): RpcContext {
     return {
-      store: this.store, accounts: this.accounts, audit: this.audit, runtime: this.runtime, registry: this.registry, runtimeDir: this.paths.runtime,
+      store: this.store, accounts: this.accounts, audit: this.audit, runtime: this.runtime, registry: this.registry, agents: this.agents, runtimeDir: this.paths.runtime,
       version: VERSION, startedAt: this.startedAt, inviteUrl: token => `${(this.publicUrl() ?? this.url).replace(/\/+$/, '')}/invite/${token}`,
       bumpAccess: () => { this.accessVersion++; }, status: () => this.statusSnapshot(),
     };
@@ -367,17 +371,30 @@ export class MusterServer {
     }
     const inviteApi = /^\/api\/invites\/([A-Za-z0-9_-]{10,200})(\/accept)?$/.exec(path);
     if (inviteApi) {
-      if (!inviteApi[2] && req.method === 'GET') { const inv = await this.accounts.inspectInvite(inviteApi[1]!); return this.json(res, 200, { ok: true, role: inv.role, expiresAt: inv.expiresAt }); }
+      if (!inviteApi[2] && req.method === 'GET') { const inv = await this.accounts.inspectInvite(inviteApi[1]!); const project = inv.projectId && this.runtime?.running ? (await this.runtime.snapshot()).projects.find(p => p.id === inv.projectId)?.name ?? null : null; return this.json(res, 200, { ok: true, role: inv.role, expiresAt: inv.expiresAt, project, projectRole: inv.projectRole }); }
       if (inviteApi[2] && req.method === 'POST') {
         if (!this.sameOrigin(req)) throw new PolicyError('Cross-site sign-up refused.', 403, 'origin');
         const b = await this.jsonBody(req, MAX_AUTH_BODY);
+        const invited = await this.accounts.inspectInvite(inviteApi[1]!);
         const user = await this.accounts.acceptInvite(inviteApi[1]!, { username: String(b.username ?? ''), password: String(b.password ?? ''), displayName: typeof b.displayName === 'string' ? b.displayName : undefined }, { ip: this.clientIp(req) });
+        // An invite for one project also gives the new person that project, with the role the inviter chose.
+        if (invited.projectId && invited.projectRole) { const by = (await this.store.userById(invited.createdBy)) ?? user; await grant(this.rpcContext(), by, user, invited.projectId, invited.projectRole); }
         const { sessionToken, session } = await this.accounts.issueSession(user, { ip: this.clientIp(req), userAgent: String(req.headers['user-agent'] ?? '') });
         await this.audit.append({ actor: `user:${user.id}`, action: 'auth.login.succeeded', target: `user:${user.id}`, detail: { via: 'invite' } });
         this.setSession(req, res, sessionToken);
         return this.json(res, 200, { ok: true, user: publicUser(user), csrf: session.csrf });
       }
     }
+    const agentInvite = /^\/api\/agent-invites\/([A-Za-z0-9_-]{10,200})(\/claim)?$/.exec(path);
+    if (agentInvite) {
+      if (!agentInvite[2] && req.method === 'GET') { const inv = await this.agents.inspect(agentInvite[1]!); const project = this.runtime?.running ? (await this.runtime.snapshot()).projects.find(p => p.id === inv.projectId)?.name ?? null : null; return this.json(res, 200, { ok: true, agent: inv.agentName, project, expiresAt: inv.expiresAt }); }
+      if (agentInvite[2] && req.method === 'POST') {
+        const claimed = await this.agents.claim(agentInvite[1]!, { ip: this.clientIp(req) });
+        this.accessVersion++;
+        return this.json(res, 200, { ok: true, credential: claimed.credential, projectId: claimed.projectId, memberId: claimed.memberId, agent: claimed.agentName, server: (this.publicUrl() ?? this.url).replace(/\/+$/, ''), expiresAt: claimed.record.expiresAt });
+      }
+    }
+    if (path.startsWith('/agent/v1/')) return this.agentApi(req, res, path, url);
     if (path === '/login' || /^\/invite\/[A-Za-z0-9_-]{10,200}$/.test(path)) return this.serveFile(res, join(this.webDir, 'login.html'), "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; base-uri 'none'; form-action 'self'; frame-ancestors 'none'");
     if (path === '/auth.css' || path === '/auth.js') return this.serveFile(res, join(this.webDir, path.slice(1)));
     if (path === '/muster-web-shim.js') return this.serveFile(res, join(this.webDir, 'shim.js'));
@@ -413,6 +430,35 @@ export class MusterServer {
       return this.json(res, 404, { ok: false, error: 'Not found.', code: 'not-found' });
     }
     return this.serveFile(res, file);
+  }
+  /**
+   * The remote-agent API (G28). Bearer credential only (cookies are never read here), scoped to one project and one agent. Every call is
+   * made on the agent's behalf with its own member id, so it can read and report on the tasks assigned to it and nothing else.
+   */
+  private async agentApi(req: http.IncomingMessage, res: http.ServerResponse, path: string, url: URL): Promise<void> {
+    const auth = req.headers.authorization;
+    const principal = typeof auth === 'string' && /^Bearer\s+/i.test(auth) ? await this.agents.authenticate(auth.replace(/^Bearer\s+/i, '').trim(), this.clientIp(req)) : null;
+    if (!principal) return this.json(res, 401, { ok: false, error: 'Not signed in as an agent.', code: 'auth' });
+    if (!this.runtime?.running) return this.json(res, 503, { ok: false, error: 'The agent runtime is not running on this server.', code: 'runtime-down' });
+    const c = principal.credential, base = { projectId: c.projectId, memberId: c.memberId }, rt = this.runtime;
+    const ok = (value: unknown) => this.json(res, 200, { ok: true, ...(value as object) });
+    const wrap = async (fn: () => Promise<unknown>) => { try { return ok(await fn()); } catch (e) { if (e instanceof PolicyError || e instanceof AuthError) throw e; return this.json(res, 403, { ok: false, error: e instanceof Error ? e.message : String(e), code: 'agent' }); } };
+    const rest = path.slice('/agent/v1/'.length);
+    if (rest === 'me' && req.method === 'GET') return wrap(async () => ({ agent: { name: c.agentName, memberId: c.memberId, projectId: c.projectId, project: (await rt.snapshot()).projects.find(p => p.id === c.projectId)?.name ?? null, expiresAt: c.expiresAt } }));
+    if (rest === 'tasks' && req.method === 'GET') return wrap(() => rt.invoke('project.remote.tasks', base));
+    if (rest === 'wait' && req.method === 'GET') { const r = await this.agents.wait(c, Number(url.searchParams.get('timeout') ?? 25) * 1000); return ok({ changed: r === 'changed' }); }
+    const m = /^tasks\/([A-Za-z0-9_-]{1,128})(?:\/(comment|state|doc))?$/.exec(rest);
+    if (m) {
+      const taskId = m[1]!, action = m[2];
+      if (!action && req.method === 'GET') return wrap(() => rt.invoke('project.remote.task', { ...base, id: taskId }));
+      if (action && req.method === 'POST') {
+        const b = await this.jsonBody(req, 1024 * 1024);
+        if (action === 'comment') return wrap(() => rt.invoke('project.remote.comment', { ...base, id: taskId, body: String(b.body ?? '') }));
+        if (action === 'state') return wrap(() => rt.invoke('project.remote.state', { ...base, id: taskId, state: String(b.state ?? '') as never, ...(typeof b.comment === 'string' ? { comment: b.comment } : {}) }));
+        return wrap(() => rt.invoke('project.remote.doc', { ...base, id: taskId, key: String(b.key ?? ''), text: String(b.text ?? ''), ...(typeof b.note === 'string' ? { note: b.note } : {}) }));
+      }
+    }
+    return this.json(res, 404, { ok: false, error: 'Not found.', code: 'not-found' });
   }
   private serveFile(res: http.ServerResponse, file: string, csp?: string) {
     const type = TYPES[extname(file)] ?? 'application/octet-stream';

@@ -20,11 +20,13 @@ import { PolicyError } from './policy.ts';
 import { dispatch, type RpcContext } from './rpc.ts';
 import { resolveRuntimeDir } from './runtime-host.ts';
 import { MusterServer, resolveRendererDir, resolveWebDir } from './server.ts';
+import { runAgentClient } from './cli-agent.ts';
+import { runWork, WORK_GROUPS } from './cli-work.ts';
 import type { UserRecord } from './store/types.ts';
 import { VERSION } from './version.ts';
 
-class UsageError extends Error {}
-interface Parsed { cmd: string[]; flags: Map<string, string[]>; bools: Set<string> }
+export class UsageError extends Error {}
+export interface Parsed { cmd: string[]; flags: Map<string, string[]>; bools: Set<string> }
 const BOOL_FLAGS = new Set(['version', 'json', 'detach', 'dry-run', 'trust-proxy', 'help', 'password-stdin', 'yes', 'disable']);
 
 export function parseArgs(argv: string[]): Parsed {
@@ -41,8 +43,8 @@ export function parseArgs(argv: string[]): Parsed {
   }
   return { cmd, flags, bools };
 }
-const flag = (p: Parsed, name: string) => p.flags.get(name)?.at(-1);
-const flagList = (p: Parsed, name: string) => (p.flags.get(name) ?? []).flatMap(v => v.split(',')).map(v => v.trim()).filter(Boolean);
+export const flag = (p: Parsed, name: string) => p.flags.get(name)?.at(-1);
+export const flagList = (p: Parsed, name: string) => (p.flags.get(name) ?? []).flatMap(v => v.split(',')).map(v => v.trim()).filter(Boolean);
 
 const HELP = `muster-server ${VERSION} — self-hosted Muster: the desktop app's agents, projects and Ledger, served to your team.
 
@@ -75,6 +77,21 @@ Connectors (several instances per type)
   connectors unroute <rule-id> | link <name> <external-user-id> <user>
   connectors import-gateway <path/to/.muster/gateway.json> [--dry-run]
 
+Work (the running server; your token's role and project grants apply, as in the app)
+  projects list | show <project>
+  tasks list|show|create|state|assign|start|comment   --project P  [--state S] [--assignee NAME] [--title T --acceptance A --assignee NAME --priority 0-3 --start]
+        tasks state <task> <state> [--reason R] | assign <task> <agent> | start <task> | comment <task> <text…>
+  roster list|add|pause|resume|remove  --project P   (add: --name N [--title T] [--reports-to NAME] [--runner provider/model] [--instructions-file F])
+  approvals list|approve|decline|comment|revise  --project P [<id> …]
+  ledger [--limit N] [--since 2026-09-01]
+  org teams | export --project P --out F.zip | import <F.zip>|--team KEY [--project P|--name NEW] [--collision skip|rename|replace] [--dry-run] | preview | pending | activate
+  backups list | run | restore <id> | settings [--enabled true|false] [--every HOURS] [--keep N]
+
+Remote agents (G28)
+  agents invite --project P --name NAME [--title T] [--expires 24h] | list | revoke <id>
+  agent join <server-url> --invite TOKEN [--out FILE]      (on the agent's machine; saves a 0600 credentials file)
+  agent me | tasks | task <task> | comment <task> <text…> | state <task> <implemented|blocked|review> [--comment C] | doc <task> <key> --file F | wait [--timeout 25]
+
 Reports
   cost report [--since 30d|2026-09-01] [--by user|project|model]
   audit verify | audit list [--limit N]
@@ -84,8 +101,9 @@ Docs: https://github.com/musterhq/muster-code/blob/main/docs/server.md`;
 
 // ------------------------------------------------------------------ output
 let JSON_MODE = false;
-const out = (human: string, data: unknown) => { process.stdout.write(JSON_MODE ? JSON.stringify(data, null, 2) + '\n' : human.endsWith('\n') ? human : human + '\n'); };
-function table(rows: Array<Record<string, unknown>>, columns: string[]): string {
+export const jsonMode = () => JSON_MODE;
+export const out = (human: string, data: unknown) => { process.stdout.write(JSON_MODE ? JSON.stringify(data, null, 2) + '\n' : human.endsWith('\n') ? human : human + '\n'); };
+export function table(rows: Array<Record<string, unknown>>, columns: string[]): string {
   if (!rows.length) return '(none)';
   const cell = (v: unknown) => v === null || v === undefined ? '-' : typeof v === 'object' ? JSON.stringify(v) : String(v);
   const widths = columns.map(c => Math.min(48, Math.max(c.length, ...rows.map(r => cell(r[c]).length))));
@@ -99,7 +117,7 @@ const since = (text: string | undefined): string | null => {
 };
 
 // ------------------------------------------------------------------ input helpers
-async function readStdin(): Promise<string> {
+export async function readStdin(): Promise<string> {
   if (process.stdin.isTTY) throw new UsageError('Expected the value on standard input.');
   const chunks: Buffer[] = [];
   for await (const c of process.stdin) chunks.push(c as Buffer);
@@ -141,7 +159,7 @@ function runningPid(dataDir: string): number | null {
 function statusFile(dataDir: string): Record<string, unknown> | null {
   try { return JSON.parse(readFileSync(join(dataDir, 'server.status.json'), 'utf8')); } catch { return null; }
 }
-function request(url: string, init: { method?: string; headers?: Record<string, string>; body?: string }): Promise<{ status: number; body: string }> {
+export function request(url: string, init: { method?: string; headers?: Record<string, string>; body?: string }): Promise<{ status: number; body: string }> {
   return new Promise((resolve, reject) => {
     const u = new URL(url);
     const lib = u.protocol === 'https:' ? https : http;
@@ -162,7 +180,7 @@ async function liveUrl(dataDir: string): Promise<string | null> {
 }
 
 // ------------------------------------------------------------------ command execution (online or offline)
-interface Exec { call(command: string, input?: Record<string, unknown>): Promise<unknown>; close(): Promise<void>; online: boolean; dataDir: string; actor: UserRecord | null }
+export interface Exec { call(command: string, input?: Record<string, unknown>): Promise<unknown>; close(): Promise<void>; online: boolean; dataDir: string; actor: UserRecord | null }
 async function executor(dataDir: string): Promise<Exec> {
   const p = paths(dataDir);
   if (!existsSync(p.config)) throw new Error(`No Muster Server at ${dataDir}. Run: muster-server init${dataDir !== resolveDataDir() ? ` --data-dir ${dataDir}` : ''}`);
@@ -183,7 +201,7 @@ async function executor(dataDir: string): Promise<Exec> {
   await server.open(false);
   const owner = (await server.store.listUsers()).find(u => u.role === 'owner' && u.status === 'active') ?? null;
   if (!owner) throw new Error('This server has no active owner. Run: muster-server init');
-  const ctx: RpcContext = { store: server.store, accounts: server.accounts, audit: server.audit, runtime: null, registry: server.registry, runtimeDir: p.runtime,
+  const ctx: RpcContext = { store: server.store, accounts: server.accounts, audit: server.audit, runtime: null, registry: server.registry, agents: server.agents, runtimeDir: p.runtime,
     version: VERSION, startedAt: Date.now(), inviteUrl: token => `${baseUrl(readConfig(p)!)}/invite/${token}`, bumpAccess: () => undefined,
     status: async () => ({ running: false }) };
   return { online: false, dataDir, actor: owner, close: () => server.store.close(), call: (command, input = {}) => dispatch(ctx, { user: owner, via: 'token' }, command, input) };
@@ -495,6 +513,8 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
     if (command === 'doctor') return await cmdDoctor(dataDir);
     if (command === 'backup') return await cmdBackup(p, dataDir);
     if (['invite', 'users', 'token', 'connectors', 'cost', 'audit'].includes(command)) return await cmdAdmin(p, dataDir);
+    if (command === 'agent') return await runAgentClient(p);
+    if (WORK_GROUPS.includes(command)) { const exec = await executor(dataDir); try { return await runWork(p, exec); } finally { await exec.close(); } }
     throw new UsageError(`Unknown command "${command}". Run muster-server --help.`);
   } catch (e) {
     const usage = e instanceof UsageError;

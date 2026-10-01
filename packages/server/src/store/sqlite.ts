@@ -2,7 +2,7 @@ import { chmodSync, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import type {
-  ApiTokenRecord, AuditRecord, ConnectorEventRecord, ConnectorHealthRecord, ConnectorRecord, ConnectorThreadRecord, IdentityLinkRecord,
+  AgentCredentialRecord, AgentInviteRecord, ApiTokenRecord, AuditRecord, ConnectorEventRecord, ConnectorHealthRecord, ConnectorRecord, ConnectorThreadRecord, IdentityLinkRecord,
   InviteRecord, ProjectAccessRecord, RoutingRuleRecord, ServerStore, SessionRecord, TurnActorRecord, UserRecord,
 } from './types.ts';
 
@@ -20,6 +20,10 @@ CREATE TABLE IF NOT EXISTS api_tokens (id TEXT PRIMARY KEY, user_id TEXT NOT NUL
   prefix TEXT NOT NULL, created_at TEXT NOT NULL, expires_at TEXT, last_used_at TEXT, revoked_at TEXT);
 CREATE TABLE IF NOT EXISTS invites (id TEXT PRIMARY KEY, token_hash TEXT NOT NULL UNIQUE, role TEXT NOT NULL, created_by TEXT NOT NULL, created_at TEXT NOT NULL,
   expires_at TEXT NOT NULL, used_at TEXT, used_by TEXT, revoked_at TEXT, note TEXT);
+CREATE TABLE IF NOT EXISTS agent_invites (id TEXT PRIMARY KEY, token_hash TEXT NOT NULL UNIQUE, project_id TEXT NOT NULL, agent_name TEXT NOT NULL, title TEXT, created_by TEXT NOT NULL,
+  created_at TEXT NOT NULL, expires_at TEXT NOT NULL, used_at TEXT, revoked_at TEXT, note TEXT);
+CREATE TABLE IF NOT EXISTS agent_credentials (id TEXT PRIMARY KEY, token_hash TEXT NOT NULL UNIQUE, prefix TEXT NOT NULL, project_id TEXT NOT NULL, member_id TEXT NOT NULL, agent_name TEXT NOT NULL,
+  invite_id TEXT NOT NULL, created_at TEXT NOT NULL, expires_at TEXT, last_used_at TEXT, last_ip TEXT, revoked_at TEXT);
 CREATE TABLE IF NOT EXISTS project_access (project_id TEXT NOT NULL, user_id TEXT NOT NULL REFERENCES users(id), role TEXT NOT NULL, member_id TEXT,
   granted_by TEXT NOT NULL, created_at TEXT NOT NULL, PRIMARY KEY (project_id, user_id));
 CREATE TABLE IF NOT EXISTS chat_owners (chat_id TEXT PRIMARY KEY, user_id TEXT NOT NULL, created_at TEXT NOT NULL);
@@ -55,7 +59,9 @@ const session = (r: Row): SessionRecord => ({ idHash: s(r.id_hash), userId: s(r.
 const token = (r: Row): ApiTokenRecord => ({ id: s(r.id), userId: s(r.user_id), name: s(r.name), tokenHash: s(r.token_hash), prefix: s(r.prefix), createdAt: s(r.created_at),
   expiresAt: n(r.expires_at), lastUsedAt: n(r.last_used_at), revokedAt: n(r.revoked_at) });
 const invite = (r: Row): InviteRecord => ({ id: s(r.id), tokenHash: s(r.token_hash), role: s(r.role) as InviteRecord['role'], createdBy: s(r.created_by), createdAt: s(r.created_at),
-  expiresAt: s(r.expires_at), usedAt: n(r.used_at), usedBy: n(r.used_by), revokedAt: n(r.revoked_at), note: n(r.note) });
+  expiresAt: s(r.expires_at), usedAt: n(r.used_at), usedBy: n(r.used_by), revokedAt: n(r.revoked_at), note: n(r.note), projectId: n(r.project_id), projectRole: n(r.project_role) as InviteRecord['projectRole'] });
+const agentInvite = (r: Row): AgentInviteRecord => ({ id: s(r.id), tokenHash: s(r.token_hash), projectId: s(r.project_id), agentName: s(r.agent_name), title: n(r.title), createdBy: s(r.created_by), createdAt: s(r.created_at), expiresAt: s(r.expires_at), usedAt: n(r.used_at), revokedAt: n(r.revoked_at), note: n(r.note) });
+const agentCred = (r: Row): AgentCredentialRecord => ({ id: s(r.id), tokenHash: s(r.token_hash), prefix: s(r.prefix), projectId: s(r.project_id), memberId: s(r.member_id), agentName: s(r.agent_name), inviteId: s(r.invite_id), createdAt: s(r.created_at), expiresAt: n(r.expires_at), lastUsedAt: n(r.last_used_at), lastIp: n(r.last_ip), revokedAt: n(r.revoked_at) });
 const access = (r: Row): ProjectAccessRecord => ({ projectId: s(r.project_id), userId: s(r.user_id), role: s(r.role) as ProjectAccessRecord['role'], memberId: n(r.member_id), grantedBy: s(r.granted_by), createdAt: s(r.created_at) });
 const audit = (r: Row): AuditRecord => ({ seq: Number(r.seq), at: s(r.at), actor: s(r.actor), action: s(r.action), target: n(r.target), detail: JSON.parse(s(r.detail)) as Record<string, unknown>, prevHash: s(r.prev_hash), hash: s(r.hash) });
 const connector = (r: Row): ConnectorRecord => ({ id: s(r.id), type: s(r.type), name: s(r.name), ownerUserId: s(r.owner_user_id), scope: s(r.scope) as ConnectorRecord['scope'],
@@ -77,6 +83,10 @@ export class SqliteServerStore implements ServerStore {
     this.db = new DatabaseSync(file);
     if (file !== ':memory:') try { chmodSync(file, 0o600); } catch { /* filesystems without modes */ }
     this.db.exec(SCHEMA);
+    // G29: invites that also grant a project (added in place to existing databases).
+    const cols = (this.db.prepare("SELECT name FROM pragma_table_info('invites')").all() as { name: string }[]).map(c => c.name);
+    if (!cols.includes('project_id')) this.db.exec('ALTER TABLE invites ADD COLUMN project_id TEXT');
+    if (!cols.includes('project_role')) this.db.exec('ALTER TABLE invites ADD COLUMN project_role TEXT');
   }
   private get(sql: string, ...args: unknown[]): Row | undefined { return this.db.prepare(sql).get(...(args as never[])) as Row | undefined; }
   private all(sql: string, ...args: unknown[]): Row[] { return this.db.prepare(sql).all(...(args as never[])) as Row[]; }
@@ -123,8 +133,8 @@ export class SqliteServerStore implements ServerStore {
   async listTokens(userId?: string) { return (userId ? this.all('SELECT * FROM api_tokens WHERE user_id=? ORDER BY created_at', userId) : this.all('SELECT * FROM api_tokens ORDER BY created_at')).map(token); }
 
   async createInvite(i: InviteRecord) {
-    this.run('INSERT INTO invites (id,token_hash,role,created_by,created_at,expires_at,used_at,used_by,revoked_at,note) VALUES (?,?,?,?,?,?,?,?,?,?)',
-      i.id, i.tokenHash, i.role, i.createdBy, i.createdAt, i.expiresAt, i.usedAt, i.usedBy, i.revokedAt, i.note);
+    this.run('INSERT INTO invites (id,token_hash,role,created_by,created_at,expires_at,used_at,used_by,revoked_at,note,project_id,project_role) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',
+      i.id, i.tokenHash, i.role, i.createdBy, i.createdAt, i.expiresAt, i.usedAt, i.usedBy, i.revokedAt, i.note, i.projectId, i.projectRole);
   }
   async inviteByHash(h: string) { const r = this.get('SELECT * FROM invites WHERE token_hash=?', h); return r ? invite(r) : null; }
   async consumeInvite(id: string, userId: string, at: string) {
@@ -132,6 +142,21 @@ export class SqliteServerStore implements ServerStore {
   }
   async revokeInvite(id: string, at: string) { return this.run('UPDATE invites SET revoked_at=? WHERE id=? AND revoked_at IS NULL AND used_at IS NULL', at, id) === 1; }
   async listInvites() { return this.all('SELECT * FROM invites ORDER BY created_at DESC').map(invite); }
+
+  async createAgentInvite(i: AgentInviteRecord) {
+    this.run('INSERT INTO agent_invites (id,token_hash,project_id,agent_name,title,created_by,created_at,expires_at,used_at,revoked_at,note) VALUES (?,?,?,?,?,?,?,?,?,?,?)', i.id, i.tokenHash, i.projectId, i.agentName, i.title, i.createdBy, i.createdAt, i.expiresAt, i.usedAt, i.revokedAt, i.note);
+  }
+  async agentInviteByHash(h: string) { const r = this.get('SELECT * FROM agent_invites WHERE token_hash=?', h); return r ? agentInvite(r) : null; }
+  async consumeAgentInvite(id: string, at: string) { return this.run('UPDATE agent_invites SET used_at=? WHERE id=? AND used_at IS NULL AND revoked_at IS NULL AND expires_at>?', at, id, at) === 1; }
+  async revokeAgentInvite(id: string, at: string) { return this.run('UPDATE agent_invites SET revoked_at=? WHERE id=? AND revoked_at IS NULL AND used_at IS NULL', at, id) === 1; }
+  async listAgentInvites() { return this.all('SELECT * FROM agent_invites ORDER BY created_at DESC').map(agentInvite); }
+  async createAgentCredential(c: AgentCredentialRecord) {
+    this.run('INSERT INTO agent_credentials (id,token_hash,prefix,project_id,member_id,agent_name,invite_id,created_at,expires_at,last_used_at,last_ip,revoked_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)', c.id, c.tokenHash, c.prefix, c.projectId, c.memberId, c.agentName, c.inviteId, c.createdAt, c.expiresAt, c.lastUsedAt, c.lastIp, c.revokedAt);
+  }
+  async agentCredentialByHash(h: string) { const r = this.get('SELECT * FROM agent_credentials WHERE token_hash=?', h); return r ? agentCred(r) : null; }
+  async touchAgentCredential(id: string, at: string, ip: string | null) { this.run('UPDATE agent_credentials SET last_used_at=?, last_ip=? WHERE id=?', at, ip, id); }
+  async revokeAgentCredential(id: string, at: string) { return this.run('UPDATE agent_credentials SET revoked_at=? WHERE id=? AND revoked_at IS NULL', at, id) === 1; }
+  async listAgentCredentials() { return this.all('SELECT * FROM agent_credentials ORDER BY created_at DESC').map(agentCred); }
 
   async setProjectAccess(a: ProjectAccessRecord) {
     this.run(`INSERT INTO project_access (project_id,user_id,role,member_id,granted_by,created_at) VALUES (?,?,?,?,?,?)

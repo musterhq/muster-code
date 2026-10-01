@@ -80,7 +80,7 @@ export function createEnvsDomain(ctx: DomainContext): DomainModule {
 
   // ── services ────────────────────────────────────────────────────────────────
   const runner = new ServiceRunner(ctx.dataDir, () => { for (const p of new Set([...runner.running.values()].map(r => r.decl.projectId))) emit('services', p); });
-  const taskKey = async (d: ServiceDecl) => { try { const w = await inv<{ tasks: { items: { id: string; seq?: number | null }[] } }>('project.work', { projectId: d.projectId, activityLimit: 1 }); const t = w.tasks.items.find(x => x.id === d.taskId); return t ? String((t as { key?: string }).key ?? '') || null : null; } catch { return null; } };
+  const taskKey = async (_d: ServiceDecl): Promise<string | null> => null;
   const view = async (d: ServiceDecl): Promise<ServiceView> => {
     const r = runner.running.get(d.id);
     return { ...d, state: r?.state ?? 'stopped', pid: r && !r.endedAt ? r.child.pid ?? null : null, url: r && (r.state === 'running' || r.state === 'starting') ? r.url : null, startedAt: r?.startedAt ?? null, endedAt: r?.endedAt ?? null, exitCode: r?.exitCode ?? null, logTail: (r?.log ?? '').slice(-1500), taskKey: await taskKey(d) };

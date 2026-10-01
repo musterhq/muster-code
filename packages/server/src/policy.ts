@@ -30,6 +30,8 @@ const DESKTOP_EXACT = new Set([
 const DESKTOP_PREFIX = ['browser.', 'terminal.', 'processes.', 'computer.', 'musterServer.'];
 
 const HOST_EXACT = new Set([
+  // Wave 4: the server's agent API acts as one remote agent through these; people never call them.
+  'project.remote.tasks', 'project.remote.task', 'project.remote.comment', 'project.remote.state', 'project.remote.doc',
   // Wave 4: SSH hosts and dev-server commands run on the server's own machine, so they are for owners and admins.
   'ssh.hosts.list', 'ssh.hosts.save', 'ssh.hosts.remove', 'ssh.hostkey.scan', 'ssh.hostkey.trust', 'ssh.test', 'ssh.chat.set', 'services.save', 'services.remove', 'services.start', 'services.stop',
   'org.export.write', 'backups.settings.set', 'backups.run', 'backups.restore', 'backups.restore.cancel', 'backups.remove',
@@ -57,7 +59,7 @@ const READ_TAIL = new Set([
   'export', 'worktree.list', 'defaultDestination', 'terminalShells', 'select', 'watch', 'pullRequests', 'compareUrl', 'diagnose', 'editOptions', 'editRestorePreview',
   'recall', 'plan', 'dismissed', 'checkLog', 'directives', 'detect', 'archives', 'deletes', 'authorize',
 ]);
-const READ_EXACT = new Set(['search.workspace', 'insight.costs', 'insight.profile', 'insight.reflect.inbox', 'studio.skill.fromTask', 'studio.skill.templates', 'work.overlay', 'work.project.meta', 'work.outputs.state', 'work.summaries.revision', 'work.inbox.state', 'automations.templates', 'project.gov.state', 'project.gov.task', 'project.gov.summary', 'project.agent.gov.get', 'project.secrets.list', 'project.secrets.audit', 'app.snapshot', 'chat.timeline', 'workspace.watch', 'git.status', 'git.changes', 'memory.list', 'memory.search', 'memory.inspect',
+const READ_EXACT = new Set(['org.imports.pending', 'services.previews', 'search.workspace', 'insight.costs', 'insight.profile', 'insight.reflect.inbox', 'studio.skill.fromTask', 'studio.skill.templates', 'work.overlay', 'work.project.meta', 'work.outputs.state', 'work.summaries.revision', 'work.inbox.state', 'automations.templates', 'project.gov.state', 'project.gov.task', 'project.gov.summary', 'project.agent.gov.get', 'project.secrets.list', 'project.secrets.audit', 'app.snapshot', 'chat.timeline', 'workspace.watch', 'git.status', 'git.changes', 'memory.list', 'memory.search', 'memory.inspect',
   'hindsight.status', 'hindsight.recall', 'plugins.list', 'plugins.inventory', 'providers.list', 'settings.get', 'settings.projectModel.get',
   'settings.folderModel.get', 'project.handoff.latest', 'project.work', 'paperclip.watch', 'git.info', 'git.worktree.list', 'providers.cli.status',
   'providers.secret.status', 'chat.defaults', 'project.tasks.list', 'project.decisions.list', 'project.activity.list', 'project.activity.query',

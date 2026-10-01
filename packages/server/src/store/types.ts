@@ -26,7 +26,13 @@ export interface ApiTokenRecord {
 export interface InviteRecord {
   id: string; tokenHash: string; role: OrgRole; createdBy: string; createdAt: string; expiresAt: string;
   usedAt: string | null; usedBy: string | null; revokedAt: string | null; note: string | null;
+  /** G29: an invite for one project also grants that project to whoever accepts it. */
+  projectId: string | null; projectRole: ProjectRole | null;
 }
+/** G28: a single-use, expiring invite for a remote agent to join one project. */
+export interface AgentInviteRecord { id: string; tokenHash: string; projectId: string; agentName: string; title: string | null; createdBy: string; createdAt: string; expiresAt: string; usedAt: string | null; revokedAt: string | null; note: string | null }
+/** G28: what a remote agent presents. Scoped to one project and one Roster member; accepted only by the agent API, never by /rpc. */
+export interface AgentCredentialRecord { id: string; tokenHash: string; prefix: string; projectId: string; memberId: string; agentName: string; inviteId: string; createdAt: string; expiresAt: string | null; lastUsedAt: string | null; lastIp: string | null; revokedAt: string | null }
 export interface ProjectAccessRecord { projectId: string; userId: string; role: ProjectRole; memberId: string | null; grantedBy: string; createdAt: string }
 export interface AuditRecord { seq: number; at: string; actor: string; action: string; target: string | null; detail: Record<string, unknown>; prevHash: string; hash: string }
 export type AuditInput = Pick<AuditRecord, 'actor' | 'action'> & { target?: string | null; detail?: Record<string, unknown>; at?: string };
@@ -82,6 +88,18 @@ export interface ServerStore {
   consumeInvite(id: string, userId: string, at: string): Promise<boolean>;
   revokeInvite(id: string, at: string): Promise<boolean>;
   listInvites(): Promise<InviteRecord[]>;
+
+  createAgentInvite(invite: AgentInviteRecord): Promise<void>;
+  agentInviteByHash(tokenHash: string): Promise<AgentInviteRecord | null>;
+  /** Atomically marks an unused, unexpired, unrevoked agent invite as used. False when it was already consumed. */
+  consumeAgentInvite(id: string, at: string): Promise<boolean>;
+  revokeAgentInvite(id: string, at: string): Promise<boolean>;
+  listAgentInvites(): Promise<AgentInviteRecord[]>;
+  createAgentCredential(c: AgentCredentialRecord): Promise<void>;
+  agentCredentialByHash(tokenHash: string): Promise<AgentCredentialRecord | null>;
+  touchAgentCredential(id: string, at: string, ip: string | null): Promise<void>;
+  revokeAgentCredential(id: string, at: string): Promise<boolean>;
+  listAgentCredentials(): Promise<AgentCredentialRecord[]>;
 
   setProjectAccess(access: ProjectAccessRecord): Promise<void>;
   removeProjectAccess(projectId: string, userId: string): Promise<ProjectAccessRecord | null>;

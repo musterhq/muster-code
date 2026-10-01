@@ -168,3 +168,17 @@ test('review S4: Paperclip commands that spend, pause or change configuration ar
   assert.equal(classifyCommand('project.tasks.get'), 'read');
   assert.equal(classifyCommand('paperclip.snapshot'), 'read');
 });
+
+test('Wave 4: commands that run on the server host or speak for an agent are admin-only; org and backup reads stay reads; imports cannot read server folders', () => {
+  for (const c of ['ssh.hosts.list', 'ssh.hosts.save', 'ssh.hostkey.trust', 'ssh.test', 'ssh.chat.set', 'services.start', 'services.save', 'services.stop', 'backups.run', 'backups.restore', 'backups.settings.set', 'org.export.write',
+    'project.remote.tasks', 'project.remote.comment', 'project.remote.state', 'project.remote.doc']) assert.equal(classifyCommand(c), 'host', c);
+  for (const c of ['backups.status', 'org.export', 'org.import.preview', 'org.teams.list', 'org.imports.pending', 'project.approvals.list', 'project.interactions.list', 'services.list', 'services.previews', 'project.protocol.get']) assert.equal(classifyCommand(c), 'read', c);
+  for (const c of ['org.import.apply', 'org.activate', 'project.interactions.answer', 'project.approvals.comment', 'project.approvals.requestRevision']) assert.equal(classifyCommand(c), 'write', c);
+  assert.throws(() => authorizeCommand('ssh.test', 'member'), /needs admin/); assert.throws(() => authorizeCommand('project.remote.comment', 'member'), /needs admin/);
+  const editor = accessView(user('member'), grants, owners), owner = accessView(user('member'), [{ projectId: 'p-shared', role: 'owner' }], owners);
+  denied(() => authorizeResource(editor, 'org.import.apply', 'write', { projectId: 'p-shared', source: { kind: 'catalog', key: 'x' } }, snapshot), 'forbidden');
+  authorizeResource(owner, 'org.import.apply', 'write', { projectId: 'p-shared', source: { kind: 'catalog', key: 'x' } }, snapshot);
+  denied(() => authorizeResource(editor, 'project.approvals.requestRevision', 'write', { projectId: 'p-shared', id: 'a', note: 'n' }, snapshot), 'forbidden');
+  authorizeResource(editor, 'project.interactions.answer', 'write', { projectId: 'p-shared', id: 'c', answers: {} }, snapshot);
+  denied(() => authorizeResource(editor, 'project.interactions.answer', 'write', { projectId: 'p-secret', id: 'c', answers: {} }, snapshot));
+});

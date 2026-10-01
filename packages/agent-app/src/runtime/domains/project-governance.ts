@@ -34,6 +34,7 @@ import { clampHeartbeat, GovernanceStore } from '../governance/store.ts';
 import { ancestorsOf, fingerprintOf, leavesOf, rootOf, subtreeIds, type TreeTask } from '../governance/subtree.ts';
 import { actionOf, evaluateTool, normalizeRules, type ToolVerdict } from '../governance/tool-policy.ts';
 import { leadReason, WakeQueue } from '../governance/wake-queue.ts';
+import { REMOTE_PROVIDER } from '../../shared/domains/agent-tools-protocol.ts';
 import { InteractionStore } from '../governance/interactions.ts';
 import { createTaskTools, TASK_MCP, TASK_PROTOCOL, TASK_TOOL_SPECS } from '../governance/task-tools.ts';
 import { ToolHost } from '../governance/tool-host.ts';
@@ -131,6 +132,7 @@ export function createGovernance(ctx: DomainContext, deps: GovernanceDeps) {
     const h = holdFor(t);
     if (h) return heldMessage(h);
     const full = t.owner ? t : tasks().getTask(t.id), mid = full?.owner ? ownerMemberId(full as ProjectTask) : null;
+    if (mid && memberOf(t.projectId, mid)?.runner?.providerId === REMOTE_PROVIDER) return `${nameOf(t.projectId, mid)} is a remote agent: it picks its tasks up through the server, so nothing starts here.`;
     if (mid) {
       // C15: an agent works on at most `maxConcurrent` tasks at once.
       const cap = agentGov(t.projectId, mid).heartbeat.maxConcurrent;

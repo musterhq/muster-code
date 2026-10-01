@@ -12,13 +12,14 @@ import type { AuditLog } from './audit.ts';
 import { costReport } from './cost.ts';
 import { CONNECTOR_TYPES } from './connectors/catalog.ts';
 import type { ConnectorRegistry } from './connectors/registry.ts';
+import type { RemoteAgents } from './agents/remote.ts';
 import { parseMatch } from './connectors/router.ts';
 import { authorizeCommand, PolicyError, ROLE_RANK } from './policy.ts';
 import type { RuntimeHost } from './runtime-host.ts';
 import { PROJECT_ROLES, type OrgRole, type ProjectRole, type ServerStore, type UserRecord } from './store/types.ts';
 
 export interface RpcContext {
-  store: ServerStore; accounts: Accounts; audit: AuditLog; runtime: RuntimeHost | null; registry: ConnectorRegistry;
+  store: ServerStore; accounts: Accounts; audit: AuditLog; runtime: RuntimeHost | null; registry: ConnectorRegistry; agents: RemoteAgents;
   runtimeDir: string; version: string; startedAt: number; inviteUrl(token: string): string;
   /** Bumped whenever access or chat ownership changes, so cached per-client views refresh. */
   bumpAccess(): void;
@@ -97,6 +98,11 @@ export async function ungrant(ctx: RpcContext, actor: UserRecord, target: UserRe
   ctx.bumpAccess();
 }
 
+/** The projects this user owns on the server (admins: every project). */
+async function ownedProjects(ctx: RpcContext, user: UserRecord): Promise<Set<string>> {
+  if (RANK[user.role] >= RANK.admin) return new Set((await projectNames(ctx)).keys());
+  return new Set((await ctx.store.projectAccessFor(user.id)).filter(a => a.role === 'owner').map(a => a.projectId));
+}
 async function projectNames(ctx: RpcContext): Promise<Map<string, string>> {
   if (!ctx.runtime?.running) return new Map();
   return new Map((await ctx.runtime.snapshot()).projects.map(p => [p.id, p.name]));
@@ -126,16 +132,40 @@ async function serverCommand(ctx: RpcContext, principal: Principal, command: str
       case 'server.users.revoke': need(user, 'admin', 'revoke access'); return ctx.accounts.revokeUser(user, str(i.userId, 'userId'));
       case 'server.users.restore': need(user, 'admin', 'restore access'); return publicUser(await ctx.accounts.restoreUser(user, str(i.userId, 'userId')));
       case 'server.invites.list': {
-        need(user, 'admin', 'see invites');
-        const now = new Date().toISOString();
-        return (await ctx.store.listInvites()).map(({ tokenHash: _t, ...inv }) => ({ ...inv, status: inv.revokedAt ? 'revoked' : inv.usedAt ? 'used' : inv.expiresAt <= now ? 'expired' : 'pending' }));
+        const owned = await ownedProjects(ctx, user), admin = RANK[user.role] >= RANK.admin;
+        if (!admin && !owned.size) need(user, 'admin', 'see invites');
+        const now = new Date().toISOString(), names = await projectNames(ctx);
+        return (await ctx.store.listInvites()).filter(inv => admin || (inv.projectId && owned.has(inv.projectId))).map(({ tokenHash: _t, ...inv }) => ({ ...inv, projectName: inv.projectId ? names.get(inv.projectId) ?? inv.projectId : null,
+          status: inv.revokedAt ? 'revoked' : inv.usedAt ? 'used' : inv.expiresAt <= now ? 'expired' : 'pending' }));
       }
       case 'server.invites.create': {
-        const { invite, token } = await ctx.accounts.createInvite(user, { role: typeof i.role === 'string' ? i.role : undefined, expires: typeof i.expires === 'string' ? i.expires : undefined, note: typeof i.note === 'string' ? i.note : undefined });
+        const projectId = typeof i.projectId === 'string' && i.projectId ? i.projectId : undefined, owned = await ownedProjects(ctx, user);
+        if (projectId && !(await projectNames(ctx)).has(projectId)) throw new PolicyError(`No project "${projectId}".`, 404, 'not-found');
+        const { invite, token } = await ctx.accounts.createInvite(user, { role: typeof i.role === 'string' ? i.role : undefined, expires: typeof i.expires === 'string' ? i.expires : undefined, note: typeof i.note === 'string' ? i.note : undefined,
+          ...(projectId ? { projectId, projectRole: typeof i.projectRole === 'string' ? i.projectRole : undefined, asProjectOwner: owned.has(projectId) } : {}) });
         const { tokenHash: _t, ...rest } = invite;
         return { invite: rest, url: ctx.inviteUrl(token) };
       }
-      case 'server.invites.revoke': await ctx.accounts.revokeInvite(user, str(i.id, 'id')); return { ok: true };
+      case 'server.invites.revoke': await ctx.accounts.revokeInvite(user, str(i.id, 'id'), await ownedProjects(ctx, user)); return { ok: true };
+      case 'server.agents.invite': {
+        const projectId = str(i.projectId, 'projectId');
+        if (RANK[user.role] < RANK.admin && !(await ownedProjects(ctx, user)).has(projectId)) throw new PolicyError('Only admins or the project owner can invite an agent.', 403, 'forbidden');
+        const { invite, token } = await ctx.agents.createInvite(user, { projectId, name: str(i.name, 'name'), title: typeof i.title === 'string' ? i.title : undefined, expires: typeof i.expires === 'string' ? i.expires : undefined, note: typeof i.note === 'string' ? i.note : undefined });
+        const { tokenHash: _t, ...rest } = invite;
+        return { invite: rest, token, joinUrl: ctx.inviteUrl(token).replace('/invite/', '/agent-invite/'), command: `muster-server agent join ${ctx.inviteUrl('').replace(/\/invite\/$/, '')} --invite ${token}` };
+      }
+      case 'server.agents.list': {
+        const admin = RANK[user.role] >= RANK.admin, owned = await ownedProjects(ctx, user);
+        if (!admin && !owned.size) need(user, 'admin', 'see remote agents');
+        const all = await ctx.agents.list(), names = await projectNames(ctx), keep = (p: string) => admin || owned.has(p);
+        return { invites: all.invites.filter(x => keep(x.projectId)).map(x => ({ ...x, projectName: names.get(x.projectId) ?? x.projectId })), agents: all.agents.filter(x => keep(x.projectId)).map(x => ({ ...x, projectName: names.get(x.projectId) ?? x.projectId })) };
+      }
+      case 'server.agents.revoke': {
+        const id = str(i.id, 'id'), all = await ctx.agents.list(), hit = all.invites.find(x => x.id === id) ?? all.agents.find(x => x.id === id || x.prefix === id);
+        if (!hit) throw new PolicyError('No pending invite or active agent with that id.', 404, 'not-found');
+        if (RANK[user.role] < RANK.admin && !(await ownedProjects(ctx, user)).has(hit.projectId)) throw new PolicyError('Only admins or the project owner can revoke an agent.', 403, 'forbidden');
+        await ctx.agents.revoke(user, id); ctx.bumpAccess(); return { ok: true };
+      }
       case 'server.sessions.list': {
         const all = RANK[user.role] >= RANK.admin && i.all !== false;
         const users = new Map((await ctx.store.listUsers()).map(u => [u.id, u]));
