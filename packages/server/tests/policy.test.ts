@@ -103,3 +103,23 @@ test('Wave 1 governance commands: reads are reads, everything else is a write, s
   authorizeResource(owner, 'project.secrets.list', 'read', { projectId: 'p-shared' }, snapshot);
   denied(() => authorizeResource(accessView(user('viewer'), [{ projectId: 'p-view', role: 'viewer' }], owners), 'project.agent.wake', 'write', { projectId: 'p-view' }, snapshot));
 });
+
+test('Wave 2 work-layer commands: reads are reads, shared inbox state and webhook secrets are admin, project status is owner, workspace goals are admin', () => {
+  for (const c of ['work.overlay', 'work.project.meta', 'work.labels.list', 'work.goals.list', 'work.docs.list', 'work.docs.get', 'work.votes.list', 'work.votes.export', 'work.outputs.state', 'work.links.list', 'work.inbox.state', 'work.summaries.list', 'work.summaries.revision', 'automations.gate.list', 'automations.templates']) assert.equal(classifyCommand(c), 'read', c);
+  for (const c of ['work.labels.save', 'work.task.labels.set', 'work.docs.save', 'work.docs.thread.add', 'work.votes.set', 'work.outputs.status', 'work.links.add', 'work.links.scan', 'work.summaries.save', 'work.summaries.refresh', 'work.star.set', 'work.goals.save', 'work.project.meta.set']) assert.equal(classifyCommand(c), 'write', c);
+  for (const c of ['automations.gate.decide', 'automations.webhook.rotate', 'work.inbox.read', 'work.inbox.snooze', 'work.inbox.decideBy', 'work.inbox.recommend']) assert.equal(classifyCommand(c), 'host', c);
+  const editor = accessView(user('member'), grants, owners), owner = accessView(user('member'), [{ projectId: 'p-shared', role: 'owner' }], owners), viewer = accessView(user('viewer'), [{ projectId: 'p-view', role: 'viewer' }], owners);
+  authorizeResource(editor, 'work.labels.save', 'write', { projectId: 'p-shared', name: 'x', color: 'ok' }, snapshot);
+  authorizeResource(editor, 'work.docs.save', 'write', { projectId: 'p-shared', taskId: 't', key: 'plan', text: 'x' }, snapshot);
+  denied(() => authorizeResource(editor, 'work.docs.save', 'write', { projectId: 'p-secret', taskId: 't', key: 'plan', text: 'x' }, snapshot));
+  denied(() => authorizeResource(editor, 'work.labels.list', 'read', { projectId: 'p-secret' }, snapshot));
+  denied(() => authorizeResource(editor, 'work.project.meta.set', 'write', { projectId: 'p-shared', status: 'planned' }, snapshot), 'forbidden');
+  authorizeResource(owner, 'work.project.meta.set', 'write', { projectId: 'p-shared', status: 'planned' }, snapshot);
+  denied(() => authorizeResource(owner, 'work.goals.save', 'write', { projectId: 'p-shared', level: 'workspace', title: 'x' }, snapshot), 'forbidden');
+  authorizeResource(owner, 'work.goals.save', 'write', { projectId: 'p-shared', level: 'project', title: 'x' }, snapshot);
+  denied(() => authorizeResource(owner, 'work.goals.remove', 'write', { projectId: 'p-shared', id: 'g', workspace: true }, snapshot), 'forbidden');
+  denied(() => authorizeResource(owner, 'work.overlay', 'read', {}, snapshot), 'forbidden');
+  denied(() => authorizeResource(viewer, 'work.labels.save', 'write', { projectId: 'p-view', name: 'x', color: 'ok' }, snapshot));
+  authorizeResource(viewer, 'work.labels.list', 'read', { projectId: 'p-view' }, snapshot);
+  assert.throws(() => authorizeCommand('work.inbox.snooze', 'member'), /needs admin/);
+});

@@ -19,8 +19,8 @@ export const DEFAULT_AGENT_NAME = 'Default agent';
 export type Invoke = <K extends keyof Commands>(command: K, input: Commands[K]['input']) => Promise<Commands[K]['output']>;
 export interface LocalPart { tasks: WorkspaceTask[]; agents: WorkspaceAgent[]; projects: WorkspaceProject[]; runs: WorkspaceRun[]; inbox: WorkspaceInboxItem[] }
 
-const STATE: Record<TaskState, WorkspaceStatus> = { backlog: 'backlog', todo: 'todo', running: 'in_progress', 'needs-input': 'in_review', blocked: 'blocked', review: 'in_review', implemented: 'in_review', verified: 'done', failed: 'blocked', cancelled: 'cancelled' };
-const PRIORITY: Record<number, WorkspacePriority> = { 0: 'critical', 1: 'high', 2: 'medium', 3: 'low' };
+export const STATE: Record<TaskState, WorkspaceStatus> = { backlog: 'backlog', todo: 'todo', running: 'in_progress', 'needs-input': 'in_review', blocked: 'blocked', review: 'in_review', implemented: 'in_review', verified: 'done', failed: 'blocked', cancelled: 'cancelled' };
+export const PRIORITY: Record<number, WorkspacePriority> = { 0: 'critical', 1: 'high', 2: 'medium', 3: 'low' };
 const PRIORITY_IN: Record<WorkspacePriority, TaskPriority> = { critical: 0, high: 1, medium: 2, low: 3 };
 const ATTEMPT: Record<string, RunState> = { running: 'running', completed: 'succeeded', failed: 'failed', interrupted: 'interrupted', cancelled: 'cancelled' };
 /** Manual moves the local task store accepts (running and verified come only from real runs and verification). */

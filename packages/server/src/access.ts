@@ -90,9 +90,11 @@ const OWNER_ONLY_PROJECT = new Set(['project.delete', 'project.archive', 'projec
   'project.members.restore', 'project.members.decide', 'project.team.settings.set', 'project.update', 'project.linkFolder', 'project.unlinkFolder',
   // Governance: run policy, agent permissions and tool rules, instruction bundles, execution policies and the secret vault.
   'project.gov.settings.set', 'project.agent.gov.set', 'project.agent.files.save', 'project.agent.files.remove', 'project.agent.revisions.restore', 'project.tasks.policy.set',
-  'project.secrets.list', 'project.secrets.audit', 'project.secrets.save', 'project.secrets.rollback', 'project.secrets.remove', 'project.secrets.grant', 'project.secrets.decide']);
+  'project.secrets.list', 'project.secrets.audit', 'project.secrets.save', 'project.secrets.rollback', 'project.secrets.remove', 'project.secrets.grant', 'project.secrets.decide',
+  // Work layer: a project's status and target date.
+  'work.project.meta.set']);
 /** Commands whose result is server-wide and not filterable per project: admins only for everyone else. */
-const ADMIN_READS = /^(paperclip\.(snapshot|dashboard|list|badge|memory|task|config\.get|inbox\.dismissed|import\.plan|watch)|settings\.(export|diagnostics|storage|storage\.preview)|providers\.diagnose|import\.|memory\.(export|archives|bank\.preview|import\.preview))/;
+const ADMIN_READS = /^(work\.(overlay|inbox\.state)|automations\.gate\.list|paperclip\.(snapshot|dashboard|list|badge|memory|task|config\.get|inbox\.dismissed|import\.plan|watch)|settings\.(export|diagnostics|storage|storage\.preview)|providers\.diagnose|import\.|memory\.(export|archives|bank\.preview|import\.preview))/;
 
 /**
  * Throws unless the user may run `command` on the resources named in `input`. `snapshot` is the runtime's current (unfiltered) state.
@@ -104,6 +106,8 @@ export function authorizeResource(v: AccessView, command: string, cls: CommandCl
   const write = cls !== 'read';
   const deny = (what: string) => { throw new PolicyError(`You do not have ${write ? 'write' : 'read'} access to this ${what}.`, 403, 'forbidden'); };
 
+  // A workspace goal belongs to every project: only owners and admins edit it.
+  if ((command === 'work.goals.save' && i.level === 'workspace') || (command === 'work.goals.remove' && i.workspace === true)) throw new PolicyError('Only owners and admins can edit workspace goals.', 403, 'forbidden');
   let projectId = typeof i.projectId === 'string' ? i.projectId : undefined;
   if (!projectId && PROJECT_ID_COMMANDS.test(command) && typeof i.id === 'string') projectId = i.id;
   if (projectId !== undefined) {
