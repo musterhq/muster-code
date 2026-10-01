@@ -361,6 +361,12 @@ export function createTaskTools(d: TaskToolDeps) {
       d.changed(projectId, card.taskId ?? '', true);
       return out;
     },
+    'project.tasks.note': (i: Record<string, unknown>) => {
+      const projectId = String(i.projectId ?? ''); if (!ID.test(projectId) || !d.exists(projectId)) throw new Error('Project not found.');
+      const t = d.tasks().getTask(String(i.id ?? '')); if (!t || t.projectId !== projectId) throw new Error('No such task.');
+      const body = text(i.text, 8000); if (!body) throw new Error('Write the note.');
+      d.record(projectId, 'task.note', `You: ${redactSecrets(body)}`, t.id, 'user'); d.changed(projectId, t.id); return { ok: true as const };
+    },
     'project.suggestions.list': (i: Record<string, unknown>) => {
       const projectId = String(i.projectId ?? ''); if (!ID.test(projectId) || !d.exists(projectId)) throw new Error('Project not found.');
       return { items: d.store().suggestions(projectId, String(i.taskId ?? '')) };

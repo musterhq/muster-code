@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Copy, LogOut } from 'lucide-react';
 import { notifySuccess } from '../../store';
+import { ProjectPeople, RemoteAgents, Channels } from './ServerWork';
 import { serverBridge, type ServerBridge, type ServerUser } from '../../webHost.ts';
 
 /**
@@ -13,7 +14,6 @@ interface InviteRow { id: string; role: Role; expiresAt: string; status: string 
 interface SessionRow { id: string; username: string; lastSeenAt: string; ip: string | null; current: boolean }
 interface CostLine { key: string; label: string; turns: number; inputTokens: number; outputTokens: number; costUsd: number; unpricedTurns: number }
 interface CostView { lines: CostLine[]; totals: CostLine; ledger: { ok: boolean; entries: number } }
-interface ConnectorRow { id: string; name: string; label: string; enabled: boolean; available: boolean; health: { state: string; lastError: string | null } | null; rules: unknown[] }
 interface AccessList { projects: Array<{ id: string; name: string }>; access: Array<{ projectId: string; userId: string; role: string }> }
 
 const ROLES: Role[] = ['owner', 'admin', 'member', 'viewer'];
@@ -43,8 +43,9 @@ export function ServerSettings(): React.ReactElement {
   const admin = me.role === 'owner' || me.role === 'admin';
   return <div className="server-settings">
     <Account server={server} me={me}/>
-    {admin ? <><People server={server} me={me}/><Invites server={server}/><Access server={server}/><Cost server={server}/><Sessions server={server}/><Connectors server={server}/><Audit server={server}/></>
-      : <p className="project-edit-hint ws-settings-hint">People, invites, usage and connectors are managed by this server’s owners and admins.</p>}
+    <ProjectPeople server={server} me={me}/>
+    {admin ? <><People server={server} me={me}/><Invites server={server}/><Access server={server}/><RemoteAgents server={server}/><Cost server={server}/><Sessions server={server}/><Channels server={server}/><Audit server={server}/></>
+      : <><RemoteAgents server={server}/><p className="project-edit-hint ws-settings-hint">People, invites, usage and channels across the server are managed by its owners and admins.</p></>}
   </div>;
 }
 
@@ -160,19 +161,6 @@ function Sessions({ server }: { server: ServerBridge }): React.ReactElement {
       <tbody>{(value ?? []).map(s => <tr key={s.id}><td>@{s.username}{s.current && <span className="ws-chip" data-tone="accent">this browser</span>}</td><td>{s.ip ?? '—'}</td><td>{when(s.lastSeenAt)}</td>
         <td>{!s.current && <button type="button" className="settings-button secondary" onClick={() => act(() => server.invoke('server.sessions.revoke', { id: s.id }), reload, 'Session ended.', setActionError)}>End</button>}</td></tr>)}</tbody></table>
     {(error || actionError) && <p role="alert" className="settings-error">{error || actionError}</p>}
-  </section>;
-}
-
-function Connectors({ server }: { server: ServerBridge }): React.ReactElement {
-  const { value, error } = useServer<ConnectorRow[]>(server, 'server.connectors.list');
-  return <section aria-label="Connectors">
-    <h3 className="preference-group-title">Connectors</h3>
-    <p className="project-edit-hint ws-settings-hint">Slack, Telegram and Mattermost bots, several of each. Add and route them with <code>muster-server connectors</code>.</p>
-    {value && (value.length ? <table className="server-table"><thead><tr><th>Name</th><th>Type</th><th>State</th><th>Routes</th></tr></thead>
-      <tbody>{value.map(c => { const state = !c.available ? 'coming soon' : !c.enabled ? 'disabled' : c.health?.state ?? 'unknown';
-        return <tr key={c.id}><td>{c.name}</td><td>{c.label}</td><td><span className="ws-chip" data-tone={state === 'ok' ? 'ok' : state === 'down' || state === 'unauth' ? 'danger' : 'warn'}>{state}</span>{state !== 'ok' && c.health?.lastError ? <span className="ws-faint"> {c.health.lastError}</span> : null}</td><td>{c.rules.length}</td></tr>; })}</tbody></table>
-      : <p className="ws-faint">No connectors yet.</p>)}
-    {error && <p role="alert" className="settings-error">{error}</p>}
   </section>;
 }
 

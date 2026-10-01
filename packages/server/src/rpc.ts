@@ -131,6 +131,16 @@ async function serverCommand(ctx: RpcContext, principal: Principal, command: str
       case 'server.users.role': need(user, 'admin', 'change roles'); return publicUser(await ctx.accounts.setRole(user, str(i.userId, 'userId'), str(i.role, 'role')));
       case 'server.users.revoke': need(user, 'admin', 'revoke access'); return ctx.accounts.revokeUser(user, str(i.userId, 'userId'));
       case 'server.users.restore': need(user, 'admin', 'restore access'); return publicUser(await ctx.accounts.restoreUser(user, str(i.userId, 'userId')));
+      case 'server.projects.mine': {
+        // The projects you are on, who else is on them, and (if you own one, or are an admin) its pending invites.
+        const admin = RANK[user.role] >= RANK.admin, names = await projectNames(ctx), access = await ctx.store.projectAccessList(), users = new Map((await ctx.store.listUsers()).map(u => [u.id, u]));
+        const mine = new Map(access.filter(a => a.userId === user.id).map(a => [a.projectId, a.role])), now = new Date().toISOString(), invites = await ctx.store.listInvites();
+        return [...names].filter(([id]) => admin || mine.has(id)).map(([id, name]) => {
+          const role = admin ? 'owner' : mine.get(id)!, canManage = admin || role === 'owner';
+          return { id, name, role, canManage, members: access.filter(a => a.projectId === id).map(a => ({ userId: a.userId, username: users.get(a.userId)?.username ?? '?', displayName: users.get(a.userId)?.displayName ?? '?', role: a.role, status: users.get(a.userId)?.status ?? 'active' })),
+            invites: canManage ? invites.filter(inv => inv.projectId === id && !inv.usedAt && !inv.revokedAt && inv.expiresAt > now).map(({ tokenHash: _t, ...inv }) => ({ ...inv, status: 'pending' })) : [] };
+        });
+      }
       case 'server.invites.list': {
         const owned = await ownedProjects(ctx, user), admin = RANK[user.role] >= RANK.admin;
         if (!admin && !owned.size) need(user, 'admin', 'see invites');

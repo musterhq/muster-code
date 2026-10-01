@@ -15,6 +15,7 @@ import { closeSettings, notifyError, notifySuccess, openFile, openPullRequestTab
 import { useStore } from '../useStore';
 import { useWorkLoad } from '../workHooks';
 import { StateChip } from './HubParts';
+import { PreviewStrip } from './ServicesPanel';
 import type { HubNav } from './HubPages';
 import { ResourceState } from './ResourceState';
 import { Tip } from './Tooltip';
@@ -65,6 +66,7 @@ export function OutputsPanel({ snapshot, projectId, local, nav }: { snapshot: Wo
   if (!list.data) return <ResourceState kind="loading" label="Loading outputs" rows={4}/>;
   return <section className="work-outputs" aria-label="Outputs">
     {list.data.note && <ResourceState kind="partial" compact message={list.data.note}/>}
+    {local && <PreviewStrip projectId={projectId} taskKey={id => tasks.get(id)?.key ?? null}/>}
     <div className="task-toolbar" role="toolbar" aria-label="Filter outputs">
       <label className="task-search"><Search size={14} aria-hidden="true"/><span className="sr-only">Search outputs</span><input type="search" placeholder="Search outputs…" value={query} onChange={e => setQuery(e.target.value)}/></label>
       <span className="task-toolbar-spacer"/>

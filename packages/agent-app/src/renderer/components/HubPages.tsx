@@ -30,7 +30,7 @@ import { EditAgentButton, HireApprovalCard } from './RosterPanel';
 import { Tip } from './Tooltip';
 
 const errorText = (cause: unknown) => cause instanceof Error ? cause.message : String(cause);
-export interface HubNav { onOpenTask: (id: string) => void; onOpenAgent: (id: string) => void; onOpenChat: (id: string) => void }
+export interface HubNav { onOpenTask: (id: string) => void; onOpenAgent: (id: string) => void; onOpenChat: (id: string) => void; /** Opens a run's own page (G14). */ onOpenRun?: (id: string) => void }
 
 export function PageHeader({ title, detail, children }: { title: string; detail?: React.ReactNode; children?: React.ReactNode }): React.ReactElement {
   return <header className="ws-page-head"><div className="ws-page-title"><h1>{title}</h1>{detail && <p>{detail}</p>}</div>{children && <div className="ws-page-actions">{children}</div>}</header>;

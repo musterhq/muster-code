@@ -13,7 +13,7 @@ import type { WorkspaceBadge, WorkspaceSnapshot } from '../shared/domains/paperc
 import { invoke, subscribe } from './bridge';
 import { openHubScreen } from './store';
 
-export type HubPage = 'inbox' | 'ledger' | 'agent' | 'task' | 'project' | 'dashboard' | 'tasks' | 'roster' | 'outputs';
+export type HubPage = 'inbox' | 'ledger' | 'agent' | 'task' | 'project' | 'dashboard' | 'tasks' | 'roster' | 'outputs' | 'run';
 export interface HubRoute { page: HubPage; arg: string | null; from: HubPage | null; fromArg: string | null }
 
 // --- route ---------------------------------------------------------------------------------------------------------

@@ -59,6 +59,8 @@ export interface AgentToolsCommands {
   /** Creates the picked subtasks (all when `picks` is omitted) under the task, owned by the person named or the task's owner. */
   'project.suggestions.create': { input: { projectId: string; id: string; picks?: number[] }; output: Suggestion };
   'project.suggestions.dismiss': { input: { projectId: string; id: string }; output: Suggestion };
+  /** A note on the task for the people on it: written in the thread, not delivered to the agent's next turn and never waking it. */
+  'project.tasks.note': { input: { projectId: string; id: string; text: string }; output: { ok: true } };
   /** Remote agents (G28). The server's agent API calls these on the agent's behalf, always with the agent's own member id; they are not offered to people. */
   'project.remote.tasks': { input: { projectId: string; memberId: string }; output: { tasks: RemoteTask[] } };
   'project.remote.task': { input: { projectId: string; memberId: string; id: string }; output: RemoteTaskDetail };
@@ -70,6 +72,6 @@ export interface AgentToolsCommands {
 }
 export const AGENT_TOOLS_COMMANDS = {
   'project.interactions.list': true, 'project.interactions.answer': true, 'project.interactions.cancel': true,
-  'project.approvals.list': true, 'project.approvals.comment': true, 'project.approvals.requestRevision': true, 'project.protocol.get': true, 'project.suggestions.list': true, 'project.suggestions.create': true, 'project.suggestions.dismiss': true,
+  'project.approvals.list': true, 'project.approvals.comment': true, 'project.approvals.requestRevision': true, 'project.protocol.get': true, 'project.suggestions.list': true, 'project.suggestions.create': true, 'project.suggestions.dismiss': true, 'project.tasks.note': true,
   'project.remote.tasks': true, 'project.remote.task': true, 'project.remote.comment': true, 'project.remote.state': true, 'project.remote.doc': true,
 } as const satisfies Record<keyof AgentToolsCommands, true>;
