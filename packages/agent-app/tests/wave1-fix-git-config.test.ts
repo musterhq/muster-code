@@ -43,3 +43,15 @@ test('M3: a commit from the Git tab inside the agent’s task worktree carries i
   await commit(h.folder.id, h.repo);
   assert.equal(execFileSync('git', ['-C', h.repo, 'log', '-1', '--format=%an <%ae>'], { encoding: 'utf8' }).trim(), 'Founder <founder@example.com>');
 });
+
+test('M7: after an agent run in your checkout, a Git-tab commit there is still yours', async t => {
+  const h = await wave1(t);
+  const cto = await h.member('CTO');
+  await h.s.invoke('project.agent.gov.set', { projectId: h.project.id, memberId: cto.id, gitIdentity: { name: 'CTO Agent', email: 'cto@agents.dev' } });
+  const plain = await h.addTask('Run in the checkout', { kind: 'agent', id: cto.id }); await h.start(plain.id); await h.settled(plain.id);
+  execFileSync('sh', ['-c', `echo mine > ${join(h.repo, 'mine.txt')}`]);
+  execFileSync('git', ['-C', h.repo, 'add', '-A']);
+  const st = await h.s.invoke('git.status', { folderId: h.folder.id });
+  await h.s.invoke('git.commit', { folderId: h.folder.id, revision: st.revision, message: 'founder commit' });
+  assert.equal(execFileSync('git', ['-C', h.repo, 'log', '-1', '--format=%an <%ae>'], { encoding: 'utf8' }).trim(), 'Founder <founder@example.com>', 'the checkout stays the founder’s');
+});

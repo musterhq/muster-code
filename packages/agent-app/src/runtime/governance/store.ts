@@ -35,6 +35,7 @@ CREATE TABLE IF NOT EXISTS monitors(id TEXT PRIMARY KEY,project_id TEXT NOT NULL
 CREATE INDEX IF NOT EXISTS monitors_due ON monitors(state,due_at);
 CREATE TABLE IF NOT EXISTS breakers(id TEXT PRIMARY KEY,project_id TEXT NOT NULL,kind TEXT NOT NULL,subject TEXT NOT NULL,summary TEXT NOT NULL,evidence TEXT NOT NULL,state TEXT NOT NULL,member_id TEXT,created_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS recovery_dismissed(task_id TEXT NOT NULL,kind TEXT NOT NULL,at TEXT NOT NULL,PRIMARY KEY(task_id,kind));
+CREATE TABLE IF NOT EXISTS task_worktrees(folder_id TEXT PRIMARY KEY,project_id TEXT NOT NULL,task_id TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS secrets_meta(project_id TEXT NOT NULL,name TEXT NOT NULL,description TEXT NOT NULL DEFAULT '',version INTEGER NOT NULL,versions TEXT NOT NULL,created_at TEXT NOT NULL,rotated_at TEXT,expires_at TEXT,PRIMARY KEY(project_id,name));
 CREATE TABLE IF NOT EXISTS secret_proposals(id TEXT PRIMARY KEY,project_id TEXT NOT NULL,member_id TEXT NOT NULL,member_name TEXT NOT NULL,task_id TEXT,name TEXT NOT NULL,purpose TEXT NOT NULL,state TEXT NOT NULL,created_at TEXT NOT NULL,decided_at TEXT,expires_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS secret_events(id TEXT PRIMARY KEY,project_id TEXT NOT NULL,name TEXT NOT NULL,kind TEXT NOT NULL,actor TEXT NOT NULL,detail TEXT NOT NULL,chat_id TEXT,at TEXT NOT NULL);
@@ -273,9 +274,11 @@ export class GovernanceStore {
   setProposalState(id: string, state: ProposalState) { this.db.prepare('UPDATE secret_proposals SET state=?,decided_at=? WHERE id=?').run(state, this.stamp(), id); }
 
   // ── cleanup ─────────────────────────────────────────────────────────────────
-  purgeTask(taskId: string) { for (const t of ['task_policy', 'task_stage', 'task_hidden', 'recovery_dismissed']) this.db.prepare(`DELETE FROM ${t} WHERE task_id=?`).run(taskId); this.db.prepare('DELETE FROM watchdogs WHERE task_id=?').run(taskId); this.db.prepare('DELETE FROM monitors WHERE task_id=?').run(taskId); }
+  noteWorktree(folderId: string, projectId: string, taskId: string) { this.db.prepare('INSERT INTO task_worktrees(folder_id,project_id,task_id) VALUES(?,?,?) ON CONFLICT(folder_id) DO UPDATE SET project_id=excluded.project_id,task_id=excluded.task_id').run(folderId, projectId, taskId); }
+  worktreeTask(folderId: string): { projectId: string; taskId: string } | undefined { const r = this.db.prepare('SELECT project_id,task_id FROM task_worktrees WHERE folder_id=?').get(folderId) as { project_id: string; task_id: string } | undefined; return r ? { projectId: r.project_id, taskId: r.task_id } : undefined; }
+  purgeTask(taskId: string) { this.db.prepare('DELETE FROM task_worktrees WHERE task_id=?').run(taskId); for (const t of ['task_policy', 'task_stage', 'task_hidden', 'recovery_dismissed']) this.db.prepare(`DELETE FROM ${t} WHERE task_id=?`).run(taskId); this.db.prepare('DELETE FROM watchdogs WHERE task_id=?').run(taskId); this.db.prepare('DELETE FROM monitors WHERE task_id=?').run(taskId); }
   purgeProject(projectId: string) {
-    for (const t of ['agent_gov', 'agent_files', 'agent_revisions', 'gov_settings', 'task_policy', 'task_stage', 'holds', 'task_hidden', 'wakes', 'run_meta', 'watchdogs', 'monitors', 'breakers', 'secrets_meta', 'secret_proposals', 'secret_events']) this.db.prepare(`DELETE FROM ${t} WHERE project_id=?`).run(projectId);
+    for (const t of ['agent_gov', 'agent_files', 'agent_revisions', 'gov_settings', 'task_policy', 'task_stage', 'holds', 'task_hidden', 'wakes', 'run_meta', 'watchdogs', 'monitors', 'breakers', 'secrets_meta', 'secret_proposals', 'secret_events', 'task_worktrees']) this.db.prepare(`DELETE FROM ${t} WHERE project_id=?`).run(projectId);
   }
   close() { try { this.db.close(); } catch { /* already closed */ } }
 }

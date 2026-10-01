@@ -28,7 +28,7 @@ export function createDomainHooks() {
   const started = new Set<(run: RunStarted) => Promise<void> | void>(), settled = new Set<(run: RunSettled) => Promise<void> | void>();
   const providerEvents = new Set<(event: ProviderEventInfo) => void>();
   const commands = new Set<(event: CommandCompleted) => void>();
-  let defaults: ChatDefaultsResolver | undefined, environment: RunEnvironmentResolver | undefined, toolPolicy: ToolPolicyResolver | undefined, commitIdentity: ((folderId: string) => { name: string; email: string } | null) | undefined;
+  let defaults: ChatDefaultsResolver | undefined, environment: RunEnvironmentResolver | undefined, toolPolicy: ToolPolicyResolver | undefined, commitIdentity: ((folderId: string) => { name: string; email: string } | null) | undefined, worktreeRecorder: ((projectId: string, taskId: string, folderId: string) => void) | undefined;
   const add = <T>(set: Set<T>, fn: T) => { set.add(fn); return () => { set.delete(fn); }; };
   const hooks: DomainHooks = {
     addPromptContributor: fn => add(prompts, fn),
@@ -40,6 +40,8 @@ export function createDomainHooks() {
     setRunEnvironmentResolver(fn) { environment = fn; },
     setToolPolicy(fn) { toolPolicy = fn; },
     setCommitIdentity(fn) { commitIdentity = fn; },
+    setTaskWorktreeRecorder(fn) { worktreeRecorder = fn; },
+    noteTaskWorktree(projectId, taskId, folderId) { try { worktreeRecorder?.(projectId, taskId, folderId); } catch { /* best effort */ } },
     commitIdentity(folderId) { try { return commitIdentity?.(folderId) ?? null; } catch { return null; } },
     onCommand: fn => add(commands, fn),
   };

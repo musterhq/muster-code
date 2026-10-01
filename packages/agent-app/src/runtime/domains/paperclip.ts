@@ -560,6 +560,7 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
     const reuse = (await context.invoke('git.worktree.list', { folderId: source.id }).catch(() => [])).find(w => !w.main && !w.prunable && (w.branch === branch || w.branch === `refs/heads/${branch}`));
     const worktree = reuse ? { folder: await context.invoke('folder.add', { path: reuse.path }), path: reuse.path, branch } : await context.invoke('git.worktree.create', { folderId: source.id, branch, ...(base ? { base } : {}) });
     try {
+      context.hooks.noteTaskWorktree?.(project.id, taskId, worktree.folder.id);
       if (!project.folderIds.includes(worktree.folder.id)) await context.invoke('project.linkFolder', { id: project.id, folderId: worktree.folder.id });
       // The run uses its owner's runner and model (set on the Roster member); the project's default model is left alone.
       const fresh = (await context.invoke('project.work', { projectId: project.id, activityLimit: 1 })).tasks.items.find(t => t.id === taskId);

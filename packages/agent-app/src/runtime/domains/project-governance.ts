@@ -1044,17 +1044,13 @@ export function createGovernance(ctx: DomainContext, deps: GovernanceDeps) {
     if (!g.gitIdentity) return;
     record(task.projectId, 'task.git-identity', `${nameOf(task.projectId, mid)} commits in this run as ${g.gitIdentity.name} <${g.gitIdentity.email}> (set through the run environment; your git config is not touched).`, task.id, 'system');
   }
-  /** The identity a commit made from the Git tab in this folder should carry: the agent whose task run works there. Null: the folder is yours. */
+  /** Records the linked worktree Muster made for a task. Only such a folder may ever carry an agent's identity for a Git-tab commit. */
+  function noteWorktree(projectId: string, taskId: string, folderId: string) { gov().noteWorktree(folderId, projectId, taskId); }
+  /** The identity a Git-tab commit in this folder should carry: the owner of the task whose own worktree it is. Null for your checkout and any folder you added (an agent run there gets its identity through the run environment only). */
   function identityForFolder(folderId: string): { name: string; email: string } | null {
-    const projects = ctx.db().prepare('SELECT id, folder_ids FROM projects').all() as { id: string; folder_ids: string }[];
-    for (const row of projects) {
-      let ids: unknown; try { ids = JSON.parse(row.folder_ids); } catch { continue; }
-      if (!Array.isArray(ids) || !ids.includes(folderId) || !deps.exists(row.id)) continue;
-      const hit = taskList(row.id).filter(t => t.owner.kind === 'agent' && t.runChatId && ctx.store.chat(t.runChatId)?.folderId === folderId).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0];
-      const g = hit ? agentGov(row.id, hit.owner.id).gitIdentity : null;
-      if (g) return g;
-    }
-    return null;
+    const w = gov().worktreeTask(folderId); if (!w || !deps.exists(w.projectId)) return null;
+    const task = taskList(w.projectId).find(t => t.id === w.taskId);
+    return task && task.owner.kind === 'agent' ? agentGov(w.projectId, task.owner.id).gitIdentity ?? null : null;
   }
 
   // ── secrets (G23) ───────────────────────────────────────────────────────────
@@ -1302,7 +1298,7 @@ export function createGovernance(ctx: DomainContext, deps: GovernanceDeps) {
   }
   return {
     handlers: commands() as unknown as Record<string, DomainHandler>,
-    gate, preflight, release, held, identityForFolder, clampAccess, beforeSend, prepareDispatch, taskLines, runOptions, decideTool, started, settled, idle, purgeTask, purgeProject, memberGone, taskView, holdFor, evaluate: scheduleEval, armAll, dispose,
+    gate, preflight, release, held, identityForFolder, noteWorktree, clampAccess, beforeSend, prepareDispatch, taskLines, runOptions, decideTool, started, settled, idle, purgeTask, purgeProject, memberGone, taskView, holdFor, evaluate: scheduleEval, armAll, dispose,
     /** For tests: the stores and queues behind the commands. */
     internals: { gov, wakeQueue, heartbeatTimers, retryTimers, tick, fireMonitors, evaluateWatchdogs, readyTaskFor, recoveryItems, effectivePolicy, startStage },
   };
