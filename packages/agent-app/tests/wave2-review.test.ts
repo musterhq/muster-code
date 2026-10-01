@@ -120,3 +120,18 @@ test('S7: a wrong timestamp, a wrong signature and an unknown id all answer the 
   assert.deepEqual([stale.status, bad.status, unknown.status], [401, 401, 401]);
   assert.deepEqual(stale.body, bad.body); assert.deepEqual(bad.body, unknown.body);
 });
+
+test('S8: pruning run history removes the rows that hang off a run and never a run that is waiting or running', async () => {
+  const { DatabaseSync } = await import('node:sqlite');
+  const { pruneRuns } = await import('../src/runtime/automations/prune.ts');
+  const db = new DatabaseSync(':memory:');
+  db.exec(`CREATE TABLE automation_runs (id TEXT PRIMARY KEY, automation_id TEXT, scheduled_for INTEGER, status TEXT);
+    CREATE TABLE automation_run_ext (run_id TEXT PRIMARY KEY); CREATE TABLE automation_gates (id TEXT PRIMARY KEY, run_id TEXT); CREATE TABLE standup_children (child_id TEXT PRIMARY KEY, run_id TEXT)`);
+  const add = (id: string, at: number, status: string) => { db.prepare('INSERT INTO automation_runs VALUES (?,?,?,?)').run(id, 'a', at, status); db.prepare('INSERT INTO automation_run_ext VALUES (?)').run(id); db.prepare('INSERT INTO automation_gates VALUES (?,?)').run(`g-${id}`, id); db.prepare('INSERT INTO standup_children VALUES (?,?)').run(`k-${id}`, id); };
+  add('old-awaiting', 1, 'awaiting'); add('old-running', 2, 'running'); add('old-done', 3, 'completed');
+  for (let i = 10; i < 20; i++) add(`skipped-${i}`, i, 'skipped');
+  assert.equal(pruneRuns(db, 'a', 5), 6, 'the old finished run and the older skipped ones go');
+  const left = (db.prepare('SELECT id FROM automation_runs ORDER BY scheduled_for').all() as { id: string }[]).map(r => r.id);
+  assert.deepEqual(left.slice(0, 2), ['old-awaiting', 'old-running']); assert.ok(!left.includes('old-done')); assert.equal(left.length, 7);
+  for (const table of [['automation_run_ext', 'run_id'], ['automation_gates', 'run_id'], ['standup_children', 'run_id']]) assert.equal((db.prepare(`SELECT COUNT(*) AS n FROM ${table[0]} WHERE ${table[1]} NOT IN (SELECT id FROM automation_runs)`).get() as { n: number }).n, 0, `${table[0]} keeps no orphans`);
+});

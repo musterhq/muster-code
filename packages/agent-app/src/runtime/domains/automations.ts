@@ -5,6 +5,7 @@ import { AUTOMATION_HISTORY, AUTOMATION_MAX, AUTOMATION_MAX_PROMPT, AUTOMATION_R
 import { AUTOMATION_TEMPLATES, builtinValues, checkVariables, renderTemplate, resolveVariables } from '../../shared/automation-templates.ts';
 import { activeSecretStore, SecretStore } from '../secret-store.ts';
 import { WEBHOOK_LIMITS, WebhookListener, newWebhookSecret } from '../automations/webhook.ts';
+import { pruneRuns } from '../automations/prune.ts';
 import { activityFingerprint } from '../automations/activity.ts';
 import { lastAssistantText } from '../work/agent-run.ts';
 import { describeSchedule, dueBetween, nextOccurrence, upcoming, validTimeZone, validateSchedule } from '../automation-schedule.ts';
@@ -313,7 +314,7 @@ export function createAutomationsDomain(ctx: DomainContext): DomainModule {
     const result = db.prepare('INSERT OR IGNORE INTO automation_runs (id, automation_id, scheduled_for, trigger, status, started_at, ended_at, chat_id, run_id, reason, version) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?)')
       .run(id, automation.id, scheduledFor, trigger, status, started, ended, reason ?? null, automation.version);
     if (!result.changes) return undefined;
-    db.prepare(`DELETE FROM automation_runs WHERE automation_id = ? AND id NOT IN (SELECT id FROM automation_runs WHERE automation_id = ? ORDER BY scheduled_for DESC LIMIT ${AUTOMATION_HISTORY})`).run(automation.id, automation.id);
+    pruneRuns(db, automation.id, AUTOMATION_HISTORY);
     broadcast();
     return runRow(id);
   }
