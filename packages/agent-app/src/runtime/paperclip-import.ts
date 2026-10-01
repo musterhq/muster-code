@@ -76,6 +76,10 @@ export class SqliteImportStore implements ImportStore {
       task_id = COALESCE(excluded.task_id, task_id), project_id = CASE WHEN excluded.task_id IS NULL AND task_id IS NOT NULL THEN project_id ELSE COALESCE(excluded.project_id, project_id) END`)
       .run(row.sourceId, row.kind, row.taskId, row.projectId, row.title, row.status, row.detail, row.at, row.pending ? 1 : 0);
   }
+  /** The Paperclip ids already imported as Muster rows of this kind. */
+  importedSources(kind: string): Set<string> {
+    return new Set((this.db.prepare('SELECT source_id FROM paperclip_import_map WHERE kind = ?').all(kind) as { source_id: string }[]).map(r => r.source_id));
+  }
   /** Read side for the workspace: keys, parents, members, comments and pending history, per Muster task or project. */
   taskMeta(taskId: string): { key: string | null; parentTaskId: string | null; sourceId: string } | undefined {
     const row = this.db.prepare("SELECT source_id, key, data FROM paperclip_import_map WHERE kind = 'task' AND muster_id = ?").get(taskId) as { source_id: string; key: string | null; data: string } | undefined;

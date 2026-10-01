@@ -211,7 +211,9 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
     const projects = withMemory ? await Promise.all([...mine.projects, ...(p?.projects ?? [])].map(async project => ({ ...project, memory: await projectMemory(project) }))) : [...mine.projects, ...(p?.projects ?? [])];
     const tasks = [...mine.tasks, ...(p?.tasks ?? [])], runs = [...mine.runs, ...(p?.runs ?? [])].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
     const rank = { high: 0, medium: 1, low: 2 } as const;
-    const inbox = [...mine.inbox, ...(p?.inbox ?? [])].sort((a, b) => rank[a.severity] - rank[b.severity] || b.at.localeCompare(a.at));
+    // A Paperclip task already imported into Muster needs you once: its Muster copy stands for it in the Inbox and badge.
+    let imported = new Set<string>(); try { imported = imports()?.importedSources('task') ?? imported; } catch { /* no import store */ }
+    const inbox = [...mine.inbox, ...(p?.inbox ?? []).filter(i => !i.taskId || !imported.has(i.taskId))].sort((a, b) => rank[a.severity] - rank[b.severity] || b.at.localeCompare(a.at));
     return {
       paperclip: theirs.link, tasks, agents: [...mine.agents, ...(p?.agents ?? [])], projects, goals: p?.goals ?? [], runs, inbox,
       counts: { liveRuns: runs.filter(r => r.status === 'running').length, inbox: inbox.filter(i => i.kind !== 'mail').length, failedRuns: runs.filter(r => r.status === 'failed').length, openTasks: tasks.filter(t => t.status !== 'done' && t.status !== 'cancelled').length },

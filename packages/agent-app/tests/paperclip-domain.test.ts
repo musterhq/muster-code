@@ -8,6 +8,7 @@ import {join} from 'node:path';
 import {test,type TestContext} from 'node:test';
 import {createPaperclipDomain,isLoopback,rankMemories,PAPERCLIP_SECRET_ID} from '../src/runtime/domains/paperclip.ts';
 import {normalizeBaseUrl} from '../src/runtime/paperclip-client.ts';
+import {SqliteImportStore} from '../src/runtime/paperclip-import.ts';
 import {buildInbox,mapAttention,mapInteraction,mapIssue,mapRoutine} from '../src/runtime/paperclip-map.ts';
 import type {DomainContext} from '../src/runtime/domains/types.ts';
 import type {SocketFactory} from '../src/runtime/paperclip-client.ts';
@@ -68,7 +69,7 @@ async function harness(t:TestContext,options:{socket?:SocketFactory;invoke?:(com
   const domain=createPaperclipDomain(context,{fetch:(options.fetch??server.fetch) as never,secrets:()=>secrets.store as never,timers,socket:options.socket??(()=>{throw new Error('no socket');}),remoteOf:async path=>path.endsWith('oss')?'git@github.com:hybrowlabs/OSS-Manager.git':undefined});
   t.after(()=>domain.dispose?.());
   const call=(command:string,input:Record<string,unknown>={})=>Promise.resolve(domain.handlers[command]!(input)) as Promise<any>;
-  return {dataDir,server,secrets,timers,events,invoked,call};
+  return {dataDir,server,secrets,timers,events,invoked,call,memory};
 }
 
 test('a custom deployment sends its board token as a Bearer header; the token lives in the secret store, never in the config file',async t=>{
@@ -412,6 +413,11 @@ test('one snapshot merges Muster and the linked Paperclip; writes route to which
   assert.deepEqual(h.server.calls.filter(c=>c.method==='POST').map(c=>c.url),['/api/issues/RAG-12/comments'],'the Paperclip task goes to Paperclip, and only it');
   const badge=await h.call('paperclip.badge');
   assert.equal(badge.connected,true);assert.equal(badge.inbox,4,'blocked, question, agent error and the failed run; reviews and mail never badge');
+  // S34: once RAG-4 is imported, its Muster copy stands for it; the linked Paperclip rows are not listed or badged again.
+  new SqliteImportStore(h.memory as never).setMap('task','i-4','lt1','RAG-4',{});
+  const after=await h.call('paperclip.snapshot');
+  assert.deepEqual(after.inbox.filter((i:any)=>i.source==='paperclip'&&i.taskId==='i-4'),[],'no duplicate rows for an imported task');
+  assert.equal((await h.call('paperclip.badge')).inbox,2,'the blocked row and the failed run on RAG-4 no longer count twice');
 });
 
 test('the Inbox badge is a light read: it never browses project memory; the full snapshot still counts it',async t=>{
