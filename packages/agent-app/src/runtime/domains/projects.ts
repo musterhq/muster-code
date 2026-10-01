@@ -436,7 +436,7 @@ export function createProjectsDomain(ctx: DomainContext): DomainModule {
   ctx.hooks.setCommitIdentity?.(folderId => gov.identityForFolder(folderId));
   ctx.hooks.setTaskWorktreeRecorder?.((projectId, taskId, folderId) => gov.noteWorktree(projectId, taskId, folderId));
   ctx.hooks.addPromptContributor(contributor);
-  ctx.hooks.addRunOptionsContributor(async chat => gov.runOptions(chat));
+  ctx.hooks.addRunOptionsContributor(chat => gov.runOptions(chat));
   // CR-21: after a run the chat's Codex thread exists; mirror projects (catches ones created in the service) and group the thread.
   ctx.hooks.onRunSettled(({ chat }) => {
     if (disposed || !ctx.native) return;

@@ -339,7 +339,7 @@ export function createWorkDomain(ctx: DomainContext): DomainModule {
     'work.docs.save': async i => {
       const p = project(i.projectId), task = await taskOf(p.id, i.taskId);
       if (typeof i.text !== 'string') throw new Error('Write the document text.');
-      return saveDoc(p.id, task.id, docKey(i.key), i.text, text(i.note, 'The note', 200, false), 'You', typeof i.baseRev === 'number' ? i.baseRev : undefined);
+      return saveDoc(p.id, task.id, docKey(i.key), i.text, text(i.note, 'The note', 200, false), typeof i.by === 'string' && i.by.trim() ? i.by.trim().slice(0, 60) : 'You', typeof i.baseRev === 'number' ? i.baseRev : undefined);
     },
     'work.docs.restore': async i => {
       const p = project(i.projectId), task = await taskOf(p.id, i.taskId), key = docKey(i.key), old = db().docRev(task.id, key, Number(i.rev));

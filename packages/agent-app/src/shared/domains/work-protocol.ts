@@ -184,7 +184,7 @@ export interface WorkCommands {
   'work.docs.list': { input: { projectId: string; taskId: string }; output: { docs: TaskDocSummary[] } };
   'work.docs.get': { input: { projectId: string; taskId: string; key: string; rev?: number }; output: TaskDoc };
   /** Saves a new revision. `baseRev` must be the revision you edited from, so two editors never overwrite each other. */
-  'work.docs.save': { input: { projectId: string; taskId: string; key: string; text: string; note?: string; baseRev?: number }; output: TaskDoc };
+  'work.docs.save': { input: { projectId: string; taskId: string; key: string; text: string; note?: string; baseRev?: number; /** Attribution label for an agent's write. */ by?: string }; output: TaskDoc };
   'work.docs.restore': { input: { projectId: string; taskId: string; key: string; rev: number }; output: TaskDoc };
   'work.docs.remove': { input: { projectId: string; taskId: string; key: string }; output: { removed: true } };
   /** Starts an annotation thread on a selection of one revision. The task's owner is woken with the comment. */
