@@ -208,6 +208,7 @@ export function createAutomationsDomain(ctx: DomainContext): DomainModule {
     if (!g) throw new Error('That approval was already decided.');
     const automation = row(g.automation_id), run = runRow(g.run_id);
     db.prepare(`UPDATE automation_gates SET status = ?, decided_at = ? WHERE id = ?`).run(approve ? 'approved' : 'declined', iso(), g.id);
+    ctx.emit({ type: 'workChanged', projectId: null, scopes: ['inbox'] });
     if (!automation || !run) { if (run) finish(run.id, 'skipped', 'The automation was deleted.'); broadcast(); return { ok: true }; }
     if (!approve) { finish(run.id, 'skipped', 'Declined by you.'); return { ok: true }; }
     db.prepare(`UPDATE automation_runs SET status = 'running', started_at = ?, reason = ? WHERE id = ? AND status = 'awaiting'`).run(iso(), 'Approved by you.', run.id);
@@ -380,7 +381,7 @@ export function createAutomationsDomain(ctx: DomainContext): DomainModule {
     // The approval gate holds every automatic firing; Run now is you, so it needs no approval.
     if (trigger !== 'manual' && extFor(automation.id).approval) {
       const held = keep(insertRun(automation, scheduledFor, trigger, 'awaiting', reason ?? 'Waiting for your approval.'));
-      if (held) { db.prepare('INSERT INTO automation_gates (id, automation_id, run_id, trigger, vars, status, created_at, decided_at) VALUES (?, ?, ?, ?, ?, ?, ?, NULL)').run(randomUUID(), automation.id, held.id, trigger, JSON.stringify(extra?.vars ?? {}), 'pending', iso()); broadcast(); }
+      if (held) { db.prepare('INSERT INTO automation_gates (id, automation_id, run_id, trigger, vars, status, created_at, decided_at) VALUES (?, ?, ?, ?, ?, ?, ?, NULL)').run(randomUUID(), automation.id, held.id, trigger, JSON.stringify(extra?.vars ?? {}), 'pending', iso()); broadcast(); ctx.emit({ type: 'workChanged', projectId: value.target.kind === 'task' || value.target.kind === 'new' ? value.target.projectId ?? null : null, scopes: ['inbox'] }); }
       return held;
     }
     const run = keep(insertRun(automation, scheduledFor, trigger, 'running', reason));
