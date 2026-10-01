@@ -315,6 +315,16 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
     history.timer = timers.setTimeout(() => { history.timer = null; void importHistory(); }, 0);
   };
 
+  // --- Pause all / Resume all ---------------------------------------------------------------------------------------------
+  // What Pause all paused, per scope ('local', or 'paperclip:<company>'), so Resume all wakes only those and never an
+  // agent you had paused on purpose. A marker row ('') records that Pause all ran even when it changed nothing.
+  let pausedReady = false;
+  const pausedDb = () => { const db = context.db(); if (!pausedReady) { db.exec('CREATE TABLE IF NOT EXISTS pause_all_sets (scope TEXT NOT NULL, id TEXT NOT NULL, PRIMARY KEY(scope, id))'); pausedReady = true; } return db; };
+  const recordPaused = (scope: string, ids: readonly string[]) => { const insert = pausedDb().prepare('INSERT OR IGNORE INTO pause_all_sets (scope, id) VALUES (?, ?)'); for (const x of ['', ...ids]) insert.run(scope, x); };
+  /** The ids Pause all paused, or null when it never ran for this scope (then Resume all wakes every paused agent). */
+  const pausedSet = (scope: string): string[] | null => { const rows = pausedDb().prepare('SELECT id FROM pause_all_sets WHERE scope = ?').all(scope) as { id: string }[]; return rows.length ? rows.map(r => r.id).filter(Boolean) : null; };
+  const forgetPaused = (scope: string, id?: string) => { if (id === undefined) pausedDb().prepare('DELETE FROM pause_all_sets WHERE scope = ?').run(scope); else pausedDb().prepare('DELETE FROM pause_all_sets WHERE scope = ? AND id = ?').run(scope, id); };
+
   // --- Inbox dismissals ------------------------------------------------------------------------------------------------
   // Keyed by item id and the item's time: a dismissed failure stays hidden, a new one (a later time) shows again.
   let dismissReady = false;
@@ -461,6 +471,8 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
   const startTask = async (taskId: string) => {
     if (await owner('task', taskId) === 'paperclip') throw new Error('This task runs in Paperclip. Import it first to run it in Muster.');
     const { project, view: task } = await local.projectFor(taskId);
+    // Paused means nothing new starts until you resume, by hand or by the scheduler.
+    if ((await context.invoke('project.work', { projectId: project.id, activityLimit: 1 })).scheduler.paused) throw new Error(`${project.name} is paused, so nothing new starts. Resume its agents first.`);
     const source = folders().find(f => f.id === project.primaryFolderId);
     if (!source) throw new Error('Link the project’s folder first: runs happen in a worktree of it.');
     const meta = imports()?.projectMeta(project.id), base = typeof meta?.defaultRef === 'string' ? meta.defaultRef : undefined;
@@ -591,18 +603,22 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
       'paperclip.agent.pause': async input => { const agentId = id(input.id); if (await owner('agent', agentId) === 'local') await local.setPaused(agentId, true); else await api().send('POST', `/agents/${encodeURIComponent(agentId)}/pause`); queueEmit(['agents', 'runs']); return { ok: true }; },
       'paperclip.agent.resume': async input => { const agentId = id(input.id); if (await owner('agent', agentId) === 'local') await local.setPaused(agentId, false); else await api().send('POST', `/agents/${encodeURIComponent(agentId)}/resume`); queueEmit(['agents', 'runs']); return { ok: true }; },
       'paperclip.pauseAll': async input => {
-        if (sourceOf(input.source) === 'local') { const changed = await local.setPaused(null, true); queueEmit(['agents']); return { changed }; }
+        if (sourceOf(input.source) === 'local') { const ids = await local.pauseAll(); recordPaused('local', ids); queueEmit(['agents', 'runs', 'tasks']); return { changed: ids.length }; }
         const c = api(); await paperclipPart(true);
         const agents = (built?.part.agents ?? []).filter(a => a.status !== 'paused' && a.status !== 'terminated' && a.status !== 'pending');
-        for (const agent of agents) await c.send('POST', `/agents/${encodeURIComponent(agent.id)}/pause`);
+        const paused: string[] = [];
+        try { for (const agent of agents) { await c.send('POST', `/agents/${encodeURIComponent(agent.id)}/pause`); paused.push(agent.id); } }
+        finally { if (built) recordPaused(`paperclip:${built.companyId}`, paused); }
         queueEmit(['agents', 'runs']);
-        return { changed: agents.length };
+        return { changed: paused.length };
       },
       'paperclip.resumeAll': async input => {
-        if (sourceOf(input.source) === 'local') { const changed = await local.setPaused(null, false); queueEmit(['agents']); return { changed }; }
+        if (sourceOf(input.source) === 'local') { const changed = await local.resumeProjects(pausedSet('local')); forgetPaused('local'); queueEmit(['agents']); return { changed }; }
         const c = api(); await paperclipPart(true);
-        const agents = (built?.part.agents ?? []).filter(a => a.status === 'paused');
+        const scope = `paperclip:${built?.companyId ?? ''}`, only = pausedSet(scope);
+        const agents = (built?.part.agents ?? []).filter(a => a.status === 'paused' && (!only || only.includes(a.id)));
         for (const agent of agents) await c.send('POST', `/agents/${encodeURIComponent(agent.id)}/resume`);
+        forgetPaused(scope);
         queueEmit(['agents', 'runs']);
         return { changed: agents.length };
       },

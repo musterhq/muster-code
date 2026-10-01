@@ -170,6 +170,27 @@ test('the thread renders comments (deleted ones hidden) and the composer address
   await assert.rejects(()=>h.call('paperclip.comment',{taskId:'../../x',body:'x'}),/Unknown item/);
 });
 
+test('Resume all wakes only the Paperclip agents Pause all paused, never one you had paused on purpose',async t=>{
+  const saved=agents.map(a=>({...a}));t.after(()=>{agents.forEach((a,i)=>Object.assign(a,saved[i]));});
+  const server=paperclip();
+  // Paperclip's agents really change status on pause/resume, and its ETags move with them.
+  const fetch=async(input:string,init:RequestInit={})=>{
+    const m=/\/api\/agents\/([^/]+)\/(pause|resume)$/.exec(new URL(input).pathname);
+    if(m&&init.method==='POST'){const a=agents.find(x=>x.id===m[1]);if(a)a.status=m[2]==='pause'?'paused':'idle';server.bump();}
+    return server.fetch(input,init);
+  };
+  const h=await harness(t,{fetch});
+  await h.call('paperclip.config.set',{mode:'local'});
+  await h.call('paperclip.snapshot');
+  assert.equal(agents.find(a=>a.id==='a-old')!.status,'paused','Old was paused before Pause all');
+  assert.deepEqual(await h.call('paperclip.pauseAll',{source:'paperclip'}),{changed:3});
+  assert.ok(agents.every(a=>a.status==='paused'));
+  assert.deepEqual(await h.call('paperclip.resumeAll',{source:'paperclip'}),{changed:3});
+  const resumed=server.calls.filter(c=>c.method==='POST'&&c.url.endsWith('/resume')).map(c=>c.url);
+  assert.deepEqual(resumed.sort(),['/api/agents/a-ceo/resume','/api/agents/a-cto/resume','/api/agents/a-qa/resume']);
+  assert.equal(agents.find(a=>a.id==='a-old')!.status,'paused','the agent paused on purpose stays paused');
+});
+
 test('live updates cost nothing while hidden: a refused socket polls only while visible, and hiding clears every timer',async t=>{
   const h=await harness(t);
   await h.call('paperclip.config.set',{mode:'local'});

@@ -30,7 +30,7 @@ async function service(t: TestContext) {
     async run(input: ProviderInput) {
       const text = `${input.developerInstructions ?? ''}\n${input.prompt}`;
       if (/E2E-SLOW/.test(text)) {
-        await new Promise<void>(r => { slow.set(input.chat.id, r); setTimeout(r, 20_000); });
+        await new Promise<void>(r => { const timer = setTimeout(r, 20_000); slow.set(input.chat.id, () => { clearTimeout(timer); r(); }); });
         slow.delete(input.chat.id);
         return stopped.has(input.chat.id) ? { status: 'failed', finalMessage: '', errorMessage: 'stopped', failure: { kind: 'aborted' }, dispatchState: 'dispatched' } : { status: 'completed', finalMessage: 'slow done', dispatchState: 'dispatched' };
       }
@@ -89,4 +89,34 @@ test('S14 an approval a Muster run is waiting on is answered from the task card 
   await until(() => answers.length > 0, 'the run got the decision');
   assert.deepEqual(answers[0], { decision: 'accept' });
   await until(async () => await state(task.id) !== 'running', 'the run settled');
+});
+
+test('S27 Pause all stops running work and refuses Assign & start and Start while paused; Resume all lifts it', async t => {
+  const { s, project, member, state, stopped } = await service(t);
+  const cto = await member('CTO');
+  const slow = await s.invoke('paperclip.task.create', { title: 'Long job', description: 'E2E-SLOW', projectId: project.id, assigneeId: `member:${cto.id}`, start: true });
+  assert.ok(slow.started, slow.startError ?? 'not started');
+  await until(async () => (await s.invoke('paperclip.snapshot', {})).runs.find(r => r.taskId === slow.id && r.status === 'running'), 'running');
+  assert.deepEqual(await s.invoke('paperclip.pauseAll', { source: 'local' }), { changed: 1 });
+  assert.ok(stopped.has(slow.started!.chatId), 'the running attempt was stopped');
+  await until(async () => (await s.invoke('paperclip.snapshot', {})).runs.find(r => r.taskId === slow.id)?.status !== 'running', 'the run ended');
+  const created = await s.invoke('paperclip.task.create', { title: 'While paused', description: '', projectId: project.id, assigneeId: `member:${cto.id}`, start: true });
+  assert.equal(created.started, undefined, 'Assign & start creates the task but starts nothing');
+  assert.match(created.startError ?? '', /OSSMANAGER is paused, so nothing new starts/);
+  await assert.rejects(() => s.invoke('paperclip.task.start', { taskId: created.id }), /is paused/);
+  assert.equal(await state(created.id), 'todo');
+  assert.deepEqual(await s.invoke('paperclip.resumeAll', { source: 'local' }), { changed: 1 });
+  const started = await s.invoke('paperclip.task.start', { taskId: created.id });
+  assert.equal(started.branch, `muster/${created.key.toLowerCase()}`);
+});
+
+test('S10 Resume all wakes only the projects Pause all paused', async t => {
+  const { s, project, folder } = await service(t);
+  const other = await s.invoke('project.create', { name: 'Side project', goal: '', folderIds: [folder.id] });
+  // Side project was paused on purpose before Pause all.
+  await s.invoke('project.scheduler.set', { projectId: other.id, paused: true });
+  assert.deepEqual(await s.invoke('paperclip.pauseAll', { source: 'local' }), { changed: 1 });
+  assert.deepEqual(await s.invoke('paperclip.resumeAll', { source: 'local' }), { changed: 1 });
+  assert.equal((await s.invoke('project.work', { projectId: project.id })).scheduler.paused, false);
+  assert.equal((await s.invoke('project.work', { projectId: other.id })).scheduler.paused, true, 'the deliberately paused project stays paused');
 });

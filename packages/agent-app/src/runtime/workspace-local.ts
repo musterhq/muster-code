@@ -186,13 +186,35 @@ export class LocalWorkspace {
     return (await this.locate(created.id)).view;
   }
 
-  /** Muster agents are Project schedulers: pausing one holds its Project's task dispatch. */
+  /** Muster agents are Project schedulers: pausing one holds its Project's task dispatch and stops its running work. */
   async setPaused(agentId: string | null, paused: boolean): Promise<number> {
     // A Roster member pauses its project's scheduler (per-member pause is a follow-up).
-    const memberProject = agentId?.startsWith('member:') ? (await this.projects()).find(r => r.members.some(m => memberAgentId(m.id) === agentId))?.project.id : undefined;
-    const list = (await this.invoke('project.list', undefined)).filter(p => !p.archived && (!agentId || agentIdOf(p.id) === agentId || p.id === memberProject));
-    for (const project of list) await this.invoke('project.scheduler.set', { projectId: project.id, paused });
+    const reads = await this.projects();
+    const memberProject = agentId?.startsWith('member:') ? reads.find(r => r.members.some(m => memberAgentId(m.id) === agentId))?.project.id : undefined;
+    const list = reads.filter(r => !agentId || agentIdOf(r.project.id) === agentId || r.project.id === memberProject);
+    for (const read of list) await this.hold(read, paused);
     return list.length;
+  }
+
+  /** Pause all: holds every project that is not paused yet and stops its running work. Returns the projects it paused. */
+  async pauseAll(): Promise<string[]> {
+    const list = (await this.projects()).filter(r => !r.work.scheduler.paused);
+    for (const read of list) await this.hold(read, true);
+    return list.map(r => r.project.id);
+  }
+
+  /** Resume all: only the projects Pause all paused (`ids`), so a project paused on purpose stays paused. `null`: every one. */
+  async resumeProjects(ids: readonly string[] | null): Promise<number> {
+    const list = (await this.projects()).filter(r => r.work.scheduler.paused && (!ids || ids.includes(r.project.id)));
+    for (const read of list) await this.hold(read, false);
+    return list.length;
+  }
+
+  /** "Running work stops and nothing new starts": pausing sets the scheduler and stops every running attempt. */
+  private async hold(read: ProjectRead, paused: boolean): Promise<void> {
+    await this.invoke('project.scheduler.set', { projectId: read.project.id, paused });
+    if (!paused) return;
+    for (const task of read.work.tasks.items) for (const attempt of task.attempts) if (attempt.status === 'running') await this.invoke('chat.stop', { id: attempt.chatId }).catch(() => undefined);
   }
 
   async cancelRun(runId: string): Promise<void> {
