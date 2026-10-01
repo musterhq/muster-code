@@ -119,3 +119,10 @@ test('G22: a declared port becomes ready by connection; a task marked done stops
   await assert.rejects(h.s.invoke('services.save', { projectId: h.project.id, taskId: task.id, name: 'x', command: 'y', port: 80 }), /1024/);
   await assert.rejects(h.s.invoke('services.save', { projectId: h.project.id, taskId: 'nope', name: 'x', command: 'y' }), /does not exist|Invalid/);
 });
+
+test('G22: a service does not inherit provider keys or tokens from the app', async t => {
+  const { scrubbed } = await import('../src/runtime/envs/services.ts');
+  const out = scrubbed({ PATH: '/bin', OPENAI_API_KEY: 'sk-x', GITHUB_TOKEN: 'ghp_x', MUSTER_SECRET_KEY: 'k', DB_PASSWORD: 'p', HOME: '/h', PORT: '3000' });
+  assert.deepEqual(Object.keys(out).sort(), ['HOME', 'PATH', 'PORT']);
+  void t;
+});
