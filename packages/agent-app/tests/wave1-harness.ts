@@ -105,7 +105,8 @@ export async function wave1(t: TestContext, opts: Wave1Options = {}) {
       if (/W1-COMMIT-ENV/.test(first) || /W1-COMMIT-CFG/.test(first)) {
         const env: Record<string, string> = { ...process.env } as Record<string, string>;
         for (const k of ['GIT_AUTHOR_NAME', 'GIT_AUTHOR_EMAIL', 'GIT_COMMITTER_NAME', 'GIT_COMMITTER_EMAIL']) delete env[k];
-        if (/W1-COMMIT-ENV/.test(first)) for (const [k, v] of Object.entries(input.configOverrides ?? {})) { const m = /^shell_environment_policy\.set\.(.+)$/.exec(k); if (m && typeof v === 'string') env[m[1]!] = v; }
+        // ENV: the identity as git's own variables; CFG: only the GIT_CONFIG_* variables (how a tool that reads config would see it).
+        for (const [k, v] of Object.entries(input.configOverrides ?? {})) { const m = /^shell_environment_policy\.set\.(.+)$/.exec(k); if (m && typeof v === 'string' && (/W1-COMMIT-ENV/.test(first) ? /^GIT_(AUTHOR|COMMITTER)_/.test(m[1]!) : /^GIT_CONFIG_/.test(m[1]!))) env[m[1]!] = v; }
         await touch('COMMITTED.md', 'x\n');
         execFileSync('git', ['-C', input.cwd, 'add', '-A'], { env }); execFileSync('git', ['-C', input.cwd, 'commit', '-qm', 'agent commit'], { env });
         return done('Committed.');

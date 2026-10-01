@@ -409,6 +409,7 @@ export function createProjectsDomain(ctx: DomainContext): DomainModule {
     for (const projectId of store.autoProjects()) if (!disposed) await s.tick(projectId).catch(() => undefined);
   }
   ctx.hooks.setToolPolicy?.((chat, method, params) => gov.decideTool(chat, method, params));
+  ctx.hooks.setCommitIdentity?.(folderId => gov.identityForFolder(folderId));
   ctx.hooks.addPromptContributor(contributor);
   ctx.hooks.addRunOptionsContributor(async chat => gov.runOptions(chat));
   // CR-21: after a run the chat's Codex thread exists; mirror projects (catches ones created in the service) and group the thread.
@@ -667,6 +668,6 @@ export function createProjectsDomain(ctx: DomainContext): DomainModule {
       void background();
       timer = setInterval(() => void background(), TICK_MS); timer.unref?.();
     },
-    dispose() { ctx.hooks.setToolPolicy?.(undefined); gov.dispose(); team.dispose(); codexSync.dispose(); disposed = true; if (timer) clearInterval(timer); timer = undefined; tasks?.close(); tasks = undefined; scheduler = undefined; db = undefined; },
+    dispose() { ctx.hooks.setToolPolicy?.(undefined); ctx.hooks.setCommitIdentity?.(undefined); gov.dispose(); team.dispose(); codexSync.dispose(); disposed = true; if (timer) clearInterval(timer); timer = undefined; tasks?.close(); tasks = undefined; scheduler = undefined; db = undefined; },
   };
 }

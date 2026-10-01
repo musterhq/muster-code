@@ -32,6 +32,10 @@ export interface DomainHooks {
   setRunEnvironmentResolver(fn: RunEnvironmentResolver | undefined): void;
   /** Replaces the single tool-policy resolver (undefined clears it). Optional so bare test contexts need not provide it. */
   setToolPolicy?(fn: ToolPolicyResolver | undefined): void;
+  /** Replaces the resolver of the git identity a Git-tab commit in a folder carries (an agent's task worktree). */
+  setCommitIdentity?(fn: ((folderId: string) => { name: string; email: string } | null) | undefined): void;
+  /** The identity a commit in this folder carries, or null. Never throws. */
+  commitIdentity?(folderId: string): { name: string; email: string } | null;
   /** Observes successful domain commands (e.g. Projects logging memory and environment writes to activity). Optional so bare test contexts need not provide it. */
   onCommand?(fn: (event: CommandCompleted) => void): () => void;
 }

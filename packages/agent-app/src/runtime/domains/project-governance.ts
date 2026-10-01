@@ -26,7 +26,7 @@ import { isAdapterProvider } from '../adapters/index.ts';
 import type { Actor, ProjectTask, ProjectTaskStore } from '../project-tasks.ts';
 import { composeBundle, validateFile, checkBundle, changedNames } from '../governance/bundle.ts';
 import { hireRequests, reviewVerdict, secretRequests, subtaskRequests, watchdogVerdict } from '../governance/blocks.ts';
-import { applyIdentity, effectiveIdentity, envOverrides, validateIdentity } from '../governance/git-identity.ts';
+import { envOverrides, validateIdentity } from '../governance/git-identity.ts';
 import { classifyRun, commentRequiredPrompt, continuationPrompt, failureKind, retryDelayMs, type RunFacts } from '../governance/liveness.ts';
 import { ProjectVault, validName, type VaultStore } from '../governance/secrets.ts';
 import { clampHeartbeat, GovernanceStore } from '../governance/store.ts';
@@ -969,13 +969,24 @@ export function createGovernance(ctx: DomainContext, deps: GovernanceDeps) {
     if (m.secrets.length && !lent.has(chat.id)) { lent.add(chat.id); lendable(chat.projectId, m, chat.id, true); if (lent.size > 500) lent.clear(); }
     return Object.keys(overrides).length ? { configOverrides: overrides } : null;
   }
-  /** Before a task run: the agent's git identity goes into its worktree's own config. Returns what happened, for the activity feed. */
+  /** Before a task run: say, in the activity feed, which identity its commits carry. Nothing is written to any git config. */
   async function prepareDispatch(task: ProjectTask, cwd: string | null): Promise<void> {
     const mid = ownerMemberId(task); if (!mid || !cwd) return;
     const g = agentGov(task.projectId, mid);
     if (!g.gitIdentity) return;
-    const r = await applyIdentity(cwd, g.gitIdentity);
-    record(task.projectId, 'task.git-identity', r.applied === 'worktree' ? `${nameOf(task.projectId, mid)} commits in this worktree as ${r.name} <${r.email}>.` : `${nameOf(task.projectId, mid)}: ${r.reason}`, task.id, 'system');
+    record(task.projectId, 'task.git-identity', `${nameOf(task.projectId, mid)} commits in this run as ${g.gitIdentity.name} <${g.gitIdentity.email}> (set through the run environment; your git config is not touched).`, task.id, 'system');
+  }
+  /** The identity a commit made from the Git tab in this folder should carry: the agent whose task run works there. Null: the folder is yours. */
+  function identityForFolder(folderId: string): { name: string; email: string } | null {
+    const projects = ctx.db().prepare('SELECT id, folder_ids FROM projects').all() as { id: string; folder_ids: string }[];
+    for (const row of projects) {
+      let ids: unknown; try { ids = JSON.parse(row.folder_ids); } catch { continue; }
+      if (!Array.isArray(ids) || !ids.includes(folderId) || !deps.exists(row.id)) continue;
+      const hit = taskList(row.id).filter(t => t.owner.kind === 'agent' && t.runChatId && ctx.store.chat(t.runChatId)?.folderId === folderId).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0];
+      const g = hit ? agentGov(row.id, hit.owner.id).gitIdentity : null;
+      if (g) return g;
+    }
+    return null;
   }
 
   // ── secrets (G23) ───────────────────────────────────────────────────────────
@@ -1195,7 +1206,7 @@ export function createGovernance(ctx: DomainContext, deps: GovernanceDeps) {
   }
   return {
     handlers: commands() as unknown as Record<string, DomainHandler>,
-    gate, preflight, held, clampAccess, beforeSend, prepareDispatch, taskLines, runOptions, decideTool, started, settled, idle, purgeTask, purgeProject, memberGone, taskView, holdFor, evaluate: scheduleEval, armAll, dispose,
+    gate, preflight, held, identityForFolder, clampAccess, beforeSend, prepareDispatch, taskLines, runOptions, decideTool, started, settled, idle, purgeTask, purgeProject, memberGone, taskView, holdFor, evaluate: scheduleEval, armAll, dispose,
     /** For tests: the stores and queues behind the commands. */
     internals: { gov, wakeQueue, heartbeatTimers, retryTimers, tick, fireMonitors, evaluateWatchdogs, readyTaskFor, recoveryItems, effectivePolicy, startStage },
   };
