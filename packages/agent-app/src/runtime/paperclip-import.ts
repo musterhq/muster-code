@@ -403,6 +403,8 @@ export async function importFromPaperclip(companyId: string, deps: ImportDeps): 
       const patch: Record<string, unknown> = {};
       const field = <T,>(name: string, current: T, incoming: T, show: (v: T) => string, apply: (v: T) => void) => {
         const before = last[name === 'owner' ? 'owner' : name] as T | undefined;
+        // No last-imported value (imported before they were recorded): any difference is yours, kept and reported; Paperclip's value becomes the baseline.
+        if (before === undefined && current !== incoming) { wrote[name] = incoming; conflict({ scope: 'task', label: `${label} ${clip(title, 40)}`, field: name, kept: show(current), paperclip: show(incoming) }); return; }
         if (before === undefined || current === before || current === incoming) { if (current !== incoming) apply(incoming); wrote[name] = incoming; return; }
         wrote[name] = before;
         if (incoming !== before) conflict({ scope: 'task', label: `${label} ${clip(title, 40)}`, field: name, kept: show(current), paperclip: show(incoming) });
@@ -421,9 +423,10 @@ export async function importFromPaperclip(companyId: string, deps: ImportDeps): 
     // Status: Paperclip's, unless you moved the task here since the last import.
     const target = STATE[String(issue.status)] ?? 'todo';
     const fresh = task;
-    const untouched = last.state === undefined || fresh.state === last.state || fresh.state === target;
+    const baseline = last.state !== undefined;
+    const untouched = !mapped || (baseline ? fresh.state === last.state || fresh.state === target : fresh.state === target);
     try {
-      if (!untouched) { if (mapped?.data.status !== str(issue.status)) conflict({ scope: 'task', label: `${label} ${clip(title, 40)}`, field: 'status', kept: fresh.state, paperclip: str(issue.status) ?? '' }); }
+      if (!untouched) { if (!baseline || mapped?.data.status !== str(issue.status)) conflict({ scope: 'task', label: `${label} ${clip(title, 40)}`, field: 'status', kept: fresh.state, paperclip: str(issue.status) ?? '' }); }
       else if (target === 'verified') {
         if (fresh.state !== 'verified') {
           const ready = fresh.state === 'implemented' || fresh.state === 'review' ? fresh : await invoke('project.tasks.setState', { projectId, id: fresh.id, revision: fresh.revision, state: 'review', reason: 'Done in Paperclip', actor: 'import' });
@@ -433,7 +436,7 @@ export async function importFromPaperclip(companyId: string, deps: ImportDeps): 
         task = await invoke('project.tasks.setState', { projectId, id: fresh.id, revision: fresh.revision, state: target, ...(target === 'blocked' ? { reason: 'Blocked in Paperclip' } : {}), actor: 'import' });
       }
     } catch (cause) { report.notes.push(`${label}: status kept (${cause instanceof Error ? cause.message : String(cause)})`); }
-    wrote.state = untouched ? task.state : last.state;
+    wrote.state = untouched ? task.state : baseline ? last.state : target;
     const labels = arr(issue.labels).map(l => ({ name: str(l.name) ?? '', color: str(l.color) })).filter(l => l.name);
     store.setMap('task', sourceId, task.id, str(issue.identifier), { parentSourceId: str(issue.parentId), status: untouched ? str(issue.status) : mapped?.data.status ?? str(issue.status), projectId, fullDescription: description.length > ACCEPTANCE_MAX, companyId, labels, imported: wrote });
     if (description.length > ACCEPTANCE_MAX && store.addComment({ sourceId: `description:${sourceId}`, taskId: task.id, authorKind: 'user', authorLabel: issue.createdByAgentId ? agentName.get(String(issue.createdByAgentId)) ?? 'Agent' : 'You', body: description, createdAt: str(issue.createdAt) ?? new Date().toISOString(), runId: null })) report.comments++;

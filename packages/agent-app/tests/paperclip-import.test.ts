@@ -605,3 +605,20 @@ test('review S3: an imported approval can be decided only on the server and comp
   await service.invoke('paperclip.config.set',{mode:'local',companyId:'00000000-0000-4000-8000-000000000999'});
   assert.ok((await approvalRows()).every(i=>!i.approvalId),'another company on the same server: none either');
 });
+
+test('review S5: tasks imported before last-imported values were recorded keep every difference as yours on the first re-import, and say so',async t=>{
+  const fx=await fixture(t);
+  const seeded=await seedLegacy(t,fx,{name:'OSS Manager',goal:'Imported goal',importMade:true});
+  const [edited,same]=seeded.tasks;
+  const item=(await fx.service.invoke('project.work',{projectId:seeded.project.id})).tasks.items.find(x=>x.id===edited)!;
+  await fx.service.invoke('project.tasks.edit',{projectId:seeded.project.id,id:edited,revision:item.revision,patch:{title:'Edited before upgrading'}});
+  const report=await fx.service.invoke('paperclip.import',{companyId:COMPANY});
+  const tasks=(await fx.service.invoke('project.work',{projectId:seeded.project.id})).tasks.items;
+  assert.equal(tasks.find(x=>x.id===edited)!.title,'Edited before upgrading','your pre-upgrade edit is kept');
+  assert.ok(report.conflicts.some(c=>c.scope==='task'&&c.field==='title'&&c.kept==='Edited before upgrading'),'and reported');
+  assert.equal(tasks.find(x=>x.id===same)!.title,seeded.issues[1].title,'a task with no difference is untouched');
+  // From then on there is a baseline: a Paperclip change to an untouched task applies.
+  const issue=(fx.raw.issues as Json[]).find(i=>i.id===seeded.issues[1].id)!;issue.title='Retitled in Paperclip';
+  await fx.service.invoke('paperclip.import',{companyId:COMPANY});
+  assert.equal((await fx.service.invoke('project.work',{projectId:seeded.project.id})).tasks.items.find(x=>x.id===same)!.title,'Retitled in Paperclip');
+});
