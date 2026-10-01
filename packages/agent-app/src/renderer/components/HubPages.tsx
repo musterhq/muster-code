@@ -3,14 +3,17 @@
  *  tagged by source. */
 import { AgentGovernancePanel } from './AgentGovernance';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { Box, History, Inbox, Pause, Play, Square, X } from 'lucide-react';
+import { Box, Download, History, Inbox, Pause, Play, Square, X } from 'lucide-react';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import type { LedgerSource, LedgerView, WorkspaceAgent, WorkspaceList, WorkspaceRun, WorkspaceSnapshot, WorkspaceSource } from '../../shared/domains/paperclip-protocol';
 import { formatUsd } from '../../shared/model-catalog';
 import { INBOX_BUCKETS, NAMES } from '../../shared/workspace-names';
 import { invoke } from '../bridge';
 import { dismissInboxItem, useInboxDismissals } from '../hubStore';
-import { buildActivity, type ActivityItem, type InboxBucket } from '../inboxModel';
+import { applyView, buildActivity, decisionOrder, nextWake, overdueDecision, snoozedNow, unreadNow, type ActivityItem, type InboxBucket, type InboxView } from '../inboxModel';
+import { GanttTimeline } from './Gantt';
+import { activityCsv, downloadText } from '../activityCsv';
+import { DecisionExtras, GateActions, InboxViews, SnoozeMenu, useInboxMeta } from './WorkInbox';
 import { agoLabel, exactTime } from '../relativeTime';
 import { notifyError, notifySuccess } from '../store';
 import { useStore } from '../useStore';
@@ -39,38 +42,54 @@ export function InboxPage({ snapshot, nav }: { snapshot: WorkspaceSnapshot | nul
   const { snapshot: app } = useStore();
   const [filter, setFilter] = useState<'all' | InboxBucket>('all');
   const [group, setGroup] = useState('all');
+  const [view, setView] = useState<InboxView>('all');
+  const [clock, setClock] = useState(0);
+  const { meta, reload: reloadMeta } = useInboxMeta();
   const dismissed = useInboxDismissals();
   const items = useMemo(() => buildActivity(app, snapshot, Date.now(), [], dismissed), [app?.chats, app?.attention, app?.projects, app?.folders, snapshot?.inbox, dismissed]);
-  const groups = useMemo(() => [...new Set(items.map(i => i.group))], [items]);
-  const counts = useMemo(() => { const c = new Map<string, number>(); for (const i of items) c.set(i.bucket, (c.get(i.bucket) ?? 0) + 1); return c; }, [items]);
-  const visible = items.filter(i => (filter === 'all' || i.bucket === filter) && (group === 'all' || i.group === group));
+  const owner = (taskId: string) => snapshot?.tasks.find(t => t.id === taskId)?.assigneeId;
+  const now = Date.now();
+  // A snooze ends by itself: one timeout for the earliest, never an interval.
+  useEffect(() => { const at = nextWake(items, meta); if (at === null) return; const t = setTimeout(() => setClock(n => n + 1), Math.min(at - Date.now() + 250, 2 ** 31 - 1)); return () => clearTimeout(t); }, [items, meta, clock]);
+  const inView = useMemo(() => applyView(items, view, meta, owner, now), [items, view, meta, snapshot?.tasks, clock]);
+  const viewCounts = useMemo<Record<InboxView, number>>(() => ({ all: applyView(items, 'all', meta, owner, now).length, mine: applyView(items, 'mine', meta, owner, now).length, unread: applyView(items, 'unread', meta, owner, now).length, snoozed: applyView(items, 'snoozed', meta, owner, now).length }), [items, meta, snapshot?.tasks, clock]);
+  const groups = useMemo(() => [...new Set(inView.map(i => i.group))], [inView]);
+  const counts = useMemo(() => { const c = new Map<string, number>(); for (const i of inView) c.set(i.bucket, (c.get(i.bucket) ?? 0) + 1); return c; }, [inView]);
+  const visible = decisionOrder(inView.filter(i => (filter === 'all' || i.bucket === filter) && (group === 'all' || i.group === group)), meta);
+  const markRead = (list: readonly ActivityItem[]) => { if (!list.length) return; void invoke('work.inbox.read', { items: list.map(i => ({ id: i.id, at: i.at })) }).then(reloadMeta, notifyError); };
+  const unreadVisible = visible.filter(i => unreadNow(i, meta));
   const byGroup = new Map<string, ActivityItem[]>();
   for (const item of visible) byGroup.set(item.group, [...(byGroup.get(item.group) ?? []), item]);
-  const act = (item: ActivityItem) => item.action.kind === 'chat' ? nav.onOpenChat(item.action.chatId) : item.action.kind === 'task' ? nav.onOpenTask(item.action.taskId) : item.action.kind === 'agent' ? nav.onOpenAgent(item.action.agentId) : undefined;
+  const act = (item: ActivityItem) => { markRead([item]); open(item); };
+  const open = (item: ActivityItem) => item.action.kind === 'chat' ? nav.onOpenChat(item.action.chatId) : item.action.kind === 'task' ? nav.onOpenTask(item.action.taskId) : item.action.kind === 'agent' ? nav.onOpenAgent(item.action.agentId) : undefined;
   const label = (item: ActivityItem) => item.action.kind === 'chat' ? item.bucket === 'needs' ? 'Answer' : item.kind === 'interrupted' ? 'Continue' : item.bucket === 'problems' ? 'Retry' : 'Open chat' : item.action.kind === 'task' ? item.bucket === 'needs' ? 'Answer' : 'Open task' : item.action.kind === 'agent' ? 'Open agent' : '';
   const mailProject = group !== 'all' ? app?.projects.find(p => p.name === group)?.id ?? null : null;
   // Paperclip offline: never claim "all caught up" when its items could not be read.
   const offline = snapshot?.paperclip?.stale ? snapshot.paperclip : null;
   return <div className="ws-page">
     <PageHeader title={NAMES.inbox} detail="Every chat and run that needs you, finished, or went wrong: folders, projects and Paperclip, in one place."/>
+    <InboxViews view={view} counts={viewCounts} onView={setView} unread={unreadVisible.length} onMarkAll={() => markRead(unreadVisible)}/>
     <div className="ws-filters" role="toolbar" aria-label="Filter the inbox">
-      {BUCKETS.map(f => <button key={f.id} type="button" className="ws-filter" aria-pressed={filter === f.id} onClick={() => setFilter(f.id)}>{f.label}<span>{f.id === 'all' ? items.length : counts.get(f.id) ?? 0}</span></button>)}
+      {BUCKETS.map(f => <button key={f.id} type="button" className="ws-filter" aria-pressed={filter === f.id} onClick={() => setFilter(f.id)}>{f.label}<span>{f.id === 'all' ? inView.length : counts.get(f.id) ?? 0}</span></button>)}
       {groups.length > 1 && <select className="ws-select" aria-label="Group" value={group} onChange={e => setGroup(e.target.value)}><option value="all">Everything</option>{groups.map(g => <option key={g} value={g}>{g}</option>)}</select>}
     </div>
     {offline && <ResourceState kind="partial" compact message={offline.cached ? `${NAMES.paperclip} can’t be reached, so its items are from the last copy and may be out of date.` : `${NAMES.paperclip} can’t be reached, so its questions, approvals and problems are not shown.`}/>}
-    {visible.length === 0 ? <ResourceState kind="empty" icon={<Inbox size={20}/>} title={items.length ? 'Nothing here' : offline ? 'Nothing from Muster needs you' : 'You’re all caught up'} message={items.length ? 'No items match these filters.' : offline ? `${NAMES.paperclip} items will show here once it can be reached.` : 'Questions and approvals from your agents, finished turns, reviews, problems and mail land here.'}/>
+    {visible.length === 0 ? <ResourceState kind="empty" icon={<Inbox size={20}/>} title={view === 'snoozed' ? 'Nothing snoozed' : view === 'unread' && items.length ? 'Nothing unread' : view === 'mine' && items.length ? 'Nothing is waiting on you' : items.length ? 'Nothing here' : offline ? 'Nothing from Muster needs you' : 'You’re all caught up'} message={view === 'snoozed' ? 'Snoozed items wait here and come back by themselves at the time you chose.' : items.length ? 'No items match these filters.' : offline ? `${NAMES.paperclip} items will show here once it can be reached.` : 'Questions and approvals from your agents, finished turns, reviews, problems and mail land here.'}/>
       : [...byGroup].map(([name, rows]) => <section key={name} className="ws-section" aria-label={name}>
         <h2 className="ws-group-title">{name}<span>{rows.length}</span></h2>
         <ul className="ws-rows">{rows.map(item => <li key={item.id}>
-          <div className={`ws-row ws-inbox-row${item.unread ? ' is-unread' : ''}`}>
-            <span className="ws-unread-dot" aria-label={item.unread ? 'Unread' : undefined}/>
+          <div className={`ws-row ws-inbox-row${unreadNow(item, meta) ? ' is-unread' : ''}`} data-overdue={overdueDecision(item, meta) || undefined}>
+            <span className="ws-unread-dot" aria-label={unreadNow(item, meta) ? 'Unread' : undefined}/>
             <StateChip tone={BUCKET_TONE[item.bucket]}>{KIND_LABEL[item.kind] ?? INBOX_BUCKETS[item.bucket]}</StateChip>
             <button type="button" className="ws-row-text ws-row-link" disabled={item.action.kind === 'none'} onClick={() => act(item)}><span className="ws-row-title">{item.title}</span><span className="ws-row-meta">{item.kind === 'failed_run' || item.kind === 'agent_error' ? explainRunError(item.why) : item.why}</span></button>
             {item.source === 'paperclip' && <span className="ws-source">{NAMES.paperclip}</span>}
             <span className="ws-row-age" title={exactTime(item.at)}>{agoLabel(item.at)}</span>
             {item.action.kind !== 'none' && <button type="button" className="settings-button secondary ws-row-action" onClick={() => act(item)}>{label(item)}</button>}
+            <GateActions item={item} onChanged={reloadMeta}/>
+            {item.source !== 'paperclip' && !item.id.startsWith('chat-') && <SnoozeMenu item={item} snoozed={snoozedNow(item, meta)} onChanged={reloadMeta}/>}
             <Tip label="Dismiss"><button type="button" className="icon-button ws-row-dismiss" aria-label={`Dismiss ${item.title}`} onClick={() => void dismissInboxItem(item).catch(notifyError)}><X size={13} aria-hidden="true"/></button></Tip>
           </div>
+          {item.bucket === 'needs' && item.taskId && !item.id.startsWith('ws:gate:') && <DecisionExtras item={item} meta={meta.get(item.id)} agentName={item.agentId ? snapshot?.agents.find(a => a.id === item.agentId)?.name ?? null : null} onChanged={reloadMeta}/>}
         </li>)}</ul>
       </section>)}
     {mailProject && <section className="ws-section" aria-label="Project mailbox"><MailboxInbox projectId={mailProject} title="This project’s mailbox: reply to your agents here."/></section>}
@@ -198,7 +217,7 @@ export function LedgerPage({ snapshot, nav, projectId }: { snapshot: WorkspaceSn
     </PageHeader>
     {chain && <p className="ws-chain" data-ok={chain.ok ? 'true' : 'false'}>{chain.ok ? chain.entries === 0 ? 'No Muster turns recorded yet' : `Muster chain verified · ${chain.entries} ${chain.entries === 1 ? 'entry' : 'entries'} · head ${chain.head.slice(0, 12)}` : `Chain broken at entry #${chain.brokenAt}: an entry was changed or removed after it was written.`}{imported ? ` · ${imported} imported from history (not chained)` : ''}</p>}
     {tab === 'activity' ? <ListPage kind="audit" embedded/>
-      : tab === 'timeline' ? <Timeline snapshot={snapshot} view={view} onOpenTask={nav.onOpenTask}/>
+      : tab === 'timeline' ? <GanttTimeline snapshot={snapshot} view={view} onOpenTask={nav.onOpenTask}/>
       : error ? <ResourceState kind="error" message="The ledger could not be read." detail={error} onRetry={() => setTick(n => n + 1)}/>
       : !view ? <ResourceState kind="loading" label="Reading the ledger" rows={4}/>
       : view.entries.length === 0 ? <ResourceState kind="empty" icon={<History size={20}/>} title="No turns recorded yet" message="Every agent turn from now on gets a receipt here. Past turns: Import history.">
@@ -209,28 +228,6 @@ export function LedgerPage({ snapshot, nav, projectId }: { snapshot: WorkspaceSn
           <div className="ws-ledger-head"><Monogram name={e.agent}/><span className="ws-ledger-agent">{e.agent}</span>{t ? <button type="button" className="ws-link" onClick={() => nav.onOpenTask(t.id)}>{t.key} · {t.title}</button> : <span className="ws-grow"/>}<SourceTag source={e.source}/><span className="ws-row-age" title={exactTime(e.endedAt)}>{agoLabel(e.endedAt)}</span></div>
           <Receipt entry={e}/>
         </li>; })}</ul>}
-  </div>;
-}
-
-/** Ledger › Timeline: one lane per agent, a dot per turn, and hand-off edges where work passed from one agent to another. */
-function Timeline({ snapshot, view, onOpenTask }: { snapshot: WorkspaceSnapshot; view: LedgerView | null; onOpenTask: (id: string) => void }): React.ReactElement {
-  const byId = useMemo(() => new Map(snapshot.tasks.map(t => [t.id, t])), [snapshot.tasks]);
-  const handoffs = useMemo(() => snapshot.tasks.filter(t => t.parentId && byId.get(t.parentId)?.assigneeLabel && t.assigneeLabel && byId.get(t.parentId)!.assigneeLabel !== t.assigneeLabel)
-    .map(t => ({ from: byId.get(t.parentId!)!.assigneeLabel!, to: t.assigneeLabel!, at: t.createdAt, task: t })), [snapshot.tasks, byId]);
-  const turns = (view?.entries ?? []).map(e => ({ agent: e.agent, at: e.endedAt, outcome: e.outcome, taskId: e.taskId }));
-  const lanes = [...new Set([...handoffs.flatMap(h => [h.from, h.to]), ...turns.map(t => t.agent)])];
-  const times = [...handoffs.map(h => Date.parse(h.at)), ...turns.map(t => Date.parse(t.at))].filter(Number.isFinite);
-  if (!lanes.length || !times.length) return <ResourceState kind="empty" icon={<History size={20}/>} message="Turns and hand-offs appear here as agents work."/>;
-  const min = Math.min(...times), max = Math.max(...times, min + 60_000), W = 1000, LANE = 34, LEFT = 150, H = lanes.length * LANE + 36;
-  const x = (iso: string) => LEFT + ((Date.parse(iso) - min) / (max - min)) * (W - LEFT - 20), y = (agent: string) => 18 + lanes.indexOf(agent) * LANE + LANE / 2;
-  return <div className="ws-timeline" role="img" aria-label={`Timeline: ${turns.length} turns and ${handoffs.length} hand-offs across ${lanes.length} agents`}>
-    <svg viewBox={`0 0 ${W} ${H}`} width="100%" preserveAspectRatio="xMinYMin meet">
-      {lanes.map(l => <g key={l}><line className="ws-timeline-lane" x1={LEFT} x2={W - 10} y1={y(l)} y2={y(l)}/><text className="ws-timeline-label" x={LEFT - 12} y={y(l) + 4} textAnchor="end">{l}</text></g>)}
-      {handoffs.map(h => <path key={`h:${h.task.id}`} className="ws-timeline-edge" d={`M${x(h.at)},${y(h.from)}C${x(h.at) + 24},${y(h.from)} ${x(h.at) + 24},${y(h.to)} ${x(h.at)},${y(h.to)}`}><title>{`${h.from} → ${h.to}: ${h.task.key} ${h.task.title}`}</title></path>)}
-      {turns.map((t, i) => <circle key={i} className="ws-timeline-dot" data-outcome={runTone(t.outcome)} cx={x(t.at)} cy={y(t.agent)} r={4} onClick={() => t.taskId && onOpenTask(t.taskId)}><title>{`${t.agent} · ${t.outcome} · ${new Date(t.at).toLocaleString()}`}</title></circle>)}
-      <text className="ws-timeline-label" x={LEFT} y={H - 6}>{new Date(min).toLocaleString()}</text>
-      <text className="ws-timeline-label" x={W - 10} y={H - 6} textAnchor="end">{new Date(max).toLocaleString()}</text>
-    </svg>
   </div>;
 }
 
@@ -247,6 +244,7 @@ export function ListPage({ kind, embedded = false, projectId }: { kind: 'artifac
   return <div className={embedded ? 'ws-embedded-list' : 'ws-page ws-page-fill'}>
     {!embedded && <PageHeader title={NAMES.outputs} detail="Files, documents and work products your agents produced, newest first."/>}
     {data?.note && <ResourceState kind="partial" compact message={data.note}/>}
+    {kind === 'audit' && rows.length > 0 && <div className="task-toolbar"><span className="task-toolbar-spacer"/><button type="button" className="settings-button secondary" onClick={() => downloadText(`muster-activity-${new Date().toISOString().slice(0, 10)}.csv`, activityCsv(rows))}><Download size={13}/>Export CSV</button></div>}
     {error ? <ResourceState kind="error" message="This list could not be loaded." detail={error} onRetry={() => setTick(n => n + 1)}/>
       : !data ? <ResourceState kind="loading" label="Loading" rows={4}/>
       : rows.length === 0 ? <ResourceState kind="empty" icon={<Icon size={20}/>} message={kind === 'artifacts' ? 'Files and documents your agents attach to tasks appear here.' : 'Task changes, runs and decisions are logged here as they happen.'}/>
