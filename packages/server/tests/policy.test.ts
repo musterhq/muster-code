@@ -168,3 +168,11 @@ test('review S4: Paperclip commands that spend, pause or change configuration ar
   assert.equal(classifyCommand('project.tasks.get'), 'read');
   assert.equal(classifyCommand('paperclip.snapshot'), 'read');
 });
+
+test('Review M1: applying a coordinator proposal can set the mission, so it is owner-only like project.update', () => {
+  const editor = accessView(user('member'), grants, owners), owner = accessView(user('member'), [{ projectId: 'p-shared', role: 'owner' }], owners);
+  denied(() => authorizeResource(editor, 'project.update', 'write', { id: 'p-shared', goal: 'x' }, snapshot), 'forbidden');
+  denied(() => authorizeResource(editor, 'project.coordinator.apply', 'write', { projectId: 'p-shared', key: 'k' }, snapshot), 'forbidden');
+  authorizeResource(owner, 'project.coordinator.apply', 'write', { projectId: 'p-shared', key: 'k' }, snapshot);
+  authorizeResource(owner, 'project.update', 'write', { id: 'p-shared', goal: 'x' }, snapshot);
+});
