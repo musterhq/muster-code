@@ -15,7 +15,7 @@ import type { Chat, ChatPermissionMode, TimelineItem } from '../../shared/protoc
 import { keyPrefixOf, DEFAULT_AGENT_ID, LOCAL_OWNER_ID, type ProjectMember } from '../../shared/domains/project-team-protocol.ts';
 import { clampPermission, type ProjectDetails, type ProjectTaskRecord, type TaskOwner, type TaskState } from '../../shared/domains/projects-protocol.ts';
 import {
-  BUNDLE_MAIN, BUNDLE_STANDARD, DEFAULT_CAPABILITIES, DEFAULT_GOVERNANCE, DEFAULT_MAX_REVIEW_ROUNDS, MAX_TOOL_RULES, RUN_REASON_LABEL,
+  BUNDLE_MAIN, BUNDLE_STANDARD, DEFAULT_CAPABILITIES, DEFAULT_GOVERNANCE, LEGACY_GOVERNANCE, DEFAULT_MAX_REVIEW_ROUNDS, MAX_TOOL_RULES, RUN_REASON_LABEL,
   type AgentCapabilities, type AgentGovernance, type AgentGovernanceView, type BundleFile, type Decision, type ExecutionPolicy, type GovernanceSettings, type GovernanceState, type HoldMode, type HoldRelease, type Liveness,
   type MonitorPolicy, type PolicyInput, type RecoveryAction, type RecoveryItem, type RunReason, type SecretProposal, type StopMode, type TaskHold, type TaskMonitor, type TaskStageState, type Watchdog, type WatchdogVerdict, type WakeRecord,
 } from '../../shared/domains/project-governance-protocol.ts';
@@ -70,12 +70,24 @@ export function createGovernance(ctx: DomainContext, deps: GovernanceDeps) {
   let store: GovernanceStore | undefined, queue: WakeQueue | undefined, vault: ProjectVault | undefined, disposed = false;
   const now = () => deps.now?.() ?? governanceClock.now?.() ?? Date.now();
   const timers = deps.timers ?? governanceClock.timers ?? { set: (fn: () => void, ms: number) => { const t = setTimeout(fn, Math.min(ms, MAX_TIMER_MS)); t.unref?.(); return t; }, clear: (h: unknown) => clearTimeout(h as ReturnType<typeof setTimeout>) };
+  /** Once, at the first start after the update: every project that already exists keeps the old run behaviour. A fresh install has none, so nothing is opened. */
+  function seedLegacy() {
+    try {
+      const d = ctx.db();
+      if (d.prepare("SELECT 1 FROM meta WHERE key = 'governance_seeded'").get()) return;
+      const rows = d.prepare('SELECT id FROM projects').all() as { id: string }[];
+      if (rows.length) { const g = gov(); for (const r of rows) if (!g.hasSettings(r.id)) g.setSettings(r.id, LEGACY_GOVERNANCE); }
+      d.prepare("INSERT OR REPLACE INTO meta (key, value) VALUES ('governance_seeded', ?)").run(new Date(now()).toISOString());
+    } catch { /* a bare test context has no meta table: the defaults apply */ }
+  }
   const gov = () => store ??= Object.assign(new GovernanceStore(ctx.dataDir), { clock: now });
   const tasks = () => deps.tasks();
   const team = () => deps.team.store();
   const record = (projectId: string, kind: string, summary: string, refId: string | null = null, actor: Actor = 'system') => { tasks().record(projectId, kind, summary, refId, actor); };
   const secretStore = (): VaultStore => deps.secrets?.() ?? governanceClock.secrets?.() ?? activeSecretStore() ?? new SecretStore(ctx.dataDir);
   const theVault = () => vault ??= new ProjectVault(gov(), secretStore);
+
+  seedLegacy();
 
   // ── names and lookups ───────────────────────────────────────────────────────
   const prefixOf = (projectId: string) => team().settings(projectId).keyPrefix ?? keyPrefixOf(deps.details(projectId).name);

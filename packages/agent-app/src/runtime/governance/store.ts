@@ -103,6 +103,7 @@ export class GovernanceStore {
     const r = this.db.prepare('SELECT json FROM gov_settings WHERE project_id=?').get(projectId) as { json: string } | undefined;
     return { ...DEFAULT_GOVERNANCE, ...(r ? json<Partial<GovernanceSettings>>(r.json, {}) : {}) };
   }
+  hasSettings(projectId: string): boolean { return Boolean(this.db.prepare('SELECT 1 FROM gov_settings WHERE project_id=?').get(projectId)); }
   setSettings(projectId: string, next: GovernanceSettings): GovernanceSettings {
     this.db.prepare('INSERT INTO gov_settings(project_id,json,updated_at) VALUES(?,?,?) ON CONFLICT(project_id) DO UPDATE SET json=excluded.json,updated_at=excluded.updated_at').run(projectId, JSON.stringify(next), this.stamp());
     return this.settings(projectId);

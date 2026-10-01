@@ -9,6 +9,8 @@ const PLAN = /\b(plan|steps?|approach|proposal|outline|i['’]?ll|i will|i['’]
 export function looksLikePlan(text: string): boolean {
   const t = text.trim();
   if (!t || t.length > 4000) return false;
+  // A message that ends by asking you something is a question, not a plan: nothing to push the agent on with.
+  if (/\?[\s"'”’)\]*_`]*$/.test(t) || /\b(could you|can you|please (provide|confirm|let me know)|i need (your|you to)|which (one|do you)|do you want)\b/i.test(t)) return false;
   return PLAN.test(t) && !DONE.test(t);
 }
 export function classifyRun(f: RunFacts): Liveness {

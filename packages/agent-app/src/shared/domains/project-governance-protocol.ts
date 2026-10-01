@@ -159,7 +159,10 @@ export interface GovernanceSettings {
   /** At 100% of the project's monthly budget, no new run starts (C28). Running work finishes. */
   budgetHardStop: boolean;
 }
+/** New projects start with the stronger run policy. */
 export const DEFAULT_GOVERNANCE: GovernanceSettings = { runComment: 'require', maxContinuations: 2, maxRetries: 2, defaultPolicy: null, watchdogAgentId: null, stormPerMinute: 12, budgetHardStop: true };
+/** Projects that existed before the update keep how runs behaved before it: nothing is asked, continued, retried or stopped until you opt in. */
+export const LEGACY_GOVERNANCE: GovernanceSettings = { ...DEFAULT_GOVERNANCE, runComment: 'off', maxContinuations: 0, maxRetries: 0, budgetHardStop: false };
 
 // ── Watchdogs, monitors, breakers (C17) ──────────────────────────────────────
 export type WatchdogState = 'open' | 'reviewing' | 'accepted' | 'reopened' | 'reassigned' | 'dismissed';
