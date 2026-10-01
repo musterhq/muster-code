@@ -42,6 +42,8 @@ CREATE TABLE IF NOT EXISTS summaries(id TEXT PRIMARY KEY,project_id TEXT NOT NUL
 CREATE INDEX IF NOT EXISTS summaries_project ON summaries(project_id);
 CREATE TABLE IF NOT EXISTS summary_revs(summary_id TEXT NOT NULL,rev INTEGER NOT NULL,text TEXT NOT NULL,fingerprint TEXT NOT NULL,tasks INTEGER NOT NULL DEFAULT 0,chat_id TEXT,created_at TEXT NOT NULL,PRIMARY KEY(summary_id,rev));
 `;
+/** How many documents (the most recently changed) a workspace search scans. */
+export const SEARCH_DOC_SCAN = 500;
 const json = <T>(raw: unknown, fallback: T): T => { try { const v = JSON.parse(String(raw)); return v ?? fallback; } catch { return fallback; } };
 
 type Row = Record<string, unknown>;
@@ -176,8 +178,9 @@ export class WorkStore {
   /** The latest revision of every document whose text or key holds every term (G19 search). Case-insensitive. */
   searchDocs(terms: readonly string[], limit = 40): { taskId: string; projectId: string; key: string; rev: number; text: string; updatedAt: string }[] {
     const like = (t: string) => `%${t.replace(/[\\%_]/g, m => `\\${m}`)}%`;
-    const where = terms.map(() => "lower(r.text||' '||d.key) LIKE ? ESCAPE '\\'").join(' AND ');
-    return this.all(`SELECT d.task_id,d.project_id,d.key,d.rev,d.updated_at,r.text FROM task_docs d JOIN task_doc_revs r ON r.task_id=d.task_id AND r.key=d.key AND r.rev=d.rev ${where ? `WHERE ${where}` : ''} ORDER BY d.updated_at DESC LIMIT ?`, ...terms.map(t => like(t.toLowerCase())), limit)
+    const where = terms.map(() => "lower(substr(r.text,1,60000)||' '||d.key) LIKE ? ESCAPE '\\'").join(' AND ');
+    // Bounded: only the most recently changed documents are scanned, and only their first 60,000 characters.
+    return this.all(`SELECT d.task_id,d.project_id,d.key,d.rev,d.updated_at,r.text FROM (SELECT * FROM task_docs ORDER BY updated_at DESC LIMIT ${SEARCH_DOC_SCAN}) d JOIN task_doc_revs r ON r.task_id=d.task_id AND r.key=d.key AND r.rev=d.rev ${where ? `WHERE ${where}` : ''} ORDER BY d.updated_at DESC LIMIT ?`, ...terms.map(t => like(t.toLowerCase())), limit)
       .map(r => ({ taskId: s(r.task_id), projectId: s(r.project_id), key: s(r.key), rev: Number(r.rev), text: s(r.text), updatedAt: s(r.updated_at) }));
   }
   headRev(taskId: string, key: string): number | null { const r = this.one('SELECT rev FROM task_docs WHERE task_id=? AND key=?', taskId, key); return r ? Number(r.rev) : null; }

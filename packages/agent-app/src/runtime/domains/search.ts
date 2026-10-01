@@ -19,6 +19,13 @@ import type { DomainContext, DomainModule } from './types.ts';
 
 const KINDS: SearchKind[] = ['tasks', 'agents', 'projects', 'documents', 'comments', 'outputs', 'decisions'];
 const HARD_CAP = 100, PER_KIND = 60;
+/** One palette session: the snapshot, the outputs list and the decisions are reused for this long, and dropped at once when a command changes something. */
+export const SEARCH_CACHE_MS = 3000;
+/** Tests and the benchmark: how many times each source was really read. */
+export const searchStats = { snapshots: 0, artifacts: 0, decisions: 0 };
+export const searchClock: { now?: () => number } = {};
+/** What changes the workspace: the last word of a command that adds, edits, removes, starts or decides something. Reads (the palette's own chat.search, the snapshot's own project.work) never drop the cache. */
+const WRITES = /\.(add|create|update|set(?!tings)\w*|save|delete|remove|dispatch|apply|dismiss|send|start|stop|retry|archive|restore|verify|edit\w*|decide|supersede|replace|pause\w*|resume\w*|rename|link|unlink|accept|cancel|wake|comment|respond|revoke|import\w*|toggle|steer|run\w*|move|reorder|assign\w*)$/;
 
 /** How well `terms` match a title: exact word start beats a substring; null when a term is missing. */
 function rank(text: string, terms: readonly string[]): number | null {
@@ -35,6 +42,17 @@ const blank = (kind: SearchKind, id: string, title: string): SearchRow => ({ kin
 
 export function createSearchDomain(ctx: DomainContext): DomainModule {
   let work: WorkStore | undefined;
+  const cache = new Map<string, { at: number; value: Promise<unknown> }>();
+  const clock = () => searchClock.now?.() ?? Date.now();
+  const cached = <T>(key: string, load: () => Promise<T>): Promise<T> => {
+    const hit = cache.get(key);
+    if (hit && clock() - hit.at < SEARCH_CACHE_MS) return hit.value as Promise<T>;
+    const value = load();
+    cache.set(key, { at: clock(), value });
+    return value;
+  };
+  const offCommand = ctx.hooks?.onCommand?.(({ command }) => { if (WRITES.test(command)) cache.clear(); });
+  const offSettled = ctx.hooks?.onRunSettled?.(() => { cache.clear(); });
   const docs = () => { if (!work && existsSync(join(ctx.dataDir, 'muster-project-work.sqlite'))) work = new WorkStore(ctx.dataDir); return work; };
 
   async function search(input: Record<string, unknown>): Promise<SearchResult> {
@@ -47,7 +65,7 @@ export function createSearchDomain(ctx: DomainContext): DomainModule {
     if (!q.terms.length && !q.identifier && q.scope === 'all') return empty();
     const want = (k: SearchKind) => q.scope === 'all' || q.scope === k;
     const terms = q.terms;
-    const snapshot: WorkspaceSnapshot | null = await ctx.invoke('paperclip.snapshot', {}).catch(() => null);
+    const snapshot: WorkspaceSnapshot | null = await cached('snapshot', () => { searchStats.snapshots++; return ctx.invoke('paperclip.snapshot', {}).catch(() => null); });
     const projectName = new Map((snapshot?.projects ?? []).map(p => [p.id, p.name]));
     const rows: (SearchRow & { score: number })[] = [];
     const push = (row: SearchRow, score: number) => { counts[row.kind]++; rows.push({ ...row, score }); };
@@ -99,16 +117,18 @@ export function createSearchDomain(ctx: DomainContext): DomainModule {
       }
     }
     // ── outputs and decisions ───────────────────────────────────────────────
-    if (want('outputs') && terms.length) {
-      const list = await ctx.invoke('paperclip.list', { kind: 'artifacts' }).catch(() => null);
+    // Outputs and decisions are looked up only when asked for or when the query has two words: one letter matches everything and is not worth a Paperclip call.
+    const deep = q.scope !== 'all' || terms.length >= 2;
+    if (want('outputs') && terms.length && deep) {
+      const list = await cached('artifacts', () => { searchStats.artifacts++; return ctx.invoke('paperclip.list', { kind: 'artifacts' }).catch(() => null); });
       for (const r of list?.rows ?? []) {
         const score = rank(`${r.title} ${r.path ?? ''} ${r.detail}`, terms); if (score === null) continue;
         push({ ...blank('outputs', r.id, r.title), status: r.status, source: r.source, projectId: r.projectId ?? null, projectName: projectName.get(r.projectId ?? '') ?? null, taskId: r.taskId ?? null, snippet: r.detail, titleRanges: termRanges(r.title, terms), at: r.at }, score);
       }
     }
-    if (want('decisions') && terms.length) for (const p of (snapshot?.projects ?? []).filter(x => x.source === 'local')) {
-      const list = await ctx.invoke('project.decisions.list', { projectId: p.id }).catch(() => null);
-      for (const d of list?.items ?? []) {
+    const decisionLists = want('decisions') && terms.length && deep ? await cached('decisions', async () => { searchStats.decisions++; return Promise.all((snapshot?.projects ?? []).filter(x => x.source === 'local').map(async p => ({ p, items: (await ctx.invoke('project.decisions.list', { projectId: p.id }).catch(() => null))?.items ?? [] }))); }) : [];
+    for (const { p, items } of decisionLists) {
+      for (const d of items) {
         const score = rank(`${d.title} ${d.rationale}`, terms); if (score === null) continue;
         const { snippet, ranges } = snippetAround(d.rationale || d.title, terms);
         push({ ...blank('decisions', d.id, d.title), status: d.status, source: 'local', projectId: p.id, projectName: p.name, snippet, snippetRanges: ranges, titleRanges: termRanges(d.title, terms), at: d.updatedAt }, score + (d.status === 'active' ? 3 : 0));
@@ -120,5 +140,5 @@ export function createSearchDomain(ctx: DomainContext): DomainModule {
     return { query: q.text, scope: q.scope, rows: out, counts, identifier, truncated: shown.length > out.length };
   }
 
-  return { handlers: { 'search.workspace': input => search(input) }, dispose() { work?.close(); work = undefined; } };
+  return { handlers: { 'search.workspace': input => search(input) }, dispose() { offCommand?.(); offSettled?.(); cache.clear(); work?.close(); work = undefined; } };
 }
