@@ -63,7 +63,7 @@ test('G40/G12: create, assign and list respect can-assign, scope and low-trust c
   assert.match((await r.tool('task_list', { scope: 'subtasks' })).text, /Write tests/);
   assert.match((await r.tool('agent_list')).text, /QA/);
   await h.s.invoke('project.agent.gov.set', { projectId: h.project.id, memberId: cto.id, capabilities: { assignScope: 'project' } });
-  assert.equal((await r.tool('task_assign', { task: (await h.task(elsewhere.id)).id, assignee: 'CTO' })).error, true === false ? false : false);
+  assert.equal((await r.tool('task_assign', { task: (await h.task(elsewhere.id)).id, assignee: 'CTO' })).error, false);
   assert.equal((await h.task(elsewhere.id)).owner.id, cto.id);
   await h.s.invoke('project.agent.gov.set', { projectId: h.project.id, memberId: cto.id, capabilities: { trust: 'low-trust', containment: 'task' } });
   const low = await r.tool('task_create', { title: 'Nope' }); assert.equal(low.error, true); assert.match(low.text, /contained/);
