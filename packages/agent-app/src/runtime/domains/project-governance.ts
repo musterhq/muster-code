@@ -650,11 +650,12 @@ export function createGovernance(ctx: DomainContext, deps: GovernanceDeps) {
 
   // ── permissions (G12) ───────────────────────────────────────────────────────
   /** May `acting` (the agent whose run this is) create or assign work at `target`? A sentence when not. */
-  function mayAssign(projectId: string, memberId: string, actingTask: ProjectTask, target: { taskId: string | null }): string | null {
+  function mayAssign(projectId: string, memberId: string, actingTask: ProjectTask, target: { taskId: string | null; create?: boolean }): string | null {
     const caps = agentGov(projectId, memberId).capabilities, tree = treeOf(projectId);
     if (!caps.canAssign) return `${nameOf(projectId, memberId)} is not allowed to create or assign tasks. Turn on “Can assign tasks” in their permissions.`;
     const under = (rootId: string) => target.taskId === null || new Set(subtreeIds(tree, rootId)).has(target.taskId);
     if (caps.trust === 'low-trust') {
+      if (caps.containment === 'task' && target.create) return `${nameOf(projectId, memberId)} is contained to this one task and cannot create new ones.`;
       if (caps.containment === 'task' && target.taskId !== null && target.taskId !== actingTask.id) return `${nameOf(projectId, memberId)} is contained to this one task.`;
       if (caps.containment === 'task' && target.taskId === null) return `${nameOf(projectId, memberId)} is contained to this one task and cannot create new ones.`;
       if (caps.containment === 'root-task' && !under(rootOf(tree, actingTask.id))) return `${nameOf(projectId, memberId)} is contained to its root task and the tasks under it.`;
@@ -662,6 +663,10 @@ export function createGovernance(ctx: DomainContext, deps: GovernanceDeps) {
     if (caps.assignScope === 'subtree' && !under(actingTask.id)) return `${nameOf(projectId, memberId)} may only assign work under its own task.`;
     return null;
   }
+  /** A low-trust agent may hand work only to itself or to another low-trust agent, so delegation never raises access. A sentence when refused. */
+  const lowTrustAssignee = (projectId: string, creatorId: string, assigneeId: string): string | null =>
+    agentGov(projectId, creatorId).capabilities.trust === 'low-trust' && assigneeId !== creatorId && agentGov(projectId, assigneeId).capabilities.trust !== 'low-trust'
+      ? `${nameOf(projectId, creatorId)} is low-trust and may only hand work to itself or another low-trust agent, not ${nameOf(projectId, assigneeId)}.` : null;
   const trustCeiling = (projectId: string, memberId: string | null): ChatPermissionMode | null => memberId && agentGov(projectId, memberId).capabilities.trust === 'low-trust' ? 'workspace' : null;
   /** The permission mode a task run gets: the usual intersection, further capped for low-trust agents. */
   function clampAccess(projectId: string, owner: TaskOwner, access: ChatPermissionMode): ChatPermissionMode {
@@ -685,7 +690,7 @@ export function createGovernance(ctx: DomainContext, deps: GovernanceDeps) {
     for (const e of sr.errors) record(projectId, 'task.secret-requested', `${who}'s secret request was not understood: ${e}`, task.id, 'system');
     const sub = subtaskRequests(text);
     if (sub.creates.length || sub.reassigns.length) {
-      const refusal = sub.creates.length ? mayAssign(projectId, memberId, task, { taskId: task.id }) : sub.reassigns.length ? mayAssign(projectId, memberId, task, { taskId: task.id }) : null;
+      const refusal = mayAssign(projectId, memberId, task, { taskId: task.id, create: sub.creates.length > 0 });
       if (refusal && !agentGov(projectId, memberId).capabilities.canAssign) record(projectId, 'task.permission-denied', `${refusal} ${sub.creates.length + sub.reassigns.length} requested ${sub.creates.length + sub.reassigns.length === 1 ? 'change was' : 'changes were'} not applied.`, task.id, 'system');
       else if (refusal && sub.creates.length) record(projectId, 'task.permission-denied', `${refusal} ${sub.creates.length} requested ${sub.creates.length === 1 ? 'subtask was' : 'subtasks were'} not created.`, task.id, 'system');
       else {
@@ -694,14 +699,17 @@ export function createGovernance(ctx: DomainContext, deps: GovernanceDeps) {
         let made = 0;
         for (const c of sub.creates) {
           const assignee = c.assignee ? find(c.assignee) : undefined;
+          const lowAssign = lowTrustAssignee(projectId, memberId, assignee?.id ?? memberId);
+          if (assignee && lowAssign) { record(projectId, 'task.permission-denied', `${lowAssign} “${clip(c.title, 60)}” was not created.`, task.id, 'system'); continue; }
           if (c.assignee && !assignee) { record(projectId, 'task.permission-denied', `${who} named “${c.assignee}”, who is not an active agent here. “${clip(c.title, 60)}” was not created.`, task.id, 'system'); continue; }
-          const t = tasks().createTask({ projectId, title: c.title, acceptance: c.acceptance, dependencies: [], owner: assignee ? { kind: 'agent', id: assignee.id } : task.owner, parentId: task.id, ...(c.priority !== null ? { priority: c.priority } : {}) }, 'agent');
+          const t = tasks().createTask({ projectId, title: c.title, acceptance: c.acceptance, dependencies: [], owner: assignee ? { kind: 'agent', id: assignee.id } : task.owner, parentId: task.id, ...(c.priority !== null ? { priority: c.priority } : {}), ...(trustCeiling(projectId, memberId) ? { permissionMode: trustCeiling(projectId, memberId)! } : {}) }, 'agent');
           record(projectId, 'task.delegated', `${who} created ${keyOf(t)} “${clip(t.title, 60)}” under ${keyOf(task)}${assignee ? ` for ${assignee.name}` : ''}.`, t.id, 'agent'); made++;
         }
         for (const r of sub.reassigns) {
           const target = tasks().listTasks(projectId).items.find(t => keyOf(t).toLowerCase() === r.key.toLowerCase()), to = find(r.to);
           const why = !target ? `${r.key} does not exist.` : !to ? `“${r.to}” is not an active agent here.` : mayAssign(projectId, memberId, task, { taskId: target.id });
-          if (why || !target || !to) { record(projectId, 'task.permission-denied', `${who} could not reassign ${r.key}: ${why}`, task.id, 'system'); continue; }
+          const low = to ? lowTrustAssignee(projectId, memberId, to.id) : null;
+          if (why || low || !target || !to) { record(projectId, 'task.permission-denied', `${who} could not reassign ${r.key}: ${why || low}`, task.id, 'system'); continue; }
           tasks().editTask({ projectId, id: target.id, revision: target.revision, patch: { owner: { kind: 'agent', id: to.id } } }, 'agent');
           record(projectId, 'task.delegated', `${who} reassigned ${keyOf(target)} to ${to.name}.`, target.id, 'agent'); made++;
         }
