@@ -337,6 +337,25 @@ test('turn ledger: entries chain by hash, verify catches an edited entry, and fi
   assert.equal(await filesChanged(repo,null),null,'no baseline, no file claims');
 });
 
+test('turn ledger: a fresh database has the baselines table, and a files error never drops the Receipt (S42)',async t=>{
+  const {DatabaseSync}=await import('node:sqlite');
+  const {TurnLedger,attachTurnLedger}=await import('../src/runtime/turn-ledger.ts');
+  const db=new DatabaseSync(':memory:');t.after(()=>db.close());
+  const ledger=new TurnLedger(db),appended:any[]=[],hooks:any={};
+  assert.ok(db.prepare("SELECT name FROM sqlite_master WHERE name='review_baselines'").get(),'created with the ledger, before any capture');
+  const context={db:()=>db,hooks:{onRunStarted:(fn:any)=>{hooks.start=fn;return()=>{};},onRunSettled:(fn:any)=>{hooks.settle=fn;return()=>{};},onProviderEvent:(fn:any)=>{hooks.event=fn;return()=>{};}}} as unknown as DomainContext;
+  const off=attachTurnLedger(context,()=>ledger,e=>appended.push(e));t.after(off);
+  // A 0 ms project turn with no baseline captured yet: the Receipt is kept, with no file list.
+  await hooks.start({chat:{id:'c1',title:'Run',projectId:'p1'},runId:'r0',cwd:'/nonexistent'});
+  await hooks.settle({chat:{id:'c1',title:'Run',projectId:'p1'},runId:'r0',status:'completed'});
+  // Even if the table is gone, the entry is still written.
+  db.exec('DROP TABLE review_baselines');
+  await hooks.start({chat:{id:'c1',title:'Run',projectId:'p1'},runId:'r1',cwd:'/nonexistent'});
+  await hooks.settle({chat:{id:'c1',title:'Run',projectId:'p1'},runId:'r1',status:'completed'});
+  assert.deepEqual(appended.map(e=>`${e.runId}:${e.files}`),['r0:null','r1:null']);
+  assert.equal(ledger.verify().entries,2);
+});
+
 test('turn ledger: only project and task runs diff the tree; everyday chats pay nothing new',async t=>{
   const {DatabaseSync}=await import('node:sqlite');
   const {TurnLedger,attachTurnLedger}=await import('../src/runtime/turn-ledger.ts');
@@ -345,7 +364,6 @@ test('turn ledger: only project and task runs diff the tree; everyday chats pay 
   const repo=await mkdtemp(join(tmpdir(),'muster-ledger-'));t.after(()=>rm(repo,{recursive:true,force:true}));
   execFileSync('git',['init','-q'],{cwd:repo});await writeFile(join(repo,'a.txt'),'one\n');
   const db=new DatabaseSync(':memory:');t.after(()=>db.close());
-  db.exec('CREATE TABLE review_baselines (run_id TEXT PRIMARY KEY, chat_id TEXT NOT NULL, folder_id TEXT, tree_sha TEXT, created_at TEXT NOT NULL, reason TEXT)');
   const ledger=new TurnLedger(db),appended:any[]=[];
   const hooks:any={};
   const context={db:()=>db,hooks:{onRunStarted:(fn:any)=>{hooks.start=fn;return()=>{};},onRunSettled:(fn:any)=>{hooks.settle=fn;return()=>{};},onProviderEvent:(fn:any)=>{hooks.event=fn;return()=>{};}}} as unknown as DomainContext;

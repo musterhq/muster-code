@@ -15,7 +15,7 @@ import type { DatabaseSync } from 'node:sqlite';
 import type { LedgerEntry, LedgerFile } from '../shared/domains/paperclip-protocol.ts';
 import { estimateCostUsd, ZERO_USAGE, type UsageTotals } from '../shared/model-catalog.ts';
 import { usageStep, type UsageCursor } from './model-usage.ts';
-import { snapshotTree } from './review-baseline.ts';
+import { ReviewBaselineStore, snapshotTree } from './review-baseline.ts';
 import type { DomainContext } from './domains/types.ts';
 
 const GENESIS = '0'.repeat(64);
@@ -33,6 +33,9 @@ export class TurnLedger {
       CREATE INDEX IF NOT EXISTS turn_ledger_history_chat ON turn_ledger_history(chat_id, ended_at);
       CREATE INDEX IF NOT EXISTS turn_ledger_history_project ON turn_ledger_history(project_id, ended_at);
       CREATE INDEX IF NOT EXISTS turn_ledger_history_ended ON turn_ledger_history(ended_at);`);
+    // The baselines a Receipt diffs against, created up front: a turn that settles before the review domain's first
+    // (fire-and-forget) capture must still find the table rather than lose its whole entry.
+    new ReviewBaselineStore(db);
   }
   head(): string { const row = this.db.prepare('SELECT hash FROM turn_ledger ORDER BY seq DESC LIMIT 1').get() as { hash: string } | undefined; return row?.hash ?? GENESIS; }
   append(body: Body): LedgerEntry {
@@ -131,8 +134,15 @@ export function attachTurnLedger(context: DomainContext, ledger: () => TurnLedge
     if (!turn) return;
     try {
       // Files cost a second full-tree snapshot, so only project and task runs pay it; everyday chats record no files.
-      const baseline = run.chat.projectId ? context.db().prepare('SELECT tree_sha FROM review_baselines WHERE run_id = ?').get(run.runId) as { tree_sha: string | null } | undefined : undefined;
-      const files = run.chat.projectId ? await filesChanged(turn.cwd, baseline?.tree_sha ?? null) : null;
+      // A files error costs the Receipt its file list (null), never the whole entry.
+      let files: LedgerFile[] | null = null;
+      if (run.chat.projectId) {
+        try {
+          ledger();
+          const baseline = context.db().prepare('SELECT tree_sha FROM review_baselines WHERE run_id = ?').get(run.runId) as { tree_sha: string | null } | undefined;
+          files = await filesChanged(turn.cwd, baseline?.tree_sha ?? null);
+        } catch { files = null; }
+      }
       const pricing = (() => { try { const provider = context.modelCatalog?.().providers.find(p => p.id === run.chat.providerId) as unknown as { models?: { id: string; pricing?: unknown }[] } | undefined; return provider?.models?.find(m => m.id === run.chat.model)?.pricing ?? null; } catch { return null; } })();
       const endedAt = new Date().toISOString();
       // A task run is the task's: its Roster owner, the task, trigger "task" (Costs, Timeline and task links key on these).
