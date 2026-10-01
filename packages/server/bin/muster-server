@@ -1,0 +1,13 @@
+#!/bin/sh
+# muster-server launcher: prefers the Node runtime shipped in the release tarball (bin/node), else `node` on PATH (must be Node 24).
+set -e
+SELF="$0"
+while [ -h "$SELF" ]; do
+  LINK="$(readlink "$SELF")"
+  case "$LINK" in /*) SELF="$LINK" ;; *) SELF="$(dirname "$SELF")/$LINK" ;; esac
+done
+ROOT="$(cd "$(dirname "$SELF")/.." && pwd -P)"
+NODE="$ROOT/bin/node"
+[ -x "$NODE" ] || NODE="$(command -v node || true)"
+if [ -z "$NODE" ]; then echo "muster-server: Node.js 24 is required (or use the release tarball, which includes it)." >&2; exit 127; fi
+exec "$NODE" --disable-warning=ExperimentalWarning --max-old-space-size="${MUSTER_SERVER_MAX_OLD_SPACE:-1024}" "$ROOT/dist/muster-server.cjs" "$@"
