@@ -50,6 +50,7 @@ test('G10: cancel needs the task key typed, cancels the subtree, and Restore put
   await h.s.invoke('project.tasks.setState', { projectId: h.project.id, id: b.id, revision: b.revision, state: 'blocked', reason: 'waiting' });
   await assert.rejects(h.s.invoke('project.holds.create', { projectId: h.project.id, taskId: root.id, mode: 'cancel', confirm: 'nope' }), /Type OSS-1 to confirm/);
   const hold = await h.s.invoke('project.holds.create', { projectId: h.project.id, taskId: root.id, mode: 'cancel', confirm: 'oss-1', release: 'after-runs' });
+  assert.equal(hold.release, 'manual', 'a cancel hold stays until restored, whatever release was asked for');
   for (const id of [root.id, a.id, b.id]) assert.equal(await h.state(id), 'cancelled');
   // No run was active, so an "after runs" hold closes on the next settle housekeeping; restore still works from the record.
   const rel = await h.s.invoke('project.holds.release', { projectId: h.project.id, id: hold.id });

@@ -346,7 +346,8 @@ export function createGovernance(ctx: DomainContext, deps: GovernanceDeps) {
   };
   async function createHold(input: Record<string, unknown>): Promise<TaskHold> {
     const projectId = id(input.projectId, 'project id'), taskId = id(input.taskId, 'task id'), mode = input.mode === 'cancel' ? 'cancel' : input.mode === 'pause' ? 'pause' : (() => { throw new Error('Choose pause or cancel.'); })();
-    const release: HoldRelease = input.release === 'after-runs' ? 'after-runs' : 'manual';
+    // A cancel hold always stays until you restore or dismiss it: closing itself would make Restore impossible.
+    const release: HoldRelease = mode === 'pause' && input.release === 'after-runs' ? 'after-runs' : 'manual';
     const root = tasks().assertTaskProject(projectId, taskId), tree = treeOf(projectId), ids = subtreeIds(tree, taskId), idSet = new Set(ids);
     if (gov().holds(projectId, 'active').some(h => h.rootTaskId === taskId)) throw new Error('This task already has an active hold.');
     const key = keyOf(root);
@@ -381,12 +382,19 @@ export function createGovernance(ctx: DomainContext, deps: GovernanceDeps) {
       for (const [taskId, state] of Object.entries(h.restore)) {
         const t = tasks().getTask(taskId);
         // Only tasks the hold itself cancelled go back; one you changed since is left alone.
-        if (!t || t.state !== 'cancelled' || state === 'cancelled' || state === 'running' || state === 'needs-input' || state === 'verified') continue;
+        if (!t || t.state !== 'cancelled' || state === 'cancelled' || state === 'verified') continue;
         tasks().setState({ projectId, id: taskId, revision: t.revision, state: state === 'implemented' || state === 'review' || state === 'blocked' || state === 'failed' || state === 'backlog' ? state : 'todo', reason: `Restored with ${key}` }, 'user'); restored++;
       }
     }
+    if (h.mode === 'pause') {
+      // Runs the pause stopped were left blocked: put those tasks back to ready, so resuming really resumes them.
+      for (const [taskId, state] of Object.entries(h.restore)) {
+        const t = tasks().getTask(taskId);
+        if ((state === 'running' || state === 'needs-input') && t && t.state === 'blocked') { tasks().setState({ projectId, id: taskId, revision: t.revision, state: 'todo', reason: `Resumed with ${key}` }, 'user'); restored++; }
+      }
+    }
     gov().setHoldStatus(h.id, h.mode === 'cancel' ? 'restored' : 'released');
-    record(projectId, 'task.hold-released', h.mode === 'cancel' ? `Restored ${key}: ${restored} ${restored === 1 ? 'task' : 'tasks'} went back to where they were.` : `Resumed ${key} and the tasks under it.`, h.rootTaskId, 'user');
+    record(projectId, 'task.hold-released', h.mode === 'cancel' ? `Restored ${key}: ${restored} ${restored === 1 ? 'task' : 'tasks'} went back to where they were.` : `Resumed ${key} and the tasks under it${restored ? `; ${restored} stopped ${restored === 1 ? 'run is' : 'runs are'} ready to start again` : ''}.`, h.rootTaskId, 'user');
     deps.changed(projectId, h.rootTaskId);
     scheduleEval(projectId);
     return holdView(gov().getHold(h.id)!);
