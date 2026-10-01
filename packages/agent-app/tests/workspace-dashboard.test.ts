@@ -12,7 +12,7 @@ const body = (i: number, endedAt: string, outcome: string, costUsd: number | nul
 function ledger() {
   const db = new DatabaseSync(':memory:');
   const l = new TurnLedger(db);
-  l.append(body(1, '2026-09-29T09:00:00.000Z', 'completed', 0.5, 'p1'));
+  l.append({ ...body(1, '2026-09-29T09:00:00.000Z', 'completed', 0.5, 'p1'), tokens: { input: 1000, cached: 200, output: 300, reasoning: 0 } });
   l.append(body(2, '2026-09-29T10:00:00.000Z', 'failed', null, 'p1'));
   l.append(body(3, '2026-09-28T23:30:00.000Z', 'completed', 1.25, 'p2'));
   l.append(body(4, '2026-08-20T10:00:00.000Z', 'completed', 9, 'p1')); // last month: not in this month's spend, not in 14 days
@@ -38,13 +38,13 @@ test('the Ledger is aggregated in SQL: turns by day and outcome, and this monthâ
   assert.equal(count('2026-09-29', 'completed'), 1); assert.equal(count('2026-09-29', 'failed'), 1); assert.equal(count('2026-09-28', 'completed'), 1);
   assert.equal(count('2026-09-27', 'failed'), 1, 'imported history counts');
   assert.ok(!a.turns.some(t => t.day === '2026-08-20'), 'older than the window');
-  assert.deepEqual(a.spend, { usd: 1.75, priced: 2, unpriced: 3 });
+  assert.deepEqual(a.spend, { usd: 1.75, priced: 2, unpriced: 3, tokens: 1300 }, 'tokens: input + output this month, priced or not');
   // A linked Paperclip reports its own runs: the imported copies (history rows without a chat) are left out.
   const linked = ledgerAggregates(db, { since, monthStart: monthStart(NOW, 0), offset: 0, skipImportedPaperclip: true });
   assert.equal(linked.spend.unpriced, 2);
   // One project (the Budget tab).
   const p1 = ledgerAggregates(db, { since, monthStart: monthStart(NOW, 0), offset: 0, skipImportedPaperclip: false, projectId: 'p1' });
-  assert.deepEqual(p1.spend, { usd: 0.5, priced: 1, unpriced: 2 });
+  assert.deepEqual(p1.spend, { usd: 0.5, priced: 1, unpriced: 2, tokens: 1300 });
 });
 
 test('buildDashboard: 14 days of run activity, tasks by day and status, and spend that is null (unpriced), never $0', () => {
