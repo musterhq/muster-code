@@ -173,6 +173,13 @@ export class WorkStore {
     const want = rev ?? Number(head.rev), r = this.one('SELECT rev,text,created_at FROM task_doc_revs WHERE task_id=? AND key=? AND rev=?', taskId, key, want);
     return r ? { rev: Number(r.rev), text: s(r.text), updatedAt: s(r.created_at) } : undefined;
   }
+  /** The latest revision of every document whose text or key holds every term (G19 search). Case-insensitive. */
+  searchDocs(terms: readonly string[], limit = 40): { taskId: string; projectId: string; key: string; rev: number; text: string; updatedAt: string }[] {
+    const like = (t: string) => `%${t.replace(/[\\%_]/g, m => `\\${m}`)}%`;
+    const where = terms.map(() => "lower(r.text||' '||d.key) LIKE ? ESCAPE '\\'").join(' AND ');
+    return this.all(`SELECT d.task_id,d.project_id,d.key,d.rev,d.updated_at,r.text FROM task_docs d JOIN task_doc_revs r ON r.task_id=d.task_id AND r.key=d.key AND r.rev=d.rev ${where ? `WHERE ${where}` : ''} ORDER BY d.updated_at DESC LIMIT ?`, ...terms.map(t => like(t.toLowerCase())), limit)
+      .map(r => ({ taskId: s(r.task_id), projectId: s(r.project_id), key: s(r.key), rev: Number(r.rev), text: s(r.text), updatedAt: s(r.updated_at) }));
+  }
   headRev(taskId: string, key: string): number | null { const r = this.one('SELECT rev FROM task_docs WHERE task_id=? AND key=?', taskId, key); return r ? Number(r.rev) : null; }
   /** Characters held by every revision of every document of a task. */
   taskDocChars(taskId: string): number { return Number(this.one('SELECT COALESCE(SUM(length(text)),0) AS n FROM task_doc_revs WHERE task_id=?', taskId)?.n ?? 0); }
