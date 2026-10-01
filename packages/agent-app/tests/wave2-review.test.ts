@@ -76,3 +76,19 @@ test('S4 (runtime): starring an agent through a project it is not on is refused'
   await assert.rejects(h.s.invoke('work.star.set', { kind: 'agent', id: `member:${cto.id}`, projectId: other.id, starred: true }), /not on this project/);
   assert.deepEqual(await h.s.invoke('work.star.set', { kind: 'agent', id: `member:${cto.id}`, projectId: h.project.id, starred: true }), { starred: true, hidden: false });
 });
+
+test('S5: a recommendation left working by a quit is failed when the store opens, so it can be asked again', async t => {
+  const { mkdtemp, rm } = await import('node:fs/promises'); const { tmpdir } = await import('node:os'); const { join } = await import('node:path');
+  const { WorkStore } = await import('../src/runtime/work/store.ts');
+  const dir = await mkdtemp(join(tmpdir(), 'muster-s5-')); t.after(() => rm(dir, { recursive: true, force: true }));
+  const first = new WorkStore(dir);
+  first.setRecommendation('ws:task:1', { state: 'working', agent: 'CTO', text: '', chatId: 'c1', at: new Date().toISOString() });
+  first.setRecommendation('ws:task:2', { state: 'ready', agent: 'CTO', text: 'Pick A.', chatId: 'c2', at: new Date().toISOString() });
+  first.close();
+  const second = new WorkStore(dir);
+  assert.equal(second.failStuckRecommendations(), 1);
+  assert.equal(second.inboxItem('ws:task:1')!.recommendation!.state, 'failed');
+  assert.match(second.inboxItem('ws:task:1')!.recommendation!.text, /Muster closed/);
+  assert.equal(second.inboxItem('ws:task:2')!.recommendation!.state, 'ready');
+  second.close();
+});

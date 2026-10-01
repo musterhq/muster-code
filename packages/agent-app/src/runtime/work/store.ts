@@ -301,5 +301,11 @@ export class WorkStore {
   removeSummary(id: string): void { this.tx(() => { this.run('DELETE FROM summary_revs WHERE summary_id=?', id); this.run('DELETE FROM summaries WHERE id=?', id); }); }
   /** Cards still marked working when the app starts: their run is gone. */
   failStuckSummaries(): number { const n = this.summaryRows().filter(r => r.state === 'working'); for (const c of n) this.setSummaryState(c.id, { state: 'failed', error: 'Muster closed before this summary finished. Refresh it to try again.', lastChatId: null }); return n.length; }
+  /** Recommendations still marked working when the app starts: their run is gone. */
+  failStuckRecommendations(): number {
+    let n = 0;
+    for (const m of this.inbox()) if (m.recommendation?.state === 'working') { this.setRecommendation(m.id, { ...m.recommendation, state: 'failed', text: 'Muster closed before this recommendation finished. Ask again.' }); n++; }
+    return n;
+  }
   hasScheduledSummaries(): boolean { return Boolean(this.one("SELECT 1 FROM summaries WHERE enabled=1 AND refresh!='manual' LIMIT 1")); }
 }

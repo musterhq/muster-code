@@ -49,7 +49,7 @@ export function createWorkDomain(ctx: DomainContext): DomainModule {
   let store: WorkStore | undefined, disposed = false;
   const now = () => workClock.now?.() ?? Date.now();
   const timers = () => workClock.timers ?? { set: (fn: () => void, ms: number) => { const t = setTimeout(fn, Math.min(ms, MAX_TIMER_MS)); t.unref?.(); return t; }, clear: (h: unknown) => clearTimeout(h as ReturnType<typeof setTimeout>) };
-  const db = () => { if (!store) { store = new WorkStore(ctx.dataDir); store.clock = now; if (store.failStuckSummaries()) emit(null, ['summaries']); } return store; };
+  const db = () => { if (!store) { store = new WorkStore(ctx.dataDir); store.clock = now; if (store.failStuckSummaries()) emit(null, ['summaries']); if (store.failStuckRecommendations()) emit(null, ['inbox']); } return store; };
   const emit = (projectId: string | null, scopes: WorkEvent['scopes']) => { if (!disposed) ctx.emit({ type: 'workChanged', projectId, scopes }); };
 
   // ── lookups ─────────────────────────────────────────────────────────────────
