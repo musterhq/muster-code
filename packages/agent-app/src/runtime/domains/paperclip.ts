@@ -114,7 +114,13 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
     return client;
   };
   /** An approval an import carried over can be decided only while a Paperclip is linked (the decision goes to its approval endpoints). */
-  const linkedApproval = (sourceId: string) => sourceId.startsWith('approval:') && connection() !== null;
+  const linkedApproval = (sourceId: string, projectId: string | null) => {
+    if (!sourceId.startsWith('approval:') || !connection() || !projectId) return false;
+    let source; try { source = imports()?.projectSource(projectId); } catch { return false; }
+    const linkedCompany = built?.companyId ?? config.companyId ?? companies[0]?.id ?? null;
+    if (!source?.companyId || source.companyId !== linkedCompany) return false;
+    return !source.serverOrigin || source.serverOrigin === originOf(config.mode === 'local' ? PAPERCLIP_LOCAL_URL : config.baseUrl);
+  };
   const originLabel = () => config.mode === 'local' ? 'This Mac' : (() => { try { return new URL(config.baseUrl).host; } catch { return 'Paperclip'; } })();
 
   // --- Muster's side ---------------------------------------------------------------------------------------------------
@@ -249,7 +255,7 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
     // A Paperclip task already imported into Muster needs you once: its Muster copy stands for it in the Inbox and badge.
     let imported = new Set<string>(); try { imported = imports()?.importedSources('task') ?? imported; } catch { /* no import store */ }
     // An approval carried over by an import is decided in the linked Paperclip (when there is one), from its row.
-    const carried = (i: WorkspaceInboxItem): WorkspaceInboxItem => i.id.startsWith('import:approval:') && connection() ? { ...i, approvalId: i.id.slice('import:approval:'.length), approvalVerbs: ['approve', 'reject', 'request_revision'] } : i;
+    const carried = (i: WorkspaceInboxItem): WorkspaceInboxItem => i.id.startsWith('import:approval:') && linkedApproval(i.id.slice('import:'.length), i.projectId ?? null) ? { ...i, approvalId: i.id.slice('import:approval:'.length), approvalVerbs: ['approve', 'reject', 'request_revision'] } : i;
     const inbox = [...mine.inbox.map(carried), ...await budgetInbox(mine.projects), ...(p?.inbox ?? []).filter(i => !i.taskId || !imported.has(i.taskId))].sort((a, b) => rank[a.severity] - rank[b.severity] || b.at.localeCompare(a.at));
     return {
       paperclip: theirs.link, tasks, agents: [...mine.agents, ...(p?.agents ?? [])], projects: projects2, goals: p?.goals ?? [], runs, inbox, ...(p ? { approvals: p.approvals, labels: p.labels, agentCounts: { active: p.agents.filter(a => a.status !== 'paused' && a.status !== 'terminated' && a.status !== 'pending').length, paused: p.agents.filter(a => a.status === 'paused').length, resumable: resumable(p) } } : {}),
@@ -440,7 +446,7 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
     if (packet) cards.push({ kind: 'handoff', id: `handoff:${packet.id}`, at: packet.createdAt, from: 'You', to: detail.task.assigneeLabel, summary: `Handoff v${packet.version}${packet.stale ? ' (stale)' : ''} · ${packet.decisions.length} decisions · ${packet.artifacts.length} artifacts`, memory: packet.memory.map(m => ({ text: m.text, source: m.scope })) });
     // Decisions carried over from Paperclip: read-only; pending ones are also in the Inbox as Needs you.
     for (const h of imports()?.history(detail.task.projectId ?? undefined).filter(x => x.taskId === taskId) ?? []) {
-      if (h.kind.startsWith('approval')) cards.push({ kind: 'approval', id: `import:${h.sourceId}`, at: h.at, title: h.title, status: h.status, ...(h.pending && linkedApproval(h.sourceId) ? { approvalId: h.sourceId.slice('approval:'.length), verbs: ['approve', 'reject', 'request_revision'] as ApprovalDecision[] } : {}) });
+      if (h.kind.startsWith('approval')) cards.push({ kind: 'approval', id: `import:${h.sourceId}`, at: h.at, title: h.title, status: h.status, ...(h.pending && linkedApproval(h.sourceId, h.projectId) ? { approvalId: h.sourceId.slice('approval:'.length), verbs: ['approve', 'reject', 'request_revision'] as ApprovalDecision[] } : {}) });
       else if (h.kind.startsWith('document:')) { const doc = parseJson(h.detail); cards.push({ kind: 'document', id: `import:${h.sourceId}`, at: h.at, key: h.kind.slice('document:'.length), title: h.title, format: String(doc.format ?? 'markdown'), body: String(doc.body ?? ''), revision: Number(h.status) || 1, revisions: Array.isArray(doc.revisions) ? doc.revisions as never : [] }); }
       else if (h.kind.startsWith('work_product:')) { const w = parseJson(h.detail); cards.push({ kind: 'workproduct', id: `import:${h.sourceId}`, at: h.at, type: h.kind.slice('work_product:'.length), title: h.title, status: h.status, provider: typeof w.provider === 'string' ? w.provider : null, url: typeof w.url === 'string' ? w.url : null, summary: typeof w.summary === 'string' ? w.summary : '' }); }
       else cards.push({ kind: 'needs', id: `import:${h.sourceId}`, at: h.at, from: null, prompt: h.title, detail: null, status: h.pending ? 'pending' : h.status === 'cancelled' || h.status === 'withdrawn' ? 'cancelled' : 'resolved', resolution: h.detail || null, interactionId: null, acceptLabel: null, rejectLabel: null });
@@ -785,7 +791,7 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
         // Only ever sent when you press the button: Paperclip's own approval endpoints.
         await api().send('POST', `/approvals/${encodeURIComponent(approvalId)}/${path}`, { decisionNote: note });
         // The decision is Paperclip's now; what an import recorded about it follows (so the Inbox row clears at once).
-        try { const row = imports(); if (row) { const h = row.history().find(x => x.sourceId === `approval:${approvalId}`); if (h) row.putHistory({ ...h, status: decision === 'approve' ? 'approved' : decision === 'reject' ? 'rejected' : 'revision_requested', detail: note ?? '', pending: decision === 'request_revision' ? true : false }); } } catch { /* nothing imported */ }
+        try { imports()?.decideHistory(`approval:${approvalId}`, decision === 'approve' ? 'approved' : decision === 'reject' ? 'rejected' : 'revision_requested', note ?? '', decision === 'request_revision'); } catch { /* nothing imported */ }
         queueEmit(['tasks', 'inbox', 'agents']);
         return { ok: true as const };
       },

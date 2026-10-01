@@ -591,3 +591,17 @@ test('review S2: the light badge read carries the org of each imported project a
   assert.deepEqual(Object.keys(badge.orgs!).sort(),imported.map(p=>p.id).sort());
   assert.ok(Object.values(badge.orgs!).every(o=>o==='RagnarDataOps'));assert.equal(badge.company,'RagnarDataOps');assert.ok(!(own.id in badge.orgs!));
 });
+
+test('review S3: an imported approval can be decided only on the server and company it came from',async t=>{
+  const {service,raw}=await fixture(t);
+  raw.approvals.push({id:'ap-pending',companyId:COMPANY,type:'hire_agent',status:'pending',payload:{name:'Nova'},createdAt:'2026-09-30T00:00:00.000Z'});
+  await service.invoke('paperclip.config.set',{mode:'local',companyId:COMPANY});
+  await service.invoke('paperclip.import',{companyId:COMPANY});
+  const approvalRows=async()=>(await service.invoke('paperclip.snapshot',{})).inbox.filter(i=>i.id.startsWith('import:approval:'));
+  const same=await approvalRows();
+  assert.ok(same.length>0);assert.ok(same.every(i=>i.approvalId&&i.approvalVerbs?.length===3),'linked to the server it was imported from');
+  await service.invoke('paperclip.config.set',{mode:'custom',baseUrl:'https://other.example.com',companyId:COMPANY});
+  assert.ok((await approvalRows()).every(i=>!i.approvalId),'another server: no decision buttons');
+  await service.invoke('paperclip.config.set',{mode:'local',companyId:'00000000-0000-4000-8000-000000000999'});
+  assert.ok((await approvalRows()).every(i=>!i.approvalId),'another company on the same server: none either');
+});

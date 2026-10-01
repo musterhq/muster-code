@@ -113,6 +113,10 @@ export class SqliteImportStore implements ImportStore {
       task_id = COALESCE(excluded.task_id, task_id), project_id = CASE WHEN excluded.task_id IS NULL AND task_id IS NOT NULL THEN project_id ELSE COALESCE(excluded.project_id, project_id) END`)
       .run(row.sourceId, row.kind, row.taskId, row.projectId, row.title, row.status, row.detail, row.at, row.pending ? 1 : 0);
   }
+  /** A decision made in Paperclip is recorded on every imported copy of that approval (each project's generation). */
+  decideHistory(sourceId: string, status: string, detail: string, pending: boolean): void {
+    this.db.prepare('UPDATE paperclip_import_history SET status = ?, detail = ?, pending = ? WHERE source_id = ?').run(status, detail, pending ? 1 : 0, sourceId);
+  }
   /** The Paperclip ids already imported as Muster rows of this kind. */
   importedSources(kind: string): Set<string> {
     return new Set((this.db.prepare('SELECT source_id FROM paperclip_import_map WHERE kind = ?').all(kind) as { source_id: string }[]).map(r => r.source_id));
@@ -139,6 +143,13 @@ export class SqliteImportStore implements ImportStore {
     if (!row) return undefined;
     const data = JSON.parse(row.data) as Json;
     return isImportedProject(data) ? str(data.companyName) ?? 'Paperclip' : undefined;
+  }
+  /** Which Paperclip company and server a project's import came from (the server is absent on rows older than it was recorded). */
+  projectSource(musterProjectId: string): { companyId: string | null; serverOrigin: string | null } | undefined {
+    const row = this.db.prepare("SELECT data FROM paperclip_import_map WHERE kind IN ('project', 'project:detached') AND muster_id = ? LIMIT 1").get(musterProjectId) as { data: string } | undefined;
+    if (!row) return undefined;
+    const d = JSON.parse(row.data) as Json;
+    return { companyId: str(d.companyId), serverOrigin: str(d.serverOrigin) };
   }
   /** Every project an import made: Muster project id to the org it came from. */
   projectOrgs(): Record<string, string> {
