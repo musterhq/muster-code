@@ -65,7 +65,7 @@ export const buildGoalTree = (goals: readonly Goal[], links: readonly GoalLink[]
 
 // ── Keyed task documents (G5) ────────────────────────────────────────────────
 export const DOC_KEY = /^[a-z0-9][a-z0-9_-]{0,39}$/;
-export const DOC_LIMITS = { maxKeys: 24, maxChars: 200_000, maxRevisions: 100 } as const;
+export const DOC_LIMITS = { maxKeys: 24, maxChars: 200_000, maxRevisions: 100, maxTaskBytes: 20 * 1024 * 1024, maxThreadsPerDoc: 200, resolvedThreadDays: 90 } as const;
 export const DOC_STANDARD_KEYS = ['plan', 'design', 'notes'] as const;
 export interface TaskDocSummary { key: string; rev: number; chars: number; updatedAt: string; openThreads: number }
 export interface DocRevision { rev: number; note: string; actor: string; createdAt: string; chars: number }
@@ -116,7 +116,7 @@ export const PR_URL = /https:\/\/github\.com\/([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]
 /** Pull request URLs in a text, once each, in order. */
 export const findPullRequests = (text: string): { url: string; repo: string; number: number }[] => {
   const out: { url: string; repo: string; number: number }[] = [], seen = new Set<string>();
-  for (const m of text.matchAll(PR_URL)) { const url = `https://github.com/${m[1]}/${m[2]}/pull/${m[3]}`; if (seen.has(url)) continue; seen.add(url); out.push({ url, repo: `${m[1]}/${m[2]}`, number: Number(m[3]) }); }
+  for (const m of text.matchAll(PR_URL)) { if (['.', '..'].includes(m[1]!) || ['.', '..'].includes(m[2]!)) continue; const url = `https://github.com/${m[1]}/${m[2]}/pull/${m[3]}`; if (seen.has(url)) continue; seen.add(url); out.push({ url, repo: `${m[1]}/${m[2]}`, number: Number(m[3]) }); }
   return out.slice(0, 20);
 };
 /** What the Tasks list shows for a task's linked pull requests, and what `pr:failing` filters on. */

@@ -43,13 +43,15 @@ const DAY_MS = 86_400_000, DEBOUNCE_MS = 90_000, MIN_REARM_MS = 1000, MAX_TIMER_
 const STALE_MS = 2 * 60_000;
 
 /** Tests only: a fake clock and timers for the daily and on-change summary schedules. Unset in the app. */
+/** Counters tests read: how often the goal hook had to read a project's tasks. */
+export const workStats = { projectWorkReads: 0 };
 export const workClock: { now?: () => number; timers?: { set(fn: () => void, ms: number): unknown; clear(handle: unknown): void } } = {};
 
 export function createWorkDomain(ctx: DomainContext): DomainModule {
   let store: WorkStore | undefined, disposed = false;
   const now = () => workClock.now?.() ?? Date.now();
   const timers = () => workClock.timers ?? { set: (fn: () => void, ms: number) => { const t = setTimeout(fn, Math.min(ms, MAX_TIMER_MS)); t.unref?.(); return t; }, clear: (h: unknown) => clearTimeout(h as ReturnType<typeof setTimeout>) };
-  const db = () => { if (!store) { store = new WorkStore(ctx.dataDir); store.clock = now; if (store.failStuckSummaries()) emit(null, ['summaries']); if (store.failStuckRecommendations()) emit(null, ['inbox']); } return store; };
+  const db = () => { if (!store) { store = new WorkStore(ctx.dataDir); store.clock = now; if (store.failStuckSummaries()) emit(null, ['summaries']); if (store.failStuckRecommendations()) emit(null, ['inbox']); store.prune(); } return store; };
   const emit = (projectId: string | null, scopes: WorkEvent['scopes']) => { if (!disposed) ctx.emit({ type: 'workChanged', projectId, scopes }); };
 
   // ── lookups ─────────────────────────────────────────────────────────────────
@@ -87,10 +89,12 @@ export function createWorkDomain(ctx: DomainContext): DomainModule {
   const saveDoc = (projectId: string, taskId: string, key: string, body: string, note: string, actor: string, baseRev?: number): TaskDoc => {
     const w = db(), head = w.headRev(taskId, key);
     if (body.length > DOC_LIMITS.maxChars) throw new Error(`A document holds up to ${DOC_LIMITS.maxChars.toLocaleString('en-US')} characters.`);
+    if (w.taskDocChars(taskId) + body.length > DOC_LIMITS.maxTaskBytes) throw new Error('This task already holds 20 MB of documents. Delete a document, or restore an older revision instead of saving more.');
     if (head === null && w.countDocs(taskId) >= DOC_LIMITS.maxKeys) throw new Error(`A task holds up to ${DOC_LIMITS.maxKeys} documents.`);
     if (head !== null && baseRev !== undefined && baseRev !== head) throw new Error(`This document changed while you edited it (it is now revision ${head}). Reload it and apply your changes again.`);
     if (head !== null && w.docRev(taskId, key)!.text === body) return docView(taskId, key);
     w.saveDoc(projectId, taskId, key, body, note, actor);
+    w.prune();
     emit(projectId, ['docs']);
     return docView(taskId, key);
   };
@@ -222,13 +226,22 @@ export function createWorkDomain(ctx: DomainContext): DomainModule {
     }
   }
   // G18: a task's run is told the chain of goals its work serves (the task's goal, else its owner's), from the top.
+  const chatTask = new Map<string, { id: string; agent: string | null } | null>();
   const offGoals = ctx.hooks.addPromptContributor(async ({ chat }) => {
     if (!chat.projectId || (!store && !existsSync(join(ctx.dataDir, 'muster-project-work.sqlite')))) return null;
     const w = db();
-    if (!w.hasGoalLinks()) return null;
-    const work = await workOf(chat.projectId).catch(() => null), task = work?.tasks.items.find(t => t.runChatId === chat.id || t.attempts.some(a => a.chatId === chat.id));
-    if (!task) return null;
-    const own = w.goalOf('task', task.id), viaAgent = task.owner.kind === 'agent' ? w.goalOf('agent', task.owner.id) : null, goalId = own ?? viaAgent;
+    if (!w.projectHasGoalLinks(chat.projectId)) return null;
+    // A chat is matched to its task once; later turns only read the goal.
+    let known = chatTask.get(chat.id);
+    if (known === undefined) {
+      workStats.projectWorkReads++;
+      const work = await workOf(chat.projectId).catch(() => null), task = work?.tasks.items.find(t => t.runChatId === chat.id || t.attempts.some(a => a.chatId === chat.id));
+      known = task ? { id: task.id, agent: task.owner.kind === 'agent' ? task.owner.id : null } : null;
+      chatTask.set(chat.id, known);
+      if (chatTask.size > 500) chatTask.delete(chatTask.keys().next().value!);
+    }
+    if (!known) return null;
+    const own = w.goalOf('task', known.id), viaAgent = known.agent ? w.goalOf('agent', known.agent) : null, goalId = own ?? viaAgent;
     if (!goalId) return null;
     const chain = goalAncestry(w.goals(chat.projectId), goalId);
     return chain.length ? { label: 'Goals', text: `This work serves the goal “${chain.at(-1)}”${own ? '' : ` (the goal of its owner)`}. Why it matters, from the top: ${chain.join(' › ')}.` } : null;

@@ -130,6 +130,7 @@ export class WorkStore {
   }
   forgetTask(taskId: string): void {
     this.tx(() => {
+      this.run('DELETE FROM inbox_meta WHERE id=? OR id=?', `ws:task:${taskId}`, `task:${taskId}`);
       this.run('DELETE FROM task_labels WHERE task_id=?', taskId); this.run("DELETE FROM goal_links WHERE kind='task' AND ref_id=?", taskId); this.run('DELETE FROM external_objects WHERE task_id=?', taskId);
       for (const d of this.all('SELECT key FROM task_docs WHERE task_id=?', taskId)) this.removeDoc(taskId, s(d.key));
     });
@@ -157,6 +158,8 @@ export class WorkStore {
   linkGoal(kind: 'task' | 'agent', refId: string, goalId: string | null): void { if (goalId) this.run('INSERT INTO goal_links(kind,ref_id,goal_id) VALUES(?,?,?) ON CONFLICT(kind,ref_id) DO UPDATE SET goal_id=excluded.goal_id', kind, refId, goalId); else this.run('DELETE FROM goal_links WHERE kind=? AND ref_id=?', kind, refId); }
   goalOf(kind: 'task' | 'agent', refId: string): string | null { return sn(this.one('SELECT goal_id FROM goal_links WHERE kind=? AND ref_id=?', kind, refId)?.goal_id); }
   hasGoalLinks(): boolean { return Boolean(this.one('SELECT 1 FROM goal_links LIMIT 1')); }
+  /** Whether any task or agent of this project is linked to a goal. */
+  projectHasGoalLinks(projectId: string): boolean { return Boolean(this.one('SELECT 1 FROM goal_links l JOIN goals g ON g.id=l.goal_id WHERE g.project_id=? OR g.project_id IS NULL LIMIT 1', projectId)); }
   taskGoals(): Record<string, string> { const out: Record<string, string> = {}; for (const r of this.all("SELECT ref_id,goal_id FROM goal_links WHERE kind='task'")) out[s(r.ref_id)] = s(r.goal_id); return out; }
 
   // ── task documents (G5) ─────────────────────────────────────────────────────
@@ -171,6 +174,8 @@ export class WorkStore {
     return r ? { rev: Number(r.rev), text: s(r.text), updatedAt: s(r.created_at) } : undefined;
   }
   headRev(taskId: string, key: string): number | null { const r = this.one('SELECT rev FROM task_docs WHERE task_id=? AND key=?', taskId, key); return r ? Number(r.rev) : null; }
+  /** Characters held by every revision of every document of a task. */
+  taskDocChars(taskId: string): number { return Number(this.one('SELECT COALESCE(SUM(length(text)),0) AS n FROM task_doc_revs WHERE task_id=?', taskId)?.n ?? 0); }
   countDocs(taskId: string): number { return Number(this.one('SELECT COUNT(*) AS n FROM task_docs WHERE task_id=?', taskId)?.n ?? 0); }
   docRevisions(taskId: string, key: string): DocRevision[] {
     return this.all('SELECT rev,note,actor,created_at,length(text) AS chars FROM task_doc_revs WHERE task_id=? AND key=? ORDER BY rev DESC', taskId, key).map(r => ({ rev: Number(r.rev), note: s(r.note), actor: s(r.actor), createdAt: s(r.created_at), chars: Number(r.chars) }));
@@ -301,6 +306,16 @@ export class WorkStore {
   removeSummary(id: string): void { this.tx(() => { this.run('DELETE FROM summary_revs WHERE summary_id=?', id); this.run('DELETE FROM summaries WHERE id=?', id); }); }
   /** Cards still marked working when the app starts: their run is gone. */
   failStuckSummaries(): number { const n = this.summaryRows().filter(r => r.state === 'working'); for (const c of n) this.setSummaryState(c.id, { state: 'failed', error: 'Muster closed before this summary finished. Refresh it to try again.', lastChatId: null }); return n.length; }
+  /** Drops what only clutters: resolved comment threads older than 90 days, and Inbox read or snooze state older than 90 days that holds no decide-by date or recommendation. */
+  prune(): number {
+    const cutoff = new Date(this.clock() - DOC_LIMITS.resolvedThreadDays * 86_400_000).toISOString();
+    return this.tx(() => {
+      let n = 0;
+      for (const t of this.all("SELECT id FROM doc_threads WHERE status='resolved' AND created_at<?", cutoff)) { this.run('DELETE FROM doc_comments WHERE thread_id=?', t.id); this.run('DELETE FROM doc_threads WHERE id=?', t.id); n++; }
+      for (const m of this.all("SELECT id FROM inbox_meta WHERE updated_at<? AND decide_by IS NULL AND recommendation IS NULL", cutoff)) { this.run('DELETE FROM inbox_meta WHERE id=?', m.id); n++; }
+      return n;
+    });
+  }
   /** Recommendations still marked working when the app starts: their run is gone. */
   failStuckRecommendations(): number {
     let n = 0;

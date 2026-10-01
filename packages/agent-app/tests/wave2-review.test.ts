@@ -135,3 +135,59 @@ test('S8: pruning run history removes the rows that hang off a run and never a r
   assert.deepEqual(left.slice(0, 2), ['old-awaiting', 'old-running']); assert.ok(!left.includes('old-done')); assert.equal(left.length, 7);
   for (const table of [['automation_run_ext', 'run_id'], ['automation_gates', 'run_id'], ['standup_children', 'run_id']]) assert.equal((db.prepare(`SELECT COUNT(*) AS n FROM ${table[0]} WHERE ${table[1]} NOT IN (SELECT id FROM automation_runs)`).get() as { n: number }).n, 0, `${table[0]} keeps no orphans`);
 });
+
+test('F1: dot segments are not an owner or repository in a pull request link', async t => {
+  const { findPullRequests } = await import('../src/shared/domains/work-protocol.ts');
+  assert.deepEqual(findPullRequests('https://github.com/../user/pull/1 https://github.com/acme/../pull/2 https://github.com/./x/pull/3 https://github.com/acme/ok/pull/4').map(p => p.repo), ['acme/ok']);
+  const h = await wave2(t);
+  const task = await h.addTask('T', { kind: 'user', id: 'local' });
+  await assert.rejects(h.s.invoke('work.links.add', { projectId: h.project.id, taskId: task.id, url: 'https://github.com/../user/pull/1' }), /Paste a GitHub pull request link/);
+});
+
+test('F2: a task holds at most 20 MB of documents, and says so', async t => {
+  const h = await wave2(t);
+  const task = await h.addTask('Docs', { kind: 'user', id: 'local' });
+  let refused = '';
+  for (let k = 0; k < 11 && !refused; k++) for (let rev = 0; rev < 10 && !refused; rev++) {
+    try { await h.s.invoke('work.docs.save', { projectId: h.project.id, taskId: task.id, key: `doc-${k}`, text: `${rev}`.repeat(1) + 'x'.repeat(199_000 + rev) }); } catch (e) { refused = (e as Error).message; }
+  }
+  assert.match(refused, /20 MB of documents/);
+});
+
+test('F3: old resolved comment threads and Inbox state for deleted items are pruned', async t => {
+  const { mkdtemp, rm } = await import('node:fs/promises'); const { tmpdir } = await import('node:os'); const { join } = await import('node:path');
+  const { WorkStore } = await import('../src/runtime/work/store.ts');
+  const dir = await mkdtemp(join(tmpdir(), 'muster-f3-')); t.after(() => rm(dir, { recursive: true, force: true }));
+  const w = new WorkStore(dir); const day = 86_400_000; let now = Date.parse('2026-01-01T00:00:00Z'); w.clock = () => now;
+  w.saveDoc('p', 't1', 'plan', 'hello world', '', 'You');
+  const old = w.addThread('t1', 'plan', 1, 'hello', 0, 5, 'You', 'user', 'old one'); w.setThreadStatus(old, 'resolved');
+  const open = w.addThread('t1', 'plan', 1, 'world', 6, 11, 'You', 'user', 'still open');
+  w.markRead([{ id: 'ws:task:t1', at: 'x' }, { id: 'ws:task:kept', at: 'x' }]); w.setDecideBy('ws:task:decided', '2026-12-01');
+  now += 120 * day;
+  assert.ok(w.prune() >= 2);
+  assert.equal(w.thread(old), undefined); assert.ok(w.thread(open), 'an open thread stays');
+  assert.equal(w.inboxItem('ws:task:kept'), undefined, 'old read state is dropped'); assert.ok(w.inboxItem('ws:task:decided'), 'a decide-by date stays');
+  w.markRead([{ id: 'ws:task:t1', at: 'y' }]); w.forgetTask('t1');
+  assert.equal(w.inboxItem('ws:task:t1'), undefined, 'a deleted task takes its Inbox state with it');
+  w.close();
+});
+
+test('F4: a chat is matched to its task once, and a project without goal links reads nothing at all', async t => {
+  const { workStats } = await import('../src/runtime/domains/work.ts');
+  const h = await wave2(t);
+  const cto = await h.member('CTO');
+  const plain = await h.addTask('Plain', { kind: 'agent', id: cto.id });
+  workStats.projectWorkReads = 0;
+  await h.start(plain.id); await h.settled(plain.id);
+  assert.equal(workStats.projectWorkReads, 0, 'no goal links in the project: no lookup');
+  const goal = await h.s.invoke('work.goals.save', { projectId: h.project.id, level: 'project', title: 'G' });
+  const linked = await h.addTask('Linked', { kind: 'agent', id: cto.id });
+  await h.s.invoke('work.goals.link', { projectId: h.project.id, kind: 'task', refId: linked.id, goalId: goal.id });
+  await h.start(linked.id); await h.settled(linked.id);
+  const after = workStats.projectWorkReads;
+  assert.ok(after >= 1 && after <= 2, `one lookup for the chat, got ${after}`);
+  await h.s.invoke('paperclip.comment', { taskId: linked.id, body: 'again please' });
+  await h.s.invoke('project.agent.wake', { projectId: h.project.id, memberId: cto.id, taskId: linked.id }).catch(() => undefined);
+  await h.wait(300);
+  assert.ok(workStats.projectWorkReads <= after + 1);
+});
