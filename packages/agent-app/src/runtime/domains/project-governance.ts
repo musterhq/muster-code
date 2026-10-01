@@ -957,7 +957,10 @@ export function createGovernance(ctx: DomainContext, deps: GovernanceDeps) {
   /** Run options for a task run: the agent's git identity and the secrets it was granted, as run environment. */
   function runOptions(chat: Chat): RunOptions | null {
     if (disposed || !chat.projectId || !deps.exists(chat.projectId)) return null;
-    const task = tasks().taskByRunChat(chat.id) ?? (gov().runMeta(chat.id)?.taskId ? tasks().getTask(gov().runMeta(chat.id)!.taskId!) : undefined);
+    // A reviewer or watchdog chat is read-only work for a different agent: it is lent nothing, never its task owner's secrets or identity.
+    const meta = gov().runMeta(chat.id);
+    if (meta && (meta.reason === 'review' || meta.reason === 'watchdog')) return null;
+    const task = tasks().taskByRunChat(chat.id);
     const mid = task ? ownerMemberId(task) : null, m = mid ? memberOf(chat.projectId, mid) : undefined;
     if (!task || !m || m.kind !== 'agent') return null;
     const g = agentGov(chat.projectId, m.id), overrides: Record<string, string> = {};
