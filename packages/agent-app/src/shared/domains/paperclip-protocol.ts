@@ -30,6 +30,7 @@ export type WorkspaceStatus = 'backlog' | 'todo' | 'in_progress' | 'in_review' |
 export const WORKSPACE_STATUSES: readonly WorkspaceStatus[] = ['backlog', 'todo', 'in_progress', 'in_review', 'blocked', 'done', 'cancelled'];
 export const STATUS_LABEL: Record<WorkspaceStatus, string> = { backlog: 'Backlog', todo: 'Todo', in_progress: 'In Progress', in_review: 'In Review', blocked: 'Blocked', done: 'Done', cancelled: 'Cancelled' };
 export type WorkspacePriority = 'critical' | 'high' | 'medium' | 'low';
+export const WORKSPACE_PRIORITIES: readonly WorkspacePriority[] = ['critical', 'high', 'medium', 'low'];
 export const PRIORITY_NAME: Record<WorkspacePriority, string> = { critical: 'Critical', high: 'High', medium: 'Medium', low: 'Low' };
 
 export interface WorkspaceCompany { id: string; name: string; prefix: string }
@@ -208,7 +209,8 @@ export interface PaperclipCommands {
   'paperclip.snapshot': { input: { refresh?: boolean }; output: WorkspaceSnapshot };
   'paperclip.task': { input: { id: string }; output: WorkspaceTaskDetail };
   'paperclip.comment': { input: { taskId: string; body: string }; output: WorkspaceComment };
-  'paperclip.task.update': { input: { taskId: string; status: WorkspaceStatus }; output: WorkspaceTask };
+  /** Only the fields you pass are changed. `assigneeId`: an agent id, or null to unassign (Paperclip tasks only for priority and assignee). */
+  'paperclip.task.update': { input: { taskId: string; status?: WorkspaceStatus; priority?: WorkspacePriority; assigneeId?: string | null }; output: WorkspaceTask };
   'paperclip.task.create': { input: TaskCreateInput; output: WorkspaceTask & { started?: TaskStartResult; startError?: string } };
   /** `projectId`: one project's runs and spend (the Budget tab). */
   'paperclip.dashboard': { input: { utcOffsetMinutes?: number; projectId?: string }; output: DashboardData };

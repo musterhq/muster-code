@@ -17,9 +17,9 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from '
 import { join } from 'node:path';
 import type { MemoryRecord } from '../../shared/domains/memory-protocol.ts';
 import {
-  budgetUse, PAPERCLIP_LOCAL_URL, WORKSPACE_STATUSES, type LedgerView, type LiveChannel, type PaperclipConfigView, type PaperclipLink, type PaperclipMode, type PaperclipTestResult,
+  budgetUse, PAPERCLIP_LOCAL_URL, WORKSPACE_PRIORITIES, WORKSPACE_STATUSES, type LedgerView, type LiveChannel, type PaperclipConfigView, type PaperclipLink, type PaperclipMode, type PaperclipTestResult,
   type ThreadCard, type WorkspaceAgent, type WorkspaceBadge, type WorkspaceInboxItem, type WorkspaceList, type WorkspaceListKind, type WorkspaceMemory, type WorkspaceProject,
-  type WorkspaceRow, type WorkspaceSnapshot, type WorkspaceSource, type WorkspaceStatus, type WorkspaceTask, type WorkspaceTaskDetail,
+  type WorkspacePriority, type WorkspaceRow, type WorkspaceSnapshot, type WorkspaceSource, type WorkspaceStatus, type WorkspaceTask, type WorkspaceTaskDetail,
 } from '../../shared/domains/paperclip-protocol.ts';
 import { normalizeRemote } from '../memory-identity.ts';
 import { PaperclipClient, PaperclipError, normalizeBaseUrl, openLiveEvents, type FetchLike, type LiveSocket, type SocketFactory } from '../paperclip-client.ts';
@@ -656,10 +656,21 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
         return mapComment(created, built?.agents ?? new Map());
       },
       'paperclip.task.update': async input => {
-        const taskId = id(input.taskId), status = input.status as WorkspaceStatus;
-        if (!WORKSPACE_STATUSES.includes(status)) throw new Error('Unknown status.');
-        if (await owner('task', taskId) === 'local') return local.setStatus(taskId, status);
-        const updated = await api().send<Json>('PATCH', `/issues/${encodeURIComponent(taskId)}`, { status });
+        const taskId = id(input.taskId), changes: Json = {};
+        if (input.status !== undefined) { if (!WORKSPACE_STATUSES.includes(input.status as WorkspaceStatus)) throw new Error('Unknown status.'); changes.status = input.status; }
+        if (input.priority !== undefined) { if (!WORKSPACE_PRIORITIES.includes(input.priority as WorkspacePriority)) throw new Error('Unknown priority.'); changes.priority = input.priority; }
+        if (input.assigneeId !== undefined) {
+          // An agent, or nobody (null, or you: a Paperclip task owned by the board is simply unassigned from an agent).
+          if (input.assigneeId !== null && typeof input.assigneeId !== 'string') throw new Error('Unknown assignee.');
+          changes.assigneeAgentId = input.assigneeId === null || input.assigneeId.startsWith('user:') ? null : id(input.assigneeId);
+        }
+        if (!Object.keys(changes).length) throw new Error('Nothing to change.');
+        if (await owner('task', taskId) === 'local') {
+          if (changes.priority !== undefined || changes.assigneeAgentId !== undefined) throw new Error('Change a Muster task’s priority or owner in its project’s task list.');
+          return local.setStatus(taskId, changes.status as WorkspaceStatus);
+        }
+        // Only what you changed is sent: Paperclip's own PATCH, user-initiated.
+        const updated = await api().send<Json>('PATCH', `/issues/${encodeURIComponent(taskId)}`, changes);
         queueEmit(['tasks', 'inbox'], taskId);
         return mapIssue(updated, built?.agents ?? new Map(), new Set());
       },

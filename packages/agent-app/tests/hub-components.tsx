@@ -59,6 +59,7 @@ const calls:{command:string;input:any}[]=[];
   if(command==='paperclip.memory')return {scope:{kind:'repository',label:'oss-manager',folderId:'f'},repo:'github.com/hybrowlabs/oss-manager',query:'x',records:[],engine:'not-configured',note:'3 memories in the oss-manager folder, none about this task yet.'};
   if(command==='paperclip.comment')return {id:'m2',author:{kind:'user',id:null,label:'Board'},body:input.body,createdAt:now};
   if(command==='paperclip.interaction.respond')return {ok:true};
+  if(command==='paperclip.task.update')return snapshot.tasks[0];
   if(command==='paperclip.ledger')return {entries:ledgerEntries,chain:{ok:true,entries:0,head:'0'.repeat(64),brokenAt:null}};
   if(command==='paperclip.ledger.backfill'){ledgerEntries=[historyEntry];return {chats:1,turns:1};}
   if(command==='paperclip.inbox.dismissed')return {items:[]};
@@ -97,6 +98,17 @@ assert.match(text('.ws-receipt-summary')[0],/1 file \+12 −3 · 2 test runs · 
 await click([...document.querySelectorAll('.ws-card-actions button')].find(b=>/Approve and delegate/.test(b.textContent!)));
 assert.deepEqual(calls.find(c=>c.command==='paperclip.interaction.respond')?.input,{taskId:'t1',interactionId:'int-1',accept:true},'Needs you is answerable in the thread');
 assert.deepEqual(text('.ws-prop-group'),['Work','Memory','Relationships','Execution','About']);
+// D4/D5: a linked Paperclip task's priority and assignee are editable here and forwarded as changed (only that field).
+{
+  const choose=async(label:string,value:string)=>{const sel=document.querySelector(`.ws-properties select[aria-label="${label}"]`) as any;assert.ok(sel,`${label} is a select for a Paperclip task`);const props=Object.keys(sel).find(k=>k.startsWith('__reactProps'))!;sel[props].onChange({target:{value},currentTarget:{value}});await delay(60);};
+  assert.deepEqual([...document.querySelectorAll('.ws-properties select[aria-label="Assignee"] option')].map(o=>o.textContent),['Unassigned','CEO · CEO title','CTO · CTO title','QA · QA title'],'every Paperclip agent can own it, or nobody');
+  await choose('Priority','low');
+  assert.deepEqual(calls.filter(c=>c.command==='paperclip.task.update').at(-1)?.input,{taskId:'t1',priority:'low'});
+  await choose('Assignee','qa');
+  assert.deepEqual(calls.filter(c=>c.command==='paperclip.task.update').at(-1)?.input,{taskId:'t1',assigneeId:'qa'});
+  await choose('Assignee','');
+  assert.deepEqual(calls.filter(c=>c.command==='paperclip.task.update').at(-1)?.input,{taskId:'t1',assigneeId:null},'Unassigned sends null');
+}
 const box=document.querySelector('.ws-composer textarea') as any;
 assert.match(box.getAttribute('placeholder'),/Message CEO/);
 let proto=Object.getPrototypeOf(box),descriptor;while(proto&&!(descriptor=Object.getOwnPropertyDescriptor(proto,'value')))proto=Object.getPrototypeOf(proto);

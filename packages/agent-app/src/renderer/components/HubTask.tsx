@@ -8,8 +8,8 @@
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { ArrowDown, ArrowRight, ArrowUp, Brain, CircleHelp, GitBranch, PanelRight, Play, ShieldCheck, Waypoints, X } from 'lucide-react';
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import type { LedgerEntry, PaperclipQuestion, ThreadCard, WorkspaceComment, WorkspaceMemory, WorkspaceSnapshot, WorkspaceStatus, WorkspaceTaskDetail } from '../../shared/domains/paperclip-protocol';
-import { PRIORITY_NAME, STATUS_LABEL, WORKSPACE_STATUSES } from '../../shared/domains/paperclip-protocol';
+import type { LedgerEntry, PaperclipQuestion, ThreadCard, WorkspaceComment, WorkspaceMemory, WorkspacePriority, WorkspaceSnapshot, WorkspaceStatus, WorkspaceTaskDetail } from '../../shared/domains/paperclip-protocol';
+import { PRIORITY_NAME, STATUS_LABEL, WORKSPACE_PRIORITIES, WORKSPACE_STATUSES } from '../../shared/domains/paperclip-protocol';
 import { NAMES } from '../../shared/workspace-names';
 import { invoke } from '../bridge';
 import { onTasksChanged } from '../hubStore';
@@ -227,6 +227,13 @@ function Properties({ detail, snapshot, onOpenTask, onClose, onChanged }: { deta
     setBusy(true);
     try { await invoke('paperclip.task.update', { taskId: task.id, status }); onChanged(); } catch (cause) { notifyError(cause); } finally { setBusy(false); }
   };
+  // Priority and assignee are Paperclip's to change from here (a linked task); a Muster task keeps them in its project's list.
+  const update = async (changes: { priority?: WorkspacePriority; assigneeId?: string | null }) => {
+    setBusy(true);
+    try { await invoke('paperclip.task.update', { taskId: task.id, ...changes }); onChanged(); } catch (cause) { notifyError(cause); } finally { setBusy(false); }
+  };
+  const editable = task.source === 'paperclip';
+  const assignable = snapshot.agents.filter(a => a.source === 'paperclip' && (a.status !== 'terminated' || a.id === task.assigneeId));
   const lastRun = detail.runs[0];
   const ellipsis = (text: string) => <span className="ws-inline" title={text}><span className="ws-ellipsis">{text}</span></span>;
   return <aside className="ws-properties" aria-label="Properties">
@@ -235,9 +242,9 @@ function Properties({ detail, snapshot, onOpenTask, onClose, onChanged }: { deta
       <h3 className="ws-prop-group">Work</h3>
       <dl>
         <Row label="Status"><span className="ws-status-pick"><TaskStatusIcon status={task.status} size={13}/><select className="ws-select is-bare" aria-label="Status" value={task.status} disabled={busy} onChange={e => void setStatus(e.target.value as WorkspaceStatus)}>{WORKSPACE_STATUSES.map(s => <option key={s} value={s}>{STATUS_LABEL[s]}</option>)}</select></span></Row>
-        <Row label="Assignee">{task.assigneeLabel ? <span className="ws-inline"><Monogram name={task.assigneeLabel}/><span className="ws-ellipsis">{task.assigneeLabel}</span></span> : <span className="ws-faint">None</span>}</Row>
+        <Row label="Assignee">{editable ? <span className="ws-status-pick">{task.assigneeLabel && <Monogram name={task.assigneeLabel}/>}<select className="ws-select is-bare" aria-label="Assignee" value={task.assigneeId ?? ''} disabled={busy} onChange={e => void update({ assigneeId: e.target.value || null })}><option value="">Unassigned</option>{assignable.map(a => <option key={a.id} value={a.id}>{a.name}{a.title ? ` · ${a.title}` : ''}</option>)}</select></span> : task.assigneeLabel ? <span className="ws-inline"><Monogram name={task.assigneeLabel}/><span className="ws-ellipsis">{task.assigneeLabel}</span></span> : <span className="ws-faint">None</span>}</Row>
         <Row label="Project">{project ? ellipsis(project.name) : <span className="ws-faint">None</span>}</Row>
-        <Row label="Priority">{PRIORITY_NAME[task.priority]}</Row>
+        <Row label="Priority">{editable ? <select className="ws-select is-bare" aria-label="Priority" value={task.priority} disabled={busy} onChange={e => void update({ priority: e.target.value as WorkspacePriority })}>{WORKSPACE_PRIORITIES.map(p => <option key={p} value={p}>{PRIORITY_NAME[p]}</option>)}</select> : PRIORITY_NAME[task.priority]}</Row>
         {goal && <Row label="Goal">{ellipsis(goal.title)}</Row>}
       </dl>
       <MemorySection taskId={task.id}/>

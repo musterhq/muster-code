@@ -544,3 +544,19 @@ test('A4: a token that would travel over plain http to another machine is warned
   for(const url of ['http://127.0.0.1:3100','http://localhost:3100','http://[::1]:3100'])assert.equal((await h.call('paperclip.test',{mode:'custom',baseUrl:url,token:'pcp_x'})).warning,undefined,url);
   assert.equal((await h.call('paperclip.test',{mode:'local'})).warning,undefined);
 });
+
+test('D4/D5: priority and assignee changes are forwarded to Paperclip as exactly the fields you changed (user-initiated)',async t=>{
+  const h=await harness(t);
+  await h.call('paperclip.config.set',{mode:'local'});
+  await h.call('paperclip.task.update',{taskId:'RAG-12',priority:'low'});
+  await h.call('paperclip.task.update',{taskId:'RAG-12',assigneeId:'a-qa'});
+  await h.call('paperclip.task.update',{taskId:'RAG-12',assigneeId:null});
+  await h.call('paperclip.task.update',{taskId:'RAG-12',assigneeId:'user:local',status:'todo',priority:'critical'});
+  assert.deepEqual(h.server.calls.filter(c=>c.method!=='GET').map(c=>`${c.method} ${c.url} ${JSON.stringify(c.body)}`),[
+    'PATCH /api/issues/RAG-12 {"priority":"low"}','PATCH /api/issues/RAG-12 {"assigneeAgentId":"a-qa"}','PATCH /api/issues/RAG-12 {"assigneeAgentId":null}',
+    'PATCH /api/issues/RAG-12 {"status":"todo","priority":"critical","assigneeAgentId":null}',
+  ]);
+  await assert.rejects(()=>h.call('paperclip.task.update',{taskId:'RAG-12',priority:'urgent'}),/Unknown priority/);
+  await assert.rejects(()=>h.call('paperclip.task.update',{taskId:'RAG-12',assigneeId:'../x'}),/Unknown item/);
+  await assert.rejects(()=>h.call('paperclip.task.update',{taskId:'RAG-12'}),/Nothing to change/);
+});
