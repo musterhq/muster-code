@@ -176,3 +176,16 @@ test('Review M1: applying a coordinator proposal can set the mission, so it is o
   authorizeResource(owner, 'project.coordinator.apply', 'write', { projectId: 'p-shared', key: 'k' }, snapshot);
   authorizeResource(owner, 'project.update', 'write', { id: 'p-shared', goal: 'x' }, snapshot);
 });
+
+test('Review M2: Skill Studio test runs are narrowed to the projects the caller can see; admins see all', () => {
+  const run = (projectId: string) => ({ id: projectId, skill: 'release', inputId: null, input: 'x', projectId, chatId: 'c', state: 'done', result: `secret from ${projectId}`, error: null, startedAt: '', endedAt: null });
+  const out = { inputs: [{ id: 'i', skill: 'release', label: 'L', text: 'T', createdAt: '' }], runs: [run('p-shared'), run('p-secret')] };
+  const viewer = accessView(user('viewer'), [{ projectId: 'p-shared', role: 'viewer' }], owners);
+  const narrowed = filterOutput(viewer, 'studio.skill.inputs.list', out, snapshot) as typeof out;
+  assert.deepEqual(narrowed.runs.map(r => r.projectId), ['p-shared']);
+  assert.equal(narrowed.inputs.length, 1);
+  assert.ok(!JSON.stringify(narrowed).includes('secret from p-secret'));
+  assert.equal((filterOutput(accessView(user('member'), [], owners), 'studio.skill.inputs.list', out, snapshot) as typeof out).runs.length, 0);
+  const admin = accessView(user('admin'), [], owners);
+  assert.equal((filterOutput(admin, 'studio.skill.inputs.list', out, snapshot) as typeof out).runs.length, 2);
+});

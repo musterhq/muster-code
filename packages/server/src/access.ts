@@ -163,6 +163,11 @@ export function filterOutput(v: AccessView, command: string, output: unknown, sn
   if (command === 'app.snapshot') return filterSnapshot(v, output as Snapshot);
   if (command === 'project.list' && Array.isArray(output)) return output.filter(p => canSeeProject(v, (p as { id: string }).id));
   if (command === 'chat.search' && Array.isArray(output)) return output.filter(r => canSeeChat(v, snapshot.chats.find(c => c.id === (r as { chatId: string }).chatId)));
+  // Skill Studio test runs carry the reply of a read-only run in one project's folder: a member sees only the runs of projects they can see.
+  if (command === 'studio.skill.inputs.list' && output && typeof output === 'object') {
+    const list = output as { runs?: Array<{ projectId: string }> };
+    return { ...list, runs: (list.runs ?? []).filter(r => canSeeProject(v, r.projectId)) };
+  }
   if (command === 'paperclip.ledger' && output && typeof output === 'object') {
     const view = output as { entries: Array<{ chatId: string | null; projectId: string | null }> };
     return { ...view, entries: view.entries.filter(e => (e.projectId && canSeeProject(v, e.projectId)) || (e.chatId && canSeeChat(v, snapshot.chats.find(c => c.id === e.chatId)))) };
