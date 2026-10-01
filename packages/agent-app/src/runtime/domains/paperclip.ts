@@ -252,7 +252,7 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
     const carried = (i: WorkspaceInboxItem): WorkspaceInboxItem => i.id.startsWith('import:approval:') && connection() ? { ...i, approvalId: i.id.slice('import:approval:'.length), approvalVerbs: ['approve', 'reject', 'request_revision'] } : i;
     const inbox = [...mine.inbox.map(carried), ...await budgetInbox(mine.projects), ...(p?.inbox ?? []).filter(i => !i.taskId || !imported.has(i.taskId))].sort((a, b) => rank[a.severity] - rank[b.severity] || b.at.localeCompare(a.at));
     return {
-      paperclip: theirs.link, tasks, agents: [...mine.agents, ...(p?.agents ?? [])], projects: projects2, goals: p?.goals ?? [], runs, inbox, ...(p ? { approvals: p.approvals, labels: p.labels, agentCounts: { active: p.agents.filter(a => a.status !== 'paused' && a.status !== 'terminated' && a.status !== 'pending').length, paused: p.agents.filter(a => a.status === 'paused').length } } : {}),
+      paperclip: theirs.link, tasks, agents: [...mine.agents, ...(p?.agents ?? [])], projects: projects2, goals: p?.goals ?? [], runs, inbox, ...(p ? { approvals: p.approvals, labels: p.labels, agentCounts: { active: p.agents.filter(a => a.status !== 'paused' && a.status !== 'terminated' && a.status !== 'pending').length, paused: p.agents.filter(a => a.status === 'paused').length, resumable: resumable(p) } } : {}),
       counts: { liveRuns: runs.filter(r => r.status === 'running').length, inbox: inbox.filter(i => i.kind !== 'mail').length, failedRuns: runs.filter(r => r.status === 'failed').length, openTasks: tasks.filter(t => t.status !== 'done' && t.status !== 'cancelled').length },
       fetchedAt: new Date().toISOString(),
     };
@@ -375,6 +375,14 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
   /** The ids Pause all paused, or null when it never ran for this scope (then Resume all wakes every paused agent). */
   const pausedSet = (scope: string): string[] | null => { const rows = pausedDb().prepare('SELECT id FROM pause_all_sets WHERE scope = ?').all(scope) as { id: string }[]; return rows.length ? rows.map(r => r.id).filter(Boolean) : null; };
   const forgetPaused = (scope: string, id?: string) => { if (id === undefined) pausedDb().prepare('DELETE FROM pause_all_sets WHERE scope = ?').run(scope); else pausedDb().prepare('DELETE FROM pause_all_sets WHERE scope = ? AND id = ?').run(scope, id); };
+
+  /** What Resume can wake: only what Muster's Pause stopped (company-wide, all Muster projects, or one project's Roster). */
+  const resumable = (p: PaperclipPart): NonNullable<WorkspaceSnapshot['agentCounts']>['resumable'] => {
+    const rows = (pausedDb().prepare("SELECT scope, id FROM pause_all_sets WHERE id <> ''").all() as { scope: string; id: string }[]);
+    const paused = new Set(p.agents.filter(a => a.status === 'paused').map(a => a.id)), projects: Record<string, number> = {};
+    for (const r of rows) if (r.scope.startsWith('local:')) projects[r.scope.slice(6)] = (projects[r.scope.slice(6)] ?? 0) + 1;
+    return { paperclip: rows.filter(r => r.scope === `paperclip:${built?.companyId ?? ''}` && paused.has(r.id)).length, local: rows.filter(r => r.scope === 'local').length, projects };
+  };
 
   // --- Inbox dismissals ------------------------------------------------------------------------------------------------
   // Keyed by item id and the item's time: a dismissed failure stays hidden, a new one (a later time) shows again.
@@ -750,17 +758,18 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
         if (sourceOf(input.source) === 'local') {
           if (typeof input.projectId === 'string' && input.projectId) {
             const projectId = id(input.projectId), scope = `local:${projectId}`, only = pausedSet(scope);
-            const roster = (await local.snapshot()).agents.filter(a => a.projectId === projectId && a.pausable && a.status === 'paused' && (!only || only.includes(a.id)));
+            const roster = (await local.snapshot()).agents.filter(a => a.projectId === projectId && a.pausable && a.status === 'paused' && (only ?? []).includes(a.id));
             for (const agent of roster) await local.setPaused(agent.id, false);
             forgetPaused(scope);
             queueEmit(['agents']);
             return { changed: roster.length };
           }
-          const changed = await local.resumeProjects(pausedSet('local')); forgetPaused('local'); queueEmit(['agents']); return { changed };
+          const changed = await local.resumeProjects(pausedSet('local') ?? []); forgetPaused('local'); queueEmit(['agents']); return { changed };
         }
         const c = api(); await paperclipPart(true);
         const scope = `paperclip:${built?.companyId ?? ''}`, only = pausedSet(scope);
-        const agents = (built?.part.agents ?? []).filter(a => a.status === 'paused' && (!only || only.includes(a.id)));
+        // Only what Pause stopped wakes: with no record there is nothing of ours to resume (an agent you paused stays paused).
+        const agents = (built?.part.agents ?? []).filter(a => a.status === 'paused' && (only ?? []).includes(a.id));
         for (const agent of agents) await c.send('POST', `/agents/${encodeURIComponent(agent.id)}/resume`);
         forgetPaused(scope);
         queueEmit(['agents', 'runs']);

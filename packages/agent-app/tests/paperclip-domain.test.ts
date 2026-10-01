@@ -629,7 +629,7 @@ test('D15: Pause then Resume (company-wide) leaves agents paused on purpose and 
     const m=/^\/api\/agents\/([^/]+)\/(pause|resume)$/.exec(url.pathname);if(m&&init?.method==='POST'){posts.push(`${m[2]} ${m[1]}`);status.set(m[1],m[2]==='pause'?'paused':'idle');return new Response('{}',{status:200});}
     return server.fetch(input,init);}});
   await h.call('paperclip.config.set',{mode:'local'});
-  assert.deepEqual((await h.call('paperclip.snapshot')).agentCounts,{active:2,paused:1},'the label counts the company’s agents that Pause would stop, not a pending hire');
+  assert.deepEqual((await h.call('paperclip.snapshot')).agentCounts,{active:2,paused:1,resumable:{paperclip:0,local:0,projects:{}}},'the label counts the company’s agents that Pause would stop, not a pending hire');
   assert.deepEqual(await h.call('paperclip.pauseAll',{source:'paperclip'}),{changed:2});
   assert.deepEqual(posts,['pause a-1','pause a-2'],'the purposely paused, pending and terminated agents are not touched');
   posts.length=0;
@@ -665,4 +665,21 @@ test('B14: Paperclip budget policies (company, project, agent) with utilisation 
   const data=await h.call('paperclip.dashboard',{});
   assert.deepEqual(data.budgets.policies.map((p:any)=>[p.scope,p.name,p.limitUsd,p.observedUsd,p.status,p.hardStop,p.paused]),[['project','OSS Manager',1000,250,'ok',false,false],['agent','CTO',500,500,'hard_stop',true,true],['company','RagnarDataOps',2500,10,'ok',false,false]],'dollar policies only, in dollars');
   assert.equal(data.budgets.incidents,1);assert.equal(data.budgets.company,'RagnarDataOps');
+});
+
+test('review S1: Resume with no recorded Pause wakes nothing, so an agent paused on purpose stays paused; the snapshot says how many Pause can resume',async t=>{
+  const status=new Map([['a-1','idle'],['a-purposely','paused']]);const posts:string[]=[];const server=paperclip();
+  const h=await harness(t,{fetch:async(input,init)=>{const url=new URL(input);
+    if(url.pathname===`/api/companies/${COMPANY}/agents`)return new Response(JSON.stringify([...status].map(([id,s])=>({id,name:id,status:s,role:'general',adapterConfig:{}}))),{status:200});
+    const m=/^\/api\/agents\/([^/]+)\/(pause|resume)$/.exec(url.pathname);if(m&&init?.method==='POST'){posts.push(`${m[2]} ${m[1]}`);status.set(m[1],m[2]==='pause'?'paused':'idle');return new Response('{}',{status:200});}
+    return server.fetch(input,init);}});
+  await h.call('paperclip.config.set',{mode:'local'});
+  assert.deepEqual((await h.call('paperclip.snapshot')).agentCounts,{active:1,paused:1,resumable:{paperclip:0,local:0,projects:{}}},'nothing recorded: nothing to resume');
+  assert.deepEqual(await h.call('paperclip.resumeAll',{source:'paperclip'}),{changed:0});
+  assert.deepEqual(posts,[],'no agent was woken');
+  await h.call('paperclip.pauseAll',{source:'paperclip'});
+  assert.equal((await h.call('paperclip.snapshot',{refresh:true})).agentCounts.resumable.paperclip,1,'only what Pause stopped');
+  posts.length=0;await h.call('paperclip.resumeAll',{source:'paperclip'});
+  assert.deepEqual(posts,['resume a-1']);assert.equal(status.get('a-purposely'),'paused');
+  assert.deepEqual(await h.call('paperclip.resumeAll',{source:'paperclip'}),{changed:0},'a second Resume has nothing left to wake');
 });

@@ -107,7 +107,9 @@ export function PulseBoard({ snapshot, nav, agentId, scoped = false, projectId }
   return <section className="ws-section" aria-label={NAMES.pulse}>
     <div className="ws-section-head"><h2>{NAMES.pulse}</h2>
       <div className="ws-page-actions">{sources.map(source => {
-        const paused = source === 'paperclip' && snapshot.agentCounts ? snapshot.agentCounts.paused : snapshot.agents.filter(a => a.source === source && a.status === 'paused').length;
+        // Resume wakes only what Muster's Pause stopped, so the button counts (and enables on) exactly those.
+        const rc = snapshot.agentCounts?.resumable;
+        const paused = rc ? source === 'paperclip' ? rc.paperclip : scoped && projectId ? rc.projects[projectId] ?? 0 : rc.local + Object.values(rc.projects).reduce((n, x) => n + x, 0) : snapshot.agents.filter(a => a.source === source && a.status === 'paused').length;
         return confirm === source
           ? <span key={source} className="ws-confirm"><span className="ws-confirm-text">{confirmText(source)}</span>
               <button type="button" className="settings-button secondary" onClick={() => setConfirm(null)}>Keep running</button>

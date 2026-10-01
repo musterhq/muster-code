@@ -106,7 +106,7 @@ export interface WorkspaceSnapshot {
   /** The linked Paperclip's pending approvals, and its labels (for New task). */
   approvals?: WorkspaceApproval[];
   /** The whole linked company's agents, whatever slice of them a page shows: what a company-wide Pause would stop, and what is paused. */
-  agentCounts?: { active: number; paused: number };
+  agentCounts?: { active: number; paused: number; /** What Resume can wake: only what Muster's Pause stopped. */ resumable: { paperclip: number; local: number; projects: Record<string, number> } };
   labels?: { id: string; name: string; color: string | null }[];
   counts: { liveRuns: number; inbox: number; failedRuns: number; openTasks: number };
   fetchedAt: string;
