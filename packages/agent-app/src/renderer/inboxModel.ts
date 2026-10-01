@@ -13,6 +13,7 @@ import type { Snapshot } from '../shared/protocol';
 import type { ApprovalDecision, InboxKind, WorkspaceSnapshot } from '../shared/domains/paperclip-protocol';
 import type { INBOX_BUCKETS } from '../shared/workspace-names';
 import { decisionOverdue, type InboxMeta } from '../shared/domains/work-protocol.ts';
+import { isRoutineTrigger } from './runsModel.ts';
 
 export type InboxBucket = keyof typeof INBOX_BUCKETS;
 export type InboxAction = { kind: 'chat'; chatId: string } | { kind: 'task'; taskId: string } | { kind: 'agent'; agentId: string } | { kind: 'none' };
@@ -23,6 +24,8 @@ export interface ActivityItem {
   projectId?: string | null; taskId?: string | null; agentId?: string | null;
   /** A Paperclip approval this row stands for: Approve, Reject and Request revision act on it. */
   approval?: { id: string; verbs: ApprovalDecision[] };
+  /** G36: it comes from a run that started by itself (an automation, a timer, a heartbeat). */
+  routine?: boolean;
 }
 
 const KIND_BUCKET: Record<InboxKind, InboxBucket> = { question: 'needs', approval: 'needs', review: 'review', blocked: 'problems', failed_run: 'problems', agent_error: 'problems', budget: 'problems', mail: 'mentions', mention: 'mentions', other: 'review' };
@@ -54,9 +57,11 @@ export function buildActivity(app: Pick<Snapshot, 'chats' | 'folders' | 'project
       items.push({ id: `chat-done:${chat.id}`, bucket: 'done', title: chat.title || 'Untitled chat', why: chat.unread ? 'Finished — not opened yet.' : 'Finished.', at: chat.updatedAt, group, unread: Boolean(chat.unread), source: 'chat', kind: 'completed', action: open });
     }
   }
+  const runTrigger = new Map((workspace?.runs ?? []).map(r => [r.id, r.trigger]));
   for (const item of workspace?.inbox ?? []) {
     items.push({ id: `ws:${item.id}`, bucket: KIND_BUCKET[item.kind], title: item.title, why: item.why, at: item.at, group: item.group ?? workspace?.paperclip?.company?.name ?? 'Muster', unread: item.severity === 'high',
       source: item.source === 'paperclip' ? 'paperclip' : 'muster', kind: item.kind, projectId: item.projectId ?? null, taskId: item.taskId, agentId: item.agentId, ...(item.approvalId ? { approval: { id: item.approvalId, verbs: item.approvalVerbs ?? ['approve', 'reject', 'request_revision'] } } : {}),
+      ...(item.runId && isRoutineTrigger(runTrigger.get(item.runId)) ? { routine: true } : {}),
       action: item.taskId ? { kind: 'task', taskId: item.taskId } : item.agentId ? { kind: 'agent', agentId: item.agentId } : { kind: 'none' } });
   }
   return items.filter(i => dismissed.get(i.id) !== i.at).sort((a, b) => Number(b.unread) - Number(a.unread) || b.at.localeCompare(a.at));

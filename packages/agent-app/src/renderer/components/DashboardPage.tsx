@@ -19,6 +19,7 @@ import { agoLabel, exactTime } from '../relativeTime';
 import { Monogram, TaskStatusIcon } from './HubParts';
 import { PageHeader, type HubNav } from './HubPages';
 import { ResourceState } from './ResourceState';
+import { YouCard } from './YouCard';
 
 const errorText = (cause: unknown) => cause instanceof Error ? cause.message : String(cause);
 const shortDay = (day: string) => { const [, m, d] = day.split('-'); return `${Number(m)}/${Number(d)}`; };
@@ -84,6 +85,7 @@ export function DashboardPage({ snapshot, nav, projectId }: { snapshot: Workspac
       <Tile icon={<DollarSign size={15}/>} label="Month spend" value={tiles.spend.value} detail={tiles.spend.detail} onClick={() => openHub('ledger')}/>
       <Tile icon={<ShieldCheck size={15}/>} label="Pending approvals" value={tiles.approvals.value} detail={tiles.approvals.detail} onClick={() => openHub('inbox')}/>
     </section>
+    <YouCard {...(projectId ? { projectId } : {})}/>
     {error ? <ResourceState kind="error" message="The Dashboard’s numbers could not be read." detail={error} onRetry={() => setTick(n => n + 1)}/>
       : !data ? <ResourceState kind="loading" label="Reading the Ledger" rows={3}/>
       : <section className="dash-charts" aria-label="Last 14 days">
@@ -113,14 +115,14 @@ function Tile({ icon, label, value, detail, onClick }: { icon: React.ReactNode; 
 }
 
 // --- Charts: one bar per day, stacked, token colours, a legend and a per-bar tooltip (title), axis labels at the ends and middle.
-interface Segment { key: string; label: string; value: number; tone: string }
-function Bars({ title, days, series, legend, format = n => String(n), max }: { title: string; days: string[]; series: Segment[][]; legend: { label: string; tone: string }[]; format?: (n: number) => string; max?: number }): React.ReactElement {
+export interface Segment { key: string; label: string; value: number; tone: string }
+export function Bars({ title, days, series, legend, format = n => String(n), max, span = 'Last 14 days' }: { title: string; days: string[]; series: Segment[][]; legend: { label: string; tone: string }[]; format?: (n: number) => string; max?: number; span?: string }): React.ReactElement {
   const top = max ?? Math.max(1, ...series.map(s => s.reduce((n, x) => n + x.value, 0)));
   const W = 280, H = 96, gap = 4, bw = (W - gap * (days.length - 1)) / days.length;
   const total = series.reduce((n, s) => n + s.reduce((m, x) => m + x.value, 0), 0);
   return <figure className="dash-chart">
-    <figcaption><strong>{title}</strong><span>Last 14 days</span></figcaption>
-    <svg viewBox={`0 0 ${W} ${H}`} width="100%" height={H} preserveAspectRatio="none" role="img" aria-label={`${title}, last 14 days${total ? '' : ': nothing yet'}`}>
+    <figcaption><strong>{title}</strong><span>{span}</span></figcaption>
+    <svg viewBox={`0 0 ${W} ${H}`} width="100%" height={H} preserveAspectRatio="none" role="img" aria-label={`${title}, ${span.toLowerCase()}${total ? '' : ': nothing yet'}`}>
       <line className="dash-axis" x1={0} x2={W} y1={H - 0.5} y2={H - 0.5}/>
       {days.map((day, i) => { let y = H; const x = i * (bw + gap);
         return <g key={day} className="dash-bar"><title>{`${shortDay(day)}: ${series[i].filter(s => s.value).map(s => `${s.label} ${format(s.value)}`).join(', ') || 'nothing'}`}</title>
