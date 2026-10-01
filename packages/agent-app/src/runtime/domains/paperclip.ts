@@ -498,6 +498,8 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
     const { project, view: task } = await local.projectFor(taskId);
     // Paused means nothing new starts until you resume, by hand or by the scheduler.
     if ((await context.invoke('project.work', { projectId: project.id, activityLimit: 1 })).scheduler.paused) throw new Error(`${project.name} is paused, so nothing new starts. Resume its agents first.`);
+    const held = task.assigneeId?.startsWith('member:') ? (await context.invoke('project.members.list', { projectId: project.id })).members.find(m => m.id === task.assigneeId!.slice(7) && m.pausedAt) : undefined;
+    if (held) throw new Error(`${held.name} is paused, so nothing of theirs starts. Resume ${held.name} first.`);
     const source = folders().find(f => f.id === project.primaryFolderId);
     if (!source) throw new Error('Link the project’s folder first: runs happen in a worktree of it.');
     const meta = imports()?.projectMeta(project.id), base = typeof meta?.defaultRef === 'string' ? meta.defaultRef : undefined;

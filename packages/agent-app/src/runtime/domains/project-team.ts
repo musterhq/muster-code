@@ -241,6 +241,14 @@ export function createProjectTeam(ctx: DomainContext, deps: ProjectTeamDeps) {
       record(projectId, input.approve === true ? 'member.hire-approved' : 'member.hire-rejected', input.approve === true ? `Approved adding ${m.name}${m.title ? ` as ${m.title}` : ''}` : `Declined adding ${m.name}`, m.id);
       return m;
     },
+    'project.members.pause': async input => {
+      const projectId = project(input), paused = input.paused === true, member = members().setPaused(projectId, id(input.id, 'member id'), paused);
+      let stoppedRuns = 0;
+      if (paused) for (const chatId of liveRunsOf(projectId, member)) { try { await ctx.invoke('chat.stop', { id: chatId }); stoppedRuns++; } catch { /* already settled */ } }
+      record(projectId, paused ? 'member.paused' : 'member.resumed', paused ? `Paused ${member.name}${stoppedRuns ? `; stopped ${plural(stoppedRuns, 'running task')}` : ''}` : `Resumed ${member.name}`, member.id);
+      deps.changed(projectId, '', true);
+      return { member, stoppedRuns };
+    },
     'project.team.settings': input => members().settings(project(input)),
     'project.team.settings.set': input => {
       const projectId = project(input), patch: Partial<TeamSettings> = {};

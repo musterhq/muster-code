@@ -12,7 +12,7 @@ import { DEFAULT_AGENT_ID, DEFAULT_TEAM_SETTINGS, LOCAL_OWNER_ID, MEMBER_ROLES, 
 
 const SCHEMA = `CREATE TABLE IF NOT EXISTS project_members(project_id TEXT NOT NULL,id TEXT NOT NULL,name TEXT NOT NULL,kind TEXT NOT NULL,role TEXT NOT NULL,max_permission TEXT,folder_ids TEXT,secrets TEXT NOT NULL DEFAULT '[]',revoked_at TEXT,local INTEGER NOT NULL DEFAULT 0,created_at TEXT NOT NULL,updated_at TEXT NOT NULL,PRIMARY KEY(project_id,id));`;
 /** Roster profile columns, added in place to existing databases (older rows read as no profile). */
-const PROFILE_COLUMNS = [['title', 'TEXT'], ['reports_to', 'TEXT'], ['provider_id', 'TEXT'], ['model', 'TEXT'], ['instructions', "TEXT NOT NULL DEFAULT ''"], ['pending_at', 'TEXT']] as const;
+const PROFILE_COLUMNS = [['title', 'TEXT'], ['reports_to', 'TEXT'], ['provider_id', 'TEXT'], ['model', 'TEXT'], ['instructions', "TEXT NOT NULL DEFAULT ''"], ['pending_at', 'TEXT'], ['paused_at', 'TEXT']] as const;
 const SETTINGS_SCHEMA = 'CREATE TABLE IF NOT EXISTS project_team_settings(project_id TEXT PRIMARY KEY,require_hire_approval INTEGER NOT NULL DEFAULT 0,key_prefix TEXT,monthly_budget_usd REAL,updated_at TEXT NOT NULL);';
 const MODES: readonly ChatPermissionMode[] = ['read-only', 'workspace', 'full'];
 const ID = /^[a-zA-Z0-9_-]{1,128}$/;
@@ -39,7 +39,7 @@ export class ProjectTeamStore {
       local: Boolean(r.local), createdAt: String(r.created_at), updatedAt: String(r.updated_at),
       title: typeof r.title === 'string' && r.title ? r.title : null, reportsTo: typeof r.reports_to === 'string' && r.reports_to ? r.reports_to : null,
       runner: typeof r.provider_id === 'string' && r.provider_id && typeof r.model === 'string' && r.model ? { providerId: r.provider_id, model: r.model } : null,
-      instructions: typeof r.instructions === 'string' ? r.instructions : '', pendingAt: typeof r.pending_at === 'string' ? r.pending_at : null };
+      instructions: typeof r.instructions === 'string' ? r.instructions : '', pendingAt: typeof r.pending_at === 'string' ? r.pending_at : null, pausedAt: typeof r.paused_at === 'string' ? r.paused_at : null };
   }
   /** Seeds the local owner and the default agent the first time a Project's team is read. */
   private ensure(projectId: string) {
@@ -98,6 +98,14 @@ export class ProjectTeamStore {
     if (!member.pendingAt) throw new Error(`${member.name} is not waiting for approval.`);
     const ts = now();
     this.db.prepare(`UPDATE project_members SET pending_at=NULL,${approve ? '' : 'revoked_at=?,'}updated_at=? WHERE project_id=? AND id=?`).run(...(approve ? [ts, projectId, id] : [ts, ts, projectId, id]));
+    return this.must(projectId, id);
+  }
+  /** Holds (pauses) or releases one agent. */
+  setPaused(projectId: string, id: string, paused: boolean): ProjectMember {
+    const member = this.must(projectId, id);
+    if (member.kind !== 'agent') throw new Error('Only agents can be paused.');
+    if (Boolean(member.pausedAt) === paused) return member;
+    this.db.prepare('UPDATE project_members SET paused_at=?,updated_at=? WHERE project_id=? AND id=?').run(paused ? now() : null, now(), projectId, id);
     return this.must(projectId, id);
   }
   settings(projectId: string): TeamSettings {

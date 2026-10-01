@@ -174,3 +174,31 @@ test('S19 a task run’s Receipt is attributed to the task and its Roster owner,
   assert.equal(entry.agent, 'CTO'); assert.equal(entry.taskId, task.id); assert.equal(entry.trigger, 'task');
   assert.equal((await s.invoke('paperclip.ledger', {})).chain.ok, true, 'the chain still verifies');
 });
+
+test('S29 pausing one agent holds only that agent: its run stops, Start and the scheduler skip it, others keep working', async t => {
+  const { s, project, member, stopped } = await service(t);
+  const cto = await member('CTO'), qa = await member('QA');
+  const slow = await s.invoke('paperclip.task.create', { title: 'Long QA job', description: 'E2E-SLOW', projectId: project.id, assigneeId: `member:${qa.id}`, start: true });
+  assert.ok(slow.started, slow.startError ?? 'not started');
+  await until(async () => (await s.invoke('paperclip.snapshot', {})).runs.find(r => r.taskId === slow.id && r.status === 'running'), 'running');
+  await s.invoke('paperclip.agent.pause', { id: `member:${qa.id}` });
+  assert.ok(stopped.has(slow.started!.chatId), 'QA’s running work stopped');
+  const snap = await s.invoke('paperclip.snapshot', {});
+  assert.deepEqual(snap.agents.filter(a => a.projectId === project.id).map(a => `${a.name}:${a.status}`).sort(), ['CTO:idle', 'QA:paused'], 'only QA is paused');
+  assert.equal((await s.invoke('project.work', { projectId: project.id })).scheduler.paused, false, 'the project is not paused');
+  const qaTask = await s.invoke('paperclip.task.create', { title: 'QA later', description: '', projectId: project.id, assigneeId: `member:${qa.id}`, start: true });
+  assert.match(qaTask.startError ?? '', /QA is paused/);
+  const ctoTask = await s.invoke('paperclip.task.create', { title: 'CTO now', description: '', projectId: project.id, assigneeId: `member:${cto.id}`, start: true });
+  assert.ok(ctoTask.started, 'CTO still starts');
+  // The scheduler skips the held member's ready work.
+  await s.invoke('project.scheduler.set', { projectId: project.id, autoDispatch: true });
+  await wait(500);
+  const work = await s.invoke('project.work', { projectId: project.id });
+  assert.equal(work.tasks.items.find(i => i.id === qaTask.id)?.state, 'todo', 'the scheduler left the held agent’s ready task alone');
+  await s.invoke('paperclip.agent.resume', { id: `member:${qa.id}` });
+  assert.equal((await s.invoke('paperclip.snapshot', {})).agents.find(a => a.name === 'QA')!.status === 'paused', false);
+  await until(async () => (await s.invoke('project.work', { projectId: project.id })).tasks.items.find(i => i.id === qaTask.id)?.state !== 'todo', 'the scheduler picks QA’s task up once resumed');
+  await s.invoke('project.scheduler.set', { projectId: project.id, autoDispatch: false });
+  await until(async () => !(await s.invoke('paperclip.snapshot', {})).runs.some(r => r.status === 'running'), 'every run settled');
+  await wait(300);
+});

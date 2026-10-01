@@ -90,7 +90,7 @@ export class LocalWorkspace {
       const failed = owned.some(t => t.status === 'blocked' && read.work.tasks.items.find(x => x.id === t.id)?.state === 'failed');
       return {
         id, name: m.name, role: r?.role ?? 'agent', title: m.title ?? r?.title ?? null, model: m.runner?.model ?? r?.runner.model ?? null, adapter: r?.runner.runtime ?? m.runner?.providerId ?? 'muster', source: 'local',
-        status: m.pendingAt ? 'pending' : paused ? 'paused' : owned.some(t => t.live) ? 'running' : failed ? 'error' : 'idle',
+        status: m.pendingAt ? 'pending' : paused || m.pausedAt ? 'paused' : owned.some(t => t.live) ? 'running' : failed ? 'error' : 'idle',
         reportsTo: boss && ids.has(boss) ? memberAgentId(boss) : 'user:local', lastActiveAt: lastActive(id), error: null, pausable: !m.pendingAt, capabilities: m.instructions?.trim() ? m.instructions.trim().split('\n')[0].slice(0, 280) : r?.capabilities ?? null,
         projectId: read.project.id, memberId: m.id, runner: m.runner ?? null, instructions: m.instructions ?? '',
       };
@@ -198,12 +198,17 @@ export class LocalWorkspace {
     return (await this.locate(created.id)).view;
   }
 
-  /** Muster agents are Project schedulers: pausing one holds its Project's task dispatch and stops its running work. */
+  /** Pausing a Roster member holds that member only (its runs stop; the scheduler and Start skip its tasks). The
+   *  project's default runner, or every agent (`null`), pauses through the Project scheduler and stops its running work. */
   async setPaused(agentId: string | null, paused: boolean): Promise<number> {
-    // A Roster member pauses its project's scheduler (per-member pause is a follow-up).
     const reads = await this.projects();
-    const memberProject = agentId?.startsWith('member:') ? reads.find(r => r.members.some(m => memberAgentId(m.id) === agentId))?.project.id : undefined;
-    const list = reads.filter(r => !agentId || agentIdOf(r.project.id) === agentId || r.project.id === memberProject);
+    if (agentId?.startsWith('member:')) {
+      const read = reads.find(r => r.members.some(m => memberAgentId(m.id) === agentId));
+      if (!read) throw new Error('That agent is not on a Roster.');
+      await this.invoke('project.members.pause', { projectId: read.project.id, id: agentId.slice(7), paused });
+      return 1;
+    }
+    const list = reads.filter(r => !agentId || agentIdOf(r.project.id) === agentId);
     for (const read of list) await this.hold(read, paused);
     return list.length;
   }
