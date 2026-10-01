@@ -197,7 +197,8 @@ export function createProjectsDomain(ctx: DomainContext): DomainModule {
       '```muster-tasks', '[{"op":"create","ref":"api","title":"…","acceptance":"…","dependsOn":["<task id or ref>"],"owner":"agent","priority":2},',
       ' {"op":"update","id":"<task id>","title":"…","dependsOn":[…],"priority":1,"owner":"user"},',
       ' {"op":"status","id":"<task id>","state":"todo|blocked|review|implemented|cancelled","reason":"…"},',
-      ' {"op":"decision","title":"…","rationale":"…","relatedTaskIds":["<task id>"]}]', '```',
+      ' {"op":"decision","title":"…","rationale":"…","relatedTaskIds":["<task id>"]},',
+      ' {"op":"goal","text":"the project mission in one to three sentences"}]', '```',
       'Priorities: 0 urgent, 1 high, 2 normal, 3 low. Agent-owned ready tasks can be auto-dispatched; verification is always a human step.'];
   }
   const contributor = async ({ chat, folder }: { chat: Chat; folder?: { id: string } }) => {
@@ -551,8 +552,10 @@ export function createProjectsDomain(ctx: DomainContext): DomainModule {
   };
   function applyOps(projectId: string, ops: CoordinatorOp[]) {
     const { tasks: store } = open(), refs = new Map<string, string>(), actor: Actor = 'coordinator';
+    let goal: string | undefined;
     store.tx(() => {
       for (const op of ops) {
+        if (op.op === 'goal') { goal = op.text; continue; }
         if (op.op === 'create') {
           const t = store.createTask({ projectId, title: op.title, acceptance: op.acceptance ?? '', dependencies: (op.dependsOn ?? []).map(d => resolveTask(projectId, d, refs)), owner: { kind: op.owner ?? 'agent', id: op.owner ?? 'agent' }, priority: op.priority ?? 2 }, actor);
           if (op.ref) refs.set(op.ref, t.id);
@@ -565,6 +568,7 @@ export function createProjectsDomain(ctx: DomainContext): DomainModule {
         } else store.createDecision({ projectId, title: op.title, rationale: op.rationale ?? '', scope: op.scope ?? '', relatedTaskIds: (op.relatedTaskIds ?? []).map(d => resolveTask(projectId, d, refs)) }, actor);
       }
     });
+    if (goal !== undefined) update({ id: projectId, goal });
   }
   const proposal = (projectId: string, key: unknown): CoordinatorProposal => {
     const k = text(key, 'proposal', 300), found = coordinatorState(projectId).proposals.find(p => p.key === k);

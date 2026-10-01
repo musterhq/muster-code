@@ -92,10 +92,12 @@ const OWNER_ONLY_PROJECT = new Set(['project.delete', 'project.archive', 'projec
   'project.gov.settings.set', 'project.agent.gov.set', 'project.agent.files.save', 'project.agent.files.remove', 'project.agent.revisions.restore', 'project.tasks.policy.set',
   'project.secrets.list', 'project.secrets.audit', 'project.secrets.save', 'project.secrets.rollback', 'project.secrets.remove', 'project.secrets.grant', 'project.secrets.decide',
   // Work layer: a project's status and target date.
-  'work.project.meta.set']);
+  'work.project.meta.set',
+  // Wave 3: a reflection changes an agent's instructions; the setup interview starts the coordinator.
+  'insight.reflect.run', 'insight.reflect.accept', 'insight.reflect.settings.set', 'insight.setup.interview']);
 const AUTOMATION_BY_ID = /^automations\.(update|delete|pause|resume|runNow|runs|list)$/;
 /** Commands whose result is server-wide and not filterable per project: admins only for everyone else. */
-const ADMIN_READS = /^(work\.(overlay|inbox\.state)|automations\.gate\.list|paperclip\.(snapshot|dashboard|list|badge|memory|task|config\.get|inbox\.dismissed|import\.plan|watch)|settings\.(export|diagnostics|storage|storage\.preview)|providers\.diagnose|import\.|memory\.(export|archives|bank\.preview|import\.preview))/;
+const ADMIN_READS = /^(work\.(overlay|inbox\.state)|search\.workspace|insight\.(costs|profile|reflect\.inbox)|automations\.gate\.list|paperclip\.(snapshot|dashboard|list|badge|memory|task|config\.get|inbox\.dismissed|import\.plan|watch)|settings\.(export|diagnostics|storage|storage\.preview)|providers\.diagnose|import\.|memory\.(export|archives|bank\.preview|import\.preview))/;
 
 /**
  * Throws unless the user may run `command` on the resources named in `input`. `snapshot` is the runtime's current (unfiltered) state.

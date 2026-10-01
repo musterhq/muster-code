@@ -144,6 +144,22 @@ test('Review S4: starring or hiding needs write access to the project, and an ag
   authorizeResource(editor, 'work.star.set', 'write', { kind: 'agent', id: 'member:m1', projectId: 'p-shared', starred: true }, snapshot);
   denied(() => authorizeResource(editor, 'work.star.set', 'write', { kind: 'agent', id: 'member:m1', projectId: 'p-secret', starred: true }, snapshot));
   denied(() => authorizeResource(editor, 'work.star.set', 'write', { kind: 'agent', id: 'member:m1', starred: true }, snapshot));
+
+test('Wave 3 navigation and insight commands: search and costs are server-wide (admin), reflections and the setup interview are project-owner, skill inputs are host', () => {
+  for (const c of ['search.workspace', 'insight.costs', 'insight.profile', 'insight.reflect.list', 'insight.reflect.inbox', 'studio.skill.fromTask', 'studio.skill.templates', 'studio.skill.inputs.list']) assert.equal(classifyCommand(c), 'read', c);
+  for (const c of ['insight.reflect.run', 'insight.reflect.accept', 'insight.reflect.dismiss', 'insight.reflect.settings.set', 'studio.skill.test', 'insight.setup.interview']) assert.equal(classifyCommand(c), 'write', c);
+  for (const c of ['studio.skill.inputs.save', 'studio.skill.inputs.remove']) assert.equal(classifyCommand(c), 'host', c);
+  const editor = accessView(user('member'), grants, owners), owner = accessView(user('member'), [{ projectId: 'p-shared', role: 'owner' }], owners);
+  for (const c of ['search.workspace', 'insight.costs', 'insight.profile', 'insight.reflect.inbox']) denied(() => authorizeResource(owner, c, 'read', {}, snapshot), 'forbidden');
+  authorizeResource(editor, 'studio.skill.fromTask', 'read', { projectId: 'p-shared', taskId: 't' }, snapshot);
+  denied(() => authorizeResource(editor, 'studio.skill.fromTask', 'read', { projectId: 'p-secret', taskId: 't' }, snapshot));
+  authorizeResource(editor, 'studio.skill.test', 'write', { projectId: 'p-shared', skill: 'x', input: 'y' }, snapshot);
+  denied(() => authorizeResource(editor, 'insight.reflect.accept', 'write', { projectId: 'p-shared', id: 'r' }, snapshot), 'forbidden');
+  denied(() => authorizeResource(editor, 'insight.setup.interview', 'write', { projectId: 'p-shared' }, snapshot), 'forbidden');
+  authorizeResource(owner, 'insight.reflect.accept', 'write', { projectId: 'p-shared', id: 'r' }, snapshot);
+  authorizeResource(owner, 'insight.setup.interview', 'write', { projectId: 'p-shared' }, snapshot);
+  denied(() => authorizeResource(editor, 'insight.reflect.list', 'read', { projectId: 'p-secret' }, snapshot));
+  assert.throws(() => authorizeCommand('studio.skill.inputs.save', 'member'), /needs admin/);
 });
 
 test('review S4: Paperclip commands that spend, pause or change configuration are host (admin) commands; reads stay reads', () => {

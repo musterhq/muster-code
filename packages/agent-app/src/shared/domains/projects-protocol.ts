@@ -76,7 +76,9 @@ export type CoordinatorOp =
   | { op: 'create'; ref?: string; title: string; acceptance?: string; dependsOn?: string[]; owner?: 'user' | 'agent'; priority?: TaskPriority }
   | { op: 'update'; id: string; title?: string; acceptance?: string; dependsOn?: string[]; owner?: 'user' | 'agent'; priority?: TaskPriority }
   | { op: 'status'; id: string; state: 'todo' | 'blocked' | 'review' | 'implemented' | 'cancelled'; reason?: string }
-  | { op: 'decision'; title: string; rationale?: string; scope?: string; relatedTaskIds?: string[] };
+  | { op: 'decision'; title: string; rationale?: string; scope?: string; relatedTaskIds?: string[] }
+  /** The project's mission: replaces its shared goal when you apply it (the setup interview ends with one). */
+  | { op: 'goal'; text: string };
 export interface CoordinatorProposal { key: string; itemId: string; createdAt: string; ops: CoordinatorOp[]; state: 'pending' | 'applied' | 'dismissed' | 'invalid'; error?: string }
 export interface CoordinatorState { chatId: string | null; proposals: CoordinatorProposal[] }
 export interface ProjectWorkState {
@@ -207,6 +209,7 @@ function validateOp(raw: unknown): CoordinatorOp {
   if (o.op === 'create') return compact<CoordinatorOp>({ op: 'create', ref: str(o.ref, 'ref', 64, true), title: str(o.title, 'title', 500)!.trim(), acceptance: str(o.acceptance, 'acceptance', 4000, true), dependsOn: strs(o.dependsOn, 'dependsOn'), owner: ownerKind(o.owner), priority: prio(o.priority) });
   if (o.op === 'update') return compact<CoordinatorOp>({ op: 'update', id: str(o.id, 'task id', 128)!, title: str(o.title, 'title', 500, true), acceptance: str(o.acceptance, 'acceptance', 4000, true), dependsOn: strs(o.dependsOn, 'dependsOn'), owner: ownerKind(o.owner), priority: prio(o.priority) });
   if (o.op === 'status') { const state = o.state; if (state !== 'todo' && state !== 'blocked' && state !== 'review' && state !== 'implemented' && state !== 'cancelled') throw new Error('Coordinator status must be todo, blocked, review, implemented or cancelled.'); return compact<CoordinatorOp>({ op: 'status', id: str(o.id, 'task id', 128)!, state, reason: str(o.reason, 'reason', 2000, true) }); }
+  if (o.op === 'goal') return { op: 'goal', text: str(o.text, 'goal', 4000)!.trim() };
   if (o.op === 'decision') return compact<CoordinatorOp>({ op: 'decision', title: str(o.title, 'decision title', 500)!.trim(), rationale: str(o.rationale, 'rationale', 8000, true), scope: str(o.scope, 'scope', 500, true), relatedTaskIds: strs(o.relatedTaskIds, 'relatedTaskIds') });
   throw new Error(`Unknown operation ${JSON.stringify(o.op)}.`);
 }
