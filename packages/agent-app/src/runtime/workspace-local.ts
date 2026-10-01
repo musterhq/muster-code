@@ -153,11 +153,14 @@ export class LocalWorkspace {
       ...(mail?.messages ?? []).filter(m => (m.recipient.kind === 'taskRun' && m.recipient.id === task.id) || chats.has(m.sender.chatId ?? m.sender.id) || chats.has(m.recipient.chatId ?? m.recipient.id)).map(m => mailComment(m)),
     ].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
     const agent = task.owner.kind === 'agent';
+    // A Delegated card per subtask: who handed which piece of this work to whom.
+    const ordered = [...read.work.tasks.items].sort((a, b) => a.createdAt.localeCompare(b.createdAt)), kids = this.children(read, task.id);
+    const delegated = kids.map(k => { const v = this.task(read, k, ordered.indexOf(k)); return { kind: 'delegated' as const, id: `delegated:${v.id}`, at: v.createdAt, from: view.assigneeLabel ?? view.origin, to: v.assigneeLabel, taskId: v.id, key: v.key, title: v.title, brief: `${v.key} · ${v.title}` }; });
     return {
       task: view, description: task.acceptance, comments, runs: task.attempts.map(a => this.run(read, task, a)).sort((a, b) => b.createdAt.localeCompare(a.createdAt)),
       addressee: agent ? { id: view.assigneeId ?? agentIdOf(read.project.id), label: view.assigneeLabel ?? 'Agent' } : null,
       composerNote: agent ? 'Delivered into the task run’s next turn through the project mailbox.' : 'This task is yours. Assign it to a Roster agent to message its runs.',
-      subtasks: this.children(read, task.id).map(t => t.id), blocking: read.work.tasks.items.filter(t => t.dependencies.includes(task.id)).map(t => t.id), receipts: [], cards: [],
+      subtasks: kids.map(t => t.id), blocking: read.work.tasks.items.filter(t => t.dependencies.includes(task.id)).map(t => t.id), receipts: [], cards: delegated,
       mentionable: read.members.filter(m => !m.revokedAt).map(m => ({ id: m.id, name: m.name })),
     };
   }

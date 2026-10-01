@@ -120,3 +120,15 @@ test('S10 Resume all wakes only the projects Pause all paused', async t => {
   assert.equal((await s.invoke('project.work', { projectId: project.id })).scheduler.paused, false);
   assert.equal((await s.invoke('project.work', { projectId: other.id })).scheduler.paused, true, 'the deliberately paused project stays paused');
 });
+
+test('S15 a Muster parent task shows a Delegated card per subtask', async t => {
+  const { s, project, member } = await service(t);
+  const cto = await member('CTO'), qa = await member('QA');
+  const parent = await s.invoke('paperclip.task.create', { title: 'Migration wizard', description: '', projectId: project.id, assigneeId: `member:${cto.id}` });
+  const a = await s.invoke('paperclip.task.create', { title: 'Write the tests', description: '', projectId: project.id, assigneeId: `member:${qa.id}`, parentId: parent.id });
+  const b = await s.invoke('paperclip.task.create', { title: 'Design the steps', description: '', projectId: project.id, assigneeId: 'user:local', parentId: parent.id });
+  const detail = await s.invoke('paperclip.task', { id: parent.id });
+  const cards = detail.cards.filter(c => c.kind === 'delegated');
+  assert.deepEqual(cards.map(c => c.kind === 'delegated' ? `${c.from}>${c.to}:${c.key}:${c.taskId}` : '').sort(), [`CTO>QA:${a.key}:${a.id}`, `CTO>You:${b.key}:${b.id}`].sort());
+  assert.deepEqual((await s.invoke('paperclip.task', { id: a.id })).cards.filter(c => c.kind === 'delegated'), [], 'a leaf task delegates nothing');
+});

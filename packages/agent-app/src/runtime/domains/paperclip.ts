@@ -388,7 +388,7 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
   const localDetail = async (taskId: string): Promise<WorkspaceTaskDetail> => {
     const detail = await local.detail(taskId);
     const chatIds = detail.runs.map(r => r.chatId).filter((c): c is string => Boolean(c));
-    const cards: ThreadCard[] = [];
+    const cards: ThreadCard[] = [...detail.cards];
     // Handoff packets carry the memory Muster hands the next run (PRJ-18).
     const packet = await context.invoke('project.handoff.latest', { projectId: detail.task.projectId ?? '', taskId }).then(r => r.packet).catch(() => null);
     if (packet) cards.push({ kind: 'handoff', id: `handoff:${packet.id}`, at: packet.createdAt, from: 'You', to: detail.task.assigneeLabel, summary: `Handoff v${packet.version}${packet.stale ? ' (stale)' : ''} · ${packet.decisions.length} decisions · ${packet.artifacts.length} artifacts`, memory: packet.memory.map(m => ({ text: m.text, source: m.scope })) });
