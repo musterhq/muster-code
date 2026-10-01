@@ -147,6 +147,22 @@ export class ConnectorRegistry {
     await this.deps.audit.append({ actor: `user:${actor.id}`, action: 'connector.identity.linked', target: `connector:${c.id}`, detail: { externalId, userId: user.id } });
   }
 
+  /** One-way post to the connector's notify channel (G27). Recorded like every other outbound message. */
+  async notify(idOrName: string, text: string, key: string | null = null): Promise<void> {
+    const c = await this.find(idOrName), channel = typeof c.config.notifyChannel === 'string' ? c.config.notifyChannel : '';
+    if (!channel) throw new Error(`${c.name} has no notify channel. Set one first.`);
+    const adapter = this.adapters.get(c.id); if (!adapter) throw new Error(`${c.name} is not running.`);
+    await adapter.send({ conversation: { kind: 'channel', id: channel }, text });
+    await this.deps.store.addConnectorEvent({ id: newId(), connectorId: c.id, ts: nowIso(), direction: 'out', externalId: null, conversation: channel, chatId: null, runId: null, status: 'notified', detail: key });
+  }
+  async setConfig(actor: UserRecord, idOrName: string, config: Record<string, unknown>): Promise<ConnectorView> {
+    const c = await this.find(idOrName); this.assertManage(actor, c);
+    const type = connectorType(c.type)!, next = { ...c.config, ...this.cleanConfig(type.configKeys, config) };
+    for (const k of Object.keys(next)) if (next[k] === null || next[k] === '') delete next[k];
+    await this.deps.store.updateConnector(c.id, { config: next });
+    await this.deps.audit.append({ actor: `user:${actor.id}`, action: 'connector.config.changed', target: `connector:${c.id}`, detail: { keys: Object.keys(config) } });
+    return this.view((await this.deps.store.connector(c.id))!);
+  }
   async list(): Promise<ConnectorView[]> { return Promise.all((await this.deps.store.listConnectors()).map(c => this.view(c))); }
   async view(c: ConnectorRecord): Promise<ConnectorView> {
     const type = connectorType(c.type);

@@ -12,6 +12,7 @@ import { AuditLog } from './audit.ts';
 import { RemoteAgents } from './agents/remote.ts';
 import { hostAllowed, isLoopback, paths, validateBind, type Paths, type ServerConfig } from './config.ts';
 import { ConnectorRegistry, type TurnRunner } from './connectors/registry.ts';
+import { NotificationBridge } from './connectors/notify.ts';
 import { acceptUpgrade, type WsConnection } from './net/ws.ts';
 import { PolicyError } from './policy.ts';
 import { dispatch, grant, viewFor, type RpcContext } from './rpc.ts';
@@ -55,6 +56,7 @@ export class MusterServer {
   audit!: AuditLog;
   accounts!: Accounts;
   agents!: RemoteAgents;
+  notifications!: NotificationBridge;
   runtime: RuntimeHost | null = null;
   registry!: ConnectorRegistry;
   private http?: http.Server | https.Server;
@@ -82,6 +84,7 @@ export class MusterServer {
     this.audit = new AuditLog(this.store);
     this.accounts = new Accounts(this.store, this.audit);
     this.agents = new RemoteAgents(this.store, this.audit, () => this.runtime);
+    this.notifications = new NotificationBridge({ store: this.store, registry: () => this.registry, runtime: () => this.runtime, publicUrl: () => this.publicUrl(), log: this.log });
     this.runtimeDir = this.paths.runtime;
     this.registry = new ConnectorRegistry({ store: this.store, secrets: this.secrets, audit: this.audit, runner: null, publicUrl: () => this.publicUrl(), log: this.log });
   }
@@ -103,7 +106,7 @@ export class MusterServer {
       this.runtime = new RuntimeHost({ dataDir: this.paths.runtime, runtimeDir: runtimeBundle, box: this.box, provider: this.options.provider });
       this.runtime.start();
       await this.runtime.snapshot(true);
-      this.runtime.subscribe(event => { this.agents.notify(event as { type: string; projectId?: unknown }); this.fanOut(event); });
+      this.runtime.subscribe(event => { this.agents.notify(event as { type: string; projectId?: unknown }); this.notifications.touch(event as { type: string; projectId?: unknown }); this.fanOut(event); });
       this.registry = new ConnectorRegistry({ store: this.store, secrets: this.secrets, audit: this.audit, runner: this.turnRunner(), publicUrl: () => this.publicUrl(), log: this.log });
     }
     this.accounts.on('user-revoked', (userId: string) => this.closeClients(c => c.principal.user.id === userId, 'Your access to this Muster Server was revoked.'));
@@ -140,7 +143,7 @@ export class MusterServer {
 
   async stop(): Promise<void> {
     if (this.statusTimer) clearInterval(this.statusTimer);
-    this.agents?.closeAll();
+    this.agents?.closeAll(); this.notifications?.dispose();
     for (const c of this.clients) c.conn.close(1001, 'server stopping');
     this.clients.clear();
     await this.registry?.stopAll().catch(() => undefined);
@@ -281,7 +284,7 @@ export class MusterServer {
   // ---------------------------------------------------------------- HTTP
   private rpcContext(): RpcContext {
     return {
-      store: this.store, accounts: this.accounts, audit: this.audit, runtime: this.runtime, registry: this.registry, agents: this.agents, runtimeDir: this.paths.runtime,
+      store: this.store, accounts: this.accounts, audit: this.audit, runtime: this.runtime, registry: this.registry, agents: this.agents, notifications: this.notifications, runtimeDir: this.paths.runtime,
       version: VERSION, startedAt: this.startedAt, inviteUrl: token => `${(this.publicUrl() ?? this.url).replace(/\/+$/, '')}/invite/${token}`,
       bumpAccess: () => { this.accessVersion++; }, status: () => this.statusSnapshot(),
     };

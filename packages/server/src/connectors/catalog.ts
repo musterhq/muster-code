@@ -7,7 +7,7 @@ import { SlackAdapter } from './slack.ts';
 import { TelegramAdapter } from './telegram.ts';
 import type { ConnectorType } from './types.ts';
 
-const COMMON_CONFIG = ['defaultProjectId', 'defaultAgentId', 'defaultMode', 'guestPolicy', 'requireLink', 'provider', 'model', 'pingIntervalMs', 'pongTimeoutMs'] as const;
+const COMMON_CONFIG = ['defaultProjectId', 'defaultAgentId', 'defaultMode', 'guestPolicy', 'requireLink', 'provider', 'model', 'pingIntervalMs', 'pongTimeoutMs', 'notifyChannel', 'notifyProject', 'notifyBacklog'] as const;
 const comingSoon = (type: string, label: string, note: string): ConnectorType => ({ type, label, status: 'coming-soon', modes: ['webhook'], secrets: () => [], configKeys: COMMON_CONFIG, note });
 
 export const CONNECTOR_TYPES: Record<string, ConnectorType> = {

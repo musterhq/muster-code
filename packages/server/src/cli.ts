@@ -73,6 +73,8 @@ Connectors (several instances per type)
   connectors add <slack|telegram|mattermost|…> --name NAME [--mode M] [--scope org|project|user] [--project ID]
              [--config key=value]... [--secret name=env:VAR | name=file:PATH | name=stdin]...
   connectors test <name> | enable <name> | disable <name> | remove <name> | events <name>
+  connectors config <name> --config notifyChannel=C123 --config notifyProject=<project-id>   (one-way: what needs you and status updates, posted to that channel)
+  connectors notify-test <name>
   connectors route <name> --project ID [--match "channel=#support,mention=true"] [--agent ID] [--mode reply|task] [--priority N]
   connectors unroute <rule-id> | link <name> <external-user-id> <user>
   connectors import-gateway <path/to/.muster/gateway.json> [--dry-run]
@@ -457,6 +459,8 @@ async function cmdAdmin(p: Parsed, dataDir: string) {
         }
         if (sub === 'unroute') { if (!rest[0]) throw new UsageError('Usage: connectors unroute <rule-id>'); await call('server.connectors.unroute', { ruleId: rest[0] }); return out(`Removed route ${rest[0]}.`, { ok: true }); }
         if (sub === 'link') { if (rest.length < 3) throw new UsageError('Usage: connectors link <name> <external-user-id> <user>'); await call('server.connectors.link', { id: rest[0], externalId: rest[1], userId: rest[2] }); return out(`Linked ${rest[1]} on ${rest[0]} to ${rest[2]}.`, { ok: true }); }
+        if (sub === 'config') { const config: Record<string, unknown> = {}; for (const kv of p.flags.get('config') ?? []) { const [k, ...v] = kv.split('='); const val = v.join('='); config[k!] = val === 'true' ? true : val === 'false' ? false : /^\d+$/.test(val) ? Number(val) : val; } if (!Object.keys(config).length) throw new UsageError('Usage: connectors config <name> --config key=value… (empty value clears it; notifyChannel and notifyProject turn on one-way notifications)'); const c = await call('server.connectors.config', { id: connectorArg(), config }); return out(`Updated ${rest[0]}.`, c); }
+        if (sub === 'notify-test') { await call('server.connectors.notifyTest', { id: connectorArg() }); return out(`Sent a test notification through ${rest[0]}.`, { ok: true }); }
         if (sub === 'events') { const ev = await call('server.connectors.events', { id: rest[0], limit: Number(flag(p, 'limit') ?? 50) }) as Array<Record<string, unknown>>; return out(table(ev, ['ts', 'direction', 'status', 'conversation', 'externalId', 'chatId', 'detail']), ev); }
         if (sub === 'import-gateway') {
           if (!rest[0]) throw new UsageError('Usage: connectors import-gateway <path/to/gateway.json> [--dry-run]');

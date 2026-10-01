@@ -19,7 +19,7 @@ import type { RuntimeHost } from './runtime-host.ts';
 import { PROJECT_ROLES, type OrgRole, type ProjectRole, type ServerStore, type UserRecord } from './store/types.ts';
 
 export interface RpcContext {
-  store: ServerStore; accounts: Accounts; audit: AuditLog; runtime: RuntimeHost | null; registry: ConnectorRegistry; agents: RemoteAgents;
+  store: ServerStore; accounts: Accounts; audit: AuditLog; runtime: RuntimeHost | null; registry: ConnectorRegistry; agents: RemoteAgents; notifications?: { invalidate(): void };
   runtimeDir: string; version: string; startedAt: number; inviteUrl(token: string): string;
   /** Bumped whenever access or chat ownership changes, so cached per-client views refresh. */
   bumpAccess(): void;
@@ -214,6 +214,8 @@ async function serverCommand(ctx: RpcContext, principal: Principal, command: str
       case 'server.connectors.add': need(user, 'member', 'add connectors');
         return ctx.registry.add(user, { type: str(i.type, 'type'), name: str(i.name, 'name'), mode: typeof i.mode === 'string' ? i.mode : undefined, scope: i.scope as never,
           projectId: typeof i.projectId === 'string' ? i.projectId : null, config: (i.config ?? {}) as Record<string, unknown>, secrets: (i.secrets ?? {}) as Record<string, string> });
+      case 'server.connectors.config': { const r = await ctx.registry.setConfig(user, str(i.id, 'id'), (i.config ?? {}) as Record<string, unknown>); ctx.notifications?.invalidate(); return r; }
+      case 'server.connectors.notifyTest': { need(user, 'admin', 'send a test notification'); await ctx.registry.notify(str(i.id, 'id'), typeof i.text === 'string' && i.text ? i.text.slice(0, 500) : 'Muster test notification: this channel will receive what needs you and status updates for the notify project.'); return { ok: true }; }
       case 'server.connectors.remove': await ctx.registry.remove(user, str(i.id, 'id')); return { ok: true };
       case 'server.connectors.enable': return ctx.registry.setEnabled(user, str(i.id, 'id'), i.enabled !== false);
       case 'server.connectors.test': need(user, 'admin', 'test connectors'); return ctx.registry.test(str(i.id, 'id'));
