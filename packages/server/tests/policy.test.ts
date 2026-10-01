@@ -189,3 +189,9 @@ test('Review M2: Skill Studio test runs are narrowed to the projects the caller 
   const admin = accessView(user('admin'), [], owners);
   assert.equal((filterOutput(admin, 'studio.skill.inputs.list', out, snapshot) as typeof out).runs.length, 2);
 });
+
+test('Review S1: dismissing a reflection proposal is owner-only, like running, accepting and scheduling one', () => {
+  const editor = accessView(user('member'), grants, owners), owner = accessView(user('member'), [{ projectId: 'p-shared', role: 'owner' }], owners);
+  denied(() => authorizeResource(editor, 'insight.reflect.dismiss', 'write', { projectId: 'p-shared', id: 'r' }, snapshot), 'forbidden');
+  authorizeResource(owner, 'insight.reflect.dismiss', 'write', { projectId: 'p-shared', id: 'r' }, snapshot);
+});

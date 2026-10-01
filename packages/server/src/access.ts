@@ -94,7 +94,7 @@ const OWNER_ONLY_PROJECT = new Set(['project.delete', 'project.archive', 'projec
   // Work layer: a project's status and target date.
   'work.project.meta.set',
   // Wave 3: a reflection changes an agent's instructions; the setup interview starts the coordinator.
-  'insight.reflect.run', 'insight.reflect.accept', 'insight.reflect.settings.set', 'insight.setup.interview',
+  'insight.reflect.run', 'insight.reflect.accept', 'insight.reflect.dismiss', 'insight.reflect.settings.set', 'insight.setup.interview',
   // Applying a coordinator proposal can change the shared mission (its goal operation), which project.update reserves for owners.
   'project.coordinator.apply']);
 const AUTOMATION_BY_ID = /^automations\.(update|delete|pause|resume|runNow|runs|list)$/;
