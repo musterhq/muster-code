@@ -14,6 +14,7 @@ void DatabaseSync;
 function queue(over: Partial<WakeDeps> = {}, gap = 30) {
   const dir = mkdtempSync(join(tmpdir(), 'muster-wq-')), store = new GovernanceStore(dir), clock = new FakeClock(), delivered: { reasons: string[]; notes: string[] }[] = [];
   const live = new Set<string>();
+  store.clock = clock.now;
   const q = new WakeQueue({
     store, now: clock.now, setTimer: clock.set, clearTimer: clock.clear, settings: () => ({ ...DEFAULT_GOVERNANCE }), heartbeat: () => ({ ...DEFAULT_HEARTBEAT, minGapSec: gap }),
     member: () => ({ name: 'CTO', paused: false, revoked: false, pending: false }),
@@ -96,19 +97,20 @@ test('C30 service: wakes through the real runtime coalesce, throttle and record 
 test('C14: the heartbeat arms one timer per enabled agent, an idle tick starts nothing, a tick with ready work starts a run with reason timer', async t => {
   const h = await wave1(t, { fakeClock: true });
   const cto = await h.member('CTO');
-  await h.clock!.advance(0); // flush the coalesced evaluation timers
-  assert.equal(h.clock!.pending, 0, 'nothing is armed until the heartbeat is turned on');
+  await h.clock!.advance(300); // flush the coalesced evaluation and assignment timers
+  const base = h.clock!.pending;
+  assert.equal(base, 0, 'nothing is armed until the heartbeat is turned on');
   await h.s.invoke('project.agent.gov.set', { projectId: h.project.id, memberId: cto.id, heartbeat: { enabled: true, intervalSec: 120 } });
-  await h.clock!.advance(0);
-  assert.equal(h.clock!.pending, 1, 'one timer for the agent');
+  await h.clock!.advance(300);
+  assert.equal(h.clock!.pending, base + 1, 'one timer for the agent');
   await assert.rejects(h.s.invoke('project.agent.gov.set', { projectId: h.project.id, memberId: cto.id, heartbeat: { intervalSec: 5 } }), /between 60 seconds/);
   // Idle: nothing ready.
   await h.clock!.advance(121_000);
   let st = await h.gov();
   assert.equal(st.wakes[0]!.status, 'skipped'); assert.match(st.wakes[0]!.detail, /no tokens used/);
   assert.equal(h.calls.length, 0, 'an idle heartbeat started no run');
-  await h.clock!.advance(0);
-  assert.equal(h.clock!.pending, 1, 'the timer re-armed');
+  await h.clock!.advance(300);
+  assert.equal(h.clock!.pending, base + 1, 'the timer re-armed');
   // Ready work.
   const job = await h.addTask('Timed job', { kind: 'agent', id: cto.id });
   await h.clock!.advance(121_000);
@@ -118,8 +120,8 @@ test('C14: the heartbeat arms one timer per enabled agent, an idle tick starts n
   assert.ok(h.calls.length >= 1);
   // Turning it off disarms.
   await h.s.invoke('project.agent.gov.set', { projectId: h.project.id, memberId: cto.id, heartbeat: { enabled: false } });
-  await h.clock!.advance(0);
-  assert.equal(h.clock!.pending, 0);
+  await h.clock!.advance(2000); // past the budget re-check that follows a settled run
+  assert.equal(h.clock!.pending, base);
   await wait(10); void until;
 });
 

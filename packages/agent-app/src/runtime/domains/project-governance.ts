@@ -69,7 +69,7 @@ export function createGovernance(ctx: DomainContext, deps: GovernanceDeps) {
   let store: GovernanceStore | undefined, queue: WakeQueue | undefined, vault: ProjectVault | undefined, disposed = false;
   const now = () => deps.now?.() ?? governanceClock.now?.() ?? Date.now();
   const timers = deps.timers ?? governanceClock.timers ?? { set: (fn: () => void, ms: number) => { const t = setTimeout(fn, Math.min(ms, MAX_TIMER_MS)); t.unref?.(); return t; }, clear: (h: unknown) => clearTimeout(h as ReturnType<typeof setTimeout>) };
-  const gov = () => store ??= new GovernanceStore(ctx.dataDir);
+  const gov = () => store ??= Object.assign(new GovernanceStore(ctx.dataDir), { clock: now });
   const tasks = () => deps.tasks();
   const team = () => deps.team.store();
   const record = (projectId: string, kind: string, summary: string, refId: string | null = null, actor: Actor = 'system') => { tasks().record(projectId, kind, summary, refId, actor); };
@@ -607,13 +607,12 @@ export function createGovernance(ctx: DomainContext, deps: GovernanceDeps) {
   // Recovery: what is stuck, computed when read (no polling), each with a way out.
   function recoveryItems(projectId: string): RecoveryItem[] {
     const out: RecoveryItem[] = [], all = taskList(projectId);
-    const chats = new Map(ctx.store.snapshot().chats.filter(c => c.projectId === projectId).map(c => [c.id, c]));
     const runs = new Map(gov().runsFor(projectId, { limit: 300 }).map(r => [r.chatId, r]));
     const skip = (taskId: string, kind: string, since: string) => { const at = gov().recoveryDismissed(taskId, kind); return Boolean(at && at >= since); };
     for (const t of all) {
       const key = keyOf(t), meta = t.runChatId ? runs.get(t.runChatId) : undefined, hold = holdFor(t);
       if (LIVE.has(t.state) && t.runChatId) {
-        const chat = chats.get(t.runChatId);
+        const chat = ctx.store.chat(t.runChatId);
         if (chat && !ACTIVE.has(chat.status) && !meta?.pendingAt && chat.status !== 'queued' as never && !pendingMeta.has(chat.id) && Date.parse(t.updatedAt) < now() - 5_000 && !skip(t.id, 'orphaned_run', t.updatedAt))
           out.push({ id: `orphaned_run:${t.id}`, projectId, taskId: t.id, kind: 'orphaned_run', summary: `${key} is marked running but its run is no longer active.`, at: t.updatedAt, actions: ['rerun', 'block', 'cancel', 'dismiss'] });
       }
