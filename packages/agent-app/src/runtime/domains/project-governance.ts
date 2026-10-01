@@ -1244,7 +1244,10 @@ export function createGovernance(ctx: DomainContext, deps: GovernanceDeps) {
   }
   /** Called when a task or project is deleted. */
   const purgeTask = (taskId: string) => { gov().purgeTask(taskId); };
-  const purgeProject = (projectId: string) => { gov().purgeProject(projectId); for (const [k] of heartbeatTimers) if (k.startsWith(`${projectId}:`)) { timers.clear(heartbeatTimers.get(k)); heartbeatTimers.delete(k); } };
+  const purgeProject = (projectId: string) => {
+    // The encrypted values go with the project: nothing could reach them once the metadata is gone.
+    for (const m of gov().secretsMeta(projectId)) { try { theVault().remove(projectId, m.name, 'You'); } catch { /* already gone */ } }
+    gov().purgeProject(projectId); for (const [k] of heartbeatTimers) if (k.startsWith(`${projectId}:`)) { timers.clear(heartbeatTimers.get(k)); heartbeatTimers.delete(k); } };
   /** An agent was removed or revoked: its timer stops. */
   const memberGone = (projectId: string, memberId: string) => disarm(projectId, memberId);
   function dispose() {
