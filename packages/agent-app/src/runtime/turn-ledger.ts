@@ -42,6 +42,9 @@ export class TurnLedger {
     const prevHash = this.head(), hash = entryHash(prevHash, body);
     const info = this.db.prepare('INSERT INTO turn_ledger (id, chat_id, run_id, project_id, body, prev_hash, hash, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
       .run(body.id, body.chatId ?? '', body.runId, body.projectId, canonical(body), prevHash, hash, body.endedAt);
+    // A task run's chat is Ledger-era from its first turn: a history row the backfill made for it while it was idle
+    // between turns would show the same turn twice (under the chat title). History is not chained, so it can go.
+    if (body.trigger === 'task' && body.chatId) this.db.prepare('DELETE FROM turn_ledger_history WHERE chat_id = ?').run(body.chatId);
     return { ...body, seq: Number(info.lastInsertRowid), prevHash, hash, source: 'local' };
   }
   /** Imported history: one row per past turn, keyed by its id, so importing again adds nothing. Returns how many were new. */
