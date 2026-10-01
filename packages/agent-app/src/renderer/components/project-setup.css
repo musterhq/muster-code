@@ -1,0 +1,27 @@
+/* Set up project (C20, G31). Muster tokens only. */
+.setup-wizard { width: min(560px, calc(100vw - 40px)); }
+.setup-steps { display: flex; gap: 4px; margin: 0 0 16px; padding: 0; list-style: none; }
+.setup-steps li { display: inline-flex; align-items: center; gap: 6px; flex: 1; min-width: 0; padding: 4px 0; border-bottom: 2px solid var(--hairline); color: var(--text-faint); font-size: var(--fs-12); white-space: nowrap; }
+.setup-steps li[data-state='now'] { border-color: var(--link); color: var(--text); font-weight: 500; }
+.setup-steps li[data-state='done'] { border-color: var(--ok); color: var(--text-dim); }
+.setup-step-dot { display: inline-grid; place-items: center; width: 17px; height: 17px; border-radius: 50%; background: var(--bg-active); font-size: var(--fs-11); font-variant-numeric: tabular-nums; }
+.setup-steps li[data-state='done'] .setup-step-dot { background: var(--ok); color: var(--bg); }
+.setup-templates { display: flex; flex-wrap: wrap; gap: 6px; }
+.setup-have { margin: 0; color: var(--text-dim); font-size: var(--fs-12); }
+.setup-date input { max-width: 200px; }
+.setup-modes { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.setup-mode { display: flex; flex-direction: column; gap: 4px; padding: 10px 12px; border: 1px solid var(--hairline); border-radius: var(--radius-10); background: none; color: var(--text); text-align: left; cursor: pointer; }
+.setup-mode strong { font-size: var(--fs-13); font-weight: 550; }
+.setup-mode span { color: var(--text-dim); font-size: var(--fs-12); }
+.setup-mode[data-on] { border-color: var(--link); background: var(--bg-active); }
+.setup-mode:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
+.setup-start { align-self: end; padding-bottom: 6px; }
+.setup-interview-note { margin: 0; color: var(--text-dim); font-size: var(--fs-12); }
+.setup-launch ul { display: flex; flex-direction: column; gap: 8px; margin: 0 0 14px; padding: 0; list-style: none; font-size: var(--fs-13); }
+.setup-launch li { display: flex; align-items: flex-start; gap: 8px; }
+.setup-launch li svg { flex: none; margin-top: 3px; color: var(--ok); }
+.setup-card { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 12px 16px; }
+.setup-card p { margin: 2px 0 0; font-size: var(--fs-12); }
+@media (max-width: 560px) { .setup-modes { grid-template-columns: minmax(0, 1fr); } .setup-steps li { font-size: var(--fs-11); } }
+.project-coordinator-ops { flex-basis: 100%; margin: 0; padding: 0 0 0 16px; color: var(--text-dim); font-size: var(--fs-12); }
+.project-coordinator-ops li { padding: 1px 0; }

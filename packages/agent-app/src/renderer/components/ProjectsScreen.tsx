@@ -8,7 +8,7 @@ import { invoke } from '../bridge';
 import { restoreFocus } from '../focus';
 import { openHub, refreshWorkspace, useWorkspace } from '../hubStore';
 import { onNewProjectRequest, takeNewProjectRequest } from '../projectIntent';
-import { clearPendingProject, onOpenProject, peekPendingProject } from '../projectFocus';
+import { clearPendingProject, onOpenProject, peekPendingProject, setCurrentProject } from '../projectFocus';
 import { notifyError, selectChat } from '../store';
 import { PROJECT_STATUS_LABEL, PROJECT_STATUSES, isOverdue, type ProjectStatus } from '../../shared/domains/work-protocol';
 import { StarButton, dayLabel } from './WorkParts';
@@ -37,6 +37,8 @@ export function ProjectsScreen({ onBack, onStartChat }: { onBack: () => void; on
   const ws = useWorkspace();
   const [details, setDetails] = useState<ProjectDetails[] | null>(null);
   const [creating, setCreating] = useState(takeNewProjectRequest);
+  // A project just made through the form opens its setup wizard once (C20).
+  const [setupFor, setSetupFor] = useState<string | null>(null);
   useEffect(() => onNewProjectRequest(() => setCreating(true)), []);
   // Peek in the initializer and consume in an effect: a first render React throws away never loses the request.
   const [selectedId, setSelectedId] = useState<string | null>(() => peekPendingProject());
@@ -63,6 +65,8 @@ export function ProjectsScreen({ onBack, onStartChat }: { onBack: () => void; on
   // An agent opened from a project's Roster keeps that project as its breadcrumb (not the hub's last page, the Inbox).
   const nav: HubNav = { onOpenTask: id => openHub('task', id), onOpenAgent: id => openHub('agent', id, selected ? { page: 'project', arg: selected.id } : undefined), onOpenChat: id => { void selectChat(id); onBack(); } };
   const toList = () => { setCreating(false); setSelectedId(null); };
+  // A shortcut such as "new task" lands in the project that is open.
+  useEffect(() => { setCurrentProject(selected?.id ?? null); return () => setCurrentProject(null); }, [selected?.id]);
 
   return <section className="project-screen" aria-label={NAMES.projects} onKeyDown={e => {
     if (e.key !== 'Escape' || e.defaultPrevented || !e.currentTarget.contains(e.target as Node) || (e.target as HTMLElement).closest('input,textarea,select,[role="dialog"],[role="menu"]')) return;
@@ -71,8 +75,8 @@ export function ProjectsScreen({ onBack, onStartChat }: { onBack: () => void; on
     <header className="project-topbar"><button ref={back} className="settings-back" onClick={leave}><ArrowLeft size={15}/>Back to app</button>
       <span className="ws-crumb">{selected || creating ? <><button type="button" className="ws-crumb-link" onClick={toList}>{NAMES.projects}</button><ChevronRight size={13} aria-hidden="true"/><strong>{creating ? 'New project' : selected!.name}</strong></> : <strong>{NAMES.projects}</strong>}</span></header>
     <div className="project-main pp-host">
-      {creating ? <div className="project-main-inner"><NewProjectForm folders={folders} onClose={toList} onCreated={p => { setCreating(false); setSelectedId(p.id); }}/></div>
-        : selected ? <ProjectPage key={selected.id} snapshot={ws.snapshot} projectId={selected.id} nav={nav}
+      {creating ? <div className="project-main-inner"><NewProjectForm folders={folders} onClose={toList} onCreated={(p, guided) => { setCreating(false); setSetupFor(guided ? p.id : null); setSelectedId(p.id); }}/></div>
+        : selected ? <ProjectPage key={selected.id} snapshot={ws.snapshot} projectId={selected.id} nav={nav} startSetup={setupFor === selected.id}
             muster={{ project: selected, allFolders: folders, chats: chats.filter(c => c.projectId === selected.id), onUpdated: upsert, onStartChat: folderId => onStartChat(selected.id, folderId), onOpenChat: nav.onOpenChat, onLeave: onBack, onDeleted: toList }}/>
         : selectedId && details ? <ResourceState kind="empty" message="This project no longer exists."><button type="button" className="settings-button secondary" onClick={toList}>All projects</button></ResourceState>
         : <ProjectList projects={projects} workspace={ws.snapshot?.projects ?? []} onOpen={setSelectedId} onCreate={() => setCreating(true)}/>}

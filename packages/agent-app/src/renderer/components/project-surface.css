@@ -132,3 +132,5 @@
 .new-project-sources > ul > li.new-project-source-actions { gap: 0; padding: 0; }
 .new-project-source-actions .project-edit-add { flex: 1; width: auto; margin-left: 0; }
 .new-project-source-actions .project-edit-add + .project-edit-add { border-left: 1px solid var(--hairline); }
+.new-project-guided { display: flex; align-items: center; gap: 8px; font-size: var(--fs-13); }
+.new-project-guided .optional { color: var(--text-faint); font-size: var(--fs-12); }

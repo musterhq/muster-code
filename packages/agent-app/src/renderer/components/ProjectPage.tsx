@@ -12,7 +12,7 @@
  *   (schedules, verification, the task graph) and Activity.
  */
 import { Menu } from '@base-ui/react/menu';
-import { Archive, ArchiveRestore, Clipboard, Download, FolderClosed, MoreHorizontal, Settings2, SquarePen, Trash2 } from 'lucide-react';
+import { Archive, ArchiveRestore, Clipboard, Download, FolderClosed, ListChecks, MoreHorizontal, Settings2, SquarePen, Trash2 } from 'lucide-react';
 import React, { useEffect, useMemo, useState } from 'react';
 import type { Chat, Folder } from '../../shared/protocol';
 import type { DashboardData, WorkspaceProject, WorkspaceSnapshot } from '../../shared/domains/paperclip-protocol';
@@ -45,6 +45,8 @@ import { ProjectCostSummary } from './UsageCost';
 import { DashboardPage, RunActivityChart } from './DashboardPage';
 import { FeedbackSection, GoalsSection, LabelsSection, PausedBanner, ProjectStatusChips, ProjectStatusFields, StatusCards } from './WorkProject';
 import { OutputsPanel } from './WorkOutputs';
+import { ProjectSetupWizard, SetupCard } from './ProjectSetup';
+import { needsSetup } from '../setupModel';
 import { StarButton } from './WorkParts';
 
 export type ProjectPageTab = 'dashboard' | 'tasks' | 'roster' | 'outputs' | 'ledger' | 'budget' | 'settings';
@@ -62,8 +64,9 @@ export interface MusterProjectContext {
   onUpdated: (p: ProjectDetails) => void; onStartChat: (folderId?: string) => void; onOpenChat: (id: string) => void; onLeave: () => void; onDeleted: () => void;
 }
 
-export function ProjectPage({ snapshot, projectId, nav, muster, initialTab = 'tasks' }: { snapshot: WorkspaceSnapshot | null; projectId: string; nav: HubNav; muster?: MusterProjectContext; initialTab?: ProjectPageTab }): React.ReactElement {
-  const [tab, setTab] = useState<ProjectPageTab>(initialTab);
+export function ProjectPage({ snapshot, projectId, nav, muster, initialTab = 'tasks', startSetup = false }: { snapshot: WorkspaceSnapshot | null; projectId: string; nav: HubNav; muster?: MusterProjectContext; initialTab?: ProjectPageTab; startSetup?: boolean }): React.ReactElement {
+  const [tab, setTab] = useState<ProjectPageTab>(startSetup ? 'dashboard' : initialTab);
+  const [setup, setSetup] = useState(startSetup);
   const [section, setSection] = useState<SettingsSection>('general');
   const [creating, setCreating] = useState(false);
   const [status, setStatus] = useState('');
@@ -99,6 +102,7 @@ export function ProjectPage({ snapshot, projectId, nav, muster, initialTab = 'ta
         <Menu.Root>
           <Menu.Trigger className="icon-button" aria-label="Project actions"><MoreHorizontal size={16}/></Menu.Trigger>
           <Menu.Portal><Menu.Positioner side="bottom" align="end" sideOffset={4} className="ui-menu-positioner"><Menu.Popup className="ui-menu">
+            {!project.archived && <Menu.Item onClick={() => setSetup(true)}><ListChecks size={14}/>Set up project…</Menu.Item>}
             <Menu.Item onClick={() => setEditing(true)}><Settings2 size={14}/>Edit project…</Menu.Item>
             <Menu.Separator/>
             <Menu.Item onClick={() => void copyProjectExport(project, project.folderIds.length).then(setStatus)}><Clipboard size={14}/>Copy export JSON</Menu.Item>
@@ -119,13 +123,14 @@ export function ProjectPage({ snapshot, projectId, nav, muster, initialTab = 'ta
         : tab === 'tasks' ? <TaskList snapshot={scoped} tasks={scoped.tasks} scope={projectId} onOpenTask={nav.onOpenTask} onNewTask={project?.archived ? undefined : () => setCreating(true)} emptyMessage={local ? 'No tasks yet. Create one, give it an owner from the Roster, and start it in its own worktree.' : 'No tasks in this project yet.'}/>
         : tab === 'roster' ? <RosterPanel snapshot={scoped} projectId={projectId} local={local} nav={nav}>{muster && <WorkingNow projectId={projectId} chats={muster.chats} onOpenChat={muster.onOpenChat}/>}</RosterPanel>
         : tab === 'outputs' ? <div className="pp-outputs"><OutputsPanel snapshot={scoped} projectId={projectId} local={local} nav={nav}/>{muster && <ProjectChangesSection folders={muster.allFolders.filter(f => muster.project.folderIds.includes(f.id))} onReview={f => { openChangesTab(f.id, f.name); muster.onLeave(); }}/>}</div>
-        : tab === 'dashboard' ? <div className="pp-stack"><PausedBanner project={summary}/>{local && <StatusCards projectId={projectId} archived={project?.archived}/>}<DashboardPage snapshot={scoped} nav={nav} projectId={projectId}/></div>
+        : tab === 'dashboard' ? <div className="pp-stack"><PausedBanner project={summary}/>{local && project && !project.archived && needsSetup({ tasks: scoped.tasks.length, agents: scoped.agents.filter(a => a.memberId && a.memberId !== 'agent').length }) && <SetupCard onStart={() => setSetup(true)}/>}{local && <StatusCards projectId={projectId} archived={project?.archived}/>}<DashboardPage snapshot={scoped} nav={nav} projectId={projectId}/></div>
         : tab === 'ledger' ? <LedgerPage snapshot={scoped} nav={nav} projectId={projectId}/>
         : tab === 'budget' ? <BudgetTab projectId={projectId} local={local} name={name}/>
         : muster ? <MusterSettings context={muster} snapshot={scoped} section={section} onSection={setSection} onEdit={() => setEditing(true)} onArchive={() => setConfirm('archive')} onDelete={() => setConfirm('delete')} onRestore={() => void restore()} onStatus={setStatus}/>
         : <PaperclipSettings snapshot={scoped}/>}
     </div>
     <NewTaskSheet open={creating} snapshot={snapshot} projectId={projectId} onClose={() => setCreating(false)} onCreated={() => undefined}/>
+    {muster && project && <ProjectSetupWizard open={setup} project={project} snapshot={scoped} onClose={() => setSetup(false)} onOpenChat={muster.onOpenChat} onDone={() => setTab('tasks')}/>}
     {muster && project && <>
       <EditProjectDialog project={project} allFolders={muster.allFolders} open={editing} onClose={() => setEditing(false)} onSaved={p => { muster.onUpdated(p); setStatus('Project saved.'); }} onArchive={() => { setEditing(false); setConfirm('archive'); }}/>
       <ConfirmProjectAction project={project} action={confirm} onClose={() => setConfirm(null)} onArchived={p => { muster.onUpdated(p); setStatus('Project archived. Task runs are paused.'); }} onDeleted={muster.onDeleted}/>
