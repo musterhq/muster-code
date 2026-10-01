@@ -30,6 +30,8 @@ const DESKTOP_EXACT = new Set([
 const DESKTOP_PREFIX = ['browser.', 'terminal.', 'processes.', 'computer.', 'musterServer.'];
 
 const HOST_EXACT = new Set([
+  // Wave 4: SSH hosts and dev-server commands run on the server's own machine, so they are for owners and admins.
+  'ssh.hosts.list', 'ssh.hosts.save', 'ssh.hosts.remove', 'ssh.hostkey.scan', 'ssh.hostkey.trust', 'ssh.test', 'ssh.chat.set', 'services.save', 'services.remove', 'services.start', 'services.stop',
   'org.export.write', 'backups.settings.set', 'backups.run', 'backups.restore', 'backups.restore.cancel', 'backups.remove',
   'settings.set', 'settings.reset', 'settings.import', 'settings.storage.cleanup', 'settings.folderModel.set',
   'providers.save', 'providers.remove', 'providers.check', 'providers.cancelCheck', 'providers.secret.set', 'providers.secret.clear',
