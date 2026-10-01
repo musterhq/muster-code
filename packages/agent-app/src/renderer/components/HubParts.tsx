@@ -2,10 +2,13 @@
  *  errors and the per-turn Receipt. Muster tokens and components only. */
 import { ChevronRight, Circle, CircleCheck, CircleDashed, CircleDot, CircleEllipsis, CircleSlash, CircleX, ReceiptText } from 'lucide-react';
 import React, { useState } from 'react';
-import type { AgentState, InboxKind, LedgerEntry, RunState, WorkspaceStatus } from '../../shared/domains/paperclip-protocol';
+import type { AgentState, ApprovalDecision, InboxKind, LedgerEntry, RunState, WorkspaceStatus } from '../../shared/domains/paperclip-protocol';
 import { STATUS_LABEL } from '../../shared/domains/paperclip-protocol';
 import { formatUsd } from '../../shared/model-catalog';
 import { NAMES } from '../../shared/workspace-names';
+import { invoke } from '../bridge';
+import { refreshWorkspace } from '../hubStore';
+import { notifyError, notifySuccess } from '../store';
 
 const STATUS_ICON: Record<WorkspaceStatus, typeof Circle> = { backlog: CircleDashed, todo: Circle, in_progress: CircleDot, in_review: CircleEllipsis, blocked: CircleSlash, done: CircleCheck, cancelled: CircleX };
 export function TaskStatusIcon({ status, size = 14 }: { status: WorkspaceStatus; size?: number }): React.ReactElement {
@@ -102,5 +105,32 @@ export function Receipt({ entry, defaultOpen = false }: { entry: LedgerEntry; de
       {entry.hash && <div><dt>Chain</dt><dd><code>#{entry.seq} · {short(entry.prevHash)} → {short(entry.hash)}</code></dd></div>}
       {entry.source === 'history' && <div><dt>Chain</dt><dd>Imported history: rebuilt from saved chats, not part of the verified chain</dd></div>}
     </dl>}
+  </div>;
+}
+
+/** Approve, Reject and Request revision for a Paperclip approval (a hire, the CEO's strategy, a budget override). Sent only when you
+ *  press a button; Request revision asks what should change, Reject takes an optional reason. */
+export function ApprovalActions({ approvalId, verbs = ['approve', 'reject', 'request_revision'], onDecided }: { approvalId: string; verbs?: readonly ApprovalDecision[]; onDecided?: () => void }): React.ReactElement {
+  const [busy, setBusy] = useState(false);
+  const [asking, setAsking] = useState<'reject' | 'request_revision' | null>(null);
+  const [note, setNote] = useState('');
+  const decide = async (decision: ApprovalDecision) => {
+    setBusy(true);
+    try {
+      await invoke('paperclip.approval.decide', { id: approvalId, decision, ...(note.trim() ? { note: note.trim() } : {}) });
+      notifySuccess(decision === 'approve' ? 'Approved.' : decision === 'reject' ? 'Rejected.' : 'Sent back for changes.');
+      setAsking(null); setNote(''); await refreshWorkspace(true); onDecided?.();
+    } catch (cause) { notifyError(cause); } finally { setBusy(false); }
+  };
+  return <div className="ws-card-actions ws-approval-actions">
+    {asking && <input className="ws-card-reason" aria-label={asking === 'reject' ? 'Why? (optional)' : 'What should change?'} placeholder={asking === 'reject' ? 'Why? (optional)' : 'What should change?'} value={note} onChange={e => setNote(e.target.value)}/>}
+    {asking ? <>
+      <button type="button" className="settings-button secondary" disabled={busy} onClick={() => { setAsking(null); setNote(''); }}>Cancel</button>
+      <button type="button" className="settings-button" disabled={busy || (asking === 'request_revision' && !note.trim())} onClick={() => void decide(asking)}>{asking === 'reject' ? 'Reject' : 'Send back'}</button>
+    </> : <>
+      {verbs.includes('reject') && <button type="button" className="settings-button secondary" disabled={busy} onClick={() => setAsking('reject')}>Reject</button>}
+      {verbs.includes('request_revision') && <button type="button" className="settings-button secondary" disabled={busy} onClick={() => setAsking('request_revision')}>Request revision</button>}
+      {verbs.includes('approve') && <button type="button" className="settings-button" disabled={busy} onClick={() => void decide('approve')}>Approve</button>}
+    </>}
   </div>;
 }

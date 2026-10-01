@@ -136,8 +136,13 @@ test('Dashboard aggregates: project stats in SQL (states, days, activity) and th
   assert.equal(dash.spend.usd, null, 'nothing priced: unknown, never $0'); assert.equal(dash.spend.pricedTurns, 0);
   assert.equal(dash.tasksByDay.at(-1)!.counts.todo, 1);
   assert.ok(dash.activity.length >= 2);
-  const budget = await s.invoke('paperclip.dashboard', { utcOffsetMinutes: 0, projectId: project.id });
-  assert.equal(budget.activity.length, 0, 'the Budget view reads spend and runs only');
+  // S45: a project's Dashboard tab reads that project's tasks and activity only.
+  const other = await s.invoke('project.create', { name: 'Other', goal: '', folderIds: [] });
+  await s.invoke('paperclip.task.create', { title: 'Elsewhere', description: '', projectId: other.id, assigneeId: 'user:local' });
+  const scoped = await s.invoke('paperclip.dashboard', { utcOffsetMinutes: 0, projectId: project.id });
+  assert.equal(scoped.tasksByDay.at(-1)!.counts.todo, 1, 'Tasks by status counts this project only');
+  assert.ok(scoped.activity.length > 0 && scoped.activity.every(a => a.projectId === project.id), 'Recent activity is this project’s');
+  assert.equal((await s.invoke('paperclip.dashboard', { utcOffsetMinutes: 0 })).tasksByDay.at(-1)!.counts.todo, 2, 'the app-wide Dashboard still counts every project');
   await s.invoke('project.team.settings.set', { projectId: project.id, monthlyBudgetUsd: 25 });
   assert.equal((await s.invoke('project.team.settings', { projectId: project.id })).monthlyBudgetUsd, 25);
 });

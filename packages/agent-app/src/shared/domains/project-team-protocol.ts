@@ -59,12 +59,15 @@ export interface ProjectMember {
   title?: string | null; reportsTo?: string | null; runner?: AgentRunner | null; instructions?: string;
   /** Set while a hire waits for approval (the project requires approval to add agents). A pending member has no access. */
   pendingAt?: string | null;
+  /** Set while this agent is paused on its own: the scheduler skips its tasks and Start refuses them until resumed. */
+  pausedAt?: string | null;
 }
 /** Which runtime and model an agent's runs use: any configured provider (Codex, Claude Code, OpenCode, Pi, …). */
 export interface AgentRunner { providerId: string; model: string }
 /** Per-project team settings. `keyPrefix` names task keys (OSS-1); null derives it from the project name. */
-export interface TeamSettings { requireHireApproval: boolean; keyPrefix: string | null; monthlyBudgetUsd: number | null }
-export const DEFAULT_TEAM_SETTINGS: TeamSettings = { requireHireApproval: false, keyPrefix: null, monthlyBudgetUsd: null };
+/** `monthlyBudgetTokens`: a budget in tokens (input + output), for runners whose models have no price. */
+export interface TeamSettings { requireHireApproval: boolean; keyPrefix: string | null; monthlyBudgetUsd: number | null; monthlyBudgetTokens?: number | null }
+export const DEFAULT_TEAM_SETTINGS: TeamSettings = { requireHireApproval: false, keyPrefix: null, monthlyBudgetUsd: null, monthlyBudgetTokens: null };
 /** Task key prefix from a project name: an all-caps first word ("OSS Manager" → OSS), initials of several words
  *  ("Launch Plan" → LP), else the first three letters ("OSSMANAGER" → OSS). */
 export function keyPrefixOf(name: string): string {
@@ -148,6 +151,8 @@ export interface ProjectTeamCommands {
   'project.members.update': { input: { projectId: string; id: string; name?: string; role?: MemberRole; maxPermission?: ChatPermissionMode | null; folderIds?: string[] | null; secrets?: string[] } & RosterProfileInput; output: ProjectMember };
   /** Approves or rejects a pending hire. Rejecting revokes the pending member. */
   'project.members.decide': { input: { projectId: string; id: string; approve: boolean }; output: ProjectMember };
+  /** Pauses (holds) or resumes one agent. Pausing stops its running task runs; nothing of its starts until resumed. */
+  'project.members.pause': { input: { projectId: string; id: string; paused: boolean }; output: { member: ProjectMember; stoppedRuns: number } };
   'project.team.settings': { input: { projectId: string }; output: TeamSettings };
   'project.team.settings.set': { input: { projectId: string } & Partial<TeamSettings>; output: TeamSettings };
   /** Revocation takes effect at once: new runs are refused and running task runs this member requested or runs are stopped. */
@@ -159,6 +164,6 @@ export interface ProjectTeamCommands {
   'project.chats.transfer': { input: { chatId: string; projectId: string | null; mode: ChatTransferMode; confirm: true }; output: { chatId: string; projectId: string | null } };
 }
 export const PROJECT_TEAM_COMMANDS = {
-  'project.activity.query': true, 'project.members.list': true, 'project.members.add': true, 'project.members.update': true, 'project.members.revoke': true, 'project.members.restore': true, 'project.members.decide': true, 'project.team.settings': true, 'project.team.settings.set': true,
+  'project.activity.query': true, 'project.members.list': true, 'project.members.add': true, 'project.members.update': true, 'project.members.revoke': true, 'project.members.restore': true, 'project.members.decide': true, 'project.members.pause': true, 'project.team.settings': true, 'project.team.settings.set': true,
   'project.chats.preview': true, 'project.chats.transfer': true,
 } as const satisfies Record<keyof ProjectTeamCommands, true>;

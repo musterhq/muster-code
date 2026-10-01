@@ -1,7 +1,7 @@
 /** Paperclip JSON -> the Projects workspace shapes (shared/domains/paperclip-protocol.ts). Pure, so tests feed recorded payloads. */
 import type {
-  ThreadCard, LedgerEntry, AgentState, InboxKind, RunState, WorkspaceAgent, WorkspaceComment, WorkspaceCompany, WorkspaceGoal, WorkspaceInboxItem, WorkspacePriority,
-  WorkspaceProject, WorkspaceRow, WorkspaceRun, WorkspaceStatus, WorkspaceTask,
+  ApprovalDecision, PaperclipBudgetPolicy, ThreadCard, LedgerEntry, AgentState, InboxKind, RunState, WorkspaceAgent, WorkspaceComment, WorkspaceCompany, WorkspaceGoal, WorkspaceInboxItem, WorkspacePriority,
+  WorkspaceApproval, WorkspaceProject, WorkspaceRow, WorkspaceRun, WorkspaceStatus, WorkspaceTask,
 } from '../shared/domains/paperclip-protocol.ts';
 import { OPEN_STATUSES, WORKSPACE_STATUSES } from '../shared/domains/paperclip-protocol.ts';
 import { normalizeRemote } from './memory-identity.ts';
@@ -24,6 +24,14 @@ export function mapAgent(a: Json): WorkspaceAgent {
   };
 }
 
+/** An issue's blockers. Paperclip lists them as `blockedBy: [{ id, … }]` (only with `includeBlockedBy=true`); older
+ *  payloads carry `blockedByIssueIds`. Both are read. */
+export function blockerIds(i: Json): string[] {
+  const listed = Array.isArray(i.blockedBy) ? (i.blockedBy as unknown[]).map(b => typeof b === 'string' ? b : str(obj(b).id)).filter((v): v is string => Boolean(v)) : [];
+  const legacy = Array.isArray(i.blockedByIssueIds) ? (i.blockedByIssueIds as unknown[]).filter((v): v is string => typeof v === 'string' && v.length > 0) : [];
+  return [...new Set([...listed, ...legacy])];
+}
+
 const PRIORITY = new Set<WorkspacePriority>(['critical', 'high', 'medium', 'low']);
 export function mapIssue(i: Json, agents: ReadonlyMap<string, WorkspaceAgent>, liveTaskIds: ReadonlySet<string>): WorkspaceTask {
   const status = (WORKSPACE_STATUSES as readonly string[]).includes(String(i.status)) ? i.status as WorkspaceStatus : 'todo';
@@ -37,8 +45,9 @@ export function mapIssue(i: Json, agents: ReadonlyMap<string, WorkspaceAgent>, l
     assigneeLabel: assigneeId ? agents.get(assigneeId)?.name ?? 'Agent' : str(i.assigneeUserId) ? 'You' : null,
     createdAt: iso(i.createdAt), updatedAt: iso(i.lastActivityAt, iso(i.updatedAt)), startedAt: str(i.startedAt), completedAt: str(i.completedAt) ?? str(i.cancelledAt),
     live: Boolean(i.activeRun) || liveTaskIds.has(id),
-    blockedByIds: Array.isArray(i.blockedByIssueIds) ? (i.blockedByIssueIds as unknown[]).filter((v): v is string => typeof v === 'string') : [],
+    blockedByIds: blockerIds(i),
     origin: creator ? agents.get(creator)?.name ?? 'Agent' : str(i.createdByUserId) ? 'You' : null,
+    ...(arr(i.labels).length ? { labels: arr(i.labels).map(l => ({ name: str(l.name) ?? '', color: str(l.color) })).filter(l => l.name) } : {}),
   };
 }
 
@@ -55,7 +64,7 @@ export function mapProject(p: Json, tasks: readonly WorkspaceTask[]): WorkspaceP
   };
 }
 
-export const mapGoal = (g: Json): WorkspaceGoal => ({ id: String(g.id), title: str(g.title) ?? 'Goal', status: str(g.status) ?? 'active', level: str(g.level) });
+export const mapGoal = (g: Json): WorkspaceGoal => ({ id: String(g.id), title: str(g.title) ?? 'Goal', status: str(g.status) ?? 'active', level: str(g.level), parentId: str(g.parentId), ownerAgentId: str(g.ownerAgentId) });
 
 const RUN_STATE: Record<string, RunState> = { queued: 'queued', scheduled_retry: 'queued', running: 'running', succeeded: 'succeeded', failed: 'failed', cancelled: 'cancelled', timed_out: 'timed_out', interrupted: 'interrupted' };
 export function mapRun(r: Json): WorkspaceRun {
@@ -87,6 +96,29 @@ export function mapAttention(item: Json): WorkspaceInboxItem {
     title: `${identifier ? `${identifier} · ` : ''}${str(subject.title) ?? str(related.title) ?? 'Needs attention'}`,
     why: WHY[String(item.sourceKind)] ?? 'Needs your attention.', severity: SEVERITY.has(String(item.severity)) ? item.severity as 'high' : 'medium', at: iso(item.activityAt, iso(item.updatedAt)),
     taskId: subject.kind === 'issue' ? str(subject.id) : str(related.id), agentId: subject.kind === 'agent' ? str(subject.id) : null, runId: subject.kind === 'run' ? str(subject.id) : null,
+    // An approval row is decided from the row: its id and the decisions Paperclip offers for it.
+    ...(item.sourceKind === 'approval' && subject.kind === 'approval' && str(subject.id) ? { approvalId: String(subject.id), approvalVerbs: verbsOf(item.decisionVerbs) } : {}),
+  };
+}
+const VERB: Record<string, ApprovalDecision> = { approve: 'approve', reject: 'reject', request_revision: 'request_revision' };
+/** The approval decisions Paperclip lists for an item; all three when it lists none. */
+const verbsOf = (value: unknown): ApprovalDecision[] => { const found = arr(value).map(v => VERB[String(v.id)]).filter((v): v is ApprovalDecision => Boolean(v)); return found.length ? found : ['approve', 'reject', 'request_revision']; };
+
+const APPROVAL_TITLE: Record<string, string> = { hire_agent: 'Hire an agent', approve_ceo_strategy: 'Approve the CEO’s strategy', budget_override_required: 'Budget override', request_board_approval: 'Board approval' };
+/** A Paperclip approval (hire, strategy, budget override, board request) waiting on the board. */
+export function mapApproval(a: Json, agents: ReadonlyMap<string, WorkspaceAgent>): WorkspaceApproval {
+  const payload = obj(a.payload), type = String(a.type ?? 'request_board_approval');
+  const name = str(payload.name), title = str(payload.title);
+  const requester = str(a.requestedByAgentId);
+  const facts = type === 'hire_agent'
+    ? [str(payload.role) && `Role: ${payload.role}`, str(payload.adapterType) && `Runner: ${String(payload.adapterType).replace(/_local$/, '')}`, str(payload.capabilities)].filter(Boolean).join('\n')
+    : [str(payload.plan), str(payload.description), str(payload.reason)].filter(Boolean).join('\n');
+  return {
+    id: String(a.id), type, status: a.status === 'revision_requested' ? 'revision_requested' : 'pending',
+    title: type === 'hire_agent' ? `Hire ${name ?? 'an agent'}${str(payload.title) ? ` as ${payload.title}` : ''}` : title ?? name ?? APPROVAL_TITLE[type] ?? 'Approval',
+    detail: facts.slice(0, 1200), requestedBy: requester ? agents.get(requester)?.name ?? 'Agent' : str(a.requestedByUserId) ? 'You' : null,
+    agentId: type === 'hire_agent' ? str(payload.agentId) : null, issueIds: arr(a.issues).map(i => str(i.id)).filter((v): v is string => Boolean(v)),
+    at: iso(a.createdAt), verbs: ['approve', 'reject', 'request_revision'],
   };
 }
 
@@ -166,13 +198,45 @@ export function mapReceipt(r: Json, agents: ReadonlyMap<string, WorkspaceAgent>)
 export function mapInteraction(i: Json, agents: ReadonlyMap<string, WorkspaceAgent>): ThreadCard {
   const payload = obj(i.payload), result = obj(i.result), status = String(i.status ?? 'pending');
   const questions = arr(payload.questions).map(q => str(q.prompt) ?? str(q.question)).filter(Boolean);
+  // ask_user_questions is answerable here too, through Paperclip's respond endpoint.
+  const asking = i.kind === 'ask_user_questions' && status === 'pending'
+    ? arr(payload.questions).filter(q => str(q.id) && arr(q.options).length).map(q => ({ id: String(q.id), prompt: str(q.prompt) ?? str(q.question) ?? 'Question', helpText: str(q.helpText), multi: q.selectionMode === 'multi', allowOther: q.allowOther === true,
+      options: arr(q.options).filter(o => str(o.id)).map(o => ({ id: String(o.id), label: str(o.label) ?? String(o.id), description: str(o.description) })) }))
+    : [];
   return {
     kind: 'needs', id: `interaction:${i.id}`, at: iso(i.createdAt), from: agents.get(str(i.createdByAgentId) ?? '')?.name ?? null,
     prompt: str(payload.prompt) ?? (questions.length ? questions.join(' · ') : str(payload.title) ?? 'An agent needs your decision.'),
     detail: str(payload.detailsMarkdown)?.slice(0, 1200) ?? null,
     status: status === 'pending' ? 'pending' : status === 'cancelled' || status === 'withdrawn' || status === 'expired' ? 'cancelled' : 'resolved',
     resolution: str(result.outcome) ? `${result.outcome}${str(result.reason) ? `: ${result.reason}` : ''}` : null,
-    interactionId: i.kind === 'request_confirmation' && status === 'pending' ? String(i.id) : null,
+    interactionId: (i.kind === 'request_confirmation' || asking.length > 0) && status === 'pending' ? String(i.id) : null,
     acceptLabel: str(payload.acceptLabel), rejectLabel: str(payload.rejectLabel),
+    ...(asking.length ? { questions: asking, submitLabel: str(payload.submitLabel) } : {}),
   };
+}
+
+/** A task document (a plan is the one with key `plan`) with its revisions, newest first. */
+export function mapDocument(d: Json, revisions: readonly Json[], agents: ReadonlyMap<string, WorkspaceAgent>): ThreadCard {
+  const by = (r: Json) => str(r.createdByAgentId) ? agents.get(String(r.createdByAgentId))?.name ?? 'Agent' : str(r.createdByUserId) ? 'You' : null;
+  return {
+    kind: 'document', id: `document:${d.id}`, at: iso(d.updatedAt, iso(d.createdAt)), key: String(d.key), title: str(d.title) ?? String(d.key), format: str(d.format) ?? 'markdown',
+    body: (str(d.body) ?? '').slice(0, 24_000), revision: Number(d.latestRevisionNumber) || 1,
+    revisions: revisions.map(r => ({ number: Number(r.revisionNumber) || 0, summary: str(r.changeSummary) ?? '', at: iso(r.createdAt), by: by(r) })).sort((a, b) => b.number - a.number).slice(0, 50),
+  };
+}
+/** A pull request, branch or artifact an agent produced for a task. */
+export const mapWorkProduct = (w: Json): ThreadCard => ({
+  kind: 'workproduct', id: `workproduct:${w.id}`, at: iso(w.updatedAt, iso(w.createdAt)), type: str(w.type) ?? 'artifact', title: str(w.title) ?? 'Work product', status: str(w.status) ?? '',
+  provider: str(w.provider), url: str(w.url), summary: (str(w.summary) ?? '').slice(0, 2000),
+});
+
+/** Budget policies from `/budgets/overview` (dollar budgets only: a policy in another metric is not a dollar figure). */
+export function mapBudgets(overview: unknown): { policies: PaperclipBudgetPolicy[]; incidents: number } {
+  const o = obj(overview);
+  const policies = arr(o.policies).filter(p => p.metric === 'billed_cents' && p.isActive !== false && Number(p.amount) > 0 && (p.scopeType === 'company' || p.scopeType === 'project' || p.scopeType === 'agent')).map(p => ({
+    id: String(p.policyId ?? p.id), scope: p.scopeType as 'company' | 'project' | 'agent', scopeId: String(p.scopeId), name: str(p.scopeName) ?? String(p.scopeType),
+    limitUsd: Number(p.amount) / 100, observedUsd: (Number(p.observedAmount) || 0) / 100, percent: Number(p.utilizationPercent) || 0, warnPercent: Number(p.warnPercent) || 80,
+    hardStop: p.hardStopEnabled === true, status: str(p.status) ?? 'ok', paused: p.paused === true,
+  }));
+  return { policies, incidents: arr(o.activeIncidents).length };
 }

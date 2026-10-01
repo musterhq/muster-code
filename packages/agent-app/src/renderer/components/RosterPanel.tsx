@@ -4,7 +4,7 @@
  * what each agent is working on now, and Pulse. Muster-native agents are the project's own members (project_members);
  * Paperclip agents come from the linked company. The old Agents tab lives here now, as "Working now".
  */
-import { Check, List, Network, Pencil, Plus, UserPlus, X } from 'lucide-react';
+import { Check, Eye, EyeOff, List, Network, Pencil, Plus, UserPlus, X } from 'lucide-react';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import type { WorkspaceAgent, WorkspaceSnapshot } from '../../shared/domains/paperclip-protocol';
 import type { ModelPreference } from '../../shared/domains/settings-protocol';
@@ -13,13 +13,15 @@ import { invoke } from '../bridge';
 import { refreshWorkspace } from '../hubStore';
 import { agoLabel } from '../relativeTime';
 import { notifyError, notifySuccess } from '../store';
-import { AGENT_STATE_LABEL, Monogram, StateChip, agentTone } from './HubParts';
+import { AGENT_STATE_LABEL, ApprovalActions, Monogram, StateChip, agentTone } from './HubParts';
 import { PulseBoard, type HubNav } from './HubPages';
 import { ModalSheet } from './ModalSheet';
 import { ResourceState } from './ResourceState';
-import { RosterGraph, runtimeLabel } from './RosterGraph';
+import { RosterGraph, useRuntimeLabel } from './RosterGraph';
 import { DefaultModelPicker } from './settings/DefaultModelPicker';
 import { Tip } from './Tooltip';
+import { StarButton } from './WorkParts';
+import { ROSTER_TAB_LABEL, rosterTabs, sortRoster, type RosterTab } from '../rosterModel';
 
 const errorText = (cause: unknown) => cause instanceof Error ? cause.message : String(cause);
 const memberOf = (agentId: string) => agentId.startsWith('member:') ? agentId.slice(7) : null;
@@ -42,37 +44,56 @@ export function RosterPanel({ snapshot, projectId, local, nav, children }: { sna
       {local && <button type="button" className="settings-button secondary" onClick={() => setAdding(true)}><Plus size={14}/>{NAMES.addAgent}</button>}
     </div>
     {pending.map(a => <HireApprovalCard key={a.id} agent={a} snapshot={snapshot} projectId={projectId}/>)}
+    {!local && (snapshot.approvals ?? []).filter(a => a.type === 'hire_agent').map(a => <section key={a.id} className="ws-card hire-card" aria-label={a.title}>
+      <header className="hire-card-head"><StateChip tone="warn">Approval</StateChip><strong>{a.title}?</strong></header>
+      {(a.detail || a.requestedBy) && <dl className="hire-card-facts">{a.requestedBy && <div><dt>Asked by</dt><dd>{a.requestedBy}</dd></div>}{a.detail && <div><dt>Details</dt><dd className="hire-card-instructions">{a.detail}</dd></div>}</dl>}
+      <ApprovalActions approvalId={a.id} verbs={a.verbs}/>
+    </section>)}
     {agents.length === 0 ? <ResourceState kind="empty" icon={<UserPlus size={20}/>} title={local ? 'No agents on this project yet' : 'No agents have worked on this project yet'} message={local ? 'Add an agent with a title, who it reports to, the runner and model it uses, and its instructions. Tasks can then be assigned to it and started in their own worktree.' : 'Agents appear here once they work on a task in this project.'}>
         {local && <button type="button" className="settings-button" onClick={() => setAdding(true)}><Plus size={14}/>{NAMES.addAgent}</button>}
       </ResourceState>
       : layout === 'org' ? <RosterGraph snapshot={snapshot} onOpenAgent={nav.onOpenAgent} onOpenTask={nav.onOpenTask}/>
       : <RosterList snapshot={snapshot} agents={agents} nav={nav}/>}
     {children}
-    <PulseBoard snapshot={snapshot} nav={nav} scoped/>
+    <PulseBoard snapshot={snapshot} nav={nav} scoped projectId={projectId}/>
     {local && <AgentSheet open={adding} projectId={projectId} snapshot={snapshot} onClose={() => setAdding(false)}/>}
   </div>;
 }
 
-/** Paperclip's agents list: a status bar, name, "title · runtime · model", who they report to, and state. */
+/** Paperclip's agents list: a status bar, name, "title · runtime · model", who they report to, and state. Star and hide an agent from its row. */
 export function RosterList({ snapshot, agents, nav }: { snapshot: WorkspaceSnapshot; agents: readonly WorkspaceAgent[]; nav: HubNav }): React.ReactElement {
+  const runtimeLabel = useRuntimeLabel();
+  const [tab, setTab] = useState<RosterTab>('all');
   const byId = useMemo(() => new Map(snapshot.agents.map(a => [a.id, a])), [snapshot.agents]);
   const doing = useMemo(() => { const m = new Map<string, string>(); for (const t of snapshot.tasks) if (t.live && t.assigneeId) m.set(t.assigneeId, `${t.key} · ${t.title}`); return m; }, [snapshot.tasks]);
-  const sorted = [...agents].sort((a, b) => Number(b.status === 'running') - Number(a.status === 'running') || a.name.localeCompare(b.name));
-  return <ul className="ws-rows roster-list" aria-label={NAMES.roster}>{sorted.map(a => {
-    const boss = a.reportsTo ? byId.get(a.reportsTo) : undefined;
-    return <li key={a.id}><button type="button" className="ws-row roster-row" onClick={() => nav.onOpenAgent(a.id)}>
-      <span className="roster-bar-mark" data-tone={agentTone(a.status)} aria-hidden="true"/>
-      <span className="ws-row-text"><span className="ws-row-title">{a.name}</span>
-        <span className="ws-row-meta">{[a.title, runtimeLabel(a.adapter) === '—' ? null : runtimeLabel(a.adapter), a.model].filter(Boolean).join(' · ') || 'Project default runner'}</span></span>
-      {doing.get(a.id) ? <span className="roster-doing" title={doing.get(a.id)}>{doing.get(a.id)}</span> : a.lastActiveAt ? <span className="ws-row-age">active {agoLabel(a.lastActiveAt)}</span> : null}
-      <span className="roster-boss">{boss ? <>reports to <Monogram name={boss.name} kind={boss.id === 'user:local' ? 'user' : 'agent'}/>{boss.name}</> : null}</span>
-      <StateChip tone={agentTone(a.status)}>{AGENT_STATE_LABEL[a.status]}</StateChip>
-    </button></li>;
-  })}</ul>;
+  const tabs = useMemo(() => rosterTabs(agents), [agents]);
+  const sorted = sortRoster(tabs[tab]);
+  const mark = (a: WorkspaceAgent, patch: { starred?: boolean; hidden?: boolean }) => void invoke('work.star.set', { kind: 'agent', id: a.id, ...(a.projectId ? { projectId: a.projectId } : {}), ...patch }).then(() => refreshWorkspace(), notifyError);
+  return <>
+    {(agents.length > 3 || tabs.starred.length > 0 || tabs.hidden.length > 0) && <div className="ws-filters roster-tabs" role="tablist" aria-label="Agent states">
+      {(Object.keys(ROSTER_TAB_LABEL) as RosterTab[]).filter(t => t === 'all' || t === tab || tabs[t].length > 0).map(t => <button key={t} type="button" role="tab" aria-selected={tab === t} className="ws-filter" aria-pressed={tab === t} onClick={() => setTab(t)}>{ROSTER_TAB_LABEL[t]}<span>{tabs[t].length}</span></button>)}
+    </div>}
+    {sorted.length === 0 ? <p className="ws-board-empty">{tab === 'hidden' ? 'No hidden agents.' : tab === 'starred' ? 'Star an agent to keep it at the top.' : `No ${ROSTER_TAB_LABEL[tab].toLowerCase()} agents.`}</p>
+      : <ul className="ws-rows roster-list" aria-label={NAMES.roster}>{sorted.map(a => {
+        const boss = a.reportsTo ? byId.get(a.reportsTo) : undefined;
+        return <li key={a.id} className="roster-item" data-hidden={a.hidden || undefined}><button type="button" className="ws-row roster-row" onClick={() => nav.onOpenAgent(a.id)}>
+          <span className="roster-bar-mark" data-tone={agentTone(a.status)} aria-hidden="true"/>
+          <span className="ws-row-text"><span className="ws-row-title">{a.name}</span>
+            <span className="ws-row-meta">{[a.title, runtimeLabel(a.adapter) === '—' ? null : runtimeLabel(a.adapter), a.model].filter(Boolean).join(' · ') || 'Project default runner'}</span></span>
+          {doing.get(a.id) ? <span className="roster-doing" title={doing.get(a.id)}>{doing.get(a.id)}</span> : a.lastActiveAt ? <span className="ws-row-age">active {agoLabel(a.lastActiveAt)}</span> : null}
+          <span className="roster-boss">{boss ? <>reports to <Monogram name={boss.name} kind={boss.id === 'user:local' ? 'user' : 'agent'}/>{boss.name}</> : null}</span>
+          <StateChip tone={agentTone(a.status)}>{AGENT_STATE_LABEL[a.status]}</StateChip>
+        </button>
+        <StarButton starred={Boolean(a.starred)} label={a.name} onToggle={() => mark(a, { starred: !a.starred })}/>
+        <Tip label={a.hidden ? `Show ${a.name}` : `Hide ${a.name}`}><button type="button" className="icon-button" aria-pressed={Boolean(a.hidden)} aria-label={a.hidden ? `Show ${a.name}` : `Hide ${a.name}`} onClick={() => mark(a, { hidden: !a.hidden })}>{a.hidden ? <Eye size={14}/> : <EyeOff size={14}/>}</button></Tip>
+        </li>;
+      })}</ul>}
+  </>;
 }
 
 /** A hire waiting for approval: approve to let it run, decline to remove it. Also in the Inbox as Needs you. */
 export function HireApprovalCard({ agent, snapshot, projectId }: { agent: WorkspaceAgent; snapshot: WorkspaceSnapshot; projectId: string }): React.ReactElement {
+  const runtimeLabel = useRuntimeLabel();
   const [busy, setBusy] = useState(false);
   const boss = agent.reportsTo ? snapshot.agents.find(a => a.id === agent.reportsTo) : undefined;
   const decide = async (approve: boolean) => {

@@ -86,6 +86,20 @@ test('imported history skips turns the live ledger already recorded, matched thr
   assert.equal(ledger.verify().ok,true);
 });
 
+test('a task run’s chat is never imported as history, and a live task Receipt replaces any history row for it',async t=>{
+  const {store,db,ledger}=await fixture(t);
+  const chat=store.createChat({model:'m',mode:'agent'});
+  const runId=turn(store,chat.id,'task prompt',[['assistant','done']]);
+  await importLedgerHistory(db,ledger);
+  assert.equal(ledger.list({chatIds:[chat.id]}).filter(e=>e.source==='history').length,1,'imported while it looked like an ordinary chat');
+  ledger.append({...live(chat.id,'dispatched-run'),trigger:'task',agent:'CTO'});
+  assert.deepEqual(ledger.list({chatIds:[chat.id]}).map(e=>`${e.source}:${e.agent}`),['local:CTO'],'the live task Receipt stands alone');
+  db.exec('DELETE FROM turn_ledger_backfill');
+  await importLedgerHistory(db,ledger);
+  assert.deepEqual(ledger.list({chatIds:[chat.id]}).map(e=>e.source),['local'],'a task chat is skipped by the backfill');
+  void runId;
+});
+
 test('imported Paperclip activity shows once per run as imported history',async t=>{
   const {db,ledger}=await fixture(t);
   const imports=new SqliteImportStore(db);

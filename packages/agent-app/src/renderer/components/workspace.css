@@ -205,3 +205,10 @@ button.dash-agent-task:hover { background: var(--bg-hover); }
 
 /* The org chart inside a project's Roster tab and on the app-wide Roster: a real height to lay the tree out in. */
 .roster-panel > .ws-roster, .ws-page > .ws-roster { flex: none; height: clamp(360px, 52vh, 640px); min-height: 360px; }
+.task-saved-menu { min-width: 240px; }
+.task-saved-row { display: flex; align-items: center; gap: 4px; }
+.task-saved-open { flex: 1; min-width: 0; }
+.task-saved-form { display: flex; gap: 6px; padding: 4px 8px 6px; }
+.task-saved-form .ws-input { flex: 1; min-width: 0; }
+.task-card-tags { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+@media (min-width: 900px) { .task-filter-cols:has(> :nth-child(4)) { grid-template-columns: repeat(4, minmax(0, 1fr)); } }

@@ -5,6 +5,55 @@ All notable changes to Muster Agent. Each `## <version>` section becomes the not
 
 ## Unreleased
 
+## 0.3.0
+
+**The sidebar is back the way it was.** Inbox, New chat, Search chats, Memory, Automations and Ledger, then Pinned, Folders, Projects and Chats. Each project lists its tasks with their owners, and opening a project shows its Dashboard, Tasks, Roster, Outputs, Ledger, Budget and Settings.
+
+**Projects work end to end.**
+- Answer an agent's question right in the task's card; the run continues.
+- Pause really stops work: running work stops, nothing new starts, and Resume all only resumes what Pause all paused. One agent can be held on its own.
+- Agent replies show in the task thread, receipts are credited to the right Roster agent, and each subtask gets a Delegated card.
+- Tasks: Sort and Group no longer crash; a real Backlog column; dropping on Done goes through review.
+- A failed task can be opened in its run chat and restarted. Provider errors are shown as the provider sent them.
+- The project Dashboard shows its own charts; Outputs lists the files agents changed; budgets can be set in tokens and warn in the Inbox at 80% and 100%.
+- Paperclip: blockers come through on link and import, questions can be answered in place, a Paperclip on this Mac at 127.0.0.1 is treated as local, imported tasks aren't listed twice, and the offline banner appears and clears live.
+- Worktrees created by Assign & start no longer fill the Folders list.
+
+**Muster Server and CLI (new).** Run Muster for your team on your own server: `muster-server init` then `start`, or Docker Compose. The web UI is the same as the desktop app. Local accounts with single-use invite links, owner/admin/member/viewer roles plus per-project roles, instant revoke, rate-limited sign-in and a tamper-evident audit log. An admin console under Settings › Server shows people, invites, project access, usage and cost per person, sessions and connectors. Connect several Slack workspaces, Telegram bots and Mattermost servers; messages become project chats and replies go back to the channel. In the desktop app, Settings › Integrations › Muster Server (optional, off by default) connects to a team server. Downloads: `muster-server-0.3.0-<platform>.tar.gz`; see docs/server.md.
+
+**Agents and governance.**
+- Agents wake for a reason you can see. Each Roster agent has a run policy: a heartbeat timer, wake on assignment, wake on a comment or @mention, wake on a decision, and a least gap between wakes. A timer wake only starts a run when the agent has ready work, so an idle heartbeat costs nothing. Wakes that arrive close together merge into one run, a runaway burst pauses the agent and tells you, and every run shows why it started.
+- Runs that go wrong recover instead of stalling. An empty or plan-only turn is continued (up to twice), a temporary failure is retried after a backoff, a usage limit is explained, and a run that ends with no comment is asked once and then gets a note written from its Receipt. Lost runs, stranded tasks and tasks with no next step show up under Settings › Run policy with a way out.
+- Hold a whole subtree: pause it, or cancel it (type the task key to confirm) and restore it later. Stop a run three ways: Stop, Stop and mark done (it still goes through review), or Stop and cancel. Hide a task from lists.
+- Review and approval policies: a task can need a review or approval by you or by an agent reviewer before it counts as done. Request changes needs a note and wakes the owner with it; the last approval verifies the task. A stopped subtree raises one finding for you (or a watchdog agent) to accept, reopen or reassign, and follow-up checks wake the owner, create a recovery task, or ask you.
+- Per-agent governance on the agent's page: an instruction bundle (AGENTS.md, SOUL.md, HEARTBEAT.md, TOOLS.md, more) with revisions and restore, permissions (create and assign tasks, propose hires, low-trust containment), tool rules (allow, ask or deny by command, file or connector tool), a git identity for its commits, and the secrets lent to it. A project's secrets are versioned, rotatable, audited, and agents can ask for one by name; you type the value, the agent never sees it.
+- A monthly budget now stops new runs at 100% (and raises an incident) until you raise it, and an agent can be limited to a number of tasks at once.
+
+**Work layer.**
+- Status cards on a project's Dashboard: a short report an agent writes and keeps up to date from the tasks it watches (the same search as the Tasks tab, such as `status:blocked label:release`). It reads the project and never changes it, keeps every revision, refreshes daily or when the watched tasks change, stays within a token cap, and skips the run (no tokens) when nothing changed.
+- Automations create tasks. Each firing can make a project task for a Roster agent (and start it in its own worktree), or run a standup: one task, a subtask per agent, and one digest of their reports written into the parent for your review. Templates: Daily standup, What the org learned, CI health check, Project digest.
+- Automations take `{{variables}}` (Run now asks for them), a signed webhook trigger on this computer only (HMAC-SHA256, the secret shown once and kept in the encrypted store), an approval gate that waits in your Inbox, and an activity gate that skips a run, at no cost, when nothing changed since the last one ended.
+- Task documents with any key (plan, design, notes): every save is a revision with a note, you can compare and restore, select text to start a comment thread that wakes the owner, and agents can save one from their final message. Thumbs on agent replies and documents (kept on this computer, exportable).
+- Pull requests link to tasks, pasted or found in an agent's report, and show their state and checks through your signed-in GitHub CLI. The Tasks search takes `pr:failing`, `label:`, `status:`, `assignee:`, `priority:` and `is:live`, and views can be saved.
+- Labels, a goals tree (a run is told the chain of goals its task serves), project status and target date, star and hide for agents and projects, Roster state tabs, and a paused banner on the Dashboard.
+- Outputs by kind (documents, images, video, text, data, code, pull requests) with search, grouping by task, a status for each (draft, ready for review, approved, changes requested, merged), approve or request changes (which tells the owner), and a mark for what arrived since you last looked.
+- The Inbox has Mine, Unread and Snoozed views, Mark all read and Snooze; a decision can carry a decide-by date and "Ask <agent> for a recommendation". The Ledger Timeline is a Gantt (a bar per run, range, zoom, stats) and Activity exports to CSV.
+
+**Find and understand.**
+- Keyboard shortcuts with a cheatsheet (press `?`): `c` new task, `/` search, `g` then `i`/`d`/`t`/`r`/`o`/`l` to jump, `j`/`k` to move. They never fire while you type and can be turned off.
+- ⌘K finds tasks, agents, projects, documents, comments, outputs and decisions; type a task key like `OSS-12` to open it.
+- Set up a project inside Projects: mission and target date, starter agents, a first task, or "Interview me" to plan it with the coordinator. The app's own onboarding is unchanged.
+- A "You" card with your tasks, turns, tokens, cost and streak; the Ledger has Costs (by model, agent, project and day, with provider usage windows and your own prices) and Runs tabs.
+- A reflection coach proposes better instructions for an agent from its recent work; nothing changes until you apply it. Skill Studio tests a skill against saved inputs, forks it, or makes one from a task.
+
+**Paperclip and models.**
+- The latest models are in the picker. Claude Sonnet 5.5 (1M context, images, up to Extra High reasoning) leads the Claude Code list, with Sonnet 5 kept for existing chats. GPT-6.1 Sol shows as "GPT-6.1 Sol" and leads the ChatGPT list (new chats start on it), and the model set in Codex's config.toml stays selectable even when Codex's model cache is out of date.
+- Paperclip and your own projects stay apart. An import never writes into a project you made in Muster: each Paperclip project becomes its own project, listed under its org (for example "RagnarDataOps · Paperclip") in Projects and the sidebar, and updated in place by the next import. What you change in Muster (a project's name or goal, a task's title, priority, owner or status) is kept when you import again, and the import report lists each kept edit. An issue deleted in Paperclip is cancelled and marked "Removed in Paperclip". A hire still waiting for approval is not added to the Roster.
+- Big Paperclip orgs work. Issues and comments are read page by page with no 500 or 200 cap, so a company of thousands of issues links, imports and re-imports without duplicates, and an issue with hundreds of comments shows every one. The import report says how long it took.
+- Change a linked Paperclip task's priority and assignee from its Properties, create tasks there with labels, a goal and blockers, and approve, reject or ask for changes on Paperclip approvals (hires, strategy, budget overrides) from the thread, the Inbox and the Roster. Nothing is sent until you press a button. Pause and Resume on a project's Roster wake only the agents that Pause stopped.
+- Paperclip task documents and plans (with their revisions), work products, labels, goal parents and owners, budgets and routines show in Muster, and an import brings them across (routines arrive as paused Automations). Test connection says when a URL is not a Paperclip API, and warns when a token would travel over plain http.
+- An imported agent whose runner is not on this Mac no longer starts on the project's default model. Starting its task stops with "Choose a model for <agent>".
+
 ## 0.2.10
 
 - Models from OmniRoute and other providers you add in Settings work again. The API key you paste into Muster is now sent with every chat; before, chats went out without it and failed with HTTP 401.

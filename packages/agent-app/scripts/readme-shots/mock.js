@@ -61,7 +61,7 @@ const snapshot = () => ({folders, chats: FX.chats, projects, activeChatId, versi
 const text = (path) => files[path]?.after ?? files[path]?.before ?? `// ${path}\n`;
 const blob = (s) => { let h = 0; for (const c of s) h = (h * 31 + c.charCodeAt(0)) >>> 0; return h.toString(16).padStart(8, '0') + 'a3f1c9e2b7d4'; };
 
-const settings = {'appearance.theme': OPTS.theme ?? 'dark', 'chat.inlineDiffs': true, 'general.defaultModel': OPTS.realisticModels ? {providerId: 'openai-direct', model: 'gpt-6-codex', effort: 'high'} : {providerId: 'gateway', model: 'frontier-large', effort: 'medium'}};
+const settings = {'appearance.theme': OPTS.theme ?? 'dark', 'chat.inlineDiffs': true, 'general.defaultModel': OPTS.realisticModels ? {providerId: 'openai-direct', model: 'gpt-6.1-sol', effort: 'high'} : {providerId: 'gateway', model: 'frontier-large', effort: 'medium'}};
 const updateStatus = {phase: 'ready', current: '0.2.0', channel: 'stable', autoCheck: true, latest: {version: '0.2.1', notes: '- Faster timeline scrolling on long chats\n- Memory recall shows where each note came from\n- Fixes a terminal resize glitch', pageUrl: 'https://example.com/releases/0.2.1', publishedAt: ago(60 * 20)}, checkedAt: ago(12)};
 
 // ---- git ------------------------------------------------------------------------------------

@@ -5,7 +5,7 @@
  */
 import { Menu } from '@base-ui/react/menu';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { ArrowDownUp, Check, ChevronDown, ChevronRight, Columns3, Filter, Layers, List, Plus, Search } from 'lucide-react';
+import { ArrowDownUp, Bookmark, Check, ChevronDown, ChevronRight, Columns3, Filter, Layers, List, Plus, Search, Trash2 } from 'lucide-react';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import type { WorkspaceSnapshot, WorkspaceStatus, WorkspaceTask } from '../../shared/domains/paperclip-protocol';
 import { PRIORITY_NAME, STATUS_LABEL, WORKSPACE_STATUSES } from '../../shared/domains/paperclip-protocol';
@@ -14,10 +14,11 @@ import { invoke } from '../bridge';
 import { refreshWorkspace } from '../hubStore';
 import { agoLabel, exactTime } from '../relativeTime';
 import { notifyError } from '../store';
-import { activeFilters, boardColumns, buildRows, filterTasks, GROUP_LABEL, loadView, ownerOptions, PRIORITIES, QUICK_LABEL, saveView, SORT_LABEL, type QuickFilter, type TaskGroup, type TaskRow, type TaskSort, type TaskViewState } from '../taskView';
+import { activeFilters, boardColumns, buildRows, filterTasks, GROUP_LABEL, labelOptions, loadSavedViews, loadView, MAX_SAVED_VIEWS, ownerOptions, PRIORITIES, QUICK_LABEL, saveView, SORT_LABEL, storeSavedViews, viewOf, type QuickFilter, type SavedView, type TaskGroup, type TaskRow, type TaskSort, type TaskViewState } from '../taskView';
 import { Monogram, TaskStatusIcon } from './HubParts';
 import { ResourceState } from './ResourceState';
 import { Tip } from './Tooltip';
+import { LabelChips, PrChip } from './WorkParts';
 
 const ROW_H = 36, GROUP_H = 34, BOARD_CAP = 50;
 const toggle = <T,>(list: readonly T[], value: T): T[] => list.includes(value) ? list.filter(v => v !== value) : [...list, value];
@@ -39,17 +40,41 @@ export function TaskList({ snapshot, tasks, scope, showProject = false, onOpenTa
   useEffect(() => { saveView(scope, view); }, [scope, view]);
   const update = (patch: Partial<TaskViewState>) => setView(v => ({ ...v, ...patch }));
   const projectName = useMemo(() => { const names = new Map(snapshot.projects.map(p => [p.id, p.name])); return (id: string | null) => (id && names.get(id)) || ''; }, [snapshot.projects]);
-  const visible = tasks;
-  const filtered = useMemo(() => filterTasks(visible, view), [visible, view.query, view.quick, view.statuses, view.owners, view.priorities]);
+  const hiddenCount = useMemo(() => tasks.filter(t => t.hidden).length, [tasks]);
+  const [showHidden, setShowHidden] = useState(false);
+  const visible = useMemo(() => showHidden ? tasks : tasks.filter(t => !t.hidden), [tasks, showHidden]);
+  const filtered = useMemo(() => filterTasks(visible, view), [visible, view.query, view.quick, view.statuses, view.owners, view.priorities, view.labels]);
   const owners = useMemo(() => ownerOptions(visible), [visible]);
+  const labels = useMemo(() => labelOptions(visible), [visible]);
+  const [saved, setSaved] = useState<SavedView[]>(() => loadSavedViews(scope));
+  const [naming, setNaming] = useState('');
+  const persist = (next: SavedView[]) => { setSaved(next); storeSavedViews(scope, next); };
+  const clearAll = { query: '', quick: 'all' as const, statuses: [], owners: [], priorities: [], labels: [] };
   const count = activeFilters(view);
   const groups: TaskGroup[] = showProject ? ['none', 'status', 'owner', 'priority', 'parent', 'project'] : ['none', 'status', 'owner', 'priority', 'parent'];
   return <div className="task-list" data-layout={view.layout}>
     <div className="task-toolbar" role="toolbar" aria-label="Tasks">
       {onNewTask && <button type="button" className="settings-button secondary task-new" onClick={onNewTask}><Plus size={14}/>{NAMES.newTask}</button>}
       <label className="task-search"><Search size={14} aria-hidden="true"/><span className="sr-only">Search tasks</span>
-        <input type="search" placeholder="Search tasks…" value={view.query} onChange={e => update({ query: e.target.value })} onKeyDown={e => { if (e.key === 'Escape' && view.query) { e.preventDefault(); e.stopPropagation(); update({ query: '' }); } }}/></label>
+        <input type="search" placeholder="Search, or status:blocked label:bug…" aria-describedby="task-query-help" value={view.query} onChange={e => update({ query: e.target.value })} onKeyDown={e => { if (e.key === 'Escape' && view.query) { e.preventDefault(); e.stopPropagation(); update({ query: '' }); } }}/></label>
+      <span id="task-query-help" className="sr-only">Words search the key, title and owner. Filters: status:, assignee:, label:, priority:, is:live, is:open, pr:failing. A leading minus negates a filter.</span>
       <span className="task-toolbar-spacer"/>
+      {hiddenCount > 0 && <button type="button" className="ws-filter" aria-pressed={showHidden} onClick={() => setShowHidden(v => !v)}>{showHidden ? 'Hide' : 'Show'} {hiddenCount} hidden</button>}
+      <Menu.Root>
+        <Tip label="Saved views"><Menu.Trigger className="icon-button task-tool" aria-label="Saved views" data-active={saved.length ? 'true' : undefined}><Bookmark size={15}/></Menu.Trigger></Tip>
+        <Menu.Portal><Menu.Positioner side="bottom" align="end" sideOffset={6} className="ui-menu-positioner"><Menu.Popup className="ui-menu task-saved-menu">
+          <Menu.Group><Menu.GroupLabel className="ui-menu-label">Saved views</Menu.GroupLabel>
+            {saved.length === 0 && <p className="task-filter-empty">Save the current search and filters to come back to them.</p>}
+            {saved.map(sv => <div key={sv.name} className="task-saved-row"><Menu.Item className="task-saved-open" onClick={() => update({ query: sv.query, quick: sv.quick, statuses: sv.statuses, owners: sv.owners, priorities: sv.priorities, labels: sv.labels, sort: sv.sort, group: sv.group, collapsed: [] })}>{sv.name}</Menu.Item>
+              <button type="button" className="icon-button" aria-label={`Delete saved view ${sv.name}`} onClick={() => persist(saved.filter(x => x.name !== sv.name))}><Trash2 size={13}/></button></div>)}
+          </Menu.Group>
+          <Menu.Separator/>
+          <form className="task-saved-form" onSubmit={e => { e.preventDefault(); const name = naming.trim().slice(0, 40); if (!name) return; persist([...saved.filter(x => x.name !== name), viewOf(name, view)].slice(-MAX_SAVED_VIEWS)); setNaming(''); }}>
+            <input type="text" className="ws-input" aria-label="Name for this view" placeholder="Name this view" maxLength={40} value={naming} onChange={e => setNaming(e.target.value)} onKeyDown={e => e.stopPropagation()}/>
+            <button type="submit" className="settings-button secondary" disabled={!naming.trim()}>Save</button>
+          </form>
+        </Menu.Popup></Menu.Positioner></Menu.Portal>
+      </Menu.Root>
       <div className="task-toggle" role="radiogroup" aria-label="Layout">
         <Tip label="List"><button type="button" role="radio" aria-checked={view.layout === 'list'} aria-label="List" className="icon-button" onClick={() => update({ layout: 'list' })}><List size={15}/></button></Tip>
         <Tip label="Board"><button type="button" role="radio" aria-checked={view.layout === 'board'} aria-label="Board" className="icon-button" onClick={() => update({ layout: 'board' })}><Columns3 size={15}/></button></Tip>
@@ -71,27 +96,28 @@ export function TaskList({ snapshot, tasks, scope, showProject = false, onOpenTa
             <Menu.Group><Menu.GroupLabel className="ui-menu-label">Priority</Menu.GroupLabel>
               {PRIORITIES.map(p => <Menu.CheckboxItem key={p} closeOnClick={false} checked={view.priorities.includes(p)} onCheckedChange={() => update({ priorities: toggle(view.priorities, p) })}><Check size={13} className="task-check" data-on={view.priorities.includes(p) || undefined}/>{PRIORITY_NAME[p]}</Menu.CheckboxItem>)}
             </Menu.Group>
+            {labels.length > 0 && <Menu.Group><Menu.GroupLabel className="ui-menu-label">Label</Menu.GroupLabel>
+              {labels.map(l => <Menu.CheckboxItem key={l.name} closeOnClick={false} checked={view.labels.includes(l.name)} onCheckedChange={() => update({ labels: toggle(view.labels, l.name) })}><Check size={13} className="task-check" data-on={view.labels.includes(l.name) || undefined}/>{l.name}<span className="task-group-count">{l.count}</span></Menu.CheckboxItem>)}
+            </Menu.Group>}
           </div>
-          {count > 0 && <><Menu.Separator/><Menu.Item onClick={() => update({ quick: 'all', statuses: [], owners: [], priorities: [] })}>Clear filters</Menu.Item></>}
+          {count > 0 && <><Menu.Separator/><Menu.Item onClick={() => update({ quick: 'all', statuses: [], owners: [], priorities: [], labels: [] })}>Clear filters</Menu.Item></>}
         </Menu.Popup></Menu.Positioner></Menu.Portal>
       </Menu.Root>
       <Menu.Root>
         <Tip label={`Sort: ${SORT_LABEL[view.sort]}`}><Menu.Trigger className="icon-button task-tool" aria-label={`Sort: ${SORT_LABEL[view.sort]}`}><ArrowDownUp size={15}/></Menu.Trigger></Tip>
         <Menu.Portal><Menu.Positioner side="bottom" align="end" sideOffset={6} className="ui-menu-positioner"><Menu.Popup className="ui-menu">
-          <Menu.GroupLabel className="ui-menu-label">Sort by</Menu.GroupLabel>
-          <Menu.RadioGroup value={view.sort} onValueChange={value => update({ sort: value as TaskSort })}>{(Object.keys(SORT_LABEL) as TaskSort[]).map(s => <Menu.RadioItem key={s} value={s}><Check size={13} className="task-check" data-on={view.sort === s || undefined}/>{SORT_LABEL[s]}</Menu.RadioItem>)}</Menu.RadioGroup>
+          <Menu.RadioGroup value={view.sort} onValueChange={value => update({ sort: value as TaskSort })}><Menu.GroupLabel className="ui-menu-label">Sort by</Menu.GroupLabel>{(Object.keys(SORT_LABEL) as TaskSort[]).map(s => <Menu.RadioItem key={s} value={s}><Check size={13} className="task-check" data-on={view.sort === s || undefined}/>{SORT_LABEL[s]}</Menu.RadioItem>)}</Menu.RadioGroup>
         </Menu.Popup></Menu.Positioner></Menu.Portal>
       </Menu.Root>
       {view.layout === 'list' && <Menu.Root>
         <Tip label={`Group: ${GROUP_LABEL[view.group]}`}><Menu.Trigger className="icon-button task-tool" aria-label={`Group: ${GROUP_LABEL[view.group]}`} data-active={view.group !== 'none' ? 'true' : undefined}><Layers size={15}/></Menu.Trigger></Tip>
         <Menu.Portal><Menu.Positioner side="bottom" align="end" sideOffset={6} className="ui-menu-positioner"><Menu.Popup className="ui-menu">
-          <Menu.GroupLabel className="ui-menu-label">Group by</Menu.GroupLabel>
-          <Menu.RadioGroup value={view.group} onValueChange={value => update({ group: value as TaskGroup, collapsed: [] })}>{groups.map(g => <Menu.RadioItem key={g} value={g}><Check size={13} className="task-check" data-on={view.group === g || undefined}/>{GROUP_LABEL[g]}</Menu.RadioItem>)}</Menu.RadioGroup>
+          <Menu.RadioGroup value={view.group} onValueChange={value => update({ group: value as TaskGroup, collapsed: [] })}><Menu.GroupLabel className="ui-menu-label">Group by</Menu.GroupLabel>{groups.map(g => <Menu.RadioItem key={g} value={g}><Check size={13} className="task-check" data-on={view.group === g || undefined}/>{GROUP_LABEL[g]}</Menu.RadioItem>)}</Menu.RadioGroup>
         </Menu.Popup></Menu.Positioner></Menu.Portal>
       </Menu.Root>}
     </div>
     {visible.length === 0 ? <ResourceState kind="empty" message={emptyMessage ?? 'No tasks yet.'}>{onNewTask && <button type="button" className="settings-button" onClick={onNewTask}><Plus size={14}/>{NAMES.newTask}</button>}</ResourceState>
-      : filtered.length === 0 ? <ResourceState kind="empty" compact message="No tasks match these filters."><button type="button" className="settings-button secondary" onClick={() => update({ query: '', quick: 'all', statuses: [], owners: [], priorities: [] })}>Clear filters</button></ResourceState>
+      : filtered.length === 0 ? <ResourceState kind="empty" compact message="No tasks match these filters."><button type="button" className="settings-button secondary" onClick={() => update(clearAll)}>Clear filters</button></ResourceState>
       : view.layout === 'board' ? <TaskBoard tasks={filtered} sort={view.sort} showProject={showProject} projectName={projectName} onOpenTask={onOpenTask}/>
       : <TaskRows rows={buildRows(visible, filtered, view, projectName)} showProject={showProject} projectName={projectName} onOpenTask={onOpenTask} onToggle={id => update({ collapsed: toggle(view.collapsed, id) })}/>}
   </div>;
@@ -114,7 +140,7 @@ function TaskRows({ rows, showProject, projectName, onOpenTask, onToggle }: { ro
           <span className="task-indent" style={{ width: row.depth * 24 }} aria-hidden="true"/>
           {row.children ? <button type="button" className="task-caret" aria-label={`${row.collapsed ? 'Expand' : 'Collapse'} ${t.key} (${row.children} subtasks)`} aria-expanded={!row.collapsed} onClick={() => onToggle(t.id)}>{row.collapsed ? <ChevronRight size={13}/> : <ChevronDown size={13}/>}</button> : <span className="task-caret" aria-hidden="true"/>}
           <button type="button" className="task-row-main" onClick={() => onOpenTask(t.id)} title={`${t.key} · ${t.title}`}>
-            <TaskStatusIcon status={t.status}/><span className="ws-key">{t.key}</span><span className="task-row-title">{t.title}</span>
+            <TaskStatusIcon status={t.status}/><span className="ws-key">{t.key}</span><span className="task-row-title">{t.title}</span><LabelChips labels={t.labels}/><PrChip pr={t.pr}/>
             {row.parentKey && <span className="task-parent-key">in {row.parentKey}</span>}
             {row.collapsed && row.children > 0 && <span className="task-sub-count">{row.children} subtasks</span>}
             {t.live && <span className="ws-live"><span className="ws-live-dot"/>live</span>}
@@ -151,6 +177,7 @@ function TaskBoard({ tasks, sort, showProject, projectName, onOpenTask }: { task
         {shown.map(t => <button key={t.id} type="button" className="task-card" draggable data-moving={moving === t.id || undefined} onDragStart={e => { e.dataTransfer.setData('text/x-muster-task', t.id); e.dataTransfer.effectAllowed = 'move'; }} onClick={() => onOpenTask(t.id)}>
           <span className="task-card-top"><span className="ws-key">{t.key}</span>{t.live && <span className="ws-live"><span className="ws-live-dot"/>live</span>}</span>
           <span className="task-card-title">{t.title}</span>
+          {(t.labels?.length || t.pr?.total) ? <span className="task-card-tags"><LabelChips labels={t.labels} max={2}/><PrChip pr={t.pr}/></span> : null}
           <span className="task-card-foot">{t.assigneeLabel ? <><Monogram name={t.assigneeLabel} kind={t.assigneeId === 'user:local' ? 'user' : 'agent'}/><span>{t.assigneeLabel}</span></> : <span className="ws-faint">No owner</span>}{showProject && <span className="task-row-project">{projectName(t.projectId)}</span>}</span>
         </button>)}
         {col.tasks.length > shown.length && <button type="button" className="ws-link task-col-more" onClick={() => setMore(m => new Set(m).add(col.status))}>Show {col.tasks.length - shown.length} more</button>}

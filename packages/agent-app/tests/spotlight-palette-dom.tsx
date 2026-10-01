@@ -20,11 +20,24 @@ const chats=[
   {id:'beta',title:'Release notes',folderId:'f1',status:'completed',updatedAt:'2026-09-01T00:00:00Z',pinned:false,archived:false,draft:'',model:'m',mode:'agent'},
 ];
 const calls:{command:string;input:any}[]=[];
+const last=(command:string)=>calls.filter(c=>c.command===command).at(-1)!;
 (window as any).muster={subscribe(){return()=>{};},async invoke(command:string,input:any){
   calls.push({command,input});
   if(command==='app.snapshot')return {version:1,chats,folders:[{id:'f1',name:'api-server',path:'/work/api-server'}],projects:[{id:'p1',name:'Billing revamp',goal:'',folderIds:['f1']}]};
   if(command==='chat.search')return input.query.includes('hono')?[{chatId:'beta',snippet:'…move the proxy to Hono…',itemId:'i1',ranges:[[19,23]],matches:1}]:[];
   if(command==='files.quickOpen')return {results:input.query==='util'?[{path:'src/lib/util.ts',score:1}]:[]};
+  if(command==='search.workspace'){
+    const q=String(input.query),scope=input.scope??'all';
+    const mk=(kind:string,id:string,title:string,over:any={})=>({kind,id,title,snippet:'',titleRanges:[],snippetRanges:[],key:null,status:null,source:'local',projectId:'p1',projectName:'Billing revamp',taskId:null,chatId:null,agentId:null,at:null,...over});
+    const counts={tasks:0,agents:0,projects:0,documents:0,comments:0,outputs:0,decisions:0};
+    if(/^oss-12$/i.test(q))return {query:q,scope,rows:[mk('tasks','t12','Fix the login redirect',{key:'OSS-12',taskId:'t12',exact:true,snippet:'Billing revamp · CTO'})],counts:{...counts,tasks:1},identifier:{key:'OSS-12',found:true},truncated:false};
+    if(/^oss-99$/i.test(q))return {query:q,scope,rows:[],counts,identifier:{key:'OSS-99',found:false},truncated:false};
+    if(/redirect|cookie/.test(q)){
+      const rows=[mk('tasks','t12','Fix the login redirect',{key:'OSS-12',taskId:'t12'}),mk('documents','t12:plan','plan · Fix the login redirect',{key:'OSS-12',taskId:'t12',snippet:'Replace the session cookie before the redirect.',snippetRanges:[[20,26]]}),mk('comments','c1:i1','Fix the login redirect',{key:'OSS-12',taskId:'t12',snippet:'I traced the redirect loop to a stale cookie.'}),mk('agents','member:m1','CTO',{agentId:'member:m1',snippet:'Chief Technology Officer'})];
+      return {query:q,scope,rows:scope==='all'?rows:rows.filter(r=>r.kind===scope),counts:{...counts,tasks:1,documents:1,comments:1,agents:1},identifier:null,truncated:false};
+    }
+    return {query:q,scope,rows:[],counts,identifier:null,truncated:false};
+  }
   if(command==='git.info')return {branch:'main',detached:false,fetchedAt:null,hasRemote:false,worktree:null};
   if(command==='chat.timeline'||command==='chat.select')return {items:[],revision:0};
   return undefined;
@@ -32,6 +45,7 @@ const calls:{command:string;input:any}[]=[];
 const {createRoot}=await import('react-dom/client');
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT=false;
 const store=await import('../src/renderer/store');
+const hub=await import('../src/renderer/hubStore');
 const spotlight=await import('../src/renderer/components/SpotlightSearch');
 await store.boot();
 await store.selectChat('alpha');
@@ -67,6 +81,40 @@ assert.ok(empty,'empty state renders');
 assert.equal(empty!.querySelector('.resource-state-title')?.textContent,'No results for “zzzznonexistent”');
 assert.match(empty!.textContent??'',/type > for commands/);
 
+// C34, G19: tasks, agents and documents come from one workspace search; a task key jumps straight to its task.
+await type('OSS-12');
+assert.deepEqual(sections().slice(0,1),['Tasks'],'the exact task leads');
+assert.equal(rowTitles()[0],'Fix the login redirect');
+assert.equal(document.querySelector('.spotlight-row .spotlight-key')?.textContent,'OSS-12');
+assert.ok(calls.some(call=>call.command==='search.workspace'&&call.input.query==='OSS-12'));
+input().dispatchEvent(Object.assign(new window.Event('keydown',{bubbles:true,cancelable:true}),{key:'Enter'}));await delay(60);
+assert.equal(store.getState().screen,'hub','Enter on a task key opens its thread');
+assert.deepEqual([hub.hubRoute().page,hub.hubRoute().arg],['task','t12']);
+spotlight.openSpotlightSearch();await delay(40);
+await type('OSS-99');
+assert.equal(document.querySelector('.spotlight-results .resource-state-title')?.textContent,'No task OSS-99');
+await type('redirect');
+for(const label of ['Tasks','Agents','Documents','Comments'])assert.ok(sections().includes(label),`${label} in ${sections().join(',')}`);
+const docRow=[...document.querySelectorAll('.spotlight-row')].find(r=>/plan · Fix the login redirect/.test(r.textContent??''))!;
+assert.match(docRow.querySelector('.spotlight-row-snippet')?.textContent??'',/session cookie before the redirect/);
+assert.equal(docRow.querySelector('.spotlight-row-snippet mark')?.textContent,'cookie','the match is highlighted');
+// Scope tabs narrow it; an in: operator does the same without touching the tabs.
+const tab=(label:string)=>[...document.querySelectorAll('.spotlight-scope')].find(n=>(n.textContent??'').startsWith(label)) as HTMLButtonElement;
+assert.match(tab('Documents').textContent??'',/Documents1/,'the tab shows how many documents matched');
+tab('Documents').click();await delay(300);
+assert.deepEqual(sections(),['Documents']);assert.equal(last('search.workspace').input.scope,'documents');
+assert.equal(tab('Documents').getAttribute('aria-selected'),'true');
+tab('All').click();await delay(30);
+await type('in:comments cookie');
+assert.deepEqual(sections(),['Comments']);assert.equal(tab('Comments').getAttribute('aria-selected'),'true');
+assert.equal(last('search.workspace').input.query,'cookie');assert.equal(last('search.workspace').input.scope,'comments');
+// Commands: page jumps carry their keys, New task says what it needs.
+await type('> go to inbox',30);
+const goInbox=[...document.querySelectorAll('.spotlight-row')].find(row=>row.querySelector('.spotlight-row-title')?.textContent==='Go to Inbox')!;
+assert.equal(goInbox.querySelector('.spotlight-shortcut')?.textContent,'g i');
+(goInbox as HTMLButtonElement).click();await delay(40);
+assert.equal(hub.hubRoute().page,'inbox');assert.ok(!spotlight.isSpotlightSearchOpen());
+spotlight.openSpotlightSearch();await delay(40);
 // Command mode by prefix: every command listed; a disabled one says why and does not run.
 await type('> forward',30);
 const forward=[...document.querySelectorAll('.spotlight-row')].find(row=>row.querySelector('.spotlight-row-title')?.textContent==='Forward')!;

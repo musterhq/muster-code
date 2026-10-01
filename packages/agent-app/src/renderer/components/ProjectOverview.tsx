@@ -1,4 +1,5 @@
 import { AlertTriangle, CheckCircle2, CircleDot, FolderPlus, Hand, ListChecks, MessageSquare, MessagesSquare, PackageCheck, Pencil, Users } from 'lucide-react';
+import { describeOp } from '../setupModel';
 import React, { useEffect, useState } from 'react';
 import type { Chat, Folder } from '../../shared/protocol';
 import type { ProjectDetails } from '../../shared/domains/projects-protocol';
@@ -54,6 +55,7 @@ export function CoordinatorCard({ projectId, coordinator, archived, onOpenChat, 
       : pending.length === 0 ? <p className="projects-empty">No pending task changes to approve.</p>
       : <ul className="project-coordinator-list">{pending.map(p => <li key={p.key}>
           <span>{plural(p.ops.length, 'change')} proposed {relativeTime(p.createdAt)}</span>
+          <ul className="project-coordinator-ops" aria-label="What would change">{p.ops.slice(0, 12).map((op, i) => <li key={i}>{describeOp(op)}</li>)}{p.ops.length > 12 && <li>and {p.ops.length - 12} more</li>}</ul>
           <span className="project-task-row-actions"><button type="button" className="settings-button secondary" disabled={Boolean(busy)} onClick={() => void apply(p.key)}>{busy===p.key?'Applying…':'Apply'}</button><button type="button" className="settings-button secondary" disabled={Boolean(busy)} onClick={() => void dismiss(p.key)}>Dismiss</button></span>
         </li>)}</ul>}
     {error && <p role="alert" className="settings-error">{error}</p>}

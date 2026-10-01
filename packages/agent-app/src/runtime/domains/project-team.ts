@@ -241,14 +241,23 @@ export function createProjectTeam(ctx: DomainContext, deps: ProjectTeamDeps) {
       record(projectId, input.approve === true ? 'member.hire-approved' : 'member.hire-rejected', input.approve === true ? `Approved adding ${m.name}${m.title ? ` as ${m.title}` : ''}` : `Declined adding ${m.name}`, m.id);
       return m;
     },
+    'project.members.pause': async input => {
+      const projectId = project(input), paused = input.paused === true, member = members().setPaused(projectId, id(input.id, 'member id'), paused);
+      let stoppedRuns = 0;
+      if (paused) for (const chatId of liveRunsOf(projectId, member)) { try { await ctx.invoke('chat.stop', { id: chatId }); stoppedRuns++; } catch { /* already settled */ } }
+      record(projectId, paused ? 'member.paused' : 'member.resumed', paused ? `Paused ${member.name}${stoppedRuns ? `; stopped ${plural(stoppedRuns, 'running task')}` : ''}` : `Resumed ${member.name}`, member.id);
+      deps.changed(projectId, '', true);
+      return { member, stoppedRuns };
+    },
     'project.team.settings': input => members().settings(project(input)),
     'project.team.settings.set': input => {
       const projectId = project(input), patch: Partial<TeamSettings> = {};
       if (input.requireHireApproval !== undefined) patch.requireHireApproval = input.requireHireApproval === true;
       if (input.keyPrefix !== undefined) patch.keyPrefix = input.keyPrefix === null || input.keyPrefix === '' ? null : String(input.keyPrefix).trim().toUpperCase();
       if (input.monthlyBudgetUsd !== undefined) patch.monthlyBudgetUsd = input.monthlyBudgetUsd === null || input.monthlyBudgetUsd === '' ? null : Number(input.monthlyBudgetUsd);
+      if (input.monthlyBudgetTokens !== undefined) patch.monthlyBudgetTokens = input.monthlyBudgetTokens === null || input.monthlyBudgetTokens === '' ? null : Number(input.monthlyBudgetTokens);
       const next = members().setSettings(projectId, patch);
-      record(projectId, 'project.team-settings', `Updated project settings: ${Object.keys(patch).map(k => k === 'requireHireApproval' ? `approval to add agents ${next.requireHireApproval ? 'on' : 'off'}` : k === 'keyPrefix' ? `task keys ${next.keyPrefix ?? 'from the name'}` : `monthly budget ${next.monthlyBudgetUsd === null ? 'off' : `$${next.monthlyBudgetUsd}`}`).join(', ')}`);
+      record(projectId, 'project.team-settings', `Updated project settings: ${Object.keys(patch).map(k => k === 'requireHireApproval' ? `approval to add agents ${next.requireHireApproval ? 'on' : 'off'}` : k === 'keyPrefix' ? `task keys ${next.keyPrefix ?? 'from the name'}` : k === 'monthlyBudgetTokens' ? `monthly token budget ${next.monthlyBudgetTokens == null ? 'off' : next.monthlyBudgetTokens.toLocaleString('en-US')}` : `monthly budget ${next.monthlyBudgetUsd === null ? 'off' : `$${next.monthlyBudgetUsd}`}`).join(', ')}`);
       deps.changed(projectId, '', true);
       return next;
     },
@@ -269,7 +278,7 @@ export function createProjectTeam(ctx: DomainContext, deps: ProjectTeamDeps) {
     'project.chats.transfer': input => transfer(input),
   };
   return {
-    handlers, runAccess,
+    handlers, runAccess, store: members,
     /** A member with their Roster profile (runner, instructions), for task dispatch. */
     member: (projectId: string, memberId: string) => members().get(projectId, memberId),
     purge(projectId: string) { members().purge(projectId); },

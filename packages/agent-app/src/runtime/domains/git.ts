@@ -45,7 +45,8 @@ export function createGitDomain(context: DomainContext): DomainModule {
     'git.fetch': async input => { const target = folder(input.folderId); const result = await fetchGit(target.path); changed(target); return result; },
     'git.commit': async input => {
       const target = folder(input.folderId);
-      const result = await commitGit(target.path, {revision: revision(input.revision), message: input.message, amend: input.amend === true, push: input.push === true});
+      const identity = context.hooks.commitIdentity?.(target.id) ?? undefined;
+      const result = await commitGit(target.path, {revision: revision(input.revision), message: input.message, amend: input.amend === true, push: input.push === true, ...(identity ? {identity} : {})});
       changed(target); return result;
     },
     'git.worktree.create': async input => {

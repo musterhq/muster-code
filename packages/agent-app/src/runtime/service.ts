@@ -613,7 +613,15 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
             // R5: a command that would signal the user's own processes always becomes a card. Full access asks the
             // provider about every non-trusted command (approvalPolicy 'untrusted') so it can be stopped here; the rest is accepted at once.
             const threat = method === 'item/commandExecution/requestApproval' ? await guardUserProcesses(params.command) : null;
-            if (access.permissionMode === 'full' && !threat) return {decision: 'accept'};
+            // G13: the agent's own tool rules. Deny refuses with a visible notice; allow answers the card (never for a stop-the-user's-process request); ask shows it even in full access.
+            const toolPolicy = (() => { const chat = store.chat(chatId); return chat ? domainHooks.toolPolicy(chat, method, params) : null; })();
+            if (toolPolicy?.effect === 'deny') {
+              store.appendItem(chatId, 'notice', toolPolicy.message, 'failed', {kind: 'tool-policy', method});
+              timeline(chatId);
+              return {decision: 'decline'};
+            }
+            if (toolPolicy?.effect === 'allow' && !threat) return {decision: 'accept'};
+            if (access.permissionMode === 'full' && !threat && toolPolicy?.effect !== 'ask') return {decision: 'accept'};
             const change = typeof params.itemId === 'string' && toolIds.has(params.itemId) ? store.item(toolIds.get(params.itemId)!)?.data?.changes : params.changes;
             const data: ApprovalData = {...approvalData(method, params, change), ...(threat ? {reason: threat.message, protectsUserProcess: true} : {})};
             const toolItemId = typeof params.itemId === 'string' ? toolIds.get(params.itemId) : undefined;
@@ -659,7 +667,12 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
         if (disposed) return;
         seal();
         if (!producedAssistant && result.finalMessage) store.appendItem(chatId, 'assistant', result.finalMessage, 'completed');
-        const recovery: ChatRecovery | undefined = result.recovery ?? (run.stopped ? {kind:'cancelled',retryable:false,reason:'Stopped.'} : result.status === 'failed' ? {kind:'recovery-needed',retryable:false,reason:'The provider attempt did not settle with confirmed outcome. Check its saved turn before continuing; the prompt was not resent.'} : undefined);
+        // The provider's own words are kept (S36): an adapter that reports a failure with a message (rate_limited, auth…)
+        // settled that attempt as failed, which Inbox and Pulse explain in a plain sentence and which may be run again.
+        // A failure with no message at all stays unconfirmed (recovery-needed).
+        const said = (result.errorMessage ?? '').replace(/\s+/g, ' ').trim().slice(0, 600);
+        const recovery: ChatRecovery | undefined = result.recovery ?? (run.stopped ? {kind:'cancelled',retryable:false,reason:'Stopped.'}
+          : result.status === 'failed' ? (said && result.dispatchState !== 'unknown' ? {kind:'failed',retryable:false,reason:`The provider attempt failed: ${said}`} : {kind:'recovery-needed',retryable:false,reason:'The provider attempt did not settle with confirmed outcome. Check its saved turn before continuing; the prompt was not resent.'}) : undefined);
         if (result.threadId) persistIdentity(result.threadId,result.turnId);
         // Only a turn the provider actually took delivered its context blocks to the thread.
         if (result.status === 'completed' && result.dispatchState !== 'not-dispatched' && !compactedInRun) contextLedger.delivered(chatId, store.chat(chatId)?.providerThreadId, [...pendingBlocks], retainedTurns);

@@ -3,6 +3,7 @@
  * the send receipt is persisted BEFORE any model call so a crashed process
  * never double-dispatches a requestId.
  */
+import {hasLiterals, redactLiterals, redactLiteralsDeep} from './literal-redaction.ts';
 import { DatabaseSync } from 'node:sqlite';
 import { chmodSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
@@ -640,6 +641,7 @@ export class AgentStore {
   }
 
   appendItem(chatId: string, kind: TimelineItem['kind'], text: string, status?: string, data?: Record<string, unknown>): TimelineItem {
+    if (hasLiterals()) { text = redactLiterals(chatId, text); if (data) data = redactLiteralsDeep(chatId, data); }
     const item: TimelineItem = {
       id: randomUUID(), chatId, kind, text, ...(status ? { status } : {}), createdAt: now(), ...(data ? { data } : {}),
     };
@@ -649,6 +651,7 @@ export class AgentStore {
   }
 
   updateItem(id: string, text: string, status?: string, data?: Record<string, unknown>): void {
+    if (hasLiterals()) { const chatId = (this.db.prepare('SELECT chat_id FROM timeline WHERE id = ?').get(id) as { chat_id: string } | undefined)?.chat_id; if (chatId) { text = redactLiterals(chatId, text); if (data) data = redactLiteralsDeep(chatId, data); } }
     this.db.prepare('UPDATE timeline SET text = ?, status = ?, data = COALESCE(?, data) WHERE id = ?').run(text, status ?? null, data ? JSON.stringify(data) : null, id);
   }
 

@@ -7,11 +7,22 @@
 import { Brain, Maximize2, Minus, Plus } from 'lucide-react';
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { WorkspaceAgent, WorkspaceSnapshot, WorkspaceTask } from '../../shared/domains/paperclip-protocol';
+import type { ProviderInfo } from '../../shared/protocol';
+import { loadProviders } from '../store';
+import { useStoreSelector } from '../useStore';
 import { AGENT_STATE_LABEL, Monogram } from './HubParts';
 
 const CARD_W = 232, CARD_H = 118, H_GAP = 20, V_GAP = 56, FOREST_GAP = 72, PAD = 40;
 const RUNTIME: Record<string, string> = { claude_local: 'Claude Code', codex_local: 'Codex', opencode_local: 'OpenCode', gemini_local: 'Gemini CLI', cursor_local: 'Cursor', process: 'Process', http: 'HTTP', muster: 'Muster', codex: 'Codex', 'claude-code': 'Claude Code', opencode: 'OpenCode', pi: 'Pi' };
-export const runtimeLabel = (adapter: string | null) => adapter ? RUNTIME[adapter] ?? adapter.replace(/_/g, ' ') : '—';
+/** A runner's name: the harness (Claude Code, Codex…), else the configured provider's display name (OpenAI, not "openai-direct"). */
+export const runtimeLabel = (adapter: string | null, providers?: readonly ProviderInfo[]) => adapter ? RUNTIME[adapter] ?? providers?.find(p => p.id === adapter)?.name ?? adapter.replace(/_/g, ' ') : '—';
+/** runtimeLabel with the configured providers' display names (loaded once). */
+export function useRuntimeLabel(): (adapter: string | null) => string {
+  const providers = useStoreSelector(s => s.providers);
+  useEffect(() => { void loadProviders(); }, []);
+  const list = (providers as { value?: ProviderInfo[] }).value;
+  return useCallback((adapter: string | null) => runtimeLabel(adapter, list), [list]);
+}
 
 interface Placed { agent: WorkspaceAgent; x: number; y: number; depth: number }
 interface Talk { from: string; to: string; task: WorkspaceTask }
@@ -62,6 +73,7 @@ export function talkingNow(snapshot: Pick<WorkspaceSnapshot, 'tasks' | 'agents'>
 }
 
 export function RosterGraph({ snapshot, onOpenAgent, onOpenTask }: { snapshot: WorkspaceSnapshot; onOpenAgent: (id: string) => void; onOpenTask: (id: string) => void }): React.ReactElement {
+  const runtimeLabel = useRuntimeLabel();
   const layout = useMemo(() => layoutRoster(snapshot.agents), [snapshot.agents]);
   const talks = useMemo(() => talkingNow(snapshot), [snapshot.tasks, snapshot.agents]);
   const at = useMemo(() => new Map(layout.placed.map(p => [p.agent.id, p])), [layout]);

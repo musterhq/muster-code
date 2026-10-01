@@ -19,6 +19,7 @@ import { agoLabel, exactTime } from '../relativeTime';
 import { Monogram, TaskStatusIcon } from './HubParts';
 import { PageHeader, type HubNav } from './HubPages';
 import { ResourceState } from './ResourceState';
+import { YouCard } from './YouCard';
 
 const errorText = (cause: unknown) => cause instanceof Error ? cause.message : String(cause);
 const shortDay = (day: string) => { const [, m, d] = day.split('-'); return `${Number(m)}/${Number(d)}`; };
@@ -29,12 +30,15 @@ export function dashboardTiles(snapshot: WorkspaceSnapshot, data: DashboardData 
   const count = (s: WorkspaceAgent['status']) => agents.filter(a => a.status === s).length;
   const open = snapshot.tasks.filter(t => t.status !== 'done' && t.status !== 'cancelled');
   const spend = data?.spend;
+  const base = !spend ? { value: '…', detail: 'Reading the Ledger' }
+    : spend.usd === null ? { value: spend.unpricedTurns ? 'Unpriced' : formatUsd(0), detail: spend.unpricedTurns ? `${spend.unpricedTurns} unpriced ${spend.unpricedTurns === 1 ? 'turn' : 'turns'} this month` : 'No agent turns this month' }
+    : { value: formatUsd(spend.usd), detail: `${spend.pricedTurns} priced ${spend.pricedTurns === 1 ? 'turn' : 'turns'}${spend.unpricedTurns ? ` + ${spend.unpricedTurns} unpriced` : ''} this month` };
+  // The linked Paperclip's company budget: how much of it this month has used.
+  const company = data?.budgets?.policies.find(p => p.scope === 'company');
   return {
     agents: { value: agents.length, detail: `${count('running')} running, ${count('paused')} paused, ${count('error')} ${count('error') === 1 ? 'error' : 'errors'}` },
     tasks: { value: snapshot.tasks.filter(t => t.status === 'in_progress').length, detail: `${open.length} open, ${open.filter(t => t.status === 'blocked').length} blocked` },
-    spend: !spend ? { value: '…', detail: 'Reading the Ledger' }
-      : spend.usd === null ? { value: spend.unpricedTurns ? 'Unpriced' : formatUsd(0), detail: spend.unpricedTurns ? `${spend.unpricedTurns} unpriced ${spend.unpricedTurns === 1 ? 'turn' : 'turns'} this month` : 'No agent turns this month' }
-      : { value: formatUsd(spend.usd), detail: `${spend.pricedTurns} priced ${spend.pricedTurns === 1 ? 'turn' : 'turns'}${spend.unpricedTurns ? ` + ${spend.unpricedTurns} unpriced` : ''} this month` },
+    spend: company ? { ...base, detail: `${base.detail} · ${Math.round(company.percent)}% of ${formatUsd(company.limitUsd)} ${data!.budgets!.company} budget` } : base,
     approvals: { value: snapshot.inbox.filter(i => i.kind === 'approval').length, detail: 'Waiting for your decision' },
   };
 }
@@ -48,18 +52,19 @@ export function agentCards(snapshot: WorkspaceSnapshot, limit = 8): { agent: Wor
     .sort((a, b) => Number(b.run.status === 'running') - Number(a.run.status === 'running') || (b.run.finishedAt ?? b.run.createdAt).localeCompare(a.run.finishedAt ?? a.run.createdAt)).slice(0, limit);
 }
 
-export function DashboardPage({ snapshot, nav }: { snapshot: WorkspaceSnapshot; nav: HubNav }): React.ReactElement {
+/** `projectId` scopes it to one project (the project page's Dashboard tab), where it renders without its own page header. */
+export function DashboardPage({ snapshot, nav, projectId }: { snapshot: WorkspaceSnapshot; nav: HubNav; projectId?: string }): React.ReactElement {
   const [data, setData] = useState<DashboardData | null>(null);
   const [error, setError] = useState('');
   const [tick, setTick] = useState(0);
   // Refetched when the workspace snapshot changes (its events), never on a timer.
-  useEffect(() => { let live = true; setError(''); invoke('paperclip.dashboard', { utcOffsetMinutes: -new Date().getTimezoneOffset() }).then(d => { if (live) setData(d); }, e => { if (live) setError(errorText(e)); }); return () => { live = false; }; }, [snapshot.fetchedAt, tick]);
+  useEffect(() => { let live = true; setError(''); invoke('paperclip.dashboard', { utcOffsetMinutes: -new Date().getTimezoneOffset(), ...(projectId ? { projectId } : {}) }).then(d => { if (live) setData(d); }, e => { if (live) setError(errorText(e)); }); return () => { live = false; }; }, [snapshot.fetchedAt, tick, projectId]);
   const tiles = dashboardTiles(snapshot, data);
   const cards = useMemo(() => agentCards(snapshot), [snapshot.runs, snapshot.agents]);
   const tasks = useMemo(() => new Map(snapshot.tasks.map(t => [t.id, t])), [snapshot.tasks]);
   const recent = useMemo(() => [...snapshot.tasks].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).slice(0, 10), [snapshot.tasks]);
-  return <div className="ws-page dash">
-    <PageHeader title={NAMES.dashboard} detail="What your agents are doing, what it costs, and how the last two weeks went, across Muster and Paperclip."/>
+  return <div className={`ws-page dash${projectId ? ' is-embedded' : ''}`}>
+    {!projectId && <PageHeader title={NAMES.dashboard} detail="What your agents are doing, what it costs, and how the last two weeks went, across Muster and Paperclip."/>}
     <section className="ws-section" aria-label="Agents">
       <h2 className="dash-label">Agents</h2>
       {cards.length === 0 ? <ResourceState kind="empty" compact icon={<Bot size={18}/>} message={snapshot.agents.some(a => a.role !== 'board') ? 'No agent has run yet. Start a task from a project and it shows here while it works.' : `No agents yet. Add one on a project’s ${NAMES.roster} tab.`}>
@@ -80,6 +85,7 @@ export function DashboardPage({ snapshot, nav }: { snapshot: WorkspaceSnapshot; 
       <Tile icon={<DollarSign size={15}/>} label="Month spend" value={tiles.spend.value} detail={tiles.spend.detail} onClick={() => openHub('ledger')}/>
       <Tile icon={<ShieldCheck size={15}/>} label="Pending approvals" value={tiles.approvals.value} detail={tiles.approvals.detail} onClick={() => openHub('inbox')}/>
     </section>
+    <YouCard {...(projectId ? { projectId } : {})}/>
     {error ? <ResourceState kind="error" message="The Dashboard’s numbers could not be read." detail={error} onRetry={() => setTick(n => n + 1)}/>
       : !data ? <ResourceState kind="loading" label="Reading the Ledger" rows={3}/>
       : <section className="dash-charts" aria-label="Last 14 days">
@@ -109,14 +115,14 @@ function Tile({ icon, label, value, detail, onClick }: { icon: React.ReactNode; 
 }
 
 // --- Charts: one bar per day, stacked, token colours, a legend and a per-bar tooltip (title), axis labels at the ends and middle.
-interface Segment { key: string; label: string; value: number; tone: string }
-function Bars({ title, days, series, legend, format = n => String(n), max }: { title: string; days: string[]; series: Segment[][]; legend: { label: string; tone: string }[]; format?: (n: number) => string; max?: number }): React.ReactElement {
+export interface Segment { key: string; label: string; value: number; tone: string }
+export function Bars({ title, days, series, legend, format = n => String(n), max, span = 'Last 14 days' }: { title: string; days: string[]; series: Segment[][]; legend: { label: string; tone: string }[]; format?: (n: number) => string; max?: number; span?: string }): React.ReactElement {
   const top = max ?? Math.max(1, ...series.map(s => s.reduce((n, x) => n + x.value, 0)));
   const W = 280, H = 96, gap = 4, bw = (W - gap * (days.length - 1)) / days.length;
   const total = series.reduce((n, s) => n + s.reduce((m, x) => m + x.value, 0), 0);
   return <figure className="dash-chart">
-    <figcaption><strong>{title}</strong><span>Last 14 days</span></figcaption>
-    <svg viewBox={`0 0 ${W} ${H}`} width="100%" height={H} preserveAspectRatio="none" role="img" aria-label={`${title}, last 14 days${total ? '' : ': nothing yet'}`}>
+    <figcaption><strong>{title}</strong><span>{span}</span></figcaption>
+    <svg viewBox={`0 0 ${W} ${H}`} width="100%" height={H} preserveAspectRatio="none" role="img" aria-label={`${title}, ${span.toLowerCase()}${total ? '' : ': nothing yet'}`}>
       <line className="dash-axis" x1={0} x2={W} y1={H - 0.5} y2={H - 0.5}/>
       {days.map((day, i) => { let y = H; const x = i * (bw + gap);
         return <g key={day} className="dash-bar"><title>{`${shortDay(day)}: ${series[i].filter(s => s.value).map(s => `${s.label} ${format(s.value)}`).join(', ') || 'nothing'}`}</title>

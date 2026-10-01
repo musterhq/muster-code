@@ -13,6 +13,8 @@ import { formatTokenCount } from './model-catalog.ts';
 export type PickerModel = ProviderInfo['models'][number] & { providerId: string; provider: string };
 export const ALL_TAB = 'all';
 export const FAVORITES_TAB = 'favorites';
+/** Providers whose list is ordered by the provider itself, newest first: Codex's ChatGPT list and Muster's Claude catalog. */
+const CURATED_ORDER: ReadonlySet<string> = new Set(['openai-direct', 'claude-code']);
 export interface PickerSelection { providerId: string; model: string }
 
 /** A router combo such as `auto/best-coding`: folded under "Auto routes". A bare `auto` stays a normal row. */
@@ -49,7 +51,8 @@ export interface PickerSection<T extends PickerModel = PickerModel> {
 }
 
 /**
- * The sections the list renders for this tab and query. Within a provider: favorites first, then by name.
+ * The sections the list renders for this tab and query. Within a provider: favorites first, then the provider's own order (newest first in Codex's list and Muster's
+ * Claude catalog), so the latest model leads instead of an alphabetical sort burying it.
  * The current model and favorited routes are never folded away under "Auto routes".
  */
 export function pickerSections<T extends PickerModel>(models: readonly T[], providerOrder: readonly { id: string; name: string }[],
@@ -60,7 +63,8 @@ export function pickerSections<T extends PickerModel>(models: readonly T[], prov
   const isSelected = (model: T) => Boolean(selected && selected.providerId === model.providerId && selected.model === model.id);
   const pool = models.filter(model => query ? matchesModelQuery(model, query)
     : tab === ALL_TAB ? true : tab === FAVORITES_TAB ? favorite(model) : model.providerId === tab);
-  const order = (a: T, b: T) => Number(favorite(b)) - Number(favorite(a)) || a.name.localeCompare(b.name);
+  const curated = (model: T) => CURATED_ORDER.has(model.providerId);
+  const order = (a: T, b: T) => Number(favorite(b)) - Number(favorite(a)) || (curated(a) && curated(b) ? 0 : a.name.localeCompare(b.name));
   const sections: PickerSection<T>[] = [];
   for (const provider of providerOrder) {
     const own = pool.filter(model => model.providerId === provider.id);

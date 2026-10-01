@@ -38,14 +38,14 @@ const snapshot={paperclip:null,goals:[],
   tasks:[task('t1','OSS-1','Migration wizard','in_review'),task('t2','OSS-2','Design the wizard','done',{parentId:'t1',assigneeId:'user:local',assigneeLabel:'You'}),task('t3','OSS-3','Docs','blocked',{priority:'high',live:true})],
   agents:[{id:'user:local',name:'You',role:'board',title:'Owner',model:null,adapter:null,source:'local',status:'active',reportsTo:null,lastActiveAt:null,error:null,pausable:false,capabilities:null},
     agent('cto','CTO',{status:'running'}),agent('qa','QA',{reportsTo:'member:cto'}),agent('des','Designer',{status:'pending',pausable:false,title:'Product designer',instructions:'Own the mockups.'})],
-  projects:[{id:'p1',name:'OSSMANAGER',status:'in_progress',description:'',source:'local',repo:'github.com/hybrowlabs/oss-manager',cwd:'/work/oss',taskCount:3,openCount:2,paused:false,memory:null}],
+  projects:[{id:'p1',name:'OSSMANAGER',org:'RagnarDataOps',status:'in_progress',description:'',source:'local',repo:'github.com/hybrowlabs/oss-manager',cwd:'/work/oss',taskCount:3,openCount:2,paused:false,memory:null}],
   runs:[{id:'r1',agentId:'member:cto',taskId:'t3',status:'running',trigger:'user',source:'local',createdAt:ago(3),startedAt:ago(3),finishedAt:null,error:null,cancellable:true,chatId:'c1'},
     {id:'r2',agentId:'member:qa',taskId:'t1',status:'succeeded',trigger:'user',source:'local',createdAt:ago(40),startedAt:ago(40),finishedAt:ago(30),error:null,cancellable:false,chatId:'c2'}],
   inbox:[{id:'hire:p1:des',kind:'approval',title:'Add Designer as Product designer to OSSMANAGER?',why:'',severity:'high',at:now,taskId:null,agentId:'member:des',runId:null,projectId:'p1',group:'OSSMANAGER',source:'local'}],
   counts:{liveRuns:1,inbox:1,failedRuns:0,openTasks:2},fetchedAt:now};
 const days=Array.from({length:14},(_,i)=>new Date(Date.now()-(13-i)*86_400_000).toISOString().slice(0,10));
 const dashboard={days,runs:days.map((day,i)=>({day,succeeded:i===13?2:0,failed:i===13?1:0,other:0})),tasksByDay:days.map((day,i)=>({day,counts:i===13?{in_review:1,blocked:1,done:1}:{}})),
-  spend:{usd:null,pricedTurns:0,unpricedTurns:3,since:now,source:'Muster'},activity:[{id:'a1',actor:'You',summary:'Added CTO as Chief Technology Officer',at:ago(2),projectId:'p1',projectName:'OSSMANAGER',source:'local',refId:null}],generatedAt:now};
+  spend:{usd:null,pricedTurns:0,unpricedTurns:3,since:now,source:'Muster',tokens:4000},activity:[{id:'a1',actor:'You',summary:'Added CTO as Chief Technology Officer',at:ago(2),projectId:'p1',projectName:'OSSMANAGER',source:'local',refId:null}],generatedAt:now};
 const project={id:'p1',name:'OSSMANAGER',goal:'',folderIds:['f1'],primaryFolderId:'f1',archived:false,archivedAt:null};
 const work={tasks:{items:[],truncated:false},decisions:{items:[],truncated:false},activity:{items:[],truncated:false},scheduler:{autoDispatch:false,paused:false,concurrency:2,budgetMinutes:30,permissionMode:'workspace',updatedAt:null},instructions:{version:0,text:'',updatedAt:null},context:{version:1,goalVersion:1,instructionsVersion:0,decisions:0,headSha:null,label:'goal v1'},coordinator:{chatId:null,proposals:[]},dispatching:[]};
 let teamSettings={requireHireApproval:false,keyPrefix:null as string|null,monthlyBudgetUsd:null as number|null};
@@ -67,7 +67,9 @@ const calls:{command:string;input:any}[]=[];
   if(command==='settings.projectModel.get')return {value:null};
   if(command==='mailbox.list')return {messages:[],unacked:0,pending:0};
   if(command==='models.usage.project')return {scope:'project',id:'p1',rows:[],totals:{input:0,cached:0,output:0,reasoning:0},costUsd:null,unpricedTokens:0,incrementalInput:false,updatedAt:null};
-  if(command==='app.snapshot')return {folders:[{id:'f1',name:'redis-automation',path:'/work/oss'}],chats:[],projects:[],version:1};
+  if(command==='app.snapshot')return {folders:[{id:'f1',name:'redis-automation',path:'/work/oss'}],chats:[],projects:[{id:'p1',name:'OSSMANAGER',goal:'',folderIds:['f1']}],version:1};
+  if(command==='project.list')return [project];
+  if(command==='providers.list')return [{id:'hybrow',name:'Hybrow Gateway',available:true,identityMasked:'',models:[{id:'planner',name:'Planner'}]}];
   return undefined;
 }};
 
@@ -92,7 +94,8 @@ const root=createRoot(document.getElementById('root')!,{onUncaughtError:e=>error
 root.render(<ProjectPage snapshot={snapshot as any} projectId="p1" nav={nav} muster={muster as any}/>);
 await delay(150);
 assert.deepEqual(errors,[]);
-assert.deepEqual(text('[role="tab"]'),['Tasks','Roster','Outputs','Settings','Budget']);
+assert.deepEqual(text('[role="tab"]'),['Dashboard','Tasks','Roster','Outputs','Ledger','Budget','Settings']);
+assert.match(text('.pp-imported-note')[0],/Imported copy from RagnarDataOps\. Paperclip changes arrive when you import again; edits here.*stay in Muster/,'an imported project says it is a copy');
 assert.match(text('.pp-sub')[0],/github\.com\/hybrowlabs\/oss-manager.*2 open of 3/);
 // Tasks: a nested list, keys with the project prefix, owners and ages on the right.
 const keys=()=>text('.task-row .ws-key');
@@ -135,6 +138,40 @@ assert.deepEqual(text('.task-col-head span:not(.task-col-count)'),['Backlog','To
 assert.deepEqual(text('.task-col[data-status="in_review"] .task-card .ws-key'),['OSS-1']);
 assert.ok(JSON.parse(storage.get('muster.tasks.view.p1')!).layout==='board','the view is remembered per project');
 await click(button(/^List$/));
+// Every Tasks menu opens without taking the page down (Sort and Group crashed with Base UI error #31: a group label
+// outside its group). Each pick is applied, and the view toggles both ways.
+{
+  const menuItems=(role:string)=>[...document.querySelectorAll(`[role="${role}"]`)];
+  await click(button(/^Sort:/));
+  assert.equal(document.querySelectorAll('[role="menu"]').length,1,'the Sort menu opens');
+  assert.deepEqual(text('[role="menu"] .ui-menu-label'),['Sort by']);
+  assert.equal(menuItems('menuitemradio').length,7);
+  await click(menuItems('menuitemradio').find(i=>/Title/.test(i.textContent!)),80);
+  assert.match(button(/^Sort:/)!.getAttribute('aria-label')!,/Sort: Title/);
+  if(document.querySelector('[role="menu"]'))await click(button(/^Sort:/),80);
+  await click(button(/^Group:/));
+  assert.equal(document.querySelectorAll('[role="menu"]').length,1,'the Group menu opens');
+  assert.deepEqual(text('[role="menu"] .ui-menu-label'),['Group by']);
+  await click(menuItems('menuitemradio').find(i=>/Status/.test(i.textContent!)),80);
+  assert.match(button(/^Group:/)!.getAttribute('aria-label')!,/Group: Status/);
+  assert.ok(document.querySelectorAll('.task-group-head').length>=2,'grouped by status');
+  if(document.querySelector('[role="menu"]'))await click(button(/^Group:/),80);
+  await click(button(/^Group:/));
+  await click(menuItems('menuitemradio').find(i=>/None/.test(i.textContent!)),80);
+  if(document.querySelector('[role="menu"]'))await click(button(/^Group:/),80);
+  await click(button(/^Filter$/));
+  assert.equal(document.querySelectorAll('[role="menu"]').length,1,'the Filter menu opens');
+  await click(button(/^Filter/),80);
+  await click(button(/^Board$/));
+  assert.ok(document.querySelector('.task-col'),'the board view');
+  await click(button(/^Sort:/));
+  assert.equal(document.querySelectorAll('[role="menu"]').length,1,'Sort opens on the board too');
+  await click(button(/^Sort:/),80);
+  await click(button(/^List$/));
+  assert.ok(document.querySelector('.task-row'),'back to the list view');
+  assert.ok(document.querySelector('[role="tab"]'),'the project page is still up');
+  assert.deepEqual(errors,[]);
+}
 
 // --- New task with Assign & start --------------------------------------------------------------------------------------------
 await click(button(/^New task$/));
@@ -154,6 +191,8 @@ assert.deepEqual(calls.filter(c=>c.command==='paperclip.task.create').at(-1)!.in
 await click([...document.querySelectorAll('[role="tab"]')].find(t=>t.textContent==='Roster'));
 assert.deepEqual(text('.roster-row .ws-row-title'),['CTO','Designer','QA'],'real members, working first; no generic "Agents" row');
 assert.ok(text('.roster-row').some(t=>/reports to.*CTO/.test(t)),'QA reports to CTO');
+assert.ok(text('.roster-row .ws-row-meta').some(t=>/Hybrow Gateway · planner/.test(t)),'the runner shows its provider’s name, not its raw id');
+assert.ok(!text('.roster-row .ws-row-meta').some(t=>/\bhybrow\b/.test(t)));
 assert.match(text('.hire-card-head')[0],/Add Designer as Product designer\?/);
 await click(button(/^Approve$/,document.querySelector('.hire-card')!),100);
 assert.deepEqual(calls.find(c=>c.command==='project.members.decide')!.input,{projectId:'p1',id:'des',approve:true});
@@ -172,7 +211,7 @@ assert.ok(document.querySelectorAll('.ws-roster-line').length>=1,'with reporting
 
 // --- Settings: every old section is reachable; approvals toggle ------------------------------------------------------------------
 await click([...document.querySelectorAll('[role="tab"]')].find(t=>t.textContent==='Settings'),150);
-assert.deepEqual(text('.pp-settings-nav button'),['General','Folders','Members','Mail','Chats','Knowledge','Runs & verification','Activity']);
+assert.deepEqual(text('.pp-settings-nav button'),['General','Folders','Members','Mail','Chats','Knowledge','Runs & verification','Run policy','Secrets','Goals','Labels','Feedback','Activity']);
 assert.ok(text('.pp-fields dt').includes('Task keys'));
 assert.equal((document.querySelector('.pp-prefix') as HTMLInputElement).getAttribute('placeholder'),'OSS');
 const approval=document.querySelector('.pp-check input') as HTMLInputElement;
@@ -181,9 +220,14 @@ assert.ok(calls.some(c=>c.command==='project.team.settings.set'&&c.input.require
 assert.ok(text('.pp-danger h3').includes('Danger zone'));
 await click(button(/^Mail$/),100);
 assert.ok(calls.some(c=>c.command==='mailbox.list'&&c.input.projectId==='p1'),'Mail is the project mailbox (renamed from Inbox)');
+assert.equal(text('.mailbox-header h2')[0],'Mail','its heading says Mail too (S68)');
 
-// --- Budget: observed spend is "Unpriced", never $0 ----------------------------------------------------------------------------
+// --- Budget: observed spend is "Unpriced", never $0; a token budget works without prices (S64) --------------------------------
+teamSettings={...teamSettings,monthlyBudgetTokens:5000} as any;
 await click([...document.querySelectorAll('[role="tab"]')].find(t=>t.textContent==='Budget'),150);
+assert.equal(text('.pp-budget-head .ws-chip')[0],'Near budget','4,000 of 5,000 tokens is past the 80% soft alert');
+assert.ok(document.querySelector('.pp-budget .pp-meter'),'the meter shows token use');
+assert.equal((document.getElementById('pp-token-budget-input') as HTMLInputElement).value,'5000');
 assert.deepEqual(calls.filter(c=>c.command==='paperclip.dashboard').at(-1)!.input.projectId,'p1');
 assert.equal(text('.pp-budget-grid .dash-value')[0],'Unpriced');
 assert.ok(!text('.pp-budget').join(' ').includes('$0.00'),'no fake $0');
@@ -209,19 +253,50 @@ root2.unmount();
 // --- Import mapping --------------------------------------------------------------------------------------------------------------------
 const root3=createRoot(document.getElementById('root')!,{onUncaughtError:(e:unknown)=>{(errors as unknown[]).push(e);}});
 let imported=0,changed:[string,string]|null=null;
-root3.render(<ImportMapping plan={{company:{id:'c',name:'RagnarDataOps'},companies:[],muster:[{id:'p1',name:'OSSMANAGER',folders:['/work/oss']}],
-  projects:[{id:'pc1',name:'OSS Manager',repo:'github.com/hybrowlabs/oss-manager',localFolder:'/work/oss',taskCount:16,mappedTo:null,suggestion:{projectId:'p1',reason:'folder'}},{id:'pc2',name:'Muster',repo:null,localFolder:null,taskCount:0,mappedTo:null,suggestion:null}]} as any}
-  targets={{pc1:'p1',pc2:'new'}} busy={false} onChange={(a,b)=>{changed=[a,b];}} onCancel={()=>{}} onImport={()=>{imported++;}}/>);
+root3.render(<ImportMapping plan={{company:{id:'c',name:'RagnarDataOps'},companies:[],local:true,
+  projects:[{id:'pc1',name:'OSS Manager',repo:'github.com/hybrowlabs/oss-manager',localFolder:'/work/oss',taskCount:16,existing:'new'},{id:'pc2',name:'Muster',repo:null,localFolder:null,taskCount:0,existing:'imported'},{id:'pc3',name:'Docs',repo:null,localFolder:null,taskCount:2,existing:'detached'}]} as any}
+  targets={{pc1:'import',pc2:'import',pc3:'import'}} busy={false} onChange={(a,b)=>{changed=[a,b];}} onCancel={()=>{}} onImport={()=>{imported++;}}/>);
 await delay(60);
-assert.deepEqual(text('.ws-import-map .ws-row-title'),['OSS Manager','Muster']);
-assert.deepEqual(text('.ws-import-map .ws-chip'),['Matched: same folder']);
-assert.deepEqual([...(document.querySelector('.ws-import-map select') as HTMLSelectElement).options].map(o=>o.textContent),['Fill OSSMANAGER','New project','Don’t import']);
+assert.deepEqual(text('.ws-import-map .ws-row-title'),['OSS Manager','Muster','Docs']);
+assert.equal(text('.ws-import-map .ws-chip').length,0,'nothing is matched to your own projects');
+assert.match(text('.ws-import-map .ws-row-meta')[0],/new project/);assert.match(text('.ws-import-map .ws-row-meta')[1],/updated in place/);assert.match(text('.ws-import-map .ws-row-meta')[2],/your own project is left alone/);
+assert.deepEqual([...(document.querySelector('.ws-import-map select') as HTMLSelectElement).options].map(o=>o.textContent),['Import','Don’t import']);
+assert.deepEqual([...document.querySelectorAll('.ws-import-map select')[1].querySelectorAll('option')].map(o=>o.textContent),['Update','Don’t import']);
 await setValue(document.querySelectorAll('.ws-import-map select')[1],'skip');
 assert.deepEqual(changed,['pc2','skip']);
-await click(button(/^Import 2 projects$/));
+await click(button(/^Import 3 projects$/));
 assert.equal(imported,1);
 root3.unmount();
+{
+  // An earlier import's project that cannot be told from yours by its records: the plan asks, and Import waits for the answer.
+  const rootAsk=createRoot(document.getElementById('root')!,{onUncaughtError:(e:unknown)=>{(errors as unknown[]).push(e);}});
+  const owner:string[]=[];
+  rootAsk.render(<ImportMapping plan={{company:{id:'c',name:'RagnarDataOps'},companies:[],local:true,projects:[{id:'pc9',name:'Old import',repo:null,localFolder:null,taskCount:1,existing:'ask',added:{tasks:3,members:0,chats:5}},{id:'pc8',name:'Other old import',repo:null,localFolder:null,taskCount:1,existing:'ask'}]} as any} targets={{pc9:'import',pc8:'import'}} owners={{}} onOwner={(id,v)=>owner.push(`${id}:${v}`)} busy={false} onChange={()=>{}} onCancel={()=>{}} onImport={()=>{}}/>);
+  await delay(60);
+  assert.match(text('.ws-import-map .ws-row-meta')[0],/you added 3 tasks and 5 chats: probably yours/,'what you added is shown');
+  assert.deepEqual([...document.querySelector('.ws-import-map select[id^="import-owner"]')!.querySelectorAll('option')].map(o=>o.textContent),['Whose is it?','Mine','Made by the import']);
+  assert.equal((button(/^Import 2 projects$/) as HTMLButtonElement).disabled,true,'no import until each is answered');
+  await setValue(document.querySelector('.ws-import-map select[aria-label="Same answer for all"]')!,'mine');
+  assert.deepEqual(owner,['pc9:mine','pc8:mine'],'one answer for all');
+  rootAsk.unmount();
+}
 
+// S44: "Open project" from the sidebar lands on the project the first time, even when React discards a first render.
+{
+  const {StrictMode,Suspense,lazy}=await import('react');
+  // A lazy sibling still loading: React throws the first render of the screen away, as a lazy chunk does in the app.
+  const Lazy=lazy(()=>new Promise<{default:()=>null}>(r=>setTimeout(()=>r({default:()=>null}),30)));
+  const {ProjectsScreen}=await import('../src/renderer/components/ProjectsScreen');
+  const {openProject}=await import('../src/renderer/projectFocus');
+  await (await import('../src/renderer/store')).boot();
+  openProject('p1');
+  const root4=createRoot(document.getElementById('root')!,{onUncaughtError:(e:unknown)=>{(errors as unknown[]).push(e);}});
+  root4.render(<StrictMode><Suspense fallback={null}><Lazy/><ProjectsScreen onBack={()=>{}} onStartChat={()=>{}}/></Suspense></StrictMode>);
+  for(let i=0;i<40&&!document.querySelector('.project-screen');i++)await delay(50);
+  await delay(150);
+  assert.match(text('.ws-crumb')[0]??'',/OSSMANAGER/,'the first open shows the project, not the list');
+  root4.unmount();
+}
 assert.deepEqual(errors,[]);
 assert.equal(intervals,0,'no intervals anywhere');
 console.log('projects-parity-components: ok');

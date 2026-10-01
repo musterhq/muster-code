@@ -72,7 +72,7 @@ export function HubScreen(): React.ReactElement {
         {task ? <><TaskStatusIcon status={task.status} size={13}/><strong>{task.title}</strong><span className="ws-key">{task.key}</span></>
           : agent ? <strong>{agent.name}</strong> : route.page === 'project' ? <strong>{snapshot?.projects.find(p => p.id === route.arg)?.name ?? NAMES.projects}</strong> : <strong>{TITLE[route.page]}</strong>}
       </span>
-      {snapshot?.paperclip && <span className="ws-topbar-origin" title={snapshot.paperclip.stale ?? undefined}><span className="ws-conn-dot" data-live={snapshot.paperclip.live} data-stale={snapshot.paperclip.stale ? 'true' : undefined} aria-hidden="true"/>{NAMES.paperclip} · {snapshot.paperclip.company?.name ?? snapshot.paperclip.origin}{snapshot.paperclip.stale ? ' · offline' : ''}</span>}
+      {snapshot?.paperclip && <span className="ws-topbar-origin" title={snapshot.paperclip.stale ?? (snapshot.paperclip.live === 'poll' ? 'This Paperclip does not push live events to board keys, so Muster checks it every 15 seconds while this screen is open.' : undefined)}><span className="ws-conn-dot" data-live={snapshot.paperclip.live} data-stale={snapshot.paperclip.stale ? 'true' : undefined} aria-hidden="true"/>{NAMES.paperclip} · {snapshot.paperclip.company?.name ?? snapshot.paperclip.origin}{snapshot.paperclip.stale ? ' · offline' : snapshot.paperclip.live === 'poll' ? ' · updates every 15 s' : ''}</span>}
     </header>
     <div className="ws-main">{body}</div>
   </section>;

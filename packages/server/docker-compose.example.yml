@@ -1,0 +1,33 @@
+# Muster Server behind Caddy with automatic HTTPS. Copy to docker-compose.yml, set your domain, then:
+#   echo 'a-long-owner-password' > owner-password.txt && docker compose up -d && rm owner-password.txt
+# Build the image first from the repository root:  docker build -f packages/server/Dockerfile -t muster-server .
+services:
+  muster:
+    image: muster-server
+    restart: unless-stopped
+    environment:
+      MUSTER_SERVER_OWNER: admin
+      MUSTER_SERVER_OWNER_PASSWORD_FILE: /run/secrets/owner_password   # read once, on the first start only
+      MUSTER_SERVER_ALLOWED_HOSTS: muster.example.com,localhost
+      MUSTER_SERVER_PUBLIC_URL: https://muster.example.com              # used in invite links and webhooks
+      MUSTER_SERVER_TRUST_PROXY: "1"                                     # Caddy terminates TLS and sets X-Forwarded-*
+    secrets: [owner_password]
+    volumes:
+      - muster-data:/data          # database, secret key, runtime state: back this up
+    expose: ["7470"]                # reachable only through Caddy
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports: ["80:80", "443:443"]
+    command: caddy reverse-proxy --from muster.example.com --to muster:7470
+    volumes:
+      - caddy-data:/data
+
+secrets:
+  owner_password:
+    file: ./owner-password.txt
+
+volumes:
+  muster-data:
+  caddy-data:

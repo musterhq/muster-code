@@ -81,6 +81,9 @@ function chatEntries(db: DatabaseSync, chat: ChatRow, tables: { receipts: boolea
     FROM timeline WHERE chat_id = ? ORDER BY seq LIMIT ?`).all(chat.id, MAX_ITEMS_PER_CHAT) as unknown as ItemRow[];
   const turns = splitTurns(items);
   if (!turns.length) return [];
+  // A task run's chat was made by Start after the Ledger existed: every turn in it is a live Receipt already (its runs
+  // are dispatched, not sent, so no send receipt links them). Importing it again would add each turn twice.
+  if (db.prepare("SELECT 1 FROM turn_ledger WHERE chat_id = ? AND json_extract(body, '$.trigger') = 'task' LIMIT 1").get(chat.id)) return [];
   // Turns the live ledger already has (matched through the send receipt's run id) are not imported again.
   const live = new Set((db.prepare('SELECT run_id FROM turn_ledger WHERE chat_id = ?').all(chat.id) as { run_id: string }[]).map(r => r.run_id));
   const receipts = tables.receipts ? (db.prepare('SELECT run_id, created_at FROM receipts WHERE chat_id = ? ORDER BY created_at, rowid').all(chat.id) as { run_id: string; created_at: string }[]) : [];

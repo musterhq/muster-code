@@ -6,9 +6,10 @@ import {mkdtemp,readFile,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {test,type TestContext} from 'node:test';
-import {createPaperclipDomain,rankMemories,PAPERCLIP_SECRET_ID} from '../src/runtime/domains/paperclip.ts';
+import {createPaperclipDomain,isLoopback,rankMemories,PAPERCLIP_SECRET_ID} from '../src/runtime/domains/paperclip.ts';
 import {normalizeBaseUrl} from '../src/runtime/paperclip-client.ts';
-import {buildInbox,mapAttention,mapIssue,mapRoutine} from '../src/runtime/paperclip-map.ts';
+import {SqliteImportStore} from '../src/runtime/paperclip-import.ts';
+import {buildInbox,mapAttention,mapInteraction,mapIssue,mapRoutine} from '../src/runtime/paperclip-map.ts';
 import type {DomainContext} from '../src/runtime/domains/types.ts';
 import type {SocketFactory} from '../src/runtime/paperclip-client.ts';
 
@@ -38,7 +39,7 @@ function paperclip(){
     '/api/health':()=>({status:'ok',version:'2026.916.1',deploymentMode:'authenticated'}),
     '/api/companies':()=>[{id:COMPANY,name:'RagnarDataOps',issuePrefix:'RAG',status:'active'}],
     [`/api/companies/${COMPANY}/issues`]:()=>issues,[`/api/companies/${COMPANY}/agents`]:()=>agents,[`/api/companies/${COMPANY}/projects`]:()=>projects,
-    [`/api/companies/${COMPANY}/goals`]:()=>[],[`/api/companies/${COMPANY}/heartbeat-runs`]:()=>runs,[`/api/companies/${COMPANY}/live-runs`]:()=>[],
+    [`/api/companies/${COMPANY}/goals`]:()=>[],[`/api/companies/${COMPANY}/approvals`]:()=>[],[`/api/companies/${COMPANY}/labels`]:()=>[],[`/api/companies/${COMPANY}/heartbeat-runs`]:()=>runs,[`/api/companies/${COMPANY}/live-runs`]:()=>[],
     [`/api/companies/${COMPANY}/attention`]:()=>attention,'/api/issues/RAG-12':()=>issues[0],'/api/issues/RAG-12/comments':()=>comments,'/api/issues/RAG-12/runs':()=>[runs[0]],
     [`/api/companies/${COMPANY}/routines`]:()=>[{id:'rt',title:'Nightly triage',status:'active',projectId:'p-oss',concurrencyPolicy:'always_enqueue',catchUpPolicy:'skip_missed',triggers:[{kind:'schedule',enabled:true,cronExpression:'0 9 * * 1-5',timezone:'UTC',nextRunAt:'2026-09-30T09:00:00.000Z'}],lastRun:{status:'failed',createdAt:now}}],
   };
@@ -68,7 +69,7 @@ async function harness(t:TestContext,options:{socket?:SocketFactory;invoke?:(com
   const domain=createPaperclipDomain(context,{fetch:(options.fetch??server.fetch) as never,secrets:()=>secrets.store as never,timers,socket:options.socket??(()=>{throw new Error('no socket');}),remoteOf:async path=>path.endsWith('oss')?'git@github.com:hybrowlabs/OSS-Manager.git':undefined});
   t.after(()=>domain.dispose?.());
   const call=(command:string,input:Record<string,unknown>={})=>Promise.resolve(domain.handlers[command]!(input)) as Promise<any>;
-  return {dataDir,server,secrets,timers,events,invoked,call};
+  return {dataDir,server,secrets,timers,events,invoked,call,memory};
 }
 
 test('a custom deployment sends its board token as a Bearer header; the token lives in the secret store, never in the config file',async t=>{
@@ -170,6 +171,27 @@ test('the thread renders comments (deleted ones hidden) and the composer address
   await assert.rejects(()=>h.call('paperclip.comment',{taskId:'../../x',body:'x'}),/Unknown item/);
 });
 
+test('Resume all wakes only the Paperclip agents Pause all paused, never one you had paused on purpose',async t=>{
+  const saved=agents.map(a=>({...a}));t.after(()=>{agents.forEach((a,i)=>Object.assign(a,saved[i]));});
+  const server=paperclip();
+  // Paperclip's agents really change status on pause/resume, and its ETags move with them.
+  const fetch=async(input:string,init:RequestInit={})=>{
+    const m=/\/api\/agents\/([^/]+)\/(pause|resume)$/.exec(new URL(input).pathname);
+    if(m&&init.method==='POST'){const a=agents.find(x=>x.id===m[1]);if(a)a.status=m[2]==='pause'?'paused':'idle';server.bump();}
+    return server.fetch(input,init);
+  };
+  const h=await harness(t,{fetch});
+  await h.call('paperclip.config.set',{mode:'local'});
+  await h.call('paperclip.snapshot');
+  assert.equal(agents.find(a=>a.id==='a-old')!.status,'paused','Old was paused before Pause all');
+  assert.deepEqual(await h.call('paperclip.pauseAll',{source:'paperclip'}),{changed:3});
+  assert.ok(agents.every(a=>a.status==='paused'));
+  assert.deepEqual(await h.call('paperclip.resumeAll',{source:'paperclip'}),{changed:3});
+  const resumed=server.calls.filter(c=>c.method==='POST'&&c.url.endsWith('/resume')).map(c=>c.url);
+  assert.deepEqual(resumed.sort(),['/api/agents/a-ceo/resume','/api/agents/a-cto/resume','/api/agents/a-qa/resume']);
+  assert.equal(agents.find(a=>a.id==='a-old')!.status,'paused','the agent paused on purpose stays paused');
+});
+
 test('live updates cost nothing while hidden: a refused socket polls only while visible, and hiding clears every timer',async t=>{
   const h=await harness(t);
   await h.call('paperclip.config.set',{mode:'local'});
@@ -198,13 +220,37 @@ test('socket events are filtered and coalesced; run-log noise never wakes the re
   assert.equal(h.timers.live.size,0,'log frames are dropped');
   sockets[0].onmessage({data:JSON.stringify({type:'heartbeat.run.status',payload:{issueId:'i-12'}})});
   sockets[0].onmessage({data:JSON.stringify({type:'activity.logged',payload:{entityType:'issue',entityId:'i-4'}})});
-  assert.equal(h.timers.live.size,1,'two events, one pending emit');
-  assert.equal([...h.timers.live.values()][0].ms,1000);
+  assert.deepEqual([...h.timers.live.values()].map(x=>x.ms).sort((a,b)=>a-b),[1000,2400],'two events: one pending emit, and one settle read for Paperclip’s 2 s list cache');
   await h.timers.fire();
   assert.equal(h.events.length,1);
   assert.deepEqual(h.events[0].taskIds.sort(),['i-12','i-4']);
+  await h.timers.fire();
+  assert.deepEqual(h.events[1].scopes.sort(),['inbox','tasks'],'then the settle re-read tells the screens once more');
+  h.events.length=0;h.timers.live.clear();
   sockets[0].onclose();
-  assert.equal(h.timers.live.size,1,'socket down while visible: fall back to a poll');
+  assert.deepEqual([...h.timers.live.values()].map(x=>x.ms).sort((a,b)=>a-b),[1000,15000],'socket down while visible: tell the screens, and fall back to a poll');
+  const poll=[...h.timers.live.entries()].find(([,x])=>x.ms===15000)!;h.timers.live.delete(poll[0]);
+  await h.timers.fire();
+  assert.deepEqual(h.events.map(e=>e.scopes),[['config']],'the socket dropping is announced at once');
+});
+
+test('going offline and coming back are announced at once, without a reload (S8)',async t=>{
+  let down=false;const server=paperclip();
+  const h=await harness(t,{fetch:async(input,init)=>{if(down)throw new TypeError('fetch failed');return server.fetch(input,init);}});
+  await h.call('paperclip.config.set',{mode:'local'});
+  await h.call('paperclip.snapshot');
+  await h.timers.fire();h.events.length=0;
+  down=true;
+  assert.ok((await h.call('paperclip.snapshot',{refresh:true})).paperclip.stale);
+  await h.timers.fire();
+  assert.equal(h.events.length,1,'ok → stale emits');assert.ok(h.events[0].scopes.includes('config'));
+  await h.call('paperclip.snapshot',{refresh:true});
+  await h.timers.fire();
+  assert.equal(h.events.length,1,'still offline: nothing new to say');
+  down=false;
+  assert.equal((await h.call('paperclip.snapshot',{refresh:true})).paperclip.stale,undefined);
+  await h.timers.fire();
+  assert.equal(h.events.length,2,'stale → ok emits');assert.ok(h.events[1].scopes.includes('config'));
 });
 
 test('Paperclip routines map onto the automation model',()=>{
@@ -243,7 +289,7 @@ test('local source: Muster Projects become tasks, agents and an inbox; writes go
   assert.deepEqual(h.invoked.find(c=>c.command==='mailbox.send')!.input,{to:{kind:'taskRun',id:'1',projectId:'p1'},body:'Use Postgres'});
   await h.call('paperclip.task.update',{taskId:'2',status:'blocked'});
   assert.deepEqual(h.invoked.find(c=>c.command==='project.tasks.setState')!.input,{projectId:'p1',id:'2',revision:3,state:'blocked'});
-  await assert.rejects(()=>h.call('paperclip.task.update',{taskId:'2',status:'done'}),/verifying/);
+  await assert.rejects(()=>h.call('paperclip.task.update',{taskId:'2',status:'done'}),/Move it to In Review first/);
   await h.call('paperclip.pauseAll',{source:'local'});
   assert.deepEqual(h.invoked.find(c=>c.command==='project.scheduler.set')!.input,{projectId:'p1',paused:true});
   await h.call('paperclip.run.cancel',{id:'at1'});
@@ -292,6 +338,25 @@ test('turn ledger: entries chain by hash, verify catches an edited entry, and fi
   assert.equal(await filesChanged(repo,null),null,'no baseline, no file claims');
 });
 
+test('turn ledger: a fresh database has the baselines table, and a files error never drops the Receipt (S42)',async t=>{
+  const {DatabaseSync}=await import('node:sqlite');
+  const {TurnLedger,attachTurnLedger}=await import('../src/runtime/turn-ledger.ts');
+  const db=new DatabaseSync(':memory:');t.after(()=>db.close());
+  const ledger=new TurnLedger(db),appended:any[]=[],hooks:any={};
+  assert.ok(db.prepare("SELECT name FROM sqlite_master WHERE name='review_baselines'").get(),'created with the ledger, before any capture');
+  const context={db:()=>db,hooks:{onRunStarted:(fn:any)=>{hooks.start=fn;return()=>{};},onRunSettled:(fn:any)=>{hooks.settle=fn;return()=>{};},onProviderEvent:(fn:any)=>{hooks.event=fn;return()=>{};}}} as unknown as DomainContext;
+  const off=attachTurnLedger(context,()=>ledger,e=>appended.push(e));t.after(off);
+  // A 0 ms project turn with no baseline captured yet: the Receipt is kept, with no file list.
+  await hooks.start({chat:{id:'c1',title:'Run',projectId:'p1'},runId:'r0',cwd:'/nonexistent'});
+  await hooks.settle({chat:{id:'c1',title:'Run',projectId:'p1'},runId:'r0',status:'completed'});
+  // Even if the table is gone, the entry is still written.
+  db.exec('DROP TABLE review_baselines');
+  await hooks.start({chat:{id:'c1',title:'Run',projectId:'p1'},runId:'r1',cwd:'/nonexistent'});
+  await hooks.settle({chat:{id:'c1',title:'Run',projectId:'p1'},runId:'r1',status:'completed'});
+  assert.deepEqual(appended.map(e=>`${e.runId}:${e.files}`),['r0:null','r1:null']);
+  assert.equal(ledger.verify().entries,2);
+});
+
 test('turn ledger: only project and task runs diff the tree; everyday chats pay nothing new',async t=>{
   const {DatabaseSync}=await import('node:sqlite');
   const {TurnLedger,attachTurnLedger}=await import('../src/runtime/turn-ledger.ts');
@@ -300,7 +365,6 @@ test('turn ledger: only project and task runs diff the tree; everyday chats pay 
   const repo=await mkdtemp(join(tmpdir(),'muster-ledger-'));t.after(()=>rm(repo,{recursive:true,force:true}));
   execFileSync('git',['init','-q'],{cwd:repo});await writeFile(join(repo,'a.txt'),'one\n');
   const db=new DatabaseSync(':memory:');t.after(()=>db.close());
-  db.exec('CREATE TABLE review_baselines (run_id TEXT PRIMARY KEY, chat_id TEXT NOT NULL, folder_id TEXT, tree_sha TEXT, created_at TEXT NOT NULL, reason TEXT)');
   const ledger=new TurnLedger(db),appended:any[]=[];
   const hooks:any={};
   const context={db:()=>db,hooks:{onRunStarted:(fn:any)=>{hooks.start=fn;return()=>{};},onRunSettled:(fn:any)=>{hooks.settle=fn;return()=>{};},onProviderEvent:(fn:any)=>{hooks.event=fn;return()=>{};}}} as unknown as DomainContext;
@@ -368,6 +432,11 @@ test('one snapshot merges Muster and the linked Paperclip; writes route to which
   assert.deepEqual(h.server.calls.filter(c=>c.method==='POST').map(c=>c.url),['/api/issues/RAG-12/comments'],'the Paperclip task goes to Paperclip, and only it');
   const badge=await h.call('paperclip.badge');
   assert.equal(badge.connected,true);assert.equal(badge.inbox,4,'blocked, question, agent error and the failed run; reviews and mail never badge');
+  // S34: once RAG-4 is imported, its Muster copy stands for it; the linked Paperclip rows are not listed or badged again.
+  new SqliteImportStore(h.memory as never).setMap('task','i-4','lt1','RAG-4',{});
+  const after=await h.call('paperclip.snapshot');
+  assert.deepEqual(after.inbox.filter((i:any)=>i.source==='paperclip'&&i.taskId==='i-4'),[],'no duplicate rows for an imported task');
+  assert.equal((await h.call('paperclip.badge')).inbox,2,'the blocked row and the failed run on RAG-4 no longer count twice');
 });
 
 test('the Inbox badge is a light read: it never browses project memory; the full snapshot still counts it',async t=>{
@@ -392,6 +461,39 @@ test('a Paperclip confirmation is answered from Muster: accept, or reject with a
   await h.call('paperclip.interaction.respond',{taskId:'RAG-1',interactionId:'int-1',accept:true});
   await h.call('paperclip.interaction.respond',{taskId:'RAG-1',interactionId:'int-2',accept:false,reason:'Keep the old flow'});
   assert.deepEqual(h.server.calls.filter(c=>c.method==='POST').map(c=>`${c.url} ${JSON.stringify(c.body)}`),['/api/issues/RAG-1/interactions/int-1/accept {}','/api/issues/RAG-1/interactions/int-2/reject {"reason":"Keep the old flow"}']);
+});
+
+test('the linked view reads Paperclip blockers from blockedBy[].id and asks for them (S22)',async t=>{
+  const issue={id:'i-5',identifier:'RAG-5',title:'x',status:'blocked',blockedBy:[{id:'i-4',identifier:'RAG-4',title:'Docs',status:'blocked'},{id:'i-3'}]};
+  assert.deepEqual(mapIssue(issue as any,new Map(),new Set()).blockedByIds,['i-4','i-3']);
+  assert.deepEqual(mapIssue({...issue,blockedBy:undefined,blockedByIssueIds:['i-9']} as any,new Map(),new Set()).blockedByIds,['i-9'],'older payloads still work');
+  const h=await harness(t);
+  await h.call('paperclip.config.set',{mode:'local'});
+  await h.call('paperclip.snapshot');
+  assert.ok(h.server.calls.some(c=>/\/issues\?.*includeBlockedBy=true/.test(c.url)),'the snapshot asks Paperclip for blockers');
+});
+
+test('a Custom URL on loopback is a Paperclip on this Mac (its folders are linked on import); other hosts are remote (S79)',()=>{
+  for(const url of ['http://127.0.0.1:3101','http://localhost:3100','http://[::1]:3100','http://127.1.2.3'])assert.equal(isLoopback(url),true,url);
+  for(const url of ['https://pc.example.com','http://10.0.0.5:3100','http://localhost.evil.com','not a url'])assert.equal(isLoopback(url),false,url);
+});
+
+test('a Paperclip question set (ask_user_questions) is answerable in place through its respond endpoint (S13)',async t=>{
+  const pending={id:'int-q',kind:'ask_user_questions',status:'pending',createdAt:now,createdByAgentId:'a-cto',payload:{version:1,submitLabel:'Send',questions:[
+    {id:'scope',prompt:'Which scope?',selectionMode:'single',allowOther:true,options:[{id:'mig',label:'Migration only'},{id:'all',label:'Everything'}]},
+    {id:'envs',prompt:'Which environments?',selectionMode:'multi',options:[{id:'dev',label:'Dev'},{id:'prod',label:'Prod'}]}]}};
+  const card=mapInteraction(pending as any,new Map([['a-cto',{name:'CTO'} as any]])) as any;
+  assert.equal(card.interactionId,'int-q','answerable, not display-only');
+  assert.equal(card.from,'CTO');assert.equal(card.submitLabel,'Send');
+  assert.deepEqual(card.questions.map((q:any)=>`${q.id}:${q.multi}:${q.allowOther}:${q.options.map((o:any)=>o.id).join('/')}`),['scope:false:true:mig/all','envs:true:false:dev/prod']);
+  assert.equal((mapInteraction({...pending,status:'answered'} as any,new Map()) as any).questions,undefined,'an answered set is history');
+  const h=await harness(t);
+  await h.call('paperclip.config.set',{mode:'local'});
+  await h.call('paperclip.snapshot');
+  assert.equal(h.server.calls.filter(c=>c.method!=='GET').length,0,'nothing is written until you answer');
+  await h.call('paperclip.interaction.respond',{taskId:'RAG-12',interactionId:'int-q',accept:true,answers:[{questionId:'scope',optionIds:[],otherText:'Only the wizard'},{questionId:'envs',optionIds:['dev','prod']}]});
+  assert.deepEqual(h.server.calls.filter(c=>c.method==='POST').map(c=>`${c.url} ${JSON.stringify(c.body)}`),['/api/issues/RAG-12/interactions/int-q/respond {"answers":[{"questionId":"scope","optionIds":[],"otherText":"Only the wizard"},{"questionId":"envs","optionIds":["dev","prod"]}]}']);
+  await assert.rejects(()=>h.call('paperclip.interaction.respond',{taskId:'RAG-12',interactionId:'int-q',accept:true,answers:[{questionId:'scope',optionIds:[]}]}),/Answer every question/);
 });
 
 test('inbox dismissals persist by item id and time; a dismissed Paperclip or project item leaves the runtime badge until it changes',async t=>{
@@ -422,4 +524,162 @@ test('the Ledger imports history in the background after the first badge read, a
   assert.deepEqual(result,{chats:0,turns:0},'no chat tables in this bare database: nothing to import, nothing fails');
   const view=await h.call('paperclip.ledger',{limit:10});
   assert.deepEqual(view.chain,{ok:true,entries:0,head:'0'.repeat(64),brokenAt:null});
+});
+
+test('A3: a URL that answers with a web page is reported as "not a Paperclip API", never a JSON parse error',async t=>{
+  const html=async()=>new Response('<!DOCTYPE html><html><body>Welcome to nginx</body></html>',{status:200,headers:{'content-type':'text/html'}});
+  const h=await harness(t,{fetch:html});
+  const result=await h.call('paperclip.test',{mode:'custom',baseUrl:'https://pc.example.com/nope'});
+  assert.equal(result.ok,false);assert.equal(result.stage,'service');
+  assert.match(result.message,/isn’t a Paperclip API/);assert.doesNotMatch(result.message,/Unexpected token|<!DOCTYPE|is not valid/);
+  const notFound=await harness(t,{fetch:async()=>new Response('<html>404</html>',{status:404})});
+  const missing=await notFound.call('paperclip.test',{mode:'custom',baseUrl:'https://pc.example.com'});
+  assert.match(missing.message,/answered 404/);assert.doesNotMatch(missing.message,/<html/);
+});
+
+test('A4: a token that would travel over plain http to another machine is warned about; https and loopback are not',async t=>{
+  const h=await harness(t);
+  const plain=await h.call('paperclip.test',{mode:'custom',baseUrl:'http://paperclip.example.com',token:'pcp_x'});
+  assert.match(plain.warning,/plain http/);assert.match(plain.warning,/Your API token/);
+  assert.equal((await h.call('paperclip.test',{mode:'custom',baseUrl:'https://paperclip.example.com',token:'pcp_x'})).warning,undefined);
+  for(const url of ['http://127.0.0.1:3100','http://localhost:3100','http://[::1]:3100'])assert.equal((await h.call('paperclip.test',{mode:'custom',baseUrl:url,token:'pcp_x'})).warning,undefined,url);
+  assert.equal((await h.call('paperclip.test',{mode:'local'})).warning,undefined);
+});
+
+test('D4/D5: priority and assignee changes are forwarded to Paperclip as exactly the fields you changed (user-initiated)',async t=>{
+  const h=await harness(t);
+  await h.call('paperclip.config.set',{mode:'local'});
+  await h.call('paperclip.task.update',{taskId:'RAG-12',priority:'low'});
+  await h.call('paperclip.task.update',{taskId:'RAG-12',assigneeId:'a-qa'});
+  await h.call('paperclip.task.update',{taskId:'RAG-12',assigneeId:null});
+  await h.call('paperclip.task.update',{taskId:'RAG-12',assigneeId:'user:local',status:'todo',priority:'critical'});
+  assert.deepEqual(h.server.calls.filter(c=>c.method!=='GET').map(c=>`${c.method} ${c.url} ${JSON.stringify(c.body)}`),[
+    'PATCH /api/issues/RAG-12 {"priority":"low"}','PATCH /api/issues/RAG-12 {"assigneeAgentId":"a-qa"}','PATCH /api/issues/RAG-12 {"assigneeAgentId":null}',
+    'PATCH /api/issues/RAG-12 {"status":"todo","priority":"critical","assigneeAgentId":null}',
+  ]);
+  await assert.rejects(()=>h.call('paperclip.task.update',{taskId:'RAG-12',priority:'urgent'}),/Unknown priority/);
+  await assert.rejects(()=>h.call('paperclip.task.update',{taskId:'RAG-12',assigneeId:'../x'}),/Unknown item/);
+  await assert.rejects(()=>h.call('paperclip.task.update',{taskId:'RAG-12'}),/Nothing to change/);
+});
+
+test('F: a reply that is cut off or not JSON becomes a plain sentence, and the last good copy stays',async t=>{
+  let broken=false;
+  const server=paperclip();
+  const h=await harness(t,{fetch:async(input,init)=>{if(broken&&new URL(input).pathname.endsWith('/issues'))return new Response('[{\"id\":\"i-1\",',{status:200});return server.fetch(input,init);}});
+  await h.call('paperclip.config.set',{mode:'local'});
+  assert.ok((await h.call('paperclip.snapshot')).tasks.length>0);
+  broken=true;h.server.bump();
+  const snap=await h.call('paperclip.snapshot',{refresh:true});
+  assert.match(snap.paperclip.stale,/could not read/);assert.doesNotMatch(snap.paperclip.stale,/Unexpected|JSON input/);
+  assert.equal(snap.paperclip.cached,true);assert.ok(snap.tasks.length>0,'the last good copy stays');
+});
+
+test('D16: a task created in a Paperclip project carries its labels, goal and blockers; priority, parent and owner as before',async t=>{
+  const h=await harness(t);
+  await h.call('paperclip.config.set',{mode:'local'});
+  await h.call('paperclip.snapshot');
+  await h.call('paperclip.task.create',{title:'New',description:'d',projectId:'p-oss',assigneeId:'a-cto',priority:'high',parentId:'i-11',labelIds:['l-bug','l-bug','l-infra'],goalId:'g-1',blockedByIds:['i-4']});
+  const post=h.server.calls.find(c=>c.method==='POST'&&/\/issues$/.test(c.url))!;
+  assert.deepEqual(post.body,{title:'New',status:'todo',description:'d',projectId:'p-oss',priority:'high',parentId:'i-11',assigneeAgentId:'a-cto',labelIds:['l-bug','l-infra'],goalId:'g-1',blockedByIssueIds:['i-4']});
+  await assert.rejects(()=>h.call('paperclip.task.create',{title:'x',description:'',projectId:'p-oss',assigneeId:null,labelIds:['../x']}),/Unknown item/);
+});
+
+const approvalRows=[{id:'ap-hire',type:'hire_agent',status:'pending',requestedByAgentId:'a-cto',payload:{name:'Nova',title:'Data Engineer',role:'engineer',agentId:'a-nova',adapterType:'process'},createdAt:now},
+  {id:'ap-strategy',type:'approve_ceo_strategy',status:'pending',requestedByUserId:'local-board',payload:{title:'FY strategy',plan:'Prioritize uptime'},createdAt:now},{id:'ap-old',type:'hire_agent',status:'approved',payload:{name:'Old'},createdAt:now}];
+function withApprovals(){const server=paperclip();return async(input:string,init:RequestInit={})=>{const url=new URL(input);if(url.pathname===`/api/companies/${COMPANY}/approvals`)return new Response(JSON.stringify(approvalRows),{status:200,headers:{'content-type':'application/json'}});
+  if(init.method==='POST'&&/^\/api\/approvals\//.test(url.pathname))return new Response(JSON.stringify({ok:true}),{status:200});
+  return server.fetch(input,init);};}
+
+test('D9: pending approvals are in the snapshot and decided only by you, through Paperclip’s approval endpoints',async t=>{
+  const calls:{method:string;url:string;body?:unknown}[]=[];const base=withApprovals();
+  const h=await harness(t,{fetch:async(input,init)=>{calls.push({method:init?.method??'GET',url:new URL(input).pathname,body:init?.body?JSON.parse(String(init.body)):undefined});return base(input,init);}});
+  await h.call('paperclip.config.set',{mode:'local'});
+  const snap=await h.call('paperclip.snapshot');
+  assert.deepEqual(snap.approvals.map((a:any)=>[a.id,a.title,a.requestedBy]),[['ap-hire','Hire Nova as Data Engineer','CTO'],['ap-strategy','FY strategy','You']],'only the pending ones, with their requester');
+  assert.equal(calls.filter(c=>c.method==='POST').length,0,'nothing is decided by reading');
+  await h.call('paperclip.approval.decide',{id:'ap-hire',decision:'approve'});
+  await h.call('paperclip.approval.decide',{id:'ap-strategy',decision:'reject',note:'Not now'});
+  await h.call('paperclip.approval.decide',{id:'ap-strategy',decision:'request_revision',note:'Add a budget'});
+  assert.deepEqual(calls.filter(c=>c.method==='POST').map(c=>`${c.url} ${JSON.stringify(c.body)}`),['/api/approvals/ap-hire/approve {"decisionNote":null}','/api/approvals/ap-strategy/reject {"decisionNote":"Not now"}','/api/approvals/ap-strategy/request-revision {"decisionNote":"Add a budget"}']);
+  await assert.rejects(()=>h.call('paperclip.approval.decide',{id:'ap-strategy',decision:'request_revision'}),/Say what should change/);
+  await assert.rejects(()=>h.call('paperclip.approval.decide',{id:'ap-strategy',decision:'delete'}),/Unknown decision/);
+  await assert.rejects(()=>h.call('paperclip.approval.decide',{id:'../x',decision:'approve'}),/Unknown item/);
+});
+
+test('D9: the Inbox row of an approval carries its id and the decisions Paperclip offers; an approval on a task is a card with actions',async t=>{
+  const attention={items:[{id:'att-ap',sourceKind:'approval',subject:{kind:'approval',id:'ap-hire',title:'Data Engineer'},decisionVerbs:[{id:'approve'},{id:'reject'}],whyNow:'x',severity:'high',activityAt:now}]};
+  const base=withApprovals();
+  const h=await harness(t,{fetch:async(input,init)=>new URL(input).pathname.endsWith('/attention')?new Response(JSON.stringify(attention),{status:200}):new URL(input).pathname==='/api/issues/RAG-12/approvals'?new Response(JSON.stringify([approvalRows[0],approvalRows[2]]),{status:200}):base(input,init)});
+  await h.call('paperclip.config.set',{mode:'local'});
+  const snap=await h.call('paperclip.snapshot');
+  const row=snap.inbox.find((i:any)=>i.approvalId==='ap-hire');
+  assert.deepEqual(row.approvalVerbs,['approve','reject'],'only what Paperclip offers');
+  const detail=await h.call('paperclip.task',{id:'RAG-12'});
+  const cards=detail.cards.filter((c:any)=>c.kind==='approval');
+  assert.deepEqual(cards.map((c:any)=>[c.approvalId??null,c.status]),[['ap-hire','pending'],[null,'approved']],'only a pending approval can be decided');
+  assert.equal(cards[0].title,'Hire Nova as Data Engineer');
+});
+
+test('D15: Pause then Resume (company-wide) leaves agents paused on purpose and agents waiting for approval exactly as they were',async t=>{
+  const agentsNow=[{id:'a-1',name:'One',status:'idle'},{id:'a-2',name:'Two',status:'active'},{id:'a-purposely',name:'Purposely',status:'paused'},{id:'a-new',name:'New',status:'pending_approval'},{id:'a-gone',name:'Gone',status:'terminated'}];
+  const status=new Map(agentsNow.map(a=>[a.id,a.status]));const posts:string[]=[];
+  const server=paperclip();
+  const h=await harness(t,{fetch:async(input,init)=>{const url=new URL(input);
+    if(url.pathname===`/api/companies/${COMPANY}/agents`)return new Response(JSON.stringify(agentsNow.map(a=>({...a,status:status.get(a.id),role:'general',adapterConfig:{}}))),{status:200});
+    const m=/^\/api\/agents\/([^/]+)\/(pause|resume)$/.exec(url.pathname);if(m&&init?.method==='POST'){posts.push(`${m[2]} ${m[1]}`);status.set(m[1],m[2]==='pause'?'paused':'idle');return new Response('{}',{status:200});}
+    return server.fetch(input,init);}});
+  await h.call('paperclip.config.set',{mode:'local'});
+  assert.deepEqual((await h.call('paperclip.snapshot')).agentCounts,{active:2,paused:1,resumable:{paperclip:0,local:0,projects:{}}},'the label counts the company’s agents that Pause would stop, not a pending hire');
+  assert.deepEqual(await h.call('paperclip.pauseAll',{source:'paperclip'}),{changed:2});
+  assert.deepEqual(posts,['pause a-1','pause a-2'],'the purposely paused, pending and terminated agents are not touched');
+  posts.length=0;
+  assert.deepEqual(await h.call('paperclip.resumeAll',{source:'paperclip'}),{changed:2});
+  assert.deepEqual(posts,['resume a-1','resume a-2'],'only what Pause paused wakes');
+  assert.equal(status.get('a-purposely'),'paused');assert.equal(status.get('a-new'),'pending_approval');
+});
+
+test('D15: a project Roster’s Pause and Resume on Muster agents touch only that project’s agents that were running, and resume only those',async t=>{
+  const paused=new Set<string>(['m-purposely']);const calls:string[]=[];
+  const members=[{id:'m-1',name:'One',kind:'agent',role:'agent',title:null,runner:null,instructions:'',createdAt:now},{id:'m-2',name:'Two',kind:'agent',role:'agent',title:null,runner:null,instructions:'',createdAt:now},{id:'m-purposely',name:'Purposely',kind:'agent',role:'agent',title:null,runner:null,instructions:'',createdAt:now},{id:'m-pending',name:'Pending',kind:'agent',role:'agent',title:null,runner:null,instructions:'',createdAt:now,pendingAt:now}];
+  const h=await harness(t,{invoke:(command,input)=>{
+    if(command==='project.list')return [{id:'p1',name:'Launch',goal:'Ship',folderIds:[],primaryFolderId:null,archived:false,archivedAt:null}];
+    if(command==='project.work')return {tasks:{items:[],truncated:false},decisions:{items:[]},activity:{items:[]},scheduler:{paused:false}};
+    if(command==='project.members.list')return {members:members.map(m=>({...m,pausedAt:paused.has(m.id)?now:null})),settings:undefined};
+    if(command==='project.members.pause'){calls.push(`${input.paused?'pause':'resume'} ${input.id}`);if(input.paused)paused.add(input.id);else paused.delete(input.id);return {};}
+  }});
+  assert.deepEqual(await h.call('paperclip.pauseAll',{source:'local',projectId:'p1'}),{changed:2});
+  assert.deepEqual(calls,['pause m-1','pause m-2']);calls.length=0;
+  assert.deepEqual(await h.call('paperclip.resumeAll',{source:'local',projectId:'p1'}),{changed:2});
+  assert.deepEqual(calls,['resume m-1','resume m-2'],'Purposely stays paused; the pending hire is never touched');
+  assert.ok(paused.has('m-purposely'));
+});
+
+test('B14: Paperclip budget policies (company, project, agent) with utilisation and incidents are read into the Dashboard',async t=>{
+  const overview={policies:[{policyId:'b1',scopeType:'project',scopeId:'p-oss',scopeName:'OSS Manager',metric:'billed_cents',amount:100000,observedAmount:25000,utilizationPercent:25,warnPercent:80,hardStopEnabled:false,isActive:true,status:'ok',paused:false},
+    {policyId:'b2',scopeType:'agent',scopeId:'a-cto',scopeName:'CTO',metric:'billed_cents',amount:50000,observedAmount:50000,utilizationPercent:100,warnPercent:80,hardStopEnabled:true,isActive:true,status:'hard_stop',paused:true},
+    {policyId:'b3',scopeType:'company',scopeId:COMPANY,scopeName:'RagnarDataOps',metric:'billed_cents',amount:250000,observedAmount:1000,utilizationPercent:0.4,warnPercent:80,hardStopEnabled:false,isActive:true,status:'ok',paused:false},
+    {policyId:'b4',scopeType:'company',scopeId:COMPANY,metric:'tokens',amount:9,isActive:true}],activeIncidents:[{id:'inc'}]};
+  const server=paperclip();
+  const h=await harness(t,{fetch:async(input,init)=>new URL(input).pathname.endsWith('/budgets/overview')?new Response(JSON.stringify(overview),{status:200}):server.fetch(input,init)});
+  await h.call('paperclip.config.set',{mode:'local'});await h.call('paperclip.snapshot');
+  const data=await h.call('paperclip.dashboard',{});
+  assert.deepEqual(data.budgets.policies.map((p:any)=>[p.scope,p.name,p.limitUsd,p.observedUsd,p.status,p.hardStop,p.paused]),[['project','OSS Manager',1000,250,'ok',false,false],['agent','CTO',500,500,'hard_stop',true,true],['company','RagnarDataOps',2500,10,'ok',false,false]],'dollar policies only, in dollars');
+  assert.equal(data.budgets.incidents,1);assert.equal(data.budgets.company,'RagnarDataOps');
+});
+
+test('review S1: Resume with no recorded Pause wakes nothing, so an agent paused on purpose stays paused; the snapshot says how many Pause can resume',async t=>{
+  const status=new Map([['a-1','idle'],['a-purposely','paused']]);const posts:string[]=[];const server=paperclip();
+  const h=await harness(t,{fetch:async(input,init)=>{const url=new URL(input);
+    if(url.pathname===`/api/companies/${COMPANY}/agents`)return new Response(JSON.stringify([...status].map(([id,s])=>({id,name:id,status:s,role:'general',adapterConfig:{}}))),{status:200});
+    const m=/^\/api\/agents\/([^/]+)\/(pause|resume)$/.exec(url.pathname);if(m&&init?.method==='POST'){posts.push(`${m[2]} ${m[1]}`);status.set(m[1],m[2]==='pause'?'paused':'idle');return new Response('{}',{status:200});}
+    return server.fetch(input,init);}});
+  await h.call('paperclip.config.set',{mode:'local'});
+  assert.deepEqual((await h.call('paperclip.snapshot')).agentCounts,{active:1,paused:1,resumable:{paperclip:0,local:0,projects:{}}},'nothing recorded: nothing to resume');
+  assert.deepEqual(await h.call('paperclip.resumeAll',{source:'paperclip'}),{changed:0});
+  assert.deepEqual(posts,[],'no agent was woken');
+  await h.call('paperclip.pauseAll',{source:'paperclip'});
+  assert.equal((await h.call('paperclip.snapshot',{refresh:true})).agentCounts.resumable.paperclip,1,'only what Pause stopped');
+  posts.length=0;await h.call('paperclip.resumeAll',{source:'paperclip'});
+  assert.deepEqual(posts,['resume a-1']);assert.equal(status.get('a-purposely'),'paused');
+  assert.deepEqual(await h.call('paperclip.resumeAll',{source:'paperclip'}),{changed:0},'a second Resume has nothing left to wake');
 });

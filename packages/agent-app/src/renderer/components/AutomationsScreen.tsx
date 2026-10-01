@@ -3,6 +3,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import type { ChatPermissionMode } from '../../shared/protocol';
 import { AUTOMATION_AWAKE_NOTE, REPO_TRIGGER_EVENTS, type RepoTriggerEvent, type AutomationCatchUp, type AutomationMode, type AutomationOverlap, type AutomationPreview, type AutomationRun, type AutomationSaveInput, type AutomationSchedule, type AutomationView } from '../../shared/domains/automations-protocol';
 import { invoke } from '../bridge';
+import { openHub } from '../hubStore';
 import { closeSettings, loadAutomations, loadProviders, notifyError, notifySuccess, selectChat } from '../store';
 import { focusComposer, restoreFocus } from '../focus';
 import { compactAge, exactTime } from '../relativeTime';
@@ -13,6 +14,8 @@ import { ResourceState } from './ResourceState';
 import {Tip} from './Tooltip';
 import {DefaultModelPicker} from './settings/DefaultModelPicker';
 import { PaperclipRoutines } from './HubSetup';
+import { BLANK_TASK_FIELDS, GateBar, RunNowDialog, TaskTargetFields, TemplatePicker, TriggersFields, VariablesEditor, extOfDraft, type TaskDraftFields } from './WorkAutomations';
+import type { AutomationTemplate } from '../../shared/domains/automations-protocol';
 
 /** A draft's `providerId::model` as the picker's value (null: the folder default). */
 const modelPreference = (value: string): {providerId: string; model: string} | null => {
@@ -25,14 +28,14 @@ const LOCAL_TZ = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
 const TIME_ZONES: string[] = (() => { try { return (Intl as unknown as { supportedValuesOf(key: string): string[] }).supportedValuesOf('timeZone'); } catch { return [LOCAL_TZ]; } })();
 const DAY_LETTERS = ['S', 'M', 'T', 'W', 'T', 'F', 'S'], DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 const ACCESS: Record<ChatPermissionMode, string> = { 'read-only': 'Read only', workspace: 'Workspace', full: 'Full access' };
-const STATUS: Record<AutomationRun['status'], string> = { queued: 'Queued', running: 'Running', completed: 'Completed', failed: 'Failed', interrupted: 'Stopped', skipped: 'Skipped', missed: 'Missed' };
-const TRIGGER: Record<AutomationRun['trigger'], string> = { schedule: 'Scheduled', manual: 'Run now', 'catch-up': 'Catch-up', watch: 'Files changed', repo: 'Repository event' };
+const STATUS: Record<AutomationRun['status'], string> = { queued: 'Queued', awaiting: 'Waiting for approval', running: 'Running', completed: 'Completed', failed: 'Failed', interrupted: 'Stopped', skipped: 'Skipped', missed: 'Missed' };
+const TRIGGER: Record<AutomationRun['trigger'], string> = { schedule: 'Scheduled', manual: 'Run now', 'catch-up': 'Catch-up', watch: 'Files changed', repo: 'Repository event', webhook: 'Webhook' };
 type Repeat = 'interval' | 'daily' | 'cron' | 'watch' | 'repo';
 const REPO_EVENT_LABEL: Record<RepoTriggerEvent, string> = { 'pr-opened': 'Pull request opened', 'pr-updated': 'Pull request updated', 'check-failed': 'Check failed', push: 'Push to branch' };
 
-interface Draft {
+interface Draft extends TaskDraftFields {
   name: string; prompt: string; repeat: Repeat; minutes: number; time: string; days: number[]; expr: string; watchFolderId: string; timezone: string; repoEvents: RepoTriggerEvent[]; repoBranch: string;
-  targetKind: 'new' | 'chat'; folderId: string; projectId: string; model: string; mode: AutomationMode; chatId: string;
+  targetKind: 'new' | 'chat' | 'task'; folderId: string; projectId: string; model: string; mode: AutomationMode; chatId: string;
   permissionMode: ChatPermissionMode; overlap: AutomationOverlap; catchUp: AutomationCatchUp; acknowledged: boolean;
 }
 const PRESETS: { label: string; apply: Partial<Draft> }[] = [
@@ -42,10 +45,10 @@ const PRESETS: { label: string; apply: Partial<Draft> }[] = [
   { label: 'Mondays at 10', apply: { repeat: 'daily', time: '10:00', days: [1] } },
 ];
 function blankDraft(folderId = '', projectId = ''): Draft {
-  return { name: '', prompt: '', repeat: 'daily', minutes: 60, time: '09:00', days: [1, 2, 3, 4, 5], expr: '0 9 * * 1-5', watchFolderId: folderId, timezone: LOCAL_TZ, repoEvents: ['check-failed'], repoBranch: '', targetKind: 'new', folderId, projectId, model: '', mode: 'agent', chatId: '', permissionMode: 'workspace', overlap: 'skip', catchUp: 'one', acknowledged: false };
+  return { name: '', prompt: '', repeat: 'daily', minutes: 60, time: '09:00', days: [1, 2, 3, 4, 5], expr: '0 9 * * 1-5', watchFolderId: folderId, timezone: LOCAL_TZ, repoEvents: ['check-failed'], repoBranch: '', targetKind: 'new', folderId, projectId, model: '', mode: 'agent', chatId: '', permissionMode: 'workspace', overlap: 'skip', catchUp: 'one', acknowledged: false, ...BLANK_TASK_FIELDS };
 }
 function draftOf(automation: AutomationView): Draft {
-  const draft = { ...blankDraft(), name: automation.name, prompt: automation.prompt, timezone: automation.timezone, permissionMode: automation.permissionMode, overlap: automation.overlap, catchUp: automation.catchUp };
+  const draft: Draft = { ...blankDraft(), variables: automation.ext.variables, approval: automation.ext.approval, activityGate: automation.ext.activityGate, webhook: automation.ext.webhook, name: automation.name, prompt: automation.prompt, timezone: automation.timezone, permissionMode: automation.permissionMode, overlap: automation.overlap, catchUp: automation.catchUp };
   const s = automation.schedule, t = automation.target;
   if (s.kind === 'interval') Object.assign(draft, { repeat: 'interval', minutes: s.minutes });
   else if (s.kind === 'daily') Object.assign(draft, { repeat: 'daily', time: s.time, days: s.days });
@@ -53,6 +56,7 @@ function draftOf(automation: AutomationView): Draft {
   else if (s.kind === 'repo') Object.assign(draft, { repeat: 'repo', watchFolderId: s.folderId, repoEvents: s.events, repoBranch: s.branch ?? '' });
   else Object.assign(draft, { repeat: 'watch', watchFolderId: s.folderId });
   if (t.kind === 'chat') Object.assign(draft, { targetKind: 'chat', chatId: t.chatId });
+  else if (t.kind === 'task') Object.assign(draft, { targetKind: 'task', projectId: t.projectId, taskAssignee: t.assigneeId ?? '', taskPriority: t.priority ?? '', taskMode: t.mode, taskStart: t.start, taskTitle: t.titleTemplate ?? '' });
   else Object.assign(draft, { targetKind: 'new', folderId: t.folderId ?? '', projectId: t.projectId ?? '', mode: t.mode, model: t.providerId && t.model ? `${t.providerId}::${t.model}` : '' });
   return draft;
 }
@@ -63,10 +67,11 @@ const scheduleOf = (draft: Draft): AutomationSchedule => draft.repeat === 'inter
   : { kind: 'watch', folderId: draft.watchFolderId };
 function targetOf(draft: Draft): AutomationSaveInput['target'] {
   if (draft.targetKind === 'chat') return { kind: 'chat', chatId: draft.chatId };
+  if (draft.targetKind === 'task') return { kind: 'task', projectId: draft.projectId, mode: draft.taskMode, start: draft.taskMode === 'standup' ? true : draft.taskStart, ...(draft.taskAssignee && draft.taskMode === 'task' ? { assigneeId: draft.taskAssignee } : {}), ...(draft.taskPriority && draft.taskMode === 'task' ? { priority: draft.taskPriority } : {}), ...(draft.taskTitle.trim() ? { titleTemplate: draft.taskTitle.trim() } : {}) };
   const [providerId, ...model] = draft.model ? draft.model.split('::') : [];
   return { kind: 'new', mode: draft.mode, ...(draft.folderId ? { folderId: draft.folderId } : {}), ...(draft.projectId ? { projectId: draft.projectId } : {}), ...(providerId && model.length ? { providerId, model: model.join('::') } : {}) };
 }
-const inputOf = (draft: Draft): AutomationSaveInput => ({ name: draft.name.trim(), prompt: draft.prompt.trim(), schedule: scheduleOf(draft), timezone: draft.timezone, target: targetOf(draft), permissionMode: draft.permissionMode, overlap: draft.overlap, catchUp: draft.catchUp, ...(draft.permissionMode === 'full' ? { acknowledgeFullAccess: draft.acknowledged } : {}) });
+const inputOf = (draft: Draft): AutomationSaveInput => ({ name: draft.name.trim(), prompt: draft.prompt.trim(), schedule: scheduleOf(draft), timezone: draft.timezone, target: targetOf(draft), permissionMode: draft.permissionMode, overlap: draft.overlap, catchUp: draft.catchUp, ext: extOfDraft(draft), ...(draft.permissionMode === 'full' ? { acknowledgeFullAccess: draft.acknowledged } : {}) });
 
 /** "Mon, Sep 21, 9:00 AM" in the automation's zone, with the zone named when it is not this Mac's. */
 function runTime(value: string, timeZone: string): string {
@@ -124,7 +129,7 @@ function Editor({ editing, onDone, projectId }: { editing: AutomationView | null
     return () => { live = false; clearTimeout(timer); };
   }, [previewKey]);
   const chatAccessNote = draft.targetKind === 'chat' && draft.chatId ? (() => { const chat = chats.find(entry => entry.id === draft.chatId); return chat ? `Runs continue “${chat.title}” in its folder with its model.` : ''; })() : '';
-  const ready = draft.name.trim() && draft.prompt.trim() && (draft.targetKind === 'new' || draft.chatId) && (draft.repeat !== 'daily' || draft.days.length) && (draft.repeat !== 'watch' || draft.watchFolderId) && (draft.repeat !== 'repo' || (draft.watchFolderId && draft.repoEvents.length)) && (draft.permissionMode !== 'full' || draft.acknowledged) && !previewError;
+  const ready = draft.name.trim() && draft.prompt.trim() && (draft.targetKind !== 'chat' || draft.chatId) && (draft.targetKind !== 'task' || draft.projectId) && (draft.repeat !== 'daily' || draft.days.length) && (draft.repeat !== 'watch' || draft.watchFolderId) && (draft.repeat !== 'repo' || (draft.watchFolderId && draft.repoEvents.length)) && (draft.permissionMode !== 'full' || draft.acknowledged) && !previewError;
   const save = async () => {
     if (!ready || busy) return;
     setBusy(true); setError('');
@@ -133,10 +138,16 @@ function Editor({ editing, onDone, projectId }: { editing: AutomationView | null
       onDone(saved);
     } catch (cause) { setError(errorText(cause).replace(/^automations\.(create|update): /, '')); setBusy(false); }
   };
+  const applyTemplate = (t: AutomationTemplate) => {
+    const s = t.schedule;
+    patch({ name: t.name, prompt: t.prompt, targetKind: 'task', projectId: draft.projectId || projectId || projects[0]?.id || '', taskMode: t.target.mode, taskStart: t.target.start, taskTitle: t.target.titleTemplate ?? '', taskAssignee: '', taskPriority: '', ...t.ext, variables: t.ext.variables,
+      ...(s.kind === 'daily' ? { repeat: 'daily' as const, time: s.time, days: s.days } : {}) });
+  };
   const toggleDay = (day: number) => patch({ days: draft.days.includes(day) ? draft.days.filter(entry => entry !== day) : [...draft.days, day] });
   return (
     <form className="automation-editor" aria-label={editing ? `Edit ${editing.name}` : 'New automation'} onSubmit={event => { event.preventDefault(); void save(); }} onKeyDown={event => { if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); onDone(); } }}>
       <header><h2>{editing ? 'Edit automation' : 'New automation'}</h2>{editing && <span className="automation-version">v{editing.version} · saving makes v{editing.version + 1}</span>}</header>
+      {!editing && <TemplatePicker onPick={applyTemplate}/>}
       <label>Name<input ref={name} type="text" value={draft.name} maxLength={120} placeholder="Morning triage" onChange={event => patch({ name: event.target.value })} /></label>
       <label>Prompt<textarea value={draft.prompt} rows={4} placeholder="Review issues opened since the last run and summarize anything urgent." onChange={event => patch({ prompt: event.target.value })} /></label>
 
@@ -175,8 +186,9 @@ function Editor({ editing, onDone, projectId }: { editing: AutomationView | null
         <div className="automation-segmented" role="radiogroup" aria-label="Target">
           <button type="button" role="radio" aria-checked={draft.targetKind === 'new'} onClick={() => patch({ targetKind: 'new' })}>New chat each run</button>
           <button type="button" role="radio" aria-checked={draft.targetKind === 'chat'} onClick={() => patch({ targetKind: 'chat', chatId: draft.chatId || chats[0]?.id || '' })}>Continue a chat</button>
+          <button type="button" role="radio" aria-checked={draft.targetKind === 'task'} onClick={() => patch({ targetKind: 'task', projectId: draft.projectId || projectId || projects[0]?.id || '' })}>Create a task</button>
         </div>
-        {draft.targetKind === 'new' ? <div className="automation-row">
+        {draft.targetKind === 'task' ? <TaskTargetFields draft={draft} patch={patch} projects={projects}/> : draft.targetKind === 'new' ? <div className="automation-row">
           <label>Folder<select value={draft.folderId} onChange={event => patch({ folderId: event.target.value })}><option value="">No folder</option>{folders.map(folder => <option key={folder.id} value={folder.id}>{folder.name}</option>)}</select></label>
           {projects.length > 0 && <label>Project<select value={draft.projectId} onChange={event => patch({ projectId: event.target.value })}><option value="">None</option>{projects.map(project => <option key={project.id} value={project.id}>{project.name}</option>)}</select></label>}
           <label>Mode<select value={draft.mode} onChange={event => patch({ mode: event.target.value as AutomationMode })}><option value="agent">Agent</option><option value="plan">Plan</option><option value="ask">Ask</option></select></label>
@@ -188,6 +200,9 @@ function Editor({ editing, onDone, projectId }: { editing: AutomationView | null
         </div>}
         {chatAccessNote && <p className="automation-help">{chatAccessNote}</p>}
       </fieldset>
+
+      <VariablesEditor variables={draft.variables} onChange={variables => patch({ variables })} text={`${draft.prompt}\n${draft.taskTitle}`}/>
+      <TriggersFields draft={draft} patch={patch} editing={editing} allowActivity={draft.targetKind !== 'chat'}/>
 
       <fieldset>
         <legend>Rules</legend>
@@ -233,7 +248,9 @@ function History({ automation }: { automation: AutomationView }): React.ReactEle
             <span className="automation-run-main">
               <span>{TRIGGER[run.trigger]} · <time dateTime={run.scheduledFor} title={exactTime(run.scheduledFor)}>{runTime(run.scheduledFor, automation.timezone)}</time>{took && ` · ${took}`}{run.version !== automation.version && ` · v${run.version}`}</span>
               {run.reason && <span className="automation-run-reason">{run.reason}</span>}
+              {run.variables && <span className="automation-run-reason">{Object.entries(run.variables).map(([k, v]) => `${k}: ${v}`).join(' · ')}</span>}
             </span>
+            {run.taskId && <button type="button" className="automation-link" onClick={() => openHub('task', run.taskId!)}>Open task</button>}
             {run.chatId && (chat
               ? <button type="button" className="automation-link" onClick={() => openChat(run.chatId!)}><MessageSquare size={12} />{chat.title}</button>
               : <span className="automation-run-reason">Chat deleted</span>)}
@@ -246,10 +263,12 @@ function History({ automation }: { automation: AutomationView }): React.ReactEle
 
 function AutomationRow({ automation, open, now, onToggle, onEdit }: { automation: AutomationView; open: boolean; now: number; onToggle: () => void; onEdit: () => void }): React.ReactElement {
   const [busy, setBusy] = useState<'run' | 'pause' | 'delete' | null>(null);
+  const [asking, setAsking] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const act = async (kind: 'run' | 'pause' | 'delete') => {
     if (busy) return;
     if (kind === 'delete' && !confirming) { setConfirming(true); return; }
+    if (kind === 'run' && automation.ext.variables.length) { setAsking(true); return; }
     setBusy(kind);
     try {
       if (kind === 'run') {
@@ -287,10 +306,18 @@ function AutomationRow({ automation, open, now, onToggle, onEdit }: { automation
             : <Tip label="Delete"><button type="button" className="icon-button" aria-label={`Delete ${automation.name}`} onClick={() => void act('delete')}><Trash2 size={14} /></button></Tip>}
         </div>
       </div>
+      {asking && <RunNowDialog automation={automation} onClose={() => setAsking(false)} onRun={async values => {
+        try {
+          const run = await invoke('automations.runNow', { id: automation.id, variables: values });
+          if (run.status === 'failed') notifyError(new Error(run.reason ?? 'The run could not start.')); else notifySuccess(`${automation.name} started${run.taskId ? '' : ''}`, run.chatId ? { label: 'Open chat', run: () => openChat(run.chatId!) } : undefined);
+          setAsking(false);
+        } catch (cause) { notifyError(cause); }
+      }}/>}
+      <GateBar automation={automation}/>
       {open && <div className="automation-detail">
         {automation.issues.map(issue => <p key={issue} className="automation-warning"><AlertCircle size={13} />{issue}</p>)}
         <p className="automation-prompt">{automation.prompt}</p>
-        <p className="automation-help">{automation.target.kind === 'chat' ? 'Continues one chat' : 'New chat each run'} · {ACCESS[automation.permissionMode]} · {automation.overlap === 'skip' ? 'skips overlapping runs' : 'queues overlapping runs'} · {automation.catchUp === 'one' ? 'catches up once after sleep' : 'skips missed runs'} · v{automation.version}</p>
+        <p className="automation-help">{automation.target.kind === 'chat' ? 'Continues one chat' : automation.target.kind === 'task' ? (automation.target.mode === 'standup' ? 'Standup: a task per agent and one digest' : 'Creates a task each run') : 'New chat each run'}{automation.ext.approval ? ' · asks before each run' : ''}{automation.ext.activityGate ? ' · skips when nothing changed' : ''}{automation.webhook?.hasSecret ? ' · webhook on' : ''} · {ACCESS[automation.permissionMode]} · {automation.overlap === 'skip' ? 'skips overlapping runs' : 'queues overlapping runs'} · {automation.catchUp === 'one' ? 'catches up once after sleep' : 'skips missed runs'} · v{automation.version}</p>
         <History automation={automation} />
       </div>}
     </li>
@@ -300,6 +327,7 @@ function AutomationRow({ automation, open, now, onToggle, onEdit }: { automation
 /** Whether an automation works for a Project: it targets the Project, one of its folders, or one of its chats. */
 export function automationInProject(automation: AutomationView, project: { id: string; folderIds: string[] }, chatProject: (chatId: string) => string | undefined): boolean {
   const { target, schedule } = automation;
+  if (target.kind === 'task' && target.projectId === project.id) return true;
   if (target.kind === 'new' && (target.projectId === project.id || (target.folderId && project.folderIds.includes(target.folderId)))) return true;
   if (target.kind === 'chat' && chatProject(target.chatId) === project.id) return true;
   return (schedule.kind === 'watch' || schedule.kind === 'repo') && project.folderIds.includes(schedule.folderId);

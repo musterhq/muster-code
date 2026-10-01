@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>Sign in · Muster Server</title>
+<link rel="stylesheet" href="/auth.css">
+</head>
+<body>
+<main class="auth">
+  <div class="brand"><svg width="28" height="28" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="currentColor" opacity=".12"/><path d="M8 23V9l8 8 8-8v14" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Muster Server</span></div>
+  <section class="card" id="card">
+    <h1 id="title">Sign in</h1>
+    <p class="sub" id="subtitle">Use the account your server admin created or invited you to.</p>
+    <form id="form" novalidate>
+      <label id="name-row" hidden>Your name<input id="displayName" autocomplete="name" maxlength="80"></label>
+      <label>Username<input id="username" autocomplete="username" autocapitalize="none" spellcheck="false" required maxlength="40"></label>
+      <label>Password<input id="password" type="password" autocomplete="current-password" required minlength="10" maxlength="1024"></label>
+      <p class="hint" id="pw-hint" hidden>At least 10 characters.</p>
+      <p class="error" id="error" role="alert" hidden></p>
+      <button type="submit" id="submit">Sign in</button>
+    </form>
+  </section>
+  <p class="foot" id="foot">Need an account? Ask an admin for an invite link.</p>
+</main>
+<script src="/auth.js"></script>
+</body>
+</html>

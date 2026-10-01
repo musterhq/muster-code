@@ -79,7 +79,7 @@ test('structured verification requires the field its kind demands, and needs-inp
 
 test('large collections report explicit truncation and project export identifies attached folders',()=>{
  const f=fixture();try{for(let i=0;i<201;i++)create(f.store,'p',`Task ${i}`);
-  assert.equal(f.store.listTasks('p').items.length,200);assert.equal(f.store.listTasks('p').truncated,true);
+  assert.equal(f.store.listTasks('p').items.length,201,'a project’s task list is read whole (a Paperclip import of a large org makes thousands of tasks)');assert.equal(f.store.listTasks('p').truncated,false);
   assert.equal(f.store.listActivity('p',100).items.length,100);assert.equal(f.store.listActivity('p',100).truncated,true);
   assert.equal(f.store.listTasks('unknown').truncated,false);
  }finally{f.close()}

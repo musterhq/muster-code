@@ -82,7 +82,7 @@ export interface Notice {
   count: number;
   action?: NoticeAction;
 }
-export type SettingsSection = 'general' | 'appearance' | 'chat' | 'providers' | 'models' | 'memory' | 'plugins' | 'environments' | 'automations' | 'integrations' | 'shortcuts' | 'diagnostics' | 'storage';
+export type SettingsSection = 'general' | 'appearance' | 'chat' | 'providers' | 'models' | 'memory' | 'plugins' | 'environments' | 'automations' | 'integrations' | 'shortcuts' | 'diagnostics' | 'storage' | 'server';
 
 export type FileBody = {native?: boolean; text: string; truncated: boolean; revision?: string; encodingWarning?: boolean; asset?: Commands['files.asset']['output']; document?:Commands['files.document']['output']; workbook?:Commands['files.workbook']['output']};
 

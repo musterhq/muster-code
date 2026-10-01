@@ -10,7 +10,8 @@ import {currentProviderUsage, formatResetEta} from './provider-usage.ts';
 import {connectorPolicy, leanCodexFeatureOverrides} from './context-budget.ts';
 import type { Chat, ProviderInfo } from '../shared/protocol.ts';
 import {NativeUnavailableError} from './codex-native.ts';
-import {CODEX_LAUNCHER, mcpServersFromOverrides} from './adapters/shared.ts';
+import {splitSecretOverrides} from './thread-config.ts';
+import {CODEX_LAUNCHER, envFromOverrides, mcpServersFromOverrides} from './adapters/shared.ts';
 
 /** Identity of the test-only route `createProviderAdapter({available})` builds. */
 export const FIXTURE_PROVIDER = {id: 'fixture', bindingId: 'fixture-binding', model: 'fixture-model'} as const;
@@ -176,6 +177,7 @@ export function createProviderAdapter(options: { core?: CoreClient; available?: 
         ...(resumeThreadId ? {resumeThreadId} : {}),
         instructions: runInstructions(input.chat.mode, input.developerInstructions),
         ...(Object.keys(mcpServersFromOverrides(input.configOverrides)).length ? {mcpServers: mcpServersFromOverrides(input.configOverrides)} : {}),
+        ...(Object.keys(envFromOverrides(input.configOverrides)).length ? {env: envFromOverrides(input.configOverrides)} : {}),
         onThreadReady: threadId => { if (live()) input.onThreadReady?.(threadId); },
         onTurnAccepted: identity => { activity = true; if (live()) input.onTurnAccepted?.({...identity, dispatchState: 'dispatched'}); },
         onDelta: text => { activity = true; if (live()) input.onDelta(text); },
@@ -288,7 +290,8 @@ export function createProviderAdapter(options: { core?: CoreClient; available?: 
         const model = model0;
         const reasoning = input.reasoningEffort ?? 'medium';
         const developerInstructions = runInstructions(input.chat.mode, input.developerInstructions);
-        const extraOverrides = Object.entries(input.configOverrides ?? {}).filter(([name]) => /^[A-Za-z0-9_.-]{1,128}$/.test(name) && !/^(sandbox|approval_policy)/.test(name)).map(([name, value]) => `${name}=${JSON.stringify(value)}`);
+        const split = splitSecretOverrides(input.configOverrides);
+        const extraOverrides = Object.entries(split.args).filter(([name]) => /^[A-Za-z0-9_.-]{1,128}$/.test(name) && !/^(sandbox|approval_policy)/.test(name)).map(([name, value]) => `${name}=${JSON.stringify(value)}`);
         const result=await client().runCodexAppServer({
           prompt: input.prompt, cwd: input.cwd, command: route.command, model, reasoning,
           ...(input.images?.length ? { images: input.images } : {}),
@@ -311,6 +314,7 @@ export function createProviderAdapter(options: { core?: CoreClient; available?: 
           // Plan mode and can only describe patches (F53).
           collaborationMode: input.chat.mode === 'plan' ? { mode: 'plan', settings: { model, reasoning_effort: reasoning } }
             : previous?.mode === 'plan' || (!previous && resumeThread) ? { mode: 'default', settings: { model, reasoning_effort: reasoning } } : undefined,
+          ...(split.threadConfig ? { threadConfig: split.threadConfig } : {}),
           configOverrides: [`agents.default_subagent_model=${JSON.stringify(model)}`, `agents.default_subagent_reasoning_effort=${JSON.stringify(reasoning)}`, ...featureOverrides, ...extraOverrides, `sandbox_workspace_write.network_access=${access.networkAccess}`],
           onDelta(text: string) { session.activity = true; if (!lateCancellation()) input.onDelta(text); },
           onReasoningDelta(text: string) { session.activity = true; if (!lateCancellation()) input.onReasoning(text); },

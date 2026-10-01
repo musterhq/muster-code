@@ -18,7 +18,7 @@ import { plural } from '../../shared/wording.ts';
 /** PRJ-07: last applied Project change-feed sequence, shared by every Project view. */
 const projectFeedCursor = new ProjectEventCursor();
 
-const STATE_LABEL: Record<TaskState, string> = { todo: 'To do', running: 'Running', 'needs-input': 'Needs input', blocked: 'Blocked', review: 'Review', implemented: 'Implemented', verified: 'Verified', failed: 'Failed', cancelled: 'Cancelled' };
+const STATE_LABEL: Record<TaskState, string> = { backlog: 'Backlog', todo: 'To do', running: 'Running', 'needs-input': 'Needs input', blocked: 'Blocked', review: 'Review', implemented: 'Implemented', verified: 'Verified', failed: 'Failed', cancelled: 'Cancelled' };
 const OWNER_LABEL: Record<TaskOwner['kind'], string> = { user: 'You', agent: 'Agent' };
 
 function StatusIcon({ state }: { state: TaskState }) {
@@ -293,7 +293,7 @@ function TaskRow({ task, tasks, projectId, folders, archived, highlighted, usage
   async function stopAgentRun(){if(!runChat)return;setBusy(true);setError('');try{await invoke('chat.stop',{id:runChat.id});onChanged();}catch(err){setError(err instanceof Error?err.message:'Could not stop the task chat.');}finally{setBusy(false);}}
   async function deleteTask(){if(!confirm(`Delete task "${task.title}"?`))return;setBusy(true);setError('');try{await invoke('project.tasks.delete',{projectId,id:task.id,revision:task.revision});onChanged();}catch(err){setError(err instanceof Error?err.message:'Could not delete task.');}finally{setBusy(false);}}
 
-  const canStart = (task.state === 'todo' || task.state === 'failed' || task.state === 'blocked') && task.owner.kind === 'agent';
+  const canStart = (task.state === 'backlog' || task.state === 'todo' || task.state === 'failed' || task.state === 'blocked') && task.owner.kind === 'agent';
   const canEdit = task.state !== 'running' && task.state !== 'needs-input';
 
   return <li className={`project-task-row${highlighted?' is-highlighted':''}`} data-ref={task.id}>

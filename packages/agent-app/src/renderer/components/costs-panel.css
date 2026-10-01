@@ -1,0 +1,45 @@
+/* Costs and provider limits (G24). Muster tokens only. */
+.costs { display: flex; flex-direction: column; gap: 16px; min-width: 0; padding-bottom: 24px; overflow-y: auto; }
+.costs-bar { display: flex; align-items: center; gap: 8px; }
+.costs-tiles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.costs-tiles .dash-tile { cursor: default; }
+.costs-tiles .dash-tile:hover { background: none; }
+.costs-tables { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; align-items: start; }
+.costs-table table { width: 100%; border-collapse: collapse; font-size: var(--fs-12); }
+.costs-table th, .costs-table td { padding: 6px 8px; border-bottom: 1px solid var(--hairline); text-align: left; font-weight: 400; vertical-align: middle; }
+.costs-table thead th { color: var(--text-faint); font-size: var(--fs-11); font-weight: 500; }
+.costs-table .numeric { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.costs-table tbody th { display: flex; flex-direction: column; gap: 3px; max-width: 220px; color: var(--text); }
+.costs-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.costs-share { display: block; height: 3px; border-radius: var(--radius-2); background: var(--bg-active); }
+.costs-share span { display: block; height: 100%; border-radius: var(--radius-2); background: var(--link); }
+.costs-window-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; }
+.costs-window { padding: 12px 14px; border: 1px solid var(--hairline); border-radius: var(--radius-10); }
+.costs-window h4 { margin: 0 0 8px; font-size: var(--fs-13); font-weight: 500; }
+.costs-note { margin: 0; color: var(--text-faint); font-size: var(--fs-11); }
+@media (max-width: 700px) { .costs-tiles { grid-template-columns: minmax(0, 1fr); } }
+
+/* Your stats (G38). */
+.you-tiles { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.you-tiles .dash-tile { cursor: default; }
+.you-tiles .dash-tile:hover { background: none; }
+.you-cols { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: 10px; align-items: start; }
+.you-side { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.you-mix { display: flex; flex-direction: column; gap: 8px; font-size: var(--fs-12); }
+.you-mix strong { font-weight: 500; }
+.you-mix ul { display: flex; flex-direction: column; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.you-mix li { display: grid; grid-template-columns: minmax(70px, 1fr) minmax(40px, 2fr) auto; align-items: center; gap: 8px; }
+.you-mix-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
+.you-mix-pct { color: var(--text-dim); font-variant-numeric: tabular-nums; }
+.you-since { font-size: var(--fs-11); }
+@media (max-width: 1100px) { .you-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); } .you-cols { grid-template-columns: minmax(0, 1fr); } }
+
+/* Audit Runs (C26). */
+.audit-runs { display: flex; flex-direction: column; gap: 10px; min-width: 0; overflow-y: auto; }
+.audit-table { width: 100%; border-collapse: collapse; font-size: var(--fs-12); }
+.audit-table th, .audit-table td { padding: 7px 8px; border-bottom: 1px solid var(--hairline); text-align: left; font-weight: 400; vertical-align: middle; }
+.audit-table thead th { color: var(--text-faint); font-size: var(--fs-11); font-weight: 500; }
+.audit-table .numeric { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.audit-agent { display: inline-flex; align-items: center; gap: 6px; color: var(--text); }
+.audit-table .ws-link { max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; }
+.audit-error { display: block; max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-faint); font-size: var(--fs-11); }

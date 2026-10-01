@@ -19,8 +19,10 @@ export interface HubRoute { page: HubPage; arg: string | null; from: HubPage | n
 // --- route ---------------------------------------------------------------------------------------------------------
 let route: HubRoute = { page: 'inbox', arg: null, from: null, fromArg: null };
 const routeListeners = new Set<() => void>();
-export function openHub(page: HubPage, arg: string | null = null): void {
-  route = route.page === page ? { page, arg, from: route.from, fromArg: route.fromArg } : { page, arg, from: route.page, fromArg: route.arg };
+/** `from`: where the page was opened from when that is not the current hub page (a project's page on the Projects
+ *  screen), so the breadcrumb leads back there. */
+export function openHub(page: HubPage, arg: string | null = null, from?: { page: HubPage; arg: string | null }): void {
+  route = from ? { page, arg, from: from.page, fromArg: from.arg } : route.page === page ? { page, arg, from: route.from, fromArg: route.fromArg } : { page, arg, from: route.page, fromArg: route.arg };
   for (const l of routeListeners) l();
   openHubScreen();
 }
@@ -51,7 +53,7 @@ function schedule(delay = 250) {
   if (timer) return;
   timer = setTimeout(() => { timer = null; void refreshWorkspace(); }, delay);
 }
-const LOCAL_EVENTS = new Set(['projectChanged', 'mailboxChanged']);
+const LOCAL_EVENTS = new Set(['projectChanged', 'mailboxChanged', 'workChanged']);
 function onEvent(event: AgentEvent) {
   if (event.type === 'projectsWorkspaceChanged') { if (event.taskIds.length) for (const l of taskListeners) l(event.taskIds); schedule(); return; }
   if (LOCAL_EVENTS.has(event.type)) { if (event.type === 'projectChanged') for (const l of taskListeners) l([event.taskId]); schedule(400); }
@@ -89,7 +91,7 @@ export function onTasksChanged(listener: (ids: string[]) => void): () => void { 
 let badge: WorkspaceBadge | null = null;
 const badgeListeners = new Set<() => void>();
 let badgeTimer: ReturnType<typeof setTimeout> | null = null, badgeDirty = true, badgeSubscribed = false;
-const BADGE_EVENTS = new Set(['projectsWorkspaceChanged', 'projectChanged', 'mailboxChanged']);
+const BADGE_EVENTS = new Set(['projectsWorkspaceChanged', 'projectChanged', 'mailboxChanged', 'workChanged']);
 function loadBadge() {
   badgeDirty = false;
   void invoke('paperclip.badge', {}).then(next => {

@@ -101,3 +101,7 @@
 .nav-heading-actions { display: contents; }
 /* QA-#7: an expanded folder or Project with no chats says so, aligned with nested chat titles. */
 .nav-folder-empty { margin: 0; padding: 3px 10px 5px 32px; font-size: var(--fs-12); color: var(--text-faint); }
+
+/* Paperclip projects (imported or linked) sit under their org's name inside Projects. */
+.nav-org { display: block; }
+.nav-org-label { margin: 0; padding: 8px 10px 2px 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-11); font-weight: 500; letter-spacing: .02em; color: var(--text-faint); }

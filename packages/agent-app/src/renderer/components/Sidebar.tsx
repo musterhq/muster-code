@@ -1,6 +1,7 @@
 import { openHub, useHubRoute, useInboxBadge, useInboxDismissals, useWorkspace, type HubPage } from '../hubStore';
 import { badgeCount, buildActivity } from '../inboxModel';
 import { NAMES } from '../../shared/workspace-names';
+import { taskWorktreeFolderIds } from '../taskWorktrees';
 import type { WorkspaceProject, WorkspaceTask } from '../../shared/domains/paperclip-protocol';
 import { NewTaskSheet } from './HubSetup';
 import {
@@ -35,12 +36,6 @@ import {
   X,
   ArrowDownCircle,
   Inbox as InboxIcon,
-  LayoutDashboard,
-  ListChecks,
-  FolderClosed,
-  Box,
-  Users,
-  Plug,
   History as LedgerIcon,
   Check as CheckIcon,
 } from 'lucide-react';
@@ -378,6 +373,8 @@ export function Sidebar(): React.ReactElement {
   useEffect(()=>{if(snapshot){const ids=new Set(snapshot.chats.map(chat=>chat.id));setSelection(previous=>pruneSelection(previous,id=>ids.has(id)));}},[snapshot]);
 
   // Every hook sits above the loading return (Rules of Hooks): a hook below it crashed the app on boot.
+  // Only the light badge read: the org of each imported project and the linked company's name. The whole workspace is read by the rows that need it.
+  const inboxBadge=useInboxBadge();
   const [projectEdit,setProjectEdit]=useState<{id:string;mode:'edit'|'rename'|'archive'}|null>(null);
   if (!snapshot) {
     return <ResourceState kind="loading" compact label="Loading chats" rows={5}/>;
@@ -391,7 +388,39 @@ export function Sidebar(): React.ReactElement {
   // S3-G: the project hover card, the native row menu and the Edit project dialog share one piece of state.
   const editedProject=projectEdit?snapshot.projects.find(project=>project.id===projectEdit.id):undefined;
   const projectGroups = snapshot.projects.map(project=>({project,gid:`project:${project.id}`,chats:inGroup(`project:${project.id}`)})).filter(group=>!group.project.archived||group.chats.length>0);
-  const folderGroups = snapshot.folders.map(folder=>({folder,gid:`folder:${folder.id}`,chats:inGroup(`folder:${folder.id}`)}));
+  // Paperclip projects (imported into Muster, or linked) are grouped under their org; projects you made show as before.
+  const orgOfProject=new Map(Object.entries(inboxBadge?.orgs??{}));
+  const ownProjects=projectGroups.filter(group=>!orgOfProject.has(group.project.id));
+  const projectsByOrg=new Map<string,typeof projectGroups>();
+  for(const group of projectGroups){const org=orgOfProject.get(group.project.id);if(org)projectsByOrg.set(org,[...(projectsByOrg.get(org)??[]),group]);}
+  const orgNames=[...new Set([...projectsByOrg.keys(),...(inboxBadge?.connected&&inboxBadge.company?[inboxBadge.company]:[])])].sort((a,b)=>a.localeCompare(b));
+  const renderProject=({project,gid,chats}:{project:typeof projectGroups[number]['project'];gid:string;chats:Chat[]})=>(
+            <Collapsible.Root className="nav-section" key={project.id} open={isOpen(gid)} onOpenChange={value=>toggleGroup(gid,value)}>
+              <PreviewCard.Root><PreviewCard.Trigger render={<div/>} className="nav-project-hover" delay={600} closeDelay={120}>
+              <GroupHead nested title={project.name} tooltip={project.name} chats={chats} icon={<Layers size={13}/>} onContextMenu={event=>{event.preventDefault();void openProjectMenu(project.id,event.clientX,event.clientY,mode=>setProjectEdit({id:project.id,mode}));}}>
+                <Tip label={project.folderIds.length ? `New chat in ${project.name}` : 'Add a folder in Projects'}><button
+                  type="button"
+                  className="icon-button"
+                  aria-label={`New chat in project ${project.name}`}
+                 
+                  onClick={() => project.folderIds.length
+                    ? openNewChat({folderId:project.primaryFolderId ?? project.folderIds[0], projectId:project.id})
+                    : openProject(project.id)}
+                >
+                  <SquarePen size={13} />
+                </button></Tip>
+                <Tip label={`Open ${project.name}: tasks, roster and outputs`}><button type="button" className="icon-button" aria-label={`Open project ${project.name}`} onClick={()=>openProject(project.id)}><LayoutGrid size={13}/></button></Tip>
+              </GroupHead>
+              </PreviewCard.Trigger>
+              <PreviewCard.Portal><PreviewCard.Positioner side="right" align="start" sideOffset={8} className="chat-preview-positioner"><PreviewCard.Popup className="chat-preview-card project-hover-card">
+                <ProjectHoverCard project={project} folders={snapshot.folders} chats={snapshot.chats.filter(chat=>chat.projectId===project.id)} onOpen={()=>openProject(project.id)} onEdit={()=>setProjectEdit({id:project.id,mode:'edit'})}/>
+              </PreviewCard.Popup></PreviewCard.Positioner></PreviewCard.Portal></PreviewCard.Root>
+              <Collapsible.Panel className="nav-group-panel is-nested-chats"><ProjectTaskRows projectId={project.id} chats={chats} renderChats={list=>list.length?rows(list,context):null}/></Collapsible.Panel>
+            </Collapsible.Root>
+  );
+  // Task worktrees (Assign & start) sit under their project's task rows, not in Folders.
+  const taskWorktrees = taskWorktreeFolderIds(snapshot);
+  const folderGroups = snapshot.folders.filter(folder=>!taskWorktrees.has(folder.id)).map(folder=>({folder,gid:`folder:${folder.id}`,chats:inGroup(`folder:${folder.id}`)}));
   const orphanChats = inGroup('chats');
   const archivedOpen = showArchived;
   // Visible row order drives roving focus; it mirrors the render order below.
@@ -479,7 +508,6 @@ export function Sidebar(): React.ReactElement {
       </button>
       <div className="nav-toolbar">
         <SidebarInbox screen={state.screen}/>
-        <SidebarDashboard screen={state.screen}/>
         <button type="button" className={`tool-button${draft.open?' is-active':''}`} title={activeFolder?`New chat in ${activeFolder.name} (⌘N)`:'New chat (⌘N)'} aria-keyshortcuts="Meta+N Control+N" aria-current={draft.open?'page':undefined} onClick={newChatHere}>
           <SquarePen size={15} /><span>New chat</span>
         </button>
@@ -487,21 +515,8 @@ export function Sidebar(): React.ReactElement {
           <Search size={15} /><span>Search chats</span>
         </button>
         <button type="button" className="tool-button" title="Memory for the current folder" onClick={() => openMemoryScreen(activeChat()?.folderId)}><Brain size={15}/><span>Memory</span></button>
-        {/* Paperclip's order (#193): Work, then Org. One sidebar; Muster's pinned chats, folders and projects follow below. */}
-        <p className="nav-tool-heading" id="nav-work">{NAMES.work}</p>
-        <div className="nav-tool-group" role="group" aria-labelledby="nav-work">
-          <HubEntry screen={state.screen} page="tasks" icon={<ListChecks size={15}/>} label={NAMES.tasks} title="Every task across your projects and Paperclip: list or board"/>
-          <button type="button" className={`tool-button${state.screen==='projects'?' is-active':''}`} title="All projects: tasks, roster, outputs, settings and budget" aria-current={state.screen==='projects'?'page':undefined} onClick={openProjectsScreen}><FolderClosed size={15}/><span>{NAMES.projects}</span></button>
-          <button type="button" className={`tool-button${state.screen==='automations'?' is-active':''}`} title="Scheduled and file-triggered agent runs" aria-current={state.screen==='automations'?'page':undefined} onClick={openAutomationsScreen}><CalendarClock size={15}/><span>{NAMES.automations}</span>{runningAutomations>0&&<span className="nav-tool-count" aria-label={`${runningAutomations} running`}>{runningAutomations}</span>}</button>
-          <HubEntry screen={state.screen} page="outputs" icon={<Box size={15}/>} label={NAMES.outputs} title="Files and documents your agents produced"/>
-        </div>
-        <p className="nav-tool-heading" id="nav-org">{NAMES.org}</p>
-        <div className="nav-tool-group" role="group" aria-labelledby="nav-org">
-          <HubEntry screen={state.screen} page="roster" icon={<Users size={15}/>} label={NAMES.roster} title="Every agent on your projects, who they report to, and what they are doing"/>
-          <button type="button" className="tool-button" title="Skills and plugins your agents can use" onClick={()=>openPluginsScreen('skills')}><Blocks size={15}/><span>{NAMES.skills}</span></button>
-          <button type="button" className="tool-button" title="Link or import a Paperclip server" onClick={()=>openAppSettings('integrations')}><Plug size={15}/><span>{NAMES.integrations}</span></button>
-          <HubEntry screen={state.screen} page="ledger" icon={<LedgerIcon size={15}/>} label={NAMES.ledger} title="Every agent turn: receipts, timeline and costs"/>
-        </div>
+        <button type="button" className={`tool-button${state.screen==='automations'?' is-active':''}`} title="Scheduled and file-triggered agent runs" aria-current={state.screen==='automations'?'page':undefined} onClick={openAutomationsScreen}><CalendarClock size={15}/><span>Automations</span>{runningAutomations>0&&<span className="nav-tool-count" aria-label={`${runningAutomations} running`}>{runningAutomations}</span>}</button>
+        <HubEntry screen={state.screen} page="ledger" icon={<LedgerIcon size={15}/>} label={NAMES.ledger} title="Every agent turn: receipts, timeline and costs"/>
 
       </div>
       <div className="visually-hidden" aria-live="polite">{selection.selected.size>0?`${plural(selection.selected.size, 'chat')} selected`:''}</div>
@@ -571,30 +586,13 @@ export function Sidebar(): React.ReactElement {
             <span className="nav-heading-title">Projects</span>
             <span className="nav-heading-actions"><Tip label="Open projects"><button type="button" className="icon-button" aria-label="Open projects" onClick={openProjectsScreen}><LayoutGrid size={14}/></button></Tip><Tip label="New project"><button type="button" className="icon-button" aria-label="New project" onClick={()=>requestNewProject(openProjectsScreen)}><Plus size={15} strokeWidth={1.75}/></button></Tip></span>
           </div>
-          {projectGroups.map(({project,gid,chats}) => (
-            <Collapsible.Root className="nav-section" key={project.id} open={isOpen(gid)} onOpenChange={value=>toggleGroup(gid,value)}>
-              <PreviewCard.Root><PreviewCard.Trigger render={<div/>} className="nav-project-hover" delay={600} closeDelay={120}>
-              <GroupHead nested title={project.name} tooltip={project.name} chats={chats} icon={<Layers size={13}/>} onContextMenu={event=>{event.preventDefault();void openProjectMenu(project.id,event.clientX,event.clientY,mode=>setProjectEdit({id:project.id,mode}));}}>
-                <Tip label={project.folderIds.length ? `New chat in ${project.name}` : 'Add a folder in Projects'}><button
-                  type="button"
-                  className="icon-button"
-                  aria-label={`New chat in project ${project.name}`}
-                 
-                  onClick={() => project.folderIds.length
-                    ? openNewChat({folderId:project.primaryFolderId ?? project.folderIds[0], projectId:project.id})
-                    : openProject(project.id)}
-                >
-                  <SquarePen size={13} />
-                </button></Tip>
-              </GroupHead>
-              </PreviewCard.Trigger>
-              <PreviewCard.Portal><PreviewCard.Positioner side="right" align="start" sideOffset={8} className="chat-preview-positioner"><PreviewCard.Popup className="chat-preview-card project-hover-card">
-                <ProjectHoverCard project={project} folders={snapshot.folders} chats={snapshot.chats.filter(chat=>chat.projectId===project.id)} onOpen={()=>openProject(project.id)} onEdit={()=>setProjectEdit({id:project.id,mode:'edit'})}/>
-              </PreviewCard.Popup></PreviewCard.Positioner></PreviewCard.Portal></PreviewCard.Root>
-              <Collapsible.Panel className="nav-group-panel is-nested-chats">{chats.length?rows(chats,context):<p className="nav-folder-empty">No chats</p>/* QA-#7 */}</Collapsible.Panel>
-            </Collapsible.Root>
-          ))}
-          <PaperclipProjects isOpen={isOpen} toggleGroup={toggleGroup}/>
+          {ownProjects.map(renderProject)}
+          {orgNames.map(org=><div key={`org:${org}`} className="nav-org" role="group" aria-label={`${org} · ${NAMES.paperclip}`}>
+            <p className="nav-org-label" title={`${org} · ${NAMES.paperclip}`}>{org} · {NAMES.paperclip}</p>
+            {(projectsByOrg.get(org)??[]).map(renderProject)}
+            <PaperclipProjects org={org} isOpen={isOpen} toggleGroup={toggleGroup}/>
+          </div>)}
+
           {snapshot.projects.length === 0 && <button type="button" className="nav-quiet-row" onClick={()=>requestNewProject(openProjectsScreen)}><Layers size={14} aria-hidden="true"/><span>Create a project</span></button>}
         </section>
         {orphanChats.length === 0 && (
@@ -628,6 +626,9 @@ export function Sidebar(): React.ReactElement {
         <UpdateFooterAction/>
         <button type="button" className="nav-footer-action" onClick={()=>openAppSettings('general')}>
           <SlidersHorizontal size={15} aria-hidden="true"/><span>Settings</span>
+        </button>
+        <button type="button" className="nav-footer-action" onClick={()=>openPluginsScreen('skills')}>
+          <Blocks size={15} aria-hidden="true"/><span>Skills &amp; plugins</span>
         </button>
         <button type="button" className="nav-footer-action" onClick={openProvidersTab}>
           <Settings2 size={15} aria-hidden="true"/><span>Accounts &amp; providers</span>
@@ -694,22 +695,6 @@ function SidebarInbox({screen}:{screen:string}):React.ReactElement {
   </button>;
 }
 
-/** Dashboard, with "● N live" while agent runs are working (from the same event-driven badge read as the Inbox). */
-function SidebarDashboard({screen}:{screen:string}):React.ReactElement {
-  const badge=useInboxBadge();
-  const route=useHubRoute();
-  const active=screen==='hub'&&route.page==='dashboard';
-  const live=badge?.liveRuns??0;
-  return <button type="button" className={`tool-button${active?' is-active':''}`} aria-current={active?'page':undefined} title="Live agents, spend, and the last two weeks" onClick={()=>openHub('dashboard')}>
-    <LayoutDashboard size={15}/><span>{NAMES.dashboard}</span>{live>0&&<span className="ws-live nav-tool-live" aria-label={`${live} live`}><span className="ws-live-dot" aria-hidden="true"/>{live} live</span>}
-  </button>;
-}
-
-function HubEntry({screen,page,icon,label,title}:{screen:string;page:HubPage;icon:React.ReactNode;label:string;title:string}):React.ReactElement {
-  const route=useHubRoute();
-  const active=screen==='hub'&&route.page===page;
-  return <button type="button" className={`tool-button${active?' is-active':''}`} aria-current={active?'page':undefined} title={title} onClick={()=>openHub(page)}>{icon}<span>{label}</span></button>;
-}
 
 /** Task glyphs in the tree: ● running or needs you, ✓ done, ○ queued. */
 function TaskGlyph({task}:{task:WorkspaceTask}):React.ReactElement {
@@ -718,14 +703,54 @@ function TaskGlyph({task}:{task:WorkspaceTask}):React.ReactElement {
 }
 
 /** The linked Paperclip's projects under Projects, tagged Paperclip, with their tasks as chat-like rows (subtasks nested). */
-function PaperclipProjects({isOpen,toggleGroup}:{isOpen:(id:string)=>boolean;toggleGroup:(id:string,open:boolean)=>void}):React.ReactElement|null {
+function HubEntry({screen,page,icon,label,title}:{screen:string;page:HubPage;icon:React.ReactNode;label:string;title:string}):React.ReactElement {
+  const route=useHubRoute();
+  const active=screen==='hub'&&route.page===page;
+  return <button type="button" className={`tool-button${active?' is-active':''}`} aria-current={active?'page':undefined} title={title} onClick={()=>openHub(page)}>{icon}<span>{label}</span></button>;
+}
+
+const taskRank=(t:WorkspaceTask)=>t.live?0:t.status==='in_review'||t.status==='blocked'?1:t.status==='in_progress'||t.status==='todo'?2:t.status==='backlog'?3:t.status==='done'?4:5;
+/** A project's tasks as nested rows (status, title, owner), opening the task thread. Open tasks first, then the last 3 done. */
+function TaskTree({tasks}:{tasks:WorkspaceTask[]}):React.ReactElement {
+  const route=useHubRoute();
+  const screen=useStoreSelector(state=>state.screen);
+  const sort=(list:WorkspaceTask[])=>[...list].sort((a,b)=>taskRank(a)-taskRank(b)||b.updatedAt.localeCompare(a.updatedAt));
+  const ids=new Set(tasks.map(t=>t.id));
+  const row=(t:WorkspaceTask,depth:number):React.ReactNode=>{
+    const active=screen==='hub'&&route.page==='task'&&route.arg===t.id;
+    return <React.Fragment key={t.id}>
+      <div className={`chat-row ws-tree-row${active?' is-active':''}`} data-depth={depth}>
+        <button type="button" className="chat-row-main" title={`${t.key} · ${t.title}`} onClick={()=>openHub('task',t.id)}>
+          <TaskGlyph task={t}/><span className="chat-title">{t.title}</span><span className="ws-tree-agent">{t.assigneeLabel??''}</span>
+        </button>
+      </div>
+      {sort(tasks.filter(c=>c.parentId===t.id)).map(c=>row(c,depth+1))}
+    </React.Fragment>;
+  };
+  const top=sort(tasks.filter(t=>!t.parentId||!ids.has(t.parentId)));
+  const open=top.filter(t=>t.status!=='done'&&t.status!=='cancelled'), done=top.filter(t=>t.status==='done'||t.status==='cancelled');
+  return <>{open.map(t=>row(t,0))}{done.slice(0,3).map(t=>row(t,0))}</>;
+}
+
+/** A Muster project's tasks (with their owners), then its other chats; a task's run chats show under the task, not again. */
+function ProjectTaskRows({projectId,chats,renderChats}:{projectId:string;chats:Chat[];renderChats:(chats:Chat[])=>React.ReactNode}):React.ReactElement {
+  const {snapshot}=useWorkspace();
+  const tasks=(snapshot?.tasks??[]).filter(t=>t.projectId===projectId&&t.source!=='paperclip');
+  const runChats=new Set((snapshot?.runs??[]).filter(r=>r.taskId&&tasks.some(t=>t.id===r.taskId)).map(r=>r.chatId).filter(Boolean));
+  const rest=chats.filter(c=>!runChats.has(c.id));
+  if(!tasks.length&&!rest.length) return <p className="nav-folder-empty">No chats</p>;
+  return <>{tasks.length>0&&<TaskTree tasks={tasks}/>}{renderChats(rest)}</>;
+}
+
+function PaperclipProjects({org,isOpen,toggleGroup}:{org:string;isOpen:(id:string)=>boolean;toggleGroup:(id:string,open:boolean)=>void}):React.ReactElement|null {
   const badge=useInboxBadge();
   const {snapshot}=useWorkspace(Boolean(badge?.connected));
   const route=useHubRoute();
   const screen=useStoreSelector(state=>state.screen);
   const [newTask,setNewTask]=useState<string|null>(null);
   if(!badge?.connected||!snapshot?.paperclip) return null;
-  const projects=snapshot.projects.filter(p=>p.source==='paperclip');
+  const projects=snapshot.projects.filter(p=>p.source==='paperclip'&&(p.org??snapshot.paperclip?.company?.name)===org);
+  if(!projects.length&&!snapshot.paperclip.stale) return null;
   const tasks=snapshot.tasks.filter(t=>t.source==='paperclip');
   const rank=(t:WorkspaceTask)=>t.live?0:t.status==='in_review'||t.status==='blocked'?1:t.status==='in_progress'||t.status==='todo'?2:t.status==='backlog'?3:t.status==='done'?4:5;
   const sort=(list:WorkspaceTask[])=>[...list].sort((a,b)=>rank(a)-rank(b)||b.updatedAt.localeCompare(a.updatedAt));
@@ -752,7 +777,6 @@ function PaperclipProjects({isOpen,toggleGroup}:{isOpen:(id:string)=>boolean;tog
           <ChevronRight size={13} className="nav-chevron"/>
           <span className="nav-section-icon" aria-hidden="true"><Layers size={13}/></span>
           <span className="nav-section-title" title={`${p.name}${p.repo?` · ${p.repo}`:''}`}>{p.name}</span>
-          <span className="ws-source">{NAMES.paperclip}</span>
           {live>0&&<span className="nav-running-count" title={`${live} running`} aria-label={`${live} running`}>{live}</span>}
         </Collapsible.Trigger>
         <span className="nav-section-actions">

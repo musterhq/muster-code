@@ -12,7 +12,7 @@ import { DEFAULT_AGENT_ID, DEFAULT_TEAM_SETTINGS, LOCAL_OWNER_ID, MEMBER_ROLES, 
 
 const SCHEMA = `CREATE TABLE IF NOT EXISTS project_members(project_id TEXT NOT NULL,id TEXT NOT NULL,name TEXT NOT NULL,kind TEXT NOT NULL,role TEXT NOT NULL,max_permission TEXT,folder_ids TEXT,secrets TEXT NOT NULL DEFAULT '[]',revoked_at TEXT,local INTEGER NOT NULL DEFAULT 0,created_at TEXT NOT NULL,updated_at TEXT NOT NULL,PRIMARY KEY(project_id,id));`;
 /** Roster profile columns, added in place to existing databases (older rows read as no profile). */
-const PROFILE_COLUMNS = [['title', 'TEXT'], ['reports_to', 'TEXT'], ['provider_id', 'TEXT'], ['model', 'TEXT'], ['instructions', "TEXT NOT NULL DEFAULT ''"], ['pending_at', 'TEXT']] as const;
+const PROFILE_COLUMNS = [['title', 'TEXT'], ['reports_to', 'TEXT'], ['provider_id', 'TEXT'], ['model', 'TEXT'], ['instructions', "TEXT NOT NULL DEFAULT ''"], ['pending_at', 'TEXT'], ['paused_at', 'TEXT']] as const;
 const SETTINGS_SCHEMA = 'CREATE TABLE IF NOT EXISTS project_team_settings(project_id TEXT PRIMARY KEY,require_hire_approval INTEGER NOT NULL DEFAULT 0,key_prefix TEXT,monthly_budget_usd REAL,updated_at TEXT NOT NULL);';
 const MODES: readonly ChatPermissionMode[] = ['read-only', 'workspace', 'full'];
 const ID = /^[a-zA-Z0-9_-]{1,128}$/;
@@ -29,6 +29,7 @@ export class ProjectTeamStore {
     this.db = new DatabaseSync(file); chmodSync(file, 0o600);
     this.db.exec('PRAGMA journal_mode=WAL; PRAGMA busy_timeout=3000;'); this.db.exec(SCHEMA); this.db.exec(SETTINGS_SCHEMA);
     const columns = (this.db.prepare("SELECT name FROM pragma_table_info('project_members')").all() as { name: string }[]).map(c => c.name);
+    if (!(this.db.prepare("SELECT name FROM pragma_table_info('project_team_settings')").all() as { name: string }[]).some(c => c.name === 'monthly_budget_tokens')) this.db.exec('ALTER TABLE project_team_settings ADD COLUMN monthly_budget_tokens INTEGER');
     for (const [name, definition] of PROFILE_COLUMNS) if (!columns.includes(name)) this.db.exec(`ALTER TABLE project_members ADD COLUMN ${name} ${definition}`);
   }
   private row(r: Record<string, unknown>): ProjectMember {
@@ -39,7 +40,7 @@ export class ProjectTeamStore {
       local: Boolean(r.local), createdAt: String(r.created_at), updatedAt: String(r.updated_at),
       title: typeof r.title === 'string' && r.title ? r.title : null, reportsTo: typeof r.reports_to === 'string' && r.reports_to ? r.reports_to : null,
       runner: typeof r.provider_id === 'string' && r.provider_id && typeof r.model === 'string' && r.model ? { providerId: r.provider_id, model: r.model } : null,
-      instructions: typeof r.instructions === 'string' ? r.instructions : '', pendingAt: typeof r.pending_at === 'string' ? r.pending_at : null };
+      instructions: typeof r.instructions === 'string' ? r.instructions : '', pendingAt: typeof r.pending_at === 'string' ? r.pending_at : null, pausedAt: typeof r.paused_at === 'string' ? r.paused_at : null };
   }
   /** Seeds the local owner and the default agent the first time a Project's team is read. */
   private ensure(projectId: string) {
@@ -100,18 +101,28 @@ export class ProjectTeamStore {
     this.db.prepare(`UPDATE project_members SET pending_at=NULL,${approve ? '' : 'revoked_at=?,'}updated_at=? WHERE project_id=? AND id=?`).run(...(approve ? [ts, projectId, id] : [ts, ts, projectId, id]));
     return this.must(projectId, id);
   }
+  /** Holds (pauses) or releases one agent. */
+  setPaused(projectId: string, id: string, paused: boolean): ProjectMember {
+    const member = this.must(projectId, id);
+    if (member.kind !== 'agent') throw new Error('Only agents can be paused.');
+    if (Boolean(member.pausedAt) === paused) return member;
+    this.db.prepare('UPDATE project_members SET paused_at=?,updated_at=? WHERE project_id=? AND id=?').run(paused ? now() : null, now(), projectId, id);
+    return this.must(projectId, id);
+  }
   settings(projectId: string): TeamSettings {
     const r = this.db.prepare('SELECT * FROM project_team_settings WHERE project_id=?').get(projectId) as Record<string, unknown> | undefined;
     if (!r) return { ...DEFAULT_TEAM_SETTINGS };
-    return { requireHireApproval: Number(r.require_hire_approval) === 1, keyPrefix: typeof r.key_prefix === 'string' && r.key_prefix ? r.key_prefix : null, monthlyBudgetUsd: r.monthly_budget_usd == null ? null : Number(r.monthly_budget_usd) };
+    return { requireHireApproval: Number(r.require_hire_approval) === 1, keyPrefix: typeof r.key_prefix === 'string' && r.key_prefix ? r.key_prefix : null, monthlyBudgetUsd: r.monthly_budget_usd == null ? null : Number(r.monthly_budget_usd), monthlyBudgetTokens: r.monthly_budget_tokens == null ? null : Number(r.monthly_budget_tokens) };
   }
   setSettings(projectId: string, patch: Partial<TeamSettings>): TeamSettings {
     const next = { ...this.settings(projectId), ...patch };
     if (next.keyPrefix !== null && !/^[A-Z][A-Z0-9]{0,7}$/.test(next.keyPrefix)) throw new Error('A task key prefix is 1–8 capital letters or digits, starting with a letter (e.g. OSS).');
     if (next.monthlyBudgetUsd !== null && (!Number.isFinite(next.monthlyBudgetUsd) || next.monthlyBudgetUsd < 0 || next.monthlyBudgetUsd > 1_000_000)) throw new Error('A monthly budget is between $0 and $1,000,000.');
-    this.db.prepare('INSERT INTO project_team_settings(project_id,require_hire_approval,key_prefix,monthly_budget_usd,updated_at) VALUES(?,?,?,?,?) ON CONFLICT(project_id) DO UPDATE SET require_hire_approval=excluded.require_hire_approval,key_prefix=excluded.key_prefix,monthly_budget_usd=excluded.monthly_budget_usd,updated_at=excluded.updated_at')
-      .run(projectId, next.requireHireApproval ? 1 : 0, next.keyPrefix, next.monthlyBudgetUsd, now());
-    return next;
+    const tokens = next.monthlyBudgetTokens ?? null;
+    if (tokens !== null && (!Number.isSafeInteger(tokens) || tokens < 1 || tokens > 1e12)) throw new Error('A token budget is a whole number of tokens, up to 1,000,000,000,000.');
+    this.db.prepare('INSERT INTO project_team_settings(project_id,require_hire_approval,key_prefix,monthly_budget_usd,monthly_budget_tokens,updated_at) VALUES(?,?,?,?,?,?) ON CONFLICT(project_id) DO UPDATE SET require_hire_approval=excluded.require_hire_approval,key_prefix=excluded.key_prefix,monthly_budget_usd=excluded.monthly_budget_usd,monthly_budget_tokens=excluded.monthly_budget_tokens,updated_at=excluded.updated_at')
+      .run(projectId, next.requireHireApproval ? 1 : 0, next.keyPrefix, next.monthlyBudgetUsd, tokens, now());
+    return { ...next, monthlyBudgetTokens: tokens };
   }
   update(projectId: string, id: string, patch: MemberPatch): { before: ProjectMember; after: ProjectMember } {
     const before = this.must(projectId, id);

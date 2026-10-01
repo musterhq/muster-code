@@ -5,6 +5,7 @@ import {WorkControls} from './components/WorkControls';
 import { ChatView } from './components/ChatView';
 import { Sidebar } from './components/Sidebar';
 import { SpotlightSearchHost } from './components/SpotlightSearch';
+import { WorkShortcutsHost } from './components/WorkShortcuts';
 import { ParallelRunHost } from './components/ParallelRunGuard';
 import { ImportConversationsHost } from './components/ImportConversations';
 import { SetupGuideHost } from './components/SetupGuide';
@@ -33,6 +34,8 @@ import { useStore } from './useStore';
 import { focusComposer } from './focus';
 import {goBack,goForward,installMenuActions,requestRename,useNavHistory,useRenameRequest} from './menuActions';
 import {applyDocumentPreferences,installSendKey,installSystemThemeListener} from './components/settings/preferences';
+import {requestedProject} from './webHost.ts';
+import {openProject} from './projectFocus';
 import './app-shell.css';
 
 /** Storage can be unavailable (private data dir, quota); a failed save must never break a resize. */
@@ -44,6 +47,8 @@ export function App(): React.ReactElement {
   const dragging = useRef(false);
   const history=useNavHistory();
   useEffect(()=>installMenuActions(),[]);
+  // Muster Server web UI: a desktop "Open" link lands here with ?project=<id> (#204). Inert in the desktop app.
+  useEffect(()=>{const id=requestedProject();if(id&&state.boot.phase==='ready'&&state.snapshot?.projects.some(p=>p.id===id)){openProject(id);window.history.replaceState(null,'',window.location.pathname);}},[state.boot.phase]);
   useEffect(()=>installSendKey(()=>getState().settings['general.sendKey']),[]);
   useEffect(()=>installSystemThemeListener(()=>getState().settings['appearance.theme']),[]);
   useEffect(()=>installResponsiveNav({navHidden:()=>getState().navHidden,setNavHidden}),[]);
@@ -110,6 +115,7 @@ export function App(): React.ReactElement {
         </div>
       </nav>
       <SpotlightSearchHost/>
+      <WorkShortcutsHost/>
       <ParallelRunHost/>
       <ImportConversationsHost/>
       <SetupGuideHost/>

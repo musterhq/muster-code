@@ -20,7 +20,7 @@ export function orderedSources(folderIds: string[], primary: string | null): str
  * "Choose folder…" (native picker) or "Clone repository…". The first source picked is primary until the user
  * makes another one primary. One project.create carries the folders and primary, so nothing is half-created.
  */
-export function NewProjectForm({ folders, onClose, onCreated }: { folders: Folder[]; onClose: () => void; onCreated: (p: Project) => void }) {
+export function NewProjectForm({ folders, onClose, onCreated }: { folders: Folder[]; onClose: () => void; onCreated: (p: Project, guided: boolean) => void }) {
   const [name, setName] = useState('');
   const [goal, setGoal] = useState('');
   const [folderIds, setFolderIds] = useState<string[]>([]);
@@ -29,6 +29,8 @@ export function NewProjectForm({ folders, onClose, onCreated }: { folders: Folde
   const [added, setAdded] = useState<Folder[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  // C20: after creating, open the Set up project wizard (mission, a first agent, a first task or an interview).
+  const [guided, setGuided] = useState(true);
   const first = useRef<HTMLInputElement>(null);
   // The clone sheet holds one stable handler; it forwards to the latest include() and is released on unmount.
   const includeRef = useRef<(folder: Folder) => void>(() => {});
@@ -55,7 +57,7 @@ export function NewProjectForm({ folders, onClose, onCreated }: { folders: Folde
     e.preventDefault();
     if (busy || !name.trim()) return;
     setError(''); setBusy(true);
-    try { onCreated(await invoke('project.create', { name: name.trim(), goal: goal.trim(), folderIds: sources, primaryFolderId: primaryId })); }
+    try { onCreated(await invoke('project.create', { name: name.trim(), goal: goal.trim(), folderIds: sources, primaryFolderId: primaryId }), guided); }
     catch (err) { setError(message(err, 'Could not create the project.')); }
     finally { setBusy(false); }
   }
@@ -79,6 +81,7 @@ export function NewProjectForm({ folders, onClose, onCreated }: { folders: Folde
       </ul>
       {sources.length === 0 && <p className="project-edit-hint">{listed.length ? 'No sources yet. ' : 'No folders in Muster yet. '}A project without sources starts chats in a private scratch folder, and its tasks need a folder before they can run.</p>}
     </div>
+    <label className="new-project-guided"><input type="checkbox" checked={guided} disabled={busy} onChange={e => setGuided(e.target.checked)}/>Guide me through setup <span className="optional">mission, a first agent and a first task</span></label>
     {error && <p role="alert" className="settings-error">{error}</p>}
     <div className="provider-actions">
       <button type="submit" className="settings-button" disabled={busy || !name.trim()}>{busy ? 'Creating…' : 'Create project'}</button>

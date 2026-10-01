@@ -2,7 +2,9 @@
 import type { ProjectEventsPage } from '../project-events.ts';
 import type { BoundedList, ChatPermissionMode, ProjectActivity, ProjectDecision, TaskStatus as LegacyTaskStatus } from '../protocol.ts';
 import { PROJECT_TEAM_COMMANDS, type ProjectTeamCommands } from './project-team-protocol.ts';
+import { PROJECT_GOVERNANCE_COMMANDS, type ProjectGovernanceCommands, type RunReason } from './project-governance-protocol.ts';
 export * from './project-team-protocol.ts';
+export * from './project-governance-protocol.ts';
 
 /** A Project with its admin state. `folderIds` lists the primary folder first; archived Projects refuse task dispatch. */
 export interface ProjectDetails { id: string; name: string; goal: string; folderIds: string[]; primaryFolderId: string | null; archived: boolean; archivedAt: string | null }
@@ -15,9 +17,10 @@ export interface ProjectImpact {
 }
 
 /** Full task lifecycle. The legacy `status` field keeps the five-state view older callers understand; `state` is the truth. */
-export type TaskState = 'todo' | 'running' | 'needs-input' | 'blocked' | 'review' | 'implemented' | 'verified' | 'failed' | 'cancelled';
-export const TASK_STATES: readonly TaskState[] = ['todo', 'running', 'needs-input', 'blocked', 'review', 'implemented', 'verified', 'failed', 'cancelled'];
-export const LEGACY_STATUS: Record<TaskState, LegacyTaskStatus> = { todo: 'todo', running: 'running', 'needs-input': 'running', blocked: 'blocked', review: 'implemented', implemented: 'implemented', verified: 'verified', failed: 'blocked', cancelled: 'blocked' };
+/** `backlog`: parked, not ready to start; the scheduler never picks it up until it moves to todo. */
+export type TaskState = 'backlog' | 'todo' | 'running' | 'needs-input' | 'blocked' | 'review' | 'implemented' | 'verified' | 'failed' | 'cancelled';
+export const TASK_STATES: readonly TaskState[] = ['backlog', 'todo', 'running', 'needs-input', 'blocked', 'review', 'implemented', 'verified', 'failed', 'cancelled'];
+export const LEGACY_STATUS: Record<TaskState, LegacyTaskStatus> = { backlog: 'todo', todo: 'todo', running: 'running', 'needs-input': 'running', blocked: 'blocked', review: 'implemented', implemented: 'implemented', verified: 'verified', failed: 'blocked', cancelled: 'blocked' };
 export interface TaskOwner { kind: 'user' | 'agent'; id: string }
 /** 0 urgent, 1 high, 2 normal, 3 low. */
 export type TaskPriority = 0 | 1 | 2 | 3;
@@ -73,7 +76,9 @@ export type CoordinatorOp =
   | { op: 'create'; ref?: string; title: string; acceptance?: string; dependsOn?: string[]; owner?: 'user' | 'agent'; priority?: TaskPriority }
   | { op: 'update'; id: string; title?: string; acceptance?: string; dependsOn?: string[]; owner?: 'user' | 'agent'; priority?: TaskPriority }
   | { op: 'status'; id: string; state: 'todo' | 'blocked' | 'review' | 'implemented' | 'cancelled'; reason?: string }
-  | { op: 'decision'; title: string; rationale?: string; scope?: string; relatedTaskIds?: string[] };
+  | { op: 'decision'; title: string; rationale?: string; scope?: string; relatedTaskIds?: string[] }
+  /** The project's mission: replaces its shared goal when you apply it (the setup interview ends with one). */
+  | { op: 'goal'; text: string };
 export interface CoordinatorProposal { key: string; itemId: string; createdAt: string; ops: CoordinatorOp[]; state: 'pending' | 'applied' | 'dismissed' | 'invalid'; error?: string }
 export interface CoordinatorState { chatId: string | null; proposals: CoordinatorProposal[] }
 export interface ProjectWorkState {
@@ -94,7 +99,7 @@ export interface ProjectStats {
   activity: (ProjectActivity & { projectName: string })[];
 }
 
-export interface ProjectsCommands extends ProjectTeamCommands {
+export interface ProjectsCommands extends ProjectTeamCommands, ProjectGovernanceCommands {
   'project.list': { input: undefined; output: ProjectDetails[] };
   /** Rename, change the goal, replace the folder set or set the primary folder. Removing a folder with a running chat is refused. */
   'project.update': { input: { id: string; name?: string; goal?: string; folderIds?: string[]; primaryFolderId?: string | null }; output: ProjectDetails };
@@ -108,18 +113,24 @@ export interface ProjectsCommands extends ProjectTeamCommands {
   'project.delete': { input: { id: string }; output: { deleted: true; detachedChats: number } };
   /** Everything the Project screen shows in one read: tasks with derived readiness, stale verification and waiting chats. */
   'project.work': { input: { projectId: string; activityLimit?: number }; output: ProjectWorkState };
-  'project.tasks.add': { input: { projectId: string; title: string; acceptance: string; dependencies: string[]; owner?: TaskOwner; priority?: TaskPriority; permissionMode?: ChatPermissionMode | null; budgetMinutes?: number | null; parentId?: string | null }; output: ProjectTaskView };
+  /** The first thing ever recorded for a project (immutable); an import uses it, with creation times, to tell a project it made from one of yours. */
+  'project.origin.get': { input: { projectId: string }; output: { firstActivity: { kind: string; at: string } | null } };
+  /** One task by id. */
+  'project.tasks.get': { input: { projectId: string; id: string }; output: ProjectTaskView };
+  /** `actor: 'import'`: the change is recorded as made by an import, so it never shows up as a comment in the task's thread. */
+  'project.tasks.add': { input: { projectId: string; title: string; acceptance: string; dependencies: string[]; owner?: TaskOwner; priority?: TaskPriority; permissionMode?: ChatPermissionMode | null; budgetMinutes?: number | null; parentId?: string | null; actor?: 'import' }; output: ProjectTaskView };
   /** Dashboard aggregates over the last `days` days (default 14), bucketed by the caller's UTC offset. Read-only. */
-  'project.stats': { input: { days?: number; utcOffsetMinutes?: number; activityLimit?: number }; output: ProjectStats };
-  'project.tasks.edit': { input: { projectId: string; id: string; revision: number; patch: TaskEdit }; output: ProjectTaskView };
+  /** `projectId`: one project's tasks, runs and activity (its Dashboard tab); omitted, every project. */
+  'project.stats': { input: { days?: number; utcOffsetMinutes?: number; activityLimit?: number; projectId?: string }; output: ProjectStats };
+  'project.tasks.edit': { input: { projectId: string; id: string; revision: number; patch: TaskEdit; actor?: 'import' }; output: ProjectTaskView };
   /** Refused while the task runs or while another task depends on it. */
   'project.tasks.delete': { input: { projectId: string; id: string; revision: number }; output: { deleted: true } };
   /** Manual transitions. Running and needs-input come only from real runs; verified only through project.tasks.verify. */
-  'project.tasks.setState': { input: { projectId: string; id: string; revision: number; state: TaskState; reason?: string }; output: ProjectTaskView };
+  'project.tasks.setState': { input: { projectId: string; id: string; revision: number; state: TaskState; reason?: string; actor?: 'import' }; output: ProjectTaskView };
   /** Structured verification. Requires implemented or review; records the folder HEAD so a later commit marks it stale. */
-  'project.tasks.verify': { input: { projectId: string; id: string; revision: number; kind: VerificationKind; notes: string; command?: string; reviewer?: string }; output: ProjectTaskView };
+  'project.tasks.verify': { input: { projectId: string; id: string; revision: number; kind: VerificationKind; notes: string; command?: string; reviewer?: string; actor?: 'import' }; output: ProjectTaskView };
   /** Starts one agent run for a task at the clamped permission mode and records the attempt. */
-  'project.tasks.dispatch': { input: { projectId: string; id: string; revision: number; folderId?: string }; output: { chatId: string; runId: string } };
+  'project.tasks.dispatch': { input: { projectId: string; id: string; revision: number; folderId?: string; /** Why the run starts (Assign & start passes 'assignment'). Default: started by you. */ reason?: RunReason }; output: { chatId: string; runId: string } };
   'project.decisions.add': { input: { projectId: string; title: string; rationale: string; scope: string; relatedTaskIds: string[] }; output: ProjectDecision };
   'project.decisions.edit': { input: { projectId: string; id: string; title?: string; rationale?: string; scope?: string; relatedTaskIds?: string[] }; output: ProjectDecision };
   'project.decisions.replace': { input: { projectId: string; id: string; replacementId: string }; output: ProjectDecision };
@@ -143,8 +154,8 @@ export interface ProjectsCommands extends ProjectTeamCommands {
   'project.events': { input: { projectId: string; after: number; limit?: number }; output: ProjectEventsPage };
 }
 export type ProjectsEvent = never;
-export const PROJECTS_COMMANDS = { ...PROJECT_TEAM_COMMANDS, 'project.list': true, 'project.update': true, 'project.linkFolder': true, 'project.unlinkFolder': true, 'project.preview': true, 'project.archive': true, 'project.restore': true, 'project.delete': true,
-  'project.work': true, 'project.tasks.add': true, 'project.stats': true, 'project.tasks.edit': true, 'project.tasks.delete': true, 'project.tasks.setState': true, 'project.tasks.verify': true, 'project.tasks.dispatch': true,
+export const PROJECTS_COMMANDS = { ...PROJECT_TEAM_COMMANDS, ...PROJECT_GOVERNANCE_COMMANDS, 'project.list': true, 'project.update': true, 'project.linkFolder': true, 'project.unlinkFolder': true, 'project.preview': true, 'project.archive': true, 'project.restore': true, 'project.delete': true,
+  'project.work': true, 'project.tasks.get': true, 'project.origin.get': true, 'project.tasks.add': true, 'project.stats': true, 'project.tasks.edit': true, 'project.tasks.delete': true, 'project.tasks.setState': true, 'project.tasks.verify': true, 'project.tasks.dispatch': true,
   'project.decisions.add': true, 'project.decisions.edit': true, 'project.decisions.replace': true, 'project.instructions.set': true, 'project.scheduler.set': true,
   'project.coordinator.start': true, 'project.coordinator.apply': true, 'project.coordinator.dismiss': true,
   'project.sources.list': true, 'project.sources.save': true, 'project.sources.remove': true, 'project.handoff.build': true, 'project.handoff.latest': true, 'project.handoff.ack': true, 'project.events': true } as const satisfies Record<keyof ProjectsCommands, true>;
@@ -198,6 +209,7 @@ function validateOp(raw: unknown): CoordinatorOp {
   if (o.op === 'create') return compact<CoordinatorOp>({ op: 'create', ref: str(o.ref, 'ref', 64, true), title: str(o.title, 'title', 500)!.trim(), acceptance: str(o.acceptance, 'acceptance', 4000, true), dependsOn: strs(o.dependsOn, 'dependsOn'), owner: ownerKind(o.owner), priority: prio(o.priority) });
   if (o.op === 'update') return compact<CoordinatorOp>({ op: 'update', id: str(o.id, 'task id', 128)!, title: str(o.title, 'title', 500, true), acceptance: str(o.acceptance, 'acceptance', 4000, true), dependsOn: strs(o.dependsOn, 'dependsOn'), owner: ownerKind(o.owner), priority: prio(o.priority) });
   if (o.op === 'status') { const state = o.state; if (state !== 'todo' && state !== 'blocked' && state !== 'review' && state !== 'implemented' && state !== 'cancelled') throw new Error('Coordinator status must be todo, blocked, review, implemented or cancelled.'); return compact<CoordinatorOp>({ op: 'status', id: str(o.id, 'task id', 128)!, state, reason: str(o.reason, 'reason', 2000, true) }); }
+  if (o.op === 'goal') return { op: 'goal', text: str(o.text, 'goal', 4000)!.trim() };
   if (o.op === 'decision') return compact<CoordinatorOp>({ op: 'decision', title: str(o.title, 'decision title', 500)!.trim(), rationale: str(o.rationale, 'rationale', 8000, true), scope: str(o.scope, 'scope', 500, true), relatedTaskIds: strs(o.relatedTaskIds, 'relatedTaskIds') });
   throw new Error(`Unknown operation ${JSON.stringify(o.op)}.`);
 }
