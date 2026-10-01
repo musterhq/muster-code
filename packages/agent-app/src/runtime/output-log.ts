@@ -1,3 +1,4 @@
+import {redactLiterals} from './literal-redaction.ts';
 import {createHash} from 'node:crypto';
 import {constants,promises as fs} from 'node:fs';
 import {join} from 'node:path';
@@ -55,6 +56,8 @@ export class OutputLog {
   }
   /** Queue output for the durable log. Never throws for disk problems; the live tail is unaffected. */
   append(chatId:string,key:string,text:string):void {
+    text=redactLiterals(chatId,text); // best effort per chunk: a value split across two chunks is not seen
+
     if(!text)return;
     let location;try{location=this.location(chatId,key);}catch{return;}
     const pending=this.pending.get(location.file)??{...location,chunks:[],bytes:0};

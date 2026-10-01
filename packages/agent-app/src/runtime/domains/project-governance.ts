@@ -21,6 +21,7 @@ import {
 } from '../../shared/domains/project-governance-protocol.ts';
 import { budgetUse } from '../../shared/domains/paperclip-protocol.ts';
 import { redactSecrets } from '../secret-redaction.ts';
+import { forgetLiterals, lendLiterals } from '../literal-redaction.ts';
 import { activeSecretStore, SecretStore } from '../secret-store.ts';
 import { isAdapterProvider } from '../adapters/index.ts';
 import type { Actor, ProjectTask, ProjectTaskStore } from '../project-tasks.ts';
@@ -856,6 +857,7 @@ export function createGovernance(ctx: DomainContext, deps: GovernanceDeps) {
       const fresh = tasks().getTask(task.id);
       if (status === 'completed' && fresh?.state === 'implemented') await startStage(fresh);
     } finally {
+      forgetLiterals(chat.id);
       try { autoRelease(projectId); budgetDirty.add(projectId); const later = timers.set(() => { budgetLater.delete(later); void refreshBudget(projectId, true); }, 1500); budgetLater.add(later); await wakeQueue().released(projectId, task.id); scheduleEval(projectId); } catch { /* housekeeping never fails a run */ }
       deps.changed(projectId, task.id);
     }
@@ -999,6 +1001,7 @@ export function createGovernance(ctx: DomainContext, deps: GovernanceDeps) {
     const g = agentGov(chat.projectId, m.id), overrides: Record<string, string> = {};
     if (g.gitIdentity) Object.assign(overrides, envOverrides(g.gitIdentity));
     if (canLend(chat.providerId)) for (const name of m.secrets) { const v = theVault().value(chat.projectId, name); if (v) overrides[`shell_environment_policy.set.${name}`] = v.value; }
+    lendLiterals(chat.id, m.secrets.flatMap(n => canLend(chat.providerId) ? [theVault().value(chat.projectId!, n)?.value ?? ''] : []));
     if (m.secrets.length && !lent.has(chat.id)) { lent.add(chat.id); lendable(chat.projectId, m, chat.id, true); if (lent.size > 500) lent.clear(); }
     return Object.keys(overrides).length ? { configOverrides: overrides } : null;
   }

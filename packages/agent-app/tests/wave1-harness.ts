@@ -117,6 +117,12 @@ export async function wave1(t: TestContext, opts: Wave1Options = {}) {
         await touch('APPROVE.md', JSON.stringify(decision));
         return done(`Decision: ${JSON.stringify(decision)}`);
       }
+      if (/W1-ECHO/.test(first)) {
+        const lent = Object.entries(input.configOverrides ?? {}).filter(([k]) => k.startsWith('shell_environment_policy.set.NPM')).map(([, v]) => String(v)).join(' ');
+        const item = { id: `echo-${turn}`, type: 'commandExecution', command: 'env', status: 'completed', aggregatedOutput: `NPM_TOKEN=${lent}\nHOME=/x`, exitCode: 0 };
+        input.onEvent('item/started', { item: { ...item, status: 'inProgress', aggregatedOutput: undefined } }); input.onEvent('item/completed', { item });
+        return done(`The token is ${lent}`);
+      }
       if (/W1-ENV/.test(first)) { await touch('ENV.md', 'env\n'); return done('Ran with env.'); }
       const say = SAY.exec(first)?.[1];
       await touch(`NOTE-${turn}.md`, 'edited\n');
