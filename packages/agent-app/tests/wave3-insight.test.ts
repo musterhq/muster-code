@@ -67,7 +67,7 @@ test('G24/G38: the commands read the real Ledger after real runs, priced once a 
   const unpriced = await h.s.invoke('insight.costs', { days: 7 });
   assert.equal(unpriced.entries, 1); assert.equal(unpriced.totals.costUsd, null); assert.equal(unpriced.totals.unpricedTurns, 1);
   assert.equal(unpriced.byProject[0]!.label, 'OSSMANAGER'); assert.equal(unpriced.byAgent[0]!.label, 'CTO'); assert.ok(unpriced.totals.inputTokens > 0);
-  assert.ok(unpriced.windows.some(w => w.providerId === 'codex' || w.reports));
+  assert.ok(Array.isArray(unpriced.windows) && unpriced.windows.every(w => w.reports && w.name), 'provider windows are listed for the providers that report them (none on a machine without Codex)');
   await h.s.invoke('models.policy.setPricing', { key: modelKey('scripted', 'scripted-model'), pricing: { inputPerMTok: 10, outputPerMTok: 20 } });
   const b = await h.addTask('Ship it again', { kind: 'agent', id: cto.id });
   await h.start(b.id); await h.settled(b.id);
