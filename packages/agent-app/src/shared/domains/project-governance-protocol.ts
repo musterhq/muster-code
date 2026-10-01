@@ -190,6 +190,11 @@ export interface GovernanceState {
   watchdogs: Watchdog[]; monitors: TaskMonitor[]; breakers: BreakerEvent[]; recovery: RecoveryItem[];
   proposals: SecretProposal[]; runs: RunMeta[]; wakes: WakeRecord[];
 }
+export interface TaskGovernanceRead {
+  stage: TaskStageState | null; policy: ExecutionPolicy | null; effectivePolicy: ExecutionPolicy | null;
+  hold: { id: string; mode: HoldMode; rootKey: string; rootTitle: string; reason: string } | null; hidden: boolean; runs: RunMeta[]; monitor: TaskMonitor | null; watchdog: Watchdog | null;
+  agents: { memberId: string; name: string }[]; proposals: SecretProposal[]; secureStorage: boolean; defaultPolicy: ExecutionPolicy | null; holdStatus: HoldStatus | null;
+}
 export interface AgentGovernanceView {
   governance: AgentGovernance; files: BundleFile[]; revisions: AgentRevision[]; wakes: WakeRecord[]; runs: RunMeta[];
   /** The permission ceiling of this agent's runs in this project, and why. */
@@ -206,6 +211,8 @@ export interface ProjectGovernanceCommands {
   /** The light read the workspace snapshot uses: Inbox rows for what needs you, hidden tasks, and tasks under an active hold. */
   'project.gov.summary': { input: { projectId: string }; output: { items: GovInboxItem[]; hidden: string[]; held: string[] } };
   'project.gov.state': { input: { projectId: string }; output: GovernanceState };
+  /** One task's governance for its thread (stage, policy, hold, hidden, runs, follow-up, finding, secret requests). Cheaper than the project-wide state. */
+  'project.gov.task': { input: { projectId: string; taskId: string }; output: TaskGovernanceRead };
   'project.gov.settings.set': { input: { projectId: string } & Partial<Omit<GovernanceSettings, 'defaultPolicy'>> & { defaultPolicy?: PolicyInput | null }; output: GovernanceSettings };
   'project.agent.gov.get': { input: { projectId: string; memberId: string }; output: AgentGovernanceView };
   'project.agent.gov.set': { input: { projectId: string; memberId: string; heartbeat?: Partial<HeartbeatPolicy>; capabilities?: Partial<AgentCapabilities>; toolRules?: Omit<ToolRule, 'id'>[]; gitIdentity?: GitIdentity | null }; output: AgentGovernance };
@@ -238,7 +245,7 @@ export interface ProjectGovernanceCommands {
   'project.secrets.audit': { input: { projectId: string; name?: string; limit?: number }; output: { events: SecretEvent[] } };
 }
 export const PROJECT_GOVERNANCE_COMMANDS = {
-  'project.gov.state': true, 'project.gov.summary': true, 'project.gov.settings.set': true, 'project.agent.gov.get': true, 'project.agent.gov.set': true, 'project.agent.wake': true,
+  'project.gov.state': true, 'project.gov.task': true, 'project.gov.summary': true, 'project.gov.settings.set': true, 'project.agent.gov.get': true, 'project.agent.gov.set': true, 'project.agent.wake': true,
   'project.agent.files.save': true, 'project.agent.files.remove': true, 'project.agent.revisions.restore': true,
   'project.tasks.policy.set': true, 'project.tasks.decide': true, 'project.holds.create': true, 'project.holds.release': true, 'project.tasks.hide': true, 'project.tasks.stop': true,
   'project.watchdogs.resolve': true, 'project.watchdogs.review': true, 'project.monitors.set': true, 'project.monitors.clear': true, 'project.breakers.resolve': true, 'project.recovery.resolve': true,

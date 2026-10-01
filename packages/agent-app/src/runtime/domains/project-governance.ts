@@ -91,15 +91,23 @@ export function createGovernance(ctx: DomainContext, deps: GovernanceDeps) {
 
   // ── holds (G10) ─────────────────────────────────────────────────────────────
   /** The active hold covering a task: its own, or one on any ancestor. */
-  function holdFor(t: Pick<ProjectTaskRecord, 'id' | 'projectId'>): { id: string; mode: HoldMode; rootKey: string; rootTitle: string; reason: string } | null {
-    const active = gov().holds(t.projectId, 'active');
-    if (!active.length) return null;
-    const tree = treeOf(t.projectId), chain = new Set([t.id, ...ancestorsOf(tree, t.id)]);
-    const hit = active.find(h => chain.has(h.rootTaskId));
-    if (!hit) return null;
-    const root = tree.find(x => x.id === hit.rootTaskId);
-    return { id: hit.id, mode: hit.mode, rootKey: root ? keyOf({ projectId: t.projectId, seq: root.seq }) : '', rootTitle: root?.title ?? '', reason: hit.reason };
+  type HoldInfo = { id: string; mode: HoldMode; rootKey: string; rootTitle: string; reason: string };
+  /** The active holds of a project resolved once: a lookup walks a task's ancestors in a prebuilt map, so a pass over n tasks costs n steps, not n tree reads. */
+  function holdIndex(projectId: string): (taskId: string) => HoldInfo | null {
+    const active = gov().holds(projectId, 'active');
+    if (!active.length) return () => null;
+    const tree = treeOf(projectId), byId = new Map(tree.map(t => [t.id, t])), roots = new Map(active.map(h => [h.rootTaskId, h]));
+    return taskId => {
+      const seen = new Set<string>();
+      for (let at: string | null | undefined = taskId; at && !seen.has(at); at = byId.get(at)?.parentId) {
+        seen.add(at);
+        const hit = roots.get(at);
+        if (hit) { const root = byId.get(hit.rootTaskId); return { id: hit.id, mode: hit.mode, rootKey: root ? keyOf({ projectId, seq: root.seq }) : '', rootTitle: root?.title ?? '', reason: hit.reason }; }
+      }
+      return null;
+    };
   }
+  const holdFor = (t: Pick<ProjectTaskRecord, 'id' | 'projectId'>): HoldInfo | null => holdIndex(t.projectId)(t.id);
   const heldMessage = (h: NonNullable<ReturnType<typeof holdFor>>) => `Held: ${h.mode === 'cancel' ? 'cancelled' : 'paused'} with ${h.rootKey || 'its parent task'}${h.rootTitle ? ` “${clip(h.rootTitle, 60)}”` : ''}${h.reason ? ` (${clip(h.reason, 80)})` : ''}. Release the hold first.`;
   /** The reason a task may not start now, or null. Called by dispatch, the wake queue and the scheduler. */
   function gate(t: Pick<ProjectTaskRecord, 'id' | 'projectId'> & { owner?: TaskOwner }): string | null {
@@ -136,7 +144,13 @@ export function createGovernance(ctx: DomainContext, deps: GovernanceDeps) {
   }
   /** Before every dispatch: holds, per-agent concurrency and the budget stop. */
   async function preflight(t: ProjectTask): Promise<string | null> { await refreshBudget(t.projectId); return gate(t); }
-  const held = (t: ProjectTask): boolean => Boolean(holdFor(t));
+  /** The scheduler asks once per candidate task: the index is shared for a second instead of rebuilt each time. */
+  const heldMemo = new Map<string, { at: number; fn: (id: string) => HoldInfo | null }>();
+  const held = (t: ProjectTask): boolean => {
+    let m = heldMemo.get(t.projectId);
+    if (!m || now() - m.at > 1000) { m = { at: now(), fn: holdIndex(t.projectId) }; heldMemo.set(t.projectId, m); }
+    return Boolean(m.fn(t.id));
+  };
   const projectHold = (projectId: string): string | null => {
     const s = tasks().schedule(projectId);
     if (s.paused) return 'This project is paused. Resume it first.';
@@ -214,8 +228,8 @@ export function createGovernance(ctx: DomainContext, deps: GovernanceDeps) {
   });
   /** Picks the task a task-less wake (timer, on demand) works on: the owner's highest-priority ready task. */
   function readyTaskFor(projectId: string, memberId: string): ProjectTask | undefined {
-    const all = taskList(projectId), byId = new Map(all.map(t => [t.id, t]));
-    return all.filter(t => t.owner.kind === 'agent' && t.owner.id === memberId && (t.state === 'todo' || t.state === 'backlog' || t.state === 'failed') && t.dependencies.every(d => byId.get(d)?.state === 'verified') && !holdFor(t))
+    const all = taskList(projectId), byId = new Map(all.map(t => [t.id, t])), heldOf = holdIndex(projectId);
+    return all.filter(t => t.owner.kind === 'agent' && t.owner.id === memberId && (t.state === 'todo' || t.state === 'backlog' || t.state === 'failed') && t.dependencies.every(d => byId.get(d)?.state === 'verified') && !heldOf(t.id))
       .sort((a, b) => a.priority - b.priority || a.createdAt.localeCompare(b.createdAt))[0];
   }
   async function deliverWake(w: { projectId: string; memberId: string; taskId: string | null; reason: RunReason; reasons: RunReason[]; notes: string[] }): Promise<{ chatId: string | null }> {
@@ -487,10 +501,10 @@ export function createGovernance(ctx: DomainContext, deps: GovernanceDeps) {
 
   // ── watchdogs, monitors, recovery (C17, G9) ─────────────────────────────────
   const evalTimers = new Map<string, unknown>();
-  /** Coalesces any number of triggers into one evaluation on the next tick. */
+  /** Coalesces any number of triggers within 100 ms into one evaluation. */
   function scheduleEval(projectId: string) {
     if (disposed || evalTimers.has(projectId)) return;
-    evalTimers.set(projectId, timers.set(() => { evalTimers.delete(projectId); void evaluateWatchdogs(projectId).catch(() => undefined); }, 0));
+    evalTimers.set(projectId, timers.set(() => { evalTimers.delete(projectId); void evaluateWatchdogs(projectId).catch(() => undefined); }, 100));
   }
   function pendingPath(projectId: string, ids: ReadonlySet<string>): boolean {
     if (gov().monitors(projectId).some(m => m.state === 'scheduled' && ids.has(m.taskId))) return true;
@@ -615,11 +629,11 @@ export function createGovernance(ctx: DomainContext, deps: GovernanceDeps) {
 
   // Recovery: what is stuck, computed when read (no polling), each with a way out.
   function recoveryItems(projectId: string): RecoveryItem[] {
-    const out: RecoveryItem[] = [], all = taskList(projectId);
+    const out: RecoveryItem[] = [], all = taskList(projectId), holdAt = holdIndex(projectId);
     const runs = new Map(gov().runsFor(projectId, { limit: 300 }).map(r => [r.chatId, r]));
     const skip = (taskId: string, kind: string, since: string) => { const at = gov().recoveryDismissed(taskId, kind); return Boolean(at && at >= since); };
     for (const t of all) {
-      const key = keyOf(t), meta = t.runChatId ? runs.get(t.runChatId) : undefined, hold = holdFor(t);
+      const key = keyOf(t), meta = t.runChatId ? runs.get(t.runChatId) : undefined, hold = holdAt(t.id);
       if (LIVE.has(t.state) && t.runChatId) {
         const chat = ctx.store.chat(t.runChatId);
         if (chat && !ACTIVE.has(chat.status) && !meta?.pendingAt && chat.status !== 'queued' as never && !pendingMeta.has(chat.id) && Date.parse(t.updatedAt) < now() - 5_000 && !skip(t.id, 'orphaned_run', t.updatedAt))
@@ -635,7 +649,7 @@ export function createGovernance(ctx: DomainContext, deps: GovernanceDeps) {
     }
     // One "held" row per hold root is plenty.
     const seen = new Set<string>();
-    return out.filter(i => { if (i.kind !== 'held') return true; const root = holdFor(all.find(t => t.id === i.taskId)!)?.id ?? i.taskId; if (seen.has(root)) return false; seen.add(root); return true; });
+    return out.filter(i => { if (i.kind !== 'held') return true; const root = holdAt(i.taskId)?.id ?? i.taskId; if (seen.has(root)) return false; seen.add(root); return true; });
   }
   async function resolveRecovery(projectId: string, taskId: string, action: RecoveryAction): Promise<void> {
     const t = tasks().assertTaskProject(projectId, taskId);
@@ -1086,6 +1100,19 @@ export function createGovernance(ctx: DomainContext, deps: GovernanceDeps) {
   const commands = () => ({
     'project.gov.state': (input: Record<string, unknown>) => { armAll(); return governanceState(project(input)); },
     'project.gov.summary': (input: Record<string, unknown>) => { const projectId = project(input), active = gov().holds(projectId, 'active'), tree = treeOf(projectId); return { items: inboxItems(projectId), hidden: gov().hidden(projectId), held: [...new Set(active.flatMap(h => subtreeIds(tree, h.rootTaskId)))] }; },
+    /** One task's governance for its thread: no project-wide recovery or run scans, so a live run's refreshes stay cheap. */
+    'project.gov.task': (input: Record<string, unknown>) => {
+      const projectId = project(input), taskId = id(input.taskId, 'task id'); tasks().assertTaskProject(projectId, taskId); expireProposals(projectId);
+      const v = taskView(projectId, taskId), ids = new Set([taskId]);
+      const hold = v.hold ? gov().getHold(v.hold.id) : undefined;
+      return {
+        stage: v.stage, policy: v.policy, effectivePolicy: v.effectivePolicy, hold: v.hold ? { id: v.hold.id, mode: v.hold.mode, rootKey: v.hold.rootKey, rootTitle: v.hold.rootTitle, reason: v.hold.reason } : null,
+        hidden: v.hidden, runs: v.runs, monitor: gov().monitors(projectId).find(m => ids.has(m.taskId)) ? monitorView(gov().monitors(projectId).find(m => ids.has(m.taskId))!) : null,
+        watchdog: gov().openWatchdogFor(taskId) ? viewWatchdog(gov().openWatchdogFor(taskId)!) : null,
+        agents: team().list(projectId).filter(m => m.kind === 'agent' && m.id !== 'agent' && !m.revokedAt && !m.pendingAt).map(m => ({ memberId: m.id, name: m.name })),
+        proposals: gov().proposals(projectId).filter(p => p.taskId === taskId), secureStorage: theVault().secure(), defaultPolicy: settings(projectId).defaultPolicy, holdStatus: hold?.status ?? null,
+      };
+    },
     'project.gov.settings.set': (input: Record<string, unknown>) => {
       const projectId = project(input), cur = settings(projectId), next: GovernanceSettings = { ...cur };
       if (input.runComment !== undefined) { if (!['off', 'notice', 'require'].includes(String(input.runComment))) throw new Error('Choose off, notice or require.'); next.runComment = input.runComment as GovernanceSettings['runComment']; }
