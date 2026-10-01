@@ -135,6 +135,40 @@ assert.deepEqual(text('.task-col-head span:not(.task-col-count)'),['Backlog','To
 assert.deepEqual(text('.task-col[data-status="in_review"] .task-card .ws-key'),['OSS-1']);
 assert.ok(JSON.parse(storage.get('muster.tasks.view.p1')!).layout==='board','the view is remembered per project');
 await click(button(/^List$/));
+// Every Tasks menu opens without taking the page down (Sort and Group crashed with Base UI error #31: a group label
+// outside its group). Each pick is applied, and the view toggles both ways.
+{
+  const menuItems=(role:string)=>[...document.querySelectorAll(`[role="${role}"]`)];
+  await click(button(/^Sort:/));
+  assert.equal(document.querySelectorAll('[role="menu"]').length,1,'the Sort menu opens');
+  assert.deepEqual(text('[role="menu"] .ui-menu-label'),['Sort by']);
+  assert.equal(menuItems('menuitemradio').length,7);
+  await click(menuItems('menuitemradio').find(i=>/Title/.test(i.textContent!)),80);
+  assert.match(button(/^Sort:/)!.getAttribute('aria-label')!,/Sort: Title/);
+  if(document.querySelector('[role="menu"]'))await click(button(/^Sort:/),80);
+  await click(button(/^Group:/));
+  assert.equal(document.querySelectorAll('[role="menu"]').length,1,'the Group menu opens');
+  assert.deepEqual(text('[role="menu"] .ui-menu-label'),['Group by']);
+  await click(menuItems('menuitemradio').find(i=>/Status/.test(i.textContent!)),80);
+  assert.match(button(/^Group:/)!.getAttribute('aria-label')!,/Group: Status/);
+  assert.ok(document.querySelectorAll('.task-group-head').length>=2,'grouped by status');
+  if(document.querySelector('[role="menu"]'))await click(button(/^Group:/),80);
+  await click(button(/^Group:/));
+  await click(menuItems('menuitemradio').find(i=>/None/.test(i.textContent!)),80);
+  if(document.querySelector('[role="menu"]'))await click(button(/^Group:/),80);
+  await click(button(/^Filter$/));
+  assert.equal(document.querySelectorAll('[role="menu"]').length,1,'the Filter menu opens');
+  await click(button(/^Filter/),80);
+  await click(button(/^Board$/));
+  assert.ok(document.querySelector('.task-col'),'the board view');
+  await click(button(/^Sort:/));
+  assert.equal(document.querySelectorAll('[role="menu"]').length,1,'Sort opens on the board too');
+  await click(button(/^Sort:/),80);
+  await click(button(/^List$/));
+  assert.ok(document.querySelector('.task-row'),'back to the list view');
+  assert.ok(document.querySelector('[role="tab"]'),'the project page is still up');
+  assert.deepEqual(errors,[]);
+}
 
 // --- New task with Assign & start --------------------------------------------------------------------------------------------
 await click(button(/^New task$/));
