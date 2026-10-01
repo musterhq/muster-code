@@ -38,7 +38,7 @@ const snapshot={paperclip:null,goals:[],
   tasks:[task('t1','OSS-1','Migration wizard','in_review'),task('t2','OSS-2','Design the wizard','done',{parentId:'t1',assigneeId:'user:local',assigneeLabel:'You'}),task('t3','OSS-3','Docs','blocked',{priority:'high',live:true})],
   agents:[{id:'user:local',name:'You',role:'board',title:'Owner',model:null,adapter:null,source:'local',status:'active',reportsTo:null,lastActiveAt:null,error:null,pausable:false,capabilities:null},
     agent('cto','CTO',{status:'running'}),agent('qa','QA',{reportsTo:'member:cto'}),agent('des','Designer',{status:'pending',pausable:false,title:'Product designer',instructions:'Own the mockups.'})],
-  projects:[{id:'p1',name:'OSSMANAGER',status:'in_progress',description:'',source:'local',repo:'github.com/hybrowlabs/oss-manager',cwd:'/work/oss',taskCount:3,openCount:2,paused:false,memory:null}],
+  projects:[{id:'p1',name:'OSSMANAGER',org:'RagnarDataOps',status:'in_progress',description:'',source:'local',repo:'github.com/hybrowlabs/oss-manager',cwd:'/work/oss',taskCount:3,openCount:2,paused:false,memory:null}],
   runs:[{id:'r1',agentId:'member:cto',taskId:'t3',status:'running',trigger:'user',source:'local',createdAt:ago(3),startedAt:ago(3),finishedAt:null,error:null,cancellable:true,chatId:'c1'},
     {id:'r2',agentId:'member:qa',taskId:'t1',status:'succeeded',trigger:'user',source:'local',createdAt:ago(40),startedAt:ago(40),finishedAt:ago(30),error:null,cancellable:false,chatId:'c2'}],
   inbox:[{id:'hire:p1:des',kind:'approval',title:'Add Designer as Product designer to OSSMANAGER?',why:'',severity:'high',at:now,taskId:null,agentId:'member:des',runId:null,projectId:'p1',group:'OSSMANAGER',source:'local'}],
@@ -95,6 +95,7 @@ root.render(<ProjectPage snapshot={snapshot as any} projectId="p1" nav={nav} mus
 await delay(150);
 assert.deepEqual(errors,[]);
 assert.deepEqual(text('[role="tab"]'),['Dashboard','Tasks','Roster','Outputs','Ledger','Budget','Settings']);
+assert.match(text('.pp-imported-note')[0],/Imported copy from RagnarDataOps\. Paperclip changes arrive when you import again; edits here.*stay in Muster/,'an imported project says it is a copy');
 assert.match(text('.pp-sub')[0],/github\.com\/hybrowlabs\/oss-manager.*2 open of 3/);
 // Tasks: a nested list, keys with the project prefix, owners and ages on the right.
 const keys=()=>text('.task-row .ws-key');
@@ -252,18 +253,33 @@ root2.unmount();
 // --- Import mapping --------------------------------------------------------------------------------------------------------------------
 const root3=createRoot(document.getElementById('root')!,{onUncaughtError:(e:unknown)=>{(errors as unknown[]).push(e);}});
 let imported=0,changed:[string,string]|null=null;
-root3.render(<ImportMapping plan={{company:{id:'c',name:'RagnarDataOps'},companies:[],muster:[{id:'p1',name:'OSSMANAGER',folders:['/work/oss']}],
-  projects:[{id:'pc1',name:'OSS Manager',repo:'github.com/hybrowlabs/oss-manager',localFolder:'/work/oss',taskCount:16,mappedTo:null,suggestion:{projectId:'p1',reason:'folder'}},{id:'pc2',name:'Muster',repo:null,localFolder:null,taskCount:0,mappedTo:null,suggestion:null}]} as any}
-  targets={{pc1:'p1',pc2:'new'}} busy={false} onChange={(a,b)=>{changed=[a,b];}} onCancel={()=>{}} onImport={()=>{imported++;}}/>);
+root3.render(<ImportMapping plan={{company:{id:'c',name:'RagnarDataOps'},companies:[],local:true,
+  projects:[{id:'pc1',name:'OSS Manager',repo:'github.com/hybrowlabs/oss-manager',localFolder:'/work/oss',taskCount:16,existing:'new'},{id:'pc2',name:'Muster',repo:null,localFolder:null,taskCount:0,existing:'imported'},{id:'pc3',name:'Docs',repo:null,localFolder:null,taskCount:2,existing:'detached'}]} as any}
+  targets={{pc1:'import',pc2:'import',pc3:'import'}} busy={false} onChange={(a,b)=>{changed=[a,b];}} onCancel={()=>{}} onImport={()=>{imported++;}}/>);
 await delay(60);
-assert.deepEqual(text('.ws-import-map .ws-row-title'),['OSS Manager','Muster']);
-assert.deepEqual(text('.ws-import-map .ws-chip'),['Matched: same folder']);
-assert.deepEqual([...(document.querySelector('.ws-import-map select') as HTMLSelectElement).options].map(o=>o.textContent),['Fill OSSMANAGER','New project','Don’t import']);
+assert.deepEqual(text('.ws-import-map .ws-row-title'),['OSS Manager','Muster','Docs']);
+assert.equal(text('.ws-import-map .ws-chip').length,0,'nothing is matched to your own projects');
+assert.match(text('.ws-import-map .ws-row-meta')[0],/new project/);assert.match(text('.ws-import-map .ws-row-meta')[1],/updated in place/);assert.match(text('.ws-import-map .ws-row-meta')[2],/your own project is left alone/);
+assert.deepEqual([...(document.querySelector('.ws-import-map select') as HTMLSelectElement).options].map(o=>o.textContent),['Import','Don’t import']);
+assert.deepEqual([...document.querySelectorAll('.ws-import-map select')[1].querySelectorAll('option')].map(o=>o.textContent),['Update','Don’t import']);
 await setValue(document.querySelectorAll('.ws-import-map select')[1],'skip');
 assert.deepEqual(changed,['pc2','skip']);
-await click(button(/^Import 2 projects$/));
+await click(button(/^Import 3 projects$/));
 assert.equal(imported,1);
 root3.unmount();
+{
+  // An earlier import's project that cannot be told from yours by its records: the plan asks, and Import waits for the answer.
+  const rootAsk=createRoot(document.getElementById('root')!,{onUncaughtError:(e:unknown)=>{(errors as unknown[]).push(e);}});
+  const owner:string[]=[];
+  rootAsk.render(<ImportMapping plan={{company:{id:'c',name:'RagnarDataOps'},companies:[],local:true,projects:[{id:'pc9',name:'Old import',repo:null,localFolder:null,taskCount:1,existing:'ask',added:{tasks:3,members:0,chats:5}},{id:'pc8',name:'Other old import',repo:null,localFolder:null,taskCount:1,existing:'ask'}]} as any} targets={{pc9:'import',pc8:'import'}} owners={{}} onOwner={(id,v)=>owner.push(`${id}:${v}`)} busy={false} onChange={()=>{}} onCancel={()=>{}} onImport={()=>{}}/>);
+  await delay(60);
+  assert.match(text('.ws-import-map .ws-row-meta')[0],/you added 3 tasks and 5 chats: probably yours/,'what you added is shown');
+  assert.deepEqual([...document.querySelector('.ws-import-map select[id^="import-owner"]')!.querySelectorAll('option')].map(o=>o.textContent),['Whose is it?','Mine','Made by the import']);
+  assert.equal((button(/^Import 2 projects$/) as HTMLButtonElement).disabled,true,'no import until each is answered');
+  await setValue(document.querySelector('.ws-import-map select[aria-label="Same answer for all"]')!,'mine');
+  assert.deepEqual(owner,['pc9:mine','pc8:mine'],'one answer for all');
+  rootAsk.unmount();
+}
 
 // S44: "Open project" from the sidebar lands on the project the first time, even when React discards a first render.
 {

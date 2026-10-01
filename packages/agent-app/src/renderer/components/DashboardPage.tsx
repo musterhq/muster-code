@@ -29,12 +29,15 @@ export function dashboardTiles(snapshot: WorkspaceSnapshot, data: DashboardData 
   const count = (s: WorkspaceAgent['status']) => agents.filter(a => a.status === s).length;
   const open = snapshot.tasks.filter(t => t.status !== 'done' && t.status !== 'cancelled');
   const spend = data?.spend;
+  const base = !spend ? { value: '…', detail: 'Reading the Ledger' }
+    : spend.usd === null ? { value: spend.unpricedTurns ? 'Unpriced' : formatUsd(0), detail: spend.unpricedTurns ? `${spend.unpricedTurns} unpriced ${spend.unpricedTurns === 1 ? 'turn' : 'turns'} this month` : 'No agent turns this month' }
+    : { value: formatUsd(spend.usd), detail: `${spend.pricedTurns} priced ${spend.pricedTurns === 1 ? 'turn' : 'turns'}${spend.unpricedTurns ? ` + ${spend.unpricedTurns} unpriced` : ''} this month` };
+  // The linked Paperclip's company budget: how much of it this month has used.
+  const company = data?.budgets?.policies.find(p => p.scope === 'company');
   return {
     agents: { value: agents.length, detail: `${count('running')} running, ${count('paused')} paused, ${count('error')} ${count('error') === 1 ? 'error' : 'errors'}` },
     tasks: { value: snapshot.tasks.filter(t => t.status === 'in_progress').length, detail: `${open.length} open, ${open.filter(t => t.status === 'blocked').length} blocked` },
-    spend: !spend ? { value: '…', detail: 'Reading the Ledger' }
-      : spend.usd === null ? { value: spend.unpricedTurns ? 'Unpriced' : formatUsd(0), detail: spend.unpricedTurns ? `${spend.unpricedTurns} unpriced ${spend.unpricedTurns === 1 ? 'turn' : 'turns'} this month` : 'No agent turns this month' }
-      : { value: formatUsd(spend.usd), detail: `${spend.pricedTurns} priced ${spend.pricedTurns === 1 ? 'turn' : 'turns'}${spend.unpricedTurns ? ` + ${spend.unpricedTurns} unpriced` : ''} this month` },
+    spend: company ? { ...base, detail: `${base.detail} · ${Math.round(company.percent)}% of ${formatUsd(company.limitUsd)} ${data!.budgets!.company} budget` } : base,
     approvals: { value: snapshot.inbox.filter(i => i.kind === 'approval').length, detail: 'Waiting for your decision' },
   };
 }

@@ -103,3 +103,9 @@ test('Wave 1 governance commands: reads are reads, everything else is a write, s
   authorizeResource(owner, 'project.secrets.list', 'read', { projectId: 'p-shared' }, snapshot);
   denied(() => authorizeResource(accessView(user('viewer'), [{ projectId: 'p-view', role: 'viewer' }], owners), 'project.agent.wake', 'write', { projectId: 'p-view' }, snapshot));
 });
+
+test('review S4: Paperclip commands that spend, pause or change configuration are host (admin) commands; reads stay reads', () => {
+  for (const c of ['paperclip.approval.decide', 'paperclip.pauseAll', 'paperclip.resumeAll', 'paperclip.agent.pause', 'paperclip.agent.resume', 'paperclip.import', 'paperclip.config.set']) assert.equal(classifyCommand(c), 'host', c);
+  assert.equal(classifyCommand('project.tasks.get'), 'read');
+  assert.equal(classifyCommand('paperclip.snapshot'), 'read');
+});

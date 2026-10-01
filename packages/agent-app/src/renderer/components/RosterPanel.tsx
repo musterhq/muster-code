@@ -13,7 +13,7 @@ import { invoke } from '../bridge';
 import { refreshWorkspace } from '../hubStore';
 import { agoLabel } from '../relativeTime';
 import { notifyError, notifySuccess } from '../store';
-import { AGENT_STATE_LABEL, Monogram, StateChip, agentTone } from './HubParts';
+import { AGENT_STATE_LABEL, ApprovalActions, Monogram, StateChip, agentTone } from './HubParts';
 import { PulseBoard, type HubNav } from './HubPages';
 import { ModalSheet } from './ModalSheet';
 import { ResourceState } from './ResourceState';
@@ -42,13 +42,18 @@ export function RosterPanel({ snapshot, projectId, local, nav, children }: { sna
       {local && <button type="button" className="settings-button secondary" onClick={() => setAdding(true)}><Plus size={14}/>{NAMES.addAgent}</button>}
     </div>
     {pending.map(a => <HireApprovalCard key={a.id} agent={a} snapshot={snapshot} projectId={projectId}/>)}
+    {!local && (snapshot.approvals ?? []).filter(a => a.type === 'hire_agent').map(a => <section key={a.id} className="ws-card hire-card" aria-label={a.title}>
+      <header className="hire-card-head"><StateChip tone="warn">Approval</StateChip><strong>{a.title}?</strong></header>
+      {(a.detail || a.requestedBy) && <dl className="hire-card-facts">{a.requestedBy && <div><dt>Asked by</dt><dd>{a.requestedBy}</dd></div>}{a.detail && <div><dt>Details</dt><dd className="hire-card-instructions">{a.detail}</dd></div>}</dl>}
+      <ApprovalActions approvalId={a.id} verbs={a.verbs}/>
+    </section>)}
     {agents.length === 0 ? <ResourceState kind="empty" icon={<UserPlus size={20}/>} title={local ? 'No agents on this project yet' : 'No agents have worked on this project yet'} message={local ? 'Add an agent with a title, who it reports to, the runner and model it uses, and its instructions. Tasks can then be assigned to it and started in their own worktree.' : 'Agents appear here once they work on a task in this project.'}>
         {local && <button type="button" className="settings-button" onClick={() => setAdding(true)}><Plus size={14}/>{NAMES.addAgent}</button>}
       </ResourceState>
       : layout === 'org' ? <RosterGraph snapshot={snapshot} onOpenAgent={nav.onOpenAgent} onOpenTask={nav.onOpenTask}/>
       : <RosterList snapshot={snapshot} agents={agents} nav={nav}/>}
     {children}
-    <PulseBoard snapshot={snapshot} nav={nav} scoped/>
+    <PulseBoard snapshot={snapshot} nav={nav} scoped projectId={projectId}/>
     {local && <AgentSheet open={adding} projectId={projectId} snapshot={snapshot} onClose={() => setAdding(false)}/>}
   </div>;
 }
