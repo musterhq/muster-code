@@ -35,9 +35,9 @@ export function ServicesPanel({ projectId, taskId }: { projectId: string; taskId
       {(s.state === 'failed' || s.state === 'exited') && s.logTail && <pre className="services-log" aria-label={`Output of ${s.name}`}>{s.logTail.slice(-600)}</pre>}
     </li>)}</ul>
     {form ? <form className="services-form" onSubmit={e => { e.preventDefault(); void run('save', async () => { await invoke('services.save', { projectId, taskId, name: form.name, command: form.command, port: form.port ? Number(form.port) : null }); setForm(null); }); }}>
-      <input className="ws-input" required aria-label="Service name" placeholder="web" maxLength={80} value={form.name} onChange={e => setForm({ ...form, name: e.target.value })}/>
-      <input className="ws-input" required aria-label="Command" placeholder="npm run dev" value={form.command} onChange={e => setForm({ ...form, command: e.target.value })}/>
-      <input className="ws-input" aria-label="Port (optional)" placeholder="Port (optional)" inputMode="numeric" value={form.port} onChange={e => setForm({ ...form, port: e.target.value.replace(/\D/g, '') })}/>
+      <input type="text" className="ws-input" required aria-label="Service name" placeholder="web" maxLength={80} value={form.name} onChange={e => setForm({ ...form, name: e.target.value })}/>
+      <input type="text" className="ws-input" required aria-label="Command" placeholder="npm run dev" value={form.command} onChange={e => setForm({ ...form, command: e.target.value })}/>
+      <input type="text" className="ws-input" aria-label="Port (optional)" placeholder="Port (optional)" inputMode="numeric" value={form.port} onChange={e => setForm({ ...form, port: e.target.value.replace(/\D/g, '') })}/>
       <div className="gov-actions"><span className="gov-grow"/><button type="button" className="settings-button secondary" onClick={() => setForm(null)}>Cancel</button><button type="submit" className="settings-button" disabled={busy === 'save'}>Save</button></div></form>
       : <button type="button" className="settings-button secondary" onClick={() => setForm({ name: '', command: '', port: '' })}>Add a dev server</button>}
     {(error || list.error) && <p role="alert" className="settings-error">{error || list.error}</p>}

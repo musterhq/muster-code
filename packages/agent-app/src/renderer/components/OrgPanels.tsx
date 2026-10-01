@@ -146,7 +146,7 @@ export function ApprovalThread({ item, projectId, onChanged }: { item: ApprovalI
   return <div className="org-thread">
     {item.revision && <p className="org-revision"><StateChip tone="warn">Changes requested</StateChip> <span>{item.revision.note}</span></p>}
     {item.comments.length > 0 && <ul className="org-comments" aria-label="Comments">{item.comments.map(c => <li key={c.id}><strong>{c.author}</strong> <span>{c.text}</span> <time className="ws-faint">{agoLabel(c.at)}</time></li>)}</ul>}
-    {open && <div className="gov-actions"><input className="ws-input" aria-label={`Comment on ${item.title}`} placeholder={asking ? 'What should change?' : 'Comment'} value={text} maxLength={2000} disabled={busy} onChange={e => setText(e.target.value)}/>
+    {open && <div className="gov-actions"><input type="text" className="ws-input" aria-label={`Comment on ${item.title}`} placeholder={asking ? 'What should change?' : 'Comment'} value={text} maxLength={2000} disabled={busy} onChange={e => setText(e.target.value)}/>
       {asking ? <button type="button" className="settings-button" disabled={busy || !text.trim()} onClick={() => void act(() => invoke('project.approvals.requestRevision', { projectId, id: item.id, note: text.trim() }), `${item.requestedBy} was asked to change it.`)}>Send request</button>
         : <><button type="button" className="settings-button secondary" disabled={busy || !text.trim()} onClick={() => void act(() => invoke('project.approvals.comment', { projectId, id: item.id, text: text.trim() }))}><MessageSquare size={13}/>Comment</button>
           <button type="button" className="settings-button secondary" disabled={busy} onClick={() => { setAsking(true); }}>Ask for changes</button></>}</div>}

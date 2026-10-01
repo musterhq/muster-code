@@ -35,7 +35,7 @@ export function InteractionCard({ interaction: c, projectId, onChanged }: { inte
       <time className="ws-faint" title={exactTime(c.createdAt)}>{agoLabel(c.createdAt)}</time></div>
     {confirm ? <p className="agent-card-prompt">{c.title}{c.questions[0] && c.questions[0].prompt !== c.title ? <><br/><span className="ws-faint">{c.questions[0].prompt}</span></> : null}</p> : null}
     {c.state === 'pending' && (confirm
-      ? <div className="gov-actions"><input className="ws-input" aria-label="Note for the agent" placeholder="Note (optional)" value={note} maxLength={2000} onChange={e => setNote(e.target.value)}/>
+      ? <div className="gov-actions"><input type="text" className="ws-input" aria-label="Note for the agent" placeholder="Note (optional)" value={note} maxLength={2000} onChange={e => setNote(e.target.value)}/>
           <button type="button" className="settings-button secondary" disabled={busy} onClick={() => void send({ confirm: 'Decline' })}>Decline</button>
           <button type="button" className="settings-button" disabled={busy} onClick={() => void send({ confirm: 'Confirm' })}>Confirm</button></div>
       : <section className="pending-question agent-card-questions" aria-label="Questions">
@@ -45,7 +45,7 @@ export function InteractionCard({ interaction: c, projectId, onChanged }: { inte
               onChange={e => setPicked(cur => ({ ...cur, [q.id]: q.multiple ? (e.target.checked ? [...(cur[q.id] ?? []), o] : (cur[q.id] ?? []).filter(x => x !== o)) : [o] }))}/><span>{o}</span></label>)}
             {!q.options.length && <label className="pending-question-custom">Your answer<input type="text" value={typed[q.id] ?? ''} maxLength={4000} onChange={e => setTyped(cur => ({ ...cur, [q.id]: e.target.value }))}/></label>}
           </fieldset>)}
-          <div className="gov-actions"><input className="ws-input" aria-label="Note for the agent" placeholder="Note (optional)" value={note} maxLength={2000} onChange={e => setNote(e.target.value)}/>
+          <div className="gov-actions"><input type="text" className="ws-input" aria-label="Note for the agent" placeholder="Note (optional)" value={note} maxLength={2000} onChange={e => setNote(e.target.value)}/>
             <button type="button" className="settings-button secondary" disabled={busy} onClick={() => void cancel()}>Withdraw</button>
             <button type="button" className="settings-button" disabled={busy || !c.questions.every(answered)} onClick={() => void send()}>Send answer</button></div>
         </section>)}

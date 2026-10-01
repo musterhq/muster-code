@@ -44,8 +44,8 @@ export function ServerSettings(): React.ReactElement {
   return <div className="server-settings">
     <Account server={server} me={me}/>
     <ProjectPeople server={server} me={me}/>
-    {admin ? <><People server={server} me={me}/><Invites server={server}/><Access server={server}/><RemoteAgents server={server}/><Cost server={server}/><Sessions server={server}/><Channels server={server}/><Audit server={server}/></>
-      : <><RemoteAgents server={server}/><p className="project-edit-hint ws-settings-hint">People, invites, usage and channels across the server are managed by its owners and admins.</p></>}
+    {admin ? <><People server={server} me={me}/><Invites server={server}/><Access server={server}/><RemoteAgents server={server} admin/><Cost server={server}/><Sessions server={server}/><Channels server={server}/><Audit server={server}/></>
+      : <><RemoteAgents server={server} admin={false}/><p className="project-edit-hint ws-settings-hint">People, invites, usage and connectors are managed by this server’s owners and admins.</p></>}
   </div>;
 }
 

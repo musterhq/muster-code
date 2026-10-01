@@ -100,7 +100,7 @@ await click(button(/^Decline$/),60);assert.deepEqual(last('project.interactions.
 await show(<C.InteractionCard key="a" interaction={{...ask,state:'answered',answers:{q1:'SQLite',q2:'single file'}}} projectId="p" onChanged={()=>{}}/>,80);assert.match(text(),/Answered/);assert.match(text(),/SQLite/);assert.ok(!button(/Send answer/));
 // C7: suggested subtasks, the Worked fold and a notice.
 await show(<C.SuggestionCard suggestion={{id:'s1',projectId:'p',taskId:'t1',memberId:'m1',memberName:'CTO',items:[{title:'Write tests',acceptance:'cover empty',assignee:'QA',priority:null,created:null},{title:'Docs',acceptance:'',assignee:null,priority:null,created:null}],state:'open',createdAt:now}} projectId="p" onChanged={()=>{}}/>,80);
-assert.match(text(),/suggests 2 subtasks/);await click(document.querySelectorAll('.agent-card input[type="checkbox"]')[1],30);await click(button(/Create 1 selected/),80);assert.deepEqual(last('project.suggestions.create')!.input,{projectId:'p',id:'s1',picks:[0]});
+assert.match(text(),/suggests 2 subtasks/);{const cb:any=document.querySelectorAll('.agent-card input[type="checkbox"]')[1];cb.checked=false;await click(cb,30);}await click(button(/Create 1 selected/),80);assert.deepEqual(last('project.suggestions.create')!.input,{projectId:'p',id:'s1',picks:[0]});
 const receipt=(id:string)=>({id,seq:1,source:'muster',chatId:'c',runId:id,taskId:null,projectId:null,trigger:'user',agent:'CTO',provider:null,model:null,tokens:null,costUsd:null,tools:[{name:'x',count:2}],approvals:0,tests:0,files:[{path:'a.ts',status:'M'}],startedAt:null,endedAt:now,durationMs:120000,outcome:'succeeded',prevHash:null,hash:null});
 await show(<><C.WorkedFold receipts={[receipt('1'),receipt('2')] as any} at={now}/><C.NoticeRow text="CTO is not allowed to create tasks." at={now}/></>,80);
 assert.match(text(),/Worked · 2 turns, 4 tool calls, 1 file, 4 min/);assert.equal(document.querySelectorAll('.ws-receipt').length,0);await click(document.querySelector('.agent-fold-head'),40);assert.equal(document.querySelectorAll('.ws-receipt').length,2);assert.match(text(),/not allowed to create tasks/);
@@ -117,7 +117,7 @@ await click(button(/Activate all/),100);assert.deepEqual(last('org.activate')!.i
 // G7: approvals with a thread and a change request.
 state.approvals=[{id:'ap1',projectId:'p',kind:'confirmation',title:'Deploy to production?',detail:'Version 1.2.0',requestedBy:'CTO',taskId:'t1',refId:'c1',state:'pending',revision:null,comments:[],createdAt:now,decidedAt:null}];
 await show(<O.ApprovalsPanel projectId="p"/>,120);assert.match(text(),/Deploy to production\?/);assert.match(text(),/Asked by/);assert.match(text(),/CTO/);
-await setValue(field('Comment on Deploy to production?'),'Is staging green?');await click(button(/^Comment$/),80);assert.deepEqual(last('project.approvals.comment')!.input,{projectId:'p',id:'ap1',text:'Is staging green?'});
+await setValue(field('Comment on Deploy to production?'),'Is staging green?');await delay(150);await click(button(/^Comment$/),80);assert.deepEqual(last('project.approvals.comment')!.input,{projectId:'p',id:'ap1',text:'Is staging green?'});
 await click(button(/Ask for changes/),40);await setValue(field('Comment on Deploy to production?'),'Wait for the release train');await click(button(/Send request/),80);assert.deepEqual(last('project.approvals.requestRevision')!.input,{projectId:'p',id:'ap1',note:'Wait for the release train'});
 await delay(300);assert.match(text(),/Changes requested/);
 // G30: backups.
@@ -127,16 +127,16 @@ await click(button(/^Restore the backup/),40);assert.match(text(),/Restore on ne
 await delay(300);assert.match(text(),/will replace your data when Muster starts next/);await click(button(/Cancel the restore/),80);assert.ok(last('backups.restore.cancel'));
 const sw=document.querySelector('input[role="switch"]') as any;sw.checked=false;await click(sw,80);assert.equal(last('backups.settings.set')!.input.enabled,false);
 // G21: SSH hosts: the key must be confirmed by typing its fingerprint.
-await show(<SshPanel/>,160);assert.match(text(),/Build box/);assert.match(text(),/Key not trusted/);assert.ok(!button(/^Test$/));
+await show(<SshPanel/>,160);assert.match(text(),/Build box/);assert.match(text(),/Key not trusted/);assert.ok(!button(/^\s*Test$/));
 await click(button(/Check host key/),100);assert.match(text(),/SHA256:A{43}/);assert.match(text(),/Compare it with the one you expect/);
 assert.ok((button(/Trust this host/) as any).disabled,'nothing typed yet');
 await setValue(field('Fingerprint you confirmed'),'SHA256:'+'A'.repeat(43));await click(button(/Trust this host/),120);assert.deepEqual(last('ssh.hostkey.trust')!.input,{id:'h1',fingerprint:'SHA256:'+'A'.repeat(43)});
-await delay(300);await click(button(/^Test$/),120);assert.match(text(),/Signed in as deploy/);
+await delay(300);await click(button(/^\s*Test$/),120);assert.match(text(),/Signed in as deploy/);
 // G22: services start, stop and give a preview.
 await show(<><ServicesPanel projectId="p" taskId="t1"/><PreviewStrip projectId="p" taskKey={()=>'OSS-1'}/></>,140);assert.match(text(),/npm run dev/);assert.match(text(),/Stopped/);assert.equal(document.querySelector('.preview-strip'),null);
-await click(button(/Start web/),100);await delay(300);assert.match(text(),/Running/);assert.match(text(),/http:\/\/127\.0\.0\.1:5173/);assert.ok(document.querySelector('.preview-strip'),'the preview shows on Outputs');
+await click(button(/Start web/),100);emit({type:'envsChanged',scope:'services'});await delay(400);assert.match(text(),/Running/);assert.match(text(),/http:\/\/127\.0\.0\.1:5173/);assert.ok(document.querySelector('.preview-strip'),'the preview shows on Outputs');
 await click(document.querySelector('.services-url'),60);assert.equal(last('link.open')!.input.url,'http://127.0.0.1:5173');
-await click(button(/Stop web/),100);await delay(300);assert.match(text(),/Stopped/);
+await click(button(/Stop web/),100);emit({type:'envsChanged',scope:'services'});await delay(400);assert.match(text(),/Stopped/);
 await click(button(/Add a dev server/),40);await setValue(field('Service name'),'api');await setValue(field('Command'),'node server.js');await setValue(field('Port (optional)'),'4000');
 await submit(document.querySelector('.services-form'));assert.deepEqual(last('services.save')!.input,{projectId:'p',taskId:'t1',name:'api',command:'node server.js',port:4000});
 // G14: the run page: facts, the Receipt and what happened.
@@ -148,7 +148,7 @@ await show(<RunDetailPage key="gone" snapshot={snapshot} runId="nope" nav={nav}/
 // G36: columns and tidy.
 let cols:any={type:true,detail:true,age:true},tidy:any={dismissDoneAfterDays:0,readAgentNotices:false};
 await show(<InboxOptions columns={cols} onColumns={n=>{cols=n;}} tidy={tidy} onTidy={n=>{tidy=n;}}/>,60);
-await click(document.querySelectorAll('.ws-options-panel input[type="checkbox"]')[1],30);assert.equal(cols.type,false);
+{const cb:any=document.querySelectorAll('.ws-options-panel input[type="checkbox"]')[0];cb.checked=false;await click(cb,30);}assert.equal(cols.type,false);
 await setValue(field('Clear finished items after'),'7');assert.equal(tidy.dismissDoneAfterDays,7);assert.match(text(),/never tidied/);
 // G28/G27/G29: the server pages with a fake bridge.
 const sv:any={invoke:async(command:string,input:any)=>{calls.push({command,input});switch(command){
@@ -165,7 +165,7 @@ const me:any={id:'u1',username:'olivia',displayName:'Olivia',role:'owner',status
 await show(<W.ProjectPeople server={sv} me={me}/>,160);assert.match(text(),/People on your projects/);assert.match(text(),/Support/);assert.match(text(),/Pat/);assert.match(text(),/invite pending/);
 await click(button(/Invite to this project/),40);await setValue(field('Role in the project'),'viewer');await click(button(/Create link/),80);
 assert.deepEqual(last('server.invites.create')!.input,{projectId:'p',role:'viewer',projectRole:'viewer',expires:'7d'});assert.match(text(),/invite\/mi_abc/);
-await show(<W.RemoteAgents server={sv}/>,160);assert.match(text(),/Remote QA/);assert.match(text(),/10\.0\.0\.5/);
+await show(<W.RemoteAgents server={sv} admin/>,160);assert.match(text(),/Remote QA/);assert.match(text(),/10\.0\.0\.5/);
 await setValue(field('Project'),'p');await setValue(field('Agent name'),'Remote Dev');await click(button(/Create invite/),100);
 assert.equal(last('server.agents.invite')!.input.name,'Remote Dev');assert.match(text(),/muster-server agent join https:\/\/muster\.example\.com --invite mai_xyz/);assert.match(text(),/shown once/);
 await click(button(/^Revoke$/),80);assert.equal(last('server.agents.revoke')!.input.id,'ag1');

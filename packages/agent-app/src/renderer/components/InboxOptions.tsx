@@ -5,7 +5,7 @@ import { INBOX_COLUMNS, type InboxColumn, type TidyPolicy } from '../inboxModel'
 
 export function InboxOptions({ columns, onColumns, tidy, onTidy }: { columns: Record<InboxColumn, boolean>; onColumns: (next: Record<InboxColumn, boolean>) => void; tidy: TidyPolicy; onTidy: (next: TidyPolicy) => void }): React.ReactElement {
   return <details className="ws-options">
-    <summary className="ws-filter" aria-label="Columns and tidy"><SlidersHorizontal size={13} aria-hidden="true"/>Columns and tidy</summary>
+    <summary className="ws-options-toggle" aria-label="Columns and tidy"><SlidersHorizontal size={13} aria-hidden="true"/>Columns and tidy</summary>
     <div className="ws-options-panel" role="group" aria-label="Inbox options">
       <fieldset><legend>Show</legend>{(Object.keys(INBOX_COLUMNS) as InboxColumn[]).map(c => <label key={c} className="org-check"><input type="checkbox" checked={columns[c]} onChange={e => onColumns({ ...columns, [c]: e.target.checked })}/>{INBOX_COLUMNS[c]}</label>)}</fieldset>
       <fieldset><legend>Tidy up for me</legend>

@@ -71,3 +71,5 @@
 [data-hide-type] .ws-inbox-row > .ws-chip { display: none; }
 [data-hide-detail] .ws-inbox-row .ws-row-meta { display: none; }
 [data-hide-age] .ws-inbox-row .ws-row-age { display: none; }
+.ws-options-toggle { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border: 1px solid var(--hairline); border-radius: var(--radius-full); color: var(--text-dim); font-size: var(--fs-12); }
+.ws-options-toggle:hover { background: var(--bg-hover); color: var(--text); }
