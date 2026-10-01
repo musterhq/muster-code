@@ -42,6 +42,9 @@ const calls:{command:string;input:any}[]=[];
   if(command==='paperclip.snapshot')return snapshot;
   if(command==='paperclip.watch')return {live:'socket'};
   // A Muster task whose run is waiting on a question: the card carries the run's real question and answers it in place.
+  if(command==='paperclip.task'&&input.id==='t15')return {task:snapshot.tasks[1],description:'',comments:[],runs:[],addressee:{id:'cto',label:'CTO'},composerNote:null,subtasks:[],blocking:[],receipts:[],mentionable:[],
+    cards:[{kind:'needs',id:'interaction:int-q',at:now,from:'CTO',prompt:'Which scope?',detail:null,status:'pending',resolution:null,interactionId:'int-q',acceptLabel:null,rejectLabel:null,submitLabel:'Send',
+      questions:[{id:'scope',prompt:'Which scope?',helpText:null,multi:false,allowOther:false,options:[{id:'mig',label:'Migration only',description:null},{id:'all',label:'Everything',description:null}]}]}]};
   if(command==='paperclip.task'&&input.id==='t4')return {task:snapshot.tasks[2],description:'',comments:[],runs:[],addressee:{id:'qa',label:'QA'},composerNote:null,subtasks:[],blocking:[],receipts:[],mentionable:[],
     cards:[{kind:'needs',id:'needs:q1',at:now,from:'QA',prompt:'Which colour should the banner be?',detail:null,status:'pending',resolution:null,interactionId:null,acceptLabel:null,rejectLabel:null,chatId:'c-run',
       pending:{id:'q1',chatId:'c-run',kind:'question',text:'The provider needs your input.',status:'pending',createdAt:now,data:{method:'item/tool/requestUserInput',questions:[{id:'color',header:'Colour',question:'Which colour should the banner be?',options:[{label:'Blue'},{label:'Green'}],allowCustomAnswer:false,multiSelect:false}]}}}]};
@@ -111,6 +114,18 @@ openHub('task','t4');await delay(150);
   blue[props].onChange({target:blue,currentTarget:blue});await delay(40);
   await click([...runCard.querySelectorAll('button')].find(b=>/Send answer/.test(b.textContent!)));
   assert.deepEqual(calls.find(c=>c.command==='question.respond')?.input,{id:'q1',answers:{color:{answers:['Blue']}}},'answered through question.respond');
+}
+// A Paperclip question set is answered in place through Paperclip's respond endpoint.
+openHub('task','t15');await delay(150);
+{
+  const qCard=document.querySelector('.ws-card-sys[data-kind="needs"]')!;
+  assert.match(qCard.textContent!,/Which scope\?/);
+  const options=[...qCard.querySelectorAll('input[type="radio"]')] as any[];
+  assert.equal(options.length,2);
+  const props=Object.keys(options[0]).find(k=>k.startsWith('__reactProps'))!;
+  options[0][props].onChange({target:options[0],currentTarget:options[0]});await delay(40);
+  await click([...qCard.querySelectorAll('button')].find(b=>/^Send$/.test(b.textContent!)));
+  assert.deepEqual(calls.find(c=>c.command==='paperclip.interaction.respond'&&c.input.answers)?.input,{taskId:'t15',interactionId:'int-q',accept:true,answers:[{questionId:'scope',optionIds:['mig']}]});
 }
 root.unmount();await delay(30);
 assert.equal(calls.filter(c=>c.command==='paperclip.watch').at(-1)!.input.visible,false,'leaving the hub stops live updates');

@@ -112,8 +112,14 @@ export type ThreadCard =
       /** Answerable here when set: a Paperclip confirmation, accepted or rejected in place. */ interactionId: string | null; acceptLabel: string | null; rejectLabel: string | null;
       /** A Muster run waiting on you: its chat, and the pending question or approval item there, answered in place
        *  (question.respond / approval.respond) so the waiting run continues. */
-      chatId?: string | null; pending?: TimelineItem | null }
+      chatId?: string | null; pending?: TimelineItem | null;
+      /** A Paperclip ask_user_questions interaction: its questions, answered in place through Paperclip's respond endpoint. */
+      questions?: PaperclipQuestion[]; submitLabel?: string | null }
   | { kind: 'approval'; id: string; at: string; title: string; status: string };
+/** One question of a Paperclip ask_user_questions interaction. */
+export interface PaperclipQuestion { id: string; prompt: string; helpText: string | null; multi: boolean; allowOther: boolean; options: { id: string; label: string; description: string | null }[] }
+/** An answer for Paperclip's `/interactions/:id/respond`. */
+export interface PaperclipAnswer { questionId: string; optionIds: string[]; otherText?: string | null }
 export interface WorkspaceTaskDetail {
   task: WorkspaceTask; description: string; comments: WorkspaceComment[]; runs: WorkspaceRun[];
   /** Who the composer addresses; null when nobody can receive a message (a task you own with no agent). */
@@ -206,8 +212,9 @@ export interface PaperclipCommands {
   /** Inbox Dismiss: hides one item until it changes (`at` is the item's time, so a new failure shows again). The chat or task itself is kept. */
   'paperclip.inbox.dismiss': { input: { id: string; at: string }; output: { ok: true } };
   'paperclip.inbox.dismissed': { input: Record<string, never>; output: { items: { id: string; at: string }[] } };
-  /** Answers a Needs-you card from the thread or the Inbox (Paperclip confirmations: accept, or reject with a reason). */
-  'paperclip.interaction.respond': { input: { taskId: string; interactionId: string; accept: boolean; reason?: string }; output: { ok: true } };
+  /** Answers a Needs-you card from the thread or the Inbox (Paperclip confirmations: accept, or reject with a reason;
+   *  questions: `answers`, sent to Paperclip's respond endpoint). Only ever sent when you answer. */
+  'paperclip.interaction.respond': { input: { taskId: string; interactionId: string; accept: boolean; reason?: string; answers?: PaperclipAnswer[] }; output: { ok: true } };
   /** Copies a Paperclip company into Muster's Projects with GET requests only. Idempotent. Nothing starts running. */
   'paperclip.import': { input: { mode?: PaperclipMode; baseUrl?: string; token?: string; companyId?: string; targets?: ImportTargets }; output: PaperclipImportReport };
   /** Starts a Muster task's first run on its Roster agent's runner, in a new worktree of the project's folder (never the checkout itself). */

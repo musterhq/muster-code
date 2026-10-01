@@ -166,13 +166,19 @@ export function mapReceipt(r: Json, agents: ReadonlyMap<string, WorkspaceAgent>)
 export function mapInteraction(i: Json, agents: ReadonlyMap<string, WorkspaceAgent>): ThreadCard {
   const payload = obj(i.payload), result = obj(i.result), status = String(i.status ?? 'pending');
   const questions = arr(payload.questions).map(q => str(q.prompt) ?? str(q.question)).filter(Boolean);
+  // ask_user_questions is answerable here too, through Paperclip's respond endpoint.
+  const asking = i.kind === 'ask_user_questions' && status === 'pending'
+    ? arr(payload.questions).filter(q => str(q.id) && arr(q.options).length).map(q => ({ id: String(q.id), prompt: str(q.prompt) ?? str(q.question) ?? 'Question', helpText: str(q.helpText), multi: q.selectionMode === 'multi', allowOther: q.allowOther === true,
+      options: arr(q.options).filter(o => str(o.id)).map(o => ({ id: String(o.id), label: str(o.label) ?? String(o.id), description: str(o.description) })) }))
+    : [];
   return {
     kind: 'needs', id: `interaction:${i.id}`, at: iso(i.createdAt), from: agents.get(str(i.createdByAgentId) ?? '')?.name ?? null,
     prompt: str(payload.prompt) ?? (questions.length ? questions.join(' · ') : str(payload.title) ?? 'An agent needs your decision.'),
     detail: str(payload.detailsMarkdown)?.slice(0, 1200) ?? null,
     status: status === 'pending' ? 'pending' : status === 'cancelled' || status === 'withdrawn' || status === 'expired' ? 'cancelled' : 'resolved',
     resolution: str(result.outcome) ? `${result.outcome}${str(result.reason) ? `: ${result.reason}` : ''}` : null,
-    interactionId: i.kind === 'request_confirmation' && status === 'pending' ? String(i.id) : null,
+    interactionId: (i.kind === 'request_confirmation' || asking.length > 0) && status === 'pending' ? String(i.id) : null,
     acceptLabel: str(payload.acceptLabel), rejectLabel: str(payload.rejectLabel),
+    ...(asking.length ? { questions: asking, submitLabel: str(payload.submitLabel) } : {}),
   };
 }

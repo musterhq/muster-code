@@ -8,7 +8,7 @@ import {join} from 'node:path';
 import {test,type TestContext} from 'node:test';
 import {createPaperclipDomain,rankMemories,PAPERCLIP_SECRET_ID} from '../src/runtime/domains/paperclip.ts';
 import {normalizeBaseUrl} from '../src/runtime/paperclip-client.ts';
-import {buildInbox,mapAttention,mapIssue,mapRoutine} from '../src/runtime/paperclip-map.ts';
+import {buildInbox,mapAttention,mapInteraction,mapIssue,mapRoutine} from '../src/runtime/paperclip-map.ts';
 import type {DomainContext} from '../src/runtime/domains/types.ts';
 import type {SocketFactory} from '../src/runtime/paperclip-client.ts';
 
@@ -436,6 +436,24 @@ test('a Paperclip confirmation is answered from Muster: accept, or reject with a
   await h.call('paperclip.interaction.respond',{taskId:'RAG-1',interactionId:'int-1',accept:true});
   await h.call('paperclip.interaction.respond',{taskId:'RAG-1',interactionId:'int-2',accept:false,reason:'Keep the old flow'});
   assert.deepEqual(h.server.calls.filter(c=>c.method==='POST').map(c=>`${c.url} ${JSON.stringify(c.body)}`),['/api/issues/RAG-1/interactions/int-1/accept {}','/api/issues/RAG-1/interactions/int-2/reject {"reason":"Keep the old flow"}']);
+});
+
+test('a Paperclip question set (ask_user_questions) is answerable in place through its respond endpoint (S13)',async t=>{
+  const pending={id:'int-q',kind:'ask_user_questions',status:'pending',createdAt:now,createdByAgentId:'a-cto',payload:{version:1,submitLabel:'Send',questions:[
+    {id:'scope',prompt:'Which scope?',selectionMode:'single',allowOther:true,options:[{id:'mig',label:'Migration only'},{id:'all',label:'Everything'}]},
+    {id:'envs',prompt:'Which environments?',selectionMode:'multi',options:[{id:'dev',label:'Dev'},{id:'prod',label:'Prod'}]}]}};
+  const card=mapInteraction(pending as any,new Map([['a-cto',{name:'CTO'} as any]])) as any;
+  assert.equal(card.interactionId,'int-q','answerable, not display-only');
+  assert.equal(card.from,'CTO');assert.equal(card.submitLabel,'Send');
+  assert.deepEqual(card.questions.map((q:any)=>`${q.id}:${q.multi}:${q.allowOther}:${q.options.map((o:any)=>o.id).join('/')}`),['scope:false:true:mig/all','envs:true:false:dev/prod']);
+  assert.equal((mapInteraction({...pending,status:'answered'} as any,new Map()) as any).questions,undefined,'an answered set is history');
+  const h=await harness(t);
+  await h.call('paperclip.config.set',{mode:'local'});
+  await h.call('paperclip.snapshot');
+  assert.equal(h.server.calls.filter(c=>c.method!=='GET').length,0,'nothing is written until you answer');
+  await h.call('paperclip.interaction.respond',{taskId:'RAG-12',interactionId:'int-q',accept:true,answers:[{questionId:'scope',optionIds:[],otherText:'Only the wizard'},{questionId:'envs',optionIds:['dev','prod']}]});
+  assert.deepEqual(h.server.calls.filter(c=>c.method==='POST').map(c=>`${c.url} ${JSON.stringify(c.body)}`),['/api/issues/RAG-12/interactions/int-q/respond {"answers":[{"questionId":"scope","optionIds":[],"otherText":"Only the wizard"},{"questionId":"envs","optionIds":["dev","prod"]}]}']);
+  await assert.rejects(()=>h.call('paperclip.interaction.respond',{taskId:'RAG-12',interactionId:'int-q',accept:true,answers:[{questionId:'scope',optionIds:[]}]}),/Answer every question/);
 });
 
 test('inbox dismissals persist by item id and time; a dismissed Paperclip or project item leaves the runtime badge until it changes',async t=>{

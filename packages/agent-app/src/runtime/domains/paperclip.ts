@@ -635,6 +635,21 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
       'paperclip.interaction.respond': async input => {
         const taskId = id(input.taskId), interactionId = id(input.interactionId);
         const reason = typeof input.reason === 'string' ? input.reason.slice(0, 4000) : undefined;
+        if (Array.isArray(input.answers)) {
+          // A question set: Paperclip's respond endpoint, with exactly the options you picked (and any text you typed).
+          const answers = input.answers.slice(0, 20).map(a => {
+            const answer = a as { questionId?: unknown; optionIds?: unknown; otherText?: unknown };
+            const key = (v: unknown) => { if (typeof v !== 'string' || !v.trim() || v.length > 160 || /[\u0000-\u001f]/.test(v)) throw new Error('Unknown answer.'); return v; };
+            const optionIds = Array.isArray(answer.optionIds) ? answer.optionIds.slice(0, 129).map(key) : [];
+            const otherText = typeof answer.otherText === 'string' && answer.otherText.trim() ? answer.otherText.slice(0, 100_000) : null;
+            if (!optionIds.length && !otherText) throw new Error('Answer every question.');
+            return { questionId: key(answer.questionId), optionIds, ...(otherText ? { otherText } : {}) };
+          });
+          if (!answers.length) throw new Error('Answer every question.');
+          await api().send('POST', `/issues/${encodeURIComponent(taskId)}/interactions/${encodeURIComponent(interactionId)}/respond`, { answers });
+          queueEmit(['tasks', 'inbox'], taskId);
+          return { ok: true };
+        }
         await api().send('POST', `/issues/${encodeURIComponent(taskId)}/interactions/${encodeURIComponent(interactionId)}/${input.accept === true ? 'accept' : 'reject'}`, input.accept === true ? {} : { ...(reason ? { reason } : {}) });
         queueEmit(['tasks', 'inbox'], taskId);
         return { ok: true };
