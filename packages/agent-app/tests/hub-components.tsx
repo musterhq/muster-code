@@ -164,6 +164,8 @@ openHub('task','t15');await delay(150);
   assert.match(plan.textContent!,/Plan Q4 plan.*revision 3[\s\S]*Ship it\.[\s\S]*3 revisions[\s\S]*Revision 3 · add dashboard/);
   const wp=document.querySelector('.ws-card-sys[data-kind="workproduct"]')!;
   assert.equal(wp.querySelector('a')!.getAttribute('href'),'https://github.com/x/y/pull/12');
+  await click(wp.querySelector('a'));
+  assert.deepEqual(calls.find(c=>c.command==='link.open')?.input,{url:'https://github.com/x/y/pull/12'},'opened through link.open (the window denies direct opens)');
   assert.match(wp.textContent!,/pull request PR #12 · github · Kafka.*ready for review/);
 }
 root.unmount();await delay(30);

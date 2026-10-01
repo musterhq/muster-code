@@ -94,7 +94,7 @@ export class PaperclipClient {
       path = nextPath(page, soFar);
     }
   }
-  /** All issues of a company (compact or full), paged by id so a change between pages cannot skip or repeat a row. */
+  /** All issues of a company (compact or full), sorted by id and paged by offset. A repeat is dropped; a skipped row is harmless here because deletions are re-checked with a GET. */
   issuePages(companyId: string, query: string): AsyncGenerator<Json[]> {
     const base = `/companies/${encodeURIComponent(companyId)}/issues?${query}${query ? '&' : ''}sortField=id&sortDir=asc&limit=${ISSUE_PAGE}`;
     return this.pages<Json>(base, ISSUE_PAGE, (_page, soFar) => `${base}&offset=${soFar}`);

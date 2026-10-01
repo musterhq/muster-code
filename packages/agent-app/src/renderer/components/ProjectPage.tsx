@@ -88,6 +88,7 @@ export function ProjectPage({ snapshot, projectId, nav, muster, initialTab = 'ta
       <div className="pp-title">
         {project ? <InlineText className="pp-name" label="Project name" placeholder="Name this project" maxLength={256} value={project.name} onSave={next => save({ name: next })}/> : <h1 className="pp-name">{name}</h1>}
         <p className="pp-sub">{where && <span className="pp-repo" title={where}>{where}</span>}<span>{open} open{scoped ? ` of ${scoped.tasks.length}` : ''}</span>{summary?.source === 'paperclip' && <span className="ws-source">{NAMES.paperclip}</span>}{project?.archived && <span className="ws-chip" data-tone="warn">Archived</span>}</p>
+        {summary?.source === 'local' && summary.org && <p className="project-edit-hint pp-imported-note">Imported copy from {summary.org}. Paperclip changes arrive when you import again; edits here, including a task's priority or owner, stay in Muster.</p>}
       </div>
       {muster && project && <div className="pp-actions">
         {!project.archived && <button type="button" className="settings-button secondary" onClick={() => muster.onStartChat(project.folderIds[0])}><SquarePen size={14}/>New chat</button>}

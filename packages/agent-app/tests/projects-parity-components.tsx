@@ -38,7 +38,7 @@ const snapshot={paperclip:null,goals:[],
   tasks:[task('t1','OSS-1','Migration wizard','in_review'),task('t2','OSS-2','Design the wizard','done',{parentId:'t1',assigneeId:'user:local',assigneeLabel:'You'}),task('t3','OSS-3','Docs','blocked',{priority:'high',live:true})],
   agents:[{id:'user:local',name:'You',role:'board',title:'Owner',model:null,adapter:null,source:'local',status:'active',reportsTo:null,lastActiveAt:null,error:null,pausable:false,capabilities:null},
     agent('cto','CTO',{status:'running'}),agent('qa','QA',{reportsTo:'member:cto'}),agent('des','Designer',{status:'pending',pausable:false,title:'Product designer',instructions:'Own the mockups.'})],
-  projects:[{id:'p1',name:'OSSMANAGER',status:'in_progress',description:'',source:'local',repo:'github.com/hybrowlabs/oss-manager',cwd:'/work/oss',taskCount:3,openCount:2,paused:false,memory:null}],
+  projects:[{id:'p1',name:'OSSMANAGER',org:'RagnarDataOps',status:'in_progress',description:'',source:'local',repo:'github.com/hybrowlabs/oss-manager',cwd:'/work/oss',taskCount:3,openCount:2,paused:false,memory:null}],
   runs:[{id:'r1',agentId:'member:cto',taskId:'t3',status:'running',trigger:'user',source:'local',createdAt:ago(3),startedAt:ago(3),finishedAt:null,error:null,cancellable:true,chatId:'c1'},
     {id:'r2',agentId:'member:qa',taskId:'t1',status:'succeeded',trigger:'user',source:'local',createdAt:ago(40),startedAt:ago(40),finishedAt:ago(30),error:null,cancellable:false,chatId:'c2'}],
   inbox:[{id:'hire:p1:des',kind:'approval',title:'Add Designer as Product designer to OSSMANAGER?',why:'',severity:'high',at:now,taskId:null,agentId:'member:des',runId:null,projectId:'p1',group:'OSSMANAGER',source:'local'}],
@@ -95,6 +95,7 @@ root.render(<ProjectPage snapshot={snapshot as any} projectId="p1" nav={nav} mus
 await delay(150);
 assert.deepEqual(errors,[]);
 assert.deepEqual(text('[role="tab"]'),['Dashboard','Tasks','Roster','Outputs','Ledger','Budget','Settings']);
+assert.match(text('.pp-imported-note')[0],/Imported copy from RagnarDataOps\. Paperclip changes arrive when you import again; edits here.*stay in Muster/,'an imported project says it is a copy');
 assert.match(text('.pp-sub')[0],/github\.com\/hybrowlabs\/oss-manager.*2 open of 3/);
 // Tasks: a nested list, keys with the project prefix, owners and ages on the right.
 const keys=()=>text('.task-row .ws-key');
