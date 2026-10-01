@@ -2,7 +2,9 @@
 import type { ProjectEventsPage } from '../project-events.ts';
 import type { BoundedList, ChatPermissionMode, ProjectActivity, ProjectDecision, TaskStatus as LegacyTaskStatus } from '../protocol.ts';
 import { PROJECT_TEAM_COMMANDS, type ProjectTeamCommands } from './project-team-protocol.ts';
+import { PROJECT_GOVERNANCE_COMMANDS, type ProjectGovernanceCommands, type RunReason } from './project-governance-protocol.ts';
 export * from './project-team-protocol.ts';
+export * from './project-governance-protocol.ts';
 
 /** A Project with its admin state. `folderIds` lists the primary folder first; archived Projects refuse task dispatch. */
 export interface ProjectDetails { id: string; name: string; goal: string; folderIds: string[]; primaryFolderId: string | null; archived: boolean; archivedAt: string | null }
@@ -95,7 +97,7 @@ export interface ProjectStats {
   activity: (ProjectActivity & { projectName: string })[];
 }
 
-export interface ProjectsCommands extends ProjectTeamCommands {
+export interface ProjectsCommands extends ProjectTeamCommands, ProjectGovernanceCommands {
   'project.list': { input: undefined; output: ProjectDetails[] };
   /** Rename, change the goal, replace the folder set or set the primary folder. Removing a folder with a running chat is refused. */
   'project.update': { input: { id: string; name?: string; goal?: string; folderIds?: string[]; primaryFolderId?: string | null }; output: ProjectDetails };
@@ -121,7 +123,7 @@ export interface ProjectsCommands extends ProjectTeamCommands {
   /** Structured verification. Requires implemented or review; records the folder HEAD so a later commit marks it stale. */
   'project.tasks.verify': { input: { projectId: string; id: string; revision: number; kind: VerificationKind; notes: string; command?: string; reviewer?: string }; output: ProjectTaskView };
   /** Starts one agent run for a task at the clamped permission mode and records the attempt. */
-  'project.tasks.dispatch': { input: { projectId: string; id: string; revision: number; folderId?: string }; output: { chatId: string; runId: string } };
+  'project.tasks.dispatch': { input: { projectId: string; id: string; revision: number; folderId?: string; /** Why the run starts (Assign & start passes 'assignment'). Default: started by you. */ reason?: RunReason }; output: { chatId: string; runId: string } };
   'project.decisions.add': { input: { projectId: string; title: string; rationale: string; scope: string; relatedTaskIds: string[] }; output: ProjectDecision };
   'project.decisions.edit': { input: { projectId: string; id: string; title?: string; rationale?: string; scope?: string; relatedTaskIds?: string[] }; output: ProjectDecision };
   'project.decisions.replace': { input: { projectId: string; id: string; replacementId: string }; output: ProjectDecision };
@@ -145,7 +147,7 @@ export interface ProjectsCommands extends ProjectTeamCommands {
   'project.events': { input: { projectId: string; after: number; limit?: number }; output: ProjectEventsPage };
 }
 export type ProjectsEvent = never;
-export const PROJECTS_COMMANDS = { ...PROJECT_TEAM_COMMANDS, 'project.list': true, 'project.update': true, 'project.linkFolder': true, 'project.unlinkFolder': true, 'project.preview': true, 'project.archive': true, 'project.restore': true, 'project.delete': true,
+export const PROJECTS_COMMANDS = { ...PROJECT_TEAM_COMMANDS, ...PROJECT_GOVERNANCE_COMMANDS, 'project.list': true, 'project.update': true, 'project.linkFolder': true, 'project.unlinkFolder': true, 'project.preview': true, 'project.archive': true, 'project.restore': true, 'project.delete': true,
   'project.work': true, 'project.tasks.add': true, 'project.stats': true, 'project.tasks.edit': true, 'project.tasks.delete': true, 'project.tasks.setState': true, 'project.tasks.verify': true, 'project.tasks.dispatch': true,
   'project.decisions.add': true, 'project.decisions.edit': true, 'project.decisions.replace': true, 'project.instructions.set': true, 'project.scheduler.set': true,
   'project.coordinator.start': true, 'project.coordinator.apply': true, 'project.coordinator.dismiss': true,

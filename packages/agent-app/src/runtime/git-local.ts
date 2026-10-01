@@ -482,7 +482,7 @@ export async function switchBranch(root: string, input: {branch: unknown; create
 }
 
 /** Commit staged changes, optionally amending HEAD and/or pushing afterwards in the same locked operation. */
-export async function commitGit(root: string, input: {revision: string; message: unknown; amend?: boolean; push?: boolean}): Promise<GitCommitResult> {
+export async function commitGit(root: string, input: {revision: string; message: unknown; amend?: boolean; push?: boolean; /** An agent's identity for this one commit (passed as -c; no config is written). */ identity?: {name: string; email: string}}): Promise<GitCommitResult> {
   const real = await repository(root);
   return serial(real, async () => {
     const before = await snapshot(real);
@@ -498,7 +498,7 @@ export async function commitGit(root: string, input: {revision: string; message:
         ? await git(real, ['merge-base', '--is-ancestor', 'HEAD', '@{upstream}']).then(() => true, () => false) : false;
       if (published) throw new Error(`The last commit is already on ${before.upstream}. Amending it would rewrite shared history; make a new commit instead.`);
     } else if (!before.stagedCount) throw new Error('Stage changes before committing.');
-    await git(real, ['commit', ...(input.amend ? ['--amend'] : []), '-m', message], 120000);
+    await git(real, [...(input.identity ? ['-c', `user.name=${input.identity.name}`, '-c', `user.email=${input.identity.email}`] : []), 'commit', ...(input.amend ? ['--amend'] : []), '-m', message], 120000);
     const committed = await snapshot(real);
     if (!input.push) return {status: committed, pushed: false};
     try { await pushLocked(real, committed); return {status: await snapshot(real), pushed: true}; }

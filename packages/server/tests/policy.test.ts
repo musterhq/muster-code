@@ -89,3 +89,17 @@ test('events and outputs are narrowed per user', () => {
   assert.deepEqual((filterOutput(v, 'project.list', snapshot.projects, snapshot) as Array<{ id: string }>).map(p => p.id), ['p-shared', 'p-view']);
   assert.deepEqual((filterOutput(v, 'chat.search', [{ chatId: 'c-secret', snippet: '' }, { chatId: 'c-mine', snippet: '' }], snapshot) as Array<{ chatId: string }>).map(r => r.chatId), ['c-mine']);
 });
+
+test('Wave 1 governance commands: reads are reads, everything else is a write, secrets and permissions need a project owner', () => {
+  for (const c of ['project.gov.state', 'project.gov.summary', 'project.agent.gov.get', 'project.secrets.list', 'project.secrets.audit']) assert.equal(classifyCommand(c), 'read', c);
+  for (const c of ['project.agent.gov.set', 'project.agent.wake', 'project.agent.files.save', 'project.tasks.decide', 'project.holds.create', 'project.tasks.stop', 'project.secrets.save', 'project.secrets.decide', 'project.gov.settings.set']) assert.equal(classifyCommand(c), 'write', c);
+  const editor = accessView(user('member'), grants, owners), owner = accessView(user('member'), [{ projectId: 'p-shared', role: 'owner' }], owners);
+  // An editor may decide a review or stop a run, but not change permissions, secrets or the run policy.
+  authorizeResource(editor, 'project.tasks.decide', 'write', { projectId: 'p-shared', id: 't' }, snapshot);
+  authorizeResource(editor, 'project.tasks.stop', 'write', { projectId: 'p-shared', id: 't', mode: 'keep' }, snapshot);
+  for (const c of ['project.agent.gov.set', 'project.gov.settings.set', 'project.secrets.save', 'project.secrets.decide', 'project.agent.files.save']) denied(() => authorizeResource(editor, c, 'write', { projectId: 'p-shared' }, snapshot));
+  denied(() => authorizeResource(editor, 'project.secrets.list', 'read', { projectId: 'p-shared' }, snapshot));
+  authorizeResource(owner, 'project.secrets.save', 'write', { projectId: 'p-shared' }, snapshot);
+  authorizeResource(owner, 'project.secrets.list', 'read', { projectId: 'p-shared' }, snapshot);
+  denied(() => authorizeResource(accessView(user('viewer'), [{ projectId: 'p-view', role: 'viewer' }], owners), 'project.agent.wake', 'write', { projectId: 'p-view' }, snapshot));
+});

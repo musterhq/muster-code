@@ -45,6 +45,9 @@ function route(raw:Json,path:string,q:URLSearchParams):unknown{
   if(path===`${base}/issues`)return q.get('includeBlockedBy')==='true'?raw.issues.map((i:Json)=>({...i,blockedBy:(raw.blockers?.[i.identifier]??[]).map((key:string)=>{const b=raw.issues.find((x:Json)=>x.identifier===key);return {id:b.id,identifier:key,title:b.title,status:b.status};})})):raw.issues;
   if(path===`${base}/goals`)return raw.goals;
   if(path===`${base}/approvals`)return raw.approvals;
+  // Paperclip's instruction bundle: an entry file and notes, read file by file.
+  const bundle=/^\/agents\/([^/]+)\/instructions-bundle(\/file)?$/.exec(path);
+  if(bundle&&raw.bundle){const files:Json=raw.bundle;return bundle[2]?(files[q.get('path')??'']===undefined?undefined:{path:q.get('path'),content:files[q.get('path')??'']}):{entryFile:'AGENTS.md',files:Object.keys(files).map(f=>({path:f}))};}
   const m=/^\/issues\/([^/]+)\/(comments|interactions|approvals)$/.exec(path);
   if(m)return raw.perIssue[decodeURIComponent(m[1])]?.[m[2]]??[];
   void q;return undefined;
@@ -220,4 +223,33 @@ test('import into an existing project: the plan matches OSSMANAGER by its folder
   assert.equal((await service.invoke('paperclip.snapshot',{})).tasks.filter(x=>x.projectId===mine.id).length,oss.taskCount);
   // Once imported, the plan remembers where it went.
   assert.deepEqual((await service.invoke('paperclip.import.plan',{companyId:COMPANY})).projects.find(p=>p.id===oss.id)!.suggestion,{projectId:mine.id,reason:'imported'});
+});
+
+test('an imported agent gets its instruction bundle and its git identity applied (G11, S87)',async t=>{
+  const {raw,service,calls}=await fixture(t);
+  raw.bundle={'AGENTS.md':'You are the imported agent.','HEARTBEAT.md':'1. check the queue','notes/skip.txt':'ignored','TOOLS.md':'use rg'};
+  await service.invoke('paperclip.config.set',{mode:'local',companyId:COMPANY});
+  await service.invoke('paperclip.import',{companyId:COMPANY});
+  assert.ok(calls.every(c=>c.method==='GET'),'GET only');
+  const project=(await service.invoke('project.list',undefined)).find(p=>!p.archived)!;
+  const agent=(await service.invoke('project.members.list',{projectId:project.id})).members.find(m=>m.kind==='agent'&&m.id!=='agent')!;
+  const view=await service.invoke('project.agent.gov.get',{projectId:project.id,memberId:agent.id});
+  assert.equal(view.files.find(f=>f.name==='AGENTS.md')!.text,'You are the imported agent.');
+  assert.equal(view.files.find(f=>f.name==='HEARTBEAT.md')!.text,'1. check the queue');
+  assert.equal(view.files.find(f=>f.name==='TOOLS.md')!.text,'use rg');
+  assert.ok(view.governance.gitIdentity?.email.endsWith('.local'),'the recorded identity is applied');
+  const before=view.revisions.length;
+  await service.invoke('project.agent.files.save',{projectId:project.id,memberId:agent.id,name:'SOUL.md',text:'local edit'});
+  await service.invoke('paperclip.import',{companyId:COMPANY});
+  const again=await service.invoke('project.agent.gov.get',{projectId:project.id,memberId:agent.id});
+  assert.equal(again.files.find(f=>f.name==='SOUL.md')!.text,'local edit','a re-import keeps a bundle you edited');
+  assert.ok(again.revisions.length>=before);
+});
+
+test('an instruction file the import cannot keep is counted in the report, not dropped silently',async t=>{
+  const {raw,service}=await fixture(t);
+  raw.bundle={'AGENTS.md':'You are the imported agent.','HUGE.md':'x'.repeat(40_000),'notes/odd name!.md':'text'};
+  await service.invoke('paperclip.config.set',{mode:'local',companyId:COMPANY});
+  const report=await service.invoke('paperclip.import',{companyId:COMPANY});
+  assert.ok(report.notes.some(n=>/instruction files were skipped/.test(n)),JSON.stringify(report.notes));
 });

@@ -286,10 +286,14 @@ export function createMcpDomain(ctx: DomainContext): DomainModule {
     if (!active.length) return null;
     const assigned = keys(), configOverrides: Record<string, unknown> = {};
     for (const entry of active) {
-      const key = `mcp_servers.${assigned.get(entry.id)}`;
+      const plain = `mcp_servers.${assigned.get(entry.id)}`;
       // An unhealthy server goes to the provider disabled, so it cannot stall startup for the others.
-      if (!healthy(entry)) { configOverrides[`${key}.enabled`] = false; continue; }
+      if (!healthy(entry)) { configOverrides[`${plain}.enabled`] = false; continue; }
       const secret = token(entry.id);
+      // A server that holds a secret travels whole in the per-thread config (the `secret.` prefix keeps it out of the
+      // process arguments). Codex checks that layer on its own, so a header or env entry without its url or command is rejected.
+      const hasSecret = Boolean(secret) && (entry.transport === 'http' ? entry.auth.kind === 'bearer' : entry.auth.kind === 'env');
+      const key = hasSecret ? `secret.${plain}` : plain;
       configOverrides[`${key}.startup_timeout_sec`] = 10;
       if (entry.transport === 'http') {
         configOverrides[`${key}.url`] = entry.url;

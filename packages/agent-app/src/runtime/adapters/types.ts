@@ -14,6 +14,8 @@ export interface AdapterRunInput {
   /** Muster's own tool servers for this run (in-app browser, terminal, mailbox…), from the domains' `mcp_servers.*`
    *  overrides. Adapters that can load MCP servers pass them to the model; the rest ignore them. */
   mcpServers?: Record<string, McpServerSpec>;
+  /** Extra environment for the run's process: the agent's git identity and the secrets lent to it. */
+  env?: Record<string, string>;
   permissionMode: 'read-only' | 'workspace' | 'full';
   /** The saved conversation to continue; only set when it belongs to this route and binding. */
   resumeThreadId?: string;

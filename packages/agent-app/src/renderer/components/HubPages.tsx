@@ -1,6 +1,7 @@
 /** The hub pages (#115): Inbox (every chat and run that needs you), Roster (org graph + Pulse), an agent's page, Ledger
  *  (Receipts, Timeline, Activity, Costs) and Outputs. Muster's own rows and the linked Paperclip's render the same way,
  *  tagged by source. */
+import { AgentGovernancePanel } from './AgentGovernance';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { Box, History, Inbox, Pause, Play, Square, X } from 'lucide-react';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
@@ -156,6 +157,7 @@ export function AgentPage({ snapshot, agentId, nav }: { snapshot: WorkspaceSnaps
       <div><dt>Direct reports</dt><dd>{reports.length ? <span className="ws-chips">{reports.map(chip)}</span> : <span className="ws-faint">None</span>}</dd></div>
       <div><dt>Last active</dt><dd>{agent.lastActiveAt ? agoLabel(agent.lastActiveAt) : '—'}</dd></div>
     </dl>
+    {agent.source === 'local' && agent.projectId && agent.memberId && agent.memberId !== 'agent' && <AgentGovernancePanel agent={agent} snapshot={snapshot}/>}
     <section className="ws-section" aria-label="Work"><h2 className="ws-group-title">Work<span>{tasks.length}</span></h2>
       {tasks.length === 0 ? <p className="ws-board-empty">No tasks assigned.</p> : <ul className="ws-rows">{tasks.slice(0, 30).map(t => <li key={t.id}><button type="button" className="ws-row" onClick={() => nav.onOpenTask(t.id)}>
         <TaskStatusIcon status={t.status}/><span className="ws-key">{t.key}</span><span className="ws-row-title ws-grow">{t.title}</span>{t.live && <span className="ws-live"><span className="ws-live-dot"/>live</span>}<span className="ws-row-age" title={exactTime(t.updatedAt)}>{agoLabel(t.updatedAt)}</span>

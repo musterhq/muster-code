@@ -11,6 +11,7 @@ import { ProjectEventLog } from '../project-event-log.ts';
 import { ProjectTaskStore, type Actor, type ProjectTask } from '../project-tasks.ts';
 import type { DomainContext, DomainModule } from './types.ts';
 import { createProjectTeam } from './project-team.ts';
+import { createGovernance, type WakeInfo } from './project-governance.ts';
 import { createCodexProjectSync } from '../codex-project-sync.ts';
 import { plural } from '../../shared/wording.ts';
 
@@ -60,7 +61,7 @@ export function createProjectsDomain(ctx: DomainContext): DomainModule {
       dispatch: async task => { await dispatch(task.projectId, task.id, task.revision, 'scheduler'); },
       stop: async chatId => { await ctx.invoke('chat.stop', { id: chatId }); },
       runnable: projectId => { const r = maybeRow(projectId); return Boolean(r && !r.archived); },
-      held: task => task.owner.kind === 'agent' && Boolean(team.member(task.projectId, task.owner.id)?.pausedAt),
+      held: task => (task.owner.kind === 'agent' && Boolean(team.member(task.projectId, task.owner.id)?.pausedAt)) || gov.held(task),
       changed: projectId => changed(projectId),
       // PER-06: automated runs queue (stay todo) while the machine is under memory/CPU pressure or agent slots are full.
       admit: () => resources.admits('agent'),
@@ -69,6 +70,7 @@ export function createProjectsDomain(ctx: DomainContext): DomainModule {
     const resources = sharedResourceScheduler(), liveDb = db;
     resources.countAgents ??= () => { try { return Number((liveDb.prepare("SELECT COUNT(*) AS n FROM chats WHERE status IN ('running','stopping')").get() as { n: number }).n) || 0; } catch { return 0; } };
     timer = setInterval(() => void background(), TICK_MS); timer.unref?.();
+    gov.armAll();
     return { db, tasks, scheduler };
   };
   const codexSync = createCodexProjectSync({
@@ -178,16 +180,11 @@ export function createProjectsDomain(ctx: DomainContext): DomainModule {
     const label = `goal v${goalVersion}, ${plural(decisions.length, 'decision')}${rules.version ? `, rules v${rules.version}` : ''}${refs.length ? `, ${plural(refs.length, 'source')}` : ''}`;
     return { lines, summary: { version, goalVersion, instructionsVersion: rules.version, decisions: decisions.length, headSha: sha, label, ...(refs.length ? { sources: refs } : {}) } };
   }
-  function taskLines(task: ProjectTask): string[] {
+  function taskLines(task: ProjectTask, chatId: string): string[] {
     const { tasks: store } = open(), deps = task.dependencies.map(d => store.getTask(d)).filter((d): d is ProjectTask => Boolean(d));
     const out = ['', `This chat runs Project task "${task.title}" (owner: ${task.owner.kind}, priority: ${PRIORITY_LABEL[task.priority]}).`];
-    // A Roster agent owns it: the run works as that agent, with its title, reporting line and instructions.
-    const agent = task.owner.kind === 'agent' ? team.member(task.projectId, task.owner.id) : undefined;
-    if (agent && agent.kind === 'agent' && (agent.title || agent.instructions?.trim())) {
-      const boss = agent.reportsTo ? team.member(task.projectId, agent.reportsTo) : undefined;
-      out.push(`You are ${agent.name}${agent.title ? `, ${agent.title}` : ''}${boss ? `, reporting to ${boss.name}` : ''}.`);
-      if (agent.instructions?.trim()) out.push(`${agent.name}'s instructions — follow these:`, clip(agent.instructions.trim(), 6000));
-    }
+    // A Roster agent owns it: the run works as that agent: its instruction bundle, why it started, what it may do (governance).
+    out.push(...gov.taskLines(task, chatId));
     if (deps.length) out.push('Dependency outcomes:', ...deps.map(d => { const last = d.attempts.find(a => a.status !== 'running'); return `- ${d.title}: ${d.state}${d.verification ? `, verified by ${d.verification.kind}${d.verification.command ? ` (${clip(d.verification.command, 120)})` : ''}: ${clip(d.verification.notes.replace(/\s+/g, ' '), 200)}` : ''}${d.artifacts.length ? `; artifacts: ${d.artifacts.slice(0, 5).join(', ')}` : ''}${last ? `; last run ${last.status}` : ''}`; }));
     if (task.artifacts.length) out.push(`Task artifacts: ${task.artifacts.slice(0, 10).join(', ')}`);
     return out;
@@ -212,7 +209,7 @@ export function createProjectsDomain(ctx: DomainContext): DomainModule {
     // A task chat receives the task's handoff packet; the run start acknowledges the version it received (PRJ-18).
     const handoff = task ? await buildHandoff(projectId, task.id).catch(() => undefined) : undefined;
     if (handoff) lastHandoff.set(chat.id, { packetId: handoff.id, version: handoff.version });
-    return { label: `Project context v${summary.version} (${summary.label})`, text: [...lines, ...(task ? taskLines(task) : []), ...(handoff ? handoffLines(handoff) : []), ...(coordinator ? coordinatorLines(projectId) : [])].join('\n') };
+    return { label: `Project context v${summary.version} (${summary.label})`, text: [...lines, ...(task ? taskLines(task, chat.id) : []), ...(handoff ? handoffLines(handoff) : []), ...(coordinator ? coordinatorLines(projectId) : [])].join('\n') };
   };
 
   // ── Knowledge sources (PRJ-16) ────────────────────────────────────────────
@@ -363,10 +360,15 @@ export function createProjectsDomain(ctx: DomainContext): DomainModule {
   // ── Dispatch ──────────────────────────────────────────────────────────────
   const taskPrompt = (t: ProjectTask) => `Project task: ${t.title}\nTask ID: ${t.id}\nAcceptance criteria:\n${t.acceptance || '(not specified)'}\n\nWork only within the selected Project folder. Implement the task, report concrete changes and relevant verification, and do not claim the task is verified. Ask before expanding scope or taking an irreversible action.`;
   /** One agent run for a task: a scoped chat at the clamped permission mode, claimed on the task before the send. */
-  async function dispatch(projectId: string, taskId: string, rev: number, trigger: 'user' | 'scheduler' | 'coordinator', folderId?: string): Promise<{ chatId: string; runId: string }> {
+  async function dispatch(projectId: string, taskId: string, rev: number, trigger: 'user' | 'scheduler' | 'coordinator', folderId?: string, wake?: WakeInfo): Promise<{ chatId: string; runId: string }> {
+    try { return await dispatchOne(projectId, taskId, rev, trigger, folderId, wake); } finally { gov.release(taskId); }
+  }
+  async function dispatchOne(projectId: string, taskId: string, rev: number, trigger: 'user' | 'scheduler' | 'coordinator', folderId?: string, wake?: WakeInfo): Promise<{ chatId: string; runId: string }> {
     const { tasks: store } = open(), project = toDetails(row(projectId));
     if (project.archived) throw new Error('This Project is archived. Restore it before starting tasks.');
     const task = store.assertCanStartTask({ projectId, id: taskId, revision: rev });
+    const blocked = await gov.preflight(task);
+    if (blocked) throw new Error(blocked);
     const previous = task.runChatId ? ctx.store.chat(task.runChatId) : undefined;
     if (previous && (ACTIVE.has(previous.status) || previous.recovery?.kind === 'recovery-needed')) throw new Error('The prior agent attempt may still be active. Open its linked chat and resolve it before running this task again.');
     const target = folderId ?? (previous?.folderId && project.folderIds.includes(previous.folderId) ? previous.folderId : project.primaryFolderId);
@@ -378,7 +380,7 @@ export function createProjectsDomain(ctx: DomainContext): DomainModule {
     const grant = team.runAccess(projectId, task.owner, trigger);
     if (!grant.active || !grant.canDispatch || !grant.permissionMode) throw new Error(grant.reason ?? 'This member cannot start task runs.');
     if (!grant.folderIds.includes(target)) throw new Error(`The member requesting this run has no access to ${folderName(target)}.`);
-    const access = clampPermission(clampPermission(task.permissionMode, store.schedule(projectId).permissionMode), grant.permissionMode), prompt = taskPrompt(task), actor: Actor = trigger === 'user' ? 'user' : trigger;
+    const access = gov.clampAccess(projectId, task.owner, clampPermission(clampPermission(task.permissionMode, store.schedule(projectId).permissionMode), grant.permissionMode)), prompt = taskPrompt(task), actor: Actor = trigger === 'user' ? 'user' : trigger;
     const chat = await ctx.invoke('chat.create', { folderId: target, projectId });
     // The owner's runner (a Roster agent's provider and model). One that is not available here falls back to the project's default, and says so.
     const runner = task.owner.kind === 'agent' ? team.member(projectId, task.owner.id)?.runner : null;
@@ -393,6 +395,8 @@ export function createProjectsDomain(ctx: DomainContext): DomainModule {
     try { store.startTask({ projectId, id: taskId, revision: rev, requestId, chatId: chat.id }, actor); }
     catch (err) { await ctx.invoke('chat.update', { id: chat.id, archived: true }).catch(() => undefined); throw err; }
     pendingTrigger.set(chat.id, trigger);
+    gov.beforeSend(projectId, chat.id, task, wake, trigger);
+    await gov.prepareDispatch(task, ctx.store.folder(target)?.path ?? null).catch(() => undefined);
     changed(projectId, taskId);
     try { const { runId } = await ctx.invoke('chat.send', { id: chat.id, text: prompt, requestId }); return { chatId: chat.id, runId }; }
     catch (err) {
@@ -407,7 +411,11 @@ export function createProjectsDomain(ctx: DomainContext): DomainModule {
     await s.enforceBudgets().catch(() => undefined);
     for (const projectId of store.autoProjects()) if (!disposed) await s.tick(projectId).catch(() => undefined);
   }
+  ctx.hooks.setToolPolicy?.((chat, method, params) => gov.decideTool(chat, method, params));
+  ctx.hooks.setCommitIdentity?.(folderId => gov.identityForFolder(folderId));
+  ctx.hooks.setTaskWorktreeRecorder?.((projectId, taskId, folderId) => gov.noteWorktree(projectId, taskId, folderId));
   ctx.hooks.addPromptContributor(contributor);
+  ctx.hooks.addRunOptionsContributor(async chat => gov.runOptions(chat));
   // CR-21: after a run the chat's Codex thread exists; mirror projects (catches ones created in the service) and group the thread.
   ctx.hooks.onRunSettled(({ chat }) => {
     if (disposed || !ctx.native) return;
@@ -415,6 +423,7 @@ export function createProjectsDomain(ctx: DomainContext): DomainModule {
   });
   ctx.hooks.onRunStarted(({ chat, runId }) => {
     if (!chat.projectId || disposed) return;
+    gov.started(chat);
     const trigger = pendingTrigger.get(chat.id); pendingTrigger.delete(chat.id);
     // The recipient acknowledges the handoff it received before the attempt is recorded (PRJ-18).
     const handoff = lastHandoff.get(chat.id); lastHandoff.delete(chat.id);
@@ -423,11 +432,12 @@ export function createProjectsDomain(ctx: DomainContext): DomainModule {
     lastPacket.delete(chat.id);
     if (started) changed(chat.projectId);
   });
-  ctx.hooks.onRunSettled(({ chat }) => {
+  ctx.hooks.onRunSettled(({ chat, status }) => {
     if (!chat.projectId || disposed) return;
     const { tasks: store, scheduler: s } = open(), reason = s.takeBudgetReason(chat.id), task = store.taskByRunChat(chat.id);
     if (reason && task) store.annotateRun(task.id, reason);
     if (task || store.coordinator(chat.projectId) === chat.id) changed(chat.projectId, task?.id ?? '');
+    gov.settled(chat, status);
   });
 
   // ── Read model ────────────────────────────────────────────────────────────
@@ -539,9 +549,12 @@ export function createProjectsDomain(ctx: DomainContext): DomainModule {
   };
 
   const team = createProjectTeam(ctx, { tasks: () => open().tasks, details: projectId => toDetails(row(projectId)), exists: projectId => Boolean(maybeRow(projectId)), changed });
+  const gov = createGovernance(ctx, { tasks: () => open().tasks, details: projectId => toDetails(row(projectId)), exists: projectId => Boolean(maybeRow(projectId)), team, dispatch, expectRun: (chatId, trigger) => { pendingTrigger.set(chatId, trigger); }, changed });
   return {
     handlers: {
       ...team.handlers,
+      ...gov.handlers,
+      'project.members.revoke': async input => { const r = await team.handlers['project.members.revoke']!(input); gov.memberGone(project(input), id(input.id, 'member id')); return r; },
       'project.list': () => (open().db.prepare('SELECT * FROM projects ORDER BY archived, name COLLATE NOCASE').all() as unknown as ProjectRow[]).map(toDetails),
       'project.update': input => update(input),
       'project.linkFolder': input => {
@@ -570,6 +583,7 @@ export function createProjectsDomain(ctx: DomainContext): DomainModule {
         });
         open().tasks.purgeProject(projectId);
         team.purge(projectId);
+        gov.purgeProject(projectId);
         changed(projectId, '', true);
         return { deleted: true, detachedChats };
       },
@@ -588,13 +602,13 @@ export function createProjectsDomain(ctx: DomainContext): DomainModule {
         return { ...stats, activity: stats.activity.map(a => ({ ...a, projectName: names.get(a.projectId) ?? 'Project' })) } as never;
       },
       'project.tasks.edit': input => { const projectId = project(input), taskId = id(input.id), t = open().tasks.editTask({ projectId, id: taskId, revision: revision(input.revision), patch: edit(input) }); changed(projectId, t.id); return view(projectId, t.id); },
-      'project.tasks.delete': input => { const projectId = project(input), taskId = id(input.id); open().tasks.deleteTask({ projectId, id: taskId, revision: revision(input.revision) }); changed(projectId, taskId); return { deleted: true }; },
+      'project.tasks.delete': input => { const projectId = project(input), taskId = id(input.id); open().tasks.deleteTask({ projectId, id: taskId, revision: revision(input.revision) }); gov.purgeTask(taskId); changed(projectId, taskId); gov.evaluate(projectId); return { deleted: true }; },
       'project.tasks.setState': input => {
         const projectId = project(input), taskId = id(input.id), state = input.state as TaskState;
         if (!TASK_STATES.includes(state)) throw new Error('Invalid task status.');
         assertNotLive(open().tasks.assertTaskProject(projectId, taskId));
         const t = open().tasks.setState({ projectId, id: taskId, revision: revision(input.revision), state, ...(input.reason !== undefined ? { reason: text(input.reason, 'reason', 2000) } : {}) });
-        changed(projectId, t.id); return view(projectId, t.id);
+        changed(projectId, t.id); gov.evaluate(projectId); return view(projectId, t.id);
       },
       'project.tasks.verify': async input => {
         const projectId = project(input), taskId = id(input.id), { tasks: store } = open(), details = toDetails(row(projectId)), current = store.assertTaskProject(projectId, taskId);
@@ -604,7 +618,7 @@ export function createProjectsDomain(ctx: DomainContext): DomainModule {
         const t = store.verifyTask({ projectId, id: taskId, revision: revision(input.revision), kind, notes: text(input.notes, 'notes', 4000), ...(input.command !== undefined ? { command: text(input.command, 'command', 1000) } : {}), ...(input.reviewer !== undefined ? { reviewer: text(input.reviewer, 'reviewer', 200) } : {}), ...(sha ? { commitSha: sha } : {}), ...(folderId ? { folderId } : {}) });
         changed(projectId, t.id); return view(projectId, t.id);
       },
-      'project.tasks.dispatch': input => dispatch(project(input), id(input.id), revision(input.revision), 'user', input.folderId === undefined ? undefined : id(input.folderId, 'folder id')),
+      'project.tasks.dispatch': input => dispatch(project(input), id(input.id), revision(input.revision), 'user', input.folderId === undefined ? undefined : id(input.folderId, 'folder id'), input.reason === 'assignment' ? { reason: 'assignment' } : undefined),
       'project.decisions.add': input => { const projectId = project(input), d = open().tasks.createDecision({ projectId, title: text(input.title, 'decision title', 500), rationale: text(input.rationale ?? '', 'rationale', 8000), scope: text(input.scope ?? '', 'scope', 500), relatedTaskIds: ids(input.relatedTaskIds ?? [], 'related tasks') }); changed(projectId); return d; },
       'project.decisions.edit': input => { const projectId = project(input), d = open().tasks.editDecision({ projectId, id: id(input.id), ...(input.title !== undefined ? { title: text(input.title, 'decision title', 500) } : {}), ...(input.rationale !== undefined ? { rationale: text(input.rationale, 'rationale', 8000) } : {}), ...(input.scope !== undefined ? { scope: text(input.scope, 'scope', 500) } : {}), ...(input.relatedTaskIds !== undefined ? { relatedTaskIds: ids(input.relatedTaskIds, 'related tasks') } : {}) }); changed(projectId); return d; },
       'project.decisions.replace': input => { const projectId = project(input), d = open().tasks.supersedeDecision({ projectId, id: id(input.id), replacementId: id(input.replacementId) }); changed(projectId); return d; },
@@ -658,6 +672,6 @@ export function createProjectsDomain(ctx: DomainContext): DomainModule {
       void background();
       timer = setInterval(() => void background(), TICK_MS); timer.unref?.();
     },
-    dispose() { team.dispose(); codexSync.dispose(); disposed = true; if (timer) clearInterval(timer); timer = undefined; tasks?.close(); tasks = undefined; scheduler = undefined; db = undefined; },
+    dispose() { ctx.hooks.setToolPolicy?.(undefined); ctx.hooks.setCommitIdentity?.(undefined); ctx.hooks.setTaskWorktreeRecorder?.(undefined); gov.dispose(); team.dispose(); codexSync.dispose(); disposed = true; if (timer) clearInterval(timer); timer = undefined; tasks?.close(); tasks = undefined; scheduler = undefined; db = undefined; },
   };
 }

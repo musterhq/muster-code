@@ -18,6 +18,8 @@ export type ChatDefaultsResolver = (input: { folderId?: string; projectId?: stri
 /** A domain command that completed without throwing. Observers must not throw or block. */
 export interface CommandCompleted { command: string; input: Record<string, unknown>; output: unknown }
 export type RunEnvironmentResolver = (chat: Chat, defaultCwd: string) => Promise<{ cwd: string }>;
+/** G13: a per-agent tool policy decision for an approval request. null: no rule applies and the usual flow decides. */
+export type ToolPolicyResolver = (chat: Chat, method: string, params: Record<string, unknown>) => { effect: 'allow' | 'ask' | 'deny'; message: string } | null;
 
 /** The add and on hooks return an unsubscribe function; the set hooks replace a single resolver (undefined clears it). */
 export interface DomainHooks {
@@ -28,6 +30,15 @@ export interface DomainHooks {
   onProviderEvent(fn: (event: ProviderEventInfo) => void): () => void;
   setChatDefaults(fn: ChatDefaultsResolver | undefined): void;
   setRunEnvironmentResolver(fn: RunEnvironmentResolver | undefined): void;
+  /** Replaces the single tool-policy resolver (undefined clears it). Optional so bare test contexts need not provide it. */
+  setToolPolicy?(fn: ToolPolicyResolver | undefined): void;
+  /** Replaces the resolver of the git identity a Git-tab commit in a folder carries (an agent's task worktree). */
+  setCommitIdentity?(fn: ((folderId: string) => { name: string; email: string } | null) | undefined): void;
+  /** Records that a folder is the linked worktree Muster made for a task, the only kind of folder a Git-tab commit may carry an agent identity in. */
+  setTaskWorktreeRecorder?(fn: ((projectId: string, taskId: string, folderId: string) => void) | undefined): void;
+  noteTaskWorktree?(projectId: string, taskId: string, folderId: string): void;
+  /** The identity a commit in this folder carries, or null. Never throws. */
+  commitIdentity?(folderId: string): { name: string; email: string } | null;
   /** Observes successful domain commands (e.g. Projects logging memory and environment writes to activity). Optional so bare test contexts need not provide it. */
   onCommand?(fn: (event: CommandCompleted) => void): () => void;
 }

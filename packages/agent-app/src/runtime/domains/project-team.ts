@@ -278,7 +278,7 @@ export function createProjectTeam(ctx: DomainContext, deps: ProjectTeamDeps) {
     'project.chats.transfer': input => transfer(input),
   };
   return {
-    handlers, runAccess,
+    handlers, runAccess, store: members,
     /** A member with their Roster profile (runner, instructions), for task dispatch. */
     member: (projectId: string, memberId: string) => members().get(projectId, memberId),
     purge(projectId: string) { members().purge(projectId); },

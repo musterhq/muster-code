@@ -442,7 +442,16 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
       comments.push({ id: `run:${run.id}:${last.id}`, author: { kind: 'agent', id: run.agentId, label: detail.task.assigneeLabel ?? 'Agent' }, body: last.text, createdAt: last.createdAt, runId: receipt?.runId ?? null });
     }
     comments.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
-    return { ...detail, comments, cards, receipts };
+    // Governance: the review stage card, hold, policy, why runs started, follow-up check, stopped-subtree finding.
+    const projectId = detail.task.projectId ?? '';
+    const gov = projectId ? await context.invoke('project.gov.task', { projectId, taskId }).catch(() => null) : null;
+    let governance: WorkspaceTaskDetail['governance'];
+    if (gov) {
+      if (gov.stage) cards.push({ kind: 'stage', id: `stage:${taskId}`, at: gov.stage.updatedAt, stage: gov.stage });
+      for (const p of gov.proposals) cards.push({ kind: 'secret', id: `secret:${p.id}`, at: p.createdAt, proposal: p, secureStorage: gov.secureStorage });
+      governance = { stage: gov.stage, policy: gov.policy, effectivePolicy: gov.effectivePolicy, hold: gov.hold, hidden: gov.hidden, runs: gov.runs, monitor: gov.monitor, watchdog: gov.watchdog, agents: gov.agents };
+    }
+    return { ...detail, comments, cards, receipts, ...(governance ? { governance } : {}) };
   };
   const paperclipDetail = async (taskId: string): Promise<WorkspaceTaskDetail> => {
     const c = api();
@@ -551,6 +560,7 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
     const reuse = (await context.invoke('git.worktree.list', { folderId: source.id }).catch(() => [])).find(w => !w.main && !w.prunable && (w.branch === branch || w.branch === `refs/heads/${branch}`));
     const worktree = reuse ? { folder: await context.invoke('folder.add', { path: reuse.path }), path: reuse.path, branch } : await context.invoke('git.worktree.create', { folderId: source.id, branch, ...(base ? { base } : {}) });
     try {
+      context.hooks.noteTaskWorktree?.(project.id, taskId, worktree.folder.id);
       if (!project.folderIds.includes(worktree.folder.id)) await context.invoke('project.linkFolder', { id: project.id, folderId: worktree.folder.id });
       // The run uses its owner's runner and model (set on the Roster member); the project's default model is left alone.
       const fresh = (await context.invoke('project.work', { projectId: project.id, activityLimit: 1 })).tasks.items.find(t => t.id === taskId);

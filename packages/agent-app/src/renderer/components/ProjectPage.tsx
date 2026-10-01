@@ -32,6 +32,7 @@ import { scopeToProject } from './ProjectHub';
 import { HandoffCard, SourcesCard } from './ProjectKnowledge';
 import { ProjectMembersSection } from './ProjectMembers';
 import { CoordinatorCard, InstructionsCard } from './ProjectOverview';
+import { GovernanceSection, SecretsSection } from './ProjectGovernance';
 import { ChatsTab, FoldersTab, InlineText } from './ProjectParts';
 import { ProjectAgentsSection, ProjectChangesSection, ProjectEnvironmentsSection, ProjectMemorySection } from './ProjectSections';
 import { copyProjectExport, ProjectDecisionSection, ProjectTaskSection, relativeTime, saveProjectExport, useProjectWork, type TaskFilter } from './ProjectTasks';
@@ -45,10 +46,10 @@ import { DashboardPage, RunActivityChart } from './DashboardPage';
 
 export type ProjectPageTab = 'dashboard' | 'tasks' | 'roster' | 'outputs' | 'ledger' | 'budget' | 'settings';
 const TABS: { id: ProjectPageTab; label: string }[] = [{ id: 'dashboard', label: NAMES.dashboard }, { id: 'tasks', label: NAMES.tasks }, { id: 'roster', label: NAMES.roster }, { id: 'outputs', label: NAMES.outputs }, { id: 'ledger', label: NAMES.ledger }, { id: 'budget', label: NAMES.budget }, { id: 'settings', label: NAMES.settings }];
-type SettingsSection = 'general' | 'folders' | 'members' | 'mail' | 'chats' | 'knowledge' | 'runs' | 'activity';
+type SettingsSection = 'general' | 'folders' | 'members' | 'mail' | 'chats' | 'knowledge' | 'runs' | 'governance' | 'secrets' | 'activity';
 const SECTIONS: { id: SettingsSection; label: string }[] = [
   { id: 'general', label: 'General' }, { id: 'folders', label: 'Folders' }, { id: 'members', label: 'Members' }, { id: 'mail', label: NAMES.mail },
-  { id: 'chats', label: 'Chats' }, { id: 'knowledge', label: 'Knowledge' }, { id: 'runs', label: 'Runs & verification' }, { id: 'activity', label: 'Activity' },
+  { id: 'chats', label: 'Chats' }, { id: 'knowledge', label: 'Knowledge' }, { id: 'runs', label: 'Runs & verification' }, { id: 'governance', label: 'Run policy' }, { id: 'secrets', label: 'Secrets' }, { id: 'activity', label: 'Activity' },
 ];
 const errorText = (cause: unknown) => cause instanceof Error ? cause.message : String(cause);
 
@@ -116,7 +117,7 @@ export function ProjectPage({ snapshot, projectId, nav, muster, initialTab = 'ta
         : tab === 'dashboard' ? <DashboardPage snapshot={scoped} nav={nav} projectId={projectId}/>
         : tab === 'ledger' ? <LedgerPage snapshot={scoped} nav={nav} projectId={projectId}/>
         : tab === 'budget' ? <BudgetTab projectId={projectId} local={local} name={name}/>
-        : muster ? <MusterSettings context={muster} section={section} onSection={setSection} onEdit={() => setEditing(true)} onArchive={() => setConfirm('archive')} onDelete={() => setConfirm('delete')} onRestore={() => void restore()} onStatus={setStatus}/>
+        : muster ? <MusterSettings context={muster} snapshot={scoped} section={section} onSection={setSection} onEdit={() => setEditing(true)} onArchive={() => setConfirm('archive')} onDelete={() => setConfirm('delete')} onRestore={() => void restore()} onStatus={setStatus}/>
         : <PaperclipSettings snapshot={scoped}/>}
     </div>
     <NewTaskSheet open={creating} snapshot={snapshot} projectId={projectId} onClose={() => setCreating(false)} onCreated={() => undefined}/>
@@ -136,7 +137,7 @@ function WorkingNow({ projectId, chats, onOpenChat }: { projectId: string; chats
 }
 
 /** Settings for a Muster project: every section of the old project screen, grouped. */
-function MusterSettings({ context, section, onSection, onEdit, onArchive, onDelete, onRestore, onStatus }: { context: MusterProjectContext; section: SettingsSection; onSection: (s: SettingsSection) => void; onEdit: () => void; onArchive: () => void; onDelete: () => void; onRestore: () => void; onStatus: (text: string) => void }): React.ReactElement {
+function MusterSettings({ context, snapshot, section, onSection, onEdit, onArchive, onDelete, onRestore, onStatus }: { context: MusterProjectContext; snapshot: WorkspaceSnapshot; section: SettingsSection; onSection: (s: SettingsSection) => void; onEdit: () => void; onArchive: () => void; onDelete: () => void; onRestore: () => void; onStatus: (text: string) => void }): React.ReactElement {
   const { project, allFolders, chats, onUpdated, onStartChat, onOpenChat } = context;
   const { work, error, reload } = useProjectWork(project.id);
   const [filter, setFilter] = useState<TaskFilter>('all');
@@ -160,6 +161,8 @@ function MusterSettings({ context, section, onSection, onEdit, onArchive, onDele
             <HandoffCard projectId={project.id} tasks={work!.tasks.items} onOpenChat={onOpenChat}/>
             <ProjectDecisionSection projectId={project.id} work={work!} onChanged={reload}/>
           </div>
+        : section === 'governance' ? <GovernanceSection projectId={project.id} snapshot={snapshot}/>
+        : section === 'secrets' ? <SecretsSection projectId={project.id} snapshot={snapshot}/>
         : section === 'runs' ? <ProjectTaskSection project={project} folders={folders} work={work!} archived={project.archived} filter={filter} onFilter={setFilter} onChanged={reload}/>
         : <ProjectActivityPanel projectId={project.id} resolveRef={() => null} onOpenRef={() => undefined}/>}
     </div>

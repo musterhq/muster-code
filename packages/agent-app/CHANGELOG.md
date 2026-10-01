@@ -5,6 +5,13 @@ All notable changes to Muster Agent. Each `## <version>` section becomes the not
 
 ## Unreleased
 
+- Agents wake for a reason you can see. Each Roster agent has a run policy: a heartbeat timer, wake on assignment, wake on a comment or @mention, wake on a decision, and a least gap between wakes. A timer wake only starts a run when the agent has ready work, so an idle heartbeat costs nothing. Wakes that arrive close together merge into one run, a runaway burst pauses the agent and tells you, and every run shows why it started.
+- Runs that go wrong recover instead of stalling. An empty or plan-only turn is continued (up to twice), a temporary failure is retried after a backoff, a usage limit is explained, and a run that ends with no comment is asked once and then gets a note written from its Receipt. Lost runs, stranded tasks and tasks with no next step show up under Settings › Run policy with a way out.
+- Hold a whole subtree: pause it, or cancel it (type the task key to confirm) and restore it later. Stop a run three ways: Stop, Stop and mark done (it still goes through review), or Stop and cancel. Hide a task from lists.
+- Review and approval policies: a task can need a review or approval by you or by an agent reviewer before it counts as done. Request changes needs a note and wakes the owner with it; the last approval verifies the task. A stopped subtree raises one finding for you (or a watchdog agent) to accept, reopen or reassign, and follow-up checks wake the owner, create a recovery task, or ask you.
+- Per-agent governance on the agent's page: an instruction bundle (AGENTS.md, SOUL.md, HEARTBEAT.md, TOOLS.md, more) with revisions and restore, permissions (create and assign tasks, propose hires, low-trust containment), tool rules (allow, ask or deny by command, file or connector tool), a git identity for its commits, and the secrets lent to it. A project's secrets are versioned, rotatable, audited, and agents can ask for one by name; you type the value, the agent never sees it.
+- A monthly budget now stops new runs at 100% (and raises an incident) until you raise it, and an agent can be limited to a number of tasks at once.
+
 ## 0.2.10
 
 - Models from OmniRoute and other providers you add in Settings work again. The API key you paste into Muster is now sent with every chat; before, chats went out without it and failed with HTTP 401.

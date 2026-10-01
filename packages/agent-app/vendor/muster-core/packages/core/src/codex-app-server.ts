@@ -37,6 +37,8 @@ export interface CodexAppServerRunInput {
   readonly command?: string;
   /** Native Codex config overrides supplied by the governed host. */
   readonly configOverrides?: readonly string[];
+  /** Muster: per-thread config sent in the thread/start and thread/resume JSON-RPC body, never process arguments. Carries values that must not appear in `ps` (lent secrets, MCP bearer tokens). */
+  readonly threadConfig?: Record<string, unknown>;
   /** Persisted Codex thread to re-open when no warm process is cached. */
   readonly threadId?: string;
   /** Stable conversation identity. Omit it to disable cross-call process reuse. */
@@ -567,6 +569,7 @@ async function createSession(
     developerInstructions: input.input.developerInstructions,
     networkAccess: input.input.networkAccess,
     configOverrides: input.input.configOverrides,
+    threadConfig: input.input.threadConfig,
     sandbox: input.input.sandbox,
     env: input.input.env,
     onClose: () => {
@@ -652,6 +655,7 @@ function appServerScopeKey(input: CodexAppServerRunInput, command: string, conve
     command,
     networkAccess: input.networkAccess === true,
     configOverrides: input.configOverrides ?? [],
+    threadConfig: input.threadConfig ?? null,
     sandbox: input.sandbox ?? "workspace-write",
     env,
   })).digest("hex");
@@ -742,6 +746,7 @@ class CodexAppServerClient {
   private readonly child: ChildProcessWithoutNullStreams;
   private readonly onClose?: () => void;
   private readonly developerInstructions?: string;
+  private readonly threadConfig?: Record<string, unknown>;
   private readonly sandbox: "read-only" | "workspace-write" | "danger-full-access";
   private nextId = 1;
   private stdoutBuffer = "";
@@ -772,10 +777,12 @@ class CodexAppServerClient {
     readonly sandbox?: "read-only" | "workspace-write" | "danger-full-access";
     readonly networkAccess?: boolean;
     readonly configOverrides?: readonly string[];
+    readonly threadConfig?: Record<string, unknown>;
     readonly env?: Record<string, string>;
     readonly onClose?: () => void;
   }) {
     this.onClose = input.onClose;
+    this.threadConfig = input.threadConfig;
     this.developerInstructions = input.developerInstructions;
     this.sandbox = input.sandbox ?? "workspace-write";
     const args = buildCodexAppServerArgs(input);
@@ -860,6 +867,7 @@ class CodexAppServerClient {
       approvalPolicy: "never",
       sandbox: this.sandbox,
       ...(this.developerInstructions ? { developerInstructions: this.developerInstructions } : {}),
+      ...(this.threadConfig ? { config: this.threadConfig } : {}),
     }, 15_000);
     const thread = asRecord(result.thread);
     const threadId = stringValue(thread.id) ?? stringValue(thread.sessionId) ?? stringValue(result.sessionId) ?? stringValue(result.threadId);
@@ -875,6 +883,7 @@ class CodexAppServerClient {
       approvalPolicy: "never",
       sandbox: this.sandbox,
       ...(this.developerInstructions ? { developerInstructions: this.developerInstructions } : {}),
+      ...(this.threadConfig ? { config: this.threadConfig } : {}),
     }, 30_000);
     const thread = asRecord(result.thread);
     const resumedId = stringValue(thread.id) ?? stringValue(thread.sessionId) ?? stringValue(result.sessionId) ?? stringValue(result.threadId);

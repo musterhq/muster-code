@@ -61,7 +61,7 @@ export function openCodeAdapter(options: {binary: string; env?: NodeJS.ProcessEn
         // After the message: `--file` is an array option and would swallow a following positional.
         ...(input.images ?? []).flatMap(path => ['--file', path])];
       let child: ChildProcess;
-      const launch = cliSpawn(options.binary, args, options.env ?? process.env);
+      const launch = cliSpawn(options.binary, args, input.env ? {...(options.env ?? process.env), ...input.env} : options.env ?? process.env);
       try { child = spawn(launch.command, launch.args, {cwd: input.cwd, env: launch.env, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true}); }
       catch (error) { resolve({status: 'failed', finalMessage: '', dispatchState: 'not-dispatched', errorMessage: `OpenCode could not start: ${error instanceof Error ? error.message : String(error)}`}); return; }
       let session = input.resumeThreadId, settled = false, failure = '', stderr = '', answer = '', killer: ReturnType<typeof setTimeout> | undefined;

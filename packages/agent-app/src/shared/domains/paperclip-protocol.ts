@@ -9,6 +9,7 @@
  */
 import type { MemoryConnection, MemoryRecord } from './memory-protocol.ts';
 import type { TimelineItem } from '../protocol.ts';
+import type { ExecutionPolicy, RunMeta, SecretProposal, TaskMonitor, TaskStageState, Watchdog } from './project-governance-protocol.ts';
 
 export type PaperclipMode = 'off' | 'local' | 'custom';
 export const PAPERCLIP_LOCAL_URL = 'http://127.0.0.1:3100';
@@ -40,6 +41,10 @@ export interface WorkspaceTask {
   blockedByIds: string[];
   /** Who opened it (board, an agent, you). */
   origin: string | null;
+  /** Hidden from lists (Hide task). Open it by key or from its parent. */
+  hidden?: boolean;
+  /** Under an active hold (paused or cancelled with its parent). */
+  held?: boolean;
 }
 export type AgentState = 'active' | 'idle' | 'running' | 'paused' | 'error' | 'pending' | 'terminated';
 export interface WorkspaceAgent {
@@ -115,11 +120,23 @@ export type ThreadCard =
       chatId?: string | null; pending?: TimelineItem | null;
       /** A Paperclip ask_user_questions interaction: its questions, answered in place through Paperclip's respond endpoint. */
       questions?: PaperclipQuestion[]; submitLabel?: string | null }
-  | { kind: 'approval'; id: string; at: string; title: string; status: string };
+  | { kind: 'approval'; id: string; at: string; title: string; status: string }
+  /** A review or approval stage of the task's execution policy (C16): who decides, the history, and the controls when it is you. */
+  | { kind: 'stage'; id: string; at: string; stage: TaskStageState }
+  /** An agent asking for a secret by name (G23). You enter the value in the card; the agent never sees it. */
+  | { kind: 'secret'; id: string; at: string; proposal: SecretProposal; secureStorage: boolean };
 /** One question of a Paperclip ask_user_questions interaction. */
 export interface PaperclipQuestion { id: string; prompt: string; helpText: string | null; multi: boolean; allowOther: boolean; options: { id: string; label: string; description: string | null }[] }
 /** An answer for Paperclip's `/interactions/:id/respond`. */
 export interface PaperclipAnswer { questionId: string; optionIds: string[]; otherText?: string | null }
+/** A Muster task's governance: execution policy and stage, hold, hiding, why its runs started, follow-up check, stopped-subtree finding. */
+export interface TaskGovernanceView {
+  stage: TaskStageState | null; policy: ExecutionPolicy | null; effectivePolicy: ExecutionPolicy | null;
+  hold: { id: string; mode: 'pause' | 'cancel'; rootKey: string; rootTitle: string; reason: string } | null;
+  hidden: boolean; runs: RunMeta[]; monitor: TaskMonitor | null; watchdog: Watchdog | null;
+  /** Agents that can review (active Roster agents). */
+  agents: { memberId: string; name: string }[];
+}
 export interface WorkspaceTaskDetail {
   task: WorkspaceTask; description: string; comments: WorkspaceComment[]; runs: WorkspaceRun[];
   /** Who the composer addresses; null when nobody can receive a message (a task you own with no agent). */
@@ -132,6 +149,7 @@ export interface WorkspaceTaskDetail {
   cards: ThreadCard[];
   /** Everyone the composer can @-mention. */
   mentionable: { id: string; name: string }[];
+  governance?: TaskGovernanceView;
 }
 export interface WorkspaceMemory {
   /** Which bank the recall reads and why it was chosen. */

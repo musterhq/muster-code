@@ -17,6 +17,8 @@ MUSTER_SANDBOX_SOURCE_ROOT=/path/to/scoped-checkout \
 npm run vendor:sync
 ```
 
+Local patch (2026-10-01): `muster-core/packages/core/src/codex-app-server.ts` accepts `threadConfig` and sends it as `config` in `thread/start` and `thread/resume`, so lent secrets and MCP bearer tokens never become `-c` process arguments (readable with `ps`). A re-sync must keep it; `tests/wave1-fix-mcp-bearer.test.ts` and `tests/wave1-fix-secrets-argv.test.ts` fail if it is lost. Upstream issue: see the link in the Wave 1 report.
+
 Local patch (2026-09-24): the example memory scopes in both `memory.ts` copies use a neutral `user:alex` /
 `tenant:acme` instead of a real person's name; make the same change upstream before the next sync.
 
