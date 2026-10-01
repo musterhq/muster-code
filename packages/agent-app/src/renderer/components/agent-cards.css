@@ -1,0 +1,18 @@
+/* Cards an agent's tools put in a task thread (Wave 4). Built from the governance card and thread tokens. */
+.agent-card { margin: 8px 0; }
+.agent-card[data-status='pending'] { border-color: color-mix(in srgb, var(--link) 40%, var(--hairline)); background: color-mix(in srgb, var(--link) 6%, var(--bg-sunken)); }
+.agent-card-prompt { color: var(--text); }
+.agent-card-questions { max-width: none; border: 0; padding: 0; background: transparent; }
+.agent-card-answers { display: flex; flex-direction: column; gap: 4px; margin: 0; padding: 0; list-style: none; font-size: var(--fs-12); color: var(--text-dim); }
+.agent-card-answers strong { color: var(--text); font-weight: 600; }
+.agent-fold { margin: 4px 0; border-radius: var(--radius-8); }
+.agent-fold-head { display: flex; align-items: center; gap: 6px; width: 100%; padding: 6px 8px; border: 0; border-radius: var(--radius-8); background: transparent; color: var(--text-dim); font: inherit; font-size: var(--fs-12); text-align: left; cursor: pointer; }
+.agent-fold-head:hover, .agent-fold-head:focus-visible { background: var(--bg-hover); color: var(--text); }
+.agent-fold-head > span { flex: 1; min-width: 0; }
+.agent-fold-head strong { color: var(--text); font-weight: 600; }
+.agent-fold-caret { flex: none; transition: transform var(--dur-fast, 120ms) ease; }
+.agent-fold[data-open] .agent-fold-caret { transform: rotate(90deg); }
+.agent-fold-body { display: flex; flex-direction: column; gap: 4px; padding: 2px 0 4px 18px; }
+.agent-notice { display: flex; align-items: baseline; gap: 8px; margin: 2px 0; padding: 2px 8px; color: var(--text-faint); font-size: var(--fs-12); }
+.agent-notice-text { flex: 1; min-width: 0; }
+@media (prefers-reduced-motion: reduce) { .agent-fold-caret { transition: none; } }

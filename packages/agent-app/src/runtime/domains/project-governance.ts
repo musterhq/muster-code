@@ -767,7 +767,7 @@ export function createGovernance(ctx: DomainContext, deps: GovernanceDeps) {
     const sub = subtaskRequests(text);
     if (sub.creates.length || sub.reassigns.length) {
       const refusal = mayAssign(projectId, memberId, task, { taskId: task.id, create: sub.creates.length > 0 });
-      if (refusal && !agentGov(projectId, memberId).capabilities.canAssign) record(projectId, 'task.permission-denied', `${refusal} ${sub.creates.length + sub.reassigns.length} requested ${sub.creates.length + sub.reassigns.length === 1 ? 'change was' : 'changes were'} not applied.`, task.id, 'system');
+      if (refusal && !agentGov(projectId, memberId).capabilities.canAssign) { record(projectId, 'task.permission-denied', `${refusal} ${sub.creates.length + sub.reassigns.length} requested ${sub.creates.length + sub.reassigns.length === 1 ? 'change was' : 'changes were'} not applied.`, task.id, 'system'); if (sub.creates.length) taskTools.suggest(projectId, task.id, memberId, sub.creates); }
       else if (refusal && sub.creates.length) record(projectId, 'task.permission-denied', `${refusal} ${sub.creates.length} requested ${sub.creates.length === 1 ? 'subtask was' : 'subtasks were'} not created.`, task.id, 'system');
       else {
         const members = team().list(projectId).filter(m => m.kind === 'agent' && !m.revokedAt && !m.pendingAt);

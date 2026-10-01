@@ -493,6 +493,10 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
     let governance: WorkspaceTaskDetail['governance'];
     if (gov) {
       if (gov.stage) cards.push({ kind: 'stage', id: `stage:${taskId}`, at: gov.stage.updatedAt, stage: gov.stage });
+      const asks = await context.invoke('project.interactions.list', { projectId, taskId }).catch(() => ({ items: [] }));
+      for (const it of asks.items) cards.push({ kind: 'ask', id: `ask:${it.id}`, at: it.createdAt, interaction: it });
+      const sug = await context.invoke('project.suggestions.list', { projectId, taskId }).catch(() => ({ items: [] }));
+      for (const x of sug.items.filter(y => y.state === 'open')) cards.push({ kind: 'suggestion', id: `suggestion:${x.id}`, at: x.createdAt, suggestion: x });
       for (const p of gov.proposals) cards.push({ kind: 'secret', id: `secret:${p.id}`, at: p.createdAt, proposal: p, secureStorage: gov.secureStorage });
       governance = { stage: gov.stage, policy: gov.policy, effectivePolicy: gov.effectivePolicy, hold: gov.hold, hidden: gov.hidden, runs: gov.runs, monitor: gov.monitor, watchdog: gov.watchdog, agents: gov.agents };
     }

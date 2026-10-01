@@ -169,7 +169,12 @@ export class LocalWorkspace {
     let imported: ReturnType<ImportMeta['comments']> = []; try { imported = this.meta?.()?.comments(task.id) ?? []; } catch { imported = []; }
     const comments: WorkspaceComment[] = [
       ...imported.map(c => ({ id: `pc:${c.sourceId}`, author: { kind: c.authorKind === 'agent' ? 'agent' as const : 'user' as const, id: null, label: c.authorLabel }, body: c.body, createdAt: c.createdAt, runId: c.runId })),
-      ...read.work.activity.items.filter(a => a.refId === task.id && a.kind !== 'task.create' && a.actor !== 'import').map(a => ({ id: a.id, author: { kind: 'system' as const, id: null, label: a.actor || 'Muster' }, body: a.summary, createdAt: a.createdAt })),
+      ...read.work.activity.items.filter(a => a.refId === task.id && a.kind !== 'task.create' && a.actor !== 'import').map(a => {
+        // An agent's own comment (the task_comment tool) is a message from that agent, not a system notice.
+        const said = a.kind === 'task.agent-comment' ? /^([^:]{1,80}): ([\s\S]*)$/.exec(a.summary) : null;
+        return said ? { id: a.id, author: { kind: 'agent' as const, id: null, label: said[1]! }, body: said[2]!, createdAt: a.createdAt }
+          : { id: a.id, author: { kind: 'system' as const, id: null, label: a.actor || 'Muster' }, body: a.summary, createdAt: a.createdAt };
+      }),
       ...(mail?.messages ?? []).filter(m => (m.recipient.kind === 'taskRun' && m.recipient.id === task.id) || chats.has(m.sender.chatId ?? m.sender.id) || chats.has(m.recipient.chatId ?? m.recipient.id)).map(m => mailComment(m)),
     ].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
     const agent = task.owner.kind === 'agent';

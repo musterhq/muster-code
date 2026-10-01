@@ -9,6 +9,7 @@
  */
 import type { MemoryConnection, MemoryRecord } from './memory-protocol.ts';
 import type { TimelineItem } from '../protocol.ts';
+import type { Interaction, Suggestion } from './agent-tools-protocol.ts';
 import type { ExecutionPolicy, RunMeta, SecretProposal, TaskMonitor, TaskStageState, Watchdog } from './project-governance-protocol.ts';
 import type { TaskLabel, TaskPrSummary } from './work-protocol.ts';
 
@@ -158,6 +159,10 @@ export type ThreadCard =
   | { kind: 'workproduct'; id: string; at: string; type: string; title: string; status: string; provider: string | null; url: string | null; summary: string }
   /** A review or approval stage of the task's execution policy (C16): who decides, the history, and the controls when it is you. */
   | { kind: 'stage'; id: string; at: string; stage: TaskStageState }
+  /** A question or confirmation card an agent raised with its tools (G6); answered in the thread. */
+  | { kind: 'ask'; id: string; at: string; interaction: Interaction }
+  /** Subtasks an agent proposed but may not create (C7). */
+  | { kind: 'suggestion'; id: string; at: string; suggestion: Suggestion }
   /** An agent asking for a secret by name (G23). You enter the value in the card; the agent never sees it. */
   | { kind: 'secret'; id: string; at: string; proposal: SecretProposal; secureStorage: boolean };
 /** One question of a Paperclip ask_user_questions interaction. */

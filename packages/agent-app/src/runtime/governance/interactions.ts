@@ -7,7 +7,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { chmodSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import type { ApprovalComment, ApprovalItem, ApprovalKind, ApprovalState, Interaction, InteractionKind, InteractionQuestion, InteractionState } from '../../shared/domains/agent-tools-protocol.ts';
+import type { Suggestion, SuggestionItem, ApprovalComment, ApprovalItem, ApprovalKind, ApprovalState, Interaction, InteractionKind, InteractionQuestion, InteractionState } from '../../shared/domains/agent-tools-protocol.ts';
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS interactions(id TEXT PRIMARY KEY,project_id TEXT NOT NULL,task_id TEXT,member_id TEXT,member_name TEXT NOT NULL,kind TEXT NOT NULL,title TEXT NOT NULL,questions TEXT NOT NULL,state TEXT NOT NULL DEFAULT 'pending',answers TEXT,note TEXT,created_at TEXT NOT NULL,answered_at TEXT);
@@ -15,6 +15,8 @@ CREATE INDEX IF NOT EXISTS interactions_project ON interactions(project_id,state
 CREATE TABLE IF NOT EXISTS approvals(id TEXT PRIMARY KEY,project_id TEXT NOT NULL,kind TEXT NOT NULL,ref_id TEXT NOT NULL,title TEXT NOT NULL,detail TEXT NOT NULL DEFAULT '',requested_by TEXT NOT NULL,requested_by_id TEXT,task_id TEXT,state TEXT NOT NULL DEFAULT 'pending',revision_note TEXT,revision_at TEXT,created_at TEXT NOT NULL,decided_at TEXT);
 CREATE INDEX IF NOT EXISTS approvals_project ON approvals(project_id,state);
 CREATE UNIQUE INDEX IF NOT EXISTS approvals_ref ON approvals(kind,ref_id);
+CREATE TABLE IF NOT EXISTS suggestions(id TEXT PRIMARY KEY,project_id TEXT NOT NULL,task_id TEXT NOT NULL,member_id TEXT,member_name TEXT NOT NULL,items TEXT NOT NULL,state TEXT NOT NULL DEFAULT 'open',created_at TEXT NOT NULL);
+CREATE INDEX IF NOT EXISTS suggestions_task ON suggestions(task_id,state);
 CREATE TABLE IF NOT EXISTS approval_comments(id TEXT PRIMARY KEY,approval_id TEXT NOT NULL,author TEXT NOT NULL,from_agent INTEGER NOT NULL DEFAULT 0,text TEXT NOT NULL,at TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS approval_comments_approval ON approval_comments(approval_id,at);
 `;
@@ -62,6 +64,17 @@ export class InteractionStore {
     return this.getInteraction(id)!;
   }
 
+  // ── suggested subtasks ──────────────────────────────────────────────────────
+  private suggestion(r: Record<string, unknown>): Suggestion { return { id: String(r.id), projectId: String(r.project_id), taskId: String(r.task_id), memberId: str(r.member_id), memberName: String(r.member_name), items: json(r.items, []), state: r.state === 'done' ? 'done' : r.state === 'dismissed' ? 'dismissed' : 'open', createdAt: String(r.created_at) }; }
+  addSuggestion(s: { projectId: string; taskId: string; memberId: string | null; memberName: string; items: SuggestionItem[] }): Suggestion {
+    const id = randomUUID();
+    this.db.prepare('INSERT INTO suggestions(id,project_id,task_id,member_id,member_name,items,state,created_at) VALUES(?,?,?,?,?,?,?,?)').run(id, s.projectId, s.taskId, s.memberId, s.memberName, JSON.stringify(s.items.map(i => ({ ...i, created: null }))), 'open', this.stamp());
+    return this.getSuggestion(id)!;
+  }
+  getSuggestion(id: string): Suggestion | undefined { const r = this.db.prepare('SELECT * FROM suggestions WHERE id=?').get(id) as Record<string, unknown> | undefined; return r ? this.suggestion(r) : undefined; }
+  suggestions(projectId: string, taskId: string): Suggestion[] { return (this.db.prepare('SELECT * FROM suggestions WHERE project_id=? AND task_id=? ORDER BY created_at DESC LIMIT 20').all(projectId, taskId) as Record<string, unknown>[]).map(r => this.suggestion(r)); }
+  saveSuggestion(s: Suggestion) { this.db.prepare('UPDATE suggestions SET items=?,state=? WHERE id=?').run(JSON.stringify(s.items), s.state, s.id); }
+
   // ── approvals ───────────────────────────────────────────────────────────────
   private approval(r: Record<string, unknown>): ApprovalItem {
     return {
@@ -103,7 +116,7 @@ export class InteractionStore {
   }
   purgeProject(projectId: string) {
     this.db.prepare('DELETE FROM approval_comments WHERE approval_id IN (SELECT id FROM approvals WHERE project_id=?)').run(projectId);
-    for (const t of ['approvals', 'interactions']) this.db.prepare(`DELETE FROM ${t} WHERE project_id=?`).run(projectId);
+    for (const t of ['approvals', 'interactions', 'suggestions']) this.db.prepare(`DELETE FROM ${t} WHERE project_id=?`).run(projectId);
   }
   private trim(projectId: string) {
     this.db.prepare("DELETE FROM interactions WHERE project_id=? AND state!='pending' AND id NOT IN (SELECT id FROM interactions WHERE project_id=? ORDER BY created_at DESC LIMIT ?)").run(projectId, projectId, KEEP);

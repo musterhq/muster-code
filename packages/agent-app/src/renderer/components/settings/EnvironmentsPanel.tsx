@@ -3,6 +3,7 @@ import type {ChatEnvironmentKind} from '../../../shared/domains/sandbox-protocol
 import {invoke} from '../../bridge';
 import {activeChat, notifyError} from '../../store';
 import {useStore} from '../../useStore';
+import {SshPanel} from './SshPanel';
 import {HOST_ENV_LABEL, SANDBOX_ENV_LABEL, useChatEnvironment} from '../EnvironmentFooter';
 
 /** PRO-07: where agents run, reachable from Settings. The choice itself stays per chat (the composer footer sets it too). */
@@ -48,5 +49,6 @@ export function EnvironmentsPanel(): React.ReactElement {
       {chat && chat.folderId ? <ActiveChatEnvironment key={chat.id} chatId={chat.id} title={chat.title} running={running} />
         : <div className="preference-row"><span className="preference-copy"><strong>No folder chat open</strong><span>Open a chat in a folder to choose where its agent runs.</span></span></div>}
     </div>
+    <SshPanel/>
   </>;
 }

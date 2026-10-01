@@ -24,6 +24,10 @@ export interface Interaction {
   createdAt: string; answeredAt: string | null;
 }
 
+/** Subtasks an agent proposed but was not allowed to create; you create the ones you want. */
+export interface SuggestionItem { title: string; acceptance: string; assignee: string | null; priority: number | null }
+export interface Suggestion { id: string; projectId: string; taskId: string; memberId: string | null; memberName: string; items: (SuggestionItem & { created: string | null })[]; state: 'open' | 'done' | 'dismissed'; createdAt: string }
+
 export type ApprovalKind = 'hire' | 'secret' | 'confirmation';
 export type ApprovalState = 'pending' | 'approved' | 'declined' | 'revision_requested' | 'cancelled' | 'expired';
 export interface ApprovalComment { id: string; author: string; fromAgent: boolean; text: string; at: string }
@@ -51,6 +55,10 @@ export interface AgentToolsCommands {
   'project.approvals.comment': { input: { projectId: string; id: string; text: string }; output: ApprovalItem };
   /** Asks the requesting agent to change its proposal. The approval stays open, marked as waiting for a revision. */
   'project.approvals.requestRevision': { input: { projectId: string; id: string; note: string }; output: ApprovalItem };
+  'project.suggestions.list': { input: { projectId: string; taskId: string }; output: { items: Suggestion[] } };
+  /** Creates the picked subtasks (all when `picks` is omitted) under the task, owned by the person named or the task's owner. */
+  'project.suggestions.create': { input: { projectId: string; id: string; picks?: number[] }; output: Suggestion };
+  'project.suggestions.dismiss': { input: { projectId: string; id: string }; output: Suggestion };
   /** Remote agents (G28). The server's agent API calls these on the agent's behalf, always with the agent's own member id; they are not offered to people. */
   'project.remote.tasks': { input: { projectId: string; memberId: string }; output: { tasks: RemoteTask[] } };
   'project.remote.task': { input: { projectId: string; memberId: string; id: string }; output: RemoteTaskDetail };
@@ -62,6 +70,6 @@ export interface AgentToolsCommands {
 }
 export const AGENT_TOOLS_COMMANDS = {
   'project.interactions.list': true, 'project.interactions.answer': true, 'project.interactions.cancel': true,
-  'project.approvals.list': true, 'project.approvals.comment': true, 'project.approvals.requestRevision': true, 'project.protocol.get': true,
+  'project.approvals.list': true, 'project.approvals.comment': true, 'project.approvals.requestRevision': true, 'project.protocol.get': true, 'project.suggestions.list': true, 'project.suggestions.create': true, 'project.suggestions.dismiss': true,
   'project.remote.tasks': true, 'project.remote.task': true, 'project.remote.comment': true, 'project.remote.state': true, 'project.remote.doc': true,
 } as const satisfies Record<keyof AgentToolsCommands, true>;

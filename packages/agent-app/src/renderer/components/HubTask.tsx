@@ -23,6 +23,7 @@ import { PendingQuestion } from './PendingQuestion';
 import { ResourceState } from './ResourceState';
 import { Tip } from './Tooltip';
 import { SkillFromTask } from './SkillStudio';
+import { InteractionCard, NoticeRow, SuggestionCard, WorkedFold } from './AgentCards';
 import { GovernanceProperties, SecretRequestCard, StageCard, StopButton } from './TaskGovernance';
 import { TaskDocuments, TaskGoalRow, TaskLabelsRow, TaskPullRequests, VoteButtons } from './WorkTask';
 import { LabelChips } from './WorkParts';
@@ -30,7 +31,23 @@ import { useWorkLoad } from '../workHooks';
 
 const errorText = (cause: unknown) => cause instanceof Error ? cause.message : String(cause);
 const when = (iso: string | null) => iso ? new Date(iso).toLocaleString(undefined, { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' }) : '—';
-type Entry = { kind: 'turn'; id: string; at: string; comment: WorkspaceComment; to: string | null; receipt: LedgerEntry | null } | { kind: 'card'; id: string; at: string; card: ThreadCard };
+type Entry = { kind: 'turn'; id: string; at: string; comment: WorkspaceComment; to: string | null; receipt: LedgerEntry | null } | { kind: 'card'; id: string; at: string; card: ThreadCard }
+  /** A run of turns that wrote nothing, gathered into one line (C7). */
+  | { kind: 'fold'; id: string; at: string; receipts: LedgerEntry[] }
+  /** A system line: a refusal, a retry, a status change. */
+  | { kind: 'notice'; id: string; at: string; text: string };
+/** Quiet turns that follow each other become one fold; system comments become notices. Two or more quiet turns fold; one stays as it is. */
+export function foldEntries(entries: readonly Entry[]): Entry[] {
+  const out: Entry[] = []; let run: Extract<Entry, { kind: 'turn' }>[] = [];
+  const flush = () => { if (run.length >= 2 && run.every(e => e.receipt)) out.push({ kind: 'fold', id: `fold:${run[0]!.id}`, at: run[run.length - 1]!.at, receipts: run.map(e => e.receipt!) }); else out.push(...run); run = []; };
+  for (const e of entries) {
+    if (e.kind === 'turn' && !e.comment.body && e.receipt) { run.push(e); continue; }
+    flush();
+    out.push(e.kind === 'turn' && e.comment.author.kind === 'system' && e.comment.body ? { kind: 'notice', id: e.id, at: e.at, text: e.comment.body } : e);
+  }
+  flush();
+  return out;
+}
 
 /** "@Implementer A" or "@CTO" at the start of a message, or anywhere in it: who the turn is addressed to. */
 export function addressed(body: string, names: readonly string[], self: string): string | null {
@@ -75,11 +92,11 @@ function Thread({ detail, snapshot, onChanged, onOpenTask, onOpenAgent, properti
       ...detail.receipts.filter(r => !used.has(r.runId)).map(r => ({ kind: 'turn' as const, id: `turn:${r.runId}`, at: r.endedAt, comment: { id: `turn:${r.runId}`, author: { kind: 'agent' as const, id: null, label: r.agent }, body: '', createdAt: r.endedAt }, to: null, receipt: r })),
     ];
     const cards: Entry[] = detail.cards.map(card => ({ kind: 'card', id: card.id, at: card.at, card }));
-    return [...turns, ...cards].sort((a, b) => a.id === 'description' ? -1 : b.id === 'description' ? 1 : a.at.localeCompare(b.at));
+    return foldEntries([...turns, ...cards].sort((a, b) => a.id === 'description' ? -1 : b.id === 'description' ? 1 : a.at.localeCompare(b.at)));
   }, [detail, task.origin, task.createdAt, task.assigneeLabel]);
   const scroller = useRef<HTMLDivElement>(null);
   // Keyed by entry id so a refetch that inserts or reorders entries never reuses another entry's measured height.
-  const virtualizer = useVirtualizer({ count: entries.length, getScrollElement: () => scroller.current, estimateSize: i => entries[i]?.kind === 'card' ? 64 : entries[i]?.kind === 'turn' && !entries[i].comment.body ? 72 : 160, getItemKey: i => entries[i]?.id ?? i, overscan: 4 });
+  const virtualizer = useVirtualizer({ count: entries.length, getScrollElement: () => scroller.current, estimateSize: i => entries[i]?.kind === 'card' ? 64 : entries[i]?.kind === 'fold' || entries[i]?.kind === 'notice' ? 32 : entries[i]?.kind === 'turn' && !entries[i].comment.body ? 72 : 160, getItemKey: i => entries[i]?.id ?? i, overscan: 4 });
   const [atEnd, setAtEnd] = useState(true);
   const first = useRef(true);
   // Open at the newest message; follow new ones only while already at the end.
@@ -95,7 +112,8 @@ function Thread({ detail, snapshot, onChanged, onOpenTask, onOpenAgent, properti
     <div ref={scroller} className="ws-thread-scroll" onScroll={onScroll} role="log" aria-label="Messages">
       {entries.length === 0 ? <ResourceState kind="empty" message="No messages yet. Write to the owner below."/> : <div style={{ height: virtualizer.getTotalSize(), position: 'relative' }}>
         {virtualizer.getVirtualItems().map(item => { const e = entries[item.index]; return <div key={e.id} data-index={item.index} ref={virtualizer.measureElement} className="ws-thread-item" style={{ transform: `translateY(${item.start}px)` }}>
-          {e.kind === 'card' ? <Card card={e.card} taskId={task.id} projectId={task.projectId ?? ''} who={who} onOpenTask={onOpenTask} onChanged={onChanged}/>
+          {e.kind === 'fold' ? <WorkedFold receipts={e.receipts} at={e.at}/> : e.kind === 'notice' ? <NoticeRow text={e.text} at={e.at}/>
+          : e.kind === 'card' ? <Card card={e.card} taskId={task.id} projectId={task.projectId ?? ''} who={who} onOpenTask={onOpenTask} onChanged={onChanged}/>
             : <article className={`ws-message${e.comment.body ? '' : ' is-quiet'}`} aria-label={`${e.comment.author.label}${e.to ? ` to ${e.to}` : ''}, ${agoLabel(e.at)}`}>
                 <header className="ws-message-head"><Monogram name={e.comment.author.label} kind={e.comment.author.kind}/>
                   <span className="ws-message-author">{who(e.comment.author.label)}{e.to && <><ArrowRight size={12} className="ws-message-arrow" aria-hidden="true"/>{who(e.to)}</>}</span>
@@ -140,6 +158,8 @@ function Card({ card, taskId, projectId, who, onOpenTask, onChanged }: { card: T
   if (card.kind === 'document') return <DocumentCard card={card}/>;
   if (card.kind === 'workproduct') return <div className="ws-card-sys" data-kind="workproduct"><GitBranch size={14} aria-hidden="true"/><span className="ws-card-sys-text"><strong>{card.type.replace(/_/g, ' ')}</strong> {card.url ? <a className="ws-link" href={card.url} onClick={e => { e.preventDefault(); void invoke('link.open', { url: card.url! }).catch(notifyError); }}>{card.title}</a> : card.title}{card.provider ? <span className="ws-faint"> · {card.provider}</span> : null}{card.summary ? <span className="ws-faint"> · {card.summary}</span> : null}</span>{card.status && <StateChip tone={card.status === 'approved' || card.status === 'merged' ? 'ok' : card.status === 'failed' ? 'danger' : 'accent'}>{card.status.replace(/_/g, ' ')}</StateChip>}</div>;
   if (card.kind === 'secret') return <SecretRequestCard proposal={card.proposal} secureStorage={card.secureStorage} projectId={projectId} onChanged={onChanged}/>;
+  if (card.kind === 'ask') return <InteractionCard interaction={card.interaction} projectId={projectId} onChanged={onChanged}/>;
+  if (card.kind === 'suggestion') return <SuggestionCard suggestion={card.suggestion} projectId={projectId} onChanged={onChanged}/>;
   if (card.kind === 'stage') return <StageCard stage={card.stage} taskId={taskId} projectId={projectId} onChanged={onChanged}/>;
   return <div className="ws-card-sys" data-kind="needs" data-status={card.status}>
     <CircleHelp size={14} aria-hidden="true"/><span className="ws-card-sys-text"><strong>{card.status === 'pending' ? 'Needs you' : 'Decision'}</strong>{card.from ? <> · {who(card.from)} asks</> : null}</span>

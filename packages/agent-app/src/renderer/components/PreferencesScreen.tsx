@@ -15,6 +15,7 @@ import {PluginsScreen} from './PluginsScreen';
 import {MemorySettings} from './MemoryScreen';
 import {DiagnosticsPanel} from './settings/DiagnosticsPanel';
 import {StoragePanel} from './settings/StoragePanel';
+import {BackupsPanel} from './settings/BackupsPanel';
 import {ConnectionPanel} from './HubSetup';
 import {DefaultModelPicker} from './settings/DefaultModelPicker';
 import {SETTINGS_SECTIONS,filterSections} from './settings/sections';
@@ -345,7 +346,7 @@ export function PreferencesScreen():React.ReactElement {
           {section==='memory'&&<MemorySection/>}
           {section==='shortcuts'&&<ShortcutsSection/>}
           {section==='diagnostics'&&<DiagnosticsPanel/>}
-          {section==='storage'&&<StoragePanel/>}
+          {section==='storage'&&<><StoragePanel/><BackupsPanel/></>}
           {section==='integrations'&&<><h3 className="preference-group-title">Paperclip</h3><p className="project-edit-hint ws-settings-hint">Link a Paperclip server and its projects appear under Projects, tagged Paperclip, with their tasks as chats. Its agents join the Roster, its runs the Ledger, and anything that needs you lands in the Inbox.</p><ConnectionPanel compact/>{!isWebHost()&&<><h3 className="preference-group-title">Muster Server</h3><p className="project-edit-hint ws-settings-hint">Optional. Sign in to your team’s self-hosted Muster Server and open its projects. Off until you connect.</p><MusterServerPanel/></>}</>}
           {section==='server'&&<ServerSettings/>}
         </div></div>}
