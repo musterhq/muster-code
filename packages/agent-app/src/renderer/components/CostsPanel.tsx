@@ -58,6 +58,7 @@ export function CostsPanel({ projectId }: { projectId?: string }): React.ReactEl
       <div className="dash-tile is-static"><span className="dash-value">{t.turns}</span><span className="dash-tile-label">Agent turns</span><span className="dash-tile-detail">{report.byAgent.length} {report.byAgent.length === 1 ? 'agent' : 'agents'} · {report.byProject.length} {report.byProject.length === 1 ? 'project' : 'projects'}</span></div>
     </section>
     <div className="dash-card costs-chart"><Bars title={priced ? 'Spend per day' : 'Tokens per day'} span={span} days={report.byDay.map(d => d.day)}
+      max={Math.max(1e-9, ...report.byDay.map(d => priced ? d.costUsd ?? 0 : d.tokens))}
       series={report.byDay.map(d => [{ key: 'v', label: priced ? 'Spend' : 'Tokens', value: priced ? d.costUsd ?? 0 : d.tokens, tone: 'accent' }])} legend={[{ label: priced ? 'Estimated spend (priced turns)' : 'Tokens in and out', tone: 'accent' }]} format={n => priced ? formatUsd(n) : formatTokenCount(n)}/></div>
     <div className="costs-tables">
       <Table title="By model" rows={report.byModel} empty="No turns in this period."/>

@@ -51,7 +51,7 @@ test('C3: rows step without wrapping and from nothing land on the first or last;
   assert.equal(readShortcutsEnabled(mem), true); assert.equal(readShortcutsEnabled(undefined), true);
   writeShortcutsEnabled(mem, false); assert.equal(readShortcutsEnabled(mem), false);
   writeShortcutsEnabled(mem, true); assert.equal(readShortcutsEnabled(mem), true);
-  assert.equal(readShortcutsEnabled({ getItem() { throw new Error('blocked'); } }), true);
+  assert.equal(readShortcutsEnabled({ getItem() { throw new Error('blocked'); }, setItem() {} }), true);
 });
 
 const ctx = (over: Partial<CommandContext> = {}): CommandContext => ({ screen: 'work', draftOpen: false, chat: null, canBack: false, canForward: false, slotTitles: [], chatCount: 0, ...over });

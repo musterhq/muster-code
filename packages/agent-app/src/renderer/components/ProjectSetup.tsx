@@ -71,7 +71,7 @@ export function ProjectSetupWizard({ open, project, snapshot, onClose, onOpenCha
   const nav = (primary: React.ReactNode, onSkip?: () => void) => <div className="project-edit-actions"><span className="project-edit-spacer"/>
     {onSkip && <button type="button" className="project-edit-cancel" disabled={busy} onClick={onSkip}>Skip</button>}{primary}</div>;
   return <ModalSheet open={open} className="project-edit-dialog setup-wizard" title={`Set up ${project.name}`} description="A few quick steps so the project can start working. You can skip any of them and come back from the project menu." initialFocus={first} onClose={() => { if (!busy) onClose(); }}>
-    <ol className="setup-steps" aria-label="Steps">{SETUP_STEPS.map((s, i) => <li key={s.id} aria-current={i === at ? 'step' : undefined} data-state={i < at ? 'done' : i === at ? 'now' : 'next'}><span className="setup-step-dot">{i < at ? <Check size={11} aria-hidden="true"/> : i + 1}</span>{s.label}</li>)}</ol>
+    <div className="setup-steps" role="list" aria-label="Steps">{SETUP_STEPS.map((s, i) => <span key={s.id} role="listitem" className="setup-step" aria-current={i === at ? 'step' : undefined} data-state={i < at ? 'done' : i === at ? 'now' : 'next'}><span className="setup-step-dot">{i < at ? <Check size={11} aria-hidden="true"/> : i + 1}</span>{s.label}</span>)}</div>
     {step === 'mission' && <form onSubmit={e => { e.preventDefault(); void saveMission(); }}>
       <label className="project-edit-goal"><span>What should this project achieve?</span><textarea ref={first} rows={4} maxLength={4000} value={goal} disabled={busy} placeholder="One to three sentences: the outcome, who it is for, and what done looks like" onChange={e => setGoal(e.target.value)}/></label>
       <label className="project-edit-goal setup-date"><span>Target date <span className="optional">optional</span></span><input className="ws-input" type="date" value={date} disabled={busy} onChange={e => setDate(e.target.value)}/></label>
@@ -115,7 +115,7 @@ export function ProjectSetupWizard({ open, project, snapshot, onClose, onOpenCha
 
 /** On a project nothing has been set up in: a card that opens the wizard. */
 export function SetupCard({ onStart }: { onStart: () => void }): React.ReactElement {
-  return <section className="ws-card setup-card" aria-label="Set up this project">
+  return <section className="setup-card" aria-label="Set up this project">
     <div><strong>Set up this project</strong><p className="ws-faint">It has no tasks and no agent yet. Write its mission, add a first agent and a first task, or let the coordinator interview you.</p></div>
     <button type="button" className="settings-button" onClick={onStart}>Set up project</button>
   </section>;

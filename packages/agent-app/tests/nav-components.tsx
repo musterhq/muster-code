@@ -170,7 +170,7 @@ const project:any={id:'p',name:'OSSMANAGER',goal:'',folderIds:['f1'],primaryFold
 let closed=0,done=0;const chats:string[]=[];
 const wizard=(key:string)=><ProjectSetupWizard key={key} open project={project} snapshot={wsSnapshot} onClose={()=>{closed++;}} onOpenChat={id=>chats.push(id)} onDone={()=>{done++;}}/>;
 await show(wizard('a'),100);
-assert.match(text(),/Set up OSSMANAGER/);assert.match(text(),/What should this project achieve\?/);assert.equal(document.querySelectorAll('.setup-steps li').length,4);assert.equal(document.querySelector('.setup-steps [aria-current="step"]')!.textContent!.trim().endsWith('Mission'),true);
+assert.match(text(),/Set up OSSMANAGER/);assert.match(text(),/What should this project achieve\?/);assert.equal(document.querySelectorAll('.setup-step').length,4);assert.equal(document.querySelector('.setup-steps [aria-current="step"]')!.textContent!.trim().endsWith('Mission'),true);
 await setValue(document.querySelector('.setup-wizard textarea'),'Ship a calm 0.3.0.');await setValue(document.querySelector('.setup-wizard input[type="date"]'),'2026-12-31');
 await submit(document.querySelector('.setup-wizard form'));
 assert.deepEqual(last('project.update')!.input,{id:'p',goal:'Ship a calm 0.3.0.'});assert.deepEqual(last('work.project.meta.set')!.input,{projectId:'p',targetDate:'2026-12-31'});

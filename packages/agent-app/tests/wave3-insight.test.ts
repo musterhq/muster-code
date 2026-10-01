@@ -31,6 +31,10 @@ test('G24: costs aggregate by model, agent, project and day; unpriced turns are 
   assert.deepEqual(r7.byModel.map(b => [b.label, b.costUsd]), [['gpt-x', 0.03], ['gpt-y', null]]);
   assert.deepEqual(r7.byProject.map(b => b.label).sort(), ['Alpha', 'Chats outside projects']);
   assert.equal(r7.byDay.at(-1)!.costUsd, 0.01);
+  // Chats are one line, not one agent per chat title.
+  const chatTurns = [turn({ endedAt: dayAgo(0), agent: 'Reflection · CTO', trigger: 'project chat' }), turn({ endedAt: dayAgo(0), agent: 'Hello there', trigger: 'chat' }), turn({ endedAt: dayAgo(0), trigger: 'task' })];
+  const chatCosts = buildCosts(chatTurns, { days: 7, offsetMin: 0, now: NOW, projectNames: names, windows: [], ledgerSince: null });
+  assert.deepEqual(chatCosts.byAgent.map(b => [b.label, b.turns]), [['Chats (not task runs)', 2], ['CTO', 1]]);
   const r30 = buildCosts(turns, { days: 30, offsetMin: 0, now: NOW, projectNames: names, windows: [], ledgerSince: null });
   assert.equal(r30.entries, 4);
   const r90 = buildCosts(turns, { days: 90, offsetMin: 0, now: NOW, projectNames: names, windows: [], ledgerSince: null });
@@ -113,6 +117,7 @@ test('G25: a reflection reads the agent read-only, lands in the Inbox as a propo
   assert.equal(call.permission, 'read-only'); assert.match(call.prompt, /Shipped without a test/); assert.match(call.prompt, /Be careful\./);
   const ready = await until(async () => { const x = (await h.s.invoke('insight.reflect.list', { projectId: h.project.id })).reflections[0]; return x?.state === 'ready' ? x : null; }, 'the proposal');
   assert.match(ready.proposedText, /Add a test with every fix/); assert.match(ready.rationale, /missing tests/);
+  assert.equal((await h.s.invoke('app.snapshot', undefined)).chats.find(c => c.id === ready.chatId)!.archived, true, 'the reading chat is archived once it has answered');
   // Nothing changed yet.
   assert.equal((await h.s.invoke('project.agent.gov.get', { projectId: h.project.id, memberId: cto.id })).files.find(f => f.name === 'AGENTS.md')!.text, 'Be careful.');
   // The Inbox overlay carries it.
@@ -207,6 +212,7 @@ test('G26: a skill is drafted from a finished task, tested read-only against sav
   assert.equal(call.permission, 'read-only'); assert.match(call.prompt, /Tag the build/); assert.match(call.prompt, /Cut 1\.2\.0 from these 3 changes/);
   const done = await until(async () => { const r = (await h.s.invoke('studio.skill.inputs.list', { skill: 'release-demo' })).runs[0]; return r && r.state !== 'working' ? r : null; }, 'the result');
   assert.equal(done.state, 'done'); assert.match(done.result, /Test note: step 2/); assert.ok(done.chatId);
+  assert.equal((await h.s.invoke('app.snapshot', undefined)).chats.find(c => c.id === done.chatId)!.archived, true, 'the helper chat is archived so it does not clutter the sidebar');
   await assert.rejects(h.s.invoke('studio.skill.test', { projectId: h.project.id, skill: 'does-not-exist', input: 'x' }), /no saved skill named/);
   // A skill saved from a chat or a task lives in ~/.codex/skills; the studio reads that one too, without its front matter.
   await mkdir(join(home, '.codex', 'skills', 'from-chat'), { recursive: true });

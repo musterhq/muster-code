@@ -6,9 +6,10 @@ import type { DatabaseSync } from 'node:sqlite';
 import { effectivePricing, estimateCostUsd, type ModelPolicy, type ModelPricing } from '../../shared/model-catalog.ts';
 import type { CostBucket, CostDay, CostsReport, ProfileStats, ProviderWindow } from '../../shared/domains/insight-protocol.ts';
 
-export interface TurnRow { projectId: string | null; agent: string; provider: string | null; model: string | null; input: number; output: number; cached?: number; costUsd: number | null; endedAt: string; outcome: string }
+export interface TurnRow { projectId: string | null; agent: string; provider: string | null; model: string | null; input: number; output: number; cached?: number; costUsd: number | null; endedAt: string; outcome: string; trigger?: string }
 
 const MAX_ROWS = 60_000, DAY_MS = 86_400_000;
+export const CHATS = 'Chats (not task runs)';
 const num = (v: unknown) => typeof v === 'number' && Number.isFinite(v) ? v : 0;
 
 /** Ledger turns that ended at or after `since` (live receipts and imported history), newest first, capped. */
@@ -18,7 +19,7 @@ export function readTurns(db: DatabaseSync, since: string, projectId?: string): 
     for (const r of rows) {
       try {
         const b = JSON.parse(r.body) as Record<string, unknown>, t = (b.tokens ?? null) as Record<string, unknown> | null;
-        out.push({ projectId: r.project_id ?? (typeof b.projectId === 'string' ? b.projectId : null), agent: typeof b.agent === 'string' && b.agent ? b.agent : 'Agent', provider: typeof b.provider === 'string' ? b.provider : null, model: typeof b.model === 'string' ? b.model : null, input: num(t?.input), output: num(t?.output), cached: num(t?.cached), costUsd: typeof b.costUsd === 'number' && Number.isFinite(b.costUsd) ? b.costUsd : null, endedAt: String(b.endedAt ?? ''), outcome: String(b.outcome ?? '') });
+        out.push({ projectId: r.project_id ?? (typeof b.projectId === 'string' ? b.projectId : null), agent: typeof b.agent === 'string' && b.agent ? b.agent : 'Agent', provider: typeof b.provider === 'string' ? b.provider : null, model: typeof b.model === 'string' ? b.model : null, input: num(t?.input), output: num(t?.output), cached: num(t?.cached), costUsd: typeof b.costUsd === 'number' && Number.isFinite(b.costUsd) ? b.costUsd : null, endedAt: String(b.endedAt ?? ''), outcome: String(b.outcome ?? ''), trigger: typeof b.trigger === 'string' ? b.trigger : undefined });
       } catch { /* an unreadable body is skipped */ }
     }
   };
@@ -65,7 +66,9 @@ export function buildCosts(turns: readonly TurnRow[], o: { days: number; offsetM
     if (day < first) continue;
     add(totals, t);
     const mKey = `${t.provider ?? ''}|${t.model ?? ''}`, mb = model.get(mKey) ?? bucket(mKey, t.model ?? 'Unknown model'); add(mb, t); model.set(mKey, mb);
-    const ab = agent.get(t.agent) ?? bucket(t.agent, t.agent); add(ab, t); agent.set(t.agent, ab);
+    // A task run belongs to the agent that ran it; a chat (yours, a coordinator's or a helper's) is one line, not one agent per chat title.
+    const who = t.trigger === 'chat' || t.trigger === 'project chat' ? CHATS : t.agent;
+    const ab = agent.get(who) ?? bucket(who, who); add(ab, t); agent.set(who, ab);
     const pKey = t.projectId ?? '', pb = project.get(pKey) ?? { ...bucket(pKey, t.projectId ? o.projectNames.get(t.projectId) ?? 'Deleted project' : 'Chats outside projects'), projectId: t.projectId }; add(pb, t); project.set(pKey, pb);
     const d = dayMap.get(day); if (d) { d.turns++; d.tokens += t.input + t.output; if (t.costUsd !== null) d.costUsd = (d.costUsd ?? 0) + t.costUsd; }
   }

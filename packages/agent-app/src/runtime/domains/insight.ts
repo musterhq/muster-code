@@ -190,6 +190,8 @@ export function createInsightDomain(ctx: DomainContext): DomainModule {
   const offSettled = ctx.hooks.onRunSettled(({ chat, status }) => {
     const p = pending.get(chat.id); if (!p) return;
     pending.delete(chat.id);
+    // The answer lives on the proposal or the test result; the helper chat itself would only clutter the sidebar and the Inbox (Open chat still reaches it).
+    void ctx.invoke('chat.update', { id: chat.id, archived: true }).catch(() => undefined);
     try { if (p.kind === 'reflect') settleReflection(chat, status, p); else settleSkill(chat, status, p); } catch { /* a settle never fails a run */ }
   });
   const offCommand = ctx.hooks.onCommand?.(({ command, input }) => { if (command === 'project.delete' && typeof input.id === 'string' && exists()) db().forgetProject(input.id); });
