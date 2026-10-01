@@ -107,7 +107,7 @@ test('C14: the heartbeat arms one timer per enabled agent, an idle tick starts n
   // Idle: nothing ready.
   await h.clock!.advance(121_000);
   let st = await h.gov();
-  assert.equal(st.wakes[0]!.status, 'skipped'); assert.match(st.wakes[0]!.detail, /no tokens used/);
+  assert.equal(st.wakes.length, 0, 'an idle heartbeat writes nothing');
   assert.equal(h.calls.length, 0, 'an idle heartbeat started no run');
   await h.clock!.advance(300);
   assert.equal(h.clock!.pending, base + 1, 'the timer re-armed');

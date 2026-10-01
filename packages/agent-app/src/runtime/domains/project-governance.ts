@@ -243,9 +243,15 @@ export function createGovernance(ctx: DomainContext, deps: GovernanceDeps) {
   const hbKey = (p: string, m: string) => `${p}:${m}`;
   function disarm(projectId: string, memberId: string) { const k = hbKey(projectId, memberId), h = heartbeatTimers.get(k); if (h) timers.clear(h); heartbeatTimers.delete(k); }
   /** One timer per enabled agent. A tick starts a run only when the agent has ready work; an idle tick records itself and costs nothing. */
+  /** A heartbeat only runs for an active, unpaused agent in a project that is neither archived nor missing. */
+  const heartbeatEligible = (projectId: string, memberId: string): boolean => {
+    if (!deps.exists(projectId) || tasks().isSuspended(projectId)) return false;
+    const m = memberOf(projectId, memberId);
+    return Boolean(m && m.kind === 'agent' && !m.revokedAt && !m.pendingAt && !m.pausedAt);
+  };
   function arm(projectId: string, memberId: string) {
     disarm(projectId, memberId);
-    if (disposed) return;
+    if (disposed || !heartbeatEligible(projectId, memberId)) return;
     const hb = agentGov(projectId, memberId).heartbeat;
     if (!hb.enabled) return;
     heartbeatTimers.set(hbKey(projectId, memberId), timers.set(() => { heartbeatTimers.delete(hbKey(projectId, memberId)); void tick(projectId, memberId); }, hb.intervalSec * 1000));
@@ -253,20 +259,19 @@ export function createGovernance(ctx: DomainContext, deps: GovernanceDeps) {
   async function tick(projectId: string, memberId: string) {
     if (disposed || !deps.exists(projectId)) return;
     try {
-      const m = memberOf(projectId, memberId);
-      if (!m || m.revokedAt) return;
-      if (!agentGov(projectId, memberId).heartbeat.enabled) return;
-      const task = m.pausedAt || projectHold(projectId) ? undefined : readyTaskFor(projectId, memberId);
-      if (!task) { gov().addWake({ projectId, memberId, taskId: null, reason: 'timer', status: 'skipped', detail: m.pausedAt ? `${m.name} is paused.` : 'Nothing ready for this agent, so the heartbeat started no run (no tokens used).' }); deps.changed(projectId); }
-      else await wakeQueue().request({ projectId, memberId, taskId: task.id, reason: 'timer' });
+      if (!heartbeatEligible(projectId, memberId) || !agentGov(projectId, memberId).heartbeat.enabled) return;
+      // Nothing ready, or the project is paused: the tick writes nothing and starts nothing (no row, no event, no tokens).
+      if (projectHold(projectId)) return;
+      const task = readyTaskFor(projectId, memberId);
+      if (task) await wakeQueue().request({ projectId, memberId, taskId: task.id, reason: 'timer' });
     } catch { /* a tick never throws */ }
-    finally { arm(projectId, memberId); }
+    finally { arm(projectId, memberId); } // re-arms only while the agent is still eligible
   }
   let armed = false;
   /** Arms the timers of every enabled agent, once, the first time governance is used. */
   function armAll() {
     if (armed || disposed) return; armed = true;
-    for (const a of gov().heartbeatAgents()) if (deps.exists(a.projectId)) arm(a.projectId, a.memberId);
+    for (const a of gov().heartbeatAgents()) arm(a.projectId, a.memberId);
     armMonitors();
   }
 
@@ -1066,7 +1071,9 @@ export function createGovernance(ctx: DomainContext, deps: GovernanceDeps) {
     try {
       if (command === 'project.tasks.add') { const o = output as { id?: string; projectId?: string; owner?: TaskOwner } | undefined; if (o?.id && o.projectId && o.owner?.kind === 'agent') onAssigned(o.projectId, o.id); }
       else if (command === 'project.tasks.edit') { const patch = (input.patch ?? {}) as { owner?: TaskOwner }; const o = output as { id?: string; projectId?: string } | undefined; if (patch.owner?.kind === 'agent' && o?.id && o.projectId) onAssigned(o.projectId, o.id); }
-      else if (command === 'project.members.pause' && input.paused === false && typeof input.projectId === 'string' && typeof input.id === 'string') {
+      else if ((command === 'project.members.pause' || command === 'project.members.revoke' || command === 'project.members.restore') && typeof input.projectId === 'string' && typeof input.id === 'string') arm(input.projectId, input.id);
+      else if (command === 'project.archive' || command === 'project.restore') { const pid = typeof input.id === 'string' ? input.id : ''; for (const a of gov().heartbeatAgents()) if (a.projectId === pid) arm(a.projectId, a.memberId); }
+      if (command === 'project.members.pause' && input.paused === false && typeof input.projectId === 'string' && typeof input.id === 'string') {
         const open = gov().openBreaker(input.projectId, 'wake_storm', input.id);
         if (open) { gov().setBreakerState(open.id, 'resumed'); deps.changed(input.projectId); }
       }
