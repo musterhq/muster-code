@@ -144,6 +144,7 @@ test('Review S4: starring or hiding needs write access to the project, and an ag
   authorizeResource(editor, 'work.star.set', 'write', { kind: 'agent', id: 'member:m1', projectId: 'p-shared', starred: true }, snapshot);
   denied(() => authorizeResource(editor, 'work.star.set', 'write', { kind: 'agent', id: 'member:m1', projectId: 'p-secret', starred: true }, snapshot));
   denied(() => authorizeResource(editor, 'work.star.set', 'write', { kind: 'agent', id: 'member:m1', starred: true }, snapshot));
+});
 
 test('Wave 3 navigation and insight commands: search and costs are server-wide (admin), reflections and the setup interview are project-owner, skill inputs are host', () => {
   for (const c of ['search.workspace', 'insight.costs', 'insight.profile', 'insight.reflect.list', 'insight.reflect.inbox', 'studio.skill.fromTask', 'studio.skill.templates', 'studio.skill.inputs.list']) assert.equal(classifyCommand(c), 'read', c);
