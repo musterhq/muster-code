@@ -54,7 +54,7 @@ export function SshPanel(): React.ReactElement {
       <label className="project-edit-goal"><span>Private key file</span><input type="text" className="ws-input" required value={form.keyPath} placeholder="/Users/you/.ssh/id_ed25519" onChange={e => setForm({...form, keyPath: e.target.value})}/></label>
       <label className="project-edit-goal"><span>Remote folder</span><input type="text" className="ws-input" value={form.remoteDir ?? '~'} onChange={e => setForm({...form, remoteDir: e.target.value})}/></label>
       <div className="project-edit-actions"><span className="project-edit-spacer"/><button type="button" className="project-edit-cancel" onClick={() => setForm(null)}>Cancel</button><button type="submit" className="project-edit-save" disabled={busy === 'save'}>Save host</button></div></form>}
-    <h3 className="preference-group-title">Current chat</h3>
+    <h3 className="preference-group-title">This chat and SSH</h3>
     <div className="preference-group"><div className="preference-row"><span className="preference-copy"><strong>{chat ? chat.title || 'Current chat' : 'No chat open'}</strong>
       <span>{binding.data?.hostName ? `Its agent works on ${binding.data.hostName} (${binding.data.remoteDir}) through the muster_ssh tools.` : 'Its agent works on this computer.'}{running ? ' Change it after the current run.' : ''}</span></span>
       <span className="preference-control"><select className="ws-select" aria-label="Where this chat’s agent works" disabled={!chat || running} value={binding.data?.hostId ?? ''}
