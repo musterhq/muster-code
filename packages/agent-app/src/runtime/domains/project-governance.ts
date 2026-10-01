@@ -432,13 +432,17 @@ export function createGovernance(ctx: DomainContext, deps: GovernanceDeps) {
   const stageApproverName = (projectId: string, a: ExecutionPolicy['stages'][number]['approver']) => a.kind === 'user' ? 'You' : nameOf(projectId, a.memberId);
 
   /** A finished task enters its policy: the first stage (or the one that asked for changes) waits for its approver. */
+  /** An agent never approves its own work: a stage naming the task's owner comes to you instead. */
+  function ownStage(task: ProjectTask, s: ExecutionPolicy['stages'][number]): { stage: ExecutionPolicy['stages'][number]; own: boolean } {
+    return s.approver.kind === 'agent' && s.approver.memberId === ownerMemberId(task) ? { stage: { ...s, approver: { kind: 'user' } }, own: true } : { stage: s, own: false };
+  }
   async function startStage(task: ProjectTask): Promise<void> {
     const policy = effectivePolicy(task);
     if (!policy?.stages.length) { gov().clearStage(task.id); return; }
     const prior = gov().stage(task.id);
-    const index = prior && prior.status === 'changes_requested' ? Math.min(prior.stage, policy.stages.length - 1) : 0, stage = policy.stages[index]!;
+    const index = prior && prior.status === 'changes_requested' ? Math.min(prior.stage, policy.stages.length - 1) : 0, { stage, own } = ownStage(task, policy.stages[index]!);
     const review = task.state === 'review' ? task : task.state === 'implemented' ? tasks().setState({ projectId: task.projectId, id: task.id, revision: task.revision, state: 'review', reason: `${stageNote(policy, index)} requested from ${stageApproverName(task.projectId, stage.approver)}` }, 'system') : task;
-    const state: TaskStageState = { taskId: task.id, stage: index, stages: policy.stages.length, round: prior?.round ?? 0, status: stage.approver.kind === 'agent' ? 'reviewing' : 'awaiting', kind: stage.kind, approver: stage.approver, approverName: stageApproverName(task.projectId, stage.approver), reviewChatId: null, history: prior?.history ?? [], updatedAt: new Date(now()).toISOString(), feedback: null };
+    const state: TaskStageState = { taskId: task.id, stage: index, stages: policy.stages.length, round: prior?.round ?? 0, status: stage.approver.kind === 'agent' ? 'reviewing' : 'awaiting', kind: stage.kind, approver: stage.approver, approverName: stageApproverName(task.projectId, stage.approver), reviewChatId: null, history: prior?.history ?? [], updatedAt: new Date(now()).toISOString(), feedback: own ? `${nameOf(task.projectId, ownerMemberId(task))} owns this task and cannot review their own work, so it comes to you.` : null };
     gov().setStage(task.projectId, state);
     record(task.projectId, 'task.stage', `${stageNote(policy, index)} requested from ${state.approverName} for “${clip(task.title, 60)}”.`, task.id, 'system');
     deps.changed(task.projectId, task.id);
@@ -511,8 +515,8 @@ export function createGovernance(ctx: DomainContext, deps: GovernanceDeps) {
   }
   async function startStageAt(task: ProjectTask, index: number, state: TaskStageState): Promise<void> {
     const policy = effectivePolicy(task); if (!policy) return;
-    const stage = policy.stages[index]!;
-    const next = { ...state, stage: index, kind: stage.kind, approver: stage.approver, approverName: stageApproverName(task.projectId, stage.approver), status: stage.approver.kind === 'agent' ? 'reviewing' as const : 'awaiting' as const };
+    const { stage, own } = ownStage(task, policy.stages[index]!);
+    const next = { ...state, feedback: own ? `${nameOf(task.projectId, ownerMemberId(task))} owns this task and cannot review their own work, so it comes to you.` : null, stage: index, kind: stage.kind, approver: stage.approver, approverName: stageApproverName(task.projectId, stage.approver), status: stage.approver.kind === 'agent' ? 'reviewing' as const : 'awaiting' as const };
     gov().setStage(task.projectId, next);
     record(task.projectId, 'task.stage', `${stageNote(policy, index)} requested from ${next.approverName} for “${clip(task.title, 60)}”.`, task.id, 'system');
     deps.changed(task.projectId, task.id);
@@ -1197,6 +1201,8 @@ export function createGovernance(ctx: DomainContext, deps: GovernanceDeps) {
     'project.tasks.policy.set': (input: Record<string, unknown>) => {
       const projectId = project(input), taskId = id(input.id, 'task id'); tasks().assertTaskProject(projectId, taskId);
       const policy = normalizePolicy(input.policy as PolicyInput | null, projectId);
+      const ownerId = ownerMemberId(tasks().getTask(taskId)!);
+      if (policy?.stages.some(s => s.approver.kind === 'agent' && s.approver.memberId === ownerId)) throw new Error(`${nameOf(projectId, ownerId)} owns this task and cannot be its own reviewer. Choose another agent, or yourself.`);
       gov().setPolicy(projectId, taskId, policy);
       const t = tasks().getTask(taskId)!;
       record(projectId, 'task.policy', policy ? `Set ${policy.stages.length === 1 ? 'a' : policy.stages.length} ${policy.stages.map(s => s.kind).join(' → ')} policy on ${keyOf(t)}: ${policy.stages.map(s => stageApproverName(projectId, s.approver)).join(' → ')}.` : `Removed the execution policy from ${keyOf(t)}.`, taskId, 'user');

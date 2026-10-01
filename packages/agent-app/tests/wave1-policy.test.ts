@@ -82,3 +82,18 @@ test('C16: the project default policy applies to tasks without their own; a task
   assert.equal((await h.gov()).policies.length, 0);
   assert.ok(true);
 });
+
+test('Review fix: an agent never approves its own work', async t => {
+  const h = await wave1(t);
+  const cto = await h.member('CTO'), qa = await h.member('QA');
+  const mine = await h.addTask('Own review', { kind: 'agent', id: cto.id });
+  await assert.rejects(h.s.invoke('project.tasks.policy.set', { projectId: h.project.id, id: mine.id, policy: { stages: [{ kind: 'review', approver: { kind: 'agent', memberId: cto.id } }] } }), /cannot be its own reviewer/);
+  // A project default naming the owner cannot know the owner: the stage comes to you at run time.
+  await h.s.invoke('project.gov.settings.set', { projectId: h.project.id, defaultPolicy: { stages: [{ kind: 'review', approver: { kind: 'agent', memberId: cto.id } }] } });
+  const job = await h.addTask('Default review by the owner', { kind: 'agent', id: cto.id }); await h.start(job.id);
+  assert.equal(await h.settled(job.id, 'review'), 'review');
+  const st = (await h.gov()).stages.find(s => s.taskId === job.id)!;
+  assert.equal(st.approver.kind, 'user'); assert.equal(st.status, 'awaiting'); assert.match(st.feedback ?? '', /cannot review their own work/);
+  assert.equal(h.calls.filter(c => /reviewing work/.test(c.prompt)).length, 0, 'no reviewer run for self-review');
+  const other = await h.addTask('Reviewed by QA', { kind: 'agent', id: cto.id }); await h.s.invoke('project.tasks.policy.set', { projectId: h.project.id, id: other.id, policy: { stages: [{ kind: 'review', approver: { kind: 'agent', memberId: qa.id } }] } });
+});

@@ -130,7 +130,7 @@ export async function wave1(t: TestContext, opts: Wave1Options = {}) {
     },
   };
   const s = createAgentService({ dataDir, provider, onEvent() {} });
-  t.after(async () => { for (const r of slow.values()) r(); await s.dispose(); if (clock) { governanceClock.now = undefined; governanceClock.timers = undefined; } governanceClock.secrets = undefined; secrets?.close?.(); await rm(dataDir, { recursive: true, force: true }); });
+  t.after(async () => { for (const r of slow.values()) r(); await s.dispose(); if (clock) { governanceClock.now = undefined; governanceClock.timers = undefined; } governanceClock.secrets = undefined; secrets?.close?.(); await rm(dataDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 150 }); });
   const folder = await s.invoke('folder.add', { path: repo });
   const project = await s.invoke('project.create', { name: 'OSSMANAGER', goal: '', folderIds: [folder.id] });
   const member = (name: string, extra: Record<string, unknown> = {}) => s.invoke('project.members.add', { projectId: project.id, name, kind: 'agent', role: 'agent', title: name, runner: { providerId: 'scripted', model: 'scripted-model' }, ...extra });
