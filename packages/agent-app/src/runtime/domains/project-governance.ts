@@ -498,8 +498,10 @@ export function createGovernance(ctx: DomainContext, deps: GovernanceDeps) {
       const leaves = leavesOf(tree, root.id), ids = new Set(subtreeIds(tree, root.id));
       const stuck = leaves.filter(l => l.state === 'failed' || l.state === 'blocked');
       const live = leaves.some(l => LIVE.has(l.state) || l.state === 'review' || l.state === 'implemented');
+      // A leaf that is ready to start is work waiting for its next run (yours or an automatic one), not a stop.
+      const ready = leaves.some(l => l.state === 'todo' && (all.find(x => x.id === l.id)?.dependencies ?? []).every(d => byId.get(d)?.state === 'verified'));
       const open = gov().openWatchdogFor(root.id);
-      if (!stuck.length || live || pendingPath(projectId, ids) || holdFor(root)) { if (open && !stuck.length) gov().updateWatchdog(open.id, { state: 'dismissed', note: 'The subtree is moving again.' }); continue; }
+      if (!stuck.length || live || ready || pendingPath(projectId, ids) || holdFor(root)) { if (open && !stuck.length) gov().updateWatchdog(open.id, { state: 'dismissed', note: 'The subtree is moving again.' }); continue; }
       const fp = fingerprintOf(leaves);
       if (gov().watchdogSeen(root.id, fp)) continue;
       if (open) gov().updateWatchdog(open.id, { state: 'dismissed', note: 'Replaced by a newer stopped state.' });

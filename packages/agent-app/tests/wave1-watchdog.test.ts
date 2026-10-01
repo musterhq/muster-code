@@ -91,3 +91,14 @@ test('C17: a monitor with create-recovery-task adds a subtask, and a finished ta
   await h.clock!.advance(6 * 60_000); await h.idle(100);
   assert.notEqual((await h.gov()).monitors.find(x => x.id === m2.id)?.state, 'escalated'); void until;
 });
+
+test('C17: a leaf that is ready to run is work waiting, not a stop: the finding comes only when nothing can move', async t => {
+  const h = await wave1(t);
+  const cto = await h.member('CTO');
+  const root = await h.addTask('Root', { kind: 'user', id: 'local' });
+  const a = await h.addTask('Leaf A', { kind: 'agent', id: cto.id }, { parentId: root.id });
+  await h.addTask('Leaf B', { kind: 'agent', id: cto.id }, { parentId: root.id });
+  const c = await h.task(a.id); await h.s.invoke('project.tasks.setState', { projectId: h.project.id, id: a.id, revision: c.revision, state: 'failed', reason: 'stuck' });
+  await h.idle(250);
+  assert.equal((await h.gov()).watchdogs.length, 0, 'leaf B is still ready to start, so nothing has stopped yet');
+});
