@@ -176,12 +176,19 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
     built = { generation: api.generation, companyId: id, part, agents };
     return part;
   };
+  /** Records the last read's outcome. Going offline (ok → stale) or coming back (stale → ok) is an update the screens
+   *  must see at once: the banner and "· offline" come from it, so it is emitted rather than waiting for a reload. */
+  const linkError = (next: string | undefined) => {
+    const changed = Boolean(next) !== Boolean(lastError);
+    lastError = next;
+    if (changed) queueEmit(['config', 'inbox', 'tasks']);
+  };
   const paperclipPart = async (refresh: boolean): Promise<{ part: PaperclipPart | null; link: PaperclipLink | null }> => {
     const api = connection();
     if (!api) return { part: null, link: null };
     if (refresh) api.invalidate();
-    inflight ??= readPaperclip(api).then(part => { lastError = undefined; ensureSocket(); return part; }, cause => {
-      lastError = cause instanceof Error ? cause.message : String(cause);
+    inflight ??= readPaperclip(api).then(part => { linkError(undefined); ensureSocket(); return part; }, cause => {
+      linkError(cause instanceof Error ? cause.message : String(cause));
       if (built) return built.part;
       throw cause;
     }).finally(() => { inflight = null; });
@@ -276,7 +283,9 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
         if (taskId) c.invalidate(`/issues/${taskId}`);
         queueEmit(type.startsWith('heartbeat.') ? ['runs', 'tasks', 'inbox'] : type === 'agent.status' ? ['agents', 'inbox'] : ['tasks', 'inbox'], taskId);
       },
-      onDown() { live.socket = null; live.socketCompany = ''; live.channel = 'off'; schedulePoll(); },
+      // A live socket dropping is often the first sign Paperclip went away: tell the screens, which re-read and show it.
+      // (A socket that never opened says nothing new, so a refused socket never wakes the renderer.)
+      onDown() { const wasLive = live.channel === 'socket'; live.socket = null; live.socketCompany = ''; live.channel = 'off'; if (wasLive) queueEmit(['config']); schedulePoll(); },
     }, options.socket);
   }
 

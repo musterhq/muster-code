@@ -224,8 +224,31 @@ test('socket events are filtered and coalesced; run-log noise never wakes the re
   await h.timers.fire();
   assert.equal(h.events.length,1);
   assert.deepEqual(h.events[0].taskIds.sort(),['i-12','i-4']);
+  h.events.length=0;
   sockets[0].onclose();
-  assert.equal(h.timers.live.size,1,'socket down while visible: fall back to a poll');
+  assert.deepEqual([...h.timers.live.values()].map(x=>x.ms).sort((a,b)=>a-b),[1000,15000],'socket down while visible: tell the screens, and fall back to a poll');
+  const poll=[...h.timers.live.entries()].find(([,x])=>x.ms===15000)!;h.timers.live.delete(poll[0]);
+  await h.timers.fire();
+  assert.deepEqual(h.events.map(e=>e.scopes),[['config']],'the socket dropping is announced at once');
+});
+
+test('going offline and coming back are announced at once, without a reload (S8)',async t=>{
+  let down=false;const server=paperclip();
+  const h=await harness(t,{fetch:async(input,init)=>{if(down)throw new TypeError('fetch failed');return server.fetch(input,init);}});
+  await h.call('paperclip.config.set',{mode:'local'});
+  await h.call('paperclip.snapshot');
+  await h.timers.fire();h.events.length=0;
+  down=true;
+  assert.ok((await h.call('paperclip.snapshot',{refresh:true})).paperclip.stale);
+  await h.timers.fire();
+  assert.equal(h.events.length,1,'ok → stale emits');assert.ok(h.events[0].scopes.includes('config'));
+  await h.call('paperclip.snapshot',{refresh:true});
+  await h.timers.fire();
+  assert.equal(h.events.length,1,'still offline: nothing new to say');
+  down=false;
+  assert.equal((await h.call('paperclip.snapshot',{refresh:true})).paperclip.stale,undefined);
+  await h.timers.fire();
+  assert.equal(h.events.length,2,'stale → ok emits');assert.ok(h.events[1].scopes.includes('config'));
 });
 
 test('Paperclip routines map onto the automation model',()=>{
