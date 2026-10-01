@@ -246,6 +246,8 @@ export interface ImportPlanProject {
    *  `detached`: an earlier import filled one of your own projects: that project is left alone and this one is imported separately.
    *  `ask`: an earlier import's project cannot be told from one of yours by its records: you say which (see `owners`). */
   existing: 'new' | 'imported' | 'detached' | 'ask';
+  /** For `ask`: what you have added to the older project since (tasks, Roster members, chats): a hint that it is yours. */
+  added?: { tasks: number; members: number; chats: number };
 }
 /** `local`: Paperclip runs on this Mac, so its folders are linked; a remote server's paths are never touched. */
 export interface ImportPlan { company: { id: string; name: string } | null; companies: WorkspaceCompany[]; projects: ImportPlanProject[]; local: boolean }

@@ -1,4 +1,4 @@
-// Manual regression probe of the upgrade path (scenarios a: own same-name project filled, b: import-made renamed, c: import-made then paused, d: touched scheduler then filled).
+// Manual regression probe of the upgrade path (scenarios a: own same-name project with a task of yours, filled, b: import-made renamed, c: import-made then paused, d: touched scheduler then filled).
 // Phase 1 runs on a checkout of release/0.3.0, phase 2 and 3 on this branch, same data dir. The permanent checks are "upgrade M1a-M1f" and "upgrade M2" in tests/paperclip-import.test.ts.
 // usage: node --experimental-transform-types migrate.ts <repoRoot> <dataDir> <phase:1|2> <ownName>
 import {readFile} from 'node:fs/promises';

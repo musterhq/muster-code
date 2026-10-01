@@ -271,12 +271,13 @@ root3.unmount();
   // An earlier import's project that cannot be told from yours by its records: the plan asks, and Import waits for the answer.
   const rootAsk=createRoot(document.getElementById('root')!,{onUncaughtError:(e:unknown)=>{(errors as unknown[]).push(e);}});
   const owner:string[]=[];
-  rootAsk.render(<ImportMapping plan={{company:{id:'c',name:'RagnarDataOps'},companies:[],local:true,projects:[{id:'pc9',name:'Old import',repo:null,localFolder:null,taskCount:1,existing:'ask'}]} as any} targets={{pc9:'import'}} owners={{}} onOwner={(id,v)=>owner.push(`${id}:${v}`)} busy={false} onChange={()=>{}} onCancel={()=>{}} onImport={()=>{}}/>);
+  rootAsk.render(<ImportMapping plan={{company:{id:'c',name:'RagnarDataOps'},companies:[],local:true,projects:[{id:'pc9',name:'Old import',repo:null,localFolder:null,taskCount:1,existing:'ask',added:{tasks:3,members:0,chats:5}},{id:'pc8',name:'Other old import',repo:null,localFolder:null,taskCount:1,existing:'ask'}]} as any} targets={{pc9:'import',pc8:'import'}} owners={{}} onOwner={(id,v)=>owner.push(`${id}:${v}`)} busy={false} onChange={()=>{}} onCancel={()=>{}} onImport={()=>{}}/>);
   await delay(60);
-  assert.deepEqual([...document.querySelector('.ws-import-map select')!.querySelectorAll('option')].map(o=>o.textContent),['Whose is it?','Mine','Made by the import']);
-  assert.equal((button(/^Import 1 project$/) as HTMLButtonElement).disabled,true,'no import until it is answered');
-  await setValue(document.querySelector('.ws-import-map select')!,'mine');
-  assert.deepEqual(owner,['pc9:mine']);
+  assert.match(text('.ws-import-map .ws-row-meta')[0],/you added 3 tasks and 5 chats: probably yours/,'what you added is shown');
+  assert.deepEqual([...document.querySelector('.ws-import-map select[id^="import-owner"]')!.querySelectorAll('option')].map(o=>o.textContent),['Whose is it?','Mine','Made by the import']);
+  assert.equal((button(/^Import 2 projects$/) as HTMLButtonElement).disabled,true,'no import until each is answered');
+  await setValue(document.querySelector('.ws-import-map select[aria-label="Same answer for all"]')!,'mine');
+  assert.deepEqual(owner,['pc9:mine','pc8:mine'],'one answer for all');
   rootAsk.unmount();
 }
 

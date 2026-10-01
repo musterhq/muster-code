@@ -236,8 +236,9 @@ test('an older import that filled one of your projects: that project is left alo
   const store=new SqliteImportStore(db);
   store.setMap('project',ossId,mine.id,'RAG',{name:'OSS Manager',companyId:COMPANY});
   const plan=await service.invoke('paperclip.import.plan',{companyId:COMPANY});
-  assert.equal(plan.projects.find(p=>p.id===ossId)!.existing,'detached');
-  const report=await service.invoke('paperclip.import',{companyId:COMPANY});
+  assert.equal(plan.projects.find(p=>p.id===ossId)!.existing,'ask','a task of yours is a hint, not proof');
+  assert.equal(plan.projects.find(p=>p.id===ossId)!.added?.tasks,1);
+  const report=await service.invoke('paperclip.import',{companyId:COMPANY,owners:{[ossId]:'mine'}});
   assert.ok(report.notes.some(n=>/earlier import filled your project “OSSMANAGER”.*left alone/.test(n)),JSON.stringify(report.notes));
   const projects=await service.invoke('project.list',undefined);
   assert.equal(projects.find(p=>p.id===mine.id)!.goal,'My own goal');
@@ -501,8 +502,9 @@ test('upgrade M1a: your own project that shares the Paperclip project’s name i
   const fx=await fixture(t);
   const seeded=await seedLegacy(t,fx,{name:'OSS Manager',goal:'My own goal',ownTask:true});
   const plan=await fx.service.invoke('paperclip.import.plan',{companyId:COMPANY});
-  assert.equal(plan.projects.find(p=>p.name==='OSS Manager')!.existing,'detached','it holds a task the import did not write: yours, whatever its name');
-  await fx.service.invoke('paperclip.import',{companyId:COMPANY});
+  const row=plan.projects.find(p=>p.name==='OSS Manager')!;
+  assert.equal(row.existing,'ask','a task of yours in it is only a hint');assert.deepEqual(row.added,{tasks:1,members:0,chats:0},'the plan shows what you added');
+  await fx.service.invoke('paperclip.import',{companyId:COMPANY,owners:{[seeded.oss.id]:'mine'}});
   const projects=await fx.service.invoke('project.list',undefined);
   const mine=projects.find(p=>p.id===seeded.project.id)!;
   assert.equal(mine.goal,'My own goal');assert.equal(mine.name,'OSS Manager');
@@ -572,7 +574,7 @@ test('upgrade M2: importing again after an older import keeps the old project’
   const seeded=await seedLegacy(t,fx,{name:'My OSS',goal:'Mine',ownTask:true});
   const before=seeded.counts();
   assert.ok(before.comments>0&&before.mapped===3&&before.history===3&&before.roster===1);
-  await fx.service.invoke('paperclip.import',{companyId:COMPANY});
+  await fx.service.invoke('paperclip.import',{companyId:COMPANY,owners:{[seeded.oss.id]:'mine'}});
   assert.deepEqual(seeded.counts(),before,'nothing moved out of your project');
   const projects=await fx.service.invoke('project.list',undefined);
   const fresh=projects.find(p=>p.name==='OSS Manager')!;
@@ -672,4 +674,28 @@ test('review S1 nit: with no Paperclip linked the snapshot still says what Resum
   const snap=await service.invoke('paperclip.snapshot',{});
   assert.equal(snap.paperclip,null);
   assert.deepEqual(snap.agentCounts,{active:0,paused:0,resumable:{paperclip:0,local:0,projects:{}}});
+});
+
+test('upgrade (e): an import-made project you added a task to is asked about, with what you added shown: left out until answered, never duplicated',async t=>{
+  const fx=await fixture(t);const seeded=await seedLegacy(t,fx,{name:'OSS Manager',goal:'Imported goal',ownTask:true});
+  const plan=await fx.service.invoke('paperclip.import.plan',{companyId:COMPANY});
+  const row=plan.projects.find(p=>p.id===seeded.oss.id)!;
+  assert.equal(row.existing,'ask');assert.deepEqual(row.added,{tasks:1,members:0,chats:0});
+  const report=await fx.service.invoke('paperclip.import',{companyId:COMPANY});
+  assert.ok(report.notes.some(n=>/\(you added 1 task\)/.test(n)),JSON.stringify(report.notes));
+  assert.equal((await fx.service.invoke('project.list',undefined)).filter(p=>p.name!=='Muster').length,1,'no second project');
+  await fx.service.invoke('paperclip.import',{companyId:COMPANY,owners:{[seeded.oss.id]:'made'}});
+  const projects=(await fx.service.invoke('project.list',undefined)).filter(p=>p.name!=='Muster');
+  assert.equal(projects.length,1,'answered "made by the import": updated in place, your task kept');
+  assert.equal((await fx.service.invoke('project.work',{projectId:seeded.project.id})).tasks.items.some(x=>x.title==='my own task'),true);
+});
+
+test('upgrade (f): an import-made project that has a chat of yours (every task run makes one) is asked about, with the chat counted',async t=>{
+  const fx=await fixture(t);const seeded=await seedLegacy(t,fx,{name:'OSS Manager',goal:'Imported goal'});
+  await fx.service.invoke('chat.create',{projectId:seeded.project.id} as never);
+  const plan=await fx.service.invoke('paperclip.import.plan',{companyId:COMPANY});
+  const row=plan.projects.find(p=>p.id===seeded.oss.id)!;
+  assert.equal(row.existing,'ask');assert.equal(row.added?.chats,1);assert.equal(row.added?.tasks,0);
+  await fx.service.invoke('paperclip.import',{companyId:COMPANY});
+  assert.equal((await fx.service.invoke('project.list',undefined)).filter(p=>p.name!=='Muster').length,1,'no duplicate while unanswered');
 });

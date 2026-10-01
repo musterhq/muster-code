@@ -245,8 +245,10 @@ export async function planImport(companyId: string | null, deps: Pick<ImportDeps
     const id = String(p.id), codebase = obj(p.codebase), name = str(p.name) ?? 'Paperclip project', localFolder = str(codebase.localFolder), repoUrl = str(codebase.repoUrl);
     const repo = repoUrl ? normalizeRemote(repoUrl) ?? repoUrl : null;
     const mapped = deps.store.map('project', id), mine = mapped ? muster.get(mapped.musterId) : undefined;
-    const existing: ImportPlan['projects'][number]['existing'] = mapped && mine ? await ownerOf(mapped, mine, deps).then(v => v === 'imported' ? 'imported' as const : v === 'own' ? 'detached' as const : 'ask' as const) : 'new';
-    projects.push({ id, name, repo, localFolder, taskCount: counts.get(id) ?? 0, existing });
+    let existing: ImportPlan['projects'][number]['existing'] = 'new';
+    const owner = mapped && mine ? await ownerOf(mapped, mine, deps) : undefined;
+    if (owner) existing = owner.verdict === 'imported' ? 'imported' : owner.verdict === 'own' ? 'detached' : 'ask';
+    projects.push({ id, name, repo, localFolder, taskCount: counts.get(id) ?? 0, existing, ...(owner?.added ? { added: owner.added } : {}) });
   }
   return { company: { id: String(company.id), name: str(company.name) ?? 'Paperclip' }, companies: listed, projects, local: deps.local };
 }
@@ -259,22 +261,25 @@ export async function planImport(companyId: string | null, deps: Pick<ImportDeps
  * guesses (an unanswered project is left out).
  */
 export const OWNER_MAX_MS = 120_000;
-export async function ownerOf(mapped: { data: Json }, project: { id: string }, deps: { invoke: Invoke; store: ImportStore }): Promise<'imported' | 'own' | 'ask'> {
-  if (isImportedProject(mapped.data)) return 'imported';
-  if (mapped.data.origin === 'own') return 'own';
+export async function ownerOf(mapped: { data: Json }, project: { id: string }, deps: { invoke: Invoke; store: ImportStore }): Promise<{ verdict: 'imported' | 'own' | 'ask'; added?: ImportPlan['projects'][number]['added'] }> {
+  if (isImportedProject(mapped.data)) return { verdict: 'imported' };
+  if (mapped.data.origin === 'own') return { verdict: 'own' };
   try {
     const written = deps.store.writtenBy?.(project.id);
-    if (!written) return 'ask';
+    if (!written) return { verdict: 'ask' };
     const [work, team, snapshot, origin] = await Promise.all([deps.invoke('project.work', { projectId: project.id, activityLimit: 1 }), deps.invoke('project.members.list', { projectId: project.id }), deps.invoke('app.snapshot', undefined), deps.invoke('project.origin.get', { projectId: project.id })]);
     const automatic = (m: { id: string; kind: string }) => m.id === 'agent' || m.id === 'local' || m.kind !== 'agent', members = team.members.filter(m => !automatic(m) && !m.revokedAt);
-    if (work.tasks.items.some(t => !written.tasks.has(t.id)) || members.some(m => !written.members.has(m.id)) || snapshot.chats.some(c => c.projectId === project.id)) return 'own';
     const first = Math.min(...work.tasks.items.map(t => Date.parse(t.createdAt)), ...members.map(m => Date.parse(m.createdAt)));
     const beginning = Math.min(...team.members.filter(automatic).map(m => Date.parse(m.createdAt)), Date.parse(origin.firstActivity?.at ?? ''));
-    if (!Number.isFinite(first) || !Number.isFinite(beginning)) return 'ask';
-    const gap = first - beginning;
-    return gap <= OWNER_MAX_MS ? 'ask' : 'own';
-  } catch { return 'ask'; }
+    // Only the timing settles it without asking: its history began long before the import wrote anything.
+    if (Number.isFinite(first) && Number.isFinite(beginning) && first - beginning > OWNER_MAX_MS) return { verdict: 'own' };
+    // Something you added (a task, a Roster member, a chat: every task run makes one) is a hint that it is yours, not proof: the import's own project looks the same after you have worked in it. So it is asked, with what you added shown.
+    const added = { tasks: work.tasks.items.filter(t => !written.tasks.has(t.id)).length, members: members.filter(m => !written.members.has(m.id)).length, chats: snapshot.chats.filter(c => c.projectId === project.id).length };
+    return { verdict: 'ask', ...(added.tasks + added.members + added.chats > 0 ? { added } : {}) };
+  } catch { return { verdict: 'ask' }; }
 }
+/** "3 tasks and 5 chats" */
+export const addedText = (a: { tasks: number; members: number; chats: number }): string => [a.tasks && `${a.tasks} ${a.tasks === 1 ? 'task' : 'tasks'}`, a.members && `${a.members} Roster ${a.members === 1 ? 'member' : 'members'}`, a.chats && `${a.chats} ${a.chats === 1 ? 'chat' : 'chats'}`].filter(Boolean).join(' and ');
 const isNotFound = (cause: unknown) => (cause as { status?: unknown } | null)?.status === 404;
 const clip = (text: string, max = 60) => text.length > max ? `${text.slice(0, max - 1)}…` : text;
 
@@ -309,10 +314,11 @@ export async function importFromPaperclip(companyId: string, deps: ImportDeps): 
     else if (localFolder && !deps.local) report.notes.push(`${name}: its folder (${localFolder}) is on the Paperclip server, not this Mac. Link your own checkout to the project yourself.`);
     let mapped = store.map('project', sourceId);
     const mine = mapped ? existing.get(mapped.musterId) : undefined;
-    let verdict = mapped && mine ? await ownerOf(mapped, mine, deps) : undefined;
+    const owner = mapped && mine ? await ownerOf(mapped, mine, deps) : undefined;
+    let verdict = owner?.verdict;
     if (verdict === 'ask') {
       const said = deps.owners?.[sourceId];
-      if (!said) { report.notes.push(`${name}: left out of this import. An earlier import’s project “${mine!.name}” cannot be told from one of yours by its records: say whether it is yours or was made by the import, then import again.`); continue; }
+      if (!said) { report.notes.push(`${name}: left out of this import. An earlier import’s project “${mine!.name}” cannot be told from one of yours by its records${owner?.added ? ` (you added ${addedText(owner.added)})` : ''}: say whether it is yours or was made by the import, then import again.`); continue; }
       verdict = said === 'made' ? 'imported' : 'own';
     }
     const ours = verdict === 'imported';
