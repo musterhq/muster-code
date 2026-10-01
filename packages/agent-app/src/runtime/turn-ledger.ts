@@ -29,6 +29,7 @@ export class TurnLedger {
       project_id TEXT, body TEXT NOT NULL, prev_hash TEXT NOT NULL, hash TEXT NOT NULL, created_at TEXT NOT NULL);
       CREATE INDEX IF NOT EXISTS turn_ledger_chat ON turn_ledger(chat_id, seq);
       CREATE INDEX IF NOT EXISTS turn_ledger_project ON turn_ledger(project_id, seq);
+      CREATE INDEX IF NOT EXISTS turn_ledger_created ON turn_ledger(created_at);
       CREATE TABLE IF NOT EXISTS turn_ledger_history (id TEXT PRIMARY KEY, chat_id TEXT, project_id TEXT, body TEXT NOT NULL, ended_at TEXT NOT NULL);
       CREATE INDEX IF NOT EXISTS turn_ledger_history_chat ON turn_ledger_history(chat_id, ended_at);
       CREATE INDEX IF NOT EXISTS turn_ledger_history_project ON turn_ledger_history(project_id, ended_at);

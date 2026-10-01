@@ -99,12 +99,15 @@ const {RosterList}=await import('../src/renderer/components/RosterPanel');
 const errors:unknown[]=[];
 const root=createRoot(document.getElementById('root')!,{onUncaughtError:e=>errors.push(e),onRecoverableError:e=>errors.push(e)});
 const text=()=>document.body.textContent??'';
-const click=async(el:Element|null|undefined,ms=40)=>{assert.ok(el,'element to click');(el as any).dispatchEvent(new window.Event('click',{bubbles:true,cancelable:true}));await delay(ms);};
+// A cold first render can be slower than any fixed wait: after the wait, hold until no command is in flight and the page text has stopped changing.
+let inflight=0;const realInvoke=window.muster.invoke.bind(window.muster);window.muster.invoke=async(command:string,input:any)=>{inflight++;try{return await realInvoke(command,input);}finally{inflight--;}};
+const quiet=async()=>{let before='',still=0;for(let i=0;i<75&&still<3;i++){await delay(40);const now=document.body.textContent??'';still=inflight===0&&now===before?still+1:0;before=now;}};
+const click=async(el:Element|null|undefined,ms=40)=>{assert.ok(el,'element to click');(el as any).dispatchEvent(new window.Event('click',{bubbles:true,cancelable:true}));await delay(ms);await quiet();};
 const button=(label:RegExp)=>[...document.querySelectorAll('button')].find(b=>label.test(b.textContent??'')||label.test(b.getAttribute('aria-label')??''));
 const setValue=async(el:any,value:string)=>{assert.ok(el,'field to set');if(el.tagName==='SELECT'){for(const o of [...el.options])o.selected=o.value===value;try{Object.defineProperty(el,'value',{configurable:true,get:()=>value});}catch{}el.dispatchEvent(new window.Event('change',{bubbles:true}));await delay(30);return;}let proto=Object.getPrototypeOf(el),d;while(proto&&!(d=Object.getOwnPropertyDescriptor(proto,'value')))proto=Object.getPrototypeOf(proto);d!.set!.call(el,value);el.dispatchEvent(new window.Event('input',{bubbles:true}));el.dispatchEvent(new window.Event('change',{bubbles:true}));await delay(30);};
 const field=(label:string)=>document.querySelector(`[aria-label="${label}"]`) as any;
 const submit=async(form:Element|null)=>{assert.ok(form,'form');form!.dispatchEvent(new window.Event('submit',{bubbles:true,cancelable:true}));await delay(40);};
-const show=async(node:React.ReactNode,ms=60)=>{root.render(<>{node}</>);await delay(ms);};
+const show=async(node:React.ReactNode,ms=60)=>{root.render(<>{node}</>);await delay(ms);await quiet();};
 
 // G34: linked pull requests with state, checks and plain error text; link, scan and unlink call the right commands.
 await show(<W.TaskPullRequests projectId="p" taskId="t1"/>,120);

@@ -166,3 +166,10 @@
 .automation-editor .work-variable-row .pp-check, .work-variable-row .pp-check { flex-direction: row; align-items: center; gap: 6px; white-space: nowrap; font-size: var(--fs-12); color: var(--text-dim); }
 .work-triggers, .work-variables { display: flex; flex-direction: column; gap: 8px; }
 .automation-editor .work-check { flex-direction: row; gap: 8px; }
+
+/* Reflection coach (G25). */
+.work-reflect { width: min(640px, calc(100vw - 40px)); }
+.work-reflect-why { margin: 0 0 6px; font-size: var(--fs-13); }
+.work-reflect-evidence { margin: 0 0 10px; font-size: var(--fs-12); }
+.work-reflect .work-diff { margin-bottom: 12px; }
+.reflect .reflect-list { margin-top: 6px; }

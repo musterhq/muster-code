@@ -15,3 +15,8 @@ export function peekPendingProject(): string | null { return pending; }
 /** Consumes the request once the Projects screen has actually mounted with it. */
 export function clearPendingProject(id: string | null): void { if (pending === id) pending = null; }
 export function onOpenProject(listener: (id: string) => void): () => void { listeners.add(listener); return () => { listeners.delete(listener); }; }
+
+/** The project open on the Projects screen right now (null on its list), so a shortcut like "new task" lands in it. */
+let current: string | null = null;
+export function setCurrentProject(id: string | null): void { current = id; }
+export function currentProject(): string | null { return current; }

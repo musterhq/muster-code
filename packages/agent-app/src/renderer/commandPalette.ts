@@ -16,6 +16,7 @@ export type CommandId =
   | 'rename-chat' | 'mark-unread' | 'pin-chat' | 'snooze-chat' | 'archive-chat' | 'copy-link' | 'next-chat' | 'prev-chat'
   | 'settings' | 'providers' | 'plugins' | 'memory' | 'automations' | 'projects' | 'stashes' | 'import-conversations'
   | 'git-changes' | 'git-history' | 'git-pull-request'
+  | 'new-task' | 'go-inbox' | 'go-dashboard' | 'go-tasks' | 'go-roster' | 'go-outputs' | 'go-ledger' | 'go-costs' | 'show-shortcuts'
   | `chat-${1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9}`;
 
 export type CommandGroup = 'Chat' | 'File' | 'View' | 'Go' | 'App';
@@ -42,6 +43,8 @@ export interface CommandContext {
   /** Chats in ⌘1…⌘9 order (visible, unarchived), titles only. */
   readonly slotTitles: readonly string[];
   readonly chatCount: number;
+  /** Projects a task can be created in; absent means unknown (the command stays available). */
+  readonly projectCount?: number;
 }
 
 export interface CommandState {
@@ -87,6 +90,16 @@ export const COMMANDS: readonly CommandDef[] = [
   { id: 'projects', label: 'Projects', group: 'App', shortcut: '', keywords: 'team tasks board' },
   { id: 'stashes', label: 'Prompt stashes', group: 'Chat', shortcut: '', keywords: 'stash stashed draft saved restore' },
   { id: 'import-conversations', label: 'Import conversations…', group: 'App', shortcut: '', keywords: 'codex claude chatgpt sessions history transcripts' },
+  // Work surfaces (C34, C3): jump to a page, make a task, or read the shortcuts. The keys are those of WorkShortcuts.
+  { id: 'new-task', label: 'New task', group: 'Go', shortcut: 'c', keywords: 'create issue todo' },
+  { id: 'go-inbox', label: 'Go to Inbox', group: 'Go', shortcut: 'g i', keywords: 'needs me approvals questions' },
+  { id: 'go-dashboard', label: 'Go to Dashboard', group: 'Go', shortcut: 'g d', keywords: 'overview stats profile you activity' },
+  { id: 'go-tasks', label: 'Go to Tasks', group: 'Go', shortcut: 'g t', keywords: 'issues list board' },
+  { id: 'go-roster', label: 'Go to Roster', group: 'Go', shortcut: 'g r', keywords: 'agents org team' },
+  { id: 'go-outputs', label: 'Go to Outputs', group: 'Go', shortcut: 'g o', keywords: 'files artifacts documents' },
+  { id: 'go-ledger', label: 'Go to Ledger', group: 'Go', shortcut: 'g l', keywords: 'receipts timeline audit runs' },
+  { id: 'go-costs', label: 'Costs and provider limits', group: 'Go', shortcut: '', keywords: 'spend usage tokens windows quota ledger money' },
+  { id: 'show-shortcuts', label: 'Keyboard shortcuts', group: 'App', shortcut: '?', keywords: 'keys cheatsheet help' },
   // The one Git tab (Changes · History · Pull request) for the chat's folder.
   { id: 'git-changes', label: 'Git: Changes', group: 'View', shortcut: '', keywords: 'diff review stage commit uncommitted working tree status' },
   { id: 'git-history', label: 'Git: History', group: 'View', shortcut: '', keywords: 'log commits compare branches graph blame' },
@@ -133,6 +146,7 @@ export function commandState(id: CommandId, ctx: CommandContext): CommandState {
     case 'snooze-chat': return !chat ? { enabled: false, reason: NO_CHAT } : chat.archived ? { enabled: false, reason: 'Archived chats cannot be snoozed' } : needChat(chat.snoozed ? { label: 'Wake chat' } : {});
     case 'stashes': return ctx.screen === 'work' ? { enabled: true } : { enabled: false, reason: 'Return to a chat to use stashes' };
     case 'memory': return { enabled: true, scope: chat?.folderName };
+    case 'new-task': return ctx.projectCount === 0 ? { enabled: false, reason: 'Create a project first: tasks belong to a project' } : { enabled: true };
     default: return { enabled: true };
   }
 }

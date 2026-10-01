@@ -11,6 +11,7 @@ import { useStore } from '../useStore';
 import { MessageBody } from './MessageBody';
 import { ModalSheet } from './ModalSheet';
 import { PluginIcon } from './PluginIcon';
+import { SkillStudio } from './SkillStudio';
 import { SkillEditor } from './SkillEditor';
 import { McpServers } from './McpServers';
 import './plugins-screen.css';
@@ -98,7 +99,7 @@ export function PluginsScreen(): React.ReactElement {
     if (selection.kind === 'editor') return <SkillEditor key={selection.name ?? 'new'} name={selection.name} onClose={() => setSelection(null)} onSaved={saved => { void changed(); setSelection({ kind: 'editor', name: saved.name }); }} />;
     if (selection.kind === 'package') { const pkg = data.catalog.find(entry => entry.id === selection.id), card = cards.find(entry => entry.pkg.id === selection.id); return pkg ? <PackageDetail pkg={pkg} icon={card?.icon} onManage={card?.installedAs ? () => manage(card.installedAs!) : undefined} busy={pending[pkg.id]} error={failed[pkg.id]} onInstall={() => setReviewing(pkg.id)} onUpdate={() => void run(pkg.id, 'Updating…', () => invoke('extensions.update', { id: pkg.name }), `${pkg.displayName} updated.`)} /> : null; }
     if (selection.kind === 'installed') { const entry = data.installed.find(row => row.id === selection.id); return entry ? <InstalledDetail entry={entry} update={data.catalog.find(pkg => pkg.id === entry.packageId && pkg.installed?.updateAvailable)} busy={pending[entry.id]} error={failed[entry.id]} onUpdate={() => void run(entry.id, 'Updating…', () => invoke('extensions.update', { id: entry.id }), `${entry.name} updated.`)} onRollback={() => void run(entry.id, 'Rolling back…', () => invoke('extensions.rollback', { id: entry.id }), `${entry.name} rolled back to ${entry.previous[0]?.version}.`)} onRemove={() => setRemoving(entry)} /> : null; }
-    if (selection.kind === 'skill') { const skill = data.skills.find(entry => entry.id === selection.id); return skill ? <SkillDetail skill={skill} shadowedBy={shadows.get(skill.id)} onEdit={skill.provenance === LOCAL_SKILLS ? () => setSelection({ kind: 'editor', name: skill.name }) : undefined} /> : null; }
+    if (selection.kind === 'skill') { const skill = data.skills.find(entry => entry.id === selection.id); return skill ? <SkillDetail skill={skill} shadowedBy={shadows.get(skill.id)} onEdit={skill.provenance === LOCAL_SKILLS ? () => setSelection({ kind: 'editor', name: skill.name }) : undefined} onForked={name => { void changed(); setSelection({ kind: 'editor', name }); }} /> : null; }
     const plugin = data.plugins.find(entry => entry.id === selection.id);
     return plugin ? <PluginDetail plugin={plugin} /> : null;
   })();
@@ -243,7 +244,7 @@ function InstalledRow({ name, icon, meta, badge, tone, enabled, busy, scopeLocke
   </li>;
 }
 
-function SkillDetail({ skill, shadowedBy, onEdit }: { skill: SkillEntry; shadowedBy?: string; onEdit?: () => void }): React.ReactElement {
+function SkillDetail({ skill, shadowedBy, onEdit, onForked }: { skill: SkillEntry; shadowedBy?: string; onEdit?: () => void; onForked: (name: string) => void }): React.ReactElement {
   return <div className="plugin-detail">
     <div className="plugin-detail-hero"><PluginIcon icon={skill.icon} name={skill.displayName ?? skill.name} seed={skill.name} shape="skill" size={48} />
       <div><h2 className="plugin-detail-name">{skill.displayName ?? skill.name}</h2><div className="plugin-detail-provenance">{qualifiedSkillName(skill)} · {skillTier(skill.provenance)}</div></div>
@@ -252,6 +253,7 @@ function SkillDetail({ skill, shadowedBy, onEdit }: { skill: SkillEntry; shadowe
     {shadowedBy && <p className="plugin-detail-notice-inline">Shadowed by {shadowedBy}: a folder skill beats a user skill, which beats an installed one with the same name.</p>}
     <div className="plugin-detail-path">{skill.path}</div>
     {skill.readError ? <div className="plugin-detail-read-error"><p>Could not read SKILL.md</p><code>{skill.readError}</code></div> : skill.readme ? <MessageBody text={skill.readme} /> : <p className="plugin-detail-empty">No SKILL.md found in this skill directory.</p>}
+    {(skill.provenance === LOCAL_SKILLS || skill.provenance === '~/.codex/skills') && !skill.readError && <SkillStudio name={skill.name} canFork={skill.provenance === LOCAL_SKILLS} onForked={onForked} />}
   </div>;
 }
 

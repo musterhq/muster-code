@@ -3,6 +3,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import type { LocalSkill } from '../../shared/domains/extensions-protocol';
 import { invoke } from '../bridge';
 import { notifySuccess } from '../store';
+import { SkillTemplates } from './SkillStudio';
 
 const NAME = /^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/;
 const slug = (value: string) => value.normalize('NFKD').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 64);
@@ -49,6 +50,7 @@ export function SkillEditor({ name, onClose, onSaved }: { name: string | null; o
     </header>
     {phase === 'loading' ? <div className="plugins-status" role="status">Loading SKILL.md…</div> : <div className="skill-editor-body">
       <div className="skill-editor-fields">
+        {!skill && <SkillTemplates onPick={t => setDraft(d => ({ name: d.name || slug(t.name), description: t.description, body: t.body }))} />}
         <label>Name<input ref={first} value={draft.name} spellCheck={false} placeholder="release-notes" onChange={event => setDraft({ ...draft, name: slug(event.target.value) })} aria-invalid={!!draft.name && !NAME.test(draft.name)} /></label>
         <label>Description<input value={draft.description} maxLength={1024} placeholder="When the agent should use this skill" onChange={event => setDraft({ ...draft, description: event.target.value })} /></label>
         <label className="skill-editor-instructions">Instructions<textarea value={draft.body} spellCheck={false} placeholder={'# Steps\n\n1. …'} onChange={event => setDraft({ ...draft, body: event.target.value })} /></label>

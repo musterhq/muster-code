@@ -5,6 +5,7 @@ import {WorkControls} from './components/WorkControls';
 import { ChatView } from './components/ChatView';
 import { Sidebar } from './components/Sidebar';
 import { SpotlightSearchHost } from './components/SpotlightSearch';
+import { WorkShortcutsHost } from './components/WorkShortcuts';
 import { ParallelRunHost } from './components/ParallelRunGuard';
 import { ImportConversationsHost } from './components/ImportConversations';
 import { SetupGuideHost } from './components/SetupGuide';
@@ -114,6 +115,7 @@ export function App(): React.ReactElement {
         </div>
       </nav>
       <SpotlightSearchHost/>
+      <WorkShortcutsHost/>
       <ParallelRunHost/>
       <ImportConversationsHost/>
       <SetupGuideHost/>

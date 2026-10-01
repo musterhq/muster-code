@@ -92,10 +92,14 @@ const OWNER_ONLY_PROJECT = new Set(['project.delete', 'project.archive', 'projec
   'project.gov.settings.set', 'project.agent.gov.set', 'project.agent.files.save', 'project.agent.files.remove', 'project.agent.revisions.restore', 'project.tasks.policy.set',
   'project.secrets.list', 'project.secrets.audit', 'project.secrets.save', 'project.secrets.rollback', 'project.secrets.remove', 'project.secrets.grant', 'project.secrets.decide',
   // Work layer: a project's status and target date.
-  'work.project.meta.set']);
+  'work.project.meta.set',
+  // Wave 3: a reflection changes an agent's instructions; the setup interview starts the coordinator.
+  'insight.reflect.run', 'insight.reflect.accept', 'insight.reflect.dismiss', 'insight.reflect.settings.set', 'insight.setup.interview',
+  // Applying a coordinator proposal can change the shared mission (its goal operation), which project.update reserves for owners.
+  'project.coordinator.apply']);
 const AUTOMATION_BY_ID = /^automations\.(update|delete|pause|resume|runNow|runs|list)$/;
 /** Commands whose result is server-wide and not filterable per project: admins only for everyone else. */
-const ADMIN_READS = /^(work\.(overlay|inbox\.state)|automations\.gate\.list|paperclip\.(snapshot|dashboard|list|badge|memory|task|config\.get|inbox\.dismissed|import\.plan|watch)|settings\.(export|diagnostics|storage|storage\.preview)|providers\.diagnose|import\.|memory\.(export|archives|bank\.preview|import\.preview))/;
+const ADMIN_READS = /^(work\.(overlay|inbox\.state)|search\.workspace|insight\.(costs|profile|reflect\.inbox)|automations\.gate\.list|paperclip\.(snapshot|dashboard|list|badge|memory|task|config\.get|inbox\.dismissed|import\.plan|watch)|settings\.(export|diagnostics|storage|storage\.preview)|providers\.diagnose|import\.|memory\.(export|archives|bank\.preview|import\.preview))/;
 
 /**
  * Throws unless the user may run `command` on the resources named in `input`. `snapshot` is the runtime's current (unfiltered) state.
@@ -159,6 +163,11 @@ export function filterOutput(v: AccessView, command: string, output: unknown, sn
   if (command === 'app.snapshot') return filterSnapshot(v, output as Snapshot);
   if (command === 'project.list' && Array.isArray(output)) return output.filter(p => canSeeProject(v, (p as { id: string }).id));
   if (command === 'chat.search' && Array.isArray(output)) return output.filter(r => canSeeChat(v, snapshot.chats.find(c => c.id === (r as { chatId: string }).chatId)));
+  // Skill Studio test runs carry the reply of a read-only run in one project's folder: a member sees only the runs of projects they can see.
+  if (command === 'studio.skill.inputs.list' && output && typeof output === 'object') {
+    const list = output as { runs?: Array<{ projectId: string }> };
+    return { ...list, runs: (list.runs ?? []).filter(r => canSeeProject(v, r.projectId)) };
+  }
   if (command === 'paperclip.ledger' && output && typeof output === 'object') {
     const view = output as { entries: Array<{ chatId: string | null; projectId: string | null }> };
     return { ...view, entries: view.entries.filter(e => (e.projectId && canSeeProject(v, e.projectId)) || (e.chatId && canSeeChat(v, snapshot.chats.find(c => c.id === e.chatId)))) };

@@ -68,7 +68,8 @@ export function createWorkDomain(ctx: DomainContext): DomainModule {
     for (const m of w.allProjectMeta()) projects[m.projectId] = { status: m.status, targetDate: m.targetDate, starred: m.starred, hidden: m.hidden };
     for (const a of w.agentMeta()) agents[a.id] = { starred: a.starred, hidden: a.hidden };
     const inbox = await ctx.invoke('automations.gate.list', {}).then(r => r.items.map(g => ({ id: `gate:${g.id}`, kind: 'approval' as const, title: `Run “${g.automationName}”?`, why: g.summary, severity: 'medium' as const, at: g.createdAt, projectId: g.projectId, group: g.projectName ?? 'Automations' })), () => []);
-    return { projects, agents, labels: w.allTaskLabels(), goals: w.taskGoals(), prs: w.prSummaries(), inbox };
+    const reflections = await ctx.invoke('insight.reflect.inbox', {}).then(r => r.items.map(x => ({ id: x.id, kind: x.kind, title: x.title, why: x.why, severity: x.severity, at: x.at, projectId: x.projectId, group: x.group })), () => []);
+    return { projects, agents, labels: w.allTaskLabels(), goals: w.taskGoals(), prs: w.prSummaries(), inbox: [...inbox, ...reflections] };
   };
 
   // ── goals ───────────────────────────────────────────────────────────────────

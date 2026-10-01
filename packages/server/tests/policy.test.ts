@@ -146,8 +146,57 @@ test('Review S4: starring or hiding needs write access to the project, and an ag
   denied(() => authorizeResource(editor, 'work.star.set', 'write', { kind: 'agent', id: 'member:m1', starred: true }, snapshot));
 });
 
+test('Wave 3 navigation and insight commands: search and costs are server-wide (admin), reflections and the setup interview are project-owner, skill inputs are host', () => {
+  for (const c of ['search.workspace', 'insight.costs', 'insight.profile', 'insight.reflect.list', 'insight.reflect.inbox', 'studio.skill.fromTask', 'studio.skill.templates', 'studio.skill.inputs.list']) assert.equal(classifyCommand(c), 'read', c);
+  for (const c of ['insight.reflect.run', 'insight.reflect.accept', 'insight.reflect.dismiss', 'insight.reflect.settings.set', 'studio.skill.test', 'insight.setup.interview']) assert.equal(classifyCommand(c), 'write', c);
+  for (const c of ['studio.skill.inputs.save', 'studio.skill.inputs.remove']) assert.equal(classifyCommand(c), 'host', c);
+  const editor = accessView(user('member'), grants, owners), owner = accessView(user('member'), [{ projectId: 'p-shared', role: 'owner' }], owners);
+  for (const c of ['search.workspace', 'insight.costs', 'insight.profile', 'insight.reflect.inbox']) denied(() => authorizeResource(owner, c, 'read', {}, snapshot), 'forbidden');
+  authorizeResource(editor, 'studio.skill.fromTask', 'read', { projectId: 'p-shared', taskId: 't' }, snapshot);
+  denied(() => authorizeResource(editor, 'studio.skill.fromTask', 'read', { projectId: 'p-secret', taskId: 't' }, snapshot));
+  authorizeResource(editor, 'studio.skill.test', 'write', { projectId: 'p-shared', skill: 'x', input: 'y' }, snapshot);
+  denied(() => authorizeResource(editor, 'insight.reflect.accept', 'write', { projectId: 'p-shared', id: 'r' }, snapshot), 'forbidden');
+  denied(() => authorizeResource(editor, 'insight.setup.interview', 'write', { projectId: 'p-shared' }, snapshot), 'forbidden');
+  authorizeResource(owner, 'insight.reflect.accept', 'write', { projectId: 'p-shared', id: 'r' }, snapshot);
+  authorizeResource(owner, 'insight.setup.interview', 'write', { projectId: 'p-shared' }, snapshot);
+  denied(() => authorizeResource(editor, 'insight.reflect.list', 'read', { projectId: 'p-secret' }, snapshot));
+  assert.throws(() => authorizeCommand('studio.skill.inputs.save', 'member'), /needs admin/);
+});
+
 test('review S4: Paperclip commands that spend, pause or change configuration are host (admin) commands; reads stay reads', () => {
   for (const c of ['paperclip.approval.decide', 'paperclip.pauseAll', 'paperclip.resumeAll', 'paperclip.agent.pause', 'paperclip.agent.resume', 'paperclip.import', 'paperclip.config.set']) assert.equal(classifyCommand(c), 'host', c);
   assert.equal(classifyCommand('project.tasks.get'), 'read');
   assert.equal(classifyCommand('paperclip.snapshot'), 'read');
+});
+
+test('Review M1: applying a coordinator proposal can set the mission, so it is owner-only like project.update', () => {
+  const editor = accessView(user('member'), grants, owners), owner = accessView(user('member'), [{ projectId: 'p-shared', role: 'owner' }], owners);
+  denied(() => authorizeResource(editor, 'project.update', 'write', { id: 'p-shared', goal: 'x' }, snapshot), 'forbidden');
+  denied(() => authorizeResource(editor, 'project.coordinator.apply', 'write', { projectId: 'p-shared', key: 'k' }, snapshot), 'forbidden');
+  authorizeResource(owner, 'project.coordinator.apply', 'write', { projectId: 'p-shared', key: 'k' }, snapshot);
+  authorizeResource(owner, 'project.update', 'write', { id: 'p-shared', goal: 'x' }, snapshot);
+});
+
+test('Review M2: Skill Studio test runs are narrowed to the projects the caller can see; admins see all', () => {
+  const run = (projectId: string) => ({ id: projectId, skill: 'release', inputId: null, input: 'x', projectId, chatId: 'c', state: 'done', result: `secret from ${projectId}`, error: null, startedAt: '', endedAt: null });
+  const out = { inputs: [{ id: 'i', skill: 'release', label: 'L', text: 'T', createdAt: '' }], runs: [run('p-shared'), run('p-secret')] };
+  const viewer = accessView(user('viewer'), [{ projectId: 'p-shared', role: 'viewer' }], owners);
+  const narrowed = filterOutput(viewer, 'studio.skill.inputs.list', out, snapshot) as typeof out;
+  assert.deepEqual(narrowed.runs.map(r => r.projectId), ['p-shared']);
+  assert.equal(narrowed.inputs.length, 1);
+  assert.ok(!JSON.stringify(narrowed).includes('secret from p-secret'));
+  assert.equal((filterOutput(accessView(user('member'), [], owners), 'studio.skill.inputs.list', out, snapshot) as typeof out).runs.length, 0);
+  const admin = accessView(user('admin'), [], owners);
+  assert.equal((filterOutput(admin, 'studio.skill.inputs.list', out, snapshot) as typeof out).runs.length, 2);
+});
+
+test('Review S1: dismissing a reflection proposal is owner-only, like running, accepting and scheduling one', () => {
+  const editor = accessView(user('member'), grants, owners), owner = accessView(user('member'), [{ projectId: 'p-shared', role: 'owner' }], owners);
+  denied(() => authorizeResource(editor, 'insight.reflect.dismiss', 'write', { projectId: 'p-shared', id: 'r' }, snapshot), 'forbidden');
+  authorizeResource(owner, 'insight.reflect.dismiss', 'write', { projectId: 'p-shared', id: 'r' }, snapshot);
+});
+
+test('Review S2: the Wave 3 commands that start an agent turn record the caller as its actor', async () => {
+  const { TURN_COMMANDS } = await import('../src/rpc.ts');
+  for (const c of ['insight.reflect.run', 'insight.setup.interview', 'studio.skill.test', 'project.coordinator.start']) assert.ok(TURN_COMMANDS.has(c), c);
 });
