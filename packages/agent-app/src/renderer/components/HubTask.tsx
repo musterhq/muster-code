@@ -62,6 +62,8 @@ export function TaskView({ taskId, snapshot, onOpenTask, onOpenAgent, onOpenRun 
   const [error, setError] = useState('');
   const [tick, setTick] = useState(0);
   const [propertiesOpen, setPropertiesOpen] = useState(true);
+  // `]` shows or hides the properties (C3).
+  useEffect(() => { const on = () => setPropertiesOpen(v => !v); window.addEventListener('muster:toggle-properties', on); return () => window.removeEventListener('muster:toggle-properties', on); }, []);
   const summary = snapshot.tasks.find(t => t.id === taskId || t.key === taskId);
   const marker = summary ? `${summary.updatedAt}:${summary.status}:${summary.live}` : '';
   useEffect(() => {

@@ -5,14 +5,14 @@
  * They are on by default (Paperclip ships them off) and never fire while you are typing, while a dialog or menu is open, or
  * on the chat screen, where plain letters belong to the transcript and composer. The ⌘ shortcuts of the app menu are unchanged.
  *
- *   /  search            ?  this list           c  new task          [  toggle the sidebar
+ *   /  search            ?  this list           c  new task          [  toggle the sidebar   ]  toggle properties   u  undo the last Inbox action
  *   g i  Inbox   g d  Dashboard   g t  Tasks   g r  Roster   g o  Outputs   g l  Ledger   g p  Projects   g c  comment box
  *   j / k  next / previous row      Enter  open      Inbox rows: a or y dismiss, r mark read
  */
 export type ShortcutAction =
   | 'new-task' | 'search' | 'cheatsheet' | 'toggle-sidebar'
   | 'go-inbox' | 'go-dashboard' | 'go-tasks' | 'go-roster' | 'go-outputs' | 'go-ledger' | 'go-projects' | 'focus-comment'
-  | 'next-row' | 'prev-row';
+  | 'next-row' | 'prev-row' | 'toggle-properties' | 'undo';
 
 export const CHORD_MS = 1200;
 export const GO_KEYS: Record<string, ShortcutAction> = { i: 'go-inbox', d: 'go-dashboard', t: 'go-tasks', r: 'go-roster', o: 'go-outputs', l: 'go-ledger', p: 'go-projects', c: 'focus-comment' };
@@ -51,6 +51,8 @@ export function resolveShortcut(state: ChordState, e: ShortcutKey, now: number):
   if (e.shiftKey) return none;
   if (e.key === 'c') return { action: 'new-task', next: IDLE, consume: true };
   if (e.key === '[') return { action: 'toggle-sidebar', next: IDLE, consume: true };
+  if (e.key === ']') return { action: 'toggle-properties', next: IDLE, consume: true };
+  if (e.key === 'u') return { action: 'undo', next: IDLE, consume: true };
   if (e.key === 'j') return { action: 'next-row', next: IDLE, consume: true };
   if (e.key === 'k') return { action: 'prev-row', next: IDLE, consume: true };
   return none;
@@ -68,14 +70,14 @@ export interface CheatSection { title: string; entries: CheatEntry[] }
 export const CHEATSHEET: readonly CheatSection[] = [
   { title: 'Anywhere in Inbox, Tasks, Projects and the Ledger', entries: [
     { keys: ['/'], label: 'Search the page, or the whole workspace' }, { keys: ['⌘K'], label: 'Command palette: tasks, agents, projects, files' }, { keys: ['c'], label: 'New task' },
-    { keys: ['['], label: 'Show or hide the sidebar' }, { keys: ['?'], label: 'This list' },
+    { keys: ['['], label: 'Show or hide the sidebar' }, { keys: [']'], label: 'Show or hide the properties of the open task' }, { keys: ['u'], label: 'Undo the last Inbox action (dismiss or mark read)' }, { keys: ['?'], label: 'This list' },
   ] },
   { title: 'Go to', entries: [
     { keys: ['g', 'i'], label: 'Inbox', then: true }, { keys: ['g', 'd'], label: 'Dashboard', then: true }, { keys: ['g', 't'], label: 'Tasks', then: true }, { keys: ['g', 'r'], label: 'Roster', then: true },
     { keys: ['g', 'o'], label: 'Outputs', then: true }, { keys: ['g', 'l'], label: 'Ledger', then: true }, { keys: ['g', 'p'], label: 'Projects', then: true }, { keys: ['g', 'c'], label: 'Comment box of the open task', then: true },
   ] },
   { title: 'Lists', entries: [{ keys: ['j'], label: 'Next row' }, { keys: ['k'], label: 'Previous row' }, { keys: ['Enter'], label: 'Open the row' }] },
-  { title: 'Inbox', entries: [{ keys: ['a'], label: 'Dismiss the row' }, { keys: ['y'], label: 'Dismiss the row' }, { keys: ['r'], label: 'Mark the row read' }] },
+  { title: 'Inbox', entries: [{ keys: ['a'], label: 'Dismiss the row' }, { keys: ['y'], label: 'Dismiss the row' }, { keys: ['r'], label: 'Mark the row read' }, { keys: ['U'], label: 'Mark the row unread' }, { keys: ['x'], label: 'Dismiss a decision (a row that needs you)' }] },
   { title: 'Command palette', entries: [{ keys: ['OSS-12'], label: 'Type a task key to jump to it' }, { keys: ['>'], label: 'Commands' }, { keys: ['in:docs'], label: 'Limit the search: tasks, agents, projects, docs, comments, outputs, decisions' }] },
 ];
 

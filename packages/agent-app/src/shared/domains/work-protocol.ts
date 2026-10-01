@@ -212,6 +212,7 @@ export interface WorkCommands {
 
   'work.inbox.state': { input: Record<string, never>; output: { items: InboxMeta[] } };
   'work.inbox.read': { input: { items: { id: string; at: string }[] }; output: { ok: true } };
+  'work.inbox.unread': { input: { items: { id: string }[] }; output: { ok: true } };
   'work.inbox.snooze': { input: { id: string; at: string; until: string | null }; output: { ok: true } };
   'work.inbox.decideBy': { input: { id: string; date: string | null }; output: { ok: true } };
   /** Asks an agent (read-only, in the project's folder) for a recommendation on a decision. */
@@ -233,6 +234,6 @@ export const WORK_COMMANDS = {
   'work.votes.set': true, 'work.votes.list': true, 'work.votes.export': true,
   'work.outputs.state': true, 'work.outputs.status': true, 'work.outputs.seen': true,
   'work.links.list': true, 'work.links.add': true, 'work.links.refresh': true, 'work.links.scan': true, 'work.links.remove': true,
-  'work.inbox.state': true, 'work.inbox.read': true, 'work.inbox.snooze': true, 'work.inbox.decideBy': true, 'work.inbox.recommend': true,
+  'work.inbox.state': true, 'work.inbox.read': true, 'work.inbox.unread': true, 'work.inbox.snooze': true, 'work.inbox.decideBy': true, 'work.inbox.recommend': true,
   'work.summaries.list': true, 'work.summaries.save': true, 'work.summaries.remove': true, 'work.summaries.refresh': true, 'work.summaries.revision': true,
 } as const satisfies Record<keyof WorkCommands, true>;

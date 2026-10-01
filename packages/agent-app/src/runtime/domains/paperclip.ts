@@ -892,6 +892,7 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
         if (itemId.startsWith('ws:')) queueEmit(['inbox']);
         return { ok: true as const };
       },
+      'paperclip.inbox.restore': input => { dismissDb().prepare('DELETE FROM inbox_dismissals WHERE id = ?').run(id(input.id)); queueEmit(['inbox']); return { ok: true as const }; },
       'paperclip.inbox.dismissed': () => ({ items: [...dismissed()].map(([itemId, at]) => ({ id: itemId, at })) }),
     },
     dispose() { history.disposed = true; if (history.timer) timers.clearTimeout(history.timer); history.timer = null; offLedger(); closeSocket(); stopPoll(); if (live.emitTimer) timers.clearTimeout(live.emitTimer); live.emitTimer = null; },

@@ -106,3 +106,33 @@ export function nextWake(items: readonly ActivityItem[], meta: InboxMetaMap, now
   for (const i of items) { const m = meta.get(i.id); if (m?.snoozedUntil && m.snoozedFor === i.at) { const t = Date.parse(m.snoozedUntil); if (t > now && (next === null || t < next)) next = t; } }
   return next;
 }
+
+// ── Columns and the tidy policy (G36) ───────────────────────────────────────────────────────────────────────────
+export type InboxColumn = 'type' | 'detail' | 'age';
+export const INBOX_COLUMNS: Record<InboxColumn, string> = { type: 'Type', detail: 'Details', age: 'When' };
+export const COLUMNS_KEY = 'muster.inbox.columns';
+type Store = Pick<Storage, 'getItem' | 'setItem'>;
+export const readColumns = (storage: Pick<Storage, 'getItem'> | undefined): Record<InboxColumn, boolean> => {
+  const all = { type: true, detail: true, age: true };
+  try { const raw = storage?.getItem(COLUMNS_KEY); if (!raw) return all; const hidden = new Set(raw.split(',')); return { type: !hidden.has('type'), detail: !hidden.has('detail'), age: !hidden.has('age') }; } catch { return all; }
+};
+/** Stores what is hidden, so a new column added later shows by default. */
+export const writeColumns = (storage: Pick<Store, 'setItem'> | undefined, shown: Record<InboxColumn, boolean>): void => { try { storage?.setItem(COLUMNS_KEY, (Object.keys(shown) as InboxColumn[]).filter(c => !shown[c]).join(',')); } catch { /* it stays as it was */ } };
+
+/** What the Inbox tidies by itself: finished items after a while, and finished-run notices from agents marked read as they arrive. */
+export interface TidyPolicy { dismissDoneAfterDays: 0 | 1 | 3 | 7 | 30; readAgentNotices: boolean }
+export const DEFAULT_TIDY: TidyPolicy = { dismissDoneAfterDays: 0, readAgentNotices: false };
+export const TIDY_KEY = 'muster.inbox.tidy';
+export function readTidy(storage: Pick<Storage, 'getItem'> | undefined): TidyPolicy {
+  try { const v = JSON.parse(storage?.getItem(TIDY_KEY) ?? 'null') as Partial<TidyPolicy> | null; const d = Number(v?.dismissDoneAfterDays); return { dismissDoneAfterDays: ([1, 3, 7, 30] as number[]).includes(d) ? d as TidyPolicy['dismissDoneAfterDays'] : 0, readAgentNotices: v?.readAgentNotices === true }; } catch { return DEFAULT_TIDY; }
+}
+export const writeTidy = (storage: Pick<Store, 'setItem'> | undefined, p: TidyPolicy): void => { try { storage?.setItem(TIDY_KEY, JSON.stringify(p)); } catch { /* it stays as it was */ } };
+/** Which items the policy would dismiss and which it would mark read right now. Pure. A decision, a problem or a question is never tidied. */
+export function tidyPlan(items: readonly ActivityItem[], policy: TidyPolicy, isUnread: (i: ActivityItem) => boolean, now = Date.now()): { dismiss: ActivityItem[]; read: ActivityItem[] } {
+  const done = items.filter(i => i.bucket === 'done');
+  const cutoff = policy.dismissDoneAfterDays ? now - policy.dismissDoneAfterDays * 86_400_000 : null;
+  const dismiss = cutoff === null ? [] : done.filter(i => Date.parse(i.at) <= cutoff);
+  const gone = new Set(dismiss.map(i => i.id));
+  const read = policy.readAgentNotices ? done.filter(i => !gone.has(i.id) && i.source !== 'chat' && isUnread(i)) : [];
+  return { dismiss, read };
+}

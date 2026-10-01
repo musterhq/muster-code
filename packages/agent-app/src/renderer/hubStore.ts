@@ -135,8 +135,25 @@ export function useInboxDismissals(): ReadonlyMap<string, string> {
   }, []);
   return useSyncExternalStore(l => { dismissalListeners.add(l); return () => dismissalListeners.delete(l); }, () => dismissals);
 }
+// The last few Inbox actions, so `u` can take the latest back (C3).
+type InboxUndo = { kind: 'dismiss'; id: string; at: string; title: string } | { kind: 'read'; ids: string[]; count: number };
+const undoStack: InboxUndo[] = [];
+export function rememberInboxRead(ids: readonly string[]): void { if (ids.length) { undoStack.push({ kind: 'read', ids: [...ids], count: ids.length }); if (undoStack.length > 20) undoStack.shift(); } }
+export const canUndoInbox = (): boolean => undoStack.length > 0;
+/** Takes back the latest dismissal or mark-read. Returns what it did, or null when there is nothing to undo. */
+export async function undoInbox(): Promise<string | null> {
+  const last = undoStack.pop(); if (!last) return null;
+  if (last.kind === 'dismiss') {
+    const next = new Map(dismissals); next.delete(last.id); setDismissals(next);
+    try { await invoke('paperclip.inbox.restore', { id: last.id }); } catch (cause) { setDismissals(new Map(dismissals).set(last.id, last.at)); throw cause; }
+    return `Brought back “${last.title}”.`;
+  }
+  await invoke('work.inbox.unread', { items: last.ids.map(id => ({ id })) });
+  return last.count === 1 ? 'Marked it unread again.' : `Marked ${last.count} items unread again.`;
+}
 /** Hides an Inbox item until it changes. The chat, task or mail it points at is kept. */
-export function dismissInboxItem(item: { id: string; at: string }): Promise<void> {
+export function dismissInboxItem(item: { id: string; at: string; title?: string }, opts: { remember?: boolean } = {}): Promise<void> {
+  if (opts.remember !== false) { undoStack.push({ kind: 'dismiss', id: item.id, at: item.at, title: item.title ?? 'the item' }); if (undoStack.length > 20) undoStack.shift(); }
   const previous = dismissals.get(item.id);
   setDismissals(new Map(dismissals).set(item.id, item.at));
   return invoke('paperclip.inbox.dismiss', { id: item.id, at: item.at }).then(() => undefined, cause => {
