@@ -168,7 +168,7 @@ export class LocalWorkspace {
     const chats = new Set(task.attempts.map(a => a.chatId));
     let imported: ReturnType<ImportMeta['comments']> = []; try { imported = this.meta?.()?.comments(task.id) ?? []; } catch { imported = []; }
     const comments: WorkspaceComment[] = [
-      ...imported.map(c => ({ id: `pc:${c.sourceId}`, author: { kind: c.authorKind === 'agent' ? 'agent' as const : 'user' as const, id: null, label: c.authorLabel }, body: c.body, createdAt: c.createdAt, runId: c.runId })),
+      ...imported.map(c => ({ id: `pc:${c.sourceId}`, author: { kind: c.authorKind === 'agent' ? 'agent' as const : c.authorKind === 'system' ? 'system' as const : 'user' as const, id: null, label: c.authorLabel }, body: c.body, createdAt: c.createdAt, runId: c.runId })),
       ...read.work.activity.items.filter(a => a.refId === task.id && a.kind !== 'task.create' && a.actor !== 'import').map(a => ({ id: a.id, author: { kind: 'system' as const, id: null, label: a.actor || 'Muster' }, body: a.summary, createdAt: a.createdAt })),
       ...(mail?.messages ?? []).filter(m => (m.recipient.kind === 'taskRun' && m.recipient.id === task.id) || chats.has(m.sender.chatId ?? m.sender.id) || chats.has(m.recipient.chatId ?? m.recipient.id)).map(m => mailComment(m)),
     ].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
