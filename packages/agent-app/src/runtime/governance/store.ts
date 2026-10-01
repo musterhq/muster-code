@@ -53,7 +53,9 @@ export function clampHeartbeat(input: Partial<HeartbeatPolicy>, current: Heartbe
   if (!Number.isFinite(interval) || interval < HEARTBEAT_LIMITS.minIntervalSec || interval > HEARTBEAT_LIMITS.maxIntervalSec) throw new Error(`The heartbeat interval is between ${HEARTBEAT_LIMITS.minIntervalSec} seconds and ${HEARTBEAT_LIMITS.maxIntervalSec} seconds (24 hours).`);
   const gap = Math.round(Number(next.minGapSec));
   if (!Number.isFinite(gap) || gap < 0 || gap > HEARTBEAT_LIMITS.maxMinGapSec) throw new Error('The least time between wakes is 0 to 3,600 seconds.');
-  return { enabled: next.enabled === true, intervalSec: interval, wakeOnAssignment: next.wakeOnAssignment === true, wakeOnComment: next.wakeOnComment === true, wakeOnDecision: next.wakeOnDecision !== false, minGapSec: gap };
+  const cap = Math.round(Number(next.maxConcurrent ?? 0));
+  if (!Number.isFinite(cap) || cap < 0 || cap > HEARTBEAT_LIMITS.maxConcurrent) throw new Error(`Runs at once is 0 (no limit) to ${HEARTBEAT_LIMITS.maxConcurrent}.`);
+  return { enabled: next.enabled === true, intervalSec: interval, wakeOnAssignment: next.wakeOnAssignment === true, wakeOnComment: next.wakeOnComment === true, wakeOnDecision: next.wakeOnDecision !== false, minGapSec: gap, maxConcurrent: cap };
 }
 
 export class GovernanceStore {

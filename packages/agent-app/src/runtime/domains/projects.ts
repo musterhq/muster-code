@@ -364,7 +364,7 @@ export function createProjectsDomain(ctx: DomainContext): DomainModule {
     const { tasks: store } = open(), project = toDetails(row(projectId));
     if (project.archived) throw new Error('This Project is archived. Restore it before starting tasks.');
     const task = store.assertCanStartTask({ projectId, id: taskId, revision: rev });
-    const blocked = gov.gate(task);
+    const blocked = await gov.preflight(task);
     if (blocked) throw new Error(blocked);
     const previous = task.runChatId ? ctx.store.chat(task.runChatId) : undefined;
     if (previous && (ACTIVE.has(previous.status) || previous.recovery?.kind === 'recovery-needed')) throw new Error('The prior agent attempt may still be active. Open its linked chat and resolve it before running this task again.');

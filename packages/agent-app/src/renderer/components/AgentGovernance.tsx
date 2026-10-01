@@ -112,6 +112,7 @@ function RuntimeTab({ projectId, memberId, agent, view, snapshot, onChanged }: {
       <Check label="Wake when a task is assigned to it" checked={hb.wakeOnAssignment} disabled={busy} onChange={wakeOnAssignment => setHb({ ...hb, wakeOnAssignment })}/>
       <Check label="Wake on a comment or @mention" checked={hb.wakeOnComment} disabled={busy} onChange={wakeOnComment => setHb({ ...hb, wakeOnComment })}/>
       <Check label="Wake on a decision" hint="(review verdicts and answers reach it with their note)" checked={hb.wakeOnDecision} disabled={busy} onChange={wakeOnDecision => setHb({ ...hb, wakeOnDecision })}/>
+      <label className="gov-field"><span>Runs at once</span><span className="gov-inline"><input className="ws-input gov-num" type="number" min={0} max={8} aria-label="Most tasks at once" value={hb.maxConcurrent} disabled={busy} onChange={e => setHb({ ...hb, maxConcurrent: Number(e.target.value) })}/> tasks · 0 means no limit beyond the project’s</span></label>
       <label className="gov-field"><span>Least time between wakes</span><span className="gov-inline"><input className="ws-input gov-num" type="number" min={0} max={3600} aria-label="Least seconds between wakes" value={hb.minGapSec} disabled={busy} onChange={e => setHb({ ...hb, minGapSec: Number(e.target.value) })}/> seconds · wakes inside it merge into one run</span></label>
     </div>
     <div className="gov-actions"><span className="gov-grow"/><button type="button" className="settings-button" disabled={busy || !dirty} onClick={() => void save()}>Save</button></div>

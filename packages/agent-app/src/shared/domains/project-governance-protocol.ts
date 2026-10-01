@@ -29,9 +29,11 @@ export interface HeartbeatPolicy {
   wakeOnDecision: boolean;
   /** The least time between two wakes of this agent, in seconds. Wakes inside it are coalesced and delivered once. */
   minGapSec: number;
+  /** Most task runs this agent works on at once (C15). 0: no limit beyond the project's concurrency. */
+  maxConcurrent: number;
 }
-export const DEFAULT_HEARTBEAT: HeartbeatPolicy = { enabled: false, intervalSec: 3600, wakeOnAssignment: false, wakeOnComment: false, wakeOnDecision: true, minGapSec: 30 };
-export const HEARTBEAT_LIMITS = { minIntervalSec: 60, maxIntervalSec: 86_400, maxMinGapSec: 3_600 } as const;
+export const DEFAULT_HEARTBEAT: HeartbeatPolicy = { enabled: false, intervalSec: 3600, wakeOnAssignment: false, wakeOnComment: false, wakeOnDecision: true, minGapSec: 30, maxConcurrent: 0 };
+export const HEARTBEAT_LIMITS = { minIntervalSec: 60, maxIntervalSec: 86_400, maxMinGapSec: 3_600, maxConcurrent: 8 } as const;
 
 export type WakeStatus = 'started' | 'coalesced' | 'throttled' | 'deferred' | 'skipped' | 'refused' | 'storm';
 export interface WakeRecord {
@@ -154,8 +156,10 @@ export interface GovernanceSettings {
   watchdogAgentId: string | null;
   /** Wakes per minute across the project before the storm breaker trips. */
   stormPerMinute: number;
+  /** At 100% of the project's monthly budget, no new run starts (C28). Running work finishes. */
+  budgetHardStop: boolean;
 }
-export const DEFAULT_GOVERNANCE: GovernanceSettings = { runComment: 'require', maxContinuations: 2, maxRetries: 2, defaultPolicy: null, watchdogAgentId: null, stormPerMinute: 12 };
+export const DEFAULT_GOVERNANCE: GovernanceSettings = { runComment: 'require', maxContinuations: 2, maxRetries: 2, defaultPolicy: null, watchdogAgentId: null, stormPerMinute: 12, budgetHardStop: true };
 
 // ── Watchdogs, monitors, breakers (C17) ──────────────────────────────────────
 export type WatchdogState = 'open' | 'reviewing' | 'accepted' | 'reopened' | 'reassigned' | 'dismissed';
@@ -165,7 +169,7 @@ export type MonitorPolicy = 'wake_owner' | 'create_recovery_task' | 'escalate';
 export const MONITOR_POLICY_LABEL: Record<MonitorPolicy, string> = { wake_owner: 'Wake the owner', create_recovery_task: 'Create a recovery task', escalate: 'Escalate to you' };
 export type MonitorState = 'scheduled' | 'triggered' | 'cleared' | 'escalated';
 export interface TaskMonitor { id: string; projectId: string; taskId: string; key: string; title: string; dueAt: string; policy: MonitorPolicy; attempts: number; maxAttempts: number; note: string; state: MonitorState; createdAt: string; lastFiredAt: string | null }
-export type BreakerKind = 'wake_storm' | 'no_progress' | 'review_loop';
+export type BreakerKind = 'wake_storm' | 'no_progress' | 'review_loop' | 'budget';
 export interface BreakerEvent { id: string; projectId: string; kind: BreakerKind; subject: string; summary: string; evidence: string[]; state: 'open' | 'resumed' | 'dismissed'; createdAt: string; memberId: string | null }
 
 // ── Secrets (G23) ────────────────────────────────────────────────────────────

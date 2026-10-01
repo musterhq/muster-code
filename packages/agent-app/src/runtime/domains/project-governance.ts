@@ -19,6 +19,7 @@ import {
   type AgentCapabilities, type AgentGovernance, type AgentGovernanceView, type BundleFile, type Decision, type ExecutionPolicy, type GovernanceSettings, type GovernanceState, type HoldMode, type HoldRelease, type Liveness,
   type MonitorPolicy, type PolicyInput, type RecoveryAction, type RecoveryItem, type RunReason, type StopMode, type TaskHold, type TaskMonitor, type TaskStageState, type Watchdog, type WatchdogVerdict, type WakeRecord,
 } from '../../shared/domains/project-governance-protocol.ts';
+import { budgetUse } from '../../shared/domains/paperclip-protocol.ts';
 import { redactSecrets } from '../secret-redaction.ts';
 import { activeSecretStore, SecretStore } from '../secret-store.ts';
 import { isAdapterProvider } from '../adapters/index.ts';
@@ -101,10 +102,40 @@ export function createGovernance(ctx: DomainContext, deps: GovernanceDeps) {
   }
   const heldMessage = (h: NonNullable<ReturnType<typeof holdFor>>) => `Held: ${h.mode === 'cancel' ? 'cancelled' : 'paused'} with ${h.rootKey || 'its parent task'}${h.rootTitle ? ` “${clip(h.rootTitle, 60)}”` : ''}${h.reason ? ` (${clip(h.reason, 80)})` : ''}. Release the hold first.`;
   /** The reason a task may not start now, or null. Called by dispatch, the wake queue and the scheduler. */
-  function gate(t: Pick<ProjectTaskRecord, 'id' | 'projectId'>): string | null {
+  function gate(t: Pick<ProjectTaskRecord, 'id' | 'projectId'> & { owner?: TaskOwner }): string | null {
     const h = holdFor(t);
-    return h ? heldMessage(h) : null;
+    if (h) return heldMessage(h);
+    const full = t.owner ? t : tasks().getTask(t.id), mid = full?.owner ? ownerMemberId(full as ProjectTask) : null;
+    if (mid) {
+      // C15: an agent works on at most `maxConcurrent` tasks at once.
+      const cap = agentGov(t.projectId, mid).heartbeat.maxConcurrent;
+      if (cap > 0) { const live = taskList(t.projectId).filter(x => x.id !== t.id && x.owner.kind === 'agent' && x.owner.id === mid && LIVE.has(x.state)).length; if (live >= cap) return `${nameOf(t.projectId, mid)} is already working on ${live} ${live === 1 ? 'task' : 'tasks'} (the limit is ${cap}). It can take another when one finishes.`; }
+    }
+    const b = budgetBlock.get(t.projectId);
+    if (b) return b;
+    return null;
   }
+  // C28: at 100% of the project's monthly budget no new run starts. The spend is read at most once a minute, and again after each run.
+  const budgetBlock = new Map<string, string>(), budgetAt = new Map<string, number>(), budgetDirty = new Set<string>(), budgetLater = new Set<unknown>();
+  async function refreshBudget(projectId: string, force = false): Promise<void> {
+    if (!force && !budgetDirty.has(projectId) && now() - (budgetAt.get(projectId) ?? 0) < 60_000) return;
+    budgetDirty.delete(projectId);
+    budgetAt.set(projectId, now());
+    try {
+      const t = team().settings(projectId);
+      if (!settings(projectId).budgetHardStop || (!t.monthlyBudgetUsd && !t.monthlyBudgetTokens)) { budgetBlock.delete(projectId); return; }
+      const dash = await ctx.invoke('paperclip.dashboard', { projectId });
+      const use = budgetUse({ usd: t.monthlyBudgetUsd, tokens: t.monthlyBudgetTokens ?? null }, { usd: dash.spend.usd, tokens: dash.spend.tokens });
+      const open = gov().openBreaker(projectId, 'budget', projectId);
+      if (use && use.ratio >= 1) {
+        const fmt = (n: number) => use.unit === 'usd' ? `$${n.toFixed(2)}` : `${Math.round(n).toLocaleString('en-US')} tokens`;
+        budgetBlock.set(projectId, `This project reached its monthly budget (${fmt(use.used)} of ${fmt(use.limit)}), so no new run starts. Raise the budget in the project's Budget tab to continue.`);
+        if (!open) { gov().addBreaker({ projectId, kind: 'budget', subject: projectId, summary: `${deps.details(projectId).name} reached its monthly budget (${fmt(use.used)} of ${fmt(use.limit)}). New runs are blocked; running work finishes.`, evidence: [] }); record(projectId, 'task.breaker', `Monthly budget reached: new runs are blocked until the budget is raised.`, null, 'system'); deps.changed(projectId); }
+      } else { budgetBlock.delete(projectId); if (open) { gov().setBreakerState(open.id, 'resumed'); deps.changed(projectId); } }
+    } catch { /* an unreadable spend never blocks work */ }
+  }
+  /** Before every dispatch: holds, per-agent concurrency and the budget stop. */
+  async function preflight(t: ProjectTask): Promise<string | null> { await refreshBudget(t.projectId); return gate(t); }
   const held = (t: ProjectTask): boolean => Boolean(holdFor(t));
   const projectHold = (projectId: string): string | null => {
     const s = tasks().schedule(projectId);
@@ -793,7 +824,7 @@ export function createGovernance(ctx: DomainContext, deps: GovernanceDeps) {
       const fresh = tasks().getTask(task.id);
       if (status === 'completed' && fresh?.state === 'implemented') await startStage(fresh);
     } finally {
-      try { autoRelease(projectId); await wakeQueue().released(projectId, task.id); scheduleEval(projectId); } catch { /* housekeeping never fails a run */ }
+      try { autoRelease(projectId); budgetDirty.add(projectId); const later = timers.set(() => { budgetLater.delete(later); void refreshBudget(projectId, true); }, 1500); budgetLater.add(later); await wakeQueue().released(projectId, task.id); scheduleEval(projectId); } catch { /* housekeeping never fails a run */ }
       deps.changed(projectId, task.id);
     }
   }
@@ -1023,10 +1054,12 @@ export function createGovernance(ctx: DomainContext, deps: GovernanceDeps) {
       const projectId = project(input), cur = settings(projectId), next: GovernanceSettings = { ...cur };
       if (input.runComment !== undefined) { if (!['off', 'notice', 'require'].includes(String(input.runComment))) throw new Error('Choose off, notice or require.'); next.runComment = input.runComment as GovernanceSettings['runComment']; }
       for (const k of ['maxContinuations', 'maxRetries'] as const) if (input[k] !== undefined) { const v = Number(input[k]); if (!Number.isSafeInteger(v) || v < 0 || v > 3) throw new Error(`${k === 'maxRetries' ? 'Retries' : 'Continuations'} are 0 to 3.`); next[k] = v; }
+      if (input.budgetHardStop !== undefined) { next.budgetHardStop = input.budgetHardStop === true; budgetAt.delete(projectId); }
       if (input.stormPerMinute !== undefined) { const v = Number(input.stormPerMinute); if (!Number.isSafeInteger(v) || v < 2 || v > 120) throw new Error('The wake storm limit is 2 to 120 per minute.'); next.stormPerMinute = v; }
       if (input.watchdogAgentId !== undefined) { if (input.watchdogAgentId === null || input.watchdogAgentId === '') next.watchdogAgentId = null; else { const m = agentMember(projectId, String(input.watchdogAgentId)); next.watchdogAgentId = m.id; } }
       if (input.defaultPolicy !== undefined) next.defaultPolicy = normalizePolicy(input.defaultPolicy as PolicyInput | null, projectId);
       const out = gov().setSettings(projectId, next);
+      void refreshBudget(projectId, true);
       record(projectId, 'project.governance', `Updated run policy: ${Object.keys(input).filter(k => k !== 'projectId').join(', ')}.`, null, 'user');
       deps.changed(projectId); return out;
     },
@@ -1149,7 +1182,7 @@ export function createGovernance(ctx: DomainContext, deps: GovernanceDeps) {
   /** An agent was removed or revoked: its timer stops. */
   const memberGone = (projectId: string, memberId: string) => disarm(projectId, memberId);
   function dispose() {
-    disposed = true; offCommands?.(); for (const h of assignTimers) timers.clear(h); assignTimers.clear(); queue?.dispose();
+    disposed = true; for (const h of budgetLater) timers.clear(h); budgetLater.clear(); offCommands?.(); for (const h of assignTimers) timers.clear(h); assignTimers.clear(); queue?.dispose();
     for (const h of heartbeatTimers.values()) timers.clear(h); heartbeatTimers.clear();
     for (const h of retryTimers.values()) timers.clear(h); retryTimers.clear();
     for (const h of evalTimers.values()) timers.clear(h); evalTimers.clear();
@@ -1158,7 +1191,7 @@ export function createGovernance(ctx: DomainContext, deps: GovernanceDeps) {
   }
   return {
     handlers: commands() as unknown as Record<string, DomainHandler>,
-    gate, held, clampAccess, beforeSend, prepareDispatch, taskLines, runOptions, decideTool, started, settled, idle, purgeTask, purgeProject, memberGone, taskView, holdFor, evaluate: scheduleEval, armAll, dispose,
+    gate, preflight, held, clampAccess, beforeSend, prepareDispatch, taskLines, runOptions, decideTool, started, settled, idle, purgeTask, purgeProject, memberGone, taskView, holdFor, evaluate: scheduleEval, armAll, dispose,
     /** For tests: the stores and queues behind the commands. */
     internals: { gov, wakeQueue, heartbeatTimers, retryTimers, tick, fireMonitors, evaluateWatchdogs, readyTaskFor, recoveryItems, effectivePolicy, startStage },
   };

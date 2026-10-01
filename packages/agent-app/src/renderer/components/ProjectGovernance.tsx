@@ -22,6 +22,8 @@ import './governance.css';
 const errorText = (cause: unknown) => cause instanceof Error ? cause.message : String(cause);
 const RECOVERY_LABEL: Record<RecoveryAction, string> = { rerun: 'Re-run', block: 'Mark blocked', cancel: 'Cancel task', dismiss: 'Dismiss', resume: 'Resume' };
 
+const Check2 = ({ label, checked, disabled, onChange }: { label: string; checked: boolean; disabled?: boolean; onChange: (v: boolean) => void }) => <label className="pp-check gov-check"><input type="checkbox" checked={checked} disabled={disabled} onChange={e => onChange(e.target.checked)}/>{label}</label>;
+
 export function useGovernance(projectId: string): { state: GovernanceState | null; error: string; reload: () => void } {
   const [state, setState] = useState<GovernanceState | null>(null);
   const [error, setError] = useState('');
@@ -80,6 +82,7 @@ export function GovernanceSection({ projectId, snapshot }: { projectId: string; 
         <label className="gov-field"><span>Continue an empty or plan-only turn up to</span><span className="gov-inline"><input className="ws-input gov-num" type="number" min={0} max={3} aria-label="Continuations" defaultValue={s.maxContinuations} key={`c${s.maxContinuations}`} disabled={busy} onBlur={e => { const v = Number(e.target.value); if (v !== s.maxContinuations) void run(() => invoke('project.gov.settings.set', { projectId, maxContinuations: v }), 'Run policy saved.'); }}/> times</span></label>
         <label className="gov-field"><span>Retry a temporary failure up to</span><span className="gov-inline"><input className="ws-input gov-num" type="number" min={0} max={3} aria-label="Retries" defaultValue={s.maxRetries} key={`r${s.maxRetries}`} disabled={busy} onBlur={e => { const v = Number(e.target.value); if (v !== s.maxRetries) void run(() => invoke('project.gov.settings.set', { projectId, maxRetries: v }), 'Run policy saved.'); }}/> times</span></label>
         <label className="gov-field"><span>Wake storm limit</span><span className="gov-inline"><input className="ws-input gov-num" type="number" min={2} max={120} aria-label="Wakes per minute" defaultValue={s.stormPerMinute} key={`s${s.stormPerMinute}`} disabled={busy} onBlur={e => { const v = Number(e.target.value); if (v !== s.stormPerMinute) void run(() => invoke('project.gov.settings.set', { projectId, stormPerMinute: v }), 'Run policy saved.'); }}/> wakes a minute, then the agent is paused</span></label>
+        <Check2 label="Stop new runs at 100% of the monthly budget" checked={s.budgetHardStop} disabled={busy} onChange={v => void run(() => invoke('project.gov.settings.set', { projectId, budgetHardStop: v }), 'Run policy saved.')}/>
       </div>
     </section>
     <section className="ws-section" aria-label="Default review policy"><h2 className="ws-group-title">Default review policy</h2>
@@ -88,7 +91,7 @@ export function GovernanceSection({ projectId, snapshot }: { projectId: string; 
     </section>
     <section className="ws-section" aria-label="Needs a decision"><h2 className="ws-group-title">Needs a decision<span>{open.length + state.recovery.length + holds.length + state.breakers.filter(b => b.state === 'open').length}</span></h2>
       {nothing && <p className="ws-board-empty">Nothing is stuck. Stopped subtrees, circuit-breaker events, holds and tasks with no next step appear here.</p>}
-      {state.breakers.filter(b => b.state === 'open').map(b => <div key={b.id} className="gov-card" role="group" aria-label={b.summary}><div className="gov-card-head"><StateChip tone="danger">{b.kind === 'wake_storm' ? 'Wake storm' : b.kind === 'review_loop' ? 'Review loop' : 'Breaker'}</StateChip><strong>{b.summary}</strong></div>
+      {state.breakers.filter(b => b.state === 'open').map(b => <div key={b.id} className="gov-card" role="group" aria-label={b.summary}><div className="gov-card-head"><StateChip tone="danger">{b.kind === 'wake_storm' ? 'Wake storm' : b.kind === 'review_loop' ? 'Review loop' : b.kind === 'budget' ? 'Budget' : 'Breaker'}</StateChip><strong>{b.summary}</strong></div>
         {b.evidence.length > 0 && <details><summary>Evidence</summary><ul>{b.evidence.map((e, i) => <li key={i}>{e}</li>)}</ul></details>}
         <div className="gov-actions"><span className="gov-grow"/><button type="button" className="settings-button secondary" disabled={busy} onClick={() => void run(() => invoke('project.breakers.resolve', { projectId, id: b.id, action: 'dismiss' }))}>Dismiss</button>
           <button type="button" className="settings-button" disabled={busy} onClick={() => void run(() => invoke('project.breakers.resolve', { projectId, id: b.id, action: 'resume' }), b.kind === 'wake_storm' ? 'Resumed.' : 'Done.')}>{b.kind === 'wake_storm' ? 'Resume the agent' : 'Acknowledge'}</button></div></div>)}

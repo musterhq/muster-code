@@ -69,6 +69,7 @@ export async function wave1(t: TestContext, opts: Wave1Options = {}) {
       const first = behaviour.get(input.chat.id)!;
       calls.push({ chatId: input.chat.id, cwd: input.cwd, prompt: input.prompt, text, turn, overrides: { ...(input.configOverrides ?? {}) }, permission: input.chat.permissionMode ?? '' });
       input.onTurnAccepted?.({ threadId: `thr-${input.chat.id}`, turnId: `turn-${turn}`, dispatchState: 'dispatched' });
+      input.onEvent('thread/tokenUsage/updated', { tokenUsage: { total: { inputTokens: 1200 * turn, cachedInputTokens: 0, outputTokens: 300 * turn, reasoningOutputTokens: 0 }, last: { inputTokens: 1200, cachedInputTokens: 0, outputTokens: 300, reasoningOutputTokens: 0 } } });
       const done = (finalMessage: string) => ({ status: 'completed' as const, finalMessage, dispatchState: 'dispatched' as const });
       const touch = async (name: string, body: string) => {
         await writeFile(join(input.cwd, name), body);

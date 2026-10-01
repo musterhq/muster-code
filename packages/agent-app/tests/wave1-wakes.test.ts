@@ -127,7 +127,7 @@ test('C14: wake flags are stored per agent and defaults are conservative', async
   const h = await wave1(t);
   const cto = await h.member('CTO');
   const view = await h.s.invoke('project.agent.gov.get', { projectId: h.project.id, memberId: cto.id });
-  assert.deepEqual(view.governance.heartbeat, { enabled: false, intervalSec: 3600, wakeOnAssignment: false, wakeOnComment: false, wakeOnDecision: true, minGapSec: 30 });
+  assert.deepEqual(view.governance.heartbeat, { enabled: false, intervalSec: 3600, wakeOnAssignment: false, wakeOnComment: false, wakeOnDecision: true, minGapSec: 30, maxConcurrent: 0 });
   const out = await h.s.invoke('project.agent.gov.set', { projectId: h.project.id, memberId: cto.id, heartbeat: { wakeOnComment: true, wakeOnAssignment: true } });
   assert.equal(out.heartbeat.wakeOnComment, true);
   const act = await h.activity('member.access');
@@ -154,4 +154,17 @@ test('C14: wake on assignment and wake on comment follow the agent’s policy an
   assert.ok(runs.some(r => r.reason === 'mention'), 'an @mention of the owner is a mention wake');
   assert.ok(h.calls.some(c => /changelog line/.test(c.text)), 'the comment reaches the woken run');
   void quiet;
+});
+
+test('C15: an agent’s concurrency limit refuses a second start until a run finishes', async t => {
+  const h = await wave1(t);
+  const cto = await h.member('CTO');
+  await h.s.invoke('project.agent.gov.set', { projectId: h.project.id, memberId: cto.id, heartbeat: { maxConcurrent: 1 } });
+  const a = await h.addTask('W1-SLOW first', { kind: 'agent', id: cto.id }), b = await h.addTask('Second', { kind: 'agent', id: cto.id });
+  await h.start(a.id); await until(async () => (await h.state(a.id)) === 'running', 'first running');
+  const cur = await h.task(b.id);
+  await assert.rejects(h.s.invoke('project.tasks.dispatch', { projectId: h.project.id, id: b.id, revision: cur.revision }), /already working on 1 task \(the limit is 1\)/);
+  await h.s.invoke('project.tasks.stop', { projectId: h.project.id, id: a.id, mode: 'keep' }); await h.settled(a.id);
+  assert.ok((await h.start(b.id)).chatId);
+  await assert.rejects(h.s.invoke('project.agent.gov.set', { projectId: h.project.id, memberId: cto.id, heartbeat: { maxConcurrent: 99 } }), /Runs at once/);
 });
