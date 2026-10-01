@@ -215,3 +215,16 @@ test('S36 a failed run keeps the provider’s own error, so the Inbox can say it
   assert.match(item.why, /rate_limited: scripted failure/, 'the provider’s message, not a generic sentence');
   assert.match(snap.runs.find(r => r.taskId === task.id)!.error ?? '', /rate_limited/);
 });
+
+test('S37 a failed task can be started again once its run settled', async t => {
+  const { s, project, member, state } = await service(t);
+  const cto = await member('CTO');
+  const task = await s.invoke('paperclip.task.create', { title: 'Flaky job', description: 'E2E-FAIL', projectId: project.id, assigneeId: `member:${cto.id}`, start: true });
+  assert.ok(task.started, task.startError ?? 'not started');
+  await until(async () => await state(task.id) === 'failed', 'failed');
+  const detail = await s.invoke('paperclip.task', { id: task.id });
+  assert.equal(detail.runs[0].chatId, task.started!.chatId, 'the thread knows the run chat, for its Open run chat link');
+  const again = await s.invoke('paperclip.task.start', { taskId: task.id });
+  assert.ok(again.chatId && again.chatId !== task.started!.chatId, 'a new run starts; no "may still be active" dead end');
+  await until(async () => await state(task.id) === 'failed', 'second run settled');
+});

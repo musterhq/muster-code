@@ -247,6 +247,7 @@ function Properties({ detail, snapshot, onOpenTask, onClose, onChanged }: { deta
       <dl>
         <Row label="Live run">{task.live ? <LiveCount count={1}/> : <span className="ws-faint">None</span>}</Row>
         <Row label="Last run">{lastRun ? <span className="ws-inline" title={explainRunError(lastRun.error) ?? undefined}><StateChip tone={runTone(lastRun.status)}>{RUN_STATE_LABEL[lastRun.status]}</StateChip><span className="ws-ellipsis" title={exactTime(lastRun.createdAt)}>{lastRun.finishedAt ? `${duration(lastRun.startedAt, lastRun.finishedAt) || '0s'} · ${agoLabel(lastRun.finishedAt)}` : agoLabel(lastRun.createdAt)}</span></span> : <span className="ws-faint">None</span>}</Row>
+        {lastRun?.chatId && <Row label="Run chat"><button type="button" className="ws-link" onClick={() => { void selectChat(lastRun.chatId!); closeSettings(); }}>Open run chat</button></Row>}
         <Row label="Runs">{detail.runs.length || <span className="ws-faint">None</span>}</Row>
       </dl>
       {task.source === 'local' && task.assigneeId !== 'user:local' && !task.live && task.status !== 'done' && task.status !== 'cancelled' && <StartRun taskId={task.id} owner={task.assigneeLabel} onStarted={onChanged}/>}

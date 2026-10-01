@@ -45,7 +45,7 @@ const calls:{command:string;input:any}[]=[];
   if(command==='paperclip.task'&&input.id==='t15')return {task:snapshot.tasks[1],description:'',comments:[],runs:[],addressee:{id:'cto',label:'CTO'},composerNote:null,subtasks:[],blocking:[],receipts:[],mentionable:[],
     cards:[{kind:'needs',id:'interaction:int-q',at:now,from:'CTO',prompt:'Which scope?',detail:null,status:'pending',resolution:null,interactionId:'int-q',acceptLabel:null,rejectLabel:null,submitLabel:'Send',
       questions:[{id:'scope',prompt:'Which scope?',helpText:null,multi:false,allowOther:false,options:[{id:'mig',label:'Migration only',description:null},{id:'all',label:'Everything',description:null}]}]}]};
-  if(command==='paperclip.task'&&input.id==='t4')return {task:snapshot.tasks[2],description:'',comments:[],runs:[],addressee:{id:'qa',label:'QA'},composerNote:null,subtasks:[],blocking:[],receipts:[],mentionable:[],
+  if(command==='paperclip.task'&&input.id==='t4')return {task:snapshot.tasks[2],description:'',comments:[],runs:[{id:'a9',agentId:'qa',taskId:'t4',status:'failed',trigger:'user',source:'local',createdAt:now,startedAt:now,finishedAt:now,error:'The provider attempt failed: rate_limited',cancellable:false,chatId:'c-run'}],addressee:{id:'qa',label:'QA'},composerNote:null,subtasks:[],blocking:[],receipts:[],mentionable:[],
     cards:[{kind:'needs',id:'needs:q1',at:now,from:'QA',prompt:'Which colour should the banner be?',detail:null,status:'pending',resolution:null,interactionId:null,acceptLabel:null,rejectLabel:null,chatId:'c-run',
       pending:{id:'q1',chatId:'c-run',kind:'question',text:'The provider needs your input.',status:'pending',createdAt:now,data:{method:'item/tool/requestUserInput',questions:[{id:'color',header:'Colour',question:'Which colour should the banner be?',options:[{label:'Blue'},{label:'Green'}],allowCustomAnswer:false,multiSelect:false}]}}},
       // Imported issue approvals (S17): a read-only Approval card with its status.
@@ -117,6 +117,11 @@ openHub('task','t4');await delay(150);
   blue[props].onChange({target:blue,currentTarget:blue});await delay(40);
   await click([...runCard.querySelectorAll('button')].find(b=>/Send answer/.test(b.textContent!)));
   assert.deepEqual(calls.find(c=>c.command==='question.respond')?.input,{id:'q1',answers:{color:{answers:['Blue']}}},'answered through question.respond');
+  // S37: the failed run's chat is one click away from the task.
+  const open=[...document.querySelectorAll('.ws-properties button')].find(b=>b.textContent==='Open run chat');
+  assert.ok(open,'Open run chat on the Last run');
+  await click(open);
+  assert.ok(calls.some(c=>/^chat\.(select|timeline)$/.test(c.command)&&c.input.id==='c-run'),'it opens the run chat');
   const approvals=[...document.querySelectorAll('.ws-card-sys[data-kind="approval"]')];
   assert.deepEqual(approvals.map(a=>a.querySelector('.ws-card-sys-text')!.textContent),['Approval Ship the migration to production','Approval Rotate the API keys']);
   assert.deepEqual(approvals.map(a=>a.querySelector('.ws-chip')?.textContent),['pending','approved'],'each approval shows its status');
