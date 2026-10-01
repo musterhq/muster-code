@@ -556,3 +556,26 @@ test('upgrade M2: deleting an imported project and importing again restores all 
   await fx.service.invoke('paperclip.import',{companyId:COMPANY});
   assert.equal(await count(),first,'the re-created tasks carry every comment again');
 });
+
+test('review M3: an imported agent whose runner cannot be mapped (an adapter Muster has no provider for, or Claude without a model) blocks its task start instead of using the project default',async t=>{
+  const {raw,service}=await fixture(t);
+  // CTO runs a `process` adapter; every other agent is a model-less Claude Code agent.
+  for(const a of raw.agents as Json[]){if(a.name==='CTO'){a.adapterType='process';a.adapterConfig={command:'true'};}else if(a.adapterType==='claude_local'){a.adapterConfig={};}}
+  await service.invoke('paperclip.config.set',{mode:'local',companyId:COMPANY});
+  await service.invoke('paperclip.import',{companyId:COMPANY});
+  const ws=await service.invoke('paperclip.snapshot',{});
+  const owned=(name:string)=>ws.tasks.find(x=>x.assigneeLabel===name&&x.status!=='done'&&x.status!=='cancelled')!;
+  const cto=owned('CTO');
+  await service.invoke('paperclip.task.update',{taskId:cto.id,status:'todo'}).catch(()=>undefined);
+  await assert.rejects(()=>service.invoke('paperclip.task.start',{taskId:cto.id}),/Choose a model for CTO/);
+  const other=ws.tasks.find(x=>x.assigneeLabel==='CEO'||x.assigneeLabel==='COO'||x.assigneeLabel==='Planner')!;
+  await service.invoke('paperclip.task.update',{taskId:other.id,status:'todo'}).catch(()=>undefined);
+  await assert.rejects(()=>service.invoke('paperclip.task.start',{taskId:other.id}),/Choose a model for/);
+  assert.equal((await service.invoke('app.snapshot',undefined)).chats.filter(c=>!c.archived).length,0,'no live chat was left for either');
+  // Choosing a runner for the agent unblocks it.
+  const project=(await service.invoke('project.list',undefined)).find(p=>p.name==='OSS Manager')!;
+  const member=(await service.invoke('project.members.list',{projectId:project.id})).members.find(m=>m.name==='CTO')!;
+  await service.invoke('project.members.update',{projectId:project.id,id:member.id,runner:{providerId:'hybrow',model:'m'}});
+  const started=await service.invoke('paperclip.task.start',{taskId:cto.id});
+  assert.ok(started.chatId);
+});

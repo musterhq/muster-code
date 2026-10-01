@@ -381,6 +381,20 @@ export function createProjectsDomain(ctx: DomainContext): DomainModule {
     if (!grant.active || !grant.canDispatch || !grant.permissionMode) throw new Error(grant.reason ?? 'This member cannot start task runs.');
     if (!grant.folderIds.includes(target)) throw new Error(`The member requesting this run has no access to ${folderName(target)}.`);
     const access = gov.clampAccess(projectId, task.owner, clampPermission(clampPermission(task.permissionMode, store.schedule(projectId).permissionMode), grant.permissionMode)), prompt = taskPrompt(task), actor: Actor = trigger === 'user' ? 'user' : trigger;
+    // An agent imported from Paperclip with no runner Muster can map (an adapter it has no provider for, or Claude without a model) and
+    // none chosen since: it never starts on the project's default model. Stop and ask for a model.
+    if (held && !held.runner) {
+      let gap: string | null = null;
+      try {
+        const row = ctx.db().prepare("SELECT data FROM paperclip_import_map WHERE kind IN ('member', 'member:detached') AND muster_id = ? LIMIT 1").get(held.id) as { data: string } | undefined;
+        const imported = row ? (JSON.parse(row.data) as { runner?: { runtime?: string; providerId?: string | null; model?: string | null } }).runner : undefined;
+        if (imported && (!imported.providerId || !imported.model)) gap = imported.runtime ?? 'unknown';
+      } catch { /* not an imported agent */ }
+      if (gap !== null) {
+        store.record(projectId, 'task.runner-unavailable', `"${task.title}": ${held.name} came from Paperclip as a ${gap} agent with no model Muster can map, so it was not started.`, task.id, 'system');
+        throw new Error(`Choose a model for ${held.name}. It came from Paperclip as a ${gap} agent with no model Muster can map, and Muster won’t quietly use the project default. Open ${held.name} in the Roster, pick a runner and model, then start the task again.`);
+      }
+    }
     const chat = await ctx.invoke('chat.create', { folderId: target, projectId });
     // The owner's runner (a Roster agent's provider and model). One that is not available here never falls back to the project's
     // default (which may cost more): the start stops and asks you to choose a model for that agent.
