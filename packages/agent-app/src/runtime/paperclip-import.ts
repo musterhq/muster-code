@@ -15,6 +15,7 @@ import type { ProjectDetails, ProjectTaskView, TaskState } from '../shared/domai
 import type { ImportPlan, ImportTargets, PaperclipImportReport } from '../shared/domains/paperclip-protocol.ts';
 import type { Folder } from '../shared/protocol.ts';
 import { normalizeRemote } from './memory-identity.ts';
+import { blockerIds } from './paperclip-map.ts';
 import type { Invoke } from './workspace-local.ts';
 
 type Json = Record<string, unknown>;
@@ -160,7 +161,7 @@ export async function importFromPaperclip(companyId: string, deps: ImportDeps): 
   const company = arr(await get('/companies')).find(c => c.id === companyId);
   if (!company) throw new Error('That company is not on this Paperclip.');
   report.company = str(company.name) ?? 'Paperclip';
-  const [projectsJson, agentsJson, issuesJson, goalsJson, approvalsJson] = await Promise.all([get(`${base}/projects`), get(`${base}/agents`), get(`${base}/issues?limit=500`), get(`${base}/goals`).catch(() => []), get(`${base}/approvals`).catch(() => [])]);
+  const [projectsJson, agentsJson, issuesJson, goalsJson, approvalsJson] = await Promise.all([get(`${base}/projects`), get(`${base}/agents`), get(`${base}/issues?limit=500&includeBlockedBy=true`), get(`${base}/goals`).catch(() => []), get(`${base}/approvals`).catch(() => [])]);
   const agents = arr(agentsJson).filter(a => a.status !== 'terminated'), agentName = new Map(agents.map(a => [String(a.id), str(a.name) ?? 'Agent']));
   const issues = arr(issuesJson);
   const existing = new Map((await invoke('project.list', undefined)).map(p => [p.id, p]));
@@ -265,7 +266,7 @@ export async function importFromPaperclip(companyId: string, deps: ImportDeps): 
   }
   for (const issue of issues) {
     const mine = taskIds.get(String(issue.id));
-    const blockers = (Array.isArray(issue.blockedByIssueIds) ? issue.blockedByIssueIds : []).map(id => taskIds.get(String(id))).filter((t): t is { projectId: string; taskId: string } => Boolean(t) && t!.projectId === mine?.projectId).map(t => t.taskId);
+    const blockers = blockerIds(issue).map(id => taskIds.get(id)).filter((t): t is { projectId: string; taskId: string } => Boolean(t) && t!.projectId === mine?.projectId).map(t => t.taskId);
     if (!mine || !blockers.length) continue;
     const task = (await work(mine.projectId)).find(t => t.id === mine.taskId);
     if (task && blockers.some(b => !task.dependencies.includes(b))) await invoke('project.tasks.edit', { projectId: mine.projectId, id: task.id, revision: task.revision, patch: { dependencies: [...new Set([...task.dependencies, ...blockers])] } }).catch(cause => report.notes.push(`${str(issue.identifier)}: blockers not linked (${cause instanceof Error ? cause.message : String(cause)})`));

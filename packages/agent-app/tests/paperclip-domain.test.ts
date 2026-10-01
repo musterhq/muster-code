@@ -438,6 +438,16 @@ test('a Paperclip confirmation is answered from Muster: accept, or reject with a
   assert.deepEqual(h.server.calls.filter(c=>c.method==='POST').map(c=>`${c.url} ${JSON.stringify(c.body)}`),['/api/issues/RAG-1/interactions/int-1/accept {}','/api/issues/RAG-1/interactions/int-2/reject {"reason":"Keep the old flow"}']);
 });
 
+test('the linked view reads Paperclip blockers from blockedBy[].id and asks for them (S22)',async t=>{
+  const issue={id:'i-5',identifier:'RAG-5',title:'x',status:'blocked',blockedBy:[{id:'i-4',identifier:'RAG-4',title:'Docs',status:'blocked'},{id:'i-3'}]};
+  assert.deepEqual(mapIssue(issue as any,new Map(),new Set()).blockedByIds,['i-4','i-3']);
+  assert.deepEqual(mapIssue({...issue,blockedBy:undefined,blockedByIssueIds:['i-9']} as any,new Map(),new Set()).blockedByIds,['i-9'],'older payloads still work');
+  const h=await harness(t);
+  await h.call('paperclip.config.set',{mode:'local'});
+  await h.call('paperclip.snapshot');
+  assert.ok(h.server.calls.some(c=>/\/issues\?.*includeBlockedBy=true/.test(c.url)),'the snapshot asks Paperclip for blockers');
+});
+
 test('a Paperclip question set (ask_user_questions) is answerable in place through its respond endpoint (S13)',async t=>{
   const pending={id:'int-q',kind:'ask_user_questions',status:'pending',createdAt:now,createdByAgentId:'a-cto',payload:{version:1,submitLabel:'Send',questions:[
     {id:'scope',prompt:'Which scope?',selectionMode:'single',allowOther:true,options:[{id:'mig',label:'Migration only'},{id:'all',label:'Everything'}]},

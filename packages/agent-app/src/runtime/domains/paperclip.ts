@@ -154,7 +154,7 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
   const readPaperclip = async (api: PaperclipClient): Promise<PaperclipPart> => {
     const id = await companyId(api), base = `/companies/${encodeURIComponent(id)}`;
     const [issues, agentsJson, projectsJson, goalsJson, runsJson, liveJson, attentionJson] = await Promise.all([
-      api.get<unknown>(`${base}/issues?view=compact&limit=500`), api.get<unknown>(`${base}/agents`), api.get<unknown>(`${base}/projects`),
+      api.get<unknown>(`${base}/issues?view=compact&limit=500&includeBlockedBy=true`), api.get<unknown>(`${base}/agents`), api.get<unknown>(`${base}/projects`),
       api.get<unknown>(`${base}/goals`).catch(() => []), api.get<unknown>(`${base}/heartbeat-runs?limit=60&summary=true`),
       api.get<unknown>(`${base}/live-runs`).catch(() => []), api.get<unknown>(`${base}/attention`).catch(() => ({ items: [] })),
     ]);

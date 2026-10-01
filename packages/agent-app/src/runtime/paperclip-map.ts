@@ -24,6 +24,14 @@ export function mapAgent(a: Json): WorkspaceAgent {
   };
 }
 
+/** An issue's blockers. Paperclip lists them as `blockedBy: [{ id, … }]` (only with `includeBlockedBy=true`); older
+ *  payloads carry `blockedByIssueIds`. Both are read. */
+export function blockerIds(i: Json): string[] {
+  const listed = Array.isArray(i.blockedBy) ? (i.blockedBy as unknown[]).map(b => typeof b === 'string' ? b : str(obj(b).id)).filter((v): v is string => Boolean(v)) : [];
+  const legacy = Array.isArray(i.blockedByIssueIds) ? (i.blockedByIssueIds as unknown[]).filter((v): v is string => typeof v === 'string' && v.length > 0) : [];
+  return [...new Set([...listed, ...legacy])];
+}
+
 const PRIORITY = new Set<WorkspacePriority>(['critical', 'high', 'medium', 'low']);
 export function mapIssue(i: Json, agents: ReadonlyMap<string, WorkspaceAgent>, liveTaskIds: ReadonlySet<string>): WorkspaceTask {
   const status = (WORKSPACE_STATUSES as readonly string[]).includes(String(i.status)) ? i.status as WorkspaceStatus : 'todo';
@@ -37,7 +45,7 @@ export function mapIssue(i: Json, agents: ReadonlyMap<string, WorkspaceAgent>, l
     assigneeLabel: assigneeId ? agents.get(assigneeId)?.name ?? 'Agent' : str(i.assigneeUserId) ? 'You' : null,
     createdAt: iso(i.createdAt), updatedAt: iso(i.lastActivityAt, iso(i.updatedAt)), startedAt: str(i.startedAt), completedAt: str(i.completedAt) ?? str(i.cancelledAt),
     live: Boolean(i.activeRun) || liveTaskIds.has(id),
-    blockedByIds: Array.isArray(i.blockedByIssueIds) ? (i.blockedByIssueIds as unknown[]).filter((v): v is string => typeof v === 'string') : [],
+    blockedByIds: blockerIds(i),
     origin: creator ? agents.get(creator)?.name ?? 'Agent' : str(i.createdByUserId) ? 'You' : null,
   };
 }

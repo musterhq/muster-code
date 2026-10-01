@@ -41,13 +41,27 @@ function route(raw:Json,path:string,q:URLSearchParams):unknown{
   const base=`/companies/${COMPANY}`;
   if(path===`${base}/projects`)return raw.projects;
   if(path===`${base}/agents`)return raw.agents;
-  if(path===`${base}/issues`)return raw.issues;
+  // Like Paperclip: blockers come back as `blockedBy: [{id,…}]`, and only when asked for.
+  if(path===`${base}/issues`)return q.get('includeBlockedBy')==='true'?raw.issues.map((i:Json)=>({...i,blockedBy:(raw.blockers?.[i.identifier]??[]).map((key:string)=>{const b=raw.issues.find((x:Json)=>x.identifier===key);return {id:b.id,identifier:key,title:b.title,status:b.status};})})):raw.issues;
   if(path===`${base}/goals`)return raw.goals;
   if(path===`${base}/approvals`)return raw.approvals;
   const m=/^\/issues\/([^/]+)\/(comments|interactions|approvals)$/.exec(path);
   if(m)return raw.perIssue[decodeURIComponent(m[1])]?.[m[2]]??[];
   void q;return undefined;
 }
+
+test('blockers survive the import: includeBlockedBy and blockedBy[].id (S79)',async t=>{
+  const {raw,service,calls}=await fixture(t);
+  raw.blockers={'RAG-16':['RAG-15'],'RAG-5':['RAG-4','RAG-6']};
+  await service.invoke('paperclip.config.set',{mode:'local',companyId:COMPANY});
+  await service.invoke('paperclip.import',{companyId:COMPANY});
+  assert.ok(calls.some(c=>/\/issues\?.*includeBlockedBy=true/.test(c.path)),'blockers are asked for');
+  await service.invoke('paperclip.config.set',{mode:'off'});
+  const ws=await service.invoke('paperclip.snapshot',{});
+  const mine=(key:string)=>ws.tasks.find(x=>x.key===key)!;
+  assert.deepEqual(mine('RAG-16').blockedByIds,[mine('RAG-15').id],'the imported task keeps its blocker');
+  assert.deepEqual(mine('RAG-5').blockedByIds.sort(),[mine('RAG-4').id,mine('RAG-6').id].sort());
+});
 
 test('runner and git identity mapping: Claude Code keeps its model, Codex keeps its provider and model',()=>{
   assert.deepEqual(runnerFor({adapterType:'claude_local',adapterConfig:{model:'claude-opus-5-5'}}),{runtime:'Claude Code',providerId:'claude-code',model:'claude-opus-5-5',modelProvider:null});
