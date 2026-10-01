@@ -252,16 +252,18 @@ root2.unmount();
 // --- Import mapping --------------------------------------------------------------------------------------------------------------------
 const root3=createRoot(document.getElementById('root')!,{onUncaughtError:(e:unknown)=>{(errors as unknown[]).push(e);}});
 let imported=0,changed:[string,string]|null=null;
-root3.render(<ImportMapping plan={{company:{id:'c',name:'RagnarDataOps'},companies:[],muster:[{id:'p1',name:'OSSMANAGER',folders:['/work/oss']}],
-  projects:[{id:'pc1',name:'OSS Manager',repo:'github.com/hybrowlabs/oss-manager',localFolder:'/work/oss',taskCount:16,mappedTo:null,suggestion:{projectId:'p1',reason:'folder'}},{id:'pc2',name:'Muster',repo:null,localFolder:null,taskCount:0,mappedTo:null,suggestion:null}]} as any}
-  targets={{pc1:'p1',pc2:'new'}} busy={false} onChange={(a,b)=>{changed=[a,b];}} onCancel={()=>{}} onImport={()=>{imported++;}}/>);
+root3.render(<ImportMapping plan={{company:{id:'c',name:'RagnarDataOps'},companies:[],local:true,
+  projects:[{id:'pc1',name:'OSS Manager',repo:'github.com/hybrowlabs/oss-manager',localFolder:'/work/oss',taskCount:16,existing:'new'},{id:'pc2',name:'Muster',repo:null,localFolder:null,taskCount:0,existing:'imported'},{id:'pc3',name:'Docs',repo:null,localFolder:null,taskCount:2,existing:'detached'}]} as any}
+  targets={{pc1:'import',pc2:'import',pc3:'import'}} busy={false} onChange={(a,b)=>{changed=[a,b];}} onCancel={()=>{}} onImport={()=>{imported++;}}/>);
 await delay(60);
-assert.deepEqual(text('.ws-import-map .ws-row-title'),['OSS Manager','Muster']);
-assert.deepEqual(text('.ws-import-map .ws-chip'),['Matched: same folder']);
-assert.deepEqual([...(document.querySelector('.ws-import-map select') as HTMLSelectElement).options].map(o=>o.textContent),['Fill OSSMANAGER','New project','Don’t import']);
+assert.deepEqual(text('.ws-import-map .ws-row-title'),['OSS Manager','Muster','Docs']);
+assert.equal(text('.ws-import-map .ws-chip').length,0,'nothing is matched to your own projects');
+assert.match(text('.ws-import-map .ws-row-meta')[0],/new project/);assert.match(text('.ws-import-map .ws-row-meta')[1],/updated in place/);assert.match(text('.ws-import-map .ws-row-meta')[2],/your own project is left alone/);
+assert.deepEqual([...(document.querySelector('.ws-import-map select') as HTMLSelectElement).options].map(o=>o.textContent),['Import','Don’t import']);
+assert.deepEqual([...document.querySelectorAll('.ws-import-map select')[1].querySelectorAll('option')].map(o=>o.textContent),['Update','Don’t import']);
 await setValue(document.querySelectorAll('.ws-import-map select')[1],'skip');
 assert.deepEqual(changed,['pc2','skip']);
-await click(button(/^Import 2 projects$/));
+await click(button(/^Import 3 projects$/));
 assert.equal(imported,1);
 root3.unmount();
 

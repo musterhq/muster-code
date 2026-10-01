@@ -44,7 +44,10 @@ const calls:{command:string;input:any}[]=[];
   // A Muster task whose run is waiting on a question: the card carries the run's real question and answers it in place.
   if(command==='paperclip.task'&&input.id==='t15')return {task:snapshot.tasks[1],description:'',comments:[],runs:[],addressee:{id:'cto',label:'CTO'},composerNote:null,subtasks:[],blocking:[],receipts:[],mentionable:[],
     cards:[{kind:'needs',id:'interaction:int-q',at:now,from:'CTO',prompt:'Which scope?',detail:null,status:'pending',resolution:null,interactionId:'int-q',acceptLabel:null,rejectLabel:null,submitLabel:'Send',
-      questions:[{id:'scope',prompt:'Which scope?',helpText:null,multi:false,allowOther:false,options:[{id:'mig',label:'Migration only',description:null},{id:'all',label:'Everything',description:null}]}]}]};
+      questions:[{id:'scope',prompt:'Which scope?',helpText:null,multi:false,allowOther:false,options:[{id:'mig',label:'Migration only',description:null},{id:'all',label:'Everything',description:null}]}]},
+      {kind:'approval',id:'approval:ap9',at:now,title:'Hire Nova as Data Engineer',status:'pending',approvalId:'ap9',detail:'Role: engineer',requestedBy:'CTO',verbs:['approve','reject','request_revision']},
+      {kind:'document',id:'document:d1',at:now,key:'plan',title:'Q4 plan',format:'markdown',body:'# Plan\n\nShip it.',revision:3,revisions:[{number:3,summary:'add dashboard',at:now,by:'CTO'},{number:2,summary:'add ship',at:now,by:'CTO'},{number:1,summary:'first draft',at:now,by:null}]},
+      {kind:'workproduct',id:'workproduct:w1',at:now,type:'pull_request',title:'PR #12',status:'ready_for_review',provider:'github',url:'https://github.com/x/y/pull/12',summary:'Kafka'}]};
   if(command==='paperclip.task'&&input.id==='t4')return {task:snapshot.tasks[2],description:'',comments:[],runs:[{id:'a9',agentId:'qa',taskId:'t4',status:'failed',trigger:'user',source:'local',createdAt:now,startedAt:now,finishedAt:now,error:'The provider attempt failed: rate_limited',cancellable:false,chatId:'c-run'}],addressee:{id:'qa',label:'QA'},composerNote:null,subtasks:[],blocking:[],receipts:[],mentionable:[],
     cards:[{kind:'needs',id:'needs:q1',at:now,from:'QA',prompt:'Which colour should the banner be?',detail:null,status:'pending',resolution:null,interactionId:null,acceptLabel:null,rejectLabel:null,chatId:'c-run',
       pending:{id:'q1',chatId:'c-run',kind:'question',text:'The provider needs your input.',status:'pending',createdAt:now,data:{method:'item/tool/requestUserInput',questions:[{id:'color',header:'Colour',question:'Which colour should the banner be?',options:[{label:'Blue'},{label:'Green'}],allowCustomAnswer:false,multiSelect:false}]}}},
@@ -59,6 +62,7 @@ const calls:{command:string;input:any}[]=[];
   if(command==='paperclip.memory')return {scope:{kind:'repository',label:'oss-manager',folderId:'f'},repo:'github.com/hybrowlabs/oss-manager',query:'x',records:[],engine:'not-configured',note:'3 memories in the oss-manager folder, none about this task yet.'};
   if(command==='paperclip.comment')return {id:'m2',author:{kind:'user',id:null,label:'Board'},body:input.body,createdAt:now};
   if(command==='paperclip.interaction.respond')return {ok:true};
+  if(command==='paperclip.approval.decide')return {ok:true};
   if(command==='paperclip.task.update')return snapshot.tasks[0];
   if(command==='paperclip.ledger')return {entries:ledgerEntries,chain:{ok:true,entries:0,head:'0'.repeat(64),brokenAt:null}};
   if(command==='paperclip.ledger.backfill'){ledgerEntries=[historyEntry];return {chats:1,turns:1};}
@@ -149,6 +153,18 @@ openHub('task','t15');await delay(150);
   options[0][props].onChange({target:options[0],currentTarget:options[0]});await delay(40);
   await click([...qCard.querySelectorAll('button')].find(b=>/^Send$/.test(b.textContent!)));
   assert.deepEqual(calls.find(c=>c.command==='paperclip.interaction.respond'&&c.input.answers)?.input,{taskId:'t15',interactionId:'int-q',accept:true,answers:[{questionId:'scope',optionIds:['mig']}]});
+  // D9: a pending approval on the task is decided in its card; a plan shows its body and revision history; work products link out.
+  const approval=document.querySelector('.ws-card-sys[data-kind="approval"]')!;
+  assert.match(approval.textContent!,/Hire Nova as Data Engineer.*asked by CTO/);
+  assert.deepEqual([...approval.querySelectorAll('.ws-approval-actions button')].map(b=>b.textContent),['Reject','Request revision','Approve']);
+  await click([...approval.querySelectorAll('button')].find(b=>b.textContent==='Approve'));
+  assert.deepEqual(calls.find(c=>c.command==='paperclip.approval.decide')?.input,{id:'ap9',decision:'approve'});
+  const plan=document.querySelector('.ws-card-sys[data-kind="document"]')!;
+  assert.equal((plan as any).dataset.plan,'true');
+  assert.match(plan.textContent!,/Plan Q4 plan.*revision 3[\s\S]*Ship it\.[\s\S]*3 revisions[\s\S]*Revision 3 · add dashboard/);
+  const wp=document.querySelector('.ws-card-sys[data-kind="workproduct"]')!;
+  assert.equal(wp.querySelector('a')!.getAttribute('href'),'https://github.com/x/y/pull/12');
+  assert.match(wp.textContent!,/pull request PR #12 · github · Kafka.*ready for review/);
 }
 root.unmount();await delay(30);
 assert.equal(calls.filter(c=>c.command==='paperclip.watch').at(-1)!.input.visible,false,'leaving the hub stops live updates');

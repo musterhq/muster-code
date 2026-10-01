@@ -397,3 +397,72 @@ test('C14: labels, documents with revisions, work products and routines come acr
   const again=await ctx.service.invoke('paperclip.import',{companyId:COMPANY});void again;
   assert.equal((await ctx.service.invoke('automations.list',undefined)).filter(a=>a.name==='Weekly digest').length,1,'idempotent');
 });
+
+test('A9: a Custom URL on loopback is a Paperclip on this Mac: its folders are linked (a symlinked path finds the folder already added); a remote one never is',async t=>{
+  const {raw,service,repo}=await fixture(t);
+  const {symlinkSync}=await import('node:fs');
+  const link=join(dirname(repo),'checkout-link');symlinkSync(repo,link);
+  for(const p of raw.projects)if(p.codebase?.localFolder)p.codebase.localFolder=link;
+  const known=await service.invoke('folder.add',{path:repo});
+  await service.invoke('paperclip.config.set',{mode:'custom',baseUrl:'http://127.0.0.1:3101',companyId:COMPANY});
+  const plan=await service.invoke('paperclip.import.plan',{companyId:COMPANY});
+  assert.equal(plan.local,true,'the plan knows the folders are this Mac’s');
+  await service.invoke('paperclip.import',{companyId:COMPANY});
+  const oss=(await service.invoke('project.list',undefined)).find(p=>p.name==='OSS Manager')!;
+  assert.deepEqual(oss.folderIds,[known.id],'the symlinked path resolves to the folder you already added, not a second one');
+  assert.equal((await service.invoke('app.snapshot',undefined)).folders.length,1);
+  await service.invoke('paperclip.config.set',{mode:'custom',baseUrl:'https://pc.example.com',companyId:COMPANY});
+  assert.equal((await service.invoke('paperclip.import.plan',{companyId:COMPANY})).local,false,'a remote server’s folders are not this Mac’s');
+});
+
+/** A provider whose runs wait until they are stopped, so a task stays running while the test stops it. */
+async function slowFixture(t:TestContext){
+  const ctx=await fixture(t);
+  const waiting=new Map<string,()=>void>();
+  const provider:ProviderAdapter={info:()=>[{id:'hybrow',name:'Hybrow',available:true,identityMasked:'configured',models:[{id:'m',name:'m'}]}],
+    stop:async chatId=>{waiting.get(chatId)?.();return true;},dispose(){},
+    async run(input){input.onTurnAccepted?.({threadId:`thr-${input.chat.id}`,turnId:'t1',dispatchState:'dispatched'});await new Promise<void>(resolve=>{waiting.set(input.chat.id,resolve);});return {status:'completed',finalMessage:'stopped',dispatchState:'dispatched'};}};
+  const dataDir=dirname(ctx.repo);
+  await ctx.service.dispose();
+  const service=createAgentService({dataDir,provider,onEvent(){}});
+  t.after(()=>service.dispose());
+  return {...ctx,service};
+}
+const until=async<T>(fn:()=>Promise<T|undefined|false>,label:string)=>{for(let i=0;i<200;i++){const v=await fn();if(v)return v as T;await new Promise(r=>setTimeout(r,30));}throw new Error(`timed out waiting for ${label}`);};
+
+test('E6: the stop variants work on tasks of an imported project: Stop keeps it blocked, Stop and cancel cancels, Stop and mark done goes to review, never straight to Done',async t=>{
+  const {service}=await slowFixture(t);
+  await service.invoke('paperclip.config.set',{mode:'local',companyId:COMPANY});
+  await service.invoke('paperclip.import',{companyId:COMPANY});
+  const oss=(await service.invoke('project.list',undefined)).find(p=>p.name==='OSS Manager')!;
+  for(const member of (await service.invoke('project.members.list',{projectId:oss.id})).members.filter(m=>m.kind==='agent'&&m.id!=='agent'))await service.invoke('project.members.update',{projectId:oss.id,id:member.id,runner:{providerId:'hybrow',model:'m'}});
+  const ws=await service.invoke('paperclip.snapshot',{});
+  const state=async(id:string)=>(await service.invoke('project.work',{projectId:oss.id})).tasks.items.find(x=>x.id===id)!.state;
+  const run=async(key:string)=>{const task=ws.tasks.find(x=>x.key===key)!;await service.invoke('paperclip.task.update',{taskId:task.id,status:'todo'});await service.invoke('paperclip.task.start',{taskId:task.id});await until(async()=>(await state(task.id))==='running','running');return task;};
+  const stop=(id:string,mode:string)=>service.invoke('project.tasks.stop',{projectId:oss.id,id,mode} as never);
+  const settled=async(id:string)=>until(async()=>{const s=await state(id);return s!=='running'&&s!=='needs-input'?s:false;},'settled');
+  const keep=await run('RAG-12');await stop(keep.id,'keep');assert.equal(await settled(keep.id),'blocked');
+  const cancel=await run('RAG-13');await stop(cancel.id,'cancel');assert.equal(await settled(cancel.id),'cancelled');
+  const done=await run('RAG-11');await stop(done.id,'done');
+  const final=await settled(done.id);assert.ok(final==='implemented'||final==='review',`went to ${final}, never verified`);
+});
+
+test('E9: delegated child tasks show as Delegated cards on an imported parent, and a comment on an imported task is kept for its next run',async t=>{
+  const {service,raw}=await fixture(t);
+  await service.invoke('paperclip.config.set',{mode:'local',companyId:COMPANY});
+  await service.invoke('paperclip.import',{companyId:COMPANY});
+  await service.invoke('paperclip.config.set',{mode:'off'});
+  const ws=await service.invoke('paperclip.snapshot',{});
+  const parent=ws.tasks.find(x=>x.key==='RAG-1')!,child=ws.tasks.find(x=>x.key==='RAG-15')!;
+  assert.equal(child.parentId,parent.id);
+  const detail=await service.invoke('paperclip.task',{id:parent.id});
+  const card=detail.cards.find(c=>c.kind==='delegated'&&c.taskId===child.id)!;
+  assert.ok(card&&card.kind==='delegated'&&card.key==='RAG-15'&&card.from===parent.assigneeLabel&&card.to===child.assigneeLabel,'who handed which piece to whom');
+  // The comment backstop: no run is live, so the comment is kept in the project mailbox for the owner's next run, not lost.
+  const comment=await service.invoke('paperclip.comment',{taskId:child.id,body:'Please rebase first.'});
+  assert.match(comment.body,/Please rebase first\./);
+  const project=(await service.invoke('project.list',undefined)).find(p=>p.name==='OSS Manager')!;
+  const mail=await service.invoke('mailbox.list',{projectId:project.id,limit:50});
+  assert.ok(mail.messages.some(m=>/Please rebase first\./.test(m.body)&&m.state!=='acked'),'kept in the mailbox');
+  void raw;
+});
