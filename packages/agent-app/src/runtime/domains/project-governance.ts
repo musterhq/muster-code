@@ -130,7 +130,7 @@ export function createGovernance(ctx: DomainContext, deps: GovernanceDeps) {
     if (mid) {
       // C15: an agent works on at most `maxConcurrent` tasks at once.
       const cap = agentGov(t.projectId, mid).heartbeat.maxConcurrent;
-      if (cap > 0) { const live = taskList(t.projectId).filter(x => x.id !== t.id && x.owner.kind === 'agent' && x.owner.id === mid && LIVE.has(x.state)).length; if (live >= cap) return `${nameOf(t.projectId, mid)} is already working on ${live} ${live === 1 ? 'task' : 'tasks'} (the limit is ${cap}). It can take another when one finishes.`; }
+      if (cap > 0) { const reserved = [...reservations].filter(([task, who]) => task !== t.id && who === `${t.projectId}:${mid}`).length; const live = reserved + taskList(t.projectId).filter(x => x.id !== t.id && x.owner.kind === 'agent' && x.owner.id === mid && LIVE.has(x.state) && !reservations.has(x.id)).length; if (live >= cap) return `${nameOf(t.projectId, mid)} is already working on ${live} ${live === 1 ? 'task' : 'tasks'} (the limit is ${cap}). It can take another when one finishes.`; }
     }
     const b = budgetBlock.get(t.projectId);
     if (b) return b;
@@ -155,8 +155,16 @@ export function createGovernance(ctx: DomainContext, deps: GovernanceDeps) {
       } else { budgetBlock.delete(projectId); if (open) { gov().setBreakerState(open.id, 'resumed'); deps.changed(projectId); } }
     } catch { /* an unreadable spend never blocks work */ }
   }
-  /** Before every dispatch: holds, per-agent concurrency and the budget stop. */
-  async function preflight(t: ProjectTask): Promise<string | null> { await refreshBudget(t.projectId); return gate(t); }
+  // C15: a start that passed its checks holds a place until its dispatch finishes, so two starts racing through the awaits cannot both take the last slot.
+  const reservations = new Map<string, string>();
+  /** Before every dispatch: holds, per-agent concurrency and the budget stop. A start that passes holds its slot until `release`. */
+  async function preflight(t: ProjectTask): Promise<string | null> {
+    await refreshBudget(t.projectId);
+    const blocked = gate(t);
+    if (!blocked && t.owner.kind === 'agent') reservations.set(t.id, `${t.projectId}:${t.owner.id}`);
+    return blocked;
+  }
+  const release = (taskId: string) => { reservations.delete(taskId); };
   /** The scheduler asks once per candidate task: the index is shared for a second instead of rebuilt each time. */
   const heldMemo = new Map<string, { at: number; fn: (id: string) => HoldInfo | null }>();
   const held = (t: ProjectTask): boolean => {
@@ -1280,7 +1288,7 @@ export function createGovernance(ctx: DomainContext, deps: GovernanceDeps) {
   }
   return {
     handlers: commands() as unknown as Record<string, DomainHandler>,
-    gate, preflight, held, identityForFolder, clampAccess, beforeSend, prepareDispatch, taskLines, runOptions, decideTool, started, settled, idle, purgeTask, purgeProject, memberGone, taskView, holdFor, evaluate: scheduleEval, armAll, dispose,
+    gate, preflight, release, held, identityForFolder, clampAccess, beforeSend, prepareDispatch, taskLines, runOptions, decideTool, started, settled, idle, purgeTask, purgeProject, memberGone, taskView, holdFor, evaluate: scheduleEval, armAll, dispose,
     /** For tests: the stores and queues behind the commands. */
     internals: { gov, wakeQueue, heartbeatTimers, retryTimers, tick, fireMonitors, evaluateWatchdogs, readyTaskFor, recoveryItems, effectivePolicy, startStage },
   };

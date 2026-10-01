@@ -361,6 +361,9 @@ export function createProjectsDomain(ctx: DomainContext): DomainModule {
   const taskPrompt = (t: ProjectTask) => `Project task: ${t.title}\nTask ID: ${t.id}\nAcceptance criteria:\n${t.acceptance || '(not specified)'}\n\nWork only within the selected Project folder. Implement the task, report concrete changes and relevant verification, and do not claim the task is verified. Ask before expanding scope or taking an irreversible action.`;
   /** One agent run for a task: a scoped chat at the clamped permission mode, claimed on the task before the send. */
   async function dispatch(projectId: string, taskId: string, rev: number, trigger: 'user' | 'scheduler' | 'coordinator', folderId?: string, wake?: WakeInfo): Promise<{ chatId: string; runId: string }> {
+    try { return await dispatchOne(projectId, taskId, rev, trigger, folderId, wake); } finally { gov.release(taskId); }
+  }
+  async function dispatchOne(projectId: string, taskId: string, rev: number, trigger: 'user' | 'scheduler' | 'coordinator', folderId?: string, wake?: WakeInfo): Promise<{ chatId: string; runId: string }> {
     const { tasks: store } = open(), project = toDetails(row(projectId));
     if (project.archived) throw new Error('This Project is archived. Restore it before starting tasks.');
     const task = store.assertCanStartTask({ projectId, id: taskId, revision: rev });

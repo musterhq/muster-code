@@ -193,3 +193,15 @@ test('Review fix: the storm cap counts per agent, so a quiet agent is not paused
     assert.equal(f.store.getWake(waiting.id)!.status, 'storm');
   } finally { f.done(); }
 });
+
+test('Review fix: two starts racing for an agent with one slot cannot both take it', async t => {
+  const h = await wave1(t);
+  const cto = await h.member('CTO');
+  await h.s.invoke('project.agent.gov.set', { projectId: h.project.id, memberId: cto.id, heartbeat: { maxConcurrent: 1 } });
+  const a = await h.addTask('W1-SLOW race A', { kind: 'agent', id: cto.id }), b = await h.addTask('W1-SLOW race B', { kind: 'agent', id: cto.id });
+  const go = (task: { id: string; revision: number }) => h.s.invoke('project.tasks.dispatch', { projectId: h.project.id, id: task.id, revision: task.revision }).then(() => 'started', (e: Error) => e.message);
+  const results = await Promise.all([go(a), go(b)]);
+  assert.deepEqual(results.filter(r => r === 'started').length, 1, `exactly one start: ${JSON.stringify(results)}`);
+  assert.ok(results.some(r => /already working on 1 task \(the limit is 1\)/.test(r)));
+  for (const task of [a, b]) { const cur = await h.task(task.id); if (cur.state === 'running') await h.s.invoke('project.tasks.stop', { projectId: h.project.id, id: task.id, mode: 'keep' }); }
+});
