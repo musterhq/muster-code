@@ -79,6 +79,11 @@ test('G18: goals form a tree with ancestry, links for tasks and agents, no loops
   const linked = await h.s.invoke('work.goals.list', { projectId: h.project.id });
   assert.deepEqual(linked.links.map(l => `${l.kind}:${l.goalId === taskGoal.id ? 'task-goal' : 'team'}`).sort(), ['agent:team', 'task:task-goal']);
   assert.equal((await h.s.invoke('work.overlay', {})).goals[task.id], taskGoal.id);
+  // A run of that task is told the chain of goals, from the top.
+  h.sayWhen(/Why it matters/, 'Understood.');
+  await h.s.invoke('project.tasks.dispatch', { projectId: h.project.id, id: task.id, revision: (await h.task(task.id)).revision });
+  await h.settled(task.id);
+  assert.match(h.calls.at(-1)!.text, /This work serves the goal “Wave 2 lands”\. Why it matters, from the top: Make agents trustworthy › Ship 0\.3\.0 › Zero broken rows › Wave 2 lands\./);
   // A loop is refused; so is a parent from another project.
   await assert.rejects(h.s.invoke('work.goals.save', { projectId: h.project.id, id: proj.id, level: 'project', title: 'Ship 0.3.0', parentId: taskGoal.id }), /under itself/);
   const tree = buildGoalTree(linked.goals, linked.links);

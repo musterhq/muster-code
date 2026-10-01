@@ -15,7 +15,7 @@ import { Menu } from '@base-ui/react/menu';
 import { Archive, ArchiveRestore, Clipboard, Download, FolderClosed, MoreHorizontal, Settings2, SquarePen, Trash2 } from 'lucide-react';
 import React, { useEffect, useMemo, useState } from 'react';
 import type { Chat, Folder } from '../../shared/protocol';
-import type { DashboardData, WorkspaceSnapshot } from '../../shared/domains/paperclip-protocol';
+import type { DashboardData, WorkspaceProject, WorkspaceSnapshot } from '../../shared/domains/paperclip-protocol';
 import { budgetUse, OPEN_STATUSES } from '../../shared/domains/paperclip-protocol';
 import type { ProjectDetails, TeamSettings } from '../../shared/domains/projects-protocol';
 import { DEFAULT_TEAM_SETTINGS, keyPrefixOf } from '../../shared/domains/project-team-protocol';
@@ -43,13 +43,16 @@ import { NewTaskSheet } from './HubSetup';
 import { TaskList } from './TaskList';
 import { ProjectCostSummary } from './UsageCost';
 import { DashboardPage, RunActivityChart } from './DashboardPage';
+import { FeedbackSection, GoalsSection, LabelsSection, PausedBanner, ProjectStatusChips, ProjectStatusFields, StatusCards } from './WorkProject';
+import { OutputsPanel } from './WorkOutputs';
+import { StarButton } from './WorkParts';
 
 export type ProjectPageTab = 'dashboard' | 'tasks' | 'roster' | 'outputs' | 'ledger' | 'budget' | 'settings';
 const TABS: { id: ProjectPageTab; label: string }[] = [{ id: 'dashboard', label: NAMES.dashboard }, { id: 'tasks', label: NAMES.tasks }, { id: 'roster', label: NAMES.roster }, { id: 'outputs', label: NAMES.outputs }, { id: 'ledger', label: NAMES.ledger }, { id: 'budget', label: NAMES.budget }, { id: 'settings', label: NAMES.settings }];
-type SettingsSection = 'general' | 'folders' | 'members' | 'mail' | 'chats' | 'knowledge' | 'runs' | 'governance' | 'secrets' | 'activity';
+type SettingsSection = 'general' | 'folders' | 'members' | 'mail' | 'chats' | 'knowledge' | 'runs' | 'governance' | 'secrets' | 'goals' | 'labels' | 'feedback' | 'activity';
 const SECTIONS: { id: SettingsSection; label: string }[] = [
   { id: 'general', label: 'General' }, { id: 'folders', label: 'Folders' }, { id: 'members', label: 'Members' }, { id: 'mail', label: NAMES.mail },
-  { id: 'chats', label: 'Chats' }, { id: 'knowledge', label: 'Knowledge' }, { id: 'runs', label: 'Runs & verification' }, { id: 'governance', label: 'Run policy' }, { id: 'secrets', label: 'Secrets' }, { id: 'activity', label: 'Activity' },
+  { id: 'chats', label: 'Chats' }, { id: 'knowledge', label: 'Knowledge' }, { id: 'runs', label: 'Runs & verification' }, { id: 'governance', label: 'Run policy' }, { id: 'secrets', label: 'Secrets' }, { id: 'goals', label: 'Goals' }, { id: 'labels', label: 'Labels' }, { id: 'feedback', label: 'Feedback' }, { id: 'activity', label: 'Activity' },
 ];
 const errorText = (cause: unknown) => cause instanceof Error ? cause.message : String(cause);
 
@@ -87,9 +90,10 @@ export function ProjectPage({ snapshot, projectId, nav, muster, initialTab = 'ta
       <span className="pp-icon" aria-hidden="true"><FolderClosed size={16}/></span>
       <div className="pp-title">
         {project ? <InlineText className="pp-name" label="Project name" placeholder="Name this project" maxLength={256} value={project.name} onSave={next => save({ name: next })}/> : <h1 className="pp-name">{name}</h1>}
-        <p className="pp-sub">{where && <span className="pp-repo" title={where}>{where}</span>}<span>{open} open{scoped ? ` of ${scoped.tasks.length}` : ''}</span>{summary?.source === 'paperclip' && <span className="ws-source">{NAMES.paperclip}</span>}{project?.archived && <span className="ws-chip" data-tone="warn">Archived</span>}</p>
+        <p className="pp-sub">{where && <span className="pp-repo" title={where}>{where}</span>}<span>{open} open{scoped ? ` of ${scoped.tasks.length}` : ''}</span>{local && <ProjectStatusChips project={summary}/>}{summary?.source === 'paperclip' && <span className="ws-source">{NAMES.paperclip}</span>}{project?.archived && <span className="ws-chip" data-tone="warn">Archived</span>}</p>
       </div>
       {muster && project && <div className="pp-actions">
+        <StarButton starred={Boolean(summary?.starred)} label={project.name} onToggle={() => void invoke('work.star.set', { kind: 'project', id: project.id, starred: !summary?.starred }).then(() => refreshWorkspace(), notifyError)}/>
         {!project.archived && <button type="button" className="settings-button secondary" onClick={() => muster.onStartChat(project.folderIds[0])}><SquarePen size={14}/>New chat</button>}
         <Menu.Root>
           <Menu.Trigger className="icon-button" aria-label="Project actions"><MoreHorizontal size={16}/></Menu.Trigger>
@@ -113,8 +117,8 @@ export function ProjectPage({ snapshot, projectId, nav, muster, initialTab = 'ta
       {!scoped ? <ResourceState kind="loading" label="Loading the project" rows={5}/>
         : tab === 'tasks' ? <TaskList snapshot={scoped} tasks={scoped.tasks} scope={projectId} onOpenTask={nav.onOpenTask} onNewTask={project?.archived ? undefined : () => setCreating(true)} emptyMessage={local ? 'No tasks yet. Create one, give it an owner from the Roster, and start it in its own worktree.' : 'No tasks in this project yet.'}/>
         : tab === 'roster' ? <RosterPanel snapshot={scoped} projectId={projectId} local={local} nav={nav}>{muster && <WorkingNow projectId={projectId} chats={muster.chats} onOpenChat={muster.onOpenChat}/>}</RosterPanel>
-        : tab === 'outputs' ? <div className="pp-outputs"><ListPage kind="artifacts" embedded projectId={projectId}/>{muster && <ProjectChangesSection folders={muster.allFolders.filter(f => muster.project.folderIds.includes(f.id))} onReview={f => { openChangesTab(f.id, f.name); muster.onLeave(); }}/>}</div>
-        : tab === 'dashboard' ? <DashboardPage snapshot={scoped} nav={nav} projectId={projectId}/>
+        : tab === 'outputs' ? <div className="pp-outputs"><OutputsPanel snapshot={scoped} projectId={projectId} local={local} nav={nav}/>{muster && <ProjectChangesSection folders={muster.allFolders.filter(f => muster.project.folderIds.includes(f.id))} onReview={f => { openChangesTab(f.id, f.name); muster.onLeave(); }}/>}</div>
+        : tab === 'dashboard' ? <div className="pp-stack"><PausedBanner project={summary}/>{local && <StatusCards projectId={projectId} archived={project?.archived}/>}<DashboardPage snapshot={scoped} nav={nav} projectId={projectId}/></div>
         : tab === 'ledger' ? <LedgerPage snapshot={scoped} nav={nav} projectId={projectId}/>
         : tab === 'budget' ? <BudgetTab projectId={projectId} local={local} name={name}/>
         : muster ? <MusterSettings context={muster} snapshot={scoped} section={section} onSection={setSection} onEdit={() => setEditing(true)} onArchive={() => setConfirm('archive')} onDelete={() => setConfirm('delete')} onRestore={() => void restore()} onStatus={setStatus}/>
@@ -148,7 +152,7 @@ function MusterSettings({ context, snapshot, section, onSection, onEdit, onArchi
     <div className="pp-settings-body">
       {needsWork && error ? <ResourceState kind="error" message="This project’s work could not be loaded." detail={error} onRetry={reload}/>
         : needsWork && !work ? <ResourceState kind="loading" label="Loading project" rows={4}/>
-        : section === 'general' ? <GeneralSettings project={project} onUpdated={onUpdated} onEdit={onEdit} onArchive={onArchive} onDelete={onDelete} onRestore={onRestore} onOpenChat={onOpenChat}>
+        : section === 'general' ? <GeneralSettings project={project} meta={snapshot.projects[0]} onUpdated={onUpdated} onEdit={onEdit} onArchive={onArchive} onDelete={onDelete} onRestore={onRestore} onOpenChat={onOpenChat}>
             <InstructionsCard projectId={project.id} instructions={work!.instructions} onChanged={reload}/>
             <CoordinatorCard projectId={project.id} coordinator={work!.coordinator} archived={project.archived} onOpenChat={onOpenChat} onChanged={reload}/>
           </GeneralSettings>
@@ -162,6 +166,9 @@ function MusterSettings({ context, snapshot, section, onSection, onEdit, onArchi
             <ProjectDecisionSection projectId={project.id} work={work!} onChanged={reload}/>
           </div>
         : section === 'governance' ? <GovernanceSection projectId={project.id} snapshot={snapshot}/>
+        : section === 'goals' ? <GoalsSection projectId={project.id} snapshot={snapshot}/>
+        : section === 'labels' ? <LabelsSection projectId={project.id}/>
+        : section === 'feedback' ? <FeedbackSection projectId={project.id} snapshot={snapshot}/>
         : section === 'secrets' ? <SecretsSection projectId={project.id} snapshot={snapshot}/>
         : section === 'runs' ? <ProjectTaskSection project={project} folders={folders} work={work!} archived={project.archived} filter={filter} onFilter={setFilter} onChanged={reload}/>
         : <ProjectActivityPanel projectId={project.id} resolveRef={() => null} onOpenRef={() => undefined}/>}
@@ -170,7 +177,7 @@ function MusterSettings({ context, snapshot, section, onSection, onEdit, onArchi
 }
 
 /** General: name and goal, task keys, default model, approval to add agents, the project's rules, and the danger zone. */
-function GeneralSettings({ project, onUpdated, onEdit, onArchive, onDelete, onRestore, children }: { project: ProjectDetails; onUpdated: (p: ProjectDetails) => void; onEdit: () => void; onArchive: () => void; onDelete: () => void; onRestore: () => void; onOpenChat: (id: string) => void; children: React.ReactNode }): React.ReactElement {
+function GeneralSettings({ project, meta, onUpdated, onEdit, onArchive, onDelete, onRestore, children }: { project: ProjectDetails; meta: WorkspaceProject | undefined; onUpdated: (p: ProjectDetails) => void; onEdit: () => void; onArchive: () => void; onDelete: () => void; onRestore: () => void; onOpenChat: (id: string) => void; children: React.ReactNode }): React.ReactElement {
   const [settings, setSettings] = useState<TeamSettings | null>(null);
   const [prefix, setPrefix] = useState('');
   useEffect(() => { let live = true; invoke('project.team.settings', { projectId: project.id }).then(s => { if (live) { setSettings(s); setPrefix(s.keyPrefix ?? ''); } }, () => { if (live) setSettings({ ...DEFAULT_TEAM_SETTINGS }); }); return () => { live = false; }; }, [project.id]);
@@ -183,6 +190,7 @@ function GeneralSettings({ project, onUpdated, onEdit, onArchive, onDelete, onRe
     <dl className="pp-fields">
       <div><dt>Name</dt><dd><InlineText className="pp-field-text" label="Project name" placeholder="Name this project" maxLength={256} value={project.name} onSave={name => save({ name })}/></dd></div>
       <div><dt>Goal</dt><dd><InlineText className="pp-field-text" label="Shared goal" placeholder="Add a shared goal every chat and task run in this project can see" multiline maxLength={32768} value={project.goal} onSave={goal => save({ goal })}/></dd></div>
+      <ProjectStatusFields projectId={project.id} status={meta?.status ?? 'in_progress'} targetDate={meta?.targetDate ?? null}/>
       <div><dt>Task keys</dt><dd className="pp-inline-form">
         <input className="ws-input pp-prefix" aria-label="Task key prefix" maxLength={8} value={prefix} placeholder={keyPrefixOf(project.name)} onChange={e => setPrefix(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ''))} onKeyDown={e => { if (e.key === 'Enter') void change({ keyPrefix: prefix || null }); }}/>
         <button type="button" className="settings-button secondary" disabled={!settings || (prefix || null) === settings.keyPrefix} onClick={() => void change({ keyPrefix: prefix || null })}>Save</button>

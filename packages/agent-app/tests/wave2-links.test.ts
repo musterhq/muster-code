@@ -51,7 +51,7 @@ test('G34: a GitHub failure is kept on the link in plain words, and a pull reque
   h.sayWhen(/Open the PR/, 'Opened https://github.com/acme/widgets/pull/7 for review.');
   const task = await h.addTask('Open the PR', { kind: 'agent', id: cto.id }, { acceptance: 'Open the PR' });
   await h.start(task.id); await h.settled(task.id);
-  const links = await h.until(async () => { const l = (await h.s.invoke('work.links.list', { projectId: h.project.id, taskId: task.id })).links; return l.length ? l : null; }, 'the detected link');
+  const links = await h.until(async () => { const l = (await h.s.invoke('work.links.list', { projectId: h.project.id, taskId: task.id })).links; return l.length && l[0]!.fetchedAt ? l : null; }, 'the detected link, once its status was read');
   assert.equal(links[0]!.source, 'detected'); assert.equal(links[0]!.number, 7);
   assert.match(links[0]!.error ?? '', /Not found on GitHub/);
   assert.equal(links[0]!.state, 'unknown');
@@ -86,4 +86,6 @@ test('G4: output status moves through draft, ready, approved and merged; changes
   const seen = await h.s.invoke('work.outputs.seen', { projectId: p });
   assert.equal((await h.s.invoke('work.outputs.state', { projectId: p })).seenAt, seen.seenAt);
   await assert.rejects(h.s.invoke('work.outputs.status', { projectId: p, outputId: id, status: 'nope' as never }), /Choose a status/);
+  // A task from another project cannot be told: the owner is looked up inside this project.
+  await assert.rejects(h.s.invoke('work.outputs.status', { projectId: p, outputId: id, status: 'changes_requested', note: 'x', taskId: 'someone-elses-task' }), /not in this project/);
 });

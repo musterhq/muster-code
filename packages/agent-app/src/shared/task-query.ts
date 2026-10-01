@@ -57,6 +57,8 @@ function matchFilter(task: QueryTask, f: QueryFilter): boolean {
     default: return true;
   }
 }
+/** Only the `field:value` filters of a query (the caller matches the words against whatever text it searches). */
+export const matchesFilters = (task: QueryTask, q: ParsedQuery): boolean => q.filters.every(f => matchFilter(task, f) !== f.negate);
 /** Whether a task satisfies the query: every word appears in its key or title, every filter holds (negated ones must not). */
 export function matchesQuery(task: QueryTask, q: ParsedQuery): boolean {
   const hay = `${task.key} ${task.title}`.toLowerCase();

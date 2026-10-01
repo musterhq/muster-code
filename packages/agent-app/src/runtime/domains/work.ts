@@ -191,6 +191,8 @@ export function createWorkDomain(ctx: DomainContext): DomainModule {
     if (job) {
       const w = db(), reply = latestAssistant(ctx, chat.id);
       pending.delete(chat.id);
+      // Its answer lives on the card or the item; the helper chat itself would only clutter the sidebar and the Inbox.
+      void ctx.invoke('chat.update', { id: chat.id, archived: true }).catch(() => undefined);
       if (job.kind === 'summary') {
         if (status === 'completed' && reply) { w.addSummaryRevision(job.cardId, capText(reply, w.summary(job.cardId)?.tokenCap ?? 600), job.fingerprint, job.tasks, chat.id); w.setSummaryState(job.cardId, { state: 'idle', error: null, lastRunAt: new Date(now()).toISOString(), lastFingerprint: job.fingerprint, lastChatId: null }); }
         else w.setSummaryState(job.cardId, { state: 'failed', error: status === 'completed' ? 'The agent finished without writing a summary.' : chat.error || 'The summary run did not finish.', lastChatId: null });
@@ -219,6 +221,18 @@ export function createWorkDomain(ctx: DomainContext): DomainModule {
       } catch (e) { ctx.store.appendItem(chat.id, 'notice', `A muster-doc block was ignored: ${e instanceof Error ? e.message : 'unreadable'}`, 'completed', { kind: 'work-doc' }); }
     }
   }
+  // G18: a task's run is told the chain of goals its work serves (the task's goal, else its owner's), from the top.
+  const offGoals = ctx.hooks.addPromptContributor(async ({ chat }) => {
+    if (!chat.projectId || (!store && !existsSync(join(ctx.dataDir, 'muster-project-work.sqlite')))) return null;
+    const w = db();
+    if (!w.hasGoalLinks()) return null;
+    const work = await workOf(chat.projectId).catch(() => null), task = work?.tasks.items.find(t => t.runChatId === chat.id || t.attempts.some(a => a.chatId === chat.id));
+    if (!task) return null;
+    const own = w.goalOf('task', task.id), viaAgent = task.owner.kind === 'agent' ? w.goalOf('agent', task.owner.id) : null, goalId = own ?? viaAgent;
+    if (!goalId) return null;
+    const chain = goalAncestry(w.goals(chat.projectId), goalId);
+    return chain.length ? { label: 'Goals', text: `This work serves the goal “${chain.at(-1)}”${own ? '' : ` (the goal of its owner)`}. Why it matters, from the top: ${chain.join(' › ')}.` } : null;
+  });
   const offSettled = ctx.hooks.onRunSettled(({ chat, status }) => settled(chat, status).catch(() => undefined));
   const offCommand = ctx.hooks.onCommand?.(({ command, input }) => {
     if (command === 'project.delete' && typeof input.id === 'string' && (store || existsSync(join(ctx.dataDir, 'muster-project-work.sqlite')))) { db().deleteProject(input.id); return; }
@@ -364,8 +378,9 @@ export function createWorkDomain(ctx: DomainContext): DomainModule {
       if (!OUTPUT_STATUSES.includes(status)) throw new Error('Choose a status.');
       const note = text(i.note, 'The note', 2000, false);
       if (status === 'changes_requested' && !note) throw new Error('Say what should change: the owner receives your note.');
+      const owner = status === 'changes_requested' && typeof i.taskId === 'string' && i.taskId ? await taskOf(p.id, i.taskId) : null;
       const state = db().setOutputState(p.id, outputId, status, note, 'You');
-      if (status === 'changes_requested' && typeof i.taskId === 'string' && i.taskId) await wakeOwner(i.taskId, `Changes requested on ${text(i.title, 'Title', 200, false) || 'an output'}: ${note}`);
+      if (status === 'changes_requested' && typeof i.taskId === 'string' && i.taskId) await wakeOwner(owner!.id, `Changes requested on ${text(i.title, 'Title', 200, false) || 'an output'}: ${note}`);
       emit(p.id, ['outputs']); return state;
     },
     'work.outputs.seen': i => { const p = project(i.projectId); const seenAt = db().markOutputsSeen(p.id); emit(p.id, ['outputs']); return { seenAt }; },
@@ -446,6 +461,6 @@ export function createWorkDomain(ctx: DomainContext): DomainModule {
   };
   return {
     handlers,
-    dispose() { disposed = true; clearTimeout(boot); offSettled(); offCommand?.(); const t = timers(); for (const h of dailyTimers.values()) t.clear(h); dailyTimers.clear(); if (changeTimer) t.clear(changeTimer); store?.close(); store = undefined; },
+    dispose() { disposed = true; clearTimeout(boot); offSettled(); offCommand?.(); offGoals(); const t = timers(); for (const h of dailyTimers.values()) t.clear(h); dailyTimers.clear(); if (changeTimer) t.clear(changeTimer); store?.close(); store = undefined; },
   };
 }
