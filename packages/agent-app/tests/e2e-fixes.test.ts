@@ -47,6 +47,7 @@ async function service(t: TestContext) {
         answers.push(decision);
         return { status: 'completed', finalMessage: `Decision: ${JSON.stringify(decision)}` };
       }
+      await wait(400); // a real turn takes a moment; the review baseline is captured as it starts
       await writeFile(join(input.cwd, 'E2E-NOTE.md'), 'edited\n');
       return { status: 'completed', finalMessage: 'Wrote E2E-NOTE.md' };
     },
@@ -169,10 +170,13 @@ test('S19 a task run’s Receipt is attributed to the task and its Roster owner,
   const cto = await member('CTO');
   const task = await s.invoke('paperclip.task.create', { title: 'Create HELLO.md', description: 'Write it', projectId: project.id, assigneeId: `member:${cto.id}`, start: true });
   assert.ok(task.started, task.startError ?? 'not started');
-  await until(async () => await state(task.id) !== 'running' && (await s.invoke('paperclip.ledger', {})).entries.some(e => e.chatId === task.started!.chatId), 'receipt');
-  const entry = (await s.invoke('paperclip.ledger', {})).entries.find(e => e.chatId === task.started!.chatId)!;
+  await until(async () => await state(task.id) !== 'running' && (await s.invoke('paperclip.ledger', {})).entries.some(e => e.chatId === task.started!.chatId && e.source === 'local'), 'receipt');
+  const entry = (await s.invoke('paperclip.ledger', {})).entries.find(e => e.chatId === task.started!.chatId && e.source === 'local')!;
   assert.equal(entry.agent, 'CTO'); assert.equal(entry.taskId, task.id); assert.equal(entry.trigger, 'task');
   assert.equal((await s.invoke('paperclip.ledger', {})).chain.ok, true, 'the chain still verifies');
+  await s.invoke('paperclip.ledger.backfill', {});
+  const forChat = (await s.invoke('paperclip.ledger', {})).entries.filter(e => e.chatId === task.started!.chatId);
+  assert.deepEqual(forChat.map(e => `${e.source}:${e.agent}`), ['local:CTO'], 'history backfill does not add the same turn again under the chat title');
 });
 
 test('S29 pausing one agent holds only that agent: its run stops, Start and the scheduler skip it, others keep working', async t => {
@@ -249,4 +253,21 @@ test('S55/S23 board moves: Backlog is a real state the scheduler skips; Done ver
   const view = (await s.invoke('project.work', { projectId: project.id })).tasks.items.find(i => i.id === fresh.id)!;
   assert.equal(view.verification?.kind, 'manual');
   assert.equal((await s.invoke('paperclip.task.update', { taskId: parked.id, status: 'todo' })).status, 'todo');
+});
+
+test('S63 Outputs lists what the agents produced: files their runs changed, canvases and attachments', async t => {
+  const { s, project, member, state, folder } = await service(t);
+  const cto = await member('CTO');
+  const task = await s.invoke('paperclip.task.create', { title: 'Write a note', description: 'Write it', projectId: project.id, assigneeId: `member:${cto.id}`, start: true });
+  assert.ok(task.started, task.startError ?? 'not started');
+  await until(async () => await state(task.id) !== 'running' && (await s.invoke('paperclip.ledger', {})).entries.some(e => e.chatId === task.started!.chatId && e.files?.length), 'receipt with files');
+  const chat = await s.invoke('chat.create', { folderId: folder.id, projectId: project.id });
+  await s.invoke('artifacts.canvas.create', { title: 'Release plan', content: '# Plan', chatId: chat.id });
+  await s.invoke('attachments.stage', { chatId: chat.id, name: 'spec.txt', mime: 'text/plain', dataBase64: Buffer.from('spec').toString('base64') });
+  const rows = (await s.invoke('paperclip.list', { kind: 'artifacts' })).rows.filter(r => r.projectId === project.id);
+  const file = rows.find(r => r.title === 'E2E-NOTE.md');
+  assert.ok(file, 'the file the run changed');
+  assert.equal(file.status, 'added'); assert.match(file.detail, /OSSMANAGER · CTO · E2E-NOTE\.md/);
+  assert.ok(rows.some(r => r.title === 'Release plan' && r.status === 'canvas'), 'the project chat’s canvas');
+  assert.ok(!rows.some(r => r.title === 'spec.txt'), 'a staged, unsent attachment is not an output yet');
 });

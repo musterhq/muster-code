@@ -468,7 +468,30 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
     const projects = (await context.invoke('project.list', undefined)).filter(p => !p.archived);
     const works = await Promise.all(projects.map(p => context.invoke('project.work', { projectId: p.id, activityLimit: 100 }).then(w => ({ p, w }))));
     if (kind === 'audit') return works.flatMap(({ p, w }) => w.activity.items.map(a => ({ id: `act:${a.id}`, title: a.summary, detail: `${p.name} · ${a.actor}`, status: a.kind, at: a.createdAt, source: 'local' as const, projectId: p.id })));
-    return works.flatMap(({ p, w }) => w.tasks.items.flatMap(t => t.artifacts.map((path, i) => ({ id: `art:${t.id}:${i}`, title: path.split('/').pop() || path, detail: `${p.name} · ${t.title} · ${path}`, status: null, at: t.updatedAt, source: 'local' as const, projectId: p.id }))));
+    const manual = works.flatMap(({ p, w }) => w.tasks.items.flatMap(t => t.artifacts.map((path, i) => ({ id: `art:${t.id}:${i}`, title: path.split('/').pop() || path, detail: `${p.name} · ${t.title} · ${path}`, status: null, at: t.updatedAt, source: 'local' as const, projectId: p.id }))));
+    // What the agents actually produced: the files their turns changed (from the Ledger's Receipts, newest change per
+    // path), the canvases made in the project's chats or folders, and the files attached to those chats.
+    const changed: WorkspaceRow[] = [];
+    for (const p of projects) {
+      const seen = new Set<string>();
+      for (const entry of ledger().list({ projectId: p.id, limit: 200 })) for (const file of entry.files ?? []) {
+        if (seen.has(file.path)) continue;
+        seen.add(file.path);
+        changed.push({ id: `file:${p.id}:${file.path}`, title: file.path.split('/').pop() || file.path, detail: `${p.name} · ${entry.agent} · ${file.path}`, status: file.status, at: entry.endedAt, source: 'local', projectId: p.id });
+      }
+    }
+    const chats = (context.store.snapshot().chats ?? []).filter(c => c.projectId && projects.some(p => p.id === c.projectId));
+    const projectOfChat = new Map(chats.map(c => [c.id, c.projectId!]));
+    const byId = new Map(projects.map(p => [p.id, p]));
+    const canvases = await context.invoke('artifacts.canvas.list', {}).then(r => r.canvases, () => []);
+    const drawn = canvases.flatMap(c => {
+      const projectId = (c.chatId && projectOfChat.get(c.chatId)) || projects.find(p => c.folderId && p.folderIds.includes(c.folderId))?.id;
+      const p = projectId ? byId.get(projectId) : undefined;
+      return p ? [{ id: `canvas:${c.id}`, title: c.title || 'Canvas', detail: `${p.name} · Canvas`, status: 'canvas', at: c.updatedAt, source: 'local' as const, projectId: p.id }] : [];
+    });
+    const recent = [...chats].sort((a, b) => (b.updatedAt ?? '').localeCompare(a.updatedAt ?? '')).slice(0, 50);
+    const attached = (await Promise.all(recent.map(c => context.invoke('attachments.list', { chatId: c.id }).then(list => list.filter(a => a.state === 'sent').map(a => ({ id: `attachment:${a.id}`, title: a.name, detail: `${byId.get(c.projectId!)?.name ?? 'Project'} · Attached in ${c.title || 'a chat'}`, status: 'attachment', at: c.updatedAt ?? null, source: 'local' as const, projectId: c.projectId! })), () => [])))).flat();
+    return [...manual, ...changed, ...drawn, ...attached];
   };
   const list = async (kind: WorkspaceListKind): Promise<WorkspaceList> => {
     const mine = await localRows(kind).catch(() => [] as WorkspaceRow[]);
