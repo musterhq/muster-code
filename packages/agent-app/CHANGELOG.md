@@ -5,6 +5,11 @@ All notable changes to Muster Agent. Each `## <version>` section becomes the not
 
 ## Unreleased
 
+## 0.3.1
+
+- Updates keep working when GitHub's download links are slow or down. If a release file times out or GitHub returns a server error, Muster retries and then fetches it through GitHub's API instead; the checksum and signature checks are unchanged. A persistent outage reads "GitHub didn't respond. Muster will try again automatically."
+
+
 ## 0.3.0
 
 **The sidebar is back the way it was.** Inbox, New chat, Search chats, Memory, Automations and Ledger, then Pinned, Folders, Projects and Chats. Each project lists its tasks with their owners, and opening a project shows its Dashboard, Tasks, Roster, Outputs, Ledger, Budget and Settings.
