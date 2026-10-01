@@ -6,7 +6,10 @@
  * and the store file is opened only when something saves or when it already exists and a weekly schedule needs reading.
  */
 import { existsSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
+import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { extensionsOptions } from './extensions.ts';
 import type { Chat } from '../../shared/protocol.ts';
 import { BUNDLE_LIMITS } from '../../shared/domains/project-governance-protocol.ts';
 import { keyPrefixOf } from '../../shared/domains/project-team-protocol.ts';
@@ -169,6 +172,15 @@ export function createInsightDomain(ctx: DomainContext): DomainModule {
     const owner = task.owner.kind === 'agent' ? (await membersOf(projectId)).find(m => m.id === task.owner.id)?.name ?? null : null;
     return { task, src: { title: task.title, acceptance: task.acceptance, state: task.state, owner, plan: documents.find(d => d.key === 'plan')?.text ?? null, documents, finalReply, tools: [...tools].sort((a, b) => b[1] - a[1]).map(([n]) => n), messages } };
   };
+  /** The text of a user skill: one saved from the Skills editor (~/.agents/skills), else one saved from a chat or a task (~/.codex/skills). */
+  const skillBody = async (name: string): Promise<string> => {
+    const saved = await ctx.invoke('extensions.skills.read', { name }).catch(() => null);
+    if (saved) return saved.body;
+    const root = join(extensionsOptions.home ?? homedir(), '.codex', 'skills', name, 'SKILL.md');
+    const raw = await readFile(root, 'utf8').catch(() => null);
+    if (raw === null) throw new Error(`There is no saved skill named “${name}”.`);
+    return raw.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, '').trim();
+  };
   const settleSkill = (chat: Chat, status: string, p: Extract<Pending, { kind: 'skill' }>) => {
     const reply = latestAssistant(ctx, chat.id);
     if (status === 'completed' && reply) db().finishSkillRun(p.runId, { state: 'done', result: reply.slice(0, 20_000) });
@@ -225,8 +237,7 @@ export function createInsightDomain(ctx: DomainContext): DomainModule {
     'studio.skill.test': async i => {
       const p = project(i.projectId), skill = skillName(i.skill), input = typeof i.input === 'string' ? i.input.trim() : '';
       if (!input) throw new Error('Write a test input first.'); if (input.length > 8000) throw new Error('Keep the test input under 8,000 characters.');
-      const saved = await ctx.invoke('extensions.skills.read', { name: skill });
-      const prompt = skillTestPrompt(skill, saved.body, input);
+      const prompt = skillTestPrompt(skill, await skillBody(skill), input);
       const started = await startReadOnlyRun(ctx, { projectId: p.id, memberId: typeof i.memberId === 'string' && i.memberId ? id(i.memberId, 'agent') : null, title: `Skill test · ${skill}`, prompt });
       const run = db().addSkillRun({ skill, inputId: typeof i.inputId === 'string' && i.inputId ? id(i.inputId) : null, input, projectId: p.id, chatId: started.chatId });
       pending.set(started.chatId, { kind: 'skill', runId: run.id, skill });

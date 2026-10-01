@@ -1,6 +1,6 @@
 /** Wave 3: G24 costs and provider windows, G38 your stats, G25 Reflection Coach, G26 Skill Studio, G31 setup interview. */
 import assert from 'node:assert/strict';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -207,7 +207,14 @@ test('G26: a skill is drafted from a finished task, tested read-only against sav
   assert.equal(call.permission, 'read-only'); assert.match(call.prompt, /Tag the build/); assert.match(call.prompt, /Cut 1\.2\.0 from these 3 changes/);
   const done = await until(async () => { const r = (await h.s.invoke('studio.skill.inputs.list', { skill: 'release-demo' })).runs[0]; return r && r.state !== 'working' ? r : null; }, 'the result');
   assert.equal(done.state, 'done'); assert.match(done.result, /Test note: step 2/); assert.ok(done.chatId);
-  await assert.rejects(h.s.invoke('studio.skill.test', { projectId: h.project.id, skill: 'does-not-exist', input: 'x' }), /./);
+  await assert.rejects(h.s.invoke('studio.skill.test', { projectId: h.project.id, skill: 'does-not-exist', input: 'x' }), /no saved skill named/);
+  // A skill saved from a chat or a task lives in ~/.codex/skills; the studio reads that one too, without its front matter.
+  await mkdir(join(home, '.codex', 'skills', 'from-chat'), { recursive: true });
+  await writeFile(join(home, '.codex', 'skills', 'from-chat', 'SKILL.md'), '---\nname: from-chat\ndescription: "x"\n---\n\n# From chat\nAlways greet first.\n');
+  h.sayWhen(/testing the skill “from-chat”/, 'Hello. Test note: none');
+  await h.s.invoke('studio.skill.test', { projectId: h.project.id, skill: 'from-chat', input: 'hi' });
+  const chatCall = await until(() => h.calls.find(c => /testing the skill “from-chat”/.test(c.prompt)), 'the codex-root skill test');
+  assert.match(chatCall.prompt, /Always greet first/); assert.doesNotMatch(chatCall.prompt, /description: "x"/);
   h.sayWhen(/testing the skill “release-demo”/, '', { fail: 'provider down' });
   const bad = await h.s.invoke('studio.skill.test', { projectId: h.project.id, skill: 'release-demo', input: 'again' });
   const failed = await until(async () => { const r = (await h.s.invoke('studio.skill.inputs.list', { skill: 'release-demo' })).runs.find(x => x.id === bad.id); return r && r.state !== 'working' ? r : null; }, 'the failed result');

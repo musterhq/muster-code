@@ -22,6 +22,7 @@ import { MessageBody } from './MessageBody';
 import { PendingQuestion } from './PendingQuestion';
 import { ResourceState } from './ResourceState';
 import { Tip } from './Tooltip';
+import { SkillFromTask } from './SkillStudio';
 import { GovernanceProperties, SecretRequestCard, StageCard, StopButton } from './TaskGovernance';
 import { TaskDocuments, TaskGoalRow, TaskLabelsRow, TaskPullRequests, VoteButtons } from './WorkTask';
 import { LabelChips } from './WorkParts';
@@ -282,6 +283,8 @@ function Properties({ detail, snapshot, onOpenTask, onClose, onChanged, votes, o
         <TaskPullRequests projectId={task.projectId} taskId={task.id}/>
         <h3 className="ws-prop-group">Documents</h3>
         <TaskDocuments projectId={task.projectId} taskId={task.id} votes={votes} onVotesChanged={onVotesChanged}/>
+        <h3 className="ws-prop-group">Skill</h3>
+        <SkillFromTask projectId={task.projectId} taskId={task.id}/>
       </>}
       <h3 className="ws-prop-group">Execution</h3>
       <dl>
