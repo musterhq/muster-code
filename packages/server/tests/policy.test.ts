@@ -226,3 +226,9 @@ test('R281 should-fix 10a: backups.status shows the data folder path and backup 
   for (const v of [viewer, member]) denied(() => authorizeResource(v, 'backups.status', 'read', {}, snapshot), 'forbidden');
   authorizeResource(admin, 'backups.status', 'read', {}, snapshot);
 });
+
+test('R281 should-fix 10b: project.remote.* cannot be called over /rpc, not even by an owner', async () => {
+  const { dispatch } = await import('../src/rpc.ts');
+  for (const role of ['owner', 'admin'] as const) for (const c of ['project.remote.tasks', 'project.remote.comment', 'project.remote.state', 'project.remote.doc', 'project.remote.task'])
+    await assert.rejects(dispatch({} as never, { user: user(role) } as never, c, { projectId: 'p' }), /remote agent API/);
+});
