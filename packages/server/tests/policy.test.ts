@@ -164,7 +164,7 @@ test('Wave 3 navigation and insight commands: search and costs are server-wide (
 });
 
 test('review S4: Paperclip commands that spend, pause or change configuration are host (admin) commands; reads stay reads', () => {
-  for (const c of ['paperclip.approval.decide', 'paperclip.pauseAll', 'paperclip.resumeAll', 'paperclip.agent.pause', 'paperclip.agent.resume', 'paperclip.import', 'paperclip.config.set']) assert.equal(classifyCommand(c), 'host', c);
+  for (const c of ['paperclip.approval.decide', 'paperclip.pauseAll', 'paperclip.resumeAll', 'paperclip.agent.pause', 'paperclip.agent.resume', 'paperclip.import', 'paperclip.config.set', 'paperclip.signin.start', 'paperclip.signin.signout', 'paperclip.session.set', 'paperclip.session.clear']) assert.equal(classifyCommand(c), 'host', c);
   assert.equal(classifyCommand('project.tasks.get'), 'read');
   assert.equal(classifyCommand('paperclip.snapshot'), 'read');
 });

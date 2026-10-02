@@ -34,8 +34,9 @@ Object.defineProperty(window.document,'visibilityState',{get(){return 'visible';
 const now=new Date().toISOString();
 const proj=(id:string,name:string,extra:object={})=>({id,name,status:'in_progress',description:'',source:'local',repo:null,cwd:null,taskCount:2,openCount:1,paused:false,memory:null,...extra});
 let live:'socket'|'poll'='socket';
+let reconnect=false;
 const approvals=[{id:'ap-hire',type:'hire_agent',status:'pending',title:'Hire Nova as Data Engineer',detail:'Role: engineer',requestedBy:'CTO',agentId:'a-nova',issueIds:[],at:now,verbs:['approve','reject','request_revision']}];
-const snapshot=()=>({paperclip:{origin:'This Mac',company:{id:'c',name:'RagnarDataOps',prefix:'RAG'},companies:[],live},goals:[],approvals,labels:[],
+const snapshot=()=>({paperclip:{origin:'This Mac',company:{id:'c',name:'RagnarDataOps',prefix:'RAG'},companies:[],live,...(reconnect?{reconnect:true,baseUrl:'https://hosted.example.test'}:{})},goals:[],approvals,labels:[],
   tasks:[],agents:[],runs:[],counts:{liveRuns:0,inbox:2,failedRuns:0,openTasks:0},fetchedAt:now,
   projects:[proj('mine','My own project'),proj('imp','Data Pipeline',{org:'RagnarDataOps',editedHere:true}),proj('pc2','Ops Dashboard',{source:'paperclip',org:'RagnarDataOps'}),proj('other','Old import',{org:'OtherOrg'})],
   inbox:[{id:'import:approval:ap-hire',kind:'approval',title:'Hire Nova as Data Engineer',why:'Waiting for your approval.',severity:'high',at:now,taskId:null,agentId:null,runId:null,source:'paperclip',group:'RagnarDataOps',approvalId:'ap-hire',approvalVerbs:['approve','reject','request_revision']},
@@ -105,7 +106,15 @@ live='poll';await refreshWorkspace(true);
 openHub('tasks');
 const root3=createRoot(document.getElementById('root')!,{onUncaughtError:e=>{(errors as unknown[]).push(e);},onRecoverableError:e=>{(errors as unknown[]).push(e);}});
 root3.render(<HubScreen/>);await delay(200);
-assert.match(text('.ws-topbar-origin')[0],/RagnarDataOps · updates every 15 s/);
+assert.match(text('.ws-topbar-origin')[0],/RagnarDataOps · updates every few seconds/);
+assert.equal(document.querySelector('.ws-reconnect'),null,'no Reconnect while the session is fine');
+// A browser sign-in whose session ended: updates are polling, and a quiet Reconnect for live updates is offered next to the org.
+reconnect=true;await refreshWorkspace(true);await delay(200);
+const quiet=document.querySelector('.ws-reconnect');
+assert.ok(quiet&&/^Reconnect for live updates$/.test(quiet.textContent!.trim()),'a quiet Reconnect for live updates');
+await click(quiet);
+assert.deepEqual(calls.filter(c=>c.command==='musterServer.signInWindow').at(-1)?.input,{baseUrl:'https://hosted.example.test',url:'https://hosted.example.test'},'it re-opens the app\'s sign-in window on the server\'s own page');
+reconnect=false;
 root3.unmount();
 
 assert.equal(intervals,0,'the hub and the Projects list start no intervals');

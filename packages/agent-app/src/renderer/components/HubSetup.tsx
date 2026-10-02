@@ -179,7 +179,7 @@ export function ConnectionPanel({ onSaved, compact = false, signInAvailable = tr
   const keychain = navigator.platform.includes('Mac') ? 'Keychain' : 'keyring';
   const found = kind ?? test?.backend ?? config?.backend ?? null;
   const httpWarning = choice === 'signin' ? (plainHttpWarning(url, true) ? 'Sign in needs an https:// address (plain http is only allowed for this Mac).' : undefined) : test?.warning ?? plainHttpWarning(url, Boolean(token) || Boolean(config?.hasToken));
-  const detected = mode === 'local' && test ? test.ok ? `${test.backend === 'muster-server' ? 'Muster Server' : 'A server'}${test.version ? ` ${test.version}` : ''} is running on this Mac.` : test.stage === 'auth' ? test.message : 'No server is answering on this Mac. Start Muster Server, then test again.' : null;
+  const detected = mode === 'local' && test ? test.ok ? `Muster Server${test.version ? ` ${test.version}` : ''} is running on this Mac.` : test.stage === 'auth' ? test.message : 'No server is answering on this Mac. Start Muster Server, then test again.' : null;
   const accountSignedIn = Boolean(config && config.mode !== 'off' && config.hasToken && (config.signedIn || config.user));
   const connected = Boolean(config && config.mode !== 'off' && (config.hasToken || config.backend === 'paperclip'));
   const waiting = signInState.phase === 'waiting';

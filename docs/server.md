@@ -275,10 +275,19 @@ connection and four choices: **This Mac** (a server running on this computer), *
 exchanged once for a token that is not stored), **URL + API token**, or **Off**. The token is kept in the macOS Keychain (or the Linux
 keyring) and is only ever sent to that server's address.
 
+**Sign in to Muster Server** asks the address first and then uses that kind of server's own way in: a Muster Server takes a username and
+password (exchanged once for a token that is stored, never the password); a hosted Paperclip-compatible server opens its own login and
+approval page in a window of the app. That window keeps its session in a cookie jar of its own per server address, stays on the server's
+address (anything else opens in your browser) and has no Node access; the app reads only the session-token cookie from it and keeps it
+encrypted, bound to that address. A hosted server only lets a browser session onto its live socket, so with that session updates arrive
+instantly. If the session ends, updates continue every few seconds (2.5 s while things change, 15 s when quiet, never while the window
+is hidden) and **Reconnect for live updates** reopens the window; you are not asked to sign in to the server again. **Use my browser
+instead** approves in your own browser; updates then poll. Signing out revokes the key and clears the window's session.
+
 Once connected, the server's org and projects show in the app itself: projects grouped under the org in the sidebar's Projects section, their
 tasks as threads, the Roster graph, the Inbox, Ledger receipts, approvals, and Pause and Resume on agents. Nothing opens in a browser. Live
-changes arrive over the server's `/events` WebSocket; if it is not reachable the app falls back to checking every 15 seconds while a screen
-that shows them is open. **Import from Muster Server…** copies a server project, its tasks and its Roster into a local project (reads only).
+changes arrive over the server's own `/events` WebSocket (a Muster Server accepts the signed-in token on it); if it is not reachable the app
+falls back to polling while a screen that shows them is open. **Import from Muster Server…** copies a server project, its tasks and its Roster into a local project (reads only).
 
 The app finds out which kind of server an address is by itself (`/healthz` for Muster Server). A server that speaks the Paperclip REST API
 works the same way, and only the connection details line says "Paperclip-compatible". An existing Paperclip link and its token carry over
