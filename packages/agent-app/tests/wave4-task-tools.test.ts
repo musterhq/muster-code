@@ -80,6 +80,19 @@ test('review: task_get respects low-trust containment: own task and subtree only
   assert.match((await r.tool('task_get')).text, /“Lead”/, 'its own task still reads');
 });
 
+test('review: agent_propose_hire validates the runner against the model catalog and refuses remote and unknown providers', async t => {
+  const h = await wave1(t); const cto = await h.member('CTO');
+  await h.s.invoke('project.agent.gov.set', { projectId: h.project.id, memberId: cto.id, capabilities: { canHire: true } });
+  const r = await runAndCall(h, 'Grow', cto.id);
+  const hire = (provider: string, model: string, name: string) => ({ name, instructions: 'Do the work.', provider, model });
+  for (const [prov, model, why] of [['remote', 'anything', /remote agent/], ['nope', 'x', /not available/], ['scripted', 'gpt-made-up', /not a model of/]] as const) {
+    const bad = await r.tool('agent_propose_hire', hire(prov, model, `Bad ${prov}`)); assert.equal(bad.error, true, bad.text); assert.match(bad.text, why);
+  }
+  const names = async () => (await h.s.invoke('project.members.list', { projectId: h.project.id })).members.map(m => m.name);
+  assert.ok(!(await names()).some(n => /^Bad /.test(n)), 'nothing was added');
+  assert.equal((await r.tool('agent_propose_hire', hire('scripted', 'scripted-model', 'Good'))).error, false); assert.ok((await names()).includes('Good'));
+});
+
 test('G40: checkout leases a task; a second agent is refused until it expires', async t => {
   const h = await wave1(t); const cto = await h.member('CTO'), qa = await h.member('QA');
   const r = await runAndCall(h, 'Mine', cto.id);
