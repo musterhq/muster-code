@@ -133,11 +133,15 @@ export function createTaskTools(d: TaskToolDeps) {
       return t ?? toolText(`No task ${String(ref)} in this project.`, true);
     };
     const isResult = (v: ProjectTask | McpToolResult): v is McpToolResult => 'content' in v;
+    /** This task and everything below it: all a low-trust agent may see. */
+    const subtree = (all: ProjectTask[]): Set<string> => { const under = new Set<string>([task.id]); for (let grew = true; grew;) { grew = false; for (const x of all) if (x.parentId && under.has(x.parentId) && !under.has(x.id)) { under.add(x.id); grew = true; } } return under; };
 
     switch (tool) {
       case 'task_get': {
         const t = pick(args.task); if (isResult(t)) return t;
-        const all = d.tasks().listTasks(projectId).items, kids = all.filter(x => x.parentId === t.id), parent = t.parentId ? all.find(x => x.id === t.parentId) : undefined;
+        const all = d.tasks().listTasks(projectId).items;
+        if (caps.trust === 'low-trust' && !subtree(all).has(t.id)) return deny(`${who} is low-trust and may only see its own task and subtasks.`);
+        const kids = all.filter(x => x.parentId === t.id), parent = t.parentId ? all.find(x => x.id === t.parentId) : undefined;
         const docs = await d.invoke('work.docs.list', { projectId, taskId: t.id }).catch(() => null) as { docs?: { key: string; rev: number }[] } | null;
         const acts = d.tasks().listActivity(projectId, 60).items.filter(a => a.refId === t.id).slice(0, 6).reverse();
         return toolText([
@@ -153,7 +157,7 @@ export function createTaskTools(d: TaskToolDeps) {
         const scope = args.scope === 'project' ? 'project' : args.scope === 'subtasks' ? 'subtasks' : 'mine';
         if (scope === 'project' && caps.trust === 'low-trust') return deny(`${who} is low-trust and may only see its own task and subtasks.`);
         const all = d.tasks().listTasks(projectId).items, limit = Math.min(Math.max(Number(args.limit) || 25, 1), 50);
-        const under = new Set<string>([task.id]); for (let grew = true; grew;) { grew = false; for (const x of all) if (x.parentId && under.has(x.parentId) && !under.has(x.id)) { under.add(x.id); grew = true; } }
+        const under = subtree(all);
         const state = typeof args.state === 'string' ? args.state : null;
         const rows = all.filter(x => scope === 'project' ? true : scope === 'subtasks' ? under.has(x.id) && x.id !== task.id : x.owner.kind === 'agent' && x.owner.id === mid).filter(x => !state || x.state === state);
         return toolText(rows.length ? `${rows.length} task${rows.length === 1 ? '' : 's'}${rows.length > limit ? ` (first ${limit})` : ''}:\n${rows.slice(0, limit).map(line).join('\n')}` : 'No tasks match.');

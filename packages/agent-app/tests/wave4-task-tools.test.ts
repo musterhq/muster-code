@@ -70,6 +70,16 @@ test('G40/G12: create, assign and list respect can-assign, scope and low-trust c
   assert.equal((await r.tool('task_list', { scope: 'project' })).error, true);
 });
 
+test('review: task_get respects low-trust containment: own task and subtree only', async t => {
+  const h = await wave1(t); const cto = await h.member('CTO'), qa = await h.member('QA');
+  const elsewhere = await h.addTask('Secret plans', { kind: 'agent', id: qa.id }, { acceptance: 'Launch codename: bluebird' });
+  const r = await runAndCall(h, 'Lead', cto.id);
+  assert.match((await r.tool('task_get', { task: elsewhere.id })).text, /bluebird/, 'a standard agent may read the project');
+  await h.s.invoke('project.agent.gov.set', { projectId: h.project.id, memberId: cto.id, capabilities: { trust: 'low-trust', containment: 'task' } });
+  const low = await r.tool('task_get', { task: elsewhere.id }); assert.equal(low.error, true); assert.ok(!/bluebird/.test(low.text)); assert.match(low.text, /low-trust/);
+  assert.match((await r.tool('task_get')).text, /“Lead”/, 'its own task still reads');
+});
+
 test('G40: checkout leases a task; a second agent is refused until it expires', async t => {
   const h = await wave1(t); const cto = await h.member('CTO'), qa = await h.member('QA');
   const r = await runAndCall(h, 'Mine', cto.id);
