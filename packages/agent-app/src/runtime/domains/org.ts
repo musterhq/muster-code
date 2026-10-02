@@ -78,7 +78,7 @@ export function createOrgDomain(ctx: DomainContext): DomainModule {
   function loadSource(source: OrgSource): { files: Record<string, string>; label: string; catalog?: CatalogEntry } {
     if (source.kind === 'catalog') { const t = CATALOG.find(x => x.key === source.key); if (!t) throw new Error('That team is not in the catalog.'); return { files: t.files, label: t.name, catalog: t }; }
     if (source.kind === 'zip') {
-      if (typeof source.base64 !== 'string' || source.base64.length > ZIP_LIMITS.totalBytes * 2) throw new Error('The package is too large to import.');
+      if (typeof source.base64 !== 'string' || source.base64.length > Math.ceil(ZIP_LIMITS.totalBytes * 4 / 3) + 64) throw new Error('The package is too large to import.');
       return { files: unzipFiles(Buffer.from(source.base64, 'base64')), label: 'a zip package' };
     }
     if (source.kind === 'folder') {

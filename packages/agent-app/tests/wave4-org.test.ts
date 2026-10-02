@@ -4,6 +4,7 @@ import { existsSync, readFileSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
+import { deflateRawSync } from 'node:zlib';
 import { dumpYaml, parseDoc, parseYaml, readPackage, unzipFiles, zipFiles } from '../src/runtime/org/agent-companies.ts';
 import { wave1 } from './wave1-harness.ts';
 
@@ -18,6 +19,31 @@ test('G16: the YAML subset and the zip round-trip, and a hostile zip is refused'
   assert.throws(() => unzipFiles(Buffer.from('nope')), /not a zip/);
   assert.throws(() => readPackage({ 'README.md': 'x' }), /no COMPANY.md or TEAM.md/);
   assert.throws(() => readPackage({ 'COMPANY.md': '---\nname: X\nschema: other/v9\n---\n' }), /agentcompanies\/v1/);
+});
+
+/** A hand-built zip: `entries` central records, each declaring `declared` bytes, all reading the local blob at `lhFor(i)`. */
+function craftedZip(blob: Buffer, entries: { name: string; method: number; usize: number; csize?: number; lh: number }[], localHeaders: number) {
+  const locals: Buffer[] = []; let off = 0; const offsets: number[] = [];
+  for (let k = 0; k < localHeaders; k++) { const h = Buffer.alloc(30); h.writeUInt32LE(0x04034b50, 0); h.writeUInt16LE(entries[0]!.method, 8); h.writeUInt16LE(5, 26); const nm = Buffer.from(`k${k}.md`); offsets.push(off); locals.push(h, nm, blob); off += 30 + nm.length + blob.length; }
+  const central = entries.map(e => { const nm = Buffer.from(e.name), c = Buffer.alloc(46); c.writeUInt32LE(0x02014b50, 0); c.writeUInt16LE(e.method, 10); c.writeUInt32LE(e.csize ?? blob.length, 20); c.writeUInt32LE(e.usize, 24); c.writeUInt16LE(nm.length, 28); c.writeUInt32LE(offsets[e.lh]!, 42); return Buffer.concat([c, nm]); });
+  const cd = Buffer.concat(central), end = Buffer.alloc(22); end.writeUInt32LE(0x06054b50, 0); end.writeUInt16LE(entries.length, 8); end.writeUInt16LE(entries.length, 10); end.writeUInt32LE(cd.length, 12); end.writeUInt32LE(off, 16);
+  return Buffer.concat([...locals, cd, end]);
+}
+
+test('review: a zip bomb is refused by the bytes really inflated, not the sizes declared', () => {
+  const blob = deflateRawSync(Buffer.alloc(1_900_000, 0x61));
+  // 400 entries, usize=0, all pointing at one 2 MB deflated blob (800 MB if trusted).
+  const overlapping = craftedZip(blob, Array.from({ length: 400 }, (_, i) => ({ name: `a${i}.md`, method: 8, usize: 0, lh: 0 })), 1);
+  assert.ok(overlapping.length < 30_000);
+  assert.throws(() => unzipFiles(overlapping), /shares data|declares|too large/);
+  // A single entry that lies about its size.
+  assert.throws(() => unzipFiles(craftedZip(blob, [{ name: 'a.md', method: 8, usize: 10, lh: 0 }], 1)), /declares|too large/);
+  // Many honest-looking separate blobs, 400 x 1.9 MB, would pass the declared limit but not the real total.
+  const many = craftedZip(blob, Array.from({ length: 12 }, (_, i) => ({ name: `m${i}.md`, method: 8, usize: 1_900_000, lh: i })), 12);
+  assert.throws(() => unzipFiles(many), /too large/);
+  // Stored entries must have csize === usize.
+  assert.throws(() => unzipFiles(craftedZip(Buffer.from('hello'), [{ name: 's.md', method: 0, usize: 3, lh: 0 }], 1)), /declares/);
+  assert.deepEqual(unzipFiles(craftedZip(Buffer.from('hello'), [{ name: 's.md', method: 0, usize: 5, lh: 0 }], 1)), { 's.md': 'hello' });
 });
 
 async function seeded(t: import('node:test').TestContext) {

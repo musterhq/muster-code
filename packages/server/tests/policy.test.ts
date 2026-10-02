@@ -214,3 +214,9 @@ test('Wave 4: commands that run on the server host or speak for an agent are adm
   authorizeResource(editor, 'project.interactions.answer', 'write', { projectId: 'p-shared', id: 'c', answers: {} }, snapshot);
   denied(() => authorizeResource(editor, 'project.interactions.answer', 'write', { projectId: 'p-secret', id: 'c', answers: {} }, snapshot));
 });
+
+test('R281 must-fix 1: org.import.preview parses an uploaded package on the server, so only owners and admins may run it', () => {
+  const viewer = accessView(user('viewer'), grants, owners), member = accessView(user('member'), grants, owners), admin = accessView(user('admin'), [], owners);
+  for (const v of [viewer, member]) denied(() => authorizeResource(v, 'org.import.preview', 'read', { source: { kind: 'zip', base64: 'AAAA' } }, snapshot), 'forbidden');
+  authorizeResource(admin, 'org.import.preview', 'read', { source: { kind: 'zip', base64: 'AAAA' } }, snapshot);
+});
