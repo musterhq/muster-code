@@ -220,3 +220,9 @@ test('R281 must-fix 1: org.import.preview parses an uploaded package on the serv
   for (const v of [viewer, member]) denied(() => authorizeResource(v, 'org.import.preview', 'read', { source: { kind: 'zip', base64: 'AAAA' } }, snapshot), 'forbidden');
   authorizeResource(admin, 'org.import.preview', 'read', { source: { kind: 'zip', base64: 'AAAA' } }, snapshot);
 });
+
+test('R281 should-fix 10a: backups.status shows the data folder path and backup list, so only owners and admins read it', () => {
+  const viewer = accessView(user('viewer'), grants, owners), member = accessView(user('member'), grants, owners), admin = accessView(user('admin'), [], owners);
+  for (const v of [viewer, member]) denied(() => authorizeResource(v, 'backups.status', 'read', {}, snapshot), 'forbidden');
+  authorizeResource(admin, 'backups.status', 'read', {}, snapshot);
+});
