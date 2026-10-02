@@ -14,18 +14,34 @@ import type { ExecutionPolicy, RunMeta, SecretProposal, TaskMonitor, TaskStageSt
 import type { TaskLabel, TaskPrSummary } from './work-protocol.ts';
 
 export type PaperclipMode = 'off' | 'local' | 'custom';
+/** Which server is behind the one "Muster Server" connection: our own packages/server, or a Paperclip instance (shown only as "Paperclip-compatible" in connection details). */
+export type ServerBackendKind = 'paperclip' | 'muster-server';
+export type ServerSignInMethod = 'password' | 'browser';
 export const PAPERCLIP_LOCAL_URL = 'http://127.0.0.1:3100';
 export type WorkspaceSource = 'paperclip' | 'local';
 
 /** The token never reaches the renderer: only whether one is stored. */
-export interface PaperclipConfigView { mode: PaperclipMode; baseUrl: string; hasToken: boolean; secureStorage: boolean; companyId: string | null }
+export interface PaperclipConfigView {
+  mode: PaperclipMode; baseUrl: string; hasToken: boolean; secureStorage: boolean; companyId: string | null;
+  /** Detected from the URL; null until it has been. */
+  backend?: ServerBackendKind | null;
+  /** "Paperclip-compatible" when the backend is a Paperclip instance: the one place that word is allowed to appear (connection details). */
+  compatibility?: string | null;
+  /** Who a Muster Server token signs in as, from the server's own answer. */
+  user?: { username: string; displayName: string; role: string } | null;
+  serverVersion?: string | null; connectedAt?: string | null;
+  /** How people can sign in to this kind of server (empty: API token only). */
+  signIn?: ServerSignInMethod[];
+}
 /** `token`: omitted keeps the stored one, '' removes it. */
-export interface PaperclipConfigInput { mode: PaperclipMode; baseUrl?: string; token?: string; companyId?: string | null }
+export interface PaperclipConfigInput { mode: PaperclipMode; baseUrl?: string; token?: string; companyId?: string | null; backend?: ServerBackendKind }
 export interface PaperclipTestResult {
   ok: boolean; stage: 'config' | 'network' | 'auth' | 'service' | 'ok'; message: string; latencyMs?: number;
   version?: string; deploymentMode?: string; companies?: WorkspaceCompany[];
   /** A heads-up that does not stop the test: a token that would travel over plain http to another machine. */
   warning?: string;
+  /** What the probe found at the URL, and the address it settled on (a server on this Mac may be on either port). */
+  backend?: ServerBackendKind; compatibility?: string | null; signIn?: ServerSignInMethod[]; baseUrl?: string;
 }
 
 export type WorkspaceStatus = 'backlog' | 'todo' | 'in_progress' | 'in_review' | 'blocked' | 'done' | 'cancelled';
@@ -267,6 +283,8 @@ export interface ImportPlan { company: { id: string; name: string } | null; comp
 /** Per Paperclip project: 'skip' leaves it out of the import. Imports never write into a project you made in Muster. */
 export type ImportTargets = Record<string, 'skip' | 'import'>;
 
+/** The `paperclip.*` command names are the wire names of the one "Muster Server" connection (existing callers and stored data keep working). `paperclip.config.*` and `paperclip.test` configure and
+ *  test whichever backend the URL turns out to be (detected, never asked); sign-in is `musterServer.connect`. (`server.*` is reserved by Muster Server's own admin commands.) */
 export interface PaperclipCommands {
   'paperclip.config.get': { input: Record<string, never>; output: PaperclipConfigView };
   'paperclip.config.set': { input: PaperclipConfigInput; output: PaperclipConfigView };

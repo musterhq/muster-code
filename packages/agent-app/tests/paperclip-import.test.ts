@@ -185,7 +185,7 @@ test('a remote Paperclip never makes Muster link or read a local path; the repor
   const projects=await service.invoke('project.list',undefined);
   assert.ok(projects.every(p=>p.folderIds.length===0),'no folder from the server is added');
   assert.equal((await service.invoke('app.snapshot',undefined)).folders.length,0);
-  assert.ok(report.notes.some(n=>/OSS Manager: its folder .* is on the Paperclip server.*Link your own checkout/.test(n)));
+  assert.ok(report.notes.some(n=>/OSS Manager: its folder .* is on the server.*Link your own checkout/.test(n)));
 });
 
 test('founder decision: an import never writes into a project you made; each Paperclip project is its own project under its org',async t=>{
@@ -325,7 +325,7 @@ test('C4: an issue deleted in Paperclip is cancelled and flagged "Removed in Pap
   const ws=await h.service.invoke('paperclip.snapshot',{});
   const gone=ws.tasks.find(x=>x.key==='RAG-13')!;
   const report=await h.again();
-  assert.equal(report.removed,1);assert.ok(report.notes.some(n=>/deleted in Paperclip/.test(n)));
+  assert.equal(report.removed,1);assert.ok(report.notes.some(n=>/deleted on Muster Server/.test(n)));
   const after=(await h.service.invoke('paperclip.snapshot',{})).tasks.find(x=>x.id===gone.id)!;
   assert.equal(after.status,'cancelled');assert.equal(after.removedInPaperclip,true);
   assert.equal((await h.service.invoke('paperclip.task',{id:gone.id})).task.removedInPaperclip,true);
@@ -352,7 +352,7 @@ test('C15: an agent waiting for hire approval is not imported as an active Roste
   await ctx.service.invoke('paperclip.config.set',{mode:'local',companyId:COMPANY});
   const report=await ctx.service.invoke('paperclip.import',{companyId:COMPANY});
   for(const project of await ctx.service.invoke('project.list',undefined))assert.ok(!(await ctx.service.invoke('project.members.list',{projectId:project.id})).members.some(m=>m.name==='Nova'),'Nova is not a member');
-  assert.ok(report.notes.some(n=>/Nova is waiting for approval in Paperclip/.test(n)),JSON.stringify(report.notes));
+  assert.ok(report.notes.some(n=>/Nova is waiting for approval on Muster Server/.test(n)),JSON.stringify(report.notes));
 });
 
 test('C16: the importer writes no "Edited…" or "Task: todo → …" entries into task threads',async t=>{
@@ -383,7 +383,7 @@ test('C14: labels, documents with revisions, work products and routines come acr
   t.after(()=>{globalThis.fetch=realFetch;});
   await ctx.service.invoke('paperclip.config.set',{mode:'local',companyId:COMPANY});
   const report=await ctx.service.invoke('paperclip.import',{companyId:COMPANY});
-  assert.equal(report.noProject,1);assert.ok(report.notes.some(n=>/1 issue has no project in Paperclip \(RAG-99\)/.test(n)),JSON.stringify(report.notes));
+  assert.equal(report.noProject,1);assert.ok(report.notes.some(n=>/1 issue has no project on Muster Server \(RAG-99\)/.test(n)),JSON.stringify(report.notes));
   await ctx.service.invoke('paperclip.config.set',{mode:'off'});
   const ws=await ctx.service.invoke('paperclip.snapshot',{});
   const task=ws.tasks.find(x=>x.key==='RAG-12')!;
@@ -708,14 +708,14 @@ test('system comments from Paperclip are attributed to Paperclip, not You; a re-
   const first=await service.invoke('paperclip.import',{companyId:COMPANY});
   const ws=await service.invoke('paperclip.snapshot',{});const task=ws.tasks.find(x=>x.key==='RAG-15')!;
   const notice=async()=>(await service.invoke('paperclip.task',{id:task.id})).comments.find(c=>c.id==='pc:sys-1')!;
-  assert.deepEqual([(await notice()).author.kind,(await notice()).author.label],['system','Paperclip']);
+  assert.deepEqual([(await notice()).author.kind,(await notice()).author.label],['system','Muster Server']);
   // What an earlier version stored: the same comment as "You".
   const {DatabaseSync}=await import('node:sqlite');const db=new DatabaseSync(join(dirname(repo),'muster-agent.sqlite'));t.after(()=>db.close());
   db.prepare("UPDATE paperclip_import_comments SET author_kind = 'user', author_label = 'You' WHERE source_id = 'sys-1'").run();
   assert.equal((await notice()).author.label,'You');
   const again=await service.invoke('paperclip.import',{companyId:COMPANY});
   assert.equal(again.comments,0,'a correction is not a new comment');
-  assert.deepEqual([(await notice()).author.kind,(await notice()).author.label],['system','Paperclip'],'corrected');
+  assert.deepEqual([(await notice()).author.kind,(await notice()).author.label],['system','Muster Server'],'corrected');
   assert.equal((await service.invoke('paperclip.import',{companyId:COMPANY})).comments,0);
   assert.ok(first.comments>0);
 });

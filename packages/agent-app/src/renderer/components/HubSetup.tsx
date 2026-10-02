@@ -1,11 +1,11 @@
-/** Paperclip setup in Muster (#115): the Integrations panel (This Mac / Custom deployment / Off, Test connection, company),
- *  the New task sheet, and Paperclip routines for the Automations screen. Built from the app's form and sheet components. */
-import { Check, Link2, Play } from 'lucide-react';
+/** Muster Server setup (#115, unified): the Integrations panel (This Mac / Sign in / URL + API token / Off, Test connection, org, import),
+ *  the New task sheet, and the server's routines for the Automations screen. Built from the app's form and sheet components. */
+import { Check, Link2, Play, UserRound } from 'lucide-react';
 import React, { useEffect, useRef, useState } from 'react';
 import type { ImportPlan, ImportTargets, PaperclipConfigView, PaperclipImportReport, PaperclipMode, PaperclipTestResult, WorkspaceList, WorkspacePriority, WorkspaceSnapshot } from '../../shared/domains/paperclip-protocol';
-import { PAPERCLIP_LOCAL_URL, PRIORITY_NAME } from '../../shared/domains/paperclip-protocol';
+import { PRIORITY_NAME } from '../../shared/domains/paperclip-protocol';
 import { NAMES } from '../../shared/workspace-names';
-import { invoke } from '../bridge';
+import { invoke, subscribe } from '../bridge';
 import { exactTime } from '../relativeTime';
 import { notifyError, notifySuccess } from '../store';
 import { refreshWorkspace } from '../hubStore';
@@ -19,12 +19,16 @@ import './hub.css';
 // @ts-ignore -- side-effect CSS import; esbuild bundles it into dist/renderer/main.css
 import './automations.css';
 
-const errorText = (cause: unknown) => cause instanceof Error ? cause.message : String(cause);
-const MODES: { id: PaperclipMode; label: string; hint: string }[] = [
-  { id: 'local', label: 'This Mac', hint: PAPERCLIP_LOCAL_URL },
-  { id: 'custom', label: 'Custom deployment', hint: 'URL and API token' },
+const errorText = (cause: unknown) => cause instanceof Error ? cause.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '') : String(cause);
+/** The four ways to connect. "Sign in" and "URL + API token" are both a custom address; they differ in how you prove who you are. */
+type Choice = 'local' | 'signin' | 'token' | 'off';
+const CHOICES: { id: Choice; label: string; hint: string }[] = [
+  { id: 'local', label: 'This Mac', hint: 'A server on this computer' },
+  { id: 'signin', label: 'Sign in to Muster Server', hint: 'Your account on a server' },
+  { id: 'token', label: 'URL + API token', hint: 'Paste an address and a token' },
   { id: 'off', label: 'Off', hint: 'Muster projects only' },
 ];
+const choiceOf = (view: PaperclipConfigView): Choice => view.mode === 'off' ? 'off' : view.mode === 'local' ? 'local' : view.user ? 'signin' : 'token';
 
 /** A token typed or stored for a plain-http address on another machine crosses the network in clear text. */
 export function plainHttpWarning(url: string, hasToken: boolean): string | undefined {
@@ -35,45 +39,74 @@ export function plainHttpWarning(url: string, hasToken: boolean): string | undef
   return `${hasToken ? 'Your API token' : 'An API token added here'} would be sent over plain http to ${parsed.host}, readable by anyone on the network. Use an https:// address.`;
 }
 
-/** Settings › Integrations › Paperclip: This Mac / Custom deployment / Off, with Test connection and the company. */
-export function ConnectionPanel({ onSaved, compact = false }: { onSaved?: (view: PaperclipConfigView) => void; compact?: boolean }): React.ReactElement {
+/**
+ * Settings › Integrations › Muster Server: the one connection. This Mac / Sign in to Muster Server / URL + API token / Off, with Test
+ * connection, the org, Import and Disconnect. Which kind of server is behind the address is detected, never asked; the only place the
+ * word "Paperclip" can appear is the "Paperclip-compatible" line in the connection details, when that is what the server is.
+ */
+export function ConnectionPanel({ onSaved, compact = false, signInAvailable = true }: { onSaved?: (view: PaperclipConfigView) => void; compact?: boolean; signInAvailable?: boolean }): React.ReactElement {
   const [config, setConfig] = useState<PaperclipConfigView | null>(null);
-  const [mode, setMode] = useState<PaperclipMode>('off');
+  const [choice, setChoice] = useState<Choice>('off');
   const [url, setUrl] = useState('');
   const [token, setToken] = useState('');
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
   const [company, setCompany] = useState<string>('');
   const [test, setTest] = useState<PaperclipTestResult | null>(null);
-  const [busy, setBusy] = useState<'test' | 'save' | 'import' | null>(null);
+  const [busy, setBusy] = useState<'test' | 'save' | 'import' | 'signin' | 'disconnect' | null>(null);
   const [imported, setImported] = useState<PaperclipImportReport | null>(null);
   const [error, setError] = useState('');
+  const mode: PaperclipMode = choice === 'off' ? 'off' : choice === 'local' ? 'local' : 'custom';
   useEffect(() => {
     let live = true;
     invoke('paperclip.config.get', {}).then(view => {
       if (!live) return;
-      setConfig(view); setMode(view.mode); setUrl(view.mode === 'custom' ? view.baseUrl : ''); setCompany(view.companyId ?? '');
-      // Auto-detect a Paperclip on this Mac so "This Mac" can say whether one is running.
+      setConfig(view); setChoice(choiceOf(view)); setUrl(view.mode === 'custom' ? view.baseUrl : ''); setCompany(view.companyId ?? '');
+      // Look for a server on this Mac so "This Mac" can say whether one is running.
       if (view.mode !== 'custom') void invoke('paperclip.test', { mode: 'local' }).then(result => { if (live) setTest(result); }, () => undefined);
     }, e => { if (live) setError(errorText(e)); });
-    return () => { live = false; };
+    // Signing in elsewhere (or the server revoking this token) changes the connection under us.
+    const off = subscribe(event => { if (event.type === 'musterServerChanged') void invoke('paperclip.config.get', {}).then(view => { if (live) setConfig(view); }, () => undefined); });
+    return () => { live = false; off(); };
   }, []);
+  const target = () => ({ mode, ...(mode === 'custom' ? { baseUrl: url, ...(token ? { token } : {}) } : mode === 'local' && test?.baseUrl ? { baseUrl: test.baseUrl } : {}) });
   const runTest = async () => {
     setBusy('test'); setError(''); setTest(null);
-    try { const result = await invoke('paperclip.test', { mode, ...(mode === 'custom' ? { baseUrl: url, ...(token ? { token } : {}) } : {}) }); setTest(result); if (result.companies?.length && !result.companies.some(c => c.id === company)) setCompany(result.companies[0].id); }
+    try { const result = await invoke('paperclip.test', target()); setTest(result); if (result.companies?.length && !result.companies.some(c => c.id === company)) setCompany(result.companies[0].id); }
     catch (cause) { setError(errorText(cause)); } finally { setBusy(null); }
   };
   const save = async () => {
     setBusy('save'); setError('');
     try {
-      const view = await invoke('paperclip.config.set', { mode, ...(mode === 'custom' ? { baseUrl: url, ...(token ? { token } : {}) } : {}), companyId: company || null });
-      setConfig(view); setToken(''); notifySuccess(mode === 'off' ? 'Paperclip unlinked. Projects show Muster’s own work.' : 'Paperclip linked. Its projects appear under Projects, tagged Paperclip.');
+      // The backend was detected by the test: it is remembered so the next read does not have to ask again.
+      const view = await invoke('paperclip.config.set', { ...target(), ...(test?.ok && test.backend ? { backend: test.backend } : {}), companyId: company || null });
+      setConfig(view); setToken(''); notifySuccess(mode === 'off' ? 'Muster Server is off. Projects show Muster’s own work.' : 'Muster Server connected. Its projects appear under Projects.');
       await refreshWorkspace(true); onSaved?.(view);
     } catch (cause) { setError(errorText(cause)); } finally { setBusy(null); }
   };
-  /** Step 1 of an import: read what it would fill (GET only) and suggest a Muster project for each Paperclip one. */
+  /** Sign in with a username and password: exchanged once for a token that is kept in the keychain; the password is not kept. */
+  const signIn = async () => {
+    setBusy('signin'); setError('');
+    try {
+      const address = mode === 'local' ? (test?.baseUrl ?? config?.baseUrl ?? '') : url;
+      await invoke('musterServer.connect', { url: address, method: 'password', username, password, mode: mode === 'local' ? 'local' : 'custom' });
+      setPassword('');
+      const view = await invoke('paperclip.config.get', {});
+      setConfig(view); setChoice(mode === 'local' ? 'local' : 'signin'); setTest(null);
+      notifySuccess(`Signed in to Muster Server${view.user ? ` as ${view.user.username}` : ''}.`);
+      await refreshWorkspace(true); onSaved?.(view);
+    } catch (cause) { setError(errorText(cause)); } finally { setBusy(null); }
+  };
+  const disconnect = async () => {
+    setBusy('disconnect'); setError('');
+    try { const view = await invoke('musterServer.disconnect', {}); void view; setConfig(await invoke('paperclip.config.get', {})); setChoice('off'); setTest(null); setCompany(''); notifySuccess('Disconnected. The server token was removed from this computer.'); await refreshWorkspace(true); }
+    catch (cause) { setError(errorText(cause)); } finally { setBusy(null); }
+  };
+  /** Step 1 of an import: read what it would fill (GET only) and suggest a Muster project for each server project. */
   const [plan, setPlan] = useState<ImportPlan | null>(null);
   const [targets, setTargets] = useState<Record<string, string>>({});
   const [owners, setOwners] = useState<Record<string, 'mine' | 'made'>>({});
-  const endpoint = () => ({ mode, ...(mode === 'custom' ? { baseUrl: url, ...(token ? { token } : {}) } : {}), ...(company ? { companyId: company } : {}) });
+  const endpoint = () => ({ ...(config && config.mode !== 'off' && choiceOf(config) === choice ? {} : target()), ...(company ? { companyId: company } : {}) });
   const planImport = async () => {
     setBusy('import'); setError(''); setImported(null);
     try {
@@ -96,38 +129,60 @@ export function ConnectionPanel({ onSaved, compact = false }: { onSaved?: (view:
   };
   if (!config && !error) return <ResourceState kind="loading" compact label="Loading connection" rows={2}/>;
   const companies = test?.companies ?? [];
-  const detected = mode === 'local' && test ? test.ok ? `Paperclip ${test.version ?? ''} is running on this Mac.` : 'No Paperclip is answering on this Mac. Start it with `paperclipai run`, then test again.' : null;
+  const keychain = navigator.platform.includes('Mac') ? 'Keychain' : 'keyring';
+  const found = test?.backend ?? config?.backend ?? null;
+  const detected = mode === 'local' && test ? test.ok ? `${test.backend === 'muster-server' ? 'Muster Server' : 'A server'}${test.version ? ` ${test.version}` : ''} is running on this Mac.` : test.stage === 'auth' ? test.message : 'No server is answering on this Mac. Start Muster Server, then test again.' : null;
+  const connected = Boolean(config && config.mode !== 'off' && (config.hasToken || config.backend === 'paperclip'));
+  const needsSignIn = Boolean(test && !test.ok && test.stage === 'auth' && test.backend === 'muster-server');
+  const passwordForm = choice === 'signin' || (choice === 'local' && (needsSignIn || found === 'muster-server') && !config?.hasToken);
+  const sameAsSaved = Boolean(config && config.mode === mode && (mode !== 'custom' || url.trim().replace(/\/+$/, '') === config.baseUrl));
   return <div className={`ws-connection${compact ? ' is-compact' : ''}`}>
-    <div className="ws-segmented" role="radiogroup" aria-label="Paperclip">
-      {MODES.map(m => <button key={m.id} type="button" role="radio" aria-checked={mode === m.id} className="ws-segment" onClick={() => { setMode(m.id); setTest(null); }}>
-        <span className="ws-segment-label">{m.label}</span><span className="ws-segment-hint">{m.hint}</span>
+    <div className="ws-segmented" role="radiogroup" aria-label="Muster Server connection">
+      {CHOICES.filter(c => c.id !== 'signin' || signInAvailable).map(c => <button key={c.id} type="button" role="radio" aria-checked={choice === c.id} className="ws-segment" onClick={() => { setChoice(c.id); setTest(null); setError(''); }}>
+        <span className="ws-segment-label">{c.label}</span><span className="ws-segment-hint">{c.hint}</span>
       </button>)}
     </div>
-    {mode === 'custom' && <div className="ws-form">
-      <label className="project-edit-goal"><span>Paperclip URL</span><span className="project-edit-name"><Link2 size={14} aria-hidden="true"/><input type="url" inputMode="url" placeholder="https://paperclip.example.com" value={url} onChange={e => setUrl(e.target.value)} spellCheck={false} autoComplete="off"/></span></label>
-      <label className="project-edit-goal"><span>Paperclip API token</span><span className="project-edit-name"><input type="password" placeholder={config?.hasToken ? 'Stored — paste a new one to replace it' : 'pcp_board_…'} value={token} onChange={e => setToken(e.target.value)} spellCheck={false} autoComplete="off"/></span></label>
-      <p className="project-edit-hint">Create one with <code>paperclipai token board create --name Muster</code>. It is sent as <code>Authorization: Bearer</code> and stored encrypted in your {navigator.platform.includes('Mac') ? 'Keychain' : 'keyring'}; it never reaches this window.{config?.hasToken && <> <button type="button" className="ws-link" onClick={() => void removeToken()}>Remove stored token</button></>}</p>
+    {(choice === 'signin' || choice === 'token') && <div className="ws-form">
+      <label className="project-edit-goal"><span>Server URL</span><span className="project-edit-name"><Link2 size={14} aria-hidden="true"/><input type="url" inputMode="url" placeholder="https://muster.example.com" value={url} onChange={e => setUrl(e.target.value)} spellCheck={false} autoComplete="off"/></span></label>
+      {choice === 'token' && <>
+        <label className="project-edit-goal"><span>API token</span><span className="project-edit-name"><input type="password" placeholder={config?.hasToken ? 'Stored — paste a new one to replace it' : 'Paste an API token'} value={token} onChange={e => setToken(e.target.value)} spellCheck={false} autoComplete="off"/></span></label>
+        <p className="project-edit-hint">Create a token on the server (Muster Server: <code>muster-server token create</code>). It is sent as <code>Authorization: Bearer</code> and stored encrypted in your {keychain}; it never reaches this window.{config?.hasToken && <> <button type="button" className="ws-link" onClick={() => void removeToken()}>Remove stored token</button></>}</p>
+      </>}
     </div>}
-    {mode === 'off' && <p className="project-edit-hint">Projects run on Muster’s own tasks, agents, mailbox and schedulers. Nothing leaves this Mac.</p>}
+    {passwordForm && <div className="ws-form">
+      <label className="project-edit-goal"><span>Username</span><span className="project-edit-name"><UserRound size={14} aria-hidden="true"/><input type="text" value={username} onChange={e => setUsername(e.target.value)} spellCheck={false} autoComplete="username" autoCapitalize="none"/></span></label>
+      <label className="project-edit-goal"><span>Password</span><span className="project-edit-name"><input type="password" value={password} onChange={e => setPassword(e.target.value)} autoComplete="current-password"/></span></label>
+      <p className="project-edit-hint">Your password is exchanged once for a server-issued token, stored encrypted in your {keychain} and only ever sent to this server’s address. The password is not kept. Use https:// (plain http:// only for a server on this computer).</p>
+    </div>}
+    {choice === 'off' && <p className="project-edit-hint">Projects run on Muster’s own tasks, agents, mailbox and schedulers. Nothing leaves this Mac.</p>}
     {detected && <p className="ws-connection-detect" data-ok={test?.ok ? 'true' : 'false'}>{test?.ok && <Check size={13} aria-hidden="true"/>}{detected}</p>}
     {test && mode === 'custom' && <p className="ws-connection-detect" data-ok={test.ok ? 'true' : 'false'} role="status">{test.ok && <Check size={13} aria-hidden="true"/>}{test.message}{test.latencyMs !== undefined ? ` · ${test.latencyMs} ms` : ''}</p>}
     {mode === 'custom' && (test?.warning ?? plainHttpWarning(url, Boolean(token) || Boolean(config?.hasToken))) && <p className="ws-connection-detect" data-ok="false" role="alert">{test?.warning ?? plainHttpWarning(url, Boolean(token) || Boolean(config?.hasToken))}</p>}
-    {mode !== 'off' && companies.length > 0 && <label className="project-edit-goal"><span>Company</span><select className="ws-select is-field" value={company} onChange={e => setCompany(e.target.value)}>{companies.map(c => <option key={c.id} value={c.id}>{c.name}{c.prefix ? ` (${c.prefix})` : ''}</option>)}</select></label>}
+    {connected && sameAsSaved && config && <dl className="ws-connection-details" aria-label="Connection details">
+      <div><dt>Connected to</dt><dd>{config.baseUrl}</dd></div>
+      {config.user && <div><dt>Signed in as</dt><dd>{config.user.displayName} (@{config.user.username}, {config.user.role})</dd></div>}
+      {config.serverVersion && <div><dt>Server version</dt><dd>{config.serverVersion}</dd></div>}
+      {config.compatibility && <div><dt>Compatibility</dt><dd>{config.compatibility}</dd></div>}
+    </dl>}
+    {mode !== 'off' && companies.length > 1 && <label className="project-edit-goal"><span>Org</span><select className="ws-select is-field" value={company} onChange={e => setCompany(e.target.value)}>{companies.map(c => <option key={c.id} value={c.id}>{c.name}{c.prefix ? ` (${c.prefix})` : ''}</option>)}</select></label>}
     {error && <p role="alert" className="settings-error">{error}</p>}
     {plan && <ImportMapping plan={plan} targets={targets} owners={owners} onOwner={(id, value) => setOwners(o => { const next = { ...o }; if (value) next[id] = value; else delete next[id]; return next; })} busy={busy !== null} onChange={(id, value) => setTargets(t => ({ ...t, [id]: value }))} onCancel={() => setPlan(null)} onImport={() => void runImport()}/>}
     {imported && <div className="ws-import-report" role="status">
       <p><Check size={13} aria-hidden="true"/>Imported {imported.company}: {imported.projects.created} new and {imported.projects.updated} updated projects, {imported.tasks.created} new and {imported.tasks.updated} updated tasks, {imported.comments} comments, {imported.agents} Roster places, {imported.history} decisions{imported.needsYou ? ` (${imported.needsYou} need you, in the Inbox)` : ''}.</p>
-      {imported.removed > 0 && <p><Check size={13} aria-hidden="true"/>{imported.removed} {imported.removed === 1 ? 'task' : 'tasks'} removed in Paperclip: cancelled here and flagged.</p>}
-      {imported.conflicts.length > 0 && <details className="ws-import-conflicts"><summary>{imported.conflicts.length >= 200 ? '200+' : imported.conflicts.length} {imported.conflicts.length === 1 ? 'edit of yours was' : 'edits of yours were'} kept over Paperclip’s</summary>
-        <ul>{imported.conflicts.map((c, i) => <li key={i} className="ws-faint">{c.label}: {c.field} stays “{c.kept}” (Paperclip says “{c.paperclip}”)</li>)}</ul></details>}
+      {imported.removed > 0 && <p><Check size={13} aria-hidden="true"/>{imported.removed} {imported.removed === 1 ? 'task' : 'tasks'} removed on Muster Server: cancelled here and flagged.</p>}
+      {imported.conflicts.length > 0 && <details className="ws-import-conflicts"><summary>{imported.conflicts.length >= 200 ? '200+' : imported.conflicts.length} {imported.conflicts.length === 1 ? 'edit of yours was' : 'edits of yours were'} kept over the server’s</summary>
+        <ul>{imported.conflicts.map((c, i) => <li key={i} className="ws-faint">{c.label}: {c.field} stays “{c.kept}” (the server says “{c.paperclip}”)</li>)}</ul></details>}
       <p className="ws-faint">{imported.issues} issues read in {(imported.tookMs / 1000).toFixed(1)} s.</p>
       {imported.notes.map(n => <p key={n} className="ws-faint">{n}</p>)}
     </div>}
     <div className="project-edit-actions">
-      {mode !== 'off' && <button type="button" className="settings-button secondary" disabled={busy !== null || (mode === 'custom' && !url.trim())} onClick={() => void runTest()}>{busy === 'test' ? 'Testing…' : 'Test connection'}</button>}
-      {mode !== 'off' && <button type="button" className="settings-button secondary" title="Copy its projects, tasks, threads and Roster into Muster, reading with GET only. Safe to repeat." disabled={busy !== null || (mode === 'custom' && !url.trim())} onClick={() => void planImport()}>{busy === 'import' && !plan ? 'Reading…' : 'Import from Paperclip…'}</button>}
+      {mode !== 'off' && !passwordForm && <button type="button" className="settings-button secondary" disabled={busy !== null || (mode === 'custom' && !url.trim())} onClick={() => void runTest()}>{busy === 'test' ? 'Testing…' : 'Test connection'}</button>}
+      {mode !== 'off' && connected && <button type="button" className="settings-button secondary" title="Copy its projects, tasks, threads and Roster into Muster, reading with GET only. Safe to repeat." disabled={busy !== null || (mode === 'custom' && !url.trim())} onClick={() => void planImport()}>{busy === 'import' && !plan ? 'Reading…' : 'Import from Muster Server…'}</button>}
       <span className="project-edit-spacer"/>
-      <button type="button" className="settings-button" disabled={busy !== null || (mode === 'custom' && !url.trim())} onClick={() => void save()}>{busy === 'save' ? 'Saving…' : 'Save'}</button>
+      {connected && config?.user && <button type="button" className="settings-button secondary" disabled={busy !== null} onClick={() => void disconnect()}>{busy === 'disconnect' ? 'Disconnecting…' : 'Disconnect'}</button>}
+      {passwordForm
+        ? <button type="button" className="settings-button" disabled={busy !== null || !username.trim() || !password || (choice === 'signin' && !url.trim()) || config?.secureStorage === false} onClick={() => void signIn()}>{busy === 'signin' ? 'Signing in…' : 'Sign in'}</button>
+        : <button type="button" className="settings-button" disabled={busy !== null || (mode === 'custom' && !url.trim())} onClick={() => void save()}>{busy === 'save' ? 'Saving…' : 'Save'}</button>}
     </div>
   </div>;
 }
@@ -138,9 +193,9 @@ const EXISTING_NOTE: Record<ImportPlan['projects'][number]['existing'], string> 
 export function ImportMapping({ plan, targets, owners = {}, onOwner = () => undefined, busy, onChange, onCancel, onImport }: { plan: ImportPlan; targets: Record<string, string>; owners?: Record<string, 'mine' | 'made'>; onOwner?: (paperclipId: string, value: 'mine' | 'made' | '') => void; busy: boolean; onChange: (paperclipId: string, target: string) => void; onCancel: () => void; onImport: () => void }): React.ReactElement {
   const chosen = plan.projects.filter(p => targets[p.id] !== 'skip');
   const asking = chosen.filter(p => p.existing === 'ask'), unanswered = asking.filter(p => !owners[p.id]).length;
-  return <section className="ws-import-map" aria-label="Choose which Paperclip projects to import">
+  return <section className="ws-import-map" aria-label="Choose which Muster Server projects to import">
     <h3>Import {plan.company?.name ?? NAMES.paperclip} into Muster</h3>
-    <p className="project-edit-hint">Each Paperclip project becomes its own project here, listed under {plan.company?.name ?? NAMES.paperclip} and updated by later imports. Projects you made in Muster are never changed. What you edit here stays when you import again. Reading is GET only and safe to repeat.</p>
+    <p className="project-edit-hint">Each server project becomes its own project here, listed under {plan.company?.name ?? NAMES.paperclip} and updated by later imports. Projects you made in Muster are never changed. What you edit here stays when you import again. Reading is GET only and safe to repeat.</p>
     {asking.length > 1 && <label className="project-edit-goal ws-import-all"><span>Same answer for all {asking.length} earlier projects</span><select className="ws-select" aria-label="Same answer for all" value="" disabled={busy} onChange={e => { const v = e.target.value as 'mine' | 'made' | ''; if (v) for (const p of asking) onOwner(p.id, v); }}><option value="">Choose…</option><option value="mine">Mine</option><option value="made">Made by the import</option></select></label>}
     {plan.projects.length === 0 ? <p className="ws-faint">This company has no projects to import.</p> : <ul className="ws-rows">{plan.projects.map(p => {
       const skip = targets[p.id] === 'skip';
@@ -251,12 +306,12 @@ export function PaperclipRoutines(): React.ReactElement | null {
   }, []);
   if (!linked) return null;
   const rows = (list?.rows ?? []).filter(r => r.source === 'paperclip');
-  return <section className="ws-section automation-paperclip" aria-label="Paperclip automations">
+  return <section className="ws-section automation-paperclip" aria-label="server automations">
     <h2 className="ws-group-title">From {NAMES.paperclip}<span>{rows.length}</span></h2>
-    {!list ? <ResourceState kind="loading" compact label="Loading Paperclip automations" rows={2}/>
+    {!list ? <ResourceState kind="loading" compact label="Loading server automations" rows={2}/>
       : list.note ? <ResourceState kind="partial" compact message={list.note}/>
-      : rows.length === 0 ? <p className="automation-help">No automations on the linked Paperclip. Automations created there appear here with their schedule and last run.</p>
-      : <ul className="automation-list" aria-label="Paperclip automations">{rows.map(r => <li key={r.id} className="automation-item" data-state={r.paused ? 'paused' : 'scheduled'}>
+      : rows.length === 0 ? <p className="automation-help">No automations on the connected Muster Server. Automations created there appear here with their schedule and last run.</p>
+      : <ul className="automation-list" aria-label="server automations">{rows.map(r => <li key={r.id} className="automation-item" data-state={r.paused ? 'paused' : 'scheduled'}>
           <div className="automation-item-head"><div className="automation-item-main is-static">
             <span className="automation-state" data-state={r.paused ? 'paused' : 'scheduled'} aria-hidden="true"/>
             <span className="automation-item-text"><span className="automation-item-name">{r.title}</span><span className="automation-item-meta">{r.detail} · {r.overlap === 'queue' ? 'queues overlapping runs' : 'skips overlapping runs'}</span></span>

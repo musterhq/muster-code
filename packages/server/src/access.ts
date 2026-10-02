@@ -6,6 +6,7 @@
  * Writing needs an org role of member or higher AND (project owner/editor, or being the chat's owner).
  */
 import type { AgentEvent, Snapshot } from '../../agent-app/src/shared/protocol.ts';
+import type { WorkspaceSnapshot, WorkspaceTaskDetail } from '../../agent-app/src/shared/domains/paperclip-protocol.ts';
 import type { ProjectRole, UserRecord } from './store/types.ts';
 import { PolicyError, ROLE_RANK, type CommandClass } from './policy.ts';
 
@@ -101,7 +102,7 @@ const OWNER_ONLY_PROJECT = new Set(['project.delete', 'project.archive', 'projec
   'org.import.apply', 'org.activate', 'project.approvals.requestRevision']);
 const AUTOMATION_BY_ID = /^automations\.(update|delete|pause|resume|runNow|runs|list)$/;
 /** Commands whose result is server-wide and not filterable per project: admins only for everyone else. */
-const ADMIN_READS = /^(work\.(overlay|inbox\.state)|search\.workspace|insight\.(costs|profile|reflect\.inbox)|automations\.gate\.list|paperclip\.(snapshot|dashboard|list|badge|memory|task|config\.get|inbox\.dismissed|import\.plan|watch)|settings\.(export|diagnostics|storage|storage\.preview)|providers\.diagnose|import\.|memory\.(export|archives|bank\.preview|import\.preview))/;
+const ADMIN_READS = /^(work\.(overlay|inbox\.state)|search\.workspace|insight\.(costs|profile|reflect\.inbox)|automations\.gate\.list|paperclip\.(dashboard|list|badge|memory|config\.get|inbox\.dismissed|import\.plan|watch)|settings\.(export|diagnostics|storage|storage\.preview)|providers\.diagnose|import\.|memory\.(export|archives|bank\.preview|import\.preview))/;
 
 /**
  * Throws unless the user may run `command` on the resources named in `input`. `snapshot` is the runtime's current (unfiltered) state.
@@ -170,9 +171,28 @@ export function filterOutput(v: AccessView, command: string, output: unknown, sn
     const list = output as { runs?: Array<{ projectId: string }> };
     return { ...list, runs: (list.runs ?? []).filter(r => canSeeProject(v, r.projectId)) };
   }
+  // The desktop app's Muster Server connection reads these: a member sees the projects they were granted, with their tasks, agents, runs and Inbox items.
+  if (command === 'paperclip.snapshot' && output && typeof output === 'object') return filterWorkspace(v, output as WorkspaceSnapshot);
+  if (command === 'paperclip.task' && output && typeof output === 'object') {
+    if (!canSeeProject(v, (output as WorkspaceTaskDetail).task.projectId)) throw new PolicyError('You do not have read access to this task.', 403, 'forbidden');
+    return output;
+  }
   if (command === 'paperclip.ledger' && output && typeof output === 'object') {
     const view = output as { entries: Array<{ chatId: string | null; projectId: string | null }> };
     return { ...view, entries: view.entries.filter(e => (e.projectId && canSeeProject(v, e.projectId)) || (e.chatId && canSeeChat(v, snapshot.chats.find(c => c.id === e.chatId)))) };
   }
   return output;
+}
+
+/** The workspace a member may see: the projects they were granted and what belongs to them. Server-wide parts (Pause all counts, mail) are dropped. */
+export function filterWorkspace(v: AccessView, snapshot: WorkspaceSnapshot): WorkspaceSnapshot {
+  if (v.all) return snapshot;
+  const projects = snapshot.projects.filter(p => canSeeProject(v, p.id));
+  const tasks = snapshot.tasks.filter(t => canSeeProject(v, t.projectId));
+  const taskIds = new Set(tasks.map(t => t.id));
+  const agents = snapshot.agents.filter(a => canSeeProject(v, a.projectId));
+  const runs = snapshot.runs.filter(r => r.taskId !== null && taskIds.has(r.taskId));
+  const inbox = snapshot.inbox.filter(i => canSeeProject(v, i.projectId));
+  const { agentCounts: _counts, approvals: _approvals, ...rest } = snapshot;
+  return { ...rest, projects, tasks, agents, runs, inbox, counts: { liveRuns: runs.filter(r => r.status === 'running').length, inbox: inbox.filter(i => i.kind !== 'mail').length, failedRuns: runs.filter(r => r.status === 'failed').length, openTasks: tasks.filter(t => t.status !== 'done' && t.status !== 'cancelled').length } };
 }

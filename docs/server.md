@@ -270,10 +270,19 @@ settings belong to admins.
 
 ## Connecting the desktop app
 
-In the desktop app, open **Settings › Integrations › Muster Server**. It is optional and stays off until you connect. Enter the server
-URL and either your username and password, or an API token. A password is exchanged once for a token and is not stored. The token is
-kept in the macOS Keychain (or the Linux keyring) and is only ever sent to that server's address. Once connected, **Show projects**
-lists the projects your account can open, and **Open** takes you to that project in the server's web UI.
+In the desktop app, open **Settings › Integrations › Muster Server**. It is optional and stays off until you connect. There is one
+connection and four choices: **This Mac** (a server running on this computer), **Sign in to Muster Server** (your username and password,
+exchanged once for a token that is not stored), **URL + API token**, or **Off**. The token is kept in the macOS Keychain (or the Linux
+keyring) and is only ever sent to that server's address.
+
+Once connected, the server's org and projects show in the app itself: projects grouped under the org in the sidebar's Projects section, their
+tasks as threads, the Roster graph, the Inbox, Ledger receipts, approvals, and Pause and Resume on agents. Nothing opens in a browser. Live
+changes arrive over the server's `/events` WebSocket; if it is not reachable the app falls back to checking every 15 seconds while a screen
+that shows them is open. **Import from Muster Server…** copies a server project, its tasks and its Roster into a local project (reads only).
+
+The app finds out which kind of server an address is by itself (`/healthz` for Muster Server). A server that speaks the Paperclip REST API
+works the same way, and only the connection details line says "Paperclip-compatible". An existing Paperclip link and its token carry over
+unchanged: nobody signs in again.
 
 ## Backup and restore
 

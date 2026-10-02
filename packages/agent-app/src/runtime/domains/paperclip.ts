@@ -22,9 +22,14 @@ import {
   type WorkspacePriority, type WorkspaceRow, type WorkspaceSnapshot, type WorkspaceSource, type WorkspaceStatus, type WorkspaceTask, type WorkspaceTaskDetail,
 } from '../../shared/domains/paperclip-protocol.ts';
 import { normalizeRemote } from '../memory-identity.ts';
-import { PaperclipClient, PaperclipError, normalizeBaseUrl, openLiveEvents, type FetchLike, type LiveSocket, type SocketFactory } from '../paperclip-client.ts';
-import { arr, buildInbox, mapAgent, mapApproval, mapBudgets, mapDocument, mapWorkProduct, mapAttention, mapComment, mapCompany, mapGoal, mapInteraction, mapIssue, mapProject, mapReceipt, mapRows, mapRun } from '../paperclip-map.ts';
-import { activeSecretStore, SecretStore } from '../secret-store.ts';
+import { PaperclipError, type FetchLike, type LiveSocket, type SocketFactory } from '../paperclip-client.ts';
+import type { ServerBackend, ServerPart } from '../server/backend.ts';
+import { LEGACY_PAPERCLIP_SECRET } from '../server/config.ts';
+import { detectBackend } from '../server/detect.ts';
+import { normalizeBaseUrl as normalizeUrl } from '../paperclip-client.ts';
+import { connectionFor, isLoopback as connectionLoopback, originOf } from '../server/connection.ts';
+import { arr, mapBudgets } from '../paperclip-map.ts';
+import { SecretStore } from '../secret-store.ts';
 import { attachTurnLedger, TurnLedger } from '../turn-ledger.ts';
 import { importLedgerHistory, paperclipHistory, type HistoryResult } from '../ledger-history.ts';
 import { LocalWorkspace, type Invoke, type LocalPart } from '../workspace-local.ts';
@@ -32,7 +37,6 @@ import { importFromPaperclip, planImport, SqliteImportStore } from '../paperclip
 import { buildDashboard, DASHBOARD_DAYS, ledgerAggregates, monthStart } from '../workspace-dashboard.ts';
 import type { DomainContext, DomainModule } from './types.ts';
 
-export const PAPERCLIP_SECRET_ID = 'paperclip-board-token';
 const POLL_MS = 15_000, POLL_MAX_MS = 60_000, EMIT_VISIBLE_MS = 1_000, EMIT_HIDDEN_MS = 5_000;
 /** Paperclip serves its issue lists from a 2 s cache that a change does not clear: a read right after an event can return the old list, so one more read follows once it has expired. */
 const SETTLE_MS = 2_400;
@@ -41,14 +45,12 @@ const NOISY = new Set(['heartbeat.run.log', 'heartbeat.run.event', 'heartbeat.ru
 /** Needs you + Problems: the only kinds that badge. */
 const URGENT = new Set(['question', 'approval', 'blocked', 'failed_run', 'agent_error', 'budget']);
 
-/** `tokenOrigin` is the origin the stored token was saved for: the token is sent to that origin and nowhere else. */
-interface StoredConfig { mode: PaperclipMode; baseUrl: string; companyId: string | null; tokenOrigin: string | null }
-const DEFAULT_CONFIG: StoredConfig = { mode: 'off', baseUrl: PAPERCLIP_LOCAL_URL, companyId: null, tokenOrigin: null };
-/** A Custom URL on this Mac (127.0.0.0/8, localhost, ::1) is a local Paperclip: its folder paths are this Mac's. */
-export const isLoopback = (baseUrl: unknown): boolean => { try { const host = new URL(normalizeBaseUrl(baseUrl)).hostname.replace(/^\[|\]$/g, '').toLowerCase(); return host === 'localhost' || host.endsWith('.localhost') || host === '::1' || /^127(\.\d{1,3}){3}$/.test(host); } catch { return false; } };
-const originOf = (baseUrl: unknown): string | null => { try { return new URL(normalizeBaseUrl(baseUrl)).origin; } catch { return null; } };
+/** Kept for callers that read it from here (tests, older code): the entry migrated Paperclip tokens stay in. */
+export const PAPERCLIP_SECRET_ID = LEGACY_PAPERCLIP_SECRET;
+/** A server on this Mac (127.0.0.0/8, localhost, ::1): its folder paths are this Mac's. */
+export const isLoopback = connectionLoopback;
 type Json = Record<string, unknown>;
-interface PaperclipPart { tasks: WorkspaceTask[]; agents: WorkspaceAgent[]; projects: WorkspaceProject[]; runs: WorkspaceSnapshot['runs']; inbox: WorkspaceInboxItem[]; goals: WorkspaceSnapshot['goals']; approvals: WorkspaceApproval[]; labels: NonNullable<WorkspaceSnapshot['labels']> }
+type PaperclipPart = ServerPart;
 
 export interface PaperclipDomainOptions {
   fetch?: FetchLike; socket?: SocketFactory; secrets?: () => SecretStore | undefined;
@@ -85,43 +87,29 @@ export function rankMemories(records: readonly MemoryRecord[], query: string, li
 
 export function createPaperclipDomain(context: DomainContext, options: PaperclipDomainOptions = {}): DomainModule {
   const timers = options.timers ?? { setTimeout, clearTimeout };
-  const secrets = () => options.secrets?.() ?? activeSecretStore() ?? new SecretStore(context.dataDir);
-  const configPath = join(context.dataDir, 'paperclip.json');
-  let config: StoredConfig = (() => {
-    try {
-      const raw = JSON.parse(readFileSync(configPath, 'utf8')) as Partial<StoredConfig>;
-      return { mode: raw.mode === 'local' || raw.mode === 'custom' ? raw.mode : 'off', baseUrl: typeof raw.baseUrl === 'string' ? raw.baseUrl : PAPERCLIP_LOCAL_URL, companyId: typeof raw.companyId === 'string' ? raw.companyId : null, tokenOrigin: typeof raw.tokenOrigin === 'string' ? raw.tokenOrigin : null };
-    } catch { return { ...DEFAULT_CONFIG }; }
-  })();
-  const saveConfig = (next: StoredConfig) => {
-    mkdirSync(context.dataDir, { recursive: true });
-    const temp = `${configPath}.${process.pid}.tmp`;
-    writeFileSync(temp, JSON.stringify(next, null, 2), { mode: 0o600 });
-    renameSync(temp, configPath);
-    config = next;
-  };
-  /** The stored token, only for the origin it was saved for; any other URL gets none. */
-  const tokenFor = (baseUrl: unknown): string | undefined => { const origin = originOf(baseUrl); return origin && origin === config.tokenOrigin ? secrets().get(PAPERCLIP_SECRET_ID) : undefined; };
-  const view = (): PaperclipConfigView => { const status = secrets().status(PAPERCLIP_SECRET_ID); return { mode: config.mode, baseUrl: config.mode === 'local' ? PAPERCLIP_LOCAL_URL : config.baseUrl, hasToken: status.stored && config.tokenOrigin !== null && config.tokenOrigin === originOf(config.baseUrl), secureStorage: status.secureStorage, companyId: config.companyId }; };
+  const conn = connectionFor(context, { fetch: options.fetch, secrets: options.secrets });
+  const secrets = () => conn.secrets();
+  const view = (): PaperclipConfigView => conn.view();
 
-  // --- the Paperclip connection ------------------------------------------------------------------------------------
-  let client: PaperclipClient | null = null;
-  const endpointFor = (mode: PaperclipMode, baseUrl: string, token: string | undefined) => ({ baseUrl: mode === 'local' ? PAPERCLIP_LOCAL_URL : normalizeBaseUrl(baseUrl), token: mode === 'custom' ? token : undefined });
-  const connection = (): PaperclipClient | null => {
-    if (config.mode === 'off') return null;
-    const endpoint = endpointFor(config.mode, config.baseUrl, tokenFor(config.baseUrl));
-    if (!client || client.endpoint.baseUrl !== endpoint.baseUrl || client.endpoint.token !== endpoint.token) { closeSocket(); client = new PaperclipClient(endpoint, options.fetch); built = null; }
-    return client;
+  // --- the server connection (Paperclip or Muster Server, whichever the URL is) ----------------------------------------------
+  let backend: ServerBackend | null = null;
+  /** The org's name on a Muster Server with no company of its own: "This Mac", or the server's host. */
+  const originLabel = (): string => { if (conn.config.mode === 'local') return 'This Mac'; try { return new URL(conn.config.baseUrl).host; } catch { return 'Muster Server'; } };
+  const connection = (): ServerBackend | null => {
+    const endpoint = conn.endpoint();
+    if (!endpoint) return null;
+    const kind = conn.config.backend ?? 'paperclip';
+    if (!backend || backend.kind !== kind || backend.endpoint.baseUrl !== endpoint.baseUrl || backend.endpoint.token !== endpoint.token) { closeSocket(); backend = conn.makeBackend(kind, endpoint, { orgName: originLabel() }); built = null; }
+    return backend;
   };
-  /** An approval an import carried over can be decided only while a Paperclip is linked (the decision goes to its approval endpoints). */
+  /** An approval an import carried over can be decided only while a server is linked (the decision goes to its approval endpoints). */
   const linkedApproval = (sourceId: string, projectId: string | null) => {
     if (!sourceId.startsWith('approval:') || !connection() || !projectId) return false;
     let source; try { source = imports()?.projectSource(projectId); } catch { return false; }
-    const linkedCompany = built?.companyId ?? config.companyId ?? companies[0]?.id ?? null;
+    const linkedCompany = built?.companyId ?? conn.config.companyId ?? companies[0]?.id ?? null;
     if (!source?.companyId || source.companyId !== linkedCompany) return false;
-    return !source.serverOrigin || source.serverOrigin === originOf(config.mode === 'local' ? PAPERCLIP_LOCAL_URL : config.baseUrl);
+    return !source.serverOrigin || source.serverOrigin === originOf(conn.baseUrl());
   };
-  const originLabel = () => config.mode === 'local' ? 'This Mac' : (() => { try { return new URL(config.baseUrl).host; } catch { return 'Paperclip'; } })();
 
   // --- Muster's side ---------------------------------------------------------------------------------------------------
   const remotes = new Map<string, Promise<string | undefined>>();
@@ -160,40 +148,21 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
   let built: { generation: number; companyId: string; part: PaperclipPart; agents: Map<string, WorkspaceAgent> } | null = null;
   let companies: PaperclipLink['companies'] = [];
   let inflight: Promise<PaperclipPart> | null = null, lastError: string | undefined;
-  const companyId = async (api: PaperclipClient): Promise<string> => {
-    companies = arr(await api.get<unknown>('/companies')).filter(c => c.status !== 'archived').map(mapCompany);
-    const chosen = companies.find(c => c.id === config.companyId) ?? companies[0];
-    if (!chosen) throw new PaperclipError('This Paperclip has no companies yet. Create one in Paperclip first.', 404, 'service');
-    return chosen.id;
+  const chooseCompany = async (api: ServerBackend) => {
+    companies = await api.companies();
+    const chosen = companies.find(c => c.id === conn.config.companyId) ?? companies[0];
+    if (!chosen) throw new PaperclipError('This Muster Server has no orgs yet. Create one on the server first.', 404, 'service');
+    return chosen;
   };
-  const readPaperclip = async (api: PaperclipClient): Promise<PaperclipPart> => {
-    const id = await companyId(api), base = `/companies/${encodeURIComponent(id)}`;
-    const [issues, agentsJson, projectsJson, goalsJson, runsJson, liveJson, attentionJson, approvalsJson, labelsJson] = await Promise.all([
-      allPages(api.issuePages(id, 'view=compact&includeBlockedBy=true')), api.get<unknown>(`${base}/agents`), api.get<unknown>(`${base}/projects`),
-      api.get<unknown>(`${base}/goals`).catch(() => []), api.get<unknown>(`${base}/heartbeat-runs?limit=60&summary=true`),
-      api.get<unknown>(`${base}/live-runs`).catch(() => []), api.get<unknown>(`${base}/attention`).catch(() => ({ items: [] })),
-      api.get<unknown>(`${base}/approvals`).catch(() => []), api.get<unknown>(`${base}/labels`).catch(() => []),
-    ]);
-    if (built && built.generation === api.generation && built.companyId === id) return built.part;
-    const agentList = arr(agentsJson).map(mapAgent), agents = new Map(agentList.map(a => [a.id, a]));
-    const runs = [...arr(liveJson), ...arr(runsJson)].map(mapRun).filter((run, index, all) => all.findIndex(r => r.id === run.id) === index).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-    const liveTasks = new Set(runs.filter(r => r.status === 'running' || r.status === 'queued').map(r => r.taskId).filter((t): t is string => Boolean(t)));
-    for (const agent of agentList) if (agent.status === 'active' && runs.some(r => r.agentId === agent.id && r.status === 'running')) agent.status = 'running';
-    const tasks = arr(issues).map(i => mapIssue(i, agents, liveTasks));
-    const company = companies.find(c => c.id === id) ?? null;
-    // Memory counts are added per snapshot (not here), so the light badge read never browses memory.
-    const projects = arr(projectsJson).map(p => mapProject(p, tasks));
-    const projectName = new Map(projects.map(p => [p.id, p.name]));
-    const inbox = buildInbox(arr((attentionJson as Json).items).map(mapAttention), tasks, runs, agents).map(item => {
-      const projectId = item.taskId ? tasks.find(t => t.id === item.taskId)?.projectId ?? null : null;
-      return { ...item, projectId, group: projectId ? projectName.get(projectId) ?? company?.name ?? 'Paperclip' : company?.name ?? 'Paperclip', source: 'paperclip' as const };
-    });
-    const approvals = arr(approvalsJson).filter(a => a.status === 'pending' || a.status === 'revision_requested').map(a => mapApproval(a, agents));
-    const labels = arr(labelsJson).map(l => ({ id: String(l.id), name: typeof l.name === 'string' ? l.name : 'Label', color: typeof l.color === 'string' ? l.color : null }));
-    const part: PaperclipPart = { tasks, agents: agentList, projects, runs, inbox, goals: arr(goalsJson).map(mapGoal), approvals, labels };
-    built = { generation: api.generation, companyId: id, part, agents };
+  const readPaperclip = async (api: ServerBackend): Promise<PaperclipPart> => {
+    const company = await chooseCompany(api);
+    const part = await api.read(company, built ? { generation: built.generation, companyId: built.companyId, part: built.part } : undefined);
+    if (built && built.part === part && built.companyId === company.id) return part;
+    built = { generation: api.generation, companyId: company.id, part, agents: new Map(part.agents.map(a => [a.id, a])) };
     return part;
   };
+  /** The connection changed (here, or by signing in from Settings): drop what was read from the old one and tell the screens. */
+  const offConnection = conn.onChange(() => { closeSocket(); stopPoll(); built = null; backend = null; companies = []; lastError = undefined; queueEmit(['config', 'tasks', 'runs', 'agents', 'inbox']); });
   /** Records the last read's outcome. Going offline (ok → stale) or coming back (stale → ok) is an update the screens
    *  must see at once: the banner and "· offline" come from it, so it is emitted rather than waiting for a reload. */
   const linkError = (next: string | undefined) => {
@@ -202,6 +171,7 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
     if (changed) queueEmit(['config', 'inbox', 'tasks']);
   };
   const paperclipPart = async (refresh: boolean): Promise<{ part: PaperclipPart | null; link: PaperclipLink | null }> => {
+    if (conn.config.mode !== 'off' && conn.config.backend === null) await conn.resolveBackend().catch(() => undefined);
     const api = connection();
     if (!api) return { part: null, link: null };
     if (refresh) api.invalidate();
@@ -256,7 +226,7 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
     let importedProjects = new Set<string>(); try { importedProjects = imports()?.importedSources('project') ?? importedProjects; } catch { /* no import store */ }
     const hidden = new Set((p?.projects ?? []).filter(x => importedProjects.has(x.id)).map(x => x.id));
     const theirTasks = (p?.tasks ?? []).filter(t => !t.projectId || !hidden.has(t.projectId));
-    const projects2 = projects.filter(x => !(x.source === 'paperclip' && hidden.has(x.id))).map(x => x.source === 'paperclip' ? { ...x, org: theirs.link?.company?.name ?? 'Paperclip' } : x);
+    const projects2 = projects.filter(x => !(x.source === 'paperclip' && hidden.has(x.id))).map(x => x.source === 'paperclip' ? { ...x, org: theirs.link?.company?.name ?? 'Muster Server' } : x);
     const tasks = [...mine.tasks, ...theirTasks], runs = [...mine.runs, ...(p?.runs ?? [])].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
     const rank = { high: 0, medium: 1, low: 2 } as const;
     // A Paperclip task already imported into Muster needs you once: its Muster copy stands for it in the Inbox and badge.
@@ -287,7 +257,7 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
     if (!has()) await paperclipPart(false);
     return has() || (kind === 'task' && /^[A-Z][A-Z0-9]*-\d+$/.test(id)) ? 'paperclip' : 'local';
   };
-  const api = (): PaperclipClient => { const c = connection(); if (!c) throw new Error('Paperclip is not linked. Link it in Settings › Integrations.'); return c; };
+  const api = (): ServerBackend => { const c = connection(); if (!c) throw new Error('Muster Server is not connected. Connect it in Settings › Integrations.'); return c; };
 
   // --- live updates -----------------------------------------------------------------------------------------------------
   const live = { channel: 'off' as LiveChannel, visible: false, socket: null as LiveSocket | null, socketCompany: '', pollTimer: null as ReturnType<typeof setTimeout> | null, settleTimer: null as ReturnType<typeof setTimeout> | null, pollDelay: POLL_MS, emitTimer: null as ReturnType<typeof setTimeout> | null, pending: new Set<string>(), taskIds: new Set<string>() };
@@ -320,26 +290,26 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
       schedulePoll();
     }, live.pollDelay);
   };
-  /** One socket while Paperclip is linked (an idle socket costs nothing); it feeds the Inbox badge even when no screen shows workspace data. */
+  /** One socket while a server is linked (an idle socket costs nothing); it feeds the Inbox badge even when no screen shows workspace data. */
   function ensureSocket() {
     const c = connection();
     if (!c || !built) return;
     if (live.socket && live.socketCompany === built.companyId) return;
     closeSocket();
-    const target = built.companyId;
+    const target = built.companyId, company = companies.find(x => x.id === target) ?? { id: target, name: originLabel(), prefix: '' };
     live.socketCompany = target;
-    live.socket = openLiveEvents(c, target, {
+    live.socket = c.openLive(company, {
       onOpen() { live.channel = 'socket'; stopPoll(); },
       onEvent(type, payload) {
         if (NOISY.has(type)) return;
         c.invalidate(`/companies/${encodeURIComponent(target)}`);
         const entity = typeof payload.entityType === 'string' ? payload.entityType : '';
-        const taskId = typeof payload.issueId === 'string' ? payload.issueId : entity === 'issue' && typeof payload.entityId === 'string' ? payload.entityId : undefined;
+        const taskId = typeof payload.issueId === 'string' ? payload.issueId : entity === 'issue' && typeof payload.entityId === 'string' ? payload.entityId : typeof payload.taskId === 'string' ? payload.taskId : undefined;
         if (taskId) c.invalidate(`/issues/${taskId}`);
-        queueEmit(type.startsWith('heartbeat.') ? ['runs', 'tasks', 'inbox'] : type === 'agent.status' ? ['agents', 'inbox'] : ['tasks', 'inbox'], taskId);
+        queueEmit(c.kind === 'muster-server' ? ['tasks', 'runs', 'agents', 'inbox'] : type.startsWith('heartbeat.') ? ['runs', 'tasks', 'inbox'] : type === 'agent.status' ? ['agents', 'inbox'] : ['tasks', 'inbox'], taskId);
         if (!live.settleTimer) live.settleTimer = timers.setTimeout(() => { live.settleTimer = null; c.invalidate(`/companies/${encodeURIComponent(target)}`); queueEmit(['tasks', 'inbox']); }, SETTLE_MS);
       },
-      // A live socket dropping is often the first sign Paperclip went away: tell the screens, which re-read and show it.
+      // A live socket dropping is often the first sign the server went away: tell the screens, which re-read and show it.
       // (A socket that never opened says nothing new, so a refused socket never wakes the renderer.)
       onDown() { const wasLive = live.channel === 'socket'; live.socket = null; live.socketCompany = ''; live.channel = 'off'; if (wasLive) queueEmit(['config']); schedulePoll(); },
     }, options.socket);
@@ -355,8 +325,7 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
     if (c) {
       await paperclipPart(false);
       if (built) {
-        const runs = await c.get<unknown>(`/companies/${encodeURIComponent(built.companyId)}/heartbeat-runs?limit=${Math.min(limit, 200)}`).catch(() => []);
-        const receipts = arr(runs).map(r => mapReceipt(r, built!.agents)), seen = new Set(receipts.map(r => r.runId));
+        const receipts = await c.receipts(companies.find(x => x.id === built!.companyId) ?? { id: built.companyId, name: originLabel(), prefix: '' }, limit, built.agents).catch(() => []), seen = new Set(receipts.map(r => r.runId));
         // An imported Paperclip run that the linked Paperclip still reports is shown once, as Paperclip's own receipt.
         entries = [...entries.filter(e => !(e.source === 'history' && e.chatId === null && seen.has(e.runId))), ...receipts];
       }
@@ -415,7 +384,7 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
     } else {
       const part = built?.part;
       const task = part?.tasks.find(t => t.id === taskId || t.key === taskId);
-      if (!task) throw new Error('That task is not in the linked Paperclip.');
+      if (!task) throw new Error('That task is not on the connected Muster Server.');
       title = task.title;
       const project = part?.projects.find(p => p.id === task.projectId);
       repo = project?.repo ?? null; cwd = project?.cwd ?? null; projectName = project?.name ?? null;
@@ -505,42 +474,10 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
   const paperclipDetail = async (taskId: string): Promise<WorkspaceTaskDetail> => {
     const c = api();
     await paperclipPart(false);
-    const agents = built?.agents ?? new Map<string, WorkspaceAgent>(), part = built?.part;
-    const key = encodeURIComponent(taskId);
-    const [issue, comments, runs, interactions, approvals, documents, products] = await Promise.all([
-      c.get<Json>(`/issues/${key}`), allPages(c.commentPages(taskId)), c.get<unknown>(`/issues/${key}/runs`).catch(() => []),
-      c.get<unknown>(`/issues/${key}/interactions`).catch(() => []), c.get<unknown>(`/issues/${key}/approvals`).catch(() => []),
-      c.get<unknown>(`/issues/${key}/documents`).catch(() => []), c.get<unknown>(`/issues/${key}/work-products`).catch(() => []),
-    ]);
-    // Documents with their revisions (a plan is the one with key `plan`), and the PRs, branches and artifacts agents produced.
-    const documentCards = await Promise.all(arr(documents).map(async d => mapDocument(d, Number(d.latestRevisionNumber) > 1 ? arr(await c.get<unknown>(`/issues/${key}/documents/${encodeURIComponent(String(d.key))}/revisions`).catch(() => [])) : [], agents)));
-    const liveTasks = new Set((part?.runs ?? []).filter(r => r.status === 'running').map(r => r.taskId).filter((t): t is string => Boolean(t)));
-    const task = mapIssue(issue, agents, liveTasks);
-    const taskRuns = arr(runs).map(mapRun);
-    if (taskRuns.some(r => r.status === 'running' || r.status === 'queued')) task.live = true;
-    const assignee = task.assigneeId ? agents.get(task.assigneeId) : undefined;
-    const children = (part?.tasks ?? []).filter(t => t.parentId === task.id);
-    const cards: ThreadCard[] = [
-      ...children.map(child => ({ kind: 'delegated' as const, id: `delegated:${child.id}`, at: child.createdAt, from: task.assigneeLabel ?? child.origin, to: child.assigneeLabel, taskId: child.id, key: child.key, title: child.title, brief: `${child.key} · ${child.title}` })),
-      ...arr(interactions).map(i => mapInteraction(i, agents)), ...documentCards, ...arr(products).map(mapWorkProduct),
-      ...arr(approvals).map(a => { const m = mapApproval(a, agents), open = a.status === 'pending' || a.status === 'revision_requested'; return { kind: 'approval' as const, id: `approval:${a.id}`, at: String(a.createdAt ?? ''), title: open ? m.title : String((a.payload as Json | undefined)?.title ?? (a.payload as Json | undefined)?.name ?? a.type ?? 'Approval'), status: String(a.status ?? 'pending'), ...(m.detail ? { detail: m.detail } : {}), requestedBy: m.requestedBy, ...(open ? { approvalId: String(a.id), verbs: m.verbs } : {}) }; }),
-    ];
-    // Hand-offs: when the task moved to another agent (or came from its parent's owner), carry the Muster memory with it.
-    const parent = task.parentId ? part?.tasks.find(t => t.id === task.parentId) : undefined;
-    if (parent && parent.assigneeLabel && task.assigneeLabel && parent.assigneeLabel !== task.assigneeLabel) {
-      const memory = await memoryFor(task.id).then(m => m.records.slice(0, 4).map(r => ({ text: r.text, source: r.source === 'hindsight' ? 'Hindsight' : m.scope.label })), () => []);
-      cards.push({ kind: 'handoff', id: `handoff:${task.id}`, at: task.createdAt, from: parent.assigneeLabel, to: task.assigneeLabel, summary: `${parent.key} → ${task.key}`, memory });
-    }
-    return {
-      task, description: typeof issue.description === 'string' ? issue.description : '', comments: arr(comments).filter(x => !x.deletedAt).map(x => mapComment(x, agents)),
-      runs: taskRuns.sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, 20),
-      addressee: assignee ? { id: assignee.id, label: assignee.name } : null,
-      composerNote: assignee ? null : 'Unassigned. Your comment is posted to the thread; @-mention an agent to bring it in.',
-      subtasks: children.map(t => t.id), blocking: (part?.tasks ?? []).filter(t => t.blockedByIds.includes(task.id)).map(t => t.id),
-      receipts: arr(runs).map(r => mapReceipt(r, agents)).sort((a, b) => b.endedAt.localeCompare(a.endedAt)).slice(0, 50),
-      cards: cards.sort((a, b) => a.at.localeCompare(b.at)),
-      mentionable: (part?.agents ?? []).filter(a => a.status !== 'terminated').map(a => ({ id: a.id, name: a.name })),
-    };
+    return c.taskDetail(taskId, {
+      agents: built?.agents ?? new Map<string, WorkspaceAgent>(), part: built?.part,
+      memory: id => memoryFor(id).then(m => m.records.slice(0, 4).map(r => ({ text: r.text, source: r.source === 'hindsight' ? 'Hindsight' : m.scope.label })), () => []),
+    });
   };
 
   // --- lists (Outputs, Ledger activity, Paperclip routines) -------------------------------------------------------------
@@ -582,9 +519,8 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
       try {
         await paperclipPart(false);
         if (!built) throw new Error(lastError ?? 'not reachable');
-        const base = `/companies/${encodeURIComponent(built.companyId)}`;
-        remote = mapRows(kind, await c.get<unknown>(kind === 'artifacts' ? `${base}/artifacts` : kind === 'audit' ? `${base}/activity?limit=150` : `${base}/routines`));
-      } catch (cause) { note = `Paperclip could not be read: ${cause instanceof Error ? cause.message : String(cause)}`; }
+        remote = await c.rows(kind, companies.find(x => x.id === built!.companyId) ?? { id: built.companyId, name: originLabel(), prefix: '' });
+      } catch (cause) { note = `Muster Server could not be read: ${cause instanceof Error ? cause.message : String(cause)}`; }
     }
     return { kind, rows: [...mine, ...remote].sort((a, b) => (b.at ?? '').localeCompare(a.at ?? '')).slice(0, 400), note };
   };
@@ -597,12 +533,19 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
     const asleep = (i: { id: string; at: string }) => { const m = meta.get(`ws:${i.id}`); return Boolean(m?.snoozedUntil && Date.parse(m.snoozedUntil) > Date.now() && m.snoozedFor === i.at); };
     const urgent = snap.inbox.filter(i => URGENT.has(i.kind) && hidden.get(`ws:${i.id}`) !== i.at && !asleep(i));
     let orgs: Record<string, string> = {}; try { orgs = imports()?.projectOrgs() ?? {}; } catch { /* no import store */ }
-    return { connected: Boolean(snap.paperclip), inbox: urgent.length, liveRuns: snap.counts.liveRuns, mail, chatIds: [...new Set(urgent.flatMap(i => i.chatIds ?? []))], company: snap.paperclip?.company?.name ?? companies.find(c => c.id === (config.companyId ?? companies[0]?.id))?.name ?? null, orgs };
+    return { connected: Boolean(snap.paperclip), inbox: urgent.length, liveRuns: snap.counts.liveRuns, mail, chatIds: [...new Set(urgent.flatMap(i => i.chatIds ?? []))], company: snap.paperclip?.company?.name ?? companies.find(c => c.id === (conn.config.companyId ?? companies[0]?.id))?.name ?? null, orgs };
   };
 
   /** Starts a Muster task's first run on its owner's runner, in a new worktree of the project's folder (never the checkout). */
   const startTask = async (taskId: string) => {
-    if (await owner('task', taskId) === 'paperclip') throw new Error('This task runs in Paperclip. Import it first to run it in Muster.');
+    if (await owner('task', taskId) === 'paperclip') {
+      // A Muster Server runs its own agents: starting is its command. Any other server's tasks run there.
+      const c = api();
+      if (!c.startTask) throw new Error('This task runs on the server. Import it first to run it here.');
+      const started = await c.startTask(taskId);
+      queueEmit(['tasks', 'runs'], taskId);
+      return started;
+    }
     const { project, view: task } = await local.projectFor(taskId);
     // Paused means nothing new starts until you resume, by hand or by the scheduler.
     if ((await context.invoke('project.work', { projectId: project.id, activityLimit: 1 })).scheduler.paused) throw new Error(`${project.name} is paused, so nothing new starts. Resume its agents first.`);
@@ -644,11 +587,11 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
     if (c && (!projectId || await owner('project', projectId) === 'paperclip')) {
       await paperclipPart(false);
       if (built) {
-        const base = `/companies/${encodeURIComponent(built.companyId)}`;
-        const [runs, activity, overview] = await Promise.all([c.get<unknown>(`${base}/heartbeat-runs?limit=200`).catch(() => []), c.get<unknown>(`${base}/activity?limit=12`).catch(() => []), c.get<unknown>(`${base}/budgets/overview`).catch(() => null)]);
-        if (overview) budgets = { ...mapBudgets(overview), company: companies.find(x => x.id === built?.companyId)?.name ?? 'Paperclip' };
+        const company = companies.find(x => x.id === built!.companyId) ?? { id: built.companyId, name: originLabel(), prefix: '' };
+        const remote = await c.dashboard(company, built.agents);
+        if (remote.budgets) budgets = { ...mapBudgets(remote.budgets), company: company.name };
         const inProject = projectId ? new Set(built.part.tasks.filter(t => t.projectId === projectId).map(t => t.id)) : null;
-        paperclip = { receipts: arr(runs).map(r => mapReceipt(r, built!.agents)).filter(r => !inProject || (r.taskId !== null && inProject.has(r.taskId))), tasks: built.part.tasks.filter(t => !projectId || t.projectId === projectId), activity: mapRows('audit', activity), name: companies.find(x => x.id === built?.companyId)?.name ?? 'Paperclip' };
+        paperclip = { receipts: remote.receipts.filter(r => !inProject || (r.taskId !== null && inProject.has(r.taskId))), tasks: built.part.tasks.filter(t => !projectId || t.projectId === projectId), activity: remote.activity, name: company.name };
       }
     }
     const [aggregates, stats] = [
@@ -664,54 +607,37 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
   const id = (value: unknown) => { if (typeof value !== 'string' || !/^[\w:.-]{1,128}$/.test(value)) throw new Error('Unknown item.'); return value; };
   const sourceOf = (value: unknown): WorkspaceSource => value === 'paperclip' ? 'paperclip' : 'local';
 
+  /** Where an import or its plan reads from: the saved connection, or what the form says (mode, URL, token), on whichever backend that URL is. */
+  const importSource = async (input: { mode?: unknown; baseUrl?: unknown; token?: unknown }) => {
+    const mode = input.mode === 'local' || input.mode === 'custom' ? input.mode : conn.config.mode === 'off' ? 'local' : conn.config.mode;
+    const typed = typeof input.baseUrl === 'string' ? input.baseUrl : conn.config.baseUrl;
+    const baseUrl = mode === 'local' ? (conn.config.mode === 'local' ? conn.baseUrl() : PAPERCLIP_LOCAL_URL) : normalizeUrl(typed);
+    const token = typeof input.token === 'string' && input.token ? input.token : conn.tokenFor(baseUrl);
+    const same = originOf(baseUrl) === originOf(conn.config.baseUrl) && conn.config.backend;
+    let kind = same ? conn.config.backend! : null;
+    if (!kind) { const found = await detectBackend(baseUrl, conn.fetcher); kind = found.ok ? found.kind : 'paperclip'; /* inconclusive: read it as the REST server it most likely is; a real failure surfaces from the first read */ }
+    const reader = conn.makeBackend(kind, { baseUrl, token }, { cache: false, orgName: originLabel() }).importReader();
+    return { reader, baseUrl, mode, onThisMac: mode === 'local' || isLoopback(baseUrl) };
+  };
+
   return {
     handlers: {
       'paperclip.config.get': () => view(),
       'paperclip.config.set': input => {
-        const mode = input.mode === 'local' || input.mode === 'custom' ? input.mode : 'off';
-        const baseUrl = mode === 'custom' ? normalizeBaseUrl(input.baseUrl) : mode === 'local' ? PAPERCLIP_LOCAL_URL : config.baseUrl;
-        // A token belongs to one custom origin. This Mac needs none, so a token sent with another mode is ignored; moving
-        // to a different origin without a new token forgets the old one rather than sending it to the new host.
-        let tokenOrigin = config.tokenOrigin;
-        const forget = () => { if (secrets().status(PAPERCLIP_SECRET_ID).stored) secrets().clear(PAPERCLIP_SECRET_ID); tokenOrigin = null; };
-        if (input.token === '') forget();
-        else if (mode === 'custom' && typeof input.token === 'string') { secrets().set(PAPERCLIP_SECRET_ID, input.token); tokenOrigin = originOf(baseUrl); }
-        else if (mode === 'custom' && tokenOrigin !== originOf(baseUrl)) forget();
-        const companyId = input.companyId === null ? null : typeof input.companyId === 'string' ? id(input.companyId) : config.companyId;
-        saveConfig({ mode, baseUrl, companyId, tokenOrigin });
-        closeSocket(); stopPoll(); built = null; client = null; companies = []; lastError = undefined;
+        const next = conn.configure(input as never);
+        closeSocket(); stopPoll(); built = null; backend = null; companies = []; lastError = undefined;
         queueEmit(['config', 'tasks', 'runs', 'agents', 'inbox']);
-        return view();
+        return next;
       },
-      'paperclip.test': async (input): Promise<PaperclipTestResult> => {
-        const mode = input.mode === 'local' || input.mode === 'custom' || input.mode === 'off' ? input.mode : config.mode;
-        if (mode === 'off') return { ok: true, stage: 'ok', message: 'Paperclip is not linked. Projects show Muster’s own work only.' };
-        let endpoint;
-        const baseUrl = typeof input.baseUrl === 'string' ? input.baseUrl : config.baseUrl;
-        try { endpoint = endpointFor(mode, baseUrl, typeof input.token === 'string' && input.token ? input.token : tokenFor(baseUrl)); }
-        catch (cause) { return { ok: false, stage: 'config', message: cause instanceof Error ? cause.message : String(cause) }; }
-        const probe = new PaperclipClient(endpoint, options.fetch), started = Date.now();
-        // A token over plain http to another machine crosses the network in clear text: say so, but let the test run.
-        const warning = mode === 'custom' && new URL(endpoint.baseUrl).protocol === 'http:' && !isLoopback(endpoint.baseUrl)
-          ? `${endpoint.token ? 'Your API token' : 'An API token added here'} would be sent over plain http to ${new URL(endpoint.baseUrl).host}, readable by anyone on the network. Use an https:// address.` : undefined;
-        try {
-          const health = await probe.get<Json>('/health');
-          const list = arr(await probe.get<unknown>('/companies')).map(mapCompany);
-          const deploymentMode = typeof health.deploymentMode === 'string' ? health.deploymentMode : undefined;
-          return { ok: true, stage: 'ok', ...(warning ? { warning } : {}), latencyMs: Date.now() - started, version: typeof health.version === 'string' ? health.version : undefined, deploymentMode, companies: list,
-            message: `Connected to Paperclip ${health.version ?? ''} (${deploymentMode === 'local_trusted' ? 'local, no sign-in' : deploymentMode ?? 'unknown mode'}). ${list.length} ${list.length === 1 ? 'company' : 'companies'}.`.replace('  ', ' ') };
-        } catch (cause) {
-          return { ok: false, stage: cause instanceof PaperclipError ? cause.stage : 'network', ...(warning ? { warning } : {}), message: cause instanceof Error ? cause.message : String(cause), latencyMs: Date.now() - started };
-        }
-      },
+      'paperclip.test': input => conn.test(input),
       'paperclip.snapshot': input => snapshot(input.refresh === true),
       'paperclip.task': async input => { const taskId = id(input.id); return await owner('task', taskId) === 'paperclip' ? paperclipDetail(taskId) : localDetail(taskId); },
       'paperclip.comment': async input => {
         const taskId = id(input.taskId), body = text(input.body, 'Message', 20_000);
         if (await owner('task', taskId) === 'local') { const comment = await local.comment(taskId, body); queueEmit(['tasks'], taskId); return comment; }
-        const created = await api().send<Json>('POST', `/issues/${encodeURIComponent(taskId)}/comments`, { body });
+        const created = await api().comment(taskId, body, built?.agents ?? new Map());
         queueEmit(['tasks'], taskId);
-        return mapComment(created, built?.agents ?? new Map());
+        return created;
       },
       'paperclip.task.update': async input => {
         const taskId = id(input.taskId), changes: Json = {};
@@ -728,9 +654,9 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
           return local.setStatus(taskId, changes.status as WorkspaceStatus);
         }
         // Only what you changed is sent: Paperclip's own PATCH, user-initiated.
-        const updated = await api().send<Json>('PATCH', `/issues/${encodeURIComponent(taskId)}`, changes);
+        const updated = await api().updateTask(taskId, changes as never, built?.agents ?? new Map());
         queueEmit(['tasks', 'inbox'], taskId);
-        return mapIssue(updated, built?.agents ?? new Map(), new Set());
+        return updated;
       },
       'paperclip.task.create': async input => {
         const projectId = typeof input.projectId === 'string' && input.projectId ? id(input.projectId) : null;
@@ -743,21 +669,15 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
           try { return { ...task, started: await startTask(task.id) }; }
           catch (cause) { return { ...task, startError: cause instanceof Error ? cause.message : String(cause) }; }
         }
-        const title = text(input.title, 'Title', 500), c = api();
-        const body: Json = { title, status: 'todo', description: typeof input.description === 'string' ? input.description.slice(0, 20_000) : '', projectId };
-        if (typeof input.priority === 'string' && ['critical', 'high', 'medium', 'low'].includes(input.priority)) body.priority = input.priority;
-        if (typeof input.parentId === 'string' && input.parentId) body.parentId = id(input.parentId);
-        if (typeof input.assigneeId === 'string' && input.assigneeId && !input.assigneeId.startsWith('user:')) body.assigneeAgentId = id(input.assigneeId);
-        // Labels, a goal and the tasks that block this one: Paperclip's own fields on create.
-        if (Array.isArray(input.labelIds) && input.labelIds.length) body.labelIds = [...new Set(input.labelIds.slice(0, 20).map(v => id(v)))];
-        if (typeof input.goalId === 'string' && input.goalId) body.goalId = id(input.goalId);
-        if (Array.isArray(input.blockedByIds) && input.blockedByIds.length) body.blockedByIssueIds = [...new Set(input.blockedByIds.slice(0, 50).map(v => id(v)))];
-        const created = await c.send<Json>('POST', `/companies/${encodeURIComponent(built!.companyId)}/issues`, body);
+        text(input.title, 'Title', 500);
+        await paperclipPart(false);
+        const company = companies.find(x => x.id === built?.companyId) ?? { id: built?.companyId ?? '', name: originLabel(), prefix: '' };
+        const created = await api().createTask({ ...(input as never as Record<string, unknown>), projectId } as never, company, built?.agents ?? new Map());
         queueEmit(['tasks', 'inbox']);
-        return mapIssue(created, built?.agents ?? new Map(), new Set());
+        return created;
       },
-      'paperclip.agent.pause': async input => { const agentId = id(input.id); if (await owner('agent', agentId) === 'local') await local.setPaused(agentId, true); else await api().send('POST', `/agents/${encodeURIComponent(agentId)}/pause`); queueEmit(['agents', 'runs']); return { ok: true }; },
-      'paperclip.agent.resume': async input => { const agentId = id(input.id); if (await owner('agent', agentId) === 'local') await local.setPaused(agentId, false); else await api().send('POST', `/agents/${encodeURIComponent(agentId)}/resume`); queueEmit(['agents', 'runs']); return { ok: true }; },
+      'paperclip.agent.pause': async input => { const agentId = id(input.id); if (await owner('agent', agentId) === 'local') await local.setPaused(agentId, true); else await api().pauseAgent(agentId); queueEmit(['agents', 'runs']); return { ok: true }; },
+      'paperclip.agent.resume': async input => { const agentId = id(input.id); if (await owner('agent', agentId) === 'local') await local.setPaused(agentId, false); else await api().resumeAgent(agentId); queueEmit(['agents', 'runs']); return { ok: true }; },
       'paperclip.pauseAll': async input => {
         if (sourceOf(input.source) === 'local') {
           // One project's Roster (from a project page) or every project's scheduler (the hub). Only what is paused here is remembered.
@@ -774,7 +694,7 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
         // An agent already paused, still waiting for approval, or terminated is left exactly as it is.
         const agents = (built?.part.agents ?? []).filter(a => a.status !== 'paused' && a.status !== 'terminated' && a.status !== 'pending');
         const paused: string[] = [];
-        try { for (const agent of agents) { await c.send('POST', `/agents/${encodeURIComponent(agent.id)}/pause`); paused.push(agent.id); } }
+        try { for (const agent of agents) { await c.pauseAgent(agent.id); paused.push(agent.id); } }
         finally { if (built) recordPaused(`paperclip:${built.companyId}`, paused); }
         queueEmit(['agents', 'runs']);
         return { changed: paused.length };
@@ -795,25 +715,24 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
         const scope = `paperclip:${built?.companyId ?? ''}`, only = pausedSet(scope);
         // Only what Pause stopped wakes: with no record there is nothing of ours to resume (an agent you paused stays paused).
         const agents = (built?.part.agents ?? []).filter(a => a.status === 'paused' && (only ?? []).includes(a.id));
-        for (const agent of agents) await c.send('POST', `/agents/${encodeURIComponent(agent.id)}/resume`);
+        for (const agent of agents) await c.resumeAgent(agent.id);
         forgetPaused(scope);
         queueEmit(['agents', 'runs']);
         return { changed: agents.length };
       },
       'paperclip.approval.decide': async input => {
         const approvalId = id(input.id), decision = input.decision as ApprovalDecision;
-        const path = decision === 'approve' ? 'approve' : decision === 'reject' ? 'reject' : decision === 'request_revision' ? 'request-revision' : null;
-        if (!path) throw new Error('Unknown decision.');
+        if (decision !== 'approve' && decision !== 'reject' && decision !== 'request_revision') throw new Error('Unknown decision.');
         const note = typeof input.note === 'string' && input.note.trim() ? input.note.trim().slice(0, 4000) : null;
         if (decision === 'request_revision' && !note) throw new Error('Say what should change.');
-        // Only ever sent when you press the button: Paperclip's own approval endpoints.
-        await api().send('POST', `/approvals/${encodeURIComponent(approvalId)}/${path}`, { decisionNote: note });
-        // The decision is Paperclip's now; what an import recorded about it follows (so the Inbox row clears at once).
+        // Only ever sent when you press the button: the server's own approval endpoints.
+        await api().decideApproval(approvalId, decision, note);
+        // The decision is the server's now; what an import recorded about it follows (so the Inbox row clears at once).
         try { imports()?.decideHistory(`approval:${approvalId}`, decision === 'approve' ? 'approved' : decision === 'reject' ? 'rejected' : 'revision_requested', note ?? '', decision === 'request_revision'); } catch { /* nothing imported */ }
         queueEmit(['tasks', 'inbox', 'agents']);
         return { ok: true as const };
       },
-      'paperclip.run.cancel': async input => { const runId = id(input.id); if (await owner('run', runId) === 'local') await local.cancelRun(runId); else await api().send('POST', `/heartbeat-runs/${encodeURIComponent(runId)}/cancel`); queueEmit(['runs', 'tasks']); return { ok: true }; },
+      'paperclip.run.cancel': async input => { const runId = id(input.id); if (await owner('run', runId) === 'local') await local.cancelRun(runId); else await api().cancelRun(runId); queueEmit(['runs', 'tasks']); return { ok: true }; },
       'paperclip.interaction.respond': async input => {
         const taskId = id(input.taskId), interactionId = id(input.interactionId);
         const reason = typeof input.reason === 'string' ? input.reason.slice(0, 4000) : undefined;
@@ -828,31 +747,28 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
             return { questionId: key(answer.questionId), optionIds, ...(otherText ? { otherText } : {}) };
           });
           if (!answers.length) throw new Error('Answer every question.');
-          await api().send('POST', `/issues/${encodeURIComponent(taskId)}/interactions/${encodeURIComponent(interactionId)}/respond`, { answers });
+          await api().respond(taskId, interactionId, { accept: true, answers });
           queueEmit(['tasks', 'inbox'], taskId);
           return { ok: true };
         }
-        await api().send('POST', `/issues/${encodeURIComponent(taskId)}/interactions/${encodeURIComponent(interactionId)}/${input.accept === true ? 'accept' : 'reject'}`, input.accept === true ? {} : { ...(reason ? { reason } : {}) });
+        await api().respond(taskId, interactionId, { accept: input.accept === true, ...(reason ? { reason } : {}) });
         queueEmit(['tasks', 'inbox'], taskId);
         return { ok: true };
       },
       'paperclip.import': async input => {
-        const mode = input.mode === 'local' || input.mode === 'custom' ? input.mode : config.mode === 'off' ? 'local' : config.mode;
-        const baseUrl = typeof input.baseUrl === 'string' ? input.baseUrl : config.baseUrl;
-        // The importer reads each page once: it keeps no parsed bodies, so a large org never sits in memory twice.
-        const reader = new PaperclipClient(endpointFor(mode, baseUrl, typeof input.token === 'string' && input.token ? input.token : tokenFor(baseUrl)), options.fetch, { cache: false });
+        const { reader, baseUrl, onThisMac } = await importSource(input);
+        // The importer reads each page once (see PaperclipBackend.importReader): it keeps no parsed bodies, so a large org never sits in memory twice.
         const store = imports();
         if (!store) throw new Error('The import store is unavailable.');
-        let target = typeof input.companyId === 'string' ? id(input.companyId) : config.companyId;
-        if (!target) target = String(arr(await reader.get<unknown>('/companies'))[0]?.id ?? '');
-        if (!target) throw new Error('That Paperclip has no companies to import.');
-        // GET only: the importer is handed nothing that can write to Paperclip.
-        // Folder paths and CODEX_HOME are this Mac's only when Paperclip runs here (This Mac, or a Custom URL on loopback);
+        let target = typeof input.companyId === 'string' ? id(input.companyId) : conn.config.companyId;
+        if (!target) target = String(arr(await reader.get('/companies'))[0]?.id ?? '');
+        if (!target) throw new Error('That Muster Server has no orgs to import.');
+        // GET only: the importer is handed nothing that can write to the server.
+        // Folder paths and CODEX_HOME are this Mac's only when the server runs here (This Mac, or a Custom URL on loopback);
         // a remote server's paths are never touched.
         const targets = input.targets && typeof input.targets === 'object' ? Object.fromEntries(Object.entries(input.targets).filter(([k, v]) => /^[\w:.-]{1,128}$/.test(k) && v === 'skip').map(([k]) => [k, 'skip' as const])) : undefined;
         const owners = input.owners && typeof input.owners === 'object' ? Object.fromEntries(Object.entries(input.owners).filter(([k, v]) => /^[\w:.-]{1,128}$/.test(k) && (v === 'mine' || v === 'made')).map(([k, v]) => [k, v as 'mine' | 'made'])) : undefined;
-        const onThisMac = mode === 'local' || isLoopback(baseUrl);
-        const report = await importFromPaperclip(target, { get: path => reader.get<unknown>(path), issuePages: (company, query) => reader.issuePages(company, query), commentPages: issue => reader.commentPages(issue), invoke: context.invoke as Invoke, store, folders, exists: path => existsSync(path), local: onThisMac, serverOrigin: originOf(mode === 'local' ? PAPERCLIP_LOCAL_URL : baseUrl) ?? undefined, ...(owners ? { owners } : {}), remoteOf, ...(targets ? { targets } : {}), ...(onThisMac ? { codexHome: codexHomeOf } : {}) });
+        const report = await importFromPaperclip(target, { get: path => reader.get(path), issuePages: (company, query) => reader.issuePages(company, query), commentPages: issue => reader.commentPages(issue), invoke: context.invoke as Invoke, store, folders, exists: path => existsSync(path), local: onThisMac, serverOrigin: originOf(baseUrl) ?? undefined, ...(owners ? { owners } : {}), remoteOf, ...(targets ? { targets } : {}), ...(onThisMac ? { codexHome: codexHomeOf } : {}) });
         queueEmit(['tasks', 'agents', 'inbox']);
         // The imported runs show in the Ledger as imported history (#190).
         try { if (ledger().importHistory(paperclipHistory(context.db()))) queueEmit(['runs']); } catch { /* the Ledger never fails an import */ }
@@ -861,13 +777,11 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
       'paperclip.task.start': input => startTask(id(input.taskId)),
       'paperclip.dashboard': input => dashboard(typeof input.utcOffsetMinutes === 'number' ? Math.max(-840, Math.min(840, input.utcOffsetMinutes)) : 0, typeof input.projectId === 'string' && input.projectId ? id(input.projectId) : undefined),
       'paperclip.import.plan': async input => {
-        const mode = input.mode === 'local' || input.mode === 'custom' ? input.mode : config.mode === 'off' ? 'local' : config.mode;
-        const baseUrl = typeof input.baseUrl === 'string' ? input.baseUrl : config.baseUrl;
-        const reader = new PaperclipClient(endpointFor(mode, baseUrl, typeof input.token === 'string' && input.token ? input.token : tokenFor(baseUrl)), options.fetch, { cache: false });
+        const { reader, onThisMac } = await importSource(input);
         const store = imports();
         if (!store) throw new Error('The import store is unavailable.');
         // GET only, and nothing is written: a preview of what the import would make.
-        return planImport(typeof input.companyId === 'string' ? id(input.companyId) : config.companyId, { get: path => reader.get<unknown>(path), issuePages: (company, query) => reader.issuePages(company, query), invoke: context.invoke as Invoke, store, local: mode === 'local' || isLoopback(baseUrl) });
+        return planImport(typeof input.companyId === 'string' ? id(input.companyId) : conn.config.companyId, { get: path => reader.get(path), issuePages: (company, query) => reader.issuePages(company, query), invoke: context.invoke as Invoke, store, local: onThisMac });
       },
       'paperclip.memory': input => memoryFor(id(input.taskId)),
       'paperclip.list': input => {
@@ -895,7 +809,7 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
       'paperclip.inbox.restore': input => { dismissDb().prepare('DELETE FROM inbox_dismissals WHERE id = ?').run(id(input.id)); queueEmit(['inbox']); return { ok: true as const }; },
       'paperclip.inbox.dismissed': () => ({ items: [...dismissed()].map(([itemId, at]) => ({ id: itemId, at })) }),
     },
-    dispose() { history.disposed = true; if (history.timer) timers.clearTimeout(history.timer); history.timer = null; offLedger(); closeSocket(); stopPoll(); if (live.emitTimer) timers.clearTimeout(live.emitTimer); live.emitTimer = null; },
+    dispose() { history.disposed = true; if (history.timer) timers.clearTimeout(history.timer); history.timer = null; offLedger(); offConnection(); closeSocket(); stopPoll(); if (live.emitTimer) timers.clearTimeout(live.emitTimer); live.emitTimer = null; },
     power(event) { if (event.state === 'suspend') { closeSocket(); stopPoll(); } else if (live.visible) { ensureSocket(); if (!live.socket) schedulePoll(); } },
   };
 }

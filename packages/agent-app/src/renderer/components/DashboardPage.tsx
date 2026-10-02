@@ -64,7 +64,7 @@ export function DashboardPage({ snapshot, nav, projectId }: { snapshot: Workspac
   const tasks = useMemo(() => new Map(snapshot.tasks.map(t => [t.id, t])), [snapshot.tasks]);
   const recent = useMemo(() => [...snapshot.tasks].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).slice(0, 10), [snapshot.tasks]);
   return <div className={`ws-page dash${projectId ? ' is-embedded' : ''}`}>
-    {!projectId && <PageHeader title={NAMES.dashboard} detail="What your agents are doing, what it costs, and how the last two weeks went, across Muster and Paperclip."/>}
+    {!projectId && <PageHeader title={NAMES.dashboard} detail="What your agents are doing, what it costs, and how the last two weeks went, across your projects and your server."/>}
     <section className="ws-section" aria-label="Agents">
       <h2 className="dash-label">Agents</h2>
       {cards.length === 0 ? <ResourceState kind="empty" compact icon={<Bot size={18}/>} message={snapshot.agents.some(a => a.role !== 'board') ? 'No agent has run yet. Start a task from a project and it shows here while it works.' : `No agents yet. Add one on a project’s ${NAMES.roster} tab.`}>

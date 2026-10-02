@@ -22,10 +22,10 @@ const MAX_PAGES = 400;
 
 /** `https://host:port/base` with no trailing slash; refuses anything that is not http(s) or carries credentials. */
 export function normalizeBaseUrl(value: unknown): string {
-  if (typeof value !== 'string' || !value.trim()) throw new Error('Enter the Paperclip URL, for example https://paperclip.example.com.');
+  if (typeof value !== 'string' || !value.trim()) throw new Error('Enter the Muster Server URL, for example https://muster.example.com.');
   let url: URL;
   try { url = new URL(value.trim()); } catch { throw new Error('That is not a valid URL. Include http:// or https://.'); }
-  if (url.protocol !== 'http:' && url.protocol !== 'https:') throw new Error('Paperclip URLs start with http:// or https://.');
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') throw new Error('Server URLs start with http:// or https://.');
   if (url.username || url.password) throw new Error('Put the API token in the token field, not in the URL.');
   url.hash = ''; url.search = '';
   return url.toString().replace(/\/+$/, '').replace(/\/api$/, '');
@@ -37,7 +37,7 @@ export class PaperclipClient {
   /** Bumped whenever any GET returned a new body (not a 304), so callers can skip rebuilding views. */
   generation = 0;
   /** `cache: false` keeps no parsed bodies (an importer reads each page once and must not hold a large org in memory). */
-  constructor(readonly endpoint: PaperclipEndpoint, private readonly fetcher: FetchLike = (input, init) => fetch(input, init), private readonly options: { cache?: boolean } = {}) {}
+  constructor(readonly endpoint: PaperclipEndpoint, readonly fetcher: FetchLike = (input, init) => fetch(input, init), private readonly options: { cache?: boolean } = {}) {}
 
   private headers(extra: Record<string, string> = {}): Record<string, string> {
     return { accept: 'application/json', ...(this.endpoint.token ? { authorization: `Bearer ${this.endpoint.token}` } : {}), ...extra };
@@ -52,11 +52,11 @@ export class PaperclipClient {
       });
     } catch (cause) {
       const reason = cause instanceof Error && cause.name === 'TimeoutError' ? 'timed out' : 'is not reachable';
-      throw new PaperclipError(`Paperclip at ${this.endpoint.baseUrl} ${reason}.`, 0, 'network');
+      throw new PaperclipError(`Muster Server at ${this.endpoint.baseUrl} ${reason}.`, 0, 'network');
     }
     if (response.status === 401 || response.status === 403) {
       const detail = await response.text().catch(() => '');
-      throw new PaperclipError(this.endpoint.token ? `Paperclip refused the API token (${response.status}).${detail ? ` ${short(detail)}` : ''}` : 'This Paperclip needs an API token. Create one with `paperclipai token board create` and paste it in Settings.', response.status, 'auth');
+      throw new PaperclipError(this.endpoint.token ? `Muster Server refused the API token (${response.status}).${detail ? ` ${short(detail)}` : ''}` : 'This Muster Server needs an API token. Create one on the server and paste it in Settings › Integrations.', response.status, 'auth');
     }
     return response;
   }
@@ -65,7 +65,7 @@ export class PaperclipClient {
     const cached = this.cache.get(path);
     const response = await this.request('GET', path, undefined, cached ? { 'if-none-match': cached.etag } : {});
     if (response.status === 304 && cached) return cached.body as T;
-    if (!response.ok) throw new PaperclipError(`Paperclip answered ${response.status} for ${path.split('?')[0]}.${await errorText(response)}`, response.status, 'service');
+    if (!response.ok) throw new PaperclipError(`Muster Server answered ${response.status} for ${path.split('?')[0]}.${await errorText(response)}`, response.status, 'service');
     const body = await readJson<T>(response, path);
     const etag = response.headers.get('etag');
     this.generation++;
@@ -107,7 +107,7 @@ export class PaperclipClient {
 
   async send<T>(method: 'POST' | 'PATCH', path: string, body: unknown = {}): Promise<T> {
     const response = await this.request(method, path, body);
-    if (!response.ok) throw new PaperclipError(`Paperclip refused the change (${response.status}).${await errorText(response)}`, response.status, 'service');
+    if (!response.ok) throw new PaperclipError(`Muster Server refused the change (${response.status}).${await errorText(response)}`, response.status, 'service');
     this.cache.clear();
     this.generation++;
     const text = await response.text();
@@ -127,8 +127,8 @@ export class PaperclipClient {
 
 /** A 200 that is a web page (a SPA, a proxy's login screen) means the URL is not a Paperclip API; one that is cut off or is not JSON
  *  at all means Paperclip answered with something Muster cannot read. Either way: a sentence, never a parse error. */
-const notPaperclip = (path: string) => new PaperclipError(`This URL isn’t a Paperclip API: ${path.split('?')[0]} answered with a web page, not JSON. Check the address (use the Paperclip server’s own URL, for example https://paperclip.example.com).`, 200, 'service');
-const unreadable = (path: string) => new PaperclipError(`Paperclip sent a reply for ${path.split('?')[0]} that Muster could not read (it was cut off or damaged on the way). The last good copy stays on screen; it will refresh when Paperclip answers properly.`, 200, 'service');
+const notPaperclip = (path: string) => new PaperclipError(`This URL isn’t a Muster Server API: ${path.split('?')[0]} answered with a web page, not JSON. Check the address (use the server’s own URL, for example https://muster.example.com).`, 200, 'service');
+const unreadable = (path: string) => new PaperclipError(`Muster Server sent a reply for ${path.split('?')[0]} that Muster could not read (it was cut off or damaged on the way). The last good copy stays on screen; it will refresh when the server answers properly.`, 200, 'service');
 const badBody = (text: string, path: string) => /^\s*</.test(text) ? notPaperclip(path) : unreadable(path);
 async function readJson<T>(response: Response, path: string): Promise<T> {
   const text = await response.text();

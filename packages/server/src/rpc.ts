@@ -5,7 +5,7 @@
  */
 import { randomUUID } from 'node:crypto';
 import type { Snapshot } from '../../agent-app/src/shared/protocol.ts';
-import { accessView, authorizeResource, filterOutput, type AccessView } from './access.ts';
+import { accessView, authorizeResource, canWriteProject, filterOutput, type AccessView } from './access.ts';
 import type { Accounts, Principal } from './auth/accounts.ts';
 import { AuthError, publicUser, RANK } from './auth/accounts.ts';
 import type { AuditLog } from './audit.ts';
@@ -50,10 +50,28 @@ export async function dispatch(ctx: RpcContext, principal: Principal, command: u
   const view = await viewFor(ctx, user);
   const snapshot: Snapshot = view.all ? ctx.runtime.cachedSnapshot() : await ctx.runtime.snapshot(true);
   authorizeResource(view, name, cls, input, snapshot);
+  await authorizeWorkspaceWrite(ctx, view, name, input);
   const startedAt = new Date().toISOString();
   const output = await ctx.runtime.invoke(name, input);
   await afterCommand(ctx, user, name, input, output, startedAt);
   return filterOutput(view, name, output, view.all ? snapshot : await ctx.runtime.snapshot(true));
+}
+
+/** Commands that act on a workspace task or run by id (the desktop's Muster Server connection): the person needs write access to the task's project. */
+const TASK_WRITES: Record<string, string> = { 'paperclip.comment': 'taskId', 'paperclip.task.update': 'taskId', 'paperclip.task.start': 'taskId', 'paperclip.interaction.respond': 'taskId' };
+async function authorizeWorkspaceWrite(ctx: RpcContext, view: AccessView, command: string, input: unknown): Promise<void> {
+  if (view.all || (command !== 'paperclip.run.cancel' && !(command in TASK_WRITES))) return;
+  const i = (input && typeof input === 'object' ? input : {}) as Record<string, unknown>;
+  const refuse = () => { throw new PolicyError('You do not have write access to this task.', 403, 'forbidden'); };
+  let projectId: string | null | undefined;
+  try {
+    if (command === 'paperclip.run.cancel') {
+      const snap = await ctx.runtime!.invoke('paperclip.snapshot', {}) as { runs: Array<{ id: string; taskId: string | null }>; tasks: Array<{ id: string; projectId: string | null }> };
+      const run = snap.runs.find(r => r.id === i[ 'id' ]);
+      projectId = snap.tasks.find(t => t.id === run?.taskId)?.projectId;
+    } else projectId = ((await ctx.runtime!.invoke('paperclip.task', { id: String(i[TASK_WRITES[command]!] ?? '') })) as { task: { projectId: string | null } }).task.projectId;
+  } catch { refuse(); }
+  if (!canWriteProject(view, projectId)) refuse();
 }
 
 async function afterCommand(ctx: RpcContext, user: UserRecord, command: string, input: unknown, output: unknown, at: string) {

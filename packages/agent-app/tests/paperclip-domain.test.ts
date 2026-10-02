@@ -6,7 +6,8 @@ import {mkdtemp,readFile,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {test,type TestContext} from 'node:test';
-import {createPaperclipDomain,isLoopback,rankMemories,PAPERCLIP_SECRET_ID} from '../src/runtime/domains/paperclip.ts';
+import {createPaperclipDomain,isLoopback,rankMemories} from '../src/runtime/domains/paperclip.ts';
+import {SERVER_SECRET as PAPERCLIP_SECRET_ID} from '../src/runtime/server/config.ts';
 import {normalizeBaseUrl} from '../src/runtime/paperclip-client.ts';
 import {SqliteImportStore} from '../src/runtime/paperclip-import.ts';
 import {buildInbox,mapAttention,mapInteraction,mapIssue,mapRoutine} from '../src/runtime/paperclip-map.ts';
@@ -45,7 +46,7 @@ function paperclip(){
   };
   const fetch=async(input:string,init:RequestInit={})=>{
     const url=new URL(input),headers=Object.fromEntries(Object.entries((init.headers??{}) as Record<string,string>).map(([k,v])=>[k.toLowerCase(),v]));
-    calls.push({method:init.method??'GET',url:url.pathname+url.search,headers,body:init.body?JSON.parse(String(init.body)):undefined});
+    if(!headers['x-muster-probe'])calls.push({method:init.method??'GET',url:url.pathname+url.search,headers,body:init.body?JSON.parse(String(init.body)):undefined});
     if(init.method&&init.method!=='GET')return new Response(JSON.stringify(url.pathname.endsWith('/comments')?{id:'new',body:(JSON.parse(String(init.body)) as {body:string}).body,authorUserId:'local-board',createdAt:now}:url.pathname.startsWith('/api/issues/')?{...issues[0],...(JSON.parse(String(init.body)) as object)}:{}),{status:200});
     const route=routes[url.pathname];
     if(!route)return new Response('{"error":"not found"}',{status:404});
@@ -77,7 +78,7 @@ test('a custom deployment sends its board token as a Bearer header; the token li
   const view=await h.call('paperclip.config.set',{mode:'custom',baseUrl:'https://pc.example.com/',token:'pcp_board_abc',companyId:COMPANY});
   assert.equal(view.baseUrl,'https://pc.example.com');assert.equal(view.hasToken,true);assert.equal('token' in view,false);
   assert.equal(h.secrets.values.get(PAPERCLIP_SECRET_ID),'pcp_board_abc');
-  const file=await readFile(join(h.dataDir,'paperclip.json'),'utf8');
+  const file=await readFile(join(h.dataDir,'server.json'),'utf8');
   assert.doesNotMatch(file,/pcp_board/);
   await h.call('paperclip.snapshot');
   assert.ok(h.server.calls.length>5);
@@ -108,11 +109,11 @@ test('the stored token is sent only to the origin it was saved for; a new origin
   assert.deepEqual([...new Set(await auth({mode:'custom',baseUrl:'https://other.example.net',token:'pcp_typed'}))],['Bearer pcp_typed'],'a token typed for the test is used as given');
   const moved=await h.call('paperclip.config.set',{mode:'custom',baseUrl:'https://other.example.net'});
   assert.equal(moved.hasToken,false);assert.equal(h.secrets.values.has(PAPERCLIP_SECRET_ID),false,'changing the origin without a new token forgets the old one');
-  assert.match(await readFile(join(h.dataDir,'paperclip.json'),'utf8'),/"tokenOrigin": null/);
+  assert.match(await readFile(join(h.dataDir,'server.json'),'utf8'),/"tokenOrigin": null/);
   const kept=await h.call('paperclip.config.set',{mode:'custom',baseUrl:'https://other.example.net',token:'pcp_new'});
   assert.equal(kept.hasToken,true);
   assert.equal((await h.call('paperclip.config.set',{mode:'custom',baseUrl:'https://other.example.net/'})).hasToken,true,'same origin: the token stays');
-  assert.match(await readFile(join(h.dataDir,'paperclip.json'),'utf8'),/"tokenOrigin": "https:\/\/other.example.net"/);
+  assert.match(await readFile(join(h.dataDir,'server.json'),'utf8'),/"tokenOrigin": "https:\/\/other.example.net"/);
   h.secrets.values.clear();
   const local=await h.call('paperclip.config.set',{mode:'local',token:'pcp_ignored'});
   assert.equal(local.hasToken,false);assert.equal(h.secrets.values.size,0,'This Mac never stores a token');
@@ -526,15 +527,15 @@ test('the Ledger imports history in the background after the first badge read, a
   assert.deepEqual(view.chain,{ok:true,entries:0,head:'0'.repeat(64),brokenAt:null});
 });
 
-test('A3: a URL that answers with a web page is reported as "not a Paperclip API", never a JSON parse error',async t=>{
+test('A3: a URL that answers with a web page is reported as "not a Muster Server API", never a JSON parse error',async t=>{
   const html=async()=>new Response('<!DOCTYPE html><html><body>Welcome to nginx</body></html>',{status:200,headers:{'content-type':'text/html'}});
   const h=await harness(t,{fetch:html});
   const result=await h.call('paperclip.test',{mode:'custom',baseUrl:'https://pc.example.com/nope'});
   assert.equal(result.ok,false);assert.equal(result.stage,'service');
-  assert.match(result.message,/isn’t a Paperclip API/);assert.doesNotMatch(result.message,/Unexpected token|<!DOCTYPE|is not valid/);
+  assert.match(result.message,/isn’t a Muster Server API/);assert.doesNotMatch(result.message,/Unexpected token|<!DOCTYPE|is not valid/);
   const notFound=await harness(t,{fetch:async()=>new Response('<html>404</html>',{status:404})});
   const missing=await notFound.call('paperclip.test',{mode:'custom',baseUrl:'https://pc.example.com'});
-  assert.match(missing.message,/answered 404/);assert.doesNotMatch(missing.message,/<html/);
+  assert.match(missing.message,/isn’t a Muster Server API/);assert.doesNotMatch(missing.message,/<html/);
 });
 
 test('A4: a token that would travel over plain http to another machine is warned about; https and loopback are not',async t=>{

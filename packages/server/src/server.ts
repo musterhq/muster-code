@@ -350,7 +350,7 @@ export class MusterServer {
     if (!hostAllowed(req.headers.host, this.options.config)) return this.json(res, 421, { ok: false, error: 'Unknown host. Add it with --allowed-host.', code: 'host' });
     const url = new URL(req.url ?? '/', 'http://local');
     const path = url.pathname;
-    if (path === '/healthz') return this.json(res, 200, { ok: true, version: VERSION, runtime: this.runtime?.running ? 'running' : 'stopped' });
+    if (path === '/healthz') return this.json(res, 200, { ok: true, name: 'Muster Server', version: VERSION, runtime: this.runtime?.running ? 'running' : 'stopped' });
 
     if (path.startsWith('/hooks/') && req.method === 'POST') {
       const [, , type, publicId] = path.split('/');

@@ -214,3 +214,31 @@ test('Wave 4: commands that run on the server host or speak for an agent are adm
   authorizeResource(editor, 'project.interactions.answer', 'write', { projectId: 'p-shared', id: 'c', answers: {} }, snapshot);
   denied(() => authorizeResource(editor, 'project.interactions.answer', 'write', { projectId: 'p-secret', id: 'c', answers: {} }, snapshot));
 });
+
+test('the desktop app\'s Muster Server connection: a member reads only the projects they were granted; the dashboard stays admin-only', () => {
+  const v = accessView(user('member'), grants, owners);
+  authorizeResource(v, 'paperclip.snapshot', 'read', {}, snapshot);
+  authorizeResource(v, 'paperclip.task', 'read', { id: 't1' }, snapshot);
+  denied(() => authorizeResource(v, 'paperclip.dashboard', 'read', {}, snapshot));
+  const task = (id: string, projectId: string) => ({ id, key: id, title: id, status: 'todo', priority: 'medium', source: 'local', projectId, parentId: null, goalId: null, assigneeId: null, assigneeLabel: null, createdAt: '', updatedAt: '', startedAt: null, completedAt: null, live: false, blockedByIds: [], origin: null });
+  const ws = {
+    paperclip: null, goals: [], labels: [], fetchedAt: '', counts: { liveRuns: 0, inbox: 0, failedRuns: 0, openTasks: 0 }, agentCounts: { active: 1, paused: 0, resumable: { paperclip: 0, local: 0, projects: {} } },
+    projects: [{ id: 'p-shared', name: 'Shared' }, { id: 'p-secret', name: 'Secret' }],
+    tasks: [task('t-a', 'p-shared'), task('t-b', 'p-secret')],
+    agents: [{ id: 'a1', projectId: 'p-shared' }, { id: 'a2', projectId: 'p-secret' }],
+    runs: [{ id: 'r1', taskId: 't-a', status: 'running' }, { id: 'r2', taskId: 't-b', status: 'failed' }],
+    inbox: [{ id: 'i1', kind: 'review', projectId: 'p-shared' }, { id: 'i2', kind: 'blocked', projectId: 'p-secret' }, { id: 'gate:1', kind: 'approval', projectId: null }],
+  };
+  const out = filterOutput(v, 'paperclip.snapshot', ws, snapshot) as typeof ws & { agentCounts?: unknown };
+  assert.deepEqual(out.projects.map(p => p.id), ['p-shared']);
+  assert.deepEqual(out.tasks.map(t => t.id), ['t-a']);
+  assert.deepEqual(out.agents.map(a => a.id), ['a1']);
+  assert.deepEqual(out.runs.map(r => r.id), ['r1']);
+  assert.deepEqual(out.inbox.map(i => i.id), ['i1']);
+  assert.equal(out.agentCounts, undefined, 'server-wide Pause counts are not a member\'s to see');
+  assert.deepEqual(out.counts, { liveRuns: 1, inbox: 1, failedRuns: 0, openTasks: 1 });
+  denied(() => filterOutput(v, 'paperclip.task', { task: task('t-b', 'p-secret') }, snapshot));
+  assert.ok(filterOutput(v, 'paperclip.task', { task: task('t-a', 'p-shared') }, snapshot));
+  const admin = accessView(user('admin'), [], new Map());
+  assert.equal(filterOutput(admin, 'paperclip.snapshot', ws, snapshot), ws, 'owners and admins see everything');
+});

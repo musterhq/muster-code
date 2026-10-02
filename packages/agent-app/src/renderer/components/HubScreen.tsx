@@ -75,7 +75,7 @@ export function HubScreen(): React.ReactElement {
         {task ? <><TaskStatusIcon status={task.status} size={13}/><strong>{task.title}</strong><span className="ws-key">{task.key}</span></>
           : agent ? <strong>{agent.name}</strong> : route.page === 'project' ? <strong>{snapshot?.projects.find(p => p.id === route.arg)?.name ?? NAMES.projects}</strong> : <strong>{TITLE[route.page]}</strong>}
       </span>
-      {snapshot?.paperclip && <span className="ws-topbar-origin" title={snapshot.paperclip.stale ?? (snapshot.paperclip.live === 'poll' ? 'This Paperclip does not push live events to board keys, so Muster checks it every 15 seconds while this screen is open.' : undefined)}><span className="ws-conn-dot" data-live={snapshot.paperclip.live} data-stale={snapshot.paperclip.stale ? 'true' : undefined} aria-hidden="true"/>{NAMES.paperclip} · {snapshot.paperclip.company?.name ?? snapshot.paperclip.origin}{snapshot.paperclip.stale ? ' · offline' : snapshot.paperclip.live === 'poll' ? ' · updates every 15 s' : ''}</span>}
+      {snapshot?.paperclip && <span className="ws-topbar-origin" title={snapshot.paperclip.stale ?? (snapshot.paperclip.live === 'poll' ? 'This Muster Server does not push live events, so Muster checks it every 15 seconds while this screen is open.' : undefined)}><span className="ws-conn-dot" data-live={snapshot.paperclip.live} data-stale={snapshot.paperclip.stale ? 'true' : undefined} aria-hidden="true"/>{NAMES.paperclip} · {snapshot.paperclip.company?.name ?? snapshot.paperclip.origin}{snapshot.paperclip.stale ? ' · offline' : snapshot.paperclip.live === 'poll' ? ' · updates every 15 s' : ''}</span>}
     </header>
     <div className="ws-main">{body}</div>
   </section>;
@@ -85,7 +85,7 @@ export function HubScreen(): React.ReactElement {
 function AllTasks({ snapshot, nav }: { snapshot: WorkspaceSnapshot; nav: HubNav }): React.ReactElement {
   const [creating, setCreating] = useState(false);
   return <div className="ws-page ws-page-fill">
-    <PageHeader title={NAMES.tasks} detail="Every task in every project: yours, your agents’ and the linked Paperclip’s."/>
+    <PageHeader title={NAMES.tasks} detail="Every task in every project: yours, your agents’ and your server’s."/>
     <TaskList snapshot={snapshot} tasks={snapshot.tasks} scope="all" showProject onOpenTask={nav.onOpenTask} onNewTask={snapshot.projects.length ? () => setCreating(true) : undefined} emptyMessage={snapshot.projects.length ? 'No tasks yet.' : 'Create a project first: tasks belong to a project.'}/>
     <NewTaskSheet open={creating} snapshot={snapshot} projectId={null} onClose={() => setCreating(false)} onCreated={() => undefined}/>
   </div>;

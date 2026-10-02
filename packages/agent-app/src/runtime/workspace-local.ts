@@ -140,7 +140,7 @@ export class LocalWorkspace {
     const names = new Map(reads.map(r => [r.project.id, r.project.name])), keys = new Map(tasks.map(t => [t.id, t.key]));
     for (const read of reads) for (const m of read.members) if (m.kind === 'agent' && m.pendingAt && !m.revokedAt)
       inbox.push({ id: `hire:${read.project.id}:${m.id}`, kind: 'approval', title: `Add ${m.name}${m.title ? ` as ${m.title}` : ''} to ${read.project.name}?`, why: 'A new agent is waiting for your approval before it can run.', severity: 'high', at: m.createdAt, taskId: null, agentId: memberAgentId(m.id), runId: null, projectId: read.project.id, group: read.project.name, source: 'local' });
-    for (const h of pending) inbox.push({ id: `import:${h.sourceId}`, kind: h.kind.startsWith('approval') ? 'approval' : 'question', title: `${h.taskId && keys.get(h.taskId) ? `${keys.get(h.taskId)} · ` : ''}${h.title}`.slice(0, 200), why: 'Waiting for your decision (carried over from Paperclip).', severity: 'high', at: h.at, taskId: h.taskId, agentId: null, runId: null, projectId: h.projectId, group: (h.projectId && names.get(h.projectId)) || 'Muster', source: 'local' });
+    for (const h of pending) inbox.push({ id: `import:${h.sourceId}`, kind: h.kind.startsWith('approval') ? 'approval' : 'question', title: `${h.taskId && keys.get(h.taskId) ? `${keys.get(h.taskId)} · ` : ''}${h.title}`.slice(0, 200), why: 'Waiting for your decision (carried over from Muster Server).', severity: 'high', at: h.at, taskId: h.taskId, agentId: null, runId: null, projectId: h.projectId, group: (h.projectId && names.get(h.projectId)) || 'Muster', source: 'local' });
     return { tasks, agents, projects, runs: runs.slice(0, 200), inbox };
   }
 
@@ -168,7 +168,7 @@ export class LocalWorkspace {
     const chats = new Set(task.attempts.map(a => a.chatId));
     let imported: ReturnType<ImportMeta['comments']> = []; try { imported = this.meta?.()?.comments(task.id) ?? []; } catch { imported = []; }
     const comments: WorkspaceComment[] = [
-      ...imported.map(c => ({ id: `pc:${c.sourceId}`, author: { kind: c.authorKind === 'agent' ? 'agent' as const : c.authorKind === 'system' ? 'system' as const : 'user' as const, id: null, label: c.authorLabel }, body: c.body, createdAt: c.createdAt, runId: c.runId })),
+      ...imported.map(c => ({ id: `pc:${c.sourceId}`, author: { kind: c.authorKind === 'agent' ? 'agent' as const : c.authorKind === 'system' ? 'system' as const : 'user' as const, id: null, label: c.authorLabel === 'Paperclip' /* audit-ok: the label older imports stored */ ? 'Muster Server' : c.authorLabel }, body: c.body, createdAt: c.createdAt, runId: c.runId })),
       ...read.work.activity.items.filter(a => a.refId === task.id && a.kind !== 'task.create' && a.actor !== 'import').map(a => {
         // An agent's own comment (the task_comment tool) is a message from that agent, not a system notice.
         if (a.kind === 'task.note') return { id: a.id, author: { kind: 'user' as const, id: null, label: 'You' }, body: a.summary.replace(/^You: /, ''), createdAt: a.createdAt };

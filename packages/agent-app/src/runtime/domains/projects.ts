@@ -392,8 +392,8 @@ export function createProjectsDomain(ctx: DomainContext): DomainModule {
         if (imported && (!imported.providerId || !imported.model)) gap = imported.runtime ?? 'unknown';
       } catch { /* not an imported agent */ }
       if (gap !== null) {
-        store.record(projectId, 'task.runner-unavailable', `"${task.title}": ${held.name} came from Paperclip as a ${gap} agent with no model Muster can map, so it was not started.`, task.id, 'system');
-        throw new Error(`Choose a model for ${held.name}. It came from Paperclip as a ${gap} agent with no model Muster can map, and Muster won’t quietly use the project default. Open ${held.name} in the Roster, pick a runner and model, then start the task again.`);
+        store.record(projectId, 'task.runner-unavailable', `"${task.title}": ${held.name} came from Muster Server as a ${gap} agent with no model Muster can map, so it was not started.`, task.id, 'system');
+        throw new Error(`Choose a model for ${held.name}. It came from Muster Server as a ${gap} agent with no model Muster can map, and Muster won’t quietly use the project default. Open ${held.name} in the Roster, pick a runner and model, then start the task again.`);
       }
     }
     const chat = await ctx.invoke('chat.create', { folderId: target, projectId });

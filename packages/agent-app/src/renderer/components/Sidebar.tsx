@@ -587,8 +587,8 @@ export function Sidebar(): React.ReactElement {
             <span className="nav-heading-actions"><Tip label="Open projects"><button type="button" className="icon-button" aria-label="Open projects" onClick={openProjectsScreen}><LayoutGrid size={14}/></button></Tip><Tip label="New project"><button type="button" className="icon-button" aria-label="New project" onClick={()=>requestNewProject(openProjectsScreen)}><Plus size={15} strokeWidth={1.75}/></button></Tip></span>
           </div>
           {ownProjects.map(renderProject)}
-          {orgNames.map(org=><div key={`org:${org}`} className="nav-org" role="group" aria-label={`${org} · ${NAMES.paperclip}`}>
-            <p className="nav-org-label" title={`${org} · ${NAMES.paperclip}`}>{org} · {NAMES.paperclip}</p>
+          {orgNames.map(org=><div key={`org:${org}`} className="nav-org" role="group" aria-label={`${org} · ${NAMES.server}`}>
+            <p className="nav-org-label" title={`${org} · ${NAMES.server}`}>{org} · {NAMES.server}</p>
             {(projectsByOrg.get(org)??[]).map(renderProject)}
             <PaperclipProjects org={org} isOpen={isOpen} toggleGroup={toggleGroup}/>
           </div>)}
@@ -690,7 +690,7 @@ function SidebarInbox({screen}:{screen:string}):React.ReactElement {
   const chatCount=React.useMemo(()=>badgeCount(buildActivity(app,null,Date.now(),badge?.chatIds??[],dismissed)),[app?.chats,app?.attention,badge?.chatIds,dismissed]);
   const count=chatCount+(badge?.inbox??0);
   const active=screen==='hub'&&route.page==='inbox';
-  return <button type="button" className={`tool-button${active?' is-active':''}`} aria-current={active?'page':undefined} title="Everything that needs you, across chats, projects and Paperclip" onClick={()=>openHub('inbox')}>
+  return <button type="button" className={`tool-button${active?' is-active':''}`} aria-current={active?'page':undefined} title="Everything that needs you, across chats, projects and your server" onClick={()=>openHub('inbox')}>
     <InboxIcon size={15}/><span>{NAMES.inbox}</span>{count>0&&<span className="nav-tool-count" aria-label={`${count} need you`}>{count>99?'99+':count}</span>}
   </button>;
 }
@@ -791,7 +791,7 @@ function PaperclipProjects({org,isOpen,toggleGroup}:{org:string;isOpen:(id:strin
   };
   return <>
     {projects.map(group)}
-    {snapshot.paperclip.stale&&<p className="nav-folder-empty" title={snapshot.paperclip.stale}>{snapshot.paperclip.cached?'Paperclip is offline · showing the last copy':'Paperclip can’t be reached · its projects show once it’s back'}</p>}
+    {snapshot.paperclip.stale&&<p className="nav-folder-empty" title={snapshot.paperclip.stale}>{snapshot.paperclip.cached?'Muster Server is offline · showing the last copy':'Muster Server can’t be reached · its projects show once it’s back'}</p>}
     <NewTaskSheet open={newTask!==null} snapshot={snapshot} projectId={newTask} onClose={()=>setNewTask(null)} onCreated={id=>openHub('task',id)}/>
   </>;
 }

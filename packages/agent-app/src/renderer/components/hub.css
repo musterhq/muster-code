@@ -114,6 +114,11 @@ button.ws-row:disabled { cursor: default; }
 
 /* Segmented control (Ledger views, Integrations modes) ------------------------------------------------------------------- */
 .ws-segmented { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+.ws-connection .ws-segmented { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.ws-connection-details { display: grid; gap: 4px; margin: 0; padding: 8px 12px; border: 1px solid var(--hairline); border-radius: var(--radius-8); font-size: var(--fs-12); }
+.ws-connection-details > div { display: flex; gap: 8px; min-width: 0; }
+.ws-connection-details dt { flex: 0 0 110px; color: var(--text-faint); }
+.ws-connection-details dd { margin: 0; min-width: 0; overflow-wrap: anywhere; color: var(--text); }
 .ws-segmented.is-inline { display: inline-flex; gap: 2px; padding: 2px; border: 1px solid var(--hairline); border-radius: var(--radius-8); }
 .ws-segment { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; min-width: 0; padding: 10px 12px; border: 1px solid var(--hairline); border-radius: var(--radius-10); text-align: left; }
 .ws-segmented.is-inline .ws-segment { padding: 3px 10px; border: 0; border-radius: var(--radius-6); }

@@ -151,7 +151,7 @@ export function buildInbox(attention: readonly WorkspaceInboxItem[], tasks: read
 export function mapComment(c: Json, agents: ReadonlyMap<string, WorkspaceAgent>): WorkspaceComment {
   const agentId = str(c.authorAgentId) ?? str(c.derivedAuthorAgentId);
   const kind = agentId ? 'agent' : str(c.authorUserId) || c.authorType === 'user' ? 'user' : 'system';
-  return { id: String(c.id), author: { kind, id: agentId ?? str(c.authorUserId), label: agentId ? agents.get(agentId)?.name ?? 'Agent' : kind === 'user' ? 'You' : 'Paperclip' }, body: str(c.body) ?? '', createdAt: iso(c.createdAt), runId: str(c.createdByRunId) };
+  return { id: String(c.id), author: { kind, id: agentId ?? str(c.authorUserId), label: agentId ? agents.get(agentId)?.name ?? 'Agent' : kind === 'user' ? 'You' : 'Muster Server' }, body: str(c.body) ?? '', createdAt: iso(c.createdAt), runId: str(c.createdByRunId) };
 }
 
 /** Rows for the read-only lists (skills, artifacts, audit, routines). */

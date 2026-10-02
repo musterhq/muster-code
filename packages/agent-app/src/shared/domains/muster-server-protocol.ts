@@ -1,5 +1,5 @@
 /**
- * Remote connect (#147, #204): link this desktop app to a self-hosted Muster Server. Optional and off by default.
+ * Remote connect (#147, #204): link this desktop app to a self-hosted Muster Server (the one "Muster Server" connection in Settings › Integrations). Optional and off by default.
  * The API token lives in the OS keychain (secret store) and is bound to the server's origin: it is only ever sent to that origin.
  */
 export interface MusterServerConnectionView {
@@ -13,9 +13,10 @@ export interface MusterServerConnectionView {
   secureStorage: boolean;
 }
 export interface MusterServerProject { id: string; name: string; goal: string; archived: boolean; openUrl: string }
+/** `mode: 'local'`: the server is on this Mac (Settings › "This Mac"); anything else is a custom address. */
 export type MusterServerConnectInput =
-  | { url: string; method: 'password'; username: string; password: string }
-  | { url: string; method: 'token'; token: string };
+  | { url: string; method: 'password'; username: string; password: string; mode?: 'local' | 'custom' }
+  | { url: string; method: 'token'; token: string; mode?: 'local' | 'custom' };
 export interface MusterServerCommands {
   'musterServer.status': { input: Record<string, never>; output: MusterServerConnectionView };
   /** Signs in (password → a server-issued API token; the password is never stored) or verifies a pasted token, then stores the token for that origin. */
