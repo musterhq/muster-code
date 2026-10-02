@@ -38,11 +38,13 @@ import { importFromPaperclip, planImport, SqliteImportStore } from '../paperclip
 import { buildDashboard, DASHBOARD_DAYS, ledgerAggregates, monthStart } from '../workspace-dashboard.ts';
 import type { DomainContext, DomainModule } from './types.ts';
 
-const POLL_MS = 15_000, POLL_MAX_MS = 60_000, EMIT_VISIBLE_MS = 1_000, EMIT_HIDDEN_MS = 5_000;
+const POLL_MAX_MS = 60_000, EMIT_VISIBLE_MS = 1_000, EMIT_HIDDEN_MS = 5_000;
 /** Paperclip serves its issue lists from a 2 s cache that a change does not clear: a read right after an event can return the old list, so one more read follows once it has expired. */
 const SETTLE_MS = 2_400;
 /** A server that refused the live socket for this credential (a hosted Paperclip-compatible server only lets a browser session or an agent key onto it, never a board key) is asked again only this often; in between, polling with ETags is the whole story. */
-const SOCKET_RETRY_MS = 10 * 60_000;
+const SOCKET_RETRY_MS = 60_000;
+/** The fallback poll (a hosted server that refuses the live socket): near-real-time while things change, quiet once they stop. Always ETag revalidated, and never while hidden. */
+const POLL_FAST_MS = 2_500, POLL_IDLE_MS = 15_000, POLL_QUIET_AFTER_MS = 60_000, SESSION_REFRESH_MS = 6 * 60 * 60_000;
 /** Frames that fire many times a second while an agent works and change nothing the UI shows. */
 const NOISY = new Set(['heartbeat.run.log', 'heartbeat.run.event', 'heartbeat.run.progress', 'plugin.ui.updated']);
 /** Needs you + Problems: the only kinds that badge. */
@@ -165,6 +167,8 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
     return part;
   };
   /** The connection changed (here, or by signing in from Settings): drop what was read from the old one and tell the screens. */
+  /** The session cookie arrived, expired or was cleared: only the live socket is rebuilt; the next read tries it first. */
+  const offSession = conn.onSession(() => { live.refusedAt = 0; closeSocket(); backend = null; built = null; if (conn.sessionState() !== 'expired') ensureSocket(); queueEmit(['config']); });
   const offConnection = conn.onChange(() => { live.refusedAt = 0; closeSocket(); stopPoll(); built = null; backend = null; companies = []; lastError = undefined; queueEmit(['config', 'tasks', 'runs', 'agents', 'inbox']); });
   /** Records the last read's outcome. Going offline (ok → stale) or coming back (stale → ok) is an update the screens
    *  must see at once: the banner and "· offline" come from it, so it is emitted rather than waiting for a reload. */
@@ -185,7 +189,7 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
     }).finally(() => { inflight = null; });
     try {
       const part = await inflight;
-      return { part, link: { origin: originLabel(), company: companies.find(c => c.id === built?.companyId) ?? null, companies, live: live.channel, ...(lastError ? { stale: lastError, cached: true } : {}) } };
+      return { part, link: { origin: originLabel(), company: companies.find(c => c.id === built?.companyId) ?? null, companies, live: live.channel, ...(conn.view().reconnect && live.channel !== 'socket' ? { reconnect: true, baseUrl: conn.baseUrl() } : {}), ...(lastError ? { stale: lastError, cached: true } : {}) } };
     } catch (cause) {
       return { part: null, link: { origin: originLabel(), company: null, companies, live: 'off', stale: cause instanceof Error ? cause.message : String(cause), cached: false } };
     }
@@ -263,8 +267,8 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
   const api = (): ServerBackend => { const c = connection(); if (!c) throw new Error('Muster Server is not connected. Connect it in Settings › Integrations.'); return c; };
 
   // --- live updates -----------------------------------------------------------------------------------------------------
-  const live = { refusedAt: 0, channel: 'off' as LiveChannel, visible: false, socket: null as LiveSocket | null, socketCompany: '', pollTimer: null as ReturnType<typeof setTimeout> | null, settleTimer: null as ReturnType<typeof setTimeout> | null, pollDelay: POLL_MS, emitTimer: null as ReturnType<typeof setTimeout> | null, pending: new Set<string>(), taskIds: new Set<string>() };
-  function closeSocket() { if (live.settleTimer) timers.clearTimeout(live.settleTimer); live.settleTimer = null; live.socket?.close(); live.socket = null; live.socketCompany = ''; if (live.channel === 'socket') live.channel = 'off'; }
+  const live = { refusedAt: 0, channel: 'off' as LiveChannel, visible: false, socket: null as LiveSocket | null, socketCompany: '', pollTimer: null as ReturnType<typeof setTimeout> | null, settleTimer: null as ReturnType<typeof setTimeout> | null, pollDelay: POLL_FAST_MS, lastChangeAt: 0, refreshTimer: null as ReturnType<typeof setTimeout> | null, emitTimer: null as ReturnType<typeof setTimeout> | null, pending: new Set<string>(), taskIds: new Set<string>() };
+  function closeSocket() { if (live.refreshTimer) timers.clearTimeout(live.refreshTimer); live.refreshTimer = null; if (live.settleTimer) timers.clearTimeout(live.settleTimer); live.settleTimer = null; live.socket?.close(); live.socket = null; live.socketCompany = ''; if (live.channel === 'socket') live.channel = 'off'; }
   const stopPoll = () => { if (live.pollTimer) timers.clearTimeout(live.pollTimer); live.pollTimer = null; };
   const queueEmit = (scopes: string[], taskId?: string) => {
     for (const s of scopes) live.pending.add(s);
@@ -281,14 +285,18 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
     stopPoll();
     if (!live.visible || live.channel === 'socket' || !connection()) return;
     live.channel = 'poll';
+    if (!live.lastChangeAt) live.lastChangeAt = Date.now();
     live.pollTimer = timers.setTimeout(async () => {
       live.pollTimer = null;
       const c = connection();
       if (!c || !live.visible) return;
       const before = c.generation;
       await paperclipPart(false);
-      live.pollDelay = lastError ? Math.min(live.pollDelay * 2, POLL_MAX_MS) : POLL_MS;
-      if (c.generation !== before) queueEmit(['tasks', 'runs', 'agents', 'inbox']);
+      const changed = c.generation !== before;
+      if (changed) live.lastChangeAt = Date.now();
+      // Near-real-time while things are changing (about 2.5 s), 15 s once nothing has changed for a minute, backing off when the server does not answer.
+      live.pollDelay = lastError ? Math.min(live.pollDelay * 2, POLL_MAX_MS) : Date.now() - live.lastChangeAt >= POLL_QUIET_AFTER_MS ? POLL_IDLE_MS : POLL_FAST_MS;
+      if (changed) queueEmit(['tasks', 'runs', 'agents', 'inbox']);
       ensureSocket();
       schedulePoll();
     }, live.pollDelay);
@@ -298,12 +306,18 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
     const c = connection();
     if (!c || !built) return;
     if (live.socket && live.socketCompany === built.companyId) return;
+    // A session the server stopped accepting cannot work again until Reconnect brings a fresh one; a board key alone is asked again now and then.
+    if (conn.config.signedIn && conn.sessionState() === 'expired') return;
     if (live.refusedAt && Date.now() - live.refusedAt < SOCKET_RETRY_MS) return;
     closeSocket();
     const target = built.companyId, company = companies.find(x => x.id === target) ?? { id: target, name: originLabel(), prefix: '' };
     live.socketCompany = target;
     live.socket = c.openLive(company, {
-      onOpen() { live.channel = 'socket'; stopPoll(); },
+      onOpen() {
+        live.channel = 'socket'; stopPoll(); conn.markSessionActive();
+        // The session is extended the way the server's own web app does (Better Auth get-session) while the socket is up.
+        if (conn.sessionCookie()) { if (live.refreshTimer) timers.clearTimeout(live.refreshTimer); live.refreshTimer = timers.setTimeout(function again() { live.refreshTimer = null; void conn.checkSession().then(() => { if (live.socket && conn.sessionCookie()) live.refreshTimer = timers.setTimeout(again, SESSION_REFRESH_MS); }); }, SESSION_REFRESH_MS); }
+      },
       onEvent(type, payload) {
         if (NOISY.has(type)) return;
         c.invalidate(`/companies/${encodeURIComponent(target)}`);
@@ -315,7 +329,7 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
       },
       // A live socket dropping is often the first sign the server went away: tell the screens, which re-read and show it.
       // (A socket that never opened says nothing new, so a refused socket never wakes the renderer.)
-      onDown() { const wasLive = live.channel === 'socket'; if (!wasLive) live.refusedAt = Date.now(); live.socket = null; live.socketCompany = ''; live.channel = 'off'; if (wasLive) queueEmit(['config']); schedulePoll(); },
+      onDown() { const wasLive = live.channel === 'socket'; if (!wasLive) { live.refusedAt = Date.now(); if (conn.sessionCookie()) void conn.checkSession(); } live.socket = null; live.socketCompany = ''; live.channel = 'off'; if (wasLive) queueEmit(['config']); schedulePoll(); },
     }, options.socket);
   }
 
@@ -635,6 +649,8 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
       'paperclip.config.get': () => ({ ...view(), live: live.channel }),
       'paperclip.signin.start': input => signIn.start(input.baseUrl),
       'paperclip.signin.status': () => signIn.state(),
+      'paperclip.session.set': input => ({ state: conn.setSession(String(input.baseUrl ?? ''), input.cookie) }),
+      'paperclip.session.clear': () => { conn.clearSession(); return { ok: true as const }; },
       'paperclip.signin.cancel': () => signIn.cancel(),
       'paperclip.signin.signout': async () => {
         if (!conn.config.signedIn) throw new Error('This Mac is not signed in with browser approval.');
@@ -813,8 +829,8 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
       'paperclip.watch': input => {
         live.visible = input.visible === true;
         if (!connection()) { stopPoll(); return { live: 'events' as LiveChannel }; }
-        if (!live.visible) stopPoll();
-        else { ensureSocket(); if (!live.socket) schedulePoll(); }
+        if (!live.visible) { stopPoll(); live.lastChangeAt = 0; live.pollDelay = POLL_FAST_MS; }
+        else { live.lastChangeAt = Date.now(); live.pollDelay = POLL_FAST_MS; ensureSocket(); if (!live.socket) schedulePoll(); }
         return { live: live.channel };
       },
       'paperclip.badge': () => { scheduleHistory(); return badge(); },
@@ -830,7 +846,7 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
       'paperclip.inbox.restore': input => { dismissDb().prepare('DELETE FROM inbox_dismissals WHERE id = ?').run(id(input.id)); queueEmit(['inbox']); return { ok: true as const }; },
       'paperclip.inbox.dismissed': () => ({ items: [...dismissed()].map(([itemId, at]) => ({ id: itemId, at })) }),
     },
-    dispose() { history.disposed = true; if (history.timer) timers.clearTimeout(history.timer); history.timer = null; offLedger(); offConnection(); signIn.dispose(); closeSocket(); stopPoll(); if (live.emitTimer) timers.clearTimeout(live.emitTimer); live.emitTimer = null; },
+    dispose() { history.disposed = true; if (history.timer) timers.clearTimeout(history.timer); history.timer = null; offLedger(); offConnection(); offSession(); signIn.dispose(); closeSocket(); stopPoll(); if (live.emitTimer) timers.clearTimeout(live.emitTimer); live.emitTimer = null; },
     power(event) { if (event.state === 'suspend') { closeSocket(); stopPoll(); } else if (live.visible) { ensureSocket(); if (!live.socket) schedulePoll(); } },
   };
 }

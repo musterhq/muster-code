@@ -108,7 +108,8 @@ export function ConnectionPanel({ onSaved, compact = false, signInAvailable = tr
   const startBrowserSignIn = async () => {
     const state = await invoke('paperclip.signin.start', { baseUrl: url });
     setSignInState(state);
-    if (state.approvalUrl) await invoke('link.open', { url: state.approvalUrl }).catch(() => setError('Muster could not open your browser. Use “Open again”, or copy the link into a browser.'));
+    // The server's own page opens in an app window with a session of its own (that session is what makes updates instant); the system browser is the fallback.
+    if (state.approvalUrl) await invoke('musterServer.signInWindow', { url: state.approvalUrl, baseUrl: state.baseUrl ?? url }).catch(() => invoke('link.open', { url: state.approvalUrl! })).catch(() => setError('Muster could not open the sign-in page. Use “Open again”, or copy the link into a browser.'));
   };
   /** Sign in with a username and password: exchanged once for a token that is kept in the keychain; the password is not kept. */
   const passwordSignIn = async () => {
@@ -199,7 +200,7 @@ export function ConnectionPanel({ onSaved, compact = false, signInAvailable = tr
       </>}
       {choice === 'signin' && waiting && <>
         <p className="ws-connection-detect" data-ok="true" role="status">Waiting for you to approve in your browser…{signInState.expiresAt ? ` The request expires at ${new Date(signInState.expiresAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}.` : ''}</p>
-        <p className="project-edit-hint">Sign in on the server’s own page and press Approve. Muster never sees your password. <button type="button" className="ws-link" onClick={() => void invoke('link.open', { url: signInState.approvalUrl! }).catch(() => setError('Muster could not open your browser.'))}>Open again</button></p>
+        <p className="project-edit-hint">Sign in on the server’s own page and press Approve. Muster never sees your password. <button type="button" className="ws-link" onClick={() => void invoke('musterServer.signInWindow', { url: signInState.approvalUrl!, baseUrl: signInState.baseUrl ?? url }).catch(() => invoke('link.open', { url: signInState.approvalUrl! })).catch(() => setError('Muster could not open the sign-in page.'))}>Open again</button> · <button type="button" className="ws-link" title="Approve in your own browser. Updates then arrive every few seconds instead of instantly." onClick={() => void invoke('musterServer.signInWindow', { baseUrl: signInState.baseUrl ?? url, close: true }).catch(() => undefined).then(() => invoke('link.open', { url: signInState.approvalUrl! })).catch(() => setError('Muster could not open your browser.'))}>Use my browser instead</button></p>
       </>}
       {choice === 'signin' && !waiting && accountSignedIn && <p className="ws-connection-detect" data-ok="true" role="status"><Check size={13} aria-hidden="true"/>Signed in as {config?.signedIn ? whoText(config.signedIn) : `${config?.user?.displayName} (@${config?.user?.username})`}.</p>}
       {choice === 'signin' && !waiting && !accountSignedIn && config?.signInNotice && <p className="ws-connection-detect" data-ok="false" role="alert">{config.signInNotice}</p>}
@@ -220,7 +221,7 @@ export function ConnectionPanel({ onSaved, compact = false, signInAvailable = tr
       {config.user && <div><dt>Signed in as</dt><dd>{config.user.displayName} (@{config.user.username}, {config.user.role})</dd></div>}
       {config.signedIn && <div><dt>Signed in as</dt><dd>{whoText(config.signedIn)}</dd></div>}
       {config.serverVersion && <div><dt>Server version</dt><dd>{config.serverVersion}</dd></div>}
-      <div><dt>Live updates</dt><dd>{config.live === 'socket' ? 'Instant (live socket)' : 'Every 15 seconds while a screen that shows them is open'}</dd></div>
+      <div><dt>Live updates</dt><dd>{config.live === 'socket' ? 'Instant (live socket)' : 'Every few seconds while a screen that shows them is open'}{config.reconnect && <> · <button type="button" className="ws-link" onClick={() => void invoke('musterServer.signInWindow', { baseUrl: config.baseUrl, url: config.baseUrl }).catch(() => undefined)}>Reconnect for live updates</button></>}</dd></div>
       {config.compatibility && <div><dt>Compatibility</dt><dd>{config.compatibility}</dd></div>}
     </dl>}
     {mode !== 'off' && companies.length > 1 && <label className="project-edit-goal"><span>Org</span><select className="ws-select is-field" value={company} onChange={e => setCompany(e.target.value)}>{companies.map(c => <option key={c.id} value={c.id}>{c.name}{c.prefix ? ` (${c.prefix})` : ''}</option>)}</select></label>}

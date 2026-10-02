@@ -11,7 +11,8 @@ export class PaperclipBackend implements ServerBackend {
   readonly kind = 'paperclip' as const;
   readonly client: PaperclipClient;
   private readonly onUnauthorized: BackendOptions['onUnauthorized'];
-  constructor(endpoint: ServerEndpoint, options: BackendOptions = {}) { this.onUnauthorized = options.onUnauthorized; this.client = new PaperclipClient(endpoint, options.fetch, { cache: options.cache, onUnauthorized: options.onUnauthorized }); }
+  private readonly session: BackendOptions['session'];
+  constructor(endpoint: ServerEndpoint, options: BackendOptions = {}) { this.onUnauthorized = options.onUnauthorized; this.session = options.session; this.client = new PaperclipClient(endpoint, options.fetch, { cache: options.cache, onUnauthorized: options.onUnauthorized }); }
   get endpoint(): ServerEndpoint { return this.client.endpoint; }
   get generation(): number { return this.client.generation; }
   invalidate(prefix?: string): void { this.client.invalidate(prefix); }
@@ -141,6 +142,6 @@ export class PaperclipBackend implements ServerBackend {
     return { get: path => reader.get<unknown>(path), issuePages: (company, query) => reader.issuePages(company, query), commentPages: issue => reader.commentPages(issue) };
   }
   private get fetcher() { return this.client.fetcher; }
-  openLive(company: WorkspaceCompany, handlers: LiveHandlers, factory?: SocketFactory) { return openLiveEvents(this.client, company.id, handlers, factory); }
+  openLive(company: WorkspaceCompany, handlers: LiveHandlers, factory?: SocketFactory) { return openLiveEvents(this.client, company.id, handlers, factory, this.session); }
 }
 export type { WorkspaceAgent };

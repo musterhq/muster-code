@@ -36,6 +36,10 @@ export interface PaperclipConfigView {
   signInNotice?: string | null;
   /** How updates reach this Mac right now: `socket` (instant), `poll` (every 15 s while a screen that shows them is open), `off`. */
   live?: LiveChannel;
+  /** The hosted-server browser session behind instant updates: `active`, `expired` (Reconnect for live updates), or `none`. */
+  session?: 'none' | 'active' | 'expired';
+  /** A browser sign-in whose session is missing or expired: updates are polling and a quiet Reconnect is offered. */
+  reconnect?: boolean;
   /** How people can sign in to this kind of server (empty: API token only). */
   signIn?: ServerSignInMethod[];
 }
@@ -137,7 +141,7 @@ export type ApprovalDecision = 'approve' | 'reject' | 'request_revision';
 export type LiveChannel = 'socket' | 'poll' | 'events' | 'off';
 /** The linked Paperclip as the snapshot saw it. `stale`: the last read failed; `cached` then says whether its rows are the
  *  last good copy (true) or missing because nothing was read yet (false). */
-export interface PaperclipLink { origin: string; company: WorkspaceCompany | null; companies: WorkspaceCompany[]; live: LiveChannel; stale?: string; cached?: boolean }
+export interface PaperclipLink { origin: string; company: WorkspaceCompany | null; companies: WorkspaceCompany[]; live: LiveChannel; stale?: string; cached?: boolean; /** Offer "Reconnect for live updates" (a browser sign-in whose session ended), and where to reconnect. */ reconnect?: boolean; baseUrl?: string }
 export interface WorkspaceSnapshot {
   paperclip: PaperclipLink | null;
   tasks: WorkspaceTask[]; agents: WorkspaceAgent[]; projects: WorkspaceProject[]; goals: WorkspaceGoal[];
@@ -310,6 +314,9 @@ export interface PaperclipCommands {
   'paperclip.signin.cancel': { input: Record<string, never>; output: PaperclipSignInState };
   /** Revokes the key the server issued to this Mac and removes it. `message`: anything to tell the person (a revoke the server did not confirm). */
   'paperclip.signin.signout': { input: Record<string, never>; output: { config: PaperclipConfigView; revoked: boolean; message?: string } };
+  /** The app's sign-in window obtained the server's session cookie (the main process calls this; the cookie never reaches the renderer). */
+  'paperclip.session.set': { input: { baseUrl: string; cookie: string }; output: { state: 'pending' | 'active' } };
+  'paperclip.session.clear': { input: Record<string, never>; output: { ok: true } };
   /** Tries a connection without saving it. Omitted fields fall back to the saved config (and saved token). */
   'paperclip.test': { input: { mode?: PaperclipMode; baseUrl?: string; token?: string }; output: PaperclipTestResult };
   /** Muster's projects, tasks, agents, runs and needs-you items, plus the linked Paperclip's (ETag-revalidated), in one read. */
@@ -360,7 +367,7 @@ export interface PaperclipCommands {
 /** Coalesced: at most one per second while watched (every 5 s otherwise, for the badge). `taskIds` lets an open thread refetch only when it changed. */
 export type PaperclipEvent = { type: 'projectsWorkspaceChanged'; scopes: ('tasks' | 'runs' | 'agents' | 'inbox' | 'config')[]; taskIds: string[] };
 export const PAPERCLIP_COMMANDS = {
-  'paperclip.config.get': true, 'paperclip.config.set': true, 'paperclip.signin.start': true, 'paperclip.signin.status': true, 'paperclip.signin.cancel': true, 'paperclip.signin.signout': true, 'paperclip.test': true, 'paperclip.snapshot': true, 'paperclip.task': true,
+  'paperclip.config.get': true, 'paperclip.config.set': true, 'paperclip.signin.start': true, 'paperclip.signin.status': true, 'paperclip.signin.cancel': true, 'paperclip.signin.signout': true, 'paperclip.session.set': true, 'paperclip.session.clear': true, 'paperclip.test': true, 'paperclip.snapshot': true, 'paperclip.task': true,
   'paperclip.comment': true, 'paperclip.task.update': true, 'paperclip.task.create': true, 'paperclip.agent.pause': true, 'paperclip.agent.resume': true,
   'paperclip.pauseAll': true, 'paperclip.resumeAll': true, 'paperclip.approval.decide': true, 'paperclip.run.cancel': true, 'paperclip.memory': true, 'paperclip.list': true,
   'paperclip.watch': true, 'paperclip.badge': true, 'paperclip.ledger': true, 'paperclip.ledger.backfill': true, 'paperclip.inbox.dismiss': true, 'paperclip.inbox.dismissed': true, 'paperclip.inbox.restore': true, 'paperclip.interaction.respond': true, 'paperclip.import': true, 'paperclip.task.start': true, 'paperclip.dashboard': true, 'paperclip.import.plan': true,

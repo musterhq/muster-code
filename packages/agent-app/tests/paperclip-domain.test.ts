@@ -202,7 +202,7 @@ test('live updates cost nothing while hidden: a refused socket polls only while 
   assert.equal([...h.timers.live.values()].length,0,'hidden and no socket: no timers');
   await h.call('paperclip.watch',{visible:true});
   const polls=[...h.timers.live.values()];
-  assert.equal(polls.length,1);assert.ok(polls[0].ms>=15_000,'polls no faster than every 15 s');
+  assert.equal(polls.length,1);assert.ok(polls[0].ms===2500,'near-real-time: every 2.5 s while things change');
   await h.call('paperclip.watch',{visible:false});
   assert.equal(h.timers.live.size,0,'hiding the screen clears the poll');
 });
@@ -229,8 +229,8 @@ test('socket events are filtered and coalesced; run-log noise never wakes the re
   assert.deepEqual(h.events[1].scopes.sort(),['inbox','tasks'],'then the settle re-read tells the screens once more');
   h.events.length=0;h.timers.live.clear();
   sockets[0].onclose();
-  assert.deepEqual([...h.timers.live.values()].map(x=>x.ms).sort((a,b)=>a-b),[1000,15000],'socket down while visible: tell the screens, and fall back to a poll');
-  const poll=[...h.timers.live.entries()].find(([,x])=>x.ms===15000)!;h.timers.live.delete(poll[0]);
+  assert.deepEqual([...h.timers.live.values()].map(x=>x.ms).sort((a,b)=>a-b),[1000,2500],'socket down while visible: tell the screens, and fall back to a poll');
+  const poll=[...h.timers.live.entries()].find(([,x])=>x.ms===2500)!;h.timers.live.delete(poll[0]);
   await h.timers.fire();
   assert.deepEqual(h.events.map(e=>e.scopes),[['config']],'the socket dropping is announced at once');
 });

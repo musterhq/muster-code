@@ -140,20 +140,22 @@ const short = (text: string) => { const plain = text.replace(/\s+/g, ' ').trim()
 async function errorText(response: Response): Promise<string> { const text = await response.text().catch(() => ''); const detail = text ? short(text) : ''; return detail ? ` ${detail}` : ''; }
 
 export interface LiveSocket { close(): void }
-export type SocketFactory = (url: string, token: string | undefined) => { onopen: (() => void) | null; onmessage: ((event: { data: unknown }) => void) | null; onclose: (() => void) | null; onerror: (() => void) | null; close(): void };
+export type SocketFactory = (url: string, token: string | undefined, headers?: Record<string, string>) => { onopen: (() => void) | null; onmessage: ((event: { data: unknown }) => void) | null; onclose: (() => void) | null; onerror: (() => void) | null; close(): void };
 /** Node's WebSocket (undici) accepts headers; the token rides in Authorization, never in the URL. */
-export const nodeSocket: SocketFactory = (url, token) => {
+export const nodeSocket: SocketFactory = (url, token, headers) => {
   const Ctor = (globalThis as unknown as { WebSocket?: new (url: string, init?: unknown) => ReturnType<SocketFactory> }).WebSocket;
   if (!Ctor) throw new Error('WebSocket is unavailable in this runtime.');
+  // A hosted server accepts a browser session (Cookie) on this socket, never a board key: with a session the key is not sent at all.
+  if (headers && Object.keys(headers).length) return new Ctor(url, { headers });
   return token ? new Ctor(url, { headers: { authorization: `Bearer ${token}` } }) : new Ctor(url);
 };
 
 /** Opens the company's live-event socket. `onEvent` gets each parsed event type; `onDown` fires once when it closes or fails. */
-export function openLiveEvents(client: PaperclipClient, companyId: string, handlers: { onOpen(): void; onEvent(type: string, payload: Record<string, unknown>): void; onDown(): void }, factory: SocketFactory = nodeSocket): LiveSocket {
+export function openLiveEvents(client: PaperclipClient, companyId: string, handlers: { onOpen(): void; onEvent(type: string, payload: Record<string, unknown>): void; onDown(): void }, factory: SocketFactory = nodeSocket, session?: { cookie: string; origin: string }): LiveSocket {
   let closed = false, down = false;
   const fail = () => { if (!down && !closed) { down = true; handlers.onDown(); } };
   let socket: ReturnType<SocketFactory>;
-  try { socket = factory(client.eventsUrl(companyId), client.endpoint.token); } catch { queueMicrotask(fail); return { close() { closed = true; } }; }
+  try { socket = session ? factory(client.eventsUrl(companyId), undefined, { cookie: session.cookie, origin: session.origin }) : factory(client.eventsUrl(companyId), client.endpoint.token); } catch { queueMicrotask(fail); return { close() { closed = true; } }; }
   socket.onopen = () => handlers.onOpen();
   socket.onmessage = event => {
     try {

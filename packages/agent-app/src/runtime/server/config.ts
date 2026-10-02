@@ -15,6 +15,8 @@ import { PAPERCLIP_LOCAL_URL } from '../../shared/domains/paperclip-protocol.ts'
 export const LEGACY_PAPERCLIP_SECRET = 'paperclip-board-token';
 export const LEGACY_MUSTER_SERVER_SECRET = 'muster-server-token';
 export const SERVER_SECRET = 'server-token';
+/** The hosted-server browser session (the Cookie its live socket accepts), kept encrypted and bound to `sessionOrigin`. */
+export const SESSION_SECRET = 'server-session';
 export interface ServerUser { username: string; displayName: string; role: string }
 export interface ServerConfig {
   version: 2; mode: PaperclipMode; baseUrl: string; companyId: string | null;
@@ -28,9 +30,11 @@ export interface ServerConfig {
   user: ServerUser | null; serverVersion: string | null; connectedAt: string | null;
   /** A browser-approval sign-in's account, and why a sign-in ended on its own (until the next one). */
   signedIn: { name: string | null; email: string | null } | null; signInNotice: string | null;
+  /** The origin the stored session cookie belongs to (the cookie is sent there and nowhere else). */
+  sessionOrigin: string | null;
   migratedFrom?: string[];
 }
-export const DEFAULT_SERVER_CONFIG: ServerConfig = { version: 2, mode: 'off', baseUrl: PAPERCLIP_LOCAL_URL, companyId: null, backend: null, tokenOrigin: null, tokenSecret: SERVER_SECRET, user: null, serverVersion: null, connectedAt: null, signedIn: null, signInNotice: null };
+export const DEFAULT_SERVER_CONFIG: ServerConfig = { version: 2, mode: 'off', baseUrl: PAPERCLIP_LOCAL_URL, companyId: null, backend: null, tokenOrigin: null, tokenSecret: SERVER_SECRET, user: null, serverVersion: null, connectedAt: null, signedIn: null, signInNotice: null, sessionOrigin: null };
 
 const who = (v: unknown): { name: string | null; email: string | null } | null => v && typeof v === 'object' ? { name: s((v as Record<string, unknown>).name), email: s((v as Record<string, unknown>).email) } : null;
 const read = (path: string): Record<string, unknown> | null => { try { const v = JSON.parse(readFileSync(path, 'utf8')) as unknown; return v && typeof v === 'object' && !Array.isArray(v) ? v as Record<string, unknown> : null; } catch { return null; } };
@@ -44,7 +48,7 @@ export function loadServerConfig(dataDir: string): { config: ServerConfig; migra
     const mode = own.mode === 'local' || own.mode === 'custom' ? own.mode : 'off';
     const user = own.user && typeof own.user === 'object' ? own.user as ServerUser : null;
     return { migrated: false, config: { ...DEFAULT_SERVER_CONFIG, mode, baseUrl: s(own.baseUrl) ?? PAPERCLIP_LOCAL_URL, companyId: s(own.companyId), backend: own.backend === 'paperclip' || own.backend === 'muster-server' ? own.backend : null,
-      tokenOrigin: s(own.tokenOrigin), tokenSecret: s(own.tokenSecret) ?? SERVER_SECRET, user, serverVersion: s(own.serverVersion), connectedAt: s(own.connectedAt), signedIn: who(own.signedIn), signInNotice: s(own.signInNotice), ...(Array.isArray(own.migratedFrom) ? { migratedFrom: own.migratedFrom as string[] } : {}) } };
+      tokenOrigin: s(own.tokenOrigin), tokenSecret: s(own.tokenSecret) ?? SERVER_SECRET, user, serverVersion: s(own.serverVersion), connectedAt: s(own.connectedAt), signedIn: who(own.signedIn), signInNotice: s(own.signInNotice), sessionOrigin: s(own.sessionOrigin), ...(Array.isArray(own.migratedFrom) ? { migratedFrom: own.migratedFrom as string[] } : {}) } };
   }
   const paperclip = read(join(dataDir, 'paperclip.json')), muster = read(join(dataDir, 'muster-server.json'));
   const pcMode = paperclip?.mode === 'local' || paperclip?.mode === 'custom' ? paperclip.mode : 'off';

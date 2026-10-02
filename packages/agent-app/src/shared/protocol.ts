@@ -128,6 +128,8 @@ export interface Commands extends DomainCommands, BrowserCommands, ScopedCompute
  'hindsight.reflect': {input: {folderId?: string; query: string; context?: string; budget?: 'low' | 'mid' | 'high'; maxTokens?: number}; output: {bankId: string; text: string}};
  'clipboard.write': {input:{text:string};output:void};
  'link.open': {input:{url:string};output:void};
+ /** Opens the server's own sign-in page in an app window with a cookie jar of its own per server origin (desktop only), so a hosted server can give this Mac the session its live socket accepts. `close` closes it. */
+ 'musterServer.signInWindow': {input:{url?:string;baseUrl:string;close?:boolean};output:{opened:boolean}};
  'app.snapshot': { input: undefined; output: Snapshot };
  'folder.add': { input: {path: string}; output: Folder };
  'folder.pick': { input: undefined; output: Folder | null };

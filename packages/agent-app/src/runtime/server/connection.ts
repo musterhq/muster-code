@@ -10,7 +10,8 @@ import { activeSecretStore, SecretStore } from '../secret-store.ts';
 import type { BackendOptions, ServerBackend, ServerEndpoint } from './backend.ts';
 import { passwordToken, signInMethods } from './auth.ts';
 import { SIGNED_OUT_BY_SERVER } from '../server-auth.ts';
-import { DEFAULT_SERVER_CONFIG, loadServerConfig, saveServerConfig, SERVER_SECRET, type ServerConfig } from './config.ts';
+import { DEFAULT_SERVER_CONFIG, loadServerConfig, saveServerConfig, SERVER_SECRET, SESSION_SECRET, type ServerConfig } from './config.ts';
+import { liveMode, validSessionCookie, type SessionState } from './session.ts';
 import { detectBackend, type Detection } from './detect.ts';
 import { MusterServerBackend } from './muster-server-backend.ts';
 import { PaperclipBackend } from './paperclip-backend.ts';
@@ -29,6 +30,10 @@ export class ServerConnection {
   config: ServerConfig;
   readonly migrated: boolean;
   private readonly listeners = new Set<() => void>();
+  private readonly sessionListeners = new Set<() => void>();
+  /** A session cookie that arrived before the sign-in finished (memory only): adopted with the key, dropped otherwise. */
+  private pendingSession: { origin: string; cookie: string; at: number } | null = null;
+  private expired = false;
   constructor(readonly dataDir: string, private readonly options: ConnectionOptions = {}) {
     const loaded = loadServerConfig(dataDir);
     this.config = loaded.config; this.migrated = loaded.migrated;
@@ -36,6 +41,8 @@ export class ServerConnection {
   get fetcher(): FetchLike { return this.options.fetch ?? ((input, init) => fetch(input, init)); }
   secrets(): SecretStore { return this.options.secrets?.() ?? activeSecretStore() ?? new SecretStore(this.dataDir); }
   onChange(listener: () => void): () => void { this.listeners.add(listener); return () => this.listeners.delete(listener); }
+  /** The session cookie changed (set, expired, cleared): the live socket is rebuilt, nothing else is. */
+  onSession(listener: () => void): () => void { this.sessionListeners.add(listener); return () => this.sessionListeners.delete(listener); }
   private save(next: ServerConfig, notify = true): void { saveServerConfig(this.dataDir, next); this.config = next; if (notify) for (const l of this.listeners) l(); }
 
   /** The URL the connection points at. A local server is on this Mac: the Paperclip default unless a Muster Server was found there. */
@@ -55,7 +62,55 @@ export class ServerConnection {
     let baseUrl = c.baseUrl; try { baseUrl = this.baseUrl(); } catch { /* keep what was typed */ }
     const hasToken = status.stored && c.tokenOrigin !== null && c.tokenOrigin === originOf(baseUrl);
     return { mode: c.mode, baseUrl, hasToken, secureStorage: status.secureStorage, companyId: c.companyId, backend: c.backend,
-      compatibility: c.backend === 'paperclip' ? 'Paperclip-compatible' : null, user: hasToken ? c.user : null, signedIn: hasToken ? c.signedIn : null, signInNotice: c.signInNotice, serverVersion: c.serverVersion, connectedAt: c.connectedAt, signIn: signInMethods(c.backend) };
+      compatibility: c.backend === 'paperclip' ? 'Paperclip-compatible' : null, user: hasToken ? c.user : null, signedIn: hasToken ? c.signedIn : null, signInNotice: c.signInNotice, session: this.sessionState(), reconnect: hasToken && c.signedIn !== null && c.backend === 'paperclip' && this.sessionState() !== 'active', serverVersion: c.serverVersion, connectedAt: c.connectedAt, signIn: signInMethods(c.backend) };
+  }
+
+  // --- the hosted-server browser session (what a hosted server's live socket accepts) -------------------------------------------
+  /** The stored session cookie and the origin it is bound to, only while the connection still points at that origin. */
+  sessionCookie(): { cookie: string; origin: string } | null {
+    const origin = this.config.sessionOrigin;
+    if (!origin || this.config.mode === 'off' || origin !== originOf(this.baseUrl())) return null;
+    const cookie = this.secrets().get(SESSION_SECRET);
+    return cookie ? { cookie, origin } : null;
+  }
+  sessionState(): SessionState { return !this.sessionCookie() ? 'none' : this.expired ? 'expired' : 'active'; }
+  /** The state the screens act on: whether a socket is up, and what a person can do about it. */
+  liveMode(channel: 'socket' | 'poll' | 'events' | 'off') { return liveMode({ channel, browserSignIn: this.config.signedIn !== null, session: this.sessionState() }); }
+  private notifySession(): void { for (const l of this.sessionListeners) l(); }
+  /** Keeps the session cookie the app's sign-in window obtained. Before the sign-in has finished it is held in memory for that origin only. */
+  setSession(baseUrl: string, cookie: unknown): 'pending' | 'active' {
+    const value = validSessionCookie(cookie), origin = originOf(baseUrl);
+    if (!origin) throw new Error('That is not a server address.');
+    if (this.config.mode === 'off' || origin !== originOf(this.baseUrl())) { this.pendingSession = { origin, cookie: value, at: Date.now() }; return 'pending'; }
+    return this.storeSession(origin, value);
+  }
+  private storeSession(origin: string, cookie: string): 'active' {
+    if (!this.secrets().status(SESSION_SECRET).secureStorage) throw new Error('This computer has no secure keychain available, so the server session cannot be stored. Muster will not keep it in plain text.');
+    this.secrets().set(SESSION_SECRET, cookie);
+    this.expired = false;
+    if (this.config.sessionOrigin !== origin) this.save({ ...this.config, sessionOrigin: origin }, false);
+    this.notifySession();
+    return 'active';
+  }
+  /** The server stopped accepting the session (expired, signed out elsewhere): kept, but marked, until Reconnect brings a fresh one. */
+  markSessionExpired(): void { if (!this.expired) { this.expired = true; this.notifySession(); } }
+  markSessionActive(): void { if (this.expired) { this.expired = false; this.notifySession(); } }
+  clearSession(notify = true): void {
+    this.pendingSession = null; this.expired = false;
+    if (this.secrets().status(SESSION_SECRET).stored) this.secrets().clear(SESSION_SECRET);
+    if (this.config.sessionOrigin !== null) this.save({ ...this.config, sessionOrigin: null }, false);
+    if (notify) this.notifySession();
+  }
+  /** Asks Better Auth whether the session is still good, the way the server's own web app does (`get-session` also extends it). */
+  async checkSession(): Promise<SessionState> {
+    const session = this.sessionCookie();
+    if (!session) return 'none';
+    try {
+      const response = await this.fetcher(`${session.origin}/api/auth/get-session`, { method: 'GET', redirect: 'error', signal: AbortSignal.timeout(10_000), headers: { accept: 'application/json', cookie: session.cookie, origin: session.origin } });
+      const body = response.ok ? await response.json().catch(() => null) as { session?: unknown } | null : null;
+      if (body && body.session) this.markSessionActive(); else this.markSessionExpired();
+    } catch { /* unreachable: nothing learned about the session */ }
+    return this.sessionState();
   }
 
   /** The 401 handler of a backend that sent `sent`: only the stored sign-in key can sign you out (a key typed into a test cannot). */
@@ -72,10 +127,12 @@ export class ServerConnection {
   /** A key that a sign-in stored and the server then revoked: forget the dead key and say so. */
   private lostSignIn(): void {
     if (this.secrets().status(this.config.tokenSecret).stored) this.secrets().clear(this.config.tokenSecret);
+    this.clearSession(false);
     this.save({ ...this.config, tokenOrigin: null, signedIn: null, user: null, signInNotice: SIGNED_OUT_BY_SERVER });
   }
   makeBackend(kind: ServerBackendKind, endpoint: ServerEndpoint, extra: BackendOptions = {}): ServerBackend {
-    const options = { fetch: this.options.fetch, onUnauthorized: this.guardFor(endpoint.baseUrl, endpoint.token), ...extra };
+    const session = kind === 'paperclip' && this.config.signedIn ? this.sessionCookie() : null;
+    const options = { fetch: this.options.fetch, onUnauthorized: this.guardFor(endpoint.baseUrl, endpoint.token), ...(session ? { session } : {}), ...extra };
     return kind === 'muster-server' ? new MusterServerBackend(endpoint, options) : new PaperclipBackend(endpoint, options);
   }
   /** Detects and remembers the backend of a connection that predates detection (or was saved offline). */
@@ -96,7 +153,7 @@ export class ServerConnection {
     else if (mode === 'local') baseUrl = typeof input.baseUrl === 'string' && isLoopback(input.baseUrl) ? normalizeBaseUrl(input.baseUrl) : isLoopback(c.baseUrl) && c.mode === 'local' ? c.baseUrl : PAPERCLIP_LOCAL_URL;
     const originChanged = originOf(baseUrl) !== originOf(c.baseUrl);
     let { tokenOrigin, tokenSecret, user, serverVersion, connectedAt, signedIn, signInNotice } = c;
-    const forget = () => { if (this.secrets().status(tokenSecret).stored) this.secrets().clear(tokenSecret); tokenOrigin = null; user = null; serverVersion = null; connectedAt = null; signedIn = null; };
+    const forget = () => { if (this.secrets().status(tokenSecret).stored) this.secrets().clear(tokenSecret); this.clearSession(false); tokenOrigin = null; user = null; serverVersion = null; connectedAt = null; signedIn = null; };
     if (input.token === '') forget();
     else if ((mode === 'custom' || (mode === 'local' && input.backend === 'muster-server')) && typeof input.token === 'string' && input.token) {
       if (!this.secrets().status(this.config.tokenSecret).secureStorage) throw new Error('This computer has no secure keychain available, so the server token cannot be stored. Muster will not keep it in plain text.');
@@ -104,7 +161,7 @@ export class ServerConnection {
     } else if (tokenOrigin !== null && tokenOrigin !== originOf(baseUrl)) forget();
     const companyId = input.companyId === null ? null : typeof input.companyId === 'string' ? id(input.companyId) : c.companyId;
     const backend: ServerBackendKind | null = input.backend === 'paperclip' || input.backend === 'muster-server' ? input.backend : originChanged ? null : c.backend;
-    this.save({ ...c, mode, baseUrl, companyId, backend, tokenOrigin, tokenSecret, user, serverVersion, connectedAt, signedIn, signInNotice });
+    this.save({ ...c, mode, baseUrl, companyId, backend, tokenOrigin, tokenSecret, user, serverVersion, connectedAt, signedIn, signInNotice, sessionOrigin: this.config.sessionOrigin });
     return this.view();
   }
 
@@ -131,17 +188,24 @@ export class ServerConnection {
   adoptSignIn(result: { origin: string; baseUrl: string; token: string; user: { name: string | null; email: string | null } }): void {
     const c = this.config;
     this.secrets().set(c.tokenSecret, result.token);
-    this.save({ ...c, mode: 'custom', baseUrl: result.baseUrl, companyId: c.tokenOrigin === result.origin || originOf(c.baseUrl) === result.origin ? c.companyId : null, backend: 'paperclip', tokenOrigin: result.origin, user: null, signedIn: { name: result.user.name, email: result.user.email }, signInNotice: null, connectedAt: new Date().toISOString() });
+    const sameOrigin = c.tokenOrigin === result.origin || originOf(c.baseUrl) === result.origin;
+    if (c.sessionOrigin !== null && c.sessionOrigin !== result.origin) this.clearSession(false);
+    this.save({ ...this.config, mode: 'custom', baseUrl: result.baseUrl, companyId: sameOrigin ? c.companyId : null, backend: 'paperclip', tokenOrigin: result.origin, user: null, signedIn: { name: result.user.name, email: result.user.email }, signInNotice: null, connectedAt: new Date().toISOString() });
+    // The sign-in window may have obtained the session before the approval finished: it joins the key now.
+    const pending = this.pendingSession; this.pendingSession = null;
+    if (pending && pending.origin === result.origin && Date.now() - pending.at < 30 * 60_000) try { this.storeSession(result.origin, pending.cookie); } catch { /* no keychain: updates fall back to polling */ }
   }
   /** Sign out of a browser-approval sign-in: the key is forgotten (the caller has asked the server to revoke it). */
   forgetSignIn(): void {
     const c = this.config;
     if (this.secrets().status(c.tokenSecret).stored) this.secrets().clear(c.tokenSecret);
-    this.save({ ...c, tokenOrigin: null, signedIn: null, user: null, signInNotice: null });
+    this.clearSession(false);
+    this.save({ ...this.config, tokenOrigin: null, signedIn: null, user: null, signInNotice: null });
   }
   disconnect(): PaperclipConfigView {
     const c = this.config;
     if (this.secrets().status(c.tokenSecret).stored) this.secrets().clear(c.tokenSecret);
+    this.clearSession(false);
     this.save({ ...DEFAULT_SERVER_CONFIG, ...(c.mode !== 'off' && c.backend === 'paperclip' ? { mode: c.mode, baseUrl: c.baseUrl, companyId: c.companyId, backend: c.backend, tokenSecret: c.tokenSecret } : { tokenSecret: c.tokenSecret }) });
     return this.view();
   }

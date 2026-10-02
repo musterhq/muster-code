@@ -211,7 +211,7 @@ test('the Muster Server import reader answers the importer\'s Paperclip-shaped r
   assert.deepEqual([issue.identifier,issue.description,issue.assigneeAgentId,issue.status],['SUP-1','Body of 1','member:m1','todo']);
   const compact:unknown[][]=[];for await(const page of reader.issuePages(SERVER_ORG_ID,'view=compact'))compact.push(page);
   assert.equal((compact[0]![0] as {description:string}).description,'','a plan only counts: no bodies are read for it');
-  const comments:Array<{authorType:string;authorAgentId?:string}>=[];for await(const page of reader.commentPages('1'))comments.push(...page as never);
+  const comments:Array<{authorType:string;authorAgentId?:string}>=[];for await(const page of reader.commentPages('1'))comments.push(...(page as unknown as typeof comments));
   assert.deepEqual(comments.map(c=>[c.authorType,c.authorAgentId]),[['agent','member:m1'],['user',undefined]]);
   await assert.rejects(reader.get('/issues/nope'),/nothing at/);
 });

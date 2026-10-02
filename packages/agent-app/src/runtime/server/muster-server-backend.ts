@@ -137,7 +137,7 @@ export class MusterServerBackend implements ServerBackend {
   async pauseAgent(id: string): Promise<void> { await this.rpc('paperclip.agent.pause', { id }); }
   async resumeAgent(id: string): Promise<void> { await this.rpc('paperclip.agent.resume', { id }); }
   async cancelRun(id: string): Promise<void> { await this.rpc('paperclip.run.cancel', { id }); }
-  async decideApproval(id: string, decision: ApprovalDecision): Promise<void> {
+  async decideApproval(id: string, decision: ApprovalDecision, _note?: string | null): Promise<void> {
     if (decision === 'request_revision') throw new Error('This request can be approved or declined.');
     if (id.startsWith('gate:')) { await this.rpc('automations.gate.decide', { id: id.slice(5), approve: decision === 'approve' }); return; }
     await this.rpc('approval.respond', { id, approved: decision === 'approve' });
