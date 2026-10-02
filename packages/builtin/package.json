@@ -966,11 +966,11 @@
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
-    "@types/vscode": "^1.105.0",
-    "esbuild": "^0.25.0",
+    "@types/vscode": "^1.138.0",
+    "esbuild": "^0.28.2",
     "linkedom": "^0.18.13",
-    "lucide-static": "^1.45.0",
-    "tsx": "^4.19.0",
+    "lucide-static": "^1.48.0",
+    "tsx": "^4.23.15",
     "typescript": "^5.7.0"
   }
 }
