@@ -65,6 +65,10 @@ test('G21: scan, compare, trust; test; a chat bound to the host gets tools that 
   const bad = await tool('ssh_exec', { command: 'exit 3' }); assert.equal(bad.error, true); assert.match(bad.text, /exit 3/);
   assert.match((await tool('ssh_exec', { command: 'sleep 5', timeout_sec: 1 })).text, /timed out/);
   assert.match((await tool('ssh_read', { path: 'nope.txt' })).text, /No such file|nope/i);
+  // The MCP process waits as long as ssh_exec may run (600 s plus a margin), and a 1 MB write fits the host's body limit.
+  assert.match(readFileSync(join(dirname(launcher), 'muster_ssh-mcp.cjs'), 'utf8'), /AbortSignal\.timeout\(610000\)/); assert.equal(call.overrides['mcp_servers.muster_ssh.tool_timeout_sec'], 600);
+  const big = await tool('ssh_write', { path: 'big.txt', text: 'x'.repeat(900_000) }); assert.equal(big.error, false, big.text);
+  assert.equal(statSync(join(s.dir, 'big.txt')).size, 900_000);
   // Injection through the path stays inside quotes.
   await tool('ssh_write', { path: "x'; touch /tmp/muster-w4-pwn; echo '.txt", text: 'x' }); assert.ok(!existsSync('/tmp/muster-w4-pwn'));
   // Read-only chats cannot exec or write.

@@ -67,7 +67,9 @@ export function createEnvsDomain(ctx: DomainContext): DomainModule {
     }
   }
   let sshHost: ToolHost | undefined;
-  const toolHost = () => sshHost ??= new ToolHost({ dir: join(ctx.dataDir, 'agent-tools', 'ssh'), name: SSH_MCP, title: 'Muster SSH', specs: SSH_TOOL_SPECS, execPath: process.execPath, run: runSshTool });
+  const toolHost = () => sshHost ??= new ToolHost({ dir: join(ctx.dataDir, 'agent-tools', 'ssh'), name: SSH_MCP, title: 'Muster SSH', specs: SSH_TOOL_SPECS, execPath: process.execPath, run: runSshTool,
+    // ssh_exec may run for up to 600 s (the provider's tool timeout is 600 too), so the MCP process waits a little longer; ssh_write takes up to 1 MB of text.
+    timeoutMs: 610_000, maxBody: 8 * 1024 * 1024 });
   const offOptions = ctx.hooks.addRunOptionsContributor(async chat => {
     if (!bound(chat.id)) return null;
     const launcher = await toolHost().start();
