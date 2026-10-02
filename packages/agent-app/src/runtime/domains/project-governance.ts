@@ -34,6 +34,11 @@ import { clampHeartbeat, GovernanceStore } from '../governance/store.ts';
 import { ancestorsOf, fingerprintOf, leavesOf, rootOf, subtreeIds, type TreeTask } from '../governance/subtree.ts';
 import { actionOf, evaluateTool, normalizeRules, type ToolVerdict } from '../governance/tool-policy.ts';
 import { leadReason, WakeQueue } from '../governance/wake-queue.ts';
+import { REMOTE_PROVIDER } from '../../shared/domains/agent-tools-protocol.ts';
+import { InteractionStore } from '../governance/interactions.ts';
+import { createTaskTools, TASK_MCP, TASK_PROTOCOL, TASK_TOOL_SPECS } from '../governance/task-tools.ts';
+import { ToolHost } from '../governance/tool-host.ts';
+import { join } from 'node:path';
 import type { createProjectTeam } from './project-team.ts';
 import type { DomainContext, DomainHandler, RunOptions } from './types.ts';
 
@@ -127,6 +132,7 @@ export function createGovernance(ctx: DomainContext, deps: GovernanceDeps) {
     const h = holdFor(t);
     if (h) return heldMessage(h);
     const full = t.owner ? t : tasks().getTask(t.id), mid = full?.owner ? ownerMemberId(full as ProjectTask) : null;
+    if (mid && memberOf(t.projectId, mid)?.runner?.providerId === REMOTE_PROVIDER) return `${nameOf(t.projectId, mid)} is a remote agent: it picks its tasks up through the server, so nothing starts here.`;
     if (mid) {
       // C15: an agent works on at most `maxConcurrent` tasks at once.
       const cap = agentGov(t.projectId, mid).heartbeat.maxConcurrent;
@@ -247,6 +253,20 @@ export function createGovernance(ctx: DomainContext, deps: GovernanceDeps) {
     storm: w => tripStorm(w),
     changed: p => deps.changed(p),
   });
+  // ── agent tools, cards and approvals (Wave 4: G40, G41, G8, G6, G7) ─────────
+  let istore: InteractionStore | undefined;
+  const interactions = () => istore ??= Object.assign(new InteractionStore(ctx.dataDir), { clock: now });
+  const taskTools = createTaskTools({
+    store: interactions, tasks, team, exists: p => deps.exists(p), keyOf, nameOf, agentGov,
+    mayAssign: (p, m, acting, target) => mayAssign(p, m, acting, target), lowTrustAssignee: (p, c, a) => lowTrustAssignee(p, c, a), trustCeiling: (p, m) => trustCeiling(p, m),
+    record: (p, kind, summary, refId, actor) => record(p, kind, summary, refId ?? null, actor ?? 'system'), changed: (p, t, snap) => deps.changed(p, t, snap),
+    wake: r => wakeQueue().request(r), onAssigned: (p, t) => onAssigned(p, t), invoke: (command, input) => ctx.invoke(command as never, input as never) as Promise<unknown>,
+    secretProposals: (p, pendingOnly) => gov().proposals(p, pendingOnly), providers: () => ctx.modelCatalog?.().providers ?? [], now,
+  });
+  let toolHost: ToolHost | undefined;
+  const taskToolHost = () => toolHost ??= new ToolHost({ dir: join(ctx.dataDir, 'agent-tools', 'tasks'), name: TASK_MCP, title: 'Muster tasks', specs: TASK_TOOL_SPECS, execPath: process.execPath,
+    run: (chatId, tool, args) => taskTools.run(chatId, tool, args, tasks().taskByRunChat(chatId)) });
+
   /** Picks the task a task-less wake (timer, on demand) works on: the owner's highest-priority ready task. */
   function readyTaskFor(projectId: string, memberId: string): ProjectTask | undefined {
     const all = taskList(projectId), byId = new Map(all.map(t => [t.id, t])), heldOf = holdIndex(projectId);
@@ -747,7 +767,7 @@ export function createGovernance(ctx: DomainContext, deps: GovernanceDeps) {
     const sub = subtaskRequests(text);
     if (sub.creates.length || sub.reassigns.length) {
       const refusal = mayAssign(projectId, memberId, task, { taskId: task.id, create: sub.creates.length > 0 });
-      if (refusal && !agentGov(projectId, memberId).capabilities.canAssign) record(projectId, 'task.permission-denied', `${refusal} ${sub.creates.length + sub.reassigns.length} requested ${sub.creates.length + sub.reassigns.length === 1 ? 'change was' : 'changes were'} not applied.`, task.id, 'system');
+      if (refusal && !agentGov(projectId, memberId).capabilities.canAssign) { record(projectId, 'task.permission-denied', `${refusal} ${sub.creates.length + sub.reassigns.length} requested ${sub.creates.length + sub.reassigns.length === 1 ? 'change was' : 'changes were'} not applied.`, task.id, 'system'); if (sub.creates.length) taskTools.suggest(projectId, task.id, memberId, sub.creates); }
       else if (refusal && sub.creates.length) record(projectId, 'task.permission-denied', `${refusal} ${sub.creates.length} requested ${sub.creates.length === 1 ? 'subtask was' : 'subtasks were'} not created.`, task.id, 'system');
       else {
         const members = team().list(projectId).filter(m => m.kind === 'agent' && !m.revokedAt && !m.pendingAt);
@@ -775,15 +795,9 @@ export function createGovernance(ctx: DomainContext, deps: GovernanceDeps) {
     for (const e of sub.errors) record(projectId, 'task.permission-denied', `${who}'s subtasks block was not understood: ${e}`, task.id, 'system');
     const hires = hireRequests(text);
     for (const h of hires.hires) {
-      const caps = agentGov(projectId, memberId).capabilities;
-      if (!caps.canHire) { record(projectId, 'task.permission-denied', `${who} proposed hiring ${h.name}, but is not allowed to add agents. Turn on “Can add agents” in their permissions.`, task.id, 'system'); continue; }
-      if (caps.trust === 'low-trust') { record(projectId, 'task.permission-denied', `${who} is a low-trust agent and cannot add agents.`, task.id, 'system'); continue; }
       try {
-        const boss = h.reportsTo ? team().list(projectId).find(m => m.kind === 'agent' && (m.id === h.reportsTo || m.name.toLowerCase() === h.reportsTo!.toLowerCase())) : undefined;
-        const pending = team().settings(projectId).requireHireApproval;
-        const m = team().add(projectId, { name: h.name, kind: 'agent', role: 'agent', pending, ...(h.title ? { title: h.title } : {}), reportsTo: boss?.id ?? memberId, instructions: h.instructions });
-        record(projectId, pending ? 'member.hire-requested' : 'member.added', `${who} ${pending ? 'asked to add' : 'added'} ${m.name}${m.title ? ` as ${m.title}` : ''}${pending ? ': waiting for your approval' : ''}.`, m.id, 'agent');
-        deps.changed(projectId, task.id, true);
+        const r = taskTools.proposeHire(projectId, memberId, { name: h.name, title: h.title, reportsTo: h.reportsTo, instructions: h.instructions }, task.id);
+        if (!r.ok) record(projectId, 'task.permission-denied', `${who} proposed hiring ${h.name}: ${r.refusal}`, task.id, 'system');
       } catch (err) { record(projectId, 'task.permission-denied', `${who}'s hire of ${h.name} failed: ${err instanceof Error ? err.message : 'error'}`, task.id, 'system'); }
     }
     for (const e of hires.errors) record(projectId, 'task.permission-denied', `${who}'s hire block was not understood: ${e}`, task.id, 'system');
@@ -859,6 +873,14 @@ export function createGovernance(ctx: DomainContext, deps: GovernanceDeps) {
         stopIntent.delete(chat.id);
         if (intent === 'hold') { deps.changed(projectId, task.id); return; }
         await afterStop(tasks().getTask(task.id) ?? task, intent);
+        return;
+      }
+      const waiting = status === 'completed' ? taskTools.pendingFor(task.id) : [];
+      if (waiting.length) {
+        const cur = tasks().getTask(task.id)!;
+        if (cur.state === 'implemented' || cur.state === 'review') tasks().setState({ projectId, id: task.id, revision: cur.revision, state: 'blocked', reason: `Waiting for your answer: ${clip(waiting[0]!.title, 80)}` }, 'system');
+        record(projectId, 'task.question', `“${clip(task.title, 60)}” is waiting for your answer.`, task.id, 'system');
+        deps.changed(projectId, task.id, true);
         return;
       }
       // The run itself leaves the task running again when a hold or pause caught it mid-flight.
@@ -1004,7 +1026,8 @@ export function createGovernance(ctx: DomainContext, deps: GovernanceDeps) {
     if (g.gitIdentity) out.push(`Commit as ${g.gitIdentity.name} <${g.gitIdentity.email}> (already set in your environment).`);
     out.push('Need a credential you were not given? Do not ask for it in chat. End your reply with ```muster-secret-request {"name":"NAME","purpose":"why"}```; the user approves it.');
     if (g.capabilities.canAssign) out.push(`You may create subtasks${g.capabilities.assignScope === 'project' ? ' anywhere in the project' : ' under this task'} and hand them to teammates: end your reply with \`\`\`muster-subtasks [{"title":"…","acceptance":"…","assignee":"Name"}]\`\`\`.`);
-    if (g.capabilities.canHire) out.push('You may propose a new teammate: ```muster-hire {"name":"…","title":"…","instructions":"…"}```.');
+    if (g.capabilities.canHire) out.push('You may propose a new teammate: ```muster-hire {"name":"…","title":"…","instructions":"…"}``` or the agent_propose_hire tool.');
+    out.push(`Tools (muster_tasks): task_get, task_list, agent_list, task_comment, task_update, task_create, task_assign, task_checkout, task_document_upsert, task_ask_questions, task_request_confirmation, agent_propose_hire.`, 'Muster task protocol:', TASK_PROTOCOL);
     if (settings(projectId).runComment !== 'off') out.push('End every run with a short comment on the task: what you did, what changed, what is left.');
     return out;
   }
@@ -1022,7 +1045,7 @@ export function createGovernance(ctx: DomainContext, deps: GovernanceDeps) {
   }
   const lent = new Set<string>();
   /** Run options for a task run: the agent's git identity and the secrets it was granted, as run environment. */
-  function runOptions(chat: Chat): RunOptions | null {
+  async function runOptions(chat: Chat): Promise<RunOptions | null> {
     if (disposed || !chat.projectId || !deps.exists(chat.projectId)) return null;
     // A reviewer or watchdog chat is read-only work for a different agent: it is lent nothing, never its task owner's secrets or identity.
     const meta = gov().runMeta(chat.id);
@@ -1030,11 +1053,18 @@ export function createGovernance(ctx: DomainContext, deps: GovernanceDeps) {
     const task = tasks().taskByRunChat(chat.id);
     const mid = task ? ownerMemberId(task) : null, m = mid ? memberOf(chat.projectId, mid) : undefined;
     if (!task || !m || m.kind !== 'agent') return null;
-    const g = agentGov(chat.projectId, m.id), overrides: Record<string, string> = {};
+    const g = agentGov(chat.projectId, m.id), overrides: Record<string, string | number> = {};
     if (g.gitIdentity) Object.assign(overrides, envOverrides(g.gitIdentity));
     if (canLend(chat.providerId)) for (const name of m.secrets) { const v = theVault().value(chat.projectId, name); if (v) overrides[`shell_environment_policy.set.${name}`] = v.value; }
     lendLiterals(chat.id, m.secrets.flatMap(n => canLend(chat.providerId) ? [theVault().value(chat.projectId!, n)?.value ?? ''] : []));
     if (m.secrets.length && !lent.has(chat.id)) { lent.add(chat.id); lendable(chat.projectId, m, chat.id, true); if (lent.size > 500) lent.clear(); }
+    try {
+      const launcher = await taskToolHost().start();
+      overrides[`mcp_servers.${TASK_MCP}.command`] = launcher;
+      overrides[`mcp_servers.${TASK_MCP}.env.MUSTER_CHAT_ID`] = chat.id;
+      overrides[`mcp_servers.${TASK_MCP}.env.MUSTER_CHAT_TOKEN`] = taskToolHost().chatToken(chat.id);
+      overrides[`mcp_servers.${TASK_MCP}.tool_timeout_sec`] = 60;
+    } catch { /* the tools are optional: a run without them still works through fenced blocks */ }
     return Object.keys(overrides).length ? { configOverrides: overrides } : null;
   }
   /** Before a task run: say, in the activity feed, which identity its commits carry. Nothing is written to any git config. */
@@ -1095,6 +1125,7 @@ export function createGovernance(ctx: DomainContext, deps: GovernanceDeps) {
     for (const p of gov().proposals(projectId, true)) items.push({ id: `secret:${p.id}`, kind: 'approval', title: `${p.memberName} asks for the secret ${p.name}`, why: p.purpose, severity: 'high', at: p.createdAt, taskId: p.taskId, agentId: `member:${p.memberId}`, area: 'secrets' });
     for (const m of gov().monitors(projectId)) if (m.state === 'escalated') { const t = tasks().getTask(m.taskId); items.push({ id: `monitor:${m.id}`, kind: 'blocked', title: `${t ? keyOf(t) : 'A task'} · follow-up check`, why: m.note || `The follow-up check on “${t?.title ?? 'a task'}” found it unfinished after ${m.attempts} ${m.attempts === 1 ? 'attempt' : 'attempts'}.`, severity: 'medium', at: m.lastFiredAt ?? m.createdAt, taskId: m.taskId, agentId: null, area: 'governance' }); }
     for (const s of gov().stages(projectId)) if ((s.status === 'awaiting' || s.status === 'escalated') && tasks().getTask(s.taskId)) { const t = tasks().getTask(s.taskId)!; items.push({ id: `stage:${s.taskId}`, kind: 'review', title: `${keyOf(t)} · ${s.kind === 'review' ? 'review' : 'approval'} ${s.stage + 1} of ${s.stages}`, why: s.status === 'escalated' ? s.feedback ?? 'Waiting for your decision.' : `Waiting for ${s.approverName === 'You' ? 'your' : `${s.approverName}'s`} ${s.kind === 'review' ? 'review' : 'approval'}.`, severity: 'high', at: s.updatedAt, taskId: s.taskId, agentId: null, area: 'governance' }); }
+    items.push(...taskTools.inboxItems(projectId));
     return items;
   }
   // ── wakes that follow what people do: assignment and comments (C14) ─────────
@@ -1134,6 +1165,7 @@ export function createGovernance(ctx: DomainContext, deps: GovernanceDeps) {
     } catch { /* observers never fail a command */ }
   });
   const commands = () => ({
+    ...taskTools.handlers,
     'project.gov.state': (input: Record<string, unknown>) => { armAll(); return governanceState(project(input)); },
     'project.gov.summary': (input: Record<string, unknown>) => { const projectId = project(input), active = gov().holds(projectId, 'active'), tree = treeOf(projectId); return { items: inboxItems(projectId), hidden: gov().hidden(projectId), held: [...new Set(active.flatMap(h => subtreeIds(tree, h.rootTaskId)))] }; },
     /** One task's governance for its thread: no project-wide recovery or run scans, so a live run's refreshes stay cheap. */
@@ -1285,7 +1317,7 @@ export function createGovernance(ctx: DomainContext, deps: GovernanceDeps) {
   const purgeProject = (projectId: string) => {
     // The encrypted values go with the project: nothing could reach them once the metadata is gone.
     for (const m of gov().secretsMeta(projectId)) { try { theVault().remove(projectId, m.name, 'You'); } catch { /* already gone */ } }
-    gov().purgeProject(projectId); for (const [k] of heartbeatTimers) if (k.startsWith(`${projectId}:`)) { timers.clear(heartbeatTimers.get(k)); heartbeatTimers.delete(k); } };
+    interactions().purgeProject(projectId); gov().purgeProject(projectId); for (const [k] of heartbeatTimers) if (k.startsWith(`${projectId}:`)) { timers.clear(heartbeatTimers.get(k)); heartbeatTimers.delete(k); } };
   /** An agent was removed or revoked: its timer stops. */
   const memberGone = (projectId: string, memberId: string) => disarm(projectId, memberId);
   function dispose() {
@@ -1294,7 +1326,7 @@ export function createGovernance(ctx: DomainContext, deps: GovernanceDeps) {
     for (const h of retryTimers.values()) timers.clear(h); retryTimers.clear();
     for (const h of evalTimers.values()) timers.clear(h); evalTimers.clear();
     if (monitorTimer) timers.clear(monitorTimer);
-    store?.close(); store = undefined;
+    store?.close(); store = undefined; istore?.close(); istore = undefined; toolHost?.dispose(); toolHost = undefined;
   }
   return {
     handlers: commands() as unknown as Record<string, DomainHandler>,

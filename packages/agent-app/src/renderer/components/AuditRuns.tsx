@@ -39,7 +39,7 @@ export function AuditRuns({ snapshot, nav }: { snapshot: WorkspaceSnapshot; nav:
             <td className="ws-faint">{r.trigger ?? '—'}</td>
             <td><StateChip tone={runTone(r.status)}>{RUN_STATE_LABEL[r.status]}</StateChip>{r.error && <span className="audit-error" title={r.error}>{explainRunError(r.error)}</span>}</td>
             <td className="numeric">{r.status === 'running' ? 'running' : duration(r.startedAt, r.finishedAt) || '0s'}</td>
-            <td className="numeric" title={exactTime(r.startedAt ?? r.createdAt)}>{agoLabel(r.startedAt ?? r.createdAt)}</td>
+            <td className="numeric" title={exactTime(r.startedAt ?? r.createdAt)}>{nav.onOpenRun ? <button type="button" className="ws-link" aria-label={`Details of the run ${agoLabel(r.startedAt ?? r.createdAt)}`} onClick={() => nav.onOpenRun!(r.id)}>{agoLabel(r.startedAt ?? r.createdAt)}</button> : agoLabel(r.startedAt ?? r.createdAt)}</td>
           </tr>; })}</tbody></table>}
     {rows.length > 300 && <p className="ws-faint">Showing the newest 300 of {rows.length}.</p>}
   </div>;

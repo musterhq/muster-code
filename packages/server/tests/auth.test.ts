@@ -144,3 +144,32 @@ test('audit: every auth event is chained; tampering is detected', async () => {
   assert.equal(v.ok, false); assert.equal(v.brokenAt, 2);
   assert.equal(typeof auditHash, 'function');
 });
+
+test('R281 should-fix 11: an invite is re-checked against the inviter at accept time, and nobody mints a role above their own', async () => {
+  const { accounts, owner, store } = await setup();
+  const at = new Date().toISOString();
+  const mk = async (id: string, role: 'admin' | 'member' | 'viewer') => { await store.createUser({ id, username: id, displayName: id, email: null, passwordHash: null, role, status: 'active', authProvider: 'local', createdAt: at, updatedAt: at, lastLoginAt: null }); return (await store.userById(id))!; };
+  // An admin's invite dies with the admin's role.
+  const admin = await mk('ada', 'admin'), plain = await accounts.createInvite(admin, { role: 'member' });
+  assert.equal((await accounts.inspectInvite(plain.token)).role, 'member');
+  await store.updateUser(admin.id, { role: 'member' });
+  await assert.rejects(accounts.acceptInvite(plain.token, { username: 'late1', password: PW }), /no longer invite/);
+  // A revoked inviter's invite is dead too.
+  const admin2 = await mk('bea', 'admin'), second = await accounts.createInvite(admin2, { role: 'viewer' });
+  await store.updateUser(admin2.id, { status: 'revoked' });
+  await assert.rejects(accounts.inspectInvite(second.token), /no longer invite/);
+  // A project owner's invite lasts only while they still own the project.
+  const lead = await mk('cal', 'member');
+  await store.setProjectAccess({ projectId: 'p1', userId: lead.id, role: 'owner', memberId: null, grantedBy: owner.id, createdAt: at });
+  const proj = await accounts.createInvite(lead, { role: 'member', projectId: 'p1', projectRole: 'editor', asProjectOwner: true });
+  assert.equal((await accounts.inspectInvite(proj.token)).projectId, 'p1');
+  await store.removeProjectAccess('p1', lead.id);
+  await assert.rejects(accounts.acceptInvite(proj.token, { username: 'late2', password: PW }), /no longer invite/);
+  // Owners and current admins are unaffected.
+  assert.equal((await accounts.acceptInvite((await accounts.createInvite(owner, { role: 'member' })).token, { username: 'fine1', password: PW })).role, 'member');
+  // A server viewer who owns a project cannot mint members (or anything above viewer).
+  const viewer = await mk('vik', 'viewer');
+  await store.setProjectAccess({ projectId: 'p2', userId: viewer.id, role: 'owner', memberId: null, grantedBy: owner.id, createdAt: at });
+  await assert.rejects(accounts.createInvite(viewer, { role: 'member', projectId: 'p2', projectRole: 'editor', asProjectOwner: true }), /cannot invite someone as member/);
+  assert.equal((await accounts.createInvite(viewer, { role: 'viewer', projectId: 'p2', projectRole: 'viewer', asProjectOwner: true })).invite.role, 'viewer');
+});

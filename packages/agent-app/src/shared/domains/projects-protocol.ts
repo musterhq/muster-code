@@ -3,6 +3,7 @@ import type { ProjectEventsPage } from '../project-events.ts';
 import type { BoundedList, ChatPermissionMode, ProjectActivity, ProjectDecision, TaskStatus as LegacyTaskStatus } from '../protocol.ts';
 import { PROJECT_TEAM_COMMANDS, type ProjectTeamCommands } from './project-team-protocol.ts';
 import { PROJECT_GOVERNANCE_COMMANDS, type ProjectGovernanceCommands, type RunReason } from './project-governance-protocol.ts';
+import { AGENT_TOOLS_COMMANDS, type AgentToolsCommands } from './agent-tools-protocol.ts';
 export * from './project-team-protocol.ts';
 export * from './project-governance-protocol.ts';
 
@@ -99,7 +100,7 @@ export interface ProjectStats {
   activity: (ProjectActivity & { projectName: string })[];
 }
 
-export interface ProjectsCommands extends ProjectTeamCommands, ProjectGovernanceCommands {
+export interface ProjectsCommands extends ProjectTeamCommands, ProjectGovernanceCommands, AgentToolsCommands {
   'project.list': { input: undefined; output: ProjectDetails[] };
   /** Rename, change the goal, replace the folder set or set the primary folder. Removing a folder with a running chat is refused. */
   'project.update': { input: { id: string; name?: string; goal?: string; folderIds?: string[]; primaryFolderId?: string | null }; output: ProjectDetails };
@@ -154,7 +155,7 @@ export interface ProjectsCommands extends ProjectTeamCommands, ProjectGovernance
   'project.events': { input: { projectId: string; after: number; limit?: number }; output: ProjectEventsPage };
 }
 export type ProjectsEvent = never;
-export const PROJECTS_COMMANDS = { ...PROJECT_TEAM_COMMANDS, ...PROJECT_GOVERNANCE_COMMANDS, 'project.list': true, 'project.update': true, 'project.linkFolder': true, 'project.unlinkFolder': true, 'project.preview': true, 'project.archive': true, 'project.restore': true, 'project.delete': true,
+export const PROJECTS_COMMANDS = { ...PROJECT_TEAM_COMMANDS, ...PROJECT_GOVERNANCE_COMMANDS, ...AGENT_TOOLS_COMMANDS, 'project.list': true, 'project.update': true, 'project.linkFolder': true, 'project.unlinkFolder': true, 'project.preview': true, 'project.archive': true, 'project.restore': true, 'project.delete': true,
   'project.work': true, 'project.tasks.get': true, 'project.origin.get': true, 'project.tasks.add': true, 'project.stats': true, 'project.tasks.edit': true, 'project.tasks.delete': true, 'project.tasks.setState': true, 'project.tasks.verify': true, 'project.tasks.dispatch': true,
   'project.decisions.add': true, 'project.decisions.edit': true, 'project.decisions.replace': true, 'project.instructions.set': true, 'project.scheduler.set': true,
   'project.coordinator.start': true, 'project.coordinator.apply': true, 'project.coordinator.dismiss': true,

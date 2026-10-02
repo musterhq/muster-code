@@ -87,7 +87,7 @@ const {ServerSettings}=await import('../src/renderer/components/settings/ServerS
 const host2=document.getElementById('root2')!;
 const root2=createRoot(host2);
 await act(async()=>{root2.render(<ServerSettings/>);});await settle(120);
-for(const heading of ['Your account','People and roles','Invites','Project access','Usage and cost, last 30 days','Active sessions','Connectors','Audit'])assert.ok(byText(host2,'h3',heading),heading);
+for(const heading of ['Your account','People and roles','Invites','Project access','Usage and cost, last 30 days','Active sessions','Chat channels','Remote agents','Audit'])assert.ok(byText(host2,'h3',heading),heading);
 assert.match(text(host2),/Mel Member \(@mel\).*\$0\.0126/);
 assert.match(text(host2),/Ledger verified · 3 turns/);
 assert.equal(text(host2).includes('old error'),false,'a healthy connector hides its last error');

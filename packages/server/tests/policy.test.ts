@@ -200,3 +200,47 @@ test('Review S2: the Wave 3 commands that start an agent turn record the caller 
   const { TURN_COMMANDS } = await import('../src/rpc.ts');
   for (const c of ['insight.reflect.run', 'insight.setup.interview', 'studio.skill.test', 'project.coordinator.start']) assert.ok(TURN_COMMANDS.has(c), c);
 });
+
+test('Wave 4: commands that run on the server host or speak for an agent are admin-only; org and backup reads stay reads; imports cannot read server folders', () => {
+  for (const c of ['ssh.hosts.list', 'ssh.hosts.save', 'ssh.hostkey.trust', 'ssh.test', 'ssh.chat.set', 'services.start', 'services.save', 'services.stop', 'backups.run', 'backups.restore', 'backups.settings.set', 'org.export.write',
+    'project.remote.tasks', 'project.remote.comment', 'project.remote.state', 'project.remote.doc']) assert.equal(classifyCommand(c), 'host', c);
+  for (const c of ['backups.status', 'org.export', 'org.import.preview', 'org.teams.list', 'org.imports.pending', 'project.approvals.list', 'project.interactions.list', 'services.list', 'services.previews', 'project.protocol.get']) assert.equal(classifyCommand(c), 'read', c);
+  for (const c of ['org.import.apply', 'org.activate', 'project.interactions.answer', 'project.approvals.comment', 'project.approvals.requestRevision']) assert.equal(classifyCommand(c), 'write', c);
+  assert.throws(() => authorizeCommand('ssh.test', 'member'), /needs admin/); assert.throws(() => authorizeCommand('project.remote.comment', 'member'), /needs admin/);
+  const editor = accessView(user('member'), grants, owners), owner = accessView(user('member'), [{ projectId: 'p-shared', role: 'owner' }], owners);
+  denied(() => authorizeResource(editor, 'org.import.apply', 'write', { projectId: 'p-shared', source: { kind: 'catalog', key: 'x' } }, snapshot), 'forbidden');
+  authorizeResource(owner, 'org.import.apply', 'write', { projectId: 'p-shared', source: { kind: 'catalog', key: 'x' } }, snapshot);
+  denied(() => authorizeResource(editor, 'project.approvals.requestRevision', 'write', { projectId: 'p-shared', id: 'a', note: 'n' }, snapshot), 'forbidden');
+  authorizeResource(editor, 'project.interactions.answer', 'write', { projectId: 'p-shared', id: 'c', answers: {} }, snapshot);
+  denied(() => authorizeResource(editor, 'project.interactions.answer', 'write', { projectId: 'p-secret', id: 'c', answers: {} }, snapshot));
+});
+
+test('R281 must-fix 1: org.import.preview parses an uploaded package on the server, so only owners and admins may run it', () => {
+  const viewer = accessView(user('viewer'), grants, owners), member = accessView(user('member'), grants, owners), admin = accessView(user('admin'), [], owners);
+  for (const v of [viewer, member]) denied(() => authorizeResource(v, 'org.import.preview', 'read', { source: { kind: 'zip', base64: 'AAAA' } }, snapshot), 'forbidden');
+  authorizeResource(admin, 'org.import.preview', 'read', { source: { kind: 'zip', base64: 'AAAA' } }, snapshot);
+});
+
+test('R281 should-fix 10a: backups.status shows the data folder path and backup list, so only owners and admins read it', () => {
+  const viewer = accessView(user('viewer'), grants, owners), member = accessView(user('member'), grants, owners), admin = accessView(user('admin'), [], owners);
+  for (const v of [viewer, member]) denied(() => authorizeResource(v, 'backups.status', 'read', {}, snapshot), 'forbidden');
+  authorizeResource(admin, 'backups.status', 'read', {}, snapshot);
+});
+
+test('R281 should-fix 10b: project.remote.* cannot be called over /rpc, not even by an owner', async () => {
+  const { dispatch } = await import('../src/rpc.ts');
+  for (const role of ['owner', 'admin'] as const) for (const c of ['project.remote.tasks', 'project.remote.comment', 'project.remote.state', 'project.remote.doc', 'project.remote.task'])
+    await assert.rejects(dispatch({} as never, { user: user(role) } as never, c, { projectId: 'p' }), /remote agent API/);
+});
+
+test('R281 should-fix 10c: work.docs.save records the signed-in person as the author, whatever `by` the client sends', async () => {
+  const { dispatch } = await import('../src/rpc.ts');
+  const seen: unknown[] = [];
+  const runtime = { running: true, cachedSnapshot: () => snapshot, snapshot: async () => snapshot, invoke: async (_c: string, input: unknown) => { seen.push(input); return { ok: true }; } };
+  const ctx = { runtime, store: { projectAccessFor: async () => [{ projectId: 'p-shared', userId: 'member', role: 'editor' }], chatOwners: async () => new Map() }, audit: { append: async () => undefined }, bumpAccess() {} };
+  const me = { ...user('member'), displayName: 'Mia Member' };
+  await dispatch(ctx as never, { user: me } as never, 'work.docs.save', { projectId: 'p-shared', taskId: 't', key: 'plan', text: 'x', by: 'CEO (an impostor)' });
+  assert.equal((seen[0] as { by: string }).by, 'Mia Member');
+  await dispatch(ctx as never, { user: me } as never, 'work.docs.save', { projectId: 'p-shared', taskId: 't', key: 'plan', text: 'x' });
+  assert.equal((seen[1] as { by: string }).by, 'Mia Member');
+});

@@ -9,6 +9,7 @@
  */
 import type { MemoryConnection, MemoryRecord } from './memory-protocol.ts';
 import type { TimelineItem } from '../protocol.ts';
+import type { Interaction, Suggestion } from './agent-tools-protocol.ts';
 import type { ExecutionPolicy, RunMeta, SecretProposal, TaskMonitor, TaskStageState, Watchdog } from './project-governance-protocol.ts';
 import type { TaskLabel, TaskPrSummary } from './work-protocol.ts';
 
@@ -158,6 +159,10 @@ export type ThreadCard =
   | { kind: 'workproduct'; id: string; at: string; type: string; title: string; status: string; provider: string | null; url: string | null; summary: string }
   /** A review or approval stage of the task's execution policy (C16): who decides, the history, and the controls when it is you. */
   | { kind: 'stage'; id: string; at: string; stage: TaskStageState }
+  /** A question or confirmation card an agent raised with its tools (G6); answered in the thread. */
+  | { kind: 'ask'; id: string; at: string; interaction: Interaction }
+  /** Subtasks an agent proposed but may not create (C7). */
+  | { kind: 'suggestion'; id: string; at: string; suggestion: Suggestion }
   /** An agent asking for a secret by name (G23). You enter the value in the card; the agent never sees it. */
   | { kind: 'secret'; id: string; at: string; proposal: SecretProposal; secureStorage: boolean };
 /** One question of a Paperclip ask_user_questions interaction. */
@@ -301,6 +306,8 @@ export interface PaperclipCommands {
   /** Inbox Dismiss: hides one item until it changes (`at` is the item's time, so a new failure shows again). The chat or task itself is kept. */
   'paperclip.inbox.dismiss': { input: { id: string; at: string }; output: { ok: true } };
   'paperclip.inbox.dismissed': { input: Record<string, never>; output: { items: { id: string; at: string }[] } };
+  /** Brings a dismissed item back (the undo of Dismiss). */
+  'paperclip.inbox.restore': { input: { id: string }; output: { ok: true } };
   /** Answers a Needs-you card from the thread or the Inbox (Paperclip confirmations: accept, or reject with a reason;
    *  questions: `answers`, sent to Paperclip's respond endpoint). Only ever sent when you answer. */
   'paperclip.interaction.respond': { input: { taskId: string; interactionId: string; accept: boolean; reason?: string; answers?: PaperclipAnswer[] }; output: { ok: true } };
@@ -316,7 +323,7 @@ export const PAPERCLIP_COMMANDS = {
   'paperclip.config.get': true, 'paperclip.config.set': true, 'paperclip.test': true, 'paperclip.snapshot': true, 'paperclip.task': true,
   'paperclip.comment': true, 'paperclip.task.update': true, 'paperclip.task.create': true, 'paperclip.agent.pause': true, 'paperclip.agent.resume': true,
   'paperclip.pauseAll': true, 'paperclip.resumeAll': true, 'paperclip.approval.decide': true, 'paperclip.run.cancel': true, 'paperclip.memory': true, 'paperclip.list': true,
-  'paperclip.watch': true, 'paperclip.badge': true, 'paperclip.ledger': true, 'paperclip.ledger.backfill': true, 'paperclip.inbox.dismiss': true, 'paperclip.inbox.dismissed': true, 'paperclip.interaction.respond': true, 'paperclip.import': true, 'paperclip.task.start': true, 'paperclip.dashboard': true, 'paperclip.import.plan': true,
+  'paperclip.watch': true, 'paperclip.badge': true, 'paperclip.ledger': true, 'paperclip.ledger.backfill': true, 'paperclip.inbox.dismiss': true, 'paperclip.inbox.dismissed': true, 'paperclip.inbox.restore': true, 'paperclip.interaction.respond': true, 'paperclip.import': true, 'paperclip.task.start': true, 'paperclip.dashboard': true, 'paperclip.import.plan': true,
 } as const satisfies Record<keyof PaperclipCommands, true>;
 
 /** How much of a monthly budget is used: in dollars when the budget and the spend are priced, else in tokens when a

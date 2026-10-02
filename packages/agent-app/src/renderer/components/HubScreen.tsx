@@ -22,12 +22,13 @@ import { openProject } from '../projectFocus';
 import { TaskStatusIcon } from './HubParts';
 import { TaskView } from './HubTask';
 import { ResourceState } from './ResourceState';
+import { RunDetailPage } from './RunDetail';
 // @ts-ignore -- side-effect CSS import; esbuild bundles it into dist/renderer/main.css
 import './hub.css';
 // @ts-ignore -- side-effect CSS import; esbuild bundles it into dist/renderer/main.css
 import './workspace.css';
 
-const TITLE: Record<HubPage, string> = { inbox: NAMES.inbox, ledger: NAMES.ledger, agent: NAMES.roster, task: NAMES.tasks, project: NAMES.projects, dashboard: NAMES.dashboard, tasks: NAMES.tasks, roster: NAMES.roster, outputs: NAMES.outputs };
+const TITLE: Record<HubPage, string> = { inbox: NAMES.inbox, ledger: NAMES.ledger, agent: NAMES.roster, task: NAMES.tasks, project: NAMES.projects, dashboard: NAMES.dashboard, tasks: NAMES.tasks, roster: NAMES.roster, outputs: NAMES.outputs, run: 'Run' };
 
 export function HubScreen(): React.ReactElement {
   const route = useHubRoute();
@@ -39,6 +40,7 @@ export function HubScreen(): React.ReactElement {
   const nav: HubNav = {
     onOpenTask: id => openHub('task', id),
     onOpenAgent: id => openHub('agent', id),
+    onOpenRun: id => openHub('run', id),
     onOpenChat: id => { void selectChat(id); closeSettings(); },
   };
   // A Muster project opens on the Projects screen (its page with Settings and the rest); a Paperclip one opens here.
@@ -58,7 +60,8 @@ export function HubScreen(): React.ReactElement {
     : route.page === 'outputs' ? <ListPage kind="artifacts"/>
     : route.page === 'agent' && route.arg ? <AgentPage snapshot={snapshot} agentId={route.arg} nav={nav}/>
     : route.page === 'ledger' ? <LedgerPage snapshot={snapshot} nav={nav}/>
-    : route.page === 'task' && route.arg ? <TaskView key={route.arg} taskId={route.arg} snapshot={snapshot} onOpenTask={nav.onOpenTask} onOpenAgent={nav.onOpenAgent}/>
+    : route.page === 'run' && route.arg ? <RunDetailPage key={route.arg} snapshot={snapshot} runId={route.arg} nav={nav}/>
+    : route.page === 'task' && route.arg ? <TaskView key={route.arg} taskId={route.arg} snapshot={snapshot} onOpenTask={nav.onOpenTask} onOpenAgent={nav.onOpenAgent} onOpenRun={nav.onOpenRun}/>
     : <InboxPage snapshot={snapshot} nav={nav}/>;
   return <section className="settings-screen ws-screen" aria-label={TITLE[route.page]} onKeyDown={e => {
     if (e.key !== 'Escape' || e.defaultPrevented || (e.target as HTMLElement).closest('input,textarea,select,[role="dialog"],[role="listbox"]')) return;

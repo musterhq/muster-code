@@ -1,3 +1,4 @@
+import { applyPendingRestore } from './backups.ts';
 import { addMemory, listMemory, searchMemory, inspectMemoryStore, isVisibleInScopes, projectMemoryScope } from './memory-adapter.ts';
 import { createMemoryIdentity } from './memory-identity.ts';
 import { HindsightService } from './hindsight-service.ts';
@@ -119,6 +120,7 @@ export function userProcessNote(groups: readonly UserProcessGroup[], cwd: string
     ...relevant.map(group => `- process group ${group.pgid}: ${group.label.replace(/[\x00-\x1f]/g, ' ').slice(0, 80)}${group.cwd ? ` (cwd ${group.cwd.slice(0, 200)})` : ''}`)].join('\n');
 }
 export function createAgentService(options: { dataDir: string; onEvent(event: AgentEvent): void; userProcesses?: () => readonly UserProcessGroup[]; userProcessTargets?: () => Promise<readonly UserProcessTarget[]>; provider?: ProviderAdapter; reconcileProvider?: (input: ReconciliationInput) => Promise<ReconciliationResult>; domains?: readonly DomainFactory[] }) {
+  applyPendingRestore(options.dataDir);
   const store = new AgentStore(options.dataDir);
   const queue = new ChatQueue(store);
   const attachments = new ChatAttachments(store.database(), options.dataDir);

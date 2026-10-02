@@ -9,8 +9,8 @@ import type { LedgerSource, LedgerView, WorkspaceAgent, WorkspaceList, Workspace
 import { formatUsd } from '../../shared/model-catalog';
 import { INBOX_BUCKETS, NAMES } from '../../shared/workspace-names';
 import { invoke } from '../bridge';
-import { dismissInboxItem, refreshWorkspace, useHubRoute, useInboxDismissals } from '../hubStore';
-import { applyView, buildActivity, decisionOrder, nextWake, overdueDecision, snoozedNow, unreadNow, type ActivityItem, type InboxBucket, type InboxView } from '../inboxModel';
+import { dismissInboxItem, refreshWorkspace, rememberInboxRead, useHubRoute, useInboxDismissals } from '../hubStore';
+import { applyView, buildActivity, decisionOrder, nextWake, overdueDecision, readColumns, readTidy, snoozedNow, tidyPlan, unreadNow, writeColumns, writeTidy, type ActivityItem, type InboxBucket, type InboxColumn, type InboxView, type TidyPolicy } from '../inboxModel';
 import { GanttTimeline } from './Gantt';
 import { activityCsv, downloadText } from '../activityCsv';
 import { DecisionExtras, GateActions, InboxViews, SnoozeMenu, useInboxMeta } from './WorkInbox';
@@ -23,6 +23,7 @@ import { AGENT_STATE_LABEL, ApprovalActions, INBOX_KIND_LABEL, Monogram, Receipt
 import { AuditRuns } from './AuditRuns';
 import { CostsPanel } from './CostsPanel';
 import { ReflectActions, ReflectionSection } from './ReflectionCoach';
+import { InboxOptions } from './InboxOptions';
 import { MailboxInbox } from './MailboxInbox';
 import { ResourceState } from './ResourceState';
 import { useRuntimeLabel } from './RosterGraph';
@@ -30,7 +31,7 @@ import { EditAgentButton, HireApprovalCard } from './RosterPanel';
 import { Tip } from './Tooltip';
 
 const errorText = (cause: unknown) => cause instanceof Error ? cause.message : String(cause);
-export interface HubNav { onOpenTask: (id: string) => void; onOpenAgent: (id: string) => void; onOpenChat: (id: string) => void }
+export interface HubNav { onOpenTask: (id: string) => void; onOpenAgent: (id: string) => void; onOpenChat: (id: string) => void; /** Opens a run's own page (G14). */ onOpenRun?: (id: string) => void }
 
 export function PageHeader({ title, detail, children }: { title: string; detail?: React.ReactNode; children?: React.ReactNode }): React.ReactElement {
   return <header className="ws-page-head"><div className="ws-page-title"><h1>{title}</h1>{detail && <p>{detail}</p>}</div>{children && <div className="ws-page-actions">{children}</div>}</header>;
@@ -54,6 +55,8 @@ export function InboxPage({ snapshot, nav }: { snapshot: WorkspaceSnapshot | nul
   const all = useMemo(() => buildActivity(app, snapshot, Date.now(), [], dismissed), [app?.chats, app?.attention, app?.projects, app?.folders, snapshot?.inbox, snapshot?.runs, dismissed]);
   // G36: items from runs that started by themselves (automations, timers, heartbeats) can be folded away.
   const [hideRoutine, setHideRoutine] = useState(() => readHideRoutine(globalThis.localStorage));
+  const [columns, setColumns] = useState<Record<InboxColumn, boolean>>(() => readColumns(globalThis.localStorage));
+  const [tidy, setTidy] = useState<TidyPolicy>(() => readTidy(globalThis.localStorage));
   const routine = all.filter(i => i.routine).length;
   const items = useMemo(() => hideRoutine ? all.filter(i => !i.routine) : all, [all, hideRoutine]);
   const owner = (taskId: string) => snapshot?.tasks.find(t => t.id === taskId)?.assigneeId;
@@ -65,7 +68,13 @@ export function InboxPage({ snapshot, nav }: { snapshot: WorkspaceSnapshot | nul
   const groups = useMemo(() => [...new Set(inView.map(i => i.group))], [inView]);
   const counts = useMemo(() => { const c = new Map<string, number>(); for (const i of inView) c.set(i.bucket, (c.get(i.bucket) ?? 0) + 1); return c; }, [inView]);
   const visible = decisionOrder(inView.filter(i => (filter === 'all' || i.bucket === filter) && (group === 'all' || i.group === group)), meta);
-  const markRead = (list: readonly ActivityItem[]) => { if (!list.length) return; void invoke('work.inbox.read', { items: list.map(i => ({ id: i.id, at: i.at })) }).then(reloadMeta, notifyError); };
+  // The tidy policy runs when the Inbox is on screen and its items change; it never touches a question, approval, review or problem.
+  useEffect(() => {
+    const plan = tidyPlan(all, tidy, i => unreadNow(i, meta));
+    for (const i of plan.dismiss) void dismissInboxItem({ id: i.id, at: i.at, title: i.title }, { remember: false }).catch(() => undefined);
+    if (plan.read.length) void invoke('work.inbox.read', { items: plan.read.map(i => ({ id: i.id, at: i.at })) }).then(reloadMeta, () => undefined);
+  }, [all, tidy, meta]);
+  const markRead = (list: readonly ActivityItem[]) => { if (!list.length) return; rememberInboxRead(list.filter(i => unreadNow(i, meta)).map(i => i.id)); void invoke('work.inbox.read', { items: list.map(i => ({ id: i.id, at: i.at })) }).then(reloadMeta, notifyError); };
   const unreadVisible = visible.filter(i => unreadNow(i, meta));
   const byGroup = new Map<string, ActivityItem[]>();
   for (const item of visible) byGroup.set(item.group, [...(byGroup.get(item.group) ?? []), item]);
@@ -73,20 +82,23 @@ export function InboxPage({ snapshot, nav }: { snapshot: WorkspaceSnapshot | nul
   // C3: with a row focused (j / k), a or y dismisses it and r marks it read. Never while typing or with a modifier held.
   const rowKey = (e: React.KeyboardEvent, item: ActivityItem) => {
     if (e.defaultPrevented || e.metaKey || e.ctrlKey || e.altKey || !shortcutsEnabled() || (e.target as HTMLElement).closest('input,textarea,select,[contenteditable="true"]')) return;
-    if (e.key === 'a' || e.key === 'y') { e.preventDefault(); const next = (e.currentTarget.closest('li')?.nextElementSibling ?? e.currentTarget.closest('li')?.previousElementSibling)?.querySelector<HTMLElement>('.ws-row-link'); void dismissInboxItem(item).catch(notifyError); next?.focus(); }
+    if (e.key === 'a' || e.key === 'y') { e.preventDefault(); const next = (e.currentTarget.closest('li')?.nextElementSibling ?? e.currentTarget.closest('li')?.previousElementSibling)?.querySelector<HTMLElement>('.ws-row-link'); void dismissInboxItem({ id: item.id, at: item.at, title: item.title }).catch(notifyError); next?.focus(); }
     else if (e.key === 'r') { e.preventDefault(); markRead([item]); }
+    else if (e.key === 'U' && e.shiftKey) { e.preventDefault(); void invoke('work.inbox.unread', { items: [{ id: item.id }] }).then(reloadMeta, notifyError); }
+    else if (e.key === 'x' && item.bucket === 'needs') { e.preventDefault(); void dismissInboxItem({ id: item.id, at: item.at, title: item.title }).catch(notifyError); }
   };
   const open = (item: ActivityItem) => item.action.kind === 'chat' ? nav.onOpenChat(item.action.chatId) : item.action.kind === 'task' ? nav.onOpenTask(item.action.taskId) : item.action.kind === 'agent' ? nav.onOpenAgent(item.action.agentId) : undefined;
   const label = (item: ActivityItem) => item.action.kind === 'chat' ? item.bucket === 'needs' ? 'Answer' : item.kind === 'interrupted' ? 'Continue' : item.bucket === 'problems' ? 'Retry' : 'Open chat' : item.action.kind === 'task' ? item.bucket === 'needs' ? 'Answer' : 'Open task' : item.action.kind === 'agent' ? 'Open agent' : '';
   const mailProject = group !== 'all' ? app?.projects.find(p => p.name === group)?.id ?? null : null;
   // Paperclip offline: never claim "all caught up" when its items could not be read.
   const offline = snapshot?.paperclip?.stale ? snapshot.paperclip : null;
-  return <div className="ws-page">
+  return <div className="ws-page" data-hide-type={columns.type ? undefined : ''} data-hide-detail={columns.detail ? undefined : ''} data-hide-age={columns.age ? undefined : ''}>
     <PageHeader title={NAMES.inbox} detail="Every chat and run that needs you, finished, or went wrong: folders, projects and Paperclip, in one place."/>
     <InboxViews view={view} counts={viewCounts} onView={setView} unread={unreadVisible.length} onMarkAll={() => markRead(unreadVisible)}/>
     <div className="ws-filters" role="toolbar" aria-label="Filter the inbox">
       {BUCKETS.map(f => <button key={f.id} type="button" className="ws-filter" aria-pressed={filter === f.id} onClick={() => setFilter(f.id)}>{f.label}<span>{f.id === 'all' ? inView.length : counts.get(f.id) ?? 0}</span></button>)}
       {(routine > 0 || hideRoutine) && <button type="button" className="ws-filter" aria-pressed={hideRoutine} title="Hide items from automations, timers and heartbeats" onClick={() => { const next = !hideRoutine; setHideRoutine(next); writeHideRoutine(globalThis.localStorage, next); }}>Hide routine<span>{routine}</span></button>}
+      <InboxOptions columns={columns} onColumns={next => { setColumns(next); writeColumns(globalThis.localStorage, next); }} tidy={tidy} onTidy={next => { setTidy(next); writeTidy(globalThis.localStorage, next); }}/>
       {groups.length > 1 && <select className="ws-select" aria-label="Group" value={group} onChange={e => setGroup(e.target.value)}><option value="all">Everything</option>{groups.map(g => <option key={g} value={g}>{g}</option>)}</select>}
     </div>
     {offline && <ResourceState kind="partial" compact message={offline.cached ? `${NAMES.paperclip} can’t be reached, so its items are from the last copy and may be out of date.` : `${NAMES.paperclip} can’t be reached, so its questions, approvals and problems are not shown.`}/>}
@@ -104,7 +116,7 @@ export function InboxPage({ snapshot, nav }: { snapshot: WorkspaceSnapshot | nul
             <GateActions item={item} onChanged={reloadMeta}/>
             <ReflectActions item={item} onChanged={() => void refreshWorkspace(true)}/>
             {item.source !== 'paperclip' && !item.id.startsWith('chat-') && <SnoozeMenu item={item} snoozed={snoozedNow(item, meta)} onChanged={reloadMeta}/>}
-            <Tip label="Dismiss"><button type="button" className="icon-button ws-row-dismiss" aria-label={`Dismiss ${item.title}`} onClick={() => void dismissInboxItem(item).catch(notifyError)}><X size={13} aria-hidden="true"/></button></Tip>
+            <Tip label="Dismiss"><button type="button" className="icon-button ws-row-dismiss" aria-label={`Dismiss ${item.title}`} onClick={() => void dismissInboxItem({ id: item.id, at: item.at, title: item.title }).catch(notifyError)}><X size={13} aria-hidden="true"/></button></Tip>
           </div>
           {item.approval && <ApprovalActions approvalId={item.approval.id} verbs={item.approval.verbs}/>}
           {item.bucket === 'needs' && item.taskId && !item.id.startsWith('ws:gate:') && <DecisionExtras item={item} meta={meta.get(item.id)} agentName={item.agentId ? snapshot?.agents.find(a => a.id === item.agentId)?.name ?? null : null} onChanged={reloadMeta}/>}

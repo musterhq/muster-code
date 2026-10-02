@@ -168,6 +168,28 @@ failures the account is locked out, starting at 1 minute and doubling up to an h
 **API tokens** (`mst_…`) are for scripts, the CLI and the desktop app: `muster-server token create --name ci --ttl 90d`. Only a hash
 is stored. A token is shown once.
 
+**Project owners invite to their own project.** In **Settings › Server › People on your projects** a project's owner can create a single-use
+invite link for that project only, as someone who can work on it or can only look. Whoever accepts the link gets an account (member or
+viewer) and that one project, and appears on its Roster. Owners can change roles on their project and take people off it. Admins can do all of this for every project.
+
+## Remote agents
+
+An agent that runs on another machine can join one project by invite (**Settings › Server › Remote agents**, or `muster-server agents invite`).
+The invite is single use, expires (24 hours by default, at most 7 days) and is stored as a hash. On the agent's machine:
+
+```sh
+muster-server agent join https://muster.example.com --invite mai_…     # saves a 0600 credentials file, never printed
+muster-server agent tasks                                               # what is assigned to it
+muster-server agent comment OSS-12 "Reproduced the bug."
+muster-server agent state OSS-12 implemented --comment "Fixed in #41"
+muster-server agent wait --timeout 25                                   # returns when something changes in the project
+```
+
+The credential (`msa_…`) is scoped to that project and that one Roster member, is accepted only by the agent API (`/agent/v1/…`, never by
+`/rpc`), and can read and report on the tasks assigned to it: comment, move to implemented, blocked or review, and save documents. Nothing
+runs for a remote agent on the server. Revoke it any time (`muster-server agents revoke`): it stops at once and leaves the Roster.
+Claims are rate limited and every step is in the audit chain.
+
 ## Connectors
 
 A connector is one bot on one platform. You can run several per type, for example two Slack workspaces and three Telegram bots. Each
@@ -214,6 +236,13 @@ attributed to them and checked against their project access. Unlinked senders ar
 `muster-server connectors import-gateway ~/.muster/gateway.json [--dry-run]` turns each configured channel into a connector named
 `default-<type>` and moves its tokens into the encrypted store. Run it while the server is stopped.
 
+### One-way notifications
+
+A connector can also post, one way, what needs you in a project: new questions, approvals and status updates go to a channel. Set a channel and a
+project (**Settings › Server › Chat channels › Routes and notices**, or `muster-server connectors config <name> --config notifyChannel=C123 --config
+notifyProject=<project-id>`). The first run records what already exists instead of flooding the channel. Text is redacted for secrets, and nothing
+said in the channel is read as a command by this path.
+
 ## Usage, cost and audit
 
 Every agent turn is in the runtime's hash-chained **Ledger**: tokens, cost, tools and files changed. The server records who started
@@ -259,6 +288,12 @@ in your secret manager. Without the key, stored provider and connector secrets c
 To restore: stop the server, then copy `server.sqlite`, `server.json` and the `runtime/` folder from the backup, and `keys/secret.key`,
 into the data directory. Start the server and run `muster-server doctor`.
 
+### Scheduled backups of the app databases
+
+The runtime also backs up its own databases on a schedule (daily, keep 7, **Settings › Storage › Backups**; `muster-server backups list|run|restore|settings`).
+Copies are consistent (`VACUUM INTO`), the folder is `0700` and the files `0600`, and secrets and their key are not included. A restore is checked
+(hashes and SQLite's integrity check) and staged: it is applied when the server starts next, and the data it replaces is kept under `backups/before-restore`.
+
 ## Security notes
 
 - Defaults: binds `127.0.0.1`, enforces the `Host` allow-list, and refuses unknown commands. Every runtime command passes a role check
@@ -286,6 +321,9 @@ be added), multiple organisations per server, running agent jobs in per-run sand
 | `token create [--user --name --ttl] \| list \| revoke <id>` | API tokens |
 | `connectors list \| types \| add \| test \| enable \| disable \| remove \| route \| unroute \| link \| events \| import-gateway` | Connectors |
 | `cost report [--since --by user\|project\|model]` | Usage and cost |
+| `projects list \| show`, `tasks list \| show \| create \| state \| assign \| start \| comment`, `roster list \| add \| pause \| resume \| remove`, `approvals …`, `ledger` | The work layer on the running server (your token's role and project grants apply) |
+| `org teams \| export \| import \| preview \| pending \| activate`, `backups list \| run \| restore \| settings` | Org packages and backups |
+| `agents invite \| list \| revoke`, `agent join \| me \| tasks \| task \| comment \| state \| doc \| wait` | Remote agents |
 | `audit verify \| list [--limit]` | Audit chain and Ledger chain |
 
 The Muster CLI has the same commands as `muster server …`, which runs `muster-server` when it is installed.

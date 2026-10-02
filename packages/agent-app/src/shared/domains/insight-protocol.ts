@@ -90,11 +90,13 @@ export interface InsightCommands {
 
   /** Starts the project's coordinator with the interview opening: it asks a few questions, then proposes the mission and a first plan for you to approve. */
   'insight.setup.interview': { input: { projectId: string }; output: SetupInterview };
+  /** G31: a short read-only run of one agent on this project: it says who it is, what it read and what it would do first. Nothing is changed. */
+  'insight.setup.testDrive': { input: { projectId: string; memberId: string }; output: { chatId: string } };
 }
 export type InsightEvent = { type: 'insightChanged'; projectId: string | null; scopes: ('reflect' | 'studio')[] };
 export const INSIGHT_COMMANDS = {
   'insight.costs': true, 'insight.profile': true,
   'insight.reflect.list': true, 'insight.reflect.run': true, 'insight.reflect.accept': true, 'insight.reflect.dismiss': true, 'insight.reflect.settings.set': true, 'insight.reflect.inbox': true,
   'studio.skill.fromTask': true, 'studio.skill.test': true, 'studio.skill.inputs.list': true, 'studio.skill.inputs.save': true, 'studio.skill.inputs.remove': true, 'studio.skill.templates': true,
-  'insight.setup.interview': true,
+  'insight.setup.interview': true, 'insight.setup.testDrive': true,
 } as const satisfies Record<keyof InsightCommands, true>;

@@ -7,7 +7,8 @@ import { ModalSheet } from './ModalSheet';
 import { NewTaskSheet } from './HubSetup';
 import { openSpotlightSearch } from './SpotlightSearch';
 import { currentProject } from '../projectFocus';
-import { hubRoute, openHub, useWorkspace } from '../hubStore';
+import { hubRoute, openHub, undoInbox, useWorkspace } from '../hubStore';
+import { notifyError, notifySuccess } from '../store';
 import { runMenuAction } from '../menuActions';
 import { CHEATSHEET, IDLE, resolveShortcut, setShortcutsEnabled, shortcutsApplyOn, shortcutsEnabled, stepRow, subscribeShortcutsPref, type ChordState, type ShortcutAction } from '../shortcuts';
 import { getState, openProjectsScreen } from '../store';
@@ -55,6 +56,8 @@ function run(action: ShortcutAction): void {
     case 'go-projects': openProjectsScreen(); return;
     case 'focus-comment': document.querySelector<HTMLTextAreaElement>('textarea[aria-label="Comment"], textarea[aria-label^="Message "]')?.focus(); return;
     case 'next-row': case 'prev-row': moveRow(action); return;
+    case 'toggle-properties': window.dispatchEvent(new CustomEvent('muster:toggle-properties')); return;
+    case 'undo': void undoInbox().then(said => { if (said) notifySuccess(said); }, notifyError); return;
   }
 }
 

@@ -339,7 +339,7 @@ export function createWorkDomain(ctx: DomainContext): DomainModule {
     'work.docs.save': async i => {
       const p = project(i.projectId), task = await taskOf(p.id, i.taskId);
       if (typeof i.text !== 'string') throw new Error('Write the document text.');
-      return saveDoc(p.id, task.id, docKey(i.key), i.text, text(i.note, 'The note', 200, false), 'You', typeof i.baseRev === 'number' ? i.baseRev : undefined);
+      return saveDoc(p.id, task.id, docKey(i.key), i.text, text(i.note, 'The note', 200, false), typeof i.by === 'string' && i.by.trim() ? i.by.trim().slice(0, 60) : 'You', typeof i.baseRev === 'number' ? i.baseRev : undefined);
     },
     'work.docs.restore': async i => {
       const p = project(i.projectId), task = await taskOf(p.id, i.taskId), key = docKey(i.key), old = db().docRev(task.id, key, Number(i.rev));
@@ -425,6 +425,10 @@ export function createWorkDomain(ctx: DomainContext): DomainModule {
     'work.links.remove': i => { const p = project(i.projectId), l = db().link(id(i.id)); if (l && l.projectId === p.id) { db().removeLink(l.id); emit(p.id, ['links', 'outputs']); } return { removed: true as const }; },
 
     'work.inbox.state': () => ({ items: db().inbox() as InboxMeta[] }),
+    'work.inbox.unread': i => {
+      const items = Array.isArray(i.items) ? i.items.slice(0, 500).map(x => ({ id: id((x as { id?: unknown }).id) })) : [];
+      db().markUnread(items); emit(null, ['inbox']); return { ok: true as const };
+    },
     'work.inbox.read': i => {
       const items = Array.isArray(i.items) ? i.items.slice(0, 500).map(x => ({ id: id((x as { id?: unknown }).id), at: text((x as { at?: unknown }).at, 'Time', 40) })) : [];
       db().markRead(items); emit(null, ['inbox']); return { ok: true as const };

@@ -23,6 +23,8 @@ import { PendingQuestion } from './PendingQuestion';
 import { ResourceState } from './ResourceState';
 import { Tip } from './Tooltip';
 import { SkillFromTask } from './SkillStudio';
+import { InteractionCard, NoticeRow, SuggestionCard, WorkedFold } from './AgentCards';
+import { ServicesPanel } from './ServicesPanel';
 import { GovernanceProperties, SecretRequestCard, StageCard, StopButton } from './TaskGovernance';
 import { TaskDocuments, TaskGoalRow, TaskLabelsRow, TaskPullRequests, VoteButtons } from './WorkTask';
 import { LabelChips } from './WorkParts';
@@ -30,8 +32,7 @@ import { useWorkLoad } from '../workHooks';
 
 const errorText = (cause: unknown) => cause instanceof Error ? cause.message : String(cause);
 const when = (iso: string | null) => iso ? new Date(iso).toLocaleString(undefined, { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' }) : '—';
-type Entry = { kind: 'turn'; id: string; at: string; comment: WorkspaceComment; to: string | null; receipt: LedgerEntry | null } | { kind: 'card'; id: string; at: string; card: ThreadCard };
-
+import { foldEntries, type Entry } from '../taskThreadModel';
 /** "@Implementer A" or "@CTO" at the start of a message, or anywhere in it: who the turn is addressed to. */
 export function addressed(body: string, names: readonly string[], self: string): string | null {
   const sorted = [...names].sort((a, b) => b.length - a.length);
@@ -39,11 +40,13 @@ export function addressed(body: string, names: readonly string[], self: string):
   return null;
 }
 
-export function TaskView({ taskId, snapshot, onOpenTask, onOpenAgent }: { taskId: string; snapshot: WorkspaceSnapshot; onOpenTask: (id: string) => void; onOpenAgent: (id: string) => void }): React.ReactElement {
+export function TaskView({ taskId, snapshot, onOpenTask, onOpenAgent, onOpenRun }: { taskId: string; snapshot: WorkspaceSnapshot; onOpenTask: (id: string) => void; onOpenAgent: (id: string) => void; onOpenRun?: (id: string) => void }): React.ReactElement {
   const [detail, setDetail] = useState<WorkspaceTaskDetail | null>(null);
   const [error, setError] = useState('');
   const [tick, setTick] = useState(0);
   const [propertiesOpen, setPropertiesOpen] = useState(true);
+  // `]` shows or hides the properties (C3).
+  useEffect(() => { const on = () => setPropertiesOpen(v => !v); window.addEventListener('muster:toggle-properties', on); return () => window.removeEventListener('muster:toggle-properties', on); }, []);
   const summary = snapshot.tasks.find(t => t.id === taskId || t.key === taskId);
   const marker = summary ? `${summary.updatedAt}:${summary.status}:${summary.live}` : '';
   useEffect(() => {
@@ -59,7 +62,7 @@ export function TaskView({ taskId, snapshot, onOpenTask, onOpenAgent }: { taskId
   if (!detail) return <ResourceState kind="loading" label="Loading task" rows={5}/>;
   return <div className={`ws-task${propertiesOpen ? ' has-properties' : ''}`}>
     <Thread detail={detail} snapshot={snapshot} onChanged={() => setTick(n => n + 1)} onOpenTask={onOpenTask} onOpenAgent={onOpenAgent} propertiesOpen={propertiesOpen} onToggleProperties={() => setPropertiesOpen(v => !v)} votes={votes.data ?? []} onVotesChanged={votes.reload}/>
-    {propertiesOpen && <Properties detail={detail} snapshot={snapshot} onOpenTask={onOpenTask} onClose={() => setPropertiesOpen(false)} onChanged={() => setTick(n => n + 1)} votes={votes.data ?? []} onVotesChanged={votes.reload}/>}
+    {propertiesOpen && <Properties detail={detail} snapshot={snapshot} onOpenTask={onOpenTask} onOpenRun={onOpenRun} onClose={() => setPropertiesOpen(false)} onChanged={() => setTick(n => n + 1)} votes={votes.data ?? []} onVotesChanged={votes.reload}/>}
   </div>;
 }
 
@@ -75,11 +78,11 @@ function Thread({ detail, snapshot, onChanged, onOpenTask, onOpenAgent, properti
       ...detail.receipts.filter(r => !used.has(r.runId)).map(r => ({ kind: 'turn' as const, id: `turn:${r.runId}`, at: r.endedAt, comment: { id: `turn:${r.runId}`, author: { kind: 'agent' as const, id: null, label: r.agent }, body: '', createdAt: r.endedAt }, to: null, receipt: r })),
     ];
     const cards: Entry[] = detail.cards.map(card => ({ kind: 'card', id: card.id, at: card.at, card }));
-    return [...turns, ...cards].sort((a, b) => a.id === 'description' ? -1 : b.id === 'description' ? 1 : a.at.localeCompare(b.at));
+    return foldEntries([...turns, ...cards].sort((a, b) => a.id === 'description' ? -1 : b.id === 'description' ? 1 : a.at.localeCompare(b.at)));
   }, [detail, task.origin, task.createdAt, task.assigneeLabel]);
   const scroller = useRef<HTMLDivElement>(null);
   // Keyed by entry id so a refetch that inserts or reorders entries never reuses another entry's measured height.
-  const virtualizer = useVirtualizer({ count: entries.length, getScrollElement: () => scroller.current, estimateSize: i => entries[i]?.kind === 'card' ? 64 : entries[i]?.kind === 'turn' && !entries[i].comment.body ? 72 : 160, getItemKey: i => entries[i]?.id ?? i, overscan: 4 });
+  const virtualizer = useVirtualizer({ count: entries.length, getScrollElement: () => scroller.current, estimateSize: i => entries[i]?.kind === 'card' ? 64 : entries[i]?.kind === 'fold' || entries[i]?.kind === 'notice' ? 32 : entries[i]?.kind === 'turn' && !entries[i].comment.body ? 72 : 160, getItemKey: i => entries[i]?.id ?? i, overscan: 4 });
   const [atEnd, setAtEnd] = useState(true);
   const first = useRef(true);
   // Open at the newest message; follow new ones only while already at the end.
@@ -95,7 +98,8 @@ function Thread({ detail, snapshot, onChanged, onOpenTask, onOpenAgent, properti
     <div ref={scroller} className="ws-thread-scroll" onScroll={onScroll} role="log" aria-label="Messages">
       {entries.length === 0 ? <ResourceState kind="empty" message="No messages yet. Write to the owner below."/> : <div style={{ height: virtualizer.getTotalSize(), position: 'relative' }}>
         {virtualizer.getVirtualItems().map(item => { const e = entries[item.index]; return <div key={e.id} data-index={item.index} ref={virtualizer.measureElement} className="ws-thread-item" style={{ transform: `translateY(${item.start}px)` }}>
-          {e.kind === 'card' ? <Card card={e.card} taskId={task.id} projectId={task.projectId ?? ''} who={who} onOpenTask={onOpenTask} onChanged={onChanged}/>
+          {e.kind === 'fold' ? <WorkedFold receipts={e.receipts} at={e.at}/> : e.kind === 'notice' ? <NoticeRow text={e.text} at={e.at}/>
+          : e.kind === 'card' ? <Card card={e.card} taskId={task.id} projectId={task.projectId ?? ''} who={who} onOpenTask={onOpenTask} onChanged={onChanged}/>
             : <article className={`ws-message${e.comment.body ? '' : ' is-quiet'}`} aria-label={`${e.comment.author.label}${e.to ? ` to ${e.to}` : ''}, ${agoLabel(e.at)}`}>
                 <header className="ws-message-head"><Monogram name={e.comment.author.label} kind={e.comment.author.kind}/>
                   <span className="ws-message-author">{who(e.comment.author.label)}{e.to && <><ArrowRight size={12} className="ws-message-arrow" aria-hidden="true"/>{who(e.to)}</>}</span>
@@ -109,7 +113,7 @@ function Thread({ detail, snapshot, onChanged, onOpenTask, onOpenAgent, properti
       </div>}
     </div>
     {!atEnd && entries.length > 1 && <button type="button" className="icon-button ws-jump" aria-label="Jump to latest" onClick={() => virtualizer.scrollToIndex(entries.length - 1, { align: 'end' })}><ArrowDown size={15}/></button>}
-    <Composer detail={detail} onSent={onChanged}/>
+    <Composer detail={detail} snapshot={snapshot} onSent={onChanged}/>
   </section>;
 }
 
@@ -140,6 +144,8 @@ function Card({ card, taskId, projectId, who, onOpenTask, onChanged }: { card: T
   if (card.kind === 'document') return <DocumentCard card={card}/>;
   if (card.kind === 'workproduct') return <div className="ws-card-sys" data-kind="workproduct"><GitBranch size={14} aria-hidden="true"/><span className="ws-card-sys-text"><strong>{card.type.replace(/_/g, ' ')}</strong> {card.url ? <a className="ws-link" href={card.url} onClick={e => { e.preventDefault(); void invoke('link.open', { url: card.url! }).catch(notifyError); }}>{card.title}</a> : card.title}{card.provider ? <span className="ws-faint"> · {card.provider}</span> : null}{card.summary ? <span className="ws-faint"> · {card.summary}</span> : null}</span>{card.status && <StateChip tone={card.status === 'approved' || card.status === 'merged' ? 'ok' : card.status === 'failed' ? 'danger' : 'accent'}>{card.status.replace(/_/g, ' ')}</StateChip>}</div>;
   if (card.kind === 'secret') return <SecretRequestCard proposal={card.proposal} secureStorage={card.secureStorage} projectId={projectId} onChanged={onChanged}/>;
+  if (card.kind === 'ask') return <InteractionCard interaction={card.interaction} projectId={projectId} onChanged={onChanged}/>;
+  if (card.kind === 'suggestion') return <SuggestionCard suggestion={card.suggestion} projectId={projectId} onChanged={onChanged}/>;
   if (card.kind === 'stage') return <StageCard stage={card.stage} taskId={taskId} projectId={projectId} onChanged={onChanged}/>;
   return <div className="ws-card-sys" data-kind="needs" data-status={card.status}>
     <CircleHelp size={14} aria-hidden="true"/><span className="ws-card-sys-text"><strong>{card.status === 'pending' ? 'Needs you' : 'Decision'}</strong>{card.from ? <> · {who(card.from)} asks</> : null}</span>
@@ -196,12 +202,27 @@ function PaperclipQuestions({ taskId, interactionId, questions, submitLabel, onC
   </section>;
 }
 
-function Composer({ detail, onSent }: { detail: WorkspaceTaskDetail; onSent: () => void }): React.ReactElement {
+function Composer({ detail, snapshot, onSent }: { detail: WorkspaceTaskDetail; snapshot: WorkspaceSnapshot; onSent: () => void }): React.ReactElement {
   const stoppable = detail.task.source === 'local' && detail.task.live && Boolean(detail.task.projectId);
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
   const [mention, setMention] = useState<{ query: string; start: number } | null>(null);
+  const [mode, setMode] = useState<'message' | 'note'>('message');
   const field = useRef<HTMLTextAreaElement>(null);
+  const local = detail.task.source === 'local' && Boolean(detail.task.projectId);
+  const owners = local ? snapshot.agents.filter(a => a.source === 'local' && a.projectId === detail.task.projectId && a.memberId && a.memberId !== 'agent' && a.status !== 'pending' && a.status !== 'terminated') : [];
+  // An @-mention of an agent that does not own the task offers to hand the task over: only the owner runs it.
+  const mentioned = local ? addressed(text, owners.map(a => a.name), detail.addressee?.label ?? '') : null;
+  const target = mentioned ? owners.find(a => a.name === mentioned) : undefined;
+  const assign = async (agentId: string) => {
+    const memberId = agentId.startsWith('member:') ? agentId.slice(7) : agentId;
+    setBusy(true);
+    try {
+      const cur = await invoke('project.tasks.get', { projectId: detail.task.projectId!, id: detail.task.id });
+      await invoke('project.tasks.edit', { projectId: detail.task.projectId!, id: detail.task.id, revision: cur.revision, patch: { owner: { kind: 'agent', id: memberId } } });
+      notifySuccess(`${owners.find(a => a.id === agentId)?.name ?? 'The agent'} now owns this task.`); onSent();
+    } catch (cause) { notifyError(cause); } finally { setBusy(false); }
+  };
   const to = detail.addressee?.label;
   const disabled = detail.task.source === 'local' && !detail.addressee;
   const matches = mention ? detail.mentionable.filter(m => m.name.toLowerCase().startsWith(mention.query.toLowerCase())).slice(0, 6) : [];
@@ -209,7 +230,11 @@ function Composer({ detail, onSent }: { detail: WorkspaceTaskDetail; onSent: () 
     const body = text.trim();
     if (!body || busy || disabled) return;
     setBusy(true);
-    try { await invoke('paperclip.comment', { taskId: detail.task.id, body }); setText(''); onSent(); }
+    try {
+      if (local && mode === 'note') await invoke('project.tasks.note', { projectId: detail.task.projectId!, id: detail.task.id, text: body });
+      else await invoke('paperclip.comment', { taskId: detail.task.id, body });
+      setText(''); onSent();
+    }
     catch (cause) { notifyError(cause); } finally { setBusy(false); requestAnimationFrame(() => field.current?.focus()); }
   };
   const onChange = (value: string, caret: number) => {
@@ -227,6 +252,9 @@ function Composer({ detail, onSent }: { detail: WorkspaceTaskDetail; onSent: () 
         if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); void send(); }
       }}/>
     <div className="ws-composer-foot">
+      {local && <div className="task-toggle ws-composer-mode" role="radiogroup" aria-label="What this is">{(['message', 'note'] as const).map(m => <Tip key={m} label={m === 'message' ? 'Delivered to the owner’s next turn; wakes it if it is set to wake on comments' : 'For the people on this task: written in the thread, never sent to the agent'}><button type="button" role="radio" aria-checked={mode === m} className="ws-filter" aria-pressed={mode === m} onClick={() => setMode(m)}>{m === 'message' ? 'Message' : 'Note'}</button></Tip>)}</div>}
+      {local && owners.length > 1 && <select className="ws-select is-bare ws-composer-owner" aria-label="Assign to" value={owners.find(a => a.id === detail.task.assigneeId)?.id ?? ''} disabled={busy} onChange={e => e.target.value && void assign(e.target.value)}><option value="" disabled>Assign to…</option>{owners.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}</select>}
+      {target && target.id !== detail.task.assigneeId && <button type="button" className="settings-button secondary ws-composer-hand" disabled={busy} onClick={() => void assign(target.id)}>Hand this to {target.name}</button>}
       <span className="ws-composer-note">{to ? <><Monogram name={to}/>{to}</> : null}{detail.composerNote && !disabled ? <span className="ws-faint">{to ? ' · ' : ''}{detail.composerNote}</span> : null}</span>
       {stoppable && <StopButton taskId={detail.task.id} projectId={detail.task.projectId!} onChanged={onSent}/>}
       <Tip label="Send (Enter)"><button type="submit" className="ws-send" aria-label="Send" disabled={!text.trim() || busy || disabled}><ArrowUp size={15}/></button></Tip>
@@ -238,9 +266,10 @@ function Row({ label, children }: { label: string; children: React.ReactNode }):
   return <div className="ws-prop"><dt>{label}</dt><dd>{children}</dd></div>;
 }
 
-function Properties({ detail, snapshot, onOpenTask, onClose, onChanged, votes, onVotesChanged }: { detail: WorkspaceTaskDetail; snapshot: WorkspaceSnapshot; onOpenTask: (id: string) => void; onClose: () => void; onChanged: () => void; votes: readonly Vote[]; onVotesChanged: () => void }): React.ReactElement {
+function Properties({ detail, snapshot, onOpenTask, onOpenRun, onClose, onChanged, votes, onVotesChanged }: { detail: WorkspaceTaskDetail; snapshot: WorkspaceSnapshot; onOpenTask: (id: string) => void; onOpenRun?: (id: string) => void; onClose: () => void; onChanged: () => void; votes: readonly Vote[]; onVotesChanged: () => void }): React.ReactElement {
   const { task } = detail;
   const [busy, setBusy] = useState(false);
+  const [tab, setTab] = useState<'properties' | 'runs' | 'activity' | 'services'>('properties');
   const byId = new Map(snapshot.tasks.map(t => [t.id, t]));
   const project = snapshot.projects.find(p => p.id === task.projectId);
   const goal = snapshot.goals.find(g => g.id === task.goalId);
@@ -261,7 +290,11 @@ function Properties({ detail, snapshot, onOpenTask, onClose, onChanged, votes, o
   const ellipsis = (text: string) => <span className="ws-inline" title={text}><span className="ws-ellipsis">{text}</span></span>;
   return <aside className="ws-properties" aria-label="Properties">
     <header className="ws-properties-head"><h2>Properties</h2><Tip label="Hide properties"><button type="button" className="icon-button" aria-label="Hide properties" onClick={onClose}><X size={15}/></button></Tip></header>
-    <div className="ws-properties-scroll">
+    <div className="ws-filters ws-prop-tabs" role="tablist" aria-label="Task side panel">{(['properties', 'runs', 'activity', ...(task.source === 'local' && task.projectId ? ['services' as const] : [])] as const).map(t => <button key={t} type="button" role="tab" aria-selected={tab === t} className="ws-filter" aria-pressed={tab === t} onClick={() => setTab(t)}>{t === 'properties' ? 'Properties' : t === 'runs' ? `Runs${detail.runs.length ? ` ${detail.runs.length}` : ''}` : t === 'activity' ? 'Activity' : 'Services'}</button>)}</div>
+    {tab === 'runs' && <div className="ws-properties-scroll"><TaskRuns detail={detail} onOpenRun={onOpenRun}/></div>}
+    {tab === 'activity' && <div className="ws-properties-scroll"><TaskActivity detail={detail}/></div>}
+    {tab === 'services' && task.projectId && <div className="ws-properties-scroll"><ServicesPanel projectId={task.projectId} taskId={task.id}/></div>}
+    {tab === 'properties' && <div className="ws-properties-scroll">
       <h3 className="ws-prop-group">Work</h3>
       <dl>
         <Row label="Status"><span className="ws-status-pick"><TaskStatusIcon status={task.status} size={13}/><select className="ws-select is-bare" aria-label="Status" value={task.status} disabled={busy} onChange={e => void setStatus(e.target.value as WorkspaceStatus)}>{WORKSPACE_STATUSES.map(s => <option key={s} value={s}>{STATUS_LABEL[s]}</option>)}</select></span></Row>
@@ -290,6 +323,7 @@ function Properties({ detail, snapshot, onOpenTask, onClose, onChanged, votes, o
       <dl>
         <Row label="Live run">{task.live ? <LiveCount count={1}/> : <span className="ws-faint">None</span>}</Row>
         <Row label="Last run">{lastRun ? <span className="ws-inline" title={explainRunError(lastRun.error) ?? undefined}><StateChip tone={runTone(lastRun.status)}>{RUN_STATE_LABEL[lastRun.status]}</StateChip><span className="ws-ellipsis" title={exactTime(lastRun.createdAt)}>{lastRun.finishedAt ? `${duration(lastRun.startedAt, lastRun.finishedAt) || '0s'} · ${agoLabel(lastRun.finishedAt)}` : agoLabel(lastRun.createdAt)}</span></span> : <span className="ws-faint">None</span>}</Row>
+        {lastRun && onOpenRun && <Row label="Run details"><button type="button" className="ws-link" onClick={() => onOpenRun(lastRun.id)}>Open the run page</button></Row>}
         {lastRun?.chatId && <Row label="Run chat"><button type="button" className="ws-link" onClick={() => { void selectChat(lastRun.chatId!); closeSettings(); }}>Open run chat</button></Row>}
         <Row label="Runs">{detail.runs.length || <span className="ws-faint">None</span>}</Row>
       </dl>
@@ -302,7 +336,7 @@ function Properties({ detail, snapshot, onOpenTask, onClose, onChanged, votes, o
         <Row label="Created">{when(task.createdAt)}</Row>
         <Row label="Updated"><span title={exactTime(task.updatedAt)}>{agoLabel(task.updatedAt)}</span></Row>
       </dl>
-    </div>
+    </div>}
   </aside>;
 }
 
@@ -339,4 +373,18 @@ function StartRun({ taskId, owner, onStarted }: { taskId: string; owner: string 
     } catch (cause) { notifyError(cause); } finally { setBusy(false); }
   };
   return <Tip label="Runs on the owner’s runner in a new worktree of the project folder; your checkout is never touched."><button type="button" className="settings-button ws-start-run" disabled={busy} onClick={() => void start()}><Play size={13}/>{busy ? 'Starting…' : `Start ${owner ?? 'the agent'} in a worktree`}</button></Tip>;
+}
+
+/** Every run of this task, newest first; each opens its own page. */
+function TaskRuns({ detail, onOpenRun }: { detail: WorkspaceTaskDetail; onOpenRun?: (id: string) => void }): React.ReactElement {
+  if (!detail.runs.length) return <p className="ws-faint ws-prop-empty">No runs yet.</p>;
+  return <ul className="ws-prop-runs" aria-label="Runs">{detail.runs.map(r => <li key={r.id}><button type="button" className="ws-row ws-prop-run" disabled={!onOpenRun} onClick={() => onOpenRun?.(r.id)}>
+    <StateChip tone={runTone(r.status)}>{RUN_STATE_LABEL[r.status]}</StateChip><span className="ws-row-text"><span className="ws-row-title">{r.trigger ?? 'Run'}</span><span className="ws-row-meta">{agoLabel(r.startedAt ?? r.createdAt)}{r.status !== 'running' && r.startedAt ? ` · ${duration(r.startedAt, r.finishedAt) || '0s'}` : ''}</span></span></button></li>)}</ul>;
+}
+
+/** What happened to this task, newest first: status changes, refusals, retries, delegations. */
+function TaskActivity({ detail }: { detail: WorkspaceTaskDetail }): React.ReactElement {
+  const rows = detail.comments.filter(c => c.author.kind === 'system').slice().reverse();
+  if (!rows.length) return <p className="ws-faint ws-prop-empty">Nothing has happened yet.</p>;
+  return <ol className="ws-prop-activity" aria-label="Activity">{rows.slice(0, 80).map(c => <li key={c.id}><span>{c.body}</span><time className="ws-faint" title={exactTime(c.createdAt)}>{agoLabel(c.createdAt)}</time></li>)}</ol>;
 }

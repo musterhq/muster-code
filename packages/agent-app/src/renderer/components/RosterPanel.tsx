@@ -21,6 +21,8 @@ import { RosterGraph, useRuntimeLabel } from './RosterGraph';
 import { DefaultModelPicker } from './settings/DefaultModelPicker';
 import { Tip } from './Tooltip';
 import { StarButton } from './WorkParts';
+import { ActivatePanel, ApprovalsPanel, ApprovalThread, OrgPortabilitySheet, PortabilityButton, TeamButton, TeamCatalogSheet } from './OrgPanels';
+import { useEventLoad } from '../orgHooks';
 import { ROSTER_TAB_LABEL, rosterTabs, sortRoster, type RosterTab } from '../rosterModel';
 
 const errorText = (cause: unknown) => cause instanceof Error ? cause.message : String(cause);
@@ -30,6 +32,8 @@ export function RosterPanel({ snapshot, projectId, local, nav, children }: { sna
   const [layout, setLayout] = useState<'list' | 'org'>(() => { try { return globalThis.localStorage?.getItem('muster.roster.layout') === 'org' ? 'org' : 'list'; } catch { return 'list'; } });
   useEffect(() => { try { globalThis.localStorage?.setItem('muster.roster.layout', layout); } catch { /* not remembered */ } }, [layout]);
   const [adding, setAdding] = useState(false);
+  const [teams, setTeams] = useState(false);
+  const [portability, setPortability] = useState(false);
   const agents = snapshot.agents.filter(a => a.role !== 'board');
   const pending = agents.filter(a => a.status === 'pending' && a.source === 'local');
   const working = agents.filter(a => a.status === 'running').length;
@@ -41,8 +45,12 @@ export function RosterPanel({ snapshot, projectId, local, nav, children }: { sna
         <Tip label="List"><button type="button" role="radio" aria-checked={layout === 'list'} aria-label="List" className="icon-button" onClick={() => setLayout('list')}><List size={15}/></button></Tip>
         <Tip label="Org chart"><button type="button" role="radio" aria-checked={layout === 'org'} aria-label="Org chart" className="icon-button" onClick={() => setLayout('org')}><Network size={15}/></button></Tip>
       </div>
+      {local && <TeamButton onClick={() => setTeams(true)}/>}
+      {local && <PortabilityButton onClick={() => setPortability(true)}/>}
       {local && <button type="button" className="settings-button secondary" onClick={() => setAdding(true)}><Plus size={14}/>{NAMES.addAgent}</button>}
     </div>
+    {local && <ActivatePanel projectId={projectId}/>}
+    {local && <ApprovalsPanel projectId={projectId}/>}
     {pending.map(a => <HireApprovalCard key={a.id} agent={a} snapshot={snapshot} projectId={projectId}/>)}
     {!local && (snapshot.approvals ?? []).filter(a => a.type === 'hire_agent').map(a => <section key={a.id} className="ws-card hire-card" aria-label={a.title}>
       <header className="hire-card-head"><StateChip tone="warn">Approval</StateChip><strong>{a.title}?</strong></header>
@@ -57,6 +65,8 @@ export function RosterPanel({ snapshot, projectId, local, nav, children }: { sna
     {children}
     <PulseBoard snapshot={snapshot} nav={nav} scoped projectId={projectId}/>
     {local && <AgentSheet open={adding} projectId={projectId} snapshot={snapshot} onClose={() => setAdding(false)}/>}
+    {local && <TeamCatalogSheet open={teams} projectId={projectId} snapshot={snapshot} onClose={() => setTeams(false)}/>}
+    {local && <OrgPortabilitySheet open={portability} projectId={projectId} projectName={snapshot.projects.find(p => p.id === projectId)?.name ?? 'Project'} onClose={() => setPortability(false)}/>}
   </div>;
 }
 
@@ -96,6 +106,13 @@ export function HireApprovalCard({ agent, snapshot, projectId }: { agent: Worksp
   const runtimeLabel = useRuntimeLabel();
   const [busy, setBusy] = useState(false);
   const boss = agent.reportsTo ? snapshot.agents.find(a => a.id === agent.reportsTo) : undefined;
+  const approvals = useEventLoad(e => e.type === 'projectChanged' || e.type === 'orgChanged', () => invoke('project.approvals.list', { projectId }), [projectId]);
+  const approval = approvals.data?.items.find(a => a.kind === 'hire' && a.refId === (agent.memberId ?? memberOf(agent.id)));
+  const [runner, setRunner] = useState<ModelPreference | null>(agent.runner ? { providerId: agent.runner.providerId, model: agent.runner.model } : null);
+  const changeRunner = async (next: ModelPreference | null) => {
+    setRunner(next); const id = agent.memberId ?? memberOf(agent.id); if (!id) return;
+    try { await invoke('project.members.update', { projectId, id, runner: next ? { providerId: next.providerId, model: next.model } : null }); await refreshWorkspace(); } catch (cause) { notifyError(cause); setRunner(runner); }
+  };
   const decide = async (approve: boolean) => {
     const id = agent.memberId ?? memberOf(agent.id);
     if (!id) return;
@@ -107,9 +124,11 @@ export function HireApprovalCard({ agent, snapshot, projectId }: { agent: Worksp
     <header className="hire-card-head"><StateChip tone="warn">Approval</StateChip><strong>Add {agent.name}{agent.title ? ` as ${agent.title}` : ''}?</strong></header>
     <dl className="hire-card-facts">
       <div><dt>Reports to</dt><dd>{boss?.name ?? 'You'}</dd></div>
-      <div><dt>Runner</dt><dd>{agent.runner ? `${runtimeLabel(agent.runner.providerId)} · ${agent.runner.model}` : 'Project default'}</dd></div>
+      {approval && <div><dt>Asked by</dt><dd>{approval.requestedBy}</dd></div>}
+      <div><dt>Runner</dt><dd><DefaultModelPicker label="Runner and model" value={runner} emptyLabel="Project default" showEffort={false} disabled={busy} onChange={next => void changeRunner(next)}/></dd></div>
       {agent.instructions?.trim() && <div><dt>Instructions</dt><dd className="hire-card-instructions">{agent.instructions.trim()}</dd></div>}
     </dl>
+    {approval && <ApprovalThread item={approval} projectId={projectId} onChanged={approvals.reload}/>}
     <div className="hire-card-actions">
       <button type="button" className="settings-button secondary" disabled={busy} onClick={() => void decide(false)}><X size={13}/>Decline</button>
       <button type="button" className="settings-button" disabled={busy} onClick={() => void decide(true)}><Check size={13}/>Approve</button>

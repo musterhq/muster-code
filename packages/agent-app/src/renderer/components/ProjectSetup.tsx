@@ -14,6 +14,8 @@ import { invoke } from '../bridge';
 import { refreshWorkspace } from '../hubStore';
 import { notifyError, notifySuccess } from '../store';
 import { AGENT_TEMPLATES, SETUP_STEPS, launchLines, type AgentTemplate, type SetupStep } from '../setupModel';
+import { useEventLoad } from '../orgHooks';
+import { MessageBody } from './MessageBody';
 import { ModalSheet } from './ModalSheet';
 import { DefaultModelPicker } from './settings/DefaultModelPicker';
 import './project-setup.css';
@@ -27,7 +29,9 @@ export function ProjectSetupWizard({ open, project, snapshot, onClose, onOpenCha
   const [template, setTemplate] = useState<AgentTemplate | null>(null);
   const [name, setName] = useState(''); const [title, setTitle] = useState(''); const [instructions, setInstructions] = useState('');
   const [runner, setRunner] = useState<ModelPreference | null>(null);
-  const [mode, setMode] = useState<'task' | 'interview'>('task');
+  const [mode, setMode] = useState<'task' | 'interview' | 'drive'>('task');
+  const [driveAgent, setDriveAgent] = useState('');
+  const [driveChat, setDriveChat] = useState<string | null>(null);
   const [taskTitle, setTaskTitle] = useState(''); const [acceptance, setAcceptance] = useState(''); const [owner, setOwner] = useState(''); const [start, setStart] = useState(false);
   const [busy, setBusy] = useState(false); const [error, setError] = useState('');
   const [made, setMade] = useState<{ goal: boolean; agents: string[]; task: string | null }>({ goal: false, agents: [], task: null });
@@ -67,6 +71,11 @@ export function ProjectSetupWizard({ open, project, snapshot, onClose, onOpenCha
     const { chatId } = await invoke('insight.setup.interview', { projectId: project.id });
     await refreshWorkspace(); onClose(); onOpenChat(chatId);
   });
+  const drive = () => guard(async () => {
+    const memberId = driveAgent.startsWith('member:') ? driveAgent.slice(7) : driveAgent || (agents[0]?.id.startsWith('member:') ? agents[0].id.slice(7) : '');
+    if (!memberId) throw new Error('Add an agent first.');
+    const r = await invoke('insight.setup.testDrive', { projectId: project.id, memberId }); setDriveChat(r.chatId);
+  });
   const at = SETUP_STEPS.findIndex(s => s.id === step);
   const nav = (primary: React.ReactNode, onSkip?: () => void) => <div className="project-edit-actions"><span className="project-edit-spacer"/>
     {onSkip && <button type="button" className="project-edit-cancel" disabled={busy} onClick={onSkip}>Skip</button>}{primary}</div>;
@@ -90,10 +99,11 @@ export function ProjectSetupWizard({ open, project, snapshot, onClose, onOpenCha
       {error && <p role="alert" className="settings-error">{error}</p>}
       {nav(<button type="submit" className="project-edit-save" disabled={busy || !name.trim()}>{busy ? 'Adding…' : 'Add agent'}</button>, () => setStep('first'))}
     </form>}
-    {step === 'first' && <form onSubmit={e => { e.preventDefault(); void (mode === 'task' ? createTask() : interview()); }}>
+    {step === 'first' && <form onSubmit={e => { e.preventDefault(); void (mode === 'task' ? createTask() : mode === 'drive' ? drive() : interview()); }}>
       <div className="setup-modes" role="radiogroup" aria-label="First task">
         <button type="button" role="radio" aria-checked={mode === 'task'} className="setup-mode" data-on={mode === 'task' || undefined} onClick={() => setMode('task')}><strong>I have a task</strong><span>Write the first task now and, if you like, start it.</span></button>
         <button type="button" role="radio" aria-checked={mode === 'interview'} className="setup-mode" data-on={mode === 'interview' || undefined} onClick={() => setMode('interview')}><strong>Interview me</strong><span>The coordinator asks three to five questions, then proposes the mission and a first plan for you to approve.</span></button>
+        <button type="button" role="radio" aria-checked={mode === 'drive'} className="setup-mode" data-on={mode === 'drive' || undefined} onClick={() => setMode('drive')} disabled={!agents.length}><strong>Test-drive an agent</strong><span>See one of your agents introduce itself and say what it would do first. Read-only: nothing changes.</span></button>
       </div>
       {mode === 'task' ? <>
         <label className="project-edit-goal"><span>Task</span><input type="text" className="ws-input" maxLength={500} value={taskTitle} disabled={busy} placeholder="What should happen first?" onChange={e => setTaskTitle(e.target.value)}/></label>
@@ -102,9 +112,12 @@ export function ProjectSetupWizard({ open, project, snapshot, onClose, onOpenCha
           <label className="project-edit-goal"><span>Owner</span><select className="ws-select is-field" value={ownerValue} disabled={busy} onChange={e => setOwner(e.target.value)}><option value="user:local">You</option>{agents.map(a => <option key={a.id} value={a.id}>{a.name}{a.title ? ` · ${a.title}` : ''}</option>)}</select></label>
           <label className="pp-check setup-start"><input type="checkbox" checked={start && canStart} disabled={busy || !canStart} onChange={e => setStart(e.target.checked)}/>Start it now <span className="ws-faint">{canStart ? 'in its own worktree' : hasFolder ? 'needs an agent as owner' : 'needs a folder on the project'}</span></label>
         </div>
+      </> : mode === 'drive' ? <>
+        <label className="project-edit-goal"><span>Agent</span><select className="ws-select is-field" aria-label="Agent to test-drive" value={driveAgent || agents[0]?.id || ''} disabled={busy} onChange={e => { setDriveAgent(e.target.value); setDriveChat(null); }}>{agents.map(a => <option key={a.id} value={a.id}>{a.name}{a.title ? ` · ${a.title}` : ''}</option>)}</select></label>
+        {driveChat && <TestDriveResult chatId={driveChat} onOpenChat={id => { onClose(); onOpenChat(id); }}/>}
       </> : <p className="setup-interview-note">{hasFolder ? 'This opens the coordinator chat with the first question. Answer there; the plan comes back as a proposal under Settings › General › Coordinator, and nothing changes until you apply it.' : 'This opens the coordinator chat. It works best with a folder linked to the project, so it can read the code.'}</p>}
       {error && <p role="alert" className="settings-error">{error}</p>}
-      {nav(<button type="submit" className="project-edit-save" disabled={busy || (mode === 'task' && !taskTitle.trim())}>{busy ? 'Working…' : mode === 'task' ? (start && canStart ? 'Create and start' : 'Create task') : 'Start the interview'}</button>, () => setStep('launch'))}
+      {nav(<button type="submit" className="project-edit-save" disabled={busy || (mode === 'task' && !taskTitle.trim())}>{busy ? 'Working…' : mode === 'task' ? (start && canStart ? 'Create and start' : 'Create task') : mode === 'drive' ? (driveChat ? 'Run it again' : 'Start the test drive') : 'Start the interview'}</button>, () => setStep('launch'))}
     </form>}
     {step === 'launch' && <div className="setup-launch">
       <ul>{launchLines({ goal: made.goal, agents: made.agents.length ? made.agents : agents.map(a => a.name), task: made.task, interview: false }).map(l => <li key={l}><Check size={13} aria-hidden="true"/>{l}</li>)}</ul>
@@ -119,4 +132,12 @@ export function SetupCard({ onStart }: { onStart: () => void }): React.ReactElem
     <div><strong>Set up this project</strong><p className="ws-faint">It has no tasks and no agent yet. Write its mission, add a first agent and a first task, or let the coordinator interview you.</p></div>
     <button type="button" className="settings-button" onClick={onStart}>Set up project</button>
   </section>;
+}
+
+/** The test drive's answer, read from its chat as it arrives. */
+function TestDriveResult({ chatId, onOpenChat }: { chatId: string; onOpenChat: (id: string) => void }): React.ReactElement {
+  const t = useEventLoad(e => e.type === 'timelinePatch' && (e as { chatId: string }).chatId === chatId, () => invoke('chat.timeline', { id: chatId }), [chatId]);
+  const answer = [...(t.data?.items ?? [])].reverse().find(i => i.kind === 'assistant' && i.text.trim());
+  return <div className="setup-drive" role="status" aria-live="polite">{answer ? <MessageBody text={answer.text}/> : <p className="ws-faint">The agent is reading the project…</p>}
+    <button type="button" className="ws-link" onClick={() => onOpenChat(chatId)}>Open the chat</button></div>;
 }

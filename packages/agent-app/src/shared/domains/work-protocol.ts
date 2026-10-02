@@ -184,7 +184,7 @@ export interface WorkCommands {
   'work.docs.list': { input: { projectId: string; taskId: string }; output: { docs: TaskDocSummary[] } };
   'work.docs.get': { input: { projectId: string; taskId: string; key: string; rev?: number }; output: TaskDoc };
   /** Saves a new revision. `baseRev` must be the revision you edited from, so two editors never overwrite each other. */
-  'work.docs.save': { input: { projectId: string; taskId: string; key: string; text: string; note?: string; baseRev?: number }; output: TaskDoc };
+  'work.docs.save': { input: { projectId: string; taskId: string; key: string; text: string; note?: string; baseRev?: number; /** Attribution label for an agent's write. */ by?: string }; output: TaskDoc };
   'work.docs.restore': { input: { projectId: string; taskId: string; key: string; rev: number }; output: TaskDoc };
   'work.docs.remove': { input: { projectId: string; taskId: string; key: string }; output: { removed: true } };
   /** Starts an annotation thread on a selection of one revision. The task's owner is woken with the comment. */
@@ -212,6 +212,7 @@ export interface WorkCommands {
 
   'work.inbox.state': { input: Record<string, never>; output: { items: InboxMeta[] } };
   'work.inbox.read': { input: { items: { id: string; at: string }[] }; output: { ok: true } };
+  'work.inbox.unread': { input: { items: { id: string }[] }; output: { ok: true } };
   'work.inbox.snooze': { input: { id: string; at: string; until: string | null }; output: { ok: true } };
   'work.inbox.decideBy': { input: { id: string; date: string | null }; output: { ok: true } };
   /** Asks an agent (read-only, in the project's folder) for a recommendation on a decision. */
@@ -233,6 +234,6 @@ export const WORK_COMMANDS = {
   'work.votes.set': true, 'work.votes.list': true, 'work.votes.export': true,
   'work.outputs.state': true, 'work.outputs.status': true, 'work.outputs.seen': true,
   'work.links.list': true, 'work.links.add': true, 'work.links.refresh': true, 'work.links.scan': true, 'work.links.remove': true,
-  'work.inbox.state': true, 'work.inbox.read': true, 'work.inbox.snooze': true, 'work.inbox.decideBy': true, 'work.inbox.recommend': true,
+  'work.inbox.state': true, 'work.inbox.read': true, 'work.inbox.unread': true, 'work.inbox.snooze': true, 'work.inbox.decideBy': true, 'work.inbox.recommend': true,
   'work.summaries.list': true, 'work.summaries.save': true, 'work.summaries.remove': true, 'work.summaries.refresh': true, 'work.summaries.revision': true,
 } as const satisfies Record<keyof WorkCommands, true>;

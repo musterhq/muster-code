@@ -29,3 +29,4 @@ section.setup-card > button { flex: none; }
 ul.project-coordinator-list > li { flex-wrap: wrap; align-items: flex-start; }
 .project-coordinator-list .project-coordinator-ops { order: 3; flex: 1 0 100%; margin: 0; padding: 0 0 0 18px; list-style: disc; color: var(--text-dim); font-size: var(--fs-12); }
 .project-coordinator-list .project-coordinator-ops li { display: list-item; padding: 1px 0; border-top: 0; }
+.setup-drive { display: flex; flex-direction: column; gap: 6px; margin: 8px 0; padding: 10px 12px; border: 1px solid var(--hairline); border-radius: var(--radius-10); font-size: var(--fs-13); }

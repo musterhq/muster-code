@@ -280,6 +280,7 @@ export class WorkStore {
       id, n.readAt, n.readFor, n.snoozedUntil, n.snoozedFor, n.decideBy, n.recommendation ? JSON.stringify(n.recommendation) : null, this.stamp());
   }
   markRead(items: readonly { id: string; at: string }[]): void { this.tx(() => { for (const i of items) this.patchInbox(i.id, { readAt: this.stamp(), readFor: i.at }); }); }
+  markUnread(items: readonly { id: string }[]): void { this.tx(() => { for (const i of items) this.patchInbox(i.id, { readAt: null, readFor: null }); }); }
   snooze(id: string, at: string, until: string | null): void { this.patchInbox(id, until ? { snoozedUntil: until, snoozedFor: at } : { snoozedUntil: null, snoozedFor: null }); }
   setDecideBy(id: string, date: string | null): void { this.patchInbox(id, { decideBy: date }); }
   setRecommendation(id: string, rec: Recommendation | null): void { this.patchInbox(id, { recommendation: rec }); }
