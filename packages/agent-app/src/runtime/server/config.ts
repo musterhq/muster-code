@@ -24,11 +24,15 @@ export interface ServerConfig {
   tokenOrigin: string | null;
   /** Which secret-store entry holds the token (a migrated one keeps its old entry, so nobody signs in again). */
   tokenSecret: string;
+  /** A password sign-in's account (Muster Server). */
   user: ServerUser | null; serverVersion: string | null; connectedAt: string | null;
+  /** A browser-approval sign-in's account, and why a sign-in ended on its own (until the next one). */
+  signedIn: { name: string | null; email: string | null } | null; signInNotice: string | null;
   migratedFrom?: string[];
 }
-export const DEFAULT_SERVER_CONFIG: ServerConfig = { version: 2, mode: 'off', baseUrl: PAPERCLIP_LOCAL_URL, companyId: null, backend: null, tokenOrigin: null, tokenSecret: SERVER_SECRET, user: null, serverVersion: null, connectedAt: null };
+export const DEFAULT_SERVER_CONFIG: ServerConfig = { version: 2, mode: 'off', baseUrl: PAPERCLIP_LOCAL_URL, companyId: null, backend: null, tokenOrigin: null, tokenSecret: SERVER_SECRET, user: null, serverVersion: null, connectedAt: null, signedIn: null, signInNotice: null };
 
+const who = (v: unknown): { name: string | null; email: string | null } | null => v && typeof v === 'object' ? { name: s((v as Record<string, unknown>).name), email: s((v as Record<string, unknown>).email) } : null;
 const read = (path: string): Record<string, unknown> | null => { try { const v = JSON.parse(readFileSync(path, 'utf8')) as unknown; return v && typeof v === 'object' && !Array.isArray(v) ? v as Record<string, unknown> : null; } catch { return null; } };
 const s = (v: unknown): string | null => typeof v === 'string' && v ? v : null;
 
@@ -40,7 +44,7 @@ export function loadServerConfig(dataDir: string): { config: ServerConfig; migra
     const mode = own.mode === 'local' || own.mode === 'custom' ? own.mode : 'off';
     const user = own.user && typeof own.user === 'object' ? own.user as ServerUser : null;
     return { migrated: false, config: { ...DEFAULT_SERVER_CONFIG, mode, baseUrl: s(own.baseUrl) ?? PAPERCLIP_LOCAL_URL, companyId: s(own.companyId), backend: own.backend === 'paperclip' || own.backend === 'muster-server' ? own.backend : null,
-      tokenOrigin: s(own.tokenOrigin), tokenSecret: s(own.tokenSecret) ?? SERVER_SECRET, user, serverVersion: s(own.serverVersion), connectedAt: s(own.connectedAt), ...(Array.isArray(own.migratedFrom) ? { migratedFrom: own.migratedFrom as string[] } : {}) } };
+      tokenOrigin: s(own.tokenOrigin), tokenSecret: s(own.tokenSecret) ?? SERVER_SECRET, user, serverVersion: s(own.serverVersion), connectedAt: s(own.connectedAt), signedIn: who(own.signedIn), signInNotice: s(own.signInNotice), ...(Array.isArray(own.migratedFrom) ? { migratedFrom: own.migratedFrom as string[] } : {}) } };
   }
   const paperclip = read(join(dataDir, 'paperclip.json')), muster = read(join(dataDir, 'muster-server.json'));
   const pcMode = paperclip?.mode === 'local' || paperclip?.mode === 'custom' ? paperclip.mode : 'off';
@@ -48,7 +52,7 @@ export function loadServerConfig(dataDir: string): { config: ServerConfig; migra
   let config: ServerConfig = { ...DEFAULT_SERVER_CONFIG };
   const from: string[] = [];
   if (paperclip && (pcMode !== 'off' || !musterLinked)) {
-    config = { ...config, mode: pcMode, baseUrl: s(paperclip.baseUrl) ?? PAPERCLIP_LOCAL_URL, companyId: s(paperclip.companyId), backend: 'paperclip', tokenOrigin: s(paperclip.tokenOrigin), tokenSecret: LEGACY_PAPERCLIP_SECRET };
+    config = { ...config, mode: pcMode, baseUrl: s(paperclip.baseUrl) ?? PAPERCLIP_LOCAL_URL, companyId: s(paperclip.companyId), backend: 'paperclip', tokenOrigin: s(paperclip.tokenOrigin), tokenSecret: LEGACY_PAPERCLIP_SECRET, signedIn: who(paperclip.signedIn), signInNotice: s(paperclip.signInNotice) };
     from.push('paperclip.json');
   } else if (muster && musterLinked) {
     const user = muster.user && typeof muster.user === 'object' ? muster.user as ServerUser : null;

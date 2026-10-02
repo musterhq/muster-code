@@ -10,7 +10,8 @@ const enc = encodeURIComponent;
 export class PaperclipBackend implements ServerBackend {
   readonly kind = 'paperclip' as const;
   readonly client: PaperclipClient;
-  constructor(endpoint: ServerEndpoint, options: BackendOptions = {}) { this.client = new PaperclipClient(endpoint, options.fetch, { cache: options.cache }); }
+  private readonly onUnauthorized: BackendOptions['onUnauthorized'];
+  constructor(endpoint: ServerEndpoint, options: BackendOptions = {}) { this.onUnauthorized = options.onUnauthorized; this.client = new PaperclipClient(endpoint, options.fetch, { cache: options.cache, onUnauthorized: options.onUnauthorized }); }
   get endpoint(): ServerEndpoint { return this.client.endpoint; }
   get generation(): number { return this.client.generation; }
   invalidate(prefix?: string): void { this.client.invalidate(prefix); }
@@ -136,7 +137,7 @@ export class PaperclipBackend implements ServerBackend {
   }
   importReader(): ImportReader {
     // The importer reads each page once: it keeps no parsed bodies, so a large org never sits in memory twice.
-    const reader = new PaperclipClient(this.client.endpoint, this.fetcher, { cache: false });
+    const reader = new PaperclipClient(this.client.endpoint, this.fetcher, { cache: false, onUnauthorized: this.onUnauthorized });
     return { get: path => reader.get<unknown>(path), issuePages: (company, query) => reader.issuePages(company, query), commentPages: issue => reader.commentPages(issue) };
   }
   private get fetcher() { return this.client.fetcher; }

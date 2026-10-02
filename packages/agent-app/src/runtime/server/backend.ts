@@ -66,4 +66,8 @@ export interface ServerBackend {
   openLive(company: WorkspaceCompany, handlers: LiveHandlers, factory?: SocketFactory): LiveSocket;
 }
 
-export interface BackendOptions { fetch?: FetchLike; cache?: boolean; orgName?: string }
+export interface BackendOptions {
+  fetch?: FetchLike; cache?: boolean; orgName?: string;
+  /** A 401: returns the sentence to show instead of the generic one (a sign-in key the server revoked). */
+  onUnauthorized?: (hadToken: boolean, status: number) => string | undefined;
+}

@@ -43,6 +43,10 @@ export class MusterServerBackend implements ServerBackend {
     }
     let json: { ok?: boolean; error?: string; value?: unknown } & Json;
     try { json = await response.json() as typeof json; } catch { throw new PaperclipError(`${this.endpoint.baseUrl} is not a Muster Server (HTTP ${response.status}).`, response.status, 'service'); }
+    if (response.status === 401) {
+      const replaced = this.options.onUnauthorized?.(Boolean(this.endpoint.token), 401);
+      if (replaced) throw new PaperclipError(replaced, 401, 'auth');
+    }
     if (response.status === 401) throw new PaperclipError(this.endpoint.token ? `Muster Server refused the sign-in (401). ${json.error ?? ''}`.trim() : 'This Muster Server needs you to sign in. Open Settings › Integrations › Muster Server.', 401, 'auth');
     if (!response.ok || json.ok === false) throw new PaperclipError(json.error ?? `Muster Server answered ${response.status}.`, response.status, 'service');
     return json as T;

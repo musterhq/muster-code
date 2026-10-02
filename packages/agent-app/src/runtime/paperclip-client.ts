@@ -37,7 +37,7 @@ export class PaperclipClient {
   /** Bumped whenever any GET returned a new body (not a 304), so callers can skip rebuilding views. */
   generation = 0;
   /** `cache: false` keeps no parsed bodies (an importer reads each page once and must not hold a large org in memory). */
-  constructor(readonly endpoint: PaperclipEndpoint, readonly fetcher: FetchLike = (input, init) => fetch(input, init), private readonly options: { cache?: boolean } = {}) {}
+  constructor(readonly endpoint: PaperclipEndpoint, readonly fetcher: FetchLike = (input, init) => fetch(input, init), private readonly options: { cache?: boolean; /** A 401: returns the sentence to show instead of the generic one (a key the server revoked). */ onUnauthorized?: (hadToken: boolean, status: number) => string | undefined } = {}) {}
 
   private headers(extra: Record<string, string> = {}): Record<string, string> {
     return { accept: 'application/json', ...(this.endpoint.token ? { authorization: `Bearer ${this.endpoint.token}` } : {}), ...extra };
@@ -55,6 +55,8 @@ export class PaperclipClient {
       throw new PaperclipError(`Muster Server at ${this.endpoint.baseUrl} ${reason}.`, 0, 'network');
     }
     if (response.status === 401 || response.status === 403) {
+      const replaced = this.options.onUnauthorized?.(Boolean(this.endpoint.token), response.status);
+      if (replaced) { await response.text().catch(() => ''); throw new PaperclipError(replaced, response.status, 'auth'); }
       const detail = await response.text().catch(() => '');
       throw new PaperclipError(this.endpoint.token ? `Muster Server refused the API token (${response.status}).${detail ? ` ${short(detail)}` : ''}` : 'This Muster Server needs an API token. Create one on the server and paste it in Settings › Integrations.', response.status, 'auth');
     }

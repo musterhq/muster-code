@@ -69,12 +69,12 @@ const root=createRoot(document.getElementById('root')!,{onUncaughtError:e=>{(err
 root.render(<ProjectsScreen onBack={()=>{}} onStartChat={()=>{}}/>);
 for(let i=0;i<40&&!document.querySelector('.pp-list');i++)await delay(40);
 await delay(100);
-assert.deepEqual(text('.ws-group-title'),['My projects','OtherOrg · Paperclip','RagnarDataOps · Paperclip']);
+assert.deepEqual(text('.ws-group-title'),['My projects','OtherOrg · Server','RagnarDataOps · Server']);
 const group=(label:string)=>[...document.querySelectorAll('section.ws-section')].find(s=>s.getAttribute('aria-label')===label)!;
 assert.deepEqual(text('.ws-row-title',group('My projects')),['My own project'],'a project you made shows as before');
-assert.deepEqual(text('.ws-row-title',group('RagnarDataOps · Paperclip')),['Data Pipeline','Ops Dashboard']);
-assert.deepEqual(text('.ws-row-title',group('OtherOrg · Paperclip')),['Old import']);
-assert.ok(text('.ws-chip',group('RagnarDataOps · Paperclip')).includes('edited here'),'an imported project edited here says so');
+assert.deepEqual(text('.ws-row-title',group('RagnarDataOps · Server')),['Data Pipeline','Ops Dashboard']);
+assert.deepEqual(text('.ws-row-title',group('OtherOrg · Server')),['Old import']);
+assert.ok(text('.ws-chip',group('RagnarDataOps · Server')).includes('edited here'),'an imported project edited here says so');
 assert.ok(!text('.ws-chip',group('My projects')).includes('edited here'));
 assert.deepEqual(errors,[]);
 root.unmount();
@@ -116,9 +116,9 @@ root4.render(<Sidebar/>);await delay(3300);  // the badge read (which says Paper
 assert.deepEqual(errors,[],'the sidebar renders (a hook below its loading return crashed it before)');
 const projectsBlock=document.querySelector('section[aria-label="Projects"]')!;
 assert.ok(projectsBlock,'the Projects section');
-assert.deepEqual(text('.nav-org-label',projectsBlock),['OtherOrg · Paperclip','RagnarDataOps · Paperclip']);
+assert.deepEqual(text('.nav-org-label',projectsBlock),['OtherOrg · Server','RagnarDataOps · Server']);
 const orgGroup=(label:string)=>[...projectsBlock.querySelectorAll('.nav-org')].find(g=>g.getAttribute('aria-label')===label)!;
-assert.deepEqual(text('.nav-section-title',orgGroup('RagnarDataOps · Paperclip')),['Data Pipeline','Ops Dashboard'],'imported and linked projects of one org sit together, once each');
+assert.deepEqual(text('.nav-section-title',orgGroup('RagnarDataOps · Server')),['Data Pipeline','Ops Dashboard'],'imported and linked projects of one org sit together, once each');
 root4.unmount();
 assert.deepEqual(errors,[]);
 

@@ -30,8 +30,24 @@ export interface PaperclipConfigView {
   /** Who a Muster Server token signs in as, from the server's own answer. */
   user?: { username: string; displayName: string; role: string } | null;
   serverVersion?: string | null; connectedAt?: string | null;
+  /** Who a browser-approval sign-in signed this Mac in as (null for a pasted token or a password sign-in, or when signed out). */
+  signedIn?: { name: string | null; email: string | null } | null;
+  /** Why a sign-in ended on its own ("Signed out by Muster Server — sign in again."), until the next sign-in. */
+  signInNotice?: string | null;
+  /** How updates reach this Mac right now: `socket` (instant), `poll` (every 15 s while a screen that shows them is open), `off`. */
+  live?: LiveChannel;
   /** How people can sign in to this kind of server (empty: API token only). */
   signIn?: ServerSignInMethod[];
+}
+/** Browser-approval sign-in (#285): the server's own approval page. The key and the challenge secret never reach the renderer. */
+export interface PaperclipSignInState {
+  phase: 'idle' | 'waiting' | 'signed-in' | 'expired' | 'cancelled' | 'failed';
+  baseUrl?: string;
+  /** While waiting: the page to open in the system browser (`link.open`). */
+  approvalUrl?: string;
+  expiresAt?: string;
+  message?: string;
+  user?: { name: string | null; email: string | null };
 }
 /** `token`: omitted keeps the stored one, '' removes it. */
 export interface PaperclipConfigInput { mode: PaperclipMode; baseUrl?: string; token?: string; companyId?: string | null; backend?: ServerBackendKind }
@@ -288,6 +304,12 @@ export type ImportTargets = Record<string, 'skip' | 'import'>;
 export interface PaperclipCommands {
   'paperclip.config.get': { input: Record<string, never>; output: PaperclipConfigView };
   'paperclip.config.set': { input: PaperclipConfigInput; output: PaperclipConfigView };
+  /** Starts the server's browser approval for this URL and returns the page to open. Polls only while waiting. */
+  'paperclip.signin.start': { input: { baseUrl: string }; output: PaperclipSignInState };
+  'paperclip.signin.status': { input: Record<string, never>; output: PaperclipSignInState };
+  'paperclip.signin.cancel': { input: Record<string, never>; output: PaperclipSignInState };
+  /** Revokes the key the server issued to this Mac and removes it. `message`: anything to tell the person (a revoke the server did not confirm). */
+  'paperclip.signin.signout': { input: Record<string, never>; output: { config: PaperclipConfigView; revoked: boolean; message?: string } };
   /** Tries a connection without saving it. Omitted fields fall back to the saved config (and saved token). */
   'paperclip.test': { input: { mode?: PaperclipMode; baseUrl?: string; token?: string }; output: PaperclipTestResult };
   /** Muster's projects, tasks, agents, runs and needs-you items, plus the linked Paperclip's (ETag-revalidated), in one read. */
@@ -338,7 +360,7 @@ export interface PaperclipCommands {
 /** Coalesced: at most one per second while watched (every 5 s otherwise, for the badge). `taskIds` lets an open thread refetch only when it changed. */
 export type PaperclipEvent = { type: 'projectsWorkspaceChanged'; scopes: ('tasks' | 'runs' | 'agents' | 'inbox' | 'config')[]; taskIds: string[] };
 export const PAPERCLIP_COMMANDS = {
-  'paperclip.config.get': true, 'paperclip.config.set': true, 'paperclip.test': true, 'paperclip.snapshot': true, 'paperclip.task': true,
+  'paperclip.config.get': true, 'paperclip.config.set': true, 'paperclip.signin.start': true, 'paperclip.signin.status': true, 'paperclip.signin.cancel': true, 'paperclip.signin.signout': true, 'paperclip.test': true, 'paperclip.snapshot': true, 'paperclip.task': true,
   'paperclip.comment': true, 'paperclip.task.update': true, 'paperclip.task.create': true, 'paperclip.agent.pause': true, 'paperclip.agent.resume': true,
   'paperclip.pauseAll': true, 'paperclip.resumeAll': true, 'paperclip.approval.decide': true, 'paperclip.run.cancel': true, 'paperclip.memory': true, 'paperclip.list': true,
   'paperclip.watch': true, 'paperclip.badge': true, 'paperclip.ledger': true, 'paperclip.ledger.backfill': true, 'paperclip.inbox.dismiss': true, 'paperclip.inbox.dismissed': true, 'paperclip.inbox.restore': true, 'paperclip.interaction.respond': true, 'paperclip.import': true, 'paperclip.task.start': true, 'paperclip.dashboard': true, 'paperclip.import.plan': true,
