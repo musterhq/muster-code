@@ -1062,6 +1062,7 @@ export function createGovernance(ctx: DomainContext, deps: GovernanceDeps) {
       const launcher = await taskToolHost().start();
       overrides[`mcp_servers.${TASK_MCP}.command`] = launcher;
       overrides[`mcp_servers.${TASK_MCP}.env.MUSTER_CHAT_ID`] = chat.id;
+      overrides[`mcp_servers.${TASK_MCP}.env.MUSTER_CHAT_TOKEN`] = taskToolHost().chatToken(chat.id);
       overrides[`mcp_servers.${TASK_MCP}.tool_timeout_sec`] = 60;
     } catch { /* the tools are optional: a run without them still works through fenced blocks */ }
     return Object.keys(overrides).length ? { configOverrides: overrides } : null;

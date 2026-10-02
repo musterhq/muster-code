@@ -71,7 +71,7 @@ export function createEnvsDomain(ctx: DomainContext): DomainModule {
   const offOptions = ctx.hooks.addRunOptionsContributor(async chat => {
     if (!bound(chat.id)) return null;
     const launcher = await toolHost().start();
-    return { configOverrides: { [`mcp_servers.${SSH_MCP}.command`]: launcher, [`mcp_servers.${SSH_MCP}.env.MUSTER_CHAT_ID`]: chat.id, [`mcp_servers.${SSH_MCP}.tool_timeout_sec`]: 600 } };
+    return { configOverrides: { [`mcp_servers.${SSH_MCP}.command`]: launcher, [`mcp_servers.${SSH_MCP}.env.MUSTER_CHAT_ID`]: chat.id, [`mcp_servers.${SSH_MCP}.env.MUSTER_CHAT_TOKEN`]: toolHost().chatToken(chat.id), [`mcp_servers.${SSH_MCP}.tool_timeout_sec`]: 600 } };
   });
   const offPrompt = ctx.hooks.addPromptContributor(async ({ chat }) => {
     const b = bound(chat.id); if (!b) return null;
