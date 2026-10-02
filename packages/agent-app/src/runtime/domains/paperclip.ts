@@ -266,21 +266,27 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
   const api = (): ServerBackend => { const c = connection(); if (!c) throw new Error('Muster Server is not connected. Connect it in Settings › Integrations.'); return c; };
 
   // --- live updates -----------------------------------------------------------------------------------------------------
-  const live = { fresh: false, lastEmitAt: 0, refusedAt: 0, channel: 'off' as LiveChannel, visible: false, socket: null as LiveSocket | null, socketCompany: '', pollTimer: null as ReturnType<typeof setTimeout> | null, pollDelay: POLL_FAST_MS, lastChangeAt: 0, refreshTimer: null as ReturnType<typeof setTimeout> | null, emitTimer: null as ReturnType<typeof setTimeout> | null, pending: new Set<string>(), taskIds: new Set<string>() };
+  const live = { fresh: false, lastEmitAt: 0, emitDue: 0, refusedAt: 0, channel: 'off' as LiveChannel, visible: false, socket: null as LiveSocket | null, socketCompany: '', pollTimer: null as ReturnType<typeof setTimeout> | null, pollDelay: POLL_FAST_MS, lastChangeAt: 0, refreshTimer: null as ReturnType<typeof setTimeout> | null, emitTimer: null as ReturnType<typeof setTimeout> | null, pending: new Set<string>(), taskIds: new Set<string>() };
   function closeSocket() { if (live.refreshTimer) timers.clearTimeout(live.refreshTimer); live.refreshTimer = null; live.socket?.close(); live.socket = null; live.socketCompany = ''; if (live.channel === 'socket') live.channel = 'off'; }
   const stopPoll = () => { if (live.pollTimer) timers.clearTimeout(live.pollTimer); live.pollTimer = null; };
-  const queueEmit = (scopes: string[], taskId?: string) => {
-    for (const s of scopes) live.pending.add(s);
-    if (taskId) live.taskIds.add(taskId);
-    if (live.emitTimer) return;
+  /** (Re)arms the coalescing timer. A screen coming into view shortens a wait that was set while nothing was watching (5 s), never lengthens one. */
+  const armEmit = () => {
+    if (!live.pending.size && !live.taskIds.size) return;
     // At most two events a second while watched, but an isolated change is announced at once (a few ms, to batch what arrives together), not after a full second.
-    const wait = live.visible ? Math.max(EMIT_LEAD_MS, EMIT_VISIBLE_MS - (Date.now() - live.lastEmitAt)) : EMIT_HIDDEN_MS;
+    const wait = live.visible ? Math.max(EMIT_LEAD_MS, EMIT_VISIBLE_MS - (Date.now() - live.lastEmitAt)) : EMIT_HIDDEN_MS, due = Date.now() + wait;
+    if (live.emitTimer) { if (due >= live.emitDue) return; timers.clearTimeout(live.emitTimer); }
+    live.emitDue = due;
     live.emitTimer = timers.setTimeout(() => {
       live.emitTimer = null; live.lastEmitAt = Date.now();
       const scopes = [...live.pending] as ('tasks' | 'runs' | 'agents' | 'inbox' | 'config')[], taskIds = [...live.taskIds];
       live.pending.clear(); live.taskIds.clear();
       context.emit({ type: 'projectsWorkspaceChanged', scopes, taskIds });
     }, wait);
+  };
+  const queueEmit = (scopes: string[], taskId?: string) => {
+    for (const s of scopes) live.pending.add(s);
+    if (taskId) live.taskIds.add(taskId);
+    armEmit();
   };
   const schedulePoll = () => {
     stopPoll();
@@ -831,7 +837,7 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
         live.visible = input.visible === true;
         if (!connection()) { stopPoll(); return { live: 'events' as LiveChannel }; }
         if (!live.visible) { stopPoll(); live.lastChangeAt = 0; live.pollDelay = POLL_FAST_MS; }
-        else { live.lastChangeAt = Date.now(); live.pollDelay = POLL_FAST_MS; ensureSocket(); if (!live.socket) schedulePoll(); }
+        else { live.lastChangeAt = Date.now(); live.pollDelay = POLL_FAST_MS; armEmit(); ensureSocket(); if (!live.socket) schedulePoll(); }
         return { live: live.channel };
       },
       'paperclip.badge': () => { scheduleHistory(); return badge(); },

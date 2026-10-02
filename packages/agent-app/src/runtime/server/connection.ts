@@ -39,7 +39,9 @@ export class ServerConnection {
     this.config = loaded.config; this.migrated = loaded.migrated;
   }
   get fetcher(): FetchLike { return this.options.fetch ?? ((input, init) => fetch(input, init)); }
-  secrets(): SecretStore { return this.options.secrets?.() ?? activeSecretStore() ?? new SecretStore(this.dataDir); }
+  /** The runtime's secret store, captured when this connection was made (the providers domain of the same runtime made it just before), so a second runtime in one process cannot swap it. */
+  private active: SecretStore | undefined = activeSecretStore();
+  secrets(): SecretStore { return this.options.secrets?.() ?? (this.active ??= activeSecretStore() ?? new SecretStore(this.dataDir)); }
   onChange(listener: () => void): () => void { this.listeners.add(listener); return () => this.listeners.delete(listener); }
   /** The session cookie changed (set, expired, cleared): the live socket is rebuilt, nothing else is. */
   onSession(listener: () => void): () => void { this.sessionListeners.add(listener); return () => this.sessionListeners.delete(listener); }

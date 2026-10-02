@@ -304,3 +304,17 @@ test('an isolated change is announced within a few milliseconds, a burst twice a
   await h.call('paperclip.snapshot',{refresh:true});
   assert.ok(h.server.restFull.filter(u=>u.includes('/issues?')).every(u=>u.includes('limit=1000')),'a routine read is unchanged');
 });
+
+test('a change that arrived while nothing was watching is announced as soon as a screen comes into view, not up to 5 s later', async t => {
+  const h = await signedInHarness(t,{session:'__Secure-better-auth.session_token=tok.sig'});
+  await h.call('paperclip.snapshot');h.sockets.made[0]!.s.onopen();
+  await h.timers.fire();h.events.length=0;h.timers.live.clear();
+  h.sockets.made[0]!.s.onmessage({data:JSON.stringify({type:'activity.logged',payload:{entityType:'issue',entityId:'i-1'}})});
+  assert.deepEqual([...h.timers.live.values()].map(x=>x.ms),[5000],'hidden: the badge read is not hurried');
+  await h.call('paperclip.watch',{visible:true});
+  const waits=[...h.timers.live.values()].map(x=>x.ms);
+  assert.equal(waits.length,1,'one pending announcement, not two');
+  assert.ok(waits[0]!<=500,`it now waits at most the half-second window (${waits[0]} ms), instead of the 5 s set while hidden`);
+  await h.timers.fire();
+  assert.deepEqual(h.events.map(e=>e.taskIds),[['i-1']],'and it carries the change');
+});

@@ -183,9 +183,9 @@ assert.match(cards[1].getAttribute('title')!,/Working on: RAG-15 Implement migra
 assert.match(cards[0].textContent!,/3/,'memory badge from the project’s bank');
 // Pulse: Paperclip agents belong to the company, so the project's Pause says so and warns before stopping them.
 const pause=[...document.querySelectorAll('.ws-page-actions button')].find(b=>/^Pause/.test(b.textContent!));
-assert.equal(pause?.textContent,'Pause 3 Paperclip agents (company-wide)');
+assert.equal(pause?.textContent,'Pause 3 server agents (org-wide)');
 await click(pause);
-assert.deepEqual(text('.ws-confirm-text'),['Pause 3 Paperclip agents? They also stop working on other projects.']);
+assert.deepEqual(text('.ws-confirm-text'),['Pause 3 server agents? They also stop working on other projects.']);
 await click([...document.querySelectorAll('.ws-confirm button')].find(b=>/Keep running/.test(b.textContent!)));
 assert.equal(calls.filter(c=>c.command==='paperclip.agent.pause').length,0,'nothing pauses without the confirm');
 let focused='';(window.HTMLElement.prototype as any).focus=function(){focused=this.querySelector?.('.ws-roster-name')?.textContent??'';};
@@ -204,7 +204,7 @@ const {InboxPage}=await import('../src/renderer/components/HubPages');
 const root3=createRoot(document.getElementById('root')!,{onUncaughtError:(e:unknown)=>{(errors as unknown[]).push(e);}});
 root3.render(<InboxPage snapshot={{...snapshot,inbox:[],tasks:[],projects:[],paperclip:{...snapshot.paperclip,company:null,stale:'fetch failed',cached:false}} as any} nav={{onOpenTask(){},onOpenAgent(){},onOpenChat(){}}}/>);
 await delay(120);
-assert.ok(text('.resource-state-partial p').some(t=>/Paperclip can’t be reached, so its questions, approvals and problems are not shown/.test(t)));
+assert.ok(text('.resource-state-partial p').some(t=>/Muster Server can’t be reached, so its questions, approvals and problems are not shown/.test(t)));
 assert.ok(!text('.resource-state-title').some(t=>/all caught up/.test(t)),'offline is never "all caught up"');
 root3.unmount();
 
