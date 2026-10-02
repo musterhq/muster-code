@@ -232,3 +232,15 @@ test('R281 should-fix 10b: project.remote.* cannot be called over /rpc, not even
   for (const role of ['owner', 'admin'] as const) for (const c of ['project.remote.tasks', 'project.remote.comment', 'project.remote.state', 'project.remote.doc', 'project.remote.task'])
     await assert.rejects(dispatch({} as never, { user: user(role) } as never, c, { projectId: 'p' }), /remote agent API/);
 });
+
+test('R281 should-fix 10c: work.docs.save records the signed-in person as the author, whatever `by` the client sends', async () => {
+  const { dispatch } = await import('../src/rpc.ts');
+  const seen: unknown[] = [];
+  const runtime = { running: true, cachedSnapshot: () => snapshot, snapshot: async () => snapshot, invoke: async (_c: string, input: unknown) => { seen.push(input); return { ok: true }; } };
+  const ctx = { runtime, store: { projectAccessFor: async () => [{ projectId: 'p-shared', userId: 'member', role: 'editor' }], chatOwners: async () => new Map() }, audit: { append: async () => undefined }, bumpAccess() {} };
+  const me = { ...user('member'), displayName: 'Mia Member' };
+  await dispatch(ctx as never, { user: me } as never, 'work.docs.save', { projectId: 'p-shared', taskId: 't', key: 'plan', text: 'x', by: 'CEO (an impostor)' });
+  assert.equal((seen[0] as { by: string }).by, 'Mia Member');
+  await dispatch(ctx as never, { user: me } as never, 'work.docs.save', { projectId: 'p-shared', taskId: 't', key: 'plan', text: 'x' });
+  assert.equal((seen[1] as { by: string }).by, 'Mia Member');
+});

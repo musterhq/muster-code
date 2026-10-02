@@ -53,6 +53,8 @@ export async function dispatch(ctx: RpcContext, principal: Principal, command: u
   const snapshot: Snapshot = view.all ? ctx.runtime.cachedSnapshot() : await ctx.runtime.snapshot(true);
   authorizeResource(view, name, cls, input, snapshot);
   const startedAt = new Date().toISOString();
+  // The author of a document revision is who is signed in, never a name the client sends (`by` is for the runtime's own agents).
+  if (name === 'work.docs.save' && input && typeof input === 'object') input = { ...(input as Record<string, unknown>), by: user.displayName || user.username };
   const output = await ctx.runtime.invoke(name, input);
   await afterCommand(ctx, user, name, input, output, startedAt);
   return filterOutput(view, name, output, view.all ? snapshot : await ctx.runtime.snapshot(true));
