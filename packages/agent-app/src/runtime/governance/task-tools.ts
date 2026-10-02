@@ -73,6 +73,8 @@ export interface TaskToolDeps {
   onAssigned(projectId: string, taskId: string): void;
   invoke(command: string, input: Record<string, unknown>): Promise<unknown>;
   secretProposals(projectId: string, pendingOnly: boolean): SecretProposal[];
+  /** The model catalog: what can really run here. */
+  providers(): { id: string; name: string; available: boolean; models: { id: string }[] }[];
   now(): number;
 }
 
@@ -99,6 +101,12 @@ export function createTaskTools(d: TaskToolDeps) {
     const who = d.nameOf(projectId, proposerId), caps = d.agentGov(projectId, proposerId).capabilities;
     if (!caps.canHire) return { ok: false, refusal: `${who} is not allowed to add agents. Turn on “Can add agents” in their permissions.` };
     if (caps.trust === 'low-trust') return { ok: false, refusal: `${who} is a low-trust agent and cannot add agents.` };
+    if (h.runner) {
+      const p = d.providers().find(x => x.id === h.runner!.providerId);
+      if (h.runner.providerId === REMOTE_PROVIDER) return { ok: false, refusal: 'A proposed agent cannot run on a remote agent. Leave provider and model out to use the project default.' };
+      if (!p || !p.available) return { ok: false, refusal: `${h.runner.providerId} is not available here. Leave provider and model out to use the project default.` };
+      if (!p.models.some(m => m.id === h.runner!.model)) return { ok: false, refusal: `${h.runner.model} is not a model of ${p.name}. Leave provider and model out to use the project default.` };
+    }
     const boss = h.reportsTo ? members(projectId).find(m => m.kind === 'agent' && (m.id === h.reportsTo || m.name.toLowerCase() === h.reportsTo!.toLowerCase())) : undefined;
     const pending = d.team().settings(projectId).requireHireApproval;
     // The same agent proposing the same name again, after a change request, revises its open proposal instead of adding a second.
@@ -133,11 +141,15 @@ export function createTaskTools(d: TaskToolDeps) {
       return t ?? toolText(`No task ${String(ref)} in this project.`, true);
     };
     const isResult = (v: ProjectTask | McpToolResult): v is McpToolResult => 'content' in v;
+    /** This task and everything below it: all a low-trust agent may see. */
+    const subtree = (all: ProjectTask[]): Set<string> => { const under = new Set<string>([task.id]); for (let grew = true; grew;) { grew = false; for (const x of all) if (x.parentId && under.has(x.parentId) && !under.has(x.id)) { under.add(x.id); grew = true; } } return under; };
 
     switch (tool) {
       case 'task_get': {
         const t = pick(args.task); if (isResult(t)) return t;
-        const all = d.tasks().listTasks(projectId).items, kids = all.filter(x => x.parentId === t.id), parent = t.parentId ? all.find(x => x.id === t.parentId) : undefined;
+        const all = d.tasks().listTasks(projectId).items;
+        if (caps.trust === 'low-trust' && !subtree(all).has(t.id)) return deny(`${who} is low-trust and may only see its own task and subtasks.`);
+        const kids = all.filter(x => x.parentId === t.id), parent = t.parentId ? all.find(x => x.id === t.parentId) : undefined;
         const docs = await d.invoke('work.docs.list', { projectId, taskId: t.id }).catch(() => null) as { docs?: { key: string; rev: number }[] } | null;
         const acts = d.tasks().listActivity(projectId, 60).items.filter(a => a.refId === t.id).slice(0, 6).reverse();
         return toolText([
@@ -153,7 +165,7 @@ export function createTaskTools(d: TaskToolDeps) {
         const scope = args.scope === 'project' ? 'project' : args.scope === 'subtasks' ? 'subtasks' : 'mine';
         if (scope === 'project' && caps.trust === 'low-trust') return deny(`${who} is low-trust and may only see its own task and subtasks.`);
         const all = d.tasks().listTasks(projectId).items, limit = Math.min(Math.max(Number(args.limit) || 25, 1), 50);
-        const under = new Set<string>([task.id]); for (let grew = true; grew;) { grew = false; for (const x of all) if (x.parentId && under.has(x.parentId) && !under.has(x.id)) { under.add(x.id); grew = true; } }
+        const under = subtree(all);
         const state = typeof args.state === 'string' ? args.state : null;
         const rows = all.filter(x => scope === 'project' ? true : scope === 'subtasks' ? under.has(x.id) && x.id !== task.id : x.owner.kind === 'agent' && x.owner.id === mid).filter(x => !state || x.state === state);
         return toolText(rows.length ? `${rows.length} task${rows.length === 1 ? '' : 's'}${rows.length > limit ? ` (first ${limit})` : ''}:\n${rows.slice(0, limit).map(line).join('\n')}` : 'No tasks match.');

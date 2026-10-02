@@ -1,12 +1,12 @@
 /** Wave 4: G30 scheduled backups: consistent copies, 0600 files, retention, verified restore applied at the next start, one timer. */
 import assert from 'node:assert/strict';
-import { statSync, existsSync, readFileSync, writeFileSync, readdirSync } from 'node:fs';
+import { statSync, existsSync, readFileSync, writeFileSync, readdirSync, mkdirSync, rmSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { DatabaseSync } from 'node:sqlite';
-import { applyPendingRestore, listBackups, takeBackup, verifyBackup, stageRestore } from '../src/runtime/backups.ts';
+import { applyPendingRestore, listBackups, pendingRestore as pendingRestoreOf, takeBackup, verifyBackup, stageRestore } from '../src/runtime/backups.ts';
 import { backupsClock, createBackupsDomain } from '../src/runtime/domains/backups.ts';
 import { FakeClock } from './wave1-harness.ts';
 
@@ -79,4 +79,26 @@ test('G30: a restore is staged, applied at the next start, and the replaced data
   assert.match(applyPendingRestore(d)!, /dropped/);
   assert.equal(new DatabaseSync(join(d, 'muster-agent.sqlite'), { readOnly: true }).prepare('SELECT COUNT(*) AS n FROM t').get()!.n, 1);
   void readFileSync;
+});
+
+test('review: a restore that fails part-way puts every live database back, and manifest names are never paths', async t => {
+  const { d, a, b } = await dir(t);
+  const e = takeBackup(d, 'manual', null);
+  a.exec("INSERT INTO t VALUES('live-only')"); b.exec("INSERT INTO tasks VALUES('live-task')"); a.exec('PRAGMA wal_checkpoint(TRUNCATE)'); a.close(); b.close();
+  const readAll = () => [['muster-agent.sqlite', 'SELECT v FROM t'], ['muster-project-tasks.sqlite', 'SELECT v FROM tasks']].map(([f, q]) => { const x = new DatabaseSync(join(d, f!), { readOnly: true }); try { return x.prepare(q!).all().map(r => r.v).join(','); } finally { x.close(); } });
+  const before = readAll(); assert.deepEqual(before, ['one,live-only', 'task,live-task']);
+  // The second database cannot be installed: the first, already swapped, must be rolled back.
+  stageRestore(d, e.id);
+  const note = applyPendingRestore(d, { beforeInstall: name => { if (name === 'muster-project-tasks.sqlite') throw new Error('disk exploded'); } })!;
+  assert.match(note, /left as it was.*disk exploded/); assert.deepEqual(readAll(), before, 'both live databases are as they were');
+  assert.equal(pendingRestoreOf(d), null, 'the staged restore is dropped'); assert.ok(!readdirSync(d).some(n => n.endsWith('.restoring')), 'no temp files remain');
+  // A copy that cannot be made stops before anything is moved.
+  stageRestore(d, e.id); mkdirSync(join(d, 'muster-project-tasks.sqlite.restoring'));
+  assert.match(applyPendingRestore(d)!, /left as it was/); assert.deepEqual(readAll(), before); rmSync(join(d, 'muster-project-tasks.sqlite.restoring'), { recursive: true });
+  // A manifest that names a path is refused when verified and when staged.
+  const man = join(d, 'backups/scheduled', e.id, 'manifest.json'), m = JSON.parse(readFileSync(man, 'utf8'));
+  for (const bad of ['../../outside.sqlite', '/etc/passwd', 'sub/dir.sqlite', 'notadb.txt']) {
+    writeFileSync(man, JSON.stringify({ ...m, files: [{ ...m.files[0], name: bad }] }));
+    assert.throws(() => verifyBackup(d, e.id), /not a database name/, bad); assert.throws(() => stageRestore(d, e.id), /not a database name/, bad);
+  }
 });

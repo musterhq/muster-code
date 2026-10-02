@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import type { ChatSsh, PreviewItem, ServiceDecl, ServiceView, SshHost } from '../../shared/domains/envs-protocol.ts';
 import { ToolHost, toolText, type ToolSpec } from '../governance/tool-host.ts';
-import { checkKeyFile, explainSshError, forgetHostKey, scanHostKey, shq, sshExec, trustHostKey, validateHost } from '../envs/ssh.ts';
+import { checkKeyFile, explainSshError, forgetHostKey, remotePath, scanHostKey, shq, sshExec, trustHostKey, validateHost } from '../envs/ssh.ts';
 import { ServiceRunner } from '../envs/services.ts';
 import type { McpToolResult } from '../sandbox-registry.ts';
 import type { DomainContext, DomainModule } from './types.ts';
@@ -18,7 +18,7 @@ export const SSH_MCP = 'muster_ssh';
 const S = { type: 'string' } as const;
 export const SSH_TOOL_SPECS: ToolSpec[] = [
   { name: 'ssh_exec', description: 'Run a shell command on the chat’s SSH host, from its remote folder (or cwd under it). Output is capped.', inputSchema: { type: 'object', properties: { command: S, cwd: S, timeout_sec: { type: 'number' } }, required: ['command'] } },
-  { name: 'ssh_read', description: 'Read a text file on the SSH host (path under the remote folder, or absolute).', inputSchema: { type: 'object', properties: { path: S }, required: ['path'] } },
+  { name: 'ssh_read', description: 'Read a text file on the SSH host. A relative path is under the remote folder; an absolute path or ~/path is read as given, anywhere the SSH user can read.', inputSchema: { type: 'object', properties: { path: S }, required: ['path'] } },
   { name: 'ssh_write', description: 'Write a text file on the SSH host (creates folders). Needs write access in this chat.', inputSchema: { type: 'object', properties: { path: S, text: S }, required: ['path', 'text'] } },
   { name: 'ssh_list', description: 'List a folder on the SSH host.', inputSchema: { type: 'object', properties: { path: S } } },
 ];
@@ -52,26 +52,28 @@ export function createEnvsDomain(ctx: DomainContext): DomainModule {
       }
       case 'ssh_read': {
         const p = typeof args.path === 'string' ? args.path : ''; if (!p) return toolText('Give the path.', true);
-        const r = await sshExec(ctx.dataDir, b.host, b.dir, `cat -- ${shq(under('.', p))}`); return r.code === 0 ? toolText(r.stdout + (r.truncated ? '\n[cut]' : '')) : fail(r);
+        const r = await sshExec(ctx.dataDir, b.host, b.dir, `cat -- ${remotePath(under('.', p))}`); return r.code === 0 ? toolText(r.stdout + (r.truncated ? '\n[cut]' : '')) : fail(r);
       }
       case 'ssh_list': {
-        const r = await sshExec(ctx.dataDir, b.host, b.dir, `ls -la -- ${shq(under('.', typeof args.path === 'string' ? args.path : '.'))}`); return r.code === 0 ? toolText(r.stdout) : fail(r);
+        const r = await sshExec(ctx.dataDir, b.host, b.dir, `ls -la -- ${remotePath(under('.', typeof args.path === 'string' ? args.path : '.'))}`); return r.code === 0 ? toolText(r.stdout) : fail(r);
       }
       case 'ssh_write': {
         if (!write) return toolText('This chat is read-only: it cannot write on the host.', true);
         const p = typeof args.path === 'string' ? args.path : '', text = typeof args.text === 'string' ? args.text : null; if (!p || text === null || text.length > 1_000_000) return toolText('Give a path and the text (up to 1 MB).', true);
-        const target = shq(under('.', p));
+        const target = remotePath(under('.', p));
         const r = await sshExec(ctx.dataDir, b.host, b.dir, `mkdir -p -- "$(dirname -- ${target})" && cat > ${target}`, { stdin: text }); return r.code === 0 ? toolText(`Wrote ${p} (${text.length} characters).`) : fail(r);
       }
       default: return toolText(`Unknown tool ${tool}.`, true);
     }
   }
   let sshHost: ToolHost | undefined;
-  const toolHost = () => sshHost ??= new ToolHost({ dir: join(ctx.dataDir, 'agent-tools', 'ssh'), name: SSH_MCP, title: 'Muster SSH', specs: SSH_TOOL_SPECS, execPath: process.execPath, run: runSshTool });
+  const toolHost = () => sshHost ??= new ToolHost({ dir: join(ctx.dataDir, 'agent-tools', 'ssh'), name: SSH_MCP, title: 'Muster SSH', specs: SSH_TOOL_SPECS, execPath: process.execPath, run: runSshTool,
+    // ssh_exec may run for up to 600 s (the provider's tool timeout is 600 too), so the MCP process waits a little longer; ssh_write takes up to 1 MB of text.
+    timeoutMs: 610_000, maxBody: 8 * 1024 * 1024 });
   const offOptions = ctx.hooks.addRunOptionsContributor(async chat => {
     if (!bound(chat.id)) return null;
     const launcher = await toolHost().start();
-    return { configOverrides: { [`mcp_servers.${SSH_MCP}.command`]: launcher, [`mcp_servers.${SSH_MCP}.env.MUSTER_CHAT_ID`]: chat.id, [`mcp_servers.${SSH_MCP}.tool_timeout_sec`]: 600 } };
+    return { configOverrides: { [`mcp_servers.${SSH_MCP}.command`]: launcher, [`mcp_servers.${SSH_MCP}.env.MUSTER_CHAT_ID`]: chat.id, [`mcp_servers.${SSH_MCP}.env.MUSTER_CHAT_TOKEN`]: toolHost().chatToken(chat.id), [`mcp_servers.${SSH_MCP}.tool_timeout_sec`]: 600 } };
   });
   const offPrompt = ctx.hooks.addPromptContributor(async ({ chat }) => {
     const b = bound(chat.id); if (!b) return null;

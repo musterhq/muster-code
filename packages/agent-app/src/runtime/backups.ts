@@ -7,6 +7,7 @@ import type { BackupEntry, BackupFile } from '../shared/domains/backups-protocol
 
 export const BACKUP_DIR = 'backups/scheduled';
 const MANIFEST = 'manifest.json', PENDING = 'restore-pending.json';
+const SAFE_DB_NAME = /^[\w.-]+\.sqlite$/;
 const quote = (p: string) => `'${p.replace(/'/g, "''")}'`;
 const sha = (file: string) => createHash('sha256').update(readFileSync(file)).digest('hex');
 const stampOf = (d: Date) => d.toISOString().replace(/[:.]/g, '-');
@@ -60,6 +61,8 @@ export function verifyBackup(dataDir: string, id: string): BackupEntry {
   const dir = join(dataDir, BACKUP_DIR, safeId(id)), entry = entryOf(dir);
   if (!entry) throw new Error('That backup does not exist or its manifest is unreadable.');
   for (const f of entry.files) {
+    // A manifest is a file on disk: its names are never trusted as paths.
+    if (typeof f.name !== 'string' || !SAFE_DB_NAME.test(f.name)) throw new Error('This backup lists a file name that is not a database name; it will not be restored.');
     const file = join(dir, f.name);
     if (!existsSync(file)) throw new Error(`The backup is missing ${f.name}.`);
     if (sha(file) !== f.sha256) throw new Error(`${f.name} in this backup was changed after it was made; it will not be restored.`);
@@ -83,18 +86,29 @@ export function cancelRestore(dataDir: string) { rmSync(join(dataDir, PENDING), 
  * Called once at the very start of the runtime, before any database is opened: puts a staged backup in place. The live databases are
  * kept first under backups/before-restore/, and each database not in the backup is left alone. Returns a sentence or null.
  */
-export function applyPendingRestore(dataDir: string): string | null {
+export function applyPendingRestore(dataDir: string, hooks: { beforeInstall?: (name: string) => void } = {}): string | null {
   const p = pendingRestore(dataDir);
   if (!p) return null;
+  const moved: { live: string; keep: string }[] = [], installed: string[] = [], temps: string[] = [];
   try {
     const entry = verifyBackup(dataDir, p.id), keepDir = join(dataDir, 'backups', 'before-restore', stampOf(new Date()));
+    // 1. Copy everything beside the live files first: a full disk or a bad file stops here, with nothing moved.
+    for (const f of entry.files) { const tmp = join(dataDir, `${f.name}.restoring`); temps.push(tmp); copyFileSync(join(dataDir, BACKUP_DIR, p.id, f.name), tmp); chmodSync(tmp, 0o600); }
     mkdirSync(keepDir, { recursive: true, mode: 0o700 });
+    // 2. Swap. Each step is recorded so a failure puts every live database back.
     for (const f of entry.files) {
       const live = join(dataDir, f.name);
-      if (existsSync(live)) { renameSync(live, join(keepDir, f.name)); for (const ext of ['-wal', '-shm']) if (existsSync(live + ext)) renameSync(live + ext, join(keepDir, f.name + ext)); }
-      copyFileSync(join(dataDir, BACKUP_DIR, p.id, f.name), live); chmodSync(live, 0o600);
+      for (const ext of ['', '-wal', '-shm']) if (existsSync(live + ext)) { renameSync(live + ext, join(keepDir, f.name + ext)); moved.push({ live: live + ext, keep: join(keepDir, f.name + ext) }); }
+      hooks.beforeInstall?.(f.name);
+      renameSync(join(dataDir, `${f.name}.restoring`), live); installed.push(live);
     }
     cancelRestore(dataDir);
     return note(dataDir, `Restored the backup from ${p.createdAt}. The previous data is kept in ${keepDir}.`);
-  } catch (e) { cancelRestore(dataDir); return note(dataDir, `The staged restore was dropped: ${e instanceof Error ? e.message : 'error'}`); }
+  } catch (e) {
+    for (const live of installed) try { rmSync(live, { force: true }); } catch { /* best effort */ }
+    for (const m of moved.reverse()) { try { rmSync(m.live, { force: true }); renameSync(m.keep, m.live); } catch { /* the kept copy stays where it is */ } }
+    for (const t of temps) try { rmSync(t, { force: true }); } catch { /* best effort */ }
+    cancelRestore(dataDir);
+    return note(dataDir, `The staged restore was dropped and your data was left as it was: ${e instanceof Error ? e.message : 'error'}`);
+  }
 }

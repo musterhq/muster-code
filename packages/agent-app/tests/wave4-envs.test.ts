@@ -54,7 +54,8 @@ test('G21: scan, compare, trust; test; a chat bound to the host gets tools that 
   const call = h.calls.find(c => c.chatId === chat.id)!, launcher = String(call.overrides['mcp_servers.muster_ssh.command']);
   assert.ok(launcher); assert.match(call.text, /SSH host “local sshd”/);
   const { url, token } = JSON.parse(readFileSync(join(dirname(launcher), 'muster_ssh-endpoint.json'), 'utf8'));
-  const tool = async (name: string, args: Record<string, unknown>) => { const r = await (await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` }, body: JSON.stringify({ chatId: chat.id, tool: name, arguments: args }) })).json() as { content: { text: string }[]; isError?: boolean }; return { text: r.content[0]!.text, error: Boolean(r.isError) }; };
+  const tool = async (name: string, args: Record<string, unknown>) => { const r = await (await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${token}`, 'x-muster-chat-token': String(call.overrides['mcp_servers.muster_ssh.env.MUSTER_CHAT_TOKEN']) }, body: JSON.stringify({ chatId: chat.id, tool: name, arguments: args }) })).json() as { content: { text: string }[]; isError?: boolean }; return { text: r.content[0]!.text, error: Boolean(r.isError) }; };
+  assert.equal((await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${token}`, 'x-muster-chat-token': String(call.overrides['mcp_servers.muster_ssh.env.MUSTER_CHAT_TOKEN']) }, body: JSON.stringify({ chatId: 'another-chat', tool: 'ssh_exec', arguments: { command: 'id' } }) })).status, 403, 'the SSH tools are bound to their chat too');
   await h.s.invoke('chat.setPermission' as never, { id: chat.id, permissionMode: 'workspace' } as never).catch(() => undefined);
   const w = await tool('ssh_write', { path: 'notes/a.txt', text: 'hello from the agent\nline 2' }); assert.equal(w.error, false, w.text);
   assert.equal(readFileSync(join(s.dir, 'notes/a.txt'), 'utf8'), 'hello from the agent\nline 2', 'the file really landed on the host');
@@ -64,6 +65,16 @@ test('G21: scan, compare, trust; test; a chat bound to the host gets tools that 
   const bad = await tool('ssh_exec', { command: 'exit 3' }); assert.equal(bad.error, true); assert.match(bad.text, /exit 3/);
   assert.match((await tool('ssh_exec', { command: 'sleep 5', timeout_sec: 1 })).text, /timed out/);
   assert.match((await tool('ssh_read', { path: 'nope.txt' })).text, /No such file|nope/i);
+  // The MCP process waits as long as ssh_exec may run (600 s plus a margin), and a 1 MB write fits the host's body limit.
+  assert.match(readFileSync(join(dirname(launcher), 'muster_ssh-mcp.cjs'), 'utf8'), /AbortSignal\.timeout\(610000\)/); assert.equal(call.overrides['mcp_servers.muster_ssh.tool_timeout_sec'], 600);
+  const big = await tool('ssh_write', { path: 'big.txt', text: 'x'.repeat(900_000) }); assert.equal(big.error, false, big.text);
+  assert.equal(statSync(join(s.dir, 'big.txt')).size, 900_000);
+  // ~/ means the login home, not a folder named "~" under the remote folder (nothing is written outside the temp dir).
+  const home = (await tool('ssh_exec', { command: 'printf %s "$HOME"' })).text.split('\n')[1]!;
+  const missing = await tool('ssh_read', { path: '~/muster-w4-no-such-file.txt' }); assert.equal(missing.error, true);
+  assert.ok(missing.text.includes(`${home}/muster-w4-no-such-file.txt`), `expanded to the home folder: ${missing.text}`);
+  assert.ok((await tool('ssh_list', { path: '~' })).text.includes('total'), 'ls of ~ lists the home folder');
+  assert.ok(!existsSync(join(s.dir, '~')), 'no folder named ~ appears');
   // Injection through the path stays inside quotes.
   await tool('ssh_write', { path: "x'; touch /tmp/muster-w4-pwn; echo '.txt", text: 'x' }); assert.ok(!existsSync('/tmp/muster-w4-pwn'));
   // Read-only chats cannot exec or write.
@@ -124,5 +135,18 @@ test('G22: a service does not inherit provider keys or tokens from the app', asy
   const { scrubbed } = await import('../src/runtime/envs/services.ts');
   const out = scrubbed({ PATH: '/bin', OPENAI_API_KEY: 'sk-x', GITHUB_TOKEN: 'ghp_x', MUSTER_SECRET_KEY: 'k', DB_PASSWORD: 'p', HOME: '/h', PORT: '3000' });
   assert.deepEqual(Object.keys(out).sort(), ['HOME', 'PATH', 'PORT']);
+  const wider = scrubbed({ PATH: '/bin', AWS_ACCESS_KEY_ID: 'a', AWS_PROFILE: 'p', AZURE_CLIENT_ID: 'z', GOOGLE_APPLICATION_CREDENTIALS: '/c.json', GCP_PROJECT: 'g', STRIPE_SECRET_KEY: 's', DATABASE_URL_SECRET: 'd', NPM_TOKEN: 'n', SSH_AUTH_SOCK: '/s', AWS_CREDENTIALS: 'x', SERVICE_CREDENTIAL: 'y', DB_PASSWD: 'p', API_KEY: 'k', LANG: 'en_US.UTF-8', EDITOR: 'vi', MONKEY: 'ape' });
+  assert.deepEqual(Object.keys(wider).sort(), ['EDITOR', 'LANG', 'MONKEY', 'PATH']);
   void t;
+});
+
+test('review: a dev server gets HOST=127.0.0.1 and none of the cloud or credential variables', async t => {
+  const { ServiceRunner } = await import('../src/runtime/envs/services.ts');
+  const dir = mkdtempSync(join(tmpdir(), 'muster-w4-svc-')); t.after(() => { execFileSync('rm', ['-rf', dir]); });
+  process.env.AWS_SECRET_ACCESS_KEY = 'aws-secret-value'; process.env.STRIPE_SECRET_KEY = 'sk-live-x'; t.after(() => { delete process.env.AWS_SECRET_ACCESS_KEY; delete process.env.STRIPE_SECRET_KEY; });
+  const runner = new ServiceRunner(dir, () => undefined);
+  const r = runner.start({ id: 's', projectId: 'p', taskId: 't', name: 'env', command: 'echo "host=$HOST name=$HOSTNAME aws=$AWS_SECRET_ACCESS_KEY stripe=$STRIPE_SECRET_KEY"', port: null, folderId: null, taskKey: null } as never, dir);
+  await until(() => r.state === 'stopped' || r.state === 'failed' || /host=/.test(r.log), 'output');
+  assert.match(r.log, /host=127\.0\.0\.1 name=127\.0\.0\.1 aws= stripe=\s/);
+  await runner.stopAll();
 });

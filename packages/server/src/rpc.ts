@@ -42,6 +42,8 @@ export async function viewFor(ctx: RpcContext, user: UserRecord): Promise<Access
 export async function dispatch(ctx: RpcContext, principal: Principal, command: unknown, input: unknown): Promise<unknown> {
   const user = principal.user;
   if (typeof command === 'string' && command.startsWith('server.')) return serverCommand(ctx, principal, command, (input && typeof input === 'object' ? input : {}) as Record<string, unknown>);
+  // The agent API speaks for one remote agent through these; nobody, admins included, may call them with a person's session.
+  if (typeof command === 'string' && command.startsWith('project.remote.')) throw new PolicyError('These commands are only reachable through the remote agent API.', 403, 'forbidden');
   const cls = authorizeCommand(command, user.role);
   const name = command as string;
   // A folder path would be read on the server's disk: only a zip (or a catalog team) may be imported over the network.
@@ -52,6 +54,8 @@ export async function dispatch(ctx: RpcContext, principal: Principal, command: u
   authorizeResource(view, name, cls, input, snapshot);
   await authorizeWorkspaceWrite(ctx, view, name, input);
   const startedAt = new Date().toISOString();
+  // The author of a document revision is who is signed in, never a name the client sends (`by` is for the runtime's own agents).
+  if (name === 'work.docs.save' && input && typeof input === 'object') input = { ...(input as Record<string, unknown>), by: user.displayName || user.username };
   const output = await ctx.runtime.invoke(name, input);
   await afterCommand(ctx, user, name, input, output, startedAt);
   return filterOutput(view, name, output, view.all ? snapshot : await ctx.runtime.snapshot(true));

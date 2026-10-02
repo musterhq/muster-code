@@ -242,3 +242,33 @@ test('the desktop app\'s Muster Server connection: a member reads only the proje
   const admin = accessView(user('admin'), [], new Map());
   assert.equal(filterOutput(admin, 'paperclip.snapshot', ws, snapshot), ws, 'owners and admins see everything');
 });
+
+test('R281 must-fix 1: org.import.preview parses an uploaded package on the server, so only owners and admins may run it', () => {
+  const viewer = accessView(user('viewer'), grants, owners), member = accessView(user('member'), grants, owners), admin = accessView(user('admin'), [], owners);
+  for (const v of [viewer, member]) denied(() => authorizeResource(v, 'org.import.preview', 'read', { source: { kind: 'zip', base64: 'AAAA' } }, snapshot), 'forbidden');
+  authorizeResource(admin, 'org.import.preview', 'read', { source: { kind: 'zip', base64: 'AAAA' } }, snapshot);
+});
+
+test('R281 should-fix 10a: backups.status shows the data folder path and backup list, so only owners and admins read it', () => {
+  const viewer = accessView(user('viewer'), grants, owners), member = accessView(user('member'), grants, owners), admin = accessView(user('admin'), [], owners);
+  for (const v of [viewer, member]) denied(() => authorizeResource(v, 'backups.status', 'read', {}, snapshot), 'forbidden');
+  authorizeResource(admin, 'backups.status', 'read', {}, snapshot);
+});
+
+test('R281 should-fix 10b: project.remote.* cannot be called over /rpc, not even by an owner', async () => {
+  const { dispatch } = await import('../src/rpc.ts');
+  for (const role of ['owner', 'admin'] as const) for (const c of ['project.remote.tasks', 'project.remote.comment', 'project.remote.state', 'project.remote.doc', 'project.remote.task'])
+    await assert.rejects(dispatch({} as never, { user: user(role) } as never, c, { projectId: 'p' }), /remote agent API/);
+});
+
+test('R281 should-fix 10c: work.docs.save records the signed-in person as the author, whatever `by` the client sends', async () => {
+  const { dispatch } = await import('../src/rpc.ts');
+  const seen: unknown[] = [];
+  const runtime = { running: true, cachedSnapshot: () => snapshot, snapshot: async () => snapshot, invoke: async (_c: string, input: unknown) => { seen.push(input); return { ok: true }; } };
+  const ctx = { runtime, store: { projectAccessFor: async () => [{ projectId: 'p-shared', userId: 'member', role: 'editor' }], chatOwners: async () => new Map() }, audit: { append: async () => undefined }, bumpAccess() {} };
+  const me = { ...user('member'), displayName: 'Mia Member' };
+  await dispatch(ctx as never, { user: me } as never, 'work.docs.save', { projectId: 'p-shared', taskId: 't', key: 'plan', text: 'x', by: 'CEO (an impostor)' });
+  assert.equal((seen[0] as { by: string }).by, 'Mia Member');
+  await dispatch(ctx as never, { user: me } as never, 'work.docs.save', { projectId: 'p-shared', taskId: 't', key: 'plan', text: 'x' });
+  assert.equal((seen[1] as { by: string }).by, 'Mia Member');
+});

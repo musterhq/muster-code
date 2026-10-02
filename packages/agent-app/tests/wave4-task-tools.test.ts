@@ -1,5 +1,6 @@
 /** Wave 4: G40 muster_tasks tools, G41 protocol, G8 agent-initiated hiring, G6 cards, G7 approvals. Tools are called through the real loopback host. */
 import assert from 'node:assert/strict';
+import { createHmac } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { test } from 'node:test';
@@ -13,11 +14,13 @@ async function runAndCall(h: Wave1, title: string, owner: string) {
   const call = h.calls.find(c => c.chatId === run.chatId)!;
   const launcher = String(call.overrides['mcp_servers.muster_tasks.command']);
   const { url, token } = JSON.parse(readFileSync(join(dirname(launcher), 'muster_tasks-endpoint.json'), 'utf8'));
-  const tool = async (name: string, args: Record<string, unknown> = {}, chatId = run.chatId) => {
-    const r = await (await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` }, body: JSON.stringify({ chatId, tool: name, arguments: args }) })).json() as { content: { text: string }[]; isError?: boolean };
+  /** What the run's own MCP process is given for its chat: an HMAC of the chat id. */
+  const chatToken = (chatId: string) => createHmac('sha256', Buffer.from(token, 'hex')).update(chatId).digest('hex');
+  const tool = async (name: string, args: Record<string, unknown> = {}, chatId = run.chatId, bound = chatId) => {
+    const r = await (await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${token}`, 'x-muster-chat-token': chatToken(bound) }, body: JSON.stringify({ chatId, tool: name, arguments: args }) })).json() as { content: { text: string }[]; isError?: boolean };
     return { text: r.content[0]!.text, error: Boolean(r.isError) };
   };
-  return { task, run, call, tool, url, token };
+  return { task, run, call, tool, url, token, chatToken };
 }
 
 test('G40: task runs get the muster_tasks MCP server; the host refuses callers without the token', async t => {
@@ -30,7 +33,19 @@ test('G40: task runs get the muster_tasks MCP server; the host refuses callers w
   assert.ok(TASK_PROTOCOL.split('\n').length >= 6);
   assert.ok(JSON.stringify(TASK_TOOL_SPECS).length < 5000, 'the schemas stay small');
   const own = await r.tool('task_get'); assert.match(own.text, /OSS-\d+ “First task”/);
-  assert.match((await r.tool('task_get', {}, 'not-a-chat')).text, /not running a task/);
+  assert.match((await r.tool('task_get', {}, 'not-a-chat')).text, /not running a task/, 'a properly bound chat that runs no task');
+});
+
+test('review: the tool host binds each call to its chat: the chat id in the body cannot be swapped', async t => {
+  const h = await wave1(t); const cto = await h.member('CTO'), qa = await h.member('QA');
+  const mine = await runAndCall(h, 'Mine', cto.id), theirs = await runAndCall(h, 'Theirs', qa.id);
+  assert.equal(mine.call.overrides['mcp_servers.muster_tasks.env.MUSTER_CHAT_TOKEN'], mine.chatToken(mine.run.chatId), 'the run is given the HMAC of its own chat');
+  assert.match((await mine.tool('task_get')).text, /“Mine”/);
+  const post = (chatId: string, header?: string) => fetch(mine.url, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${mine.token}`, ...(header ? { 'x-muster-chat-token': header } : {}) }, body: JSON.stringify({ chatId, tool: 'task_get', arguments: {} }) });
+  assert.equal((await post(theirs.run.chatId, mine.chatToken(mine.run.chatId))).status, 403, 'my token, their chat id');
+  assert.equal((await post(theirs.run.chatId)).status, 403, 'no chat token at all');
+  assert.equal((await post(mine.run.chatId, 'f'.repeat(64))).status, 403, 'a forged token');
+  assert.equal((await post(theirs.run.chatId, theirs.chatToken(theirs.run.chatId))).status, 200);
 });
 
 test('G40: comment, update and document tools act as the agent; secrets are redacted', async t => {
@@ -68,6 +83,29 @@ test('G40/G12: create, assign and list respect can-assign, scope and low-trust c
   await h.s.invoke('project.agent.gov.set', { projectId: h.project.id, memberId: cto.id, capabilities: { trust: 'low-trust', containment: 'task' } });
   const low = await r.tool('task_create', { title: 'Nope' }); assert.equal(low.error, true); assert.match(low.text, /contained/);
   assert.equal((await r.tool('task_list', { scope: 'project' })).error, true);
+});
+
+test('review: task_get respects low-trust containment: own task and subtree only', async t => {
+  const h = await wave1(t); const cto = await h.member('CTO'), qa = await h.member('QA');
+  const elsewhere = await h.addTask('Secret plans', { kind: 'agent', id: qa.id }, { acceptance: 'Launch codename: bluebird' });
+  const r = await runAndCall(h, 'Lead', cto.id);
+  assert.match((await r.tool('task_get', { task: elsewhere.id })).text, /bluebird/, 'a standard agent may read the project');
+  await h.s.invoke('project.agent.gov.set', { projectId: h.project.id, memberId: cto.id, capabilities: { trust: 'low-trust', containment: 'task' } });
+  const low = await r.tool('task_get', { task: elsewhere.id }); assert.equal(low.error, true); assert.ok(!/bluebird/.test(low.text)); assert.match(low.text, /low-trust/);
+  assert.match((await r.tool('task_get')).text, /“Lead”/, 'its own task still reads');
+});
+
+test('review: agent_propose_hire validates the runner against the model catalog and refuses remote and unknown providers', async t => {
+  const h = await wave1(t); const cto = await h.member('CTO');
+  await h.s.invoke('project.agent.gov.set', { projectId: h.project.id, memberId: cto.id, capabilities: { canHire: true } });
+  const r = await runAndCall(h, 'Grow', cto.id);
+  const hire = (provider: string, model: string, name: string) => ({ name, instructions: 'Do the work.', provider, model });
+  for (const [prov, model, why] of [['remote', 'anything', /remote agent/], ['nope', 'x', /not available/], ['scripted', 'gpt-made-up', /not a model of/]] as const) {
+    const bad = await r.tool('agent_propose_hire', hire(prov, model, `Bad ${prov}`)); assert.equal(bad.error, true, bad.text); assert.match(bad.text, why);
+  }
+  const names = async () => (await h.s.invoke('project.members.list', { projectId: h.project.id })).members.map(m => m.name);
+  assert.ok(!(await names()).some(n => /^Bad /.test(n)), 'nothing was added');
+  assert.equal((await r.tool('agent_propose_hire', hire('scripted', 'scripted-model', 'Good'))).error, false); assert.ok((await names()).includes('Good'));
 });
 
 test('G40: checkout leases a task; a second agent is refused until it expires', async t => {

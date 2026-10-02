@@ -7,17 +7,21 @@ export type OrgSource = { kind: 'zip'; base64: string } | { kind: 'catalog'; key
 export type CollisionStrategy = 'skip' | 'rename' | 'replace';
 export interface OrgExportFile { path: string; bytes: number }
 export interface OrgExport { name: string; slug: string; files: OrgExportFile[]; zipBase64: string; zipBytes: number; warnings: string[] }
-export interface OrgPreviewAgent { slug: string; name: string; title: string | null; reportsTo: string | null; action: 'create' | 'collision'; existingId: string | null; runner: { providerId: string; model: string } | null; runnerNote: string | null; instructionsChars: number }
+/** What the package asks an agent to be allowed to do. Shown before importing; nothing here is applied unless the person confirms it. */
+export interface OrgPermissions { canHire: boolean; canAssign: boolean; assignScope: string; trust: string; containment: string; toolRules: number }
+export interface OrgPreviewAgent { permissions: OrgPermissions | null; slug: string; name: string; title: string | null; reportsTo: string | null; action: 'create' | 'collision'; existingId: string | null; runner: { providerId: string; model: string } | null; runnerNote: string | null; instructionsChars: number }
 export interface OrgPreviewTask { slug: string; name: string; assignee: string | null; recurring: boolean; schedule: string | null }
 export interface OrgPreview {
   package: { kind: 'company' | 'team'; name: string; slug: string; description: string };
   target: { kind: 'existing' | 'new'; projectId: string | null; name: string };
   agents: OrgPreviewAgent[]; tasks: OrgPreviewTask[]; skills: number;
   secrets: string[];
+  /** True when any agent asks for more than the default permissions or brings tool rules. */
+  privileged: boolean;
   /** Said once each: what will be paused, what is not imported, which runner is replaced. */
   notes: string[];
 }
-export interface OrgImportOptions { source: OrgSource; projectId?: string | null; name?: string; collision?: CollisionStrategy; agents?: string[]; includeTasks?: boolean; includeRoutines?: boolean; attachTo?: string | null; /** Leave the new agents running (a bundled team) instead of paused. */ activate?: boolean }
+export interface OrgImportOptions { source: OrgSource; projectId?: string | null; name?: string; collision?: CollisionStrategy; agents?: string[]; includeTasks?: boolean; includeRoutines?: boolean; attachTo?: string | null; /** `least` (the default for zips and folders) gives every imported agent the default permissions and drops tool rules; `imported` applies what the package asks for, after the person confirmed the preview. Bundled catalog teams are ours and default to `imported`. */ permissions?: 'least' | 'imported'; /** Leave the new agents running (a bundled team) instead of paused. */ activate?: boolean }
 export interface OrgImportResult {
   projectId: string; importId: string; created: { slug: string; id: string; name: string }[]; replaced: { slug: string; id: string; name: string }[]; skipped: { slug: string; name: string; reason: string }[];
   tasks: { id: string; title: string }[]; routines: { id: string; name: string }[]; paused: number; notes: string[];

@@ -54,6 +54,8 @@ export class ConnectorRegistry {
     if (scope === 'org' && ROLE_RANK[actor.role] < ROLE_RANK.admin) throw new Error('Only owners and admins can add org-wide connectors.');
     if (scope === 'project' && !input.projectId) throw new Error('A project-scoped connector needs --project.');
     const config = this.cleanConfig(type.configKeys, input.config ?? {});
+    if (scope === 'project') await this.assertProjectAccess(actor, input.projectId!);
+    if (typeof config.notifyProject === 'string') await this.assertProjectAccess(actor, config.notifyProject);
     const id = newId();
     const secretRefs: Record<string, string> = {};
     for (const [name, value] of Object.entries(input.secrets ?? {})) {
@@ -114,6 +116,12 @@ export class ConnectorRegistry {
     await this.deps.audit.append({ actor: `user:${actor.id}`, action: 'connector.secret.set', target: `connector:${c.id}`, detail: { name } });
     if (c.enabled) { await this.stopOne(c.id); await this.startOne((await this.deps.store.connector(c.id))!); }
   }
+  /** A connector posts about a project into a channel anyone there can read, so saving that project needs the saver's own access to it. */
+  private async assertProjectAccess(actor: UserRecord, projectId: string): Promise<void> {
+    if (ROLE_RANK[actor.role] >= ROLE_RANK.admin) return;
+    if ((await this.deps.store.projectAccessFor(actor.id)).some(a => a.projectId === projectId)) return;
+    throw new Error('You do not have access to that project.');
+  }
   private assertManage(actor: UserRecord, c: ConnectorRecord) {
     if (ROLE_RANK[actor.role] >= ROLE_RANK.admin || (c.scope !== 'org' && c.ownerUserId === actor.id)) return;
     throw new Error('Only the connector owner or an admin can change it.');
@@ -157,7 +165,8 @@ export class ConnectorRegistry {
   }
   async setConfig(actor: UserRecord, idOrName: string, config: Record<string, unknown>): Promise<ConnectorView> {
     const c = await this.find(idOrName); this.assertManage(actor, c);
-    const type = connectorType(c.type)!, next = { ...c.config, ...this.cleanConfig(type.configKeys, config) };
+    const type = connectorType(c.type)!, clean = this.cleanConfig(type.configKeys, config), next = { ...c.config, ...clean };
+    if (typeof clean.notifyProject === 'string' && clean.notifyProject !== c.config.notifyProject) await this.assertProjectAccess(actor, clean.notifyProject);
     for (const k of Object.keys(next)) if (next[k] === null || next[k] === '') delete next[k];
     await this.deps.store.updateConnector(c.id, { config: next });
     await this.deps.audit.append({ actor: `user:${actor.id}`, action: 'connector.config.changed', target: `connector:${c.id}`, detail: { keys: Object.keys(config) } });

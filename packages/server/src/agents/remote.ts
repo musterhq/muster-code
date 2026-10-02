@@ -18,6 +18,12 @@ export interface AgentPrincipal { credential: AgentCredentialRecord }
 const MAX_TTL = 7 * 86_400_000, DEFAULT_TTL = 86_400_000;
 const REMOTE = 'remote';
 
+export const MAX_POLLS_PER_CREDENTIAL = 2;
+/** The long poll's timeout in seconds from a query string: a finite number from 1 to 30, 25 when absent or not a number. */
+export function waitSeconds(raw: string | null | undefined): number {
+  const n = raw === null || raw === undefined || raw.trim() === '' ? NaN : Number(raw);
+  return Number.isFinite(n) ? Math.min(Math.max(n, 1), 30) : 25;
+}
 export class RemoteAgents {
   private readonly claimLimiter = new LoginRateLimiter({ max: 8, windowMs: 10 * 60_000, lockMs: 60_000 });
   private waiters = new Map<string, Set<{ credId: string; fire: () => void }>>();
@@ -91,7 +97,9 @@ export class RemoteAgents {
     await this.audit.append({ actor: `user:${actor.id}`, action: 'agent.revoked', target: `agent:${c.id}`, detail: { projectId: c.projectId, name: c.agentName } });
   }
   /** Resolves when something changes in the agent's project, or after `ms`: the long poll behind "wait for work". */
-  wait(c: AgentCredentialRecord, ms: number): Promise<'changed' | 'timeout'> {
+  wait(c: AgentCredentialRecord, ms: number): Promise<'changed' | 'timeout' | 'busy'> {
+    // One agent has no use for more than a couple of open polls; more would let a looping client hold the server's sockets and timers.
+    if ([...(this.waiters.get(c.projectId) ?? [])].filter(w => w.credId === c.id).length >= MAX_POLLS_PER_CREDENTIAL) return Promise.resolve('busy');
     return new Promise(resolve => {
       const set = this.waiters.get(c.projectId) ?? new Set<{ credId: string; fire: () => void }>(); this.waiters.set(c.projectId, set);
       const entry = { credId: c.id, fire: () => done('changed') };

@@ -6,6 +6,7 @@
  * per project collects what is new, posts it, and remembers what it posted (so a restart never repeats a notice). Text is redacted for secrets.
  */
 import { redactSecrets } from '../../../agent-app/src/runtime/secret-redaction.ts';
+import { ROLE_RANK } from '../policy.ts';
 import { newId } from '../auth/tokens.ts';
 import type { RuntimeHost } from '../runtime-host.ts';
 import type { ConnectorRecord, ServerStore } from '../store/types.ts';
@@ -21,9 +22,19 @@ export class NotificationBridge {
   private busy = new Set<string>();
   constructor(private d: NotifyDeps) {}
   invalidate() { this.targets = null; }
+  /** Whether the person who set this connector up may still read the project it reports on. Org-wide connectors are an admin's choice and exempt. */
+  private async mayPost(c: ConnectorRecord, projectId: string): Promise<boolean> {
+    if (c.scope === 'org') return true;
+    const owner = await this.d.store.userById(c.ownerUserId);
+    if (!owner || owner.status === 'revoked') return false;
+    if (ROLE_RANK[owner.role] >= ROLE_RANK.admin) return true;
+    return (await this.d.store.projectAccessFor(owner.id)).some(a => a.projectId === projectId);
+  }
   private async notifying(projectId: string): Promise<ConnectorRecord[]> {
     if (!this.targets || Date.now() - this.targets.at > TARGET_TTL_MS) this.targets = { at: Date.now(), list: (await this.d.store.listConnectors()).filter(c => c.enabled && typeof c.config.notifyChannel === 'string' && c.config.notifyChannel && typeof c.config.notifyProject === 'string') };
-    return this.targets.list.filter(c => c.config.notifyProject === projectId);
+    const list: ConnectorRecord[] = [];
+    for (const c of this.targets.list) if (c.config.notifyProject === projectId && await this.mayPost(c, projectId)) list.push(c);
+    return list;
   }
   /** Called with every runtime event. Cheap when no connector notifies. */
   touch(event: { type: string; projectId?: unknown }) {
@@ -65,6 +76,8 @@ export class NotificationBridge {
         if (first) await this.d.store.setMeta(`${metaKey}:primed`, '1');
         const toSend = first && c.config.notifyBacklog !== true ? [] : fresh;
         for (const i of toSend.slice(0, 10)) {
+          // Access can be taken away at any time: look again before every post, not once per flush.
+          if (!(await this.mayPost(c, projectId))) break;
           try { await this.d.registry().notify(c.id, redactSecrets(i.text), i.key); sent++; }
           catch (e) { await this.d.store.addConnectorEvent({ id: newId(), connectorId: c.id, ts: new Date().toISOString(), direction: 'error', externalId: null, conversation: String(c.config.notifyChannel), chatId: null, runId: null, status: 'notify-failed', detail: (e as Error).message.slice(0, 300) }); }
         }

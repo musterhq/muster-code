@@ -7,7 +7,7 @@ import { Check, MessageSquare, Package, Rocket, Users } from 'lucide-react';
 import React, { useRef, useState } from 'react';
 import type { ApprovalItem } from '../../shared/domains/agent-tools-protocol';
 import type { WorkspaceSnapshot } from '../../shared/domains/paperclip-protocol';
-import type { CatalogTeam, CollisionStrategy, OrgExport, OrgImportResult, OrgPreview } from '../../shared/domains/org-protocol';
+import type { CatalogTeam, CollisionStrategy, OrgExport, OrgImportResult, OrgPermissions, OrgPreview } from '../../shared/domains/org-protocol';
 import { invoke } from '../bridge';
 import { refreshWorkspace } from '../hubStore';
 import { downloadBase64, fileToBase64, useEventLoad } from '../orgHooks';
@@ -57,6 +57,8 @@ export function TeamCatalogSheet({ open, projectId, snapshot, onClose }: { open:
   </ModalSheet>;
 }
 
+const permissionsText = (p: OrgPermissions): string => [p.canHire && 'hire agents', p.canAssign && `assign work (${p.assignScope})`, p.trust !== 'standard' && `trust ${p.trust}`, p.containment !== 'project' && `containment ${p.containment}`, p.toolRules > 0 && `${p.toolRules} tool rule${p.toolRules === 1 ? '' : 's'}`].filter(Boolean).join(', ') || 'defaults';
+
 /** G16: export this project's agents, open tasks and routines as a package, or import one with a preview first. */
 export function OrgPortabilitySheet({ open, projectId, projectName, onClose }: { open: boolean; projectId: string; projectName: string; onClose: () => void }): React.ReactElement | null {
   const [tab, setTab] = useState<'export' | 'import'>('export');
@@ -67,6 +69,7 @@ export function OrgPortabilitySheet({ open, projectId, projectName, onClose }: {
   const [preview, setPreview] = useState<OrgPreview | null>(null);
   const [collision, setCollision] = useState<CollisionStrategy>('skip');
   const [picked, setPicked] = useState<Set<string>>(new Set());
+  const [applyPerms, setApplyPerms] = useState(false);
   const [result, setResult] = useState<OrgImportResult | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -76,11 +79,11 @@ export function OrgPortabilitySheet({ open, projectId, projectName, onClose }: {
   const doExport = () => run(async () => { const r = await invoke('org.export', { projectId, includeTasks: tasks, includeRoutines: routines }); setExported(r); });
   const choose = (file: File | undefined) => file && run(async () => {
     const base64 = await fileToBase64(file); setZip({ base64, name: file.name }); setResult(null);
-    const p = await invoke('org.import.preview', { source: { kind: 'zip', base64 }, projectId }); setPreview(p); setPicked(new Set(p.agents.map(a => a.slug)));
+    const p = await invoke('org.import.preview', { source: { kind: 'zip', base64 }, projectId }); setPreview(p); setApplyPerms(false); setPicked(new Set(p.agents.map(a => a.slug)));
   });
   const doImport = () => run(async () => {
     if (!zip) return;
-    const r = await invoke('org.import.apply', { source: { kind: 'zip', base64: zip.base64 }, projectId, collision, agents: [...picked], includeTasks: tasks, includeRoutines: routines });
+    const r = await invoke('org.import.apply', { source: { kind: 'zip', base64: zip.base64 }, projectId, collision, agents: [...picked], includeTasks: tasks, includeRoutines: routines, permissions: applyPerms ? 'imported' : 'least' });
     setResult(r); await refreshWorkspace();
   });
   return <ModalSheet open={open} className="project-edit-dialog org-sheet" title="Import and export" description={`${projectName}: agents, open tasks and routines as an Agent Companies package (markdown).`} onClose={onClose}>
@@ -99,10 +102,11 @@ export function OrgPortabilitySheet({ open, projectId, projectName, onClose }: {
       {preview && !result && <div className="org-preview">
         <p><strong>{preview.package.name}</strong> <span className="ws-faint">({preview.package.kind}){preview.package.description ? ` · ${preview.package.description.slice(0, 120)}` : ''}</span></p>
         <ul className="org-agents">{preview.agents.map(a => <li key={a.slug}><label className="org-check"><input type="checkbox" checked={picked.has(a.slug)} onChange={e => setPicked(cur => { const n = new Set(cur); if (e.target.checked) n.add(a.slug); else n.delete(a.slug); return n; })}/>
-          <span>{a.name}{a.title ? <span className="ws-faint"> · {a.title}</span> : null}</span></label><StateChip tone={a.action === 'create' ? 'ok' : 'warn'}>{a.action === 'create' ? 'New' : 'Already here'}</StateChip></li>)}</ul>
+          <span>{a.name}{a.title ? <span className="ws-faint"> · {a.title}</span> : null}{a.permissions && <span className="ws-faint org-perms"> · asks to: {permissionsText(a.permissions)}</span>}</span></label><StateChip tone={a.action === 'create' ? 'ok' : 'warn'}>{a.action === 'create' ? 'New' : 'Already here'}</StateChip></li>)}</ul>
         {preview.tasks.length > 0 && <ul className="org-agents">{preview.tasks.map(t => <li key={t.slug}><span>{t.recurring ? 'Routine' : 'Task'}: {t.name}{t.schedule ? <span className="ws-faint"> · {t.schedule}</span> : null}</span></li>)}</ul>}
         {preview.agents.some(a => a.action === 'collision') && <label className="project-edit-goal"><span>Agents that are already here</span><select className="ws-select is-field" value={collision} onChange={e => setCollision(e.target.value as CollisionStrategy)}>
           <option value="skip">Skip them</option><option value="rename">Add them with a new name</option><option value="replace">Replace their instructions and settings</option></select></label>}
+        {preview.privileged && <label className="org-check org-confirm"><input type="checkbox" checked={applyPerms} onChange={e => setApplyPerms(e.target.checked)}/><span>Apply the permissions and tool rules listed above. Left off, every imported agent gets the default permissions and no tool rules.</span></label>}
         <ul className="org-notes">{preview.notes.map((n, i) => <li key={i} className="ws-faint">{n}</li>)}</ul>
         <div className="project-edit-actions"><button type="button" className="project-edit-cancel" disabled={busy} onClick={() => { setPreview(null); setZip(null); }}>Choose another</button><span className="project-edit-spacer"/>
           <button type="button" className="project-edit-save" disabled={busy || (!picked.size && !preview.tasks.length)} onClick={() => void doImport()}>{busy ? 'Importing…' : 'Import'}</button></div></div>}

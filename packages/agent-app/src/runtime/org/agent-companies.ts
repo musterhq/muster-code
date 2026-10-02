@@ -52,9 +52,13 @@ export function parseYaml(text: string): Yaml {
       if (!m) throw new Error(`Cannot read this line of the package: ${lines[i]!.trim().slice(0, 80)}`);
       const key = m[1]!.trim().replace(/^["']|["']$/g, ''), rest = m[2];
       i++;
-      if (rest !== undefined && rest.trim() !== '') map[key] = scalar(rest);
-      else if (i < lines.length && (indentOf(lines[i]!) > indent || (indentOf(lines[i]!) === indent && lines[i]!.trim().startsWith('- ')))) map[key] = block(indentOf(lines[i]!));
-      else map[key] = null;
+      let value: Yaml;
+      if (rest !== undefined && rest.trim() !== '') value = scalar(rest);
+      else if (i < lines.length && (indentOf(lines[i]!) > indent || (indentOf(lines[i]!) === indent && lines[i]!.trim().startsWith('- ')))) value = block(indentOf(lines[i]!));
+      else value = null;
+      // A package is untrusted: these keys would rewrite the prototype of every object after them. The value is read and dropped.
+      if (key === '__proto__' || key === 'constructor' || key === 'prototype') continue;
+      Object.defineProperty(map, key, { value, enumerable: true, writable: true, configurable: true });
     }
     return map;
   }
@@ -96,25 +100,40 @@ export function zipFiles(files: Record<string, string>): Buffer {
   const cd = Buffer.concat(central), end = Buffer.alloc(22); end.writeUInt32LE(0x06054b50, 0); end.writeUInt16LE(central.length / 2, 8); end.writeUInt16LE(central.length / 2, 10); end.writeUInt32LE(cd.length, 12); end.writeUInt32LE(offset, 16);
   return Buffer.concat([...parts, cd, end]);
 }
-/** Reads a zip, refusing path tricks and zip bombs. Only markdown, yaml and json text files are kept. */
+/** Reads a zip, refusing path tricks and zip bombs. The limits count the bytes ACTUALLY inflated, not the sizes an entry declares; an entry whose
+ *  real size differs from its declared one, or that shares compressed data with another, is refused. */
 export function unzipFiles(zip: Buffer): Record<string, string> {
   let end = -1; for (let i = zip.length - 22; i >= Math.max(0, zip.length - 65_557); i--) if (zip.readUInt32LE(i) === 0x06054b50) { end = i; break; }
   if (end < 0) throw new Error('This is not a zip file.');
   const count = zip.readUInt16LE(end + 10); let p = zip.readUInt32LE(end + 16);
   if (count > ZIP_LIMITS.files) throw new Error(`The package has more than ${ZIP_LIMITS.files} files.`);
-  const out: Record<string, string> = {}; let total = 0;
+  const out: Record<string, string> = {}, ranges: [number, number][] = []; let total = 0;
   for (let n = 0; n < count; n++) {
-    if (zip.readUInt32LE(p) !== 0x02014b50) throw new Error('The zip is damaged.');
+    if (p + 46 > zip.length || zip.readUInt32LE(p) !== 0x02014b50) throw new Error('The zip is damaged.');
     const method = zip.readUInt16LE(p + 10), csize = zip.readUInt32LE(p + 20), usize = zip.readUInt32LE(p + 24), nlen = zip.readUInt16LE(p + 28), xlen = zip.readUInt16LE(p + 30), clen = zip.readUInt16LE(p + 32), lh = zip.readUInt32LE(p + 42);
     const name = zip.subarray(p + 46, p + 46 + nlen).toString('utf8'); p += 46 + nlen + xlen + clen;
     if (name.endsWith('/')) continue;
     const norm = name.replace(/\\/g, '/');
     if (norm.startsWith('/') || /(^|\/)\.\.(\/|$)/.test(norm) || norm.includes('\0')) throw new Error(`The package has an unsafe path: ${name.slice(0, 80)}`);
     if (!/\.(md|ya?ml|json|txt)$/i.test(norm)) continue;
-    if (usize > ZIP_LIMITS.fileBytes || (total += usize) > ZIP_LIMITS.totalBytes) throw new Error('The package is too large to import.');
-    const start = lh + 30 + zip.readUInt16LE(lh + 26) + zip.readUInt16LE(lh + 28), data = zip.subarray(start, start + csize);
-    const raw = method === 0 ? data : method === 8 ? inflateRawSync(data, { maxOutputLength: ZIP_LIMITS.fileBytes }) : null;
-    if (!raw) throw new Error(`${name} uses an unsupported compression.`);
+    if (usize > ZIP_LIMITS.fileBytes) throw new Error('The package is too large to import.');
+    if (lh + 30 > zip.length || zip.readUInt32LE(lh) !== 0x04034b50) throw new Error('The zip is damaged.');
+    const start = lh + 30 + zip.readUInt16LE(lh + 26) + zip.readUInt16LE(lh + 28);
+    if (start + csize > zip.length) throw new Error('The zip is damaged.');
+    // Two entries must never read the same compressed bytes: that is how a tiny zip inflates to gigabytes.
+    for (const [a, b] of ranges) if (start < b && start + Math.max(csize, 1) > a) throw new Error(`${name.slice(0, 80)} shares data with another entry; the package is refused.`);
+    ranges.push([start, start + Math.max(csize, 1)]);
+    const data = zip.subarray(start, start + csize);
+    if (method === 0 && csize !== usize) throw new Error(`${name.slice(0, 80)} is not the size it declares; the package is refused.`);
+    let raw: Buffer;
+    if (method === 0) raw = data;
+    else if (method === 8) {
+      try { raw = inflateRawSync(data, { maxOutputLength: Math.min(usize, ZIP_LIMITS.totalBytes - total) + 1 }); }
+      catch { throw new Error('The package is too large to import, or damaged.'); }
+    } else throw new Error(`${name} uses an unsupported compression.`);
+    if (raw.length !== usize) throw new Error(`${name.slice(0, 80)} is not the size it declares; the package is refused.`);
+    total += raw.length;
+    if (total > ZIP_LIMITS.totalBytes) throw new Error('The package is too large to import.');
     out[norm] = raw.toString('utf8');
   }
   return out;

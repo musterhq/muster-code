@@ -31,8 +31,8 @@ test('C7/G40: an agent’s tool comment is a message from that agent in the thre
   const h = await wave1(t); const cto = await h.member('CTO');
   const task = await h.addTask('Ask things', { kind: 'agent', id: cto.id }); const run = await h.start(task.id); await h.settled(task.id);
   const { readFileSync } = await import('node:fs'); const { dirname, join } = await import('node:path');
-  const launcher = String(h.calls.find(c => c.chatId === run.chatId)!.overrides['mcp_servers.muster_tasks.command']); const ep = JSON.parse(readFileSync(join(dirname(launcher), 'muster_tasks-endpoint.json'), 'utf8'));
-  const call = (tool: string, args: object) => fetch(ep.url, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${ep.token}` }, body: JSON.stringify({ chatId: run.chatId, tool, arguments: args }) }).then(r => r.json());
+  const overrides = h.calls.find(c => c.chatId === run.chatId)!.overrides, launcher = String(overrides['mcp_servers.muster_tasks.command']); const ep = JSON.parse(readFileSync(join(dirname(launcher), 'muster_tasks-endpoint.json'), 'utf8'));
+  const call = (tool: string, args: object) => fetch(ep.url, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${ep.token}`, 'x-muster-chat-token': String(overrides['mcp_servers.muster_tasks.env.MUSTER_CHAT_TOKEN']) }, body: JSON.stringify({ chatId: run.chatId, tool, arguments: args }) }).then(r => r.json());
   await call('task_comment', { body: 'Found the root cause.' }); await call('task_ask_questions', { questions: [{ prompt: 'Ship it?', options: ['Yes', 'No'] }] });
   const detail = await h.s.invoke('paperclip.task', { id: task.id });
   const c = detail.comments.find(x => x.body === 'Found the root cause.')!; assert.equal(c.author.kind, 'agent'); assert.equal(c.author.label, 'CTO');

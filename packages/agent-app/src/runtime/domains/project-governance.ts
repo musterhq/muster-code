@@ -261,7 +261,7 @@ export function createGovernance(ctx: DomainContext, deps: GovernanceDeps) {
     mayAssign: (p, m, acting, target) => mayAssign(p, m, acting, target), lowTrustAssignee: (p, c, a) => lowTrustAssignee(p, c, a), trustCeiling: (p, m) => trustCeiling(p, m),
     record: (p, kind, summary, refId, actor) => record(p, kind, summary, refId ?? null, actor ?? 'system'), changed: (p, t, snap) => deps.changed(p, t, snap),
     wake: r => wakeQueue().request(r), onAssigned: (p, t) => onAssigned(p, t), invoke: (command, input) => ctx.invoke(command as never, input as never) as Promise<unknown>,
-    secretProposals: (p, pendingOnly) => gov().proposals(p, pendingOnly), now,
+    secretProposals: (p, pendingOnly) => gov().proposals(p, pendingOnly), providers: () => ctx.modelCatalog?.().providers ?? [], now,
   });
   let toolHost: ToolHost | undefined;
   const taskToolHost = () => toolHost ??= new ToolHost({ dir: join(ctx.dataDir, 'agent-tools', 'tasks'), name: TASK_MCP, title: 'Muster tasks', specs: TASK_TOOL_SPECS, execPath: process.execPath,
@@ -1062,6 +1062,7 @@ export function createGovernance(ctx: DomainContext, deps: GovernanceDeps) {
       const launcher = await taskToolHost().start();
       overrides[`mcp_servers.${TASK_MCP}.command`] = launcher;
       overrides[`mcp_servers.${TASK_MCP}.env.MUSTER_CHAT_ID`] = chat.id;
+      overrides[`mcp_servers.${TASK_MCP}.env.MUSTER_CHAT_TOKEN`] = taskToolHost().chatToken(chat.id);
       overrides[`mcp_servers.${TASK_MCP}.tool_timeout_sec`] = 60;
     } catch { /* the tools are optional: a run without them still works through fenced blocks */ }
     return Object.keys(overrides).length ? { configOverrides: overrides } : null;

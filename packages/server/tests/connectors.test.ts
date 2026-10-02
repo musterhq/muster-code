@@ -54,7 +54,7 @@ async function harness() {
   const secrets = new ServerSecrets(store, createSecretBox(randomBytes(32)));
   const sent: OutboundMessage[] = [];
   const contexts: AdapterContext[] = [];
-  CONNECTOR_TYPES.fake = { type: 'fake', label: 'Fake', status: 'available', modes: ['socket'], secrets: () => ['botToken'], configKeys: ['defaultProjectId', 'guestPolicy', 'requireLink', 'defaultMode'],
+  CONNECTOR_TYPES.fake = { type: 'fake', label: 'Fake', status: 'available', modes: ['socket'], secrets: () => ['botToken'], configKeys: ['defaultProjectId', 'guestPolicy', 'requireLink', 'defaultMode', 'notifyChannel', 'notifyProject'],
     create: ctx => { contexts.push(ctx); return { start: async () => ctx.health('ok'), stop: async () => undefined, test: async () => ({ ok: true, detail: 'fake ok', latencyMs: 1 }), send: async m => { sent.push(m); } }; } };
   const turns: Array<{ kind: string; chatId: string | null; text: string; actor: string; projectId: string }> = [];
   let n = 0;
@@ -169,4 +169,32 @@ test('gateway.json import: one connector per configured channel, secrets moved i
     const again = await h.registry.importGateway(h.owner, file);
     assert.equal(again[0]!.name, 'default-telegram-2', 'importing twice never overwrites');
   } finally { await h.registry.stopAll(); rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('R281 must-fix 2: a member cannot point channel notices at a project they cannot see, and losing access stops the notices', async () => {
+  const h = await harness();
+  const at = new Date().toISOString();
+  await h.store.createUser({ id: 'u-m', username: 'mia', displayName: 'Mia', email: null, passwordHash: null, role: 'member', status: 'active', authProvider: 'local', createdAt: at, updatedAt: at, lastLoginAt: null });
+  const mia = (await h.store.userById('u-m'))!;
+  await h.store.setProjectAccess({ projectId: 'p-mine', userId: mia.id, role: 'owner', memberId: null, grantedBy: h.owner.id, createdAt: at });
+  await assert.rejects(h.registry.add(mia, { type: 'fake', name: 'leak', scope: 'user', config: { notifyChannel: 'C9', notifyProject: 'p-secret' } }), /do not have access/);
+  await assert.rejects(h.registry.add(mia, { type: 'fake', name: 'leak2', scope: 'project', projectId: 'p-secret' }), /do not have access/);
+  const ok = await h.registry.add(mia, { type: 'fake', name: 'mine', scope: 'user', config: { notifyChannel: 'C9', notifyProject: 'p-mine' } });
+  await assert.rejects(h.registry.setConfig(mia, ok.id, { notifyProject: 'p-secret' }), /do not have access/);
+  assert.equal((await h.registry.setConfig(h.owner, ok.id, { notifyProject: 'p-secret' })).config.notifyProject, 'p-secret', 'an admin may point it anywhere');
+
+  const { NotificationBridge } = await import('../src/connectors/notify.ts');
+  await h.registry.setConfig(h.owner, ok.id, { notifyProject: 'p-mine' });
+  const posts: string[] = [];
+  const runtime = { running: true, snapshot: async () => ({ projects: [{ id: 'p-mine', name: 'Mine' }] }), invoke: async (c: string) => c === 'project.gov.summary' ? { items: [{ id: 'q', title: 'Question', why: '' }] } : c === 'project.approvals.list' ? { items: [] } : { cards: [] } };
+  const bridge = new NotificationBridge({ store: h.store, registry: () => ({ notify: async (_id: string, text: string) => { posts.push(text); } }) as never, runtime: () => runtime as never, publicUrl: () => null, log: () => undefined, debounceMs: 5 });
+  await h.store.setMeta(`notify:${ok.id}:primed`, '1');
+  assert.equal(await bridge.flush('p-mine'), 1);
+  await h.store.removeProjectAccess('p-mine', mia.id); bridge.invalidate();
+  runtime.invoke = async (c: string) => c === 'project.gov.summary' ? { items: [{ id: 'q2', title: 'Another', why: '' }] } : c === 'project.approvals.list' ? { items: [] } : { cards: [] };
+  assert.equal(await bridge.flush('p-mine'), 0, 'access was revoked: nothing is posted');
+  await h.store.setProjectAccess({ projectId: 'p-mine', userId: mia.id, role: 'owner', memberId: null, grantedBy: h.owner.id, createdAt: at });
+  await h.store.updateUser(mia.id, { status: 'revoked' });
+  assert.equal(await bridge.flush('p-mine'), 0, 'a revoked owner posts nothing');
+  assert.equal(posts.length, 1); bridge.dispose();
 });

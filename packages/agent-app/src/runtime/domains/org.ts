@@ -1,15 +1,17 @@
 /**
  * The org domain (Wave 4: G16 export and import, G17 teams catalog). Contract: shared/domains/org-protocol.ts.
- * Everything goes through the same commands the app uses (members, governance, tasks, automations), so an import can never do more than
- * you could do by hand, and the server's role checks apply to each step. Event-driven: nothing here runs on its own.
+ * Everything goes through the same commands the app uses (members, governance, tasks, automations). Those inner calls are NOT re-checked by a
+ * server's role policy (only the outer org.import.* command is), so the import itself keeps to least privilege: agents arrive paused, with the
+ * default permissions and no tool rules, unless the person confirmed what the package asks for. Event-driven: nothing here runs on its own.
  */
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, writeFileSync, chmodSync } from 'node:fs';
 import { basename, isAbsolute, join, relative, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import catalogJson from '../catalogs/teams-catalog.json' with { type: 'json' };
+import { DEFAULT_CAPABILITIES } from '../../shared/domains/project-governance-protocol.ts';
 import { DEFAULT_AGENT_ID } from '../../shared/domains/project-team-protocol.ts';
 import type { AutomationView } from '../../shared/domains/automations-protocol.ts';
-import type { CatalogTeam, OrgExport, OrgImportOptions, OrgImportResult, OrgPending, OrgPreview, OrgPreviewAgent, OrgSource } from '../../shared/domains/org-protocol.ts';
+import type { CatalogTeam, OrgExport, OrgImportOptions, OrgImportResult, OrgPending, OrgPermissions, OrgPreview, OrgPreviewAgent, OrgSource } from '../../shared/domains/org-protocol.ts';
 import { dumpDoc, dumpYaml, readPackage, slugify, unzipFiles, zipFiles, ZIP_LIMITS, type PkgModel, type Yaml } from '../org/agent-companies.ts';
 import type { DomainContext, DomainModule } from './types.ts';
 
@@ -78,7 +80,7 @@ export function createOrgDomain(ctx: DomainContext): DomainModule {
   function loadSource(source: OrgSource): { files: Record<string, string>; label: string; catalog?: CatalogEntry } {
     if (source.kind === 'catalog') { const t = CATALOG.find(x => x.key === source.key); if (!t) throw new Error('That team is not in the catalog.'); return { files: t.files, label: t.name, catalog: t }; }
     if (source.kind === 'zip') {
-      if (typeof source.base64 !== 'string' || source.base64.length > ZIP_LIMITS.totalBytes * 2) throw new Error('The package is too large to import.');
+      if (typeof source.base64 !== 'string' || source.base64.length > Math.ceil(ZIP_LIMITS.totalBytes * 4 / 3) + 64) throw new Error('The package is too large to import.');
       return { files: unzipFiles(Buffer.from(source.base64, 'base64')), label: 'a zip package' };
     }
     if (source.kind === 'folder') {
@@ -108,13 +110,24 @@ export function createOrgDomain(ctx: DomainContext): DomainModule {
     if (!p.models.some(m => m.id === r.model)) return { runner: null, note: `${r.model} is not offered by ${p.name}: it will use the project's default runner.` };
     return { runner: { providerId: r.providerId, model: r.model }, note: null };
   }
+  /** What a package asks for an agent, read the same way apply reads it. */
+  function askedFor(ext: { [k: string]: Yaml }): { caps: Record<string, unknown> | null; toolRules: unknown[]; summary: OrgPermissions | null } {
+    const obj = (v: Yaml | undefined) => v && typeof v === 'object' && !Array.isArray(v) ? v as Record<string, Yaml> : null;
+    const c = obj(ext.capabilities), perms = obj(ext.permissions);
+    const caps = c ? { canHire: c.canHire === true, canAssign: c.canAssign === true, ...(typeof c.assignScope === 'string' ? { assignScope: c.assignScope } : {}), ...(typeof c.trust === 'string' ? { trust: c.trust } : {}), ...(typeof c.containment === 'string' ? { containment: c.containment } : {}) }
+      : perms ? { canHire: perms.canCreateAgents === true } : null;
+    const toolRules = Array.isArray(ext.toolRules) ? ext.toolRules as unknown[] : [];
+    const summary = caps || toolRules.length ? { ...DEFAULT_CAPABILITIES, ...caps, toolRules: toolRules.length } as OrgPermissions : null;
+    return { caps, toolRules, summary };
+  }
+  const isPrivileged = (p: OrgPermissions | null) => !!p && (p.canHire !== DEFAULT_CAPABILITIES.canHire || p.canAssign !== DEFAULT_CAPABILITIES.canAssign || p.assignScope !== DEFAULT_CAPABILITIES.assignScope || p.trust !== DEFAULT_CAPABILITIES.trust || p.containment !== DEFAULT_CAPABILITIES.containment || p.toolRules > 0);
   async function plan(o: OrgImportOptions) {
     const src = loadSource(o.source), model = readPackage(src.files);
     const existing = o.projectId ? activeAgents(await members(id(o.projectId, 'project id'))) : [];
     const picked = o.agents ? new Set(o.agents) : null, pkgAgents = model.agents.filter(a => !picked || picked.has(a.slug));
     const agents: OrgPreviewAgent[] = pkgAgents.map(a => {
       const hit = existing.find(m => m.name.toLowerCase() === a.name.toLowerCase()), rn = runnerFor(a.ext);
-      return { slug: a.slug, name: a.name, title: a.title, reportsTo: a.reportsTo, action: hit ? 'collision' : 'create', existingId: hit?.id ?? null, runner: rn.runner, runnerNote: rn.note, instructionsChars: a.instructions.length };
+      return { slug: a.slug, name: a.name, title: a.title, reportsTo: a.reportsTo, action: hit ? 'collision' : 'create', existingId: hit?.id ?? null, runner: rn.runner, runnerNote: rn.note, instructionsChars: a.instructions.length, permissions: askedFor(a.ext).summary };
     });
     const includeTasks = o.includeTasks !== false, includeRoutines = o.includeRoutines !== false;
     const tasks = model.tasks.filter(t => (t.recurring ? includeRoutines : includeTasks) && (!t.assignee || !picked || picked.has(t.assignee))).map(t => ({ slug: t.slug, name: t.name, assignee: t.assignee, recurring: t.recurring, schedule: t.recurring ? scheduleText(t.ext.schedule ?? SCHEDULE_DEFAULT) : null }));
@@ -125,14 +138,16 @@ export function createOrgDomain(ctx: DomainContext): DomainModule {
     const clash = agents.filter(a => a.action === 'collision'); if (clash.length) notes.push(`${clash.length} agent${clash.length === 1 ? ' has' : 's have'} the same name as one already here (${clash.slice(0, 3).map(a => a.name).join(', ')}): choose to skip, rename or replace.`);
     for (const a of agents) if (a.runnerNote) notes.push(`${a.name}: ${a.runnerNote}`);
     const preview: OrgPreview = { package: { kind: model.kind, name: model.name, slug: model.slug, description: model.description.slice(0, 400) }, target: { kind: project ? 'existing' : 'new', projectId: project?.id ?? null, name: project?.name ?? o.name?.trim() ?? model.name },
-      agents, tasks, skills: model.skills.length, secrets: model.requirements.secrets, notes };
+      agents, tasks, skills: model.skills.length, secrets: model.requirements.secrets, privileged: agents.some(a => isPrivileged(a.permissions)), notes };
+    if (preview.privileged) notes.push(src.catalog ? 'Some agents can hire or assign work: this team is bundled with Muster, so its permissions are applied.' : 'Some agents ask for more than the default permissions (hiring, assigning work, trust or tool rules). They get the defaults unless you choose to apply what the package asks for.');
     if (model.requirements.secrets.length) notes.push(`It needs these secrets, which are not included: ${model.requirements.secrets.join(', ')}. Add them under the project's Secrets.`);
     return { preview, model, pkgAgents, tasks, src, includeTasks, includeRoutines };
   }
 
   async function apply(o: OrgImportOptions): Promise<OrgImportResult> {
     const { preview, model, pkgAgents, src, includeTasks, includeRoutines } = await plan(o);
-    const strategy = o.collision ?? 'skip';
+    const strategy = o.collision ?? 'skip', imported = (o.permissions ?? (src.catalog ? 'imported' : 'least')) === 'imported';
+    if (o.permissions !== undefined && o.permissions !== 'least' && o.permissions !== 'imported') throw new Error('Choose least or imported for permissions.');
     if (!['skip', 'rename', 'replace'].includes(strategy)) throw new Error('Choose skip, rename or replace for agents that already exist.');
     let projectId = o.projectId ? id(o.projectId, 'project id') : null;
     const notes = [...preview.notes];
@@ -141,27 +156,29 @@ export function createOrgDomain(ctx: DomainContext): DomainModule {
       projectId = (await inv<{ id: string }>('project.create', { name, goal: model.description.slice(0, 2000), folderIds: [] })).id;
     }
     const existing = activeAgents(await members(projectId)), taken = new Set(existing.map(m => m.name.toLowerCase()));
-    const idOf = new Map<string, string>(), created: OrgImportResult['created'] = [], replaced: OrgImportResult['replaced'] = [], skipped: OrgImportResult['skipped'] = [], newIds: string[] = [];
+    const idOf = new Map<string, string>(), created: OrgImportResult['created'] = [], replaced: OrgImportResult['replaced'] = [], skipped: OrgImportResult['skipped'] = [], newIds: string[] = [], touchedIds: string[] = [];
     for (const a of pkgAgents) {
       const rn = runnerFor(a.ext), hit = existing.find(m => m.name.toLowerCase() === a.name.toLowerCase());
       const profile = { ...(a.title ? { title: a.title } : {}), instructions: a.instructions, ...(rn.runner ? { runner: rn.runner } : {}) };
       let member: { id: string; name: string } | null = null;
       if (hit && strategy === 'skip') { skipped.push({ slug: a.slug, name: a.name, reason: 'an agent with this name is already here' }); idOf.set(a.slug, hit.id); continue; }
-      if (hit && strategy === 'replace') { member = await inv<{ id: string; name: string }>('project.members.update', { projectId, id: hit.id, ...profile }); replaced.push({ slug: a.slug, id: member.id, name: member.name }); }
+      // A replaced agent may be mid-run with its old instructions: stop it before changing them. It starts again from the Activate panel.
+      if (hit && strategy === 'replace') { await inv('project.members.pause', { projectId, id: hit.id, paused: true }); touchedIds.push(hit.id); member = await inv<{ id: string; name: string }>('project.members.update', { projectId, id: hit.id, ...profile }); replaced.push({ slug: a.slug, id: member.id, name: member.name }); }
       else {
         let name = a.name, n = 2; while (taken.has(name.toLowerCase())) name = `${a.name} (${n++})`;
         taken.add(name.toLowerCase());
         member = await inv<{ id: string; name: string }>('project.members.add', { projectId, name, kind: 'agent', role: 'agent', ...profile });
-        created.push({ slug: a.slug, id: member.id, name: member.name }); newIds.push(member.id);
+        created.push({ slug: a.slug, id: member.id, name: member.name }); newIds.push(member.id); touchedIds.push(member.id);
+        // Paused before anything below can arm a heartbeat for it.
+        await inv('project.members.pause', { projectId, id: member.id, paused: true });
       }
       idOf.set(a.slug, member.id);
-      const caps = a.ext.capabilities && typeof a.ext.capabilities === 'object' && !Array.isArray(a.ext.capabilities) ? a.ext.capabilities as Record<string, Yaml> : null;
-      const perms = a.ext.permissions && typeof a.ext.permissions === 'object' && !Array.isArray(a.ext.permissions) ? a.ext.permissions as Record<string, Yaml> : null;
-      const gov: Record<string, unknown> = {};
-      if (caps) gov.capabilities = { canHire: caps.canHire === true, canAssign: caps.canAssign === true, ...(typeof caps.assignScope === 'string' ? { assignScope: caps.assignScope } : {}), ...(typeof caps.trust === 'string' ? { trust: caps.trust } : {}), ...(typeof caps.containment === 'string' ? { containment: caps.containment } : {}) };
-      else if (perms) gov.capabilities = { canHire: perms.canCreateAgents === true };
+      const asked = askedFor(a.ext), gov: Record<string, unknown> = {};
+      // Least privilege unless the person confirmed what the package asks for. A replaced agent keeps the permissions it already has.
+      if (imported && asked.caps) gov.capabilities = asked.caps;
+      else if (!imported && !(hit && strategy === 'replace')) gov.capabilities = { ...DEFAULT_CAPABILITIES };
       if (a.ext.heartbeat && typeof a.ext.heartbeat === 'object' && !Array.isArray(a.ext.heartbeat)) gov.heartbeat = a.ext.heartbeat;
-      if (Array.isArray(a.ext.toolRules)) gov.toolRules = a.ext.toolRules;
+      if (imported && asked.toolRules.length) gov.toolRules = asked.toolRules;
       if (Object.keys(gov).length) { try { await inv('project.agent.gov.set', { projectId, memberId: member.id, ...gov }); } catch (e) { notes.push(`${a.name}: permissions were not applied (${e instanceof Error ? e.message : 'error'}).`); } }
       for (const [name, text] of Object.entries(a.files)) if (name !== 'AGENTS.md') { try { await inv('project.agent.files.save', { projectId, memberId: member.id, name, text, note: 'Imported from a package' }); } catch (e) { notes.push(`${a.name}: ${name} was not imported (${e instanceof Error ? e.message : 'error'}).`); } }
     }
@@ -193,9 +210,9 @@ export function createOrgDomain(ctx: DomainContext): DomainModule {
       }
     }
     let pausedCount = 0;
-    if (!o.activate) for (const mid of newIds) { await inv('project.members.pause', { projectId, id: mid, paused: true }); pausedCount++; }
+    for (const mid of touchedIds) { if (o.activate) await inv('project.members.pause', { projectId, id: mid, paused: false }); else pausedCount++; }
     const importId = randomUUID(), all = readImports();
-    all[projectId] = { agents: [...new Set([...(all[projectId]?.agents ?? []), ...(o.activate ? [] : newIds)])], routines: [...new Set([...(all[projectId]?.routines ?? []), ...routineIds])] };
+    all[projectId] = { agents: [...new Set([...(all[projectId]?.agents ?? []), ...(o.activate ? [] : touchedIds)])], routines: [...new Set([...(all[projectId]?.routines ?? []), ...routineIds])] };
     writeImports(all);
     void src; ctx.emit({ type: 'orgChanged', projectId } as never);
     return { projectId, importId, created, replaced, skipped, tasks, routines, paused: pausedCount + routines.length, notes };

@@ -8,7 +8,7 @@ import test from 'node:test';
 import {AppUpdater,bundlePathOf,checksumFor,installBlocker,pickRelease,plistString,type GitHubRelease} from '../src/main/app-updater.ts';
 import type {UpdateStatus} from '../src/shared/update-protocol.ts';
 
-const asset=(name:string)=>({name,browser_download_url:`https://example.test/${name}`});
+const asset=(name:string)=>({name,browser_download_url:`https://example.test/${name}`,url:`https://api.example.test/assets/${name}`});
 const release=(version:string,extra:Partial<GitHubRelease>={}):GitHubRelease=>({tag_name:`agent-v${version}`,html_url:`https://github.com/o/r/releases/tag/agent-v${version}`,draft:false,prerelease:false,body:`Notes ${version}`,assets:[asset(`Muster-Agent-${version}-arm64.zip`),asset('SHA256SUMS')],...extra});
 
 test('pickRelease takes the newest agent release above the current one that has this Mac’s zip', () => {
@@ -53,7 +53,7 @@ test('bundle path, plist keys and install blockers', async () => {
 function harness(fetchImpl:typeof fetch,repo:string|null='o/r') {
   const dir=mkdtempSync(path.join(tmpdir(),'muster-updater-'));
   const events:UpdateStatus[]=[];let quits=0;
-  const updater=new AppUpdater({current:'0.2.0',arch:'arm64',exe:'/usr/local/bin/node',repo:repo??undefined,channel:'stable',settingsFile:path.join(dir,'updates.json'),stagingDir:path.join(dir,'pending'),emit:status=>events.push(status),quit:()=>{quits++;},fetch:fetchImpl});
+  const updater=new AppUpdater({current:'0.2.0',arch:'arm64',exe:'/usr/local/bin/node',repo:repo??undefined,channel:'stable',settingsFile:path.join(dir,'updates.json'),stagingDir:path.join(dir,'pending'),emit:status=>events.push(status),quit:()=>{quits++;},fetch:fetchImpl,retryDelaysMs:[0,0]});
   return {updater,events,dir,quits:()=>quits};
 }
 const json=(value:unknown)=>new Response(JSON.stringify(value),{status:200,headers:{'content-type':'application/json'}});
@@ -159,4 +159,69 @@ test('cancelInstall stops the waiting installer and returns the verified update 
   assert.equal(existsSync(staged),true,'the staged update is kept for the next attempt');
   updater.cancelInstall();
   assert.equal(events.filter(status=>status.phase==='ready').length,1,'cancelling when not installing does nothing');
+});
+
+
+/** A fake GitHub: `browser` and `api` decide the response for the direct and API asset URLs. */
+function fakeGitHub(opts:{zip:Buffer;sums?:string;browser:(name:string,n:number)=>number;api?:(name:string,n:number)=>number}) {
+  const calls:string[]=[],counts=new Map<string,number>();
+  const sums=opts.sums??`${createHash('sha256').update(opts.zip).digest('hex')}  Muster-Agent-0.3.0-arm64.zip\n`;
+  const fetchImpl=(async(url:string,init?:RequestInit)=>{
+    const href=String(url);calls.push(href);
+    if(href.includes('/releases?'))return json([release('0.3.0')]);
+    const isApi=href.startsWith('https://api.example.test/'),name=href.split('/').pop()!;
+    if(isApi)assert.equal((init?.headers as Record<string,string>).accept,'application/octet-stream');
+    const n=(counts.get(href)??0)+1;counts.set(href,n);
+    const status=isApi?(opts.api?.(name,n)??200):opts.browser(name,n);
+    if(status!==200)return new Response('',{status});
+    return name==='SHA256SUMS'?new Response(sums):new Response(new Uint8Array(opts.zip),{headers:{'content-length':String(opts.zip.length)}});
+  }) as typeof fetch;
+  return {fetchImpl,calls};
+}
+
+test('GitHub’s direct download 504s: SHA256SUMS and the zip come through the API asset endpoint', async () => {
+  const zip=Buffer.from('not a real archive');
+  const gh=fakeGitHub({zip,browser:()=>504,sums:`${'0'.repeat(64)}  Muster-Agent-0.3.0-arm64.zip\n`});
+  const {updater}=harness(gh.fetchImpl);
+  const result=await updater.check();
+  // Reached the zip (checksum stage) instead of failing on SHA256SUMS.
+  assert.match(result.message??'',/checksum/);
+  assert.ok(gh.calls.includes('https://api.example.test/assets/SHA256SUMS'));
+  assert.ok(gh.calls.includes('https://api.example.test/assets/Muster-Agent-0.3.0-arm64.zip'));
+});
+
+test('a persistent outage reads clearly and keeps the update known', async () => {
+  const gh=fakeGitHub({zip:Buffer.from('x'),browser:()=>504,api:()=>503});
+  const {updater}=harness(gh.fetchImpl);
+  const result=await updater.check();
+  assert.equal(result.phase,'error');
+  assert.equal(result.message,'GitHub didn’t respond (503). Muster will try again automatically.');
+  assert.equal(result.latest?.version,'0.3.0');
+  assert.equal(gh.calls.filter(c=>c.endsWith('/SHA256SUMS')).length,6,'3 attempts on each source');
+});
+
+test('a 503 then a 200 is retried on the same source', async () => {
+  const gh=fakeGitHub({zip:Buffer.from('x'),browser:(name,n)=>n<2?503:200,sums:`${'0'.repeat(64)}  Muster-Agent-0.3.0-arm64.zip\n`});
+  const {updater}=harness(gh.fetchImpl);
+  const result=await updater.check();
+  assert.match(result.message??'',/checksum/);
+  assert.equal(gh.calls.filter(c=>c==='https://example.test/SHA256SUMS').length,2);
+  assert.equal(gh.calls.some(c=>c.startsWith('https://api.example.test/')),false,'no fallback needed');
+});
+
+test('a checksum mismatch through the fallback path still refuses to install', async () => {
+  const gh=fakeGitHub({zip:Buffer.from('tampered'),browser:()=>504,sums:`${createHash('sha256').update('other').digest('hex')}  Muster-Agent-0.3.0-arm64.zip\n`});
+  const {updater,dir}=harness(gh.fetchImpl);
+  const result=await updater.check();
+  assert.equal(result.phase,'error');assert.match(result.message??'',/didn’t match its published checksum/);
+  assert.equal(existsSync(path.join(dir,'pending','0.3.0')),false);
+  assert.equal((await updater.install()).phase,'error');
+});
+
+test('a 404 is not retried and does not fall back', async () => {
+  const gh=fakeGitHub({zip:Buffer.from('x'),browser:()=>404});
+  const {updater}=harness(gh.fetchImpl);
+  const result=await updater.check();
+  assert.equal(result.message,'Couldn’t read SHA256SUMS (404).');
+  assert.equal(gh.calls.filter(c=>c.endsWith('/SHA256SUMS')).length,1);
 });
