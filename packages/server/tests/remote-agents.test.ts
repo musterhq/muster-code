@@ -85,6 +85,7 @@ test('G28: claims are rate limited per address', async () => {
 test('G29: a project owner invites people to their project only, as members or viewers; admins can do more', async () => {
   const { accounts, owner, store } = await setup();
   const member = await accounts.acceptInvite((await accounts.createInvite(owner, { role: 'member' })).token, { username: 'pat', password: PW });
+  await store.setProjectAccess({ projectId: 'p1', userId: member.id, role: 'owner', memberId: null, grantedBy: owner.id, createdAt: new Date().toISOString() });
   const as = (u: typeof member, projectId: string, extra: object = {}) => accounts.createInvite(u, { projectId, asProjectOwner: true, ...extra });
   const ok = await as(member, 'p1', { role: 'member', projectRole: 'editor' }); assert.equal(ok.invite.projectId, 'p1'); assert.equal(ok.invite.projectRole, 'editor');
   await assert.rejects(as(member, 'p1', { role: 'admin' }), /members and viewers/);

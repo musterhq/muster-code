@@ -71,6 +71,8 @@ export class Accounts extends EventEmitter {
       if (role === 'viewer' && projectRole !== 'viewer') throw new AuthError('A viewer can only be given the viewer role in the project.', 400);
     }
     if (role === 'owner' && actor.role !== 'owner') throw new AuthError('Only an owner can invite another owner.', 403);
+    // Nobody can mint a server role above their own: a server viewer who owns a project cannot invite members.
+    if (RANK[role] > RANK[actor.role]) throw new AuthError(`You cannot invite someone as ${role}: your own role is ${actor.role}.`, 403);
     const ttl = parseDuration(input.expires, 7 * 86_400_000);
     const token = newSecret('mi');
     const invite: InviteRecord = { id: newId(), tokenHash: hashSecret(token), role, createdBy: actor.id, createdAt: this.iso(), expiresAt: this.iso(ttl),
@@ -87,6 +89,11 @@ export class Accounts extends EventEmitter {
     if (invite.revokedAt) throw new AuthError('This invite was revoked.', 410);
     if (invite.usedAt) throw new AuthError('This invite was already used.', 410);
     if (invite.expiresAt <= this.iso()) throw new AuthError('This invite has expired. Ask an admin for a new one.', 410);
+    // The inviter's standing is checked now, not when the link was made: a person who lost the right to invite cannot have links that still work.
+    const by = await this.store.userById(invite.createdBy);
+    const stillMay = !!by && by.status === 'active' && RANK[by.role] >= RANK[invite.role] && (RANK[by.role] >= RANK.admin
+      || (!!invite.projectId && (await this.store.projectAccessFor(by.id)).some(a => a.projectId === invite.projectId && a.role === 'owner')));
+    if (!stillMay) throw new AuthError('This invite is no longer valid: the person who made it can no longer invite people. Ask for a new one.', 410);
     return invite;
   }
 
