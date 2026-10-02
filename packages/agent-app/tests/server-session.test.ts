@@ -40,8 +40,8 @@ test('cookie scoping: only the server\'s session-token cookie for that origin, n
   assert.equal(sessionCookieHeader([{name:'better-auth.session_token',value:'v',domain:'.example.test',path:'/',secure:true}],'https://a.example.test',now),'better-auth.session_token=v','a parent-domain cookie reaches its subdomains');
   assert.equal(sessionCookieHeader([{name:'better-auth.session_token',value:'v',domain:'example.test',path:'/',secure:true}],'https://a.example.test',now),null,'a host-only cookie does not');
   assert.equal(sessionCookieHeader([],HOST,now),null);
-  for(const name of ['__Secure-better-auth.session_token','better-auth.session_token','__Host-better-auth.session_token','app.better-auth.session_token'])assert.ok(isSessionCookie(name),name);
-  for(const name of ['better-auth.session_data','session','better-auth.session_token_x','xbetter-auth.session_token'])assert.ok(!isSessionCookie(name),name);
+  for(const name of ['__Secure-better-auth.session_token','better-auth.session_token','__Host-better-auth.session_token','app.better-auth.session_token','__Secure-paperclip-default.session_token','paperclip-prod.session_token'])assert.ok(isSessionCookie(name),name);
+  for(const name of ['better-auth.session_data','__Secure-paperclip-default.session_data','session','better-auth.session_token_x','session_token','tracking'])assert.ok(!isSessionCookie(name),name);
 });
 
 test('what the main process may hand the runtime: session-token cookies only',()=>{
@@ -149,20 +149,22 @@ function fakeTimers(){const live=new Map<number,{fn:()=>void;ms:number}>();let n
 const COMPANY='c1';
 /** An authenticated, hosted-like Paperclip: REST needs the board key; its socket takes a session cookie only. */
 function hostedPaperclip(){
-  const rest:{path:string;auth?:string;cookie?:string}[]=[];let sessionValid=true,notModified=0;
+  const rest:{path:string;auth?:string;cookie?:string}[]=[],restFull:string[]=[];let sessionValid=true,notModified=0,stamps=0;
   const fetch=async(input:string,init:RequestInit={})=>{
     const url=new URL(input),h=init.headers as Record<string,string>;
     if(h['x-muster-probe'])return url.pathname==='/api/health'?json(200,{status:'ok',version:'2026.1001.0',deploymentMode:'authenticated'}):json(404,{});
-    rest.push({path:url.pathname,auth:h.authorization,cookie:h.cookie});
+    rest.push({path:url.pathname,auth:h.authorization,cookie:h.cookie});restFull.push(url.pathname+url.search);
     if(url.pathname==='/api/auth/get-session')return h.cookie?.includes('tok.sig')&&sessionValid?json(200,{session:{id:'s'},user:{id:'u'}}):json(200,null);
     if(h.authorization!=='Bearer pcp_board_key')return json(401,{error:'no'});
     // Every read carries an ETag and is answered 304 when nothing changed, like the real server.
-    const etag=`W/"${url.pathname}"`;
+    // Paperclip's attention feed stamps every reply with generatedAt, so its ETag moves on every request though nothing changed.
+    const attention=url.pathname.endsWith('/attention');
+    const etag=attention?`W/"attention-${++stamps}"`:`W/"${url.pathname}"`;
     if(h['if-none-match']===etag){notModified++;return new Response(null,{status:304,headers:{etag}});}
-    const body=url.pathname==='/api/companies'?[{id:COMPANY,name:'HostedCo',issuePrefix:'HC',status:'active'}]:[];
+    const body=attention?{items:[],generatedAt:new Date(stamps*1000).toISOString()}:url.pathname==='/api/companies'?[{id:COMPANY,name:'HostedCo',issuePrefix:'HC',status:'active'}]:[];
     return new Response(JSON.stringify(body),{status:200,headers:{'content-type':'application/json',etag}});
   };
-  return {rest,fetch:fetch as never,get notModified(){return notModified;},expire(){sessionValid=false;},renew(){sessionValid=true;}};
+  return {rest,restFull,fetch:fetch as never,get notModified(){return notModified;},expire(){sessionValid=false;},renew(){sessionValid=true;}};
 }
 function socketsFor(server:{rest:unknown[]}){
   const made:{url:string;token:string|undefined;headers?:Record<string,string>;s:any}[]=[];
@@ -269,9 +271,36 @@ test('the polling fallback: about 2.5 s while things change, 15 s once a minute 
   const attempts=h.sockets.made.length;
   clock+=60_000;await h.timers.fire();
   assert.equal(pollMs(),15_000,'a minute of nothing: back off');
-  assert.ok(h.server.notModified>=9,`idle polls are conditional GETs answered 304 (${h.server.notModified})`);
+  assert.ok(h.server.notModified>=9,`idle polls are conditional GETs answered 304 (${h.server.notModified}); an attention feed that only re-stamps itself is not a change`);
   assert.equal(h.sockets.made.length,attempts+1,'a minute later the socket is asked again, so a server that starts accepting the credential is picked up');
   h.sockets.made.at(-1)!.s.onclose();           // refused again
   await h.call('paperclip.watch',{visible:false});assert.equal(h.timers.live.size,0);
   await h.call('paperclip.watch',{visible:true});assert.equal(pollMs(),2500,'visible again: fast again');
+});
+
+test('an isolated change is announced within a few milliseconds, a burst twice a second at most; the read after an event bypasses the server\'s 2 s list cache',async t=>{
+  const h=await signedInHarness(t,{session:'__Secure-better-auth.session_token=tok.sig'});
+  await h.call('paperclip.snapshot');h.sockets.made[0]!.s.onopen();
+  await h.call('paperclip.watch',{visible:true});
+  const realNow=Date.now;let clock=realNow()+10_000_000;Date.now=()=>clock;t.after(()=>{Date.now=realNow;});
+  h.events.length=0;h.timers.live.clear();
+  h.sockets.made[0]!.s.onmessage({data:JSON.stringify({type:'activity.logged',payload:{entityType:'issue',entityId:'i-1'}})});
+  const emit=[...h.timers.live.values()].map(x=>x.ms).sort((a,b)=>a-b)[0];
+  assert.equal(emit,40,'an isolated change is announced at once');
+  const [emitId,emitTimer]=[...h.timers.live.entries()].find(([,x])=>x.ms===40)!;
+  emitTimer.fn();h.timers.live.delete(emitId);assert.equal(h.events.length,1);
+  clock+=100;h.timers.live.clear();
+  h.sockets.made[0]!.s.onmessage({data:JSON.stringify({type:'activity.logged',payload:{entityType:'issue',entityId:'i-2'}})});
+  const burst=[...h.timers.live.values()].map(x=>x.ms).sort((a,b)=>a-b)[0]!;
+  assert.ok(burst>=390&&burst<=400,`a second change right behind it waits out the half-second window (${burst} ms)`);
+  // The refresh after an event asks for a different page size than a routine read, so Paperclip computes the list instead of replaying its cache.
+  h.server.rest.length=0;h.server.restFull.length=0;
+  await h.call('paperclip.snapshot',{refresh:true});
+  const limits=h.server.rest.filter(r=>r.path.endsWith('/issues')).map(r=>r.path);
+  assert.ok(limits.length>=1&&limits.every(path=>path.endsWith('/issues')),'issue list reads happened');
+  const reads=h.server.restFull.filter(u=>u.includes('/issues?'));
+  assert.ok(reads.length>=1&&reads.every(u=>u.includes('limit=999')),`after an event the list is asked for with a different page size (${reads[0]})`);
+  h.server.restFull.length=0;
+  await h.call('paperclip.snapshot',{refresh:true});
+  assert.ok(h.server.restFull.filter(u=>u.includes('/issues?')).every(u=>u.includes('limit=1000')),'a routine read is unchanged');
 });

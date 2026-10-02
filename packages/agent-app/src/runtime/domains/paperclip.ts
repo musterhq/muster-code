@@ -8,7 +8,7 @@
  * Cost model (the founder's hard requirement): nothing runs while nobody looks.
  * - Paperclip reads are conditional GETs (ETag), coalesced, and rebuilt only when a body changed.
  * - Live updates come from Paperclip's company WebSocket; run-log noise is dropped and the rest coalesces into at most one
- *   `projectsWorkspaceChanged` event per second (every 5 s while no workspace screen is visible, for the Inbox badge).
+ *   `projectsWorkspaceChanged` event per half second (every 5 s while no workspace screen is visible, for the Inbox badge); an isolated change is announced within milliseconds.
  * - Only when the socket is refused AND a workspace screen is visible does a poll run (15 s, backing off to 60 s).
  *   Hidden means no timers at all. Muster's own data needs none: its changes already arrive as events.
  */
@@ -38,9 +38,7 @@ import { importFromPaperclip, planImport, SqliteImportStore } from '../paperclip
 import { buildDashboard, DASHBOARD_DAYS, ledgerAggregates, monthStart } from '../workspace-dashboard.ts';
 import type { DomainContext, DomainModule } from './types.ts';
 
-const POLL_MAX_MS = 60_000, EMIT_VISIBLE_MS = 1_000, EMIT_HIDDEN_MS = 5_000;
-/** Paperclip serves its issue lists from a 2 s cache that a change does not clear: a read right after an event can return the old list, so one more read follows once it has expired. */
-const SETTLE_MS = 2_400;
+const POLL_MAX_MS = 60_000, EMIT_VISIBLE_MS = 500, EMIT_HIDDEN_MS = 5_000, EMIT_LEAD_MS = 40;
 /** A server that refused the live socket for this credential (a hosted Paperclip-compatible server only lets a browser session or an agent key onto it, never a board key) is asked again only this often; in between, polling with ETags is the whole story. */
 const SOCKET_RETRY_MS = 60_000;
 /** The fallback poll (a hosted server that refuses the live socket): near-real-time while things change, quiet once they stop. Always ETag revalidated, and never while hidden. */
@@ -161,7 +159,8 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
   };
   const readPaperclip = async (api: ServerBackend): Promise<PaperclipPart> => {
     const company = await chooseCompany(api);
-    const part = await api.read(company, built ? { generation: built.generation, companyId: built.companyId, part: built.part } : undefined);
+    const fresh = live.fresh; live.fresh = false;
+    const part = await api.read(company, built ? { generation: built.generation, companyId: built.companyId, part: built.part } : undefined, { fresh });
     if (built && built.part === part && built.companyId === company.id) return part;
     built = { generation: api.generation, companyId: company.id, part, agents: new Map(part.agents.map(a => [a.id, a])) };
     return part;
@@ -267,19 +266,21 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
   const api = (): ServerBackend => { const c = connection(); if (!c) throw new Error('Muster Server is not connected. Connect it in Settings › Integrations.'); return c; };
 
   // --- live updates -----------------------------------------------------------------------------------------------------
-  const live = { refusedAt: 0, channel: 'off' as LiveChannel, visible: false, socket: null as LiveSocket | null, socketCompany: '', pollTimer: null as ReturnType<typeof setTimeout> | null, settleTimer: null as ReturnType<typeof setTimeout> | null, pollDelay: POLL_FAST_MS, lastChangeAt: 0, refreshTimer: null as ReturnType<typeof setTimeout> | null, emitTimer: null as ReturnType<typeof setTimeout> | null, pending: new Set<string>(), taskIds: new Set<string>() };
-  function closeSocket() { if (live.refreshTimer) timers.clearTimeout(live.refreshTimer); live.refreshTimer = null; if (live.settleTimer) timers.clearTimeout(live.settleTimer); live.settleTimer = null; live.socket?.close(); live.socket = null; live.socketCompany = ''; if (live.channel === 'socket') live.channel = 'off'; }
+  const live = { fresh: false, lastEmitAt: 0, refusedAt: 0, channel: 'off' as LiveChannel, visible: false, socket: null as LiveSocket | null, socketCompany: '', pollTimer: null as ReturnType<typeof setTimeout> | null, pollDelay: POLL_FAST_MS, lastChangeAt: 0, refreshTimer: null as ReturnType<typeof setTimeout> | null, emitTimer: null as ReturnType<typeof setTimeout> | null, pending: new Set<string>(), taskIds: new Set<string>() };
+  function closeSocket() { if (live.refreshTimer) timers.clearTimeout(live.refreshTimer); live.refreshTimer = null; live.socket?.close(); live.socket = null; live.socketCompany = ''; if (live.channel === 'socket') live.channel = 'off'; }
   const stopPoll = () => { if (live.pollTimer) timers.clearTimeout(live.pollTimer); live.pollTimer = null; };
   const queueEmit = (scopes: string[], taskId?: string) => {
     for (const s of scopes) live.pending.add(s);
     if (taskId) live.taskIds.add(taskId);
     if (live.emitTimer) return;
+    // At most two events a second while watched, but an isolated change is announced at once (a few ms, to batch what arrives together), not after a full second.
+    const wait = live.visible ? Math.max(EMIT_LEAD_MS, EMIT_VISIBLE_MS - (Date.now() - live.lastEmitAt)) : EMIT_HIDDEN_MS;
     live.emitTimer = timers.setTimeout(() => {
-      live.emitTimer = null;
+      live.emitTimer = null; live.lastEmitAt = Date.now();
       const scopes = [...live.pending] as ('tasks' | 'runs' | 'agents' | 'inbox' | 'config')[], taskIds = [...live.taskIds];
       live.pending.clear(); live.taskIds.clear();
       context.emit({ type: 'projectsWorkspaceChanged', scopes, taskIds });
-    }, live.visible ? EMIT_VISIBLE_MS : EMIT_HIDDEN_MS);
+    }, wait);
   };
   const schedulePoll = () => {
     stopPoll();
@@ -320,12 +321,12 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
       },
       onEvent(type, payload) {
         if (NOISY.has(type)) return;
+        live.fresh = true;
         c.invalidate(`/companies/${encodeURIComponent(target)}`);
         const entity = typeof payload.entityType === 'string' ? payload.entityType : '';
         const taskId = typeof payload.issueId === 'string' ? payload.issueId : entity === 'issue' && typeof payload.entityId === 'string' ? payload.entityId : typeof payload.taskId === 'string' ? payload.taskId : undefined;
         if (taskId) c.invalidate(`/issues/${taskId}`);
         queueEmit(c.kind === 'muster-server' ? ['tasks', 'runs', 'agents', 'inbox'] : type.startsWith('heartbeat.') ? ['runs', 'tasks', 'inbox'] : type === 'agent.status' ? ['agents', 'inbox'] : ['tasks', 'inbox'], taskId);
-        if (!live.settleTimer) live.settleTimer = timers.setTimeout(() => { live.settleTimer = null; c.invalidate(`/companies/${encodeURIComponent(target)}`); queueEmit(['tasks', 'inbox']); }, SETTLE_MS);
       },
       // A live socket dropping is often the first sign the server went away: tell the screens, which re-read and show it.
       // (A socket that never opened says nothing new, so a refused socket never wakes the renderer.)

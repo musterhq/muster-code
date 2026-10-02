@@ -46,7 +46,7 @@ export interface ServerBackend {
   /** The orgs (companies) this server serves. */
   companies(): Promise<WorkspaceCompany[]>;
   /** The org's tasks, agents, projects, runs, Inbox, approvals. `previous` lets a backend hand back the same part when nothing changed. */
-  read(company: WorkspaceCompany, previous?: { generation: number; companyId: string; part: ServerPart }): Promise<ServerPart>;
+  read(company: WorkspaceCompany, previous?: { generation: number; companyId: string; part: ServerPart }, options?: { fresh?: boolean }): Promise<ServerPart>;
   taskDetail(taskId: string, context: TaskDetailContext): Promise<WorkspaceTaskDetail>;
   comment(taskId: string, body: string, agents: ReadonlyMap<string, WorkspaceAgent>): Promise<WorkspaceComment>;
   updateTask(taskId: string, changes: TaskChanges, agents: ReadonlyMap<string, WorkspaceAgent>): Promise<WorkspaceTask>;

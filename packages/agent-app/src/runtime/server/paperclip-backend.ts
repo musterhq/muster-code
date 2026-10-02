@@ -23,10 +23,10 @@ export class PaperclipBackend implements ServerBackend {
   }
   async companies(): Promise<WorkspaceCompany[]> { return arr(await this.client.get<unknown>('/companies')).filter(c => c.status !== 'archived').map(mapCompany); }
 
-  async read(company: WorkspaceCompany, previous?: { generation: number; companyId: string; part: ServerPart }): Promise<ServerPart> {
+  async read(company: WorkspaceCompany, previous?: { generation: number; companyId: string; part: ServerPart }, options: { fresh?: boolean } = {}): Promise<ServerPart> {
     const api = this.client, id = company.id, base = `/companies/${enc(id)}`;
     const [issues, agentsJson, projectsJson, goalsJson, runsJson, liveJson, attentionJson, approvalsJson, labelsJson] = await Promise.all([
-      allPages(api.issuePages(id, 'view=compact&includeBlockedBy=true')), api.get<unknown>(`${base}/agents`), api.get<unknown>(`${base}/projects`),
+      allPages(api.issuePages(id, 'view=compact&includeBlockedBy=true', options.fresh)), api.get<unknown>(`${base}/agents`), api.get<unknown>(`${base}/projects`),
       api.get<unknown>(`${base}/goals`).catch(() => []), api.get<unknown>(`${base}/heartbeat-runs?limit=60&summary=true`),
       api.get<unknown>(`${base}/live-runs`).catch(() => []), api.get<unknown>(`${base}/attention`).catch(() => ({ items: [] })),
       api.get<unknown>(`${base}/approvals`).catch(() => []), api.get<unknown>(`${base}/labels`).catch(() => []),

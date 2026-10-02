@@ -70,6 +70,8 @@ export class PaperclipClient {
     if (!response.ok) throw new PaperclipError(`Muster Server answered ${response.status} for ${path.split('?')[0]}.${await errorText(response)}`, response.status, 'service');
     const body = await readJson<T>(response, path);
     const etag = response.headers.get('etag');
+    // A 200 whose body is what we already hold, apart from a generation timestamp (Paperclip's attention feed stamps every reply), is not a change.
+    if (cached && etag && stable(body) === stable(cached.body)) { if (this.options.cache !== false) this.cache.set(path, { etag, body: cached.body }); return cached.body as T; }
     this.generation++;
     if (etag && this.options.cache !== false) {
       if (this.cache.size >= CACHE_MAX) this.cache.delete(this.cache.keys().next().value!);
@@ -97,9 +99,12 @@ export class PaperclipClient {
     }
   }
   /** All issues of a company (compact or full), sorted by id and paged by offset. A repeat is dropped; a skipped row is harmless here because deletions are re-checked with a GET. */
-  issuePages(companyId: string, query: string): AsyncGenerator<Json[]> {
-    const base = `/companies/${encodeURIComponent(companyId)}/issues?${query}${query ? '&' : ''}sortField=id&sortDir=asc&limit=${ISSUE_PAGE}`;
-    return this.pages<Json>(base, ISSUE_PAGE, (_page, soFar) => `${base}&offset=${soFar}`);
+  issuePages(companyId: string, query: string, fresh = false): AsyncGenerator<Json[]> {
+    // Paperclip keeps a compact issue list for 2 s and a change does not clear it. A read right after a live event asks for one row fewer
+    // per page: a different request key, so the server computes the list instead of replaying the old one.
+    const limit = fresh ? ISSUE_PAGE - 1 : ISSUE_PAGE;
+    const base = `/companies/${encodeURIComponent(companyId)}/issues?${query}${query ? '&' : ''}sortField=id&sortDir=asc&limit=${limit}`;
+    return this.pages<Json>(base, limit, (_page, soFar) => `${base}&offset=${soFar}`);
   }
   /** All comments of an issue, oldest first, paged with Paperclip's `after` cursor. */
   commentPages(issueId: string): AsyncGenerator<Json[]> {
@@ -139,6 +144,7 @@ async function readJson<T>(response: Response, path: string): Promise<T> {
 const short = (text: string) => { const plain = text.replace(/\s+/g, ' ').trim(); if (/^<(!doctype|html|\?xml)/i.test(plain)) return ''; try { const parsed = JSON.parse(plain) as { error?: string; message?: string }; return (parsed.error ?? parsed.message ?? '').slice(0, 200); } catch { return plain.slice(0, 200); } };
 async function errorText(response: Response): Promise<string> { const text = await response.text().catch(() => ''); const detail = text ? short(text) : ''; return detail ? ` ${detail}` : ''; }
 
+const stable = (value: unknown): string => JSON.stringify(value, (key, v) => key === 'generatedAt' ? undefined : v);
 export interface LiveSocket { close(): void }
 export type SocketFactory = (url: string, token: string | undefined, headers?: Record<string, string>) => { onopen: (() => void) | null; onmessage: ((event: { data: unknown }) => void) | null; onclose: (() => void) | null; onerror: (() => void) | null; close(): void };
 /** Node's WebSocket (undici) accepts headers; the token rides in Authorization, never in the URL. */

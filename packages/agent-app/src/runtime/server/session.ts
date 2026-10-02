@@ -16,8 +16,8 @@ export function sessionPartition(origin: string): string {
 }
 
 export interface CookieLike { name: string; value: string; domain?: string; path?: string; secure?: boolean; expirationDate?: number }
-/** Better Auth's session token cookie, with or without the __Secure- / __Host- prefix it takes over https. */
-export const isSessionCookie = (name: string): boolean => /^(__Secure-|__Host-)?([\w-]+\.)?better-auth\.session_token$/.test(name);
+/** Better Auth's session token cookie: `<prefix>.session_token` (Paperclip's prefix is its instance, e.g. `paperclip-default`), with the __Secure- / __Host- prefix it takes over https. Never `session_data` or any other cookie. */
+export const isSessionCookie = (name: string): boolean => /^(__Secure-|__Host-)?[\w-]+(\.[\w-]+)*\.session_token$/.test(name);
 
 /** The `Cookie` header value for the server's own session: only session-token cookies that belong to this origin (host, path, scheme) and have not expired. */
 export function sessionCookieHeader(cookies: readonly CookieLike[], origin: string, now = Date.now()): string | null {
