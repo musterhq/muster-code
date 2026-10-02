@@ -5,7 +5,7 @@
  */
 import { randomUUID } from 'node:crypto';
 import type { Snapshot } from '../../agent-app/src/shared/protocol.ts';
-import { accessView, authorizeResource, filterOutput, type AccessView } from './access.ts';
+import { accessView, authorizeResource, canWriteProject, filterOutput, type AccessView } from './access.ts';
 import type { Accounts, Principal } from './auth/accounts.ts';
 import { AuthError, publicUser, RANK } from './auth/accounts.ts';
 import type { AuditLog } from './audit.ts';
@@ -14,6 +14,7 @@ import { CONNECTOR_TYPES } from './connectors/catalog.ts';
 import type { ConnectorRegistry } from './connectors/registry.ts';
 import type { RemoteAgents } from './agents/remote.ts';
 import { parseMatch } from './connectors/router.ts';
+import { cleanOrgName } from './config.ts';
 import { authorizeCommand, PolicyError, ROLE_RANK } from './policy.ts';
 import type { RuntimeHost } from './runtime-host.ts';
 import { PROJECT_ROLES, type OrgRole, type ProjectRole, type ServerStore, type UserRecord } from './store/types.ts';
@@ -23,6 +24,9 @@ export interface RpcContext {
   runtimeDir: string; version: string; startedAt: number; inviteUrl(token: string): string;
   /** Bumped whenever access or chat ownership changes, so cached per-client views refresh. */
   bumpAccess(): void;
+  /** The organisation name apps show for this server, and the owner's way to change it (written to server.json). */
+  orgName(): string | null;
+  setOrgName(name: string | null): Promise<void>;
   status(): Promise<Record<string, unknown>>;
 }
 
@@ -52,12 +56,30 @@ export async function dispatch(ctx: RpcContext, principal: Principal, command: u
   const view = await viewFor(ctx, user);
   const snapshot: Snapshot = view.all ? ctx.runtime.cachedSnapshot() : await ctx.runtime.snapshot(true);
   authorizeResource(view, name, cls, input, snapshot);
+  await authorizeWorkspaceWrite(ctx, view, name, input);
   const startedAt = new Date().toISOString();
   // The author of a document revision is who is signed in, never a name the client sends (`by` is for the runtime's own agents).
   if (name === 'work.docs.save' && input && typeof input === 'object') input = { ...(input as Record<string, unknown>), by: user.displayName || user.username };
   const output = await ctx.runtime.invoke(name, input);
   await afterCommand(ctx, user, name, input, output, startedAt);
   return filterOutput(view, name, output, view.all ? snapshot : await ctx.runtime.snapshot(true));
+}
+
+/** Commands that act on a workspace task or run by id (the desktop's Muster Server connection): the person needs write access to the task's project. */
+const TASK_WRITES: Record<string, string> = { 'paperclip.comment': 'taskId', 'paperclip.task.update': 'taskId', 'paperclip.task.start': 'taskId', 'paperclip.interaction.respond': 'taskId' };
+async function authorizeWorkspaceWrite(ctx: RpcContext, view: AccessView, command: string, input: unknown): Promise<void> {
+  if (view.all || (command !== 'paperclip.run.cancel' && !(command in TASK_WRITES))) return;
+  const i = (input && typeof input === 'object' ? input : {}) as Record<string, unknown>;
+  const refuse = () => { throw new PolicyError('You do not have write access to this task.', 403, 'forbidden'); };
+  let projectId: string | null | undefined;
+  try {
+    if (command === 'paperclip.run.cancel') {
+      const snap = await ctx.runtime!.invoke('paperclip.snapshot', {}) as { runs: Array<{ id: string; taskId: string | null }>; tasks: Array<{ id: string; projectId: string | null }> };
+      const run = snap.runs.find(r => r.id === i[ 'id' ]);
+      projectId = snap.tasks.find(t => t.id === run?.taskId)?.projectId;
+    } else projectId = ((await ctx.runtime!.invoke('paperclip.task', { id: String(i[TASK_WRITES[command]!] ?? '') })) as { task: { projectId: string | null } }).task.projectId;
+  } catch { refuse(); }
+  if (!canWriteProject(view, projectId)) refuse();
 }
 
 async function afterCommand(ctx: RpcContext, user: UserRecord, command: string, input: unknown, output: unknown, at: string) {
@@ -125,7 +147,8 @@ async function serverCommand(ctx: RpcContext, principal: Principal, command: str
   };
   return wrap(async () => {
     switch (command) {
-      case 'server.me': return { user: publicUser(user), server: { version: ctx.version }, via: principal.via };
+      case 'server.me': return { user: publicUser(user), server: { version: ctx.version, name: ctx.orgName() }, via: principal.via };
+      case 'server.org.set': { need(user, 'owner', 'rename the organisation'); const name = cleanOrgName(i.name); await ctx.setOrgName(name); await ctx.audit.append({ actor: `user:${user.id}`, action: 'org.renamed', target: 'server', detail: { name } }); return { name }; }
       case 'server.password.change': await ctx.accounts.changePassword(user, str(i.current, 'current'), str(i.next, 'next')); return { ok: true };
       case 'server.status': need(user, 'admin', 'see server status'); return ctx.status();
       case 'server.users.list': {

@@ -12,7 +12,7 @@ export const NAMES = {
   outputs: 'Outputs',
   /** Paperclip "agents" / org chart. */
   roster: 'Roster',
-  /** Paperclip "connectors"; also where a Paperclip server is linked. */
+  /** Paperclip "connectors"; also where Muster Server is connected. */
   integrations: 'Integrations',
   /** Paperclip "audit": Receipts, Timeline, Activity and Costs. */
   ledger: 'Ledger',
@@ -37,7 +37,11 @@ export const NAMES = {
   org: 'Org',
   /** Paperclip "hire an agent". */
   addAgent: 'Add agent',
-  paperclip: 'Paperclip',
+  /** The one product name for the connected server, whichever backend it is. */
+  paperclip: 'Muster Server',
+  musterServer: 'Muster Server',
+  /** Short form for group labels ("RagnarDataOps · Server") and counts ("2 server agents"). */
+  server: 'Server',
 } as const;
 
 /** The Inbox's buckets, in filter order (All comes first). The badge counts only Needs you and Problems. */

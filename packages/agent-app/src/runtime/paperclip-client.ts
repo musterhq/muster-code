@@ -22,10 +22,10 @@ const MAX_PAGES = 400;
 
 /** `https://host:port/base` with no trailing slash; refuses anything that is not http(s) or carries credentials. */
 export function normalizeBaseUrl(value: unknown): string {
-  if (typeof value !== 'string' || !value.trim()) throw new Error('Enter the Paperclip URL, for example https://paperclip.example.com.');
+  if (typeof value !== 'string' || !value.trim()) throw new Error('Enter the Muster Server URL, for example https://muster.example.com.');
   let url: URL;
   try { url = new URL(value.trim()); } catch { throw new Error('That is not a valid URL. Include http:// or https://.'); }
-  if (url.protocol !== 'http:' && url.protocol !== 'https:') throw new Error('Paperclip URLs start with http:// or https://.');
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') throw new Error('Server URLs start with http:// or https://.');
   if (url.username || url.password) throw new Error('Put the API token in the token field, not in the URL.');
   url.hash = ''; url.search = '';
   return url.toString().replace(/\/+$/, '').replace(/\/api$/, '');
@@ -37,7 +37,7 @@ export class PaperclipClient {
   /** Bumped whenever any GET returned a new body (not a 304), so callers can skip rebuilding views. */
   generation = 0;
   /** `cache: false` keeps no parsed bodies (an importer reads each page once and must not hold a large org in memory). */
-  constructor(readonly endpoint: PaperclipEndpoint, private readonly fetcher: FetchLike = (input, init) => fetch(input, init), private readonly options: { cache?: boolean } = {}) {}
+  constructor(readonly endpoint: PaperclipEndpoint, readonly fetcher: FetchLike = (input, init) => fetch(input, init), private readonly options: { cache?: boolean; /** A 401: returns the sentence to show instead of the generic one (a key the server revoked). */ onUnauthorized?: (hadToken: boolean, status: number) => string | undefined } = {}) {}
 
   private headers(extra: Record<string, string> = {}): Record<string, string> {
     return { accept: 'application/json', ...(this.endpoint.token ? { authorization: `Bearer ${this.endpoint.token}` } : {}), ...extra };
@@ -52,11 +52,13 @@ export class PaperclipClient {
       });
     } catch (cause) {
       const reason = cause instanceof Error && cause.name === 'TimeoutError' ? 'timed out' : 'is not reachable';
-      throw new PaperclipError(`Paperclip at ${this.endpoint.baseUrl} ${reason}.`, 0, 'network');
+      throw new PaperclipError(`Muster Server at ${this.endpoint.baseUrl} ${reason}.`, 0, 'network');
     }
     if (response.status === 401 || response.status === 403) {
+      const replaced = this.options.onUnauthorized?.(Boolean(this.endpoint.token), response.status);
+      if (replaced) { await response.text().catch(() => ''); throw new PaperclipError(replaced, response.status, 'auth'); }
       const detail = await response.text().catch(() => '');
-      throw new PaperclipError(this.endpoint.token ? `Paperclip refused the API token (${response.status}).${detail ? ` ${short(detail)}` : ''}` : 'This Paperclip needs an API token. Create one with `paperclipai token board create` and paste it in Settings.', response.status, 'auth');
+      throw new PaperclipError(this.endpoint.token ? `Muster Server refused the API token (${response.status}).${detail ? ` ${short(detail)}` : ''}` : 'This Muster Server needs an API token. Create one on the server and paste it in Settings › Integrations.', response.status, 'auth');
     }
     return response;
   }
@@ -65,9 +67,11 @@ export class PaperclipClient {
     const cached = this.cache.get(path);
     const response = await this.request('GET', path, undefined, cached ? { 'if-none-match': cached.etag } : {});
     if (response.status === 304 && cached) return cached.body as T;
-    if (!response.ok) throw new PaperclipError(`Paperclip answered ${response.status} for ${path.split('?')[0]}.${await errorText(response)}`, response.status, 'service');
+    if (!response.ok) throw new PaperclipError(`Muster Server answered ${response.status} for ${path.split('?')[0]}.${await errorText(response)}`, response.status, 'service');
     const body = await readJson<T>(response, path);
     const etag = response.headers.get('etag');
+    // A 200 whose body is what we already hold, apart from a generation timestamp (Paperclip's attention feed stamps every reply), is not a change.
+    if (cached && etag && stable(body) === stable(cached.body)) { if (this.options.cache !== false) this.cache.set(path, { etag, body: cached.body }); return cached.body as T; }
     this.generation++;
     if (etag && this.options.cache !== false) {
       if (this.cache.size >= CACHE_MAX) this.cache.delete(this.cache.keys().next().value!);
@@ -95,9 +99,12 @@ export class PaperclipClient {
     }
   }
   /** All issues of a company (compact or full), sorted by id and paged by offset. A repeat is dropped; a skipped row is harmless here because deletions are re-checked with a GET. */
-  issuePages(companyId: string, query: string): AsyncGenerator<Json[]> {
-    const base = `/companies/${encodeURIComponent(companyId)}/issues?${query}${query ? '&' : ''}sortField=id&sortDir=asc&limit=${ISSUE_PAGE}`;
-    return this.pages<Json>(base, ISSUE_PAGE, (_page, soFar) => `${base}&offset=${soFar}`);
+  issuePages(companyId: string, query: string, fresh = false): AsyncGenerator<Json[]> {
+    // Paperclip keeps a compact issue list for 2 s and a change does not clear it. A read right after a live event asks for one row fewer
+    // per page: a different request key, so the server computes the list instead of replaying the old one.
+    const limit = fresh ? ISSUE_PAGE - 1 : ISSUE_PAGE;
+    const base = `/companies/${encodeURIComponent(companyId)}/issues?${query}${query ? '&' : ''}sortField=id&sortDir=asc&limit=${limit}`;
+    return this.pages<Json>(base, limit, (_page, soFar) => `${base}&offset=${soFar}`);
   }
   /** All comments of an issue, oldest first, paged with Paperclip's `after` cursor. */
   commentPages(issueId: string): AsyncGenerator<Json[]> {
@@ -107,7 +114,7 @@ export class PaperclipClient {
 
   async send<T>(method: 'POST' | 'PATCH', path: string, body: unknown = {}): Promise<T> {
     const response = await this.request(method, path, body);
-    if (!response.ok) throw new PaperclipError(`Paperclip refused the change (${response.status}).${await errorText(response)}`, response.status, 'service');
+    if (!response.ok) throw new PaperclipError(`Muster Server refused the change (${response.status}).${await errorText(response)}`, response.status, 'service');
     this.cache.clear();
     this.generation++;
     const text = await response.text();
@@ -127,8 +134,8 @@ export class PaperclipClient {
 
 /** A 200 that is a web page (a SPA, a proxy's login screen) means the URL is not a Paperclip API; one that is cut off or is not JSON
  *  at all means Paperclip answered with something Muster cannot read. Either way: a sentence, never a parse error. */
-const notPaperclip = (path: string) => new PaperclipError(`This URL isn’t a Paperclip API: ${path.split('?')[0]} answered with a web page, not JSON. Check the address (use the Paperclip server’s own URL, for example https://paperclip.example.com).`, 200, 'service');
-const unreadable = (path: string) => new PaperclipError(`Paperclip sent a reply for ${path.split('?')[0]} that Muster could not read (it was cut off or damaged on the way). The last good copy stays on screen; it will refresh when Paperclip answers properly.`, 200, 'service');
+const notPaperclip = (path: string) => new PaperclipError(`This URL isn’t a Muster Server API: ${path.split('?')[0]} answered with a web page, not JSON. Check the address (use the server’s own URL, for example https://muster.example.com).`, 200, 'service');
+const unreadable = (path: string) => new PaperclipError(`Muster Server sent a reply for ${path.split('?')[0]} that Muster could not read (it was cut off or damaged on the way). The last good copy stays on screen; it will refresh when the server answers properly.`, 200, 'service');
 const badBody = (text: string, path: string) => /^\s*</.test(text) ? notPaperclip(path) : unreadable(path);
 async function readJson<T>(response: Response, path: string): Promise<T> {
   const text = await response.text();
@@ -137,21 +144,24 @@ async function readJson<T>(response: Response, path: string): Promise<T> {
 const short = (text: string) => { const plain = text.replace(/\s+/g, ' ').trim(); if (/^<(!doctype|html|\?xml)/i.test(plain)) return ''; try { const parsed = JSON.parse(plain) as { error?: string; message?: string }; return (parsed.error ?? parsed.message ?? '').slice(0, 200); } catch { return plain.slice(0, 200); } };
 async function errorText(response: Response): Promise<string> { const text = await response.text().catch(() => ''); const detail = text ? short(text) : ''; return detail ? ` ${detail}` : ''; }
 
+const stable = (value: unknown): string => JSON.stringify(value, (key, v) => key === 'generatedAt' ? undefined : v);
 export interface LiveSocket { close(): void }
-export type SocketFactory = (url: string, token: string | undefined) => { onopen: (() => void) | null; onmessage: ((event: { data: unknown }) => void) | null; onclose: (() => void) | null; onerror: (() => void) | null; close(): void };
+export type SocketFactory = (url: string, token: string | undefined, headers?: Record<string, string>) => { onopen: (() => void) | null; onmessage: ((event: { data: unknown }) => void) | null; onclose: (() => void) | null; onerror: (() => void) | null; close(): void };
 /** Node's WebSocket (undici) accepts headers; the token rides in Authorization, never in the URL. */
-export const nodeSocket: SocketFactory = (url, token) => {
+export const nodeSocket: SocketFactory = (url, token, headers) => {
   const Ctor = (globalThis as unknown as { WebSocket?: new (url: string, init?: unknown) => ReturnType<SocketFactory> }).WebSocket;
   if (!Ctor) throw new Error('WebSocket is unavailable in this runtime.');
+  // A hosted server accepts a browser session (Cookie) on this socket, never a board key: with a session the key is not sent at all.
+  if (headers && Object.keys(headers).length) return new Ctor(url, { headers });
   return token ? new Ctor(url, { headers: { authorization: `Bearer ${token}` } }) : new Ctor(url);
 };
 
 /** Opens the company's live-event socket. `onEvent` gets each parsed event type; `onDown` fires once when it closes or fails. */
-export function openLiveEvents(client: PaperclipClient, companyId: string, handlers: { onOpen(): void; onEvent(type: string, payload: Record<string, unknown>): void; onDown(): void }, factory: SocketFactory = nodeSocket): LiveSocket {
+export function openLiveEvents(client: PaperclipClient, companyId: string, handlers: { onOpen(): void; onEvent(type: string, payload: Record<string, unknown>): void; onDown(): void }, factory: SocketFactory = nodeSocket, session?: { cookie: string; origin: string }): LiveSocket {
   let closed = false, down = false;
   const fail = () => { if (!down && !closed) { down = true; handlers.onDown(); } };
   let socket: ReturnType<SocketFactory>;
-  try { socket = factory(client.eventsUrl(companyId), client.endpoint.token); } catch { queueMicrotask(fail); return { close() { closed = true; } }; }
+  try { socket = session ? factory(client.eventsUrl(companyId), undefined, { cookie: session.cookie, origin: session.origin }) : factory(client.eventsUrl(companyId), client.endpoint.token); } catch { queueMicrotask(fail); return { close() { closed = true; } }; }
   socket.onopen = () => handlers.onOpen();
   socket.onmessage = event => {
     try {

@@ -43,10 +43,25 @@ export function ServerSettings(): React.ReactElement {
   const admin = me.role === 'owner' || me.role === 'admin';
   return <div className="server-settings">
     <Account server={server} me={me}/>
+    {me.role === 'owner' && <OrgName server={server}/>}
     <ProjectPeople server={server} me={me}/>
     {admin ? <><People server={server} me={me}/><Invites server={server}/><Access server={server}/><RemoteAgents server={server} admin/><Cost server={server}/><Sessions server={server}/><Channels server={server}/><Audit server={server}/></>
       : <><RemoteAgents server={server} admin={false}/><p className="project-edit-hint ws-settings-hint">People, invites, usage and connectors are managed by this server’s owners and admins.</p></>}
   </div>;
+}
+
+/** The organisation name apps show for this server (the desktop app's sidebar group reads "<name> · Server"). Owners only. */
+function OrgName({ server }: { server: ServerBridge }): React.ReactElement {
+  const [name, setName] = useState(server.info().server?.name === 'Muster Server' ? '' : server.info().server?.name ?? '');
+  const [error, setError] = useState('');
+  useEffect(() => { server.invoke<{ server?: { name?: string | null } }>('server.me').then(me => setName(me.server?.name ?? ''), () => undefined); }, [server]);
+  return <section aria-label="Organisation name">
+    <h3 className="preference-group-title">Organisation name</h3>
+    <div className="preference-group"><div className="preference-row"><span className="preference-copy"><strong>What people call this server</strong><span>Shown in the Muster app instead of the server's address. Up to 80 characters.</span></span>
+      <span className="preference-control server-inline"><input type="text" value={name} maxLength={80} placeholder="Acme" onChange={e => setName(e.target.value)} aria-label="Organisation name"/>
+        <button type="button" className="settings-button secondary" onClick={() => act(() => server.invoke('server.org.set', { name }), () => setError(''), 'Organisation name saved.', setError)}>Save</button></span></div></div>
+    {error && <p role="alert" className="settings-error">{error}</p>}
+  </section>;
 }
 
 function Account({ server, me }: { server: ServerBridge; me: ServerUser }): React.ReactElement {

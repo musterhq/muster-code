@@ -128,7 +128,7 @@ export function paperclipHistory(db: DatabaseSync): Body[] {
     const start = ms(r.started), end = ms(r.ended);
     return {
       id: `history:paperclip:${r.run_id}`, chatId: null, runId: r.run_id, taskId: r.task_id, projectId: typeof r.project_id === 'string' ? r.project_id : null,
-      trigger: 'Paperclip run', agent: r.agent || 'Agent', provider: null, model: null, tokens: null, costUsd: null, tools: [], approvals: 0, tests: 0, files: null,
+      trigger: 'Server run', agent: r.agent || 'Agent', provider: null, model: null, tokens: null, costUsd: null, tools: [], approvals: 0, tests: 0, files: null,
       startedAt: r.started, endedAt: r.ended, durationMs: start !== null && end !== null ? Math.max(0, end - start) : null, outcome: 'completed',
     };
   });

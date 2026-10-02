@@ -114,12 +114,12 @@ function ProjectList({ projects, workspace, onOpen, onCreate }: { projects: Proj
     {rows.length === 0 ? <ResourceState kind="empty" icon={<FolderClosed size={20}/>} title={hiddenCount ? 'Every project is hidden' : 'No projects yet'} message={hiddenCount ? 'Use the Hidden filter to bring them back.' : 'A project holds tasks, a Roster of agents that work on them, and the folders they work in.'}>
         {!hiddenCount && <button type="button" className="settings-button" onClick={onCreate}><Plus size={14}/>New project</button>}
       </ResourceState>
-      : groups.map(group => <section key={group.org ?? 'mine'} className="ws-section" aria-label={group.org ? `${group.org} · ${NAMES.paperclip}` : 'My projects'}>
-        <div className="ws-section-head"><h2 className="ws-group-title">{group.org ? `${group.org} · ${NAMES.paperclip}` : 'My projects'}</h2><span className="ws-row-count">{group.rows.length} {group.rows.length === 1 ? 'project' : 'projects'}</span></div>
+      : groups.map(group => <section key={group.org ?? 'mine'} className="ws-section" aria-label={group.org ? `${group.org} · ${NAMES.server}` : 'My projects'}>
+        <div className="ws-section-head"><h2 className="ws-group-title">{group.org ? `${group.org} · ${NAMES.server}` : 'My projects'}</h2><span className="ws-row-count">{group.rows.length} {group.rows.length === 1 ? 'project' : 'projects'}</span></div>
         {group.rows.length === 0 ? <p className="ws-faint">Projects you make in Muster show here.</p> : <ul className="ws-rows">{group.rows.map(r => <li key={r.id} className="pp-list-item" data-hidden={r.hidden || undefined}><button type="button" className="ws-row pp-list-row" onClick={() => r.source === 'paperclip' ? openHub('project', r.id) : onOpen(r.id)}>
           <span className="pp-icon" aria-hidden="true"><FolderClosed size={14}/></span>
           <span className="ws-row-text"><span className="ws-row-title">{r.name}</span><span className="ws-row-meta">{r.detail || 'No goal yet'}</span></span>
-          {r.edited && <span className="ws-chip" data-tone="faint" title="You changed this project’s name or goal here. Importing from Paperclip again keeps your version.">edited here</span>}
+          {r.edited && <span className="ws-chip" data-tone="faint" title="You changed this project’s name or goal here. Importing from Muster Server again keeps your version.">edited here</span>}
           {r.tasks !== null && <span className="ws-row-count">{r.tasks} {r.tasks === 1 ? 'task' : 'tasks'}</span>}
           {r.targetDate && <span className="ws-chip" data-tone={isOverdue(r.status, r.targetDate) ? 'danger' : undefined} title="Target date">{dayLabel(r.targetDate)}</span>}
           <span className="ws-chip" data-tone={r.archived ? 'faint' : r.paused ? 'warn' : r.status === 'completed' ? 'ok' : r.status === 'cancelled' || r.status === 'backlog' ? 'faint' : 'accent'}>{r.archived ? 'archived' : r.paused ? 'paused' : PROJECT_STATUS_LABEL[r.status].toLowerCase()}</span>

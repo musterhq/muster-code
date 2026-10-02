@@ -5,7 +5,8 @@ import {mkdtemp,readFile,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {test} from 'node:test';
-import {createMusterServerDomain,MUSTER_SERVER_SECRET_ID,serverOrigin} from '../src/runtime/domains/muster-server.ts';
+import {createMusterServerDomain,serverOrigin} from '../src/runtime/domains/muster-server.ts';
+import {SERVER_SECRET as MUSTER_SERVER_SECRET_ID} from '../src/runtime/server/config.ts';
 import {SecretStore} from '../src/runtime/secret-store.ts';
 import type {DomainContext} from '../src/runtime/domains/types.ts';
 
@@ -18,6 +19,7 @@ function fakeServer(){
     const body=JSON.parse(String(init.body??'{}')) as Record<string,unknown>;
     calls.push({url:url.href,headers,body});
     const reply=(status:number,value:unknown)=>new Response(JSON.stringify(value),{status,headers:{'content-type':'application/json'}});
+    if(url.pathname==='/healthz')return reply(200,{ok:true,version:'0.2.10',runtime:'running'});
     if(url.pathname==='/api/auth/token')return body.password==='right-password-1'?reply(200,{ok:true,token:'mst_server_issued_token_value_1234'}):reply(401,{ok:false,error:'Wrong username or password.'});
     if(url.pathname==='/rpc'){
       if(!String(headers.authorization).startsWith('Bearer mst_'))return reply(401,{ok:false,error:'Not signed in.'});
@@ -50,7 +52,7 @@ test('connect with a password stores only a server-issued token, bound to that o
   const view=await h['musterServer.connect']!({url:'https://muster.example.com/',method:'password',username:'olivia',password:'right-password-1'}) as {connected:boolean;url:string;user:{username:string}};
   assert.deepEqual([view.connected,view.url,view.user.username],[true,'https://muster.example.com','olivia']);
   assert.equal(secrets.get(MUSTER_SERVER_SECRET_ID),'mst_server_issued_token_value_1234');
-  const onDisk=await readFile(join(dir,'muster-server.json'),'utf8')+await readFile(join(dir,'secrets.json'),'utf8');
+  const onDisk=await readFile(join(dir,'server.json'),'utf8')+await readFile(join(dir,'secrets.json'),'utf8');
   assert.equal(onDisk.includes('right-password-1'),false,'the password is never stored');
   assert.equal(onDisk.includes('mst_server_issued_token_value_1234'),false,'the token is stored only as ciphertext');
   const {projects}=await h['musterServer.projects']!({}) as {projects:Array<{name:string;openUrl:string}>};

@@ -38,7 +38,7 @@ export function PageHeader({ title, detail, children }: { title: string; detail?
 }
 /** Paperclip rows, and Ledger entries imported from past chats (#190): those were never hash-chained, and say so. */
 const SourceTag = ({ source }: { source: LedgerSource }) => source === 'paperclip' ? <span className="ws-source">{NAMES.paperclip}</span>
-  : source === 'history' ? <span className="ws-source ws-source-history" title="Imported from saved chats and Paperclip activity from before the Ledger recorded turns. Not part of the verified chain.">Imported history</span> : null;
+  : source === 'history' ? <span className="ws-source ws-source-history" title="Imported from saved chats and Muster Server activity from before the Ledger recorded turns. Not part of the verified chain.">Imported history</span> : null;
 
 // --- Inbox -----------------------------------------------------------------------------------------------------------
 const BUCKETS: { id: 'all' | InboxBucket; label: string }[] = [{ id: 'all', label: 'All' }, ...(Object.entries(INBOX_BUCKETS) as [InboxBucket, string][]).map(([id, label]) => ({ id, label }))];
@@ -93,7 +93,7 @@ export function InboxPage({ snapshot, nav }: { snapshot: WorkspaceSnapshot | nul
   // Paperclip offline: never claim "all caught up" when its items could not be read.
   const offline = snapshot?.paperclip?.stale ? snapshot.paperclip : null;
   return <div className="ws-page" data-hide-type={columns.type ? undefined : ''} data-hide-detail={columns.detail ? undefined : ''} data-hide-age={columns.age ? undefined : ''}>
-    <PageHeader title={NAMES.inbox} detail="Every chat and run that needs you, finished, or went wrong: folders, projects and Paperclip, in one place."/>
+    <PageHeader title={NAMES.inbox} detail="Every chat and run that needs you, finished, or went wrong: folders, projects and your server, in one place."/>
     <InboxViews view={view} counts={viewCounts} onView={setView} unread={unreadVisible.length} onMarkAll={() => markRead(unreadVisible)}/>
     <div className="ws-filters" role="toolbar" aria-label="Filter the inbox">
       {BUCKETS.map(f => <button key={f.id} type="button" className="ws-filter" aria-pressed={filter === f.id} onClick={() => setFilter(f.id)}>{f.label}<span>{f.id === 'all' ? inView.length : counts.get(f.id) ?? 0}</span></button>)}
@@ -145,8 +145,8 @@ export function PulseBoard({ snapshot, nav, agentId, scoped = false, projectId }
   // Paperclip agents belong to the company, not the project: pausing one here also stops its work on every other project.
   // The count is the whole company's (what Pause really stops), not just the agents on this page; a pending hire is never counted.
   const running = (s: WorkspaceSource) => s === 'paperclip' && snapshot.agentCounts ? snapshot.agentCounts.active : snapshot.agents.filter(a => a.source === s && a.pausable && a.status !== 'paused' && a.status !== 'terminated' && a.status !== 'pending').length;
-  const paperclipAgents = (n: number) => `${n} ${NAMES.paperclip} ${n === 1 ? 'agent' : 'agents'}`;
-  const label = (s: WorkspaceSource) => scoped ? s === 'paperclip' ? `${paperclipAgents(running(s))} (company-wide)` : 'Muster agents on this project' : s === 'paperclip' ? snapshot.paperclip?.company?.name ?? NAMES.paperclip : 'Muster';
+  const paperclipAgents = (n: number) => `${n} server ${n === 1 ? 'agent' : 'agents'}`;
+  const label = (s: WorkspaceSource) => scoped ? s === 'paperclip' ? `${paperclipAgents(running(s))} (org-wide)` : 'Muster agents on this project' : s === 'paperclip' ? snapshot.paperclip?.company?.name ?? NAMES.paperclip : 'Muster';
   const confirmText = (s: WorkspaceSource) => scoped && s === 'paperclip' ? `Pause ${paperclipAgents(running(s))}? They also stop working on other projects.`
     : `Pause every ${scoped ? 'Muster agent on this project' : `${label(s)} agent`}? Running work stops and nothing new starts until you resume.`;
   // From a project page: Muster's Pause stops that project's agents, Paperclip's stops the company's (its agents belong to the company).

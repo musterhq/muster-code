@@ -7,6 +7,7 @@ import { ArrowLeft, ChevronRight, List, Network } from 'lucide-react';
 import React, { useEffect, useRef, useState } from 'react';
 import type { WorkspaceSnapshot } from '../../shared/domains/paperclip-protocol';
 import { NAMES } from '../../shared/workspace-names';
+import { invoke } from '../bridge';
 import { openHub, refreshWorkspace, useHubRoute, useWorkspace, type HubPage } from '../hubStore';
 import { restoreFocus } from '../focus';
 import { closeSettings, selectChat } from '../store';
@@ -75,7 +76,8 @@ export function HubScreen(): React.ReactElement {
         {task ? <><TaskStatusIcon status={task.status} size={13}/><strong>{task.title}</strong><span className="ws-key">{task.key}</span></>
           : agent ? <strong>{agent.name}</strong> : route.page === 'project' ? <strong>{snapshot?.projects.find(p => p.id === route.arg)?.name ?? NAMES.projects}</strong> : <strong>{TITLE[route.page]}</strong>}
       </span>
-      {snapshot?.paperclip && <span className="ws-topbar-origin" title={snapshot.paperclip.stale ?? (snapshot.paperclip.live === 'poll' ? 'This Paperclip does not push live events to board keys, so Muster checks it every 15 seconds while this screen is open.' : undefined)}><span className="ws-conn-dot" data-live={snapshot.paperclip.live} data-stale={snapshot.paperclip.stale ? 'true' : undefined} aria-hidden="true"/>{NAMES.paperclip} · {snapshot.paperclip.company?.name ?? snapshot.paperclip.origin}{snapshot.paperclip.stale ? ' · offline' : snapshot.paperclip.live === 'poll' ? ' · updates every 15 s' : ''}</span>}
+      {snapshot?.paperclip && <span className="ws-topbar-origin" title={snapshot.paperclip.stale ?? (snapshot.paperclip.live === 'poll' ? 'Live updates are not available for this sign-in, so Muster checks the server every few seconds while this screen is open, and not at all while it is hidden.' : undefined)}><span className="ws-conn-dot" data-live={snapshot.paperclip.live} data-stale={snapshot.paperclip.stale ? 'true' : undefined} aria-hidden="true"/>{NAMES.paperclip} · {snapshot.paperclip.company?.name ?? snapshot.paperclip.origin}{snapshot.paperclip.stale ? ' · offline' : snapshot.paperclip.live === 'poll' ? ' · updates every few seconds' : ''}</span>}
+      {snapshot?.paperclip?.reconnect && snapshot.paperclip.baseUrl && <button type="button" className="ws-link ws-reconnect" title="Sign in again in the app window to get instant updates. Your sign-in is still valid; nothing else changes." onClick={() => { void invoke('musterServer.signInWindow', { baseUrl: snapshot.paperclip!.baseUrl!, url: snapshot.paperclip!.baseUrl! }).catch(() => undefined); }}>Reconnect for live updates</button>}
     </header>
     <div className="ws-main">{body}</div>
   </section>;
@@ -85,7 +87,7 @@ export function HubScreen(): React.ReactElement {
 function AllTasks({ snapshot, nav }: { snapshot: WorkspaceSnapshot; nav: HubNav }): React.ReactElement {
   const [creating, setCreating] = useState(false);
   return <div className="ws-page ws-page-fill">
-    <PageHeader title={NAMES.tasks} detail="Every task in every project: yours, your agents’ and the linked Paperclip’s."/>
+    <PageHeader title={NAMES.tasks} detail="Every task in every project: yours, your agents’ and your server’s."/>
     <TaskList snapshot={snapshot} tasks={snapshot.tasks} scope="all" showProject onOpenTask={nav.onOpenTask} onNewTask={snapshot.projects.length ? () => setCreating(true) : undefined} emptyMessage={snapshot.projects.length ? 'No tasks yet.' : 'Create a project first: tasks belong to a project.'}/>
     <NewTaskSheet open={creating} snapshot={snapshot} projectId={null} onClose={() => setCreating(false)} onCreated={() => undefined}/>
   </div>;

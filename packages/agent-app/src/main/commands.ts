@@ -126,6 +126,7 @@ const COMMANDS = {
   'memory.add': true,
   'memory.search': true,
   'memory.inspect': true,
+  'musterServer.signInWindow': true,
   'hindsight.status': true,
   'hindsight.retain': true,
   'hindsight.recall': true,

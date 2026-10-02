@@ -87,7 +87,7 @@ export function ProjectPage({ snapshot, projectId, nav, muster, initialTab = 'ta
     if (next < 0) return;
     e.preventDefault(); setTab(TABS[next].id); (e.currentTarget.querySelectorAll('[role="tab"]')[next] as HTMLElement | undefined)?.focus();
   };
-  if (!muster && snapshot && !summary) return <ResourceState kind="empty" message="This project is no longer in the linked Paperclip."/>;
+  if (!muster && snapshot && !summary) return <ResourceState kind="empty" message="This project is no longer on your Muster Server."/>;
   return <article className="pp" aria-label={`Project ${name}`}>
     <header className="pp-head">
       <span className="pp-icon" aria-hidden="true"><FolderClosed size={16}/></span>
@@ -218,7 +218,7 @@ function GeneralSettings({ project, meta, onUpdated, onEdit, onArchive, onDelete
 /** A Paperclip project's configuration, read-only here (it is edited in Paperclip), with Import into Muster. */
 function PaperclipSettings({ snapshot }: { snapshot: WorkspaceSnapshot }): React.ReactElement {
   const p = snapshot.projects[0];
-  if (!p) return <ResourceState kind="empty" message="This project is no longer in the linked Paperclip."/>;
+  if (!p) return <ResourceState kind="empty" message="This project is no longer on your Muster Server."/>;
   return <div className="pp-stack">
     <dl className="pp-fields">
       <div><dt>Name</dt><dd>{p.name}</dd></div>

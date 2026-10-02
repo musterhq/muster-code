@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>Connect the Muster app · Muster Server</title>
+<link rel="stylesheet" href="/auth.css">
+</head>
+<body>
+<main class="auth">
+  <div class="brand"><svg width="28" height="28" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="currentColor" opacity=".12"/><path d="M8 23V9l8 8 8-8v14" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Muster Server</span></div>
+  <section class="card" id="card">
+    <h1 id="title">Connect the Muster app</h1>
+    <p class="sub" id="subtitle">Checking the request…</p>
+    <p class="error" id="error" role="alert" hidden></p>
+    <form id="form" hidden>
+      <p class="hint" id="who"></p>
+      <button type="submit" id="approve">Approve</button>
+      <button type="button" id="cancel" class="secondary">Cancel</button>
+    </form>
+  </section>
+  <p class="foot" id="foot">Only approve a request you started yourself, in the Muster app.</p>
+</main>
+<script src="/connect.js"></script>
+</body>
+</html>

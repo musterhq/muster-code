@@ -34,8 +34,9 @@ Object.defineProperty(window.document,'visibilityState',{get(){return 'visible';
 const now=new Date().toISOString();
 const proj=(id:string,name:string,extra:object={})=>({id,name,status:'in_progress',description:'',source:'local',repo:null,cwd:null,taskCount:2,openCount:1,paused:false,memory:null,...extra});
 let live:'socket'|'poll'='socket';
+let reconnect=false;
 const approvals=[{id:'ap-hire',type:'hire_agent',status:'pending',title:'Hire Nova as Data Engineer',detail:'Role: engineer',requestedBy:'CTO',agentId:'a-nova',issueIds:[],at:now,verbs:['approve','reject','request_revision']}];
-const snapshot=()=>({paperclip:{origin:'This Mac',company:{id:'c',name:'RagnarDataOps',prefix:'RAG'},companies:[],live},goals:[],approvals,labels:[],
+const snapshot=()=>({paperclip:{origin:'This Mac',company:{id:'c',name:'RagnarDataOps',prefix:'RAG'},companies:[],live,...(reconnect?{reconnect:true,baseUrl:'https://hosted.example.test'}:{})},goals:[],approvals,labels:[],
   tasks:[],agents:[],runs:[],counts:{liveRuns:0,inbox:2,failedRuns:0,openTasks:0},fetchedAt:now,
   projects:[proj('mine','My own project'),proj('imp','Data Pipeline',{org:'RagnarDataOps',editedHere:true}),proj('pc2','Ops Dashboard',{source:'paperclip',org:'RagnarDataOps'}),proj('other','Old import',{org:'OtherOrg'})],
   inbox:[{id:'import:approval:ap-hire',kind:'approval',title:'Hire Nova as Data Engineer',why:'Waiting for your approval.',severity:'high',at:now,taskId:null,agentId:null,runId:null,source:'paperclip',group:'RagnarDataOps',approvalId:'ap-hire',approvalVerbs:['approve','reject','request_revision']},
@@ -69,12 +70,12 @@ const root=createRoot(document.getElementById('root')!,{onUncaughtError:e=>{(err
 root.render(<ProjectsScreen onBack={()=>{}} onStartChat={()=>{}}/>);
 for(let i=0;i<40&&!document.querySelector('.pp-list');i++)await delay(40);
 await delay(100);
-assert.deepEqual(text('.ws-group-title'),['My projects','OtherOrg · Paperclip','RagnarDataOps · Paperclip']);
+assert.deepEqual(text('.ws-group-title'),['My projects','OtherOrg · Server','RagnarDataOps · Server']);
 const group=(label:string)=>[...document.querySelectorAll('section.ws-section')].find(s=>s.getAttribute('aria-label')===label)!;
 assert.deepEqual(text('.ws-row-title',group('My projects')),['My own project'],'a project you made shows as before');
-assert.deepEqual(text('.ws-row-title',group('RagnarDataOps · Paperclip')),['Data Pipeline','Ops Dashboard']);
-assert.deepEqual(text('.ws-row-title',group('OtherOrg · Paperclip')),['Old import']);
-assert.ok(text('.ws-chip',group('RagnarDataOps · Paperclip')).includes('edited here'),'an imported project edited here says so');
+assert.deepEqual(text('.ws-row-title',group('RagnarDataOps · Server')),['Data Pipeline','Ops Dashboard']);
+assert.deepEqual(text('.ws-row-title',group('OtherOrg · Server')),['Old import']);
+assert.ok(text('.ws-chip',group('RagnarDataOps · Server')).includes('edited here'),'an imported project edited here says so');
 assert.ok(!text('.ws-chip',group('My projects')).includes('edited here'));
 assert.deepEqual(errors,[]);
 root.unmount();
@@ -105,7 +106,15 @@ live='poll';await refreshWorkspace(true);
 openHub('tasks');
 const root3=createRoot(document.getElementById('root')!,{onUncaughtError:e=>{(errors as unknown[]).push(e);},onRecoverableError:e=>{(errors as unknown[]).push(e);}});
 root3.render(<HubScreen/>);await delay(200);
-assert.match(text('.ws-topbar-origin')[0],/RagnarDataOps · updates every 15 s/);
+assert.match(text('.ws-topbar-origin')[0],/RagnarDataOps · updates every few seconds/);
+assert.equal(document.querySelector('.ws-reconnect'),null,'no Reconnect while the session is fine');
+// A browser sign-in whose session ended: updates are polling, and a quiet Reconnect for live updates is offered next to the org.
+reconnect=true;await refreshWorkspace(true);await delay(200);
+const quiet=document.querySelector('.ws-reconnect');
+assert.ok(quiet&&/^Reconnect for live updates$/.test(quiet.textContent!.trim()),'a quiet Reconnect for live updates');
+await click(quiet);
+assert.deepEqual(calls.filter(c=>c.command==='musterServer.signInWindow').at(-1)?.input,{baseUrl:'https://hosted.example.test',url:'https://hosted.example.test'},'it re-opens the app\'s sign-in window on the server\'s own page');
+reconnect=false;
 root3.unmount();
 
 assert.equal(intervals,0,'the hub and the Projects list start no intervals');
@@ -116,9 +125,9 @@ root4.render(<Sidebar/>);await delay(3300);  // the badge read (which says Paper
 assert.deepEqual(errors,[],'the sidebar renders (a hook below its loading return crashed it before)');
 const projectsBlock=document.querySelector('section[aria-label="Projects"]')!;
 assert.ok(projectsBlock,'the Projects section');
-assert.deepEqual(text('.nav-org-label',projectsBlock),['OtherOrg · Paperclip','RagnarDataOps · Paperclip']);
+assert.deepEqual(text('.nav-org-label',projectsBlock),['OtherOrg · Server','RagnarDataOps · Server']);
 const orgGroup=(label:string)=>[...projectsBlock.querySelectorAll('.nav-org')].find(g=>g.getAttribute('aria-label')===label)!;
-assert.deepEqual(text('.nav-section-title',orgGroup('RagnarDataOps · Paperclip')),['Data Pipeline','Ops Dashboard'],'imported and linked projects of one org sit together, once each');
+assert.deepEqual(text('.nav-section-title',orgGroup('RagnarDataOps · Server')),['Data Pipeline','Ops Dashboard'],'imported and linked projects of one org sit together, once each');
 root4.unmount();
 assert.deepEqual(errors,[]);
 

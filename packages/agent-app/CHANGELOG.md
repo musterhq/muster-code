@@ -5,6 +5,9 @@ All notable changes to Muster Agent. Each `## <version>` section becomes the not
 
 ## Unreleased
 
+- One Muster Server. Paperclip and Muster Server are now a single connection in Settings › Integrations › Muster Server: type the server address and press Connect (a server on this Mac is offered inline; an API token is under Other ways to connect). The app finds out what is at the address by itself, so a Muster Server's org and projects show in the app exactly as a linked Paperclip's always did: projects under their org in the sidebar, tasks as threads, the Roster graph, Inbox, Ledger receipts, approvals, Pause and Resume, and Import from Muster Server. Nothing opens in a browser any more, and the separate Paperclip section is gone. Existing Paperclip links, tokens and imported copies carry over with no sign-in.
+- Connect opens the server's own sign-in page in the app, in a window with a session of its own for that server. A hosted server then updates the app instantly (a task created there arrives in about a tenth of a second) instead of every few seconds; if that session ends, updates continue every few seconds and a quiet Reconnect brings the socket back without signing in again. "Use my browser instead" is still there.
+
 ## 0.3.1
 
 - Updates keep working when GitHub's download links are slow or down. If a release file times out or GitHub returns a server error, Muster retries and then fetches it through GitHub's API instead; the checksum and signature checks are unchanged. A persistent outage reads "GitHub didn't respond. Muster will try again automatically."

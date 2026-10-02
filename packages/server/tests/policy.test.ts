@@ -164,7 +164,7 @@ test('Wave 3 navigation and insight commands: search and costs are server-wide (
 });
 
 test('review S4: Paperclip commands that spend, pause or change configuration are host (admin) commands; reads stay reads', () => {
-  for (const c of ['paperclip.approval.decide', 'paperclip.pauseAll', 'paperclip.resumeAll', 'paperclip.agent.pause', 'paperclip.agent.resume', 'paperclip.import', 'paperclip.config.set']) assert.equal(classifyCommand(c), 'host', c);
+  for (const c of ['paperclip.approval.decide', 'paperclip.pauseAll', 'paperclip.resumeAll', 'paperclip.agent.pause', 'paperclip.agent.resume', 'paperclip.import', 'paperclip.config.set', 'paperclip.signin.start', 'paperclip.signin.signout', 'paperclip.session.set', 'paperclip.session.clear']) assert.equal(classifyCommand(c), 'host', c);
   assert.equal(classifyCommand('project.tasks.get'), 'read');
   assert.equal(classifyCommand('paperclip.snapshot'), 'read');
 });
@@ -215,6 +215,34 @@ test('Wave 4: commands that run on the server host or speak for an agent are adm
   denied(() => authorizeResource(editor, 'project.interactions.answer', 'write', { projectId: 'p-secret', id: 'c', answers: {} }, snapshot));
 });
 
+test('the desktop app\'s Muster Server connection: a member reads only the projects they were granted; the dashboard stays admin-only', () => {
+  const v = accessView(user('member'), grants, owners);
+  authorizeResource(v, 'paperclip.snapshot', 'read', {}, snapshot);
+  authorizeResource(v, 'paperclip.task', 'read', { id: 't1' }, snapshot);
+  denied(() => authorizeResource(v, 'paperclip.dashboard', 'read', {}, snapshot));
+  const task = (id: string, projectId: string) => ({ id, key: id, title: id, status: 'todo', priority: 'medium', source: 'local', projectId, parentId: null, goalId: null, assigneeId: null, assigneeLabel: null, createdAt: '', updatedAt: '', startedAt: null, completedAt: null, live: false, blockedByIds: [], origin: null });
+  const ws = {
+    paperclip: null, goals: [], labels: [], fetchedAt: '', counts: { liveRuns: 0, inbox: 0, failedRuns: 0, openTasks: 0 }, agentCounts: { active: 1, paused: 0, resumable: { paperclip: 0, local: 0, projects: {} } },
+    projects: [{ id: 'p-shared', name: 'Shared' }, { id: 'p-secret', name: 'Secret' }],
+    tasks: [task('t-a', 'p-shared'), task('t-b', 'p-secret')],
+    agents: [{ id: 'a1', projectId: 'p-shared' }, { id: 'a2', projectId: 'p-secret' }],
+    runs: [{ id: 'r1', taskId: 't-a', status: 'running' }, { id: 'r2', taskId: 't-b', status: 'failed' }],
+    inbox: [{ id: 'i1', kind: 'review', projectId: 'p-shared' }, { id: 'i2', kind: 'blocked', projectId: 'p-secret' }, { id: 'gate:1', kind: 'approval', projectId: null }],
+  };
+  const out = filterOutput(v, 'paperclip.snapshot', ws, snapshot) as typeof ws & { agentCounts?: unknown };
+  assert.deepEqual(out.projects.map(p => p.id), ['p-shared']);
+  assert.deepEqual(out.tasks.map(t => t.id), ['t-a']);
+  assert.deepEqual(out.agents.map(a => a.id), ['a1']);
+  assert.deepEqual(out.runs.map(r => r.id), ['r1']);
+  assert.deepEqual(out.inbox.map(i => i.id), ['i1']);
+  assert.equal(out.agentCounts, undefined, 'server-wide Pause counts are not a member\'s to see');
+  assert.deepEqual(out.counts, { liveRuns: 1, inbox: 1, failedRuns: 0, openTasks: 1 });
+  denied(() => filterOutput(v, 'paperclip.task', { task: task('t-b', 'p-secret') }, snapshot));
+  assert.ok(filterOutput(v, 'paperclip.task', { task: task('t-a', 'p-shared') }, snapshot));
+  const admin = accessView(user('admin'), [], new Map());
+  assert.equal(filterOutput(admin, 'paperclip.snapshot', ws, snapshot), ws, 'owners and admins see everything');
+});
+
 test('R281 must-fix 1: org.import.preview parses an uploaded package on the server, so only owners and admins may run it', () => {
   const viewer = accessView(user('viewer'), grants, owners), member = accessView(user('member'), grants, owners), admin = accessView(user('admin'), [], owners);
   for (const v of [viewer, member]) denied(() => authorizeResource(v, 'org.import.preview', 'read', { source: { kind: 'zip', base64: 'AAAA' } }, snapshot), 'forbidden');
@@ -243,4 +271,27 @@ test('R281 should-fix 10c: work.docs.save records the signed-in person as the au
   assert.equal((seen[0] as { by: string }).by, 'Mia Member');
   await dispatch(ctx as never, { user: me } as never, 'work.docs.save', { projectId: 'p-shared', taskId: 't', key: 'plan', text: 'x' });
   assert.equal((seen[1] as { by: string }).by, 'Mia Member');
+});
+
+test('the organisation name: set at init, trimmed, shown by server.me; only an owner can change it', async () => {
+  const { cleanOrgName, readConfig, writeConfig, paths, defaultConfig } = await import('../src/config.ts');
+  const { dispatch } = await import('../src/rpc.ts');
+  const { mkdtempSync, rmSync } = await import('node:fs'); const { tmpdir } = await import('node:os'); const { join } = await import('node:path');
+  assert.equal(cleanOrgName('  Acme   Data \n Ops '), 'Acme Data Ops'); assert.equal(cleanOrgName('   '), null); assert.equal(cleanOrgName(42), null); assert.equal(cleanOrgName('x'.repeat(200))!.length, 80);
+  const dir = mkdtempSync(join(tmpdir(), 'muster-org-')); const pt = paths(dir);
+  try {
+    writeConfig(pt, { ...defaultConfig(), orgName: cleanOrgName('Acme Data Ops') });
+    assert.equal(readConfig(pt)!.orgName, 'Acme Data Ops', 'persisted in server.json');
+    let name = readConfig(pt)!.orgName;
+    const audit: unknown[] = [];
+    const ctx = { version: '1', orgName: () => name, setOrgName: async (n: string | null) => { name = n; writeConfig(pt, { ...readConfig(pt)!, orgName: n }); }, audit: { append: async (e: unknown) => { audit.push(e); } } };
+    const me = await dispatch(ctx as never, { user: user('member') } as never, 'server.me', {}) as { server: { name: string | null } };
+    assert.equal(me.server.name, 'Acme Data Ops');
+    await assert.rejects(dispatch(ctx as never, { user: user('admin') } as never, 'server.org.set', { name: 'Hijack' }), /Only owners/);
+    assert.equal(name, 'Acme Data Ops');
+    assert.deepEqual(await dispatch(ctx as never, { user: user('owner') } as never, 'server.org.set', { name: '  Ragnar Ops ' }), { name: 'Ragnar Ops' });
+    assert.equal(readConfig(pt)!.orgName, 'Ragnar Ops'); assert.equal(audit.length, 1);
+    await dispatch(ctx as never, { user: user('owner') } as never, 'server.org.set', { name: '' });
+    assert.equal(readConfig(pt)!.orgName, null, 'clearing the name returns to the address');
+  } finally { rmSync(dir, { recursive: true, force: true }); }
 });

@@ -34,6 +34,7 @@ import {MENU_CHANNEL,MENU_CLOSE_CHANNEL,type MenuAction} from '../shared/menu-pr
 import {installProcessGuard} from './process-guard.ts';
 import {passwordStoreSwitch} from './linux-launch.ts';
 import {electronSecretBox} from '../runtime/memory-context.ts';
+import {ServerSignInWindows} from './server-signin-window.ts';
 
 app.setName('Muster Agent');
 {const store=passwordStoreSwitch(process.env,process.argv);if(store)app.commandLine.appendSwitch('password-store',store);}
@@ -230,6 +231,8 @@ async function main(): Promise<void> {
     ],
   });
   const desktopWork = new DesktopWorkspaces(loaded.service,processes,computers);
+  // Sign in to Muster Server inside the app: the server's own page in a window with a per-origin cookie jar. The session cookie goes straight to the runtime (never the renderer).
+  const signInWindows = new ServerSignInWindows({onSession:(baseUrl,cookie)=>loaded.service.invoke('paperclip.session.set',{baseUrl,cookie}).catch(()=>undefined)});
   // SBX-13: sleep/wake. The runtime pauses timers that would misfire, then on wake fires due work once and re-checks
   // provider sessions; sandboxes are re-inspected here because ScopedComputers lives in main. Lock/unlock are no-ops.
   const forwardPower=(state:'suspend'|'resume'|'lock-screen'|'unlock-screen')=>{
@@ -596,6 +599,12 @@ async function main(): Promise<void> {
       if(typeof text!=='string'||text.length>2097152)throw new Error('Copy exceeds the 2 MB limit.');
       clipboard.writeText(text);return;
     }
+    if(command === 'musterServer.signInWindow'){
+      const request=input as Commands['musterServer.signInWindow']['input'];
+      if(!request||typeof request.baseUrl!=='string'||request.baseUrl.length>2048||(request.url!==undefined&&(typeof request.url!=='string'||request.url.length>8192)))throw new Error('Invalid sign-in request.');
+      if(request.close){signInWindows.close(request.baseUrl);return {opened:false};}
+      return signInWindows.open({url:request.url??request.baseUrl,baseUrl:request.baseUrl},window&&!window.isDestroyed()?window:undefined);
+    }
     if(command === 'link.open'){
       const raw=(input as {url?:unknown})?.url;
       if(typeof raw!=='string'||raw.length>8192)throw new Error('Invalid link.');
@@ -627,6 +636,13 @@ async function main(): Promise<void> {
       });
       if (command === 'files.trash') onEvent({type:'workspaceChanged',folderId:folder.id});
       return;
+    }
+    if (command === 'paperclip.signin.signout' || command === 'paperclip.disconnect' || command === 'musterServer.disconnect') {
+      // Signing out clears BOTH the key (the runtime revokes it) and this server's sign-in window session (its partition).
+      const before = await service.invoke('paperclip.config.get', {}).catch(() => null);
+      const outcome = await desktopWork.invoke(command, input as Commands[typeof command]['input']);
+      if (before && before.mode !== 'off') await signInWindows.clear(before.baseUrl).catch(() => undefined);
+      return outcome;
     }
     const result = await desktopWork.invoke(command, input as Commands[typeof command]['input']);
     // UX-19: every settings command answers with the full values; keep the native appearance in step.
@@ -790,6 +806,7 @@ async function main(): Promise<void> {
       if (service) {
         disposal ??= (async()=>{
           // A failing command/container cleanup must never skip provider cancellation.
+          signInWindows.dispose();
           const outcomes=await Promise.allSettled([desktopWork.dispose(),loaded.service.dispose()]);
           const failure=outcomes.find(result=>result.status==='rejected');
           if(failure?.status==='rejected')throw failure.reason;

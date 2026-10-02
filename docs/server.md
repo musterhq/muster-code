@@ -270,10 +270,33 @@ settings belong to admins.
 
 ## Connecting the desktop app
 
-In the desktop app, open **Settings › Integrations › Muster Server**. It is optional and stays off until you connect. Enter the server
-URL and either your username and password, or an API token. A password is exchanged once for a token and is not stored. The token is
-kept in the macOS Keychain (or the Linux keyring) and is only ever sent to that server's address. Once connected, **Show projects**
-lists the projects your account can open, and **Open** takes you to that project in the server's web UI.
+In the desktop app, open **Settings › Integrations › Muster Server**. It is optional and stays off until you connect. There is one
+field, **Server address**, and one button, **Connect**. Muster works out by itself whether the address is a Muster Server or a
+Paperclip-compatible one and how it signs people in. A server running on this Mac is offered inline ("Found a server on this Mac").
+Under **Other ways to connect**, **Use an API token instead** takes a token for scripts and special cases; it is kept in the macOS
+Keychain (or the Linux keyring) and only ever sent to that server's address.
+
+Connect opens the server's own sign-in page in a window of the app ("Waiting for you to sign in on <host>..."; Cancel stops it).
+You sign in there, and on a Muster Server press **Approve** on the "Connect the Muster app" page; Muster never sees your password.
+That window keeps its session in a cookie jar of its own per server address, stays on the server's
+address (anything else opens in your browser) and has no Node access; the app reads only the session-token cookie from it and keeps it
+encrypted, bound to that address. A hosted server only lets a browser session onto its live socket, so with that session updates arrive
+instantly. If the session ends, updates continue every few seconds (2.5 s while things change, 15 s when quiet, never while the window
+is hidden) and **Reconnect** reopens the window; you are not asked to sign in to the server again. **Use my browser instead**
+approves in your own browser; updates then poll. **Disconnect** revokes the key and clears the window's session. Existing links
+keep working after an update; a token link shows "Connected with an API token". **Details** shows the server version and the
+Paperclip-compatible line.
+
+The org shown in the app is the **organisation name** the owner sets (`muster-server init --org-name "Acme"`, or Settings › Server › Organisation name in the web UI); with no name set it falls back to the server's host name.
+
+Once connected, the server's org and projects show in the app itself: projects grouped under the org in the sidebar's Projects section, their
+tasks as threads, the Roster graph, the Inbox, Ledger receipts, approvals, and Pause and Resume on agents. Nothing opens in a browser. Live
+changes arrive over the server's own `/events` WebSocket (a Muster Server accepts the signed-in token on it); if it is not reachable the app
+falls back to polling while a screen that shows them is open. **Import from Muster Server…** copies a server project, its tasks and its Roster into a local project (reads only).
+
+The app finds out which kind of server an address is by itself (`/healthz` for Muster Server). A server that speaks the Paperclip REST API
+works the same way, and only the connection details line says "Paperclip-compatible". An existing Paperclip link and its token carry over
+unchanged: nobody signs in again.
 
 ## Backup and restore
 

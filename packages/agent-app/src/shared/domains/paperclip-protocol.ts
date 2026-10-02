@@ -14,18 +14,54 @@ import type { ExecutionPolicy, RunMeta, SecretProposal, TaskMonitor, TaskStageSt
 import type { TaskLabel, TaskPrSummary } from './work-protocol.ts';
 
 export type PaperclipMode = 'off' | 'local' | 'custom';
+/** Which server is behind the one "Muster Server" connection: our own packages/server, or a Paperclip instance (shown only as "Paperclip-compatible" in connection details). */
+export type ServerBackendKind = 'paperclip' | 'muster-server';
+export type ServerSignInMethod = 'password' | 'browser';
 export const PAPERCLIP_LOCAL_URL = 'http://127.0.0.1:3100';
 export type WorkspaceSource = 'paperclip' | 'local';
 
 /** The token never reaches the renderer: only whether one is stored. */
-export interface PaperclipConfigView { mode: PaperclipMode; baseUrl: string; hasToken: boolean; secureStorage: boolean; companyId: string | null }
+export interface PaperclipConfigView {
+  mode: PaperclipMode; baseUrl: string; hasToken: boolean; secureStorage: boolean; companyId: string | null;
+  /** Detected from the URL; null until it has been. */
+  backend?: ServerBackendKind | null;
+  /** "Paperclip-compatible" when the backend is a Paperclip instance: the one place that word is allowed to appear (connection details). */
+  compatibility?: string | null;
+  /** Who a Muster Server token signs in as, from the server's own answer. */
+  user?: { username: string; displayName: string; role: string } | null;
+  serverVersion?: string | null; connectedAt?: string | null;
+  /** Who a browser-approval sign-in signed this Mac in as (null for a pasted token or a password sign-in, or when signed out). */
+  signedIn?: { name: string | null; email: string | null } | null;
+  /** Why a sign-in ended on its own ("Signed out by Muster Server — sign in again."), until the next sign-in. */
+  signInNotice?: string | null;
+  /** How updates reach this Mac right now: `socket` (instant), `poll` (every 15 s while a screen that shows them is open), `off`. */
+  live?: LiveChannel;
+  /** The hosted-server browser session behind instant updates: `active`, `expired` (Reconnect for live updates), or `none`. */
+  session?: 'none' | 'active' | 'expired';
+  /** A browser sign-in whose session is missing or expired: updates are polling and a quiet Reconnect is offered. */
+  reconnect?: boolean;
+  /** How people can sign in to this kind of server (empty: API token only). */
+  signIn?: ServerSignInMethod[];
+}
+/** Browser-approval sign-in (#285): the server's own approval page. The key and the challenge secret never reach the renderer. */
+export interface PaperclipSignInState {
+  phase: 'idle' | 'waiting' | 'signed-in' | 'expired' | 'cancelled' | 'failed';
+  baseUrl?: string;
+  /** While waiting: the page to open in the system browser (`link.open`). */
+  approvalUrl?: string;
+  expiresAt?: string;
+  message?: string;
+  user?: { name: string | null; email: string | null };
+}
 /** `token`: omitted keeps the stored one, '' removes it. */
-export interface PaperclipConfigInput { mode: PaperclipMode; baseUrl?: string; token?: string; companyId?: string | null }
+export interface PaperclipConfigInput { mode: PaperclipMode; baseUrl?: string; token?: string; companyId?: string | null; backend?: ServerBackendKind }
 export interface PaperclipTestResult {
   ok: boolean; stage: 'config' | 'network' | 'auth' | 'service' | 'ok'; message: string; latencyMs?: number;
   version?: string; deploymentMode?: string; companies?: WorkspaceCompany[];
   /** A heads-up that does not stop the test: a token that would travel over plain http to another machine. */
   warning?: string;
+  /** What the probe found at the URL, and the address it settled on (a server on this Mac may be on either port). */
+  backend?: ServerBackendKind; compatibility?: string | null; signIn?: ServerSignInMethod[]; baseUrl?: string;
 }
 
 export type WorkspaceStatus = 'backlog' | 'todo' | 'in_progress' | 'in_review' | 'blocked' | 'done' | 'cancelled';
@@ -105,7 +141,7 @@ export type ApprovalDecision = 'approve' | 'reject' | 'request_revision';
 export type LiveChannel = 'socket' | 'poll' | 'events' | 'off';
 /** The linked Paperclip as the snapshot saw it. `stale`: the last read failed; `cached` then says whether its rows are the
  *  last good copy (true) or missing because nothing was read yet (false). */
-export interface PaperclipLink { origin: string; company: WorkspaceCompany | null; companies: WorkspaceCompany[]; live: LiveChannel; stale?: string; cached?: boolean }
+export interface PaperclipLink { origin: string; company: WorkspaceCompany | null; companies: WorkspaceCompany[]; live: LiveChannel; stale?: string; cached?: boolean; /** Offer "Reconnect for live updates" (a browser sign-in whose session ended), and where to reconnect. */ reconnect?: boolean; baseUrl?: string }
 export interface WorkspaceSnapshot {
   paperclip: PaperclipLink | null;
   tasks: WorkspaceTask[]; agents: WorkspaceAgent[]; projects: WorkspaceProject[]; goals: WorkspaceGoal[];
@@ -267,9 +303,22 @@ export interface ImportPlan { company: { id: string; name: string } | null; comp
 /** Per Paperclip project: 'skip' leaves it out of the import. Imports never write into a project you made in Muster. */
 export type ImportTargets = Record<string, 'skip' | 'import'>;
 
+/** The `paperclip.*` command names are the wire names of the one "Muster Server" connection (existing callers and stored data keep working). `paperclip.config.*` and `paperclip.test` configure and
+ *  test whichever backend the URL turns out to be (detected, never asked); sign-in is `musterServer.connect`. (`server.*` is reserved by Muster Server's own admin commands.) */
 export interface PaperclipCommands {
   'paperclip.config.get': { input: Record<string, never>; output: PaperclipConfigView };
   'paperclip.config.set': { input: PaperclipConfigInput; output: PaperclipConfigView };
+  /** Starts the server's browser approval for this URL and returns the page to open. Polls only while waiting. */
+  'paperclip.signin.start': { input: { baseUrl: string }; output: PaperclipSignInState };
+  'paperclip.signin.status': { input: Record<string, never>; output: PaperclipSignInState };
+  'paperclip.signin.cancel': { input: Record<string, never>; output: PaperclipSignInState };
+  /** Revokes the key the server issued to this Mac and removes it. `message`: anything to tell the person (a revoke the server did not confirm). */
+  'paperclip.signin.signout': { input: Record<string, never>; output: { config: PaperclipConfigView; revoked: boolean; message?: string } };
+  /** Disconnect: revokes the key a browser approval issued (when it did), forgets every key and session, and turns the connection off. */
+  'paperclip.disconnect': { input: Record<string, never>; output: { config: PaperclipConfigView; revoked: boolean; message?: string } };
+  /** The app's sign-in window obtained the server's session cookie (the main process calls this; the cookie never reaches the renderer). */
+  'paperclip.session.set': { input: { baseUrl: string; cookie: string }; output: { state: 'pending' | 'active' } };
+  'paperclip.session.clear': { input: Record<string, never>; output: { ok: true } };
   /** Tries a connection without saving it. Omitted fields fall back to the saved config (and saved token). */
   'paperclip.test': { input: { mode?: PaperclipMode; baseUrl?: string; token?: string }; output: PaperclipTestResult };
   /** Muster's projects, tasks, agents, runs and needs-you items, plus the linked Paperclip's (ETag-revalidated), in one read. */
@@ -320,7 +369,7 @@ export interface PaperclipCommands {
 /** Coalesced: at most one per second while watched (every 5 s otherwise, for the badge). `taskIds` lets an open thread refetch only when it changed. */
 export type PaperclipEvent = { type: 'projectsWorkspaceChanged'; scopes: ('tasks' | 'runs' | 'agents' | 'inbox' | 'config')[]; taskIds: string[] };
 export const PAPERCLIP_COMMANDS = {
-  'paperclip.config.get': true, 'paperclip.config.set': true, 'paperclip.test': true, 'paperclip.snapshot': true, 'paperclip.task': true,
+  'paperclip.config.get': true, 'paperclip.config.set': true, 'paperclip.signin.start': true, 'paperclip.signin.status': true, 'paperclip.signin.cancel': true, 'paperclip.signin.signout': true, 'paperclip.disconnect': true, 'paperclip.session.set': true, 'paperclip.session.clear': true, 'paperclip.test': true, 'paperclip.snapshot': true, 'paperclip.task': true,
   'paperclip.comment': true, 'paperclip.task.update': true, 'paperclip.task.create': true, 'paperclip.agent.pause': true, 'paperclip.agent.resume': true,
   'paperclip.pauseAll': true, 'paperclip.resumeAll': true, 'paperclip.approval.decide': true, 'paperclip.run.cancel': true, 'paperclip.memory': true, 'paperclip.list': true,
   'paperclip.watch': true, 'paperclip.badge': true, 'paperclip.ledger': true, 'paperclip.ledger.backfill': true, 'paperclip.inbox.dismiss': true, 'paperclip.inbox.dismissed': true, 'paperclip.inbox.restore': true, 'paperclip.interaction.respond': true, 'paperclip.import': true, 'paperclip.task.start': true, 'paperclip.dashboard': true, 'paperclip.import.plan': true,
