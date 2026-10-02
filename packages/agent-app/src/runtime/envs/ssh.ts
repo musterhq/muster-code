@@ -13,6 +13,8 @@ export const SSH_BIN = process.platform === 'win32' ? 'ssh.exe' : '/usr/bin/ssh'
 const KEYSCAN = process.platform === 'win32' ? 'ssh-keyscan.exe' : '/usr/bin/ssh-keyscan';
 export const MAX_OUTPUT = 200_000;
 export const shq = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
+/** A remote path as shell text: `~` and `~/x` expand to the login home (quoted, so spaces are safe); everything else is quoted literally. */
+export const remotePath = (p: string) => p === '~' ? '"$HOME"' : /^~\//.test(p) ? `"$HOME"/${shq(p.slice(2))}` : shq(p);
 export const knownHostsFile = (dataDir: string) => join(dataDir, 'ssh', 'known_hosts');
 /** The `known_hosts` name for a host: bracketed when the port is not 22. */
 export const hostPattern = (h: Pick<SshHost, 'host' | 'port'>) => h.port === 22 ? h.host : `[${h.host}]:${h.port}`;
@@ -66,7 +68,7 @@ export function forgetHostKey(dataDir: string, h: Pick<SshHost, 'host' | 'port'>
 export interface ExecResult { code: number | null; stdout: string; stderr: string; timedOut: boolean; truncated: boolean }
 /** Runs `command` on the host from `cwd` (the remote folder), capped in output and time. `stdin` feeds the remote command (for writes). */
 export function sshExec(dataDir: string, h: Pick<SshHost, 'host' | 'port' | 'user' | 'keyPath'>, cwd: string, command: string, opts: { timeoutSec?: number; stdin?: string } = {}): Promise<ExecResult> {
-  const timeout = Math.min(Math.max(opts.timeoutSec ?? 60, 1), 600) * 1000, dir = cwd === '~' ? '"$HOME"' : /^~\//.test(cwd) ? `"$HOME"/${shq(cwd.slice(2))}` : shq(cwd);
+  const timeout = Math.min(Math.max(opts.timeoutSec ?? 60, 1), 600) * 1000, dir = remotePath(cwd);
   return new Promise(resolve => {
     const child = spawn(SSH_BIN, [...sshArgs(dataDir, h), `cd ${dir} && ${command}`], { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true, env: { PATH: process.env.PATH ?? '/usr/bin:/bin' } });
     let stdout = '', stderr = '', truncated = false, timedOut = false;
