@@ -70,7 +70,7 @@ test('G21: scan, compare, trust; test; a chat bound to the host gets tools that 
   const big = await tool('ssh_write', { path: 'big.txt', text: 'x'.repeat(900_000) }); assert.equal(big.error, false, big.text);
   assert.equal(statSync(join(s.dir, 'big.txt')).size, 900_000);
   // ~/ means the login home, not a folder named "~" under the remote folder (nothing is written outside the temp dir).
-  const home = execFileSync('sh', ['-c', 'cd ~ && pwd']).toString().trim();
+  const home = (await tool('ssh_exec', { command: 'printf %s "$HOME"' })).text.split('\n')[1]!;
   const missing = await tool('ssh_read', { path: '~/muster-w4-no-such-file.txt' }); assert.equal(missing.error, true);
   assert.ok(missing.text.includes(`${home}/muster-w4-no-such-file.txt`), `expanded to the home folder: ${missing.text}`);
   assert.ok((await tool('ssh_list', { path: '~' })).text.includes('total'), 'ls of ~ lists the home folder');
