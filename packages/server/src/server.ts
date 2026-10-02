@@ -9,7 +9,7 @@ import type { AgentEvent, Snapshot } from '../../agent-app/src/shared/protocol.t
 import { filterEvent, type AccessView } from './access.ts';
 import { Accounts, AuthError, publicUser, type Principal } from './auth/accounts.ts';
 import { AuditLog } from './audit.ts';
-import { RemoteAgents } from './agents/remote.ts';
+import { RemoteAgents, waitSeconds } from './agents/remote.ts';
 import { hostAllowed, isLoopback, paths, validateBind, type Paths, type ServerConfig } from './config.ts';
 import { ConnectorRegistry, type TurnRunner } from './connectors/registry.ts';
 import { NotificationBridge } from './connectors/notify.ts';
@@ -449,7 +449,11 @@ export class MusterServer {
     const rest = path.slice('/agent/v1/'.length);
     if (rest === 'me' && req.method === 'GET') return wrap(async () => ({ agent: { name: c.agentName, memberId: c.memberId, projectId: c.projectId, project: (await rt.snapshot()).projects.find(p => p.id === c.projectId)?.name ?? null, expiresAt: c.expiresAt } }));
     if (rest === 'tasks' && req.method === 'GET') return wrap(() => rt.invoke('project.remote.tasks', base));
-    if (rest === 'wait' && req.method === 'GET') { const r = await this.agents.wait(c, Number(url.searchParams.get('timeout') ?? 25) * 1000); return ok({ changed: r === 'changed' }); }
+    if (rest === 'wait' && req.method === 'GET') {
+      const r = await this.agents.wait(c, waitSeconds(url.searchParams.get('timeout')) * 1000);
+      if (r === 'busy') { res.setHeader('retry-after', '5'); return this.json(res, 429, { ok: false, error: 'This agent already has its allowed number of open waits.', code: 'busy' }); }
+      return ok({ changed: r === 'changed' });
+    }
     const m = /^tasks\/([A-Za-z0-9_-]{1,128})(?:\/(comment|state|doc))?$/.exec(rest);
     if (m) {
       const taskId = m[1]!, action = m[2];

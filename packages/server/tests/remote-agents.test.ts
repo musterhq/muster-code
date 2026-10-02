@@ -1,7 +1,7 @@
 /** Wave 4: G28 remote agents by invite and G29 project invites, against the real store with a fake runtime. */
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { RemoteAgents } from '../src/agents/remote.ts';
+import { RemoteAgents, waitSeconds } from '../src/agents/remote.ts';
 import { AuditLog } from '../src/audit.ts';
 import { Accounts, AuthError } from '../src/auth/accounts.ts';
 import { LoginRateLimiter } from '../src/auth/rate-limit.ts';
@@ -97,4 +97,17 @@ test('G29: a project owner invites people to their project only, as members or v
   const stored = (await store.listInvites()).find(i => i.id === ok.invite.id)!; assert.equal(stored.projectRole, 'editor');
   const user = await accounts.acceptInvite(ok.token, { username: 'sam', password: PW }); assert.equal(user.role, 'member');
   await assert.rejects(accounts.acceptInvite(ok.token, { username: 'sam2', password: PW }), /already used/);
+});
+
+test('R281 should-fix 12: a credential holds at most two long polls, and the timeout is a validated number', async () => {
+  const { agents, owner } = await setup();
+  const { token } = await agents.createInvite(owner, { projectId: 'p1', name: 'Poller' }), claimed = await agents.claim(token, {});
+  const cred = (await agents.authenticate(claimed.credential, '10.0.0.1'))!.credential;
+  const one = agents.wait(cred, 30_000), two = agents.wait(cred, 30_000);
+  assert.equal(await agents.wait(cred, 30_000), 'busy', 'a third open wait is refused');
+  agents.notify({ type: 'projectChanged', projectId: 'p1' });
+  assert.deepEqual([await one, await two], ['changed', 'changed']);
+  assert.equal(await agents.wait(cred, 1), 'timeout', 'the slots free up when the polls end');
+  assert.equal(waitSeconds(null), 25); assert.equal(waitSeconds(''), 25); assert.equal(waitSeconds('abc'), 25); assert.equal(waitSeconds('NaN'), 25); assert.equal(waitSeconds('Infinity'), 25);
+  assert.equal(waitSeconds('0'), 1); assert.equal(waitSeconds('-5'), 1); assert.equal(waitSeconds('999'), 30); assert.equal(waitSeconds('12.5'), 12.5);
 });
