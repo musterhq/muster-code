@@ -54,6 +54,31 @@ test('review: a package cannot pollute prototypes through __proto__, constructor
   assert.deepEqual(Object.keys(parsed).sort(), ['a', 'nested']); assert.deepEqual(parsed.nested, { ok: 2 });
 });
 
+test('review: an import is least privilege by default, a replaced agent is stopped and listed for Activate, and a new agent is paused', async t => {
+  const { h, cto } = await seeded(t);
+  const out = await h.s.invoke('org.export', { projectId: h.project.id }), pkg = { kind: 'zip' as const, base64: out.zipBase64 };
+  const gov = (projectId: string, memberId: string) => h.s.invoke('project.agent.gov.get', { projectId, memberId });
+  // Default: the package asks for canHire, a project scope and a deny rule; none of it is applied.
+  const plain = await h.s.invoke('org.import.apply', { source: pkg, name: 'Plain' });
+  const plainCto = (await h.s.invoke('project.members.list', { projectId: plain.projectId })).members.find(m => m.name === 'CTO')!;
+  const g = (await gov(plain.projectId, plainCto.id)).governance;
+  assert.equal(g.capabilities.canHire, false); assert.equal(g.capabilities.canAssign, false); assert.equal(g.capabilities.assignScope, 'subtree'); assert.equal(g.toolRules.length, 0);
+  // Replace: the running agent is paused, and shows in the Activate list.
+  assert.equal((await h.s.invoke('project.members.list', { projectId: h.project.id })).members.find(m => m.id === cto.id)!.pausedAt ?? null, null);
+  const rep = await h.s.invoke('org.import.apply', { source: pkg, projectId: h.project.id, collision: 'replace', agents: ['cto'], includeRoutines: false, includeTasks: false });
+  assert.equal(rep.replaced.length, 1);
+  assert.ok((await h.s.invoke('project.members.list', { projectId: h.project.id })).members.find(m => m.id === cto.id)!.pausedAt, 'the replaced agent is paused');
+  assert.ok((await h.s.invoke('org.imports.pending', { projectId: h.project.id })).agents.some(a => a.id === cto.id), 'and listed for Activate');
+  assert.equal((await gov(h.project.id, cto.id)).governance.capabilities.canHire, true, 'a replaced agent keeps the permissions it had');
+  await h.s.invoke('org.activate', { projectId: h.project.id });
+  assert.equal((await h.s.invoke('project.members.list', { projectId: h.project.id })).members.find(m => m.id === cto.id)!.pausedAt ?? null, null);
+  // Confirmed: the package's own permissions apply.
+  const asked = await h.s.invoke('org.import.apply', { source: pkg, name: 'Asked', permissions: 'imported' });
+  const askedCto = (await h.s.invoke('project.members.list', { projectId: asked.projectId })).members.find(m => m.name === 'CTO')!;
+  assert.equal((await gov(asked.projectId, askedCto.id)).governance.capabilities.canHire, true);
+  await assert.rejects(h.s.invoke('org.import.apply', { source: pkg, name: 'Bad', permissions: 'root' as never }), /least or imported/);
+});
+
 async function seeded(t: import('node:test').TestContext) {
   const h = await wave1(t);
   const cto = await h.member('CTO', { instructions: 'You are the CTO.\nKeep changes small.' }), qa = await h.member('QA', { reportsTo: cto.id, instructions: 'Verify every fix.' });
@@ -81,7 +106,9 @@ test('G16: export writes a package with agents, open tasks, routines and no secr
   const preview = await h.s.invoke('org.import.preview', { source: { kind: 'zip', base64: out.zipBase64 }, name: 'Copy' });
   assert.equal(preview.target.kind, 'new'); assert.deepEqual(preview.agents.map(a => a.slug).sort(), ['cto', 'qa']); assert.ok(preview.agents.every(a => a.action === 'create'));
   assert.ok(preview.tasks.some(x => x.recurring && /Mondays|Mon/.test(x.schedule!))); assert.ok(preview.notes.some(n => /start paused/.test(n)));
-  const res = await h.s.invoke('org.import.apply', { source: { kind: 'zip', base64: out.zipBase64 }, name: 'Copy' });
+  assert.equal(preview.privileged, true); assert.equal(preview.agents.find(a => a.slug === 'cto')!.permissions!.canHire, true); assert.equal(preview.agents.find(a => a.slug === 'cto')!.permissions!.toolRules, 1);
+  assert.ok(preview.notes.some(n => /more than the default permissions/.test(n)));
+  const res = await h.s.invoke('org.import.apply', { source: { kind: 'zip', base64: out.zipBase64 }, name: 'Copy', permissions: 'imported' });
   assert.equal(res.created.length, 2); assert.equal(res.routines.length, 1); assert.equal(res.tasks.length, 1);
   const team = (await h.s.invoke('project.members.list', { projectId: res.projectId })).members.filter(m => m.kind === 'agent' && m.id !== 'agent');
   assert.ok(team.every(m => m.pausedAt), 'imported agents are paused');
