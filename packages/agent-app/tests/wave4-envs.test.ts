@@ -135,5 +135,18 @@ test('G22: a service does not inherit provider keys or tokens from the app', asy
   const { scrubbed } = await import('../src/runtime/envs/services.ts');
   const out = scrubbed({ PATH: '/bin', OPENAI_API_KEY: 'sk-x', GITHUB_TOKEN: 'ghp_x', MUSTER_SECRET_KEY: 'k', DB_PASSWORD: 'p', HOME: '/h', PORT: '3000' });
   assert.deepEqual(Object.keys(out).sort(), ['HOME', 'PATH', 'PORT']);
+  const wider = scrubbed({ PATH: '/bin', AWS_ACCESS_KEY_ID: 'a', AWS_PROFILE: 'p', AZURE_CLIENT_ID: 'z', GOOGLE_APPLICATION_CREDENTIALS: '/c.json', GCP_PROJECT: 'g', STRIPE_SECRET_KEY: 's', DATABASE_URL_SECRET: 'd', NPM_TOKEN: 'n', SSH_AUTH_SOCK: '/s', AWS_CREDENTIALS: 'x', SERVICE_CREDENTIAL: 'y', DB_PASSWD: 'p', API_KEY: 'k', LANG: 'en_US.UTF-8', EDITOR: 'vi', MONKEY: 'ape' });
+  assert.deepEqual(Object.keys(wider).sort(), ['EDITOR', 'LANG', 'MONKEY', 'PATH']);
   void t;
+});
+
+test('review: a dev server gets HOST=127.0.0.1 and none of the cloud or credential variables', async t => {
+  const { ServiceRunner } = await import('../src/runtime/envs/services.ts');
+  const dir = mkdtempSync(join(tmpdir(), 'muster-w4-svc-')); t.after(() => { execFileSync('rm', ['-rf', dir]); });
+  process.env.AWS_SECRET_ACCESS_KEY = 'aws-secret-value'; process.env.STRIPE_SECRET_KEY = 'sk-live-x'; t.after(() => { delete process.env.AWS_SECRET_ACCESS_KEY; delete process.env.STRIPE_SECRET_KEY; });
+  const runner = new ServiceRunner(dir, () => undefined);
+  const r = runner.start({ id: 's', projectId: 'p', taskId: 't', name: 'env', command: 'echo "host=$HOST name=$HOSTNAME aws=$AWS_SECRET_ACCESS_KEY stripe=$STRIPE_SECRET_KEY"', port: null, folderId: null, taskKey: null } as never, dir);
+  await until(() => r.state === 'stopped' || r.state === 'failed' || /host=/.test(r.log), 'output');
+  assert.match(r.log, /host=127\.0\.0\.1 name=127\.0\.0\.1 aws= stripe=\s/);
+  await runner.stopAll();
 });

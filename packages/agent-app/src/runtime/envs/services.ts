@@ -13,7 +13,7 @@ import type { ServiceDecl, ServiceState } from '../../shared/domains/envs-protoc
 const URL_RE = /https?:\/\/(?:localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\]):(\d{2,5})[^\s'")]*/i, TAIL = 4000, READY_MS = 45_000;
 export interface Running { decl: ServiceDecl; child: ChildProcess; state: ServiceState; url: string | null; startedAt: string; endedAt: string | null; exitCode: number | null; log: string; port: number | null; timers: Set<ReturnType<typeof setTimeout>> }
 /** A dev server a task runs does not inherit the app's provider keys or Muster's own settings. */
-const SECRET_ENV = /^(?:OPENAI|ANTHROPIC|CODEX|CLAUDE|GEMINI|OPENROUTER|MUSTER)_|(?:_API_KEY|_TOKEN|_SECRET|_PASSWORD)$/;
+const SECRET_ENV = /^(?:OPENAI|ANTHROPIC|CODEX|CLAUDE|GEMINI|OPENROUTER|MUSTER)_|^(?:AWS|AZURE|GCP|GOOGLE)_|(?:_KEY|_TOKEN|_SECRET|_PASSWORD|_PASSWD|CREDENTIALS?)$|SECRET|^SSH_AUTH_SOCK$/i;
 export const scrubbed = (env: NodeJS.ProcessEnv): NodeJS.ProcessEnv => Object.fromEntries(Object.entries(env).filter(([k]) => !SECRET_ENV.test(k)));
 const alive = (pid: number) => { try { process.kill(pid, 0); return true; } catch { return false; } };
 const commandOf = (pid: number): string => { try { return execFileSync('/bin/ps', ['-p', String(pid), '-o', 'command='], { encoding: 'utf8', timeout: 3000 }).trim(); } catch { return ''; } };
@@ -36,7 +36,7 @@ export class ServiceRunner {
   start(decl: ServiceDecl, cwd: string, env: Record<string, string> = {}): Running {
     const prior = this.running.get(decl.id); if (prior && (prior.state === 'starting' || prior.state === 'running')) throw new Error(`${decl.name} is already running.`);
     const posix = process.platform !== 'win32';
-    const child = spawn(posix ? '/bin/sh' : 'cmd.exe', posix ? ['-c', decl.command] : ['/d', '/s', '/c', decl.command], { cwd, detached: posix, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, env: { ...scrubbed(process.env), ...env, ...(decl.port ? { PORT: String(decl.port) } : {}), BROWSER: 'none', FORCE_COLOR: '0' } });
+    const child = spawn(posix ? '/bin/sh' : 'cmd.exe', posix ? ['-c', decl.command] : ['/d', '/s', '/c', decl.command], { cwd, detached: posix, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, env: { ...scrubbed(process.env), HOST: '127.0.0.1', HOSTNAME: '127.0.0.1', ...env, ...(decl.port ? { PORT: String(decl.port) } : {}), BROWSER: 'none', FORCE_COLOR: '0' } });
     const r: Running = { decl, child, state: 'starting', url: null, startedAt: new Date().toISOString(), endedAt: null, exitCode: null, log: '', port: decl.port, timers: new Set() };
     this.running.set(decl.id, r);
     if (child.pid) { const all = this.pids(); all[decl.id] = { pid: child.pid, command: decl.command }; this.savePids(all); }
