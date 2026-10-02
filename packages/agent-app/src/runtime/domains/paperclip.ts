@@ -25,6 +25,7 @@ import { normalizeRemote } from '../memory-identity.ts';
 import { PaperclipClient, PaperclipError, normalizeBaseUrl, openLiveEvents, type FetchLike, type LiveSocket, type SocketFactory } from '../paperclip-client.ts';
 import { arr, buildInbox, mapAgent, mapApproval, mapBudgets, mapDocument, mapWorkProduct, mapAttention, mapComment, mapCompany, mapGoal, mapInteraction, mapIssue, mapProject, mapReceipt, mapRows, mapRun } from '../paperclip-map.ts';
 import { activeSecretStore, SecretStore } from '../secret-store.ts';
+import { createPaperclipSignIn, SIGNED_OUT_BY_SERVER } from '../paperclip-signin.ts';
 import { attachTurnLedger, TurnLedger } from '../turn-ledger.ts';
 import { importLedgerHistory, paperclipHistory, type HistoryResult } from '../ledger-history.ts';
 import { LocalWorkspace, type Invoke, type LocalPart } from '../workspace-local.ts';
@@ -42,8 +43,8 @@ const NOISY = new Set(['heartbeat.run.log', 'heartbeat.run.event', 'heartbeat.ru
 const URGENT = new Set(['question', 'approval', 'blocked', 'failed_run', 'agent_error', 'budget']);
 
 /** `tokenOrigin` is the origin the stored token was saved for: the token is sent to that origin and nowhere else. */
-interface StoredConfig { mode: PaperclipMode; baseUrl: string; companyId: string | null; tokenOrigin: string | null }
-const DEFAULT_CONFIG: StoredConfig = { mode: 'off', baseUrl: PAPERCLIP_LOCAL_URL, companyId: null, tokenOrigin: null };
+interface StoredConfig { mode: PaperclipMode; baseUrl: string; companyId: string | null; tokenOrigin: string | null; signedIn: { name: string | null; email: string | null } | null; signInNotice: string | null }
+const DEFAULT_CONFIG: StoredConfig = { mode: 'off', baseUrl: PAPERCLIP_LOCAL_URL, companyId: null, tokenOrigin: null, signedIn: null, signInNotice: null };
 /** A Custom URL on this Mac (127.0.0.0/8, localhost, ::1) is a local Paperclip: its folder paths are this Mac's. */
 export const isLoopback = (baseUrl: unknown): boolean => { try { const host = new URL(normalizeBaseUrl(baseUrl)).hostname.replace(/^\[|\]$/g, '').toLowerCase(); return host === 'localhost' || host.endsWith('.localhost') || host === '::1' || /^127(\.\d{1,3}){3}$/.test(host); } catch { return false; } };
 const originOf = (baseUrl: unknown): string | null => { try { return new URL(normalizeBaseUrl(baseUrl)).origin; } catch { return null; } };
@@ -90,7 +91,7 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
   let config: StoredConfig = (() => {
     try {
       const raw = JSON.parse(readFileSync(configPath, 'utf8')) as Partial<StoredConfig>;
-      return { mode: raw.mode === 'local' || raw.mode === 'custom' ? raw.mode : 'off', baseUrl: typeof raw.baseUrl === 'string' ? raw.baseUrl : PAPERCLIP_LOCAL_URL, companyId: typeof raw.companyId === 'string' ? raw.companyId : null, tokenOrigin: typeof raw.tokenOrigin === 'string' ? raw.tokenOrigin : null };
+      return { mode: raw.mode === 'local' || raw.mode === 'custom' ? raw.mode : 'off', baseUrl: typeof raw.baseUrl === 'string' ? raw.baseUrl : PAPERCLIP_LOCAL_URL, companyId: typeof raw.companyId === 'string' ? raw.companyId : null, tokenOrigin: typeof raw.tokenOrigin === 'string' ? raw.tokenOrigin : null, signedIn: raw.signedIn && typeof raw.signedIn === 'object' ? { name: typeof raw.signedIn.name === 'string' ? raw.signedIn.name : null, email: typeof raw.signedIn.email === 'string' ? raw.signedIn.email : null } : null, signInNotice: typeof raw.signInNotice === 'string' ? raw.signInNotice : null };
     } catch { return { ...DEFAULT_CONFIG }; }
   })();
   const saveConfig = (next: StoredConfig) => {
@@ -102,15 +103,27 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
   };
   /** The stored token, only for the origin it was saved for; any other URL gets none. */
   const tokenFor = (baseUrl: unknown): string | undefined => { const origin = originOf(baseUrl); return origin && origin === config.tokenOrigin ? secrets().get(PAPERCLIP_SECRET_ID) : undefined; };
-  const view = (): PaperclipConfigView => { const status = secrets().status(PAPERCLIP_SECRET_ID); return { mode: config.mode, baseUrl: config.mode === 'local' ? PAPERCLIP_LOCAL_URL : config.baseUrl, hasToken: status.stored && config.tokenOrigin !== null && config.tokenOrigin === originOf(config.baseUrl), secureStorage: status.secureStorage, companyId: config.companyId }; };
+  const view = (): PaperclipConfigView => { const status = secrets().status(PAPERCLIP_SECRET_ID); return { mode: config.mode, baseUrl: config.mode === 'local' ? PAPERCLIP_LOCAL_URL : config.baseUrl, hasToken: status.stored && config.tokenOrigin !== null && config.tokenOrigin === originOf(config.baseUrl), secureStorage: status.secureStorage, companyId: config.companyId, signedIn: config.signedIn, signInNotice: config.signInNotice }; };
 
   // --- the Paperclip connection ------------------------------------------------------------------------------------
   let client: PaperclipClient | null = null;
+  /** A key that "Sign in with Paperclip" stored and Paperclip then revoked: the next request gets 401. Forget the dead key and say so. */
+  const lostSignIn = () => {
+    if (secrets().status(PAPERCLIP_SECRET_ID).stored) secrets().clear(PAPERCLIP_SECRET_ID);
+    saveConfig({ ...config, tokenOrigin: null, signedIn: null, signInNotice: SIGNED_OUT_BY_SERVER });
+    closeSocket(); stopPoll(); client = null;
+    queueEmit(['config', 'tasks', 'inbox']);
+  };
+  /** The 401 handler of a client that sent `sent` (undefined: no key). Only the stored sign-in key can sign you out. */
+  const guardFor = (baseUrl: string, sent: string | undefined) => (hadToken: boolean, status: number): string | undefined => {
+    if (hadToken) { if (status === 401 && config.signedIn && sent !== undefined && sent === tokenFor(baseUrl)) { lostSignIn(); return SIGNED_OUT_BY_SERVER; } return undefined; }
+    return config.signInNotice ?? undefined;
+  };
   const endpointFor = (mode: PaperclipMode, baseUrl: string, token: string | undefined) => ({ baseUrl: mode === 'local' ? PAPERCLIP_LOCAL_URL : normalizeBaseUrl(baseUrl), token: mode === 'custom' ? token : undefined });
   const connection = (): PaperclipClient | null => {
     if (config.mode === 'off') return null;
     const endpoint = endpointFor(config.mode, config.baseUrl, tokenFor(config.baseUrl));
-    if (!client || client.endpoint.baseUrl !== endpoint.baseUrl || client.endpoint.token !== endpoint.token) { closeSocket(); client = new PaperclipClient(endpoint, options.fetch); built = null; }
+    if (!client || client.endpoint.baseUrl !== endpoint.baseUrl || client.endpoint.token !== endpoint.token) { closeSocket(); client = new PaperclipClient(endpoint, options.fetch, { onUnauthorized: guardFor(endpoint.baseUrl, endpoint.token) }); built = null; }
     return client;
   };
   /** An approval an import carried over can be decided only while a Paperclip is linked (the decision goes to its approval endpoints). */
@@ -656,6 +669,17 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
     return budgets ? { ...result, budgets } : result;
   };
 
+  const signIn = createPaperclipSignIn({
+    fetch: options.fetch ?? ((input, init) => fetch(input, init)), timers,
+    changed: () => context.emit({ type: 'projectsWorkspaceChanged', scopes: ['config'], taskIds: [] }),
+    approved: ({ origin, baseUrl, token, user }) => {
+      // The key goes into the encrypted secret store, bound to this origin like a pasted token; a new origin forgets the old company.
+      secrets().set(PAPERCLIP_SECRET_ID, token);
+      saveConfig({ mode: 'custom', baseUrl, companyId: config.tokenOrigin === origin || originOf(config.baseUrl) === origin ? config.companyId : null, tokenOrigin: origin, signedIn: { name: user.name, email: user.email }, signInNotice: null });
+      closeSocket(); stopPoll(); built = null; client = null; companies = []; lastError = undefined;
+      queueEmit(['config', 'tasks', 'runs', 'agents', 'inbox']);
+    },
+  });
   const text = (value: unknown, label: string, max: number) => { if (typeof value !== 'string' || !value.trim()) throw new Error(`${label} is required.`); if (value.length > max) throw new Error(`${label} is too long.`); return value; };
   const id = (value: unknown) => { if (typeof value !== 'string' || !/^[\w:.-]{1,128}$/.test(value)) throw new Error('Unknown item.'); return value; };
   const sourceOf = (value: unknown): WorkspaceSource => value === 'paperclip' ? 'paperclip' : 'local';
@@ -668,16 +692,33 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
         const baseUrl = mode === 'custom' ? normalizeBaseUrl(input.baseUrl) : mode === 'local' ? PAPERCLIP_LOCAL_URL : config.baseUrl;
         // A token belongs to one custom origin. This Mac needs none, so a token sent with another mode is ignored; moving
         // to a different origin without a new token forgets the old one rather than sending it to the new host.
-        let tokenOrigin = config.tokenOrigin;
-        const forget = () => { if (secrets().status(PAPERCLIP_SECRET_ID).stored) secrets().clear(PAPERCLIP_SECRET_ID); tokenOrigin = null; };
+        let tokenOrigin = config.tokenOrigin, signedIn = config.signedIn, signInNotice = config.signInNotice;
+        const forget = () => { if (secrets().status(PAPERCLIP_SECRET_ID).stored) secrets().clear(PAPERCLIP_SECRET_ID); tokenOrigin = null; signedIn = null; };
         if (input.token === '') forget();
-        else if (mode === 'custom' && typeof input.token === 'string') { secrets().set(PAPERCLIP_SECRET_ID, input.token); tokenOrigin = originOf(baseUrl); }
+        else if (mode === 'custom' && typeof input.token === 'string') { secrets().set(PAPERCLIP_SECRET_ID, input.token); tokenOrigin = originOf(baseUrl); signedIn = null; signInNotice = null; }
         else if (mode === 'custom' && tokenOrigin !== originOf(baseUrl)) forget();
         const companyId = input.companyId === null ? null : typeof input.companyId === 'string' ? id(input.companyId) : config.companyId;
-        saveConfig({ mode, baseUrl, companyId, tokenOrigin });
+        saveConfig({ mode, baseUrl, companyId, tokenOrigin, signedIn, signInNotice });
         closeSocket(); stopPoll(); built = null; client = null; companies = []; lastError = undefined;
         queueEmit(['config', 'tasks', 'runs', 'agents', 'inbox']);
         return view();
+      },
+      'paperclip.signin.start': async input => {
+        const state = await signIn.start(input.baseUrl);
+        return state;
+      },
+      'paperclip.signin.status': () => signIn.state(),
+      'paperclip.signin.cancel': () => signIn.cancel(),
+      'paperclip.signin.signout': async () => {
+        if (!config.signedIn) throw new Error('This Mac is not signed in with Paperclip.');
+        const key = tokenFor(config.baseUrl);
+        const outcome = key ? await signIn.revoke(config.baseUrl, key) : { revoked: false as boolean, message: undefined as string | undefined };
+        if (secrets().status(PAPERCLIP_SECRET_ID).stored) secrets().clear(PAPERCLIP_SECRET_ID);
+        saveConfig({ ...config, tokenOrigin: null, signedIn: null, signInNotice: null });
+        closeSocket(); stopPoll(); built = null; client = null; companies = []; lastError = undefined;
+        signIn.reset();
+        queueEmit(['config', 'tasks', 'runs', 'agents', 'inbox']);
+        return { config: view(), revoked: outcome.revoked, ...(outcome.message ? { message: outcome.message } : {}) };
       },
       'paperclip.test': async (input): Promise<PaperclipTestResult> => {
         const mode = input.mode === 'local' || input.mode === 'custom' || input.mode === 'off' ? input.mode : config.mode;
@@ -686,7 +727,7 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
         const baseUrl = typeof input.baseUrl === 'string' ? input.baseUrl : config.baseUrl;
         try { endpoint = endpointFor(mode, baseUrl, typeof input.token === 'string' && input.token ? input.token : tokenFor(baseUrl)); }
         catch (cause) { return { ok: false, stage: 'config', message: cause instanceof Error ? cause.message : String(cause) }; }
-        const probe = new PaperclipClient(endpoint, options.fetch), started = Date.now();
+        const probe = new PaperclipClient(endpoint, options.fetch, { onUnauthorized: guardFor(endpoint.baseUrl, endpoint.token) }), started = Date.now();
         // A token over plain http to another machine crosses the network in clear text: say so, but let the test run.
         const warning = mode === 'custom' && new URL(endpoint.baseUrl).protocol === 'http:' && !isLoopback(endpoint.baseUrl)
           ? `${endpoint.token ? 'Your API token' : 'An API token added here'} would be sent over plain http to ${new URL(endpoint.baseUrl).host}, readable by anyone on the network. Use an https:// address.` : undefined;
@@ -836,7 +877,7 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
         const mode = input.mode === 'local' || input.mode === 'custom' ? input.mode : config.mode === 'off' ? 'local' : config.mode;
         const baseUrl = typeof input.baseUrl === 'string' ? input.baseUrl : config.baseUrl;
         // The importer reads each page once: it keeps no parsed bodies, so a large org never sits in memory twice.
-        const reader = new PaperclipClient(endpointFor(mode, baseUrl, typeof input.token === 'string' && input.token ? input.token : tokenFor(baseUrl)), options.fetch, { cache: false });
+        const reader = new PaperclipClient(endpointFor(mode, baseUrl, typeof input.token === 'string' && input.token ? input.token : tokenFor(baseUrl)), options.fetch, { cache: false, onUnauthorized: guardFor(baseUrl, typeof input.token === 'string' && input.token ? input.token : tokenFor(baseUrl)) });
         const store = imports();
         if (!store) throw new Error('The import store is unavailable.');
         let target = typeof input.companyId === 'string' ? id(input.companyId) : config.companyId;
@@ -859,7 +900,7 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
       'paperclip.import.plan': async input => {
         const mode = input.mode === 'local' || input.mode === 'custom' ? input.mode : config.mode === 'off' ? 'local' : config.mode;
         const baseUrl = typeof input.baseUrl === 'string' ? input.baseUrl : config.baseUrl;
-        const reader = new PaperclipClient(endpointFor(mode, baseUrl, typeof input.token === 'string' && input.token ? input.token : tokenFor(baseUrl)), options.fetch, { cache: false });
+        const reader = new PaperclipClient(endpointFor(mode, baseUrl, typeof input.token === 'string' && input.token ? input.token : tokenFor(baseUrl)), options.fetch, { cache: false, onUnauthorized: guardFor(baseUrl, typeof input.token === 'string' && input.token ? input.token : tokenFor(baseUrl)) });
         const store = imports();
         if (!store) throw new Error('The import store is unavailable.');
         // GET only, and nothing is written: a preview of what the import would make.
@@ -890,7 +931,7 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
       },
       'paperclip.inbox.dismissed': () => ({ items: [...dismissed()].map(([itemId, at]) => ({ id: itemId, at })) }),
     },
-    dispose() { history.disposed = true; if (history.timer) timers.clearTimeout(history.timer); history.timer = null; offLedger(); closeSocket(); stopPoll(); if (live.emitTimer) timers.clearTimeout(live.emitTimer); live.emitTimer = null; },
+    dispose() { signIn.dispose(); history.disposed = true; if (history.timer) timers.clearTimeout(history.timer); history.timer = null; offLedger(); closeSocket(); stopPoll(); if (live.emitTimer) timers.clearTimeout(live.emitTimer); live.emitTimer = null; },
     power(event) { if (event.state === 'suspend') { closeSocket(); stopPoll(); } else if (live.visible) { ensureSocket(); if (!live.socket) schedulePoll(); } },
   };
 }

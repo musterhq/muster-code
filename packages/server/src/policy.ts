@@ -39,7 +39,7 @@ const HOST_EXACT = new Set([
   'memory.config.set', 'memory.config.test', 'memory.models.save', 'memory.models.delete', 'memory.models.clear', 'memory.models.refresh',
   'memory.bank.delete', 'memory.import.apply',
   'folder.add', 'folder.remove', 'folder.rename', 'folder.relink', 'folder.move', 'folder.reorder',
-  'git.clone.start', 'git.clone.cancel', 'paperclip.config.set', 'paperclip.import', 'paperclip.ledger.backfill', 'import.run',
+  'git.clone.start', 'git.clone.cancel', 'paperclip.config.set', 'paperclip.signin.start', 'paperclip.signin.cancel', 'paperclip.signin.signout', 'paperclip.import', 'paperclip.ledger.backfill', 'import.run',
   'terminalAccess.set', 'setup.saveProgress', 'setup.refresh', 'models.policy.setHidden', 'models.policy.setPricing', 'models.policy.reset',
   'files.runActions.set', 'studio.skill.inputs.save', 'studio.skill.inputs.remove', 'automations.gate.decide', 'automations.webhook.rotate', 'work.inbox.read', 'work.inbox.snooze', 'work.inbox.decideBy', 'work.inbox.recommend', 'paperclip.test', 'paperclip.pauseAll', 'paperclip.resumeAll', 'paperclip.agent.pause', 'paperclip.agent.resume', 'paperclip.approval.decide', 'sandbox.syncFromHost', 'sandbox.applyToHost', 'sandbox.browserPlacement.set',
 ]);
@@ -70,7 +70,7 @@ const READ_EXACT = new Set(['search.workspace', 'insight.costs', 'insight.profil
   'extensions.inventory', 'extensions.review', 'extensions.installed', 'extensions.enablement.list', 'extensions.skills.read', 'ci.repair.list',
   'github.repo', 'github.pr.get', 'github.pr.checks', 'github.pr.files', 'github.pr.threads', 'github.pr.conversation', 'subagents.transcript',
   'subagents.capabilities', 'review.baselines', 'review.changes', 'review.fileDiff', 'review.marks', 'chat.search', 'chat.export', 'chat.select',
-  'chat.contextTelemetry', 'chat.editOptions', 'chat.editRestorePreview', 'paperclip.config.get', 'paperclip.snapshot', 'paperclip.list', 'paperclip.badge',
+  'chat.contextTelemetry', 'chat.editOptions', 'chat.editRestorePreview', 'paperclip.config.get', 'paperclip.signin.status', 'paperclip.snapshot', 'paperclip.list', 'paperclip.badge',
   'paperclip.ledger', 'paperclip.dashboard', 'paperclip.memory', 'paperclip.task', 'paperclip.inbox.dismissed', 'paperclip.import.plan', 'project.list',
   'project.export', 'project.events', 'project.handoff.build', 'git.log', 'git.commitDetail', 'git.compare', 'git.refDiff', 'git.blame', 'git.branches',
   'git.headMessage', 'git.conflicts', 'git.conflictFile', 'git.diff', 'git.pullRequests', 'git.compareUrl', 'settings.export', 'settings.diagnostics',
