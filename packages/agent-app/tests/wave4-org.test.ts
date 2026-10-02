@@ -46,6 +46,14 @@ test('review: a zip bomb is refused by the bytes really inflated, not the sizes 
   assert.deepEqual(unzipFiles(craftedZip(Buffer.from('hello'), [{ name: 's.md', method: 0, usize: 5, lh: 0 }], 1)), { 's.md': 'hello' });
 });
 
+test('review: a package cannot pollute prototypes through __proto__, constructor or prototype keys', () => {
+  const parsed = parseYaml('a: 1\n__proto__:\n  polluted: yes\nconstructor:\n  prototype:\n    polluted2: yes\nnested:\n  __proto__:\n    polluted3: yes\n  ok: 2\n') as Record<string, unknown>;
+  assert.equal(({} as Record<string, unknown>).polluted, undefined); assert.equal(({} as Record<string, unknown>).polluted2, undefined); assert.equal(({} as Record<string, unknown>).polluted3, undefined);
+  assert.equal(Object.getPrototypeOf(parsed), Object.prototype, 'the parsed map keeps its own prototype');
+  assert.equal((parsed as { polluted?: unknown }).polluted, undefined);
+  assert.deepEqual(Object.keys(parsed).sort(), ['a', 'nested']); assert.deepEqual(parsed.nested, { ok: 2 });
+});
+
 async function seeded(t: import('node:test').TestContext) {
   const h = await wave1(t);
   const cto = await h.member('CTO', { instructions: 'You are the CTO.\nKeep changes small.' }), qa = await h.member('QA', { reportsTo: cto.id, instructions: 'Verify every fix.' });

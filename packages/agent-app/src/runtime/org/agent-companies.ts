@@ -52,9 +52,13 @@ export function parseYaml(text: string): Yaml {
       if (!m) throw new Error(`Cannot read this line of the package: ${lines[i]!.trim().slice(0, 80)}`);
       const key = m[1]!.trim().replace(/^["']|["']$/g, ''), rest = m[2];
       i++;
-      if (rest !== undefined && rest.trim() !== '') map[key] = scalar(rest);
-      else if (i < lines.length && (indentOf(lines[i]!) > indent || (indentOf(lines[i]!) === indent && lines[i]!.trim().startsWith('- ')))) map[key] = block(indentOf(lines[i]!));
-      else map[key] = null;
+      let value: Yaml;
+      if (rest !== undefined && rest.trim() !== '') value = scalar(rest);
+      else if (i < lines.length && (indentOf(lines[i]!) > indent || (indentOf(lines[i]!) === indent && lines[i]!.trim().startsWith('- ')))) value = block(indentOf(lines[i]!));
+      else value = null;
+      // A package is untrusted: these keys would rewrite the prototype of every object after them. The value is read and dropped.
+      if (key === '__proto__' || key === 'constructor' || key === 'prototype') continue;
+      Object.defineProperty(map, key, { value, enumerable: true, writable: true, configurable: true });
     }
     return map;
   }
