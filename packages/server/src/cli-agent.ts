@@ -13,11 +13,16 @@ const homeDir = () => process.env.MUSTER_AGENT_HOME ?? join(homedir(), '.muster-
 const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || 'agent';
 
 /** https only; plain http for this computer. A credential never travels in clear text over a network. */
-function origin(input: string): string {
+export function origin(input: string): string {
   let u: URL; try { u = new URL(input); } catch { throw new UsageError('Give the server address, for example https://muster.example.com.'); }
   if (u.username || u.password) throw new UsageError('Leave the user name and password out of the address.');
   if (u.protocol !== 'https:' && !(u.protocol === 'http:' && LOOPBACK.has(u.hostname))) throw new UsageError('Use https://. Plain http:// is only for a server on this computer.');
   return u.origin;
+}
+/** The address to save: the one the server reports about itself when it passes the same https rule, otherwise the one the person joined with. */
+export function savedServer(joined: string, reported: unknown): string {
+  if (typeof reported !== 'string' || !reported) return joined;
+  try { return origin(reported); } catch { return joined; }
 }
 async function api<T = any>(server: string, path: string, init: { method?: string; credential?: string; body?: unknown } = {}): Promise<T> {
   const r = await request(`${server}${path}`, { method: init.method ?? 'GET', headers: { 'content-type': 'application/json', ...(init.credential ? { authorization: `Bearer ${init.credential}` } : {}), host: new URL(server).host }, ...(init.body !== undefined ? { body: JSON.stringify(init.body) } : {}) });
@@ -39,7 +44,7 @@ export async function runAgentClient(p: Parsed): Promise<void> {
     const r = await api<any>(server, `/api/agent-invites/${encodeURIComponent(invite)}/claim`, { method: 'POST', body: {} });
     const dir = homeDir(), file = resolve(flag(p, 'out') ?? join(dir, `${slug(r.agent)}.json`));
     mkdirSync(join(file, '..'), { recursive: true, mode: 0o700 });
-    const creds: Creds = { server: r.server ?? server, credential: r.credential, projectId: r.projectId, memberId: r.memberId, agent: r.agent };
+    const creds: Creds = { server: savedServer(server, r.server), credential: r.credential, projectId: r.projectId, memberId: r.memberId, agent: r.agent };
     writeFileSync(file, JSON.stringify(creds, null, 2), { mode: 0o600 }); try { chmodSync(file, 0o600); } catch { /* no modes */ }
     return out(`Joined as ${r.agent}. The credential is saved in ${file} (readable only by you; it is never printed). It expires ${r.expiresAt ?? 'never'}.`, { ok: true, agent: r.agent, projectId: r.projectId, file });
   }
