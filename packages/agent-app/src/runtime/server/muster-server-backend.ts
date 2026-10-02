@@ -26,8 +26,16 @@ export class MusterServerBackend implements ServerBackend {
   private readonly request: (input: string, init?: RequestInit) => Promise<Response>;
   constructor(readonly endpoint: ServerEndpoint, private readonly options: BackendOptions = {}) { this.request = options.fetch ?? ((input, init) => fetch(input, init)); }
   invalidate(): void { this.lastSignature = ''; }
-  get orgName(): string { return this.options.orgName ?? hostOf(this.endpoint.baseUrl); }
+  /** The organisation name the server's owner set; until it is known (or when none is set) the caller's label, else the server's host name. */
+  private named: string | null = null;
+  get orgName(): string { return this.named ?? this.options.orgName ?? hostOf(this.endpoint.baseUrl); }
   private company(): WorkspaceCompany { return { id: SERVER_ORG_ID, name: this.orgName, prefix: '' }; }
+  /** Reads the org name once (`server.me`); a server without one, or an older server, keeps the fallback. */
+  private async learnName(): Promise<void> {
+    if (this.nameKnown) return;
+    try { const me = await this.rpc<{ server?: { name?: string | null } }>('server.me'); this.nameKnown = true; this.named = typeof me.server?.name === 'string' && me.server.name.trim() ? me.server.name.trim() : null; } catch { /* keep the fallback; ask again next read */ }
+  }
+  private nameKnown = false;
 
   // --- transport ---------------------------------------------------------------------------------------------------
   private async post<T>(path: string, body: unknown): Promise<T> {
@@ -57,7 +65,7 @@ export class MusterServerBackend implements ServerBackend {
     const me = await this.rpc<{ server?: { version?: string } }>('server.me');
     return { version: me.server?.version, deploymentMode: 'self-hosted', compatibility: null };
   }
-  async companies(): Promise<WorkspaceCompany[]> { return [this.company()]; }
+  async companies(): Promise<WorkspaceCompany[]> { await this.learnName(); return [this.company()]; }
 
   // --- reading -------------------------------------------------------------------------------------------------------
   async read(_company: WorkspaceCompany, previous?: { generation: number; companyId: string; part: ServerPart }): Promise<ServerPart> {
@@ -166,9 +174,9 @@ export class MusterServerBackend implements ServerBackend {
 
   // --- import: a read-only Paperclip-shaped view of this server's own data (the importer reads one shape) -----------------------
   importReader(): ImportReader {
-    const company = this.company();
+    const self = this, company = { id: SERVER_ORG_ID, get name() { return self.orgName; }, prefix: '' };
     let snap: Promise<WorkspaceSnapshot> | undefined;
-    const snapshot = () => snap ??= this.rpc<WorkspaceSnapshot>('paperclip.snapshot', {});
+    const snapshot = () => snap ??= this.learnName().then(() => this.rpc<WorkspaceSnapshot>('paperclip.snapshot', {}));
     const notFound = (path: string) => new PaperclipError(`Muster Server has nothing at ${path.split('?')[0]}.`, 404, 'service');
     const detail = (id: string) => this.rpc<WorkspaceTaskDetail>('paperclip.task', { id });
     const issueJson = (t: WorkspaceTask, description = ''): Json => ({

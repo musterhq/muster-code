@@ -10,7 +10,8 @@ import { filterEvent, type AccessView } from './access.ts';
 import { Accounts, AuthError, publicUser, type Principal } from './auth/accounts.ts';
 import { AuditLog } from './audit.ts';
 import { RemoteAgents, waitSeconds } from './agents/remote.ts';
-import { hostAllowed, isLoopback, paths, validateBind, type Paths, type ServerConfig } from './config.ts';
+import { Challenges } from './auth/challenges.ts';
+import { hostAllowed, isLoopback, paths, validateBind, writeConfig, type Paths, type ServerConfig } from './config.ts';
 import { ConnectorRegistry, type TurnRunner } from './connectors/registry.ts';
 import { NotificationBridge } from './connectors/notify.ts';
 import { acceptUpgrade, type WsConnection } from './net/ws.ts';
@@ -55,6 +56,8 @@ export class MusterServer {
   secrets!: ServerSecrets;
   audit!: AuditLog;
   accounts!: Accounts;
+  readonly challenges = new Challenges();
+  private readonly connectLimit = new Map<string, { n: number; at: number }>();
   agents!: RemoteAgents;
   notifications!: NotificationBridge;
   runtime: RuntimeHost | null = null;
@@ -287,6 +290,8 @@ export class MusterServer {
       store: this.store, accounts: this.accounts, audit: this.audit, runtime: this.runtime, registry: this.registry, agents: this.agents, notifications: this.notifications, runtimeDir: this.paths.runtime,
       version: VERSION, startedAt: this.startedAt, inviteUrl: token => `${(this.publicUrl() ?? this.url).replace(/\/+$/, '')}/invite/${token}`,
       bumpAccess: () => { this.accessVersion++; }, status: () => this.statusSnapshot(),
+      orgName: () => this.options.config.orgName ?? null,
+      setOrgName: async name => { this.options.config.orgName = name; writeConfig(this.paths, this.options.config); },
     };
   }
   private secureRequest(req: http.IncomingMessage): boolean {
@@ -399,13 +404,46 @@ export class MusterServer {
     }
     if (path.startsWith('/agent/v1/')) return this.agentApi(req, res, path, url);
     if (path === '/login' || /^\/invite\/[A-Za-z0-9_-]{10,200}$/.test(path)) return this.serveFile(res, join(this.webDir, 'login.html'), "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; base-uri 'none'; form-action 'self'; frame-ancestors 'none'");
-    if (path === '/auth.css' || path === '/auth.js') return this.serveFile(res, join(this.webDir, path.slice(1)));
+    if (/^\/connect\/[A-Za-z0-9_-]{10,100}$/.test(path)) return this.serveFile(res, join(this.webDir, 'connect.html'), "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; base-uri 'none'; form-action 'self'; frame-ancestors 'none'");
+    if (path === '/auth.css' || path === '/auth.js' || path === '/connect.js') return this.serveFile(res, join(this.webDir, path.slice(1)));
+    // Connect approval (the Muster app asks, this server's own page approves). Asking and polling need no account: the secret is the proof.
+    const connect = /^\/api\/connect\/challenges(?:\/([A-Za-z0-9_-]{10,100})\/(info|cancel|poll|approve|decline))?$/.exec(path);
+    if (connect && !(connect[2] === 'approve' || connect[2] === 'decline')) {
+      const [, id, action] = connect;
+      if (!id && req.method === 'POST') {
+        const ip = this.clientIp(req), slot = this.connectLimit.get(ip) ?? { n: 0, at: Date.now() };
+        if (Date.now() - slot.at > 60_000) { slot.n = 0; slot.at = Date.now(); }
+        if (++slot.n > 20) throw new PolicyError('Too many sign-in requests. Wait a minute.', 429, 'rate-limited');
+        this.connectLimit.set(ip, slot);
+        const b = await this.jsonBody(req, 4096);
+        const made = this.challenges.create(String(b.clientName ?? 'Muster app'));
+        return this.json(res, 200, { ok: true, id: made.id, secret: made.secret, approvalPath: `/connect/${made.id}`, expiresAt: made.expiresAt, pollIntervalMs: 1000 });
+      }
+      if (id && action === 'info' && req.method === 'GET') { const info = this.challenges.info(id); return info ? this.json(res, 200, { ok: true, ...info }) : this.json(res, 404, { ok: false, error: 'Not found.', code: 'not-found' }); }
+      if (id && action === 'poll' && req.method === 'POST') { const b = await this.jsonBody(req, 1024); const r = this.challenges.poll(id, String(b.secret ?? '')); return this.json(res, 200, { ok: true, ...r }); }
+      if (id && action === 'cancel' && req.method === 'POST') { const b = await this.jsonBody(req, 1024); return this.json(res, 200, { ok: this.challenges.cancel(id, String(b.secret ?? '')) }); }
+    }
     if (path === '/muster-web-shim.js') return this.serveFile(res, join(this.webDir, 'shim.js'));
 
     const principal = await this.principal(req);
     if (path === '/api/auth/me' && req.method === 'GET') {
       if (!principal) return this.json(res, 401, { ok: false, error: 'Not signed in.', code: 'auth' });
-      return this.json(res, 200, { ok: true, user: publicUser(principal.user), csrf: principal.session?.csrf ?? null, server: { version: VERSION, name: 'Muster Server' } });
+      return this.json(res, 200, { ok: true, user: publicUser(principal.user), csrf: principal.session?.csrf ?? null, server: { version: VERSION, name: 'Muster Server', org: this.options.config.orgName ?? null } });
+    }
+    if (connect && (connect[2] === 'approve' || connect[2] === 'decline') && req.method === 'POST') {
+      if (!principal || principal.via !== 'session') return this.json(res, 401, { ok: false, error: 'Sign in first.', code: 'auth' });
+      if (!this.sameOrigin(req) || !this.accounts.checkCsrf(principal, req.headers['x-muster-csrf'] as string | undefined)) throw new PolicyError('Missing or invalid CSRF token.', 403, 'csrf');
+      if (connect[2] === 'decline') { this.challenges.decline(connect[1]!); return this.json(res, 200, { ok: true }); }
+      try {
+        await this.challenges.approve(connect[1]!, { username: principal.user.username, displayName: principal.user.displayName }, async client => (await this.accounts.createToken(principal.user, { name: `Muster app (${client})`, ttl: '90d' })).token);
+      } catch (error) { return this.json(res, 400, { ok: false, error: (error as Error).message, code: 'bad-input' }); }
+      await this.audit.append({ actor: `user:${principal.user.id}`, action: 'auth.connect.approved', target: `challenge:${connect[1]}`, detail: {} });
+      return this.json(res, 200, { ok: true });
+    }
+    if (path === '/api/connect/revoke-current' && req.method === 'POST') {
+      if (!principal?.token) return this.json(res, 401, { ok: false, error: 'Not signed in with a token.', code: 'auth' });
+      await this.accounts.revokeToken(principal.user, principal.token.id);
+      return this.json(res, 200, { ok: true });
     }
     if (path === '/api/auth/logout' && req.method === 'POST') {
       if (principal) { if (!this.accounts.checkCsrf(principal, req.headers['x-muster-csrf'] as string | undefined)) throw new PolicyError('Missing CSRF token.', 403, 'csrf'); await this.accounts.logout(principal); }

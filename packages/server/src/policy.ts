@@ -44,7 +44,7 @@ const HOST_EXACT = new Set([
   'memory.config.set', 'memory.config.test', 'memory.models.save', 'memory.models.delete', 'memory.models.clear', 'memory.models.refresh',
   'memory.bank.delete', 'memory.import.apply',
   'folder.add', 'folder.remove', 'folder.rename', 'folder.relink', 'folder.move', 'folder.reorder',
-  'git.clone.start', 'git.clone.cancel', 'paperclip.config.set', 'paperclip.signin.start', 'paperclip.signin.cancel', 'paperclip.signin.signout', 'paperclip.session.set', 'paperclip.session.clear', 'paperclip.import', 'paperclip.ledger.backfill', 'import.run',
+  'git.clone.start', 'git.clone.cancel', 'paperclip.config.set', 'paperclip.signin.start', 'paperclip.signin.cancel', 'paperclip.signin.signout', 'paperclip.session.set', 'paperclip.session.clear', 'paperclip.disconnect', 'paperclip.import', 'paperclip.ledger.backfill', 'import.run',
   'terminalAccess.set', 'setup.saveProgress', 'setup.refresh', 'models.policy.setHidden', 'models.policy.setPricing', 'models.policy.reset',
   'files.runActions.set', 'studio.skill.inputs.save', 'studio.skill.inputs.remove', 'automations.gate.decide', 'automations.webhook.rotate', 'work.inbox.read', 'work.inbox.unread', 'work.inbox.snooze', 'work.inbox.decideBy', 'work.inbox.recommend', 'paperclip.test', 'paperclip.pauseAll', 'paperclip.resumeAll', 'paperclip.agent.pause', 'paperclip.agent.resume', 'paperclip.approval.decide', 'sandbox.syncFromHost', 'sandbox.applyToHost', 'sandbox.browserPlacement.set',
 ]);

@@ -33,9 +33,9 @@ test('detection: Paperclip answers /api/health, a Muster Server answers /healthz
   assert.ok(seen.every(s=>!s.headers.authorization&&s.headers['x-muster-probe']==='detect'));
 });
 
-test('sign-in methods follow the backend: Paperclip approves in the browser, a Muster Server takes a password',()=>{
+test('sign-in methods: both kinds of server approve in a browser window, so Connect never asks which one',()=>{
   assert.deepEqual(signInMethods('paperclip'),['browser']);
-  assert.deepEqual(signInMethods('muster-server'),['password']);
+  assert.deepEqual(signInMethods('muster-server'),['browser']);
   assert.deepEqual(signInMethods(null),[]);
 });
 
@@ -214,4 +214,16 @@ test('the Muster Server import reader answers the importer\'s Paperclip-shaped r
   const comments:Array<{authorType:string;authorAgentId?:string}>=[];for await(const page of reader.commentPages('1'))comments.push(...(page as unknown as typeof comments));
   assert.deepEqual(comments.map(c=>[c.authorType,c.authorAgentId]),[['agent','member:m1'],['user',undefined]]);
   await assert.rejects(reader.get('/issues/nope'),/nothing at/);
+});
+
+test('the org group is named after the organisation the server\'s owner set, never its address; no name falls back to the host name',async()=>{
+  const named=new MusterServerBackend({baseUrl:'http://127.0.0.1:7470',token:'mst_t'},{fetch:fakeRpc({'server.me':()=>({user:{},server:{version:'1',name:'Acme Data Ops'}}),'paperclip.snapshot':()=>SNAPSHOT}).fetch,orgName:'127.0.0.1:7470'});
+  assert.equal((await named.companies())[0]!.name,'Acme Data Ops','a set name wins over the label the caller offers');
+  const part=await named.read((await named.companies())[0]!);
+  assert.ok(part.projects.length&&named.importReader(),'reading still works');
+  assert.deepEqual(await named.importReader().get('/companies'),[{id:SERVER_ORG_ID,name:'Acme Data Ops',issuePrefix:''}],'the import sees the same name');
+  const unnamed=new MusterServerBackend({baseUrl:'https://muster.example.com',token:'mst_t'},{fetch:fakeRpc({'server.me':()=>({user:{},server:{version:'1',name:null}})}).fetch});
+  assert.equal((await unnamed.companies())[0]!.name,'muster.example.com','no name set: the server\'s host name');
+  const old=new MusterServerBackend({baseUrl:'https://muster.example.com',token:'mst_t'},{fetch:fakeRpc({}).fetch});
+  assert.equal((await old.companies())[0]!.name,'muster.example.com','an older server that cannot say: the host name');
 });

@@ -314,6 +314,8 @@ export interface PaperclipCommands {
   'paperclip.signin.cancel': { input: Record<string, never>; output: PaperclipSignInState };
   /** Revokes the key the server issued to this Mac and removes it. `message`: anything to tell the person (a revoke the server did not confirm). */
   'paperclip.signin.signout': { input: Record<string, never>; output: { config: PaperclipConfigView; revoked: boolean; message?: string } };
+  /** Disconnect: revokes the key a browser approval issued (when it did), forgets every key and session, and turns the connection off. */
+  'paperclip.disconnect': { input: Record<string, never>; output: { config: PaperclipConfigView; revoked: boolean; message?: string } };
   /** The app's sign-in window obtained the server's session cookie (the main process calls this; the cookie never reaches the renderer). */
   'paperclip.session.set': { input: { baseUrl: string; cookie: string }; output: { state: 'pending' | 'active' } };
   'paperclip.session.clear': { input: Record<string, never>; output: { ok: true } };
@@ -367,7 +369,7 @@ export interface PaperclipCommands {
 /** Coalesced: at most one per second while watched (every 5 s otherwise, for the badge). `taskIds` lets an open thread refetch only when it changed. */
 export type PaperclipEvent = { type: 'projectsWorkspaceChanged'; scopes: ('tasks' | 'runs' | 'agents' | 'inbox' | 'config')[]; taskIds: string[] };
 export const PAPERCLIP_COMMANDS = {
-  'paperclip.config.get': true, 'paperclip.config.set': true, 'paperclip.signin.start': true, 'paperclip.signin.status': true, 'paperclip.signin.cancel': true, 'paperclip.signin.signout': true, 'paperclip.session.set': true, 'paperclip.session.clear': true, 'paperclip.test': true, 'paperclip.snapshot': true, 'paperclip.task': true,
+  'paperclip.config.get': true, 'paperclip.config.set': true, 'paperclip.signin.start': true, 'paperclip.signin.status': true, 'paperclip.signin.cancel': true, 'paperclip.signin.signout': true, 'paperclip.disconnect': true, 'paperclip.session.set': true, 'paperclip.session.clear': true, 'paperclip.test': true, 'paperclip.snapshot': true, 'paperclip.task': true,
   'paperclip.comment': true, 'paperclip.task.update': true, 'paperclip.task.create': true, 'paperclip.agent.pause': true, 'paperclip.agent.resume': true,
   'paperclip.pauseAll': true, 'paperclip.resumeAll': true, 'paperclip.approval.decide': true, 'paperclip.run.cancel': true, 'paperclip.memory': true, 'paperclip.list': true,
   'paperclip.watch': true, 'paperclip.badge': true, 'paperclip.ledger': true, 'paperclip.ledger.backfill': true, 'paperclip.inbox.dismiss': true, 'paperclip.inbox.dismissed': true, 'paperclip.inbox.restore': true, 'paperclip.interaction.respond': true, 'paperclip.import': true, 'paperclip.task.start': true, 'paperclip.dashboard': true, 'paperclip.import.plan': true,

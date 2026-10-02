@@ -1,8 +1,8 @@
 /** Muster Server setup (#115, unified): the Integrations panel (This Mac / Sign in / URL + API token / Off, Test connection, org, import),
  *  the New task sheet, and the server's routines for the Automations screen. Built from the app's form and sheet components. */
-import { Check, Link2, LogIn, Play, UserRound } from 'lucide-react';
+import { Check, Link2, Play } from 'lucide-react';
 import React, { useEffect, useRef, useState } from 'react';
-import type { ImportPlan, ImportTargets, PaperclipConfigView, PaperclipImportReport, PaperclipMode, PaperclipSignInState, PaperclipTestResult, WorkspaceList, WorkspacePriority, WorkspaceSnapshot } from '../../shared/domains/paperclip-protocol';
+import type { ImportPlan, ImportTargets, PaperclipConfigView, PaperclipImportReport, PaperclipSignInState, PaperclipTestResult, WorkspaceList, WorkspacePriority, WorkspaceSnapshot } from '../../shared/domains/paperclip-protocol';
 import { PRIORITY_NAME } from '../../shared/domains/paperclip-protocol';
 import { NAMES } from '../../shared/workspace-names';
 import { invoke, subscribe } from '../bridge';
@@ -20,16 +20,16 @@ import './hub.css';
 import './automations.css';
 
 const errorText = (cause: unknown) => cause instanceof Error ? cause.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '') : String(cause);
-/** The four ways to connect. "Sign in" and "URL + API token" are both a custom address; they differ in how you prove who you are. */
-type Choice = 'local' | 'signin' | 'token' | 'off';
-const CHOICES: { id: Choice; label: string; hint: string }[] = [
-  { id: 'local', label: 'This Mac', hint: 'A server on this computer' },
-  { id: 'signin', label: 'Sign in to Muster Server', hint: 'Your account on a server' },
-  { id: 'token', label: 'URL + API token', hint: 'Paste an address and a token' },
-  { id: 'off', label: 'Off', hint: 'Muster projects only' },
-];
-const choiceOf = (view: PaperclipConfigView): Choice => view.mode === 'off' ? 'off' : view.mode === 'local' ? 'local' : view.user || view.signedIn || view.signInNotice ? 'signin' : 'token';
 const whoText = (user: { name: string | null; email: string | null } | null | undefined) => user ? [user.name, user.email && (user.name ? `(${user.email})` : user.email)].filter(Boolean).join(' ') || 'your account' : '';
+const hostOf = (url: string) => { try { return new URL(url.trim()).host; } catch { return url.trim(); } };
+const isLocalUrl = (url: string) => { try { const h = new URL(url).hostname.replace(/^\[|\]$/g, ''); return h === 'localhost' || h === '::1' || /^127(\.\d{1,3}){3}$/.test(h); } catch { return false; } };
+/** What a probe of an address means in plain words, shown under the address field. */
+const plainProbeError = (result: PaperclipTestResult, address: string): string => {
+  const host = hostOf(address);
+  if (result.stage === 'network') return `Muster can’t reach ${host}. Check the address and that the server is running.`;
+  if (result.stage === 'service') return `${host} isn’t a Muster server. Check the address.`;
+  return result.message;
+};
 
 /** A token typed or stored for a plain-http address on another machine crosses the network in clear text. */
 export function plainHttpWarning(url: string, hasToken: boolean): string | undefined {
@@ -41,123 +41,111 @@ export function plainHttpWarning(url: string, hasToken: boolean): string | undef
 }
 
 /**
- * Settings › Integrations › Muster Server: the one connection. This Mac / Sign in to Muster Server / URL + API token / Off, with Test
- * connection, the org, Import and Disconnect. Which kind of server is behind the address is detected, never asked; the only place the
- * word "Paperclip" can appear is the "Paperclip-compatible" line in the connection details, when that is what the server is.
+ * Settings › Integrations › Muster Server: one address, one Connect. Connect finds out what the address is (Muster Server, or a
+ * Paperclip-compatible one) and what sign-in it needs, then opens that server's own sign-in page in an app window: Muster never sees the
+ * password. Nobody picks a method. Connected shows who and how live it is, with Disconnect and Import a copy. "Paperclip-compatible"
+ * appears only in the Details line.
  */
 export function ConnectionPanel({ onSaved, compact = false, signInAvailable = true }: { onSaved?: (view: PaperclipConfigView) => void; compact?: boolean; signInAvailable?: boolean }): React.ReactElement {
   const [config, setConfig] = useState<PaperclipConfigView | null>(null);
-  const [choice, setChoice] = useState<Choice>('off');
-  const [url, setUrl] = useState('');
+  const [address, setAddress] = useState('');
   const [token, setToken] = useState('');
-  const [username, setUsername] = useState('');
-  const [password, setPassword] = useState('');
-  const [company, setCompany] = useState<string>('');
-  const [test, setTest] = useState<PaperclipTestResult | null>(null);
-  const [busy, setBusy] = useState<'test' | 'save' | 'import' | 'signin' | 'disconnect' | null>(null);
+  const [others, setOthers] = useState(false);
+  const [local, setLocal] = useState<{ baseUrl: string; version?: string } | null>(null);
+  const [companies, setCompanies] = useState<{ id: string; name: string; prefix: string }[]>([]);
+  const [busy, setBusy] = useState<'connect' | 'token' | 'disconnect' | 'import' | null>(null);
   const [signInState, setSignInState] = useState<PaperclipSignInState>({ phase: 'idle' });
-  /** What the address turned out to be while signing in (before anything is saved). */
-  const [kind, setKind] = useState<'paperclip' | 'muster-server' | null>(null);
   const [imported, setImported] = useState<PaperclipImportReport | null>(null);
   const [error, setError] = useState('');
-  const mode: PaperclipMode = choice === 'off' ? 'off' : choice === 'local' ? 'local' : 'custom';
+  const connectedNow = (view: PaperclipConfigView | null) => Boolean(view && view.mode !== 'off' && (view.hasToken || (isLocalUrl(view.baseUrl) && !view.signInNotice)));
+  const load = (view: PaperclipConfigView, live: { current: boolean }) => {
+    setConfig(view);
+    if (connectedNow(view)) void invoke('paperclip.test', {}).then(result => { if (live.current) setCompanies(result.companies ?? []); }, () => undefined);
+    else void invoke('paperclip.test', { mode: 'local' }).then(result => { if (live.current && (result.ok || (result.stage === 'auth' && result.backend)) && result.baseUrl) setLocal({ baseUrl: result.baseUrl, ...(result.version ? { version: result.version } : {}) }); }, () => undefined);
+  };
   useEffect(() => {
-    let live = true;
-    invoke('paperclip.config.get', {}).then(view => {
-      if (!live) return;
-      setConfig(view); setChoice(choiceOf(view)); setUrl(view.mode === 'custom' ? view.baseUrl : ''); setCompany(view.companyId ?? '');
-      // Look for a server on this Mac so "This Mac" can say whether one is running.
-      if (view.mode !== 'custom') void invoke('paperclip.test', { mode: 'local' }).then(result => { if (live) setTest(result); }, () => undefined);
-    }, e => { if (live) setError(errorText(e)); });
-    void invoke('paperclip.signin.status', {}).then(state => { if (live) setSignInState(state); }, () => undefined);
-    // Signing in elsewhere, the server revoking a key, or the browser approval moving on all change the connection under us: the runtime says so, nothing here polls.
+    const alive = { current: true };
+    invoke('paperclip.config.get', {}).then(view => { if (!alive.current) return; setAddress(view.mode !== 'off' ? view.baseUrl : ''); load(view, alive); }, e => { if (alive.current) setError(errorText(e)); });
+    void invoke('paperclip.signin.status', {}).then(state => { if (alive.current) setSignInState(state); }, () => undefined);
+    // Signing in finishing, the server revoking a key, or the session ending all change the connection under us: the runtime says so, nothing here polls.
     const off = subscribe(event => {
-      const config = event.type === 'projectsWorkspaceChanged' && event.scopes.includes('config');
-      if (event.type !== 'musterServerChanged' && !config) return;
-      void invoke('paperclip.config.get', {}).then(view => { if (live) setConfig(view); }, () => undefined);
-      if (config) void invoke('paperclip.signin.status', {}).then(state => { if (live) setSignInState(state); }, () => undefined);
+      const changed = event.type === 'projectsWorkspaceChanged' && event.scopes.includes('config');
+      if (event.type !== 'musterServerChanged' && !changed) return;
+      void invoke('paperclip.config.get', {}).then(view => { if (alive.current) setConfig(view); }, () => undefined);
+      if (changed) void invoke('paperclip.signin.status', {}).then(state => { if (alive.current) setSignInState(state); }, () => undefined);
     });
-    return () => { live = false; off(); };
+    return () => { alive.current = false; off(); };
   }, []);
   const lastPhase = useRef<PaperclipSignInState['phase']>('idle');
   useEffect(() => {
     const was = lastPhase.current; lastPhase.current = signInState.phase;
     if (was !== 'waiting' || signInState.phase !== 'signed-in') return;
-    // Approved in the browser: the key is stored. Say who you are, check the connection, and refresh the projects.
-    setError(''); notifySuccess(`Signed in to Muster Server as ${whoText(signInState.user)}.`);
-    void invoke('paperclip.config.get', {}).then(view => { setConfig(view); setChoice('signin'); setUrl(view.baseUrl); setCompany(view.companyId ?? ''); onSaved?.(view); });
-    void invoke('paperclip.test', { mode: 'custom', baseUrl: signInState.baseUrl }).then(result => { setTest(result); if (result.companies?.length) setCompany(c => result.companies!.some(x => x.id === c) ? c : result.companies![0].id); }, () => undefined);
+    // Approved in the server's window: the key is stored. Say who you are and bring the projects in.
+    setError(''); notifySuccess(`Connected to ${hostOf(signInState.baseUrl ?? address)} as ${whoText(signInState.user)}.`);
+    void invoke('paperclip.config.get', {}).then(view => { load(view, { current: true }); onSaved?.(view); });
     void refreshWorkspace(true);
   }, [signInState.phase]);
-  const target = () => ({ mode, ...(mode === 'custom' ? { baseUrl: url, ...(token ? { token } : {}) } : mode === 'local' && test?.baseUrl ? { baseUrl: test.baseUrl } : {}) });
-  const runTest = async () => {
-    setBusy('test'); setError(''); setTest(null);
-    try { const result = await invoke('paperclip.test', target()); setTest(result); if (result.companies?.length && !result.companies.some(c => c.id === company)) setCompany(result.companies[0].id); }
-    catch (cause) { setError(errorText(cause)); } finally { setBusy(null); }
+
+  /** Opens the server's own sign-in page in an app window (the system browser is the fallback). */
+  const beginSignIn = async (baseUrl: string) => {
+    if (!signInAvailable) { setOthers(true); throw new Error('Signing in opens a window in the Muster desktop app. From here, connect with an API token under “Other ways to connect”.'); }
+    const state = await invoke('paperclip.signin.start', { baseUrl });
+    setSignInState(state);
+    if (state.approvalUrl) await invoke('musterServer.signInWindow', { url: state.approvalUrl, baseUrl: state.baseUrl ?? baseUrl }).catch(() => invoke('link.open', { url: state.approvalUrl! })).catch(() => setError('Muster could not open the sign-in window. Use “Open window again”, or copy the link into a browser.'));
   };
-  const save = async () => {
-    setBusy('save'); setError('');
+  /** Connect: probe the address, then either link it (nothing to sign in to) or open that server's sign-in. */
+  const connect = async (target = address) => {
+    const baseUrl = target.trim();
+    if (!baseUrl) return;
+    setBusy('connect'); setError(''); setImported(null);
     try {
-      // The backend was detected by the test: it is remembered so the next read does not have to ask again.
-      const view = await invoke('paperclip.config.set', { ...target(), ...(test?.ok && test.backend ? { backend: test.backend } : {}), companyId: company || null });
-      setConfig(view); setToken(''); notifySuccess(mode === 'off' ? 'Muster Server is off. Projects show Muster’s own work.' : 'Muster Server connected. Its projects appear under Projects.');
-      await refreshWorkspace(true); onSaved?.(view);
+      const probe = await invoke('paperclip.test', { mode: 'custom', baseUrl });
+      if (probe.ok) {
+        const view = await invoke('paperclip.config.set', { mode: isLocalUrl(baseUrl) ? 'local' : 'custom', baseUrl, ...(probe.backend ? { backend: probe.backend } : {}), companyId: probe.companies?.[0]?.id ?? null });
+        setAddress(view.baseUrl); load(view, { current: true }); setLocal(null);
+        notifySuccess(`Connected to ${hostOf(view.baseUrl)}. Its projects appear under Projects.`);
+        await refreshWorkspace(true); onSaved?.(view);
+      } else if (probe.stage === 'auth') await beginSignIn(baseUrl);
+      else setError(plainProbeError(probe, baseUrl));
     } catch (cause) { setError(errorText(cause)); } finally { setBusy(null); }
   };
-  /** Browser approval: open the server's own approval page; the runtime polls only while waiting. */
-  const startBrowserSignIn = async () => {
-    const state = await invoke('paperclip.signin.start', { baseUrl: url });
-    setSignInState(state);
-    // The server's own page opens in an app window with a session of its own (that session is what makes updates instant); the system browser is the fallback.
-    if (state.approvalUrl) await invoke('musterServer.signInWindow', { url: state.approvalUrl, baseUrl: state.baseUrl ?? url }).catch(() => invoke('link.open', { url: state.approvalUrl! })).catch(() => setError('Muster could not open the sign-in page. Use “Open again”, or copy the link into a browser.'));
-  };
-  /** Sign in with a username and password: exchanged once for a token that is kept in the keychain; the password is not kept. */
-  const passwordSignIn = async () => {
-    const address = mode === 'local' ? (test?.baseUrl ?? config?.baseUrl ?? '') : url;
-    await invoke('musterServer.connect', { url: address, method: 'password', username, password, mode: mode === 'local' ? 'local' : 'custom' });
-    setPassword('');
-    const view = await invoke('paperclip.config.get', {});
-    setConfig(view); setChoice(mode === 'local' ? 'local' : 'signin'); setTest(null); setKind(null);
-    notifySuccess(`Signed in to Muster Server${view.user ? ` as ${view.user.username}` : ''}.`);
-    await refreshWorkspace(true); onSaved?.(view);
-  };
-  /** The Sign in button: finds out what is at the address first, then uses that kind of server's own way in. */
-  const signIn = async () => {
-    setBusy('signin'); setError(''); setTest(null);
+  /** The other way in, for scripts and special cases: an address and an API token. */
+  const connectWithToken = async () => {
+    const baseUrl = address.trim();
+    if (!baseUrl || !token.trim()) return;
+    setBusy('token'); setError(''); setImported(null);
     try {
-      let found: 'paperclip' | 'muster-server' | null = kind;
-      if (!found && mode === 'local') found = test?.backend ?? null;
-      if (!found) found = (await invoke('paperclip.test', { mode: 'custom', baseUrl: url })).backend ?? null;
-      setKind(found);
-      if (found === 'paperclip') await startBrowserSignIn();
-      else if (found === 'muster-server') { if (username.trim() && password) await passwordSignIn(); }
-      else throw new Error('Muster could not tell what is at that address. Check the URL, or use “URL + API token”.');
-    } catch (cause) { setSignInState({ phase: 'idle' }); setError(errorText(cause)); } finally { setBusy(null); }
+      const probe = await invoke('paperclip.test', { mode: 'custom', baseUrl, token });
+      if (!probe.ok) { setError(probe.stage === 'auth' ? 'The server didn’t accept that token.' : plainProbeError(probe, baseUrl)); return; }
+      const view = await invoke('paperclip.config.set', { mode: 'custom', baseUrl, token, ...(probe.backend ? { backend: probe.backend } : {}), companyId: probe.companies?.[0]?.id ?? null });
+      setToken(''); setAddress(view.baseUrl); load(view, { current: true });
+      notifySuccess(`Connected to ${hostOf(view.baseUrl)} with an API token.`);
+      await refreshWorkspace(true); onSaved?.(view);
+    } catch (cause) { setError(errorText(cause)); } finally { setBusy(null); }
   };
   const cancelSignIn = async () => { try { setSignInState(await invoke('paperclip.signin.cancel', {})); } catch (cause) { setError(errorText(cause)); } };
-  /** Sign out: a browser sign-in revokes the key the server issued to this Mac; a password sign-in forgets its token. */
-  const signOut = async () => {
+  /** Disconnect: the server revokes the key this Mac was given, and the key, the session and the link are forgotten here. */
+  const disconnect = async () => {
     setBusy('disconnect'); setError('');
     try {
-      if (config?.signedIn) {
-        const result = await invoke('paperclip.signin.signout', {});
-        setConfig(result.config); setSignInState({ phase: 'idle' });
-        notifySuccess(result.revoked ? 'Signed out. The server revoked the key for this Mac.' : 'Signed out of the server on this Mac.'); if (result.message) setError(result.message);
-      } else { await invoke('musterServer.disconnect', {}); setConfig(await invoke('paperclip.config.get', {})); notifySuccess('Signed out. The server token was removed from this computer.'); }
-      const view = await invoke('paperclip.config.get', {});
-      setConfig(view); if (view.mode === 'off') setChoice('off'); setTest(null); setCompany(''); setKind(null);
-      await refreshWorkspace(true); onSaved?.(view);
+      const result = await invoke('paperclip.disconnect', {});
+      setConfig(result.config); setAddress(''); setCompanies([]); setSignInState({ phase: 'idle' }); setImported(null);
+      notifySuccess(result.revoked ? 'Disconnected. The server revoked the key for this Mac.' : 'Disconnected. The server key was removed from this computer.'); if (result.message) setError(result.message);
+      await refreshWorkspace(true); onSaved?.(result.config); load(result.config, { current: true });
     } catch (cause) { setError(errorText(cause)); } finally { setBusy(null); }
+  };
+  const chooseOrg = async (id: string) => {
+    if (!config) return;
+    try { const view = await invoke('paperclip.config.set', { mode: config.mode, baseUrl: config.baseUrl, companyId: id }); setConfig(view); await refreshWorkspace(true); } catch (cause) { setError(errorText(cause)); }
   };
   /** Step 1 of an import: read what it would fill (GET only) and suggest a Muster project for each server project. */
   const [plan, setPlan] = useState<ImportPlan | null>(null);
   const [targets, setTargets] = useState<Record<string, string>>({});
   const [owners, setOwners] = useState<Record<string, 'mine' | 'made'>>({});
-  const endpoint = () => ({ ...(config && config.mode !== 'off' && choiceOf(config) === choice ? {} : target()), ...(company ? { companyId: company } : {}) });
   const planImport = async () => {
     setBusy('import'); setError(''); setImported(null);
     try {
-      const next = await invoke('paperclip.import.plan', endpoint());
+      const next = await invoke('paperclip.import.plan', {});
       setPlan(next); setTargets(Object.fromEntries(next.projects.map(p => [p.id, 'import']))); setOwners(Object.fromEntries(next.projects.filter(p => p.existing === 'ask' && p.added).map(p => [p.id, 'mine' as const])));
     } catch (cause) { setError(errorText(cause)); } finally { setBusy(null); }
   };
@@ -165,67 +153,68 @@ export function ConnectionPanel({ onSaved, compact = false, signInAvailable = tr
   const runImport = async () => {
     setBusy('import'); setError(''); setImported(null);
     try {
-      const report = await invoke('paperclip.import', { ...endpoint(), targets: targets as ImportTargets, owners });
+      const report = await invoke('paperclip.import', { targets: targets as ImportTargets, owners });
       setImported(report); setPlan(null); notifySuccess(`Imported ${report.company}: ${report.tasks.created + report.tasks.updated} tasks in ${report.projects.created + report.projects.updated} projects.`);
       await refreshWorkspace(true);
     } catch (cause) { setError(errorText(cause)); } finally { setBusy(null); }
   };
-  const removeToken = async () => {
-    setBusy('save');
-    try { setConfig(await invoke('paperclip.config.set', { mode, ...(mode === 'custom' ? { baseUrl: url } : {}), token: '', companyId: company || null })); } catch (cause) { setError(errorText(cause)); } finally { setBusy(null); }
-  };
   if (!config && !error) return <ResourceState kind="loading" compact label="Loading connection" rows={2}/>;
-  const companies = test?.companies ?? [];
-  const keychain = navigator.platform.includes('Mac') ? 'Keychain' : 'keyring';
-  const found = kind ?? test?.backend ?? config?.backend ?? null;
-  const httpWarning = choice === 'signin' ? (plainHttpWarning(url, true) ? 'Sign in needs an https:// address (plain http is only allowed for this Mac).' : undefined) : test?.warning ?? plainHttpWarning(url, Boolean(token) || Boolean(config?.hasToken));
-  const detected = mode === 'local' && test ? test.ok ? `Muster Server${test.version ? ` ${test.version}` : ''} is running on this Mac.` : test.stage === 'auth' ? test.message : 'No server is answering on this Mac. Start Muster Server, then test again.' : null;
-  const accountSignedIn = Boolean(config && config.mode !== 'off' && config.hasToken && (config.signedIn || config.user));
-  const connected = Boolean(config && config.mode !== 'off' && (config.hasToken || config.backend === 'paperclip'));
   const waiting = signInState.phase === 'waiting';
-  const needsSignIn = Boolean(test && !test.ok && test.stage === 'auth' && test.backend === 'muster-server');
-  const passwordForm = !accountSignedIn && !waiting && ((choice === 'signin' && kind === 'muster-server') || (choice === 'local' && (needsSignIn || test?.backend === 'muster-server') && !config?.hasToken));
-  const sameAsSaved = Boolean(config && config.mode === mode && (mode !== 'custom' || url.trim().replace(/\/+$/, '') === config.baseUrl));
+  const connected = connectedNow(config) && !waiting;
+  const host = hostOf(config && connected ? config.baseUrl : signInState.baseUrl ?? address);
+  const who = config?.signedIn ? whoText(config.signedIn) : config?.user ? `${config.user.displayName} (@${config.user.username})` : null;
+  const ended = signInState.phase === 'cancelled' ? 'Sign-in was cancelled. Connect to try again.' : signInState.phase === 'expired' ? 'The sign-in request expired before you approved it. Connect to try again.' : signInState.phase === 'failed' ? signInState.message ?? null : null;
+  const notice = !connected && !waiting ? ended ?? config?.signInNotice ?? null : null;
+  const warning = !connected && !waiting ? plainHttpWarning(address, false) : undefined;
   return <div className={`ws-connection${compact ? ' is-compact' : ''}`}>
-    <div className="ws-segmented" role="radiogroup" aria-label="Muster Server connection">
-      {CHOICES.filter(c => c.id !== 'signin' || signInAvailable).map(c => <button key={c.id} type="button" role="radio" aria-checked={choice === c.id} className="ws-segment" onClick={() => { setChoice(c.id); setTest(null); setError(''); setKind(null); }}>
-        <span className="ws-segment-label">{c.label}</span><span className="ws-segment-hint">{c.hint}</span>
-      </button>)}
-    </div>
-    {(choice === 'signin' || choice === 'token') && <div className="ws-form">
-      <label className="project-edit-goal"><span>Server URL</span><span className="project-edit-name"><Link2 size={14} aria-hidden="true"/><input type="url" inputMode="url" placeholder="https://muster.example.com" value={url} onChange={e => { setUrl(e.target.value); setKind(null); }} spellCheck={false} autoComplete="off" disabled={waiting || (choice === 'signin' && accountSignedIn)}/></span></label>
-      {choice === 'token' && <>
-        <label className="project-edit-goal"><span>API token</span><span className="project-edit-name"><input type="password" placeholder={config?.hasToken ? 'Stored — paste a new one to replace it' : 'Paste an API token'} value={token} onChange={e => setToken(e.target.value)} spellCheck={false} autoComplete="off"/></span></label>
-        <p className="project-edit-hint">Create a token on the server (Muster Server: <code>muster-server token create</code>). It is sent as <code>Authorization: Bearer</code> and stored encrypted in your {keychain}; it never reaches this window.{config?.hasToken && <> <button type="button" className="ws-link" onClick={() => void removeToken()}>Remove stored token</button></>}</p>
-      </>}
-      {choice === 'signin' && waiting && <>
-        <p className="ws-connection-detect" data-ok="true" role="status">Waiting for you to approve in your browser…{signInState.expiresAt ? ` The request expires at ${new Date(signInState.expiresAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}.` : ''}</p>
-        <p className="project-edit-hint">Sign in on the server’s own page and press Approve. Muster never sees your password. <button type="button" className="ws-link" onClick={() => void invoke('musterServer.signInWindow', { url: signInState.approvalUrl!, baseUrl: signInState.baseUrl ?? url }).catch(() => invoke('link.open', { url: signInState.approvalUrl! })).catch(() => setError('Muster could not open the sign-in page.'))}>Open again</button> · <button type="button" className="ws-link" title="Approve in your own browser. Updates then arrive every few seconds instead of instantly." onClick={() => void invoke('musterServer.signInWindow', { baseUrl: signInState.baseUrl ?? url, close: true }).catch(() => undefined).then(() => invoke('link.open', { url: signInState.approvalUrl! })).catch(() => setError('Muster could not open your browser.'))}>Use my browser instead</button></p>
-      </>}
-      {choice === 'signin' && !waiting && accountSignedIn && <p className="ws-connection-detect" data-ok="true" role="status"><Check size={13} aria-hidden="true"/>Signed in as {config?.signedIn ? whoText(config.signedIn) : `${config?.user?.displayName} (@${config?.user?.username})`}.</p>}
-      {choice === 'signin' && !waiting && !accountSignedIn && config?.signInNotice && <p className="ws-connection-detect" data-ok="false" role="alert">{config.signInNotice}</p>}
-      {choice === 'signin' && (signInState.phase === 'expired' || signInState.phase === 'cancelled' || signInState.phase === 'failed') && signInState.message && <p className="ws-connection-detect" data-ok="false" role="alert">{signInState.message}</p>}
-      {choice === 'signin' && !accountSignedIn && !waiting && kind !== 'muster-server' && <p className="project-edit-hint">Sign in opens the server in your browser to approve this Mac, or asks for your username and password, whichever your server uses. The key it issues is stored encrypted in your {keychain} and sent only to this address; it never reaches this window.</p>}
+    {connected && config && <>
+      <p className="ws-connection-detect" data-ok="true" role="status"><Check size={13} aria-hidden="true"/>
+        {who ? `Connected to ${host} as ${who}.` : config.hasToken ? `Connected to ${host} with an API token.` : `Connected to ${host}.`}{' '}
+        {config.live === 'socket' ? 'Live updates on.' : 'Updates every few seconds.'}{config.reconnect && <> <button type="button" className="ws-link" onClick={() => void invoke('musterServer.signInWindow', { baseUrl: config.baseUrl, url: config.baseUrl }).catch(() => undefined)}>Reconnect for live updates</button></>}</p>
+      {companies.length > 1 && <label className="project-edit-goal"><span>Org</span><select className="ws-select is-field" value={config.companyId ?? companies[0]!.id} onChange={e => void chooseOrg(e.target.value)}>{companies.map(c => <option key={c.id} value={c.id}>{c.name}{c.prefix ? ` (${c.prefix})` : ''}</option>)}</select></label>}
+      <details className="ws-connection-more"><summary>Details</summary>
+        <dl className="ws-connection-details" aria-label="Connection details">
+          <div><dt>Address</dt><dd>{config.baseUrl}</dd></div>
+          {who && <div><dt>Signed in as</dt><dd>{config.user ? `${config.user.displayName} (@${config.user.username}, ${config.user.role})` : who}</dd></div>}
+          {config.serverVersion && <div><dt>Server version</dt><dd>{config.serverVersion}</dd></div>}
+          <div><dt>Live updates</dt><dd>{config.live === 'socket' ? 'Instant (live socket)' : 'Every few seconds while a screen that shows them is open'}</dd></div>
+          {config.compatibility && <div><dt>Compatibility</dt><dd>{config.compatibility}</dd></div>}
+        </dl>
+      </details>
+    </>}
+    {!connected && !waiting && <>
+      {local && <p className="ws-connection-detect ws-connection-local" data-ok="true" role="status"><Check size={13} aria-hidden="true"/>Found a server on this Mac{local.version ? ` (${local.version})` : ''}. <button type="button" className="settings-button secondary" disabled={busy !== null} onClick={() => void connect(local.baseUrl)}>Connect</button></p>}
+      <div className="ws-form">
+        <label className="project-edit-goal"><span>Server address</span><span className="project-edit-name"><Link2 size={14} aria-hidden="true"/><input type="url" inputMode="url" placeholder="https://muster.example.com" value={address} onChange={e => { setAddress(e.target.value); setError(''); }} onKeyDown={e => { if (e.key === 'Enter') void connect(); }} spellCheck={false} autoComplete="off" aria-invalid={error ? true : undefined}/></span></label>
+        {(error || notice || warning) && <p role="alert" className="settings-error">{error || notice || warning}</p>}
+      </div>
+      <div className="project-edit-actions"><span className="project-edit-spacer"/>
+        <button type="button" className="settings-button" disabled={busy !== null || !address.trim()} onClick={() => void connect()}>{busy === 'connect' ? 'Connecting…' : 'Connect'}</button>
+      </div>
+      <section className="ws-connect-steps" aria-label="How connecting works">
+        <h4>How connecting works</h4>
+        <ol>
+          <li>Enter your team’s server address.</li>
+          <li>Your server’s own sign-in page opens in a window. Sign in there; Muster never sees your password.</li>
+          <li>Your team’s projects, tasks and agents appear under Projects and stay up to date live.</li>
+        </ol>
+      </section>
+      <details className="ws-connection-more" open={others || undefined} onToggle={e => setOthers((e.currentTarget as HTMLDetailsElement).open)}><summary>Other ways to connect</summary>
+        <div className="ws-form">
+          <p><strong>Use an API token instead</strong></p>
+          <p className="project-edit-hint">For scripts and special cases. It uses the server address above; the token is stored encrypted in your {navigator.platform.includes('Mac') ? 'Keychain' : 'keyring'} and never reaches this window.</p>
+          <label className="project-edit-goal"><span>API token</span><span className="project-edit-name"><input type="password" placeholder="Paste an API token" value={token} onChange={e => { setToken(e.target.value); setError(''); }} spellCheck={false} autoComplete="off"/></span></label>
+          <div className="project-edit-actions"><span className="project-edit-spacer"/><button type="button" className="settings-button secondary" disabled={busy !== null || !address.trim() || !token.trim()} onClick={() => void connectWithToken()}>{busy === 'token' ? 'Connecting…' : 'Connect with token'}</button></div>
+        </div>
+      </details>
+    </>}
+    {waiting && <div className="ws-form">
+      <p className="ws-connection-detect" data-ok="true" role="status">Waiting for you to sign in on {hostOf(signInState.baseUrl ?? address)}…{signInState.expiresAt ? ` The request expires at ${new Date(signInState.expiresAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}.` : ''}</p>
+      <p className="project-edit-hint">The server’s own sign-in page is open in a window. Sign in there and press Approve; Muster never sees your password. <button type="button" className="ws-link" onClick={() => void invoke('musterServer.signInWindow', { url: signInState.approvalUrl!, baseUrl: signInState.baseUrl ?? address }).catch(() => invoke('link.open', { url: signInState.approvalUrl! })).catch(() => setError('Muster could not open the sign-in window.'))}>Open window again</button> · <button type="button" className="ws-link" title="Approve in your own browser. Updates then arrive every few seconds instead of instantly." onClick={() => void invoke('musterServer.signInWindow', { baseUrl: signInState.baseUrl ?? address, close: true }).catch(() => undefined).then(() => invoke('link.open', { url: signInState.approvalUrl! })).catch(() => setError('Muster could not open your browser.'))}>Use my browser instead</button></p>
+      {error && <p role="alert" className="settings-error">{error}</p>}
+      <div className="project-edit-actions"><span className="project-edit-spacer"/><button type="button" className="settings-button secondary" onClick={() => void cancelSignIn()}>Cancel</button></div>
     </div>}
-    {passwordForm && <div className="ws-form">
-      <label className="project-edit-goal"><span>Username</span><span className="project-edit-name"><UserRound size={14} aria-hidden="true"/><input type="text" value={username} onChange={e => setUsername(e.target.value)} spellCheck={false} autoComplete="username" autoCapitalize="none"/></span></label>
-      <label className="project-edit-goal"><span>Password</span><span className="project-edit-name"><input type="password" value={password} onChange={e => setPassword(e.target.value)} autoComplete="current-password"/></span></label>
-      <p className="project-edit-hint">Your password is exchanged once for a server-issued token, stored encrypted in your {keychain} and only ever sent to this server’s address. The password is not kept. Use https:// (plain http:// only for a server on this computer).</p>
-    </div>}
-    {choice === 'off' && <p className="project-edit-hint">Projects run on Muster’s own tasks, agents, mailbox and schedulers. Nothing leaves this Mac.</p>}
-    {detected && <p className="ws-connection-detect" data-ok={test?.ok ? 'true' : 'false'}>{test?.ok && <Check size={13} aria-hidden="true"/>}{detected}</p>}
-    {test && mode === 'custom' && <p className="ws-connection-detect" data-ok={test.ok ? 'true' : 'false'} role="status">{test.ok && <Check size={13} aria-hidden="true"/>}{test.message}{test.latencyMs !== undefined ? ` · ${test.latencyMs} ms` : ''}</p>}
-    {mode === 'custom' && httpWarning && <p className="ws-connection-detect" data-ok="false" role="alert">{httpWarning}</p>}
-    {connected && sameAsSaved && config && <dl className="ws-connection-details" aria-label="Connection details">
-      <div><dt>Connected to</dt><dd>{config.baseUrl}</dd></div>
-      {config.user && <div><dt>Signed in as</dt><dd>{config.user.displayName} (@{config.user.username}, {config.user.role})</dd></div>}
-      {config.signedIn && <div><dt>Signed in as</dt><dd>{whoText(config.signedIn)}</dd></div>}
-      {config.serverVersion && <div><dt>Server version</dt><dd>{config.serverVersion}</dd></div>}
-      <div><dt>Live updates</dt><dd>{config.live === 'socket' ? 'Instant (live socket)' : 'Every few seconds while a screen that shows them is open'}{config.reconnect && <> · <button type="button" className="ws-link" onClick={() => void invoke('musterServer.signInWindow', { baseUrl: config.baseUrl, url: config.baseUrl }).catch(() => undefined)}>Reconnect for live updates</button></>}</dd></div>
-      {config.compatibility && <div><dt>Compatibility</dt><dd>{config.compatibility}</dd></div>}
-    </dl>}
-    {mode !== 'off' && companies.length > 1 && <label className="project-edit-goal"><span>Org</span><select className="ws-select is-field" value={company} onChange={e => setCompany(e.target.value)}>{companies.map(c => <option key={c.id} value={c.id}>{c.name}{c.prefix ? ` (${c.prefix})` : ''}</option>)}</select></label>}
-    {error && <p role="alert" className="settings-error">{error}</p>}
+    {connected && error && <p role="alert" className="settings-error">{error}</p>}
     {plan && <ImportMapping plan={plan} targets={targets} owners={owners} onOwner={(id, value) => setOwners(o => { const next = { ...o }; if (value) next[id] = value; else delete next[id]; return next; })} busy={busy !== null} onChange={(id, value) => setTargets(t => ({ ...t, [id]: value }))} onCancel={() => setPlan(null)} onImport={() => void runImport()}/>}
     {imported && <div className="ws-import-report" role="status">
       <p><Check size={13} aria-hidden="true"/>Imported {imported.company}: {imported.projects.created} new and {imported.projects.updated} updated projects, {imported.tasks.created} new and {imported.tasks.updated} updated tasks, {imported.comments} comments, {imported.agents} Roster places, {imported.history} decisions{imported.needsYou ? ` (${imported.needsYou} need you, in the Inbox)` : ''}.</p>
@@ -235,16 +224,11 @@ export function ConnectionPanel({ onSaved, compact = false, signInAvailable = tr
       <p className="ws-faint">{imported.issues} issues read in {(imported.tookMs / 1000).toFixed(1)} s.</p>
       {imported.notes.map(n => <p key={n} className="ws-faint">{n}</p>)}
     </div>}
-    <div className="project-edit-actions">
-      {choice === 'signin' && waiting && <button type="button" className="settings-button secondary" onClick={() => void cancelSignIn()}>Cancel</button>}
-      {mode !== 'off' && !passwordForm && !waiting && (choice !== 'signin' || accountSignedIn) && <button type="button" className="settings-button secondary" disabled={busy !== null || (mode === 'custom' && !url.trim())} onClick={() => void runTest()}>{busy === 'test' ? 'Testing…' : 'Test connection'}</button>}
-      {mode !== 'off' && connected && <button type="button" className="settings-button secondary" title="Copy its projects, tasks, threads and Roster into Muster, reading with GET only. Safe to repeat." disabled={busy !== null || (mode === 'custom' && !url.trim())} onClick={() => void planImport()}>{busy === 'import' && !plan ? 'Reading…' : 'Import from Muster Server…'}</button>}
+    {connected && <div className="project-edit-actions">
+      <button type="button" className="settings-button secondary" title="Copy its projects, tasks, threads and Roster into Muster, reading with GET only. Safe to repeat." disabled={busy !== null} onClick={() => void planImport()}>{busy === 'import' && !plan ? 'Reading…' : 'Import a copy…'}</button>
       <span className="project-edit-spacer"/>
-      {accountSignedIn && !waiting && <button type="button" className="settings-button secondary" disabled={busy !== null} onClick={() => void signOut()}>{busy === 'disconnect' ? 'Signing out…' : 'Sign out'}</button>}
-      {(passwordForm || (choice === 'signin' && !accountSignedIn && !waiting)) && <button type="button" className="settings-button" disabled={busy !== null || (choice === 'signin' && !url.trim()) || (passwordForm && (!username.trim() || !password)) || config?.secureStorage === false} onClick={() => void signIn()}><LogIn size={13} aria-hidden="true"/> {busy === 'signin' ? 'Signing in…' : 'Sign in'}</button>}
-      {!passwordForm && !(choice === 'signin') && <button type="button" className="settings-button" disabled={busy !== null || (mode === 'custom' && !url.trim())} onClick={() => void save()}>{busy === 'save' ? 'Saving…' : 'Save'}</button>}
-      {choice === 'signin' && accountSignedIn && !waiting && <button type="button" className="settings-button" disabled={busy !== null} onClick={() => void save()}>{busy === 'save' ? 'Saving…' : 'Save'}</button>}
-    </div>
+      <button type="button" className="settings-button secondary" disabled={busy !== null} onClick={() => void disconnect()}>{busy === 'disconnect' ? 'Disconnecting…' : 'Disconnect'}</button>
+    </div>}
   </div>;
 }
 

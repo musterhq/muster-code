@@ -8,7 +8,7 @@ import {DatabaseSync} from 'node:sqlite';
 import {test,type TestContext} from 'node:test';
 import {createPaperclipDomain} from '../src/runtime/domains/paperclip.ts';
 import {isSessionCookie,liveMode,sessionCookieHeader,sessionPartition,validSessionCookie} from '../src/runtime/server/session.ts';
-import {LEGACY_PAPERCLIP_SECRET,SESSION_SECRET} from '../src/runtime/server/config.ts';
+import {LEGACY_PAPERCLIP_SECRET,SESSION_SECRET,SERVER_SECRET as SERVER_TOKEN_SECRET} from '../src/runtime/server/config.ts';
 import {ServerSignInWindows,serverOriginOf,type SessionLike,type SignInRuntime,type WindowLike} from '../src/main/server-signin-window.ts';
 import type {DomainContext} from '../src/runtime/domains/types.ts';
 
@@ -317,4 +317,48 @@ test('a change that arrived while nothing was watching is announced as soon as a
   assert.ok(waits[0]!<=500,`it now waits at most the half-second window (${waits[0]} ms), instead of the 5 s set while hidden`);
   await h.timers.fire();
   assert.deepEqual(h.events.map(e=>e.taskIds),[['i-1']],'and it carries the change');
+});
+
+// ---------------------------------------------------------------- Connect against a Muster Server (browser approval, then Disconnect)
+test('Connect on a Muster Server: its own approval page, a token picked up once, who you are, live updates; Disconnect revokes the token and turns it off',async t=>{
+  const dir=await home(t),secrets=secretsFake(),timers=fakeTimers(),events:any[]=[];
+  const memory=new DatabaseSync(':memory:');t.after(()=>memory.close());
+  let approved=false,revoked=false,tokenPolled=0;const calls:string[]=[];
+  const BASE='https://muster.example.com';
+  const fetch=(async(input:string,init:RequestInit={})=>{
+    const url=new URL(input),h=(init.headers??{}) as Record<string,string>,body=init.body?JSON.parse(String(init.body)):{};
+    if(h['x-muster-probe'])return url.pathname==='/healthz'?json(200,{ok:true,name:'Muster Server',version:'0.3.2',runtime:'running'}):json(404,{ok:false});
+    calls.push(`${init.method??'GET'} ${url.pathname} ${h.authorization?'bearer':'none'}`);
+    if(url.pathname==='/api/connect/challenges')return json(200,{ok:true,id:'chal_0123456789abcdef',secret:'sec_secret_value_0123456789',approvalPath:'/connect/chal_0123456789abcdef',expiresAt:Date.now()+600_000,pollIntervalMs:1000});
+    if(url.pathname.endsWith('/poll')){tokenPolled++;return approved?json(200,{ok:true,status:'approved',token:'mst_issued_token_value_0123456789',user:{username:'olivia',displayName:'Olivia'}}):json(200,{ok:true,status:'pending'});}
+    if(url.pathname==='/rpc'&&body.command==='server.me')return h.authorization==='Bearer mst_issued_token_value_0123456789'?json(200,{ok:true,value:{user:{id:'u1',username:'olivia',displayName:'Olivia Owner',email:null,role:'owner'},server:{version:'0.3.2',name:'Acme'}}}):json(401,{ok:false});
+    if(url.pathname==='/api/connect/revoke-current'){revoked=h.authorization==='Bearer mst_issued_token_value_0123456789';return json(200,{ok:true});}
+    return json(404,{ok:false,error:'nope'});
+  }) as never;
+  const context={dataDir:dir,db:()=>memory,store:{snapshot:()=>({folders:[]})},emit:(e:unknown)=>events.push(e),hooks:{},async invoke(command:string){if(command==='mailbox.list')return {messages:[],unacked:0,pending:0};if(command==='project.list')return [];throw new Error(`unexpected ${command}`);}} as unknown as DomainContext;
+  const domain=createPaperclipDomain(context,{fetch,secrets:()=>secrets.store as never,timers,socket:(()=>{throw new Error('no socket');}) as never});
+  t.after(()=>domain.dispose?.());
+  const call=(command:string,input:Record<string,unknown>={})=>Promise.resolve(domain.handlers[command]!(input)) as Promise<any>;
+  const started=await call('paperclip.signin.start',{baseUrl:BASE});
+  assert.deepEqual([started.phase,started.approvalUrl],['waiting',`${BASE}/connect/chal_0123456789abcdef`],'the server\'s own page, on the address that was typed');
+  assert.equal(secrets.values.size,0,'nothing is stored while waiting');
+  await timers.fire();assert.ok(tokenPolled>=1,'the app polls only while waiting');
+  approved=true;await timers.fire();
+  for(let i=0;i<20&&(await call('paperclip.signin.status')).phase!=='signed-in';i++)await new Promise(r=>setTimeout(r,10));
+  const view=await call('paperclip.config.get');
+  assert.deepEqual([view.backend,view.mode,view.hasToken,view.user?.username,view.user?.role,view.signedIn?.name,view.compatibility],['muster-server','custom',true,'olivia','owner','Olivia Owner',null]);
+  assert.equal(secrets.values.get(SERVER_TOKEN_SECRET),'mst_issued_token_value_0123456789','the token is in the secret store, not the config');
+  assert.ok(!(await (await import('node:fs/promises')).readFile(join(dir,'server.json'),'utf8')).includes('mst_issued'));
+  const out=await call('paperclip.disconnect');
+  assert.deepEqual([out.revoked,revoked,out.config.mode,out.config.hasToken,out.config.signedIn,out.config.user],[true,true,'off',false,null,null],'Disconnect revokes the token on the server and turns the connection off');
+  assert.equal(secrets.values.size,0);
+});
+
+test('Connect finds out the kind of server from the address and says so in plain words when it is neither',async t=>{
+  const dir=await home(t),memory=new DatabaseSync(':memory:');t.after(()=>memory.close());
+  const mk=(fetch:any)=>createPaperclipDomain({dataDir:dir,db:()=>memory,store:{snapshot:()=>({folders:[]})},emit(){},hooks:{},async invoke(){return [];}} as unknown as DomainContext,{fetch,secrets:()=>secretsFake().store as never,timers:fakeTimers()});
+  const page=mk(async()=>new Response('<html>login portal</html>',{status:200,headers:{'content-type':'text/html'}}));
+  await assert.rejects(async()=>page.handlers['paperclip.signin.start']!({baseUrl:'https://portal.example.com'}),/portal\.example\.com isn’t a Muster server/);
+  const down=mk(async()=>{throw new Error('ECONNREFUSED');});
+  await assert.rejects(async()=>down.handlers['paperclip.signin.start']!({baseUrl:'https://gone.example.com'}),/Muster can’t reach gone\.example\.com/);
 });

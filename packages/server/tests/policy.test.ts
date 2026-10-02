@@ -272,3 +272,26 @@ test('R281 should-fix 10c: work.docs.save records the signed-in person as the au
   await dispatch(ctx as never, { user: me } as never, 'work.docs.save', { projectId: 'p-shared', taskId: 't', key: 'plan', text: 'x' });
   assert.equal((seen[1] as { by: string }).by, 'Mia Member');
 });
+
+test('the organisation name: set at init, trimmed, shown by server.me; only an owner can change it', async () => {
+  const { cleanOrgName, readConfig, writeConfig, paths, defaultConfig } = await import('../src/config.ts');
+  const { dispatch } = await import('../src/rpc.ts');
+  const { mkdtempSync, rmSync } = await import('node:fs'); const { tmpdir } = await import('node:os'); const { join } = await import('node:path');
+  assert.equal(cleanOrgName('  Acme   Data \n Ops '), 'Acme Data Ops'); assert.equal(cleanOrgName('   '), null); assert.equal(cleanOrgName(42), null); assert.equal(cleanOrgName('x'.repeat(200))!.length, 80);
+  const dir = mkdtempSync(join(tmpdir(), 'muster-org-')); const pt = paths(dir);
+  try {
+    writeConfig(pt, { ...defaultConfig(), orgName: cleanOrgName('Acme Data Ops') });
+    assert.equal(readConfig(pt)!.orgName, 'Acme Data Ops', 'persisted in server.json');
+    let name = readConfig(pt)!.orgName;
+    const audit: unknown[] = [];
+    const ctx = { version: '1', orgName: () => name, setOrgName: async (n: string | null) => { name = n; writeConfig(pt, { ...readConfig(pt)!, orgName: n }); }, audit: { append: async (e: unknown) => { audit.push(e); } } };
+    const me = await dispatch(ctx as never, { user: user('member') } as never, 'server.me', {}) as { server: { name: string | null } };
+    assert.equal(me.server.name, 'Acme Data Ops');
+    await assert.rejects(dispatch(ctx as never, { user: user('admin') } as never, 'server.org.set', { name: 'Hijack' }), /Only owners/);
+    assert.equal(name, 'Acme Data Ops');
+    assert.deepEqual(await dispatch(ctx as never, { user: user('owner') } as never, 'server.org.set', { name: '  Ragnar Ops ' }), { name: 'Ragnar Ops' });
+    assert.equal(readConfig(pt)!.orgName, 'Ragnar Ops'); assert.equal(audit.length, 1);
+    await dispatch(ctx as never, { user: user('owner') } as never, 'server.org.set', { name: '' });
+    assert.equal(readConfig(pt)!.orgName, null, 'clearing the name returns to the address');
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});

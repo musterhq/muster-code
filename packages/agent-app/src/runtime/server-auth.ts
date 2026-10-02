@@ -8,8 +8,8 @@
  */
 import type { PaperclipSignInState } from '../shared/domains/paperclip-protocol.ts';
 
-export interface SignedInUser { name: string | null; email: string | null; userId: string | null }
-/** What `start` returns. `secret` and `key` stay inside the controller. */
+export interface SignedInUser { name: string | null; email: string | null; userId: string | null; /** Muster Server also says the account name and role. */ username?: string; role?: string }
+/** What `start` returns. `secret` and `key` stay inside the controller. (`key` is the board key a Paperclip challenge issues up front; a Muster Server fills it in when the approval completes.) */
 export interface ServerChallenge { id: string; secret: string; key: string; approvalUrl: string; expiresAt: number; pollIntervalMs: number }
 export type ChallengeStatus = 'pending' | 'approved' | 'cancelled' | 'expired' | 'gone';
 /** Thrown by an adapter when the server cannot be reached (the controller backs off). Any other Error from `start` is shown as is. */

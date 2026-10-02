@@ -187,12 +187,12 @@ export class ServerConnection {
     return this.view();
   }
   /** A browser approval finished: the key goes into the secret store bound to this origin, like a pasted token; a new origin forgets the old org. */
-  adoptSignIn(result: { origin: string; baseUrl: string; token: string; user: { name: string | null; email: string | null } }): void {
+  adoptSignIn(result: { origin: string; baseUrl: string; token: string; backend?: ServerBackendKind; user: { name: string | null; email: string | null; username?: string; role?: string } }): void {
     const c = this.config;
     this.secrets().set(c.tokenSecret, result.token);
     const sameOrigin = c.tokenOrigin === result.origin || originOf(c.baseUrl) === result.origin;
     if (c.sessionOrigin !== null && c.sessionOrigin !== result.origin) this.clearSession(false);
-    this.save({ ...this.config, mode: 'custom', baseUrl: result.baseUrl, companyId: sameOrigin ? c.companyId : null, backend: 'paperclip', tokenOrigin: result.origin, user: null, signedIn: { name: result.user.name, email: result.user.email }, signInNotice: null, connectedAt: new Date().toISOString() });
+    this.save({ ...this.config, mode: 'custom', baseUrl: result.baseUrl, companyId: sameOrigin ? c.companyId : null, backend: result.backend ?? 'paperclip', tokenOrigin: result.origin, user: result.backend === 'muster-server' && result.user.username ? { username: result.user.username, displayName: result.user.name ?? result.user.username, role: result.user.role ?? 'member' } : null, signedIn: { name: result.user.name, email: result.user.email }, signInNotice: null, connectedAt: new Date().toISOString() });
     // The sign-in window may have obtained the session before the approval finished: it joins the key now.
     const pending = this.pendingSession; this.pendingSession = null;
     if (pending && pending.origin === result.origin && Date.now() - pending.at < 30 * 60_000) try { this.storeSession(result.origin, pending.cookie); } catch { /* no keychain: updates fall back to polling */ }
@@ -208,7 +208,8 @@ export class ServerConnection {
     const c = this.config;
     if (this.secrets().status(c.tokenSecret).stored) this.secrets().clear(c.tokenSecret);
     this.clearSession(false);
-    this.save({ ...DEFAULT_SERVER_CONFIG, ...(c.mode !== 'off' && c.backend === 'paperclip' ? { mode: c.mode, baseUrl: c.baseUrl, companyId: c.companyId, backend: c.backend, tokenSecret: c.tokenSecret } : { tokenSecret: c.tokenSecret }) });
+    // Disconnect turns the connection off: nothing is kept but where the next token would go.
+    this.save({ ...DEFAULT_SERVER_CONFIG, tokenSecret: c.tokenSecret });
     return this.view();
   }
 

@@ -13,7 +13,7 @@ import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { createInterface } from 'node:readline';
 import { publicUser } from './auth/accounts.ts';
-import { defaultConfig, DEFAULT_PORT, isLoopback, paths, readConfig, resolveDataDir, validateBind, writeConfig, type ServerConfig } from './config.ts';
+import { cleanOrgName, defaultConfig, DEFAULT_PORT, isLoopback, paths, readConfig, resolveDataDir, validateBind, writeConfig, type ServerConfig } from './config.ts';
 import { verifyLedger } from './cost.ts';
 import { parseDuration } from './auth/tokens.ts';
 import { PolicyError } from './policy.ts';
@@ -53,7 +53,7 @@ Usage: muster-server <command> [options]          (--json on any command for mac
 Setup and lifecycle
   init        Create the data directory, secret key and owner account
               [--data-dir DIR] [--username NAME] [--name "Full Name"] [--password-stdin]
-              [--host H] [--port N] [--allowed-host HOST]... [--public-url URL] [--tls-cert F --tls-key F] [--trust-proxy]
+              [--host H] [--port N] [--allowed-host HOST]... [--public-url URL] [--tls-cert F --tls-key F] [--trust-proxy] [--org-name NAME]
   start       Run the server in the foreground (use --detach to background it)
               [--host 127.0.0.1] [--port ${DEFAULT_PORT}] [--data-dir DIR] [--allowed-host HOST]... [--tls-cert F --tls-key F]
               [--public-url URL] [--trust-proxy] [--detach]
@@ -205,6 +205,7 @@ async function executor(dataDir: string): Promise<Exec> {
   if (!owner) throw new Error('This server has no active owner. Run: muster-server init');
   const ctx: RpcContext = { store: server.store, accounts: server.accounts, audit: server.audit, runtime: null, registry: server.registry, agents: server.agents, runtimeDir: p.runtime,
     version: VERSION, startedAt: Date.now(), inviteUrl: token => `${baseUrl(readConfig(p)!)}/invite/${token}`, bumpAccess: () => undefined,
+    orgName: () => readConfig(p)?.orgName ?? null, setOrgName: async name => { writeConfig(p, { ...readConfig(p)!, orgName: name }); },
     status: async () => ({ running: false }) };
   return { online: false, dataDir, actor: owner, close: () => server.store.close(), call: (command, input = {}) => dispatch(ctx, { user: owner, via: 'token' }, command, input) };
 }
@@ -220,6 +221,7 @@ function configFromFlags(base: ServerConfig, p: Parsed): ServerConfig {
   if (flag(p, 'tls-key')) c.tlsKey = flag(p, 'tls-key')!;
   if (flag(p, 'public-url')) { const u = flag(p, 'public-url')!; if (!/^https?:\/\/[^/]+/.test(u)) throw new UsageError('--public-url must be an http(s) URL.'); c.publicUrl = u.replace(/\/+$/, ''); }
   if (p.bools.has('trust-proxy')) c.trustProxy = true;
+  if (flag(p, 'org-name')) c.orgName = cleanOrgName(flag(p, 'org-name'));
   return c;
 }
 

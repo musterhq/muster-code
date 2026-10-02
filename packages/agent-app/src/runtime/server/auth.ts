@@ -8,7 +8,7 @@ import { hostname } from 'node:os';
 import type { ServerBackendKind, ServerSignInMethod } from '../../shared/domains/paperclip-protocol.ts';
 import type { FetchLike } from '../paperclip-client.ts';
 
-export const SIGN_IN_METHODS: Record<ServerBackendKind, readonly ServerSignInMethod[]> = { paperclip: ['browser'], 'muster-server': ['password'] };
+export const SIGN_IN_METHODS: Record<ServerBackendKind, readonly ServerSignInMethod[]> = { paperclip: ['browser'], 'muster-server': ['browser'] };
 export const signInMethods = (backend: ServerBackendKind | null): ServerSignInMethod[] => backend ? [...SIGN_IN_METHODS[backend]] : [];
 
 /** Username and password to a server-issued API token (Muster Server's `POST /api/auth/token`). */

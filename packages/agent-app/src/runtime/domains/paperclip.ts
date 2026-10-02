@@ -25,7 +25,8 @@ import { normalizeRemote } from '../memory-identity.ts';
 import { PaperclipError, type FetchLike, type LiveSocket, type SocketFactory } from '../paperclip-client.ts';
 import type { ServerBackend, ServerPart } from '../server/backend.ts';
 import { LEGACY_PAPERCLIP_SECRET } from '../server/config.ts';
-import { createPaperclipSignIn } from '../paperclip-signin.ts';
+import { createServerSignIn } from '../server-auth.ts';
+import { createAutoAuth } from '../server/auto-auth.ts';
 import { detectBackend } from '../server/detect.ts';
 import { normalizeBaseUrl as normalizeUrl } from '../paperclip-client.ts';
 import { connectionFor, isLoopback as connectionLoopback, originOf } from '../server/connection.ts';
@@ -629,10 +630,11 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
   };
 
   /** Browser-approval sign-in (the ServerAuth seam): the approved key is stored like a pasted token, bound to its origin. */
-  const signIn = createPaperclipSignIn({
-    fetch: conn.fetcher, timers,
+  const auth = createAutoAuth(conn.fetcher, origin => conn.config.backend && originOf(conn.config.baseUrl) === origin ? conn.config.backend : null);
+  const signIn = createServerSignIn(auth, {
+    timers,
     changed: () => context.emit({ type: 'projectsWorkspaceChanged', scopes: ['config'], taskIds: [] }),
-    approved: result => conn.adoptSignIn(result),
+    approved: result => conn.adoptSignIn({ ...result, backend: auth.backendFor(result.origin) }),
   });
   const text = (value: unknown, label: string, max: number) => { if (typeof value !== 'string' || !value.trim()) throw new Error(`${label} is required.`); if (value.length > max) throw new Error(`${label} is too long.`); return value; };
   const id = (value: unknown) => { if (typeof value !== 'string' || !/^[\w:.-]{1,128}$/.test(value)) throw new Error('Unknown item.'); return value; };
@@ -666,6 +668,16 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
         conn.forgetSignIn();
         signIn.reset();
         return { config: view(), revoked: outcome.revoked, ...(outcome.message ? { message: outcome.message } : {}) };
+      },
+      'paperclip.disconnect': async () => {
+        // Disconnect: a key this app was given by browser approval is revoked on the server; every key, session and the link itself is forgotten here.
+        let revoked = false, message: string | undefined;
+        if (conn.config.signedIn) {
+          const baseUrl = conn.baseUrl(), key = conn.tokenFor(baseUrl);
+          if (key) { const outcome = await signIn.revoke(baseUrl, key); revoked = outcome.revoked; message = outcome.message; }
+        }
+        conn.disconnect(); signIn.reset();
+        return { config: view(), revoked, ...(message ? { message } : {}) };
       },
       'paperclip.config.set': input => {
         const next = conn.configure(input as never);

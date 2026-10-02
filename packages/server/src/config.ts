@@ -15,9 +15,12 @@ export interface ServerConfig {
   publicUrl: string | null;
   /** Trust X-Forwarded-Proto/For from a reverse proxy on loopback. */
   trustProxy: boolean;
+  /** What people call this server's organisation (set at init, editable by the owner). Apps show it instead of the address. */
+  orgName: string | null;
   createdAt: string;
 }
-export const defaultConfig = (): ServerConfig => ({ version: 1, host: DEFAULT_HOST, port: DEFAULT_PORT, allowedHosts: [], tlsCert: null, tlsKey: null, publicUrl: null, trustProxy: false, createdAt: new Date().toISOString() });
+export const cleanOrgName = (value: unknown): string | null => { if (typeof value !== 'string') return null; const t = value.replace(/\s+/g, ' ').trim().slice(0, 80); return t || null; };
+export const defaultConfig = (): ServerConfig => ({ version: 1, host: DEFAULT_HOST, port: DEFAULT_PORT, allowedHosts: [], tlsCert: null, tlsKey: null, publicUrl: null, trustProxy: false, orgName: null, createdAt: new Date().toISOString() });
 
 export interface Paths { dir: string; config: string; db: string; key: string; runtime: string; pid: string; log: string }
 export function resolveDataDir(flag?: string, env: NodeJS.ProcessEnv = process.env): string {
@@ -31,7 +34,7 @@ export function paths(dir: string): Paths {
 export function readConfig(p: Paths): ServerConfig | null {
   if (!existsSync(p.config)) return null;
   const raw = JSON.parse(readFileSync(p.config, 'utf8')) as Partial<ServerConfig>;
-  return { ...defaultConfig(), ...raw, allowedHosts: Array.isArray(raw.allowedHosts) ? raw.allowedHosts.map(String) : [] };
+  return { ...defaultConfig(), ...raw, orgName: cleanOrgName(raw.orgName), allowedHosts: Array.isArray(raw.allowedHosts) ? raw.allowedHosts.map(String) : [] };
 }
 export function writeConfig(p: Paths, config: ServerConfig): void {
   mkdirSync(p.dir, { recursive: true, mode: 0o700 });

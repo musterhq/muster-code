@@ -637,7 +637,7 @@ async function main(): Promise<void> {
       if (command === 'files.trash') onEvent({type:'workspaceChanged',folderId:folder.id});
       return;
     }
-    if (command === 'paperclip.signin.signout' || command === 'musterServer.disconnect') {
+    if (command === 'paperclip.signin.signout' || command === 'paperclip.disconnect' || command === 'musterServer.disconnect') {
       // Signing out clears BOTH the key (the runtime revokes it) and this server's sign-in window session (its partition).
       const before = await service.invoke('paperclip.config.get', {}).catch(() => null);
       const outcome = await desktopWork.invoke(command, input as Commands[typeof command]['input']);

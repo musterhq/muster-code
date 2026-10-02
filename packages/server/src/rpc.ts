@@ -14,6 +14,7 @@ import { CONNECTOR_TYPES } from './connectors/catalog.ts';
 import type { ConnectorRegistry } from './connectors/registry.ts';
 import type { RemoteAgents } from './agents/remote.ts';
 import { parseMatch } from './connectors/router.ts';
+import { cleanOrgName } from './config.ts';
 import { authorizeCommand, PolicyError, ROLE_RANK } from './policy.ts';
 import type { RuntimeHost } from './runtime-host.ts';
 import { PROJECT_ROLES, type OrgRole, type ProjectRole, type ServerStore, type UserRecord } from './store/types.ts';
@@ -23,6 +24,9 @@ export interface RpcContext {
   runtimeDir: string; version: string; startedAt: number; inviteUrl(token: string): string;
   /** Bumped whenever access or chat ownership changes, so cached per-client views refresh. */
   bumpAccess(): void;
+  /** The organisation name apps show for this server, and the owner's way to change it (written to server.json). */
+  orgName(): string | null;
+  setOrgName(name: string | null): Promise<void>;
   status(): Promise<Record<string, unknown>>;
 }
 
@@ -143,7 +147,8 @@ async function serverCommand(ctx: RpcContext, principal: Principal, command: str
   };
   return wrap(async () => {
     switch (command) {
-      case 'server.me': return { user: publicUser(user), server: { version: ctx.version }, via: principal.via };
+      case 'server.me': return { user: publicUser(user), server: { version: ctx.version, name: ctx.orgName() }, via: principal.via };
+      case 'server.org.set': { need(user, 'owner', 'rename the organisation'); const name = cleanOrgName(i.name); await ctx.setOrgName(name); await ctx.audit.append({ actor: `user:${user.id}`, action: 'org.renamed', target: 'server', detail: { name } }); return { name }; }
       case 'server.password.change': await ctx.accounts.changePassword(user, str(i.current, 'current'), str(i.next, 'next')); return { ok: true };
       case 'server.status': need(user, 'admin', 'see server status'); return ctx.status();
       case 'server.users.list': {

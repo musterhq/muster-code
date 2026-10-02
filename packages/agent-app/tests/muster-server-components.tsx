@@ -28,7 +28,7 @@ let config:any={mode:'off',baseUrl:'http://127.0.0.1:3100',hasToken:false,secure
   calls.push({command,input});
   if(command==='paperclip.config.get')return config;
   if(command==='paperclip.signin.status')return {phase:'idle'};
-  if(command==='paperclip.test')return input.mode==='local'?{ok:false,stage:'network',message:'No server is answering on this Mac.'}:{ok:false,stage:'auth',backend:'muster-server',compatibility:null,signIn:['password'],message:'This Muster Server needs you to sign in.',baseUrl:input.baseUrl};
+  if(command==='paperclip.test')return {ok:false,stage:'network',message:'No server is answering.',baseUrl:input.baseUrl};
   if(command==='musterServer.connect'){if(input.password!=='right-password-1')throw new Error('Wrong username or password.');config={...config,mode:'custom',baseUrl:'https://muster.example.com',hasToken:true,backend:'muster-server',user:{username:'olivia',displayName:'Olivia Owner',role:'owner'},serverVersion:'0.2.10',connectedAt:'2026-10-01T00:00:00Z'};return {connected:true};}
   if(command==='musterServer.disconnect'){config={...config,mode:'off',hasToken:false,user:null,backend:null};return {connected:false};}
   if(command==='paperclip.snapshot')return {paperclip:null,goals:[],approvals:[],labels:[],tasks:[],agents:[],projects:[],runs:[],inbox:[],counts:{liveRuns:0,inbox:0,failedRuns:0,openTasks:0},fetchedAt:new Date().toISOString()};
@@ -46,29 +46,18 @@ const {ConnectionPanel}=await import('../src/renderer/components/HubSetup');
 const host=document.getElementById('root')!;
 const root=createRoot(host);
 await act(async()=>{root.render(<ConnectionPanel compact/>);});await settle();
-assert.deepEqual([...host.querySelectorAll('.ws-segment-label')].map(e=>text(e)),['This Mac','Sign in to Muster Server','URL + API token','Off'],'one connection, four choices');
-assert.match(text(host),/Nothing leaves this Mac/,'off until you connect');
-await click(byText(host,'button','Your account on a server'));
-const field=(i:number)=>host.querySelectorAll('input')[i]??null; // URL, then (after detection) username and password
-const signInButton=()=>[...host.querySelectorAll('button')].find(b=>text(b)==='Sign in') as HTMLButtonElement|undefined;
-assert.equal(signInButton()?.disabled,true,'Sign in waits for a URL');
-await type(field(0),'https://muster.example.com');
-await click(signInButton());await settle();
+assert.equal(host.querySelectorAll('[role=radio]').length,0,'one address and one Connect: no method to pick');
+const connectButton=byText(host,'button','Connect') as HTMLButtonElement;
+assert.ok(connectButton&&!connectButton.className.includes('secondary'),'Connect is the primary button');
+assert.equal(connectButton.disabled,true,'Connect waits for an address');
+assert.match(text(host),/How connecting worksEnter your team’s server address\./);
+assert.match(text(host),/Muster never sees your password/);
+await type(host.querySelector('input[type=url]'),'https://muster.example.com');
+assert.equal((byText(host,'button','Connect') as HTMLButtonElement).disabled,false);
+await click(byText(host,'button','Connect'));await settle();
 assert.equal(calls.find(c=>c.command==='paperclip.test'&&c.input.baseUrl==='https://muster.example.com')?.input.mode,'custom','the address is checked first: nobody says which kind of server it is');
-assert.ok(host.querySelector('input[type=password]'),'a Muster Server asks for a username and password');
-await type(field(1),'olivia');
-await type(field(2),'wrong-password-1');
-await click(signInButton());await settle();
-assert.match(text(host.querySelector('[role=alert]')),/Wrong username or password/);
-await type(field(2),'right-password-1');
-await click(signInButton());await settle();
-assert.match(text(host.querySelector('.ws-connection-details')),/Connected tohttps:\/\/muster\.example\.com.*Signed in asOlivia Owner \(@olivia, owner\).*Server version0\.2\.10/);
-assert.ok(!/Compatibility/.test(text(host.querySelector('.ws-connection-details'))),'the compatibility line appears only for a Paperclip-compatible backend');
-assert.deepEqual(calls.find(c=>c.command==='musterServer.connect'&&c.input.password==='right-password-1')?.input,{url:'https://muster.example.com',method:'password',username:'olivia',password:'right-password-1',mode:'custom'});
-assert.ok(byText(host,'button','Import from Muster Server'),'import is part of the same section');
-assert.equal(calls.some(c=>c.command==='link.open'),false,'a connected Muster Server never opens in the browser');
-await click(byText(host,'button','Sign out'));await settle();
-assert.match(text(host),/Nothing leaves this Mac/);
+assert.match(text(host.querySelector('[role=alert]')),/Muster can’t reach muster\.example\.com/,'a server that does not answer is said plainly under the address');
+assert.equal(calls.some(c=>c.command==='link.open'),false,'a Muster Server never opens in the browser');
 await act(async()=>{root.unmount();});
 
 // ---------------------------------------------------------------- web: Settings › Server, admin console
