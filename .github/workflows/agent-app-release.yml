@@ -57,7 +57,7 @@ jobs:
       run:
         working-directory: packages/agent-app
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: refs/tags/${{ env.TAG }}
 
@@ -172,7 +172,7 @@ jobs:
       run:
         working-directory: packages/agent-app
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: refs/tags/${{ env.TAG }}
       - uses: actions/setup-node@v4
@@ -264,7 +264,7 @@ jobs:
       ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
       MUSTER_SKIP_NATIVE_REBUILD: "1"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: refs/tags/${{ env.TAG }}
       - uses: actions/setup-node@v4
@@ -313,7 +313,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: refs/tags/${{ env.TAG }}
           sparse-checkout: |
