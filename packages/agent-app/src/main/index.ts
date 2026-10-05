@@ -583,6 +583,18 @@ async function main(): Promise<void> {
       await fs.copyFile(source,result.filePath);
       return {saved:true,fileName:path.basename(result.filePath)};
     }
+    if(command==='paperclip.output.save'){
+      if(!service||!window||window.isDestroyed())throw new Error('Agent service is unavailable.');
+      const request=input as Commands['paperclip.output.save']['input'];
+      if(!request||typeof request.id!=='string'||!request.id||request.id.length>200||(request.projectId!==undefined&&typeof request.projectId!=='string'))throw new Error('Invalid Download request.');
+      // The runtime fetches with the connection's own sign-in into the private cache; main only writes what the person chose.
+      const file=await service.invoke('paperclip.output.fetch',{id:request.id,...(request.projectId?{projectId:request.projectId}:{}),preferServer:true});
+      if(file.kind!=='cached'||!file.path)throw new Error('The server has no file to download for this output.');
+      const result=await dialog.showSaveDialog(window,{title:'Download',defaultPath:path.join(app.getPath('downloads'),file.name)});
+      if(result.canceled||!result.filePath)return {saved:false};
+      await fs.copyFile(file.path,result.filePath);
+      return {saved:true,fileName:path.basename(result.filePath)};
+    }
     if(command==='chat.export.file'){
       if(!service||!window||window.isDestroyed())throw new Error('Agent service is unavailable.');
       const request=input as Commands['chat.export.file']['input'];

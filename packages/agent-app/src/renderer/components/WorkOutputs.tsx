@@ -4,7 +4,7 @@
  * merged), approve / request changes (which tells the task's owner), an arrival cue for what is new since you last looked,
  * and previews through the app's own file viewers and pull request tab.
  */
-import { Box, Check, ExternalLink, FileText, GitPullRequest, Image, Search, Table2, Video, Code2, Type } from 'lucide-react';
+import { Box, Check, Download, ExternalLink, FileText, GitPullRequest, Image, Search, Table2, Video, Code2, Type } from 'lucide-react';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import type { WorkspaceRow, WorkspaceSnapshot } from '../../shared/domains/paperclip-protocol';
 import { OUTPUT_KINDS, OUTPUT_STATUS_LABEL, OUTPUT_STATUSES, type OutputKind, type OutputStatus } from '../../shared/domains/work-protocol';
@@ -12,6 +12,9 @@ import { filterOutputs, outputItems, type OutputItem } from '../outputsModel';
 import { invoke } from '../bridge';
 import { agoLabel, exactTime } from '../relativeTime';
 import { closeSettings, notifyError, notifySuccess, openFile, openPullRequestTab } from '../store';
+import type { ServerOutputFile } from '../../shared/domains/paperclip-protocol';
+import { cleanIpcError } from './resourceErrors';
+import { ServerOutputViewer } from './ServerOutputViewer';
 import { useStore } from '../useStore';
 import { useWorkLoad } from '../workHooks';
 import { StateChip } from './HubParts';
@@ -49,7 +52,25 @@ export function OutputsPanel({ snapshot, projectId, local, nav }: { snapshot: Wo
     try { await invoke('work.outputs.status', { projectId, outputId: i.id, status: next, note: why, taskId: i.taskId, title: i.title }); setAsking(null); setNote(''); meta.reload(); if (next === 'changes_requested') notifySuccess('Sent. The owner has your note.'); }
     catch (cause) { notifyError(cause); } finally { setBusy(null); }
   };
+  // A server output has no folder here: Muster fetches it (or finds the same file in the Work locally folder) and shows it.
+  const [loading, setLoading] = useState<string | null>(null), [failed, setFailed] = useState<Record<string, string>>({}), [viewing, setViewing] = useState<{ item: OutputItem; file: ServerOutputFile } | null>(null);
+  const openServer = async (i: OutputItem) => {
+    if (loading) return;
+    setLoading(i.id); setFailed(f => { const { [i.id]: _gone, ...rest } = f; return rest; });
+    try {
+      const file = await invoke('paperclip.output.fetch', { id: i.id, projectId });
+      if (file.kind === 'link' && file.url) { void invoke('link.open', { url: file.url }).catch(() => { window.open(file.url!, '_blank', 'noopener'); }); return; }
+      if (file.kind === 'local' && file.folderPath && file.relPath) {
+        const folder = app?.folders.find(f => f.path === file.folderPath) ?? await invoke('folder.add', { path: file.folderPath });
+        void openFile(folder.id, file.relPath); closeSettings(); return;
+      }
+      setViewing({ item: i, file });
+    } catch (cause) { setFailed(f => ({ ...f, [i.id]: cleanIpcError(cause) })); }
+    finally { setLoading(null); }
+  };
+  const download = (i: OutputItem) => void invoke('paperclip.output.save', { id: i.id, projectId }).then(r => { if (r.saved) notifySuccess(`Saved “${r.fileName}”.`); }, cause => setFailed(f => ({ ...f, [i.id]: cleanIpcError(cause) })));
   const open = (i: OutputItem) => {
+    if (i.output) { void openServer(i); return; }
     if (i.kind === 'pull_request' && i.url) { void invoke('link.open', { url: i.url }).catch(() => { window.open(i.url!, '_blank', 'noopener'); }); return; }
     if (i.path && primaryFolder) { void openFile(primaryFolder, i.path); closeSettings(); }
   };
@@ -83,11 +104,11 @@ export function OutputsPanel({ snapshot, projectId, local, nav }: { snapshot: Wo
       : groups.map(g => <div key={g.label || 'all'} className="work-output-group">
         {g.label && <h3 className="ws-group-title">{g.label}<span>{g.rows.length}</span></h3>}
         <ul className="ws-rows" aria-label={g.label || 'Outputs'}>{g.rows.map(i => {
-          const Icon = ICON[i.kind], st = states[i.id], task = i.taskId ? tasks.get(i.taskId) : undefined, can = Boolean(i.path && primaryFolder) || Boolean(i.url);
+          const Icon = ICON[i.kind], st = states[i.id], task = i.taskId ? tasks.get(i.taskId) : undefined, can = Boolean(i.output) || Boolean(i.path && primaryFolder) || Boolean(i.url);
           return <li key={i.id} className="work-output" data-new={isNew(i) || undefined} data-kind={i.kind}>
             <div className="ws-row is-static">
               <Icon size={15} aria-hidden={true}/>
-              <span className="ws-row-text"><span className="ws-row-title">{can ? <button type="button" className="work-output-open" onClick={() => open(i)}>{i.title}</button> : i.title}{isNew(i) && <span className="ws-chip" data-tone="accent">New</span>}</span>
+              <span className="ws-row-text"><span className="ws-row-title">{can ? <button type="button" className="work-output-open" onClick={() => open(i)}>{i.title}</button> : i.title}{isNew(i) && <span className="ws-chip" data-tone="accent">New</span>}{loading === i.id && <span className="work-output-spinner" role="status" aria-label={`Opening ${i.title}`}/>}</span>
                 <span className="ws-row-meta">{i.detail}</span></span>
               {task && group !== 'task' && <button type="button" className="ws-chip-link" onClick={() => nav.onOpenTask(task.id)} title={task.title}>{task.key}</button>}
               {local && (st ? <StateChip tone={STATUS_TONE[st.status]}>{OUTPUT_STATUS_LABEL[st.status]}</StateChip> : null)}
@@ -96,9 +117,12 @@ export function OutputsPanel({ snapshot, projectId, local, nav }: { snapshot: Wo
                 <button type="button" className="settings-button" disabled={busy === i.id} onClick={() => void setState(i, 'approved')}><Check size={13}/>Approve</button>
                 <button type="button" className="settings-button secondary" disabled={busy === i.id} onClick={() => { setAsking(i.id); setNote(''); }}>Request changes</button></>}
               {i.kind === 'pull_request' && i.prNumber && i.repo && primaryFolder && <Tip label="Open in the pull request tab"><button type="button" className="icon-button" aria-label={`Open ${i.repo}#${i.prNumber} in Muster`} onClick={() => { openPullRequestTab(primaryFolder, i.prNumber!, i.title); closeSettings(); }}><GitPullRequest size={13}/></button></Tip>}
+              {i.output?.downloadable && <Tip label="Download…"><button type="button" className="icon-button" aria-label={`Download ${i.title}`} onClick={() => download(i)}><Download size={13}/></button></Tip>}
+              {i.output && <Tip label="Open on server"><button type="button" className="icon-button" aria-label={`Open ${i.title} on server`} onClick={() => void invoke('link.open', { url: i.output!.href }).catch(() => { window.open(i.output!.href, '_blank', 'noopener'); })}><ExternalLink size={13}/></button></Tip>}
               {i.url && <Tip label="Open on GitHub"><button type="button" className="icon-button" aria-label={`Open ${i.title} on GitHub`} onClick={() => open(i)}><ExternalLink size={13}/></button></Tip>}
               {i.at && <span className="ws-row-age" title={exactTime(i.at)}>{agoLabel(i.at)}</span>}
             </div>
+            {failed[i.id] && <p className="work-output-error" role="alert">{failed[i.id]}</p>}
             {st?.status === 'changes_requested' && st.note && <p className="work-output-note"><strong>Changes requested:</strong> {st.note}</p>}
             {asking === i.id && <form className="work-comment-form" onSubmit={e => { e.preventDefault(); void setState(i, 'changes_requested', note.trim()); }}>
               <textarea className="work-comment-text" aria-label={`What should change in ${i.title}?`} rows={2} placeholder="What should change? The owner receives this note." value={note} onChange={e => setNote(e.target.value)} autoFocus/>
@@ -107,6 +131,7 @@ export function OutputsPanel({ snapshot, projectId, local, nav }: { snapshot: Wo
           </li>;
         })}</ul>
       </div>)}
+    {viewing && <ServerOutputViewer title={viewing.item.title} file={viewing.file} serverUrl={viewing.item.output?.href ?? null} projectId={projectId} outputId={viewing.item.id} onClose={() => setViewing(null)}/>}
     {shown.length > CAP && !more && <button type="button" className="ws-link" onClick={() => setMore(true)}>Show {shown.length - CAP} more</button>}
   </section>;
 }

@@ -259,7 +259,39 @@ export interface WorkspaceRow {
   nextRunAt?: string | null; lastRun?: { status: string; at: string | null } | null; overlap?: 'skip' | 'queue'; catchUp?: 'one' | 'none'; paused?: boolean;
   /** Outputs: the file path, the task it came from and the agent that made it, when known (Wave 2). */
   path?: string; taskId?: string | null; agent?: string | null;
+  /** A server output (an issue document, an attachment or a work product): what the app needs to fetch, open, download or link it. Muster's own rows have none. */
+  output?: ServerOutputRef;
 }
+/** One output of a connected server project, as the server lists it (`/companies/:id/artifacts`). */
+export interface ServerOutputRef {
+  source: 'document' | 'attachment' | 'work_product';
+  issueId: string; issueKey: string;
+  /** A document's key on its task (the document route is `/issues/:id/documents/:key`). */
+  documentKey?: string;
+  contentType: string | null;
+  /** The server's same-origin attachment content route, when it stores the bytes. */
+  contentPath?: string;
+  /** A work product's id on the server, to read what the listing leaves out (a workspace file reference). */
+  workProductId?: string;
+  /** A work product's own path or link (a path in the server's workspace, or a web address). */
+  openPath?: string;
+  /** The page on the server's web UI (absolute once the backend has read it). */
+  href: string;
+  /** The server may hold content Muster can download: a document, an attachment, or a work product that is not a web link (it may name a workspace file; if it does not, the download says so). */
+  downloadable: boolean;
+}
+/** What `paperclip.output.fetch` opened: a copy cached under the app's data folder, the same file in the folder bound for Work locally, or a plain link. */
+export interface ServerOutputFile {
+  kind: 'cached' | 'local' | 'link';
+  id: string; name: string;
+  /** The file on this Mac (empty for a link). */
+  path: string; mime: string; size: number;
+  /** `local`: the bound folder and the project-relative path of the file in it. */
+  folderPath?: string; relPath?: string;
+  /** `link`: the web address to open. */
+  url?: string;
+}
+export interface ServerOutputPreview { kind: 'text' | 'image' | 'binary'; name: string; mime: string; size: number; text?: string; dataUrl?: string; truncated?: boolean }
 export interface WorkspaceList { kind: WorkspaceListKind; rows: WorkspaceRow[]; note: string }
 /** The sidebar Inbox badge: needs-you and problem items only (mail and reviews never badge). */
 /** `chatIds`: run chats already counted in `inbox` through their task, so the sidebar does not count them twice. */
@@ -369,6 +401,10 @@ export interface PaperclipCommands {
   /** What memory would be recalled for a task: its repository's bank (matched by git remote), else its project's, else personal. Read-only. */
   'paperclip.memory': { input: { taskId: string }; output: WorkspaceMemory };
   'paperclip.list': { input: { kind: WorkspaceListKind }; output: WorkspaceList };
+  /** Opens one server output on this Mac: a local file when the project's Work locally folder holds the same path, else the content downloaded from the server (with this connection's own sign-in) into a private per-server cache. `preferServer` always downloads (for Download…). */
+  'paperclip.output.fetch': { input: { id: string; projectId?: string; preferServer?: boolean }; output: ServerOutputFile };
+  /** Reads a cached output for Muster's viewer (text up to 2 MB, images up to 10 MB). Only files in the output cache can be read. */
+  'paperclip.output.preview': { input: { path: string }; output: ServerOutputPreview };
   /** A Muster screen showing workspace data is visible (true) or not (false). Paperclip polling (the socket's fallback) runs only while one is. */
   'paperclip.watch': { input: { visible: boolean }; output: { live: LiveChannel } };
   'paperclip.badge': { input: Record<string, never>; output: WorkspaceBadge };
@@ -395,7 +431,7 @@ export type PaperclipEvent = { type: 'projectsWorkspaceChanged'; scopes: ('tasks
 export const PAPERCLIP_COMMANDS = {
   'paperclip.config.get': true, 'paperclip.config.set': true, 'paperclip.signin.start': true, 'paperclip.signin.status': true, 'paperclip.signin.cancel': true, 'paperclip.signin.signout': true, 'paperclip.disconnect': true, 'paperclip.session.set': true, 'paperclip.session.clear': true, 'paperclip.test': true, 'paperclip.snapshot': true, 'paperclip.task': true,
   'paperclip.comment': true, 'paperclip.task.update': true, 'paperclip.task.create': true, 'paperclip.agent.pause': true, 'paperclip.agent.resume': true,
-  'paperclip.pauseAll': true, 'paperclip.resumeAll': true, 'paperclip.approval.decide': true, 'paperclip.run.cancel': true, 'paperclip.run': true, 'paperclip.costs': true, 'paperclip.memory': true, 'paperclip.list': true,
+  'paperclip.pauseAll': true, 'paperclip.resumeAll': true, 'paperclip.approval.decide': true, 'paperclip.run.cancel': true, 'paperclip.run': true, 'paperclip.costs': true, 'paperclip.memory': true, 'paperclip.list': true, 'paperclip.output.fetch': true, 'paperclip.output.preview': true,
   'paperclip.watch': true, 'paperclip.badge': true, 'paperclip.ledger': true, 'paperclip.ledger.backfill': true, 'paperclip.inbox.dismiss': true, 'paperclip.inbox.dismissed': true, 'paperclip.inbox.restore': true, 'paperclip.interaction.respond': true, 'paperclip.import': true, 'paperclip.task.start': true, 'paperclip.dashboard': true, 'paperclip.import.plan': true,
 } as const satisfies Record<keyof PaperclipCommands, true>;
 

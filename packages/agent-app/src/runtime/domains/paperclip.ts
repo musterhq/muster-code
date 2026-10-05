@@ -14,11 +14,12 @@
  */
 import { execFile } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { stat } from 'node:fs/promises';
+import { basename, join } from 'node:path';
 import type { MemoryRecord } from '../../shared/domains/memory-protocol.ts';
 import {
   budgetUse, PAPERCLIP_LOCAL_URL, WORKSPACE_PRIORITIES, WORKSPACE_STATUSES, type ApprovalDecision, type DashboardData, type LedgerView, type LiveChannel, type PaperclipConfigView, type PaperclipCostsView, type PaperclipRunView, type PaperclipLink, type PaperclipMode, type PaperclipTestResult,
-  type ThreadCard, type WorkspaceAgent, type WorkspaceApproval, type WorkspaceBadge, type WorkspaceInboxItem, type WorkspaceList, type WorkspaceListKind, type WorkspaceMemory, type WorkspaceProject,
+  type ServerOutputFile, type ThreadCard, type WorkspaceAgent, type WorkspaceApproval, type WorkspaceBadge, type WorkspaceInboxItem, type WorkspaceList, type WorkspaceListKind, type WorkspaceMemory, type WorkspaceProject,
   type WorkspacePriority, type WorkspaceRow, type WorkspaceSnapshot, type WorkspaceSource, type WorkspaceStatus, type WorkspaceTask, type WorkspaceTaskDetail,
 } from '../../shared/domains/paperclip-protocol.ts';
 import { normalizeRemote } from '../memory-identity.ts';
@@ -31,6 +32,7 @@ import { detectBackend } from '../server/detect.ts';
 import { normalizeBaseUrl as normalizeUrl } from '../paperclip-client.ts';
 import { connectionFor, isLoopback as connectionLoopback, originOf } from '../server/connection.ts';
 import { arr, mapBudgets } from '../paperclip-map.ts';
+import { cachedOutput, localOutput, MAX_OUTPUT_BYTES, nameWithExtension, outputCacheRoot, outputMime, previewOutput, projectRelativePath, sanitizeOutputName, storeOutput } from '../server-outputs.ts';
 import { OrgReader, serverHubFor } from '../server/orgs.ts';
 import { leadAgentIds, normalizeOrgSetting, scopeInbox } from '../../shared/org-work.ts';
 import { SecretStore } from '../secret-store.ts';
@@ -64,6 +66,8 @@ export interface PaperclipDomainOptions {
   /** `git config --get remote.origin.url` for a folder path (tests inject it). */
   remoteOf?: (path: string) => Promise<string | undefined>;
   timers?: { setTimeout: typeof setTimeout; clearTimeout: typeof clearTimeout };
+  /** The most one server output may weigh (50 MB); tests lower it. */
+  outputMaxBytes?: number;
 }
 
 const gitRemote = (path: string) => new Promise<string | undefined>(resolve => {
@@ -586,6 +590,43 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
     return { kind, rows: [...mine, ...remote].sort((a, b) => (b.at ?? '').localeCompare(a.at ?? '')).slice(0, 400), note };
   };
 
+  /** One server output opened on this Mac: the same file in the project's Work locally folder when there is one, else the server's content in a private per-server cache. */
+  const outputCache = () => outputCacheRoot(context.dataDir, originOf(conn.baseUrl()) ?? conn.baseUrl());
+  const openOutput = async (outputId: string, projectHint: string | undefined, preferServer: boolean): Promise<ServerOutputFile> => {
+    const c = api();
+    await paperclipPart(false);
+    if (!built) throw new Error(lastError ?? 'Muster Server could not be reached.');
+    const company = companies.find(x => x.id === built!.companyId) ?? { id: built.companyId, name: originLabel(), prefix: '' };
+    const row = (await c.rows('artifacts', company)).find(r => r.id === outputId);
+    const output = row?.output;
+    if (!row || !output) throw new Error('This output is no longer on the server. Refresh the Outputs tab.');
+    const projectId = row.projectId ?? projectHint ?? null;
+    const label = (path: string, mime?: string) => { const name = path.split('/').pop() || row.title; return { id: outputId, name, mime: mime ?? outputMime(null, name) }; };
+    if (output.source === 'work_product' && output.openPath && /^https?:\/\//i.test(output.openPath)) return { kind: 'link', ...label(row.title, 'text/uri-list'), path: '', size: 0, url: output.openPath };
+    // The same file in the folder this Mac bound for the project (Work locally), when the output names a path in the server's workspace.
+    if (!preferServer && projectId && (output.openPath || output.workProductId)) {
+      const project = built.part.projects.find(p => p.id === projectId);
+      // The server's own record of a workspace file says exactly which project-relative path it is; a bare path is reduced to one.
+      const recorded = output.source === 'work_product' && !output.contentPath && c.workspaceFile ? await c.workspaceFile(output).catch(() => null) : null;
+      const rel = recorded?.relativePath ? projectRelativePath(recorded.relativePath, []) : output.openPath ? projectRelativePath(output.openPath, project?.cwd ? [project.cwd] : []) : null;
+      const bindings = rel ? await context.invoke('checkout.bindings', {} as never).then(r => r.bindings, () => []) : [];
+      const binding = bindings.find(b => b.projectId === projectId && (!b.orgId || b.orgId === built!.companyId)) ?? bindings.find(b => b.projectId === projectId);
+      const hit = rel && binding ? await localOutput(binding.path, rel) : null;
+      if (hit && rel && binding) return { kind: 'local', ...label(rel), path: hit.path, size: hit.size, folderPath: binding.path, relPath: rel };
+    }
+    if (!output.downloadable || !c.outputContent) throw new Error(output.openPath ? 'The server keeps no copy of this output: it is a path in the server’s own workspace. Use Open on server, or link a folder with Work locally to open it here.' : 'The server keeps no file for this output. Use Open on server.');
+    const root = outputCache(), cap = options.outputMaxBytes ?? MAX_OUTPUT_BYTES;
+    // An attachment never changes once uploaded, so its copy is reused; a document is read again every time.
+    if (output.contentPath) {
+      const hit = await cachedOutput(root, outputId);
+      if (hit) { const size = (await stat(hit)).size; return { kind: 'cached', id: outputId, name: basename(hit), path: hit, mime: outputMime(output.contentType, basename(hit)), size }; }
+    }
+    const file = await c.outputContent(output, cap);
+    const first = sanitizeOutputName(file.name ?? row.title, 'output'), mime = outputMime(file.contentType, first), name = sanitizeOutputName(nameWithExtension(first, mime));
+    const path = await storeOutput(root, outputId, name, file.bytes, cap);
+    return { kind: 'cached', id: outputId, name, path, mime, size: file.bytes.byteLength };
+  };
+
   /** One run of the linked server by id (the snapshot only keeps the latest), with its tool use and the server's own pages for it. */
   const runView = async (runId: string): Promise<PaperclipRunView> => {
     const c = connection();
@@ -919,6 +960,11 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
         if (!['artifacts', 'audit', 'routines'].includes(kind)) throw new Error('Unknown list.');
         return list(kind);
       },
+      'paperclip.output.fetch': async input => {
+        if (typeof input.id !== 'string' || !/^[\w:.-]{1,200}$/.test(input.id)) throw new Error('Unknown output.');
+        return openOutput(input.id, typeof input.projectId === 'string' ? input.projectId : undefined, input.preferServer === true);
+      },
+      'paperclip.output.preview': async input => previewOutput(connection() ? [outputCache()] : [], input.path as string),
       'paperclip.watch': input => {
         live.visible = input.visible === true;
         if (!connection()) { stopPoll(); return { live: 'events' as LiveChannel }; }

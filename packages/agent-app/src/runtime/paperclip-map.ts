@@ -1,7 +1,7 @@
 /** Paperclip JSON -> the Projects workspace shapes (shared/domains/paperclip-protocol.ts). Pure, so tests feed recorded payloads. */
 import type {
   ApprovalDecision, PaperclipBudgetPolicy, ThreadCard, LedgerEntry, AgentState, InboxKind, RunState, WorkspaceAgent, WorkspaceComment, WorkspaceCompany, WorkspaceGoal, WorkspaceInboxItem, WorkspacePriority,
-  WorkspaceApproval, WorkspaceProject, WorkspaceRow, WorkspaceRun, WorkspaceStatus, WorkspaceTask,
+  ServerOutputRef, WorkspaceApproval, WorkspaceProject, WorkspaceRow, WorkspaceRun, WorkspaceStatus, WorkspaceTask,
 } from '../shared/domains/paperclip-protocol.ts';
 import { OPEN_STATUSES, WORKSPACE_STATUSES } from '../shared/domains/paperclip-protocol.ts';
 import { normalizeRemote } from './memory-identity.ts';
@@ -189,11 +189,26 @@ export function mapComment(c: Json, agents: ReadonlyMap<string, WorkspaceAgent>,
   return { id: String(c.id), author: { kind, id: agentId ?? str(c.authorUserId), label: agentId ? agents.get(agentId)?.name ?? 'Agent' : kind === 'user' ? (me && str(c.authorUserId) !== me ? people?.get(String(c.authorUserId)) ?? 'A teammate' : 'You') : 'Muster Server' }, body: str(c.body) ?? '', createdAt: iso(c.createdAt), runId: str(c.createdByRunId) };
 }
 
+const ATTACHMENT_CONTENT = /^\/api\/attachments\/[0-9a-f-]{8,64}\/content$/i;
+/** What a server artifact (document, attachment or work product) needs to be opened, downloaded or linked; none for a shape Muster does not know. */
+function outputRef(item: Json): { output?: ServerOutputRef } {
+  const source = str(item.source), issue = obj(item.issue), issueId = str(issue.id), href = str(item.href);
+  if ((source !== 'document' && source !== 'attachment' && source !== 'work_product') || !issueId || !href) return {};
+  const issueKey = str(issue.identifier) ?? issueId;
+  const contentPath = str(item.contentPath), content = contentPath && ATTACHMENT_CONTENT.test(contentPath) ? contentPath : undefined;
+  const openPath = str(item.openPath);
+  const documentKey = source === 'document' ? /#document-(.+)$/.exec(href)?.[1] : undefined;
+  if (source === 'document' && !documentKey) return {};
+  const workProductId = source === 'work_product' ? /^work_product:(.+)$/.exec(String(item.id))?.[1] : undefined;
+  const isLink = Boolean(openPath && /^https?:\/\//i.test(openPath));
+  return { output: { source, issueId, issueKey, ...(workProductId ? { workProductId } : {}), ...(documentKey ? { documentKey: decodeURIComponent(documentKey) } : {}), contentType: str(item.contentType), ...(content ? { contentPath: content } : {}), ...(openPath && openPath !== content ? { openPath } : {}), href, downloadable: source === 'document' || source === 'attachment' || (source === 'work_product' && !isLink) } };
+}
+
 /** Rows for the read-only lists (skills, artifacts, audit, routines). */
 export function mapRows(kind: 'artifacts' | 'audit' | 'routines', payload: unknown): WorkspaceRow[] {
   const list = kind === 'artifacts' ? arr(obj(payload).artifacts) : arr(Array.isArray(payload) ? payload : obj(payload).items);
   return list.slice(0, 200).map(item => {
-    if (kind === 'artifacts') { const issue = obj(item.issue), project = obj(item.project); return { id: String(item.id), title: str(item.title) ?? 'Artifact', detail: [str(issue.identifier), str(item.mediaKind), str(item.previewText)?.slice(0, 140)].filter(Boolean).join(' · '), status: str(item.source), at: str(item.updatedAt), source: 'paperclip', projectId: str(project.id) ?? str(item.projectId) }; }
+    if (kind === 'artifacts') { const issue = obj(item.issue), project = obj(item.project); return { id: String(item.id), title: str(item.title) ?? 'Artifact', detail: [str(issue.identifier), str(item.mediaKind), str(item.previewText)?.slice(0, 140)].filter(Boolean).join(' · '), status: str(item.source), at: str(item.updatedAt), source: 'paperclip', projectId: str(project.id) ?? str(item.projectId), taskId: str(issue.id), ...outputRef(item) }; }
     if (kind === 'audit') {
       // Which project and task an event is about, so a project's Activity can show only its own (the server's feed is company-wide).
       const details = obj(item.details), entity = str(item.entityType), entityId = str(item.entityId);

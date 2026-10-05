@@ -173,3 +173,10 @@
 .work-reflect-evidence { margin: 0 0 10px; font-size: var(--fs-12); }
 .work-reflect .work-diff { margin-bottom: 12px; }
 .reflect .reflect-list { margin-top: 6px; }
+.server-output-image { max-width: 100%; max-height: 70vh; object-fit: contain; align-self: center; border-radius: var(--radius-8); }
+.work-output-spinner { display: inline-block; width: 11px; height: 11px; margin-left: 6px; border: 2px solid var(--hairline); border-top-color: var(--accent); border-radius: 50%; animation: work-output-spin 0.8s linear infinite; vertical-align: -1px; }
+@keyframes work-output-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .work-output-spinner { animation-duration: 2.4s; } }
+.work-output-error { margin: 2px 0 0 26px; font-size: var(--fs-12); color: var(--danger); }
+.server-output-actions { display: flex; align-items: center; gap: 4px; margin-left: auto; flex: none; }
+.file-dialog.artifact-viewer .artifact-viewer-title { flex: 1; min-width: 0; }

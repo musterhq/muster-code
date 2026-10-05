@@ -92,6 +92,7 @@ const COMMANDS = {
   'files.trash': true,
   'files.reveal': true,
   'files.saveCopy': true,
+  'paperclip.output.save': true,
   'files.search': true,
   'files.read': true,
   'files.asset': true,
