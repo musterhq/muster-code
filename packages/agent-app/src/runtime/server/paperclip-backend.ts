@@ -1,11 +1,14 @@
 /** The Paperclip implementation of `ServerBackend`: the existing REST client and mappers, behind the shared interface. */
-import type { LedgerEntry, TaskCreateInput, ThreadCard, WorkspaceAgent, WorkspaceComment, WorkspaceCompany, WorkspaceListKind, WorkspaceRow, WorkspaceTask, WorkspaceTaskDetail } from '../../shared/domains/paperclip-protocol.ts';
+import type { LedgerEntry, TaskCreateInput, ThreadCard, WorkspaceAgent, WorkspaceComment, WorkspaceCompany, WorkspaceListKind, WorkspaceRow, WorkspaceRun, WorkspaceTask, WorkspaceTaskDetail } from '../../shared/domains/paperclip-protocol.ts';
 import { arr, buildInbox, mapAgent, mapApproval, mapAttention, mapComment, mapCompany, mapDocument, mapGoal, mapInteraction, mapIssue, mapProject, mapReceipt, mapRows, mapRun, mapWorkProduct } from '../paperclip-map.ts';
-import { PaperclipClient, openLiveEvents, type SocketFactory } from '../paperclip-client.ts';
+import { PaperclipClient, PaperclipError, openLiveEvents, type SocketFactory } from '../paperclip-client.ts';
+import { toolsFromLog } from './paperclip-run-tools.ts';
 import type { BackendOptions, ImportReader, Json, LiveHandlers, ServerBackend, ServerEndpoint, ServerHealth, ServerPart, TaskChanges, TaskDetailContext } from './backend.ts';
 
 const allPages = async <T>(pages: AsyncIterable<T[]>): Promise<T[]> => { const rows: T[] = []; for await (const page of pages) for (const row of page) rows.push(row); return rows; };
 const enc = encodeURIComponent;
+/** How much of a run's log is scanned for tool calls. */
+const LOG_BYTES = 2_000_000;
 
 export class PaperclipBackend implements ServerBackend {
   readonly kind = 'paperclip' as const;
@@ -135,6 +138,23 @@ export class PaperclipBackend implements ServerBackend {
   async rows(kind: WorkspaceListKind, company: WorkspaceCompany): Promise<WorkspaceRow[]> {
     const base = `/companies/${enc(company.id)}`;
     return mapRows(kind, await this.client.get<unknown>(kind === 'artifacts' ? `${base}/artifacts` : kind === 'audit' ? `${base}/activity?limit=150` : `${base}/routines`));
+  }
+  async runDetail(runId: string, agents: ReadonlyMap<string, WorkspaceAgent>): Promise<{ run: WorkspaceRun; receipt: LedgerEntry } | null> {
+    let raw: Json;
+    try { raw = await this.client.get<Json>(`/heartbeat-runs/${enc(runId)}`); } catch (cause) { if (cause instanceof PaperclipError && cause.status === 404) return null; throw cause; }
+    const receipt = mapReceipt(raw, agents), run = mapRun(raw);
+    // The run's tool use is in its log. If the log cannot be read the receipt stays `unfetched`: "not read", never "none recorded".
+    try {
+      const log = await this.client.get<Json>(`/heartbeat-runs/${enc(runId)}/log?limitBytes=${LOG_BYTES}`);
+      if (typeof log.content === 'string') { const { tools, tests } = toolsFromLog(log.content); delete receipt.toolsState; receipt.tools = tools; receipt.tests = tests; }
+    } catch { /* keep unfetched */ }
+    return { run, receipt };
+  }
+  linkFor(company: WorkspaceCompany, target: { runId?: string; agentId?: string | null; taskKey?: string }): string | null {
+    const base = `${this.client.endpoint.baseUrl}/${company.prefix ? `${enc(company.prefix)}/` : ''}`;
+    if (target.runId && target.agentId) return `${base}agents/${enc(target.agentId)}/runs/${enc(target.runId)}`;
+    if (target.taskKey) return `${base}issues/${enc(target.taskKey)}`;
+    return null;
   }
   importReader(): ImportReader {
     // The importer reads each page once: it keeps no parsed bodies, so a large org never sits in memory twice.

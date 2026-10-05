@@ -231,6 +231,9 @@ export function LedgerPage({ snapshot, nav, projectId }: { snapshot: WorkspaceSn
   useEffect(() => { let live = true; setError(''); invoke('paperclip.ledger', { limit: projectId ? 1000 : 300 }).then(v => { if (live) { const mine = new Set(snapshot.tasks.map(t => t.id)); setView(projectId ? { ...v, entries: v.entries.filter(e => e.projectId === projectId || (e.taskId !== null && mine.has(e.taskId))) } : v); } }, e => { if (live) setError(errorText(e)); }); return () => { live = false; }; }, [snapshot.fetchedAt, tick]);
   const tasks = useMemo(() => new Map(snapshot.tasks.map(t => [t.id, t])), [snapshot.tasks]);
   const chain = view?.chain;
+  /** A project that lives on the connected server: its costs and activity come from that server, not from this Mac's Ledger. */
+  const serverProject = Boolean(projectId) && (snapshot.projects.find(p => p.id === projectId) ?? snapshot.projects[0])?.source === 'paperclip';
+  const [orgActivity, setOrgActivity] = useState(false);
   const imported = view?.entries.filter(e => e.source === 'history').length ?? 0;
   const [importing, setImporting] = useState(false);
   const importHistory = () => { setImporting(true); invoke('paperclip.ledger.backfill', {}).then(r => { notifySuccess(r.turns ? `Imported ${r.turns} past ${r.turns === 1 ? 'turn' : 'turns'} as history.` : 'No past turns to import.'); setTick(n => n + 1); }, notifyError).finally(() => setImporting(false)); };
@@ -240,10 +243,16 @@ export function LedgerPage({ snapshot, nav, projectId }: { snapshot: WorkspaceSn
       <div className="ws-segmented is-inline" role="tablist" aria-label="Ledger views">{TABS.map(([t, l]) => <button key={t} type="button" role="tab" aria-selected={tab === t} className="ws-segment" onClick={() => setTab(t)}><span className="ws-segment-label">{l}</span></button>)}</div>
     </PageHeader>
     {chain && !(projectId && snapshot.projects[0]?.source === 'paperclip') && <p className="ws-chain" data-ok={chain.ok ? 'true' : 'false'}>{chain.ok ? chain.entries === 0 ? 'No Muster turns recorded yet' : `Muster chain verified · ${chain.entries} ${chain.entries === 1 ? 'entry' : 'entries'} · head ${chain.head.slice(0, 12)}` : `Chain broken at entry #${chain.brokenAt}: an entry was changed or removed after it was written.`}{imported ? ` · ${imported} imported from history (not chained)` : ''}</p>}
-    {tab === 'activity' ? <ListPage kind="audit" embedded/>
+    {tab === 'activity' ? <>
+        {serverProject && <div className="task-toolbar"><div className="ws-segmented is-inline" role="radiogroup" aria-label="Activity scope">
+          <button type="button" role="radio" aria-checked={!orgActivity} className="ws-segment" onClick={() => setOrgActivity(false)}><span className="ws-segment-label">This project</span></button>
+          <button type="button" role="radio" aria-checked={orgActivity} className="ws-segment" onClick={() => setOrgActivity(true)}><span className="ws-segment-label">Organisation activity</span></button></div></div>}
+        {serverProject && orgActivity && <p className="ws-faint ws-activity-scope" role="status">Organisation activity: every event in {snapshot.paperclip?.company?.name ?? 'the whole organisation'}, not only this project’s.</p>}
+        <ListPage kind="audit" embedded {...(projectId && !orgActivity ? { projectId } : {})}/>
+      </>
       : tab === 'runs' ? <AuditRuns snapshot={snapshot} nav={nav}/>
       : tab === 'timeline' ? <GanttTimeline snapshot={snapshot} view={view} onOpenTask={nav.onOpenTask}/>
-      : tab === 'costs' ? <CostsPanel {...(projectId ? { projectId } : {})}/>
+      : tab === 'costs' ? <CostsPanel {...(projectId ? { projectId } : {})} server={serverProject}/>
       : error ? <ResourceState kind="error" message="The ledger could not be read." detail={error} onRetry={() => setTick(n => n + 1)}/>
       : !view ? <ResourceState kind="loading" label="Reading the ledger" rows={4}/>
       : view.entries.length === 0 ? <ResourceState kind="empty" icon={<History size={20}/>} title="No turns recorded yet" message="Every agent turn from now on gets a receipt here. Past turns: Import history.">
@@ -272,7 +281,7 @@ export function ListPage({ kind, embedded = false, projectId }: { kind: 'artifac
     {kind === 'audit' && rows.length > 0 && <div className="task-toolbar"><span className="task-toolbar-spacer"/><button type="button" className="settings-button secondary" onClick={() => downloadText(`muster-activity-${new Date().toISOString().slice(0, 10)}.csv`, activityCsv(rows))}><Download size={13}/>Export CSV</button></div>}
     {error ? <ResourceState kind="error" message="This list could not be loaded." detail={error} onRetry={() => setTick(n => n + 1)}/>
       : !data ? <ResourceState kind="loading" label="Loading" rows={4}/>
-      : rows.length === 0 ? <ResourceState kind="empty" icon={<Icon size={20}/>} message={kind === 'artifacts' ? 'Files and documents your agents attach to tasks appear here.' : 'Task changes, runs and decisions are logged here as they happen.'}/>
+      : rows.length === 0 ? <ResourceState kind="empty" icon={<Icon size={20}/>} message={kind === 'artifacts' ? 'Files and documents your agents attach to tasks appear here.' : projectId ? 'No activity has been logged for this project yet.' : 'Task changes, runs and decisions are logged here as they happen.'}/>
       : <div ref={scroller} className="ws-virtual" role="list" aria-label={kind === 'artifacts' ? NAMES.outputs : 'Activity'}><div style={{ height: virtualizer.getTotalSize(), position: 'relative' }}>
           {virtualizer.getVirtualItems().map(item => { const r = rows[item.index]; return <div key={r.id} role="listitem" className="ws-virtual-row" style={{ transform: `translateY(${item.start}px)`, height: 52 }}>
             <div className="ws-row is-static"><Icon size={15} aria-hidden="true" className="ws-row-icon"/>
