@@ -182,10 +182,11 @@ export function buildInbox(attention: readonly WorkspaceInboxItem[], tasks: read
   return items.sort((a, b) => rank[a.severity] - rank[b.severity] || b.at.localeCompare(a.at));
 }
 
-export function mapComment(c: Json, agents: ReadonlyMap<string, WorkspaceAgent>): WorkspaceComment {
+/** `me` and `people` (as for `mapIssue`): "You" is only the signed-in person; another person is named, or "A teammate". Without `me` (the reply to one's own post) a person is "You". */
+export function mapComment(c: Json, agents: ReadonlyMap<string, WorkspaceAgent>, me?: string | null, people?: ReadonlyMap<string, string>): WorkspaceComment {
   const agentId = str(c.authorAgentId) ?? str(c.derivedAuthorAgentId);
   const kind = agentId ? 'agent' : str(c.authorUserId) || c.authorType === 'user' ? 'user' : 'system';
-  return { id: String(c.id), author: { kind, id: agentId ?? str(c.authorUserId), label: agentId ? agents.get(agentId)?.name ?? 'Agent' : kind === 'user' ? 'You' : 'Muster Server' }, body: str(c.body) ?? '', createdAt: iso(c.createdAt), runId: str(c.createdByRunId) };
+  return { id: String(c.id), author: { kind, id: agentId ?? str(c.authorUserId), label: agentId ? agents.get(agentId)?.name ?? 'Agent' : kind === 'user' ? (me && str(c.authorUserId) !== me ? people?.get(String(c.authorUserId)) ?? 'A teammate' : 'You') : 'Muster Server' }, body: str(c.body) ?? '', createdAt: iso(c.createdAt), runId: str(c.createdByRunId) };
 }
 
 /** Rows for the read-only lists (skills, artifacts, audit, routines). */

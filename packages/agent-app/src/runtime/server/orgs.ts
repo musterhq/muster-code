@@ -4,7 +4,7 @@
  * work in each. It reuses the one `ServerBackend` (same token, same ETag cache), never opens another connection, and reads nothing for an org
  * the person unticked.
  */
-import type { WorkspaceCompany } from '../../shared/domains/paperclip-protocol.ts';
+import type { WorkspaceCompany, WorkspaceTask } from '../../shared/domains/paperclip-protocol.ts';
 import type { MyWorkTask, OrgEntry, OrgsList, OrgWork } from '../../shared/domains/checkout-protocol.ts';
 import { groupByProject, leadAgentIds, mineOnly, normalizeOrgSetting, projectCounts, scopeInbox, workTasks, type Me, type OrgSetting } from '../../shared/org-work.ts';
 import type { ServerBackend, ServerPart } from './backend.ts';
@@ -62,6 +62,18 @@ export class OrgReader {
       if (had) return had.part;
       throw cause;
     }
+  }
+  /**
+   * One task read by its own id, for the moments that must not act on a stale list (conflict checks, Undo, finding the task). Null: the server says it is gone.
+   * A server that cannot read a single task falls back to a fresh read of the org.
+   */
+  async task(company: WorkspaceCompany, taskId: string): Promise<WorkspaceTask | null> {
+    const backend = this.deps.backend();
+    if (!backend) throw new Error('Muster Server is not connected.');
+    if (!backend.task) return (await this.part(company, true)).tasks.find(t => t.id === taskId) ?? null;
+    const part = this.cached(company.id) ?? await this.part(company);
+    const live = new Set(part.runs.filter(r => r.status === 'running' || r.status === 'queued').map(r => r.taskId).filter((t): t is string => Boolean(t)));
+    return backend.task(taskId, { agents: new Map(part.agents.map(a => [a.id, a])), people: part.people ?? [], live });
   }
   /** The last good part for an org, if any (no network). */
   cached(companyId: string): ServerPart | undefined { return this.parts.get(companyId)?.part; }

@@ -27,7 +27,7 @@ export interface OrgEntry {
 export interface OrgsList { connected: boolean; server: string | null; me: { id: string; name: string | null } | null; orgs: OrgEntry[]; stale?: string }
 export interface OrgProjectRow { id: string; name: string; open: number }
 /** What a task row in the sidebar and My work says about local work: "Checked out · this Mac". */
-export interface CheckoutBadge { state: 'checked_out'; thisMac: boolean; device: string; since: string; stale: boolean }
+export interface CheckoutBadge { state: 'checked_out'; thisMac: boolean; device: string; since: string; stale: boolean; /** The local chat of the check-out: it is listed under the task in the sidebar, and its worktree folder stays out of Folders. */ chatId: string | null; folderId: string | null }
 /** The line a task row shows: "Checked out · this Mac" (or the other Mac's name). */
 export const badgeText = (b: Pick<CheckoutBadge, 'thisMac' | 'device'>): string => `Checked out · ${b.thisMac ? 'this Mac' : b.device}`;
 export interface MyWorkTask {

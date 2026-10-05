@@ -33,7 +33,7 @@ export class PaperclipBackend implements ServerBackend, PersonalAccess {
     }, () => { setTimeout(() => { this.person = null; }, 60_000).unref?.(); return null; });
     return this.person;
   }
-  async patchTask(taskId: string, changes: { status?: string; assigneeUserId?: string | null; assigneeAgentId?: string | null; comment?: string }): Promise<void> {
+  async patchTask(taskId: string, changes: { status?: string; assigneeUserId?: string | null; assigneeAgentId?: string | null; comment?: string; commentClientRequestId?: string }): Promise<void> {
     await this.client.send('PATCH', `/issues/${enc(taskId)}`, changes);
     this.client.invalidate();
   }
@@ -93,6 +93,13 @@ export class PaperclipBackend implements ServerBackend, PersonalAccess {
     return { tasks, agents: agentList, projects, runs, inbox, goals: arr(goalsJson).map(mapGoal), approvals, labels, people };
   }
 
+  async task(taskId: string, ctx: { agents: ReadonlyMap<string, WorkspaceAgent>; people: readonly { id: string; name: string }[]; live: ReadonlySet<string> }): Promise<WorkspaceTask | null> {
+    let issue: Json;
+    try { issue = await this.client.get<Json>(`/issues/${enc(taskId)}`); }
+    catch (cause) { if (cause instanceof PaperclipError && cause.status === 404) return null; throw cause; }
+    const me = (await this.whoami().catch(() => null))?.id ?? null;
+    return mapIssue(issue, ctx.agents, ctx.live, me, new Map(ctx.people.map(p => [p.id, p.name])));
+  }
   async taskDetail(taskId: string, ctx: TaskDetailContext): Promise<WorkspaceTaskDetail> {
     const c = this.client, agents = ctx.agents, part = ctx.part, key = enc(taskId);
     const [issue, comments, runs, interactions, approvals, documents, products] = await Promise.all([
@@ -124,7 +131,7 @@ export class PaperclipBackend implements ServerBackend, PersonalAccess {
       cards.push({ kind: 'handoff', id: `handoff:${task.id}`, at: task.createdAt, from: parent.assigneeLabel, to: task.assigneeLabel, summary: `${parent.key} → ${task.key}`, memory });
     }
     return {
-      task, description: typeof issue.description === 'string' ? issue.description : '', comments: arr(comments).filter(x => !x.deletedAt).map(x => mapComment(x, agents)),
+      task, description: typeof issue.description === 'string' ? issue.description : '', comments: arr(comments).filter(x => !x.deletedAt).map(x => mapComment(x, agents, meId, peopleNames)),
       runs: taskRuns.sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, 20),
       addressee: assignee ? { id: assignee.id, label: assignee.name } : null,
       composerNote: assignee ? null : task.assigneeUserId ? `With ${task.assigneeLabel ?? 'a person'}. Your comment is posted to the thread; @-mention a person or agent to bring them in.` : 'Unassigned. Your comment is posted to the thread; @-mention a person or agent to bring them in.',

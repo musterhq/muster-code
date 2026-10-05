@@ -43,7 +43,7 @@ export interface ServerPerson { id: string; name: string | null; email: string |
 export interface PersonalAccess {
   whoami(): Promise<ServerPerson | null>;
   /** Status, human assignee and agent assignee in one PATCH; only what is passed changes. */
-  patchTask(taskId: string, changes: { status?: WorkspaceStatus; assigneeUserId?: string | null; assigneeAgentId?: string | null; comment?: string }): Promise<void>;
+  patchTask(taskId: string, changes: { status?: WorkspaceStatus; assigneeUserId?: string | null; assigneeAgentId?: string | null; comment?: string; commentClientRequestId?: string }): Promise<void>;
   rawComments(taskId: string): Promise<TaskCommentRow[]>;
   putDocument(taskId: string, key: string, doc: { title: string; body: string; changeSummary: string }): Promise<void>;
   postCostEvent(companyId: string, body: Record<string, unknown>): Promise<void>;
@@ -65,6 +65,8 @@ export interface ServerBackend extends Partial<PersonalAccess> {
   companies(): Promise<WorkspaceCompany[]>;
   /** The org's tasks, agents, projects, runs, Inbox, approvals. `previous` lets a backend hand back the same part when nothing changed. */
   read(company: WorkspaceCompany, previous?: { generation: number; companyId: string; part: ServerPart }, options?: { fresh?: boolean }): Promise<ServerPart>;
+  /** One task, read by its id (a conditional GET of that single issue, so never the 2-second list copy). Null when the server says it does not exist. For hand-back, Undo and conflict checks. */
+  task?(taskId: string, context: { agents: ReadonlyMap<string, WorkspaceAgent>; people: readonly { id: string; name: string }[]; live: ReadonlySet<string> }): Promise<WorkspaceTask | null>;
   taskDetail(taskId: string, context: TaskDetailContext): Promise<WorkspaceTaskDetail>;
   /** `clientRequestId` makes a retry idempotent: the server keeps one comment per id. */
   comment(taskId: string, body: string, agents: ReadonlyMap<string, WorkspaceAgent>, clientRequestId?: string): Promise<WorkspaceComment>;

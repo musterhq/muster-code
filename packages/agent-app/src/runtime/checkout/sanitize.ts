@@ -11,9 +11,12 @@
  */
 const SECRET_NAME = '[A-Za-z0-9_.-]*(?:KEY|TOKEN|SECRET|PASSWORD|PASSWD|PWD|CREDENTIAL|AUTH|COOKIE|SESSION)[A-Za-z0-9_.-]*';
 const SECRET_PATTERNS: [RegExp, string | ((m: string, ...g: string[]) => string)][] = [
+  [new RegExp(`(["'])(${SECRET_NAME})\\1(\\s*:\\s*)(?:"[^"\\n]*"|'[^'\\n]*'|[^\\s,}]+)`, 'gi'), (_m, q: string, name: string, sep: string) => `${q}${name}${q}${sep}"[redacted]"`],
+  [/\bhttps:\/\/hooks\.slack\.com\/services\/[A-Za-z0-9/_-]+/g, '[redacted webhook]'],
+  [/\b(?:npm_[A-Za-z0-9]{30,}|AIza[0-9A-Za-z_-]{30,}|(?:sk|rk|pk)_(?:live|test)_[A-Za-z0-9]{16,})\b/g, '[redacted key]'],
+  [/\b([a-z][a-z0-9+.-]*:\/\/)[^\s/@:]+:[^\s/@]+@/gi, '$1[redacted]@'],
   [/-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?(?:-----END [A-Z ]*PRIVATE KEY-----|$)/g, '[redacted private key]'],
   [new RegExp(`\\b(${SECRET_NAME})\\b(\\s*[=:]\\s*)(?:(?:Bearer|Basic|Token)\\s+)?(?:"[^"\\n]*"|'[^'\\n]*'|[^\\s"',;]+)`, 'gi'), (_m, name: string, sep: string) => `${name}${sep}[redacted]`],
-  [/\b(https?:\/\/)[^\s/@:]+:[^\s/@]+@/g, '$1[redacted]@'],
   [/\bAKIA[0-9A-Z]{16}\b/g, '[redacted key]'],
   [/\b(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,})\b/g, '[redacted token]'],
   [/\bsk-(?:ant-|proj-)?[A-Za-z0-9_-]{20,}\b/g, '[redacted key]'],
@@ -30,8 +33,12 @@ export function redactSecrets(text: string): string {
 export function stripMarkup(text: string): string {
   let out = text;
   // A comment can be split by another comment's start, so repeat until stable.
-  for (let i = 0; i < 4 && /<!--/.test(out); i++) out = out.replace(/<!--[\s\S]*?(?:-->|$)/g, '');
-  out = out.replace(/\[([^\]]*)\]\((?:agent|user|project|skill|routine|pipeline):\/\/[^)]*\)/gi, '$1');
+  // Every pass removes at least one `<!--`, so this ends; nesting of any depth cannot leave a marker behind. Anything left is escaped.
+  while (/<!--/.test(out)) out = out.replace(/<!--[\s\S]*?(?:-->|$)/g, '');
+  out = out.replace(/<!--/g, '&lt;!--');
+  // Entity and percent forms of a link scheme are decoded first; every markdown link whose target is not http(s) or mailto is reduced to its label.
+  out = out.replace(/&#0*47;|&#x0*2f;|&sol;/gi, '/').replace(/&#0*58;|&#x0*3a;|&colon;/gi, ':').replace(/%3a/gi, ':').replace(/%2f/gi, '/');
+  out = out.replace(/\[([^\]]*)\]\(\s*(?!https?:\/\/|mailto:)[^)]*\)/gi, '$1');
   out = out.replace(/\b(?:agent|user|project|skill|routine|pipeline):\/\/[^\s)]+/gi, '[link removed]');
   return out;
 }

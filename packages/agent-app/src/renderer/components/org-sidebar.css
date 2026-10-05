@@ -34,3 +34,7 @@
 .org-dot[data-state='prog'] { border-color: var(--accent); background: linear-gradient(90deg, var(--accent) 50%, transparent 50%); }
 .org-dot[data-state='rev'] { border-color: var(--warn); background: var(--warn); }
 .org-dot[data-state='blocked'] { border-color: var(--danger); }
+.org-chat { display: flex; align-items: center; gap: 7px; min-width: 0; margin-left: 16px; padding: 0 8px; min-height: 24px; background: none; border: 0; border-radius: var(--radius-6); color: var(--text-dim); font: inherit; font-size: var(--fs-12); cursor: pointer; text-align: left; }
+.org-chat:hover { background: var(--bg-hover); color: var(--text); }
+.org-chat.is-active { background: var(--bg-active); color: var(--text); }
+.org-chat:focus-visible { outline: 1px solid var(--focus-ring); outline-offset: -1px; }

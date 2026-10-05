@@ -81,7 +81,7 @@ export function createCheckoutDomain(ctx: DomainContext): DomainModule {
   });
   const offSettled = ctx.hooks.onRunSettled(run => { if (store.leaseForChat(run.chat.id, origin())) return svc().onTurn(run.chat.id, run.runId, run.status).catch(() => undefined); });
   // Disconnecting forgets what was kept for the server: org copies, ended check-outs and the posts that were never sent (security review M6).
-  const offCommand = ctx.hooks.onCommand?.(event => { if (event.command === 'paperclip.disconnect') for (const o of new Set(store.leases().map(l => l.origin))) store.purge({ origin: o }); });
+  const offCommand = ctx.hooks.onCommand?.(event => { if (event.command === 'paperclip.disconnect' || event.command === 'paperclip.signin.signout' || event.command === 'musterServer.disconnect') for (const o of new Set(store.leases().map(l => l.origin))) store.purge({ origin: o }); });
 
   const work = async (fresh: boolean): Promise<MyWork> => {
     if (!hub.reader || !hub.backend?.()) return { connected: false, me: null, orgs: [], fetchedAt: new Date().toISOString() };
@@ -120,10 +120,10 @@ export function createCheckoutDomain(ctx: DomainContext): DomainModule {
       },
       'checkout.bindings': async () => {
         const orgs = hub.reader && hub.backend?.() ? await hub.reader.list().then(l => l.orgs.filter(o => o.enabled).map(o => ({ id: o.id, name: o.name, projects: (hub.reader!.cached(o.id)?.projects ?? []).map(p => ({ id: p.id, name: p.name })) }))).catch(() => []) : [];
-        return { bindings: store.bindings(server()), orgs };
+        return { bindings: store.bindings(origin()), orgs };
       },
       'checkout.bind': input => svc().bind(id(input.orgId), id(input.projectId), text(input.path, 4096), typeof input.devBranch === 'string' ? text(input.devBranch, 200) : undefined),
-      'checkout.unbind': input => { store.unbind(server(), id(input.orgId), id(input.projectId)); return { ok: true }; },
+      'checkout.unbind': input => { store.unbind(origin(), id(input.orgId), id(input.projectId)); return { ok: true }; },
       'checkout.plan': input => svc().plan(id(input.taskId)),
       'checkout.start': input => svc().start({ taskId: id(input.taskId), take: input.take === true, confirm: input.confirm as true, model: input.model as never, ...(typeof input.folder === 'string' ? { folder: text(input.folder, 4096) } : {}), ...(typeof input.devBranch === 'string' ? { devBranch: text(input.devBranch, 200) } : {}) }),
       'checkout.get': input => ({ lease: svc().get(id(input.taskId)) }),

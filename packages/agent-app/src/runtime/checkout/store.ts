@@ -28,6 +28,13 @@ export class CheckoutStore {
       CREATE TABLE IF NOT EXISTS checkout_outbox (id INTEGER PRIMARY KEY AUTOINCREMENT, origin TEXT NOT NULL DEFAULT '', user_id TEXT NOT NULL DEFAULT '', client_id TEXT NOT NULL, task_id TEXT NOT NULL, org_id TEXT NOT NULL, type TEXT NOT NULL, key TEXT NOT NULL, kind TEXT NOT NULL, body TEXT NOT NULL, at TEXT NOT NULL, attempts INTEGER NOT NULL DEFAULT 0, last_error TEXT, posted_at TEXT, dead INTEGER NOT NULL DEFAULT 0, UNIQUE (task_id, key));
       CREATE TABLE IF NOT EXISTS checkout_receipts (task_id TEXT NOT NULL, run_id TEXT NOT NULL, json TEXT NOT NULL, doc_posted INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (task_id, run_id));
     `);
+    // A database made by an earlier build of this branch has these tables without the newer columns: add what is missing (guarded, so it runs once and never fails on a fresh or already-migrated file).
+    const cols = (table: string) => new Set((db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).map(c => c.name));
+    const outbox = cols('checkout_outbox');
+    if (!outbox.has('origin')) db.exec("ALTER TABLE checkout_outbox ADD COLUMN origin TEXT NOT NULL DEFAULT ''");
+    if (!outbox.has('user_id')) db.exec("ALTER TABLE checkout_outbox ADD COLUMN user_id TEXT NOT NULL DEFAULT ''");
+    if (!outbox.has('client_id')) db.exec("ALTER TABLE checkout_outbox ADD COLUMN client_id TEXT NOT NULL DEFAULT ''");
+    db.exec('DROP TABLE IF EXISTS checkout_org_copy');
     this.ready = true;
   }
 
@@ -88,7 +95,11 @@ export class CheckoutStore {
     for (const lease of this.leases()) {
       if (lease.origin !== match.origin || (match.orgId && lease.orgId !== match.orgId)) continue;
       this.deleteOrgCopy(lease.taskId);
-      if (lease.state !== 'checked_out') { this.d().prepare('DELETE FROM checkout_leases WHERE task_id = ?').run(lease.taskId); this.d().prepare('DELETE FROM checkout_outbox WHERE task_id = ?').run(lease.taskId); this.d().prepare('DELETE FROM checkout_receipts WHERE task_id = ?').run(lease.taskId); n++; }
+      if (lease.state !== 'checked_out') {
+        // What was sent is forgotten; what was never sent stays (a hand-back that has not reached the server must not be lost), and so does its lease.
+        this.d().prepare('DELETE FROM checkout_outbox WHERE task_id = ? AND (posted_at IS NOT NULL OR dead = 1)').run(lease.taskId);
+        if (this.pendingCount(lease.taskId) === 0) { this.d().prepare('DELETE FROM checkout_leases WHERE task_id = ?').run(lease.taskId); this.d().prepare('DELETE FROM checkout_receipts WHERE task_id = ?').run(lease.taskId); n++; }
+      }
     }
     return n;
   }

@@ -3,7 +3,7 @@
  * and inside an org the person's active tasks (at most five, newest first, then "See all mine") and the org's projects with their own open-count badge.
  * Other people's tasks never appear here. Local projects, chats and folders are untouched: this only replaces the old per-server project tree.
  */
-import { ChevronRight, Laptop, Pin } from 'lucide-react';
+import { ChevronRight, Laptop, MessageSquare, Pin } from 'lucide-react';
 import React, { useState } from 'react';
 import type { MyWorkTask, OrgWork } from '../../shared/domains/checkout-protocol';
 import { sidebarRows } from '../../shared/org-work';
@@ -11,6 +11,7 @@ import { NAMES } from '../../shared/workspace-names';
 import { useHubRoute } from '../hubStore';
 import { openMyWork, openProjectInOrg, openTaskInOrg, readAccordion, toggleOrg, togglePin, useMyWork, writeAccordion, type Accordion } from '../orgStore';
 import { useStoreSelector } from '../useStore';
+import { closeSettings, selectChat } from '../store';
 import { Tip } from './Tooltip';
 import './org-sidebar.css';
 
@@ -27,19 +28,21 @@ export function OrgSidebar(): React.ReactElement | null {
   const { work } = useMyWork(true);
   const route = useHubRoute();
   const screen = useStoreSelector(state => state.screen);
+  const activeChatId = useStoreSelector(state => state.activeChatId) ?? null;
   const [acc, setAcc] = useState<Accordion>(() => readAccordion(globalThis.localStorage));
   const change = (next: Accordion) => { setAcc(next); writeAccordion(globalThis.localStorage, next); };
   const orgs = (work?.orgs ?? []).filter(o => o.sidebar !== 'none');
   if (!work?.connected || !orgs.length) return null;
   return <section className="nav-block org-nav" aria-label="Organisations">
     {orgs.map(org => <OrgBlock key={org.org.id} org={org} open={acc.open.includes(org.org.id)} pinned={acc.pinned.includes(org.org.id)} onToggle={() => change(toggleOrg(acc, org.org.id))} onPin={() => change(togglePin(acc, org.org.id))}
-      activeTask={screen === 'hub' && route.page === 'task' ? route.arg : null} activeProject={screen === 'hub' && route.page === 'project' ? route.arg : null}/>)}
+      activeChat={screen === 'work' ? activeChatId : null} activeTask={screen === 'hub' && route.page === 'task' ? route.arg : null} activeProject={screen === 'hub' && route.page === 'project' ? route.arg : null}/>)}
   </section>;
 }
 
-function OrgBlock({ org, open, pinned, onToggle, onPin, activeTask, activeProject }: { org: OrgWork; open: boolean; pinned: boolean; onToggle: () => void; onPin: () => void; activeTask: string | null; activeProject: string | null }): React.ReactElement {
+function OrgBlock({ org, open, pinned, onToggle, onPin, activeTask, activeProject, activeChat }: { activeChat: string | null; org: OrgWork; open: boolean; pinned: boolean; onToggle: () => void; onPin: () => void; activeTask: string | null; activeProject: string | null }): React.ReactElement {
   const rows = sidebarRows(org.tasks);
   const panel = `org-panel-${org.org.id}`;
+  const chats = useStoreSelector(state => state.snapshot?.chats);
   return <div className="org-block" data-open={open || undefined}>
     <div className="org-head">
       <button type="button" className="org-toggle" aria-expanded={open} aria-controls={panel} onClick={onToggle}>
@@ -52,10 +55,13 @@ function OrgBlock({ org, open, pinned, onToggle, onPin, activeTask, activeProjec
     {open && <div className="org-body" id={panel}>
       <p className="org-mini">{org.sidebar === 'team' ? 'My work and team' : NAMES.myWork}</p>
       {rows.shown.length === 0 && <p className="org-empty">Nothing is open for you here.</p>}
-      {rows.shown.map(task => <button key={task.id} type="button" className={`org-task${activeTask === task.id || activeTask === task.key ? ' is-active' : ''}`} title={`${task.key} · ${task.title}${task.assignee ? ` · ${task.assignee}` : ''}`} onClick={() => void openTaskInOrg(task.orgId, task.id)}>
-        <span className="org-dot" data-state={taskDot(task.status)} aria-label={task.status.replace('_', ' ')}/><span className="org-key">{task.key}</span><span className="org-title">{task.title}</span>
-        {task.checkout && <Laptop size={11} className="org-here" aria-label={`Checked out · ${task.checkout.thisMac ? 'this Mac' : task.checkout.device}`}/>}
-      </button>)}
+      {rows.shown.map(task => { const chat = task.checkout?.chatId ? chats?.find(c => c.id === task.checkout!.chatId) : undefined; return <React.Fragment key={task.id}>
+        <button type="button" className={`org-task${activeTask === task.id || activeTask === task.key ? ' is-active' : ''}`} title={`${task.key} · ${task.title}${task.assignee ? ` · ${task.assignee}` : ''}`} onClick={() => void openTaskInOrg(task.orgId, task.id)}>
+          <span className="org-dot" data-state={taskDot(task.status)} aria-label={task.status.replace('_', ' ')}/><span className="org-key">{task.key}</span><span className="org-title">{task.title}</span>
+          {task.checkout && <Laptop size={11} className="org-here" aria-label={`Checked out · ${task.checkout.thisMac ? 'this Mac' : task.checkout.device}`}/>}
+        </button>
+        {chat && <button type="button" className={`org-chat${activeChat === chat.id ? ' is-active' : ''}`} title="The local chat for this task" onClick={() => { void selectChat(chat.id); closeSettings(); }}><MessageSquare size={11} aria-hidden="true"/><span className="org-title">{chat.title}</span></button>}
+      </React.Fragment>; })}
       {rows.more > 0 && <button type="button" className="org-more" onClick={openMyWork}>See all mine ({rows.total})</button>}
       {org.projects.length > 0 && <p className="org-mini">Projects</p>}
       {org.projects.map(p => <button key={p.id} type="button" className={`org-project${activeProject === p.id ? ' is-active' : ''}`} onClick={() => void openProjectInOrg(org.org.id, p.id)}>

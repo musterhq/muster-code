@@ -20,7 +20,7 @@ Object.defineProperty(window.document,'visibilityState',{get(){return 'visible';
 const iso=(d:number)=>new Date(Date.now()-d*3_600_000).toISOString();
 const mk=(org:string,orgId:string,key:string,title:string,status:string,project:string,hours:number,over:object={})=>({id:`${orgId}-${key}`,key,title,status,priority:'medium',orgId,orgName:org,projectId:project.toLowerCase(),projectName:project,createdAt:iso(hours+1),updatedAt:iso(hours),why:'mine',assignee:null,checkout:null,...over});
 const ragTasks=[
-  mk('Ragnar','rag','RAG-2','External Valkey migration','in_progress','Redis',1,{checkout:{state:'checked_out',thisMac:true,device:'MacBook',since:iso(2),stale:false}}),
+  mk('Ragnar','rag','RAG-2','External Valkey migration','in_progress','Redis',1,{checkout:{state:'checked_out',thisMac:true,device:'MacBook',since:iso(2),stale:false,chatId:'chat-2',folderId:'f-wt'}}),
   mk('Ragnar','rag','RAG-9','Review: Sentinel auth contract','in_review','Redis',2),
   mk('Ragnar','rag','RAG-7','Cluster seed discovery','todo','Redis',3),
   mk('Ragnar','rag','RAG-11','Tune the pool','todo','PostgreSQL',4),mk('Ragnar','rag','RAG-12','Replication lag','blocked','PostgreSQL',5),
@@ -93,6 +93,16 @@ assert.ok(body().includes('See all mine (7)'));
 assert.deepEqual(text('.org-project .org-project-name'),['Redis','PostgreSQL','Website','UI App']);
 assert.deepEqual(text('.org-project .org-count'),['3','2','2'],'a project’s badge is the person’s own open tasks; zero shows none');
 assert.ok(document.querySelector('.org-task svg[aria-label="Checked out · this Mac"]'),'a checked-out task is marked');
+// the local chat lives under its task (no separate folder entry): a nested row that opens that chat
+const {boot}=await import('../src/renderer/store');
+void boot().catch(()=>undefined); await delay(50);
+for(const l of [...listeners])l({type:'snapshot',snapshot:{chats:[{id:'chat-2',title:'RAG-2 local work',folderId:'f-wt',archived:false}],folders:[],projects:[],activeChatId:null}});
+await delay(100);
+assert.deepEqual(text('.org-chat .org-title'),['RAG-2 local work'],'the checked-out task shows its local chat beneath it');
+const rowsOrder=[...document.querySelectorAll('.org-task, .org-chat')].map(n=>n.className.includes('org-chat')?'chat':'task');
+assert.equal(rowsOrder[rowsOrder.indexOf('chat')-1],'task','the chat row follows its task');
+calls.length=0; await click(document.querySelector('.org-chat')); await delay(50);
+assert.ok(calls.some(c=>c.command==='chat.timeline'&&c.input?.id==='chat-2'),'clicking it opens that chat');
 // opening Hybrow closes Ragnar
 await click([...document.querySelectorAll('.org-toggle')][1]);
 assert.equal(document.querySelectorAll('.org-task').length,1); assert.deepEqual(text('.org-task .org-key'),['HYB-2']);

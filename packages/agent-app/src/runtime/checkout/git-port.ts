@@ -16,6 +16,8 @@ export interface GitPort {
   pushedHead(path: string, branch: string): Promise<boolean>;
   /** A pull request link is real and is this worktree's: `gh` says its head branch is `branch` and the repository is the one `origin` points at. False when `gh` is missing or unsure. */
   verifyPr(path: string, url: string, branch: string): Promise<boolean>;
+  /** No uncommitted or untracked changes in the worktree. */
+  isClean(path: string): Promise<boolean>;
 }
 const git = (cwd: string, args: string[], timeout = 60_000): Promise<string> => new Promise((resolve, reject) => {
   execFile('git', args, { cwd, timeout, maxBuffer: 16 * 1024 * 1024, env: { ...process.env, GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'never' } }, (error, stdout, stderr) => error ? reject(new Error((stderr || error.message).trim())) : resolve(stdout));
@@ -33,17 +35,23 @@ export const realGit: GitPort = {
     try {
       const origin = repoOf((await git(path, ['config', '--get', 'remote.origin.url'])).trim());
       if (!origin || origin !== `${m[1]}/${m[2]}`.toLowerCase()) return false;
-      const out = JSON.parse(await run(path, 'gh', ['pr', 'view', url, '--json', 'headRefName,url'])) as { headRefName?: string; url?: string };
-      return out.headRefName === branch && out.url === url;
+      // The pull request must be from this repository (not a fork), from this branch, and at exactly the commit the worktree is on.
+      const out = JSON.parse(await run(path, 'gh', ['pr', 'view', url, '--json', 'headRefName,url,isCrossRepository,headRefOid'])) as { headRefName?: string; url?: string; isCrossRepository?: boolean; headRefOid?: string };
+      const head = (await git(path, ['rev-parse', 'HEAD'])).trim();
+      return out.headRefName === branch && out.url === url && out.isCrossRepository === false && out.headRefOid === head;
     } catch { return false; }
   },
+  async isClean(path) { return (await git(path, ['status', '--porcelain']).catch(() => 'x')).trim() === ''; },
+  /** Pushed to the worktree's own upstream: `@{u}` is a remote branch of this name and is exactly HEAD. */
   async pushedHead(path, branch) {
     try {
       const head = (await git(path, ['rev-parse', 'HEAD'])).trim();
-      for (const remote of (await git(path, ['remote'])).split('\n').filter(Boolean)) { const ref = await git(path, ['rev-parse', '--verify', '--quiet', `refs/remotes/${remote}/${branch}`]).catch(() => ''); if (ref.trim() === head) return true; }
-    } catch { /* no remote */ }
-    return false;
+      const upstream = (await git(path, ['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}'])).trim();
+      if (!upstream.endsWith(`/${branch}`)) return false;
+      return (await git(path, ['rev-parse', '--verify', '--quiet', upstream])).trim() === head;
+    } catch { return false; }
   },
+
   async isRepo(path) { return git(path, ['rev-parse', '--is-inside-work-tree']).then(out => out.trim() === 'true', () => false); },
   async defaultBranch(path, preferred) {
     const exists = (name: string) => git(path, ['show-ref', '--verify', '--quiet', `refs/heads/${name}`]).then(() => true, () => false);

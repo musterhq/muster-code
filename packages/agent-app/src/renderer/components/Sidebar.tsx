@@ -82,6 +82,7 @@ import './sidebar-disclosure.css';
 import {useProcessSummary} from '../processSummary';
 import {isActiveProcess} from '../../shared/process-protocol';
 import {invoke} from '../bridge';
+import {useEventLoad} from '../orgHooks';
 import {isMarkUnreadChord,markUnread,openChatMenu,openProjectMenu} from '../chatMenu';
 import {openProject} from '../projectFocus';
 import {addFolderToDraft,closeNewChat,openNewChat,useNewChatDraft} from '../newChatDraft';
@@ -376,6 +377,8 @@ export function Sidebar(): React.ReactElement {
   // Every hook sits above the loading return (Rules of Hooks): a hook below it crashed the app on boot.
   // Only the light badge read: the org of each imported project and the linked company's name. The whole workspace is read by the rows that need it.
   const inboxBadge=useInboxBadge();
+  // Work locally makes a worktree folder per task; its chat is listed under the task in its org, so the folder stays out of Folders.
+  const checkoutFolders=useEventLoad(e=>e.type==='checkoutChanged',()=>invoke('checkout.leases',{}).then(r=>new Set(r.leases.map(l=>l.folderId).filter((id):id is string=>Boolean(id)))).catch(()=>new Set<string>()),[]).data;
   const [projectEdit,setProjectEdit]=useState<{id:string;mode:'edit'|'rename'|'archive'}|null>(null);
   if (!snapshot) {
     return <ResourceState kind="loading" compact label="Loading chats" rows={5}/>;
@@ -421,7 +424,7 @@ export function Sidebar(): React.ReactElement {
   );
   // Task worktrees (Assign & start) sit under their project's task rows, not in Folders.
   const taskWorktrees = taskWorktreeFolderIds(snapshot);
-  const folderGroups = snapshot.folders.filter(folder=>!taskWorktrees.has(folder.id)).map(folder=>({folder,gid:`folder:${folder.id}`,chats:inGroup(`folder:${folder.id}`)}));
+  const folderGroups = snapshot.folders.filter(folder=>!taskWorktrees.has(folder.id)&&!checkoutFolders?.has(folder.id)).map(folder=>({folder,gid:`folder:${folder.id}`,chats:inGroup(`folder:${folder.id}`)}));
   const orphanChats = inGroup('chats');
   const archivedOpen = showArchived;
   // Visible row order drives roving focus; it mirrors the render order below.

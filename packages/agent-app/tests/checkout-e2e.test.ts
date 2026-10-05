@@ -114,6 +114,12 @@ test('check out → the server shows the comment and assignee, no agent wakes, a
   // bind the local checkout once; the plan shows exactly what will be posted
   const bound = await s.invoke('checkout.bind', { orgId: rag.id, projectId: rag.redis, path: repo, devBranch: 'dev' });
   assert.equal(bound.devBranch, 'dev');
+  // bindings are keyed by this server's origin: they list for it, and unbind removes exactly that one (a binding made for another server is untouched)
+  const listed = await s.invoke('checkout.bindings', {});
+  assert.ok(listed.bindings.some(b => b.projectId === rag.redis && b.path === bound.path), 'the binding lists for this server');
+  await s.invoke('checkout.unbind', { orgId: rag.id, projectId: rag.redis });
+  assert.ok(!(await s.invoke('checkout.bindings', {})).bindings.some(b => b.projectId === rag.redis), 'unbind removed it');
+  await s.invoke('checkout.bind', { orgId: rag.id, projectId: rag.redis, path: repo, devBranch: 'dev' });
   const plan = await s.invoke('checkout.plan', { taskId: task.id });
   assert.equal(plan.assignedToMe, true);
   assert.match(plan.willPost.comment, /^Checked out · working locally on .+ · via Muster$/);
