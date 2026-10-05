@@ -13,6 +13,7 @@ import { restoreFocus } from '../focus';
 import { closeSettings, selectChat } from '../store';
 import { AgentPage, InboxPage, LedgerPage, ListPage, PageHeader, PulseBoard, type HubNav } from './HubPages';
 import { DashboardPage } from './DashboardPage';
+import { MyWorkPage } from './MyWorkPage';
 import { NewTaskSheet } from './HubSetup';
 import { ProjectPage } from './ProjectPage';
 import { RosterList } from './RosterPanel';
@@ -29,7 +30,7 @@ import './hub.css';
 // @ts-ignore -- side-effect CSS import; esbuild bundles it into dist/renderer/main.css
 import './workspace.css';
 
-const TITLE: Record<HubPage, string> = { inbox: NAMES.inbox, ledger: NAMES.ledger, agent: NAMES.roster, task: NAMES.tasks, project: NAMES.projects, dashboard: NAMES.dashboard, tasks: NAMES.tasks, roster: NAMES.roster, outputs: NAMES.outputs, run: 'Run' };
+const TITLE: Record<HubPage, string> = { mywork: NAMES.myWork, inbox: NAMES.inbox, ledger: NAMES.ledger, agent: NAMES.roster, task: NAMES.tasks, project: NAMES.projects, dashboard: NAMES.dashboard, tasks: NAMES.tasks, roster: NAMES.roster, outputs: NAMES.outputs, run: 'Run' };
 
 export function HubScreen(): React.ReactElement {
   const route = useHubRoute();
@@ -51,7 +52,8 @@ export function HubScreen(): React.ReactElement {
   const agent = route.page === 'agent' && route.arg ? snapshot?.agents.find(a => a.id === route.arg) : undefined;
   const parent: HubPage | null = route.page === 'agent' && route.from && route.from !== 'agent' ? route.from : null;
   const parentLabel = parent === 'project' ? snapshot?.projects.find(p => p.id === route.fromArg)?.name ?? NAMES.projects : parent === 'task' ? snapshot?.tasks.find(t => t.id === route.fromArg)?.key ?? NAMES.tasks : parent ? TITLE[parent] : '';
-  const body = route.page === 'inbox' ? <InboxPage snapshot={snapshot} nav={nav}/>
+  const body = route.page === 'mywork' ? <MyWorkPage/>
+    : route.page === 'inbox' ? <InboxPage snapshot={snapshot} nav={nav}/>
     : ws.error && !snapshot ? <ResourceState kind="error" message="Your projects could not be read." detail={ws.error} onRetry={() => void refreshWorkspace(true)}/>
     : !snapshot ? <ResourceState kind="loading" label="Loading" rows={5}/>
     : route.page === 'project' && route.arg ? <div className="ws-page pp-host"><ProjectPage key={route.arg} snapshot={snapshot} projectId={route.arg} nav={nav}/></div>

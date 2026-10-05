@@ -133,8 +133,7 @@ export const isStale = (lease: Pick<CheckoutLease, 'state' | 'lastActivityAt'> &
 };
 
 export const toView = (lease: CheckoutLease, deviceId: string, now: number, staleHours: number): LeaseView => ({ ...lease, thisMac: lease.deviceId === deviceId, stale: isStale(lease, now, staleHours), staleHours });
-/** The line a task row shows: "Checked out · this Mac" (or the other Mac's name). */
-export const badgeText = (b: Pick<CheckoutBadge, 'thisMac' | 'device'>): string => `Checked out · ${b.thisMac ? 'this Mac' : b.device}`;
+export { badgeText } from '../../shared/domains/checkout-protocol.ts';
 export const badgeOf = (lease: LeaseView | CheckoutLease | null, deviceId: string, now: number, staleHours: number): CheckoutBadge | null =>
   lease && lease.state === 'checked_out' ? { state: 'checked_out', thisMac: lease.deviceId === deviceId, device: lease.device, since: lease.since, stale: isStale(lease, now, staleHours) } : null;
 export const isOpen = (state: LeaseState): boolean => state === 'checked_out';

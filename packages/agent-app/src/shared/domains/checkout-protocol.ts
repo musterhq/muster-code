@@ -28,6 +28,8 @@ export interface OrgsList { connected: boolean; server: string | null; me: { id:
 export interface OrgProjectRow { id: string; name: string; open: number }
 /** What a task row in the sidebar and My work says about local work: "Checked out · this Mac". */
 export interface CheckoutBadge { state: 'checked_out'; thisMac: boolean; device: string; since: string; stale: boolean }
+/** The line a task row shows: "Checked out · this Mac" (or the other Mac's name). */
+export const badgeText = (b: Pick<CheckoutBadge, 'thisMac' | 'device'>): string => `Checked out · ${b.thisMac ? 'this Mac' : b.device}`;
 export interface MyWorkTask {
   id: string; key: string; title: string; status: WorkspaceStatus; priority: WorkspaceTask['priority'];
   orgId: string; orgName: string; projectId: string | null; projectName: string | null;
@@ -127,6 +129,8 @@ export interface CheckoutPlan {
   willPost: { comment: string; status: WorkspaceStatus; reassign: boolean };
   device: string;
   binding: LocalBinding | null;
+  /** A folder on this Mac whose git remote is the project's repository (offered when nothing is bound yet), so the person is asked only when there is no match. */
+  detectedFolder: string | null;
   /** The project's own dev branch is unknown until someone picks it; the binding keeps it. */
   devBranch: string | null;
   /** The org agents that could be the "Same as the org agent" choice, the task's own agent first. */
@@ -162,6 +166,8 @@ export interface CheckoutCommands {
   'orgs.set': { input: { companyId: string; enabled?: boolean; sidebar?: OrgSidebarMode }; output: OrgsList };
   /** The person's own work in every enabled org (plus teams when set), and the Inbox items that ask them. */
   'orgs.work': { input: { refresh?: boolean }; output: MyWork };
+  /** A `muster://task/...` link: resolves to the task when `host` is the server this Mac is connected to, else asks to connect first. Never connects by itself. */
+  'orgs.link': { input: { companyId: string; issueId: string; host: string; identifier?: string | null }; output: { status: 'ok'; taskId: string; orgName: string; mine: boolean } | { status: 'connect-first'; host: string } | { status: 'not-found'; identifier: string | null } };
   /** Makes an org the one Projects, Roster and Ledger show (a project row in the sidebar opens its page there). */
   'orgs.open': { input: { companyId: string }; output: { ok: true } };
   'checkout.settings': { input: { staleHours?: number; deviceName?: string }; output: CheckoutSettings };
@@ -202,9 +208,9 @@ export interface CheckoutCommands {
   'checkout.remind': { input: { taskId: string }; output: { ok: true } };
 }
 /** Fired when a lease changes, a post is queued or synced: screens refetch their badge. */
-export type CheckoutEvent = { type: 'checkoutChanged'; taskId: string | null };
+export type CheckoutEvent = { type: 'checkoutChanged'; taskId: string | null } | { type: 'taskLink'; companyId: string; issueId: string; host: string; identifier: string | null };
 export const CHECKOUT_COMMANDS = {
-  'orgs.list': true, 'orgs.set': true, 'orgs.work': true, 'orgs.open': true, 'checkout.settings': true, 'checkout.bindings': true, 'checkout.bind': true, 'checkout.unbind': true, 'checkout.plan': true,
+  'orgs.list': true, 'orgs.set': true, 'orgs.work': true, 'orgs.open': true, 'orgs.link': true, 'checkout.settings': true, 'checkout.bindings': true, 'checkout.bind': true, 'checkout.unbind': true, 'checkout.plan': true,
   'checkout.start': true, 'checkout.get': true, 'checkout.leases': true, 'checkout.decision': true, 'checkout.handback.preview': true, 'checkout.handback': true, 'checkout.release': true, 'checkout.runOnServer': true,
   'checkout.sync': true, 'checkout.outbox': true, 'checkout.remind': true, 'checkout.org': true, 'checkout.engine': true, 'checkout.review': true, 'checkout.offline': true, 'checkout.pending': true, 'checkout.pending.edit': true, 'checkout.resolve': true,
 } as const satisfies Record<keyof CheckoutCommands, true>;

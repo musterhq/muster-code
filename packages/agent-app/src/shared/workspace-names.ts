@@ -4,6 +4,8 @@
  */
 export const NAMES = {
   inbox: 'Inbox',
+  /** The person's own open work across every org (#117). */
+  myWork: 'My work',
   tasks: 'Tasks',
   projects: 'Projects',
   /** Paperclip "routines": Muster's Automations, reused. */

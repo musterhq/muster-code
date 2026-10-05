@@ -51,6 +51,8 @@ export interface CheckoutDeps {
   emit(taskId: string | null): void;
   /** Opens a PR for the branch (GitHub). Absent or failing: the branch is pushed and the link is left for the person. */
   openPr?(worktree: string, base: string, title: string, body: string): Promise<string | null>;
+  /** A folder of this Mac whose origin remote is the project's repository (`github.com/org/repo`), or null. */
+  detectFolder?(repo: string | null): Promise<string | null>;
   /** Waits before a flush (so a burst of turns makes one document write). Tests pass an immediate one. */
   later?(fn: () => void, ms: number): void;
 }
@@ -125,7 +127,7 @@ export class CheckoutService {
       task: { id: task.id, key: task.key, title: task.title, status: task.status, orgId: company.id, orgName: company.name, projectId: task.projectId, projectName: project?.name ?? null, assignee: task.assigneeLabel },
       assignedToMe: task.assigneeUserId === me.id, device: this.device,
       willPost: { comment: checkoutText(this.device), status: 'in_progress', reassign: task.assigneeUserId !== me.id },
-      binding, devBranch: binding?.devBranch ?? null, agents, providers: providers.map(p => ({ id: p.id, name: p.name, models: p.models })),
+      binding, detectedFolder: binding ? null : await (this.d.detectFolder?.(project?.repo ?? null) ?? Promise.resolve(null)).catch(() => null), devBranch: binding?.devBranch ?? null, agents, providers: providers.map(p => ({ id: p.id, name: p.name, models: p.models })),
       otherMac: derived && !derived.thisMac ? derived.device : null,
       firstTime: this.d.store.leases().length === 0,
     };

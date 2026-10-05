@@ -76,7 +76,7 @@ export function workTasks(tasks: readonly WorkspaceTask[], me: Me | null, mode: 
 export const mineOnly = (rows: readonly WorkTask[]): WorkTask[] => rows.filter(r => r.why === 'mine');
 
 /** What the sidebar lists inside an org, and how many more "See all" holds. */
-export function sidebarRows(rows: readonly WorkTask[], limit = SIDEBAR_TASK_LIMIT): { shown: WorkTask[]; total: number; more: number } {
+export function sidebarRows<T>(rows: readonly T[], limit = SIDEBAR_TASK_LIMIT): { shown: T[]; total: number; more: number } {
   return { shown: rows.slice(0, limit), total: rows.length, more: Math.max(0, rows.length - limit) };
 }
 
@@ -129,12 +129,12 @@ export function groupByProject(orgId: string, rows: readonly WorkTask[], project
 
 /** Filters of the My work page. */
 export interface WorkFilter { orgIds: ReadonlySet<string> | null; statuses: ReadonlySet<WorkspaceStatus> | null }
-export function applyFilter<T extends { orgId: string; task: WorkspaceTask }>(rows: readonly T[], filter: WorkFilter): T[] {
+export function applyFilter<T extends { orgId: string; task: { status: WorkspaceStatus } }>(rows: readonly T[], filter: WorkFilter): T[] {
   return rows.filter(r => (!filter.orgIds || filter.orgIds.has(r.orgId)) && (!filter.statuses || filter.statuses.has(r.task.status)));
 }
 /** Board columns for the My work board view, in work order. */
 export const BOARD_COLUMNS: readonly WorkspaceStatus[] = ['todo', 'in_progress', 'in_review', 'blocked'];
-export function boardColumns<T extends { task: WorkspaceTask }>(rows: readonly T[]): { status: WorkspaceStatus; rows: T[] }[] {
+export function boardColumns<T extends { task: { status: WorkspaceStatus } }>(rows: readonly T[]): { status: WorkspaceStatus; rows: T[] }[] {
   return BOARD_COLUMNS.map(status => ({ status, rows: rows.filter(r => r.task.status === status) }));
 }
 

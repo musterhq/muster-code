@@ -13,7 +13,7 @@ import type { WorkspaceBadge, WorkspaceSnapshot } from '../shared/domains/paperc
 import { invoke, subscribe } from './bridge';
 import { openHubScreen } from './store';
 
-export type HubPage = 'inbox' | 'ledger' | 'agent' | 'task' | 'project' | 'dashboard' | 'tasks' | 'roster' | 'outputs' | 'run';
+export type HubPage = 'mywork' | 'inbox' | 'ledger' | 'agent' | 'task' | 'project' | 'dashboard' | 'tasks' | 'roster' | 'outputs' | 'run';
 export interface HubRoute { page: HubPage; arg: string | null; from: HubPage | null; fromArg: string | null }
 
 // --- route ---------------------------------------------------------------------------------------------------------
@@ -39,6 +39,8 @@ let viewers = 0, dirty = true, inflight: Promise<void> | null = null, timer: Ret
 const taskListeners = new Set<(ids: string[]) => void>();
 const hidden = () => typeof document !== 'undefined' && document.visibilityState === 'hidden';
 
+/** The snapshot as last read, outside React. */
+export const workspaceSnapshot = (): WorkspaceSnapshot | null => state.snapshot;
 export function refreshWorkspace(refresh = false): Promise<void> {
   if (inflight && !refresh) return inflight;
   dirty = false;

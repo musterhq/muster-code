@@ -15,6 +15,7 @@ import { GanttTimeline } from './Gantt';
 import { activityCsv, downloadText } from '../activityCsv';
 import { DecisionExtras, GateActions, InboxViews, SnoozeMenu, useInboxMeta } from './WorkInbox';
 import { agoLabel, exactTime } from '../relativeTime';
+import { openTaskInOrg } from '../orgStore';
 import { readHideRoutine, writeHideRoutine } from '../runsModel';
 import { shortcutsEnabled } from '../shortcuts';
 import { notifyError, notifySuccess } from '../store';
@@ -87,7 +88,7 @@ export function InboxPage({ snapshot, nav }: { snapshot: WorkspaceSnapshot | nul
     else if (e.key === 'U' && e.shiftKey) { e.preventDefault(); void invoke('work.inbox.unread', { items: [{ id: item.id }] }).then(reloadMeta, notifyError); }
     else if (e.key === 'x' && item.bucket === 'needs') { e.preventDefault(); void dismissInboxItem({ id: item.id, at: item.at, title: item.title }).catch(notifyError); }
   };
-  const open = (item: ActivityItem) => item.action.kind === 'chat' ? nav.onOpenChat(item.action.chatId) : item.action.kind === 'task' ? nav.onOpenTask(item.action.taskId) : item.action.kind === 'agent' ? nav.onOpenAgent(item.action.agentId) : undefined;
+  const open = (item: ActivityItem) => item.action.kind === 'chat' ? nav.onOpenChat(item.action.chatId) : item.action.kind === 'task' ? (item.org ? void openTaskInOrg(item.org.id, item.action.taskId) : nav.onOpenTask(item.action.taskId)) : item.action.kind === 'agent' ? nav.onOpenAgent(item.action.agentId) : undefined;
   const label = (item: ActivityItem) => item.action.kind === 'chat' ? item.bucket === 'needs' ? 'Answer' : item.kind === 'interrupted' ? 'Continue' : item.bucket === 'problems' ? 'Retry' : 'Open chat' : item.action.kind === 'task' ? item.bucket === 'needs' ? 'Answer' : 'Open task' : item.action.kind === 'agent' ? 'Open agent' : '';
   const mailProject = group !== 'all' ? app?.projects.find(p => p.name === group)?.id ?? null : null;
   // Paperclip offline: never claim "all caught up" when its items could not be read.
@@ -110,7 +111,7 @@ export function InboxPage({ snapshot, nav }: { snapshot: WorkspaceSnapshot | nul
             <span className="ws-unread-dot" aria-label={unreadNow(item, meta) ? 'Unread' : undefined}/>
             <StateChip tone={BUCKET_TONE[item.bucket]}>{KIND_LABEL[item.kind] ?? INBOX_BUCKETS[item.bucket]}</StateChip>
             <button type="button" className="ws-row-text ws-row-link" disabled={item.action.kind === 'none'} onClick={() => act(item)}><span className="ws-row-title">{item.title}</span><span className="ws-row-meta">{item.kind === 'failed_run' || item.kind === 'agent_error' ? explainRunError(item.why) : item.why}</span></button>
-            {item.source === 'paperclip' && <span className="ws-source">{NAMES.paperclip}</span>}
+            {item.org ? <span className="ws-source ws-org-chip" title={`${item.org.name} · ${NAMES.server}`}>{item.org.name}</span> : item.source === 'paperclip' && <span className="ws-source">{NAMES.paperclip}</span>}
             <span className="ws-row-age" title={exactTime(item.at)}>{agoLabel(item.at)}</span>
             {item.action.kind !== 'none' && <button type="button" className="settings-button secondary ws-row-action" onClick={() => act(item)}>{label(item)}</button>}
             <GateActions item={item} onChanged={reloadMeta}/>

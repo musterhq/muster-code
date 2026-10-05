@@ -1,7 +1,10 @@
 /** Orgs and Check out (#117): the handlers of `orgs.*` and `checkout.*`. The pure rules and the orchestration live in shared/org-work.ts and runtime/checkout/. */
+import { execFile } from 'node:child_process';
 import { hostname } from 'node:os';
 import type { MyWork } from '../../shared/domains/checkout-protocol.ts';
 import { createWorktree } from '../git-local.ts';
+import { sameOrigin } from '../../shared/task-link.ts';
+import { normalizeRemote } from '../memory-identity.ts';
 import { CheckoutService, type LocalProviderInfo, type TurnFacts } from '../checkout/service.ts';
 import { CheckoutStore } from '../checkout/store.ts';
 import { realGit } from '../checkout/git-port.ts';
@@ -11,6 +14,7 @@ import { connectionFor } from '../server/connection.ts';
 import { serverHubFor } from '../server/orgs.ts';
 import type { DomainContext, DomainModule } from './types.ts';
 
+const gitRemote = (cwd: string) => new Promise<string | undefined>(resolve => execFile('git', ['config', '--get', 'remote.origin.url'], { cwd, timeout: 1500, env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } }, (error, stdout) => resolve(error ? undefined : stdout.trim() || undefined)));
 const text = (v: unknown, max = 4000): string => { if (typeof v !== 'string' || v.length > max) throw new Error('Invalid input.'); return v; };
 const id = (v: unknown): string => { if (typeof v !== 'string' || !/^[\w:.\-/]{1,160}$/.test(v)) throw new Error('Unknown item.'); return v; };
 const wait = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms));
@@ -31,6 +35,11 @@ export function createCheckoutDomain(ctx: DomainContext): DomainModule {
     git: realGit, serverLabel: server, deviceNameDefault: () => hostname().replace(/\.local$/, ''), now: () => Date.now(),
     worktrees: { create: (root, branch, base) => createWorktree(root, ctx.dataDir, { branch, base }) },
     providers,
+    detectFolder: async repo => {
+      if (!repo) return null;
+      for (const folder of ctx.store.snapshot().folders) { try { if (normalizeRemote(await gitRemote(folder.path) ?? '') === repo) return folder.path; } catch { /* not a repository */ } }
+      return null;
+    },
     chats: {
       addFolder: async path => ctx.invoke('folder.add', { path }),
       create: async folderId => ctx.invoke('chat.create', { folderId }),
@@ -81,6 +90,17 @@ export function createCheckoutDomain(ctx: DomainContext): DomainModule {
         return reader().list();
       },
       'orgs.work': input => work(input.refresh === true),
+      'orgs.link': async input => {
+        // Only a server this Mac is already connected to: the person connects first, never the link.
+        const connected = conn.config.mode !== 'off' && sameOrigin(conn.baseUrl(), text(input.host, 2048));
+        if (!connected || !hub.reader || !hub.backend?.()) return { status: 'connect-first' as const, host: text(input.host, 2048) };
+        const companies = await hub.reader.orgs(), company = companies.find(c => c.id === id(input.companyId));
+        if (!company) return { status: 'not-found' as const, identifier: typeof input.identifier === 'string' ? input.identifier : null };
+        const part = await hub.reader.part(company, true), task = part.tasks.find(t => t.id === id(input.issueId) || (typeof input.identifier === 'string' && t.key === input.identifier));
+        if (!task) return { status: 'not-found' as const, identifier: typeof input.identifier === 'string' ? input.identifier : null };
+        const me = await hub.reader.me();
+        return { status: 'ok' as const, taskId: task.id, orgName: company.name, mine: Boolean(me && task.assigneeUserId === me.id) };
+      },
       'orgs.open': input => { conn.configure({ mode: conn.config.mode, baseUrl: conn.config.baseUrl, companyId: id(input.companyId) }); return { ok: true }; },
       'checkout.settings': input => {
         if (typeof input.staleHours === 'number') store.setStaleHours(input.staleHours);

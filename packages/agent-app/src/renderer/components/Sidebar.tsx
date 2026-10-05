@@ -1,4 +1,5 @@
 import { openHub, useHubRoute, useInboxBadge, useInboxDismissals, useWorkspace, type HubPage } from '../hubStore';
+import { OrgSidebar } from './OrgSidebar';
 import { badgeCount, buildActivity } from '../inboxModel';
 import { NAMES } from '../../shared/workspace-names';
 import { taskWorktreeFolderIds } from '../taskWorktrees';
@@ -393,7 +394,7 @@ export function Sidebar(): React.ReactElement {
   const ownProjects=projectGroups.filter(group=>!orgOfProject.has(group.project.id));
   const projectsByOrg=new Map<string,typeof projectGroups>();
   for(const group of projectGroups){const org=orgOfProject.get(group.project.id);if(org)projectsByOrg.set(org,[...(projectsByOrg.get(org)??[]),group]);}
-  const orgNames=[...new Set([...projectsByOrg.keys(),...(inboxBadge?.connected&&inboxBadge.company?[inboxBadge.company]:[])])].sort((a,b)=>a.localeCompare(b));
+  const orgNames=[...projectsByOrg.keys()].sort((a,b)=>a.localeCompare(b));
   const renderProject=({project,gid,chats}:{project:typeof projectGroups[number]['project'];gid:string;chats:Chat[]})=>(
             <Collapsible.Root className="nav-section" key={project.id} open={isOpen(gid)} onOpenChange={value=>toggleGroup(gid,value)}>
               <PreviewCard.Root><PreviewCard.Trigger render={<div/>} className="nav-project-hover" delay={600} closeDelay={120}>
@@ -590,11 +591,11 @@ export function Sidebar(): React.ReactElement {
           {orgNames.map(org=><div key={`org:${org}`} className="nav-org" role="group" aria-label={`${org} · ${NAMES.server}`}>
             <p className="nav-org-label" title={`${org} · ${NAMES.server}`}>{org} · {NAMES.server}</p>
             {(projectsByOrg.get(org)??[]).map(renderProject)}
-            <PaperclipProjects org={org} isOpen={isOpen} toggleGroup={toggleGroup}/>
           </div>)}
 
           {snapshot.projects.length === 0 && <button type="button" className="nav-quiet-row" onClick={()=>requestNewProject(openProjectsScreen)}><Layers size={14} aria-hidden="true"/><span>Create a project</span></button>}
         </section>
+        <OrgSidebar/>
         {orphanChats.length === 0 && (
           <section className="nav-block" aria-label="Chats">
             <div className="nav-heading"><span className="nav-heading-title">Chats</span></div>
@@ -740,58 +741,4 @@ function ProjectTaskRows({projectId,chats,renderChats}:{projectId:string;chats:C
   const rest=chats.filter(c=>!runChats.has(c.id));
   if(!tasks.length&&!rest.length) return <p className="nav-folder-empty">No chats</p>;
   return <>{tasks.length>0&&<TaskTree tasks={tasks}/>}{renderChats(rest)}</>;
-}
-
-function PaperclipProjects({org,isOpen,toggleGroup}:{org:string;isOpen:(id:string)=>boolean;toggleGroup:(id:string,open:boolean)=>void}):React.ReactElement|null {
-  const badge=useInboxBadge();
-  const {snapshot}=useWorkspace(Boolean(badge?.connected));
-  const route=useHubRoute();
-  const screen=useStoreSelector(state=>state.screen);
-  const [newTask,setNewTask]=useState<string|null>(null);
-  if(!badge?.connected||!snapshot?.paperclip) return null;
-  const projects=snapshot.projects.filter(p=>p.source==='paperclip'&&(p.org??snapshot.paperclip?.company?.name)===org);
-  if(!projects.length&&!snapshot.paperclip.stale) return null;
-  const tasks=snapshot.tasks.filter(t=>t.source==='paperclip');
-  const rank=(t:WorkspaceTask)=>t.live?0:t.status==='in_review'||t.status==='blocked'?1:t.status==='in_progress'||t.status==='todo'?2:t.status==='backlog'?3:t.status==='done'?4:5;
-  const sort=(list:WorkspaceTask[])=>[...list].sort((a,b)=>rank(a)-rank(b)||b.updatedAt.localeCompare(a.updatedAt));
-  const row=(t:WorkspaceTask,depth:number):React.ReactNode=>{
-    const kids=sort(tasks.filter(c=>c.parentId===t.id));
-    const active=screen==='hub'&&route.page==='task'&&route.arg===t.id;
-    return <React.Fragment key={t.id}>
-      <div className={`chat-row ws-tree-row${active?' is-active':''}`} data-depth={depth}>
-        <button type="button" className="chat-row-main" title={`${t.key} · ${t.title}`} onClick={()=>openHub('task',t.id)}>
-          <TaskGlyph task={t}/><span className="chat-title">{t.title}</span><span className="ws-tree-agent">{t.assigneeLabel??''}</span>
-        </button>
-      </div>
-      {kids.map(c=>row(c,depth+1))}
-    </React.Fragment>;
-  };
-  const group=(p:WorkspaceProject)=>{
-    const ids=new Set(tasks.filter(t=>t.projectId===p.id).map(t=>t.id));
-    const top=sort(tasks.filter(t=>t.projectId===p.id&&(!t.parentId||!ids.has(t.parentId))));
-    const open=top.filter(t=>t.status!=='done'&&t.status!=='cancelled'), done=top.filter(t=>t.status==='done'||t.status==='cancelled');
-    const live=tasks.filter(t=>t.projectId===p.id&&t.live).length;
-    return <Collapsible.Root className="nav-section" key={p.id} open={isOpen(`pc:${p.id}`)} onOpenChange={value=>toggleGroup(`pc:${p.id}`,value)}>
-      <header className="nav-section-head is-nested ws-pc-head">
-        <Collapsible.Trigger className="nav-disclosure">
-          <ChevronRight size={13} className="nav-chevron"/>
-          <span className="nav-section-icon" aria-hidden="true"><Layers size={13}/></span>
-          <span className="nav-section-title" title={`${p.name}${p.repo?` · ${p.repo}`:''}`}>{p.name}</span>
-          {live>0&&<span className="nav-running-count" title={`${live} running`} aria-label={`${live} running`}>{live}</span>}
-        </Collapsible.Trigger>
-        <span className="nav-section-actions">
-          <Tip label={`Open ${p.name}: tasks, roster and outputs`}><button type="button" className="icon-button" aria-label={`Open project ${p.name}`} onClick={()=>openHub('project',p.id)}><LayoutGrid size={13}/></button></Tip>
-          <Tip label={`New task in ${p.name}`}><button type="button" className="icon-button" aria-label={`New task in ${p.name}`} onClick={()=>setNewTask(p.id)}><SquarePen size={13}/></button></Tip>
-        </span>
-      </header>
-      <Collapsible.Panel className="nav-group-panel is-nested-chats">
-        {top.length===0?<p className="nav-folder-empty">No tasks</p>:<>{open.map(t=>row(t,0))}{done.slice(0,3).map(t=>row(t,0))}</>}
-      </Collapsible.Panel>
-    </Collapsible.Root>;
-  };
-  return <>
-    {projects.map(group)}
-    {snapshot.paperclip.stale&&<p className="nav-folder-empty" title={snapshot.paperclip.stale}>{snapshot.paperclip.cached?'Muster Server is offline · showing the last copy':'Muster Server can’t be reached · its projects show once it’s back'}</p>}
-    <NewTaskSheet open={newTask!==null} snapshot={snapshot} projectId={newTask} onClose={()=>setNewTask(null)} onCreated={id=>openHub('task',id)}/>
-  </>;
 }

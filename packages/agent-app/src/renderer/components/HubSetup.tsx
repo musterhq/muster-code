@@ -1,5 +1,6 @@
 /** Muster Server setup (#115, unified): the Integrations panel (This Mac / Sign in / URL + API token / Off, Test connection, org, import),
  *  the New task sheet, and the server's routines for the Automations screen. Built from the app's form and sheet components. */
+import { LocalCheckoutsCard, OrgsCard } from './OrgsCard';
 import { Check, Link2, Play } from 'lucide-react';
 import React, { useEffect, useRef, useState } from 'react';
 import type { ImportPlan, ImportTargets, PaperclipConfigView, PaperclipImportReport, PaperclipSignInState, PaperclipTestResult, WorkspaceList, WorkspacePriority, WorkspaceSnapshot } from '../../shared/domains/paperclip-protocol';
@@ -171,7 +172,8 @@ export function ConnectionPanel({ onSaved, compact = false, signInAvailable = tr
       <p className="ws-connection-detect" data-ok="true" role="status"><Check size={13} aria-hidden="true"/>
         {who ? `Connected to ${host} as ${who}.` : config.hasToken ? `Connected to ${host} with an API token.` : `Connected to ${host}.`}{' '}
         {config.live === 'socket' ? 'Live updates on.' : 'Updates every few seconds.'}{config.reconnect && <> <button type="button" className="ws-link" onClick={() => void invoke('musterServer.signInWindow', { baseUrl: config.baseUrl, url: config.baseUrl }).catch(() => undefined)}>Reconnect for live updates</button></>}</p>
-      {companies.length > 1 && <label className="project-edit-goal"><span>Org</span><select className="ws-select is-field" value={config.companyId ?? companies[0]!.id} onChange={e => void chooseOrg(e.target.value)}>{companies.map(c => <option key={c.id} value={c.id}>{c.name}{c.prefix ? ` (${c.prefix})` : ''}</option>)}</select></label>}
+      {!compact && <><OrgsCard/><LocalCheckoutsCard/></>}
+      {compact && companies.length > 1 && <label className="project-edit-goal"><span>Org</span><select className="ws-select is-field" value={config.companyId ?? companies[0]!.id} onChange={e => void chooseOrg(e.target.value)}>{companies.map(c => <option key={c.id} value={c.id}>{c.name}{c.prefix ? ` (${c.prefix})` : ''}</option>)}</select></label>}
       <details className="ws-connection-more"><summary>Details</summary>
         <dl className="ws-connection-details" aria-label="Connection details">
           <div><dt>Address</dt><dd>{config.baseUrl}</dd></div>
