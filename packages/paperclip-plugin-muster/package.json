@@ -1,0 +1,37 @@
+{
+  "name": "@musterhq/paperclip-plugin-muster",
+  "version": "0.1.0",
+  "type": "module",
+  "private": true,
+  "description": "Paperclip companion for Muster Agent's local check-out workflow: issue tab, My work page, receipts, idle check-out reminders.",
+  "license": "MIT",
+  "scripts": {
+    "build": "node ./esbuild.config.mjs",
+    "dev": "node ./esbuild.config.mjs --watch",
+    "dev:ui": "paperclip-plugin-dev-server --root . --ui-dir dist/ui --port 4177",
+    "test": "vitest run --config ./vitest.config.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "paperclipPlugin": {
+    "manifest": "./dist/manifest.js",
+    "worker": "./dist/worker.js",
+    "ui": "./dist/ui/"
+  },
+  "keywords": ["paperclip", "plugin", "muster", "ui"],
+  "author": "Muster",
+  "devDependencies": {
+    "@paperclipai/plugin-sdk": "^2026.1001.0",
+    "@types/node": "^24.0.0",
+    "@types/react": "^19.0.8",
+    "esbuild": "^0.27.3",
+    "react": "^19.0.0",
+    "typescript": "^5.7.3",
+    "vitest": "^3.0.5"
+  },
+  "peerDependencies": {
+    "react": ">=18"
+  },
+  "engines": {
+    "node": ">=24.11.0"
+  }
+}

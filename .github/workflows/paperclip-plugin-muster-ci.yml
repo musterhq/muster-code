@@ -1,0 +1,50 @@
+name: Paperclip plugin (Muster) CI
+
+# packages/paperclip-plugin-muster is a standalone npm project (its own package-lock.json); this job uses only that directory.
+on:
+  push:
+    branches: [main, 'release/**']
+    paths:
+      - "packages/paperclip-plugin-muster/**"
+      - ".github/workflows/paperclip-plugin-muster-ci.yml"
+  pull_request:
+    paths:
+      - "packages/paperclip-plugin-muster/**"
+      - ".github/workflows/paperclip-plugin-muster-ci.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: paperclip-plugin-muster-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    working-directory: packages/paperclip-plugin-muster
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: packages/paperclip-plugin-muster/package-lock.json
+
+      - name: Install
+        run: npm ci --no-audit --no-fund
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
+
+      - name: Build
+        run: npm run build

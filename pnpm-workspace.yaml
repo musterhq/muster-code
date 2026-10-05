@@ -6,3 +6,6 @@ packages:
   # Muster Server (packages/server) runs the agent-app runtime and imports its sources, so it uses agent-app's npm
   # dependencies, not this workspace's. Its tests run with the agent-app (see docs/server.md).
   - "!packages/server"
+  # Muster Paperclip plugin (packages/paperclip-plugin-muster) is a standalone npm project with its own
+  # package-lock.json and CI (.github/workflows/paperclip-plugin-muster-ci.yml). Keep it out of the IDE workspace.
+  - "!packages/paperclip-plugin-muster"
