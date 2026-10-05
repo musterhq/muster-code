@@ -44,9 +44,12 @@ const MARKER = /<!--\s*muster:([a-z][a-z-]*)((?:\s+[a-z][\w-]*="[^"]*")*)\s*-->/
 /** The newest lease marker (check-out, release or hand-back) in a comment body, or null (a person typing the words is not a lease). */
 export function parseLeaseMarker(body: string): LeaseMarker | null {
   let found: LeaseMarker | null = null;
+  // One lease marker per comment (the plugin applies the same rule): a body with two cannot be trusted to mean either.
+  let seen = 0;
   for (const m of body.matchAll(MARKER)) {
     const kind = m[1]!.toLowerCase();
     if (kind !== 'checkout' && kind !== 'release' && kind !== 'handback') continue;
+    if (++seen > 1) return null;
     const attrs: Record<string, string> = {};
     for (const a of (m[2] ?? '').matchAll(/([a-z][\w-]*)="([^"]*)"/gi)) attrs[a[1]!.toLowerCase()] = decode(a[2]!);
     found = { v: 1, event: kind, deviceId: attrs['device-id'] ?? '', device: attrs.device ?? '', by: attrs.by ?? '', at: attrs.at ?? '' };
@@ -76,8 +79,9 @@ export function deriveLease(task: { assigneeUserId: string | null }, comments: r
 export class LeaseError extends Error { constructor(message: string, readonly code: 'conflict' | 'none' | 'ended') { super(message); this.name = 'LeaseError'; } }
 
 export interface LeaseEvent { type: 'checkout' | 'activity' | 'remind' | 'handback' | 'release' | 'run-on-server' | 'offline' | 'online' | 'conflict' | 'resolve' | 'reopen' | 'paused'; at: string; mode?: 'manual' | 'auto'; conflict?: CheckoutLease['conflict']; deviceId?: string; device?: string; on?: boolean; prUrl?: string | null }
-export interface NewLease { taskId: string; orgId: string; key: string; title: string; projectId: string | null; deviceId: string; device: string; model: ModelChoice; modelLabel: string; at: string; previous: CheckoutLease['previous'] }
+export interface NewLease { origin: string; userId: string; taskId: string; orgId: string; key: string; title: string; projectId: string | null; deviceId: string; device: string; model: ModelChoice; modelLabel: string; at: string; previous: CheckoutLease['previous'] }
 export const newLease = (n: NewLease): CheckoutLease => ({
+  origin: n.origin, userId: n.userId, armedFrom: null, autoOff: false, handedTo: null,
   taskId: n.taskId, orgId: n.orgId, key: n.key, title: n.title, projectId: n.projectId, state: 'checked_out', deviceId: n.deviceId, device: n.device, since: n.at, lastActivityAt: n.at, endedAt: null,
   worktree: null, branch: null, chatId: null, folderId: null, baseSha: null, model: n.model, modelLabel: n.modelLabel, runOnServer: false, prUrl: null, previous: n.previous, remindedAt: null, reviewLocally: false, reviewChats: [], pausedNoteAt: null, pending: 0, offline: null, recheck: false, conflict: null,
 });

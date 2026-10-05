@@ -56,7 +56,8 @@ export function WorkLocallyBar({ detail }: { detail: WorkspaceTaskDetail }): Rea
     try {
       const p = await invoke('checkout.plan', { taskId: task.id });
       // The sheet appears only the first time for a project (folder and engine), the first check-out ever (what will be posted), or to take it over from another Mac.
-      if (!p.binding || p.firstTime || p.otherMac) setPlan(p); else await run(p, readMemory());
+      // Taking a task from someone else (a person, or an agent that may be working on it) is never one click: the sheet asks first.
+      if (!p.binding || p.firstTime || p.otherMac || !p.assignedToMe) setPlan(p); else await run(p, readMemory());
     } catch (cause) { notifyError(cause); } finally { setBusy(false); }
   };
   return <>
@@ -123,7 +124,8 @@ function WorkLocallySheet({ plan, onClose, onStart }: { plan: CheckoutPlan; onCl
   return <ModalSheet open className="project-edit-dialog ws-work-locally" title={`Work locally on ${plan.task.key}`} initialFocus={first} onClose={() => { if (!busy) onClose(); }}>
     <p className="project-edit-hint">Everything runs on this Mac. Nothing runs on the server until you hand back. Your credentials stay here.</p>
     <section aria-label="What happens"><h3 className="ws-prop-group">What happens</h3><ul className="ws-checkout-steps">{steps.map(s => <li key={s}>{s}</li>)}</ul>
-      {plan.otherMac && <p className="settings-error">It is checked out on {plan.otherMac}. Working here takes it over.</p>}</section>
+      {plan.otherMac && <p className="settings-error">It is checked out on {plan.otherMac}. Working here takes it over.</p>}
+      {!plan.assignedToMe && <p className="settings-error" role="alert">Take it from {plan.task.assignee ?? 'nobody'}? This task is not assigned to you. Working here reassigns it to you, and {plan.task.assignee ?? 'whoever has it'} will see that.</p>}</section>
     <section aria-label="Folder"><h3 className="ws-prop-group">Folder for {plan.task.projectName ?? 'this project'}</h3>
       <p className="ws-checkout-folder">{folder ? <code>{folder}</code> : <span className="ws-faint">No folder on this Mac matches this project’s repository yet.</span>}
         {folder && !plan.binding && plan.detectedFolder === folder && <span className="ws-faint"> Found from the project’s repository.</span>}</p>
@@ -139,7 +141,7 @@ function WorkLocallySheet({ plan, onClose, onStart }: { plan: CheckoutPlan; onCl
     </section>
     <div className="project-edit-actions"><span className="project-edit-spacer"/>
       <button type="button" className="project-edit-cancel" disabled={busy} onClick={onClose}>Cancel</button>
-      <button type="button" className="settings-button" disabled={!ready || busy} onClick={() => { setBusy(true); void onStart({ engine, providerId, model }, folder, agentId).finally(() => setBusy(false)); }}>{busy ? 'Starting…' : 'Work locally'}</button></div>
+      <button type="button" className="settings-button" disabled={!ready || busy} onClick={() => { setBusy(true); void onStart({ engine, providerId, model }, folder, agentId).finally(() => setBusy(false)); }}>{busy ? 'Starting…' : plan.assignedToMe ? 'Work locally' : `Take it${plan.task.assignee ? ` from ${plan.task.assignee}` : ''} and work locally`}</button></div>
   </ModalSheet>;
 }
 

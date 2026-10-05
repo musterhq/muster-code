@@ -5,16 +5,19 @@
  * per-turn receipts the work log is built from.
  */
 import type { DatabaseSync } from 'node:sqlite';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
+import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import type { CheckoutLease, LocalBinding, LocalOrgCopy } from '../../shared/domains/checkout-protocol.ts';
 import type { Report, ReportKind, TurnReceipt } from './reports.ts';
 import { DEFAULT_STALE_HOURS } from './lease.ts';
 
 export type OutboxType = 'comment' | 'patch' | 'cost';
-export interface OutboxRow { id: number; clientId: string; taskId: string; orgId: string; type: OutboxType; key: string; kind: string; body: string; at: string; attempts: number; lastError: string | null; postedAt: string | null; dead: boolean }
+export interface OutboxRow { id: number; origin: string; userId: string; clientId: string; taskId: string; orgId: string; type: OutboxType; key: string; kind: string; body: string; at: string; attempts: number; lastError: string | null; postedAt: string | null; dead: boolean }
 
 export class CheckoutStore {
-  constructor(private readonly db: () => DatabaseSync) { this.init(); }
+  /** `dir`: where the org copies live (a private folder under the app's data directory: mode 0700, files 0600). */
+  constructor(private readonly db: () => DatabaseSync, private readonly dir?: string) { this.init(); }
   private ready = false;
   private d(): DatabaseSync { const db = this.db(); if (!this.ready) { this.init(db); } return db; }
   private init(db: DatabaseSync = this.db()): void {
@@ -22,8 +25,7 @@ export class CheckoutStore {
       CREATE TABLE IF NOT EXISTS checkout_kv (key TEXT PRIMARY KEY, value TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS checkout_bindings (server TEXT NOT NULL, org_id TEXT NOT NULL, project_id TEXT NOT NULL, project_name TEXT NOT NULL, path TEXT NOT NULL, dev_branch TEXT NOT NULL, bound_at TEXT NOT NULL, PRIMARY KEY (server, org_id, project_id));
       CREATE TABLE IF NOT EXISTS checkout_leases (task_id TEXT PRIMARY KEY, org_id TEXT NOT NULL, state TEXT NOT NULL, json TEXT NOT NULL);
-      CREATE TABLE IF NOT EXISTS checkout_outbox (id INTEGER PRIMARY KEY AUTOINCREMENT, client_id TEXT NOT NULL, task_id TEXT NOT NULL, org_id TEXT NOT NULL, type TEXT NOT NULL, key TEXT NOT NULL, kind TEXT NOT NULL, body TEXT NOT NULL, at TEXT NOT NULL, attempts INTEGER NOT NULL DEFAULT 0, last_error TEXT, posted_at TEXT, dead INTEGER NOT NULL DEFAULT 0, UNIQUE (task_id, key));
-      CREATE TABLE IF NOT EXISTS checkout_org_copy (task_id TEXT PRIMARY KEY, json TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS checkout_outbox (id INTEGER PRIMARY KEY AUTOINCREMENT, origin TEXT NOT NULL DEFAULT '', user_id TEXT NOT NULL DEFAULT '', client_id TEXT NOT NULL, task_id TEXT NOT NULL, org_id TEXT NOT NULL, type TEXT NOT NULL, key TEXT NOT NULL, kind TEXT NOT NULL, body TEXT NOT NULL, at TEXT NOT NULL, attempts INTEGER NOT NULL DEFAULT 0, last_error TEXT, posted_at TEXT, dead INTEGER NOT NULL DEFAULT 0, UNIQUE (task_id, key));
       CREATE TABLE IF NOT EXISTS checkout_receipts (task_id TEXT NOT NULL, run_id TEXT NOT NULL, json TEXT NOT NULL, doc_posted INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (task_id, run_id));
     `);
     this.ready = true;
@@ -62,9 +64,34 @@ export class CheckoutStore {
   lease(taskId: string): CheckoutLease | null { const r = this.d().prepare('SELECT json FROM checkout_leases WHERE task_id = ?').get(taskId) as { json: string } | undefined; return r ? JSON.parse(r.json) as CheckoutLease : null; }
   leases(): CheckoutLease[] { return (this.d().prepare('SELECT json FROM checkout_leases ORDER BY task_id').all() as { json: string }[]).map(r => JSON.parse(r.json) as CheckoutLease); }
   openLeases(): CheckoutLease[] { return this.leases().filter(l => l.state === 'checked_out'); }
-  leaseForChat(chatId: string): CheckoutLease | null { return this.openLeases().find(l => l.chatId === chatId || l.reviewChats?.some(r => r.chatId === chatId)) ?? null; }
-  orgCopy(taskId: string): LocalOrgCopy | null { const r = this.d().prepare('SELECT json FROM checkout_org_copy WHERE task_id = ?').get(taskId) as { json: string } | undefined; return r ? JSON.parse(r.json) as LocalOrgCopy : null; }
-  putOrgCopy(taskId: string, copy: LocalOrgCopy): void { this.d().prepare('INSERT INTO checkout_org_copy (task_id, json) VALUES (?, ?) ON CONFLICT(task_id) DO UPDATE SET json = excluded.json').run(taskId, JSON.stringify(copy)); }
+  leaseForChat(chatId: string, origin?: string): CheckoutLease | null { return this.openLeases().find(l => (origin === undefined || l.origin === origin) && (l.chatId === chatId || l.reviewChats?.some(r => r.chatId === chatId))) ?? null; }
+  /** Org copies are files, not database rows: a private folder (0700) with a file per task (0600), deleted when the check-out ends (security review M6). */
+  private copyFile(taskId: string): string | null { return this.dir ? join(this.dir, `org-${createHash('sha256').update(taskId).digest('hex').slice(0, 24)}.json`) : null; }
+  private memory = new Map<string, LocalOrgCopy>();
+  orgCopy(taskId: string): LocalOrgCopy | null {
+    const file = this.copyFile(taskId);
+    if (!file) return this.memory.get(taskId) ?? null;
+    try { return JSON.parse(readFileSync(file, 'utf8')) as LocalOrgCopy; } catch { return null; }
+  }
+  putOrgCopy(taskId: string, copy: LocalOrgCopy): void {
+    const file = this.copyFile(taskId);
+    if (!file) { this.memory.set(taskId, copy); return; }
+    mkdirSync(this.dir!, { recursive: true, mode: 0o700 }); try { chmodSync(this.dir!, 0o700); } catch { /* best effort */ }
+    writeFileSync(file, JSON.stringify(copy), { mode: 0o600 }); try { chmodSync(file, 0o600); } catch { /* best effort */ }
+  }
+  deleteOrgCopy(taskId: string): void { const file = this.copyFile(taskId); if (!file) { this.memory.delete(taskId); return; } try { rmSync(file, { force: true }); } catch { /* already gone */ } }
+  /** Every copy on this Mac (a private folder listing), for purges. */
+  orgCopyTaskIds(): string[] { return this.leases().map(l => l.taskId).filter(id => this.orgCopy(id)); }
+  /** Forget everything about an org or a whole server: copies, leases that ended, queued posts that were never sent. Used on untick and on disconnect (M6). */
+  purge(match: { origin: string; orgId?: string }): number {
+    let n = 0;
+    for (const lease of this.leases()) {
+      if (lease.origin !== match.origin || (match.orgId && lease.orgId !== match.orgId)) continue;
+      this.deleteOrgCopy(lease.taskId);
+      if (lease.state !== 'checked_out') { this.d().prepare('DELETE FROM checkout_leases WHERE task_id = ?').run(lease.taskId); this.d().prepare('DELETE FROM checkout_outbox WHERE task_id = ?').run(lease.taskId); this.d().prepare('DELETE FROM checkout_receipts WHERE task_id = ?').run(lease.taskId); n++; }
+    }
+    return n;
+  }
   putLease(lease: CheckoutLease): void {
     const pending = this.pendingCount(lease.taskId);
     const next = { ...lease, pending };
@@ -73,11 +100,11 @@ export class CheckoutStore {
 
   // --- the outbox (also the history of what was posted) ---------------------------------------------------------------------------------
   /** Adds a row once per (task, key); returns false for a repeat. */
-  enqueue(row: { taskId: string; orgId: string; type: OutboxType; key: string; kind: string; body: string; at: string }): boolean {
-    const r = this.d().prepare('INSERT OR IGNORE INTO checkout_outbox (client_id, task_id, org_id, type, key, kind, body, at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(randomUUID(), row.taskId, row.orgId, row.type, row.key, row.kind, row.body, row.at);
+  enqueue(row: { origin: string; userId: string; taskId: string; orgId: string; type: OutboxType; key: string; kind: string; body: string; at: string }): boolean {
+    const r = this.d().prepare('INSERT OR IGNORE INTO checkout_outbox (origin, user_id, client_id, task_id, org_id, type, key, kind, body, at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(row.origin, row.userId, randomUUID(), row.taskId, row.orgId, row.type, row.key, row.kind, row.body, row.at);
     return Number(r.changes) > 0;
   }
-  private map(r: Record<string, unknown>): OutboxRow { return { id: Number(r.id), clientId: String(r.client_id), taskId: String(r.task_id), orgId: String(r.org_id), type: r.type as OutboxType, key: String(r.key), kind: String(r.kind), body: String(r.body), at: String(r.at), attempts: Number(r.attempts), lastError: (r.last_error as string | null) ?? null, postedAt: (r.posted_at as string | null) ?? null, dead: Boolean(r.dead) }; }
+  private map(r: Record<string, unknown>): OutboxRow { return { id: Number(r.id), origin: String(r.origin ?? ''), userId: String(r.user_id ?? ''), clientId: String(r.client_id), taskId: String(r.task_id), orgId: String(r.org_id), type: r.type as OutboxType, key: String(r.key), kind: String(r.kind), body: String(r.body), at: String(r.at), attempts: Number(r.attempts), lastError: (r.last_error as string | null) ?? null, postedAt: (r.posted_at as string | null) ?? null, dead: Boolean(r.dead) }; }
   pending(taskId?: string): OutboxRow[] {
     const rows = taskId ? this.d().prepare('SELECT * FROM checkout_outbox WHERE posted_at IS NULL AND dead = 0 AND task_id = ? ORDER BY id').all(taskId) : this.d().prepare('SELECT * FROM checkout_outbox WHERE posted_at IS NULL AND dead = 0 ORDER BY id').all();
     return (rows as Record<string, unknown>[]).map(r => this.map(r));

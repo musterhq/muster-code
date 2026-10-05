@@ -1,6 +1,7 @@
 /** Orgs and Check out (#117): the handlers of `orgs.*` and `checkout.*`. The pure rules and the orchestration live in shared/org-work.ts and runtime/checkout/. */
 import { execFile } from 'node:child_process';
 import { hostname } from 'node:os';
+import { join } from 'node:path';
 import type { MyWork } from '../../shared/domains/checkout-protocol.ts';
 import { createWorktree } from '../git-local.ts';
 import { sameOrigin } from '../../shared/task-link.ts';
@@ -22,17 +23,20 @@ const wait = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms
 export function createCheckoutDomain(ctx: DomainContext): DomainModule {
   const hub = serverHubFor(ctx);
   const conn = connectionFor(ctx);
-  const store = new CheckoutStore(() => ctx.db());
+  // Org copies are private files (0700 folder, 0600 files) under the app's data directory, deleted when a check-out ends.
+  const store = new CheckoutStore(() => ctx.db(), join(ctx.dataDir, 'checkout'));
   let service: CheckoutService | null = null;
   let retry: ReturnType<typeof setTimeout> | null = null;
   const server = () => { const origin = conn.config.baseUrl; try { return new URL(origin).host; } catch { return origin; } };
+  /** The connected server's origin (scheme, host, port): what leases, queued posts and bindings are keyed by. */
+  const origin = () => { try { return new URL(conn.baseUrl()).origin; } catch { return conn.config.baseUrl; } };
   const providers = (): LocalProviderInfo[] => (ctx.modelCatalog?.().providers ?? []).map(p => ({
     id: p.id, name: p.name, driver: p.driver, available: p.available, models: p.models.map(m => ({ id: m.id, name: m.name })),
     subscription: p.id === 'claude-code' || p.codex?.kind === 'chatgpt',
   }));
   const svc = (): CheckoutService => service ??= new CheckoutService({
     store, backend: () => hub.backend?.() ?? null, get reader() { if (!hub.reader) throw new Error('Muster Server is not connected. Connect it in Settings › Integrations.'); return hub.reader; },
-    git: realGit, serverLabel: server, deviceNameDefault: () => hostname().replace(/\.local$/, ''), now: () => Date.now(),
+    git: realGit, serverLabel: server, origin, deviceNameDefault: () => hostname().replace(/\.local$/, ''), now: () => Date.now(),
     worktrees: { create: (root, branch, base) => createWorktree(root, ctx.dataDir, { branch, base }) },
     providers,
     detectFolder: async repo => {
@@ -45,7 +49,7 @@ export function createCheckoutDomain(ctx: DomainContext): DomainModule {
       create: async folderId => ctx.invoke('chat.create', { folderId }),
       select: async (chatId, providerId, model) => { await ctx.invoke('chat.selectProvider', { id: chatId, providerId, model }); },
       rename: async (chatId, title) => { await ctx.invoke('chat.update', { id: chatId, title }); },
-      transcript: async chatId => (await ctx.invoke('chat.timeline', { id: chatId })).items.filter(i => i.kind === 'tool' || i.kind === 'assistant').map(i => i.text),
+      timeline: async chatId => (await ctx.invoke('chat.timeline', { id: chatId })).items.map(i => ({ kind: i.kind, text: i.text, ...(i.data ? { data: i.data } : {}), ...(i.status ? { status: i.status } : {}) })),
     },
     turnFacts: async (chatId, runId): Promise<TurnFacts | null> => {
       // The Receipt is written by the Ledger as the run settles; give it a moment.
@@ -62,20 +66,22 @@ export function createCheckoutDomain(ctx: DomainContext): DomainModule {
   /** Posts that could not go (offline) are tried again every half minute, only while some are waiting. */
   const schedule = () => {
     if (retry || !store.pendingCount()) return;
-    retry = setTimeout(() => { retry = null; void svc().flush().finally(schedule); }, 30_000);
+    retry = setTimeout(() => { retry = null; void svc().flush().catch(() => undefined).finally(schedule); }, 30_000);
     retry.unref?.();
   };
   /** A quiet session gets a "paused" note. One timer, only while a task is checked out here. */
   const idle = setInterval(() => { if (store.openLeases().length) void svc().checkIdle().catch(() => undefined); }, 5 * 60_000);
   idle.unref?.();
-  hub.badge = taskId => { const l = store.openLeases().find(x => x.taskId === taskId); return l ? badgeOf(l, store.deviceId(), Date.now(), store.staleHours()) : null; };
-  hub.onOnline = () => { if (store.pendingCount()) void svc().flush(); };
+  hub.badge = taskId => { const l = store.openLeases().find(x => x.taskId === taskId && x.origin === origin()); return l ? badgeOf(l, store.deviceId(), Date.now(), store.staleHours()) : null; };
+  hub.onOnline = () => { if (store.pendingCount()) void svc().flush().catch(() => undefined); };
   const offPrompt = ctx.hooks.addPromptContributor(async ({ chat }) => {
-    if (!store.leaseForChat(chat.id)) return null;
+    if (!store.leaseForChat(chat.id, origin())) return null;
     const brief = await svc().brief(chat.id);
     return brief ? { label: 'Server task', text: brief } : null;
   });
-  const offSettled = ctx.hooks.onRunSettled(run => { if (store.leaseForChat(run.chat.id)) return svc().onTurn(run.chat.id, run.runId, run.status); });
+  const offSettled = ctx.hooks.onRunSettled(run => { if (store.leaseForChat(run.chat.id, origin())) return svc().onTurn(run.chat.id, run.runId, run.status).catch(() => undefined); });
+  // Disconnecting forgets what was kept for the server: org copies, ended check-outs and the posts that were never sent (security review M6).
+  const offCommand = ctx.hooks.onCommand?.(event => { if (event.command === 'paperclip.disconnect') for (const o of new Set(store.leases().map(l => l.origin))) store.purge({ origin: o }); });
 
   const work = async (fresh: boolean): Promise<MyWork> => {
     if (!hub.reader || !hub.backend?.()) return { connected: false, me: null, orgs: [], fetchedAt: new Date().toISOString() };
@@ -90,6 +96,7 @@ export function createCheckoutDomain(ctx: DomainContext): DomainModule {
       'orgs.set': async input => {
         const sidebar = input.sidebar === 'mine' || input.sidebar === 'team' || input.sidebar === 'none' ? input.sidebar : undefined;
         conn.setOrg(id(input.companyId), { ...(typeof input.enabled === 'boolean' ? { enabled: input.enabled } : {}), ...(sidebar ? { sidebar } : {}) });
+        if (input.enabled === false) store.purge({ origin: origin(), orgId: id(input.companyId) });
         ctx.emit({ type: 'projectsWorkspaceChanged', scopes: ['config', 'tasks', 'inbox'], taskIds: [] });
         return reader().list();
       },
@@ -100,7 +107,7 @@ export function createCheckoutDomain(ctx: DomainContext): DomainModule {
         if (!connected || !hub.reader || !hub.backend?.()) return { status: 'connect-first' as const, host: text(input.host, 2048) };
         const companies = await hub.reader.orgs(), company = companies.find(c => c.id === id(input.companyId));
         if (!company) return { status: 'not-found' as const, identifier: typeof input.identifier === 'string' ? input.identifier : null };
-        const part = await hub.reader.part(company, true), task = part.tasks.find(t => t.id === id(input.issueId) || (typeof input.identifier === 'string' && t.key === input.identifier));
+        const part = await hub.reader.part(company, true), task = part.tasks.find(t => t.id === id(input.issueId));
         if (!task) return { status: 'not-found' as const, identifier: typeof input.identifier === 'string' ? input.identifier : null };
         const me = await hub.reader.me();
         return { status: 'ok' as const, taskId: task.id, orgName: company.name, mine: Boolean(me && task.assigneeUserId === me.id) };
@@ -144,7 +151,7 @@ export function createCheckoutDomain(ctx: DomainContext): DomainModule {
       'checkout.undo': input => svc().undoHandBack(id(input.taskId)),
       'checkout.remind': input => { svc().remind(id(input.taskId)); return { ok: true }; },
     },
-    power(event) { if (event.state === 'resume' && store.pendingCount()) void svc().flush(); },
-    dispose() { offPrompt(); offSettled(); clearInterval(idle); if (retry) clearTimeout(retry); hub.badge = undefined; hub.onOnline = undefined; },
+    power(event) { if (event.state === 'resume' && store.pendingCount()) void svc().flush().catch(() => undefined); },
+    dispose() { offPrompt(); offSettled(); offCommand?.(); clearInterval(idle); if (retry) clearTimeout(retry); hub.badge = undefined; hub.onOnline = undefined; },
   };
 }

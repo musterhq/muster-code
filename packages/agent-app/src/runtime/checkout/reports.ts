@@ -14,6 +14,7 @@
  * `Outbox` rows survive offline: the service stores them in SQLite and flushes on reconnect; these functions decide what a flush contains.
  */
 import { markerFor } from './lease.ts';
+import { sanitizeOut } from './sanitize.ts';
 export const REPORT_LABEL = 'via Muster · local';
 export const WORK_LOG_KEY = 'local-work-log';
 export type ReportKind = 'checkout' | 'decision' | 'context' | 'pr' | 'tests' | 'handback' | 'release' | 'note';
@@ -51,8 +52,8 @@ export function batchReports(pending: readonly Report[], already: ReadonlySet<st
 }
 
 // --- milestone texts -------------------------------------------------------------------------------------------------------------
-export const decisionReport = (key: string, at: string, text: string): Report => ({ key, kind: 'decision', at, body: `**Decision**\n\n${text.trim()}` });
-export const contextReport = (key: string, at: string, summary: string): Report => ({ key, kind: 'context', at, body: `**Context so far**\n\n${summary.trim()}` });
+export const decisionReport = (key: string, at: string, text: string): Report => ({ key, kind: 'decision', at, body: `**Decision**\n\n${sanitizeOut(text, 4000, { multiline: true })}` });
+export const contextReport = (key: string, at: string, summary: string): Report => ({ key, kind: 'context', at, body: `**Context so far**\n\n${sanitizeOut(summary, 600)}` });
 export const prReport = (key: string, at: string, url: string, branch: string): Report => ({ key, kind: 'pr', at, body: `**Pull request opened**\n\n${url}\n\nBranch: \`${branch}\`` });
 export interface TestResult { ran: boolean; passed?: number; failed?: number; baselineFailed?: number | null; note?: string | null }
 export function testsLine(t: TestResult): string {
@@ -66,6 +67,8 @@ export const testsReport = (key: string, at: string, t: TestResult): Report => (
 
 export interface HandBackSummary { reviewedLocally?: readonly string[]; branch: string; changed: string; decisions: readonly string[]; tests: TestResult; prUrl: string | null; openQuestions?: string; reviewerName: string; summary?: string }
 export function handBackBody(s: HandBackSummary): string {
+  const clean = (v: string) => sanitizeOut(v, 2000, { multiline: true });
+  s = { ...s, ...(s.summary ? { summary: clean(s.summary) } : {}), changed: clean(s.changed), decisions: s.decisions.map(d => clean(d)), ...(s.openQuestions ? { openQuestions: clean(s.openQuestions) } : {}) };
   const lines = ['**Handed back for review** · via Muster', '', s.summary?.trim() || 'Work on this task is ready for review.', '', '**What changed**', s.changed.trim() || 'No file changes were recorded.', ''];
   lines.push('**Decisions**', ...(s.decisions.length ? s.decisions.map(d => `- ${d}`) : ['None recorded.']), '');
   lines.push('**Evidence**', testsLine(s.tests), ...(s.reviewedLocally?.length ? [`Reviewed locally by ${s.reviewedLocally.join(', ')}.`] : []), s.prUrl ? `Pull request: ${s.prUrl}` : `Branch: \`${s.branch}\` (no pull request linked).`, '');
@@ -99,14 +102,14 @@ export function renderWorkLog(header: WorkLogHeader, receipts: readonly TurnRece
     `${rows.length} ${rows.length === 1 ? 'turn' : 'turns'} · +${fmt(total.added)} −${fmt(total.removed)} lines · ${total.tests} test ${total.tests === 1 ? 'command' : 'commands'} · ${fmt(total.tokens)} tokens. Written by Muster on this Mac (${REPORT_LABEL}).`, '',
   ];
   rows.forEach((r, i) => {
-    out.push(`## ${r.at.replace(/\.\d+Z$/, 'Z')} · ${oneLine(r.title || `Local turn ${i + 1}`, 90)}${r.role === 'reviewer' ? ' (review)' : ''}`);
+    out.push(`## ${r.at.replace(/\.\d+Z$/, 'Z')} · ${sanitizeOut(r.title || `Local turn ${i + 1}`, 90)}${r.role === 'reviewer' ? ' (review)' : ''}`);
     out.push(`- Device: ${header.device}`);
     if (r.files) out.push(`- Files: +${r.files.added} -${r.files.removed} (${r.files.count} ${r.files.count === 1 ? 'file' : 'files'})`);
     out.push(`- Tests: ${r.testSummary ? `${r.testSummary.passed} passed, ${r.testSummary.failed} failed` : r.tests > 0 ? `${r.tests} test ${r.tests === 1 ? 'command' : 'commands'} ran` : 'not run'}`);
     if (r.tokens) out.push(`- Tokens: ${fmt(r.tokens.input)} in / ${fmt(r.tokens.output)} out`);
-    out.push(`- Model: ${r.model ?? 'unknown'}${r.source === 'org-agent' ? ' (org agent)' : ''}`);
+    out.push(`- Model: ${sanitizeOut(r.model ?? 'unknown', 80)}${r.source === 'org-agent' ? ' (org agent)' : ''}`);
     out.push(`- Cost: $${(r.costUsd ?? 0).toFixed(2)} (${r.costSource ?? 'personal'})`);
-    if (r.summary) out.push(`- Summary: ${oneLine(r.summary, 280)}`);
+    if (r.summary) out.push(`- Summary: ${sanitizeOut(r.summary, 280)}`);
     out.push('');
   });
   return out.join('\n').trimEnd() + '\n';

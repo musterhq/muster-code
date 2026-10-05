@@ -50,11 +50,15 @@ async function harness(t: TestContext) {
     async run(input: ProviderInput) {
       prompts.push(`${input.developerInstructions ?? ''}\n${input.prompt}`);
       input.onEvent('thread/tokenUsage/updated', { tokenUsage: { total: { inputTokens: 900, cachedInputTokens: 100, outputTokens: 250, reasoningOutputTokens: 0 }, last: { inputTokens: 900, cachedInputTokens: 100, outputTokens: 250, reasoningOutputTokens: 0 } } });
-      input.onEvent('item/started', { item: { type: 'commandExecution', id: 'cmd-1', command: 'npm test' } });
       await wait(200);
       await writeFile(join(input.cwd, 'SEEDS.md'), 'cluster seed discovery\nline two\n');
-      // "FINISH" in the prompt: the agent says it is done, with the structured block the briefing asks for (Muster then hands back by itself).
-      return { status: 'completed', finalMessage: /FINISH/.test(input.prompt) ? 'All done and the tests pass.\n```muster-handback\n{"done":true,"summary":"Seed discovery now reads the Sentinel list."}\n```' : 'Added SEEDS.md and ran npm test: 12 passed.' };
+      input.onEvent('item/completed', { item: { id: 'f-1', type: 'fileChange', status: 'completed', changes: [{ path: 'SEEDS.md', kind: { type: 'add' } }] } });
+      // "FINISH" in the prompt: the agent commits and pushes its branch, as a developer finishing would. Muster hands back from those FACTS (HEAD moved and pushed, tests green after the change), never from what the agent says.
+      if (/FINISH/.test(input.prompt)) { git(input.cwd, 'add', '-A'); git(input.cwd, '-c', 'user.email=dev@muster.test', '-c', 'user.name=Dev', 'commit', '-qm', 'seed discovery'); git(input.cwd, 'push', '-q', '-u', 'origin', 'muster/RAG-1'); }
+      const cmd = { id: 'cmd-1', type: 'commandExecution', command: 'npm test', status: 'inProgress', aggregatedOutput: '' };
+      input.onEvent('item/started', { item: cmd });
+      input.onEvent('item/completed', { item: { ...cmd, status: 'completed', exitCode: 0, aggregatedOutput: 'ℹ tests 13\nℹ pass 13\nℹ fail 0\n' } });
+      return { status: 'completed', finalMessage: /FINISH/.test(input.prompt) ? 'All done: committed, pushed and the tests pass.' : 'Added SEEDS.md and ran npm test: 13 passed.' };
     },
   };
   const s = createAgentService({ dataDir, provider, onEvent() {} });
@@ -171,7 +175,7 @@ test('check out → the server shows the comment and assignee, no agent wakes, a
   const finalComments = await api(`/issues/${task.id}/comments?order=asc&limit=100`) as { body: string; authorUserId: string | null }[];
   const summary = finalComments.find(c => /Handed back for review/.test(c.body))!;
   assert.ok(summary && summary.authorUserId === seed.me); assert.match(summary.body, /<!-- muster:handback at="/); assert.match(summary.body, new RegExp(`agent://${rag.qa}`), 'the reviewer is @mentioned');
-  assert.match(summary.body, /Seed discovery now reads the Sentinel list/); assert.match(summary.body, /Use the sentinel seed list/, 'the decision is in the summary');
+  assert.match(summary.body, /Use the sentinel seed list/, 'the decision is in the summary'); assert.ok(!/<server-data|AWS_SECRET/.test(summary.body));
   assert.match(git(bare, 'branch', '--list', 'muster/RAG-1'), /muster\/RAG-1/, 'the branch was pushed');
   await until(async () => (await runsFor(task.id)).length > 0, 'the QA agent woke on hand-back', 40_000);
   assert.equal((await runsFor(task.id))[0]!.agentId, rag.qa, 'the run is the QA agent’s');

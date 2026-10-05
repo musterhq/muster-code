@@ -14,12 +14,29 @@ export interface GitPort {
   push(path: string, branch: string): Promise<{ pushed: boolean; message: string }>;
   /** The branch has been pushed from this worktree and the remote copy is the current HEAD (the remote-tracking ref says so; no network). */
   pushedHead(path: string, branch: string): Promise<boolean>;
+  /** A pull request link is real and is this worktree's: `gh` says its head branch is `branch` and the repository is the one `origin` points at. False when `gh` is missing or unsure. */
+  verifyPr(path: string, url: string, branch: string): Promise<boolean>;
 }
 const git = (cwd: string, args: string[], timeout = 60_000): Promise<string> => new Promise((resolve, reject) => {
   execFile('git', args, { cwd, timeout, maxBuffer: 16 * 1024 * 1024, env: { ...process.env, GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'never' } }, (error, stdout, stderr) => error ? reject(new Error((stderr || error.message).trim())) : resolve(stdout));
 });
 
+const run = (cwd: string, cmd: string, args: string[], timeout = 12_000): Promise<string> => new Promise((resolve, reject) => {
+  execFile(cmd, args, { cwd, timeout, maxBuffer: 2 * 1024 * 1024, env: { ...process.env, GIT_TERMINAL_PROMPT: '0', GH_PROMPT_DISABLED: '1' } }, (error, stdout) => error ? reject(error) : resolve(stdout));
+});
+/** `github.com/org/repo` from a remote URL (https or ssh), lowercased. */
+export const repoOf = (url: string): string | null => { const m = /github\.com[:/]+([^/\s]+)\/([^/\s]+?)(?:\.git)?\/?$/i.exec(url.trim()); return m ? `${m[1]}/${m[2]}`.toLowerCase() : null; };
 export const realGit: GitPort = {
+  async verifyPr(path, url, branch) {
+    const m = /^https:\/\/github\.com\/([^/]+)\/([^/]+)\/pull\/(\d+)$/.exec(url);
+    if (!m) return false;
+    try {
+      const origin = repoOf((await git(path, ['config', '--get', 'remote.origin.url'])).trim());
+      if (!origin || origin !== `${m[1]}/${m[2]}`.toLowerCase()) return false;
+      const out = JSON.parse(await run(path, 'gh', ['pr', 'view', url, '--json', 'headRefName,url'])) as { headRefName?: string; url?: string };
+      return out.headRefName === branch && out.url === url;
+    } catch { return false; }
+  },
   async pushedHead(path, branch) {
     try {
       const head = (await git(path, ['rev-parse', 'HEAD'])).trim();
@@ -48,7 +65,8 @@ export const realGit: GitPort = {
     return { count: files.size, added, removed };
   },
   async push(path, branch) {
-    const remote = (await git(path, ['remote']).catch(() => '')).split('\n').filter(Boolean)[0];
+    // The remote the project came from: origin when there is one, else the first listed.
+    const remotes = (await git(path, ['remote']).catch(() => '')).split('\n').filter(Boolean), remote = remotes.includes('origin') ? 'origin' : remotes[0];
     if (!remote) return { pushed: false, message: 'This repository has no remote, so the branch stays on this Mac.' };
     try { await git(path, ['push', '-u', remote, `${branch}:${branch}`], 120_000); return { pushed: true, message: `Pushed ${branch} to ${remote}.` }; }
     catch (cause) { return { pushed: false, message: `Could not push ${branch}: ${cause instanceof Error ? cause.message.split('\n')[0] : String(cause)}` }; }

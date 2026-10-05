@@ -154,6 +154,13 @@ calls.length=0; await click(document.querySelector('.ws-checkout button'));
 const start=calls.find(c=>c.command==='checkout.start');
 assert.ok(start,'no sheet: bound folder, not the first check-out'); assert.deepEqual(start!.input,{taskId:'t1',take:false,model:{kind:'org-agent',agentId:'a-ceo'},confirm:true});
 assert.ok(calls.some(c=>c.command==='chat.timeline'&&c.input.id==='chat-1'),'the local chat opens');
+// M1: a task that is someone else's is never one click: the sheet asks "Take it from <X>?" even when the folder and engine are known
+plan={...plan,assignedToMe:false,task:{...plan.task,assignee:'Bob Rivera'},willPost:{...plan.willPost,reassign:true}};
+calls.length=0; await show(<WorkLocallyBar detail={detail()}/>); await click(document.querySelector('.ws-checkout button'));await delay(150);
+assert.ok(document.querySelector('.ws-work-locally'),'the sheet opens'); assert.ok(!calls.some(c=>c.command==='checkout.start'),'nothing was started by the click');
+assert.ok(body().includes('Take it from Bob Rivera?'),'it asks'); assert.ok(text('.ws-work-locally button').some(t=>t==='Take it from Bob Rivera and work locally'),'and the button says what it does');
+await click(byText('.ws-work-locally button','Cancel')); assert.ok(!document.querySelector('.ws-work-locally'));
+plan={...plan,assignedToMe:true,task:{...plan.task,assignee:'You'},willPost:{...plan.willPost,reassign:false}};
 plan={...plan,binding:null,detectedFolder:'/Users/me/redis',firstTime:true};
 await click(document.querySelector('.ws-checkout button')); await delay(150);
 assert.ok(document.querySelector('.ws-work-locally'),'the first use asks once');

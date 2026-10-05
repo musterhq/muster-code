@@ -86,6 +86,14 @@ export const engineOf = (model: ModelChoice): Engine => model.kind === 'org-agen
 export const ENGINE_LABEL: Record<Engine, string> = { 'org-definition': 'Org agents', 'personal-subscription': 'My subscriptions' };
 export type LeaseState = 'checked_out' | 'handed_back' | 'released';
 export interface CheckoutLease {
+  /** The server (scheme, host, port) and the person on it this check-out belongs to. Queued posts go only to this server, as this person (security review H3). */
+  origin: string; userId: string;
+  /** The worktree's HEAD when the check-out started (or was last undone). Hand-back needs HEAD to have moved past it, and be pushed. */
+  armedFrom: string | null;
+  /** The person pressed Undo: nothing hands back by itself again until they say it is done. */
+  autoOff: boolean;
+  /** Who the task was handed to (so Undo can refuse once someone else has acted on it). */
+  handedTo: { kind: 'agent' | 'user'; id: string; name: string } | null;
   taskId: string; orgId: string; key: string; title: string; projectId: string | null;
   state: LeaseState; deviceId: string; device: string;
   since: string; lastActivityAt: string; endedAt: string | null;
