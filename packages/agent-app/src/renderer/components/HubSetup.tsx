@@ -137,10 +137,6 @@ export function ConnectionPanel({ onSaved, compact = false, signInAvailable = tr
       await refreshWorkspace(true); onSaved?.(result.config); load(result.config, { current: true });
     } catch (cause) { setError(errorText(cause)); } finally { setBusy(null); }
   };
-  const chooseOrg = async (id: string) => {
-    if (!config) return;
-    try { const view = await invoke('paperclip.config.set', { mode: config.mode, baseUrl: config.baseUrl, companyId: id }); setConfig(view); await refreshWorkspace(true); } catch (cause) { setError(errorText(cause)); }
-  };
   /** Step 1 of an import: read what it would fill (GET only) and suggest a Muster project for each server project. */
   const [plan, setPlan] = useState<ImportPlan | null>(null);
   const [targets, setTargets] = useState<Record<string, string>>({});
@@ -174,8 +170,7 @@ export function ConnectionPanel({ onSaved, compact = false, signInAvailable = tr
       <p className="ws-connection-detect" data-ok="true" role="status"><Check size={13} aria-hidden="true"/>
         {who ? `Connected to ${host} as ${who}.` : config.hasToken ? `Connected to ${host} with an API token.` : `Connected to ${host}.`}{' '}
         {config.live === 'socket' ? 'Live updates on.' : 'Updates every few seconds.'}{config.reconnect && <> <button type="button" className="ws-link" onClick={() => void invoke('musterServer.signInWindow', { baseUrl: config.baseUrl, url: config.baseUrl }).catch(() => undefined)}>Reconnect for live updates</button></>}</p>
-      {!compact && <><OrgsCard/><LocalCheckoutsCard/></>}
-      {compact && companies.length > 1 && <label className="project-edit-goal"><span>Org</span><select className="ws-select is-field" value={config.companyId ?? companies[0]!.id} onChange={e => void chooseOrg(e.target.value)}>{companies.map(c => <option key={c.id} value={c.id}>{c.name}{c.prefix ? ` (${c.prefix})` : ''}</option>)}</select></label>}
+      <OrgsCard/><LocalCheckoutsCard/>
       <details className="ws-connection-more"><summary>Details</summary>
         <dl className="ws-connection-details" aria-label="Connection details">
           <div><dt>Address</dt><dd>{config.baseUrl}</dd></div>

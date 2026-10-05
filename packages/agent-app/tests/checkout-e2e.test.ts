@@ -53,7 +53,8 @@ async function harness(t: TestContext) {
       input.onEvent('item/started', { item: { type: 'commandExecution', id: 'cmd-1', command: 'npm test' } });
       await wait(200);
       await writeFile(join(input.cwd, 'SEEDS.md'), 'cluster seed discovery\nline two\n');
-      return { status: 'completed', finalMessage: 'Added SEEDS.md and ran npm test: 12 passed.' };
+      // "FINISH" in the prompt: the agent says it is done, with the structured block the briefing asks for (Muster then hands back by itself).
+      return { status: 'completed', finalMessage: /FINISH/.test(input.prompt) ? 'All done and the tests pass.\n```muster-handback\n{"done":true,"summary":"Seed discovery now reads the Sentinel list."}\n```' : 'Added SEEDS.md and ran npm test: 12 passed.' };
     },
   };
   const s = createAgentService({ dataDir, provider, onEvent() {} });
@@ -152,22 +153,25 @@ test('check out → the server shows the comment and assignee, no agent wakes, a
     assert.equal(costs[0]!.billing_type, 'metered_api');
   }
   const afterTurn = await api(`/issues/${task.id}/comments?order=asc&limit=100`) as { body: string }[];
-  assert.equal(afterTurn.filter(c => /muster:report (tests|context)/.test(c.body)).length <= 1, true, 'no comment per turn');
+  assert.equal(afterTurn.filter(c => /muster:report context/.test(c.body)).length, 1, 'one context summary, not a comment per turn');
+  assert.ok(afterTurn.filter(c => /muster:report tests/.test(c.body)).length <= 1);
   const decisionComment = afterTurn.find(c => /\*\*Decision\*\*/.test(c.body));
   assert.ok(decisionComment && /via Muster · local/.test(decisionComment.body), 'the decision is posted as the person, labelled via Muster · local');
 
-  // hand back: tests ran, so it is allowed; push, PR link, summary, In review, reassign to the QA agent (which wakes)
+  // hand-back is automatic: the agent says it is done (tests ran), so Muster pushes, summarises, sets In review and gives it to the reviewer, which wakes
   const preview = await s.invoke('checkout.handback.preview', { taskId: task.id });
   assert.equal(preview.testsRun, true); assert.equal(preview.blocked, null);
   assert.ok(preview.reviewers.some(r => r.name === 'QA Lead' && r.suggested), 'a QA agent is suggested');
-  const done = await s.invoke('checkout.handback', { taskId: task.id, reviewer: { kind: 'agent', id: rag.qa }, prUrl: 'https://github.com/musterhq/example/pull/7', summary: 'Seed discovery now reads the Sentinel list.' });
-  assert.equal(done.state, 'handed_back');
+  assert.equal((await s.invoke('checkout.get', { taskId: task.id })).lease?.state, 'checked_out', 'a normal turn is not a hand-back');
+  await s.invoke('chat.send', { id: lease.chatId!, text: 'FINISH: wrap up.', requestId: 'r-2' });
+  await until(async () => (await s.invoke('checkout.get', { taskId: task.id })).lease?.state === 'handed_back', 'the automatic hand-back', 25_000);
+  await s.invoke('checkout.sync', {});
   const back = await api(`/issues/${task.id}`);
   assert.equal(back.status, 'in_review'); assert.equal(back.assigneeAgentId, rag.qa); assert.equal(back.assigneeUserId, null);
   const finalComments = await api(`/issues/${task.id}/comments?order=asc&limit=100`) as { body: string; authorUserId: string | null }[];
   const summary = finalComments.find(c => /Handed back for review/.test(c.body))!;
-  assert.ok(summary && summary.authorUserId === seed.me); assert.match(summary.body, /pull\/7/); assert.match(summary.body, new RegExp(`agent://${rag.qa}`), 'the reviewer is @mentioned');
-  assert.match(summary.body, /Use the sentinel seed list/, 'the decision is in the summary');
+  assert.ok(summary && summary.authorUserId === seed.me); assert.match(summary.body, /<!-- muster:handback at="/); assert.match(summary.body, new RegExp(`agent://${rag.qa}`), 'the reviewer is @mentioned');
+  assert.match(summary.body, /Seed discovery now reads the Sentinel list/); assert.match(summary.body, /Use the sentinel seed list/, 'the decision is in the summary');
   assert.match(git(bare, 'branch', '--list', 'muster/RAG-1'), /muster\/RAG-1/, 'the branch was pushed');
   await until(async () => (await runsFor(task.id)).length > 0, 'the QA agent woke on hand-back', 40_000);
   assert.equal((await runsFor(task.id))[0]!.agentId, rag.qa, 'the run is the QA agent’s');

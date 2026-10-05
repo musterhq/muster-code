@@ -2,7 +2,7 @@
 .ws-checkout { display: inline-flex; gap: 6px; margin-left: auto; align-items: center; }
 .ws-checkout .settings-button { display: inline-flex; align-items: center; gap: 6px; }
 .ws-working { color: var(--ok); }
-.ws-checkout-notes { display: grid; gap: 6px; padding: 0 16px 8px; }
+.ws-checkout-notes { display: grid; gap: 6px; padding: 4px 51px 8px; }
 .ws-checkout-note { margin: 0; font-size: var(--fs-12); color: var(--text-dim); }
 .ws-checkout-note[data-tone='warn'] { color: var(--warn); }
 .ws-checkout-conflict { display: grid; gap: 6px; padding: 10px 12px; border: 1px solid var(--warn); border-radius: var(--radius-8); background: var(--bg-raised); font-size: var(--fs-13); }

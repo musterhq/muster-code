@@ -84,7 +84,7 @@ export class PaperclipBackend implements ServerBackend, PersonalAccess {
     // Memory counts are added per snapshot (not here), so the light badge read never browses memory.
     const projects = arr(projectsJson).map(p => mapProject(p, tasks));
     const projectName = new Map(projects.map(p => [p.id, p.name]));
-    const inbox = [...buildInbox(arr((attentionJson as Json).items).map(mapAttention), tasks, runs, agents), ...mapMentions(arr(activityJson), me, agents)].map(item => {
+    const inbox = [...buildInbox(arr((attentionJson as Json).items).map(mapAttention), tasks, runs, agents), ...mapMentions(arr(activityJson), me, agents, peopleNames)].map(item => {
       const projectId = item.taskId ? tasks.find(t => t.id === item.taskId)?.projectId ?? null : null;
       return { ...item, projectId, group: projectId ? projectName.get(projectId) ?? company.name : company.name, source: 'paperclip' as const };
     });
@@ -103,8 +103,8 @@ export class PaperclipBackend implements ServerBackend, PersonalAccess {
     // Documents with their revisions (a plan is the one with key `plan`), and the PRs, branches and artifacts agents produced.
     const documentCards = await Promise.all(arr(documents).map(async d => mapDocument(d, Number(d.latestRevisionNumber) > 1 ? arr(await c.get<unknown>(`/issues/${key}/documents/${enc(String(d.key))}/revisions`).catch(() => [])) : [], agents)));
     const liveTasks = new Set((part?.runs ?? []).filter(r => r.status === 'running').map(r => r.taskId).filter((t): t is string => Boolean(t)));
-    const peopleNames = new Map((part?.people ?? []).map(p => [p.id, p.name]));
-    const task = mapIssue(issue, agents, liveTasks, (await this.whoami().catch(() => null))?.id ?? null, peopleNames);
+    const peopleNames = new Map((part?.people ?? []).map(p => [p.id, p.name])), meId = (await this.whoami().catch(() => null))?.id ?? null;
+    const task = mapIssue(issue, agents, liveTasks, meId, peopleNames);
     const taskRuns = arr(runs).map(mapRun);
     if (taskRuns.some(r => r.status === 'running' || r.status === 'queued')) task.live = true;
     const assignee = task.assigneeId ? agents.get(task.assigneeId) : undefined;
@@ -127,11 +127,11 @@ export class PaperclipBackend implements ServerBackend, PersonalAccess {
       task, description: typeof issue.description === 'string' ? issue.description : '', comments: arr(comments).filter(x => !x.deletedAt).map(x => mapComment(x, agents)),
       runs: taskRuns.sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, 20),
       addressee: assignee ? { id: assignee.id, label: assignee.name } : null,
-      composerNote: assignee ? null : 'Unassigned. Your comment is posted to the thread; @-mention an agent to bring it in.',
+      composerNote: assignee ? null : task.assigneeUserId ? `With ${task.assigneeLabel ?? 'a person'}. Your comment is posted to the thread; @-mention a person or agent to bring them in.` : 'Unassigned. Your comment is posted to the thread; @-mention a person or agent to bring them in.',
       subtasks: children.map(t => t.id), blocking: (part?.tasks ?? []).filter(t => t.blockedByIds.includes(task.id)).map(t => t.id),
       receipts: arr(runs).map(r => mapReceipt(r, agents)).sort((a, b) => b.endedAt.localeCompare(a.endedAt)).slice(0, 50),
       cards: cards.sort((a, b) => a.at.localeCompare(b.at)),
-      mentionable: [...(part?.people ?? []).map(p => ({ id: p.id, name: p.name, kind: 'user' as const })), ...(part?.agents ?? []).filter(a => a.status !== 'terminated').map(a => ({ id: a.id, name: a.name, kind: 'agent' as const }))],
+      mentionable: [...(part?.people ?? []).filter(p => p.id !== meId).map(p => ({ id: p.id, name: p.name, kind: 'user' as const })), ...(part?.agents ?? []).filter(a => a.status !== 'terminated').map(a => ({ id: a.id, name: a.name, kind: 'agent' as const }))],
     };
   }
 

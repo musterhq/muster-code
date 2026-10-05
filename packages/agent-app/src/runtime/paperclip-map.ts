@@ -143,14 +143,14 @@ export const mentionsUser = (body: string, userId: string): boolean => body.incl
  * Comments that tag the person, as Inbox items. Paperclip's attention feed has no mention kind, so the company activity feed is read for
  * `issue.comment_added` rows whose snippet carries the person's mention chip. One item per comment; the person's own comments never count.
  */
-export function mapMentions(rows: readonly Json[], meId: string | null, agents: ReadonlyMap<string, WorkspaceAgent>): WorkspaceInboxItem[] {
+export function mapMentions(rows: readonly Json[], meId: string | null, agents: ReadonlyMap<string, WorkspaceAgent>, people?: ReadonlyMap<string, string>): WorkspaceInboxItem[] {
   if (!meId) return [];
   const out: WorkspaceInboxItem[] = [];
   for (const row of rows) {
     if (row.action !== 'issue.comment_added' || row.actorId === meId) continue;
     const d = obj(row.details), snippet = str(d.bodySnippet);
     if (!snippet || !mentionsUser(snippet, meId)) continue;
-    const by = str(row.agentId) ? agents.get(String(row.agentId))?.name ?? 'An agent' : 'Someone';
+    const by = str(row.agentId) ? agents.get(String(row.agentId))?.name ?? 'An agent' : people?.get(String(row.actorId)) ?? 'Someone';
     out.push({ id: `mention:${str(d.commentId) ?? str(row.id)}`, kind: 'mention', title: `${str(d.identifier) ? `${d.identifier} · ` : ''}${str(d.issueTitle) ?? 'A task'}`, why: `${by} mentioned you in a comment.`, severity: 'medium', at: iso(row.createdAt), taskId: str(row.entityId), agentId: null, runId: null });
   }
   return out;

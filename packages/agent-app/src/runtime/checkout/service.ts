@@ -16,6 +16,8 @@ import { costEventFor, payerOf, type ProviderPayInfo } from './costs.ts';
 import { canCheckout, checkoutComment, checkoutText, deriveLease, LeaseError, markerFor, newLease, transition, toView } from './lease.ts';
 /** How long an automatic hand-back can be taken back. */
 export const UNDO_MS = 2 * 60_000;
+/** One context summary at most this often. */
+export const CONTEXT_EVERY_MS = 30 * 60_000;
 import {
   batchReports, contextReport, decisionReport, handBackBody, postedKeys, prReport, releaseBody, renderWorkLog, reportComment, testsReport, WORK_LOG_KEY,
   type Report, type TestResult, type TurnReceipt,
@@ -331,6 +333,7 @@ export class CheckoutService {
     this.d.store.enqueue({ taskId: lease.taskId, orgId: lease.orgId, type: 'comment', key: `decision:${hash(body)}`, kind: 'decision', body: decisionReport(`decision:${hash(body)}`, at, body).body, at });
     this.touch(lease.taskId);
     await this.flush(lease.taskId);
+    this.d.emit(lease.taskId);
     return { posted: this.d.store.pendingCount(lease.taskId) === 0, queued: this.d.store.pendingCount(lease.taskId) > 0 };
   }
   /** A context summary (also written by the person or the local agent); only the newest of a flush is posted. */
@@ -341,6 +344,7 @@ export class CheckoutService {
     this.d.store.enqueue({ taskId: lease.taskId, orgId: lease.orgId, type: 'comment', key, kind: 'context', body: contextReport(key, at, summary).body, at });
     this.touch(lease.taskId);
     this.scheduleFlush(lease.taskId);
+    this.d.emit(lease.taskId);
   }
   private touch(taskId: string): void {
     const lease = this.d.store.lease(taskId);
@@ -376,6 +380,12 @@ export class CheckoutService {
       if (result) { receipt.testSummary = { passed: result.passed ?? 0, failed: result.failed ?? 0 }; this.d.store.updateReceipt(lease.taskId, receipt); }
       // One comment per distinct result: the same outcome after another turn says nothing new.
       if (result) { const key = `tests:${result.passed ?? 0}-${result.failed ?? 0}`; this.d.store.enqueue({ taskId: lease.taskId, orgId: lease.orgId, type: 'comment', key, kind: 'tests', body: testsReport(key, receipt.at, result).body, at: receipt.at }); }
+    }
+    // A context summary (what the agent says it is doing), at most one every half hour: the thread gets the story, not a comment per turn.
+    const lastContext = this.d.store.history(lease.taskId, 'context').at(-1);
+    if (receipt.summary && receipt.role !== 'reviewer' && (!lastContext || this.d.now() - Date.parse(lastContext.at) > CONTEXT_EVERY_MS)) {
+      const key = `context:${receipt.at}`;
+      this.d.store.enqueue({ taskId: lease.taskId, orgId: lease.orgId, type: 'comment', key, kind: 'context', body: contextReport(key, receipt.at, receipt.summary).body, at: receipt.at });
     }
     this.touch(lease.taskId);
     this.scheduleFlush(lease.taskId);
@@ -520,6 +530,8 @@ export class CheckoutService {
     const text = [...(await this.d.chats.transcript(chatId).catch(() => []))].reverse().find(t => t.trim()) ?? '';
     const signal = await this.finishedSignal(lease, text);
     if (!signal) return;
+    // The pull request is a milestone in its own right, even when hand-back has to wait.
+    if (signal.prUrl) this.d.store.enqueue({ taskId, orgId: lease.orgId, type: 'comment', key: `pr:${hash(signal.prUrl)}`, kind: 'pr', body: prReport(`pr:${hash(signal.prUrl)}`, iso(this.d.now()), signal.prUrl, lease.branch).body, at: iso(this.d.now()) });
     const receipts = this.d.store.receipts(taskId), latest = [...receipts].reverse().find(r => r.testSummary);
     const note = async (key: string, body: string) => { if (this.d.store.enqueue({ taskId, orgId: lease.orgId, type: 'comment', key, kind: 'note', body, at: iso(this.d.now()) })) this.scheduleFlush(taskId); };
     if (latest?.testSummary && latest.testSummary.failed > 0) { await note(`blocked:tests:${latest.testSummary.passed}-${latest.testSummary.failed}`, `**Not handing back yet.** The work looks finished (${signal.label}) but ${latest.testSummary.failed} ${latest.testSummary.failed === 1 ? 'test is' : 'tests are'} failing (${latest.testSummary.passed} passed). It stays checked out on ${lease.device}.`); return; }

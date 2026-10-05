@@ -1,5 +1,5 @@
 import React,{memo,useEffect,useMemo,useRef,useState} from 'react';
-import {ArrowUp,Check,Copy,GitBranch,LoaderCircle,Pencil,RotateCcw,TriangleAlert} from 'lucide-react';
+import {ArrowUp,Check,Copy,Gavel,GitBranch,LoaderCircle,Pencil,RotateCcw,TriangleAlert} from 'lucide-react';
 import type {EditRestoreFile,EditRestorePreview,EditResendMode,EditResendOptions} from '../../shared/protocol';
 import {copyText} from '../clipboard';
 import './message-meta.css';
@@ -8,7 +8,7 @@ import {Tip} from './Tooltip';
 const clock=new Intl.DateTimeFormat(undefined,{hour:'2-digit',minute:'2-digit',hourCycle:'h23'});
 const fullDate=new Intl.DateTimeFormat(undefined,{dateStyle:'full',timeStyle:'long'});
 /** Result actions (Codex/Cursor): prompts get Edit and Fork; answers get Fork and, on the latest turn, Retry. Each returns when done. */
-export interface MessageActions {onEdit?:()=>void;onFork?:()=>Promise<unknown>;onRetry?:()=>Promise<unknown>}
+export interface MessageActions {onEdit?:()=>void;onFork?:()=>Promise<unknown>;onRetry?:()=>Promise<unknown>;/** A chat for a checked-out server task: post this message to the task as a decision, as you ("via Muster · local"). */onDecision?:()=>Promise<unknown>}
 function ActionButton({label,icon,run}:{label:string;icon:React.ReactNode;run:()=>unknown}) {
   const [busy,setBusy]=useState(false),alive=useRef(true);
   useEffect(()=>{alive.current=true;return()=>{alive.current=false;};},[]);
@@ -35,6 +35,7 @@ export const MessageMeta=memo(function MessageMeta({text,createdAt,label='Copy m
     </button>
     {actions?.onEdit&&<Tip label="Edit message"><button type="button" className="message-copy" aria-label="Edit message" onClick={actions.onEdit}><Pencil size={13}/></button></Tip>}
     {actions?.onRetry&&<ActionButton label="Retry" icon={<RotateCcw size={13}/>} run={actions.onRetry}/>}
+    {actions?.onDecision&&<ActionButton label="Post as decision" icon={<Gavel size={13}/>} run={actions.onDecision}/>}
     {actions?.onFork&&<ActionButton label="Fork from here" icon={<GitBranch size={13}/>} run={actions.onFork}/>}
     <span className="message-copy-feedback" role="status" aria-live="polite">{feedback}</span>
   </div>;

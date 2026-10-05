@@ -3,7 +3,8 @@
  * grouped No owner → Me → People → Agents, names shown once. Choosing a person assigns them (the agent is cleared); an agent assigns it (the person is cleared).
  */
 import { ChevronDown } from 'lucide-react';
-import React, { useEffect, useId, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
+import React, { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { filterOwners, OWNER_GROUP_LABEL, type OwnerGroup, type OwnerOption } from '../ownerOptions';
 import './owner-picker.css';
 
@@ -11,14 +12,21 @@ export function OwnerPicker({ options, value, label, disabled, bare, onChange }:
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [active, setActive] = useState(0);
-  const root = useRef<HTMLDivElement>(null), input = useRef<HTMLInputElement>(null);
+  const root = useRef<HTMLDivElement>(null), input = useRef<HTMLInputElement>(null), pop = useRef<HTMLDivElement>(null);
   const listId = useId();
+  // The list is fixed to the viewport, placed under the button and kept inside the window, so a narrow or scrolling side panel never clips it.
+  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
+  useLayoutEffect(() => {
+    if (!open || !root.current) { setPos(null); return; }
+    const r = root.current.getBoundingClientRect(), width = 280, vw = globalThis.innerWidth || 1200, vh = globalThis.innerHeight || 800;
+    setPos({ top: Math.min(r.bottom + 4, Math.max(8, vh - 340)), left: Math.max(8, Math.min(r.left, vw - width - 8)) });
+  }, [open]);
   const shown = useMemo(() => filterOwners(options, query), [options, query]);
   const current = options.find(o => o.value === value);
   useEffect(() => { if (open) { setQuery(''); setActive(0); requestAnimationFrame(() => input.current?.focus()); } }, [open]);
   useEffect(() => {
     if (!open) return;
-    const away = (e: MouseEvent) => { if (!root.current?.contains(e.target as Node)) setOpen(false); };
+    const away = (e: MouseEvent) => { const t = e.target as Node; if (!root.current?.contains(t) && !pop.current?.contains(t)) setOpen(false); };
     document.addEventListener('mousedown', away); return () => document.removeEventListener('mousedown', away);
   }, [open]);
   const choose = (o: OwnerOption | undefined) => { if (!o) return; setOpen(false); if (o.value !== value) onChange(o.value); };
@@ -27,7 +35,7 @@ export function OwnerPicker({ options, value, label, disabled, bare, onChange }:
     <button type="button" className={bare ? 'ws-select is-bare owner-trigger' : 'ws-select is-field owner-trigger'} role="combobox" aria-haspopup="listbox" aria-expanded={open} aria-controls={listId} aria-label={label} disabled={disabled} onClick={() => setOpen(v => !v)}>
       <span className="owner-current">{current?.label ?? 'Unassigned'}</span><ChevronDown size={12} aria-hidden="true"/>
     </button>
-    {open && <div className="owner-pop ui-menu">
+    {open && createPortal(<div ref={pop} className="owner-pop ui-menu" style={pos ? { position: 'fixed', top: pos.top, left: pos.left } : undefined}>
       <input ref={input} className="owner-filter" type="text" role="searchbox" aria-label={`Filter ${label}`} placeholder="Type to filter…" value={query} onChange={e => { setQuery(e.target.value); setActive(0); }}
         onKeyDown={e => {
           if (e.key === 'ArrowDown') { e.preventDefault(); setActive(i => Math.min(shown.length - 1, i + 1)); }
@@ -42,6 +50,6 @@ export function OwnerPicker({ options, value, label, disabled, bare, onChange }:
             <li role="option" aria-selected={o.value === value} data-active={i === active || undefined} className="owner-option" onMouseEnter={() => setActive(i)} onMouseDown={e => { e.preventDefault(); choose(o); }}>
               <span>{o.label}</span>{o.hint && <small>{o.hint}</small>}</li></React.Fragment>; })}
       </ul>
-    </div>}
+    </div>, document.body)}
   </div>;
 }
