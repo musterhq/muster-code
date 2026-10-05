@@ -66,3 +66,25 @@ export function LocalCheckoutsCard(): React.ReactElement | null {
     </div>}
   </section>;
 }
+
+/** A server project's "Local checkout on this Mac" row: the bound folder, the worktrees in use and their engine, with Change and Unlink. */
+export function ProjectCheckoutRow({ orgId, projectId }: { orgId: string; projectId: string }): React.ReactElement {
+  const [data, setData] = useState<{ binding: LocalBinding | null; leases: { key: string; branch: string | null; engine: string }[] } | null>(null);
+  const load = useCallback(() => {
+    void Promise.all([invoke('checkout.bindings', {}), invoke('checkout.leases', {})]).then(([b, l]) => setData({
+      binding: b.bindings.find(x => x.orgId === orgId && x.projectId === projectId) ?? null,
+      leases: l.leases.filter(x => x.orgId === orgId && x.projectId === projectId && x.state === 'checked_out').map(x => ({ key: x.key, branch: x.branch, engine: x.model.kind === 'org-agent' ? 'Org agents' : 'My subscriptions' })),
+    })).catch(() => setData({ binding: null, leases: [] }));
+  }, [orgId, projectId]);
+  useEffect(load, [load]);
+  const choose = async () => {
+    try { const folder = await invoke('folder.pick', undefined); if (folder) { await invoke('checkout.bind', { orgId, projectId, path: folder.path }); load(); } } catch (cause) { notifyError(cause); }
+  };
+  const b = data?.binding ?? null;
+  return <div><dt>Local checkout on this Mac</dt><dd>
+    {b ? <><code>{b.path}</code> <span className="ws-faint">dev branch {b.devBranch}</span></> : <span className="ws-faint" data-local-checkout="none">Not linked</span>}
+    {data?.leases.map(l => <span key={l.key} className="pp-field-hint ws-faint">Working locally on {l.key}{l.branch ? ` (${l.branch})` : ''} · {l.engine}</span>)}
+    <span className="pp-field-hint ws-faint">Work locally on a task of this project creates a worktree and a branch from the dev branch here. The server’s workspace path above is never used.</span>
+    <span className="ws-orgs-actions"><button type="button" className="settings-button secondary" onClick={() => void choose()}>{b ? 'Change…' : 'Choose folder…'}</button>{b && <button type="button" className="settings-button secondary" onClick={() => void invoke('checkout.unbind', { orgId, projectId }).then(load, notifyError)}>Unlink</button>}</span>
+  </dd></div>;
+}

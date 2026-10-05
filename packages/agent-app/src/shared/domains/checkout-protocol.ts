@@ -104,6 +104,8 @@ export interface CheckoutLease {
   reviewLocally: boolean;
   /** Local review sessions started for this task. */
   reviewChats: { chatId: string; agentId: string | null; label: string; at: string }[];
+  /** When the "paused" activity note was last posted for a quiet session (one per quiet stretch). */
+  pausedNoteAt: string | null;
   /** Posts waiting to reach the server (offline): synced on reconnect. */
   pending: number;
   /** Offline: `manual` (the person switched "Work offline" on) or `auto` (the server could not be reached). Nothing is sent while it is set; every action is queued. */
@@ -118,6 +120,8 @@ export interface LeaseConflict { at: string; changes: string[]; status: Workspac
 export interface PendingPost { id: number; type: 'comment' | 'patch' | 'cost'; kind: string; summary: string; body: string; at: string; editable: boolean }
 /** A lease as the screens see it: stale means silent for longer than the reminder hours. */
 export interface LeaseView extends CheckoutLease { thisMac: boolean; stale: boolean; staleHours: number }
+/** Per project: `auto` hands back by itself when the local work is finished; `ask` offers it in a toast instead. */
+export type AutoMode = 'auto' | 'ask';
 export interface CheckoutSettings { staleHours: number; deviceName: string }
 
 /** What the check-out dialog shows before anything is posted. */
@@ -206,11 +210,16 @@ export interface CheckoutCommands {
   'checkout.resolve': { input: { taskId: string; choice: 'send' | 'discard' }; output: LeaseView };
   /** A silent lease: the reminder was shown (snoozes it for the hours set). */
   'checkout.remind': { input: { taskId: string }; output: { ok: true } };
+  /** Whether finished work is handed back automatically (default) or offered ("Ask me"), per project. Without `mode` it only reads. */
+  'checkout.auto': { input: { taskId?: string; orgId?: string; projectId?: string; mode?: AutoMode }; output: { mode: AutoMode } };
+  /** Takes an automatic hand-back back (within about two minutes, while nobody has acted on it): status and assignee return, with a short comment. */
+  'checkout.undo': { input: { taskId: string }; output: LeaseView };
 }
 /** Fired when a lease changes, a post is queued or synced: screens refetch their badge. */
-export type CheckoutEvent = { type: 'checkoutChanged'; taskId: string | null } | { type: 'taskLink'; companyId: string; issueId: string; host: string; identifier: string | null };
+/** `handedBack`: Muster handed a finished task back by itself (a toast with Undo until `undoUntil`). `handBackReady`: the project is on "Ask me" and the work looks finished. */
+export type CheckoutEvent = { type: 'checkoutChanged'; taskId: string | null } | { type: 'handedBack'; taskId: string; key: string; to: string; undoUntil: string } | { type: 'handBackReady'; taskId: string; key: string; to: string; recipient: { kind: 'agent' | 'user'; id: string }; reason: string } | { type: 'taskLink'; companyId: string; issueId: string; host: string; identifier: string | null };
 export const CHECKOUT_COMMANDS = {
   'orgs.list': true, 'orgs.set': true, 'orgs.work': true, 'orgs.open': true, 'orgs.link': true, 'checkout.settings': true, 'checkout.bindings': true, 'checkout.bind': true, 'checkout.unbind': true, 'checkout.plan': true,
   'checkout.start': true, 'checkout.get': true, 'checkout.leases': true, 'checkout.decision': true, 'checkout.handback.preview': true, 'checkout.handback': true, 'checkout.release': true, 'checkout.runOnServer': true,
-  'checkout.sync': true, 'checkout.outbox': true, 'checkout.remind': true, 'checkout.org': true, 'checkout.engine': true, 'checkout.review': true, 'checkout.offline': true, 'checkout.pending': true, 'checkout.pending.edit': true, 'checkout.resolve': true,
+  'checkout.sync': true, 'checkout.outbox': true, 'checkout.remind': true, 'checkout.auto': true, 'checkout.undo': true, 'checkout.org': true, 'checkout.engine': true, 'checkout.review': true, 'checkout.offline': true, 'checkout.pending': true, 'checkout.pending.edit': true, 'checkout.resolve': true,
 } as const satisfies Record<keyof CheckoutCommands, true>;

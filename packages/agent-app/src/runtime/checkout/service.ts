@@ -9,11 +9,13 @@
 import type { WorkspaceAgent, WorkspaceCompany, WorkspaceStatus, WorkspaceTask } from '../../shared/domains/paperclip-protocol.ts';
 import { engineOf, type LocalOrgAgent, type LocalOrgCopy, type PolicyStage } from '../../shared/domains/checkout-protocol.ts';
 import type {
-  CheckoutLease, CheckoutPlan, CheckoutStartInput, HandBackInput, HandBackPreview, LeaseView, LocalBinding, ModelChoice, OutboxStatus, PendingPost,
+  AutoMode, CheckoutEvent, CheckoutLease, CheckoutPlan, CheckoutStartInput, HandBackInput, HandBackPreview, LeaseView, LocalBinding, ModelChoice, OutboxStatus, PendingPost,
 } from '../../shared/domains/checkout-protocol.ts';
 import { agentBrief, mapAgentToLocal, type LocalProvider } from './tiers.ts';
 import { costEventFor, payerOf, type ProviderPayInfo } from './costs.ts';
-import { canCheckout, checkoutComment, checkoutText, deriveLease, LeaseError, newLease, transition, toView } from './lease.ts';
+import { canCheckout, checkoutComment, checkoutText, deriveLease, LeaseError, markerFor, newLease, transition, toView } from './lease.ts';
+/** How long an automatic hand-back can be taken back. */
+export const UNDO_MS = 2 * 60_000;
 import {
   batchReports, contextReport, decisionReport, handBackBody, postedKeys, prReport, releaseBody, renderWorkLog, reportComment, testsReport, WORK_LOG_KEY,
   type Report, type TestResult, type TurnReceipt,
@@ -49,6 +51,8 @@ export interface CheckoutDeps {
   deviceNameDefault(): string;
   now(): number;
   emit(taskId: string | null): void;
+  /** Typed events for toasts: a finished task handed back by itself (Undo), or one that looks finished on "Ask me". */
+  notify?(event: Extract<CheckoutEvent, { type: 'handedBack' | 'handBackReady' }>): void;
   /** Opens a PR for the branch (GitHub). Absent or failing: the branch is pushed and the link is left for the person. */
   openPr?(worktree: string, base: string, title: string, body: string): Promise<string | null>;
   /** A folder of this Mac whose origin remote is the project's repository (`github.com/org/repo`), or null. */
@@ -61,7 +65,7 @@ const iso = (ms: number) => new Date(ms).toISOString();
 const mention = (kind: 'agent' | 'user', id: string, name: string) => `[@${name}](${kind}://${id})`;
 const personal = (backend: ServerBackend | null): ServerBackend & PersonalAccess => {
   if (!backend) throw new Error('Muster Server is not connected. Connect it in Settings › Integrations.');
-  if (!backend.whoami || !backend.patchTask || !backend.rawComments || !backend.putDocument || !backend.postCostEvent || !backend.agentInstructions || !backend.issuePolicy) throw new Error('Check out works with Paperclip-compatible servers. This server cannot be checked out from yet.');
+  if (!backend.whoami || !backend.patchTask || !backend.rawComments || !backend.putDocument || !backend.postCostEvent || !backend.agentInstructions || !backend.issuePolicy) throw new Error('Work locally needs a server that can assign tasks to people. This one cannot be worked on locally yet.');
   return backend as ServerBackend & PersonalAccess;
 };
 const isNetwork = (cause: unknown): boolean => !(cause instanceof PaperclipError) || cause.status === 0 || cause.status >= 500 || cause.status === 401 || cause.status === 408 || cause.status === 429 || cause.stage === 'network';
@@ -269,6 +273,7 @@ export class CheckoutService {
       if (maker) lines.push(agentBrief(maker, maker.instructions), maker.skills.length ? `Skills the org gave this role: ${maker.skills.join(', ')}.` : '');
     } else if (makerId && agentName(makerId)) lines.push(`The org's maker for this task is ${agentName(makerId)}; you are standing in for that role with your own model.`);
     lines.push('Say what you decided and why in plain words: Muster reports your milestones to the task as the person working here.');
+    if (!review) lines.push('When the task is finished and the tests pass, end your final message with this block so Muster can hand the work back for review (do not write it before then):\n```muster-handback\n{"done":true,"summary":"one or two sentences on what changed"}\n```\nOpening a pull request or pushing the branch also counts as finished.');
     return lines.filter(Boolean).join('\n\n');
   }
 
@@ -375,6 +380,8 @@ export class CheckoutService {
     this.touch(lease.taskId);
     this.scheduleFlush(lease.taskId);
     this.d.emit(lease.taskId);
+    // Finished? Only the maker's turns count (a local review is feedback, not completion).
+    if (receipt.role !== 'reviewer' && status === 'completed') await this.afterTurn(lease.taskId, chatId, receipt).catch(() => undefined);
   }
   /** A title and summary for a turn's work-log section: the first line and the opening of the agent's final message. */
   private async describeTurn(chatId: string): Promise<{ title?: string; summary?: string }> {
@@ -498,6 +505,96 @@ export class CheckoutService {
   }
   async outbox(): Promise<OutboxStatus> { return { pending: this.d.store.pendingCount(), ...this.d.store.syncState() }; }
   async sync(): Promise<OutboxStatus> { await this.flush(); return this.outbox(); }
+
+  // --- automatic hand-back -----------------------------------------------------------------------------------------------------------------
+  /**
+   * People forget to hand back, so Muster does it when the local work is finished. Finished means one of these signals, none of them a keyword guess:
+   *  - the PR was opened (its link is in the agent's final message) or the branch was pushed from the worktree (the remote-tracking ref is HEAD);
+   *  - the agent ended its final message with the structured `muster-handback` block (`{"done":true}`), as the briefing asks it to when the work is done
+   *    and the tests pass. That covers "done" or "ship it" said in the local chat: the agent reads it and writes the block.
+   * Never while tests are failing, and never without a test run: those post a progress note and the task stays checked out.
+   */
+  private async afterTurn(taskId: string, chatId: string, receipt: TurnReceipt): Promise<void> {
+    const lease = this.d.store.lease(taskId);
+    if (!lease || lease.state !== 'checked_out' || lease.runOnServer || !lease.worktree || !lease.branch) return;
+    const text = [...(await this.d.chats.transcript(chatId).catch(() => []))].reverse().find(t => t.trim()) ?? '';
+    const signal = await this.finishedSignal(lease, text);
+    if (!signal) return;
+    const receipts = this.d.store.receipts(taskId), latest = [...receipts].reverse().find(r => r.testSummary);
+    const note = async (key: string, body: string) => { if (this.d.store.enqueue({ taskId, orgId: lease.orgId, type: 'comment', key, kind: 'note', body, at: iso(this.d.now()) })) this.scheduleFlush(taskId); };
+    if (latest?.testSummary && latest.testSummary.failed > 0) { await note(`blocked:tests:${latest.testSummary.passed}-${latest.testSummary.failed}`, `**Not handing back yet.** The work looks finished (${signal.label}) but ${latest.testSummary.failed} ${latest.testSummary.failed === 1 ? 'test is' : 'tests are'} failing (${latest.testSummary.passed} passed). It stays checked out on ${lease.device}.`); return; }
+    if (!receipts.some(r => r.tests > 0)) { await note('blocked:no-tests', `**Not handing back yet.** The work looks finished (${signal.label}) but no tests have run. It stays checked out on ${lease.device}; run the tests and it will go back for review.`); return; }
+    const recipient = await this.recipientFor(lease).catch(() => null);
+    if (!recipient) { await note('blocked:no-recipient', `**Not handing back yet.** The work looks finished (${signal.label}) but there is no reviewer or originator to give it to. Hand it back from the task when you choose who.`); return; }
+    if (this.d.store.autoMode(this.d.serverLabel(), lease.orgId, lease.projectId) === 'ask') { this.d.notify?.({ type: 'handBackReady', taskId, key: lease.key, to: recipient.name, recipient: { kind: recipient.kind, id: recipient.id }, reason: signal.label }); return; }
+    const done = await this.handBack({ taskId, reviewer: { kind: recipient.kind, id: recipient.id }, ...(signal.prUrl ? { prUrl: signal.prUrl } : {}), ...(signal.summary ? { summary: signal.summary } : {}), push: !signal.pushed && !signal.prUrl });
+    void done;
+    this.d.notify?.({ type: 'handedBack', taskId, key: lease.key, to: recipient.name, undoUntil: iso(this.d.now() + UNDO_MS) });
+  }
+  private async finishedSignal(lease: CheckoutLease, finalText: string): Promise<{ label: string; prUrl?: string; pushed?: boolean; summary?: string } | null> {
+    const block = /```muster-handback[^\n]*\n([\s\S]*?)```/.exec(finalText);
+    let done: { summary?: string } | null = null;
+    if (block) { try { const j = JSON.parse(block[1]!) as { done?: unknown; summary?: unknown }; if (j.done === true) done = { summary: typeof j.summary === 'string' ? j.summary.slice(0, 2000) : undefined }; } catch { /* a malformed block is not a signal */ } }
+    const pr = /https:\/\/[\w.-]+\/[\w.-]+\/[\w.-]+\/pull\/\d+/.exec(finalText)?.[0];
+    const pushed = lease.worktree && lease.branch ? await this.d.git.pushedHead(lease.worktree, lease.branch).catch(() => false) : false;
+    if (pr) return { label: 'the pull request is open', prUrl: pr, pushed, ...(done?.summary ? { summary: done.summary } : {}) };
+    if (pushed) return { label: 'the branch is pushed', pushed: true, ...(done?.summary ? { summary: done.summary } : {}) };
+    return done ? { label: 'the agent says it is done', ...(done.summary ? { summary: done.summary } : {}) } : null;
+  }
+  /** Who a finished task goes to: the task's own review and approval policy first, then whoever opened it, then a QA agent. */
+  private async recipientFor(lease: CheckoutLease): Promise<{ kind: 'agent' | 'user'; id: string; name: string } | null> {
+    const { part, task, me } = await this.locate(lease.taskId, { cacheOnly: true });
+    const copy = this.d.store.orgCopy(lease.taskId);
+    const stage = copy?.policy.find(st => st.type === 'review' && st.participants.length) ?? copy?.policy.find(st => st.participants.length);
+    const named = stage?.participants.find(p => p.id !== me.id) ?? stage?.participants[0];
+    if (named) return { kind: named.kind, id: named.id, name: named.name };
+    if (task.createdByAgentId) { const a = part.agents.find(x => x.id === task.createdByAgentId && x.status !== 'terminated'); if (a) return { kind: 'agent', id: a.id, name: a.name }; }
+    if (task.createdByUserId && task.createdByUserId !== me.id) return { kind: 'user', id: task.createdByUserId, name: part.people?.find(p => p.id === task.createdByUserId)?.name ?? 'the originator' };
+    const qa = part.agents.find(a => a.status !== 'terminated' && /qa|quality|review|test/i.test(`${a.role} ${a.title ?? ''} ${a.name}`));
+    return qa ? { kind: 'agent', id: qa.id, name: qa.name } : null;
+  }
+  /** A quiet session gets one short "paused" note per quiet stretch; unfinished work is never handed back because of silence. */
+  async checkIdle(): Promise<number> {
+    let posted = 0;
+    for (const lease of this.d.store.openLeases()) {
+      if (lease.offline === 'manual') continue;
+      const idleMs = this.d.store.idleMinutes() * 60_000, last = Date.parse(lease.lastActivityAt), noted = lease.pausedNoteAt ? Date.parse(lease.pausedNoteAt) : 0;
+      if (!(this.d.now() - last >= idleMs) || noted > last) continue;
+      const at = iso(this.d.now()), mins = Math.round((this.d.now() - last) / 60_000);
+      this.d.store.enqueue({ taskId: lease.taskId, orgId: lease.orgId, type: 'comment', key: `paused:${lease.lastActivityAt}`, kind: 'note', body: `**Paused.** No activity for ${mins} minutes. It is still checked out on ${lease.device}; nothing was handed back.`, at });
+      this.d.store.putLease(transition(lease, { type: 'paused', at })); posted++;
+      this.scheduleFlush(lease.taskId);
+    }
+    return posted;
+  }
+  /** Takes a hand-back back (for about two minutes, while nobody has acted on it): the task returns to the person, In progress, with a short comment. */
+  async undoHandBack(ref: string): Promise<LeaseView> {
+    const lease = this.d.store.leases().filter(l => l.taskId === ref || l.key === ref).sort((a, b) => b.since.localeCompare(a.since))[0];
+    if (!lease || lease.state !== 'handed_back' || !lease.endedAt) throw new LeaseError('There is no hand-back to undo.', 'none');
+    if (this.d.now() - Date.parse(lease.endedAt) > UNDO_MS) throw new Error('This hand-back can no longer be undone: more than two minutes have passed.');
+    const me = (await this.d.reader.me()) ?? this.d.reader.remembered();
+    if (!me) throw new Error('Muster Server did not say who you are. Sign in again in Settings › Integrations.');
+    // Only while the task is still where hand-back left it: if the reviewer has already acted, it is theirs now. (A fresh read; unreachable means the queue decides.)
+    const fresh = await (async () => { const company = (await this.d.reader.orgs()).find(c => c.id === lease.orgId); return company ? (await this.d.reader.part(company, true)).tasks.find(t => t.id === lease.taskId) : undefined; })().catch(() => undefined);
+    if (fresh && !this.d.store.pending(lease.taskId).length && fresh.status !== 'in_review') throw new Error('The reviewer has already acted on this task, so it cannot be taken back.');
+    const at = iso(this.d.now()), key = `undo:${at}`;
+    this.d.store.enqueue({ taskId: lease.taskId, orgId: lease.orgId, type: 'comment', key, kind: 'checkout', at, body: `Hand-back undone · working locally on ${lease.device} · via Muster\n\n${markerFor('checkout', { device: lease.device, 'device-id': lease.deviceId, by: me.name ?? me.id, at })}` });
+    this.enqueuePatch(lease.taskId, lease.orgId, key, { status: 'in_progress', assigneeUserId: me.id, assigneeAgentId: null }, at);
+    this.d.store.putLease(transition(lease, { type: 'reopen', at }));
+    await this.flush(lease.taskId);
+    this.d.emit(lease.taskId);
+    return this.view(this.d.store.lease(lease.taskId)!);
+  }
+  autoMode(ref: { taskId?: string; orgId?: string; projectId?: string }): AutoMode {
+    const lease = ref.taskId ? this.d.store.leases().find(l => l.taskId === ref.taskId || l.key === ref.taskId) : undefined;
+    return this.d.store.autoMode(this.d.serverLabel(), lease?.orgId ?? ref.orgId ?? '', lease ? lease.projectId : ref.projectId ?? null);
+  }
+  setAutoMode(ref: { taskId?: string; orgId?: string; projectId?: string }, mode: AutoMode): AutoMode {
+    const lease = ref.taskId ? this.d.store.leases().find(l => l.taskId === ref.taskId || l.key === ref.taskId) : undefined;
+    this.d.store.setAutoMode(this.d.serverLabel(), lease?.orgId ?? ref.orgId ?? '', lease ? lease.projectId : ref.projectId ?? null, mode);
+    this.d.emit(lease?.taskId ?? null);
+    return mode;
+  }
 
   // --- hand back ----------------------------------------------------------------------------------------------------------------------------
   async handBackPreview(ref: string): Promise<HandBackPreview> {

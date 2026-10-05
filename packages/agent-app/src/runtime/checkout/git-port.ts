@@ -12,12 +12,21 @@ export interface GitPort {
   /** Files and lines changed in a worktree against a base commit (tracked changes plus new files). */
   stat(path: string, base: string): Promise<WorkStat>;
   push(path: string, branch: string): Promise<{ pushed: boolean; message: string }>;
+  /** The branch has been pushed from this worktree and the remote copy is the current HEAD (the remote-tracking ref says so; no network). */
+  pushedHead(path: string, branch: string): Promise<boolean>;
 }
 const git = (cwd: string, args: string[], timeout = 60_000): Promise<string> => new Promise((resolve, reject) => {
   execFile('git', args, { cwd, timeout, maxBuffer: 16 * 1024 * 1024, env: { ...process.env, GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'never' } }, (error, stdout, stderr) => error ? reject(new Error((stderr || error.message).trim())) : resolve(stdout));
 });
 
 export const realGit: GitPort = {
+  async pushedHead(path, branch) {
+    try {
+      const head = (await git(path, ['rev-parse', 'HEAD'])).trim();
+      for (const remote of (await git(path, ['remote'])).split('\n').filter(Boolean)) { const ref = await git(path, ['rev-parse', '--verify', '--quiet', `refs/remotes/${remote}/${branch}`]).catch(() => ''); if (ref.trim() === head) return true; }
+    } catch { /* no remote */ }
+    return false;
+  },
   async isRepo(path) { return git(path, ['rev-parse', '--is-inside-work-tree']).then(out => out.trim() === 'true', () => false); },
   async defaultBranch(path, preferred) {
     const exists = (name: string) => git(path, ['show-ref', '--verify', '--quiet', `refs/heads/${name}`]).then(() => true, () => false);

@@ -52,7 +52,7 @@ export function mapIssue(i: Json, agents: ReadonlyMap<string, WorkspaceAgent>, l
     projectId: str(i.projectId), parentId: str(i.parentId), goalId: str(i.goalId),
     assigneeId: assigneeId ?? (str(i.assigneeUserId) ? `user:${i.assigneeUserId}` : null),
     assigneeLabel: assigneeId ? agents.get(assigneeId)?.name ?? 'Agent' : str(i.assigneeUserId) ? (me && i.assigneeUserId !== me ? people?.get(String(i.assigneeUserId)) ?? 'A teammate' : 'You') : null,
-    assigneeUserId: str(i.assigneeUserId), responsibleUserId: str(i.responsibleUserId), createdByUserId: str(i.createdByUserId),
+    assigneeUserId: str(i.assigneeUserId), responsibleUserId: str(i.responsibleUserId), createdByUserId: str(i.createdByUserId), createdByAgentId: creator,
     createdAt: iso(i.createdAt), updatedAt: iso(i.lastActivityAt, iso(i.updatedAt)), startedAt: str(i.startedAt), completedAt: str(i.completedAt) ?? str(i.cancelledAt),
     live: Boolean(i.activeRun) || liveTaskIds.has(id),
     blockedByIds: blockerIds(i),

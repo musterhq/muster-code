@@ -76,6 +76,8 @@ export type NoticeKind = 'success' | 'error' | 'info';
 export interface NoticeAction { label: string; run: () => unknown }
 /** Errors stay until dismissed; identical ones coalesce into one row with a count. */
 export interface Notice {
+  /** How long an action stays offered (an automatic hand-back's Undo lasts about two minutes). */
+  lifetimeMs?: number;
   id: number;
   message: string;
   kind: NoticeKind;
@@ -276,7 +278,8 @@ const MAX_NOTICES = 4;
 const noticeTimers = new Map<number, ReturnType<typeof setTimeout>>();
 let noticesHeld = false;
 /** Success confirms briefly (longer when it offers Undo); errors persist until dismissed. */
-export function noticeLifetime(notice: Pick<Notice, 'kind' | 'action'>): number | null {
+export function noticeLifetime(notice: Pick<Notice, 'kind' | 'action'> & { lifetimeMs?: number }): number | null {
+  if (notice.lifetimeMs && notice.kind !== 'error') return notice.lifetimeMs;
   return notice.kind === 'error' ? null : notice.kind === 'success' && !notice.action ? 4000 : 6000;
 }
 function scheduleNotice(notice: Notice): void {
@@ -292,7 +295,7 @@ export function runtimeNoticeKind(message: string): NoticeKind {
   return /\b(could not|couldn't|cannot|can't|failed|failure|unavailable|not available|stopped|error|denied)\b/i.test(message) ? 'error' : 'info';
 }
 
-export function pushNotice(message: string, options: {kind?: NoticeKind; action?: NoticeAction} = {}): number {
+export function pushNotice(message: string, options: {kind?: NoticeKind; action?: NoticeAction; lifetimeMs?: number} = {}): number {
   const kind = options.kind ?? 'info';
   // An Undo reverts one specific change, so two of them never merge into a row that could revert only the last.
   const same = options.action?.label === 'Undo' ? undefined : state.notices.find(n => n.message === message && n.kind === kind && n.action?.label === options.action?.label);
@@ -302,7 +305,7 @@ export function pushNotice(message: string, options: {kind?: NoticeKind; action?
     scheduleNotice(next);
     return same.id;
   }
-  const notice: Notice = {id: ++noticeSeq, message, kind, count: 1, ...(options.action ? {action: options.action} : {})};
+  const notice: Notice = {id: ++noticeSeq, message, kind, count: 1, ...(options.action ? {action: options.action} : {}), ...(options.lifetimeMs ? {lifetimeMs: options.lifetimeMs} : {})};
   let notices = [...state.notices, notice];
   while (notices.length > MAX_NOTICES) {
     // Drop the oldest transient row first; persistent errors leave only when errors alone overflow.

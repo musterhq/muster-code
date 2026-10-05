@@ -75,11 +75,11 @@ export function deriveLease(task: { assigneeUserId: string | null }, comments: r
 
 export class LeaseError extends Error { constructor(message: string, readonly code: 'conflict' | 'none' | 'ended') { super(message); this.name = 'LeaseError'; } }
 
-export interface LeaseEvent { type: 'checkout' | 'activity' | 'remind' | 'handback' | 'release' | 'run-on-server' | 'offline' | 'online' | 'conflict' | 'resolve'; at: string; mode?: 'manual' | 'auto'; conflict?: CheckoutLease['conflict']; deviceId?: string; device?: string; on?: boolean; prUrl?: string | null }
+export interface LeaseEvent { type: 'checkout' | 'activity' | 'remind' | 'handback' | 'release' | 'run-on-server' | 'offline' | 'online' | 'conflict' | 'resolve' | 'reopen' | 'paused'; at: string; mode?: 'manual' | 'auto'; conflict?: CheckoutLease['conflict']; deviceId?: string; device?: string; on?: boolean; prUrl?: string | null }
 export interface NewLease { taskId: string; orgId: string; key: string; title: string; projectId: string | null; deviceId: string; device: string; model: ModelChoice; modelLabel: string; at: string; previous: CheckoutLease['previous'] }
 export const newLease = (n: NewLease): CheckoutLease => ({
   taskId: n.taskId, orgId: n.orgId, key: n.key, title: n.title, projectId: n.projectId, state: 'checked_out', deviceId: n.deviceId, device: n.device, since: n.at, lastActivityAt: n.at, endedAt: null,
-  worktree: null, branch: null, chatId: null, folderId: null, baseSha: null, model: n.model, modelLabel: n.modelLabel, runOnServer: false, prUrl: null, previous: n.previous, remindedAt: null, reviewLocally: false, reviewChats: [], pending: 0, offline: null, recheck: false, conflict: null,
+  worktree: null, branch: null, chatId: null, folderId: null, baseSha: null, model: n.model, modelLabel: n.modelLabel, runOnServer: false, prUrl: null, previous: n.previous, remindedAt: null, reviewLocally: false, reviewChats: [], pausedNoteAt: null, pending: 0, offline: null, recheck: false, conflict: null,
 });
 
 /** The transition function. It never mutates; invalid moves throw a LeaseError the screens turn into a sentence. */
@@ -99,6 +99,12 @@ export function transition(lease: CheckoutLease | null, event: LeaseEvent): Chec
     case 'resolve':
       if (!lease) throw new LeaseError('This task is not checked out.', 'none');
       return { ...lease, conflict: null, recheck: false };
+    case 'reopen':
+      if (!lease || lease.state !== 'handed_back') throw new LeaseError('Only a hand-back can be undone.', 'ended');
+      return { ...lease, state: 'checked_out', endedAt: null, lastActivityAt: event.at };
+    case 'paused':
+      if (!lease || lease.state !== 'checked_out') throw new LeaseError('This task is not checked out.', 'none');
+      return { ...lease, pausedNoteAt: event.at };
     case 'remind':
       if (!lease || lease.state !== 'checked_out') throw new LeaseError('This task is not checked out.', 'none');
       return { ...lease, remindedAt: event.at };

@@ -56,6 +56,7 @@ export function createCheckoutDomain(ctx: DomainContext): DomainModule {
       }
       return null;
     },
+    notify: event => ctx.emit(event),
     emit: taskId => { ctx.emit({ type: 'checkoutChanged', taskId }); ctx.emit({ type: 'projectsWorkspaceChanged', scopes: ['tasks'], taskIds: taskId ? [taskId] : [] }); schedule(); },
   });
   /** Posts that could not go (offline) are tried again every half minute, only while some are waiting. */
@@ -64,6 +65,9 @@ export function createCheckoutDomain(ctx: DomainContext): DomainModule {
     retry = setTimeout(() => { retry = null; void svc().flush().finally(schedule); }, 30_000);
     retry.unref?.();
   };
+  /** A quiet session gets a "paused" note. One timer, only while a task is checked out here. */
+  const idle = setInterval(() => { if (store.openLeases().length) void svc().checkIdle().catch(() => undefined); }, 5 * 60_000);
+  idle.unref?.();
   hub.badge = taskId => { const l = store.openLeases().find(x => x.taskId === taskId); return l ? badgeOf(l, store.deviceId(), Date.now(), store.staleHours()) : null; };
   hub.onOnline = () => { if (store.pendingCount()) void svc().flush(); };
   const offPrompt = ctx.hooks.addPromptContributor(async ({ chat }) => {
@@ -133,9 +137,14 @@ export function createCheckoutDomain(ctx: DomainContext): DomainModule {
       'checkout.pending': input => svc().pending(id(input.taskId)),
       'checkout.pending.edit': input => { svc().editPending(Number(input.id), text(input.body, 8000)); return { ok: true }; },
       'checkout.resolve': input => svc().resolve(id(input.taskId), input.choice === 'discard' ? 'discard' : 'send'),
+      'checkout.auto': input => {
+        const ref = { ...(typeof input.taskId === 'string' ? { taskId: id(input.taskId) } : {}), ...(typeof input.orgId === 'string' ? { orgId: id(input.orgId) } : {}), ...(typeof input.projectId === 'string' ? { projectId: id(input.projectId) } : {}) };
+        return { mode: input.mode === 'auto' || input.mode === 'ask' ? svc().setAutoMode(ref, input.mode) : svc().autoMode(ref) };
+      },
+      'checkout.undo': input => svc().undoHandBack(id(input.taskId)),
       'checkout.remind': input => { svc().remind(id(input.taskId)); return { ok: true }; },
     },
     power(event) { if (event.state === 'resume' && store.pendingCount()) void svc().flush(); },
-    dispose() { offPrompt(); offSettled(); if (retry) clearTimeout(retry); hub.badge = undefined; hub.onOnline = undefined; },
+    dispose() { offPrompt(); offSettled(); clearInterval(idle); if (retry) clearTimeout(retry); hub.badge = undefined; hub.onOnline = undefined; },
   };
 }

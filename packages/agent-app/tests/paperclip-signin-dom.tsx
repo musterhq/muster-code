@@ -34,6 +34,9 @@ let listener:((e:any)=>void)|null=null;
 let startError='';
 const HOSTED={ok:false,stage:'auth',backend:'paperclip',compatibility:'Paperclip-compatible',signIn:['browser'],message:'needs sign-in',baseUrl:'https://team.example.test'};
 (window as any).muster={subscribe(l:any){listener=l;return()=>{listener=null;};},async invoke(command:string,input:any){calls.push({command,input});
+  if(command==='orgs.list')return {connected:true,server:'team.example.test',me:{id:'u',name:'Founder'},orgs:[{id:'c1',name:'MockCo',prefix:'MCK',server:'team.example.test',projects:2,agents:3,enabled:true,sidebar:'mine',active:true},{id:'c2',name:'OtherCo',prefix:'OTH',server:'team.example.test',projects:1,agents:0,enabled:true,sidebar:'mine',active:false}]};
+  if(command==='checkout.bindings')return {bindings:[],orgs:[]};
+  if(command==='checkout.settings')return {staleHours:8,deviceName:'Mac'};
   if(command==='paperclip.config.get')return config;
   if(command==='paperclip.signin.status')return signin;
   if(command==='paperclip.signin.start'){if(startError)throw new Error(startError);signin={phase:'waiting',baseUrl:input.baseUrl,approvalUrl:input.baseUrl+'/cli-auth/abc?token=secret',expiresAt:new Date(Date.now()+300000).toISOString()};return signin;}
@@ -111,7 +114,7 @@ const details=document.querySelector('details.ws-connection-more') as any;
 assert.equal(text('summary',details)[0],'Details');assert.ok(!details.hasAttribute('open'));
 assert.match(details.textContent,/Server version2026\.1001\.0/);assert.match(details.textContent,/CompatibilityPaperclip-compatible/,'the one place the word appears');
 assert.equal(text('.ws-connection-detect')[0].includes('Paperclip'),false);
-assert.ok(document.querySelector('.ws-select'),'two orgs: an Org picker');
+assert.deepEqual(text('.ws-orgs-name > span:last-child').map((t:string)=>t.replace(/\s+/g,' ')),['MockCo · 2 projects · 3 agents','OtherCo · 1 project · 0 agents'],'every org on the server is listed, each with its own checkbox and sidebar choice (the app no longer silently picks one)');
 // 5. The fallback: updates every few seconds, with a quiet Reconnect.
 config={...config,live:'poll',reconnect:true,session:'expired'};await configChanged();
 assert.match(text('.ws-connection-detect')[0],/Updates every few seconds\./);

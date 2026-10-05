@@ -96,7 +96,7 @@ export interface WorkspaceTask {
   removedInPaperclip?: boolean;
   /** The server's own people fields (ids, never names): who the task is assigned to, who is accountable for it, who opened it. The sidebar,
    *  My work and the Inbox compare these with the signed-in person's id; they never guess from a label. */
-  assigneeUserId?: string | null; responsibleUserId?: string | null; createdByUserId?: string | null;
+  assigneeUserId?: string | null; responsibleUserId?: string | null; createdByUserId?: string | null; createdByAgentId?: string | null;
 }
 export type AgentState = 'active' | 'idle' | 'running' | 'paused' | 'error' | 'pending' | 'terminated';
 export interface WorkspaceAgent {

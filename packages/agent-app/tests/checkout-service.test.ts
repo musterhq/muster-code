@@ -68,20 +68,22 @@ function setup(opts: { tests?: number } = {}) {
   const server = new FakeServer(), db = new DatabaseSync(':memory:'), store = new CheckoutStore(() => db);
   let clock = Date.parse('2026-10-05T10:00:00.000Z');
   const worktrees: string[] = [], pushed: string[] = [], emitted: (string | null)[] = [];
-  let pushOk = true, chatSeq = 0;
+  let pushOk = true, chatSeq = 0, pushedHead = false;
+  let finalText = 'Worked on it.\nℹ pass 12\nℹ fail 1';
+  const events: unknown[] = [];
   const settings: Record<string, never> = {};
   const reader = new OrgReader({ backend: () => server.backend(), settings: () => settings, activeId: () => CO.id, serverLabel: () => 'aiteam', remembered: () => ({ id: ME, name: 'Dhairya' }), remember() {} });
   const deps: CheckoutDeps = {
     store, backend: () => server.backend(), reader,
-    git: { isRepo: async () => true, defaultBranch: async (_p, preferred) => preferred ?? 'dev', headSha: async () => 'abc123', stat: async () => ({ count: 2, added: 20, removed: 3 }), push: async (_p, b) => { if (pushOk) pushed.push(b); return { pushed: pushOk, message: pushOk ? `Pushed ${b}.` : 'Could not push: no network' }; } },
+    git: { isRepo: async () => true, defaultBranch: async (_p, preferred) => preferred ?? 'dev', headSha: async () => 'abc123', stat: async () => ({ count: 2, added: 20, removed: 3 }), push: async (_p, b) => { if (pushOk) pushed.push(b); return { pushed: pushOk, message: pushOk ? `Pushed ${b}.` : 'Could not push: no network' }; }, pushedHead: async () => pushedHead },
     worktrees: { create: async (_root, branch) => { worktrees.push(branch); return { path: `/wt/${branch.replace('/', '-')}`, branch }; } },
-    chats: { addFolder: async p => ({ id: `f:${p}` }), create: async f => ({ id: `chat:${f}:${++chatSeq}` }), select: async () => {}, rename: async () => {}, transcript: async () => ['ℹ pass 12\nℹ fail 1'] },
+    chats: { addFolder: async p => ({ id: `f:${p}` }), create: async f => ({ id: `chat:${f}:${++chatSeq}` }), select: async () => {}, rename: async () => {}, transcript: async () => [finalText] },
     providers: () => providers,
     turnFacts: async () => ({ tokens: { input: 1000, cached: 100, output: 200 }, tests: opts.tests ?? 1, model: 'claude-opus-4', provider: 'claude-code', costUsd: 0.5, durationMs: 4000, outcome: 'completed' }),
-    serverLabel: () => 'aiteam', deviceNameDefault: () => 'Dhairya’s MacBook', now: () => clock, emit: id => emitted.push(id), later: fn => { fn(); },
+    serverLabel: () => 'aiteam', deviceNameDefault: () => 'Dhairya’s MacBook', now: () => clock, emit: id => emitted.push(id), notify: e => events.push(e), later: fn => { fn(); },
   };
   const svc = new CheckoutService(deps);
-  return { server, db, store, svc, reader, advance: (ms: number) => { clock += ms; }, worktrees, pushed, emitted, setPush: (v: boolean) => { pushOk = v; }, now: () => clock };
+  return { events, setFinal: (t: string) => { finalText = t; }, setPushedHead: (v: boolean) => { pushedHead = v; }, server, db, store, svc, reader, advance: (ms: number) => { clock += ms; }, worktrees, pushed, emitted, setPush: (v: boolean) => { pushOk = v; }, now: () => clock };
 }
 const OWN = { kind: 'own' as const, providerId: 'omniroute', model: 'gpt-x' };
 async function bound(h: ReturnType<typeof setup>) { await h.reader.part(CO); await h.svc.bind(CO.id, 'p-redis', '/repo/redis', 'dev'); }
@@ -419,7 +421,7 @@ test('bindings are per org project and remembered; a folder that is not a reposi
 
 test('no personal access on this server: check out says so instead of failing in the middle', async () => {
   const h = setup(); const svc = new CheckoutService({ ...(h.svc as unknown as { d: CheckoutDeps }).d, backend: () => ({ ...h.server.backend(), patchTask: undefined } as never) });
-  await assert.rejects(() => svc.plan('t1'), /Paperclip-compatible servers/);
+  await assert.rejects(() => svc.plan('t1'), /assign tasks to people/);
 });
 
 // --- the local copy of the org, the two engines, the workflow ------------------------------------------------------------------------------------
@@ -481,4 +483,116 @@ test('the reviewer step stays on this Mac when chosen: a local review chat with 
   await h.svc.handBack({ taskId: 't1', reviewer: { kind: 'agent', id: 'a-qa' }, prUrl: 'https://pr/2' });
   assert.match(h.server.comments.get('t1')!.find(c => /Handed back/.test(c.body))!.body, /Reviewed locally by QA Lead\./);
   assert.equal(h.server.calls.filter(c => c.startsWith('patch')).length, 2, 'no server run or reassignment happened before hand-back');
+});
+
+// --- automatic hand-back ---------------------------------------------------------------------------------------------------------------------
+const GREEN = 'Added Sentinel seeds.\nℹ tests 13\nℹ pass 13\nℹ fail 0\n';
+const DONE = '```muster-handback\n{"done":true,"summary":"Seed discovery now reads the Sentinel list."}\n```';
+
+test('auto hand-back: a finished agent (the structured block), with tests green, goes back for review by itself, to the policy’s reviewer, with a toast and Undo', async () => {
+  const h = setup(); await bound(h);
+  h.server.policy = [{ type: 'review', participants: [{ kind: 'agent', id: 'a-qa' }] }];
+  const l = await h.svc.start({ taskId: 't1', model: OWN, confirm: true });
+  h.setFinal(`${GREEN}\nWorking on it, not done yet.`); await h.svc.onTurn(l.chatId!, 'r1', 'completed');
+  assert.equal(h.svc.get('t1')!.state, 'checked_out', 'a normal turn is not a hand-back');
+  h.setFinal(`${GREEN}\n${DONE}`); await h.svc.onTurn(l.chatId!, 'r2', 'completed'); await h.svc.sync();
+  assert.equal(h.svc.get('t1')!.state, 'handed_back');
+  const t1 = h.server.tasks[0]!; assert.deepEqual([t1.status, t1.assigneeId], ['in_review', 'a-qa'], 'In review, given to the policy’s reviewer');
+  const summary = h.server.comments.get('t1')!.find(c => /Handed back for review/.test(c.body))!;
+  assert.match(summary.body, /<!-- muster:handback at="/); assert.match(summary.body, /Seed discovery now reads the Sentinel list\./); assert.match(summary.body, /\[@QA Lead\]\(agent:\/\/a-qa\)/);
+  assert.deepEqual((h.events as { type: string; to: string }[]).map(e => [e.type, e.to]), [['handedBack', 'QA Lead']], 'one toast: Handed back to QA Lead · Undo');
+  assert.deepEqual(h.pushed, ['muster/RAG-1'], 'the branch was pushed');
+});
+
+test('auto hand-back: a pushed branch or an opened pull request counts as finished, with no block needed', async () => {
+  const pr = setup(); await bound(pr);
+  const l = await pr.svc.start({ taskId: 't1', model: OWN, confirm: true });
+  pr.setFinal(`${GREEN}\nOpened https://github.com/musterhq/redis-valkey/pull/42 for review.`); await pr.svc.onTurn(l.chatId!, 'r1', 'completed'); await pr.svc.sync();
+  assert.equal(pr.svc.get('t1')!.state, 'handed_back'); assert.equal(pr.svc.get('t1')!.prUrl, 'https://github.com/musterhq/redis-valkey/pull/42');
+  assert.deepEqual(pr.pushed, [], 'the agent already pushed; Muster does not push again');
+  const push = setup(); await bound(push);
+  const l2 = await push.svc.start({ taskId: 't1', model: OWN, confirm: true });
+  push.setPushedHead(true); push.setFinal(GREEN); await push.svc.onTurn(l2.chatId!, 'r1', 'completed'); await push.svc.sync();
+  assert.equal(push.svc.get('t1')!.state, 'handed_back');
+});
+
+test('auto hand-back never hands back failing or untested work: it posts a progress note and stays checked out', async () => {
+  const failing = setup(); await bound(failing);
+  const l = await failing.svc.start({ taskId: 't1', model: OWN, confirm: true });
+  failing.setFinal(`Tests:\nℹ pass 12\nℹ fail 2\n${DONE}`); await failing.svc.onTurn(l.chatId!, 'r1', 'completed'); await failing.svc.sync();
+  assert.equal(failing.svc.get('t1')!.state, 'checked_out');
+  assert.match(failing.server.comments.get('t1')!.at(-1)!.body, /Not handing back yet\.\*\* .* 2 tests are failing \(12 passed\)\. It stays checked out/);
+  const untested = setup({ tests: 0 }); await bound(untested);
+  const l2 = await untested.svc.start({ taskId: 't1', model: OWN, confirm: true });
+  untested.setFinal(DONE); await untested.svc.onTurn(l2.chatId!, 'r1', 'completed'); await untested.svc.sync();
+  assert.equal(untested.svc.get('t1')!.state, 'checked_out');
+  assert.match(untested.server.comments.get('t1')!.at(-1)!.body, /no tests have run/);
+  // the same note is not posted twice
+  untested.setFinal(DONE); await untested.svc.onTurn(l2.chatId!, 'r2', 'completed'); await untested.svc.sync();
+  assert.equal(untested.server.comments.get('t1')!.filter(c => /no tests have run/.test(c.body)).length, 1);
+  // a malformed block and a failed run are not signals
+  const odd = setup(); await bound(odd);
+  const l3 = await odd.svc.start({ taskId: 't1', model: OWN, confirm: true });
+  odd.setFinal(`${GREEN}\n\`\`\`muster-handback\n{not json}\n\`\`\``); await odd.svc.onTurn(l3.chatId!, 'r1', 'completed');
+  odd.setFinal(`${GREEN}\n${DONE}`); await odd.svc.onTurn(l3.chatId!, 'r2', 'failed');
+  assert.equal(odd.svc.get('t1')!.state, 'checked_out');
+});
+
+test('auto hand-back is per project: "Ask me" offers it in a toast instead; a review session never counts', async () => {
+  const h = setup(); await bound(h);
+  const l = await h.svc.start({ taskId: 't1', model: OWN, confirm: true });
+  assert.equal(h.svc.autoMode({ taskId: 't1' }), 'auto', 'Auto is the default');
+  assert.equal(h.svc.setAutoMode({ taskId: 't1' }, 'ask'), 'ask'); assert.equal(h.svc.autoMode({ orgId: CO.id, projectId: 'p-redis' }), 'ask'); assert.equal(h.svc.autoMode({ orgId: CO.id, projectId: 'other' }), 'auto');
+  h.setFinal(`${GREEN}\n${DONE}`); await h.svc.onTurn(l.chatId!, 'r1', 'completed');
+  assert.equal(h.svc.get('t1')!.state, 'checked_out'); assert.deepEqual((h.events as { type: string }[]).map(e => e.type), ['handBackReady']);
+  h.svc.setAutoMode({ taskId: 't1' }, 'auto');
+  const review = await h.svc.startReview('t1'); await h.svc.onTurn(review.chatId, 'rv', 'completed');
+  assert.equal(h.svc.get('t1')!.state, 'checked_out', 'a local review is feedback, not completion');
+});
+
+test('auto hand-back goes to the originator when the policy names no one, and queues offline for sending on reconnect', async () => {
+  const h = setup(); await bound(h);
+  const l = await h.svc.start({ taskId: 't1', model: OWN, confirm: true });
+  await h.svc.setOffline('t1', true);
+  h.setFinal(`${GREEN}\n${DONE}`); await h.svc.onTurn(l.chatId!, 'r1', 'completed');
+  assert.equal(h.svc.get('t1')!.state, 'handed_back'); assert.equal(h.server.tasks[0]!.status, 'in_progress', 'nothing sent while offline');
+  assert.ok(h.svc.pending('t1').rows.some(r => r.kind === 'handback'));
+  await h.svc.setOffline('t1', false);
+  const t1 = h.server.tasks[0]!; assert.deepEqual([t1.status, t1.assigneeUserId], ['in_review', BOB], 'no policy: the originator (Bob opened it)');
+  assert.match(h.server.comments.get('t1')!.find(c => /Handed back/.test(c.body))!.body, /\[@Bob Rivera\]\(user:\/\/u-bob\)/);
+});
+
+test('undo: within two minutes the task comes back to the person, In progress, with a short comment; later, or after the reviewer acted, it does not', async () => {
+  const h = setup(); await bound(h);
+  const l = await h.svc.start({ taskId: 't1', model: OWN, confirm: true });
+  h.setFinal(`${GREEN}\n${DONE}`); await h.svc.onTurn(l.chatId!, 'r1', 'completed'); await h.svc.sync();
+  assert.equal(h.svc.get('t1')!.state, 'handed_back');
+  h.advance(90_000);
+  const back = await h.svc.undoHandBack('t1');
+  assert.equal(back.state, 'checked_out'); const t1 = h.server.tasks[0]!; assert.deepEqual([t1.status, t1.assigneeUserId, t1.assigneeId], ['in_progress', ME, `user:${ME}`]);
+  assert.match(h.server.comments.get('t1')!.at(-1)!.body, /Hand-back undone · working locally on .* · via Muster\n\n<!-- muster:checkout /, 'the lease marker is restored');
+  await assert.rejects(() => h.svc.undoHandBack('t1'), /no hand-back to undo/);
+  // too late
+  h.setFinal(`${GREEN}\n${DONE}`); await h.svc.onTurn(l.chatId!, 'r2', 'completed'); await h.svc.sync();
+  h.advance(121_000);
+  await assert.rejects(() => h.svc.undoHandBack('t1'), /more than two minutes/);
+  // the reviewer already acted
+  const g = setup(); await bound(g);
+  const l2 = await g.svc.start({ taskId: 't1', model: OWN, confirm: true });
+  g.setFinal(`${GREEN}\n${DONE}`); await g.svc.onTurn(l2.chatId!, 'r1', 'completed'); await g.svc.sync();
+  g.server.tasks[0]!.status = 'done'; g.server.generation++; await g.reader.part(CO, true);
+  await assert.rejects(() => g.svc.undoHandBack('t1'), /already acted/);
+});
+
+test('a quiet session gets one short "paused" note per stretch, never a hand-back', async () => {
+  const h = setup(); await bound(h);
+  const l = await h.svc.start({ taskId: 't1', model: OWN, confirm: true });
+  assert.equal(await h.svc.checkIdle(), 0);
+  h.advance(46 * 60_000); assert.equal(await h.svc.checkIdle(), 1); await h.svc.sync();
+  assert.match(h.server.comments.get('t1')!.at(-1)!.body, /\*\*Paused\.\*\* No activity for 46 minutes\. It is still checked out/);
+  h.advance(30 * 60_000); assert.equal(await h.svc.checkIdle(), 0, 'one note per quiet stretch');
+  h.setFinal('Back at it.\nℹ pass 1\nℹ fail 0'); await h.svc.onTurn(l.chatId!, 'r1', 'completed');
+  h.advance(50 * 60_000); assert.equal(await h.svc.checkIdle(), 1, 'a new stretch after activity');
+  assert.equal(h.svc.get('t1')!.state, 'checked_out');
+  await h.svc.setOffline('t1', true); h.advance(5 * 3_600_000); assert.equal(await h.svc.checkIdle(), 0, 'offline by choice: nothing is posted');
 });

@@ -38,6 +38,11 @@ export class CheckoutStore {
   setDeviceName(name: string): void { this.setKv('deviceName', name.trim().slice(0, 80)); }
   staleHours(): number { const v = Number(this.kv('staleHours')); return Number.isFinite(v) && v >= 0 && this.kv('staleHours') !== null ? v : DEFAULT_STALE_HOURS; }
   setStaleHours(hours: number): void { this.setKv('staleHours', String(Math.max(0, Math.min(24 * 30, Math.round(hours))))); }
+  /** Auto hand-back is the default; a project can be set to "Ask me". Keyed by server, org and project. */
+  autoMode(server: string, orgId: string, projectId: string | null): 'auto' | 'ask' { return this.kv(`auto:${server}:${orgId}:${projectId ?? ''}`) === 'ask' ? 'ask' : 'auto'; }
+  setAutoMode(server: string, orgId: string, projectId: string | null, mode: 'auto' | 'ask'): void { this.setKv(`auto:${server}:${orgId}:${projectId ?? ''}`, mode); }
+  /** Minutes of silence before a checked-out session gets a short "paused" note (default 45). */
+  idleMinutes(): number { const v = Number(this.kv('idleMinutes')); return this.kv('idleMinutes') !== null && Number.isFinite(v) && v >= 1 ? v : 45; }
   syncState(): { lastSyncAt: string | null; lastError: string | null } { return { lastSyncAt: this.kv('lastSyncAt'), lastError: this.kv('lastSyncError') || null }; }
   setSyncState(at: string, error: string | null): void { this.setKv('lastSyncAt', at); this.setKv('lastSyncError', error ?? ''); }
 
