@@ -1,0 +1,5 @@
+This package is built against the Paperclip plugin SDK (@paperclipai/plugin-sdk,
+MIT, https://github.com/paperclipai/paperclip). The package layout, build
+presets (esbuild via @paperclipai/plugin-sdk/bundlers) and test harness usage
+follow the conventions of Paperclip's create-paperclip-plugin scaffold and its
+example plugins. No Paperclip source is vendored here.
