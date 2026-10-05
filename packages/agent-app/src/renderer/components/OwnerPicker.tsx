@@ -27,7 +27,10 @@ export function OwnerPicker({ options, value, label, disabled, bare, onChange }:
   useEffect(() => {
     if (!open) return;
     const away = (e: MouseEvent) => { const t = e.target as Node; if (!root.current?.contains(t) && !pop.current?.contains(t)) setOpen(false); };
-    document.addEventListener('mousedown', away); return () => document.removeEventListener('mousedown', away);
+    // Escape closes from anywhere (focus may have left the filter after a Tab, since the list is portalled) and hands focus back to the button.
+    const esc = (e: KeyboardEvent) => { if (e.key === 'Escape') { setOpen(false); root.current?.querySelector<HTMLElement>('.owner-trigger')?.focus(); } };
+    document.addEventListener('mousedown', away); document.addEventListener('keydown', esc);
+    return () => { document.removeEventListener('mousedown', away); document.removeEventListener('keydown', esc); };
   }, [open]);
   const choose = (o: OwnerOption | undefined) => { if (!o) return; setOpen(false); if (o.value !== value) onChange(o.value); };
   let lastGroup: OwnerGroup | null = null;

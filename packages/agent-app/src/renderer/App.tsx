@@ -142,7 +142,7 @@ export function App(): React.ReactElement {
         }}
       />}
       <main className="center" data-screen={state.screen}>
-        <div className="work-surface" hidden={state.screen!=='work'} inert={state.screen!=='work'} aria-hidden={state.screen!=='work'}>
+        <div className="work-surface" hidden={state.screen!=='work'} inert={state.screen!=='work'}>
           {state.boot.phase === 'loading' || state.boot.phase === 'idle' ? (
             <div className="center-loading" role="status">
               Loading workspace…
