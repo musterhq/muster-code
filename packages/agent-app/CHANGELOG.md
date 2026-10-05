@@ -3,7 +3,7 @@
 All notable changes to Muster Agent. Each `## <version>` section becomes the notes of the
 `agent-v<version>` GitHub Release (`.github/workflows/agent-app-release.yml`).
 
-## Unreleased
+## 0.3.4
 
 - Work locally no longer needs a git repository (#303). Any folder can be linked to a project: a git repository still gets its own worktree and branch, and any other folder is used as it is, with "Working in <folder>" on screen. Muster notes the files at check-out, and progress and the hand-back list the files added, changed and removed instead of a git diff. A plain folder hands back when you say you are done in the local chat (and, if it has a test setup and tests ran, they passed after the last change); it never pushes and never opens a pull request.
 - A project with no folder yet offers "Use a new folder Muster creates" (~/Muster/<Org>/<Project>, readable only by you), "Choose a folder…" or "Use a git repository…", in the first-use sheet and in the project's Settings row. Tasks with no project can be worked locally too: Settings › Local checkouts has a "<Org> · tasks without a project" row, else Muster makes ~/Muster/<Org>/_tasks/<KEY>.
