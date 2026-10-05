@@ -25,7 +25,7 @@ const ref=(source:string,extra:object={})=>({source,issueId:'i-1',issueKey:'RAG-
 const serverRows:any[]=[
   {id:'document:d1',title:'Launch plan',detail:'RAG-1 · document',status:'document',at:now,source:'paperclip',projectId:'p-srv',taskId:'i-1',output:ref('document',{documentKey:'plan',contentType:'text/markdown',href:'https://pc.example.com/RAG/issues/RAG-1#document-plan',downloadable:true})},
   {id:'attachment:a1',title:'report.pdf',detail:'RAG-1 · file',status:'attachment',at:now,source:'paperclip',projectId:'p-srv',taskId:'i-1',output:ref('attachment',{contentPath:'/api/attachments/a1/content',downloadable:true})},
-  {id:'work_product:w1',title:'notes.md',detail:'RAG-1',status:'work_product',at:now,source:'paperclip',projectId:'p-srv',taskId:'i-1',output:ref('work_product',{openPath:'/srv/ws/docs/notes.md'})},
+  {id:'work_product:w1',title:'notes.md',detail:'RAG-1',status:'work_product',at:now,source:'paperclip',projectId:'p-srv',taskId:'i-1',output:ref('work_product',{openPath:'/srv/ws/docs/notes.md',downloadable:true})},
   {id:'work_product:w2',title:'Fix login',detail:'RAG-1',status:'work_product',at:now,source:'paperclip',projectId:'p-srv',taskId:'i-1',output:ref('work_product',{openPath:'https://github.com/acme/widgets/pull/3'})},
   {id:'file:p:docs/plan.md',title:'plan.md',detail:'P · CTO · docs/plan.md',status:'added',at:now,source:'local',projectId:'p',path:'docs/plan.md',taskId:'t1',agent:'CTO'},
 ];
