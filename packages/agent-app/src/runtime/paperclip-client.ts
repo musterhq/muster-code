@@ -43,12 +43,12 @@ export class PaperclipClient {
     return { accept: 'application/json', ...(this.endpoint.token ? { authorization: `Bearer ${this.endpoint.token}` } : {}), ...extra };
   }
 
-  private async request(method: string, path: string, body?: unknown, headers: Record<string, string> = {}): Promise<Response> {
+  private async request(method: string, path: string, body?: unknown, headers: Record<string, string> = {}, timeoutMs = TIMEOUT_MS): Promise<Response> {
     let response: Response;
     try {
       response = await this.fetcher(`${this.endpoint.baseUrl}/api${path}`, {
         method, headers: this.headers(body === undefined ? headers : { ...headers, 'content-type': 'application/json' }),
-        body: body === undefined ? undefined : JSON.stringify(body), signal: AbortSignal.timeout(TIMEOUT_MS), redirect: 'error',
+        body: body === undefined ? undefined : JSON.stringify(body), signal: AbortSignal.timeout(timeoutMs), redirect: 'error',
       });
     } catch (cause) {
       const reason = cause instanceof Error && cause.name === 'TimeoutError' ? 'timed out' : 'is not reachable';
@@ -78,6 +78,41 @@ export class PaperclipClient {
       this.cache.set(path, { etag, body });
     }
     return body;
+  }
+
+  /**
+   * One file (an attachment's content), with this connection's own sign-in. Refused before any byte is kept when the server says it is
+   * bigger than `maxBytes`, and stopped as soon as more than that arrives. A 401/403/404 becomes a sentence about the output.
+   */
+  async getBytes(path: string, maxBytes: number): Promise<{ bytes: Buffer; contentType: string | null; filename: string | null }> {
+    let response: Response;
+    try { response = await this.request('GET', path, undefined, { accept: '*/*' }, 120_000); }
+    catch (cause) {
+      if (cause instanceof PaperclipError && cause.status === 403) throw new PaperclipError('The server will not let you open this output (403). You may not have access to its task.', 403, 'auth');
+      throw cause;
+    }
+    if (response.status === 404) { await response.body?.cancel().catch(() => undefined); throw new PaperclipError('This output is no longer on the server (404).', 404, 'service'); }
+    if (!response.ok) throw new PaperclipError(`Muster Server answered ${response.status} when asked for this output.${await errorText(response)}`, response.status, 'service');
+    const declared = Number(response.headers.get('content-length'));
+    const tooBig = (size: number) => new PaperclipError(`This output is ${(size / 1048576).toFixed(size >= 10485760 ? 0 : 1)} MB, over the ${Math.round(maxBytes / 1048576)} MB Muster opens. Use Open on server instead.`, 413, 'service');
+    if (Number.isFinite(declared) && declared > maxBytes) { await response.body?.cancel().catch(() => undefined); throw tooBig(declared); }
+    const chunks: Buffer[] = [];
+    let total = 0;
+    if (response.body) {
+      const reader = response.body.getReader();
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        total += value.byteLength;
+        if (total > maxBytes) { await reader.cancel().catch(() => undefined); throw tooBig(total); }
+        chunks.push(Buffer.from(value));
+      }
+    }
+    const disposition = response.headers.get('content-disposition') ?? '';
+    const star = /filename\*=(?:UTF-8'')?([^;]+)/i.exec(disposition), plain = /filename="?([^";]+)"?/i.exec(disposition);
+    let filename: string | null = null;
+    try { filename = star ? decodeURIComponent(star[1]!.trim()) : plain ? plain[1]!.trim() : null; } catch { filename = plain ? plain[1]!.trim() : null; }
+    return { bytes: Buffer.concat(chunks), contentType: response.headers.get('content-type'), filename };
   }
 
   /**

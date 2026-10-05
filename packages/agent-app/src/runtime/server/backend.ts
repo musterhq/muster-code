@@ -12,7 +12,7 @@ import type {
   ApprovalDecision, LedgerEntry, TaskCreateInput, TaskStartResult, WorkspaceAgent, WorkspaceApproval, WorkspaceComment, WorkspaceCompany, WorkspaceGoal, WorkspaceInboxItem,
   WorkspaceListKind, WorkspacePriority, WorkspaceProject, WorkspaceRow, WorkspaceRun, WorkspaceStatus, WorkspaceTask, WorkspaceTaskDetail, PaperclipAnswer,
 } from '../../shared/domains/paperclip-protocol.ts';
-import type { ServerBackendKind } from '../../shared/domains/paperclip-protocol.ts';
+import type { ServerBackendKind, ServerOutputRef } from '../../shared/domains/paperclip-protocol.ts';
 import type { FetchLike, LiveSocket, SocketFactory } from '../paperclip-client.ts';
 
 export type { ServerBackendKind } from '../../shared/domains/paperclip-protocol.ts';
@@ -85,6 +85,10 @@ export interface ServerBackend extends Partial<PersonalAccess> {
   rows(kind: WorkspaceListKind, company: WorkspaceCompany): Promise<WorkspaceRow[]>;
   /** One run by id, with its tool use read from the server. `null`: the server has no such run. Optional: a backend that cannot read a single run leaves it out. */
   runDetail?(runId: string, agents: ReadonlyMap<string, WorkspaceAgent>): Promise<{ run: WorkspaceRun; receipt: LedgerEntry } | null>;
+  /** One output's bytes (a document's text or an attachment's content) read with this connection's own sign-in. Optional: a backend with no download route leaves it out. */
+  /** The workspace file a work product stands for (project, workspace and project-relative path), when the server recorded one. */
+  workspaceFile?(output: ServerOutputRef): Promise<{ projectId: string; workspaceId: string; relativePath: string } | null>;
+  outputContent?(output: ServerOutputRef, maxBytes: number): Promise<{ bytes: Buffer; contentType: string | null; name: string | null }>;
   /** The server's own web page for a run or a task ("Open in server"), or null when it has no such page. */
   linkFor?(company: WorkspaceCompany, target: { runId?: string; agentId?: string | null; taskKey?: string }): string | null;
   importReader(): ImportReader;

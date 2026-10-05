@@ -1,5 +1,5 @@
 /** The Paperclip implementation of `ServerBackend`: the existing REST client and mappers, behind the shared interface. */
-import type { LedgerEntry, TaskCreateInput, ThreadCard, WorkspaceAgent, WorkspaceComment, WorkspaceCompany, WorkspaceListKind, WorkspaceRow, WorkspaceRun, WorkspaceTask, WorkspaceTaskDetail } from '../../shared/domains/paperclip-protocol.ts';
+import type { LedgerEntry, ServerOutputRef, TaskCreateInput, ThreadCard, WorkspaceAgent, WorkspaceComment, WorkspaceCompany, WorkspaceListKind, WorkspaceRow, WorkspaceRun, WorkspaceTask, WorkspaceTaskDetail } from '../../shared/domains/paperclip-protocol.ts';
 import { arr, buildInbox, mapAgent, mapApproval, mapAttention, mapComment, mapCompany, mapDocument, mapGoal, mapInteraction, mapIssue, mapMentions, mapPeople, mapProject, mapReceipt, mapRows, mapRun, mapWorkProduct } from '../paperclip-map.ts';
 import { PaperclipClient, PaperclipError, openLiveEvents, type SocketFactory } from '../paperclip-client.ts';
 import { toolsFromLog } from './paperclip-run-tools.ts';
@@ -186,7 +186,40 @@ export class PaperclipBackend implements ServerBackend, PersonalAccess {
   }
   async rows(kind: WorkspaceListKind, company: WorkspaceCompany): Promise<WorkspaceRow[]> {
     const base = `/companies/${enc(company.id)}`;
-    return mapRows(kind, await this.client.get<unknown>(kind === 'artifacts' ? `${base}/artifacts` : kind === 'audit' ? `${base}/activity?limit=150` : `${base}/routines`));
+    const rows = mapRows(kind, await this.client.get<unknown>(kind === 'artifacts' ? `${base}/artifacts` : kind === 'audit' ? `${base}/activity?limit=150` : `${base}/routines`));
+    // An output's page is a path on the server's web UI: make it the full address ("Open on server").
+    return kind === 'artifacts' ? rows.map(r => r.output ? { ...r, output: { ...r.output, href: `${this.client.endpoint.baseUrl}${r.output.href}` } } : r) : rows;
+  }
+  async workspaceFile(output: ServerOutputRef): Promise<{ projectId: string; workspaceId: string; relativePath: string } | null> {
+    if (output.source !== 'work_product' || !output.workProductId) return null;
+    const products = arr(await this.client.get<unknown>(`/issues/${enc(output.issueId)}/work-products`).catch(() => []));
+    const metadata = products.find(p => p.id === output.workProductId)?.metadata as Json | undefined, ref = (metadata?.resourceRef ?? null) as Json | null;
+    return ref && ref.kind === 'workspace_file' && typeof ref.projectId === 'string' && typeof ref.workspaceId === 'string' && typeof ref.relativePath === 'string' ? { projectId: ref.projectId, workspaceId: ref.workspaceId, relativePath: ref.relativePath } : null;
+  }
+  async outputContent(output: ServerOutputRef, maxBytes: number): Promise<{ bytes: Buffer; contentType: string | null; name: string | null }> {
+    if (output.source === 'document') {
+      if (!output.documentKey) throw new Error('This document has no key on the server.');
+      let doc: Json;
+      try { doc = await this.client.get<Json>(`/issues/${enc(output.issueId)}/documents/${enc(output.documentKey)}`); }
+      catch (cause) {
+        if (cause instanceof PaperclipError && cause.status === 403) throw new PaperclipError('The server will not let you open this document (403). You may not have access to its task.', 403, 'auth');
+        if (cause instanceof PaperclipError && cause.status === 404) throw new PaperclipError('This document is no longer on the server (404).', 404, 'service');
+        throw cause;
+      }
+      const bytes = Buffer.from(typeof doc.body === 'string' ? doc.body : '', 'utf8');
+      if (bytes.byteLength > maxBytes) throw new PaperclipError(`This document is ${(bytes.byteLength / 1048576).toFixed(1)} MB, over the ${Math.round(maxBytes / 1048576)} MB Muster opens. Use Open on server instead.`, 413, 'service');
+      const title = typeof doc.title === 'string' && doc.title.trim() ? doc.title.trim() : output.documentKey;
+      return { bytes, contentType: 'text/markdown', name: title };
+    }
+    if (!output.contentPath) {
+      const ref = await this.workspaceFile(output);
+      if (!ref) throw new Error('The server keeps no file for this output. Use Open on server.');
+      const query = `projectId=${enc(ref.projectId)}&workspaceId=${enc(ref.workspaceId)}&path=${enc(ref.relativePath)}&download=1`;
+      const file = await this.client.getBytes(`/issues/${enc(output.issueId)}/file-resources/content?${query}`, maxBytes);
+      return { bytes: file.bytes, contentType: file.contentType, name: file.filename ?? ref.relativePath.split('/').pop() ?? null };
+    }
+    const file = await this.client.getBytes(output.contentPath.replace(/^\/api/, ''), maxBytes);
+    return { bytes: file.bytes, contentType: file.contentType ?? output.contentType, name: file.filename };
   }
   async runDetail(runId: string, agents: ReadonlyMap<string, WorkspaceAgent>): Promise<{ run: WorkspaceRun; receipt: LedgerEntry } | null> {
     let raw: Json;

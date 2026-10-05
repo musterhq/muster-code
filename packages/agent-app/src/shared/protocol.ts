@@ -248,6 +248,8 @@ export interface Commands extends DomainCommands, BrowserCommands, ScopedCompute
  'files.reveal': {input:{folderId:string;path:string};output:void};
  /** W6-D: "Save a copy…" — main shows a save dialog and copies the (folder-confined) file there. */
  'files.saveCopy': {input:{folderId:string;path:string};output:{saved:boolean;fileName?:string}};
+ /** Download… on a server output: main downloads it (or reuses the cached copy), shows a save dialog and writes the file. */
+ 'paperclip.output.save': {input:{id:string;projectId?:string};output:{saved:boolean;fileName?:string}};
  'files.search': { input: {folderId: string; path?: string; query: string}; output: {entries: FileEntry[]; truncated: boolean} };
  'files.read': { input: {folderId: string; path: string}; output: {path: string; text: string; truncated: boolean} };
  'files.asset': { input: {folderId: string; path: string}; output: {mime: string; dataUrl: string; size: number; width: number; height: number} };
