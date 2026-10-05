@@ -2,10 +2,11 @@
  *  idempotent retries, conflicts, cost labels and the hand-back tag. The live version of this runs in checkout-e2e.test.ts. */
 import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
-import { mkdtempSync, readdirSync, statSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
+import { NO_PROJECT } from '../src/shared/domains/checkout-protocol.ts';
 import { CheckoutService, isRealTestCommand, lastTestRun, lastUserText, parseTestSummary, reassignStrategy, userSaysDone, type CheckoutDeps, type LocalProviderInfo, type TimelineEntry } from '../src/runtime/checkout/service.ts';
 import { ENVELOPE_RULES, redactSecrets, sanitizeOut, stripMarkup, untrusted } from '../src/runtime/checkout/sanitize.ts';
 import { CheckoutStore } from '../src/runtime/checkout/store.ts';
@@ -19,6 +20,8 @@ import type { ServerBackend, ServerPart } from '../src/runtime/server/backend.ts
 import type { WorkspaceAgent, WorkspaceTask } from '../src/shared/domains/paperclip-protocol.ts';
 
 // --- a fake Paperclip --------------------------------------------------------------------------------------------------------------
+/** A real folder standing in for the project's repository (binding checks the disk now). */
+const REPO = mkdtempSync(join(tmpdir(), 'muster-repo-'));
 const ME = 'u-me', BOB = 'u-bob', CO = { id: 'co-rag', name: 'Ragnar', prefix: 'RAG' };
 interface Comment { id: string; body: string; authorUserId: string | null; createdAt: string; clientRequestId?: string }
 class FakeServer {
@@ -73,8 +76,9 @@ function setup(opts: { tests?: number } = {}) {
   const server = new FakeServer(), db = new DatabaseSync(':memory:'), orgDir = join(mkdtempSync(join(tmpdir(), 'muster-orgcopy-')), 'checkout'), store = new CheckoutStore(() => db, orgDir);
   let clock = Date.parse('2026-10-05T10:00:00.000Z');
   const worktrees: string[] = [], pushed: string[] = [], emitted: (string | null)[] = [];
-  let pushOk = true, chatSeq = 0, pushedHead = false, clean = true, head = 'abc123', origin = 'https://aiteam.example';
-  const prOk = new Set<string>();
+  let pushOk = true, noRemote = false, commitOk = true, hasTests = true, repo = true, chatSeq = 0, pushedHead = false, clean = true, head = 'abc123', origin = 'https://aiteam.example';
+  const prOk = new Set<string>(), gitCalls: string[] = [], commits: string[] = [];
+  const homeDir = mkdtempSync(join(tmpdir(), 'muster-home-'));
   // The local chat as the timeline shows it: the person's message, a file change, a test run (tool output), and the agent's last message.
   const tl = { user: 'Implement it.', change: true, test: 'ℹ pass 12\nℹ fail 1' as string | null, testStatus: 'completed', exit: 0 as number, testCommand: 'npm test', after: null as { command: string } | null, final: 'Worked on it.', trailingTool: null as string | null };
   const events: unknown[] = [];
@@ -90,18 +94,20 @@ function setup(opts: { tests?: number } = {}) {
   ];
   const deps: CheckoutDeps = {
     store, backend: () => server.backend(), reader,
-    git: { isRepo: async () => true, defaultBranch: async (_p, preferred) => preferred ?? 'dev', headSha: async () => head, stat: async () => ({ count: 2, added: 20, removed: 3 }), push: async (_p, b) => { if (pushOk) pushed.push(b); return { pushed: pushOk, message: pushOk ? `Pushed ${b}.` : 'Could not push: no network' }; }, pushedHead: async () => pushedHead, isClean: async () => clean, verifyPr: async (_p, url) => prOk.has(url) },
+    git: counted(gitCalls, { isRepo: async () => repo, defaultBranch: async (_p, preferred) => preferred ?? 'dev', headSha: async () => head, stat: async () => ({ count: 2, added: 20, removed: 3 }), push: async (_p, b) => { if (pushOk) pushed.push(b); return { pushed: pushOk, ...(noRemote ? { noRemote: true } : {}), message: pushOk ? `Pushed ${b}.` : noRemote ? 'This repository has no remote.' : 'Could not push: no network' }; }, commitAll: async (_p, message) => { if (!commitOk) return { committed: false, message: 'Git has no name and email set.' }; commits.push(message); head = `commit${commits.length}`; clean = true; return { committed: true, message: 'Committed.' }; }, pushedHead: async () => pushedHead, isClean: async () => clean, verifyPr: async (_p, url) => prOk.has(url) }),
     worktrees: { create: async (_root, branch) => { worktrees.push(branch); return { path: `/wt/${branch.replace('/', '-')}`, branch }; } },
     chats: { addFolder: async p => ({ id: `f:${p}` }), create: async f => ({ id: `chat:${f}:${++chatSeq}` }), select: async () => {}, rename: async () => {}, timeline },
-    providers: () => providers,
+    providers: () => providers, home: () => homeDir, testSetup: async () => hasTests,
     turnFacts: async () => ({ tokens: { input: 1000, cached: 100, output: 200 }, tests: opts.tests ?? 1, model: 'claude-opus-4', provider: 'claude-code', costUsd: 0.5, durationMs: 4000, outcome: 'completed' }),
     serverLabel: () => 'aiteam', origin: () => origin, deviceNameDefault: () => 'Dhairya’s MacBook', now: () => clock, emit: id => emitted.push(id), notify: e => events.push(e), later: fn => { fn(); },
   };
   const svc = new CheckoutService(deps);
-  return { events, tl, orgDir, setClean: (v: boolean) => { clean = v; }, setHead: (v: string) => { head = v; }, setPushedHead: (v: boolean) => { pushedHead = v; }, setOrigin: (v: string) => { origin = v; }, prOk, server, db, store, svc, reader, advance: (ms: number) => { clock += ms; }, worktrees, pushed, emitted, setPush: (v: boolean) => { pushOk = v; }, now: () => clock };
+  return { events, tl, orgDir, homeDir, gitCalls, commits, setNoRemote: (v: boolean) => { noRemote = v; }, setCommitOk: (v: boolean) => { commitOk = v; }, setHasTests: (v: boolean) => { hasTests = v; }, setRepo: (v: boolean) => { repo = v; }, dirty: () => !clean, setClean: (v: boolean) => { clean = v; }, setHead: (v: string) => { head = v; }, setPushedHead: (v: boolean) => { pushedHead = v; }, setOrigin: (v: string) => { origin = v; }, prOk, server, db, store, svc, reader, advance: (ms: number) => { clock += ms; }, worktrees, pushed, emitted, setPush: (v: boolean) => { pushOk = v; }, now: () => clock };
 }
+/** The fake git, with every call counted (a plain folder must make none). */
+function counted<T extends object>(calls: string[], target: T): T { return new Proxy(target, { get: (t, k) => { const v = (t as Record<string | symbol, unknown>)[k]; return typeof v === 'function' ? (...args: unknown[]) => { calls.push(String(k)); return (v as (...a: unknown[]) => unknown)(...args); } : v; } }); }
 const OWN = { kind: 'own' as const, providerId: 'omniroute', model: 'gpt-x' };
-async function bound(h: ReturnType<typeof setup>) { await h.reader.part(CO); await h.svc.bind(CO.id, 'p-redis', '/repo/redis', 'dev'); }
+async function bound(h: ReturnType<typeof setup>) { await h.reader.part(CO); await h.svc.bind(CO.id, 'p-redis', REPO, 'dev'); }
 
 // --- the state machine ----------------------------------------------------------------------------------------------------------------
 test('lease: derived from the assignee plus Muster’s own comment marker (the plugin’s contract), never from a label', () => {
@@ -220,8 +226,8 @@ test('check out: needs confirmation and a bound folder; posts as the person; In 
   const h = setup(); await h.reader.part(CO);
   await assert.rejects(() => h.svc.start({ taskId: 't1', model: OWN, confirm: false as never }), /confirm/i);
   assert.deepEqual(h.server.calls, [], 'nothing was posted before the person confirmed');
-  await assert.rejects(() => h.svc.start({ taskId: 't1', model: OWN, confirm: true }), /where .*code lives/i, 'a folder is chosen once');
-  await h.svc.bind(CO.id, 'p-redis', '/repo/redis', 'dev');
+  await assert.rejects(() => h.svc.start({ taskId: 't1', model: OWN, confirm: true }), /where .*files live/i, 'a folder is chosen once');
+  await h.svc.bind(CO.id, 'p-redis', REPO, 'dev');
   const plan = await h.svc.plan('t1');
   assert.deepEqual([plan.assignedToMe, plan.willPost.status, plan.willPost.reassign, plan.devBranch], [true, 'in_progress', false, 'dev']);
   assert.equal(plan.willPost.comment, 'Checked out · working locally on Dhairya’s MacBook · via Muster');
@@ -424,16 +430,13 @@ test('stale lease: silent for the configured hours shows a reminder; remind snoo
   h.store.setStaleHours(2); h.advance(3 * 3_600_000); assert.equal(h.svc.get('t1')!.stale, true); assert.equal(h.svc.get('t1')!.staleHours, 2);
 });
 
-test('bindings are per org project and remembered; a folder that is not a repository is refused', async () => {
+test('bindings are per org project and remembered, and carry what the folder is', async () => {
   const h = setup(); await h.reader.part(CO);
-  const b = await h.svc.bind(CO.id, 'p-redis', '/repo/redis', 'dev');
-  assert.deepEqual([b.projectName, b.devBranch], ['Redis', 'dev']);
-  assert.equal(h.store.binding('https://aiteam.example', CO.id, 'p-redis')!.path, '/repo/redis');
+  const b = await h.svc.bind(CO.id, 'p-redis', REPO, 'dev');
+  assert.deepEqual([b.projectName, b.devBranch, b.kind], ['Redis', 'dev', 'git']);
+  assert.equal(h.store.binding('https://aiteam.example', CO.id, 'p-redis')!.path, REPO);
   assert.equal(h.store.binding('http://aiteam.example', CO.id, 'p-redis'), null, 'bindings belong to their server by origin: http and https of one host are different servers');
   assert.equal(h.store.binding('https://other.example', CO.id, 'p-redis'), null);
-  const bad = setup(); await bad.reader.part(CO);
-  (bad.svc as unknown as { d: CheckoutDeps }).d.git.isRepo = async () => false;
-  await assert.rejects(() => bad.svc.bind(CO.id, 'p-redis', '/tmp', 'dev'), /not a git repository/);
 });
 
 test('no personal access on this server: check out says so instead of failing in the middle', async () => {
@@ -882,7 +885,7 @@ test('R2-freshness: check-out, conflict checks and Undo read the single task by 
   const base = h.server.backend();
   const withBackend = (custom: ServerBackend) => new CheckoutService({ ...(h.svc as unknown as { d: CheckoutDeps }).d, backend: () => custom, reader: new OrgReader({ backend: () => custom, settings: () => ({}) as never, activeId: () => CO.id, serverLabel: () => 'aiteam', remembered: () => ({ id: ME, name: 'Dhairya' }), remember() {} }) });
   const svc = withBackend({ ...base, async task(id: string) { reads++; const t = h.server.part().tasks.find(x => x.id === id)!; return { ...t, status: 'done' as const }; } } as never);
-  await svc.bind(CO.id, 'p-redis', '/repo/redis', 'dev');
+  await svc.bind(CO.id, 'p-redis', REPO, 'dev');
   await assert.rejects(svc.start({ taskId: 't1', model: OWN, confirm: true }), /is done/);
   assert.ok(reads > 0, 'the single-task read was used');
   // a refusal from the server while looking is not "not on the server"
@@ -897,4 +900,277 @@ test('R2-comments: only the signed-in person is "You"; another person is named (
   const his = mapComment({ id: 'c2', authorUserId: BOB, body: 'y', createdAt: '2026-10-05T00:00:00Z' }, agents, ME, people);
   const unknown = mapComment({ id: 'c3', authorUserId: 'u-zed', body: 'z', createdAt: '2026-10-05T00:00:00Z' }, agents, ME, people);
   assert.equal(mine.author.label, 'You'); assert.equal(his.author.label, 'Bob Rivera'); assert.equal(unknown.author.label, 'A teammate');
+});
+
+// --- #303: Work locally on a folder that is not a git repository ------------------------------------------------------------------------------------
+/** A plain folder with a few files, bound to the project (git says it is not a repository). */
+async function plain(h: ReturnType<typeof setup>, files: Record<string, string> = { 'notes.md': 'hello\n', 'plan.txt': 'one\n' }): Promise<string> {
+  const dir = mkdtempSync(join(tmpdir(), 'muster-plain-'));
+  for (const [name, body] of Object.entries(files)) { mkdirSync(join(dir, name, '..'), { recursive: true }); writeFileSync(join(dir, name), body); }
+  h.setRepo(false); await h.reader.part(CO); await h.svc.bind(CO.id, 'p-redis', dir);
+  return dir;
+}
+const handedBack = (h: ReturnType<typeof setup>) => h.server.comments.get('t1')?.find(c => /Handed back for review/.test(c.body))?.body;
+const noted = (h: ReturnType<typeof setup>) => (h.server.comments.get('t1') ?? []).map(c => c.body).filter(b => /Not handing back yet/.test(b));
+
+test('#303 bind: any existing folder is accepted and remembered as a plain folder; a git repository stays a git binding', async () => {
+  const h = setup(); const dir = await plain(h);
+  const b = h.store.binding('https://aiteam.example', CO.id, 'p-redis')!;
+  assert.deepEqual([b.kind, b.devBranch, b.path], ['folder', '', dir]);
+  const g = setup(); await g.reader.part(CO);
+  assert.equal((await g.svc.bind(CO.id, 'p-redis', REPO, 'dev')).kind, 'git');
+  assert.equal(h.gitCalls.includes('defaultBranch'), false, 'a plain folder has no dev branch to look up');
+});
+
+test('#303 bind: still refuses what is not a folder: NUL, a file, a missing path, /, the home folder, and system paths', async () => {
+  const h = setup(); await h.reader.part(CO); h.setRepo(false);
+  const file = join(REPO, 'a-file.txt'); writeFileSync(file, 'x');
+  for (const [bad, why] of [['/tmp/x\0y', /usable/], [file, /file, not a folder/], [join(REPO, 'nope'), /does not exist/], ['/', /will not work/], [h.homeDir, /will not work/], ['/usr', /will not work/], ['/System', /will not work/], ['/etc', /will not work/]] as const)
+    await assert.rejects(() => h.svc.bind(CO.id, 'p-redis', bad, undefined), why, `refused: ${bad}`);
+  assert.equal(h.store.bindings('https://aiteam.example').length, 0, 'nothing was stored');
+  await assert.rejects(() => h.svc.bind(CO.id, 'p-redis', join(REPO), undefined, false, true), /not a git repository/, '“Use a git repository…” refuses a plain folder');
+});
+
+test('#303 migration: bindings from an earlier build (no kind column) become git bindings, and a plain folder is stored as one', async () => {
+  const old = new DatabaseSync(':memory:');
+  old.exec('CREATE TABLE checkout_bindings (server TEXT NOT NULL, org_id TEXT NOT NULL, project_id TEXT NOT NULL, project_name TEXT NOT NULL, path TEXT NOT NULL, dev_branch TEXT NOT NULL, bound_at TEXT NOT NULL, PRIMARY KEY (server, org_id, project_id))');
+  old.prepare("INSERT INTO checkout_bindings VALUES ('https://s','o','p','Redis','/old/repo','dev','2026-10-01T00:00:00Z')").run();
+  const store = new CheckoutStore(() => old);
+  assert.equal(store.binding('https://s', 'o', 'p')!.kind, 'git', 'old rows are git repositories');
+  assert.ok((old.prepare('PRAGMA table_info(checkout_bindings)').all() as { name: string }[]).some(c => c.name === 'kind'));
+  new CheckoutStore(() => old); // a second start does not fail (guarded)
+  store.bind('https://s', { orgId: 'o', projectId: 'q', projectName: 'Docs', path: '/docs', devBranch: '', boundAt: '2026-10-02T00:00:00Z', kind: 'folder' });
+  assert.deepEqual(store.bindings('https://s').map(b => [b.projectName, b.kind]), [['Docs', 'folder'], ['Redis', 'git']]);
+});
+
+test('#303 plain folder check-out makes no git calls: no worktree, no branch, the folder is used in place', async () => {
+  const h = setup(); const dir = await plain(h); h.gitCalls.length = 0;
+  const plan = await h.svc.plan('t1'); assert.equal(plan.binding!.kind, 'folder'); assert.equal(plan.devBranch, null);
+  const l = await h.svc.start({ taskId: 't1', model: OWN, confirm: true });
+  assert.deepEqual(h.worktrees, [], 'no worktree was made');
+  assert.deepEqual([l.kind, l.branch, l.worktree, l.baseSha, l.armedFrom, l.folderId], ['folder', null, dir, null, null, `f:${dir}`], 'the local chat opens in the folder itself');
+  h.tl.test = GREEN; await h.svc.onTurn(l.chatId!, 'r1', 'completed');
+  h.tl.user = 'done'; await h.svc.onTurn(l.chatId!, 'r2', 'completed'); await h.svc.sync();
+  assert.equal(h.svc.get('t1')!.state, 'handed_back');
+  assert.deepEqual(h.gitCalls, [], 'not one git call across check-out, two turns and the hand-back');
+  assert.deepEqual(h.pushed, [], 'nothing was pushed'); assert.match(await (async () => { const b = (await h.svc.brief(l.chatId!)) ?? ''; return b || 'handed back'; })(), /./);
+  assert.match(handedBack(h)!, /Worked in place in “muster-plain-[^”]*”; no branch, push or pull request/);
+});
+
+test('#303 plain folder: the brief says there is no branch to commit', async () => {
+  const h = setup(); await plain(h);
+  const l = await h.svc.start({ taskId: 't1', model: OWN, confirm: true });
+  const brief = (await h.svc.brief(l.chatId!))!;
+  assert.match(brief, /in this folder, which is used as it is: there is no branch and nothing to commit or push/); assert.ok(!/Commit your work on this branch/.test(brief));
+});
+
+test('#303 evidence: progress and hand-back list the files added, changed and removed since check-out (no git diff)', async () => {
+  const h = setup(); const dir = await plain(h, { 'notes.md': 'hello\n', 'plan.txt': 'one\n', 'old.txt': 'bye\n', 'node_modules/x/index.js': '1', '.git/HEAD': 'ref', '.cache/a': '1' });
+  const l = await h.svc.start({ taskId: 't1', model: OWN, confirm: true });
+  // an unchanged file that is only touched is not a change; node_modules and dot-folders are never looked at
+  writeFileSync(join(dir, 'notes.md'), 'hello\n'); writeFileSync(join(dir, 'plan.txt'), 'two, longer\n'); writeFileSync(join(dir, 'new.md'), 'fresh\n'); rmSync(join(dir, 'old.txt'));
+  writeFileSync(join(dir, 'node_modules/x/index.js'), 'changed'); writeFileSync(join(dir, '.cache/a'), 'changed'); writeFileSync(join(dir, '.git/HEAD'), 'changed');
+  await h.svc.onTurn(l.chatId!, 'r1', 'completed');
+  assert.deepEqual(h.store.receipts('t1')[0]!.fileChanges, { added: 1, changed: 1, removed: 1 }); assert.equal(h.store.receipts('t1')[0]!.files, null, 'no git line counts');
+  await h.svc.sync(); assert.match(h.server.docs.get('t1/local-work-log')!, /- Files changed: 1 added, 1 changed, 1 removed/);
+  assert.match(h.server.docs.get('t1/local-work-log')!, /in the folder “muster-plain-[^”]*” \(used in place\)/);
+  const preview = await h.svc.handBackPreview('t1');
+  assert.deepEqual([preview.kind, preview.fileChanges], ['folder', { added: ['new.md'], changed: ['plan.txt'], removed: ['old.txt'] }]);
+  assert.equal(preview.blocked, null, 'a plain folder needs no test reason');
+  await h.svc.handBack({ taskId: 't1', reviewer: { kind: 'agent', id: 'a-qa' } });
+  const body = handedBack(h)!;
+  assert.match(body, /Added \(1\): `new\.md`/); assert.match(body, /Changed \(1\): `plan\.txt`/); assert.match(body, /Removed \(1\): `old\.txt`/);
+  assert.ok(!/node_modules|\.cache|HEAD/.test(body));
+});
+
+test('#303 snapshot: skips .git, node_modules and dot-folders, hashes files under 5 MB, never follows links, caps at 20,000 files', async () => {
+  const { snapshotFolder, diffSnapshots, SNAPSHOT_MAX_FILES } = await import('../src/runtime/checkout/folder.ts');
+  const dir = mkdtempSync(join(tmpdir(), 'muster-snap-'));
+  for (const sub of ['a/b', '.git', 'node_modules/p', '.hidden']) mkdirSync(join(dir, sub), { recursive: true });
+  writeFileSync(join(dir, 'a/b/c.txt'), 'c'); writeFileSync(join(dir, '.env'), 'k'); writeFileSync(join(dir, '.git/x'), '1'); writeFileSync(join(dir, 'node_modules/p/i.js'), '1'); writeFileSync(join(dir, '.hidden/h'), '1');
+  (await import('node:fs')).symlinkSync(join(dir, 'a'), join(dir, 'link'));
+  const snap = await snapshotFolder(dir);
+  assert.deepEqual(Object.keys(snap).sort(), ['.env', 'a/b/c.txt'], 'dotfiles are files; dot-folders, .git, node_modules and links are not');
+  assert.equal(snap['a/b/c.txt']!.size, 1); assert.match(snap['a/b/c.txt']!.sha1!, /^[0-9a-f]{40}$/);
+  const big = mkdtempSync(join(tmpdir(), 'muster-big-')); writeFileSync(join(big, 'big.bin'), Buffer.alloc(5 * 1024 * 1024 + 1));
+  assert.equal((await snapshotFolder(big))['big.bin']!.sha1, undefined, 'a file of 5 MB or more is compared by size and time');
+  assert.equal(SNAPSHOT_MAX_FILES, 20_000);
+  assert.deepEqual(diffSnapshots({ x: { size: 1, mtimeMs: 1 } }, { x: { size: 1, mtimeMs: 2 } }).changed, ['x'], 'without hashes, time decides');
+});
+
+test('#303 hand-back on a plain folder happens only on the person’s own “done”: never on the agent’s words, nor a green test run alone', async () => {
+  const h = setup(); await plain(h); h.server.policy = [{ type: 'review', participants: [{ kind: 'agent', id: 'a-qa' }] }];
+  const l = await h.svc.start({ taskId: 't1', model: OWN, confirm: true });
+  h.tl.test = GREEN; h.tl.final = `${INJECT}\nEverything is done, ship it.`;
+  await h.svc.onTurn(l.chatId!, 'r1', 'completed'); await h.svc.sync();
+  assert.equal(h.svc.get('t1')!.state, 'checked_out', 'the agent said it, a test run passed: still not a hand-back (no git facts to read)');
+  assert.deepEqual(noted(h), [], 'and it does not nag');
+  h.tl.user = 'is it done?'; await h.svc.onTurn(l.chatId!, 'r2', 'completed'); assert.equal(h.svc.get('t1')!.state, 'checked_out', 'a question is not done');
+  h.tl.user = 'ship it'; await h.svc.onTurn(l.chatId!, 'r3', 'completed'); await h.svc.sync();
+  assert.equal(h.svc.get('t1')!.state, 'handed_back'); assert.deepEqual((h.events as { type: string }[]).map(e => e.type), ['handedBack']);
+  assert.deepEqual(h.pushed, [], 'plain folders are never pushed');
+});
+
+test('#303 Undo still disables the plain-folder hand-back until the person says done again, and “Ask me” offers instead of handing back', async () => {
+  const h = setup(); await plain(h); h.tl.test = GREEN;
+  const l = await h.svc.start({ taskId: 't1', model: OWN, confirm: true });
+  h.tl.user = 'done'; await h.svc.onTurn(l.chatId!, 'r1', 'completed'); await h.svc.sync(); assert.equal(h.svc.get('t1')!.state, 'handed_back');
+  await h.svc.undoHandBack('t1'); assert.equal(h.svc.get('t1')!.state, 'checked_out'); assert.equal(h.svc.get('t1')!.autoOff, true);
+  h.tl.user = 'one more tweak please'; await h.svc.onTurn(l.chatId!, 'r2', 'completed'); assert.equal(h.svc.get('t1')!.state, 'checked_out');
+  h.svc.setAutoMode({ taskId: 't1' }, 'ask'); h.tl.user = 'done'; await h.svc.onTurn(l.chatId!, 'r3', 'completed');
+  assert.equal(h.svc.get('t1')!.state, 'checked_out', 'Ask me: not handed back'); assert.equal((h.events as { type: string }[]).at(-1)!.type, 'handBackReady');
+});
+
+test('#303 test gate for a plain folder: when it has a test setup and tests ran, they must pass after the last change; with no setup there is no gate', async () => {
+  const h = setup(); await plain(h); const l = await h.svc.start({ taskId: 't1', model: OWN, confirm: true });
+  h.tl.user = 'done';
+  h.tl.test = 'ℹ pass 12\nℹ fail 2'; await h.svc.onTurn(l.chatId!, 'r1', 'completed'); await h.svc.sync();
+  assert.equal(h.svc.get('t1')!.state, 'checked_out', 'tests ran and failed'); assert.match(noted(h)[0]!, /2 tests are failing/);
+  h.tl.test = GREEN; h.tl.after = { command: 'sed -i s/a/b/ notes.md' }; await h.svc.onTurn(l.chatId!, 'r2', 'completed'); await h.svc.sync();
+  assert.equal(h.svc.get('t1')!.state, 'checked_out', 'a passing run that came before the last change does not count'); assert.ok(noted(h).some(n => /no test run came after the last change/.test(n)));
+  h.tl.after = null; await h.svc.onTurn(l.chatId!, 'r3', 'completed'); await h.svc.sync();
+  assert.equal(h.svc.get('t1')!.state, 'handed_back', 'green after the last change'); assert.match(handedBack(h)!, /Tests: 13 passed, 0 failed/);
+  const n = setup(); await plain(n); const l2 = await n.svc.start({ taskId: 't1', model: OWN, confirm: true });
+  n.tl.test = null; n.tl.user = 'done'; await n.svc.onTurn(l2.chatId!, 'r1', 'completed'); await n.svc.sync();
+  assert.equal(n.svc.get('t1')!.state, 'handed_back', 'a test setup but no test run: a folder of notes is not blocked'); 
+  const none = setup({ tests: 0 }); await plain(none); none.setHasTests(false); const l3 = await none.svc.start({ taskId: 't1', model: OWN, confirm: true });
+  none.tl.test = null; none.tl.user = 'done'; await none.svc.onTurn(l3.chatId!, 'r1', 'completed'); await none.svc.sync();
+  assert.equal(none.svc.get('t1')!.state, 'handed_back', 'no recognised test setup: no gate at all'); assert.match(handedBack(none)!, /No tests in this project\./);
+});
+
+test('#303 Muster’s own folder: ~/Muster/<Org>/<Project> with 0700, the default when the project has no repository', async () => {
+  const h = setup(); await h.reader.part(CO); h.setRepo(true);
+  const plan = await h.svc.plan('t1');
+  assert.equal(plan.noRepo, true); assert.equal(plan.binding, null); assert.equal(plan.newFolder, join(h.homeDir, 'Muster', 'Ragnar', 'Redis'));
+  const l = await h.svc.start({ taskId: 't1', model: OWN, confirm: true, newFolder: true });
+  const dir = join(h.homeDir, 'Muster', 'Ragnar', 'Redis');
+  assert.equal(statSync(dir).isDirectory(), true); assert.equal(statSync(dir).mode & 0o777, 0o700);
+  assert.deepEqual([l.kind, l.worktree, l.branch], ['folder', realpathSyncSafe(dir), null]);
+  assert.deepEqual([h.store.binding('https://aiteam.example', CO.id, 'p-redis')!.kind, h.worktrees.length], ['folder', 0], 'remembered for the project; no worktree');
+  assert.ok(!h.gitCalls.includes('isRepo'), 'the folder Muster makes is never probed as a repository');
+  assert.deepEqual((await h.svc.plan('t1')).binding?.kind, 'folder');
+  // names that could escape ~/Muster are made harmless
+  const { musterFolderPath } = await import('../src/runtime/checkout/folder.ts');
+  assert.equal(musterFolderPath('/h', '../../etc', '..'), join('/h', 'Muster', 'etc', 'Project'));
+  assert.equal(musterFolderPath('/h', 'A/B', 'C\\D:E'), join('/h', 'Muster', 'A B', 'C D E'));
+});
+function realpathSyncSafe(p: string): string { return readFileSyncReal(p); }
+function readFileSyncReal(p: string): string { return require_('node:fs').realpathSync(p) as string; }
+const require_ = (await import('node:module')).createRequire(import.meta.url);
+
+test('#303 tasks with no project can be worked locally: the org’s default folder, else a Muster folder of its own for the task', async () => {
+  const h = setup(); await h.reader.part(CO); h.setRepo(false);
+  h.server.tasks[0]!.projectId = null; await h.reader.part(CO, true);
+  await assert.rejects(() => h.svc.start({ taskId: 't1', model: OWN, confirm: true }), /where this task’s files live/);
+  const plan = await h.svc.plan('t1'); assert.equal(plan.newFolder, join(h.homeDir, 'Muster', 'Ragnar', '_tasks', 'RAG-1'));
+  const l = await h.svc.start({ taskId: 't1', model: OWN, confirm: true, newFolder: true });
+  assert.equal(l.kind, 'folder'); assert.equal(statSync(join(h.homeDir, 'Muster', 'Ragnar', '_tasks', 'RAG-1')).mode & 0o777, 0o700);
+  assert.equal(h.store.bindings('https://aiteam.example').length, 0, 'a per-task folder is not remembered as the org default');
+  // the org's default folder (Settings › “<Org> · tasks without a project”)
+  const g = setup(); await g.reader.part(CO); g.setRepo(false); g.server.tasks[0]!.projectId = null; await g.reader.part(CO, true);
+  const dir = mkdtempSync(join(tmpdir(), 'muster-default-')); const b = await g.svc.bind(CO.id, NO_PROJECT, dir);
+  assert.deepEqual([b.projectName, b.kind], ['Ragnar · tasks without a project', 'folder']);
+  const l2 = await g.svc.start({ taskId: 't1', model: OWN, confirm: true }); assert.equal(l2.worktree, dir);
+  const made = await g.svc.bind(CO.id, NO_PROJECT, undefined, undefined, true); assert.equal(made.path, realpathSyncSafe(join(g.homeDir, 'Muster', 'Ragnar', '_tasks')));
+});
+
+test('#303 git project with no tests is not blocked forever: no recognised test setup skips the gate and the evidence says so; with a setup the gate stays', async () => {
+  const h = setup({ tests: 0 }); await bound(h); h.setHasTests(false); h.tl.test = null; h.server.policy = [{ type: 'review', participants: [{ kind: 'agent', id: 'a-qa' }] }];
+  const l = await h.svc.start({ taskId: 't1', model: OWN, confirm: true });
+  finish(h); h.tl.test = null; await h.svc.onTurn(l.chatId!, 'r1', 'completed'); await h.svc.sync();
+  assert.equal(h.svc.get('t1')!.state, 'handed_back'); assert.match(handedBack(h)!, /No tests in this project\./);
+  const g = setup(); await bound(g); const l2 = await g.svc.start({ taskId: 't1', model: OWN, confirm: true });
+  finish(g); g.tl.test = null; await g.svc.onTurn(l2.chatId!, 'r1', 'completed'); await g.svc.sync();
+  assert.equal(g.svc.get('t1')!.state, 'checked_out', 'a test setup exists: still gated'); assert.ok(noted(g).some(n => /no test run came after the last change/.test(n)));
+  // the manual hand-back and the preview agree
+  const m = setup({ tests: 0 }); await bound(m); m.setHasTests(false); await m.svc.start({ taskId: 't1', model: OWN, confirm: true });
+  const pre = await m.svc.handBackPreview('t1'); assert.deepEqual([pre.blocked, pre.noTests, pre.testsLine], [null, true, 'No tests in this project.']);
+  await m.svc.handBack({ taskId: 't1', reviewer: { kind: 'agent', id: 'a-qa' } }); assert.equal(m.svc.get('t1')!.state, 'handed_back');
+  const w = setup(); await bound(w); await w.svc.start({ taskId: 't1', model: OWN, confirm: true }); w.store.deleteSnapshot('t1');
+  await assert.rejects(() => w.svc.handBack({ taskId: 't1', reviewer: { kind: 'agent', id: 'a-qa' } }), /Run the tests/);
+});
+
+test('#303 tests that ran but whose output cannot be read: the person’s own “done” accepts them (once), and says so in the evidence', async () => {
+  const h = setup(); await bound(h); h.server.policy = [{ type: 'review', participants: [{ kind: 'agent', id: 'a-qa' }] }];
+  const l = await h.svc.start({ taskId: 't1', model: OWN, confirm: true });
+  h.setHead('def456'); h.tl.test = 'custom runner: all good'; h.tl.user = 'implement it';
+  h.setPushedHead(true); await h.svc.onTurn(l.chatId!, 'r1', 'completed'); await h.svc.sync();
+  assert.equal(h.svc.get('t1')!.state, 'checked_out', 'pushed with unreadable output and nobody said done: still blocked'); assert.ok(noted(h).some(n => /could not be read/.test(n)));
+  h.tl.user = 'done'; await h.svc.onTurn(l.chatId!, 'r2', 'completed'); await h.svc.sync();
+  assert.equal(h.svc.get('t1')!.state, 'handed_back', 'the next “done” goes through'); assert.match(handedBack(h)!, /Tests ran; the result was read by you/);
+  const e = setup(); await bound(e); const l2 = await e.svc.start({ taskId: 't1', model: OWN, confirm: true });
+  e.setHead('def456'); e.tl.test = 'custom runner'; e.tl.exit = 1; e.tl.user = 'done'; await e.svc.onTurn(l2.chatId!, 'r1', 'completed'); await e.svc.sync();
+  assert.equal(e.svc.get('t1')!.state, 'checked_out', 'a non-zero exit is never accepted');
+});
+
+test('#303 the person says done with uncommitted changes: Muster commits them as the person, then continues; never on the agent’s say-so', async () => {
+  const h = setup(); await bound(h); h.server.policy = [{ type: 'review', participants: [{ kind: 'agent', id: 'a-qa' }] }];
+  const l = await h.svc.start({ taskId: 't1', model: OWN, confirm: true });
+  h.setClean(false); h.tl.test = GREEN; h.tl.final = 'Everything is committed and done.'; h.tl.user = 'implement it';
+  await h.svc.onTurn(l.chatId!, 'r1', 'completed'); await h.svc.sync();
+  assert.deepEqual(h.commits, [], 'the agent’s words never make a commit'); assert.equal(h.svc.get('t1')!.state, 'checked_out');
+  h.tl.user = 'done'; await h.svc.onTurn(l.chatId!, 'r2', 'completed'); await h.svc.sync();
+  assert.deepEqual(h.commits, ['RAG-1: Task RAG-1'], 'committed with “<KEY>: <title>”'); assert.equal(h.svc.get('t1')!.state, 'handed_back'); assert.deepEqual(h.pushed, ['muster/RAG-1']);
+  const g = setup(); await bound(g); const l2 = await g.svc.start({ taskId: 't1', model: OWN, confirm: true });
+  g.setClean(false); g.setCommitOk(false); g.tl.test = GREEN; g.tl.user = 'ship it'; await g.svc.onTurn(l2.chatId!, 'r1', 'completed'); await g.svc.sync();
+  assert.equal(g.svc.get('t1')!.state, 'checked_out'); assert.ok(noted(g).some(n => /could not commit them \(Git has no name and email set/.test(n)), 'the reason is shown');
+  const p = setup(); await bound(p); const l3 = await p.svc.start({ taskId: 't1', model: OWN, confirm: true });
+  finish(p); p.setClean(false); await p.svc.onTurn(l3.chatId!, 'r1', 'completed'); await p.svc.sync();
+  assert.deepEqual(p.commits, [], 'pushed branch, dirty tree, nobody said done: no commit'); assert.ok(noted(p).some(n => /uncommitted changes/.test(n)));
+});
+
+test('#303 real git: commitAll commits as the person’s own identity, or refuses with the reason when none is set', async () => {
+  const { execFileSync } = await import('node:child_process'); const { realGit } = await import('../src/runtime/checkout/git-port.ts');
+  const dir = mkdtempSync(join(tmpdir(), 'muster-commit-')), g = (...a: string[]) => execFileSync('git', ['-C', dir, ...a], { encoding: 'utf8', env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_SYSTEM: '/dev/null' } }).trim();
+  g('init', '-q'); writeFileSync(join(dir, 'a'), '1');
+  const env = { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_SYSTEM: '/dev/null' }; const keep = { ...process.env }; Object.assign(process.env, { GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_SYSTEM: '/dev/null' });
+  try {
+    const refused = await realGit.commitAll(dir, 'RAG-1: x'); assert.equal(refused.committed, false); assert.match(refused.message, /no name and email/);
+    g('config', 'user.name', 'Dev One'); g('config', 'user.email', 'dev@one.test');
+    assert.deepEqual(await realGit.commitAll(dir, 'RAG-1: Move the sources'), { committed: true, message: 'Committed.' });
+    assert.equal(g('log', '-1', '--format=%an <%ae> %s'), 'Dev One <dev@one.test> RAG-1: Move the sources'); assert.equal(await realGit.isClean(dir), true);
+    assert.equal((await realGit.commitAll(dir, 'again')).committed, false, 'nothing left to commit');
+    assert.equal((await realGit.push(dir, 'main')).noRemote, true, 'no remote at all is said as such');
+  } finally { for (const k of ['GIT_CONFIG_GLOBAL', 'GIT_CONFIG_SYSTEM']) { if (keep[k] === undefined) delete process.env[k]; else process.env[k] = keep[k]; } void env; }
+});
+
+test('#303 remotes: GitHub, GitLab, Bitbucket and self-hosted repositories all match however the remote is spelled', async () => {
+  const { sameRepo } = await import('../src/runtime/checkout/git-port.ts');
+  for (const [repo, url] of [
+    ['github.com/org/repo', 'git@github.com:Org/Repo.git'], ['gitlab.com/group/sub/proj', 'https://oauth2:tok@gitlab.com/group/sub/proj.git'], ['bitbucket.org/team/app', 'ssh://git@bitbucket.org/team/app'],
+    ['git.corp.example:8443/eng/tool', 'https://git.corp.example:8443/eng/tool.git/'], ['code.example.com/eng/tool', 'git@code.example.com:eng/tool'],
+  ] as const) assert.equal(sameRepo(repo, url), true, `${repo} ~ ${url}`);
+  assert.equal(sameRepo('gitlab.com/group/proj', 'https://github.com/group/proj'), false, 'another host is another repository');
+  assert.equal(sameRepo(null, 'https://github.com/a/b'), false); assert.equal(sameRepo('github.com/a/b', 'not a url'), false);
+  assert.equal(sameRepo('https://gitlab.com/g/p.git', 'git@gitlab.com:g/p.git'), true, 'a server that stores the full URL still matches');
+});
+
+test('#303 a repository with no remote, or a push that fails, still hands back: the summary says the branch is local, and the push failure does not fail it', async () => {
+  const h = setup(); await bound(h); h.server.policy = [{ type: 'review', participants: [{ kind: 'agent', id: 'a-qa' }] }];
+  const l = await h.svc.start({ taskId: 't1', model: OWN, confirm: true });
+  h.setPush(false); h.setNoRemote(true); h.setHead('def456'); h.tl.test = GREEN; h.tl.user = 'done';
+  await h.svc.onTurn(l.chatId!, 'r1', 'completed'); await h.svc.sync();
+  assert.equal(h.svc.get('t1')!.state, 'handed_back');
+  assert.match(handedBack(h)!, /Branch `muster\/RAG-1` is local on Dhairya’s MacBook \(no remote\)/); assert.ok(!/Muster will not retry the push/.test(handedBack(h)!));
+  const g = setup(); await bound(g); const l2 = await g.svc.start({ taskId: 't1', model: OWN, confirm: true });
+  g.setPush(false); g.setHead('def456'); g.tl.test = GREEN; g.tl.user = 'done'; await g.svc.onTurn(l2.chatId!, 'r1', 'completed'); await g.svc.sync();
+  assert.equal(g.svc.get('t1')!.state, 'handed_back'); assert.match(handedBack(g)!, /Could not push: no network Muster will not retry the push by itself/);
+  // even a push that throws
+  const t = setup(); await bound(t); const l3 = await t.svc.start({ taskId: 't1', model: OWN, confirm: true });
+  (t.svc as unknown as { d: CheckoutDeps }).d.git.push = async () => { throw new Error('spawn git ENOENT'); };
+  t.setHead('def456'); t.tl.test = GREEN; t.tl.user = 'done'; await t.svc.onTurn(l3.chatId!, 'r1', 'completed'); await t.svc.sync();
+  assert.equal(t.svc.get('t1')!.state, 'handed_back'); assert.match(handedBack(t)!, /Could not push muster\/RAG-1: spawn git ENOENT/);
+});
+
+test('#303 test setup detection: package.json test script, pytest, go.mod, Cargo, Makefile test target; none for plain notes', async () => {
+  const { hasTestSetup } = await import('../src/runtime/checkout/folder.ts');
+  const mk = (files: Record<string, string>) => { const d = mkdtempSync(join(tmpdir(), 'muster-ts-')); for (const [n, b] of Object.entries(files)) { mkdirSync(join(d, n, '..'), { recursive: true }); writeFileSync(join(d, n), b); } return d; };
+  assert.equal(await hasTestSetup(mk({ 'notes.md': '# n' })), false);
+  assert.equal(await hasTestSetup(mk({ 'package.json': '{"scripts":{"build":"tsc"}}' })), false);
+  assert.equal(await hasTestSetup(mk({ 'package.json': '{"scripts":{"test":"echo \\"Error: no test specified\\" && exit 1"}}' })), false, 'npm’s placeholder is not a test setup');
+  assert.equal(await hasTestSetup(mk({ 'package.json': '{"scripts":{"test":"vitest run"}}' })), true);
+  assert.equal(await hasTestSetup(mk({ 'pyproject.toml': '[tool.pytest.ini_options]\naddopts = "-q"' })), true);
+  assert.equal(await hasTestSetup(mk({ 'tests/test_a.py': 'def test_a(): pass' })), true);
+  for (const f of ['go.mod', 'Cargo.toml', 'pytest.ini', 'pom.xml']) assert.equal(await hasTestSetup(mk({ [f]: 'x' })), true, f);
+  assert.equal(await hasTestSetup(mk({ Makefile: 'build:\n\tcc x\n\ntest:\n\t./run\n' })), true); assert.equal(await hasTestSetup(mk({ Makefile: 'build:\n\tcc x\n' })), false);
 });

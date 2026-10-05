@@ -3,6 +3,13 @@
 All notable changes to Muster Agent. Each `## <version>` section becomes the notes of the
 `agent-v<version>` GitHub Release (`.github/workflows/agent-app-release.yml`).
 
+## Unreleased
+
+- Work locally no longer needs a git repository (#303). Any folder can be linked to a project: a git repository still gets its own worktree and branch, and any other folder is used as it is, with "Working in <folder>" on screen. Muster notes the files at check-out, and progress and the hand-back list the files added, changed and removed instead of a git diff. A plain folder hands back when you say you are done in the local chat (and, if it has a test setup and tests ran, they passed after the last change); it never pushes and never opens a pull request.
+- A project with no folder yet offers "Use a new folder Muster creates" (~/Muster/<Org>/<Project>, readable only by you), "Choose a folder…" or "Use a git repository…", in the first-use sheet and in the project's Settings row. Tasks with no project can be worked locally too: Settings › Local checkouts has a "<Org> · tasks without a project" row, else Muster makes ~/Muster/<Org>/_tasks/<KEY>.
+- Hand-back is no longer stuck for projects without tests (a project with no recognised test setup has no test gate, and the hand-back says "No tests in this project"), for test output Muster cannot read (your own "done" accepts a run that exited 0), or for uncommitted changes (when you say done, Muster commits them as you with "<KEY>: <title>", never on the agent's say-so). Repositories on GitLab, Bitbucket or a self-hosted server are found like GitHub ones, and a repository with no remote, or a push that fails, still hands back with "branch is local on <your Mac>".
+- The error toast for a folder that cannot be linked reads "That folder does not exist…" without the `checkout.bind:` command label, and the copy says files and folders instead of code.
+
 ## 0.3.3
 
 - Every org on your server, not one. Settings › Integrations › Muster Server lists each org you belong to with a checkbox and what the sidebar shows of it (My work, My team or Nothing). The sidebar has one row per org with your open count, an accordion, your own active tasks (five, newest first, then “See all mine”) and the org's projects with your open-count badge. A My work page groups it all by org and project, with filters and a board. The Inbox lists only what asks you, from every org, each row tagged with its org, and includes @mentions of you. Other people's tasks never show up in your sidebar, and a teammate's task is named instead of labelled “You”.

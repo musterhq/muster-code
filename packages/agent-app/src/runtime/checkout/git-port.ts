@@ -2,6 +2,7 @@
 import { execFile } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import { join } from 'node:path';
+import { normalizeRemote } from '../memory-identity.ts';
 
 export interface WorkStat { count: number; added: number; removed: number }
 export interface GitPort {
@@ -11,7 +12,9 @@ export interface GitPort {
   headSha(path: string, rev?: string): Promise<string>;
   /** Files and lines changed in a worktree against a base commit (tracked changes plus new files). */
   stat(path: string, base: string): Promise<WorkStat>;
-  push(path: string, branch: string): Promise<{ pushed: boolean; message: string }>;
+  push(path: string, branch: string): Promise<{ pushed: boolean; message: string; /** The repository has no remote at all: the branch can only stay on this Mac. */ noRemote?: boolean }>;
+  /** Commits every change in the worktree (tracked and new files) as the person's own git identity. Used only when the person said it is done. `committed` is false when there was nothing to commit or git refused (for instance no identity is set). */
+  commitAll(path: string, message: string): Promise<{ committed: boolean; message: string }>;
   /** The branch has been pushed from this worktree and the remote copy is the current HEAD (the remote-tracking ref says so; no network). */
   pushedHead(path: string, branch: string): Promise<boolean>;
   /** A pull request link is real and is this worktree's: `gh` says its head branch is `branch` and the repository is the one `origin` points at. False when `gh` is missing or unsure. */
@@ -26,6 +29,12 @@ const git = (cwd: string, args: string[], timeout = 60_000): Promise<string> => 
 const run = (cwd: string, cmd: string, args: string[], timeout = 12_000): Promise<string> => new Promise((resolve, reject) => {
   execFile(cmd, args, { cwd, timeout, maxBuffer: 2 * 1024 * 1024, env: { ...process.env, GIT_TERMINAL_PROMPT: '0', GH_PROMPT_DISABLED: '1' } }, (error, stdout) => error ? reject(error) : resolve(stdout));
 });
+/** The remote of a git folder is the project's repository: `repo` is the server's normalised `host/path` (GitHub, GitLab, Bitbucket or a self-hosted server alike), and any URL form of the same remote matches (https, ssh, scp-style, with credentials or a `.git` suffix). */
+export const sameRepo = (repo: string | null | undefined, remoteUrl: string): boolean => {
+  if (!repo) return false;
+  const given = repo.trim(), want = /^[\w.-]+(?::\d+)?\/\S+$/.test(given) ? given.toLowerCase().replace(/\.git$/, '') : normalizeRemote(given) ?? given.toLowerCase(), have = normalizeRemote(remoteUrl);
+  return Boolean(have) && have === want;
+};
 /** `github.com/org/repo` from a remote URL (https or ssh), lowercased. */
 export const repoOf = (url: string): string | null => { const m = /github\.com[:/]+([^/\s]+)\/([^/\s]+?)(?:\.git)?\/?$/i.exec(url.trim()); return m ? `${m[1]}/${m[2]}`.toLowerCase() : null; };
 export const realGit: GitPort = {
@@ -72,10 +81,21 @@ export const realGit: GitPort = {
     }
     return { count: files.size, added, removed };
   },
+  async commitAll(path, message) {
+    try {
+      await git(path, ['add', '-A']);
+      if ((await git(path, ['status', '--porcelain'])).trim() === '') return { committed: false, message: 'Nothing to commit.' };
+      // The person's own identity (their git config): Muster never invents an author.
+      const name = (await git(path, ['config', 'user.name']).catch(() => '')).trim(), email = (await git(path, ['config', 'user.email']).catch(() => '')).trim();
+      if (!name || !email) return { committed: false, message: 'Git has no name and email set on this Mac (git config user.name / user.email), so Muster cannot commit for you.' };
+      await git(path, ['commit', '-q', '-m', message]);
+      return { committed: true, message: 'Committed.' };
+    } catch (cause) { return { committed: false, message: `Could not commit: ${cause instanceof Error ? cause.message.split('\n')[0] : String(cause)}` }; }
+  },
   async push(path, branch) {
     // The remote the project came from: origin when there is one, else the first listed.
     const remotes = (await git(path, ['remote']).catch(() => '')).split('\n').filter(Boolean), remote = remotes.includes('origin') ? 'origin' : remotes[0];
-    if (!remote) return { pushed: false, message: 'This repository has no remote, so the branch stays on this Mac.' };
+    if (!remote) return { pushed: false, noRemote: true, message: 'This repository has no remote, so the branch stays on this Mac.' };
     try { await git(path, ['push', '-u', remote, `${branch}:${branch}`], 120_000); return { pushed: true, message: `Pushed ${branch} to ${remote}.` }; }
     catch (cause) { return { pushed: false, message: `Could not push ${branch}: ${cause instanceof Error ? cause.message.split('\n')[0] : String(cause)}` }; }
   },

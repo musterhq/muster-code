@@ -1,16 +1,17 @@
 /**
  * Settings › Integrations › Muster Server: every org (company) the signed-in person belongs to on the server, each with a checkbox and what the sidebar shows
- * of it (My work, My team, Nothing), and the local checkouts on this Mac (one folder per org project, chosen once).
+ * of it (My work, My team, Nothing), and the local checkouts on this Mac (one folder per org project, chosen once; a git repository or any other folder).
  */
 import React, { useCallback, useEffect, useState } from 'react';
-import type { LocalBinding, OrgsList } from '../../shared/domains/checkout-protocol';
+import { NO_PROJECT, type LocalBinding, type OrgsList } from '../../shared/domains/checkout-protocol';
 import type { OrgSidebarMode } from '../../shared/org-work';
 import { invoke } from '../bridge';
-import { notifyError, notifySuccess } from '../store';
+import { fail, FolderChoices, FOLDER_COPY } from './FolderChoice';
+import { plainError } from './resourceErrors';
 import { OrgAvatar } from './OrgSidebar';
 import './orgs-card.css';
 
-const errorText = (cause: unknown) => cause instanceof Error ? cause.message : String(cause);
+const errorText = (cause: unknown) => plainError(cause).message;
 const MODES: { id: OrgSidebarMode; label: string }[] = [{ id: 'mine', label: 'My work' }, { id: 'team', label: 'My team' }, { id: 'none', label: 'Nothing' }];
 const plural = (n: number, one: string) => `${n} ${one}${n === 1 ? '' : 's'}`;
 
@@ -20,7 +21,7 @@ export function OrgsCard(): React.ReactElement | null {
   const load = useCallback(() => { invoke('orgs.list', {}).then(setList, c => setError(errorText(c))); }, []);
   useEffect(load, [load]);
   const set = (companyId: string, patch: { enabled?: boolean; sidebar?: OrgSidebarMode }) => {
-    invoke('orgs.set', { companyId, ...patch }).then(setList, c => notifyError(c));
+    invoke('orgs.set', { companyId, ...patch }).then(setList, fail);
   };
   if (error && !list) return <p role="alert" className="settings-error">{error}</p>;
   if (!list?.connected) return null;
@@ -35,39 +36,35 @@ export function OrgsCard(): React.ReactElement | null {
   </section>;
 }
 
+/** What a binding says in a row: a plain folder is "Working in <folder>"; a git repository shows its dev branch. */
+const bindingLabel = (b: LocalBinding | null): string => !b ? '→ not bound' : b.kind === 'folder' ? `→ Working in ${b.path}` : `→ ${b.path} (${b.devBranch})`;
+
 export function LocalCheckoutsCard(): React.ReactElement | null {
   const [data, setData] = useState<{ bindings: LocalBinding[]; orgs: { id: string; name: string; projects: { id: string; name: string }[] }[] } | null>(null);
   const [settings, setSettings] = useState<{ staleHours: number; deviceName: string } | null>(null);
   const load = useCallback(() => { invoke('checkout.bindings', {}).then(setData, () => undefined); invoke('checkout.settings', {}).then(setSettings, () => undefined); }, []);
   useEffect(load, [load]);
-  const choose = async (orgId: string, projectId: string) => {
-    try {
-      const folder = await invoke('folder.pick', undefined);
-      if (!folder) return;
-      const b = await invoke('checkout.bind', { orgId, projectId, path: folder.path });
-      notifySuccess(`${b.projectName} now works from ${b.path} (branch ${b.devBranch}).`); load();
-    } catch (cause) { notifyError(cause); }
-  };
   if (!data || !data.orgs.length) return null;
-  const rows = data.orgs.flatMap(o => o.projects.map(p => ({ org: o, project: p, binding: data.bindings.find(b => b.orgId === o.id && b.projectId === p.id) ?? null })));
+  // Every project, plus one row per org for its tasks that belong to no project.
+  const rows = data.orgs.flatMap(o => [...o.projects.map(p => ({ org: o, id: p.id, label: p.name })), { org: o, id: NO_PROJECT, label: 'tasks without a project' }]).map(r => ({ ...r, binding: data.bindings.find(b => b.orgId === r.org.id && b.projectId === r.id) ?? null }));
   return <section className="ws-orgs-card" aria-label="Local checkouts on this Mac">
     <h4>Local checkouts on this Mac</h4>
-    <p className="project-edit-hint">Where each project’s code lives on this Mac. Work locally creates a worktree and a branch from the project’s dev branch here; the server’s own workspace path is never used.</p>
-    <ul className="ws-orgs-list">{rows.map(({ org, project, binding }) => <li key={`${org.id}:${project.id}`} className="ws-orgs-row">
-      <span className="ws-orgs-name"><span>{org.name} › {project.name}<small> {binding ? `→ ${binding.path} (${binding.devBranch})` : '→ not bound'}</small></span></span>
+    <p className="project-edit-hint">{FOLDER_COPY}</p>
+    <ul className="ws-orgs-list">{rows.map(({ org, id, label, binding }) => <li key={`${org.id}:${id}`} className="ws-orgs-row" data-binding-kind={binding?.kind ?? 'none'}>
+      <span className="ws-orgs-name"><span>{org.name} {id === NO_PROJECT ? '·' : '›'} {label}<small> {bindingLabel(binding)}</small></span></span>
       <span className="ws-orgs-actions">
-        <button type="button" className="settings-button secondary" onClick={() => void choose(org.id, project.id)}>{binding ? 'Change…' : 'Choose folder…'}</button>
-        {binding && <button type="button" className="settings-button secondary" onClick={() => void invoke('checkout.unbind', { orgId: org.id, projectId: project.id }).then(load, notifyError)}>Unlink</button>}
+        <FolderChoices orgId={org.id} projectId={id} done={load} bound={Boolean(binding)}/>
+        {binding && <button type="button" className="settings-button secondary" onClick={() => void invoke('checkout.unbind', { orgId: org.id, projectId: id }).then(load, fail)}>Unlink</button>}
       </span>
     </li>)}</ul>
     {settings && <div className="ws-orgs-prefs">
-      <label className="project-edit-goal"><span>This Mac is called</span><input value={settings.deviceName} maxLength={80} onChange={e => setSettings({ ...settings, deviceName: e.target.value })} onBlur={() => void invoke('checkout.settings', { deviceName: settings.deviceName }).then(setSettings, notifyError)}/></label>
-      <label className="project-edit-goal"><span>Remind me after (hours quiet)</span><input type="number" min={0} max={720} value={settings.staleHours} onChange={e => setSettings({ ...settings, staleHours: Number(e.target.value) })} onBlur={() => void invoke('checkout.settings', { staleHours: settings.staleHours }).then(setSettings, notifyError)}/></label>
+      <label className="project-edit-goal"><span>This Mac is called</span><input value={settings.deviceName} maxLength={80} onChange={e => setSettings({ ...settings, deviceName: e.target.value })} onBlur={() => void invoke('checkout.settings', { deviceName: settings.deviceName }).then(setSettings, fail)}/></label>
+      <label className="project-edit-goal"><span>Remind me after (hours quiet)</span><input type="number" min={0} max={720} value={settings.staleHours} onChange={e => setSettings({ ...settings, staleHours: Number(e.target.value) })} onBlur={() => void invoke('checkout.settings', { staleHours: settings.staleHours }).then(setSettings, fail)}/></label>
     </div>}
   </section>;
 }
 
-/** A server project's "Local checkout on this Mac" row: the bound folder, the worktrees in use and their engine, with Change and Unlink. */
+/** A server project's "Local checkout on this Mac" row: the bound folder, the tasks being worked on, and the three ways to choose (a new Muster folder, any folder, a git repository), with Unlink. */
 export function ProjectCheckoutRow({ orgId, projectId }: { orgId: string; projectId: string }): React.ReactElement {
   const [data, setData] = useState<{ binding: LocalBinding | null; leases: { key: string; branch: string | null; engine: string }[] } | null>(null);
   const load = useCallback(() => {
@@ -77,14 +74,11 @@ export function ProjectCheckoutRow({ orgId, projectId }: { orgId: string; projec
     })).catch(() => setData({ binding: null, leases: [] }));
   }, [orgId, projectId]);
   useEffect(load, [load]);
-  const choose = async () => {
-    try { const folder = await invoke('folder.pick', undefined); if (folder) { await invoke('checkout.bind', { orgId, projectId, path: folder.path }); load(); } } catch (cause) { notifyError(cause); }
-  };
   const b = data?.binding ?? null;
   return <div><dt>Local checkout on this Mac</dt><dd>
-    {b ? <><code>{b.path}</code> <span className="ws-faint">dev branch {b.devBranch}</span></> : <span className="ws-faint" data-local-checkout="none">Not linked</span>}
+    {b ? b.kind === 'folder' ? <><span data-local-checkout="folder">Working in</span> <code>{b.path}</code></> : <><code>{b.path}</code> <span className="ws-faint">dev branch {b.devBranch}</span></> : <span className="ws-faint" data-local-checkout="none">Not linked</span>}
     {data?.leases.map(l => <span key={l.key} className="pp-field-hint ws-faint">Working locally on {l.key}{l.branch ? ` (${l.branch})` : ''} · {l.engine}</span>)}
-    <span className="pp-field-hint ws-faint">Work locally on a task of this project creates a worktree and a branch from the dev branch here. The server’s workspace path above is never used.</span>
-    <span className="ws-orgs-actions"><button type="button" className="settings-button secondary" onClick={() => void choose()}>{b ? 'Change…' : 'Choose folder…'}</button>{b && <button type="button" className="settings-button secondary" onClick={() => void invoke('checkout.unbind', { orgId, projectId }).then(load, notifyError)}>Unlink</button>}</span>
+    <span className="pp-field-hint ws-faint">A git repository gets its own worktree and branch for each task; any other folder is used as it is. The server’s workspace path above is never used.</span>
+    <span className="ws-orgs-actions"><FolderChoices orgId={orgId} projectId={projectId} done={load} bound={Boolean(b)} open/>{b && <button type="button" className="settings-button secondary" onClick={() => void invoke('checkout.unbind', { orgId, projectId }).then(load, fail)}>Unlink</button>}</span>
   </dd></div>;
 }

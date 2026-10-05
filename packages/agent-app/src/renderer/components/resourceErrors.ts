@@ -42,3 +42,6 @@ export function gitErrorMessage(error: unknown): string | undefined {
   if (/spawn git|git: command not found|git not found/i.test(text)) return 'Git is not installed, so changes cannot be read.';
   return text ? `Changes could not be read. ${text.replace(/\s+/g, ' ').slice(0, 160)}` : 'Changes could not be read.';
 }
+
+/** The message of a failed command as the person should read it, as a plain Error: no `checkout.bind:` command label. `notifyError` puts a bridge error's command back in front of its text; this is for panels whose messages are written for people. */
+export const plainError = (cause: unknown): Error => new Error(cleanIpcError(cause));
