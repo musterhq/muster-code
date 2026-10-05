@@ -5,6 +5,7 @@
  */
 import type { DatabaseSync } from 'node:sqlite';
 import { effectivePricing, estimateCostUsd, type ModelPolicy, type ModelPricing } from '../../shared/model-catalog.ts';
+import type { LedgerEntry } from '../../shared/domains/paperclip-protocol.ts';
 import type { CostBucket, CostDay, CostsReport, ProfileStats, ProviderWindow } from '../../shared/domains/insight-protocol.ts';
 
 /** One turn, as the pure tests build them. The runtime never builds these: it reads groups. */
@@ -83,6 +84,23 @@ export function repriceGroups(groups: readonly TurnGroup[], policy: ModelPolicy,
     const cost = estimateCostUsd({ inputTokens: g.uInput, cachedInputTokens: g.uCached, outputTokens: g.uOutput, reasoningOutputTokens: 0, requests: unpriced }, pricing);
     return cost === null ? g : { ...g, cost: g.cost + cost, pricedN: g.n, uInput: 0, uOutput: 0, uCached: 0 };
   });
+}
+
+/**
+ * A linked server's run receipts as the groups `buildCosts` reads: the server's own usage and cost, per day, project, agent, provider,
+ * model and outcome. A run with no reported cost is counted unpriced (never $0); one with no tokens counts as a turn with none.
+ */
+export function groupsFromReceipts(receipts: readonly Pick<LedgerEntry, 'projectId' | 'agent' | 'provider' | 'model' | 'tokens' | 'costUsd' | 'endedAt' | 'outcome'>[], offsetMin: number, projectId?: string): TurnGroup[] {
+  const groups = new Map<string, TurnGroup>();
+  for (const r of receipts) {
+    const pid = projectId ?? r.projectId, day = dayOf(r.endedAt, offsetMin), key = [day, pid, r.agent, r.provider, r.model, r.outcome].join('\u0000');
+    const g = groups.get(key) ?? { day, projectId: pid, agent: r.agent, provider: r.provider, model: r.model, outcome: r.outcome, n: 0, input: 0, output: 0, cached: 0, cost: 0, pricedN: 0, uInput: 0, uOutput: 0, uCached: 0 };
+    const input = r.tokens?.input ?? 0, output = r.tokens?.output ?? 0, cached = r.tokens?.cached ?? 0;
+    g.n++; g.input += input; g.output += output; g.cached += cached;
+    if (r.costUsd !== null) { g.cost += r.costUsd; g.pricedN++; } else { g.uInput += input; g.uOutput += output; g.uCached += cached; }
+    groups.set(key, g);
+  }
+  return [...groups.values()];
 }
 
 const bucket = (key: string, label: string): CostBucket => ({ key, label, turns: 0, inputTokens: 0, outputTokens: 0, costUsd: null, unpricedTurns: 0 });

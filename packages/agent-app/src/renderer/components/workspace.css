@@ -51,6 +51,8 @@
 .pp-prefix { width: 110px; font-family: var(--mono); text-transform: uppercase; }
 .pp-check { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .pp-pre { white-space: pre-wrap; }
+.pp-field-hint { display: block; font-size: var(--fs-12); margin-top: 2px; }
+.ws-activity-scope { margin: 6px 0; }
 .pp-danger { display: flex; flex-direction: column; gap: 10px; padding: 14px; border: 1px solid color-mix(in srgb, var(--danger) 40%, var(--hairline)); border-radius: var(--radius-10); background: color-mix(in srgb, var(--danger) 6%, transparent); }
 .pp-danger h3 { margin: 0; color: var(--danger); font-size: var(--fs-12); font-weight: 600; letter-spacing: .04em; text-transform: uppercase; }
 .pp-danger p { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 0; color: var(--text-dim); font-size: var(--fs-13); }

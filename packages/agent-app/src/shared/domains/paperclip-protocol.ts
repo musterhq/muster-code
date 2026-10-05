@@ -7,6 +7,7 @@
  * - `paperclip`: the linked server. The runtime talks to it; the token lives in the encrypted secret store and never
  *   reaches the renderer.
  */
+import type { CostsReport } from './insight-protocol.ts';
 import type { MemoryConnection, MemoryRecord } from './memory-protocol.ts';
 import type { TimelineItem } from '../protocol.ts';
 import type { Interaction, Suggestion } from './agent-tools-protocol.ts';
@@ -167,6 +168,8 @@ export interface LedgerEntry {
   trigger: string; agent: string; provider: string | null; model: string | null;
   tokens: { input: number; cached: number; output: number; reasoning: number } | null; costUsd: number | null;
   tools: { name: string; count: number }[]; approvals: number;
+  /** A linked server's run: `unfetched` means the list this receipt came from carries no tool data, so an empty `tools` is "not read yet", never "none recorded". Open the run to read it. Absent: the tools are known (a Muster turn, or a run whose tools were read). */
+  toolsState?: 'unfetched';
   /** Shell commands that ran tests (npm test, pytest, go test…). */
   tests: number;
   /** Null when the folder has no review baseline (not a Git repository) or the files could not be read. */
@@ -174,6 +177,14 @@ export interface LedgerEntry {
   startedAt: string | null; endedAt: string; durationMs: number | null; outcome: string;
   prevHash: string | null; hash: string | null;
 }
+/** One run of the linked server read by id (the run page), with where the server shows it. `missing`: the server answered 404 for that id. */
+export interface PaperclipRunView {
+  run: WorkspaceRun | null; receipt: LedgerEntry | null; missing: boolean;
+  /** "Open in server": the server's own page for this run and for its task, when the server has such pages. */
+  links: { run: string | null; task: string | null };
+}
+/** A connected project's costs, read through the server. `report: null`: the server cannot provide them, and `note` says so. */
+export interface PaperclipCostsView { report: CostsReport | null; note: string | null }
 export interface LedgerView { entries: LedgerEntry[]; chain: { ok: boolean; entries: number; head: string; brokenAt: number | null } }
 /** System cards in a task thread, between agent turns. */
 export type ThreadCard =
@@ -340,6 +351,10 @@ export interface PaperclipCommands {
   /** Wakes only what Pause paused (company-wide or for that project), never an agent that was paused on purpose or is waiting for approval. */
   'paperclip.resumeAll': { input: { source: WorkspaceSource; projectId?: string }; output: { changed: number } };
   'paperclip.run.cancel': { input: { id: string }; output: { ok: true } };
+  /** One run of the linked server by id: for a run the snapshot's recent list no longer holds, and to read its tool use. */
+  'paperclip.run': { input: { id: string }; output: PaperclipRunView };
+  /** Costs of a connected (server) project, from the server's own run records; the local Ledger knows nothing of it. */
+  'paperclip.costs': { input: { projectId: string; days?: number; utcOffsetMinutes?: number }; output: PaperclipCostsView };
   /** Decides a Paperclip approval (approve, reject, request revision) with an optional note. Only ever sent when you press the button. */
   'paperclip.approval.decide': { input: { id: string; decision: ApprovalDecision; note?: string }; output: { ok: true } };
   /** What memory would be recalled for a task: its repository's bank (matched by git remote), else its project's, else personal. Read-only. */
@@ -371,7 +386,7 @@ export type PaperclipEvent = { type: 'projectsWorkspaceChanged'; scopes: ('tasks
 export const PAPERCLIP_COMMANDS = {
   'paperclip.config.get': true, 'paperclip.config.set': true, 'paperclip.signin.start': true, 'paperclip.signin.status': true, 'paperclip.signin.cancel': true, 'paperclip.signin.signout': true, 'paperclip.disconnect': true, 'paperclip.session.set': true, 'paperclip.session.clear': true, 'paperclip.test': true, 'paperclip.snapshot': true, 'paperclip.task': true,
   'paperclip.comment': true, 'paperclip.task.update': true, 'paperclip.task.create': true, 'paperclip.agent.pause': true, 'paperclip.agent.resume': true,
-  'paperclip.pauseAll': true, 'paperclip.resumeAll': true, 'paperclip.approval.decide': true, 'paperclip.run.cancel': true, 'paperclip.memory': true, 'paperclip.list': true,
+  'paperclip.pauseAll': true, 'paperclip.resumeAll': true, 'paperclip.approval.decide': true, 'paperclip.run.cancel': true, 'paperclip.run': true, 'paperclip.costs': true, 'paperclip.memory': true, 'paperclip.list': true,
   'paperclip.watch': true, 'paperclip.badge': true, 'paperclip.ledger': true, 'paperclip.ledger.backfill': true, 'paperclip.inbox.dismiss': true, 'paperclip.inbox.dismissed': true, 'paperclip.inbox.restore': true, 'paperclip.interaction.respond': true, 'paperclip.import': true, 'paperclip.task.start': true, 'paperclip.dashboard': true, 'paperclip.import.plan': true,
 } as const satisfies Record<keyof PaperclipCommands, true>;
 

@@ -16,6 +16,8 @@ import './costs-panel.css';
 const errorText = (cause: unknown) => cause instanceof Error ? cause.message : String(cause);
 export const costText = (b: Pick<CostBucket, 'costUsd' | 'unpricedTurns' | 'turns'>): string => b.costUsd === null ? (b.turns ? 'Unpriced' : '—') : b.unpricedTurns ? `${formatUsd(b.costUsd)} + unpriced` : formatUsd(b.costUsd);
 const DAYS = [7, 30, 90] as const;
+/** A connected project's costs, read through the server (the local Ledger has never heard of it). */
+const readServerCosts = (projectId: string, days: number, utcOffsetMinutes: number) => invoke('paperclip.costs', { projectId, days, utcOffsetMinutes });
 
 function Table({ title, rows, empty }: { title: string; rows: CostBucket[]; empty: string }): React.ReactElement {
   const top = Math.max(1, ...rows.map(r => r.costUsd ?? 0));
@@ -31,19 +33,25 @@ function Table({ title, rows, empty }: { title: string; rows: CostBucket[]; empt
   </section>;
 }
 
-/** `projectId` scopes it to one project (the project page's Ledger tab); the provider windows then stay out of it. */
-export function CostsPanel({ projectId }: { projectId?: string }): React.ReactElement {
+/** projectId scopes it to one project (the project page's Ledger tab); the provider windows then stay out of it.
+ *  server: the project lives on the connected server, so its costs are read through that server, not from the local Ledger (which has never heard of it). */
+export function CostsPanel({ projectId, server = false }: { projectId?: string; server?: boolean }): React.ReactElement {
   const [days, setDays] = useState<7 | 30 | 90>(30);
   const [report, setReport] = useState<CostsReport | null>(null);
+  const [note, setNote] = useState<string | null>(null);
+  const [unavailable, setUnavailable] = useState(false);
   const [error, setError] = useState('');
   const [tick, setTick] = useState(0);
   useEffect(() => {
     let live = true; setError('');
-    invoke('insight.costs', { days, utcOffsetMinutes: -new Date().getTimezoneOffset(), ...(projectId ? { projectId } : {}) }).then(r => { if (live) setReport(r); }, e => { if (live) setError(errorText(e)); });
+    const utcOffsetMinutes = -new Date().getTimezoneOffset();
+    if (server && projectId) readServerCosts(projectId, days, utcOffsetMinutes).then(r => { if (live) { setReport(r.report); setNote(r.note); setUnavailable(r.report === null); } }, e => { if (live) setError(errorText(e)); });
+    else invoke('insight.costs', { days, utcOffsetMinutes, ...(projectId ? { projectId } : {}) }).then(r => { if (live) { setReport(r); setNote(null); setUnavailable(false); } }, e => { if (live) setError(errorText(e)); });
     return () => { live = false; };
-  }, [days, projectId, tick]);
+  }, [days, projectId, server, tick]);
   if (error) return <ResourceState kind="error" message="Costs could not be read." detail={error} onRetry={() => setTick(n => n + 1)}/>;
-  if (!report) return <ResourceState kind="loading" label="Reading the Ledger" rows={4}/>;
+  if (unavailable) return <ResourceState kind="empty" title="Costs come from the server" message={note ?? 'Costs for server projects come from the server; not available here yet.'}/>;
+  if (!report) return <ResourceState kind="loading" label={server ? 'Reading the server’s runs' : 'Reading the Ledger'} rows={4}/>;
   const t = report.totals, priced = report.byDay.some(d => d.costUsd !== null);
   const span = `Last ${report.days} days`;
   return <div className="costs" aria-label="Costs">
@@ -70,7 +78,8 @@ export function CostsPanel({ projectId }: { projectId?: string }): React.ReactEl
       {report.windows.length === 0 ? <p className="ws-board-empty">No provider here reports rate limits. ChatGPT sign-ins and Codex gateways do, after a run.</p>
         : <div className="costs-window-list">{report.windows.map(w => <div key={w.providerId} className="costs-window"><h4>{w.name}</h4><ProviderUsageMeters usage={w.usage ?? undefined} loaded/></div>)}</div>}
     </section>}
+    {note && <p className="costs-note" role="status" data-server-note="true">{note}</p>}
     {report.truncated && <p className="costs-note" role="status" data-truncated="true">The Ledger holds more than a report reads, so the oldest days are missing from these totals. Choose a shorter period for exact numbers.</p>}
-    <p className="costs-note">Costs are estimates from the Ledger{report.ledgerSince ? `, which goes back to ${new Date(report.ledgerSince).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}` : ''}. A turn on a model with no price is counted as unpriced; set your own price in Settings › Models.</p>
+    {server ? <p className="costs-note">Costs are what the server reported for this project’s recent runs (its latest 200 runs, across the organisation). A run the server reported no cost for is counted as unpriced.</p> : <p className="costs-note">Costs are estimates from the Ledger{report.ledgerSince ? `, which goes back to ${new Date(report.ledgerSince).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}` : ''}. A turn on a model with no price is counted as unpriced; set your own price in Settings › Models.</p>}
   </div>;
 }

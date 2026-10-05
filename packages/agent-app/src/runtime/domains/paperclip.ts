@@ -17,7 +17,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from '
 import { join } from 'node:path';
 import type { MemoryRecord } from '../../shared/domains/memory-protocol.ts';
 import {
-  budgetUse, PAPERCLIP_LOCAL_URL, WORKSPACE_PRIORITIES, WORKSPACE_STATUSES, type ApprovalDecision, type DashboardData, type LedgerView, type LiveChannel, type PaperclipConfigView, type PaperclipLink, type PaperclipMode, type PaperclipTestResult,
+  budgetUse, PAPERCLIP_LOCAL_URL, WORKSPACE_PRIORITIES, WORKSPACE_STATUSES, type ApprovalDecision, type DashboardData, type LedgerView, type LiveChannel, type PaperclipConfigView, type PaperclipCostsView, type PaperclipRunView, type PaperclipLink, type PaperclipMode, type PaperclipTestResult,
   type ThreadCard, type WorkspaceAgent, type WorkspaceApproval, type WorkspaceBadge, type WorkspaceInboxItem, type WorkspaceList, type WorkspaceListKind, type WorkspaceMemory, type WorkspaceProject,
   type WorkspacePriority, type WorkspaceRow, type WorkspaceSnapshot, type WorkspaceSource, type WorkspaceStatus, type WorkspaceTask, type WorkspaceTaskDetail,
 } from '../../shared/domains/paperclip-protocol.ts';
@@ -36,6 +36,7 @@ import { attachTurnLedger, TurnLedger } from '../turn-ledger.ts';
 import { importLedgerHistory, paperclipHistory, type HistoryResult } from '../ledger-history.ts';
 import { LocalWorkspace, type Invoke, type LocalPart } from '../workspace-local.ts';
 import { importFromPaperclip, planImport, SqliteImportStore } from '../paperclip-import.ts';
+import { buildCosts, groupsFromReceipts } from '../insight/costs.ts';
 import { buildDashboard, DASHBOARD_DAYS, ledgerAggregates, monthStart } from '../workspace-dashboard.ts';
 import type { DomainContext, DomainModule } from './types.ts';
 
@@ -546,9 +547,45 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
         await paperclipPart(false);
         if (!built) throw new Error(lastError ?? 'not reachable');
         remote = await c.rows(kind, companies.find(x => x.id === built!.companyId) ?? { id: built.companyId, name: originLabel(), prefix: '' });
+        // An event about a task belongs to that task's project: what lets a project's Activity show only its own.
+        if (kind === 'audit') { const projectOfTask = new Map(built.part.tasks.map(t => [t.id, t.projectId])); remote = remote.map(r => r.projectId || !r.taskId ? r : { ...r, projectId: projectOfTask.get(r.taskId) ?? null }); }
       } catch (cause) { note = `Muster Server could not be read: ${cause instanceof Error ? cause.message : String(cause)}`; }
     }
     return { kind, rows: [...mine, ...remote].sort((a, b) => (b.at ?? '').localeCompare(a.at ?? '')).slice(0, 400), note };
+  };
+
+  /** One run of the linked server by id (the snapshot only keeps the latest), with its tool use and the server's own pages for it. */
+  const runView = async (runId: string): Promise<PaperclipRunView> => {
+    const c = connection();
+    if (!c) return { run: null, receipt: null, missing: true, links: { run: null, task: null } };
+    await paperclipPart(false);
+    const company = companies.find(x => x.id === built?.companyId) ?? { id: built?.companyId ?? '', name: originLabel(), prefix: '' };
+    const known = built?.part.runs.find(r => r.id === runId) ?? null;
+    const found = c.runDetail ? await c.runDetail(runId, built?.agents ?? new Map()) : known ? { run: known, receipt: null } : null;
+    const run = found?.run ?? known;
+    if (!run) return { run: null, receipt: null, missing: true, links: { run: null, task: null } };
+    const task = run.taskId ? built?.part.tasks.find(t => t.id === run.taskId) : undefined;
+    return { run: { ...run, ...(known ?? {}) }, receipt: found?.receipt ?? null, missing: false, links: { run: c.linkFor?.(company, { runId: run.id, agentId: run.agentId }) ?? null, task: task ? c.linkFor?.(company, { taskKey: task.key }) ?? null : null } };
+  };
+  const COSTS_UNAVAILABLE = 'Costs for server projects come from the server; not available here yet.';
+  /** A connected project's costs, from the server's own run records. The local Ledger has none for it. */
+  const serverCosts = async (projectId: string, daysInput: unknown, offsetInput: unknown): Promise<PaperclipCostsView> => {
+    const c = connection();
+    if (!c) return { report: null, note: COSTS_UNAVAILABLE };
+    await paperclipPart(false);
+    if (!built) return { report: null, note: COSTS_UNAVAILABLE };
+    const project = built.part.projects.find(p => p.id === projectId);
+    if (!project) return { report: null, note: 'This project was not found among the connected server’s projects.' };
+    const days = daysInput === 7 || daysInput === 30 || daysInput === 90 ? daysInput : 30;
+    const offset = typeof offsetInput === 'number' && Math.abs(offsetInput) <= 14 * 60 ? Math.round(offsetInput) : 0;
+    const company = companies.find(x => x.id === built!.companyId) ?? { id: built.companyId, name: originLabel(), prefix: '' };
+    const limit = 200;
+    let receipts; try { receipts = await c.receipts(company, limit, built.agents); } catch { return { report: null, note: COSTS_UNAVAILABLE }; }
+    const inProject = new Set(built.part.tasks.filter(t => t.projectId === projectId).map(t => t.id));
+    const mine = receipts.filter(r => r.projectId === projectId || (r.taskId !== null && inProject.has(r.taskId)));
+    const report = buildCosts(groupsFromReceipts(mine, offset, projectId), { days, offsetMin: offset, now: Date.now(), projectNames: new Map([[projectId, project.name]]), windows: [], ledgerSince: mine.map(r => r.endedAt).sort()[0] ?? null, truncated: receipts.length >= limit });
+    const reported = mine.some(r => r.tokens !== null || r.costUsd !== null);
+    return { report, note: mine.length && !reported ? `The server reported no token or cost data for this project’s ${mine.length} ${mine.length === 1 ? 'run' : 'runs'}.` : null };
   };
 
   const badge = async (): Promise<WorkspaceBadge> => {
@@ -688,6 +725,8 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
       'paperclip.test': input => conn.test(input),
       'paperclip.snapshot': input => snapshot(input.refresh === true),
       'paperclip.task': async input => { const taskId = id(input.id); return await owner('task', taskId) === 'paperclip' ? paperclipDetail(taskId) : localDetail(taskId); },
+      'paperclip.run': input => runView(id(input.id)),
+      'paperclip.costs': input => serverCosts(id(input.projectId), input.days, input.utcOffsetMinutes),
       'paperclip.comment': async input => {
         const taskId = id(input.taskId), body = text(input.body, 'Message', 20_000);
         if (await owner('task', taskId) === 'local') { const comment = await local.comment(taskId, body); queueEmit(['tasks'], taskId); return comment; }

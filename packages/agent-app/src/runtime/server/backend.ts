@@ -62,6 +62,10 @@ export interface ServerBackend {
   /** Run receipts, recent activity and budgets for the Dashboard. */
   dashboard(company: WorkspaceCompany, agents: ReadonlyMap<string, WorkspaceAgent>): Promise<{ receipts: LedgerEntry[]; activity: WorkspaceRow[]; budgets?: unknown }>;
   rows(kind: WorkspaceListKind, company: WorkspaceCompany): Promise<WorkspaceRow[]>;
+  /** One run by id, with its tool use read from the server. `null`: the server has no such run. Optional: a backend that cannot read a single run leaves it out. */
+  runDetail?(runId: string, agents: ReadonlyMap<string, WorkspaceAgent>): Promise<{ run: WorkspaceRun; receipt: LedgerEntry } | null>;
+  /** The server's own web page for a run or a task ("Open in server"), or null when it has no such page. */
+  linkFor?(company: WorkspaceCompany, target: { runId?: string; agentId?: string | null; taskKey?: string }): string | null;
   importReader(): ImportReader;
   openLive(company: WorkspaceCompany, handlers: LiveHandlers, factory?: SocketFactory): LiveSocket;
 }

@@ -67,10 +67,15 @@ export function mapProject(p: Json, tasks: readonly WorkspaceTask[]): WorkspaceP
 export const mapGoal = (g: Json): WorkspaceGoal => ({ id: String(g.id), title: str(g.title) ?? 'Goal', status: str(g.status) ?? 'active', level: str(g.level), parentId: str(g.parentId), ownerAgentId: str(g.ownerAgentId) });
 
 const RUN_STATE: Record<string, RunState> = { queued: 'queued', scheduled_retry: 'queued', running: 'running', succeeded: 'succeeded', failed: 'failed', cancelled: 'cancelled', timed_out: 'timed_out', interrupted: 'interrupted' };
+/**
+ * Paperclip answers about a run in two shapes: a heartbeat run (`/heartbeat-runs`, `/live-runs`: `id` and a `contextSnapshot` holding
+ * the task) and an issue's run row (`/issues/:id/runs`: `runId` and `contextIssueId`, no `id`, no snapshot). Both must give the same
+ * run, or a run opened from a task is a different run ("undefined") from the one the Ledger lists.
+ */
 export function mapRun(r: Json): WorkspaceRun {
   const status = RUN_STATE[String(r.status)] ?? 'failed', context = obj(r.contextSnapshot);
   return {
-    id: String(r.id), agentId: str(r.agentId), taskId: str(context.issueId) ?? str(context.taskId), status, trigger: str(r.invocationSource), source: 'paperclip',
+    id: String(str(r.id) ?? str(r.runId)), agentId: str(r.agentId), taskId: str(context.issueId) ?? str(context.taskId) ?? str(r.contextIssueId), status, trigger: str(r.invocationSource), source: 'paperclip',
     createdAt: iso(r.createdAt), startedAt: str(r.startedAt), finishedAt: str(r.finishedAt), error: str(r.error) ?? str(r.errorCode),
     cancellable: status === 'queued' || status === 'running',
   };
@@ -159,7 +164,13 @@ export function mapRows(kind: 'artifacts' | 'audit' | 'routines', payload: unkno
   const list = kind === 'artifacts' ? arr(obj(payload).artifacts) : arr(Array.isArray(payload) ? payload : obj(payload).items);
   return list.slice(0, 200).map(item => {
     if (kind === 'artifacts') { const issue = obj(item.issue), project = obj(item.project); return { id: String(item.id), title: str(item.title) ?? 'Artifact', detail: [str(issue.identifier), str(item.mediaKind), str(item.previewText)?.slice(0, 140)].filter(Boolean).join(' · '), status: str(item.source), at: str(item.updatedAt), source: 'paperclip', projectId: str(project.id) ?? str(item.projectId) }; }
-    if (kind === 'audit') return { id: String(item.id), title: `${str(item.action) ?? 'action'} · ${str(item.entityType) ?? ''}`, detail: `${str(item.actorType) ?? 'actor'} ${String(item.actorId ?? '').slice(0, 8)}`, status: null, at: str(item.createdAt), source: 'paperclip' };
+    if (kind === 'audit') {
+      // Which project and task an event is about, so a project's Activity can show only its own (the server's feed is company-wide).
+      const details = obj(item.details), entity = str(item.entityType), entityId = str(item.entityId);
+      const taskId = entity === 'issue' ? entityId : str(details.issueId) ?? str(details.taskId);
+      const projectId = entity === 'project' ? entityId : str(details.projectId);
+      return { id: String(item.id), title: `${str(item.action) ?? 'action'} · ${str(item.entityType) ?? ''}`, detail: `${str(item.actorType) ?? 'actor'} ${String(item.actorId ?? '').slice(0, 8)}`, status: null, at: str(item.createdAt), source: 'paperclip', projectId, taskId };
+    }
     return mapRoutine(item);
   });
 }
@@ -188,7 +199,8 @@ export function mapReceipt(r: Json, agents: ReadonlyMap<string, WorkspaceAgent>)
     id: `paperclip:${run.id}`, seq: null, source: 'paperclip', chatId: null, runId: run.id, taskId: run.taskId, projectId: str(context.projectId),
     trigger: str(r.invocationSource) ?? 'run', agent: agent?.name ?? 'Agent', provider: str(usage.provider) ?? agent?.adapter ?? null, model: str(usage.model) ?? agent?.model ?? null,
     tokens: input === null && output === null ? null : { input: input ?? 0, cached: num(usage.cachedInputTokens) ?? num(usage.cacheReadInputTokens) ?? 0, output: output ?? 0, reasoning: num(usage.reasoningOutputTokens) ?? 0 },
-    costUsd: num(usage.costUsd) ?? num(usage.cost_usd), tools: [], approvals: 0, tests: 0, files: null,
+    // A run's list row carries no tool use (it lives in the run's own log): `unfetched`, not "none recorded". The run page reads it.
+    costUsd: num(usage.costUsd) ?? num(usage.cost_usd), tools: [], toolsState: 'unfetched', approvals: 0, tests: 0, files: null,
     startedAt: run.startedAt, endedAt: run.finishedAt ?? run.createdAt, durationMs: run.startedAt && run.finishedAt ? Date.parse(run.finishedAt) - Date.parse(run.startedAt) : null,
     outcome: run.status, prevHash: null, hash: null,
   };
