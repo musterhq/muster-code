@@ -72,7 +72,13 @@ export interface LocalOrgCopy {
 
 // --- bindings and leases --------------------------------------------------------------------------------------------------------
 /** A local checkout, per Mac per org project: where this project's repository lives on this Mac. */
-export interface LocalBinding { orgId: string; projectId: string; projectName: string; path: string; devBranch: string; boundAt: string }
+/** The project id a binding carries for an org's tasks that belong to no project ("Project: None"): the org's default folder. */
+export const NO_PROJECT = '_tasks';
+/** What a bound folder is: a git repository (gets a worktree and a branch) or any other folder (used in place). */
+export type FolderKind = 'git' | 'folder';
+export interface LocalBinding { orgId: string; projectId: string; projectName: string; path: string; /** Empty for a plain folder: it has no branch. */ devBranch: string; boundAt: string; /** Absent on a row written by an older build: a git repository. */ kind?: FolderKind }
+/** The files that differ from the file snapshot taken at check-out (a plain folder has no git diff). Paths are relative to the folder. */
+export interface FileChanges { added: string[]; changed: string[]; removed: string[] }
 export type ModelChoice =
   /** Run with the org agent's instructions bundle and tier, on the person's own local providers. */
   | { kind: 'org-agent'; agentId: string }
@@ -97,6 +103,8 @@ export interface CheckoutLease {
   taskId: string; orgId: string; key: string; title: string; projectId: string | null;
   state: LeaseState; deviceId: string; device: string;
   since: string; lastActivityAt: string; endedAt: string | null;
+  /** A plain folder is used in place: `worktree` is the folder itself and there is no branch. Absent on an older lease: a git worktree. */
+  kind?: FolderKind;
   worktree: string | null; branch: string | null; chatId: string | null; folderId: string | null;
   /** The commit the worktree started from (the dev branch tip), the base of every "files changed" count. */
   baseSha: string | null;
@@ -152,8 +160,12 @@ export interface CheckoutPlan {
   /** True when an earlier check-out on another Mac is still open on the server. */
   otherMac: string | null;
   firstTime: boolean;
+  /** The project has no repository on the server (nothing for a git folder to match), so Muster's own folder is the default choice. */
+  noRepo: boolean;
+  /** The folder "Use a new folder Muster creates" would make, e.g. ~/Muster/<Org>/<Project> (or ~/Muster/<Org>/_tasks/<KEY> for a task with no project). */
+  newFolder: string;
 }
-export interface CheckoutStartInput { taskId: string; take?: boolean; model: ModelChoice; confirm: true; folder?: string; devBranch?: string }
+export interface CheckoutStartInput { taskId: string; take?: boolean; model: ModelChoice; confirm: true; folder?: string; devBranch?: string; /** Make and use the folder Muster offers (`CheckoutPlan.newFolder`). */ newFolder?: boolean; /** The folder was chosen as "Use a git repository…": refuse one that is not. */ requireGit?: boolean }
 export interface HandBackInput {
   taskId: string;
   /** A QA agent on the server (it wakes) or a person (they are notified). */
@@ -163,7 +175,7 @@ export interface HandBackInput {
   summary?: string; openQuestions?: string; prUrl?: string; push?: boolean;
 }
 export interface HandBackPreview {
-  taskId: string; branch: string; testsRun: boolean; testsLine: string; prUrl: string | null; summary: string;
+  taskId: string; branch: string; /** A plain folder: handed back from where it is, with no branch or pull request. */ kind?: FolderKind; /** Files changed since check-out (plain folder). */ fileChanges?: FileChanges; /** The project has no recognised test setup, so no test run is expected. */ noTests?: boolean; testsRun: boolean; testsLine: string; prUrl: string | null; summary: string;
   decisions: string[]; reviewers: { kind: 'agent' | 'user'; id: string; name: string; suggested: boolean }[];
   /** The task's review and approval stages, and whether the reviewer step already ran on this Mac. */
   policy: PolicyStage[]; reviewedLocally: string[];
@@ -185,7 +197,7 @@ export interface CheckoutCommands {
   'checkout.settings': { input: { staleHours?: number; deviceName?: string }; output: CheckoutSettings };
   'checkout.bindings': { input: Record<string, never>; output: { bindings: LocalBinding[]; orgs: { id: string; name: string; projects: { id: string; name: string }[] }[] } };
   /** Binds this Mac's checkout for an org project. Remembered; the server only ever sees a label. */
-  'checkout.bind': { input: { orgId: string; projectId: string; path: string; devBranch?: string }; output: LocalBinding };
+  'checkout.bind': { input: { orgId: string; projectId: string; path?: string; devBranch?: string; /** Make Muster's own folder (~/Muster/<Org>/<Project>, mode 0700) and use it. */ create?: boolean; /** "Use a git repository…": refuse a folder that is not one. */ requireGit?: boolean }; output: LocalBinding };
   'checkout.unbind': { input: { orgId: string; projectId: string }; output: { ok: true } };
   'checkout.plan': { input: { taskId: string }; output: CheckoutPlan };
   /** Check out (or Take it): status In progress, the lease comment, the worktree, and the local task chat. Posts only after `confirm`. */

@@ -31,9 +31,10 @@ const work={connected:true,me:{id:'u-me',name:'Dhairya'},fetchedAt:iso(0),orgs:[
   {org:{id:'hyb',name:'Hybrow',prefix:'HYB',server:'aiteam.example.com'},sidebar:'mine',open:1,tasks:[mk('Hybrow','hyb','HYB-2','Invite agents to the team','in_progress','Onboarding',5)],projects:[{id:'onboarding',name:'Onboarding',open:1},{id:'rez',name:'Rez',open:0}],inbox:[]},
 ]};
 let lease:any=null,pending:any={rows:[],conflict:null};
-let plan:any={task:{id:'t1',key:'RAG-1',title:'External Valkey migration',status:'todo',orgId:'rag',orgName:'Ragnar',projectId:'redis',projectName:'Redis',assignee:'You'},assignedToMe:true,willPost:{comment:'Checked out · working locally on MacBook · via Muster',status:'in_progress',reassign:false},device:'MacBook',binding:{orgId:'rag',projectId:'redis',projectName:'Redis',path:'/Users/me/redis',devBranch:'dev',boundAt:iso(1)},detectedFolder:null,devBranch:'dev',agents:[{id:'a-ceo',name:'Head Muster',adapter:'claude_local',model:'claude-opus-4',suggested:true,mapsTo:'Claude Code · Opus 4'}],providers:[{id:'omniroute',name:'OmniRoute',models:[{id:'gpt-x',name:'GPT X'}]}],otherMac:null,firstTime:false};
+let plan:any={task:{id:'t1',key:'RAG-1',title:'External Valkey migration',status:'todo',orgId:'rag',orgName:'Ragnar',projectId:'redis',projectName:'Redis',assignee:'You'},assignedToMe:true,willPost:{comment:'Checked out · working locally on MacBook · via Muster',status:'in_progress',reassign:false},device:'MacBook',binding:{orgId:'rag',projectId:'redis',projectName:'Redis',path:'/Users/me/redis',devBranch:'dev',boundAt:iso(1)},detectedFolder:null,devBranch:'dev',agents:[{id:'a-ceo',name:'Head Muster',adapter:'claude_local',model:'claude-opus-4',suggested:true,mapsTo:'Claude Code · Opus 4'}],providers:[{id:'omniroute',name:'OmniRoute',models:[{id:'gpt-x',name:'GPT X'}]}],otherMac:null,firstTime:false,noRepo:false,newFolder:'/Users/me/Muster/Ragnar/Redis'};
 let preview:any={taskId:'t1',branch:'muster/RAG-1',testsRun:true,testsLine:'12 passed, 0 failed.',prUrl:null,summary:'RAG-1',decisions:[],reviewers:[{kind:'agent',id:'a-qa',name:'QA Lead',suggested:true},{kind:'user',id:'u-bob',name:'Bob Rivera',suggested:false}],policy:[],reviewedLocally:[],blocked:null};
 const calls:{command:string;input:any}[]=[];
+let bindingsData:any={bindings:[],orgs:[]},bindError:string|null=null,pickPath:string|null=null;
 // A runaway guard: this suite is small, so it stops itself on a render or read loop instead of eating memory.
 setInterval(()=>{if(process.memoryUsage().rss>1_500_000_000||calls.length>3000){console.error('orgs-dom: runaway guard tripped',calls.length,Math.round(process.memoryUsage().rss/1e6)+'MB');process.exit(3);}},500);
 setTimeout(()=>{console.error('orgs-dom: timed out');process.exit(4);},90_000);
@@ -52,11 +53,14 @@ const listeners=new Set<(e:any)=>void>();
     case 'checkout.auto':return {mode:input.mode??'auto'};
     case 'checkout.pending':return pending;
     case 'checkout.org':return {copy:null};
-    case 'checkout.bindings':return {bindings:[],orgs:[]};
+    case 'checkout.bindings':return bindingsData;
+    case 'checkout.bind':if(bindError)throw new Error(`checkout.bind: ${bindError}`);return {orgId:input.orgId,projectId:input.projectId,projectName:'Redis',path:input.path??'/Users/me/Muster/Ragnar/Redis',devBranch:'',kind:input.create?'folder':'git',boundAt:iso(0)};
+    case 'checkout.leases':return {leases:[]};
+    case 'checkout.unbind':return {ok:true};
     case 'checkout.settings':return {staleHours:8,deviceName:'MacBook'};
     // The local chat opens through the store's timeline read; this suite does not model a timeline, so it errors (a bare snapshot would be re-read by the store until it looks complete).
     case 'chat.timeline':throw new Error('no timeline in this suite');
-    case 'folder.pick':return null;
+    case 'folder.pick':return pickPath?{path:pickPath}:null;
     default:return undefined;
   }}};
 const React=await import('react');
@@ -64,7 +68,7 @@ const {createRoot}=await import('react-dom/client');
 const {OrgSidebar}=await import('../src/renderer/components/OrgSidebar');
 const {MyWorkPage}=await import('../src/renderer/components/MyWorkPage');
 const {OwnerPicker}=await import('../src/renderer/components/OwnerPicker');
-const {OrgsCard}=await import('../src/renderer/components/OrgsCard');
+const {OrgsCard,LocalCheckoutsCard,ProjectCheckoutRow}=await import('../src/renderer/components/OrgsCard');
 const {WorkLocallyBar,CheckoutNotes,CheckoutProperties}=await import('../src/renderer/components/CheckoutPanel');
 const {HandBackHost}=await import('../src/renderer/components/HandBackHost');
 const {getState}=await import('../src/renderer/store');
@@ -182,6 +186,43 @@ calls.length=0; await click(byText('.ws-work-locally button','Work locally') as 
 assert.deepEqual(calls.find(c=>c.command==='checkout.start')?.input.model,{kind:'org-agent',agentId:'a-ceo'});
 assert.equal(calls.find(c=>c.command==='checkout.start')?.input.folder,'/Users/me/redis');
 plan={...plan,binding:{orgId:'rag',projectId:'redis',projectName:'Redis',path:'/x',devBranch:'dev',boundAt:iso(1)},detectedFolder:null,firstTime:false};
+
+// #303: a project with no repository and no folder yet: the sheet offers a folder Muster creates (the default), any folder, or a git repository
+plan={...plan,binding:null,detectedFolder:null,firstTime:true,noRepo:true};
+await show(<WorkLocallyBar detail={detail()}/>); await click(document.querySelector('.ws-checkout button')); await delay(150);
+assert.deepEqual(text('.ws-work-locally [data-folder-choice]'),['Use a new folder Muster creates','Choose a folder…','Use a git repository…'],'the three ways to say where the files live');
+assert.ok(body().includes('Working in /Users/me/Muster/Ragnar/Redis'),'the folder Muster would create is the default'); assert.ok(body().includes('A git repository gets its own worktree and branch; any other folder is used as it is.'));
+assert.equal(document.querySelector('.ws-work-locally [data-folder-choice="new"]')!.getAttribute('aria-pressed'),'true');
+calls.length=0; await click(byText('.ws-work-locally button','Work locally') as any);
+const made=calls.find(c=>c.command==='checkout.start')!.input; assert.equal(made.newFolder,true,'start asks Muster to make the folder'); assert.ok(!('folder' in made));
+// a project that has a repository is not defaulted to the Muster folder
+plan={...plan,noRepo:false}; await show(<WorkLocallyBar detail={detail()}/>); await click(document.querySelector('.ws-checkout button')); await delay(150);
+assert.equal(document.querySelector('.ws-work-locally [data-folder-choice="new"]')!.getAttribute('aria-pressed'),'false'); await click(byText('.ws-work-locally button','Cancel'));
+plan={...plan,binding:{orgId:'rag',projectId:'redis',projectName:'Redis',path:'/Users/me/Notes',devBranch:'',kind:'folder',boundAt:iso(1)},detectedFolder:null,firstTime:true,noRepo:false,assignedToMe:false};
+await show(<WorkLocallyBar detail={detail()}/>); await click(document.querySelector('.ws-checkout button')); await delay(150);
+assert.ok(body().includes('Working in /Users/me/Notes')&&body().includes('no worktree, branch or pull request'),'a plain folder binding says Working in <folder>'); await click(byText('.ws-work-locally button','Cancel'));
+plan={...plan,assignedToMe:true,binding:{orgId:'rag',projectId:'redis',projectName:'Redis',path:'/x',devBranch:'dev',boundAt:iso(1)},firstTime:false};
+
+// #303 Settings: the row says where, offers the same three choices, and a failing bind reads without the command label
+bindingsData={bindings:[{orgId:'rag',projectId:'redis',projectName:'Redis',path:'/Users/me/Notes',devBranch:'',kind:'folder',boundAt:iso(1)}],orgs:[{id:'rag',name:'Ragnar',projects:[{id:'redis',name:'Redis'}]}]};
+await show(<LocalCheckoutsCard/>);
+assert.ok(body().includes('Where each project’s files live on this Mac. A git repository gets its own worktree and branch; any other folder is used as it is.'),'the new copy');
+assert.ok(!/where each project’s code/i.test(body()),'no code wording');
+assert.deepEqual(text('.ws-orgs-name > span'),['Ragnar › Redis → Working in /Users/me/Notes','Ragnar · tasks without a project → not bound'],'a project row and the org’s no-project row');
+assert.deepEqual(text('.ws-orgs-row:first-child [data-folder-choice]'),['Use a new folder Muster creates','Choose a folder…','Use a git repository…']);
+calls.length=0; await click(document.querySelector('.ws-orgs-row:first-child [data-folder-choice="new"]'));
+assert.deepEqual(calls.find(c=>c.command==='checkout.bind')?.input,{orgId:'rag',projectId:'redis',create:true},'a Muster folder is requested');
+assert.ok(getState().notices.some(n=>n.message==='Redis now works in /Users/me/Muster/Ragnar/Redis.'),'and said plainly');
+calls.length=0; await click(document.querySelector('.ws-orgs-row:last-child [data-folder-choice="new"]'));
+assert.deepEqual(calls.find(c=>c.command==='checkout.bind')?.input,{orgId:'rag',projectId:'_tasks',create:true},'the org default for tasks without a project');
+pickPath='/nope'; bindError='That folder does not exist on this Mac. Choose another.';
+await click(document.querySelector('.ws-orgs-row:first-child [data-folder-choice="folder"]'));
+const failed=getState().notices.filter(n=>n.kind==='error').map(n=>n.message);
+assert.ok(failed.includes('That folder does not exist on this Mac. Choose another.'),'the message reads as written'); assert.ok(!failed.some(m=>/checkout\.bind/.test(m)),'with no command label in front');
+bindError=null; pickPath=null;
+await show(<dl><ProjectCheckoutRow orgId="rag" projectId="redis"/></dl>);
+assert.ok(body().includes('Working in')&&body().includes('/Users/me/Notes'),'the project’s own row'); assert.deepEqual(text('[data-folder-choice]'),['Use a new folder Muster creates','Choose a folder…','Use a git repository…']);
+assert.ok(!/worktree and a branch from the dev branch/.test(body()),'the old, git-only hint is gone');
 
 // While working: "Working locally · <engine>" and nothing else on the surface. Hand-back is automatic; the properties hold the fallback and the Auto / Ask me choice
 lease={taskId:'t1',orgId:'rag',key:'RAG-1',state:'checked_out',model:{kind:'org-agent',agentId:'a-ceo'},modelLabel:'Head Muster → Claude Code · Opus 4',branch:'muster/RAG-1',worktree:'/wt/x',device:'MacBook',chatId:'chat-1',pending:0,offline:null,stale:false,staleHours:8,conflict:null,thisMac:true,since:iso(1),lastActivityAt:iso(0),reviewLocally:false,reviewChats:[]};

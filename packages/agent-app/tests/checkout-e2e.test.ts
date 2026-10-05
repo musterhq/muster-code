@@ -8,7 +8,7 @@
  */
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -186,6 +186,38 @@ test('check out → the server shows the comment and assignee, no agent wakes, a
   await until(async () => (await runsFor(task.id)).length > 0, 'the QA agent woke on hand-back', 40_000);
   assert.equal((await runsFor(task.id))[0]!.agentId, rag.qa, 'the run is the QA agent’s');
   assert.equal((await s.invoke('checkout.get', { taskId: task.id })).lease?.state, 'handed_back');
+});
+
+test('a plain folder (not a git repository, #303): bound as it is, checked out in place with no worktree, listed files in the hand-back, handed back only on the person’s “done”', { skip }, async t => {
+  const { s, seed, dataDir } = await harness(t);
+  const rag = seed.companies.rag, task = rag.issues.r3!;
+  const folder = join(dataDir, 'onboarding-notes');
+  await mkdir(folder); await writeFile(join(folder, 'brief.md'), 'Welcome pack\n');
+  const bound = await s.invoke('checkout.bind', { orgId: rag.id, projectId: rag.redis, path: folder });
+  assert.deepEqual([bound.kind, bound.devBranch, bound.path], ['folder', '', folder], 'a folder that is not a repository is accepted');
+  const plan = await s.invoke('checkout.plan', { taskId: task.id });
+  assert.equal(plan.binding?.kind, 'folder'); assert.equal(plan.devBranch, null);
+  const lease = await s.invoke('checkout.start', { taskId: task.id, model: { kind: 'own', providerId: 'scripted', model: 'scripted-model' }, confirm: true });
+  assert.deepEqual([lease.kind, lease.branch, lease.worktree], ['folder', null, folder], 'used in place: no branch, the chat works in the folder itself');
+  assert.equal(existsSync(join(folder, '.git')), false, 'Muster did not make a repository of it');
+  assert.equal((await api(`/issues/${task.id}`)).status, 'in_progress');
+  // the agent works and runs its tests; it even says it is done: that alone hands nothing back (a plain folder has no git facts to read)
+  await s.invoke('chat.send', { id: lease.chatId!, text: 'Write the seed list and say when you are done.', requestId: 'p-1' });
+  await until(() => existsSync(join(folder, 'SEEDS.md')), 'the file written in the folder');
+  await until(async () => { await s.invoke('checkout.sync', {}); return (await api(`/issues/${task.id}/documents`) as { key: string }[]).some(d => d.key === 'local-work-log'); }, 'the work log document', 20_000);
+  assert.match((await api(`/issues/${task.id}/documents/local-work-log`)).body, /- Files changed: 1 added, 0 changed, 0 removed/, 'progress lists files, not git lines');
+  assert.equal((await s.invoke('checkout.get', { taskId: task.id })).lease?.state, 'checked_out', 'the agent’s words do not hand back');
+  const preview = await s.invoke('checkout.handback.preview', { taskId: task.id });
+  assert.deepEqual([preview.kind, preview.fileChanges?.added], ['folder', ['SEEDS.md']]);
+  await s.invoke('chat.send', { id: lease.chatId!, text: 'done', requestId: 'p-2' });
+  await until(async () => (await s.invoke('checkout.get', { taskId: task.id })).lease?.state === 'handed_back', 'the hand-back on the person’s “done”', 25_000);
+  await s.invoke('checkout.sync', {});
+  const back = await api(`/issues/${task.id}`);
+  assert.equal(back.status, 'in_review'); assert.equal(back.assigneeAgentId, rag.qa);
+  const summary = (await api(`/issues/${task.id}/comments?order=asc&limit=100`) as { body: string; authorUserId: string | null }[]).find(c => /Handed back for review/.test(c.body))!;
+  assert.ok(summary && summary.authorUserId === seed.me);
+  assert.match(summary.body, /Worked in place in “onboarding-notes”; no branch, push or pull request/); assert.match(summary.body, /Added \(1\): `SEEDS\.md`/);
+  assert.ok(!/Branch:/.test(summary.body), 'no branch is named');
 });
 
 test('release puts the task back as it was with a note; Take it reassigns first; the escape hatch is explicit', { skip }, async t => {

@@ -11,6 +11,7 @@ import { join } from 'node:path';
 import type { CheckoutLease, LocalBinding, LocalOrgCopy } from '../../shared/domains/checkout-protocol.ts';
 import type { Report, ReportKind, TurnReceipt } from './reports.ts';
 import { DEFAULT_STALE_HOURS } from './lease.ts';
+import type { FileSnapshot } from './folder.ts';
 
 export type OutboxType = 'comment' | 'patch' | 'cost';
 export interface OutboxRow { id: number; origin: string; userId: string; clientId: string; taskId: string; orgId: string; type: OutboxType; key: string; kind: string; body: string; at: string; attempts: number; lastError: string | null; postedAt: string | null; dead: boolean }
@@ -26,6 +27,7 @@ export class CheckoutStore {
       CREATE TABLE IF NOT EXISTS checkout_bindings (server TEXT NOT NULL, org_id TEXT NOT NULL, project_id TEXT NOT NULL, project_name TEXT NOT NULL, path TEXT NOT NULL, dev_branch TEXT NOT NULL, bound_at TEXT NOT NULL, PRIMARY KEY (server, org_id, project_id));
       CREATE TABLE IF NOT EXISTS checkout_leases (task_id TEXT PRIMARY KEY, org_id TEXT NOT NULL, state TEXT NOT NULL, json TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS checkout_outbox (id INTEGER PRIMARY KEY AUTOINCREMENT, origin TEXT NOT NULL DEFAULT '', user_id TEXT NOT NULL DEFAULT '', client_id TEXT NOT NULL, task_id TEXT NOT NULL, org_id TEXT NOT NULL, type TEXT NOT NULL, key TEXT NOT NULL, kind TEXT NOT NULL, body TEXT NOT NULL, at TEXT NOT NULL, attempts INTEGER NOT NULL DEFAULT 0, last_error TEXT, posted_at TEXT, dead INTEGER NOT NULL DEFAULT 0, UNIQUE (task_id, key));
+      CREATE TABLE IF NOT EXISTS checkout_snapshots (task_id TEXT PRIMARY KEY, json TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS checkout_receipts (task_id TEXT NOT NULL, run_id TEXT NOT NULL, json TEXT NOT NULL, doc_posted INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (task_id, run_id));
     `);
     // A database made by an earlier build of this branch has these tables without the newer columns: add what is missing (guarded, so it runs once and never fails on a fresh or already-migrated file).
@@ -34,6 +36,8 @@ export class CheckoutStore {
     if (!outbox.has('origin')) db.exec("ALTER TABLE checkout_outbox ADD COLUMN origin TEXT NOT NULL DEFAULT ''");
     if (!outbox.has('user_id')) db.exec("ALTER TABLE checkout_outbox ADD COLUMN user_id TEXT NOT NULL DEFAULT ''");
     if (!outbox.has('client_id')) db.exec("ALTER TABLE checkout_outbox ADD COLUMN client_id TEXT NOT NULL DEFAULT ''");
+    // Bindings made before plain folders could be bound are all git repositories.
+    if (!cols('checkout_bindings').has('kind')) db.exec("ALTER TABLE checkout_bindings ADD COLUMN kind TEXT NOT NULL DEFAULT 'git'");
     db.exec('DROP TABLE IF EXISTS checkout_org_copy');
     this.ready = true;
   }
@@ -57,13 +61,13 @@ export class CheckoutStore {
 
   // --- bindings: per Mac, per org project --------------------------------------------------------------------------------------------
   bindings(server: string): LocalBinding[] {
-    return (this.d().prepare('SELECT org_id, project_id, project_name, path, dev_branch, bound_at FROM checkout_bindings WHERE server = ? ORDER BY project_name').all(server) as { org_id: string; project_id: string; project_name: string; path: string; dev_branch: string; bound_at: string }[])
-      .map(r => ({ orgId: r.org_id, projectId: r.project_id, projectName: r.project_name, path: r.path, devBranch: r.dev_branch, boundAt: r.bound_at }));
+    return (this.d().prepare('SELECT org_id, project_id, project_name, path, dev_branch, bound_at, kind FROM checkout_bindings WHERE server = ? ORDER BY project_name').all(server) as { org_id: string; project_id: string; project_name: string; path: string; dev_branch: string; bound_at: string; kind: string | null }[])
+      .map(r => ({ orgId: r.org_id, projectId: r.project_id, projectName: r.project_name, path: r.path, devBranch: r.dev_branch, boundAt: r.bound_at, kind: r.kind === 'folder' ? 'folder' as const : 'git' as const }));
   }
   binding(server: string, orgId: string, projectId: string): LocalBinding | null { return this.bindings(server).find(b => b.orgId === orgId && b.projectId === projectId) ?? null; }
   bind(server: string, b: LocalBinding): void {
-    this.d().prepare('INSERT INTO checkout_bindings (server, org_id, project_id, project_name, path, dev_branch, bound_at) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(server, org_id, project_id) DO UPDATE SET project_name = excluded.project_name, path = excluded.path, dev_branch = excluded.dev_branch, bound_at = excluded.bound_at')
-      .run(server, b.orgId, b.projectId, b.projectName, b.path, b.devBranch, b.boundAt);
+    this.d().prepare('INSERT INTO checkout_bindings (server, org_id, project_id, project_name, path, dev_branch, bound_at, kind) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(server, org_id, project_id) DO UPDATE SET project_name = excluded.project_name, path = excluded.path, dev_branch = excluded.dev_branch, bound_at = excluded.bound_at, kind = excluded.kind')
+      .run(server, b.orgId, b.projectId, b.projectName, b.path, b.devBranch, b.boundAt, b.kind === 'folder' ? 'folder' : 'git');
   }
   unbind(server: string, orgId: string, projectId: string): void { this.d().prepare('DELETE FROM checkout_bindings WHERE server = ? AND org_id = ? AND project_id = ?').run(server, orgId, projectId); }
 
@@ -94,7 +98,7 @@ export class CheckoutStore {
     let n = 0;
     for (const lease of this.leases()) {
       if (lease.origin !== match.origin || (match.orgId && lease.orgId !== match.orgId)) continue;
-      this.deleteOrgCopy(lease.taskId);
+      this.deleteOrgCopy(lease.taskId); this.deleteSnapshot(lease.taskId);
       if (lease.state !== 'checked_out') {
         // What was sent is forgotten; what was never sent stays (a hand-back that has not reached the server must not be lost), and so does its lease.
         this.d().prepare('DELETE FROM checkout_outbox WHERE task_id = ? AND (posted_at IS NOT NULL OR dead = 1)').run(lease.taskId);
@@ -108,6 +112,11 @@ export class CheckoutStore {
     const next = { ...lease, pending };
     this.d().prepare('INSERT INTO checkout_leases (task_id, org_id, state, json) VALUES (?, ?, ?, ?) ON CONFLICT(task_id) DO UPDATE SET org_id = excluded.org_id, state = excluded.state, json = excluded.json').run(lease.taskId, lease.orgId, lease.state, JSON.stringify(next));
   }
+
+  // --- file snapshots (plain-folder check-outs) -------------------------------------------------------------------------------------
+  snapshot(taskId: string): FileSnapshot | null { const r = this.d().prepare('SELECT json FROM checkout_snapshots WHERE task_id = ?').get(taskId) as { json: string } | undefined; try { return r ? JSON.parse(r.json) as FileSnapshot : null; } catch { return null; } }
+  putSnapshot(taskId: string, snapshot: FileSnapshot): void { this.d().prepare('INSERT INTO checkout_snapshots (task_id, json) VALUES (?, ?) ON CONFLICT(task_id) DO UPDATE SET json = excluded.json').run(taskId, JSON.stringify(snapshot)); }
+  deleteSnapshot(taskId: string): void { this.d().prepare('DELETE FROM checkout_snapshots WHERE task_id = ?').run(taskId); }
 
   // --- the outbox (also the history of what was posted) ---------------------------------------------------------------------------------
   /** Adds a row once per (task, key); returns false for a repeat. */

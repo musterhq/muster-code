@@ -5,17 +5,18 @@ import { join } from 'node:path';
 import type { MyWork } from '../../shared/domains/checkout-protocol.ts';
 import { createWorktree } from '../git-local.ts';
 import { sameOrigin } from '../../shared/task-link.ts';
-import { normalizeRemote } from '../memory-identity.ts';
 import { CheckoutService, type LocalProviderInfo, type TurnFacts } from '../checkout/service.ts';
 import { CheckoutStore } from '../checkout/store.ts';
-import { realGit } from '../checkout/git-port.ts';
+import { realGit, sameRepo } from '../checkout/git-port.ts';
+import { hasTestSetup } from '../checkout/folder.ts';
 import { badgeOf } from '../checkout/lease.ts';
 import { TurnLedger } from '../turn-ledger.ts';
 import { connectionFor } from '../server/connection.ts';
 import { serverHubFor } from '../server/orgs.ts';
 import type { DomainContext, DomainModule } from './types.ts';
 
-const gitRemote = (cwd: string) => new Promise<string | undefined>(resolve => execFile('git', ['config', '--get', 'remote.origin.url'], { cwd, timeout: 1500, env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } }, (error, stdout) => resolve(error ? undefined : stdout.trim() || undefined)));
+/** Every remote URL of a folder (origin and any other), so a repository on GitHub, GitLab, Bitbucket or a self-hosted server matches however it is named. */
+const gitRemotes = (cwd: string) => new Promise<string[]>(resolve => execFile('git', ['config', '--get-regexp', '^remote\\..*\\.url$'], { cwd, timeout: 1500, env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } }, (error, stdout) => resolve(error ? [] : stdout.split('\n').map(l => l.replace(/^\S+\s+/, '').trim()).filter(Boolean))));
 const text = (v: unknown, max = 4000): string => { if (typeof v !== 'string' || v.length > max) throw new Error('Invalid input.'); return v; };
 const id = (v: unknown): string => { if (typeof v !== 'string' || !/^[\w:.\-/]{1,160}$/.test(v)) throw new Error('Unknown item.'); return v; };
 const wait = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms));
@@ -38,10 +39,10 @@ export function createCheckoutDomain(ctx: DomainContext): DomainModule {
     store, backend: () => hub.backend?.() ?? null, get reader() { if (!hub.reader) throw new Error('Muster Server is not connected. Connect it in Settings › Integrations.'); return hub.reader; },
     git: realGit, serverLabel: server, origin, deviceNameDefault: () => hostname().replace(/\.local$/, ''), now: () => Date.now(),
     worktrees: { create: (root, branch, base) => createWorktree(root, ctx.dataDir, { branch, base }) },
-    providers,
+    providers, testSetup: hasTestSetup,
     detectFolder: async repo => {
       if (!repo) return null;
-      for (const folder of ctx.store.snapshot().folders) { try { if (normalizeRemote(await gitRemote(folder.path) ?? '') === repo) return folder.path; } catch { /* not a repository */ } }
+      for (const folder of ctx.store.snapshot().folders) { try { if ((await gitRemotes(folder.path)).some(url => sameRepo(repo, url))) return folder.path; } catch { /* not a repository */ } }
       return null;
     },
     chats: {
@@ -122,7 +123,7 @@ export function createCheckoutDomain(ctx: DomainContext): DomainModule {
         const orgs = hub.reader && hub.backend?.() ? await hub.reader.list().then(l => l.orgs.filter(o => o.enabled).map(o => ({ id: o.id, name: o.name, projects: (hub.reader!.cached(o.id)?.projects ?? []).map(p => ({ id: p.id, name: p.name })) }))).catch(() => []) : [];
         return { bindings: store.bindings(origin()), orgs };
       },
-      'checkout.bind': input => svc().bind(id(input.orgId), id(input.projectId), text(input.path, 4096), typeof input.devBranch === 'string' ? text(input.devBranch, 200) : undefined),
+      'checkout.bind': input => svc().bind(id(input.orgId), id(input.projectId), typeof input.path === 'string' ? text(input.path, 4096) : undefined, typeof input.devBranch === 'string' ? text(input.devBranch, 200) : undefined, input.create === true, input.requireGit === true),
       'checkout.unbind': input => { store.unbind(origin(), id(input.orgId), id(input.projectId)); return { ok: true }; },
       'checkout.plan': input => svc().plan(id(input.taskId)),
       'checkout.start': input => svc().start({ taskId: id(input.taskId), take: input.take === true, confirm: input.confirm as true, model: input.model as never, ...(typeof input.folder === 'string' ? { folder: text(input.folder, 4096) } : {}), ...(typeof input.devBranch === 'string' ? { devBranch: text(input.devBranch, 200) } : {}) }),
