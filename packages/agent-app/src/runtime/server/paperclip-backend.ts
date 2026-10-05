@@ -1,16 +1,16 @@
 /** The Paperclip implementation of `ServerBackend`: the existing REST client and mappers, behind the shared interface. */
 import type { LedgerEntry, TaskCreateInput, ThreadCard, WorkspaceAgent, WorkspaceComment, WorkspaceCompany, WorkspaceListKind, WorkspaceRow, WorkspaceRun, WorkspaceTask, WorkspaceTaskDetail } from '../../shared/domains/paperclip-protocol.ts';
-import { arr, buildInbox, mapAgent, mapApproval, mapAttention, mapComment, mapCompany, mapDocument, mapGoal, mapInteraction, mapIssue, mapProject, mapReceipt, mapRows, mapRun, mapWorkProduct } from '../paperclip-map.ts';
+import { arr, buildInbox, mapAgent, mapApproval, mapAttention, mapComment, mapCompany, mapDocument, mapGoal, mapInteraction, mapIssue, mapMentions, mapPeople, mapProject, mapReceipt, mapRows, mapRun, mapWorkProduct } from '../paperclip-map.ts';
 import { PaperclipClient, PaperclipError, openLiveEvents, type SocketFactory } from '../paperclip-client.ts';
 import { toolsFromLog } from './paperclip-run-tools.ts';
-import type { BackendOptions, ImportReader, Json, LiveHandlers, ServerBackend, ServerEndpoint, ServerHealth, ServerPart, TaskChanges, TaskDetailContext } from './backend.ts';
+import type { BackendOptions, ImportReader, Json, LiveHandlers, PersonalAccess, ServerBackend, ServerEndpoint, ServerHealth, ServerPart, ServerPerson, TaskChanges, TaskCommentRow, TaskDetailContext } from './backend.ts';
 
 const allPages = async <T>(pages: AsyncIterable<T[]>): Promise<T[]> => { const rows: T[] = []; for await (const page of pages) for (const row of page) rows.push(row); return rows; };
 const enc = encodeURIComponent;
 /** How much of a run's log is scanned for tool calls. */
 const LOG_BYTES = 2_000_000;
 
-export class PaperclipBackend implements ServerBackend {
+export class PaperclipBackend implements ServerBackend, PersonalAccess {
   readonly kind = 'paperclip' as const;
   readonly client: PaperclipClient;
   private readonly onUnauthorized: BackendOptions['onUnauthorized'];
@@ -24,32 +24,73 @@ export class PaperclipBackend implements ServerBackend {
     const health = await this.client.get<Json>('/health');
     return { version: typeof health.version === 'string' ? health.version : undefined, deploymentMode: typeof health.deploymentMode === 'string' ? health.deploymentMode : undefined, compatibility: 'Paperclip-compatible' };
   }
+  /** The signed-in person (`/cli-auth/me`, which a board key and the local board both answer). Cached for this connection; null (not asked again for a minute) when the server does not say. */
+  private person: Promise<ServerPerson | null> | null = null;
+  whoami(): Promise<ServerPerson | null> {
+    this.person ??= this.client.get<Json>('/cli-auth/me').then(me => {
+      const user = (me.user && typeof me.user === 'object' ? me.user : {}) as Json, id = typeof me.userId === 'string' && me.userId ? me.userId : typeof user.id === 'string' ? user.id : null;
+      return id ? { id, name: typeof user.name === 'string' ? user.name : null, email: typeof user.email === 'string' ? user.email : null } : null;
+    }, () => { setTimeout(() => { this.person = null; }, 60_000).unref?.(); return null; });
+    return this.person;
+  }
+  async patchTask(taskId: string, changes: { status?: string; assigneeUserId?: string | null; assigneeAgentId?: string | null; comment?: string }): Promise<void> {
+    await this.client.send('PATCH', `/issues/${enc(taskId)}`, changes);
+    this.client.invalidate();
+  }
+  async rawComments(taskId: string): Promise<TaskCommentRow[]> {
+    const rows = await allPages(this.client.commentPages(taskId));
+    return rows.filter(c => !c.deletedAt).map(c => ({ id: String(c.id), body: typeof c.body === 'string' ? c.body : '', authorUserId: typeof c.authorUserId === 'string' ? c.authorUserId : null, authorAgentId: typeof c.authorAgentId === 'string' ? c.authorAgentId : null, createdAt: String(c.createdAt ?? '') }));
+  }
+  async putDocument(taskId: string, key: string, doc: { title: string; body: string; changeSummary: string }): Promise<void> {
+    const path = `/issues/${enc(taskId)}/documents/${enc(key)}`;
+    // An existing document needs its latest revision as the base; a new one has none.
+    const existing = await this.client.get<Json>(path).catch(() => null);
+    await this.client.send('PUT', path, { title: doc.title, format: 'markdown', body: doc.body, changeSummary: doc.changeSummary, ...(existing && typeof existing.latestRevisionId === 'string' ? { baseRevisionId: existing.latestRevisionId } : {}) });
+  }
+  async postCostEvent(companyId: string, body: Record<string, unknown>): Promise<void> { await this.client.send('POST', `/companies/${enc(companyId)}/cost-events`, body); }
+  async issuePolicy(taskId: string): Promise<{ type: 'review' | 'approval'; participants: { kind: 'agent' | 'user'; id: string }[] }[]> {
+    const issue = await this.client.get<Json>(`/issues/${enc(taskId)}`);
+    const policy = (issue.executionPolicy && typeof issue.executionPolicy === 'object' ? issue.executionPolicy : {}) as Json;
+    return arr(policy.stages).filter(st => st.type === 'review' || st.type === 'approval').map(st => ({
+      type: st.type as 'review' | 'approval',
+      participants: arr(st.participants).map(p => p.type === 'agent' && typeof p.agentId === 'string' ? { kind: 'agent' as const, id: p.agentId } : typeof p.userId === 'string' ? { kind: 'user' as const, id: p.userId } : null).filter((p): p is { kind: 'agent' | 'user'; id: string } => Boolean(p)),
+    }));
+  }
+  async agentInstructions(agentId: string): Promise<string> {
+    const bundle = await this.client.get<Json>(`/agents/${enc(agentId)}/instructions-bundle`);
+    const entry = typeof bundle.entryFile === 'string' ? bundle.entryFile : 'AGENTS.md';
+    const file = await this.client.get<Json>(`/agents/${enc(agentId)}/instructions-bundle/file?path=${enc(entry)}`);
+    return typeof file.content === 'string' ? file.content : '';
+  }
+
   async companies(): Promise<WorkspaceCompany[]> { return arr(await this.client.get<unknown>('/companies')).filter(c => c.status !== 'archived').map(mapCompany); }
 
   async read(company: WorkspaceCompany, previous?: { generation: number; companyId: string; part: ServerPart }, options: { fresh?: boolean } = {}): Promise<ServerPart> {
     const api = this.client, id = company.id, base = `/companies/${enc(id)}`;
-    const [issues, agentsJson, projectsJson, goalsJson, runsJson, liveJson, attentionJson, approvalsJson, labelsJson] = await Promise.all([
+    const [issues, agentsJson, projectsJson, goalsJson, runsJson, liveJson, attentionJson, approvalsJson, labelsJson, activityJson, directoryJson] = await Promise.all([
       allPages(api.issuePages(id, 'view=compact&includeBlockedBy=true', options.fresh)), api.get<unknown>(`${base}/agents`), api.get<unknown>(`${base}/projects`),
       api.get<unknown>(`${base}/goals`).catch(() => []), api.get<unknown>(`${base}/heartbeat-runs?limit=60&summary=true`),
       api.get<unknown>(`${base}/live-runs`).catch(() => []), api.get<unknown>(`${base}/attention`).catch(() => ({ items: [] })),
-      api.get<unknown>(`${base}/approvals`).catch(() => []), api.get<unknown>(`${base}/labels`).catch(() => []),
+      api.get<unknown>(`${base}/approvals`).catch(() => []), api.get<unknown>(`${base}/labels`).catch(() => []), api.get<unknown>(`${base}/activity?limit=100`).catch(() => []), api.get<unknown>(`${base}/user-directory`).catch(() => ({ users: [] })),
     ]);
     if (previous && previous.generation === api.generation && previous.companyId === id) return previous.part;
     const agentList = arr(agentsJson).map(mapAgent), agents = new Map(agentList.map(a => [a.id, a]));
     const runs = [...arr(liveJson), ...arr(runsJson)].map(mapRun).filter((run, index, all) => all.findIndex(r => r.id === run.id) === index).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
     const liveTasks = new Set(runs.filter(r => r.status === 'running' || r.status === 'queued').map(r => r.taskId).filter((t): t is string => Boolean(t)));
     for (const agent of agentList) if (agent.status === 'active' && runs.some(r => r.agentId === agent.id && r.status === 'running')) agent.status = 'running';
-    const tasks = arr(issues).map(i => mapIssue(i, agents, liveTasks));
+    const me = (await this.whoami().catch(() => null))?.id ?? null;
+    const people = mapPeople(directoryJson), peopleNames = new Map(people.map(p => [p.id, p.name]));
+    const tasks = arr(issues).map(i => mapIssue(i, agents, liveTasks, me, peopleNames));
     // Memory counts are added per snapshot (not here), so the light badge read never browses memory.
     const projects = arr(projectsJson).map(p => mapProject(p, tasks));
     const projectName = new Map(projects.map(p => [p.id, p.name]));
-    const inbox = buildInbox(arr((attentionJson as Json).items).map(mapAttention), tasks, runs, agents).map(item => {
+    const inbox = [...buildInbox(arr((attentionJson as Json).items).map(mapAttention), tasks, runs, agents), ...mapMentions(arr(activityJson), me, agents)].map(item => {
       const projectId = item.taskId ? tasks.find(t => t.id === item.taskId)?.projectId ?? null : null;
       return { ...item, projectId, group: projectId ? projectName.get(projectId) ?? company.name : company.name, source: 'paperclip' as const };
     });
     const approvals = arr(approvalsJson).filter(a => a.status === 'pending' || a.status === 'revision_requested').map(a => mapApproval(a, agents));
     const labels = arr(labelsJson).map(l => ({ id: String(l.id), name: typeof l.name === 'string' ? l.name : 'Label', color: typeof l.color === 'string' ? l.color : null }));
-    return { tasks, agents: agentList, projects, runs, inbox, goals: arr(goalsJson).map(mapGoal), approvals, labels };
+    return { tasks, agents: agentList, projects, runs, inbox, goals: arr(goalsJson).map(mapGoal), approvals, labels, people };
   }
 
   async taskDetail(taskId: string, ctx: TaskDetailContext): Promise<WorkspaceTaskDetail> {
@@ -62,7 +103,8 @@ export class PaperclipBackend implements ServerBackend {
     // Documents with their revisions (a plan is the one with key `plan`), and the PRs, branches and artifacts agents produced.
     const documentCards = await Promise.all(arr(documents).map(async d => mapDocument(d, Number(d.latestRevisionNumber) > 1 ? arr(await c.get<unknown>(`/issues/${key}/documents/${enc(String(d.key))}/revisions`).catch(() => [])) : [], agents)));
     const liveTasks = new Set((part?.runs ?? []).filter(r => r.status === 'running').map(r => r.taskId).filter((t): t is string => Boolean(t)));
-    const task = mapIssue(issue, agents, liveTasks);
+    const peopleNames = new Map((part?.people ?? []).map(p => [p.id, p.name]));
+    const task = mapIssue(issue, agents, liveTasks, (await this.whoami().catch(() => null))?.id ?? null, peopleNames);
     const taskRuns = arr(runs).map(mapRun);
     if (taskRuns.some(r => r.status === 'running' || r.status === 'queued')) task.live = true;
     const assignee = task.assigneeId ? agents.get(task.assigneeId) : undefined;
@@ -89,12 +131,12 @@ export class PaperclipBackend implements ServerBackend {
       subtasks: children.map(t => t.id), blocking: (part?.tasks ?? []).filter(t => t.blockedByIds.includes(task.id)).map(t => t.id),
       receipts: arr(runs).map(r => mapReceipt(r, agents)).sort((a, b) => b.endedAt.localeCompare(a.endedAt)).slice(0, 50),
       cards: cards.sort((a, b) => a.at.localeCompare(b.at)),
-      mentionable: (part?.agents ?? []).filter(a => a.status !== 'terminated').map(a => ({ id: a.id, name: a.name })),
+      mentionable: [...(part?.people ?? []).map(p => ({ id: p.id, name: p.name, kind: 'user' as const })), ...(part?.agents ?? []).filter(a => a.status !== 'terminated').map(a => ({ id: a.id, name: a.name, kind: 'agent' as const }))],
     };
   }
 
-  async comment(taskId: string, body: string, agents: ReadonlyMap<string, WorkspaceAgent>): Promise<WorkspaceComment> {
-    return mapComment(await this.client.send<Json>('POST', `/issues/${enc(taskId)}/comments`, { body }), agents);
+  async comment(taskId: string, body: string, agents: ReadonlyMap<string, WorkspaceAgent>, clientRequestId?: string): Promise<WorkspaceComment> {
+    return mapComment(await this.client.send<Json>('POST', `/issues/${enc(taskId)}/comments`, { body, ...(clientRequestId ? { clientRequestId } : {}) }), agents);
   }
   async updateTask(taskId: string, changes: TaskChanges, agents: ReadonlyMap<string, WorkspaceAgent>): Promise<WorkspaceTask> {
     // Only what you changed is sent: the server's own PATCH, user-initiated.
@@ -106,7 +148,7 @@ export class PaperclipBackend implements ServerBackend {
     const body: Json = { title: title.slice(0, 500), status: 'todo', description: typeof input.description === 'string' ? input.description.slice(0, 20_000) : '', projectId: input.projectId };
     if (typeof input.priority === 'string' && ['critical', 'high', 'medium', 'low'].includes(input.priority)) body.priority = input.priority;
     if (typeof input.parentId === 'string' && input.parentId) body.parentId = id(input.parentId);
-    if (typeof input.assigneeId === 'string' && input.assigneeId && !input.assigneeId.startsWith('user:')) body.assigneeAgentId = id(input.assigneeId);
+    if (typeof input.assigneeId === 'string' && input.assigneeId) { if (input.assigneeId.startsWith('user:')) body.assigneeUserId = id(input.assigneeId.slice(5)); else body.assigneeAgentId = id(input.assigneeId); }
     // Labels, a goal and the tasks that block this one: the server's own fields on create.
     if (Array.isArray(input.labelIds) && input.labelIds.length) body.labelIds = [...new Set(input.labelIds.slice(0, 20).map(v => id(v)))];
     if (typeof input.goalId === 'string' && input.goalId) body.goalId = id(input.goalId);

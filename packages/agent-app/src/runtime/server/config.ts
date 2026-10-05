@@ -11,6 +11,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from '
 import { join } from 'node:path';
 import type { PaperclipMode, ServerBackendKind } from '../../shared/domains/paperclip-protocol.ts';
 import { PAPERCLIP_LOCAL_URL } from '../../shared/domains/paperclip-protocol.ts';
+import { normalizeOrgSetting, type OrgSetting } from '../../shared/org-work.ts';
 
 export const LEGACY_PAPERCLIP_SECRET = 'paperclip-board-token';
 export const LEGACY_MUSTER_SERVER_SECRET = 'muster-server-token';
@@ -33,11 +34,21 @@ export interface ServerConfig {
   /** The origin the stored session cookie belongs to (the cookie is sent there and nowhere else). */
   sessionOrigin: string | null;
   migratedFrom?: string[];
+  /** Per org (company id): whether it is ticked in Settings › Integrations › Muster Server, and what the sidebar shows of it. An org with no entry is ticked, "My work". */
+  orgs: Record<string, OrgSetting>;
+  /** Who this Mac is signed in as on the server (the server's own user id), resolved once and kept with the origin it was resolved for. "Assigned to me" compares ids, never labels. */
+  me: { id: string; name: string | null; origin: string } | null;
 }
-export const DEFAULT_SERVER_CONFIG: ServerConfig = { version: 2, mode: 'off', baseUrl: PAPERCLIP_LOCAL_URL, companyId: null, backend: null, tokenOrigin: null, tokenSecret: SERVER_SECRET, user: null, serverVersion: null, connectedAt: null, signedIn: null, signInNotice: null, sessionOrigin: null };
+export const DEFAULT_SERVER_CONFIG: ServerConfig = { version: 2, mode: 'off', baseUrl: PAPERCLIP_LOCAL_URL, companyId: null, backend: null, tokenOrigin: null, tokenSecret: SERVER_SECRET, user: null, serverVersion: null, connectedAt: null, signedIn: null, signInNotice: null, sessionOrigin: null, orgs: {}, me: null };
 
 const who = (v: unknown): { name: string | null; email: string | null } | null => v && typeof v === 'object' ? { name: s((v as Record<string, unknown>).name), email: s((v as Record<string, unknown>).email) } : null;
 const read = (path: string): Record<string, unknown> | null => { try { const v = JSON.parse(readFileSync(path, 'utf8')) as unknown; return v && typeof v === 'object' && !Array.isArray(v) ? v as Record<string, unknown> : null; } catch { return null; } };
+const meOf = (v: unknown): ServerConfig['me'] => { const o = v && typeof v === 'object' ? v as Record<string, unknown> : null; return o && typeof o.id === 'string' && o.id && typeof o.origin === 'string' ? { id: o.id, name: typeof o.name === 'string' ? o.name : null, origin: o.origin } : null; };
+const orgsOf = (v: unknown): Record<string, OrgSetting> => {
+  const out: Record<string, OrgSetting> = {};
+  if (v && typeof v === 'object' && !Array.isArray(v)) for (const [id, value] of Object.entries(v as Record<string, unknown>)) if (/^[\w:.-]{1,128}$/.test(id)) out[id] = normalizeOrgSetting(value);
+  return out;
+};
 const s = (v: unknown): string | null => typeof v === 'string' && v ? v : null;
 
 /** Reads `server.json`, or builds it from the older files (writing it so that this happens once). */
@@ -48,7 +59,7 @@ export function loadServerConfig(dataDir: string): { config: ServerConfig; migra
     const mode = own.mode === 'local' || own.mode === 'custom' ? own.mode : 'off';
     const user = own.user && typeof own.user === 'object' ? own.user as ServerUser : null;
     return { migrated: false, config: { ...DEFAULT_SERVER_CONFIG, mode, baseUrl: s(own.baseUrl) ?? PAPERCLIP_LOCAL_URL, companyId: s(own.companyId), backend: own.backend === 'paperclip' || own.backend === 'muster-server' ? own.backend : null,
-      tokenOrigin: s(own.tokenOrigin), tokenSecret: s(own.tokenSecret) ?? SERVER_SECRET, user, serverVersion: s(own.serverVersion), connectedAt: s(own.connectedAt), signedIn: who(own.signedIn), signInNotice: s(own.signInNotice), sessionOrigin: s(own.sessionOrigin), ...(Array.isArray(own.migratedFrom) ? { migratedFrom: own.migratedFrom as string[] } : {}) } };
+      tokenOrigin: s(own.tokenOrigin), tokenSecret: s(own.tokenSecret) ?? SERVER_SECRET, user, serverVersion: s(own.serverVersion), connectedAt: s(own.connectedAt), signedIn: who(own.signedIn), signInNotice: s(own.signInNotice), sessionOrigin: s(own.sessionOrigin), orgs: orgsOf(own.orgs), me: meOf(own.me), ...(Array.isArray(own.migratedFrom) ? { migratedFrom: own.migratedFrom as string[] } : {}) } };
   }
   const paperclip = read(join(dataDir, 'paperclip.json')), muster = read(join(dataDir, 'muster-server.json'));
   const pcMode = paperclip?.mode === 'local' || paperclip?.mode === 'custom' ? paperclip.mode : 'off';
