@@ -127,7 +127,7 @@ const projectsBlock=document.querySelector('section[aria-label="Projects"]')!;
 assert.ok(projectsBlock,'the Projects section');
 assert.deepEqual(text('.nav-org-label',projectsBlock),['OtherOrg · Server','RagnarDataOps · Server']);
 const orgGroup=(label:string)=>[...projectsBlock.querySelectorAll('.nav-org')].find(g=>g.getAttribute('aria-label')===label)!;
-assert.deepEqual(text('.nav-section-title',orgGroup('RagnarDataOps · Server')),['Data Pipeline','Ops Dashboard'],'imported and linked projects of one org sit together, once each');
+assert.deepEqual(text('.nav-section-title',orgGroup('RagnarDataOps · Server')),['Data Pipeline'],'the org’s imported copy sits under its org; its linked projects are the sidebar’s org rows (OrgSidebar), not repeated here');
 root4.unmount();
 assert.deepEqual(errors,[]);
 

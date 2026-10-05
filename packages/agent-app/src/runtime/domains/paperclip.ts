@@ -31,6 +31,8 @@ import { detectBackend } from '../server/detect.ts';
 import { normalizeBaseUrl as normalizeUrl } from '../paperclip-client.ts';
 import { connectionFor, isLoopback as connectionLoopback, originOf } from '../server/connection.ts';
 import { arr, mapBudgets } from '../paperclip-map.ts';
+import { OrgReader, serverHubFor } from '../server/orgs.ts';
+import { leadAgentIds, normalizeOrgSetting, scopeInbox } from '../../shared/org-work.ts';
 import { SecretStore } from '../secret-store.ts';
 import { attachTurnLedger, TurnLedger } from '../turn-ledger.ts';
 import { importLedgerHistory, paperclipHistory, type HistoryResult } from '../ledger-history.ts';
@@ -48,7 +50,7 @@ const POLL_FAST_MS = 2_500, POLL_IDLE_MS = 15_000, POLL_QUIET_AFTER_MS = 60_000,
 /** Frames that fire many times a second while an agent works and change nothing the UI shows. */
 const NOISY = new Set(['heartbeat.run.log', 'heartbeat.run.event', 'heartbeat.run.progress', 'plugin.ui.updated']);
 /** Needs you + Problems: the only kinds that badge. */
-const URGENT = new Set(['question', 'approval', 'blocked', 'failed_run', 'agent_error', 'budget']);
+const URGENT = new Set(['question', 'approval', 'blocked', 'failed_run', 'agent_error', 'budget', 'mention']);
 
 /** Kept for callers that read it from here (tests, older code): the entry migrated Paperclip tokens stay in. */
 export const PAPERCLIP_SECRET_ID = LEGACY_PAPERCLIP_SECRET;
@@ -107,6 +109,13 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
     if (!backend || backend.kind !== kind || backend.endpoint.baseUrl !== endpoint.baseUrl || backend.endpoint.token !== endpoint.token) { closeSocket(); backend = conn.makeBackend(kind, endpoint, { orgName: originLabel() }); built = null; }
     return backend;
   };
+  // Every org the person belongs to, side by side (sidebar, My work, Inbox): one reader over this same backend, shared with the checkout domain.
+  const hub = serverHubFor(context);
+  hub.backend = connection;
+  hub.reader = new OrgReader({
+    backend: connection, settings: () => conn.config.orgs, activeId: () => built?.companyId ?? conn.config.companyId ?? companies[0]?.id ?? null,
+    serverLabel: () => { try { return new URL(conn.baseUrl()).host; } catch { return originLabel(); } }, badge: taskId => hub.badge?.(taskId) ?? null, remembered: () => conn.person(), remember: person => conn.setPerson(person),
+  });
   /** An approval an import carried over can be decided only while a server is linked (the decision goes to its approval endpoints). */
   const linkedApproval = (sourceId: string, projectId: string | null) => {
     if (!sourceId.startsWith('approval:') || !connection() || !projectId) return false;
@@ -170,12 +179,14 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
   /** The connection changed (here, or by signing in from Settings): drop what was read from the old one and tell the screens. */
   /** The session cookie arrived, expired or was cleared: only the live socket is rebuilt; the next read tries it first. */
   const offSession = conn.onSession(() => { live.refusedAt = 0; closeSocket(); backend = null; built = null; if (conn.sessionState() !== 'expired') ensureSocket(); queueEmit(['config']); });
-  const offConnection = conn.onChange(() => { live.refusedAt = 0; closeSocket(); stopPoll(); built = null; backend = null; companies = []; lastError = undefined; queueEmit(['config', 'tasks', 'runs', 'agents', 'inbox']); });
+  const offConnection = conn.onChange(() => { hub.reader?.reset(); live.refusedAt = 0; closeSocket(); stopPoll(); built = null; backend = null; companies = []; lastError = undefined; queueEmit(['config', 'tasks', 'runs', 'agents', 'inbox']); });
   /** Records the last read's outcome. Going offline (ok → stale) or coming back (stale → ok) is an update the screens
    *  must see at once: the banner and "· offline" come from it, so it is emitted rather than waiting for a reload. */
   const linkError = (next: string | undefined) => {
     const changed = Boolean(next) !== Boolean(lastError);
+    const cameBack = changed && !next;
     lastError = next;
+    if (cameBack) hub.onOnline?.();
     if (changed) queueEmit(['config', 'inbox', 'tasks']);
   };
   const paperclipPart = async (refresh: boolean): Promise<{ part: PaperclipPart | null; link: PaperclipLink | null }> => {
@@ -242,12 +253,33 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
     // An approval carried over by an import is decided in the linked Paperclip (when there is one), from its row.
     const carried = (i: WorkspaceInboxItem): WorkspaceInboxItem => i.id.startsWith('import:approval:') && linkedApproval(i.id.slice('import:'.length), i.projectId ?? null) ? { ...i, approvalId: i.id.slice('import:approval:'.length), approvalVerbs: ['approve', 'reject', 'request_revision'] } : i;
     const gates: WorkspaceInboxItem[] = (over?.inbox ?? []).map(g => ({ ...g, taskId: null, agentId: null, runId: null, source: 'local' as const }));
-    const inbox = [...mine.inbox.map(carried), ...gates, ...await budgetInbox(mine.projects), ...(p?.inbox ?? []).filter(i => !i.taskId || !imported.has(i.taskId))].sort((a, b) => rank[a.severity] - rank[b.severity] || b.at.localeCompare(a.at));
+    // The server's Inbox lists only what asks the signed-in person (never another person's task), from every ticked org, each tagged with its org.
+    const serverInbox = await scopedServerInbox(p, theirs.link?.company ?? null);
+    const inbox = [...mine.inbox.map(carried), ...gates, ...await budgetInbox(mine.projects), ...serverInbox.filter(i => !i.taskId || !imported.has(i.taskId))].sort((a, b) => rank[a.severity] - rank[b.severity] || b.at.localeCompare(a.at));
     return {
-      paperclip: theirs.link, tasks, agents: [...mine.agents, ...(p?.agents ?? [])], projects: projects2, goals: p?.goals ?? [], runs, inbox, ...(p ? { approvals: p.approvals, labels: p.labels } : {}), agentCounts: p ?  { active: p.agents.filter(a => a.status !== 'paused' && a.status !== 'terminated' && a.status !== 'pending').length, paused: p.agents.filter(a => a.status === 'paused').length, resumable: resumable(p) } : { active: 0, paused: 0, resumable: resumable(null) },
+      paperclip: theirs.link, tasks, agents: [...mine.agents, ...(p?.agents ?? [])], projects: projects2, goals: p?.goals ?? [], runs, inbox, ...(p ? { approvals: p.approvals, labels: p.labels, people: await peopleOf(p) } : {}), agentCounts: p ?  { active: p.agents.filter(a => a.status !== 'paused' && a.status !== 'terminated' && a.status !== 'pending').length, paused: p.agents.filter(a => a.status === 'paused').length, resumable: resumable(p) } : { active: 0, paused: 0, resumable: resumable(null) },
       counts: { liveRuns: runs.filter(r => r.status === 'running').length, inbox: inbox.filter(i => i.kind !== 'mail').length, failedRuns: runs.filter(r => r.status === 'failed').length, openTasks: tasks.filter(t => t.status !== 'done' && t.status !== 'cancelled').length },
       fetchedAt: new Date().toISOString(),
     };
+  };
+  /** The linked org's Inbox items that ask the person, plus the same from the other ticked orgs. A server that cannot say who the person is (a Muster Server) is shown unscoped, as before. */
+  const scopedServerInbox = async (p: PaperclipPart | null | undefined, company: PaperclipLink['company']): Promise<WorkspaceInboxItem[]> => {
+    if (!p) return [];
+    const api0 = connection();
+    if (!api0?.whoami || !hub.reader) return p.inbox;
+    const me = await hub.reader.me();
+    // A server that does not say who the person is cannot be scoped: the old unscoped Inbox is kept for it (My work and the sidebar then show nothing).
+    if (!me) return p.inbox;
+    const setting = company ? normalizeOrgSetting(conn.config.orgs[company.id]) : normalizeOrgSetting(undefined);
+    const own = company && !setting.enabled ? [] : scopeInbox(p.inbox, p.tasks, me, { team: setting.sidebar === 'team', reporting: { agentIds: leadAgentIds(me, p.tasks, p.agents) } }).map(i => company ? { ...i, org: { id: company.id, name: company.name } } : i);
+    const others = await hub.reader.otherInbox(company?.id ?? null).catch(() => []);
+    return [...own, ...others];
+  };
+  /** The linked org's people, with the signed-in one marked: what the owner pickers and @-mentions list. */
+  const peopleOf = async (p: PaperclipPart): Promise<{ id: string; name: string; me?: boolean }[]> => {
+    const me = hub.reader ? await hub.reader.me().catch(() => null) : null;
+    const list = (p.people ?? []).map(x => me && x.id === me.id ? { id: x.id, name: x.name || me.name || 'Me', me: true } : x);
+    return me && !list.some(x => x.id === me.id) ? [{ id: me.id, name: me.name ?? 'Me', me: true }, ...list] : list;
   };
   const snapshot = (refresh = false): Promise<WorkspaceSnapshot> => {
     snapshotInflight ??= merge(refresh, true).finally(() => { snapshotInflight = null; });
@@ -741,11 +773,14 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
         if (input.assigneeId !== undefined) {
           // An agent, or nobody (null, or you: a Paperclip task owned by the board is simply unassigned from an agent).
           if (input.assigneeId !== null && typeof input.assigneeId !== 'string') throw new Error('Unknown assignee.');
-          changes.assigneeAgentId = input.assigneeId === null || input.assigneeId.startsWith('user:') ? null : id(input.assigneeId);
+          const person = typeof input.assigneeId === 'string' && input.assigneeId.startsWith('user:') ? input.assigneeId.slice(5) : null;
+          // A person (their server user id) takes the task and the agent is cleared; an agent takes it and any person is cleared; null clears both.
+          changes.assigneeAgentId = input.assigneeId === null || person !== null ? null : id(input.assigneeId);
+          if (connection()?.kind === 'paperclip') changes.assigneeUserId = person !== null && person !== 'local' ? id(person) : null;
         }
         if (!Object.keys(changes).length) throw new Error('Nothing to change.');
         if (await owner('task', taskId) === 'local') {
-          if (changes.priority !== undefined || changes.assigneeAgentId !== undefined) throw new Error('Change a Muster task’s priority or owner in its project’s task list.');
+          if (changes.priority !== undefined || changes.assigneeAgentId !== undefined || changes.assigneeUserId !== undefined) throw new Error('Change a Muster task’s priority or owner in its project’s task list.');
           return local.setStatus(taskId, changes.status as WorkspaceStatus);
         }
         // Only what you changed is sent: Paperclip's own PATCH, user-initiated.

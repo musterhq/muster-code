@@ -5,6 +5,7 @@
  */
 import type { PaperclipConfigInput, PaperclipConfigView, PaperclipMode, PaperclipTestResult, ServerBackendKind, WorkspaceCompany } from '../../shared/domains/paperclip-protocol.ts';
 import { PAPERCLIP_LOCAL_URL } from '../../shared/domains/paperclip-protocol.ts';
+import { normalizeOrgSetting, type OrgSetting } from '../../shared/org-work.ts';
 import { PaperclipError, normalizeBaseUrl, type FetchLike } from '../paperclip-client.ts';
 import { activeSecretStore, SecretStore } from '../secret-store.ts';
 import type { BackendOptions, ServerBackend, ServerEndpoint } from './backend.ts';
@@ -137,6 +138,19 @@ export class ServerConnection {
     const options = { fetch: this.options.fetch, onUnauthorized: this.guardFor(endpoint.baseUrl, endpoint.token), ...(session ? { session } : {}), ...extra };
     return kind === 'muster-server' ? new MusterServerBackend(endpoint, options) : new PaperclipBackend(endpoint, options);
   }
+  /** Ticks or unticks an org and sets its sidebar view. Saved to server.json; the connection itself (token, URL) is untouched, so nothing is re-read. */
+  setOrg(companyId: string, patch: { enabled?: boolean; sidebar?: OrgSetting['sidebar'] }): void {
+    const id = (() => { if (!/^[\w:.-]{1,128}$/.test(companyId)) throw new Error('Unknown org.'); return companyId; })();
+    const now = normalizeOrgSetting(this.config.orgs[id]), next = normalizeOrgSetting({ ...now, ...patch });
+    this.save({ ...this.config, orgs: { ...this.config.orgs, [id]: next } }, false);
+  }
+  /** Remembers who this Mac is signed in as (the server's user id), for the origin it was resolved on. Used when the server cannot be asked. */
+  setPerson(person: { id: string; name: string | null }): void {
+    const origin = originOf(this.baseUrl());
+    if (!origin || (this.config.me?.id === person.id && this.config.me.name === person.name && this.config.me.origin === origin)) return;
+    this.save({ ...this.config, me: { id: person.id, name: person.name, origin } }, false);
+  }
+  person(): { id: string; name: string | null } | null { const me = this.config.me; return me && me.origin === originOf(this.baseUrl()) ? { id: me.id, name: me.name } : null; }
   /** Detects and remembers the backend of a connection that predates detection (or was saved offline). */
   async resolveBackend(): Promise<ServerBackendKind> {
     if (this.config.backend) return this.config.backend;

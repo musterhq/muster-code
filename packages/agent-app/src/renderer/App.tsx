@@ -8,6 +8,8 @@ import { SpotlightSearchHost } from './components/SpotlightSearch';
 import { WorkShortcutsHost } from './components/WorkShortcuts';
 import { ParallelRunHost } from './components/ParallelRunGuard';
 import { ImportConversationsHost } from './components/ImportConversations';
+import { TaskLinkHost } from './components/TaskLinkHost';
+import { HandBackHost } from './components/HandBackHost';
 import { SetupGuideHost } from './components/SetupGuide';
 import { ResourcePane } from './components/ResourcePane';
 import {LazyAutomationsScreen,LazyBoundary,LazyHubScreen,LazyMemoryScreen,LazyPreferencesScreen,LazyProjectsScreen,preloadScreens} from './lazyScreens';
@@ -118,6 +120,8 @@ export function App(): React.ReactElement {
       <WorkShortcutsHost/>
       <ParallelRunHost/>
       <ImportConversationsHost/>
+      <TaskLinkHost/>
+      <HandBackHost/>
       <SetupGuideHost/>
       {!state.navHidden&&<div
         className="nav-separator"
@@ -138,7 +142,7 @@ export function App(): React.ReactElement {
         }}
       />}
       <main className="center" data-screen={state.screen}>
-        <div className="work-surface" hidden={state.screen!=='work'} inert={state.screen!=='work'} aria-hidden={state.screen!=='work'}>
+        <div className="work-surface" hidden={state.screen!=='work'} inert={state.screen!=='work'}>
           {state.boot.phase === 'loading' || state.boot.phase === 'idle' ? (
             <div className="center-loading" role="status">
               Loading workspace…

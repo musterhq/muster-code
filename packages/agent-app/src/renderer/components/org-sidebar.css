@@ -1,0 +1,40 @@
+/* The sidebar's organisations (#117). App tokens only: the type scale, corner scale and colour roles from styles.css. */
+.org-nav { display: grid; gap: 2px; }
+.org-block { display: grid; }
+.org-head { display: flex; align-items: center; min-width: 0; border-radius: var(--radius-6); }
+.org-head:hover { background: var(--bg-hover); }
+.org-toggle { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; padding: 0 6px; min-height: var(--sidebar-row-h); background: none; border: 0; color: var(--text); font: inherit; font-size: var(--sidebar-font); font-weight: 600; cursor: pointer; text-align: left; border-radius: var(--radius-6); }
+.org-toggle:focus-visible, .org-task:focus-visible, .org-project:focus-visible, .org-more:focus-visible { outline: 1px solid var(--focus-ring); outline-offset: -1px; }
+.org-chev { flex: none; color: var(--text-faint); transition: transform 0.15s; }
+.org-block[data-open] .org-chev { transform: rotate(90deg); }
+.org-avatar { flex: none; width: 18px; height: 18px; border-radius: var(--radius-4); display: grid; place-items: center; font-size: var(--fs-10); font-weight: 700; color: var(--on-accent); }
+.org-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.org-stale { color: var(--warn); font-weight: 700; }
+.org-count { flex: none; font-size: var(--sidebar-badge); font-variant-numeric: tabular-nums; color: var(--text-dim); background: var(--bg-active); border-radius: var(--radius-full); padding: 1px 7px; }
+.org-count.is-hot { background: var(--accent); color: var(--on-accent); }
+.org-pin { opacity: 0; width: 22px; height: 22px; }
+.org-head:hover .org-pin, .org-head:focus-within .org-pin, .org-pin[aria-pressed='true'] { opacity: 1; }
+.org-pin[aria-pressed='true'] { color: var(--accent); }
+.org-body { display: grid; gap: 1px; padding-left: 14px; }
+.org-mini { margin: 6px 0 2px 8px; font-size: var(--sidebar-label); color: var(--text-faint); }
+.org-empty { margin: 2px 8px; font-size: var(--fs-12); color: var(--text-faint); }
+.org-task, .org-project { display: flex; align-items: center; gap: 7px; min-width: 0; padding: 0 8px; min-height: 26px; background: none; border: 0; border-radius: var(--radius-6); color: var(--text); font: inherit; font-size: var(--sidebar-font); cursor: pointer; text-align: left; }
+.org-task:hover, .org-project:hover { background: var(--bg-hover); }
+.org-task.is-active, .org-project.is-active { background: var(--bg-active); }
+.org-project { color: var(--text-dim); }
+.org-project:hover { color: var(--text); }
+.org-project-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.org-key { flex: none; font-family: var(--mono); font-size: var(--fs-11); color: var(--text-faint); }
+.org-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.org-here { flex: none; color: var(--ok); }
+.org-more { margin: 1px 0 0 8px; padding: 2px 0; background: none; border: 0; text-align: left; font: inherit; font-size: var(--fs-12); color: var(--link); cursor: pointer; }
+.org-more:hover { text-decoration: underline; }
+/* Task state dots, shared with the My work page. */
+.org-dot { flex: none; width: 9px; height: 9px; border-radius: 50%; border: 1.5px solid var(--text-faint); box-sizing: border-box; }
+.org-dot[data-state='prog'] { border-color: var(--accent); background: linear-gradient(90deg, var(--accent) 50%, transparent 50%); }
+.org-dot[data-state='rev'] { border-color: var(--warn); background: var(--warn); }
+.org-dot[data-state='blocked'] { border-color: var(--danger); }
+.org-chat { display: flex; align-items: center; gap: 7px; min-width: 0; margin-left: 16px; padding: 0 8px; min-height: 24px; background: none; border: 0; border-radius: var(--radius-6); color: var(--text-dim); font: inherit; font-size: var(--fs-12); cursor: pointer; text-align: left; }
+.org-chat:hover { background: var(--bg-hover); color: var(--text); }
+.org-chat.is-active { background: var(--bg-active); color: var(--text); }
+.org-chat:focus-visible { outline: 1px solid var(--focus-ring); outline-offset: -1px; }

@@ -112,7 +112,7 @@ export class PaperclipClient {
     return this.pages<Json>(base, COMMENT_PAGE, page => `${base}&after=${encodeURIComponent(String(page[page.length - 1]!.id))}`);
   }
 
-  async send<T>(method: 'POST' | 'PATCH', path: string, body: unknown = {}): Promise<T> {
+  async send<T>(method: 'POST' | 'PATCH' | 'PUT', path: string, body: unknown = {}): Promise<T> {
     const response = await this.request(method, path, body);
     if (!response.ok) throw new PaperclipError(`Muster Server refused the change (${response.status}).${await errorText(response)}`, response.status, 'service');
     this.cache.clear();

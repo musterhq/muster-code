@@ -15,6 +15,7 @@ import { GanttTimeline } from './Gantt';
 import { activityCsv, downloadText } from '../activityCsv';
 import { DecisionExtras, GateActions, InboxViews, SnoozeMenu, useInboxMeta } from './WorkInbox';
 import { agoLabel, exactTime } from '../relativeTime';
+import { openTaskInOrg } from '../orgStore';
 import { readHideRoutine, writeHideRoutine } from '../runsModel';
 import { shortcutsEnabled } from '../shortcuts';
 import { notifyError, notifySuccess } from '../store';
@@ -87,7 +88,7 @@ export function InboxPage({ snapshot, nav }: { snapshot: WorkspaceSnapshot | nul
     else if (e.key === 'U' && e.shiftKey) { e.preventDefault(); void invoke('work.inbox.unread', { items: [{ id: item.id }] }).then(reloadMeta, notifyError); }
     else if (e.key === 'x' && item.bucket === 'needs') { e.preventDefault(); void dismissInboxItem({ id: item.id, at: item.at, title: item.title }).catch(notifyError); }
   };
-  const open = (item: ActivityItem) => item.action.kind === 'chat' ? nav.onOpenChat(item.action.chatId) : item.action.kind === 'task' ? nav.onOpenTask(item.action.taskId) : item.action.kind === 'agent' ? nav.onOpenAgent(item.action.agentId) : undefined;
+  const open = (item: ActivityItem) => item.action.kind === 'chat' ? nav.onOpenChat(item.action.chatId) : item.action.kind === 'task' ? (item.org ? void openTaskInOrg(item.org.id, item.action.taskId) : nav.onOpenTask(item.action.taskId)) : item.action.kind === 'agent' ? nav.onOpenAgent(item.action.agentId) : undefined;
   const label = (item: ActivityItem) => item.action.kind === 'chat' ? item.bucket === 'needs' ? 'Answer' : item.kind === 'interrupted' ? 'Continue' : item.bucket === 'problems' ? 'Retry' : 'Open chat' : item.action.kind === 'task' ? item.bucket === 'needs' ? 'Answer' : 'Open task' : item.action.kind === 'agent' ? 'Open agent' : '';
   const mailProject = group !== 'all' ? app?.projects.find(p => p.name === group)?.id ?? null : null;
   // Paperclip offline: never claim "all caught up" when its items could not be read.
@@ -101,7 +102,7 @@ export function InboxPage({ snapshot, nav }: { snapshot: WorkspaceSnapshot | nul
       <InboxOptions columns={columns} onColumns={next => { setColumns(next); writeColumns(globalThis.localStorage, next); }} tidy={tidy} onTidy={next => { setTidy(next); writeTidy(globalThis.localStorage, next); }}/>
       {groups.length > 1 && <select className="ws-select" aria-label="Group" value={group} onChange={e => setGroup(e.target.value)}><option value="all">Everything</option>{groups.map(g => <option key={g} value={g}>{g}</option>)}</select>}
     </div>
-    {offline && <ResourceState kind="partial" compact message={offline.cached ? `${NAMES.paperclip} can’t be reached, so its items are from the last copy and may be out of date.` : `${NAMES.paperclip} can’t be reached, so its questions, approvals and problems are not shown.`}/>}
+    {offline && <ResourceState kind="partial" compact message={/token|sign.?in|refused|expired|unauthori[sz]ed/i.test(offline.stale ?? '') ? `${offline.stale} Sign in again in Settings › Integrations; the items below are from the last copy.` : offline.cached ? `${NAMES.paperclip} can’t be reached, so its items are from the last copy and may be out of date.` : `${NAMES.paperclip} can’t be reached, so its questions, approvals and problems are not shown.`}/>}
     {visible.length === 0 ? <ResourceState kind="empty" icon={<Inbox size={20}/>} title={view === 'snoozed' ? 'Nothing snoozed' : view === 'unread' && items.length ? 'Nothing unread' : view === 'mine' && items.length ? 'Nothing is waiting on you' : items.length ? 'Nothing here' : offline ? 'Nothing from Muster needs you' : 'You’re all caught up'} message={view === 'snoozed' ? 'Snoozed items wait here and come back by themselves at the time you chose.' : items.length ? 'No items match these filters.' : offline ? `${NAMES.paperclip} items will show here once it can be reached.` : 'Questions and approvals from your agents, finished turns, reviews, problems and mail land here.'}/>
       : [...byGroup].map(([name, rows]) => <section key={name} className="ws-section" aria-label={name}>
         <h2 className="ws-group-title">{name}<span>{rows.length}</span></h2>
@@ -110,7 +111,7 @@ export function InboxPage({ snapshot, nav }: { snapshot: WorkspaceSnapshot | nul
             <span className="ws-unread-dot" aria-label={unreadNow(item, meta) ? 'Unread' : undefined}/>
             <StateChip tone={BUCKET_TONE[item.bucket]}>{KIND_LABEL[item.kind] ?? INBOX_BUCKETS[item.bucket]}</StateChip>
             <button type="button" className="ws-row-text ws-row-link" disabled={item.action.kind === 'none'} onClick={() => act(item)}><span className="ws-row-title">{item.title}</span><span className="ws-row-meta">{item.kind === 'failed_run' || item.kind === 'agent_error' ? explainRunError(item.why) : item.why}</span></button>
-            {item.source === 'paperclip' && <span className="ws-source">{NAMES.paperclip}</span>}
+            {item.org ? <span className="ws-source ws-org-chip" title={`${item.org.name} · ${NAMES.server}`}>{item.org.name}</span> : item.source === 'paperclip' && <span className="ws-source">{NAMES.paperclip}</span>}
             <span className="ws-row-age" title={exactTime(item.at)}>{agoLabel(item.at)}</span>
             {item.action.kind !== 'none' && <button type="button" className="settings-button secondary ws-row-action" onClick={() => act(item)}>{label(item)}</button>}
             <GateActions item={item} onChanged={reloadMeta}/>

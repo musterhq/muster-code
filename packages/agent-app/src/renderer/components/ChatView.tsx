@@ -18,6 +18,8 @@ import {
 } from '../store';
 import {invoke} from '../bridge';
 import {editResend,forkChat,retryTarget,retryTurn,turnEnd} from '../messageActions';
+import {useEventLoad} from '../orgHooks';
+import {notifyError,notifySuccess} from '../store';
 import { useStore } from '../useStore';
 import {findMentionSpans} from '../mentionChips';
 import {resolveToolPath} from './toolPresentation';
@@ -180,11 +182,16 @@ export function Timeline({ items, chatId, onScrolled, running, planMode=false }:
   const retryId=useMemo(()=>retryTarget(items,live),[items,live]);
   const [editingId,setEditingId]=useState<string>();
   const itemsRef=useRef(items);itemsRef.current=items;
+  // A chat made by Work locally belongs to a server task: its messages can be posted there as a decision (visible, as you, "via Muster · local").
+  const leases=useEventLoad(e=>e.type==='checkoutChanged',()=>invoke('checkout.leases',{}).then(r=>r.leases).catch(()=>[]),[chatId]);
+  const linked=(leases.data??[]).find(l=>l.state==='checked_out'&&l.chatId===chatId);
+  const decide=(row:TimelineItem|TranscriptEntry)=>linked&&'text' in row?{onDecision:async()=>{try{await invoke('checkout.decision',{taskId:linked.taskId,text:row.text});notifySuccess(`Posted to ${linked.key} as a decision, as you (via Muster · local).`);}catch(error){notifyError(error);}}}:{};
   const actionsFor=(row:TranscriptEntry):MessageActions|undefined=>row.kind==='user'?{
     onEdit:()=>setEditingId(row.id),
     onFork:()=>forkChat(chatId,turnEnd(itemsRef.current,row.id)),
     ...(retryId===row.id?{onRetry:()=>retryTurn(chatId,row.id)}:{}),
-  }:row.kind==='assistant'?{onFork:()=>forkChat(chatId,row.id),...(retryId===row.id?{onRetry:()=>retryTurn(chatId,row.id)}:{})}:undefined;
+    ...decide(row),
+  }:row.kind==='assistant'?{onFork:()=>forkChat(chatId,row.id),...(retryId===row.id?{onRetry:()=>retryTurn(chatId,row.id)}:{}),...decide(row)}:undefined;
   const editingFor=(row:TranscriptEntry):EditingProps|undefined=>row.kind==='user'&&row.id===editingId?{
     onCancel:()=>setEditingId(undefined),
     onSubmit:async(text,mode,restoreFiles)=>{const sent=await editResend(chatId,row.id,text,mode,restoreFiles);if(sent)setEditingId(undefined);return sent;},

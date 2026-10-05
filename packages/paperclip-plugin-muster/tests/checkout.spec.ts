@@ -33,9 +33,19 @@ describe("deriveCheckout", () => {
     });
   });
 
-  it("counts a 'via Muster' sign-off as activity even without a marker", () => {
+  it("no longer counts a plain 'via Muster' sign-off as activity: only Muster's own marker does", () => {
     const state = deriveCheckout(issue, [checkout("2026-10-05T09:00:00Z"), human("2026-10-05T12:00:00Z", "Tests green. via Muster · local")]);
-    expect(state.lastActivityAt).toBe("2026-10-05T12:00:00.000Z");
+    expect(state.lastActivityAt).toBe("2026-10-05T09:00:00.000Z");
+  });
+
+  it("applies the desktop's rules: one lease marker per comment, and only the assignee's check-out is a lease", () => {
+    const two = human("2026-10-05T10:00:00Z", `${buildMarker("release")}\n${buildMarker("checkout", { device: "x", "device-id": "y", by: "z" })}`);
+    expect(deriveCheckout(issue, [checkout("2026-10-05T09:00:00Z"), two]).status).toBe("checked_out");
+    expect(deriveCheckout(issue, [two]).status).toBe("none");
+    const other = human("2026-10-05T10:00:00Z", buildMarker("checkout", { device: "evil", "device-id": "e", by: "Eve" }), "user-eve");
+    const state = deriveCheckout(issue, [checkout("2026-10-05T09:00:00Z"), other]);
+    expect(state).toMatchObject({ status: "checked_out", device: "Dhairya's MacBook", userId: ME });
+    expect(deriveCheckout(issue, [other]).status).toBe("stale");
   });
 
   it("ends on release and on hand-back", () => {

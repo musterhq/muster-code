@@ -1,5 +1,8 @@
 /** Muster Server setup (#115, unified): the Integrations panel (This Mac / Sign in / URL + API token / Off, Test connection, org, import),
  *  the New task sheet, and the server's routines for the Automations screen. Built from the app's form and sheet components. */
+import { LocalCheckoutsCard, OrgsCard } from './OrgsCard';
+import { OwnerPicker } from './OwnerPicker';
+import { agentLabel, ownerOptions } from '../ownerOptions';
 import { Check, Link2, Play } from 'lucide-react';
 import React, { useEffect, useRef, useState } from 'react';
 import type { ImportPlan, ImportTargets, PaperclipConfigView, PaperclipImportReport, PaperclipSignInState, PaperclipTestResult, WorkspaceList, WorkspacePriority, WorkspaceSnapshot } from '../../shared/domains/paperclip-protocol';
@@ -134,10 +137,6 @@ export function ConnectionPanel({ onSaved, compact = false, signInAvailable = tr
       await refreshWorkspace(true); onSaved?.(result.config); load(result.config, { current: true });
     } catch (cause) { setError(errorText(cause)); } finally { setBusy(null); }
   };
-  const chooseOrg = async (id: string) => {
-    if (!config) return;
-    try { const view = await invoke('paperclip.config.set', { mode: config.mode, baseUrl: config.baseUrl, companyId: id }); setConfig(view); await refreshWorkspace(true); } catch (cause) { setError(errorText(cause)); }
-  };
   /** Step 1 of an import: read what it would fill (GET only) and suggest a Muster project for each server project. */
   const [plan, setPlan] = useState<ImportPlan | null>(null);
   const [targets, setTargets] = useState<Record<string, string>>({});
@@ -171,7 +170,7 @@ export function ConnectionPanel({ onSaved, compact = false, signInAvailable = tr
       <p className="ws-connection-detect" data-ok="true" role="status"><Check size={13} aria-hidden="true"/>
         {who ? `Connected to ${host} as ${who}.` : config.hasToken ? `Connected to ${host} with an API token.` : `Connected to ${host}.`}{' '}
         {config.live === 'socket' ? 'Live updates on.' : 'Updates every few seconds.'}{config.reconnect && <> <button type="button" className="ws-link" onClick={() => void invoke('musterServer.signInWindow', { baseUrl: config.baseUrl, url: config.baseUrl }).catch(() => undefined)}>Reconnect for live updates</button></>}</p>
-      {companies.length > 1 && <label className="project-edit-goal"><span>Org</span><select className="ws-select is-field" value={config.companyId ?? companies[0]!.id} onChange={e => void chooseOrg(e.target.value)}>{companies.map(c => <option key={c.id} value={c.id}>{c.name}{c.prefix ? ` (${c.prefix})` : ''}</option>)}</select></label>}
+      <OrgsCard/><LocalCheckoutsCard/>
       <details className="ws-connection-more"><summary>Details</summary>
         <dl className="ws-connection-details" aria-label="Connection details">
           <div><dt>Address</dt><dd>{config.baseUrl}</dd></div>
@@ -297,6 +296,8 @@ export function NewTaskSheet({ open, snapshot, projectId, parentId = null, onClo
       await refreshWorkspace();
       if (task.started) notifySuccess(`${task.assigneeLabel ?? 'The agent'} started ${task.key} on ${task.started.branch} in its own worktree.`);
       else if (task.startError) notifyError(new Error(`${task.key} was created, but it could not start: ${task.startError}`));
+      const mine = source === 'paperclip' && Boolean(owner) && owner === `user:${(snapshot?.people ?? []).find(p => p.me)?.id ?? ''}`;
+      if (mine) notifySuccess(`${task.key} is yours.`, { label: 'Work locally', run: () => onCreated(task.id) });
       onCreated(task.id); onClose();
     } catch (cause) { setError(errorText(cause)); } finally { setBusy(null); }
   };
@@ -306,10 +307,12 @@ export function NewTaskSheet({ open, snapshot, projectId, parentId = null, onClo
       <label className="project-edit-goal"><span>Description</span><textarea rows={4} maxLength={20000} value={description} disabled={busy !== null} placeholder="Context, constraints and what done looks like" onChange={e => setDescription(e.target.value)}/></label>
       <div className="ws-form-row">
         <label className="project-edit-goal"><span>Project</span><select className="ws-select is-field" value={project} disabled={busy !== null || Boolean(projectId)} onChange={e => { setProject(e.target.value); setAssignee(''); setParent(''); }}>{(snapshot?.projects ?? []).map(p => <option key={p.id} value={p.id}>{p.name}{p.source === 'paperclip' ? ` · ${NAMES.paperclip}` : ''}</option>)}</select></label>
-        <label className="project-edit-goal"><span>Owner</span><select className="ws-select is-field" value={owner} disabled={busy !== null} onChange={e => setAssignee(e.target.value)}>
-          {source === 'paperclip' ? <option value="">No owner</option> : <option value="user:local">You</option>}
-          {agents.map(a => <option key={a.id} value={a.id}>{a.name}{a.title ? ` · ${a.title}` : ''}</option>)}
-        </select></label>
+        {source === 'paperclip'
+          ? <div className="project-edit-goal"><span id="new-task-owner">Owner</span><OwnerPicker label="Owner" value={owner} disabled={busy !== null} options={ownerOptions({ agents, people: snapshot?.people ?? [], noneLabel: 'No owner' })} onChange={setAssignee}/></div>
+          : <label className="project-edit-goal"><span>Owner</span><select className="ws-select is-field" value={owner} disabled={busy !== null} onChange={e => setAssignee(e.target.value)}>
+            <option value="user:local">You</option>
+            {agents.map(a => <option key={a.id} value={a.id}>{agentLabel(a.name, a.title)}</option>)}
+          </select></label>}
       </div>
       <div className="ws-form-row">
         <label className="project-edit-goal"><span>Priority</span><select className="ws-select is-field" value={priority} disabled={busy !== null} onChange={e => setPriority(e.target.value as WorkspacePriority)}>{(['critical', 'high', 'medium', 'low'] as const).map(p => <option key={p} value={p}>{PRIORITY_NAME[p]}</option>)}</select></label>

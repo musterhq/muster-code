@@ -11,6 +11,7 @@
  *   delete), Folders, Members, Mail (renamed from the project "Inbox", #186), Chats, Knowledge, Runs & verification
  *   (schedules, verification, the task graph) and Activity.
  */
+import { ProjectCheckoutRow } from './OrgsCard';
 import { Menu } from '@base-ui/react/menu';
 import { Archive, ArchiveRestore, Clipboard, Download, FolderClosed, ListChecks, MoreHorizontal, Settings2, SquarePen, Trash2 } from 'lucide-react';
 import React, { useEffect, useMemo, useState } from 'react';
@@ -225,7 +226,7 @@ export function PaperclipSettings({ snapshot }: { snapshot: WorkspaceSnapshot })
       <div><dt>Description</dt><dd className="pp-pre">{p.description || <span className="ws-faint">None</span>}</dd></div>
       <div><dt>Repository</dt><dd>{p.repo ?? <span className="ws-faint">None</span>}</dd></div>
       <div><dt>Server workspace</dt><dd>{p.cwd ? <><code>{p.cwd}</code> <span className="ws-faint">on {snapshot.paperclip?.origin ?? 'the server'}</span></> : <span className="ws-faint">None</span>}<span className="pp-field-hint ws-faint">Where the server's agents work. This is a path on the server, not a folder on this Mac.</span></dd></div>
-      <div><dt>Local checkout on this Mac</dt><dd><span className="ws-faint" data-local-checkout="none">Not linked</span><span className="pp-field-hint ws-faint">Read-only for now: linking a checkout on this Mac to a server project is coming.</span></dd></div>
+      <ProjectCheckoutRow orgId={snapshot.paperclip?.company?.id ?? ''} projectId={p.id}/>
       <div><dt>Memory</dt><dd>{p.memory ? `${p.memory.label} · ${p.memory.count} ${p.memory.count === 1 ? 'note' : 'notes'}` : <span className="ws-faint">No Muster folder matches this repository yet</span>}</dd></div>
     </dl>
     <p className="project-edit-hint">This project lives in {snapshot.paperclip?.company?.name ?? NAMES.paperclip}; change its configuration there. To work on its tasks in Muster, import it: it becomes its own project here, under its org.</p>

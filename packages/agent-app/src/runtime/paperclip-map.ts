@@ -12,8 +12,15 @@ const obj = (value: unknown): Json => value && typeof value === 'object' && !Arr
 export const arr = (value: unknown): Json[] => Array.isArray(value) ? value.filter((v): v is Json => Boolean(v) && typeof v === 'object') : [];
 const iso = (value: unknown, fallback = ''): string => str(value) ?? fallback;
 
+/** The org's people from `/user-directory` (`users: [{ principalId, user: { id, name } | null }]`): id and a display name (the account's name, else its email, else the id). */
+export function mapPeople(directory: unknown): { id: string; name: string }[] {
+  const rows = arr(obj(directory).users);
+  return rows.filter(r => r.status === undefined || r.status === 'active').map(r => { const u = obj(r.user), id = String(r.principalId ?? u.id ?? ''); return { id, name: str(u.name) ?? str(u.email)?.split('@')[0] ?? id }; }).filter(p => p.id);
+}
 export const mapCompany = (c: Json): WorkspaceCompany => ({ id: String(c.id), name: str(c.name) ?? 'Company', prefix: str(c.issuePrefix) ?? '' });
 
+/** Skill names the org gave an agent (`adapterConfig.paperclipSkillSync.desiredSkills`). Never anything from `env`. */
+const skillsOf = (adapter: Json): string[] => Array.isArray(obj(adapter.paperclipSkillSync).desiredSkills) ? (obj(adapter.paperclipSkillSync).desiredSkills as unknown[]).filter((v): v is string => typeof v === 'string').map(v => v.split('/').pop()!).slice(0, 40) : [];
 const AGENT_STATE: Record<string, AgentState> = { active: 'active', idle: 'idle', running: 'running', paused: 'paused', error: 'error', pending_approval: 'pending', terminated: 'terminated' };
 export function mapAgent(a: Json): WorkspaceAgent {
   const adapter = obj(a.adapterConfig);
@@ -21,6 +28,7 @@ export function mapAgent(a: Json): WorkspaceAgent {
     id: String(a.id), name: str(a.name) ?? 'Agent', role: str(a.role) ?? 'general', title: str(a.title), model: str(adapter.model), adapter: str(a.adapterType),
     status: AGENT_STATE[String(a.status)] ?? 'idle', reportsTo: str(a.reportsTo), lastActiveAt: str(a.lastHeartbeatAt) ?? str(a.updatedAt),
     error: str(a.errorReason) ?? str(a.pauseReason), pausable: true, source: 'paperclip', capabilities: str(a.capabilities),
+    ...(skillsOf(adapter).length ? { skills: skillsOf(adapter) } : {}),
   };
 }
 
@@ -33,7 +41,8 @@ export function blockerIds(i: Json): string[] {
 }
 
 const PRIORITY = new Set<WorkspacePriority>(['critical', 'high', 'medium', 'low']);
-export function mapIssue(i: Json, agents: ReadonlyMap<string, WorkspaceAgent>, liveTaskIds: ReadonlySet<string>): WorkspaceTask {
+/** `me`: the signed-in person's id on this server. When it is known, "You" is shown only for that id; anyone else is named from `people` (user id to name), or "A teammate". */
+export function mapIssue(i: Json, agents: ReadonlyMap<string, WorkspaceAgent>, liveTaskIds: ReadonlySet<string>, me?: string | null, people?: ReadonlyMap<string, string>): WorkspaceTask {
   const status = (WORKSPACE_STATUSES as readonly string[]).includes(String(i.status)) ? i.status as WorkspaceStatus : 'todo';
   const assigneeId = str(i.assigneeAgentId), creator = str(i.createdByAgentId);
   const id = String(i.id);
@@ -42,11 +51,12 @@ export function mapIssue(i: Json, agents: ReadonlyMap<string, WorkspaceAgent>, l
     priority: PRIORITY.has(i.priority as WorkspacePriority) ? i.priority as WorkspacePriority : 'medium',
     projectId: str(i.projectId), parentId: str(i.parentId), goalId: str(i.goalId),
     assigneeId: assigneeId ?? (str(i.assigneeUserId) ? `user:${i.assigneeUserId}` : null),
-    assigneeLabel: assigneeId ? agents.get(assigneeId)?.name ?? 'Agent' : str(i.assigneeUserId) ? 'You' : null,
+    assigneeLabel: assigneeId ? agents.get(assigneeId)?.name ?? 'Agent' : str(i.assigneeUserId) ? (me && i.assigneeUserId !== me ? people?.get(String(i.assigneeUserId)) ?? 'A teammate' : 'You') : null,
+    assigneeUserId: str(i.assigneeUserId), responsibleUserId: str(i.responsibleUserId), createdByUserId: str(i.createdByUserId), createdByAgentId: creator,
     createdAt: iso(i.createdAt), updatedAt: iso(i.lastActivityAt, iso(i.updatedAt)), startedAt: str(i.startedAt), completedAt: str(i.completedAt) ?? str(i.cancelledAt),
     live: Boolean(i.activeRun) || liveTaskIds.has(id),
     blockedByIds: blockerIds(i),
-    origin: creator ? agents.get(creator)?.name ?? 'Agent' : str(i.createdByUserId) ? 'You' : null,
+    origin: creator ? agents.get(creator)?.name ?? 'Agent' : str(i.createdByUserId) ? (me && i.createdByUserId !== me ? people?.get(String(i.createdByUserId)) ?? 'A teammate' : 'You') : null,
     ...(arr(i.labels).length ? { labels: arr(i.labels).map(l => ({ name: str(l.name) ?? '', color: str(l.color) })).filter(l => l.name) } : {}),
   };
 }
@@ -127,6 +137,25 @@ export function mapApproval(a: Json, agents: ReadonlyMap<string, WorkspaceAgent>
   };
 }
 
+/** The @mention chip of a person in a comment: `[@Name](user://<id>)`. */
+export const mentionsUser = (body: string, userId: string): boolean => body.includes(`(user://${userId})`) || body.includes(`(user://${userId}?`);
+/**
+ * Comments that tag the person, as Inbox items. Paperclip's attention feed has no mention kind, so the company activity feed is read for
+ * `issue.comment_added` rows whose snippet carries the person's mention chip. One item per comment; the person's own comments never count.
+ */
+export function mapMentions(rows: readonly Json[], meId: string | null, agents: ReadonlyMap<string, WorkspaceAgent>, people?: ReadonlyMap<string, string>): WorkspaceInboxItem[] {
+  if (!meId) return [];
+  const out: WorkspaceInboxItem[] = [];
+  for (const row of rows) {
+    if (row.action !== 'issue.comment_added' || row.actorId === meId) continue;
+    const d = obj(row.details), snippet = str(d.bodySnippet);
+    if (!snippet || !mentionsUser(snippet, meId)) continue;
+    const by = str(row.agentId) ? agents.get(String(row.agentId))?.name ?? 'An agent' : people?.get(String(row.actorId)) ?? 'Someone';
+    out.push({ id: `mention:${str(d.commentId) ?? str(row.id)}`, kind: 'mention', title: `${str(d.identifier) ? `${d.identifier} · ` : ''}${str(d.issueTitle) ?? 'A task'}`, why: `${by} mentioned you in a comment.`, severity: 'medium', at: iso(row.createdAt), taskId: str(row.entityId), agentId: null, runId: null });
+  }
+  return out;
+}
+
 /** The founder's inbox: Paperclip's attention feed, plus review/blocked tasks and recent failed runs it did not already list. */
 export function buildInbox(attention: readonly WorkspaceInboxItem[], tasks: readonly WorkspaceTask[], runs: readonly WorkspaceRun[], agents: ReadonlyMap<string, WorkspaceAgent>, now = Date.now()): WorkspaceInboxItem[] {
   const items = [...attention];
@@ -153,10 +182,11 @@ export function buildInbox(attention: readonly WorkspaceInboxItem[], tasks: read
   return items.sort((a, b) => rank[a.severity] - rank[b.severity] || b.at.localeCompare(a.at));
 }
 
-export function mapComment(c: Json, agents: ReadonlyMap<string, WorkspaceAgent>): WorkspaceComment {
+/** `me` and `people` (as for `mapIssue`): "You" is only the signed-in person; another person is named, or "A teammate". Without `me` (the reply to one's own post) a person is "You". */
+export function mapComment(c: Json, agents: ReadonlyMap<string, WorkspaceAgent>, me?: string | null, people?: ReadonlyMap<string, string>): WorkspaceComment {
   const agentId = str(c.authorAgentId) ?? str(c.derivedAuthorAgentId);
   const kind = agentId ? 'agent' : str(c.authorUserId) || c.authorType === 'user' ? 'user' : 'system';
-  return { id: String(c.id), author: { kind, id: agentId ?? str(c.authorUserId), label: agentId ? agents.get(agentId)?.name ?? 'Agent' : kind === 'user' ? 'You' : 'Muster Server' }, body: str(c.body) ?? '', createdAt: iso(c.createdAt), runId: str(c.createdByRunId) };
+  return { id: String(c.id), author: { kind, id: agentId ?? str(c.authorUserId), label: agentId ? agents.get(agentId)?.name ?? 'Agent' : kind === 'user' ? (me && str(c.authorUserId) !== me ? people?.get(String(c.authorUserId)) ?? 'A teammate' : 'You') : 'Muster Server' }, body: str(c.body) ?? '', createdAt: iso(c.createdAt), runId: str(c.createdByRunId) };
 }
 
 /** Rows for the read-only lists (skills, artifacts, audit, routines). */

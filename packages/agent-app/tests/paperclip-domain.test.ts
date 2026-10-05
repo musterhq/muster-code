@@ -40,7 +40,7 @@ function paperclip(){
     '/api/health':()=>({status:'ok',version:'2026.916.1',deploymentMode:'authenticated'}),
     '/api/companies':()=>[{id:COMPANY,name:'RagnarDataOps',issuePrefix:'RAG',status:'active'}],
     [`/api/companies/${COMPANY}/issues`]:()=>issues,[`/api/companies/${COMPANY}/agents`]:()=>agents,[`/api/companies/${COMPANY}/projects`]:()=>projects,
-    [`/api/companies/${COMPANY}/goals`]:()=>[],[`/api/companies/${COMPANY}/approvals`]:()=>[],[`/api/companies/${COMPANY}/labels`]:()=>[],[`/api/companies/${COMPANY}/heartbeat-runs`]:()=>runs,[`/api/companies/${COMPANY}/live-runs`]:()=>[],
+    [`/api/companies/${COMPANY}/goals`]:()=>[],[`/api/companies/${COMPANY}/approvals`]:()=>[],[`/api/companies/${COMPANY}/labels`]:()=>[],[`/api/companies/${COMPANY}/heartbeat-runs`]:()=>runs,[`/api/companies/${COMPANY}/live-runs`]:()=>[],[`/api/companies/${COMPANY}/activity`]:()=>[],[`/api/companies/${COMPANY}/user-directory`]:()=>({users:[]}),
     [`/api/companies/${COMPANY}/attention`]:()=>attention,'/api/issues/RAG-12':()=>issues[0],'/api/issues/RAG-12/comments':()=>comments,'/api/issues/RAG-12/runs':()=>[runs[0]],
     [`/api/companies/${COMPANY}/routines`]:()=>[{id:'rt',title:'Nightly triage',status:'active',projectId:'p-oss',concurrencyPolicy:'always_enqueue',catchUpPolicy:'skip_missed',triggers:[{kind:'schedule',enabled:true,cronExpression:'0 9 * * 1-5',timezone:'UTC',nextRunAt:'2026-09-30T09:00:00.000Z'}],lastRun:{status:'failed',createdAt:now}}],
   };
@@ -556,8 +556,8 @@ test('D4/D5: priority and assignee changes are forwarded to Paperclip as exactly
   await h.call('paperclip.task.update',{taskId:'RAG-12',assigneeId:null});
   await h.call('paperclip.task.update',{taskId:'RAG-12',assigneeId:'user:local',status:'todo',priority:'critical'});
   assert.deepEqual(h.server.calls.filter(c=>c.method!=='GET').map(c=>`${c.method} ${c.url} ${JSON.stringify(c.body)}`),[
-    'PATCH /api/issues/RAG-12 {"priority":"low"}','PATCH /api/issues/RAG-12 {"assigneeAgentId":"a-qa"}','PATCH /api/issues/RAG-12 {"assigneeAgentId":null}',
-    'PATCH /api/issues/RAG-12 {"status":"todo","priority":"critical","assigneeAgentId":null}',
+    'PATCH /api/issues/RAG-12 {"priority":"low"}','PATCH /api/issues/RAG-12 {"assigneeAgentId":"a-qa","assigneeUserId":null}','PATCH /api/issues/RAG-12 {"assigneeAgentId":null,"assigneeUserId":null}',
+    'PATCH /api/issues/RAG-12 {"status":"todo","priority":"critical","assigneeAgentId":null,"assigneeUserId":null}',
   ]);
   await assert.rejects(()=>h.call('paperclip.task.update',{taskId:'RAG-12',priority:'urgent'}),/Unknown priority/);
   await assert.rejects(()=>h.call('paperclip.task.update',{taskId:'RAG-12',assigneeId:'../x'}),/Unknown item/);

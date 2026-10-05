@@ -105,22 +105,26 @@ assert.deepEqual(text('.ws-prop-group'),['Work','Memory','Relationships','Execut
 // D4/D5: a linked Paperclip task's priority and assignee are editable here and forwarded as changed (only that field).
 {
   const choose=async(label:string,value:string)=>{const sel=document.querySelector(`.ws-properties select[aria-label="${label}"]`) as any;assert.ok(sel,`${label} is a select for a Paperclip task`);const props=Object.keys(sel).find(k=>k.startsWith('__reactProps'))!;sel[props].onChange({target:{value},currentTarget:{value}});await delay(60);};
-  assert.deepEqual([...document.querySelectorAll('.ws-properties select[aria-label="Assignee"] option')].map(o=>o.textContent),['Unassigned','CEO · CEO title','CTO · CTO title','QA · QA title'],'every Paperclip agent can own it, or nobody');
+  // The Assignee is the type-to-filter picker: No owner, Me, People, then Agents (here only agents), names shown once.
+  const pickOwner=async(value:string)=>{const trigger=document.querySelector('.ws-properties .owner-trigger[aria-label="Assignee"]') as any;assert.ok(trigger,'Assignee is the owner picker for a Paperclip task');trigger.dispatchEvent(new window.Event('click',{bubbles:true,cancelable:true}));await delay(80);const opt=[...document.querySelectorAll('.owner-option')].find((o:any)=>o.textContent===value||false) as any;assert.ok(opt,`option ${value}`);opt.dispatchEvent(new window.Event('mousedown',{bubbles:true,cancelable:true}));await delay(80);};
+  (document.querySelector('.ws-properties .owner-trigger[aria-label="Assignee"]') as any).dispatchEvent(new window.Event('click',{bubbles:true,cancelable:true}));await delay(80);
+  assert.deepEqual([...document.querySelectorAll('.owner-option > span')].map(o=>o.textContent),['Unassigned','CEO · CEO title','CTO · CTO title','QA · QA title'],'every Paperclip agent can own it, or nobody');
+  (document.querySelector('.ws-properties .owner-trigger[aria-label="Assignee"]') as any).dispatchEvent(new window.Event('click',{bubbles:true,cancelable:true}));await delay(80);
   await choose('Priority','low');
   assert.deepEqual(calls.filter(c=>c.command==='paperclip.task.update').at(-1)?.input,{taskId:'t1',priority:'low'});
-  await choose('Assignee','qa');
+  await pickOwner('QA · QA title');
   assert.deepEqual(calls.filter(c=>c.command==='paperclip.task.update').at(-1)?.input,{taskId:'t1',assigneeId:'qa'});
-  await choose('Assignee','');
+  await pickOwner('Unassigned');
   assert.deepEqual(calls.filter(c=>c.command==='paperclip.task.update').at(-1)?.input,{taskId:'t1',assigneeId:null},'Unassigned sends null');
 }
 const box=document.querySelector('.ws-composer textarea') as any;
 assert.match(box.getAttribute('placeholder'),/Message CEO/);
 let proto=Object.getPrototypeOf(box),descriptor;while(proto&&!(descriptor=Object.getOwnPropertyDescriptor(proto,'value')))proto=Object.getPrototypeOf(proto);
 box.selectionStart=4;descriptor!.set!.call(box,'@CT');box.selectionStart=3;box.dispatchEvent(new window.Event('input',{bubbles:true}));await delay(40);
-assert.deepEqual(text('.ws-mentions button'),['CTCTO'],'typing @ offers the agents');
+assert.deepEqual(text('.ws-mentions button'),['CTCTOAgent'],'typing @ offers people and agents, each marked Person or Agent');
 descriptor!.set!.call(box,'@CTO rebase onto dev');box.dispatchEvent(new window.Event('input',{bubbles:true}));await delay(40);
 document.querySelector('.ws-composer')!.dispatchEvent(new window.Event('submit',{bubbles:true,cancelable:true}));await delay(80);
-assert.deepEqual(calls.find(c=>c.command==='paperclip.comment')?.input,{taskId:'t1',body:'@CTO rebase onto dev'});
+assert.deepEqual(calls.find(c=>c.command==='paperclip.comment')?.input,{taskId:'t1',body:'[@CTO](agent://cto) rebase onto dev'},'a server comment carries the chip Paperclip’s own composer writes');
 // A Muster run's question is answered from its task card through question.respond (not "reply below").
 openHub('task','t4');await delay(150);
 {

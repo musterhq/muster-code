@@ -1,4 +1,4 @@
-import { parseMarkers, VIA_MUSTER_RE } from "./markers.js";
+import { parseMarkers } from "./markers.js";
 
 /** The slice of an issue the derivation needs. */
 export interface CheckoutIssue {
@@ -99,8 +99,12 @@ export function deriveCheckout(issue: CheckoutIssue, comments: CheckoutComment[]
       continue;
     }
 
-    const checkout = markers.find((marker) => marker.kind === "checkout");
-    const ending = markers.find((marker) => marker.kind === "release" || marker.kind === "handback");
+    // One lease marker per comment (the desktop applies the same rule): a body with two cannot be trusted to mean either, so none of them count as a lease event.
+    const leaseMarkers = markers.filter((marker) => marker.kind === "checkout" || marker.kind === "release" || marker.kind === "handback");
+    const single = leaseMarkers.length === 1 ? leaseMarkers[0] : undefined;
+    // Only the person the task is assigned to can take over a held task: a check-out by anyone else never replaces a live lease (and shows as "no longer held" on its own).
+    const checkout = single?.kind === "checkout" && (comment.authorUserId === issue.assigneeUserId || !active) ? single : undefined;
+    const ending = single && single.kind !== "checkout" ? single : undefined;
 
     if (checkout) {
       state = {
@@ -134,7 +138,8 @@ export function deriveCheckout(issue: CheckoutIssue, comments: CheckoutComment[]
       continue;
     }
 
-    const isActivity = markers.some((marker) => marker.kind === "activity") || VIA_MUSTER_RE.test(comment.body);
+    // Activity is a marker Muster wrote; a plain "via Muster" sign-off typed by anyone no longer keeps a lease alive.
+    const isActivity = leaseMarkers.length === 0 && markers.some((marker) => marker.kind === "activity");
     if (isActivity && active && comment.authorUserId === state.userId) {
       state = { ...state, lastActivityAt: createdAt, lastActivityCommentId: comment.id };
     }

@@ -20,6 +20,8 @@ export type InboxAction = { kind: 'chat'; chatId: string } | { kind: 'task'; tas
 export interface ActivityItem {
   id: string; bucket: InboxBucket; title: string; why: string; at: string; group: string; unread: boolean;
   source: 'chat' | 'muster' | 'paperclip'; kind: string; action: InboxAction;
+  /** The org a server item belongs to (the Inbox tags each row with it, since several orgs share one list). */
+  org?: { id: string; name: string };
   /** Workspace items: the project, task and agent they are about (decide-by, recommendations and gates need them). */
   projectId?: string | null; taskId?: string | null; agentId?: string | null;
   /** A Paperclip approval this row stands for: Approve, Reject and Request revision act on it. */
@@ -60,7 +62,7 @@ export function buildActivity(app: Pick<Snapshot, 'chats' | 'folders' | 'project
   const runTrigger = new Map((workspace?.runs ?? []).map(r => [r.id, r.trigger]));
   for (const item of workspace?.inbox ?? []) {
     items.push({ id: `ws:${item.id}`, bucket: KIND_BUCKET[item.kind], title: item.title, why: item.why, at: item.at, group: item.group ?? workspace?.paperclip?.company?.name ?? 'Muster', unread: item.severity === 'high',
-      source: item.source === 'paperclip' ? 'paperclip' : 'muster', kind: item.kind, projectId: item.projectId ?? null, taskId: item.taskId, agentId: item.agentId, ...(item.approvalId ? { approval: { id: item.approvalId, verbs: item.approvalVerbs ?? ['approve', 'reject', 'request_revision'] } } : {}),
+      source: item.source === 'paperclip' ? 'paperclip' : 'muster', kind: item.kind, projectId: item.projectId ?? null, taskId: item.taskId, agentId: item.agentId, ...(item.org ? { org: item.org } : {}), ...(item.approvalId ? { approval: { id: item.approvalId, verbs: item.approvalVerbs ?? ['approve', 'reject', 'request_revision'] } } : {}),
       ...(item.runId && isRoutineTrigger(runTrigger.get(item.runId)) ? { routine: true } : {}),
       action: item.taskId ? { kind: 'task', taskId: item.taskId } : item.agentId ? { kind: 'agent', agentId: item.agentId } : { kind: 'none' } });
   }

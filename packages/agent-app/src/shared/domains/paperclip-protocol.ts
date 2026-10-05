@@ -73,6 +73,8 @@ export const WORKSPACE_PRIORITIES: readonly WorkspacePriority[] = ['critical', '
 export const PRIORITY_NAME: Record<WorkspacePriority, string> = { critical: 'Critical', high: 'High', medium: 'Medium', low: 'Low' };
 
 export interface WorkspaceCompany { id: string; name: string; prefix: string }
+/** A person (human member) of the linked org: assignable, taggable. `me` marks the signed-in person. */
+export interface WorkspacePerson { id: string; name: string; me?: boolean }
 export interface WorkspaceTask {
   id: string; key: string; title: string; status: WorkspaceStatus; priority: WorkspacePriority; source: WorkspaceSource;
   projectId: string | null; parentId: string | null; goalId: string | null;
@@ -92,6 +94,9 @@ export interface WorkspaceTask {
   pr?: TaskPrSummary | null;
   /** An imported task whose issue no longer exists in Paperclip (cancelled here, kept for the record). */
   removedInPaperclip?: boolean;
+  /** The server's own people fields (ids, never names): who the task is assigned to, who is accountable for it, who opened it. The sidebar,
+   *  My work and the Inbox compare these with the signed-in person's id; they never guess from a label. */
+  assigneeUserId?: string | null; responsibleUserId?: string | null; createdByUserId?: string | null; createdByAgentId?: string | null;
 }
 export type AgentState = 'active' | 'idle' | 'running' | 'paused' | 'error' | 'pending' | 'terminated';
 export interface WorkspaceAgent {
@@ -105,6 +110,8 @@ export interface WorkspaceAgent {
   projectId?: string | null; memberId?: string | null; runner?: { providerId: string; model: string } | null; instructions?: string;
   /** Star and hide (G35): Roster lists put starred agents first and fold hidden ones away. */
   starred?: boolean; hidden?: boolean;
+  /** The skills the org gave the agent (names only; no credentials). */
+  skills?: string[];
 }
 export interface WorkspaceProject {
   id: string; name: string; status: string; description: string; source: WorkspaceSource;
@@ -129,7 +136,7 @@ export interface WorkspaceRun {
 export type InboxKind = 'review' | 'blocked' | 'approval' | 'question' | 'failed_run' | 'agent_error' | 'mention' | 'mail' | 'budget' | 'other';
 /** `group` is the project it belongs to (the Inbox groups by it); `source` says whether it came from Paperclip or Muster. */
 /** `chatIds`: a Muster task's run chats. The Inbox lists and counts the task, not those chats again. */
-export interface WorkspaceInboxItem { id: string; kind: InboxKind; /** A Paperclip approval this row stands for: decided from the row. */ approvalId?: string; approvalVerbs?: ApprovalDecision[]; title: string; why: string; severity: 'high' | 'medium' | 'low'; at: string; taskId: string | null; agentId: string | null; runId: string | null; group?: string; source?: WorkspaceSource; projectId?: string | null; chatIds?: string[] }
+export interface WorkspaceInboxItem { id: string; kind: InboxKind; /** The org (company) a server item belongs to, so one Inbox over several orgs can tag each row. */ org?: { id: string; name: string }; /** A Paperclip approval this row stands for: decided from the row. */ approvalId?: string; approvalVerbs?: ApprovalDecision[]; title: string; why: string; severity: 'high' | 'medium' | 'low'; at: string; taskId: string | null; agentId: string | null; runId: string | null; group?: string; source?: WorkspaceSource; projectId?: string | null; chatIds?: string[] }
 export interface WorkspaceGoal { id: string; title: string; status: string; level: string | null; parentId?: string | null; ownerAgentId?: string | null }
 /** A Paperclip approval waiting on the board (a hire, a CEO strategy, a budget override, a board request). Decided only by you. */
 export interface WorkspaceApproval {
@@ -152,6 +159,8 @@ export interface WorkspaceSnapshot {
   /** The whole linked company's agents, whatever slice of them a page shows: what a company-wide Pause would stop, and what is paused. */
   agentCounts?: { active: number; paused: number; /** What Resume can wake: only what Muster's Pause stopped. */ resumable: { paperclip: number; local: number; projects: Record<string, number> } };
   labels?: { id: string; name: string; color: string | null }[];
+  /** The linked org's people (and who is you), for the owner pickers and @-mentions. */
+  people?: WorkspacePerson[];
   counts: { liveRuns: number; inbox: number; failedRuns: number; openTasks: number };
   fetchedAt: string;
 }
@@ -235,7 +244,7 @@ export interface WorkspaceTaskDetail {
   receipts: LedgerEntry[];
   cards: ThreadCard[];
   /** Everyone the composer can @-mention. */
-  mentionable: { id: string; name: string }[];
+  mentionable: { id: string; name: string; /** 'user': a person (tagged with a user chip); 'agent' (the default). */ kind?: 'agent' | 'user' }[];
   governance?: TaskGovernanceView;
 }
 export interface WorkspaceMemory {
@@ -336,7 +345,7 @@ export interface PaperclipCommands {
   'paperclip.snapshot': { input: { refresh?: boolean }; output: WorkspaceSnapshot };
   'paperclip.task': { input: { id: string }; output: WorkspaceTaskDetail };
   'paperclip.comment': { input: { taskId: string; body: string }; output: WorkspaceComment };
-  /** Only the fields you pass are changed. `assigneeId`: an agent id, or null to unassign (Paperclip tasks only for priority and assignee). */
+  /** Only the fields you pass are changed. `assigneeId`: an agent id, `user:<id>` for a person (clears the agent), or null to unassign (Paperclip tasks only for priority and assignee). */
   'paperclip.task.update': { input: { taskId: string; status?: WorkspaceStatus; priority?: WorkspacePriority; assigneeId?: string | null }; output: WorkspaceTask };
   'paperclip.task.create': { input: TaskCreateInput; output: WorkspaceTask & { started?: TaskStartResult; startError?: string } };
   /** `projectId`: one project's runs and spend (the Budget tab). */

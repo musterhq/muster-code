@@ -29,6 +29,7 @@ import { createQuitCoordinator, quitChoice, quitPrompt, withinDeadline } from '.
 import { loadAgentService, type AgentService } from './service-loader.ts';
 import { clampGeometry, DEFAULT_GEOMETRY, MIN_HEIGHT, MIN_WIDTH, planDisplayChange, WindowStateStore, type WindowGeometry } from './window-state.ts';
 import {chatIdFromArgs,chatIdFromLink} from './chat-links.ts';
+import {parseTaskLink,taskLinkFromArgs,type TaskLink} from '../shared/task-link.ts';
 import {attentionBadge,createCrashTracker,isRendererCrash} from './app-shell.ts';
 import {MENU_CHANNEL,MENU_CLOSE_CHANNEL,type MenuAction} from '../shared/menu-protocol.ts';
 import {installProcessGuard} from './process-guard.ts';
@@ -70,12 +71,20 @@ async function main(): Promise<void> {
   let disposal: Promise<void> | undefined;
   let shutdownStarted = false;
   let pendingChatId=chatIdFromArgs(process.argv);
+  // muster://task/... from the optional Paperclip plugin: opens the task (the renderer checks the host is a connected server).
+  let pendingTaskLink=taskLinkFromArgs(process.argv);
+  const openTaskLink=(link:TaskLink)=>{
+    if(!service||!window||window.isDestroyed()||window.webContents.isLoading()){pendingTaskLink=link;return;}
+    pendingTaskLink=null;onEvent({type:'taskLink',...link});
+    if(window.isMinimized())window.restore();window.show();window.focus();
+  };
   let openLinkedChat: (id:string)=>Promise<void> = async id=>{pendingChatId=id;};
 
   const stateStore = new WindowStateStore(app.getPath('userData'));
 
   app.on('second-instance', (_event,argv) => {
     const linked=chatIdFromArgs(argv);if(linked)void openLinkedChat(linked);
+    const task=taskLinkFromArgs(argv);if(task)openTaskLink(task);
     if (window) {
       if (window.isMinimized()) window.restore();
       window.show();
@@ -86,6 +95,7 @@ async function main(): Promise<void> {
   app.on('open-url',(event,url)=>{
     event.preventDefault();
     const linked=chatIdFromLink(url);if(linked)void openLinkedChat(linked);
+    const task=parseTaskLink(url);if(task)openTaskLink(task);
   });
 
   app.on('activate', () => {
@@ -885,4 +895,5 @@ async function main(): Promise<void> {
   }
   await window.loadFile(rendererEntry);
   if(pendingChatId)await openLinkedChat(pendingChatId);
+  if(pendingTaskLink)openTaskLink(pendingTaskLink);
 }

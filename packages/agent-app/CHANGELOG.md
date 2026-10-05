@@ -3,7 +3,19 @@
 All notable changes to Muster Agent. Each `## <version>` section becomes the notes of the
 `agent-v<version>` GitHub Release (`.github/workflows/agent-app-release.yml`).
 
-## Unreleased
+## 0.3.3
+
+- Every org on your server, not one. Settings › Integrations › Muster Server lists each org you belong to with a checkbox and what the sidebar shows of it (My work, My team or Nothing). The sidebar has one row per org with your open count, an accordion, your own active tasks (five, newest first, then “See all mine”) and the org's projects with your open-count badge. A My work page groups it all by org and project, with filters and a board. The Inbox lists only what asks you, from every org, each row tagged with its org, and includes @mentions of you. Other people's tasks never show up in your sidebar, and a teammate's task is named instead of labelled “You”.
+- Work locally. One button on a server task: Muster assigns it to you if needed, sets it In progress, posts “Checked out · working locally on <your Mac> · via Muster”, copies the org read-only (agents, instructions, skills, the task's context and its review policy), makes a worktree and a branch from the project's dev branch in your own checkout, and opens a local chat with the context loaded. Pick the engine once: the org's own agents on your providers, or your own subscriptions. Everything runs on your Mac and your credentials stay here.
+- While you work, Muster reports as you, labelled “via Muster · local”: decisions (a message can be posted as a decision), a context summary, the pull request, test results, and one rolling Local work log document with a section per turn. Cost entries say whether you or the org paid and which engine ran.
+- Hand-back is automatic. When your branch has new commits, is pushed to its own upstream (or its pull request is open on the same repository), and a real test run after the last change passes, or when you say you are done, Muster posts the summary, sets In review and gives the task to the reviewer the task's policy names (else whoever opened it), with a toast and Undo for about two minutes. Failing or untested work stays checked out with a note, and nothing the agent writes or a comment says can hand a task back. Per project you can choose Ask me instead.
+- Offline works. Every post is kept in a queue on your Mac and sent in order when the server is back; if the task changed meanwhile (reassigned, closed) you choose to send anyway, edit or discard. A quiet session gets one “paused” note and, after a while, a reminder.
+- Owners and assignees can be people as well as agents: a picker with Me first, then People, then Agents, type to filter, and a name shown once. @-mentions offer people and agents and write the same chip Paperclip's own composer writes.
+- `muster://task/<org>/<task>?host=…` opens a task from the optional Muster plugin for Paperclip, for servers you have already connected.
+- Server text (task descriptions, comments, org instructions) reaches the local agent marked as untrusted data, and everything Muster posts as you is built from the agent's own replies with secrets removed and no hidden notes or mention links.
+- Connected projects: Costs come from the server instead of saying the project no longer exists; a run opens from its task as well as from the Ledger; project Activity shows the project, with an Organisation switch; the server's workspace path is labelled Server workspace, beside your Local checkout on this Mac; receipts list the tools a server run used and link to it on the server.
+- A comment's author is named; only yours says You. An expired sign-in says so and points to Settings, instead of saying the server can't be reached.
+- The optional Muster plugin for Paperclip (packages/paperclip-plugin-muster) shows on the server who has a task checked out and on which Mac, the Local work log and receipts, a My work page, and one reminder after a quiet day. It never reassigns anything.
 
 ## 0.3.2
 

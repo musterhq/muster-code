@@ -19,7 +19,7 @@ export type { ServerBackendKind } from '../../shared/domains/paperclip-protocol.
 export type Json = Record<string, unknown>;
 export interface ServerEndpoint { baseUrl: string; token?: string }
 /** What one read of the server returns: the linked server's slice of the workspace snapshot. */
-export interface ServerPart { tasks: WorkspaceTask[]; agents: WorkspaceAgent[]; projects: WorkspaceProject[]; runs: WorkspaceRun[]; inbox: WorkspaceInboxItem[]; goals: WorkspaceGoal[]; approvals: WorkspaceApproval[]; labels: { id: string; name: string; color: string | null }[] }
+export interface ServerPart { tasks: WorkspaceTask[]; agents: WorkspaceAgent[]; projects: WorkspaceProject[]; runs: WorkspaceRun[]; inbox: WorkspaceInboxItem[]; goals: WorkspaceGoal[]; approvals: WorkspaceApproval[]; labels: { id: string; name: string; color: string | null }[]; /** The org's people (humans), when the server lists them. */ people?: { id: string; name: string }[] }
 export interface ServerHealth { version?: string; deploymentMode?: string; /** One line for the connection details, e.g. "Paperclip-compatible". Never shown anywhere else. */ compatibility: string | null }
 /** Read-only access in the shape the importer was built on (Paperclip's REST reads). A Muster Server answers it from its own data. */
 export interface ImportReader {
@@ -33,9 +33,27 @@ export interface TaskDetailContext {
   /** Notes to carry with a hand-off between agents (the desktop's own memory). */
   memory(taskId: string): Promise<{ text: string; source: string }[]>;
 }
-export interface TaskChanges { status?: WorkspaceStatus; priority?: WorkspacePriority; assigneeAgentId?: string | null }
+export interface TaskChanges { status?: WorkspaceStatus; priority?: WorkspacePriority; assigneeAgentId?: string | null; /** A person: set together with `assigneeAgentId: null`. */ assigneeUserId?: string | null }
 
-export interface ServerBackend {
+/** A task comment as written: who wrote it (a person or an agent), for reading Muster's own footers back. */
+export interface TaskCommentRow { id: string; body: string; authorUserId: string | null; authorAgentId: string | null; createdAt: string }
+/** The signed-in person on this server (their user id is what assignee, owner and responsible fields are compared with). */
+export interface ServerPerson { id: string; name: string | null; email: string | null }
+/** What check-out needs beyond the shared workspace reads. Everything is the server's existing surface (assignee, comments, documents, cost events). Optional: a backend without it cannot check out. */
+export interface PersonalAccess {
+  whoami(): Promise<ServerPerson | null>;
+  /** Status, human assignee and agent assignee in one PATCH; only what is passed changes. */
+  patchTask(taskId: string, changes: { status?: WorkspaceStatus; assigneeUserId?: string | null; assigneeAgentId?: string | null; comment?: string; commentClientRequestId?: string }): Promise<void>;
+  rawComments(taskId: string): Promise<TaskCommentRow[]>;
+  putDocument(taskId: string, key: string, doc: { title: string; body: string; changeSummary: string }): Promise<void>;
+  postCostEvent(companyId: string, body: Record<string, unknown>): Promise<void>;
+  /** The agent's instructions bundle entry file (its role text). */
+  agentInstructions(agentId: string): Promise<string>;
+  /** The task's execution policy: its review and approval stages and who is in each. Empty when it has none. */
+  issuePolicy(taskId: string): Promise<{ type: 'review' | 'approval'; participants: { kind: 'agent' | 'user'; id: string }[] }[]>;
+}
+
+export interface ServerBackend extends Partial<PersonalAccess> {
   readonly kind: ServerBackendKind;
   readonly endpoint: ServerEndpoint;
   /** Bumped whenever a read returned something new, so callers can skip rebuilding views. */
@@ -47,8 +65,11 @@ export interface ServerBackend {
   companies(): Promise<WorkspaceCompany[]>;
   /** The org's tasks, agents, projects, runs, Inbox, approvals. `previous` lets a backend hand back the same part when nothing changed. */
   read(company: WorkspaceCompany, previous?: { generation: number; companyId: string; part: ServerPart }, options?: { fresh?: boolean }): Promise<ServerPart>;
+  /** One task, read by its id (a conditional GET of that single issue, so never the 2-second list copy). Null when the server says it does not exist. For hand-back, Undo and conflict checks. */
+  task?(taskId: string, context: { agents: ReadonlyMap<string, WorkspaceAgent>; people: readonly { id: string; name: string }[]; live: ReadonlySet<string> }): Promise<WorkspaceTask | null>;
   taskDetail(taskId: string, context: TaskDetailContext): Promise<WorkspaceTaskDetail>;
-  comment(taskId: string, body: string, agents: ReadonlyMap<string, WorkspaceAgent>): Promise<WorkspaceComment>;
+  /** `clientRequestId` makes a retry idempotent: the server keeps one comment per id. */
+  comment(taskId: string, body: string, agents: ReadonlyMap<string, WorkspaceAgent>, clientRequestId?: string): Promise<WorkspaceComment>;
   updateTask(taskId: string, changes: TaskChanges, agents: ReadonlyMap<string, WorkspaceAgent>): Promise<WorkspaceTask>;
   createTask(input: TaskCreateInput, company: WorkspaceCompany, agents: ReadonlyMap<string, WorkspaceAgent>): Promise<WorkspaceTask>;
   pauseAgent(id: string): Promise<void>;

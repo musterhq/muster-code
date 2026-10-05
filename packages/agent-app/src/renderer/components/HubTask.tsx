@@ -28,6 +28,9 @@ import { ServicesPanel } from './ServicesPanel';
 import { GovernanceProperties, SecretRequestCard, StageCard, StopButton } from './TaskGovernance';
 import { TaskDocuments, TaskGoalRow, TaskLabelsRow, TaskPullRequests, VoteButtons } from './WorkTask';
 import { LabelChips } from './WorkParts';
+import { CheckoutNotes, CheckoutProperties, WorkLocallyBar } from './CheckoutPanel';
+import { OwnerPicker } from './OwnerPicker';
+import { agentLabel, chipMentions, mentionMatches, ownerOptions } from '../ownerOptions';
 import { useWorkLoad } from '../workHooks';
 
 const errorText = (cause: unknown) => cause instanceof Error ? cause.message : String(cause);
@@ -93,8 +96,10 @@ function Thread({ detail, snapshot, onChanged, onOpenTask, onOpenAgent, properti
     <div className="ws-thread-head">
       <TaskStatusIcon status={task.status} size={16}/><h1 className="ws-thread-title">{task.title}</h1><span className="ws-key">{task.key}</span><LabelChips labels={task.labels}/>{task.live && <LiveCount count={1}/>}{task.removedInPaperclip && <StateChip tone="warn">Removed in Paperclip</StateChip>}{detail.governance?.hold && <StateChip tone={detail.governance.hold.mode === 'cancel' ? 'danger' : 'warn'}>{detail.governance.hold.mode === 'cancel' ? 'Cancelled with parent' : 'On hold'}</StateChip>}
       {task.source === 'paperclip' && <span className="ws-source">{NAMES.paperclip}</span>}
+      <WorkLocallyBar detail={detail}/>
       {!propertiesOpen && <Tip label="Show properties"><button type="button" className="icon-button ws-thread-toggle" aria-label="Show properties" onClick={onToggleProperties}><PanelRight size={15}/></button></Tip>}
     </div>
+    <CheckoutNotes detail={detail}/>
     <div ref={scroller} className="ws-thread-scroll" onScroll={onScroll} role="log" aria-label="Messages">
       {entries.length === 0 ? <ResourceState kind="empty" message="No messages yet. Write to the owner below."/> : <div style={{ height: virtualizer.getTotalSize(), position: 'relative' }}>
         {virtualizer.getVirtualItems().map(item => { const e = entries[item.index]; return <div key={e.id} data-index={item.index} ref={virtualizer.measureElement} className="ws-thread-item" style={{ transform: `translateY(${item.start}px)` }}>
@@ -225,14 +230,20 @@ function Composer({ detail, snapshot, onSent }: { detail: WorkspaceTaskDetail; s
   };
   const to = detail.addressee?.label;
   const disabled = detail.task.source === 'local' && !detail.addressee;
-  const matches = mention ? detail.mentionable.filter(m => m.name.toLowerCase().startsWith(mention.query.toLowerCase())).slice(0, 6) : [];
+  const server = detail.task.source === 'paperclip';
+  // People first when the query matches, then agents; a server comment turns the typed @Name into the chip Paperclip's own composer writes.
+  const matches = mention ? mentionMatches(detail.mentionable, mention.query) : [];
+  const people = snapshot.people ?? [];
+  const serverOwners = server ? ownerOptions({ agents: snapshot.agents.filter(a => a.source === 'paperclip' && a.status !== 'terminated'), people, noneLabel: null, selected: detail.task.assigneeId }) : [];
+  const mentionedOwner = server ? (() => { const name = addressed(text, detail.mentionable.map(m => m.name), detail.addressee?.label ?? ''); const m = name ? detail.mentionable.find(x => x.name === name) : undefined; return m ? { value: m.kind === 'user' ? `user:${m.id}` : m.id, name: m.name } : null; })() : null;
+  const assignServer = async (value: string, name: string) => { setBusy(true); try { await invoke('paperclip.task.update', { taskId: detail.task.id, assigneeId: value }); notifySuccess(`${name} now has this task.`); onSent(); } catch (cause) { notifyError(cause); } finally { setBusy(false); } };
   const send = async () => {
     const body = text.trim();
     if (!body || busy || disabled) return;
     setBusy(true);
     try {
       if (local && mode === 'note') await invoke('project.tasks.note', { projectId: detail.task.projectId!, id: detail.task.id, text: body });
-      else await invoke('paperclip.comment', { taskId: detail.task.id, body });
+      else await invoke('paperclip.comment', { taskId: detail.task.id, body: server ? chipMentions(body, detail.mentionable) : body });
       setText(''); onSent();
     }
     catch (cause) { notifyError(cause); } finally { setBusy(false); requestAnimationFrame(() => field.current?.focus()); }
@@ -244,8 +255,8 @@ function Composer({ detail, snapshot, onSent }: { detail: WorkspaceTaskDetail; s
   };
   const pick = (name: string) => { if (!mention) return; const next = `${text.slice(0, mention.start)}@${name} ${text.slice(mention.start + mention.query.length + 1)}`; setText(next); setMention(null); requestAnimationFrame(() => field.current?.focus()); };
   return <form className="ws-composer" onSubmit={e => { e.preventDefault(); void send(); }}>
-    {matches.length > 0 && <ul className="ws-mentions ui-menu" role="listbox" aria-label="Mention an agent">{matches.map(m => <li key={m.id}><button type="button" role="option" aria-selected={false} onMouseDown={e => { e.preventDefault(); pick(m.name); }}><Monogram name={m.name}/>{m.name}</button></li>)}</ul>}
-    <textarea ref={field} rows={2} value={text} disabled={busy || disabled} aria-label={to ? `Message ${to}` : 'Comment'} placeholder={disabled ? detail.composerNote ?? '' : to ? `Message ${to} — describe what you want done, or @-mention an agent…` : 'Comment on this task, or @-mention an agent…'}
+    {matches.length > 0 && <ul className="ws-mentions ui-menu" role="listbox" aria-label="Mention a person or agent">{matches.map(m => <li key={`${m.kind ?? 'agent'}:${m.id}`}><button type="button" role="option" aria-selected={false} onMouseDown={e => { e.preventDefault(); pick(m.name); }}><Monogram name={m.name}/>{m.name}{server && <small className="ws-mention-kind">{m.kind === 'user' ? 'Person' : 'Agent'}</small>}</button></li>)}</ul>}
+    <textarea ref={field} rows={2} value={text} disabled={busy || disabled} aria-label={to ? `Message ${to}` : 'Comment'} placeholder={disabled ? detail.composerNote ?? '' : to ? `Message ${to} — describe what you want done, or @-mention ${server ? 'a person or agent' : 'an agent'}…` : `Comment on this task, or @-mention ${server ? 'a person or agent' : 'an agent'}…`}
       onChange={e => onChange(e.target.value, e.target.selectionStart)} onKeyDown={e => {
         if (matches.length && (e.key === 'Tab' || e.key === 'Enter')) { e.preventDefault(); pick(matches[0].name); return; }
         if (e.key === 'Escape' && mention) { e.preventDefault(); setMention(null); return; }
@@ -254,7 +265,9 @@ function Composer({ detail, snapshot, onSent }: { detail: WorkspaceTaskDetail; s
     <div className="ws-composer-foot">
       {local && <div className="task-toggle ws-composer-mode" role="radiogroup" aria-label="What this is">{(['message', 'note'] as const).map(m => <Tip key={m} label={m === 'message' ? 'Delivered to the owner’s next turn; wakes it if it is set to wake on comments' : 'For the people on this task: written in the thread, never sent to the agent'}><button type="button" role="radio" aria-checked={mode === m} className="ws-filter" aria-pressed={mode === m} onClick={() => setMode(m)}>{m === 'message' ? 'Message' : 'Note'}</button></Tip>)}</div>}
       {local && owners.length > 1 && <select className="ws-select is-bare ws-composer-owner" aria-label="Assign to" value={owners.find(a => a.id === detail.task.assigneeId)?.id ?? ''} disabled={busy} onChange={e => e.target.value && void assign(e.target.value)}><option value="" disabled>Assign to…</option>{owners.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}</select>}
+      {server && serverOwners.length > 1 && <OwnerPicker label="Assign to" value={detail.task.assigneeId ?? ''} disabled={busy} bare options={serverOwners} onChange={value => void assignServer(value, serverOwners.find(o => o.value === value)?.label ?? 'They')}/>}
       {target && target.id !== detail.task.assigneeId && <button type="button" className="settings-button secondary ws-composer-hand" disabled={busy} onClick={() => void assign(target.id)}>Hand this to {target.name}</button>}
+      {mentionedOwner && mentionedOwner.value !== detail.task.assigneeId && <button type="button" className="settings-button secondary ws-composer-hand" disabled={busy} onClick={() => void assignServer(mentionedOwner.value, mentionedOwner.name)}>Hand this to {mentionedOwner.name}</button>}
       <span className="ws-composer-note">{to ? <><Monogram name={to}/>{to}</> : null}{detail.composerNote && !disabled ? <span className="ws-faint">{to ? ' · ' : ''}{detail.composerNote}</span> : null}</span>
       {stoppable && <StopButton taskId={detail.task.id} projectId={detail.task.projectId!} onChanged={onSent}/>}
       <Tip label="Send (Enter)"><button type="submit" className="ws-send" aria-label="Send" disabled={!text.trim() || busy || disabled}><ArrowUp size={15}/></button></Tip>
@@ -298,7 +311,7 @@ function Properties({ detail, snapshot, onOpenTask, onOpenRun, onClose, onChange
       <h3 className="ws-prop-group">Work</h3>
       <dl>
         <Row label="Status"><span className="ws-status-pick"><TaskStatusIcon status={task.status} size={13}/><select className="ws-select is-bare" aria-label="Status" value={task.status} disabled={busy} onChange={e => void setStatus(e.target.value as WorkspaceStatus)}>{WORKSPACE_STATUSES.map(s => <option key={s} value={s}>{STATUS_LABEL[s]}</option>)}</select></span></Row>
-        <Row label="Assignee">{editable ? <span className="ws-status-pick">{task.assigneeLabel && <Monogram name={task.assigneeLabel}/>}<select className="ws-select is-bare" aria-label="Assignee" value={task.assigneeId ?? ''} disabled={busy} onChange={e => void update({ assigneeId: e.target.value || null })}><option value="">Unassigned</option>{assignable.map(a => <option key={a.id} value={a.id}>{a.name}{a.title ? ` · ${a.title}` : ''}</option>)}</select></span> : task.assigneeLabel ? <span className="ws-inline"><Monogram name={task.assigneeLabel}/><span className="ws-ellipsis">{task.assigneeLabel}</span></span> : <span className="ws-faint">None</span>}</Row>
+        <Row label="Assignee">{editable ? <span className="ws-status-pick">{task.assigneeLabel && <Monogram name={task.assigneeLabel}/>}<OwnerPicker bare label="Assignee" value={task.assigneeId ?? ''} disabled={busy} options={ownerOptions({ agents: assignable, people: snapshot.people ?? [], noneLabel: 'Unassigned', selected: task.assigneeId })} onChange={value => void update({ assigneeId: value || null })}/></span> : task.assigneeLabel ? <span className="ws-inline"><Monogram name={task.assigneeLabel}/><span className="ws-ellipsis">{task.assigneeLabel}</span></span> : <span className="ws-faint">None</span>}</Row>
         <Row label="Project">{project ? ellipsis(project.name) : <span className="ws-faint">None</span>}</Row>
         <Row label="Priority">{editable ? <select className="ws-select is-bare" aria-label="Priority" value={task.priority} disabled={busy} onChange={e => void update({ priority: e.target.value as WorkspacePriority })}>{WORKSPACE_PRIORITIES.map(p => <option key={p} value={p}>{PRIORITY_NAME[p]}</option>)}</select> : PRIORITY_NAME[task.priority]}</Row>
         {task.source === 'local' && task.projectId ? <><Row label="Labels"><TaskLabelsRow projectId={task.projectId} taskId={task.id} labels={task.labels ?? []} onChanged={onChanged}/></Row><Row label="Goal"><TaskGoalRow projectId={task.projectId} taskId={task.id}/></Row></> : <>{goal && <Row label="Goal">{ellipsis([goal.title, goal.parentId ? snapshot.goals.find(g => g.id === goal.parentId)?.title && `under ${snapshot.goals.find(g => g.id === goal.parentId)!.title}` : null, goal.ownerAgentId ? snapshot.agents.find(a => a.id === goal.ownerAgentId)?.name && `owner ${snapshot.agents.find(a => a.id === goal.ownerAgentId)!.name}` : null].filter(Boolean).join(' · '))}</Row>}{task.labels?.length ? <Row label="Labels"><span className="ws-chips">{task.labels.map(l => <span key={l.name} className="ws-chip" data-tone="faint" style={l.color ? { borderColor: l.color } : undefined}>{l.name}</span>)}</span></Row> : null}</>}
@@ -327,6 +340,7 @@ function Properties({ detail, snapshot, onOpenTask, onOpenRun, onClose, onChange
         {lastRun?.chatId && <Row label="Run chat"><button type="button" className="ws-link" onClick={() => { void selectChat(lastRun.chatId!); closeSettings(); }}>Open run chat</button></Row>}
         <Row label="Runs">{detail.runs.length || <span className="ws-faint">None</span>}</Row>
       </dl>
+      <CheckoutProperties detail={detail}/>
       {task.source === 'local' && task.assigneeId !== 'user:local' && !task.live && task.status !== 'done' && task.status !== 'cancelled' && <StartRun taskId={task.id} owner={task.assigneeLabel} onStarted={onChanged}/>}
       {task.source === 'local' && task.projectId && detail.governance && <GovernanceProperties task={task} governance={detail.governance} projectId={task.projectId} onChanged={onChanged}/>}
       <h3 className="ws-prop-group">About</h3>
