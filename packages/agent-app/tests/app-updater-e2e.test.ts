@@ -294,7 +294,7 @@ test('deb: apt-get installs the verified package through pkexec, then Muster rel
     assert.equal(installing.phase,'installing');
     assert.equal(quits(),1);
     assert.equal(spawned.at(-1)!.file,'/bin/sh');
-    assert.match(readFileSync(spawned.at(-1)!.args[0]!,'utf8'),/exec '\/opt\/Muster Agent\/muster-agent'/,'relaunches the installed launcher');
+    assert.match(readFileSync(spawned.at(-1)!.args[0]!,'utf8'),/exec '\/opt\/muster-agent\/muster-agent'/,'relaunches the installed launcher');
     u.cancelInstall();
     assert.match(u.snapshot().message??'',/is installed\. Restart Muster Agent/);
   }finally{await gh.close();}
