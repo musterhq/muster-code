@@ -12,6 +12,7 @@ import { ProviderUsageMeters, reportsUsage, useProviderUsage } from './ProviderU
 import { ProviderLogo, providerBrand } from './ProviderLogo';
 import './providers-screen.css';
 import { CliMaintenance } from './CliMaintenance';
+import { AddProviderPanel } from './AddProviderPanel';
 
 const statusLabel = (p: ProviderInfo) => p.available ? 'Ready for chats' : p.status === 'configured' ? 'Profile detected · unavailable for chats' : p.status === 'installed' ? 'Installed · sign-in not detected' : p.status === 'error' ? 'Needs attention' : p.status === 'not-detected' ? 'Not detected' : 'Unavailable';
 /** A real brand glyph when the provider is recognized (Codex/OpenAI, Claude, Anthropic, OpenCode, Ollama, …);
@@ -177,7 +178,7 @@ async function pasteInto(input: HTMLInputElement | null, set: (value: string) =>
 }
 
 /** Password-style key entry: masked input, paste button, capture warning. The saved key never returns to the renderer. */
-function KeyInput({value, onChange, label, autoFocus}: {value: string; onChange(value: string): void; label: string; autoFocus?: boolean}) {
+export function KeyInput({value, onChange, label, autoFocus}: {value: string; onChange(value: string): void; label: string; autoFocus?: boolean}) {
   const input = useRef<HTMLInputElement>(null);
   const [focused, setFocused] = useState(false);
   const captured = useCaptureWarning(focused || value.length > 0);
@@ -273,7 +274,7 @@ export function ProvidersScreen() {
   const list=providers.value ?? [];const ready=list.filter(p=>p.available);const localProfiles=list.filter(p=>!p.custom&&!p.available&&p.status!=='not-detected');const custom=list.filter(p=>p.custom&&!p.available);const absent=list.filter(p=>!p.custom&&p.status==='not-detected');
   return <section className="settings-screen" aria-label="Providers settings"><header className="settings-topbar"><button ref={back} className="settings-back" onClick={leave}><ArrowLeft size={15}/>Back to app</button><span>Settings</span></header><div className="settings-scroll"><div className="settings-content"><div className="settings-title"><div><h1>Accounts &amp; providers</h1><p>Local sign-ins, provider profiles, and compatible model endpoints.</p></div><button className="settings-button" onClick={()=>setAdding(true)}><Plus size={14}/>Add provider</button></div>
     <div className="discovery-bar"><p>Muster detects supported local sign-ins and configuration. A detected login does not verify a paid subscription or its remaining limits.</p><button className="settings-button secondary" disabled={providers.phase==='loading'} onClick={()=>void loadProviders(true)}><RefreshCw size={14}/>{providers.phase==='loading'?'Scanning…':'Scan again'}</button></div>
-    {adding && <AddConnection onClose={()=>setAdding(false)}/>}
+    {adding && <AddProviderPanel providers={list} onClose={()=>setAdding(false)} KeyField={KeyInput} openTerminal={openCommandInTerminal}/>}
     {providers.phase==='error' && <p role="alert" className="settings-error">{providers.error}</p>}
     {providers.phase==='loading' && !list.length && <p role="status">Looking for local connections…</p>}
     <ProviderAccounts/>

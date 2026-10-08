@@ -29,7 +29,7 @@ const BRAND_GLYPHS = {
   },
 } as const;
 
-type BrandKey = keyof typeof BRAND_GLYPHS;
+export type BrandKey = keyof typeof BRAND_GLYPHS;
 
 /** OpenAI's own routes: the ChatGPT sign-in through Codex (`openai-direct`, per account) and the Codex CLI row. */
 const OPENAI_ID = /^(openai-direct|codex)(?:_[0-9a-f]{10})?$/;
@@ -65,6 +65,8 @@ export interface ProviderLogoProps {
   endpoint?: string;
   size?: number;
   className?: string;
+  /** Force a catalog glyph (the Add provider cards); otherwise it is sniffed from id/name/endpoint. */
+  brand?: BrandKey;
 }
 
 /**
@@ -72,8 +74,8 @@ export interface ProviderLogoProps {
  * Unrecognized providers — mainly custom, user-named connections — fall back to {@link PluginIcon}'s deterministic
  * monogram rather than a made-up shape.
  */
-export function ProviderLogo({ id, name, endpoint, size = 18, className }: ProviderLogoProps): React.ReactElement {
-  const brand = providerBrand(id, name, endpoint);
+export function ProviderLogo({ id, name, endpoint, size = 18, className, brand: forced }: ProviderLogoProps): React.ReactElement {
+  const brand = forced ?? providerBrand(id, name, endpoint);
   if (brand) {
     const glyph = BRAND_GLYPHS[brand];
     return <svg width={size} height={size} viewBox={glyph.viewBox} fill="currentColor" className={className} aria-hidden="true" focusable="false"><path d={glyph.path} /></svg>;
