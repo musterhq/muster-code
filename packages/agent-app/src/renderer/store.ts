@@ -1504,12 +1504,12 @@ export async function refreshProvidersQuietly(minIntervalMs = 60_000): Promise<v
 }
 if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') window.addEventListener('focus', () => { void refreshProvidersQuietly(); });
 
-export async function loadProviders(force = false): Promise<void> {
+export async function loadProviders(force = false, rescan = false): Promise<void> {
   if (state.providers.phase === 'loading') return;
   if (!force && state.providers.phase === 'ready') return;
   set({ providers: { phase: 'loading', value: state.providers.value } });
   try {
-    const providers = await invoke('providers.list', undefined);
+    const providers = await invoke('providers.list', rescan ? { rescan: true } : undefined);
     set({ providers: { phase: 'ready', value: providers } });
   } catch (cause) {
     set({ providers: { phase: 'error', error: errorText(cause) } });
