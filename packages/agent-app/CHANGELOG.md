@@ -5,6 +5,7 @@ All notable changes to Muster Agent. Each `## <version>` section becomes the not
 
 ## Unreleased
 
+- More agents (#325). Muster can run your own Cursor CLI, Gemini CLI and Grok Build (1.0.13 or newer) in the chat folder, alongside Claude Code, Codex and OpenCode. Each appears only when installed and signed in; Accounts & providers lists the ones that are not with a How to install link. Muster's access levels become each CLI's own flags, stopping a run ends the CLI and everything it started, and the CLIs get a clean environment without Muster's secrets. Google Antigravity is detected and shown as not supported yet.
 - Server agents show their own runtime and model (#307). In a connected Paperclip org the Roster, agent cards and agent pages name each agent's adapter and model as the server has them (Claude Code · Opus 4.7, Codex · gpt-5.4-codex, Hermes · hermes-4) and say "Model not shared by the server" when it sends none, instead of looking like Muster's default model. In Work locally, "Work as" maps the agent's real model to the closest model you have and says when it differs ("Opus on server → Claude Code · Opus here"); a runtime that isn't set up on this Mac is said too.
 
 ## 0.3.5

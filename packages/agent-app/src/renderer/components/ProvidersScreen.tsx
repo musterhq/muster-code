@@ -1,4 +1,4 @@
-import { ArrowLeft, Check, ChevronDown, ClipboardPaste, Copy, Eye, EyeOff, KeyRound, Plus, RefreshCw, Server, ShieldCheck, Sparkles, SquareTerminal, TriangleAlert, X } from 'lucide-react';
+import { ArrowLeft, Check, ChevronDown, ClipboardPaste, Copy, Eye, EyeOff, ExternalLink, KeyRound, Plus, RefreshCw, Server, ShieldCheck, Sparkles, SquareTerminal, TriangleAlert, X } from 'lucide-react';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import type { ProviderInfo } from '../../shared/protocol';
 import { accountProviderId, activeAccountId, type ProviderAccountRow, type ProviderDiagnosis, type ProviderSecretStatus, type ProviderStage } from '../../shared/domains/providers-protocol';
@@ -242,6 +242,7 @@ function ProviderCard({ provider: p }: {provider: ProviderInfo}) {
     {p.apiKeyEnv && <div className="provider-source">Credentials from <code>{p.apiKeyEnv}</code></div>}
     {p.checkedAt && <div className="provider-source">Last checked {new Date(p.checkedAt).toLocaleString()}</div>}
     <div className="provider-catalog"><span className="provider-catalog-label">Model catalog</span>{p.models.length > 0 ? <><span className="provider-catalog-state">{p.available ? 'Available to select in chats' : 'Discovered · not available to chats'}</span><button type="button" className="provider-model-toggle" aria-expanded={expanded} onClick={()=>setExpanded(!expanded)}><ChevronDown size={13} style={{transform:expanded?'rotate(180deg)':undefined}}/>{p.models.length} {p.models.length === 1 ? 'model' : 'models'}</button>{expanded && <ul className="settings-models">{p.models.map(m=><li key={m.id}>{m.name}</li>)}</ul>}</> : <span className="provider-catalog-state">No runnable model catalog reported</span>}</div>
+    {p.installUrl && !p.available && <div className="provider-actions"><button type="button" className="settings-button secondary" onClick={()=>void invoke('link.open',{url:p.installUrl!}).catch(e=>setError(errorText(e,'Could not open the link.')))}><ExternalLink size={13}/>How to install</button>{p.loginCommand && p.status!=='not-detected' && <span className="provider-source">Sign in: <code>{p.loginCommand}</code></span>}</div>}
     {reportsUsage(p) && p.status !== 'not-detected' && <UsageSection provider={p}/>}
     {p.custom && <SecretField provider={p}/>}
     <Diagnosis provider={p} auto={p.status !== 'not-detected'}/>

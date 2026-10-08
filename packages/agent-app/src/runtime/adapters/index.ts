@@ -15,10 +15,15 @@ import {configuredProviderInstances} from '../provider-instances.ts';
 import {existsSync} from 'node:fs';
 import {claudeAuthStamp, claudeSignIn} from './claude-auth.ts';
 import type {RunnableAdapter, Validation} from './types.ts';
+import {cliAgent} from './cli-agents.ts';
+import {cursorAdapter, cursorCapabilities, CURSOR_ENV} from './cursor-cli.ts';
+import {geminiAdapter, geminiCapabilities, geminiSignIn} from './gemini-cli.ts';
+import {grokAdapter, grokCapabilities} from './grok-cli.ts';
+import type {AgentSpawn} from './cli-common.ts';
 
 export type {RunnableAdapter} from './types.ts';
 /** Provider ids served by these adapters; their runs never leave remote work behind. */
-export const isAdapterProvider = (id: string) => id === 'claude-code' || id === 'opencode' || id.startsWith('env-') || id.startsWith('local-') || id.startsWith('custom_');
+export const isAdapterProvider = (id: string) => id === 'claude-code' || id === 'opencode' || id === 'cursor-agent' || id === 'gemini-cli' || id === 'grok-cli' || id === 'antigravity' || id.startsWith('env-') || id.startsWith('local-') || id.startsWith('custom_');
 const hash = (...parts: unknown[]) => createHash('sha256').update(JSON.stringify(parts)).digest('hex');
 const OPENAI_CHAT = /^(?:gpt-|chatgpt-|o[1-9])/, OPENAI_EXCLUDE = /(?:audio|realtime|tts|transcribe|image|search|embedding|instruct|moderation|dall-e|codex)/;
 
@@ -34,6 +39,8 @@ export interface AdapterCatalogOptions {
   codexEndpoints?: () => string[];
   /** Probe local model servers (Ollama, LM Studio, an installed OmniRoute) on localhost. Default true outside tests. */
   localProbes?: boolean;
+  /** Cursor CLI, Gemini CLI, Grok Build and Antigravity. Default true outside tests. */
+  cliAgents?: boolean;
 }
 export interface AdapterCatalog { instances(): ProviderInstance[]; ready(): Promise<void> }
 
@@ -72,7 +79,12 @@ export function createAdapterCatalog(options: AdapterCatalogOptions = {}): Adapt
   const codexEndpoints = options.codexEndpoints ?? (() => { try { return configuredProviderInstances({env: env(), home}).map(row => row.info.endpoint ?? '').filter(Boolean); } catch { return []; } });
   const origin = (url: string) => { try { const parsed = new URL(url); return `${parsed.hostname === 'localhost' ? '127.0.0.1' : parsed.hostname}:${parsed.port}`; } catch { return url; } };
   const localProbes = options.localProbes ?? !process.env.NODE_TEST_CONTEXT;
-  const validators = (): Array<Validator<unknown>> => [claudeCheck, openCodeCheck, openAICheck, anthropicCheck, ...envChecks.values(), ...localChecks.values()] as Array<Validator<unknown>>;
+  const cliAgents = options.cliAgents ?? !process.env.NODE_TEST_CONTEXT;
+  const agentSpawn = options.spawn as AgentSpawn | undefined;
+  const cursorCheck = new Validator(() => cursorCapabilities(cliAgent('cursor-agent')!.detect(env(), home)!, {spawn: agentSpawn, env: env()}));
+  const geminiCheck = new Validator(() => geminiCapabilities(cliAgent('gemini-cli')!.detect(env(), home)!, {spawn: agentSpawn, env: env(), home}));
+  const grokCheck = new Validator(() => grokCapabilities(cliAgent('grok-cli')!.detect(env(), home)!, {spawn: agentSpawn, env: env()}));
+  const validators = (): Array<Validator<unknown>> => [claudeCheck, openCodeCheck, ...(cliAgents ? [cursorCheck, geminiCheck, grokCheck] : []), openAICheck, anthropicCheck, ...envChecks.values(), ...localChecks.values()] as Array<Validator<unknown>>;
 
   const route = (info: ProviderInfo, run?: RunnableAdapter): ProviderInstance => ({info, command: '', env: {}, sessionsRoot: '', ...(run ? {adapter: run} : {})});
   /** Pending and failed checks stay visible but unavailable; nothing falls back to another provider. */
@@ -106,6 +118,31 @@ export function createAdapterCatalog(options: AdapterCatalogOptions = {}): Adapt
       rows.push(gate({id: 'opencode', name: 'OpenCode', driver: 'opencode-cli', bindingId, identityMasked: 'OpenCode sign-in', models: [], available: false, source: openCode},
         openCodeCheck.current(openCode), value => ({models: value.models, detail: 'Runs OpenCode in the chat folder with its own tools and providers. Read-only chats use the plan agent.'}),
         () => adapter(`opencode:${bindingId}`, () => openCodeAdapter({binary: openCode, env: e, spawn: options.spawn}))));
+    }
+    if (cliAgents) {
+      const meta = (id: string) => ({...cliAgent(id)!, binary: cliAgent(id)!.detect(e, home)});
+      const cursor = meta('cursor-agent'), gemini = meta('gemini-cli'), grok = meta('grok-cli'), anti = meta('antigravity');
+      const extra = (m: {installUrl: string; loginCommand: string}) => ({installUrl: m.installUrl, ...(m.loginCommand ? {loginCommand: m.loginCommand} : {})});
+      if (cursor.binary) {
+        const bindingId = hash('cursor-agent', cursor.binary), bin = cursor.binary;
+        rows.push(gate({id: 'cursor-agent', name: cursor.name, driver: 'cursor-cli', bindingId, identityMasked: 'Cursor sign-in', models: [], available: false, source: bin, ...extra(cursor)},
+          cursorCheck.current(`${bin}|${CURSOR_ENV.map(name => e[name] ? 1 : 0).join('')}`), value => ({models: value.models, detail: `Runs Cursor CLI ${value.version}${value.account ? ` (${value.account})` : ''} in the chat folder. Read-only chats use ask mode; Cursor decides approvals in print mode, so Muster's access level sets its force and sandbox flags.`}),
+          () => adapter(`cursor:${bindingId}`, () => cursorAdapter({binary: bin, env: e, spawn: agentSpawn}))));
+      }
+      if (gemini.binary) {
+        const bindingId = hash('gemini-cli', gemini.binary), bin = gemini.binary;
+        rows.push(gate({id: 'gemini-cli', name: gemini.name, driver: 'gemini-cli', bindingId, identityMasked: 'Gemini sign-in', models: [], available: false, source: bin, ...extra(gemini)},
+          geminiCheck.current(`${bin}|${geminiSignIn(e, home) ?? ''}`), value => ({models: value.models, detail: `Runs Gemini CLI ${value.version} (${value.account}) headless in the chat folder. Read-only uses plan mode, workspace auto-approves edits only, full access approves everything.`}),
+          () => adapter(`gemini:${bindingId}`, () => geminiAdapter({binary: bin, flags: () => { const found = geminiCheck.current(`${bin}|${geminiSignIn(e, home) ?? ''}`); return found.value?.flags ?? {plan: false, resume: false, approvalMode: true}; }, env: e, spawn: agentSpawn}))));
+      }
+      if (grok.binary) {
+        const bindingId = hash('grok-cli', grok.binary), bin = grok.binary;
+        rows.push(gate({id: 'grok-cli', name: grok.name, driver: 'grok-acp', bindingId, identityMasked: 'Grok sign-in', models: [], available: false, source: bin, ...extra(grok)},
+          grokCheck.current(`${bin}|${e.XAI_API_KEY ? 1 : 0}`), value => ({models: value.models, detail: `Runs Grok Build ${value.version} over its Agent Client Protocol. Read-only allows reads and searches, workspace also edits, full access approves everything.`}),
+          () => adapter(`grok:${bindingId}`, () => grokAdapter({binary: bin, env: e, spawn: agentSpawn}))));
+      }
+      // Seen but not drivable: shown with the reason, never offered in the model picker.
+      if (anti.binary) rows.push(route({id: 'antigravity', name: anti.name, driver: 'antigravity', identityMasked: '', models: [], available: false, status: 'error', source: anti.binary, error: 'Not supported yet.', detail: `Not supported yet. ${anti.unsupportedReason}`, ...extra(anti)}));
     }
     if (e.OPENAI_API_KEY) {
       const base = openAIBase(), bindingId = hash('env-openai', base, hash(e.OPENAI_API_KEY));

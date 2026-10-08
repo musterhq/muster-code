@@ -9,6 +9,8 @@ import { basename, join } from 'node:path';
 import type { AgentEvent, ApprovalData, ApprovalDecision, Chat, ChatRecovery, Commands, PendingQuestion, PendingQuestionData, TimelineItem, WakeReason } from '../shared/protocol.ts';
 import type { PendingAttentionSummary, AttentionRequest } from '../shared/attention-protocol.ts';
 import { discoverLocalProviders } from './provider-discovery.ts';
+import { homedir } from 'node:os';
+import { absentCliAgentRows } from './adapters/cli-agents.ts';
 import { CustomProviders } from './custom-providers.ts';
 import { AgentStore } from './store.ts';
 import { WorkspaceWatchService } from './workspace-watch.ts';
@@ -943,6 +945,8 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
       return [...runtime.filter(shown).map(entry=>({...entry,...account(entry),source:entry.codex&&entry.source?entry.source:'Existing local provider profile'})),
         // A Codex gateway already listed as a route (its id may be prefixed, e.g. codex-<id>) is not listed again as a dead discovery row.
         ...detected.filter(entry=>!runtime.some(runnable=>runnable.id===entry.id||(runnable.codex?.kind==='gateway'&&runnable.codex.modelProvider===entry.id&&!runnable.codex.account))&&shown(entry)).map(({identity,credentialPresent,...entry})=>({...entry,available:false,models:[],canReveal:Boolean(identity),source:'Local configuration discovery',detail:`${entry.detail}. No runnable adapter is enabled for this entry.`})),
+        // Agent CLIs that are not installed: listed (with How to install) but never offered in the model picker.
+        ...(process.env.NODE_TEST_CONTEXT && process.env.MUSTER_PROVIDER_ADAPTERS !== '1' ? [] : absentCliAgentRows(process.env, homedir()).filter(row => !runtime.some(entry => entry.id === row.id))),
         ...customProviders.list()];
     }
     if (command === 'plugins.inventory') return discoverPlugins();
