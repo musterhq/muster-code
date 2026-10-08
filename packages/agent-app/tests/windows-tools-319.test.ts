@@ -25,7 +25,7 @@ import type {AdapterRunInput} from '../src/runtime/adapters/types.ts';
 import type {ImportRunResult,ImportListPage} from '../src/shared/domains/import-protocol.ts';
 import {toolBlindModel,toolCapableAlternative,TOOLS_BLIND_NOTICE} from '../src/renderer/components/composerMenus.ts';
 
-const directory=async(t:TestContext)=>{const dir=await mkdtemp(join(tmpdir(),'muster-319-'));t.after(()=>rm(dir,{recursive:true,force:true}));return dir;};
+const directory=async(t:TestContext)=>{const dir=await mkdtemp(join(tmpdir(),'muster-319-'));t.after(()=>rm(dir,{recursive:true,force:true,maxRetries:5,retryDelay:100}).catch(()=>{/* Windows keeps SQLite files locked a moment; the temp folder is disposable */}));return dir;};
 
 /* ---- 1. one shared path normaliser -------------------------------------------------------------------------------- */
 test('normalizeFsPath: Windows spellings of one folder collapse to one stored form (tested with path.win32, on any OS)',()=>{
