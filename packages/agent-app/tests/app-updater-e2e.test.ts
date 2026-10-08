@@ -276,7 +276,7 @@ test('deb: apt-get installs the verified package through pkexec, then Muster rel
   writeFileSync(pkexec,`#!/bin/sh\nprintf '%s\\n' "$@" > '${argsFile}'\nexit \${FAKE_PKEXEC_EXIT:-0}\n`);chmodSync(pkexec,0o755);
   try{
     const spawned:{file:string;args:string[]}[]=[];
-    const {updater:u,quits}=updater(gh,{method:'deb',relaunch:'/opt/Muster Agent/muster-agent'},{platform:'linux',pkexec,aptGet:'/usr/bin/apt-get',spawnDetached:(file,args)=>{spawned.push({file,args});return {unref(){},kill(){return true;}} as never;}});
+    const {updater:u,quits}=updater(gh,{method:'deb',relaunch:'/opt/muster-agent/muster-agent'},{platform:'linux',pkexec,aptGet:'/usr/bin/apt-get',spawnDetached:(file,args)=>{spawned.push({file,args});return {unref(){},kill(){return true;}} as never;}});
     const ready=await u.check();
     assert.equal(ready.phase,'ready',String(ready.message));
     process.env.FAKE_PKEXEC_EXIT='126';
@@ -335,7 +335,7 @@ test('install method detection', () => {
   assert.deepEqual(detectInstallMethod({...base,platform:'win32',exe:'D:\\portable\\muster-agent.exe',exists:none}),{method:'manual'},'the portable zip opens the release page');
   assert.deepEqual(detectInstallMethod({...base,platform:'linux',exe:'/tmp/.mount_x/muster-agent.bin',env:{APPIMAGE:'/home/me/Apps/Muster.AppImage'},exists:yes}),{method:'appimage',target:'/home/me/Apps/Muster.AppImage'});
   assert.deepEqual(detectInstallMethod({...base,platform:'linux',exe:'/tmp/.mount_x/muster-agent.bin',env:{APPIMAGE:'/opt/ro/Muster.AppImage'},exists:yes,writable:none}),{method:'manual'},'a read-only AppImage folder cannot be updated in place');
-  assert.deepEqual(detectInstallMethod({...base,platform:'linux',exe:'/opt/Muster Agent/muster-agent.bin',exists:file=>file==='/var/lib/dpkg/info/muster-agent.list'}),{method:'deb',relaunch:'/opt/Muster Agent/muster-agent'});
+  assert.deepEqual(detectInstallMethod({...base,platform:'linux',exe:'/opt/muster-agent/muster-agent.bin',exists:file=>file==='/var/lib/dpkg/info/muster-agent.list'}),{method:'deb',relaunch:'/opt/muster-agent/muster-agent'});
   assert.deepEqual(detectInstallMethod({...base,platform:'linux',exe:'/home/me/muster/muster-agent.bin',exists:none}),{method:'manual'},'tar.gz');
   assert.deepEqual(detectInstallMethod({...base,packaged:false,platform:'linux',exe:'/x/electron',env:{APPIMAGE:'/a'},exists:yes}),{method:'manual'},'development');
 });

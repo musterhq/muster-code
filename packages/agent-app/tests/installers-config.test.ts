@@ -28,7 +28,7 @@ test('Windows and Linux ship one app.asar, with what other programs open by path
 });
 
 test('unpackedPath maps app.asar paths to app.asar.unpacked and leaves others alone', () => {
-  assert.equal(unpackedPath('/opt/Muster Agent/resources/app.asar/dist/runtime/resources/codex-launch.sh'),'/opt/Muster Agent/resources/app.asar.unpacked/dist/runtime/resources/codex-launch.sh');
+  assert.equal(unpackedPath('/opt/muster-agent/resources/app.asar/dist/runtime/resources/codex-launch.sh'),'/opt/muster-agent/resources/app.asar.unpacked/dist/runtime/resources/codex-launch.sh');
   assert.equal(unpackedPath('C:\\Users\\me\\AppData\\Local\\Programs\\muster-agent\\resources\\app.asar\\dist\\main\\browser-mcp.cjs'),'C:\\Users\\me\\AppData\\Local\\Programs\\muster-agent\\resources\\app.asar.unpacked\\dist\\main\\browser-mcp.cjs');
   assert.equal(unpackedPath('/Applications/Muster Agent.app/Contents/Resources/app/dist/main/index.cjs'),'/Applications/Muster Agent.app/Contents/Resources/app/dist/main/index.cjs');
   assert.equal(unpackedPath('/x/app.asar.unpacked/y'),'/x/app.asar.unpacked/y','already unpacked');

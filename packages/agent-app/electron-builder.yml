@@ -63,6 +63,8 @@ protocols:
 # AppImage type 2 static runtime: runs without libfuse2 (Ubuntu 24.04 ships only fuse3), zstd squashfs.
 toolsets:
   appimage: "1.0.3"
+# The Linux build is packaged with -c.productName=muster-agent (package:linux and the cross-platform workflow): the deb
+# installs to /opt/<productName>, and Chromium's setuid sandbox helper path breaks on a space ("/opt/Muster", exit 127, #343).
 linux:
   target: [AppImage, deb, tar.gz]
   category: Development
@@ -75,6 +77,7 @@ linux:
   syncDesktopName: true
   desktop:
     entry:
+      Name: Muster Agent
       Keywords: agent;ai;coding;terminal;
 deb:
   compression: xz
