@@ -11,6 +11,7 @@
 import { createRequire } from 'node:module';
 import type { BrowserWindow, BrowserWindowConstructorOptions, Session } from 'electron';
 import { sessionCookieHeader, sessionPartition, type CookieLike } from '../runtime/server/session.ts';
+import { device } from '../shared/device-noun.ts';
 
 export interface WindowLike {
   loadURL(url: string): Promise<void>;
@@ -49,7 +50,7 @@ export function serverOriginOf(value: unknown): string {
   let url: URL;
   try { url = new URL(String(value)); } catch { throw new Error('That is not a server address.'); }
   if (url.username || url.password) throw new Error('Leave credentials out of the address.');
-  if (url.protocol !== 'https:' && !(url.protocol === 'http:' && LOOPBACK.has(url.hostname))) throw new Error('Sign in needs an https:// address (plain http is only allowed for this Mac).');
+  if (url.protocol !== 'https:' && !(url.protocol === 'http:' && LOOPBACK.has(url.hostname))) throw new Error('Sign in needs an https:// address (plain http is only allowed for '+device().lower+').');
   return url.origin;
 }
 const isWeb = (url: string): boolean => { try { return ['http:', 'https:'].includes(new URL(url).protocol); } catch { return false; } };

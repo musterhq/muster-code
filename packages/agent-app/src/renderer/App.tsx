@@ -32,7 +32,7 @@ import {
   createChat,
   updateChat,
 } from './store';
-import { useStore } from './useStore';
+import { useStoreSelector, useStoreSlice } from './useStore';
 import { focusComposer } from './focus';
 import {goBack,goForward,installMenuActions,requestRename,useNavHistory,useRenameRequest} from './menuActions';
 import {applyDocumentPreferences,installSendKey,installSystemThemeListener} from './components/settings/preferences';
@@ -44,13 +44,13 @@ import './app-shell.css';
 function saveNavWidth():void { try { persistNavWidth(); } catch {} }
 
 export function App(): React.ReactElement {
-  const state = useStore();
+  const state = useStoreSlice('activeChatId','boot','memoryFolderId','navHidden','navWidth','notices','screen','settings');
   const draft = useNewChatDraft();
   const dragging = useRef(false);
   const history=useNavHistory();
   useEffect(()=>installMenuActions(),[]);
   // Muster Server web UI: a desktop "Open" link lands here with ?project=<id> (#204). Inert in the desktop app.
-  useEffect(()=>{const id=requestedProject();if(id&&state.boot.phase==='ready'&&state.snapshot?.projects.some(p=>p.id===id)){openProject(id);window.history.replaceState(null,'',window.location.pathname);}},[state.boot.phase]);
+  useEffect(()=>{const id=requestedProject();if(id&&state.boot.phase==='ready'&&getState().snapshot?.projects.some(p=>p.id===id)){openProject(id);window.history.replaceState(null,'',window.location.pathname);}},[state.boot.phase]);
   useEffect(()=>installSendKey(()=>getState().settings['general.sendKey']),[]);
   useEffect(()=>installSystemThemeListener(()=>getState().settings['appearance.theme'],document.documentElement,()=>applyDocumentPreferences(getState().settings)),[]);
   useEffect(()=>installResponsiveNav({navHidden:()=>getState().navHidden,setNavHidden}),[]);
@@ -189,7 +189,7 @@ export function App(): React.ReactElement {
 /** Rename form for the Work ▸ Rename Chat menu item when no chat surface claims the event. */
 function MenuRename(): React.ReactElement | null {
   const id=useRenameRequest();
-  const chat=useStore().snapshot?.chats.find(candidate=>candidate.id===id)??null;
+  const chat=useStoreSelector(state=>state.snapshot?.chats.find(candidate=>candidate.id===id)??null);
   const [title,setTitle]=useState('');
   const [busy,setBusy]=useState(false);
   const input=useRef<HTMLInputElement>(null);

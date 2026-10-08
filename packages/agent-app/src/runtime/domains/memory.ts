@@ -134,6 +134,8 @@ function memoryDomain(context: DomainContext, options: MemoryDomainOptions): Dom
     }
     try { return identity.folder(context.folderFor(folderId)); } catch { return undefined; }
   };
+  // Fill the identity caches off the event loop, so resolveScope (sync, used by status()) rarely has to spawn git itself.
+  try { void identity.warm(context.store.snapshot().folders as { id: string; path: string }[]); } catch { /* no folders yet */ }
   let hindsight: HindsightService | undefined, unavailable = false;
   const service = (): HindsightService | undefined => {
     if (hindsight || unavailable) return hindsight;

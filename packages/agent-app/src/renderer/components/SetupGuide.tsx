@@ -15,6 +15,7 @@ import {openCloneSheet} from './CloneRepositorySheet';
 import {ModalSheet} from './ModalSheet';
 import {ProviderLogo} from './ProviderLogo';
 import {ResourceState} from './ResourceState';
+import { device } from '../../shared/device-noun.ts';
 import './setup-guide.css';
 
 const errorText=(cause: unknown)=>cause instanceof Error?cause.message:String(cause);
@@ -214,7 +215,7 @@ function ApiConnectionForm({onDone,onCancel}:{onDone:(message: string)=>void;onC
     <label>Name<input ref={first} required maxLength={100} value={name} onChange={event=>setName(event.target.value)} placeholder="My gateway"/></label>
     <label>API base URL<input required type="url" maxLength={2048} value={endpoint} onChange={event=>setEndpoint(event.target.value)} placeholder="https://api.example.com/v1"/></label>
     <label>API key <span className="setup-optional">optional</span><input type="password" autoComplete="off" spellCheck={false} value={key} onChange={event=>setKey(event.target.value)}/></label>
-    <p className="setup-help">OpenAI-compatible endpoints only. The key is encrypted with the macOS Keychain and never shown again.</p>
+    <p className="setup-help">OpenAI-compatible endpoints only. The key is encrypted with {device().secretStore} and never shown again.</p>
     {error&&<p className="setup-error" role="alert">{error}</p>}
     <div className="setup-inline-actions"><button type="submit" className="is-primary" disabled={busy}>{busy?'Connecting…':'Connect'}</button><button type="button" disabled={busy} onClick={onCancel}>Cancel</button></div>
   </form>;

@@ -6,6 +6,7 @@ import type {BrowserWindow, DownloadItem, NavigationEntry, Session, WebContents,
 import {BROWSER_VIEWPORTS, browserURL, type BrowserBounds, type BrowserCapture, type BrowserCommands, type BrowserConsoleEntry, type BrowserDownload, type BrowserEvent, type BrowserPickedElement, type BrowserProfile, type BrowserState, type BrowserSurface, type BrowserViewport} from '../shared/browser-protocol.ts';
 import type {BrowserSessionVault, SavedBrowserSession} from './browser-session-vault.ts';
 import {BROWSER_CANCEL_PICK_SCRIPT, BROWSER_PICK_WORLD, browserPickScript, consoleEntry, downloadFilename, faviconURL, MAX_CONSOLE_ENTRIES, pickedElement, pickedRect, uniqueFilename} from './browser-inspect.ts';
+import { device } from '../shared/device-noun.ts';
 
 /** Browser tabs (live or discarded) tracked across every chat workspace. */
 export const MAX_BROWSER_VIEWS=16;
@@ -510,7 +511,7 @@ export class BrowserWorkspaceController {
     this.enforceLiveLimit(undefined,1);
     // BRW-06: a tab reopened after a restart gets its encrypted back/forward stack back (Chromium restores page state).
     const saved=this.vault?.take(input.owner,input.profileId);
-    const unreadable=this.vault?.consumeUnreadableNotice()?'Saved browsing state could not be decrypted on this Mac. Sign in again if the page asks.':undefined;
+    const unreadable=this.vault?.consumeUnreadableNotice()?'Saved browsing state could not be decrypted on '+device().lower+'. Sign in again if the page asks.':undefined;
     this.entries.set(entry.owner,entry);
     if(saved){
       // The renderer only persisted a redacted URL; the vault holds the real one (and the back/forward stack).

@@ -10,6 +10,7 @@
 import type { FetchLike } from './paperclip-client.ts';
 import { isLoopback, normalizeBaseUrl } from './paperclip-client.ts';
 import { createServerSignIn, Unreachable, type ChallengeStatus, type ServerAuth, type ServerChallenge, type SignInDeps } from './server-auth.ts';
+import { device } from '../shared/device-noun.ts';
 
 export { SIGNED_OUT_BY_SERVER } from './server-auth.ts';
 export type { SignedInUser } from './server-auth.ts';
@@ -70,9 +71,9 @@ export function createPaperclipAuth(fetcher: FetchLike): ServerAuth {
       try {
         const reply = await call('POST', `${normalizeBaseUrl(base)}/api/cli-auth/revoke-current`, { token: key, body: {} });
         if (reply.status === 200) return { revoked: true };
-        if (reply.status === 401 || reply.status === 403) return { revoked: true, message: 'The server had already signed this Mac out.' };
-        return { revoked: false, message: `The server did not confirm the sign-out (${reply.status}). The key was removed from this Mac; remove it from the server’s API keys too.` };
-      } catch { return { revoked: false, message: 'The server could not be reached, so its key could not be revoked. The key was removed from this Mac; remove it from the server’s API keys too.' }; }
+        if (reply.status === 401 || reply.status === 403) return { revoked: true, message: 'The server had already signed '+device().lower+' out.' };
+        return { revoked: false, message: `The server did not confirm the sign-out (${reply.status}). The key was removed from ${device().lower}; remove it from the server’s API keys too.` };
+      } catch { return { revoked: false, message: 'The server could not be reached, so its key could not be revoked. The key was removed from '+device().lower+'; remove it from the server’s API keys too.' }; }
     },
   };
 }

@@ -1,4 +1,5 @@
 import {spawn,type ChildProcess} from 'node:child_process';
+import {commandEnvironment} from './command-environment.ts';
 import {killTree, shellCommand, WINDOWS} from './process-tree.ts';
 import {createHash,randomUUID} from 'node:crypto';
 import {promises as fs} from 'node:fs';
@@ -33,15 +34,6 @@ function receiptSnapshot(value:ProcessSnapshot):ProcessSnapshot {
   const {command:_command,args:_args,output:_output,...metadata}=value;
   return {...metadata,output:'',truncated:true};
 }
-/** Do not pass provider tokens, API keys, SSH agents or arbitrary app variables to a shell. */
-function commandEnvironment():NodeJS.ProcessEnv {
-  // Windows programs need the Windows environment (SystemRoot, PATHEXT, TEMP, USERPROFILE…) to run.
-  if(process.platform==='win32')return {...process.env,TERM:'dumb',NO_COLOR:'1'};
-  const env:NodeJS.ProcessEnv={PATH:process.env.PATH??'/usr/bin:/bin',TERM:'dumb',NO_COLOR:'1'};
-  for(const key of ['HOME','USER','LOGNAME','TMPDIR','LANG','LC_ALL'])if(process.env[key])env[key]=process.env[key];
-  return env;
-}
-
 /** A single owner for four non-interactive process groups. No persisted PID is
  * trusted or exposed. Attach/detach controls observers, never process lifetime.
  */

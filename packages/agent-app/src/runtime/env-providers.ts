@@ -7,6 +7,7 @@
 import { readFileSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { device } from '../shared/device-noun.ts';
 
 export interface EnvKeyProvider {
   /** Muster provider id (`env-<name>`). */
@@ -53,12 +54,12 @@ function omniRoutePort(dir: string): number | undefined {
 export function localServers(env: NodeJS.ProcessEnv = process.env, home: string = homedir(), hasOmniRoute: boolean): LocalServer[] {
   const servers: LocalServer[] = [];
   const ollama = env.OLLAMA_HOST && /^(?:https?:\/\/)?(127\.0\.0\.1|localhost)(?::(\d{1,5}))?\/?$/.exec(env.OLLAMA_HOST);
-  servers.push({ id: 'local-ollama', name: 'Ollama (this Mac)', endpoint: `http://${ollama ? ollama[1] : '127.0.0.1'}:${ollama && port(ollama[2]) || 11434}/v1` });
-  servers.push({ id: 'local-lmstudio', name: 'LM Studio (this Mac)', endpoint: `http://127.0.0.1:${port(env.LMSTUDIO_PORT) ?? 1234}/v1` });
+  servers.push({ id: 'local-ollama', name: 'Ollama ('+device().lower+')', endpoint: `http://${ollama ? ollama[1] : '127.0.0.1'}:${ollama && port(ollama[2]) || 11434}/v1` });
+  servers.push({ id: 'local-lmstudio', name: 'LM Studio ('+device().lower+')', endpoint: `http://127.0.0.1:${port(env.LMSTUDIO_PORT) ?? 1234}/v1` });
   if (hasOmniRoute) {
     const dir = env.OMNIROUTE_HOME || join(home, '.omniroute');
     const host = loopback(env.OMNIROUTE_HOST) ?? '127.0.0.1';
-    servers.push({ id: 'local-omniroute', name: 'OmniRoute (this Mac)', endpoint: `http://${host}:${port(env.OMNIROUTE_PORT) ?? omniRoutePort(dir) ?? 20128}/v1`, keyEnv: 'OMNIROUTE_API_KEY' });
+    servers.push({ id: 'local-omniroute', name: 'OmniRoute ('+device().lower+')', endpoint: `http://${host}:${port(env.OMNIROUTE_PORT) ?? omniRoutePort(dir) ?? 20128}/v1`, keyEnv: 'OMNIROUTE_API_KEY' });
   }
   return servers;
 }

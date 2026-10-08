@@ -13,6 +13,7 @@ import { WorkspaceWatchService } from '../workspace-watch.ts';
 import { readRepoSnapshot, RepoPoller, repoWatchKey, type RepoEvent, type RepoWatch } from '../repo-triggers.ts';
 import type { DomainContext, DomainModule } from './types.ts';
 import { plural } from '../../shared/wording.ts';
+import { device } from '../../shared/device-noun.ts';
 
 /** Scheduler clock; tests shorten the tick and move `now`. */
 export const automationTiming = { tickMs: 30_000, firstTickMs: 1_000, now: () => Date.now(), graceMs: 150_000, watchCooldownMs: AUTOMATION_WATCH_COOLDOWN_MS, watchQuietMs: 5_000, repoPollMs: AUTOMATION_REPO_POLL_MS, repoMaxBackoffMs: AUTOMATION_REPO_MAX_BACKOFF_MS, /** The webhook listener's preferred loopback port (0: any free one; tests use 0). */ webhookPort: 47831, /** Tests only: a secret store override. */ secrets: undefined as (() => { secureStorage(): boolean; set(id: string, value: unknown): unknown; get(id: string): string | undefined; clear(id: string): unknown }) | undefined };
@@ -466,7 +467,7 @@ export function createAutomationsDomain(ctx: DomainContext): DomainModule {
           const current = { ...automation, cursor: due.latest };
           // Sleep, a closed app or a long block: the due runs coalesce into one catch-up run, or one "missed" entry.
           const late = now - due.latest > automationTiming.graceMs, missed = due.count > 1 || late;
-          if (missed && automation.catch_up === 'none') insertRun(current, due.latest, 'schedule', 'missed', `${plural(due.count, 'run')} missed while this Mac was asleep or Muster was closed.`);
+          if (missed && automation.catch_up === 'none') insertRun(current, due.latest, 'schedule', 'missed', `${plural(due.count, 'run')} missed while ${device().lower} was asleep or Muster was closed.`);
           else void fireRun(current, due.latest, missed ? 'catch-up' : 'schedule', missed ? `Covers ${plural(due.count, 'missed run')}.` : undefined).catch(() => undefined);
           broadcast();
         }

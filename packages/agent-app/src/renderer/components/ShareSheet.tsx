@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { ModalSheet } from './ModalSheet';
 import { invoke } from '../bridge';
 import { getState, notifySuccess } from '../store';
+import { device } from '../../shared/device-noun.ts';
 import './share-sheet.css';
 
 const errorText = (cause: unknown): string => (cause instanceof Error ? cause.message : String(cause || '')).replace(/^Error invoking remote method '[^']+': (?:Error: )?/, '') || 'Could not share this chat.';
@@ -40,7 +41,7 @@ export function ShareSheet(): React.ReactElement | null {
   const run = async (kind: 'save' | 'copy' | 'link') => {
     setBusy(kind); setError('');
     try {
-      if (kind === 'link') { await invoke('clipboard.write', { text: localChatLink(chat.id) }); notifySuccess('Local chat link copied · opens only in Muster on this Mac'); }
+      if (kind === 'link') { await invoke('clipboard.write', { text: localChatLink(chat.id) }); notifySuccess('Local chat link copied · opens only in Muster on '+device().lower); }
       else if (kind === 'copy') {
         const data = await invoke('chat.export', { id: chat.id, format, ...(redact ? {} : { redact: false }) });
         await invoke('clipboard.write', { text: data.text });
@@ -67,7 +68,7 @@ export function ShareSheet(): React.ReactElement | null {
     {error && <p className="share-error" role="alert">{error}</p>}
     <div className="share-link">
       <button type="button" disabled={!!busy} onClick={() => void run('link')}>{busy === 'link' ? 'Copying…' : 'Copy local link'}</button>
-      <span className="share-hint">Works only in Muster on this Mac. It holds the chat id, not the conversation.</span>
+      <span className="share-hint">Works only in Muster on {device().lower}. It holds the chat id, not the conversation.</span>
     </div>
     <div className="composer-confirm-actions">
       <button type="button" onClick={close} disabled={!!busy}>Cancel</button>

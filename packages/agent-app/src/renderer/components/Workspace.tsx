@@ -37,7 +37,7 @@ import {
   updateBrowserTabUrl,
   type WorkspaceTab,
 } from '../store';
-import { useStore, useStoreSelector } from '../useStore';
+import { useStoreSelector, useStoreSlice } from '../useStore';
 import {cleanIpcError} from './resourceErrors';
 import {useRevealedPath} from './fileReveal';
 import {addFolderToDraft, useNewChatDraft} from '../newChatDraft';
@@ -240,7 +240,7 @@ type Launcher = {label: string; icon: React.ReactNode; run: () => void};
  * the new-chat draft. A tile that cannot work here is left out and one line says why; nothing is inert.
  */
 function ResourceLaunchers({draft}: {draft?: {folderId?: string; projectId?: string}}): React.ReactElement {
-  const state = useStore();
+  const state = useStoreSlice('snapshot','activeChatId');
   const chat = draft ? undefined : state.snapshot?.chats.find(c => c.id === state.activeChatId);
   const project = draft?.projectId ? state.snapshot?.projects.find(item => item.id === draft.projectId) : undefined;
   const folderId = draft ? draft.folderId ?? (project?.primaryFolderId ?? project?.folderIds[0]) : chat?.folderId;
@@ -283,7 +283,7 @@ let draftOpenedOver: string | null = null;
 function showInDraft(id: string): void { draftHiddenTabs?.delete(id); }
 
 export function Workspace({headerAction, onToggleResourceMaximize, resourceMaximized=false}: {headerAction?:React.ReactNode; onToggleResourceMaximize?:()=>void; resourceMaximized?:boolean}): React.ReactElement | null {
-  const state = useStore();
+  const state = useStoreSlice('tabs','activeTabId','dirtyTabs','resourcesHidden','rightPaneMode','screen','snapshot');
   const draft = useNewChatDraft();
   if (draft.open) {
     if (!draftHiddenTabs) { draftHiddenTabs = new Set(state.tabs.map(tab => tab.id)); draftOpenedOver = state.activeTabId; }

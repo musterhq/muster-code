@@ -7,7 +7,7 @@ import {validateEndpoint} from '../custom-providers.ts';
 import {providerDataDir, type ProviderInstance} from '../provider-instances.ts';
 import {claudeCodeAdapter, type Spawn} from './claude-code.ts';
 import {claudeCodeModels} from './claude-models.ts';
-import {ANTHROPIC_API, anthropicAdapter, CHAT_ONLY, listChatModels, openAICompatibleAdapter} from './http-chat.ts';
+import {ANTHROPIC_API, anthropicAdapter, CHAT_ONLY, WITH_TOOLS, listChatModels, openAICompatibleAdapter, refusedTools} from './http-chat.ts';
 import {openCodeAdapter, openCodeCapabilities, probe} from './opencode.ts';
 import {ConversationMemory, findBinary, Validator} from './shared.ts';
 import {ENV_KEY_PROVIDERS, localServers} from '../env-providers.ts';
@@ -15,10 +15,15 @@ import {configuredProviderInstances} from '../provider-instances.ts';
 import {existsSync} from 'node:fs';
 import {claudeAuthStamp, claudeSignIn} from './claude-auth.ts';
 import type {RunnableAdapter, Validation} from './types.ts';
+import {cliAgent} from './cli-agents.ts';
+import {cursorAdapter, cursorCapabilities, CURSOR_ENV} from './cursor-cli.ts';
+import {geminiAdapter, geminiCapabilities, geminiSignIn} from './gemini-cli.ts';
+import {grokAdapter, grokCapabilities} from './grok-cli.ts';
+import type {AgentSpawn} from './cli-common.ts';
 
 export type {RunnableAdapter} from './types.ts';
 /** Provider ids served by these adapters; their runs never leave remote work behind. */
-export const isAdapterProvider = (id: string) => id === 'claude-code' || id === 'opencode' || id.startsWith('env-') || id.startsWith('local-') || id.startsWith('custom_');
+export const isAdapterProvider = (id: string) => id === 'claude-code' || id === 'opencode' || id === 'cursor-agent' || id === 'gemini-cli' || id === 'grok-cli' || id === 'antigravity' || id.startsWith('env-') || id.startsWith('local-') || id.startsWith('custom_');
 const hash = (...parts: unknown[]) => createHash('sha256').update(JSON.stringify(parts)).digest('hex');
 const OPENAI_CHAT = /^(?:gpt-|chatgpt-|o[1-9])/, OPENAI_EXCLUDE = /(?:audio|realtime|tts|transcribe|image|search|embedding|instruct|moderation|dall-e|codex)/;
 
@@ -34,6 +39,8 @@ export interface AdapterCatalogOptions {
   codexEndpoints?: () => string[];
   /** Probe local model servers (Ollama, LM Studio, an installed OmniRoute) on localhost. Default true outside tests. */
   localProbes?: boolean;
+  /** Cursor CLI, Gemini CLI, Grok Build and Antigravity. Default true outside tests. */
+  cliAgents?: boolean;
 }
 export interface AdapterCatalog { instances(): ProviderInstance[]; ready(): Promise<void> }
 
@@ -72,7 +79,12 @@ export function createAdapterCatalog(options: AdapterCatalogOptions = {}): Adapt
   const codexEndpoints = options.codexEndpoints ?? (() => { try { return configuredProviderInstances({env: env(), home}).map(row => row.info.endpoint ?? '').filter(Boolean); } catch { return []; } });
   const origin = (url: string) => { try { const parsed = new URL(url); return `${parsed.hostname === 'localhost' ? '127.0.0.1' : parsed.hostname}:${parsed.port}`; } catch { return url; } };
   const localProbes = options.localProbes ?? !process.env.NODE_TEST_CONTEXT;
-  const validators = (): Array<Validator<unknown>> => [claudeCheck, openCodeCheck, openAICheck, anthropicCheck, ...envChecks.values(), ...localChecks.values()] as Array<Validator<unknown>>;
+  const cliAgents = options.cliAgents ?? !process.env.NODE_TEST_CONTEXT;
+  const agentSpawn = options.spawn as AgentSpawn | undefined;
+  const cursorCheck = new Validator(() => cursorCapabilities(cliAgent('cursor-agent')!.detect(env(), home)!, {spawn: agentSpawn, env: env()}));
+  const geminiCheck = new Validator(() => geminiCapabilities(cliAgent('gemini-cli')!.detect(env(), home)!, {spawn: agentSpawn, env: env(), home}));
+  const grokCheck = new Validator(() => grokCapabilities(cliAgent('grok-cli')!.detect(env(), home)!, {spawn: agentSpawn, env: env()}));
+  const validators = (): Array<Validator<unknown>> => [claudeCheck, openCodeCheck, ...(cliAgents ? [cursorCheck, geminiCheck, grokCheck] : []), openAICheck, anthropicCheck, ...envChecks.values(), ...localChecks.values()] as Array<Validator<unknown>>;
 
   const route = (info: ProviderInfo, run?: RunnableAdapter): ProviderInstance => ({info, command: '', env: {}, sessionsRoot: '', ...(run ? {adapter: run} : {})});
   /** Pending and failed checks stay visible but unavailable; nothing falls back to another provider. */
@@ -107,10 +119,35 @@ export function createAdapterCatalog(options: AdapterCatalogOptions = {}): Adapt
         openCodeCheck.current(openCode), value => ({models: value.models, detail: 'Runs OpenCode in the chat folder with its own tools and providers. Read-only chats use the plan agent.'}),
         () => adapter(`opencode:${bindingId}`, () => openCodeAdapter({binary: openCode, env: e, spawn: options.spawn}))));
     }
+    if (cliAgents) {
+      const meta = (id: string) => ({...cliAgent(id)!, binary: cliAgent(id)!.detect(e, home)});
+      const cursor = meta('cursor-agent'), gemini = meta('gemini-cli'), grok = meta('grok-cli'), anti = meta('antigravity');
+      const extra = (m: {installUrl: string; loginCommand: string}) => ({installUrl: m.installUrl, ...(m.loginCommand ? {loginCommand: m.loginCommand} : {})});
+      if (cursor.binary) {
+        const bindingId = hash('cursor-agent', cursor.binary), bin = cursor.binary;
+        rows.push(gate({id: 'cursor-agent', name: cursor.name, driver: 'cursor-cli', bindingId, identityMasked: 'Cursor sign-in', models: [], available: false, source: bin, ...extra(cursor)},
+          cursorCheck.current(`${bin}|${CURSOR_ENV.map(name => e[name] ? 1 : 0).join('')}`), value => ({models: value.models, detail: `Runs Cursor CLI ${value.version}${value.account ? ` (${value.account})` : ''} in the chat folder. Read-only chats use ask mode; Cursor decides approvals in print mode, so Muster's access level sets its force and sandbox flags.`}),
+          () => adapter(`cursor:${bindingId}`, () => cursorAdapter({binary: bin, env: e, spawn: agentSpawn}))));
+      }
+      if (gemini.binary) {
+        const bindingId = hash('gemini-cli', gemini.binary), bin = gemini.binary;
+        rows.push(gate({id: 'gemini-cli', name: gemini.name, driver: 'gemini-cli', bindingId, identityMasked: 'Gemini sign-in', models: [], available: false, source: bin, ...extra(gemini)},
+          geminiCheck.current(`${bin}|${geminiSignIn(e, home) ?? ''}`), value => ({models: value.models, detail: `Runs Gemini CLI ${value.version} (${value.account}) headless in the chat folder. Read-only uses plan mode, workspace auto-approves edits only, full access approves everything.`}),
+          () => adapter(`gemini:${bindingId}`, () => geminiAdapter({binary: bin, flags: () => { const found = geminiCheck.current(`${bin}|${geminiSignIn(e, home) ?? ''}`); return found.value?.flags ?? {plan: false, resume: false, approvalMode: true}; }, env: e, spawn: agentSpawn}))));
+      }
+      if (grok.binary) {
+        const bindingId = hash('grok-cli', grok.binary), bin = grok.binary;
+        rows.push(gate({id: 'grok-cli', name: grok.name, driver: 'grok-acp', bindingId, identityMasked: 'Grok sign-in', models: [], available: false, source: bin, ...extra(grok)},
+          grokCheck.current(`${bin}|${e.XAI_API_KEY ? 1 : 0}`), value => ({models: value.models, detail: `Runs Grok Build ${value.version} over its Agent Client Protocol. Read-only allows reads and searches, workspace also edits, full access approves everything.`}),
+          () => adapter(`grok:${bindingId}`, () => grokAdapter({binary: bin, env: e, spawn: agentSpawn}))));
+      }
+      // Seen but not drivable: shown with the reason, never offered in the model picker.
+      if (anti.binary) rows.push(route({id: 'antigravity', name: anti.name, driver: 'antigravity', identityMasked: '', models: [], available: false, status: 'error', source: anti.binary, error: 'Not supported yet.', detail: `Not supported yet. ${anti.unsupportedReason}`, ...extra(anti)}));
+    }
     if (e.OPENAI_API_KEY) {
       const base = openAIBase(), bindingId = hash('env-openai', base, hash(e.OPENAI_API_KEY));
       rows.push(gate({id: 'env-openai', name: 'OpenAI API key (environment)', driver: 'openai-chat-completions', bindingId, identityMasked: 'Key set in environment', models: [], available: false, source: 'env:OPENAI_API_KEY', endpoint: base},
-        openAICheck.current(bindingId), models => ({models, detail: `${CHAT_ONLY}. Streams chat completions with OPENAI_API_KEY from Muster’s environment.`}),
+        openAICheck.current(bindingId), models => ({models, detail: `${WITH_TOOLS}. Streams chat completions with OPENAI_API_KEY from Muster’s environment.`}),
         () => adapter(`openai:${bindingId}`, () => openAICompatibleAdapter({endpoint: base, apiKey: () => env().OPENAI_API_KEY, label: 'OpenAI', fetch: request, memory: memory('env-openai')}))));
     }
     if (e.ANTHROPIC_API_KEY) {
@@ -123,7 +160,7 @@ export function createAdapterCatalog(options: AdapterCatalogOptions = {}): Adapt
       if (key.kind !== 'openai-compatible' || !e[key.env]) continue;
       const base = endpointFor(key), bindingId = hash(key.id, base, hash(e[key.env]));
       rows.push(gate({id: key.id, name: `${key.name} API key (environment)`, driver: 'openai-chat-completions', bindingId, identityMasked: 'Key set in environment', models: [], available: false, source: `env:${key.env}`, endpoint: base},
-        envChecks.get(key.id)!.current(bindingId), models => ({models, detail: `${CHAT_ONLY}. Streams chat completions with ${key.env} from Muster’s environment.`}),
+        envChecks.get(key.id)!.current(bindingId), models => ({models, detail: `${WITH_TOOLS}. Streams chat completions with ${key.env} from Muster’s environment.`}),
         () => adapter(`${key.id}:${bindingId}`, () => openAICompatibleAdapter({endpoint: base, apiKey: () => env()[key.env], label: key.name, fetch: request, memory: memory(key.id)}))));
     }
     if (localProbes) {
@@ -135,7 +172,7 @@ export function createAdapterCatalog(options: AdapterCatalogOptions = {}): Adapt
         // Not running (or nothing loaded): not offered, and no error row for software the user may not have.
         if (check.status !== 'ok' || !check.value?.length) continue;
         rows.push(route({id: server.id, name: server.name, driver: 'openai-chat-completions', bindingId, identityMasked: 'Local server', models: check.value, available: true, status: 'ready', source: server.endpoint, endpoint: server.endpoint,
-          detail: `${CHAT_ONLY}. Local OpenAI-compatible server; models from its own /models list.`},
+          detail: `${WITH_TOOLS}. Local OpenAI-compatible server; models from its own /models list.`},
           adapter(`${server.id}:${bindingId}`, () => openAICompatibleAdapter({endpoint: server.endpoint, apiKey: () => server.keyEnv ? env()[server.keyEnv] : undefined, label: server.name, fetch: request, memory: memory(server.id)}))));
       }
     }
@@ -151,7 +188,15 @@ export function createAdapterCatalog(options: AdapterCatalogOptions = {}): Adapt
         identityMasked: 'No account metadata', canReveal: false, source: 'Added in Muster', models: connection.models, available: true, status: 'ready', detail: `${CUSTOM_CHAT_ONLY}. OpenAI-compatible chat completions; model discovery succeeded.`},
         adapter(`custom:${bindingId}`, () => openAICompatibleAdapter({endpoint: connection.endpoint, apiKey: () => resolveCustomKey(connection, env()), label: connection.name, fetch: request, memory: memory(connection.id)}))));
     }
-    return rows;
+    // #319: a chat-only route (Anthropic Messages) or a model whose endpoint rejected tool definitions is marked per model, so the
+    // composer can say "This model can't run commands or edit files" before the user sends.
+    return rows.map(row => {
+      const info = row.info, endpoint = info.endpoint;
+      const chatOnly = info.driver === 'anthropic-messages';
+      const refused = info.driver === 'openai-chat-completions' && !!endpoint && info.models.some(model => refusedTools(endpoint, model.id));
+      if (!chatOnly && !refused) return row;
+      return {...row, info: {...info, models: info.models.map(model => chatOnly || (endpoint && refusedTools(endpoint, model.id)) ? {...model, tools: false} : model)}};
+    });
   }
   // The sign-in check starts only once the version check passed, so settle twice.
   return {instances, async ready() { instances(); await Promise.all(validators().map(check => check.settled())); instances(); await claudeAuth.settled(); }};

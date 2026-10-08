@@ -1,6 +1,7 @@
 import { applyPendingRestore } from './backups.ts';
 import { addMemory, listMemory, searchMemory, inspectMemoryStore, isVisibleInScopes, projectMemoryScope } from './memory-adapter.ts';
 import { createMemoryIdentity } from './memory-identity.ts';
+import { createSnapshotCoalescer } from './snapshot-coalescer.ts';
 import { HindsightService } from './hindsight-service.ts';
 import { MemoryConfigStore, MemoryTombstones, electronSecretBox } from './memory-context.ts';
 import { createHash } from 'node:crypto';
@@ -9,8 +10,11 @@ import { basename, join } from 'node:path';
 import type { AgentEvent, ApprovalData, ApprovalDecision, Chat, ChatRecovery, Commands, PendingQuestion, PendingQuestionData, TimelineItem, WakeReason } from '../shared/protocol.ts';
 import type { PendingAttentionSummary, AttentionRequest } from '../shared/attention-protocol.ts';
 import { discoverLocalProviders } from './provider-discovery.ts';
+import { homedir } from 'node:os';
+import { absentCliAgentRows } from './adapters/cli-agents.ts';
 import { CustomProviders } from './custom-providers.ts';
 import { AgentStore } from './store.ts';
+import { applyFolderAliases, canonicalFolderPath } from './folder-merge.ts';
 import { WorkspaceWatchService } from './workspace-watch.ts';
 import {claudeChildRow,claudeChildThread} from './subagent-rows.ts';
 import {appendCommandOutput,finishCommandOutput,stripAnsi} from './command-output-buffer.ts';
@@ -40,7 +44,7 @@ import { createNativeTurnObserver } from './native-turns.ts';
 import { createNativeQueueMirror } from './native-queue.ts';
 import { ChatAttachments, attachedFileLines } from './attachments.ts';
 import { admissionRetryText, withAdmissionRetry } from './admission-retry.ts';
-import { ContextLedger, HISTORY_WINDOW_EVENT, requestsConnectors, type ContextBlock } from './context-budget.ts';
+import { ContextLedger, HISTORY_WINDOW_EVENT, TOOLS_UNAVAILABLE_EVENT, requestsConnectors, type ContextBlock } from './context-budget.ts';
 import { createDomainHooks } from './domains/hooks.ts';
 import { createDomains } from './domains/index.ts';
 import type { DomainFactory } from './domains/types.ts';
@@ -59,6 +63,7 @@ import type { ReviewBaselineInfo } from '../shared/domains/review-protocol.ts';
 import type { EditRestorePreview } from '../shared/protocol.ts';
 import { randomUUID } from 'node:crypto';
 import { plural } from '../shared/wording.ts';
+import { device } from '../shared/device-noun.ts';
 
 function object(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Invalid command input.');
@@ -122,6 +127,8 @@ export function userProcessNote(groups: readonly UserProcessGroup[], cwd: string
 export function createAgentService(options: { dataDir: string; onEvent(event: AgentEvent): void; userProcesses?: () => readonly UserProcessGroup[]; userProcessTargets?: () => Promise<readonly UserProcessTarget[]>; provider?: ProviderAdapter; reconcileProvider?: (input: ReconciliationInput) => Promise<ReconciliationResult>; domains?: readonly DomainFactory[] }) {
   applyPendingRestore(options.dataDir);
   const store = new AgentStore(options.dataDir);
+  // M4 (#319): ids merged by the duplicate-folder migration are remapped in the stores that keep their own database files.
+  try { const aliases = store.pendingFolderAliases(); if (Object.keys(aliases).length && applyFolderAliases(options.dataDir, aliases)) store.clearFolderAliases(); } catch { /* retried on the next start */ }
   const queue = new ChatQueue(store);
   const attachments = new ChatAttachments(store.database(), options.dataDir);
   const domainHooks = createDomainHooks();
@@ -145,6 +152,8 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
   }
   let hindsight: HindsightService | undefined;
   const memoryIdentity = createMemoryIdentity();
+  // Fill the identity caches off the event loop so the sync lookups below rarely spawn git themselves.
+  void memoryIdentity.warm(store.snapshot().folders);
   // Legacy hindsight.* commands honour the in-app Memory settings too, not only environment variables.
   let secretBox: ReturnType<typeof electronSecretBox> | null = null;
   const memoryConfig = new MemoryConfigStore(options.dataDir, () => secretBox === null ? secretBox = electronSecretBox() : secretBox);
@@ -226,7 +235,10 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
     attention.chats.sort((a,b) => a.requests[0]!.createdAt.localeCompare(b.requests[0]!.createdAt) || a.chatId.localeCompare(b.chatId));
     return {...current, attention};
   };
-  const state = () => emit({ type: 'snapshot', snapshot: snapshot() });
+  /** F3: `state()` is called from ~56 places and each full snapshot is a SQLite read plus an IPC clone and a
+   *  renderer re-render; bursts collapse (snapshot-coalescer.ts). A command's reply flushes a pending one first. */
+  const snapshots = createSnapshotCoalescer(() => emit({ type: 'snapshot', snapshot: snapshot() }));
+  const state = (): void => snapshots.request();
   const publishedTimelineRevisions = new Map<string, number>();
   const timeline = (chatId: string) => {
     const after = publishedTimelineRevisions.get(chatId) ?? 0;
@@ -331,7 +343,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
   function validateRunnableModel(model: string, providerId: string | undefined) {
     if (!providerId) throw new Error('No model is connected yet. Connect a model (Settings › Providers), then pick it in the composer.');
     const listed = provider.info().filter(candidate => candidate.id === providerId);
-    if (!listed.length) throw new Error(`The provider “${providerId}” is not available on this Mac. Pick another model for this chat.`);
+    if (!listed.length) throw new Error(`The provider “${providerId}” is not available on ${device().lower}. Pick another model for this chat.`);
     // A provider that reports no model list runs whatever model the chat names; the provider checks it at dispatch.
     const entry = listed.find(candidate => candidate.available && (candidate.models.some(candidateModel => candidateModel.id === model) || candidate.models.length === 0));
     if (!entry) throw new Error(`Model ${model || '(none)'} is unavailable through the configured provider. Choose an available model.`);
@@ -371,7 +383,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
     const project = chat.projectId ? store.snapshot().projects.find(p => p.id === chat.projectId) : undefined;
     const context = project ? `Project: ${project.name}\nShared goal: ${project.goal || '(not set)'}` : '';
     const skillContext = [...attachedSkills.map(entry => `Selected skill: ${entry.name} (${entry.provenance})\n\nApply these user-selected skill instructions to the current request:\n<skill-instructions>\n${entry.content}\n</skill-instructions>`), invokedPluginContext(plugins)].filter(Boolean).join('\n\n');
-    const defaultCwd = folder?.path ?? join(options.dataDir, 'scratch', chatId);
+    const defaultCwd = folder ? canonicalFolderPath(folder.path) : join(options.dataDir, 'scratch', chatId);
     const cwd = await domainHooks.runEnvironment(chat, defaultCwd);
     if (folder || cwd !== defaultCwd) { if (!(await fs.stat(cwd)).isDirectory()) throw new Error('Selected folder is unavailable.'); }
     else await fs.mkdir(cwd, {recursive: true, mode: 0o700});
@@ -383,11 +395,16 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
     if (chat.recovery?.kind === 'recovery-needed') throw new Error('Check the unresolved provider attempt before sending. Your draft is retained.');
     if (providerSelections.has(chatId)) throw new Error('Wait for the provider selection to finish.');
     const selectedProvider=validateRunnableModel(chat.model,chat.providerId);
+    // #319: a chat-only model in an Agent chat answers as chat, and the chat says so. Moving it to another provider or account is the
+    // user's choice (the composer's "Switch to…" button), never done here: that would send the conversation to a different vendor.
+    if (chat.mode === 'agent' && selectedProvider.models.find(entry => entry.id === chat.model)?.tools === false && !store.timeline(chatId).some(item => item.data?.kind === 'tools-unavailable' && item.data?.model === chat.model && item.data?.providerId === selectedProvider.id)) {
+      store.appendItem(chatId, 'notice', `${selectedProvider.models.find(entry => entry.id === chat.model)?.name ?? chat.model} can’t run commands or edit files through ${selectedProvider.name}, so this chat answers without tools. Use “Switch to…” in the composer to pick a model with tools.`, 'completed', {kind: 'tools-unavailable', model: chat.model, providerId: selectedProvider.id});
+    }
     const bindingId=selectedProvider.bindingId??selectedProvider.id;
     if (chat.providerBindingId && chat.providerBindingId!==bindingId) throw new Error('The selected provider account or profile changed. Select it again before sending. Your draft is retained.');
     const nativeMatches=chat.providerThreadProviderId===selectedProvider.id && chat.providerThreadBindingId===bindingId;
     if (!chat.providerBindingId || (chat.providerThreadId && !nativeMatches)) {
-      if (chat.providerThreadId && !nativeMatches) store.appendItem(chatId,'notice','This provider will start a fresh conversation. The displayed chat history is retained.','completed');
+      if (chat.providerThreadId && !nativeMatches) { store.appendItem(chatId,'notice','This provider will start a fresh conversation with a summary of the earlier messages. The displayed chat history is retained.','completed'); store.requireDigest(chatId); }
       chat=store.updateChat(chatId,{providerId:selectedProvider.id,providerBindingId:bindingId,...(!nativeMatches?{providerThreadId:null,providerTurnId:null,providerThreadProviderId:null,providerThreadBindingId:null}:{})});
     }
     const access = providerAccessPolicy(chat);
@@ -483,6 +500,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
             // A subagent inside a CLI provider (Claude Code Task): its rows live in its own transcript, never in the parent's.
             const ownThread = store.chat(chatId)?.providerThreadId, child = claudeChildThread(params, ownThread);
             if (child) { const row = claudeChildRow(method, params); if (row) store.upsertSubagentItem(chatId, child, row); return; }
+            if (method === TOOLS_UNAVAILABLE_EVENT) { store.appendItem(chatId, 'notice', `${chat.model} can’t run commands or edit files through this route, so it answered without tools. Use “Switch to…” in the composer to pick a model with tools.`, 'completed', {kind: 'tools-unavailable', model: chat.model}); scheduleTimeline(chatId); return; }
             if (method === HISTORY_WINDOW_EVENT) { if (typeof params.retainedUserTurns === 'number') retainedTurns = params.retainedUserTurns; return; }
             if (method === 'thread/compacted') { seal(); compactionCompleted(chatId); compactedInRun = true; }
             const item = params.item && typeof params.item === 'object' ? params.item as Record<string, unknown> : params;
@@ -623,7 +641,8 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
               return {decision: 'decline'};
             }
             if (toolPolicy?.effect === 'allow' && !threat) return {decision: 'accept'};
-            if (access.permissionMode === 'full' && !threat && toolPolicy?.effect !== 'ask') return {decision: 'accept'};
+            // policyOnly: an adapter that runs its own tools (HTTP routes) only wants the rules, the guard and a card for a threat or an ask; workspace edits inside the folder do not need a card.
+            if ((access.permissionMode === 'full' || params.policyOnly === true) && !threat && toolPolicy?.effect !== 'ask') return {decision: 'accept'};
             const change = typeof params.itemId === 'string' && toolIds.has(params.itemId) ? store.item(toolIds.get(params.itemId)!)?.data?.changes : params.changes;
             const data: ApprovalData = {...approvalData(method, params, change), ...(threat ? {reason: threat.message, protectsUserProcess: true} : {})};
             const toolItemId = typeof params.itemId === 'string' ? toolIds.get(params.itemId) : undefined;
@@ -925,7 +944,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
     if (disposed || closing) throw new Error('Agent runtime is stopping or closed.');
     const pending = dispatch(command, input);
     invocations.add(pending);
-    try { return await pending as Commands[K]['output']; }
+    try { const result = await pending as Commands[K]['output']; snapshots.flush(); return result; }
     finally { invocations.delete(pending); }
   }
   async function dispatch(command: string, input: unknown): Promise<unknown> {
@@ -943,6 +962,8 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
       return [...runtime.filter(shown).map(entry=>({...entry,...account(entry),source:entry.codex&&entry.source?entry.source:'Existing local provider profile'})),
         // A Codex gateway already listed as a route (its id may be prefixed, e.g. codex-<id>) is not listed again as a dead discovery row.
         ...detected.filter(entry=>!runtime.some(runnable=>runnable.id===entry.id||(runnable.codex?.kind==='gateway'&&runnable.codex.modelProvider===entry.id&&!runnable.codex.account))&&shown(entry)).map(({identity,credentialPresent,...entry})=>({...entry,available:false,models:[],canReveal:Boolean(identity),source:'Local configuration discovery',detail:`${entry.detail}. No runnable adapter is enabled for this entry.`})),
+        // Agent CLIs that are not installed: listed (with How to install) but never offered in the model picker.
+        ...(process.env.NODE_TEST_CONTEXT && process.env.MUSTER_PROVIDER_ADAPTERS !== '1' ? [] : absentCliAgentRows(process.env, homedir()).filter(row => !runtime.some(entry => entry.id === row.id))),
         ...customProviders.list()];
     }
     if (command === 'plugins.inventory') return discoverPlugins();
@@ -1604,7 +1625,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
       await Promise.allSettled([...invocations,...[...runs.values()].flatMap(run => run.promise ? [run.promise] : [])]);
       await domains.dispose();
       await toolOutputLog.flush().catch(() => {});
-      disposed = true; for (const timer of timers.values()) clearTimeout(timer); timers.clear(); customProviders.close(); annotations.close(); projectTasks.close(); store.close();
+      disposed = true; snapshots.dispose(); for (const timer of timers.values()) clearTimeout(timer); timers.clear(); customProviders.close(); annotations.close(); projectTasks.close(); store.close();
     })();
     return disposal;
   }};

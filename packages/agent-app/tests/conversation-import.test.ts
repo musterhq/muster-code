@@ -308,7 +308,7 @@ test('Continue in Muster resumes the Codex thread natively when a Codex provider
   const service=createAgentService({dataDir:join(f.root,'data'),provider:codexProvider(),onEvent(){}});
   t.after(()=>service.dispose());
   const result=await call<ImportRunResult>(service,'import.run',{ids:[`codex:${CODEX_ID}`,`codex:${LEGACY_ID}`],continueInMuster:true});
-  assert.deepEqual(result.chats.map(chat=>chat.continued),['native','native']);
+  assert.deepEqual(result.chats.map(chat=>chat.continued),['native','digest'],'the legacy rollout shows no tool use, so it starts a fresh tool-enabled session instead of resuming (#319)');
   const chat=(await service.invoke('app.snapshot',undefined)).chats.find(entry=>entry.id===result.chats[0]!.chatId)!;
   assert.deepEqual([chat.providerId,chat.providerBindingId,chat.providerThreadId,chat.providerThreadProviderId,chat.providerThreadBindingId],['codex','codex',CODEX_ID,'codex','codex']);
   assert.equal(chat.model,'claude/claude-fable-5','the session model is not in the provider catalog, so the default stays');

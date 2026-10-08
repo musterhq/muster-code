@@ -402,3 +402,6 @@ div.composer .composer-error { padding: 0 16px 10px; color: var(--danger); font-
 
 /* DF-F32: the chosen model cannot read the staged image(s). */
 .composer-image-warning{margin:0 12px 4px;font-size:var(--fs-12);color:var(--warn)}
+.composer-tools-warning{margin:0 12px 4px;font-size:var(--fs-12);color:var(--warn)}
+.composer-tools-warning button{margin-left:4px;padding:0;border:0;background:none;color:var(--accent);font:inherit;text-decoration:underline;cursor:pointer}
+.composer-tools-warning button:disabled{opacity:.5;cursor:default}

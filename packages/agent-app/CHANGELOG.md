@@ -3,17 +3,95 @@
 All notable changes to Muster Agent. Each `## <version>` section becomes the notes of the
 `agent-v<version>` GitHub Release (`.github/workflows/agent-app-release.yml`).
 
-## Unreleased
+## 0.3.6
+
+### Faster, smoother, smaller
+
+0.3.6 rebuilds how Muster draws itself. Typing and streaming used to redraw almost the whole app many times a second. Now each part of the screen redraws only when its own data changes. Replies stream in at a steady 60 frames a second, typing stays instant in long chats, startup asks the server for less, and the download is up to 45% smaller.
+
+**What changed under the hood**
+- **Redraws only what changed.** The sidebar, summary card, workspace and transcript each watch only their own slice of state, and unchanged chat rows and messages are skipped.
+- **Drafts stay in the composer.** Typing no longer touches the chat list, so the sidebar sits still while you type.
+- **Bundled updates.** State changes that arrive together are sent as one update instead of one per change, and unchanged chats, folders and projects keep their identity, so nothing redraws for no reason.
+- **Fewer server requests at startup.** With several orgs connected, back-to-back refreshes are answered from the read that just finished.
+- **Nothing blocks the window.** The once-a-second system memory check and the git identity lookups no longer block the app.
+- **Lighter browser and computer-use panes.** They only re-measure their position when something relevant moves.
+- **Smoother animations.** The "working" shimmer, panels opening and progress bars now animate on the graphics card instead of re-laying out the page.
+- **Rests when idle.** Muster slows its timers when the window is hidden, or unfocused with nothing running, and runs at full speed while a reply is streaming.
+
+**Typing in a long chat** (23 keystrokes, 300-message chat)
+
+| Redraws during typing | 0.3.5 | 0.3.6 | |
+|---|---:|---:|---|
+| Sidebar | 29 | **0** | gone |
+| Sidebar chat rows | 390 | **0** | gone |
+| Chat messages | 493 | **0** | gone |
+| Whole app | 29 | **0** | gone |
+| Tooltips and menus | 1,953 | **177** | 11× fewer |
+| Script time while typing | 217 ms | **61 ms** | 3.6× less |
+| Script time on a slow CPU (4× throttle) | 587 ms | **146 ms** | 4× less |
+
+**Streaming a reply** (600 tokens at 30 tokens/s into a 300-message chat)
+
+| | 0.3.5 | 0.3.6 | |
+|---|---:|---:|---|
+| Sidebar rows redrawn | 7,969 | **0** | gone |
+| Sidebar and app redraws | 611 each | **0** | gone |
+| Script CPU | 5.0 s | **2.7 s** | −46% |
+| Slowest frames (p99) | 33.2 ms | **16.8 ms** | a steady 60 fps |
+| Dropped frames | 14 | **1** | 14× fewer |
+
+**Streaming on a slow computer** (same reply, CPU throttled 4×)
+
+| | 0.3.5 | 0.3.6 | |
+|---|---:|---:|---|
+| Time the app was frozen (long tasks) | 5.2 s | **2.1 s** | −60% |
+| Long tasks | 60 | **30** | half |
+| Longest freeze | 258 ms | **105 ms** | −59% |
+| Worst frame | 333 ms | **150 ms** | −55% |
+| Frames drawn | 521 | **817** | +57% |
+| Dropped frames | 249 | **169** | −32% |
+| Script CPU | 13.4 s | **8.3 s** | −38% |
+
+**Startup with two orgs connected**
+
+| Server requests in the first 12 seconds | 0.3.5 | 0.3.6 | |
+|---|---:|---:|---|
+| Total | 162 | **66** | −59% |
+| Each org endpoint (tasks, agents, projects…) | 13 times | **5 times** | 2.6× fewer |
+| A burst of 52 chat changes sent to the screen | 52 updates | **1 update** | 52× fewer |
+
+**Smaller downloads**
+
+| | 0.3.5 | 0.3.6 | |
+|---|---:|---:|---|
+| Mac (Apple silicon) | 132 MB | **90 MB** | −32% |
+| Mac installed size | 308 MB | **258 MB** | −16% |
+| Windows installer | 144 MB | **103 MB** | −29% |
+| Windows zip | 197 MB | **140 MB** | −29% |
+| Linux AppImage | 173 MB | **95 MB** | −45% |
+| Linux .deb | 133 MB | **95 MB** | −29% |
+| Muster Server (Mac) | 42 MB | **26 MB** | −38% |
+| Files installed on Windows | ~10,160 | **~220** | 46× fewer |
+
+The fewer files mean Windows installs faster and antivirus scans finish sooner. Nothing was removed that the app uses: the cut is code libraries that were already built in, unused Chromium language packs, and stronger compression.
+
+<sub>How these were measured: the 0.3.5 and 0.3.6 renderers, run headlessly against an isolated test data set with the same 300-message chat, keystrokes and streamed reply. Redraw counts come from a development build; frame times and CPU come from a production build. Sizes are the published 0.3.5 assets against the 0.3.6 builds.</sub>
+
+### Also in this release
 
 - Smaller downloads, same app (#315). The Windows and Linux packages no longer carry about 190 MB of npm packages that were already bundled into the app (only node-pty ships), Chromium language packs other than English are dropped on every system, the Mac disk image is LZMA-compressed (about 40 MB smaller), and the Muster Server download is a `.tar.xz` (extract with `tar -xf`). A size check in CI keeps it that way.
-
+- More agents (#325). Muster can run your own Cursor CLI, Gemini CLI and Grok Build (1.0.13 or newer) in the chat folder, alongside Claude Code, Codex and OpenCode. Each appears only when installed and signed in; Accounts & providers lists the ones that are not with a How to install link. Muster's access levels become each CLI's own flags, stopping a run ends the CLI and everything it started, and the CLIs get a clean environment without Muster's secrets. Google Antigravity is detected and shown as not supported yet.
+- Windows: the agent has its shell and file tools in every chat, and one folder is one folder (#319). Local OpenAI-compatible routes (an OmniRoute router and its combos such as "intelligent-planner", Ollama, LM Studio, API-key and saved endpoints) used to be chat only; they now offer the tools the chat's access level allows (read and list files; edit files inside the folder; run commands with Full access), and a route that refuses tools answers as chat and says so. A chat on a model that cannot run commands moves to the same model on a route that has tools, with a notice and the earlier conversation carried over; the composer shows "This model can't run commands or edit files" with a one-click switch when there is no such route. An imported Codex or Claude thread that shows no tool use is no longer resumed (tools can't be added to a thread partway): the first message starts a fresh tool-enabled session with the imported conversation as context. Folder paths are normalised everywhere (`\\?\` prefix, drive-letter case, separators, case-insensitive on Windows), so an imported `\\?\E:\...` chat lands in its existing folder, and a migration merges existing duplicate folders (oldest id kept, chats and project links moved). These tools never follow a link out of the folder, end everything a command started on Stop, run with a scrubbed environment (no keys or tokens), and meet the Project tool rules and the protection for your own processes. A chat is never moved to another provider or account on its own; the composer offers the switch. The "1 Terminal" chip and the terminal pane say your terminals are not shared with the agent, which has its own shell.
 - Computer-use and browser pictures-in-picture are fluid, and each session opens as its own tab in the right sidebar (#308). Clicking a picture-in-picture opens (or focuses) that session as a tab beside Files and the other tabs, as many as you like, and the picture-in-picture fades into it; it never shows in both places, and closing the tab brings it back. Several pictures stack with a slight overlap: click one behind to bring it to the front, hover to fan them. Drag the stack anywhere, it follows the pointer, settles with a spring into the nearest corner and stays inside the window. Opening a chat that used the browser or computer no longer restores a session or opens the sidebar. Screenshots from the transcript open as tabs too, so the sidebar is never taken over.
-
+- The app names your computer correctly (#335). "This Mac" is "This PC" on Windows and "This computer" on Linux in the composer footer, Work locally (including the check-out comments and work log posted to the server), Settings, setup, sign-in, outputs, the scoped computer, plugins, memory, automations, share and diagnostics. One helper (`src/shared/device-noun.ts`) picks the words; a guard test stops new hard-coded "this Mac" strings. Finder, Keychain and Dock wording now follows the OS too (File Explorer, Windows credential store, taskbar flash), and macOS-only features keep their macOS names.
 - Renderer polish (#309, #310, #311). The New task owner list now opens above the dialog (menus and pickers share one popover layer above modals). Chat replies use a compact rhythm: a 0.55em gap between paragraphs, lists and quotes, 1.52 line height, and clearer bold (weight 630, stronger colour). A plain-text reply gets light emphasis: a leading short "Label:" ("Note:", "Root cause:") is shown in bold, never inside code or links, and the text is not changed. The Stopped/Interrupted banner stays inside the chat column instead of spanning the sidebar.
-
 - Themes (#324). Settings › Appearance has a colour theme picker with live swatches: separate Light and Dark themes (so System switches between them), six new built-ins (High Contrast Dark and Light, Solarized Dark and Light, GitHub Dark, Warm Sepia, all WCAG AA), and Import VS Code theme… to bring in any VS Code colour theme (only #hex, rgb() and hsl() colours are accepted). Custom themes stay on this Mac and export as JSON. The chosen theme paints before the first frame, with no reload, and the terminal follows it. With no theme chosen, Muster Light, Muster Dark and System look exactly as before.
-
+- Add provider is a grid of cards (#333). Settings › Accounts & providers › Add provider now shows one card per provider with its logo, a line of description and a status chip (Connected, Installed not signed in, Not installed). Codex, Claude Code and OpenCode sign in through the existing login flow (or show install steps); OpenAI, Anthropic, OpenRouter, Groq, Mistral and DeepSeek ask for one key with a Get a key link; Ollama, LM Studio, OmniRoute and Custom endpoint start with their default address and an optional key. Test connection, then Save; name, base URL and key variable sit under Advanced. Existing connections, their keys and the Muster Server link are untouched. The cards come from one catalog (src/shared/provider-catalog.ts), so a new adapter adds one entry.
 - Server agents show their own runtime and model (#307). In a connected Paperclip org the Roster, agent cards and agent pages name each agent's adapter and model as the server has them (Claude Code · Opus 4.7, Codex · gpt-5.4-codex, Hermes · hermes-4) and say "Model not shared by the server" when it sends none, instead of looking like Muster's default model. In Work locally, "Work as" maps the agent's real model to the closest model you have and says when it differs ("Opus on server → Claude Code · Opus here"); a runtime that isn't set up on this Mac is said too.
+- Smoother typing and streaming (fluidity): the composer, sidebar, summary card and workspace subscribe to just the state they use, so a keystroke re-renders the composer only; runtime snapshots are coalesced and structurally shared; the focus refresh is debounced; startup fetches Paperclip far less often (#302); no synchronous `sysctl` or `git` on the main process; cheaper animations; background throttling when idle and unfocused.
+- Windows and Linux update in place (#317). Settings › Updates and the sidebar say what happens on your system: the Windows installer version downloads only the changed parts of the next installer once it has updated once, then closes Muster, installs silently for your user (no admin prompt) and reopens it; the AppImage downloads only the blocks that changed, replaces itself and restarts; the .deb downloads the new package and installs it with apt after your administrator password (or shows the command to run). Every update is still checked against SHA256SUMS, comes only from this repository's GitHub releases, and never goes to an older version. The Windows zip and Linux tar.gz open the release page as before.
+- Installers: the Windows app is one `app.asar` instead of about 10,000 loose files (faster install and Defender scans), the installer registers `muster://` and the uninstaller removes it, and notifications carry the app's own ID. The AppImage uses the type 2 runtime, so it starts on Ubuntu 24.04 without installing libfuse2, and the deb ships every icon size and on Ubuntu 24.04 depends on the real ALSA library (apt could pick an OSS stand-in, and the app then failed to start).
 
 ## 0.3.5
 

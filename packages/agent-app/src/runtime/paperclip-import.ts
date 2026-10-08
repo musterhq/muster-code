@@ -17,6 +17,8 @@ import type { Folder } from '../shared/protocol.ts';
 import { normalizeRemote } from './memory-identity.ts';
 import { blockerIds } from './paperclip-map.ts';
 import type { Invoke } from './workspace-local.ts';
+import { device } from '../shared/device-noun.ts';
+import { normalizeFsPath } from '../shared/path-normalize.ts';
 
 type Json = Record<string, unknown>;
 const str = (v: unknown): string | null => typeof v === 'string' && v ? v : null;
@@ -224,7 +226,7 @@ async function eachBounded<T>(items: readonly T[], width: number, work: (item: T
 
 const nameKey = (name: string) => name.toLowerCase().normalize('NFKD').replace(/[^a-z0-9]+/g, '');
 /** A path as this Mac resolves it (~ expanded, symlinks such as /var → /private/var followed), for matching folders. */
-const home = (path: string) => { const expanded = path.replace(/^~(?=\/|$)/, process.env.HOME ?? '~').replace(/\/+$/, ''); try { return realpathSync(expanded); } catch { return expanded; } };
+const home = (path: string) => { const expanded = path.replace(/^~(?=\/|$)/, process.env.HOME ?? '~').replace(/\/+$/, ''); try { return normalizeFsPath(realpathSync(expanded)); } catch { return normalizeFsPath(expanded); } };
 
 /**
  * What an import would do, read with GET only: each Paperclip project and whether it is new, already imported (updated in
@@ -313,7 +315,7 @@ export async function importFromPaperclip(companyId: string, deps: ImportDeps): 
     if (deps.targets?.[sourceId] === 'skip') { report.notes.push(`${name}: left out of this import.`); continue; }
     let folderId: string | null = null;
     if (localFolder && deps.local && deps.exists(localFolder)) { const want = home(localFolder); folderId = deps.folders().find(f => home(f.path) === want)?.id ?? (await invoke('folder.add', { path: localFolder })).id; }
-    else if (localFolder && !deps.local) report.notes.push(`${name}: its folder (${localFolder}) is on the server, not this Mac. Link your own checkout to the project yourself.`);
+    else if (localFolder && !deps.local) report.notes.push(`${name}: its folder (${localFolder}) is on the server, not ${device().lower}. Link your own checkout to the project yourself.`);
     let mapped = store.map('project', sourceId);
     const mine = mapped ? existing.get(mapped.musterId) : undefined;
     const owner = mapped && mine ? await ownerOf(mapped, mine, deps) : undefined;

@@ -12,6 +12,7 @@ import { statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { discoverLocalProviders } from '../provider-discovery.ts';
+import { device } from '../../shared/device-noun.ts';
 
 export const CLAUDE_KEYCHAIN_SERVICE = 'Claude Code-credentials';
 export interface ClaudeAuthOptions {
@@ -36,7 +37,7 @@ export async function claudeSignIn(options: ClaudeAuthOptions = {}): Promise<str
   if (env.CLAUDE_CODE_OAUTH_TOKEN) return 'OAuth token in the environment';
   if (env.ANTHROPIC_API_KEY) return 'Anthropic API key in the environment';
   const local = (await discoverLocalProviders({ home, env }).catch(() => [])).find(row => row.id === 'claude-code');
-  if (local?.status === 'configured') return local.credentialPresent ? 'Credential file on this Mac' : 'Account on this Mac';
+  if (local?.status === 'configured') return local.credentialPresent ? 'Credential file on '+device().lower : 'Account on '+device().lower;
   if (platform === 'darwin' && await (options.keychain ?? defaultKeychain)(CLAUDE_KEYCHAIN_SERVICE).catch(() => false)) return 'Signed in (Keychain)';
   const status = options.authStatus ?? (process.env.NODE_TEST_CONTEXT ? undefined : defaultAuthStatus);
   if (status && await status().catch(() => false)) return 'Signed in (claude auth status)';

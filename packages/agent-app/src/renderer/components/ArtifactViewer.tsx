@@ -3,6 +3,7 @@ import {Dialog} from '@base-ui/react/dialog';
 import {FileText, X} from 'lucide-react';
 import type {ArtifactFile} from '../../shared/domains/artifacts-protocol';
 import {invoke} from '../bridge';
+import { device } from '../../shared/device-noun.ts';
 import './file-actions.css';
 import './artifact-viewer.css';
 
@@ -22,7 +23,7 @@ export function ArtifactContents({chatId,path,line}:{chatId:string;path:string;l
   <p className="artifact-viewer-note">Read-only · outside this conversation’s folders{load.state==='ready'&&load.file.truncated?' · showing the first 2 MB':''}</p>
   {load.state==='loading'&&<div role="status" className="artifact-viewer-status">Loading…</div>}
   {load.state==='error'&&<div role="alert" className="artifact-viewer-status">{load.message}</div>}
-  {load.state==='ready'&&load.file.binary&&<div className="artifact-viewer-status">This is a binary file. Use Open with or Reveal in Finder to view it.</div>}
+  {load.state==='ready'&&load.file.binary&&<div className="artifact-viewer-status">This is a binary file. Use Open with or Reveal in {device().fileManager} to view it.</div>}
   {load.state==='ready'&&!load.file.binary&&<pre className="artifact-viewer-body" tabIndex={0} aria-label="File contents">{lines.slice(0,20000).map((text,index)=><span key={index} id={`artifact-line-${index+1}`} className="artifact-viewer-line" data-current={line===index+1||undefined}>{text}{'\n'}</span>)}</pre>}
  </>;
 }

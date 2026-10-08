@@ -15,6 +15,7 @@ import { refreshWorkspace } from '../hubStore';
 import { ModalSheet } from './ModalSheet';
 import { ResourceState } from './ResourceState';
 import { StateChip } from './HubParts';
+import { device } from '../../shared/device-noun.ts';
 // @ts-ignore -- side-effect CSS import; esbuild bundles it into dist/renderer/main.css
 import './project-surface.css';
 // @ts-ignore -- side-effect CSS import; esbuild bundles it into dist/renderer/main.css
@@ -133,7 +134,7 @@ export function ConnectionPanel({ onSaved, compact = false, signInAvailable = tr
     try {
       const result = await invoke('paperclip.disconnect', {});
       setConfig(result.config); setAddress(''); setCompanies([]); setSignInState({ phase: 'idle' }); setImported(null);
-      notifySuccess(result.revoked ? 'Disconnected. The server revoked the key for this Mac.' : 'Disconnected. The server key was removed from this computer.'); if (result.message) setError(result.message);
+      notifySuccess(result.revoked ? 'Disconnected. The server revoked the key for '+device().lower+'.' : 'Disconnected. The server key was removed from this computer.'); if (result.message) setError(result.message);
       await refreshWorkspace(true); onSaved?.(result.config); load(result.config, { current: true });
     } catch (cause) { setError(errorText(cause)); } finally { setBusy(null); }
   };
@@ -182,7 +183,7 @@ export function ConnectionPanel({ onSaved, compact = false, signInAvailable = tr
       </details>
     </>}
     {!connected && !waiting && <>
-      {local && <p className="ws-connection-detect ws-connection-local" data-ok="true" role="status"><Check size={13} aria-hidden="true"/>Found a server on this Mac{local.version ? ` (${local.version})` : ''}. <button type="button" className="settings-button secondary" disabled={busy !== null} onClick={() => void connect(local.baseUrl)}>Connect</button></p>}
+      {local && <p className="ws-connection-detect ws-connection-local" data-ok="true" role="status"><Check size={13} aria-hidden="true"/>Found a server on {device().lower}{local.version ? ` (${local.version})` : ''}. <button type="button" className="settings-button secondary" disabled={busy !== null} onClick={() => void connect(local.baseUrl)}>Connect</button></p>}
       <div className="ws-form">
         <label className="project-edit-goal"><span>Server address</span><span className="project-edit-name"><Link2 size={14} aria-hidden="true"/><input type="url" inputMode="url" placeholder="https://muster.example.com" value={address} onChange={e => { setAddress(e.target.value); setError(''); }} onKeyDown={e => { if (e.key === 'Enter') void connect(); }} spellCheck={false} autoComplete="off" aria-invalid={error ? true : undefined}/></span></label>
         {(error || notice || warning) && <p role="alert" className="settings-error">{error || notice || warning}</p>}
@@ -201,7 +202,7 @@ export function ConnectionPanel({ onSaved, compact = false, signInAvailable = tr
       <details className="ws-connection-more" open={others || undefined} onToggle={e => setOthers((e.currentTarget as HTMLDetailsElement).open)}><summary>Other ways to connect</summary>
         <div className="ws-form">
           <p><strong>Use an API token instead</strong></p>
-          <p className="project-edit-hint">For scripts and special cases. It uses the server address above; the token is stored encrypted in your {navigator.platform.includes('Mac') ? 'Keychain' : 'keyring'} and never reaches this window.</p>
+          <p className="project-edit-hint">For scripts and special cases. It uses the server address above; the token is stored encrypted in {device().secretStore} and never reaches this window.</p>
           <label className="project-edit-goal"><span>API token</span><span className="project-edit-name"><input type="password" placeholder="Paste an API token" value={token} onChange={e => { setToken(e.target.value); setError(''); }} spellCheck={false} autoComplete="off"/></span></label>
           <div className="project-edit-actions"><span className="project-edit-spacer"/><button type="button" className="settings-button secondary" disabled={busy !== null || !address.trim() || !token.trim()} onClick={() => void connectWithToken()}>{busy === 'token' ? 'Connecting…' : 'Connect with token'}</button></div>
         </div>

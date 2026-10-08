@@ -5,6 +5,7 @@ import {invoke} from '../../bridge';
 import {copyText} from '../../clipboard';
 import {notifyError,notifySuccess} from '../../store';
 import {formatBytes} from './sections';
+import { device } from '../../../shared/device-noun.ts';
 
 /** On-demand only: nothing is sampled until this panel opens or Refresh is pressed. */
 export function DiagnosticsPanel():React.ReactElement {
@@ -44,8 +45,8 @@ export function DiagnosticsPanel():React.ReactElement {
       </section>
       <section className="preference-group" aria-labelledby="diagnostics-paths">
         <h3 id="diagnostics-paths" className="preference-group-title">Locations</h3>
-        <div className="preference-row"><span className="preference-copy"><strong>App data</strong><code className="settings-path">{report.dataDir}</code></span><button type="button" className="settings-button secondary" onClick={()=>reveal('dataDir')}><FolderOpen size={14}/>Show in Finder</button></div>
-        <div className="preference-row"><span className="preference-copy"><strong>Runtime log</strong><code className="settings-path">{report.logPath}</code></span><button type="button" className="settings-button secondary" onClick={()=>reveal('log')}><FolderOpen size={14}/>Show in Finder</button></div>
+        <div className="preference-row"><span className="preference-copy"><strong>App data</strong><code className="settings-path">{report.dataDir}</code></span><button type="button" className="settings-button secondary" onClick={()=>reveal('dataDir')}><FolderOpen size={14}/>Show in {device().fileManager}</button></div>
+        <div className="preference-row"><span className="preference-copy"><strong>Runtime log</strong><code className="settings-path">{report.logPath}</code></span><button type="button" className="settings-button secondary" onClick={()=>reveal('log')}><FolderOpen size={14}/>Show in {device().fileManager}</button></div>
       </section>
       <section className="preference-group" aria-labelledby="diagnostics-processes">
         <h3 id="diagnostics-processes" className="preference-group-title">Processes</h3>
@@ -55,7 +56,7 @@ export function DiagnosticsPanel():React.ReactElement {
           <tfoot><tr><th scope="row" colSpan={2}>Total</th><td className="numeric">{formatBytes(totalKB*1024)}</td><td className="numeric">{totalCPU.toFixed(1)}%</td></tr></tfoot>
         </table>:<p className="settings-muted">Process metrics are available in the desktop app.</p>}
       </section>
-      <p className="settings-footnote">Diagnostics stay on this Mac. The copy masks your home folder, account name and email addresses.</p>
+      <p className="settings-footnote">Diagnostics stay on {device().lower}. The copy masks your home folder, account name and email addresses.</p>
     </>}
   </div>;
 }

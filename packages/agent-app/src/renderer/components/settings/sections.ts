@@ -1,5 +1,6 @@
 import type {SettingsSection} from '../../store';
 import {isWebHost} from '../../webHost.ts';
+import { device } from '../../../shared/device-noun.ts';
 
 export interface SectionInfo { id: SettingsSection; label: string; description: string; keywords: string }
 /** Order is the nav order. Keywords cover every row title in the section so search lands on the right page. */
@@ -11,7 +12,7 @@ export const SETTINGS_SECTIONS: readonly SectionInfo[] = [
   {id:'models', label:'Models', description:'Which models the picker offers, their capabilities and prices.', keywords:'models model picker visibility hide show hidden catalog capabilities context window images tool search reasoning price pricing cost dollars tokens excluded unavailable'},
   {id:'memory', label:'Memory', description:'What Muster remembers across chats.', keywords:'memory remember hindsight recall facts'},
   {id:'plugins', label:'Skills & plugins', description:'Installed plugins and skills with their scope.', keywords:'plugins skills extensions mcp servers apps inventory scope inheritance'},
-  {id:'environments', label:'Environments', description:'Where agents run: this Mac or an isolated Linux sandbox.', keywords:'environments environment sandbox container linux docker local host this mac isolated copy worktree run location'},
+  {id:'environments', label:'Environments', description:'Where agents run: '+device().lower+' or an isolated Linux sandbox.', keywords:'environments environment sandbox container linux docker local host this mac this pc this computer isolated copy worktree run location'},
   {id:'automations', label:'Automations', description:'Scheduled and file-triggered agent work.', keywords:'automations automation schedule scheduled cron recurring trigger file watch runs history'},
   {id:'integrations', label:'Integrations', description:'Connect to Muster Server: its projects, tasks and agents show up in the app.', keywords:'muster server remote connect self-hosted team sign in integrations connection server deployment url api token org projects agents roster this mac off test link import disconnect sign in password browser'},
   {id:'shortcuts', label:'Shortcuts', description:'Keyboard shortcuts from the app menus.', keywords:'keyboard shortcuts hotkeys accelerators keys bindings'},

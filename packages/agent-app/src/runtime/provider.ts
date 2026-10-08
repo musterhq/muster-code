@@ -12,6 +12,8 @@ import type { Chat, ProviderInfo } from '../shared/protocol.ts';
 import {NativeUnavailableError} from './codex-native.ts';
 import {splitSecretOverrides} from './thread-config.ts';
 import {CODEX_LAUNCHER, envFromOverrides, mcpServersFromOverrides} from './adapters/shared.ts';
+import { device } from '../shared/device-noun.ts';
+import {unpackedPath} from './unpacked-path.ts';
 
 /** Identity of the test-only route `createProviderAdapter({available})` builds. */
 export const FIXTURE_PROVIDER = {id: 'fixture', bindingId: 'fixture-binding', model: 'fixture-model'} as const;
@@ -135,7 +137,7 @@ export function createProviderAdapter(options: { core?: CoreClient; available?: 
   // `available` is a test seam: one Codex-style route with a fixed identity, no configuration read.
   const instances = ():ProviderInstance[] => options.instances?.() ?? (options.available ? [{
     info:{id:FIXTURE_PROVIDER.id,name:'Fixture provider',driver:'codex-app-server',available:options.available(),identityMasked:'Account hidden',bindingId:FIXTURE_PROVIDER.bindingId,models:[{id:FIXTURE_PROVIDER.model,name:'Fixture model'}]},
-    command:options.command??join(__dirname,'resources',CODEX_LAUNCHER),env:{},sessionsRoot:join(process.env.CODEX_HOME||join(homedir(),'.codex'),'sessions'),
+    command:options.command??unpackedPath(join(__dirname,'resources',CODEX_LAUNCHER)),env:{},sessionsRoot:join(process.env.CODEX_HOME||join(homedir(),'.codex'),'sessions'),
   }] : [...configuredProviderInstances(), ...catalog?.instances() ?? []]);
   const close = (session: OwnedSession) => core?.clearCodexAppServerSessions(session.owner);
   const cancel = (id: string, session: OwnedSession): Promise<boolean> => {
@@ -178,6 +180,14 @@ export function createProviderAdapter(options: { core?: CoreClient; available?: 
         instructions: runInstructions(input.chat.mode, input.developerInstructions),
         ...(Object.keys(mcpServersFromOverrides(input.configOverrides)).length ? {mcpServers: mcpServersFromOverrides(input.configOverrides)} : {}),
         ...(Object.keys(envFromOverrides(input.configOverrides)).length ? {env: envFromOverrides(input.configOverrides)} : {}),
+        // The adapter runs its own tools (HTTP routes): they meet the same Project tool rules, user-process guard and approval cards as Codex's.
+        authorize: async (method, params) => {
+          if (!live()) return false;
+          const answer = await requestWhileOwned(owned.controller.signal, () => input.onRequest(method, params));
+          if (owned.controller.signal.aborted) return false;
+          const decision = answer?.decision;
+          return answer === undefined || decision === 'accept' || decision === 'acceptForSession';
+        },
         onThreadReady: threadId => { if (live()) input.onThreadReady?.(threadId); },
         onTurnAccepted: identity => { activity = true; if (live()) input.onTurnAccepted?.({...identity, dispatchState: 'dispatched'}); },
         onDelta: text => { activity = true; if (live()) input.onDelta(text); },
@@ -222,7 +232,7 @@ export function createProviderAdapter(options: { core?: CoreClient; available?: 
       revalidateProviderInstances();
       if (!input.chat.providerId) throw new ProviderPreDispatchError('No model is connected for this chat. Connect a model, then pick it in the composer.');
       const route = beforeDispatch(() => instances().find(instance=>instance.info.id===input.chat.providerId));
-      if (!route) throw new ProviderPreDispatchError(`The provider “${input.chat.providerId}” is not available on this Mac. Pick another model. No alternate provider was used.`);
+      if (!route) throw new ProviderPreDispatchError(`The provider “${input.chat.providerId}” is not available on ${device().lower}. Pick another model. No alternate provider was used.`);
       if (!route.info.available) throw new ProviderPreDispatchError('The selected provider is unavailable. No alternate provider was used.');
       if (input.chat.model && !route.info.models.some(model=>model.id===input.chat.model)) throw new ProviderPreDispatchError('This model is unavailable through the selected provider.');
       const bindingId=route.info.bindingId??route.info.id;

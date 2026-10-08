@@ -15,7 +15,7 @@ import {chatMenuTemplate,folderMenuTemplate,projectMenuTemplate,popupChoice,type
 import {attentionAllowed,createSettleTracker,notificationPrefs,notificationsMuted,wantedNotices,type NotificationPrefs} from './chat-notifications.ts';
 import { isCommandName } from './commands.ts';
 import { fileOperation, mutablePath } from '../runtime/file-operations.ts';
-import { existsSync, readFileSync, promises as fs } from 'node:fs';
+import { accessSync, constants as fsConstants, existsSync, readFileSync, promises as fs } from 'node:fs';
 import { resolveInside } from '../runtime/paths.ts';
 import {BrowserWorkspaceController} from './browser-workspace.ts';
 import {BrowserBridge} from './agent-tools/browser-bridge.ts';
@@ -23,7 +23,8 @@ import {TERMINAL_MCP_LAUNCHER_ENV,TERMINAL_READ_MAX_BYTES,TerminalToolHost} from
 import {accessibilityText,captureSource,captureSources,computerPermissions} from './computer-capture.ts';
 import {NativePreviewController} from './native-preview.ts';
 import { buildMenuTemplate } from './menu.ts';
-import {AppUpdater,bundlePathOf,plistString} from './app-updater.ts';
+import {AppUpdater,bundlePathOf,detectInstallMethod,plistString} from './app-updater.ts';
+import {unpackedPath} from '../runtime/unpacked-path.ts';
 import {resolveUpdateChannel} from './update-channel.ts';
 import { createQuitCoordinator, quitChoice, quitPrompt, withinDeadline } from './quit-coordinator.ts';
 import { loadAgentService, type AgentService } from './service-loader.ts';
@@ -34,14 +35,19 @@ import {attentionBadge,createCrashTracker,isRendererCrash} from './app-shell.ts'
 import {MENU_CHANNEL,MENU_CLOSE_CHANNEL,type MenuAction} from '../shared/menu-protocol.ts';
 import {installProcessGuard} from './process-guard.ts';
 import {passwordStoreSwitch} from './linux-launch.ts';
+import {shouldThrottleBackground} from './painting-policy.ts';
 import {electronSecretBox} from '../runtime/memory-context.ts';
 import {ServerSignInWindows} from './server-signin-window.ts';
+import { device } from '../shared/device-noun.ts';
 
 app.setName('Muster Agent');
 {const store=passwordStoreSwitch(process.env,process.argv);if(store)app.commandLine.appendSwitch('password-store',store);}
 app.setPath('userData', app.commandLine.getSwitchValue('user-data-dir') || path.join(app.getPath('appData'), 'Muster Agent'));
 // EXT-10: plugin UI gets its own standard origin (registered before ready), served only through PluginUiRegistry.
 protocol.registerSchemesAsPrivileged([{scheme: PLUGIN_SCHEME, privileges: {standard: true, secure: true, supportFetchAPI: false, corsEnabled: true}}]);
+
+/** electron-builder.yml appId: the AppUserModelID of the Windows shortcuts. */
+const WINDOWS_APP_ID = 'dev.themuster.agent';
 
 // Single instance: second launch focuses the existing window instead.
 if (!app.requestSingleInstanceLock()) {
@@ -68,6 +74,7 @@ async function main(): Promise<void> {
   });
   let service: AgentService | null = null;
   let runningChats = 0;
+  let repaintPolicy: (() => void) | undefined;
   let disposal: Promise<void> | undefined;
   let shutdownStarted = false;
   let pendingChatId=chatIdFromArgs(process.argv);
@@ -109,6 +116,9 @@ async function main(): Promise<void> {
   // Match the dark renderer with the dark native sidebar material until Settings > Appearance > Theme loads (UX-19).
   nativeTheme.themeSource = 'dark';
   await app.whenReady();
+  // Windows: notifications and the taskbar group under the AppUserModelID the installer gave the Start-menu and desktop
+  // shortcuts (electron-builder.yml appId); without it toasts are attributed to an unknown app or not shown at all.
+  if (process.platform === 'win32') app.setAppUserModelId(WINDOWS_APP_ID);
   app.setAsDefaultProtocolClient('muster');
 
   // --- Agent service -------------------------------------------------------
@@ -176,7 +186,9 @@ async function main(): Promise<void> {
     if (event.type === 'settingsChanged') { notifyPrefs = notificationPrefs(event.values); applyBadge(pendingAttention); }
     if (event.type === 'chatWoke') notifyWoke(event);
     if (event.type === 'snapshot') {
+      const before = runningChats;
       runningChats = event.snapshot.chats.filter((c) => c.status === 'running' || c.status === 'stopping').length;
+      if ((before === 0) !== (runningChats === 0)) repaintPolicy?.();
       applyBadge(event.snapshot.attention?.totalRequests ?? 0);
       notifySettled(event.snapshot);
     }
@@ -293,7 +305,7 @@ async function main(): Promise<void> {
       spellcheck: true,
       // A visible Agent window must paint streaming text and resize changes
       // even while another app has keyboard focus. Hidden windows are throttled below.
-      backgroundThrottling: false,
+      backgroundThrottling: false, // turned on while idle and unfocused (syncPainting below)
     },
   });
   const nativePreview = new NativePreviewController(window);
@@ -307,7 +319,7 @@ async function main(): Promise<void> {
     return new Response(typeof response.body === 'string' ? response.body : new Uint8Array(response.body), {status: response.status, headers: response.headers});
   });
   // RUN-X1: the agent drives this same browser through the muster_browser MCP bridge; each chat's tab shows in the right pane.
-  const browserBridge = new BrowserBridge({dir:path.join(dataDir,'agent-tools'),browser:browserWorkspace,execPath:process.execPath,script:path.join(__dirname,'browser-mcp.cjs'),
+  const browserBridge = new BrowserBridge({dir:path.join(dataDir,'agent-tools'),browser:browserWorkspace,execPath:process.execPath,script:unpackedPath(path.join(__dirname,'browser-mcp.cjs')),
     snapshot:()=>loaded.service.invoke('app.snapshot',undefined),lease:async chatId=>(await loaded.service.invoke('computer.lease',{chatId})).owner,emit:onEvent});
   void browserBridge.start().then(launcher=>{process.env.MUSTER_BROWSER_MCP_LAUNCHER=launcher;},error=>console.warn(`Agent browser bridge unavailable: ${error instanceof Error?error.message:String(error)}`));
   window.on('hide',()=>nativePreview.hide());
@@ -393,8 +405,12 @@ async function main(): Promise<void> {
   screen.on('display-metrics-changed', followDisplays);
   const syncPainting = () => {
     if (!window || window.isDestroyed()) return;
-    window.webContents.setBackgroundThrottling(!window.isVisible() || window.isMinimized());
+    window.webContents.setBackgroundThrottling(shouldThrottleBackground({visible: window.isVisible(), minimized: window.isMinimized(), focused: window.isFocused(), runningChats}));
   };
+  // Full-rate timers and rAF only while a run streams into a window the user can see; an idle, unfocused window may throttle.
+  repaintPolicy = syncPainting;
+  window.on('focus', syncPainting);
+  window.on('blur', syncPainting);
   window.on('hide', syncPainting);
   window.on('minimize', syncPainting);
   window.on('restore', syncPainting);
@@ -427,6 +443,8 @@ async function main(): Promise<void> {
   const infoPlist=bundle?(()=>{try{return readFileSync(path.join(bundle,'Contents/Info.plist'),'utf8');}catch{return '';}})():'';
   // Windows and Linux builds carry their update source in the packaged package.json (electron-builder extraMetadata).
   const packagedMeta:{musterUpdateRepo?:string;musterUpdateChannel?:string}=app.isPackaged?(()=>{try{return JSON.parse(readFileSync(path.join(app.getAppPath(),'package.json'),'utf8'));}catch{return {};}})():{};
+  const install=detectInstallMethod({platform:process.platform,exe:process.execPath,env:process.env,packaged:app.isPackaged,exists:existsSync,
+    writable:dir=>{try{accessSync(dir,fsConstants.W_OK);return true;}catch{return false;}}});
   const updater=new AppUpdater({
     current:plistString(infoPlist,'CFBundleShortVersionString')??app.getVersion(),
     arch:process.arch,
@@ -435,6 +453,9 @@ async function main(): Promise<void> {
     channel:resolveUpdateChannel({bundle:plistString(infoPlist,'MusterUpdateChannel')??packagedMeta.musterUpdateChannel,env:process.env}),
     settingsFile:path.join(app.getPath('userData'),'updates.json'),
     stagingDir:path.join(app.getPath('userData'),'pending-update'),
+    // Windows: the last verified installer, the base of the next differential download.
+    cacheDir:path.join(app.getPath('userData'),'update-cache'),
+    install,
     emit:status=>{if(window&&!window.isDestroyed())window.webContents.send('muster:event',{type:'updateStatus',status} satisfies AgentEvent);},
     quit:()=>app.quit(),
     openExternal:url=>{void shell.openExternal(url);},
@@ -695,7 +716,7 @@ async function main(): Promise<void> {
       case 'delete':{
         const running=busy(snapshot,id);
         const {response}=await dialog.showMessageBox(window,{type:'warning',buttons:['Delete','Cancel'],defaultId:1,cancelId:1,message:`Permanently delete “${chat.title}”?`,
-          detail:`${running?'It is still working; deleting stops the run first. ':''}Its messages, queued follow-ups and attached files are removed from this Mac. Files in the folder are not touched. This cannot be undone.`});
+          detail:`${running?'It is still working; deleting stops the run first. ':''}Its messages, queued follow-ups and attached files are removed from ${device().lower}. Files in the folder are not touched. This cannot be undone.`});
         if(response!==0)return null;
         await service.invoke('chat.delete',{id,force:running});notice(`Deleted “${chat.title}”`);return null;
       }
@@ -782,7 +803,8 @@ async function main(): Promise<void> {
     send: sendMenuAction,
     openHelp: () => {},
     // PER-10: the license bundle written by scripts/dependency-report.mjs ships beside the renderer.
-    ...(existsSync(path.join(__dirname, '../renderer/THIRD-PARTY-LICENSES.txt')) ? { openLicenses: () => { void shell.openPath(path.join(__dirname, '../renderer/THIRD-PARTY-LICENSES.txt')); } } : {}),
+    // The file manager cannot open a file inside app.asar, so this one is unpacked (electron-builder.yml asarUnpack).
+    ...(existsSync(path.join(__dirname, '../renderer/THIRD-PARTY-LICENSES.txt')) ? { openLicenses: () => { void shell.openPath(unpackedPath(path.join(__dirname, '../renderer/THIRD-PARTY-LICENSES.txt'))); } } : {}),
     toggleDevTools: () => window?.webContents.toggleDevTools(),
     addFolder: () => {
       if(shutdownStarted)return;

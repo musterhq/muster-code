@@ -8,6 +8,7 @@ import { promises as fs } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, join, resolve, sep } from 'node:path';
 import type { FileChanges } from '../../shared/domains/checkout-protocol.ts';
+import { device } from '../../shared/device-noun.ts';
 
 /** Folders that are never a project's files: the system's own, and the roots that hold everyone's. */
 const SYSTEM_EXACT = ['/', '/Users', '/Volumes', '/home', '/private', '/var', '/tmp', '/opt', '/root'];
@@ -24,7 +25,7 @@ export async function validateFolder(path: string, home: string = homedir()): Pr
     real = await fs.realpath(abs);
   } catch (cause) {
     if (cause instanceof Error && /That is a file/.test(cause.message)) throw cause;
-    throw new Error('That folder does not exist on this Mac. Choose another.');
+    throw new Error('That folder does not exist on '+device().lower+'. Choose another.');
   }
   const realHome = await fs.realpath(home).catch(() => resolve(home));
   const same = (a: string, b: string) => a === b || a === b + sep;

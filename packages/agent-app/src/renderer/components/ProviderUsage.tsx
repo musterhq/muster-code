@@ -44,7 +44,7 @@ function Meter({window: w}: {window: ProviderUsageWindow}) {
   const tone = w.usedPercent >= 90 ? ' is-critical' : w.usedPercent >= 70 ? ' is-warn' : '';
   return <div className="usage-meter">
     <div className="usage-meter-row"><span>{windowName(w.windowMinutes)}</span><span className="usage-meter-value">{Math.round(w.usedPercent)}% used</span></div>
-    <div className={`usage-meter-track${tone}`} role="meter" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(w.usedPercent)} aria-label={`${windowName(w.windowMinutes)} usage`}><span style={{width: `${w.usedPercent}%`}}/></div>
+    <div className={`usage-meter-track${tone}`} role="meter" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(w.usedPercent)} aria-label={`${windowName(w.windowMinutes)} usage`}><span style={{transform: `scaleX(${Math.min(100, Math.max(0, w.usedPercent)) / 100})`}}/></div>
     <div className="usage-meter-reset">{resetLabel(w.resetsAt)}</div>
   </div>;
 }

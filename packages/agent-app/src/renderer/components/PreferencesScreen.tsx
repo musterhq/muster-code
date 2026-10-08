@@ -6,7 +6,8 @@ import type {MemoryAutoRetain,MemoryConfigView} from '../../shared/domains/memor
 import {invoke} from '../bridge';
 import {activeChat,closeSettings,notifyError,notifySuccess,openMemoryScreen,resetSettings,setFollowUpMode,setPluginView,setSetting,setSettingsSection,setSummaryHidden,type SettingsSection} from '../store';
 import {setTerminalDock,subscribeTerminalDock,terminalDock} from '../processSummary';
-import {checkForUpdates,installUpdate,INSTALLS_IN_PLACE,setAutoCheckUpdates,updateSummary,useUpdateStatus} from '../updates';
+import {checkForUpdates,installExplanation,installLabel,installsInPlace,installUpdate,setAutoCheckUpdates,updateSummary,useUpdateStatus} from '../updates';
+import {copyText} from '../clipboard';
 import {DEFAULT_DIFF_PREFERENCES,clearGlobalDiffPreferences,hasGlobalDiffPreferences,saveGlobalDiffPreferences,useDiffPreferences,type DiffPreferences} from '../diff-preferences';
 import {useStore,useStoreSelector} from '../useStore';
 import {restoreFocus} from '../focus';
@@ -30,6 +31,7 @@ import {EnvironmentsPanel} from './settings/EnvironmentsPanel';
 import {FullAccessSkips} from './FullAccessConfirm';
 import {recordProvenance,settingProvenance} from './settings/provenance';
 import {ProvenanceTag} from './settings/ProvenanceTag';
+import { device, deviceNoun } from '../../shared/device-noun.ts';
 import {ThemeRows} from './settings/ThemePicker';
 import './preferences-screen.css';
 
@@ -98,23 +100,23 @@ function GeneralSection({settings,set}:{settings:AppSettings;set:Setter}):React.
   return <>
     <h3 className="preference-group-title">Setup checklist</h3>
     <div className="preference-group">
-      <Row title="Setup checklist" scope="This Mac · checked live" description="Models, folders and optional capabilities. Reopen the guided setup at any step."/>
+      <Row title="Setup checklist" scope={device().title+" · checked live"} description="Models, folders and optional capabilities. Reopen the guided setup at any step."/>
       <SetupChecklist/>
     </div>
     <div className="preference-group">
       <Row setting="general.defaultModel" title="Default model" scope="New chats · a Project can override this" description="New chats start with this model and reasoning level; each chat can still switch in the composer. If its provider stops being ready, new chats use the built-in default.">
         <DefaultModelPicker label="Default model" value={settings['general.defaultModel']} emptyLabel="Built-in default" onChange={value=>set('general.defaultModel',value)}/>
       </Row>
-      <Row setting="general.sendKey" title="Send messages with" scope="This Mac · message field" description={settings['general.sendKey']==='enter'?'Enter sends. Shift+Enter starts a new line.':`${MAC?'⌘':'Ctrl+'}Enter sends (and steers a running turn). Enter starts a new line.`}>
+      <Row setting="general.sendKey" title="Send messages with" scope={device().title+" · message field"} description={settings['general.sendKey']==='enter'?'Enter sends. Shift+Enter starts a new line.':`${MAC?'⌘':'Ctrl+'}Enter sends (and steers a running turn). Enter starts a new line.`}>
         <Segmented label="Send messages with" value={settings['general.sendKey']} options={[{value:'enter',label:'Enter'},{value:'mod-enter',label:MAC?'⌘ Enter':'Ctrl+Enter'}]} onChange={value=>set('general.sendKey',value)}/>
       </Row>
-      <Row setting="general.spellcheck" title="Check spelling" scope="This Mac · text you type" description="Underline misspelled words in the message field and other text boxes.">
+      <Row setting="general.spellcheck" title="Check spelling" scope={device().title+" · text you type"} description="Underline misspelled words in the message field and other text boxes.">
         <Switch label="Check spelling" checked={settings['general.spellcheck']} onChange={value=>set('general.spellcheck',value)}/>
       </Row>
-      <Row title="Default terminal location" scope="This Mac · all chats" description={`Choose where ${MAC?'⌘':'Ctrl+'}J and terminal actions open terminal tabs.`}>
+      <Row title="Default terminal location" scope={device().title+" · all chats"} description={`Choose where ${MAC?'⌘':'Ctrl+'}J and terminal actions open terminal tabs.`}>
         <Segmented label="Default terminal location" value={dock.placement} options={[{value:'pane',label:'Right'},{value:'panel',label:'Bottom'}]} onChange={value=>setTerminalDock(value==='panel'?{placement:'panel'}:{placement:'pane',open:false})}/>
       </Row>
-      <Row setting="terminal.shell" title="Integrated terminal shell" scope="This Mac · new terminals" description="The shell new terminal tabs start. A missing shell falls back to your login shell.">
+      <Row setting="terminal.shell" title="Integrated terminal shell" scope={device().title+" · new terminals"} description="The shell new terminal tabs start. A missing shell falls back to your login shell.">
         <TerminalShellPicker value={settings['terminal.shell']} onChange={value=>set('terminal.shell',value)}/>
       </Row>
     </div>
@@ -142,25 +144,36 @@ function GeneralSection({settings,set}:{settings:AppSettings;set:Setter}):React.
   </>;
 }
 
-const DEVICE = typeof navigator !== 'undefined' && /Mac/.test(navigator.platform) ? 'This Mac' : 'This computer';
+const DEVICE = device().title;
+/** The attention alert is a Dock badge and bounce on macOS, a taskbar flash on Windows, and a launcher badge on Linux (src/main/index.ts). */
+const ATTENTION_COPY = () => { const p = device().platform; return p === 'darwin'
+  ? { title: 'Badge the Dock for approvals and questions', description: 'Show the waiting count on the Dock icon and bounce it once when something new needs you.' }
+  : p === 'win32'
+    ? { title: 'Flash the taskbar for approvals and questions', description: 'Flash the Muster taskbar button once when something new needs you.' }
+    : { title: 'Badge the app icon for approvals and questions', description: 'Show the waiting count on the app icon, where your desktop supports it, and flash the window once when something new needs you.' }; };
 /** Self-update (src/main/app-updater.ts): version, status, a manual check, restart-to-update and the automatic toggle. */
 function UpdatesGroup():React.ReactElement|null {
   const status=useUpdateStatus();
   const [busy,setBusy]=useState(false);
   if(!status)return null;
   const act=async(action:()=>Promise<unknown>):Promise<void>=>{setBusy(true);try{await action();}catch(cause){notifyError(cause);}finally{setBusy(false);}};
+  // The main process knows how this copy was installed; older builds fall back to the browser's platform.
+  const device=status.method?(status.method==='mac-bundle'?deviceNoun('darwin').title:'This computer'):DEVICE;
   const working=busy||status.phase==='checking'||status.phase==='downloading'||status.phase==='installing';
   return <>
     <h3 className="preference-group-title">Updates</h3>
     <div className="preference-group">
-      <Row title={`Muster Agent ${status.current}`} scope={`${DEVICE} · ${status.channel} channel`} description={updateSummary(status)}>
-        {status.phase==='available'&&!INSTALLS_IN_PLACE
-          ?<button type="button" className="settings-button" disabled={busy} onClick={()=>void act(installUpdate)}>Download update</button>
+      <Row title={`Muster Agent ${status.current}`} scope={`${device} · ${status.channel} channel`} description={updateSummary(status)}>
+        {status.phase==='available'&&!installsInPlace(status)
+          ?<button type="button" className="settings-button" disabled={busy} onClick={()=>void act(installUpdate)}>{installLabel(status)}</button>
           :status.phase==='ready'
-          ?<button type="button" className="settings-button" disabled={busy} onClick={()=>void act(installUpdate)}><RotateCcw size={14}/>Update and relaunch</button>
+          ?<button type="button" className="settings-button" disabled={busy} onClick={()=>void act(installUpdate)}><RotateCcw size={14}/>{installLabel(status)}</button>
           :status.phase!=='disabled'&&<button type="button" className="settings-button secondary" disabled={working} onClick={()=>void act(checkForUpdates)}>{status.phase==='checking'?'Checking…':'Check for updates'}</button>}
       </Row>
-      {status.phase!=='disabled'&&<Row title="Check for updates automatically" scope={DEVICE} description="Checks GitHub Releases shortly after launch, every hour and when you come back to the window, downloads a newer version in the background and verifies its checksum and signature. Nothing installs until you restart.">
+      {status.manualCommand&&<Row title="Install from a terminal" scope={device} description={<code className="settings-path">{status.manualCommand}</code>}>
+        <button type="button" className="settings-button secondary" onClick={()=>void act(()=>copyText(status.manualCommand!))}>Copy command</button>
+      </Row>}
+      {status.phase!=='disabled'&&<Row title="Check for updates automatically" scope={device} description={`Checks GitHub Releases shortly after launch, every hour and when you come back to the window. ${installExplanation(status)} Nothing installs until you choose to.`}>
         <Switch label="Check for updates automatically" checked={status.autoCheck} onChange={value=>void act(()=>setAutoCheckUpdates(value))}/>
       </Row>}
     </div>
@@ -175,13 +188,13 @@ function NotificationsGroup({settings,set}:{settings:AppSettings;set:Setter}):Re
   return <>
     <h3 className="preference-group-title">Notifications</h3>
     <div className="preference-group">
-      <Row setting="notifications.runs" title="When a run finishes out of sight" scope="This Mac · all chats and automations" description="One notification per run that finishes or fails while Muster is in the background or you are in another chat. Clicking it opens the chat.">
+      <Row setting="notifications.runs" title="When a run finishes out of sight" scope={device().title+" · all chats and automations"} description="One notification per run that finishes or fails while Muster is in the background or you are in another chat. Clicking it opens the chat.">
         <Segmented label="When a run finishes out of sight" value={settings['notifications.runs']} options={[{value:'all',label:'Always'},{value:'failures',label:'Failures only'},{value:'off',label:'Never'}]} onChange={value=>set('notifications.runs',value)}/>
       </Row>
-      <Row setting="notifications.attention" title="Badge the Dock for approvals and questions" scope="This Mac · all chats" description="Show the waiting count on the Dock icon and bounce it once when something new needs you.">
-        <Switch label="Badge the Dock for approvals and questions" checked={settings['notifications.attention']} onChange={value=>set('notifications.attention',value)}/>
+      <Row setting="notifications.attention" title={ATTENTION_COPY().title} scope={device().title+" · all chats"} description={ATTENTION_COPY().description}>
+        <Switch label={ATTENTION_COPY().title} checked={settings['notifications.attention']} onChange={value=>set('notifications.attention',value)}/>
       </Row>
-      <Row setting="notifications.mutedUntil" title="Mute notifications" scope="This Mac · everything above and snooze reminders" description={muted?`Muted until ${untilLabel}. Runs keep going; nothing is announced until then.`:'Silence every notification and Dock alert for a while.'}>
+      <Row setting="notifications.mutedUntil" title="Mute notifications" scope={device().title+" · everything above and snooze reminders"} description={muted?`Muted until ${untilLabel}. Runs keep going; nothing is announced until then.`:'Silence every notification and attention alert for a while.'}>
         {muted?<button type="button" className="settings-button secondary" onClick={()=>set('notifications.mutedUntil',null)}>Unmute</button>
           :<span className="preference-segmented" role="group" aria-label="Mute for">{MUTE_OPTIONS.map(option=><button key={option.hours} type="button" onClick={()=>set('notifications.mutedUntil',new Date(Date.now()+option.hours*3_600_000).toISOString())}>{option.label}</button>)}</span>}
       </Row>
@@ -233,13 +246,13 @@ function MemorySection():React.ReactElement {
     <Row title="Memory" scope={folderId?'This chat’s folder and your personal memory':'Your personal memory'} description="Review, search, add and remove what agents remember.">
       <button type="button" className="settings-button secondary" onClick={()=>openMemoryScreen(folderId)}>Open Memory</button>
     </Row>
-    <Row title="Memory engine (Hindsight)" scope="This Mac · all chats" description={config?config.endpoint||(config.source==='environment'?'Using HINDSIGHT_API_URL from the environment':'Not configured — local memory only'):'Loading…'}>
+    <Row title="Memory engine (Hindsight)" scope={device().title+" · all chats"} description={config?config.endpoint||(config.source==='environment'?'Using HINDSIGHT_API_URL from the environment':'Not configured — local memory only'):'Loading…'}>
       <button type="button" className="settings-button secondary" disabled={!config} onClick={()=>setEditing(true)}>{config?.endpoint?'Edit…':'Configure…'}</button>
     </Row>
-    {config&&<Row title="Use memory in agent runs" scope="This Mac · all chats" description="Add relevant notes from this chat’s scope as context before each run.">
+    {config&&<Row title="Use memory in agent runs" scope={device().title+" · all chats"} description="Add relevant notes from this chat’s scope as context before each run.">
       <Switch label="Use memory in agent runs" checked={config.autoRecall} onChange={value=>patch({autoRecall:value,autoRetain:config.autoRetain})}/>
     </Row>}
-    {config&&<Row title="After a run completes" scope="This Mac · all chats" description="Whether new memories are saved automatically once a run finishes.">
+    {config&&<Row title="After a run completes" scope={device().title+" · all chats"} description="Whether new memories are saved automatically once a run finishes.">
       <Segmented label="After a run completes" value={config.autoRetain} options={RETAIN_OPTIONS} onChange={value=>patch({autoRecall:config.autoRecall,autoRetain:value})}/>
     </Row>}
     {editing&&config&&<MemorySettings config={config} folderId={folderId} onSaved={result=>{setConfig(result);setEditing(false);}} onClose={()=>setEditing(false)}/>}
@@ -301,29 +314,29 @@ export function PreferencesScreen():React.ReactElement {
           <div className="settings-title"><div><h1>{current.label}</h1><p>{current.description}</p></div></div>
           {section==='general'&&<GeneralSection settings={settings} set={set}/>}
           {section==='appearance'&&<div className="preference-group">
-            <Row setting="appearance.theme" title="Theme" scope="This Mac · whole window" description="System follows your macOS appearance and switches with it.">
+            <Row setting="appearance.theme" title="Theme" scope={device().title+" · whole window"} description={`System follows your ${device().os} appearance and switches with it.`}>
               <Segmented label="Theme" value={settings['appearance.theme']} options={[{value:'system',label:'System'},{value:'dark',label:'Dark'},{value:'light',label:'Light'}]} onChange={value=>set('appearance.theme',value)}/>
             </Row>
             <ThemeRows settings={settings} set={set}/>
-            <Row setting="appearance.textSize" title="Text size" scope="This Mac · whole window" description={`Scales text and controls. ${MAC?'⌘+ and ⌘−':'Ctrl++ and Ctrl+−'} adjust it until the window reloads.`}>
+            <Row setting="appearance.textSize" title="Text size" scope={device().title+" · whole window"} description={`Scales text and controls. ${MAC?'⌘+ and ⌘−':'Ctrl++ and Ctrl+−'} adjust it until the window reloads.`}>
               <Segmented label="Text size" value={settings['appearance.textSize']} options={TEXT_SIZES.map(size=>({value:size as number,label:`${size}%`}))} onChange={value=>set('appearance.textSize',value)}/>
             </Row>
-            <Row setting="appearance.chatTextSize" title="Chat text size" scope="This Mac · replies in every chat" description="The size of the agent’s replies. The rest of the window follows Text size.">
+            <Row setting="appearance.chatTextSize" title="Chat text size" scope={device().title+" · replies in every chat"} description="The size of the agent’s replies. The rest of the window follows Text size.">
               <Segmented label="Chat text size" value={settings['appearance.chatTextSize']} options={CHAT_TEXT_SIZES.map(size=>({value:size as number,label:`${size}px`}))} onChange={value=>set('appearance.chatTextSize',value as ChatTextSize)}/>
             </Row>
-            <Row setting="appearance.reducedMotion" title="Reduce motion" scope="This Mac · overrides the system" description="Turn off slide and fade animations, including panel transitions.">
+            <Row setting="appearance.reducedMotion" title="Reduce motion" scope={device().title+" · overrides the system"} description="Turn off slide and fade animations, including panel transitions.">
               <Segmented label="Reduce motion" value={settings['appearance.reducedMotion']} options={OVERRIDES} onChange={value=>set('appearance.reducedMotion',value)}/>
             </Row>
-            <Row setting="appearance.reducedTransparency" title="Reduce transparency" scope="This Mac · overrides the system" description="Use solid backgrounds instead of blurred, see-through surfaces.">
+            <Row setting="appearance.reducedTransparency" title="Reduce transparency" scope={device().title+" · overrides the system"} description="Use solid backgrounds instead of blurred, see-through surfaces.">
               <Segmented label="Reduce transparency" value={settings['appearance.reducedTransparency']} options={OVERRIDES} onChange={value=>set('appearance.reducedTransparency',value)}/>
             </Row>
-            <Row title="Show summary card" scope="This Mac · all chats" description="Show the floating card that tracks the current turn’s progress and files changed.">
+            <Row title="Show summary card" scope={device().title+" · all chats"} description="Show the floating card that tracks the current turn’s progress and files changed.">
               <Switch label="Show summary card" checked={!state.summaryHidden} onChange={value=>setSummaryHidden(!value)}/>
             </Row>
           </div>}
           {section==='chat'&&<>
             <div className="preference-group">
-              <Row title="Follow-up behavior" scope="This Mac · while a chat runs" description={`Queue follow-ups while Muster runs or steer the current run. Press ${MAC?'⌘':'Ctrl+'}Enter to do the opposite for one message.`}>
+              <Row title="Follow-up behavior" scope={device().title+" · while a chat runs"} description={`Queue follow-ups while Muster runs or steer the current run. Press ${MAC?'⌘':'Ctrl+'}Enter to do the opposite for one message.`}>
                 <Segmented label="Follow-up behavior" value={state.followUpMode} options={[{value:'queue',label:'Queue'},{value:'steer',label:'Steer'}]} onChange={setFollowUpMode}/>
               </Row>
               <Row setting="chat.responseStyle" title="Response style" scope="New runs · Codex-based models" description={settings['chat.responseStyle']==='pragmatic'?'Short, direct answers that stick to the result.':settings['chat.responseStyle']==='friendly'?'Explains what it did and why, in a warmer tone.':'Uses the personality set in your Codex config, otherwise Friendly.'}>
@@ -335,7 +348,7 @@ export function PreferencesScreen():React.ReactElement {
               <Row setting="chats.autoArchiveDays" title="Archive idle chats" scope="All chats · off by default" description="Archive chats with no activity for this long. Pinned, snoozed, unread and working chats, and chats waiting for your input, are never archived. Archived chats stay searchable and can be restored.">
                 <Segmented label="Archive idle chats after" value={settings['chats.autoArchiveDays']} options={AUTO_ARCHIVE_DAYS.map(days=>({value:days,label:days===0?'Never':`${days} days`}))} onChange={value=>set('chats.autoArchiveDays',value)}/>
               </Row>
-              <Row title="Full access confirmation" scope="This Mac · per folder" description="Folders where you chose “Don’t ask again” skip the Turn on Full Access? confirmation. Ask again restores it.">
+              <Row title="Full access confirmation" scope={device().title+" · per folder"} description="Folders where you chose “Don’t ask again” skip the Turn on Full Access? confirmation. Ask again restores it.">
                 <FullAccessSkips folders={state.snapshot?.folders??[]}/>
               </Row>
             </div>
@@ -348,7 +361,7 @@ export function PreferencesScreen():React.ReactElement {
           {section==='shortcuts'&&<ShortcutsSection/>}
           {section==='diagnostics'&&<DiagnosticsPanel/>}
           {section==='storage'&&<><StoragePanel/><BackupsPanel/></>}
-          {section==='integrations'&&<><h3 className="preference-group-title">Muster Server</h3><p className="project-edit-hint ws-settings-hint">Connect your team’s Muster Server and its org and projects appear under Projects, with their tasks as chats. Its agents join the Roster, its runs the Ledger, and anything that needs you lands in the Inbox. Optional, and off until you connect.</p><ConnectionPanel compact signInAvailable={!isWebHost()}/><details className="ws-settings-hint paperclip-writes" aria-label="What Muster does on your connected server"><summary>What Muster does on your connected server</summary><p className="project-edit-hint"><strong>Importing only reads.</strong> Muster fetches projects, tasks, comments, agents and runs with read requests and changes nothing on the server.</p><p className="project-edit-hint"><strong>A connected server is written to only when you press something.</strong> From one of its tasks or agents you can: comment, change a task&apos;s status, priority or assignee, create a task, answer a question or approve, reject or ask for changes on a decision, pause or resume one agent (or all of them: confirmed first), and cancel a run. Each of those is sent to your server as you, with your own sign-in, and is visible there. Work locally, Hand back and Release do the same: they set the status and assignee and post comments, a work-log document and cost entries to the task as you, each labelled “via Muster”. If the server is out of reach they wait in a queue on this Mac and are sent, in order, when it is back; if the task changed meanwhile you choose what to send. Muster never writes on its own initiative, and your agents here do not act on the server.</p></details></>}
+          {section==='integrations'&&<><h3 className="preference-group-title">Muster Server</h3><p className="project-edit-hint ws-settings-hint">Connect your team’s Muster Server and its org and projects appear under Projects, with their tasks as chats. Its agents join the Roster, its runs the Ledger, and anything that needs you lands in the Inbox. Optional, and off until you connect.</p><ConnectionPanel compact signInAvailable={!isWebHost()}/><details className="ws-settings-hint paperclip-writes" aria-label="What Muster does on your connected server"><summary>What Muster does on your connected server</summary><p className="project-edit-hint"><strong>Importing only reads.</strong> Muster fetches projects, tasks, comments, agents and runs with read requests and changes nothing on the server.</p><p className="project-edit-hint"><strong>A connected server is written to only when you press something.</strong> From one of its tasks or agents you can: comment, change a task&apos;s status, priority or assignee, create a task, answer a question or approve, reject or ask for changes on a decision, pause or resume one agent (or all of them: confirmed first), and cancel a run. Each of those is sent to your server as you, with your own sign-in, and is visible there. Work locally, Hand back and Release do the same: they set the status and assignee and post comments, a work-log document and cost entries to the task as you, each labelled “via Muster”. If the server is out of reach they wait in a queue on {device().lower} and are sent, in order, when it is back; if the task changed meanwhile you choose what to send. Muster never writes on its own initiative, and your agents here do not act on the server.</p></details></>}
           {section==='server'&&<ServerSettings/>}
         </div></div>}
       </div>

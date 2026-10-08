@@ -1,14 +1,12 @@
 /* Transcript chrome: live tail, per-turn "Worked for" header, folded rows, live region. */
 .shimmer-text {
-  color:var(--text-faint);
-  background:linear-gradient(90deg,var(--text-faint) 0%,var(--text-faint) 40%,var(--text) 50%,var(--text-faint) 60%,var(--text-faint) 100%);
-  background-size:250% 100%;
-  -webkit-background-clip:text; background-clip:text;
-  -webkit-text-fill-color:transparent;
-  animation:shimmer-text 2.2s linear infinite;
+  /* Compositor-only: pulsing opacity instead of sweeping a text-clipped gradient, which repainted the text every frame. */
+  color:var(--text-dim);
+  animation:shimmer-text 2.2s ease-in-out infinite;
+  will-change:opacity;
 }
-@keyframes shimmer-text { from { background-position:100% 0; } to { background-position:-150% 0; } }
-@media (prefers-reduced-motion:reduce) { .shimmer-text { animation:none; background:none; -webkit-text-fill-color:currentColor; color:var(--text-dim); } }
+@keyframes shimmer-text { 0%,100% { opacity:.5; } 50% { opacity:1; } }
+@media (prefers-reduced-motion:reduce) { .shimmer-text { animation:none; will-change:auto; opacity:1; } }
 
 .timeline-tail { display:flex; align-items:center; height:40px; padding-block:0; }
 .working-tail { display:flex; align-items:baseline; gap:10px; min-width:0; padding:0 8px; font-size:var(--fs-14); color:var(--text-faint); }

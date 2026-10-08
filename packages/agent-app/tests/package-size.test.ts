@@ -80,3 +80,27 @@ test('server tarball is an xz archive and the install docs and workflow agree', 
   assert.doesNotMatch(workflow, /muster-server-[^\s]*\.tar\.gz/);
   assert.match(workflow, /out\/muster-server-\*\.tar\.xz/);
 });
+
+test('size budget reads the asar layout: app.asar plus app.asar.unpacked (#317)', async () => {
+  const {createRequire} = await import('node:module');
+  const asar = createRequire(import.meta.url)('@electron/asar') as {createPackageWithOptions(src: string, dest: string, options: {unpack?: string; unpackDir?: string}): Promise<void>};
+  const pack = async (modules: Record<string, string[]>, prune: string[] = []) => {
+    const {base, app} = fixture(modules);
+    const out = path.join(base, 'linux-unpacked/resources/app.asar');
+    mkdirSync(path.dirname(out), {recursive: true});
+    await asar.createPackageWithOptions(app, out, {unpackDir: 'node_modules/node-pty'});
+    rmSync(app, {recursive: true, force: true});
+    for (const file of prune) rmSync(path.join(`${out}.unpacked`, file), {recursive: true, force: true});
+    return {base, out};
+  };
+  const ok = await pack({'node-pty': ['package.json', 'build/Release/pty.node', 'prebuilds/linux-x64/pty.node', 'prebuilds/darwin-arm64/pty.node']}, ['node_modules/node-pty/prebuilds/darwin-arm64']);
+  const bad = await pack({'node-pty': ['package.json'], react: ['package.json']});
+  try {
+    const passed = run(ok.out);
+    assert.equal(passed.status, 0, passed.stderr);
+    assert.match(passed.stdout, /app\.asar/);
+    const failed = run(bad.out);
+    assert.equal(failed.status, 1);
+    assert.match(failed.stderr, /node_modules must hold only node-pty.*react/);
+  } finally { rmSync(ok.base, {recursive: true, force: true}); rmSync(bad.base, {recursive: true, force: true}); }
+});

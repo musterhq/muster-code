@@ -20,7 +20,7 @@ import {invoke} from '../bridge';
 import {editResend,forkChat,retryTarget,retryTurn,turnEnd} from '../messageActions';
 import {useEventLoad} from '../orgHooks';
 import {notifyError,notifySuccess} from '../store';
-import { useStore } from '../useStore';
+import { useStoreSlice } from '../useStore';
 import {findMentionSpans} from '../mentionChips';
 import {resolveToolPath} from './toolPresentation';
 import {tokenStyle} from '../agentIdentity';
@@ -114,7 +114,7 @@ interface TurnHeaderProps {durationMs:number|null;open:boolean;onToggle:()=>void
 /** A live turn's header: "Working for …" since its user message. */
 interface LiveTurnProps {live:string}
 interface EditingProps {onSubmit:(text:string,mode:EditResendMode,restoreFiles?:Array<{path:string;afterHash:string}>)=>Promise<boolean>;onCancel:()=>void}
-function TimelineCard({ item, nextAt, reveal, turn, tail=false, actions, editing, plan=false, meta=true }: { item: TranscriptEntry; nextAt?:string; reveal?:string; turn?:TurnHeaderProps|LiveTurnProps; tail?:boolean; actions?:MessageActions; editing?:EditingProps; plan?:boolean; meta?:boolean }): React.ReactElement {
+function TimelineCardImpl({ item, nextAt, reveal, turn, tail=false, actions, editing, plan=false, meta=true }: { item: TranscriptEntry; nextAt?:string; reveal?:string; turn?:TurnHeaderProps|LiveTurnProps; tail?:boolean; actions?:MessageActions; editing?:EditingProps; plan?:boolean; meta?:boolean }): React.ReactElement {
   switch (item.kind) {
     case 'activity': return <ActivityGroup items={item.items} reveal={reveal} live={tail}/>;
     case 'user':
@@ -141,6 +141,12 @@ function TimelineCard({ item, nextAt, reveal, turn, tail=false, actions, editing
       return <div className="timeline-notice">{item.text}</div>;
   }
 }
+
+/** Row callbacks are rebuilt every render but only close over ids that are part of the row; compare what they expose. */
+const sameKeys=(a?:object,b?:object)=>a===b||(!!a&&!!b&&Object.keys(a).join()===Object.keys(b).join());
+const sameTurn=(a?:TurnHeaderProps|LiveTurnProps,b?:TurnHeaderProps|LiveTurnProps)=>a===b||(!!a&&!!b&&('live' in a?'live' in b&&a.live===b.live:!('live' in b)&&a.durationMs===b.durationMs&&a.open===b.open&&a.summary===b.summary));
+/** Finished rows skip re-rendering while the tail streams. */
+const TimelineCard=React.memo(TimelineCardImpl,(a,b)=>a.item===b.item&&a.nextAt===b.nextAt&&a.reveal===b.reveal&&a.tail===b.tail&&a.plan===b.plan&&a.meta===b.meta&&sameKeys(a.actions,b.actions)&&!a.editing===!b.editing&&sameTurn(a.turn,b.turn));
 
 const turnDisclosures=new Map<string,boolean>();
 function rememberTurn(id:string,open:boolean){turnDisclosures.delete(id);turnDisclosures.set(id,open);if(turnDisclosures.size>300)turnDisclosures.delete(turnDisclosures.keys().next().value!);}
@@ -390,7 +396,7 @@ export function Timeline({ items, chatId, onScrolled, running, planMode=false }:
 
 const NO_ITEMS:TimelineItem[]=[];
 export function ChatView(): React.ReactElement {
-  const state = useStore();
+  const state = useStoreSlice('contextTelemetry','sending','showInlineFileDiffs','snapshot','timelines');
   const chat = activeChat();
   const newChat = useNewChatDraft();
   const [scrolled,setScrolled]=useState(false);

@@ -11,11 +11,12 @@ import {openSandbox} from '../sandboxScope';
 import {ContextMeter} from './ContextMeter';
 import {BranchPicker, type BranchMode} from './BranchPicker';
 import {SandboxApplySheet} from './SandboxApplySheet';
+import { device } from '../../shared/device-noun.ts';
 import './environment-footer.css';
 
 export const SANDBOX_ENV_LABEL = 'Sandbox · Linux container';
 // On Muster Server's web UI the host is the server, not the viewer's computer (#199).
-export const HOST_ENV_LABEL = isWebHost() ? 'Server' : 'This Mac';
+export const HOST_ENV_LABEL = isWebHost() ? 'Server' : device().title;
 
 /** Where the chat's agent runs (SBX-01); refreshed on domain events, on container activity and on window focus. */
 export function useChatEnvironment(chatId: string): {environment: ChatEnvironmentStatus | undefined; refresh: () => void} {
@@ -47,7 +48,7 @@ async function setBrowserPlacement(chatId: string, browser: 'host' | 'sandbox'):
 }
 /** Plain-language label for where the browser runs, including the in-sandbox service's state. */
 export function browserPlacementLabel(environment: Pick<ChatEnvironmentStatus, 'browser' | 'browserService'> | undefined): string {
-  if (environment?.browser !== 'sandbox') return 'Browser runs on this Mac';
+  if (environment?.browser !== 'sandbox') return 'Browser runs on '+device().lower;
   const state = environment.browserService?.state;
   const detail = state === 'running' ? 'running' : state === 'backoff' ? 'restarting' : state === 'failed' || state === 'lost' || state === 'exited' ? 'not running' : state === 'not-registered' ? 'not set up' : state ?? 'starting';
   return `Browser runs in the sandbox · ${detail}`;
@@ -135,7 +136,7 @@ export function EnvironmentMenu({chat, project, folder, info, environment, class
             {inSandbox && <>
               <div className="env-menu-separator" role="separator"/>
               <Menu.GroupLabel className="env-menu-label">Browser</Menu.GroupLabel>
-              <Menu.Item className="env-menu-item" disabled={busy} title={lock ?? 'The agent browser runs on this Mac'} onClick={() => { if (environment?.browser === 'sandbox') void setBrowserPlacement(chat.id, 'host'); }}>
+              <Menu.Item className="env-menu-item" disabled={busy} title={lock ?? 'The agent browser runs on '+device().lower} onClick={() => { if (environment?.browser === 'sandbox') void setBrowserPlacement(chat.id, 'host'); }}>
                 <Laptop size={14}/><span className="env-menu-text">{HOST_ENV_LABEL}</span>
                 {environment?.browser !== 'sandbox' ? <Check size={13} className="env-menu-check" aria-label="Current"/> : null}
               </Menu.Item>
@@ -149,11 +150,11 @@ export function EnvironmentMenu({chat, project, folder, info, environment, class
               <TerminalSquare size={14}/><span className="env-menu-text">Sandbox shell</span><span className="env-menu-detail">Linux container</span>
             </Menu.Item>
             {inSandbox && folder && <>
-              <Menu.Item className="env-menu-item" disabled={!onApply} title="Review the copy’s changes and apply them to the folder on this Mac" onClick={() => onApply?.()}>
-                <Upload size={14}/><span className="env-menu-text">Apply changes to this Mac…</span>
+              <Menu.Item className="env-menu-item" disabled={!onApply} title={"Review the copy’s changes and apply them to the folder on "+device().lower} onClick={() => onApply?.()}>
+                <Upload size={14}/><span className="env-menu-text">Apply changes to {device().lower}…</span>
               </Menu.Item>
-              <Menu.Item className="env-menu-item" disabled={busy} title={lock ?? 'Replace the isolated copy with the folder’s current files'} onClick={() => invoke('sandbox.syncFromHost', {chatId: chat.id}).then(() => notifySuccess('Sandbox copy refreshed from this Mac.'), notifyError)}>
-                <RefreshCw size={14}/><span className="env-menu-text">Refresh copy from this Mac</span>
+              <Menu.Item className="env-menu-item" disabled={busy} title={lock ?? 'Replace the isolated copy with the folder’s current files'} onClick={() => invoke('sandbox.syncFromHost', {chatId: chat.id}).then(() => notifySuccess('Sandbox copy refreshed from '+device().lower+'.'), notifyError)}>
+                <RefreshCw size={14}/><span className="env-menu-text">Refresh copy from {device().lower}</span>
               </Menu.Item>
             </>}
             {list && <>

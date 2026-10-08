@@ -5,6 +5,7 @@ import {invoke} from '../bridge';
 import {notifyError, notifySuccess} from '../store';
 import {InlineDiff} from './InlineDiff';
 import {ModalSheet} from './ModalSheet';
+import { device } from '../../shared/device-noun.ts';
 
 const STATUS: Record<SandboxChange['status'], string> = {added: 'A', modified: 'M', deleted: 'D'};
 
@@ -34,11 +35,11 @@ export function SandboxApplySheet({chatId, folderId, open, onClose}: {chatId: st
     setBusy(true);
     try {
       const {applied} = await invoke('sandbox.applyToHost', {chatId, paths: [...selected]});
-      notifySuccess(`Applied ${applied.length} ${applied.length === 1 ? 'file' : 'files'} to this Mac.`);
+      notifySuccess(`Applied ${applied.length} ${applied.length === 1 ? 'file' : 'files'} to ${device().lower}.`);
       onClose();
     } catch (cause) { notifyError(cause); } finally { setBusy(false); }
   };
-  return <ModalSheet open={open} title="Apply sandbox changes to this Mac" description="Files the isolated copy changed. Review each diff; applying overwrites the file in the project folder." className="sandbox-apply" testId="sandbox-apply" onClose={() => { if (!busy) onClose(); }}>
+  return <ModalSheet open={open} title={"Apply sandbox changes to "+device().lower} description="Files the isolated copy changed. Review each diff; applying overwrites the file in the project folder." className="sandbox-apply" testId="sandbox-apply" onClose={() => { if (!busy) onClose(); }}>
     {!files ? <div className="sandbox-apply-empty"><Loader2 size={14} className="env-menu-spin" aria-hidden="true"/> Comparing the copy with the folder…</div>
       : !files.length ? <div className="sandbox-apply-empty">The copy matches the folder. Nothing to apply.</div>
       : <div className="sandbox-apply-body">

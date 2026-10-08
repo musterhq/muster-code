@@ -95,11 +95,14 @@
 .tool-child-ids { padding-top: 6px; user-select: text; }
 
 /* T3's Base UI disclosure contract: measured height, not guessed max-height.
-   Panels unmount after closing; no hidden output trees or JS animation loop. */
-.activity-disclosure { height: var(--collapsible-panel-height); overflow: hidden; }
-.activity-disclosure[data-starting-style], .activity-disclosure[data-ending-style] { height: 0; }
-.activity-disclosure[data-open][data-ending-style] { height: var(--collapsible-panel-height); }
-@media (prefers-reduced-motion: no-preference) { .activity-disclosure { transition: height 200ms cubic-bezier(.2,.8,.2,1); } }
+   Panels unmount after closing; no hidden output trees or JS animation loop.
+   The animation runs on grid-template-rows (0fr -> 1fr) so it needs no measured height; the single child holds the content. */
+.activity-disclosure { display: grid; grid-template-rows: 1fr; overflow: hidden; }
+.activity-disclosure[hidden] { display: none; }
+.activity-disclosure > * { min-height: 0; overflow: hidden; }
+.activity-disclosure[data-starting-style], .activity-disclosure[data-ending-style] { grid-template-rows: 0fr; }
+.activity-disclosure[data-open][data-ending-style] { grid-template-rows: 1fr; }
+@media (prefers-reduced-motion: no-preference) { .activity-disclosure { transition: grid-template-rows 200ms cubic-bezier(.2,.8,.2,1); } }
 
 /* Command output and tool results: one soft surface, same family as the diff block. */
 .tool-result { min-width: 0; overflow: hidden; margin: 4px 0 6px; border: 1px solid color-mix(in srgb, var(--text) 5.5%, transparent); border-radius: var(--radius-10); background: color-mix(in srgb, var(--text) 2.2%, var(--bg)); }

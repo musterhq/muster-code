@@ -9,6 +9,8 @@ import {BROWSER_VIEWPORTS,browserAddress,browserScopeProfile,type BrowserConsole
 import './browser-tab.css';
 import {Tip} from './Tooltip';
 import {Menu,MenuPopup} from './AppMenu';
+import { device } from '../../shared/device-noun.ts';
+import {OVERLAY_SELECTOR,observeOverlayChanges,sameBounds,type Bounds} from '../overlayObserver';
 
 export interface BrowserTabProps {owner:string;profileId:string;profileName?:string;initialUrl?:string;active?:boolean;onUrlChange?:(url:string)=>void}
 
@@ -98,7 +100,7 @@ function DesktopBrowserTab({owner,profileId:requestedProfile,initialUrl='about:b
   useEffect(()=>{
     if(!active)return;
     epoch.current++;
-    let disposed=false,visible=false,moving=false,frame=0,lastBounds='',opened=false;
+    let disposed=false,visible=false,moving=false,frame=0,lastBounds:Bounds|null=null,opened=false;
     const surfaceId=crypto.randomUUID();
     const surface={owner,surfaceId};
     current.current=undefined;setBrowser(undefined);setReady(false);setError('');
@@ -112,30 +114,29 @@ function DesktopBrowserTab({owner,profileId:requestedProfile,initialUrl='about:b
     };
     apply.current=accept;
     const hide=()=>{
-      lastBounds='';
+      lastBounds=null;
       if(visible){visible=false;void invoke('browser.hide',surface).catch(()=>{});}
     };
     const update=()=>{
       frame=0;if(disposed || !opened || !host.current)return;
       const element=host.current,rect=element.getBoundingClientRect(),report=current.current;
-      const overlay=Array.from(document.querySelectorAll('[role="dialog"],[role="menu"],[role="listbox"],[data-native-preview-overlay],[data-browser-overlay]')).some(element=>element.getClientRects().length>0);
+      const overlay=Array.from(document.querySelectorAll(OVERLAY_SELECTOR)).some(element=>element.getClientRects().length>0);
       if(moving || document.hidden || element.closest('[hidden],[aria-hidden="true"]') || rect.width<1 || rect.height<1 || overlay || report?.error || report?.certificateError || (report?.url==='about:blank' && !report.loading)){hide();return;}
-      const bounds={x:rect.x,y:rect.y,width:rect.width,height:rect.height},key=JSON.stringify(bounds);
-      if(visible && lastBounds===key)return;
-      visible=true;lastBounds=key;
+      const bounds={x:rect.x,y:rect.y,width:rect.width,height:rect.height};
+      if(visible && sameBounds(lastBounds,bounds))return;
+      visible=true;lastBounds=bounds;
       void invoke('browser.position',{...surface,bounds}).catch(cause=>{if(!disposed){hide();setError(message(cause));}});
     };
     function schedule(){if(!disposed && !frame)frame=requestAnimationFrame(update);}
     const start=()=>{moving=true;hide();};
     const end=()=>{moving=false;schedule();};
     const focus=()=>{
-      visible=false;lastBounds='';
+      visible=false;lastBounds=null;
       if(opened)void invoke('browser.status',{owner}).then(accept).catch(cause=>{if(!disposed)setError(message(cause));});
       schedule();
     };
     const resize=new ResizeObserver(schedule);if(host.current)resize.observe(host.current);
-    const mutations=new MutationObserver(schedule);
-    mutations.observe(document.body,{subtree:true,childList:true,attributes:true,attributeFilter:['hidden','aria-hidden','open','class','style']});
+    const stopMutations=observeOverlayChanges(()=>host.current,schedule,['hidden','aria-hidden','open','class','style']);
     const unsubscribe=subscribe(event=>{
       if(event.type==='browserState')accept(event.state);
       else if(event.type==='browserClosed' && event.owner===owner){opened=false;visible=false;setReady(false);setError('This browser has closed. Reopen it to continue.');}
@@ -153,7 +154,7 @@ function DesktopBrowserTab({owner,profileId:requestedProfile,initialUrl='about:b
     return()=>{
       // A pick in progress must not keep listening on a page the user can no longer see.
       if(pickingRef.current){void invoke('browser.cancelPick',{owner}).catch(()=>{});setPicking(null);}
-      disposed=true;epoch.current++;cancelAnimationFrame(frame);resize.disconnect();mutations.disconnect();unsubscribe();
+      disposed=true;epoch.current++;cancelAnimationFrame(frame);resize.disconnect();stopMutations();unsubscribe();
       // Always send cleanup, including when open completed after the first hide.
       visible=false;void invoke('browser.hide',surface).catch(()=>{});
       window.removeEventListener('muster:layout-start',start);window.removeEventListener('muster:layout-end',end);
@@ -297,7 +298,7 @@ function DesktopBrowserTab({owner,profileId:requestedProfile,initialUrl='about:b
         :pending.state==='cancelled'?<>Download of <b>{pending.filename}</b> cancelled</>:<>Download of <b>{pending.filename}</b> failed</>}</span>
       {pending.state==='pending' && <><button className="is-primary" onClick={()=>void download('save')}>Save to Downloads</button><button onClick={()=>void download('cancel')}>Cancel</button></>}
       {pending.state==='saving' && <button onClick={()=>void download('cancel')}>Cancel</button>}
-      {pending.state==='saved' && <button onClick={()=>void download('reveal')}>Show in Finder</button>}
+      {pending.state==='saved' && <button onClick={()=>void download('reveal')}>Show in {device().fileManager}</button>}
       {(pending.state==='saved' || pending.state==='cancelled' || pending.state==='failed') && <button className="browser-bar-close" aria-label="Dismiss download notice" onClick={()=>void download('dismiss')}><X size={12}/></button>}
     </div>}
     {(flash || browser?.notice) && <p className="browser-notice" role="status">{flash || browser?.notice}</p>}

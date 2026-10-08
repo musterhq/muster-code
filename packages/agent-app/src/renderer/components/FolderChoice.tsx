@@ -6,10 +6,11 @@ import React, { useCallback } from 'react';
 import { invoke } from '../bridge';
 import { notifyError, notifySuccess } from '../store';
 import { plainError } from './resourceErrors';
+import { device } from '../../shared/device-noun.ts';
 
 /** A failed command, worded for people (no command label in front). */
 export const fail = (cause: unknown): void => notifyError(plainError(cause));
-export const FOLDER_COPY = 'Where each project’s files live on this Mac. A git repository gets its own worktree and branch; any other folder is used as it is.';
+export const FOLDER_COPY = 'Where each project’s files live on '+device().lower+'. A git repository gets its own worktree and branch; any other folder is used as it is.';
 
 export function useBindFolder(orgId: string, projectId: string, done: () => void) {
   const say = (b: { projectName: string; path: string; kind?: string; devBranch: string }) =>

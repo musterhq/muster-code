@@ -9,6 +9,7 @@ import type { OpenWithApp } from '../../shared/domains/files-protocol';
 import type { ServerOutputFile, ServerOutputPreview } from '../../shared/domains/paperclip-protocol';
 import { invoke } from '../bridge';
 import { cleanIpcError } from './resourceErrors';
+import { device } from '../../shared/device-noun.ts';
 import './file-actions.css';
 import './artifact-viewer.css';
 
@@ -34,7 +35,7 @@ export function ServerOutputContents({ file }: { file: ServerOutputFile }): Reac
     {load.state === 'ready' && load.preview.kind === 'image' && <img className="server-output-image" src={load.preview.dataUrl} alt={file.name}/>}
     {binary && <div className="artifact-viewer-status">Muster cannot preview this type of file here.
       <div className="work-inline-form">
-        <button type="button" className="settings-button secondary" onClick={act(() => invoke('files.external.reveal', { path: file.path }))}><FolderOpen size={13}/>Reveal in Finder</button>
+        <button type="button" className="settings-button secondary" onClick={act(() => invoke('files.external.reveal', { path: file.path }))}><FolderOpen size={13}/>Reveal in {device().fileManager}</button>
         {apps.map(app => <button key={app.id} type="button" className="settings-button secondary" onClick={act(() => invoke('files.external.openWith', { path: file.path, app: app.id }))}>Open with {app.name}</button>)}
       </div></div>}
   </>;

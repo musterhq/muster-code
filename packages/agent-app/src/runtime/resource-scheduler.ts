@@ -1,4 +1,4 @@
-import {execFileSync} from 'node:child_process';
+import {execFile} from 'node:child_process';
 import os from 'node:os';
 
 /** PER-06: CPU/RAM-aware admission for concurrent agents and heavy builds.
@@ -40,19 +40,32 @@ export function defaultResourcePolicy(totalBytes=os.totalmem()):ResourcePolicy {
 }
 
 let cachedDarwin:{at:number;level:number}|undefined;
-/** Available memory: macOS reports free pages only (os.freemem ignores reclaimable cache), so use the
- * kernel's memorystatus level (percent of memory available) there, sampled at most once a second. */
-export function systemResourceSample(now=Date.now()):ResourceSample {
+let darwinRefresh:Promise<void>|undefined;
+/** Reads the kernel's memorystatus level without blocking the caller (no synchronous spawn on the main process). */
+export type MemoryLevelReader=(onLevel:(level:number)=>void)=>void;
+const readDarwinLevel:MemoryLevelReader=onLevel=>{
+  execFile('/usr/sbin/sysctl',['-n','kern.memorystatus_level'],{encoding:'utf8',timeout:2000},(error,stdout)=>{
+    if(error)return;
+    const level=Number(String(stdout).trim());
+    if(Number.isFinite(level)&&level>=0&&level<=100)onLevel(level);
+  });
+};
+/** Available memory: macOS reports free pages only (os.freemem ignores reclaimable cache), so on macOS the
+ * kernel's memorystatus level (percent of memory available) is folded in. It is refreshed in the background
+ * at most every 5 s and read from the cache here, so sampling never spawns or waits on a process. */
+export function systemResourceSample(now=Date.now(),readLevel:MemoryLevelReader=readDarwinLevel):ResourceSample {
   const totalBytes=os.totalmem(),cpus=Math.max(1,os.availableParallelism?.()??os.cpus().length),load1=os.loadavg()[0]??0;
   let freeBytes=os.freemem();
   if(process.platform==='darwin'){
-    try{
-      if(!cachedDarwin||now-cachedDarwin.at>1000){
-        const level=Number(execFileSync('/usr/sbin/sysctl',['-n','kern.memorystatus_level'],{encoding:'utf8',timeout:500}).trim());
-        if(Number.isFinite(level)&&level>=0&&level<=100)cachedDarwin={at:now,level};
-      }
-      if(cachedDarwin)freeBytes=Math.max(freeBytes,Math.round(totalBytes*cachedDarwin.level/100));
-    }catch{/* Fall back to os.freemem. */}
+    const info=(process as {getSystemMemoryInfo?:()=>{free:number}}).getSystemMemoryInfo?.();
+    if(info&&info.free>0)freeBytes=Math.max(freeBytes,info.free*1024);
+    if(!darwinRefresh&&(!cachedDarwin||now-cachedDarwin.at>5000)){
+      darwinRefresh=new Promise<void>(resolve=>{
+        try{readLevel(level=>{cachedDarwin={at:Date.now(),level};});}catch{/* keep the last level */}
+        setTimeout(()=>{darwinRefresh=undefined;resolve();},1000).unref?.();
+      });
+    }
+    if(cachedDarwin)freeBytes=Math.max(freeBytes,Math.round(totalBytes*cachedDarwin.level/100));
   }
   return {freeBytes,totalBytes,load1,cpus};
 }

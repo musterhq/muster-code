@@ -6,7 +6,7 @@ import {invoke, subscribe} from '../bridge';
 import {useNewChatDraft} from '../newChatDraft';
 import {branchPullRequest} from '../branchPullRequest';
 import {loadGitChanges, notifyError, openBrowserTab, openChangesTab, openCreatePullRequestTab, openFile, openPullRequestTab, openFilesTab, openProcessesTab, openSubagentsTab, setSummaryLayout} from '../store';
-import {useStore} from '../useStore';
+import {useStoreSlice} from '../useStore';
 import {EMPTY_ACTIVITY_ITEMS, getSubagentActivity, subagentState} from '../subagentActivity';
 import {portURL, useListeningPorts, useProcessSummary} from '../processSummary';
 import {isActiveProcess} from '../../shared/process-protocol';
@@ -203,7 +203,7 @@ function PullRequestRow({pr, current, folderId, chatId}: {pr: PullRequest; curre
 }
 
 function FolderSection({folder, chat, project, activity}: {folder: Folder; chat: Chat; project?: Project; activity: number}) {
-  const state = useStore();
+  const state = useStoreSlice('gitChanges');
   const {status, info, error, setStatus, setInfo, refresh} = useGitStatus(folder.id);
   const [pushing, setPushing] = useState(false);
   const [fetching, setFetching] = useState(false);
@@ -327,7 +327,7 @@ function sourceList(items: readonly TimelineItem[]) {
  * header toggle (`summaryHidden`) takes it away.
  */
 export function SummaryCard() {
-  const state = useStore();
+  const state = useStoreSlice('activeChatId','snapshot','summaryHidden','summaryLayout','timelines');
   const draft = useNewChatDraft();
   const root = useRef<HTMLElement>(null);
   const [collapsed, setCollapsed] = useState(readCollapsed);

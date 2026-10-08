@@ -9,6 +9,7 @@ import { invoke } from '../bridge';
 import { fail, FolderChoices, FOLDER_COPY } from './FolderChoice';
 import { plainError } from './resourceErrors';
 import { OrgAvatar } from './OrgSidebar';
+import { device } from '../../shared/device-noun.ts';
 import './orgs-card.css';
 
 const errorText = (cause: unknown) => plainError(cause).message;
@@ -47,8 +48,8 @@ export function LocalCheckoutsCard(): React.ReactElement | null {
   if (!data || !data.orgs.length) return null;
   // Every project, plus one row per org for its tasks that belong to no project.
   const rows = data.orgs.flatMap(o => [...o.projects.map(p => ({ org: o, id: p.id, label: p.name })), { org: o, id: NO_PROJECT, label: 'tasks without a project' }]).map(r => ({ ...r, binding: data.bindings.find(b => b.orgId === r.org.id && b.projectId === r.id) ?? null }));
-  return <section className="ws-orgs-card" aria-label="Local checkouts on this Mac">
-    <h4>Local checkouts on this Mac</h4>
+  return <section className="ws-orgs-card" aria-label={"Local checkouts on "+device().lower}>
+    <h4>Local checkouts on {device().lower}</h4>
     <p className="project-edit-hint">{FOLDER_COPY}</p>
     <ul className="ws-orgs-list">{rows.map(({ org, id, label, binding }) => <li key={`${org.id}:${id}`} className="ws-orgs-row" data-binding-kind={binding?.kind ?? 'none'}>
       <span className="ws-orgs-name"><span>{org.name} {id === NO_PROJECT ? '·' : '›'} {label}<small> {bindingLabel(binding)}</small></span></span>
@@ -58,7 +59,7 @@ export function LocalCheckoutsCard(): React.ReactElement | null {
       </span>
     </li>)}</ul>
     {settings && <div className="ws-orgs-prefs">
-      <label className="project-edit-goal"><span>This Mac is called</span><input value={settings.deviceName} maxLength={80} onChange={e => setSettings({ ...settings, deviceName: e.target.value })} onBlur={() => void invoke('checkout.settings', { deviceName: settings.deviceName }).then(setSettings, fail)}/></label>
+      <label className="project-edit-goal"><span>{device().title} is called</span><input value={settings.deviceName} maxLength={80} onChange={e => setSettings({ ...settings, deviceName: e.target.value })} onBlur={() => void invoke('checkout.settings', { deviceName: settings.deviceName }).then(setSettings, fail)}/></label>
       <label className="project-edit-goal"><span>Remind me after (hours quiet)</span><input type="number" min={0} max={720} value={settings.staleHours} onChange={e => setSettings({ ...settings, staleHours: Number(e.target.value) })} onBlur={() => void invoke('checkout.settings', { staleHours: settings.staleHours }).then(setSettings, fail)}/></label>
     </div>}
   </section>;
@@ -75,7 +76,7 @@ export function ProjectCheckoutRow({ orgId, projectId }: { orgId: string; projec
   }, [orgId, projectId]);
   useEffect(load, [load]);
   const b = data?.binding ?? null;
-  return <div><dt>Local checkout on this Mac</dt><dd>
+  return <div><dt>Local checkout on {device().lower}</dt><dd>
     {b ? b.kind === 'folder' ? <><span data-local-checkout="folder">Working in</span> <code>{b.path}</code></> : <><code>{b.path}</code> <span className="ws-faint">dev branch {b.devBranch}</span></> : <span className="ws-faint" data-local-checkout="none">Not linked</span>}
     {data?.leases.map(l => <span key={l.key} className="pp-field-hint ws-faint">Working locally on {l.key}{l.branch ? ` (${l.branch})` : ''} · {l.engine}</span>)}
     <span className="pp-field-hint ws-faint">A git repository gets its own worktree and branch for each task; any other folder is used as it is. The server’s workspace path above is never used.</span>

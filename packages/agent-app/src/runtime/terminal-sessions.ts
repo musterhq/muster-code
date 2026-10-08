@@ -5,6 +5,8 @@ import {basename,dirname,isAbsolute} from 'node:path';
 import {stripAnsi,TerminalRing} from './command-output-buffer.ts';
 import {spawnRemoteTerminal,type AppServerConnection,type TerminalPty} from './remote-terminal.ts';
 import {loginShell,resolveTerminalShell,shellArgs} from './terminal-shell.ts';
+import {createRequire} from 'node:module';
+import {unpackedPath} from './unpacked-path.ts';
 import type {ProcessEvent,TerminalCreate,TerminalInfo,TerminalReplay} from '../shared/process-protocol.ts';
 
 export const MAX_TERMINALS=12;
@@ -23,9 +25,19 @@ type PtyModule=typeof import('node-pty');
 interface Entry {info:TerminalInfo;ring:TerminalRing;pty?:TerminalPty;pending:string;paused:boolean;closing:boolean;done:Promise<void>;resolve:()=>void;timer?:ReturnType<typeof setTimeout>}
 
 let loader:Promise<PtyModule>|undefined;
+/** A packed build (app.asar, Windows and Linux) loads node-pty from app.asar.unpacked by its real path, so node-pty's own
+ *  __dirname is a real directory too: Windows starts its ConPTY output worker and console-list agent from there, and
+ *  macOS/Linux its spawn-helper. Development, tests and the macOS app (no asar) import it normally. */
+function importPty():Promise<unknown> {
+  if(typeof require==='function'&&typeof __dirname==='string'&&/[\\/]app\.asar[\\/]/.test(__dirname)){
+    const resolved=unpackedPath(require.resolve('node-pty'));
+    return Promise.resolve().then(()=>createRequire(resolved)(resolved));
+  }
+  return import('node-pty');
+}
 /** node-pty is native and external to the bundle; a missing build is reported, never faked. */
 export function loadPty():Promise<PtyModule> {
-  return loader??=import('node-pty').then(module=>{const value=(module as any).default?.spawn?(module as any).default:module;if(typeof value.spawn!=='function')throw new Error('invalid');return value as PtyModule;})
+  return loader??=importPty().then(module=>{const value=(module as any).default?.spawn?(module as any).default:module;if(typeof value.spawn!=='function')throw new Error('invalid');return value as PtyModule;})
     .catch(()=>{loader=undefined;throw new Error('The terminal runtime (node-pty) is not available in this build of Muster.');});
 }
 const validId=(value:unknown):value is string=>typeof value==='string'&&/^[a-zA-Z0-9:_-]{1,160}$/.test(value);

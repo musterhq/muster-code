@@ -8,6 +8,7 @@ import { invoke } from '../bridge';
 import { ConfirmSheet } from './ConfirmSheet';
 import { ResourceState } from './ResourceState';
 import { cleanIpcError } from './resourceErrors';
+import { device } from '../../shared/device-noun.ts';
 
 type Team = { members: ProjectMember[]; access: Record<string, MemberAccess>; policy: AccessPolicy };
 const MODE_LABEL: Record<ChatPermissionMode, string> = { 'read-only': 'Read-only', workspace: 'Workspace', full: 'Full access' };
@@ -73,7 +74,7 @@ function MemberRow({ member: m, access, policy, folders, busy, archived, onUpdat
     <div className="project-member-main">
       <span className="project-member-icon" aria-hidden="true">{m.kind === 'agent' ? <Bot size={14}/> : <User size={14}/>}</span>
       <span className="project-member-text">
-        <span className="project-member-name">{m.name}{m.local && <span className="project-badge">This Mac</span>}{revoked && <span className="project-badge">Revoked</span>}</span>
+        <span className="project-member-name">{m.name}{m.local && <span className="project-badge">{device().title}</span>}{revoked && <span className="project-badge">Revoked</span>}</span>
         <span className="project-member-access">{accessSummary(access, policy)}</span>
       </span>
       <label className="sr-only" htmlFor={`member-role-${m.id}`}>Role for {m.name}</label>
@@ -112,7 +113,7 @@ function AddMemberForm({ busy, onAdd, onCancel }: { busy: boolean; onAdd: (input
     <label>Role<select value={role} disabled={busy || kind === 'agent'} onChange={e => setRole(e.target.value as MemberRole)}>
       {MEMBER_ROLES.filter(r => kind === 'agent' ? r === 'agent' : r !== 'agent').map(r => <option key={r} value={r}>{ROLE_LABEL[r]}</option>)}
     </select></label>
-    <p className="field-help">{ROLE_HELP[role]} Members are stored on this Mac and are ready to sync; nothing is sent anywhere.</p>
+    <p className="field-help">{ROLE_HELP[role]} Members are stored on {device().lower} and are ready to sync; nothing is sent anywhere.</p>
     <div className="project-task-form-actions"><button type="submit" className="settings-button" disabled={busy || !name.trim()}>{busy ? 'Adding…' : 'Add member'}</button><button type="button" className="settings-button secondary" disabled={busy} onClick={onCancel}>Cancel</button></div>
   </form>;
 }

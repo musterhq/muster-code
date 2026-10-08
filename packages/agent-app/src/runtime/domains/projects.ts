@@ -14,6 +14,7 @@ import { createProjectTeam } from './project-team.ts';
 import { createGovernance, type WakeInfo } from './project-governance.ts';
 import { createCodexProjectSync } from '../codex-project-sync.ts';
 import { plural } from '../../shared/wording.ts';
+import { device } from '../../shared/device-noun.ts';
 
 interface ProjectRow { id: string; name: string; goal: string; folder_ids: string; primary_folder_id: string | null; archived: number | null; archived_at: string | null }
 const ID = /^[a-zA-Z0-9_-]{1,128}$/;
@@ -405,7 +406,7 @@ export function createProjectsDomain(ctx: DomainContext): DomainModule {
       if (unavailable !== null) {
         await ctx.invoke('chat.update', { id: chat.id, archived: true }).catch(() => undefined);
         store.record(projectId, 'task.runner-unavailable', `"${task.title}": ${runner.model} (${runner.providerId}) is not available here, so ${member!.name} was not started. ${unavailable}`.trim(), task.id, 'system');
-        throw new Error(`Choose a model for ${member!.name}. Its runner (${runner.model} on ${runner.providerId}) isn’t available on this Mac, and Muster won’t quietly use a different one. Open ${member!.name} in the Roster and pick a runner and model, then start the task again.`);
+        throw new Error(`Choose a model for ${member!.name}. Its runner (${runner.model} on ${runner.providerId}) isn’t available on ${device().lower}, and Muster won’t quietly use a different one. Open ${member!.name} in the Roster and pick a runner and model, then start the task again.`);
       }
     }
     try {

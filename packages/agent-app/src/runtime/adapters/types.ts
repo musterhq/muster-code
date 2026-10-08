@@ -17,6 +17,8 @@ export interface AdapterRunInput {
   /** Extra environment for the run's process: the agent's git identity and the secrets lent to it. */
   env?: Record<string, string>;
   permissionMode: 'read-only' | 'workspace' | 'full';
+  /** Asked before a tool this adapter runs itself changes anything (a command, a file change). Resolves true to go ahead: the Project tool rules, the guard for the user's own processes and approval cards live behind it. */
+  authorize?(method: string, params: Record<string, unknown>): Promise<boolean>;
   /** The saved conversation to continue; only set when it belongs to this route and binding. */
   resumeThreadId?: string;
   signal: AbortSignal;
