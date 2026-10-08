@@ -385,12 +385,13 @@ export async function boot(): Promise<void> {
     // durable state on focus rather than relying on another token arriving. A
     // snapshot that just arrived is already current, so focus churn (alt-tab,
     // dialogs) costs nothing; otherwise settle for a moment before fetching.
+    // Open resource listings always reconcile at once (files changed while another app had focus).
+    for (const folderId of new Set(state.tabs.map(tab=>tab.folderId))) if(folderId) void refreshResources(folderId);
     if (Date.now() - lastSnapshotAt < FOCUS_REFRESH_FRESH_MS) return;
     clearTimeout(focusTimer);
     focusTimer = window.setTimeout(refreshNow, FOCUS_REFRESH_DEBOUNCE_MS);
   };
   const refreshNow = () => {
-    for (const folderId of new Set(state.tabs.map(tab=>tab.folderId))) if(folderId) void refreshResources(folderId);
     if (refreshingFocus) return;
     refreshingFocus = true;
     if (state.automations.phase !== 'idle') void loadAutomations(true);

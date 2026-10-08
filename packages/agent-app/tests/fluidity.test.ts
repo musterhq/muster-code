@@ -7,6 +7,7 @@ import {createAgentService} from '../src/runtime/service.ts';
 import type {ProviderAdapter} from '../src/runtime/provider.ts';
 import type {AgentEvent} from '../src/shared/protocol.ts';
 import {systemResourceSample} from '../src/runtime/resource-scheduler.ts';
+import {createSnapshotCoalescer} from '../src/runtime/snapshot-coalescer.ts';
 import {createMemoryIdentity} from '../src/runtime/memory-identity.ts';
 
 const info:ProviderAdapter['info']=()=>[{id:'hybrow',name:'Fixture',available:true,identityMasked:'fixture',models:[{id:'claude/claude-fable-5',name:'Fixture'}]}];
@@ -14,20 +15,27 @@ const provider:ProviderAdapter={info,run:async()=>({status:'completed',finalMess
 const sleep=(ms:number)=>new Promise(resolve=>setTimeout(resolve,ms));
 async function directory(t:TestContext){const path=await mkdtemp(join(tmpdir(),'muster-fluidity-'));t.after(()=>rm(path,{recursive:true,force:true}));return path;}
 
-test('F3: a burst of state() calls coalesces into a leading and one trailing snapshot carrying the latest state',async t=>{
+test('F3: a burst of state requests emits once up front and once at the end, with the latest state',async()=>{
+  let version=0;const seen:number[]=[];
+  const coalescer=createSnapshotCoalescer(()=>seen.push(version),30);
+  for(let i=1;i<=100;i++){version=i;coalescer.request();}
+  assert.deepEqual(seen,[1],'the first request emits at once');
+  await sleep(80);
+  assert.deepEqual(seen,[1,100],'the rest collapse into one trailing emit carrying the latest state');
+  version=101;coalescer.request();await sleep(5);version=102;coalescer.request();coalescer.flush();
+  assert.deepEqual(seen.slice(2),[101,102],'flush emits a pending request immediately');
+  coalescer.flush();assert.equal(seen.length,4,'nothing pending, nothing emitted');
+  coalescer.dispose();coalescer.request();await sleep(50);assert.equal(seen.length,4,'disposed coalescers stay silent');
+});
+
+test('F3: a command reply never overtakes the snapshot that contains its change',async t=>{
   const events:AgentEvent[]=[];
   const service=createAgentService({dataDir:await directory(t),provider,onEvent:event=>events.push(event)});
   t.after(()=>service.dispose());
-  const chat=await service.invoke('chat.create',{});
-  await sleep(200);
-  const before=events.filter(event=>event.type==='snapshot').length;
-  await Promise.all(Array.from({length:40},(_,i)=>service.invoke('chat.update',{id:chat.id,title:`title ${i}`})));
-  await sleep(250);
-  const snapshots=events.slice().filter(event=>event.type==='snapshot').slice(before) as Extract<AgentEvent,{type:'snapshot'}>[];
-  assert.ok(snapshots.length>=1&&snapshots.length<=3,`40 updates emit ${snapshots.length} snapshots, not 40`);
-  const last=snapshots.at(-1)!.snapshot.chats.find(entry=>entry.id===chat.id)!;
-  assert.match(last.title,/^title \d+$/,'the trailing snapshot is the latest state, never an older one');
-  assert.equal(last.title,(await service.invoke('app.snapshot',undefined)).chats.find(entry=>entry.id===chat.id)!.title);
+  await service.invoke('chat.create',{});
+  const chat=await service.invoke('chat.create',{}); // inside the previous snapshot's window
+  const last=events.filter((event):event is Extract<AgentEvent,{type:'snapshot'}> =>event.type==='snapshot').at(-1)!;
+  assert.ok(last.snapshot.chats.some(entry=>entry.id===chat.id),'the renderer already has the new chat when the reply arrives');
 });
 
 test('F2a: sampling resources never spawns sysctl synchronously and refreshes the macOS level in the background',async()=>{

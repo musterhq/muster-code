@@ -184,7 +184,9 @@ assert.equal(document.querySelectorAll('.turn-change-preview .inline-diff-row.is
 assert.ok(document.querySelector('.summary-card'),'opening an inline diff leaves the summary card in place');
 const settingsButton=Array.from(document.querySelectorAll<HTMLButtonElement>('.nav-footer-action')).find(button=>button.textContent?.trim()==='Settings')!;
 assert.ok(settingsButton,'app-level display preferences have a reachable Settings destination');settingsButton.click();await delay(50);
-store.setSettingsSection('chat');await delay(40);
+store.setSettingsSection('chat');
+// The lazy Settings chunk is revealed through Suspense (React throttles that reveal up to ~300 ms); wait for it instead of guessing.
+for(let i=0;i<60&&!document.querySelector('[aria-label="Show file diffs inline"]');i++)await delay(50);
 const inlinePreference=document.querySelector('[aria-label="Show file diffs inline"]');
 assert.equal(inlinePreference?.getAttribute('aria-checked'),'true','inline file diffs are enabled by default');store.setInlineFileDiffsVisible(false);await delay(40);
 assert.equal(document.querySelector('[aria-label="Show file diffs inline"]')?.getAttribute('aria-checked'),'false','the Settings switch reflects the persisted app choice');

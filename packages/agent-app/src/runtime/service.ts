@@ -1,6 +1,7 @@
 import { applyPendingRestore } from './backups.ts';
 import { addMemory, listMemory, searchMemory, inspectMemoryStore, isVisibleInScopes, projectMemoryScope } from './memory-adapter.ts';
 import { createMemoryIdentity } from './memory-identity.ts';
+import { createSnapshotCoalescer } from './snapshot-coalescer.ts';
 import { HindsightService } from './hindsight-service.ts';
 import { MemoryConfigStore, MemoryTombstones, electronSecretBox } from './memory-context.ts';
 import { createHash } from 'node:crypto';
@@ -229,16 +230,9 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
     return {...current, attention};
   };
   /** F3: `state()` is called from ~56 places and each full snapshot is a SQLite read plus an IPC clone and a
-   *  renderer re-render. The first call in a quiet period emits at once (no added latency); calls inside the
-   *  window collapse into one trailing emit that carries the latest state. */
-  const STATE_WINDOW_MS = 80;
-  let stateWindow: ReturnType<typeof setTimeout> | undefined, statePending = false;
-  const state = (): void => {
-    if (stateWindow) { statePending = true; return; }
-    emit({ type: 'snapshot', snapshot: snapshot() });
-    stateWindow = setTimeout(() => { stateWindow = undefined; if (statePending && !disposed) { statePending = false; state(); } }, STATE_WINDOW_MS);
-    stateWindow.unref?.();
-  };
+   *  renderer re-render; bursts collapse (snapshot-coalescer.ts). A command's reply flushes a pending one first. */
+  const snapshots = createSnapshotCoalescer(() => emit({ type: 'snapshot', snapshot: snapshot() }));
+  const state = (): void => snapshots.request();
   const publishedTimelineRevisions = new Map<string, number>();
   const timeline = (chatId: string) => {
     const after = publishedTimelineRevisions.get(chatId) ?? 0;
@@ -937,7 +931,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
     if (disposed || closing) throw new Error('Agent runtime is stopping or closed.');
     const pending = dispatch(command, input);
     invocations.add(pending);
-    try { return await pending as Commands[K]['output']; }
+    try { const result = await pending as Commands[K]['output']; snapshots.flush(); return result; }
     finally { invocations.delete(pending); }
   }
   async function dispatch(command: string, input: unknown): Promise<unknown> {
@@ -1616,7 +1610,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
       await Promise.allSettled([...invocations,...[...runs.values()].flatMap(run => run.promise ? [run.promise] : [])]);
       await domains.dispose();
       await toolOutputLog.flush().catch(() => {});
-      disposed = true; if (stateWindow) clearTimeout(stateWindow); stateWindow = undefined; for (const timer of timers.values()) clearTimeout(timer); timers.clear(); customProviders.close(); annotations.close(); projectTasks.close(); store.close();
+      disposed = true; snapshots.dispose(); for (const timer of timers.values()) clearTimeout(timer); timers.clear(); customProviders.close(); annotations.close(); projectTasks.close(); store.close();
     })();
     return disposal;
   }};
