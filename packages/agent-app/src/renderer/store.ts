@@ -42,7 +42,7 @@ export interface WorkspaceTab {
   id: string;
   /** 'git' is the one Git surface per folder (Changes · History · Pull request). The older 'changes', 'history' and
    *  'pullRequest' kinds are only read from saved workspaces and are mapped onto 'git' on restore. */
-  kind: 'files' | 'git' | 'changes' | 'file' | 'diff' | 'subagents' | 'browser' | 'computer' | 'processes' | 'attachment' | 'pullRequest' | 'history' | 'conflict' | 'canvas' | 'sideChat' | 'pluginUi' | 'inbox';
+  kind: 'files' | 'git' | 'changes' | 'file' | 'diff' | 'subagents' | 'browser' | 'computer' | 'processes' | 'attachment' | 'pullRequest' | 'history' | 'conflict' | 'canvas' | 'sideChat' | 'pluginUi' | 'inbox' | 'liveView';
   /** kind: 'git' only — which segment is showing. */
   gitView?: GitView;
   /** kind: 'canvas' only (WRK-12). */
@@ -933,8 +933,12 @@ function rememberVisibleResourcePane():void {
 }
 
 const closingBrowserTabs = new Set<string>();
+/** The agent's per-chat browser tab id (see agentBrowserOwner in main). */
+export const AGENT_BROWSER_TAB = /^browser:agent-/;
 export function closeTab(id: string): void {
   const tab = state.tabs.find(tab => tab.id === id);
+  // An agent's browser session outlives its tab: closing the tab hands the session back to its picture-in-picture.
+  if (tab?.kind === 'browser' && AGENT_BROWSER_TAB.test(id)) { removeTab(id); return; }
   if (tab?.kind === 'browser') {
     if (closingBrowserTabs.has(id)) return;
     closingBrowserTabs.add(id);

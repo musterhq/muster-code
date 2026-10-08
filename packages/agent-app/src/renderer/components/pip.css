@@ -1,17 +1,32 @@
 /* Computer-use picture-in-picture (floats over the conversation) and the right-pane viewer. */
 /* Codex stack: frameless live thumbnails, one per app or page, fanned with the newest in front. It floats at
    the conversation's right under the summary card (ComputerPip measures the card; top/right/width inline). */
-.pip-stack { position:fixed; z-index:40; display:flex; flex-direction:column; gap:8px; font-size:var(--fs-11); color:var(--text-dim); transition:top 180ms ease, right 180ms ease; -webkit-app-region:no-drag; }
+.pip-stack { position:fixed; z-index:40; display:flex; flex-direction:column; gap:8px; font-size:var(--fs-11); color:var(--text-dim); transition:top 180ms ease, right 180ms ease, opacity 200ms ease, visibility 0s linear 0s; -webkit-app-region:no-drag; touch-action:none; }
+/* Once the user has parked the cluster in a corner, only the spring moves it; a dragged cluster follows the pointer. */
+.pip-stack.is-placed, .pip-stack.is-dragging { transition:none; }
+.pip-stack.is-dragging { will-change:transform; cursor:grabbing; }
+.pip-stack.is-dragging .pip-card { transition:none; }
+/* Every session it holds is open as a sidebar tab: nothing to show, and nothing to catch the pointer. */
+.pip-stack.is-empty { visibility:hidden; pointer-events:none; transition:visibility 0s linear 220ms; }
 .pip-cards { position:relative; }
-.pip-card { --depth:0; position:absolute; left:0; right:0; bottom:0; display:block; aspect-ratio:16 / 10; padding:0; border:0; border-radius:var(--radius-12); background:var(--media-bg); overflow:hidden; cursor:zoom-in;
-  box-shadow:0 0 0 1px rgb(var(--fg-rgb) / 7%), 0 10px 28px color-mix(in srgb, var(--shadow-ink) 30%, transparent), 0 2px 6px color-mix(in srgb, var(--shadow-ink) 18%, transparent);
-  transform-origin:top center; transform:translateY(calc(var(--depth) * -9px)) scale(calc(1 - var(--depth) * .055)); transition:transform 200ms ease, filter 160ms ease, box-shadow 160ms ease; }
-.pip-card img { display:block; width:100%; height:100%; object-fit:cover; object-position:top center; pointer-events:none; }
-.pip-card:not(.is-front) { filter:brightness(.82) saturate(.85); }
-.pip-card:not(.is-front):hover { filter:none; }
-.pip-card.is-front:hover { box-shadow:0 0 0 1px rgb(var(--fg-rgb) / 14%), 0 14px 34px color-mix(in srgb, var(--shadow-ink) 34%, transparent), 0 2px 6px color-mix(in srgb, var(--shadow-ink) 18%, transparent); }
-.pip-card:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
-.pip-card.is-user { box-shadow:0 0 0 2px var(--accent), 0 10px 28px color-mix(in srgb, var(--shadow-ink) 30%, transparent); }
+.pip-card { --depth:0; --fan:14px; position:absolute; left:0; right:0; bottom:0; aspect-ratio:16 / 10; border-radius:var(--radius-12); transform-origin:top center; transform:translateY(calc(var(--depth) * var(--fan) * -1)) scale(calc(1 - var(--depth) * .055));
+  transition:transform 240ms cubic-bezier(.2,.9,.3,1.15), opacity 200ms ease, filter 160ms ease, visibility 0s linear 0s; }
+/* Hovering the cluster fans the cards apart a little, so each one is easy to aim at. */
+.pip-stack:hover .pip-card, .pip-stack:focus-within .pip-card { --fan:24px; }
+/* Opened as a sidebar tab: the card shrinks toward the sidebar and fades, over about 200 ms. */
+.pip-card.is-docked { opacity:0; visibility:hidden; pointer-events:none; transform-origin:right center; transform:translateX(36px) scale(.62); transition:transform 200ms ease, opacity 200ms ease, visibility 0s linear 200ms; }
+.pip-card-main { position:absolute; inset:0; display:block; padding:0; border:0; border-radius:inherit; background:var(--media-bg); overflow:hidden; cursor:grab; touch-action:none; user-select:none; -webkit-user-select:none;
+  box-shadow:0 0 0 1px rgb(var(--fg-rgb) / 7%), 0 10px 28px color-mix(in srgb, var(--shadow-ink) 30%, transparent), 0 2px 6px color-mix(in srgb, var(--shadow-ink) 18%, transparent); transition:box-shadow 160ms ease, filter 160ms ease; }
+.pip-card:not(.is-front) .pip-card-main { filter:brightness(.82) saturate(.85); }
+.pip-card:not(.is-front) .pip-card-main:hover { filter:none; }
+.pip-card.is-front .pip-card-main:hover { box-shadow:0 0 0 1px rgb(var(--fg-rgb) / 14%), 0 14px 34px color-mix(in srgb, var(--shadow-ink) 34%, transparent), 0 2px 6px color-mix(in srgb, var(--shadow-ink) 18%, transparent); }
+.pip-card-main img { display:block; width:100%; height:100%; object-fit:cover; object-position:top center; pointer-events:none; }
+.pip-card-main:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+.pip-card.is-user .pip-card-main { box-shadow:0 0 0 2px var(--accent), 0 10px 28px color-mix(in srgb, var(--shadow-ink) 30%, transparent); }
+/* A small "open in the sidebar" button on the back cards. */
+.pip-open { position:absolute; top:6px; right:6px; z-index:2; display:inline-grid; place-items:center; width:22px; height:22px; padding:0; border:0; border-radius:50%; background:var(--media-scrim); color:var(--on-media); cursor:pointer; opacity:0; backdrop-filter:blur(8px); -webkit-backdrop-filter:blur(8px); transition:opacity 120ms ease; }
+.pip-card:hover .pip-open, .pip-open:focus-visible { opacity:1; }
+.pip-open:focus-visible { outline:2px solid var(--accent); outline-offset:1px; }
 /* Freshness: dimmed, never a text label. A stale or dropped feed also gets a small dot in the corner. */
 .pip-stack.is-stale .pip-card.is-front img { filter:saturate(.6) brightness(.92); }
 .pip-stack.is-disconnected .pip-card.is-front img { filter:grayscale(.7) brightness(.8); }
@@ -48,7 +63,7 @@
 .pip-pill.is-disconnected .pip-dot { background:var(--danger); }
 .pip-pill-title { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-weight:500; color:var(--text); }
 .pip-pill-count { flex:none; color:var(--text-faint); font-variant-numeric:tabular-nums; }
-@media (prefers-reduced-motion: reduce) { .pip-stack, .pip-card, .pip-pill { transition:none; } }
+@media (prefers-reduced-motion: reduce) { .pip-stack, .pip-card, .pip-card-main, .pip-pill { transition:none; } .pip-card.is-docked { transform:none; } }
 /* Right-pane viewer. */
 .computer-viewer { display:flex; flex-direction:column; flex:1; min-height:0; height:100%; }
 .computer-viewer-head { display:flex; align-items:center; gap:6px; padding:6px 8px 6px 12px; border-bottom:1px solid var(--hairline); font-size:var(--fs-12); color:var(--text-dim); }

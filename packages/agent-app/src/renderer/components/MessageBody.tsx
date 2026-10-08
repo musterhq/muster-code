@@ -8,6 +8,7 @@ import ReactMarkdown, { type Components } from 'react-markdown';
 import {ResourceLink, type ResourceContext} from './ResourceLink';
 import {MarkdownTable} from './MarkdownTable';
 import remarkGfm from 'remark-gfm';
+import { remarkLeadingLabels } from '../markdown-labels';
 import { createIncrementalMarkdownPlugin } from '../markdown-incremental';
 import {markdownHeadingId} from './markdownAnchors';
 import {HighlightedCode} from './HighlightedCode';
@@ -185,7 +186,7 @@ function SelectionQuote({ container }: { container: React.RefObject<HTMLDivEleme
 
 function MessageBodyContent({ text, resourceContext, animate = false, linkFiles = false }: { text: string; resourceContext?: ResourceContext; animate?: boolean; linkFiles?: boolean }): React.ReactElement {
   // Replies link the files they mention (markdown-file-links.ts); documents and previews render as written.
-  const remarkPlugins = React.useMemo(() => linkFiles ? [remarkGfm, createIncrementalMarkdownPlugin(), remarkFileLinks] : [remarkGfm, createIncrementalMarkdownPlugin()], [linkFiles]);
+  const remarkPlugins = React.useMemo(() => linkFiles ? [remarkGfm, createIncrementalMarkdownPlugin(), remarkLeadingLabels, remarkFileLinks] : [remarkGfm, createIncrementalMarkdownPlugin()], [linkFiles]);
   const renderedText = React.useMemo(() => inferMarkdownCodeLanguages(text), [text]);
   // Streaming fade (markdown-fade.ts): text that arrives after the first render fades in.
   const fade = useRef<FadeState | null>(null);

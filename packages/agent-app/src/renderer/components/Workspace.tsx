@@ -55,6 +55,7 @@ import {LazyBoundary,LazyScopedComputerTab} from '../lazyScreens';
 import {AreaBoundary} from './AreaBoundary';
 import {ProcessesTab, openTerminalTab} from './ProcessesTab';
 import {BrowserTab} from './BrowserTab';
+import {LiveViewTab} from './ComputerPip';
 import {SubagentsTab} from './SubagentsTab';
 import {MailboxInbox} from './MailboxInbox';
 import {CanvasTab} from './CanvasTab';
@@ -222,6 +223,8 @@ function TabBody({ tab, visible, onToggleResourceMaximize, resourceMaximized }: 
       return <SideChatTab tab={tab} />;
     case 'pluginUi':
       return <PluginUiTab tab={tab} />;
+    case 'liveView':
+      return <LiveViewTab tab={tab}/>;
   }
 }
 

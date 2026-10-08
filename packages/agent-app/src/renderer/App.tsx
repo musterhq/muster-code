@@ -52,7 +52,7 @@ export function App(): React.ReactElement {
   // Muster Server web UI: a desktop "Open" link lands here with ?project=<id> (#204). Inert in the desktop app.
   useEffect(()=>{const id=requestedProject();if(id&&state.boot.phase==='ready'&&state.snapshot?.projects.some(p=>p.id===id)){openProject(id);window.history.replaceState(null,'',window.location.pathname);}},[state.boot.phase]);
   useEffect(()=>installSendKey(()=>getState().settings['general.sendKey']),[]);
-  useEffect(()=>installSystemThemeListener(()=>getState().settings['appearance.theme']),[]);
+  useEffect(()=>installSystemThemeListener(()=>getState().settings['appearance.theme'],document.documentElement,()=>applyDocumentPreferences(getState().settings)),[]);
   useEffect(()=>installResponsiveNav({navHidden:()=>getState().navHidden,setNavHidden}),[]);
   useEffect(()=>applyDocumentPreferences(state.settings),[state.settings]);
   // PER-01: once the workspace is up, warm the demand-loaded screens on idle.

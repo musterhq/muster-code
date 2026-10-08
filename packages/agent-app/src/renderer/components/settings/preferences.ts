@@ -1,4 +1,5 @@
 import type {AppSettings, SendKey, ThemePreference} from '../../../shared/domains/settings-protocol';
+import {BOOT_CACHE_KEY, applyThemeTokens, bootCacheFor, pickTheme} from '../../../shared/theme.ts';
 
 /** The theme actually painted: 'system' follows the OS (main sets nativeTheme.themeSource to match, so
  *  prefers-color-scheme reports the real macOS appearance). */
@@ -11,22 +12,39 @@ function systemPrefersLight(): boolean {
   try { return typeof matchMedia === 'function' && matchMedia('(prefers-color-scheme: light)').matches; } catch { return false; }
 }
 /** Re-resolve 'system' when macOS flips appearance. */
-export function installSystemThemeListener(preference: () => ThemePreference | undefined, root: HTMLElement = document.documentElement): () => void {
+export function installSystemThemeListener(preference: () => ThemePreference | undefined, root: HTMLElement = document.documentElement, repaint?: () => void): () => void {
   if (typeof matchMedia !== 'function') return () => {};
   const query = matchMedia('(prefers-color-scheme: light)');
-  const onChange = () => { if (preference() === 'system') root.setAttribute('data-theme', resolveTheme('system', query.matches)); };
+  const onChange = () => { if (preference() === 'system') { root.setAttribute('data-theme', resolveTheme('system', query.matches)); repaint?.(); } };
   query.addEventListener?.('change', onChange);
   return () => query.removeEventListener?.('change', onChange);
 }
 
 /** Document-level preferences: CSS keys off these attributes; the composer inherits spellcheck from <html>. */
 export function applyDocumentPreferences(settings: AppSettings, root: HTMLElement = document.documentElement): void {
-  root.setAttribute('data-theme', resolveTheme(settings['appearance.theme']));
+  const mode = resolveTheme(settings['appearance.theme']);
+  root.setAttribute('data-theme', mode);
+  applyColorTheme(settings, mode, root);
   root.setAttribute('data-motion', settings['appearance.reducedMotion']);
   root.setAttribute('data-chat-text', String(settings['appearance.chatTextSize'] ?? 14));
   root.setAttribute('data-transparency', settings['appearance.reducedTransparency']);
   root.setAttribute('data-send-key', settings['general.sendKey']);
   root.setAttribute('spellcheck', String(settings['general.spellcheck']));
+}
+
+/** #324: paint the chosen colour theme as custom properties on :root. The stock Muster Light / Dark add none, so the
+ *  stylesheet alone paints them. The choice is mirrored to localStorage for theme-boot.js to apply before first paint. */
+export function applyColorTheme(settings: AppSettings, mode: 'dark' | 'light', root: HTMLElement = document.documentElement): void {
+  const custom = settings['appearance.customThemes'] ?? [];
+  const theme = pickTheme(mode, settings['appearance.lightTheme'], settings['appearance.darkTheme'], custom);
+  applyThemeTokens(root, theme);
+  try {
+    const light = pickTheme('light', settings['appearance.lightTheme'], settings['appearance.darkTheme'], custom);
+    const dark = pickTheme('dark', settings['appearance.lightTheme'], settings['appearance.darkTheme'], custom);
+    const cache = bootCacheFor(settings['appearance.theme'], light, dark);
+    if (!cache.light && !cache.dark) localStorage.removeItem(BOOT_CACHE_KEY); else localStorage.setItem(BOOT_CACHE_KEY, JSON.stringify(cache));
+  } catch { /* storage unavailable: the theme still applies, only the pre-paint head start is lost */ }
+  try { window.dispatchEvent(new CustomEvent('muster-theme-change')); } catch { /* non-DOM host */ }
 }
 
 export interface SendKeyEvent { key: string; metaKey: boolean; ctrlKey: boolean; altKey: boolean; shiftKey: boolean; isComposing?: boolean; keyCode?: number }
