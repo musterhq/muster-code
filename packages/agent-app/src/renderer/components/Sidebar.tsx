@@ -292,6 +292,9 @@ function useMinuteClock():number {
 
 export function Sidebar(): React.ReactElement {
   const state = useStoreSlice('activeChatId','automations','screen','snapshot');
+  // Rows are memoised, so the click handler they receive must keep its identity; it reads the latest closure.
+  const rowClickRef=useRef<(id:string,event:React.MouseEvent)=>void>(()=>{});
+  const stableRowClick=useCallback((id:string,event:React.MouseEvent)=>rowClickRef.current(id,event),[]);
   const draft = useNewChatDraft();
   const now = useMinuteClock();
   const runningAutomations = state.automations.value?.filter(automation => automation.activeRun?.status === 'running').length ?? 0;
@@ -476,8 +479,7 @@ export function Sidebar(): React.ReactElement {
     for(const chat of selectedChats()){try{await invoke('chat.delete',{id:chat.id});}catch(error){failed.push(chat.id);notifyError(error);}}
     setDeleteBusy(false);setConfirmDelete(false);setSelection(previous=>keepSelected(previous,failed));
   };
-  const rowClickRef=useRef(handleRowClick);rowClickRef.current=handleRowClick;
-  const stableRowClick=useCallback((id:string,event:React.MouseEvent)=>rowClickRef.current(id,event),[]);
+  rowClickRef.current=handleRowClick;
   const context:RowContext={now,stop:rovingStop(visible,focusedRow,state.activeChatId),onFocusRow:setFocusedRow,selection,selectionMode:selection.selected.size>0,onRowClick:stableRowClick};
   const onNavKey=(event:React.KeyboardEvent<HTMLDivElement>)=>{
     const target=event.target as HTMLElement;
