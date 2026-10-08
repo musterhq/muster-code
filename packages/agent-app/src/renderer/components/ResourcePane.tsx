@@ -3,8 +3,7 @@ import { Maximize2, Minimize2 } from 'lucide-react';
 import React, { useEffect, useRef, useState } from 'react';
 import { useStore } from '../useStore';
 import { Workspace } from './Workspace';
-import { ComputerPip, ComputerViewer } from './ComputerPip';
-import { useComputerUi } from '../computerUse';
+import { ComputerPip } from './ComputerPip';
 import { dragPaneWidth } from '../paneResize';
 import {Tip} from './Tooltip';
 
@@ -17,8 +16,6 @@ function initialWidth() {
 /** Optional file/tool surface. Chat activity is rendered in its own persistent rail. */
 export function ResourcePane({suspended=false}:{suspended?:boolean}) {
   const {navWidth, navHidden, tabs, resourcesHidden} = useStore();
-  // CUA-02: a docked live view or an opened screenshot takes the pane over until it is closed.
-  const viewer = useComputerUi().viewer;
   const [width, setWidth] = useState(initialWidth);
   const [maximized, setMaximized] = useState(false);
   const [viewport, setViewport] = useState(window.innerWidth);
@@ -39,12 +36,12 @@ export function ResourcePane({suspended=false}:{suspended?:boolean}) {
   };
   // Keep a usable conversation and the permanent activity summary at narrow widths.
   if (!suspended && !resourcesHidden && viewport - (navHidden?0:navWidth) - activityRailWidth < 720 && !maximized) {
-    return <><ComputerPip/><button className="icon-button resource-compact-open" style={{right:activityRailWidth+12}} aria-label={`Open resources (${tabs.length})`} onClick={toggleMaximized}>
+    return <><ComputerPip paneVisible={false}/><button className="icon-button resource-compact-open" style={{right:activityRailWidth+12}} aria-label={`Open resources (${tabs.length})`} onClick={toggleMaximized}>
       <Maximize2 size={14}/>
     </button></>;
   }
-  const hidden=(resourcesHidden&&!viewer)||suspended;
-  return <><ComputerPip/><aside className="workspace" aria-label="Resources" aria-hidden={hidden} data-maximized={!hidden&&maximized} data-resizing={resizing||undefined} hidden={hidden}
+  const hidden=resourcesHidden||suspended;
+  return <><ComputerPip paneVisible={!hidden}/><aside className="workspace" aria-label="Resources" aria-hidden={hidden} data-maximized={!hidden&&maximized} data-resizing={resizing||undefined} hidden={hidden}
     style={{width:hidden?0:maximized ? `calc(100% - ${navHidden?0:navWidth}px - ${activityRailWidth}px)` : effectiveWidth,minWidth:hidden?0:280,maxWidth:'none',position:'relative'}}>
     {!maximized && <div className="resource-separator" role="separator" aria-label="Resize resources" aria-orientation="vertical" aria-valuemin={280} aria-valuemax={maxWidth} aria-valuenow={effectiveWidth} tabIndex={0}
       onPointerDown={e=>{drag.current={x:e.clientX,width:effectiveWidth};setResizing(true);e.currentTarget.setPointerCapture(e.pointerId);}}
@@ -55,7 +52,7 @@ export function ResourcePane({suspended=false}:{suspended?:boolean}) {
       onDoubleClick={()=>{latest.current=Math.round(viewport/3);setWidth(latest.current);persist();}}
       onKeyDown={e=>{if(e.key!=='ArrowLeft'&&e.key!=='ArrowRight')return;e.preventDefault();const delta=(e.shiftKey?32:8)*(e.key==='ArrowLeft'?1:-1);const value=Math.min(maxWidth,Math.max(280,effectiveWidth+delta));latest.current=value;setWidth(value);persist();}} />}
     <div className="right-pane-content">
-      {viewer ? <ComputerViewer/> : <Workspace onToggleResourceMaximize={toggleMaximized} resourceMaximized={maximized} headerAction={<Tip label={maximized?'Restore':'Maximize'}><button className="icon-button resource-maximize" aria-label={maximized?'Restore resource pane':'Maximize resource pane'} aria-pressed={maximized} onClick={toggleMaximized}>
+      {<Workspace onToggleResourceMaximize={toggleMaximized} resourceMaximized={maximized} headerAction={<Tip label={maximized?'Restore':'Maximize'}><button className="icon-button resource-maximize" aria-label={maximized?'Restore resource pane':'Maximize resource pane'} aria-pressed={maximized} onClick={toggleMaximized}>
         {maximized?<Minimize2 size={14}/>:<Maximize2 size={14}/>}</button></Tip>} />}
     </div>
   </aside></>;

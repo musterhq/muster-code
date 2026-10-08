@@ -5,6 +5,7 @@ import type {TimelineItem} from '../shared/protocol.ts';
 import type {ComputerControlOwner, ComputerFrame} from '../shared/domains/computer-protocol.ts';
 import {computerAction, computerUseTarget, type ComputerTarget} from '../shared/computer-use.ts';
 import {subscribe} from './bridge.ts';
+import {orderByRaise, raiseKey} from './pipLayout.ts';
 
 export type Corner = 'top-right' | 'top-left' | 'bottom-right' | 'bottom-left';
 export const PIP_MIN = 220, PIP_MAX = 480, PIP_DEFAULT = 300;
@@ -36,7 +37,7 @@ export function cornerPosition(corner: Corner, area: {left: number; top: number;
 }
 export interface Box {left: number; top: number; right: number; bottom: number; width: number; height: number}
 /** Stack metrics: gap under the summary card, inset from the conversation edge, how far each older card peeks. */
-export const STACK_GAP = 10, STACK_EDGE = 14, STACK_PEEK = 9, STACK_WIDTH = 280;
+export const STACK_GAP = 10, STACK_EDGE = 14, STACK_PEEK = 14, STACK_WIDTH = 280;
 /** The stack's cards are 16:10; each older card peeks above the one in front of it. */
 export const stackHeight = (width: number, count: number) => Math.round(width * 0.625) + STACK_PEEK * Math.max(0, Math.min(count, PIP_STACK_MAX) - 1);
 export const stackWidth = (card: Box | undefined) => Math.round(Math.min(320, Math.max(PIP_MIN, card?.width ?? STACK_WIDTH)));
@@ -125,6 +126,18 @@ export function mergeSources(frames: readonly PipSource[], steps: readonly PipSo
   for (const frame of frames) { const key = sourceKey(frame); byKey.set(key, pickSource(frame, byKey.get(key))!); }
   return [...byKey.values()].sort((a, b) => b.at - a.at).slice(0, max);
 }
+/** One PiP card per session: the chat plus the app or page. The key the z-order is kept under. */
+export const sessionKey = (source: Pick<PipSource, 'chatId' | 'target' | 'app' | 'url'>): string => `${source.chatId}|${sourceKey(source)}`;
+/** The right-sidebar tab a session opens as: the agent's real browser tab when it has one, else a live-view tab. */
+export function sessionTabId(source: Pick<PipSource, 'chatId' | 'target' | 'app' | 'url' | 'owner' | 'profileId'>): string {
+  if (source.target === 'browser' && source.owner && source.profileId) return source.owner;
+  return `live:${source.chatId}:${sourceKey(source).replace(/[^a-zA-Z0-9_.:-]+/g, '-')}`;
+}
+/** Cards in front-to-back order: sessions the user raised first (latest raise in front), the rest by recency. */
+export const orderPipSources = (sources: readonly PipSource[], raised: readonly string[]): PipSource[] => orderByRaise(sources, sessionKey, raised);
+/** A session is shown in exactly one place: while its tab is the visible one in the sidebar, its PiP card steps aside. */
+export const dockedSessions = (sources: readonly PipSource[], visibleTabId: string | null | undefined): Set<string> =>
+  new Set(visibleTabId ? sources.filter(source => sessionTabId(source) === visibleTabId).map(sessionKey) : []);
 export function pipShouldShow(source: PipSource | undefined, running: boolean, now: number): boolean {
   return !!source && (running || now - source.at < HIDE_AFTER_MS);
 }
@@ -135,7 +148,6 @@ export const hostOf = (url: string) => { try { return new URL(url).host || url; 
 
 // --- Per-window store -------------------------------------------------------
 const PLACEMENT_KEY = 'muster.computerPip';
-interface ViewerTarget {chatId: string; live: boolean; source?: PipSource}
 interface ComputerUiState {
   frames: Record<string, PipSource>;
   /** chatId → the last few distinct pages the agent's browser pushed frames for, newest first. */
@@ -143,8 +155,10 @@ interface ComputerUiState {
   control: Record<string, ComputerControlOwner>;
   placement: PipPlacement;
   minimized: boolean;
-  docked: boolean;
-  viewer: ViewerTarget | null;
+  /** Session keys the user raised, most recent first: the PiP z-order. */
+  raised: string[];
+  /** Screenshot tabs (tab id → the step and picture they show); live-view tabs read the chat's live sources instead. */
+  snapshots: Record<string, PipSource>;
   /** chatId → the newest agent browser tab main opened for it. */
   browsers: Record<string, {owner: string; profileId: string; url: string}>;
 }
@@ -155,7 +169,7 @@ function loadPlacement(): PipPlacement {
   } catch {}
   return {corner: 'top-right', width: PIP_DEFAULT};
 }
-let ui: ComputerUiState = {frames: {}, recentFrames: {}, control: {}, placement: typeof localStorage === 'undefined' ? {corner: 'top-right', width: PIP_DEFAULT} : loadPlacement(), minimized: false, docked: false, viewer: null, browsers: {}};
+let ui: ComputerUiState = {frames: {}, recentFrames: {}, control: {}, placement: typeof localStorage === 'undefined' ? {corner: 'top-right', width: PIP_DEFAULT} : loadPlacement(), minimized: false, raised: [], snapshots: {}, browsers: {}};
 const listeners = new Set<() => void>();
 function set(patch: Partial<ComputerUiState>): void { ui = {...ui, ...patch}; for (const listener of listeners) listener(); }
 export function computerUi(): ComputerUiState { return ui; }
@@ -168,9 +182,9 @@ export function setPlacement(placement: Partial<PipPlacement>): void {
   try { localStorage.setItem(PLACEMENT_KEY, JSON.stringify(next)); } catch {}
 }
 export const setMinimized = (minimized: boolean) => set({minimized});
-export const setDocked = (docked: boolean) => set({docked, ...(docked ? {minimized: false} : {})});
-export const openViewer = (target: ViewerTarget) => set({viewer: target});
-export const closeViewer = () => set({viewer: null, docked: false});
+/** Click on a back card: it comes to the front and the one that was in front goes behind. */
+export const raiseSession = (key: string) => set({raised: raiseKey(ui.raised, key)});
+export const setSnapshot = (tabId: string, source: PipSource) => set({snapshots: bounded({...ui.snapshots, [tabId]: source}, 24)});
 export function applyComputerEvent(event: {type: string; [key: string]: unknown}): void {
   if (event.type === 'computerFrame') {
     const frame = event.frame as ComputerFrame;

@@ -2,6 +2,10 @@
 
 :root {
   color-scheme: dark;
+  /* Layers: modal backdrop and dialog, then popovers/menus above any dialog (a picker opened inside a modal must not open behind it). */
+  --z-modal-backdrop: 110; --z-modal: 111; --z-popover: 130;
+  /* Chat reply rhythm (message-body.css): compact, ChatGPT-like. */
+  --md-leading: 1.52; --md-gap: 0.55em; --md-heading-gap: 1.05em; --md-strong-weight: 630;
   /* Neutral surfaces matched to the observed Cursor Agents window and its
      installed Cursor Dark palette; native material supplies sidebar blur. */
   --bg: #161616;
@@ -12,6 +16,7 @@
   --nav-material: rgb(19 19 19 / 46%);
   --nav-solid: #1a1a1a;
   --text: #e8e8e8;
+  --text-strong: #ffffff;
   --text-dim: rgb(232 232 232 / 72%);
   --text-faint: rgb(232 232 232 / 48%);
   --accent: #91abc2;
@@ -108,6 +113,7 @@
   --nav-material: rgb(244 244 244 / 55%);
   --nav-solid: #f2f2f2;
   --text: #1d1d1f;
+  --text-strong: #000000;
   --link: #0a64d6;
   --file-blue: #1f6feb;
   --file-yellow: #a07800;
@@ -1025,7 +1031,7 @@ textarea:focus-visible {
 /* Menus (UX-08/UX-21) ------------------------------------------------------ */
 /* One geometry for every Base UI menu (components/AppMenu.tsx). The doubled class outranks the older
    per-menu surface rules, which now only set widths and row content. */
-.ui-menu-positioner { z-index: 120; }
+.ui-menu-positioner { z-index: var(--z-popover); }
 :where(.ui-menu) { min-width: 200px; max-width: min(360px, calc(100vw - 24px)); max-height: var(--available-height, 70vh); overflow-y: auto; }
 .ui-menu.ui-menu {
   padding: 5px;
