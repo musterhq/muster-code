@@ -122,7 +122,7 @@ assert.deepEqual(revealCalls.map(call=>call.input.path).sort(),['README.md','not
 
 // Attach to composer: an @mention per selected path, inserted into the active chat's draft.
 (host.querySelector('[aria-label="Attach selected files to the composer"]') as HTMLButtonElement).click();await delay(20);
-const draft=store.getState().snapshot?.chats.find(c=>c.id==='chat')?.draft ?? '';
+const draft=store.getState().composerDrafts.chat?.text ?? store.getState().snapshot?.chats.find(c=>c.id==='chat')?.draft ?? '';
 assert.match(draft,/@README\.md/);assert.match(draft,/@notes\.md/);
 
 // The selection survives these non-destructive actions.

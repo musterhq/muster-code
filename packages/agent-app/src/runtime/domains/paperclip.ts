@@ -67,6 +67,8 @@ export interface PaperclipDomainOptions {
   /** `git config --get remote.origin.url` for a folder path (tests inject it). */
   remoteOf?: (path: string) => Promise<string | undefined>;
   timers?: { setTimeout: typeof setTimeout; clearTimeout: typeof clearTimeout };
+  /** #302: a forced refresh this soon after a completed read (with nothing changed since) is answered from it. Default 2500; 0 turns it off. */
+  refreshCoalesceMs?: number;
   /** The most one server output may weigh (50 MB); tests lower it. */
   outputMaxBytes?: number;
 }
@@ -167,6 +169,8 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
   let built: { generation: number; companyId: string; part: PaperclipPart; agents: Map<string, WorkspaceAgent> } | null = null;
   let companies: PaperclipLink['companies'] = [];
   let inflight: Promise<PaperclipPart> | null = null, lastError: string | undefined;
+  const REFRESH_COALESCE_MS = options.refreshCoalesceMs ?? 2500;
+  let readDoneAt = 0, readEpoch = -1, changeEpoch = 0;
   const chooseCompany = async (api: ServerBackend) => {
     companies = await api.companies();
     const chosen = companies.find(c => c.id === conn.config.companyId) ?? companies[0];
@@ -184,7 +188,7 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
   /** The connection changed (here, or by signing in from Settings): drop what was read from the old one and tell the screens. */
   /** The session cookie arrived, expired or was cleared: only the live socket is rebuilt; the next read tries it first. */
   const offSession = conn.onSession(() => { live.refusedAt = 0; closeSocket(); backend = null; built = null; if (conn.sessionState() !== 'expired') ensureSocket(); queueEmit(['config']); });
-  const offConnection = conn.onChange(() => { hub.reader?.reset(); live.refusedAt = 0; closeSocket(); stopPoll(); built = null; backend = null; companies = []; lastError = undefined; queueEmit(['config', 'tasks', 'runs', 'agents', 'inbox']); });
+  const offConnection = conn.onChange(() => { changeEpoch++; hub.reader?.reset(); live.refusedAt = 0; closeSocket(); stopPoll(); built = null; backend = null; companies = []; lastError = undefined; queueEmit(['config', 'tasks', 'runs', 'agents', 'inbox']); });
   /** Records the last read's outcome. Going offline (ok → stale) or coming back (stale → ok) is an update the screens
    *  must see at once: the banner and "· offline" come from it, so it is emitted rather than waiting for a reload. */
   const linkError = (next: string | undefined) => {
@@ -198,14 +202,20 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
     if (conn.config.mode !== 'off' && conn.config.backend === null) await conn.resolveBackend().catch(() => undefined);
     const api = connection();
     if (!api) return { part: null, link: null };
-    if (refresh) api.invalidate();
-    inflight ??= readPaperclip(api).then(part => { linkError(undefined); ensureSocket(); return part; }, cause => {
-      linkError(cause instanceof Error ? cause.message : String(cause));
-      if (built) return built.part;
-      throw cause;
-    }).finally(() => { inflight = null; });
+    // #302: startup has several callers asking for a forced refresh. A forced refresh right after a completed read,
+    // with nothing changed since (no write, live event or connection change bumps `changeEpoch`), is answered from that read.
+    const coalesced = refresh && !inflight && built !== null && readEpoch === changeEpoch && Date.now() - readDoneAt < REFRESH_COALESCE_MS;
+    if (refresh && !coalesced) api.invalidate();
+    if (!coalesced) {
+      const startedAt = changeEpoch;
+      inflight ??= readPaperclip(api).then(part => { linkError(undefined); ensureSocket(); readDoneAt = Date.now(); readEpoch = startedAt; return part; }, cause => {
+        linkError(cause instanceof Error ? cause.message : String(cause));
+        if (built) return built.part;
+        throw cause;
+      }).finally(() => { inflight = null; });
+    }
     try {
-      const part = await inflight;
+      const part = coalesced ? built!.part : await inflight!;
       return { part, link: { origin: originLabel(), company: companies.find(c => c.id === built?.companyId) ?? null, companies, live: live.channel, ...(conn.view().reconnect && live.channel !== 'socket' ? { reconnect: true, baseUrl: conn.baseUrl() } : {}), ...(lastError ? { stale: lastError, cached: true } : {}) } };
     } catch (cause) {
       return { part: null, link: { origin: originLabel(), company: null, companies, live: 'off', stale: cause instanceof Error ? cause.message : String(cause), cached: false } };
@@ -323,6 +333,7 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
     }, wait);
   };
   const queueEmit = (scopes: string[], taskId?: string) => {
+    changeEpoch++;
     for (const s of scopes) live.pending.add(s);
     if (taskId) live.taskIds.add(taskId);
     armEmit();

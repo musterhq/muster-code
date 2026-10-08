@@ -143,7 +143,7 @@ export const FileTree = React.memo(function FileTreeView({
   const attachSelectedToComposer = () => {
     const chat = activeChat();
     if (!chat) return;
-    let text = chat.draft;
+    let text = getState().composerDrafts[chat.id]?.text ?? chat.draft;
     for (const entryPath of selectedPaths()) text = insertWorkspaceReference(text, entryPath).text;
     setComposerDraft(chat.id, text);
   };

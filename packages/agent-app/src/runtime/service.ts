@@ -1,6 +1,7 @@
 import { applyPendingRestore } from './backups.ts';
 import { addMemory, listMemory, searchMemory, inspectMemoryStore, isVisibleInScopes, projectMemoryScope } from './memory-adapter.ts';
 import { createMemoryIdentity } from './memory-identity.ts';
+import { createSnapshotCoalescer } from './snapshot-coalescer.ts';
 import { HindsightService } from './hindsight-service.ts';
 import { MemoryConfigStore, MemoryTombstones, electronSecretBox } from './memory-context.ts';
 import { createHash } from 'node:crypto';
@@ -148,6 +149,8 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
   }
   let hindsight: HindsightService | undefined;
   const memoryIdentity = createMemoryIdentity();
+  // Fill the identity caches off the event loop so the sync lookups below rarely spawn git themselves.
+  void memoryIdentity.warm(store.snapshot().folders);
   // Legacy hindsight.* commands honour the in-app Memory settings too, not only environment variables.
   let secretBox: ReturnType<typeof electronSecretBox> | null = null;
   const memoryConfig = new MemoryConfigStore(options.dataDir, () => secretBox === null ? secretBox = electronSecretBox() : secretBox);
@@ -229,7 +232,10 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
     attention.chats.sort((a,b) => a.requests[0]!.createdAt.localeCompare(b.requests[0]!.createdAt) || a.chatId.localeCompare(b.chatId));
     return {...current, attention};
   };
-  const state = () => emit({ type: 'snapshot', snapshot: snapshot() });
+  /** F3: `state()` is called from ~56 places and each full snapshot is a SQLite read plus an IPC clone and a
+   *  renderer re-render; bursts collapse (snapshot-coalescer.ts). A command's reply flushes a pending one first. */
+  const snapshots = createSnapshotCoalescer(() => emit({ type: 'snapshot', snapshot: snapshot() }));
+  const state = (): void => snapshots.request();
   const publishedTimelineRevisions = new Map<string, number>();
   const timeline = (chatId: string) => {
     const after = publishedTimelineRevisions.get(chatId) ?? 0;
@@ -928,7 +934,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
     if (disposed || closing) throw new Error('Agent runtime is stopping or closed.');
     const pending = dispatch(command, input);
     invocations.add(pending);
-    try { return await pending as Commands[K]['output']; }
+    try { const result = await pending as Commands[K]['output']; snapshots.flush(); return result; }
     finally { invocations.delete(pending); }
   }
   async function dispatch(command: string, input: unknown): Promise<unknown> {
@@ -1609,7 +1615,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
       await Promise.allSettled([...invocations,...[...runs.values()].flatMap(run => run.promise ? [run.promise] : [])]);
       await domains.dispose();
       await toolOutputLog.flush().catch(() => {});
-      disposed = true; for (const timer of timers.values()) clearTimeout(timer); timers.clear(); customProviders.close(); annotations.close(); projectTasks.close(); store.close();
+      disposed = true; snapshots.dispose(); for (const timer of timers.values()) clearTimeout(timer); timers.clear(); customProviders.close(); annotations.close(); projectTasks.close(); store.close();
     })();
     return disposal;
   }};

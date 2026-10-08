@@ -5,7 +5,7 @@ import {forkChat} from '../messageActions';
 import {getState,activeChat,setResourcesHidden,toggleSummary,updateChat,notifyError} from '../store';
 import {openChatMenu} from '../chatMenu';
 import {useNewChatDraft} from '../newChatDraft';
-import {useStore} from '../useStore';
+import {useStoreSlice} from '../useStore';
 import {invoke} from '../bridge';
 import './work-controls.css';
 import {PendingAttention} from './PendingAttention';
@@ -30,7 +30,7 @@ function TerminalToggle({chatId,title}:{chatId:string;title:string}){
  * over the transcript, so the header no longer doubles as a pill.
  */
 function SummaryToggle(){
- const state=useStore();
+ const state=useStoreSlice('summaryHidden');
  const shown=!state.summaryHidden;
  const label=shown?'Hide summary':'Show summary';
  return <Tip label={label}><button className="icon-button summary-toggle" aria-label={label} aria-pressed={shown} onClick={toggleSummary}>
@@ -43,7 +43,7 @@ function SummaryToggle(){
 export function WorkControls(){
  // UX-24: same reasoning as SummaryToggle — a draft in progress is not "this chat" yet, so Copy link,
  // Fork, Rename and the ⋯ menu must not bind to whatever chat was active before New chat was opened.
- const state=useStore(),draft=useNewChatDraft(),chat=draft.open?null:activeChat();
+ const state=useStoreSlice('resourcesHidden','snapshot','activeChatId'),draft=useNewChatDraft(),chat=draft.open?null:activeChat();
  const [menuOpen,setMenuOpen]=useState(false);
  const [forking,setForking]=useState(false);
  const [renaming,setRenaming]=useState(false),[title,setTitle]=useState(''),[notice,setNotice]=useState('');

@@ -25,6 +25,7 @@ import { BridgeError, getBridge, invoke, subscribe } from './bridge';
 import { runtimeMessage } from './composerBridge';
 import { focusComposer } from './focus';
 import { killChatTerminals } from './processSummary';
+import { shareStructure } from './structuralShare';
 import { TimelineReplica } from './timeline-replica';
 import { recordTransport } from './connectionHealth';
 import { MAX_TABS, readWorkspace, saveWorkspace } from './workspacePersistence';
@@ -365,7 +366,8 @@ function timelineReplica(chatId: string): TimelineReplica {
 }
 function publishTimeline(chatId: string): void {
   const value = timelineReplicas.get(chatId)?.value;
-  if (value) set({timelines: {...state.timelines, [chatId]: {phase: 'ready', value: value.items}}});
+  const shown = state.timelines[chatId];
+  if (value && !(shown?.phase === 'ready' && shown.value === value.items)) set({timelines: {...state.timelines, [chatId]: {phase: 'ready', value: value.items}}});
 }
 
 export async function boot(): Promise<void> {
@@ -377,10 +379,19 @@ export async function boot(): Promise<void> {
   unsubscribe?.();
   removeFocusRefresh?.();
   let refreshingFocus = false;
+  let focusTimer: number | undefined;
   const refreshVisible = () => {
-    for (const folderId of new Set(state.tabs.map(tab=>tab.folderId))) if(folderId) void refreshResources(folderId);
     // Main intentionally suppresses events for a hidden window. Reconcile its
-    // durable state on focus rather than relying on another token arriving.
+    // durable state on focus rather than relying on another token arriving. A
+    // snapshot that just arrived is already current, so focus churn (alt-tab,
+    // dialogs) costs nothing; otherwise settle for a moment before fetching.
+    // Open resource listings always reconcile at once (files changed while another app had focus).
+    for (const folderId of new Set(state.tabs.map(tab=>tab.folderId))) if(folderId) void refreshResources(folderId);
+    if (Date.now() - lastSnapshotAt < FOCUS_REFRESH_FRESH_MS) return;
+    clearTimeout(focusTimer);
+    focusTimer = window.setTimeout(refreshNow, FOCUS_REFRESH_DEBOUNCE_MS);
+  };
+  const refreshNow = () => {
     if (refreshingFocus) return;
     refreshingFocus = true;
     if (state.automations.phase !== 'idle') void loadAutomations(true);
@@ -390,7 +401,7 @@ export async function boot(): Promise<void> {
     }).catch(cause => notifyError(cause)).finally(() => { refreshingFocus = false; });
   };
   window.addEventListener('focus',refreshVisible);
-  removeFocusRefresh = () => window.removeEventListener('focus',refreshVisible);
+  removeFocusRefresh = () => { clearTimeout(focusTimer); window.removeEventListener('focus',refreshVisible); };
   unsubscribe = subscribe((event) => {
     if (event.type === 'snapshot') applySnapshot(event.snapshot);
     else if (event.type === 'fileMoved') remapFileTab(event.folderId, event.from, event.to);
@@ -432,21 +443,28 @@ export async function boot(): Promise<void> {
 }
 
 let snapshotRevisionValue = 0;
+let lastSnapshotAt = 0;
+export const FOCUS_REFRESH_FRESH_MS = 2000;
+export const FOCUS_REFRESH_DEBOUNCE_MS = 150;
 /** Bumps once per runtime snapshot (not for local draft edits); lets views tell runtime truth from their own optimism. */
 export function snapshotRevision(): number { return snapshotRevisionValue; }
 
+function shareSnapshot(previous: Snapshot | null, next: Snapshot): Snapshot {
+  return previous ? shareStructure(previous, next) : next;
+}
+
 function applySnapshot(snapshot: Snapshot): void {
   snapshotRevisionValue++;
+  lastSnapshotAt = Date.now();
   // Snapshots are authoritative for chats/folders/projects. The active chat is
   // ours once the user picked one; only adopt the host's suggestion initially.
   const activeChatId =
     state.activeChatId && snapshot.chats.some((c) => c.id === state.activeChatId)
       ? state.activeChatId
       : (snapshot.activeChatId ?? snapshot.chats.find((c) => !c.archived)?.id ?? null);
-  set({ snapshot: { ...snapshot, chats: snapshot.chats.map(chat => {
-    const draft = state.composerDrafts[chat.id];
-    return draft ? { ...chat, draft: draft.text } : chat;
-  }) }, activeChatId });
+  // Drafts live in `composerDrafts` only (consumers read them from there); snapshot chats keep the
+  // persisted text so a keystroke never rebuilds `snapshot`.
+  set({ snapshot: shareSnapshot(state.snapshot, snapshot), activeChatId });
   if (activeChatId && !state.timelines[activeChatId]) void loadTimeline(activeChatId);
   if (activeChatId) void loadContextTelemetry(activeChatId);
 }
@@ -669,7 +687,6 @@ export function setComposerDraft(id: string, text: string): void {
   const previous = state.composerDrafts[id];
   set({
     composerDrafts: { ...state.composerDrafts, [id]: { text, revision: (previous?.revision ?? 0) + 1 } },
-    snapshot: state.snapshot ? { ...state.snapshot, chats: state.snapshot.chats.map(chat => chat.id === id ? { ...chat, draft: text } : chat) } : null,
   });
   clearTimeout(draftTimers.get(id));
   draftTimers.set(id, window.setTimeout(() => void flushComposerDraft(id), 250));

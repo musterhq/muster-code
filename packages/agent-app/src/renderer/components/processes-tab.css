@@ -67,12 +67,8 @@
 .process-note { margin:8px 0 0; color:var(--text-faint); font-size:var(--fs-11); line-height:1.5; }
 .process-error { margin:8px 0 0; color:var(--danger); font-size:var(--fs-11); line-height:1.5; overflow-wrap:anywhere; }
 .processes-empty { padding:30px 12px; text-align:center; color:var(--text-faint); font-size:var(--fs-12); }
-.process-panel { height:var(--collapsible-panel-height); overflow:hidden; }
-.process-panel[data-starting-style],.process-panel[data-ending-style] { height:0; }
-.process-panel[data-open][data-ending-style] { height:var(--collapsible-panel-height); }
 .process-chevron { transition:transform 180ms cubic-bezier(.2,.8,.2,1); }
 .process-disclosure-trigger[aria-expanded='true'] .process-chevron { transform:rotate(90deg); }
-@media(prefers-reduced-motion:no-preference) { .process-panel { transition:height 200ms cubic-bezier(.2,.8,.2,1); } }
 @media(prefers-reduced-motion:reduce) { .process-chevron { transition:none; } }
 /* S3-E: one-level Terminal — header, compact list (shells, commands, agent commands/servers), selected shell. */
 .terminal-pane-head { display:flex; align-items:center; gap:8px; flex:none; min-width:0; padding:6px 8px 6px 12px; border-bottom:1px solid var(--hairline); }

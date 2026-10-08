@@ -1,7 +1,7 @@
 import {transitionLayout} from '../layoutMotion';
 import { Maximize2, Minimize2 } from 'lucide-react';
 import React, { useEffect, useRef, useState } from 'react';
-import { useStore } from '../useStore';
+import {useStoreSlice} from '../useStore';
 import { Workspace } from './Workspace';
 import { ComputerPip } from './ComputerPip';
 import { dragPaneWidth } from '../paneResize';
@@ -15,7 +15,7 @@ function initialWidth() {
 
 /** Optional file/tool surface. Chat activity is rendered in its own persistent rail. */
 export function ResourcePane({suspended=false}:{suspended?:boolean}) {
-  const {navWidth, navHidden, tabs, resourcesHidden} = useStore();
+  const {navWidth, navHidden, tabs, resourcesHidden} = useStoreSlice('navWidth','navHidden','tabs','resourcesHidden');
   const [width, setWidth] = useState(initialWidth);
   const [maximized, setMaximized] = useState(false);
   const [viewport, setViewport] = useState(window.innerWidth);

@@ -45,7 +45,7 @@ import { requestNewProject } from '../projectIntent';
 import {Collapsible} from '@base-ui/react/collapsible';
 import {Menu} from '@base-ui/react/menu';
 import {PreviewCard} from '@base-ui/react/preview-card';
-import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {ensureArtifactSync, useHiddenSideChats} from '../artifacts';
 import { ARCHIVE_RUNNING_WARNING, type Chat, type Folder } from '../../shared/protocol';
 import {
@@ -65,8 +65,10 @@ import {
   reorderPins,
   reorderFolders,
   wakeChat,
+  getState,
+  type AppState,
 } from '../store';
-import { useStore, useStoreSelector } from '../useStore';
+import { useStoreSelector, useStoreSlice } from '../useStore';
 import { isChord } from '../focus';
 import { readCollapsed, saveCollapsed } from '../sidebarDisclosure';
 import { StatusDot } from './StatusDot';
@@ -99,13 +101,15 @@ import { ConfirmProjectAction, EditProjectDialog, toProjectDetails } from './Pro
 import {Tip} from './Tooltip';
 import { device } from '../../shared/device-noun.ts';
 
-const snapshotChats=(snapshot:ReturnType<typeof useStore>['snapshot']):Chat[]=>snapshot?.chats.filter(chat=>!chat.archived)??[];
+const snapshotChats=(snapshot:AppState['snapshot']):Chat[]=>snapshot?.chats.filter(chat=>!chat.archived)??[];
 const IS_MAC=typeof navigator!=='undefined'&&/mac/i.test(navigator.platform||navigator.userAgent||'');
 
 type RowProps = { chat: Chat; now: number; tabbable: boolean; onFocusRow: (id: string) => void; selected: boolean; selectionMode: boolean; onRowClick: (id: string, event: React.MouseEvent) => void; drag?: ItemDragProps };
 
-function ChatRow({ chat, now, tabbable, onFocusRow, selected, selectionMode, onRowClick, drag }: RowProps): React.ReactElement {
-  const state = useStore();
+const sameDrag=(a?:ItemDragProps,b?:ItemDragProps)=>a===b||(!!a&&!!b&&a.draggable===b.draggable&&a['data-drop']===b['data-drop']&&a['data-dragging']===b['data-dragging']&&a['aria-roledescription']===b['aria-roledescription']);
+/** Rows re-render only when their own chat object, selection or position changes; callbacks are stable (see Sidebar). */
+const ChatRow=React.memo(ChatRowImpl,(a,b)=>a.chat===b.chat&&a.now===b.now&&a.tabbable===b.tabbable&&a.selected===b.selected&&a.selectionMode===b.selectionMode&&a.onFocusRow===b.onFocusRow&&a.onRowClick===b.onRowClick&&sameDrag(a.drag,b.drag));
+function ChatRowImpl({ chat, now, tabbable, onFocusRow, selected, selectionMode, onRowClick, drag }: RowProps): React.ReactElement {
   const {summary: processSummary} = useProcessSummary();
   const [renaming, setRenaming] = useState(false);
   const [title, setTitle] = useState(chat.title);
@@ -114,14 +118,16 @@ function ChatRow({ chat, now, tabbable, onFocusRow, selected, selectionMode, onR
   const rowButton=useRef<HTMLElement|null>(null),renameInput=useRef<HTMLInputElement>(null);
   const renameCancelled=useRef(false),renamePending=useRef(false);
   const drafting = useNewChatDraft().open;
-  const active = !drafting && state.activeChatId === chat.id;
+  const activeId = useStoreSelector(state => state.activeChatId);
+  const active = !drafting && activeId === chat.id;
   const activeProcesses = processSummary?.sessions.filter(session => session.chatId === chat.id && isActiveProcess(session.status)).length ?? 0;
-  const pendingAttention = state.snapshot?.attention?.chats.find(item => item.chatId === chat.id)?.requests.length ?? 0;
-  const folder=state.snapshot?.folders.find(item=>item.id===chat.folderId);
+  const pendingAttention = useStoreSelector(state => state.snapshot?.attention?.chats.find(item => item.chatId === chat.id)?.requests.length ?? 0);
+  const folder = useStoreSelector(state => state.snapshot?.folders.find(item => item.id === chat.folderId));
+  // An unsent draft shows at once from the composer, before the runtime echoes it back.
+  const hasDraft = useStoreSelector(state => { const local = state.composerDrafts[chat.id]; return local ? local.text.length > 0 : Boolean(chat.draft); });
   // Timeline items are only kept live for the active chat (and a couple of open-tab edge cases);
   // everywhere else this stays undefined and the row just shows the chat's plain status.
-  const timelineItems=state.timelines[chat.id]?.value;
-  const rowStatus=timelineItems?displayStatus(chat,timelineItems):chat.status;
+  const rowStatus = useStoreSelector(state => { const items = state.timelines[chat.id]?.value; return items ? displayStatus(chat, items) : chat.status; });
   const age=compactAge(chat.updatedAt,now),exact=exactTime(chat.updatedAt),updated=relativeLabel(chat.updatedAt,now);
   const togglePin=()=>void updateChat(chat.id,{pinned:!chat.pinned});
   const snoozed=isSnoozed(chat),wakes=snoozed?snoozeLabel(chat,new Date(now)):'';
@@ -189,7 +195,7 @@ function ChatRow({ chat, now, tabbable, onFocusRow, selected, selectionMode, onR
             if(event.key==='ContextMenu'||(event.shiftKey&&event.key==='F10')){event.preventDefault();const rect=event.currentTarget.getBoundingClientRect();void showNativeMenu(rect.left,rect.bottom);}
             else if(event.key==='F2'){event.preventDefault();beginRename();}
           }}
-          onClick={event => { if(event.metaKey||event.ctrlKey||event.shiftKey){event.preventDefault();onRowClick(chat.id,event);return;} onRowClick(chat.id,event); closeNewChat(); if(state.activeChatId!==chat.id)void selectChat(chat.id); }}
+          onClick={event => { if(event.metaKey||event.ctrlKey||event.shiftKey){event.preventDefault();onRowClick(chat.id,event);return;} onRowClick(chat.id,event); closeNewChat(); if(getState().activeChatId!==chat.id)void selectChat(chat.id); }}
           onDoubleClick={event=>{event.preventDefault();beginRename();}}
         >
           <StatusDot status={rowStatus} unread={chat.unread} />
@@ -200,7 +206,7 @@ function ChatRow({ chat, now, tabbable, onFocusRow, selected, selectionMode, onR
             {activeProcesses > 0 && <span className="chat-running-badge" aria-hidden="true">{activeProcesses}</span>}
             {pendingAttention > 0 && <span className="chat-attention-badge" aria-hidden="true">{pendingAttention}</span>}
           </span>}
-          {chat.draft && <span className="chat-draft-dot" title="Unsent draft" />}
+          {hasDraft && <span className="chat-draft-dot" title="Unsent draft" />}
         </PreviewCard.Trigger>
       )}
       {renameError&&renaming&&<span className="chat-rename-error" role="alert">{renameError}</span>}
@@ -286,7 +292,10 @@ function useMinuteClock():number {
 }
 
 export function Sidebar(): React.ReactElement {
-  const state = useStore();
+  const state = useStoreSlice('activeChatId','automations','screen','snapshot');
+  // Rows are memoised, so the click handler they receive must keep its identity; it reads the latest closure.
+  const rowClickRef=useRef<(id:string,event:React.MouseEvent)=>void>(()=>{});
+  const stableRowClick=useCallback((id:string,event:React.MouseEvent)=>rowClickRef.current(id,event),[]);
   const draft = useNewChatDraft();
   const now = useMinuteClock();
   const runningAutomations = state.automations.value?.filter(automation => automation.activeRun?.status === 'running').length ?? 0;
@@ -471,7 +480,8 @@ export function Sidebar(): React.ReactElement {
     for(const chat of selectedChats()){try{await invoke('chat.delete',{id:chat.id});}catch(error){failed.push(chat.id);notifyError(error);}}
     setDeleteBusy(false);setConfirmDelete(false);setSelection(previous=>keepSelected(previous,failed));
   };
-  const context:RowContext={now,stop:rovingStop(visible,focusedRow,state.activeChatId),onFocusRow:setFocusedRow,selection,selectionMode:selection.selected.size>0,onRowClick:handleRowClick};
+  rowClickRef.current=handleRowClick;
+  const context:RowContext={now,stop:rovingStop(visible,focusedRow,state.activeChatId),onFocusRow:setFocusedRow,selection,selectionMode:selection.selected.size>0,onRowClick:stableRowClick};
   const onNavKey=(event:React.KeyboardEvent<HTMLDivElement>)=>{
     const target=event.target as HTMLElement;
     // ⌥⇧↑/⌥⇧↓: the keyboard equivalent of dragging a pinned chat or a folder one step (same result as the drop).

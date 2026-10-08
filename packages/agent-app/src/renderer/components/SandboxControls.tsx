@@ -75,7 +75,7 @@ function ResourcesSection({scope,computer,disabled,working,act,onStatus}:{scope:
 }
 function Meter({label,percent,text}:{label:string;percent:number|null;text:string}) {
   return <div className="sbx-meter"><span className="sbx-meter-label">{label}</span>
-    <span className="sbx-meter-track" role="meter" aria-label={`${label} usage`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent??0} aria-valuetext={text}><span className={`sbx-meter-fill${percent!==null&&percent>=90?' is-high':''}`} style={{width:`${percent??0}%`}}/></span>
+    <span className="sbx-meter-track" role="meter" aria-label={`${label} usage`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent??0} aria-valuetext={text}><span className={`sbx-meter-fill${percent!==null&&percent>=90?' is-high':''}`} style={{transform:`scaleX(${(percent??0)/100})`}}/></span>
     <span className="sbx-meter-text">{text}</span></div>;
 }
 

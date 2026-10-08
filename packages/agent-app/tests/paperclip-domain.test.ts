@@ -59,7 +59,7 @@ function paperclip(){
 function secretsFake(){const values=new Map<string,string>();return {values,store:{status:(id:string)=>({stored:values.has(id),updatedAt:null,secureStorage:true}),get:(id:string)=>values.get(id),set(id:string,v:string){values.set(id,v);return this.status(id);},clear(id:string){values.delete(id);return this.status(id);}}};}
 function fakeTimers(){const live=new Map<number,{fn:()=>void;ms:number}>();let n=0;return {live,setTimeout:((fn:()=>void,ms:number)=>{live.set(++n,{fn,ms});return n;}) as unknown as typeof setTimeout,clearTimeout:((id:number)=>{live.delete(id);}) as unknown as typeof clearTimeout,async fire(){const all=[...live];live.clear();for(const [,t] of all)await t.fn();}};}
 
-async function harness(t:TestContext,options:{socket?:SocketFactory;invoke?:(command:string,input:any)=>unknown;folders?:{id:string;name:string;path:string}[];fetch?:(input:string,init?:RequestInit)=>Promise<Response>}={}){
+async function harness(t:TestContext,options:{socket?:SocketFactory;invoke?:(command:string,input:any)=>unknown;folders?:{id:string;name:string;path:string}[];fetch?:(input:string,init?:RequestInit)=>Promise<Response>;coalesce?:boolean}={}){
   const dataDir=await mkdtemp(join(tmpdir(),'muster-paperclip-'));t.after(()=>rm(dataDir,{recursive:true,force:true}));
   const server=paperclip(),secrets=secretsFake(),timers=fakeTimers(),events:any[]=[],invoked:{command:string;input:any}[]=[];
   const {DatabaseSync}=await import('node:sqlite');const memory=new DatabaseSync(':memory:');t.after(()=>memory.close());
@@ -67,7 +67,7 @@ async function harness(t:TestContext,options:{socket?:SocketFactory;invoke?:(com
     async invoke(command:string,input:any){invoked.push({command,input});if(options.invoke){const r=options.invoke(command,input);if(r!==undefined)return r;}
       if(command==='mailbox.list')return {messages:[],unacked:0,pending:0};if(command==='project.list')return [];
       if(command==='memory.browse')return {records:[],status:{connection:'not-configured'}};throw new Error(`unexpected ${command}`);}} as unknown as DomainContext;
-  const domain=createPaperclipDomain(context,{fetch:(options.fetch??server.fetch) as never,secrets:()=>secrets.store as never,timers,socket:options.socket??(()=>{throw new Error('no socket');}),remoteOf:async path=>path.endsWith('oss')?'git@github.com:hybrowlabs/OSS-Manager.git':undefined});
+  const domain=createPaperclipDomain(context,{refreshCoalesceMs:options.coalesce?undefined:0,fetch:(options.fetch??server.fetch) as never,secrets:()=>secrets.store as never,timers,socket:options.socket??(()=>{throw new Error('no socket');}),remoteOf:async path=>path.endsWith('oss')?'git@github.com:hybrowlabs/OSS-Manager.git':undefined});
   t.after(()=>domain.dispose?.());
   const call=(command:string,input:Record<string,unknown>={})=>Promise.resolve(domain.handlers[command]!(input)) as Promise<any>;
   return {dataDir,server,secrets,timers,events,invoked,call,memory};
@@ -684,4 +684,35 @@ test('review S1: Resume with no recorded Pause wakes nothing, so an agent paused
   posts.length=0;await h.call('paperclip.resumeAll',{source:'paperclip'});
   assert.deepEqual(posts,['resume a-1']);assert.equal(status.get('a-purposely'),'paused');
   assert.deepEqual(await h.call('paperclip.resumeAll',{source:'paperclip'}),{changed:0},'a second Resume has nothing left to wake');
+});
+
+const reads=(calls:Call[])=>calls.filter(c=>c.method==='GET'&&c.url.startsWith(`/api/companies/${COMPANY}/issues`)).length;
+test('#302: startup refresh callers share one read; a write or a connection change still forces a fresh one',async t=>{
+  const h=await harness(t,{coalesce:true});
+  await h.call('paperclip.config.set',{mode:'local'});
+  await h.call('paperclip.snapshot',{refresh:true});
+  const afterFirst=reads(h.server.calls);
+  assert.equal(afterFirst,1,'the first read fetches the issues once');
+  // Ten startup callers all ask for a forced refresh right after the read completed: no endpoint is fetched again.
+  for(let i=0;i<10;i++)await h.call('paperclip.snapshot',{refresh:true});
+  assert.equal(reads(h.server.calls),afterFirst,'refreshes inside the window are answered from the completed read');
+  // A write marks the data as changed, so the next forced refresh re-reads.
+  h.server.bump();
+  await h.call('paperclip.comment',{taskId:'RAG-12',body:'hello'});
+  await h.call('paperclip.snapshot',{refresh:true});
+  assert.ok(reads(h.server.calls)>afterFirst,'a refresh after a write reads again');
+  // Reconnecting (config change) drops the cached read entirely.
+  const before=reads(h.server.calls);
+  await h.call('paperclip.config.set',{mode:'local'});
+  await h.call('paperclip.snapshot',{refresh:true});
+  assert.ok(reads(h.server.calls)>before,'a connection change reads again');
+});
+
+test('#302: with coalescing off (0 ms) every forced refresh reads, as before',async t=>{
+  const h=await harness(t);
+  await h.call('paperclip.config.set',{mode:'local'});
+  await h.call('paperclip.snapshot',{refresh:true});
+  const first=reads(h.server.calls);
+  for(let i=0;i<3;i++)await h.call('paperclip.snapshot',{refresh:true});
+  assert.equal(reads(h.server.calls),first+3);
 });
