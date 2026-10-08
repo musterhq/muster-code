@@ -6,7 +6,8 @@ import type {MemoryAutoRetain,MemoryConfigView} from '../../shared/domains/memor
 import {invoke} from '../bridge';
 import {activeChat,closeSettings,notifyError,notifySuccess,openMemoryScreen,resetSettings,setFollowUpMode,setPluginView,setSetting,setSettingsSection,setSummaryHidden,type SettingsSection} from '../store';
 import {setTerminalDock,subscribeTerminalDock,terminalDock} from '../processSummary';
-import {checkForUpdates,installUpdate,INSTALLS_IN_PLACE,setAutoCheckUpdates,updateSummary,useUpdateStatus} from '../updates';
+import {checkForUpdates,installExplanation,installLabel,installsInPlace,installUpdate,setAutoCheckUpdates,updateSummary,useUpdateStatus} from '../updates';
+import {copyText} from '../clipboard';
 import {DEFAULT_DIFF_PREFERENCES,clearGlobalDiffPreferences,hasGlobalDiffPreferences,saveGlobalDiffPreferences,useDiffPreferences,type DiffPreferences} from '../diff-preferences';
 import {useStore,useStoreSelector} from '../useStore';
 import {restoreFocus} from '../focus';
@@ -153,13 +154,16 @@ function UpdatesGroup():React.ReactElement|null {
     <h3 className="preference-group-title">Updates</h3>
     <div className="preference-group">
       <Row title={`Muster Agent ${status.current}`} scope={`${DEVICE} · ${status.channel} channel`} description={updateSummary(status)}>
-        {status.phase==='available'&&!INSTALLS_IN_PLACE
-          ?<button type="button" className="settings-button" disabled={busy} onClick={()=>void act(installUpdate)}>Download update</button>
+        {status.phase==='available'&&!installsInPlace(status)
+          ?<button type="button" className="settings-button" disabled={busy} onClick={()=>void act(installUpdate)}>{installLabel(status)}</button>
           :status.phase==='ready'
-          ?<button type="button" className="settings-button" disabled={busy} onClick={()=>void act(installUpdate)}><RotateCcw size={14}/>Update and relaunch</button>
+          ?<button type="button" className="settings-button" disabled={busy} onClick={()=>void act(installUpdate)}><RotateCcw size={14}/>{installLabel(status)}</button>
           :status.phase!=='disabled'&&<button type="button" className="settings-button secondary" disabled={working} onClick={()=>void act(checkForUpdates)}>{status.phase==='checking'?'Checking…':'Check for updates'}</button>}
       </Row>
-      {status.phase!=='disabled'&&<Row title="Check for updates automatically" scope={DEVICE} description="Checks GitHub Releases shortly after launch, every hour and when you come back to the window, downloads a newer version in the background and verifies its checksum and signature. Nothing installs until you restart.">
+      {status.manualCommand&&<Row title="Install from a terminal" scope={DEVICE} description={<code className="settings-path">{status.manualCommand}</code>}>
+        <button type="button" className="settings-button secondary" onClick={()=>void act(()=>copyText(status.manualCommand!))}>Copy command</button>
+      </Row>}
+      {status.phase!=='disabled'&&<Row title="Check for updates automatically" scope={DEVICE} description={`Checks GitHub Releases shortly after launch, every hour and when you come back to the window. ${installExplanation(status)} Nothing installs until you choose to.`}>
         <Switch label="Check for updates automatically" checked={status.autoCheck} onChange={value=>void act(()=>setAutoCheckUpdates(value))}/>
       </Row>}
     </div>

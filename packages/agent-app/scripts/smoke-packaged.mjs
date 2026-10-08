@@ -135,8 +135,13 @@ try {
     } catch (error) { fail(`the ${label} agent tool launcher failed: ${error instanceof Error ? error.message : String(error)}`); }
   }
   const updates = await invoke('updates.status', undefined);
-  console.log(`updates: ${updates.phase} (current ${updates.current})`);
+  console.log(`updates: ${updates.phase} (current ${updates.current}, installs via ${updates.method ?? 'unknown'})`);
   if (process.env.SMOKE_EXPECT_UPDATES === '1' && updates.phase === 'disabled') fail('updates are disabled: the packaged build has no update source.');
+  // How this install updates itself (nsis, appimage, deb, manual): proves the app recognised the way it was installed.
+  if (process.env.SMOKE_EXPECT_UPDATE_METHOD) {
+    if (updates.method !== process.env.SMOKE_EXPECT_UPDATE_METHOD) fail(`update method is ${updates.method}, expected ${process.env.SMOKE_EXPECT_UPDATE_METHOD}.`);
+    else console.log(`update method: ${updates.method}`);
+  }
   // The installed deb must keep the sandbox ON (its AppArmor profile grants user namespaces): no launcher fallback notice.
   if (process.env.SMOKE_EXPECT_SANDBOX === '1' && /starting with --no-sandbox/.test(appOutput)) fail('the launcher fell back to --no-sandbox; the installed package should keep the sandbox on.');
   if (!process.exitCode) console.log('SMOKE OK');

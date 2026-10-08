@@ -13,6 +13,7 @@ import type { ProviderDiagnosis, ProviderStage } from '../shared/domains/provide
 import { accountHash, parseProviderAccounts, providerAccountsFile, providerDataDir } from './provider-instances.ts';
 import { ENV_KEY_PROVIDERS } from './env-providers.ts';
 import { CODEX_LAUNCHER, cliSpawn } from './adapters/shared.ts';
+import {unpackedPath} from './unpacked-path.ts';
 import { readCodexCatalog } from './codex-catalog.ts';
 
 export interface DiagnoseOptions { home?: string; env?: NodeJS.ProcessEnv; directory?: string; now?: () => number; version?: (cli: string) => Promise<string | null>; dataDir?: string }
@@ -73,7 +74,7 @@ function codexSteps(p: ProviderInfo, options: Required<Pick<DiagnoseOptions, 'ho
   const authFile = join(codexHome, 'auth.json');
   const readAuth = () => { try { return readSmall(authFile); } catch { return null; } };
   if (family === 'codex') return {step: authStage(readAuth(), now, login, false), cli, facts};
-  const launcher = join(directory, 'resources', CODEX_LAUNCHER);
+  const launcher = unpackedPath(join(directory, 'resources', CODEX_LAUNCHER));
   if (!executable(launcher)) return {step: {stage: 'executable-missing', summary: 'Muster’s bundled Codex launcher is missing or not executable.', hint: 'Reinstall Muster to restore its launcher scripts.'}, cli, facts};
   const profile = p.codex?.profile;
   // Routes from config.toml or the plain ChatGPT sign-in have no profile file: their own status says what is missing.

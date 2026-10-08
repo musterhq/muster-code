@@ -252,6 +252,10 @@ jobs:
             packages/agent-app/release-dist/*.tar.gz
             packages/agent-app/release-dist/*-setup.exe
             packages/agent-app/release-dist/*-win-*.zip
+            packages/agent-app/release-dist/*.blockmap
+            packages/agent-app/release-dist/latest*.yml
+            packages/agent-app/release-dist/beta*.yml
+            packages/agent-app/release-dist/alpha*.yml
 
   # Muster Server ships in the same release: one Node bundle (esbuild) plus the Node 24 runtime per platform. The store is
   # node:sqlite (built into Node), so there is no native addon to rebuild; the tarball carries the platform's own `node`.
@@ -351,7 +355,9 @@ jobs:
           cd out
           MODES="$(cat signing-*.txt | sort -u | tr '\n' ' ')"
           rm -f signing-*.txt
-          sha256sum Muster-Agent-* muster-server-* > SHA256SUMS
+          # Update metadata for Windows/Linux in-place updates (latest.yml, latest-linux.yml; beta*.yml for prereleases) and
+          # the installers' .blockmap files are checksummed like everything else.
+          sha256sum Muster-Agent-* muster-server-* $(ls latest*.yml beta*.yml alpha*.yml 2>/dev/null) > SHA256SUMS
           cat SHA256SUMS
           PRERELEASE=false
           # Stable versions publish as the repository's latest release (shown in the sidebar) whatever the signing mode;
@@ -396,6 +402,8 @@ jobs:
             echo
             echo "Extract it, then \`bin/muster-server init\` and \`bin/muster-server start\`. It includes its own Node runtime. Docker, systemd and TLS setups are in [docs/server.md](https://github.com/${{ github.repository }}/blob/main/docs/server.md)."
             echo
+            echo "Windows (installed with the setup.exe), AppImage and Debian/Ubuntu installs update themselves from Settings › Updates, downloading only what changed where they can."
+            echo
             echo "Checksums for every file are in \`SHA256SUMS\`."
             if [[ "$MODES" != "developer-id-notarized " ]]; then
               echo
@@ -430,4 +438,8 @@ jobs:
             out/Muster-Agent-*.deb
             out/Muster-Agent-*.tar.gz
             out/muster-server-*.tar.xz
+            out/Muster-Agent-*.blockmap
+            out/latest*.yml
+            out/beta*.yml
+            out/alpha*.yml
             out/SHA256SUMS

@@ -52,7 +52,7 @@ jobs:
       - name: Linux build tools
         if: matrix.os == 'linux'
         working-directory: .
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends build-essential python3 xvfb libgtk-3-0 libnss3 libxss1 libgbm1 libasound2t64 rpm fakeroot
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends build-essential python3 xvfb libgtk-3-0 libnss3 libxss1 libgbm1 libasound2t64 rpm fakeroot desktop-file-utils xdg-utils
 
       - name: Install
         run: npm ci --no-audit --no-fund
@@ -61,6 +61,13 @@ jobs:
         run: |
           npx tsc --noEmit
           npm run build
+
+      # In-place updates against a local fake GitHub release server: an old version updates to a new one (AppImage and
+      # setup.exe differential downloads, deb via a stand-in pkexec), a corrupt download is rejected, a downgrade is
+      # refused, a 5xx falls back to the API asset endpoint (#317). macOS runs the same files in agent-app-ci.yml.
+      - name: Updater and installer tests
+        shell: bash
+        run: node --max-old-space-size=1024 --experimental-transform-types --test tests/app-updater.test.ts tests/app-updater-e2e.test.ts tests/installers-config.test.ts tests/package-size.test.ts
 
       - name: Package
         shell: bash
@@ -85,6 +92,7 @@ jobs:
           APPIMAGE_EXTRACT_AND_RUN=1 xvfb-run -a node scripts/smoke-packaged.mjs "$(ls "$PWD"/release-dist/*.AppImage)"
         env:
           SMOKE_EXPECT_UPDATES: '1'
+          SMOKE_EXPECT_UPDATE_METHOD: appimage
           SMOKE_PORT: '9478'
 
       - name: Smoke test (Linux .deb installed, sandbox stays ON)
@@ -100,7 +108,16 @@ jobs:
         env:
           SMOKE_EXPECT_UPDATES: '1'
           SMOKE_EXPECT_SANDBOX: '1'
+          SMOKE_EXPECT_UPDATE_METHOD: deb
           SMOKE_PORT: '9479'
+
+      - name: Check the installed deb (desktop entry, muster:// handler, icons, chrome-sandbox, app.asar)
+        if: matrix.os == 'linux'
+        run: bash scripts/test-linux-install.sh
+
+      - name: Remove the deb
+        if: matrix.os == 'linux'
+        run: bash scripts/test-linux-install.sh --remove
 
       - name: Verify Linux packages (desktop entry, AppArmor, launcher)
         if: matrix.os == 'linux'
@@ -111,6 +128,25 @@ jobs:
         run: node scripts/smoke-packaged.mjs
         env:
           SMOKE_EXPECT_UPDATES: '1'
+          SMOKE_EXPECT_UPDATE_METHOD: manual
+
+      - name: Install, update in place, launch and uninstall (Windows)
+        if: matrix.os == 'windows'
+        shell: pwsh
+        run: ./scripts/test-windows-install.ps1
+
+      # A typical small release (one string changes, the renderer is rebuilt, the version bumps), packaged again: how much
+      # an in-place update downloads with the block maps, compared with the full installer.
+      - name: Measure a differential update
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/old"
+          cp release-dist/*.AppImage "$RUNNER_TEMP/old/" 2>/dev/null || cp release-dist/*-setup.exe release-dist/*-setup.exe.blockmap "$RUNNER_TEMP/old/"
+          node -e "const f='src/renderer/updates.ts',fs=require('fs');fs.writeFileSync(f,fs.readFileSync(f,'utf8').replace('Checking for updates…','Looking for updates…'))"
+          npm run build
+          NEXT=$(node -p "const v=require('./package.json').version.split('-')[0].split('.');v[2]=+v[2]+1;v.join('.')")
+          npx electron-builder ${{ matrix.os == 'linux' && '--linux AppImage' || '--win nsis' }} --publish never -c.extraMetadata.version=$NEXT -c.directories.output=release-next -c.extraMetadata.musterUpdateRepo=${{ github.repository }}
+          node --experimental-transform-types scripts/measure-update-size.mjs "$RUNNER_TEMP/old" release-next
 
       - name: List artifacts
         shell: bash
@@ -126,3 +162,46 @@ jobs:
             packages/agent-app/release-dist/*.tar.gz
             packages/agent-app/release-dist/*-setup.exe
             packages/agent-app/release-dist/*.zip
+            packages/agent-app/release-dist/*.blockmap
+            packages/agent-app/release-dist/latest*.yml
+
+  # The Linux packages on a stock Ubuntu 24.04 userland (no libfuse2, no desktop): the deb installs with apt and starts,
+  # and the AppImage's runtime does not ask for libfuse.so.2 (#317).
+  ubuntu-24-04:
+    needs: package
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    container: ubuntu:24.04
+    defaults:
+      run:
+        working-directory: packages/agent-app
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: packages/agent-app/.nvmrc
+      - uses: actions/download-artifact@v4
+        with:
+          name: muster-agent-linux
+          path: packages/agent-app/release-dist
+      - name: Install the deb with apt
+        run: |
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends xvfb xauth desktop-file-utils ./release-dist/Muster-Agent-*-linux-amd64.deb
+          ! dpkg -s libfuse2t64 >/dev/null 2>&1 && ! dpkg -s libfuse2 >/dev/null 2>&1 && echo "libfuse2 is not installed"
+          bash scripts/test-linux-install.sh
+      - name: Launch the installed app (as a regular user)
+        run: |
+          useradd -m tester
+          chmod -R a+rX "$GITHUB_WORKSPACE"
+          su tester -c "cd '$PWD' && SMOKE_EXPECT_UPDATES=1 SMOKE_EXPECT_UPDATE_METHOD=deb xvfb-run -a $(command -v node) scripts/smoke-packaged.mjs /usr/bin/muster-agent"
+      - name: AppImage without libfuse2
+        run: |
+          app="$(ls "$PWD"/release-dist/*.AppImage)"
+          chmod +x "$app"
+          # Mounting is attempted (the container has no /dev/fuse, so it fails either way): the legacy runtime fails with
+          # "dlopen(): error loading libfuse.so.2", the static type 2 runtime only reports the missing FUSE device.
+          out=$(timeout 30 "$app" --version 2>&1 || true); echo "$out"
+          ! echo "$out" | grep -q 'libfuse.so.2' || { echo "the AppImage runtime still needs libfuse2"; exit 1; }
+          cp "$app" /tmp/Muster.AppImage && chown tester /tmp/Muster.AppImage
+          su tester -c "cd '$PWD' && APPIMAGE_EXTRACT_AND_RUN=1 SMOKE_EXPECT_UPDATES=1 SMOKE_PORT=9482 xvfb-run -a $(command -v node) scripts/smoke-packaged.mjs /tmp/Muster.AppImage"

@@ -6,6 +6,8 @@ All notable changes to Muster Agent. Each `## <version>` section becomes the not
 ## Unreleased
 
 - Smaller downloads, same app (#315). The Windows and Linux packages no longer carry about 190 MB of npm packages that were already bundled into the app (only node-pty ships), Chromium language packs other than English are dropped on every system, the Mac disk image is LZMA-compressed (about 40 MB smaller), and the Muster Server download is a `.tar.xz` (extract with `tar -xf`). A size check in CI keeps it that way.
+- Windows and Linux update in place (#317). Settings › Updates and the sidebar say what happens on your system: the Windows installer version downloads only the changed parts of the next installer once it has updated once, then closes Muster, installs silently for your user (no admin prompt) and reopens it; the AppImage downloads only the blocks that changed, replaces itself and restarts; the .deb downloads the new package and installs it with apt after your administrator password (or shows the command to run). Every update is still checked against SHA256SUMS, comes only from this repository's GitHub releases, and never goes to an older version. The Windows zip and Linux tar.gz open the release page as before.
+- Installers: the Windows app is one `app.asar` instead of about 10,000 loose files (faster install and Defender scans), the installer registers `muster://` and the uninstaller removes it, and notifications carry the app's own ID. The AppImage uses the type 2 runtime, so it starts on Ubuntu 24.04 without installing libfuse2, and the deb ships every icon size.
 
 ## 0.3.5
 

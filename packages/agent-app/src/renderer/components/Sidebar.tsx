@@ -40,7 +40,7 @@ import {
   History as LedgerIcon,
   Check as CheckIcon,
 } from 'lucide-react';
-import {installUpdate,INSTALLS_IN_PLACE,updateSummary,useUpdateStatus} from '../updates';
+import {installLabel,installsInPlace,installUpdate,updateSummary,useUpdateStatus} from '../updates';
 import { requestNewProject } from '../projectIntent';
 import {Collapsible} from '@base-ui/react/collapsible';
 import {Menu} from '@base-ui/react/menu';
@@ -672,10 +672,11 @@ export function Sidebar(): React.ReactElement {
 /** Appears above Settings only while an update downloads or waits for a restart (src/renderer/updates.ts). */
 function UpdateFooterAction():React.ReactElement|null {
   const status=useUpdateStatus();
-  const download=status?.phase==='available'&&!INSTALLS_IN_PLACE;
+  const download=status?.phase==='available'&&!installsInPlace(status);
   if(!status||(!download&&status.phase!=='ready'&&status.phase!=='downloading'&&status.phase!=='installing'))return null;
   const ready=status.phase==='ready'||download;
-  const label=download?`Download update · ${status.latest?.version}`:ready?`Update and relaunch · ${status.latest?.version}`:status.phase==='installing'?'Relaunching…':`Downloading ${status.latest?.version}${status.progress!==undefined?` · ${Math.round(status.progress*100)}%`:''}…`;
+  // The label says what pressing it does here (Settings › Updates explains each platform); the tooltip has the detail.
+  const label=ready?`${installLabel(status)} · ${status.latest?.version}`:status.phase==='installing'?(status.method==='deb'?'Installing…':'Relaunching…'):`Downloading ${status.latest?.version}${status.progress!==undefined?` · ${Math.round(status.progress*100)}%`:''}…`;
   return <button type="button" className="nav-footer-action nav-footer-update" data-phase={status.phase} disabled={!ready} title={updateSummary(status)}
     onClick={()=>void installUpdate().catch(cause=>notifyError(cause))}>
     <ArrowDownCircle size={15} aria-hidden="true"/><span>{label}</span>
