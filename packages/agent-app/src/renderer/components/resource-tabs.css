@@ -86,7 +86,7 @@
 .workspace-head > .resource-add-trigger { flex: none; align-self: center; width: 26px; height: 26px; margin: 0 auto 0 4px; color: var(--text-faint); border-radius: var(--radius-6); }
 .workspace-head > .resource-add-trigger:hover, .workspace-head > .resource-add-trigger[data-popup-open] { color: var(--text); background: var(--bg-hover); }
 .resource-add-trigger:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
-.resource-add-positioner { z-index: 100; }
+.resource-add-positioner { z-index: var(--z-popover); }
 .resource-add-popup { width: min(340px, calc(100vw - 32px)); max-height: min(440px, var(--available-height, 440px)); display: flex; flex-direction: column; padding: 5px; background: var(--bg-raised); border: 1px solid rgb(var(--fg-rgb) / 10%); border-radius: var(--radius-10); box-shadow: var(--shadow-popover); color: var(--text); transform-origin: var(--transform-origin); transition: opacity 120ms ease, transform 120ms ease; outline: 0; }
 .resource-add-popup[data-starting-style], .resource-add-popup[data-ending-style] { opacity: 0; transform: translateY(-3px) scale(.98); }
 .resource-add-search { display: flex; align-items: center; gap: 8px; padding: 7px 9px 9px; margin-bottom: 4px; border-bottom: 1px solid var(--hairline); color: var(--text-faint); }

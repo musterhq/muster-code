@@ -3,6 +3,10 @@
 All notable changes to Muster Agent. Each `## <version>` section becomes the notes of the
 `agent-v<version>` GitHub Release (`.github/workflows/agent-app-release.yml`).
 
+## Unreleased
+
+- Renderer polish (#309, #310, #311). The New task owner list now opens above the dialog (menus and pickers share one popover layer above modals). Chat replies use a compact rhythm: a 0.55em gap between paragraphs, lists and quotes, 1.52 line height, and clearer bold (weight 630, stronger colour). A plain-text reply gets light emphasis: a leading short "Label:" ("Note:", "Root cause:") is shown in bold, never inside code or links, and the text is not changed. The Stopped/Interrupted banner stays inside the chat column instead of spanning the sidebar.
+
 ## 0.3.5
 
 - Outputs of a server project open on your Mac (#305). Every document, attachment and work product in a connected project's Outputs tab is a link: Muster downloads it with your own sign-in into a private cache (readable only by you, one folder per server, 50 MB at most) and shows it in its own viewer, with a spinner while it loads and a plain sentence if the server refuses or no longer has it. When the project is linked for Work locally and the same file exists in that folder, the local file opens instead. Each row also has Download… (a save dialog) and Open on server. Pull requests and links open as before, and local projects are unchanged.
