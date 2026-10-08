@@ -11,13 +11,14 @@ import './tool-card.css';
 import {Collapsible} from '@base-ui/react/collapsible';
 import {invoke} from '../bridge';
 import {computerAction,type ComputerAction} from '../../shared/computer-use';
-import {openViewer,toolImageUrl,toolShots,type PipSource,type ToolShot} from '../computerUse';
+import {toolImageUrl,toolShots,type PipSource,type ToolShot} from '../computerUse';
 import {itemPatches} from '../patchModel';
 import {FileChangeView} from './FileDiffEditor';
 import {DiffStat} from './DiffStat';
 import {MessageBody} from './MessageBody';
 import {Tip} from './Tooltip';
 import {AppGlyph} from './AppGlyph';
+import {openScreenshotTab} from './ComputerPip';
 
 type Glyph = React.ComponentType<{size?: number; strokeWidth?: number; 'aria-hidden'?: boolean | 'true'}>;
 /** Codex transcript glyphs: thin, monochrome, one per verb. */
@@ -30,7 +31,7 @@ export function ToolGlyph({kind,running=false,image=false}:{kind:ToolKind;runnin
 function Shot({shot,source,index}:{shot:ToolShot;source:PipSource;index:number}) {
   const [url,setUrl]=useState(shot.dataUrl);
   useEffect(()=>{if(shot.dataUrl){setUrl(shot.dataUrl);return;}let live=true;toolImageUrl(shot,id=>invoke('computer.image',{id})).then(value=>{if(live)setUrl(value);},()=>{});return()=>{live=false;};},[shot.id,shot.dataUrl]);
-  return <button type="button" className="tool-shot" aria-label={`Open screenshot ${index+1} full size`} onClick={()=>openViewer({chatId:source.chatId,live:false,source:{...source,image:shot}})}>
+  return <button type="button" className="tool-shot" aria-label={`Open screenshot ${index+1} full size`} onClick={()=>openScreenshotTab({...source,image:shot})}>
     {url&&<img src={url} alt="" draggable={false} decoding="async" loading="lazy"/>}
     {shot.width&&shot.height?<span className="tool-shot-size">{shot.width}×{shot.height}</span>:null}
   </button>;
