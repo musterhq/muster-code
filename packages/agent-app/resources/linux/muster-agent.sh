@@ -43,6 +43,21 @@ case "${MUSTER_NO_SANDBOX:-}" in
   *) case " $* " in *" --no-sandbox "*) add=0 ;; *) if sandbox_usable; then add=0; else add=1; fi ;; esac ;;
 esac
 
+# The setuid sandbox helper is launched through Chromium's command-line wrapper, which splits the helper path on
+# whitespace: "/opt/Muster Agent/chrome-sandbox" becomes "/opt/Muster" + "Agent/chrome-sandbox" and the zygote dies with
+# exit code 127 (Ubuntu 24.04 and any host where the deb's postinst made chrome-sandbox setuid). Point Chromium at a
+# space-free symlink to the real helper (setuid applies to the target).
+if [ "$add" = 0 ] && [ -z "${CHROME_DEVEL_SANDBOX:-}" ] && [ -u "$dir/chrome-sandbox" ]; then
+  case "$dir" in
+    *[[:space:]]*)
+      link_dir="${TMPDIR:-/tmp}/muster-agent-$(id -u)"
+      case "$link_dir" in *[[:space:]]*) link_dir="/tmp/muster-agent-$(id -u)" ;; esac
+      if mkdir -p "$link_dir" 2>/dev/null && chmod 700 "$link_dir" 2>/dev/null && ln -sfn "$dir/chrome-sandbox" "$link_dir/chrome-sandbox" 2>/dev/null; then
+        CHROME_DEVEL_SANDBOX="$link_dir/chrome-sandbox"; export CHROME_DEVEL_SANDBOX
+      fi ;;
+  esac
+fi
+
 if [ "$add" = 1 ]; then
   echo "muster-agent: user namespaces are restricted here and chrome-sandbox is not setuid, starting with --no-sandbox. Install the .deb (it adds an AppArmor profile) to keep the sandbox." >&2
   exec "$bin" --no-sandbox "$@"
