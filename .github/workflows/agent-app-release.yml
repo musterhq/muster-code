@@ -144,7 +144,7 @@ jobs:
           security delete-keychain "$RUNNER_TEMP/muster-sign.keychain-db" 2>/dev/null || true
           rm -f "$RUNNER_TEMP/muster-sign.p12" "$RUNNER_TEMP/muster-sign.pw"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: muster-agent-${{ matrix.arch }}
           path: |
@@ -233,7 +233,7 @@ jobs:
         run: node scripts/smoke-packaged.mjs
         env:
           SMOKE_EXPECT_UPDATES: '1'
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: muster-agent-${{ matrix.os }}
           if-no-files-found: error
@@ -301,7 +301,7 @@ jobs:
           "$BIN" --version
           echo 'smoke-test-password-1' | "$BIN" init --data-dir "$DIR/data" --username smoke --port 17999 --password-stdin
           "$BIN" doctor --data-dir "$DIR/data"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: muster-server-${{ matrix.platform }}
           path: packages/server/release-dist/muster-server-*.tar.gz
