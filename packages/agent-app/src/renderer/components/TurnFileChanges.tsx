@@ -7,9 +7,10 @@ import {splitChangeTotals} from '../changeCounts';
 import {useDisclosure} from './useDisclosure';
 import {basename,resolveToolPath,uniqueFileLabels} from './toolPresentation';
 import {normalizeChange} from '../patchModel';
-import {collectFileChanges,type FileChangeEntry} from '../turnFileChanges';
+import {collectFileChanges,mergeReviewFiles,type FileChangeEntry} from '../turnFileChanges';
 import {getState,openChangesTab,openDiff,openFile} from '../store';
 import {useStoreSelector} from '../useStore';
+import {useLatestTurnFiles} from '../reviewState';
 import {Collapsible} from '@base-ui/react/collapsible';
 import './tool-card.css';
 import './transcript-changes.css';
@@ -86,12 +87,15 @@ function EditedFileBody({entry,chatId,to,latest,onReview}:{entry:FileChangeEntry
  * inline diffs are on.
  */
 export function TurnFileChanges({items,chatId,turnId,latest,showPill}:{items:readonly TimelineItem[];chatId:string;turnId:string;latest:boolean;showPill:boolean}):React.ReactElement|null {
-  const entries=useMemo(()=>collectFileChanges(items),[items]);
+  const folder=useStoreSelector(state=>{const chat=state.snapshot?.chats.find(chat=>chat.id===chatId);return state.snapshot?.folders.find(folder=>folder.id===chat?.folderId);});
+  const chatStatus=useStoreSelector(state=>state.snapshot?.chats.find(chat=>chat.id===chatId)?.status);
+  // The latest turn also lists what Git saw change since its baseline (shell edits report no fileChange item).
+  const gitFiles=useLatestTurnFiles(latest?chatId:undefined,folder?.id,chatStatus);
+  const entries=useMemo(()=>{const reported=collectFileChanges(items);return latest?mergeReviewFiles(reported,gitFiles?.files,path=>target(chatId,path)?.path):reported;},[items,latest,gitFiles,chatId]);
   // Disambiguated names across the whole turn, VS Code style, so "Edited package.json" (root)
   // and "Edited package.json" (apps/api) never collide — the second becomes "api/package.json".
   const labels=useMemo(()=>uniqueFileLabels(entries.map(entry=>entry.path)),[entries]);
   const inline=useStoreSelector(state=>state.showInlineFileDiffs);
-  const folder=useStoreSelector(state=>{const chat=state.snapshot?.chats.find(chat=>chat.id===chatId);return state.snapshot?.folders.find(folder=>folder.id===chat?.folderId);});
   const review=useTurnReviewCounts({chatId,folderId:folder?.id,enabled:latest&&entries.length>0});
   const [bulk,setBulk]=useState<{open:boolean;n:number}>();
   // With a live review, counts follow it (an undone hunk leaves the totals); the file stays listed.

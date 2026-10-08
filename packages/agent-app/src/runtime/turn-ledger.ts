@@ -1,7 +1,7 @@
 /**
  * The turn ledger (#115, Phase 1 audit foundation): every agent turn Muster runs appends one entry — trigger, agent,
  * provider/model, tokens (in / cached / out / reasoning) and cost, tools used, approvals, the files it changed observed
- * from disk against the review baseline (before/after blob hashes; project and task runs only), duration and outcome. Entries are hash-chained:
+ * from disk against the review baseline (before/after blob hashes; every turn in a Git work tree, worktrees included), duration and outcome. Entries are hash-chained:
  * each stores sha256(previous hash + canonical entry), so editing or deleting a past entry breaks every later hash.
  * `verify()` walks the chain. Recording is observation only; it never blocks or fails a run.
  *
@@ -137,16 +137,16 @@ export function attachTurnLedger(context: DomainContext, ledger: () => TurnLedge
     open.delete(run.runId);
     if (!turn) return;
     try {
-      // Files cost a second full-tree snapshot, so only project and task runs pay it; everyday chats record no files.
+      // Files cost a second full-tree snapshot, taken for every turn that has a baseline. That includes a Work locally chat
+      // (a checkout worktree, which has no projectId) and any Git folder, whatever the provider or how it edits: null means
+      // only that the folder is not a Git work tree or its snapshot failed, never that the chat kind skipped it.
       // A files error costs the Receipt its file list (null), never the whole entry.
       let files: LedgerFile[] | null = null;
-      if (run.chat.projectId) {
-        try {
-          ledger();
-          const baseline = context.db().prepare('SELECT tree_sha FROM review_baselines WHERE run_id = ?').get(run.runId) as { tree_sha: string | null } | undefined;
-          files = await filesChanged(turn.cwd, baseline?.tree_sha ?? null);
-        } catch { files = null; }
-      }
+      try {
+        ledger();
+        const baseline = context.db().prepare('SELECT tree_sha FROM review_baselines WHERE run_id = ?').get(run.runId) as { tree_sha: string | null } | undefined;
+        files = await filesChanged(turn.cwd, baseline?.tree_sha ?? null);
+      } catch { files = null; }
       const pricing = (() => { try { const provider = context.modelCatalog?.().providers.find(p => p.id === run.chat.providerId) as unknown as { models?: { id: string; pricing?: unknown }[] } | undefined; return provider?.models?.find(m => m.id === run.chat.model)?.pricing ?? null; } catch { return null; } })();
       const endedAt = new Date().toISOString();
       // A task run is the task's: its Roster owner, the task, trigger "task" (Costs, Timeline and task links key on these).

@@ -6,7 +6,7 @@
  */
 import { Laptop } from 'lucide-react';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { ENGINE_LABEL, engineOf, type CheckoutPlan, type Engine, type HandBackPreview, type LeaseView, type LocalOrgCopy, type ModelChoice, type PendingPost } from '../../shared/domains/checkout-protocol';
+import { ENGINE_LABEL, engineOf, looksBroadFolder, type CheckoutPlan, type Engine, type HandBackPreview, type LeaseView, type LocalOrgCopy, type ModelChoice, type PendingPost } from '../../shared/domains/checkout-protocol';
 import type { WorkspaceTaskDetail } from '../../shared/domains/paperclip-protocol';
 import { invoke } from '../bridge';
 import { useEventLoad } from '../orgHooks';
@@ -69,7 +69,7 @@ export function WorkLocallyBar({ detail }: { detail: WorkspaceTaskDetail }): Rea
   return <>
     <span className="ws-checkout">
       {open && lease
-        ? <Tip label={`${lease.kind === 'folder' ? `Working in ${leaf(lease.worktree)}` : lease.branch ?? ''} on ${lease.device}. Open the local chat. ${lease.kind === 'folder' ? 'Muster hands the task back when you say you are done in the chat.' : 'Muster hands the task back by itself when the work is finished.'}`}><button type="button" className="settings-button secondary ws-working" onClick={() => openChat(lease.chatId)}><Laptop size={13} aria-hidden="true"/>Working locally · {ENGINE_LABEL[engineOf(lease.model)]}</button></Tip>
+        ? <Tip label={`${lease.kind === 'folder' ? `Working in ${leaf(lease.worktree)}` : lease.branch ?? ''} on ${lease.device}. Open the local chat. Muster hands the task back by itself when the work is finished; a 60 second countdown lets you stop it.`}><button type="button" className="settings-button secondary ws-working" onClick={() => openChat(lease.chatId)}><Laptop size={13} aria-hidden="true"/>Working locally · {ENGINE_LABEL[engineOf(lease.model)]}</button></Tip>
         : <button type="button" className="settings-button" disabled={busy} onClick={() => void click()}><Laptop size={13} aria-hidden="true"/>{busy ? 'Starting…' : 'Work locally'}</button>}
     </span>
     {plan && <WorkLocallySheet plan={plan} onClose={() => setPlan(null)} onStart={async (mem, folder, agentId, newFolder, requireGit) => { remember(mem); try { await run(plan, mem, folder, agentId, newFolder, requireGit); setPlan(null); } catch (cause) { fail(cause); } }}/>}
@@ -82,15 +82,29 @@ export function CheckoutNotes({ detail }: { detail: WorkspaceTaskDetail }): Reac
   if (!lease) return null;
   const waiting = lease.pending > 0;
   // Nothing relevant: no extra chrome at all.
-  if (!lease.offline && !waiting && !lease.stale && !lease.conflict) return null;
+  if (!lease.offline && !waiting && !lease.stale && !lease.conflict && !lease.staleDays && !lease.broadFolder && !lease.heldBack) return null;
   return <div className="ws-checkout-notes" role="status">
+    {lease.staleDays ? <StaleCheckout lease={lease} onChanged={reload}/> : null}
+    {lease.heldBack && <p className="ws-checkout-note" data-tone="warn">Not handed back yet: {lease.heldBack.reason}</p>}
+    {lease.broadFolder && <p className="ws-checkout-note" data-tone="warn">This is a very broad folder (<code>{lease.worktree}</code>): changes anywhere in it count as this task’s work. Choose a project folder for a cleaner hand-back.</p>}
     {lease.offline && <p className="ws-checkout-note" data-tone="warn">Offline{waiting ? ` · ${lease.pending} ${lease.pending === 1 ? 'update' : 'updates'} waiting` : ''}. Work continues here and Muster sends everything when it can.</p>}
     {!lease.offline && waiting && <p className="ws-checkout-note">{lease.pending} {lease.pending === 1 ? 'update' : 'updates'} waiting to be sent.</p>}
-    {lease.stale && <p className="ws-checkout-note" data-tone="warn">Quiet for {lease.staleHours} hours. Still working on this? <button type="button" className="ws-link" onClick={() => void invoke('checkout.remind', { taskId: lease.taskId }).then(reload, fail)}>Keep it</button> · <button type="button" className="ws-link" onClick={() => void invoke('checkout.release', { taskId: lease.taskId, note: 'Released after a quiet spell.' }).then(reload, fail)}>Release</button></p>}
+    {lease.stale && !lease.staleDays && <p className="ws-checkout-note" data-tone="warn">Quiet for {lease.staleHours} hours. Still working on this? <button type="button" className="ws-link" onClick={() => void invoke('checkout.remind', { taskId: lease.taskId }).then(reload, fail)}>Keep it</button> · <button type="button" className="ws-link" onClick={() => void invoke('checkout.release', { taskId: lease.taskId, note: 'Released after a quiet spell.' }).then(reload, fail)}>Release</button></p>}
     {lease.conflict && <ConflictCard lease={lease} onChanged={reload}/>}
   </div>;
 }
 
+/** "Checked out 4 days ago · idle" with Hand back and Release. Nothing is released by itself. */
+export function StaleCheckout({ lease, onChanged }: { lease: Pick<LeaseView, 'taskId' | 'staleDays'>; onChanged: () => void }): React.ReactElement {
+  const [handBack, setHandBack] = useState(false);
+  return <p className="ws-checkout-note" data-tone="warn" data-stale-checkout>
+    {staleLabel(lease.staleDays ?? 3)}{' '}
+    <button type="button" className="ws-link" onClick={() => setHandBack(true)}>Hand back</button> · <button type="button" className="ws-link" onClick={() => void invoke('checkout.release', { taskId: lease.taskId, note: 'Released after sitting idle.' }).then(onChanged, fail)}>Release</button>
+    {handBack && <HandBackSheet taskId={lease.taskId} onClose={() => setHandBack(false)} onDone={() => { setHandBack(false); onChanged(); }}/>}
+  </p>;
+}
+/** "Checked out 4 days ago · idle". */
+export const staleLabel = (days: number): string => `Checked out ${days} days ago · idle`;
 function ConflictCard({ lease, onChanged }: { lease: LeaseView; onChanged: () => void }): React.ReactElement {
   const [rows, setRows] = useState<PendingPost[] | null>(null);
   const [editing, setEditing] = useState(false);
@@ -135,6 +149,7 @@ function WorkLocallySheet({ plan, onClose, onStart }: { plan: CheckoutPlan; onCl
   return <ModalSheet open className="project-edit-dialog ws-work-locally" title={`Work locally on ${plan.task.key}`} initialFocus={first} onClose={() => { if (!busy) onClose(); }}>
     <p className="project-edit-hint">Everything runs on {device().lower}. Nothing runs on the server until you hand back. Your credentials stay here.</p>
     <section aria-label="What happens"><h3 className="ws-prop-group">What happens</h3><ul className="ws-checkout-steps">{steps.map(s => <li key={s}>{s}</li>)}</ul>
+      {(plan.broadFolder || (!useNew && !repoOnly && looksBroadFolder(folder))) && <p className="settings-error" role="alert">That folder is very broad (your home folder, Documents, Desktop or Downloads). Everything in it counts as this task’s work. Choose the project’s own folder, or let Muster make one.</p>}
       {plan.otherMac && <p className="settings-error">It is checked out on {plan.otherMac}. Working here takes it over.</p>}
       {!plan.assignedToMe && <p className="settings-error" role="alert">Take it from {plan.task.assignee ?? 'nobody'}? This task is not assigned to you. Working here reassigns it to you, and {plan.task.assignee ?? 'whoever has it'} will see that.</p>}</section>
     <section aria-label="Folder"><h3 className="ws-prop-group">Folder for {plan.task.projectName ?? 'tasks without a project'}</h3>

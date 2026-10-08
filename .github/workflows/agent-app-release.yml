@@ -17,29 +17,168 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Existing tag to build and publish (e.g. agent-v0.2.0)"
-        required: true
+        description: "Existing tag to build and publish (e.g. agent-v0.2.0). Leave empty for a dry run of the current version."
+        required: false
+        type: string
+      sha:
+        description: "Commit to gate and build. Defaults to the tag's commit (or the tip of main when there is no tag)."
+        required: false
         type: string
       prerelease:
         description: "Mark the release as a prerelease"
         required: false
         type: boolean
         default: false
+      dry_run:
+        description: "Run the gate and every build job, but create no tag and publish nothing"
+        required: false
+        type: boolean
+        default: false
+      force_tests:
+        description: "Emergency: re-run the full test suites in the build jobs (normally main's CI has already run them)"
+        required: false
+        type: boolean
+        default: false
+  # Called by agent-app-auto-release.yml after main is green; that workflow cannot rely on a tag push (a tag created with
+  # GITHUB_TOKEN does not trigger other workflows), so the tag is created here, after the gate and the builds, in `publish`.
+  workflow_call:
+    inputs:
+      tag:
+        type: string
+        required: false
+      sha:
+        type: string
+        required: false
+      create_tag:
+        description: "Create the tag at sha in the publish job when it does not exist"
+        type: boolean
+        default: false
+      prerelease:
+        type: boolean
+        default: false
+      dry_run:
+        type: boolean
+        default: false
+      force_tests:
+        type: boolean
+        default: false
 
 permissions:
-  contents: write
+  contents: read
+  actions: read
 
 concurrency:
-  group: agent-app-release-${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+  group: agent-app-release-${{ inputs.tag || inputs.sha || github.ref_name }}-${{ inputs.dry_run == true && 'dry' || 'real' }}
   cancel-in-progress: false
 
 env:
-  TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
   NODE_OPTIONS: --max-old-space-size=2048
 
 jobs:
+  # Release builds do not re-run the test suites: main's CI already ran them on this exact commit. This job proves it
+  # through the Actions API and waits for runs that are still going.
+  gate:
+    name: gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    outputs:
+      tag: ${{ steps.resolve.outputs.tag }}
+      sha: ${{ steps.resolve.outputs.sha }}
+      tag_exists: ${{ steps.resolve.outputs.tag_exists }}
+    steps:
+      - name: Resolve the release commit and tag
+        id: resolve
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          EVENT: ${{ github.event_name }}
+          PUSH_TAG: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
+          PUSH_SHA: ${{ github.sha }}
+          IN_TAG: ${{ inputs.tag }}
+          IN_SHA: ${{ inputs.sha }}
+          CREATE_TAG: ${{ inputs.create_tag }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          TAG="" SHA="" EXISTS=false
+          if [[ "$EVENT" == push ]]; then TAG="$PUSH_TAG"; else TAG="$IN_TAG"; fi
+          if [[ -n "$TAG" ]]; then
+            if REF="$(gh api "repos/$REPO/git/ref/tags/$TAG" --jq '.object.type + " " + .object.sha' 2>/dev/null)"; then
+              EXISTS=true
+              read -r TYPE OBJ <<< "$REF"
+              if [[ "$TYPE" == tag ]]; then OBJ="$(gh api "repos/$REPO/git/tags/$OBJ" --jq .object.sha)"; fi
+              TAG_SHA="$OBJ"
+              if [[ -n "$IN_SHA" && "$IN_SHA" != "$TAG_SHA" ]]; then
+                echo "::error::Tag $TAG points at $TAG_SHA but sha $IN_SHA was requested."; exit 1
+              fi
+              SHA="$TAG_SHA"
+            fi
+          fi
+          if [[ -z "$SHA" ]]; then SHA="$IN_SHA"; fi
+          if [[ -z "$SHA" && "$DRY_RUN" == true ]]; then SHA="$(gh api "repos/$REPO/commits/main" --jq .sha)"; fi
+          if [[ -z "$SHA" ]]; then echo "::error::No commit to release: tag '$TAG' does not exist and no sha was given."; exit 1; fi
+          SHA="$(gh api "repos/$REPO/commits/$SHA" --jq .sha)"
+          if [[ -z "$TAG" ]]; then
+            if [[ "$DRY_RUN" != true ]]; then echo "::error::A tag is required for a real release."; exit 1; fi
+            VERSION="$(gh api "repos/$REPO/contents/packages/agent-app/package.json?ref=$SHA" --jq .content | base64 -d | jq -r .version)"
+            TAG="agent-v$VERSION"
+            if gh api "repos/$REPO/git/ref/tags/$TAG" >/dev/null 2>&1; then EXISTS=true; fi
+          fi
+          if [[ "$TAG" != agent-v* ]]; then echo "::error::Tag $TAG must start with agent-v."; exit 1; fi
+          if [[ "$EXISTS" != true && "$DRY_RUN" != true && "$CREATE_TAG" != true ]]; then
+            echo "::error::Tag $TAG does not exist. Push it, or run the auto-release workflow."; exit 1
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+          echo "tag_exists=$EXISTS" >> "$GITHUB_OUTPUT"
+          echo "Release $TAG at $SHA (tag exists: $EXISTS, dry run: ${DRY_RUN:-false})"
+
+      - name: Require green CI on this commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ steps.resolve.outputs.sha }}
+        run: |
+          set -uo pipefail
+          # Workflow names, exactly as in .github/workflows/*.yml (agent-app-ci.yml, agent-app-cross-platform.yml, ci.yml).
+          REQUIRED=("Muster Agent CI" "Muster Agent Windows & Linux" "CI")
+          WAIT_SECS=1200      # running checks: wait up to 20 minutes
+          MISSING_SECS=180    # a check that does not exist yet may just be queueing; give it 3 minutes
+          START=$SECONDS
+          while true; do
+            RUNS="$(gh api "repos/$REPO/actions/runs?head_sha=$SHA&per_page=100" --jq '.workflow_runs')" || { echo "::warning::API call failed, retrying"; sleep 15; continue; }
+            FAILED=() PENDING=() MISSING=() OK=()
+            for NAME in "${REQUIRED[@]}"; do
+              # Newest push/dispatch run of that workflow on this exact commit (pull_request runs do not count).
+              LINE="$(jq -r --arg n "$NAME" '[.[] | select(.name == $n and (.event == "push" or .event == "workflow_dispatch"))] | sort_by(.created_at) | last | if . == null then "missing" else "\(.status) \(.conclusion // "-") \(.html_url)" end' <<< "$RUNS")"
+              read -r STATUS CONCLUSION URL <<< "$LINE"
+              if [[ "$STATUS" == missing ]]; then MISSING+=("$NAME")
+              elif [[ "$STATUS" != completed ]]; then PENDING+=("$NAME ($STATUS) $URL")
+              elif [[ "$CONCLUSION" == success ]]; then OK+=("$NAME")
+              else FAILED+=("$NAME: $CONCLUSION $URL"); fi
+            done
+            ELAPSED=$((SECONDS - START))
+            echo "[$ELAPSED s] ok=${#OK[@]} pending=${#PENDING[@]} missing=${#MISSING[@]} failed=${#FAILED[@]}"
+            if (( ${#FAILED[@]} )); then
+              for F in "${FAILED[@]}"; do echo "::error::Required check did not succeed on $SHA: $F"; done; exit 1
+            fi
+            if (( ${#PENDING[@]} == 0 && ${#MISSING[@]} == 0 )); then
+              echo "All required checks succeeded on $SHA: ${OK[*]}" ; exit 0
+            fi
+            if (( ${#MISSING[@]} && ELAPSED >= MISSING_SECS )); then
+              for M in "${MISSING[@]}"; do echo "::error::Required check '$M' has not run on $SHA. If its path filter skipped it, start it with workflow_dispatch on main, then re-run this release."; done; exit 1
+            fi
+            if (( ELAPSED >= WAIT_SECS )); then
+              for P in "${PENDING[@]}"; do echo "::error::Required check still running after 20 minutes: $P"; done; exit 1
+            fi
+            sleep 20
+          done
+
   build:
     name: build (${{ matrix.arch }})
+    needs: gate
+    env:
+      TAG: ${{ needs.gate.outputs.tag }}
     strategy:
       # Keep the other architecture building when one fails so its log is available; publish needs both anyway.
       fail-fast: false
@@ -59,7 +198,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: refs/tags/${{ env.TAG }}
+          ref: ${{ needs.gate.outputs.sha }}
 
       - name: Check tag against package.json
         id: version
@@ -79,11 +218,30 @@ jobs:
           cache: npm
           cache-dependency-path: packages/agent-app/package-lock.json
 
+      - id: electron
+        # Download caches only (never node_modules): keyed on OS, CPU and the locked Electron version.
+        shell: bash
+        run: echo "version=$(node -p "require(process.env.GITHUB_WORKSPACE + '/packages/agent-app/package-lock.json').packages['node_modules/electron'].version")" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/Library/Caches/electron
+            ~/Library/Caches/electron-builder
+            ~/.cache/electron
+            ~/.cache/electron-builder
+            ~/AppData/Local/electron/Cache
+            ~/AppData/Local/electron-builder/Cache
+          key: electron-${{ runner.os }}-${{ runner.arch }}-${{ steps.electron.outputs.version }}
+          restore-keys: |
+            electron-${{ runner.os }}-${{ runner.arch }}-
+
       - name: Install
-        # postinstall downloads Electron and rebuilds node-pty for it (Xcode is on the runner).
+        # postinstall downloads Electron (cached above) and rebuilds node-pty for it (Xcode is on the runner).
         run: npm ci --no-audit --no-fund
 
-      - name: Verify
+      - name: Verify (force_tests only)
+        # main's CI ran the full suites on this commit (see the gate job); this is the emergency re-run.
+        if: inputs.force_tests == true
         run: |
           npx tsc --noEmit
           npm run build
@@ -159,6 +317,9 @@ jobs:
 
   build-other:
     name: build (${{ matrix.os }})
+    needs: gate
+    env:
+      TAG: ${{ needs.gate.outputs.tag }}
     strategy:
       fail-fast: true
       matrix:
@@ -177,7 +338,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: refs/tags/${{ env.TAG }}
+          ref: ${{ needs.gate.outputs.sha }}
       - uses: actions/setup-node@v6
         with:
           node-version-file: packages/agent-app/.nvmrc
@@ -187,17 +348,53 @@ jobs:
         if: matrix.os == 'linux'
         working-directory: .
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends build-essential python3 xvfb libgtk-3-0 libnss3 libxss1 libgbm1 libasound2t64 rpm fakeroot
-      - name: Install
-        run: npm ci --no-audit --no-fund
-      - name: Verify
+      - id: electron
+        # Download caches only (never node_modules): keyed on OS, CPU and the locked Electron version.
         shell: bash
-        run: |
-          npx tsc --noEmit
-          npm run build
+        run: echo "version=$(node -p "require(process.env.GITHUB_WORKSPACE + '/packages/agent-app/package-lock.json').packages['node_modules/electron'].version")" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/Library/Caches/electron
+            ~/Library/Caches/electron-builder
+            ~/.cache/electron
+            ~/.cache/electron-builder
+            ~/AppData/Local/electron/Cache
+            ~/AppData/Local/electron-builder/Cache
+          key: electron-${{ runner.os }}-${{ runner.arch }}-${{ steps.electron.outputs.version }}
+          restore-keys: |
+            electron-${{ runner.os }}-${{ runner.arch }}-
+      - name: Install
+        # electron-builder rebuilds node-pty for Electron while packaging (npmRebuild), so the postinstall rebuild is
+        # redundant here (it was most of the Windows install time). The Electron binary is still fetched (and cached).
+        env:
+          MUSTER_SKIP_NATIVE_REBUILD: "1"
+        run: npm ci --no-audit --no-fund
+      - name: Build
+        # The renderer/runtime bundle that electron-builder packages. Typecheck and tests ran in main's CI.
+        shell: bash
+        run: npm run build
+      - name: Typecheck (force_tests only)
+        if: inputs.force_tests == true
+        shell: bash
+        run: npx tsc --noEmit
       - name: Package
         shell: bash
         # The update source is this repository (forks publish and update from their own).
-        run: npx electron-builder ${{ matrix.target }} --publish never -c.extraMetadata.musterUpdateRepo=${{ github.repository }} -c.extraMetadata.musterUpdateChannel=${{ contains(env.TAG, '-') && 'beta' || 'stable' }}
+        # Windows: electron-builder builds only the NSIS setup.exe (compression maximum); the portable zip is made in the
+        # next step because the zip target would compress at maximum too, and `compression` is per platform.
+        run: npx electron-builder ${{ matrix.target }} ${{ matrix.os == 'windows' && '-c.win.target=nsis' || '' }} ${{ matrix.target == '--linux' && '-c.productName=muster-agent' || '' }} --publish never -c.extraMetadata.musterUpdateRepo=${{ github.repository }} -c.extraMetadata.musterUpdateChannel=${{ contains(env.TAG, '-') && 'beta' || 'stable' }}
+      - name: Portable zip (Windows, normal compression)
+        if: matrix.os == 'windows'
+        shell: bash
+        # Same name and layout electron-builder's zip target produced: the contents of win-unpacked at the archive root.
+        # The in-app updater uses setup.exe + blockmap, never this zip (it is the "manual" install method).
+        run: |
+          VERSION="$(node -p "require('./package.json').version")"
+          ZIP="$PWD/release-dist/Muster-Agent-${VERSION}-win-x64.zip"
+          rm -f "$ZIP"
+          (cd release-dist/win-unpacked && 7z a -tzip -mx=5 -mmt=on "$ZIP" . >/dev/null)
+          ls -l "$ZIP"
       - name: Package size budget
         shell: bash
         # Fails if resources/app/node_modules holds anything but node-pty (or ships build intermediates / another platform's
@@ -273,13 +470,15 @@ jobs:
             platform: linux-x64
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 40
+    needs: gate
     env:
+      TAG: ${{ needs.gate.outputs.tag }}
       ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
       MUSTER_SKIP_NATIVE_REBUILD: "1"
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: refs/tags/${{ env.TAG }}
+          ref: ${{ needs.gate.outputs.sha }}
       - uses: actions/setup-node@v6
         with:
           node-version-file: packages/agent-app/.nvmrc
@@ -322,17 +521,35 @@ jobs:
           retention-days: 14
 
   publish:
-    needs: [build, build-other, server]
+    needs: [gate, build, build-other, server]
+    # A dry run builds everything above and stops here: no tag, no release.
+    if: inputs.dry_run != true
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    permissions:
+      contents: write
+    env:
+      TAG: ${{ needs.gate.outputs.tag }}
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: refs/tags/${{ env.TAG }}
+          ref: ${{ needs.gate.outputs.sha }}
           sparse-checkout: |
             packages/agent-app/package.json
             packages/agent-app/CHANGELOG.md
           sparse-checkout-cone-mode: false
+
+      - name: Create the tag (after the gate and the builds passed)
+        # Only the automatic release creates tags. A tag made with GITHUB_TOKEN triggers no workflow, which is why this
+        # runs inside the same workflow run rather than starting another through the tag.
+        if: needs.gate.outputs.tag_exists != 'true' && inputs.create_tag == true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ needs.gate.outputs.sha }}
+        run: |
+          set -euo pipefail
+          gh api "repos/${{ github.repository }}/git/refs" -f "ref=refs/tags/$TAG" -f "sha=$SHA" --silent
+          echo "Created tag $TAG at $SHA"
 
       - uses: actions/download-artifact@v4
         with:
@@ -349,7 +566,7 @@ jobs:
       - name: Checksums and release notes
         id: notes
         env:
-          PRERELEASE_INPUT: ${{ github.event_name == 'workflow_dispatch' && inputs.prerelease || false }}
+          PRERELEASE_INPUT: ${{ inputs.prerelease == true && 'true' || 'false' }}
         run: |
           VERSION="$(node -p "require('./packages/agent-app/package.json').version")"
           cd out
@@ -425,6 +642,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ env.TAG }}
+          target_commitish: ${{ needs.gate.outputs.sha }}
           name: Muster Agent ${{ steps.notes.outputs.version }}
           body_path: release-notes.md
           generate_release_notes: ${{ steps.notes.outputs.generate == 'true' }}

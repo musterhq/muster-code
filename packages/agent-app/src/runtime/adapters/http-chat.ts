@@ -18,6 +18,10 @@ interface Streamed { usage?: Record<string, unknown>; calls?: ToolCall[] }
 const toolRefusals = new Map<string, number>();
 export const refusedTools = (endpoint: string, model: string) => { const at = toolRefusals.get(`${endpoint}\0${model}`); if (at === undefined) return false; if (Date.now() - at > REFUSAL_TTL_MS) { toolRefusals.delete(`${endpoint}\0${model}`); return false; } return true; };
 
+/** What is stored and re-sent every round of a call's arguments: at most 64 KB, still valid JSON, with a note when cut. The call itself runs with the full arguments. */
+export const MAX_RESENT_ARGUMENT = 64 * 1024;
+export const resent = (args: string): string => !args ? '{}' : args.length <= MAX_RESENT_ARGUMENT ? args : JSON.stringify({note: `[arguments of ${args.length} characters omitted from the history to save space (kept: ${MAX_RESENT_ARGUMENT >> 10} KB per call); the call itself ran with them in full]`});
+
 /** Shared turn skeleton: history, identity callbacks, abort, result mapping and (for routes that offer tools) the tool loop. */
 async function turn(input: AdapterRunInput, memory: ConversationMemory, label: string, send: (history: ChatMessage[], extra: unknown[], tools: boolean) => Promise<Response>, stream: (response: Response, emit: (text: string) => void) => Promise<Streamed | undefined>, tooling?: {endpoint: string}): Promise<AdapterRunResult> {
   const {threadId, history} = memory.open(input.resumeThreadId);
@@ -66,7 +70,7 @@ async function turn(input: AdapterRunInput, memory: ConversationMemory, label: s
       if (round >= MAX_TOOL_ROUNDS || callsThisTurn >= MAX_CALLS_PER_TURN || Date.now() > deadline) { const note = '\n\n(Stopped: this turn reached its limit on tool calls or time.)'; answer += note; input.onDelta(note); break; }
       calls = calls.slice(0, Math.min(MAX_CALLS_PER_ROUND, MAX_CALLS_PER_TURN - callsThisTurn));
       callsThisTurn += calls.length;
-      extra.push({role: 'assistant', content: null, tool_calls: calls.map(call => ({id: call.id, type: 'function', function: {name: call.name, arguments: call.arguments || '{}'}}))});
+      extra.push({role: 'assistant', content: null, tool_calls: calls.map(call => ({id: call.id, type: 'function', function: {name: call.name, arguments: resent(call.arguments)}}))});
       for (const call of calls) {
         const result = await executeTool(call, {cwd: input.cwd, access: input.permissionMode, signal: input.signal, emit: input.onEvent, threadId, turnId, ...(input.authorize ? {authorize: input.authorize} : {}), ...(input.env ? {env: input.env} : {}), deadline});
         used.push(`${call.name}${result.ok ? '' : ' (failed)'}`);

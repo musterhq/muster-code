@@ -42,6 +42,21 @@ const app = path.join(releaseDir, `${PRODUCT}.app`);
 const baseName = `Muster-Agent-${version}-${arch}`;
 const zipPath = path.join(releaseDir, `${baseName}.zip`), dmgPath = path.join(releaseDir, `${baseName}.dmg`);
 const run = (command, args, options = {}) => execFileSync(command, args, {stdio: 'pipe', ...options});
+
+/** Force-detaches every mounted disk image whose volume is /Volumes/<volname> (or "<volname> 1"), left by an earlier attempt. */
+function detachVolumes(volname) {
+  try {
+    const plist = execFileSync('hdiutil', ['info', '-plist'], {stdio: ['ignore', 'pipe', 'ignore']});
+    const info = JSON.parse(execFileSync('plutil', ['-convert', 'json', '-o', '-', '-'], {input: plist, stdio: ['pipe', 'pipe', 'ignore']}).toString());
+    for (const image of info.images ?? []) for (const entity of image['system-entities'] ?? []) {
+      const mount = entity['mount-point'];
+      if (typeof mount === 'string' && (mount === `/Volumes/${volname}` || mount.startsWith(`/Volumes/${volname} `))) {
+        console.log(`[package-release] detaching stale volume ${mount}`);
+        try { execFileSync('hdiutil', ['detach', '-force', mount], {stdio: 'ignore'}); } catch { /* still busy: the retry reports it */ }
+      }
+    }
+  } catch { /* hdiutil info unavailable: nothing to detach */ }
+}
 const log = message => console.log(`[package-release] ${message}`);
 
 // 1. Clean production build (dist/ is never cleaned by build.mjs, so stale files would ride along).
@@ -203,14 +218,21 @@ try {
   try {
     run('ditto', [app, path.join(dmgStage, `${PRODUCT}.app`)]);
     symlinkSync('/Applications', path.join(dmgStage, 'Applications'));
-    // hdiutil intermittently fails with "Resource busy" on CI runners (a scanner or diskimages helper still holds
-    // the staged files); a short back-off and retry is the standard remedy.
+    // hdiutil intermittently fails with "Resource busy" on CI runners (a stale mount of the same volume, or Spotlight/mds
+    // indexing the staged files, holds them; the Intel runner then stalls for minutes before giving up). Release what
+    // holds them up front, then retry quickly: 2 s, then 5 s.
+    const volname = `${PRODUCT} ${version}`;
+    detachVolumes(volname);
+    writeFileSync(path.join(dmgStage, '.metadata_never_index'), '');
+    if (process.env.CI) { try { execFileSync('sudo', ['-n', 'mdutil', '-a', '-i', 'off'], {stdio: 'ignore'}); } catch { /* best effort */ } }
+    const backoff = [2, 5, 5, 5];
     for (let attempt = 1; ; attempt++) {
-      try { run('hdiutil', ['create', '-volname', `${PRODUCT} ${version}`, '-srcfolder', dmgStage, '-fs', 'HFS+', '-format', 'ULMO', '-ov', dmgPath], {stdio: 'inherit'}); break; }
+      try { run('hdiutil', ['create', '-volname', volname, '-srcfolder', dmgStage, '-fs', 'HFS+', '-format', 'ULMO', '-ov', dmgPath], {stdio: 'inherit'}); break; }
       catch (error) {
-        if (attempt >= 5) throw error;
-        console.log(`[package-release] hdiutil create failed (attempt ${attempt}/5); retrying in ${attempt * 10}s`);
-        execFileSync('sleep', [String(attempt * 10)]);
+        if (attempt > backoff.length) throw error;
+        console.log(`[package-release] hdiutil create failed (attempt ${attempt}/${backoff.length + 1}); retrying in ${backoff[attempt - 1]}s`);
+        detachVolumes(volname);
+        execFileSync('sleep', [String(backoff[attempt - 1])]);
       }
     }
   } finally { rmSync(dmgStage, {recursive: true, force: true}); }

@@ -7,6 +7,7 @@ import { MemoryConfigStore, MemoryTombstones, electronSecretBox } from './memory
 import { createHash } from 'node:crypto';
 import { promises as fs, existsSync, mkdirSync, copyFileSync, statSync } from 'node:fs';
 import { basename, join } from 'node:path';
+import { rescanProviderListings, setProviderListingStore } from './provider-instances.ts';
 import type { AgentEvent, ApprovalData, ApprovalDecision, Chat, ChatRecovery, Commands, PendingQuestion, PendingQuestionData, TimelineItem, WakeReason } from '../shared/protocol.ts';
 import type { PendingAttentionSummary, AttentionRequest } from '../shared/attention-protocol.ts';
 import { discoverLocalProviders } from './provider-discovery.ts';
@@ -124,8 +125,10 @@ export function userProcessNote(groups: readonly UserProcessGroup[], cwd: string
   return ['User-owned processes (started by the user in Muster, not by you). Never signal, kill or restart these process groups or their children, and do not free ports they hold; if a port is taken, use another port or ask:',
     ...relevant.map(group => `- process group ${group.pgid}: ${group.label.replace(/[\x00-\x1f]/g, ' ').slice(0, 80)}${group.cwd ? ` (cwd ${group.cwd.slice(0, 200)})` : ''}`)].join('\n');
 }
+const PROVIDER_LISTING_WAIT_MS = 15_000;
 export function createAgentService(options: { dataDir: string; onEvent(event: AgentEvent): void; userProcesses?: () => readonly UserProcessGroup[]; userProcessTargets?: () => Promise<readonly UserProcessTarget[]>; provider?: ProviderAdapter; reconcileProvider?: (input: ReconciliationInput) => Promise<ReconciliationResult>; domains?: readonly DomainFactory[] }) {
   applyPendingRestore(options.dataDir);
+  setProviderListingStore(join(options.dataDir, 'provider-listings'));
   const store = new AgentStore(options.dataDir);
   // M4 (#319): ids merged by the duplicate-folder migration are remapped in the stores that keep their own database files.
   try { const aliases = store.pendingFolderAliases(); if (Object.keys(aliases).length && applyFolderAliases(options.dataDir, aliases)) store.clearFolderAliases(); } catch { /* retried on the next start */ }
@@ -346,7 +349,14 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
     if (!listed.length) throw new Error(`The provider “${providerId}” is not available on ${device().lower}. Pick another model for this chat.`);
     // A provider that reports no model list runs whatever model the chat names; the provider checks it at dispatch.
     const entry = listed.find(candidate => candidate.available && (candidate.models.some(candidateModel => candidateModel.id === model) || candidate.models.length === 0));
-    if (!entry) throw new Error(`Model ${model || '(none)'} is unavailable through the configured provider. Choose an available model.`);
+    if (!entry) {
+      const row = listed[0]!;
+      // A gateway without a model catalog lists its models live; say exactly what state that listing is in.
+      if (row.listing === 'loading') throw new Error(`Still loading models from ${row.name}. Try again in a moment.`);
+      if (row.listing === 'failed' || (row.listing === 'stale' && row.listingError)) throw new Error(row.listingError ?? `${row.name} didn’t answer. Retry.`);
+      if (row.listing === 'live' || row.listing === 'stale') throw new Error(`${model || '(none)'} isn’t offered by ${row.name} any more. Pick another model.`);
+      throw new Error(`Model ${model || '(none)'} is unavailable through the configured provider. Choose an available model.`);
+    }
     return entry;
   }
   /** Provider and model for a chat nobody chose one for: Project → folder → user default, else the first ready provider. */
@@ -379,6 +389,8 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
     if (!prompt.trim() && attachmentIds.length === 0) throw new Error('Write a message first.');
     if (chat.archived) throw new Error('Restore this chat before sending.');
     if (providerSelections.has(chatId)) throw new Error('Wait for the provider selection to finish.');
+    // A gateway's live model listing may still be loading (app just started) or have failed once: wait for it, bounded, then validate.
+    if (chat.providerId) { await provider.awaitListing?.(chat.providerId, PROVIDER_LISTING_WAIT_MS).catch(() => undefined); chat = chatFor(chatId); }
     validateRunnableModel(chat.model,chat.providerId);
     const project = chat.projectId ? store.snapshot().projects.find(p => p.id === chat.projectId) : undefined;
     const context = project ? `Project: ${project.name}\nShared goal: ${project.goal || '(not set)'}` : '';
@@ -950,6 +962,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
   async function dispatch(command: string, input: unknown): Promise<unknown> {
     if (command === 'app.snapshot') return snapshot();
     if (command === 'providers.list') {
+      if ((input as {rescan?: boolean} | undefined)?.rescan) { rescanProviderListings(); await Promise.race([Promise.resolve(provider.ready?.()).catch(() => undefined), new Promise(resolve => setTimeout(resolve, PROVIDER_LISTING_WAIT_MS).unref())]); }
       const detected = await discoverLocalProviders();
       const runtime = provider.info();
       // OpenAI Direct signs in with the same ~/.codex/auth.json the Codex CLI entry reads: show that account

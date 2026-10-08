@@ -31,6 +31,8 @@ import {ForkOrigin,MessageEditor,MessageMeta,type MessageActions} from './Messag
 import {ImportOrigin} from './ImportConversations';
 import './chat-continuity.css';
 import {TurnChanges} from './TurnChanges';
+import {useStoreSelector} from '../useStore';
+import {useLatestTurnFiles} from '../reviewState';
 import {EnvironmentFooter} from './EnvironmentFooter';
 import { StatusDot } from './StatusDot';
 import { ToolCard } from './ToolCard';
@@ -184,6 +186,8 @@ export function Timeline({ items, chatId, onScrolled, running, planMode=false }:
     }
     return map;
   },[rows,turnModel]);
+  // Files Git saw the latest turn change: a shell-editing model leaves no fileChange item, so the transcript's Edited rows follow Git too.
+  const gitTurnFiles=useLatestTurnFiles(chatId,useStoreSelector(state=>state.snapshot?.chats.find(c=>c.id===chatId)?.folderId??undefined),running?'running':'idle')?.files.length??0;
   const turnEnds=useMemo(()=>new Map([...turnModel.turns.values()].map(info=>[info.end,info.id])),[turnModel]);
   const retryId=useMemo(()=>retryTarget(items,live),[items,live]);
   const [editingId,setEditingId]=useState<string>();
@@ -380,7 +384,7 @@ export function Timeline({ items, chatId, onScrolled, running, planMode=false }:
             {(()=>{
               // Edits stay visible after a turn even when its work is folded (Codex/Cursor): one Edited row per file, full diffs.
               const turnId=turnEnds.get(v.index),end=turnId?turnModel.turns.get(turnId):undefined,work=turnId?turnWork.get(turnId):undefined;
-              return turnId&&end?.complete&&work?.edits?<AreaBoundary area="this turn's changes" scope="item" resetKey={work.items}><TurnFileChanges items={work.items} chatId={chatId} turnId={turnId} latest={turnId===turnModel.last} showPill={turnId!==turnModel.last}/></AreaBoundary>:null;
+              return turnId&&end?.complete&&work&&(work.edits||(turnId===turnModel.last&&gitTurnFiles>0))?<AreaBoundary area="this turn's changes" scope="item" resetKey={work.items}><TurnFileChanges items={work.items} chatId={chatId} turnId={turnId} latest={turnId===turnModel.last} showPill={turnId!==turnModel.last}/></AreaBoundary>:null;
             })()}
           </div>;
         })}

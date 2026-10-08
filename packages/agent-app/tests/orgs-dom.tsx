@@ -30,6 +30,7 @@ const work={connected:true,me:{id:'u-me',name:'Dhairya'},fetchedAt:iso(0),orgs:[
   {org:{id:'rag',name:'Ragnar',prefix:'RAG',server:'aiteam.example.com'},sidebar:'mine',open:7,tasks:ragTasks,projects:[{id:'redis',name:'Redis',open:3},{id:'postgresql',name:'PostgreSQL',open:2},{id:'website',name:'Website',open:2},{id:'ui',name:'UI App',open:0}],inbox:[]},
   {org:{id:'hyb',name:'Hybrow',prefix:'HYB',server:'aiteam.example.com'},sidebar:'mine',open:1,tasks:[mk('Hybrow','hyb','HYB-2','Invite agents to the team','in_progress','Onboarding',5)],projects:[{id:'onboarding',name:'Onboarding',open:1},{id:'rez',name:'Rez',open:0}],inbox:[]},
 ]};
+let reloaded:any[]=[];
 let lease:any=null,pending:any={rows:[],conflict:null};
 let plan:any={task:{id:'t1',key:'RAG-1',title:'External Valkey migration',status:'todo',orgId:'rag',orgName:'Ragnar',projectId:'redis',projectName:'Redis',assignee:'You'},assignedToMe:true,willPost:{comment:'Checked out · working locally on MacBook · via Muster',status:'in_progress',reassign:false},device:'MacBook',binding:{orgId:'rag',projectId:'redis',projectName:'Redis',path:'/Users/me/redis',devBranch:'dev',boundAt:iso(1)},detectedFolder:null,devBranch:'dev',agents:[{id:'a-ceo',name:'Head Muster',adapter:'claude_local',model:'claude-opus-4',suggested:true,mapsTo:'Claude Code · Opus 4'}],providers:[{id:'omniroute',name:'OmniRoute',models:[{id:'gpt-x',name:'GPT X'}]}],otherMac:null,firstTime:false,noRepo:false,newFolder:'/Users/me/Muster/Ragnar/Redis'};
 let preview:any={taskId:'t1',branch:'muster/RAG-1',testsRun:true,testsLine:'12 passed, 0 failed.',prUrl:null,summary:'RAG-1',decisions:[],reviewers:[{kind:'agent',id:'a-qa',name:'QA Lead',suggested:true},{kind:'user',id:'u-bob',name:'Bob Rivera',suggested:false}],policy:[],reviewedLocally:[],blocked:null};
@@ -50,6 +51,9 @@ const listeners=new Set<(e:any)=>void>();
     case 'checkout.handback.preview':return preview;
     case 'checkout.handback':return {state:'handed_back'};
     case 'checkout.undo':return {state:'checked_out'};
+    case 'checkout.countdown':return {ok:true};
+    case 'checkout.countdowns':return {countdowns:reloaded};
+    case 'checkout.release':return {state:'released'};
     case 'checkout.auto':return {mode:input.mode??'auto'};
     case 'checkout.pending':return pending;
     case 'checkout.org':return {copy:null};
@@ -70,7 +74,7 @@ const {MyWorkPage}=await import('../src/renderer/components/MyWorkPage');
 const {OwnerPicker}=await import('../src/renderer/components/OwnerPicker');
 const {OrgsCard,LocalCheckoutsCard,ProjectCheckoutRow}=await import('../src/renderer/components/OrgsCard');
 const {WorkLocallyBar,CheckoutNotes,CheckoutProperties}=await import('../src/renderer/components/CheckoutPanel');
-const {HandBackHost}=await import('../src/renderer/components/HandBackHost');
+const {HandBackHost,NoticeCountdown}=await import('../src/renderer/components/HandBackHost');
 const {getState}=await import('../src/renderer/store');
 const {ownerOptions,filterOwners,agentLabel,chipMentions,mentionMatches}=await import('../src/renderer/ownerOptions');
 const {toggleOrg,togglePin}=await import('../src/renderer/orgStore');
@@ -257,9 +261,21 @@ calls.length=0; undoNotice!.action!.run(); await delay(100);
 assert.deepEqual(calls.find(c=>c.command==='checkout.undo')?.input,{taskId:'t1'});
 for(const l of [...listeners])l({type:'handBackReady',taskId:'t2',key:'RAG-2',to:'Bob Rivera',recipient:{kind:'user',id:'u-bob'},reason:'the pull request is open'});
 await delay(100);
-const ask=getState().notices.find(n=>n.message.startsWith('RAG-2 looks finished'));
+const ask=getState().notices.find(n=>n.message.startsWith('Ready to hand back RAG-2 to Bob Rivera'));
 assert.ok(ask&&ask.action?.label==='Hand back'); calls.length=0; ask!.action!.run(); await delay(100);
 assert.deepEqual(calls.find(c=>c.command==='checkout.handback')?.input,{taskId:'t2',reviewer:{kind:'user',id:'u-bob'}},'the recipient comes with the offer: one click');
+// the countdown: a live toast with Hand back now and Keep working, owned by the runtime (a reloaded window asks for it again)
+const endsAt=new Date(Date.now()+60_000).toISOString();
+for(const l of [...listeners])l({type:'handBackCountdown',taskId:'t1',key:'RAG-1',to:'QA Lead',endsAt});
+await delay(100);
+const cd=getState().notices.find(n=>n.countdown);
+assert.ok(cd,'a countdown toast'); assert.match(cd!.countdown!.format(60),/^Handing back RAG-1 to QA Lead in 60 s$/); assert.match(cd!.message,/^Handing back RAG-1 to QA Lead in (59|60) s$/);
+assert.deepEqual([cd!.action?.label,cd!.secondary?.label],['Hand back now','Keep working']); assert.ok(cd!.lifetimeMs!>=60_000,'it outlasts the countdown');
+calls.length=0; cd!.secondary!.run(); await delay(100); assert.deepEqual(calls.find(c=>c.command==='checkout.countdown')?.input,{taskId:'t1',action:'keep'});
+calls.length=0; cd!.action!.run(); await delay(100); assert.deepEqual(calls.find(c=>c.command==='checkout.countdown')?.input,{taskId:'t1',action:'now'});
+for(const l of [...listeners])l({type:'handBackCountdownEnded',taskId:'t1'}); await delay(50);
+assert.ok(!getState().notices.some(n=>n.countdown),'the toast goes when the countdown ends');
+await show(<NoticeCountdown countdown={cd!.countdown!}/>); assert.match(body(),/Handing back RAG-1 to QA Lead in \d+ s/,'the toast text is live');
 // offline and conflicts show only when relevant
 lease={...lease,pending:3,offline:'auto'};
 await show(<CheckoutNotes detail={detail()}/>);
@@ -271,6 +287,19 @@ assert.ok(body().includes('This task changed on the server while you were offlin
 assert.deepEqual(text('.ws-checkout-conflict button'),['Send anyway','Edit first','Discard'],'send anyway, edit, or discard');
 await show(<WorkLocallyBar detail={detail({status:'done'})}/>);
 assert.ok(text('.ws-checkout button')[0]?.startsWith('Working locally'),'while still checked out the control stays, even on a done task');
+// a check-out idle for more than three days: how long ago, with Hand back and Release; a very broad folder is flagged; the runtime's last reason is shown
+lease={...lease,conflict:null,pending:0,offline:null,stale:true,staleDays:4,broadFolder:true,heldBack:{reason:'The last test run did not finish with exit code 0.',at:iso(0)}};
+await show(<CheckoutNotes detail={detail()}/>);
+assert.ok(body().includes('Checked out 4 days ago · idle'),'idle for days: said plainly'); assert.deepEqual(text('[data-stale-checkout] button'),['Hand back','Release']); assert.ok(!body().includes('Quiet for'),'the hours reminder gives way to it');
+assert.ok(body().includes('very broad folder')&&body().includes('Not handed back yet: The last test run did not finish with exit code 0.'));
+calls.length=0; await click(byText('[data-stale-checkout] button','Release')); assert.equal(calls.find(c=>c.command==='checkout.release')?.input.taskId,'t1','Release is the person\'s click; nothing is released by itself');
+await click(byText('[data-stale-checkout] button','Hand back')); assert.ok(document.querySelector('.ws-hand-back'),'Hand back opens the usual sheet with the recipient filled in');
+// My work: the idle row says so, with the same two choices
+ragTasks.push(mk('Ragnar','rag','RAG-21','Old spike','in_progress','Redis',100,{checkout:{state:'checked_out',thisMac:true,device:'MacBook',since:iso(100),stale:true,staleDays:4,chatId:'chat-21',folderId:'f-21'}}));
+{const {loadMyWork}=await import('../src/renderer/orgStore'); await loadMyWork(true);}
+await show(<MyWorkPage/>); await click(byText('.ws-filter','All orgs'));
+assert.ok(text('.my-row').some(t=>/RAG-21/.test(t)&&/Checked out · this Mac · idle/.test(t)),'the row is tagged idle');
+assert.ok(text('.my-stale').some(t=>t.includes('Checked out 4 days ago · idle')&&t.includes('Hand back')&&t.includes('Release')),'with Hand back and Release under it');
 lease=null; await show(<WorkLocallyBar detail={detail({status:'done'})}/>); assert.ok(!document.querySelector('.ws-checkout'),'a done task cannot be checked out');
 await show(<WorkLocallyBar detail={detail({source:'local'})}/>); assert.ok(!document.querySelector('.ws-checkout'),'only server tasks');
 assert.deepEqual(errors,[],'no render errors');

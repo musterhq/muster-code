@@ -1,6 +1,7 @@
 import type {TimelineItem} from '../shared/protocol';
 import {itemPatches,type ChangeKind} from './patchModel.ts';
 import {netChangeCounts,type PatchEdit} from './turnChangeTotals.ts';
+import type {ReviewChange} from '../shared/domains/review-protocol';
 
 export interface FileChangePatch extends PatchEdit { adds: number; dels: number; itemId: string; truncated?: boolean }
 export interface FileChangeEntry { path: string; movePath?: string; kind: ChangeKind; adds: number; dels: number; patches: FileChangePatch[]; status: string }
@@ -36,4 +37,22 @@ export function latestTurnItems(items: readonly TimelineItem[]): readonly Timeli
 
 export function changeTotals(entries: readonly FileChangeEntry[]): {files: number; adds: number; dels: number} {
   return {files: entries.length, adds: entries.reduce((sum, entry) => sum + entry.adds, 0), dels: entries.reduce((sum, entry) => sum + entry.dels, 0)};
+}
+
+/**
+ * The turn's files as Git sees them against its turn-start baseline, added to the ones the provider
+ * reported. Providers that edit through shell commands (a Codex model_provider route, any model that
+ * writes with `sed`/`cat >`) emit no fileChange items, so Git is the only record of what they changed.
+ * A file the provider already reported (matched by folder-relative path) keeps its patches; the rest
+ * become entries with no patches, which the live review renders straight from the baseline.
+ */
+export function mergeReviewFiles(entries: readonly FileChangeEntry[], files: readonly ReviewChange[] | undefined, relativeOf: (path: string) => string | undefined = path => path): FileChangeEntry[] {
+  if (!files?.length) return [...entries];
+  const covered = new Set<string>();
+  for (const entry of entries) for (const path of [entry.path, entry.movePath]) if (path) covered.add(relativeOf(path) ?? path);
+  const extra = files.filter(file => !covered.has(file.path)).map((file): FileChangeEntry => ({
+    path: file.path, kind: file.status === 'added' || file.status === 'untracked' ? 'add' : file.status === 'deleted' ? 'delete' : 'update',
+    adds: file.adds, dels: file.dels, patches: [], status: 'completed',
+  }));
+  return [...entries, ...extra];
 }

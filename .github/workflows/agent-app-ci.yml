@@ -42,6 +42,23 @@ jobs:
           cache: npm
           cache-dependency-path: packages/agent-app/package-lock.json
 
+      - id: electron
+        # Download caches only (never node_modules): keyed on OS, CPU and the locked Electron version.
+        shell: bash
+        run: echo "version=$(node -p "require(process.env.GITHUB_WORKSPACE + '/packages/agent-app/package-lock.json').packages['node_modules/electron'].version")" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/Library/Caches/electron
+            ~/Library/Caches/electron-builder
+            ~/.cache/electron
+            ~/.cache/electron-builder
+            ~/AppData/Local/electron/Cache
+            ~/AppData/Local/electron-builder/Cache
+          key: electron-${{ runner.os }}-${{ runner.arch }}-${{ steps.electron.outputs.version }}
+          restore-keys: |
+            electron-${{ runner.os }}-${{ runner.arch }}-
+
       - name: Install
         run: npm ci --no-audit --no-fund
 

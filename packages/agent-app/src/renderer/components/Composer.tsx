@@ -1085,7 +1085,8 @@ export function Composer({ chat }: { chat: Chat }): React.ReactElement {
   const modelTitle = !chat.providerId ? 'No model is connected for this chat yet. Pick one, or connect a provider in Settings › Providers.' : providerMissing ? `The provider “${chat.providerId}” this chat used is not available on ${device().lower}. Pick another model to continue.` : 'Select model';
   const primaryDisabled = !hasPayload || staging || sending || modelChanging || settingsChanging || chat.archived || recoveryNeeded;
   const answering = Boolean(questionFlow && !questionFlow.collapsed);
-  const placeholder = dictation ? (dictation.interim || 'Listening…') : chat.archived ? 'Restore this chat to continue' : answering ? (questionFlow!.question.options.length ? 'Type your own answer, or leave blank to use the selected option' : 'Type your answer') : !providers.length && state.providers.phase === 'ready' ? 'Enable a provider to send a message' : running ? 'Working…' : planMode ? 'Describe your task to generate a plan…' : 'Do anything';
+  const loadingProvider = (state.providers.value ?? []).find(row => row.id === chat.providerId && row.listing === 'loading');
+  const placeholder = loadingProvider ? `Loading models from ${loadingProvider.name}…` : dictation ? (dictation.interim || 'Listening…') : chat.archived ? 'Restore this chat to continue' : answering ? (questionFlow!.question.options.length ? 'Type your own answer, or leave blank to use the selected option' : 'Type your answer') : !providers.length && state.providers.phase === 'ready' ? 'Enable a provider to send a message' : running ? 'Working…' : planMode ? 'Describe your task to generate a plan…' : 'Do anything';
   const caretPopoverId = slash ? 'composer-slash-options' : 'composer-mention-options';
   const hovered = chipHover ? tokenRanges[chipHover.index] : undefined;
 

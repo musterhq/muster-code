@@ -9,7 +9,7 @@ import { WorkShortcutsHost } from './components/WorkShortcuts';
 import { ParallelRunHost } from './components/ParallelRunGuard';
 import { ImportConversationsHost } from './components/ImportConversations';
 import { TaskLinkHost } from './components/TaskLinkHost';
-import { HandBackHost } from './components/HandBackHost';
+import { HandBackHost, NoticeCountdown } from './components/HandBackHost';
 import { SetupGuideHost } from './components/SetupGuide';
 import { ResourcePane } from './components/ResourcePane';
 import {LazyAutomationsScreen,LazyBoundary,LazyHubScreen,LazyMemoryScreen,LazyPreferencesScreen,LazyProjectsScreen,preloadScreens} from './lazyScreens';
@@ -24,6 +24,7 @@ import {
   dismissNotice,
   holdNotices,
   runNoticeAction,
+  runNoticeSecondary,
   persistNavWidth,
   setNavWidth,
   setNavHidden,
@@ -167,9 +168,10 @@ export function App(): React.ReactElement {
           {state.notices.map((n) => (
             <div key={n.id} className="notice" data-kind={n.kind}>
               <span className="notice-icon" aria-hidden="true">{n.kind==='error'?<AlertCircle size={14}/>:n.kind==='success'?<CircleCheck size={14}/>:<Info size={14}/>}</span>
-              <span className="notice-message">{n.kind==='error'&&<span className="visually-hidden">Error: </span>}{n.message}</span>
+              <span className="notice-message">{n.kind==='error'&&<span className="visually-hidden">Error: </span>}{n.countdown?<NoticeCountdown countdown={n.countdown}/>:n.message}</span>
               {n.count>1&&<span className="notice-count" aria-label={`Repeated ${n.count} times`}>×{n.count}</span>}
               {n.action&&<button type="button" className="notice-action" onClick={()=>runNoticeAction(n.id)}>{n.action.label}</button>}
+              {n.secondary&&<button type="button" className="notice-action" onClick={()=>runNoticeSecondary(n.id)}>{n.secondary.label}</button>}
               <button
                 type="button"
                 className="icon-button notice-dismiss"

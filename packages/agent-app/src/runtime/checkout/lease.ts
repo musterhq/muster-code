@@ -142,8 +142,13 @@ export const isStale = (lease: Pick<CheckoutLease, 'state' | 'lastActivityAt'> &
   return lease.state === 'checked_out' && staleHours > 0 && hoursSince(last, now) >= staleHours;
 };
 
-export const toView = (lease: CheckoutLease, deviceId: string, now: number, staleHours: number): LeaseView => ({ ...lease, thisMac: lease.deviceId === deviceId, stale: isStale(lease, now, staleHours), staleHours });
+/** A check-out idle for more than this many days is surfaced in My work and on the task with Hand back and Release (never released automatically). */
+export const IDLE_DAYS = 3;
+/** Whole days since check-out when the check-out has been idle for more than three days, else null. */
+export const staleDaysOf = (lease: Pick<CheckoutLease, 'state' | 'since' | 'lastActivityAt'>, now: number): number | null =>
+  lease.state === 'checked_out' && hoursSince(lease.lastActivityAt, now) > IDLE_DAYS * 24 ? Math.max(IDLE_DAYS, Math.floor(hoursSince(lease.since, now) / 24)) : null;
+export const toView = (lease: CheckoutLease, deviceId: string, now: number, staleHours: number, broadFolder = false): LeaseView => ({ ...lease, thisMac: lease.deviceId === deviceId, stale: isStale(lease, now, staleHours), staleHours, staleDays: staleDaysOf(lease, now), broadFolder });
 export { badgeText } from '../../shared/domains/checkout-protocol.ts';
 export const badgeOf = (lease: LeaseView | CheckoutLease | null, deviceId: string, now: number, staleHours: number): CheckoutBadge | null =>
-  lease && lease.state === 'checked_out' ? { state: 'checked_out', thisMac: lease.deviceId === deviceId, device: lease.device, since: lease.since, stale: isStale(lease, now, staleHours), chatId: lease.chatId, folderId: lease.folderId } : null;
+  lease && lease.state === 'checked_out' ? { state: 'checked_out', thisMac: lease.deviceId === deviceId, device: lease.device, since: lease.since, stale: isStale(lease, now, staleHours), staleDays: staleDaysOf(lease, now), chatId: lease.chatId, folderId: lease.folderId } : null;
 export const isOpen = (state: LeaseState): boolean => state === 'checked_out';

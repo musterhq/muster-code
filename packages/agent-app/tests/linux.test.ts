@@ -24,7 +24,7 @@ function fixture(t: TestContext, proc: Record<string, string>, opts: {apparmorPr
   if (opts.unshare) { writeFileSync(unshare, `#!/bin/sh\n[ "$1 $2" = "-Ur true" ] || exit 2\nexit ${opts.unshare === 'ok' ? 0 : 1}\n`); chmodSync(unshare, 0o755); }
   if (opts.setuid) { writeFileSync(join(app, 'chrome-sandbox'), ''); chmodSync(join(app, 'chrome-sandbox'), 0o4755); }
   return (args: string[] = [], env: Record<string, string> = {}) => {
-    const run = spawnSync(join(app, 'muster-agent'), args, {encoding: 'utf8', env: {PATH: process.env.PATH!, MUSTER_PROC_ROOT: procRoot, MUSTER_APPARMOR_DIR: apparmor, MUSTER_UNSHARE: opts.unshare ? unshare : join(root, 'no-unshare'), MUSTER_PROFILE_TARGET: opts.installedPath ? join(realpathSync(app), 'muster-agent') : '/opt/Muster Agent/muster-agent', ...env}});
+    const run = spawnSync(join(app, 'muster-agent'), args, {encoding: 'utf8', env: {PATH: process.env.PATH!, MUSTER_PROC_ROOT: procRoot, MUSTER_APPARMOR_DIR: apparmor, MUSTER_UNSHARE: opts.unshare ? unshare : join(root, 'no-unshare'), MUSTER_PROFILE_TARGET: opts.installedPath ? join(realpathSync(app), 'muster-agent') : '/opt/muster-agent/muster-agent', ...env}});
     return {out: run.stdout.trim(), err: run.stderr};
   };
 }

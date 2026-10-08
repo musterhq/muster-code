@@ -2,7 +2,7 @@ import { createRequire } from 'node:module';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
-import {configuredProviderInstances,providerListingsSettled,providerNode,type ProviderInstance,revalidateProviderInstances} from './provider-instances.ts';
+import {awaitProviderListing,configuredProviderInstances,providerListingsSettled,providerNode,type ProviderInstance,revalidateProviderInstances} from './provider-instances.ts';
 import {createAdapterCatalog,type AdapterCatalog} from './adapters/index.ts';
 import {readOwnedCommandOutputs} from './command-output-recovery.ts';
 import {authFailureStatus, authRecovery, coreBudgetOptions, classifyProviderFailure, lifecycleDiagnostic, requestWhileOwned, providerAccessPolicy, type ProviderBudgets, type ProviderRecovery} from './provider-run-lifecycle.ts';
@@ -61,6 +61,8 @@ export interface ProviderAdapter {
   compact?(chatId: string): Promise<void>;
   /** Resolves once asynchronous provider checks (CLI probes, /models requests) have settled, so a listing is current. */
   ready?(): Promise<void>;
+  /** Waits (up to timeoutMs) for the provider's live model listing when it is still loading, refreshing or failed; never throws. */
+  awaitListing?(providerId: string, timeoutMs: number): Promise<void>;
   /** Thread identity of the chat's live Codex app-server session (native thread APIs), or undefined. */
   nativeThread?(chatId: string): {threadId: string; providerId: string; bindingId: string} | undefined;
   /** Calls a method on the chat's live Codex session. Throws NativeUnavailableError when none holds the thread. */
@@ -218,6 +220,7 @@ export function createProviderAdapter(options: { core?: CoreClient; available?: 
   }
   return {
     info() { return instances().map(instance=>({...instance.info,available:!disposed&&instance.info.available})); },
+    async awaitListing(providerId, timeoutMs) { await awaitProviderListing(instances().find(instance => instance.info.id === providerId)?.listingKey, timeoutMs); },
     async ready() { await Promise.all([catalog?.ready(), options.instances || options.available ? undefined : providerListingsSettled()]); },
     markStale() {
       revalidateProviderInstances();

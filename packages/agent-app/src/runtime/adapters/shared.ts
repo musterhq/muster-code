@@ -11,10 +11,12 @@ export class Validator<T> {
   private state: Validation<T> = {status: 'pending'};
   private key = '';
   private inflight?: Promise<Validation<T>>;
-  constructor(private check: () => Promise<T>, private ttlMs = 10 * 60_000, private now: () => number = Date.now) {}
+  constructor(private check: () => Promise<T>, private ttlMs = 10 * 60_000, private now: () => number = Date.now, private errorTtlMs = 30_000) {}
+  /** True while a check is in flight. */
+  get busy(): boolean { return this.inflight !== undefined; }
   current(key: string): Validation<T> {
     if (key !== this.key) { this.key = key; this.state = {status: 'pending'}; this.inflight = undefined; }
-    if (!this.inflight && (this.state.status === 'pending' || this.now() - (this.state.checkedAt ?? 0) > (this.state.status === 'error' ? Math.min(this.ttlMs, 30_000) : this.ttlMs))) void this.refresh();
+    if (!this.inflight && (this.state.status === 'pending' || this.now() - (this.state.checkedAt ?? 0) > (this.state.status === 'error' ? Math.min(this.ttlMs, this.errorTtlMs) : this.ttlMs))) void this.refresh();
     return this.state;
   }
   refresh(): Promise<Validation<T>> {

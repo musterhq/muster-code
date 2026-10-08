@@ -3,11 +3,39 @@
 All notable changes to Muster Agent. Each `## <version>` section becomes the notes of the
 `agent-v<version>` GitHub Release (`.github/workflows/agent-app-release.yml`).
 
+## 0.3.7
+
+Work locally now hands back on its own, live diffs show up in checked-out tasks, router models no longer report "unavailable" after a restart, Ubuntu 24.04 installs start, and releases build about twice as fast.
+
+### Work locally hands back by itself, quickly (#345)
+- **No typing "done".** After a finished turn Muster decides: a git project with a commit past the check-out (Muster commits uncommitted work as you) and a real test run that exited 0 after the last change (or no tests), or a plain folder whose files changed. Output Muster cannot parse no longer blocks; the exit code is the evidence. Errored or stopped turns, queued follow-ups and open questions never trigger it, and after Undo or Keep working it waits for new work.
+- **A 60 second countdown** ("Handing back RAG-121 to QA Lead in 60 s", Hand back now, Keep working) runs in the app's runtime, so it survives a window reload. Undo still works afterwards. "Ask me" shows "Ready to hand back" instead.
+- **One PATCH, sent at once.** Status, assignee and the summary go in a single request that jumps ahead of other waiting posts; the branch is pushed during the countdown.
+- **No "Paused" comment spam.** At most one note per check-out, after a day of silence. "Not handing back yet" reasons now stay on the task in Muster.
+- **A correct summary.** Files and lines come from the merge-base with the base branch, without gitignored or build output, plus uncommitted work. Unparsed tests with exit 0 say "Tests passed (exit 0)"; "read by you" appears only when you said done.
+- **Stale check-outs** (idle over 3 days) show "Checked out 4 days ago · idle" with Hand back and Release in My work and on the task, and a plain-folder check-out in a very broad folder (home, Documents, Desktop, Downloads) suggests a project folder.
+
+### Live diffs in Work locally chats (#353)
+- A checked-out task's chat now shows live inline diffs and the "N files changed" card, like any other chat, whatever the model, including edits made with shell commands.
+
+### Router models are there right after a restart (#350)
+- Sending waits for a router's model list (for example intelligent-planner on Hybrow OmniRoute) instead of saying the model is unavailable. The last good list is remembered across restarts, failed listings retry on their own, and errors say exactly what is wrong.
+
+### Linux
+- Ubuntu 24.04: the .deb now starts. It installs to /opt/muster-agent (a space in the old path broke Chromium's sandbox helper), and in containers without the capabilities that helper needs it falls back cleanly. The app's name in menus and its data folder are unchanged (#343).
+
+### Safer tools on router and local models (#348)
+- Stop also ends programs the agent detached. Linked files outside the folder can't be read without Full access. Very large tool arguments are trimmed. Secrets are removed from stored commands and diffs. A failing project-rules check now blocks the command.
+- The composer placeholder fits narrow windows, and its focus ring is clearly visible.
+
+### Faster releases (#341)
+- Releases no longer re-run the full test suite: they check that main's CI passed for that exact commit. A version bump on main releases automatically once CI is green, downloads are cached, and the Windows zip uses normal compression. A release now takes about 5 to 8 minutes instead of 11.
+
 ## 0.3.6
 
 ### Faster, smoother, smaller
 
-0.3.6 rebuilds how Muster draws itself. Typing and streaming used to redraw almost the whole app many times a second. Now each part of the screen redraws only when its own data changes. Replies stream in at a steady 60 frames a second, typing stays instant in long chats, startup asks the server for less, and the download is up to 45% smaller.
+0.3.6 rebuilds how Muster draws itself. Typing and streaming used to redraw almost the whole app many times a second. Now each part of the screen redraws only when its own data changes. Replies stream in at a steady 60 frames a second, typing stays instant in long chats, startup asks the server for less, and the download is up to a third smaller.
 
 **What changed under the hood**
 - **Redraws only what changed.** The sidebar, summary card, workspace and transcript each watch only their own slice of state, and unchanged chat rows and messages are skipped.
@@ -65,18 +93,19 @@ All notable changes to Muster Agent. Each `## <version>` section becomes the not
 
 | | 0.3.5 | 0.3.6 | |
 |---|---:|---:|---|
-| Mac (Apple silicon) | 132 MB | **90 MB** | −32% |
-| Mac installed size | 308 MB | **258 MB** | −16% |
-| Windows installer | 144 MB | **103 MB** | −29% |
-| Windows zip | 197 MB | **140 MB** | −29% |
-| Linux AppImage | 173 MB | **95 MB** | −45% |
-| Linux .deb | 133 MB | **95 MB** | −29% |
-| Muster Server (Mac) | 42 MB | **26 MB** | −38% |
+| Mac (Apple silicon) | 132 MB | **91.5 MB** | −31% |
+| Mac (Intel) | 138 MB | **102 MB** | −26% |
+| Mac installed size (Apple silicon) | 308 MB | **258 MB** | −16% |
+| Windows installer | 144 MB | **107 MB** | −26% |
+| Windows zip | 197 MB | **147 MB** | −25% |
+| Linux AppImage | 173 MB | **117 MB** | −32% |
+| Linux .deb | 133 MB | **100 MB** | −25% |
+| Muster Server (Mac) | 42.5 MB | **27 MB** | −36% |
 | Files installed on Windows | ~10,160 | **~220** | 46× fewer |
 
 The fewer files mean Windows installs faster and antivirus scans finish sooner. Nothing was removed that the app uses: the cut is code libraries that were already built in, unused Chromium language packs, and stronger compression.
 
-<sub>How these were measured: the 0.3.5 and 0.3.6 renderers, run headlessly against an isolated test data set with the same 300-message chat, keystrokes and streamed reply. Redraw counts come from a development build; frame times and CPU come from a production build. Sizes are the published 0.3.5 assets against the 0.3.6 builds.</sub>
+<sub>How these were measured: the 0.3.5 and 0.3.6 renderers, run headlessly against an isolated test data set with the same 300-message chat, keystrokes and streamed reply. Redraw counts come from a development build; frame times and CPU come from a production build. Sizes are the published 0.3.5 and 0.3.6 release files.</sub>
 
 ### Also in this release
 

@@ -56,10 +56,13 @@ export function batchReports(pending: readonly Report[], already: ReadonlySet<st
 export const decisionReport = (key: string, at: string, text: string): Report => ({ key, kind: 'decision', at, body: `**Decision**\n\n${sanitizeOut(text, 4000, { multiline: true })}` });
 export const contextReport = (key: string, at: string, summary: string): Report => ({ key, kind: 'context', at, body: `**Context so far**\n\n${sanitizeOut(summary, 600)}` });
 export const prReport = (key: string, at: string, url: string, branch: string): Report => ({ key, kind: 'pr', at, body: `**Pull request opened**\n\n${url}\n\nBranch: \`${branch}\`` });
-export interface TestResult { ran: boolean; passed?: number; failed?: number; baselineFailed?: number | null; note?: string | null; /** The project has no recognised test setup, so none was expected. */ none?: boolean; /** Tests ran and finished cleanly but their output is not a summary Muster can read: the person looked at it. */ unparsed?: boolean }
+export interface TestResult { ran: boolean; passed?: number; failed?: number; baselineFailed?: number | null; note?: string | null; /** The project has no recognised test setup, so none was expected. */ none?: boolean; /** Tests ran and finished cleanly but their output is not a summary Muster can read: the person looked at it. */ unparsed?: boolean; /** The newest test command's exit code was 0 (the exit code is the evidence when its output is not a summary Muster can read). */ exitOk?: boolean; /** The person said it is done in their own words, so they looked at the result themselves. */ userSaid?: boolean }
 export function testsLine(t: TestResult): string {
   if (t.none && !t.ran) return 'No tests in this project.';
-  if (t.ran && t.unparsed) return 'Tests ran; the result was read by you (Muster could not parse it).';
+  if (t.ran && t.unparsed) {
+    if (t.exitOk === true) return t.userSaid ? 'Tests passed (exit 0); the result was read by you (Muster could not parse it).' : 'Tests passed (exit 0).';
+    return t.exitOk === false ? 'Tests ran but did not finish with exit code 0.' : 'Tests ran; Muster could not read the result.';
+  }
   if (!t.ran) return t.note?.trim() ? `Tests were not run: ${t.note.trim()}` : 'Tests were not run.';
   const now = `${t.passed ?? 0} passed, ${t.failed ?? 0} failed`;
   if (t.baselineFailed === null || t.baselineFailed === undefined) return `Tests: ${now}.`;
