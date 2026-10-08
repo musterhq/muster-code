@@ -3,7 +3,9 @@
 All notable changes to Muster Agent. Each `## <version>` section becomes the notes of the
 `agent-v<version>` GitHub Release (`.github/workflows/agent-app-release.yml`).
 
-## Unreleased
+## 0.3.7
+
+Work locally now hands back on its own, live diffs show up in checked-out tasks, router models no longer report "unavailable" after a restart, and releases build about twice as fast.
 
 ### Work locally hands back by itself, quickly (#345)
 - **No typing "done".** After a finished turn Muster decides: a git project with a commit past the check-out (Muster commits uncommitted work as you) and a real test run that exited 0 after the last change (or no tests), or a plain folder whose files changed. Output Muster cannot parse no longer blocks; the exit code is the evidence. Errored or stopped turns, queued follow-ups and open questions never trigger it, and after Undo or Keep working it waits for new work.
@@ -12,6 +14,22 @@ All notable changes to Muster Agent. Each `## <version>` section becomes the not
 - **No "Paused" comment spam.** At most one note per check-out, after a day of silence. "Not handing back yet" reasons now stay on the task in Muster.
 - **A correct summary.** Files and lines come from the merge-base with the base branch, without gitignored or build output, plus uncommitted work. Unparsed tests with exit 0 say "Tests passed (exit 0)"; "read by you" appears only when you said done.
 - **Stale check-outs** (idle over 3 days) show "Checked out 4 days ago · idle" with Hand back and Release in My work and on the task, and a plain-folder check-out in a very broad folder (home, Documents, Desktop, Downloads) suggests a project folder.
+
+### Live diffs in Work locally chats (#353)
+- A checked-out task's chat now shows live inline diffs and the "N files changed" card, like any other chat, whatever the model, including edits made with shell commands.
+
+### Router models are there right after a restart (#350)
+- Sending waits for a router's model list (for example intelligent-planner on Hybrow OmniRoute) instead of saying the model is unavailable. The last good list is remembered across restarts, failed listings retry on their own, and errors say exactly what is wrong.
+
+### Known issue
+- Ubuntu 24.04: the .deb doesn't start yet (the fix is in progress, #343). Use the AppImage on 24.04 for now; other Linux versions, Mac and Windows are unaffected.
+
+### Safer tools on router and local models (#348)
+- Stop also ends programs the agent detached. Linked files outside the folder can't be read without Full access. Very large tool arguments are trimmed. Secrets are removed from stored commands and diffs. A failing project-rules check now blocks the command.
+- The composer placeholder fits narrow windows, and its focus ring is clearly visible.
+
+### Faster releases (#341)
+- Releases no longer re-run the full test suite: they check that main's CI passed for that exact commit. A version bump on main releases automatically once CI is green, downloads are cached, and the Windows zip uses normal compression. A release now takes about 5 to 8 minutes instead of 11.
 
 ## 0.3.6
 
