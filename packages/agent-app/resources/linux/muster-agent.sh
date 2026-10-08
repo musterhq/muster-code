@@ -58,6 +58,7 @@ if [ "$add" = 0 ] && [ -z "${CHROME_DEVEL_SANDBOX:-}" ] && [ -u "$dir/chrome-san
   esac
 fi
 
+echo "DEBUG add=$add dir=[$dir] CDS=[${CHROME_DEVEL_SANDBOX:-}] $(ls -ln "$dir/chrome-sandbox" "${CHROME_DEVEL_SANDBOX:-/nonexistent}" 2>&1)" >&2
 if [ "$add" = 1 ]; then
   echo "muster-agent: user namespaces are restricted here and chrome-sandbox is not setuid, starting with --no-sandbox. Install the .deb (it adds an AppArmor profile) to keep the sandbox." >&2
   exec "$bin" --no-sandbox "$@"
