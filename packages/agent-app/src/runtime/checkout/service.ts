@@ -157,7 +157,7 @@ export class CheckoutService {
     const derived = deriveLease({ assigneeUserId: task.assigneeUserId ?? null }, comments, me.id, this.deviceId);
     const providers = this.d.providers().filter(p => p.available);
     const own = task.assigneeId && !task.assigneeId.startsWith('user:') ? task.assigneeId : null;
-    const agents = part.agents.filter(a => a.status !== 'terminated').map(a => ({ id: a.id, name: a.name, adapter: a.adapter, model: a.model, suggested: a.id === own, mapsTo: mapAgentToLocal({ adapter: a.adapter, model: a.model }, providers)?.label ?? null }))
+    const agents = part.agents.filter(a => a.status !== 'terminated').map(a => ({ id: a.id, name: a.name, adapter: a.adapter, model: a.model, suggested: a.id === own, mapsTo: mapAgentToLocal({ adapter: a.adapter, model: a.model }, providers)?.summary ?? null }))
       .sort((a, b) => Number(b.suggested) - Number(a.suggested) || a.name.localeCompare(b.name));
     return {
       task: { id: task.id, key: task.key, title: task.title, status: task.status, orgId: company.id, orgName: company.name, projectId: task.projectId, projectName: project?.name ?? null, assignee: task.assigneeLabel },
