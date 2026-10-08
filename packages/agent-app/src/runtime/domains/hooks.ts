@@ -96,7 +96,8 @@ export function createDomainHooks() {
     },
     /** The tool-policy verdict for an approval request, or null. A resolver that throws decides nothing. */
     toolPolicy(chat: Chat, method: string, params: Record<string, unknown>) {
-      try { return toolPolicy?.(chat, method, params) ?? null; } catch { return null; }
+      // Fail closed: a rule check that throws must not wave the call through.
+      try { return toolPolicy?.(chat, method, params) ?? null; } catch { return {effect: 'deny' as const, message: 'The Project tool rules could not be checked, so this was declined. Try again; if it keeps happening, check the Project’s rules.'}; }
     },
     chatDefaults(input: { folderId?: string; projectId?: string }): ChatDefaults {
       try { return defaults?.(input) ?? {}; } catch { return {}; }

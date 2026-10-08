@@ -240,7 +240,7 @@ button.ws-row:disabled { cursor: default; }
 .ws-card-memory-note { margin: 0; color: var(--text-dim); font-size: var(--fs-12); line-height: 1.45; }
 .ws-jump { position: absolute; left: 50%; bottom: 128px; translate: -50% 0; border: 1px solid var(--hairline); background: var(--bg-raised); box-shadow: var(--shadow-sm); border-radius: 50%; }
 .ws-composer { position: relative; flex: none; width: calc(100% - 48px); max-width: 812px; margin: 8px auto 16px; padding: 10px 12px 8px; border: 1px solid var(--hairline); border-radius: var(--radius-16); background: var(--bg-raised); box-shadow: var(--shadow-xs); }
-.ws-composer:focus-within { border-color: color-mix(in srgb, var(--text) 22%, transparent); }
+.ws-composer:focus-within { border-color: var(--focus-ring); box-shadow: var(--shadow-xs), 0 0 0 2px color-mix(in srgb, var(--focus-ring) 35%, transparent); }
 .ws-composer textarea { display: block; width: 100%; min-height: 44px; max-height: 200px; border: 0; outline: 0; resize: none; background: transparent; color: var(--text); font: inherit; font-size: var(--chat-font-size); line-height: 1.5; }
 .ws-composer textarea::placeholder { color: var(--text-faint); }
 .ws-composer-foot { display: flex; align-items: center; gap: 8px; margin-top: 4px; }

@@ -7,7 +7,7 @@ All notable changes to Muster Agent. Each `## <version>` section becomes the not
 
 ### Faster, smoother, smaller
 
-0.3.6 rebuilds how Muster draws itself. Typing and streaming used to redraw almost the whole app many times a second. Now each part of the screen redraws only when its own data changes. Replies stream in at a steady 60 frames a second, typing stays instant in long chats, startup asks the server for less, and the download is up to 45% smaller.
+0.3.6 rebuilds how Muster draws itself. Typing and streaming used to redraw almost the whole app many times a second. Now each part of the screen redraws only when its own data changes. Replies stream in at a steady 60 frames a second, typing stays instant in long chats, startup asks the server for less, and the download is up to a third smaller.
 
 **What changed under the hood**
 - **Redraws only what changed.** The sidebar, summary card, workspace and transcript each watch only their own slice of state, and unchanged chat rows and messages are skipped.
@@ -65,18 +65,19 @@ All notable changes to Muster Agent. Each `## <version>` section becomes the not
 
 | | 0.3.5 | 0.3.6 | |
 |---|---:|---:|---|
-| Mac (Apple silicon) | 132 MB | **90 MB** | −32% |
-| Mac installed size | 308 MB | **258 MB** | −16% |
-| Windows installer | 144 MB | **103 MB** | −29% |
-| Windows zip | 197 MB | **140 MB** | −29% |
-| Linux AppImage | 173 MB | **95 MB** | −45% |
-| Linux .deb | 133 MB | **95 MB** | −29% |
-| Muster Server (Mac) | 42 MB | **26 MB** | −38% |
+| Mac (Apple silicon) | 132 MB | **91.5 MB** | −31% |
+| Mac (Intel) | 138 MB | **102 MB** | −26% |
+| Mac installed size (Apple silicon) | 308 MB | **258 MB** | −16% |
+| Windows installer | 144 MB | **107 MB** | −26% |
+| Windows zip | 197 MB | **147 MB** | −25% |
+| Linux AppImage | 173 MB | **117 MB** | −32% |
+| Linux .deb | 133 MB | **100 MB** | −25% |
+| Muster Server (Mac) | 42.5 MB | **27 MB** | −36% |
 | Files installed on Windows | ~10,160 | **~220** | 46× fewer |
 
 The fewer files mean Windows installs faster and antivirus scans finish sooner. Nothing was removed that the app uses: the cut is code libraries that were already built in, unused Chromium language packs, and stronger compression.
 
-<sub>How these were measured: the 0.3.5 and 0.3.6 renderers, run headlessly against an isolated test data set with the same 300-message chat, keystrokes and streamed reply. Redraw counts come from a development build; frame times and CPU come from a production build. Sizes are the published 0.3.5 assets against the 0.3.6 builds.</sub>
+<sub>How these were measured: the 0.3.5 and 0.3.6 renderers, run headlessly against an isolated test data set with the same 300-message chat, keystrokes and streamed reply. Redraw counts come from a development build; frame times and CPU come from a production build. Sizes are the published 0.3.5 and 0.3.6 release files.</sub>
 
 ### Also in this release
 
