@@ -381,7 +381,20 @@ jobs:
       - name: Package
         shell: bash
         # The update source is this repository (forks publish and update from their own).
-        run: npx electron-builder ${{ matrix.target }} --publish never -c.extraMetadata.musterUpdateRepo=${{ github.repository }} -c.extraMetadata.musterUpdateChannel=${{ contains(env.TAG, '-') && 'beta' || 'stable' }}
+        # Windows: electron-builder builds only the NSIS setup.exe (compression maximum); the portable zip is made in the
+        # next step because the zip target would compress at maximum too, and `compression` is per platform.
+        run: npx electron-builder ${{ matrix.target }} ${{ matrix.os == 'windows' && '-c.win.target=nsis' || '' }} --publish never -c.extraMetadata.musterUpdateRepo=${{ github.repository }} -c.extraMetadata.musterUpdateChannel=${{ contains(env.TAG, '-') && 'beta' || 'stable' }}
+      - name: Portable zip (Windows, normal compression)
+        if: matrix.os == 'windows'
+        shell: bash
+        # Same name and layout electron-builder's zip target produced: the contents of win-unpacked at the archive root.
+        # The in-app updater uses setup.exe + blockmap, never this zip (it is the "manual" install method).
+        run: |
+          VERSION="$(node -p "require('./package.json').version")"
+          ZIP="$PWD/release-dist/Muster-Agent-${VERSION}-win-x64.zip"
+          rm -f "$ZIP"
+          (cd release-dist/win-unpacked && 7z a -tzip -mx=5 -mmt=on "$ZIP" . >/dev/null)
+          ls -l "$ZIP"
       - name: Package size budget
         shell: bash
         # Fails if resources/app/node_modules holds anything but node-pty (or ships build intermediates / another platform's
