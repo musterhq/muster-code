@@ -218,7 +218,22 @@ jobs:
           cache: npm
           cache-dependency-path: packages/agent-app/package-lock.json
 
-      - uses: ./.github/actions/electron-cache
+      - id: electron
+        # Download caches only (never node_modules): keyed on OS, CPU and the locked Electron version.
+        shell: bash
+        run: echo "version=$(node -p "require(process.env.GITHUB_WORKSPACE + '/packages/agent-app/package-lock.json').packages['node_modules/electron'].version")" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/Library/Caches/electron
+            ~/Library/Caches/electron-builder
+            ~/.cache/electron
+            ~/.cache/electron-builder
+            ~/AppData/Local/electron/Cache
+            ~/AppData/Local/electron-builder/Cache
+          key: electron-${{ runner.os }}-${{ runner.arch }}-${{ steps.electron.outputs.version }}
+          restore-keys: |
+            electron-${{ runner.os }}-${{ runner.arch }}-
 
       - name: Install
         # postinstall downloads Electron (cached above) and rebuilds node-pty for it (Xcode is on the runner).
@@ -333,7 +348,22 @@ jobs:
         if: matrix.os == 'linux'
         working-directory: .
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends build-essential python3 xvfb libgtk-3-0 libnss3 libxss1 libgbm1 libasound2t64 rpm fakeroot
-      - uses: ./.github/actions/electron-cache
+      - id: electron
+        # Download caches only (never node_modules): keyed on OS, CPU and the locked Electron version.
+        shell: bash
+        run: echo "version=$(node -p "require(process.env.GITHUB_WORKSPACE + '/packages/agent-app/package-lock.json').packages['node_modules/electron'].version")" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/Library/Caches/electron
+            ~/Library/Caches/electron-builder
+            ~/.cache/electron
+            ~/.cache/electron-builder
+            ~/AppData/Local/electron/Cache
+            ~/AppData/Local/electron-builder/Cache
+          key: electron-${{ runner.os }}-${{ runner.arch }}-${{ steps.electron.outputs.version }}
+          restore-keys: |
+            electron-${{ runner.os }}-${{ runner.arch }}-
       - name: Install
         # electron-builder rebuilds node-pty for Electron while packaging (npmRebuild), so the postinstall rebuild is
         # redundant here (it was most of the Windows install time). The Electron binary is still fetched (and cached).
