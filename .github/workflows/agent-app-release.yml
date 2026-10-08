@@ -57,7 +57,7 @@ jobs:
       run:
         working-directory: packages/agent-app
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: refs/tags/${{ env.TAG }}
 
@@ -73,7 +73,7 @@ jobs:
           [[ "$(uname -m)" == "${{ matrix.arch }}" || ( "$(uname -m)" == "x86_64" && "${{ matrix.arch }}" == "x64" ) ]] || { echo "::error::Runner is $(uname -m), expected ${{ matrix.arch }}"; exit 1; }
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version-file: packages/agent-app/.nvmrc
           cache: npm
@@ -144,7 +144,7 @@ jobs:
           security delete-keychain "$RUNNER_TEMP/muster-sign.keychain-db" 2>/dev/null || true
           rm -f "$RUNNER_TEMP/muster-sign.p12" "$RUNNER_TEMP/muster-sign.pw"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: muster-agent-${{ matrix.arch }}
           path: |
@@ -172,10 +172,10 @@ jobs:
       run:
         working-directory: packages/agent-app
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: refs/tags/${{ env.TAG }}
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version-file: packages/agent-app/.nvmrc
           cache: npm
@@ -233,7 +233,7 @@ jobs:
         run: node scripts/smoke-packaged.mjs
         env:
           SMOKE_EXPECT_UPDATES: '1'
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: muster-agent-${{ matrix.os }}
           if-no-files-found: error
@@ -264,10 +264,10 @@ jobs:
       ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
       MUSTER_SKIP_NATIVE_REBUILD: "1"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: refs/tags/${{ env.TAG }}
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version-file: packages/agent-app/.nvmrc
           cache: npm
@@ -301,7 +301,7 @@ jobs:
           "$BIN" --version
           echo 'smoke-test-password-1' | "$BIN" init --data-dir "$DIR/data" --username smoke --port 17999 --password-stdin
           "$BIN" doctor --data-dir "$DIR/data"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: muster-server-${{ matrix.platform }}
           path: packages/server/release-dist/muster-server-*.tar.gz
@@ -313,7 +313,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: refs/tags/${{ env.TAG }}
           sparse-checkout: |
@@ -321,13 +321,13 @@ jobs:
             packages/agent-app/CHANGELOG.md
           sparse-checkout-cone-mode: false
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v7
         with:
           pattern: muster-agent-*
           path: out
           merge-multiple: true
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v7
         with:
           pattern: muster-server-*
           path: out
@@ -405,7 +405,7 @@ jobs:
           echo "prerelease=$PRERELEASE" >> "$GITHUB_OUTPUT"
 
       - name: Publish GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ env.TAG }}
           name: Muster Agent ${{ steps.notes.outputs.version }}
