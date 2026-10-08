@@ -11,9 +11,6 @@ function Wait-Until($what, [scriptblock]$condition, $seconds = 120) {
 
 $setup = Get-ChildItem release-dist\*-setup.exe | Select-Object -First 1
 if (-not $setup) { Fail 'no setup.exe in release-dist' }
-$dir = Join-Path $env:LOCALAPPDATA 'Programs\muster-agent'
-$exe = Join-Path $dir 'muster-agent.exe'
-$uninstaller = Join-Path $dir 'Uninstall Muster Agent.exe'
 $startMenu = Join-Path ([Environment]::GetFolderPath('Programs')) 'Muster Agent.lnk'
 $desktop = Join-Path ([Environment]::GetFolderPath('Desktop')) 'Muster Agent.lnk'
 $protocol = 'HKCU:\Software\Classes\muster'
@@ -26,9 +23,14 @@ Write-Host ("installed in {0:N1}s" -f ((Get-Date) - $started).TotalSeconds)
 
 $entry = Get-ChildItem 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall' | Where-Object { (Get-ItemProperty $_.PSPath).DisplayName -like 'Muster Agent*' }
 if (-not $entry) { Fail 'no Apps & features (uninstall) entry under HKCU' }
-$location = (Get-ItemProperty $entry.PSPath).InstallLocation
-Write-Host "install location: $location"
-if ($location -and ((Resolve-Path $location).Path.TrimEnd('\') -ne $dir)) { Fail "installed to $location, expected $dir (per user)" }
+# electron-builder names the per-user folder after the package (%LOCALAPPDATA%\Programs\<name>); read it from the entry.
+$uninstallString = (Get-ItemProperty $entry.PSPath).UninstallString
+$uninstaller = ($uninstallString -replace '^"([^"]+)".*$', '$1')
+$dir = Split-Path $uninstaller -Parent
+$exe = Join-Path $dir 'muster-agent.exe'
+Write-Host "installed to $dir"
+$programs = Join-Path $env:LOCALAPPDATA 'Programs'
+if (-not $dir.StartsWith($programs, [StringComparison]::OrdinalIgnoreCase)) { Fail "installed to $dir, expected under $programs (per user)" }
 # Per user, no admin: everything under %LOCALAPPDATA% and HKCU.
 if (-not (Test-Path $exe)) { Fail "$exe missing" }
 if (-not (Test-Path $uninstaller)) { Fail 'uninstaller missing' }
