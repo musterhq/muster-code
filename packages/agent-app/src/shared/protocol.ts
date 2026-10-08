@@ -100,7 +100,9 @@ export interface ProviderInfo { id: string; driver?: string; bindingId?: string;
    *  OpenAI's own ChatGPT sign-in or a gateway, the profile file stem it came from, and the extra-account hash. */
   codex?: { modelProvider: string; kind: 'chatgpt' | 'gateway'; profile?: string; account?: string };
   /** The route's catalog declares `reports_incremental_input`: its token reports carry only new input tokens. */
-  incrementalInput?: boolean }
+  incrementalInput?: boolean;
+  /** Agent CLIs (Cursor, Gemini, Grok, Antigravity): where to get the CLI and the command that signs it in. */
+  installUrl?: string; loginCommand?: string }
 /** Read-only local skill inventory. Skills are inspected, never installed or executed here. */
 export interface SkillEntry { id: string; name: string; provenance: string; path: string; readme: string | null; readError: string | null;
   /** From agents/openai.yaml `interface` or SKILL.md front matter; absent on older runtimes. */
