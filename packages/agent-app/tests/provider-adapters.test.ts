@@ -37,7 +37,7 @@ function fakeChild() {
 
 test('OpenAI-compatible adapter streams text, reports usage and resends history on the next turn',async()=>{
   const bodies:Record<string,unknown>[]=[];const headers:Record<string,string>[]=[];
-  const adapter=openAICompatibleAdapter({endpoint:'https://llm.example/v1',apiKey:()=>'secret',label:'Example',memory:new ConversationMemory(),
+  const adapter=openAICompatibleAdapter({endpoint:'https://llm.example/v1',apiKey:()=>'secret',label:'Example',tools:false,memory:new ConversationMemory(),
     fetch:async(_url,init)=>{bodies.push(JSON.parse(String(init?.body)));headers.push(init?.headers as Record<string,string>);
       return sse([{choices:[{delta:{reasoning_content:'think'}}]},{choices:[{delta:{content:'Hel'}}]},{choices:[{delta:{content:'lo'}}]},{choices:[],usage:{prompt_tokens:5,completion_tokens:2,total_tokens:7}}],'data: [DONE]\n\n');}});
   const first=capture({instructions:'Be brief.'});
@@ -152,9 +152,9 @@ test('catalog marks a provider available only after its adapter validates, and n
   await catalog.ready();
   const after=Object.fromEntries(catalog.instances().map(r=>[r.info.id,r.info]));
   assert.equal(after['claude-code']?.available,true);assert.match(after['claude-code']?.detail??'',/Claude Code 2\.1\.0/);
-  assert.deepEqual(after['env-openai']?.models.map(m=>m.id),['gpt-5.1']);assert.match(after['env-openai']?.detail??'',/Chat only · no tools/);
+  assert.deepEqual(after['env-openai']?.models.map(m=>m.id),['gpt-5.1']);assert.match(after['env-openai']?.detail??'',/Shell and file tools/);
   assert.equal(after['env-anthropic']?.available,false);assert.equal(after['env-anthropic']?.status,'error');assert.match(after['env-anthropic']?.error??'',/HTTP 401/);
-  assert.match(after.custom_ok?.detail??'',/Chat only · no tools/);assert.equal(after.custom_unchecked,undefined);
+  assert.match(after.custom_ok?.detail??'',/Shell and file tools/);assert.equal(after.custom_unchecked,undefined);
 });
 
 test('provider adapter delegates adapter routes, enforces bindings, and stops them',async()=>{
@@ -235,7 +235,7 @@ test('custom connections become runnable once checked, and list() does not repea
     const saved=store.save({name:'Local',endpoint:'http://localhost:9/v1'});
     assert.equal(saved.available,false);
     const checked=await store.check(saved.id);
-    assert.equal(checked.available,true);assert.match(checked.detail??'',/Chat only · no tools/);
+    assert.equal(checked.available,true);assert.match(checked.detail??'',/Shell and file tools/);
     const catalog=createAdapterCatalog({env:{PATH:''},home:'/nonexistent'});
     assert.deepEqual(catalog.instances().filter(r=>r.info.custom).map(r=>r.info.id),[saved.id]);
     assert.deepEqual(store.list().map(r=>r.id),[]);

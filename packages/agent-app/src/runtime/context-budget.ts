@@ -53,6 +53,8 @@ const blockKey = (block: ContextBlock) => createHash('sha256').update(`${block.l
 
 /** Adapter event (HTTP routes): Muster trimmed the provider-side history; `retainedUserTurns` user turns survive. */
 export const HISTORY_WINDOW_EVENT = 'muster/historyWindow';
+/** Adapter event (HTTP routes): the route rejected tool definitions, so the turn ran as plain chat. */
+export const TOOLS_UNAVAILABLE_EVENT = 'muster/toolsUnavailable';
 
 /**
  * Remembers which static context blocks a provider thread already holds. The provider keeps earlier

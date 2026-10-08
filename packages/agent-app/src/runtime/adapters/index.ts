@@ -7,7 +7,7 @@ import {validateEndpoint} from '../custom-providers.ts';
 import {providerDataDir, type ProviderInstance} from '../provider-instances.ts';
 import {claudeCodeAdapter, type Spawn} from './claude-code.ts';
 import {claudeCodeModels} from './claude-models.ts';
-import {ANTHROPIC_API, anthropicAdapter, CHAT_ONLY, listChatModels, openAICompatibleAdapter} from './http-chat.ts';
+import {ANTHROPIC_API, anthropicAdapter, CHAT_ONLY, WITH_TOOLS, listChatModels, openAICompatibleAdapter, refusedTools} from './http-chat.ts';
 import {openCodeAdapter, openCodeCapabilities, probe} from './opencode.ts';
 import {ConversationMemory, findBinary, Validator} from './shared.ts';
 import {ENV_KEY_PROVIDERS, localServers} from '../env-providers.ts';
@@ -147,7 +147,7 @@ export function createAdapterCatalog(options: AdapterCatalogOptions = {}): Adapt
     if (e.OPENAI_API_KEY) {
       const base = openAIBase(), bindingId = hash('env-openai', base, hash(e.OPENAI_API_KEY));
       rows.push(gate({id: 'env-openai', name: 'OpenAI API key (environment)', driver: 'openai-chat-completions', bindingId, identityMasked: 'Key set in environment', models: [], available: false, source: 'env:OPENAI_API_KEY', endpoint: base},
-        openAICheck.current(bindingId), models => ({models, detail: `${CHAT_ONLY}. Streams chat completions with OPENAI_API_KEY from Muster’s environment.`}),
+        openAICheck.current(bindingId), models => ({models, detail: `${WITH_TOOLS}. Streams chat completions with OPENAI_API_KEY from Muster’s environment.`}),
         () => adapter(`openai:${bindingId}`, () => openAICompatibleAdapter({endpoint: base, apiKey: () => env().OPENAI_API_KEY, label: 'OpenAI', fetch: request, memory: memory('env-openai')}))));
     }
     if (e.ANTHROPIC_API_KEY) {
@@ -160,7 +160,7 @@ export function createAdapterCatalog(options: AdapterCatalogOptions = {}): Adapt
       if (key.kind !== 'openai-compatible' || !e[key.env]) continue;
       const base = endpointFor(key), bindingId = hash(key.id, base, hash(e[key.env]));
       rows.push(gate({id: key.id, name: `${key.name} API key (environment)`, driver: 'openai-chat-completions', bindingId, identityMasked: 'Key set in environment', models: [], available: false, source: `env:${key.env}`, endpoint: base},
-        envChecks.get(key.id)!.current(bindingId), models => ({models, detail: `${CHAT_ONLY}. Streams chat completions with ${key.env} from Muster’s environment.`}),
+        envChecks.get(key.id)!.current(bindingId), models => ({models, detail: `${WITH_TOOLS}. Streams chat completions with ${key.env} from Muster’s environment.`}),
         () => adapter(`${key.id}:${bindingId}`, () => openAICompatibleAdapter({endpoint: base, apiKey: () => env()[key.env], label: key.name, fetch: request, memory: memory(key.id)}))));
     }
     if (localProbes) {
@@ -172,7 +172,7 @@ export function createAdapterCatalog(options: AdapterCatalogOptions = {}): Adapt
         // Not running (or nothing loaded): not offered, and no error row for software the user may not have.
         if (check.status !== 'ok' || !check.value?.length) continue;
         rows.push(route({id: server.id, name: server.name, driver: 'openai-chat-completions', bindingId, identityMasked: 'Local server', models: check.value, available: true, status: 'ready', source: server.endpoint, endpoint: server.endpoint,
-          detail: `${CHAT_ONLY}. Local OpenAI-compatible server; models from its own /models list.`},
+          detail: `${WITH_TOOLS}. Local OpenAI-compatible server; models from its own /models list.`},
           adapter(`${server.id}:${bindingId}`, () => openAICompatibleAdapter({endpoint: server.endpoint, apiKey: () => server.keyEnv ? env()[server.keyEnv] : undefined, label: server.name, fetch: request, memory: memory(server.id)}))));
       }
     }
@@ -188,7 +188,15 @@ export function createAdapterCatalog(options: AdapterCatalogOptions = {}): Adapt
         identityMasked: 'No account metadata', canReveal: false, source: 'Added in Muster', models: connection.models, available: true, status: 'ready', detail: `${CUSTOM_CHAT_ONLY}. OpenAI-compatible chat completions; model discovery succeeded.`},
         adapter(`custom:${bindingId}`, () => openAICompatibleAdapter({endpoint: connection.endpoint, apiKey: () => resolveCustomKey(connection, env()), label: connection.name, fetch: request, memory: memory(connection.id)}))));
     }
-    return rows;
+    // #319: a chat-only route (Anthropic Messages) or a model whose endpoint rejected tool definitions is marked per model, so the
+    // composer can say "This model can't run commands or edit files" before the user sends.
+    return rows.map(row => {
+      const info = row.info, endpoint = info.endpoint;
+      const chatOnly = info.driver === 'anthropic-messages';
+      const refused = info.driver === 'openai-chat-completions' && !!endpoint && info.models.some(model => refusedTools(endpoint, model.id));
+      if (!chatOnly && !refused) return row;
+      return {...row, info: {...info, models: info.models.map(model => chatOnly || (endpoint && refusedTools(endpoint, model.id)) ? {...model, tools: false} : model)}};
+    });
   }
   // The sign-in check starts only once the version check passed, so settle twice.
   return {instances, async ready() { instances(); await Promise.all(validators().map(check => check.settled())); instances(); await claudeAuth.settled(); }};

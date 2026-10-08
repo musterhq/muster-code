@@ -409,6 +409,7 @@ function DesktopProcessesTab({chatId,active=true}:{chatId:string;active?:boolean
           :<Tip label="Show shells here instead of the bottom panel"><button type="button" className="terminal-tool" aria-label="Show terminals here" onClick={()=>setTerminalDock({placement:'pane',open:false})}><PanelRight size={13}/></button></Tip>}
       </div>
     </header>
+    <p className="terminal-agent-note" data-testid="terminal-agent-note">Your terminals are not shared with the agent. The agent runs commands in its own shell.</p>
     {agentPorts.length>0&&<p className="terminal-port-note" role="status">The agent is listening on {agentPorts.map(port=>`:${port.port}`).join(', ')}. A server you start on the same port will fail or move to another one.</p>}
     {launcher&&<CommandLauncher chatId={chatId} active={active} commands={commands}/>}
     <div className="terminal-list" ref={list} role="list" aria-label="Shells and commands">

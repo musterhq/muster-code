@@ -6,7 +6,7 @@ import type { ProviderInfo } from '../shared/protocol.ts';
 import { registerProviderDataDir } from './provider-instances.ts';
 import { activeSecretStore, type SecretStore } from './secret-store.ts';
 
-export const CUSTOM_CHAT_ONLY = 'Chat only · no tools';
+export const CUSTOM_CHAT_ONLY = 'Shell and file tools';
 export interface CustomConnection { id: string; name: string; endpoint: string; apiKeyEnv: string; models: {id:string;name:string}[]; checkedAt: string | null }
 /** The key for a connection: the one entered in Muster (Keychain-encrypted) first, then its environment variable. */
 export const resolveCustomKey = (row: Pick<CustomConnection,'id'|'apiKeyEnv'>, env: NodeJS.ProcessEnv, secrets: SecretStore | undefined = activeSecretStore()): string | undefined =>
@@ -50,7 +50,7 @@ export class CustomProviders {
       detail: runnable ? `${CUSTOM_CHAT_ONLY}. OpenAI-compatible chat completions; model discovery succeeded.`
         : keyMissing ? row.apiKeyEnv ? `${row.apiKeyEnv} is not set in Muster’s environment. Paste the key below, or export it in your shell profile and restart Muster.` : 'The stored API key could not be read from the Keychain. Paste it again.'
         : row.checkedAt ? 'Model discovery found no models. Check the endpoint and try again.'
-        : `Saved locally. Check connection to discover models; it becomes available to chats (${CUSTOM_CHAT_ONLY.toLowerCase()}) once models are found.`};
+        : `Saved locally. Check connection to discover models; it becomes available to chats (${CUSTOM_CHAT_ONLY.toLowerCase()}, within the chat’s access level) once models are found.`};
   }
   private connection(row: Connection): CustomConnection { let models: CustomConnection['models'] = []; try { models = JSON.parse(row.models); } catch { models = []; } return {...row, models}; }
   private rows(): ProviderInfo[] { return (this.db.prepare('SELECT * FROM connections ORDER BY name').all() as unknown as Connection[]).map(row => this.info(row)); }

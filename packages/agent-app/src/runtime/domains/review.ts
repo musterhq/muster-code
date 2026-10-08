@@ -4,6 +4,7 @@ import type { ReviewBaseline } from '../../shared/domains/review-protocol.ts';
 import { captureBaseline, ReviewBaselineStore } from '../review-baseline.ts';
 import { parseBaseline, reviewChanges, reviewFileDiff, stageAll, stageHunk, undoFile, undoHunk } from '../review.ts';
 import type { DomainContext, DomainModule } from './types.ts';
+import { samePath } from '../../shared/path-normalize.ts';
 
 const text = (value: unknown, label: string, max = 4096): string => {
   if (typeof value !== 'string' || !value || value.length > max || value.includes('\0')) throw new Error(`Invalid ${label}.`);
@@ -69,7 +70,7 @@ export function createReviewDomain(context: DomainContext): DomainModule {
   const folderForCwd = async (cwd: string, preferred?: string): Promise<string | null> => {
     const folders = context.store.snapshot().folders;
     const real = await fs.realpath(cwd).catch(() => cwd);
-    return folders.find(entry => entry.path === cwd || entry.path === real)?.id ?? (preferred && folders.some(entry => entry.id === preferred) ? preferred : null);
+    return folders.find(entry => samePath(entry.path, cwd) || samePath(entry.path, real))?.id ?? (preferred && folders.some(entry => entry.id === preferred) ? preferred : null);
   };
   const off = context.hooks.onRunStarted(run => {
     // Fire-and-forget: see the design note above. Not awaited, and not `async`,
