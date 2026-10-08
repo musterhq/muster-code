@@ -130,3 +130,11 @@ export async function hasTestSetup(dir: string): Promise<boolean> {
   }
   return false;
 }
+
+/** A plain-folder binding this broad (the home folder, Documents, Desktop or Downloads) holds far more than one project: the app suggests a project folder instead. */
+export function isBroadFolder(path: string | null | undefined, home: string): boolean {
+  if (!path) return false;
+  const norm = (p: string) => p.replace(/\/+$/, '') || '/';
+  const here = norm(path), base = norm(home);
+  return [base, `${base}/Documents`, `${base}/Desktop`, `${base}/Downloads`].includes(here);
+}

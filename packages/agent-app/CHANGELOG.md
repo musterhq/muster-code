@@ -3,6 +3,16 @@
 All notable changes to Muster Agent. Each `## <version>` section becomes the notes of the
 `agent-v<version>` GitHub Release (`.github/workflows/agent-app-release.yml`).
 
+## Unreleased
+
+### Work locally hands back by itself, quickly (#345)
+- **No typing "done".** After a finished turn Muster decides: a git project with a commit past the check-out (Muster commits uncommitted work as you) and a real test run that exited 0 after the last change (or no tests), or a plain folder whose files changed. Output Muster cannot parse no longer blocks; the exit code is the evidence. Errored or stopped turns, queued follow-ups and open questions never trigger it, and after Undo or Keep working it waits for new work.
+- **A 60 second countdown** ("Handing back RAG-121 to QA Lead in 60 s", Hand back now, Keep working) runs in the app's runtime, so it survives a window reload. Undo still works afterwards. "Ask me" shows "Ready to hand back" instead.
+- **One PATCH, sent at once.** Status, assignee and the summary go in a single request that jumps ahead of other waiting posts; the branch is pushed during the countdown.
+- **No "Paused" comment spam.** At most one note per check-out, after a day of silence. "Not handing back yet" reasons now stay on the task in Muster.
+- **A correct summary.** Files and lines come from the merge-base with the base branch, without gitignored or build output, plus uncommitted work. Unparsed tests with exit 0 say "Tests passed (exit 0)"; "read by you" appears only when you said done.
+- **Stale check-outs** (idle over 3 days) show "Checked out 4 days ago · idle" with Hand back and Release in My work and on the task, and a plain-folder check-out in a very broad folder (home, Documents, Desktop, Downloads) suggests a project folder.
+
 ## 0.3.6
 
 ### Faster, smoother, smaller

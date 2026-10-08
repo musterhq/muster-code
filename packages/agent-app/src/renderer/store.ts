@@ -84,6 +84,10 @@ export interface Notice {
   kind: NoticeKind;
   count: number;
   action?: NoticeAction;
+  /** A second choice beside the action (the hand-back countdown's "Keep working"). */
+  secondary?: NoticeAction;
+  /** A live countdown: the message is re-rendered every second from `format(secondsLeft)` until `endsAt` (ms since epoch). */
+  countdown?: { endsAt: number; format: (seconds: number) => string };
 }
 export type SettingsSection = 'general' | 'appearance' | 'chat' | 'providers' | 'models' | 'memory' | 'plugins' | 'environments' | 'automations' | 'integrations' | 'shortcuts' | 'diagnostics' | 'storage' | 'server';
 
@@ -296,7 +300,7 @@ export function runtimeNoticeKind(message: string): NoticeKind {
   return /\b(could not|couldn't|cannot|can't|failed|failure|unavailable|not available|stopped|error|denied)\b/i.test(message) ? 'error' : 'info';
 }
 
-export function pushNotice(message: string, options: {kind?: NoticeKind; action?: NoticeAction; lifetimeMs?: number} = {}): number {
+export function pushNotice(message: string, options: {kind?: NoticeKind; action?: NoticeAction; secondary?: NoticeAction; countdown?: Notice['countdown']; lifetimeMs?: number} = {}): number {
   const kind = options.kind ?? 'info';
   // An Undo reverts one specific change, so two of them never merge into a row that could revert only the last.
   const same = options.action?.label === 'Undo' ? undefined : state.notices.find(n => n.message === message && n.kind === kind && n.action?.label === options.action?.label);
@@ -306,7 +310,7 @@ export function pushNotice(message: string, options: {kind?: NoticeKind; action?
     scheduleNotice(next);
     return same.id;
   }
-  const notice: Notice = {id: ++noticeSeq, message, kind, count: 1, ...(options.action ? {action: options.action} : {}), ...(options.lifetimeMs ? {lifetimeMs: options.lifetimeMs} : {})};
+  const notice: Notice = {id: ++noticeSeq, message, kind, count: 1, ...(options.action ? {action: options.action} : {}), ...(options.secondary ? {secondary: options.secondary} : {}), ...(options.countdown ? {countdown: options.countdown} : {}), ...(options.lifetimeMs ? {lifetimeMs: options.lifetimeMs} : {})};
   let notices = [...state.notices, notice];
   while (notices.length > MAX_NOTICES) {
     // Drop the oldest transient row first; persistent errors leave only when errors alone overflow.
@@ -335,6 +339,11 @@ export function holdNotices(hold: boolean): void {
   else for (const notice of state.notices) scheduleNotice(notice);
 }
 
+export function runNoticeSecondary(id: number): void {
+  const action = state.notices.find(n => n.id === id)?.secondary;
+  dismissNotice(id);
+  if (action) void Promise.resolve().then(action.run).catch(cause => notifyError(cause));
+}
 export function runNoticeAction(id: number): void {
   const action = state.notices.find(n => n.id === id)?.action;
   dismissNotice(id);

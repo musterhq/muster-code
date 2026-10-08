@@ -5,6 +5,8 @@
 import { LayoutGrid, List } from 'lucide-react';
 import React, { useMemo, useState } from 'react';
 import { badgeText, type MyWorkTask } from '../../shared/domains/checkout-protocol';
+import { StaleCheckout } from './CheckoutPanel';
+import { loadMyWork } from '../orgStore';
 import type { WorkspaceStatus } from '../../shared/domains/paperclip-protocol';
 import { STATUS_LABEL } from '../../shared/domains/paperclip-protocol';
 import { applyFilter, BOARD_COLUMNS } from '../../shared/org-work';
@@ -18,7 +20,7 @@ import { ResourceState } from './ResourceState';
 import './my-work.css';
 
 const STATUS_FILTERS: { id: WorkspaceStatus; label: string }[] = BOARD_COLUMNS.map(id => ({ id, label: STATUS_LABEL[id] }));
-const tag = (t: MyWorkTask) => t.checkout ? `${badgeText(t.checkout)}${t.checkout.stale ? ' · quiet' : ''}` : t.why === 'team' && t.assignee ? t.assignee : STATUS_LABEL[t.status];
+const tag = (t: MyWorkTask) => t.checkout ? `${badgeText(t.checkout)}${t.checkout.staleDays ? ' · idle' : t.checkout.stale ? ' · quiet' : ''}` : t.why === 'team' && t.assignee ? t.assignee : STATUS_LABEL[t.status];
 
 export function MyWorkPage(): React.ReactElement {
   const { work, error } = useMyWork(true);
@@ -58,7 +60,7 @@ export function MyWorkPage(): React.ReactElement {
           <ul className="ws-rows">{orgRows.filter(r => (r.projectName ?? 'No project') === project).map(t => <li key={t.id}><button type="button" className="ws-row my-row" onClick={() => void openTaskInOrg(t.orgId, t.id)}>
             <span className="org-dot" data-state={taskDot(t.status)} aria-label={STATUS_LABEL[t.status]}/><span className="org-key">{t.key}</span><span className="ws-row-text"><span className="ws-row-title">{t.title}</span></span>
             <StateChip tone={t.checkout ? 'ok' : 'faint'}>{tag(t)}</StateChip><span className="ws-row-age">{agoLabel(t.updatedAt)}</span>
-          </button></li>)}</ul>
+          </button>{t.checkout?.staleDays ? <div className="my-stale"><StaleCheckout lease={{ taskId: t.id, staleDays: t.checkout.staleDays }} onChanged={() => void loadMyWork()}/></div> : null}</li>)}</ul>
         </div>)}
       </section>)}
   </div>;

@@ -28,8 +28,10 @@ export interface OrgEntry {
 export interface OrgsList { connected: boolean; server: string | null; me: { id: string; name: string | null } | null; orgs: OrgEntry[]; stale?: string }
 export interface OrgProjectRow { id: string; name: string; open: number }
 /** What a task row in the sidebar and My work says about local work: "Checked out · this Mac". */
-export interface CheckoutBadge { state: 'checked_out'; thisMac: boolean; device: string; since: string; stale: boolean; /** The local chat of the check-out: it is listed under the task in the sidebar, and its worktree folder stays out of Folders. */ chatId: string | null; folderId: string | null }
+export interface CheckoutBadge { state: 'checked_out'; thisMac: boolean; device: string; since: string; stale: boolean; /** Whole days since check-out when it has been idle for more than three days, else null: the row says "Checked out 4 days ago · idle" with Hand back and Release. */ staleDays?: number | null; /** The local chat of the check-out: it is listed under the task in the sidebar, and its worktree folder stays out of Folders. */ chatId: string | null; folderId: string | null }
 /** The line a task row shows: "Checked out · this Mac" (or the other Mac's name). */
+/** A path this broad (a home folder, Documents, Desktop or Downloads) holds far more than one project; the screens suggest a project folder. The runtime checks against the real home folder; this reads the path alone. */
+export const looksBroadFolder = (path: string | null | undefined): boolean => Boolean(path) && /^(?:\/Users\/[^/]+|\/home\/[^/]+|[A-Za-z]:[\\/]Users[\\/][^\\/]+)(?:[\\/](?:Documents|Desktop|Downloads))?[\\/]*$/i.test(path!.trim());
 export const badgeText = (b: Pick<CheckoutBadge, 'thisMac' | 'device'>): string => `Checked out · ${b.thisMac ? device().lower : b.device}`;
 export interface MyWorkTask {
   id: string; key: string; title: string; status: WorkspaceStatus; priority: WorkspaceTask['priority'];
@@ -97,8 +99,12 @@ export interface CheckoutLease {
   origin: string; userId: string;
   /** The worktree's HEAD when the check-out started (or was last undone). Hand-back needs HEAD to have moved past it, and be pushed. */
   armedFrom: string | null;
-  /** The person pressed Undo: nothing hands back by itself again until they say it is done. */
+  /** The person pressed Undo or Keep working: nothing hands back by itself until a turn leaves the work in a different state (new commits or changes), or they say it is done. */
   autoOff: boolean;
+  /** The state of the work (HEAD and changes, or the folder's files) when `autoOff` was set. A later turn that changes it switches automatic hand-back back on. */
+  armedState?: string | null;
+  /** Why Muster has not handed back (shown on the task only; never posted to the server). */
+  heldBack?: { reason: string; at: string } | null;
   /** Who the task was handed to (so Undo can refuse once someone else has acted on it). */
   handedTo: { kind: 'agent' | 'user'; id: string; name: string } | null;
   taskId: string; orgId: string; key: string; title: string; projectId: string | null;
@@ -136,7 +142,7 @@ export interface LeaseConflict { at: string; changes: string[]; status: Workspac
 /** A queued post, as the "N updates waiting" list shows it. */
 export interface PendingPost { id: number; type: 'comment' | 'patch' | 'cost'; kind: string; summary: string; body: string; at: string; editable: boolean }
 /** A lease as the screens see it: stale means silent for longer than the reminder hours. */
-export interface LeaseView extends CheckoutLease { thisMac: boolean; stale: boolean; staleHours: number }
+export interface LeaseView extends CheckoutLease { thisMac: boolean; stale: boolean; staleHours: number; /** Whole days since check-out when idle for more than three days. */ staleDays: number | null; /** A plain-folder check-out in a very broad folder (home, Documents, Desktop, Downloads). */ broadFolder: boolean }
 /** Per project: `auto` hands back by itself when the local work is finished; `ask` offers it in a toast instead. */
 export type AutoMode = 'auto' | 'ask';
 export interface CheckoutSettings { staleHours: number; deviceName: string }
@@ -165,6 +171,8 @@ export interface CheckoutPlan {
   noRepo: boolean;
   /** The folder "Use a new folder Muster creates" would make, e.g. ~/Muster/<Org>/<Project> (or ~/Muster/<Org>/_tasks/<KEY> for a task with no project). */
   newFolder: string;
+  /** The folder already bound is very broad (home, Documents, Desktop or Downloads): a project folder is better. */
+  broadFolder: boolean;
 }
 export interface CheckoutStartInput { taskId: string; take?: boolean; model: ModelChoice; confirm: true; folder?: string; devBranch?: string; /** Make and use the folder Muster offers (`CheckoutPlan.newFolder`). */ newFolder?: boolean; /** The folder was chosen as "Use a git repository…": refuse one that is not. */ requireGit?: boolean }
 export interface HandBackInput {
@@ -235,12 +243,16 @@ export interface CheckoutCommands {
   'checkout.auto': { input: { taskId?: string; orgId?: string; projectId?: string; mode?: AutoMode }; output: { mode: AutoMode } };
   /** Takes an automatic hand-back back (within about two minutes, while nobody has acted on it): status and assignee return, with a short comment. */
   'checkout.undo': { input: { taskId: string }; output: LeaseView };
+  /** The 60-second countdown before an automatic hand-back: hand back now, or keep working (cancels it until the work changes again). */
+  'checkout.countdown': { input: { taskId: string; action: 'now' | 'keep' }; output: { ok: true } };
+  /** Countdowns running now (so a reloaded window shows them again). */
+  'checkout.countdowns': { input: Record<string, never>; output: { countdowns: { taskId: string; key: string; to: string; endsAt: string }[] } };
 }
 /** Fired when a lease changes, a post is queued or synced: screens refetch their badge. */
 /** `handedBack`: Muster handed a finished task back by itself (a toast with Undo until `undoUntil`). `handBackReady`: the project is on "Ask me" and the work looks finished. */
-export type CheckoutEvent = { type: 'checkoutChanged'; taskId: string | null } | { type: 'handedBack'; taskId: string; key: string; to: string; undoUntil: string } | { type: 'handBackReady'; taskId: string; key: string; to: string; recipient: { kind: 'agent' | 'user'; id: string }; reason: string } | { type: 'taskLink'; companyId: string; issueId: string; host: string; identifier: string | null };
+export type CheckoutEvent = { type: 'checkoutChanged'; taskId: string | null } | { type: 'handBackCountdown'; taskId: string; key: string; to: string; endsAt: string } | { type: 'handBackCountdownEnded'; taskId: string } | { type: 'handedBack'; taskId: string; key: string; to: string; undoUntil: string } | { type: 'handBackReady'; taskId: string; key: string; to: string; recipient: { kind: 'agent' | 'user'; id: string }; reason: string } | { type: 'taskLink'; companyId: string; issueId: string; host: string; identifier: string | null };
 export const CHECKOUT_COMMANDS = {
   'orgs.list': true, 'orgs.set': true, 'orgs.work': true, 'orgs.open': true, 'orgs.link': true, 'checkout.settings': true, 'checkout.bindings': true, 'checkout.bind': true, 'checkout.unbind': true, 'checkout.plan': true,
   'checkout.start': true, 'checkout.get': true, 'checkout.leases': true, 'checkout.decision': true, 'checkout.handback.preview': true, 'checkout.handback': true, 'checkout.release': true, 'checkout.runOnServer': true,
-  'checkout.sync': true, 'checkout.outbox': true, 'checkout.remind': true, 'checkout.auto': true, 'checkout.undo': true, 'checkout.org': true, 'checkout.engine': true, 'checkout.review': true, 'checkout.offline': true, 'checkout.pending': true, 'checkout.pending.edit': true, 'checkout.resolve': true,
+  'checkout.sync': true, 'checkout.outbox': true, 'checkout.remind': true, 'checkout.auto': true, 'checkout.undo': true, 'checkout.countdown': true, 'checkout.countdowns': true, 'checkout.org': true, 'checkout.engine': true, 'checkout.review': true, 'checkout.offline': true, 'checkout.pending': true, 'checkout.pending.edit': true, 'checkout.resolve': true,
 } as const satisfies Record<keyof CheckoutCommands, true>;
