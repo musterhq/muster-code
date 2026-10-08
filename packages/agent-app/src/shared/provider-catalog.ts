@@ -7,6 +7,7 @@
  * Electron, no network, so it is importable from the runtime, the renderer and tests alike.
  */
 import type { ProviderInfo } from './protocol.ts';
+import { device } from './device-noun.ts';
 
 /** subscription-cli: sign in with a vendor CLI. api-key: hosted API with one key. local: self-hosted URL plus optional key. custom: any OpenAI-compatible URL. */
 export type CatalogAuthKind = 'subscription-cli' | 'api-key' | 'local' | 'custom';
@@ -97,7 +98,7 @@ export const PROVIDER_CATALOG: CatalogEntry[] = [
     keyUrl: 'https://console.mistral.ai/api-keys', defaultEndpoint: 'https://api.mistral.ai/v1', detect: endpointStatus('https://api.mistral.ai/v1')},
   {id: 'deepseek', name: 'DeepSeek', description: 'DeepSeek chat and reasoning models.', logo: 'deepseek', authKind: 'api-key',
     keyUrl: 'https://platform.deepseek.com/api_keys', defaultEndpoint: 'https://api.deepseek.com/v1', detect: endpointStatus('https://api.deepseek.com/v1')},
-  {id: 'ollama', name: 'Ollama', description: 'Models running on this Mac.', logo: 'ollama', authKind: 'local',
+  {id: 'ollama', name: 'Ollama', description: `Models running on ${device().lower}.`, logo: 'ollama', authKind: 'local',
     installUrl: 'https://ollama.com/download', defaultEndpoint: 'http://127.0.0.1:11434/v1', detect: endpointStatus('http://127.0.0.1:11434/v1')},
   {id: 'lmstudio', name: 'LM Studio', description: 'Local models served by LM Studio.', logo: 'lmstudio', authKind: 'local',
     installUrl: 'https://lmstudio.ai', defaultEndpoint: 'http://127.0.0.1:1234/v1', detect: endpointStatus('http://127.0.0.1:1234/v1')},

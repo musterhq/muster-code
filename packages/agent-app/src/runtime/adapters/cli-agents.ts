@@ -2,6 +2,7 @@ import {existsSync} from 'node:fs';
 import {join} from 'node:path';
 import type {ProviderInfo} from '../../shared/protocol.ts';
 import {findBinary} from './shared.ts';
+import {deviceNoun} from '../../shared/device-noun.ts';
 
 /**
  * The user's own agent CLIs Muster can drive, as plain data (name, description, install link, login command,
@@ -33,7 +34,7 @@ export const CLI_AGENTS: readonly CliAgentMeta[] = [
   {id: 'grok-cli', name: 'Grok Build', description: 'Runs your Grok Build CLI in the chat folder over the Agent Client Protocol, with your Grok account or XAI_API_KEY. Needs version 1.0.13 or newer.',
     installUrl: 'https://x.ai/cli', loginCommand: 'grok login', commandEnv: 'MUSTER_GROK_COMMAND', runnable: true,
     detect: (env, home) => override(env, 'MUSTER_GROK_COMMAND') ?? findBinary('grok', env, home, [join(home, '.grok/bin/grok')])},
-  {id: 'antigravity', name: 'Google Antigravity', description: 'Detected on this Mac, but not supported yet.',
+  {id: 'antigravity', name: 'Google Antigravity', description: `Detected on ${deviceNoun().lower}, but not supported yet.`,
     installUrl: 'https://antigravity.google/download', loginCommand: '', commandEnv: 'MUSTER_ANTIGRAVITY_COMMAND', runnable: false,
     unsupportedReason: 'Antigravity is a desktop app. T3 Code drives it only through a private agent runtime that it downloads and signs in with its own Google OAuth flow; the installed app has no headless or local agent interface Muster can use.',
     detect: (env, home) => override(env, 'MUSTER_ANTIGRAVITY_COMMAND') ?? findBinary('antigravity', env, home, [join(home, '.antigravity/antigravity/bin/antigravity'), '/Applications/Antigravity.app/Contents/Resources/app/bin/antigravity'])},

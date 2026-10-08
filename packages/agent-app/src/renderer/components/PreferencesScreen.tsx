@@ -31,7 +31,7 @@ import {EnvironmentsPanel} from './settings/EnvironmentsPanel';
 import {FullAccessSkips} from './FullAccessConfirm';
 import {recordProvenance,settingProvenance} from './settings/provenance';
 import {ProvenanceTag} from './settings/ProvenanceTag';
-import { device } from '../../shared/device-noun.ts';
+import { device, deviceNoun } from '../../shared/device-noun.ts';
 import {ThemeRows} from './settings/ThemePicker';
 import './preferences-screen.css';
 
@@ -158,7 +158,7 @@ function UpdatesGroup():React.ReactElement|null {
   if(!status)return null;
   const act=async(action:()=>Promise<unknown>):Promise<void>=>{setBusy(true);try{await action();}catch(cause){notifyError(cause);}finally{setBusy(false);}};
   // The main process knows how this copy was installed; older builds fall back to the browser's platform.
-  const device=status.method?(status.method==='mac-bundle'?'This Mac':'This computer'):DEVICE;
+  const device=status.method?(status.method==='mac-bundle'?deviceNoun('darwin').title:'This computer'):DEVICE;
   const working=busy||status.phase==='checking'||status.phase==='downloading'||status.phase==='installing';
   return <>
     <h3 className="preference-group-title">Updates</h3>

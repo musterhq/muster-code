@@ -2,6 +2,7 @@ import { Check, ChevronDown, ExternalLink, SquareTerminal, X } from 'lucide-reac
 import React, { useEffect, useRef, useState } from 'react';
 import type { ProviderInfo } from '../../shared/protocol';
 import type { ProviderDiagnosis } from '../../shared/domains/providers-protocol';
+import { device } from '../../shared/device-noun.ts';
 import { fieldRules, nameFromEndpoint, plainError, PROVIDER_CATALOG, secretStorageNote, STATUS_LABEL, type CatalogEntry } from '../../shared/provider-catalog';
 import { invoke } from '../bridge';
 import { loadProviders, notifySuccess } from '../store';
@@ -98,7 +99,7 @@ function ProviderSheet({entry, providers, onClose, onBack, KeyField, openTermina
       {rules.signIn && (status === 'connected'
         ? <p className="sheet-note is-ok"><Check size={13} aria-hidden="true"/>Already signed in and ready for chats.</p>
         : status === 'missing'
-          ? <div className="sheet-block"><p>{entry.name} is not installed on this Mac. Install it, then come back and sign in.</p>
+          ? <div className="sheet-block"><p>{entry.name} is not installed on {device().lower}. Install it, then come back and sign in.</p>
               {entry.installCommand && <code className="provider-command">{entry.installCommand}</code>}
               <div className="provider-actions">{entry.installCommand && <button type="button" className="settings-button sheet-primary" onClick={() => void run(entry.installCommand!)}><SquareTerminal size={13}/>Open in Terminal</button>}
                 {entry.installUrl && <button type="button" className="settings-button secondary" onClick={() => openLink(entry.installUrl!)}><ExternalLink size={13}/>Install instructions</button>}
