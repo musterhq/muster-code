@@ -2,14 +2,14 @@ import React,{useEffect,useMemo,useRef,useState} from 'react';
 import {ExternalLink,Check,Undo2,Eye,Loader2,AlertCircle,RotateCw} from 'lucide-react';
 import type {TimelineItem} from '../../shared/protocol';
 import {FileChangeView,useFileReview} from './FileDiffEditor';
-import {collectFileChanges,latestTurnItems,type FileChangeEntry} from '../turnFileChanges';
+import {collectFileChanges,latestTurnItems,mergeReviewFiles,type FileChangeEntry} from '../turnFileChanges';
 import {GeneratedChanges,formatCount} from './DiffStat';
 import {splitChangeTotals} from '../changeCounts';
 import {uniqueFileLabels} from './toolPresentation';
 import {openChangesTab,openDiff} from '../store';
 import {invoke} from '../bridge';
 import type {ReviewChange,ReviewMark} from '../../shared/domains/review-protocol';
-import {keepHunks,keptFor,latestBaseline,prepareTurnReview,refreshReviewChanges,refreshRunMarks,setReviewBaseline,useChatBaselines,useReviewChanges,useRunMarks} from '../reviewState';
+import {keepHunks,keptFor,latestBaseline,prepareTurnReview,refreshReviewChanges,refreshRunMarks,setReviewBaseline,useChatBaselines,useLatestTurnFiles,useReviewChanges,useRunMarks} from '../reviewState';
 import {advanceReviewReadiness,REVIEW_READINESS_LABEL,type ReviewReadiness} from './turnStatusModel';
 import {reviewViewedKey,useViewedVersion,viewedState} from '../diff-preferences';
 import {useStoreSelector} from '../useStore';
@@ -42,12 +42,21 @@ const STATE_LABEL:Record<TurnFileState,string>={updating:'Updating',proposed:'Pr
 export function TurnChanges({items,inline=true,folder}:{items:TimelineItem[];inline?:boolean;folder?:{id:string;name:string}}){
  const [open,setOpen]=useState(false),root=useRef<HTMLDivElement>(null),trigger=useRef<HTMLButtonElement>(null);
  const [selectedPath,setSelectedPath]=useState('');
- const entries=useMemo(()=>collectTurnChanges(items),[items]);
+
+ const chatId=items[0]?.chatId;
+ const chatStatus=useStoreSelector(state=>chatId?state.snapshot?.chats.find(chat=>chat.id===chatId)?.status:undefined);
+ const folderPath=useStoreSelector(state=>folder?state.snapshot?.folders.find(f=>f.id===folder.id)?.path:undefined);
+ // Providers report absolute paths; git.diff wants folder-relative ones (an absolute path would read an empty HEAD side).
+ const relative=(path:string)=>{if(!/^(\/|[A-Za-z]:[\\/])/.test(path))return path;const base=folderPath?.replace(/[\\/]+$/,'');return base&&path.startsWith(base)&&/[\\/]/.test(path[base.length]??'')?path.slice(base.length+1):undefined;};
+ // Files Git saw change since the turn started join the provider's fileChange items: a model that edits through shell commands reports none.
+ const gitFiles=useLatestTurnFiles(chatId,folder?.id,chatStatus);
+ const timelineEntries=useMemo(()=>collectTurnChanges(items),[items]);
+ const entries=useMemo(()=>mergeReviewFiles(timelineEntries,gitFiles?.files,relative),[timelineEntries,gitFiles,folderPath]);
  // F15: root and apps/api package.json must not both read "package.json".
  const labels=useMemo(()=>uniqueFileLabels(entries.map(entry=>entry.path)),[entries]);
  const selected=entries.find(entry=>entry.path===selectedPath)??entries[0];
  // The latest turn's baseline (when the folder is a Git repository) gives Keep/Undo and Viewed state per file.
- const chatId=items[0]?.chatId,running=entries.some(entry=>entry.status==='running');
+ const running=entries.some(entry=>entry.status==='running');
  const turn=latestBaseline(useChatBaselines(folder?chatId:undefined,running?'running':String(entries.length)),folder?.id);
  const baseline=turn?{runId:turn.runId}:undefined;
  // Loaded whenever there is a baseline: the pill's counts follow the review (an undone hunk leaves the totals).
@@ -55,11 +64,7 @@ export function TurnChanges({items,inline=true,folder}:{items:TimelineItem[];inl
  const marks=useRunMarks(open?turn?.runId:undefined);
  useViewedVersion();
  const [busy,setBusy]=useState(false),[notice,setNotice]=useState('');
- const folderPath=useStoreSelector(state=>folder?state.snapshot?.folders.find(f=>f.id===folder.id)?.path:undefined);
- // Providers report absolute paths; git.diff wants folder-relative ones (an absolute path would read an empty HEAD side).
- const relative=(path:string)=>{if(!/^(\/|[A-Za-z]:[\\/])/.test(path))return path;const base=folderPath?.replace(/[\\/]+$/,'');return base&&path.startsWith(base)&&/[\\/]/.test(path[base.length]??'')?path.slice(base.length+1):undefined;};
  // TRN-18: "Preparing review…" from the moment the run ends until its review is re-read, then "Ready to review".
- const chatStatus=useStoreSelector(state=>chatId?state.snapshot?.chats.find(chat=>chat.id===chatId)?.status:undefined);
  const live=chatStatus==='running'||chatStatus==='stopping';
  const [readiness,setReadiness]=useState<ReviewReadiness>(live?'working':undefined);
  const wasLive=useRef(live);
