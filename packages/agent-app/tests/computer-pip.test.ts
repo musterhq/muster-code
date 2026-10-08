@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {DISCONNECTED_MS,HIDE_AFTER_MS,PIP_MAX,PIP_MIN,PIP_STACK_MAX,STACK_EDGE,STACK_GAP,STACK_PEEK,STALE_MS,applyComputerEvent,mergeSources,recentComputerSources,sourceKey,stackAnchor,stackHeight,stackWidth,clampPipWidth,computerUi,cornerPosition,frameFreshness,frameSource,latestComputerShot,pickSource,pipShouldShow,screenshotName,setDocked,setMinimized,setPlacement,snapCorner,toolImageUrl} from '../src/renderer/computerUse.ts';
+import {DISCONNECTED_MS,HIDE_AFTER_MS,PIP_MAX,PIP_MIN,PIP_STACK_MAX,STACK_EDGE,STACK_GAP,STACK_PEEK,STALE_MS,applyComputerEvent,mergeSources,recentComputerSources,sourceKey,stackAnchor,stackHeight,stackWidth,clampPipWidth,computerUi,cornerPosition,frameFreshness,frameSource,latestComputerShot,pickSource,pipShouldShow,screenshotName,setMinimized,setPlacement,snapCorner,toolImageUrl} from '../src/renderer/computerUse.ts';
 import type {TimelineItem} from '../src/shared/protocol.ts';
 import {activityApp,summarizeActivity} from '../src/renderer/components/activityGrouping.ts';
 
@@ -47,8 +47,7 @@ test('events: frames are kept per chat (bounded), control owner and agent browse
   assert.equal(computerUi().control.chat17,'user');
   applyComputerEvent({type:'computerBrowserOpened',chatId:'chat17',owner:'browser:agent-chat17',profileId:'personal',url:'https://a.test'});
   assert.equal(computerUi().browsers.chat17?.owner,'browser:agent-chat17');
-  setMinimized(true);setDocked(true);
-  assert.equal(computerUi().minimized,false);assert.equal(computerUi().docked,true);
+  setMinimized(true);assert.equal(computerUi().minimized,true);setMinimized(false);
 });
 
 test('screenshots load once by id and export under a readable name',async()=>{
