@@ -149,6 +149,9 @@ if (hasRenderer) {
   });
 }
 
+// #324: classic (non-module) script that paints the persisted colour theme before first paint; see src/renderer/theme-boot.ts.
+if (hasRenderer) builds.push({...common, entryPoints: [src('renderer', 'theme-boot.ts')], outfile: dist('renderer', 'theme-boot.js'), platform: 'browser', format: 'iife', target: 'es2022'});
+
 function copyRendererStatic() {
   mkdirSync(dist('renderer'), { recursive: true });
   cpSync(path.join(root,'node_modules/pdfjs-dist/build/pdf.worker.mjs'),dist('renderer','pdf.worker.mjs'));
@@ -206,7 +209,7 @@ if (watch) {
  *  and were copied into the packaged app. Remove bundle outputs this build did not produce. */
 function pruneStaleRendererOutputs(metafile) {
   const produced = new Set(Object.keys(metafile.outputs).map(name => path.resolve(root, name)));
-  const statics = new Set(['styles.css']);
+  const statics = new Set(['styles.css', 'theme-boot.js', 'theme-boot.js.map']);
   let removed = 0, bytes = 0;
   for (const name of readdirSync(dist('renderer'))) {
     if (statics.has(name) || !/\.(js|css|ttf|woff2|wasm)(\.map)?$/.test(name)) continue;

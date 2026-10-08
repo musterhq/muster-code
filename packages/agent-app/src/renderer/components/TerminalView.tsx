@@ -53,6 +53,12 @@ function listen():void {
 function css(name:string,fallback:string):string {
   try{return getComputedStyle(document.documentElement).getPropertyValue(name).trim()||fallback;}catch{return fallback;}
 }
+const terminalTheme=()=>({background:css('--bg','#161616'),foreground:css('--text','#e8e8e8'),cursor:css('--text','#e8e8e8'),selectionBackground:'rgba(145,171,194,0.35)'});
+/** #324: open terminals follow a colour-theme change (xterm reads colours once, so it must be told). */
+if(typeof window!=='undefined')window.addEventListener('muster-theme-change',()=>{
+  const next=terminalTheme();
+  for(const entry of registry.values()){const term=entry.term;if(!term)continue;const now=term.options.theme;if(now?.background!==next.background||now?.foreground!==next.foreground)term.options.theme=next;}
+});
 function live(id:string):Live {
   let entry=registry.get(id);
   if(!entry){
@@ -70,7 +76,7 @@ function open(entry:Live,readOnly:boolean):Promise<void> {
     const term=new Terminal({
       fontFamily:css('--mono','ui-monospace, Menlo, monospace'),fontSize:12,lineHeight:1.25,scrollback:5000,
       cursorBlink:true,allowProposedApi:true,macOptionIsMeta:true,disableStdin:entry.readOnly,
-      theme:{background:css('--bg','#161616'),foreground:css('--text','#e8e8e8'),cursor:css('--text','#e8e8e8'),selectionBackground:'rgba(145,171,194,0.35)'},
+      theme:terminalTheme(),
     });
     const fit=new FitAddon(),search=new SearchAddon();
     term.loadAddon(fit);term.loadAddon(search);
