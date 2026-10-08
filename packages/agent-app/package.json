@@ -21,7 +21,7 @@
     "vendor:sync": "node scripts/vendor-sync.mjs",
     "package": "node scripts/package-release.mjs",
     "shots": "node --max-old-space-size=1536 scripts/readme-shots/shoot.mjs",
-    "package:linux": "node scripts/build.mjs && electron-builder --linux --publish never",
+    "package:linux": "node scripts/build.mjs && electron-builder --linux --publish never -c.productName=muster-agent",
     "package:win": "node scripts/build.mjs && electron-builder --win --publish never"
   },
   "dependencies": {

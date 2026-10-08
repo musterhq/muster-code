@@ -7,7 +7,7 @@
 set -euo pipefail
 fail() { echo "INSTALL CHECK FAIL: $*" >&2; exit 1; }
 sudo_() { if [ "$(id -u)" = 0 ]; then "$@"; else sudo "$@"; fi; }
-opt="/opt/Muster Agent"
+opt="/opt/muster-agent"
 desktop=/usr/share/applications/muster-agent.desktop
 
 if [ "${1:-}" = --remove ]; then

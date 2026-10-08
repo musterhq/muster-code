@@ -96,7 +96,7 @@ jobs:
 
       - name: Package
         shell: bash
-        run: npx electron-builder ${{ matrix.target }} --publish never -c.extraMetadata.musterUpdateRepo=${{ github.repository }} -c.extraMetadata.musterUpdateChannel=stable
+        run: npx electron-builder ${{ matrix.target }} --publish never ${{ matrix.target == '--linux' && '-c.productName=muster-agent' || '' }} -c.extraMetadata.musterUpdateRepo=${{ github.repository }} -c.extraMetadata.musterUpdateChannel=stable
 
       - name: Package size budget
         shell: bash

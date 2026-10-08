@@ -123,9 +123,9 @@ export async function installBlocker(bundle:string|undefined):Promise<string|und
 
 export interface InstallTarget {method:UpdateInstallMethod;/** appimage: the AppImage file. */target?:string;/** deb: what to start after installing. */relaunch?:string}
 /** Where the deb installs (electron-builder: /opt/<productName>) and dpkg's record of the package. */
-export const DEB_DIR='/opt/Muster Agent',DEB_RECORD='/var/lib/dpkg/info/muster-agent.list';
+export const DEB_DIR='/opt/muster-agent',DEB_RECORD='/var/lib/dpkg/info/muster-agent.list';
 /** How this copy installs updates. Windows: the NSIS install leaves its uninstaller beside the executable (the zip
- *  has none). Linux: an AppImage runs with $APPIMAGE set; the deb lives in /opt/Muster Agent and is known to dpkg. */
+ *  has none). Linux: an AppImage runs with $APPIMAGE set; the deb lives in /opt/muster-agent and is known to dpkg. */
 export function detectInstallMethod(input:{platform:string;exe:string;env:NodeJS.ProcessEnv;packaged:boolean;exists:(file:string)=>boolean;writable:(dir:string)=>boolean}):InstallTarget {
   const {platform,exe,env,exists}=input;
   if(platform==='darwin')return {method:'mac-bundle'};
