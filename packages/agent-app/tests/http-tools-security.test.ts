@@ -98,7 +98,7 @@ test('H4: a Project tool rule reaches the HTTP route through the service (deny b
   const adapter={kind:'http' as const,run:async(input:AdapterRunInput)=>{seen=input;const ok=await input.authorize!('item/fileChange/requestApproval',{changes:[{path:join(ws,'.env')}],policyOnly:true});return {status:'completed' as const,finalMessage:String(ok),dispatchState:'dispatched' as const};}};
   const provider=createProviderAdapter({instances:()=>[{info:{id:'local-x',name:'X',available:true,identityMasked:'x',models:[{id:'m',name:'M'}]},command:'',env:{},sessionsRoot:'',adapter}] as never});
   const noop=()=>{};
-  const run=(decision:unknown)=>provider.run({chat:{id:'c',mode:'agent',providerId:'local-x',model:'m',permissionMode:'full'} as never,cwd:ws,prompt:'p',onDelta:noop,onReasoning:noop,onEvent:noop,onRequest:async(method,params)=>{requests.push([method,params]);return decision as never;}} as never);
+  const run=(decision:unknown)=>provider.run({chat:{id:'c',mode:'agent',providerId:'local-x',model:'m',permissionMode:'full'} as never,cwd:ws,prompt:'p',onDelta:noop,onReasoning:noop,onEvent:noop,onRequest:async(method:string,params:Record<string,unknown>)=>{requests.push([method,params]);return decision as never;}} as never);
   assert.equal((await run({decision:'decline'})).finalMessage,'false');
   assert.equal((await run({decision:'accept'})).finalMessage,'true');
   assert.equal((await run(undefined)).finalMessage,'true','no objection from the service means go ahead');
