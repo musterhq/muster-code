@@ -19,6 +19,8 @@ export interface ProviderInstance {
   sessionsRoot: string;
   /** Set for non-Codex routes (Claude Code, OpenCode, HTTP APIs); run() delegates to it instead of the app-server. */
   adapter?: RunnableAdapter;
+  /** Key of the live model listing behind this route (a gateway without a catalog), for waiting on it at send. */
+  listingKey?: string;
 }
 /** The subset of node:fs this module touches; tests inject a counting wrapper. */
 export type ProviderInstanceFs=Pick<typeof nodeFs,'openSync'|'fstatSync'|'readSync'|'closeSync'|'existsSync'|'accessSync'|'statSync'|'readdirSync'>;
@@ -317,19 +319,89 @@ function routeIds(routes:CodexRouteSpec[]):string[] {
 /** A gateway with no model catalog lists its models from `<base_url>/models`, the way it would authenticate a run:
  * its `env_key` variable, its own `auth.command` helper (the one Codex runs), or nothing for a local endpoint. */
 type Models=ProviderInfo['models'];
-const listings=new Map<string,Validator<ListedModel[]>>();
+/** Retry delays after a failed listing; the last one repeats. */
+export const LISTING_BACKOFF_MS=[2_000,5_000,15_000,60_000];
+export const LISTING_WAIT_MS=15_000;
+export type ListingState=Validation<ListedModel[]> & {stale?:boolean};
+interface ListingEntry {validator:Validator<ListedModel[]>;key:string;failures:number;watching:boolean;timer?:unknown;persisted?:ListedModel[]|null}
+const listings=new Map<string,ListingEntry>();
 const settleListeners=new Set<()=>void>();
+let listingDir:string|undefined;
+let scheduler:{set:(fn:()=>void,ms:number)=>unknown;clear:(handle:unknown)=>void}={set:(fn,ms)=>{const timer=setTimeout(fn,ms);timer.unref?.();return timer;},clear:handle=>clearTimeout(handle as NodeJS.Timeout)};
+/** Where the last good listing of each route is kept (tests inject a temp dir). Never holds tokens. */
+export function setProviderListingStore(dir:string|undefined):void {listingDir=dir;}
+/** Tests drive the retry timers by hand. */
+export function setListingScheduler(next?:typeof scheduler):void {scheduler=next??{set:(fn,ms)=>{const timer=setTimeout(fn,ms);timer.unref?.();return timer;},clear:handle=>clearTimeout(handle as NodeJS.Timeout)};}
+/** Forgets every in-memory listing (tests). */
+export function resetProviderListings():void {for(const entry of listings.values())if(entry.timer!==undefined)scheduler.clear(entry.timer);listings.clear();}
 /** Called when a model listing settles, so a cached instance list is rebuilt with its result. */
 export function onProviderListingSettled(listener:()=>void):()=>void {settleListeners.add(listener);return ()=>settleListeners.delete(listener);}
 /** Resolves once no model listing is in flight. */
-export async function providerListingsSettled():Promise<void> {await Promise.all([...listings.values()].map(listing=>listing.settled()));}
-function listing(route:CodexRouteSpec,env:NodeJS.ProcessEnv,fetcher:typeof fetch|undefined):Validation<ListedModel[]> {
+export async function providerListingsSettled():Promise<void> {await Promise.all([...listings.values()].map(entry=>entry.validator.settled()));}
+function persistedFile(key:string):string|undefined {return listingDir?join(listingDir,`${key}.json`):undefined;}
+function loadPersisted(entry:ListingEntry):ListedModel[]|null {
+  if(entry.persisted!==undefined)return entry.persisted;
+  entry.persisted=null;
+  const file=persistedFile(entry.key);if(!file)return null;
+  try {
+    const parsed=JSON.parse(boundedFile(nodeFs,file)) as {models?:unknown};
+    if(Array.isArray(parsed.models)&&parsed.models.length)entry.persisted=parsed.models.flatMap((item:unknown)=>{
+      const row=item&&typeof item==='object'?item as Record<string,unknown>:{};
+      return typeof row.id==='string'&&row.id.length<=200&&typeof row.name==='string'?[{id:row.id,name:row.name,...(typeof row.owner==='string'?{owner:row.owner}:{}),...(typeof row.chat==='boolean'?{chat:row.chat}:{})} as ListedModel]:[];
+    });
+    if(!entry.persisted?.length)entry.persisted=null;
+  } catch {entry.persisted=null;}
+  return entry.persisted;
+}
+function savePersisted(entry:ListingEntry,models:ListedModel[]):void {
+  entry.persisted=models;
+  const file=persistedFile(entry.key);if(!file)return;
+  try {
+    nodeFs.mkdirSync(listingDir!,{recursive:true,mode:0o700});
+    const temp=`${file}.${process.pid}.tmp`;
+    nodeFs.writeFileSync(temp,JSON.stringify({version:1,savedAt:new Date().toISOString(),models}),{mode:0o600});
+    nodeFs.renameSync(temp,file);
+  } catch {/* the list stays in memory; persistence is best effort */}
+}
+function settleEntry(entry:ListingEntry):void {
+  const state=entry.validator.current(entry.key);
+  if(state.status==='ok'){entry.failures=0;if(entry.timer!==undefined){scheduler.clear(entry.timer);entry.timer=undefined;}savePersisted(entry,state.value!);}
+  else if(state.status==='error'){
+    if(entry.timer!==undefined)scheduler.clear(entry.timer);
+    const delay=LISTING_BACKOFF_MS[Math.min(entry.failures,LISTING_BACKOFF_MS.length-1)]!;entry.failures++;
+    entry.timer=scheduler.set(()=>{entry.timer=undefined;if(listings.get(entry.key)===entry)refreshEntry(entry);},delay);
+  }
+  invalidateProviderInstances();for(const listener of settleListeners)listener();
+}
+function watchEntry(entry:ListingEntry):void {
+  if(entry.watching||!entry.validator.busy)return;
+  entry.watching=true;
+  void entry.validator.settled().then(()=>{entry.watching=false;settleEntry(entry);});
+}
+function refreshEntry(entry:ListingEntry):void {void entry.validator.refresh();watchEntry(entry);}
+/** Scan again: retry every listing now, whatever its backoff. */
+export function rescanProviderListings():void {for(const entry of listings.values()){entry.failures=0;if(entry.timer!==undefined){scheduler.clear(entry.timer);entry.timer=undefined;}refreshEntry(entry);}}
+/** Send: wait (up to `timeoutMs`) for the route's listing while it is loading, refreshing, or stale/failed (forcing a retry now). */
+export async function awaitProviderListing(listingKey:string|undefined,timeoutMs:number=LISTING_WAIT_MS):Promise<void> {
+  const entry=listingKey?listings.get(listingKey):undefined;if(!entry)return;
+  const state=entry.validator.current(entry.key);
+  if(!entry.validator.busy&&state.status==='error'){entry.failures=0;if(entry.timer!==undefined){scheduler.clear(entry.timer);entry.timer=undefined;}refreshEntry(entry);}
+  else watchEntry(entry);
+  if(!entry.validator.busy)return;
+  let timer:unknown;
+  const timeout=new Promise<void>(resolve=>{timer=setTimeout(resolve,timeoutMs);(timer as NodeJS.Timeout).unref?.();});
+  try {await Promise.race([entry.validator.settled().then(()=>undefined),timeout]);} finally {clearTimeout(timer as NodeJS.Timeout);}
+  // The settle handler runs on the same promise; give it its turn so provider info is rebuilt before validating.
+  await new Promise<void>(resolve=>setImmediate(resolve));
+}
+function listing(route:CodexRouteSpec,env:NodeJS.ProcessEnv,fetcher:typeof fetch|undefined):ListingState&{key:string} {
   const base=route.baseUrl!.replace(/\/+$/,''),auth=route.auth??{};
   const envHash=(name:string|undefined)=>name?createHash('sha256').update(env[name]??'').digest('hex'):'';
+  // The route's base URL plus a hash of its account binding; no token is part of it, readable or stored.
   const key=createHash('sha256').update(JSON.stringify([base,auth,envHash(auth.envKey),Object.values(auth.envHttpHeaders??{}).map(envHash)])).digest('hex');
   let found=listings.get(key);
   if(!found){
-    found=new Validator<ListedModel[]>(async()=>{
+    const validator=new Validator<ListedModel[]>(async()=>{
       const label=route.name??route.modelProvider,list=async(force:boolean)=>fetchModelList(`${base}/models`,await codexAuthHeaders(auth,env,{force}),label,fetcher);
       try {return await list(false);}
       catch (error) {
@@ -337,13 +409,17 @@ function listing(route:CodexRouteSpec,env:NodeJS.ProcessEnv,fetcher:typeof fetch
         if(auth.authCommand&&error instanceof Error&&/HTTP 401/.test(error.message))return list(true);
         throw error;
       }
-    });
-    if(listings.size>=32)listings.delete(listings.keys().next().value!);
+    },10*60_000,Date.now,Number.POSITIVE_INFINITY);
+    found={validator,key,failures:0,watching:false};
+    if(listings.size>=32){const [oldKey,old]=listings.entries().next().value!;if(old.timer!==undefined)scheduler.clear(old.timer);listings.delete(oldKey);}
     listings.set(key,found);
   }
-  const before=found.current(key);
-  if(before.status==='pending')void found.settled().then(()=>{invalidateProviderInstances();for(const listener of settleListeners)listener();});
-  return before;
+  const state=found.validator.current(key);
+  watchEntry(found);
+  if(state.status==='ok')return {...state,key};
+  const saved=loadPersisted(found);
+  if(saved)return {status:'ok',value:saved,stale:true,...(state.status==='error'?{reason:state.reason}:{}),key};
+  return {...state,key};
 }
 
 /** Node for the launcher: MUSTER_PROVIDER_NODE, a `node` on PATH or in a standard location, else Electron itself run as Node. */
@@ -435,7 +511,7 @@ function homeInstances({fs,directory,codexHome,cli,node,env,track,validator,fetc
       try {const cache=JSON.parse(boundedFile(fs,track(join(codexHome,'models_cache.json')))) as {models?:unknown};if(Array.isArray(cache.models)){list=cache.models;catalogSource='Codex’s model cache';}} catch {list=undefined;}
       if(!list)return fail('Codex has not listed this account’s models yet. Run `codex` once, or set model_catalog_json in config.toml.');
     }
-    let models:Models,excluded:ExcludedModel[]=[];
+    let models:Models,excluded:ExcludedModel[]=[],listingKey:string|undefined,listingInfo:Pick<ProviderInfo,'listing'|'listingError'>={};
     if(list){
       ({models,excluded}=catalogModels(route.kind==='chatgpt'?'openai-direct':'gateway',list));
       // Fallback: the model the user set in Codex's config.toml stays selectable (first, so it is the default) when a stale
@@ -446,7 +522,7 @@ function homeInstances({fs,directory,codexHome,cli,node,env,track,validator,fetc
       // While the listing loads, or if it fails, the catalog alone is offered.
       if(route.kind==='gateway'&&route.baseUrl){
         const live=listing(route,env,fetcher);
-        if(live.status==='ok'){
+        if(live.status==='ok'&&!live.stale){
           for(const entry of routerAgents(live.value!))if(!models.some(model=>model.id===entry.id))models.push(entry);
           // Everything else the router serves is loaded too, off in the picker until switched on in Settings › Models.
           const known=new Set(models.map(model=>model.id));
@@ -455,11 +531,15 @@ function homeInstances({fs,directory,codexHome,cli,node,env,track,validator,fetc
       }
     }
     else if(route.baseUrl){
-      const listed=listing(route,env,fetcher);
-      if(listed.status==='pending')return {info:{...base,status:'configured',detail:`Listing models from ${route.baseUrl}… Scan again in a moment. ${mcpDetail(mcp)}`},command,env:childEnv,sessionsRoot};
-      if(listed.status==='error')return fail(`${listed.reason} Add model_catalog_json to the profile to list models without asking the endpoint.`,'error');
+      const listed=listing(route,env,fetcher);listingKey=listed.key;
+      if(listed.status==='pending')return {info:{...base,status:'configured',listing:'loading',detail:`Loading models from ${name}… Scan again in a moment. ${mcpDetail(mcp)}`},command,env:childEnv,sessionsRoot,listingKey};
+      if(listed.status==='error'){
+        const reason=`${name} didn’t answer: ${(listed.reason??'no reason given').replace(/[.\s]+$/,'')}. Retry.`;
+        return {info:{...base,status:'error',listing:'failed',listingError:reason,error:reason,detail:`${reason} Add model_catalog_json to the profile to list models without asking the endpoint. ${mcpDetail(mcp)}`},command,env:childEnv,sessionsRoot,listingKey};
+      }
+      listingInfo=listed.stale?{listing:'stale',...(listed.reason?{listingError:`${name} didn’t answer: ${listed.reason.replace(/[.\s]+$/,'')}. Retry.`}:{})}:{listing:'live'};
       const runnable=listed.value!.filter(entry=>entry.chat!==false);
-      models=runnable.slice(0,MAX_CATALOG_ENTRIES).map(({id,name})=>({id,name}));catalogSource=`${route.baseUrl}/models`;
+      models=runnable.slice(0,MAX_CATALOG_ENTRIES).map(({id,name})=>({id,name}));catalogSource=`${route.baseUrl}/models${listed.stale?' (last saved list, refreshing)':''}`;
       if(listed.value!.length>runnable.length)excluded.push({id:'non-chat-models',name:`${listed.value!.length-runnable.length} image, audio and other models`,reason:'These models cannot run a chat.'});
       if(runnable.length>MAX_CATALOG_ENTRIES)excluded.push({id:'listing-overflow',name:`${runnable.length-MAX_CATALOG_ENTRIES} more models`,reason:`Only the first ${MAX_CATALOG_ENTRIES} listed models are offered; add model_catalog_json to choose.`});
     } else return fail(`[model_providers.${route.modelProvider}] has no base_url and no model catalog.`);
@@ -473,7 +553,7 @@ function homeInstances({fs,directory,codexHome,cli,node,env,track,validator,fetc
       accountId=typeof tokenAccount==='string'&&tokenAccount?tokenAccount:apiKey??'codex-sign-in';
     }
     const bindingId=createHash('sha256').update(JSON.stringify([route.modelProvider,route.profile??'',codexHome,cli,route.fingerprint,accountId])).digest('hex');
-    return {info:{...base,models,...(excluded.length?{excludedModels:excluded}:{}),...(incremental?{incrementalInput:true}:{}),available:true,status:'ready',bindingId,detail:`Runs through the Codex CLI with ${catalogSource}. ${mcpDetail(mcp)} Upstream access is checked only when you run.`},command,env:childEnv,sessionsRoot};
+    return {info:{...base,models,...(excluded.length?{excludedModels:excluded}:{}),...(incremental?{incrementalInput:true}:{}),...listingInfo,available:true,status:'ready',bindingId,detail:`Runs through the Codex CLI with ${catalogSource}. ${mcpDetail(mcp)} Upstream access is checked only when you run.`},command,env:childEnv,sessionsRoot,...(listingKey?{listingKey}:{})};
   });
 }
 
