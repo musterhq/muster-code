@@ -63,13 +63,14 @@ function entries(app) {
     return list;
   }
   for (const name of asar.listPackage(app, {isPack: false})) {
-    const relative = name.replace(/\\/g, '/').replace(/^\//, '');
-    const stat = asar.statFile(app, relative, false);
+    // listPackage uses the platform's separator; statFile/extractFile want that form, the checks want '/'.
+    const native = name.replace(/^[\\/]/, ''), relative = native.replace(/\\/g, '/');
+    const stat = asar.statFile(app, native, false);
     if (!stat || 'files' in stat || 'link' in stat) continue;
     if (stat.unpacked) {
-      const real = path.join(`${app}.unpacked`, relative);
+      const real = path.join(`${app}.unpacked`, native);
       if (existsSync(real)) list.push({relative, size: statSync(real).size, unpacked: true, read: () => readFileSync(real, 'utf8')});
-    } else list.push({relative, size: stat.size, unpacked: false, read: () => asar.extractFile(app, relative).toString('utf8')});
+    } else list.push({relative, size: stat.size, unpacked: false, read: () => asar.extractFile(app, native).toString('utf8')});
   }
   return list;
 }

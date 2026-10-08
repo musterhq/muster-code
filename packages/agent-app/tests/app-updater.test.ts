@@ -141,7 +141,7 @@ test('coming back to the window re-checks only when the last look is stale', asy
   assert.equal(calls,2,'stale: check again');
 });
 
-test('cancelInstall stops the waiting installer and returns the verified update to ready', async () => {
+test('cancelInstall stops the waiting installer and returns the verified update to ready', {skip:process.platform!=='darwin'}, async () => {
   const {spawn}=await import('node:child_process');
   const root=mkdtempSync(path.join(tmpdir(),'muster-updater-cancel-'));
   const target=path.join(root,'Applications','Muster Agent.app'),staged=path.join(root,'pending','0.3.0','app','Muster Agent.app');
