@@ -151,7 +151,8 @@ if (hasRenderer) {
 
 function copyRendererStatic() {
   mkdirSync(dist('renderer'), { recursive: true });
-  cpSync(path.join(root,'node_modules/pdfjs-dist/build/pdf.worker.mjs'),dist('renderer','pdf.worker.mjs'));
+  // The minified build of the same worker (1.3 MB instead of 2.2 MB); served under the name the renderer loads.
+  cpSync(path.join(root,'node_modules/pdfjs-dist/build/pdf.worker.min.mjs'),dist('renderer','pdf.worker.mjs'));
   cpSync(path.join(root,'node_modules/pdfjs-dist/LICENSE'),dist('renderer','pdfjs-LICENSE.txt'));
   cpSync(path.join(root,'node_modules/exceljs/LICENSE'),dist('renderer','exceljs-LICENSE.txt'));
   for (const name of ['t3code-MIT.txt','muster-core-MIT.txt','qm-MIT.txt']) cpSync(path.join(root,'licenses',name),dist('renderer',name));

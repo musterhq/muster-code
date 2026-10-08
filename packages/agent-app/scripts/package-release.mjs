@@ -2,7 +2,7 @@
 // Builds the distributable Muster Agent for this Mac's architecture:
 //   release-dist/Muster Agent.app
 //   release-dist/Muster-Agent-<version>-<arch>.zip   (ditto -c -k --keepParent)
-//   release-dist/Muster-Agent-<version>-<arch>.dmg   (app + /Applications link)
+//   release-dist/Muster-Agent-<version>-<arch>.dmg   (app + /Applications link; LZMA-compressed, macOS 10.15+)
 //   release-dist/SHA256SUMS                          (every Muster-Agent-<version>-* archive there)
 // Output goes to release-dist/ (override: MUSTER_RELEASE_DIR), never release/, where package-preview.mjs
 // keeps a developer's running "Muster Agent Preview.app".
@@ -92,6 +92,15 @@ setKeys(plist, {MusterUpdateChannel: channel, ...(feed ? {MusterUpdateBaseURL: f
 const resourcesDir = path.join(app, 'Contents/Resources');
 rmSync(path.join(resourcesDir, 'default_app.asar'), {force: true}); // Electron's sample app
 rmSync(path.join(resourcesDir, 'electron.icns'), {force: true});
+// The app UI is English only. Chromium falls back to en when no other .lproj exists, so drop the other ~220 locale folders
+// (about 12 MB in the download) before anything is signed; the bundle declares the one language it ships.
+const keepLproj = new Set(['en.lproj']);
+const lprojRoots = [resourcesDir, path.join(frameworks, 'Electron Framework.framework/Resources'), ...readdirSync(frameworks).filter(entry => entry.endsWith('.app')).map(entry => path.join(frameworks, entry, 'Contents/Resources'))];
+let removedLproj = 0;
+for (const dir of lprojRoots.filter(existsSync)) for (const entry of readdirSync(dir)) if (entry.endsWith('.lproj') && !keepLproj.has(entry)) { rmSync(path.join(dir, entry), {recursive: true, force: true}); removedLproj++; }
+plistBuddy(plist, 'Delete :CFBundleLocalizations', {optional: true});
+for (const command of ['Add :CFBundleLocalizations array', 'Add :CFBundleLocalizations:0 string en']) plistBuddy(plist, command);
+log(`removed ${removedLproj} non-English .lproj folders`);
 cpSync(path.join(root, 'resources/icon.icns'), path.join(resourcesDir, 'icon.icns'));
 
 // 3. Production files only: built output (no tests, no source maps) and node-pty's runtime pieces.
@@ -197,7 +206,7 @@ try {
     // hdiutil intermittently fails with "Resource busy" on CI runners (a scanner or diskimages helper still holds
     // the staged files); a short back-off and retry is the standard remedy.
     for (let attempt = 1; ; attempt++) {
-      try { run('hdiutil', ['create', '-volname', `${PRODUCT} ${version}`, '-srcfolder', dmgStage, '-fs', 'HFS+', '-format', 'UDZO', '-imagekey', 'zlib-level=9', '-ov', dmgPath], {stdio: 'inherit'}); break; }
+      try { run('hdiutil', ['create', '-volname', `${PRODUCT} ${version}`, '-srcfolder', dmgStage, '-fs', 'HFS+', '-format', 'ULMO', '-ov', dmgPath], {stdio: 'inherit'}); break; }
       catch (error) {
         if (attempt >= 5) throw error;
         console.log(`[package-release] hdiutil create failed (attempt ${attempt}/5); retrying in ${attempt * 10}s`);
