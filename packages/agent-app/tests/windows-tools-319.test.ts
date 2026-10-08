@@ -265,28 +265,24 @@ test('an imported thread with no tool use is not resumed; the first send starts 
   assert.match(inputs[0]!.prompt,/Automate the redis failover drill/,'the imported context rides along');
   assert.match(inputs[0]!.prompt,/continue the drill/);
 });
-test('a chat on a tool-less route moves to the same model on a route with tools, with a notice and the history',async t=>{
+test('a chat on a tool-less route is never moved to another provider or account on the server (H5)',async t=>{
   const dataDir=await directory(t),inputs:ProviderInput[]=[];
-  let chatOnly=false;
   const model=(tools?:false)=>({id:'intelligent-planner',name:'Intelligent planner',...(tools===false?{tools}:{})});
   const provider:ProviderAdapter={
-    info:()=>[{id:'gateway-http',name:'Gateway (HTTP)',available:true,identityMasked:'fixture',models:[model(chatOnly?false:undefined)]},{id:'gateway-codex',name:'Gateway (Codex)',available:true,identityMasked:'fixture',models:[model()]}],
+    info:()=>[{id:'local-ollama',name:'Ollama',available:true,identityMasked:'fixture',models:[model(false)]},{id:'cloud-key',name:'Cloud key',available:true,identityMasked:'fixture',models:[model()]}],
     run:async input=>{inputs.push(input);return {status:'completed',finalMessage:'done',threadId:`thread-${inputs.length}`,turnId:`turn-${inputs.length}`};},stop:async()=>true,dispose(){},
   };
   const service=createAgentService({dataDir,provider,onEvent(){}});t.after(()=>service.dispose());
   const chat=await service.invoke('chat.create',{});
   const settle=async(count:number)=>{for(let i=0;i<500&&inputs.length<count;i++)await new Promise(resolve=>setImmediate(resolve));for(let i=0;i<200;i++)await new Promise(resolve=>setImmediate(resolve));};
   await service.invoke('chat.send',{id:chat.id,text:'first question about redis',requestId:'a'});await settle(1);
-  assert.equal(inputs[0]!.chat.providerId,'gateway-http');
-  chatOnly=true;
   await service.invoke('chat.send',{id:chat.id,text:'now run the drill',requestId:'b'});await settle(2);
-  assert.equal(inputs[1]!.chat.providerId,'gateway-codex','moved to the route that has tools');
-  assert.equal(inputs[1]!.chat.providerThreadId,undefined,'a fresh provider session');
-  assert.match(inputs[1]!.prompt,/first question about redis/,'the earlier conversation is carried over');
-  const notices=(await service.invoke('chat.timeline',{id:chat.id})).items.filter(item=>item.kind==='notice'&&item.data?.kind==='tools-session-restarted');
-  assert.equal(notices.length,1);assert.match(notices[0]!.text,/can’t run commands or edit files on Gateway \(HTTP\).*Gateway \(Codex\).*has tools/);
+  assert.equal(inputs[0]!.chat.providerId,'local-ollama');assert.equal(inputs[1]!.chat.providerId,'local-ollama','the chat stays where the user put it');
+  assert.equal(inputs[1]!.chat.providerBindingId,inputs[0]!.chat.providerBindingId);
+  const notices=(await service.invoke('chat.timeline',{id:chat.id})).items.filter(item=>item.kind==='notice'&&item.data?.kind==='tools-unavailable');
+  assert.equal(notices.length,1,'said once, not on every send');assert.match(notices[0]!.text,/answers without tools.*Switch to/);
 });
-test('with no tool-capable alternative the chat says it answers without tools',async t=>{
+test('a chat-only model says it answers without tools',async t=>{
   const dataDir=await directory(t),inputs:ProviderInput[]=[];
   const provider:ProviderAdapter={info:()=>[{id:'only',name:'Only',available:true,identityMasked:'fixture',models:[{id:'m',name:'M',tools:false}]}],run:async input=>{inputs.push(input);return {status:'completed',finalMessage:'ok'};},stop:async()=>true,dispose(){}};
   const service=createAgentService({dataDir,provider,onEvent(){}});t.after(()=>service.dispose());
@@ -294,7 +290,7 @@ test('with no tool-capable alternative the chat says it answers without tools',a
   await service.invoke('chat.send',{id:chat.id,text:'hello',requestId:'a'});
   for(let i=0;i<500&&!inputs.length;i++)await new Promise(resolve=>setImmediate(resolve));
   const notice=(await service.invoke('chat.timeline',{id:chat.id})).items.find(item=>item.data?.kind==='tools-unavailable');
-  assert.match(notice?.text??'',/can’t run commands or edit files here, so this chat answers without tools/);
+  assert.match(notice?.text??'',/can’t run commands or edit files through Only, so this chat answers without tools/);
 });
 
 /* ---- 6. the composer capability notice ------------------------------------------------------------------------------ */

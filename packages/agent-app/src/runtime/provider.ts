@@ -178,6 +178,14 @@ export function createProviderAdapter(options: { core?: CoreClient; available?: 
         instructions: runInstructions(input.chat.mode, input.developerInstructions),
         ...(Object.keys(mcpServersFromOverrides(input.configOverrides)).length ? {mcpServers: mcpServersFromOverrides(input.configOverrides)} : {}),
         ...(Object.keys(envFromOverrides(input.configOverrides)).length ? {env: envFromOverrides(input.configOverrides)} : {}),
+        // The adapter runs its own tools (HTTP routes): they meet the same Project tool rules, user-process guard and approval cards as Codex's.
+        authorize: async (method, params) => {
+          if (!live()) return false;
+          const answer = await requestWhileOwned(owned.controller.signal, () => input.onRequest(method, params));
+          if (owned.controller.signal.aborted) return false;
+          const decision = answer?.decision;
+          return answer === undefined || decision === 'accept' || decision === 'acceptForSession';
+        },
         onThreadReady: threadId => { if (live()) input.onThreadReady?.(threadId); },
         onTurnAccepted: identity => { activity = true; if (live()) input.onTurnAccepted?.({...identity, dispatchState: 'dispatched'}); },
         onDelta: text => { activity = true; if (live()) input.onDelta(text); },

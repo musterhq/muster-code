@@ -38,7 +38,9 @@ export function normalizeFsPath(input: string, platform: PathPlatform = currentP
   let text = input.replace(/\//g, '\\');
   // \\?\UNC\server\share -> \\server\share ; \\?\E:\x and \\.\E:\x -> E:\x
   if (/^\\\\[?.]\\UNC\\/i.test(text)) text = '\\\\' + text.slice(8);
-  else if (/^\\\\[?.]\\/.test(text)) text = text.slice(4);
+  else if (/^\\\\[?.]\\[A-Za-z]:(?:\\|$)/.test(text)) text = text.slice(4);
+  // Any other device-namespace path (\\?\Volume{GUID}\x, \\.\PhysicalDrive0, \\?\GLOBALROOT\...) is left exactly as written.
+  else if (/^\\\\[?.]\\/.test(text)) return text;
   const drive = /^([A-Za-z]):(?:\\|$)/.exec(text);
   if (drive) {
     const rest = collapseDots(text.slice(2).split('\\')).join('\\');
@@ -56,7 +58,8 @@ export function normalizeFsPath(input: string, platform: PathPlatform = currentP
 /** Comparison key: the normalised path, folded to lower case on win32. */
 export function pathKey(input: string, platform: PathPlatform = currentPathPlatform()): string {
   const normal = normalizeFsPath(input, platform);
-  return platform === 'win32' ? normal.toLowerCase() : normal;
+  // ASCII-only fold: NTFS does not equate U+212A (Kelvin sign) with k the way String.toLowerCase does.
+  return platform === 'win32' ? normal.replace(/[A-Z]/g, letter => letter.toLowerCase()) : normal;
 }
 
 export function samePath(a: string | undefined, b: string | undefined, platform: PathPlatform = currentPathPlatform()): boolean {

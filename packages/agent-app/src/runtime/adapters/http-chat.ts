@@ -9,11 +9,14 @@ export const WITH_TOOLS = 'Shell and file tools';
 type Fetch = typeof fetch;
 interface HttpOptions {endpoint: string; apiKey: () => string | undefined; label: string; fetch?: Fetch; memory?: ConversationMemory}
 
-const MAX_TOOL_ROUNDS = 40;
+const MAX_TOOL_ROUNDS = 40, MAX_CALLS_PER_ROUND = 16, MAX_CALLS_PER_TURN = 100, MAX_PENDING_CALLS = 64;
+const MAX_ARGUMENT_BYTES_PER_STREAM = 4 * 1024 * 1024, MAX_EXTRA_BYTES = 2 * 1024 * 1024, TURN_DEADLINE_MS = 30 * 60_000, REFUSAL_TTL_MS = 30 * 60_000;
+/** A 400/422 counts as "this model takes no tool definitions" only when its body says so (not for a context overflow or a bad image). */
+export const refusesTools = (body: string) => /\b(?:tools?|functions?|tool_choice|tool[ _-]?calls?)\b/i.test(body) && /(?:not|n't|no longer|unsupported|unknown|invalid|does not|doesn't)/i.test(body);
 interface Streamed { usage?: Record<string, unknown>; calls?: ToolCall[] }
 /** Models that refused tool definitions this process, by endpoint and model, so the picker and composer can say so. */
-const toolRefusals = new Set<string>();
-export const refusedTools = (endpoint: string, model: string) => toolRefusals.has(`${endpoint}\0${model}`);
+const toolRefusals = new Map<string, number>();
+export const refusedTools = (endpoint: string, model: string) => { const at = toolRefusals.get(`${endpoint}\0${model}`); if (at === undefined) return false; if (Date.now() - at > REFUSAL_TTL_MS) { toolRefusals.delete(`${endpoint}\0${model}`); return false; } return true; };
 
 /** Shared turn skeleton: history, identity callbacks, abort, result mapping and (for routes that offer tools) the tool loop. */
 async function turn(input: AdapterRunInput, memory: ConversationMemory, label: string, send: (history: ChatMessage[], extra: unknown[], tools: boolean) => Promise<Response>, stream: (response: Response, emit: (text: string) => void) => Promise<Streamed | undefined>, tooling?: {endpoint: string}): Promise<AdapterRunResult> {
@@ -29,32 +32,47 @@ async function turn(input: AdapterRunInput, memory: ConversationMemory, label: s
     return fail(`Could not reach ${label}: ${error instanceof Error ? error.message.slice(0, 200) : 'network error'}.`);
   }
   if (!response.ok && toolsOn && (response.status === 400 || response.status === 422)) {
-    // The route (or model) does not accept tool definitions: run this turn as plain chat and remember it.
-    await response.body?.cancel().catch(() => {});
-    toolsOn = false; toolRefusals.add(`${tooling!.endpoint}\0${input.model}`);
-    input.onEvent(TOOLS_UNAVAILABLE_EVENT, {threadId, model: input.model});
-    try { response = await first(); }
-    catch (error) { return fail(`Could not reach ${label}: ${error instanceof Error ? error.message.slice(0, 200) : 'network error'}.`); }
+    const text = await response.clone().text().catch(() => '');
+    if (refusesTools(text.slice(0, 4000))) {
+      // The route (or model) does not accept tool definitions: run this turn as plain chat and remember it for a while.
+      await response.body?.cancel().catch(() => {});
+      toolsOn = false; toolRefusals.set(`${tooling!.endpoint}\0${input.model}`, Date.now());
+      input.onEvent(TOOLS_UNAVAILABLE_EVENT, {threadId, model: input.model});
+      try { response = await first(); }
+      catch (error) { return fail(`Could not reach ${label}: ${error instanceof Error ? error.message.slice(0, 200) : 'network error'}.`); }
+    }
   }
   if (!response.ok) return fail(await responseError(response, label), {statusCode: response.status});
   if (!response.body) return {status: 'failed', finalMessage: '', threadId, dispatchState: 'dispatched', errorMessage: `${label} returned an empty stream.`};
   const turnId = randomUUID();
   input.onTurnAccepted({threadId, turnId});
   let answer = '';
-  const extra: unknown[] = [];
+  const extra: Array<{role: string; content?: string | null; tool_calls?: unknown; tool_call_id?: string}> = [];
   const usages: Array<{inputTokens?: number; outputTokens?: number; totalTokens?: number}> = [];
+  const deadline = Date.now() + TURN_DEADLINE_MS;
+  const used: string[] = [];
+  let callsThisTurn = 0;
+  /** The model re-reads `extra` every round: keep it under a total size by blanking the oldest tool results. */
+  const trimExtra = () => {
+    let size = extra.reduce((sum, message) => sum + (message.content?.length ?? 0), 0);
+    for (const message of extra) { if (size <= MAX_EXTRA_BYTES) break; if (message.role === 'tool' && (message.content?.length ?? 0) > 200) { size -= message.content!.length; message.content = '[earlier tool output omitted to save space]'; size += message.content.length; } }
+  };
   try {
     for (let round = 0; ; round++) {
       const streamed = await stream(response, delta => { answer += delta; input.onDelta(delta); });
       if (streamed?.usage) usages.push(streamed.usage as {inputTokens?: number; outputTokens?: number; totalTokens?: number});
-      const calls = streamed?.calls ?? [];
+      let calls = streamed?.calls ?? [];
       if (!toolsOn || !calls.length || input.signal.aborted) break;
-      if (round >= MAX_TOOL_ROUNDS) { const note = '\n\n(Stopped after the tool call limit for one turn.)'; answer += note; input.onDelta(note); break; }
+      if (round >= MAX_TOOL_ROUNDS || callsThisTurn >= MAX_CALLS_PER_TURN || Date.now() > deadline) { const note = '\n\n(Stopped: this turn reached its limit on tool calls or time.)'; answer += note; input.onDelta(note); break; }
+      calls = calls.slice(0, Math.min(MAX_CALLS_PER_ROUND, MAX_CALLS_PER_TURN - callsThisTurn));
+      callsThisTurn += calls.length;
       extra.push({role: 'assistant', content: null, tool_calls: calls.map(call => ({id: call.id, type: 'function', function: {name: call.name, arguments: call.arguments || '{}'}}))});
       for (const call of calls) {
-        const result = await executeTool(call, {cwd: input.cwd, access: input.permissionMode, signal: input.signal, emit: input.onEvent, threadId, turnId});
+        const result = await executeTool(call, {cwd: input.cwd, access: input.permissionMode, signal: input.signal, emit: input.onEvent, threadId, turnId, ...(input.authorize ? {authorize: input.authorize} : {}), ...(input.env ? {env: input.env} : {}), deadline});
+        used.push(`${call.name}${result.ok ? '' : ' (failed)'}`);
         extra.push({role: 'tool', tool_call_id: call.id, content: result.content});
       }
+      trimExtra();
       if (input.signal.aborted) break;
       response = await send(history, extra, true);
       if (!response.ok || !response.body) throw new Error(response.ok ? `${label} returned an empty stream.` : await responseError(response, label));
@@ -67,10 +85,11 @@ async function turn(input: AdapterRunInput, memory: ConversationMemory, label: s
     }
   } catch (error) {
     const stopped = input.signal.aborted;
-    if (answer) memory.commit(threadId, [...history, {role: 'user', content: input.prompt}, {role: 'assistant', content: answer}]);
+    if (answer || used.length) memory.commit(threadId, [...history, {role: 'user', content: input.prompt}, {role: 'assistant', content: `${answer}${used.length ? `\n\n[Tools used before this stopped: ${used.slice(0, 40).join(', ')}]` : ''}`}]);
     return {status: 'failed', finalMessage: '', threadId, turnId, dispatchState: 'dispatched', errorMessage: stopped ? 'Stopped.' : error instanceof Error ? error.message.slice(0, 300) : `${label} stream failed.`};
   }
-  const retained = memory.commit(threadId, [...history, {role: 'user', content: input.prompt}, {role: 'assistant', content: answer}]);
+  const remembered = used.length ? `${answer}\n\n[Tools used this turn: ${used.slice(0, 40).join(', ')}]` : answer;
+  const retained = memory.commit(threadId, [...history, {role: 'user', content: input.prompt}, {role: 'assistant', content: remembered}]);
   // Muster trims this history (80 messages / 400k chars): say how many user turns survive, so static context
   // carried by a trimmed-out turn is sent again (service.ts → ContextLedger).
   input.onEvent(HISTORY_WINDOW_EVENT, {threadId, turnId, retainedUserTurns: retained.retainedUserTurns, trimmed: retained.trimmed});
@@ -94,6 +113,7 @@ export function openAICompatibleAdapter(options: HttpOptions & {tools?: boolean}
   }, async (response, emit) => {
     let usage: Record<string, unknown> | undefined;
     const pending = new Map<number, ToolCall>();
+    let argumentBytes = 0;
     for await (const {data} of sseEvents(response.body!)) {
       if (data === '[DONE]') break;
       let chunk: {choices?: Array<{delta?: {content?: unknown; reasoning_content?: unknown; reasoning?: unknown; tool_calls?: Array<{index?: number; id?: string; function?: {name?: string; arguments?: string}}>}}>; usage?: {prompt_tokens?: unknown; completion_tokens?: unknown; total_tokens?: unknown}; error?: {message?: unknown}};
@@ -109,7 +129,8 @@ export function openAICompatibleAdapter(options: HttpOptions & {tools?: boolean}
         if (piece.id) call.id = piece.id;
         if (piece.function?.name) call.name += piece.function.name;
         if (piece.function?.arguments) call.arguments += piece.function.arguments;
-        if (call.arguments.length > 1024 * 1024) throw new Error(`${options.label} sent an oversized tool call.`);
+        argumentBytes += (piece.function?.arguments?.length ?? 0) + (piece.function?.name?.length ?? 0);
+        if (call.arguments.length > 1024 * 1024 || argumentBytes > MAX_ARGUMENT_BYTES_PER_STREAM || (!pending.has(index) && pending.size >= MAX_PENDING_CALLS)) throw new Error(`${options.label} sent too many or oversized tool calls.`);
         pending.set(index, call);
       }
       if (chunk.usage) usage = {inputTokens: chunk.usage.prompt_tokens, outputTokens: chunk.usage.completion_tokens, totalTokens: chunk.usage.total_tokens};

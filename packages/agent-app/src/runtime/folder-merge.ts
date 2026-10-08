@@ -1,4 +1,6 @@
-import type { DatabaseSync } from 'node:sqlite';
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { looksLikeWindowsPath, normalizeFsPath, pathKey, currentPathPlatform } from '../shared/path-normalize.ts';
 
 /**
@@ -25,7 +27,8 @@ function remapJsonList(db: DatabaseSync, table: string, column: string, key: str
   }
 }
 
-export interface FolderMergeResult { merged: number; groups: number; normalized: number }
+export interface FolderMergeResult { merged: number; groups: number; normalized: number; moved?: Record<string, string>; names?: string[] }
+const ALIAS_KEY = 'folderAliasesPending';
 
 export function mergeDuplicateFolders(db: DatabaseSync): FolderMergeResult {
   const result: FolderMergeResult = { merged: 0, groups: 0, normalized: 0 };
@@ -51,8 +54,16 @@ export function mergeDuplicateFolders(db: DatabaseSync): FolderMergeResult {
     }
     remapJsonList(db, 'projects', 'folder_ids', 'id', moved);
     remapJsonList(db, 'project_members', 'folder_ids', 'rowid', moved);
+    // Automations keep the folder id inside JSON (target, schedule, versions); ids are UUIDs, so a quoted-string replace is exact.
+    for (const [table, column] of [['automations', 'target'], ['automations', 'schedule'], ['automation_versions', 'config'], ['automation_ext', 'json']] as const) {
+      if (!hasTable(db, table) || !hasColumn(db, table, column)) continue;
+      const replace = db.prepare(`UPDATE ${table} SET ${column} = REPLACE(${column}, ?, ?) WHERE instr(${column}, ?) > 0`);
+      for (const [from, to] of moved) replace.run(`"${from}"`, `"${to}"`, `"${from}"`);
+    }
+    result.names = rows.filter(row => moved.has(row.id)).map(row => row.path);
     const remove = db.prepare('DELETE FROM folders WHERE id = ?');
     for (const from of moved.keys()) { remove.run(from); result.merged++; }
+    result.moved = Object.fromEntries(moved);
   }
   const survivors = db.prepare('SELECT id, path FROM folders').all() as { id: string; path: string }[];
   const setPath = db.prepare('UPDATE folders SET path = ? WHERE id = ?');
@@ -61,4 +72,46 @@ export function mergeDuplicateFolders(db: DatabaseSync): FolderMergeResult {
     if (canonical !== row.path && !survivors.some(other => other.id !== row.id && other.path === canonical)) { setPath.run(canonical, row.id); result.normalized++; }
   }
   return result;
+}
+
+/** Called by migration v3: remembers the id remap until the stores that live in other database files have applied it. */
+export function recordFolderAliases(db: DatabaseSync, moved: Record<string, string>): void {
+  if (!Object.keys(moved).length) return;
+  db.exec('CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)');
+  const row = db.prepare('SELECT value FROM meta WHERE key = ?').get(ALIAS_KEY) as { value: string } | undefined;
+  let previous: Record<string, string> = {}; try { previous = row ? JSON.parse(row.value) as Record<string, string> : {}; } catch { previous = {}; }
+  db.prepare('INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value').run(ALIAS_KEY, JSON.stringify({ ...previous, ...moved }));
+}
+export function pendingFolderAliases(db: DatabaseSync): Record<string, string> {
+  try { const row = db.prepare('SELECT value FROM meta WHERE key = ?').get(ALIAS_KEY) as { value: string } | undefined; return row ? JSON.parse(row.value) as Record<string, string> : {}; } catch { return {}; }
+}
+export function clearFolderAliases(db: DatabaseSync): void { try { db.prepare('DELETE FROM meta WHERE key = ?').run(ALIAS_KEY); } catch { /* no meta table */ } }
+
+/**
+ * M4: folder ids also live in databases of their own (project member folder grants, task worktrees, file annotations).
+ * Rewrites them after a merge. Idempotent; a file that is missing or busy is skipped and the aliases stay pending.
+ */
+export function applyFolderAliases(dataDir: string, aliases: Record<string, string>): boolean {
+  const entries = Object.entries(aliases); if (!entries.length) return true;
+  let complete = true;
+  const open = (file: string, work: (db: DatabaseSync) => void) => {
+    const path = join(dataDir, file); if (!existsSync(path)) return;
+    let db: DatabaseSync | undefined;
+    try { db = new DatabaseSync(path); db.exec('PRAGMA busy_timeout=3000'); db.exec('BEGIN IMMEDIATE'); work(db); db.exec('COMMIT'); }
+    catch { complete = false; try { db?.exec('ROLLBACK'); } catch { /* not in a transaction */ } }
+    finally { try { db?.close(); } catch { /* closed */ } }
+  };
+  open('muster-project-team.sqlite', db => remapJsonList(db, 'project_members', 'folder_ids', 'rowid', new Map(entries)));
+  open('muster-project-governance.sqlite', db => {
+    if (!hasTable(db, 'task_worktrees')) return;
+    for (const [from, to] of entries) {
+      if (db.prepare('SELECT 1 FROM task_worktrees WHERE folder_id = ?').get(to)) db.prepare('DELETE FROM task_worktrees WHERE folder_id = ?').run(from);
+      else db.prepare('UPDATE task_worktrees SET folder_id = ? WHERE folder_id = ?').run(to, from);
+    }
+  });
+  open('annotations.sqlite', db => {
+    if (!hasTable(db, 'annotations')) return;
+    for (const [from, to] of entries) db.prepare('UPDATE OR IGNORE annotations SET folderId = ? WHERE folderId = ?').run(to, from);
+  });
+  return complete;
 }

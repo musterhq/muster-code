@@ -141,7 +141,7 @@ async function readLimited(path: string, limit: number): Promise<{text: string; 
 }
 
 /* ---- shell --------------------------------------------------------------------------------------------------------- */
-export function shellInvocation(command: string): {file: string; args: string[]} {
+function shellInvocation(command: string): {file: string; args: string[]} {
   if (!WINDOWS) return {file: '/bin/sh', args: ['-c', command]};
   // -EncodedCommand (UTF-16LE base64): the command reaches PowerShell byte for byte, whatever quotes it contains.
   const script = `[Console]::OutputEncoding=[System.Text.Encoding]::UTF8; $ProgressPreference='SilentlyContinue'; ${command}`;

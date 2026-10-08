@@ -7,7 +7,7 @@ import {hasLiterals, redactLiterals, redactLiteralsDeep} from './literal-redacti
 import { DatabaseSync } from 'node:sqlite';
 import { chmodSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { canonicalFolderKey, canonicalFolderPath, mergeDuplicateFolders } from './folder-merge.ts';
+import { canonicalFolderKey, canonicalFolderPath, mergeDuplicateFolders, pendingFolderAliases, recordFolderAliases, clearFolderAliases } from './folder-merge.ts';
 import { runSchemaMigrations, type MigrationResult, type SchemaMigration } from './schema-migrations.ts';
 import { createHash, randomUUID } from 'node:crypto';
 import { DEFAULT_CHAT_TITLE, generateChatTitle } from './chat-title.ts';
@@ -143,7 +143,7 @@ export const STORE_MIGRATIONS: readonly SchemaMigration[] = [
   {version: 1, name: 'adopt versioned schema', up: () => { /* Baseline: tables and columns as of 0.2.0 (created idempotently by SCHEMA). */ }},
   {version: 2, name: 'subagent transcripts', up: db => { db.exec(SUBAGENT_ITEMS_SQL); }},
   // #319: one Windows folder under several spellings (\\?\E:\x, E:\x, e:/x) becomes one folder, chats and project links moved.
-  {version: 3, name: 'merge duplicate folders', up: db => { mergeDuplicateFolders(db); }},
+  {version: 3, name: 'merge duplicate folders', up: db => { const merged = mergeDuplicateFolders(db); if (merged.moved) recordFolderAliases(db, merged.moved); }},
 ];
 
 const now = (): string => new Date().toISOString();
@@ -803,6 +803,9 @@ export class AgentStore {
   needsDigest(chatId: string): boolean {
     return (this.db.prepare('SELECT resume_digest FROM chats WHERE id = ?').get(chatId) as { resume_digest: number } | undefined)?.resume_digest === 1;
   }
+  /** Folder ids merged by migration v3 that stores in other database files have not remapped yet. */
+  pendingFolderAliases(): Record<string, string> { return pendingFolderAliases(this.db); }
+  clearFolderAliases(): void { clearFolderAliases(this.db); }
   /** The next send starts a fresh provider conversation seeded with the visible history. */
   requireDigest(chatId: string): void { this.db.prepare('UPDATE chats SET resume_digest = 1 WHERE id = ?').run(chatId); }
   clearDigest(chatId: string): void { this.db.prepare('UPDATE chats SET resume_digest = 0 WHERE id = ?').run(chatId); }
