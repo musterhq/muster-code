@@ -16,6 +16,7 @@ import { liveMode, validSessionCookie, type SessionState } from './session.ts';
 import { detectBackend, type Detection } from './detect.ts';
 import { MusterServerBackend } from './muster-server-backend.ts';
 import { PaperclipBackend } from './paperclip-backend.ts';
+import { device } from '../../shared/device-noun.ts';
 
 export const MUSTER_LOCAL_URL = 'http://127.0.0.1:7470';
 const LOOPBACK = new Set(['localhost', '127.0.0.1', '::1']);
@@ -251,7 +252,7 @@ export class ServerConnection {
     const warning = mode === 'custom' && new URL(baseUrl).protocol === 'http:' && !isLoopback(baseUrl)
       ? `${token ? 'Your API token' : 'An API token added here'} would be sent over plain http to ${new URL(baseUrl).host}, readable by anyone on the network. Use an https:// address.` : undefined;
     if (!detection.ok) {
-      const local = mode === 'local' ? 'No server is answering on this Mac. Start Muster Server (`muster-server start`) or a Paperclip-compatible server, then test again.' : null;
+      const local = mode === 'local' ? 'No server is answering on '+device().lower+'. Start Muster Server (`muster-server start`) or a Paperclip-compatible server, then test again.' : null;
       return { ok: false, stage: detection.stage, message: local ?? detection.message, ...(warning ? { warning } : {}), latencyMs: Date.now() - started, baseUrl };
     }
     const kind = detection.kind, compatibility = kind === 'paperclip' ? 'Paperclip-compatible' : null;

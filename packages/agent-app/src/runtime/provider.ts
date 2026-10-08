@@ -12,6 +12,7 @@ import type { Chat, ProviderInfo } from '../shared/protocol.ts';
 import {NativeUnavailableError} from './codex-native.ts';
 import {splitSecretOverrides} from './thread-config.ts';
 import {CODEX_LAUNCHER, envFromOverrides, mcpServersFromOverrides} from './adapters/shared.ts';
+import { device } from '../shared/device-noun.ts';
 
 /** Identity of the test-only route `createProviderAdapter({available})` builds. */
 export const FIXTURE_PROVIDER = {id: 'fixture', bindingId: 'fixture-binding', model: 'fixture-model'} as const;
@@ -222,7 +223,7 @@ export function createProviderAdapter(options: { core?: CoreClient; available?: 
       revalidateProviderInstances();
       if (!input.chat.providerId) throw new ProviderPreDispatchError('No model is connected for this chat. Connect a model, then pick it in the composer.');
       const route = beforeDispatch(() => instances().find(instance=>instance.info.id===input.chat.providerId));
-      if (!route) throw new ProviderPreDispatchError(`The provider “${input.chat.providerId}” is not available on this Mac. Pick another model. No alternate provider was used.`);
+      if (!route) throw new ProviderPreDispatchError(`The provider “${input.chat.providerId}” is not available on ${device().lower}. Pick another model. No alternate provider was used.`);
       if (!route.info.available) throw new ProviderPreDispatchError('The selected provider is unavailable. No alternate provider was used.');
       if (input.chat.model && !route.info.models.some(model=>model.id===input.chat.model)) throw new ProviderPreDispatchError('This model is unavailable through the selected provider.');
       const bindingId=route.info.bindingId??route.info.id;

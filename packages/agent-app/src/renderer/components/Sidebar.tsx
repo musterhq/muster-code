@@ -97,6 +97,7 @@ import { ResourceState } from './ResourceState';
 import { ProjectHoverCard } from './ProjectHoverCard';
 import { ConfirmProjectAction, EditProjectDialog, toProjectDetails } from './ProjectEditDialog';
 import {Tip} from './Tooltip';
+import { device } from '../../shared/device-noun.ts';
 
 const snapshotChats=(snapshot:ReturnType<typeof useStore>['snapshot']):Chat[]=>snapshot?.chats.filter(chat=>!chat.archived)??[];
 const IS_MAC=typeof navigator!=='undefined'&&/mac/i.test(navigator.platform||navigator.userAgent||'');
@@ -644,7 +645,7 @@ export function Sidebar(): React.ReactElement {
       <ConfirmSheet
         open={confirmDelete}
         title={`Permanently delete ${plural(selection.selected.size, 'chat')}?`}
-        description="Their messages, queued follow-ups and attached files are removed from this Mac. Files in the folder are not touched. This cannot be undone."
+        description={"Their messages, queued follow-ups and attached files are removed from "+device().lower+". Files in the folder are not touched. This cannot be undone."}
         busy={deleteBusy}
         testId="sidebar-delete-confirm"
         onCancel={()=>{if(!deleteBusy)setConfirmDelete(false);}}

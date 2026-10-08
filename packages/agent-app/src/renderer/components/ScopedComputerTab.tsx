@@ -7,6 +7,7 @@ import {SandboxControls} from './SandboxControls';
 import './scoped-computer.css';
 import { plural } from '../../shared/wording.ts';
 import {Tip} from './Tooltip';
+import { device } from '../../shared/device-noun.ts';
 
 type Segment={stream:'stdout'|'stderr';text:string};
 interface RunView {id:string;command:string;state:ScopedComputerExecution['state'];exitCode:number|null;segments:Segment[];reason?:string;restored?:boolean;truncated:boolean}
@@ -124,7 +125,7 @@ function SandboxView({scope}:{scope:ScopedComputerRef}) {
   return <section className="sbx" aria-label={`${scratch?'Scratch sandbox':'Sandbox'} ${computer?.label??''}`}>
     <header className="sbx-head">
       <Container size={16} aria-hidden="true"/>
-      <div className="sbx-title"><h2>{scratch?'Scratch sandbox':'Sandbox'}{computer?.label?` · ${computer.label}`:''}</h2><p>Linux container (Docker) · not this Mac{scratch?' · disposable':''}</p></div>
+      <div className="sbx-title"><h2>{scratch?'Scratch sandbox':'Sandbox'}{computer?.label?` · ${computer.label}`:''}</h2><p>Linux container (Docker) · not {device().lower}{scratch?' · disposable':''}</p></div>
       <span className={`sbx-state is-${tone}`} role="status"><span className="sbx-dot" aria-hidden="true"/>{stateLabel}</span>
       <button className={`sbx-net${network==='egress'?' is-on':''}`} disabled={!!busy||!!active||!computer||state==='recovery-needed'} title={network==='egress'?'Internet access is on. Click to turn it off (recreates the container).':'No network. Click to allow internet access (recreates the container).'} onClick={()=>void openConfirm(network==='egress'?'none':'egress')}><Globe size={12} aria-hidden="true"/>{network==='egress'?'Internet on':'No network'}</button>
       <Tip label="Refresh"><button className="icon-button" aria-label="Refresh sandbox status" disabled={!!busy} onClick={()=>{void refresh();void loadFiles();}}><RefreshCw size={13}/></button></Tip>
@@ -147,7 +148,7 @@ function SandboxView({scope}:{scope:ScopedComputerRef}) {
     {confirm&&<div className="sbx-banner is-confirm" role="alertdialog" aria-label="Confirm sandbox change">
       <p>{confirm==='egress'?'Allow internet access? The container is recreated: anything running stops, files in /workspace are kept. Commands in this sandbox can then reach the internet.'
         :confirm==='none'?'Turn off network access? The container is recreated without a network. Files in /workspace are kept.'
-        :confirm==='remove'?`Remove the container? Its files stay on this Mac (${sizeText}).`
+        :confirm==='remove'?`Remove the container? Its files stay on ${device().lower} (${sizeText}).`
         :confirm==='delete'?`Delete every file in this sandbox’s workspace (${sizeText})? This cannot be undone.`
         :`Dispose this scratch sandbox? The container is removed and its files are deleted (${sizeText}). Export anything you need first.`}</p>
       <button className={confirm==='egress'||confirm==='none'?'is-primary':'is-danger'} disabled={!!busy} onClick={()=>{
@@ -162,7 +163,7 @@ function SandboxView({scope}:{scope:ScopedComputerRef}) {
     <div className="sbx-body">
       <div className="sbx-terminal" ref={terminal} role="log" aria-label="Sandbox output" onScroll={event=>{const el=event.currentTarget;stick.current=el.scrollHeight-el.scrollTop-el.clientHeight<40;}}>
         {runs.length?runs.map(run=><RunBlock key={run.id} run={run} busy={!!busy} onStop={()=>void cancel(run.id)}/>)
-          :<p className="sbx-empty">{state==='running'?'Commands run as an unprivileged user in /workspace inside the container. Nothing runs on this Mac.':state==='not-created'?'Create the sandbox to get an isolated Linux shell. Its /workspace folder is kept on this Mac.':'Start the sandbox to run commands.'}</p>}
+          :<p className="sbx-empty">{state==='running'?'Commands run as an unprivileged user in /workspace inside the container. Nothing runs on '+device().lower+'.':state==='not-created'?'Create the sandbox to get an isolated Linux shell. Its /workspace folder is kept on '+device().lower+'.':'Start the sandbox to run commands.'}</p>}
       </div>
       {filesOpen&&<FilesPane files={files} busy={!!busy} onOpen={path=>void loadFiles(path)} onImport={()=>void act('import',()=>invoke('computer.files.import',{scope,into:files.path}),()=>void loadFiles())} onExport={path=>void act('export',()=>invoke('computer.files.export',{scope,path}))}/>}
     </div>
@@ -204,13 +205,13 @@ function FilesPane({files,busy,onOpen,onImport,onExport}:{files:{path:string;ent
   return <aside className="sbx-files" aria-label="Sandbox files">
     <div className="sbx-files-head">
       <nav aria-label="Folder" className="sbx-crumbs"><button onClick={()=>onOpen('')}>workspace</button>{parts.map((part,index)=><React.Fragment key={index}><ChevronRight size={10} aria-hidden="true"/><button onClick={()=>onOpen(parts.slice(0,index+1).join('/'))}>{part}</button></React.Fragment>)}</nav>
-      <Tip label="Import files from this Mac"><button className="icon-button" aria-label="Import files from this Mac" disabled={busy} onClick={onImport}><Upload size={12}/></button></Tip>
+      <Tip label={"Import files from "+device().lower}><button className="icon-button" aria-label={"Import files from "+device().lower} disabled={busy} onClick={onImport}><Upload size={12}/></button></Tip>
     </div>
     <ul>
       {files.path&&<li><button className="sbx-file" onClick={()=>onOpen(parts.slice(0,-1).join('/'))}><CornerLeftUp size={12} aria-hidden="true"/><span>..</span></button></li>}
       {files.entries.map(entry=>{const Icon=entry.kind==='directory'?Folder:entry.kind==='symlink'?Link2:File;return <li key={entry.path}>
         <button className="sbx-file" disabled={entry.kind!=='directory'} title={entry.kind==='symlink'?'Links are not followed':entry.name} onClick={()=>onOpen(entry.path)}><Icon size={12} aria-hidden="true"/><span>{entry.name}</span>{entry.kind==='file'&&<small>{formatBytes(entry.size)}</small>}</button>
-        {entry.kind!=='symlink'&&<Tip label="Export to this Mac"><button className="icon-button sbx-export" aria-label={`Export ${entry.name} to this Mac`} disabled={busy} onClick={()=>onExport(entry.path)}><Download size={12}/></button></Tip>}
+        {entry.kind!=='symlink'&&<Tip label={"Export to "+device().lower}><button className="icon-button sbx-export" aria-label={`Export ${entry.name} to ${device().lower}`} disabled={busy} onClick={()=>onExport(entry.path)}><Download size={12}/></button></Tip>}
       </li>;})}
     </ul>
     {!files.entries.length&&<p className="sbx-empty">{files.path?'This folder is empty.':'No files in /workspace yet. Import files or create them with a command.'}</p>}

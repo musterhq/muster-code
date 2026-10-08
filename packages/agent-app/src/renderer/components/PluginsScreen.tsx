@@ -19,6 +19,7 @@ import './plugin-ui.css';
 import { plural } from '../../shared/wording.ts';
 import { ResourceState } from './ResourceState';
 import {Tip} from './Tooltip';
+import { device } from '../../shared/device-noun.ts';
 
 type Tab = 'discover' | 'installed' | 'sources' | 'mcp';
 type Kind = 'all' | 'plugin' | 'skill';
@@ -302,7 +303,7 @@ function SourcesPanel({ sources, pending, failed, onAdd, onSync, onRemove }: { s
         const busy = pending[`sync:${source.id}`], problem = failed[`sync:${source.id}`] ?? source.error;
         const removeVerb = source.detected ? 'Hide' : 'Remove';
         return <tr key={source.id}>
-          <td><span className="plugins-source-label">{source.kind === 'git' ? <FolderGit2 size={13} /> : <FolderOpen size={13} />}{source.label}{source.detected && <span className="plugins-badge is-dim" title={`Detected on this Mac from ${source.detected === 'codex' ? 'the Codex plugin cache' : 'a Claude marketplace checkout'}`}>Detected · {source.detected === 'codex' ? 'Codex' : 'Claude'}</span>}</span><code className="plugins-source-id">{source.id}</code></td>
+          <td><span className="plugins-source-label">{source.kind === 'git' ? <FolderGit2 size={13} /> : <FolderOpen size={13} />}{source.label}{source.detected && <span className="plugins-badge is-dim" title={`Detected on ${device().lower} from ${source.detected === 'codex' ? 'the Codex plugin cache' : 'a Claude marketplace checkout'}`}>Detected · {source.detected === 'codex' ? 'Codex' : 'Claude'}</span>}</span><code className="plugins-source-id">{source.id}</code></td>
           <td className="plugins-source-location" title={source.url ?? source.path}>{source.url ?? source.path}{problem && <span className="settings-error">{problem}</span>}</td>
           <td><code>{source.pinnedCommit?.slice(0, 10) ?? (source.kind === 'local' ? 'live' : '—')}</code></td>
           <td>{busy ?? source.packages ?? '—'}</td>

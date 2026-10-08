@@ -9,6 +9,7 @@
 import { hostname } from 'node:os';
 import type { FetchLike } from './paperclip-client.ts';
 import { Unreachable, type ChallengeStatus, type ServerAuth, type ServerChallenge } from './server-auth.ts';
+import { device } from '../shared/device-noun.ts';
 
 const REQUEST_MS = 10_000;
 interface Reply { status: number; json: Record<string, unknown> | null }
@@ -28,7 +29,7 @@ export function createMusterServerAuth(fetcher: FetchLike): ServerAuth {
     let url: URL;
     try { url = new URL(String(value).trim()); } catch { throw new Error('That is not a valid address. Include https://.'); }
     if (url.username || url.password) throw new Error('Leave the user name and password out of the address.');
-    if (url.protocol !== 'https:' && !(url.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname))) throw new Error('Connect needs an https:// address (plain http is only allowed for a server on this Mac).');
+    if (url.protocol !== 'https:' && !(url.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname))) throw new Error('Connect needs an https:// address (plain http is only allowed for a server on '+device().lower+').');
     return url.origin;
   };
   return {
@@ -63,9 +64,9 @@ export function createMusterServerAuth(fetcher: FetchLike): ServerAuth {
       try {
         const reply = await post(`${base}/api/connect/revoke-current`, {}, key);
         if (reply.status === 200) return { revoked: true };
-        if (reply.status === 401 || reply.status === 403) return { revoked: true, message: 'The server had already signed this Mac out.' };
-        return { revoked: false, message: `The server did not confirm the disconnect (${reply.status}). The key was removed from this Mac; remove it from the server’s API tokens too.` };
-      } catch { return { revoked: false, message: 'The server could not be reached, so its key could not be revoked. The key was removed from this Mac; remove it from the server’s API tokens too.' }; }
+        if (reply.status === 401 || reply.status === 403) return { revoked: true, message: 'The server had already signed '+device().lower+' out.' };
+        return { revoked: false, message: `The server did not confirm the disconnect (${reply.status}). The key was removed from ${device().lower}; remove it from the server’s API tokens too.` };
+      } catch { return { revoked: false, message: 'The server could not be reached, so its key could not be revoked. The key was removed from '+device().lower+'; remove it from the server’s API tokens too.' }; }
     },
   };
 }

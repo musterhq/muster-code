@@ -12,6 +12,7 @@ import {useStore} from '../useStore';
 import {externalReference, resourceReference} from './resourceReference';
 import {markdownFragmentId} from './markdownAnchors';
 import {Tip} from './Tooltip';
+import { device } from '../../shared/device-noun.ts';
 export type ResourceContext = { folderId: string; path: string };
 export function ResourceLink({href,children,context,auto=false}:{href?:string;children?:React.ReactNode;context?:ResourceContext;auto?:boolean}){
  const state=useStore(),chat=activeChat();
@@ -81,7 +82,7 @@ function ExternalFileReference({path,line,chatId,children}:{path:string;line?:nu
    {!info&&!failed&&<div className="external-reference-note">Checking…</div>}
    {info&&!info.exists&&<div className="external-reference-note">This path no longer exists.</div>}
    {info?.kind==='file'&&chatId&&<Menu.Item onClick={()=>setViewing(true)}><Eye size={13}/>View read-only</Menu.Item>}
-   {info?.exists&&<Menu.Item onClick={act(()=>invoke('files.external.reveal',{path:info.path}))}><FolderOpen size={13}/>Reveal in Finder</Menu.Item>}
+   {info?.exists&&<Menu.Item onClick={act(()=>invoke('files.external.reveal',{path:info.path}))}><FolderOpen size={13}/>Reveal in {device().fileManager}</Menu.Item>}
    {info?.kind==='file'&&apps.map(app=><Menu.Item key={app.id} onClick={act(()=>invoke('files.external.openWith',{path:info.path,app:app.id}))}>{app.icon?<img className="open-in-icon" src={app.icon} alt="" aria-hidden="true" draggable={false}/>:<ExternalLink size={13}/>}Open with {app.name}</Menu.Item>)}
    {info?.exists&&<Menu.Item onClick={addFolder}><FolderPlus size={13}/>Add folder “{info.folderPath.split('/').filter(Boolean).pop() ?? info.folderPath}” to Muster</Menu.Item>}
    <Menu.Item onClick={act(()=>invoke('clipboard.write',{text:info?.path ?? path}))}><Copy size={13}/>Copy path</Menu.Item>

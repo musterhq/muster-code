@@ -21,9 +21,10 @@ import { currentAgentSandboxHost, type AgentSandboxHost } from '../sandbox-regis
 import { SANDBOX_MCP } from '../sandbox-agent-tools.ts';
 import { providerAccessPolicy } from '../provider-run-lifecycle.ts';
 import type { DomainContext, DomainModule } from './types.ts';
+import { device } from '../../shared/device-noun.ts';
 
 export const SANDBOX_ENV_LABEL = 'Sandbox · Linux container';
-export const HOST_ENV_LABEL = 'This Mac';
+export const HOST_ENV_LABEL = device().title;
 export const SANDBOX_NOT_READY = `${SANDBOX_ENV_LABEL} is not running for this chat. Start it in the Sandbox tab (or switch the chat back to ${HOST_ENV_LABEL}), then send again.`;
 export const MOUNT_UNSUPPORTED = 'Mounting the folder itself into the container is not available yet: the container core binds only its own workspace. Choose the isolated copy.';
 /** SBX-11: the note's browser sentence when the chat's browser runs inside the container instead. */

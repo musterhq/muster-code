@@ -11,6 +11,7 @@ import { plural } from '../../shared/wording.ts';
 import { ResourceState } from './ResourceState';
 import { StatusDot } from './StatusDot';
 import { agentRuns, shortPath } from '../projectSurface';
+import { device } from '../../shared/device-noun.ts';
 
 const message = (err: unknown, fallback: string) => err instanceof Error ? err.message : fallback;
 const ATTEMPT_STATUS: Record<AttemptStatus, ChatStatus> = { running: 'running', completed: 'completed', failed: 'failed', interrupted: 'interrupted', cancelled: 'interrupted' };
@@ -56,7 +57,7 @@ export function ProjectChangesSection({ folders, onReview }: { folders: readonly
   useEffect(() => {
     let cancelled = false;
     setRows(null);
-    void Promise.all(folders.map(folder => folder.missing ? Promise.resolve<FolderStatus>({ folder, error: 'Folder not found on this Mac.' })
+    void Promise.all(folders.map(folder => folder.missing ? Promise.resolve<FolderStatus>({ folder, error: 'Folder not found on '+device().lower+'.' })
       : invoke('git.status', { folderId: folder.id }).then(status => ({ folder, status }), err => ({ folder, error: message(err, 'Not a git repository.') }))))
       .then(next => { if (!cancelled) setRows(next); });
     return () => { cancelled = true; };
@@ -123,12 +124,12 @@ export function ProjectEnvironmentsSection({ chats, folders, onOpenChat, childre
     <h3 className="project-subhead">Folders</h3>
     {children}
     <h3 className="project-subhead">Where agents run</h3>
-    {recent.length === 0 ? <ResourceState kind="empty" compact message="No project chats yet. Each chat runs on this Mac unless you move it into a sandbox."/>
+    {recent.length === 0 ? <ResourceState kind="empty" compact message={"No project chats yet. Each chat runs on "+device().lower+" unless you move it into a sandbox."}/>
       : !rows ? <ResourceState kind="loading" compact label="Reading chat environments" rows={2}/>
       : <ul className="project-run-list">{rows.map(({ chat, env, error }) => <li key={chat.id}><button type="button" onClick={() => onOpenChat(chat.id)}>
           {env?.env === 'sandbox' ? <Container size={14} aria-hidden="true" className="project-env-icon"/> : env ? <Laptop size={14} aria-hidden="true" className="project-env-icon"/> : <MessageSquare size={14} aria-hidden="true" className="project-env-icon"/>}
           <span className="project-run-text"><span className="project-run-title">{chat.title || 'Untitled chat'}</span>
-            <span className="project-run-meta">{folderName(chat.folderId)} · {error ? error : env?.env === 'sandbox' ? `Sandbox${env.ready ? '' : ` · ${env.reason || 'not running'}`}${env.workspacePath ? ` · ${shortPath(env.workspacePath)}` : ''}` : 'This Mac'}</span></span>
+            <span className="project-run-meta">{folderName(chat.folderId)} · {error ? error : env?.env === 'sandbox' ? `Sandbox${env.ready ? '' : ` · ${env.reason || 'not running'}`}${env.workspacePath ? ` · ${shortPath(env.workspacePath)}` : ''}` : device().title}</span></span>
           <span className="project-run-age" title={exactTime(chat.updatedAt)}>{agoLabel(chat.updatedAt)}</span>
         </button></li>)}</ul>}
   </section>;

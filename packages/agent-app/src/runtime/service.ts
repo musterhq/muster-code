@@ -59,6 +59,7 @@ import type { ReviewBaselineInfo } from '../shared/domains/review-protocol.ts';
 import type { EditRestorePreview } from '../shared/protocol.ts';
 import { randomUUID } from 'node:crypto';
 import { plural } from '../shared/wording.ts';
+import { device } from '../shared/device-noun.ts';
 
 function object(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Invalid command input.');
@@ -331,7 +332,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
   function validateRunnableModel(model: string, providerId: string | undefined) {
     if (!providerId) throw new Error('No model is connected yet. Connect a model (Settings › Providers), then pick it in the composer.');
     const listed = provider.info().filter(candidate => candidate.id === providerId);
-    if (!listed.length) throw new Error(`The provider “${providerId}” is not available on this Mac. Pick another model for this chat.`);
+    if (!listed.length) throw new Error(`The provider “${providerId}” is not available on ${device().lower}. Pick another model for this chat.`);
     // A provider that reports no model list runs whatever model the chat names; the provider checks it at dispatch.
     const entry = listed.find(candidate => candidate.available && (candidate.models.some(candidateModel => candidateModel.id === model) || candidate.models.length === 0));
     if (!entry) throw new Error(`Model ${model || '(none)'} is unavailable through the configured provider. Choose an available model.`);

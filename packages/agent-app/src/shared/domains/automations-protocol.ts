@@ -1,5 +1,6 @@
 /** Automations domain contract: recurring agent work (Codex "Scheduled"). Runs happen only while this Mac is awake and the app is open. */
 import type { ChatPermissionMode } from '../protocol.ts';
+import { device } from '../device-noun.ts';
 
 export type AutomationMode = 'ask' | 'plan' | 'agent';
 /** `interval` counts from when the automation was created or its schedule last changed; `daily` days are 0 = Sunday … 6 = Saturday. */
@@ -108,7 +109,7 @@ export const AUTOMATION_WATCH_COOLDOWN_MS = 60_000;
 export const AUTOMATION_REPO_POLL_MS = 60_000;
 export const AUTOMATION_REPO_MAX_BACKOFF_MS = 15 * 60_000;
 export const PERMISSION_RANK: Record<ChatPermissionMode, number> = { 'read-only': 0, workspace: 1, full: 2 };
-export const AUTOMATION_AWAKE_NOTE = 'Runs only while this Mac is awake and Muster is open. Missed runs follow the catch-up setting.';
+export const AUTOMATION_AWAKE_NOTE = 'Runs only while '+device().lower+' is awake and Muster is open. Missed runs follow the catch-up setting.';
 
 export interface AutomationsCommands {
   'automations.list': { input: undefined; output: AutomationView[] };

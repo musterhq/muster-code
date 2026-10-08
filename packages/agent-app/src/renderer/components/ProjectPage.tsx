@@ -49,6 +49,7 @@ import { OutputsPanel } from './WorkOutputs';
 import { ProjectSetupWizard, SetupCard } from './ProjectSetup';
 import { needsSetup } from '../setupModel';
 import { StarButton } from './WorkParts';
+import { device } from '../../shared/device-noun.ts';
 
 export type ProjectPageTab = 'dashboard' | 'tasks' | 'roster' | 'outputs' | 'ledger' | 'budget' | 'settings';
 const TABS: { id: ProjectPageTab; label: string }[] = [{ id: 'dashboard', label: NAMES.dashboard }, { id: 'tasks', label: NAMES.tasks }, { id: 'roster', label: NAMES.roster }, { id: 'outputs', label: NAMES.outputs }, { id: 'ledger', label: NAMES.ledger }, { id: 'budget', label: NAMES.budget }, { id: 'settings', label: NAMES.settings }];
@@ -225,7 +226,7 @@ export function PaperclipSettings({ snapshot }: { snapshot: WorkspaceSnapshot })
       <div><dt>Name</dt><dd>{p.name}</dd></div>
       <div><dt>Description</dt><dd className="pp-pre">{p.description || <span className="ws-faint">None</span>}</dd></div>
       <div><dt>Repository</dt><dd>{p.repo ?? <span className="ws-faint">None</span>}</dd></div>
-      <div><dt>Server workspace</dt><dd>{p.cwd ? <><code>{p.cwd}</code> <span className="ws-faint">on {snapshot.paperclip?.origin ?? 'the server'}</span></> : <span className="ws-faint">None</span>}<span className="pp-field-hint ws-faint">Where the server's agents work. This is a path on the server, not a folder on this Mac.</span></dd></div>
+      <div><dt>Server workspace</dt><dd>{p.cwd ? <><code>{p.cwd}</code> <span className="ws-faint">on {snapshot.paperclip?.origin ?? 'the server'}</span></> : <span className="ws-faint">None</span>}<span className="pp-field-hint ws-faint">Where the server's agents work. This is a path on the server, not a folder on {device().lower}.</span></dd></div>
       <ProjectCheckoutRow orgId={snapshot.paperclip?.company?.id ?? ''} projectId={p.id}/>
       <div><dt>Memory</dt><dd>{p.memory ? `${p.memory.label} · ${p.memory.count} ${p.memory.count === 1 ? 'note' : 'notes'}` : <span className="ws-faint">No Muster folder matches this repository yet</span>}</dd></div>
     </dl>

@@ -42,6 +42,7 @@ import { plural } from '../../shared/wording.ts';
 import {Tip} from './Tooltip';
 import { Menu, MenuPopup } from './AppMenu';
 import {ConnectModelPrompt,useNoProvider} from './SetupGuide';
+import { device } from '../../shared/device-noun.ts';
 
 const ACCESS = ACCESS_OPTIONS;
 const COMMAND_ICONS: Record<ComposerCommandId, LucideIcon> = {plan:Lightbulb,goal:Goal,project:FolderKanban,sketch:PenLine,terminal:SquareTerminal,model:Cpu,reasoning:Brain,access:CircleAlert,new:SquarePen,browser:Globe,stop:Square,compact:Shrink,fork:GitBranch,rename:Pencil,status:Gauge,mcp:Server,init:FilePlus,review:GitCompare};
@@ -1078,8 +1079,8 @@ export function Composer({ chat }: { chat: Chat }): React.ReactElement {
   // No provider bound (nothing was ready when the chat was made), or a provider this Mac does not have (a chat from
   // another machine or a removed gateway): say so on the pill instead of pretending a model is selected.
   const providerMissing = Boolean(chat.providerId) && state.providers.phase !== 'loading' && Array.isArray(state.providers.value) && !state.providers.value.some(entry => entry.id === chat.providerId);
-  const modelName = !chat.providerId ? 'Connect a model' : providerMissing ? 'Not on this Mac · pick a model' : selectedModel?.name ?? humanizeModel(chat.model);
-  const modelTitle = !chat.providerId ? 'No model is connected for this chat yet. Pick one, or connect a provider in Settings › Providers.' : providerMissing ? `The provider “${chat.providerId}” this chat used is not available on this Mac. Pick another model to continue.` : 'Select model';
+  const modelName = !chat.providerId ? 'Connect a model' : providerMissing ? 'Not on '+device().lower+' · pick a model' : selectedModel?.name ?? humanizeModel(chat.model);
+  const modelTitle = !chat.providerId ? 'No model is connected for this chat yet. Pick one, or connect a provider in Settings › Providers.' : providerMissing ? `The provider “${chat.providerId}” this chat used is not available on ${device().lower}. Pick another model to continue.` : 'Select model';
   const primaryDisabled = !hasPayload || staging || sending || modelChanging || settingsChanging || chat.archived || recoveryNeeded;
   const answering = Boolean(questionFlow && !questionFlow.collapsed);
   const placeholder = dictation ? (dictation.interim || 'Listening…') : chat.archived ? 'Restore this chat to continue' : answering ? (questionFlow!.question.options.length ? 'Type your own answer, or leave blank to use the selected option' : 'Type your answer') : !providers.length && state.providers.phase === 'ready' ? 'Enable a provider to send a message' : running ? 'Working…' : planMode ? 'Describe your task to generate a plan…' : 'Do anything';

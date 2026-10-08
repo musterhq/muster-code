@@ -10,6 +10,7 @@ import { plural } from '../../shared/wording.ts';
 import { agoLabel } from '../relativeTime.ts';
 import { ResourceState } from './ResourceState';
 import {Tip} from './Tooltip';
+import { device } from '../../shared/device-noun.ts';
 
 const message = (error: unknown) => error instanceof Error ? error.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '') : String(error);
 const STAGES: McpStage[] = ['spawn', 'initialize', 'tools'];
@@ -173,7 +174,7 @@ function ServerForm({ draft, editingId, stored, folders, projects, error, busy, 
         {projects.length > 0 && <optgroup label="Project">{projects.map(project => <option key={project.id} value={`project:${project.id}`}>{project.name}</option>)}</optgroup>}
       </select></label>
       {draft.auth === 'env' && <label>Variable name<input value={draft.envName} onChange={event => set('envName', event.target.value)} spellCheck={false} pattern="[A-Za-z_][A-Za-z0-9_]*" required /></label>}
-      {draft.auth !== 'none' && <label>Token<input type="password" value={draft.token} onChange={event => set('token', event.target.value)} placeholder={hasToken ? 'Stored — leave blank to keep' : 'Paste token'} autoComplete="off" /><small>Kept in the Keychain-backed secret store, never in settings.</small></label>}
+      {draft.auth !== 'none' && <label>Token<input type="password" value={draft.token} onChange={event => set('token', event.target.value)} placeholder={hasToken ? 'Stored — leave blank to keep' : 'Paste token'} autoComplete="off" /><small>Kept in the encrypted secret store, never in settings.</small></label>}
     </div>
     {error && <p className="settings-error" role="alert">{error}</p>}
     <div className="mcp-form-actions"><button type="button" className="plugins-secondary" onClick={onCancel}>Cancel</button><button type="submit" className="plugins-primary" disabled={busy}>{busy ? 'Saving…' : editingId ? 'Save' : 'Add and test'}</button></div>
@@ -199,7 +200,7 @@ function HookReview({ hooks, onChange, onError }: { hooks: McpHook[]; onChange(h
       </div>
       {hook.lastRun?.output && <pre className="mcp-logs">{hook.lastRun.output}</pre>}
     </li>)}</ul>}
-    <ModalSheet open={!!confirming} className="composer-access-dialog project-confirm" title={`Enable ${confirming?.event ?? ''} hook from ${confirming?.extensionName ?? ''}?`} description={`This shell command will run on your Mac with your user permissions, in the plugin folder, for chats where the plugin is enabled. It is killed after ${confirming?.timeoutSec ?? 0}s and its output is capped at ${confirming?.maxOutputKb ?? 0} KB.`} onClose={() => setConfirming(null)}>
+    <ModalSheet open={!!confirming} className="composer-access-dialog project-confirm" title={`Enable ${confirming?.event ?? ''} hook from ${confirming?.extensionName ?? ''}?`} description={`This shell command will run on ${device().your} with your user permissions, in the plugin folder, for chats where the plugin is enabled. It is killed after ${confirming?.timeoutSec ?? 0}s and its output is capped at ${confirming?.maxOutputKb ?? 0} KB.`} onClose={() => setConfirming(null)}>
       <pre className="mcp-logs">{confirming?.command}</pre>
       <div><button type="button" onClick={() => setConfirming(null)}>Cancel</button><button type="button" className="is-danger" onClick={() => { const hook = confirming!; setConfirming(null); void set(hook.id, { enabled: true }); }}>Enable hook</button></div>
     </ModalSheet>

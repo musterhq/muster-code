@@ -9,6 +9,7 @@ import { compactAge, exactTime } from '../relativeTime';
 import { useStore } from '../useStore';
 import { Menu, MenuPopup } from './AppMenu';
 import { Tip } from './Tooltip';
+import { device } from '../../shared/device-noun.ts';
 
 const errorText = (cause: unknown) => cause instanceof Error ? cause.message : String(cause);
 const REFRESH_LABEL: Record<MemoryModelRefresh, string> = { manual: 'Manual', daily: 'Daily', weekly: 'Weekly', 'after-consolidation': 'After consolidation' };
@@ -431,7 +432,7 @@ export function MemoryAdvanced({ folderId, scopeName }: { folderId: string | und
   }, [folderId]);
   const engineLabel = useMemo(() => {
     if (!engine) return 'Checking engine…';
-    if (!engine.version) return 'Advanced features run locally on this Mac';
+    if (!engine.version) return 'Advanced features run locally on '+device().lower;
     const advanced = Object.values(engine.capabilities).some(view => view.supported);
     return advanced ? 'Advanced features run in the memory engine' : 'Advanced features run locally · update the memory engine to run them there';
   }, [engine]);

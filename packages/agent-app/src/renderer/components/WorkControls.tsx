@@ -12,6 +12,7 @@ import {PendingAttention} from './PendingAttention';
 import {Tip} from './Tooltip';
 import {toggleTerminal} from './ProcessesTab';
 import {subscribeTerminalDock,terminalDock} from '../processSummary';
+import { device } from '../../shared/device-noun.ts';
 
 const MAC=typeof navigator!=='undefined'&&/Mac/.test(navigator.platform);
 
@@ -76,7 +77,7 @@ export function WorkControls(){
  return <div ref={root} className="work-controls">
   <PendingAttention/>
   {notice&&<span className="work-control-notice" role="status">{notice}</span>}
-  {chat&&<Tip label="Copy local chat link"><button className="icon-button" aria-label="Copy local chat link" aria-description="Opens this chat on this Mac; use Conversation actions › Export Conversation… to share with someone else" onClick={()=>void copyLink()}><Share2 size={16}/></button></Tip>}
+  {chat&&<Tip label="Copy local chat link"><button className="icon-button" aria-label="Copy local chat link" aria-description={"Opens this chat on "+device().lower+"; use Conversation actions › Export Conversation… to share with someone else"} onClick={()=>void copyLink()}><Share2 size={16}/></button></Tip>}
   {chat&&<SummaryToggle/>}
   {chat&&<Tip label="Fork into a new chat" disabledReason="Forking…"><button className="icon-button" aria-label="Fork conversation" disabled={forking} aria-busy={forking||undefined} onClick={()=>void fork()}>{forking?<LoaderCircle size={16}/>:<GitBranch size={16}/>}</button></Tip>}
   {chat&&<Tip label="Conversation actions"><button ref={trigger} className="icon-button" aria-label="Conversation actions" aria-haspopup="menu" aria-expanded={menuOpen} onClick={()=>void openMenu()} onKeyDown={event=>{if(event.key==='ArrowDown'){event.preventDefault();void openMenu();}}}><MoreHorizontal size={17}/></button></Tip>}

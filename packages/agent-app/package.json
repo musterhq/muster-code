@@ -14,7 +14,7 @@
     "start": "node scripts/build.mjs && electron .",
     "dev": "node scripts/build.mjs --watch",
     "typecheck": "tsc --noEmit",
-    "test": "node --max-old-space-size=1536 --experimental-transform-types --test 'tests/*.test.ts'",
+    "test": "node --max-old-space-size=1536 --experimental-transform-types --import ./tests/pin-device-platform.mjs --test 'tests/*.test.ts'",
     "test:renderer": "node scripts/test-renderer.mjs",
     "rebuild:native": "node scripts/postinstall.mjs --force",
     "postinstall": "node scripts/postinstall.mjs",

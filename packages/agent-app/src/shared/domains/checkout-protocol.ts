@@ -11,6 +11,7 @@
  */
 import type { WorkspaceInboxItem, WorkspaceStatus, WorkspaceTask } from './paperclip-protocol.ts';
 import type { OrgSetting, OrgSidebarMode, WorkWhy } from '../org-work.ts';
+import { device } from '../device-noun.ts';
 
 export type { OrgSetting, OrgSidebarMode, WorkWhy } from '../org-work.ts';
 
@@ -29,7 +30,7 @@ export interface OrgProjectRow { id: string; name: string; open: number }
 /** What a task row in the sidebar and My work says about local work: "Checked out · this Mac". */
 export interface CheckoutBadge { state: 'checked_out'; thisMac: boolean; device: string; since: string; stale: boolean; /** The local chat of the check-out: it is listed under the task in the sidebar, and its worktree folder stays out of Folders. */ chatId: string | null; folderId: string | null }
 /** The line a task row shows: "Checked out · this Mac" (or the other Mac's name). */
-export const badgeText = (b: Pick<CheckoutBadge, 'thisMac' | 'device'>): string => `Checked out · ${b.thisMac ? 'this Mac' : b.device}`;
+export const badgeText = (b: Pick<CheckoutBadge, 'thisMac' | 'device'>): string => `Checked out · ${b.thisMac ? device().lower : b.device}`;
 export interface MyWorkTask {
   id: string; key: string; title: string; status: WorkspaceStatus; priority: WorkspaceTask['priority'];
   orgId: string; orgName: string; projectId: string | null; projectName: string | null;

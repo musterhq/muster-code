@@ -15,6 +15,7 @@
  */
 import { markerFor } from './lease.ts';
 import { sanitizeOut } from './sanitize.ts';
+import { device } from '../../shared/device-noun.ts';
 export const REPORT_LABEL = 'via Muster · local';
 export const WORK_LOG_KEY = 'local-work-log';
 export type ReportKind = 'checkout' | 'decision' | 'context' | 'pr' | 'tests' | 'handback' | 'release' | 'note';
@@ -101,7 +102,7 @@ export function renderWorkLog(header: WorkLogHeader, receipts: readonly TurnRece
   const out = [
     `# Local work log · ${header.key}`, '',
     `${header.person} on ${header.device}, ${header.folder ? `in the folder “${header.folder}” (used in place)` : `branch \`${header.branch}\``}, ${header.state}. Engine: ${header.modelLabel}. Since ${header.since}.`,
-    `${rows.length} ${rows.length === 1 ? 'turn' : 'turns'} · +${fmt(total.added)} −${fmt(total.removed)} lines · ${total.tests} test ${total.tests === 1 ? 'command' : 'commands'} · ${fmt(total.tokens)} tokens. Written by Muster on this Mac (${REPORT_LABEL}).`, '',
+    `${rows.length} ${rows.length === 1 ? 'turn' : 'turns'} · +${fmt(total.added)} −${fmt(total.removed)} lines · ${total.tests} test ${total.tests === 1 ? 'command' : 'commands'} · ${fmt(total.tokens)} tokens. Written by Muster on ${device().lower} (${REPORT_LABEL}).`, '',
   ];
   rows.forEach((r, i) => {
     out.push(`## ${r.at.replace(/\.\d+Z$/, 'Z')} · ${sanitizeOut(r.title || `Local turn ${i + 1}`, 90)}${r.role === 'reviewer' ? ' (review)' : ''}`);

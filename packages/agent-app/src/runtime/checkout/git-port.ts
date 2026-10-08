@@ -3,6 +3,7 @@ import { execFile } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import { join } from 'node:path';
 import { normalizeRemote } from '../memory-identity.ts';
+import { device } from '../../shared/device-noun.ts';
 
 export interface WorkStat { count: number; added: number; removed: number }
 export interface GitPort {
@@ -87,7 +88,7 @@ export const realGit: GitPort = {
       if ((await git(path, ['status', '--porcelain'])).trim() === '') return { committed: false, message: 'Nothing to commit.' };
       // The person's own identity (their git config): Muster never invents an author.
       const name = (await git(path, ['config', 'user.name']).catch(() => '')).trim(), email = (await git(path, ['config', 'user.email']).catch(() => '')).trim();
-      if (!name || !email) return { committed: false, message: 'Git has no name and email set on this Mac (git config user.name / user.email), so Muster cannot commit for you.' };
+      if (!name || !email) return { committed: false, message: 'Git has no name and email set on '+device().lower+' (git config user.name / user.email), so Muster cannot commit for you.' };
       await git(path, ['commit', '-q', '-m', message]);
       return { committed: true, message: 'Committed.' };
     } catch (cause) { return { committed: false, message: `Could not commit: ${cause instanceof Error ? cause.message.split('\n')[0] : String(cause)}` }; }
@@ -95,7 +96,7 @@ export const realGit: GitPort = {
   async push(path, branch) {
     // The remote the project came from: origin when there is one, else the first listed.
     const remotes = (await git(path, ['remote']).catch(() => '')).split('\n').filter(Boolean), remote = remotes.includes('origin') ? 'origin' : remotes[0];
-    if (!remote) return { pushed: false, noRemote: true, message: 'This repository has no remote, so the branch stays on this Mac.' };
+    if (!remote) return { pushed: false, noRemote: true, message: 'This repository has no remote, so the branch stays on '+device().lower+'.' };
     try { await git(path, ['push', '-u', remote, `${branch}:${branch}`], 120_000); return { pushed: true, message: `Pushed ${branch} to ${remote}.` }; }
     catch (cause) { return { pushed: false, message: `Could not push ${branch}: ${cause instanceof Error ? cause.message.split('\n')[0] : String(cause)}` }; }
   },

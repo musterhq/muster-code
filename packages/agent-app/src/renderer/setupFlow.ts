@@ -5,6 +5,7 @@
 import {useSyncExternalStore} from 'react';
 import {SETUP_STEPS,type SetupProgress,type SetupStatus,type SetupStep} from '../shared/domains/setup-protocol.ts';
 import type {ComputerPermissions} from '../shared/domains/computer-protocol.ts';
+import { device } from '../shared/device-noun.ts';
 
 /** Nothing can run a chat and no CLI sign-in or connection is even on file. Only then does the guide open by itself. */
 export function nothingSignedIn(status: Pick<SetupStatus,'readyProviders'|'clis'|'connections'>): boolean {
@@ -39,12 +40,12 @@ export function setupChecklist(status: SetupStatus|null, extra: {folders: number
   return [
     {id:'model',label:'Connect a model',step:'connect',state:!status?'unknown':ready.length?'done':'todo',
       detail:!status?'Checking…':ready.length?`${ready.map(provider=>provider.name).join(', ')} ready`:'No provider can run a chat yet'},
-    {id:'folder',label:'Add a folder',step:'folder',state:extra.folders>0?'done':'todo',detail:extra.folders>0?`${extra.folders} ${extra.folders===1?'folder':'folders'} added`:'Chats work in a folder on this Mac'},
+    {id:'folder',label:'Add a folder',step:'folder',state:extra.folders>0?'done':'todo',detail:extra.folders>0?`${extra.folders} ${extra.folders===1?'folder':'folders'} added`:'Chats work in a folder on '+device().lower},
     {id:'git',label:'Git',step:'folder',state:!git?'unknown':git.available?'done':'optional',detail:git?.detail??'Checking…'},
     {id:'sandbox',label:'Sandbox (Docker)',step:'capabilities',state:!docker?'unknown':docker.running?'done':'optional',detail:docker?.detail??'Checking…'},
     {id:'computer',label:'Computer use',step:'capabilities',state:computer,detail:perms?`Screen Recording ${permissionWord(perms.screen)} · Accessibility ${permissionWord(perms.accessibility)}`:'Checking…'},
     {id:'notifications',label:'Notifications',step:'capabilities',state:extra.notifications==='off'?'optional':'unknown',
-      detail:extra.notifications==='off'?'Turned off in Muster':'macOS asks the first time Muster notifies; review it in System Settings'},
+      detail:extra.notifications==='off'?'Turned off in Muster':(device().platform==='darwin'?'macOS asks the first time Muster notifies; review it in System Settings':'Your system may ask the first time Muster notifies; review it in your system notification settings')},
   ];
 }
 

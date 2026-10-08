@@ -1,0 +1,61 @@
+/** Shared body of the device-noun DOM suites (#335): renders the composer footer, the Work locally rows and a few Settings rows under the platform in MUSTER_DEVICE_PLATFORM. */
+import assert from 'node:assert/strict';
+import {createRequire} from 'node:module';
+import {setTimeout as delay} from 'node:timers/promises';
+const platform=process.env.MUSTER_DEVICE_PLATFORM as 'win32'|'linux';
+const noun={win32:{title:'This PC',lower:'this PC',bare:'PC'},linux:{title:'This computer',lower:'this computer',bare:'computer'}}[platform];
+assert.ok(noun,'platform pinned by the entry file');
+const require=createRequire(import.meta.url),{parseHTML}=require('linkedom');
+const {window}=parseHTML('<html><body><div id="root"></div></body></html>');
+(window.document as any).oninput=null;
+const saved=new Map<string,string>();
+const storage={getItem:(key:string)=>saved.get(key)??null,setItem:(key:string,value:string)=>{saved.set(key,value);},removeItem:(key:string)=>{saved.delete(key);}};
+Object.assign(globalThis,{window,document:window.document,HTMLElement:window.HTMLElement,Element:window.Element,Node:window.Node,MutationObserver:window.MutationObserver,ResizeObserver:class{observe(){}unobserve(){}disconnect(){}},requestAnimationFrame:(fn:any)=>setTimeout(fn,0),cancelAnimationFrame:clearTimeout,localStorage:storage});
+const styles=()=>({getPropertyValue:()=>'',direction:'ltr',position:'static',overflow:'visible',overflowX:'visible',overflowY:'visible',display:'block',animationName:'none',transitionProperty:'none',transitionDuration:'0s',animationDuration:'0s',paddingTop:'0px',paddingBottom:'0px',paddingLeft:'0px',paddingRight:'0px'});
+Object.assign(globalThis,{getComputedStyle:styles});window.getComputedStyle=styles;
+window.HTMLElement.prototype.getBoundingClientRect=()=>({x:0,y:0,width:224,height:30,left:0,top:0,right:224,bottom:30});
+window.HTMLElement.prototype.getClientRects=function(){return [this.getBoundingClientRect()];};
+window.HTMLElement.prototype.scrollIntoView=function(){};
+(window.document as any).hasFocus=()=>true;
+const chat={id:'c',title:'Build it',folderId:'f',status:'completed',updatedAt:'',pinned:false,archived:false,draft:'',model:'m',mode:'agent'};
+window.muster={subscribe(){return()=>{};},async invoke(command:string,input:any){
+  if(command==='app.snapshot')return {version:1,chats:[chat],folders:[{id:'f',name:'Repo',path:'/repo'}],projects:[],activeChatId:'c'};
+  if(command==='chat.timeline')return {items:[],revision:0};
+  if(command==='git.info')return {branch:'main',detached:false,fetchedAt:null,hasRemote:true,worktree:null};
+  if(command==='git.status')return {branch:'main',detached:false,unborn:false,revision:'r1',files:[],truncated:false,stagedCount:0,conflicted:false,upstream:'origin/main',ahead:0,behind:0,pushRemote:'origin',remoteUrl:''};
+  if(command==='orgs.list')return {connected:true,server:'x',me:{id:'u',name:'D'},orgs:[]};
+  if(command==='checkout.bindings')return {bindings:[],orgs:[{id:'rag',name:'Ragnar',projects:[{id:'redis',name:'Redis'}]}]};
+  if(command==='checkout.settings')return {staleHours:8,deviceName:'DESKTOP-1'};
+  return undefined;
+}};
+const React=await import('react');
+const {createRoot}=await import('react-dom/client');
+(globalThis as any).IS_REACT_ACT_ENVIRONMENT=false;
+const store=await import('../src/renderer/store');
+const {EnvironmentFooter}=await import('../src/renderer/components/EnvironmentFooter');
+const {LocalCheckoutsCard,ProjectCheckoutRow}=await import('../src/renderer/components/OrgsCard');
+const {badgeText}=await import('../src/shared/domains/checkout-protocol');
+const {deviceNoun}=await import('../src/shared/device-noun');
+await store.boot();
+const root=createRoot(document.getElementById('root')!);
+const body=()=>document.body.textContent??'';
+const show=async(node:React.ReactNode)=>{root.render(node);await delay(200);};
+const clean=(label:string)=>assert.ok(!/\bMac\b|macOS/.test(body()),`${label} must not say Mac: ${body().slice(0,300)}`);
+
+await show(<EnvironmentFooter chat={chat as any} folder={{id:'f',name:'Repo',path:'/repo'}}/>);
+assert.equal(document.querySelectorAll('.env-footer-trigger')[0]?.textContent?.includes(noun.title),true,'composer environment chip reads '+noun.title);
+clean('composer footer');
+
+await show(<LocalCheckoutsCard/>);
+assert.ok(body().includes(`Local checkouts on ${noun.lower}`),'Work locally heading');
+assert.ok(body().includes(`Where each project’s files live on ${noun.lower}.`),'folder copy');
+assert.ok(body().includes(`${noun.title} is called`),'device name label');
+clean('local checkouts');
+await show(<dl><ProjectCheckoutRow orgId="rag" projectId="redis"/></dl>);
+assert.ok(body().includes(`Local checkout on ${noun.lower}`),'project row label');
+clean('project row');
+
+assert.equal(badgeText({thisMac:true,device:'x'}),`Checked out · ${noun.lower}`,'the checked-out badge');
+assert.equal(deviceNoun(platform).lower,noun.lower);
+console.log(`device-noun ${platform}: ok`);
+process.exit(0);

@@ -43,6 +43,7 @@ import { importFromPaperclip, planImport, SqliteImportStore } from '../paperclip
 import { buildCosts, groupsFromReceipts } from '../insight/costs.ts';
 import { buildDashboard, DASHBOARD_DAYS, ledgerAggregates, monthStart } from '../workspace-dashboard.ts';
 import type { DomainContext, DomainModule } from './types.ts';
+import { device } from '../../shared/device-noun.ts';
 
 const POLL_MAX_MS = 60_000, EMIT_VISIBLE_MS = 500, EMIT_HIDDEN_MS = 5_000, EMIT_LEAD_MS = 40;
 /** A server that refused the live socket for this credential (a hosted Paperclip-compatible server only lets a browser session or an agent key onto it, never a board key) is asked again only this often; in between, polling with ETags is the whole story. */
@@ -105,7 +106,7 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
   // --- the server connection (Paperclip or Muster Server, whichever the URL is) ----------------------------------------------
   let backend: ServerBackend | null = null;
   /** The org's name on a Muster Server with no company of its own: "This Mac", or the server's host. */
-  const originLabel = (): string => { if (conn.config.mode === 'local') return 'This Mac'; try { return new URL(conn.config.baseUrl).host; } catch { return 'Muster Server'; } };
+  const originLabel = (): string => { if (conn.config.mode === 'local') return device().title; try { return new URL(conn.config.baseUrl).host; } catch { return 'Muster Server'; } };
   const connection = (): ServerBackend | null => {
     const endpoint = conn.endpoint();
     if (!endpoint) return null;
@@ -772,7 +773,7 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
       'paperclip.session.clear': () => { conn.clearSession(); return { ok: true as const }; },
       'paperclip.signin.cancel': () => signIn.cancel(),
       'paperclip.signin.signout': async () => {
-        if (!conn.config.signedIn) throw new Error('This Mac is not signed in with browser approval.');
+        if (!conn.config.signedIn) throw new Error(device().title+' is not signed in with browser approval.');
         const baseUrl = conn.baseUrl(), key = conn.tokenFor(baseUrl);
         const outcome = key ? await signIn.revoke(baseUrl, key) : { revoked: false as boolean, message: undefined as string | undefined };
         conn.forgetSignIn();

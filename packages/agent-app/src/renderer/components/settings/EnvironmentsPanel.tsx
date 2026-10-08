@@ -5,6 +5,7 @@ import {activeChat, notifyError} from '../../store';
 import {useStore} from '../../useStore';
 import {SshPanel} from './SshPanel';
 import {HOST_ENV_LABEL, SANDBOX_ENV_LABEL, useChatEnvironment} from '../EnvironmentFooter';
+import { device } from '../../../shared/device-noun.ts';
 
 /** PRO-07: where agents run, reachable from Settings. The choice itself stays per chat (the composer footer sets it too). */
 function ActiveChatEnvironment({chatId, title, running}: {chatId: string; title: string; running: boolean}): React.ReactElement {
@@ -25,7 +26,7 @@ function ActiveChatEnvironment({chatId, title, running}: {chatId: string; title:
     </span>
     <span className="preference-control">
       <span className="preference-segmented" role="radiogroup" aria-label="Environment for this chat">
-        {(['host', 'sandbox'] as const).map(env => <button key={env} type="button" role="radio" aria-checked={current === env} disabled={busy || running || !environment} onClick={() => { if (current !== env) void choose(env); }}>{env === 'host' ? 'This Mac' : 'Sandbox'}</button>)}
+        {(['host', 'sandbox'] as const).map(env => <button key={env} type="button" role="radio" aria-checked={current === env} disabled={busy || running || !environment} onClick={() => { if (current !== env) void choose(env); }}>{env === 'host' ? device().title : 'Sandbox'}</button>)}
       </span>
     </span>
   </div>;
@@ -41,7 +42,7 @@ export function EnvironmentsPanel(): React.ReactElement {
         <span className="preference-copy"><strong>{HOST_ENV_LABEL}</strong><span>The agent works in the chat’s folder with the access level you choose in the composer. Always available.</span><span className="preference-scope">Default for new chats</span></span>
       </div>
       <div className="preference-row" role="group" aria-label={SANDBOX_ENV_LABEL}>
-        <span className="preference-copy"><strong>{SANDBOX_ENV_LABEL}</strong><span>Commands and edits run in an isolated copy of the folder inside a Linux container. Review the differences and apply them back to this Mac when you are ready. The agent browser still runs on this Mac.</span><span className="preference-scope">Chosen per chat</span></span>
+        <span className="preference-copy"><strong>{SANDBOX_ENV_LABEL}</strong><span>Commands and edits run in an isolated copy of the folder inside a Linux container. Review the differences and apply them back to {device().lower} when you are ready. The agent browser still runs on {device().lower}.</span><span className="preference-scope">Chosen per chat</span></span>
       </div>
     </div>
     <h3 className="preference-group-title">Current chat</h3>

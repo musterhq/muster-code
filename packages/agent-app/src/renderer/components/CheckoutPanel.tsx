@@ -17,6 +17,7 @@ import { plainError } from './resourceErrors';
 import { engineLabel } from '../../shared/agent-engine';
 import { ModalSheet } from './ModalSheet';
 import { Tip } from './Tooltip';
+import { device } from '../../shared/device-noun.ts';
 import './checkout-panel.css';
 
 const errorText = (cause: unknown) => plainError(cause).message;
@@ -51,7 +52,7 @@ export function WorkLocallyBar({ detail }: { detail: WorkspaceTaskDetail }): Rea
   if (!open && (task.status === 'done' || task.status === 'cancelled')) return null;
   const run = async (p: CheckoutPlan, mem: Remembered, folder?: string, agentId?: string, newFolder?: boolean, requireGit?: boolean) => {
     const model = choice(p, mem, agentId);
-    if (!model) throw new Error(mem.engine === 'org-definition' ? 'No org agent can run on a provider you have here. Pick My subscriptions, or connect a provider.' : 'No provider is available on this Mac. Connect one in Accounts & providers.');
+    if (!model) throw new Error(mem.engine === 'org-definition' ? 'No org agent can run on a provider you have here. Pick My subscriptions, or connect a provider.' : 'No provider is available on '+device().lower+'. Connect one in Accounts & providers.');
     const started = await invoke('checkout.start', { taskId: task.id, take: !p.assignedToMe, model, confirm: true, ...(folder ? { folder } : {}), ...(newFolder ? { newFolder: true } : {}), ...(requireGit ? { requireGit: true } : {}) });
     notifySuccess(`Working on ${started.key} locally · ${started.modelLabel}.`);
     reload(); openChat(started.chatId);
@@ -132,7 +133,7 @@ function WorkLocallySheet({ plan, onClose, onStart }: { plan: CheckoutPlan; onCl
   const ready = Boolean(where) && (engine === 'org-definition' ? Boolean(agentId) : Boolean(providerId && model));
   const steps = [plan.willPost.reassign ? `Take it from ${plan.task.assignee ?? 'nobody'} and assign it to you` : null, 'Set it to In progress', `Post as you: “${plan.willPost.comment}”`, plan.binding?.kind === 'folder' ? `Work in ${plan.binding.path} as it is: no worktree, branch or pull request` : useNew ? `Make ${plan.newFolder} and work in it as it is: no worktree, branch or pull request` : `If it is a git repository, make a worktree and the branch muster/${plan.task.key} from ${plan.devBranch ?? 'the dev branch'}; any other folder is used as it is`].filter((s): s is string => Boolean(s));
   return <ModalSheet open className="project-edit-dialog ws-work-locally" title={`Work locally on ${plan.task.key}`} initialFocus={first} onClose={() => { if (!busy) onClose(); }}>
-    <p className="project-edit-hint">Everything runs on this Mac. Nothing runs on the server until you hand back. Your credentials stay here.</p>
+    <p className="project-edit-hint">Everything runs on {device().lower}. Nothing runs on the server until you hand back. Your credentials stay here.</p>
     <section aria-label="What happens"><h3 className="ws-prop-group">What happens</h3><ul className="ws-checkout-steps">{steps.map(s => <li key={s}>{s}</li>)}</ul>
       {plan.otherMac && <p className="settings-error">It is checked out on {plan.otherMac}. Working here takes it over.</p>}
       {!plan.assignedToMe && <p className="settings-error" role="alert">Take it from {plan.task.assignee ?? 'nobody'}? This task is not assigned to you. Working here reassigns it to you, and {plan.task.assignee ?? 'whoever has it'} will see that.</p>}</section>
@@ -140,7 +141,7 @@ function WorkLocallySheet({ plan, onClose, onStart }: { plan: CheckoutPlan; onCl
       {plan.binding
         ? <p className="ws-checkout-folder">{inPlace ? 'Working in ' : ''}<code>{plan.binding.path}</code>{!inPlace && <span className="ws-faint"> A git repository: each task gets its own worktree and branch.</span>}</p>
         : <>
-          <p className="ws-checkout-folder">{where ? <>{useNew ? 'Working in ' : ''}<code>{where}</code></> : <span className="ws-faint">No folder on this Mac is linked to this project yet.</span>}
+          <p className="ws-checkout-folder">{where ? <>{useNew ? 'Working in ' : ''}<code>{where}</code></> : <span className="ws-faint">No folder on {device().lower} is linked to this project yet.</span>}
             {where && !useNew && plan.detectedFolder === folder && <span className="ws-faint"> Found from the project’s repository.</span>}
             {useNew && <span className="ws-faint"> Made for you, readable only by you.</span>}</p>
           <div className="ws-folder-options" role="group" aria-label="Where the files live">
@@ -222,7 +223,7 @@ export function CheckoutProperties({ detail }: { detail: WorkspaceTaskDetail }):
     if (!plan) return;
     const mem: Remembered = { ...readMemory(), engine: next }; remember(mem);
     const model = choice(plan, mem, lease.model.kind === 'org-agent' ? lease.model.agentId : undefined);
-    if (!model) { fail(new Error(next === 'org-definition' ? 'No org agent can run on a provider you have here.' : 'No provider is available on this Mac.')); return; }
+    if (!model) { fail(new Error(next === 'org-definition' ? 'No org agent can run on a provider you have here.' : 'No provider is available on '+device().lower+'.')); return; }
     void act(invoke('checkout.engine', { taskId: lease.taskId, model }));
   };
   const roster = copy ? [...copy.agents].sort((a, b) => (a.reportsTo ? 1 : 0) - (b.reportsTo ? 1 : 0) || a.name.localeCompare(b.name)) : [];
@@ -237,7 +238,7 @@ export function CheckoutProperties({ detail }: { detail: WorkspaceTaskDetail }):
         ? <div className="ws-prop"><dt>Working in</dt><dd className="ws-ellipsis" title={lease.worktree ?? ''}>{lease.worktree}</dd></div>
         : <><div className="ws-prop"><dt>Branch</dt><dd><code>{lease.branch}</code></dd></div>
           <div className="ws-prop"><dt>Worktree</dt><dd className="ws-ellipsis" title={lease.worktree ?? ''}>{lease.worktree}</dd></div></>}
-      <div className="ws-prop"><dt>On this Mac</dt><dd>{lease.device} · since {agoLabel(lease.since)}</dd></div>
+      <div className="ws-prop"><dt>On {device().lower}</dt><dd>{lease.device} · since {agoLabel(lease.since)}</dd></div>
     </dl>
     {copy && <details className="ws-local-copy"><summary>Local copy of {copy.orgName}</summary>
       <p className="ws-faint">Read-only, taken {agoLabel(copy.takenAt)}. Definitions only: no keys or credentials. <button type="button" className="ws-link" onClick={() => void invoke('checkout.org', { taskId: lease.taskId, refresh: true }).then(r => setCopy(r.copy), fail)}>Refresh</button></p>
@@ -246,7 +247,7 @@ export function CheckoutProperties({ detail }: { detail: WorkspaceTaskDetail }):
     </details>}
     {handBack && <HandBackSheet taskId={lease.taskId} onClose={() => setHandBack(false)} onDone={() => { setHandBack(false); reload(); }}/>}
     <div className="ws-checkout-actions">
-      {!confirmServer ? <button type="button" className="settings-button secondary" onClick={() => lease.runOnServer ? void act(invoke('checkout.runOnServer', { taskId: lease.taskId, on: false })) : setConfirmServer(true)}>{lease.runOnServer ? 'Bring it back to this Mac' : 'Run on server…'}</button>
+      {!confirmServer ? <button type="button" className="settings-button secondary" onClick={() => lease.runOnServer ? void act(invoke('checkout.runOnServer', { taskId: lease.taskId, on: false })) : setConfirmServer(true)}>{lease.runOnServer ? 'Bring it back to '+device().lower : 'Run on server…'}</button>
         : <span className="ws-checkout-confirm">The org agent will run it on the server while it stays yours. <button type="button" className="settings-button" onClick={() => { setConfirmServer(false); void act(invoke('checkout.runOnServer', { taskId: lease.taskId, on: true })); }}>Run on server</button><button type="button" className="settings-button secondary" onClick={() => setConfirmServer(false)}>Cancel</button></span>}
       <button type="button" className="settings-button secondary" onClick={() => void act(invoke('checkout.release', { taskId: lease.taskId }))}>Release</button>
     </div>

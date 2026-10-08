@@ -17,6 +17,7 @@ import type { Folder } from '../shared/protocol.ts';
 import { normalizeRemote } from './memory-identity.ts';
 import { blockerIds } from './paperclip-map.ts';
 import type { Invoke } from './workspace-local.ts';
+import { device } from '../shared/device-noun.ts';
 
 type Json = Record<string, unknown>;
 const str = (v: unknown): string | null => typeof v === 'string' && v ? v : null;
@@ -313,7 +314,7 @@ export async function importFromPaperclip(companyId: string, deps: ImportDeps): 
     if (deps.targets?.[sourceId] === 'skip') { report.notes.push(`${name}: left out of this import.`); continue; }
     let folderId: string | null = null;
     if (localFolder && deps.local && deps.exists(localFolder)) { const want = home(localFolder); folderId = deps.folders().find(f => home(f.path) === want)?.id ?? (await invoke('folder.add', { path: localFolder })).id; }
-    else if (localFolder && !deps.local) report.notes.push(`${name}: its folder (${localFolder}) is on the server, not this Mac. Link your own checkout to the project yourself.`);
+    else if (localFolder && !deps.local) report.notes.push(`${name}: its folder (${localFolder}) is on the server, not ${device().lower}. Link your own checkout to the project yourself.`);
     let mapped = store.map('project', sourceId);
     const mine = mapped ? existing.get(mapped.musterId) : undefined;
     const owner = mapped && mine ? await ownerOf(mapped, mine, deps) : undefined;

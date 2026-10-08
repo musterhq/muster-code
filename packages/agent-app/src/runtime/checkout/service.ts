@@ -31,6 +31,7 @@ import type { PersonalAccess, ServerBackend, ServerPart } from '../server/backen
 import { PaperclipError } from '../paperclip-client.ts';
 import { TEST_COMMAND } from '../turn-ledger.ts';
 import { ENVELOPE_RULES, neutralizeServerText, sanitizeOut, untrusted } from './sanitize.ts';
+import { device } from '../../shared/device-noun.ts';
 
 export type LocalProviderInfo = LocalProvider & ProviderPayInfo;
 export interface ChatPort {
@@ -211,7 +212,7 @@ export class CheckoutService {
     const { company, part, task, me, backend } = await this.locate(input.taskId, { fresh: true });
     if (task.status === 'done' || task.status === 'cancelled') throw new Error(`${task.key} is ${task.status === 'done' ? 'done' : 'cancelled'}. Reopen it on the server first.`);
     const existing = this.d.store.lease(task.id);
-    if (existing && existing.state === 'checked_out') throw new LeaseError(`${task.key} is already checked out on this Mac.`, 'conflict');
+    if (existing && existing.state === 'checked_out') throw new LeaseError(`${task.key} is already checked out on ${device().lower}.`, 'conflict');
     const assignedToMe = task.assigneeUserId === me.id;
     if (!assignedToMe && !input.take) throw new Error(`${task.key} is not assigned to you. Use “Take it” to reassign it to yourself first.`);
     const server = this.origin();
@@ -230,7 +231,7 @@ export class CheckoutService {
       if (task.projectId) binding = await this.bind(company.id, task.projectId, undefined, undefined, true);
       else { const path = await ensureMusterFolder(musterFolderPath(this.home(), company.name, null, task.key), this.home()); binding = { orgId: company.id, projectId: NO_PROJECT, projectName: task.key, path, devBranch: '', boundAt: iso(this.d.now()), kind: 'folder' }; }
     }
-    if (!binding) throw new Error(`Choose where ${task.projectId ? 'this project’s' : 'this task’s'} files live on this Mac first (Work locally › Choose folder), or let Muster make a folder.`);
+    if (!binding) throw new Error(`Choose where ${task.projectId ? 'this project’s' : 'this task’s'} files live on ${device().lower} first (Work locally › Choose folder), or let Muster make a folder.`);
 
     const model = this.resolveModel(input.model, part);
     const inPlace = binding.kind === 'folder';
@@ -265,14 +266,14 @@ export class CheckoutService {
     const providers = this.d.providers().filter(p => p.available);
     if (choice.kind === 'own') {
       const p = providers.find(x => x.id === choice.providerId);
-      if (!p) throw new Error('That provider is not available on this Mac. Pick another, or connect it in Accounts & providers.');
+      if (!p) throw new Error('That provider is not available on '+device().lower+'. Pick another, or connect it in Accounts & providers.');
       const m = p.models.find(x => x.id === choice.model) ?? (() => { throw new Error(`${p.name} has no model “${choice.model}”.`); })();
       return { providerId: p.id, model: m.id, label: `${p.name} · ${m.name}` };
     }
     const agent = part.agents.find(a => a.id === choice.agentId);
     if (!agent) throw new Error('That org agent is not on the server any more.');
     const mapped = mapAgentToLocal({ adapter: agent.adapter, model: agent.model }, providers);
-    if (!mapped) throw new Error('No provider is available on this Mac to match the org agent. Pick “My own”, or connect a provider.');
+    if (!mapped) throw new Error('No provider is available on '+device().lower+' to match the org agent. Pick “My own”, or connect a provider.');
     return { providerId: mapped.providerId, model: mapped.model, label: `${agent.name} → ${mapped.label}` };
   }
 
@@ -327,7 +328,7 @@ export class CheckoutService {
     const t = copy.task, review = lease.reviewChats.find(r => r.chatId === chatId);
     const agentName = (id: string | null) => copy.agents.find(a => a.id === id)?.name;
     const inPlace = lease.kind === 'folder';
-    const lines: string[] = [inPlace ? 'You are working locally on a server task. Everything runs on this Mac, in this folder, which is used as it is: there is no branch and nothing to commit or push; nothing runs on the server until hand-back.' : 'You are working locally on a server task. Everything runs on this Mac, in this worktree; nothing runs on the server until hand-back.', ENVELOPE_RULES];
+    const lines: string[] = [inPlace ? 'You are working locally on a server task. Everything runs on '+device().lower+', in this folder, which is used as it is: there is no branch and nothing to commit or push; nothing runs on the server until hand-back.' : 'You are working locally on a server task. Everything runs on '+device().lower+', in this worktree; nothing runs on the server until hand-back.', ENVELOPE_RULES];
     // Every name below (org, project, task key, agents, reviewers, skills) is chosen by someone on the server, so it all lives inside the envelope too.
     const nm = (v: string | null | undefined) => neutralizeServerText(String(v ?? '')).replace(/\s+/g, ' ').trim().slice(0, 80);
     lines.push(untrusted('task', `${nm(t.key)}: ${t.title}\nOrg: ${nm(copy.orgName)}${copy.project ? `; project: ${nm(copy.project.name)}` : ''}\n\n${t.description}`));
@@ -389,7 +390,7 @@ export class CheckoutService {
   private resolveRoute(model: ModelChoice, providers: LocalProviderInfo[]): { providerId: string; model: string } {
     if (model.kind === 'own') return { providerId: model.providerId, model: model.model };
     const first = providers.find(p => p.models.length);
-    if (!first) throw new Error('No provider is available on this Mac for the review.');
+    if (!first) throw new Error('No provider is available on '+device().lower+' for the review.');
     return { providerId: first.id, model: first.models[0]!.id };
   }
 
@@ -859,7 +860,7 @@ export class CheckoutService {
     const key = `server:${on}:${at}`;
     const agent = part.agents.find(a => a.id === agentId);
     this.enqueuePatch(lease.taskId, lease.orgId, key, on ? { assigneeAgentId: agentId, assigneeUserId: null, status: 'in_progress' } : { assigneeUserId: me.id, assigneeAgentId: null }, at);
-    this.enq({ taskId: lease.taskId, orgId: lease.orgId, type: 'comment', key, kind: 'note', at, body: on ? `Running this on the server with ${agent?.name ?? 'the org agent'} · it stays with ${me.name ?? 'me'} · via Muster` : 'Back on this Mac · via Muster' });
+    this.enq({ taskId: lease.taskId, orgId: lease.orgId, type: 'comment', key, kind: 'note', at, body: on ? `Running this on the server with ${agent?.name ?? 'the org agent'} · it stays with ${me.name ?? 'me'} · via Muster` : 'Back on '+device().lower+' · via Muster' });
     this.d.store.putLease(transition(lease, { type: 'run-on-server', on, at }));
     await this.flush(lease.taskId);
     this.d.emit(lease.taskId);

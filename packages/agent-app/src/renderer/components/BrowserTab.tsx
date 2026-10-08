@@ -9,6 +9,7 @@ import {BROWSER_VIEWPORTS,browserAddress,browserScopeProfile,type BrowserConsole
 import './browser-tab.css';
 import {Tip} from './Tooltip';
 import {Menu,MenuPopup} from './AppMenu';
+import { device } from '../../shared/device-noun.ts';
 
 export interface BrowserTabProps {owner:string;profileId:string;profileName?:string;initialUrl?:string;active?:boolean;onUrlChange?:(url:string)=>void}
 
@@ -297,7 +298,7 @@ function DesktopBrowserTab({owner,profileId:requestedProfile,initialUrl='about:b
         :pending.state==='cancelled'?<>Download of <b>{pending.filename}</b> cancelled</>:<>Download of <b>{pending.filename}</b> failed</>}</span>
       {pending.state==='pending' && <><button className="is-primary" onClick={()=>void download('save')}>Save to Downloads</button><button onClick={()=>void download('cancel')}>Cancel</button></>}
       {pending.state==='saving' && <button onClick={()=>void download('cancel')}>Cancel</button>}
-      {pending.state==='saved' && <button onClick={()=>void download('reveal')}>Show in Finder</button>}
+      {pending.state==='saved' && <button onClick={()=>void download('reveal')}>Show in {device().fileManager}</button>}
       {(pending.state==='saved' || pending.state==='cancelled' || pending.state==='failed') && <button className="browser-bar-close" aria-label="Dismiss download notice" onClick={()=>void download('dismiss')}><X size={12}/></button>}
     </div>}
     {(flash || browser?.notice) && <p className="browser-notice" role="status">{flash || browser?.notice}</p>}

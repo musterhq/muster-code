@@ -13,6 +13,7 @@ import { openMyWork, openProjectInOrg, openTaskInOrg, readAccordion, toggleOrg, 
 import { useStoreSelector } from '../useStore';
 import { closeSettings, selectChat } from '../store';
 import { Tip } from './Tooltip';
+import { device } from '../../shared/device-noun.ts';
 import './org-sidebar.css';
 
 const HUES = ['var(--info)', 'var(--warn)', 'var(--violet)', 'var(--pink)', 'var(--ok)', 'var(--file-teal)'];
@@ -58,7 +59,7 @@ function OrgBlock({ org, open, pinned, onToggle, onPin, activeTask, activeProjec
       {rows.shown.map(task => { const chat = task.checkout?.chatId ? chats?.find(c => c.id === task.checkout!.chatId) : undefined; return <React.Fragment key={task.id}>
         <button type="button" className={`org-task${activeTask === task.id || activeTask === task.key ? ' is-active' : ''}`} title={`${task.key} · ${task.title}${task.assignee ? ` · ${task.assignee}` : ''}`} onClick={() => void openTaskInOrg(task.orgId, task.id)}>
           <span className="org-dot" data-state={taskDot(task.status)} aria-label={task.status.replace('_', ' ')}/><span className="org-key">{task.key}</span><span className="org-title">{task.title}</span>
-          {task.checkout && <Laptop size={11} className="org-here" aria-label={`Checked out · ${task.checkout.thisMac ? 'this Mac' : task.checkout.device}`}/>}
+          {task.checkout && <Laptop size={11} className="org-here" aria-label={`Checked out · ${task.checkout.thisMac ? device().lower : task.checkout.device}`}/>}
         </button>
         {chat && <button type="button" className={`org-chat${activeChat === chat.id ? ' is-active' : ''}`} title="The local chat for this task" onClick={() => { void selectChat(chat.id); closeSettings(); }}><MessageSquare size={11} aria-hidden="true"/><span className="org-title">{chat.title}</span></button>}
       </React.Fragment>; })}

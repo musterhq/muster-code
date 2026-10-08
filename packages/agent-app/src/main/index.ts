@@ -36,6 +36,7 @@ import {installProcessGuard} from './process-guard.ts';
 import {passwordStoreSwitch} from './linux-launch.ts';
 import {electronSecretBox} from '../runtime/memory-context.ts';
 import {ServerSignInWindows} from './server-signin-window.ts';
+import { device } from '../shared/device-noun.ts';
 
 app.setName('Muster Agent');
 {const store=passwordStoreSwitch(process.env,process.argv);if(store)app.commandLine.appendSwitch('password-store',store);}
@@ -695,7 +696,7 @@ async function main(): Promise<void> {
       case 'delete':{
         const running=busy(snapshot,id);
         const {response}=await dialog.showMessageBox(window,{type:'warning',buttons:['Delete','Cancel'],defaultId:1,cancelId:1,message:`Permanently delete “${chat.title}”?`,
-          detail:`${running?'It is still working; deleting stops the run first. ':''}Its messages, queued follow-ups and attached files are removed from this Mac. Files in the folder are not touched. This cannot be undone.`});
+          detail:`${running?'It is still working; deleting stops the run first. ':''}Its messages, queued follow-ups and attached files are removed from ${device().lower}. Files in the folder are not touched. This cannot be undone.`});
         if(response!==0)return null;
         await service.invoke('chat.delete',{id,force:running});notice(`Deleted “${chat.title}”`);return null;
       }
