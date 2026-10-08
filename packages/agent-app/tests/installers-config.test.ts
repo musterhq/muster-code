@@ -51,6 +51,9 @@ test('Linux: libfuse2-free AppImage runtime, every icon size, the URL scheme in 
   for(const size of [16,24,32,48,64,128,256,512])assert.ok(existsSync(path.join(root,config.linux.icon,`${size}x${size}.png`)),`${size}px icon`);
   assert.deepEqual(config.protocols[0].schemes,['muster']);
   assert.equal(config.linux.executableArgs.length,0,'no hard-coded --no-sandbox');
+  // Ubuntu 24.04: the real t64 package first, or apt may pick liboss4-salsa-asound2 for the virtual libasound2.
+  assert.ok(config.deb.depends.includes('libasound2t64 | libasound2'));
+  assert.ok(config.deb.depends.includes('libgtk-3-0t64 | libgtk-3-0'));
 });
 
 test('update metadata is written next to the installers, never published from a build', () => {
