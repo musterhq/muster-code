@@ -149,21 +149,23 @@ function UpdatesGroup():React.ReactElement|null {
   const [busy,setBusy]=useState(false);
   if(!status)return null;
   const act=async(action:()=>Promise<unknown>):Promise<void>=>{setBusy(true);try{await action();}catch(cause){notifyError(cause);}finally{setBusy(false);}};
+  // The main process knows how this copy was installed; older builds fall back to the browser's platform.
+  const device=status.method?(status.method==='mac-bundle'?'This Mac':'This computer'):DEVICE;
   const working=busy||status.phase==='checking'||status.phase==='downloading'||status.phase==='installing';
   return <>
     <h3 className="preference-group-title">Updates</h3>
     <div className="preference-group">
-      <Row title={`Muster Agent ${status.current}`} scope={`${DEVICE} · ${status.channel} channel`} description={updateSummary(status)}>
+      <Row title={`Muster Agent ${status.current}`} scope={`${device} · ${status.channel} channel`} description={updateSummary(status)}>
         {status.phase==='available'&&!installsInPlace(status)
           ?<button type="button" className="settings-button" disabled={busy} onClick={()=>void act(installUpdate)}>{installLabel(status)}</button>
           :status.phase==='ready'
           ?<button type="button" className="settings-button" disabled={busy} onClick={()=>void act(installUpdate)}><RotateCcw size={14}/>{installLabel(status)}</button>
           :status.phase!=='disabled'&&<button type="button" className="settings-button secondary" disabled={working} onClick={()=>void act(checkForUpdates)}>{status.phase==='checking'?'Checking…':'Check for updates'}</button>}
       </Row>
-      {status.manualCommand&&<Row title="Install from a terminal" scope={DEVICE} description={<code className="settings-path">{status.manualCommand}</code>}>
+      {status.manualCommand&&<Row title="Install from a terminal" scope={device} description={<code className="settings-path">{status.manualCommand}</code>}>
         <button type="button" className="settings-button secondary" onClick={()=>void act(()=>copyText(status.manualCommand!))}>Copy command</button>
       </Row>}
-      {status.phase!=='disabled'&&<Row title="Check for updates automatically" scope={DEVICE} description={`Checks GitHub Releases shortly after launch, every hour and when you come back to the window. ${installExplanation(status)} Nothing installs until you choose to.`}>
+      {status.phase!=='disabled'&&<Row title="Check for updates automatically" scope={device} description={`Checks GitHub Releases shortly after launch, every hour and when you come back to the window. ${installExplanation(status)} Nothing installs until you choose to.`}>
         <Switch label="Check for updates automatically" checked={status.autoCheck} onChange={value=>void act(()=>setAutoCheckUpdates(value))}/>
       </Row>}
     </div>
