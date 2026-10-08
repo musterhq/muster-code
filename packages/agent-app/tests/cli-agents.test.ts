@@ -76,7 +76,7 @@ test('Cursor CLI: detection, streaming, tools, usage, resume and a clean environ
   const adapter = cursorAdapter({binary: box.cursor, env: {PATH: process.env.PATH, ...SECRETS}});
   const {input, log} = capture(box.cwd, {permissionMode: 'read-only', model: 'cursor-agent/composer-1', resumeThreadId: 'old-session', instructions: 'Be brief.'});
   const result = await adapter.run(input);
-  assert.equal(result.status, 'completed', result.errorMessage); assert.equal(result.threadId, 'cursor-session-1'); assert.equal(result.finalMessage, 'muster-marker');
+  assert.equal(result.status, 'completed', result.errorMessage ?? ''); assert.equal(result.threadId, 'cursor-session-1'); assert.equal(result.finalMessage, 'muster-marker');
   assert.equal(log.deltas, 'muster-marker', 'the closing full message is not appended after streamed chunks');
   const args = await json(box.cwd, 'argv.json');
   assert.deepEqual(args.slice(0, 5), ['-p', '--output-format', 'stream-json', '--stream-partial-output', '--trust']);
@@ -126,7 +126,7 @@ test('Gemini CLI: detection, streaming, tools, usage and permission flags', asyn
   const adapter = geminiAdapter({binary: box.gemini, flags: () => caps.flags, env: {...env, ...SECRETS}});
   const {input, log} = capture(box.cwd, {permissionMode: 'read-only', model: 'gemini-cli/gemini-2.5-flash', resumeThreadId: 'prev'});
   const result = await adapter.run(input);
-  assert.equal(result.status, 'completed', result.errorMessage); assert.equal(result.finalMessage, 'muster-marker'); assert.equal(log.deltas, 'muster-marker'); assert.equal(result.threadId, 'gemini-session-1');
+  assert.equal(result.status, 'completed', result.errorMessage ?? ''); assert.equal(result.finalMessage, 'muster-marker'); assert.equal(log.deltas, 'muster-marker'); assert.equal(result.threadId, 'gemini-session-1');
   const args = (await json(box.cwd, 'argv.json')).join(' ');
   assert.match(args, /--output-format stream-json --approval-mode plan --model gemini-2\.5-flash --resume prev --prompt read marker/);
   const items = log.events.filter(([m]) => m === 'item/completed').map(([, p]) => p.item as {type: string; status: string});
@@ -165,7 +165,7 @@ test('Grok Build over ACP: streams text, tools and usage; permission asks follow
     const cwd = join(box.root, `work-${mode}`); await (await import('node:fs/promises')).mkdir(cwd);
     const {input, log} = capture(cwd, {permissionMode: mode, model: 'grok-cli/grok-4.5'});
     const result = await grokAdapter({binary: box.grok, env}).run(input);
-    assert.equal(result.status, 'completed', result.errorMessage); assert.equal(result.threadId, 's1'); assert.equal(result.finalMessage, 'hello world'); assert.equal(log.deltas, 'hello world'); assert.equal(log.reasoning, 'thinking');
+    assert.equal(result.status, 'completed', result.errorMessage ?? ''); assert.equal(result.threadId, 's1'); assert.equal(result.finalMessage, 'hello world'); assert.equal(log.deltas, 'hello world'); assert.equal(log.reasoning, 'thinking');
     assert.equal((await json(cwd, 'permission.json')).outcome.optionId, expectOption, mode);
     const done = log.events.find(([m]) => m === 'item/completed')![1].item as {type: string; status: string; command: string};
     assert.deepEqual([done.type, done.status, done.command], ['commandExecution', tool, 'ls']);
