@@ -42,6 +42,8 @@ jobs:
           cache: npm
           cache-dependency-path: packages/agent-app/package-lock.json
 
+      - uses: ./.github/actions/electron-cache
+
       - name: Install
         run: npm ci --no-audit --no-fund
 

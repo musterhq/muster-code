@@ -1,0 +1,25 @@
+name: Electron download caches
+description: Caches the Electron and electron-builder download directories, keyed on the OS and the locked Electron version.
+inputs:
+  lockfile:
+    description: package-lock.json to read the Electron version from
+    default: packages/agent-app/package-lock.json
+runs:
+  using: composite
+  steps:
+    - id: ver
+      shell: bash
+      working-directory: ${{ github.workspace }}
+      run: echo "electron=$(node -p "require('./${{ inputs.lockfile }}').packages['node_modules/electron'].version")" >> "$GITHUB_OUTPUT"
+    - uses: actions/cache@v4
+      with:
+        path: |
+          ~/Library/Caches/electron
+          ~/Library/Caches/electron-builder
+          ~/.cache/electron
+          ~/.cache/electron-builder
+          ~/AppData/Local/electron/Cache
+          ~/AppData/Local/electron-builder/Cache
+        key: electron-${{ runner.os }}-${{ runner.arch }}-${{ steps.ver.outputs.electron }}
+        restore-keys: |
+          electron-${{ runner.os }}-${{ runner.arch }}-

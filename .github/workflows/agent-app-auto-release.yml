@@ -1,0 +1,62 @@
+name: Muster Agent Auto Release
+
+# Releases the version in packages/agent-app/package.json as soon as main is green for that commit, if it has no
+# agent-v<version> tag yet. Bumping the version and merging is the whole release procedure.
+#
+# The tag is created inside agent-app-release.yml (after its gate and builds pass) rather than pushed from here: a tag
+# created with GITHUB_TOKEN does not trigger the tag-push workflow, so the release is started by workflow_call instead.
+# The manual route (push an agent-v* tag) still works unchanged.
+on:
+  workflow_run:
+    workflows: ["Muster Agent CI", "Muster Agent Windows & Linux", "CI"]
+    types: [completed]
+    branches: [main]
+
+permissions: {}
+
+# One decision per commit; the three CI workflows each fire this, the concurrency group serializes them and the later ones find the tag the first created.
+concurrency:
+  group: agent-app-auto-release-${{ github.event.workflow_run.head_sha }}
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      release: ${{ steps.plan.outputs.release }}
+      tag: ${{ steps.plan.outputs.tag }}
+    steps:
+      - id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+          echo "release=false" >> "$GITHUB_OUTPUT"
+          TIP="$(gh api "repos/$REPO/commits/main" --jq .sha)"
+          if [[ "$TIP" != "$SHA" ]]; then echo "main moved on to $TIP; $SHA is not released (the newer commit decides)."; exit 0; fi
+          VERSION="$(gh api "repos/$REPO/contents/packages/agent-app/package.json?ref=$SHA" --jq .content | base64 -d | jq -r .version)"
+          TAG="agent-v$VERSION"
+          if gh api "repos/$REPO/git/ref/tags/$TAG" >/dev/null 2>&1; then echo "$TAG already exists; nothing to release."; exit 0; fi
+          echo "release=true" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "Releasing $TAG at $SHA"
+
+  release:
+    needs: plan
+    if: needs.plan.outputs.release == 'true'
+    # Reusable workflows cannot hold more permissions than this job grants: write is only used by its publish job.
+    permissions:
+      contents: write
+      actions: read
+    uses: ./.github/workflows/agent-app-release.yml
+    with:
+      tag: ${{ needs.plan.outputs.tag }}
+      sha: ${{ github.event.workflow_run.head_sha }}
+      create_tag: true
+    secrets: inherit

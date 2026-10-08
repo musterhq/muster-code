@@ -54,7 +54,12 @@ jobs:
         working-directory: .
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends build-essential python3 xvfb libgtk-3-0 libnss3 libxss1 libgbm1 libasound2t64 rpm fakeroot desktop-file-utils xdg-utils
 
+      - uses: ./.github/actions/electron-cache
+
       - name: Install
+        # electron-builder rebuilds node-pty while packaging, so skip the redundant postinstall rebuild.
+        env:
+          MUSTER_SKIP_NATIVE_REBUILD: "1"
         run: npm ci --no-audit --no-fund
 
       - name: Windows path and agent tool tests (#319)
