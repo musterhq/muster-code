@@ -91,6 +91,8 @@ export function createMemoryIdentity(deps: MemoryIdentityDeps = {}) {
   return {
     /** True once the person id and this folder's remote are cached, so the sync methods cannot spawn git. */
     isWarm: (path?: string) => Boolean(person) && (path === undefined || remotes.has(path)),
+    /** Pre-fills the person and per-folder remote caches without blocking. */
+    async warm(folders: Array<{id: string; path: string}>) { await personAsync(); await Promise.all(folders.map(folder => repoOfAsync(folder.path))); },
     async personalAsync() { return {kind: 'user', id: await personAsync()}; },
     async folderAsync(folder: {id: string; path: string}) {
       const repo = await repoOfAsync(folder.path);

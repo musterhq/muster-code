@@ -145,15 +145,15 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
   }
   let hindsight: HindsightService | undefined;
   const memoryIdentity = createMemoryIdentity();
+  // Fill the identity caches off the event loop so the sync lookups below rarely spawn git themselves.
+  void memoryIdentity.warm(store.snapshot().folders);
   // Legacy hindsight.* commands honour the in-app Memory settings too, not only environment variables.
   let secretBox: ReturnType<typeof electronSecretBox> | null = null;
   const memoryConfig = new MemoryConfigStore(options.dataDir, () => secretBox === null ? secretBox = electronSecretBox() : secretBox);
   const hindsightClient = () => hindsight ??= new HindsightService({readConfig: () => memoryConfig.hindsight(), resolveFolderScope(folderId) {
     // Same banks as the memory domain (memory-identity.ts): per person, per repository, private otherwise.
-    // Cached identities answer synchronously; the first lookup per folder runs git off the event loop.
-    if (folderId === 'personal') return memoryIdentity.isWarm() ? memoryIdentity.personal() : memoryIdentity.personalAsync();
-    const folder = folderFor(folderId);
-    return memoryIdentity.isWarm(folder.path) ? memoryIdentity.folder(folder) : memoryIdentity.folderAsync(folder);
+    if (folderId === 'personal') return memoryIdentity.personal();
+    return memoryIdentity.folder(folderFor(folderId));
   }});
   const runs = new Map<string, ActiveRun>();
   const reconciliations = new Set<string>();

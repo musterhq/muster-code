@@ -134,28 +134,13 @@ function memoryDomain(context: DomainContext, options: MemoryDomainOptions): Dom
     }
     try { return identity.folder(context.folderFor(folderId)); } catch { return undefined; }
   };
-  /** Same bank as resolveScope, but the first git lookup per repository runs off the event loop. */
-  const resolveScopeWithoutBlocking = (folderId: string) => {
-    try {
-      if (folderId === 'personal') return identity.isWarm() ? identity.personal() : identity.personalAsync();
-      if (folderId.startsWith('project:')) {
-        const project = context.store.project(folderId.slice(8)) as { id: string; name?: string; primaryFolderId?: string | null; folderIds?: string[] } | undefined;
-        if (!project) return undefined;
-        const primaryId = project.primaryFolderId ?? project.folderIds?.[0];
-        let primary: { id: string; path: string } | undefined;
-        try { primary = primaryId ? context.folderFor(primaryId) : undefined; } catch { primary = undefined; }
-        const info = { id: project.id, name: project.name ?? project.id };
-        return identity.isWarm(primary?.path) ? identity.project(info, primary) : identity.projectAsync(info, primary);
-      }
-      const folder = context.folderFor(folderId);
-      return identity.isWarm(folder.path) ? identity.folder(folder) : identity.folderAsync(folder);
-    } catch { return undefined; }
-  };
+  // Fill the identity caches off the event loop, so resolveScope (sync, used by status()) rarely has to spawn git itself.
+  try { void identity.warm(context.store.snapshot().folders as { id: string; path: string }[]); } catch { /* no folders yet */ }
   let hindsight: HindsightService | undefined, unavailable = false;
   const service = (): HindsightService | undefined => {
     if (hindsight || unavailable) return hindsight;
     try {
-      return hindsight = new HindsightService({ env, readConfig: () => config.hindsight(), core: options.core, createClient: options.createClient, resolveFolderScope: resolveScopeWithoutBlocking });
+      return hindsight = new HindsightService({ env, readConfig: () => config.hindsight(), core: options.core, createClient: options.createClient, resolveFolderScope: resolveScope });
     } catch { unavailable = true; return undefined; }
   };
   /** Configured and not failing its last request: worth waiting on inside a run. */
