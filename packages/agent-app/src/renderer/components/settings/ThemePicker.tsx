@@ -79,13 +79,13 @@ export function ThemeRows({settings,set}:{settings:AppSettings;set:Setter}):Reac
     if(settings['appearance.darkTheme']===theme.id)choose('dark','muster-dark');
   };
   return <>
-    <ThemeRow title="Light theme" description="The colours used when the window is light, including when Theme is System and macOS is light.">
+    <ThemeRow title="Light theme" description={`The colours used when the window is light, including when Theme is System and ${device().os} is light.`}>
       <Picker label="Light theme" base="light" themes={all} value={settings['appearance.lightTheme']} onSelect={id=>choose('light',id)}/>
     </ThemeRow>
-    <ThemeRow title="Dark theme" description="The colours used when the window is dark, including when Theme is System and macOS is dark.">
+    <ThemeRow title="Dark theme" description={`The colours used when the window is dark, including when Theme is System and ${device().os} is dark.`}>
       <Picker label="Dark theme" base="dark" themes={all} value={settings['appearance.darkTheme']} onSelect={id=>choose('dark',id)}/>
     </ThemeRow>
-    <ThemeRow title="Custom themes" description={`Import a VS Code colour theme (.json) or a theme exported from Muster. Themes stay on ${device().lower}.`>
+    <ThemeRow title="Custom themes" description={`Import a VS Code colour theme (.json) or a theme exported from Muster. Themes stay on ${device().lower}.`}>
       <span className="theme-custom">
         <span className="theme-custom-actions">
           <button type="button" className="settings-button secondary" onClick={()=>file.current?.click()}><Upload size={14}/>Import VS Code theme…</button>

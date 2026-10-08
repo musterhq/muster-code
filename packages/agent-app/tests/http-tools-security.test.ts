@@ -65,12 +65,12 @@ test('H2: a timeout also ends the whole tree',{skip:win&&'POSIX process groups'}
   assert.equal(existsSync(marker),false);
 });
 test('H3: the command environment is an allowlist without provider keys, tokens or Muster internals',async t=>{
-  const source={PATH:'/usr/bin',HOME:'/h',OPENAI_API_KEY:'sk-x',GH_TOKEN:'g',AWS_SECRET_ACCESS_KEY:'a',MUSTER_TERMINAL_MCP_LAUNCHER:'/l',RANDOM_APP_VAR:'v',SystemRoot:'C:\\Windows'};
+  const source={PATH:'/usr/bin',HOME:'/h',OPENAI_API_KEY:'sk-x',GH_TOKEN:'g',AWS_SECRET_ACCESS_KEY:'a',MUSTER_TERMINAL_MCP_LAUNCHER:'/l',STRIPE_SECRET_KEY:'s',GITHUB_PAT:'p',PGPASSWORD:'pw',DATABASE_URL:'postgres://u:p@h/d',LITELLM_MASTER_KEY:'m',JAVA_HOME:'C:\\jdk',RANDOM_APP_VAR:'v',SystemRoot:'C:\\Windows'};
   const posix=agentCommandEnvironment({PROJECT_TOKEN:'lent'},source,'linux');
   assert.deepEqual(Object.keys(posix).sort(),['HOME','NO_COLOR','PATH','PROJECT_TOKEN','TERM'].sort(),'allowlist, plus the run\'s own lent variables');
   const windows=agentCommandEnvironment(undefined,source,'win32');
-  for(const key of ['OPENAI_API_KEY','GH_TOKEN','AWS_SECRET_ACCESS_KEY','MUSTER_TERMINAL_MCP_LAUNCHER'])assert.equal(key in windows,false,key);
-  assert.equal(windows.SystemRoot,'C:\\Windows');assert.equal(windows.RANDOM_APP_VAR,'v','Windows keeps the system variables programs need');
+  for(const key of ['OPENAI_API_KEY','GH_TOKEN','AWS_SECRET_ACCESS_KEY','MUSTER_TERMINAL_MCP_LAUNCHER','STRIPE_SECRET_KEY','GITHUB_PAT','PGPASSWORD','DATABASE_URL','LITELLM_MASTER_KEY'])assert.equal(key in windows,false,key);
+  assert.equal(windows.SystemRoot,'C:\\Windows');assert.equal(windows.RANDOM_APP_VAR,'v','Windows keeps the system variables programs need');assert.equal(windows.JAVA_HOME,'C:\\jdk','toolchain variables still reach Windows programs');
   if(!win){
     const {ws}=await sandbox(t);process.env.OPENAI_API_KEY='sk-test-leak';t.after(()=>{delete process.env.OPENAI_API_KEY;});
     const result=await executeTool(call('run_command',{command:'echo "[${OPENAI_API_KEY}]"'}),ctx(ws,'full',{env:{LENT_ONE:'1'}}));
