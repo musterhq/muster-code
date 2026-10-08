@@ -73,7 +73,7 @@ jobs:
           [[ "$(uname -m)" == "${{ matrix.arch }}" || ( "$(uname -m)" == "x86_64" && "${{ matrix.arch }}" == "x64" ) ]] || { echo "::error::Runner is $(uname -m), expected ${{ matrix.arch }}"; exit 1; }
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version-file: packages/agent-app/.nvmrc
           cache: npm
@@ -178,7 +178,7 @@ jobs:
       - uses: actions/checkout@v7
         with:
           ref: refs/tags/${{ env.TAG }}
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version-file: packages/agent-app/.nvmrc
           cache: npm
@@ -276,7 +276,7 @@ jobs:
       - uses: actions/checkout@v7
         with:
           ref: refs/tags/${{ env.TAG }}
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version-file: packages/agent-app/.nvmrc
           cache: npm
