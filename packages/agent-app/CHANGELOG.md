@@ -5,7 +5,7 @@ All notable changes to Muster Agent. Each `## <version>` section becomes the not
 
 ## 0.3.7
 
-Work locally now hands back on its own, live diffs show up in checked-out tasks, router models no longer report "unavailable" after a restart, and releases build about twice as fast.
+Work locally now hands back on its own, live diffs show up in checked-out tasks, router models no longer report "unavailable" after a restart, Ubuntu 24.04 installs start, and releases build about twice as fast.
 
 ### Work locally hands back by itself, quickly (#345)
 - **No typing "done".** After a finished turn Muster decides: a git project with a commit past the check-out (Muster commits uncommitted work as you) and a real test run that exited 0 after the last change (or no tests), or a plain folder whose files changed. Output Muster cannot parse no longer blocks; the exit code is the evidence. Errored or stopped turns, queued follow-ups and open questions never trigger it, and after Undo or Keep working it waits for new work.
@@ -21,8 +21,8 @@ Work locally now hands back on its own, live diffs show up in checked-out tasks,
 ### Router models are there right after a restart (#350)
 - Sending waits for a router's model list (for example intelligent-planner on Hybrow OmniRoute) instead of saying the model is unavailable. The last good list is remembered across restarts, failed listings retry on their own, and errors say exactly what is wrong.
 
-### Known issue
-- Ubuntu 24.04: the .deb doesn't start yet (the fix is in progress, #343). Use the AppImage on 24.04 for now; other Linux versions, Mac and Windows are unaffected.
+### Linux
+- Ubuntu 24.04: the .deb now starts. It installs to /opt/muster-agent (a space in the old path broke Chromium's sandbox helper), and in containers without the capabilities that helper needs it falls back cleanly. The app's name in menus and its data folder are unchanged (#343).
 
 ### Safer tools on router and local models (#348)
 - Stop also ends programs the agent detached. Linked files outside the folder can't be read without Full access. Very large tool arguments are trimmed. Secrets are removed from stored commands and diffs. A failing project-rules check now blocks the command.

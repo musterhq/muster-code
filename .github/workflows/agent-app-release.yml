@@ -383,7 +383,7 @@ jobs:
         # The update source is this repository (forks publish and update from their own).
         # Windows: electron-builder builds only the NSIS setup.exe (compression maximum); the portable zip is made in the
         # next step because the zip target would compress at maximum too, and `compression` is per platform.
-        run: npx electron-builder ${{ matrix.target }} ${{ matrix.os == 'windows' && '-c.win.target=nsis' || '' }} --publish never -c.extraMetadata.musterUpdateRepo=${{ github.repository }} -c.extraMetadata.musterUpdateChannel=${{ contains(env.TAG, '-') && 'beta' || 'stable' }}
+        run: npx electron-builder ${{ matrix.target }} ${{ matrix.os == 'windows' && '-c.win.target=nsis' || '' }} ${{ matrix.target == '--linux' && '-c.productName=muster-agent' || '' }} --publish never -c.extraMetadata.musterUpdateRepo=${{ github.repository }} -c.extraMetadata.musterUpdateChannel=${{ contains(env.TAG, '-') && 'beta' || 'stable' }}
       - name: Portable zip (Windows, normal compression)
         if: matrix.os == 'windows'
         shell: bash
