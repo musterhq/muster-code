@@ -1,5 +1,5 @@
 /* Branch switcher popover: shared by the summary card branch row and the composer footer. */
-.branch-picker-positioner { z-index: 100; }
+.branch-picker-positioner { z-index: var(--z-popover); }
 .branch-picker { width: min(320px, calc(100vw - 32px)); max-height: min(420px, var(--available-height, 420px)); display: flex; flex-direction: column; padding: 5px; background: var(--bg-raised); border: 1px solid rgb(var(--fg-rgb) / 10%); border-radius: var(--radius-10); box-shadow: var(--shadow-popover); color: var(--text); font-size: var(--font-caption); transform-origin: var(--transform-origin); transition: opacity 120ms ease, transform 120ms ease; outline: 0; }
 .branch-picker[data-starting-style], .branch-picker[data-ending-style] { opacity: 0; transform: translateY(-3px) scale(.98); }
 .branch-picker-search { display: flex; align-items: center; gap: 8px; padding: 6px 8px 8px; margin-bottom: 4px; border-bottom: 1px solid var(--hairline); color: var(--text-faint); }
