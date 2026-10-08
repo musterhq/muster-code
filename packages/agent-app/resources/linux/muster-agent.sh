@@ -21,7 +21,13 @@ value() { cat "$1" 2>/dev/null | tr -d '[:space:]'; }
 
 sandbox_usable() {
   # A setuid-root chrome-sandbox (the deb installs it that way where user namespaces are unavailable).
-  if [ -u "$dir/chrome-sandbox" ] && [ "$(stat -c %u "$dir/chrome-sandbox" 2>/dev/null)" = 0 ]; then return 0; fi
+  # The helper creates PID/network namespaces as root, which needs CAP_SYS_ADMIN (bit 21) in the capability bounding set;
+  # Docker and other unprivileged containers drop it ("Failed to move to new namespace ... Operation not permitted"),
+  # and then the helper cannot work however it is installed.
+  if [ -u "$dir/chrome-sandbox" ] && [ "$(stat -c %u "$dir/chrome-sandbox" 2>/dev/null)" = 0 ]; then
+    capbnd=$(awk '/^CapBnd:/ {print $2}' "$proc/self/status" 2>/dev/null)
+    if [ -z "$capbnd" ] || [ $((0x$capbnd & 0x200000)) -ne 0 ]; then return 0; fi
+  fi
   # Fast negatives: no unprivileged user namespaces (Debian's switch, a zero limit).
   [ "$(value "$proc/sys/kernel/unprivileged_userns_clone")" = 0 ] && return 1
   [ "$(value "$proc/sys/user/max_user_namespaces")" = 0 ] && return 1
