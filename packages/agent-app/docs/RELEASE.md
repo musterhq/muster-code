@@ -12,7 +12,7 @@
 3. `.github/workflows/agent-app-release.yml` builds on `macos-15` (arm64) and `macos-15-intel` (x64):
    `npm ci`, typecheck, unit and renderer tests, then `scripts/package-release.mjs`. It publishes the
    GitHub Release "Muster Agent <version>" with `Muster-Agent-<version>-{arm64,x64}.{dmg,zip}` and
-   `SHA256SUMS`, plus `muster-server-<version>-{darwin-arm64,darwin-x64,linux-x64}.tar.gz` (see `docs/server.md`).
+   `SHA256SUMS`, plus `muster-server-<version>-{darwin-arm64,darwin-x64,linux-x64}.tar.xz` (see `docs/server.md`).
    The IDE's `release.yml` reacts only to `v*` tags.
 
 Signing is chosen from repository secrets (never printed; the PKCS#12 goes into a throwaway keychain

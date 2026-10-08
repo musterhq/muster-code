@@ -1,4 +1,4 @@
-// Packs the built server into release-dist/muster-server-<version>-<platform>.tar.gz with this machine's Node runtime as bin/node,
+// Packs the built server into release-dist/muster-server-<version>-<platform>.tar.xz with this machine's Node runtime as bin/node,
 // so the tarball runs on a host without Node. Run `npm run build` first (here and in packages/agent-app).
 // The store is node:sqlite (built into Node 24): there is no native addon to rebuild per platform; only the Node binary differs.
 import { execFileSync } from 'node:child_process';
@@ -29,8 +29,9 @@ chmodSync(path.join(stage, 'bin', 'muster-server'), 0o755); chmodSync(path.join(
 copyFileSync(path.join(repo, 'LICENSE'), path.join(stage, 'LICENSE'));
 if (existsSync(path.join(repo, 'docs', 'server.md'))) copyFileSync(path.join(repo, 'docs', 'server.md'), path.join(stage, 'README.md'));
 writeFileSync(path.join(stage, 'VERSION'), `muster-server ${version} (${platform}, node ${process.versions.node})\n`);
-const tarball = path.join(out, `${name}.tar.gz`);
-execFileSync('tar', ['-czf', tarball, '-C', out, name]);
+// xz (about a fifth smaller than gzip for the Node runtime). bsdtar (macOS) takes the level as an option, GNU tar through XZ_OPT.
+const tarball = path.join(out, `${name}.tar.xz`);
+execFileSync('tar', process.platform === 'darwin' ? ['--options', 'xz:compression-level=9', '-cJf', tarball, '-C', out, name] : ['-cJf', tarball, '-C', out, name], {env: {...process.env, XZ_OPT: '-9e'}});
 rmSync(stage, { recursive: true, force: true });
 const sha = createHash('sha256');
 await new Promise((resolve, reject) => createReadStream(tarball).on('data', d => sha.update(d)).on('end', resolve).on('error', reject));

@@ -31,6 +31,7 @@ import {FullAccessSkips} from './FullAccessConfirm';
 import {recordProvenance,settingProvenance} from './settings/provenance';
 import {ProvenanceTag} from './settings/ProvenanceTag';
 import { device } from '../../shared/device-noun.ts';
+import {ThemeRows} from './settings/ThemePicker';
 import './preferences-screen.css';
 
 const ICONS:Record<SettingsSection,React.ReactNode>={general:<SlidersHorizontal size={15}/>,appearance:<Palette size={15}/>,chat:<MessageSquare size={15}/>,providers:<Server size={15}/>,models:<Cpu size={15}/>,memory:<Brain size={15}/>,plugins:<Puzzle size={15}/>,environments:<Boxes size={15}/>,automations:<CalendarClock size={15}/>,integrations:<Link2 size={15}/>,shortcuts:<Keyboard size={15}/>,server:<ShieldCheck size={15}/>,diagnostics:<Activity size={15}/>,storage:<HardDrive size={15}/>};
@@ -310,6 +311,7 @@ export function PreferencesScreen():React.ReactElement {
             <Row setting="appearance.theme" title="Theme" scope={device().title+" · whole window"} description={`System follows your ${device().os} appearance and switches with it.`}>
               <Segmented label="Theme" value={settings['appearance.theme']} options={[{value:'system',label:'System'},{value:'dark',label:'Dark'},{value:'light',label:'Light'}]} onChange={value=>set('appearance.theme',value)}/>
             </Row>
+            <ThemeRows settings={settings} set={set}/>
             <Row setting="appearance.textSize" title="Text size" scope={device().title+" · whole window"} description={`Scales text and controls. ${MAC?'⌘+ and ⌘−':'Ctrl++ and Ctrl+−'} adjust it until the window reloads.`}>
               <Segmented label="Text size" value={settings['appearance.textSize']} options={TEXT_SIZES.map(size=>({value:size as number,label:`${size}%`}))} onChange={value=>set('appearance.textSize',value)}/>
             </Row>

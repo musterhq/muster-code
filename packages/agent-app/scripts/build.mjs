@@ -149,9 +149,13 @@ if (hasRenderer) {
   });
 }
 
+// #324: classic (non-module) script that paints the persisted colour theme before first paint; see src/renderer/theme-boot.ts.
+if (hasRenderer) builds.push({...common, entryPoints: [src('renderer', 'theme-boot.ts')], outfile: dist('renderer', 'theme-boot.js'), platform: 'browser', format: 'iife', target: 'es2022'});
+
 function copyRendererStatic() {
   mkdirSync(dist('renderer'), { recursive: true });
-  cpSync(path.join(root,'node_modules/pdfjs-dist/build/pdf.worker.mjs'),dist('renderer','pdf.worker.mjs'));
+  // The minified build of the same worker (1.3 MB instead of 2.2 MB); served under the name the renderer loads.
+  cpSync(path.join(root,'node_modules/pdfjs-dist/build/pdf.worker.min.mjs'),dist('renderer','pdf.worker.mjs'));
   cpSync(path.join(root,'node_modules/pdfjs-dist/LICENSE'),dist('renderer','pdfjs-LICENSE.txt'));
   cpSync(path.join(root,'node_modules/exceljs/LICENSE'),dist('renderer','exceljs-LICENSE.txt'));
   for (const name of ['t3code-MIT.txt','muster-core-MIT.txt','qm-MIT.txt']) cpSync(path.join(root,'licenses',name),dist('renderer',name));
@@ -206,7 +210,7 @@ if (watch) {
  *  and were copied into the packaged app. Remove bundle outputs this build did not produce. */
 function pruneStaleRendererOutputs(metafile) {
   const produced = new Set(Object.keys(metafile.outputs).map(name => path.resolve(root, name)));
-  const statics = new Set(['styles.css']);
+  const statics = new Set(['styles.css', 'theme-boot.js', 'theme-boot.js.map']);
   let removed = 0, bytes = 0;
   for (const name of readdirSync(dist('renderer'))) {
     if (statics.has(name) || !/\.(js|css|ttf|woff2|wasm)(\.map)?$/.test(name)) continue;

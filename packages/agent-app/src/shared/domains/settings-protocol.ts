@@ -1,5 +1,6 @@
 /** Settings domain contract. Add commands here; the allowlist and service dispatch pick them up. */
 import type { ProviderInfo, ReasoningEffort } from '../protocol.ts';
+import { DEFAULT_DARK_THEME_ID, DEFAULT_LIGHT_THEME_ID, THEME_ID, isCleanThemeList, type Theme } from '../theme.ts';
 export type SendKey = 'enter' | 'mod-enter';
 /** 'system' follows macOS; 'reduce' forces the reduced variant whatever the OS preference. */
 export type AccessibilityOverride = 'system' | 'reduce';
@@ -16,6 +17,11 @@ export interface AppSettings {
   'general.sendKey': SendKey;
   'general.spellcheck': boolean;
   'appearance.theme': ThemePreference;
+  /** #324: colour theme painted when the appearance resolves to light / dark. The stock ids add no overrides. */
+  'appearance.lightTheme': string;
+  'appearance.darkTheme': string;
+  /** #324: themes imported from VS Code or a Muster export, kept on this Mac. */
+  'appearance.customThemes': Theme[];
   'appearance.textSize': number;
   /** Reply prose size in px; the rest of the UI follows appearance.textSize. */
   'appearance.chatTextSize': ChatTextSize;
@@ -60,6 +66,9 @@ export const SETTING_DEFAULTS: AppSettings = {
   'general.sendKey': 'enter',
   'general.spellcheck': true,
   'appearance.theme': 'dark',
+  'appearance.lightTheme': DEFAULT_LIGHT_THEME_ID,
+  'appearance.darkTheme': DEFAULT_DARK_THEME_ID,
+  'appearance.customThemes': [],
   'appearance.textSize': 100,
   'appearance.chatTextSize': 14,
   'appearance.reducedMotion': 'system',
@@ -94,6 +103,9 @@ const CHECKS: { [K in SettingKey]: { valid(value: unknown): value is AppSettings
   'general.sendKey': { valid: oneOf<SendKey>(['enter', 'mod-enter']), expected: '"enter" or "mod-enter"' },
   'general.spellcheck': { valid: bool, expected: 'true or false' },
   'appearance.theme': { valid: oneOf<ThemePreference>(THEME_PREFERENCES), expected: '"system", "dark" or "light"' },
+  'appearance.lightTheme': { valid: (value): value is string => typeof value === 'string' && THEME_ID.test(value), expected: 'a theme id' },
+  'appearance.darkTheme': { valid: (value): value is string => typeof value === 'string' && THEME_ID.test(value), expected: 'a theme id' },
+  'appearance.customThemes': { valid: (value): value is Theme[] => isCleanThemeList(value), expected: 'a list of at most 24 themes with #hex, rgb() or hsl() colours' },
   'appearance.textSize': { valid: (value): value is number => typeof value === 'number' && (TEXT_SIZES as readonly number[]).includes(value), expected: `one of ${TEXT_SIZES.join(', ')}` },
   'appearance.chatTextSize': { valid: (value): value is ChatTextSize => typeof value === 'number' && (CHAT_TEXT_SIZES as readonly number[]).includes(value), expected: `one of ${CHAT_TEXT_SIZES.join(', ')}` },
   'appearance.reducedMotion': { valid: oneOf<AccessibilityOverride>(['system', 'reduce']), expected: '"system" or "reduce"' },
