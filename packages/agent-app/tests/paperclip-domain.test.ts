@@ -359,7 +359,7 @@ test('turn ledger: a fresh database has the baselines table, and a files error n
   assert.equal(ledger.verify().entries,2);
 });
 
-test('turn ledger: only project and task runs diff the tree; everyday chats pay nothing new',async t=>{
+test('turn ledger: every turn with a Git baseline diffs the tree, project or not (#353)',async t=>{
   const {DatabaseSync}=await import('node:sqlite');
   const {TurnLedger,attachTurnLedger}=await import('../src/runtime/turn-ledger.ts');
   const {snapshotTree}=await import('../src/runtime/review-baseline.ts');
@@ -380,7 +380,7 @@ test('turn ledger: only project and task runs diff the tree; everyday chats pay 
   await turn({id:'everyday',title:'Chat'},'r-chat');
   await turn({id:'task-run',title:'Builder',projectId:'p1'},'r-task');
   assert.equal(appended.length,2);
-  assert.equal(appended[0].files,null,'an everyday chat never snapshots the tree at settle');
+  assert.deepEqual(appended[0].files.map((f:any)=>`${f.status}:${f.path}`),['added:r-chat.txt'],'a chat without a project records its files too, so a Work locally worktree chat has receipts');
   assert.deepEqual(appended[1].files.map((f:any)=>`${f.status}:${f.path}`),['added:r-task.txt'],'a project run records the files it changed');
 });
 

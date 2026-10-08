@@ -1,5 +1,5 @@
 import {useCallback, useEffect, useSyncExternalStore} from 'react';
-import type {ReviewBaseline, ReviewBaselineInfo, ReviewChanges, ReviewMark} from '../shared/domains/review-protocol';
+import type {ReviewBaseline, ReviewBaselineInfo, ReviewChange, ReviewChanges, ReviewMark} from '../shared/domains/review-protocol';
 import {invoke, subscribe} from './bridge';
 
 /**
@@ -105,6 +105,17 @@ export function onWorkspaceChanged(folderId: string, run: () => void, delay = 25
     clearTimeout(timer); timer = setTimeout(run, delay);
   });
   return () => { off(); clearTimeout(timer); };
+}
+
+/**
+ * The files the chat's latest turn changed according to Git (its turn-start baseline against the working tree now),
+ * whatever tool made the edit. `stamp` (the chat status) refetches the baselines when a new turn starts; the list
+ * itself refreshes on workspaceChanged, so it fills in while the agent works. undefined without a baseline.
+ */
+export function useLatestTurnFiles(chatId: string | undefined, folderId: string | undefined, stamp?: string): {runId: string; files: ReviewChange[]} | undefined {
+  const turn = latestBaseline(useChatBaselines(folderId ? chatId : undefined, stamp), folderId);
+  const changes = useReviewChanges(turn ? folderId : undefined, turn ? {runId: turn.runId} : undefined).value;
+  return turn && changes ? {runId: turn.runId, files: changes.files} : undefined;
 }
 
 // ---------------------------------------------------------------------------
