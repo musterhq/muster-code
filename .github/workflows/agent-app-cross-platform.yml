@@ -66,6 +66,12 @@ jobs:
         shell: bash
         run: npx electron-builder ${{ matrix.target }} --publish never -c.extraMetadata.musterUpdateRepo=${{ github.repository }} -c.extraMetadata.musterUpdateChannel=stable
 
+      - name: Package size budget
+        shell: bash
+        # Fails if resources/app/node_modules holds anything but node-pty (or ships build intermediates / another platform's
+        # prebuilds); prints a size table here and in the job summary.
+        run: node scripts/check-package-size.mjs
+
       - name: Smoke test (Linux, no --no-sandbox flag)
         if: matrix.os == 'linux'
         run: xvfb-run -a node scripts/smoke-packaged.mjs

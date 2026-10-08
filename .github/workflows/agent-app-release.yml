@@ -138,6 +138,9 @@ jobs:
           echo "${{ steps.signing.outputs.mode }}" > "release-dist/signing-${{ matrix.arch }}.txt"
           ls -lh release-dist
 
+      - name: Package size budget
+        run: node scripts/check-package-size.mjs
+
       - name: Remove signing material
         if: always()
         run: |
@@ -195,6 +198,12 @@ jobs:
         shell: bash
         # The update source is this repository (forks publish and update from their own).
         run: npx electron-builder ${{ matrix.target }} --publish never -c.extraMetadata.musterUpdateRepo=${{ github.repository }} -c.extraMetadata.musterUpdateChannel=${{ contains(env.TAG, '-') && 'beta' || 'stable' }}
+      - name: Package size budget
+        shell: bash
+        # Fails if resources/app/node_modules holds anything but node-pty (or ships build intermediates / another platform's
+        # prebuilds); prints a size table here and in the job summary.
+        run: node scripts/check-package-size.mjs
+
       - name: Smoke test (Linux, no --no-sandbox flag)
         if: matrix.os == 'linux'
         run: xvfb-run -a node scripts/smoke-packaged.mjs
@@ -296,7 +305,7 @@ jobs:
       - name: Smoke test the tarball
         working-directory: packages/server
         run: |
-          DIR="$RUNNER_TEMP/smoke" && mkdir -p "$DIR" && tar -xzf release-dist/muster-server-*-${{ matrix.platform }}.tar.gz -C "$DIR"
+          DIR="$RUNNER_TEMP/smoke" && mkdir -p "$DIR" && tar -xf release-dist/muster-server-*-${{ matrix.platform }}.tar.xz -C "$DIR"
           BIN="$(echo "$DIR"/muster-server-*/bin/muster-server)"
           "$BIN" --version
           echo 'smoke-test-password-1' | "$BIN" init --data-dir "$DIR/data" --username smoke --port 17999 --password-stdin
@@ -304,7 +313,7 @@ jobs:
       - uses: actions/upload-artifact@v6
         with:
           name: muster-server-${{ matrix.platform }}
-          path: packages/server/release-dist/muster-server-*.tar.gz
+          path: packages/server/release-dist/muster-server-*.tar.xz
           if-no-files-found: error
           retention-days: 14
 
@@ -381,9 +390,9 @@ jobs:
             echo
             echo "| Muster Server (self-hosted) | File |"
             echo "| --- | --- |"
-            echo "| macOS, Apple silicon | \`muster-server-${VERSION}-darwin-arm64.tar.gz\` |"
-            echo "| macOS, Intel | \`muster-server-${VERSION}-darwin-x64.tar.gz\` |"
-            echo "| Linux x64 | \`muster-server-${VERSION}-linux-x64.tar.gz\` |"
+            echo "| macOS, Apple silicon | \`muster-server-${VERSION}-darwin-arm64.tar.xz\` |"
+            echo "| macOS, Intel | \`muster-server-${VERSION}-darwin-x64.tar.xz\` |"
+            echo "| Linux x64 | \`muster-server-${VERSION}-linux-x64.tar.xz\` |"
             echo
             echo "Extract it, then \`bin/muster-server init\` and \`bin/muster-server start\`. It includes its own Node runtime. Docker, systemd and TLS setups are in [docs/server.md](https://github.com/${{ github.repository }}/blob/main/docs/server.md)."
             echo
@@ -420,5 +429,5 @@ jobs:
             out/Muster-Agent-*.AppImage
             out/Muster-Agent-*.deb
             out/Muster-Agent-*.tar.gz
-            out/muster-server-*.tar.gz
+            out/muster-server-*.tar.xz
             out/SHA256SUMS

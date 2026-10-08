@@ -2,6 +2,8 @@
 #   npx electron-builder --linux   ->  release-dist/Muster-Agent-<version>-<arch>.AppImage, .deb, .tar.gz
 #   npx electron-builder --win     ->  release-dist/Muster-Agent-<version>-<arch>-setup.exe, .zip
 # Only the built app ships: dist/ (esbuild bundles every dependency except electron and node-pty) and node-pty.
+# electron-builder adds every production dependency to app/node_modules on its own, so "!node_modules/**" comes first
+# and node-pty is then added back (scripts/check-package-size.mjs fails CI if anything else slips in).
 appId: dev.themuster.agent
 productName: Muster Agent
 executableName: muster-agent
@@ -13,11 +15,23 @@ files:
   - "!dist/tests/**"
   - "!**/*.map"
   - package.json
+  - "!node_modules/**"
   - node_modules/node-pty/**
-  - "!node_modules/node-pty/{src,deps,scripts,typings,third_party}/**"
+  - "!node_modules/node-pty/{src,deps,scripts,typings,third_party,node-addon-api}/**"
   - "!node_modules/node-pty/**/*.{md,ts,cc,h,gyp,gypi}"
+  # Build intermediates (MSVC/gyp/make output) and debug symbols: not needed to load pty.node.
+  - "!node_modules/node-pty/build/**/*.{iobj,ipdb,tlog,obj,pdb,lib,exp,o,d,mk}"
+  - "!node_modules/node-pty/build/{Makefile,gyp-mac-tool}"
+  - "!node_modules/node-pty/build/**/{obj,obj.target,.deps}/**"
+  - "!node_modules/node-pty/prebuilds/**/*.pdb"
+  # Other platforms' prebuilds are removed per target in scripts/after-pack.cjs (a platform-level `files` would replace this list).
+  # node-pty loads build/Release or prebuilds/<platform>-<arch> only; bin/ is node-gyp output nothing requires.
+  - "!node_modules/node-pty/bin/**"
 # Not packed into app.asar: the runtime spawns launchers from dist/ (as the macOS build does).
 asar: false
+# Chromium/Electron locales: the app UI is English only; Chromium strings fall back to en-US.
+electronLanguages: [en-US]
+compression: maximum
 npmRebuild: true
 nodeGypRebuild: false
 artifactName: "Muster-Agent-${version}-${os}-${arch}.${ext}"
@@ -43,6 +57,7 @@ linux:
     entry:
       Keywords: agent;ai;coding;terminal;
 deb:
+  compression: xz
   # libsecret + a Secret Service provider back safeStorage (API keys); xdg-utils opens links; libnotify4 for notifications.
   depends: [libgtk-3-0 | libgtk-3-0t64, libnss3, libxss1, libasound2 | libasound2t64, libgbm1, libsecret-1-0, xdg-utils, libnotify4]
   recommends: [gnome-keyring | kwalletmanager | keepassxc]

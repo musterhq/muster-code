@@ -18,11 +18,11 @@ It is one Node process with an SQLite database. In our end-to-end run it idled a
 
 ## Quickstart
 
-Download `muster-server-<version>-<platform>.tar.gz` for your platform from the
+Download `muster-server-<version>-<platform>.tar.xz` for your platform from the
 [releases page](https://github.com/musterhq/muster-code/releases). Check it against `SHA256SUMS`, then:
 
 ```sh
-tar -xzf muster-server-<version>-linux-x64.tar.gz
+tar -xf muster-server-<version>-linux-x64.tar.xz   # needs xz (the xz-utils package on Debian/Ubuntu)
 cd muster-server-<version>-linux-x64
 bin/muster-server init --username admin      # creates ~/.muster-server, the secret key and the owner (asks for a password)
 bin/muster-server start                      # http://127.0.0.1:7470
