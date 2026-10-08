@@ -176,6 +176,7 @@ root.unmount();await delay(30);
 assert.equal(calls.filter(c=>c.command==='paperclip.watch').at(-1)!.input.visible,false,'leaving the hub stops live updates');
 
 // Project › Roster: cards, reporting lines, the talking-now edge, keyboard
+Object.assign(snapshot.agents[2]!,{model:null,adapter:'process'}); // #307: a server agent with no model shows that, never Muster's default
 const root2=createRoot(document.getElementById('root')!,{onUncaughtError:(e:unknown)=>{(errors as unknown[]).push(e);}});
 root2.render(<ProjectRoster projectId="p1"/>);
 await delay(200);
@@ -183,7 +184,9 @@ const cards=[...document.querySelectorAll('.ws-roster-card')];
 assert.deepEqual(cards.map(c=>c.querySelector('.ws-roster-name')!.textContent),['CEO','CTO','QA']);
 assert.equal(document.querySelectorAll('.ws-roster-line').length,2,'CEO→CTO and CTO→QA reporting lines');
 assert.equal(document.querySelectorAll('.ws-roster-talk').length,1,'CEO is talking to CTO on the live RAG-15');
-assert.match(cards[1].getAttribute('title')!,/Working on: RAG-15 Implement migration\nModel: claude-opus-5-5/,'hover shows current work and model');
+assert.match(cards[1].getAttribute('title')!,/Working on: RAG-15 Implement migration\nModel: Opus 5\.5/,'hover shows current work and the friendly model');
+assert.deepEqual([...document.querySelectorAll('.ws-roster-runtime')].map(n=>n.textContent),['Claude Code · Opus 5.5','Claude Code · Opus 5.5','Process · Model not shared by the server'],'each card names its runtime and model; a missing model is said');
+assert.ok(!/terra/i.test(document.body.textContent!),'never Muster’s default model for a server agent');
 assert.match(cards[0].textContent!,/3/,'memory badge from the project’s bank');
 // Pulse: Paperclip agents belong to the company, so the project's Pause says so and warns before stopping them.
 const pause=[...document.querySelectorAll('.ws-page-actions button')].find(b=>/^Pause/.test(b.textContent!));

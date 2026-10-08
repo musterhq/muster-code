@@ -25,7 +25,7 @@ const AGENT_STATE: Record<string, AgentState> = { active: 'active', idle: 'idle'
 export function mapAgent(a: Json): WorkspaceAgent {
   const adapter = obj(a.adapterConfig);
   return {
-    id: String(a.id), name: str(a.name) ?? 'Agent', role: str(a.role) ?? 'general', title: str(a.title), model: str(adapter.model), adapter: str(a.adapterType),
+    id: String(a.id), name: str(a.name) ?? 'Agent', role: str(a.role) ?? 'general', title: str(a.title), model: str(adapter.model)?.trim() || null, adapter: str(a.adapterType),
     status: AGENT_STATE[String(a.status)] ?? 'idle', reportsTo: str(a.reportsTo), lastActiveAt: str(a.lastHeartbeatAt) ?? str(a.updatedAt),
     error: str(a.errorReason) ?? str(a.pauseReason), pausable: true, source: 'paperclip', capabilities: str(a.capabilities),
     ...(skillsOf(adapter).length ? { skills: skillsOf(adapter) } : {}),
