@@ -18,7 +18,10 @@ grep -q '^MimeType=.*x-scheme-handler/muster;' "$desktop" || fail "desktop MimeT
 grep -q '^Categories=.*Development' "$desktop" || fail "desktop Categories"
 grep -q '^Exec=.*muster-agent.* %U' "$desktop" || fail "desktop Exec"
 ! grep -q -- '--no-sandbox' "$desktop" || fail "deb Exec must not hard-code --no-sandbox"
-ls "$work"/deb/usr/share/icons/hicolor/*/apps/muster-agent.png > /dev/null || fail "deb has no hicolor icons"
+for size in 16 24 32 48 64 128 256 512; do [ -f "$work/deb/usr/share/icons/hicolor/${size}x${size}/apps/muster-agent.png" ] || fail "deb has no ${size}x${size} icon"; done
+[ -f "$work/deb/opt/Muster Agent/resources/app.asar" ] || fail "deb lacks resources/app.asar"
+[ ! -d "$work/deb/opt/Muster Agent/resources/app" ] || fail "deb still ships loose resources/app"
+[ -x "$work/deb/opt/Muster Agent/resources/app.asar.unpacked/dist/runtime/resources/codex-launch.sh" ] || fail "deb lacks the unpacked Codex launcher"
 head -1 "$work/deb/opt/Muster Agent/muster-agent" | grep -q '^#!/bin/sh' || fail "deb launcher is not the sandbox-aware wrapper"
 [ -x "$work/deb/opt/Muster Agent/muster-agent.bin" ] || fail "deb lacks muster-agent.bin"
 [ -f "$work/deb/opt/Muster Agent/resources/apparmor-profile" ] || fail "deb lacks the AppArmor profile"
@@ -31,6 +34,8 @@ grep -Eq '(^|/)muster-agent\.bin$' "$work/tar-list" || fail "tar.gz lacks muster
 grep -Eq '(^|/)chrome-sandbox$' "$work/tar-list" || fail "tar.gz lacks chrome-sandbox"
 
 appimage=$(ls Muster-Agent-*-linux-x86_64.AppImage) || fail "no AppImage"
+# Type 2 static runtime: nothing to load from the system, so no libfuse2 (absent on Ubuntu 24.04).
+! readelf -d "$appimage" 2>/dev/null | grep -q 'libfuse' || fail "the AppImage runtime links libfuse"
 [ -x "$appimage" ] || chmod +x "$appimage"
 (cd "$work" && APPIMAGE_EXTRACT_AND_RUN=1 "$OLDPWD/$appimage" --appimage-extract '*.desktop' > /dev/null)
 ad=$(ls "$work"/squashfs-root/*.desktop) || fail "AppImage has no .desktop"

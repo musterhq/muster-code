@@ -120,7 +120,12 @@ try {
   for (let i = 0; i < 30 && !output.includes('MUSTER_SMOKE_42'); i++) { await sleep(500); output = (await invoke('terminal.snapshot', {id: terminal.id})).data; }
   if (!output.includes('MUSTER_SMOKE_42')) fail(`the terminal did not print the command output. Got: ${JSON.stringify(output.slice(-400))}`);
   else console.log('terminal ran a command: MUSTER_SMOKE_42');
-  await invoke('terminal.kill', {id: terminal.id});
+  // The app's own answer to a slow close is "Try closing it again" (the first ConPTY teardown on a freshly installed
+  // copy can outlast its 3 s wait while Defender scans the new files); do what a user would, at most twice more.
+  for (let attempt = 1; ; attempt++) {
+    try { await invoke('terminal.kill', {id: terminal.id}); if (attempt > 1) console.log(`terminal closed on attempt ${attempt}`); break; }
+    catch (error) { if (attempt >= 3 || !/did not stop/.test(String(error))) throw error; console.log(`terminal close attempt ${attempt}: ${String(error).slice(-80)}`); }
+  }
   // Agent tools: the launchers must start and reach the app's tool host, on every platform.
   const userData = path.join(profile, 'user-data');
   for (const [stem, label] of [['muster-terminal-mcp', 'terminal'], ['muster-browser-mcp', 'browser']]) {
@@ -135,8 +140,13 @@ try {
     } catch (error) { fail(`the ${label} agent tool launcher failed: ${error instanceof Error ? error.message : String(error)}`); }
   }
   const updates = await invoke('updates.status', undefined);
-  console.log(`updates: ${updates.phase} (current ${updates.current})`);
+  console.log(`updates: ${updates.phase} (current ${updates.current}, installs via ${updates.method ?? 'unknown'})`);
   if (process.env.SMOKE_EXPECT_UPDATES === '1' && updates.phase === 'disabled') fail('updates are disabled: the packaged build has no update source.');
+  // How this install updates itself (nsis, appimage, deb, manual): proves the app recognised the way it was installed.
+  if (process.env.SMOKE_EXPECT_UPDATE_METHOD) {
+    if (updates.method !== process.env.SMOKE_EXPECT_UPDATE_METHOD) fail(`update method is ${updates.method}, expected ${process.env.SMOKE_EXPECT_UPDATE_METHOD}.`);
+    else console.log(`update method: ${updates.method}`);
+  }
   // The installed deb must keep the sandbox ON (its AppArmor profile grants user namespaces): no launcher fallback notice.
   if (process.env.SMOKE_EXPECT_SANDBOX === '1' && /starting with --no-sandbox/.test(appOutput)) fail('the launcher fell back to --no-sandbox; the installed package should keep the sandbox on.');
   if (!process.exitCode) console.log('SMOKE OK');

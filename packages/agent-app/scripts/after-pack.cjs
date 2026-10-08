@@ -5,11 +5,15 @@ const path = require('node:path');
 
 // node-pty ships prebuilds for several platforms; keep only the one being packaged. The loader (node-pty/lib/utils.js) reads
 // build/Release first and prebuilds/<platform>-<arch> second, so another platform's directory is never opened.
+// With asar (Windows, Linux) node-pty lives in resources/app.asar.unpacked; the asar header still lists the pruned files,
+// but nothing opens them and they carry no bytes. Without asar (macOS) it is resources/app.
 function pruneForeignPrebuilds(context) {
-  const prebuilds = path.join(context.appOutDir, 'resources', 'app', 'node_modules', 'node-pty', 'prebuilds');
-  if (!fs.existsSync(prebuilds)) return;
-  for (const name of fs.readdirSync(prebuilds)) if (!name.startsWith(`${context.electronPlatformName}-`)) fs.rmSync(path.join(prebuilds, name), {recursive: true, force: true});
-  if (fs.readdirSync(prebuilds).length === 0) fs.rmdirSync(prebuilds);
+  for (const app of ['app', 'app.asar.unpacked']) {
+    const prebuilds = path.join(context.appOutDir, 'resources', app, 'node_modules', 'node-pty', 'prebuilds');
+    if (!fs.existsSync(prebuilds)) continue;
+    for (const name of fs.readdirSync(prebuilds)) if (!name.startsWith(`${context.electronPlatformName}-`)) fs.rmSync(path.join(prebuilds, name), {recursive: true, force: true});
+    if (fs.readdirSync(prebuilds).length === 0) fs.rmdirSync(prebuilds);
+  }
 }
 
 exports.default = async function afterPack(context) {
