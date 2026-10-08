@@ -120,7 +120,12 @@ try {
   for (let i = 0; i < 30 && !output.includes('MUSTER_SMOKE_42'); i++) { await sleep(500); output = (await invoke('terminal.snapshot', {id: terminal.id})).data; }
   if (!output.includes('MUSTER_SMOKE_42')) fail(`the terminal did not print the command output. Got: ${JSON.stringify(output.slice(-400))}`);
   else console.log('terminal ran a command: MUSTER_SMOKE_42');
-  await invoke('terminal.kill', {id: terminal.id});
+  // The app's own answer to a slow close is "Try closing it again" (the first ConPTY teardown on a freshly installed
+  // copy can outlast its 3 s wait while Defender scans the new files); do what a user would, at most twice more.
+  for (let attempt = 1; ; attempt++) {
+    try { await invoke('terminal.kill', {id: terminal.id}); if (attempt > 1) console.log(`terminal closed on attempt ${attempt}`); break; }
+    catch (error) { if (attempt >= 3 || !/did not stop/.test(String(error))) throw error; console.log(`terminal close attempt ${attempt}: ${String(error).slice(-80)}`); }
+  }
   // Agent tools: the launchers must start and reach the app's tool host, on every platform.
   const userData = path.join(profile, 'user-data');
   for (const [stem, label] of [['muster-terminal-mcp', 'terminal'], ['muster-browser-mcp', 'browser']]) {
