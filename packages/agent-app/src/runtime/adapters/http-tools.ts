@@ -3,7 +3,7 @@ import {constants as fsc, promises as fs} from 'node:fs';
 import {dirname, isAbsolute, join, relative, sep} from 'node:path';
 import {isInsidePath, normalizeFsPath} from '../../shared/path-normalize.ts';
 import {agentCommandEnvironment} from '../command-environment.ts';
-import {killTree, WINDOWS} from '../process-tree.ts';
+import {killTreeAndEscapees, WINDOWS} from '../process-tree.ts';
 import {redactSecrets} from '../secret-redaction.ts';
 import type {AdapterRunInput} from './types.ts';
 
@@ -56,6 +56,16 @@ export function toolInstructions(access: ToolAccess, cwd: string): string {
 const clip = (text: string, max = MAX_TOOL_OUTPUT) => text.length > max ? text.slice(0, max) + `\n[output cut at ${max} characters]` : text;
 /** What the timeline stores of a tool's output: capped, with the pattern-based secret redaction. The model still gets the real output. */
 const stored = (text: string) => redactSecrets(clip(text, MAX_TIMELINE_OUTPUT));
+
+/** The same event with secret shapes masked in the command line and in each file change's diff. */
+function redactedItem(params: Record<string, unknown>): Record<string, unknown> {
+  const item = params.item as Record<string, unknown> | undefined;
+  if (!item) return params;
+  const next: Record<string, unknown> = {...item};
+  if (typeof item.command === 'string') next.command = redactSecrets(item.command);
+  if (Array.isArray(item.changes)) next.changes = item.changes.map(change => change && typeof (change as {diff?: unknown}).diff === 'string' ? {...change, diff: redactSecrets((change as {diff: string}).diff)} : change);
+  return {...params, item: next};
+}
 
 /* ---- path confinement ---------------------------------------------------------------------------------------------- */
 const RESERVED = /^(?:con|prn|aux|nul|conin\$|conout\$|com[1-9]|lpt[1-9])(?:\..*)?$/i;
@@ -127,13 +137,15 @@ async function writeConfined(resolved: Resolved, content: string): Promise<void>
 }
 
 /** At most `limit` bytes of a regular file, never the whole thing. */
-async function readLimited(path: string, limit: number): Promise<{text: string; size: number}> {
+async function readLimited(path: string, limit: number, refuseHardLinked = false): Promise<{text: string; size: number}> {
   // stat first: opening a FIFO or device for reading can block forever.
   if (!(await fs.stat(path)).isFile()) throw new Error(`${path} is not a regular file.`);
   const handle = await fs.open(path, fsc.O_RDONLY);
   try {
     const info = await handle.stat();
     if (!info.isFile()) throw new Error(`${path} is not a regular file.`);
+    // A hardlink planted in the folder can name a file that lives outside it; whether its other names are outside cannot be known, so refuse.
+    if (refuseHardLinked && info.nlink > 1) throw new Error(`${path} has other hard links, so it is not read outside Full access (it may be the same file as one outside the working folder).`);
     const buffer = Buffer.alloc(Math.min(info.size, limit));
     const {bytesRead} = await handle.read(buffer, 0, buffer.length, 0);
     return {text: buffer.subarray(0, bytesRead).toString('utf8'), size: info.size};
@@ -159,8 +171,8 @@ function runCommand(command: string, timeoutSeconds: number, ctx: ToolContext): 
     child.stdout.on('data', add); child.stderr.on('data', add);
     const end = () => {
       if (child.pid === undefined) return;
-      try { killTree(child.pid, 'SIGTERM'); } catch { /* already gone */ }
-      if (!WINDOWS) setTimeout(() => { try { killTree(child.pid!, 'SIGKILL'); } catch { /* already gone */ } }, 2000).unref();
+      try { killTreeAndEscapees(child.pid, 'SIGTERM'); } catch { /* already gone */ }
+      if (!WINDOWS) setTimeout(() => { try { killTreeAndEscapees(child.pid!, 'SIGKILL'); } catch { /* already gone */ } }, 2000).unref();
     };
     const finish = (exitCode: number | null, extra = '') => { if (done) return; done = true; clearTimeout(timer); ctx.signal.removeEventListener('abort', stop); resolvePromise({output: clip(output + extra), exitCode}); };
     const stop = () => { end(); finish(null, '\n[stopped]'); };
@@ -175,12 +187,14 @@ function runCommand(command: string, timeoutSeconds: number, ctx: ToolContext): 
 /** Runs one tool call, reporting it to the timeline in the same item shapes Codex and Claude Code produce. */
 export async function executeTool(call: ToolCall, ctx: ToolContext): Promise<ToolResult> {
   const base = {threadId: ctx.threadId, turnId: ctx.turnId};
+  /** The timeline stores the command text and the file diffs too: pattern-redact them like the output. */
+  const emit: ToolContext['emit'] = (method, params) => ctx.emit(method, redactedItem(params));
   let args: Record<string, unknown> = {};
   try { const parsed = JSON.parse(call.arguments || '{}') as unknown; if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) args = parsed as Record<string, unknown>; }
   catch { return {content: 'The tool arguments were not valid JSON.', ok: false}; }
   const id = call.id, cwd = normalizeFsPath(ctx.cwd);
   const finish = (item: Record<string, unknown>, result: ToolResult, shown = result.content): ToolResult => {
-    ctx.emit('item/completed', {...base, item: {...item, id, status: result.ok ? 'completed' : 'failed', aggregatedOutput: stored(shown), ...(result.ok ? {} : {success: false})}});
+    emit('item/completed', {...base, item: {...item, id, status: result.ok ? 'completed' : 'failed', aggregatedOutput: stored(shown), ...(result.ok ? {} : {success: false})}});
     return result;
   };
   const kindOf = call.name === 'run_command' ? 'commandExecution' : call.name === 'read_file' ? 'fileRead' : call.name === 'write_file' || call.name === 'edit_file' ? 'fileChange' : 'commandExecution';
@@ -191,7 +205,7 @@ export async function executeTool(call: ToolCall, ctx: ToolContext): Promise<Too
     return finish({type: 'commandExecution', command: `${call.name} (blocked)`, cwd}, {content: why, ok: false});
   }
   /** Project rules and the user-process guard; false when declined. */
-  const approved = async (method: string, params: Record<string, unknown>) => !ctx.authorize || await ctx.authorize(method, {...params, itemId: id, policyOnly: true});
+  const approved = async (method: string, params: Record<string, unknown>) => { if (!ctx.authorize) return true; try { return await ctx.authorize(method, {...params, itemId: id, policyOnly: true}); } catch { return false; } };
   const declined: ToolResult = {content: 'This was declined (a Project tool rule, the protection for your own processes, or your answer).', ok: false};
   let item: Record<string, unknown> = {type: kindOf};
   try {
@@ -199,27 +213,27 @@ export async function executeTool(call: ToolCall, ctx: ToolContext): Promise<Too
       const command = typeof args.command === 'string' ? args.command : '';
       if (!command.trim()) return {content: 'A command is required.', ok: false};
       item = {type: 'commandExecution', command, cwd};
-      ctx.emit('item/started', {...base, item: {...item, id}});
+      emit('item/started', {...base, item: {...item, id}});
       if (!await approved('item/commandExecution/requestApproval', {command, cwd})) return finish(item, declined);
       const remaining = ctx.deadline ? Math.max(1, Math.floor((ctx.deadline - Date.now()) / 1000)) : MAX_TIMEOUT_S;
       const timeout = Math.min(remaining, MAX_TIMEOUT_S, Math.max(1, typeof args.timeout_sec === 'number' && Number.isFinite(args.timeout_sec) ? Math.floor(args.timeout_sec) : DEFAULT_TIMEOUT_S));
       const {output, exitCode} = await runCommand(command, timeout, ctx);
-      ctx.emit('item/completed', {...base, item: {...item, id, status: exitCode === 0 ? 'completed' : 'failed', exitCode, aggregatedOutput: stored(output)}});
+      emit('item/completed', {...base, item: {...item, id, status: exitCode === 0 ? 'completed' : 'failed', exitCode, aggregatedOutput: stored(output)}});
       return {content: output || (exitCode === 0 ? '(no output)' : `Exited with code ${exitCode}`), ok: exitCode === 0};
     }
     const resolved = await resolvePath(call.name === 'list_directory' && args.path === undefined ? '.' : args.path, ctx);
     const path = resolved.path;
     if (call.name === 'read_file') {
       item = {type: 'fileRead', path, name: path};
-      ctx.emit('item/started', {...base, item: {...item, id}});
-      const {text, size} = await readLimited(path, MAX_FILE_READ);
+      emit('item/started', {...base, item: {...item, id}});
+      const {text, size} = await readLimited(path, MAX_FILE_READ, resolved.confined);
       const content = (text || '(empty file)') + (size > MAX_FILE_READ ? `\n[file is ${size} bytes; the first ${MAX_FILE_READ} are shown]` : '');
       // The timeline row shows that the file was read, not its body.
       return finish(item, {content, ok: true}, `Read ${Math.min(size, MAX_FILE_READ)} of ${size} bytes`);
     }
     if (call.name === 'list_directory') {
       item = {type: 'commandExecution', command: `ls ${path}`, cwd, commandActions: [{type: 'listFiles', path}]};
-      ctx.emit('item/started', {...base, item: {...item, id}});
+      emit('item/started', {...base, item: {...item, id}});
       const entries = await fs.readdir(path, {withFileTypes: true});
       return finish(item, {content: entries.slice(0, 500).map(entry => entry.isDirectory() ? entry.name + '/' : entry.name).join('\n') || '(empty folder)', ok: true});
     }
@@ -227,7 +241,7 @@ export async function executeTool(call: ToolCall, ctx: ToolContext): Promise<Too
       const content = typeof args.content === 'string' ? args.content : '';
       const existed = await fs.lstat(path).then(() => true, () => false);
       item = {type: 'fileChange', changes: [{path, kind: existed ? 'update' : 'add', diff: content.split('\n').slice(0, 200).map(line => '+' + line).join('\n')}]};
-      ctx.emit('item/started', {...base, item: {...item, id}});
+      emit('item/started', {...base, item: {...item, id}});
       if (!await approved('item/fileChange/requestApproval', {changes: [{path, kind: existed ? 'update' : 'add'}]})) return finish(item, declined);
       await writeConfined(resolved, content);
       return finish(item, {content: `Wrote ${path}`, ok: true});
@@ -235,7 +249,7 @@ export async function executeTool(call: ToolCall, ctx: ToolContext): Promise<Too
     if (call.name === 'edit_file') {
       const oldText = typeof args.old_string === 'string' ? args.old_string : '', newText = typeof args.new_string === 'string' ? args.new_string : '';
       item = {type: 'fileChange', changes: [{path, kind: 'update', diff: oldText.split('\n').map(line => '-' + line).concat(newText.split('\n').map(line => '+' + line)).join('\n')}]};
-      ctx.emit('item/started', {...base, item: {...item, id}});
+      emit('item/started', {...base, item: {...item, id}});
       if (!await approved('item/fileChange/requestApproval', {changes: [{path, kind: 'update'}]})) return finish(item, declined);
       const info = await fs.stat(path);
       if (!info.isFile() || info.size > MAX_EDIT_FILE) return finish(item, {content: `${path} is not a regular file under ${MAX_EDIT_FILE / 1024 / 1024} MB.`, ok: false});
