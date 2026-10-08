@@ -1,7 +1,7 @@
 .owner-picker { position: relative; display: inline-block; min-width: 0; max-width: 100%; }
 .owner-trigger { display: inline-flex; align-items: center; justify-content: space-between; gap: 6px; width: 100%; text-align: left; cursor: pointer; }
 .owner-current { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
-.owner-pop { position: absolute; z-index: 60; top: calc(100% + 4px); left: 0; width: 280px; display: grid; gap: 4px; padding: 6px; background: var(--bg-menu); border: 1px solid var(--hairline); border-radius: var(--radius-8); box-shadow: var(--shadow-popover); }
+.owner-pop { position: absolute; z-index: var(--z-popover); top: calc(100% + 4px); left: 0; width: 280px; display: grid; gap: 4px; padding: 6px; background: var(--bg-menu); border: 1px solid var(--hairline); border-radius: var(--radius-8); box-shadow: var(--shadow-popover); }
 .owner-filter { width: 100%; box-sizing: border-box; padding: 6px 8px; font: inherit; font-size: var(--fs-13); color: var(--text); background: var(--bg); border: 1px solid var(--hairline); border-radius: var(--radius-6); }
 .owner-filter:focus-visible { outline: 1px solid var(--focus-ring); }
 .owner-list { list-style: none; margin: 0; padding: 0; max-height: 260px; overflow: auto; display: grid; }

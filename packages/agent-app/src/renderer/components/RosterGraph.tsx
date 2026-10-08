@@ -10,10 +10,11 @@ import type { WorkspaceAgent, WorkspaceSnapshot, WorkspaceTask } from '../../sha
 import type { ProviderInfo } from '../../shared/protocol';
 import { loadProviders } from '../store';
 import { useStoreSelector } from '../useStore';
+import { friendlyModel, MODEL_NOT_SHARED, RUNTIME_NAMES } from '../../shared/agent-engine';
 import { AGENT_STATE_LABEL, Monogram } from './HubParts';
 
 const CARD_W = 232, CARD_H = 118, H_GAP = 20, V_GAP = 56, FOREST_GAP = 72, PAD = 40;
-const RUNTIME: Record<string, string> = { claude_local: 'Claude Code', codex_local: 'Codex', opencode_local: 'OpenCode', gemini_local: 'Gemini CLI', cursor_local: 'Cursor', process: 'Process', http: 'HTTP', muster: 'Muster', codex: 'Codex', 'claude-code': 'Claude Code', opencode: 'OpenCode', pi: 'Pi' };
+const RUNTIME = RUNTIME_NAMES;
 /** A runner's name: the harness (Claude Code, Codex…), else the configured provider's display name (OpenAI, not "openai-direct"). */
 export const runtimeLabel = (adapter: string | null, providers?: readonly ProviderInfo[]) => adapter ? RUNTIME[adapter] ?? providers?.find(p => p.id === adapter)?.name ?? adapter.replace(/_/g, ' ') : '—';
 /** runtimeLabel with the configured providers' display names (loaded once). */
@@ -152,14 +153,15 @@ export function RosterGraph({ snapshot, onOpenAgent, onOpenTask }: { snapshot: W
         </button>)}
         {layout.placed.map(p => {
           const a = p.agent, task = work.get(a.id), mem = task?.projectId ? memory.get(task.projectId) : null;
-          const hover = [task ? `${task.live ? 'Working on' : 'Next'}: ${task.key} ${task.title}` : 'No open work', a.model ? `Model: ${a.model}` : null, a.error ? `Error: ${a.error.replace(/_/g, ' ')}` : null].filter(Boolean).join('\n');
+          const runtime = a.role === 'board' ? 'Owner' : a.source === 'paperclip' ? `${runtimeLabel(a.adapter)} · ${friendlyModel(a.model) ?? MODEL_NOT_SHARED}` : `${runtimeLabel(a.adapter)}${a.model ? ` · ${a.model}` : ''}`;
+          const hover = [task ? `${task.live ? 'Working on' : 'Next'}: ${task.key} ${task.title}` : 'No open work', `Model: ${friendlyModel(a.model) ?? (a.source === 'paperclip' ? MODEL_NOT_SHARED : 'Project default runner')}`, a.error ? `Error: ${a.error.replace(/_/g, ' ')}` : null].filter(Boolean).join('\n');
           return <button key={a.id} ref={el => { cards.current.set(a.id, el); }} type="button" className="ws-roster-card" data-status={a.status} data-source={a.source} style={{ left: p.x, top: p.y, width: CARD_W, height: CARD_H }}
             title={hover} aria-label={`${a.name}, ${a.title ?? a.role}. ${AGENT_STATE_LABEL[a.status]}. ${hover}`} onClick={() => onOpenAgent(a.id)} onKeyDown={e => onKeyDown(e, p)}>
             <span className="ws-roster-avatar"><Monogram name={a.name} kind={a.role === 'board' ? 'user' : 'agent'}/><span className="ws-roster-dot" data-status={a.status} aria-hidden="true"/></span>
             <span className="ws-roster-body">
               <span className="ws-roster-name">{a.name}</span>
               <span className="ws-roster-title">{a.title ?? a.role}</span>
-              <span className="ws-roster-runtime">{a.role === 'board' ? 'Owner' : `${runtimeLabel(a.adapter)}${a.model ? ` · ${a.model}` : ''}`}</span>
+              <span className="ws-roster-runtime" title={runtime}>{runtime}</span>
               {task ? <span className="ws-roster-work">{task.live && <span className="ws-live-dot" aria-hidden="true"/>}{task.key} · {task.title}</span>
                 : <span className="ws-roster-cap">{a.capabilities ?? ''}</span>}
             </span>

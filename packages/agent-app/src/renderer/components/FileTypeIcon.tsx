@@ -1,5 +1,5 @@
 import React from 'react';
-import {AppWindow, Inbox, MessagesSquare, NotebookPen, Bot, Braces, File, FileArchive, FileAudio, FileCode, FileImage, FileLock, FileSpreadsheet, FileText, FileType, FileVideo, Files, Folder, FolderOpen, GitBranch, GitCompare, GitMerge, GitPullRequest, Globe, History, Monitor, Presentation, SquareTerminal, type LucideIcon} from 'lucide-react';
+import {AppWindow, Inbox, MessagesSquare, NotebookPen, Bot, Braces, File, FileArchive, FileAudio, FileCode, FileImage, FileLock, FileSpreadsheet, FileText, FileType, FileVideo, Files, Folder, FolderOpen, GitBranch, GitCompare, GitMerge, GitPullRequest, Globe, History, Monitor, PictureInPicture2, Presentation, SquareTerminal, type LucideIcon} from 'lucide-react';
 import type {WorkspaceTab} from '../store';
 import {fileIcon, type FileIconKind} from './filePresentation';
 import './file-type-icon.css';
@@ -23,7 +23,7 @@ export function FileTypeIcon({path, directory = false, open = false, size = 13, 
 
 const KIND_GLYPHS: Record<Exclude<WorkspaceTab['kind'], 'file' | 'attachment'>, LucideIcon> = {
   diff: GitCompare, git: GitBranch, changes: GitCompare, files: Files, browser: Globe, processes: SquareTerminal, computer: Monitor, subagents: Bot, pullRequest: GitPullRequest, history: History, conflict: GitMerge,
-  canvas: NotebookPen, sideChat: MessagesSquare, pluginUi: AppWindow, inbox: Inbox,
+  canvas: NotebookPen, sideChat: MessagesSquare, pluginUi: AppWindow, inbox: Inbox, liveView: PictureInPicture2,
 };
 
 /** 13px glyph for a resource tab or a recently closed resource: kind glyph, or the file-type icon (also used for an

@@ -2,7 +2,7 @@ import type {ScopedComputerRef} from '../shared/scoped-computer-protocol';
 import {browserURL} from '../shared/browser-protocol.ts';
 export interface SavedTab {
   id: string;
-  kind: 'files' | 'git' | 'changes' | 'file' | 'diff' | 'subagents' | 'browser' | 'computer' | 'processes' | 'attachment' | 'pullRequest' | 'history' | 'conflict' | 'canvas' | 'sideChat' | 'pluginUi' | 'inbox';
+  kind: 'files' | 'git' | 'changes' | 'file' | 'diff' | 'subagents' | 'browser' | 'computer' | 'processes' | 'attachment' | 'pullRequest' | 'history' | 'conflict' | 'canvas' | 'sideChat' | 'pluginUi' | 'inbox' | 'liveView';
   gitView?: 'changes' | 'history' | 'pullRequest';
   sha?: string;
   canvasId?: string;
@@ -81,6 +81,8 @@ export function readWorkspace(storage: Pick<Storage, 'getItem'>, scope = 'person
         continue;
       }
       if (t?.kind === 'browser') {
+        // An agent's session is never re-opened by restoring the workspace: it comes back as a picture-in-picture only when the agent acts.
+        if (typeof t.id==='string' && t.id.startsWith('browser:agent-')) continue;
         if (typeof t.id==='string' && /^browser:[a-zA-Z0-9_-]{1,128}$/.test(t.id) && typeof t.browserProfileId==='string' && /^[a-zA-Z0-9_-]{1,64}$/.test(t.browserProfileId) && !tabs.some(tab=>tab.id===t.id)) {
           let url='about:blank';
           try {if(t.url!==undefined)url=browserURL(t.url);} catch {}
@@ -145,7 +147,7 @@ export function redactBrowserURL(value: string): string {
 
 export function saveWorkspace(storage: Pick<Storage, 'setItem'>, workspace: SavedWorkspace, scope = 'personal'): boolean {
   try {
-    storage.setItem(storageKey(scope), JSON.stringify({version:2, scope, tabs:workspace.tabs.slice(0,MAX_TABS).map(tab=>{
+    storage.setItem(storageKey(scope), JSON.stringify({version:2, scope, tabs:workspace.tabs.filter(tab=>tab.kind!=='liveView'&&!(tab.kind==='browser'&&tab.id.startsWith('browser:agent-'))).slice(0,MAX_TABS).map(tab=>{
       if(tab.kind!=='browser')return tab;
       let url='about:blank';
       try {if(tab.url!==undefined)url=redactBrowserURL(browserURL(tab.url));} catch {}

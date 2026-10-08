@@ -4,6 +4,7 @@
  * what each agent is working on now, and Pulse. Muster-native agents are the project's own members (project_members);
  * Paperclip agents come from the linked company. The old Agents tab lives here now, as "Working now".
  */
+import { friendlyModel, MODEL_NOT_SHARED } from '../../shared/agent-engine';
 import { Check, Eye, EyeOff, List, Network, Pencil, Plus, UserPlus, X } from 'lucide-react';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import type { WorkspaceAgent, WorkspaceSnapshot } from '../../shared/domains/paperclip-protocol';
@@ -89,7 +90,7 @@ export function RosterList({ snapshot, agents, nav }: { snapshot: WorkspaceSnaps
         return <li key={a.id} className="roster-item" data-hidden={a.hidden || undefined}><button type="button" className="ws-row roster-row" onClick={() => nav.onOpenAgent(a.id)}>
           <span className="roster-bar-mark" data-tone={agentTone(a.status)} aria-hidden="true"/>
           <span className="ws-row-text"><span className="ws-row-title">{a.name}</span>
-            <span className="ws-row-meta">{[a.title, runtimeLabel(a.adapter) === '—' ? null : runtimeLabel(a.adapter), a.model].filter(Boolean).join(' · ') || 'Project default runner'}</span></span>
+            <span className="ws-row-meta">{[a.title, runtimeLabel(a.adapter) === '—' ? null : runtimeLabel(a.adapter), a.source === 'paperclip' ? friendlyModel(a.model) ?? MODEL_NOT_SHARED : a.model].filter(Boolean).join(' · ') || 'Project default runner'}</span></span>
           {doing.get(a.id) ? <span className="roster-doing" title={doing.get(a.id)}>{doing.get(a.id)}</span> : a.lastActiveAt ? <span className="ws-row-age">active {agoLabel(a.lastActiveAt)}</span> : null}
           <span className="roster-boss">{boss ? <>reports to <Monogram name={boss.name} kind={boss.id === 'user:local' ? 'user' : 'agent'}/>{boss.name}</> : null}</span>
           <StateChip tone={agentTone(a.status)}>{AGENT_STATE_LABEL[a.status]}</StateChip>

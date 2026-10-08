@@ -160,7 +160,7 @@
 /* Like Codex, the conversation is centred in the room left of the card, not under the whole window: the
    composer, changes bar and footer shift with the transcript so every column edge lines up. `translate`
    moves them without reflowing; the composer is capped so it never runs under the card. */
-.center:is([data-summary='float'], [data-summary='reserve']) .chat > :not(.chat-head, .timeline-shell, .chat-empty, .chat-loading, .chat-error) { translate: calc(var(--summary-reserve) / -2) 0; }
+.center:is([data-summary='float'], [data-summary='reserve']) .chat > :not(.chat-head, .chat-error-banner, .fork-origin, .timeline-shell, .chat-empty, .chat-loading, .chat-error) { translate: calc(var(--summary-reserve) / -2) 0; }
 .center:is([data-summary='float'], [data-summary='reserve']) .chat > :is(div.composer, .turn-changes) { max-width: calc(100% - var(--summary-reserve) - 40px); }
 /* The folded pill ('overlay') sits in the transcript's top-right corner: push the first message below it
    (card gap 10px + pill 32px + 8px) so it never clips the opening bubble. Scrolled content may pass

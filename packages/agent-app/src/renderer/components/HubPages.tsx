@@ -1,6 +1,7 @@
 /** The hub pages (#115): Inbox (every chat and run that needs you), Roster (org graph + Pulse), an agent's page, Ledger
  *  (Receipts, Timeline, Activity, Costs) and Outputs. Muster's own rows and the linked Paperclip's render the same way,
  *  tagged by source. */
+import { friendlyModel, MODEL_NOT_SHARED } from '../../shared/agent-engine';
 import { AgentGovernancePanel } from './AgentGovernance';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { Box, Download, History, Inbox, Pause, Play, Square, X } from 'lucide-react';
@@ -195,7 +196,7 @@ export function AgentPage({ snapshot, agentId, nav }: { snapshot: WorkspaceSnaps
   const toggle = async () => { setBusy(true); try { await invoke(agent.status === 'paused' ? 'paperclip.agent.resume' : 'paperclip.agent.pause', { id: agent.id }); notifySuccess(`${agent.name} ${agent.status === 'paused' ? 'resumed' : 'paused'}.`); } catch (cause) { notifyError(cause); } finally { setBusy(false); } };
   const chip = (a: WorkspaceAgent) => <button key={a.id} type="button" className="ws-chip-link" onClick={() => nav.onOpenAgent(a.id)}><Monogram name={a.name}/>{a.name}</button>;
   return <div className="ws-page">
-    <PageHeader title={agent.name} detail={<>{agent.title ?? agent.role} · {runtimeLabel(agent.adapter)}{agent.model ? ` · ${agent.model}` : ''} <SourceTag source={agent.source}/></>}>
+    <PageHeader title={agent.name} detail={<>{agent.title ?? agent.role} · {runtimeLabel(agent.adapter)}{agent.source === 'paperclip' ? ` · ${friendlyModel(agent.model) ?? MODEL_NOT_SHARED}` : agent.model ? ` · ${agent.model}` : ''} <SourceTag source={agent.source}/></>}>
       <StateChip tone={agentTone(agent.status)}>{AGENT_STATE_LABEL[agent.status]}</StateChip>
       <EditAgentButton agent={agent} snapshot={snapshot}/>
       {agent.pausable && agent.status !== 'terminated' && <button type="button" className="settings-button secondary" disabled={busy} onClick={() => void toggle()}>{agent.status === 'paused' ? <><Play size={13}/>Resume</> : <><Pause size={13}/>Pause</>}</button>}

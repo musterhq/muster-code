@@ -14,6 +14,7 @@ import { agoLabel } from '../relativeTime';
 import { closeSettings, notifySuccess, selectChat } from '../store';
 import { fail, FOLDER_COPY } from './FolderChoice';
 import { plainError } from './resourceErrors';
+import { engineLabel } from '../../shared/agent-engine';
 import { ModalSheet } from './ModalSheet';
 import { Tip } from './Tooltip';
 import './checkout-panel.css';
@@ -153,7 +154,7 @@ function WorkLocallySheet({ plan, onClose, onStart }: { plan: CheckoutPlan; onCl
         <label><input type="radio" name="engine" checked={engine === 'org-definition'} onChange={() => setEngine('org-definition')}/><span><strong>{ENGINE_LABEL['org-definition']}</strong><small>The org’s own agent definitions (instructions, skills, model tier) on your providers.</small></span></label>
         <label><input type="radio" name="engine" checked={engine === 'personal-subscription'} onChange={() => setEngine('personal-subscription')}/><span><strong>{ENGINE_LABEL['personal-subscription']}</strong><small>Your own Claude, Codex, OmniRoute or other provider. The same org roles and workflow.</small></span></label>
       </div>
-      {engine === 'org-definition' ? <label className="project-edit-goal"><span>Work as</span><select className="ws-select is-field" value={agentId} onChange={e => setAgentId(e.target.value)}>{plan.agents.map(a => <option key={a.id} value={a.id} disabled={!a.mapsTo}>{a.name}{a.mapsTo ? ` → ${a.mapsTo}` : ' (no matching provider here)'}</option>)}</select></label>
+      {engine === 'org-definition' ? <label className="project-edit-goal"><span>Work as</span><select className="ws-select is-field" value={agentId} onChange={e => setAgentId(e.target.value)}>{plan.agents.map(a => <option key={a.id} value={a.id} disabled={!a.mapsTo}>{a.name}{a.mapsTo ? `: ${a.mapsTo}` : ' (no provider ready here)'}</option>)}</select></label>
         : <div className="ws-form-row"><label className="project-edit-goal"><span>Provider</span><select className="ws-select is-field" value={providerId} onChange={e => { setProviderId(e.target.value); setModel(plan.providers.find(p => p.id === e.target.value)?.models[0]?.id ?? ''); }}>{plan.providers.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select></label>
           <label className="project-edit-goal"><span>Model</span><select className="ws-select is-field" value={model} onChange={e => setModel(e.target.value)}>{(provider?.models ?? []).map(m => <option key={m.id} value={m.id}>{m.name}</option>)}</select></label></div>}
     </section>
@@ -240,7 +241,7 @@ export function CheckoutProperties({ detail }: { detail: WorkspaceTaskDetail }):
     </dl>
     {copy && <details className="ws-local-copy"><summary>Local copy of {copy.orgName}</summary>
       <p className="ws-faint">Read-only, taken {agoLabel(copy.takenAt)}. Definitions only: no keys or credentials. <button type="button" className="ws-link" onClick={() => void invoke('checkout.org', { taskId: lease.taskId, refresh: true }).then(r => setCopy(r.copy), fail)}>Refresh</button></p>
-      <ul className="ws-local-roster" aria-label="Roster (local copy)">{roster.map(a => <li key={a.id} data-child={a.reportsTo ? '' : undefined}><strong>{a.name}</strong>{a.title && a.title.toLowerCase() !== a.name.toLowerCase() ? <span className="ws-faint"> · {a.title}</span> : null}<small className="ws-faint">{[a.adapter, a.model].filter(Boolean).join(' · ')}{a.skills.length ? ` · ${a.skills.length} skills` : ''}</small></li>)}</ul>
+      <ul className="ws-local-roster" aria-label="Roster (local copy)">{roster.map(a => <li key={a.id} data-child={a.reportsTo ? '' : undefined}><strong>{a.name}</strong>{a.title && a.title.toLowerCase() !== a.name.toLowerCase() ? <span className="ws-faint"> · {a.title}</span> : null}<small className="ws-faint">{engineLabel(a.adapter, a.model)}{a.skills.length ? ` · ${a.skills.length} skills` : ''}</small></li>)}</ul>
       {copy.policy.length > 0 && <p className="ws-faint">Workflow: {copy.policy.map(s => `${s.type === 'review' ? 'review' : 'approval'} by ${s.participants.map(p => p.name).join(' or ')}`).join(' → ')}</p>}
     </details>}
     {handBack && <HandBackSheet taskId={lease.taskId} onClose={() => setHandBack(false)} onDone={() => { setHandBack(false); reload(); }}/>}
