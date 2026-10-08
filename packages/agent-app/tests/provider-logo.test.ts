@@ -41,3 +41,14 @@ test('the monogram fallback scales its letters with the icon and keeps the calle
   assert.match(small, /font-size:8.5px/);
   assert.match(large, /font-size:17px/);
 });
+
+test('catalog cards without a glyph render a rounded letter tile, never a bare letter', async () => {
+  const {ProviderLogo} = await import(`file://${outfile}`) as {ProviderLogo: (props: Record<string, unknown>) => unknown};
+  const React = await import('react');
+  const {renderToStaticMarkup} = await import('react-dom/server');
+  const tile = renderToStaticMarkup(React.createElement(ProviderLogo as never, {id: 'groq', name: 'Groq', size: 26, tile: true}));
+  assert.match(tile, /class="provider-monogram-tile"[^>]*>G</);
+  assert.match(tile, /width:26px;height:26px/);
+  const glyph = renderToStaticMarkup(React.createElement(ProviderLogo as never, {id: 'mistral', name: 'Mistral', brand: 'mistral', size: 26, tile: true}));
+  assert.match(glyph, /<svg[^>]*fill="currentColor"/);
+});

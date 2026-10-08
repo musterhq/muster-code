@@ -11,7 +11,8 @@ import type { ProviderInfo } from './protocol.ts';
 /** subscription-cli: sign in with a vendor CLI. api-key: hosted API with one key. local: self-hosted URL plus optional key. custom: any OpenAI-compatible URL. */
 export type CatalogAuthKind = 'subscription-cli' | 'api-key' | 'local' | 'custom';
 /** Glyph keys that ProviderLogo ships (simple-icons, CC0). An entry without one gets a monogram. */
-export type CatalogLogo = 'anthropic' | 'claude' | 'openai' | 'ollama' | 'lmstudio' | 'opencode';
+export type CatalogLogo = 'anthropic' | 'claude' | 'openai' | 'ollama' | 'lmstudio' | 'opencode'
+  | 'mistral' | 'openrouter' | 'deepseek' | 'gemini' | 'cursor';
 /** connected: usable now. installed: CLI present, not signed in. missing: CLI absent. not-connected: API/local with no live connection yet. */
 export type CatalogStatus = 'connected' | 'installed' | 'missing' | 'not-connected';
 
@@ -88,13 +89,13 @@ export const PROVIDER_CATALOG: CatalogEntry[] = [
     keyUrl: 'https://platform.openai.com/api-keys', defaultEndpoint: 'https://api.openai.com/v1', detect: endpointStatus('https://api.openai.com/v1')},
   {id: 'anthropic-api', name: 'Anthropic API', description: 'Claude models with an Anthropic API key.', logo: 'anthropic', authKind: 'api-key',
     keyUrl: 'https://console.anthropic.com/settings/keys', defaultEndpoint: 'https://api.anthropic.com/v1', detect: endpointStatus('https://api.anthropic.com/v1')},
-  {id: 'openrouter', name: 'OpenRouter', description: 'One key for hundreds of hosted models.', authKind: 'api-key',
+  {id: 'openrouter', name: 'OpenRouter', description: 'One key for hundreds of hosted models.', logo: 'openrouter', authKind: 'api-key',
     keyUrl: 'https://openrouter.ai/keys', defaultEndpoint: 'https://openrouter.ai/api/v1', detect: endpointStatus('https://openrouter.ai/api/v1')},
   {id: 'groq', name: 'Groq', description: 'Very fast open models on Groq hardware.', authKind: 'api-key',
     keyUrl: 'https://console.groq.com/keys', defaultEndpoint: 'https://api.groq.com/openai/v1', detect: endpointStatus('https://api.groq.com/openai/v1')},
-  {id: 'mistral', name: 'Mistral', description: 'Mistral and Codestral models.', authKind: 'api-key',
+  {id: 'mistral', name: 'Mistral', description: 'Mistral and Codestral models.', logo: 'mistral', authKind: 'api-key',
     keyUrl: 'https://console.mistral.ai/api-keys', defaultEndpoint: 'https://api.mistral.ai/v1', detect: endpointStatus('https://api.mistral.ai/v1')},
-  {id: 'deepseek', name: 'DeepSeek', description: 'DeepSeek chat and reasoning models.', authKind: 'api-key',
+  {id: 'deepseek', name: 'DeepSeek', description: 'DeepSeek chat and reasoning models.', logo: 'deepseek', authKind: 'api-key',
     keyUrl: 'https://platform.deepseek.com/api_keys', defaultEndpoint: 'https://api.deepseek.com/v1', detect: endpointStatus('https://api.deepseek.com/v1')},
   {id: 'ollama', name: 'Ollama', description: 'Models running on this Mac.', logo: 'ollama', authKind: 'local',
     installUrl: 'https://ollama.com/download', defaultEndpoint: 'http://127.0.0.1:11434/v1', detect: endpointStatus('http://127.0.0.1:11434/v1')},
@@ -123,4 +124,15 @@ export function plainError(cause: unknown, fallback: string): string {
 /** A name for a custom endpoint when the user does not give one: its host. */
 export function nameFromEndpoint(endpoint: string): string {
   try { return new URL(endpoint).host || 'Custom endpoint'; } catch { return 'Custom endpoint'; }
+}
+
+/**
+ * The sentence under an API key field, true for the OS it runs on. Mirrors what the runtime's secret store does with
+ * Electron safeStorage: macOS Keychain, Windows DPAPI, Linux libsecret or KWallet. Where Linux has no keyring Electron
+ * falls back to a hard-coded key ("basic_text"); the store refuses that and keeps the key for the session only.
+ */
+export function secretStorageNote(platform: string): string {
+  if (/mac/i.test(platform)) return 'Stored encrypted in your macOS Keychain and never shown again.';
+  if (/win/i.test(platform)) return 'Stored encrypted with Windows data protection (DPAPI) and never shown again.';
+  return 'Stored encrypted in your desktop keyring (libsecret or KWallet) and never shown again. If no keyring is running, Muster keeps the key for this session only and does not write it to disk.';
 }

@@ -2,7 +2,7 @@ import { Check, ChevronDown, ExternalLink, SquareTerminal, X } from 'lucide-reac
 import React, { useEffect, useRef, useState } from 'react';
 import type { ProviderInfo } from '../../shared/protocol';
 import type { ProviderDiagnosis } from '../../shared/domains/providers-protocol';
-import { fieldRules, nameFromEndpoint, plainError, PROVIDER_CATALOG, STATUS_LABEL, type CatalogEntry } from '../../shared/provider-catalog';
+import { fieldRules, nameFromEndpoint, plainError, PROVIDER_CATALOG, secretStorageNote, STATUS_LABEL, type CatalogEntry } from '../../shared/provider-catalog';
 import { invoke } from '../bridge';
 import { loadProviders, notifySuccess } from '../store';
 import { ProviderLogo } from './ProviderLogo';
@@ -28,7 +28,7 @@ export function AddProviderPanel(props: PanelProps) {
     <ul className="provider-grid">{PROVIDER_CATALOG.map(entry => {
       const status = entry.detect(props.providers);
       return <li key={entry.id}><button type="button" className="provider-tile" data-provider={entry.id} data-status={status} onClick={() => setChosen(entry)}>
-        <span className="provider-tile-logo" aria-hidden="true"><ProviderLogo id={entry.id} name={entry.name} brand={entry.logo} size={26}/></span>
+        <span className="provider-tile-logo" aria-hidden="true"><ProviderLogo id={entry.id} name={entry.name} brand={entry.logo} size={26} tile/></span>
         <span className="provider-tile-name">{entry.name}</span>
         <span className="provider-tile-desc">{entry.description}</span>
         <span className={`provider-chip is-${status}`}>{STATUS_LABEL[status]}</span>
@@ -91,7 +91,7 @@ function ProviderSheet({entry, providers, onClose, onBack, KeyField, openTermina
 
   return <div className="provider-sheet-scrim" onMouseDown={e => { if (e.target === e.currentTarget) dismiss(); }}>
     <div ref={ref} className="provider-sheet" role="dialog" aria-modal="true" aria-label={`Add ${entry.name}`} data-kind={entry.authKind} onKeyDown={e => { if (e.key === 'Escape') { e.stopPropagation(); dismiss(); } }}>
-      <header><span className="provider-tile-logo" aria-hidden="true"><ProviderLogo id={entry.id} name={entry.name} brand={entry.logo} size={22}/></span>
+      <header><span className="provider-tile-logo" aria-hidden="true"><ProviderLogo id={entry.id} name={entry.name} brand={entry.logo} size={22} tile/></span>
         <div><h3>{entry.name}</h3><p>{entry.description}</p></div>
         <button type="button" className="icon-button" aria-label="Close" disabled={busy} onClick={dismiss}><X size={15}/></button></header>
 
@@ -112,7 +112,7 @@ function ProviderSheet({entry, providers, onClose, onBack, KeyField, openTermina
         {rules.endpoint === 'shown' && <label>{entry.authKind === 'custom' ? 'API base URL' : 'Server address'}
           <input required type="url" maxLength={2048} value={endpoint} onChange={e => { setEndpoint(e.target.value); setTested(undefined); }} placeholder="https://api.example.com/v1" spellCheck={false}/></label>}
         {rules.key !== 'none' && <KeyField value={key} onChange={value => { setKey(value); setTested(undefined); }} label={rules.key === 'optional' ? 'API key (optional)' : 'API key'} autoFocus={rules.endpoint !== 'shown'}/>}
-        {entry.keyUrl && <p className="field-help"><button type="button" className="link-button" onClick={() => openLink(entry.keyUrl!)}>Get a key<ExternalLink size={11} aria-hidden="true"/></button>. Stored encrypted in your Keychain and never shown again.</p>}
+        {entry.keyUrl && <p className="field-help"><button type="button" className="link-button" onClick={() => openLink(entry.keyUrl!)}>Get a key<ExternalLink size={11} aria-hidden="true"/></button>. {secretStorageNote(typeof navigator !== 'undefined' ? navigator.platform : '')}</p>}
         {!entry.keyUrl && rules.key === 'optional' && <p className="field-help">Leave the key empty if this server does not ask for one.</p>}
         {entry.authKind === 'local' && entry.installUrl && <p className="field-help">Not running yet? <button type="button" className="link-button" onClick={() => openLink(entry.installUrl!)}>Get {entry.name}<ExternalLink size={11} aria-hidden="true"/></button></p>}
         {rules.advanced && <details className="sheet-advanced"><summary><ChevronDown size={12} aria-hidden="true"/>Advanced</summary>

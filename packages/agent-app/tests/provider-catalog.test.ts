@@ -4,7 +4,7 @@ import {mkdtemp, readFile, rm, writeFile, stat} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {test} from 'node:test';
-import {fieldRules, nameFromEndpoint, plainError, PROVIDER_CATALOG, registerCatalogEntries, STATUS_LABEL, type CatalogEntry} from '../src/shared/provider-catalog.ts';
+import {fieldRules, nameFromEndpoint, plainError, PROVIDER_CATALOG, registerCatalogEntries, secretStorageNote, STATUS_LABEL, type CatalogEntry} from '../src/shared/provider-catalog.ts';
 import {CustomProviders} from '../src/runtime/custom-providers.ts';
 import {SecretStore} from '../src/runtime/secret-store.ts';
 import {SERVER_SECRET} from '../src/runtime/server/config.ts';
@@ -102,4 +102,19 @@ test('the add flow never imports or names the Muster Server', async () => {
     const source = await readFile(new URL(file, import.meta.url), 'utf8');
     assert.doesNotMatch(source, /server\.json|runtime\/server|loadServerConfig|saveServerConfig|paperclip|hybrowlabs|server\.(connect|signin|config)/i, file);
   }
+});
+
+test('the API key sentence names the real store per OS and is honest when Linux has no keyring', () => {
+  assert.match(secretStorageNote('MacIntel'), /macOS Keychain/);
+  assert.match(secretStorageNote('Win32'), /DPAPI/);
+  assert.doesNotMatch(secretStorageNote('Win32'), /Keychain/);
+  const linux = secretStorageNote('Linux x86_64');
+  assert.match(linux, /libsecret or KWallet/);
+  assert.match(linux, /session only/);
+  assert.doesNotMatch(linux, /Keychain/);
+});
+
+test('the hosted API cards that have a simple-icons glyph use it', () => {
+  for (const id of ['openrouter', 'mistral', 'deepseek']) assert.equal(PROVIDER_CATALOG.find(e => e.id === id)?.logo, id);
+  for (const id of ['groq', 'omniroute', 'custom']) assert.equal(PROVIDER_CATALOG.find(e => e.id === id)?.logo, undefined, `${id} has no CC0 glyph and gets the letter tile`);
 });

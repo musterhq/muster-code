@@ -82,6 +82,7 @@
 .provider-tile:hover { background: var(--bg-hover); }
 .provider-tile:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .provider-tile-logo { display: inline-flex; align-items: center; justify-content: center; width: 34px; height: 34px; color: var(--text); }
+.provider-monogram-tile { display: inline-flex; align-items: center; justify-content: center; border-radius: var(--radius-8); background: var(--bg-active); border: 1px solid var(--hairline); color: var(--text-strong); font-weight: 600; line-height: 1; box-sizing: border-box; }
 .provider-tile-name { font-size: var(--fs-13); font-weight: 550; }
 .provider-tile-desc { flex: 1; color: var(--text-dim); font-size: var(--fs-12); line-height: 1.45; }
 .provider-chip { padding: 2px 8px; border: 1px solid var(--hairline); border-radius: var(--radius-16); color: var(--text-faint); font-size: var(--fs-11); }
