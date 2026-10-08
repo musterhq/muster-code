@@ -72,15 +72,16 @@ const providers: LocalProviderInfo[] = [
   { id: 'claude-code', name: 'Claude Code', driver: 'claude-code-cli', available: true, subscription: true, models: [{ id: 'claude-opus-4', name: 'Opus 4' }, { id: 'claude-haiku-4', name: 'Haiku 4' }] },
   { id: 'omniroute', name: 'OmniRoute', available: true, models: [{ id: 'gpt-x', name: 'GPT X' }] },
 ];
-function setup(opts: { tests?: number } = {}) {
+function setup(opts: { tests?: number; lazy?: boolean } = {}) {
   const server = new FakeServer(), db = new DatabaseSync(':memory:'), orgDir = join(mkdtempSync(join(tmpdir(), 'muster-orgcopy-')), 'checkout'), store = new CheckoutStore(() => db, orgDir);
   let clock = Date.parse('2026-10-05T10:00:00.000Z');
   const worktrees: string[] = [], pushed: string[] = [], emitted: (string | null)[] = [];
   let pushOk = true, noRemote = false, commitOk = true, hasTests = true, repo = true, chatSeq = 0, pushedHead = false, clean = true, head = 'abc123', origin = 'https://aiteam.example';
-  const prOk = new Set<string>(), gitCalls: string[] = [], commits: string[] = [];
+  const prOk = new Set<string>(), gitCalls: string[] = [], commits: string[] = [], statCalls: string[][] = [];
+  let salt = 0, statFails = false, stat = { count: 7, added: 120, removed: 30 }, queuedMore = false, wait: { fn: () => void; ms: number; live: boolean }[] = [];
   const homeDir = mkdtempSync(join(tmpdir(), 'muster-home-'));
   // The local chat as the timeline shows it: the person's message, a file change, a test run (tool output), and the agent's last message.
-  const tl = { user: 'Implement it.', change: true, test: 'ℹ pass 12\nℹ fail 1' as string | null, testStatus: 'completed', exit: 0 as number, testCommand: 'npm test', after: null as { command: string } | null, final: 'Worked on it.', trailingTool: null as string | null };
+  const tl = { user: 'Implement it.', change: true, test: 'ℹ pass 12\nℹ fail 1' as string | null, testStatus: 'completed', exit: 0 as number, testCommand: 'npm test', after: null as { command: string } | null, final: 'Worked on it.', trailingTool: null as string | null, outcome: 'completed', question: false };
   const events: unknown[] = [];
   const settings: Record<string, never> = {};
   const reader = new OrgReader({ backend: () => server.backend(), settings: () => settings, activeId: () => CO.id, serverLabel: () => 'aiteam', remembered: () => ({ id: ME, name: 'Dhairya' }), remember() {} });
@@ -91,18 +92,26 @@ function setup(opts: { tests?: number } = {}) {
     ...(tl.after ? [{ kind: 'tool', text: tl.after.command, data: { type: 'commandExecution', command: tl.after.command, output: '', status: 'completed', exitCode: 0 } }] : []),
     ...(tl.trailingTool !== null ? [{ kind: 'tool', text: tl.trailingTool, data: { type: 'commandExecution', command: 'env', output: tl.trailingTool, status: 'completed' } }] : []),
     { kind: 'assistant', text: tl.final },
+    ...(tl.question ? [{ kind: 'question', text: 'Which database?', status: 'pending' }] : []),
   ];
   const deps: CheckoutDeps = {
     store, backend: () => server.backend(), reader,
-    git: counted(gitCalls, { isRepo: async () => repo, defaultBranch: async (_p, preferred) => preferred ?? 'dev', headSha: async () => head, stat: async () => ({ count: 2, added: 20, removed: 3 }), push: async (_p, b) => { if (pushOk) pushed.push(b); return { pushed: pushOk, ...(noRemote ? { noRemote: true } : {}), message: pushOk ? `Pushed ${b}.` : noRemote ? 'This repository has no remote.' : 'Could not push: no network' }; }, commitAll: async (_p, message) => { if (!commitOk) return { committed: false, message: 'Git has no name and email set.' }; commits.push(message); head = `commit${commits.length}`; clean = true; return { committed: true, message: 'Committed.' }; }, pushedHead: async () => pushedHead, isClean: async () => clean, verifyPr: async (_p, url) => prOk.has(url) }),
+    git: counted(gitCalls, { isRepo: async () => repo, defaultBranch: async (_p, preferred) => preferred ?? 'dev', headSha: async () => head, stat: async () => ({ count: 2, added: 20, removed: 3 }), push: async (_p, b) => { if (pushOk) { pushed.push(b); pushedHead = true; } return { pushed: pushOk, ...(noRemote ? { noRemote: true } : {}), message: pushOk ? `Pushed ${b}.` : noRemote ? 'This repository has no remote.' : 'Could not push: no network' }; }, commitAll: async (_p, message) => { if (!commitOk) return { committed: false, message: 'Git has no name and email set.' }; commits.push(message); head = `commit${commits.length}`; clean = true; pushedHead = false; return { committed: true, message: 'Committed.' }; }, pushedHead: async () => pushedHead, isClean: async () => clean, state: async () => `${head}|${clean ? 'clean' : 'dirty'}|${salt}`, summaryStat: async (_p, bases) => { statCalls.push([...bases]); if (statFails) throw new Error('no merge base'); return stat; }, verifyPr: async (_p, url) => prOk.has(url) }),
     worktrees: { create: async (_root, branch) => { worktrees.push(branch); return { path: `/wt/${branch.replace('/', '-')}`, branch }; } },
     chats: { addFolder: async p => ({ id: `f:${p}` }), create: async f => ({ id: `chat:${f}:${++chatSeq}` }), select: async () => {}, rename: async () => {}, timeline },
     providers: () => providers, home: () => homeDir, testSetup: async () => hasTests,
-    turnFacts: async () => ({ tokens: { input: 1000, cached: 100, output: 200 }, tests: opts.tests ?? 1, model: 'claude-opus-4', provider: 'claude-code', costUsd: 0.5, durationMs: 4000, outcome: 'completed' }),
-    serverLabel: () => 'aiteam', origin: () => origin, deviceNameDefault: () => 'Dhairya’s MacBook', now: () => clock, emit: id => emitted.push(id), notify: e => events.push(e), later: fn => { fn(); },
+    turnFacts: async () => ({ tokens: { input: 1000, cached: 100, output: 200 }, tests: opts.tests ?? 1, model: 'claude-opus-4', provider: 'claude-code', costUsd: 0.5, durationMs: 4000, outcome: tl.outcome }),
+    serverLabel: () => 'aiteam', origin: () => origin, deviceNameDefault: () => 'Dhairya’s MacBook', now: () => clock, emit: id => emitted.push(id), notify: e => events.push(e), later: fn => { if (!opts.lazy) fn(); },
+    queued: () => queuedMore, countdown: { schedule: (fn, ms) => { const t = { fn, ms, live: true }; wait.push(t); return () => { t.live = false; }; } },
   };
   const svc = new CheckoutService(deps);
-  return { events, tl, orgDir, homeDir, gitCalls, commits, setNoRemote: (v: boolean) => { noRemote = v; }, setCommitOk: (v: boolean) => { commitOk = v; }, setHasTests: (v: boolean) => { hasTests = v; }, setRepo: (v: boolean) => { repo = v; }, dirty: () => !clean, setClean: (v: boolean) => { clean = v; }, setHead: (v: string) => { head = v; }, setPushedHead: (v: boolean) => { pushedHead = v; }, setOrigin: (v: string) => { origin = v; }, prOk, server, db, store, svc, reader, advance: (ms: number) => { clock += ms; }, worktrees, pushed, emitted, setPush: (v: boolean) => { pushOk = v; }, now: () => clock };
+  // Most tests are about what a finished turn leads to, not the 60 seconds in between: the countdown runs out right after the turn unless a test turns that off.
+  let autoFire = true;
+  const rawOnTurn = svc.onTurn.bind(svc);
+  svc.onTurn = async (...args) => { await rawOnTurn(...args); if (autoFire) await fire(); };
+  /** Lets the 60 second countdown run out (or says there is none). */
+  const fire = async (sync = true): Promise<number> => { const live = wait.filter(t => t.live); wait = wait.filter(t => !live.includes(t)); for (const t of live) { t.live = false; t.fn(); } await new Promise(r => setTimeout(r, 20)); if (sync) await svc.sync(); return live.length; };
+  return { events, fire, hold: (v = true) => { autoFire = !v; }, countdownMs: () => wait.filter(t => t.live).map(t => t.ms), statCalls, setSalt: (v: number) => { salt = v; }, setStatFails: (v: boolean) => { statFails = v; }, setStat: (v: typeof stat) => { stat = v; }, setQueued: (v: boolean) => { queuedMore = v; }, tl, orgDir, homeDir, gitCalls, commits, setNoRemote: (v: boolean) => { noRemote = v; }, setCommitOk: (v: boolean) => { commitOk = v; }, setHasTests: (v: boolean) => { hasTests = v; }, setRepo: (v: boolean) => { repo = v; }, dirty: () => !clean, setClean: (v: boolean) => { clean = v; }, setHead: (v: string) => { head = v; }, setPushedHead: (v: boolean) => { pushedHead = v; }, setOrigin: (v: string) => { origin = v; }, prOk, server, db, store, svc, reader, advance: (ms: number) => { clock += ms; }, worktrees, pushed, emitted, setPush: (v: boolean) => { pushOk = v; }, now: () => clock };
 }
 /** The fake git, with every call counted (a plain folder must make none). */
 function counted<T extends object>(calls: string[], target: T): T { return new Proxy(target, { get: (t, k) => { const v = (t as Record<string | symbol, unknown>)[k]; return typeof v === 'function' ? (...args: unknown[]) => { calls.push(String(k)); return (v as (...a: unknown[]) => unknown)(...args); } : v; } }); }
@@ -523,7 +532,7 @@ test('auto hand-back: a pushed branch (HEAD moved past the check-out, remote is 
   const t1 = h.server.tasks[0]!; assert.deepEqual([t1.status, t1.assigneeId], ['in_review', 'a-qa'], 'In review, given to the policy’s reviewer');
   const summary = h.server.comments.get('t1')!.find(c => /Handed back for review/.test(c.body))!;
   assert.match(summary.body, /<!-- muster:handback at="/); assert.match(summary.body, /\[@QA Lead\]\(agent:\/\/a-qa\)/);
-  assert.deepEqual((h.events as { type: string; to: string }[]).map(e => [e.type, e.to]), [['handedBack', 'QA Lead']], 'one toast: Handed back to QA Lead · Undo');
+  assert.deepEqual((h.events as { type: string; to: string }[]).map(e => e.type), ['handBackCountdown', 'handBackCountdownEnded', 'handedBack'], 'a countdown toast, then: Handed back to QA Lead · Undo');
   assert.deepEqual(h.pushed, [], 'it was already pushed: Muster does not push again');
   assert.equal(h.svc.get('t1')!.handedTo?.id, 'a-qa');
 });
@@ -562,7 +571,7 @@ test('H1: the person saying done, in their own words and with the work committed
   h.tl.user = 'ship it'; h.tl.test = GREEN;
   await h.svc.onTurn(l.chatId!, 'r1', 'completed');
   assert.equal(h.svc.get('t1')!.state, 'checked_out', 'said done, but nothing is committed');
-  await h.svc.sync(); assert.match(h.server.comments.get('t1')!.at(-1)!.body, /nothing has been committed on muster\/RAG-1/);
+  assert.match(noted(h)[0]!, /Nothing has been committed on muster\/RAG-1/); assert.deepEqual(serverNotes(h), [], 'a local note, never a server comment');
   h.setHead('def456'); await h.svc.onTurn(l.chatId!, 'r2', 'completed'); await h.svc.sync();
   assert.equal(h.svc.get('t1')!.state, 'handed_back'); assert.deepEqual(h.pushed, ['muster/RAG-1'], 'Muster pushes what the person said is done');
 });
@@ -587,20 +596,22 @@ test('H4: not on false signals: no new commit since check-out (a re-checked-out 
   const l3 = await u.svc.start({ taskId: 't1', model: OWN, confirm: true });
   finish(u); await u.svc.onTurn(l3.chatId!, 'r1', 'completed'); await u.svc.sync(); u.advance(30_000);
   await u.svc.undoHandBack('t1'); assert.equal(u.svc.get('t1')!.autoOff, true);
-  u.tl.user = 'explain this file'; u.tl.test = GREEN; u.setHead('ghi789'); await u.svc.onTurn(l3.chatId!, 'r2', 'completed'); await u.svc.sync();
-  assert.equal(u.svc.get('t1')!.state, 'checked_out', 'after Undo, any later turn does not hand back again');
-  u.tl.user = 'done'; await u.svc.onTurn(l3.chatId!, 'r3', 'completed'); await u.svc.sync();
-  assert.equal(u.svc.get('t1')!.state, 'handed_back', 'saying done re-arms it');
+  u.tl.user = 'explain this file'; u.tl.test = GREEN; await u.svc.onTurn(l3.chatId!, 'r2', 'completed'); await u.svc.sync();
+  assert.equal(u.svc.get('t1')!.state, 'checked_out', 'after Undo, a turn that left the work as it was does not hand back again');
+  u.setHead('ghi789'); await u.svc.onTurn(l3.chatId!, 'r3', 'completed'); await u.svc.sync();
+  assert.equal(u.svc.get('t1')!.state, 'handed_back', 'a turn that adds new commits re-arms it (no “done” needed)');
+  await u.svc.undoHandBack('t1'); u.setHead('jkl012'); u.tl.user = 'done'; await u.svc.onTurn(l3.chatId!, 'r4', 'completed'); await u.svc.sync();
+  assert.equal(u.svc.get('t1')!.state, 'handed_back', 'saying done still works as a trigger');
 });
 
 test('H4: the test gate is evidence: a run after the last change, finished, parsed from its own output, with no failures; prose about tests proves nothing', async () => {
   const gate = async (mutate: (h: ReturnType<typeof setup>) => void) => { const h = setup(); await bound(h); const l = await h.svc.start({ taskId: 't1', model: OWN, confirm: true }); finish(h); mutate(h); await h.svc.onTurn(l.chatId!, 'r1', 'completed'); await h.svc.sync(); return h; };
   const failing = await gate(h => { h.tl.test = 'ℹ pass 12\nℹ fail 2\n'; });
-  assert.equal(failing.svc.get('t1')!.state, 'checked_out'); assert.match(failing.server.comments.get('t1')!.at(-1)!.body, /2 tests are failing \(12 passed\)/);
+  assert.equal(failing.svc.get('t1')!.state, 'checked_out'); assert.match(noted(failing)[0]!, /2 tests are failing \(12 passed\)/);
   const unparsed = await gate(h => { h.tl.test = 'ok  \tgithub.com/x/y\t0.4s'; });
-  assert.equal(unparsed.svc.get('t1')!.state, 'checked_out'); assert.match(unparsed.server.comments.get('t1')!.at(-1)!.body, /could not be read/);
+  assert.equal(unparsed.svc.get('t1')!.state, 'handed_back', 'output Muster cannot parse no longer blocks: the exit code 0 is the evidence'); assert.match(handedBack(unparsed)!, /Tests passed \(exit 0\)\./); assert.doesNotMatch(handedBack(unparsed)!, /read by you/);
   const none = await gate(h => { h.tl.test = null; h.tl.final = 'All 13 tests pass, 0 failed.'; });
-  assert.equal(none.svc.get('t1')!.state, 'checked_out', 'the agent saying the tests pass is not a test run'); assert.match(none.server.comments.get('t1')!.at(-1)!.body, /no test run came after the last change/);
+  assert.equal(none.svc.get('t1')!.state, 'checked_out', 'the agent saying the tests pass is not a test run'); assert.deepEqual(noted(none), [], 'and nothing nags: the work is just not finished');
   const stale = await gate(h => { h.tl.test = GREEN; h.tl.change = false; });
   assert.equal(stale.svc.get('t1')!.state, 'handed_back', 'no change after the run: the run stands');
   assert.deepEqual(lastTestRun([{ kind: 'tool', text: '', data: { type: 'commandExecution', command: 'npm test', output: GREEN, status: 'completed', exitCode: 0 } }, { kind: 'tool', text: '', data: { type: 'fileChange', status: 'completed' } }]), { done: true, exitOk: true, summary: { passed: 13, failed: 0 }, afterLastChange: false }, 'a change after the run means the run proves nothing');
@@ -708,9 +719,9 @@ test('M2: report keys count only from the person’s own comments; a body with t
   const h = setup(); await bound(h);
   const l = await h.svc.start({ taskId: 't1', model: OWN, confirm: true });
   // another org member pre-posts the key of a milestone Muster is about to post
-  h.server.comments.get('t1')!.push({ id: 'evil', body: '<!-- muster:report note blocked:no-tests -->', authorUserId: BOB, createdAt: new Date().toISOString() });
-  h.tl.test = null; h.setHead('def456'); h.setPushedHead(true); await h.svc.onTurn(l.chatId!, 'r1', 'completed'); await h.svc.sync();
-  assert.ok(h.server.comments.get('t1')!.some(c => c.authorUserId === ME && /Not handing back yet/.test(c.body)), 'the note was still posted');
+  h.server.comments.get('t1')!.push({ id: 'evil', body: '<!-- muster:report tests tests:13-0 -->', authorUserId: BOB, createdAt: new Date().toISOString() });
+  h.tl.test = GREEN; await h.svc.onTurn(l.chatId!, 'r1', 'completed'); await h.svc.sync();
+  assert.ok(h.server.comments.get('t1')!.some(c => c.authorUserId === ME && /Test results/.test(c.body)), 'the test milestone was still posted');
   assert.equal(parseLeaseMarker('<!-- muster:release at="2026-10-05T10:00:00Z" -->\n<!-- muster:checkout device="a" device-id="b" by="c" at="2026-10-05T10:00:00Z" -->'), null, 'one lease marker per comment');
 });
 
@@ -803,13 +814,13 @@ test('R2-4: the test gate wants a real runner, exit code 0, a clean tree, and no
   const fake = await gate(h => { h.tl.testCommand = "printf 'ℹ pass 1\nℹ fail 0' # npm test"; });
   assert.equal(fake.svc.get('t1')!.state, 'checked_out', 'a faked run is not a run');
   const exit = await gate(h => { h.tl.exit = 1; });
-  assert.equal(exit.svc.get('t1')!.state, 'checked_out'); assert.match(exit.server.comments.get('t1')!.at(-1)!.body, /exit code 0/);
+  assert.equal(exit.svc.get('t1')!.state, 'checked_out'); assert.match(noted(exit)[0]!, /exit code 0/);
   const shell = await gate(h => { h.tl.after = { command: "sed -i 's/a/b/' src/seed.js" }; });
-  assert.equal(shell.svc.get('t1')!.state, 'checked_out', 'a shell edit after the run invalidates it'); assert.match(shell.server.comments.get('t1')!.at(-1)!.body, /no test run came after the last change/);
+  assert.equal(shell.svc.get('t1')!.state, 'checked_out', 'a shell edit after the run invalidates it'); assert.deepEqual(noted(shell), []);
   const gitAfter = await gate(h => { h.tl.after = { command: 'git commit -am more' }; });
   assert.equal(gitAfter.svc.get('t1')!.state, 'checked_out');
   const dirty = await gate(h => { h.setClean(false); });
-  assert.equal(dirty.svc.get('t1')!.state, 'checked_out'); assert.match(dirty.server.comments.get('t1')!.at(-1)!.body, /uncommitted changes/);
+  assert.equal(dirty.svc.get('t1')!.state, 'handed_back', 'uncommitted changes are committed by Muster, as the person'); assert.deepEqual(dirty.commits, ['RAG-1: Task RAG-1']);
   const harmless = await gate(h => { h.tl.after = { command: 'git push -u origin muster/RAG-1' }; });
   assert.equal(harmless.svc.get('t1')!.state, 'handed_back', 'pushing after the run is fine');
 });
@@ -911,7 +922,9 @@ async function plain(h: ReturnType<typeof setup>, files: Record<string, string> 
   return dir;
 }
 const handedBack = (h: ReturnType<typeof setup>) => h.server.comments.get('t1')?.find(c => /Handed back for review/.test(c.body))?.body;
-const noted = (h: ReturnType<typeof setup>) => (h.server.comments.get('t1') ?? []).map(c => c.body).filter(b => /Not handing back yet/.test(b));
+/** Why Muster is holding the hand-back: a note on the task in Muster, never a comment on the server. */
+const noted = (h: ReturnType<typeof setup>) => { const r = h.svc.get('t1')?.heldBack?.reason; return r ? [r] : []; };
+const serverNotes = (h: ReturnType<typeof setup>) => (h.server.comments.get('t1') ?? []).map(c => c.body).filter(b => /Not handing back yet|Paused/.test(b));
 
 test('#303 bind: any existing folder is accepted and remembered as a plain folder; a git repository stays a git binding', async () => {
   const h = setup(); const dir = await plain(h);
@@ -1003,7 +1016,7 @@ test('#303 hand-back on a plain folder happens only on the person’s own “don
   const l = await h.svc.start({ taskId: 't1', model: OWN, confirm: true });
   h.tl.test = GREEN; h.tl.final = `${INJECT}\nEverything is done, ship it.`;
   await h.svc.onTurn(l.chatId!, 'r1', 'completed'); await h.svc.sync();
-  assert.equal(h.svc.get('t1')!.state, 'checked_out', 'the agent said it, a test run passed: still not a hand-back (no git facts to read)');
+  assert.equal(h.svc.get('t1')!.state, 'checked_out', 'the agent said it, a test run passed, but no file changed: not a hand-back');
   assert.deepEqual(noted(h), [], 'and it does not nag');
   h.tl.user = 'is it done?'; await h.svc.onTurn(l.chatId!, 'r2', 'completed'); assert.equal(h.svc.get('t1')!.state, 'checked_out', 'a question is not done');
   h.tl.user = 'ship it'; await h.svc.onTurn(l.chatId!, 'r3', 'completed'); await h.svc.sync();
@@ -1027,7 +1040,7 @@ test('#303 test gate for a plain folder: when it has a test setup and tests ran,
   h.tl.test = 'ℹ pass 12\nℹ fail 2'; await h.svc.onTurn(l.chatId!, 'r1', 'completed'); await h.svc.sync();
   assert.equal(h.svc.get('t1')!.state, 'checked_out', 'tests ran and failed'); assert.match(noted(h)[0]!, /2 tests are failing/);
   h.tl.test = GREEN; h.tl.after = { command: 'sed -i s/a/b/ notes.md' }; await h.svc.onTurn(l.chatId!, 'r2', 'completed'); await h.svc.sync();
-  assert.equal(h.svc.get('t1')!.state, 'checked_out', 'a passing run that came before the last change does not count'); assert.ok(noted(h).some(n => /no test run came after the last change/.test(n)));
+  assert.equal(h.svc.get('t1')!.state, 'checked_out', 'a passing run that came before the last change does not count'); assert.ok(noted(h).some(n => /Tests have not run since the last change/.test(n)));
   h.tl.after = null; await h.svc.onTurn(l.chatId!, 'r3', 'completed'); await h.svc.sync();
   assert.equal(h.svc.get('t1')!.state, 'handed_back', 'green after the last change'); assert.match(handedBack(h)!, /Tests: 13 passed, 0 failed/);
   const n = setup(); await plain(n); const l2 = await n.svc.start({ taskId: 't1', model: OWN, confirm: true });
@@ -1081,7 +1094,7 @@ test('#303 git project with no tests is not blocked forever: no recognised test 
   assert.equal(h.svc.get('t1')!.state, 'handed_back'); assert.match(handedBack(h)!, /No tests in this project\./);
   const g = setup(); await bound(g); const l2 = await g.svc.start({ taskId: 't1', model: OWN, confirm: true });
   finish(g); g.tl.test = null; await g.svc.onTurn(l2.chatId!, 'r1', 'completed'); await g.svc.sync();
-  assert.equal(g.svc.get('t1')!.state, 'checked_out', 'a test setup exists: still gated'); assert.ok(noted(g).some(n => /no test run came after the last change/.test(n)));
+  assert.equal(g.svc.get('t1')!.state, 'checked_out', 'a test setup exists: still gated'); assert.deepEqual(noted(g), [], 'and it stays quiet: the work is not finished until the tests ran');
   // the manual hand-back and the preview agree
   const m = setup({ tests: 0 }); await bound(m); m.setHasTests(false); await m.svc.start({ taskId: 't1', model: OWN, confirm: true });
   const pre = await m.svc.handBackPreview('t1'); assert.deepEqual([pre.blocked, pre.noTests, pre.testsLine], [null, true, 'No tests in this project.']);
@@ -1090,33 +1103,33 @@ test('#303 git project with no tests is not blocked forever: no recognised test 
   await assert.rejects(() => w.svc.handBack({ taskId: 't1', reviewer: { kind: 'agent', id: 'a-qa' } }), /Run the tests/);
 });
 
-test('#303 tests that ran but whose output cannot be read: the person’s own “done” accepts them (once), and says so in the evidence', async () => {
+test('#345 tests that ran but whose output cannot be read: the exit code 0 is the evidence (“Tests passed (exit 0)”); “read by you” only when the person said done', async () => {
   const h = setup(); await bound(h); h.server.policy = [{ type: 'review', participants: [{ kind: 'agent', id: 'a-qa' }] }];
   const l = await h.svc.start({ taskId: 't1', model: OWN, confirm: true });
   h.setHead('def456'); h.tl.test = 'custom runner: all good'; h.tl.user = 'implement it';
   h.setPushedHead(true); await h.svc.onTurn(l.chatId!, 'r1', 'completed'); await h.svc.sync();
-  assert.equal(h.svc.get('t1')!.state, 'checked_out', 'pushed with unreadable output and nobody said done: still blocked'); assert.ok(noted(h).some(n => /could not be read/.test(n)));
-  h.tl.user = 'done'; await h.svc.onTurn(l.chatId!, 'r2', 'completed'); await h.svc.sync();
-  assert.equal(h.svc.get('t1')!.state, 'handed_back', 'the next “done” goes through'); assert.match(handedBack(h)!, /Tests ran; the result was read by you/);
+  assert.equal(h.svc.get('t1')!.state, 'handed_back', 'output Muster cannot parse, exit 0: finished');
+  assert.match(handedBack(h)!, /Tests passed \(exit 0\)\./); assert.doesNotMatch(handedBack(h)!, /read by you/);
+  const d = setup(); await bound(d); const ld = await d.svc.start({ taskId: 't1', model: OWN, confirm: true });
+  d.setHead('def456'); d.tl.test = 'custom runner'; d.tl.user = 'done'; await d.svc.onTurn(ld.chatId!, 'r1', 'completed'); await d.svc.sync();
+  assert.match(handedBack(d)!, /read by you/, 'the person said done, so they did look');
   const e = setup(); await bound(e); const l2 = await e.svc.start({ taskId: 't1', model: OWN, confirm: true });
   e.setHead('def456'); e.tl.test = 'custom runner'; e.tl.exit = 1; e.tl.user = 'done'; await e.svc.onTurn(l2.chatId!, 'r1', 'completed'); await e.svc.sync();
-  assert.equal(e.svc.get('t1')!.state, 'checked_out', 'a non-zero exit is never accepted');
+  assert.equal(e.svc.get('t1')!.state, 'checked_out', 'a non-zero exit is never accepted'); assert.match(noted(e)[0]!, /exit code 0/);
 });
 
-test('#303 the person says done with uncommitted changes: Muster commits them as the person, then continues; never on the agent’s say-so', async () => {
+test('#345 uncommitted changes are committed by Muster as “<KEY>: <title>” once the tests passed; with no passing test run, or when git refuses, nothing is committed and the reason is a local note', async () => {
   const h = setup(); await bound(h); h.server.policy = [{ type: 'review', participants: [{ kind: 'agent', id: 'a-qa' }] }];
   const l = await h.svc.start({ taskId: 't1', model: OWN, confirm: true });
   h.setClean(false); h.tl.test = GREEN; h.tl.final = 'Everything is committed and done.'; h.tl.user = 'implement it';
   await h.svc.onTurn(l.chatId!, 'r1', 'completed'); await h.svc.sync();
-  assert.deepEqual(h.commits, [], 'the agent’s words never make a commit'); assert.equal(h.svc.get('t1')!.state, 'checked_out');
-  h.tl.user = 'done'; await h.svc.onTurn(l.chatId!, 'r2', 'completed'); await h.svc.sync();
-  assert.deepEqual(h.commits, ['RAG-1: Task RAG-1'], 'committed with “<KEY>: <title>”'); assert.equal(h.svc.get('t1')!.state, 'handed_back'); assert.deepEqual(h.pushed, ['muster/RAG-1']);
+  assert.deepEqual(h.commits, ['RAG-1: Task RAG-1'], 'committed with “<KEY>: <title>”'); assert.equal(h.svc.get('t1')!.state, 'handed_back'); assert.deepEqual(h.pushed, ['muster/RAG-1'], 'and pushed (during the countdown)');
+  const n = setup(); await bound(n); const ln = await n.svc.start({ taskId: 't1', model: OWN, confirm: true });
+  n.setClean(false); n.tl.test = null; n.tl.final = 'Everything is committed and done.'; await n.svc.onTurn(ln.chatId!, 'r1', 'completed');
+  assert.deepEqual(n.commits, [], 'the agent’s words never make a commit; no test run, no commit'); assert.equal(n.svc.get('t1')!.state, 'checked_out');
   const g = setup(); await bound(g); const l2 = await g.svc.start({ taskId: 't1', model: OWN, confirm: true });
-  g.setClean(false); g.setCommitOk(false); g.tl.test = GREEN; g.tl.user = 'ship it'; await g.svc.onTurn(l2.chatId!, 'r1', 'completed'); await g.svc.sync();
-  assert.equal(g.svc.get('t1')!.state, 'checked_out'); assert.ok(noted(g).some(n => /could not commit them \(Git has no name and email set/.test(n)), 'the reason is shown');
-  const p = setup(); await bound(p); const l3 = await p.svc.start({ taskId: 't1', model: OWN, confirm: true });
-  finish(p); p.setClean(false); await p.svc.onTurn(l3.chatId!, 'r1', 'completed'); await p.svc.sync();
-  assert.deepEqual(p.commits, [], 'pushed branch, dirty tree, nobody said done: no commit'); assert.ok(noted(p).some(n => /uncommitted changes/.test(n)));
+  g.setClean(false); g.setCommitOk(false); g.tl.test = GREEN; await g.svc.onTurn(l2.chatId!, 'r1', 'completed'); await g.svc.sync();
+  assert.equal(g.svc.get('t1')!.state, 'checked_out'); assert.ok(noted(g).some(x => /could not commit the changes on muster\/RAG-1: Git has no name and email set/.test(x)), 'the reason is shown'); assert.deepEqual(serverNotes(g), []);
 });
 
 test('#303 real git: commitAll commits as the person’s own identity, or refuses with the reason when none is set', async () => {
@@ -1173,4 +1186,152 @@ test('#303 test setup detection: package.json test script, pytest, go.mod, Cargo
   assert.equal(await hasTestSetup(mk({ 'tests/test_a.py': 'def test_a(): pass' })), true);
   for (const f of ['go.mod', 'Cargo.toml', 'pytest.ini', 'pom.xml']) assert.equal(await hasTestSetup(mk({ [f]: 'x' })), true, f);
   assert.equal(await hasTestSetup(mk({ Makefile: 'build:\n\tcc x\n\ntest:\n\t./run\n' })), true); assert.equal(await hasTestSetup(mk({ Makefile: 'build:\n\tcc x\n' })), false);
+});
+
+// --- #345: hand-back is automatic and quick ----------------------------------------------------------------------------------------------------
+/** A git project's finished turn: a commit past the check-out and a passing run, with Muster's own countdown held so it can be watched. */
+async function finishedGit(opts: Parameters<typeof setup>[0] = {}) {
+  const h = setup(opts); await bound(h); h.hold(); h.server.policy = [{ type: 'review', participants: [{ kind: 'agent', id: 'a-qa' }] }];
+  const l = await h.svc.start({ taskId: 't1', model: OWN, confirm: true });
+  return { h, l, chat: l.chatId! };
+}
+const types = (h: { events: unknown[] }) => (h.events as { type: string }[]).map(e => e.type);
+
+test('#345 git, exit 0: the turn ends with a commit and a passing run (parsed or not): a 60 s countdown starts in the runtime, with nobody typing “done”', async () => {
+  for (const output of [GREEN, 'custom runner: all good']) {
+    const { h, chat } = await finishedGit(); h.setHead('def456'); h.tl.test = output; h.tl.user = 'add the cache';
+    await h.svc.onTurn(chat, 'r1', 'completed');
+    assert.deepEqual(h.countdownMs(), [60_000]); assert.equal(h.svc.get('t1')!.state, 'checked_out', 'not yet: the person has 60 seconds');
+    const [event] = (h.events as { type: string; to: string; endsAt: string; key: string }[]); assert.deepEqual([event!.type, event!.to, event!.key], ['handBackCountdown', 'QA Lead', 'RAG-1']); assert.equal(Date.parse(event!.endsAt) - h.now(), 60_000);
+    assert.deepEqual(h.svc.activeCountdowns().map(c => [c.taskId, c.to]), [['t1', 'QA Lead']], 'a reloaded window can ask what is counting down');
+    await h.fire(); assert.equal(h.svc.get('t1')!.state, 'handed_back'); assert.deepEqual(types(h), ['handBackCountdown', 'handBackCountdownEnded', 'handedBack']); assert.deepEqual(h.svc.activeCountdowns(), []);
+  }
+});
+
+test('#345 git with no test setup: a commit past the check-out is enough; Muster commits the uncommitted work as the person and pushes it itself', async () => {
+  const { h, chat } = await finishedGit({ tests: 0 }); h.setHasTests(false); h.tl.test = null; h.setClean(false);
+  await h.svc.onTurn(chat, 'r1', 'completed'); assert.deepEqual(h.commits, ['RAG-1: Task RAG-1']); assert.deepEqual(h.pushed, ['muster/RAG-1'], 'pushed during the countdown');
+  await h.fire(); assert.equal(h.svc.get('t1')!.state, 'handed_back'); assert.match(handedBack(h)!, /No tests in this project\./); assert.deepEqual(h.pushed, ['muster/RAG-1'], 'and not pushed twice');
+});
+
+test('#345 git with no remote: the hand-back still goes through, with the branch noted as local', async () => {
+  const { h, chat } = await finishedGit(); h.setNoRemote(true); h.setPush(false); h.setHead('def456'); h.tl.test = GREEN;
+  await h.svc.onTurn(chat, 'r1', 'completed'); await h.fire();
+  assert.equal(h.svc.get('t1')!.state, 'handed_back'); assert.match(handedBack(h)!, /is local on .* \(no remote\)/);
+});
+
+test('#345 plain folder: files changed since check-out and a turn that completed hand back by themselves; no change, no hand-back', async () => {
+  const h = setup(); const dir = await plain(h); h.hold(); h.setHasTests(false); h.server.policy = [{ type: 'review', participants: [{ kind: 'agent', id: 'a-qa' }] }];
+  const l = await h.svc.start({ taskId: 't1', model: OWN, confirm: true });
+  await h.svc.onTurn(l.chatId!, 'r1', 'completed'); assert.deepEqual(h.countdownMs(), [], 'nothing changed in the folder');
+  writeFileSync(join(dir, 'notes.md'), 'hello, edited\n'); writeFileSync(join(dir, 'new.txt'), 'x');
+  await h.svc.onTurn(l.chatId!, 'r2', 'completed'); assert.deepEqual(h.countdownMs(), [60_000]); await h.fire();
+  assert.equal(h.svc.get('t1')!.state, 'handed_back'); assert.match(handedBack(h)!, /Added \(1\): `new\.txt`/); assert.deepEqual(h.pushed, []); assert.ok(!h.gitCalls.some(c => c !== 'isRepo'), 'no git calls beyond the bind check');
+});
+
+test('#345 never on a turn that errored or was stopped, while a later turn is queued, or while the agent asked a question', async () => {
+  for (const status of ['failed', 'interrupted', 'stopped']) { const { h, chat } = await finishedGit(); h.setHead('def456'); h.tl.test = GREEN; await h.svc.onTurn(chat, 'r1', status); assert.deepEqual(h.countdownMs(), [], status); }
+  const err = await finishedGit(); err.h.setHead('def456'); err.h.tl.test = GREEN; err.h.tl.outcome = 'error'; await err.h.svc.onTurn(err.chat, 'r1', 'completed'); assert.deepEqual(err.h.countdownMs(), [], 'the ledger says the turn errored');
+  const queued = await finishedGit(); queued.h.setHead('def456'); queued.h.tl.test = GREEN; queued.h.setQueued(true); await queued.h.svc.onTurn(queued.chat, 'r1', 'completed'); assert.deepEqual(queued.h.countdownMs(), [], 'a follow-up is waiting');
+  queued.h.setQueued(false); await queued.h.svc.onTurn(queued.chat, 'r2', 'completed'); assert.deepEqual(queued.h.countdownMs(), [60_000], 'the queue drained: it starts');
+  const asked = await finishedGit(); asked.h.setHead('def456'); asked.h.tl.test = GREEN; asked.h.tl.question = true; await asked.h.svc.onTurn(asked.chat, 'r1', 'completed'); assert.deepEqual(asked.h.countdownMs(), [], 'the agent is waiting for an answer');
+});
+
+test('#345 not finished: failing tests (parsed or by exit code), no changes, the agent’s words alone, a change after the run; and after Undo only a turn with new work starts it again', async () => {
+  const cases: [string, (h: ReturnType<typeof setup>) => void][] = [
+    ['parsed failures', h => { h.tl.test = 'ℹ pass 12\nℹ fail 2\n'; }],
+    ['non-zero exit', h => { h.tl.exit = 1; }],
+    ['no new commit', h => { h.setHead('abc123'); }],
+    ['the agent says so', h => { h.tl.test = null; h.tl.final = 'All tests pass and it is done. https://github.com/musterhq/redis-valkey/pull/1'; }],
+    ['edited after the run', h => { h.tl.after = { command: "sed -i 's/a/b/' x.js" }; }],
+  ];
+  for (const [name, mutate] of cases) { const { h, chat } = await finishedGit(); h.setHead('def456'); h.tl.test = GREEN; mutate(h); await h.svc.onTurn(chat, 'r1', 'completed'); assert.deepEqual(h.countdownMs(), [], name); assert.equal(h.svc.get('t1')!.state, 'checked_out', name); }
+  const { h, chat } = await finishedGit(); h.setHead('def456'); h.tl.test = GREEN;
+  await h.svc.onTurn(chat, 'r1', 'completed'); await h.fire(); await h.svc.undoHandBack('t1');
+  await h.svc.onTurn(chat, 'r2', 'completed'); assert.deepEqual(h.countdownMs(), [], 'after Undo, the same work does not start it again');
+  h.setHead('ghi789'); await h.svc.onTurn(chat, 'r3', 'completed'); assert.deepEqual(h.countdownMs(), [60_000], 'new commits switch it back on without “done”');
+});
+
+test('#345 the countdown: Keep working cancels it for this turn; Hand back now goes at once; a new run drops it; and the person saying done still works', async () => {
+  const keep = await finishedGit(); keep.h.setHead('def456'); keep.h.tl.test = GREEN;
+  await keep.h.svc.onTurn(keep.chat, 'r1', 'completed'); await keep.h.svc.countdown('t1', 'keep');
+  assert.deepEqual(keep.h.countdownMs(), []); assert.deepEqual(types(keep.h), ['handBackCountdown', 'handBackCountdownEnded']); assert.equal(keep.h.svc.get('t1')!.state, 'checked_out'); assert.deepEqual(keep.h.svc.activeCountdowns(), []);
+  await keep.h.svc.onTurn(keep.chat, 'r2', 'completed'); assert.deepEqual(keep.h.countdownMs(), [], 'a turn that changes nothing does not start it again');
+  keep.h.setHead('ghi789'); await keep.h.svc.onTurn(keep.chat, 'r3', 'completed'); assert.deepEqual(keep.h.countdownMs(), [60_000], 'new work does');
+  const now = await finishedGit(); now.h.setHead('def456'); now.h.tl.test = GREEN;
+  await now.h.svc.onTurn(now.chat, 'r1', 'completed'); await now.h.svc.countdown('t1', 'now');
+  assert.equal(now.h.svc.get('t1')!.state, 'handed_back'); assert.deepEqual(now.h.countdownMs(), [], 'the timer is cancelled'); assert.equal(now.h.svc.get('t1')!.handedTo?.id, 'a-qa'); assert.equal((now.h.events as { type: string }[]).at(-1)!.type, 'handedBack', 'and Undo is offered as before');
+  await assert.rejects(() => now.h.svc.countdown('t1', 'now'), /already handed back/);
+  const run = await finishedGit(); run.h.setHead('def456'); run.h.tl.test = GREEN; await run.h.svc.onTurn(run.chat, 'r1', 'completed'); run.h.svc.runStarted(run.chat);
+  assert.deepEqual(run.h.countdownMs(), [], 'the person is working again'); assert.equal(run.h.svc.get('t1')!.state, 'checked_out');
+  const said = await finishedGit(); said.h.setHead('def456'); said.h.tl.test = GREEN; said.h.tl.user = 'done'; await said.h.svc.onTurn(said.chat, 'r1', 'completed'); await said.h.fire(false);
+  assert.equal(said.h.svc.get('t1')!.state, 'handed_back', 'saying done is an extra trigger, with no countdown'); assert.deepEqual(types(said.h), ['handedBack']);
+  const ask = await finishedGit(); ask.h.svc.setAutoMode({ taskId: 't1' }, 'ask'); ask.h.setHead('def456'); ask.h.tl.test = GREEN; await ask.h.svc.onTurn(ask.chat, 'r1', 'completed');
+  assert.deepEqual(types(ask.h), ['handBackReady'], 'Ask me: “Ready to hand back”, no countdown'); assert.deepEqual(ask.h.countdownMs(), []);
+});
+
+test('#345 the hand-back is ONE PATCH (status, assignee and summary comment), sent first and at once: not behind other waiting posts, not on the delayed flush', async () => {
+  const { h, chat } = await finishedGit({ lazy: true }); h.setHead('def456'); h.tl.test = GREEN;
+  await h.svc.onTurn(chat, 'r1', 'completed');
+  assert.ok(h.svc.pending('t1').rows.length >= 3, 'a cost entry, the test result and the context are still waiting');
+  const calls = h.server.calls.length, patches = h.server.patchCount, folded = h.server.foldedComments;
+  await h.fire(false);
+  assert.equal(h.server.patchCount - patches, 1, 'one PATCH'); assert.equal(h.server.foldedComments - folded, 1, 'with the summary comment inside it');
+  assert.match(h.server.calls[calls]!, /^patch t1 .*in_review/, 'the very first request after the countdown is the hand-back'); assert.equal(h.server.tasks[0]!.status, 'in_review');
+  assert.equal(h.server.calls.length - calls, 2, 'the PATCH and the comment inside it (the fake logs both) and nothing else yet');
+  assert.ok(h.svc.pending('t1').rows.length >= 1, 'the rest follows right behind');
+  await h.svc.sync(); assert.equal(h.svc.pending('t1').rows.length, 0);
+});
+
+test('#345 no “Paused” spam: a quiet session says nothing on the server until a day has passed, then once per check-out and never again', async () => {
+  const h = setup(); await bound(h); await h.svc.start({ taskId: 't1', model: OWN, confirm: true });
+  for (let n = 0; n < 6; n++) { h.advance(49 * 60_000); assert.equal(await h.svc.checkIdle(), 0); }
+  assert.deepEqual(serverNotes(h), [], 'five hours quiet: no comment');
+  h.advance(20 * 3_600_000); assert.equal(await h.svc.checkIdle(), 1); await h.svc.sync(); assert.equal(serverNotes(h).length, 1);
+  for (let n = 0; n < 5; n++) { h.advance(30 * 3_600_000); assert.equal(await h.svc.checkIdle(), 0); }
+  await h.svc.sync(); assert.equal(serverNotes(h).length, 1, 'never repeated'); assert.equal(h.svc.get('t1')!.state, 'checked_out', 'and nothing is handed back or released because of silence');
+});
+
+test('#345 the summary: the diff stat is counted from the merge-base with the base branch (not summed per turn), and the evidence says what is true', async () => {
+  const { h, chat } = await finishedGit(); h.setHead('def456'); h.tl.test = 'custom runner'; h.setStat({ count: 7, added: 120, removed: 30 });
+  await h.svc.onTurn(chat, 'r1', 'completed'); await h.fire(false); await h.svc.sync();
+  const body = handedBack(h)!; assert.match(body, /7 files changed \(\+120 −30\) over 1 local turn\./); assert.doesNotMatch(body, /read by you/); assert.match(body, /Tests passed \(exit 0\)\./);
+  assert.deepEqual(h.statCalls[0], ['dev', 'abc123'], 'the base branch, then the commit it started from');
+  const bad = await finishedGit(); bad.h.setHead('def456'); bad.h.tl.test = GREEN; bad.h.setStatFails(true); await bad.h.svc.onTurn(bad.chat, 'r1', 'completed'); await bad.h.fire();
+  assert.match(handedBack(bad.h)!, /The size of the change could not be counted over 1 local turn/, 'never a made-up number');
+});
+
+test('#345 real git: the stat is `git diff --shortstat` from the merge-base, without gitignored or build output, plus uncommitted work', async () => {
+  const { execFileSync } = await import('node:child_process'); const { realGit, parseShortstat } = await import('../src/runtime/checkout/git-port.ts');
+  assert.deepEqual(parseShortstat(' 3 files changed, 10 insertions(+), 2 deletions(-)'), { count: 3, added: 10, removed: 2 }); assert.deepEqual(parseShortstat(' 1 file changed, 1 insertion(+)'), { count: 1, added: 1, removed: 0 }); assert.deepEqual(parseShortstat(''), { count: 0, added: 0, removed: 0 });
+  const dir = mkdtempSync(join(tmpdir(), 'muster-stat-')), g = (...a: string[]) => execFileSync('git', ['-C', dir, '-c', 'user.email=t@t', '-c', 'user.name=t', ...a], { encoding: 'utf8' }).trim();
+  const put = (rel: string, body: string) => { mkdirSync(join(dir, rel, '..'), { recursive: true }); writeFileSync(join(dir, rel), body); };
+  g('init', '-q', '-b', 'main'); put('a.txt', '1\n2\n3\n'); put('.gitignore', 'secret.log\n'); g('add', '.'); g('commit', '-qm', 'base');
+  g('checkout', '-q', '-b', 'muster/K-1');
+  // main moves on after the fork (the diff must not count it)
+  g('checkout', '-q', 'main'); put('later.txt', 'x\n'.repeat(500)); g('add', '.'); g('commit', '-qm', 'main moves'); g('checkout', '-q', 'muster/K-1');
+  put('a.txt', '1\n2\n3\n4\n5\n'); put('b.txt', 'new\n'); put('dist/bundle.js', 'y\n'.repeat(900)); put('node_modules/pkg/index.js', 'z\n'.repeat(900)); put('secret.log', 'q\n'.repeat(300));
+  g('add', '-f', 'dist/bundle.js', 'node_modules/pkg/index.js'); g('add', '.'); g('commit', '-qm', 'work');
+  assert.deepEqual(await realGit.summaryStat(dir, ['main']), { count: 2, added: 3, removed: 0 }, 'a.txt +2 and b.txt +1: not main’s 500 lines, not dist, node_modules or the ignored log');
+  assert.deepEqual(await realGit.summaryStat(dir, ['nope', await realGit.headSha(dir, 'main')]), { count: 2, added: 3, removed: 0 }, 'falls back to the commit when the branch name is unknown');
+  put('c.txt', 'one\ntwo\n'); put('a.txt', '1\n');
+  assert.deepEqual(await realGit.summaryStat(dir, ['main']), { count: 3, added: 3, removed: 2 }, 'uncommitted changes and new files count too');
+  await assert.rejects(() => realGit.summaryStat(dir, ['nope']), /common ancestor/);
+  const before = await realGit.state(dir); put('d.txt', 'd'); assert.notEqual(await realGit.state(dir), before, 'the state fingerprint moves with the work'); assert.equal(await realGit.state(dir), await realGit.state(dir));
+});
+
+test('#345 stale check-outs: idle for more than 3 days shows how long ago and offers Hand back and Release; nothing is released by itself; very broad plain folders are flagged', async () => {
+  const { staleDaysOf, badgeOf } = await import('../src/runtime/checkout/lease.ts'); const { isBroadFolder } = await import('../src/runtime/checkout/folder.ts'); const { looksBroadFolder } = await import('../src/shared/domains/checkout-protocol.ts');
+  const h = setup(); await bound(h); await h.svc.start({ taskId: 't1', model: OWN, confirm: true });
+  h.advance(2 * 86_400_000); assert.equal(h.svc.get('t1')!.staleDays, null, 'two days is not enough');
+  h.advance(2 * 86_400_000); const view = h.svc.get('t1')!; assert.equal(view.staleDays, 4, '“Checked out 4 days ago · idle”'); assert.equal(view.state, 'checked_out', 'never released automatically');
+  assert.equal(await h.svc.checkIdle(), 1); await h.svc.sync(); assert.equal(h.svc.get('t1')!.state, 'checked_out');
+  assert.equal(badgeOf(view, h.svc.deviceId, h.now(), 8)!.staleDays, 4); assert.equal(staleDaysOf({ state: 'handed_back', since: view.since, lastActivityAt: view.lastActivityAt }, h.now()), null, 'only open check-outs');
+  const released = await h.svc.release('t1', 'Released after sitting idle.'); assert.equal(released.state, 'released', 'Release works from the row');
+  assert.equal(isBroadFolder('/Users/x', '/Users/x'), true); assert.equal(isBroadFolder('/Users/x/Documents/', '/Users/x'), true); assert.equal(isBroadFolder('/Users/x/Desktop', '/Users/x'), true); assert.equal(isBroadFolder('/Users/x/Downloads', '/Users/x'), true);
+  assert.equal(isBroadFolder('/Users/x/Documents/shop', '/Users/x'), false); assert.equal(isBroadFolder('/Users/x/Code', '/Users/x'), false);
+  assert.equal(looksBroadFolder('/Users/dhairya/Documents'), true); assert.equal(looksBroadFolder('/Users/dhairya/Documents/shop'), false); assert.equal(looksBroadFolder('/home/ann'), true); assert.equal(looksBroadFolder(null), false);
+  const b = setup(); mkdirSync(join(b.homeDir, 'Documents'), { recursive: true }); b.setRepo(false); await b.reader.part(CO); await b.svc.bind(CO.id, 'p-redis', join(b.homeDir, 'Documents'));
+  assert.equal((await b.svc.plan('t1')).broadFolder, true, 'the check-out sheet warns'); const lb = await b.svc.start({ taskId: 't1', model: OWN, confirm: true }); assert.equal(lb.broadFolder, true, 'and so does the task');
+  const ok = setup(); await plain(ok); assert.equal((await ok.svc.plan('t1')).broadFolder, false);
 });

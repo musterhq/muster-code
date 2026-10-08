@@ -174,6 +174,12 @@ test('check out → the server shows the comment and assignee, no agent wakes, a
   assert.ok(preview.reviewers.some(r => r.name === 'QA Lead' && r.suggested), 'a QA agent is suggested');
   assert.equal((await s.invoke('checkout.get', { taskId: task.id })).lease?.state, 'checked_out', 'a normal turn is not a hand-back');
   await s.invoke('chat.send', { id: lease.chatId!, text: 'FINISH: wrap up.', requestId: 'r-2' });
+  // nobody types “done”: the commit is pushed, the run exited 0, so a 60 second countdown starts in the runtime; the person presses Hand back now
+  await until(async () => (await s.invoke('checkout.countdowns', {})).countdowns.some(c => c.taskId === task.id), 'the countdown', 25_000);
+  assert.equal((await s.invoke('checkout.get', { taskId: task.id })).lease?.state, 'checked_out', 'still the person’s for the countdown');
+  const pressed = Date.now(); await s.invoke('checkout.countdown', { taskId: task.id, action: 'now' });
+  await until(async () => (await api(`/issues/${task.id}`)).status === 'in_review', 'the server showing In review', 25_000);
+  console.log(`hand-back latency (Hand back now → server In review): ${Date.now() - pressed} ms`);
   await until(async () => (await s.invoke('checkout.get', { taskId: task.id })).lease?.state === 'handed_back', 'the automatic hand-back', 25_000);
   await s.invoke('checkout.sync', {});
   const back = await api(`/issues/${task.id}`);
@@ -188,7 +194,7 @@ test('check out → the server shows the comment and assignee, no agent wakes, a
   assert.equal((await s.invoke('checkout.get', { taskId: task.id })).lease?.state, 'handed_back');
 });
 
-test('a plain folder (not a git repository, #303): bound as it is, checked out in place with no worktree, listed files in the hand-back, handed back only on the person’s “done”', { skip }, async t => {
+test('a plain folder (not a git repository, #303): bound as it is, checked out in place with no worktree, listed files in the hand-back, handed back by itself once files changed (no “done” needed)', { skip }, async t => {
   const { s, seed, dataDir } = await harness(t);
   const rag = seed.companies.rag, task = rag.issues.r3!;
   const folder = join(dataDir, 'onboarding-notes');
@@ -201,16 +207,17 @@ test('a plain folder (not a git repository, #303): bound as it is, checked out i
   assert.deepEqual([lease.kind, lease.branch, lease.worktree], ['folder', null, folder], 'used in place: no branch, the chat works in the folder itself');
   assert.equal(existsSync(join(folder, '.git')), false, 'Muster did not make a repository of it');
   assert.equal((await api(`/issues/${task.id}`)).status, 'in_progress');
-  // the agent works and runs its tests; it even says it is done: that alone hands nothing back (a plain folder has no git facts to read)
+  // the agent works in the folder and the turn ends: files changed since check-out, so the countdown starts (and the agent's words alone would not have)
   await s.invoke('chat.send', { id: lease.chatId!, text: 'Write the seed list and say when you are done.', requestId: 'p-1' });
   await until(() => existsSync(join(folder, 'SEEDS.md')), 'the file written in the folder');
   await until(async () => { await s.invoke('checkout.sync', {}); return (await api(`/issues/${task.id}/documents`) as { key: string }[]).some(d => d.key === 'local-work-log'); }, 'the work log document', 20_000);
   assert.match((await api(`/issues/${task.id}/documents/local-work-log`)).body, /- Files changed: 1 added, 0 changed, 0 removed/, 'progress lists files, not git lines');
-  assert.equal((await s.invoke('checkout.get', { taskId: task.id })).lease?.state, 'checked_out', 'the agent’s words do not hand back');
   const preview = await s.invoke('checkout.handback.preview', { taskId: task.id });
   assert.deepEqual([preview.kind, preview.fileChanges?.added], ['folder', ['SEEDS.md']]);
-  await s.invoke('chat.send', { id: lease.chatId!, text: 'done', requestId: 'p-2' });
-  await until(async () => (await s.invoke('checkout.get', { taskId: task.id })).lease?.state === 'handed_back', 'the hand-back on the person’s “done”', 25_000);
+  await until(async () => (await s.invoke('checkout.countdowns', {})).countdowns.some(c => c.taskId === task.id), 'the countdown', 25_000);
+  assert.equal((await s.invoke('checkout.get', { taskId: task.id })).lease?.state, 'checked_out', 'still the person’s for the countdown');
+  await s.invoke('checkout.countdown', { taskId: task.id, action: 'now' });
+  await until(async () => (await s.invoke('checkout.get', { taskId: task.id })).lease?.state === 'handed_back', 'the automatic hand-back', 25_000);
   await s.invoke('checkout.sync', {});
   const back = await api(`/issues/${task.id}`);
   assert.equal(back.status, 'in_review'); assert.equal(back.assigneeAgentId, rag.qa);

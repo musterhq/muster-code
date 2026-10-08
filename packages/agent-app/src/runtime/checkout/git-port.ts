@@ -1,6 +1,7 @@
 /** The few git reads and the one push check-out needs, as a port so the service is testable. Real implementation shells out to git with no prompts. */
 import { execFile } from 'node:child_process';
 import { promises as fs } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import { normalizeRemote } from '../memory-identity.ts';
 import { device } from '../../shared/device-noun.ts';
@@ -22,7 +23,15 @@ export interface GitPort {
   verifyPr(path: string, url: string, branch: string): Promise<boolean>;
   /** No uncommitted or untracked changes in the worktree. */
   isClean(path: string): Promise<boolean>;
+  /** A fingerprint of the work: HEAD plus the uncommitted changes (their paths and line counts). Equal fingerprints mean nothing new happened. */
+  state(path: string): Promise<string>;
+  /** What this branch changed for review: `git diff --shortstat <merge-base of the first resolvable base and HEAD>..HEAD`, minus gitignored and build output, plus uncommitted changes when there are any. */
+  summaryStat(path: string, bases: readonly string[]): Promise<WorkStat>;
 }
+/** Folders that hold build output or installed packages: never part of "what changed" in a hand-back, even when a repository tracks them. */
+export const BUILD_DIRS = ['node_modules', 'dist', 'build', 'out', '.next', '.nuxt', 'coverage', '__pycache__', '.venv'];
+/** "3 files changed, 10 insertions(+), 2 deletions(-)". */
+export const parseShortstat = (out: string): WorkStat => ({ count: Number(/(\d+) files? changed/.exec(out)?.[1] ?? 0), added: Number(/(\d+) insertions?\(\+\)/.exec(out)?.[1] ?? 0), removed: Number(/(\d+) deletions?\(-\)/.exec(out)?.[1] ?? 0) });
 const git = (cwd: string, args: string[], timeout = 60_000): Promise<string> => new Promise((resolve, reject) => {
   execFile('git', args, { cwd, timeout, maxBuffer: 16 * 1024 * 1024, env: { ...process.env, GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'never' } }, (error, stdout, stderr) => error ? reject(new Error((stderr || error.message).trim())) : resolve(stdout));
 });
@@ -50,6 +59,30 @@ export const realGit: GitPort = {
       const head = (await git(path, ['rev-parse', 'HEAD'])).trim();
       return out.headRefName === branch && out.url === url && out.isCrossRepository === false && out.headRefOid === head;
     } catch { return false; }
+  },
+  async state(path) {
+    const head = (await git(path, ['rev-parse', 'HEAD']).catch(() => '')).trim();
+    const status = await git(path, ['status', '--porcelain']).catch(() => ''), numstat = status.trim() ? await git(path, ['diff', '--numstat', 'HEAD']).catch(() => '') : '';
+    return `${head}:${createHash('sha1').update(status).update('\0').update(numstat).digest('hex')}`;
+  },
+  async summaryStat(path, bases) {
+    let base = '';
+    for (const ref of bases) { if (!ref) continue; try { base = (await git(path, ['merge-base', ref, 'HEAD'])).trim(); if (base) break; } catch { /* try the next */ } }
+    if (!base) throw new Error('No common ancestor with the base branch.');
+    // Tracked files that are gitignored (force-added) and build folders are not the author's change.
+    const ignored = (await git(path, ['ls-files', '-ci', '--exclude-standard', '-z']).catch(() => '')).split('\0').filter(Boolean).slice(0, 200);
+    const excludes = [...BUILD_DIRS.map(d => `:(exclude,glob)**/${d}/**`), ...ignored.map(f => `:(exclude,literal)${f}`)];
+    const dirty = (await git(path, ['status', '--porcelain']).catch(() => '')).trim() !== '';
+    // Clean: exactly the commits since the fork point. Dirty: the same range plus the working tree (one diff against the fork point, so nothing counts twice) and the new files.
+    const stat = parseShortstat(await git(path, ['diff', '--shortstat', dirty ? base : `${base}..HEAD`, '--', '.', ...excludes]).catch(() => ''));
+    if (dirty) {
+      for (const rel of (await git(path, ['ls-files', '--others', '--exclude-standard', '-z']).catch(() => '')).split('\0').filter(Boolean)) {
+        if (rel.split('/').some(part => BUILD_DIRS.includes(part))) continue;
+        stat.count++;
+        try { const text = await fs.readFile(join(path, rel), 'utf8'); stat.added += text ? text.split('\n').length - (text.endsWith('\n') ? 1 : 0) : 0; } catch { /* binary or unreadable */ }
+      }
+    }
+    return stat;
   },
   async isClean(path) { return (await git(path, ['status', '--porcelain']).catch(() => 'x')).trim() === ''; },
   /** Pushed to the worktree's own upstream: `@{u}` is a remote branch of this name and is exactly HEAD. */

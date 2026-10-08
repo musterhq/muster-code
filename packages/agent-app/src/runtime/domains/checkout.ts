@@ -62,6 +62,7 @@ export function createCheckoutDomain(ctx: DomainContext): DomainModule {
       return null;
     },
     notify: event => ctx.emit(event),
+    queued: chatId => ctx.store.queue(chatId).length > 0,
     emit: taskId => { ctx.emit({ type: 'checkoutChanged', taskId }); ctx.emit({ type: 'projectsWorkspaceChanged', scopes: ['tasks'], taskIds: taskId ? [taskId] : [] }); schedule(); },
   });
   /** Posts that could not go (offline) are tried again every half minute, only while some are waiting. */
@@ -80,6 +81,7 @@ export function createCheckoutDomain(ctx: DomainContext): DomainModule {
     const brief = await svc().brief(chat.id);
     return brief ? { label: 'Server task', text: brief } : null;
   });
+  const offStarted = ctx.hooks.onRunStarted?.(({ chat }) => { if (service) service.runStarted(chat.id); });
   const offSettled = ctx.hooks.onRunSettled(run => { if (store.leaseForChat(run.chat.id, origin())) return svc().onTurn(run.chat.id, run.runId, run.status).catch(() => undefined); });
   // Disconnecting forgets what was kept for the server: org copies, ended check-outs and the posts that were never sent (security review M6).
   const offCommand = ctx.hooks.onCommand?.(event => { if (event.command === 'paperclip.disconnect' || event.command === 'paperclip.signin.signout' || event.command === 'musterServer.disconnect') for (const o of new Set(store.leases().map(l => l.origin))) store.purge({ origin: o }); });
@@ -150,9 +152,11 @@ export function createCheckoutDomain(ctx: DomainContext): DomainModule {
         return { mode: input.mode === 'auto' || input.mode === 'ask' ? svc().setAutoMode(ref, input.mode) : svc().autoMode(ref) };
       },
       'checkout.undo': input => svc().undoHandBack(id(input.taskId)),
+      'checkout.countdown': async input => { if (input.action !== 'now' && input.action !== 'keep') throw new Error('Invalid input.'); await svc().countdown(id(input.taskId), input.action); return { ok: true as const }; },
+      'checkout.countdowns': () => ({ countdowns: service ? service.activeCountdowns() : [] }),
       'checkout.remind': input => { svc().remind(id(input.taskId)); return { ok: true }; },
     },
     power(event) { if (event.state === 'resume' && store.pendingCount()) void svc().flush().catch(() => undefined); },
-    dispose() { offPrompt(); offSettled(); offCommand?.(); clearInterval(idle); if (retry) clearTimeout(retry); hub.badge = undefined; hub.onOnline = undefined; },
+    dispose() { offPrompt(); offStarted?.(); offSettled(); offCommand?.(); clearInterval(idle); if (retry) clearTimeout(retry); hub.badge = undefined; hub.onOnline = undefined; },
   };
 }
