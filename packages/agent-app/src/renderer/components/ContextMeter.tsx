@@ -58,7 +58,7 @@ export function ContextMeter({ telemetry }: { telemetry: ContextTelemetry }): Re
     <Popover.Trigger className={`context-meter context-${level}`} aria-label={detail} title="Context usage">
       {/* QA-#11: no empty track before the provider reports usage; the bar appears with the first real number. */}
       {percent !== null && !estimated && <span className="context-meter-track" aria-hidden="true">
-        <span className="context-meter-fill" style={{ width: `${percent}%` }} />
+        <span className="context-meter-fill" style={{ transform: `scaleX(${percent / 100})` }} />
       </span>}
       <span className="context-meter-label">
         {estimated ? '' : percent !== null ? `${percent}%` : usedTokens !== null ? formatTokens(usedTokens) : ''}

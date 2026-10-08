@@ -34,6 +34,7 @@ import {attentionBadge,createCrashTracker,isRendererCrash} from './app-shell.ts'
 import {MENU_CHANNEL,MENU_CLOSE_CHANNEL,type MenuAction} from '../shared/menu-protocol.ts';
 import {installProcessGuard} from './process-guard.ts';
 import {passwordStoreSwitch} from './linux-launch.ts';
+import {shouldThrottleBackground} from './painting-policy.ts';
 import {electronSecretBox} from '../runtime/memory-context.ts';
 import {ServerSignInWindows} from './server-signin-window.ts';
 
@@ -68,6 +69,7 @@ async function main(): Promise<void> {
   });
   let service: AgentService | null = null;
   let runningChats = 0;
+  let repaintPolicy: (() => void) | undefined;
   let disposal: Promise<void> | undefined;
   let shutdownStarted = false;
   let pendingChatId=chatIdFromArgs(process.argv);
@@ -176,7 +178,9 @@ async function main(): Promise<void> {
     if (event.type === 'settingsChanged') { notifyPrefs = notificationPrefs(event.values); applyBadge(pendingAttention); }
     if (event.type === 'chatWoke') notifyWoke(event);
     if (event.type === 'snapshot') {
+      const before = runningChats;
       runningChats = event.snapshot.chats.filter((c) => c.status === 'running' || c.status === 'stopping').length;
+      if ((before === 0) !== (runningChats === 0)) repaintPolicy?.();
       applyBadge(event.snapshot.attention?.totalRequests ?? 0);
       notifySettled(event.snapshot);
     }
@@ -293,7 +297,7 @@ async function main(): Promise<void> {
       spellcheck: true,
       // A visible Agent window must paint streaming text and resize changes
       // even while another app has keyboard focus. Hidden windows are throttled below.
-      backgroundThrottling: false,
+      backgroundThrottling: false, // turned on while idle and unfocused (syncPainting below)
     },
   });
   const nativePreview = new NativePreviewController(window);
@@ -393,8 +397,12 @@ async function main(): Promise<void> {
   screen.on('display-metrics-changed', followDisplays);
   const syncPainting = () => {
     if (!window || window.isDestroyed()) return;
-    window.webContents.setBackgroundThrottling(!window.isVisible() || window.isMinimized());
+    window.webContents.setBackgroundThrottling(shouldThrottleBackground({visible: window.isVisible(), minimized: window.isMinimized(), focused: window.isFocused(), runningChats}));
   };
+  // Full-rate timers and rAF only while a run streams into a window the user can see; an idle, unfocused window may throttle.
+  repaintPolicy = syncPainting;
+  window.on('focus', syncPainting);
+  window.on('blur', syncPainting);
   window.on('hide', syncPainting);
   window.on('minimize', syncPainting);
   window.on('restore', syncPainting);

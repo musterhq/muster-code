@@ -150,8 +150,10 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
   const memoryConfig = new MemoryConfigStore(options.dataDir, () => secretBox === null ? secretBox = electronSecretBox() : secretBox);
   const hindsightClient = () => hindsight ??= new HindsightService({readConfig: () => memoryConfig.hindsight(), resolveFolderScope(folderId) {
     // Same banks as the memory domain (memory-identity.ts): per person, per repository, private otherwise.
-    if (folderId === 'personal') return memoryIdentity.personal();
-    return memoryIdentity.folder(folderFor(folderId));
+    // Cached identities answer synchronously; the first lookup per folder runs git off the event loop.
+    if (folderId === 'personal') return memoryIdentity.isWarm() ? memoryIdentity.personal() : memoryIdentity.personalAsync();
+    const folder = folderFor(folderId);
+    return memoryIdentity.isWarm(folder.path) ? memoryIdentity.folder(folder) : memoryIdentity.folderAsync(folder);
   }});
   const runs = new Map<string, ActiveRun>();
   const reconciliations = new Set<string>();
@@ -226,7 +228,17 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
     attention.chats.sort((a,b) => a.requests[0]!.createdAt.localeCompare(b.requests[0]!.createdAt) || a.chatId.localeCompare(b.chatId));
     return {...current, attention};
   };
-  const state = () => emit({ type: 'snapshot', snapshot: snapshot() });
+  /** F3: `state()` is called from ~56 places and each full snapshot is a SQLite read plus an IPC clone and a
+   *  renderer re-render. The first call in a quiet period emits at once (no added latency); calls inside the
+   *  window collapse into one trailing emit that carries the latest state. */
+  const STATE_WINDOW_MS = 80;
+  let stateWindow: ReturnType<typeof setTimeout> | undefined, statePending = false;
+  const state = (): void => {
+    if (stateWindow) { statePending = true; return; }
+    emit({ type: 'snapshot', snapshot: snapshot() });
+    stateWindow = setTimeout(() => { stateWindow = undefined; if (statePending && !disposed) { statePending = false; state(); } }, STATE_WINDOW_MS);
+    stateWindow.unref?.();
+  };
   const publishedTimelineRevisions = new Map<string, number>();
   const timeline = (chatId: string) => {
     const after = publishedTimelineRevisions.get(chatId) ?? 0;
@@ -1604,7 +1616,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
       await Promise.allSettled([...invocations,...[...runs.values()].flatMap(run => run.promise ? [run.promise] : [])]);
       await domains.dispose();
       await toolOutputLog.flush().catch(() => {});
-      disposed = true; for (const timer of timers.values()) clearTimeout(timer); timers.clear(); customProviders.close(); annotations.close(); projectTasks.close(); store.close();
+      disposed = true; if (stateWindow) clearTimeout(stateWindow); stateWindow = undefined; for (const timer of timers.values()) clearTimeout(timer); timers.clear(); customProviders.close(); annotations.close(); projectTasks.close(); store.close();
     })();
     return disposal;
   }};

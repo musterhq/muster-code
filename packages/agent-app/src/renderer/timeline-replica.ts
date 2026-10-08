@@ -1,4 +1,5 @@
 import type {TimelineItem, TimelinePatch, TimelineSnapshot} from '../shared/protocol.ts';
+import {shareStructure} from './structuralShare.ts';
 
 /** Snapshot + ordered deltas, following T3's thread reducer approach. Completed
  * rows retain their identities; gaps request an authoritative snapshot. The
@@ -29,7 +30,12 @@ export class TimelineReplica {
 
   snapshot(snapshot: TimelineSnapshot): void {
     if (!this.value || snapshot.revision >= this.value.revision) {
-      this.value = snapshot;
+      // A re-read (focus, resync) returns fresh objects for rows that did not change; keep the old ones so
+      // memoised rows skip rendering, and keep the whole snapshot when nothing changed at all.
+      const previous = this.value;
+      const items = previous ? shareStructure(previous.items, snapshot.items) : snapshot.items;
+      this.value = previous && items === previous.items && snapshot.revision === previous.revision ? previous : {items, revision: snapshot.revision};
+      snapshot = this.value;
       this.indices = new Map(snapshot.items.map((item, index) => [item.id, index]));
     }
     this.drain();

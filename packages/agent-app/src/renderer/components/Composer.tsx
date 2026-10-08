@@ -12,7 +12,7 @@ import { createChat, flushComposerDraft, getState, loadPlugins, loadProviders, l
 import { ADD_CONTEXT_EVENT, loadComposerMemory, normalizeContextChip, saveComposerMemory, serializeContext, type ContextChip } from '../composerContext';
 import { setTerminalDock, setTerminalPaneView, terminalDock } from '../processSummary';
 import { ChipMirror, ContextStrip, TokenCard } from './ComposerTokens';
-import { useStore } from '../useStore';
+import { useStoreSlice } from '../useStore';
 import { AttachmentStrip, type ComposerAttachment } from './AttachmentStrip';
 import { CaptureSourcePicker, type CaptureResult } from './CaptureSourcePicker';
 import { accessibilityAttachment, utf8Base64 } from '../captureRegion';
@@ -159,7 +159,7 @@ export function useMentionEntries(folderId: string | undefined, query: string, e
 }
 
 export function Composer({ chat }: { chat: Chat }): React.ReactElement {
-  const state = useStore();
+  const state = useStoreSlice('composerDrafts','followUpMode','plugins','providers','screen','sendErrors','sending','settings','skills','snapshot','timelines');
   const modEnter = state.settings['general.sendKey'] === 'mod-enter';
   const draft = state.composerDrafts[chat.id];
   const text = draft?.text ?? chat.draft;

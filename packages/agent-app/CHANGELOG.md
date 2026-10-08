@@ -3,6 +3,10 @@
 All notable changes to Muster Agent. Each `## <version>` section becomes the notes of the
 `agent-v<version>` GitHub Release (`.github/workflows/agent-app-release.yml`).
 
+## Unreleased
+
+- Smoother typing and streaming (fluidity): the composer, sidebar, summary card and workspace subscribe to just the state they use, so a keystroke re-renders the composer only; runtime snapshots are coalesced and structurally shared; the focus refresh is debounced; startup fetches Paperclip far less often (#302); no synchronous `sysctl` or `git` on the main process; cheaper animations; background throttling when idle and unfocused.
+
 ## 0.3.5
 
 - Outputs of a server project open on your Mac (#305). Every document, attachment and work product in a connected project's Outputs tab is a link: Muster downloads it with your own sign-in into a private cache (readable only by you, one folder per server, 50 MB at most) and shows it in its own viewer, with a spinner while it loads and a plain sentence if the server refuses or no longer has it. When the project is linked for Work locally and the same file exists in that folder, the local file opens instead. Each row also has Download… (a save dialog) and Open on server. Pull requests and links open as before, and local projects are unchanged.

@@ -102,7 +102,7 @@ export function ProjectOverview({ project, folders, chats, work, onTab, onTasks,
         </button>)}
       </div>
       {r.total > 0 && <div className="project-progress" role="progressbar" aria-label="Verified tasks" aria-valuemin={0} aria-valuemax={r.total} aria-valuenow={r.verified}>
-        <div className="project-progress-bar"><span style={{ width: `${pct}%` }}/></div><span>{r.verified} of {r.total} tasks verified</span>
+        <div className="project-progress-bar"><span style={{ transform: `scaleX(${pct / 100})` }}/></div><span>{r.verified} of {r.total} tasks verified</span>
       </div>}
     </section>
     <section aria-labelledby="project-ov-chats" className="project-overview-block">
