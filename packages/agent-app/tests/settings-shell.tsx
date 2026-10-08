@@ -16,7 +16,7 @@ Object.assign(globalThis,{
 const calls:{command:string;input:any}[]=[];
 const settingsValues:any={
   'general.sendKey':'enter','general.spellcheck':true,'appearance.textSize':100,
-  'appearance.theme':'dark','appearance.reducedMotion':'system','appearance.reducedTransparency':'system','chat.inlineDiffs':true,
+  'appearance.theme':'dark','appearance.lightTheme':'muster-light','appearance.darkTheme':'muster-dark','appearance.customThemes':[],'appearance.reducedMotion':'system','appearance.reducedTransparency':'system','chat.inlineDiffs':true,
 };
 const memoryConfig:any={endpoint:'http://localhost:8888',hasApiKey:false,keyStorage:'none',autoRecall:true,autoRetain:'ask',source:'app'};
 window.muster={
@@ -115,6 +115,16 @@ assert.equal(summarySwitch.getAttribute('aria-checked'),'false','summary card hi
 assert.equal(store.get('muster.summaryHidden'),'true','the toggle persists through the same store the summary card reads');
 summarySwitch.click();await delay(10);
 assert.equal(store.get('muster.summaryHidden'),'false');
+
+// #324 colour themes: a swatch picker per appearance, wired to settings.set; stock Muster Light/Dark are the defaults.
+const picker=(label:string)=>document.querySelector(`.theme-picker[aria-label="${label}"]`) as HTMLElement;
+const names=(label:string)=>Array.from(picker(label).querySelectorAll('.theme-option-name')).map(el=>el.textContent);
+assert.deepEqual(names('Light theme'),['Muster Light','High Contrast Light','Solarized Light','Warm Sepia']);
+assert.deepEqual(names('Dark theme'),['Muster Dark','High Contrast Dark','Solarized Dark','GitHub Dark']);
+assert.equal((picker('Dark theme').querySelector('[aria-checked="true"] .theme-option-name') as HTMLElement).textContent,'Muster Dark','the stock theme is the default selection');
+(Array.from(picker('Dark theme').querySelectorAll('button')).find(el=>el.textContent?.endsWith('GitHub Dark')) as HTMLButtonElement).click();await delay(10);
+assert.ok(calls.some(call=>call.command==='settings.set'&&call.input.key==='appearance.darkTheme'&&call.input.value==='github-dark'),'choosing a theme goes through settings.set');
+assert.match(document.body.textContent!,/Import VS Code theme/);
 
 // Chat: inline diffs plus the real global diff defaults (split/unified, wrap, ignore whitespace, full file, text size).
 go('chat');await delay(10);
