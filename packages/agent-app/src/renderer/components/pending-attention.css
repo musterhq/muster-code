@@ -14,7 +14,7 @@
 .pending-attention-trigger { display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-height: 28px; padding: 3px 7px; border: 1px solid var(--hairline); border-radius: var(--radius-6); color: var(--text); background: var(--bg-raised); font-size: var(--fs-11); cursor: pointer; }
 .pending-attention-trigger:hover { background: var(--bg-hover); }
 .pending-attention-trigger:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
-.pending-attention-positioner { z-index: 100; }
+.pending-attention-positioner { z-index: var(--z-popover); }
 .pending-attention-popup { width: min(310px,calc(100vw - 24px)); background: var(--bg-raised); color: var(--text); border: 1px solid var(--hairline); border-radius: var(--radius-10); box-shadow: var(--shadow-popover); }
 .pending-attention-popup .pending-attention { margin: 0; border: 0; }
 .pending-attention-popup__title { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }

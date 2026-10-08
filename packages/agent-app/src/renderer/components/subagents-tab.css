@@ -58,7 +58,7 @@
 .subagent-steer { flex:none; display:inline-flex; }
 .subagent-steer button { display:inline-flex; align-items:center; gap:5px; height:24px; padding:0 8px; border:1px solid var(--hairline); border-radius:var(--radius-6); font-size:var(--fs-11); color:var(--text-faint); }
 .subagent-steer button:disabled { opacity:.5; cursor:default; }
-.subagent-menu-positioner { z-index:100; }
+.subagent-menu-positioner { z-index:var(--z-popover); }
 .subagent-menu { min-width:170px; padding:5px; background:var(--bg-raised); border:1px solid rgb(var(--fg-rgb) / 10%); border-radius:var(--radius-10); box-shadow:var(--shadow-popover); color:var(--text); transform-origin:var(--transform-origin); transition:opacity 120ms ease,transform 120ms ease; }
 .subagent-menu[data-starting-style], .subagent-menu[data-ending-style] { opacity:0; transform:translateY(-3px) scale(.98); }
 .subagent-menu [role=menuitem] { display:flex; align-items:center; gap:9px; padding:7px 9px; border-radius:var(--radius-6); font-size:var(--fs-12); cursor:default; outline:0; }

@@ -5,6 +5,8 @@ All notable changes to Muster Agent. Each `## <version>` section becomes the not
 
 ## Unreleased
 
+- Renderer polish (#309, #310, #311). The New task owner list now opens above the dialog (menus and pickers share one popover layer above modals). Chat replies use a compact rhythm: a 0.55em gap between paragraphs, lists and quotes, 1.52 line height, and clearer bold (weight 630, stronger colour). A plain-text reply gets light emphasis: a leading short "Label:" ("Note:", "Root cause:") is shown in bold, never inside code or links, and the text is not changed. The Stopped/Interrupted banner stays inside the chat column instead of spanning the sidebar.
+
 - Server agents show their own runtime and model (#307). In a connected Paperclip org the Roster, agent cards and agent pages name each agent's adapter and model as the server has them (Claude Code · Opus 4.7, Codex · gpt-5.4-codex, Hermes · hermes-4) and say "Model not shared by the server" when it sends none, instead of looking like Muster's default model. In Work locally, "Work as" maps the agent's real model to the closest model you have and says when it differs ("Opus on server → Claude Code · Opus here"); a runtime that isn't set up on this Mac is said too.
 
 ## 0.3.5

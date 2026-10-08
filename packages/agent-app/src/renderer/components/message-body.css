@@ -124,41 +124,43 @@
   padding: 4px 8px 6px;
   color: color-mix(in srgb, var(--text) 88%, transparent);
 }
-.timeline-row .msg-assistant > .md-body { font-size: var(--chat-font-size); font-weight: 430; line-height: 1.625; letter-spacing: 0; }
-.md-body p, .md-body ul, .md-body ol, .md-body blockquote { margin-block: 0.7em; }
-.timeline-row .msg-assistant > .md-body > :is(p, ul, ol, blockquote) { margin-block: 1em; }
+.timeline-row .msg-assistant > .md-body { font-size: var(--chat-font-size); font-weight: 430; line-height: var(--md-leading); letter-spacing: 0; }
+/* One compact gap between blocks (adjacent margins collapse): paragraph to paragraph, to a list, to a quote. */
+.md-body p, .md-body ul, .md-body ol, .md-body blockquote { margin-block: var(--md-gap); }
+.timeline-row .msg-assistant > .md-body > :is(p, ul, ol, blockquote) { margin-block: var(--md-gap); }
 /* Lists read as one block: no gap between items, bullets in the text colour. */
 .timeline-row .msg-assistant > .md-body li { margin: 0; }
 .timeline-row .msg-assistant > .md-body li::marker { color: color-mix(in srgb, var(--text) 80%, transparent); }
-.timeline-row .msg-assistant > .md-body :is(h1, h2, h3, h4, h5, h6) + :is(ul, ol, p) { margin-top: 0.5em; }
+.timeline-row .msg-assistant > .md-body :is(h1, h2, h3, h4, h5, h6) + :is(ul, ol, p) { margin-top: 0.3em; }
 
 /* Streaming: each newly arrived stretch of text fades in (MessageBody `animate`). */
 .md-fade { animation: md-fade-in 150ms cubic-bezier(.37, .55, .86, .88) both; }
 @keyframes md-fade-in { from { opacity: 0; } to { opacity: 1; } }
 @media (prefers-reduced-motion: reduce) { .md-fade { animation: none; } }
-.md-body h1, .md-body h2, .md-body h3, .md-body h4, .md-body h5, .md-body h6 { margin: 1.35em 0 0.5em; line-height: 1.3; color: var(--text); letter-spacing: -0.01em; }
+.md-body h1, .md-body h2, .md-body h3, .md-body h4, .md-body h5, .md-body h6 { margin: var(--md-heading-gap) 0 0.35em; line-height: 1.3; color: var(--text); letter-spacing: -0.01em; }
 .md-body h1 { font-size: 1.4em; font-weight: 600; }
 .md-body h2 { font-size: 1.2em; font-weight: 600; }
 .md-body h3 { font-size: 1.05em; font-weight: 600; }
 .md-body h4, .md-body h5, .md-body h6 { font-size: 1em; font-weight: 600; color: color-mix(in srgb, var(--text) 90%, transparent); }
-.md-body strong { font-weight: 600; color: var(--text); }
+.md-body strong { font-weight: var(--md-strong-weight); color: var(--text-strong); }
+.timeline-row .msg-assistant .md-body em { font-style: italic; color: var(--text-strong); }
 .md-body ul, .md-body ol { padding-left: 1.5em; }
-.md-body li { margin: 0.28em 0; padding-left: 0.15em; }
+.md-body li { margin: 0.18em 0; padding-left: 0.15em; }
 .md-body li::marker { color: var(--text-faint); }
-.md-body li > p { margin-block: 0.3em; }
+.md-body li > p { margin-block: 0.2em; }
 .md-body li > ul, .md-body li > ol { margin: 0.2em 0; }
-.md-body hr { margin: 1.4em 0; border-top-color: color-mix(in srgb, var(--text) 9%, transparent); }
+.md-body hr { margin: 1em 0; border-top-color: color-mix(in srgb, var(--text) 9%, transparent); }
 .md-body a { color: var(--link); text-decoration: underline; text-decoration-color: color-mix(in srgb, var(--link) 35%, transparent); text-decoration-thickness: 1px; text-underline-offset: 3px; }
 .md-body a:hover { text-decoration-color: currentColor; }
 .md-body a:focus-visible, .md-resource-link:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; border-radius: var(--radius-2); }
-.md-body blockquote { padding: 0 0 0 14px; border-left: 2px solid color-mix(in srgb, var(--text) 14%, transparent); color: var(--text-dim); }
+.md-body blockquote { padding: 0 0 0 12px; border-left: 2px solid color-mix(in srgb, var(--text) 14%, transparent); color: var(--text-dim); }
 .md-body code { font-family: var(--mono); font-size: 0.87em; }
 .md-body :not(pre) > code { padding: 0.12em 0.38em; border: 0; border-radius: var(--radius-6); background: color-mix(in srgb, var(--text) 8%, transparent); color: color-mix(in srgb, var(--text) 94%, transparent); white-space: break-spaces; }
 .md-body a > code { color: inherit; }
 
 /* Code blocks: one soft surface (same family as the diff block); language + copy in a slim header. */
-.md-body pre { margin: 0.9em 0; }
-.md-code { margin: 1em 0; border: 1px solid color-mix(in srgb, var(--text) 6%, transparent); border-radius: var(--radius-16); background: color-mix(in srgb, var(--text) 3%, var(--bg)); overflow: hidden; }
+.md-body pre { margin: 0.7em 0; }
+.md-code { margin: 0.75em 0; border: 1px solid color-mix(in srgb, var(--text) 6%, transparent); border-radius: var(--radius-16); background: color-mix(in srgb, var(--text) 3%, var(--bg)); overflow: hidden; }
 .md-code-head { display: flex; align-items: center; justify-content: space-between; min-height: 38px; padding: 0 8px 0 16px; border: 0; background: none; }
 .md-code-lang { display: inline-flex; align-items: center; gap: 7px; color: var(--text-dim); font: var(--fs-13)/1 var(--ui); letter-spacing: 0; text-transform: none; }
 .md-code-actions { display: inline-flex; align-items: center; gap: 2px; }
