@@ -130,7 +130,11 @@ export function detectInstallMethod(input:{platform:string;exe:string;env:NodeJS
   const {platform,exe,env,exists}=input;
   if(platform==='darwin')return {method:'mac-bundle'};
   if(!input.packaged)return {method:'manual'};
-  if(platform==='win32')return exists(path.win32.join(path.win32.dirname(exe),'Uninstall Muster Agent.exe'))?{method:'nsis'}:{method:'manual'};
+  if(platform==='win32'){
+    // electron-builder names it after the executable ("Uninstall muster-agent.exe"); older configs used the product name.
+    const dir=path.win32.dirname(exe),stem=path.win32.basename(exe).replace(/\.exe$/i,'');
+    return [`Uninstall ${stem}.exe`,'Uninstall Muster Agent.exe'].some(name=>exists(path.win32.join(dir,name)))?{method:'nsis'}:{method:'manual'};
+  }
   if(platform==='linux'){
     const image=env.APPIMAGE;
     if(image&&path.posix.isAbsolute(image)&&exists(image))return input.writable(path.posix.dirname(image))?{method:'appimage',target:image}:{method:'manual'};

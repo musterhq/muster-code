@@ -331,7 +331,7 @@ test('install method detection', () => {
   const none=()=>false,yes=()=>true;
   const base={env:{},packaged:true,writable:yes};
   assert.deepEqual(detectInstallMethod({...base,platform:'darwin',exe:'/Applications/Muster Agent.app/Contents/MacOS/Muster Agent',exists:none}),{method:'mac-bundle'});
-  assert.deepEqual(detectInstallMethod({...base,platform:'win32',exe:'C:\\Users\\me\\AppData\\Local\\Programs\\muster-agent\\muster-agent.exe',exists:file=>file==='C:\\Users\\me\\AppData\\Local\\Programs\\muster-agent\\Uninstall Muster Agent.exe'}),{method:'nsis'});
+  assert.deepEqual(detectInstallMethod({...base,platform:'win32',exe:'C:\\Users\\me\\AppData\\Local\\Programs\\muster-agent\\muster-agent.exe',exists:file=>file==='C:\\Users\\me\\AppData\\Local\\Programs\\muster-agent\\Uninstall muster-agent.exe'}),{method:'nsis'},'the uninstaller electron-builder writes');
   assert.deepEqual(detectInstallMethod({...base,platform:'win32',exe:'D:\\portable\\muster-agent.exe',exists:none}),{method:'manual'},'the portable zip opens the release page');
   assert.deepEqual(detectInstallMethod({...base,platform:'linux',exe:'/tmp/.mount_x/muster-agent.bin',env:{APPIMAGE:'/home/me/Apps/Muster.AppImage'},exists:yes}),{method:'appimage',target:'/home/me/Apps/Muster.AppImage'});
   assert.deepEqual(detectInstallMethod({...base,platform:'linux',exe:'/tmp/.mount_x/muster-agent.bin',env:{APPIMAGE:'/opt/ro/Muster.AppImage'},exists:yes,writable:none}),{method:'manual'},'a read-only AppImage folder cannot be updated in place');

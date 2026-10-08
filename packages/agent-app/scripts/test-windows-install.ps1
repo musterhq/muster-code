@@ -28,7 +28,7 @@ $uninstallString = (Get-ItemProperty $entry.PSPath).UninstallString
 $uninstaller = ($uninstallString -replace '^"([^"]+)".*$', '$1')
 $dir = Split-Path $uninstaller -Parent
 $exe = Join-Path $dir 'muster-agent.exe'
-Write-Host "installed to $dir"
+Write-Host "installed to $dir (uninstaller: $(Split-Path $uninstaller -Leaf))"
 $programs = Join-Path $env:LOCALAPPDATA 'Programs'
 if (-not $dir.StartsWith($programs, [StringComparison]::OrdinalIgnoreCase)) { Fail "installed to $dir, expected under $programs (per user)" }
 # Per user, no admin: everything under %LOCALAPPDATA% and HKCU.
