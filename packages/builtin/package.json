@@ -965,7 +965,7 @@
     "@musterhq/core": "link:../../../muster/packages/core"
   },
   "devDependencies": {
-    "@types/node": "^22.0.0",
+    "@types/node": "^26.6.4",
     "@types/vscode": "^1.105.0",
     "esbuild": "^0.25.0",
     "linkedom": "^0.18.13",
