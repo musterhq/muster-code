@@ -5,6 +5,7 @@ import {basename, dirname, join, resolve} from 'node:path';
 import {resolveInside} from './paths.ts';
 import type {GitLocalStatus, GitLocalFile, GitPullRequest, GitPullRequestList, GitCompareUrl} from '../shared/protocol.ts';
 import type {GitBranch, GitBranches, GitCommitResult, GitRepoInfo, GitSwitchResult, GitWorktree} from '../shared/domains/git-protocol.ts';
+import {normalizeFsPath, samePath} from '../shared/path-normalize.ts';
 
 const queues = new Map<string, Promise<unknown>>();
 const depths = new Map<string, number>();
@@ -526,7 +527,7 @@ async function worktreeEntries(real: string): Promise<WorktreeEntry[]> {
   return entries;
 }
 
-const same = async (a: string, b: string) => resolve(a) === resolve(b) || await fs.realpath(a).then(x => x === b || x === resolve(b), () => false);
+const same = async (a: string, b: string) => samePath(resolve(a), resolve(b)) || samePath(a, b) || await fs.realpath(a).then(x => samePath(x, b) || samePath(x, resolve(b)), () => false);
 
 /** Bounded disk usage: stops after `limit` entries and says so rather than stalling on huge trees. */
 async function diskUsage(path: string, limit = 20000): Promise<{bytes: number; truncated: boolean}> {
@@ -589,7 +590,7 @@ export async function createWorktree(root: string, dataDir: string, input: {bran
       target = join(parent, `${slug(name)}-${n}`);
     }
     await git(real, ['worktree', 'add', '--quiet', ...(exists ? [target, name] : ['-b', name, target, base!])], 120000);
-    return {path: await fs.realpath(target), branch: name};
+    return {path: normalizeFsPath(await fs.realpath(target)), branch: name};
   });
 }
 

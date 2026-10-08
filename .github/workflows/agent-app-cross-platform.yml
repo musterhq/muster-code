@@ -57,6 +57,11 @@ jobs:
       - name: Install
         run: npm ci --no-audit --no-fund
 
+      - name: Windows path and agent tool tests (#319)
+        # The \\?\ folder spellings and the shell tool's working directory only exist on a Windows runner.
+        if: matrix.os == 'windows'
+        run: node --max-old-space-size=1536 --experimental-transform-types --test tests/windows-tools-319.test.ts
+
       - name: Typecheck and build
         run: |
           npx tsc --noEmit

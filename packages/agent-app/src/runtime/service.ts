@@ -11,6 +11,7 @@ import type { PendingAttentionSummary, AttentionRequest } from '../shared/attent
 import { discoverLocalProviders } from './provider-discovery.ts';
 import { CustomProviders } from './custom-providers.ts';
 import { AgentStore } from './store.ts';
+import { canonicalFolderPath } from './folder-merge.ts';
 import { WorkspaceWatchService } from './workspace-watch.ts';
 import {claudeChildRow,claudeChildThread} from './subagent-rows.ts';
 import {appendCommandOutput,finishCommandOutput,stripAnsi} from './command-output-buffer.ts';
@@ -40,7 +41,7 @@ import { createNativeTurnObserver } from './native-turns.ts';
 import { createNativeQueueMirror } from './native-queue.ts';
 import { ChatAttachments, attachedFileLines } from './attachments.ts';
 import { admissionRetryText, withAdmissionRetry } from './admission-retry.ts';
-import { ContextLedger, HISTORY_WINDOW_EVENT, requestsConnectors, type ContextBlock } from './context-budget.ts';
+import { ContextLedger, HISTORY_WINDOW_EVENT, TOOLS_UNAVAILABLE_EVENT, requestsConnectors, type ContextBlock } from './context-budget.ts';
 import { createDomainHooks } from './domains/hooks.ts';
 import { createDomains } from './domains/index.ts';
 import type { DomainFactory } from './domains/types.ts';
@@ -371,7 +372,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
     const project = chat.projectId ? store.snapshot().projects.find(p => p.id === chat.projectId) : undefined;
     const context = project ? `Project: ${project.name}\nShared goal: ${project.goal || '(not set)'}` : '';
     const skillContext = [...attachedSkills.map(entry => `Selected skill: ${entry.name} (${entry.provenance})\n\nApply these user-selected skill instructions to the current request:\n<skill-instructions>\n${entry.content}\n</skill-instructions>`), invokedPluginContext(plugins)].filter(Boolean).join('\n\n');
-    const defaultCwd = folder?.path ?? join(options.dataDir, 'scratch', chatId);
+    const defaultCwd = folder ? canonicalFolderPath(folder.path) : join(options.dataDir, 'scratch', chatId);
     const cwd = await domainHooks.runEnvironment(chat, defaultCwd);
     if (folder || cwd !== defaultCwd) { if (!(await fs.stat(cwd)).isDirectory()) throw new Error('Selected folder is unavailable.'); }
     else await fs.mkdir(cwd, {recursive: true, mode: 0o700});
@@ -382,14 +383,29 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
     if (chat.archived) throw new Error('Restore this chat before sending.');
     if (chat.recovery?.kind === 'recovery-needed') throw new Error('Check the unresolved provider attempt before sending. Your draft is retained.');
     if (providerSelections.has(chatId)) throw new Error('Wait for the provider selection to finish.');
-    const selectedProvider=validateRunnableModel(chat.model,chat.providerId);
+    let selectedProvider=validateRunnableModel(chat.model,chat.providerId);
+    // #319: a chat-only model in an Agent chat must not strand the thread without tools. Move to the same model on a route
+    // that has tools when there is one (a fresh tool-enabled session carrying the history), else say so and run as chat.
+    let toolSwitch: string | undefined;
+    if (chat.mode === 'agent' && selectedProvider.models.find(entry => entry.id === chat.model)?.tools === false) {
+      const alternative = provider.info().find(candidate => candidate.available && candidate.id !== selectedProvider.id && candidate.models.some(entry => entry.id === chat.model && entry.tools !== false));
+      if (alternative) {
+        const target = alternative.bindingId ?? alternative.id;
+        const modelName = selectedProvider.models.find(entry => entry.id === chat.model)?.name ?? chat.model, fromName = selectedProvider.name;
+        chat = store.updateChat(chatId, {providerId: alternative.id, providerBindingId: target, providerThreadId: null, providerTurnId: null, providerThreadProviderId: null, providerThreadBindingId: null});
+        store.requireDigest(chatId);
+        selectedProvider = alternative;
+        toolSwitch = `${modelName} can’t run commands or edit files on ${fromName}, so Muster started a fresh session through ${alternative.name}, which has tools. Your earlier conversation is carried over as a summary and the recent messages.`;
+      } else store.appendItem(chatId, 'notice', `${chat.model} can’t run commands or edit files here, so this chat answers without tools. Switch to a model with tools to let the agent work on your files.`, 'completed', {kind: 'tools-unavailable'});
+    }
     const bindingId=selectedProvider.bindingId??selectedProvider.id;
     if (chat.providerBindingId && chat.providerBindingId!==bindingId) throw new Error('The selected provider account or profile changed. Select it again before sending. Your draft is retained.');
     const nativeMatches=chat.providerThreadProviderId===selectedProvider.id && chat.providerThreadBindingId===bindingId;
     if (!chat.providerBindingId || (chat.providerThreadId && !nativeMatches)) {
-      if (chat.providerThreadId && !nativeMatches) store.appendItem(chatId,'notice','This provider will start a fresh conversation. The displayed chat history is retained.','completed');
+      if (chat.providerThreadId && !nativeMatches) { store.appendItem(chatId,'notice','This provider will start a fresh conversation with a summary of the earlier messages. The displayed chat history is retained.','completed'); store.requireDigest(chatId); }
       chat=store.updateChat(chatId,{providerId:selectedProvider.id,providerBindingId:bindingId,...(!nativeMatches?{providerThreadId:null,providerTurnId:null,providerThreadProviderId:null,providerThreadBindingId:null}:{})});
     }
+    if (toolSwitch) store.appendItem(chatId, 'notice', toolSwitch, 'completed', {kind: 'tools-session-restarted'});
     const access = providerAccessPolicy(chat);
     // A fork (or a replaced turn) starts a fresh provider conversation: carry the visible history once, bounded.
     const digest = store.needsDigest(chatId) ? transcriptDigest(store.timeline(chatId)) : '';
@@ -483,6 +499,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
             // A subagent inside a CLI provider (Claude Code Task): its rows live in its own transcript, never in the parent's.
             const ownThread = store.chat(chatId)?.providerThreadId, child = claudeChildThread(params, ownThread);
             if (child) { const row = claudeChildRow(method, params); if (row) store.upsertSubagentItem(chatId, child, row); return; }
+            if (method === TOOLS_UNAVAILABLE_EVENT) { store.appendItem(chatId, 'notice', `${chat.model} can’t run commands or edit files through this route, so it answered without tools. Switch to a model with tools to let the agent work on your files.`, 'completed', {kind: 'tools-unavailable'}); scheduleTimeline(chatId); return; }
             if (method === HISTORY_WINDOW_EVENT) { if (typeof params.retainedUserTurns === 'number') retainedTurns = params.retainedUserTurns; return; }
             if (method === 'thread/compacted') { seal(); compactionCompleted(chatId); compactedInRun = true; }
             const item = params.item && typeof params.item === 'object' ? params.item as Record<string, unknown> : params;

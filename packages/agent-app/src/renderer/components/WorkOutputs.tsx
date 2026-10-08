@@ -7,6 +7,7 @@
 import { Box, Check, Download, ExternalLink, FileText, GitPullRequest, Image, Search, Table2, Video, Code2, Type } from 'lucide-react';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import type { WorkspaceRow, WorkspaceSnapshot } from '../../shared/domains/paperclip-protocol';
+import { samePath } from '../../shared/path-normalize';
 import { OUTPUT_KINDS, OUTPUT_STATUS_LABEL, OUTPUT_STATUSES, type OutputKind, type OutputStatus } from '../../shared/domains/work-protocol';
 import { filterOutputs, outputItems, type OutputItem } from '../outputsModel';
 import { invoke } from '../bridge';
@@ -61,7 +62,7 @@ export function OutputsPanel({ snapshot, projectId, local, nav }: { snapshot: Wo
       const file = await invoke('paperclip.output.fetch', { id: i.id, projectId });
       if (file.kind === 'link' && file.url) { void invoke('link.open', { url: file.url }).catch(() => { window.open(file.url!, '_blank', 'noopener'); }); return; }
       if (file.kind === 'local' && file.folderPath && file.relPath) {
-        const folder = app?.folders.find(f => f.path === file.folderPath) ?? await invoke('folder.add', { path: file.folderPath });
+        const folder = app?.folders.find(f => samePath(f.path, file.folderPath)) ?? await invoke('folder.add', { path: file.folderPath });
         void openFile(folder.id, file.relPath); closeSettings(); return;
       }
       setViewing({ item: i, file });

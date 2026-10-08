@@ -32,7 +32,7 @@ import { RecordSkill, type SkillDraft } from './RecordSkill';
 import { SKETCH_FILE_NAME, SketchPad, type SketchStroke } from './SketchPad';
 import { ConfirmSheet } from './ConfirmSheet';
 import { ACCESS_OPTIONS, FullAccessConfirm } from './FullAccessConfirm';
-import { COMPOSER_COMMANDS, EFFORT_LABELS, SKILL_RECORDER_PROMPT, followUpAction, skillDraft, terminalText, MAX_ATTACHMENT_BYTES, MAX_ATTACHMENTS, attachmentKey, attachmentName, imageBlindModel, imageBlindWarning, chipPayload, chipToken, classifyPaste, configuredAccess, effectiveAccess, findChipRanges, findTokenRanges, formatBytes, insertToken, nextEffort, previewLimit, rankSections, readMentionQuery, readSlashQuery, saveFolderAccess, scoreItem, scoreQueryMatch, INIT_PROMPT, reviewPrompt, pendingQuestionItem, questionDigit, pluginPromptHint, terminalsPillLabel, skipsFullAccessConfirm, setFullAccessSkip, type ChipRange, type ComposerAccess, type ComposerChip, type ComposerCommandId, type TokenVocabulary } from './composerMenus';
+import { COMPOSER_COMMANDS, EFFORT_LABELS, SKILL_RECORDER_PROMPT, followUpAction, skillDraft, terminalText, MAX_ATTACHMENT_BYTES, MAX_ATTACHMENTS, attachmentKey, attachmentName, imageBlindModel, imageBlindWarning, toolBlindModel, toolCapableAlternative, TOOLS_BLIND_NOTICE, chipPayload, chipToken, classifyPaste, configuredAccess, effectiveAccess, findChipRanges, findTokenRanges, formatBytes, insertToken, nextEffort, previewLimit, rankSections, readMentionQuery, readSlashQuery, saveFolderAccess, scoreItem, scoreQueryMatch, INIT_PROMPT, reviewPrompt, pendingQuestionItem, questionDigit, pluginPromptHint, terminalsPillLabel, skipsFullAccessConfirm, setFullAccessSkip, type ChipRange, type ComposerAccess, type ComposerChip, type ComposerCommandId, type TokenVocabulary } from './composerMenus';
 import { QueuedMessages } from './QueuedMessages';
 import { CheckoutQueueBanner, isCheckoutQueued, sendWithCheckoutGuard } from './ParallelRunGuard';
 import { StashesPopover, usePromptStash } from './PromptStashes';
@@ -261,6 +261,8 @@ export function Composer({ chat }: { chat: Chat }): React.ReactElement {
   const providers = (state.providers.value ?? []).filter(provider => provider.available);
   const modelOptions = providers.flatMap(provider => provider.models.map(model => ({ ...model, provider: provider.name, providerId: provider.id })));
   const imageBlind = imageBlindModel(providers, chat.providerId, chat.model);
+  const toolBlind = chat.mode === 'plan' ? null : toolBlindModel(providers, chat.providerId, chat.model);
+  const toolAlternative = toolBlind ? toolCapableAlternative(providers, chat.providerId, chat.model) : null;
   const selectedModel = modelOptions.find(model => model.id === chat.model && model.providerId === chat.providerId);
   const modelEfforts = selectedModel?.efforts ?? REASONING_EFFORTS;
   const storedEffort = efforts[chat.id];
@@ -1105,6 +1107,7 @@ export function Composer({ chat }: { chat: Chat }): React.ReactElement {
     {/* A sketch tile reopens its drawing (Codex openAttachment); other tiles keep AttachmentStrip's own open-in-right-pane. */}
     <div className="composer-attachments"><AttachmentStrip chatId={chat.id} items={attachments} onRemove={removeAttachment} onRetry={retryAttachment}
       onOpen={item => { if (!sketches.current.has(item.localId)) return false; openSketch(item.localId); return true; }} /></div>
+    {toolBlind && <p className="composer-tools-warning" role="status" data-testid="tools-blind-warning">{TOOLS_BLIND_NOTICE}.{toolAlternative && <> <button type="button" data-testid="tools-blind-switch" disabled={settingsBlocked || running} onClick={() => void chooseModel(toolAlternative.model, toolAlternative.providerId)}>Switch to {toolAlternative.name}</button></>}</p>}
     {imageBlind && attachments.some(item => item.kind === 'image') && <p className="composer-image-warning" role="status" data-testid="image-blind-warning">{imageBlindWarning(imageBlind)}</p>}
     {largePaste && <div className="composer-paste-offer" role="group" aria-label="Large paste">
       <FileText size={14} aria-hidden="true" /><span>Large paste · {formatBytes(largePaste.bytes)}</span>
@@ -1171,7 +1174,7 @@ export function Composer({ chat }: { chat: Chat }): React.ReactElement {
         </Menu.Root>
         {project && <button type="button" data-testid="composer-project" className="composer-project" aria-label={`Project: ${project.name}`} aria-haspopup="dialog" aria-expanded={menu === 'project'} title={project.goal ? `${project.name} · ${project.goal}` : project.name}
           onClick={() => { setModelOpen(false); setMenu(menu === 'project' ? null : 'project'); }}><FolderKanban size={13} aria-hidden="true" /><span>{project.name}</span></button>}
-        {runningTerminals.shells + runningTerminals.commands > 0 && <button type="button" data-testid="composer-terminals" className="composer-terminals" title="Show running terminals" onClick={openTerminals}>
+        {runningTerminals.shells + runningTerminals.commands > 0 && <button type="button" data-testid="composer-terminals" className="composer-terminals" title="Show running terminals. These are your terminals, not shared with the agent: it runs commands in its own shell." onClick={openTerminals}>
           <SquareTerminal size={13} aria-hidden="true" /><span>{terminalsPillLabel(runningTerminals.shells + runningTerminals.commands)}</span></button>}
         {planMode && <span className="composer-plan-chip"><Lightbulb size={13} aria-hidden="true" /><span>Plan</span><button type="button" aria-label="Turn plan mode off" disabled={choicesDisabled} onClick={() => void togglePlan()}><X size={11} /></button></span>}
         {/* MEM-X2: what the next turn will recall; click to inspect or leave notes out. */}

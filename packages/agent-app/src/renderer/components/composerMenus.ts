@@ -339,6 +339,21 @@ export function imageBlindModel(providers:readonly {id:string;models:readonly {i
   const entry=providers.find(provider=>provider.id===providerId)?.models.find(item=>item.id===model);
   return entry?.images===false?entry.name||entry.id:null;
 }
+/** #319: a model that cannot run commands or edit files here (a chat-only route, or one its endpoint refused tools for). */
+export const TOOLS_BLIND_NOTICE='This model can’t run commands or edit files';
+export interface ToolsProviderLike{id:string;name?:string;available?:boolean;models:readonly {id:string;name:string;tools?:boolean}[]}
+export function toolBlindModel(providers:readonly ToolsProviderLike[],providerId:string|undefined,model:string|undefined):string|null{
+  if(!model)return null;
+  const entry=providers.find(provider=>provider.id===providerId)?.models.find(item=>item.id===model);
+  return entry?.tools===false?entry.name||entry.id:null;
+}
+/** One click away: the same model on a route that has tools, else the first tool-capable model of a ready route. */
+export function toolCapableAlternative(providers:readonly ToolsProviderLike[],providerId:string|undefined,model:string|undefined):{providerId:string;model:string;name:string}|null{
+  const usable=providers.filter(provider=>provider.available!==false&&provider.id!==providerId);
+  for(const provider of usable){const same=provider.models.find(item=>item.id===model&&item.tools!==false);if(same)return {providerId:provider.id,model:same.id,name:same.name||same.id};}
+  for(const provider of usable){const any=provider.models.find(item=>item.tools!==false);if(any)return {providerId:provider.id,model:any.id,name:any.name||any.id};}
+  return null;
+}
 export const imageBlindWarning=(model:string)=>`${model} can’t read images. Attached images won’t be sent; pick a model that accepts images to include them.`;
 
 /* S3-A: Full access "Don't ask again for this folder" ---------------------- */

@@ -139,11 +139,11 @@ test('schema v2 adds subagent transcripts to an existing database; rows persist,
   const dir=mkdtempSync(join(tmpdir(),'muster-subagents-'));
   try{
     const first=new AgentStore(dir);
-    assert.equal(schemaVersion(first.database()),2);
+    assert.equal(schemaVersion(first.database()),3);
     // Simulate a 0.2.5 database: version 1, no subagent_items table.
     first.database().exec('DROP TABLE subagent_items; PRAGMA user_version = 1');first.close();
     const store=new AgentStore(dir);
-    assert.deepEqual(store.schemaMigration.applied,['2:subagent transcripts']);assert.ok(store.schemaMigration.backup&&existsSync(store.schemaMigration.backup));
+    assert.deepEqual(store.schemaMigration.applied,['2:subagent transcripts','3:merge duplicate folders']);assert.ok(store.schemaMigration.backup&&existsSync(store.schemaMigration.backup));
     const chat=store.createChat({model:'claude-code/sonnet',providerId:'claude-code',mode:'agent'});
     store.upsertSubagentItem(chat.id,'s:t',{id:'s:t:prompt',kind:'user',text:'do it',status:'completed'});
     store.upsertSubagentItem(chat.id,'s:t',{id:'s:t:b1',kind:'tool',text:'ls',status:'running',data:{name:'ls'}});

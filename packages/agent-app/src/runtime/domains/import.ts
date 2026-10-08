@@ -15,6 +15,8 @@ import { MAX_ITEMS_PER_SESSION, MAX_MESSAGE_TEXT, MAX_REASONING_TEXT, MAX_TOOL_O
 import type { Chat, Folder, ProviderInfo } from '../../shared/protocol.ts';
 import type { DomainContext, DomainModule } from './types.ts';
 import { plural } from '../../shared/wording.ts';
+import { currentPathPlatform, isInsidePath, looksLikeWindowsPath, type PathPlatform } from '../../shared/path-normalize.ts';
+import { canonicalFolderPath } from '../folder-merge.ts';
 
 const SCHEMA = `CREATE TABLE IF NOT EXISTS imported_chats (
   source TEXT NOT NULL, session_id TEXT NOT NULL, chat_id TEXT NOT NULL, path TEXT NOT NULL,
@@ -36,14 +38,15 @@ const isDirectory = async (path: string) => { try { return (await fs.stat(path))
 /** Deepest sidebar folder that contains `cwd` (or is it). */
 export function folderForCwd(folders: readonly Folder[], cwd: string | undefined): Folder | undefined {
   if (!cwd) return undefined;
-  const target = cwd.replace(/[\\/]+$/, '');
-  let best: Folder | undefined;
+  let best: Folder | undefined, bestLength = -1;
   for (const folder of folders) {
-    const root = folder.path.replace(/[\\/]+$/, '');
-    if (target === root || target.startsWith(root + sep)) { if (!best || root.length > best.path.replace(/[\\/]+$/, '').length) best = folder; }
+    // #319: `\\?\E:\x`, `e:/x` and `E:\x\` are one folder; compared through the shared normaliser, not as raw text.
+    const root = canonicalFolderPath(folder.path);
+    if (isInsidePath(root, canonicalFolderPath(cwd), platformOf(folder.path, cwd)) && root.length > bestLength) { best = folder; bestLength = root.length; }
   }
   return best;
 }
+const platformOf = (a: string, b: string): PathPlatform => looksLikeWindowsPath(a) || looksLikeWindowsPath(b) ? 'win32' : currentPathPlatform();
 /** Longest string kept inside tool data (a Write's whole file, an Edit's old/new text, a patch): the transcript row
  *  shows a preview, and the full text stays in the source. */
 const MAX_DATA_STRING = 64 * 1024;
@@ -207,7 +210,7 @@ export function createImportDomain(context: DomainContext): DomainModule {
     const update = database.prepare('UPDATE timeline SET text = ?, status = ?, data = ? WHERE id = ?');
     const redacted = { value: 0 };
     const pending = new Map<string, { id: string; name: string; data: Record<string, unknown> }>();
-    let batch: Array<() => void> = [], items = 0, messages = 0, truncated = false, meta: { cwd?: string; model?: string; title?: string } = {};
+    let batch: Array<() => void> = [], items = 0, messages = 0, toolItems = 0, truncated = false, meta: { cwd?: string; model?: string; title?: string } = {};
     const flush = () => { if (!batch.length) return; const work = batch; batch = []; store.tx(() => { for (const step of work) step(); }); };
     const importedAt = new Date().toISOString();
     const noticeId = randomUUID();
@@ -217,6 +220,7 @@ export function createImportDomain(context: DomainContext): DomainModule {
     const write = (item: ImportedItem) => {
       if (items >= MAX_ITEMS_PER_SESSION) { truncated = true; return false; }
       items++;
+      if (item.kind === 'tool') toolItems++;
       const rowId = randomUUID();
       let data = item.data ? redactDeep(item.data, redacted) as Record<string, unknown> : undefined, text: string;
       if (item.kind === 'user' || item.kind === 'assistant') { messages++; const clipped = clipRedact(item.text, MAX_MESSAGE_TEXT, redacted); text = clipped.text; if (clipped.truncated) data = { ...data, truncated: true }; }
@@ -252,7 +256,13 @@ export function createImportDomain(context: DomainContext): DomainModule {
     // Sidebar recency follows the session's own last activity, so a bulk import does not bury today's chats.
     database.prepare('UPDATE chats SET updated_at = ?, status = ?, error = NULL, recovery = NULL WHERE id = ?').run(session.updatedAt, 'idle', chatId);
     let continued: 'native' | 'digest' = 'digest';
-    const provider = options.continueInMuster ? nativeProvider(session.source) : undefined;
+    // #319: resume the source thread only when the transcript shows it ran shell or file tools. A thread with no tool use at all may
+    // have been created without them (and tools cannot be added to a thread partway), so it is not resumed: the first send starts a
+    // fresh tool-enabled session seeded with a summary and the recent turns, and the chat says so.
+    const nativeCandidate = options.continueInMuster ? nativeProvider(session.source) : undefined;
+    const provider = nativeCandidate && toolItems > 0 ? nativeCandidate : undefined;
+    // Written at the import's own timestamp so a later re-import does not mistake it for the user continuing the chat.
+    if (nativeCandidate && !provider) insert.run(randomUUID(), chatId, 'notice', `This ${sourceLabel(session.source)} thread shows no shell or file tool use, so Muster did not resume it (a thread without tools can’t gain them). Your next message starts a fresh session with tools, carrying this conversation as context.`, 'completed', importedAt, JSON.stringify({ kind: 'import-fresh-session' }));
     if (provider) {
       const bindingId = provider.bindingId ?? provider.id;
       const model = meta.model && provider.models.some(entry => entry.id === meta.model) ? meta.model : undefined;

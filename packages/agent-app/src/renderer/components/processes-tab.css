@@ -78,6 +78,7 @@
 .terminal-pane-head { display:flex; align-items:center; gap:8px; flex:none; min-width:0; padding:6px 8px 6px 12px; border-bottom:1px solid var(--hairline); }
 .terminal-pane-head h2 { margin:0; font-size:var(--fs-12); font-weight:500; color:var(--text); }
 .terminal-pane-count { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--text-faint); font-size:var(--fs-11); font-variant-numeric:tabular-nums; }
+.terminal-agent-note { flex:none; margin:0; padding:6px 12px; border-bottom:1px solid var(--hairline); color:var(--text-dim); font-size:var(--fs-11); line-height:1.5; }
 .terminal-port-note { flex:none; margin:0; padding:6px 12px; border-bottom:1px solid var(--hairline); color:var(--warn, var(--text-dim)); font-size:var(--fs-11); line-height:1.5; }
 .terminal-launcher { flex:none; max-height:45%; overflow:auto; padding:8px 10px; border-bottom:1px solid var(--hairline); }
 .terminal-launcher .process-saved-actions { margin-bottom:8px; }
