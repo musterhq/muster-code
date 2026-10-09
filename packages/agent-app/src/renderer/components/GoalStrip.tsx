@@ -7,6 +7,7 @@ import { ConfirmSheet } from './ConfirmSheet';
 import { formatElapsed, goalElapsed, goalHeadline, goalStopNote } from './composerMenus';
 import './goal-strip.css';
 import {Tip} from './Tooltip';
+import {startActiveInterval} from '../windowActivity';
 
 /** Ticks once a second, only while the goal's clock runs. */
 function useNow(active: boolean): number {
@@ -14,8 +15,7 @@ function useNow(active: boolean): number {
   useEffect(() => {
     if (!active) return;
     setNow(Date.now());
-    const timer = window.setInterval(() => setNow(Date.now()), 1000);
-    return () => window.clearInterval(timer);
+    return startActiveInterval(() => setNow(Date.now()), 1000);
   }, [active]);
   return now;
 }

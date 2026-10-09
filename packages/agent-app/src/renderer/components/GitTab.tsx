@@ -15,6 +15,7 @@ import {useGitRepository} from './GitActions';
 import {GitRefChip, GitSync, PrStateIcon} from './GitStatus';
 import {Tip} from './Tooltip';
 import './git-tab.css';
+import {startActiveInterval} from '../windowActivity';
 
 type PrSection = 'conversation' | 'checks' | 'files';
 
@@ -38,8 +39,8 @@ function useChecks(folderId: string, number: number | undefined): GitHubChecks |
     let live = true, pending = false, ticks = 0;
     const load = (refresh: boolean) => invoke('github.pr.checks', {folderId, number, refresh}).then(value => { if (live && value) { setChecks(value); pending = !!value.summary?.pending; } }, () => undefined);
     void load(false);
-    const timer = setInterval(() => { ticks++; if (pending || ticks % 4 === 0) void load(true); }, 30_000);
-    return () => { live = false; clearInterval(timer); };
+    const stop = startActiveInterval(() => { ticks++; if (pending || ticks % 4 === 0) void load(true); }, 30_000);
+    return () => { live = false; stop(); };
   }, [folderId, number]);
   return checks;
 }

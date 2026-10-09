@@ -72,6 +72,7 @@ import { useStoreSelector, useStoreSlice } from '../useStore';
 import { isChord } from '../focus';
 import { readCollapsed, saveCollapsed } from '../sidebarDisclosure';
 import { StatusDot } from './StatusDot';
+import { useActiveNow } from '../windowActivity';
 import { displayStatus } from './runStatus';
 import {chatGroup,compareChats,isChatRunning,isChatSort,newChatTarget,readChatSort,rovingStop,rovingTarget,saveChatSort,selectionReveal,stepReorder,type ChatSort} from '../chatNavigation';
 import {isSnoozed,snoozeLabel} from '../../shared/snooze';
@@ -286,9 +287,7 @@ const rows=(chats:Chat[],context:RowContext,drag?:(id:string)=>ItemDragProps)=>c
 
 /** Re-render row ages once a minute without touching the store. */
 function useMinuteClock():number {
-  const [now,setNow]=useState(()=>Date.now());
-  useEffect(()=>{const timer=setInterval(()=>setNow(Date.now()),60_000);return()=>clearInterval(timer);},[]);
-  return now;
+  return useActiveNow(60_000);
 }
 
 export function Sidebar(): React.ReactElement {

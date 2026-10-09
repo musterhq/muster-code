@@ -396,10 +396,13 @@ textarea:focus-visible {
 .status-dot[data-status='stopping'] { color: var(--warn); }
 .status-label { color: currentColor; font-size: var(--fs-11); font-weight: 500; white-space: nowrap; }
 
+/* Stepped like the macOS spinner (12 steps, ~10 frames/s): a smooth spin forces a 60 Hz window composite for a 13px glyph (#356). */
 @media (prefers-reduced-motion: no-preference) {
-  .status-dot[data-status='running'] > svg { animation: status-spin 1.2s linear infinite; }
+  .status-dot[data-status='running'] > svg { animation: status-spin 1.2s steps(12, end) infinite; }
 }
 @keyframes status-spin { to { transform: rotate(360deg); } }
+/* Nothing animates in a window the user cannot see or is not using (set by windowActivity.ts); motion resumes on focus. */
+:root[data-window-active='false'] *, :root[data-window-active='false'] *::before, :root[data-window-active='false'] *::after { animation-play-state: paused !important; }
 
 /* Chat -------------------------------------------------------------------- */
 

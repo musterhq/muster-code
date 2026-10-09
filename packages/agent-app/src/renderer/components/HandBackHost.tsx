@@ -5,6 +5,7 @@
  */
 import React, { useEffect, useState } from 'react';
 import { invoke, subscribe } from '../bridge';
+import { startActiveInterval } from '../windowActivity';
 import { dismissNotice, notifyError, pushNotice, type Notice } from '../store';
 
 export const UNDO_WINDOW_MS = 2 * 60_000;
@@ -12,7 +13,7 @@ const secondsLeft = (endsAt: number) => Math.max(0, Math.ceil((endsAt - Date.now
 /** The countdown toast's text, re-rendered every second. */
 export function NoticeCountdown({ countdown }: { countdown: NonNullable<Notice['countdown']> }): React.ReactElement {
   const [, tick] = useState(0);
-  useEffect(() => { const t = setInterval(() => tick(n => n + 1), 1000); return () => clearInterval(t); }, []);
+  useEffect(() => startActiveInterval(() => tick(n => n + 1), 1000), []);
   return <>{countdown.format(secondsLeft(countdown.endsAt))}</>;
 }
 /** One toast per task: the countdown running in the runtime. */

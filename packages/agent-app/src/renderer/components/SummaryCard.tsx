@@ -29,6 +29,7 @@ import {ciRepairActive} from '../../shared/domains/ci-protocol';
 import type {GitHubChecks} from '../../shared/domains/github-protocol';
 import { plural } from '../../shared/wording.ts';
 import {Tip} from './Tooltip';
+import {startActiveInterval, useActiveNow} from '../windowActivity';
 
 type Folder = {id: string; name: string; path: string};
 type PullRequests = Awaited<ReturnType<typeof fetchPullRequests>>;
@@ -100,6 +101,8 @@ function register(folderId: string, refresher: {status: () => void; prs: () => v
   };
 }
 
+const sameValue = (a: unknown, b: unknown): boolean => a === b || (a !== undefined && b !== undefined && JSON.stringify(a) === JSON.stringify(b));
+
 function useGitStatus(folderId: string) {
   const [status, setStatus] = useState<GitLocalStatus>();
   const [info, setInfo] = useState<GitRepoInfo>();
@@ -114,7 +117,8 @@ function useGitStatus(folderId: string) {
     const mine = ++token.current;
     try {
       const [next, , facts] = await Promise.all([invoke('git.status', {folderId}), loadGitChanges(folderId), invoke('git.info', {folderId}).catch(() => undefined)]);
-      if (mine === token.current) {setStatus(next); if (facts) setInfo(facts); setError('');}
+      // Polls return fresh objects every time; keep the old reference when nothing changed so an idle card does not re-render (#356).
+      if (mine === token.current) {setStatus(prev => sameValue(prev, next) ? prev : next); if (facts) setInfo(prev => sameValue(prev, facts) ? prev : facts); setError('');}
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : String(cause);
       // A busy queue is transient: keep showing the last good status rather than an error.
@@ -159,8 +163,8 @@ function PullRequestChecks({folderId, number, chatId}: {folderId: string; number
     // Running checks stream in: re-read every 30s while any are pending, and whenever the repair reports progress.
     // Settled checks re-read every 2 minutes: the refresh re-reads the PR head, so a new push shows its own checks.
     let ticks = 0;
-    const timer = setInterval(() => { ticks++; if (checksPending.current || ticks % 4 === 0) void load(true); }, 30_000);
-    return () => { alive = false; clearInterval(timer); };
+    const stop = startActiveInterval(() => { ticks++; if (checksPending.current || ticks % 4 === 0) void load(true); }, 30_000);
+    return () => { alive = false; stop(); };
   }, [folderId, number, repair?.headSha, repair?.phase, repair?.checks?.pending, repair?.checks?.failed]);
   if (error && !checks) return <p className="summary-muted">Checks unavailable: {error}</p>;
   if (!checks) return <p className="summary-muted">Loading checks…</p>;
@@ -259,7 +263,8 @@ function FolderSection({folder, chat, project, activity}: {folder: Folder; chat:
     catch (cause) { notifyError(cause); }
     finally { setFetching(false); }
   };
-  const commit = commitAction(status, info, dirty);
+  const now = useActiveNow(60_000);
+  const commit = commitAction(status, info, dirty, now);
   const openPrs = prs?.available ? prs.items.filter(pr => pr.state === 'OPEN' || pr.state === 'open') : [];
   const branchPr = status ? branchPullRequest(openPrs, status) : undefined;
   const branchLabel = status ? (status.detached ? 'Detached HEAD' : status.branch || 'No branch') : '…';
