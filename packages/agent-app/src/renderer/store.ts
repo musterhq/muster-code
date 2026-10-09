@@ -1378,15 +1378,20 @@ function gitFolderKnown(folderId: string): boolean {
   const folders = state.snapshot?.folders;
   return !folders || folders.some(folder => folder.id === folderId);
 }
+const gitChangesInFlight = new Set<string>();
 export async function loadGitChanges(folderId: string): Promise<void> {
   const previous = state.gitChanges[folderId];
-  if (previous?.phase === 'loading') return;
+  if (previous?.phase === 'loading' || gitChangesInFlight.has(folderId)) return;
   clearTimeout(gitChangesRetry.get(folderId));
   gitChangesRetry.delete(folderId);
-  set({ gitChanges: { ...state.gitChanges, [folderId]: { phase: 'loading', value: previous?.value } } });
+  gitChangesInFlight.add(folderId);
+  // A background refresh of a list that is already on screen changes nothing visible, so it does not flip to 'loading' and back (#356).
+  if (previous?.phase !== 'ready') set({ gitChanges: { ...state.gitChanges, [folderId]: { phase: 'loading', value: previous?.value } } });
   try {
     const changes = await invoke('git.changes', { folderId });
     gitChangesRetryCount.delete(folderId);
+    const now = state.gitChanges[folderId];
+    if (now?.phase === 'ready' && JSON.stringify(now.value) === JSON.stringify(changes)) return;
     set({ gitChanges: { ...state.gitChanges, [folderId]: { phase: 'ready', value: changes } } });
   } catch (cause) {
     // Mid-run reads can hit a transient timeout or a busy Git lock (the review host and the status
@@ -1409,6 +1414,8 @@ export async function loadGitChanges(folderId: string): Promise<void> {
     } else {
       gitChangesRetryCount.delete(folderId);
     }
+  } finally {
+    gitChangesInFlight.delete(folderId);
   }
 }
 

@@ -1,5 +1,6 @@
 import {useCallback,useSyncExternalStore} from 'react';
 import {invoke,subscribe} from './bridge.ts';
+import {isWindowActive,onWindowActivity} from './windowActivity.ts';
 import {mergeProcessSummary,type ListeningPort,type ProcessPortsSnapshot,type ProcessSummarySnapshot,type TerminalInfo} from '../shared/process-protocol.ts';
 import type {TimelineItem} from '../shared/protocol.ts';
 import {classifyTool,commandLabel} from './components/toolPresentation.ts';
@@ -109,29 +110,44 @@ export function agentCommands(items:readonly TimelineItem[]|undefined):AgentComm
 /** S3-E / DF-F38: listening ports per conversation, polled every few seconds while something shows
  * them (the Terminal list, the summary card). Main caches the lsof scan, so readers are cheap. */
 export interface PortsState {ports:ListeningPort[];supported:boolean}
-const PORT_POLL_MS=4000,EMPTY_PORTS:PortsState={ports:[],supported:true};
-const portStates=new Map<string,PortsState>(),portListeners=new Map<string,Set<()=>void>>(),portTimers=new Map<string,ReturnType<typeof setInterval>>();
+const PORT_POLL_MS=4000,PORT_POLL_MAX_MS=30_000,EMPTY_PORTS:PortsState={ports:[],supported:true};
+const portStates=new Map<string,PortsState>(),portListeners=new Map<string,Set<()=>void>>(),portStops=new Map<string,()=>void>();
 const samePorts=(a:ListeningPort[],b:ListeningPort[])=>a.length===b.length&&a.every((port,index)=>port.id===b[index].id&&port.owner===b[index].owner&&JSON.stringify(port.source)===JSON.stringify(b[index].source));
 export const listeningPorts=(chatId:string):PortsState=>portStates.get(chatId)??EMPTY_PORTS;
-export function refreshListeningPorts(chatId:string):Promise<void> {
-  if(!portListeners.get(chatId)?.size)return Promise.resolve();
-  if(typeof document!=='undefined'&&document.visibilityState==='hidden')return Promise.resolve();
+/** Resolves true when the ports (or support) changed, so the poller can back off while nothing moves. */
+export function refreshListeningPorts(chatId:string):Promise<boolean> {
+  if(!portListeners.get(chatId)?.size)return Promise.resolve(false);
+  if(typeof document!=='undefined'&&document.visibilityState==='hidden')return Promise.resolve(false);
   return invoke('processes.ports',{chatId}).then((reply:ProcessPortsSnapshot|undefined)=>{
     // An older runtime (or a test host) may not answer this command: treat it as no port data, never a crash.
     const next:ProcessPortsSnapshot=reply&&Array.isArray(reply.ports)?reply:{...(reply??{}),ports:[],supported:false} as ProcessPortsSnapshot;
     const current=portStates.get(chatId);
-    if(current&&current.supported===next.supported&&samePorts(current.ports,next.ports))return;
+    if(current&&current.supported===next.supported&&samePorts(current.ports,next.ports))return false;
     portStates.set(chatId,{ports:next.ports,supported:next.supported});
     for(const listener of portListeners.get(chatId)??[])listener();
-  },()=>{});
+    return true;
+  },()=>false);
+}
+/** Poll every 4 s while ports change, backing off to 30 s while they do not; paused entirely while the window is hidden or unfocused (#356). */
+function pollPorts(chatId:string):()=>void {
+  let delay=PORT_POLL_MS,timer:ReturnType<typeof setTimeout>|undefined,stopped=false;
+  const schedule=()=>{if(stopped)return;timer=setTimeout(tick,delay);};
+  const tick=()=>{
+    if(stopped)return;
+    if(!isWindowActive()){schedule();return;}
+    void refreshListeningPorts(chatId).then(changed=>{delay=changed?PORT_POLL_MS:Math.min(delay*2,PORT_POLL_MAX_MS);schedule();});
+  };
+  const off=onWindowActivity(active=>{if(!active||stopped)return;delay=PORT_POLL_MS;clearTimeout(timer);tick();});
+  schedule();
+  return()=>{stopped=true;clearTimeout(timer);off();};
 }
 export function subscribeListeningPorts(chatId:string,listener:()=>void):()=>void {
   let set=portListeners.get(chatId);if(!set){set=new Set();portListeners.set(chatId,set);}
   set.add(listener);
-  if(set.size===1){void refreshListeningPorts(chatId);portTimers.set(chatId,setInterval(()=>void refreshListeningPorts(chatId),PORT_POLL_MS));}
+  if(set.size===1){void refreshListeningPorts(chatId);portStops.set(chatId,pollPorts(chatId));}
   return()=>{
     const current=portListeners.get(chatId);if(!current)return;current.delete(listener);
-    if(!current.size){portListeners.delete(chatId);clearInterval(portTimers.get(chatId));portTimers.delete(chatId);portStates.delete(chatId);}
+    if(!current.size){portListeners.delete(chatId);portStops.get(chatId)?.();portStops.delete(chatId);portStates.delete(chatId);}
   };
 }
 export function useListeningPorts(chatId:string|undefined):PortsState {

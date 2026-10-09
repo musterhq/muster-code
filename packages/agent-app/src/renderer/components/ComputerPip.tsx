@@ -1,4 +1,5 @@
 /** Codex-style computer-use picture-in-picture (CUA-01/02/03/07/09) and the right-pane screenshot viewer (CUA-06). */
+import {startActiveInterval} from '../windowActivity';
 import React,{useEffect,useMemo,useRef,useState} from 'react';
 import {AppWindow,Download,ExternalLink,Eye,Globe,Hand,PanelRightOpen,Paperclip,Play,Square,X} from 'lucide-react';
 import {invoke} from '../bridge';
@@ -42,7 +43,7 @@ function useChatSources(chatId:string|null):{sources:PipSource[];source?:PipSour
 }
 function useNow(active:boolean,everyMs=1000):number {
   const [now,setNow]=useState(()=>Date.now());
-  useEffect(()=>{if(!active)return;setNow(Date.now());const timer=window.setInterval(()=>setNow(Date.now()),everyMs);return()=>window.clearInterval(timer);},[active,everyMs]);
+  useEffect(()=>{if(!active)return;setNow(Date.now());return startActiveInterval(()=>setNow(Date.now()),everyMs);},[active,everyMs]);
   return now;
 }
 
@@ -75,8 +76,8 @@ function usePermissions(active:boolean):ComputerPermissions|undefined {
   useEffect(()=>{
     if(!active)return;let live=true;
     const probe=()=>void invoke('computer.permissions',undefined).then(value=>{if(live)setPerms(value);},()=>{});
-    probe();const timer=window.setInterval(probe,15_000);
-    return()=>{live=false;window.clearInterval(timer);};
+    probe();const stop=startActiveInterval(probe,15_000);
+    return()=>{live=false;stop();};
   },[active]);
   return perms;
 }
@@ -134,11 +135,11 @@ function useStackAnchor(active:boolean,count:number,corner:PipCorner|undefined,f
     update();
     window.addEventListener('resize',update);
     // The summary card folds, grows and hides without a window resize; a light poll follows it.
-    const timer=window.setInterval(update,700);
+    const stopPoll=startActiveInterval(update,700);
     const center=document.querySelector('main.center');
     const observer=typeof ResizeObserver==='undefined'||!center?undefined:new ResizeObserver(update);
     if(center)observer?.observe(center);
-    return()=>{window.removeEventListener('resize',update);window.clearInterval(timer);observer?.disconnect();};
+    return()=>{window.removeEventListener('resize',update);stopPoll();observer?.disconnect();};
   },[active,count,corner]);
   return [anchor,setAnchor] as const;
 }

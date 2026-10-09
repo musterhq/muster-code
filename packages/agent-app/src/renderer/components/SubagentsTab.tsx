@@ -19,6 +19,7 @@ import { MessageBody } from './MessageBody';
 import { ActivityGroup } from './ActivityGroup';
 import './subagents-tab.css';
 import {Tip} from './Tooltip';
+import {startActiveInterval} from '../windowActivity';
 
 export function SubagentStatus({state}: {state?: string}) {
   const {kind, label} = subagentState(state);
@@ -54,7 +55,7 @@ function PhaseBadge({kind, label}: {kind:SubagentPhaseKind; label:string}) {
 /** A 1s clock, only while something visible is running. */
 function useNow(active: boolean): number {
   const [now, setNow] = useState(Date.now);
-  useEffect(() => { if (!active) return; setNow(Date.now()); const timer = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(timer); }, [active]);
+  useEffect(() => { if (!active) return; setNow(Date.now()); return startActiveInterval(() => setNow(Date.now()), 1000); }, [active]);
   return now;
 }
 function elapsedLabel(start: string | undefined, end: string | undefined, running: boolean, now: number): string | undefined {
