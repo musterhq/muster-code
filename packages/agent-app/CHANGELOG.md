@@ -3,6 +3,22 @@
 All notable changes to Muster Agent. Each `## <version>` section becomes the notes of the
 `agent-v<version>` GitHub Release (`.github/workflows/agent-app-release.yml`).
 
+## 0.3.8
+
+Muster now rests when nothing is happening. A finished chat had kept the graphics process and the window busy (about 29% and 13% CPU on a Mac), which warmed the laptop for no reason.
+
+| While idle, in a headless test | 0.3.7 | 0.3.8 |
+|---|---:|---:|
+| Frames drawn per second with a running-chat spinner visible | 60.9 | **11.8** |
+| Same, window unfocused | 60.9 | **2** (animations paused) |
+| Compositor work per second (GPU thread) | 29.5 ms | **12.1 ms** |
+| Renderer script work per second | 2.5 ms | **0.11 ms** |
+| Screen updates per second with nothing changing | 0.20 | **0** |
+
+- **Animations pause when the window is in the background.** Spinners and pulses stop while Muster is unfocused or hidden and resume when you come back. The running-chat spinner now turns in 12 steps, like the macOS spinner, instead of redrawing the whole window 60 times a second.
+- **Clocks and polls rest too.** "Up to date as of…" and sidebar ages refresh once a minute and only while the window is active. Pull-request checks, the hand-back countdown display and live-view timers pause in the background. The open-ports check backs off from every 4 s to every 30 s when nothing changes.
+- **The summary card no longer redraws itself every 15 seconds** when the git status hasn't changed (#356).
+
 ## 0.3.7
 
 Work locally now hands back on its own, live diffs show up in checked-out tasks, router models no longer report "unavailable" after a restart, Ubuntu 24.04 installs start, and releases build about twice as fast.
