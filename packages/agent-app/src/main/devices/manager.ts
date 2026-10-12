@@ -53,6 +53,9 @@ export class DeviceManager {
   private list: DeviceList = {devices: [], errors: [], checkedAt: 0};
   private setupCache?: {at: number; ios: DeviceSetup['ios']; android: DeviceSetup['android']; node: DeviceSetup['node']};
   private disposed = false;
+  private hubLogTail = '';
+  /** The helper's recent output (diagnostics and the CI smoke report). */
+  get hubLog(): string { return this.hubLogTail; }
   private timers: {set: typeof setTimeout; clear: typeof clearTimeout};
   /** The window is in front: frames only flow while it is (#357). */
   private windowActive = true;
@@ -145,7 +148,13 @@ export class DeviceManager {
     if (!node) return Promise.reject(new Error('Node.js was not found, so the device helper cannot run. Install Node.js 20 or later and restart Muster.'));
     const env = hubEnv(this.deps.env, this.paths.stateDir, androidTools(this.deps).sdk);
     this.hubStarting = startHub({node, paths: this.paths, env, spawn: this.deps.spawn, fetch: this.deps.fetch, onExit: () => this.hubExited()})
-      .then(started => { this.hub = started; void this.publishSetup(); return started.endpoint; })
+      .then(started => {
+        this.hub = started;
+        // A bounded tail of the helper's own log for diagnostics; the token never appears in it (it was only in the banner).
+        const keep = (chunk: unknown) => { this.hubLogTail = (this.hubLogTail + String(chunk)).split(started.endpoint.token).join('[token]').slice(-16_000); };
+        started.child.stdout?.on('data', keep); started.child.stderr?.on('data', keep);
+        void this.publishSetup(); return started.endpoint;
+      })
       .finally(() => { this.hubStarting = undefined; });
     return this.hubStarting;
   }

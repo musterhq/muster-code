@@ -181,7 +181,7 @@ export class DeviceLink {
       if (this.videoSocket !== socket) return;
       this.videoSocket = undefined;
       if (this.inputSocket === socket) { this.inputSocket = undefined; this.admitted = false; this.events.input(false); }
-      this.videoFailed(event.reason || 'The emulator stream closed.');
+      this.videoFailed(event.reason ? `The emulator stream closed: ${event.reason}.` : `The emulator stream closed (code ${event.code}).`);
     };
     socket.onerror = () => { try { socket.close(); } catch {} };
   }

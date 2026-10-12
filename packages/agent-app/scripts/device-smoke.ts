@@ -80,6 +80,16 @@ try {
 } catch (error) {
   report.error = error instanceof Error ? error.stack ?? error.message : String(error);
   console.error('[smoke] FAILED', report.error);
+  // Diagnostics: what the helper said, and what its own health and device routes answer.
+  try {
+    const hub = await manager.hubEndpoint();
+    for (const route of [platform === 'ios' ? '/vendor/serve-sim/api' : '/vendor/serve-emu/health', '/api/devices', platform === 'android' ? '/vendor/serve-emu/api/devices' : '/vendor/serve-sim/grid/api/status']) {
+      const response = await fetch(`${hub.origin}${route}`, {headers: {authorization: `Bearer ${hub.token}`}, signal: AbortSignal.timeout(15_000)}).catch(e => ({status: 0, text: async () => String(e)}));
+      console.error(`[smoke] ${route} -> ${response.status} ${(await response.text()).slice(0, 1500)}`);
+    }
+  } catch (e) { console.error('[smoke] no helper for diagnostics', e); }
+  console.error('[smoke] helper log tail:\n' + manager.hubLog.slice(-6000));
+  report.hubLog = manager.hubLog.slice(-16000);
 } finally {
   await manager.dispose().catch(() => undefined);
   report.finished = new Date().toISOString();
