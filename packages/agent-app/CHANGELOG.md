@@ -3,6 +3,11 @@
 All notable changes to Muster Agent. Each `## <version>` section becomes the notes of the
 `agent-v<version>` GitHub Release (`.github/workflows/agent-app-release.yml`).
 
+## Unreleased
+
+- Chats on routes that cannot start sub-agents (API keys, routers, local servers) no longer keep saying "I don't have a sub-agent tool in this chat". Sub-agent hints now appear only on routes that can use them, and those chats are told to just do the work.
+- Router and API-key chats can work much longer in one turn (up to 400 tool rounds, 1,000 tool calls or 2 hours) before stopping. When a limit is reached, the model now gives a short status of what is done and what is next instead of a bare "Stopped" note.
+
 ## 0.3.10
 
 Previews and project chats behave. Browser and computer-use previews show only while a session is live and show the real page; Compact works in Project chats; router models show their context window.

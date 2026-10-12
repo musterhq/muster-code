@@ -9,8 +9,8 @@ export const WITH_TOOLS = 'Shell and file tools';
 type Fetch = typeof fetch;
 interface HttpOptions {endpoint: string; apiKey: () => string | undefined; label: string; fetch?: Fetch; memory?: ConversationMemory}
 
-const MAX_TOOL_ROUNDS = 40, MAX_CALLS_PER_ROUND = 16, MAX_CALLS_PER_TURN = 100, MAX_PENDING_CALLS = 64;
-const MAX_ARGUMENT_BYTES_PER_STREAM = 4 * 1024 * 1024, MAX_EXTRA_BYTES = 2 * 1024 * 1024, TURN_DEADLINE_MS = 30 * 60_000, REFUSAL_TTL_MS = 30 * 60_000;
+const MAX_TOOL_ROUNDS = 400, MAX_CALLS_PER_ROUND = 16, MAX_CALLS_PER_TURN = 1000, MAX_PENDING_CALLS = 64;
+const MAX_ARGUMENT_BYTES_PER_STREAM = 4 * 1024 * 1024, MAX_EXTRA_BYTES = 2 * 1024 * 1024, TURN_DEADLINE_MS = 2 * 60 * 60_000, REFUSAL_TTL_MS = 30 * 60_000;
 /** A 400/422 counts as "this model takes no tool definitions" only when its body says so (not for a context overflow or a bad image). */
 export const refusesTools = (body: string) => /\b(?:tools?|functions?|tool_choice|tool[ _-]?calls?)\b/i.test(body) && /(?:not|n't|no longer|unsupported|unknown|invalid|does not|doesn't)/i.test(body);
 interface Streamed { usage?: Record<string, unknown>; calls?: ToolCall[] }
@@ -61,13 +61,30 @@ async function turn(input: AdapterRunInput, memory: ConversationMemory, label: s
     let size = extra.reduce((sum, message) => sum + (message.content?.length ?? 0), 0);
     for (const message of extra) { if (size <= MAX_EXTRA_BYTES) break; if (message.role === 'tool' && (message.content?.length ?? 0) > 200) { size -= message.content!.length; message.content = '[earlier tool output omitted to save space]'; size += message.content.length; } }
   };
+  /** At a cap: one last streamed request with no tools asking for a short status. If that fails, the plain note. */
+  const closingStatus = async () => {
+    const note = '\n\n(Stopped: this turn reached its limit on tool calls or time.)';
+    let got = '';
+    try {
+      if (input.signal.aborted) throw new Error('aborted');
+      extra.push({role: 'user', content: 'This turn has reached its limit on tool calls or time, so no more tools are available. In 2-3 sentences, say what is done and what is next. Do not call tools.'});
+      const last = await send(history, extra, false);
+      if (!last.ok || !last.body) throw new Error('status request failed');
+      const lead = '\n\n';
+      const streamed = await stream(last, delta => { if (!got) { answer += lead; input.onDelta(lead); } got += delta; answer += delta; input.onDelta(delta); });
+      if (streamed?.usage) usages.push(streamed.usage as {inputTokens?: number; outputTokens?: number; totalTokens?: number});
+      if (!got.trim()) throw new Error('empty status');
+    } catch {
+      if (!got) { answer += note; input.onDelta(note); }
+    }
+  };
   try {
     for (let round = 0; ; round++) {
       const streamed = await stream(response, delta => { answer += delta; input.onDelta(delta); });
       if (streamed?.usage) usages.push(streamed.usage as {inputTokens?: number; outputTokens?: number; totalTokens?: number});
       let calls = streamed?.calls ?? [];
       if (!toolsOn || !calls.length || input.signal.aborted) break;
-      if (round >= MAX_TOOL_ROUNDS || callsThisTurn >= MAX_CALLS_PER_TURN || Date.now() > deadline) { const note = '\n\n(Stopped: this turn reached its limit on tool calls or time.)'; answer += note; input.onDelta(note); break; }
+      if (round >= MAX_TOOL_ROUNDS || callsThisTurn >= MAX_CALLS_PER_TURN || Date.now() > deadline) { await closingStatus(); break; }
       calls = calls.slice(0, Math.min(MAX_CALLS_PER_ROUND, MAX_CALLS_PER_TURN - callsThisTurn));
       callsThisTurn += calls.length;
       extra.push({role: 'assistant', content: null, tool_calls: calls.map(call => ({id: call.id, type: 'function', function: {name: call.name, arguments: resent(call.arguments)}}))});
