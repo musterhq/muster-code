@@ -137,14 +137,16 @@ const hasRenderer = existsSync(src('renderer', 'main.tsx'));
 if (hasRenderer) {
   builds.push({
     ...common,
-    entryPoints: [src('renderer', 'main.tsx'),src('renderer','diff-worker.ts'),src('renderer','syntax-highlight-worker.ts')],
+    entryPoints: {main: src('renderer', 'main.tsx'), 'diff-worker': src('renderer', 'diff-worker.ts'), 'syntax-highlight-worker': src('renderer', 'syntax-highlight-worker.ts'), 'model-worker': src('renderer', 'three-engine', 'model', 'worker.ts')},
     outdir: dist('renderer'),
     splitting: true,
     platform: 'browser',
     format: 'esm',
     target: 'es2022',
     jsx: 'automatic',
-    loader: { '.ttf': 'file', '.woff2': 'file' },
+    loader: { '.ttf': 'file', '.woff2': 'file', '.wasm': 'binary' },
+    // The vendored Draco glue has a Node-only branch that require()s these; the browser/worker branch never runs it.
+    external: ['fs', 'path'],
     metafile: true,
   });
 }

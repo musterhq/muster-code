@@ -17,7 +17,7 @@
 import React, {useCallback, useEffect, useRef, useState} from 'react';
 import {Dialog} from '@base-ui/react/dialog';
 import {Menu} from '@base-ui/react/menu';
-import {Box, Check, ChartColumn, ChevronDown, Code, Copy, Download, FileCode, Maximize2, PanelRightOpen, Smartphone, Workflow, X} from 'lucide-react';
+import {Box, Check, ChartColumn, ChevronDown, Code, Copy, Download, FileCode, Maximize2, Minimize2, PanelRightOpen, Smartphone, Workflow, X} from 'lucide-react';
 import {copyText} from '../clipboard';
 import {RICH_KIND_LABEL, RICH_NOUN, type RichKind} from '../../shared/rich-fence';
 import {ResourceState} from './ResourceState';
@@ -38,6 +38,7 @@ export interface RichContext {
 export interface RichExport {
   id: string;
   label: string;
+  disabled?: boolean;
   /** Runs the export; reject with a message to show it in the block (never throw past it). */
   run(): Promise<void> | void;
 }
@@ -48,7 +49,7 @@ export interface RichBlockProps {
   kindLabel?: string;
   status: RichStatus;
   /** For status 'error'. `message` is plain English for the person; `detail` is the library's own text. */
-  error?: {message?: string; detail?: string; onRetry?(): void};
+  error?: {message?: string; detail?: string; onRetry?(): void; /** Extra buttons on the error card (Reveal in Finder). */ actions?: React.ReactNode};
   emptyMessage?: string;
   /** The block's source (Mermaid text, chart JSON, report HTML): feeds "Copy source" and "Show source" on the error card. */
   source?: string;
@@ -64,6 +65,17 @@ export interface RichBlockProps {
   height?: number | 'auto';
   /** Text alternative for assistive tech: the diagram source, a chart summary, the report title. */
   description?: string;
+  /** Label of the copy action when the "source" is not text of the visual (the 3D viewer copies the file path). Default "Copy source". */
+  copyLabel?: string;
+  /**
+   * For a viewport that owns a GPU context or a worker (3D model, device): the children stay mounted in every status (hidden
+   * until ready, with the skeleton or error card over them) so the canvas is never torn down around a state change, and
+   * Full screen enlarges this same block in place instead of mounting a second copy.
+   */
+  persistent?: boolean;
+  /** Loading text for a persistent block ("Reading file"), and optional detail under it (a progress bar). */
+  loadingLabel?: string;
+  loadingDetail?: React.ReactNode;
   /** A live session (a device): no "Copy source". */
   live?: boolean;
   /** The viewport. A function receives where it is shown; it is called again for the full-screen copy. */
@@ -88,10 +100,12 @@ interface ChromeProps extends RichBlockProps {
   suspended: boolean;
   onClose?: () => void;
   onFullscreen?: () => void;
+  /** Persistent blocks enlarge in place: the header toggles. */
+  inPlaceFull?: boolean;
 }
 
 function Chrome(props: ChromeProps): React.ReactElement {
-  const {kind, title, status, source, exports = [], extras, mode, suspended, onClose, onFullscreen, onOpenInTab, live, description} = props;
+  const {kind, title, status, source, exports = [], extras, mode, suspended, onClose, onFullscreen, onOpenInTab, live, description, persistent, inPlaceFull} = props;
   const [copied, copy] = useCopy();
   const [showSource, setShowSource] = useState(false);
   const [problem, setProblem] = useState('');
@@ -113,15 +127,25 @@ function Chrome(props: ChromeProps): React.ReactElement {
     else setAnnounce('');
   }, [status, mode, kindLabel, noun, title]);
 
-  const body = status === 'loading' ? <ResourceState kind="loading" label={`Loading ${noun}…`} rows={mode === 'inline' ? 2 : 4} compact={mode === 'inline'}/>
+  const viewport = typeof props.children === 'function' ? props.children(context) : props.children;
+  const loadingLabel = props.loadingLabel ?? `Loading ${noun}…`;
+  const loadingCard = <><ResourceState kind="loading" label={loadingLabel} rows={mode === 'inline' ? 2 : 4} compact={mode === 'inline'}/>{props.loadingDetail && <div className="rich-loading-detail">{props.loadingDetail}</div>}</>;
+  const body = status === 'loading' ? loadingCard
     : status === 'error' ? <>
       <ResourceState kind="error" compact message={props.error?.message ?? `Couldn’t render this ${noun}`} {...(props.error?.detail ? {detail: props.error.detail} : {})} {...(props.error?.onRetry ? {onRetry: props.error.onRetry} : {})}>
+        {props.error?.actions}
         {source !== undefined && <button type="button" aria-expanded={showSource} onClick={() => setShowSource(value => !value)}><Code size={12} aria-hidden="true"/>{showSource ? 'Hide source' : 'Show source'}</button>}
       </ResourceState>
       {showSource && source !== undefined && <pre className="rich-source" tabIndex={0} aria-label="Source">{source}</pre>}
     </>
     : status === 'empty' ? <ResourceState kind="empty" compact message={props.emptyMessage ?? `There is nothing to show in this ${noun}.`}/>
-    : typeof props.children === 'function' ? props.children(context) : props.children;
+    : viewport;
+  const shown = persistent
+    ? <>
+      <div className="rich-persist" hidden={status !== 'ready'}>{viewport}</div>
+      {status !== 'ready' && <div className="rich-persist-card">{body}</div>}
+    </>
+    : body;
 
   return <>
     <div className="rich-head">
@@ -130,27 +154,27 @@ function Chrome(props: ChromeProps): React.ReactElement {
       {kindLabel !== title ? <span className="rich-kind">{kindLabel}</span> : <span className="rich-kind"/>}
       <span className="rich-actions" role="toolbar" aria-label={`${kindLabel} actions`}>
         {status === 'ready' && (typeof extras === 'function' ? extras(context) : extras)}
-        {source !== undefined && !live && <Tip label={copied === 'error' ? 'Copy failed' : copied === 'copied' ? 'Copied' : 'Copy source'}>
-          <button type="button" className="rich-action" data-state={copied} aria-label={copied === 'error' ? 'Copy source failed' : copied === 'copied' ? 'Source copied' : 'Copy source'} onClick={() => copy(source)}>
+        {source !== undefined && !live && <Tip label={copied === 'error' ? 'Copy failed' : copied === 'copied' ? 'Copied' : props.copyLabel ?? 'Copy source'}>
+          <button type="button" className="rich-action" data-state={copied} aria-label={copied === 'error' ? (props.copyLabel ? 'Copy failed' : 'Copy source failed') : copied === 'copied' ? (props.copyLabel ? 'Copied' : 'Source copied') : props.copyLabel ?? 'Copy source'} onClick={() => copy(source)}>
             {copied === 'copied' ? <Check size={13} aria-hidden="true"/> : copied === 'error' ? <X size={13} aria-hidden="true"/> : <Copy size={13} aria-hidden="true"/>}
           </button>
         </Tip>}
         {status === 'ready' && exports.length === 1 && <Tip label={exports[0]!.label}>
-          <button type="button" className="rich-action" aria-label={exports[0]!.label} onClick={() => run(exports[0]!)}><Download size={13} aria-hidden="true"/></button>
+          <button type="button" className="rich-action" aria-label={exports[0]!.label} disabled={exports[0]!.disabled} onClick={() => run(exports[0]!)}><Download size={13} aria-hidden="true"/></button>
         </Tip>}
         {status === 'ready' && exports.length > 1 && <Menu.Root>
           <Menu.Trigger className="rich-action rich-download" aria-label="Download">
             <Download size={13} aria-hidden="true"/><ChevronDown size={10} aria-hidden="true"/>
           </Menu.Trigger>
           <Menu.Portal><Menu.Positioner side="bottom" align="end" sideOffset={4} collisionPadding={8} className="ui-menu-positioner"><Menu.Popup className="ui-menu rich-menu">
-            {exports.map(item => <Menu.Item key={item.id} onClick={() => run(item)}><Download size={13} aria-hidden="true"/>{item.label}</Menu.Item>)}
+            {exports.map(item => <Menu.Item key={item.id} disabled={item.disabled} onClick={() => run(item)}><Download size={13} aria-hidden="true"/>{item.label}</Menu.Item>)}
           </Menu.Popup></Menu.Positioner></Menu.Portal>
         </Menu.Root>}
         {status === 'ready' && onOpenInTab && mode !== 'tab' && <Tip label="Open in tab">
           <button type="button" className="rich-action" aria-label="Open in tab" onClick={() => { onOpenInTab(); onClose?.(); }}><PanelRightOpen size={13} aria-hidden="true"/></button>
         </Tip>}
-        {status === 'ready' && mode === 'inline' && onFullscreen && <Tip label="Full screen">
-          <button type="button" className="rich-action" aria-label="Full screen" onClick={onFullscreen}><Maximize2 size={13} aria-hidden="true"/></button>
+        {status === 'ready' && (mode === 'inline' || persistent) && onFullscreen && <Tip label={inPlaceFull ? 'Exit full screen' : 'Full screen'}>
+          <button type="button" className="rich-action" aria-label={inPlaceFull ? 'Exit full screen' : 'Full screen'} aria-pressed={persistent ? Boolean(inPlaceFull) : undefined} onClick={onFullscreen}>{inPlaceFull ? <Minimize2 size={13} aria-hidden="true"/> : <Maximize2 size={13} aria-hidden="true"/>}</button>
         </Tip>}
         {mode === 'fullscreen' && onClose && <Tip label="Close">
           <Dialog.Close className="rich-action" aria-label="Close full screen"><X size={13} aria-hidden="true"/></Dialog.Close>
@@ -158,7 +182,7 @@ function Chrome(props: ChromeProps): React.ReactElement {
       </span>
     </div>
     {problem && <p className="rich-problem" role="alert">{problem}</p>}
-    <div className="rich-body" data-status={status} data-mode={mode} {...(status === 'ready' ? {'aria-describedby': descriptionId} : {})}>{body}</div>
+    <div className="rich-body" data-status={status} data-mode={mode} {...(status === 'ready' ? {'aria-describedby': descriptionId} : {})}>{shown}</div>
     {description && <span id={descriptionId} className="rich-sr">{description}</span>}
     {mode !== 'fullscreen' && <span className="rich-sr" role="status" aria-live="polite">{announce}</span>}
   </>;
@@ -173,12 +197,19 @@ export function RichBlock(props: RichBlockProps): React.ReactElement {
   const [full, setFull] = useState(false);
   // Focus lands on the dialog itself, not its first button: a tooltip on that button would swallow the first Escape.
   const popup = useRef<HTMLDivElement>(null);
-  const canFull = props.fullscreen !== false && variant === 'inline' && props.status === 'ready';
+  const canFull = props.fullscreen !== false && props.status === 'ready' && (variant === 'inline' || (props.persistent === true && variant === 'tab'));
+  const inPlace = props.persistent === true;
+  useEffect(() => {
+    if (!inPlace || !full) return;
+    const onKey = (event: KeyboardEvent) => { if (event.key === 'Escape') setFull(false); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [inPlace, full]);
   useEffect(() => { if (props.status !== 'ready') setFull(false); }, [props.status]);
   const height = variant === 'inline' && typeof props.height === 'number' ? {'--rich-height': `${props.height}px`} as React.CSSProperties : undefined;
-  return <figure className="rich-block" data-kind={props.kind} data-variant={variant} data-status={props.status} {...(height ? {'data-fixed-height': ''} : {})} style={height} aria-label={`${props.kindLabel ?? RICH_KIND_LABEL[props.kind]}: ${props.title}`}>
-    <Chrome {...props} mode={variant} suspended={full} {...(canFull ? {onFullscreen: () => setFull(true)} : {})}/>
-    {full && <Dialog.Root open onOpenChange={next => { if (!next) setFull(false); }}>
+  return <figure className="rich-block" data-kind={props.kind} data-variant={variant} data-status={props.status} {...(inPlace && full ? {'data-fullscreen': 'true'} : {})} {...(height ? {'data-fixed-height': ''} : {})} style={height} aria-label={`${props.kindLabel ?? RICH_KIND_LABEL[props.kind]}: ${props.title}`}>
+    <Chrome {...props} mode={variant} suspended={inPlace ? false : full} {...(canFull ? {onFullscreen: () => setFull(value => !value), inPlaceFull: inPlace && full} : {})}/>
+    {full && !inPlace && <Dialog.Root open onOpenChange={next => { if (!next) setFull(false); }}>
       <Dialog.Portal>
         <Dialog.Backdrop className="rich-full-backdrop"/>
         <Dialog.Popup ref={popup} className="rich-full" initialFocus={popup} tabIndex={-1} aria-label={`${props.title} (full screen)`}>

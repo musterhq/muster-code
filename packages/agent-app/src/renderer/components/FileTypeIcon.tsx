@@ -8,7 +8,7 @@ import './file-type-icon.css';
 const GLYPHS: Record<FileIconKind, LucideIcon> = {
   folder: Folder, markdown: FileText, json: Braces, typescript: FileCode, javascript: FileCode, css: FileType, html: Globe,
   image: FileImage, pdf: FileText, sheet: FileSpreadsheet, doc: FileText, slides: Presentation, archive: FileArchive,
-  lock: FileLock, audio: FileAudio, video: FileVideo, code: FileCode, text: FileText, file: File,
+  lock: FileLock, audio: FileAudio, video: FileVideo, model: Box, code: FileCode, text: FileText, file: File,
 };
 
 /** Per-type file glyph with a quiet tone, shared by the tree, search results and resource tabs. */

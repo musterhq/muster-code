@@ -1,21 +1,21 @@
 {
-  "generatedAt": "2026-10-12T06:49:10.648Z",
+  "generatedAt": "2026-10-12T07:18:07.029Z",
   "note": "Minified bytes each package contributes to the shipped bundles (renderer chunks are lazy where split). Regenerate with node scripts/dependency-report.mjs and commit with any dependency change.",
   "totals": {
-    "renderer": 14528376,
-    "main": 316816,
+    "renderer": 15782943,
+    "main": 316866,
     "preload": 1055,
-    "runtime": 2655624
+    "runtime": 2657634
   },
   "packages": [
     {
       "name": "(app source)",
-      "bytes": 5296894,
+      "bytes": 5430695,
       "targets": {
-        "renderer": 3345538,
-        "main": 316328,
+        "renderer": 3477290,
+        "main": 316378,
         "preload": 1041,
-        "runtime": 1633987
+        "runtime": 1635986
       },
       "version": "0.3.8",
       "license": "UNLICENSED",
@@ -54,6 +54,17 @@
       "license": "EPL-2.0",
       "licenseFile": "LICENSE.md",
       "direct": false
+    },
+    {
+      "name": "three",
+      "bytes": 1117371,
+      "targets": {
+        "renderer": 1117371
+      },
+      "version": "0.186.1",
+      "license": "MIT",
+      "licenseFile": "LICENSE",
+      "direct": true
     },
     {
       "name": "@mermaid-js/parser",
@@ -134,9 +145,9 @@
     },
     {
       "name": "exceljs",
-      "bytes": 251355,
+      "bytes": 251366,
       "targets": {
-        "runtime": 251355
+        "runtime": 251366
       },
       "version": "4.4.0",
       "license": "MIT",
@@ -156,9 +167,9 @@
     },
     {
       "name": "@base-ui/react",
-      "bytes": 162812,
+      "bytes": 162815,
       "targets": {
-        "renderer": 162812
+        "renderer": 162815
       },
       "version": "1.8.0",
       "license": "MIT",
@@ -211,9 +222,9 @@
     },
     {
       "name": "lucide-react",
-      "bytes": 72633,
+      "bytes": 73212,
       "targets": {
-        "renderer": 72633
+        "renderer": 73212
       },
       "version": "1.50.0",
       "license": "ISC",

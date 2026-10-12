@@ -92,3 +92,11 @@
 .rich-tab { display: flex; height: 100%; min-height: 0; min-width: 0; }
 /* A diagram never animates: Mermaid's animated edges (`e1@{animate: true}`) loop forever, which would keep the compositor busy while idle. */
 .rich-stage svg *, .rich-stage svg { animation: none !important; }
+
+/* persistent blocks (3D model, device): the viewport stays mounted behind the skeleton or error card, and Full screen enlarges the block in place. */
+.rich-persist { display: flex; flex: 1; min-height: 0; flex-direction: column; min-width: 0; }
+.rich-persist[hidden] { display: none; }
+.rich-persist-card { min-height: 0; }
+.rich-loading-detail { display: flex; justify-content: center; padding: 0 12px 10px; }
+.rich-block[data-fullscreen='true'] { position: fixed; inset: 0; z-index: var(--z-modal); margin: 0; border: 0; border-radius: 0; background: var(--bg); }
+.rich-block[data-fullscreen='true'] .rich-body { flex: 1; display: flex; flex-direction: column; }

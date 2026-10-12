@@ -29,6 +29,7 @@ import {friendlyFileError, parseDelimited, delimitedCellType} from './filePresen
 import {ResourceState} from './ResourceState';
 import {FileExitActions, FileFallback, HtmlPreview, MediaFile, QuickLookFile} from './FilePreviews';
 import {Tip} from './Tooltip';
+import {ModelFilePane} from './LazyModel';
 
 // Keep Markdown parsing bounded independently of the host's file-read limit.
 const MARKDOWN_LIMIT = 64 * 1024;
@@ -387,7 +388,7 @@ export function FileTab({tab, onToggleResourceMaximize, resourceMaximized=false}
   const [loadedFull, setLoadedFull] = useState<{path: string; text: string} | null>(null);
   useEffect(() => setLoadedFull(null), [tab.id]);
 
-  const bypassesBody = kind === 'quicklook' || kind === 'media' || kind === 'binary';
+  const bypassesBody = kind === 'quicklook' || kind === 'media' || kind === 'binary' || kind === 'model';
   const ready = body?.phase === 'ready' ? body.value! : undefined;
   const fullOverride = loadedFull && loadedFull.path === tab.path ? loadedFull : null;
   const text = fullOverride ? fullOverride.text : ready?.text ?? '', truncated = fullOverride ? false : ready?.truncated ?? false;
@@ -427,7 +428,7 @@ export function FileTab({tab, onToggleResourceMaximize, resourceMaximized=false}
   } else {
     const {asset, document, workbook} = ready!;
     content = <>
-      {ready!.native ? <NativeDocument key={tab.id} folderId={tab.folderId!} path={tab.path!} revision={ready!} onToggleResourceMaximize={onToggleResourceMaximize} resourceMaximized={resourceMaximized}/> : document ? <PdfFile document={document} onLocation={setLocation}/> : workbook || (delimited.workbook && preview) ? <WorkbookFile key={`workbook:${tab.id}`} delimited={isDelimited} workbook={workbook ?? delimited.workbook!} onLocation={locateCell} onToggleFullPage={onToggleResourceMaximize} fullPage={resourceMaximized}/> : asset ? <ImageFile asset={asset} name={tab.title}/> : preview && delimited.error ? <div className="pane-error" role="alert"><p>Cannot preview this table: {delimited.error}</p><button onClick={() => setMode('source')}>View source</button></div> : preview && kind === 'html' ? <HtmlPreview html={text} name={tab.title}/> : preview ? <div className="file-markdown" data-kind={kind} role="region" aria-label={`Preview of ${tab.path}`} tabIndex={0}>
+      {kind === 'model' ? <ModelFilePane key={tab.id} folderId={tab.folderId!} path={tab.path!} revision={ready}/> : ready!.native ? <NativeDocument key={tab.id} folderId={tab.folderId!} path={tab.path!} revision={ready!} onToggleResourceMaximize={onToggleResourceMaximize} resourceMaximized={resourceMaximized}/> : document ? <PdfFile document={document} onLocation={setLocation}/> : workbook || (delimited.workbook && preview) ? <WorkbookFile key={`workbook:${tab.id}`} delimited={isDelimited} workbook={workbook ?? delimited.workbook!} onLocation={locateCell} onToggleFullPage={onToggleResourceMaximize} fullPage={resourceMaximized}/> : asset ? <ImageFile asset={asset} name={tab.title}/> : preview && delimited.error ? <div className="pane-error" role="alert"><p>Cannot preview this table: {delimited.error}</p><button onClick={() => setMode('source')}>View source</button></div> : preview && kind === 'html' ? <HtmlPreview html={text} name={tab.title}/> : preview ? <div className="file-markdown" data-kind={kind} role="region" aria-label={`Preview of ${tab.path}`} tabIndex={0}>
         {kind === 'markdown' && text && <DocumentCopyButton text={text}/>}
         {kind === 'markdown' ? <MessageBody text={text} resourceContext={{folderId: tab.folderId!, path: tab.path!}}/> : <StructuredFile text={text} kind={kind as 'json'|'csv'|'tsv'}/>}
         {!text && <p className="file-empty">This document is empty.</p>}
