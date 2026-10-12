@@ -3,6 +3,11 @@
 All notable changes to Muster Agent. Each `## <version>` section becomes the notes of the
 `agent-v<version>` GitHub Release (`.github/workflows/agent-app-release.yml`).
 
+## Unreleased
+
+- The browser and computer-use picture-in-picture (#360) now appears only for a live session. When a session ends it shows "Ended" with its last screenshot for a few seconds and goes away; a chat reopened later no longer keeps a ghost card, and unrelated shell work no longer leaves a red "disconnected" dot on an old page.
+- A card without a picture shows a "Starting…" skeleton instead of a globe. The corner dot means live and has an accessible label. Clicking a card opens that session's existing tab, never a blank browser. The browser tab shows "Opening browser…" instead of an empty pane while it starts.
+
 ## 0.3.8
 
 Muster now rests when nothing is happening. A finished chat had kept the graphics process and the window busy (about 29% and 13% CPU on a Mac), which warmed the laptop for no reason.

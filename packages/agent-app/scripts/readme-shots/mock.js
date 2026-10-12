@@ -56,6 +56,20 @@ if (OPTS.computerUse) {
   // The agent's browser pushes live frames, so the front card reads as live.
   if (OPTS.computerUse === true) setInterval(() => emit({type: 'computerFrame', frame: {chatId: activeChatId, owner: `browser:agent-${activeChatId}`, profileId: 'personal', dataUrl: page.dataUrl, width: 1280, height: 800, url: PAGE, title: 'uat.taskboard.dev', action: 'Clicking “Retry loading details”', at: Date.now()}}), 400);
 }
+if (OPTS.computerUse === 'ghost' || OPTS.computerUse === 'starting') {
+  // #360: 'ghost' = browser used minutes ago, the current turn is shell work; 'starting' = a browser step just began, no frame yet.
+  const stamp = (seconds) => new Date(Date.now() - seconds * 1000).toISOString();
+  const shell = {id: 'cu-sh', chatId: activeChatId, kind: 'tool', text: '', status: 'running', createdAt: stamp(1), data: {type: 'commandExecution', command: 'jenkins-cli build deploy-staging', commandActions: [], exitCode: null}};
+  timelines[activeChatId] = OPTS.computerUse === 'starting'
+    ? [timelines[activeChatId][0], {id: 'cu-st', chatId: activeChatId, kind: 'tool', text: '', status: 'running', createdAt: stamp(2), data: {type: 'mcpToolCall', server: 'muster_browser', tool: 'browser_navigate', arguments: JSON.stringify({url: PAGE})}}]
+    : [...timelines[activeChatId].map(item => ({...item, createdAt: new Date(Date.parse(item.createdAt) - 600_000).toISOString(), data: item.data && item.data.images ? {...item.data, images: undefined} : item.data})), shell];
+}
+if (OPTS.computerUse === 'ended') {
+  // #360: the agent browser pushes frames, then the run ends; the card reads Ended and then goes away.
+  const frame = () => emit({type: 'computerFrame', frame: {chatId: activeChatId, owner: `browser:agent-${activeChatId}`, profileId: 'personal', dataUrl: fakeWindow({title: 'uat.taskboard.dev/solutions/482', accent: '#3a5bd9', kind: 'browser'}).dataUrl, width: 1280, height: 800, url: PAGE, title: 'uat.taskboard.dev', action: 'Opened uat.taskboard.dev', at: Date.now()}});
+  const timer = setInterval(frame, 400); setTimeout(() => clearInterval(timer), 1200);
+  setTimeout(() => { const hero = FX.chats.find(c => c.id === activeChatId); if (hero) hero.status = 'completed'; emit({type: 'snapshot', snapshot: snapshot()}); }, 1800);
+}
 window.__emitShotEvent = (event) => emit(event);
 const snapshot = () => ({folders, chats: FX.chats, projects, activeChatId, version: 1, attention: {totalRequests: 0, chats: []}});
 const text = (path) => files[path]?.after ?? files[path]?.before ?? `// ${path}\n`;
