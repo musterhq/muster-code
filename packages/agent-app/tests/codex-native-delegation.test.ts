@@ -139,9 +139,9 @@ test('goals fall back to Muster’s loop without native support, count provider-
   const goal=await service.invoke('goals.set',{chatId:chat.id,text:'Refactor',tokenBudget:1000});
   assert.equal(goal.native,undefined);
   await until(()=>fake.open,'kickoff');
-  assert.equal(fake.inputs[0]!.prompt,'Start working toward the goal.');
+  assert.match(fake.inputs[0]!.prompt,/Token budget: 0 of 1000 tokens used[\s\S]*Current user request:\nStart working toward the goal\.$/,'the budget line travels with the turn');
   assert.equal((fake.inputs[0]!.configOverrides as Record<string,unknown>)['features.goals'],true);
-  assert.match(fake.inputs[0]!.developerInstructions??'',/Token budget: 0 of 1000 tokens used/);
+  assert.doesNotMatch(fake.inputs[0]!.developerInstructions??'',/Token budget/,'a per-turn line in the instructions would restart the app-server every turn');
   fake.emit(chat.id,'thread/tokenUsage/updated',{threadId:'thread-1',tokenUsage:{last:{totalTokens:400},total:{totalTokens:400}}});
   fake.emit(chat.id,'thread/tokenUsage/updated',{threadId:'thread-1',tokenUsage:{last:{totalTokens:700},total:{totalTokens:1100}}});
   assert.equal((await service.invoke('goals.get',{chatId:chat.id}))!.tokensUsed,1100);

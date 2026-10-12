@@ -205,7 +205,9 @@ export function createGoalsDomain(ctx: DomainContext): DomainModule {
         const configOverrides = ctx.native ? { 'features.goals': true } : undefined;
         if (goal.native) return configOverrides ? { configOverrides } : null;
         const spent = goal.tokenBudget ? `Token budget: ${goal.tokensUsed ?? 0} of ${goal.tokenBudget} tokens used.${(goal.tokensUsed ?? 0) >= goal.tokenBudget * 0.9 ? ' The budget is nearly spent: wrap up this turn soon.' : ''}` : '';
-        return { developerInstructions: [goalInstructions(goal.text), spent, idleTurns.get(chat.id) ? GOAL_COMPLETION_CHECK : ''].filter(Boolean).join('\n\n'), ...(configOverrides ? { configOverrides } : {}) };
+        // The budget line changes every turn, so it travels with the turn: in the developer instructions (which key the chat's
+        // warm app-server) it restarted the app-server on every goal turn.
+        return { developerInstructions: [goalInstructions(goal.text), idleTurns.get(chat.id) ? GOAL_COMPLETION_CHECK : ''].filter(Boolean).join('\n\n'), ...(spent ? { turnContext: spent } : {}), ...(configOverrides ? { configOverrides } : {}) };
       });
       // Any turn starting (a user message, a queued follow-up) supersedes a pending continuation.
       const offStarted = ctx.hooks.onRunStarted(run => cancel(run.chat.id));

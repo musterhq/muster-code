@@ -484,8 +484,20 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
     const toolStarted = new Map<string, number>();
     /** Provider reasoning items whose text arrived as deltas; their completion must not repeat it. */
     const reasoningStreamed = new Set<string>();
+    /** Assistant message items whose text arrived as deltas. One that completes without any is written whole, so a
+     *  final answer the provider never streamed is not lost behind an earlier streamed message. */
+    const messageStreamed = new Set<string>();
+    let anonymousMessageDelta = false;
+    /** "Reconnecting…" while the provider retries its model connection (Codex `error` with willRetry). */
+    let reconnectNotice: TimelineItem | undefined;
+    const reconnected = (status: 'completed' | 'failed' = 'completed') => {
+      if (!reconnectNotice) return;
+      store.updateItem(reconnectNotice.id, status === 'completed' ? 'Reconnected.' : reconnectNotice.text, status, reconnectNotice.data);
+      reconnectNotice = undefined; scheduleTimeline(chatId);
+    };
     const append = (kind: 'assistant' | 'reasoning', delta: string) => {
       if (disposed || !runs.has(chatId) || !delta) return;
+      if (reconnectNotice) reconnected();
       if (kind === 'assistant') producedAssistant = true;
       if (segment && segment.kind !== kind) seal();
       if (!segment) segment = store.appendItem(chatId, kind, '', 'running');
@@ -525,7 +537,10 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
         const sentSources = contributed.blocks.filter(block => pendingBlocks.has(block)).map(block => block.label);
         if (sentSources.length) { store.appendItem(chatId,'notice',`Context from ${sentSources.join(', ')}`,'completed',{kind:'context-sources',sources:sentSources}); scheduleTimeline(chatId); }
         const sent = (block: ContextBlock | undefined) => block && pendingBlocks.has(block) ? block.text : '';
-        const preamble = [sent(projectBlock), digest, skillContext, ...contributed.blocks.map(sent), sent(ownershipBlock)].filter(Boolean).join('\n\n');
+        // Per-turn notes (a goal's token budget) ride in the message, never in the developer instructions: those key the
+        // warm app-server, so a line that changes every turn would restart it every turn.
+        const preamble = [sent(projectBlock), digest, skillContext, ...contributed.blocks.map(sent), sent(ownershipBlock), runOptions.turnContext].filter(Boolean).join('\n\n');
+        let threadReset = false;
         const request = [prompt, fileLines].filter(Boolean).join('\n\n');
         const contextualPrompt = preamble ? `${preamble}\n\nCurrent user request:\n${request}` : request;
         let retryNotice: TimelineItem | undefined;
@@ -536,6 +551,18 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
           ...(runOptions.configOverrides ? {configOverrides: runOptions.configOverrides as Record<string, string | number | boolean | string[]>} : {}), ...(runOptions.developerInstructions ? {developerInstructions: runOptions.developerInstructions} : {}),
           onDelta: delta => append('assistant', delta), onReasoning: delta => append('reasoning', delta),
           onThreadReady: threadId => persistIdentity(threadId),
+          // The saved provider thread is gone (pruned or deleted): the fresh one gets the earlier conversation and the
+          // context blocks the old thread already held, and the user is told.
+          onThreadReset() {
+            if (disposed || runs.get(chatId) !== run) return undefined;
+            threadReset = true;
+            const items = store.timeline(chatId);
+            let last = items.length - 1;
+            while (last >= 0 && items[last]!.kind !== 'user') last--;
+            store.appendItem(chatId, 'notice', 'The saved provider conversation could not be resumed, so a fresh one started with a summary of the earlier messages. The displayed chat history is retained.', 'completed', {kind: 'thread-reset'});
+            scheduleTimeline(chatId);
+            return [transcriptDigest(items.slice(0, Math.max(0, last))), ...staticBlocks.filter(block => !pendingBlocks.has(block)).map(block => block.text)].filter(Boolean).join('\n\n') || undefined;
+          },
           onTurnAccepted: identity => persistIdentity(identity.threadId,identity.turnId),
           onEvent(method, params) {
             if (disposed) return;
@@ -548,6 +575,26 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
             if (method === TOOLS_UNAVAILABLE_EVENT) { store.appendItem(chatId, 'notice', `${chat.model} can’t run commands or edit files through this route, so it answered without tools. Use “Switch to…” in the composer to pick a model with tools.`, 'completed', {kind: 'tools-unavailable', model: chat.model}); scheduleTimeline(chatId); return; }
             if (method === HISTORY_WINDOW_EVENT) { if (typeof params.retainedUserTurns === 'number') retainedTurns = params.retainedUserTurns; return; }
             if (method === 'thread/compacted') { seal(); compactionCompleted(chatId); compactedInRun = true; }
+            const ownRun = runs.get(chatId) === run, parentThread0 = store.chat(chatId)?.providerThreadId, parentEvent = !(typeof params.threadId === 'string' && parentThread0 && params.threadId !== parentThread0);
+            if (method === 'error') {
+              // Codex retries a dropped model connection itself (willRetry): say so instead of looking stuck.
+              if (!ownRun || !parentEvent || params.willRetry !== true) return;
+              const error = params.error && typeof params.error === 'object' ? params.error as Record<string, unknown> : {};
+              const why = typeof error.message === 'string' ? error.message.replace(/\s+/g, ' ').trim().slice(0, 300) : '';
+              const text = why ? `Reconnecting… ${why}` : 'Reconnecting…';
+              seal();
+              if (reconnectNotice) { reconnectNotice = {...reconnectNotice, text}; store.updateItem(reconnectNotice.id, text, 'running', reconnectNotice.data); }
+              else reconnectNotice = store.appendItem(chatId, 'notice', text, 'running', {kind: 'reconnecting'});
+              scheduleTimeline(chatId); return;
+            }
+            if (reconnectNotice && ownRun && method.startsWith('item/')) reconnected();
+            if (method === 'item/agentMessage/delta' && parentEvent) { if (typeof params.itemId === 'string' && params.itemId) messageStreamed.add(params.itemId); else anonymousMessageDelta = true; }
+            if (method === 'item/completed' && ownRun && parentEvent && !anonymousMessageDelta) {
+              const message = params.item && typeof params.item === 'object' ? params.item as Record<string, unknown> : undefined;
+              if (message?.type === 'agentMessage' && typeof message.id === 'string' && message.id && !messageStreamed.has(message.id) && typeof message.text === 'string' && message.text.trim()) {
+                messageStreamed.add(message.id); seal(); append('assistant', message.text); seal(); return;
+              }
+            }
             const item = params.item && typeof params.item === 'object' ? params.item as Record<string, unknown> : params;
             const type = String(item.type ?? '');
             // Reasoning text streams through onReasoning (summary deltas). These events only frame it:
@@ -611,7 +658,12 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
             }
           },
           async onRequest(method, params) {
-            if (disposed || closing || run.stopped || runs.get(chatId) !== run) return undefined;
+            // After this turn ended, the warm app-server still asks for approvals: background sub-agents (the provider
+            // still reports active work) or a native goal continuation or queued turn (adopted as the chat's run). They
+            // get a card like any other request. A stopped run, or a late callback with no work behind it, declines.
+            const current = runs.get(chatId);
+            const background = current ? current !== run && !current.stopped : provider.hasActiveWork?.(chatId) === true;
+            if (disposed || closing || run.stopped || (current !== run && !background) || !store.chat(chatId)) return undefined;
             seal();
             if (method === 'item/tool/requestUserInput') {
               const rawQuestions = Array.isArray(params.questions) ? params.questions : [];
@@ -732,6 +784,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
         }
         if (disposed) return;
         seal();
+        reconnected(result.status === 'completed' ? 'completed' : 'failed');
         if (!producedAssistant && result.finalMessage) store.appendItem(chatId, 'assistant', result.finalMessage, 'completed');
         // The provider's own words are kept (S36): an adapter that reports a failure with a message (rate_limited, auth…)
         // settled that attempt as failed, which Inbox and Pulse explain in a plain sentence and which may be run again.
@@ -741,7 +794,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
           : result.status === 'failed' ? (said && result.dispatchState !== 'unknown' ? {kind:'failed',retryable:false,reason:`The provider attempt failed: ${said}`} : {kind:'recovery-needed',retryable:false,reason:'The provider attempt did not settle with confirmed outcome. Check its saved turn before continuing; the prompt was not resent.'}) : undefined);
         if (result.threadId) persistIdentity(result.threadId,result.turnId);
         // Only a turn the provider actually took delivered its context blocks to the thread.
-        if (result.status === 'completed' && result.dispatchState !== 'not-dispatched' && !compactedInRun) contextLedger.delivered(chatId, store.chat(chatId)?.providerThreadId, [...pendingBlocks], retainedTurns);
+        if (result.status === 'completed' && result.dispatchState !== 'not-dispatched' && !compactedInRun) contextLedger.delivered(chatId, store.chat(chatId)?.providerThreadId, threadReset ? staticBlocks : [...pendingBlocks], retainedTurns);
         else if (result.dispatchState !== 'not-dispatched') contextLedger.forget(chatId);
         if (recovery) store.appendItem(chatId,'notice',recovery.reason,recovery.kind,{recovery,providerThreadId:store.chat(chatId)?.providerThreadId,providerTurnId:store.chat(chatId)?.providerTurnId});
         const restoreDraft=result.status==='failed' && result.dispatchState==='not-dispatched' && recovery?.kind!=='recovery-needed' && store.chat(chatId)?.draft==='';
@@ -760,7 +813,9 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
           store.updateChat(chatId,{status:recovery.kind==='cancelled'?'interrupted':'failed',error:recovery.reason,recovery,...(restore?{draft:prompt}:{})});
         }
       } finally {
-        settleApprovals(chatId); settleQuestions(chatId); runs.delete(chatId);
+        // Background sub-agents can still be waiting on a card after the parent turn ended: keep it answerable.
+        if (run.stopped || disposed || !provider.hasActiveWork?.(chatId)) { settleApprovals(chatId); settleQuestions(chatId); }
+        runs.delete(chatId);
         if (!disposed) { const timer = timers.get(chatId); if (timer) clearTimeout(timer); timers.delete(chatId); timeline(chatId); let finalChat=store.chat(chatId);
           // A result the user has not seen yet: marked unread until the chat is opened again.
           if(finalChat&&(finalChat.status==='completed'||finalChat.status==='failed')&&store.activeChatId()!==chatId&&store.setUnread(chatId,true))finalChat=store.chat(chatId);

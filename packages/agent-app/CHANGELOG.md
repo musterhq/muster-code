@@ -6,6 +6,14 @@ All notable changes to Muster Agent. Each `## <version>` section becomes the not
 ## Unreleased
 
 - When a reply views, makes or embeds two or more images, they now show as one gallery: a large hero image with a thumbnail strip beside it (below it on narrow windows). Click a thumbnail or use the arrow keys to switch, click the hero to zoom with left and right navigation, and use the Canvas badge to open the image in a tab. File links above the gallery open each image, and "Download all" saves them as a zip. The same pictures are no longer repeated under the tool rows. Images load lazily, and only the neighbours of the selected image are preloaded.
+- Codex chats no longer turn down approvals after a turn ends. Sub-agents still working in the background, and goal or queued turns the Codex app-server starts by itself, now show an approval card you can answer instead of being declined silently.
+- Codex sub-agents that are still working are no longer stopped when Muster frees memory by closing idle Codex processes. When a Codex process has exited, its unfinished background work no longer blocks switching providers until you restart.
+- /compact works again after a Codex chat has been idle for a few minutes. Muster reopens the conversation and Codex compacts it as usual, instead of failing with "No live app-server owner".
+- If a saved Codex conversation can no longer be resumed, Muster now says so and gives the new conversation a summary of the earlier messages, so the agent does not lose track of what you discussed.
+- A final answer that Codex sends without streaming it is no longer dropped when an earlier message in the same turn did stream.
+- While Codex reconnects to the model, the chat shows "Reconnecting…" instead of looking stuck.
+- A message sent to a running agent is never delivered twice when the request is slow to answer.
+- A goal with a token budget no longer restarts the Codex process on every turn.
 
 ## 0.3.11
 

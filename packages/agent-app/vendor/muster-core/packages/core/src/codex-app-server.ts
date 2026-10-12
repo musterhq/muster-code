@@ -71,6 +71,11 @@ export interface CodexAppServerRunInput {
   readonly images?: readonly string[];
   /** Codex collaboration mode for the turn: plan mode is `{ mode: "plan", settings: { model, reasoning_effort } }`. */
   readonly collaborationMode?: CodexCollaborationMode;
+  /**
+   * The persisted `threadId` could not be resumed and a fresh provider thread starts instead. Returns text to
+   * prepend to this turn's prompt (a digest of the earlier conversation) so the fresh thread does not start blind.
+   */
+  readonly onThreadReset?: (previousThreadId: string) => string | undefined;
 }
 
 export interface CodexCollaborationMode {
@@ -110,6 +115,8 @@ export interface CodexAppServerRunResult {
   /** A cold app-server failure may safely fall back; an active turn may not be replayed. */
   readonly fallbackEligible?: boolean;
   readonly hadActivity?: boolean;
+  /** The requested thread could not be resumed; this turn ran on a fresh provider thread. */
+  readonly threadReset?: boolean;
   readonly tokenUsage?: {
     readonly inputTokens?: number;
     readonly cachedInputTokens?: number;
@@ -310,29 +317,70 @@ export function clearCodexAppServerConversation(conversationKey: string, transpo
   recordGatewayWarmThreadCount();
 }
 
+/** Whether a live app-server process still serves this conversation (its warm session, or a turn in flight). */
+export function hasLiveCodexConversation(conversationKey: string, transportOwner?: string): boolean {
+  for (const [client, metadata] of ACTIVE_CLIENTS) {
+    if (metadata.conversationKey !== conversationKey) continue;
+    if (transportOwner !== undefined && metadata.transportOwner !== transportOwner) continue;
+    if (client.isAlive()) return true;
+  }
+  return false;
+}
+
+/**
+ * Re-open a persisted thread on a warm app-server without starting a turn, so native thread methods
+ * (`thread/compact/start`, …) work again after the idle timer closed the previous process. The session
+ * then observes the thread like one a turn left warm, and closes on the normal idle timer.
+ */
+export async function openCodexConversation(input: Omit<CodexAppServerRunInput, "prompt"> & { readonly threadId: string; readonly cacheKey: string }): Promise<{ readonly threadId: string }> {
+  const { command, key, scopeKey } = await sessionIdentity(input);
+  const lease = await acquireSession({ input: { ...input, prompt: "" }, command, key, scopeKey, keepAlive: true });
+  return runExclusive(lease.session, async () => {
+    await lease.session.client.stopObservation();
+    lease.session.client.setObserver({ ...(input.onEvent ? { onEvent: input.onEvent } : {}), ...(input.onRequest ? { onRequest: input.onRequest } : {}) });
+    await lease.session.client.startObservation();
+    return { threadId: lease.session.threadId };
+  });
+}
+
+function withReasoningSummary<T extends Pick<CodexAppServerRunInput, "configOverrides">>(input: T): T {
+  if ((input.configOverrides ?? []).some((value) => /^model_reasoning_summary\s*=/.test(value))) return input;
+  // Request provider-approved summaries for the transcript without changing
+  // ~/.codex/config.toml. Models that emit no summary remain silent.
+  return { ...input, configOverrides: [...(input.configOverrides ?? []), 'model_reasoning_summary="detailed"'] };
+}
+
+async function sessionIdentity(input: Omit<CodexAppServerRunInput, "prompt">): Promise<{ command: string; key: string; scopeKey: string }> {
+  const scoped = withReasoningSummary(input);
+  const instructionsHash = await hashInstructions(scoped.developerInstructions, scoped.instructionsFile);
+  const command = resolveCodexCommand(scoped.command);
+  const scopeKey = appServerScopeKey(scoped, command, scoped.cacheKey ?? `anonymous:${randomUUID()}`);
+  return { command, scopeKey, key: `${scopeKey}\0instructions:${instructionsHash}` };
+}
+
 export async function runCodexAppServer(input: CodexAppServerRunInput): Promise<CodexAppServerRunResult> {
   if (!input.prompt.trim()) throw new Error("Codex prompt is required.");
   validateLifecycleBudgets(input.budgets);
   if (input.signal?.aborted) return coldFailure(new CodexRunError("Codex turn was cancelled before dispatch.", "not-dispatched", { kind: "aborted" }), Date.now());
-  if (!(input.configOverrides ?? []).some((value) => /^model_reasoning_summary\s*=/.test(value))) {
-    // Request provider-approved summaries for the transcript without changing
-    // ~/.codex/config.toml. Models that emit no summary remain silent.
-    input = { ...input, configOverrides: [...(input.configOverrides ?? []), 'model_reasoning_summary="detailed"'] };
-  }
+  input = withReasoningSummary(input);
   const started = Date.now();
   const keepAlive = (input.keepAlive ?? true) && input.cacheKey !== undefined;
-  const instructionsHash = await hashInstructions(input.developerInstructions, input.instructionsFile);
-  const command = resolveCodexCommand(input.command);
-  const conversationIdentity = input.cacheKey ?? `anonymous:${randomUUID()}`;
-  const scopeKey = appServerScopeKey(input, command, conversationIdentity);
-  const key = `${scopeKey}\0instructions:${instructionsHash}`;
+  const { command, key, scopeKey } = await sessionIdentity(input);
   let lease: SessionLease;
+  let threadReset = false;
   try {
     lease = await acquireSession({ input, command, key, scopeKey, keepAlive });
   } catch (error) {
     if (input.threadId && missingProviderThread(error)) {
       try {
+        // The saved thread is gone: start fresh, but never silently. The host seeds the new thread with a
+        // digest of the earlier conversation and tells the user.
+        const previousThreadId = input.threadId;
         lease = await acquireSession({ input: { ...input, threadId: undefined }, command, key, scopeKey, keepAlive });
+        threadReset = true;
+        let seed: string | undefined;
+        try { seed = input.onThreadReset?.(previousThreadId); } catch { seed = undefined; }
+        if (seed?.trim()) input = { ...input, prompt: `${seed.trim()}\n\nCurrent user request:\n${input.prompt}` };
       } catch (recoveryError) {
         return coldFailure(recoveryError, started);
       }
@@ -409,6 +457,7 @@ export async function runCodexAppServer(input: CodexAppServerRunInput): Promise<
       ...(turn.failure ? { failure: turn.failure } : {}),
       fallbackEligible: turn.errorMessage ? !providerActivity : false,
       hadActivity: providerActivity,
+      ...(threadReset ? { threadReset: true } : {}),
       tokenUsage: turn.tokenUsage,
     } as const;
     if (turn.errorMessage) {
@@ -438,6 +487,7 @@ export async function runCodexAppServer(input: CodexAppServerRunInput): Promise<
         ...(error instanceof CodexRunError && error.failure ? { failure: error.failure } : {}),
         fallbackEligible: !providerActivity && (error instanceof CodexRunError ? error.dispatchState === "not-dispatched" : false),
         hadActivity: providerActivity,
+        ...(threadReset ? { threadReset: true } : {}),
       };
     });
 }
@@ -644,7 +694,7 @@ function positiveIntegerEnv(name: string, fallback: number, minimum: number, max
   return Number.isSafeInteger(parsed) && parsed >= minimum && parsed <= maximum ? parsed : fallback;
 }
 
-function appServerScopeKey(input: CodexAppServerRunInput, command: string, conversationIdentity: string): string {
+function appServerScopeKey(input: Omit<CodexAppServerRunInput, "prompt">, command: string, conversationIdentity: string): string {
   const env = [...Object.entries(input.env ?? {})].sort(([left], [right]) => left.localeCompare(right));
   return createHash("sha256").update(JSON.stringify({
     conversation: conversationIdentity,
@@ -675,8 +725,14 @@ export function buildCodexAppServerArgs(input: {
   return args;
 }
 
+/** Background work (sub-agents, native goal or queued turns) still running on this warm app-server. */
+function sessionBusy(session: CachedSession): boolean {
+  return session.pendingRuns > 0 || (session.client.isAlive() && session.client.hasObservedActiveWork());
+}
+
 function closeCachedSession(key: string, session: CachedSession): void {
-  if (session.pendingRuns > 0) return;
+  // Pruning and cache-room eviction must never kill a sub-agent or a native turn mid-flight.
+  if (sessionBusy(session)) return;
   if (session.idleTimer) clearTimeout(session.idleTimer);
   SESSION_CACHE.delete(key);
   session.client.close();
@@ -721,7 +777,7 @@ function makeSessionCacheRoom(protectedKey: string): boolean {
   const maxSize = positiveIntegerEnv("MUSTER_NATIVE_SESSION_CACHE_SIZE", DEFAULT_SESSION_CACHE_SIZE, 1, 64);
   for (const [key, session] of [...SESSION_CACHE.entries()].sort((left, right) => left[1].lastUsedAt - right[1].lastUsedAt)) {
     if (SESSION_CACHE.size < maxSize) break;
-    if (key === protectedKey) continue;
+    if (key === protectedKey || sessionBusy(session)) continue;
     closeCachedSession(key, session);
   }
   return SESSION_CACHE.size < maxSize;
@@ -1028,7 +1084,8 @@ class CodexAppServerClient {
         const method = stringValue(message.method) ?? "";
         const params = asRecord(message.params);
         if (method.startsWith("item/")) input.onActivity?.();
-        if (method.startsWith("item/") || method.startsWith("turn/") || method.startsWith("account/") || method.startsWith("thread/")) input.onEvent?.(method, params);
+        this.trackObservedWork(method, params);
+        if (forwardedEvent(method)) input.onEvent?.(method, params);
         // JSON-RPC: a message carrying BOTH an id and a method is a server→client
         // request awaiting our answer (…/requestApproval, …/requestUserInput,
         // mcpServer/elicitation/request). Matching only "/request" left the
@@ -1185,7 +1242,7 @@ class CodexAppServerClient {
     const params = asRecord(message.params);
     if (!method) return;
     this.trackObservedWork(method, params);
-    if (method.startsWith("item/") || method.startsWith("turn/") || method.startsWith("account/") || method.startsWith("thread/")) this.observer?.onEvent?.(method, params);
+    if (forwardedEvent(method)) this.observer?.onEvent?.(method, params);
     if (message.id === undefined || message.id === null) return;
     const decline = { decision: "decline", action: "decline", content: null, _meta: null };
     if (!this.observer?.onRequest) { this.respond(message.id, decline); return; }
@@ -1257,6 +1314,11 @@ class CodexAppServerClient {
     this.pending.clear();
     this.onClose?.();
   }
+}
+
+/** Notifications a host sees. `error` carries `willRetry` while Codex reconnects to the model provider. */
+function forwardedEvent(method: string): boolean {
+  return method === "error" || method.startsWith("item/") || method.startsWith("turn/") || method.startsWith("account/") || method.startsWith("thread/");
 }
 
 function resolveCodexCommand(command?: string): string {

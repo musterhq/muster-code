@@ -553,10 +553,14 @@ export function Composer({ chat }: { chat: Chat }): React.ReactElement {
     queuePending.current = true; setQueueing(true); setQueueError('');
     let steered = false;
     let reason = '';
+    let failed: unknown;
     try { const result = await invoke('chat.steer', { id: chat.id, text: outgoing(value), requestId: crypto.randomUUID(), ...extras }); steered = Boolean(result?.steered); reason = result?.reason ?? ''; }
-    catch { steered = false; }
+    catch (cause) { failed = cause; }
     finally { queuePending.current = false; setQueueing(false); }
     if (currentDraft.current.chatId !== chat.id) return;
+    // A steer that failed in flight may already have reached the agent: queueing it too would send it twice.
+    // The draft stays in the composer with the error, so the user decides.
+    if (failed !== undefined) { setQueueError(runtimeMessage(failed)); return; }
     if (steered) { recall.current = null; clearIfUnchanged(value); setChips(() => []); setContext(() => []); flash('Sent to the running agent'); }
     else await queueFollowUp(reason ? `${reason} Queued instead.` : 'Queued: agent could not accept a steer right now');
   };
