@@ -20,6 +20,8 @@ export const FIXTURE_PROVIDER = {id: 'fixture', bindingId: 'fixture-binding', mo
 /** The legacy-core turn ceiling is logged once, so a killed long turn is never a silent failure. */
 let lifecycleWarned = false;
 
+/** No in-memory provider session holds the chat's thread (new process, switched provider, retired after a stopped or failed turn). */
+export const NO_LIVE_SESSION = 'No live provider session holds this thread. Send a message first, then compact.';
 export class ProviderPreDispatchError extends Error {
   readonly dispatchState = 'not-dispatched' as const;
 }
@@ -457,7 +459,7 @@ export function createProviderAdapter(options: { core?: CoreClient; available?: 
     },
     async compact(id) {
       const session = sessions.get(id);
-      if (disposed || !core || !session?.threadId || session.retired || session.controller.signal.aborted) throw new Error('No live provider session holds this thread. Send a message first, then compact.');
+      if (disposed || !core || !session?.threadId || session.retired || session.controller.signal.aborted) throw new Error(NO_LIVE_SESSION);
       if (session.active || session.stop) throw new Error('Wait for the current run to finish before compacting.');
       await core.callCodexConversation(session.key, 'thread/compact/start', {threadId: session.threadId}, {transportOwner: session.owner, requireOwner: true, timeoutMs: 30_000});
     },

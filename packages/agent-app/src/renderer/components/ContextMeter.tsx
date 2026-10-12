@@ -2,6 +2,9 @@ import React, {useState} from 'react';
 import {Popover} from '@base-ui/react/popover';
 import type { ContextTelemetry } from '../../shared/protocol';
 import {invoke} from '../bridge';
+import {cleanIpcError} from './resourceErrors';
+import {contextView} from '../contextView';
+export {contextView};
 import {useStoreSelector} from '../useStore';
 import {ChatUsageSection} from './UsageCost';
 import './context-meter.css';
@@ -10,17 +13,6 @@ export function formatTokens(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(n % 1_000_000 === 0 ? 0 : 1)}M`;
   if (n >= 1_000) return `${(n / 1_000).toFixed(n % 1_000 === 0 ? 0 : 1)}k`;
   return String(n);
-}
-
-/** The meter's view: reported values win; before any report the catalog window gives an 'Estimated' state with nothing used. */
-export function contextView(telemetry: ContextTelemetry, catalogWindow?: number) {
-  const estimated = telemetry.source === null && telemetry.usedTokens === null && telemetry.windowTokens === null && !!catalogWindow;
-  const usedTokens = estimated ? 0 : telemetry.usedTokens;
-  const windowTokens = telemetry.windowTokens ?? (estimated ? catalogWindow! : null);
-  const percent = usedTokens !== null && windowTokens !== null ? Math.min(100, Math.round((usedTokens / windowTokens) * 100)) : null;
-  const remaining = usedTokens !== null && windowTokens !== null ? Math.max(0, windowTokens - usedTokens) : null;
-  const source = estimated ? 'Estimated from the model catalog' : telemetry.source === 'live' ? 'Codex app-server · live' : telemetry.source === 'restored' ? 'Codex app-server · restored from last session' : 'Not reported yet';
-  return {estimated, usedTokens, windowTokens, percent, remaining, source};
 }
 
 /**
@@ -50,7 +42,7 @@ export function ContextMeter({ telemetry }: { telemetry: ContextTelemetry }): Re
     if (!chatId || compacting) return;
     setCompacting(true); setCompactError('');
     try { await invoke('chat.compact', { id: chatId }); }
-    catch (error) { setCompactError(error instanceof Error ? error.message : 'Compaction failed.'); }
+    catch (error) { setCompactError(cleanIpcError(error) || 'Compaction failed.'); }
     finally { setCompacting(false); }
   };
   return (

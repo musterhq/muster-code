@@ -3,6 +3,12 @@
 All notable changes to Muster Agent. Each `## <version>` section becomes the notes of the
 `agent-v<version>` GitHub Release (`.github/workflows/agent-app-release.yml`).
 
+## Unreleased
+
+- Compact now works in Project chats. When no live provider session holds the thread (after a restart, a stopped turn, or a provider switch) Muster compacts from the saved transcript: the next message starts a fresh provider conversation seeded with a summary of the earlier messages, instead of failing with "No live provider session holds this thread".
+- The context popover shows window size and remaining context for router models. The router's `/models` `context_length` / `max_input_tokens` is used when the provider reports no window.
+- Typing `/compact` is always handled by Muster (every chat type and provider), never sent to the model. Compact errors no longer show the "Error invoking remote method" prefix.
+
 ## 0.3.9
 
 The model picker now keeps up with new releases. Claude Haiku 5.5 is added (with Light to Extra High reasoning levels; Haiku 4.5 stays). GPT-6.1 Sol and any other model Codex lists as visible show without being switched on in Settings.
