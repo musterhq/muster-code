@@ -18,6 +18,7 @@ import { existsSync } from 'node:fs';
 import { asksOpenQuestion } from '../project-tasks.ts';
 import { homedir } from 'node:os';
 import { costEventFor, payerOf, type ProviderPayInfo } from './costs.ts';
+import { credentialId, GIVE_UP_MS, whyNotSend, type Expect } from './outbox-policy.ts';
 import { canCheckout, checkoutComment, checkoutText, deriveLease, LeaseError, markerFor, newLease, transition, toView } from './lease.ts';
 /** How long an automatic hand-back can be taken back. */
 export const UNDO_MS = 2 * 60_000;
@@ -111,7 +112,9 @@ const personal = (backend: ServerBackend | null): ServerBackend & PersonalAccess
   if (!backend.whoami || !backend.patchTask || !backend.rawComments || !backend.putDocument || !backend.postCostEvent || !backend.agentInstructions || !backend.issuePolicy) throw new Error('Work locally needs a server that can assign tasks to people. This one cannot be worked on locally yet.');
   return backend as ServerBackend & PersonalAccess;
 };
-const isNetwork = (cause: unknown): boolean => !(cause instanceof PaperclipError) || cause.status === 0 || cause.status >= 500 || cause.status === 401 || cause.status === 408 || cause.status === 429 || cause.stage === 'network';
+/** A 401 is the sign-in being refused (an expired or revoked key), not a lost connection: it waits for a new key instead of going offline. */
+const isAuth = (cause: unknown): boolean => cause instanceof PaperclipError && cause.status === 401;
+const isNetwork = (cause: unknown): boolean => !(cause instanceof PaperclipError) || cause.status === 0 || cause.status >= 500 || cause.status === 408 || cause.status === 429 || cause.stage === 'network';
 
 /** The two ways a hand-back can reach the next person or agent; today only reassign. Swappable (reviewers/approvers) without touching the flow. */
 export interface HandBackStrategy {
@@ -144,7 +147,7 @@ export class CheckoutService {
   }
   get deviceId(): string { return this.d.store.deviceId(); }
   get device(): string { return this.d.store.deviceName(this.d.deviceNameDefault()); }
-  private view(lease: CheckoutLease): LeaseView { return toView({ ...lease, pending: this.d.store.pendingCount(lease.taskId) }, this.deviceId, this.d.now(), this.d.store.staleHours(), lease.kind === 'folder' && isBroadFolder(lease.worktree, this.home())); }
+  private view(lease: CheckoutLease): LeaseView { return toView({ ...lease, pending: this.d.store.pendingCount(lease.taskId), stuck: this.d.store.stuckCount(lease.taskId), authRequired: this.authBlocked() } as CheckoutLease, this.deviceId, this.d.now(), this.d.store.staleHours(), lease.kind === 'folder' && isBroadFolder(lease.worktree, this.home())); }
 
   // --- finding the task -------------------------------------------------------------------------------------------------------------
   /**
@@ -293,9 +296,15 @@ export class CheckoutService {
     this.d.emit(task.id);
     return this.view(this.d.store.lease(task.id)!);
   }
-  private enqueuePatch(taskId: string, orgId: string, key: string, patch: Record<string, unknown>, at: string, cond?: Record<string, unknown>): void {
-    this.enq({ taskId, orgId, type: 'patch', key: `patch:${key}`, kind: 'patch', body: JSON.stringify(cond ? { patch, if: cond } : patch), at });
+  private enqueuePatch(taskId: string, orgId: string, key: string, patch: Record<string, unknown>, at: string, cond?: Record<string, unknown>, expect?: Expect): void {
+    this.enq({ taskId, orgId, type: 'patch', key: `patch:${key}`, kind: 'patch', body: JSON.stringify(cond || expect ? { patch, ...(cond ? { if: cond } : {}), ...(expect ? { expect } : {}) } : patch), at });
   }
+  /** What a lease-ending change expects to find: the task still in progress and still the person's (on the server's agent: not closed). Checked again when it is sent. */
+  private expectHeld(lease: CheckoutLease, meId: string): Expect { return lease.runOnServer ? { statusNot: ['done', 'cancelled'] } : { status: 'in_progress', assigneeUserId: meId }; }
+  /** A server that answered 401 to this key: nothing is retried until the key changes, or the person presses Sync or Retry. */
+  private authStop: string | null = null;
+  private credential(): string { return credentialId(this.d.backend()?.endpoint?.token); }
+  authBlocked(): boolean { return this.authStop !== null && this.authStop === this.credential(); }
   private resolveModel(choice: ModelChoice, part: ServerPart): { providerId: string; model: string; label: string } {
     const providers = this.d.providers().filter(p => p.available);
     if (choice.kind === 'own') {
@@ -548,6 +557,8 @@ export class CheckoutService {
     if (this.d.later) this.d.later(run, 2500); else setTimeout(run, 2500).unref?.();
   }
   flush(taskId?: string, force = false, fast = false): Promise<void> {
+    // Updates that kept failing for about a day are given up on (kept, marked, with a Retry); the rest of the queue goes on.
+    if (this.d.store.giveUp(iso(this.d.now() - GIVE_UP_MS))) this.d.emit(null);
     const ids = taskId ? [taskId] : [...new Set(this.d.store.pending().filter(r => r.origin === this.origin()).map(r => r.taskId)), ...this.ownLeases().filter(l => this.d.store.docDirty(l.taskId)).map(l => l.taskId)];
     // Calls for one task run one after the other: a caller that arrives mid-flush gets a fresh run after it, not the finished one's result.
     return Promise.all([...new Set(ids)].map(id => { const run = (this.flushing.get(id) ?? Promise.resolve()).then(() => this.flushLoop(id, force, fast)); this.flushing.set(id, run); return run.finally(() => { if (this.flushing.get(id) === run) this.flushing.delete(id); }); })).then(() => undefined);
@@ -569,6 +580,8 @@ export class CheckoutService {
     if (lease && lease.origin !== this.origin()) return;
     // Offline by choice: nothing leaves this Mac. Everything stays queued (with its own client id) until the switch is off.
     if (lease?.offline === 'manual') return;
+    // The server refused this key (401): no request goes until the key changes.
+    if (this.authBlocked() && !force) return;
     // A conflict found by the last re-read waits for the person's choice.
     if (lease?.conflict && !force) return;
     let backend: (ServerBackend & PersonalAccess) | null = null;
@@ -584,13 +597,19 @@ export class CheckoutService {
         const conflict = await this.detectConflict(lease);
         if (conflict) { store.putLease(transition(lease, { type: 'conflict', at: done(), conflict })); store.setSyncState(done(), 'The task changed on the server while you were offline.'); this.d.emit(taskId); return; }
       }
-      await this.sendRows(backend, taskId, me?.id ?? lease?.userId ?? '', fast);
+      await this.sendRows(backend, taskId, me?.id ?? lease?.userId ?? '', fast, force);
       if (fast) { if (this.d.store.pendingCount(taskId) || store.docDirty(taskId)) this.scheduleFlush(taskId); }
       else if (store.docDirty(taskId) && store.lease(taskId)?.conflict === null) await this.writeWorkLog(backend, taskId);
       lease = store.lease(taskId);
       if (lease && !lease.conflict && (lease.offline === 'auto' || lease.recheck)) store.putLease({ ...transition(lease, { type: 'online', at: done() }), recheck: false });
       store.setSyncState(done(), null);
     } catch (cause) {
+      if (isAuth(cause)) {
+        // A refused sign-in is not a lost connection: the lease stays online, nothing is retried, and the task says to sign in again.
+        this.authStop = this.credential();
+        store.setSyncState(done(), 'Sign in to Paperclip again. Updates are held until you do.');
+        return;
+      }
       store.setSyncState(done(), message(cause));
       // The server cannot be reached: work on offline. The queue keeps every post; the next flush (or Sync) tries again.
       const now = store.lease(taskId);
@@ -608,7 +627,7 @@ export class CheckoutService {
    * the comment is dropped, the lease is put back to checked out with a visible conflict, so the Mac and the server never disagree silently (M4). Consecutive
    * comments are batched (newest context/tests only, no repeats, nothing the server already shows). A cost event whose delivery is unknown is not sent twice (M5).
    */
-  private async sendRows(backend: ServerBackend & PersonalAccess, taskId: string, userId: string, fast = false): Promise<void> {
+  private async sendRows(backend: ServerBackend & PersonalAccess, taskId: string, userId: string, fast = false, force = false): Promise<void> {
     const store = this.d.store;
     // Fast (a hand-back that was just made): its reassignment, with the summary inside, goes before anything else that is waiting.
     const rows = fast ? [...this.pendingFor(taskId)].sort((a, b) => Number(b.type === 'patch' && b.key.startsWith('patch:handback:')) - Number(a.type === 'patch' && a.key.startsWith('patch:handback:'))) : this.pendingFor(taskId);
@@ -621,9 +640,17 @@ export class CheckoutService {
       const row = rows[i]!;
       if (folded.has(row.id)) { i++; continue; }
       if (row.type === 'patch') {
-        const parsed = JSON.parse(row.body) as { patch?: Parameters<PersonalAccess['patchTask']>[1]; if?: { status?: string; assigneeAgentId?: string | null; assigneeUserId?: string | null } } & Parameters<PersonalAccess['patchTask']>[1];
+        const parsed = JSON.parse(row.body) as { patch?: Parameters<PersonalAccess['patchTask']>[1]; if?: { status?: string; assigneeAgentId?: string | null; assigneeUserId?: string | null }; expect?: Expect } & Parameters<PersonalAccess['patchTask']>[1];
         const patch = parsed.patch ?? parsed;
         try {
+          // A lease-ending change (hand-back, release, run on the server) is sent only if the task still looks the way check-out left it. A cancelled,
+          // closed or reassigned task is left alone: the lease ends here, the worktree stays, and the person is told. "Send anyway" skips this.
+          if (parsed.expect && !force) {
+            const lease = store.lease(taskId), company = (await this.d.reader.orgs()).find(c => c.id === lease?.orgId);
+            const now = company ? await this.d.reader.task(company, taskId) : null;
+            const why = whyNotSend(now, lease?.key ?? taskId, parsed.expect);
+            if (why) { this.endHere(taskId, rows, why); return; }
+          }
           // A precondition (Undo): only if the task still looks the way hand-back left it.
           if (parsed.if) { const lease = store.lease(taskId), company = (await this.d.reader.orgs()).find(c => c.id === lease?.orgId), t = company ? (await this.d.reader.task(company, taskId)) ?? undefined : undefined;
             const ok = t && (parsed.if.status === undefined || t.status === parsed.if.status) && (parsed.if.assigneeAgentId === undefined || (t.assigneeId ?? null) === parsed.if.assigneeAgentId) && (parsed.if.assigneeUserId === undefined || (t.assigneeUserId ?? null) === parsed.if.assigneeUserId);
@@ -636,7 +663,7 @@ export class CheckoutService {
           if (pair) { store.markPosted(pair.id, done()); folded.add(pair.id); }
           if (fast && row.key.startsWith('patch:handback:')) return;
         } catch (cause) {
-          if (isNetwork(cause)) { store.markFailed(row.id, message(cause), false); throw cause; }
+          if (isNetwork(cause) || isAuth(cause)) { store.markFailed(row.id, message(cause), false); throw cause; }
           // The server refused: the paired comment (same key without the "patch:" prefix) is not sent, and the lease says so.
           store.markFailed(row.id, message(cause), true);
           for (const other of rows) if (other.key === row.key.replace(/^patch:/, '')) { store.markFailed(other.id, 'The paired change was refused.', true); }
@@ -653,6 +680,7 @@ export class CheckoutService {
           // A timeout or a lost response may have been recorded: the server has no way to ask, and posting again would count the turn twice. Not clearly undelivered means not retried.
           const clear = /ECONNREFUSED|ENOTFOUND|EAI_AGAIN|ENETUNREACH|EHOSTUNREACH|offline/i.test(message(cause));
           if (isNetwork(cause) && !clear) { store.markPosted(row.id, done()); store.markFailed(row.id, `unconfirmed: ${message(cause)}; not retried, to avoid counting the turn twice`, false); }
+          else if (isAuth(cause)) { store.markFailed(row.id, message(cause), false); throw cause; }
           else { store.markFailed(row.id, message(cause), !isNetwork(cause)); if (isNetwork(cause)) throw cause; }
         }
         i++; continue;
@@ -665,9 +693,28 @@ export class CheckoutService {
       for (const r of post) {
         const row2 = group.find(g => g.key === r.key)!;
         try { await backend.comment!(taskId, reportComment(r), agentMap, row2.clientId); store.markPosted(row2.id, done()); }
-        catch (cause) { store.markFailed(row2.id, message(cause), !isNetwork(cause)); if (isNetwork(cause)) throw cause; }
+        catch (cause) { store.markFailed(row2.id, message(cause), !isNetwork(cause) && !isAuth(cause)); if (isNetwork(cause) || isAuth(cause)) throw cause; }
       }
     }
+  }
+  /**
+   * The task changed in Paperclip, so a lease-ending change is not sent. Nothing queued for it is (a comment on someone else's task would be noise), the lease
+   * is ended here with a notice, and the worktree is kept.
+   */
+  private endHere(taskId: string, rows: readonly { id: number }[], why: string): void {
+    const store = this.d.store, at = iso(this.d.now());
+    let lease = store.lease(taskId);
+    const where = lease?.worktree ? lease.worktree : 'this Mac';
+    const notice = `${why}; your local work is kept in ${where}`;
+    for (const r of rows) store.markFailed(r.id, `Not sent: ${why}.`, true);
+    for (const r of this.pendingFor(taskId)) store.markFailed(r.id, `Not sent: ${why}.`, true);
+    store.markDocPosted(taskId);
+    if (lease) {
+      if (lease.state === 'checked_out') lease = transition(lease, { type: 'release', at });
+      store.putLease({ ...lease, endNotice: notice, conflict: null, offline: null, recheck: false, countdown: null });
+    }
+    store.setSyncState(at, notice);
+    this.d.emit(taskId);
   }
   /** What a re-read of the task finds different from what check-out left: a different assignee, or a status that is no longer In progress. An org the server no longer lists is a conflict too (H3). */
   private async detectConflict(lease: CheckoutLease): Promise<NonNullable<CheckoutLease['conflict']> | null> {
@@ -692,8 +739,10 @@ export class CheckoutService {
     await backend.putDocument(taskId, WORK_LOG_KEY, { title: 'Local work log', body, changeSummary: `${receipts.length} local ${receipts.length === 1 ? 'turn' : 'turns'}` });
     this.d.store.markDocPosted(taskId);
   }
-  async outbox(): Promise<OutboxStatus> { return { pending: this.d.store.pendingCount(), ...this.d.store.syncState() }; }
-  async sync(): Promise<OutboxStatus> { await this.flush(); return this.outbox(); }
+  async outbox(): Promise<OutboxStatus> { return { pending: this.d.store.pendingCount(), ...this.d.store.syncState(), stuck: this.d.store.stuckCount(), authRequired: this.authBlocked() }; }
+  async sync(): Promise<OutboxStatus> { this.authStop = null; await this.flush(); return this.outbox(); }
+  /** "N updates couldn't be sent · Retry": puts the given-up updates back in the queue and sends them. */
+  async retry(taskId?: string): Promise<OutboxStatus> { this.authStop = null; this.d.store.revive(taskId); this.d.emit(taskId ?? null); await this.flush(taskId); return this.outbox(); }
 
   // --- automatic hand-back -----------------------------------------------------------------------------------------------------------------
   /**
@@ -1046,7 +1095,7 @@ export class CheckoutService {
     const key = `handback:${at}`;
     // 3. the summary comment and the reassignment, in that order, through the outbox. The lease ends only after both are queued.
     // The reassignment goes first: if the server refuses it, the summary is not posted either (M4).
-    this.enqueuePatch(lease.taskId, lease.orgId, key, strategy.patch, at);
+    this.enqueuePatch(lease.taskId, lease.orgId, key, strategy.patch, at, undefined, this.expectHeld(lease, me.id));
     this.enq({ taskId: lease.taskId, orgId: lease.orgId, type: 'comment', key, kind: 'handback', body: summary, at });
     this.d.store.markDocDirty(lease.taskId);
     const ended = { ...transition(lease, { type: 'handback', at, prUrl: prUrl ?? null }), handedTo: { kind: input.reviewer.kind, id: input.reviewer.id, name: reviewerName } };
@@ -1068,7 +1117,7 @@ export class CheckoutService {
     const back = lease.previous;
     // Back as it was: the old agent (it wakes again), or the person's own task, or whoever held it, in the status it had.
     const status: WorkspaceStatus = back.status;
-    this.enqueuePatch(lease.taskId, lease.orgId, key, { status, assigneeUserId: back.assigneeAgentId ? null : back.assigneeUserId, assigneeAgentId: back.assigneeAgentId }, at);
+    this.enqueuePatch(lease.taskId, lease.orgId, key, { status, assigneeUserId: back.assigneeAgentId ? null : back.assigneeUserId, assigneeAgentId: back.assigneeAgentId }, at, undefined, this.expectHeld(lease, lease.userId));
     this.enq({ taskId: lease.taskId, orgId: lease.orgId, type: 'comment', key, kind: 'release', body: releaseBody(lease.device, note), at });
     this.d.store.putLease(transition(lease, { type: 'release', at }));
     this.d.store.deleteOrgCopy(lease.taskId); this.d.store.deleteSnapshot(lease.taskId);
@@ -1083,7 +1132,7 @@ export class CheckoutService {
     if (on && !agentId) throw new Error('No org agent is available to run this on the server.');
     const key = `server:${on}:${at}`;
     const agent = part.agents.find(a => a.id === agentId);
-    this.enqueuePatch(lease.taskId, lease.orgId, key, on ? { assigneeAgentId: agentId, assigneeUserId: null, status: 'in_progress' } : { assigneeUserId: me.id, assigneeAgentId: null }, at);
+    this.enqueuePatch(lease.taskId, lease.orgId, key, on ? { assigneeAgentId: agentId, assigneeUserId: null, status: 'in_progress' } : { assigneeUserId: me.id, assigneeAgentId: null }, at, undefined, this.expectHeld(lease, me.id));
     this.enq({ taskId: lease.taskId, orgId: lease.orgId, type: 'comment', key, kind: 'note', at, body: on ? `Running this on the server with ${agent?.name ?? 'the org agent'} · it stays with ${me.name ?? 'me'} · via Muster` : 'Back on '+device().lower+' · via Muster' });
     this.d.store.putLease(transition(lease, { type: 'run-on-server', on, at }));
     await this.flush(lease.taskId);
