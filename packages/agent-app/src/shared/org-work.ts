@@ -38,6 +38,13 @@ export function isMine(task: WorkspaceTask, me: Me | null): boolean {
   return task.responsibleUserId === me.id;
 }
 
+/** The task is known to belong to someone else: a human assignee who is not the person, or an agent's task whose accountable owner is another person. */
+const heldByAnother = (task: WorkspaceTask, me: Me): boolean => {
+  const assignee = humanAssignee(task);
+  if (assignee) return assignee !== me.id;
+  return agentAssigned(task) && Boolean(task.responsibleUserId) && task.responsibleUserId !== me.id;
+};
+
 /** Agents the person leads: the agents on tasks they are accountable for, plus everyone who reports to those agents (transitively). */
 export function leadAgentIds(me: Me | null, tasks: readonly WorkspaceTask[], agents: readonly WorkspaceAgent[]): Set<string> {
   const lead = new Set<string>();
@@ -106,6 +113,9 @@ export function scopeInbox(items: readonly WorkspaceInboxItem[], tasks: readonly
     // Someone tagged the person: it is a message to them, whoever the task belongs to.
     if (item.kind === 'mention') return true;
     const task = item.taskId ? byId.get(item.taskId) : undefined;
+    // The server's own attention feed is already limited to what this board user may act on, and its compact task rows do not say who is
+    // accountable. So an asking item from it stays unless the task is known to be another person's (a human assignee, or a different owner).
+    if (item.scoped && ASKING.has(item.kind)) return !task || !heldByAnother(task, me) || Boolean(opts.team && isTeam(task, me, opts.reporting ?? {}));
     if (item.taskId && !task) return false;
     if (!task) return ASKING.has(item.kind) || item.kind === 'mail';
     if (isMine(task, me)) return true;

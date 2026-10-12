@@ -1,6 +1,6 @@
 /**
  * Paperclip-in-Muster data for the renderer (#115): one cached workspace snapshot, the hub route (Inbox, Roster, an
- * agent, Ledger, Outputs, a task thread) and the sidebar Inbox badge. No intervals anywhere: the runtime owns the live
+ * agent, Ledger, Outputs, a task thread) and the sidebar Inbox badge. The only interval is the badge's 60 s safety net (badgePoll.ts, off while the window is idle): the runtime owns the live
  * channel (Paperclip's WebSocket, or Muster's own projectChanged / mailboxChanged events) and a hidden window defers
  * every refetch until it is shown again.
  *
@@ -9,6 +9,7 @@
  */
 import { useEffect, useSyncExternalStore } from 'react';
 import type { AgentEvent } from '../shared/protocol';
+import { startBadgePoll } from './badgePoll';
 import type { WorkspaceBadge, WorkspaceSnapshot } from '../shared/domains/paperclip-protocol';
 import { invoke, subscribe } from './bridge';
 import { openHubScreen } from './store';
@@ -94,8 +95,9 @@ let badge: WorkspaceBadge | null = null;
 const badgeListeners = new Set<() => void>();
 let badgeTimer: ReturnType<typeof setTimeout> | null = null, badgeDirty = true, badgeSubscribed = false;
 const BADGE_EVENTS = new Set(['projectsWorkspaceChanged', 'projectChanged', 'mailboxChanged', 'workChanged']);
+let badgeReadAt = 0;
 function loadBadge() {
-  badgeDirty = false;
+  badgeDirty = false; badgeReadAt = Date.now();
   void invoke('paperclip.badge', {}).then(next => {
     if (badge && next.inbox === badge.inbox && next.liveRuns === badge.liveRuns && next.connected === badge.connected && next.mail === badge.mail) return;
     badge = next; for (const l of badgeListeners) l();
@@ -106,7 +108,7 @@ function queueBadge(delay: number) {
   if (badgeTimer) return;
   badgeTimer = setTimeout(() => { badgeTimer = null; loadBadge(); }, delay);
 }
-/** Refetched after events (coalesced over 1.5 s) and when the window is shown again. Never polled. */
+/** Refetched after events (coalesced over 1.5 s) and when the window is shown again. A server that sends no events is asked once a minute (badgePoll.ts), never while the window is idle. */
 export function useInboxBadge(): WorkspaceBadge | null {
   useEffect(() => {
     if (badgeSubscribed) return;
@@ -114,6 +116,7 @@ export function useInboxBadge(): WorkspaceBadge | null {
     subscribe(event => { if (BADGE_EVENTS.has(event.type)) queueBadge(1500); });
     document.addEventListener('visibilitychange', () => { if (!hidden() && badgeDirty) queueBadge(0); });
     queueBadge(2500);
+    startBadgePoll({ connected: () => badge?.connected === true, lastReadAt: () => badgeReadAt, load: loadBadge, active: () => !hidden() });
   }, []);
   return useSyncExternalStore(l => { badgeListeners.add(l); return () => badgeListeners.delete(l); }, () => badge);
 }

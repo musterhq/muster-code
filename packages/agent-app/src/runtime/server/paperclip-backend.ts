@@ -1,6 +1,6 @@
 /** The Paperclip implementation of `ServerBackend`: the existing REST client and mappers, behind the shared interface. */
 import type { LedgerEntry, ServerOutputRef, TaskCreateInput, ThreadCard, WorkspaceAgent, WorkspaceComment, WorkspaceCompany, WorkspaceListKind, WorkspaceRow, WorkspaceRun, WorkspaceTask, WorkspaceTaskDetail } from '../../shared/domains/paperclip-protocol.ts';
-import { arr, buildInbox, mapAgent, mapApproval, mapAttention, mapComment, mapCompany, mapDocument, mapGoal, mapInteraction, mapIssue, mapMentions, mapPeople, mapProject, mapReceipt, mapRows, mapRun, mapWorkProduct } from '../paperclip-map.ts';
+import { arr, buildInbox, mapAgent, mapApproval, mapAttention, mapComment, mapCompany, mapDocument, mapGoal, mapInteraction, mapIssue, mapMentions, mapPeople, mentionCandidates, mapProject, mapReceipt, mapRows, mapRun, mapWorkProduct } from '../paperclip-map.ts';
 import { PaperclipClient, PaperclipError, openLiveEvents, type SocketFactory } from '../paperclip-client.ts';
 import { toolsFromLog } from './paperclip-run-tools.ts';
 import type { BackendOptions, ImportReader, Json, LiveHandlers, PersonalAccess, ServerBackend, ServerEndpoint, ServerHealth, ServerPart, ServerPerson, TaskChanges, TaskCommentRow, TaskDetailContext } from './backend.ts';
@@ -70,7 +70,7 @@ export class PaperclipBackend implements ServerBackend, PersonalAccess {
     const [issues, agentsJson, projectsJson, goalsJson, runsJson, liveJson, attentionJson, approvalsJson, labelsJson, activityJson, directoryJson] = await Promise.all([
       allPages(api.issuePages(id, 'view=compact&includeBlockedBy=true', options.fresh)), api.get<unknown>(`${base}/agents`), api.get<unknown>(`${base}/projects`),
       api.get<unknown>(`${base}/goals`).catch(() => []), api.get<unknown>(`${base}/heartbeat-runs?limit=60&summary=true`),
-      api.get<unknown>(`${base}/live-runs`).catch(() => []), api.get<unknown>(`${base}/attention`).catch(() => ({ items: [] })),
+      api.get<unknown>(`${base}/live-runs`).catch(() => []), api.get<unknown>(`${base}/attention?all=true`).catch(() => ({ items: [] })),
       api.get<unknown>(`${base}/approvals`).catch(() => []), api.get<unknown>(`${base}/labels`).catch(() => []), api.get<unknown>(`${base}/activity?limit=100`).catch(() => []), api.get<unknown>(`${base}/user-directory`).catch(() => ({ users: [] })),
     ]);
     if (previous && previous.generation === api.generation && previous.companyId === id) return previous.part;
@@ -81,16 +81,50 @@ export class PaperclipBackend implements ServerBackend, PersonalAccess {
     const me = (await this.whoami().catch(() => null))?.id ?? null;
     const people = mapPeople(directoryJson), peopleNames = new Map(people.map(p => [p.id, p.name]));
     const tasks = arr(issues).map(i => mapIssue(i, agents, liveTasks, me, peopleNames));
+    const attentionItems = arr((attentionJson as Json).items).map(mapAttention);
+    // Paperclip's compact issue rows leave out who is accountable. The full issue says, so it is read for the tasks the Inbox points at (ETag cached).
+    await this.fillResponsible(tasks, attentionItems.map(i => i.taskId));
+    const bodies = await this.mentionBodies(arr(activityJson), me);
     // Memory counts are added per snapshot (not here), so the light badge read never browses memory.
     const projects = arr(projectsJson).map(p => mapProject(p, tasks));
     const projectName = new Map(projects.map(p => [p.id, p.name]));
-    const inbox = [...buildInbox(arr((attentionJson as Json).items).map(mapAttention), tasks, runs, agents), ...mapMentions(arr(activityJson), me, agents, peopleNames)].map(item => {
+    const mentions = mapMentions(arr(activityJson), me, agents, peopleNames, bodies);
+    this.mentionTasks = new Set(mentions.map(m => m.taskId).filter((t): t is string => Boolean(t)));
+    const inbox = [...buildInbox(attentionItems, tasks, runs, agents), ...mentions].map(item => {
       const projectId = item.taskId ? tasks.find(t => t.id === item.taskId)?.projectId ?? null : null;
       return { ...item, projectId, group: projectId ? projectName.get(projectId) ?? company.name : company.name, source: 'paperclip' as const };
     });
     const approvals = arr(approvalsJson).filter(a => a.status === 'pending' || a.status === 'revision_requested').map(a => mapApproval(a, agents));
     const labels = arr(labelsJson).map(l => ({ id: String(l.id), name: typeof l.name === 'string' ? l.name : 'Label', color: typeof l.color === 'string' ? l.color : null }));
     return { tasks, agents: agentList, projects, runs, inbox, goals: arr(goalsJson).map(mapGoal), approvals, labels, people };
+  }
+
+  /** Tasks with a pending @mention of the person, as of the last read: opening one marks it read on the server. */
+  private mentionTasks = new Set<string>();
+  private readonly commentBodies = new Map<string, string>();
+  /** Reads `responsibleUserId` from the full issue for the listed tasks that lack it (at most 40 per read). */
+  private async fillResponsible(tasks: WorkspaceTask[], ids: readonly (string | null)[]): Promise<void> {
+    const wanted = new Set(ids.filter((id): id is string => Boolean(id)));
+    const todo = tasks.filter(t => wanted.has(t.id) && !t.responsibleUserId).slice(0, 40);
+    await Promise.all(todo.map(async task => {
+      const full = await this.client.get<Json>(`/issues/${enc(task.id)}`).catch(() => null);
+      if (full && typeof full.responsibleUserId === 'string' && full.responsibleUserId) task.responsibleUserId = full.responsibleUserId;
+    }));
+  }
+  /** The whole comment for activity rows whose 120-character snippet may have cut a mention off (at most 15 per read; kept for later reads). */
+  private async mentionBodies(rows: readonly Json[], me: string | null): Promise<ReadonlyMap<string, string>> {
+    const todo = mentionCandidates(rows, me).filter(row => { const d = (row.details ?? {}) as Json; return typeof d.commentId === 'string' && typeof row.entityId === 'string' && !this.commentBodies.has(d.commentId); }).slice(0, 15);
+    await Promise.all(todo.map(async row => {
+      const id = String((row.details as Json).commentId);
+      const comment = await this.client.get<Json>(`/issues/${enc(String(row.entityId))}/comments/${enc(id)}`).catch(() => null);
+      if (comment && typeof comment.body === 'string') { if (this.commentBodies.size >= 400) this.commentBodies.delete(this.commentBodies.keys().next().value!); this.commentBodies.set(id, comment.body); }
+    }));
+    return this.commentBodies;
+  }
+  /** Opening a task that carries a mention of the person marks it read for them on the server (POST /issues/:id/read), once. */
+  private async markMentionRead(taskId: string): Promise<void> {
+    if (!this.mentionTasks.delete(taskId)) return;
+    await this.client.send('POST', `/issues/${enc(taskId)}/read`, {}).catch(() => undefined);
   }
 
   async task(taskId: string, ctx: { agents: ReadonlyMap<string, WorkspaceAgent>; people: readonly { id: string; name: string }[]; live: ReadonlySet<string> }): Promise<WorkspaceTask | null> {
@@ -112,6 +146,7 @@ export class PaperclipBackend implements ServerBackend, PersonalAccess {
     const liveTasks = new Set((part?.runs ?? []).filter(r => r.status === 'running').map(r => r.taskId).filter((t): t is string => Boolean(t)));
     const peopleNames = new Map((part?.people ?? []).map(p => [p.id, p.name])), meId = (await this.whoami().catch(() => null))?.id ?? null;
     const task = mapIssue(issue, agents, liveTasks, meId, peopleNames);
+    void this.markMentionRead(taskId);
     const taskRuns = arr(runs).map(mapRun);
     if (taskRuns.some(r => r.status === 'running' || r.status === 'queued')) task.live = true;
     const assignee = task.assigneeId ? agents.get(task.assigneeId) : undefined;
