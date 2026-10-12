@@ -3,7 +3,7 @@ import {itemPatches,type ChangeKind} from './patchModel.ts';
 import {netChangeCounts,type PatchEdit} from './turnChangeTotals.ts';
 import type {ReviewChange} from '../shared/domains/review-protocol';
 
-export interface FileChangePatch extends PatchEdit { adds: number; dels: number; itemId: string; truncated?: boolean }
+export interface FileChangePatch extends PatchEdit { adds: number; dels: number; itemId: string; truncated?: boolean; withheld?: boolean }
 export interface FileChangeEntry { path: string; movePath?: string; kind: ChangeKind; adds: number; dels: number; patches: FileChangePatch[]; status: string }
 
 /**
@@ -23,10 +23,15 @@ export function collectFileChanges(items: readonly TimelineItem[]): FileChangeEn
       // A file the turn created stays "added" however often it is edited afterwards.
       if (!entry.patches.length) entry.kind = change.kind; else if (change.kind === 'delete') entry.kind = 'delete';
       if (change.patch && entry.patches.at(-1)?.diff !== change.patch) entry.patches.push({diff: change.patch, before: change.before, after: change.after, adds: change.adds, dels: change.dels, itemId: item.id, ...(change.truncated ? {truncated: true} : {})});
+      else if (change.withheld) entry.patches.push({diff: '', adds: change.adds, dels: change.dels, itemId: item.id, truncated: true, withheld: true});
       changes.set(change.path, entry);
     }
   }
-  for (const entry of changes.values()) Object.assign(entry, netChangeCounts(entry.patches));
+  for (const entry of changes.values()) {
+    // A withheld diff has counts but no text to net against: its file sums the counts it was given.
+    if (entry.patches.some(patch => patch.withheld)) Object.assign(entry, {adds: entry.patches.reduce((n, patch) => n + patch.adds, 0), dels: entry.patches.reduce((n, patch) => n + patch.dels, 0)});
+    else Object.assign(entry, netChangeCounts(entry.patches));
+  }
   return [...changes.values()];
 }
 

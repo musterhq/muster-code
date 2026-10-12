@@ -1,0 +1,101 @@
+/* Transcript rows: one muted row, an overlapping icon stack, cards for sub-agents and changed files.
+   Prose keeps full contrast; chrome is secondary. Every visual value is a token (styles.css :root), so a new
+   design language restyles these primitives in one place. */
+.tx-row {
+  display: flex; align-items: center; gap: var(--gap-3); width: 100%; height: var(--row-h); min-width: 0;
+  padding: 0 var(--gap-3); border-radius: var(--radius-6); color: var(--text-faint); font-size: var(--fs-13);
+  text-align: left; font-variant-numeric: tabular-nums;
+}
+button.tx-row:hover, button.tx-row:focus-visible { color: var(--text-dim); background: var(--bg-hover); }
+.tx-row:focus-visible { outline: 1px solid color-mix(in srgb, var(--accent) 55%, transparent); outline-offset: -1px; }
+.tx-row-icon { display: inline-flex; flex: none; align-items: center; justify-content: center; width: var(--icon-slot); height: var(--icon-slot); color: var(--text-dim); }
+.tx-row-icon > svg, .tool-glyph > svg { width: var(--icon-size); height: var(--icon-size); stroke-width: var(--icon-stroke); }
+button.tx-row:hover .tx-row-icon, .tx-row[aria-expanded='true'] .tx-row-icon { color: var(--text); }
+.tx-row-text { flex: 0 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.tx-row-trailing { display: inline-flex; flex: none; align-items: center; gap: var(--gap-3); margin-left: auto; color: var(--text-faint); font-size: var(--fs-12); }
+.tx-chevron { flex: none; transition: transform var(--dur-1) steps(4, end); }
+.tx-row[aria-expanded='true'] .tx-chevron { transform: rotate(90deg); }
+/* Graded failures: a tinted icon for a routine one, red text only for a severe one. */
+.tx-row.is-routine .tx-row-icon { color: var(--warn); }
+.tx-row.is-severe, .tx-row.is-severe .tx-row-icon { color: var(--danger); }
+
+/* Fold line: "Worked for 1m 38s ›" with a hairline rule and the turn's digest. */
+.tx-fold { margin-top: var(--gap-5); }
+.tx-fold::after { content: ""; flex: 1; min-width: var(--gap-6); height: 1px; margin-left: var(--gap-4); background: var(--hairline); }
+.tx-fold .tx-row-trailing { order: 3; margin-left: 0; min-width: 0; overflow: hidden; }
+.tx-fold-digest { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.tx-fold-digest::before { content: "· "; }
+
+/* Icon stack: each icon overlaps the one before, ringed in the row background so edges stay crisp. */
+.tx-stack { display: inline-flex; flex: none; align-items: center; }
+.tx-stack-item {
+  display: inline-flex; align-items: center; justify-content: center; width: var(--icon-stack); height: var(--icon-stack);
+  border-radius: var(--radius-full); background: var(--bg); box-shadow: 0 0 0 var(--icon-ring) var(--bg); overflow: hidden;
+}
+.tx-stack-item + .tx-stack-item { margin-left: var(--icon-stack-overlap); }
+.tx-stack-item[data-kind='agent'] + .tx-stack-item[data-kind='agent'] { margin-left: var(--icon-stack-overlap-agent); }
+.tx-stack-item > * { width: calc(var(--icon-stack) - 2px); height: calc(var(--icon-stack) - 2px); }
+.tx-stack-tip { display: flex; flex-direction: column; gap: var(--gap-1); }
+.tx-stack-more { margin-left: var(--gap-2); color: var(--text-faint); font-size: var(--fs-11); }
+.tx-site { display: block; border-radius: var(--radius-2); object-fit: contain; }
+.tx-letter {
+  display: inline-flex; align-items: center; justify-content: center; border-radius: var(--radius-4);
+  background: var(--bg-active); color: var(--text-dim); font-size: var(--fs-10); font-weight: 600;
+}
+
+/* Work group: the sentence row; opened, its steps indent under it. */
+.tx-work-items { display: flex; flex-direction: column; gap: var(--gap-1); margin: var(--gap-1) 0 var(--gap-2) var(--gap-6); }
+
+/* Live tail: thought line, clock, current step. Fixed heights so it never jumps. */
+.tx-live { display: flex; flex-direction: column; gap: var(--gap-1); padding: var(--gap-2) var(--gap-3); color: var(--text-faint); font-size: var(--fs-13); }
+.tx-live > div { height: var(--row-h-tight); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.tx-live-thought { font-style: italic; }
+.tx-live-clock { font-size: var(--fs-12); font-variant-numeric: tabular-nums; }
+.tx-live.is-waiting .tx-live-step { color: var(--warn); }
+.tx-live-text { position: relative; display: inline-block; max-width: 100%; overflow: hidden; vertical-align: bottom; color: var(--text-dim); }
+/* A highlight band sweeps across live text: transform only, stepped, and only while on screen. */
+.tx-live-text.is-animated::after {
+  content: ""; position: absolute; inset: 0; pointer-events: none;
+  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--bg) 55%, transparent), transparent);
+  transform: translateX(-100%); will-change: transform;
+  animation: tx-sweep 2.2s steps(30) infinite;
+}
+@keyframes tx-sweep { to { transform: translateX(100%); } }
+
+/* Thoughts: one muted line; opened, the merged thoughts read in muted prose. */
+.tx-thought-body { margin: var(--gap-1) 0 var(--gap-3) calc(var(--icon-slot) + var(--gap-3)); color: var(--text-faint); font-size: var(--fs-13); }
+
+/* Sub-agent card. */
+.tx-agents { margin: var(--gap-2) 0; padding: var(--gap-1); border: 1px solid var(--hairline); border-radius: var(--radius-8); }
+.tx-agent-list { display: flex; flex-direction: column; }
+.tx-agent { display: flex; align-items: center; gap: var(--gap-4); height: var(--row-h-card); padding: 0 var(--gap-3); border-radius: var(--radius-6); color: var(--text-dim); font-size: var(--fs-13); text-align: left; }
+.tx-agent:hover, .tx-agent:focus-visible { background: var(--bg-hover); }
+.tx-agent-name { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.tx-agent-state { color: var(--text-faint); font-size: var(--fs-12); }
+.tx-agent.is-failed .tx-agent-state { color: var(--danger); }
+
+/* Changed-files card under the reply. */
+.tx-files { max-width: var(--reading-width); margin: var(--gap-4) 0 var(--gap-2); border: 1px solid var(--hairline); border-radius: var(--radius-8); font-size: var(--fs-13); }
+.tx-files-head { display: flex; align-items: center; gap: var(--gap-4); height: var(--row-h-card); padding: 0 var(--gap-5); color: var(--text-dim); border-bottom: 1px solid var(--hairline); }
+.tx-files-list { margin: 0; padding: var(--gap-1) 0; list-style: none; }
+.tx-file { display: flex; align-items: center; gap: var(--gap-4); height: var(--row-h-card); padding: 0 var(--gap-5); color: var(--text-dim); }
+.tx-file:hover { background: var(--bg-hover); }
+.tx-file-name { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--text); text-align: left; }
+.tx-file-name:hover:not(:disabled) { text-decoration: underline dotted; }
+.tx-file-counts { display: inline-flex; gap: var(--gap-2); margin-left: auto; font-size: var(--fs-12); font-variant-numeric: tabular-nums; }
+.tx-add { color: var(--ok); }
+.tx-del { color: var(--danger); }
+.tx-minibar { display: inline-flex; gap: 1px; }
+.tx-minibar i { width: var(--gap-2); height: var(--gap-4); border-radius: var(--radius-2); background: var(--bg-active); }
+.tx-minibar i.is-add { background: var(--ok); }
+.tx-minibar i.is-del { background: var(--danger); }
+.tx-file-state { color: var(--text-faint); font-size: var(--fs-12); }
+.tx-file-actions { display: inline-flex; gap: var(--gap-2); }
+.tx-file-actions button, .tx-file-open { display: inline-flex; align-items: center; gap: 3px; height: var(--row-h-tight); padding: 0 var(--gap-3); border-radius: var(--radius-4); color: var(--text-dim); font-size: var(--fs-12); }
+.tx-file-actions button:hover, .tx-file-open:hover { background: var(--bg-active); color: var(--text); }
+.tx-files-notice { margin: 0; padding: var(--gap-2) var(--gap-5); color: var(--warn); font-size: var(--fs-12); }
+
+@media (prefers-reduced-motion: reduce) {
+  .tx-live-text.is-animated::after { animation: none; display: none; }
+  .tx-chevron { transition: none; }
+}

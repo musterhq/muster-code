@@ -1,4 +1,4 @@
-import { ArrowUp, Check, FileText, Folder, X } from 'lucide-react';
+import { ArrowDown, Check, FileText, Folder, X } from 'lucide-react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import React, {
   useCallback,
@@ -31,19 +31,19 @@ import {ForkOrigin,MessageEditor,MessageMeta,type MessageActions} from './Messag
 import {ImportOrigin} from './ImportConversations';
 import './chat-continuity.css';
 import {TurnChanges} from './TurnChanges';
-import {useStoreSelector} from '../useStore';
-import {useLatestTurnFiles} from '../reviewState';
 import {EnvironmentFooter} from './EnvironmentFooter';
 import { StatusDot } from './StatusDot';
 import { ToolCard, TurnGallery } from './ToolCard';
 import { GalleryCoverage } from './ImageGallery';
 import { ActivityGroup } from './ActivityGroup';
-import { summarizeActivity, viewedImages, type TranscriptEntry } from './activityGrouping';
+import { viewedImages, type TranscriptEntry } from './activityGrouping';
 import { MessageBody, localImagePath } from './MessageBody';
-import {LiveAnnouncer,LiveTurnHeader,TurnHeader,WorkingTail} from './TurnStatus';
+import {LiveAnnouncer} from './TurnStatus';
 import {ReasoningRow} from './ReasoningRow';
-import {TurnFileChanges} from './TurnFileChanges';
-import {describeTurns,foldable,rowStart} from './turnStatusModel';
+import {deriveRows,shareRows,type TranscriptRow} from '../transcriptRows';
+import {FoldRow,LiveRow,SubagentCardRow,WorkRow,itemsOfRow} from './transcript/TranscriptRows';
+import {ChangedFilesCard} from './transcript/ChangedFilesCard';
+import {ThoughtRow} from './transcript/ThoughtRow';
 import {attachmentPreview} from '../timelineBridge';
 import {attachmentPdfThumbnail,isPdf} from '../pdfThumbnail';
 import {openAttachment, openAttachmentOnKey} from '../attachmentOpen';
@@ -113,11 +113,8 @@ function UserMessage({item,reveal}:{item:TimelineItem;reveal:boolean}) {
   </>;
 }
 
-interface TurnHeaderProps {durationMs:number|null;open:boolean;onToggle:()=>void;summary?:string}
-/** A live turn's header: "Working for …" since its user message. */
-interface LiveTurnProps {live:string}
 interface EditingProps {onSubmit:(text:string,mode:EditResendMode,restoreFiles?:Array<{path:string;afterHash:string}>)=>Promise<boolean>;onCancel:()=>void}
-function TimelineCardImpl({ item, nextAt, reveal, turn, tail=false, actions, editing, plan=false, meta=true, gallery }: { gallery?:readonly string[]; item: TranscriptEntry; nextAt?:string; reveal?:string; turn?:TurnHeaderProps|LiveTurnProps; tail?:boolean; actions?:MessageActions; editing?:EditingProps; plan?:boolean; meta?:boolean }): React.ReactElement {
+function TimelineCardImpl({ item, nextAt, reveal, tail=false, actions, editing, plan=false, meta=true, gallery }: { gallery?:readonly string[]; item: TranscriptEntry; nextAt?:string; reveal?:string; tail?:boolean; actions?:MessageActions; editing?:EditingProps; plan?:boolean; meta?:boolean }): React.ReactElement {
   switch (item.kind) {
     case 'activity': return <ActivityGroup items={item.items} reveal={reveal} live={tail}/>;
     case 'user':
@@ -125,7 +122,7 @@ function TimelineCardImpl({ item, nextAt, reveal, turn, tail=false, actions, edi
         <div className="user-message-row">
         {editing?<MessageEditor text={item.text} loadOptions={()=>invoke('chat.editOptions',{id:item.chatId,itemId:item.id})} loadRestore={()=>invoke('chat.editRestorePreview',{id:item.chatId,itemId:item.id})} onSubmit={editing.onSubmit} onCancel={editing.onCancel}/>
           :<><UserMessage item={item} reveal={reveal===item.id}/><MessageMeta text={item.text} createdAt={item.createdAt} label="Copy message" actions={actions}/></>}
-        {turn&&('live' in turn?<LiveTurnHeader since={turn.live}/>:<TurnHeader {...turn}/>)}</div>
+        </div>
       );
     case 'assistant':
       if (plan) return <PlanCard item={item}/>;
@@ -148,12 +145,14 @@ function TimelineCardImpl({ item, nextAt, reveal, turn, tail=false, actions, edi
 
 /** Row callbacks are rebuilt every render but only close over ids that are part of the row; compare what they expose. */
 const sameKeys=(a?:object,b?:object)=>a===b||(!!a&&!!b&&Object.keys(a).join()===Object.keys(b).join());
-const sameTurn=(a?:TurnHeaderProps|LiveTurnProps,b?:TurnHeaderProps|LiveTurnProps)=>a===b||(!!a&&!!b&&('live' in a?'live' in b&&a.live===b.live:!('live' in b)&&a.durationMs===b.durationMs&&a.open===b.open&&a.summary===b.summary));
 /** Finished rows skip re-rendering while the tail streams. */
-const TimelineCard=React.memo(TimelineCardImpl,(a,b)=>a.item===b.item&&a.nextAt===b.nextAt&&a.reveal===b.reveal&&a.tail===b.tail&&a.plan===b.plan&&a.meta===b.meta&&a.gallery===b.gallery&&sameKeys(a.actions,b.actions)&&!a.editing===!b.editing&&sameTurn(a.turn,b.turn));
+const TimelineCard=React.memo(TimelineCardImpl,(a,b)=>a.item===b.item&&a.nextAt===b.nextAt&&a.reveal===b.reveal&&a.tail===b.tail&&a.plan===b.plan&&a.meta===b.meta&&a.gallery===b.gallery&&sameKeys(a.actions,b.actions)&&!a.editing===!b.editing);
 
-const turnDisclosures=new Map<string,boolean>();
-function rememberTurn(id:string,open:boolean){turnDisclosures.delete(id);turnDisclosures.set(id,open);if(turnDisclosures.size>300)turnDisclosures.delete(turnDisclosures.keys().next().value!);}
+/** A prompt just sent sits this far below the top of the transcript while its reply arrives. */
+const PROMPT_PIN_OFFSET=24;
+/** Per-thread memory of opened and closed turns (bounded). */
+const turnMemory=new Map<string,Map<string,boolean>>();
+function turnsOf(chatId:string){let map=turnMemory.get(chatId);if(!map){map=new Map();turnMemory.set(chatId,map);if(turnMemory.size>100)turnMemory.delete(turnMemory.keys().next().value!);}return map;}
 /** Case-insensitive hits inside rendered text nodes; a hit split across elements is not marked. */
 export function textRanges(root:Node,needle:string,limit=400):Range[] {
   const ranges:Range[]=[];
@@ -167,89 +166,91 @@ export function textRanges(root:Node,needle:string,limit=400):Range[] {
 type HighlightRegistry={set(name:string,value:unknown):void;delete(name:string):void};
 const highlightApi=()=>{const css=(globalThis as {CSS?:{highlights?:HighlightRegistry}}).CSS,Ctor=(globalThis as {Highlight?:new(...ranges:Range[])=>unknown}).Highlight;return css?.highlights&&Ctor?{registry:css.highlights,Ctor}:null;};
 
-/** Images a turn names, in order: the ones its tool rows viewed and the local pictures its replies embed. Cached per row so a
- *  streamed token only re-reads the row that grew. */
+/** Images a turn names, in order: the ones its tool rows viewed and the local pictures its replies embed. */
 const MARKDOWN_IMAGE=/!\[[^\]]*\]\(\s*<?([^)\s>]+)>?[^)]*\)/g;
-const scanned=new WeakMap<object,{size:number;paths:string[]}>();
-function rowImages(row:TranscriptEntry):string[] {
-  if(row.kind!=='activity'&&row.kind!=='assistant')return [];
-  const size=row.kind==='activity'?row.items.length+row.items.reduce((n,item)=>n+(item.status==='completed'?1:0),0):row.text.length,hit=scanned.get(row);
-  if(hit&&hit.size===size)return hit.paths;
-  const paths=row.kind==='activity'?viewedImages(row.items):[...row.text.matchAll(MARKDOWN_IMAGE)].flatMap(match=>{const path=localImagePath(match[1]);return path?[path]:[];});
-  scanned.set(row,{size,paths});return paths;
+function itemImages(item:TimelineItem):string[] {
+  if(item.kind==='tool')return viewedImages([item]);
+  if(item.kind!=='assistant')return [];
+  return [...item.text.matchAll(MARKDOWN_IMAGE)].flatMap(match=>{const path=localImagePath(match[1]);return path?[path]:[];});
 }
-interface TurnGalleryModel {key:string;paths:string[];covered:ReadonlySet<string>}
+interface TurnGalleryModel {key:string;paths:string[];covered:ReadonlySet<string>;reply:string}
 const NO_COVERAGE:ReadonlySet<string>=new Set();
-const TAIL_HEIGHT=40;
+/** One gallery per turn that viewed or embedded two or more images, under its final reply; unchanged galleries keep their identity. */
+function useGalleries(items:readonly TimelineItem[],rows:readonly TranscriptRow[]){
+  const memo=useRef(new Map<string,TurnGalleryModel>());
+  return useMemo(()=>{
+    const next=new Map<string,TurnGalleryModel>();let turn:string|undefined,paths:string[]=[];
+    const finish=()=>{const reply=rows.find(row=>row.kind==='assistant'&&row.final&&row.turnId===turn);if(!turn||!reply||paths.length<2)return;const key=reply.key+'\0'+paths.join('\0'),old=memo.current.get(turn);next.set(turn,old?.key===key?old:{key,paths,covered:new Set(paths),reply:reply.key});};
+    for(const item of items){if(item.kind==='user'&&item.data?.steered!==true){finish();turn=item.id;paths=[];continue;}for(const path of itemImages(item))if(!paths.includes(path))paths.push(path);}
+    finish();memo.current=next;return next;
+  },[items,rows]);
+}
+
+/** Optional render counter for the streaming performance gate (tests only). */
+let rowRenderProbe:((key:string)=>void)|undefined;
+export function setRowRenderProbe(probe:((key:string)=>void)|undefined):void {rowRenderProbe=probe;}
+
+interface RowViewProps {row:TranscriptRow;chatId:string;reveal?:string;actions?:MessageActions;editing?:EditingProps;plan?:boolean;gallery?:readonly string[];turnItems?:readonly TimelineItem[];onToggleTurn?:(id:string)=>void}
+function RowViewImpl({row,chatId,reveal,actions,editing,plan=false,gallery,turnItems,onToggleTurn}:RowViewProps):React.ReactElement|null {
+  rowRenderProbe?.(row.key);
+  switch(row.kind){
+    case 'fold': return <FoldRow row={row} onToggle={()=>onToggleTurn?.(row.turnId!)}/>;
+    case 'work': return <WorkRow row={row} chatId={chatId} reveal={reveal}/>;
+    case 'live': return <LiveRow row={row}/>;
+    case 'subagents': return <SubagentCardRow row={row}/>;
+    case 'changed-files': return <ChangedFilesCard files={row.files} chatId={chatId} turnId={row.turnId!} latest={row.latest} items={turnItems??[]}/>;
+    case 'assistant': return <TimelineCard item={row.item} meta={row.final||!row.turnId} plan={plan} gallery={gallery} actions={actions} reveal={reveal}/>;
+    case 'user': case 'steer': return <TimelineCard item={row.item} actions={actions} editing={editing} reveal={reveal}/>;
+    case 'reasoning': return <ThoughtRow items={row.items} chatId={chatId} reveal={reveal}/>;
+    case 'approval': case 'question': case 'notice': return <TimelineCard item={row.item} reveal={reveal}/>;
+  }
+}
+/** Rows are memoised on identity: a settled row is skipped while the tail streams. */
+const RowView=React.memo(RowViewImpl,(a,b)=>a.row===b.row&&a.chatId===b.chatId&&a.reveal===b.reveal&&a.plan===b.plan&&a.gallery===b.gallery&&a.turnItems===b.turnItems&&sameKeys(a.actions,b.actions)&&!a.editing===!b.editing);
+
+const editableTarget=(target:EventTarget|null)=>target instanceof HTMLElement&&(target.isContentEditable||/^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName)||!!target.closest('[contenteditable="true"],[role="textbox"]'));
 
 export function Timeline({ items, chatId, onScrolled, running, planMode=false }: { items: TimelineItem[]; chatId:string; onScrolled?: (scrolled:boolean)=>void; running?:boolean; planMode?:boolean }): React.ReactElement {
   const project=useMemo(()=>createTimelineProjection(),[]);
-  const {rows,turns,rowIndexes}=useMemo(()=>project(items),[items,project]);
+  const {rows:entries,turns:promptTurns}=useMemo(()=>project(items),[items,project]);
   const live=running??items.some(item=>item.status==='running');
-  // Plan mode: the settled final answer of the latest turn is the plan.
   const planId=useMemo(()=>planCardId(items,planMode,live),[items,planMode,live]);
-  // Only a turn's last reply carries the copy/time/actions row (as Codex does); interim replies sit close together.
-  const finalReplies=useMemo(()=>{const last=new Set<string>();let candidate:string|undefined;
-    for(const row of rows){if(row.kind==='user'){if(candidate)last.add(candidate);candidate=undefined;}else if(row.kind==='assistant')candidate=row.id;}
-    if(candidate)last.add(candidate);return last;},[rows]);
-  const turnModel=useMemo(()=>describeTurns(rows,live),[rows,live]);
-  // Per turn: its tool items, a Codex summary for the folded header, and whether it edited files.
-  const turnWork=useMemo(()=>{
-    const map=new Map<string,{items:TimelineItem[];summary:string;edits:boolean}>();
-    for(const [id,info] of turnModel.turns){
-      const items:TimelineItem[]=[];for(let index=info.row+1;index<=info.end;index++){const row=rows[index];if(row?.kind==='activity')items.push(...row.items);}
-      map.set(id,{items,summary:items.length?summarizeActivity(items):'',edits:items.some(item=>item.data?.type==='fileChange')});
-    }
-    return map;
-  },[rows,turnModel]);
-  // One gallery per turn that viewed or embedded two or more images, shown under its last reply. Entries keep their identity while
-  // their images are unchanged, so a streamed token never re-renders the gallery.
-  const galleryMemo=useRef(new Map<string,TurnGalleryModel>());
-  const galleries=useMemo(()=>{
-    const next=new Map<string,TurnGalleryModel&{reply:string}>();
-    for(const [id,info] of turnModel.turns){
-      let reply:string|undefined;const paths:string[]=[];
-      for(let index=info.row+1;index<=info.end;index++){const row=rows[index];if(row.kind==='assistant')reply=row.id;for(const path of rowImages(row))if(!paths.includes(path))paths.push(path);}
-      if(!reply||paths.length<2)continue;
-      const key=reply+'\0'+paths.join('\0'),old=galleryMemo.current.get(id);
-      next.set(id,old?.key===key?Object.assign(old,{reply}):{key,paths,covered:new Set(paths),reply});
-    }
-    galleryMemo.current=next;return next;
-  },[rows,turnModel]);
+  const [turnOpen,setTurnOpen]=useState<ReadonlyMap<string,boolean>>(()=>new Map(turnsOf(chatId)));
+  const shared=useRef<TranscriptRow[]>([]);
+  const {rows,turns:turnMeta}=useMemo(()=>{const next=deriveRows(items,{running:live,turnOpen});shared.current=shareRows(shared.current,next.rows);return {rows:shared.current,turns:next.turns};},[items,live,turnOpen]);
+  const rowIndexes=useMemo(()=>{const map=new Map<string,number>();rows.forEach((row,index)=>{map.set(row.key,index);for(const item of itemsOfRow(row))map.set(item.id,index);});return map;},[rows]);
+  const turnOfItem=useMemo(()=>new Map(turnMeta.flatMap(turn=>turn.itemIds.map(id=>[id,turn.id] as const))),[turnMeta]);
+  const turnItems=useMemo(()=>{const map=new Map<string,TimelineItem[]>();for(const item of items){const turn=turnOfItem.get(item.id);if(turn)map.set(turn,[...(map.get(turn)??[]),item]);}return map;},[items,turnOfItem]);
+  const turnItemsMemo=useRef(new Map<string,TimelineItem[]>());
+  const stableTurnItems=useMemo(()=>{const next=new Map<string,TimelineItem[]>();for(const [id,list] of turnItems){const old=turnItemsMemo.current.get(id);next.set(id,old&&old.length===list.length&&old.every((item,index)=>item===list[index])?old:list);}turnItemsMemo.current=next;return next;},[turnItems]);
+  // The rail's turns, positioned on the rows actually drawn.
+  const turns=useMemo(()=>promptTurns.map(turn=>({...turn,rowIndex:rowIndexes.get(turn.id)??turn.rowIndex})),[promptTurns,rowIndexes]);
+  const galleries=useGalleries(items,rows);
   const galleryByReply=useMemo(()=>new Map([...galleries.values()].map(model=>[model.reply,model])),[galleries]);
-  // Files Git saw the latest turn change: a shell-editing model leaves no fileChange item, so the transcript's Edited rows follow Git too.
-  const gitTurnFiles=useLatestTurnFiles(chatId,useStoreSelector(state=>state.snapshot?.chats.find(c=>c.id===chatId)?.folderId??undefined),running?'running':'idle')?.files.length??0;
-  const turnEnds=useMemo(()=>new Map([...turnModel.turns.values()].map(info=>[info.end,info.id])),[turnModel]);
   const retryId=useMemo(()=>retryTarget(items,live),[items,live]);
   const [editingId,setEditingId]=useState<string>();
   const itemsRef=useRef(items);itemsRef.current=items;
-  // A chat made by Work locally belongs to a server task: its messages can be posted there as a decision (visible, as you, "via Muster · local").
   const leases=useEventLoad(e=>e.type==='checkoutChanged',()=>invoke('checkout.leases',{}).then(r=>r.leases).catch(()=>[]),[chatId]);
   const linked=(leases.data??[]).find(l=>l.state==='checked_out'&&l.chatId===chatId);
-  const decide=(row:TimelineItem|TranscriptEntry)=>linked&&'text' in row?{onDecision:async()=>{try{await invoke('checkout.decision',{taskId:linked.taskId,text:row.text});notifySuccess(`Posted to ${linked.key} as a decision, as you (via Muster · local).`);}catch(error){notifyError(error);}}}:{};
-  const actionsFor=(row:TranscriptEntry):MessageActions|undefined=>row.kind==='user'?{
-    onEdit:()=>setEditingId(row.id),
-    onFork:()=>forkChat(chatId,turnEnd(itemsRef.current,row.id)),
-    ...(retryId===row.id?{onRetry:()=>retryTurn(chatId,row.id)}:{}),
-    ...decide(row),
-  }:row.kind==='assistant'?{onFork:()=>forkChat(chatId,row.id),...(retryId===row.id?{onRetry:()=>retryTurn(chatId,row.id)}:{}),...decide(row)}:undefined;
-  const editingFor=(row:TranscriptEntry):EditingProps|undefined=>row.kind==='user'&&row.id===editingId?{
+  const decide=(item:TimelineItem)=>linked?{onDecision:async()=>{try{await invoke('checkout.decision',{taskId:linked.taskId,text:item.text});notifySuccess(`Posted to ${linked.key} as a decision, as you (via Muster · local).`);}catch(error){notifyError(error);}}}:{};
+  const actionsFor=(row:TranscriptRow):MessageActions|undefined=>{
+    if(row.kind==='user')return {onEdit:()=>setEditingId(row.item.id),onFork:()=>forkChat(chatId,turnEnd(itemsRef.current,row.item.id)),...(retryId===row.item.id?{onRetry:()=>retryTurn(chatId,row.item.id)}:{}),...decide(row.item)};
+    if(row.kind==='assistant')return {onFork:()=>forkChat(chatId,row.item.id),...(retryId===row.item.id?{onRetry:()=>retryTurn(chatId,row.item.id)}:{}),...decide(row.item)};
+    return undefined;
+  };
+  const editingFor=(row:TranscriptRow):EditingProps|undefined=>row.kind==='user'&&row.item.id===editingId?{
     onCancel:()=>setEditingId(undefined),
-    onSubmit:async(text,mode,restoreFiles)=>{const sent=await editResend(chatId,row.id,text,mode,restoreFiles);if(sent)setEditingId(undefined);return sent;},
+    onSubmit:async(text,mode,restoreFiles)=>{const sent=await editResend(chatId,row.item.id,text,mode,restoreFiles);if(sent)setEditingId(undefined);return sent;},
   }:undefined;
-  const [turnOpen,setTurnOpen]=useState<Record<string,boolean>>({});
-  const isTurnOpen=(id:string)=>turnOpen[id]??turnDisclosures.get(id)??id===turnModel.last;
-  const setTurn=useCallback((id:string,open:boolean)=>{rememberTurn(id,open);setTurnOpen(prev=>prev[id]===open?prev:{...prev,[id]:open});},[]);
-  const folded=(index:number)=>{const row=rows[index];if(!foldable(row))return false;const turn=turnModel.turns.get(turnModel.rowTurn[index]??'');return !!turn&&turn.complete&&turn.work>0&&!isTurnOpen(turn.id);};
-  const foldedRef=useRef(folded);foldedRef.current=folded;
   const rowsRef=useRef(rows);rowsRef.current=rows;
   const turnsRef=useRef(turns);turnsRef.current=turns;
-  const rowTurnRef=useRef(turnModel.rowTurn);rowTurnRef.current=turnModel.rowTurn;
   const rowIndexesRef=useRef(rowIndexes);rowIndexesRef.current=rowIndexes;
   const scrollRef = useRef<HTMLDivElement>(null);
   const saved=useRef(recallPosition(chatId));
   const atBottom = useRef(!saved.current);
   const restoring=useRef(Boolean(saved.current));
+  /** Set while a disclosure changes: the reading position is held instead of following the tail. */
+  const hold=useRef<ReadingAnchor|null>(null);
   const scrolledState=useRef(false);
   const [away,setAway]=useState(Boolean(saved.current));
   const [unread,setUnread]=useState(false);
@@ -257,7 +258,7 @@ export function Timeline({ items, chatId, onScrolled, running, planMode=false }:
   const [searchQuery,setSearchQuery]=useState('');
   const [searchIndex,setSearchIndex]=useState(-1);
   const searchOrigin=useRef(false);
-  const searchMatches=useMemo(()=>findTranscriptMatches(rows,searchQuery),[rows,searchQuery]);
+  const searchMatches=useMemo(()=>findTranscriptMatches(entries,searchQuery).map(match=>({...match,rowIndex:rowIndexes.get(match.itemId)??-1})),[entries,searchQuery,rowIndexes]);
   const activeMatch:TranscriptMatch|undefined=searchIndex>=0?searchMatches[searchIndex]:undefined;
   useEffect(()=>{setSearchIndex(-1);if(!searchQuery.trim())searchOrigin.current=false;},[searchQuery]);
   const [backCount,setBackCount]=useState(0),[navigationNotice,setNavigationNotice]=useState('');
@@ -265,30 +266,31 @@ export function Timeline({ items, chatId, onScrolled, running, planMode=false }:
   const navigationFrame=useRef<number|undefined>(undefined);
   const revision=`${items.length}:${items.at(-1)?.id}:${items.at(-1)?.status}:${items.at(-1)?.text.length}`;
   const lastRevision=useRef(revision);
-  const tail=live?TAIL_HEIGHT:0;
   const virtualizer = useVirtualizer({
     count: rows.length,
     getScrollElement: () => scrollRef.current,
-    // Folded rows measure 0; estimating them so keeps long folded histories from inflating the scrollbar.
-    estimateSize: (index) => foldedRef.current(index)?0:72,
+    estimateSize: (index) => rows[index]?.kind==='fold'||rows[index]?.kind==='work'?28:72,
     overscan: 8,
-    paddingEnd: tail,
-    scrollPaddingEnd: tail,
-    getItemKey: (index) => rows[index].id,
+    getItemKey: (index) => rows[index].key,
   });
   virtualizer.shouldAdjustScrollPositionOnItemSizeChange=(item,_delta,instance)=>!atBottom.current&&item.start<(instance.scrollOffset??0);
   const totalSize = virtualizer.getTotalSize();
+  const anchorNow=useCallback(()=>{const el=scrollRef.current;return el?captureAnchor(virtualizer.getVirtualItems(),el.scrollTop):null;},[virtualizer]);
+  const setTurn=useCallback((id:string,open:boolean)=>{
+    hold.current=atBottom.current?null:anchorNow();
+    const memory=turnsOf(chatId);memory.set(id,open);
+    setTurnOpen(prev=>prev.get(id)===open?prev:new Map(prev).set(id,open));
+  },[chatId,anchorNow]);
+  const toggleTurn=useCallback((id:string)=>setTurn(id,!(turnOpen.get(id)??false)),[setTurn,turnOpen]);
   const saveReadingPosition=useCallback(()=>{
-    const el=scrollRef.current;if(!el)return;
-    const anchor=captureAnchor(virtualizer.getVirtualItems(),el.scrollTop);
+    const anchor=anchorNow();
     if(anchor){backPositions.current=[...backPositions.current.slice(-19),anchor];setBackCount(backPositions.current.length);}
-  },[virtualizer]);
+  },[anchorNow]);
   const updateCurrentTurn=useCallback(()=>{
-    const el=scrollRef.current;if(!el)return;
-    const anchor=captureAnchor(virtualizer.getVirtualItems(),el.scrollTop);
+    const anchor=anchorNow();
     const row=anchor?rowIndexesRef.current.get(anchor.itemId):undefined;
     if(row!==undefined)setCurrentTurn(turnAtRow(turnsRef.current,row));
-  },[virtualizer]);
+  },[anchorNow]);
   const goToAnchor=useCallback((anchor:ReadingAnchor,smooth=false,after?:()=>void)=>{
     const index=rowIndexesRef.current.get(anchor.itemId);
     if(index===undefined){setNavigationNotice('That reading position is no longer in the loaded conversation.');return;}
@@ -303,8 +305,6 @@ export function Timeline({ items, chatId, onScrolled, running, planMode=false }:
     });
   },[chatId,virtualizer,updateCurrentTurn]);
   const jumpToTurn=useCallback((id:string)=>{if(!rowIndexesRef.current.has(id))return;saveReadingPosition();goToAnchor({itemId:id,offset:0});},[saveReadingPosition,goToAnchor]);
-  // Find: CSS Custom Highlight ranges over rendered text. No DOM is mutated, so
-  // React-owned and streaming Markdown nodes stay intact.
   const highlight=useRef<()=>Range|undefined>(()=>undefined);
   const needle=searchQuery.trim().toLocaleLowerCase();
   highlight.current=()=>{
@@ -328,19 +328,24 @@ export function Timeline({ items, chatId, onScrolled, running, planMode=false }:
     return()=>{observer?.disconnect();if(frame!==undefined)cancelAnimationFrame(frame);};
   },[needle,activeMatch]);
   useEffect(()=>()=>{const api=highlightApi();api?.registry.delete('chat-find');api?.registry.delete('chat-find-active');},[]);
+  const showMatch=useCallback((match:TranscriptMatch)=>{
+    goToAnchor({itemId:rowsRef.current[match.rowIndex]!.key,offset:-8},true,()=>{
+      const range=highlight.current(),el=scrollRef.current;if(!range||!el||typeof range.getBoundingClientRect!=='function')return;
+      const box=range.getBoundingClientRect(),view=el.getBoundingClientRect();
+      if(box.bottom>view.bottom-24||box.top<view.top)el.scrollTop+=box.top-view.top-view.height/3;
+    });
+  },[goToAnchor]);
+  /** A match inside a folded turn opens the turn first; the jump follows once its rows exist. */
+  const pendingMatch=useRef(-1);
+  useEffect(()=>{const at=pendingMatch.current,match=searchMatches[at];if(at<0||!match||match.rowIndex<0)return;pendingMatch.current=-1;showMatch(match);},[searchMatches,showMatch]);
   const stepSearch=useCallback((direction:1|-1)=>{
     if(!searchMatches.length)return;
     if(!searchOrigin.current){saveReadingPosition();searchOrigin.current=true;}
     const next=searchIndex<0?(direction>0?0:searchMatches.length-1):(searchIndex+direction+searchMatches.length)%searchMatches.length;
     setSearchIndex(next);const match=searchMatches[next];
-    const turn=rowTurnRef.current[match.rowIndex];if(turn&&foldable(rowsRef.current[match.rowIndex]))setTurn(turn,true);
-    goToAnchor({itemId:rowsRef.current[match.rowIndex].id,offset:-8},true,()=>{
-      // A hit deep inside a long row: bring the marked text itself into view.
-      const range=highlight.current(),el=scrollRef.current;if(!range||!el||typeof range.getBoundingClientRect!=='function')return;
-      const box=range.getBoundingClientRect(),view=el.getBoundingClientRect();
-      if(box.bottom>view.bottom-24||box.top<view.top)el.scrollTop+=box.top-view.top-view.height/3;
-    });
-  },[searchMatches,searchIndex,saveReadingPosition,goToAnchor,setTurn]);
+    if(match.rowIndex>=0){showMatch(match);return;}
+    const turn=turnOfItem.get(match.itemId);if(turn){pendingMatch.current=next;setTurn(turn,true);}
+  },[searchMatches,searchIndex,saveReadingPosition,showMatch,setTurn,turnOfItem]);
   const jumpBack=useCallback(()=>{const anchor=backPositions.current.pop();setBackCount(backPositions.current.length);if(anchor)goToAnchor(anchor);},[goToAnchor]);
   const jumpToLatest=useCallback(()=>{
     if(!atBottom.current)saveReadingPosition();
@@ -350,10 +355,21 @@ export function Timeline({ items, chatId, onScrolled, running, planMode=false }:
     if(rowsRef.current.length)virtualizer.scrollToIndex(rowsRef.current.length-1,{align:'end',behavior:'auto'});
   },[chatId,virtualizer,saveReadingPosition]);
   useEffect(()=>()=>{if(navigationFrame.current!==undefined)cancelAnimationFrame(navigationFrame.current);},[]);
+  // Keyboard: j / k move between turns, e opens or closes the current turn's fold. Typing anywhere is never captured.
+  useEffect(()=>{
+    const onKey=(event:KeyboardEvent)=>{
+      if(event.metaKey||event.ctrlKey||event.altKey||event.defaultPrevented||editableTarget(event.target))return;
+      const list=turnsRef.current;if(!list.length)return;
+      const at=Math.max(0,list.findIndex(turn=>turn.id===currentTurn));
+      if(event.key==='j'||event.key==='k'){const next=list[Math.min(list.length-1,Math.max(0,at+(event.key==='j'?1:-1)))];if(next){event.preventDefault();jumpToTurn(next.id);}return;}
+      if(event.key==='e'){const id=list[at]?.id,meta=turnMeta.find(turn=>turn.id===id);if(id&&meta&&(meta.state==='settled'||meta.state==='stopped')){event.preventDefault();toggleTurn(id);}}
+    };
+    window.addEventListener('keydown',onKey);return()=>window.removeEventListener('keydown',onKey);
+  },[currentTurn,jumpToTurn,toggleTurn,turnMeta]);
   useLayoutEffect(()=>{
     const anchor=saved.current;
     if(!anchor)return;
-    const index=resolveAnchorIndex(anchor,rows);
+    const index=resolveAnchorIndex(anchor,rows.map(row=>({id:row.key})));
     if(index<0){restoring.current=false;atBottom.current=true;setAway(false);saved.current=null;return;}
     virtualizer.scrollToIndex(index,{align:'start'});
     const frame=requestAnimationFrame(()=>{
@@ -377,52 +393,49 @@ export function Timeline({ items, chatId, onScrolled, running, planMode=false }:
     setAway(!atBottom.current);
     if(atBottom.current)setUnread(false);
     updateCurrentTurn();
-    rememberPosition(chatId,atBottom.current?null:captureAnchor(virtualizer.getVirtualItems(),el.scrollTop));
-  }, [chatId,virtualizer,updateCurrentTurn,onScrolled]);
+    rememberPosition(chatId,atBottom.current?null:anchorNow());
+  }, [chatId,anchorNow,updateCurrentTurn,onScrolled]);
 
-  // Follow the tail only while the reader is at the bottom; a reader scrolled
-  // up keeps their anchor as new items stream in. scrollPaddingEnd keeps the
-  // live "Working for" tail in view.
+  // Follow the tail only while the reader is at the bottom: smoothly while a reply streams, at most once a frame.
+  // Opening or closing a fold holds the reading position. A prompt just sent is pinned near the top instead.
+  const followFrame=useRef<number|undefined>(undefined);
+  const lastPrompt=useRef(turns.at(-1)?.id);
+  useEffect(()=>()=>{if(followFrame.current!==undefined)cancelAnimationFrame(followFrame.current);},[]);
   useLayoutEffect(() => {
-    if (atBottom.current && rows.length > 0) {
-      virtualizer.scrollToIndex(rows.length - 1, { align: 'end' });
-      setCurrentTurn(turnsRef.current.at(-1)?.id);
+    const held=hold.current;
+    if(held){hold.current=null;const index=rowIndexesRef.current.get(held.itemId);const offset=index===undefined?undefined:virtualizer.getOffsetForIndex(index,'start')?.[0];if(offset!=null)virtualizer.scrollToOffset(Math.max(0,offset+held.offset));return;}
+    const prompt=turnsRef.current.at(-1)?.id;
+    if(prompt&&prompt!==lastPrompt.current&&lastPrompt.current!==undefined&&atBottom.current){
+      lastPrompt.current=prompt;
+      const index=rowIndexesRef.current.get(prompt),offset=index===undefined?undefined:virtualizer.getOffsetForIndex(index,'start')?.[0];
+      if(offset!=null){virtualizer.scrollToOffset(Math.max(0,offset-PROMPT_PIN_OFFSET));setCurrentTurn(prompt);return;}
     }
-  }, [rows.length, totalSize, virtualizer]);
+    lastPrompt.current=prompt;
+    if (!atBottom.current || rows.length === 0) return;
+    setCurrentTurn(turnsRef.current.at(-1)?.id);
+    if(!live){virtualizer.scrollToIndex(rows.length - 1, { align: 'end' });return;}
+    if(followFrame.current!==undefined)return;
+    followFrame.current=requestAnimationFrame(()=>{followFrame.current=undefined;const el=scrollRef.current;if(el&&atBottom.current)el.scrollTo({top:el.scrollHeight,behavior:'smooth'});});
+  }, [rows.length, totalSize, virtualizer, live]);
 
   return (
     <div className={`timeline-shell${turns.length?' timeline-with-navigation':''}`}>
     <TimelineNavigation turns={turns} currentId={currentTurn} canGoBack={backCount>0} onTurn={jumpToTurn} onBack={jumpBack} onLatest={jumpToLatest} searchQuery={searchQuery} onSearch={setSearchQuery} searchCount={searchMatches.length} searchIndex={searchIndex} onSearchStep={stepSearch}/>
     <div className="timeline" ref={scrollRef} onScroll={onScroll}>
-      <div
-        className="timeline-inner"
-        style={{ height: totalSize }}
-      >
+      <div className="timeline-inner" style={{ height: totalSize }}>
         {virtualizer.getVirtualItems().map((v) => {
-          const row=rows[v.index],hidden=folded(v.index),info=row.kind==='user'?turnModel.turns.get(row.id):undefined;
-          return <div
-            key={v.key}
-            data-index={v.index}
-            data-item-id={row.id}
-            ref={virtualizer.measureElement}
-            className={hidden?'timeline-row is-folded':'timeline-row'}
-            data-kind={row.kind}
-            style={{ transform: `translateY(${v.start}px)` }}
-          >
-            {!hidden&&<AreaBoundary area="this message" scope="item" resetKey={row}><GalleryCoverage.Provider value={galleries.get(turnModel.rowTurn[v.index]??'')?.covered??NO_COVERAGE}><TimelineCard gallery={galleryByReply.get(row.id)?.paths} item={row} meta={row.kind!=='assistant'||finalReplies.has(row.id)} plan={row.kind==='assistant'&&row.id===planId} actions={actionsFor(row)} editing={editingFor(row)} tail={live&&v.index===rows.length-1} nextAt={row.kind==='reasoning'?rowStart(rows[v.index+1]):undefined}
-              reveal={activeMatch?.rowIndex===v.index?activeMatch.itemId:undefined}
-              turn={info&&info.complete&&info.work>0?{durationMs:info.durationMs,open:isTurnOpen(info.id),onToggle:()=>setTurn(info.id,!isTurnOpen(info.id)),summary:turnWork.get(info.id)?.summary}:info&&!info.complete&&live&&info.id===turnModel.last?{live:rowStart(row)??''}:undefined}/></GalleryCoverage.Provider></AreaBoundary>}
-            {(()=>{
-              // Edits stay visible after a turn even when its work is folded (Codex/Cursor): one Edited row per file, full diffs.
-              const turnId=turnEnds.get(v.index),end=turnId?turnModel.turns.get(turnId):undefined,work=turnId?turnWork.get(turnId):undefined;
-              return turnId&&end?.complete&&work&&(work.edits||(turnId===turnModel.last&&gitTurnFiles>0))?<AreaBoundary area="this turn's changes" scope="item" resetKey={work.items}><TurnFileChanges items={work.items} chatId={chatId} turnId={turnId} latest={turnId===turnModel.last} showPill={turnId!==turnModel.last}/></AreaBoundary>:null;
-            })()}
+          const row=rows[v.index];
+          const reveal=activeMatch?.rowIndex===v.index?activeMatch.itemId:undefined;
+          return <div key={v.key} data-index={v.index} data-item-id={row.key} ref={virtualizer.measureElement} className="timeline-row" data-kind={row.kind} style={{ transform: `translateY(${v.start}px)` }}>
+            <AreaBoundary area="this message" scope="item" resetKey={row}><GalleryCoverage.Provider value={galleries.get(row.turnId??'')?.covered??NO_COVERAGE}>
+              <RowView row={row} chatId={chatId} reveal={reveal} actions={actionsFor(row)} editing={editingFor(row)} plan={row.kind==='assistant'&&row.item.id===planId}
+                gallery={galleryByReply.get(row.key)?.paths} turnItems={row.kind==='changed-files'?stableTurnItems.get(row.turnId!):undefined} onToggleTurn={toggleTurn}/>
+            </GalleryCoverage.Provider></AreaBoundary>
           </div>;
         })}
-        {live&&<div className="timeline-row timeline-tail" style={{transform:`translateY(${totalSize-TAIL_HEIGHT}px)`}}><WorkingTail items={items}/></div>}
       </div>
     </div>
-    {away&&<button className="jump-latest" onClick={jumpToLatest} aria-label={unread?'New activity — jump to latest':'Jump to latest'}><ArrowUp size={14} style={{transform:'rotate(180deg)'}}/>{unread&&<span>New activity</span>}</button>}
+    {away&&<button className="jump-latest" tabIndex={-1} onMouseDown={event=>event.preventDefault()} onClick={jumpToLatest} aria-label={unread?'New activity — jump to latest':'Jump to latest'}><ArrowDown size={14}/>{unread&&<span>New activity</span>}</button>}
     {navigationNotice&&<div className="turn-navigation-status" role="status">{navigationNotice}</div>}
     </div>
   );

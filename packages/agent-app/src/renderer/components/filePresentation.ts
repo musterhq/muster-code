@@ -47,7 +47,8 @@ export function filePresentation(path: string): FilePresentation {
   return 'text';
 }
 
-export type FileIconKind = 'folder' | 'markdown' | 'json' | 'typescript' | 'javascript' | 'css' | 'html' | 'image' | 'pdf' | 'sheet' | 'doc' | 'slides' | 'archive' | 'lock' | 'audio' | 'video' | 'code' | 'text' | 'file';
+export type FileIconKind = 'folder' | 'markdown' | 'json' | 'typescript' | 'javascript' | 'css' | 'html' | 'image' | 'pdf' | 'sheet' | 'doc' | 'slides' | 'archive' | 'lock' | 'audio' | 'video'
+  | 'python' | 'ruby' | 'go' | 'rust' | 'jvm' | 'swift' | 'c' | 'csharp' | 'php' | 'shell' | 'sql' | 'config' | 'env' | 'docker' | 'build' | 'git' | 'license' | 'notebook' | 'code' | 'text' | 'file';
 /** Visual tone per icon; resolved to existing :root tokens in file-type-icon.css. */
 export type FileIconTone = 'accent' | 'ok' | 'warn' | 'danger' | 'violet' | 'orange' | 'dim';
 const ICONS: Array<[FileIconKind, FileIconTone, Set<string>]> = [
@@ -65,15 +66,38 @@ const ICONS: Array<[FileIconKind, FileIconTone, Set<string>]> = [
   ['archive', 'dim', set('zip gz tgz bz2 xz 7z rar tar dmg iso pkg jar war')],
   ['audio', 'violet', AUDIO],
   ['video', 'violet', VIDEO],
-  ['code', 'dim', set('py rb go rs java kt swift c h cc cpp hpp cs php scala sh bash zsh fish sql graphql yaml yml toml ini lua dart ex exs hs zig tf proto')],
+  ['python', 'accent', set('py pyi pyw pyx')],
+  ['notebook', 'orange', set('ipynb')],
+  ['ruby', 'danger', set('rb erb rake gemspec')],
+  ['go', 'accent', set('go mod sum')],
+  ['rust', 'orange', set('rs')],
+  ['jvm', 'danger', set('java kt kts scala groovy gradle clj')],
+  ['swift', 'orange', set('swift m mm')],
+  ['c', 'accent', set('c h cc cpp cxx hpp hh ino')],
+  ['csharp', 'violet', set('cs fs vb')],
+  ['php', 'violet', set('php')],
+  ['shell', 'ok', set('sh bash zsh fish ps1 bat cmd')],
+  ['sql', 'warn', set('sql psql prisma')],
+  ['config', 'dim', set('yaml yml toml ini cfg conf properties plist editorconfig')],
+  ['env', 'warn', set('env')],
+  ['code', 'dim', set('graphql gql lua dart ex exs erl hs zig tf tfvars hcl proto r jl nim ml elm vue svelte')],
   ['text', 'dim', set('txt rst log env')],
 ];
+/** Files known by name rather than extension. */
+const NAMED_FILES = new Map<string, {kind: FileIconKind; tone: FileIconTone}>([
+  ...['dockerfile', 'containerfile', 'docker-compose.yml', 'docker-compose.yaml', 'compose.yml', 'compose.yaml'].map(name => [name, {kind: 'docker', tone: 'accent'}] as const),
+  ...['makefile', 'justfile', 'rakefile', 'gemfile', 'procfile', 'brewfile', 'caddyfile', 'cmakelists.txt', 'build.gradle', 'pom.xml'].map(name => [name, {kind: 'build', tone: 'dim'}] as const),
+  ...['.gitignore', '.gitattributes', '.gitmodules', '.gitkeep'].map(name => [name, {kind: 'git', tone: 'orange'}] as const),
+  ...['license', 'license.md', 'license.txt', 'copying', 'notice'].map(name => [name, {kind: 'license', tone: 'dim'}] as const),
+]);
 const LOCK_FILES = set('package-lock.json pnpm-lock.yaml yarn.lock bun.lockb cargo.lock gemfile.lock poetry.lock composer.lock uv.lock');
 
 /** Per-extension icon identity shared by the file tree, search results and resource tabs. */
 export function fileIcon(path: string): {kind: FileIconKind; tone: FileIconTone} {
   const name = (path.split('/').pop() ?? '').toLowerCase();
   if (LOCK_FILES.has(name) || name.endsWith('.lock')) return {kind: 'lock', tone: 'dim'};
+  const named = NAMED_FILES.get(name) ?? (name.startsWith('dockerfile') ? NAMED_FILES.get('dockerfile') : name.startsWith('.env') ? {kind: 'env', tone: 'warn'} as const : undefined);
+  if (named) return named;
   const extension = extensionOf(name);
   for (const [kind, tone, extensions] of ICONS) if (extensions.has(extension)) return {kind, tone};
   return {kind: 'file', tone: 'dim'};

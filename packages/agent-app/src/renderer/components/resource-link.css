@@ -16,10 +16,9 @@
 /* File references in replies read like Codex: link blue, a file-type glyph, no underline until hover. */
 .md-body .md-file-link { display: inline; padding: 0; border: 0; background: none; color: var(--link); font: inherit; text-align: inherit; cursor: pointer; text-decoration: none; }
 .md-body .md-file-link:hover { text-decoration: underline; text-decoration-color: color-mix(in srgb, var(--link) 45%, transparent); text-underline-offset: 3px; }
-.md-file-glyph { display: inline-flex; margin-right: 3px; vertical-align: -2px; color: var(--text-dim); }
-.md-file-glyph[data-hue='blue'] { color: var(--file-blue); }
-.md-file-glyph[data-hue='yellow'] { color: var(--file-yellow); }
-.md-file-glyph[data-hue='green'] { color: var(--file-green); }
-.md-file-glyph[data-hue='red'] { color: var(--file-red); }
-.md-file-glyph[data-hue='purple'] { color: var(--file-purple); }
-.md-file-glyph[data-hue='teal'] { color: var(--file-teal); }
+
+/* File references are chips: a real file-type icon, the name and "· L4". Web links lead with the site's icon. */
+.md-body .md-file-chip { display: inline-flex; align-items: center; gap: 3px; padding: 0 0.3em; border-radius: var(--radius-6); background: color-mix(in srgb, var(--text) 6%, transparent); line-height: 1.35; vertical-align: baseline; }
+.md-file-chip-icon { flex: none; }
+.md-link-favicon { display: inline-flex; width: 16px; height: 16px; margin-right: 4px; vertical-align: -3px; }
+.md-link-favicon > * { width: 16px; height: 16px; border-radius: .16em; }

@@ -12,7 +12,8 @@ import {parseInlineDiff} from './inlineDiffModel.ts';
  * `patch`, parsed by the same `parseInlineDiff`, so they cannot disagree.
  */
 export type ChangeKind = 'add' | 'delete' | 'update';
-export interface FilePatch { path: string; movePath?: string; kind: ChangeKind; patch: string; adds: number; dels: number; before?: string; after?: string; truncated?: boolean }
+/** `withheld`: the stream carried counts only (a very large diff); the full patch comes from chat.itemDetail or the Diff tab. */
+export interface FilePatch { path: string; movePath?: string; kind: ChangeKind; patch: string; adds: number; dels: number; before?: string; after?: string; truncated?: boolean; withheld?: boolean }
 
 const str = (value: unknown): string | undefined => typeof value === 'string' ? value : undefined;
 const isUnified = (text: string) => /^@@/m.test(text) || /^diff --git /m.test(text);
@@ -59,6 +60,10 @@ export function normalizeChange(change: Record<string, unknown>): FilePatch | un
   else if (diff) patch = diff;
   else if (before !== undefined || after !== undefined) patch = textsPatch(before ?? '', after ?? '');
   if (!kind) kind = /^--- \/dev\/null$/m.test(patch) || /^new file mode /m.test(patch) ? 'add' : /^\+\+\+ \/dev\/null$/m.test(patch) || /^deleted file mode /m.test(patch) ? 'delete' : 'update';
+  if (change.diffWithheld === true && !patch) {
+    const count = (value: unknown) => typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : 0;
+    return {path, ...(movePath && movePath !== path ? {movePath} : {}), kind: kind ?? 'update', patch: '', adds: count(change.adds), dels: count(change.dels), truncated: true, withheld: true};
+  }
   const {adds, dels} = countPatch(patch);
   return {path, ...(movePath && movePath !== path ? {movePath} : {}), kind, patch, adds, dels, ...(before !== undefined ? {before} : {}), ...(after !== undefined ? {after} : {}), ...(change.diffTruncated === true ? {truncated: true} : {})};
 }

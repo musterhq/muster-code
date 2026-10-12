@@ -4,3 +4,8 @@
 .jump-latest:focus-visible { outline:1px solid var(--accent); outline-offset:2px; }
 @media(prefers-reduced-transparency:reduce) { .jump-latest { -webkit-backdrop-filter:none; backdrop-filter:none; background:var(--bg-raised); } }
 @media(prefers-reduced-motion:reduce) { .jump-latest { transition:none; } }
+
+/* Appears after a short delay so a brief scroll does not flash it; it never takes focus from the composer. */
+.jump-latest { animation: jump-latest-in var(--dur-2) var(--ease-out) 150ms both; }
+@keyframes jump-latest-in { from { opacity: 0; } to { opacity: 1; } }
+@media(prefers-reduced-motion:reduce) { .jump-latest { animation: none; } }

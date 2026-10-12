@@ -153,7 +153,7 @@ function cachedSettings(): AppSettings {
   try {
     const cached = localStorage.getItem(SETTINGS_CACHE);
     if (cached) return normalizeSettings(JSON.parse(cached));
-    return {...SETTING_DEFAULTS, 'chat.inlineDiffs': localStorage.getItem('muster.showInlineFileDiffs') !== 'false'};
+    return {...SETTING_DEFAULTS, 'chat.inlineDiffs': localStorage.getItem('muster.showInlineFileDiffs') === 'true'};
   } catch { return SETTING_DEFAULTS; }
 }
 const initialSettings = cachedSettings();

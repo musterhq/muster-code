@@ -1,7 +1,7 @@
 import React,{useEffect,useState} from 'react';
 import {PreviewCard} from '@base-ui/react/preview-card';
 import {Menu} from '@base-ui/react/menu';
-import {Braces, Copy, Eye, ExternalLink, FileCode2, FileImage, FileSpreadsheet, FileText, FolderOpen, FolderPlus, Settings2, SquareTerminal} from 'lucide-react';
+import {Copy, Eye, ExternalLink, FileText, FolderOpen, FolderPlus} from 'lucide-react';
 import {ArtifactViewer} from './ArtifactViewer';
 import type {ExternalFileInfo, OpenWithApp} from '../../shared/domains/files-protocol';
 import {notifyError, notifySuccess} from '../store';
@@ -13,6 +13,12 @@ import {externalReference, resourceReference} from './resourceReference';
 import {markdownFragmentId} from './markdownAnchors';
 import {Tip} from './Tooltip';
 import { device } from '../../shared/device-noun.ts';
+import {FileTypeIcon} from './FileTypeIcon';
+import {SiteIcon} from './transcript/Primitives';
+import {hostOf} from '../../shared/turn-digest.ts';
+
+/** A web link carries its site's icon inline (letter tile until the cached icon arrives). */
+function LinkFavicon({href}:{href:string}){const host=hostOf(href);return host?<span className="md-link-favicon" aria-hidden="true"><SiteIcon host={host}/></span>:null;}
 export type ResourceContext = { folderId: string; path: string };
 export function ResourceLink({href,children,context,auto=false}:{href?:string;children?:React.ReactNode;context?:ResourceContext;auto?:boolean}){
  const state=useStore(),chat=activeChat();
@@ -28,7 +34,7 @@ export function ResourceLink({href,children,context,auto=false}:{href?:string;ch
  }} title="Jump to this section">{children}</a>;
  const ref=href?resourceReference(href,folders,context?.folderId??chat?.folderId,context?.path):null;
  if(ref)return <FileReference key={`${ref.folderId}:${ref.path}:${ref.line??0}`} reference={ref}>{children}</FileReference>;
- if(href&&/^(https?|mailto):/i.test(href))return <a href={href} title={href} onClick={e=>{if(/^https?:/i.test(href)){e.preventDefault();openBrowserTab(href);}}} rel="noreferrer noopener">{children}</a>;
+ if(href&&/^(https?|mailto):/i.test(href))return <a href={href} title={href} onClick={e=>{if(/^https?:/i.test(href)){e.preventDefault();openBrowserTab(href);}}} rel="noreferrer noopener">{/^https:/i.test(href)&&<LinkFavicon href={href}/>}{children}</a>;
  const outside=href?externalReference(href):null;
  if(outside)return <ExternalFileReference key={outside.path} path={outside.path} line={outside.line} chatId={chat?.id}>{children}</ExternalFileReference>;
  return <span className="md-unavailable-link" title="This reference is relative to a folder this conversation does not have, or is unsupported.">{children}</span>;
@@ -48,7 +54,7 @@ function FileReference({reference,children}:{reference:NonNullable<ReturnType<ty
   return()=>{live=false;};
  },[open,reference.folderId,reference.path,reference.line]);
  return <PreviewCard.Root open={open} onOpenChange={setOpen}>
-  <PreviewCard.Trigger render={<button type="button"/>} className="md-resource-link md-file-link" aria-label={`${reference.path}${reference.line?':'+reference.line:''} — Open in adjoining pane`} delay={450} closeDelay={120} onClick={()=>{setOpen(false);void openFile(reference.folderId,reference.path,reference.line);}}><FileGlyph path={reference.path}/>{children}</PreviewCard.Trigger>
+  <PreviewCard.Trigger render={<button type="button"/>} className="md-resource-link md-file-link md-file-chip" aria-label={`${reference.path}${reference.line?':'+reference.line:''} — Open in adjoining pane`} delay={450} closeDelay={120} onClick={()=>{setOpen(false);void openFile(reference.folderId,reference.path,reference.line);}}><FileTypeIcon path={reference.path} size={13} className="md-file-chip-icon"/>{children}</PreviewCard.Trigger>
   <PreviewCard.Portal><PreviewCard.Positioner side="top" sideOffset={8} className="file-preview-positioner"><PreviewCard.Popup className="file-reference-preview" data-native-preview-overlay>
    <header><FileText size={14}/><span>{reference.path}{reference.line?':'+reference.line:''}</span></header>
    {preview?.text&&<pre>{preview.text}</pre>}
@@ -88,26 +94,6 @@ function ExternalFileReference({path,line,chatId,children}:{path:string;line?:nu
    <Menu.Item onClick={act(()=>invoke('clipboard.write',{text:info?.path ?? path}))}><Copy size={13}/>Copy path</Menu.Item>
   </Menu.Popup></Menu.Positioner></Menu.Portal>
  </Menu.Root></>;
-}
-
-/** File-type glyph for a file link: an icon and a hue by extension (tokens in styles.css). */
-const FILE_KINDS:Array<[RegExp,React.ComponentType<{size?:number}>,string]>=[
- [/\.(tsx?|go|c|h|cc|cpp|hpp|cs|sql|dart)$/i,FileCode2,'blue'],
- [/\.(py|pyi|ipynb)$/i,FileCode2,'teal'],
- [/\.(jsx?|mjs|cjs)$/i,FileCode2,'yellow'],
- [/\.(rs|rb|java|kts?|scala|erl|exs?|html?|php)$/i,FileCode2,'red'],
- [/\.(css|scss|less|swift|vue|svelte|graphql|gql|proto)$/i,FileCode2,'purple'],
- [/\.(sh|bash|zsh|fish|ps1)$/i,SquareTerminal,'green'],
- [/\.(jsonc?|lock)$/i,Braces,'yellow'],
- [/\.(ya?ml|toml|ini|cfg|conf|env|tf|tfvars|hcl|plist|xml)$/i,Settings2,'red'],
- [/(^|\/)(Dockerfile|Makefile|Procfile|Gemfile|Rakefile|Justfile|Caddyfile|Brewfile)$/,Settings2,'blue'],
- [/\.(csv|tsv|xlsx)$/i,FileSpreadsheet,'green'],
- [/\.(png|jpe?g|gif|svg)$/i,FileImage,'purple'],
-];
-export function FileGlyph({path}:{path:string}):React.ReactElement{
- const kind=FILE_KINDS.find(([test])=>test.test(path));
- const Icon=kind?.[1]??FileText;
- return <span className="md-file-glyph" data-hue={kind?.[2]??'text'} aria-hidden="true"><Icon size={13}/></span>;
 }
 
 /** Mentions resolved per folder and path, shared by every reply in the window. */
