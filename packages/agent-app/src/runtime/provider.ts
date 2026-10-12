@@ -13,6 +13,7 @@ import {NativeUnavailableError} from './codex-native.ts';
 import {splitSecretOverrides} from './thread-config.ts';
 import {CODEX_LAUNCHER, envFromOverrides, mcpServersFromOverrides} from './adapters/shared.ts';
 import { device } from '../shared/device-noun.ts';
+import { RICH_CONTENT_GUIDANCE } from '../shared/rich-block.ts';
 import {unpackedPath} from './unpacked-path.ts';
 
 /** Identity of the test-only route `createProviderAdapter({available})` builds. */
@@ -115,7 +116,8 @@ export function steerFailure(error: unknown): false | {refused: string} | 'retry
 const modeInstructions = (mode: Chat['mode']) => mode === 'ask' ? 'Answer and inspect only. Do not modify files, execute mutations or request expanded access.' : mode === 'plan' ? 'Produce a reviewable plan. Do not change files or request expanded access. Do not spawn sub-agents to implement changes: implementation starts only after the user executes the plan. Put the complete plan in your final message.' : undefined;
 /** Process ownership (F41/F50): the agent may only clean up what it started itself. */
 export const PROCESS_OWNERSHIP_RULE = 'Process ownership: only stop, kill or restart processes you started yourself in this conversation. Never kill processes by port or name without confirming you started them; the user\'s terminals and dev servers are theirs even when they look orphaned. If a port you need is busy, pick another port. Stop long-running processes you started (dev servers, watchers) before ending your turn unless the user asked you to keep them running.';
-const runInstructions = (mode: Chat['mode'], extra?: string) => [modeInstructions(mode), mode === 'agent' ? PROCESS_OWNERSHIP_RULE : undefined, extra].filter(Boolean).join('\n\n') || undefined;
+/** Every route, every mode: the app draws ```mermaid, ```chart and ```html-report fences (shared/rich-block.ts). */
+const runInstructions = (mode: Chat['mode'], extra?: string) => [modeInstructions(mode), mode === 'agent' ? PROCESS_OWNERSHIP_RULE : undefined, RICH_CONTENT_GUIDANCE, extra].filter(Boolean).join('\n\n') || undefined;
 /** Test runners construct many services; they opt into real CLI/API adapters by passing a catalog. */
 const defaultCatalog = () => process.env.NODE_TEST_CONTEXT && process.env.MUSTER_PROVIDER_ADAPTERS !== '1' ? undefined : createAdapterCatalog();
 interface AdapterRun {controller: AbortController; completed: Promise<void>; /** Set by adapters that accept mid-turn messages (Claude Code). */ steer?: (text: string) => boolean}

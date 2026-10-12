@@ -10,6 +10,7 @@ import {ContextLedger,CONTEXT_REFRESH_TURNS,estimateTokens,leanCodexFeatureOverr
 import {BROWSER_TOOL_SPECS} from '../src/main/agent-tools/browser-tools.ts';
 import {BROWSER_MCP_LAUNCHER_ENV} from '../src/runtime/domains/computer.ts';
 import {MAILBOX_TOOL_SPECS} from '../src/runtime/mailbox-agent-tools.ts';
+import {RICH_CONTENT_GUIDANCE} from '../src/shared/rich-block.ts';
 
 /** Budget for everything Muster itself adds to a default chat's turn (instructions, prompt preamble, its own MCP tools). */
 const MUSTER_TURN_BUDGET_TOKENS = 6000;
@@ -81,10 +82,10 @@ test(`budget: Muster adds under ${MUSTER_TURN_BUDGET_TOKENS} tokens to a default
   const first=await send(REQUEST);
   const preamble=first.prompt.slice(0,first.prompt.length-REQUEST.length);
   const browserTools=JSON.stringify(BROWSER_TOOL_SPECS.map(({name,description,inputSchema})=>({name,description,inputSchema})));
-  // The provider adapter prepends its agent-mode process rule to the contributors' instructions.
+  // The provider adapter prepends its agent-mode process rule and the rich-block guidance to the contributors' instructions.
   // A project chat also gets the muster_mailbox tools (SBX-12/17); their schemas count against the same budget.
   const mailboxTools=first.configOverrides?.['mcp_servers.muster_mailbox.command']?JSON.stringify(MAILBOX_TOOL_SPECS):'';
-  const parts={developerInstructions:estimateTokens(`${PROCESS_OWNERSHIP_RULE}\n\n${first.developerInstructions??''}`),promptPreamble:estimateTokens(preamble),browserToolSchemas:estimateTokens(browserTools),mailboxToolSchemas:estimateTokens(mailboxTools)};
+  const parts={developerInstructions:estimateTokens(`${PROCESS_OWNERSHIP_RULE}\n\n${RICH_CONTENT_GUIDANCE}\n\n${first.developerInstructions??''}`),promptPreamble:estimateTokens(preamble),browserToolSchemas:estimateTokens(browserTools),mailboxToolSchemas:estimateTokens(mailboxTools)};
   const total=Object.values(parts).reduce((a,b)=>a+b,0);
   t.diagnostic(`Muster-added context, first turn: ${JSON.stringify(parts)} = ${total} tokens (chars/4)`);
   assert.ok(first.configOverrides?.['mcp_servers.muster_browser.command'],'the browser bridge is registered, so its schemas count');
@@ -115,7 +116,7 @@ test(`budget: a full mailbox inbox block rides within the ${MUSTER_TURN_BUDGET_T
   const preamble=first.prompt.slice(0,first.prompt.length-REQUEST.length);
   const inbox=/<context source="mailbox">[\s\S]*?<\/context>/.exec(first.prompt)?.[0]??'';
   assert.ok(inbox,'the inbox block is in the prompt');
-  const parts={developerInstructions:estimateTokens(`${PROCESS_OWNERSHIP_RULE}\n\n${first.developerInstructions??''}`),promptPreamble:estimateTokens(preamble),mailboxToolSchemas:estimateTokens(JSON.stringify(MAILBOX_TOOL_SPECS)),browserToolSchemas:estimateTokens(JSON.stringify(BROWSER_TOOL_SPECS.map(({name,description,inputSchema})=>({name,description,inputSchema}))))};
+  const parts={developerInstructions:estimateTokens(`${PROCESS_OWNERSHIP_RULE}\n\n${RICH_CONTENT_GUIDANCE}\n\n${first.developerInstructions??''}`),promptPreamble:estimateTokens(preamble),mailboxToolSchemas:estimateTokens(JSON.stringify(MAILBOX_TOOL_SPECS)),browserToolSchemas:estimateTokens(JSON.stringify(BROWSER_TOOL_SPECS.map(({name,description,inputSchema})=>({name,description,inputSchema}))))};
   const total=Object.values(parts).reduce((a,b)=>a+b,0);
   t.diagnostic(`Full inbox turn: inbox block ${estimateTokens(inbox)} tokens; ${JSON.stringify(parts)} = ${total}`);
   assert.ok(estimateTokens(inbox)<1200,`inbox block is ${estimateTokens(inbox)} tokens`);

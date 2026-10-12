@@ -1,6 +1,7 @@
 import React from 'react';
-import {AppWindow, Inbox, MessagesSquare, NotebookPen, Bot, Braces, File, FileArchive, FileAudio, FileCode, FileImage, FileLock, FileSpreadsheet, FileText, FileType, FileVideo, Files, Folder, FolderOpen, GitBranch, GitCompare, GitMerge, GitPullRequest, Globe, History, Monitor, PictureInPicture2, Presentation, SquareTerminal, type LucideIcon} from 'lucide-react';
+import {AppWindow, Box, ChartColumn, Smartphone, Workflow, Inbox, MessagesSquare, NotebookPen, Bot, Braces, File, FileArchive, FileAudio, FileCode, FileImage, FileLock, FileSpreadsheet, FileText, FileType, FileVideo, Files, Folder, FolderOpen, GitBranch, GitCompare, GitMerge, GitPullRequest, Globe, History, Monitor, PictureInPicture2, Presentation, SquareTerminal, type LucideIcon} from 'lucide-react';
 import type {WorkspaceTab} from '../store';
+import type {RichKind} from '../../shared/rich-fence';
 import {fileIcon, type FileIconKind} from './filePresentation';
 import './file-type-icon.css';
 
@@ -23,13 +24,15 @@ export function FileTypeIcon({path, directory = false, open = false, size = 13, 
 
 const KIND_GLYPHS: Record<Exclude<WorkspaceTab['kind'], 'file' | 'attachment'>, LucideIcon> = {
   diff: GitCompare, git: GitBranch, changes: GitCompare, files: Files, browser: Globe, processes: SquareTerminal, computer: Monitor, subagents: Bot, pullRequest: GitPullRequest, history: History, conflict: GitMerge,
-  canvas: NotebookPen, sideChat: MessagesSquare, pluginUi: AppWindow, inbox: Inbox, liveView: PictureInPicture2,
+  canvas: NotebookPen, sideChat: MessagesSquare, pluginUi: AppWindow, inbox: Inbox, liveView: PictureInPicture2, rich: Workflow,
 };
+
+const RICH_GLYPHS: Record<RichKind, LucideIcon> = {diagram: Workflow, chart: ChartColumn, report: FileCode, model: Box, device: Smartphone};
 
 /** 13px glyph for a resource tab or a recently closed resource: kind glyph, or the file-type icon (also used for an
  * attachment tab, whose `path` carries its file name so it gets the same extension-based glyph as a workspace file). */
-export function ResourceTabIcon({tab, className = 'workspace-tab-icon'}: {tab: Pick<WorkspaceTab, 'kind' | 'path' | 'title'>; className?: string}): React.ReactElement {
+export function ResourceTabIcon({tab, className = 'workspace-tab-icon'}: {tab: Pick<WorkspaceTab, 'kind' | 'path' | 'title'> & Partial<Pick<WorkspaceTab, 'richKind'>>; className?: string}): React.ReactElement {
   if (tab.kind === 'file' || tab.kind === 'attachment') return <FileTypeIcon path={tab.path ?? tab.title} className={className}/>;
-  const Glyph = KIND_GLYPHS[tab.kind];
+  const Glyph = tab.kind === 'rich' && tab.richKind ? RICH_GLYPHS[tab.richKind] : KIND_GLYPHS[tab.kind];
   return <Glyph size={14} aria-hidden="true" className={className}/>;
 }

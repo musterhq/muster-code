@@ -3,6 +3,13 @@
 All notable changes to Muster Agent. Each `## <version>` section becomes the notes of the
 `agent-v<version>` GitHub Release (`.github/workflows/agent-app-release.yml`).
 
+## Unreleased
+
+- **Rich replies (visuals program, part A).** A reply can now carry a Mermaid diagram (` ```mermaid `), a chart (` ```chart `, Vega-Lite or a short `{type, data, x, y}` form) and an HTML report (` ```html-report `). They draw inline once the closing fence arrives (while a reply is still streaming the fence stays code), follow the active theme (Light, Dark, System, the built-in and imported colour themes), and share one block: Copy source, Download (SVG, PNG, CSV, HTML, PDF), Open in tab, Full screen, a "Couldn't render this ..." card with the source, and the same loading and empty states. Diagrams zoom and pan in a tab or full screen; charts have a Table view and hover tooltips; reports run their scripts only inside a sandbox with no network, and print to PDF through the app, never from inside the sandbox.
+- **One place for untrusted HTML.** Agent reports, Canvas HTML pages and the file viewer's HTML preview now all render through the same sandboxed frame, served from its own `muster-report://` origin with a no-network content security policy (previously Canvas and the file viewer each had their own `srcdoc` frame).
+- **Agents are told they can use these blocks.** Every route (Codex, Claude Code, OpenCode, HTTP and router models) gets the exact fence formats in its instructions.
+- Everything new loads on first use: the initial renderer bundle grows by well under 1 KB gzip.
+
 ## 0.3.8
 
 Muster now rests when nothing is happening. A finished chat had kept the graphics process and the window busy (about 29% and 13% CPU on a Mac), which warmed the laptop for no reason.

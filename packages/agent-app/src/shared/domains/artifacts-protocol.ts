@@ -61,6 +61,10 @@ export interface ArtifactsCommands {
   'plugins.ui.entry': { input: { pluginId: string; app: string }; output: PluginUiEntry };
   /** Registers the entry with the desktop shell's isolated `muster-plugin:` origin and returns the frame URL (main). */
   'plugins.ui.open': { input: { pluginId: string; app: string }; output: { url: string; title: string } };
+  /** Visuals: registers untrusted HTML (a report, a Canvas page) with the desktop shell's isolated `muster-report:` origin and returns the frame URL (main). `key` re-uses one document across edits. */
+  'reports.open': { input: { html: string; scripts?: boolean; key?: string }; output: { url: string; token: string } };
+  /** Visuals: prints a registered report to PDF in a hidden sandboxed window and writes it where the person chooses (main). */
+  'reports.pdf': { input: { token: string; title?: string }; output: { saved: boolean; fileName?: string } };
 }
 export type ArtifactsEvent =
   | { type: 'canvasChanged'; canvas: CanvasSummary; created?: boolean }
@@ -72,6 +76,7 @@ export const ARTIFACTS_COMMANDS = {
   'artifacts.sideChat.create': true, 'artifacts.sideChat.list': true, 'artifacts.sideChat.promote': true, 'artifacts.sideChat.discard': true,
   'artifacts.authorize': true, 'artifacts.read': true,
   'plugins.ui.entry': true, 'plugins.ui.open': true,
+  'reports.open': true, 'reports.pdf': true,
 } as const satisfies Record<keyof ArtifactsCommands, true>;
 
 /** Short label for a side chat's tab and header. */

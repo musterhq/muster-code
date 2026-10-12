@@ -196,6 +196,8 @@ export function createArtifactsDomain(context: DomainContext): DomainModule {
         return pluginUiEntry(plugin, input.app);
       },
       'plugins.ui.open': () => { throw new Error('Plugin UI opens in the Muster desktop app only.'); },
+      'reports.open': () => { throw new Error('Reports open in the Muster desktop app only.'); },
+      'reports.pdf': () => { throw new Error('Reports print in the Muster desktop app only.'); },
     },
     dispose() { removeRunOptions(); removePrompt(); host?.dispose(); },
   };

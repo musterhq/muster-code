@@ -1,36 +1,69 @@
 {
-  "generatedAt": "2026-09-23T18:05:51.553Z",
+  "generatedAt": "2026-10-12T06:49:10.648Z",
   "note": "Minified bytes each package contributes to the shipped bundles (renderer chunks are lazy where split). Regenerate with node scripts/dependency-report.mjs and commit with any dependency change.",
   "totals": {
-    "renderer": 6803544,
-    "main": 232667,
-    "preload": 1037,
-    "runtime": 1806915
+    "renderer": 14528376,
+    "main": 316816,
+    "preload": 1055,
+    "runtime": 2655624
   },
   "packages": [
     {
-      "name": "@shikijs/langs",
-      "bytes": 2812176,
+      "name": "(app source)",
+      "bytes": 5296894,
       "targets": {
-        "renderer": 2812176
+        "renderer": 3345538,
+        "main": 316328,
+        "preload": 1041,
+        "runtime": 1633987
       },
-      "version": "4.2.0",
+      "version": "0.3.8",
+      "license": "UNLICENSED",
+      "licenseFile": null,
+      "direct": false
+    },
+    {
+      "name": "@shikijs/langs",
+      "bytes": 2979375,
+      "targets": {
+        "renderer": 2979375
+      },
+      "version": "4.5.0",
       "license": "MIT",
       "licenseFile": "LICENSE",
       "direct": true
     },
     {
-      "name": "(app source)",
-      "bytes": 2746567,
+      "name": "mermaid",
+      "bytes": 1669217,
       "targets": {
-        "renderer": 1725236,
-        "main": 232179,
-        "preload": 1023,
-        "runtime": 788129
+        "renderer": 1669217
       },
-      "version": "0.2.0",
-      "license": "UNLICENSED",
-      "licenseFile": null,
+      "version": "12.1.0",
+      "license": "MIT",
+      "licenseFile": "LICENSE",
+      "direct": true
+    },
+    {
+      "name": "elkjs",
+      "bytes": 1457904,
+      "targets": {
+        "renderer": 1457904
+      },
+      "version": "0.9.3",
+      "license": "EPL-2.0",
+      "licenseFile": "LICENSE.md",
+      "direct": false
+    },
+    {
+      "name": "@mermaid-js/parser",
+      "bytes": 647620,
+      "targets": {
+        "renderer": 647620
+      },
+      "version": "2.0.1",
+      "license": "MIT",
+      "licenseFile": "LICENSE",
       "direct": false
     },
     {
@@ -39,7 +72,18 @@
       "targets": {
         "renderer": 628935
       },
-      "version": "4.2.0",
+      "version": "4.5.0",
+      "license": "MIT",
+      "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
+      "name": "cytoscape",
+      "bytes": 443028,
+      "targets": {
+        "renderer": 443028
+      },
+      "version": "3.34.3",
       "license": "MIT",
       "licenseFile": "LICENSE",
       "direct": false
@@ -67,10 +111,32 @@
       "direct": true
     },
     {
-      "name": "exceljs",
-      "bytes": 250978,
+      "name": "katex",
+      "bytes": 267410,
       "targets": {
-        "runtime": 250978
+        "renderer": 267410
+      },
+      "version": "0.16.47",
+      "license": "MIT",
+      "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
+      "name": "vega-lite",
+      "bytes": 254289,
+      "targets": {
+        "renderer": 254289
+      },
+      "version": "6.5.0",
+      "license": "BSD-3-Clause",
+      "licenseFile": "LICENSE",
+      "direct": true
+    },
+    {
+      "name": "exceljs",
+      "bytes": 251355,
+      "targets": {
+        "runtime": 251355
       },
       "version": "4.4.0",
       "license": "MIT",
@@ -79,9 +145,9 @@
     },
     {
       "name": "react-dom",
-      "bytes": 209895,
+      "bytes": 209974,
       "targets": {
-        "renderer": 209895
+        "renderer": 209974
       },
       "version": "19.3.0",
       "license": "MIT",
@@ -90,9 +156,9 @@
     },
     {
       "name": "@base-ui/react",
-      "bytes": 162946,
+      "bytes": 162812,
       "targets": {
-        "renderer": 162946
+        "renderer": 162812
       },
       "version": "1.8.0",
       "license": "MIT",
@@ -101,9 +167,9 @@
     },
     {
       "name": "readable-stream",
-      "bytes": 160949,
+      "bytes": 161208,
       "targets": {
-        "runtime": 160949
+        "runtime": 161208
       },
       "version": "2.3.8",
       "license": "MIT",
@@ -111,10 +177,32 @@
       "direct": false
     },
     {
-      "name": "bluebird",
-      "bytes": 87240,
+      "name": "layout-base",
+      "bytes": 111329,
       "targets": {
-        "runtime": 87240
+        "renderer": 111329
+      },
+      "version": "2.0.1",
+      "license": "MIT",
+      "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
+      "name": "chevrotain",
+      "bytes": 92975,
+      "targets": {
+        "renderer": 92975
+      },
+      "version": "13.2.0",
+      "license": "Apache-2.0",
+      "licenseFile": "LICENSE.txt",
+      "direct": false
+    },
+    {
+      "name": "bluebird",
+      "bytes": 87287,
+      "targets": {
+        "runtime": 87287
       },
       "version": "3.4.7",
       "license": "MIT",
@@ -123,20 +211,53 @@
     },
     {
       "name": "lucide-react",
-      "bytes": 58198,
+      "bytes": 72633,
       "targets": {
-        "renderer": 58198
+        "renderer": 72633
       },
-      "version": "1.47.0",
+      "version": "1.50.0",
       "license": "ISC",
       "licenseFile": "LICENSE",
       "direct": true
     },
     {
-      "name": "pako",
-      "bytes": 46463,
+      "name": "cose-base",
+      "bytes": 65057,
       "targets": {
-        "runtime": 46463
+        "renderer": 65057
+      },
+      "version": "2.2.0",
+      "license": "MIT",
+      "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
+      "name": "vega-scenegraph",
+      "bytes": 57339,
+      "targets": {
+        "renderer": 57339
+      },
+      "version": "5.3.0",
+      "license": "BSD-3-Clause",
+      "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
+      "name": "vega-parser",
+      "bytes": 46709,
+      "targets": {
+        "renderer": 46709
+      },
+      "version": "7.1.3",
+      "license": "BSD-3-Clause",
+      "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
+      "name": "pako",
+      "bytes": 46479,
+      "targets": {
+        "runtime": 46479
       },
       "version": "1.0.11",
       "license": "(MIT AND Zlib)",
@@ -145,9 +266,9 @@
     },
     {
       "name": "jszip",
-      "bytes": 43569,
+      "bytes": 43603,
       "targets": {
-        "runtime": 43569
+        "runtime": 43603
       },
       "version": "3.10.2",
       "license": "(MIT OR GPL-3.0-or-later)",
@@ -166,6 +287,28 @@
       "direct": false
     },
     {
+      "name": "vega-transforms",
+      "bytes": 40294,
+      "targets": {
+        "renderer": 40294
+      },
+      "version": "5.2.2",
+      "license": "BSD-3-Clause",
+      "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
+      "name": "marked",
+      "bytes": 39571,
+      "targets": {
+        "renderer": 39571
+      },
+      "version": "16.4.2",
+      "license": "MIT",
+      "licenseFile": "LICENSE.md",
+      "direct": false
+    },
+    {
       "name": "@xterm/addon-search",
       "bytes": 38081,
       "targets": {
@@ -175,6 +318,73 @@
       "license": "MIT",
       "licenseFile": "LICENSE",
       "direct": true
+    },
+    {
+      "name": "d3-geo",
+      "bytes": 32425,
+      "targets": {
+        "renderer": 32425
+      },
+      "version": "3.1.1",
+      "license": "ISC",
+      "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
+      "name": "lodash-es",
+      "bytes": 31898,
+      "targets": {
+        "renderer": 31898
+      },
+      "version": "4.18.1",
+      "license": "MIT",
+      "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
+      "name": "dayjs",
+      "bytes": 31389,
+      "targets": {
+        "renderer": 17972,
+        "runtime": 13417
+      },
+      "version": "1.11.23",
+      "license": "MIT",
+      "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
+      "name": "dagre-d3-es",
+      "bytes": 31150,
+      "targets": {
+        "renderer": 31150
+      },
+      "version": "7.0.14",
+      "license": "MIT",
+      "licenseFile": "LICENSE.md",
+      "direct": false
+    },
+    {
+      "name": "dompurify",
+      "bytes": 29836,
+      "targets": {
+        "renderer": 29836
+      },
+      "version": "3.4.16",
+      "license": "(MPL-2.0 OR Apache-2.0)",
+      "licenseFile": "LICENSE",
+      "direct": true
+    },
+    {
+      "name": "roughjs",
+      "bytes": 27356,
+      "targets": {
+        "renderer": 27356
+      },
+      "version": "4.6.6",
+      "license": "MIT",
+      "licenseFile": "LICENSE",
+      "direct": false
     },
     {
       "name": "micromark-core-commonmark",
@@ -188,10 +398,21 @@
       "direct": false
     },
     {
-      "name": "ssf",
-      "bytes": 25023,
+      "name": "vega-expression",
+      "bytes": 26663,
       "targets": {
-        "runtime": 25023
+        "renderer": 26663
+      },
+      "version": "6.2.2",
+      "license": "BSD-3-Clause",
+      "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
+      "name": "ssf",
+      "bytes": 25197,
+      "targets": {
+        "runtime": 25197
       },
       "version": "0.11.2",
       "license": "Apache-2.0",
@@ -200,9 +421,9 @@
     },
     {
       "name": "async",
-      "bytes": 24084,
+      "bytes": 24431,
       "targets": {
-        "runtime": 24084
+        "runtime": 24431
       },
       "version": "3.2.6",
       "license": "MIT",
@@ -210,10 +431,21 @@
       "direct": false
     },
     {
-      "name": "@tanstack/virtual-core",
-      "bytes": 23842,
+      "name": "d3-shape",
+      "bytes": 24066,
       "targets": {
-        "renderer": 23842
+        "renderer": 24066
+      },
+      "version": "1.3.7",
+      "license": "BSD-3-Clause",
+      "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
+      "name": "@tanstack/virtual-core",
+      "bytes": 23825,
+      "targets": {
+        "renderer": 23825
       },
       "version": "3.17.11",
       "license": "MIT",
@@ -222,9 +454,9 @@
     },
     {
       "name": "saxes",
-      "bytes": 23733,
+      "bytes": 23734,
       "targets": {
-        "runtime": 23733
+        "runtime": 23734
       },
       "version": "5.0.1",
       "license": "ISC",
@@ -232,21 +464,10 @@
       "direct": false
     },
     {
-      "name": "fstream",
-      "bytes": 22251,
-      "targets": {
-        "runtime": 22251
-      },
-      "version": "1.0.12",
-      "license": "ISC",
-      "licenseFile": "LICENSE",
-      "direct": false
-    },
-    {
       "name": "big-integer",
-      "bytes": 22120,
+      "bytes": 22731,
       "targets": {
-        "runtime": 22120
+        "runtime": 22731
       },
       "version": "1.6.52",
       "license": "Unlicense",
@@ -254,12 +475,45 @@
       "direct": false
     },
     {
-      "name": "string_decoder",
-      "bytes": 22024,
+      "name": "fstream",
+      "bytes": 22266,
       "targets": {
-        "runtime": 22024
+        "runtime": 22266
+      },
+      "version": "1.0.12",
+      "license": "ISC",
+      "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
+      "name": "string_decoder",
+      "bytes": 22040,
+      "targets": {
+        "runtime": 22040
       },
       "version": "1.1.1",
+      "license": "MIT",
+      "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
+      "name": "cytoscape-fcose",
+      "bytes": 20783,
+      "targets": {
+        "renderer": 20783
+      },
+      "version": "2.2.0",
+      "license": "MIT",
+      "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
+      "name": "@upsetjs/venn.js",
+      "bytes": 19740,
+      "targets": {
+        "renderer": 19740
+      },
+      "version": "2.0.0",
       "license": "MIT",
       "licenseFile": "LICENSE",
       "direct": false
@@ -277,10 +531,21 @@
       "direct": true
     },
     {
-      "name": "unzipper",
-      "bytes": 18333,
+      "name": "@shikijs/themes",
+      "bytes": 18992,
       "targets": {
-        "runtime": 18333
+        "renderer": 18992
+      },
+      "version": "4.5.0",
+      "license": "MIT",
+      "licenseFile": "LICENSE",
+      "direct": true
+    },
+    {
+      "name": "unzipper",
+      "bytes": 18349,
+      "targets": {
+        "runtime": 18349
       },
       "version": "0.10.14",
       "license": "MIT",
@@ -289,9 +554,9 @@
     },
     {
       "name": "@fast-csv/parse",
-      "bytes": 18235,
+      "bytes": 18295,
       "targets": {
-        "runtime": 18235
+        "runtime": 18295
       },
       "version": "4.3.6",
       "license": "MIT",
@@ -311,9 +576,9 @@
     },
     {
       "name": "minimatch",
-      "bytes": 17862,
+      "bytes": 17896,
       "targets": {
-        "runtime": 17862
+        "runtime": 17896
       },
       "version": "5.1.9",
       "license": "ISC",
@@ -322,20 +587,31 @@
     },
     {
       "name": "@shikijs/core",
-      "bytes": 16901,
+      "bytes": 17059,
       "targets": {
-        "renderer": 16901
+        "renderer": 17059
       },
-      "version": "4.2.0",
+      "version": "4.5.0",
       "license": "MIT",
       "licenseFile": "LICENSE",
       "direct": false
     },
     {
-      "name": "glob",
-      "bytes": 16519,
+      "name": "vega-view",
+      "bytes": 16615,
       "targets": {
-        "runtime": 16519
+        "renderer": 16615
+      },
+      "version": "6.2.0",
+      "license": "BSD-3-Clause",
+      "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
+      "name": "glob",
+      "bytes": 16550,
+      "targets": {
+        "runtime": 16550
       },
       "version": "7.2.3",
       "license": "ISC",
@@ -344,9 +620,9 @@
     },
     {
       "name": "compress-commons",
-      "bytes": 16430,
+      "bytes": 16497,
       "targets": {
-        "runtime": 16430
+        "runtime": 16497
       },
       "version": "4.1.2",
       "license": "MIT",
@@ -354,10 +630,54 @@
       "direct": false
     },
     {
-      "name": "archiver",
-      "bytes": 14099,
+      "name": "vega-view-transforms",
+      "bytes": 15055,
       "targets": {
-        "runtime": 14099
+        "renderer": 15055
+      },
+      "version": "5.2.2",
+      "license": "BSD-3-Clause",
+      "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
+      "name": "vega-dataflow",
+      "bytes": 14863,
+      "targets": {
+        "renderer": 14863
+      },
+      "version": "6.1.3",
+      "license": "BSD-3-Clause",
+      "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
+      "name": "d3-hierarchy",
+      "bytes": 14466,
+      "targets": {
+        "renderer": 14466
+      },
+      "version": "3.1.2",
+      "license": "ISC",
+      "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
+      "name": "vega-scale",
+      "bytes": 14202,
+      "targets": {
+        "renderer": 14202
+      },
+      "version": "8.1.3",
+      "license": "BSD-3-Clause",
+      "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
+      "name": "archiver",
+      "bytes": 14155,
+      "targets": {
+        "runtime": 14155
       },
       "version": "5.3.2",
       "license": "MIT",
@@ -365,13 +685,13 @@
       "direct": false
     },
     {
-      "name": "dayjs",
-      "bytes": 13499,
+      "name": "vega-geo",
+      "bytes": 14138,
       "targets": {
-        "runtime": 13499
+        "renderer": 14138
       },
-      "version": "1.11.23",
-      "license": "MIT",
+      "version": "5.1.3",
+      "license": "BSD-3-Clause",
       "licenseFile": "LICENSE",
       "direct": false
     },
@@ -388,24 +708,69 @@
     },
     {
       "name": "@shikijs/primitive",
-      "bytes": 13335,
+      "bytes": 13461,
       "targets": {
-        "renderer": 13335
+        "renderer": 13461
       },
-      "version": "4.2.0",
+      "version": "4.5.0",
       "license": "MIT",
       "licenseFile": "LICENSE",
       "direct": false
     },
     {
-      "name": "lodash.groupby",
-      "bytes": 12637,
+      "name": "d3-scale",
+      "bytes": 12892,
       "targets": {
-        "runtime": 12637
+        "renderer": 12892
+      },
+      "version": "4.0.2",
+      "license": "ISC",
+      "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
+      "name": "lodash.groupby",
+      "bytes": 12735,
+      "targets": {
+        "runtime": 12735
       },
       "version": "4.6.0",
       "license": "MIT",
       "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
+      "name": "d3-selection",
+      "bytes": 12195,
+      "targets": {
+        "renderer": 12195
+      },
+      "version": "3.0.0",
+      "license": "ISC",
+      "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
+      "name": "vega-encode",
+      "bytes": 11782,
+      "targets": {
+        "renderer": 11782
+      },
+      "version": "5.2.2",
+      "license": "BSD-3-Clause",
+      "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
+      "name": "uuid",
+      "bytes": 11655,
+      "targets": {
+        "renderer": 1036,
+        "runtime": 10619
+      },
+      "version": "11.1.1",
+      "license": "MIT",
+      "licenseFile": "LICENSE.md",
       "direct": false
     },
     {
@@ -420,10 +785,43 @@
       "direct": false
     },
     {
-      "name": "graceful-fs",
-      "bytes": 10910,
+      "name": "vega-statistics",
+      "bytes": 11346,
       "targets": {
-        "runtime": 10910
+        "renderer": 11346
+      },
+      "version": "2.0.0",
+      "license": "BSD-3-Clause",
+      "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
+      "name": "d3-delaunay",
+      "bytes": 11049,
+      "targets": {
+        "renderer": 11049
+      },
+      "version": "6.0.4",
+      "license": "ISC",
+      "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
+      "name": "d3-transition",
+      "bytes": 10912,
+      "targets": {
+        "renderer": 10912
+      },
+      "version": "3.0.1",
+      "license": "ISC",
+      "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
+      "name": "graceful-fs",
+      "bytes": 10912,
+      "targets": {
+        "runtime": 10912
       },
       "version": "4.2.11",
       "license": "ISC",
@@ -432,12 +830,23 @@
     },
     {
       "name": "tar-stream",
-      "bytes": 10829,
+      "bytes": 10881,
       "targets": {
-        "runtime": 10829
+        "runtime": 10881
       },
       "version": "2.2.0",
       "license": "MIT",
+      "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
+      "name": "vega-functions",
+      "bytes": 10745,
+      "targets": {
+        "renderer": 10745
+      },
+      "version": "6.2.0",
+      "license": "BSD-3-Clause",
       "licenseFile": "LICENSE",
       "direct": false
     },
@@ -453,25 +862,36 @@
       "direct": false
     },
     {
-      "name": "uuid",
-      "bytes": 10598,
+      "name": "@chevrotain/regexp-to-ast",
+      "bytes": 10727,
       "targets": {
-        "runtime": 10598
+        "renderer": 10727
       },
-      "version": "11.1.1",
-      "license": "MIT",
-      "licenseFile": "LICENSE.md",
+      "version": "13.2.0",
+      "license": "Apache-2.0",
+      "licenseFile": "LICENSE.txt",
       "direct": false
     },
     {
       "name": "lodash.isequal",
-      "bytes": 10507,
+      "bytes": 10611,
       "targets": {
-        "runtime": 10507
+        "runtime": 10611
       },
       "version": "4.5.0",
       "license": "MIT",
       "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
+      "name": "khroma",
+      "bytes": 10525,
+      "targets": {
+        "renderer": 10525
+      },
+      "version": "2.1.0",
+      "license": "UNKNOWN",
+      "licenseFile": "license",
       "direct": false
     },
     {
@@ -486,6 +906,17 @@
       "direct": false
     },
     {
+      "name": "d3-color",
+      "bytes": 10233,
+      "targets": {
+        "renderer": 10233
+      },
+      "version": "3.1.0",
+      "license": "ISC",
+      "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
       "name": "micromark",
       "bytes": 9396,
       "targets": {
@@ -497,21 +928,54 @@
       "direct": false
     },
     {
-      "name": "@shikijs/themes",
-      "bytes": 9074,
+      "name": "d3-time-format",
+      "bytes": 9060,
       "targets": {
-        "renderer": 9074
+        "renderer": 9060
       },
-      "version": "4.2.0",
+      "version": "4.1.0",
+      "license": "ISC",
+      "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
+      "name": "es-toolkit",
+      "bytes": 9021,
+      "targets": {
+        "renderer": 9021
+      },
+      "version": "1.52.0",
       "license": "MIT",
       "licenseFile": "LICENSE",
-      "direct": true
+      "direct": false
+    },
+    {
+      "name": "vega-label",
+      "bytes": 8908,
+      "targets": {
+        "renderer": 8908
+      },
+      "version": "2.1.3",
+      "license": "BSD-3-Clause",
+      "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
+      "name": "vega-util",
+      "bytes": 8458,
+      "targets": {
+        "renderer": 8458
+      },
+      "version": "2.1.3",
+      "license": "BSD-3-Clause",
+      "licenseFile": "LICENSE",
+      "direct": false
     },
     {
       "name": "react",
-      "bytes": 8394,
+      "bytes": 8285,
       "targets": {
-        "renderer": 8394
+        "renderer": 8285
       },
       "version": "19.3.0",
       "license": "MIT",
@@ -530,13 +994,35 @@
       "direct": false
     },
     {
-      "name": "@fast-csv/format",
-      "bytes": 7714,
+      "name": "d3-interpolate",
+      "bytes": 7740,
       "targets": {
-        "runtime": 7714
+        "renderer": 7740
+      },
+      "version": "3.0.1",
+      "license": "ISC",
+      "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
+      "name": "@fast-csv/format",
+      "bytes": 7734,
+      "targets": {
+        "runtime": 7734
       },
       "version": "4.3.5",
       "license": "MIT",
+      "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
+      "name": "vega-runtime",
+      "bytes": 7567,
+      "targets": {
+        "renderer": 7567
+      },
+      "version": "7.1.3",
+      "license": "BSD-3-Clause",
       "licenseFile": "LICENSE",
       "direct": false
     },
@@ -552,10 +1038,32 @@
       "direct": false
     },
     {
-      "name": "archiver-utils",
-      "bytes": 6785,
+      "name": "d3-force",
+      "bytes": 7051,
       "targets": {
-        "runtime": 6785
+        "renderer": 7051
+      },
+      "version": "3.0.0",
+      "license": "ISC",
+      "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
+      "name": "vega-time",
+      "bytes": 6902,
+      "targets": {
+        "renderer": 6902
+      },
+      "version": "3.3.0",
+      "license": "BSD-3-Clause",
+      "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
+      "name": "archiver-utils",
+      "bytes": 6827,
+      "targets": {
+        "runtime": 6827
       },
       "version": "2.1.0",
       "license": "MIT",
@@ -563,10 +1071,21 @@
       "direct": false
     },
     {
-      "name": "@floating-ui/core",
-      "bytes": 6475,
+      "name": "vega-crossfilter",
+      "bytes": 6479,
       "targets": {
-        "renderer": 6475
+        "renderer": 6479
+      },
+      "version": "5.1.3",
+      "license": "BSD-3-Clause",
+      "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
+      "name": "@floating-ui/core",
+      "bytes": 6473,
+      "targets": {
+        "renderer": 6473
       },
       "version": "1.8.0",
       "license": "MIT",
@@ -574,10 +1093,21 @@
       "direct": false
     },
     {
-      "name": "brace-expansion",
-      "bytes": 6280,
+      "name": "cytoscape-cose-bilkent",
+      "bytes": 6415,
       "targets": {
-        "runtime": 6280
+        "renderer": 6415
+      },
+      "version": "4.1.0",
+      "license": "MIT",
+      "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
+      "name": "brace-expansion",
+      "bytes": 6319,
+      "targets": {
+        "runtime": 6319
       },
       "version": "2.1.7",
       "license": "MIT",
@@ -586,12 +1116,34 @@
     },
     {
       "name": "tmp",
-      "bytes": 6127,
+      "bytes": 6128,
       "targets": {
-        "runtime": 6127
+        "runtime": 6128
       },
       "version": "0.2.7",
       "license": "MIT",
+      "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
+      "name": "vega-hierarchy",
+      "bytes": 5902,
+      "targets": {
+        "renderer": 5902
+      },
+      "version": "5.1.3",
+      "license": "BSD-3-Clause",
+      "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
+      "name": "vega-wordcloud",
+      "bytes": 5896,
+      "targets": {
+        "renderer": 5896
+      },
+      "version": "5.1.3",
+      "license": "BSD-3-Clause",
       "licenseFile": "LICENSE",
       "direct": false
     },
@@ -607,25 +1159,25 @@
       "direct": false
     },
     {
-      "name": "bl",
-      "bytes": 5654,
-      "targets": {
-        "runtime": 5654
-      },
-      "version": "4.1.0",
-      "license": "MIT",
-      "licenseFile": "LICENSE.md",
-      "direct": false
-    },
-    {
       "name": "lodash.union",
-      "bytes": 5649,
+      "bytes": 5685,
       "targets": {
-        "runtime": 5649
+        "runtime": 5685
       },
       "version": "4.6.0",
       "license": "MIT",
       "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
+      "name": "bl",
+      "bytes": 5664,
+      "targets": {
+        "runtime": 5664
+      },
+      "version": "4.1.0",
+      "license": "MIT",
+      "licenseFile": "LICENSE.md",
       "direct": false
     },
     {
@@ -641,12 +1193,34 @@
     },
     {
       "name": "lodash.difference",
-      "bytes": 5561,
+      "bytes": 5594,
       "targets": {
-        "runtime": 5561
+        "runtime": 5594
       },
       "version": "4.5.0",
       "license": "MIT",
+      "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
+      "name": "d3-array",
+      "bytes": 5541,
+      "targets": {
+        "renderer": 5541
+      },
+      "version": "2.12.1",
+      "license": "BSD-3-Clause",
+      "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
+      "name": "delaunator",
+      "bytes": 5252,
+      "targets": {
+        "renderer": 5252
+      },
+      "version": "5.1.0",
+      "license": "ISC",
       "licenseFile": "LICENSE",
       "direct": false
     },
@@ -662,10 +1236,54 @@
       "direct": false
     },
     {
-      "name": "safe-buffer",
-      "bytes": 4707,
+      "name": "d3-sankey",
+      "bytes": 5094,
       "targets": {
-        "runtime": 4707
+        "renderer": 5094
+      },
+      "version": "0.12.3",
+      "license": "BSD-3-Clause",
+      "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
+      "name": "vega-interpreter",
+      "bytes": 5005,
+      "targets": {
+        "renderer": 5005
+      },
+      "version": "2.3.2",
+      "license": "BSD-3-Clause",
+      "licenseFile": "LICENSE",
+      "direct": true
+    },
+    {
+      "name": "d3-quadtree",
+      "bytes": 5004,
+      "targets": {
+        "renderer": 5004
+      },
+      "version": "3.0.1",
+      "license": "ISC",
+      "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
+      "name": "d3-format",
+      "bytes": 4934,
+      "targets": {
+        "renderer": 4934
+      },
+      "version": "3.1.2",
+      "license": "ISC",
+      "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
+      "name": "safe-buffer",
+      "bytes": 4723,
+      "targets": {
+        "runtime": 4723
       },
       "version": "5.1.2",
       "license": "MIT",
@@ -673,14 +1291,47 @@
       "direct": false
     },
     {
-      "name": "lodash.uniq",
-      "bytes": 4509,
+      "name": "d3-time",
+      "bytes": 4650,
       "targets": {
-        "runtime": 4509
+        "renderer": 4650
+      },
+      "version": "3.1.0",
+      "license": "ISC",
+      "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
+      "name": "lodash.uniq",
+      "bytes": 4528,
+      "targets": {
+        "runtime": 4528
       },
       "version": "4.5.0",
       "license": "MIT",
       "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
+      "name": "@chevrotain/gast",
+      "bytes": 4376,
+      "targets": {
+        "renderer": 4376
+      },
+      "version": "13.2.0",
+      "license": "Apache-2.0",
+      "licenseFile": "LICENSE.txt",
+      "direct": false
+    },
+    {
+      "name": "@iconify/utils",
+      "bytes": 4291,
+      "targets": {
+        "renderer": 4291
+      },
+      "version": "3.1.7",
+      "license": "MIT",
+      "licenseFile": "license.txt",
       "direct": false
     },
     {
@@ -696,13 +1347,24 @@
     },
     {
       "name": "xmlchars",
-      "bytes": 4149,
+      "bytes": 4152,
       "targets": {
-        "runtime": 4149
+        "runtime": 4152
       },
       "version": "2.2.0",
       "license": "MIT",
       "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
+      "name": "binary",
+      "bytes": 4051,
+      "targets": {
+        "runtime": 4051
+      },
+      "version": "0.3.0",
+      "license": "MIT",
+      "licenseFile": null,
       "direct": false
     },
     {
@@ -717,21 +1379,32 @@
       "direct": false
     },
     {
-      "name": "binary",
-      "bytes": 4029,
+      "name": "stylis",
+      "bytes": 4007,
       "targets": {
-        "runtime": 4029
+        "renderer": 4007
       },
-      "version": "0.3.0",
+      "version": "4.4.0",
       "license": "MIT",
-      "licenseFile": null,
+      "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
+      "name": "d3-path",
+      "bytes": 3948,
+      "targets": {
+        "renderer": 3948
+      },
+      "version": "1.0.9",
+      "license": "BSD-3-Clause",
+      "licenseFile": "LICENSE",
       "direct": false
     },
     {
       "name": "traverse",
-      "bytes": 3920,
+      "bytes": 3930,
       "targets": {
-        "runtime": 3920
+        "runtime": 3930
       },
       "version": "0.3.9",
       "license": "MIT/X11",
@@ -740,9 +1413,9 @@
     },
     {
       "name": "rimraf",
-      "bytes": 3917,
+      "bytes": 3918,
       "targets": {
-        "runtime": 3917
+        "runtime": 3918
       },
       "version": "2.7.1",
       "license": "ISC",
@@ -757,6 +1430,17 @@
       },
       "version": "0.2.12",
       "license": "MIT",
+      "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
+      "name": "vega-loader",
+      "bytes": 3840,
+      "targets": {
+        "renderer": 3840
+      },
+      "version": "5.1.3",
+      "license": "BSD-3-Clause",
       "licenseFile": "LICENSE",
       "direct": false
     },
@@ -783,6 +1467,17 @@
       "direct": false
     },
     {
+      "name": "vega-selections",
+      "bytes": 3547,
+      "targets": {
+        "renderer": 3547
+      },
+      "version": "6.1.5",
+      "license": "BSD-3-Clause",
+      "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
       "name": "micromark-util-subtokenize",
       "bytes": 3533,
       "targets": {
@@ -795,9 +1490,9 @@
     },
     {
       "name": "buffer-crc32",
-      "bytes": 3508,
+      "bytes": 3514,
       "targets": {
-        "runtime": 3508
+        "runtime": 3514
       },
       "version": "0.2.13",
       "license": "MIT",
@@ -817,9 +1512,9 @@
     },
     {
       "name": "lie",
-      "bytes": 3450,
+      "bytes": 3451,
       "targets": {
-        "runtime": 3450
+        "runtime": 3451
       },
       "version": "3.3.0",
       "license": "MIT",
@@ -827,10 +1522,21 @@
       "direct": false
     },
     {
-      "name": "readdir-glob",
-      "bytes": 3214,
+      "name": "robust-predicates",
+      "bytes": 3387,
       "targets": {
-        "runtime": 3214
+        "renderer": 3387
+      },
+      "version": "3.0.3",
+      "license": "Unlicense",
+      "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
+      "name": "readdir-glob",
+      "bytes": 3228,
+      "targets": {
+        "runtime": 3228
       },
       "version": "1.1.3",
       "license": "Apache-2.0",
@@ -838,10 +1544,32 @@
       "direct": false
     },
     {
-      "name": "fs.realpath",
-      "bytes": 3096,
+      "name": "topojson-client",
+      "bytes": 3218,
       "targets": {
-        "runtime": 3096
+        "renderer": 3218
+      },
+      "version": "3.1.0",
+      "license": "ISC",
+      "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
+      "name": "vega-force",
+      "bytes": 3212,
+      "targets": {
+        "renderer": 3212
+      },
+      "version": "5.1.3",
+      "license": "BSD-3-Clause",
+      "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
+      "name": "fs.realpath",
+      "bytes": 3111,
+      "targets": {
+        "runtime": 3111
       },
       "version": "1.0.0",
       "license": "ISC",
@@ -861,9 +1589,9 @@
     },
     {
       "name": "buffers",
-      "bytes": 3030,
+      "bytes": 3034,
       "targets": {
-        "runtime": 3030
+        "runtime": 3034
       },
       "version": "0.1.1",
       "license": "UNKNOWN",
@@ -872,9 +1600,9 @@
     },
     {
       "name": "@floating-ui/react-dom",
-      "bytes": 2815,
+      "bytes": 2808,
       "targets": {
-        "renderer": 2815
+        "renderer": 2808
       },
       "version": "2.1.9",
       "license": "MIT",
@@ -893,13 +1621,35 @@
       "direct": true
     },
     {
-      "name": "lodash.defaults",
-      "bytes": 2618,
+      "name": "d3-axis",
+      "bytes": 2685,
       "targets": {
-        "runtime": 2618
+        "renderer": 2685
+      },
+      "version": "3.0.0",
+      "license": "ISC",
+      "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
+      "name": "lodash.defaults",
+      "bytes": 2639,
+      "targets": {
+        "runtime": 2639
       },
       "version": "4.2.0",
       "license": "MIT",
+      "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
+      "name": "vega-regression",
+      "bytes": 2486,
+      "targets": {
+        "renderer": 2486
+      },
+      "version": "2.1.3",
+      "license": "BSD-3-Clause",
       "licenseFile": "LICENSE",
       "direct": false
     },
@@ -915,6 +1665,39 @@
       "direct": true
     },
     {
+      "name": "d3-ease",
+      "bytes": 2346,
+      "targets": {
+        "renderer": 2346
+      },
+      "version": "3.0.1",
+      "license": "BSD-3-Clause",
+      "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
+      "name": "d3-dsv",
+      "bytes": 2183,
+      "targets": {
+        "renderer": 2183
+      },
+      "version": "3.0.1",
+      "license": "ISC",
+      "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
+      "name": "vega-format",
+      "bytes": 2127,
+      "targets": {
+        "renderer": 2127
+      },
+      "version": "2.1.3",
+      "license": "BSD-3-Clause",
+      "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
       "name": "mdast-util-gfm-autolink-literal",
       "bytes": 2097,
       "targets": {
@@ -926,21 +1709,21 @@
       "direct": false
     },
     {
-      "name": "crc-32",
-      "bytes": 1928,
+      "name": "vega-event-selector",
+      "bytes": 2060,
       "targets": {
-        "runtime": 1928
+        "renderer": 2060
       },
-      "version": "1.2.2",
-      "license": "Apache-2.0",
+      "version": "4.0.0",
+      "license": "BSD-3-Clause",
       "licenseFile": "LICENSE",
       "direct": false
     },
     {
       "name": "zip-stream",
-      "bytes": 1928,
+      "bytes": 1933,
       "targets": {
-        "runtime": 1928
+        "runtime": 1933
       },
       "version": "4.1.1",
       "license": "MIT",
@@ -948,10 +1731,32 @@
       "direct": false
     },
     {
-      "name": "@tanstack/react-virtual",
-      "bytes": 1840,
+      "name": "crc-32",
+      "bytes": 1932,
       "targets": {
-        "renderer": 1840
+        "runtime": 1932
+      },
+      "version": "1.2.2",
+      "license": "Apache-2.0",
+      "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
+      "name": "@braintree/sanitize-url",
+      "bytes": 1839,
+      "targets": {
+        "renderer": 1839
+      },
+      "version": "7.1.2",
+      "license": "MIT",
+      "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
+      "name": "@tanstack/react-virtual",
+      "bytes": 1834,
+      "targets": {
+        "renderer": 1834
       },
       "version": "3.14.13",
       "license": "MIT",
@@ -960,9 +1765,9 @@
     },
     {
       "name": "chainsaw",
-      "bytes": 1785,
+      "bytes": 1790,
       "targets": {
-        "runtime": 1785
+        "runtime": 1790
       },
       "version": "0.1.0",
       "license": "MIT/X11",
@@ -982,9 +1787,9 @@
     },
     {
       "name": "setimmediate",
-      "bytes": 1743,
+      "bytes": 1744,
       "targets": {
-        "runtime": 1743
+        "runtime": 1744
       },
       "version": "1.0.5",
       "license": "MIT",
@@ -1015,9 +1820,9 @@
     },
     {
       "name": "fast-csv",
-      "bytes": 1651,
+      "bytes": 1655,
       "targets": {
-        "runtime": 1651
+        "runtime": 1655
       },
       "version": "4.3.6",
       "license": "MIT",
@@ -1047,6 +1852,17 @@
       "direct": false
     },
     {
+      "name": "d3-timer",
+      "bytes": 1633,
+      "targets": {
+        "renderer": 1633
+      },
+      "version": "3.0.1",
+      "license": "ISC",
+      "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
       "name": "markdown-table",
       "bytes": 1571,
       "targets": {
@@ -1069,10 +1885,21 @@
       "direct": false
     },
     {
-      "name": "end-of-stream",
-      "bytes": 1474,
+      "name": "d3-dispatch",
+      "bytes": 1550,
       "targets": {
-        "runtime": 1474
+        "renderer": 1550
+      },
+      "version": "3.0.1",
+      "license": "ISC",
+      "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
+      "name": "end-of-stream",
+      "bytes": 1481,
+      "targets": {
+        "runtime": 1481
       },
       "version": "1.4.5",
       "license": "MIT",
@@ -1092,11 +1919,22 @@
     },
     {
       "name": "lodash.flatten",
-      "bytes": 1251,
+      "bytes": 1266,
       "targets": {
-        "runtime": 1251
+        "runtime": 1266
       },
       "version": "4.4.0",
+      "license": "MIT",
+      "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
+      "name": "crc32-stream",
+      "bytes": 1212,
+      "targets": {
+        "runtime": 1212
+      },
+      "version": "4.0.3",
       "license": "MIT",
       "licenseFile": "LICENSE",
       "direct": false
@@ -1108,17 +1946,6 @@
         "renderer": 1202
       },
       "version": "3.0.2",
-      "license": "MIT",
-      "licenseFile": "LICENSE",
-      "direct": false
-    },
-    {
-      "name": "crc32-stream",
-      "bytes": 1199,
-      "targets": {
-        "runtime": 1199
-      },
-      "version": "4.0.3",
       "license": "MIT",
       "licenseFile": "LICENSE",
       "direct": false
@@ -1158,9 +1985,9 @@
     },
     {
       "name": "core-util-is",
-      "bytes": 1087,
+      "bytes": 1088,
       "targets": {
-        "runtime": 1087
+        "runtime": 1088
       },
       "version": "1.0.3",
       "license": "MIT",
@@ -1168,10 +1995,43 @@
       "direct": false
     },
     {
-      "name": "immediate",
-      "bytes": 934,
+      "name": "vega-voronoi",
+      "bytes": 976,
       "targets": {
-        "runtime": 934
+        "renderer": 976
+      },
+      "version": "5.1.3",
+      "license": "BSD-3-Clause",
+      "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
+      "name": "vega-projection",
+      "bytes": 964,
+      "targets": {
+        "renderer": 964
+      },
+      "version": "2.1.3",
+      "license": "BSD-3-Clause",
+      "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
+      "name": "d3-zoom",
+      "bytes": 946,
+      "targets": {
+        "renderer": 946
+      },
+      "version": "3.0.0",
+      "license": "ISC",
+      "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
+      "name": "immediate",
+      "bytes": 935,
+      "targets": {
+        "runtime": 935
       },
       "version": "3.0.6",
       "license": "MIT",
@@ -1191,9 +2051,9 @@
     },
     {
       "name": "buffer-indexof-polyfill",
-      "bytes": 906,
+      "bytes": 916,
       "targets": {
-        "runtime": 906
+        "runtime": 916
       },
       "version": "1.0.2",
       "license": "MIT",
@@ -1201,10 +2061,21 @@
       "direct": false
     },
     {
-      "name": "duplexer2",
-      "bytes": 902,
+      "name": "internmap",
+      "bytes": 907,
       "targets": {
-        "runtime": 902
+        "renderer": 907
+      },
+      "version": "2.0.3",
+      "license": "ISC",
+      "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
+      "name": "duplexer2",
+      "bytes": 903,
+      "targets": {
+        "runtime": 903
       },
       "version": "0.1.4",
       "license": "BSD-3-Clause",
@@ -1213,9 +2084,9 @@
     },
     {
       "name": "mkdirp",
-      "bytes": 899,
+      "bytes": 900,
       "targets": {
-        "runtime": 899
+        "runtime": 900
       },
       "version": "0.5.6",
       "license": "MIT",
@@ -1224,12 +2095,23 @@
     },
     {
       "name": "lodash.isfunction",
-      "bytes": 873,
+      "bytes": 885,
       "targets": {
-        "runtime": 873
+        "runtime": 885
       },
       "version": "3.0.9",
       "license": "MIT",
+      "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
+      "name": "d3-scale-chromatic",
+      "bytes": 877,
+      "targets": {
+        "renderer": 877
+      },
+      "version": "3.1.0",
+      "license": "ISC",
       "licenseFile": "LICENSE",
       "direct": false
     },
@@ -1278,6 +2160,17 @@
       "direct": false
     },
     {
+      "name": "ts-dedent",
+      "bytes": 776,
+      "targets": {
+        "renderer": 776
+      },
+      "version": "2.3.0",
+      "license": "MIT",
+      "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
       "name": "trough",
       "bytes": 767,
       "targets": {
@@ -1301,9 +2194,9 @@
     },
     {
       "name": "lodash.escaperegexp",
-      "bytes": 738,
+      "bytes": 753,
       "targets": {
-        "runtime": 738
+        "runtime": 753
       },
       "version": "4.1.2",
       "license": "MIT",
@@ -1312,9 +2205,9 @@
     },
     {
       "name": "process-nextick-args",
-      "bytes": 716,
+      "bytes": 717,
       "targets": {
-        "runtime": 716
+        "runtime": 717
       },
       "version": "2.0.1",
       "license": "MIT",
@@ -1323,9 +2216,9 @@
     },
     {
       "name": "once",
-      "bytes": 674,
+      "bytes": 681,
       "targets": {
-        "runtime": 674
+        "runtime": 681
       },
       "version": "1.4.0",
       "license": "ISC",
@@ -1334,9 +2227,9 @@
     },
     {
       "name": "lazystream",
-      "bytes": 657,
+      "bytes": 667,
       "targets": {
-        "runtime": 657
+        "runtime": 667
       },
       "version": "1.0.1",
       "license": "MIT",
@@ -1356,9 +2249,9 @@
     },
     {
       "name": "lodash.isplainobject",
-      "bytes": 623,
+      "bytes": 632,
       "targets": {
-        "runtime": 623
+        "runtime": 632
       },
       "version": "4.0.6",
       "license": "MIT",
@@ -1367,13 +2260,24 @@
     },
     {
       "name": "balanced-match",
-      "bytes": 618,
+      "bytes": 630,
       "targets": {
-        "runtime": 618
+        "runtime": 630
       },
       "version": "1.0.2",
       "license": "MIT",
       "licenseFile": "LICENSE.md",
+      "direct": false
+    },
+    {
+      "name": "d3-brush",
+      "bytes": 610,
+      "targets": {
+        "renderer": 610
+      },
+      "version": "3.0.0",
+      "license": "ISC",
+      "licenseFile": "LICENSE",
       "direct": false
     },
     {
@@ -1396,6 +2300,17 @@
       "version": "2.0.1",
       "license": "MIT",
       "licenseFile": "license",
+      "direct": false
+    },
+    {
+      "name": "d3-geo-projection",
+      "bytes": 560,
+      "targets": {
+        "renderer": 560
+      },
+      "version": "4.0.0",
+      "license": "ISC",
+      "licenseFile": "LICENSE",
       "direct": false
     },
     {
@@ -1433,9 +2348,9 @@
     },
     {
       "name": "inherits",
-      "bytes": 472,
+      "bytes": 474,
       "targets": {
-        "runtime": 472
+        "runtime": 474
       },
       "version": "2.0.4",
       "license": "ISC",
@@ -1444,9 +2359,9 @@
     },
     {
       "name": "inflight",
-      "bytes": 450,
+      "bytes": 454,
       "targets": {
-        "runtime": 450
+        "runtime": 454
       },
       "version": "1.0.6",
       "license": "ISC",
@@ -1465,6 +2380,17 @@
       "direct": false
     },
     {
+      "name": "wrappy",
+      "bytes": 421,
+      "targets": {
+        "runtime": 421
+      },
+      "version": "1.0.2",
+      "license": "ISC",
+      "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
       "name": "style-to-object",
       "bytes": 417,
       "targets": {
@@ -1472,17 +2398,6 @@
       },
       "version": "1.0.14",
       "license": "MIT",
-      "licenseFile": "LICENSE",
-      "direct": false
-    },
-    {
-      "name": "wrappy",
-      "bytes": 415,
-      "targets": {
-        "runtime": 415
-      },
-      "version": "1.0.2",
-      "license": "ISC",
       "licenseFile": "LICENSE",
       "direct": false
     },
@@ -1499,9 +2414,9 @@
     },
     {
       "name": "normalize-path",
-      "bytes": 372,
+      "bytes": 375,
       "targets": {
-        "runtime": 372
+        "runtime": 375
       },
       "version": "3.0.0",
       "license": "MIT",
@@ -1531,10 +2446,21 @@
       "direct": false
     },
     {
-      "name": "path-is-absolute",
-      "bytes": 317,
+      "name": "@chevrotain/utils",
+      "bytes": 345,
       "targets": {
-        "runtime": 317
+        "renderer": 345
+      },
+      "version": "13.2.0",
+      "license": "Apache-2.0",
+      "licenseFile": "LICENSE.txt",
+      "direct": false
+    },
+    {
+      "name": "path-is-absolute",
+      "bytes": 324,
+      "targets": {
+        "runtime": 324
       },
       "version": "1.0.1",
       "license": "MIT",
@@ -1609,9 +2535,9 @@
     },
     {
       "name": "concat-map",
-      "bytes": 237,
+      "bytes": 241,
       "targets": {
-        "runtime": 237
+        "runtime": 241
       },
       "version": "0.0.1",
       "license": "MIT",
@@ -1630,6 +2556,17 @@
       "direct": false
     },
     {
+      "name": "lodash.isboolean",
+      "bytes": 216,
+      "targets": {
+        "runtime": 216
+      },
+      "version": "3.0.3",
+      "license": "MIT",
+      "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
       "name": "is-plain-obj",
       "bytes": 212,
       "targets": {
@@ -1638,17 +2575,6 @@
       "version": "4.1.0",
       "license": "MIT",
       "licenseFile": "license",
-      "direct": false
-    },
-    {
-      "name": "lodash.isboolean",
-      "bytes": 212,
-      "targets": {
-        "runtime": 212
-      },
-      "version": "3.0.3",
-      "license": "MIT",
-      "licenseFile": "LICENSE",
       "direct": false
     },
     {
@@ -1675,13 +2601,24 @@
     },
     {
       "name": "listenercount",
-      "bytes": 201,
+      "bytes": 205,
       "targets": {
-        "runtime": 201
+        "runtime": 205
       },
       "version": "1.0.1",
       "license": "ISC",
       "licenseFile": "LICENSE.md",
+      "direct": false
+    },
+    {
+      "name": "vega-canvas",
+      "bytes": 204,
+      "targets": {
+        "renderer": 204
+      },
+      "version": "2.0.0",
+      "license": "BSD-3-Clause",
+      "licenseFile": "LICENSE",
       "direct": false
     },
     {
@@ -1829,9 +2766,9 @@
     },
     {
       "name": "isarray",
-      "bytes": 118,
+      "bytes": 119,
       "targets": {
-        "runtime": 118
+        "runtime": 119
       },
       "version": "1.0.0",
       "license": "MIT",
@@ -1862,9 +2799,9 @@
     },
     {
       "name": "fs-constants",
-      "bytes": 79,
+      "bytes": 83,
       "targets": {
-        "runtime": 79
+        "runtime": 83
       },
       "version": "1.0.0",
       "license": "MIT",
@@ -1877,16 +2814,16 @@
       "targets": {
         "renderer": 75
       },
-      "version": "4.2.0",
+      "version": "4.5.0",
       "license": "MIT",
       "licenseFile": "LICENSE",
       "direct": false
     },
     {
       "name": "lodash.isundefined",
-      "bytes": 71,
+      "bytes": 75,
       "targets": {
-        "runtime": 71
+        "runtime": 75
       },
       "version": "3.0.1",
       "license": "MIT",
@@ -1895,9 +2832,9 @@
     },
     {
       "name": "lodash.isnil",
-      "bytes": 68,
+      "bytes": 71,
       "targets": {
-        "runtime": 68
+        "runtime": 71
       },
       "version": "4.0.0",
       "license": "MIT",
@@ -1917,9 +2854,9 @@
     },
     {
       "name": "util-deprecate",
-      "bytes": 59,
+      "bytes": 60,
       "targets": {
-        "runtime": 59
+        "runtime": 60
       },
       "version": "1.0.2",
       "license": "MIT",
@@ -1947,6 +2884,17 @@
       "license": "MIT",
       "licenseFile": "license",
       "direct": false
+    },
+    {
+      "name": "vega",
+      "bytes": 39,
+      "targets": {
+        "renderer": 39
+      },
+      "version": "6.4.0",
+      "license": "BSD-3-Clause",
+      "licenseFile": "LICENSE",
+      "direct": true
     },
     {
       "name": "bail",
