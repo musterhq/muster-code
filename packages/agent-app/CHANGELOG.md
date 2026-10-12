@@ -3,6 +3,14 @@
 All notable changes to Muster Agent. Each `## <version>` section becomes the notes of the
 `agent-v<version>` GitHub Release (`.github/workflows/agent-app-release.yml`).
 
+## 0.3.9
+
+The model picker now keeps up with new releases. Claude Haiku 5.5 is added (with Light to Extra High reasoning levels; Haiku 4.5 stays). GPT-6.1 Sol and any other model Codex lists as visible show without being switched on in Settings.
+
+- The ChatGPT model list is read from Codex's `models_cache.json` with the same 16 MB limit as a model catalog. It used the 1 MB config-file limit, which a cache holding many models' full instructions can outgrow, hiding the whole list.
+- When Codex rewrites its cache and one model replaces another (same count), the picker is now told. Before, Muster compared only the number of models, so the swap was never pushed to the open app.
+- The Claude catalog (`anthropic-models.json`, dated 2026-10-12) is no longer masked by an old copy: an override file in the data folder or `~/.muster/` whose `updated` date is older than the one shipped is ignored. An override without a date is your own list and still wins. The live Anthropic `/v1/models` list is still added when an API key is set.
+
 ## 0.3.8
 
 Muster now rests when nothing is happening. A finished chat had kept the graphics process and the window busy (about 29% and 13% CPU on a Mac), which warmed the laptop for no reason.
