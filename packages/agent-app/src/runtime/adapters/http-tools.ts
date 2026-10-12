@@ -50,7 +50,7 @@ export function toolInstructions(access: ToolAccess, cwd: string): string {
   const limits = access === 'read-only' ? 'Access is read-only: you can look at files in the working folder but not change them or run commands.'
     : access === 'workspace' ? 'You can edit files inside the working folder; running commands needs Full access, which the user can switch on in the composer.'
     : 'You have Full access: commands and files anywhere the user can reach. Ask the user in chat before anything destructive or irreversible (deleting data, force-pushing, changing system settings).';
-  return `You have these tools in this chat: ${names}. Working folder: ${normalizeFsPath(cwd)}. ${limits}`;
+  return `You have these tools in this chat: ${names}. Working folder: ${normalizeFsPath(cwd)}. ${limits} There is no sub-agent tool in this chat, so do the work directly and don't mention it.`;
 }
 
 const clip = (text: string, max = MAX_TOOL_OUTPUT) => text.length > max ? text.slice(0, max) + `\n[output cut at ${max} characters]` : text;

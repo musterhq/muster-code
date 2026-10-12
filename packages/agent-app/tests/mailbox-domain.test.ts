@@ -24,8 +24,8 @@ async function harness(t:TestContext,options:{tools?:boolean}={}){
   const hooks=createDomainHooks(),events:AgentEvent[]=[],invoked:{command:string;input:Record<string,unknown>}[]=[];
   let clock=Date.parse('2026-09-23T10:00:00.000Z');
   const tasks:{id:string;title:string;runChatId?:string}[]=[];
-  const steer={ok:false};
-  const context={dataDir,store,db:()=>store.database(),emit:(event:AgentEvent)=>events.push(event),emitSnapshot(){},folderFor:()=>{throw new Error('no folders');},hooks:hooks.hooks,
+  const steer={ok:false};const route={driver:'codex-app-server'};
+  const context={modelCatalog:()=>({providers:[{id:'p',driver:route.driver}],builtin:{providerId:'p',model:'m'}}),dataDir,store,db:()=>store.database(),emit:(event:AgentEvent)=>events.push(event),emitSnapshot(){},folderFor:()=>{throw new Error('no folders');},hooks:hooks.hooks,
     async invoke(command:string,input:Record<string,unknown>){invoked.push({command,input});
       if(command==='project.work')return {tasks:{items:tasks,truncated:false}};
       if(command==='subagents.control')return {...steer};
@@ -39,7 +39,7 @@ async function harness(t:TestContext,options:{tools?:boolean}={}){
   const call=(command:string,input:Record<string,unknown>)=>Promise.resolve().then(()=>mailbox.module.handlers[command]!(input)) as Promise<any>;
   /** One provider turn: what the prompt carries, then the run settling with `status`. */
   const turn=async(target:Chat,status:'completed'|'failed'='completed')=>{const current=store.chat(target.id)!;const contributed=await hooks.contributePrompt({chat:current,prompt:'go'});hooks.runSettled({chat:current,runId:randomUUID(),status});await new Promise(resolve=>setImmediate(resolve));return contributed.text;};
-  return {store,hooks,events,invoked,mailbox,call,turn,chat,project,other,tasks,steer,hosts,advance(ms:number){clock+=ms;},get now(){return clock;}};
+  return {route,store,hooks,events,invoked,mailbox,call,turn,chat,project,other,tasks,steer,hosts,advance(ms:number){clock+=ms;},get now(){return clock;}};
 }
 
 test('user mail rides into the recipient chat\'s next turn once; a failed turn does not count as delivery',async t=>{
@@ -197,6 +197,15 @@ test('wake starts a turn in an idle recipient at most once per gap; the inbox bl
   assert.ok((await h.hooks.resolveRunOptions(h.store.chat(loose.id)!)).configOverrides?.['mcp_servers.muster_mailbox.command']);
   const inbox=text(await h.mailbox.runTool(b.id,'mailbox_inbox',{}));
   assert.match(inbox,/Unacknowledged mail/);assert.match(inbox,new RegExp(`chat:${a.id} "A"`));
+});
+
+test('the inbox lists agent:<subagent thread id> only on routes that can spawn sub-agents',async t=>{
+  const h=await harness(t),c=h.chat(h.project.id,'C');h.store.updateChat(c.id,{providerId:'p'});
+  assert.match(text(await h.mailbox.runTool(c.id,'mailbox_inbox',{})),/agent:<your subagent thread id>/);
+  h.route.driver='openai-chat-completions';
+  assert.doesNotMatch(text(await h.mailbox.runTool(c.id,'mailbox_inbox',{})),/subagent/);
+  h.route.driver='claude-code-cli';
+  assert.match(text(await h.mailbox.runTool(c.id,'mailbox_inbox',{})),/agent:<your subagent thread id>/);
 });
 
 test('the MCP host authenticates, routes calls as the calling chat, and writes a launcher',async t=>{
