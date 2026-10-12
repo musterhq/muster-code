@@ -65,7 +65,8 @@ export function sectionOf(chat:Chat,now:number,needsYou:boolean):StatusSection|'
   if(chat.pinned)return 'pinned';
   if(chat.unread||needsYou||chat.status==='waiting'||chat.status==='queued'||chat.status==='failed'||chat.queue?.length)return 'active';
   const updated=Date.parse(chat.updatedAt);
-  return Number.isFinite(updated)&&now-updated<ACTIVE_WINDOW_MS?'active':'settled';
+  // A chat with no readable date is never tucked away as settled.
+  return !Number.isFinite(updated)||now-updated<ACTIVE_WINDOW_MS?'active':'settled';
 }
 
 /** One pass over the chats; `compare` orders each bucket. */

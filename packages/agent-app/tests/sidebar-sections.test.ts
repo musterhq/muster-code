@@ -18,6 +18,7 @@ test('a running chat is Working even when pinned, snoozed or in a folder; other 
   assert.equal(sectionOf(chat('a',{unread:true,updatedAt:ago(30*86400_000)}),NOW,false),'active');
   assert.equal(sectionOf(chat('a',{updatedAt:ago(30*86400_000)}),NOW,true),'active','waiting on you keeps it active');
   assert.equal(sectionOf(chat('a',{updatedAt:ago(30*86400_000)}),NOW,false),'settled');
+  assert.equal(sectionOf(chat('a',{updatedAt:''}),NOW,false),'active','an unreadable date is never settled');
   assert.equal(sectionOf(chat('a',{archived:true,status:'running'}),NOW,false),'archived');
   assert.equal(chatGroup(chat('a',{status:'running',pinned:true,folderId:'f'}),{folders:[{id:'f',name:'f',path:'/f'}],projects:[]}),'working');
 });
