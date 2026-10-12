@@ -15,7 +15,12 @@ import { CliMaintenance } from './CliMaintenance';
 import { device } from '../../shared/device-noun.ts';
 import { AddProviderPanel } from './AddProviderPanel';
 
-const statusLabel = (p: ProviderInfo) => p.available ? 'Ready for chats' : p.status === 'configured' ? 'Profile detected · unavailable for chats' : p.status === 'installed' ? 'Installed · sign-in not detected' : p.status === 'error' ? 'Needs attention' : p.status === 'not-detected' ? 'Not detected' : 'Unavailable';
+/** A route that points at this computer (127.0.0.1, localhost, ::1): its service may simply not be running. */
+export const isLocalEndpoint = (p: Pick<ProviderInfo, 'endpoint'>): boolean => { try { return !!p.endpoint && ['127.0.0.1', 'localhost', '[::1]', '0.0.0.0'].includes(new URL(p.endpoint).hostname); } catch { return false; } };
+/** A local endpoint is only 'Ready' once a connection check has reached it; a saved profile alone proves nothing. */
+export const needsReachabilityCheck = (p: ProviderInfo): boolean => isLocalEndpoint(p) && !p.checkedAt && p.status !== 'not-detected';
+const checkedOnce = new Set<string>();
+const statusLabel = (p: ProviderInfo) => needsReachabilityCheck(p) ? 'Not checked yet' : p.available ? 'Ready for chats' : p.status === 'configured' ? 'Profile detected · unavailable for chats' : p.status === 'installed' ? 'Installed · sign-in not detected' : p.status === 'error' ? 'Needs attention' : p.status === 'not-detected' ? 'Not detected' : 'Unavailable';
 /** A real brand glyph when the provider is recognized (Codex/OpenAI, Claude, Anthropic, OpenCode, Ollama, …);
  * otherwise the previous status-shaped glyph, so an unbranded custom endpoint still reads as custom/ready/unset. */
 const providerIcon = (p: ProviderInfo) => providerBrand(p.id, p.name, p.endpoint) ? <ProviderLogo id={p.id} name={p.name} endpoint={p.endpoint} size={18}/> : p.custom ? <Server size={18}/> : p.available ? <Sparkles size={18}/> : <ShieldCheck size={18}/>;
@@ -234,16 +239,18 @@ function ProviderCard({ provider: p }: {provider: ProviderInfo}) {
   const kind = identityKind(p);
   const defaultModel = useStoreSelector(state => state.settings['general.defaultModel']);
   useEffect(()=>()=>{if(checking.current)void invoke('providers.cancelCheck',{id:p.id}).catch(()=>{});},[p.id]);
+  // Cheap reachability check, once per provider per session: a local router that is not running must not read 'Ready'.
+  useEffect(()=>{if(!needsReachabilityCheck(p)||checkedOnce.has(p.id))return;checkedOnce.add(p.id);void check();},[p.id]);
   async function check() {if(checking.current)return;checking.current=true;setBusy(true);setError('');try {await invoke('providers.check',{id:p.id}); await loadProviders(true);} catch(e) {setError(errorText(e,'Connection check failed.'));} finally {checking.current=false;setBusy(false);}}
   async function remove() {setBusy(true);setError('');try {await invoke('providers.remove',{id:p.id}); await loadProviders(true);} catch(e) {setError(errorText(e,'Could not remove connection.'));} finally {setBusy(false);}}
   return <article className="settings-provider">
-    <div className="settings-provider-top"><div className="provider-symbol" aria-hidden="true">{providerIcon(p)}</div><div className="provider-heading"><h2>{p.name}</h2><span className="provider-source">{p.source ?? 'Local configuration'}{defaultModel?.providerId === p.id ? ' · default for new chats' : ''}</span></div><span className={`connection-status ${p.available ? 'is-ready' : ''}`}>{statusLabel(p)}</span></div>
+    <div className="settings-provider-top"><div className="provider-symbol" aria-hidden="true">{providerIcon(p)}</div><div className="provider-heading"><h2>{p.name}</h2><span className="provider-source">{p.source ?? 'Local configuration'}{defaultModel?.providerId === p.id ? ' · default for new chats' : ''}</span></div><span className={`connection-status ${p.available && !needsReachabilityCheck(p) ? 'is-ready' : ''}`}>{statusLabel(p)}</span></div>
     <p className="provider-detail">{p.detail ?? p.error ?? 'Configured locally. Subscription and usage limits have not been verified.'}</p>
     {kind && <IdentityField provider={p} kind={kind}/>}
     {p.endpoint && <div className="connection-address">{p.endpoint}</div>}
     {p.apiKeyEnv && <div className="provider-source">Credentials from <code>{p.apiKeyEnv}</code></div>}
     {p.checkedAt && <div className="provider-source">Last checked {new Date(p.checkedAt).toLocaleString()}</div>}
-    <div className="provider-catalog"><span className="provider-catalog-label">Model catalog</span>{p.models.length > 0 ? <><span className="provider-catalog-state">{p.available ? 'Available to select in chats' : 'Discovered · not available to chats'}</span><button type="button" className="provider-model-toggle" aria-expanded={expanded} onClick={()=>setExpanded(!expanded)}><ChevronDown size={13} style={{transform:expanded?'rotate(180deg)':undefined}}/>{p.models.length} {p.models.length === 1 ? 'model' : 'models'}</button>{expanded && <ul className="settings-models">{p.models.map(m=><li key={m.id}>{m.name}</li>)}</ul>}</> : <span className="provider-catalog-state">No runnable model catalog reported</span>}</div>
+    <div className="provider-catalog"><span className="provider-catalog-label">Model catalog</span>{p.models.length > 0 ? <><span className="provider-catalog-state">{p.available ? 'Available to select in chats' : 'Discovered · not available to chats'}</span><button type="button" className="provider-model-toggle" aria-expanded={expanded} onClick={()=>setExpanded(!expanded)}><ChevronDown size={13} style={{transform:expanded?'rotate(180deg)':undefined}}/>{p.models.length} {p.models.length === 1 ? 'model' : 'models'}</button>{(p.excludedModels?.length ?? 0) > 0 && <span className="provider-source" title={p.excludedModels!.map(m => `${m.name}: ${m.reason}`).join('\n')}>The server lists more; {p.excludedModels!.length === 1 ? 'one group is' : `${p.excludedModels!.length} groups are`} not offered here</span>}{expanded && <ul className="settings-models">{p.models.map(m=><li key={m.id}>{m.name}</li>)}</ul>}</> : <span className="provider-catalog-state">No runnable model catalog reported</span>}</div>
     {p.installUrl && !p.available && <div className="provider-actions"><button type="button" className="settings-button secondary" onClick={()=>void invoke('link.open',{url:p.installUrl!}).catch(e=>setError(errorText(e,'Could not open the link.')))}><ExternalLink size={13}/>How to install</button>{p.loginCommand && p.status!=='not-detected' && <span className="provider-source">Sign in: <code>{p.loginCommand}</code></span>}</div>}
     {reportsUsage(p) && p.status !== 'not-detected' && <UsageSection provider={p}/>}
     {p.custom && <SecretField provider={p}/>}

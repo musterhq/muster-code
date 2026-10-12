@@ -47,3 +47,9 @@ test('titleSource: default until the first completed exchange, generated after, 
   store.updateChat(renamed.id,{title:'Q3 notes'});store.updateChat(renamed.id,{status:'completed'});
   assert.equal(store.settleTitle(renamed.id),false);assert.equal(store.chat(renamed.id)!.title,'Q3 notes');
 });
+
+test('titles keep the punctuation that belongs to their words', () => {
+  assert.equal(generateChatTitle('Port the C++ parser (draft) to Rust'), 'Port C++ parser (draft) to Rust');
+  assert.equal(generateChatTitle('Fix: login redirect, then retry'), 'Fix: login redirect, then retry');
+  assert.equal(generateChatTitle('Why is "npm ci" slow?'), 'Why is "npm ci" slow');
+});

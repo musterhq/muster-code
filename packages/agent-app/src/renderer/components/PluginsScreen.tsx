@@ -1,7 +1,7 @@
 import { AlertTriangle, AppWindow, ArrowLeft, BookOpen, Boxes, Check, Download, FolderGit2, FolderOpen, GitBranch, Pencil, Plug, Plus, RefreshCw, RotateCcw, Search, Server, Store, Trash2, Webhook } from 'lucide-react';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ItemIcon, PluginEntry, SkillEntry } from '../../shared/protocol';
-import { brandIcons, discoverCards, iconFor, isHiddenUnsupported, isSystemSkill, type CatalogCard, type InstalledTarget } from '../marketplaceCatalog';
+import { brandIcons, discoverCards, iconFor, isHiddenUnsupported, isInstalledCard, isSystemSkill, shortSourceLabel, type CatalogCard, type InstalledTarget } from '../marketplaceCatalog';
 import { isEnabled, pluginExtensionId, qualifiedSkillName, skillExtensionId, skillShadows, skillTier, type ExtensionEnablement, type ExtensionScope, type ExtensionSource, type InstalledExtension, type InstallReview, type MarketplacePackage } from '../../shared/domains/extensions-protocol';
 import { invoke } from '../bridge';
 import { closeSettings, loadPlugins, loadSkills, notifySuccess } from '../store';
@@ -83,8 +83,9 @@ export function PluginsScreen(): React.ReactElement {
   // unsupported packages behind a filter, and a real logo wherever any manifest ships one.
   const [showUnsupported, setShowUnsupported] = useState(false);
   const cards = useMemo(() => discoverCards(data), [data]);
-  const unsupportedCount = useMemo(() => cards.filter(isHiddenUnsupported).length, [cards]);
-  const catalog = useMemo(() => cards.filter(card => (showUnsupported || !isHiddenUnsupported(card)) && (kind === 'all' || card.pkg.kind === kind) && matches(q, card.pkg.displayName, card.pkg.name, card.pkg.description, card.pkg.publisher, card.pkg.category, ...card.sources, ...(card.pkg.keywords ?? []))), [cards, showUnsupported, kind, q]);
+  const discoverable = useMemo(() => cards.filter(card => !isInstalledCard(card)), [cards]);
+  const unsupportedCount = useMemo(() => discoverable.filter(isHiddenUnsupported).length, [discoverable]);
+  const catalog = useMemo(() => discoverable.filter(card => (showUnsupported || !isHiddenUnsupported(card)) && (kind === 'all' || card.pkg.kind === kind) && matches(q, card.pkg.displayName, card.pkg.name, card.pkg.description, card.pkg.publisher, card.pkg.category, ...card.sources, ...(card.pkg.keywords ?? []))), [discoverable, showUnsupported, kind, q]);
   const icons = useMemo(() => brandIcons(data.plugins, data.catalog), [data.plugins, data.catalog]);
   const manage = (target: InstalledTarget) => { setTab('installed'); setSelection(target); };
   const userSkills = useMemo(() => data.skills.filter(skill => !isSystemSkill(skill)), [data.skills]);
@@ -113,7 +114,7 @@ export function PluginsScreen(): React.ReactElement {
     </header>
     <div className="plugins-toolbar">
       <div className="plugins-view-tabs" role="tablist" aria-label="Marketplace">
-        <button role="tab" aria-selected={tab === 'discover'} className={tab === 'discover' ? 'is-active' : ''} onClick={() => switchTab('discover')}><Store size={14} />Discover <span>{cards.length - unsupportedCount || ''}</span></button>
+        <button role="tab" aria-selected={tab === 'discover'} className={tab === 'discover' ? 'is-active' : ''} onClick={() => switchTab('discover')}><Store size={14} />Discover <span>{discoverable.length - unsupportedCount || ''}</span></button>
         <button role="tab" aria-selected={tab === 'installed'} className={tab === 'installed' ? 'is-active' : ''} onClick={() => switchTab('installed')}><Boxes size={14} />Installed <span>{data.installed.length + data.plugins.length + userSkills.filter(skill => skillTier(skill.provenance) !== 'global').length || ''}</span></button>
         <button role="tab" aria-selected={tab === 'sources'} className={tab === 'sources' ? 'is-active' : ''} onClick={() => switchTab('sources')}><GitBranch size={14} />Sources <span>{data.sources.length || ''}</span></button>
         <button role="tab" aria-selected={tab === 'mcp'} className={tab === 'mcp' ? 'is-active' : ''} onClick={() => switchTab('mcp')}><Server size={14} />MCP</button>
@@ -121,7 +122,8 @@ export function PluginsScreen(): React.ReactElement {
       {tab !== 'sources' && tab !== 'mcp' && <>
         <div className="plugins-search-row"><Search size={13} className="plugins-search-icon" /><input type="search" className="plugins-search" placeholder={tab === 'discover' ? 'Search plugins and skills' : 'Filter installed'} value={query} onChange={event => setQuery(event.target.value)} aria-label="Search" /></div>
         <div className="plugins-categories" role="group" aria-label="Type">{(['all', 'plugin', 'skill'] as const).map(value => <button key={value} type="button" className={`plugins-category${kind === value ? ' is-active' : ''}`} aria-pressed={kind === value} onClick={() => setKind(value)}>{value === 'all' ? 'All' : value === 'plugin' ? 'Plugins' : 'Skills'}</button>)}
-          {tab === 'discover' && unsupportedCount > 0 && <button type="button" className={`plugins-category plugins-unsupported-filter${showUnsupported ? ' is-active' : ''}`} aria-pressed={showUnsupported} title="Packages that use features Muster cannot run yet" onClick={() => setShowUnsupported(value => !value)}>Unsupported <span>{unsupportedCount}</span></button>}</div>
+          {tab === 'discover' && unsupportedCount > 0 && <button type="button" className={`plugins-category plugins-unsupported-filter${showUnsupported ? ' is-active' : ''}`} aria-pressed={showUnsupported} title="Packages that need features Muster cannot run yet, such as native apps or hooks it does not support. Open one to see exactly what is missing." onClick={() => setShowUnsupported(value => !value)}>Unsupported <span>{unsupportedCount}</span></button>}</div>
+        {tab === 'discover' && showUnsupported && <p className="plugins-scope-note">Unsupported means the package needs something Muster cannot run yet (for example a native app or an unsupported hook). It is listed for reference; open one to see what is missing.</p>}
         {tab === 'installed' && <label className="plugins-scope">Scope<select value={scope} onChange={event => setScope(event.target.value)}>
           <option value="user">User (everywhere)</option>
           {folders.length > 0 && <optgroup label="Folders">{folders.map(folder => <option key={folder.id} value={`folder:${folder.id}`}>{folder.name}</option>)}</optgroup>}
@@ -135,7 +137,7 @@ export function PluginsScreen(): React.ReactElement {
         {phase === 'loading' && tab !== 'mcp' && <ResourceState kind="loading" label="Loading marketplace" rows={4}/>}
         {phase === 'ready' && tab === 'discover' && (data.sources.length === 0
           ? <EmptyState icon={<Store size={26} />} title="No marketplace sources yet" text="Add a Git repository or a local folder that publishes a Claude or Codex marketplace index, or a folder of skills." action={<button type="button" className="plugins-primary" onClick={() => switchTab('sources')}><Plus size={13} />Add source</button>} />
-          : catalog.length === 0 ? <EmptyState icon={<Search size={24} />} title={q || kind !== 'all' ? 'Nothing matches' : 'The sources list no packages'} text={q || kind !== 'all' ? 'Try another search or type.' : 'Sync a source or check that it has a marketplace.json or skills folder.'} />
+          : catalog.length === 0 ? <EmptyState icon={<Search size={24} />} title={q || kind !== 'all' ? 'Nothing matches' : cards.length ? 'Everything here is installed' : 'The sources list no packages'} text={q || kind !== 'all' ? 'Try another search or type.' : cards.length ? 'Installed items, and their updates, are under Installed.' : 'Sync a source or check that it has a marketplace.json or skills folder.'} />
           : <ul className="plugins-grid" role="list">{catalog.map(card => { const pkg = card.pkg; return <li key={pkg.id}><PackageCard card={card} busy={pending[pkg.id]} failed={!!failed[pkg.id]} onOpen={() => setSelection({ kind: 'package', id: pkg.id })} onInstall={() => setReviewing(pkg.id)} onManage={card.installedAs ? () => manage(card.installedAs!) : undefined} onUpdate={() => void run(pkg.id, 'Updating…', () => invoke('extensions.update', { id: pkg.name }), `${pkg.displayName} updated.`)} /></li>; })}</ul>)}
         {phase === 'ready' && tab === 'installed' && <div className="plugins-installed">
           <p className="plugins-scope-note">Toggles apply {scopeLabel}. Folder settings override project settings, which override user settings.</p>
@@ -176,10 +178,10 @@ function PackageCard({ card, busy, failed, onOpen, onInstall, onUpdate, onManage
     : installed ? (onManage ? <button type="button" className="plugins-card-action is-manage" onClick={event => { event.stopPropagation(); onManage(); }} aria-label={`Manage ${pkg.displayName}`} title={card.installedAs?.kind === 'codex' ? 'Installed in Codex' : 'Installed'}>Manage</button> : <span className="plugins-card-state is-ok"><Check size={12} />Installed</span>)
     : !pkg.compatibility.supported ? <span className="plugins-card-state" title={pkg.compatibility.unsupported.join('\n')}>Unsupported</span>
     : <button type="button" className="plugins-card-action" onClick={event => { event.stopPropagation(); onInstall(); }} aria-label={`Install ${pkg.displayName}`}><Plus size={13} /></button>;
-  const provenance = [pkg.publisher, card.sources.join(', ')].filter(Boolean).join(' · ');
+  const fullProvenance = [pkg.publisher, card.sources.join(', ')].filter(Boolean).join(' · '), provenance = [pkg.publisher, card.sources.map(shortSourceLabel).join(', ')].filter(Boolean).join(' · ');
   return <div className={`plugins-card${installed ? ' is-installed' : ''}`} role="button" tabIndex={0} aria-label={`${pkg.displayName}${installed ? ', installed' : ''}`} onClick={onOpen} onKeyDown={event => { if (event.target === event.currentTarget && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); onOpen(); } }}>
     <ItemTile icon={card.icon} name={pkg.displayName} seed={pkg.id} shape={pkg.kind === 'skill' ? 'skill' : 'square'} size={36} />
-    <span className="plugins-card-text"><strong>{pkg.displayName}</strong><small>{pkg.description ?? (pkg.kind === 'skill' ? 'Skill' : 'Plugin')}</small><em>{installed && <span className="plugins-card-installed"><Check size={11} />Installed{card.installedAs?.kind === 'codex' ? ' in Codex' : ''}</span>}{installed && provenance ? ' · ' : ''}{provenance}{failed ? ' · install failed' : ''}</em></span>
+    <span className="plugins-card-text"><strong>{pkg.displayName}</strong><small>{pkg.description ?? (pkg.kind === 'skill' ? 'Skill' : 'Plugin')}</small><em title={fullProvenance}>{installed && <span className="plugins-card-installed"><Check size={11} />Installed{card.installedAs?.kind === 'codex' ? ' in Codex' : ''}</span>}{installed && provenance ? ' · ' : ''}{provenance}{failed ? ' · install failed' : ''}</em></span>
     {action}
   </div>;
 }

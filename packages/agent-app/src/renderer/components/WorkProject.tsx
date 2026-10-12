@@ -22,17 +22,18 @@ import { ResourceState } from './ResourceState';
 import { LabelChip, daysUntil, dayLabel } from './WorkParts';
 import { goalOptions } from '../workModels';
 import { Tip } from './Tooltip';
+import { showsStatusChip } from '../projectStatus';
 
 const STATUS_TONE: Record<ProjectStatus, 'faint' | 'accent' | 'ok' | 'warn'> = { backlog: 'faint', planned: 'warn', in_progress: 'accent', completed: 'ok', cancelled: 'faint' };
 
 // ── Status and target date (G32) ─────────────────────────────────────────────
 /** The header chips: the project's status, and its target date with how far off it is, red once overdue. */
-export function ProjectStatusChips({ project }: { project: Pick<WorkspaceProject, 'status' | 'targetDate' | 'starred'> | undefined }): React.ReactElement | null {
+export function ProjectStatusChips({ project }: { project: Pick<WorkspaceProject, 'status' | 'targetDate' | 'starred'> & { taskCount?: number } | undefined }): React.ReactElement | null {
   if (!project) return null;
   const status = (PROJECT_STATUSES.includes(project.status as ProjectStatus) ? project.status : 'in_progress') as ProjectStatus;
   const target = project.targetDate ?? null, overdue = isOverdue(status, target), days = target ? daysUntil(target) : 0;
   return <>
-    <StateChip tone={STATUS_TONE[status]}>{PROJECT_STATUS_LABEL[status]}</StateChip>
+    {showsStatusChip(status, project.taskCount) && <StateChip tone={STATUS_TONE[status]}>{PROJECT_STATUS_LABEL[status]}</StateChip>}
     {target && <span className="ws-chip" data-tone={overdue ? 'danger' : undefined} title={`Target date ${dayLabel(target)}`}>{overdue ? `Overdue · ${dayLabel(target)}` : status === 'completed' || status === 'cancelled' ? `Target ${dayLabel(target)}` : days === 0 ? 'Due today' : `Target ${dayLabel(target)} · ${days} ${days === 1 ? 'day' : 'days'}`}</span>}
   </>;
 }

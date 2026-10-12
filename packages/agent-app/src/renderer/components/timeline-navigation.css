@@ -37,3 +37,7 @@
 .turn-navigation-actions { opacity:0; visibility:hidden; transition:opacity 120ms ease, visibility 0s linear 120ms; }
 .turn-navigation:is(:hover,:focus-within) .turn-navigation-actions { opacity:1; visibility:visible; transition-delay:0s; }
 @media (hover:none) { .turn-navigation-actions { opacity:1; visibility:visible; } }
+
+/* One turn has nothing to navigate between: no stray dash in the left gutter, and no padding reserved for it. */
+.turn-rail:has(> .turn-tick:only-child) { display: none; }
+.turn-navigation:not(:has(.turn-rail > .turn-tick:nth-child(2))):not(:has(.turn-page)):not(:hover):not(:focus-within) { visibility: hidden; }

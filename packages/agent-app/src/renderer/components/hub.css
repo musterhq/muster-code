@@ -336,3 +336,7 @@ button.ws-row:disabled { cursor: default; }
 .ws-import-report p { display: flex; align-items: flex-start; gap: 6px; margin: 0; color: var(--text-dim); line-height: 1.45; }
 .ws-import-report svg { flex: none; margin-top: 2px; color: var(--ok); }
 .ws-start-run { margin-top: 8px; width: 100%; }
+.ws-chain-details { flex: none; font-size: var(--fs-12); color: var(--text-faint); }
+.ws-chain-details > summary { cursor: pointer; list-style: none; }
+.ws-chain-details > summary::-webkit-details-marker { display: none; }
+.ws-chain-details > .ws-chain { margin-top: 4px; }

@@ -35,6 +35,9 @@ export function describeTurns(rows:readonly TranscriptEntry[],running:boolean):{
     if(row.kind==='user'){finish(false);current={id:row.id,row:index,end:index,durationMs:null,complete:false,work:0};turns.set(row.id,current);live=false;latest=time(row.createdAt);latestAt=row.createdAt;rowTurn[index]=row.id;continue;}
     rowTurn[index]=current?.id;if(!current)continue;
     current.end=index;if(row.kind==='activity'||row.kind==='reasoning')current.work++;if(busy(row))live=true;
+    // A notice (an import marker, a stop note) is stamped when it was written, not when work happened; counting it
+    // made an imported chat read 'Worked for 614h'. A turn's time is its own work and replies.
+    if(row.kind==='notice')continue;
     const at=rowEnd(row),ms=time(at);if(ms>latest){latest=ms;latestAt=at;}
   }
   finish(true);

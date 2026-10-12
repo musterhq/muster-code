@@ -92,7 +92,7 @@ export function Receipt({ entry, defaultOpen = false }: { entry: LedgerEntry; de
   return <div className="ws-receipt" data-open={open || undefined}>
     <button type="button" className="ws-receipt-head" aria-expanded={open} onClick={() => setOpen(v => !v)}>
       <ChevronRight size={12} className="ws-receipt-caret" aria-hidden="true"/><ReceiptText size={12} aria-hidden="true"/>
-      <span className="ws-receipt-label">{NAMES.receipt}</span><span className="ws-receipt-summary">{parts.join(' · ')}</span>
+      <span className="ws-receipt-label">{NAMES.receipt}</span><span className="ws-receipt-summary" title={costText(entry) === 'unpriced' ? 'No price is known for this model, so the cost cannot be shown. Token counts are still exact.' : undefined}>{parts.join(' · ')}</span>
       <StateChip tone={runTone(entry.outcome)}>{entry.outcome.replace(/_/g, ' ')}</StateChip>
     </button>
     {open && <dl className="ws-receipt-body">

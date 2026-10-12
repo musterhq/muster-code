@@ -20,6 +20,7 @@ import {
   FolderKanban,
   FolderOpen,
   GitBranch,
+  GitPullRequest,
   Layers,
   LayoutGrid,
   MailOpen,
@@ -38,6 +39,7 @@ import {
   ArrowDownCircle,
   Inbox as InboxIcon,
   History as LedgerIcon,
+  LoaderCircle,
   Check as CheckIcon,
 } from 'lucide-react';
 import {installLabel,installsInPlace,installUpdate,updateSummary,useUpdateStatus} from '../updates';
@@ -101,17 +103,20 @@ import { ProjectHoverCard } from './ProjectHoverCard';
 import { ConfirmProjectAction, EditProjectDialog, toProjectDetails } from './ProjectEditDialog';
 import {Tip} from './Tooltip';
 import { device } from '../../shared/device-noun.ts';
+import { ProviderLogo } from './ProviderLogo';
+import { WorkingTimer, useFolderGit } from './SidebarLive';
+import { EMPTY_META, SETTLED_PAGE, buildLookups, buildSections, pageSettled, rowMeta, sameMeta, type RowMeta } from '../sidebarSections';
+import './sidebar-sections.css';
 
 const snapshotChats=(snapshot:AppState['snapshot']):Chat[]=>snapshot?.chats.filter(chat=>!chat.archived)??[];
 const IS_MAC=typeof navigator!=='undefined'&&/mac/i.test(navigator.platform||navigator.userAgent||'');
 
-type RowProps = { chat: Chat; now: number; tabbable: boolean; onFocusRow: (id: string) => void; selected: boolean; selectionMode: boolean; onRowClick: (id: string, event: React.MouseEvent) => void; drag?: ItemDragProps };
+type RowProps = { chat: Chat; meta: RowMeta; flat: boolean; now: number; tabbable: boolean; onFocusRow: (id: string) => void; selected: boolean; selectionMode: boolean; onRowClick: (id: string, event: React.MouseEvent) => void; drag?: ItemDragProps };
 
 const sameDrag=(a?:ItemDragProps,b?:ItemDragProps)=>a===b||(!!a&&!!b&&a.draggable===b.draggable&&a['data-drop']===b['data-drop']&&a['data-dragging']===b['data-dragging']&&a['aria-roledescription']===b['aria-roledescription']);
 /** Rows re-render only when their own chat object, selection or position changes; callbacks are stable (see Sidebar). */
-const ChatRow=React.memo(ChatRowImpl,(a,b)=>a.chat===b.chat&&a.now===b.now&&a.tabbable===b.tabbable&&a.selected===b.selected&&a.selectionMode===b.selectionMode&&a.onFocusRow===b.onFocusRow&&a.onRowClick===b.onRowClick&&sameDrag(a.drag,b.drag));
-function ChatRowImpl({ chat, now, tabbable, onFocusRow, selected, selectionMode, onRowClick, drag }: RowProps): React.ReactElement {
-  const {summary: processSummary} = useProcessSummary();
+const ChatRow=React.memo(ChatRowImpl,(a,b)=>a.chat===b.chat&&sameMeta(a.meta,b.meta)&&a.flat===b.flat&&a.now===b.now&&a.tabbable===b.tabbable&&a.selected===b.selected&&a.selectionMode===b.selectionMode&&a.onFocusRow===b.onFocusRow&&a.onRowClick===b.onRowClick&&sameDrag(a.drag,b.drag));
+function ChatRowImpl({ chat, meta, flat, now, tabbable, onFocusRow, selected, selectionMode, onRowClick, drag }: RowProps): React.ReactElement {
   const [renaming, setRenaming] = useState(false);
   const [title, setTitle] = useState(chat.title);
   const [renameError,setRenameError]=useState('');
@@ -120,10 +125,10 @@ function ChatRowImpl({ chat, now, tabbable, onFocusRow, selected, selectionMode,
   const renameCancelled=useRef(false),renamePending=useRef(false);
   const drafting = useNewChatDraft().open;
   const activeId = useStoreSelector(state => state.activeChatId);
-  const active = !drafting && activeId === chat.id;
-  const activeProcesses = processSummary?.sessions.filter(session => session.chatId === chat.id && isActiveProcess(session.status)).length ?? 0;
-  const pendingAttention = useStoreSelector(state => state.snapshot?.attention?.chats.find(item => item.chatId === chat.id)?.requests.length ?? 0);
-  const folder = useStoreSelector(state => state.snapshot?.folders.find(item => item.id === chat.folderId));
+  // Only the open conversation highlights, and only while the conversation is what is on screen (not Inbox, Memory or Ledger).
+  const onWork = useStoreSelector(state => state.screen === 'work');
+  const active = onWork && !drafting && activeId === chat.id;
+  const activeProcesses = meta.processes, pendingAttention = meta.attention;
   // An unsent draft shows at once from the composer, before the runtime echoes it back.
   const hasDraft = useStoreSelector(state => { const local = state.composerDrafts[chat.id]; return local ? local.text.length > 0 : Boolean(chat.draft); });
   // Timeline items are only kept live for the active chat (and a couple of open-tab edge cases);
@@ -208,6 +213,14 @@ function ChatRowImpl({ chat, now, tabbable, onFocusRow, selected, selectionMode,
             {pendingAttention > 0 && <span className="chat-attention-badge" aria-hidden="true">{pendingAttention}</span>}
           </span>}
           {hasDraft && <span className="chat-draft-dot" title="Unsent draft" />}
+          {(flat||meta.hint||isChatRunning(chat))&&<span className="chat-row-sub">
+            {flat&&meta.chip&&<span className="chat-row-chip" title={meta.hint?`${meta.chip} · ${meta.hint}`:meta.chip}>{meta.chip}</span>}
+            {meta.hint&&<span className="chat-row-hint">{meta.hint}</span>}
+            {flat&&meta.branch&&<span className="chat-row-branch" title={`Branch ${meta.branch}`}><GitBranch size={10} aria-hidden="true"/>{meta.branch}</span>}
+            {flat&&!!meta.prs&&<span className="chat-row-prs" title={`${plural(meta.prs,'open pull request')} for this branch`}><GitPullRequest size={10} aria-hidden="true"/>{meta.prs}</span>}
+            {flat&&meta.providerId&&<span className="chat-row-provider" title={`Provider ${meta.providerId}`}><ProviderLogo id={meta.providerId} name={meta.providerId} size={11}/></span>}
+            {isChatRunning(chat)&&<span className="chat-row-working"><span>{chat.status==='stopping'?'Stopping':'Working'}</span> <WorkingTimer chatId={chat.id} updatedAt={chat.updatedAt}/></span>}
+          </span>}
         </PreviewCard.Trigger>
       )}
       {renameError&&renaming&&<span className="chat-rename-error" role="alert">{renameError}</span>}
@@ -226,7 +239,7 @@ function ChatRowImpl({ chat, now, tabbable, onFocusRow, selected, selectionMode,
     </div>
     {!renaming&&<PreviewCard.Portal><PreviewCard.Positioner side="right" align="start" sideOffset={8} className="chat-preview-positioner"><PreviewCard.Popup className="chat-preview-card">
       <div className="chat-preview-title"><span>{chat.title}</span><StatusDot status={rowStatus} showLabel={isChatRunning(chat)}/></div>
-      <div className="chat-preview-meta"><span>{folder?(folder.missing?`${folder.name} (missing)`:folder.name):'Personal chat'}</span><time dateTime={chat.updatedAt} title={exact}>{updated?`Updated ${updated}`:'Updated recently'}</time></div>
+      <div className="chat-preview-meta"><span>{meta.folderLabel}{meta.hint?` · ${meta.hint}`:''}</span><time dateTime={chat.updatedAt} title={exact}>{updated?`Updated ${updated}`:'Updated recently'}</time></div>
       {snoozed&&<div className="chat-preview-activity"><span>{wakes}</span></div>}
       {(activeProcesses>0||pendingAttention>0)&&<div className="chat-preview-activity">{activeProcesses>0&&<span>{plural(activeProcesses, 'command')} running</span>}{pendingAttention>0&&<span>{plural(pendingAttention, 'request')} need input</span>}</div>}
     </PreviewCard.Popup></PreviewCard.Positioner></PreviewCard.Portal>}
@@ -234,8 +247,10 @@ function ChatRowImpl({ chat, now, tabbable, onFocusRow, selected, selectionMode,
   );
 }
 
-function GroupHead({ title, tooltip, chats=[], children, icon, nested=false, onContextMenu, className='', draggable }: {
+function GroupHead({ title, hint, tooltip, chats=[], children, icon, nested=false, onContextMenu, className='', draggable }: {
   title: string;
+  /** Parent path or suffix that tells same-named folders and projects apart. */
+  hint?: string;
   tooltip?: string;
   chats?: Chat[];
   children?: React.ReactNode;
@@ -256,6 +271,7 @@ function GroupHead({ title, tooltip, chats=[], children, icon, nested=false, onC
         <span className="nav-section-title" title={tooltip ?? title}>
           {title}
         </span>
+        {hint&&<span className="nav-section-hint" title={hint}>{hint}</span>}
         {running>0&&<span className="nav-running-count" title={`${running} working or stopping`} aria-label={`${running} active chats`}>{running}</span>}
         {unread>0&&<span className="nav-unread-dot" title={`${unread} unread`} aria-label={`${plural(unread, 'unread chat')}`}/>}
       </Collapsible.Trigger>
@@ -282,8 +298,8 @@ function FolderRename({folder,done}:{folder:Folder;done:()=>void}):React.ReactEl
   }}/></header>;
 }
 
-type RowContext = { now: number; stop: string | null; onFocusRow: (id: string) => void; selection: MultiSelectState; selectionMode: boolean; onRowClick: (id: string, event: React.MouseEvent) => void };
-const rows=(chats:Chat[],context:RowContext,drag?:(id:string)=>ItemDragProps)=>chats.map(chat=><ChatRow key={chat.id} chat={chat} now={context.now} tabbable={context.stop===chat.id} onFocusRow={context.onFocusRow} selected={isSelected(context.selection,chat.id)} selectionMode={context.selectionMode} onRowClick={context.onRowClick} drag={drag?.(chat.id)}/>);
+type RowContext = { metaOf: (chat: Chat) => RowMeta; now: number; stop: string | null; onFocusRow: (id: string) => void; selection: MultiSelectState; selectionMode: boolean; onRowClick: (id: string, event: React.MouseEvent) => void };
+const rows=(chats:Chat[],context:RowContext,drag?:(id:string)=>ItemDragProps,flat=false)=>chats.map(chat=><ChatRow key={chat.id} chat={chat} meta={context.metaOf(chat)} flat={flat} now={context.now} tabbable={context.stop===chat.id} onFocusRow={context.onFocusRow} selected={isSelected(context.selection,chat.id)} selectionMode={context.selectionMode} onRowClick={context.onRowClick} drag={drag?.(chat.id)}/>);
 
 /** Re-render row ages once a minute without touching the store. */
 function useMinuteClock():number {
@@ -389,15 +405,32 @@ export function Sidebar(): React.ReactElement {
   // Work locally makes a worktree folder per task; its chat is listed under the task in its org, so the folder stays out of Folders.
   const checkoutFolders=useEventLoad(e=>e.type==='checkoutChanged',()=>invoke('checkout.leases',{}).then(r=>new Set(r.leases.map(l=>l.folderId).filter((id):id is string=>Boolean(id)))).catch(()=>new Set<string>()),[]).data;
   const [projectEdit,setProjectEdit]=useState<{id:string;mode:'edit'|'rename'|'archive'}|null>(null);
-  if (!snapshot) {
+  // Lookup maps are built once per snapshot, so rows never scan folders, projects, attention or processes themselves.
+  const {summary:processSummary}=useProcessSummary();
+  const [settledShown,setSettledShown]=useState(SETTLED_PAGE);
+  const lookups=useMemo(()=>snapshot?buildLookups(snapshot):undefined,[snapshot]);
+  const processesByChat=useMemo(()=>{const map=new Map<string,number>();for(const session of processSummary?.sessions??[])if(session.chatId&&isActiveProcess(session.status))map.set(session.chatId,(map.get(session.chatId)??0)+1);return map;},[processSummary]);
+  // Branch and PR facts are only worth fetching for rows that show them: working, pinned and the newest chats.
+  const gitFolderIds=useMemo(()=>{
+    if(!snapshot)return [];
+    const ids=new Set<string>();
+    const recent=snapshot.chats.filter(chat=>!chat.archived&&chat.folderId).sort((a,b)=>(isChatRunning(b)?1:0)-(isChatRunning(a)?1:0)||(b.pinned?1:0)-(a.pinned?1:0)||b.updatedAt.localeCompare(a.updatedAt)).slice(0,14);
+    for(const chat of recent)ids.add(chat.folderId!);
+    return [...ids];
+  },[snapshot]);
+  const gitFacts=useFolderGit(gitFolderIds);
+  if (!snapshot||!lookups) {
     return <ResourceState kind="loading" compact label="Loading chats" rows={5}/>;
   }
+  const metaOf=(chat:Chat):RowMeta=>rowMeta(chat,lookups,processesByChat.get(chat.id)??0,chat.folderId?gitFacts.get(chat.folderId):undefined);
 
   const live = snapshot.chats.filter((c) => !c.archived).sort(compareChats(sort));
   const snoozedChats = live.filter(chat=>chatGroup(chat,snapshot)==='snoozed').sort((a,b)=>(a.snoozedUntil??'\uffff').localeCompare(b.snoozedUntil??'\uffff')||a.title.localeCompare(b.title));
   const archived = snapshot.chats.filter((c) => c.archived).sort(compareChats(sort));
   const inGroup=(group:string)=>live.filter(chat=>chatGroup(chat,snapshot)===group);
   const pinned = inGroup('pinned');
+  // A running chat is always listed here, whatever its folder or pin state, so it is never hidden behind a collapsed group.
+  const working = inGroup('working');
   // S3-G: the project hover card, the native row menu and the Edit project dialog share one piece of state.
   const editedProject=projectEdit?snapshot.projects.find(project=>project.id===projectEdit.id):undefined;
   const projectGroups = snapshot.projects.map(project=>({project,gid:`project:${project.id}`,chats:inGroup(`project:${project.id}`)})).filter(group=>!group.project.archived||group.chats.length>0);
@@ -410,7 +443,7 @@ export function Sidebar(): React.ReactElement {
   const renderProject=({project,gid,chats}:{project:typeof projectGroups[number]['project'];gid:string;chats:Chat[]})=>(
             <Collapsible.Root className="nav-section" key={project.id} open={isOpen(gid)} onOpenChange={value=>toggleGroup(gid,value)}>
               <PreviewCard.Root><PreviewCard.Trigger render={<div/>} className="nav-project-hover" delay={600} closeDelay={120}>
-              <GroupHead nested title={project.name} tooltip={project.name} chats={chats} icon={<Layers size={13}/>} onContextMenu={event=>{event.preventDefault();void openProjectMenu(project.id,event.clientX,event.clientY,mode=>setProjectEdit({id:project.id,mode}));}}>
+              <GroupHead nested title={project.name} hint={lookups.projectHints.get(project.id)} tooltip={lookups.projectHints.get(project.id)?`${project.name} · ${lookups.projectHints.get(project.id)}`:project.name} chats={chats} icon={<Layers size={13}/>} onContextMenu={event=>{event.preventDefault();void openProjectMenu(project.id,event.clientX,event.clientY,mode=>setProjectEdit({id:project.id,mode}));}}>
                 <Tip label={project.folderIds.length ? `New chat in ${project.name}` : 'Add a folder in Projects'}><button
                   type="button"
                   className="icon-button"
@@ -435,13 +468,17 @@ export function Sidebar(): React.ReactElement {
   const taskWorktrees = taskWorktreeFolderIds(snapshot);
   const folderGroups = snapshot.folders.filter(folder=>!taskWorktrees.has(folder.id)&&!checkoutFolders?.has(folder.id)).map(folder=>({folder,gid:`folder:${folder.id}`,chats:inGroup(`folder:${folder.id}`)}));
   const orphanChats = inGroup('chats');
+  const loose=buildSections(orphanChats,new Set(lookups.attention.keys()),now,compareChats(sort));
+  const settledPage=pageSettled(loose.settled,settledShown);
   const archivedOpen = showArchived;
   // Visible row order drives roving focus; it mirrors the render order below.
   const visible=[
+    ...(isOpen('working')?working:[]),
     ...(isOpen('pinned')?pinned:[]),
     ...folderGroups.flatMap(group=>isOpen(group.gid)?group.chats:[]),
     ...projectGroups.flatMap(group=>isOpen(group.gid)?group.chats:[]),
-    ...(isOpen('chats')?orphanChats:[]),
+    ...(isOpen('chats')?loose.active:[]),
+    ...(isOpen('settled')?settledPage.visible:[]),
     ...(isOpen('snoozed')?snoozedChats:[]),
     ...(archivedOpen?archived:[]),
   ].map(chat=>chat.id);
@@ -480,7 +517,7 @@ export function Sidebar(): React.ReactElement {
     setDeleteBusy(false);setConfirmDelete(false);setSelection(previous=>keepSelected(previous,failed));
   };
   rowClickRef.current=handleRowClick;
-  const context:RowContext={now,stop:rovingStop(visible,focusedRow,state.activeChatId),onFocusRow:setFocusedRow,selection,selectionMode:selection.selected.size>0,onRowClick:stableRowClick};
+  const context:RowContext={metaOf,now,stop:rovingStop(visible,focusedRow,state.activeChatId),onFocusRow:setFocusedRow,selection,selectionMode:selection.selected.size>0,onRowClick:stableRowClick};
   const onNavKey=(event:React.KeyboardEvent<HTMLDivElement>)=>{
     const target=event.target as HTMLElement;
     // ⌥⇧↑/⌥⇧↓: the keyboard equivalent of dragging a pinned chat or a folder one step (same result as the drop).
@@ -522,13 +559,13 @@ export function Sidebar(): React.ReactElement {
       </button>
       <div className="nav-toolbar">
         <SidebarInbox screen={state.screen}/>
-        <button type="button" className={`tool-button${draft.open?' is-active':''}`} title={activeFolder?`New chat in ${activeFolder.name} (⌘N)`:'New chat (⌘N)'} aria-keyshortcuts="Meta+N Control+N" aria-current={draft.open?'page':undefined} onClick={newChatHere}>
+        <button type="button" className={`tool-button${draft.open&&state.screen==='work'?' is-active':''}`} title={activeFolder?`New chat in ${activeFolder.name} (⌘N)`:'New chat (⌘N)'} aria-keyshortcuts="Meta+N Control+N" aria-current={draft.open&&state.screen==='work'?'page':undefined} onClick={newChatHere}>
           <SquarePen size={15} /><span>New chat</span>
         </button>
         <button type="button" className="tool-button" title="Search chats (⌘K)" aria-keyshortcuts="Meta+K Control+K" onClick={() => openSpotlightSearch()} aria-haspopup="dialog">
           <Search size={15} /><span>Search chats</span>
         </button>
-        <button type="button" className="tool-button" title="Memory for the current folder" onClick={() => openMemoryScreen(activeChat()?.folderId)}><Brain size={15}/><span>Memory</span></button>
+        <button type="button" className={`tool-button${state.screen==='memory'?' is-active':''}`} aria-current={state.screen==='memory'?'page':undefined} title="Memory for the current folder" onClick={() => openMemoryScreen(activeChat()?.folderId)}><Brain size={15}/><span>Memory</span></button>
         <button type="button" className={`tool-button${state.screen==='automations'?' is-active':''}`} title="Scheduled and file-triggered agent runs" aria-current={state.screen==='automations'?'page':undefined} onClick={openAutomationsScreen}><CalendarClock size={15}/><span>Automations</span>{runningAutomations>0&&<span className="nav-tool-count" aria-label={`${runningAutomations} running`}>{runningAutomations}</span>}</button>
         <HubEntry screen={state.screen} page="ledger" icon={<LedgerIcon size={15}/>} label={NAMES.ledger} title="Every agent turn: receipts, timeline and costs"/>
 
@@ -557,10 +594,16 @@ export function Sidebar(): React.ReactElement {
       <FolderDefaultModelSheet/>
       {autoscroll.rejected&&<div className="nav-drag-hint" role="status">{autoscroll.rejected}</div>}
       <div className="nav-scroll" ref={nav} tabIndex={-1} onKeyDown={onNavKey} onKeyUp={event=>{if(event.key===' '&&(event.target as HTMLElement).classList?.contains('chat-row-main'))event.preventDefault();}} onDragOver={autoscroll.onDragOver} onDragLeave={autoscroll.onDragLeave}>
+        {working.length > 0 && (
+          <Collapsible.Root className="nav-section nav-working" open={isOpen('working')} onOpenChange={value=>toggleGroup('working',value)}>
+            <GroupHead title="Working" tooltip="Chats that are running right now" chats={working} icon={<LoaderCircle size={12}/>}/>
+            <Collapsible.Panel className="nav-group-panel">{rows(working,context,undefined,true)}</Collapsible.Panel>
+          </Collapsible.Root>
+        )}
         {pinned.length > 0 && (
           <Collapsible.Root className="nav-section" open={isOpen('pinned')} onOpenChange={value=>toggleGroup('pinned',value)}>
             <GroupHead title="Pinned" tooltip="Pinned · drag or ⌥⇧↑/⌥⇧↓ to reorder" chats={pinned} icon={<Pin size={12}/>}/>
-            <Collapsible.Panel className="nav-group-panel" {...pinDrag.containerProps}>{rows(pinned,context,pinDrag.itemProps)}</Collapsible.Panel>
+            <Collapsible.Panel className="nav-group-panel" {...pinDrag.containerProps}>{rows(pinned,context,pinDrag.itemProps,true)}</Collapsible.Panel>
           </Collapsible.Root>
         )}
         <section className="nav-block" aria-label="Folders" {...folderDrag.containerProps}>
@@ -576,7 +619,7 @@ export function Sidebar(): React.ReactElement {
             <Collapsible.Root className="nav-section" key={folder.id} open={isOpen(gid)} onOpenChange={value=>toggleGroup(gid,value)} data-folder-id={folder.id} {...dropMark}>
               {renamingFolder===folder.id
                 ? <FolderRename folder={folder} done={()=>setRenamingFolder(null)}/>
-                : <GroupHead nested draggable={folderIds.length>1} title={folder.name} tooltip={folder.missing?`${folder.path} — not found`:`${folder.path}${folderIds.length>1?' · drag or ⌥⇧↑/⌥⇧↓ to reorder':''}`} chats={chats} className={folder.missing?'is-missing':''} icon={folder.missing?<TriangleAlert size={13}/>:<FolderOpen size={13}/>} onContextMenu={event=>{event.preventDefault();void folderMenu(folder,event.clientX,event.clientY);}}>
+                : <GroupHead nested draggable={folderIds.length>1} title={folder.name} hint={lookups.folderHints.get(folder.id)} tooltip={folder.missing?`${folder.path} — not found`:`${folder.path}${folderIds.length>1?' · drag or ⌥⇧↑/⌥⇧↓ to reorder':''}`} chats={chats} className={folder.missing?'is-missing':''} icon={folder.missing?<TriangleAlert size={13}/>:<FolderOpen size={13}/>} onContextMenu={event=>{event.preventDefault();void folderMenu(folder,event.clientX,event.clientY);}}>
                 {folder.missing
                   ? <button type="button" className="nav-relink" title={`${folder.path} was moved or deleted. Choose its new location.`} onClick={()=>void folderMenu(folder,0,0,'relink')}>Relink</button>
                   : <>
@@ -615,12 +658,21 @@ export function Sidebar(): React.ReactElement {
             <button type="button" className="nav-quiet-row" onClick={()=>openNewChat({})}><MessageCircle size={14} aria-hidden="true"/><span>Start a chat without a folder</span></button>
           </section>
         )}
-        {orphanChats.length > 0 && (
+        {loose.active.length > 0 && (
           <Collapsible.Root className="nav-section" open={isOpen('chats')} onOpenChange={value=>toggleGroup('chats',value)}>
-            <GroupHead title="Chats" chats={orphanChats} icon={<MessageCircle size={12}/>}>
+            <GroupHead title={loose.settled.length?'Active':'Chats'} chats={loose.active} icon={<MessageCircle size={12}/>}>
               <Tip label="New chat without a folder"><button type="button" className="icon-button" aria-label="New chat without a folder" onClick={()=>openNewChat({})}><SquarePen size={13}/></button></Tip>
             </GroupHead>
-            <Collapsible.Panel className="nav-group-panel">{rows(orphanChats,context)}</Collapsible.Panel>
+            <Collapsible.Panel className="nav-group-panel">{rows(loose.active,context,undefined,true)}</Collapsible.Panel>
+          </Collapsible.Root>
+        )}
+        {loose.settled.length > 0 && (
+          <Collapsible.Root className="nav-section nav-settled" open={isOpen('settled')} onOpenChange={value=>toggleGroup('settled',value)}>
+            <GroupHead title={`Settled (${loose.settled.length})`} tooltip="Chats with nothing new in a few days" chats={[]} icon={<Check size={12}/>}/>
+            <Collapsible.Panel className="nav-group-panel">
+              {rows(settledPage.visible,context,undefined,true)}
+              {settledPage.more>0&&<button type="button" className="nav-quiet-row nav-show-more" onClick={()=>setSettledShown(count=>count+SETTLED_PAGE)}><Plus size={13} aria-hidden="true"/><span>Show more ({settledPage.more})</span></button>}
+            </Collapsible.Panel>
           </Collapsible.Root>
         )}
         {snoozedChats.length > 0 && (
