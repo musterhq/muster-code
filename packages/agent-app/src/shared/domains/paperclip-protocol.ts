@@ -222,7 +222,17 @@ export type ThreadCard =
   /** An agent asking for a secret by name (G23). You enter the value in the card; the agent never sees it. */
   | { kind: 'secret'; id: string; at: string; proposal: SecretProposal; secureStorage: boolean };
 /** One question of a Paperclip ask_user_questions interaction. */
-export interface PaperclipQuestion { id: string; prompt: string; helpText: string | null; multi: boolean; allowOther: boolean; options: { id: string; label: string; description: string | null }[] }
+export interface PaperclipQuestion { id: string; prompt: string; helpText: string | null; multi: boolean; allowOther: boolean;
+  /** Paperclip's free-text option ("Other"): its id goes in `optionIds` with the text. It is not listed in `options`. */
+  otherOptionId?: string | null;
+  options: { id: string; label: string; description: string | null }[] }
+/** The answer for one question: the picked options, plus the Other option's id and text when Other text is given (single-select: just the Other id). */
+export function buildPaperclipAnswer(q: Pick<PaperclipQuestion, 'id' | 'multi' | 'otherOptionId'>, picked: readonly string[], otherText: string): PaperclipAnswer {
+  const text = otherText.trim();
+  if (!text) return { questionId: q.id, optionIds: [...picked] };
+  const optionIds = q.otherOptionId ? (q.multi ? [...picked, q.otherOptionId] : [q.otherOptionId]) : q.multi ? [...picked] : [];
+  return { questionId: q.id, optionIds, otherText: text };
+}
 /** An answer for Paperclip's `/interactions/:id/respond`. */
 export interface PaperclipAnswer { questionId: string; optionIds: string[]; otherText?: string | null }
 /** A Muster task's governance: execution policy and stage, hold, hiding, why its runs started, follow-up check, stopped-subtree finding. */

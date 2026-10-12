@@ -252,20 +252,37 @@ export function mapReceipt(r: Json, agents: ReadonlyMap<string, WorkspaceAgent>)
 }
 
 /** Needs-you cards from a Paperclip issue's thread interactions (confirmations, questions, suggested tasks). */
+/** What the person answered on a resolved ask_user_questions set: the chosen labels, and "Other: text" for a typed answer. */
+function answeredSummary(i: Json, payload: Json, result: Json): string | null {
+  if (i.kind !== 'ask_user_questions') return null;
+  const questions = arr(payload.questions), parts: string[] = [];
+  for (const a of arr(result.answers)) {
+    const q = questions.find(x => str(x.id) === str(a.questionId)), options = arr(q?.options);
+    const ids = Array.isArray(a.optionIds) ? a.optionIds : [], labels = ids.map(id => options.find(o => o.id === id)).filter((o): o is Json => Boolean(o) && o!.freeText !== true).map(o => str(o.label) ?? String(o.id));
+    const other = str(a.otherText);
+    const text = [...labels, ...(other ? [`Other: ${other}`] : [])].join(', ');
+    if (text) parts.push(questions.length > 1 ? `${str(q?.prompt) ?? 'Question'} ${text}` : text);
+  }
+  return parts.length ? parts.join(' · ').slice(0, 1200) : null;
+}
 export function mapInteraction(i: Json, agents: ReadonlyMap<string, WorkspaceAgent>): ThreadCard {
   const payload = obj(i.payload), result = obj(i.result), status = String(i.status ?? 'pending');
   const questions = arr(payload.questions).map(q => str(q.prompt) ?? str(q.question)).filter(Boolean);
   // ask_user_questions is answerable here too, through Paperclip's respond endpoint.
   const asking = i.kind === 'ask_user_questions' && status === 'pending'
-    ? arr(payload.questions).filter(q => str(q.id) && arr(q.options).length).map(q => ({ id: String(q.id), prompt: str(q.prompt) ?? str(q.question) ?? 'Question', helpText: str(q.helpText), multi: q.selectionMode === 'multi', allowOther: q.allowOther === true,
-      options: arr(q.options).filter(o => str(o.id)).map(o => ({ id: String(o.id), label: str(o.label) ?? String(o.id), description: str(o.description) })) }))
+    ? arr(payload.questions).filter(q => str(q.id)).map(q => {
+      const all = arr(q.options).filter(o => str(o.id)), free = all.find(o => o.freeText === true);
+      // Paperclip: "Other" is on unless allowOther is false, and the usual form is an option marked freeText. A question with no options is text-only.
+      return { id: String(q.id), prompt: str(q.prompt) ?? str(q.question) ?? 'Question', helpText: str(q.helpText), multi: q.selectionMode === 'multi', allowOther: q.allowOther !== false || free !== undefined || all.length === 0, otherOptionId: free ? String(free.id) : null,
+        options: all.filter(o => o !== free).map(o => ({ id: String(o.id), label: str(o.label) ?? String(o.id), description: str(o.description) })) };
+    })
     : [];
   return {
     kind: 'needs', id: `interaction:${i.id}`, at: iso(i.createdAt), from: agents.get(str(i.createdByAgentId) ?? '')?.name ?? null,
     prompt: str(payload.prompt) ?? (questions.length ? questions.join(' · ') : str(payload.title) ?? 'An agent needs your decision.'),
     detail: str(payload.detailsMarkdown)?.slice(0, 1200) ?? null,
     status: status === 'pending' ? 'pending' : status === 'cancelled' || status === 'withdrawn' || status === 'expired' ? 'cancelled' : 'resolved',
-    resolution: str(result.outcome) ? `${result.outcome}${str(result.reason) ? `: ${result.reason}` : ''}` : null,
+    resolution: str(result.outcome) ? `${result.outcome}${str(result.reason) ? `: ${result.reason}` : ''}` : answeredSummary(i, payload, result),
     interactionId: (i.kind === 'request_confirmation' || asking.length > 0) && status === 'pending' ? String(i.id) : null,
     acceptLabel: str(payload.acceptLabel), rejectLabel: str(payload.rejectLabel),
     ...(asking.length ? { questions: asking, submitLabel: str(payload.submitLabel) } : {}),

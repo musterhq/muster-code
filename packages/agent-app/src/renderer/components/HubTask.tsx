@@ -10,7 +10,7 @@ import { ArrowDown, ArrowRight, ArrowUp, Brain, CircleHelp, FileText, GitBranch,
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { LedgerEntry, PaperclipQuestion, ThreadCard, WorkspaceComment, WorkspaceMemory, WorkspacePriority, WorkspaceSnapshot, WorkspaceStatus, WorkspaceTaskDetail } from '../../shared/domains/paperclip-protocol';
 import type { Vote } from '../../shared/domains/work-protocol';
-import { PRIORITY_NAME, STATUS_LABEL, WORKSPACE_PRIORITIES, WORKSPACE_STATUSES } from '../../shared/domains/paperclip-protocol';
+import { buildPaperclipAnswer, PRIORITY_NAME, STATUS_LABEL, WORKSPACE_PRIORITIES, WORKSPACE_STATUSES } from '../../shared/domains/paperclip-protocol';
 import { NAMES } from '../../shared/workspace-names';
 import { invoke } from '../bridge';
 import { onTasksChanged } from '../hubStore';
@@ -186,13 +186,22 @@ function DocumentCard({ card }: { card: Extract<ThreadCard, { kind: 'document' }
 function PaperclipQuestions({ taskId, interactionId, questions, submitLabel, onChanged }: { taskId: string; interactionId: string; questions: PaperclipQuestion[]; submitLabel: string | null; onChanged: () => void }): React.ReactElement {
   const [picked, setPicked] = useState<Record<string, string[]>>({});
   const [other, setOther] = useState<Record<string, string>>({});
+  // "Other" is a choice of its own; a question with no options is only the text field.
+  const [otherOn, setOtherOn] = useState<Record<string, boolean>>({});
+  const otherField = useRef<Record<string, HTMLInputElement | null>>({});
   const [busy, setBusy] = useState(false);
-  const answered = (q: PaperclipQuestion) => (picked[q.id]?.length ?? 0) > 0 || Boolean(other[q.id]?.trim());
+  const otherShown = (q: PaperclipQuestion) => q.allowOther && (q.options.length === 0 || otherOn[q.id] === true);
+  const answered = (q: PaperclipQuestion) => (picked[q.id]?.length ?? 0) > 0 || (otherShown(q) && Boolean(other[q.id]?.trim()));
+  const chooseOther = (q: PaperclipQuestion, on: boolean) => {
+    setOtherOn(current => ({ ...current, [q.id]: on }));
+    if (on && !q.multi) setPicked(current => ({ ...current, [q.id]: [] }));
+    if (on) setTimeout(() => otherField.current[q.id]?.focus(), 0);
+  };
   const send = async () => {
     if (busy || !questions.every(answered)) return;
     setBusy(true);
     try {
-      await invoke('paperclip.interaction.respond', { taskId, interactionId, accept: true, answers: questions.map(q => ({ questionId: q.id, optionIds: picked[q.id] ?? [], ...(other[q.id]?.trim() ? { otherText: other[q.id].trim() } : {}) })) });
+      await invoke('paperclip.interaction.respond', { taskId, interactionId, accept: true, answers: questions.map(q => buildPaperclipAnswer(q, picked[q.id] ?? [], otherShown(q) ? other[q.id] ?? '' : '')) });
       notifySuccess('Answer sent.'); onChanged();
     } catch (cause) { notifyError(cause); setBusy(false); }
   };
@@ -200,8 +209,9 @@ function PaperclipQuestions({ taskId, interactionId, questions, submitLabel, onC
     {questions.map(q => <fieldset key={q.id} disabled={busy}>
       <p>{q.prompt}</p>
       {q.helpText && <p className="ws-faint">{q.helpText}</p>}
-      {q.options.map(option => { const on = picked[q.id]?.includes(option.id) ?? false; return <label key={option.id} className="pending-question-option"><input type={q.multi ? 'checkbox' : 'radio'} name={`${interactionId}:${q.id}`} checked={on} onChange={() => setPicked(current => ({ ...current, [q.id]: q.multi ? (on ? (current[q.id] ?? []).filter(x => x !== option.id) : [...(current[q.id] ?? []), option.id]) : [option.id] }))}/> <span>{option.label}{option.description && <small>{option.description}</small>}</span></label>; })}
-      {q.allowOther && <label className="pending-question-custom">Other answer<input type="text" value={other[q.id] ?? ''} onChange={e => setOther(current => ({ ...current, [q.id]: e.target.value }))} placeholder="Or type a custom response"/></label>}
+      {q.options.map(option => { const on = picked[q.id]?.includes(option.id) ?? false; return <label key={option.id} className="pending-question-option"><input type={q.multi ? 'checkbox' : 'radio'} name={`${interactionId}:${q.id}`} checked={on} onChange={() => { setPicked(current => ({ ...current, [q.id]: q.multi ? (on ? (current[q.id] ?? []).filter(x => x !== option.id) : [...(current[q.id] ?? []), option.id]) : [option.id] })); if (!q.multi) setOtherOn(current => ({ ...current, [q.id]: false })); }}/> <span>{option.label}{option.description && <small>{option.description}</small>}</span></label>; })}
+      {q.allowOther && q.options.length > 0 && <label className="pending-question-option"><input type={q.multi ? 'checkbox' : 'radio'} name={`${interactionId}:${q.id}`} checked={otherOn[q.id] === true} onChange={() => chooseOther(q, !(otherOn[q.id] === true))}/> <span>Other</span></label>}
+      {otherShown(q) && <label className="pending-question-custom">{q.options.length ? 'Other answer' : 'Your answer'}<input type="text" ref={el => { otherField.current[q.id] = el; }} value={other[q.id] ?? ''} onChange={e => setOther(current => ({ ...current, [q.id]: e.target.value }))} placeholder="Type your own answer"/></label>}
     </fieldset>)}
     <div className="pending-question-actions"><button type="button" className="pending-question-submit" disabled={busy || !questions.every(answered)} onClick={() => void send()}>{busy ? 'Sending…' : submitLabel ?? 'Send answer'}</button></div>
   </section>;
