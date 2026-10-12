@@ -1335,3 +1335,17 @@ test('#345 stale check-outs: idle for more than 3 days shows how long ago and of
   assert.equal((await b.svc.plan('t1')).broadFolder, true, 'the check-out sheet warns'); const lb = await b.svc.start({ taskId: 't1', model: OWN, confirm: true }); assert.equal(lb.broadFolder, true, 'and so does the task');
   const ok = setup(); await plain(ok); assert.equal((await ok.svc.plan('t1')).broadFolder, false);
 });
+
+test('#385: a task description past the 32,000-character cap is written whole to a self-ignoring .muster/task file and the brief points at it', async () => {
+  const h = setup(); await bound(h);
+  const l = await h.svc.start({ taskId: 't1', model: { kind: 'org-agent', agentId: 'a-ceo' }, confirm: true });
+  const wt = mkdtempSync(join(tmpdir(), 'muster-wt-')); h.store.putLease({ ...h.store.lease('t1')!, worktree: wt });
+  const copy = h.store.orgCopy('t1')!; copy.task.description = 'Goal: do it.\n' + 'x'.repeat(40_000) + '\nEND-OF-TASK'; h.store.putOrgCopy('t1', copy);
+  const brief = (await h.svc.brief(l.chatId!))!;
+  assert.ok(!brief.includes('END-OF-TASK'), 'the envelope is cut');
+  const m = brief.match(/The full text is in (\S+TASK\.md)/);
+  assert.ok(m, 'the brief points at the file');
+  assert.match(readFileSync(m![1]!, 'utf8'), /END-OF-TASK/);
+  assert.equal(readFileSync(join(m![1]!, '..', '.gitignore'), 'utf8').trim(), '*');
+  assert.match(brief, /local commits on the task branch/);
+});

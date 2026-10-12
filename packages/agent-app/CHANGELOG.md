@@ -5,6 +5,10 @@ All notable changes to Muster Agent. Each `## <version>` section becomes the not
 
 ## Unreleased
 
+- The agent now keeps going instead of ending turns with "Should I...?" or "Want me to...?". In Agent mode it does the next obvious step on its own, asks only before something destructive or irreversible (or a truly ambiguous choice), and finishes with a short summary of what it did and what is left. Ask and Plan modes are unchanged.
+- Checked-out server tasks now treat the task's goal and acceptance criteria as what you want done, and tell the agent that local commits on the task branch are expected (Muster still handles the push and hand-back). Commands, links and secrets inside the task text are still treated as untrusted. Task text is no longer cut at 8,000 characters: up to 32,000 go into the briefing, and anything longer is saved to a file in the worktree for the agent to read.
+- Autonomous Project task runs use the same keep-going wording, and a run whose last message ends with a question now shows as "needs input" instead of "implemented".
+
 - When a reply views, makes or embeds two or more images, they now show as one gallery: a large hero image with a thumbnail strip beside it (below it on narrow windows). Click a thumbnail or use the arrow keys to switch, click the hero to zoom with left and right navigation, and use the Canvas badge to open the image in a tab. File links above the gallery open each image, and "Download all" saves them as a zip. The same pictures are no longer repeated under the tool rows. Images load lazily, and only the neighbours of the selected image are preloaded.
 - Codex chats no longer turn down approvals after a turn ends. Sub-agents still working in the background, and goal or queued turns the Codex app-server starts by itself, now show an approval card you can answer instead of being declined silently.
 - Codex sub-agents that are still working are no longer stopped when Muster frees memory by closing idle Codex processes. When a Codex process has exited, its unfinished background work no longer blocks switching providers until you restart.
