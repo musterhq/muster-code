@@ -508,7 +508,9 @@ function homeInstances({fs,directory,codexHome,cli,node,env,track,validator,fetc
       list=catalog.models;incremental=catalog.incremental;catalogSource='its model catalog';
     } else if(route.kind==='chatgpt'){
       // Codex keeps the model list of a ChatGPT sign-in in its own cache.
-      try {const cache=JSON.parse(boundedFile(fs,track(join(codexHome,'models_cache.json')))) as {models?:unknown};if(Array.isArray(cache.models)){list=cache.models;catalogSource='Codex’s model cache';}} catch {list=undefined;}
+      // Read like a model catalog (16 MB bound, not the 1 MB config bound): the cache carries every model's instructions and grows with each Codex release.
+      const cache=readCodexCatalog(track(join(codexHome,'models_cache.json')),fs);
+      if(cache.ok){list=cache.models;catalogSource='Codex’s model cache';}
       if(!list)return fail('Codex has not listed this account’s models yet. Run `codex` once, or set model_catalog_json in config.toml.');
     }
     let models:Models,excluded:ExcludedModel[]=[],listingKey:string|undefined,listingInfo:Pick<ProviderInfo,'listing'|'listingError'>={};
