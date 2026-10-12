@@ -8,6 +8,7 @@ import { forkChat } from '../messageActions';
 import { runMenuAction } from '../menuActions';
 import { discardAttachment, listAttachments, previewAttachment, readFileBase64, runtimeMessage, stageAttachment } from '../composerBridge';
 import { ModelPicker } from './ModelPicker';
+import { isCompactCommand } from '../../shared/compact-command';
 import { createChat, flushComposerDraft, getState, loadPlugins, loadProviders, loadSkills, refreshProvidersQuietly, notifyError, notifySuccess, openAppSettings, openBrowserTab, openFile, openPluginsScreen, openProjectsScreen, openTab, selectChat, sendMessage, setComposerDraft, setFollowUpMode, snapshotRevision, stopChat, updateChat } from '../store';
 import { ADD_CONTEXT_EVENT, loadComposerMemory, normalizeContextChip, saveComposerMemory, serializeContext, type ContextChip } from '../composerContext';
 import { setTerminalDock, setTerminalPaneView, terminalDock } from '../processSummary';
@@ -497,6 +498,8 @@ export function Composer({ chat }: { chat: Chat }): React.ReactElement {
     if (noProvider && !running) { setConnectAsk(true); return; }
     if (!hasPayload || composing.current || sending || modelPending.current || settingsPending.current || chat.archived || recoveryNeeded) return;
     if (staging) { flash('Waiting for attachments to finish uploading'); return; }
+    // /compact is Muster's own command: it runs here (or waits), and is never sent to the model.
+    if (isCompactCommand(text)) { if (running) { flash('Compact is available when the current run finishes'); return; } clearIfUnchanged(text); runCommand('compact'); return; }
     if (running) { void followUp(false); return; }
     if (!confirmed && chat.queuePaused && queue.length) { setConfirmSend(true); return; }
     if (isCheckoutQueued(chat.id)) { flash('Already queued · starts when the other chat in this folder finishes'); return; }
@@ -859,7 +862,7 @@ export function Composer({ chat }: { chat: Chat }): React.ReactElement {
     flash(`Saved skill $${slug} · find it under / and +`);
     requestAnimationFrame(() => input.current?.focus());
   };
-  const commandDisabled = (id: ComposerCommandId) => id === 'stop' ? !running : id === 'plan' ? choicesDisabled : id === 'model' || id === 'access' ? settingsBlocked : id === 'goal' || id === 'project' || id === 'sketch' || id === 'terminal' ? chat.archived : id === 'compact' ? running || !chat.providerThreadId : id === 'init' || id === 'review' ? chat.archived || !chat.folderId : false;
+  const commandDisabled = (id: ComposerCommandId) => id === 'stop' ? !running : id === 'plan' ? choicesDisabled : id === 'model' || id === 'access' ? settingsBlocked : id === 'goal' || id === 'project' || id === 'sketch' || id === 'terminal' ? chat.archived : id === 'compact' ? running || (!chat.providerThreadId && !timelineItems?.some(item => item.kind === 'user')) : id === 'init' || id === 'review' ? chat.archived || !chat.folderId : false;
   const runCommand = (id: ComposerCommandId, range?: { start: number; end: number }) => {
     if (commandDisabled(id)) return;
     if (range) replaceRange(range.start, range.end, '');

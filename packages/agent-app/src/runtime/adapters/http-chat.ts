@@ -175,7 +175,12 @@ export function anthropicAdapter(options: Omit<HttpOptions, 'endpoint' | 'label'
 /** GET a JSON model list with a timeout and a 1 MiB cap. */
 /** One `/models` entry. `owner` is the router's `owned_by` (a router's own agents and combos report "combo");
  *  `chat` is false for image, audio, video and moderation models, which a chat cannot run. */
-export interface ListedModel { id: string; name: string; owner?: string; chat?: boolean }
+export interface ListedModel { id: string; name: string; owner?: string; chat?: boolean; /** The router's own context size (`context_length`, `max_input_tokens`…), used as the window when the provider reports none. */ contextWindow?: number }
+/** A positive integer context size from a `/models` entry; routers name it differently. */
+export function listedContextWindow(entry: Record<string, unknown>): number | undefined {
+  for (const key of ['context_length', 'max_input_tokens', 'context_window', 'contextWindow', 'max_context_length', 'input_token_limit']) { const value = entry[key]; if (typeof value === 'number' && Number.isInteger(value) && value > 0 && value <= 50_000_000) return value; }
+  return undefined;
+}
 export async function fetchModelList(url: string, headers: Record<string, string>, label: string, request: Fetch = fetch, timeoutMs = 8000): Promise<ListedModel[]> {
   const controller = new AbortController(), timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -195,7 +200,8 @@ export async function fetchModelList(url: string, headers: Record<string, string
       const output = Array.isArray(entry.output_modalities) ? entry.output_modalities : undefined;
       const tools = entry.capabilities && typeof entry.capabilities === 'object' ? (entry.capabilities as {tool_calling?: unknown}).tool_calling : undefined;
       const chat = !(typeof entry.type === 'string' && entry.type !== 'model') && !(output && !output.includes('text')) && tools !== false;
-      return [{id, name: typeof name === 'string' && name.length <= 160 ? name.replace(/[\x00-\x1f]/g, '') : id, ...(typeof entry.owned_by === 'string' ? {owner: entry.owned_by.slice(0, 64)} : {}), chat}];
+      const contextWindow = listedContextWindow(entry);
+      return [{id, name: typeof name === 'string' && name.length <= 160 ? name.replace(/[\x00-\x1f]/g, '') : id, ...(typeof entry.owned_by === 'string' ? {owner: entry.owned_by.slice(0, 64)} : {}), chat, ...(contextWindow ? {contextWindow} : {})}];
     });
   } finally { clearTimeout(timer); }
 }

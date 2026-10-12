@@ -33,7 +33,8 @@ import { AgentModeReviewHost } from './review.ts';
 import {dirtyFileCount, gitStatus, mutateGit, pushGit, listPullRequests, compareUrl} from './git-local.ts';
 import {createEntry, moveFile} from './file-operations.ts';
 import { isElicitationRequest, elicitationPolicy, elicitationResult, elicitationText, elicitationServer } from '../shared/computer-use.ts';
-import { createProviderAdapter, ProviderPreDispatchError, type ProviderAdapter, type ProviderResult } from './provider.ts';
+import { isCompactCommand } from '../shared/compact-command.ts';
+import { createProviderAdapter, NO_LIVE_SESSION, ProviderPreDispatchError, type ProviderAdapter, type ProviderResult } from './provider.ts';
 import { discoverPlugins, discoverSkills, invokedPluginContext, resolveAttachedSkill, resolveInvokedPlugins } from './plugin-library.ts';
 import {providerAccessPolicy} from './provider-run-lifecycle.ts';
 import {parseKillIntent, userProcessThreat, type UserProcessTarget, type UserProcessThreat} from './user-process-guard.ts';
@@ -340,6 +341,36 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
     else store.appendItem(chatId, 'notice', COMPACTION_TEXT, 'completed', data);
     timeline(chatId);
   }
+  /** Manual compaction. A live provider session compacts its own thread. With none (a project chat after a restart, a thread retired by a
+   *  stopped turn, a provider switch) Muster compacts from the stored transcript: the thread is dropped and the next message starts a fresh
+   *  provider conversation seeded with the same summary digest a provider switch uses. */
+  async function compactChat(chatId: string): Promise<void> {
+    const chat = chatFor(chatId);
+    if (runs.has(chatId) || busy(chat)) throw new Error('Wait for the current run to finish before compacting.');
+    if (!provider.compact) throw new Error('This provider cannot compact context.');
+    if (compactions.has(chatId)) throw new Error('Compaction is already in progress.');
+    const row = store.appendItem(chatId, 'notice', 'Compacting context…', 'running', {kind:'compaction', status:'running', manual:true});
+    compactions.set(chatId, row.id); timeline(chatId);
+    try { await provider.compact(chatId); }
+    catch (error) {
+      const message = error instanceof Error ? error.message : '';
+      if (message.startsWith(NO_LIVE_SESSION.slice(0, 40)) && store.timeline(chatId).some(item => item.kind === 'user')) {
+        compactions.delete(chatId);
+        await provider.release?.(chatId).catch(() => undefined);
+        store.requireDigest(chatId);
+        store.updateChat(chatId, {providerThreadId: null, providerTurnId: null, providerThreadProviderId: null, providerThreadBindingId: null});
+        contextLedger.forget(chatId);
+        const telemetry = {...store.contextTelemetry(chatId), compacted: true, updatedAt: new Date().toISOString()};
+        store.setContextTelemetry(chatId, telemetry); emit({type: 'contextTelemetry', chatId, telemetry});
+        store.updateItem(row.id, 'Context compacted from the saved transcript. The next message starts a fresh provider conversation with a summary of the earlier messages.', 'completed', {kind:'compaction', status:'completed', manual:true});
+        timeline(chatId); state(); return;
+      }
+      if (compactions.get(chatId) === row.id) { compactions.delete(chatId); store.updateItem(row.id, `Compaction failed: ${message || 'the provider refused the request.'} History is unchanged.`, 'failed', {kind:'compaction', status:'failed', manual:true}); timeline(chatId); }
+      throw error;
+    }
+    // The provider confirms with thread/compacted; a quiet provider still settles the row once the request was accepted.
+    compactionCompleted(chatId);
+  }
   function settleQuestions(chatId: string) {
     for (const [itemId, pending] of questions) if (pending.chatId === chatId) finishQuestion(itemId, pending, null, 'interrupted');
   }
@@ -366,6 +397,8 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
     return firstReadyModel(provider.info());
   }
   async function send(chatId: string, prompt: string, requestId: string, skill?: string | string[], attachmentIds: string[] = [], invoked: {pluginIds?: string[]; effort?: ReasoningEffort; reuseUserItemId?: string} = {}) {
+    // /compact is Muster's command in every chat type and provider: never a message for the model.
+    if (isCompactCommand(prompt) && attachmentIds.length === 0 && skill === undefined) { await compactChat(chatId); return {runId: ''}; }
     let chat = chatFor(chatId);
     const folder = chat.folderId ? folderFor(chat.folderId) : undefined;
     const skillIds = [...new Set(skill === undefined ? [] : Array.isArray(skill) ? skill : [skill])];
@@ -1165,6 +1198,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
       }
       case 'chat.queue.add': {
         const chatId = id(p.id), chat = chatFor(chatId), attachmentIds = ids(p.attachmentIds, MAX_ATTACHMENTS_PER_MESSAGE);
+        if (isCompactCommand(p.text)) throw new Error('/compact runs when the current run finishes. It is not queued as a message.');
         if (chat.archived) throw new Error('Restore this chat before sending.');
         attachments.resolve(chatId, attachmentIds);
         const owned = queue.attachmentIds(chatId);
@@ -1205,6 +1239,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
       case 'chat.steer': {
         const chatId = id(p.id), message = text(p.text, 'message', MAX_QUEUED_TEXT), requestId = id(p.requestId), chat = chatFor(chatId);
         if (!message.trim()) throw new Error('Write a message first.');
+        if (isCompactCommand(message)) throw new Error('/compact runs when the current run finishes. It is not sent to the running agent.');
         const previous = steered.get(requestId);
         if (previous) { if (previous !== chatId) throw new Error('Request identity conflicts with its original message.'); return {steered:true}; }
         // A live turn cannot take files; the composer queues them instead.
@@ -1397,21 +1432,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
         const decision: ApprovalDecision = !p.approved ? 'decline' : p.decision === 'acceptForSession' ? 'acceptForSession' : 'accept';
         const pending = approvals.get(approvalId); if (!pending) throw new Error('This approval is no longer pending.'); finishApproval(approvalId, pending, decision, decision === 'decline' ? 'declined' : decision === 'acceptForSession' ? 'approved-session' : 'approved'); return; }
       case 'question.dismiss': { const questionId = id(p.id); const pending = questions.get(questionId); if (!pending) throw new Error('This question is no longer pending.'); finishQuestion(questionId, pending, null, 'dismissed'); return; }
-      case 'chat.compact': {
-        const chatId = id(p.id), chat = chatFor(chatId);
-        if (runs.has(chatId) || busy(chat)) throw new Error('Wait for the current run to finish before compacting.');
-        if (!provider.compact) throw new Error('This provider cannot compact context.');
-        if (compactions.has(chatId)) throw new Error('Compaction is already in progress.');
-        const row = store.appendItem(chatId, 'notice', 'Compacting context…', 'running', {kind:'compaction', status:'running', manual:true});
-        compactions.set(chatId, row.id); timeline(chatId);
-        try { await provider.compact(chatId); }
-        catch (error) {
-          if (compactions.get(chatId) === row.id) { compactions.delete(chatId); store.updateItem(row.id, `Compaction failed: ${error instanceof Error ? error.message : 'the provider refused the request.'} History is unchanged.`, 'failed', {kind:'compaction', status:'failed', manual:true}); timeline(chatId); }
-          throw error;
-        }
-        // The provider confirms with thread/compacted; a quiet provider still settles the row once the request was accepted.
-        compactionCompleted(chatId); return;
-      }
+      case 'chat.compact': await compactChat(id(p.id)); return;
       case 'question.respond': {
         const questionId = id(p.id); const pending = questions.get(questionId); if (!pending) throw new Error('This question is no longer pending.');
         if (!p.answers || typeof p.answers !== 'object' || Array.isArray(p.answers)) throw new Error('Invalid question answers.');

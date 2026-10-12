@@ -5,10 +5,14 @@ All notable changes to Muster Agent. Each `## <version>` section becomes the not
 
 ## 0.3.10
 
-The browser and computer-use previews behave: they show only while a session is live, show the real page, and never open a blank browser.
+Previews and project chats behave. Browser and computer-use previews show only while a session is live and show the real page; Compact works in Project chats; router models show their context window.
 
 - The browser and computer-use picture-in-picture (#360) now appears only for a live session. When a session ends it shows "Ended" with its last screenshot for a few seconds and goes away; a chat reopened later no longer keeps a ghost card, and unrelated shell work no longer leaves a red "disconnected" dot on an old page.
 - A card without a picture shows a "Starting…" skeleton instead of a globe. The corner dot means live and has an accessible label. Clicking a card opens that session's existing tab, never a blank browser. The browser tab shows "Opening browser…" instead of an empty pane while it starts.
+- Compact now works in Project chats. When no live provider session holds the thread (after a restart, a stopped turn, or a provider switch) Muster compacts from the saved transcript: the next message starts a fresh provider conversation seeded with a summary of the earlier messages, instead of failing with "No live provider session holds this thread".
+- The context popover shows window size and remaining context for router models. The router's `/models` `context_length` / `max_input_tokens` is used when the provider reports no window.
+- Typing `/compact` is always handled by Muster (every chat type and provider), never sent to the model. Compact errors no longer show the "Error invoking remote method" prefix.
+
 
 ## 0.3.9
 
