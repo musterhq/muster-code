@@ -83,7 +83,7 @@ const click=async(el:Element|null)=>{assert.ok(el,'element to click exists');(el
   assert.equal(tokens.get('--md-gap'),'0.55em');
   const gap=num(style(paragraph,'margin-block'));assert.ok(gap>=0.5&&gap<=0.6,`paragraph margin ${gap}em is 0.5-0.6em`);
   assert.equal(style(paragraph,'margin-block'),style(list,'margin-block'),'paragraph to list uses the same compact gap');
-  const lh=num(style(body,'line-height'));assert.ok(lh>=1.5&&lh<=1.55,`body line-height ${lh}`);
+  const lh=num(style(body,"line-height"));assert.ok(lh>=1.4&&lh<=1.5,`body line-height ${lh} (about 1.45 over the 16px chat text)`);
   const strong=document.querySelector('strong')!;
   const weight=num(style(strong,'font-weight'));assert.ok(weight>=600&&weight<=650,`bold weight ${weight}`);
   assert.equal(style(strong,'color'),tokens.get('--text-strong'),'bold uses the stronger foreground token');

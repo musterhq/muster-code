@@ -9,7 +9,7 @@ test('code-form references parse paths with every common line style', () => {
   assert.deepEqual(parseCodeReference('./handoff.md'),{path:'./handoff.md'});
   assert.deepEqual(parseCodeReference('Dockerfile:3'),{path:'Dockerfile',line:3});
   for (const notAPath of ['status --refresh','0660','NOAUTH','dueAt','v4.2.1','https://x.io/a.md','isDueSoon()','npm test']) assert.equal(parseCodeReference(notAPath),null,notAPath);
-  assert.equal(mentionLabel({path:'src/api/cli_contracts.py',line:169}),'cli_contracts.py (line 169)');
+  assert.equal(mentionLabel({path:'src/api/cli_contracts.py',line:169}),'cli_contracts.py · L169');
   assert.equal(mentionLabel({path:'docs/valkey.md'}),'valkey.md');
 });
 
@@ -27,7 +27,7 @@ test('the plugin links code and prose references and leaves code blocks, links a
   ]};
   remarkFileLinks()(tree);
   const p=tree.children[0].children;
-  assert.deepEqual(p.map((n:any)=>n.type==='link'?`[${n.children[0].value}](${n.url})`:n.value),['Edited ','[app.ts (line 42)](src/app.ts:42)',' and ','[README.md](README.md)','.']);
+  assert.deepEqual(p.map((n:any)=>n.type==='link'?`[${n.children[0].value}](${n.url})`:n.value),['Edited ','[app.ts · L42](src/app.ts:42)',' and ','[README.md](README.md)','.']);
   assert.equal(p[1].data.hProperties.dataAutoFile,'true');
   assert.equal(tree.children[1].value,'cat src/app.ts','code blocks untouched');
   assert.equal(tree.children[2].children[0].url,'https://x.io','existing links untouched');

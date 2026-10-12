@@ -76,10 +76,11 @@ const findRows=[
   {id:'fa1',chatId:'find',kind:'assistant' as const,text:'ok',createdAt:at(41)},
 ];
 await render(findRows,'find');
-const header=document.querySelector('.turn-worked');
-assert.equal(header?.textContent,'Worked for 30s · Ran 2 commands','folded, the header says what the work was (Codex)');assert.equal(header?.getAttribute('aria-expanded'),'false','older completed turns fold their activity');
-assert.ok(!document.querySelector('.activity-group'),'folded activity is not rendered');
-assert.ok(!document.querySelector('.working-tail'),'no live tail when idle');
+const header=document.querySelector('.tx-fold');
+assert.equal(header?.querySelector('.tx-row-text')?.textContent,'Worked for 30s','folded, the line says how long the turn worked');
+assert.equal(header?.querySelector('.tx-fold-digest')?.textContent,'Ran 2 commands','and what the work was');assert.equal(header?.getAttribute('aria-expanded'),'false','completed turns fold their activity');
+assert.ok(!document.querySelector('.tx-work'),'folded activity is not rendered');
+assert.ok(!document.querySelector('.tx-live'),'no live row when idle');
 window.dispatchEvent(new window.Event('muster:find-in-chat'));await delay(20);
 const input=document.querySelector('input[aria-label="Find in conversation"]') as HTMLInputElement;
 assert.ok(input,'find-in-chat event opens the search field');assert.ok(document.activeElement===input,'and focuses it');
@@ -91,36 +92,37 @@ key(input,'Enter');await delay(80);
 assert.match(document.querySelector('.timeline-search-count')?.textContent??'',/^1 of 5$/);
 assert.equal([...highlights.get('chat-find-active')!].map(range=>range.toString()).join(),'widget');
 key(input,'Enter');await delay(120);
-assert.equal(document.querySelector('.turn-worked')?.getAttribute('aria-expanded'),'true','a hit in folded activity unfolds its turn');
-assert.ok(document.querySelector('.activity-group[data-open]')||document.querySelector('.activity-details'),'and opens the collapsed activity group');
+assert.equal(document.querySelector('.tx-fold')?.getAttribute('aria-expanded'),'true','a hit in folded activity unfolds its turn');
+assert.ok(document.querySelector('.tx-work[data-open]'),'and opens the collapsed activity group');
 assert.ok((highlights.get('chat-find')?.size??0)>2,'revealed tool text is marked too');
 assert.equal(highlights.get('chat-find-active')?.size,1);
 key(input,'Escape');await delay(30);
 assert.ok(!highlights.has('chat-find'),'closing find clears every mark');
 // Live runs show the shimmering tail with a Working-for timer.
 await render([...findRows,{id:'fu2',chatId:'find',kind:'user' as const,text:'Go',createdAt:new Date(Date.now()-72000).toISOString()},{id:'ft3',chatId:'find',kind:'tool' as const,status:'running',text:'npm test',createdAt:new Date().toISOString(),data:{type:'commandExecution',command:'npm test'}}],'find');
-assert.equal(document.querySelector('.working-tail')?.textContent,'Running npm test','the tail says what the agent is doing now');
-assert.match(document.querySelector('.turn-worked.is-live')?.textContent??'',/^Working for 1m 1[23]s$/,'the live turn is headed "Working for …" (Codex)');
+assert.equal(document.querySelector('.tx-live-step')?.textContent,'Running npm test','the live row says what the agent is doing now');
+assert.match(document.querySelector('.tx-live-clock')?.textContent??'',/^Working for 1m 1[23]s$/,'and how long the turn has worked');
 // Reasoning: "Thinking" expands to the live stream; an empty reasoning item is a plain label, never an expander.
 const click=(node:Element|null)=>{assert.ok(node,'clickable element');(node as HTMLElement).click();};
 const thinking=(text:string,status='running')=>[{id:'ru',chatId:'think',kind:'user' as const,text:'Think',createdAt:at(0)},{id:'rr',chatId:'think',kind:'reasoning' as const,status,text,createdAt:at(1)}];
 await render(thinking(''),'think');
-assert.equal(document.querySelector('.reasoning-row.is-empty')?.textContent,'Thinking');
-assert.equal(document.querySelector('.reasoning-trigger'),null,'nothing to open, so no expander');
+assert.equal(document.querySelector('.tx-thought .tx-row-text')?.textContent,'Thinking');
+assert.equal(document.querySelector('.tx-thought button'),null,'nothing to open, so no expander');
 await render(thinking('**Plan** first step'),'think');
-const trigger=document.querySelector('.reasoning-trigger');
+const trigger=document.querySelector('.tx-thought button');
 assert.equal(trigger?.getAttribute('aria-expanded'),'false');
 click(trigger);await delay(40);
-assert.equal(document.querySelector('.reasoning-trigger')?.getAttribute('aria-expanded'),'true','click opens it');
-assert.match(document.querySelector('.reasoning-body')?.textContent??'',/Plan first step/);
+assert.equal(document.querySelector('.tx-thought button')?.getAttribute('aria-expanded'),'true','click opens it');
+assert.match(document.querySelector('.tx-thought-body')?.textContent??'',/Plan first step/);
 await render(thinking('**Plan** first step, then the second'),'think');
-assert.match(document.querySelector('.reasoning-body')?.textContent??'',/then the second/,'new deltas stream into the open row');
-assert.equal(document.querySelector('.reasoning-trigger')?.getAttribute('aria-expanded'),'true','and it stays open across updates');
-assert.equal(document.querySelector('.working-tail')?.textContent,'','the tail does not repeat "Thinking" under a streaming reasoning row');
+assert.match(document.querySelector('.tx-thought-body')?.textContent??'',/then the second/,'new deltas stream into the open row');
+assert.equal(document.querySelector('.tx-thought button')?.getAttribute('aria-expanded'),'true','and it stays open across updates');
 await render(thinking('**Plan** done','completed'),'think');
-assert.match(document.querySelector('.reasoning-trigger')?.textContent??'',/^Thought/);
-click(document.querySelector('.reasoning-trigger'));await delay(260);
-assert.equal(document.querySelector('.reasoning-trigger')?.getAttribute('aria-expanded'),'false','and collapses back');
+assert.equal(document.querySelector('.tx-thought'),null,'a finished turn folds its thoughts away');
+click(document.querySelector('.tx-fold'));await delay(40);
+assert.equal(document.querySelector('.tx-thought .tx-row-text')?.textContent,'Plan done','a finished thought reads as its own line');
+click(document.querySelector('.tx-thought button'));await delay(60);
+assert.equal(document.querySelector('.tx-thought button')?.getAttribute('aria-expanded'),'false','and collapses back');
 
 // Edits stay visible after a turn: one Edited row per file, the whole file in an editor view (no @@, no "diff" label).
 const {getState}=await import('../src/renderer/store');
@@ -193,5 +195,5 @@ assert.equal(rowsFor()[0].querySelectorAll('.fde .inline-diff-row.is-add,.fde .i
 assert.equal(rowsFor()[0].querySelectorAll('.fde .inline-diff-row').length,40,'the whole file still shows');
 // An older turn shows its own pill; a following turn makes this one "not latest".
 await render([...edits,{id:'eu2',chatId:'edits',kind:'user' as const,text:'Thanks',createdAt:at(20)},{id:'ea2',chatId:'edits',kind:'assistant' as const,text:'Sure.',createdAt:at(21)}],'edits');await delay(40);
-assert.equal(document.querySelector('.turn-files-pill')?.textContent,'2 files changed+4-1','every earlier turn that edited files ends with its pill');
+assert.equal(document.querySelector('.tx-files-head')?.textContent,'2 files changed+4-1','every earlier turn that edited files ends with its changed-files card');
 root.unmount();assert.deepEqual(errors,[]);console.log('Timeline DOM checks passed: anchors, keyboard/preview/Escape, jump/back/latest, stream continuity, chat switch, bounded long history, find occurrences/highlights/unfold, worked-for header, live tail, reasoning expand/stream, edited-file rows with whole-file editor diff, inline diff length setting, per-turn pills.');

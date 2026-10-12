@@ -1,6 +1,6 @@
 import {computerAction,type ComputerAction} from '../../shared/computer-use.ts';
 import {countPatch,itemPatches} from '../patchModel.ts';
-export type ToolKind = 'read' | 'edit' | 'search' | 'list' | 'command' | 'subagent' | 'mcp' | 'computer' | 'generic';
+export type ToolKind = 'read' | 'edit' | 'search' | 'web' | 'list' | 'command' | 'subagent' | 'mcp' | 'computer' | 'generic';
 export interface FileStat {path:string;adds:number;dels:number}
 export interface ToolPresentation {kind:ToolKind;verb:string;runningVerb:string;subject:string;paths?:string[];/** Reads that only looked at images (Codex "Viewed 4 images"). */images?:string[];files?:FileStat[];adds?:number;dels?:number;plan?:boolean;/** The plan's own markdown text (ExitPlanMode, or a native plan item) when it wasn't submitted as a steps array. */planText?:string;computer?:ComputerAction}
 const string=(value:unknown):string=>typeof value==='string'?value:'';
@@ -10,14 +10,16 @@ export function classifyTool(data:Record<string,unknown>|undefined):ToolPresenta
  if(type==='commandExecution'){
   const actions=objects(data?.commandActions);
   if(actions.length && actions.every(action=>action.type==='read')){const paths=[...new Set(actions.map(action=>string(action.path)||string(action.name)).filter(Boolean))];return readOf(paths);}
-  if(actions.length && actions.every(action=>action.type==='search'))return {kind:'search',verb:'Searched',runningVerb:'Searching',subject:actions.map(action=>[string(action.query),string(action.path)].filter(Boolean).join(' in ')).join(', ')};
+  if(actions.length && actions.every(action=>action.type==='search'))return {kind:'search',verb:'Searched for',runningVerb:'Searching for',subject:actions.map(action=>[string(action.query),basename(string(action.path))].filter(Boolean).join(' in ')).join(', '),paths:actions.map(action=>string(action.path)).filter(Boolean)};
+  const browsed=browserCommand(string(data?.command));
+  if(browsed)return browsed;
   if(actions.length && actions.every(action=>action.type==='listFiles'))return {kind:'list',verb:'Listed files',runningVerb:'Listing files',subject:actions.map(action=>string(action.path)).filter(Boolean).join(', ')};
   return {kind:'command',verb:'Ran',runningVerb:'Running',subject:string(data?.command)||subject};
  }
  if(type==='fileChange'){const files=fileStats(data),paths=files.map(file=>file.path);return {kind:'edit',verb:'Edited',runningVerb:'Editing',subject:paths.join(', ')||subject,paths,files,adds:files.reduce((n,file)=>n+file.adds,0),dels:files.reduce((n,file)=>n+file.dels,0)};}
  if(type==='fileRead'){const path=string(data?.path)||subject;return path?readOf([path]):{kind:'read',verb:'Read',runningVerb:'Reading',subject};}
  if(type==='imageView'){const path=string(data?.path)||subject;return {kind:'read',verb:'Viewed image',runningVerb:'Viewing image',subject:path,paths:path?[path]:[],images:path?[path]:[]};}
- if(type==='webSearch')return {kind:'search',verb:'Searched',runningVerb:'Searching',subject:string(data?.query)||subject};
+ if(type==='webSearch')return {kind:'web',verb:'Searched the web for',runningVerb:'Searching the web for',subject:string(data?.query)||subject};
  if(type==='todoList'||type==='plan'||PLAN_TOOLS.has(string(data?.tool))||PLAN_TOOLS.has(subject)){
   const steps=planSteps(data),text=steps.length?undefined:planText(data);
   return {kind:'list',verb:'Updated plan',runningVerb:'Updating plan',subject:steps.length?planSummary(steps):(text?planPreview(text):''),plan:true,...(text?{planText:text}:{})};
@@ -41,6 +43,14 @@ export function classifyTool(data:Record<string,unknown>|undefined):ToolPresenta
  if(action){const where=action.target==='computer'&&action.app&&action.label.endsWith(` in ${action.app}`)?` in ${action.app}`:'';return {kind:'computer',verb:action.verb,runningVerb:action.runningVerb,subject:`${action.object}${where}`.trim(),computer:action};}
  if(type==='mcpToolCall'||type==='dynamicToolCall')return {kind:'mcp',verb:'Used',runningVerb:'Using',subject:string(data?.title)||[string(data?.server)||string(data?.namespace),string(data?.tool)].filter(Boolean).join(' / ')||subject};
  return {kind:'generic',verb:'Ran tool',runningVerb:'Running tool',subject};
+}
+/** Browser command-line tools (headless drivers, devtools CLIs) read as browser steps ("Opened pytest.org"), never as a raw shell line. */
+const BROWSER_CLI=/(?:^|[\s/])(?:chrome-devtools(?:-[\w]+)?|playwright(?:-cli)?|puppeteer|agent-browser|browser-use|browsh|lynx|w3m|xdg-open|open)(?:\s|$)/;
+export function browserCommand(command:string):ToolPresentation|undefined {
+ const url=/https?:\/\/[^\s'"<>]+/.exec(command)?.[0];
+ if(!url||!BROWSER_CLI.test(command.split(url)[0]??''))return undefined;
+ let host=url;try{host=new URL(url).hostname.replace(/^www\./,'');}catch{/* keep the raw text */}
+ return {kind:'computer',verb:'Opened',runningVerb:'Opening',subject:host,computer:{target:'browser',verb:'Opened',runningVerb:'Opening',object:host,app:'',url,label:`Opened ${host}`}};
 }
 export const IMAGE_PATH=/\.(?:png|jpe?g|gif|webp|bmp|avif|heic|svg)$/i;
 function readOf(paths:string[]):ToolPresentation {

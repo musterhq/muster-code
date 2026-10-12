@@ -1,11 +1,15 @@
 import {ToolOutput,ToolDetail} from './ToolOutput';
 import {useDisclosure} from './useDisclosure';
 import {copyText} from '../clipboard';
-import { Blocks, BookOpen, Bot, Check, ChevronRight, Circle, CircleCheck, CircleDot, Copy, Image as ImageIcon, ListChecks, MousePointerClick, PencilLine, Search, SquareTerminal, Wrench } from 'lucide-react';
+import { Blocks, BookOpen, Bot, Check, ChevronRight, Circle, CircleCheck, CircleDot, Copy, Globe, Image as ImageIcon, ListChecks, MousePointerClick, PencilLine, Search, SquareTerminal, Wrench } from 'lucide-react';
 import React, { useEffect, useRef, useState } from 'react';
 import type { TimelineItem } from '../../shared/protocol';
 import { APPROVAL_WAIT_LABEL, awaitingApproval, basename, classifyTool, commandLabel, commandOutcome, planPreview, planSteps, resolveToolPath, uniqueFileLabels, type PlanStep, type ToolKind } from './toolPresentation';
 import {getState,openFile} from '../store';
+import {useStoreSelector} from '../useStore';
+import {PluginIcon} from './PluginIcon';
+import {SiteIcon} from './transcript/Primitives';
+import {hostOf} from '../../shared/turn-digest';
 import {openTerminalTab} from './ProcessesTab';
 import './tool-card.css';
 import {Collapsible} from '@base-ui/react/collapsible';
@@ -25,7 +29,7 @@ import {GalleryCoverage,ImageGallery,type GalleryTarget} from './ImageGallery';
 type Glyph = React.ComponentType<{size?: number; strokeWidth?: number; 'aria-hidden'?: boolean | 'true'}>;
 /** Codex transcript glyphs: thin, monochrome, one per verb. */
 const ICONS: Record<ToolKind, Glyph> = {
-  read: BookOpen, edit: PencilLine, search: Search, list: ListChecks, command: SquareTerminal, subagent: Bot, mcp: Blocks, computer: MousePointerClick, generic: Wrench,
+  read: BookOpen, edit: PencilLine, search: Search, web: Globe, list: ListChecks, command: SquareTerminal, subagent: Bot, mcp: Blocks, computer: MousePointerClick, generic: Wrench,
 };
 export function ToolGlyph({kind,running=false,image=false}:{kind:ToolKind;running?:boolean;image?:boolean}) { const Icon=image?ImageIcon:ICONS[kind];return <span className={running?'tool-glyph is-active':'tool-glyph'} aria-hidden="true"><Icon size={15} strokeWidth={1.6}/></span>; }
 
@@ -146,6 +150,20 @@ function computerStepSubject(action:ComputerAction):string {
   if(action.object)return action.object;
   return action.target==='computer'&&action.app&&action.verb!=='Listed apps'?action.app:'';
 }
+/** A plugin's own icon for its tool rows, by MCP server name; a monogram when no installed plugin names the server. */
+function PluginToolIcon({server}:{server:string}) {
+  const plugin=useStoreSelector(state=>state.plugins.value?.find(entry=>entry.mcpServers.some(mcp=>mcp.name===server)));
+  return <span className="tool-glyph" aria-hidden="true"><PluginIcon icon={plugin?.icon} name={plugin?.displayName??plugin?.name??server} brandColor={plugin?.brandColor} size={14}/></span>;
+}
+/** Each step's real icon: the site's favicon for a browser step, the app for a desktop step, the plugin for its tools, else the kind's glyph. */
+function StepIcon({item,presentation:p,running,image}:{item:TimelineItem;presentation:ReturnType<typeof classifyTool>;running:boolean;image:boolean}) {
+  const host=p.computer?.target==='browser'&&p.computer.url?hostOf(p.computer.url):'';
+  if(host)return <span className={running?'tool-glyph is-active':'tool-glyph'} aria-hidden="true"><SiteIcon host={host}/></span>;
+  if(p.computer)return <AppGlyph app={p.computer.app} target={p.computer.target} running={running}/>;
+  const server=typeof item.data?.server==='string'?item.data.server:'';
+  if(p.kind==='mcp'&&server)return <PluginToolIcon server={server}/>;
+  return <ToolGlyph kind={p.kind} running={running} image={image}/>;
+}
 export function ToolCard({item,reveal=false}: {item: TimelineItem;reveal?:boolean}) {
   const [open, setOpen] = useDisclosure('tool:'+item.id);
   useEffect(()=>{if(reveal&&!open)setOpen(true);},[reveal]);
@@ -177,7 +195,7 @@ export function ToolCard({item,reveal=false}: {item: TimelineItem;reveal?:boolea
     <div className="tool-row-head">
       {/* The trigger covers the whole row; file links sit above it so they stay separate buttons. */}
       <Collapsible.Trigger className="tool-row-hit" aria-label={label} title={p.subject||undefined}/>
-      {p.computer?<AppGlyph app={p.computer.app} target={p.computer.target} running={running}/>:<ToolGlyph kind={p.kind} running={running} image={images.length>0}/>}
+      <StepIcon item={item} presentation={p} running={running} image={images.length>0}/>
       <span className="tool-row-text">
         <span className="tool-row-state">{state}</span>
         {files.length?<> <span className="tool-row-files"><FileLinks item={item} files={files}/></span></>:subject?<> <span className="tool-row-subject">{subject}</span></>:null}

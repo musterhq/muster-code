@@ -5,7 +5,7 @@
   /* Layers: modal backdrop and dialog, then popovers/menus above any dialog (a picker opened inside a modal must not open behind it). */
   --z-modal-backdrop: 110; --z-modal: 111; --z-popover: 130;
   /* Chat reply rhythm (message-body.css): compact, ChatGPT-like. */
-  --md-leading: 1.52; --md-gap: 0.55em; --md-heading-gap: 1.05em; --md-strong-weight: 630;
+  --md-leading: 1.45; --md-gap: 0.55em; --md-heading-gap: 1.05em; --md-strong-weight: 630;
   /* Neutral surfaces matched to the observed Cursor Agents window and its
      installed Cursor Dark palette; native material supplies sidebar blur. */
   --bg: #161616;
@@ -401,8 +401,15 @@ textarea:focus-visible {
   .status-dot[data-status='running'] > svg { animation: status-spin 1.2s steps(12, end) infinite; }
 }
 @keyframes status-spin { to { transform: rotate(360deg); } }
-/* Nothing animates in a window the user cannot see or is not using (set by windowActivity.ts); motion resumes on focus. */
+/* Loops (spinners, shimmer, pulse) pause in a window the user cannot see or is not using (set by windowActivity.ts).
+   Pausing must never hold content at its start state: an entrance (a streamed text fade, a screen, a menu, a toast)
+   keeps running so it lands fully visible. Every one-shot animation's element is listed in the second rule;
+   tests/animation-pause.test.ts fails when a new entrance is missing from it. */
 :root[data-window-active='false'] *, :root[data-window-active='false'] *::before, :root[data-window-active='false'] *::after { animation-play-state: paused !important; }
+:root[data-window-active='false'] :is(.md-fade, .notice, main.center > *, .center > .settings-screen, .work-surface, .turn-preview, .attachment-chip,
+  .memory-drawer, .memory-drawer-scrim, .summary-pr-detail, .goal-strip, .sketch-dialog, .record-skill-dialog, .composer-popover, .composer-confirm, .setup-guide) {
+  animation-play-state: running !important;
+}
 
 /* Chat -------------------------------------------------------------------- */
 

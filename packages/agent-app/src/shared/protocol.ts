@@ -132,6 +132,8 @@ export interface Commands extends DomainCommands, BrowserCommands, ScopedCompute
  'hindsight.recall': {input: {folderId?: string; query: string; budget?: 'low' | 'mid' | 'high'; maxTokens?: number; types?: Array<'world' | 'experience' | 'observation'>; tags?: string[]}; output: {bankId: string; results: readonly {id?: string; text: string; type?: string; score?: number}[]}};
  'hindsight.reflect': {input: {folderId?: string; query: string; context?: string; budget?: 'low' | 'mid' | 'high'; maxTokens?: number}; output: {bankId: string; text: string}};
  'clipboard.write': {input:{text:string};output:void};
+ /** A site's icon as a data URL (https only, size-capped, cached); null when there is none. */
+ 'favicon.get': {input:{url:string};output:{dataUrl:string|null}};
  'link.open': {input:{url:string};output:void};
  /** Opens the server's own sign-in page in an app window with a cookie jar of its own per server origin (desktop only), so a hosted server can give this Mac the session its live socket accepts. `close` closes it. */
  'musterServer.signInWindow': {input:{url?:string;baseUrl:string;close?:boolean};output:{opened:boolean}};

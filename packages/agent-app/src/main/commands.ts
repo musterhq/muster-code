@@ -116,6 +116,7 @@ const COMMANDS = {
   'git.compareUrl': true,
   'link.open': true,
   'clipboard.write': true,
+  'favicon.get': true,
   'git.diff': true,
   'providers.list': true,
   'providers.reveal': true,

@@ -40,6 +40,7 @@ import {shouldThrottleBackground} from './painting-policy.ts';
 import {electronSecretBox} from '../runtime/memory-context.ts';
 import {ServerSignInWindows} from './server-signin-window.ts';
 import { device } from '../shared/device-noun.ts';
+import {FaviconCache} from './favicon-cache.ts';
 
 app.setName('Muster Agent');
 {const store=passwordStoreSwitch(process.env,process.argv);if(store)app.commandLine.appendSwitch('password-store',store);}
@@ -124,6 +125,7 @@ async function main(): Promise<void> {
 
   // --- Agent service -------------------------------------------------------
   const dataDir = path.join(app.getPath('userData'), 'agent-data');
+  const favicons = new FaviconCache({dir: path.join(dataDir, 'favicons')});
   // Pending approvals/questions badge the dock while the window is not in front.
   let attentionCount = 0;
   let shownBadge = '';
@@ -654,6 +656,11 @@ async function main(): Promise<void> {
       if(result.canceled||!result.filePath)return {saved:false};
       await writeProjectExportFile(result.filePath,JSON.stringify(data,null,2)+'\n');
       return {saved:true,fileName:path.basename(result.filePath),truncated:data.chats.truncated||data.tasks.truncated||data.decisions.truncated||data.activity.truncated};
+    }
+    if(command === 'favicon.get'){
+      const url=(input as {url?:unknown})?.url;
+      if(typeof url!=='string'||url.length>2048)throw new Error('Invalid site.');
+      return {dataUrl:await favicons.get(url)};
     }
     if(command === 'clipboard.write'){
       const text=(input as {text?:unknown})?.text;

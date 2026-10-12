@@ -177,6 +177,8 @@ assert.equal(store.getState().summaryHidden,false);
 emit({type:'timeline',chatId:'a',items:[{id:'a1',chatId:'a',kind:'assistant',text:'Chat a live update',createdAt:''},{id:'a2',chatId:'a',kind:'tool',status:'completed',text:'Read src/main.ts',data:{type:'fileRead',path:'src/main.ts'}},{id:'a3',chatId:'a',kind:'tool',status:'completed',text:'Edited src/main.ts',data:{type:'fileChange',changes:[{path:'src/main.ts',diff:'@@ -1 +1,2 @@\n-export const total = 1;\n+export const total = 2;\n+export const ready = true;'}]}},{id:'a4',chatId:'a',kind:'tool',status:'completed',text:'pnpm run typecheck\nTypecheck passed',data:{type:'commandExecution',command:'pnpm run typecheck',exitCode:0,durationMs:1800,output:'Typecheck passed'}}]});
 await delay(40);
 await delay(20);
+assert.equal(store.getState().showInlineFileDiffs,false,'inline file diffs are off by default: replies list changed files instead');
+store.setInlineFileDiffsVisible(true);await delay(30);
 const inlineChangesButton=document.querySelector('.changes-pill') as HTMLButtonElement;
 assert.ok(inlineChangesButton,'completed file edits have a review control in the main conversation');inlineChangesButton.click();await delay(80);
 assert.equal(document.querySelectorAll('.turn-change-preview .inline-diff-row.is-add').length,2,'the main conversation renders added code inline with syntax-aware patch rows');
@@ -188,7 +190,7 @@ store.setSettingsSection('chat');
 // The lazy Settings chunk is revealed through Suspense (React throttles that reveal up to ~300 ms); wait for it instead of guessing.
 for(let i=0;i<60&&!document.querySelector('[aria-label="Show file diffs inline"]');i++)await delay(50);
 const inlinePreference=document.querySelector('[aria-label="Show file diffs inline"]');
-assert.equal(inlinePreference?.getAttribute('aria-checked'),'true','inline file diffs are enabled by default');store.setInlineFileDiffsVisible(false);await delay(40);
+assert.equal(inlinePreference?.getAttribute('aria-checked'),'true','the Settings switch shows inline diffs as turned on');store.setInlineFileDiffsVisible(false);await delay(40);
 assert.equal(document.querySelector('[aria-label="Show file diffs inline"]')?.getAttribute('aria-checked'),'false','the Settings switch reflects the persisted app choice');
 assert.equal(store.getState().showInlineFileDiffs,false,'the app preference immediately hides inline code previews');
 assert.equal(JSON.parse(persisted.get('muster.settings.v1')??'{}')['chat.inlineDiffs'],false,'the app preference is cached for first paint');

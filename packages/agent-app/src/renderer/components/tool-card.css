@@ -1,14 +1,14 @@
 /* Codex transcript activity rows: quiet one-liners on the canvas.
    [thin glyph] Verb object +a -d ›   — no card, no border, no fill.
    The glyph sits on the prose's left edge; details indent under the text. */
-.tool-row-card { --row-inset: 8px; --row-glyph: 16px; --row-gap: 8px; min-width: 0; }
+.tool-row-card { --row-inset: 6px; --row-glyph: 16px; --row-gap: 6px; min-width: 0; }
 .tool-row-head {
   position: relative; display: flex; align-items: center; gap: var(--row-gap);
-  width: 100%; min-height: 30px; padding: 4px 8px 4px var(--row-inset);
-  color: var(--text-dim); font-size: var(--fs-14); line-height: 1.4; text-align: left;
+  width: 100%; min-height: 21px; padding: 1px 8px 1px var(--row-inset);
+  color: var(--text-faint); font-size: var(--fs-13); line-height: 19px; text-align: left;
   transition: color 130ms ease;
 }
-.tool-row-head:hover, .tool-row-head:has(.tool-row-hit:focus-visible), .tool-row-card[data-open] > .tool-row-head { color: var(--text); }
+.tool-row-head:hover, .tool-row-head:has(.tool-row-hit:focus-visible), .tool-row-card[data-open] > .tool-row-head { color: var(--text-dim); }
 /* Whole-row disclosure hit area; content is inert except real file links layered above it. */
 .tool-row-hit { position: absolute; inset: 0; z-index: 0; border-radius: var(--radius-6); color: inherit; }
 .tool-row-hit:focus-visible { outline: 1px solid color-mix(in srgb, var(--accent) 60%, transparent); outline-offset: -1px; }
@@ -26,7 +26,7 @@
 .tool-row-subject, .tool-row-files { color: inherit; font: inherit; }
 .tool-row-sep { color: var(--text-faint); }
 .tool-file-link, .tool-file-name { font: inherit; color: inherit; padding: 0; }
-.tool-file-link { text-decoration: underline; text-decoration-color: color-mix(in srgb, currentColor 34%, transparent); text-decoration-thickness: 1px; text-underline-offset: 3px; border-radius: var(--radius-4); cursor: pointer; }
+.tool-file-link { text-decoration: underline dotted; text-decoration-color: color-mix(in srgb, currentColor 55%, transparent); text-decoration-thickness: 1px; text-underline-offset: 3px; border-radius: var(--radius-4); cursor: pointer; }
 .tool-file-link:hover { color: var(--text); text-decoration-color: currentColor; }
 .tool-file-link:focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
 
