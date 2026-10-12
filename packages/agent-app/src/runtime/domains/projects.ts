@@ -181,14 +181,17 @@ export function createProjectsDomain(ctx: DomainContext): DomainModule {
     const label = `goal v${goalVersion}, ${plural(decisions.length, 'decision')}${rules.version ? `, rules v${rules.version}` : ''}${refs.length ? `, ${plural(refs.length, 'source')}` : ''}`;
     return { lines, summary: { version, goalVersion, instructionsVersion: rules.version, decisions: decisions.length, headSha: sha, label, ...(refs.length ? { sources: refs } : {}) } };
   }
-  function taskLines(task: ProjectTask, chatId: string): string[] {
+  /** A task run's lines in two parts: what the run cannot do without (task header, why it started, reviewer feedback, git identity, protocol), and the agent's bundle. */
+  function taskParts(task: ProjectTask, chatId: string): { first: string[]; deps: string[]; bundle: string[] } {
     const { tasks: store } = open(), deps = task.dependencies.map(d => store.getTask(d)).filter((d): d is ProjectTask => Boolean(d));
-    const out = ['', `This chat runs Project task "${task.title}" (owner: ${task.owner.kind}, priority: ${PRIORITY_LABEL[task.priority]}).`];
-    // A Roster agent owns it: the run works as that agent: its instruction bundle, why it started, what it may do (governance).
-    out.push(...gov.taskLines(task, chatId));
+    const first = ['', `This chat runs Project task "${task.title}" (owner: ${task.owner.kind}, priority: ${PRIORITY_LABEL[task.priority]}).`];
+    // A Roster agent owns it: the run works as that agent: why it started, what it may do (governance), and then its instruction bundle.
+    const { critical, bundle } = gov.taskSections(task, chatId);
+    first.push(...critical);
+    const out: string[] = [];
     if (deps.length) out.push('Dependency outcomes:', ...deps.map(d => { const last = d.attempts.find(a => a.status !== 'running'); return `- ${d.title}: ${d.state}${d.verification ? `, verified by ${d.verification.kind}${d.verification.command ? ` (${clip(d.verification.command, 120)})` : ''}: ${clip(d.verification.notes.replace(/\s+/g, ' '), 200)}` : ''}${d.artifacts.length ? `; artifacts: ${d.artifacts.slice(0, 5).join(', ')}` : ''}${last ? `; last run ${last.status}` : ''}`; }));
     if (task.artifacts.length) out.push(`Task artifacts: ${task.artifacts.slice(0, 10).join(', ')}`);
-    return out;
+    return { first, deps: out, bundle };
   }
   function coordinatorLines(projectId: string): string[] {
     const all = open().tasks.listTasks(projectId).items, byId = new Map(all.map(t => [t.id, t]));
@@ -211,7 +214,9 @@ export function createProjectsDomain(ctx: DomainContext): DomainModule {
     // A task chat receives the task's handoff packet; the run start acknowledges the version it received (PRJ-18).
     const handoff = task ? await buildHandoff(projectId, task.id).catch(() => undefined) : undefined;
     if (handoff) lastHandoff.set(chat.id, { packetId: handoff.id, version: handoff.version });
-    return { label: `Project context v${summary.version} (${summary.label})`, text: [...lines, ...(task ? taskLines(task, chat.id) : []), ...(handoff ? handoffLines(handoff) : []), ...(coordinator ? coordinatorLines(projectId) : [])].join('\n') };
+    // The prompt block is capped (8 KB), so what the run cannot work without goes first and the agent's bundle last: a long bundle is what gets cut (#383).
+    const parts = task ? taskParts(task, chat.id) : null;
+    return { label: `Project context v${summary.version} (${summary.label})`, text: [...(parts?.first ?? []), ...(handoff ? handoffLines(handoff) : []), ...(parts?.deps ?? []), ...lines, ...(coordinator ? coordinatorLines(projectId) : []), ...(parts?.bundle ?? [])].join('\n') };
   };
 
   // ── Knowledge sources (PRJ-16) ────────────────────────────────────────────

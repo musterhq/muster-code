@@ -104,7 +104,13 @@ export interface CheckoutLease {
   /** The state of the work (HEAD and changes, or the folder's files) when `autoOff` was set. A later turn that changes it switches automatic hand-back back on. */
   armedState?: string | null;
   /** Why Muster has not handed back (shown on the task only; never posted to the server). */
-  heldBack?: { reason: string; at: string } | null;
+  heldBack?: { reason: string; at: string; /** 'no-tests': held only because no test run came after the last change; the task offers "Run tests and hand back" and "Hand back anyway". */ kind?: 'no-tests' } | null;
+  /** An automatic hand-back countdown in progress, saved so a restart picks it up again (#383). */
+  countdown?: { endsAt: string; plan: { recipient: { kind: 'agent' | 'user'; id: string; name: string }; prUrl?: string; summary?: string; inPlace: boolean; commit?: boolean } } | null;
+  /** Other chats whose folder is this check-out's worktree, linked to it so their activity and turns count (a re-check-out or a chat opened by hand in the worktree). */
+  linkedChats?: string[];
+  /** "Run tests and hand back" was pressed: the next finished turn hands back as if the person had said it is done (the test gate still applies). */
+  afterTests?: boolean;
   /** Who the task was handed to (so Undo can refuse once someone else has acted on it). */
   handedTo: { kind: 'agent' | 'user'; id: string; name: string } | null;
   taskId: string; orgId: string; key: string; title: string; projectId: string | null;
@@ -245,6 +251,10 @@ export interface CheckoutCommands {
   'checkout.undo': { input: { taskId: string }; output: LeaseView };
   /** The 60-second countdown before an automatic hand-back: hand back now, or keep working (cancels it until the work changes again). */
   'checkout.countdown': { input: { taskId: string; action: 'now' | 'keep' }; output: { ok: true } };
+  /** Held for want of a test run: hand back now without one ("Hand back anyway"). The reason is written on the hand-back. */
+  'checkout.handback.anyway': { input: { taskId: string }; output: LeaseView };
+  /** Held for want of a test run: ask the agent to run the tests, then hand back when they pass ("Run tests and hand back"). */
+  'checkout.handback.runtests': { input: { taskId: string }; output: LeaseView };
   /** Countdowns running now (so a reloaded window shows them again). */
   'checkout.countdowns': { input: Record<string, never>; output: { countdowns: { taskId: string; key: string; to: string; endsAt: string }[] } };
 }
@@ -254,5 +264,5 @@ export type CheckoutEvent = { type: 'checkoutChanged'; taskId: string | null } |
 export const CHECKOUT_COMMANDS = {
   'orgs.list': true, 'orgs.set': true, 'orgs.work': true, 'orgs.open': true, 'orgs.link': true, 'checkout.settings': true, 'checkout.bindings': true, 'checkout.bind': true, 'checkout.unbind': true, 'checkout.plan': true,
   'checkout.start': true, 'checkout.get': true, 'checkout.leases': true, 'checkout.decision': true, 'checkout.handback.preview': true, 'checkout.handback': true, 'checkout.release': true, 'checkout.runOnServer': true,
-  'checkout.sync': true, 'checkout.outbox': true, 'checkout.remind': true, 'checkout.auto': true, 'checkout.undo': true, 'checkout.countdown': true, 'checkout.countdowns': true, 'checkout.org': true, 'checkout.engine': true, 'checkout.review': true, 'checkout.offline': true, 'checkout.pending': true, 'checkout.pending.edit': true, 'checkout.resolve': true,
+  'checkout.sync': true, 'checkout.outbox': true, 'checkout.remind': true, 'checkout.auto': true, 'checkout.undo': true, 'checkout.countdown': true, 'checkout.handback.anyway': true, 'checkout.handback.runtests': true, 'checkout.countdowns': true, 'checkout.org': true, 'checkout.engine': true, 'checkout.review': true, 'checkout.offline': true, 'checkout.pending': true, 'checkout.pending.edit': true, 'checkout.resolve': true,
 } as const satisfies Record<keyof CheckoutCommands, true>;

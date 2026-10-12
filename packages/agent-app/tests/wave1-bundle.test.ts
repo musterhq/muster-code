@@ -1,7 +1,7 @@
 /** Wave 1: G11 agent instruction bundle with revisions. */
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { composeBundle, validateFile, checkBundle, changedNames } from '../src/runtime/governance/bundle.ts';
+import { composeBundle, heartbeatLines, validateFile, checkBundle, changedNames } from '../src/runtime/governance/bundle.ts';
 import { wave1 } from './wave1-harness.ts';
 
 test('G11: validation and composition', () => {
@@ -59,4 +59,17 @@ test('G11: a timer wake does receive HEARTBEAT.md', async t => {
   const job = await h.addTask('Timed', { kind: 'agent', id: cto.id });
   await h.clock!.advance(61_000); await h.settled(job.id);
   assert.match(h.calls[0]!.text, /heartbeat timer[\s\S]*CHECKLIST-BETA/);
+});
+
+test('#383: a long agent bundle is what the 8 KB context block cuts; the task protocol and the run comment line always arrive', async t => {
+  const h = await wave1(t);
+  const cto = await h.member('CTO', { instructions: 'Start instructions.' });
+  for (const name of ['AGENTS.md', 'SOUL.md', 'TOOLS.md']) await h.s.invoke('project.agent.files.save', { projectId: h.project.id, memberId: cto.id, name, text: `${name} `.repeat(1500) });
+  const job = await h.addTask('Long bundle job', { kind: 'agent', id: cto.id }); await h.start(job.id); await h.settled(job.id);
+  const text = h.calls[0]!.text;
+  assert.match(text, /Muster task protocol:/); assert.match(text, /End every run with a short comment on the task/);
+  assert.ok(text.indexOf('Muster task protocol:') < text.indexOf('instructions — follow these:'), 'task-critical lines come before the bundle');
+  assert.match(text, /\[truncated\]/, 'the cap still applies, to the tail (the bundle)');
+  assert.deepEqual(heartbeatLines([{ name: 'HEARTBEAT.md', text: '', updatedAt: null }]), []);
+  assert.match(heartbeatLines([{ name: 'HEARTBEAT.md', text: '1. check inbox', updatedAt: null }]).join('\n'), /heartbeat timer[\s\S]*check inbox/);
 });
