@@ -19,7 +19,7 @@ const calls:{command:string;input:any}[]=[];
 const chat={id:'c1',title:'Research',folderId:'repo',pinned:false,archived:false,draft:'',status:'idle',updatedAt:'',model:'test',mode:'agent'};
 const snapshot={chats:[chat],folders:[{id:'repo',name:'repo',path:'/repo'}],projects:[],version:1,activeChatId:'c1'};
 const ok=(detail:string)=>({available:true,detail});
-let setup:any={enabled:false,agentControl:false,host:'darwin',helper:{state:'absent',version:'0.15.3',downloadMB:26,running:false},ios:{available:false,reason:'Xcode is not installed.',fix:['Install Xcode from the App Store.']},android:ok('Android SDK at ~/sdk'),node:ok('24.4.0')};
+let setup:any={enabled:false,agentControl:false,appleModels:false,models:[{id:'iphone',label:'iPhone',state:'absent'},{id:'ipad',label:'iPad',state:'absent'}],host:'darwin',helper:{state:'absent',version:'0.15.3',downloadMB:26,running:false},ios:{available:false,reason:'Xcode is not installed.',fix:['Install Xcode from the App Store.']},android:ok('Android SDK at ~/sdk'),node:ok('24.4.0')};
 const list={devices:[{id:IPHONE,name:'iPhone 17 Pro',platform:'ios',osVersion:'iOS 26.0',state:'booted',formFactor:'phone'},{id:'avd:Pixel_9',name:'Pixel_9',platform:'android',osVersion:'Android',state:'shutdown',formFactor:'phone'}],errors:[],checkedAt:1};
 let sessions:any[]=[];
 const listeners=new Set<(event:any)=>void>();
@@ -65,6 +65,8 @@ assert.deepEqual(calls.filter(c=>c.command.startsWith('devices.configure')||c.co
 assert.equal(toggles()[0]!.getAttribute('aria-checked'),'true');assert.equal(toggles()[1]!.disabled,false);
 toggles()[1]!.click();await delay(40);
 assert.deepEqual(calls.at(-1),{command:'devices.configure',input:{agentControl:true}});
+assert.match(text(),/Downloads Apple's device models from apple.com to this Mac for the 3D view/,'the Apple model download is disclosed, opt-in');
+assert.equal(toggles()[2]!.getAttribute('aria-checked'),'false');
 settingsRoot.unmount();
 
 // 2. Picker: platform note for a missing Xcode, devices listed, Start/Open, a session opens its tab.

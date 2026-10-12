@@ -5,6 +5,7 @@
  */
 import path from 'node:path';
 import type {DeviceFormFactor, DeviceInfo, PlatformCheck} from '../../shared/device-protocol.ts';
+import {device} from '../../shared/device-noun.ts';
 
 export type Run = (file: string, args: string[], options?: {timeoutMs?: number; env?: NodeJS.ProcessEnv}) => Promise<string>;
 export interface ProbeDeps {
@@ -54,7 +55,7 @@ export async function checkIos(deps: ProbeDeps): Promise<PlatformCheck> {
     await deps.run('/usr/bin/xcrun', ['simctl', 'help'], {timeoutMs: 10_000});
     return {available: true, detail: version};
   } catch (error) {
-    return {available: false, reason: 'Xcode is installed but its simulator tools did not answer.', fix: ['Open Xcode once and accept its license and component install.', 'If you just updated Xcode, restart your Mac.'], detail: errorLine(error)};
+    return {available: false, reason: 'Xcode is installed but its simulator tools did not answer.', fix: ['Open Xcode once and accept its license and component install.', `If you just updated Xcode, restart ${device().your}.`], detail: errorLine(error)};
   }
 }
 export async function listIos(deps: ProbeDeps): Promise<DeviceInfo[]> {

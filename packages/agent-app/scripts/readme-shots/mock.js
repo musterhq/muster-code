@@ -275,7 +275,7 @@ const handlers = {
 if (OPTS.devices) {
   const mode = OPTS.devices;
   const ok = (detail) => ({available: true, detail});
-  const setup = () => ({enabled: !['off', 'missing'].includes(mode), agentControl: mode === 'agent', host: OPTS.host ?? 'darwin',
+  const setup = () => ({enabled: !['off', 'missing'].includes(mode), agentControl: mode === 'agent', appleModels: mode === 'agent', models: [{id: 'iphone', label: 'iPhone', state: mode === 'agent' ? 'converted' : 'absent'}, {id: 'ipad', label: 'iPad', state: mode === 'agent' ? 'converted' : 'absent'}], host: OPTS.host ?? 'darwin',
     helper: {state: mode === 'installing' ? 'installing' : mode === 'failed' ? 'failed' : mode === 'off' || mode === 'missing' ? 'absent' : 'installed', version: '0.15.3', downloadMB: 26, running: ['live', 'agent', 'tablet', 'android', 'error'].includes(mode), ...(mode === 'installing' ? {progress: 'Downloading the device helper…'} : {}), ...(mode === 'failed' ? {error: 'Could not reach the npm registry. Check your internet connection (or proxy) and try again.'} : {})},
     ios: mode === 'missing' ? {available: false, reason: 'Xcode is not installed.', fix: ['Install Xcode from the App Store.', 'Open Xcode once and let it install its components.', 'In Terminal run: sudo xcode-select -s /Applications/Xcode.app']} : ok('Xcode 26.1'),
     android: mode === 'missing' ? {available: false, reason: 'Android SDK not found.', fix: ['Install Android Studio from developer.android.com/studio.', 'In Android Studio open Settings › Languages & Frameworks › Android SDK and install the Android Emulator and Android SDK Platform-Tools.', 'Create a virtual device in Device Manager.'], detail: 'Looked in ~/Library/Android/sdk'} : ok('Android SDK at ~/Library/Android/sdk'),

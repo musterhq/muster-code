@@ -62,7 +62,7 @@ export class DeviceLink {
     const hub = await this.deps.hub();
     if (this.platform === 'ios') {
       // Attaching the helper is idempotent for a booted simulator.
-      const response = await this.deps.fetch(`${hub.origin}/vendor/serve-sim/grid/api/start`, {method: 'POST', headers: {...this.auth(hub), 'content-type': 'application/json'}, body: JSON.stringify({udid: this.deviceId}), signal: AbortSignal.timeout(60_000)});
+      const response = await this.deps.fetch(`${hub.origin}/vendor/serve-sim/grid/api/start`, {method: 'POST', headers: {...this.auth(hub), 'content-type': 'application/json'}, body: JSON.stringify({udid: this.deviceId}), signal: AbortSignal.timeout(240_000)});
       if (!response.ok) throw new Error(`The device helper could not attach to the simulator (${response.status}).`);
       const result = await response.json().catch(() => ({})) as {ok?: boolean; error?: string};
       if (result.ok === false) throw new Error(result.error || 'The device helper could not attach to the simulator.');
@@ -84,7 +84,7 @@ export class DeviceLink {
   }
 
   private async startVideo(): Promise<void> {
-    this.stopVideo();
+    this.stopVideo(false);
     if (this.closed || !this.viewing) return;
     this.gotFrame = false; this.gate.reset(); this.h264Backlog = 0; this.dropping = false;
     this.events.state(this.retries ? 'reconnecting' : 'starting');
@@ -95,13 +95,17 @@ export class DeviceLink {
     if (this.platform === 'ios') void this.readMjpeg(hub);
     else this.openAndroidVideo(hub);
   }
-  private stopVideo(): void {
+  /** Android's video socket is also its input socket (serve-emu keeps one connection per device); closing it reopens
+   *  an input-only one unless the video is about to restart. */
+  private stopVideo(reopenInput = true): void {
     if (this.firstFrameTimer) this.deps.clearTimeout(this.firstFrameTimer);
     if (this.retryTimer) this.deps.clearTimeout(this.retryTimer);
     this.firstFrameTimer = this.retryTimer = undefined;
     this.video?.abort(); this.video = undefined;
     const socket = this.videoSocket; this.videoSocket = undefined;
+    if (socket && this.inputSocket === socket) { this.inputSocket = undefined; this.admitted = false; this.events.input(false); }
     try { socket?.close(); } catch {}
+    if (reopenInput && this.platform === 'android' && !this.closed && !this.inputSocket) void this.deps.hub().then(hub => this.connectInput(hub), () => {});
   }
   private frameArrived(): void {
     if (this.gotFrame) return;
@@ -112,7 +116,7 @@ export class DeviceLink {
   }
   private videoFailed(detail: string): void {
     if (this.closed || !this.viewing) return;
-    this.stopVideo();
+    this.stopVideo(this.retries >= RETRY_MS.length);
     if (this.retries >= RETRY_MS.length) { this.events.state('error', `${detail} Reconnect to try again.`); return; }
     const wait = RETRY_MS[this.retries++]!;
     this.events.state('reconnecting', detail);
@@ -145,9 +149,13 @@ export class DeviceLink {
   }
   private openAndroidVideo(hub: HubEndpoint): void {
     const wsOrigin = hub.origin.replace(/^http/, 'ws');
+    // One connection per device: the input-only socket gives way to this one, which carries video and input.
+    const input = this.inputSocket;
+    if (input) { this.inputSocket = undefined; try { input.close(); } catch {} }
     const socket = this.deps.socket(`${wsOrigin}/vendor/serve-emu/ws?device=${encodeURIComponent(this.deviceId)}&frame-meta=1`, this.auth(hub));
     socket.binaryType = 'arraybuffer';
-    this.videoSocket = socket;
+    this.videoSocket = socket; this.inputSocket = socket; this.admitted = true;
+    socket.onopen = () => { if (this.inputSocket === socket) this.events.input(true); };
     socket.onmessage = event => {
       if (this.videoSocket !== socket) return;
       if (typeof event.data === 'string') {
@@ -169,12 +177,17 @@ export class DeviceLink {
       this.h264Backlog++;
       this.events.frame({codec: 'h264', key: info.key, data: Buffer.from(bytes.subarray(info.payloadOffset)), ...(info.pts !== undefined ? {pts: info.pts} : {})});
     };
-    socket.onclose = event => { if (this.videoSocket === socket) { this.videoSocket = undefined; this.videoFailed(event.reason || 'The emulator stream closed.'); } };
+    socket.onclose = event => {
+      if (this.videoSocket !== socket) return;
+      this.videoSocket = undefined;
+      if (this.inputSocket === socket) { this.inputSocket = undefined; this.admitted = false; this.events.input(false); }
+      this.videoFailed(event.reason || 'The emulator stream closed.');
+    };
     socket.onerror = () => { try { socket.close(); } catch {} };
   }
 
   private connectInput(hub: HubEndpoint): void {
-    if (this.closed || this.inputSocket) return;
+    if (this.closed || this.inputSocket || (this.platform === 'android' && this.videoSocket)) return;
     const wsOrigin = hub.origin.replace(/^http/, 'ws');
     const url = this.platform === 'ios'
       ? `${wsOrigin}/vendor/serve-sim/helper/ws?device=${encodeURIComponent(this.deviceId)}`

@@ -85,6 +85,9 @@
   --violet: #a8abea;
   --pink: #df8fc1;
   --media-bg: #0b0c0c;
+  /* #363 3D device frame: a neutral body and its lighting, read by the 3D view. */
+  --device-body: #34363b;
+  --device-light: #f2f3f5;
   --paper: #ffffff;
   --paper-ink: #1d1d1f;
   /* Lightness for hue-keyed text (chips, plugin monograms, agent identity): readable on the theme's surface. */
@@ -104,6 +107,8 @@
 /* UX-19 Light appearance (Settings > Appearance > Theme). Only tokens change; components never branch on theme.
    The accent/status hues are darkened so text and glyphs on white keep >= 4.5:1. */
 :root[data-theme='light'] {
+  --device-body: #c4c6cc;
+  --device-light: #ffffff;
   color-scheme: light;
   --bg: #fbfbfb;
   --bg-raised: #ffffff;

@@ -3,7 +3,7 @@
  * controls rail (Home, App switcher, Rotate, Lock, Screenshot, Back on Android, 3D, Shut down). Every state is spelled
  * out: starting, reconnecting (the last picture stays), error with Reconnect, and an agent's session with Take control.
  */
-import React, {useCallback, useEffect, useRef, useState} from 'react';
+import React, {Suspense, lazy, useCallback, useEffect, useRef, useState} from 'react';
 import {Box, Camera, Hand, House, LayoutGrid, Lock, Play, Power, RefreshCw, RotateCw, Undo2, X} from 'lucide-react';
 import type {DeviceButton, DeviceSession} from '../../../shared/device-protocol';
 import {invoke} from '../../bridge';
@@ -13,7 +13,9 @@ import {deviceTabId} from '../../deviceSessions';
 import {useDeviceFeed, paintInto, type DeviceFeed} from '../../devices/deviceFeed';
 import {clampedPointOnScreen, containRect, pointOnScreen} from '../../devices/geometry';
 import {Tip} from '../Tooltip';
-import {DeviceFrame3D, threeAvailable} from './DeviceFrame3D';
+import {threeAvailable} from '../../devices/webgl';
+// three.js and the device bodies load only when someone turns on the 3D view.
+const DeviceFrame3D = lazy(() => import('./DeviceFrame3D'));
 
 const STATE_LABEL: Record<DeviceSession['state'], string> = {starting: 'Connecting', live: 'Live', reconnecting: 'Reconnecting', error: 'Disconnected'};
 
@@ -107,7 +109,7 @@ export function DeviceView({session, visible}: {session: DeviceSession; visible:
     <div className="device-view-body">
       <div className="device-stage">
         {mode === '3d'
-          ? <DeviceFrame3D session={session} feed={feed} tick={tick} input={input} onFallback={() => setView('flat')}/>
+          ? <Suspense fallback={<div className="device-screen-skeleton is-3d" aria-hidden="true"/>}><DeviceFrame3D session={session} feed={feed} tick={tick} onFallback={() => setView('flat')}/></Suspense>
           : <div className="device-bezel" style={{aspectRatio: ready ? `${feed!.width} / ${feed!.height}` : session.formFactor === 'tablet' ? '3 / 4' : '9 / 19.5'}}>
             <canvas ref={canvas} className="device-screen" tabIndex={0} role="img" aria-roledescription="device screen"
               aria-label={`${session.name} screen. Click to tap, drag to swipe; while focused, typing goes to the device.`}

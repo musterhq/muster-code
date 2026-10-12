@@ -26,6 +26,32 @@ const STATES = {
   'pip': {opts: {devices: 'agent'}, run: async (ctx) => { await ctx.store(`s.openTab({id:'files:f-taskboard',kind:'files',folderId:'f-taskboard',title:'taskboard'})`); await ctx.sleep(1800); }},
   'fullscreen': {opts: {devices: 'live'}, run: async (ctx) => { await tab(IPHONE)(ctx); await ctx.evaluate(`document.querySelector('[aria-label="Maximize resources"],[aria-label^="Maximize"]')?.click()`); await ctx.sleep(900); }},
 };
+// 3D: Muster's own bodies; with APPLE_USDZ_DIR set (a local folder holding Apple's two files, never committed), the
+// Apple-model path runs end to end in the browser: conversion, then the converted model on screen.
+const three = (which, apple, turn) => async (ctx) => {
+  if (apple && process.env.APPLE_USDZ_DIR) {
+    const {readFileSync} = await import('node:fs');
+    const file = readFileSync(`${process.env.APPLE_USDZ_DIR}/${apple === 'ipad' ? 'ipad-pro-space-black' : 'iphone-18-pro-e-sim'}.usdz`).toString('base64');
+    const node = apple === 'ipad' ? ['zRrSLDpdYmKeRJQ', 'lsDiIbtoSGSmWWZ'] : ['UBGArkKGrAMRRnj', 'EHjrGDHNHzgNjtE'];
+    await ctx.evaluate(`const bin=atob(${JSON.stringify(file)});const u=new Uint8Array(bin.length);for(let i=0;i<bin.length;i++)u[i]=bin.charCodeAt(i);window.__mockHandlers['devices.model']=()=>({id:'x',bodyNode:'${node[0]}',screenNode:'${node[1]}',usdz:u});window.__mockHandlers['devices.modelStore']=()=>null;`);
+  }
+  await tab(which)(ctx);
+  await ctx.sleep(apple ? 6000 : 2500);
+  if (turn) {
+    // Drag from the empty stage beside the device: the body turns (and keeps the throw's momentum).
+    const r = await ctx.evaluate(`const b=document.querySelector('.device-3d-canvas').getBoundingClientRect();return {x:b.left+b.width*0.08,y:b.top+b.height*0.5};`);
+    await ctx.cdp.call('Input.dispatchMouseEvent', {type: 'mousePressed', x: r.x, y: r.y, button: 'left', clickCount: 1});
+    for (let i = 1; i <= 8; i++) { await ctx.cdp.call('Input.dispatchMouseEvent', {type: 'mouseMoved', x: r.x + i * 40, y: r.y - i * 6, button: 'left', buttons: 1}); await ctx.sleep(16); }
+    await ctx.cdp.call('Input.dispatchMouseEvent', {type: 'mouseReleased', x: r.x + 320, y: r.y - 48, button: 'left', clickCount: 1});
+    await ctx.sleep(120);
+  }
+};
+STATES['3d-android'] = {opts: {devices: 'android', localStorage: {'muster.deviceView': '3d'}}, run: three('emulator-5554')};
+STATES['3d-iphone-own'] = {opts: {devices: 'live', localStorage: {'muster.deviceView': '3d'}}, run: three(IPHONE)};
+STATES['3d-ipad-own'] = {opts: {devices: 'tablet', localStorage: {'muster.deviceView': '3d'}}, run: three(IPAD)};
+STATES['3d-iphone-apple'] = {opts: {devices: 'agent', localStorage: {'muster.deviceView': '3d'}}, run: three(IPHONE, 'iphone')};
+STATES['3d-iphone-apple-turned'] = {opts: {devices: 'agent', localStorage: {'muster.deviceView': '3d'}}, run: three(IPHONE, 'iphone', true)};
+STATES['3d-android-turned'] = {opts: {devices: 'android', localStorage: {'muster.deviceView': '3d'}}, run: three('emulator-5554', undefined, true)};
 const THEMES = {dark: {}, light: {theme: 'light'}, solarized: {darkTheme: 'solarized-dark'}, contrast: {theme: 'light', lightTheme: 'high-contrast-light'}};
 const KEY = ['settings-ready', 'picker', 'live-iphone', 'live-android', 'pip', 'error', 'starting', 'settings-missing'];
 export const SHOTS = [];

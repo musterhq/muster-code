@@ -62,6 +62,9 @@ export function DeviceSettings(): React.ReactElement {
         <Toggle label="Let agents use devices" checked={setup.agentControl} disabled={busy || !setup.enabled} onChange={on => void run(() => invoke('devices.configure', {agentControl: on}))}/>
       </Row>
       </div>
+      {setup.host === 'darwin' && <div className="preference-group"><Row title="Apple device models in 3D" description={<>Downloads Apple's device models from apple.com to {noun.lower} for the 3D view. Muster checks each file and converts it locally; it never ships them. Off: Muster's own device shapes.{setup.appleModels && setup.models.some(model => model.state === 'failed') ? <span className="device-check-detail">{setup.models.find(model => model.state === 'failed')?.error} Muster's own shapes are used meanwhile.</span> : null}</>}>
+        <Toggle label="Apple device models in 3D" checked={setup.appleModels} disabled={busy || !setup.enabled} onChange={on => void run(() => invoke('devices.configure', {appleModels: on}))}/>
+      </Row></div>}
       {setup.enabled && helper?.state === 'installed' && <p className="project-edit-hint"><button type="button" className="pip-action" onClick={() => { closeSettings(); openTab({id: DEVICES_TAB_ID, kind: 'device', title: 'Devices'}); }}>Open Devices</button></p>}
     </>}
   </>;

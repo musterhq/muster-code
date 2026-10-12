@@ -198,10 +198,10 @@ test('manager: off by default; agent access is a separate opt-in that never outl
   await manager.configure({agentControl: true});
   assert.equal(manager.agentAccess, false, 'no tools until the helper is installed');
   const file = path.join(dir, 'devices.json');
-  assert.deepEqual(JSON.parse(fs.readFileSync(file, 'utf8')), {enabled: true, agentControl: true});
+  assert.deepEqual(JSON.parse(fs.readFileSync(file, 'utf8')), {enabled: true, agentControl: true, appleModels: false});
   if (process.platform !== 'win32') assert.equal(fs.statSync(file).mode & 0o777, 0o600);
   await manager.configure({enabled: false});
-  assert.deepEqual(JSON.parse(fs.readFileSync(file, 'utf8')), {enabled: false, agentControl: false}, 'turning devices off also turns agent access off');
+  assert.deepEqual(JSON.parse(fs.readFileSync(file, 'utf8')), {enabled: false, agentControl: false, appleModels: false}, 'turning devices off also turns agent access off');
   assert.deepEqual(access, []);
   await assert.rejects(manager.configure({enabled: 'yes'}), /Choose whether devices are on/);
   fs.rmSync(dir, {recursive: true, force: true});
@@ -291,10 +291,13 @@ test('Android link: H.264 forwarded in order, a backlog skips to the next keyfra
   video.onmessage!({data: unit(false)});assert.equal(frames.length, H264_BACKLOG, 'deltas are dropped until a keyframe');
   video.onmessage!({data: unit(true)});assert.equal(frames.at(-1)!.key, true);
   video.onmessage!({data: '{"type":"video-session"}'});assert.equal(frames.at(-1)!.reset, true);
-  FakeSocket.all[0]!.open();
-  assert.equal(link.input({kind: 'touch', phase: 'end', x: 0.1, y: 0.2}), true);
-  assert.deepEqual(JSON.parse(FakeSocket.all[0]!.sent.at(-1) as string), {type: 'touch', action: 'up', x: 0.1, y: 0.2});
-  assert.equal(link.button('appSwitcher'), true);assert.deepEqual(JSON.parse(FakeSocket.all[0]!.sent.at(-1) as string), {type: 'recents'});
+  assert.equal(FakeSocket.all[0]!.readyState, 3, 'the input-only socket gave way: serve-emu keeps one connection per device');
+  video.open();
+  assert.equal(link.input({kind: 'touch', phase: 'end', x: 0.1, y: 0.2}), true, 'input rides the video socket');
+  assert.deepEqual(JSON.parse(video.sent.at(-1) as string), {type: 'touch', action: 'up', x: 0.1, y: 0.2});
+  assert.equal(link.button('appSwitcher'), true);assert.deepEqual(JSON.parse(video.sent.at(-1) as string), {type: 'recents'});
+  link.setViewing(false);await new Promise(r => setTimeout(r, 5));
+  assert.equal(video.readyState, 3);assert.match(FakeSocket.all.at(-1)!.url, /video=0$/, 'not viewed: back to an input-only socket');
   link.close();
 });
 
@@ -352,4 +355,83 @@ test('agent tool host: bearer token required, launcher written 0700 and endpoint
   assert.ok(!off.developerInstructions.includes('muster_device'));assert.equal(off.configOverrides, undefined);
   host.dispose();
   fs.rmSync(dir, {recursive: true, force: true});
+});
+
+test('Apple models: opt-in only, https from apple.com, checksum verified, converted GLB cached, cleared when turned off', async () => {
+  const {AppleModels, sha256} = await import('../src/main/devices/models.ts');
+  const dir = tmp();
+  const good = Buffer.from('fake usdz bytes');
+  const source = {id: 'iphone' as const, label: 'iPhone', url: 'https://www.apple.com/x.usdz', sha256: sha256(good), bodyNode: 'B', screenNode: 'S'};
+  let body = good, fetched = 0;
+  const models = new AppleModels(dir, (async (url: string) => { fetched++; assert.equal(url, source.url); return new Response(body); }) as typeof fetch, () => {}, [source]);
+  assert.equal(models.status()[0]!.state, 'absent');
+  const first = await models.get('iphone');
+  assert.deepEqual(Buffer.from(first.usdz!), good);assert.equal(first.glb, undefined);assert.equal(first.bodyNode, 'B');
+  await models.get('iphone');assert.equal(fetched, 1, 'a verified download is reused');
+  assert.throws(() => models.store('iphone', new Uint8Array([1, 2, 3])), /Invalid converted model/);
+  const glb = Buffer.concat([Buffer.from('glTF'), Buffer.alloc(32)]);
+  models.store('iphone', new Uint8Array(glb));
+  assert.equal(models.status()[0]!.state, 'converted');assert.deepEqual(Buffer.from((await models.get('iphone')).glb!), glb);
+  models.clear();assert.equal(models.status()[0]!.state, 'absent');assert.ok(!fs.existsSync(path.join(dir, 'device-models')));
+  body = Buffer.from('tampered');
+  await assert.rejects(models.get('iphone'), /checksum mismatch/);assert.equal(models.status()[0]!.state, 'failed');
+  const evil = new AppleModels(dir, (async () => new Response(good)) as typeof fetch, () => {}, [{...source, url: 'https://evil.example/x.usdz'}]);
+  await assert.rejects(evil.get('iphone'), /only downloaded from apple.com/);
+  await assert.rejects(models.get('android'), /Unknown device model/);
+  fs.rmSync(dir, {recursive: true, force: true});
+});
+
+test('3D motion: drag turns, a throw keeps momentum then rests, near the front it springs back, touches map from the screen', async () => {
+  const {atRest, drag, release, step, settled, finish, uvToDevice, MOTION} = await import('../src/renderer/devices/motion.ts');
+  let m = drag(atRest(), 50, 0);
+  assert.ok(Math.abs(m.yaw - 50 * MOTION.gain) < 1e-9);
+  // Small turn, released still: springs back to the front and stops (no endless animation).
+  m = release(m, 0, 0);
+  let frames = 0;
+  while (!settled(m) && frames < 600) { m = step(m, 1 / 60); frames++; }
+  assert.ok(frames < 600, 'settles');m = finish(m);
+  assert.deepEqual(m, atRest());
+  // A hard throw far from the front keeps turning, slows down and stays where it stopped.
+  m = release(drag(atRest(), 300, 0), 4000, 0);
+  assert.ok(Math.abs(m.vyaw) <= MOTION.maxSpeed, 'velocity capped');
+  frames = 0;
+  while (!settled(m) && frames < 1200) { m = step(m, 1 / 60); frames++; }
+  assert.ok(frames < 1200);assert.ok(Math.abs(m.yaw) > MOTION.snapWithin, 'a far turn stays turned');
+  // Reduced motion: no momentum at all.
+  const reduced = step(release(drag(atRest(), 300, 0), 4000, 0), 1 / 60, true);
+  assert.equal(reduced.vyaw, 0);
+  assert.equal(drag(atRest(), 0, 10_000).pitch, MOTION.maxPitch, 'pitch is limited');
+  assert.deepEqual(uvToDevice(0.25, 0.75), {x: 0.25, y: 0.25});
+});
+
+test('3D bodies: Muster-made phone, tablet and foldable each carry one live screen with 0..1 UVs at the standard height', async () => {
+  const {buildBody, SCREEN_NAME, SCREEN_HEIGHT} = await import('../src/renderer/devices/bodies.ts');
+  const {Color} = await import('three');
+  const colors = {body: new Color(0.2, 0.2, 0.2), trim: new Color(0.1, 0.1, 0.1), lens: new Color(0, 0, 0), screenOff: new Color(0, 0, 0)};
+  for (const [form, aspect] of [['phone', 0.46], ['tablet', 0.75], ['foldable', 0.9]] as const) {
+    const body = buildBody(form, aspect, colors);
+    const screens: any[] = [];
+    body.traverse((node: any) => { if (node.name === SCREEN_NAME) screens.push(node); });
+    assert.equal(screens.length, 1, form);
+    const geometry = screens[0].geometry; geometry.computeBoundingBox();
+    const size = geometry.boundingBox.max.clone().sub(geometry.boundingBox.min);
+    assert.ok(Math.abs(size.y - SCREEN_HEIGHT) < 1e-6, `${form} screen height`);
+    assert.ok(Math.abs(size.x / size.y - aspect) < 1e-6, `${form} screen aspect`);
+    const uv = geometry.attributes.uv;
+    let min = Infinity, max = -Infinity;
+    for (let i = 0; i < uv.count; i++) { min = Math.min(min, uv.getX(i), uv.getY(i)); max = Math.max(max, uv.getX(i), uv.getY(i)); }
+    assert.ok(min >= -1e-6 && max <= 1 + 1e-6 && max > 0.99, `${form} UVs span 0..1`);
+  }
+});
+
+test('Apple conversion geometry: the display frame comes from its triangles, not an axis-aligned box', async () => {
+  const {displayFrame} = await import('../src/renderer/devices/appleModels.ts');
+  const {Vector3, Matrix4, PlaneGeometry} = await import('three');
+  // A 1×2 display tilted 30° about X and moved: the frame must recover its normal, its long side and its height.
+  const plane = new PlaneGeometry(1, 2, 4, 8).applyMatrix4(new Matrix4().makeRotationX(Math.PI / 6)).translate(3, 1, -2);
+  const frame = displayFrame(plane.attributes.position as any, plane.index ? plane.index.array : null);
+  assert.ok(Math.abs(Math.abs(frame.normal.dot(new Vector3(0, 0, 1).applyMatrix4(new Matrix4().makeRotationX(Math.PI / 6)))) - 1) < 1e-3, 'normal');
+  assert.ok(Math.abs(frame.height - 2) < 1e-6, 'height along the long side');
+  assert.ok(frame.center.distanceTo(new Vector3(3, 1, -2)) < 1e-6, 'centre');
+  assert.ok(frame.up.y > 0, 'not upside down');
 });
