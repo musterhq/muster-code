@@ -6,6 +6,7 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {readModelChunk, MAX_MODEL_CHUNK} from '../src/runtime/file-models.ts';
 import {isCommandName} from '../src/main/commands.ts';
+import {createAgentService} from '../src/runtime/service.ts';
 import {cubeGlb, stlBinary, plyBinary, checkerPng} from './fixtures/model-fixtures.ts';
 
 const root = mkdtempSync(join(tmpdir(), 'muster-model-'));
@@ -73,4 +74,17 @@ test('invalid ranges are rejected', async () => {
   await assert.rejects(readModelChunk(root, 'cube.glb', 1.5, 10), /Invalid model read range/);
   await assert.rejects(readModelChunk(root, 'cube.glb', 10_000_000, 10), /past the end/);
   await assert.rejects(readModelChunk(root, 'cube.glb', Number.NaN, 10), /Invalid model read range/);
+});
+
+test('the runtime service answers files.modelChunk for a folder it knows, and refuses what readModelChunk refuses', async t => {
+  const service = createAgentService({dataDir: join(root, 'service-state'), onEvent: () => {}});
+  t.after(() => service.dispose());
+  const folder = await service.invoke('folder.add', {path: root});
+  const first = await service.invoke('files.modelChunk', {folderId: folder.id, path: 'cube.glb', offset: 0, length: 64});
+  assert.equal(first.bytes.length, 64);
+  assert.equal(first.size, cubeGlb().length);
+  assert.equal(Buffer.from(first.bytes).toString('latin1', 0, 4), 'glTF');
+  await assert.rejects(service.invoke('files.modelChunk', {folderId: folder.id, path: '../x.glb', offset: 0, length: 8}), /escapes folder root|Unsupported|outside/);
+  await assert.rejects(service.invoke('files.modelChunk', {folderId: 'nope', path: 'cube.glb', offset: 0, length: 8}), /Folder/);
+  await assert.rejects(service.invoke('files.modelChunk', {folderId: folder.id, path: 'cube.glb', offset: 'x' as unknown as number, length: 8}), /Invalid model read range/);
 });
