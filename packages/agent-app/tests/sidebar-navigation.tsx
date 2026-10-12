@@ -73,7 +73,7 @@ assert.deepEqual(errors,[]);assert.ok(document.querySelector('[aria-label="1 act
 const footerLabels=Array.from(document.querySelectorAll<HTMLElement>('.nav-footer-action')).map(button=>button.textContent);
 assert.deepEqual(footerLabels,['Settings','Skills & plugins','Accounts & providers'],'sidebar utilities remain legible at the minimum navigation width');
 const sections=()=>Array.from(document.querySelector('.nav-scroll')!.children).map(el=>el.getAttribute('aria-label')??el.querySelector('.nav-section-title')?.textContent);
-assert.deepEqual(sections(),['Folders','Projects','Chats','Archived (1)'],'folders, projects, folderless chats, then archived');
+assert.deepEqual(sections(),['Working','Folders','Projects','Chats','Archived (1)'],'running chats, folders, projects, folderless chats, then archived');
 assert.ok(!document.querySelector('[data-chat-id="old"]'),'archived starts collapsed');
 const ageOne=document.querySelector('[data-chat-id="one"] .chat-row-age')!;
 assert.equal(ageOne.textContent,'2h','each row shows its compact age');assert.ok(ageOne.getAttribute('title')?.length,'the age carries an exact-time tooltip');
@@ -87,16 +87,16 @@ assert.ok(!document.querySelector('[data-chat-id="one"] .status-unread-dot'),'re
 for(const button of Array.from(document.querySelectorAll<HTMLButtonElement>('.nav-inner button'))){if(!button.textContent?.trim())assert.ok(button.title||button.dataset.tip,`icon-only button ${button.getAttribute('aria-label')} has a tooltip`);}
 (document.querySelector('[aria-label="Pin one"]') as HTMLButtonElement).click();await delay(40);
 assert.ok(calls.some(call=>call.command==='chat.update'&&call.input.id==='one'&&call.input.pinned===true),'the inline hover Pin action pins through the chat service');
-assert.deepEqual(sections(),['Pinned','Folders','Projects','Chats','Archived (1)'],'pinned leads the hierarchy');
+assert.deepEqual(sections(),['Working','Pinned','Folders','Projects','Chats','Archived (1)'],'pinned leads the hierarchy');
 assert.equal(document.querySelector('[aria-label="Unpin one"]')?.getAttribute('data-tip'),'Unpin','the pinned row offers Unpin in the same reserved slot');
 assert.equal(document.querySelectorAll('.chat-row-main[tabindex="0"]').length,1,'exactly one chat row is a tab stop');
 const main=(id:string)=>document.querySelector(`[data-chat-id="${id}"] .chat-row-main`)!;
 const key=(target:Element,init:Record<string,unknown>)=>{const event=new window.Event('keydown',{bubbles:true,cancelable:true});Object.assign(event,init);target.dispatchEvent(event);return event;};
-assert.ok(key(main('one'),{key:'ArrowDown'}).defaultPrevented);assert.equal(focused.at(-1),'two','ArrowDown moves from the pinned row to the first folder row');
-key(main('two'),{key:'ArrowDown'});assert.equal(focused.at(-1),'loose','ArrowDown skips empty groups into folderless chats');
+assert.ok(key(main('one'),{key:'ArrowDown'}).defaultPrevented);assert.equal(focused.at(-1),'loose','ArrowDown moves from the pinned row to the next visible row (the running chat is listed above, under Working)');
+key(main('two'),{key:'ArrowDown'});assert.equal(focused.at(-1),'one','ArrowDown steps from Working into Pinned');
 key(main('loose'),{key:'ArrowDown'});assert.equal(focused.at(-1),'loose','ArrowDown clamps at the last visible row (archived is collapsed)');
-key(main('loose'),{key:'Home'});assert.equal(focused.at(-1),'one');key(main('one'),{key:'End'});assert.equal(focused.at(-1),'loose');
-key(main('two'),{key:'ArrowUp'});assert.equal(focused.at(-1),'one');
+key(main('loose'),{key:'Home'});assert.equal(focused.at(-1),'two');key(main('one'),{key:'End'});assert.equal(focused.at(-1),'loose');
+key(main('one'),{key:'ArrowUp'});assert.equal(focused.at(-1),'two');
 (document.querySelector('[aria-label="Unpin one"]') as HTMLButtonElement).click();await delay(40);
 // New chat is a draft: repeated Cmd+N / New chat clicks create no rows until the first message is sent.
 const creates=()=>calls.filter(call=>call.command==='chat.create');

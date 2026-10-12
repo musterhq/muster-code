@@ -82,11 +82,12 @@ export function installNavHistory(deps:NavHistoryDeps,history=new NavHistory()):
   };
 }
 
-/** Sidebar row order (pinned, folders, projects, loose chats, then archived) for Ctrl+Tab and Cmd+1…9. */
+/** Sidebar row order (working, pinned, folders, projects, loose chats, then archived) for Ctrl+Tab and Cmd+1…9. */
 export function chatOrder(snapshot:Pick<Snapshot,'chats'|'folders'|'projects'>,sort:ChatSort):Chat[] {
   const sorted=[...snapshot.chats].sort(compareChats(sort));
   const group=(id:string)=>sorted.filter(chat=>chatGroup(chat,snapshot)===id);
   return [
+    ...group('working'),
     ...group('pinned'),
     ...snapshot.folders.flatMap(folder=>group(`folder:${folder.id}`)),
     ...snapshot.projects.flatMap(project=>group(`project:${project.id}`)),

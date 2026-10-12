@@ -4,6 +4,8 @@ import {newChatTarget,resolveTarget,reusableChat,type ChatTarget} from './chatNa
 import {focusComposer} from './focus';
 import {activeChat,closeSettings,getState,notifyError,pickFolder,selectChat,sendMessage,setComposerDraft,subscribeStore} from './store';
 import {sendWithCheckoutGuard} from './components/ParallelRunGuard';
+import {defaultNewChatFolder} from './sidebarSections';
+import {looksBroadFolder} from '../shared/domains/checkout-protocol';
 
 /**
  * The Codex-style draft chat. "New chat" opens this instead of persisting a row; the chat is created
@@ -33,10 +35,23 @@ function watchSelection():void {
   });
 }
 
+const LAST_FOLDER_KEY='muster.newChat.lastFolder.v1';
+const readLastFolder=():string|undefined=>{try{return localStorage.getItem(LAST_FOLDER_KEY)||undefined;}catch{return undefined;}};
+const rememberFolder=(id:string|undefined):void=>{if(!id)return;try{localStorage.setItem(LAST_FOLDER_KEY,id);}catch{/* private mode: the default just falls back to recent chats */}};
+/** The open chat's place when it is a real project folder; otherwise the last-used project folder. Never a home or Documents folder. */
+export function defaultNewChatTarget():ChatTarget {
+  const snapshot=getState().snapshot;
+  const own=newChatTarget(activeChat(),snapshot);
+  const ownFolder=own.folderId?snapshot?.folders.find(folder=>folder.id===own.folderId):undefined;
+  if(ownFolder&&!ownFolder.missing&&!looksBroadFolder(ownFolder.path))return own;
+  const folderId=snapshot?defaultNewChatFolder(snapshot,readLastFolder(),looksBroadFolder):undefined;
+  return folderId?{folderId}:{};
+}
+
 /** Open (or just refocus) the draft. A second New chat never adds anything; an explicit target retargets it. */
 export function openNewChat(target?:ChatTarget):void {
   if(getState().screen!=='work')closeSettings();
-  if(!draft.open){watchSelection();update({open:true,target:target??newChatTarget(activeChat(),getState().snapshot),error:''});}
+  if(!draft.open){watchSelection();update({open:true,target:target??defaultNewChatTarget(),error:''});}
   else if(target)update({target});
   focusComposer();
 }
@@ -67,6 +82,7 @@ export async function submitNewChat():Promise<boolean> {
   const text=draft.text.trim();
   if(!text||draft.busy)return false;
   const target=resolveTarget(draft.target,getState().snapshot).target;
+  rememberFolder(target.folderId);
   update({busy:true,error:''});
   let id=unusedChatIn(target);
   if(!id){

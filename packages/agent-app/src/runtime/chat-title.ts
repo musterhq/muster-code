@@ -41,11 +41,13 @@ function fromLine(line: string): string | null {
     }
     if (!changed) text = lead;
   }
-  const tokens = text.split(/\s+/).map(token => token.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, '')).filter(Boolean);
+  // Punctuation that belongs to a word stays ("C++", "Q&A?", "(draft)", "--force", "don't"); only the sentence's own ending is shed.
+  const tokens = text.split(/\s+/).map(token => token.replace(/^[^\p{L}\p{N}(\[{'"`$@#~./_-]+|[.;]+$/gu, '')).filter(token => /[\p{L}\p{N}]/u.test(token));
+  if (tokens.length) tokens[tokens.length - 1] = tokens[tokens.length - 1]!.replace(/[.,;:!?]+$/u, '');
   const words: string[] = [];
   let key = 0;
   for (const token of tokens) {
-    const lower = token.toLowerCase();
+    const lower = token.toLowerCase().replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, '');
     if (DROP.has(lower)) continue;
     const minor = MINOR.has(lower);
     if (minor && (!words.length || MINOR.has(words.at(-1)!.toLowerCase()))) continue;

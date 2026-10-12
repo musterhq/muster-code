@@ -25,6 +25,8 @@ export function compareChats(sort:ChatSort):(a:Chat,b:Chat)=>number {
 /** Exactly one visible group owns each chat, including stale project/folder references. */
 export function chatGroup(chat:Chat,snapshot:Pick<Snapshot,'projects'|'folders'>):string {
   if(chat.archived)return 'archived';
+  // A chat that is running is always listed under Working, wherever it lives and even inside a collapsed folder.
+  if(isChatRunning(chat))return 'working';
   // CHAT-15: a snoozed chat (pinned or not) waits in Snoozed until it wakes.
   if(chat.snoozedUntil||chat.snoozeUntilActivity)return 'snoozed';
   if(chat.pinned)return 'pinned';

@@ -530,6 +530,9 @@ function homeInstances({fs,directory,codexHome,cli,node,env,track,validator,fetc
           for(const entry of routerAgents(live.value!))if(!models.some(model=>model.id===entry.id))models.push(entry);
           // Everything else the router serves is loaded too, off in the picker until switched on in Settings › Models.
           const known=new Set(models.map(model=>model.id));
+          // The server's own total is the honest count: what it lists but this list leaves out (image, audio and other models that cannot chat) is reported, not dropped silently.
+          const notChat=live.value!.filter(entry=>entry.chat===false).length;
+          if(notChat)excluded.push({id:'non-chat-models',name:`${notChat} image, audio and other models`,reason:'These models cannot run a chat.'});
           for(const entry of live.value!)if(entry.chat!==false&&entry.owner!=='combo'&&!known.has(entry.id)){known.add(entry.id);models.push({id:entry.id,name:entry.name,hiddenByDefault:true,...(entry.images!==undefined?{images:entry.images}:{}),...(entry.owner?{group:entry.owner}:{}),...(entry.contextWindow?{contextWindow:entry.contextWindow}:{})});}
         }
       }

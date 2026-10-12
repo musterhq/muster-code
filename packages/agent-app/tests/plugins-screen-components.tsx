@@ -33,29 +33,25 @@ await store.boot();root.render(<PluginsScreen/>);await delay(80);
 assert.deepEqual(errors,[]);
 Array.from(document.querySelectorAll<HTMLButtonElement>('.plugins-view-tabs [role="tab"]')).find(tab=>/Discover/.test(tab.textContent??''))!.click();await delay(30);
 const names=()=>Array.from(document.querySelectorAll('.plugins-card-text strong')).map(node=>node.textContent);
-assert.deepEqual(names(),['Figma','Slack','Notion'],'no duplicates across curated sources; unsupported hidden by default');
-assert.equal(document.querySelector('.plugins-view-tabs [role="tab"] span')?.textContent,'3','Discover counts what it shows');
-// Installed anywhere (here: in Codex) → Manage, never Install.
-assert.ok(document.querySelector('[aria-label="Manage Slack"]'));
+assert.deepEqual(names(),['Notion'],'Discover lists only what is not installed yet; no duplicates across curated sources; unsupported hidden by default');
+assert.equal(document.querySelector('.plugins-view-tabs [role="tab"] span')?.textContent,'1','Discover counts what it shows');
+// Installed anywhere (here: Figma, and Slack in Codex) lives under Installed, never offered again in Discover.
+assert.equal(document.querySelector('[aria-label="Manage Slack"]'),null);
 assert.equal(document.querySelector('[aria-label="Install Slack"]'),null);
-assert.match(document.querySelector('.plugins-card.is-installed')?.textContent??'',/Installed in Codex/);
 assert.ok(document.querySelector('[aria-label="Install Notion"]'));
-// Every card icon sits in the same 36px tile; real logos where a manifest has one.
+// Every card icon sits in the same 36px tile; a package without a logo gets a monogram.
 const tiles=Array.from(document.querySelectorAll<HTMLElement>('.plugins-card .plugins-tile'));
-assert.equal(tiles.length,3);assert.ok(tiles.every(tile=>tile.style.width==='36px'&&tile.style.height==='36px'));
-assert.equal(document.querySelectorAll('.plugins-card .plugins-tile.is-image').length,2,'Figma and Slack show their logos, Notion a monogram');
+assert.equal(tiles.length,1);assert.ok(tiles.every(tile=>tile.style.width==='36px'&&tile.style.height==='36px'));
+assert.equal(document.querySelectorAll('.plugins-card .plugins-tile.is-image').length,0,'Notion shows a monogram');
 // Unsupported entries live behind a filter.
 const filter=document.querySelector<HTMLButtonElement>('.plugins-unsupported-filter');
 assert.ok(filter);assert.match(filter!.textContent??'',/Unsupported\s*1/);
 filter!.click();await delay(30);
-assert.deepEqual(names(),['Figma','Slack','Hookify','Notion']);
+assert.deepEqual(names(),['Hookify','Notion']);
+assert.match(document.querySelector('.plugins-scope-note')?.textContent??'',/Unsupported means the package needs something Muster cannot run yet/,'Unsupported is explained');
 assert.match(Array.from(document.querySelectorAll('.plugins-card')).find(card=>/Hookify/.test(card.textContent??''))?.textContent??'',/Unsupported/);
-// Manage jumps to the Installed detail of that plugin.
-document.querySelector<HTMLButtonElement>('[aria-label="Manage Slack"]')!.click();await delay(30);
-assert.equal(document.querySelector('[role="tab"][aria-selected="true"]')?.textContent?.startsWith('Installed'),true);
-assert.equal(document.querySelector('.plugin-detail-name')?.textContent,'Slack');
-// Installed: the .system skill is not a user skill; rows use the same 28px tile.
-document.querySelector<HTMLButtonElement>('.plugins-detail-back')!.click();await delay(30);
+// Installed items (including Slack, installed in Codex) are under Installed.
+Array.from(document.querySelectorAll<HTMLButtonElement>('.plugins-view-tabs [role="tab"]')).find(tab=>/Installed/.test(tab.textContent??''))!.click();await delay(30);
 const rows=Array.from(document.querySelectorAll('.plugins-row .plugins-card-text strong')).map(node=>node.textContent);
 assert.ok(rows.includes('pdf'));assert.ok(!rows.includes('imagegen'),'.system skills are excluded');
 assert.ok(Array.from(document.querySelectorAll<HTMLElement>('.plugins-row .plugins-tile')).every(tile=>tile.style.width==='28px'));

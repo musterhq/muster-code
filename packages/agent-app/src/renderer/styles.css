@@ -5,7 +5,7 @@
   /* Layers: modal backdrop and dialog, then popovers/menus above any dialog (a picker opened inside a modal must not open behind it). */
   --z-modal-backdrop: 110; --z-modal: 111; --z-popover: 130;
   /* Chat reply rhythm (message-body.css): compact, ChatGPT-like. */
-  --md-leading: 1.52; --md-gap: 0.55em; --md-heading-gap: 1.05em; --md-strong-weight: 630;
+  --md-leading: 1.52; --md-gap: 0.55em; --md-heading-gap: 0.9em; --md-strong-weight: 630;
   /* Neutral surfaces matched to the observed Cursor Agents window and its
      installed Cursor Dark palette; native material supplies sidebar blur. */
   --bg: #161616;

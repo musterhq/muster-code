@@ -1,6 +1,7 @@
 import {transitionLayout} from '../layoutMotion';
 import React, {useEffect,useRef,useState,useSyncExternalStore} from 'react';
-import {Check,GitBranch,ListTodo,LoaderCircle,MoreHorizontal,PanelBottom,PanelRight,Share2,X} from 'lucide-react';
+import {Menu} from '@base-ui/react/menu';
+import {Check,GitBranch,Link2,ListTodo,LoaderCircle,MoreHorizontal,PanelBottom,PanelRight,Share2,X} from 'lucide-react';
 import {forkChat} from '../messageActions';
 import {getState,activeChat,setResourcesHidden,toggleSummary,updateChat,notifyError} from '../store';
 import {openChatMenu} from '../chatMenu';
@@ -77,13 +78,19 @@ export function WorkControls(){
  return <div ref={root} className="work-controls">
   <PendingAttention/>
   {notice&&<span className="work-control-notice" role="status">{notice}</span>}
-  {chat&&<Tip label="Copy local chat link"><button className="icon-button" aria-label="Copy local chat link" aria-description={"Opens this chat on "+device().lower+"; use Conversation actions › Export Conversation… to share with someone else"} onClick={()=>void copyLink()}><Share2 size={16}/></button></Tip>}
   {chat&&<SummaryToggle/>}
-  {chat&&<Tip label="Fork into a new chat" disabledReason="Forking…"><button className="icon-button" aria-label="Fork conversation" disabled={forking} aria-busy={forking||undefined} onClick={()=>void fork()}>{forking?<LoaderCircle size={16}/>:<GitBranch size={16}/>}</button></Tip>}
-  {chat&&<Tip label="Conversation actions"><button ref={trigger} className="icon-button" aria-label="Conversation actions" aria-haspopup="menu" aria-expanded={menuOpen} onClick={()=>void openMenu()} onKeyDown={event=>{if(event.key==='ArrowDown'){event.preventDefault();void openMenu();}}}><MoreHorizontal size={17}/></button></Tip>}
-  {chat&&<TerminalToggle chatId={chat.id} title={chat.title}/>}
-  <Tip label={state.resourcesHidden?'Show resource pane':'Hide resource pane'}><button className="icon-button" aria-label={state.resourcesHidden?'Show resource pane':'Hide resource pane'} aria-pressed={!state.resourcesHidden} onClick={()=>{transitionLayout(()=>setResourcesHidden(!getState().resourcesHidden));}}><PanelRight size={16}/></button></Tip>
-  {renaming&&<form className="work-rename" onSubmit={event=>{event.preventDefault();void saveRename();}} data-native-preview-overlay>
+ {chat&&<TerminalToggle chatId={chat.id} title={chat.title}/>}
+ <Tip label={state.resourcesHidden?'Show resource pane':'Hide resource pane'}><button className="icon-button" aria-label={state.resourcesHidden?'Show resource pane':'Hide resource pane'} aria-pressed={!state.resourcesHidden} onClick={()=>{transitionLayout(()=>setResourcesHidden(!getState().resourcesHidden));}}><PanelRight size={16}/></button></Tip>
+ {/* Three primary actions above; everything else lives in one overflow menu. */}
+ {chat&&<Menu.Root>
+  <Tip label="More"><Menu.Trigger ref={trigger} className="icon-button" aria-label="Conversation actions"><MoreHorizontal size={17}/></Menu.Trigger></Tip>
+  <Menu.Portal><Menu.Positioner side="bottom" align="end" sideOffset={4} className="chat-menu-positioner"><Menu.Popup className="ui-menu chat-menu">
+   <Menu.Item onClick={()=>void copyLink()} aria-description={"Opens this chat on "+device().lower+"; use Conversation actions › Export Conversation… to share with someone else"}><Link2 size={14} aria-hidden="true"/> Copy local chat link</Menu.Item>
+   <Menu.Item disabled={forking} onClick={()=>void fork()}><GitBranch size={14} aria-hidden="true"/> Fork into a new chat</Menu.Item>
+   <Menu.Item onClick={()=>void openMenu()}><MoreHorizontal size={14} aria-hidden="true"/> More conversation actions…</Menu.Item>
+  </Menu.Popup></Menu.Positioner></Menu.Portal>
+ </Menu.Root>}
+ {renaming&&<form className="work-rename" onSubmit={event=>{event.preventDefault();void saveRename();}} data-native-preview-overlay>
    <label htmlFor="work-rename-title">Rename chat</label>
    <div><input ref={renameInput} id="work-rename-title" value={title} maxLength={256} onChange={event=>setTitle(event.target.value)} onKeyDown={event=>{if(event.key==='Escape'){event.preventDefault();setRenaming(false);trigger.current?.focus();}}}/><button type="button" className="icon-button" aria-label="Cancel rename" onClick={()=>setRenaming(false)}><X size={14}/></button><button type="submit" className="icon-button" aria-label="Save chat name"><Check size={14}/></button></div>
   </form>}

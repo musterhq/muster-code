@@ -66,3 +66,8 @@ export function discoverCards(input: { catalog: readonly MarketplacePackage[]; i
 }
 /** Unsupported packages stay out of the grid unless asked for (an installed one always shows). */
 export const isHiddenUnsupported = (card: CatalogCard): boolean => !card.pkg.compatibility.supported && !card.pkg.installed && !card.installedAs;
+
+/** Discover offers what you do not have yet; what is installed (or installed in Codex) lives under Installed. */
+export const isInstalledCard = (card: CatalogCard): boolean => !!(card.pkg.installed || card.installedAs);
+/** 'Codex: /Users/me/.codex/plugins/cache/...' reads as 'Codex'; the long path stays in the tooltip. */
+export const shortSourceLabel = (label: string): string => label.replace(/^([^:\/]{1,24}):\s*[\/~].*$/, '$1').replace(/^([^:]{1,24}):\s.{40,}$/, '$1');
