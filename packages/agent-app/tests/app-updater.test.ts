@@ -117,15 +117,17 @@ test('install waits for the app to exit, swaps the bundle and keeps the old one 
   for(const [dir,label] of [[target,'old'],[staged,'new']] as const){mkdirSync(path.join(dir,'Contents/MacOS'),{recursive:true});writeFileSync(path.join(dir,'Contents/marker'),label);}
   const sleeper=spawn('/bin/sleep',['1']);
   let quits=0;
-  const updater=new AppUpdater({current:'0.2.0',arch:'arm64',exe:path.join(target,'Contents/MacOS/Muster Agent'),repo:'o/r',channel:'stable',settingsFile:path.join(root,'updates.json'),stagingDir:path.join(root,'pending'),emit:()=>{},quit:()=>{quits++;},pid:sleeper.pid,relaunch:'/usr/bin/true'});
+  // The install script runs the relaunch command last, after the swap and the cleanup: that is its completion signal.
+  const done=path.join(root,'relaunched'),relaunch=path.join(root,'relaunch.sh');
+  writeFileSync(relaunch,`#!/bin/sh\ntouch "${done}"\n`,{mode:0o755});
+  const updater=new AppUpdater({current:'0.2.0',arch:'arm64',exe:path.join(target,'Contents/MacOS/Muster Agent'),repo:'o/r',channel:'stable',settingsFile:path.join(root,'updates.json'),stagingDir:path.join(root,'pending'),emit:()=>{},quit:()=>{quits++;},pid:sleeper.pid,relaunch});
   Object.assign(updater as any,{staged});(updater as any).status={...updater.snapshot(),phase:'ready'};
   assert.equal((await updater.install()).phase,'installing');
   assert.equal(quits,1,'the app is asked to quit');
   assert.equal(readFileSync(path.join(target,'Contents/marker'),'utf8'),'old','nothing is replaced while the app runs');
-  for(let end=Date.now()+15000;Date.now()<end&&readFileSync(path.join(target,'Contents/marker'),'utf8')!=='new';)await new Promise(r=>setTimeout(r,100));
+  for(let end=Date.now()+60000;Date.now()<end&&!existsSync(done);)await new Promise(r=>setTimeout(r,50));
+  assert.ok(existsSync(done),'the installer finished');
   assert.equal(readFileSync(path.join(target,'Contents/marker'),'utf8'),'new','the new bundle is in place');
-  // Cleanup follows the swap in the same script; give it a moment on a slow runner.
-  for(let end=Date.now()+10000;Date.now()<end&&(existsSync(`${target}.previous`)||existsSync(path.join(root,'pending','0.3.0')));)await new Promise(r=>setTimeout(r,100));
   assert.equal(existsSync(`${target}.previous`),false,'the old copy is cleaned up');
   assert.equal(existsSync(path.join(root,'pending','0.3.0')),false,'the staged download is removed');
 });
