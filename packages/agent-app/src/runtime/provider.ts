@@ -180,7 +180,7 @@ export function createProviderAdapter(options: { core?: CoreClient; available?: 
     try {
       const result = await route.adapter!.run({
         chat: input.chat, cwd: input.cwd, prompt: input.prompt, model, permissionMode: access.permissionMode, signal: owned.controller.signal,
-        ...(input.images?.length ? {images: input.images} : {}), ...(input.reasoningEffort ? {reasoningEffort: input.reasoningEffort} : {}),
+        ...(input.images?.length ? {images: input.images} : {}), ...(route.info.models.find(entry => entry.id === model)?.images === true ? {vision: true} : {}), ...(input.reasoningEffort ? {reasoningEffort: input.reasoningEffort} : {}),
         ...(resumeThreadId ? {resumeThreadId} : {}),
         instructions: runInstructions(input.chat.mode, input.developerInstructions, canSpawnSubagents(route.info.driver)),
         ...(Object.keys(mcpServersFromOverrides(input.configOverrides)).length ? {mcpServers: mcpServersFromOverrides(input.configOverrides)} : {}),

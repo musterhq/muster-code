@@ -51,15 +51,18 @@ async function turn(input: AdapterRunInput, memory: ConversationMemory, label: s
   const turnId = randomUUID();
   input.onTurnAccepted({threadId, turnId});
   let answer = '';
-  const extra: Array<{role: string; content?: string | null; tool_calls?: unknown; tool_call_id?: string}> = [];
+  const extra: Array<{role: string; content?: string | unknown[] | null; tool_calls?: unknown; tool_call_id?: string}> = [];
+  const pictures = new Set<object>();
+  const visionNote = {told: false};
   const usages: Array<{inputTokens?: number; outputTokens?: number; totalTokens?: number}> = [];
   const deadline = Date.now() + TURN_DEADLINE_MS;
   const used: string[] = [];
   let callsThisTurn = 0;
   /** The model re-reads `extra` every round: keep it under a total size by blanking the oldest tool results. */
   const trimExtra = () => {
-    let size = extra.reduce((sum, message) => sum + (message.content?.length ?? 0), 0);
-    for (const message of extra) { if (size <= MAX_EXTRA_BYTES) break; if (message.role === 'tool' && (message.content?.length ?? 0) > 200) { size -= message.content!.length; message.content = '[earlier tool output omitted to save space]'; size += message.content.length; } }
+    const length = (message: {content?: string | unknown[] | null}) => typeof message.content === 'string' ? message.content.length : 0;
+    let size = extra.reduce((sum, message) => sum + length(message), 0);
+    for (const message of extra) { if (size <= MAX_EXTRA_BYTES) break; if (message.role === 'tool' && length(message) > 200) { size -= length(message); message.content = '[earlier tool output omitted to save space]'; size += message.content.length; } }
   };
   /** At a cap: one last streamed request with no tools asking for a short status. If that fails, the plain note. */
   const closingStatus = async () => {
@@ -88,11 +91,18 @@ async function turn(input: AdapterRunInput, memory: ConversationMemory, label: s
       calls = calls.slice(0, Math.min(MAX_CALLS_PER_ROUND, MAX_CALLS_PER_TURN - callsThisTurn));
       callsThisTurn += calls.length;
       extra.push({role: 'assistant', content: null, tool_calls: calls.map(call => ({id: call.id, type: 'function', function: {name: call.name, arguments: resent(call.arguments)}}))});
+      // Pictures are re-sent every round, so only the latest ones stay; earlier ones become a one-line note.
+      for (const message of extra) if (pictures.delete(message)) message.content = '[an earlier image was shown here and has been omitted to save space]';
+      const seen: Array<{role: string; content: unknown[]}> = [];
       for (const call of calls) {
-        const result = await executeTool(call, {cwd: input.cwd, access: input.permissionMode, signal: input.signal, emit: input.onEvent, threadId, turnId, ...(input.authorize ? {authorize: input.authorize} : {}), ...(input.env ? {env: input.env} : {}), deadline});
+        const result = await executeTool(call, {cwd: input.cwd, access: input.permissionMode, ...(input.vision ? {vision: true} : {}), visionNote, signal: input.signal, emit: input.onEvent, threadId, turnId, ...(input.authorize ? {authorize: input.authorize} : {}), ...(input.env ? {env: input.env} : {}), deadline});
         used.push(`${call.name}${result.ok ? '' : ' (failed)'}`);
         extra.push({role: 'tool', tool_call_id: call.id, content: result.content});
+        // A tool message cannot carry a picture: it follows as a user message once every tool reply of this round is in.
+        if (result.image) seen.push({role: 'user', content: [{type: 'text', text: `Image returned by read_file (${result.image.name}):`}, {type: 'image_url', image_url: {url: `data:${result.image.mediaType};base64,${result.image.data}`}}]});
       }
+      for (const message of seen) pictures.add(message);
+      extra.push(...seen);
       trimExtra();
       if (input.signal.aborted) break;
       response = await send(history, extra, true);
@@ -192,7 +202,18 @@ export function anthropicAdapter(options: Omit<HttpOptions, 'endpoint' | 'label'
 /** GET a JSON model list with a timeout and a 1 MiB cap. */
 /** One `/models` entry. `owner` is the router's `owned_by` (a router's own agents and combos report "combo");
  *  `chat` is false for image, audio, video and moderation models, which a chat cannot run. */
-export interface ListedModel { id: string; name: string; owner?: string; chat?: boolean; /** The router's own context size (`context_length`, `max_input_tokens`…), used as the window when the provider reports none. */ contextWindow?: number }
+/** Whether a `/models` or catalog entry says the model takes images: `input_modalities` (or `modalities.input`, `architecture.input_modalities`)
+ *  naming "image", or `capabilities.vision` / `capabilities.image_input`. Undefined when the entry does not say. */
+export function entryAcceptsImages(entry: Record<string, unknown>): boolean | undefined {
+  const object = (value: unknown) => value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
+  const capabilities = object(entry.capabilities);
+  const lists = [entry.input_modalities, entry.inputModalities, object(entry.modalities).input, object(entry.architecture).input_modalities, capabilities.input_modalities];
+  const listed = lists.find(Array.isArray) as unknown[] | undefined;
+  if (listed) return listed.some(item => typeof item === 'string' && item.toLowerCase() === 'image');
+  for (const flag of [capabilities.vision, capabilities.image_input, capabilities.images, entry.vision, entry.supports_vision]) if (typeof flag === 'boolean') return flag;
+  return undefined;
+}
+export interface ListedModel { id: string; name: string; owner?: string; chat?: boolean; /** The router reports image input (vision) for this model. */ images?: boolean; /** The router's own context size (`context_length`, `max_input_tokens`…), used as the window when the provider reports none. */ contextWindow?: number }
 /** A positive integer context size from a `/models` entry; routers name it differently. */
 export function listedContextWindow(entry: Record<string, unknown>): number | undefined {
   for (const key of ['context_length', 'max_input_tokens', 'context_window', 'contextWindow', 'max_context_length', 'input_token_limit']) { const value = entry[key]; if (typeof value === 'number' && Number.isInteger(value) && value > 0 && value <= 50_000_000) return value; }
@@ -217,8 +238,8 @@ export async function fetchModelList(url: string, headers: Record<string, string
       const output = Array.isArray(entry.output_modalities) ? entry.output_modalities : undefined;
       const tools = entry.capabilities && typeof entry.capabilities === 'object' ? (entry.capabilities as {tool_calling?: unknown}).tool_calling : undefined;
       const chat = !(typeof entry.type === 'string' && entry.type !== 'model') && !(output && !output.includes('text')) && tools !== false;
-      const contextWindow = listedContextWindow(entry);
-      return [{id, name: typeof name === 'string' && name.length <= 160 ? name.replace(/[\x00-\x1f]/g, '') : id, ...(typeof entry.owned_by === 'string' ? {owner: entry.owned_by.slice(0, 64)} : {}), chat, ...(contextWindow ? {contextWindow} : {})}];
+      const contextWindow = listedContextWindow(entry), images = entryAcceptsImages(entry);
+      return [{id, name: typeof name === 'string' && name.length <= 160 ? name.replace(/[\x00-\x1f]/g, '') : id, ...(typeof entry.owned_by === 'string' ? {owner: entry.owned_by.slice(0, 64)} : {}), chat, ...(images !== undefined ? {images} : {}), ...(contextWindow ? {contextWindow} : {})}];
     });
   } finally { clearTimeout(timer); }
 }

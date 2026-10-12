@@ -9,6 +9,10 @@ Router and API-key chats work longer and stay quiet about sub-agents.
 
 - Chats on routes that cannot start sub-agents (API keys, routers, local servers) no longer keep saying "I don't have a sub-agent tool in this chat". Sub-agent hints now appear only on routes that can use them, and those chats are told to just do the work.
 - Router and API-key chats can work much longer in one turn (up to 400 tool rounds, 1,000 tool calls or 2 hours) before stopping. When a limit is reached, the model now gives a short status of what is done and what is next instead of a bare "Stopped" note.
+- "Viewed N images" rows now show the real pictures instead of grey placeholders, for any image the agent looked at or made: in your project, in /tmp, in a worktree under app data, or at any other absolute path. Muster reads only image files (checked by their contents, up to 20 MB), only for paths that appear in that chat's own tool rows. The thumbnails are small, cached and decoded in the background. Clicking one opens the full image, with zoom.
+- Images in a reply (a markdown image pointing at a file on your computer) show at a readable size, and clicking one zooms it.
+- Models reached over an OpenAI-compatible route now actually receive an image when the agent reads one with read_file, as long as the model reports image input. Otherwise the agent is told once, plainly, that the model cannot see images instead of being handed garbled text.
+- Router models that report vision (image input, or capabilities.vision) are now marked as image-capable in the model list, including router agents such as intelligent-planner.
 
 ## 0.3.10
 

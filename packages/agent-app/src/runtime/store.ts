@@ -623,6 +623,14 @@ export class AgentStore {
     return (this.db.prepare('SELECT * FROM timeline WHERE chat_id = ? ORDER BY seq').all(chatId) as unknown as TimelineRow[]).map(rowToItem);
   }
 
+  /** True when one of this chat's own rows (a tool row, a reply) names the path. The gate for reading an image outside every folder. */
+  chatMentionsPath(chatId: string, path: string): boolean {
+    if (!path || path.includes('\0')) return false;
+    const escaped = JSON.stringify(path).slice(1, -1);
+    const row = this.db.prepare("SELECT 1 AS hit FROM timeline WHERE chat_id = ? AND kind <> 'user' AND (instr(data, ?) > 0 OR instr(text, ?) > 0) LIMIT 1").get(chatId, escaped, path);
+    return row !== undefined;
+  }
+
   /** Full ordered timeline plus its per-chat cursor, including empty chats. */
   timelineSnapshot(chatId: string): { items: TimelineItem[]; revision: number } {
     const items = this.timeline(chatId);

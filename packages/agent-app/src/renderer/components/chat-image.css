@@ -1,0 +1,15 @@
+.chat-image { display: grid; place-items: center; padding: 0; overflow: hidden; border: 1px solid color-mix(in srgb, var(--text) 8%, transparent); border-radius: var(--radius-8); background: color-mix(in srgb, var(--text) 3%, var(--bg)); color: var(--text-faint); cursor: zoom-in; transition: border-color 130ms ease; }
+.chat-image:hover, .chat-image:focus-visible { border-color: color-mix(in srgb, var(--text) 22%, transparent); }
+.chat-image:focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
+.chat-image.is-missing, .chat-image.is-failed { cursor: default; }
+.chat-image img { width: 100%; height: 100%; display: block; }
+.chat-image-thumb { flex: none; width: 92px; height: 92px; }
+.chat-image-thumb img { object-fit: cover; }
+.chat-image-inline { display: inline-grid; max-width: min(100%, 560px); min-width: 120px; min-height: 80px; max-height: 420px; margin: 6px 0; }
+.chat-image-inline img { object-fit: contain; max-height: 420px; }
+.chat-image-lightbox { position: fixed; inset: 0; z-index: 1000; display: grid; place-items: center; padding: 24px; background: var(--scrim); }
+.chat-image-lightbox-card { display: flex; flex-direction: column; width: min(1100px, 100%); height: min(760px, 100%); overflow: hidden; border-radius: var(--radius-12); background: var(--bg); box-shadow: var(--shadow-dialog); }
+.chat-image-lightbox-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 12px; border-bottom: 1px solid color-mix(in srgb, var(--text) 8%, transparent); font-size: var(--fs-13); }
+.chat-image-lightbox-head span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat-image-lightbox .image-file { flex: 1; min-height: 0; }
+@media (prefers-reduced-motion: reduce) { .chat-image { transition: none; } }
