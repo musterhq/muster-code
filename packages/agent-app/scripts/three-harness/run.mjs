@@ -173,7 +173,7 @@ try {
     for (const file of ['cube.glb', 'cube-textured.glb', 'cube-draco.glb', 'cube-meshopt.glb', 'cube-external.gltf', 'cube.obj', 'cube-textured.obj', 'sphere.stl', 'cube-ascii.stl', 'sphere.ply', 'spiral-points.ply', 'cube.fbx']) {
       const opened = await evaluate(`harness.open(${JSON.stringify(file)})`);
       await sleep(250);
-      const detail = await evaluate(`(document.querySelector('.rich-block-error')?.textContent ?? '') + ' | ' + (document.querySelector('.model-info') ? 'info' : '')`);
+      const detail = await evaluate(`(document.querySelector('.resource-state-error')?.textContent ?? '') + ' | ' + (document.querySelector('.model-info') ? 'info' : '')`);
       report.formats[file] = {state: opened.state, ms: Math.round(opened.ms), error: opened.state === 'error' ? detail : undefined};
     }
   }
