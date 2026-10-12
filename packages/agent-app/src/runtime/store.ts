@@ -154,8 +154,42 @@ export class AgentStore {
   /** What opening this database migrated (and where the pre-upgrade backup is). */
   readonly schemaMigration: MigrationResult;
 
-  /** Raw handle for runtime modules that keep their own tables in this database. */
-  database(): DatabaseSync { return this.db; }
+  /** Raw handle for runtime modules that keep their own tables in this database. Staged rows are written first. */
+  database(): DatabaseSync { this.flushStaged(); return this.db; }
+
+  /**
+   * Streaming writes are staged in memory and written once per flush, not once per token (each write is the full
+   * row, so per-token writes grow with the square of the answer). Every read or write of the timeline flushes
+   * first, so no reader ever sees a stale row; the service's timeline tick (about 33 ms) and sealing a segment
+   * are the usual flush points. `writes` counts timeline row writes, for the streaming write budget.
+   */
+  private readonly staged = new Map<string, { text: string; status?: string; data?: Record<string, unknown> }>();
+  private timelineWrites = 0;
+  /** Timeline rows written (inserts and updates) since this store opened. */
+  timelineWriteCount(): number { return this.timelineWrites; }
+  /** Stage a row's new text (and status/data) without writing it. Later stages of the same row replace earlier ones. */
+  stageItem(id: string, text: string, status?: string, data?: Record<string, unknown>): void {
+    const previous = this.staged.get(id);
+    this.staged.set(id, { text, ...(status !== undefined ? { status } : {}), ...(data ? { data } : previous?.data ? { data: previous.data } : {}) });
+  }
+  /** Write every staged row. Returns how many rows were written. */
+  flushStaged(): number {
+    if (!this.staged.size) return 0;
+    const batch = [...this.staged];
+    this.staged.clear();
+    for (const [id, row] of batch) this.writeItem(id, row.text, row.status, row.data);
+    return batch.length;
+  }
+  /** A row as it will read after the next flush, without flushing (a cheap read for the streaming path). */
+  peekItem(id: string): TimelineItem | undefined {
+    const row = this.db.prepare('SELECT * FROM timeline WHERE id = ?').get(id) as TimelineRow | undefined;
+    if (!row) return undefined;
+    const item = rowToItem(row), staged = this.staged.get(id);
+    if (!staged) return item;
+    const next: TimelineItem = { ...item, text: staged.text, ...(staged.data ? { data: staged.data } : {}) };
+    if (staged.status !== undefined) next.status = staged.status; else delete next.status;
+    return next;
+  }
 
   constructor(dataDir: string) {
     mkdirSync(dataDir, { recursive: true, mode: 0o700 });
@@ -230,6 +264,7 @@ export class AgentStore {
 
   /** Run `fn` inside a transaction; rolls back on throw. */
   tx<T>(fn: () => T): T {
+    this.flushStaged();
     this.db.exec('BEGIN IMMEDIATE');
     try {
       const value = fn();
@@ -620,12 +655,14 @@ export class AgentStore {
   }
 
   timeline(chatId: string): TimelineItem[] {
+    this.flushStaged();
     return (this.db.prepare('SELECT * FROM timeline WHERE chat_id = ? ORDER BY seq').all(chatId) as unknown as TimelineRow[]).map(rowToItem);
   }
 
   /** True when one of this chat's own rows (a tool row, a reply) names the path. The gate for reading an image outside every folder. */
   chatMentionsPath(chatId: string, path: string): boolean {
     if (!path || path.includes('\0')) return false;
+    this.flushStaged();
     const escaped = JSON.stringify(path).slice(1, -1);
     const row = this.db.prepare("SELECT 1 AS hit FROM timeline WHERE chat_id = ? AND kind <> 'user' AND (instr(data, ?) > 0 OR instr(text, ?) > 0) LIMIT 1").get(chatId, escaped, path);
     return row !== undefined;
@@ -640,6 +677,7 @@ export class AgentStore {
 
   /** The per-chat timeline cursor alone (no rows): a cheap "did anything change?" probe for caches. */
   timelineRevision(chatId: string): number {
+    this.flushStaged();
     const row = this.db.prepare('SELECT revision FROM timeline_cursors WHERE chat_id = ?').get(chatId) as { revision: number } | undefined;
     return row?.revision ?? 0;
   }
@@ -647,6 +685,7 @@ export class AgentStore {
   /** Return each row changed after `since`, ordered by its original sequence. */
   timelineChanges(chatId: string, since: number): { items: TimelineItem[]; revision: number } {
     if (!Number.isSafeInteger(since) || since < 0) throw new Error('Invalid timeline revision cursor.');
+    this.flushStaged();
     const cursor = this.db.prepare('SELECT revision FROM timeline_cursors WHERE chat_id = ?').get(chatId) as { revision: number } | undefined;
     const revision = cursor?.revision ?? 0;
     if (since > revision) throw new Error(`Timeline revision ${since} is ahead of current revision ${revision}.`);
@@ -658,6 +697,8 @@ export class AgentStore {
 
   appendItem(chatId: string, kind: TimelineItem['kind'], text: string, status?: string, data?: Record<string, unknown>): TimelineItem {
     if (hasLiterals()) { text = redactLiterals(chatId, text); if (data) data = redactLiteralsDeep(chatId, data); }
+    this.flushStaged();
+    this.timelineWrites++;
     const item: TimelineItem = {
       id: randomUUID(), chatId, kind, text, ...(status ? { status } : {}), createdAt: now(), ...(data ? { data } : {}),
     };
@@ -667,6 +708,16 @@ export class AgentStore {
   }
 
   updateItem(id: string, text: string, status?: string, data?: Record<string, unknown>): void {
+    // A direct write supersedes this row's staged text; other staged rows go first so writes keep their order.
+    const staged = this.staged.get(id);
+    this.staged.delete(id);
+    if (staged?.data && !data) data = staged.data;
+    this.flushStaged();
+    this.writeItem(id, text, status, data);
+  }
+
+  private writeItem(id: string, text: string, status?: string, data?: Record<string, unknown>): void {
+    this.timelineWrites++;
     if (hasLiterals()) { const chatId = (this.db.prepare('SELECT chat_id FROM timeline WHERE id = ?').get(id) as { chat_id: string } | undefined)?.chat_id; if (chatId) { text = redactLiterals(chatId, text); if (data) data = redactLiteralsDeep(chatId, data); } }
     this.db.prepare('UPDATE timeline SET text = ?, status = ?, data = COALESCE(?, data) WHERE id = ?').run(text, status ?? null, data ? JSON.stringify(data) : null, id);
   }
@@ -708,6 +759,7 @@ export class AgentStore {
   }
 
   item(id: string): TimelineItem | undefined {
+    this.flushStaged();
     const row = this.db.prepare('SELECT * FROM timeline WHERE id = ?').get(id) as TimelineRow | undefined;
     return row ? rowToItem(row) : undefined;
   }
@@ -902,6 +954,7 @@ export class AgentStore {
   }
 
   close(): void {
+    try { this.flushStaged(); } catch { /* closing anyway */ }
     this.db.close();
   }
 }

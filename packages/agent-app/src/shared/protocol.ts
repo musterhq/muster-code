@@ -62,6 +62,9 @@ export interface ApprovalData { method: string; kind: 'command' | 'fileChange' |
 /** `acceptForSession` maps to the codex app-server decision of the same name: later identical requests in this session are not asked again. */
 export type ApprovalDecision = 'accept' | 'acceptForSession' | 'decline';
 export interface TimelineSnapshot { items: TimelineItem[]; revision: number }
+/** `chat.itemDetail`: the full output and diffs of one row, which the stream carries only as a capped preview.
+ *  `output.truncated` means even the detail cap cut it (the durable log keeps the rest). */
+export interface ItemDetail { itemId: string; output?: { text: string; truncated: boolean; totalBytes: number }; changes?: Record<string, unknown>[] }
 export interface TimelinePatch extends TimelineSnapshot { after: number }
 export interface Project { id: string; name: string; goal: string; folderIds: string[]; primaryFolderId?: string | null; archived?: boolean }
 export type TaskStatus = 'todo' | 'running' | 'blocked' | 'implemented' | 'verified';
@@ -153,7 +156,10 @@ export interface Commands extends DomainCommands, BrowserCommands, ScopedCompute
  'chat.export': {input:{id:string;format:'markdown'|'html'|'json';redact?:boolean};output:ChatExport};
  /** Share sheet: saves an export through a save dialog (main process). */
  'chat.export.file': {input:{id:string;format:'markdown'|'html'|'json';redact?:boolean};output:{saved:boolean;fileName?:string}};
- 'chat.timeline': { input: {id: string; select?: boolean}; output: TimelineSnapshot };
+ /** `full` keeps every row whole (runtime domains); the window gets capped previews and fetches the rest with chat.itemDetail. */
+ 'chat.timeline': { input: {id: string; select?: boolean; full?: boolean}; output: TimelineSnapshot };
+ /** Full output (newest part, up to 1 MiB) and diffs (up to 2 MiB) of one row whose preview was cut. */
+ 'chat.itemDetail': { input: {chatId: string; itemId: string}; output: ItemDetail };
  /** NAV-11 global search over message content (runtime full-text index of every non-archived chat's user and
   *  assistant messages). Every whitespace-separated term must appear in one message; one hit per chat (its best
   *  message), phrase matches first, then recency. Paged by `offset`/`limit` (default 20, max 50): a full page means

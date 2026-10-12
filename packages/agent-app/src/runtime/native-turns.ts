@@ -20,6 +20,8 @@ export interface NativeTurnHost {
   runs: Map<string, { stopped: boolean; retry: AbortController; cwd: string; seal?(): void }>;
   state(): void;
   timeline(chatId: string): void;
+  /** Coalesced timeline publish (the streaming tick); `timeline` when absent. */
+  scheduleTimeline?(chatId: string): void;
   runStarted(chat: Chat, runId: string): void;
   runSettled(chat: Chat, runId: string, status: ChatStatus): void;
   afterRun(chatId: string, status: ChatStatus): void;
@@ -33,22 +35,24 @@ function userText(item: Record<string, unknown>): string {
 }
 
 export function createNativeTurnObserver(host: NativeTurnHost) {
-  const adopted = new Map<string, { run: AdoptedRun; runId: string; segment?: TimelineItem; streamed: Set<string> }>();
+  const adopted = new Map<string, { run: AdoptedRun; runId: string; segment?: TimelineItem; message?: string; streamed: Set<string> }>();
   /** Events of a native turn that began while Muster's own run was still settling; replayed by drain(). */
   const pending = new Map<string, Array<[string, Record<string, unknown>]>>();
   const MAX_PENDING = 4096;
   const seal = (chatId: string) => {
     const entry = adopted.get(chatId);
-    if (entry?.segment) { host.store.updateItem(entry.segment.id, entry.segment.text, 'completed'); entry.segment = undefined; }
+    if (entry?.segment) { host.store.updateItem(entry.segment.id, entry.segment.text, 'completed'); entry.segment = undefined; entry.message = undefined; }
   };
-  const append = (chatId: string, kind: 'assistant' | 'reasoning', delta: string) => {
+  const append = (chatId: string, kind: 'assistant' | 'reasoning', delta: string, message?: string) => {
     const entry = adopted.get(chatId);
     if (!entry || !delta) return;
-    if (entry.segment && entry.segment.kind !== kind) seal(chatId);
+    // A different provider message starts its own segment, so two replies never run together.
+    if (entry.segment && (entry.segment.kind !== kind || (kind === 'assistant' && message && entry.message && entry.message !== message))) seal(chatId);
+    if (kind === 'assistant' && message && !entry.segment) entry.message = message;
     if (!entry.segment) entry.segment = host.store.appendItem(chatId, kind, '', 'running');
     entry.segment = { ...entry.segment, text: entry.segment.text + delta };
-    host.store.updateItem(entry.segment.id, entry.segment.text, 'running');
-    host.timeline(chatId);
+    host.store.stageItem(entry.segment.id, entry.segment.text, 'running');
+    (host.scheduleTimeline ?? host.timeline)(chatId);
   };
   function finish(chatId: string, status: ChatStatus, error?: string) {
     const entry = adopted.get(chatId);
@@ -95,7 +99,7 @@ export function createNativeTurnObserver(host: NativeTurnHost) {
         finish(chatId, status, error || undefined);
         return;
       }
-      if (method === 'item/agentMessage/delta') { entry.streamed.add(text(params.itemId)); append(chatId, 'assistant', text(params.delta)); return; }
+      if (method === 'item/agentMessage/delta') { entry.streamed.add(text(params.itemId)); append(chatId, 'assistant', text(params.delta), text(params.itemId) || undefined); return; }
       if (method === 'item/reasoning/summaryTextDelta' || method === 'item/reasoning/textDelta') { entry.streamed.add(text(params.itemId)); append(chatId, 'reasoning', text(params.delta)); return; }
       const item = params.item && typeof params.item === 'object' ? params.item as Record<string, unknown> : undefined;
       if (!item) return;
@@ -106,7 +110,7 @@ export function createNativeTurnObserver(host: NativeTurnHost) {
       }
       if (method === 'item/completed' && item.type === 'agentMessage' && !entry.streamed.has(text(item.id))) {
         const message = text(item.text);
-        if (message) { append(chatId, 'assistant', message); seal(chatId); }
+        if (message) { append(chatId, 'assistant', message, text(item.id) || undefined); seal(chatId); }
         return;
       }
       if (method === 'item/started' && item.type !== 'agentMessage' && item.type !== 'reasoning') seal(chatId);

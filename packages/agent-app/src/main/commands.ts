@@ -30,6 +30,7 @@ const COMMANDS = {
   'chat.markUnread': true,
   'chat.export': true,
   'chat.timeline': true,
+  'chat.itemDetail': true,
   'chat.search': true,
   'chat.editOwners': true,
   'chat.update': true,

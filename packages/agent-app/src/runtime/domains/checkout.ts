@@ -56,7 +56,7 @@ export function createCheckoutDomain(ctx: DomainContext): DomainModule {
       folderOf: chatId => { const folderId = ctx.store.chat(chatId)?.folderId; return folderId ? ctx.store.folder(folderId)?.path ?? null : null; },
       select: async (chatId, providerId, model) => { await ctx.invoke('chat.selectProvider', { id: chatId, providerId, model }); },
       rename: async (chatId, title) => { await ctx.invoke('chat.update', { id: chatId, title }); },
-      timeline: async chatId => (await ctx.invoke('chat.timeline', { id: chatId })).items.map(i => ({ kind: i.kind, text: i.text, ...(i.data ? { data: i.data } : {}), ...(i.status ? { status: i.status } : {}) })),
+      timeline: async chatId => (await ctx.invoke('chat.timeline', { id: chatId, full: true })).items.map(i => ({ kind: i.kind, text: i.text, ...(i.data ? { data: i.data } : {}), ...(i.status ? { status: i.status } : {}) })),
     },
     turnFacts: async (chatId, runId): Promise<TurnFacts | null> => {
       // The Receipt is written by the Ledger as the run settles; give it a moment.

@@ -15,6 +15,8 @@ import { homedir } from 'node:os';
 import { absentCliAgentRows } from './adapters/cli-agents.ts';
 import { CustomProviders } from './custom-providers.ts';
 import { AgentStore } from './store.ts';
+import { MESSAGE_BOUNDARY_EVENT, OUTPUT_DETAIL_MAX_BYTES, itemDetail, wireItems } from './transcript-wire.ts';
+import { turnDigest } from '../shared/turn-digest.ts';
 import { applyFolderAliases, canonicalFolderPath } from './folder-merge.ts';
 import { WorkspaceWatchService } from './workspace-watch.ts';
 import {claudeChildRow,claudeChildThread} from './subagent-rows.ts';
@@ -246,12 +248,24 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
   const publishedTimelineRevisions = new Map<string, number>();
   /** The last assistant message of the latest turn (after the last user message), or '' when the turn said nothing. */
   const finalAssistantText = (chatId: string): string => { const items = store.timeline(chatId); for (let i = items.length - 1; i >= 0; i--) { const it = items[i]!; if (it.kind === 'user') return ''; if (it.kind === 'assistant' && it.text.trim()) return it.text; } return ''; };
+  /** The finished turn's one-sentence digest goes on its prompt row, for the fold line and other surfaces. */
+  const stampTurnDigest = (chatId: string) => {
+    try {
+      const items = store.timeline(chatId);
+      let start = items.length - 1;
+      while (start >= 0 && !(items[start]!.kind === 'user' && items[start]!.data?.steered !== true)) start--;
+      const prompt = items[start];
+      if (!prompt) return;
+      const digest = turnDigest(items.slice(start + 1));
+      if ((prompt.data?.turnDigest ?? '') !== digest) store.updateItem(prompt.id, prompt.text, prompt.status, {...prompt.data, turnDigest: digest});
+    } catch { /* a digest is presentation only */ }
+  };
   const timeline = (chatId: string) => {
     const after = publishedTimelineRevisions.get(chatId) ?? 0;
     const patch = store.timelineChanges(chatId, after);
     if (patch.revision > after) {
       publishedTimelineRevisions.set(chatId, patch.revision);
-      emit({type: 'timelinePatch', chatId, patch: {...patch, after}});
+      emit({type: 'timelinePatch', chatId, patch: {...patch, items: wireItems(patch.items), after}});
     }
   };
   const scheduleTimeline = (chatId: string) => {
@@ -490,6 +504,11 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
      *  final answer the provider never streamed is not lost behind an earlier streamed message. */
     const messageStreamed = new Set<string>();
     let anonymousMessageDelta = false;
+    /** The provider message the open assistant segment belongs to, and the one the next delta starts. A new id seals the
+     *  segment, so two messages never run together ("back.The"). */
+    let segmentMessage: string | undefined, nextMessage: string | undefined;
+    /** Every sub-agent row of this run shares one group, which the transcript shows as one card. */
+    let subagentGroup: string | undefined;
     /** "Reconnecting…" while the provider retries its model connection (Codex `error` with willRetry). */
     let reconnectNotice: TimelineItem | undefined;
     const reconnected = (status: 'completed' | 'failed' = 'completed') => {
@@ -502,10 +521,11 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
       if (reconnectNotice) reconnected();
       if (kind === 'assistant') producedAssistant = true;
       if (segment && segment.kind !== kind) seal();
-      if (!segment) segment = store.appendItem(chatId, kind, '', 'running');
-      segment = {...segment, text: segment.text + delta}; store.updateItem(segment.id, segment.text, 'running'); scheduleTimeline(chatId);
+      if (!segment) { segment = store.appendItem(chatId, kind, '', 'running', kind === 'assistant' && nextMessage ? {providerItemId: nextMessage} : undefined); segmentMessage = kind === 'assistant' ? nextMessage : undefined; }
+      // Staged, not written: the timeline tick (or the seal) writes the row once for many deltas.
+      segment = {...segment, text: segment.text + delta}; store.stageItem(segment.id, segment.text, 'running', segment.data); scheduleTimeline(chatId);
     };
-    const seal = () => { if (segment) store.updateItem(segment.id, segment.text, 'completed'); segment = undefined; };
+    const seal = () => { if (segment) store.updateItem(segment.id, segment.text, 'completed', segment.data); segment = undefined; segmentMessage = undefined; };
     run.seal = seal;
     run.promise = (async () => {
       try {
@@ -591,6 +611,12 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
             }
             if (reconnectNotice && ownRun && method.startsWith('item/')) reconnected();
             if (method === 'item/agentMessage/delta' && parentEvent) { if (typeof params.itemId === 'string' && params.itemId) messageStreamed.add(params.itemId); else anonymousMessageDelta = true; }
+            // Message boundaries: a delta (or start) of a different provider message closes the open reply segment.
+            if (ownRun && parentEvent && (method === 'item/agentMessage/delta' || (method === 'item/started' && (params.item as Record<string, unknown> | undefined)?.type === 'agentMessage'))) {
+              const messageId = method === 'item/started' ? (params.item as Record<string, unknown>).id : params.itemId;
+              if (typeof messageId === 'string' && messageId) { if (segment?.kind === 'assistant' && segmentMessage !== messageId) seal(); nextMessage = messageId; }
+            }
+            if (method === MESSAGE_BOUNDARY_EVENT) { if (ownRun && segment?.kind === 'assistant') seal(); nextMessage = undefined; return; }
             if (method === 'item/completed' && ownRun && parentEvent && !anonymousMessageDelta) {
               const message = params.item && typeof params.item === 'object' ? params.item as Record<string, unknown> : undefined;
               if (message?.type === 'agentMessage' && typeof message.id === 'string' && message.id && !messageStreamed.has(message.id) && typeof message.text === 'string' && message.text.trim()) {
@@ -642,19 +668,20 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
               const details = toolEventDetails(item), startedAt = toolStarted.get(itemId);
               if (finished && startedAt !== undefined) { toolStarted.delete(itemId); if (!(typeof details.durationMs === 'number' && details.durationMs > 0)) details.durationMs = Date.now() - startedAt; }
               else if (finished && !(typeof details.durationMs === 'number' && details.durationMs > 0) && typeof previous?.data?.durationMs === 'number') details.durationMs = previous.data.durationMs;
-              const metadata = {...details,providerItemId:itemId,type:type || previous?.data?.type,name:label,output,outputTruncated:buffered.truncated,...(childThread ? {threadId:childThread} : {}),...(finished ? {awaitingApproval:undefined} : {})};
+              const group = (type || previous?.data?.type) === 'collabAgentToolCall' ? (typeof previous?.data?.subagentGroup === 'string' ? previous.data.subagentGroup : (subagentGroup ??= `subagents:${itemId}`)) : undefined;
+              const metadata = {...details,...(group ? {subagentGroup: group} : {}),providerItemId:itemId,type:type || previous?.data?.type,name:label,output,outputTruncated:buffered.truncated,...(childThread ? {threadId:childThread} : {}),...(finished ? {awaitingApproval:undefined} : {})};
               if (!local) { local = store.appendItem(chatId, 'tool', body, status, metadata).id; toolIds.set(itemId, local); }
               else store.updateItem(local, body, status, {...store.item(local)?.data,...metadata});
               // A tool that streamed no deltas logs its full final output once.
               if (finished) { if (finalOutput && !toolOutputLogged.has(local)) toolOutputLog.append(chatId, `item:${local}`, finalOutput); toolOutputLogged.delete(local); }
               scheduleTimeline(chatId);
             } else if (method.endsWith('/outputDelta')) {
-              const local = toolIds.get(itemId); const previous = local ? store.item(local) : undefined;
+              const local = toolIds.get(itemId); const previous = local ? store.peekItem(local) : undefined;
               if (previous?.status === 'running') {
                 if (params.delta) { toolOutputLog.append(chatId, `item:${previous.id}`, stripAnsi(String(params.delta))); toolOutputLogged.add(previous.id); }
                 const buffered=appendCommandOutput({output:String(previous.data?.output??''),truncated:previous.data?.outputTruncated===true},String(params.delta??''));
                 const output=stripAnsi(buffered.output);
-                store.updateItem(previous.id, String(previous.data?.name ?? '') + '\n' + output, 'running', {...previous.data, output,outputTruncated:buffered.truncated});
+                store.stageItem(previous.id, String(previous.data?.name ?? '') + '\n' + output, 'running', {...previous.data, output,outputTruncated:buffered.truncated});
                 scheduleTimeline(chatId);
               }
             }
@@ -818,7 +845,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
         // Background sub-agents can still be waiting on a card after the parent turn ended: keep it answerable.
         if (run.stopped || disposed || !provider.hasActiveWork?.(chatId)) { settleApprovals(chatId); settleQuestions(chatId); }
         runs.delete(chatId);
-        if (!disposed) { const timer = timers.get(chatId); if (timer) clearTimeout(timer); timers.delete(chatId); timeline(chatId); let finalChat=store.chat(chatId);
+        if (!disposed) { const timer = timers.get(chatId); if (timer) clearTimeout(timer); timers.delete(chatId); stampTurnDigest(chatId); timeline(chatId); let finalChat=store.chat(chatId);
           // A result the user has not seen yet: marked unread until the chat is opened again.
           if(finalChat&&(finalChat.status==='completed'||finalChat.status==='failed')&&store.activeChatId()!==chatId&&store.setUnread(chatId,true))finalChat=store.chat(chatId);
           // First completed exchange: a chat still on its default name gets a summary title (renamed chats never do).
@@ -1095,12 +1122,21 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
         if (defaults.effort && REASONING_EFFORTS.includes(defaults.effort)) efforts.set(result.id, defaults.effort);
         state(); return result;
       }
-      case 'chat.select': { const chatId = id(p.id); chatFor(chatId); store.setActiveChat(chatId); if (store.setUnread(chatId, false)) state(); return store.timeline(chatId); }
+      case 'chat.select': { const chatId = id(p.id); chatFor(chatId); store.setActiveChat(chatId); if (store.setUnread(chatId, false)) state(); return wireItems(store.timeline(chatId)); }
+      case 'chat.itemDetail': {
+        const chatId = id(p.chatId); chatFor(chatId);
+        const item = store.item(id(p.itemId));
+        if (!item || item.chatId !== chatId) throw new Error('That row is no longer in this chat.');
+        const page = item.kind === 'tool' ? await toolOutputLog.page(chatId, `item:${item.id}`, {bytes: OUTPUT_DETAIL_MAX_BYTES}).catch(() => undefined) : undefined;
+        return itemDetail(item, page && page.size ? page : undefined);
+      }
       case 'chat.timeline': {
         const chatId = id(p.id); chatFor(chatId);
         if (p.select !== undefined && typeof p.select !== 'boolean') throw new Error('Invalid selection.');
         if (p.select) { store.setActiveChat(chatId); if (store.setUnread(chatId, false)) state(); }
-        return store.timelineSnapshot(chatId);
+        if (p.full !== undefined && typeof p.full !== 'boolean') throw new Error('Invalid full flag.');
+        const snapshot = store.timelineSnapshot(chatId);
+        return p.full ? snapshot : {...snapshot, items: wireItems(snapshot.items)};
       }
       // NAV-11: titles are matched client-side already (the snapshot has them); this reaches message content through
       // the runtime full-text index, so remembering what was SAID finds the chat. Paged; unchanged chats are never re-read.
@@ -1412,7 +1448,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
           store.appendItem(chatId, 'notice', `Restored ${restored.length === 1 ? '1 file' : `${restored.length} files`} Muster changed after this point.${commands}`, 'completed', {kind: 'files-restored', paths: restored.slice(0, 200), external: preview.external});
           const snapshot = store.timelineSnapshot(chatId);
           publishedTimelineRevisions.set(chatId, snapshot.revision);
-          emit({type: 'timeline', chatId, items: snapshot.items});
+          emit({type: 'timeline', chatId, items: wireItems(snapshot.items)});
           emit({type: 'workspaceChanged', folderId: chat.folderId!});
           const result = await send(chatId, message, requestId).catch(error => {
             if (!store.receipt(requestId) && store.chat(chatId)) { store.updateChat(chatId, {draft: message}); state(); }
@@ -1426,7 +1462,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
           store.truncateFrom(chatId, itemId);
           const snapshot = store.timelineSnapshot(chatId);
           publishedTimelineRevisions.set(chatId, snapshot.revision);
-          emit({type: 'timeline', chatId, items: snapshot.items});
+          emit({type: 'timeline', chatId, items: wireItems(snapshot.items)});
           // The prompt row is gone now; a refused send leaves the edit in this chat's composer instead.
           const result = await send(chatId, message, requestId).catch(error => {
             if (!store.receipt(requestId) && store.chat(chatId)) { store.updateChat(chatId, {draft: message}); state(); }
@@ -1624,7 +1660,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
     call: (chatId, method, params, timeoutMs) => provider.nativeCall!(chatId, method, params, timeoutMs),
     ...(provider.nativeQuery ? {query: (method: string, params: Record<string, unknown>, timeoutMs?: number) => provider.nativeQuery!(method, params, timeoutMs)} : {}),
   }) : undefined;
-  const nativeTurns = createNativeTurnObserver({store, runs, state: () => state(), timeline: chatId => timeline(chatId),
+  const nativeTurns = createNativeTurnObserver({store, runs, state: () => state(), timeline: chatId => timeline(chatId), scheduleTimeline: chatId => scheduleTimeline(chatId),
     runStarted: (chat, runId) => { void domainHooks.runStarted({chat, runId, cwd: ''}).catch(() => undefined); },
     runSettled: (chat, runId, status) => domainHooks.runSettled({chat, runId, status}),
     afterRun: (chatId, status) => afterRun(chatId, status)});
