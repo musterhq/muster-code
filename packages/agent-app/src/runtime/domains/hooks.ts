@@ -64,7 +64,7 @@ export function createDomainHooks() {
     /** Later contributors win for reasoning; overrides merge; instructions concatenate. */
     async resolveRunOptions(chat: Chat): Promise<RunOptions> {
       const results = await Promise.all([...runOptions].map(fn => bounded(() => fn(chat), PROMPT_CONTRIBUTOR_TIMEOUT_MS)));
-      const merged: RunOptions = {}, instructions: string[] = [];
+      const merged: RunOptions = {}, instructions: string[] = [], turnNotes: string[] = [];
       for (const result of results) {
         if (!result) continue;
         if (result.reasoningEffort && EFFORTS.includes(result.reasoningEffort)) merged.reasoningEffort = result.reasoningEffort;
@@ -76,8 +76,10 @@ export function createDomainHooks() {
           }
         }
         if (typeof result.developerInstructions === 'string' && result.developerInstructions.trim()) instructions.push(capBytes(result.developerInstructions.trim(), PROMPT_CONTRIBUTION_MAX_BYTES));
+        if (typeof result.turnContext === 'string' && result.turnContext.trim()) turnNotes.push(capBytes(result.turnContext.trim(), PROMPT_CONTRIBUTION_MAX_BYTES));
       }
       if (instructions.length) merged.developerInstructions = instructions.join('\n\n');
+      if (turnNotes.length) merged.turnContext = turnNotes.join('\n\n');
       return merged;
     },
     async runStarted(run: RunStarted): Promise<void> {

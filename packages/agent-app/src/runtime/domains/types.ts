@@ -7,7 +7,10 @@ import type { NativeThreadBridge } from '../codex-native.ts';
 export type ReasoningEffort = 'low' | 'medium' | 'high' | 'xhigh';
 export interface PromptContribution { label: string; text: string }
 export type PromptContributor = (input: { chat: Chat; folder?: Folder; project?: Project; prompt: string; signal: AbortSignal }) => Promise<PromptContribution | null>;
-export interface RunOptions { reasoningEffort?: ReasoningEffort; configOverrides?: Record<string, unknown>; developerInstructions?: string }
+export interface RunOptions { reasoningEffort?: ReasoningEffort; configOverrides?: Record<string, unknown>; developerInstructions?: string;
+  /** Notes for this turn only (a goal's token budget). Sent with the message, so a per-turn change never alters the
+   *  developer instructions that key the warm app-server. */
+  turnContext?: string }
 export type RunOptionsContributor = (chat: Chat) => Promise<RunOptions | null>;
 export interface RunStarted { chat: Chat; runId: string; cwd: string }
 export interface RunSettled { chat: Chat; runId: string; status: ChatStatus }
