@@ -704,7 +704,7 @@ export class CheckoutService {
   private endHere(taskId: string, rows: readonly { id: number }[], why: string): void {
     const store = this.d.store, at = iso(this.d.now());
     let lease = store.lease(taskId);
-    const where = lease?.worktree ? lease.worktree : 'this Mac';
+    const where = lease?.worktree ? lease.worktree : device().lower;
     const notice = `${why}; your local work is kept in ${where}`;
     for (const r of rows) store.markFailed(r.id, `Not sent: ${why}.`, true);
     for (const r of this.pendingFor(taskId)) store.markFailed(r.id, `Not sent: ${why}.`, true);
