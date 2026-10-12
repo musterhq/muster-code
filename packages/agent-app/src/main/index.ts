@@ -17,6 +17,7 @@ import { isCommandName } from './commands.ts';
 import { fileOperation, mutablePath } from '../runtime/file-operations.ts';
 import { accessSync, constants as fsConstants, existsSync, readFileSync, promises as fs } from 'node:fs';
 import { resolveInside } from '../runtime/paths.ts';
+import {archiveNames,zipStore} from './zip.ts';
 import {BrowserWorkspaceController} from './browser-workspace.ts';
 import {BrowserBridge} from './agent-tools/browser-bridge.ts';
 import {TERMINAL_MCP_LAUNCHER_ENV,TERMINAL_READ_MAX_BYTES,TerminalToolHost} from '../runtime/terminal-agent-tools.ts';
@@ -603,6 +604,23 @@ async function main(): Promise<void> {
       if(result.canceled||!result.filePath)return {saved:false};
       await fs.copyFile(source,result.filePath);
       return {saved:true,fileName:path.basename(result.filePath)};
+    }
+    if(command==='files.downloadImages'){
+      if(!service||!window||window.isDestroyed())throw new Error('Agent service is unavailable.');
+      const request=input as Commands['files.downloadImages']['input'];
+      if(!request||typeof request.chatId!=='string'||!Array.isArray(request.images)||request.images.length<1||request.images.length>60)throw new Error('Invalid Download all request.');
+      // Every image is read through the preview gates: a folder image stays inside its folder, any other path must be named by this chat's own rows.
+      const files:{path:string;data:Buffer}[]=[];
+      for(const image of request.images){
+        if(!image||typeof image.path!=='string'||!image.path||image.path.length>4096||(image.folderId!==undefined&&typeof image.folderId!=='string'))throw new Error('Invalid Download all request.');
+        const asset=image.folderId?await service.invoke('files.asset',{folderId:image.folderId,path:image.path}):await service.invoke('files.chatImage',{chatId:request.chatId,path:image.path});
+        files.push({path:image.path,data:Buffer.from(asset.dataUrl.slice(asset.dataUrl.indexOf(',')+1),'base64')});
+      }
+      const names=archiveNames(files.map(file=>file.path));
+      const result=await dialog.showSaveDialog(window,{title:'Download images',defaultPath:path.join(app.getPath('downloads'),'muster-images.zip'),filters:[{name:'Zip archive',extensions:['zip']}]});
+      if(result.canceled||!result.filePath)return {saved:false};
+      await fs.writeFile(result.filePath,zipStore(files.map((file,index)=>({name:names[index]!,data:file.data}))));
+      return {saved:true,fileName:path.basename(result.filePath),count:files.length};
     }
     if(command==='paperclip.output.save'){
       if(!service||!window||window.isDestroyed())throw new Error('Agent service is unavailable.');

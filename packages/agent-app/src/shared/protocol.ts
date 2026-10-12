@@ -251,6 +251,8 @@ export interface Commands extends DomainCommands, BrowserCommands, ScopedCompute
  /** W6-D: "Save a copy…" — main shows a save dialog and copies the (folder-confined) file there. */
  'files.saveCopy': {input:{folderId:string;path:string};output:{saved:boolean;fileName?:string}};
  /** Download… on a server output: main downloads it (or reuses the cached copy), shows a save dialog and writes the file. */
+ /** A chat gallery's "Download all": main reads each image through the same chat/folder gates as the preview, asks where to save, and writes one zip. */
+ 'files.downloadImages': {input:{chatId:string;images:{path:string;folderId?:string}[]};output:{saved:boolean;fileName?:string;count?:number}};
  'paperclip.output.save': {input:{id:string;projectId?:string};output:{saved:boolean;fileName?:string}};
  'files.search': { input: {folderId: string; path?: string; query: string}; output: {entries: FileEntry[]; truncated: boolean} };
  'files.read': { input: {folderId: string; path: string}; output: {path: string; text: string; truncated: boolean} };

@@ -3,6 +3,10 @@
 All notable changes to Muster Agent. Each `## <version>` section becomes the notes of the
 `agent-v<version>` GitHub Release (`.github/workflows/agent-app-release.yml`).
 
+## Unreleased
+
+- When a reply views, makes or embeds two or more images, they now show as one gallery: a large hero image with a thumbnail strip beside it (below it on narrow windows). Click a thumbnail or use the arrow keys to switch, click the hero to zoom with left and right navigation, and use the Canvas badge to open the image in a tab. File links above the gallery open each image, and "Download all" saves them as a zip. The same pictures are no longer repeated under the tool rows. Images load lazily, and only the neighbours of the selected image are preloaded.
+
 ## 0.3.11
 
 Router and API-key chats work longer and stay quiet about sub-agents.
