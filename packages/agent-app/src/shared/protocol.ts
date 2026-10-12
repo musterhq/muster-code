@@ -8,6 +8,8 @@ import type {DomainCommands, DomainEvent} from './domains/index.ts';
 import type {ChatGoal} from './domains/goals-protocol.ts';
 import type {ExcludedModel, ModelPricing} from './model-catalog.ts';
 /** The only renderer capability surface. Main validates every command and sender. */
+/** One slice of a 3D model file (or companion texture); `size` is the whole file's length. */
+export interface ModelChunk { size: number; offset: number; bytes: Uint8Array }
 export type ChatPermissionMode = 'read-only' | 'workspace' | 'full';
 /** 'waiting' (approval or question open), 'queued' and 'reconnecting' are display states derived in the renderer; the runtime never persists them. */
 export type ChatStatus = 'idle' | 'running' | 'stopping' | 'completed' | 'failed' | 'interrupted' | 'waiting' | 'queued' | 'reconnecting';
@@ -205,6 +207,8 @@ export interface Commands extends DomainCommands, BrowserCommands, ScopedCompute
  /** The resource pane opening a staged/sent attachment: same readers as files.read/asset/document/workbook, confined to the chat's attachment directory. */
  'attachments.read': {input:{chatId:string;id:string};output:{path:string;text:string;truncated:boolean}};
  'attachments.asset': {input:{chatId:string;id:string};output:{mime:string;dataUrl:string;size:number;width:number;height:number}};
+ /** 3D models: chunked bytes (see runtime/file-models.ts) so a large GLB never crosses IPC as one message. */
+ 'attachments.modelChunk': {input:{chatId:string;id:string;offset:number;length:number};output:ModelChunk};
  'attachments.document': {input:{chatId:string;id:string};output:DocumentPreview};
  'attachments.workbook': {input:{chatId:string;id:string};output:WorkbookPreview};
  /** Branch into a new chat with the same folder, project, model, mode and access. History up to and including `fromItemId`
@@ -255,6 +259,7 @@ export interface Commands extends DomainCommands, BrowserCommands, ScopedCompute
  'files.search': { input: {folderId: string; path?: string; query: string}; output: {entries: FileEntry[]; truncated: boolean} };
  'files.read': { input: {folderId: string; path: string}; output: {path: string; text: string; truncated: boolean} };
  'files.asset': { input: {folderId: string; path: string}; output: {mime: string; dataUrl: string; size: number; width: number; height: number} };
+ 'files.modelChunk': {input:{folderId:string;path:string;offset:number;length:number};output:ModelChunk};
  'files.nativeAvailable': {input:undefined;output:boolean};
  'files.nativeShow': {input:{owner:string;folderId:string;path:string;bounds:{x:number;y:number;width:number;height:number}};output:void};
  'files.nativePosition': {input:{owner:string;bounds:{x:number;y:number;width:number;height:number}};output:void};

@@ -1,0 +1,26 @@
+/* TEMPORARY stub chrome; replaced by workstream A's RichBlock stylesheet. Tokens only. */
+.rich-block { position: relative; display: flex; flex-direction: column; min-height: 0; border: 1px solid var(--hairline); border-radius: var(--radius-10); background: var(--bg-raised); overflow: hidden; }
+.rich-block[data-variant='tab'] { flex: 1; border: 0; border-radius: 0; background: transparent; }
+.rich-block[data-variant='inline'] { width: 100%; max-width: 720px; margin: 8px 0; }
+.rich-block[data-fullscreen='true'] { position: fixed; inset: 0; z-index: var(--z-modal); max-width: none; margin: 0; border-radius: 0; background: var(--bg); }
+.rich-block-head { display: flex; align-items: center; gap: 8px; min-height: 36px; padding: 0 6px 0 12px; border-bottom: 1px solid var(--hairline); font-size: var(--fs-12); color: var(--text-dim); }
+.rich-block-icon { display: inline-flex; color: var(--text-faint); }
+.rich-block-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); font-weight: 560; }
+.rich-block-kind { flex: none; padding: 1px 6px; border-radius: var(--radius-full); background: var(--bg-hover); color: var(--text-faint); font-size: var(--fs-11); }
+.rich-block-actions { display: inline-flex; gap: 2px; margin-left: auto; }
+.rich-block-body { position: relative; display: flex; flex: 1; min-height: 0; flex-direction: column; }
+.rich-block-content { display: flex; flex: 1; min-height: 0; flex-direction: column; }
+.rich-block-content[hidden] { display: none; }
+.rich-block-skeleton, .rich-block-error, .rich-block-empty { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 24px; text-align: center; color: var(--text-dim); font-size: var(--fs-13); background: var(--bg-sunken); }
+.rich-block-skeleton { pointer-events: none; }
+.rich-block-shimmer { width: 96px; height: 4px; border-radius: var(--radius-full); background: linear-gradient(90deg, var(--bg-hover), var(--bg-active), var(--bg-hover)); background-size: 200% 100%; animation: rich-block-shimmer 1.4s linear infinite; }
+@keyframes rich-block-shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+.rich-block-error strong { color: var(--text); }
+.rich-block-error p { max-width: 46ch; margin: 0; }
+.rich-block-error svg { color: var(--warn); }
+.rich-block-error-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; justify-content: center; margin-top: 4px; }
+.rich-block-error-actions > button { display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px; border: 1px solid var(--hairline); border-radius: var(--radius-6); background: var(--bg-hover); color: var(--text-dim); font-size: var(--fs-12); transition: background-color 140ms ease, color 140ms ease; }
+.rich-block-error-actions > button:hover { background: var(--bg-active); color: var(--text); }
+.rich-block-error-actions > button:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.rich-block-live { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+@media (prefers-reduced-motion: reduce) { .rich-block-shimmer { animation: none; } .rich-block-error-actions > button { transition: none; } }

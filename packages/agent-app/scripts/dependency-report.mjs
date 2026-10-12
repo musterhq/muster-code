@@ -16,7 +16,7 @@ const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 const src=(...p)=>path.join(root,'src',...p);
 const common={bundle:true,minify:true,write:false,metafile:true,logLevel:'silent',absWorkingDir:root,define:{'process.env.NODE_ENV':'"production"'}};
 const targets=[
-  {name:'renderer',entryPoints:[src('renderer','main.tsx'),src('renderer','diff-worker.ts'),src('renderer','syntax-highlight-worker.ts')],outdir:path.join(root,'.dependency-report'),splitting:true,platform:'browser',format:'esm',target:'es2022',jsx:'automatic',loader:{'.ttf':'file','.woff2':'file'}},
+  {name:'renderer',entryPoints:{main:src('renderer','main.tsx'),'diff-worker':src('renderer','diff-worker.ts'),'syntax-highlight-worker':src('renderer','syntax-highlight-worker.ts'),'model-worker':src('renderer','three-engine','model','worker.ts')},outdir:path.join(root,'.dependency-report'),splitting:true,platform:'browser',format:'esm',target:'es2022',jsx:'automatic',loader:{'.ttf':'file','.woff2':'file','.wasm':'binary'},external:['fs','path']},
   {name:'main',entryPoints:[src('main','index.ts')],outfile:path.join(root,'.dependency-report/main.cjs'),platform:'node',format:'cjs',target:'node22',external:['electron','node-pty']},
   {name:'preload',entryPoints:[src('preload','index.ts')],outfile:path.join(root,'.dependency-report/preload.cjs'),platform:'node',format:'cjs',target:'node22',external:['electron']},
   {name:'runtime',entryPoints:[src('runtime','service.ts')],outfile:path.join(root,'.dependency-report/service.cjs'),platform:'node',format:'cjs',target:'node22',external:['electron']},

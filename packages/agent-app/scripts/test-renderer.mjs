@@ -31,7 +31,7 @@ for (const name of suites) {
   if (!runSuite(name, outfile)) failed++;
 }
 // Suites that need their own build (code splitting) ship a standalone runner.
-for (const runner of ['run-git-history-components.mjs', 'run-spotlight-palette-dom.mjs']) {
+for (const runner of ['run-git-history-components.mjs', 'run-spotlight-palette-dom.mjs', 'run-three-model.mjs', 'run-model-viewer-dom.mjs']) {
   if (!runSuite(runner, path.join(root, 'tests', runner))) failed++;
 }
 process.exitCode = failed ? 1 : 0;

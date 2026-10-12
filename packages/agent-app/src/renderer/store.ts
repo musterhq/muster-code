@@ -1318,7 +1318,7 @@ export function loadDir(folderId: string, path: string): Promise<void> {
 
 async function readFileBody(folderId: string, path: string): Promise<FileBody> {
   const kind = filePresentation(path);
-  if (kind === 'quicklook' || kind === 'media' || kind === 'binary') return {text: '', truncated: false};
+  if (kind === 'quicklook' || kind === 'media' || kind === 'binary' || kind === 'model') return {text: '', truncated: false};
   if (['document','workbook'].includes(filePresentation(path)) && await invoke('files.nativeAvailable',undefined).catch(()=>false)) return {native:true,text:'',truncated:false};
   if (filePresentation(path) === 'document') return {text:'',truncated:false,document:await invoke('files.document',{folderId,path})};
   if (filePresentation(path) === 'workbook') return {text:'',truncated:false,workbook:await invoke('files.workbook',{folderId,path})};
