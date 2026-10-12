@@ -1,9 +1,9 @@
 /* Sidebar status sections and row details. Colours and sizes come from the existing tokens. */
 .chat-row-main { flex-wrap: wrap; }
-.chat-row-sub { flex: 0 0 100%; display: flex; align-items: center; gap: 6px; min-width: 0; padding-left: 20px; margin-top: -2px; color: var(--text-faint); font-size: var(--fs-11, 11px); line-height: 1.4; overflow: hidden; white-space: nowrap; }
+.chat-row-sub { flex: 0 0 100%; display: flex; align-items: center; gap: 6px; min-width: 0; padding-left: 20px; margin-top: -2px; color: var(--text-faint); font-size: var(--fs-11); line-height: 1.4; overflow: hidden; white-space: nowrap; }
 .chat-row-chip { flex: 0 1 auto; min-width: 0; max-width: 45%; overflow: hidden; text-overflow: ellipsis; padding: 0 5px; border-radius: var(--radius-4); background: var(--bg-active); color: var(--text-dim); }
 .chat-row-hint, .nav-section-hint { min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--text-faint); font-weight: 400; }
-.nav-section-hint { margin-left: 6px; font-size: var(--fs-11, 11px); flex: 0 1 auto; }
+.nav-section-hint { margin-left: 6px; font-size: var(--fs-11); flex: 0 1 auto; }
 .chat-row-branch, .chat-row-prs { display: inline-flex; align-items: center; gap: 2px; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .chat-row-prs { color: var(--ok); flex: none; }
 .chat-row-provider { display: inline-flex; flex: none; opacity: .8; }
