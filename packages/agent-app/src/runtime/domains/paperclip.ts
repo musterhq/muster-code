@@ -685,6 +685,32 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
   };
 
   /** Starts a Muster task's first run on its owner's runner, in a new worktree of the project's folder (never the checkout). */
+  /**
+   * The worktree a run of one task works in: a worktree of the project's folder on the task's own branch (reused when the task already has one),
+   * linked to the project. A run never works in the project's own checkout. `undo` takes back what this call made (a reused worktree is kept).
+   * Used by Start and, through the automated-worktree hook, by the scheduler and wakes of an imported project.
+   */
+  const prepareWorktree = async (project: { id: string; primaryFolderId?: string | null; folderIds: readonly string[] }, task: { id: string; key: string }) => {
+    const source = folders().find(f => f.id === project.primaryFolderId);
+    if (!source) throw new Error('Link the project’s folder first: runs happen in a worktree of it.');
+    const meta = imports()?.projectMeta(project.id), base = typeof meta?.defaultRef === 'string' ? meta.defaultRef : undefined;
+    const branch = `muster/${task.key.toLowerCase().replace(/[^a-z0-9-]+/g, '-')}`;
+    // A worktree of its own: the run never touches the project's checkout. Starting again reuses this task's worktree.
+    const reuse = (await context.invoke('git.worktree.list', { folderId: source.id }).catch(() => [])).find(w => !w.main && !w.prunable && (w.branch === branch || w.branch === `refs/heads/${branch}`));
+    const worktree = reuse ? { folder: await context.invoke('folder.add', { path: reuse.path }), path: reuse.path, branch } : await context.invoke('git.worktree.create', { folderId: source.id, branch, ...(base ? { base } : {}) });
+    const undo = async () => {
+      if (reuse) return;
+      await context.invoke('project.unlinkFolder', { id: project.id, folderId: worktree.folder.id }).catch(() => undefined);
+      await context.invoke('git.worktree.remove', { folderId: source.id, path: worktree.path }).catch(() => undefined);
+      await context.invoke('folder.remove', { id: worktree.folder.id }).catch(() => undefined);
+    };
+    try {
+      if (worktree.folder.id === source.id) throw new Error('A run must not work in the project’s own checkout.');
+      context.hooks.noteTaskWorktree?.(project.id, task.id, worktree.folder.id);
+      if (!project.folderIds.includes(worktree.folder.id)) await context.invoke('project.linkFolder', { id: project.id, folderId: worktree.folder.id });
+    } catch (cause) { await undo(); throw cause; }
+    return { worktree, source, undo };
+  };
   const startTask = async (taskId: string) => {
     if (await owner('task', taskId) === 'paperclip') {
       // A Muster Server runs its own agents: starting is its command. Any other server's tasks run there.
@@ -699,16 +725,9 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
     if ((await context.invoke('project.work', { projectId: project.id, activityLimit: 1 })).scheduler.paused) throw new Error(`${project.name} is paused, so nothing new starts. Resume its agents first.`);
     const held = task.assigneeId?.startsWith('member:') ? (await context.invoke('project.members.list', { projectId: project.id })).members.find(m => m.id === task.assigneeId!.slice(7) && m.pausedAt) : undefined;
     if (held) throw new Error(`${held.name} is paused, so nothing of theirs starts. Resume ${held.name} first.`);
-    const source = folders().find(f => f.id === project.primaryFolderId);
-    if (!source) throw new Error('Link the project’s folder first: runs happen in a worktree of it.');
-    const meta = imports()?.projectMeta(project.id), base = typeof meta?.defaultRef === 'string' ? meta.defaultRef : undefined;
-    const branch = `muster/${task.key.toLowerCase().replace(/[^a-z0-9-]+/g, '-')}`;
-    // A worktree of its own: the run never touches the project's checkout. Starting again reuses this task's worktree.
-    const reuse = (await context.invoke('git.worktree.list', { folderId: source.id }).catch(() => [])).find(w => !w.main && !w.prunable && (w.branch === branch || w.branch === `refs/heads/${branch}`));
-    const worktree = reuse ? { folder: await context.invoke('folder.add', { path: reuse.path }), path: reuse.path, branch } : await context.invoke('git.worktree.create', { folderId: source.id, branch, ...(base ? { base } : {}) });
+    const made = await prepareWorktree(project, task);
+    const { worktree, source } = made;
     try {
-      context.hooks.noteTaskWorktree?.(project.id, taskId, worktree.folder.id);
-      if (!project.folderIds.includes(worktree.folder.id)) await context.invoke('project.linkFolder', { id: project.id, folderId: worktree.folder.id });
       // The run uses its owner's runner and model (set on the Roster member); the project's default model is left alone.
       const fresh = (await context.invoke('project.work', { projectId: project.id, activityLimit: 1 })).tasks.items.find(t => t.id === taskId);
       if (!fresh) throw new Error('That task no longer exists.');
@@ -717,14 +736,18 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
       return { ...run, worktree: worktree.path, branch: worktree.branch };
     } catch (cause) {
       // Nothing ran: take back the worktree and folder this Start made (the branch stays, and a reused worktree is kept).
-      if (!reuse) {
-        await context.invoke('project.unlinkFolder', { id: project.id, folderId: worktree.folder.id }).catch(() => undefined);
-        await context.invoke('git.worktree.remove', { folderId: source.id, path: worktree.path }).catch(() => undefined);
-        await context.invoke('folder.remove', { id: worktree.folder.id }).catch(() => undefined);
-      }
+      await made.undo();
       throw cause;
     }
   };
+
+  // Automated runs (the scheduler, a wake) of an imported project's task work in a worktree too, never in the project's own checkout.
+  context.hooks.setAutomatedWorktree?.(async (projectId, taskId) => {
+    if (imports()?.projectOrg(projectId) === undefined) return null;
+    const { project, view } = await local.projectFor(taskId);
+    const made = await prepareWorktree(project, view);
+    return { folderId: made.worktree.folder.id, undo: made.undo };
+  });
 
   // --- the Dashboard (#132) -------------------------------------------------------------------------------------------------
   const dashboard = async (offset: number, projectId?: string) => {
@@ -997,7 +1020,7 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
       'paperclip.inbox.restore': input => { dismissDb().prepare('DELETE FROM inbox_dismissals WHERE id = ?').run(id(input.id)); queueEmit(['inbox']); return { ok: true as const }; },
       'paperclip.inbox.dismissed': () => ({ items: [...dismissed()].map(([itemId, at]) => ({ id: itemId, at })) }),
     },
-    dispose() { history.disposed = true; if (history.timer) timers.clearTimeout(history.timer); history.timer = null; offLedger(); offConnection(); offSession(); signIn.dispose(); closeSocket(); stopPoll(); if (live.emitTimer) timers.clearTimeout(live.emitTimer); live.emitTimer = null; },
+    dispose() { context.hooks.setAutomatedWorktree?.(undefined); history.disposed = true; if (history.timer) timers.clearTimeout(history.timer); history.timer = null; offLedger(); offConnection(); offSession(); signIn.dispose(); closeSocket(); stopPoll(); if (live.emitTimer) timers.clearTimeout(live.emitTimer); live.emitTimer = null; },
     power(event) { if (event.state === 'suspend') { closeSocket(); stopPoll(); } else if (live.visible) { ensureSocket(); if (!live.socket) schedulePoll(); } },
   };
 }

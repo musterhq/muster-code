@@ -368,9 +368,27 @@ export function createProjectsDomain(ctx: DomainContext): DomainModule {
   const taskPrompt = (t: ProjectTask) => `Project task: ${t.title}\nTask ID: ${t.id}\nAcceptance criteria:\n${t.acceptance || '(not specified)'}\n\nWork only within the selected Project folder. Implement the task, report concrete changes and relevant verification, and do not claim the task is verified. Work autonomously and do the next obvious step without asking; stop to ask only before a destructive or irreversible action, or when a choice is genuinely ambiguous. End with a short summary of what you did and what is left, not a question.`;
   /** One agent run for a task: a scoped chat at the clamped permission mode, claimed on the task before the send. */
   async function dispatch(projectId: string, taskId: string, rev: number, trigger: 'user' | 'scheduler' | 'coordinator', folderId?: string, wake?: WakeInfo): Promise<{ chatId: string; runId: string }> {
-    try { return await dispatchOne(projectId, taskId, rev, trigger, folderId, wake); } finally { gov.release(taskId); }
+    let made: Awaited<ReturnType<NonNullable<typeof ctx.hooks.automatedWorktree>>> = null;
+    // An automated run (the scheduler, a wake) of an imported project's task works in a worktree of its own, never in the project's checkout. The
+    // worktree is made only once the task is known to be startable, and if it cannot be made the run does not start rather than fall back to the
+    // folder you work in.
+    const lazyFolder = trigger === 'user' || folderId !== undefined ? undefined : async () => {
+      try { made = await ctx.hooks.automatedWorktree?.(projectId, taskId) ?? null; }
+      catch (cause) {
+        const why = cause instanceof Error ? cause.message : String(cause);
+        open().tasks.record(projectId, 'scheduler.worktree', `Not started: a worktree for this task could not be made. ${why}`, taskId, 'system');
+        throw new Error(`Not started: a worktree for this task could not be made. ${why}`);
+      }
+      return made?.folderId;
+    };
+    try { return await dispatchOne(projectId, taskId, rev, trigger, folderId, wake, lazyFolder); }
+    catch (cause) {
+      // Nothing ran: take back the worktree this attempt made (one the task already had is kept).
+      if (made) await (made as { undo(): Promise<void> }).undo().catch(() => undefined);
+      throw cause;
+    } finally { gov.release(taskId); }
   }
-  async function dispatchOne(projectId: string, taskId: string, rev: number, trigger: 'user' | 'scheduler' | 'coordinator', folderId?: string, wake?: WakeInfo): Promise<{ chatId: string; runId: string }> {
+  async function dispatchOne(projectId: string, taskId: string, rev: number, trigger: 'user' | 'scheduler' | 'coordinator', folderId?: string, wake?: WakeInfo, lazyFolder?: () => Promise<string | undefined>): Promise<{ chatId: string; runId: string }> {
     const { tasks: store } = open(), project = toDetails(row(projectId));
     if (project.archived) throw new Error('This Project is archived. Restore it before starting tasks.');
     const task = store.assertCanStartTask({ projectId, id: taskId, revision: rev });
@@ -378,9 +396,10 @@ export function createProjectsDomain(ctx: DomainContext): DomainModule {
     if (blocked) throw new Error(blocked);
     const previous = task.runChatId ? ctx.store.chat(task.runChatId) : undefined;
     if (previous && (ACTIVE.has(previous.status) || previous.recovery?.kind === 'recovery-needed')) throw new Error('The prior agent attempt may still be active. Open its linked chat and resolve it before running this task again.');
-    const target = folderId ?? (previous?.folderId && project.folderIds.includes(previous.folderId) ? previous.folderId : project.primaryFolderId);
+    const target = folderId ?? (await lazyFolder?.()) ?? (previous?.folderId && project.folderIds.includes(previous.folderId) ? previous.folderId : project.primaryFolderId);
     if (!target) throw new Error('Attach a folder to this Project before starting an agent task.');
-    if (!project.folderIds.includes(target)) throw new Error('Choose a folder attached to this Project.');
+    // Read again: a worktree made just now for this run was linked to the Project after `project` was read.
+    if (!toDetails(row(projectId)).folderIds.includes(target)) throw new Error('Choose a folder attached to this Project.');
     // PRJ-13: the run gets only what its requester and its agent both hold, inside the Project policy.
     const held = task.owner.kind === 'agent' ? team.member(projectId, task.owner.id) : undefined;
     if (held?.pausedAt) throw new Error(`${held.name} is paused, so nothing of theirs starts. Resume ${held.name} first.`);
