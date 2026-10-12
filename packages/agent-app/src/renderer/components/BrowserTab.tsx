@@ -303,6 +303,7 @@ function DesktopBrowserTab({owner,profileId:requestedProfile,initialUrl='about:b
     </div>}
     {(flash || browser?.notice) && <p className="browser-notice" role="status">{flash || browser?.notice}</p>}
     <div ref={host} className="browser-surface" role="region" aria-label="Website content" aria-busy={browser?.loading??false}>
+      {!ready && !reportedError && <div className="browser-empty" role="status"><Globe size={26} aria-hidden="true"/><p>Opening browser…</p></div>}
       {ready && browser?.url==='about:blank' && !reportedError && <div className="browser-empty"><Globe size={26} aria-hidden="true"/><p>Browse a website</p><span>Enter an HTTP or HTTPS address above.</span></div>}
       {browser?.certificateError && <div className="browser-interstitial" role="alert">
         <ShieldAlert size={28} aria-hidden="true"/>

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {DISCONNECTED_MS,HIDE_AFTER_MS,PIP_MAX,PIP_MIN,PIP_STACK_MAX,STACK_EDGE,STACK_GAP,STACK_PEEK,STALE_MS,applyComputerEvent,mergeSources,recentComputerSources,sourceKey,stackAnchor,stackHeight,stackWidth,clampPipWidth,computerUi,cornerPosition,frameFreshness,frameSource,latestComputerShot,pickSource,pipShouldShow,screenshotName,setMinimized,setPlacement,snapCorner,toolImageUrl} from '../src/renderer/computerUse.ts';
+import {DISCONNECTED_MS,ENDED_LINGER_MS,LIVE_MS,pipPhase,PIP_MAX,PIP_MIN,PIP_STACK_MAX,STACK_EDGE,STACK_GAP,STACK_PEEK,STALE_MS,applyComputerEvent,mergeSources,recentComputerSources,sourceKey,stackAnchor,stackHeight,stackWidth,clampPipWidth,computerUi,cornerPosition,frameFreshness,frameSource,latestComputerShot,pickSource,pipShouldShow,screenshotName,setMinimized,setPlacement,snapCorner,toolImageUrl} from '../src/renderer/computerUse.ts';
 import type {TimelineItem} from '../src/shared/protocol.ts';
 import {activityApp,summarizeActivity} from '../src/renderer/components/activityGrouping.ts';
 
@@ -37,7 +37,7 @@ test('source selection: newest computer-use step carries the newest screenshot; 
   const merged=pickSource(frame,later)!;
   assert.equal(merged.label,later.label);assert.equal(merged.image,frame.image);assert.equal(merged.owner,'browser:agent-c1');
   assert.equal(pickSource(undefined,shot),shot);
-  assert.ok(pipShouldShow(shot,false,shot.at+HIDE_AFTER_MS-1));assert.ok(!pipShouldShow(shot,false,shot.at+HIDE_AFTER_MS));assert.ok(pipShouldShow(shot,true,1e12));assert.ok(!pipShouldShow(undefined,true,0));
+  assert.ok(pipShouldShow(shot,false,shot.at+ENDED_LINGER_MS-1));assert.ok(!pipShouldShow(shot,false,shot.at+ENDED_LINGER_MS));assert.ok(!pipShouldShow(undefined,true,0));
 });
 
 test('events: frames are kept per chat (bounded), control owner and agent browser tabs are recorded, dock clears minimize',()=>{
@@ -111,4 +111,25 @@ test('activity rows: the apps a group drove lead its summary, and its icon is th
   assert.equal(summarizeActivity(items),'Used Mail and the browser, ran 1 command');
   assert.deepEqual(activityApp(items),{app:'Browser',target:'browser'});
   assert.equal(activityApp([items[2]!]),undefined);
+});
+
+test('pip phase: only a live session has a PiP; it ends with an Ended linger and then goes',()=>{
+  const step={chatId:'c1',target:'browser' as const,app:'a.test',label:'Opened a.test',at:10_000,url:'https://a.test/'};
+  // Live while the run is going and the session acted lately.
+  assert.equal(pipPhase(step,true,step.at+LIVE_MS-1),'live');
+  // Unrelated shell work for a long time: the old page is not a live session, and it does not linger forever.
+  assert.equal(pipPhase(step,true,step.at+LIVE_MS+1),'ended');
+  assert.equal(pipPhase(step,true,step.at+LIVE_MS+ENDED_LINGER_MS),'gone');
+  // A step stuck "running" from long ago does not keep a ghost alive.
+  assert.equal(pipPhase({...step,running:true},true,step.at+LIVE_MS*5),'gone');
+  // The run stopped in this window: Ended for a few seconds, then removed.
+  const stoppedAt=step.at+5000;
+  assert.equal(pipPhase(step,false,stoppedAt+1,stoppedAt),'ended');
+  assert.equal(pipPhase(step,false,stoppedAt+ENDED_LINGER_MS,stoppedAt),'gone');
+  // A session that had gone quiet long before the run stopped does not get an Ended card.
+  assert.equal(pipPhase(step,false,step.at+LIVE_MS*3+1,step.at+LIVE_MS*3),'gone');
+  // A chat opened later (never saw the run) has no ghost PiP for past sessions.
+  assert.equal(pipPhase(step,false,Date.now()),'gone');
+  assert.equal(pipPhase(step,false,step.at+ENDED_LINGER_MS),'gone');
+  assert.equal(pipPhase(undefined,true,0),'gone');
 });

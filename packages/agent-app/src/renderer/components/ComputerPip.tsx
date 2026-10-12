@@ -9,26 +9,39 @@ import {stageAttachment} from '../composerBridge';
 import {rememberProfile} from './BrowserTab';
 import {ImageFile} from './ImageFile';
 import type {ComputerPermissions} from '../../shared/domains/computer-protocol';
-import {PIP_STACK_MAX,STACK_PEEK,STACK_WIDTH,dockedSessions,formatAge,frameFreshness,hostOf,mergeSources,orderPipSources,pipShouldShow,raiseSession,recentComputerSources,screenshotName,sessionKey,sessionTabId,setMinimized,setSnapshot,sourceKey,stackAnchor,stackHeight,stackWidth,toolImageUrl,useComputerUi,wireComputerEvents,type Box,type Freshness,type PipSource} from '../computerUse';
+import {PIP_STACK_MAX,STACK_PEEK,STACK_WIDTH,dockedSessions,formatAge,frameFreshness,hostOf,mergeSources,orderPipSources,pipPhase,type PipPhase,raiseSession,recentComputerSources,screenshotName,sessionKey,sessionTabId,setMinimized,setSnapshot,sourceKey,stackAnchor,stackHeight,stackWidth,toolImageUrl,useComputerUi,wireComputerEvents,type Box,type Freshness,type PipSource} from '../computerUse';
 import {clampPipPosition,exceedsDragThreshold,loadPipCorner,pipCornerOrigin,savePipCorner,settlePipDrop,springSettled,springStep,type PipCorner,type PipPoint,type PipRect,type PipSize,type SpringState} from '../pipLayout';
 import {AppGlyph} from './AppGlyph';
 import './pip.css';
 import {Tip} from './Tooltip';
 
 const loadImage=(id:string)=>invoke('computer.image',{id});
+const STATUS_LABEL:Record<string,string>={live:'Live: the agent is controlling this session',stale:'Stale: no new frame lately',disconnected:'Disconnected: the live feed stopped',failed:'The last step failed'};
 const FRESH_LABEL:Record<Freshness,string>={live:'Live',stale:'Stale',disconnected:'Disconnected',ended:'Ended'};
 
 /** The data URL of a source's picture; undefined while it loads or when there is none. */
-function useShotUrl(source:PipSource|undefined):string|undefined {
+function useShotUrl(source:PipSource|undefined):string|undefined { return useShot(source).url; }
+/** The picture plus whether loading it failed, so a card can say so instead of showing a skeleton forever. */
+function useShot(source:PipSource|undefined):{url:string|undefined;failed:boolean} {
   const shot=source?.image,key=shot?.dataUrl??shot?.id;
-  const [url,setUrl]=useState<string>();
+  const [url,setUrl]=useState<string>(),[failed,setFailed]=useState(false);
   useEffect(()=>{
+    setFailed(false);
     if(!shot){setUrl(undefined);return;}
     let live=true;
-    toolImageUrl(shot,loadImage).then(value=>{if(live)setUrl(value);},()=>{if(live)setUrl(undefined);});
+    toolImageUrl(shot,loadImage).then(value=>{if(live)setUrl(value);},()=>{if(live){setUrl(undefined);setFailed(true);}});
     return()=>{live=false;};
   },[key]);
-  return shot?.dataUrl??url;
+  return {url:shot?.dataUrl??url,failed};
+}
+/** When this window saw the chat's run stop (0 if it has not): a session that ended then lingers as "Ended". */
+function useRunEnd(chatId:string|null,running:boolean):number {
+  const seen=useRef<{chatId:string|null;running:boolean;endedAt:number}>({chatId,running,endedAt:0});
+  const mark=seen.current;
+  if(mark.chatId!==chatId){mark.chatId=chatId;mark.running=running;mark.endedAt=0;}
+  else if(mark.running&&!running){mark.endedAt=Date.now();mark.running=false;}
+  else if(running){mark.running=true;mark.endedAt=0;}
+  return mark.endedAt;
 }
 /** The chat's recently used apps and pages (pushed browser frames and transcript steps), newest first. */
 function useChatSources(chatId:string|null):{sources:PipSource[];source?:PipSource;running:boolean} {
@@ -43,8 +56,10 @@ function useChatSources(chatId:string|null):{sources:PipSource[];source?:PipSour
 }
 function useNow(active:boolean,everyMs=1000):number {
   const [now,setNow]=useState(()=>Date.now());
+  // startActiveInterval skips ticks while the window is inactive and catches up once when it is active again.
   useEffect(()=>{if(!active)return;setNow(Date.now());return startActiveInterval(()=>setNow(Date.now()),everyMs);},[active,everyMs]);
-  return now;
+  // While nothing ticks the stored time is stale; read the clock so a reopened chat never judges sessions by it.
+  return active?now:Date.now();
 }
 
 /** Opens the page the agent is looking at in the in-app browser: its own tab when one exists, else a new tab. */
@@ -53,7 +68,9 @@ export function visitSource(source:PipSource):void {
   if(source.owner&&source.profileId){
     rememberProfile(source.owner,source.profileId);
     const existing=state.tabs.find(tab=>tab.id===source.owner);
-    openTab(existing??{id:source.owner,kind:'browser',browserProfileId:source.profileId,url:source.url??'about:blank',title:source.app||'Agent browser',chatId:source.chatId});
+    // Never open a blank browser: with no tab and no page to show there is nothing to open.
+    if(existing)openTab(existing);
+    else if(source.url)openTab({id:source.owner,kind:'browser',browserProfileId:source.profileId,url:source.url,title:source.app||'Agent browser',chatId:source.chatId});
     return;
   }
   if(source.url) openTab({id:`browser:${crypto.randomUUID()}`,kind:'browser',browserProfileId:'personal',url:source.url,title:hostOf(source.url)||'Browser',chatId:source.chatId});
@@ -204,28 +221,33 @@ function usePipDrag(stack:React.RefObject<HTMLDivElement|null>,frozen:React.Muta
 type DragHandlers=ReturnType<typeof usePipDrag>;
 /** One live thumbnail in the cluster. Front card opens its tab; a back card comes to the front. */
 function PipCard({source,depth,count,docked,freshness,owner,now,drag}:{source:PipSource;depth:number;count:number;docked:boolean;freshness:Freshness;owner:'agent'|'user';now:number;drag:DragHandlers}) {
-  const url=useShotUrl(source);
+  const {url,failed:imageFailed}=useShot(source);
+  const ended=freshness==='ended';
   const front=depth===0,title=sourceTitle(source);
   const age=source.at?formatAge(now-source.at):'';
-  const status=front&&source.failed?'failed':front&&(freshness==='stale'||freshness==='disconnected')?freshness:undefined;
-  const tip=[title,source.failed?`Failed: ${source.failed}`:source.label,front&&age?`Last frame ${age}`:''].filter(Boolean).join(' · ');
+  // The corner dot means "live" and only exists while the session is live; an ended card shows an "Ended" label instead.
+  const status=ended?undefined:front&&source.failed?'failed':front&&freshness==='live'?'live':front&&(freshness==='stale'||freshness==='disconnected')?freshness:undefined;
+  const tip=[title,source.failed?`Failed: ${source.failed}`:source.label,front&&age?`${ended?'Last frame':'Frame'} ${age}`:'',ended?'Session ended':''].filter(Boolean).join(' · ');
   const open=()=>openSessionTab(source);
   const click=()=>{if(drag.wasDrag())return;if(front||count===1)open();else raiseSession(sessionKey(source));};
   return <div className={`pip-card${front?' is-front':''}${front&&owner==='user'?' is-user':''}${docked?' is-docked':''}`} style={{'--depth':docked?0:depth,zIndex:docked?0:count-depth} as React.CSSProperties} data-session={sessionKey(source)} data-docked={docked||undefined}>
     <button type="button" className="pip-card-main" tabIndex={docked?-1:0} title={tip} data-status={status}
       aria-label={front?`Open ${title} in the sidebar: ${source.failed?`failed, ${source.failed}`:source.label}`:`Bring ${title} to the front`}
       onPointerDown={drag.onPointerDown} onPointerMove={drag.onPointerMove} onPointerUp={drag.onPointerUp} onPointerCancel={drag.onPointerCancel} onClick={click} onDoubleClick={open}>
-      {url?<img src={url} alt="" draggable={false} decoding="async"/>:<span className="pip-empty"><AppGlyph app={source.app} target={source.target} size={26}/></span>}
-      {status&&<span className={`pip-card-status is-${status}`} aria-hidden="true"/>}
+      {url?<img src={url} alt="" draggable={false} decoding="async"/>:<span className={`pip-empty${ended||imageFailed?'':' is-starting'}`} role="status">{ended||imageFailed?<span className="pip-empty-text">{imageFailed?'Preview unavailable':'No preview captured'}</span>:<><span className="pip-skeleton" aria-hidden="true"/><span className="pip-empty-text">Starting…</span></>}</span>}
+      {ended&&<span className="pip-ended-badge">Ended</span>}
+      {status&&<span className={`pip-card-status is-${status}`} role="img" aria-label={STATUS_LABEL[status]} title={STATUS_LABEL[status]}/>}
     </button>
     {!front&&!docked&&<button type="button" className="pip-open" aria-label={`Open ${title} in the sidebar`} title="Open in the sidebar" onClick={open}><PanelRightOpen size={12} strokeWidth={2.2}/></button>}
   </div>;
 }
+/** Live sessions age from their last frame; once the session is over it is simply "ended". */
+const freshnessOf=(source:PipSource,running:boolean,now:number,runEndedAt:number):Freshness=>pipPhase(source,running,now,runEndedAt)==='live'?frameFreshness(now-source.at,true):'ended';
 const sourceTitle=(source:PipSource)=>source.target==='browser'?(source.url?hostOf(source.url):source.app&&source.app!=='Browser'?source.app:'Browser'):source.app||'Computer';
 
 /** Opens a session in the right sidebar as its own tab (the sidebar opens if it was closed), or focuses the tab it already has. */
 export function openSessionTab(source:PipSource):void {
-  if(source.target==='browser'&&source.owner&&source.profileId){visitSource(source);return;}
+  if(source.target==='browser'&&source.owner&&source.profileId&&(source.url||getState().tabs.some(tab=>tab.id===source.owner))){visitSource(source);return;}
   openTab({id:sessionTabId(source),kind:'liveView',title:sourceTitle(source),chatId:source.chatId});
 }
 /** A transcript screenshot opens as a tab too; the picture is held in the UI store, never in the saved workspace. */
@@ -246,14 +268,18 @@ export function ComputerPip({paneVisible=true}:{paneVisible?:boolean}={}) {
   const screen=useStoreSelector(state=>state.screen);
   const visibleTabId=useStoreSelector(selectVisibleTab);
   const ui=useComputerUi();
-  const {sources,running}=useChatSources(chatId);
+  const {sources:recent,running}=useChatSources(chatId);
+  const runEndedAt=useRunEnd(chatId,running);
+  // Only a session that is live now, or ended moments ago, gets a card; the rest of the transcript's history does not.
+  const clock=useNow(recent.some(candidate=>pipPhase(candidate,running,Date.now(),runEndedAt)!=='gone'));
+  const sources=useMemo(()=>recent.filter(candidate=>pipPhase(candidate,running,clock,runEndedAt)!=='gone'),[recent,running,clock,runEndedAt]);
   useEffect(()=>wireComputerEvents(),[]);
   const cards=useMemo(()=>orderPipSources(sources,ui.raised).slice(0,PIP_STACK_MAX),[sources,ui.raised]);
   const docked=useMemo(()=>dockedSessions(cards,paneVisible?visibleTabId:null),[cards,visibleTabId,paneVisible]);
   const open=cards.filter(card=>!docked.has(sessionKey(card)));
   const source=open[0]??cards[0];
-  const now=useNow(!!source);
-  const shown=screen==='work'&&pipShouldShow(sources[0],running,now);
+  const now=clock;
+  const shown=screen==='work'&&!!source;
   const perms=usePermissions(shown&&open.some(card=>card.target==='computer'));
   const [corner,setCorner]=useState<PipCorner|undefined>(loadPipCorner);
   const frozen=useRef(false),stack=useRef<HTMLDivElement>(null);
@@ -264,7 +290,7 @@ export function ComputerPip({paneVisible=true}:{paneVisible?:boolean}={}) {
   const [busy,setBusy]=useState(false);
   if(!shown||!source)return null;
   const owner=ui.control[source.chatId]??'agent';
-  const freshness=frameFreshness(now-source.at,running);
+  const freshness=freshnessOf(source,running,now,runEndedAt);
   const title=sourceTitle(source);
   const setOwner=async(next:'agent'|'user')=>{setBusy(true);try{await invoke('computer.control',{chatId:source.chatId,owner:next});}catch(cause){notifyError(cause);}finally{setBusy(false);}};
   if(!open.length) return <div className="pip-stack is-empty" aria-hidden="true" ref={stack} style={{top:anchor.top,right:anchor.right,width:anchor.width}}>
@@ -289,6 +315,14 @@ export function ComputerPip({paneVisible=true}:{paneVisible?:boolean}={}) {
   </div>;
 }
 
+/** What the viewer says when it has no picture: starting while live, otherwise why there is none. */
+function viewerEmpty(source:PipSource|undefined,shot:boolean,live:boolean,imageFailed:boolean):string {
+  if(shot)return source?imageFailed?'This screenshot could not be loaded.':'Loading the screenshot…':'This screenshot is no longer in memory.';
+  if(!source)return 'This session has ended. Its screenshots are in the conversation.';
+  if(imageFailed)return 'The last screenshot could not be loaded.';
+  if(source.image)return 'Loading the screenshot…';
+  return live?'Starting…':'This session ended before a screenshot was captured.';
+}
 /** A session (or one transcript screenshot) as a right-sidebar tab: the live feed with zoom, Visit/Open app, attach and export.
  *  Closing the tab hands the session back to its picture-in-picture. */
 export function LiveViewTab({tab}:{tab:Pick<WorkspaceTab,'id'|'chatId'|'title'>}) {
@@ -300,12 +334,15 @@ export function LiveViewTab({tab}:{tab:Pick<WorkspaceTab,'id'|'chatId'|'title'>}
   const last=useRef<PipSource|undefined>(undefined);
   if(found)last.current=found;
   const source=found??last.current;
-  const url=useShotUrl(source);
+  const {url,failed:imageFailed}=useShot(source);
+  const runEndedAt=useRunEnd(shot?null:tab.chatId??null,running);
   const now=useNow(!shot&&!!source);
   useEffect(()=>wireComputerEvents(),[]);
   const perms=usePermissions(!!source&&source.target==='computer');
   const owner=source?ui.control[source.chatId]??'agent':'agent';
-  const freshness=source&&!shot?frameFreshness(now-source.at,running):'ended';
+  // A session that is no longer live reads "Ended" (its tab keeps the last picture), not a red "Disconnected".
+  const live=!!source&&!shot&&pipPhase(source,running,now,runEndedAt)==='live';
+  const freshness=live?frameFreshness(now-source!.at,true):'ended';
   const title=source?sourceTitle(source):tab.title;
   return <section className="computer-viewer" aria-label={shot?'Screenshot':'Live computer use'} data-session-tab={tab.id}>
     <header className="computer-viewer-head">
@@ -325,6 +362,6 @@ export function LiveViewTab({tab}:{tab:Pick<WorkspaceTab,'id'|'chatId'|'title'>}
     <PermissionNotice perms={perms}/>
     {source&&url
       ?<ImageFile key={url.length+':'+(source.image?.id??source.at)} asset={{dataUrl:url,mime:source.image?.mime||'image/png',size:source.image?.bytes??Math.round((url.length-url.indexOf(','))*0.75),width:source.image?.width??0,height:source.image?.height??0}} name={source.label}/>
-      :<div className="computer-viewer-empty" role="status"><Eye size={16} aria-hidden="true"/>{source?'Loading the screenshot…':shot?'This screenshot is no longer in memory.':'Waiting for the agent. This session shows here once it acts.'}</div>}
+      :<div className="computer-viewer-empty" role="status"><Eye size={16} aria-hidden="true"/>{viewerEmpty(source,shot,live,imageFailed)}</div>}
   </section>;
 }
