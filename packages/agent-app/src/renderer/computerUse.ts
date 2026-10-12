@@ -13,8 +13,11 @@ export const PIP_MIN = 220, PIP_MAX = 480, PIP_DEFAULT = 300;
 export const PIP_STACK_MAX = 4;
 /** CUA-09: a frame older than this is stale; older than the second, the feed is disconnected. */
 export const STALE_MS = 2000, DISCONNECTED_MS = 10_000;
-/** The PiP goes away this long after the last computer-use activity once the run is idle. */
-export const HIDE_AFTER_MS = 45_000;
+/** A session is live while the run is going and it acted this recently (browser frames are pumped about once a second
+ * after each action); a run that moves on to unrelated work leaves it behind. */
+export const LIVE_MS = 60_000;
+/** A session that ended shows an "Ended" PiP with its last picture for this long, then the PiP is removed. */
+export const ENDED_LINGER_MS = 6000;
 export interface ToolShot {id?: string; dataUrl?: string; mime?: string; width?: number; height?: number; bytes?: number}
 /** What the PiP shows: a pushed browser frame or the newest computer-use screenshot in the transcript. */
 export interface PipSource {
@@ -138,9 +141,19 @@ export const orderPipSources = (sources: readonly PipSource[], raised: readonly 
 /** A session is shown in exactly one place: while its tab is the visible one in the sidebar, its PiP card steps aside. */
 export const dockedSessions = (sources: readonly PipSource[], visibleTabId: string | null | undefined): Set<string> =>
   new Set(visibleTabId ? sources.filter(source => sessionTabId(source) === visibleTabId).map(sessionKey) : []);
-export function pipShouldShow(source: PipSource | undefined, running: boolean, now: number): boolean {
-  return !!source && (running || now - source.at < HIDE_AFTER_MS);
+export type PipPhase = 'live' | 'ended' | 'gone';
+/** Whether a session still has a PiP. Only a live agent browser or computer-use session does (the chat is running and the
+ * session acted within LIVE_MS; a step stuck "running" from long ago does not keep it alive); when it ends it lingers as "Ended" for ENDED_LINGER_MS and goes.
+ * `runEndedAt` is when this window saw the run stop; a chat opened later has none, so past sessions never get a PiP. */
+export function pipPhase(source: PipSource | undefined, running: boolean, now: number, runEndedAt = 0): PipPhase {
+  if (!source) return 'gone';
+  const liveUntil = source.at + LIVE_MS;
+  if (running && now < liveUntil) return 'live';
+  // Only a session that was still live when the run stopped lingers; one that had gone quiet long before is already past.
+  const endedAt = running ? liveUntil : runEndedAt > 0 && runEndedAt < liveUntil ? Math.max(source.at, runEndedAt) : source.at;
+  return now - endedAt < ENDED_LINGER_MS ? 'ended' : 'gone';
 }
+export const pipShouldShow = (source: PipSource | undefined, running: boolean, now: number, runEndedAt = 0): boolean => pipPhase(source, running, now, runEndedAt) !== 'gone';
 export function frameSource(frame: ComputerFrame): PipSource {
   return {chatId: frame.chatId, target: 'browser', app: frame.title || hostOf(frame.url), label: frame.action ?? (frame.title || hostOf(frame.url)), at: frame.at, image: {dataUrl: frame.dataUrl, width: frame.width, height: frame.height, mime: 'image/jpeg'}, url: frame.url, owner: frame.owner, profileId: frame.profileId};
 }

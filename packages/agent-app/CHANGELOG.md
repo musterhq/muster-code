@@ -8,6 +8,8 @@ All notable changes to Muster Agent. Each `## <version>` section becomes the not
 - Open 3D models in Muster. GLB, glTF (with Draco or meshopt compression), OBJ with MTL, STL, PLY and FBX files open as an interactive preview in the file viewer, from chat attachments and from the Outputs tab: drag to rotate with momentum, scroll to zoom, shift-drag to pan, arrow keys to orbit, Front / 3/4 / Top / Right views, wireframe, model info (vertices, triangles, size), and save an image of the current view. Text formats (OBJ, glTF) keep a Source toggle.
 - Large models stay smooth: files are read in 4 MiB pieces, parsed in a background worker, and sent to the graphics card a few megabytes per frame, so a 50 MB model opens without freezing the window. Textures and companion files are read only from the model's own folder.
 - The 3D view draws only when something changes. Idle, hidden or inactive windows cost no graphics work, and closing a model releases its graphics memory.
+- The browser and computer-use picture-in-picture (#360) now appears only for a live session. When a session ends it shows "Ended" with its last screenshot for a few seconds and goes away; a chat reopened later no longer keeps a ghost card, and unrelated shell work no longer leaves a red "disconnected" dot on an old page.
+- A card without a picture shows a "Starting…" skeleton instead of a globe. The corner dot means live and has an accessible label. Clicking a card opens that session's existing tab, never a blank browser. The browser tab shows "Opening browser…" instead of an empty pane while it starts.
 
 ## 0.3.8
 

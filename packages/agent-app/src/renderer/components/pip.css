@@ -32,8 +32,16 @@
 .pip-stack.is-disconnected .pip-card.is-front img { filter:grayscale(.7) brightness(.8); }
 .pip-stack.is-ended .pip-card.is-front img { filter:grayscale(.35); }
 .pip-card-status { position:absolute; right:8px; bottom:8px; width:8px; height:8px; border-radius:50%; background:var(--warn); box-shadow:0 0 0 2px color-mix(in srgb, var(--shadow-ink) 45%, transparent); }
+.pip-card-status.is-live { background:var(--danger); animation:pip-live 1.6s ease-in-out infinite; }
 .pip-card-status.is-disconnected, .pip-card-status.is-failed { background:var(--danger); }
-.pip-empty { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; background:var(--bg-raised); }
+/* Never a generic icon: a card without a picture is either "Starting…" (a shimmering skeleton) or says why it has none. */
+.pip-empty { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:6px; background:var(--bg-raised); color:var(--text-faint); font-size:var(--fs-11); }
+.pip-skeleton { position:absolute; inset:0; background:linear-gradient(100deg, transparent 30%, var(--bg-hover) 50%, transparent 70%) 0 0/200% 100%; animation:pip-shimmer 1.4s linear infinite; }
+.pip-empty-text { position:relative; }
+.pip-ended-badge { position:absolute; left:8px; bottom:8px; padding:1px 7px; border-radius:var(--radius-full); background:var(--media-scrim); color:var(--on-media); font-size:var(--fs-10); line-height:1.6; backdrop-filter:blur(8px); -webkit-backdrop-filter:blur(8px); }
+@keyframes pip-shimmer { to { background-position:-200% 0; } }
+@keyframes pip-live { 50% { opacity:.45; } }
+@media (prefers-reduced-motion: reduce) { .pip-skeleton, .pip-card-status.is-live { animation:none; } }
 /* Two small round controls over the front card's top-left: hide and take control. */
 .pip-controls { position:absolute; left:7px; z-index:10; display:flex; gap:4px; }
 .pip-control { display:inline-grid; place-items:center; width:22px; height:22px; padding:0; border:0; border-radius:50%; background:var(--media-scrim); color:var(--on-media); cursor:pointer; backdrop-filter:blur(8px); -webkit-backdrop-filter:blur(8px); opacity:.88; transition:opacity 120ms ease, background-color 120ms ease; }
