@@ -1,7 +1,8 @@
 /**
  * Models offered through Claude Code. Claude Code has no model-list command, so the list is built from:
  *   1. a versioned catalog shipped with Muster (catalogs/anthropic-models.json), replaced by a user or
- *      update override at `<data dir>/anthropic-models.json` or `~/.muster/anthropic-models.json`;
+ *      update override at `<data dir>/anthropic-models.json` or `~/.muster/anthropic-models.json` (same shape; an
+ *      override whose `updated` date is older than the shipped catalog is ignored, an undated one always wins);
  *   2. the model the user configured for Claude Code itself (`model` in ~/.claude/settings.json);
  *   3. the live Anthropic `/v1/models` list when ANTHROPIC_API_KEY is set (passed in; the key is never read here).
  * Every id is passed to the CLI as `--model <id>`. The family aliases stay last, labelled as aliases,
@@ -50,12 +51,23 @@ export function parseClaudeCatalog(raw: unknown): Model[] {
 function readJson(file: string): unknown {
   try { if (statSync(file).size > 1024 * 1024) return undefined; return JSON.parse(readFileSync(file, 'utf8')); } catch { return undefined; }
 }
-/** The first override that parses to at least one model, else the shipped catalog. */
+/** `updated` (YYYY-MM-DD) of a catalog file, or undefined when it has none. */
+const catalogDate = (raw: unknown): string | undefined => {
+  const value = raw && typeof raw === 'object' ? (raw as {updated?: unknown}).updated : undefined;
+  return typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : undefined;
+};
+/** The first override that parses to at least one model, else the shipped catalog. An override that carries an
+ *  `updated` date older than the shipped catalog is a stale copy from an earlier release (an old update override):
+ *  the shipped catalog wins, so an app update is never masked by it. An override with no date is the user's own list and always wins. */
 export function claudeCatalog(options: {dataDir?: string; home?: string} = {}): {models: Model[]; source: string} {
   const home = options.home ?? homedir();
+  const shippedDate = catalogDate(bundled);
   for (const file of [options.dataDir ? join(options.dataDir, 'anthropic-models.json') : undefined, join(home, '.muster', 'anthropic-models.json')]) {
     if (!file) continue;
-    const models = parseClaudeCatalog(readJson(file));
+    const raw = readJson(file);
+    const date = catalogDate(raw);
+    if (date && shippedDate && date < shippedDate) continue;
+    const models = parseClaudeCatalog(raw);
     if (models.length) return {models, source: file};
   }
   return {models: parseClaudeCatalog(bundled), source: 'Muster’s model catalog'};

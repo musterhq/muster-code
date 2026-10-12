@@ -109,7 +109,8 @@ test('launch-time detection, then an auth-file change re-probes and the models a
 });
 
 test('readiness helpers', () => {
-  assert.equal(readySignature([provider('b', true, 1), provider('a', true, 2), provider('c', false)]), 'a:2|b:1');
+  assert.match(readySignature([provider('b', true, 1), provider('a', true, 2), provider('c', false)]), /^a:2:[0-9a-f]{12}\|b:1:[0-9a-f]{12}$/);
+  assert.equal(readySignature([provider('b', true, 1), provider('a', true, 2)]), readySignature([provider('a', true, 2), provider('b', true, 1), provider('c', false)]));
   assert.deepEqual(newlyReady([provider('a', true)], [provider('a', true), provider('b', true, 4)]).map(row => row.id), ['b']);
   assert.equal(automaticDefaultModel([provider('a', true), provider('b', true)], null), null, 'two ready providers: no automatic choice');
   assert.equal(automaticDefaultModel([provider('a', true)], {providerId: 'x', model: 'y'}), null, 'an existing default is kept');
