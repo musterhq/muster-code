@@ -110,7 +110,7 @@ export function DeviceView({session, visible}: {session: DeviceSession; visible:
       <div className="device-stage">
         {mode === '3d'
           ? <Suspense fallback={<div className="device-screen-skeleton is-3d" aria-hidden="true"/>}><DeviceFrame3D session={session} feed={feed} tick={tick} onFallback={() => setView('flat')}/></Suspense>
-          : <div className="device-bezel" style={{aspectRatio: ready ? `${feed!.width} / ${feed!.height}` : session.formFactor === 'tablet' ? '3 / 4' : '9 / 19.5'}}>
+          : <div className="device-bezel" style={{'--ratio': ready ? feed!.width / feed!.height : session.formFactor === 'tablet' ? 0.75 : 9 / 19.5} as React.CSSProperties}>
             <canvas ref={canvas} className="device-screen" tabIndex={0} role="img" aria-roledescription="device screen"
               aria-label={`${session.name} screen. Click to tap, drag to swipe; while focused, typing goes to the device.`}
               onPointerDown={input.onPointerDown} onPointerMove={input.onPointerMove} onPointerUp={input.onPointerUp} onPointerCancel={input.onPointerUp}
