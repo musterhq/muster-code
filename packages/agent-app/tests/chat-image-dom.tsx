@@ -53,12 +53,18 @@ await delay(10);
 assert.equal(document.querySelector('.chat-image-lightbox'),null,'close removes it');
 
 // Local image links in a reply.
-const {localImagePath}=await import('../src/renderer/components/MessageBody');
+const {localImagePath,isServerAttachment}=await import('../src/renderer/components/MessageBody');
 assert.equal(localImagePath('/tmp/a/shot.png'),'/tmp/a/shot.png');
 assert.equal(localImagePath('file:///tmp/a%20b/shot.JPG'),'/tmp/a b/shot.JPG');
 assert.equal(localImagePath('https://example.com/x.png'),undefined);
 assert.equal(localImagePath('/tmp/a/notes.txt'),undefined);
 assert.equal(localImagePath('relative/x.png'),undefined);
+// #395: a picture attached on the connected server is recognised by its attachment route (fetched with the connection's sign-in), nothing else is.
+assert.equal(isServerAttachment('/api/attachments/0000aaaa-0000-4000-8000-000000000001/content'),true);
+assert.equal(isServerAttachment('https://pc.example.com/api/attachments/0000aaaa-0000-4000-8000-000000000001/content'),true);
+assert.equal(isServerAttachment('/api/issues/RAG-1'),false);
+assert.equal(isServerAttachment('https://example.com/x.png'),false);
+assert.equal(localImagePath('/api/attachments/0000aaaa-0000-4000-8000-000000000001/content'),undefined,'not mistaken for a local file');
 root.unmount();
 console.log('chat-image-dom ok');
 process.exit(0);

@@ -22,6 +22,8 @@ export function billingTypeOf(provider: ProviderPayInfo | undefined): 'subscript
 export interface CostEventBody {
   agentId: string; issueId: string; projectId: string | null; provider: string; biller: string; billingType: 'subscription_included' | 'metered_api'; model: string;
   inputTokens: number; cachedInputTokens: number; outputTokens: number; costCents: number; occurredAt: string; billingCode: string;
+  /** The server keeps one event per key (Paperclip's `idempotencyKey`), so a post that may have landed can be sent again without counting the turn twice. */
+  idempotencyKey: string;
 }
 /** The POST /companies/:id/cost-events body for one local turn. `agentId` is required by the server: the org agent the work stands in for. */
 export function costEventFor(input: { engine: 'org-definition' | 'personal-subscription'; receipt: TurnReceipt; costUsd: number | null; agentId: string; issueId: string; projectId: string | null; userId: string; provider: ProviderPayInfo | undefined }): CostEventBody {
@@ -29,6 +31,6 @@ export function costEventFor(input: { engine: 'org-definition' | 'personal-subsc
   return {
     agentId: input.agentId, issueId: input.issueId, projectId: input.projectId, provider: provider?.name ?? receipt.provider ?? 'local', biller: billerFor(payer, input.userId), billingType, model: receipt.model ?? 'unknown',
     inputTokens: receipt.tokens?.input ?? 0, cachedInputTokens: receipt.tokens?.cached ?? 0, outputTokens: receipt.tokens?.output ?? 0,
-    costCents: billingType === 'subscription_included' || input.costUsd === null ? 0 : Math.max(0, Math.round(input.costUsd * 100)), occurredAt: receipt.at, billingCode: `muster-local/${input.engine}/${receipt.runId}`,
+    costCents: billingType === 'subscription_included' || input.costUsd === null ? 0 : Math.max(0, Math.round(input.costUsd * 100)), occurredAt: receipt.at, billingCode: `muster-local/${input.engine}/${receipt.runId}`, idempotencyKey: `muster-local:${receipt.runId}`,
   };
 }

@@ -232,6 +232,14 @@ button.ws-row:disabled { cursor: default; }
 .ws-card-detail { color: var(--text-dim); font-size: var(--fs-13); }
 .ws-card-detail summary { cursor: pointer; color: var(--text-faint); font-size: var(--fs-12); }
 .ws-card-resolution { font-size: var(--fs-12); }
+.ws-tool, .ws-ask { grid-column: 2 / -1; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.ws-tool-head, .ws-tool-result { margin: 0; font-size: var(--fs-13); color: var(--text); }
+.ws-tool-args { margin: 0; padding: 8px 10px; border: 1px solid var(--hairline); border-radius: var(--radius-8); background: var(--bg); color: var(--text-dim); font-size: var(--fs-12); overflow: auto; max-height: 220px; }
+.ws-ask-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.ws-ask-item { display: flex; flex-direction: column; gap: 6px; padding: 8px 10px; border: 1px solid var(--hairline); border-radius: var(--radius-8); }
+.ws-ask-item p { margin: 0; }
+.ws-ask-verdicts { display: flex; gap: 6px; flex-wrap: wrap; }
+.ws-ask-verdicts [data-on='true'] { border-color: var(--accent); color: var(--text); background: var(--bg-active); }
 .ws-card-actions { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 8px; }
 .ws-card-reason { flex: 1; min-width: 180px; height: 32px; padding: 0 10px; border: 1px solid var(--hairline); border-radius: var(--radius-8); background: var(--bg); color: var(--text); font: inherit; font-size: var(--fs-13); outline: 0; }
 .ws-card-reason:focus { border-color: var(--accent); }

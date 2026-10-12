@@ -76,7 +76,7 @@ export interface ServerBackend extends Partial<PersonalAccess> {
   resumeAgent(id: string): Promise<void>;
   cancelRun(id: string): Promise<void>;
   decideApproval(id: string, decision: ApprovalDecision, note: string | null): Promise<void>;
-  respond(taskId: string, interactionId: string, input: { accept: boolean; reason?: string; answers?: PaperclipAnswer[] }): Promise<void>;
+  respond(taskId: string, interactionId: string, input: { accept: boolean; reason?: string; answers?: PaperclipAnswer[]; selectedClientKeys?: string[]; selectedOptionIds?: string[]; verdicts?: { id: string; verdict: 'approve' | 'reject' | 'defer'; reason?: string }[]; connection?: boolean }): Promise<void>;
   /** Starts a task's first run on the server (a Muster Server runs its own agents; a Paperclip server's tasks start there). */
   startTask?(taskId: string): Promise<TaskStartResult>;
   receipts(company: WorkspaceCompany, limit: number, agents: ReadonlyMap<string, WorkspaceAgent>): Promise<LedgerEntry[]>;
