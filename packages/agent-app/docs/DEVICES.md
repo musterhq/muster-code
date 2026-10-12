@@ -25,7 +25,7 @@ picture-in-picture card, and through agent tools.
   serve-sim's shell-exec routes and serve-emu's action routes are never called.
 - **Install is reproducible and inert.** `npm ci --ignore-scripts` of the shipped lockfile: every tarball is checked
   against its sha512, no package script runs, and the install is staged and renamed into place only when complete.
-- **Isolation.** The helper runs with its own `TMPDIR` under Muster's data, so stopping it (`serve-sim --kill`) touches
+- **Isolation.** The helper gets an allowlisted environment (PATH, HOME, locale, Android/Xcode locations; no API keys or tokens from Muster's environment) and its own `TMPDIR` under Muster's data, so stopping it (`serve-sim --kill`) touches
   only the helpers Muster started. It starts on demand and stops 45 s after the last session closes; turning Devices off
   stops it and every session. The user's simulators and emulators keep running.
 - **Agents are a separate opt-in.** The MCP server is added to a run only when Devices and "Let agents use devices" are

@@ -125,9 +125,11 @@ test('helper: banner parsing, loopback-only args with a token, isolated TMPDIR, 
   const args = hubArgs('/x/cli.mjs');
   assert.equal(args[args.indexOf('--host') + 1], '127.0.0.1');assert.ok(args.includes('--require-token'));assert.ok(!args.includes('0.0.0.0'));
   const dir = tmp();
-  const env = hubEnv({PATH: '/bin', ELECTRON_RUN_AS_NODE: '1', NODE_OPTIONS: '--inspect', EXPO_DEVICE_HUB_SESSION_TOKEN: 'x'}, dir, '/sdk');
+  const env = hubEnv({PATH: '/bin', HOME: '/h', TMPDIR: '/t', ELECTRON_RUN_AS_NODE: '1', NODE_OPTIONS: '--inspect', EXPO_DEVICE_HUB_SESSION_TOKEN: 'x', OPENAI_API_KEY: 'sk-1', GITHUB_TOKEN: 'ghp'}, dir, '/sdk', 'darwin');
+  assert.equal(env.PATH, '/sdk/platform-tools:/sdk/emulator:/bin', 'the SDK tools come first');
+  assert.equal(hubEnv({PATH: '/bin', TMPDIR: '/t'}, dir, '/sdk', 'linux').TMPDIR, '/t', 'Linux keeps TMPDIR: the emulator publishes its gRPC discovery there');assert.equal(env.HOME, '/h');
   assert.equal(env.TMPDIR, path.join(dir, 'tmp'));assert.equal(env.ANDROID_HOME, '/sdk');
-  for (const key of ['ELECTRON_RUN_AS_NODE', 'NODE_OPTIONS', 'EXPO_DEVICE_HUB_SESSION_TOKEN']) assert.equal(env[key], undefined, key);
+  for (const key of ['ELECTRON_RUN_AS_NODE', 'NODE_OPTIONS', 'EXPO_DEVICE_HUB_SESSION_TOKEN', 'OPENAI_API_KEY', 'GITHUB_TOKEN']) assert.equal(env[key], undefined, key);
   assert.match(npmError('npm error code ENOTFOUND registry.npmjs.org')!, /internet connection/);
   assert.match(npmError('npm error code EINTEGRITY sha512')!, /checksum/);
   fs.rmSync(dir, {recursive: true, force: true});

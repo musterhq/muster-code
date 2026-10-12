@@ -53,7 +53,7 @@ STATES['3d-iphone-apple'] = {opts: {devices: 'agent', localStorage: {'muster.dev
 STATES['3d-iphone-apple-turned'] = {opts: {devices: 'agent', localStorage: {'muster.deviceView': '3d'}}, run: three(IPHONE, 'iphone', true)};
 STATES['3d-android-turned'] = {opts: {devices: 'android', localStorage: {'muster.deviceView': '3d'}}, run: three('emulator-5554', undefined, true)};
 const THEMES = {dark: {}, light: {theme: 'light'}, solarized: {darkTheme: 'solarized-dark'}, contrast: {theme: 'light', lightTheme: 'high-contrast-light'}};
-const KEY = ['settings-ready', 'picker', 'live-iphone', 'live-android', 'pip', 'error', 'starting', 'settings-missing'];
+const KEY = ['settings-ready', 'picker', 'live-iphone', 'live-android', 'pip', 'error', 'starting', 'settings-missing', '3d-android', '3d-iphone-apple'];
 export const SHOTS = [];
 for (const [state, def] of Object.entries(STATES)) for (const [theme, themeOpts] of Object.entries(THEMES)) for (const width of [1280, 900]) {
   if (theme !== 'dark' && !KEY.includes(state)) continue;

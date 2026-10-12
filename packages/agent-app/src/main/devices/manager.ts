@@ -146,7 +146,7 @@ export class DeviceManager {
     if (this.hubStarting) return this.hubStarting;
     const node = this.deps.locate('node');
     if (!node) return Promise.reject(new Error('Node.js was not found, so the device helper cannot run. Install Node.js 20 or later and restart Muster.'));
-    const env = hubEnv(this.deps.env, this.paths.stateDir, androidTools(this.deps).sdk);
+    const env = hubEnv(this.deps.env, this.paths.stateDir, androidTools(this.deps).sdk, this.deps.platform);
     this.hubStarting = startHub({node, paths: this.paths, env, spawn: this.deps.spawn, fetch: this.deps.fetch, onExit: () => this.hubExited()})
       .then(started => {
         this.hub = started;
@@ -178,7 +178,7 @@ export class DeviceManager {
     if (hub) {
       try { hub.child.kill('SIGTERM'); } catch {}
       const node = this.deps.locate('node');
-      if (node) await killServeSimHelpers({node, paths: this.paths, env: hubEnv(this.deps.env, this.paths.stateDir, androidTools(this.deps).sdk), spawn: this.deps.spawn});
+      if (node) await killServeSimHelpers({node, paths: this.paths, env: hubEnv(this.deps.env, this.paths.stateDir, androidTools(this.deps).sdk, this.deps.platform), spawn: this.deps.spawn});
     }
     if (!this.disposed) void this.publishSetup();
   }
