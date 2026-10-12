@@ -39,7 +39,7 @@ const three = (which, apple, turn) => async (ctx) => {
   await ctx.sleep(apple ? 6000 : 2500);
   if (turn) {
     // Drag from the empty stage beside the device: the body turns (and keeps the throw's momentum).
-    const r = await ctx.evaluate(`const b=document.querySelector('.device-3d-canvas').getBoundingClientRect();return {x:b.left+b.width*0.08,y:b.top+b.height*0.5};`);
+    const r = await ctx.evaluate(`const b=document.querySelector('.device-3d canvas').getBoundingClientRect();return {x:b.left+b.width*0.08,y:b.top+b.height*0.5};`);
     await ctx.cdp.call('Input.dispatchMouseEvent', {type: 'mousePressed', x: r.x, y: r.y, button: 'left', clickCount: 1});
     for (let i = 1; i <= 8; i++) { await ctx.cdp.call('Input.dispatchMouseEvent', {type: 'mouseMoved', x: r.x + i * 40, y: r.y - i * 6, button: 'left', buttons: 1}); await ctx.sleep(16); }
     await ctx.cdp.call('Input.dispatchMouseEvent', {type: 'mouseReleased', x: r.x + 320, y: r.y - 48, button: 'left', clickCount: 1});

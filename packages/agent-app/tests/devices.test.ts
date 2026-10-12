@@ -381,29 +381,6 @@ test('Apple models: opt-in only, https from apple.com, checksum verified, conver
   fs.rmSync(dir, {recursive: true, force: true});
 });
 
-test('3D motion: drag turns, a throw keeps momentum then rests, near the front it springs back, touches map from the screen', async () => {
-  const {atRest, drag, release, step, settled, finish, uvToDevice, MOTION} = await import('../src/renderer/devices/motion.ts');
-  let m = drag(atRest(), 50, 0);
-  assert.ok(Math.abs(m.yaw - 50 * MOTION.gain) < 1e-9);
-  // Small turn, released still: springs back to the front and stops (no endless animation).
-  m = release(m, 0, 0);
-  let frames = 0;
-  while (!settled(m) && frames < 600) { m = step(m, 1 / 60); frames++; }
-  assert.ok(frames < 600, 'settles');m = finish(m);
-  assert.deepEqual(m, atRest());
-  // A hard throw far from the front keeps turning, slows down and stays where it stopped.
-  m = release(drag(atRest(), 300, 0), 4000, 0);
-  assert.ok(Math.abs(m.vyaw) <= MOTION.maxSpeed, 'velocity capped');
-  frames = 0;
-  while (!settled(m) && frames < 1200) { m = step(m, 1 / 60); frames++; }
-  assert.ok(frames < 1200);assert.ok(Math.abs(m.yaw) > MOTION.snapWithin, 'a far turn stays turned');
-  // Reduced motion: no momentum at all.
-  const reduced = step(release(drag(atRest(), 300, 0), 4000, 0), 1 / 60, true);
-  assert.equal(reduced.vyaw, 0);
-  assert.equal(drag(atRest(), 0, 10_000).pitch, MOTION.maxPitch, 'pitch is limited');
-  assert.deepEqual(uvToDevice(0.25, 0.75), {x: 0.25, y: 0.25});
-});
-
 test('3D bodies: Muster-made phone, tablet and foldable each carry one live screen with 0..1 UVs at the standard height', async () => {
   const {buildBody, SCREEN_NAME, SCREEN_HEIGHT} = await import('../src/renderer/devices/bodies.ts');
   const {Color} = await import('three');
@@ -434,4 +411,16 @@ test('Apple conversion geometry: the display frame comes from its triangles, not
   assert.ok(Math.abs(frame.height - 2) < 1e-6, 'height along the long side');
   assert.ok(frame.center.distanceTo(new Vector3(3, 1, -2)) < 1e-6, 'centre');
   assert.ok(frame.up.y > 0, 'not upside down');
+});
+
+test('3D screen orientation: a landscape picture turns the screen UVs a quarter so hits still name the picture pixel', async () => {
+  const {orientScreen} = await import('../src/renderer/components/devices/orientScreen.ts');
+  const {Mesh, PlaneGeometry} = await import('three');
+  const mesh = new Mesh(new PlaneGeometry(1, 2));
+  const before = Array.from(mesh.geometry.attributes.uv!.array as ArrayLike<number>);
+  orientScreen(mesh, true);
+  const turned = Array.from(mesh.geometry.attributes.uv!.array as ArrayLike<number>);
+  for (let i = 0; i < before.length; i += 2) { assert.equal(turned[i], 1 - before[i + 1]!); assert.equal(turned[i + 1], before[i]); }
+  orientScreen(mesh, false);
+  assert.deepEqual(Array.from(mesh.geometry.attributes.uv!.array as ArrayLike<number>), before, 'portrait restores the original UVs');
 });

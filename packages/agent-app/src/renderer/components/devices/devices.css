@@ -56,9 +56,9 @@
 .device-helper-state.is-failed { color:var(--danger); }
 @media (prefers-reduced-motion: reduce) { .device-spinner, .is-spinning, .device-screen-skeleton { animation:none; } }
 .device-3d { position:relative; width:100%; height:100%; }
-.device-3d-canvas { display:block; width:100%; height:100%; outline:none; touch-action:none; cursor:grab; }
-.device-3d-canvas:active { cursor:grabbing; }
-.device-3d-canvas:focus-visible { box-shadow:inset 0 0 0 2px var(--accent); }
-.device-3d-note { position:absolute; left:12px; bottom:10px; color:var(--text-faint); font-size:var(--fs-11); }
+.device-3d canvas { cursor:grab; }
+.device-3d canvas:active { cursor:grabbing; }
+.device-3d canvas:focus-visible { box-shadow:inset 0 0 0 2px var(--accent); }
+.device-3d-note { position:absolute; z-index:1; left:12px; bottom:10px; color:var(--text-faint); font-size:var(--fs-11); }
 .device-screen-skeleton.is-3d { position:relative; inset:auto; width:40%; height:70%; border-radius:var(--radius-16); }
 .device-view[data-mode='3d'] .device-stage { padding:0; }
