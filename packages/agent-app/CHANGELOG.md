@@ -5,6 +5,7 @@ All notable changes to Muster Agent. Each `## <version>` section becomes the not
 
 ## Unreleased
 
+- The Paperclip Inbox now keeps agent questions and approvals on tasks you are accountable for, reads the whole attention feed instead of the first 50, shows critical items above high ones, finds @mentions that the 120-character activity snippet cut off, and clears a mention once you open the task. With a board key and no live connection, the Inbox badge re-checks once a minute (ETag revalidated, and not at all while the window is hidden or unfocused).
 - Project decisions that ask a question now show Paperclip's "Other" answer: choose Other to type your own reply (the field is focused for you), or answer a text-only question directly. Once answered, the card shows "Other: your text".
 - Automatic hand-back no longer fires on unfinished work. If the agent's last message ends with a question or an offer ("Should I commit item 1 now?", "Want me to...", "Would you like..."), nothing is committed or handed back until you answer or say you are done. Uncommitted work is now committed only after the 60 second countdown, not before it, and a running countdown is saved so an app restart picks it up again.
 - Saying "I am done", "done", "done, hand back", "hand it back", "finished" or "all done" now hands the task back. When the hand-back is held because no tests ran, the task offers "Run tests and hand back" and "Hand back anyway".

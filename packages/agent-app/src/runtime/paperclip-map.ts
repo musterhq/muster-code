@@ -102,14 +102,14 @@ const WHY: Record<string, string> = {
   review: 'Waiting for your review.', productivity_review: 'Waiting for your review of recent work.', failed_run: 'The run ended with an error.',
   agent_error_alert: 'The agent stopped with an error. Open it to see why.', budget_alert: 'An agent is close to or over its budget.', recovery_action: 'Needs a recovery step before work can go on.',
 };
-const SEVERITY = new Set(['high', 'medium', 'low']);
+const SEVERITY = new Set(['critical', 'high', 'medium', 'low']);
 export function mapAttention(item: Json): WorkspaceInboxItem {
   const subject = obj(item.subject), related = obj(item.relatedIssue);
   const identifier = str(subject.identifier) ?? (subject.kind === 'interaction' ? str(related.identifier) : null);
   return {
     id: String(item.id ?? item.dedupKey), kind: ATTENTION_KIND[String(item.sourceKind)] ?? 'other',
     title: `${identifier ? `${identifier} · ` : ''}${str(subject.title) ?? str(related.title) ?? 'Needs attention'}`,
-    why: WHY[String(item.sourceKind)] ?? 'Needs your attention.', severity: SEVERITY.has(String(item.severity)) ? item.severity as 'high' : 'medium', at: iso(item.activityAt, iso(item.updatedAt)),
+    why: WHY[String(item.sourceKind)] ?? 'Needs your attention.', severity: SEVERITY.has(String(item.severity)) ? item.severity as 'high' : 'medium', at: iso(item.activityAt, iso(item.updatedAt)), scoped: true,
     taskId: subject.kind === 'issue' ? str(subject.id) : str(related.id), agentId: subject.kind === 'agent' ? str(subject.id) : null, runId: subject.kind === 'run' ? str(subject.id) : null,
     // An approval row is decided from the row: its id and the decisions Paperclip offers for it.
     ...(item.sourceKind === 'approval' && subject.kind === 'approval' && str(subject.id) ? { approvalId: String(subject.id), approvalVerbs: verbsOf(item.decisionVerbs) } : {}),
@@ -139,19 +139,40 @@ export function mapApproval(a: Json, agents: ReadonlyMap<string, WorkspaceAgent>
 
 /** The @mention chip of a person in a comment: `[@Name](user://<id>)`. */
 export const mentionsUser = (body: string, userId: string): boolean => body.includes(`(user://${userId})`) || body.includes(`(user://${userId}?`);
+/** Paperclip cuts an activity row's `bodySnippet` at this many characters. */
+export const SNIPPET_LIMIT = 120;
+/** Activity rows that may be a mention of the person but whose snippet was cut before the chip could show: their full comment is read. */
+export function mentionCandidates(rows: readonly Json[], meId: string | null): Json[] {
+  if (!meId) return [];
+  return rows.filter(row => {
+    if (row.action !== 'issue.comment_added' || row.actorId === meId) return false;
+    const snippet = str(obj(row.details).bodySnippet);
+    return Boolean(snippet) && snippet!.length >= SNIPPET_LIMIT && !mentionsUser(snippet!, meId);
+  });
+}
 /**
  * Comments that tag the person, as Inbox items. Paperclip's attention feed has no mention kind, so the company activity feed is read for
- * `issue.comment_added` rows whose snippet carries the person's mention chip. One item per comment; the person's own comments never count.
+ * `issue.comment_added` rows whose comment carries the person's mention chip: the snippet, or `bodies` (commentId to the full comment) when
+ * the snippet was cut. One item per comment; the person's own comments never count. A mention is cleared once the person has opened the
+ * task: Paperclip logs `issue.read_marked` for their user at that moment (POST /issues/:id/read), and a mention older than it is read.
  */
-export function mapMentions(rows: readonly Json[], meId: string | null, agents: ReadonlyMap<string, WorkspaceAgent>, people?: ReadonlyMap<string, string>): WorkspaceInboxItem[] {
+export function mapMentions(rows: readonly Json[], meId: string | null, agents: ReadonlyMap<string, WorkspaceAgent>, people?: ReadonlyMap<string, string>, bodies?: ReadonlyMap<string, string>): WorkspaceInboxItem[] {
   if (!meId) return [];
+  const readAt = new Map<string, number>();
+  for (const row of rows) {
+    if (row.action !== 'issue.read_marked' || (str(obj(row.details).userId) ?? str(row.actorId)) !== meId) continue;
+    const at = Date.parse(iso(row.createdAt)), task = str(row.entityId);
+    if (task && Number.isFinite(at) && at > (readAt.get(task) ?? 0)) readAt.set(task, at);
+  }
   const out: WorkspaceInboxItem[] = [];
   for (const row of rows) {
     if (row.action !== 'issue.comment_added' || row.actorId === meId) continue;
-    const d = obj(row.details), snippet = str(d.bodySnippet);
-    if (!snippet || !mentionsUser(snippet, meId)) continue;
+    const d = obj(row.details), commentId = str(d.commentId), text = (commentId ? bodies?.get(commentId) : undefined) ?? str(d.bodySnippet);
+    if (!text || !mentionsUser(text, meId)) continue;
+    const task = str(row.entityId), at = Date.parse(iso(row.createdAt));
+    if (task && Number.isFinite(at) && (readAt.get(task) ?? 0) >= at) continue;
     const by = str(row.agentId) ? agents.get(String(row.agentId))?.name ?? 'An agent' : people?.get(String(row.actorId)) ?? 'Someone';
-    out.push({ id: `mention:${str(d.commentId) ?? str(row.id)}`, kind: 'mention', title: `${str(d.identifier) ? `${d.identifier} · ` : ''}${str(d.issueTitle) ?? 'A task'}`, why: `${by} mentioned you in a comment.`, severity: 'medium', at: iso(row.createdAt), taskId: str(row.entityId), agentId: null, runId: null });
+    out.push({ id: `mention:${commentId ?? str(row.id)}`, kind: 'mention', title: `${str(d.identifier) ? `${d.identifier} · ` : ''}${str(d.issueTitle) ?? 'A task'}`, why: `${by} mentioned you in a comment.`, severity: 'medium', at: iso(row.createdAt), taskId: task, agentId: null, runId: null });
   }
   return out;
 }
@@ -178,7 +199,7 @@ export function buildInbox(attention: readonly WorkspaceInboxItem[], tasks: read
     if (task && (task.status === 'done' || task.status === 'cancelled')) continue;
     items.push({ id: `run:${run.id}`, kind: 'failed_run', title: `${agents.get(run.agentId ?? '')?.name ?? 'An agent'}'s run failed${task ? ` on ${task.key}` : ''}`, why: run.error ?? 'The run ended with an error.', severity: 'medium', at: run.finishedAt ?? run.createdAt, taskId: run.taskId, agentId: run.agentId, runId: run.id });
   }
-  const rank = { high: 0, medium: 1, low: 2 } as const;
+  const rank = { critical: -1, high: 0, medium: 1, low: 2 } as const;
   return items.sort((a, b) => rank[a.severity] - rank[b.severity] || b.at.localeCompare(a.at));
 }
 

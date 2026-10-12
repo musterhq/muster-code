@@ -132,7 +132,7 @@ export class LocalWorkspace {
       for (let i = inbox.length - 1; i >= 0; i--) if (inbox[i]!.projectId === read.project.id && inbox[i]!.taskId && staged.has(inbox[i]!.taskId!) && inbox[i]!.id.startsWith('task:')) inbox.splice(i, 1);
       for (const g of read.gov.items) inbox.push({ id: `gov:${g.id}`, kind: g.kind, title: g.title, why: g.why, severity: g.severity, at: g.at, taskId: g.taskId, agentId: g.agentId, runId: null, projectId: read.project.id, group: read.project.name, source: 'local' });
     }
-    inbox.sort((a, b) => ({ high: 0, medium: 1, low: 2 }[a.severity] - { high: 0, medium: 1, low: 2 }[b.severity]) || b.at.localeCompare(a.at));
+    inbox.sort((a, b) => ({ critical: -1, high: 0, medium: 1, low: 2 }[a.severity] - { critical: -1, high: 0, medium: 1, low: 2 }[b.severity]) || b.at.localeCompare(a.at));
     // Pending human-only decisions carried over from Paperclip: Needs you, never resolved here.
     let pending: ReturnType<ImportMeta['history']> = [];
     // A decision carried over from Paperclip shows once, even when an older project of yours and the new Paperclip project both hold a copy of it.
@@ -311,7 +311,7 @@ export function localInbox(reads: readonly { project: ProjectDetails; work: Proj
     items.push({ id: `task:${task.id}`, kind, title: `${view.key} · ${task.title}`, why, severity: kind === 'question' || task.priority <= 1 ? 'high' : 'medium', at: task.updatedAt, taskId: task.id, agentId: view.assigneeId, runId: runs.find(r => r.taskId === task.id)?.id ?? null, projectId: read.project.id, group: read.project.name, source: 'local', chatIds: [...new Set(task.attempts.map(a => a.chatId).filter(Boolean))] });
   }
   items.push(...mailInbox(mail, new Map(reads.map(r => [r.project.id, r.project.name]))));
-  const rank = { high: 0, medium: 1, low: 2 } as const;
+  const rank = { critical: -1, high: 0, medium: 1, low: 2 } as const;
   return items.sort((a, b) => rank[a.severity] - rank[b.severity] || b.at.localeCompare(a.at));
 }
 

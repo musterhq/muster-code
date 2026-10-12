@@ -262,7 +262,7 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
     const theirTasks = (p?.tasks ?? []).filter(t => !t.projectId || !hidden.has(t.projectId));
     const projects2 = projects.filter(x => !(x.source === 'paperclip' && hidden.has(x.id))).map(x => x.source === 'paperclip' ? { ...x, org: theirs.link?.company?.name ?? 'Muster Server' } : x);
     const tasks = [...mine.tasks, ...theirTasks], runs = [...mine.runs, ...(p?.runs ?? [])].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-    const rank = { high: 0, medium: 1, low: 2 } as const;
+    const rank = { critical: -1, high: 0, medium: 1, low: 2 } as const;
     // A Paperclip task already imported into Muster needs you once: its Muster copy stands for it in the Inbox and badge.
     let imported = new Set<string>(); try { imported = imports()?.importedSources('task') ?? imported; } catch { /* no import store */ }
     // An approval carried over by an import is decided in the linked Paperclip (when there is one), from its row.
