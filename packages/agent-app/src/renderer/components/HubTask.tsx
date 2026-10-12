@@ -20,7 +20,7 @@ import { ApprovalActions, LiveCount, Monogram, Receipt, RUN_STATE_LABEL, StateCh
 import { ApprovalCard } from './ApprovalCard';
 import { MessageBody } from './MessageBody';
 import { PendingQuestion } from './PendingQuestion';
-import { PaperclipDecision, ToolActionView } from './PaperclipDecision';
+import { ServerDecision, ToolActionView } from './ServerDecision';
 import { ResourceState } from './ResourceState';
 import { Tip } from './Tooltip';
 import { SkillFromTask } from './SkillStudio';
@@ -154,7 +154,7 @@ function Card({ card, taskId, projectId, who, onOpenTask, onChanged }: { card: T
       : card.questions?.length && card.interactionId ? <PaperclipQuestions taskId={taskId} interactionId={card.interactionId} questions={card.questions} submitLabel={card.submitLabel ?? null} onChanged={onChanged}/>
       : card.pending ? (card.pending.kind === 'question' ? <PendingQuestion item={card.pending}/> : <ApprovalCard item={card.pending}/>)
       : card.chatId ? <p className="ws-faint ws-card-resolution">Answer it in <button type="button" className="ws-link" onClick={() => { void selectChat(card.chatId!); closeSettings(); }}>the run chat</button>.</p>
-      : card.interactionId ? <PaperclipDecision card={card} taskId={taskId} onChanged={onChanged}/>
+      : card.interactionId ? <ServerDecision card={card} taskId={taskId} onChanged={onChanged}/>
       : <p className="ws-faint ws-card-resolution">Answer it by replying below.</p>}
     {card.notice && <p className="ws-faint ws-card-resolution" role="status" data-kind="resume">{card.notice}</p>}
   </div>;

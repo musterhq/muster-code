@@ -26,7 +26,7 @@ export function ToolActionView({ tool }: { tool: PaperclipToolAction }): React.R
   </div>;
 }
 
-export function PaperclipDecision({ card, taskId, onChanged }: { card: Needs; taskId: string; onChanged: () => void }): React.ReactElement {
+export function ServerDecision({ card, taskId, onChanged }: { card: Needs; taskId: string; onChanged: () => void }): React.ReactElement {
   const ask = card.ask, interactionId = card.interactionId!;
   const [busy, setBusy] = useState(false);
   const [reason, setReason] = useState('');
