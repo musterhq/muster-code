@@ -11,6 +11,7 @@ import {SERVER_SECRET as PAPERCLIP_SECRET_ID} from '../src/runtime/server/config
 import {normalizeBaseUrl} from '../src/runtime/paperclip-client.ts';
 import {SqliteImportStore} from '../src/runtime/paperclip-import.ts';
 import {buildInbox,mapAttention,mapInteraction,mapIssue,mapRoutine} from '../src/runtime/paperclip-map.ts';
+import {buildPaperclipAnswer} from '../src/shared/domains/paperclip-protocol.ts';
 import type {DomainContext} from '../src/runtime/domains/types.ts';
 import type {SocketFactory} from '../src/runtime/paperclip-client.ts';
 
@@ -487,7 +488,7 @@ test('a Paperclip question set (ask_user_questions) is answerable in place throu
   const card=mapInteraction(pending as any,new Map([['a-cto',{name:'CTO'} as any]])) as any;
   assert.equal(card.interactionId,'int-q','answerable, not display-only');
   assert.equal(card.from,'CTO');assert.equal(card.submitLabel,'Send');
-  assert.deepEqual(card.questions.map((q:any)=>`${q.id}:${q.multi}:${q.allowOther}:${q.options.map((o:any)=>o.id).join('/')}`),['scope:false:true:mig/all','envs:true:false:dev/prod']);
+  assert.deepEqual(card.questions.map((q:any)=>`${q.id}:${q.multi}:${q.allowOther}:${q.options.map((o:any)=>o.id).join('/')}`),['scope:false:true:mig/all','envs:true:true:dev/prod']);
   assert.equal((mapInteraction({...pending,status:'answered'} as any,new Map()) as any).questions,undefined,'an answered set is history');
   const h=await harness(t);
   await h.call('paperclip.config.set',{mode:'local'});
@@ -496,6 +497,26 @@ test('a Paperclip question set (ask_user_questions) is answerable in place throu
   await h.call('paperclip.interaction.respond',{taskId:'RAG-12',interactionId:'int-q',accept:true,answers:[{questionId:'scope',optionIds:[],otherText:'Only the wizard'},{questionId:'envs',optionIds:['dev','prod']}]});
   assert.deepEqual(h.server.calls.filter(c=>c.method==='POST').map(c=>`${c.url} ${JSON.stringify(c.body)}`),['/api/issues/RAG-12/interactions/int-q/respond {"answers":[{"questionId":"scope","optionIds":[],"otherText":"Only the wizard"},{"questionId":"envs","optionIds":["dev","prod"]}]}']);
   await assert.rejects(()=>h.call('paperclip.interaction.respond',{taskId:'RAG-12',interactionId:'int-q',accept:true,answers:[{questionId:'scope',optionIds:[]}]}),/Answer every question/);
+});
+
+test('Paperclip "Other": a freeText option, an omitted allowOther and a text-only question all map, and the answer carries the free-text id (#388)',()=>{
+  const agents=new Map();
+  const card=mapInteraction({id:'q1',kind:'ask_user_questions',status:'pending',createdAt:now,payload:{questions:[
+    {id:'a',prompt:'Pick',selectionMode:'single',allowOther:false,options:[{id:'x',label:'X'},{id:'other',label:'Other',freeText:true}]},
+    {id:'b',prompt:'Left out',options:[{id:'y',label:'Y'}]},
+    {id:'c',prompt:'Strict',allowOther:false,options:[{id:'z',label:'Z'}]},
+    {id:'d',prompt:'Say it'}]}} as any,agents) as any;
+  const [a,b,c,d]=card.questions;
+  assert.deepEqual([a.allowOther,a.otherOptionId,a.options.map((o:any)=>o.id)],[true,'other',['x']],'freeText option becomes Other and leaves the list');
+  assert.equal(b.allowOther,true,'allowOther omitted means on');
+  assert.equal(c.allowOther,false);
+  assert.deepEqual([d.allowOther,d.options.length],[true,0],'a text-only question is kept');
+  assert.deepEqual(buildPaperclipAnswer(a,['x'],'  mine '),{questionId:'a',optionIds:['other'],otherText:'mine'});
+  assert.deepEqual(buildPaperclipAnswer({...a,multi:true},['x'],'mine'),{questionId:'a',optionIds:['x','other'],otherText:'mine'});
+  assert.deepEqual(buildPaperclipAnswer(b,['y'],''),{questionId:'b',optionIds:['y']});
+  assert.deepEqual(buildPaperclipAnswer(d,[],'text'),{questionId:'d',optionIds:[],otherText:'text'},'no freeText option: empty ids plus the text');
+  const done=mapInteraction({id:'q1',kind:'ask_user_questions',status:'answered',createdAt:now,payload:{questions:[{id:'a',prompt:'Pick',options:[{id:'x',label:'X'},{id:'other',label:'Other',freeText:true}]}]},result:{answers:[{questionId:'a',optionIds:['other'],otherText:'mine'}]}} as any,agents) as any;
+  assert.equal(done.resolution,'Other: mine');
 });
 
 test('inbox dismissals persist by item id and time; a dismissed Paperclip or project item leaves the runtime badge until it changes',async t=>{
