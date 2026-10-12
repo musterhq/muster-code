@@ -20,6 +20,7 @@ import {Tip} from './Tooltip';
 import {AppGlyph} from './AppGlyph';
 import {openScreenshotTab} from './ComputerPip';
 import {ChatImage} from './ChatImage';
+import {GalleryCoverage,ImageGallery,type GalleryTarget} from './ImageGallery';
 
 type Glyph = React.ComponentType<{size?: number; strokeWidth?: number; 'aria-hidden'?: boolean | 'true'}>;
 /** Codex transcript glyphs: thin, monochrome, one per verb. */
@@ -108,8 +109,11 @@ function ImageThumb({item,path}:{item:TimelineItem;path:string}) {
   return <ChatImage chatId={item.chatId} path={path} inFolder={to} onOpen={to?()=>void openFile(to.folderId,to.path):undefined}/>;
 }
 export function ImageThumbs({item,paths}:{item:TimelineItem;paths:readonly string[]}) {
-  if(!paths.length)return null;
-  return <div className="tool-thumbs">{paths.slice(0,12).map(path=><ImageThumb key={path} item={item} path={path}/>)}</div>;
+  const covered=React.useContext(GalleryCoverage);
+  // Images the turn's gallery already shows are not repeated under their tool rows.
+  const shown=covered.size?paths.filter(path=>!covered.has(path)):paths;
+  if(!shown.length)return null;
+  return <div className="tool-thumbs">{shown.slice(0,12).map(path=><ImageThumb key={path} item={item} path={path}/>)}</div>;
 }
 
 /** An edit row opened: each changed file as the inline diff editor (the whole file when it can be read). */
@@ -199,4 +203,11 @@ export function ToolCard({item,reveal=false}: {item: TimelineItem;reveal?:boolea
       <Metadata item={item} plan={steps.length>0}/>
     </div></Collapsible.Panel>
   </Collapsible.Root>;
+}
+
+/** A turn's image gallery: paths resolve against the chat's folders; folder images open in the side pane. */
+export function TurnGallery({chatId,paths}:{chatId:string;paths:readonly string[]}) {
+  const resolve=React.useCallback((path:string):GalleryTarget|undefined=>{const {snapshot}=getState(),chat=snapshot?.chats.find(chat=>chat.id===chatId);return resolveToolPath(path,snapshot?.folders??[],chat?.folderId)??undefined;},[chatId]);
+  const open=React.useCallback((target:GalleryTarget)=>void openFile(target.folderId,target.path),[]);
+  return <ImageGallery chatId={chatId} paths={paths} resolve={resolve} onOpenFile={open}/>;
 }

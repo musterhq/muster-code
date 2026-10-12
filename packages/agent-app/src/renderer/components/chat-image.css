@@ -11,5 +11,10 @@
 .chat-image-lightbox-card { display: flex; flex-direction: column; width: min(1100px, 100%); height: min(760px, 100%); overflow: hidden; border-radius: var(--radius-12); background: var(--bg); box-shadow: var(--shadow-dialog); }
 .chat-image-lightbox-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 12px; border-bottom: 1px solid color-mix(in srgb, var(--text) 8%, transparent); font-size: var(--fs-13); }
 .chat-image-lightbox-head span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat-image-lightbox-count { flex: 1; text-align: center; color: var(--text-faint); font-variant-numeric: tabular-nums; }
+.chat-image-lightbox-stage { position: relative; flex: 1; display: flex; flex-direction: column; min-height: 0; }
+.chat-image-lightbox-nav { position: absolute; top: 50%; z-index: 1; transform: translateY(-50%); background: color-mix(in srgb, var(--bg) 78%, transparent); border-radius: var(--radius-full); }
+.chat-image-lightbox-nav.is-prev { left: 8px; }
+.chat-image-lightbox-nav.is-next { right: 8px; }
 .chat-image-lightbox .image-file { flex: 1; min-height: 0; }
 @media (prefers-reduced-motion: reduce) { .chat-image { transition: none; } }

@@ -7,6 +7,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import {ResourceLink, type ResourceContext} from './ResourceLink';
 import {ChatImage} from './ChatImage';
+import {GalleryCoverage} from './ImageGallery';
 import {activeChat} from '../store';
 import {MarkdownTable} from './MarkdownTable';
 import remarkGfm from 'remark-gfm';
@@ -191,6 +192,9 @@ function SelectionQuote({ container }: { container: React.RefObject<HTMLDivEleme
 function ReplyImage({src, alt}: {src?: string; alt?: string}): React.ReactElement {
   const path = localImagePath(src);
   const chat = activeChat();
+  const covered = React.useContext(GalleryCoverage);
+  // The turn's gallery already shows this picture.
+  if (path && covered.has(path)) return <></>;
   if (path && chat) return <ChatImage chatId={chat.id} path={path} variant="inline"/>;
   return <span className="md-unavailable-link">[Image: {alt || 'image'} — preview unavailable]</span>;
 }

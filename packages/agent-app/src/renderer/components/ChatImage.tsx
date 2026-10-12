@@ -1,6 +1,6 @@
 import React, {useEffect, useRef, useState} from 'react';
 import {createPortal} from 'react-dom';
-import {Image as ImageIcon, X} from 'lucide-react';
+import {ChevronLeft, ChevronRight, Image as ImageIcon, X} from 'lucide-react';
 import {invoke} from '../bridge';
 import type {Commands} from '../../shared/protocol';
 import {ImageFile} from './ImageFile';
@@ -10,7 +10,7 @@ export type ImageAsset = Commands['files.asset']['output'];
 /** Where an image the chat named can be read from. */
 export type ImageSource = {kind: 'folder'; folderId: string; path: string} | {kind: 'chat'; chatId: string; path: string};
 
-const absolute = (path: string) => path.startsWith('/') || /^[A-Za-z]:[\\/]/.test(path);
+export const absolute = (path: string) => path.startsWith('/') || /^[A-Za-z]:[\\/]/.test(path);
 
 /** A path inside one of the chat's folders reads through the folder; any other absolute path (/tmp, a worktree under
  *  app data, a folder elsewhere) reads through the chat's own tool rows. A relative path outside every folder has no source. */
@@ -69,23 +69,39 @@ export function loadImageThumb(source: ImageSource, side: number): Promise<Entry
   return job;
 }
 
-/** The full image in a zoomable dialog (Fit, actual size, zoom). */
-export function ImageLightbox({source, name, onClose}: {source: ImageSource; name: string; onClose: () => void}) {
+/** The full image in a zoomable dialog (Fit, actual size, zoom). With `gallery` the dialog steps through that set with the
+ *  arrow keys (or the Previous / Next buttons) starting at `gallery.index`; `onStep` reports where it moved. */
+export function ImageLightbox({source, name, onClose, gallery, onStep}: {source: ImageSource; name: string; onClose: () => void; gallery?: {items: {source: ImageSource; name: string}[]; index: number}; onStep?: (index: number) => void}) {
   const [asset, setAsset] = useState<ImageAsset>();
   const [failed, setFailed] = useState(false);
+  const [at, setAt] = useState(gallery?.index ?? 0);
   const close = useRef<HTMLButtonElement>(null);
-  useEffect(() => { let live = true; loadImageAsset(source).then(value => { if (live) setAsset(value); }, () => { if (live) setFailed(true); }); return () => { live = false; }; }, [source.kind, source.path, source.kind === 'chat' ? source.chatId : source.folderId]);
+  const count = gallery?.items.length ?? 1;
+  const current = gallery ? gallery.items[Math.min(at, count - 1)] : {source, name};
+  const atRef = useRef(at);
+  const step = (delta: number) => { const next = (atRef.current + delta + count) % count; atRef.current = next; setAt(next); onStep?.(next); };
+  const stepRef = useRef(step); stepRef.current = step;
+  useEffect(() => { let live = true; setAsset(undefined); setFailed(false); loadImageAsset(current.source).then(value => { if (live) setAsset(value); }, () => { if (live) setFailed(true); }); return () => { live = false; }; }, [current.source.kind, current.source.path, current.source.kind === 'chat' ? current.source.chatId : current.source.folderId]);
   useEffect(() => {
     const previous = document.activeElement as HTMLElement | null;
     close.current?.focus();
-    const key = (event: KeyboardEvent) => { if (event.key === 'Escape') { event.stopPropagation(); onClose(); } };
+    const key = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') { event.stopPropagation(); onClose(); }
+      else if (count > 1 && (event.key === 'ArrowRight' || event.key === 'ArrowLeft')) { event.preventDefault(); event.stopPropagation(); stepRef.current(event.key === 'ArrowRight' ? 1 : -1); }
+    };
     document.addEventListener('keydown', key, true);
     return () => { document.removeEventListener('keydown', key, true); previous?.focus?.(); };
   }, []);
-  return createPortal(<div className="chat-image-lightbox" role="dialog" aria-modal="true" aria-label={name} onMouseDown={event => { if (event.target === event.currentTarget) onClose(); }}>
+  return createPortal(<div className="chat-image-lightbox" role="dialog" aria-modal="true" aria-label={current.name} onMouseDown={event => { if (event.target === event.currentTarget) onClose(); }}>
     <div className="chat-image-lightbox-card">
-      <div className="chat-image-lightbox-head"><span title={source.path}>{name}</span><button ref={close} type="button" className="icon-button" aria-label="Close image" onClick={onClose}><X size={14}/></button></div>
-      {asset ? <ImageFile asset={asset} name={name}/> : <div className="pane-error" role="status">{failed ? 'This image could not be opened.' : 'Loading image…'}</div>}
+      <div className="chat-image-lightbox-head"><span title={current.source.path}>{current.name}</span>
+        {count > 1 && <span className="chat-image-lightbox-count" aria-live="polite">{Math.min(at, count - 1) + 1} / {count}</span>}
+        <button ref={close} type="button" className="icon-button" aria-label="Close image" onClick={onClose}><X size={14}/></button></div>
+      <div className="chat-image-lightbox-stage">
+        {count > 1 && <button type="button" className="chat-image-lightbox-nav is-prev icon-button" aria-label="Previous image" onClick={() => step(-1)}><ChevronLeft size={18}/></button>}
+        {asset ? <ImageFile key={current.source.path} asset={asset} name={current.name}/> : <div className="pane-error" role="status">{failed ? 'This image could not be opened.' : 'Loading image…'}</div>}
+        {count > 1 && <button type="button" className="chat-image-lightbox-nav is-next icon-button" aria-label="Next image" onClick={() => step(1)}><ChevronRight size={18}/></button>}
+      </div>
     </div>
   </div>, document.body);
 }
