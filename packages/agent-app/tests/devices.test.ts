@@ -150,15 +150,18 @@ test('helper install: npm ci of the shipped lockfile with scripts off, atomic, s
   fs.mkdirSync(manifest);fs.writeFileSync(path.join(manifest, 'package.json'), '{}');fs.writeFileSync(path.join(manifest, 'package-lock.json'), '{}');
   const paths = helperPaths(path.join(dir, 'tools'));
   const seen: string[][] = [];
-  await assert.rejects(installHelper({paths, manifestDir: manifest, npm: {command: '/npm', args: []}, env: {}, spawn: fakeChild(1)}), /disk space/);
+  await assert.rejects(installHelper({paths, manifestDir: manifest, npm: {command: '/npm', args: []}, env: {}, spawn: fakeChild(1), fetchScrcpy: async () => Buffer.from('x')}), /disk space/);
   assert.equal(helperInstalled(paths), false);assert.ok(!fs.existsSync(paths.installDir));
   assert.deepEqual(fs.readdirSync(path.dirname(paths.installDir)).filter(n => n.startsWith('.staging')), [], 'staging removed');
-  await installHelper({paths, manifestDir: manifest, npm: {command: '/node', args: ['/npm-cli.js']}, env: {}, spawn: (command, args, options) => {
+  await installHelper({paths, manifestDir: manifest, npm: {command: '/node', args: ['/npm-cli.js']}, env: {}, fetchScrcpy: async () => Buffer.from('scrcpy'), spawn: (command, args, options) => {
     seen.push([command, ...args]);
     return fakeChild(0, cwd => { const entry = path.join(cwd, 'node_modules', 'expo-device-hub', 'dist', 'server'); fs.mkdirSync(entry, {recursive: true}); fs.writeFileSync(path.join(entry, 'cli.mjs'), ''); assert.ok(fs.existsSync(path.join(cwd, 'package-lock.json'))); })(command, args, options);
   }});
   assert.deepEqual(seen[0]!.slice(0, 3), ['/node', '/npm-cli.js', 'ci']);assert.ok(seen[0]!.includes('--ignore-scripts'));
   assert.equal(helperInstalled(paths), true);
+  assert.equal(fs.readFileSync(path.join(paths.installDir, 'node_modules', 'expo-device-hub', 'vendor', 'serve-emu', 'vendor', 'scrcpy-server-v4.0'), 'utf8'), 'scrcpy', 'the verified streamer is where serve-emu looks, so it never downloads one itself');
+  const {fetchScrcpyServer} = await import('../src/main/devices/helper.ts');
+  await assert.rejects(fetchScrcpyServer((async () => new Response('tampered')) as typeof fetch), /checksum/);
   fs.rmSync(dir, {recursive: true, force: true});
 });
 

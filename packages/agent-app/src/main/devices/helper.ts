@@ -13,6 +13,7 @@
  * state there, and stopping kills only those helpers, never a serve-sim the user runs themselves.
  */
 import {spawn, type ChildProcess} from 'node:child_process';
+import {createHash} from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -21,6 +22,12 @@ export const HELPER_VERSION = '0.15.3';
 /** Shown before install; the tarball is ~6 MB, unpacked with dependencies ~26 MB. */
 export const HELPER_DOWNLOAD_MB = 26;
 const ENTRY = ['node_modules', HELPER_PACKAGE, 'dist', 'server', 'cli.mjs'];
+/**
+ * Android video comes from scrcpy's on-device H.264 encoder (no ffmpeg needed on the computer). serve-emu would fetch
+ * scrcpy-server from GitHub unverified the first time it streams; Muster fetches the same pinned file at install and
+ * checks it against the SHA-256 the scrcpy project publishes (SHA256SUMS.txt of release v4.0). scrcpy is Apache-2.0.
+ */
+export const SCRCPY_SERVER = {version: '4.0', url: 'https://github.com/Genymobile/scrcpy/releases/download/v4.0/scrcpy-server-v4.0', sha256: '84924bd564a1eb6089c872c7521f968058977f91f5ff02514a8c74aff3210f3a', path: ['node_modules', HELPER_PACKAGE, 'vendor', 'serve-emu', 'vendor', 'scrcpy-server-v4.0']};
 const SERVE_SIM = ['node_modules', HELPER_PACKAGE, 'vendor', 'serve-sim', 'dist', 'serve-sim.js'];
 
 export interface HelperPaths {root: string; installDir: string; entry: string; serveSim: string; sentinel: string; stateDir: string}
@@ -36,7 +43,7 @@ export type Spawn = (command: string, args: string[], options: {cwd?: string; en
 const defaultSpawn: Spawn = (command, args, options) => spawn(command, args, {...options, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true});
 
 /** npm ci of the shipped lockfile into a staging folder, then an atomic rename. `onProgress` gets short status lines. */
-export async function installHelper(input: {paths: HelperPaths; manifestDir: string; npm: {command: string; args: string[]}; env: NodeJS.ProcessEnv; onProgress?: (line: string) => void; spawn?: Spawn; timeoutMs?: number}): Promise<void> {
+export async function installHelper(input: {paths: HelperPaths; manifestDir: string; npm: {command: string; args: string[]}; env: NodeJS.ProcessEnv; onProgress?: (line: string) => void; spawn?: Spawn; timeoutMs?: number; fetchScrcpy?: () => Promise<Buffer>}): Promise<void> {
   const {paths} = input;
   if (helperInstalled(paths)) return;
   const parent = path.dirname(paths.installDir);
@@ -49,10 +56,24 @@ export async function installHelper(input: {paths: HelperPaths; manifestDir: str
     // --ignore-scripts: no package code runs during install. The one optional native module (WebRTC) is not used by Muster.
     await runNpm(input.spawn ?? defaultSpawn, input.npm, [...input.npm.args, 'ci', '--ignore-scripts', '--no-audit', '--no-fund', '--omit=dev', '--loglevel=error'], staging, input.env, input.timeoutMs ?? 10 * 60_000, input.onProgress);
     if (!fs.existsSync(path.join(staging, ...ENTRY))) throw new Error('The device helper downloaded, but its entry point is missing.');
+    input.onProgress?.('Downloading the Android screen streamer…');
+    const scrcpy = await (input.fetchScrcpy ?? fetchScrcpyServer)();
+    fs.mkdirSync(path.dirname(path.join(staging, ...SCRCPY_SERVER.path)), {recursive: true});
+    fs.writeFileSync(path.join(staging, ...SCRCPY_SERVER.path), scrcpy, {mode: 0o644});
     fs.writeFileSync(path.join(staging, '.install-complete'), `${HELPER_VERSION}\n`, {mode: 0o600});
     input.onProgress?.('Finishing…');
     fs.renameSync(staging, paths.installDir);
   } finally { fs.rmSync(staging, {recursive: true, force: true}); }
+}
+/** The pinned scrcpy-server, verified; any mismatch fails the install (nothing half-trusted is left behind). */
+export async function fetchScrcpyServer(fetchFn: typeof fetch = fetch): Promise<Buffer> {
+  let response: Response;
+  try { response = await fetchFn(SCRCPY_SERVER.url, {signal: AbortSignal.timeout(120_000)}); }
+  catch { throw new Error('Could not download the Android screen streamer from GitHub. Check your connection and try again.'); }
+  if (!response.ok) throw new Error(`GitHub answered ${response.status} for the Android screen streamer.`);
+  const buffer = Buffer.from(await response.arrayBuffer());
+  if (createHash('sha256').update(buffer).digest('hex') !== SCRCPY_SERVER.sha256) throw new Error('The Android screen streamer did not match its published checksum, so nothing was installed.');
+  return buffer;
 }
 function runNpm(spawnFn: Spawn, npm: {command: string}, args: string[], cwd: string, env: NodeJS.ProcessEnv, timeoutMs: number, onProgress?: (line: string) => void): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -88,8 +109,8 @@ export function parseHubBanner(text: string): {port: number; token: string} | nu
   return match ? {port: Number(match[1]), token: match[2]!} : null;
 }
 export function hubArgs(entry: string): string[] {
-  // MJPEG for iOS (decoded with createImageBitmap); Android always sends H.264 over its socket (WebCodecs in the renderer).
-  return [entry, '--host', '127.0.0.1', '--port', '0', '--require-token', '--transport', 'mjpeg', '--max-dimension', '1280', '--mjpeg-quality', '0.72', '--video-fps', '30', '--hide-sidebar', '--hide-boot-device'];
+  // MJPEG for iOS (decoded with createImageBitmap); Android sends scrcpy's H.264 over its socket (WebCodecs in the renderer).
+  return [entry, '--host', '127.0.0.1', '--port', '0', '--require-token', '--transport', 'mjpeg', '--stream-source', 'scrcpy', '--max-dimension', '1280', '--mjpeg-quality', '0.72', '--video-fps', '30', '--hide-sidebar', '--hide-boot-device'];
 }
 /** Only what the helper needs reaches it: no API keys, tokens or Muster internals from the app's own environment. */
 const HUB_ENV_ALLOW = /^(PATH|Path|HOME|USER|LOGNAME|SHELL|LANG|LC_[A-Z]+|TZ|DEVELOPER_DIR|XDG_RUNTIME_DIR|XDG_CONFIG_HOME|ANDROID_AVD_HOME|ANDROID_EMULATOR_HOME|ANDROID_USER_HOME|JAVA_HOME|SystemRoot|SYSTEMROOT|windir|WINDIR|ComSpec|COMSPEC|PATHEXT|USERPROFILE|LOCALAPPDATA|APPDATA|ProgramData|ProgramFiles|ProgramFiles\(x86\)|SystemDrive|HOMEDRIVE|HOMEPATH|NUMBER_OF_PROCESSORS|PROCESSOR_ARCHITECTURE)$/;
