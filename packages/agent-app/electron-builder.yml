@@ -37,6 +37,7 @@ asarUnpack:
   - dist/runtime/resources/**
   - dist/main/browser-mcp.cjs
   - dist/main/*.node
+  - dist/main/device-helper/**
   - dist/renderer/THIRD-PARTY-LICENSES.txt
 # Chromium/Electron locales: the app UI is English only; Chromium strings fall back to en-US.
 electronLanguages: [en-US]

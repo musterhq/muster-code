@@ -3,6 +3,7 @@ import { DOMAIN_COMMANDS } from '../shared/domains/index.ts';
 import { PROCESS_COMMANDS } from '../shared/process-protocol.ts';
 import { BROWSER_COMMANDS } from '../shared/browser-protocol.ts';
 import { SCOPED_COMPUTER_COMMANDS } from '../shared/scoped-computer-protocol.ts';
+import { DEVICE_COMMANDS } from '../shared/device-protocol.ts';
 
 /** Runtime allowlist mirroring the keys of the parent-owned `Commands` interface.
  *  `satisfies` keeps it in lockstep: protocol drift breaks typecheck here. */
@@ -11,6 +12,7 @@ const COMMANDS = {
   ...PROCESS_COMMANDS,
   ...BROWSER_COMMANDS,
   ...SCOPED_COMPUTER_COMMANDS,
+  ...DEVICE_COMMANDS,
   'app.snapshot': true,
   'updates.status': true,
   'updates.check': true,
