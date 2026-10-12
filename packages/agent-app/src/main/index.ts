@@ -184,7 +184,7 @@ async function main(): Promise<void> {
     toast.show();
   };
   // R3: event delivery runs inside runtime domain code (emit); a delivery fault is logged, never thrown back into it.
-  const onEvent = (event: AgentEvent): void => { try { deliverEvent(event); } catch (error) { console.error(`[muster] event delivery failed (${event.type}):`, error instanceof Error ? error.message : String(error)); } };
+  const onEvent = (event: AgentEvent): void => { if (event.type === 'browserState' && event.state.favicon) favicons.seed(event.state.url, event.state.favicon); try { deliverEvent(event); } catch (error) { console.error(`[muster] event delivery failed (${event.type}):`, error instanceof Error ? error.message : String(error)); } };
   const deliverEvent = (event: AgentEvent): void => {
     if (event.type === 'settingsChanged') { notifyPrefs = notificationPrefs(event.values); applyBadge(pendingAttention); }
     if (event.type === 'chatWoke') notifyWoke(event);

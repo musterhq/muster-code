@@ -1,6 +1,13 @@
 import React, {useEffect, useRef, useState} from 'react';
 import {formatDuration} from '../turnStatusModel';
 
+/** One IntersectionObserver for every live element in the window, instead of one per row. */
+const watchers = new Map<Element, (visible: boolean) => void>();
+let shared: IntersectionObserver | null | undefined;
+function observer(): IntersectionObserver | null {
+  if (shared === undefined) shared = typeof IntersectionObserver === 'function' ? new IntersectionObserver(entries => { for (const entry of entries) watchers.get(entry.target)?.(entry.isIntersecting); }) : null;
+  return shared;
+}
 /**
  * Whether `ref` is on screen and the window is visible. Animations and clocks run only while this is true,
  * so an off-screen or hidden transcript costs nothing.
@@ -8,12 +15,13 @@ import {formatDuration} from '../turnStatusModel';
 export function useOnScreen(ref: React.RefObject<HTMLElement | null>): boolean {
   const [visible, setVisible] = useState(true);
   useEffect(() => {
+    const node = ref.current;
     let onScreen = true;
     const sync = () => setVisible(onScreen && document.visibilityState !== 'hidden');
-    const observer = typeof IntersectionObserver === 'function' && ref.current ? new IntersectionObserver(entries => { onScreen = entries.at(-1)?.isIntersecting ?? true; sync(); }) : null;
-    if (observer && ref.current) observer.observe(ref.current);
+    const io = node ? observer() : null;
+    if (node && io) { watchers.set(node, value => { onScreen = value; sync(); }); io.observe(node); }
     document.addEventListener('visibilitychange', sync);
-    return () => { observer?.disconnect(); document.removeEventListener('visibilitychange', sync); };
+    return () => { if (node && io) { io.unobserve(node); watchers.delete(node); } document.removeEventListener('visibilitychange', sync); };
   }, [ref]);
   return visible;
 }

@@ -2,10 +2,17 @@ import {computerAction,type ComputerAction} from '../../shared/computer-use.ts';
 import {countPatch,itemPatches} from '../patchModel.ts';
 export type ToolKind = 'read' | 'edit' | 'search' | 'web' | 'list' | 'command' | 'subagent' | 'mcp' | 'computer' | 'generic';
 export interface FileStat {path:string;adds:number;dels:number}
-export interface ToolPresentation {kind:ToolKind;verb:string;runningVerb:string;subject:string;paths?:string[];/** Reads that only looked at images (Codex "Viewed 4 images"). */images?:string[];files?:FileStat[];adds?:number;dels?:number;plan?:boolean;/** The plan's own markdown text (ExitPlanMode, or a native plan item) when it wasn't submitted as a steps array. */planText?:string;computer?:ComputerAction}
+export interface ToolPresentation {/** Edits only: what the edit did to its files, for the row's icon. */editKind?:'edit'|'create'|'delete'|'rename';kind:ToolKind;verb:string;runningVerb:string;subject:string;paths?:string[];/** Reads that only looked at images (Codex "Viewed 4 images"). */images?:string[];files?:FileStat[];adds?:number;dels?:number;plan?:boolean;/** The plan's own markdown text (ExitPlanMode, or a native plan item) when it wasn't submitted as a steps array. */planText?:string;computer?:ComputerAction}
 const string=(value:unknown):string=>typeof value==='string'?value:'';
 const objects=(value:unknown):Record<string,unknown>[]=>Array.isArray(value)?value.filter(v=>v&&typeof v==='object'):[];
+const classified=new WeakMap<object,ToolPresentation>();
+/** Memoised per data object: rows re-render often and timeline items are immutable, so each row is classified once. */
 export function classifyTool(data:Record<string,unknown>|undefined):ToolPresentation {
+ if(!data)return classifyToolData(data);
+ let hit=classified.get(data);if(!hit){hit=classifyToolData(data);classified.set(data,hit);}
+ return hit;
+}
+function classifyToolData(data:Record<string,unknown>|undefined):ToolPresentation {
  const type=string(data?.type),subject=string(data?.name);
  if(type==='commandExecution'){
   const actions=objects(data?.commandActions);
@@ -16,7 +23,7 @@ export function classifyTool(data:Record<string,unknown>|undefined):ToolPresenta
   if(actions.length && actions.every(action=>action.type==='listFiles'))return {kind:'list',verb:'Listed files',runningVerb:'Listing files',subject:actions.map(action=>string(action.path)).filter(Boolean).join(', ')};
   return {kind:'command',verb:'Ran',runningVerb:'Running',subject:string(data?.command)||subject};
  }
- if(type==='fileChange'){const files=fileStats(data),paths=files.map(file=>file.path);return {kind:'edit',verb:'Edited',runningVerb:'Editing',subject:paths.join(', ')||subject,paths,files,adds:files.reduce((n,file)=>n+file.adds,0),dels:files.reduce((n,file)=>n+file.dels,0)};}
+ if(type==='fileChange'){const files=fileStats(data),paths=files.map(file=>file.path),patches=itemPatches(data);const editKind=patches.length&&patches.every(patch=>patch.movePath)?'rename':patches.length&&patches.every(patch=>patch.kind==='add')?'create':patches.length&&patches.every(patch=>patch.kind==='delete')?'delete':'edit';return {kind:'edit',verb:'Edited',runningVerb:'Editing',subject:paths.join(', ')||subject,paths,files,editKind,adds:files.reduce((n,file)=>n+file.adds,0),dels:files.reduce((n,file)=>n+file.dels,0)};}
  if(type==='fileRead'){const path=string(data?.path)||subject;return path?readOf([path]):{kind:'read',verb:'Read',runningVerb:'Reading',subject};}
  if(type==='imageView'){const path=string(data?.path)||subject;return {kind:'read',verb:'Viewed image',runningVerb:'Viewing image',subject:path,paths:path?[path]:[],images:path?[path]:[]};}
  if(type==='webSearch')return {kind:'web',verb:'Searched the web for',runningVerb:'Searching the web for',subject:string(data?.query)||subject};

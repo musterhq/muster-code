@@ -5,6 +5,7 @@ import {useFavicon} from '../../favicons';
 import {FileTypeIcon} from '../FileTypeIcon';
 import {basename} from '../toolPresentation';
 import type {Severity, SourceIcon} from '../../transcriptRows';
+import {Tip} from '../Tooltip';
 import './transcript.css';
 
 /** The transcript's row primitives: one fixed-height muted row, one overlapping icon stack, one disclosure chevron. */
@@ -37,10 +38,12 @@ export function IconStack({icons, max = ICON_STACK_MAX, label}: {icons: readonly
   if (!icons.length) return null;
   const shown = icons.slice(0, max), extra = icons.length - shown.length;
   const names = icons.map(icon => icon.kind === 'file' ? basename(icon.path) : sourceLabel(icon));
-  return <span className="tx-stack" title={names.join('\n')} aria-label={label ?? names.join(', ')} role="img">
-    {shown.map(icon => <span key={icon.key} className="tx-stack-item" data-kind={icon.kind}><SourceGlyph icon={icon}/></span>)}
-    {extra > 0 && <span className="tx-stack-more">+{extra}</span>}
-  </span>;
+  return <Tip label={<span className="tx-stack-tip">{names.map(name => <span key={name}>{name}</span>)}</span>}>
+    <span className="tx-stack" aria-label={label ?? names.join(', ')} role="img">
+      {shown.map(icon => <span key={icon.key} className="tx-stack-item" data-kind={icon.kind}><SourceGlyph icon={icon}/></span>)}
+      {extra > 0 && <span className="tx-stack-more">+{extra}</span>}
+    </span>
+  </Tip>;
 }
 
 export interface RowProps {
@@ -63,7 +66,8 @@ export function Row({icon, children, trailing, severity = 'none', open, onToggle
     {onToggle && <ChevronRight className="tx-chevron" size={12} aria-hidden="true"/>}
   </>;
   const classes = `tx-row is-${severity}${className ? ` ${className}` : ''}`;
-  return onToggle
-    ? <button type="button" className={classes} aria-expanded={open} title={title} onClick={onToggle}>{body}</button>
-    : <div className={classes} title={title}>{body}</div>;
+  const row = onToggle
+    ? <button type="button" className={classes} aria-expanded={open} onClick={onToggle}>{body}</button>
+    : <div className={classes}>{body}</div>;
+  return title ? <Tip label={title} side="top">{row}</Tip> : row;
 }

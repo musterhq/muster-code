@@ -65,6 +65,15 @@ export class FaviconCache {
     return task;
   }
 
+  /** An icon the in-app browser already has for a page (its own favicon capture): stored without a fetch. */
+  seed(pageUrl: string, dataUrl: string): void {
+    const host = faviconHost(pageUrl);
+    if (!host || !/^data:image\/[\w.+-]+;base64,/.test(dataUrl) || dataUrl.length > this.maxBytes * 1.4) return;
+    if (this.memory.get(host) === dataUrl) return;
+    this.misses.delete(host); this.remember(host, dataUrl);
+    void fs.mkdir(this.options.dir, {recursive: true, mode: 0o700}).then(() => fs.writeFile(this.file(host), dataUrl, {mode: 0o600})).then(() => this.prune()).catch(() => {});
+  }
+
   private remember(host: string, value: string | null) {
     this.memory.delete(host); this.memory.set(host, value);
     while (this.memory.size > this.memoryEntries) this.memory.delete(this.memory.keys().next().value!);

@@ -1,26 +1,15 @@
 import React, {useRef} from 'react';
-import {BookOpen, Bot, Globe, ListChecks, Pencil, Plug, Search, SquareTerminal, Wrench} from 'lucide-react';
 import type {TimelineItem} from '../../../shared/protocol';
 import {foldLabel, subagentCounts, type SourceIcon, type TranscriptRow} from '../../transcriptRows';
 import {selectSubagent} from '../../subagentActivity';
 import {getState, openSubagentsTab} from '../../store';
 import {useDisclosure} from '../useDisclosure';
-import {ToolCard, ImageThumbs} from '../ToolCard';
+import {ToolCard, ToolGlyph, ImageThumbs} from '../ToolCard';
 import {activityKind, viewedImages} from '../activityGrouping';
-import type {ToolKind} from '../toolPresentation';
 import {ElapsedText, LiveText} from './LiveParts';
 import {IconStack, Row} from './Primitives';
 
 type RowOf<K extends TranscriptRow['kind']> = Extract<TranscriptRow, {kind: K}>;
-
-/** One glyph per kind of work: read = open book, edit = pencil, command = terminal, search = magnifier, web = globe. */
-const KIND_ICONS: Record<ToolKind, React.ComponentType<{size?: number; strokeWidth?: number}>> = {
-  read: BookOpen, edit: Pencil, command: SquareTerminal, search: Search, web: Globe, list: ListChecks, subagent: Bot, mcp: Plug, computer: Globe, generic: Wrench,
-};
-export function KindIcon({kind}: {kind: ToolKind}) {
-  const Icon = KIND_ICONS[kind];
-  return <Icon size={14} strokeWidth={1.7}/>;
-}
 
 /** "Worked for 1m 38s ›" with the turn's digest; opening it shows the work it hides. */
 export function FoldRow({row, onToggle}: {row: RowOf<'fold'>; onToggle: () => void}) {
@@ -39,7 +28,7 @@ export function WorkRow({row, chatId, reveal}: {row: RowOf<'work'>; chatId: stri
   const expanded = open || revealed;
   const images = viewedImages(row.items);
   return <div className="tx-work" data-open={expanded || undefined}>
-    <Row icon={<KindIcon kind={activityKind(row.items).kind}/>} severity={row.severity} open={expanded} onToggle={() => setOpen(!expanded)}
+    <Row icon={<ToolGlyph kind={activityKind(row.items).kind}/>} severity={row.severity} open={expanded} onToggle={() => setOpen(!expanded)}
       trailing={<IconStack icons={row.sources}/>} title={row.sentence}>
       {row.running ? <LiveText>{row.sentence}</LiveText> : row.sentence}
     </Row>

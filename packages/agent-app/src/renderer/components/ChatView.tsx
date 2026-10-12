@@ -1,4 +1,4 @@
-import { ArrowUp, Check, FileText, Folder, X } from 'lucide-react';
+import { ArrowDown, Check, FileText, Folder, X } from 'lucide-react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import React, {
   useCallback,
@@ -38,7 +38,7 @@ import { GalleryCoverage } from './ImageGallery';
 import { ActivityGroup } from './ActivityGroup';
 import { viewedImages, type TranscriptEntry } from './activityGrouping';
 import { MessageBody, localImagePath } from './MessageBody';
-import {LiveAnnouncer,LiveTurnHeader,TurnHeader} from './TurnStatus';
+import {LiveAnnouncer} from './TurnStatus';
 import {ReasoningRow} from './ReasoningRow';
 import {deriveRows,shareRows,type TranscriptRow} from '../transcriptRows';
 import {FoldRow,LiveRow,SubagentCardRow,WorkRow,itemsOfRow} from './transcript/TranscriptRows';
@@ -113,11 +113,8 @@ function UserMessage({item,reveal}:{item:TimelineItem;reveal:boolean}) {
   </>;
 }
 
-interface TurnHeaderProps {durationMs:number|null;open:boolean;onToggle:()=>void;summary?:string}
-/** A live turn's header: "Working for …" since its user message. */
-interface LiveTurnProps {live:string}
 interface EditingProps {onSubmit:(text:string,mode:EditResendMode,restoreFiles?:Array<{path:string;afterHash:string}>)=>Promise<boolean>;onCancel:()=>void}
-function TimelineCardImpl({ item, nextAt, reveal, turn, tail=false, actions, editing, plan=false, meta=true, gallery }: { gallery?:readonly string[]; item: TranscriptEntry; nextAt?:string; reveal?:string; turn?:TurnHeaderProps|LiveTurnProps; tail?:boolean; actions?:MessageActions; editing?:EditingProps; plan?:boolean; meta?:boolean }): React.ReactElement {
+function TimelineCardImpl({ item, nextAt, reveal, tail=false, actions, editing, plan=false, meta=true, gallery }: { gallery?:readonly string[]; item: TranscriptEntry; nextAt?:string; reveal?:string; tail?:boolean; actions?:MessageActions; editing?:EditingProps; plan?:boolean; meta?:boolean }): React.ReactElement {
   switch (item.kind) {
     case 'activity': return <ActivityGroup items={item.items} reveal={reveal} live={tail}/>;
     case 'user':
@@ -125,7 +122,7 @@ function TimelineCardImpl({ item, nextAt, reveal, turn, tail=false, actions, edi
         <div className="user-message-row">
         {editing?<MessageEditor text={item.text} loadOptions={()=>invoke('chat.editOptions',{id:item.chatId,itemId:item.id})} loadRestore={()=>invoke('chat.editRestorePreview',{id:item.chatId,itemId:item.id})} onSubmit={editing.onSubmit} onCancel={editing.onCancel}/>
           :<><UserMessage item={item} reveal={reveal===item.id}/><MessageMeta text={item.text} createdAt={item.createdAt} label="Copy message" actions={actions}/></>}
-        {turn&&('live' in turn?<LiveTurnHeader since={turn.live}/>:<TurnHeader {...turn}/>)}</div>
+        </div>
       );
     case 'assistant':
       if (plan) return <PlanCard item={item}/>;
@@ -148,10 +145,11 @@ function TimelineCardImpl({ item, nextAt, reveal, turn, tail=false, actions, edi
 
 /** Row callbacks are rebuilt every render but only close over ids that are part of the row; compare what they expose. */
 const sameKeys=(a?:object,b?:object)=>a===b||(!!a&&!!b&&Object.keys(a).join()===Object.keys(b).join());
-const sameTurn=(a?:TurnHeaderProps|LiveTurnProps,b?:TurnHeaderProps|LiveTurnProps)=>a===b||(!!a&&!!b&&('live' in a?'live' in b&&a.live===b.live:!('live' in b)&&a.durationMs===b.durationMs&&a.open===b.open&&a.summary===b.summary));
 /** Finished rows skip re-rendering while the tail streams. */
-const TimelineCard=React.memo(TimelineCardImpl,(a,b)=>a.item===b.item&&a.nextAt===b.nextAt&&a.reveal===b.reveal&&a.tail===b.tail&&a.plan===b.plan&&a.meta===b.meta&&a.gallery===b.gallery&&sameKeys(a.actions,b.actions)&&!a.editing===!b.editing&&sameTurn(a.turn,b.turn));
+const TimelineCard=React.memo(TimelineCardImpl,(a,b)=>a.item===b.item&&a.nextAt===b.nextAt&&a.reveal===b.reveal&&a.tail===b.tail&&a.plan===b.plan&&a.meta===b.meta&&a.gallery===b.gallery&&sameKeys(a.actions,b.actions)&&!a.editing===!b.editing);
 
+/** A prompt just sent sits this far below the top of the transcript while its reply arrives. */
+const PROMPT_PIN_OFFSET=24;
 /** Per-thread memory of opened and closed turns (bounded). */
 const turnMemory=new Map<string,Map<string,boolean>>();
 function turnsOf(chatId:string){let map=turnMemory.get(chatId);if(!map){map=new Map();turnMemory.set(chatId,map);if(turnMemory.size>100)turnMemory.delete(turnMemory.keys().next().value!);}return map;}
@@ -398,15 +396,27 @@ export function Timeline({ items, chatId, onScrolled, running, planMode=false }:
     rememberPosition(chatId,atBottom.current?null:anchorNow());
   }, [chatId,anchorNow,updateCurrentTurn,onScrolled]);
 
-  // Follow the tail only while the reader is at the bottom. Opening or closing a fold holds the reading position.
+  // Follow the tail only while the reader is at the bottom: smoothly while a reply streams, at most once a frame.
+  // Opening or closing a fold holds the reading position. A prompt just sent is pinned near the top instead.
+  const followFrame=useRef<number|undefined>(undefined);
+  const lastPrompt=useRef(turns.at(-1)?.id);
+  useEffect(()=>()=>{if(followFrame.current!==undefined)cancelAnimationFrame(followFrame.current);},[]);
   useLayoutEffect(() => {
     const held=hold.current;
     if(held){hold.current=null;const index=rowIndexesRef.current.get(held.itemId);const offset=index===undefined?undefined:virtualizer.getOffsetForIndex(index,'start')?.[0];if(offset!=null)virtualizer.scrollToOffset(Math.max(0,offset+held.offset));return;}
-    if (atBottom.current && rows.length > 0) {
-      virtualizer.scrollToIndex(rows.length - 1, { align: 'end' });
-      setCurrentTurn(turnsRef.current.at(-1)?.id);
+    const prompt=turnsRef.current.at(-1)?.id;
+    if(prompt&&prompt!==lastPrompt.current&&lastPrompt.current!==undefined&&atBottom.current){
+      lastPrompt.current=prompt;
+      const index=rowIndexesRef.current.get(prompt),offset=index===undefined?undefined:virtualizer.getOffsetForIndex(index,'start')?.[0];
+      if(offset!=null){virtualizer.scrollToOffset(Math.max(0,offset-PROMPT_PIN_OFFSET));setCurrentTurn(prompt);return;}
     }
-  }, [rows.length, totalSize, virtualizer]);
+    lastPrompt.current=prompt;
+    if (!atBottom.current || rows.length === 0) return;
+    setCurrentTurn(turnsRef.current.at(-1)?.id);
+    if(!live){virtualizer.scrollToIndex(rows.length - 1, { align: 'end' });return;}
+    if(followFrame.current!==undefined)return;
+    followFrame.current=requestAnimationFrame(()=>{followFrame.current=undefined;const el=scrollRef.current;if(el&&atBottom.current)el.scrollTo({top:el.scrollHeight,behavior:'smooth'});});
+  }, [rows.length, totalSize, virtualizer, live]);
 
   return (
     <div className={`timeline-shell${turns.length?' timeline-with-navigation':''}`}>
@@ -425,7 +435,7 @@ export function Timeline({ items, chatId, onScrolled, running, planMode=false }:
         })}
       </div>
     </div>
-    {away&&<button className="jump-latest" onClick={jumpToLatest} aria-label={unread?'New activity — jump to latest':'Jump to latest'}><ArrowUp size={14} style={{transform:'rotate(180deg)'}}/>{unread&&<span>New activity</span>}</button>}
+    {away&&<button className="jump-latest" tabIndex={-1} onMouseDown={event=>event.preventDefault()} onClick={jumpToLatest} aria-label={unread?'New activity — jump to latest':'Jump to latest'}><ArrowDown size={14}/>{unread&&<span>New activity</span>}</button>}
     {navigationNotice&&<div className="turn-navigation-status" role="status">{navigationNotice}</div>}
     </div>
   );

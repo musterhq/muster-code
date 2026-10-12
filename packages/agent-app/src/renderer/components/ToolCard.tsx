@@ -1,10 +1,10 @@
 import {ToolOutput,ToolDetail} from './ToolOutput';
 import {useDisclosure} from './useDisclosure';
 import {copyText} from '../clipboard';
-import { Blocks, BookOpen, Bot, Check, ChevronRight, Circle, CircleCheck, CircleDot, Copy, Globe, Image as ImageIcon, ListChecks, MousePointerClick, PencilLine, Search, SquareTerminal, Wrench } from 'lucide-react';
+import { ArrowDownUp, ArrowLeft, ArrowLeftRight, Bot, Braces, Camera, Check, ChevronRight, Circle, CircleCheck, CircleDot, Command, Copy, Crosshair, FileMinus2, FilePlus2, FileText, Files, Globe, Hand, Hourglass, Image as ImageIcon, Keyboard, ListTodo, MousePointerClick, NotebookText, Plug, RotateCw, ScanSearch, ScanText, SquarePen, SquareTerminal, Wrench, X } from 'lucide-react';
 import React, { useEffect, useRef, useState } from 'react';
 import type { TimelineItem } from '../../shared/protocol';
-import { APPROVAL_WAIT_LABEL, awaitingApproval, basename, classifyTool, commandLabel, commandOutcome, planPreview, planSteps, resolveToolPath, uniqueFileLabels, type PlanStep, type ToolKind } from './toolPresentation';
+import { APPROVAL_WAIT_LABEL, awaitingApproval, basename, classifyTool, commandLabel, commandOutcome, planPreview, planSteps, resolveToolPath, uniqueFileLabels, type PlanStep, type ToolKind, type ToolPresentation } from './toolPresentation';
 import {getState,openFile} from '../store';
 import {useStoreSelector} from '../useStore';
 import {PluginIcon} from './PluginIcon';
@@ -27,11 +27,28 @@ import {ChatImage} from './ChatImage';
 import {GalleryCoverage,ImageGallery,type GalleryTarget} from './ImageGallery';
 
 type Glyph = React.ComponentType<{size?: number; strokeWidth?: number; 'aria-hidden'?: boolean | 'true'}>;
-/** Codex transcript glyphs: thin, monochrome, one per verb. */
-const ICONS: Record<ToolKind, Glyph> = {
-  read: BookOpen, edit: PencilLine, search: Search, web: Globe, list: ListChecks, command: SquareTerminal, subagent: Bot, mcp: Blocks, computer: MousePointerClick, generic: Wrench,
+const KIND_GLYPHS: Record<ToolKind, Glyph> = {
+  read: FileText, edit: SquarePen, search: ScanSearch, web: Globe, list: Files, command: SquareTerminal, subagent: Bot, mcp: Plug, computer: MousePointerClick, generic: Wrench,
 };
-export function ToolGlyph({kind,running=false,image=false}:{kind:ToolKind;running?:boolean;image?:boolean}) { const Icon=image?ImageIcon:ICONS[kind];return <span className={running?'tool-glyph is-active':'tool-glyph'} aria-hidden="true"><Icon size={15} strokeWidth={1.6}/></span>; }
+const EDIT_GLYPHS: Record<NonNullable<ToolPresentation['editKind']>, Glyph> = {edit: SquarePen, create: FilePlus2, delete: FileMinus2, rename: ArrowLeftRight};
+/** The one icon per kind of step, used by every transcript row. */
+export function glyphFor(p: Pick<ToolPresentation, 'kind' | 'editKind' | 'plan' | 'planText' | 'images'>): Glyph {
+  if (p.images?.length) return ImageIcon;
+  if (p.kind === 'edit' && p.editKind) return EDIT_GLYPHS[p.editKind];
+  if (p.plan) return p.planText ? NotebookText : ListTodo;
+  return KIND_GLYPHS[p.kind];
+}
+export function ToolGlyph({kind,running=false,image=false,presentation}:{kind:ToolKind;running?:boolean;image?:boolean;presentation?:ToolPresentation}) {
+  const Icon=presentation?glyphFor(presentation):image?ImageIcon:KIND_GLYPHS[kind];
+  return <span className={running?'tool-glyph is-active':'tool-glyph'} aria-hidden="true"><Icon size={16} strokeWidth={2}/></span>;
+}
+/** A trailing glyph naming what a browser or app step did (click, type, scroll…), beside the site or app icon. */
+const ACTION_GLYPHS: Array<[RegExp, Glyph]> = [[/^Click|^Double|^Right/, MousePointerClick], [/^Typ|^Fill/, Keyboard], [/^Press/, Command], [/^Scroll/, ArrowDownUp], [/^Hover/, Crosshair], [/^Drag/, Hand],
+  [/^Looked|^Took|^Captur|screenshot/i, Camera], [/^Read/, ScanText], [/^Went back|^Back/, ArrowLeft], [/^Reload/, RotateCw], [/^Wait/, Hourglass], [/console/i, Braces]];
+export function ActionGlyph({verb}:{verb:string}) {
+  const Icon=ACTION_GLYPHS.find(([test])=>test.test(verb))?.[1];
+  return Icon?<span className="tool-action-glyph" aria-hidden="true"><Icon size={12} strokeWidth={2}/></span>:null;
+}
 
 /** CUA-06: screenshots in a tool result are pictures, never base64 text; click opens the full-resolution viewer. */
 function Shot({shot,source,index}:{shot:ToolShot;source:PipSource;index:number}) {
@@ -162,9 +179,9 @@ function StepIcon({item,presentation:p,running,image}:{item:TimelineItem;present
   if(p.computer)return <AppGlyph app={p.computer.app} target={p.computer.target} running={running}/>;
   const server=typeof item.data?.server==='string'?item.data.server:'';
   if(p.kind==='mcp'&&server)return <PluginToolIcon server={server}/>;
-  return <ToolGlyph kind={p.kind} running={running} image={image}/>;
+  return <ToolGlyph kind={p.kind} running={running} image={image} presentation={p}/>;
 }
-export function ToolCard({item,reveal=false}: {item: TimelineItem;reveal?:boolean}) {
+function ToolCardImpl({item,reveal=false}: {item: TimelineItem;reveal?:boolean}) {
   const [open, setOpen] = useDisclosure('tool:'+item.id);
   useEffect(()=>{if(reveal&&!open)setOpen(true);},[reveal]);
   const [copied, copy] = useCopy();
@@ -200,6 +217,8 @@ export function ToolCard({item,reveal=false}: {item: TimelineItem;reveal?:boolea
         <span className="tool-row-state">{state}</span>
         {files.length?<> <span className="tool-row-files"><FileLinks item={item} files={files}/></span></>:subject?<> <span className="tool-row-subject">{subject}</span></>:null}
       </span>
+      {p.computer&&<ActionGlyph verb={p.computer.verb}/>}
+      {failed&&(p.computer||p.kind==='mcp')&&<X className="tool-fail-mark" size={12} strokeWidth={2.4} aria-label="Failed"/>}
       {outcome.suffix&&<span className={`tool-row-outcome${failed?' is-error':''}`}>{outcome.suffix}</span>}
       {duration&&<span className="tool-row-duration">{duration}</span>}
       <ChevronRight className="tool-chevron" size={13} aria-hidden="true"/>
@@ -222,6 +241,9 @@ export function ToolCard({item,reveal=false}: {item: TimelineItem;reveal?:boolea
     </div></Collapsible.Panel>
   </Collapsible.Root>;
 }
+
+/** Memoised on the item: timeline items are immutable, so an unchanged row never re-renders. */
+export const ToolCard=React.memo(ToolCardImpl,(a,b)=>a.item===b.item&&a.reveal===b.reveal);
 
 /** A turn's image gallery: paths resolve against the chat's folders; folder images open in the side pane. */
 export function TurnGallery({chatId,paths}:{chatId:string;paths:readonly string[]}) {

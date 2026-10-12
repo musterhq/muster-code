@@ -12,7 +12,7 @@ function fake(body:(url:string)=>{status?:number;type?:string;bytes?:Uint8Array;
   const calls:string[]=[];
   const fetch=(async(input:string|URL)=>{
     const url=String(input);calls.push(url);const reply=body(url);
-    const response=new Response(reply.bytes??PNG,{status:reply.status??200,headers:{'content-type':reply.type??'image/png',...(reply.length!==undefined?{'content-length':String(reply.length)}:{})}});
+    const response=new Response((reply.bytes??PNG) as unknown as BodyInit,{status:reply.status??200,headers:{'content-type':reply.type??'image/png',...(reply.length!==undefined?{'content-length':String(reply.length)}:{})}});
     Object.defineProperty(response,'url',{value:reply.finalUrl??url});
     return response;
   }) as typeof globalThis.fetch;
@@ -57,4 +57,15 @@ test('the disk cache is a bounded LRU',async t=>{
   const cache=new FaviconCache({dir,fetch,diskEntries:3,memoryEntries:2});
   for(const host of ['a.example','b.example','c.example','d.example','e.example'])await cache.get(host);
   assert.equal((await readdir(dir)).filter(name=>name.endsWith('.icon')).length,3);
+});
+
+test('icons the in-app browser already captured are seeded without a fetch',async t=>{
+  const {fetch,calls}=fake(()=>({}));
+  const cache=new FaviconCache({dir:await directory(t),fetch});
+  cache.seed('https://docs.example.org/page','data:image/png;base64,AAAA');
+  cache.seed('http://plain.example.org/','data:image/png;base64,AAAA');
+  cache.seed('https://bad.example.org/','javascript:alert(1)');
+  assert.equal(await cache.get('docs.example.org'),'data:image/png;base64,AAAA');
+  assert.equal(calls.length,0);
+  await cache.get('bad.example.org');assert.equal(calls.length,1,'an invalid seed is ignored');
 });

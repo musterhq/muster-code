@@ -6,7 +6,7 @@ test('classifies explicit provider item types', () => {
   assert.deepEqual(classifyTool({type: 'fileRead', name: 'src/runtime/service.ts'}),
     {kind: 'read', verb: 'Read', runningVerb: 'Reading', subject: 'src/runtime/service.ts', paths: ['src/runtime/service.ts']});
   assert.deepEqual(classifyTool({type: 'webSearch', name: 'electron csp'}),
-    {kind: 'search', verb: 'Searched', runningVerb: 'Searching', subject: 'electron csp'});
+    {kind: 'web', verb: 'Searched the web for', runningVerb: 'Searching the web for', subject: 'electron csp'}, 'web search is its own kind (globe icon), apart from code search');
   assert.equal(classifyTool({type: 'todoList'}).kind, 'list');
   assert.equal(classifyTool({type: 'collabAgentToolCall', name: 'reviewer'}).kind, 'subagent');
   assert.equal(classifyTool({type: 'mcpToolCall', name: 'browser.navigate'}).kind, 'mcp');
@@ -121,4 +121,18 @@ test('a plan submitted as markdown (not a steps array) is kept and classified as
   const empty = classifyTool({type: 'dynamicToolCall', name: 'ExitPlanMode', arguments: '{}'});
   assert.equal(empty.planText, undefined);
   assert.equal(empty.subject, '');
+});
+
+test('browser command-line tools read as browser steps with the site, never a raw shell line', async () => {
+  const {classifyTool, browserCommand} = await import('../src/renderer/components/toolPresentation.ts');
+  const step = classifyTool({type: 'commandExecution', command: '/Users/me/.local/bin/chrome-devtools-axi open https://pytest.org/en/latest/how-to/fixtures.html'});
+  assert.equal(step.kind, 'computer');assert.equal(step.verb, 'Opened');assert.equal(step.subject, 'pytest.org');
+  assert.equal(step.computer?.target, 'browser');assert.equal(step.computer?.url, 'https://pytest.org/en/latest/how-to/fixtures.html');
+  assert.equal(browserCommand('npx playwright open https://example.com')?.subject, 'example.com');
+  assert.equal(browserCommand('curl https://example.com'), undefined, 'a fetch with curl stays a command');
+  assert.equal(browserCommand('chrome-devtools-axi snapshot'), undefined, 'no URL, no browser step');
+  const edit = (kind: string, extra: Record<string, unknown> = {}) => classifyTool({type: 'fileChange', changes: [{path: 'a.ts', kind, diff: 'x\n', ...extra}]}).editKind;
+  assert.equal(edit('add'), 'create');assert.equal(edit('delete'), 'delete');assert.equal(edit('update', {movePath: 'b.ts'}), 'rename');
+  const data = {type: 'commandExecution', command: 'ls'};
+  assert.equal(classifyTool(data), classifyTool(data), 'classification is memoised per row');
 });

@@ -30,13 +30,17 @@ const icons=['a.example','b.example','c.example','d.example','e.example'].map(ho
 root.render(<IconStack icons={icons}/>);await delay(20);
 assert.equal(document.querySelectorAll('.tx-stack-item').length,3,'three icons at most');
 assert.equal(document.querySelector('.tx-stack-more')?.textContent,'+2','then +N');
-assert.equal(document.querySelector('.tx-stack')?.getAttribute('title'),icons.map(icon=>icon.host).join('\n'),'hover lists them all');
+assert.equal(document.querySelector('.tx-stack')?.getAttribute('aria-label'),icons.map(icon=>icon.host).join(', '),'every source is named (a styled tip lists them on hover)');
+assert.equal(document.querySelector('.tx-stack')?.getAttribute('title'),null,'no native title');
 assert.equal(document.querySelectorAll('.tx-letter').length,3,'a letter tile stands in until an icon arrives');
 root.render(<IconStack icons={icons.slice(0,2)}/>);await delay(10);
 assert.equal(document.querySelector('.tx-stack-more'),null,'no +N when everything fits');
 const css=readFileSync(join(process.cwd(),'src/renderer/components/transcript/transcript.css'),'utf8');
-assert.match(css,/\.tx-stack-item \+ \.tx-stack-item \{ margin-left: -6px; \}/,'each icon overlaps the previous by about 40% of 16px');
-assert.match(css,/box-shadow: 0 0 0 1\.5px var\(--bg\)/,'with a 1.5px ring in the row background');
+const tokens=readFileSync(join(process.cwd(),'src/renderer/styles.css'),'utf8');
+assert.match(css,/\.tx-stack-item \+ \.tx-stack-item \{ margin-left: var\(--icon-stack-overlap\); \}/);
+assert.match(tokens,/--icon-stack: 16px;/);assert.match(tokens,/--icon-stack-overlap: -6px;/,'each icon overlaps the previous by about 40% of 16px');
+assert.match(tokens,/--icon-stack-overlap-agent: -4px;/,'agent avatars overlap by 4px');
+assert.match(css,/box-shadow: 0 0 0 var\(--icon-ring\) var\(--bg\)/);assert.match(tokens,/--icon-ring: 1\.5px;/,'with a 1.5px ring in the row background');
 
 // 2. Render-count gate: while a reply streams, settled rows render zero times.
 const settled=[item('user','First'),item('reasoning','Plan'),item('tool','',{data:{type:'commandExecution',command:'ls',exitCode:0}}),item('assistant','Answer one.'),
