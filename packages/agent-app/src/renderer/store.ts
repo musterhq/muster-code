@@ -39,15 +39,20 @@ export interface Loadable<T> {
   error?: string;
 }
 
+import type {RichKind} from '../shared/rich-fence';
+
 export interface WorkspaceTab {
   id: string;
   /** 'git' is the one Git surface per folder (Changes · History · Pull request). The older 'changes', 'history' and
    *  'pullRequest' kinds are only read from saved workspaces and are mapped onto 'git' on restore. */
-  kind: 'files' | 'git' | 'changes' | 'file' | 'diff' | 'subagents' | 'browser' | 'computer' | 'processes' | 'attachment' | 'pullRequest' | 'history' | 'conflict' | 'canvas' | 'sideChat' | 'pluginUi' | 'inbox' | 'liveView';
+  kind: 'files' | 'git' | 'changes' | 'file' | 'diff' | 'subagents' | 'browser' | 'computer' | 'processes' | 'attachment' | 'pullRequest' | 'history' | 'conflict' | 'canvas' | 'sideChat' | 'pluginUi' | 'inbox' | 'liveView' | 'rich';
   /** kind: 'git' only — which segment is showing. */
   gitView?: GitView;
   /** kind: 'canvas' only (WRK-12). */
   canvasId?: string;
+  /** kind: 'rich' only (visuals): what the block shows and its source (Mermaid text, chart JSON, report HTML). */
+  richKind?: RichKind;
+  richSource?: string;
   /** kind: 'pluginUi' only (EXT-10): the plugin (its folder id) and the app it declares. */
   pluginId?: string;
   appName?: string;

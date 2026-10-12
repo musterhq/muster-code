@@ -130,7 +130,7 @@ function TimelineCardImpl({ item, nextAt, reveal, turn, tail=false, actions, edi
       if (plan) return <PlanCard item={item}/>;
       return (
         <div className="msg msg-assistant">
-          <MessageBody text={item.text} animate linkFiles />
+          <MessageBody text={item.text} animate linkFiles reports />
           {meta&&<MessageMeta text={item.text} createdAt={item.createdAt} label="Copy response" actions={actions}/>}
         </div>
       );

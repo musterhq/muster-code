@@ -62,11 +62,11 @@ type Opened = {ms: number; state: string; firstFrameMs: number | null};
     root.render(<TipProvider><ModelViewerPane source={{kind: 'file', folderId: 'f', path}} variant={options.variant ?? 'tab'} onOpenInTab={() => {}}/></TipProvider>);
     return new Promise(resolve => {
       const check = () => {
-        const state = stage().querySelector('.rich-block')?.getAttribute('data-state');
+        const state = stage().querySelector('.rich-block')?.getAttribute('data-status');
         if (state === 'ready' || state === 'error') { observer.disconnect(); resolve({ms: performance.now() - started, state, firstFrameMs: performance.now() - started}); }
       };
       const observer = new MutationObserver(check);
-      observer.observe(stage(), {attributes: true, subtree: true, childList: true, attributeFilter: ['data-state']});
+      observer.observe(stage(), {attributes: true, subtree: true, childList: true, attributeFilter: ['data-status']});
       check();
     });
   },
