@@ -5,7 +5,7 @@ import {join} from 'node:path';
 import {test} from 'node:test';
 import {AGENT_AUTONOMY_RULE, runInstructions} from '../src/runtime/provider.ts';
 import {ENVELOPE_RULES, TASK_TEXT_MAX, untrusted} from '../src/runtime/checkout/sanitize.ts';
-import {endsWithQuestion, ProjectTaskStore} from '../src/runtime/project-tasks.ts';
+import {asksOpenQuestion, endsWithQuestion, ProjectTaskStore} from '../src/runtime/project-tasks.ts';
 
 test('#385: the keep-going directive is in agent mode only, and short', () => {
   assert.ok(AGENT_AUTONOMY_RULE.length < 600);
@@ -48,4 +48,10 @@ test('#385: a run that ends with a question is needs-input, not implemented', ()
     assert.equal(store.settleRunForChat('c1', 'completed', undefined, 'I fixed it. Want me to add tests?')!.state, 'needs-input');
     assert.equal(store.settleRunForChat('c2', 'completed', undefined, 'Fixed and tested. Nothing left.')!.state, 'implemented');
   } finally { store.close(); rmSync(dir, {recursive: true, force: true}); }
+});
+
+test('#383: asksOpenQuestion reuses endsWithQuestion and also catches an offer in the closing paragraph', () => {
+  for (const q of ['Should I commit item 1 now?', 'Item 1 is ready. Want me to commit it and start item 2', 'Done.\n\nWould you like me to add docs']) assert.ok(asksOpenQuestion(q), q);
+  for (const n of ['Committed and pushed.', '```\nShould I?\n```\nAll done.', '']) assert.ok(!asksOpenQuestion(n), n);
+  assert.ok(!asksOpenQuestion(undefined));
 });

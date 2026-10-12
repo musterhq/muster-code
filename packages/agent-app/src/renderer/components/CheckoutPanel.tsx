@@ -85,7 +85,9 @@ export function CheckoutNotes({ detail }: { detail: WorkspaceTaskDetail }): Reac
   if (!lease.offline && !waiting && !lease.stale && !lease.conflict && !lease.staleDays && !lease.broadFolder && !lease.heldBack) return null;
   return <div className="ws-checkout-notes" role="status">
     {lease.staleDays ? <StaleCheckout lease={lease} onChanged={reload}/> : null}
-    {lease.heldBack && <p className="ws-checkout-note" data-tone="warn">Not handed back yet: {lease.heldBack.reason}</p>}
+    {lease.heldBack && <p className="ws-checkout-note" data-tone="warn">Not handed back yet: {lease.heldBack.reason}
+      {lease.heldBack.kind === 'no-tests' && <> <button type="button" className="ws-link" onClick={() => void invoke('checkout.handback.runtests', { taskId: lease.taskId }).then(reload, fail)}>Run tests and hand back</button> · <button type="button" className="ws-link" onClick={() => void invoke('checkout.handback.anyway', { taskId: lease.taskId }).then(reload, fail)}>Hand back anyway</button></>}
+    </p>}
     {lease.broadFolder && <p className="ws-checkout-note" data-tone="warn">This is a very broad folder (<code>{lease.worktree}</code>): changes anywhere in it count as this task’s work. Choose a project folder for a cleaner hand-back.</p>}
     {lease.offline && <p className="ws-checkout-note" data-tone="warn">Offline{waiting ? ` · ${lease.pending} ${lease.pending === 1 ? 'update' : 'updates'} waiting` : ''}. Work continues here and Muster sends everything when it can.</p>}
     {!lease.offline && waiting && <p className="ws-checkout-note">{lease.pending} {lease.pending === 1 ? 'update' : 'updates'} waiting to be sent.</p>}

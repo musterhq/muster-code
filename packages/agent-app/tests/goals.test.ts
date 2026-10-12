@@ -115,3 +115,16 @@ test('pause prevents dispatch; a queued user message goes before the continuatio
   await assert.rejects(service.invoke('goals.set',{chatId:chat.id,text:'  '}),/Describe the goal/);
   await assert.rejects(service.invoke('goals.pause',{chatId:'missing'}),/no goal/);
 });
+
+test('a prose "the goal is complete" does not close the goal; the next turn gets the completion check and only update_goal closes it (#383)',async t=>{
+  const dataDir=await directory(t);
+  const fake=fakeProvider((_input,index)=>index===0?{status:'completed',finalMessage:'Phase 1 is done. The goal is complete.'}:{status:'completed',finalMessage:'Verified.\nupdate_goal(status="complete")'});
+  const service=createAgentService({dataDir,provider:fake.provider,onEvent(){}});
+  const chat=await service.invoke('chat.create',{});
+  await service.invoke('goals.set',{chatId:chat.id,text:'Ship all three phases'});
+  await until(async()=>(await service.invoke('goals.get',{chatId:chat.id}))?.status==='complete','goal done by status');
+  assert.equal(fake.inputs.length,2,'the prose claim did not stop the goal: a second turn ran');
+  assert.doesNotMatch(fake.inputs[0].developerInstructions??'',/does not close it/);
+  assert.match(fake.inputs[1].developerInstructions??'',/only said in prose that the goal is done/,'the completion check follows the claim');
+  await service.dispose();
+});

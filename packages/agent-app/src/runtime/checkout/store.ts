@@ -75,7 +75,7 @@ export class CheckoutStore {
   lease(taskId: string): CheckoutLease | null { const r = this.d().prepare('SELECT json FROM checkout_leases WHERE task_id = ?').get(taskId) as { json: string } | undefined; return r ? JSON.parse(r.json) as CheckoutLease : null; }
   leases(): CheckoutLease[] { return (this.d().prepare('SELECT json FROM checkout_leases ORDER BY task_id').all() as { json: string }[]).map(r => JSON.parse(r.json) as CheckoutLease); }
   openLeases(): CheckoutLease[] { return this.leases().filter(l => l.state === 'checked_out'); }
-  leaseForChat(chatId: string, origin?: string): CheckoutLease | null { return this.openLeases().find(l => (origin === undefined || l.origin === origin) && (l.chatId === chatId || l.reviewChats?.some(r => r.chatId === chatId))) ?? null; }
+  leaseForChat(chatId: string, origin?: string): CheckoutLease | null { return this.openLeases().find(l => (origin === undefined || l.origin === origin) && (l.chatId === chatId || l.linkedChats?.includes(chatId) || l.reviewChats?.some(r => r.chatId === chatId))) ?? null; }
   /** Org copies are files, not database rows: a private folder (0700) with a file per task (0600), deleted when the check-out ends (security review M6). */
   private copyFile(taskId: string): string | null { return this.dir ? join(this.dir, `org-${createHash('sha256').update(taskId).digest('hex').slice(0, 24)}.json`) : null; }
   private memory = new Map<string, LocalOrgCopy>();

@@ -1,5 +1,6 @@
 /** Orgs and Check out (#117): the handlers of `orgs.*` and `checkout.*`. The pure rules and the orchestration live in shared/org-work.ts and runtime/checkout/. */
 import { execFile } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import { hostname } from 'node:os';
 import { join } from 'node:path';
 import type { MyWork } from '../../shared/domains/checkout-protocol.ts';
@@ -19,6 +20,7 @@ import type { DomainContext, DomainModule } from './types.ts';
 const gitRemotes = (cwd: string) => new Promise<string[]>(resolve => execFile('git', ['config', '--get-regexp', '^remote\\..*\\.url$'], { cwd, timeout: 1500, env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } }, (error, stdout) => resolve(error ? [] : stdout.split('\n').map(l => l.replace(/^\S+\s+/, '').trim()).filter(Boolean))));
 const text = (v: unknown, max = 4000): string => { if (typeof v !== 'string' || v.length > max) throw new Error('Invalid input.'); return v; };
 const id = (v: unknown): string => { if (typeof v !== 'string' || !/^[\w:.\-/]{1,160}$/.test(v)) throw new Error('Unknown item.'); return v; };
+const samePath = (a: string | undefined, b: string): boolean => Boolean(a) && a!.replace(/[\\/]+$/, '') === b.replace(/[\\/]+$/, '');
 const wait = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms));
 
 export function createCheckoutDomain(ctx: DomainContext): DomainModule {
@@ -48,6 +50,9 @@ export function createCheckoutDomain(ctx: DomainContext): DomainModule {
     chats: {
       addFolder: async path => ctx.invoke('folder.add', { path }),
       create: async folderId => ctx.invoke('chat.create', { folderId }),
+      send: async (chatId, text) => { await ctx.invoke('chat.send', { id: chatId, text, requestId: randomUUID() }); },
+      inFolder: async path => ctx.store.snapshot().chats.filter(c => !c.archived && c.folderId && samePath(ctx.store.folder(c.folderId)?.path, path)).map(c => ({ id: c.id, activeAt: Date.parse(c.updatedAt) || 0 })),
+      folderOf: chatId => { const folderId = ctx.store.chat(chatId)?.folderId; return folderId ? ctx.store.folder(folderId)?.path ?? null : null; },
       select: async (chatId, providerId, model) => { await ctx.invoke('chat.selectProvider', { id: chatId, providerId, model }); },
       rename: async (chatId, title) => { await ctx.invoke('chat.update', { id: chatId, title }); },
       timeline: async chatId => (await ctx.invoke('chat.timeline', { id: chatId })).items.map(i => ({ kind: i.kind, text: i.text, ...(i.data ? { data: i.data } : {}), ...(i.status ? { status: i.status } : {}) })),
@@ -74,15 +79,17 @@ export function createCheckoutDomain(ctx: DomainContext): DomainModule {
   /** A quiet session gets a "paused" note. One timer, only while a task is checked out here. */
   const idle = setInterval(() => { if (store.openLeases().length) void svc().checkIdle().catch(() => undefined); }, 5 * 60_000);
   idle.unref?.();
+  // A hand-back countdown that was running when the app closed starts again.
+  if (store.openLeases().some(l => l.countdown)) { const resume = setTimeout(() => { try { svc().resumeCountdowns(); } catch { /* the next start tries again */ } }, 3000); resume.unref?.(); }
   hub.badge = taskId => { const l = store.openLeases().find(x => x.taskId === taskId && x.origin === origin()); return l ? badgeOf(l, store.deviceId(), Date.now(), store.staleHours()) : null; };
   hub.onOnline = () => { if (store.pendingCount()) void svc().flush().catch(() => undefined); };
   const offPrompt = ctx.hooks.addPromptContributor(async ({ chat }) => {
-    if (!store.leaseForChat(chat.id, origin())) return null;
+    if (!store.openLeases().length || !svc().leaseForChat(chat.id)) return null;
     const brief = await svc().brief(chat.id);
     return brief ? { label: 'Server task', text: brief } : null;
   });
   const offStarted = ctx.hooks.onRunStarted?.(({ chat }) => { if (service) service.runStarted(chat.id); });
-  const offSettled = ctx.hooks.onRunSettled(run => { if (store.leaseForChat(run.chat.id, origin())) return svc().onTurn(run.chat.id, run.runId, run.status).catch(() => undefined); });
+  const offSettled = ctx.hooks.onRunSettled(run => { if (store.openLeases().length && svc().leaseForChat(run.chat.id)) return svc().onTurn(run.chat.id, run.runId, run.status).catch(() => undefined); });
   // Disconnecting forgets what was kept for the server: org copies, ended check-outs and the posts that were never sent (security review M6).
   const offCommand = ctx.hooks.onCommand?.(event => { if (event.command === 'paperclip.disconnect' || event.command === 'paperclip.signin.signout' || event.command === 'musterServer.disconnect') for (const o of new Set(store.leases().map(l => l.origin))) store.purge({ origin: o }); });
 
@@ -153,6 +160,8 @@ export function createCheckoutDomain(ctx: DomainContext): DomainModule {
       },
       'checkout.undo': input => svc().undoHandBack(id(input.taskId)),
       'checkout.countdown': async input => { if (input.action !== 'now' && input.action !== 'keep') throw new Error('Invalid input.'); await svc().countdown(id(input.taskId), input.action); return { ok: true as const }; },
+      'checkout.handback.anyway': input => svc().handBackAnyway(id(input.taskId)),
+      'checkout.handback.runtests': input => svc().runTestsAndHandBack(id(input.taskId)),
       'checkout.countdowns': () => ({ countdowns: service ? service.activeCountdowns() : [] }),
       'checkout.remind': input => { svc().remind(id(input.taskId)); return { ok: true }; },
     },

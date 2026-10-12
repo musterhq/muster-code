@@ -46,6 +46,13 @@ export function endsWithQuestion(text?: string): boolean {
   if (!t) return false;
   return /\?[\s"'”’)*_\]]*$/.test(t) || /^[\s*_>#-]*(should i|shall i|want me to|do you want)\b/i.test(t);
 }
+/** An unfinished run: the last message ends on a question, or offers to do the next step ("Should I / Shall I / Want me to / Do you want / Would you like") in its closing paragraph. Builds on endsWithQuestion (#383). */
+export function asksOpenQuestion(text?: string): boolean {
+  if (endsWithQuestion(text)) return true;
+  const t = (text ?? '').replace(/```[\s\S]*?```/g, '').trim();
+  const last = t.split(/\n\s*\n/).pop() ?? '';
+  return /\b(?:should i|shall i|want me to|do you want|would you like)\b/i.test(last);
+}
 export class ProjectTaskStore {
  private db:DatabaseSync;
  private depth=0;

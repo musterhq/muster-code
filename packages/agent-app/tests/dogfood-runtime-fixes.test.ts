@@ -19,7 +19,7 @@ test('the agent is told which live processes belong to the user', () => {
   assert.ok(note.indexOf('4200') < note.indexOf('4100'), 'processes in this folder are listed first');
 });
 
-test('goal completion is detected from an update line or a plain declaration, not from plans', () => {
+test('goal completion is read from the update line; a plain declaration is only recognised (it earns the completion check), not from plans', () => {
   assert.equal(goalUpdate('Done.\nupdate_goal(status="complete")'), 'complete');
   assert.equal(goalDeclaredDone('Tests green, typecheck clean. The goal is complete.'), true);
   assert.equal(goalDeclaredDone('All requirements are met and verified.'), true);
