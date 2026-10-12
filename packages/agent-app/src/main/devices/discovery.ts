@@ -125,7 +125,7 @@ export async function checkNode(deps: ProbeDeps, node: string | undefined, npm: 
     const version = (await deps.run(node, ['--version'], {timeoutMs: 5000})).trim();
     const major = Number(/^v?(\d+)/.exec(version)?.[1] ?? 0);
     if (major < MIN_NODE_MAJOR) return {available: false, reason: `Node.js ${version} is too old for the device helper.`, fix, detail: node};
-    return {available: true, detail: `Node.js ${version}`};
+    return {available: true, detail: version.replace(/^v/, '')};
   } catch (error) { return {available: false, reason: 'Node.js did not start.', fix, detail: errorLine(error)}; }
 }
 

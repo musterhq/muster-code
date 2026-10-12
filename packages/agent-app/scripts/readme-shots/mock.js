@@ -75,7 +75,7 @@ const snapshot = () => ({folders, chats: FX.chats, projects, activeChatId, versi
 const text = (path) => files[path]?.after ?? files[path]?.before ?? `// ${path}\n`;
 const blob = (s) => { let h = 0; for (const c of s) h = (h * 31 + c.charCodeAt(0)) >>> 0; return h.toString(16).padStart(8, '0') + 'a3f1c9e2b7d4'; };
 
-const settings = {'appearance.theme': OPTS.theme ?? 'dark', 'chat.inlineDiffs': true, 'general.defaultModel': OPTS.realisticModels ? {providerId: 'openai-direct', model: 'gpt-6.1-sol', effort: 'high'} : {providerId: 'gateway', model: 'frontier-large', effort: 'medium'}};
+const settings = {'appearance.theme': OPTS.theme ?? 'dark', ...(OPTS.darkTheme ? {'appearance.darkTheme': OPTS.darkTheme} : {}), ...(OPTS.lightTheme ? {'appearance.lightTheme': OPTS.lightTheme} : {}), 'chat.inlineDiffs': true, 'general.defaultModel': OPTS.realisticModels ? {providerId: 'openai-direct', model: 'gpt-6.1-sol', effort: 'high'} : {providerId: 'gateway', model: 'frontier-large', effort: 'medium'}};
 const updateStatus = {phase: 'ready', current: '0.2.0', channel: 'stable', autoCheck: true, latest: {version: '0.2.1', notes: '- Faster timeline scrolling on long chats\n- Memory recall shows where each note came from\n- Fixes a terminal resize glitch', pageUrl: 'https://example.com/releases/0.2.1', publishedAt: ago(60 * 20)}, checkedAt: ago(12)};
 
 // ---- git ------------------------------------------------------------------------------------
@@ -270,6 +270,66 @@ const handlers = {
   'automations.list': () => FX.automations,
   'automations.runs': ({id}) => FX.automationRuns.filter(r => r.automationId === id),
 };
+
+// ---- devices (#363): a fictional Xcode + Android SDK, the helper, and live screens drawn on a canvas -----------------
+if (OPTS.devices) {
+  const mode = OPTS.devices;
+  const ok = (detail) => ({available: true, detail});
+  const setup = () => ({enabled: !['off', 'missing'].includes(mode), agentControl: mode === 'agent', host: OPTS.host ?? 'darwin',
+    helper: {state: mode === 'installing' ? 'installing' : mode === 'failed' ? 'failed' : mode === 'off' || mode === 'missing' ? 'absent' : 'installed', version: '0.15.3', downloadMB: 26, running: ['live', 'agent', 'tablet', 'android', 'error'].includes(mode), ...(mode === 'installing' ? {progress: 'Downloading the device helper…'} : {}), ...(mode === 'failed' ? {error: 'Could not reach the npm registry. Check your internet connection (or proxy) and try again.'} : {})},
+    ios: mode === 'missing' ? {available: false, reason: 'Xcode is not installed.', fix: ['Install Xcode from the App Store.', 'Open Xcode once and let it install its components.', 'In Terminal run: sudo xcode-select -s /Applications/Xcode.app']} : ok('Xcode 26.1'),
+    android: mode === 'missing' ? {available: false, reason: 'Android SDK not found.', fix: ['Install Android Studio from developer.android.com/studio.', 'In Android Studio open Settings › Languages & Frameworks › Android SDK and install the Android Emulator and Android SDK Platform-Tools.', 'Create a virtual device in Device Manager.'], detail: 'Looked in ~/Library/Android/sdk'} : ok('Android SDK at ~/Library/Android/sdk'),
+    node: ok('24.4.0')});
+  const list = {devices: mode === 'empty' ? [] : [
+    {id: '6B1F0C4A-2E7D-4C55-9A0B-1F2E3D4C5B6A', name: 'iPhone 17 Pro', platform: 'ios', osVersion: 'iOS 26.0', state: 'booted', formFactor: 'phone'},
+    {id: '9C2D7E1B-4F3A-4B8C-8D9E-0A1B2C3D4E5F', name: 'iPad Pro 13-inch (M5)', platform: 'ios', osVersion: 'iOS 26.0', state: mode === 'tablet' ? 'booted' : 'shutdown', formFactor: 'tablet'},
+    {id: 'emulator-5554', name: 'Pixel_9_API_36', platform: 'android', osVersion: 'Android 16', state: mode === 'android' ? 'booted' : 'shutdown', formFactor: 'phone'},
+    {id: 'avd:Pixel_Fold_API_35', name: 'Pixel_Fold_API_35', platform: 'android', osVersion: 'Android', state: 'shutdown', formFactor: 'foldable'},
+  ], errors: [], checkedAt: Date.now()};
+  const pick = mode === 'tablet' ? list.devices[1] : mode === 'android' ? list.devices[2] : list.devices[0];
+  const sessions = ['live', 'agent', 'tablet', 'android', 'error', 'starting'].includes(mode) && pick ? [{deviceId: pick.id, name: pick.name.replace(/_/g, ' '), platform: pick.platform, formFactor: pick.formFactor, ...(mode === 'agent' ? {chatId: activeChatId} : {}), openedBy: mode === 'agent' ? 'agent' : 'user', control: 'agent', state: mode === 'error' ? 'error' : mode === 'starting' ? 'starting' : 'live', ...(mode === 'error' ? {error: 'No video arrived from the device. Reconnect to try again.'} : {}), inputReady: mode !== 'starting', openedAt: Date.now() - 60_000}] : [];
+  Object.assign(handlers, {
+    'devices.setup': setup, 'devices.list': () => list, 'devices.sessions': () => sessions,
+    'devices.configure': setup, 'devices.installHelper': setup, 'devices.view': ({active}) => { if (active && mode !== 'error' && mode !== 'starting') pump(); return null; },
+    'devices.open': ({id}) => sessions.find(x => x.deviceId === id) ?? sessions[0], 'devices.close': () => null, 'devices.button': () => null, 'devices.rotate': () => null, 'devices.control': ({id, owner}) => ({...sessions[0], control: owner}),
+  });
+  const frameListeners = new Set();
+  const draw = () => {
+    const tablet = pick.formFactor === 'tablet', android = pick.platform === 'android';
+    const w = tablet ? 820 : android ? 412 : 393, h = tablet ? 1180 : android ? 915 : 852, k = 2;
+    const c = new OffscreenCanvas(w * k, h * k), g = c.getContext('2d'); g.scale(k, k);
+    const sky = g.createLinearGradient(0, 0, w, h); sky.addColorStop(0, android ? '#1d3b2a' : '#2a3f9e'); sky.addColorStop(0.55, android ? '#3f7d5a' : '#7a4fc4'); sky.addColorStop(1, android ? '#d9c27a' : '#f08a6a');
+    g.fillStyle = sky; g.fillRect(0, 0, w, h);
+    g.fillStyle = '#fff'; g.font = '600 15px -apple-system, Helvetica'; g.fillText('9:41', android ? 20 : 34, 22);
+    g.fillRect(w - (android ? 52 : 62), 12, 24, 11); g.fillRect(w - (android ? 80 : 92), 13, 18, 10);
+    const names = ['Messages', 'Calendar', 'Photos', 'Camera', 'Mail', 'Clock', 'Maps', 'Weather', 'Notes', 'Reminders', 'Taskboard', 'Settings', 'Music', 'Files', 'Health', 'Wallet'];
+    const hues = [140, 4, 40, 220, 210, 0, 120, 200, 48, 20, 250, 220, 340, 205, 350, 30];
+    const cols = tablet ? 6 : 4, size = tablet ? 74 : 60, gapX = (w - cols * size) / (cols + 1), top = tablet ? 90 : 70;
+    names.slice(0, tablet ? 18 : 16).forEach((name, i) => {
+      const x = gapX + (i % cols) * (size + gapX), y = top + Math.floor(i / cols) * (size + 34);
+      g.fillStyle = `hsl(${hues[i % hues.length]} 70% ${name === 'Taskboard' ? 45 : 55}%)`; g.beginPath(); g.roundRect(x, y, size, size, android ? size / 2 : size * 0.23); g.fill();
+      g.fillStyle = 'rgba(255,255,255,.9)'; g.beginPath(); g.roundRect(x + size * 0.3, y + size * 0.3, size * 0.4, size * 0.4, 6); g.fill();
+      g.fillStyle = '#fff'; g.font = '500 11px -apple-system, Helvetica'; g.textAlign = 'center'; g.fillText(name, x + size / 2, y + size + 15); g.textAlign = 'start';
+    });
+    g.fillStyle = 'rgba(255,255,255,.28)'; g.beginPath(); g.roundRect(14, h - (android ? 110 : 106), w - 28, 84, android ? 42 : 30); g.fill();
+    if (android) { g.fillStyle = 'rgba(255,255,255,.75)'; g.beginPath(); g.roundRect(w / 2 - 50, h - 12, 100, 4, 2); g.fill(); }
+    else { g.fillStyle = 'rgba(255,255,255,.85)'; g.beginPath(); g.roundRect(w / 2 - 68, h - 10, 136, 5, 3); g.fill(); }
+    return c.convertToBlob({type: 'image/jpeg', quality: 0.86});
+  };
+  let pumping = false;
+  const pump = () => {
+    if (pumping) return; pumping = true;
+    let n = 0;
+    const tick = async () => {
+      const blob = await draw(); const data = new Uint8Array(await blob.arrayBuffer());
+      for (const listener of [...frameListeners]) listener({deviceId: pick.id, codec: 'jpeg', key: true, data});
+      if (++n < 3) setTimeout(tick, 250);
+    };
+    void tick();
+  };
+  window.musterDevices = {onFrame(listener) { frameListeners.add(listener); return () => frameListeners.delete(listener); }, ack() {}, input() {}};
+  if (OPTS.devicesTab) setTimeout(() => window.__shots?.store?.openTab(OPTS.devicesTab === 'picker' ? {id: 'devices', kind: 'device', title: 'Devices'} : {id: `device:${pick.id}`, kind: 'device', deviceId: pick.id, title: pick.name.replace(/_/g, ' ')}), 600);
+}
 window.__mockHandlers = handlers;
 
 const fallback = (command) => {

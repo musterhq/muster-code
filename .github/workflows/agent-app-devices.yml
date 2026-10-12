@@ -1,0 +1,99 @@
+name: Muster Agent devices smoke
+
+# #363: real-device checks for Devices. Installs the pinned device helper exactly as the app does (npm ci of the shipped
+# lockfile, scripts off), boots a simulator/emulator headless, and streams one frame through the helper, then input,
+# Home and a screenshot. Artifacts: first frame, screenshot and a step report per platform.
+on:
+  pull_request:
+    paths:
+      - "packages/agent-app/src/main/devices/**"
+      - "packages/agent-app/src/shared/device-protocol.ts"
+      - "packages/agent-app/resources/device-helper/**"
+      - "packages/agent-app/scripts/device-smoke.ts"
+      - ".github/workflows/agent-app-devices.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: agent-app-devices-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    working-directory: packages/agent-app
+
+env:
+  NODE_OPTIONS: --max-old-space-size=2048
+  MUSTER_SKIP_NATIVE_REBUILD: "1"
+  ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+
+jobs:
+  ios-simulator:
+    runs-on: macos-15
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: packages/agent-app/.nvmrc
+          cache: npm
+          cache-dependency-path: packages/agent-app/package-lock.json
+      - name: Install
+        run: npm ci --no-audit --no-fund --ignore-scripts
+      - name: Xcode and simulators
+        run: |
+          xcode-select -p
+          xcrun xcodebuild -version
+          xcrun simctl list devices available | head -40
+      - name: Stream one frame from an iOS Simulator through the helper
+        env:
+          SMOKE_OUT: ${{ runner.temp }}/device-smoke
+        run: node --experimental-transform-types scripts/device-smoke.ts ios
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: device-smoke-ios
+          path: ${{ runner.temp }}/device-smoke
+          if-no-files-found: warn
+
+  android-emulator:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: packages/agent-app/.nvmrc
+          cache: npm
+          cache-dependency-path: packages/agent-app/package-lock.json
+      - name: Install
+        run: npm ci --no-audit --no-fund --ignore-scripts
+      - name: Enable KVM
+        working-directory: .
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Stream one frame from an Android Emulator through the helper
+        uses: reactivecircus/android-emulator-runner@v2
+        env:
+          SMOKE_OUT: ${{ runner.temp }}/device-smoke
+        with:
+          api-level: 34
+          arch: x86_64
+          target: google_apis
+          profile: pixel_6
+          avd-name: Pixel_6_API_34
+          force-avd-creation: false
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          disable-animations: true
+          working-directory: packages/agent-app
+          script: node --experimental-transform-types scripts/device-smoke.ts android
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: device-smoke-android
+          path: ${{ runner.temp }}/device-smoke
+          if-no-files-found: warn

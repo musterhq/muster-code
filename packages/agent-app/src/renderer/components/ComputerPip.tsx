@@ -1,6 +1,6 @@
 /** Codex-style computer-use picture-in-picture (CUA-01/02/03/07/09) and the right-pane screenshot viewer (CUA-06). */
 import {startActiveInterval} from '../windowActivity';
-import React,{useEffect,useMemo,useRef,useState} from 'react';
+import React,{Suspense,lazy,useEffect,useMemo,useRef,useState} from 'react';
 import {AppWindow,Download,ExternalLink,Eye,Globe,Hand,PanelRightOpen,Paperclip,Play,Square,X} from 'lucide-react';
 import {invoke} from '../bridge';
 import {getState,notifyError,notifySuccess,openTab,stopChat,type WorkspaceTab} from '../store';
@@ -9,11 +9,14 @@ import {stageAttachment} from '../composerBridge';
 import {rememberProfile} from './BrowserTab';
 import {ImageFile} from './ImageFile';
 import type {ComputerPermissions} from '../../shared/domains/computer-protocol';
-import {PIP_STACK_MAX,STACK_PEEK,STACK_WIDTH,dockedSessions,formatAge,frameFreshness,hostOf,mergeSources,orderPipSources,pipPhase,type PipPhase,raiseSession,recentComputerSources,screenshotName,sessionKey,sessionTabId,setMinimized,setSnapshot,sourceKey,stackAnchor,stackHeight,stackWidth,toolImageUrl,useComputerUi,wireComputerEvents,type Box,type Freshness,type PipSource} from '../computerUse';
+import {deviceSources,PIP_STACK_MAX,STACK_PEEK,STACK_WIDTH,dockedSessions,formatAge,frameFreshness,hostOf,mergeSources,orderPipSources,pipPhase,type PipPhase,raiseSession,recentComputerSources,screenshotName,sessionKey,sessionTabId,setMinimized,setSnapshot,sourceKey,stackAnchor,stackHeight,stackWidth,toolImageUrl,useComputerUi,wireComputerEvents,type Box,type Freshness,type PipSource} from '../computerUse';
 import {clampPipPosition,exceedsDragThreshold,loadPipCorner,pipCornerOrigin,savePipCorner,settlePipDrop,springSettled,springStep,type PipCorner,type PipPoint,type PipRect,type PipSize,type SpringState} from '../pipLayout';
 import {AppGlyph} from './AppGlyph';
 import './pip.css';
 import {Tip} from './Tooltip';
+import {useDeviceUi,wireDeviceEvents} from '../deviceSessions';
+// #363: a device card shows the live feed; the decoder and its canvas load with the first device session.
+const LazyDeviceThumb=lazy(()=>import('./devices/DeviceThumb'));
 
 const loadImage=(id:string)=>invoke('computer.image',{id});
 const STATUS_LABEL:Record<string,string>={live:'Live: the agent is controlling this session',stale:'Stale: no new frame lately',disconnected:'Disconnected: the live feed stopped',failed:'The last step failed'};
@@ -222,6 +225,7 @@ type DragHandlers=ReturnType<typeof usePipDrag>;
 /** One live thumbnail in the cluster. Front card opens its tab; a back card comes to the front. */
 function PipCard({source,depth,count,docked,freshness,owner,now,drag}:{source:PipSource;depth:number;count:number;docked:boolean;freshness:Freshness;owner:'agent'|'user';now:number;drag:DragHandlers}) {
   const {url,failed:imageFailed}=useShot(source);
+  const isDevice=source.target==='device'&&!!source.deviceId;
   const ended=freshness==='ended';
   const front=depth===0,title=sourceTitle(source);
   const age=source.at?formatAge(now-source.at):'';
@@ -234,7 +238,8 @@ function PipCard({source,depth,count,docked,freshness,owner,now,drag}:{source:Pi
     <button type="button" className="pip-card-main" tabIndex={docked?-1:0} title={tip} data-status={status}
       aria-label={front?`Open ${title} in the sidebar: ${source.failed?`failed, ${source.failed}`:source.label}`:`Bring ${title} to the front`}
       onPointerDown={drag.onPointerDown} onPointerMove={drag.onPointerMove} onPointerUp={drag.onPointerUp} onPointerCancel={drag.onPointerCancel} onClick={click} onDoubleClick={open}>
-      {url?<img src={url} alt="" draggable={false} decoding="async"/>:<span className={`pip-empty${ended||imageFailed?'':' is-starting'}`} role="status">{ended||imageFailed?<span className="pip-empty-text">{imageFailed?'Preview unavailable':'No preview captured'}</span>:<><span className="pip-skeleton" aria-hidden="true"/><span className="pip-empty-text">Starting…</span></>}</span>}
+      {isDevice?<Suspense fallback={<span className="pip-empty is-starting"><span className="pip-skeleton" aria-hidden="true"/></span>}><LazyDeviceThumb deviceId={source.deviceId!} active={front&&!docked}/></Suspense>
+        :url?<img src={url} alt="" draggable={false} decoding="async"/>:<span className={`pip-empty${ended||imageFailed?'':' is-starting'}`} role="status">{ended||imageFailed?<span className="pip-empty-text">{imageFailed?'Preview unavailable':'No preview captured'}</span>:<><span className="pip-skeleton" aria-hidden="true"/><span className="pip-empty-text">Starting…</span></>}</span>}
       {ended&&<span className="pip-ended-badge">Ended</span>}
       {status&&<span className={`pip-card-status is-${status}`} role="img" aria-label={STATUS_LABEL[status]} title={STATUS_LABEL[status]}/>}
     </button>
@@ -242,11 +247,12 @@ function PipCard({source,depth,count,docked,freshness,owner,now,drag}:{source:Pi
   </div>;
 }
 /** Live sessions age from their last frame; once the session is over it is simply "ended". */
-const freshnessOf=(source:PipSource,running:boolean,now:number,runEndedAt:number):Freshness=>pipPhase(source,running,now,runEndedAt)==='live'?frameFreshness(now-source.at,true):'ended';
-const sourceTitle=(source:PipSource)=>source.target==='browser'?(source.url?hostOf(source.url):source.app&&source.app!=='Browser'?source.app:'Browser'):source.app||'Computer';
+const freshnessOf=(source:PipSource,running:boolean,now:number,runEndedAt:number):Freshness=>source.target==='device'?(source.deviceState==='error'?'disconnected':source.deviceState==='reconnecting'?'stale':'live'):pipPhase(source,running,now,runEndedAt)==='live'?frameFreshness(now-source.at,true):'ended';
+const sourceTitle=(source:PipSource)=>source.target==='device'?source.app||'Device':source.target==='browser'?(source.url?hostOf(source.url):source.app&&source.app!=='Browser'?source.app:'Browser'):source.app||'Computer';
 
 /** Opens a session in the right sidebar as its own tab (the sidebar opens if it was closed), or focuses the tab it already has. */
 export function openSessionTab(source:PipSource):void {
+  if(source.target==='device'&&source.deviceId){openTab({id:sessionTabId(source),kind:'device',deviceId:source.deviceId,title:sourceTitle(source)});return;}
   if(source.target==='browser'&&source.owner&&source.profileId&&(source.url||getState().tabs.some(tab=>tab.id===source.owner))){visitSource(source);return;}
   openTab({id:sessionTabId(source),kind:'liveView',title:sourceTitle(source),chatId:source.chatId});
 }
@@ -272,8 +278,11 @@ export function ComputerPip({paneVisible=true}:{paneVisible?:boolean}={}) {
   const runEndedAt=useRunEnd(chatId,running);
   // Only a session that is live now, or ended moments ago, gets a card; the rest of the transcript's history does not.
   const clock=useNow(recent.some(candidate=>pipPhase(candidate,running,Date.now(),runEndedAt)!=='gone'));
-  const sources=useMemo(()=>recent.filter(candidate=>pipPhase(candidate,running,clock,runEndedAt)!=='gone'),[recent,running,clock,runEndedAt]);
+  const devices=useDeviceUi().sessions;
+  // Device sessions are live until closed (no transcript history to age out); they share the stack with browser and app cards.
+  const sources=useMemo(()=>[...deviceSources(devices,chatId),...recent.filter(candidate=>pipPhase(candidate,running,clock,runEndedAt)!=='gone')].sort((a,b)=>b.at-a.at),[devices,chatId,recent,running,clock,runEndedAt]);
   useEffect(()=>wireComputerEvents(),[]);
+  useEffect(()=>wireDeviceEvents(),[]);
   const cards=useMemo(()=>orderPipSources(sources,ui.raised).slice(0,PIP_STACK_MAX),[sources,ui.raised]);
   const docked=useMemo(()=>dockedSessions(cards,paneVisible?visibleTabId:null),[cards,visibleTabId,paneVisible]);
   const open=cards.filter(card=>!docked.has(sessionKey(card)));
@@ -289,10 +298,13 @@ export function ComputerPip({paneVisible=true}:{paneVisible?:boolean}={}) {
   });
   const [busy,setBusy]=useState(false);
   if(!shown||!source)return null;
-  const owner=ui.control[source.chatId]??'agent';
+  const deviceSession=source.target==='device'?devices.find(session=>session.deviceId===source.deviceId):undefined;
+  const owner=deviceSession?deviceSession.control:ui.control[source.chatId]??'agent';
   const freshness=freshnessOf(source,running,now,runEndedAt);
   const title=sourceTitle(source);
-  const setOwner=async(next:'agent'|'user')=>{setBusy(true);try{await invoke('computer.control',{chatId:source.chatId,owner:next});}catch(cause){notifyError(cause);}finally{setBusy(false);}};
+  // A device the user opened has no agent to take control from; an agent's device session has its own lease.
+  const canTakeControl=!deviceSession||!!deviceSession.chatId;
+  const setOwner=async(next:'agent'|'user')=>{setBusy(true);try{if(deviceSession)await invoke('devices.control',{id:deviceSession.deviceId,owner:next});else await invoke('computer.control',{chatId:source.chatId,owner:next});}catch(cause){notifyError(cause);}finally{setBusy(false);}};
   if(!open.length) return <div className="pip-stack is-empty" aria-hidden="true" ref={stack} style={{top:anchor.top,right:anchor.right,width:anchor.width}}>
     <div className="pip-cards" style={{height:stackHeight(anchor.width,1)}}>{cards.map(card=><PipCard key={sourceKey(card)} source={card} depth={0} count={1} docked freshness={freshness} owner={owner} now={now} drag={drag}/>)}</div>
   </div>;
@@ -307,9 +319,9 @@ export function ComputerPip({paneVisible=true}:{paneVisible?:boolean}={}) {
     </div>
     <div className="pip-controls" style={{top:peek+6}}>
       <Tip label="Hide the live view"><button type="button" className="pip-control" aria-label="Hide the live view" onClick={()=>setMinimized(true)}><X size={12} strokeWidth={2.2}/></button></Tip>
-      {owner==='agent'
+      {canTakeControl&&(owner==='agent'
         ?<Tip label="Take control"><button type="button" className="pip-control" aria-label="Take control" disabled={busy} onClick={()=>void setOwner('user')}><Hand size={12} strokeWidth={2.2}/></button></Tip>
-        :<Tip label="Hand control back to the agent"><button type="button" className="pip-control is-user" aria-label="Hand control back" disabled={busy} onClick={()=>void setOwner('agent')}><Play size={12} strokeWidth={2.2}/></button></Tip>}
+        :<Tip label="Hand control back to the agent"><button type="button" className="pip-control is-user" aria-label="Hand control back" disabled={busy} onClick={()=>void setOwner('agent')}><Play size={12} strokeWidth={2.2}/></button></Tip>)}
     </div>
     <PermissionNotice perms={perms}/>
   </div>;
