@@ -1,6 +1,6 @@
 import {spawn} from 'node:child_process';
 import {constants as fsc, promises as fs} from 'node:fs';
-import {dirname, isAbsolute, join, relative, sep} from 'node:path';
+import {basename, dirname, extname, isAbsolute, join, relative, sep} from 'node:path';
 import {isInsidePath, normalizeFsPath} from '../../shared/path-normalize.ts';
 import {agentCommandEnvironment} from '../command-environment.ts';
 import {killTreeAndEscapees, WINDOWS} from '../process-tree.ts';
@@ -19,10 +19,12 @@ import type {AdapterRunInput} from './types.ts';
  */
 export type ToolAccess = AdapterRunInput['permissionMode'];
 export interface ToolCall { id: string; name: string; arguments: string }
-export interface ToolResult { content: string; ok: boolean }
+/** An image a tool read, for the model to see (OpenAI `image_url` part on the next request). */
+export interface ToolImage { mediaType: string; data: string; name: string }
+export interface ToolResult { content: string; ok: boolean; image?: ToolImage }
 /** Resolves true to proceed. The service answers with the Project tool policy, the user-process guard and approval cards. */
 export type Authorize = (method: string, params: Record<string, unknown>) => Promise<boolean>;
-export interface ToolContext { cwd: string; access: ToolAccess; signal: AbortSignal; emit: AdapterRunInput['onEvent']; threadId: string; turnId: string; authorize?: Authorize; env?: Record<string, string>; deadline?: number }
+export interface ToolContext { cwd: string; access: ToolAccess; signal: AbortSignal; emit: AdapterRunInput['onEvent']; threadId: string; turnId: string; authorize?: Authorize; env?: Record<string, string>; deadline?: number; /** True when the model reports image input. read_file of an image returns the picture only then. */ vision?: boolean; /** Shared across one turn so the "this model cannot see images" explanation is given once. */ visionNote?: {told: boolean} }
 
 export const MAX_TOOL_OUTPUT = 64 * 1024, MAX_FILE_READ = 256 * 1024, MAX_EDIT_FILE = 5 * 1024 * 1024, MAX_TIMELINE_OUTPUT = 8 * 1024;
 const DEFAULT_TIMEOUT_S = 120, MAX_TIMEOUT_S = 600;
@@ -152,6 +154,34 @@ async function readLimited(path: string, limit: number, refuseHardLinked = false
   } finally { await handle.close(); }
 }
 
+const IMAGE_TYPES: Record<string, string> = {'.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp'};
+export const MAX_MODEL_IMAGE = 8 * 1024 * 1024;
+/** The media type a file's first bytes declare, for the formats vision models take; undefined for anything else. */
+export function sniffImageType(head: Buffer): string | undefined {
+  if (head.length >= 8 && head.readUInt32BE(0) === 0x89504e47 && head.readUInt32BE(4) === 0x0d0a1a0a) return 'image/png';
+  if (head.length >= 3 && head[0] === 0xff && head[1] === 0xd8 && head[2] === 0xff) return 'image/jpeg';
+  if (head.length >= 6 && /^GIF8[79]a$/.test(head.toString('latin1', 0, 6))) return 'image/gif';
+  if (head.length >= 12 && head.toString('latin1', 0, 4) === 'RIFF' && head.toString('latin1', 8, 12) === 'WEBP') return 'image/webp';
+  return undefined;
+}
+/** The whole image (at most 8 MiB, regular file, signature must match the extension), for a vision model. */
+async function readImageLimited(path: string, refuseHardLinked: boolean): Promise<{mediaType: string; data: string; size: number}> {
+  const declared = IMAGE_TYPES[extname(path).toLowerCase()];
+  if (!(await fs.stat(path)).isFile()) throw new Error(`${path} is not a regular file.`);
+  const handle = await fs.open(path, fsc.O_RDONLY);
+  try {
+    const info = await handle.stat();
+    if (!info.isFile()) throw new Error(`${path} is not a regular file.`);
+    if (refuseHardLinked && info.nlink > 1) throw new Error(`${path} has other hard links, so it is not read outside Full access.`);
+    if (info.size > MAX_MODEL_IMAGE) throw new Error(`${basename(path)} is ${(info.size / 1048576).toFixed(1)} MB; images over ${MAX_MODEL_IMAGE / 1048576} MB are not sent to the model.`);
+    const buffer = Buffer.alloc(info.size);
+    const {bytesRead} = await handle.read(buffer, 0, buffer.length, 0);
+    const mediaType = sniffImageType(buffer.subarray(0, bytesRead));
+    if (!mediaType || mediaType !== declared) throw new Error(`${basename(path)} is not a valid ${declared.slice(6).toUpperCase()} image.`);
+    return {mediaType, data: buffer.subarray(0, bytesRead).toString('base64'), size: info.size};
+  } finally { await handle.close(); }
+}
+
 /* ---- shell --------------------------------------------------------------------------------------------------------- */
 export function shellInvocation(command: string): {file: string; args: string[]} {
   if (!WINDOWS) return {file: '/bin/sh', args: ['-c', command]};
@@ -226,6 +256,17 @@ export async function executeTool(call: ToolCall, ctx: ToolContext): Promise<Too
     if (call.name === 'read_file') {
       item = {type: 'fileRead', path, name: path};
       emit('item/started', {...base, item: {...item, id}});
+      if (IMAGE_TYPES[extname(path).toLowerCase()]) {
+        const name = basename(path);
+        if (!ctx.vision) {
+          // Once, plainly; later reads of images in the same turn get the short form.
+          const told = ctx.visionNote?.told === true;
+          if (ctx.visionNote) ctx.visionNote.told = true;
+          return finish(item, {content: told ? `${name} is an image and this model cannot see images.` : `This model cannot see images, so ${name} was not read. It is an image file; choose a vision-capable model to have it looked at, or describe what you need from its metadata (size, format) instead.`, ok: false}, `${name}: this model cannot see images`);
+        }
+        const image = await readImageLimited(path, resolved.confined);
+        return finish(item, {content: `${name} (${image.mediaType}, ${image.size} bytes) is attached as an image below.`, ok: true, image: {mediaType: image.mediaType, data: image.data, name}}, `Viewed ${name} (${image.size} bytes)`);
+      }
       const {text, size} = await readLimited(path, MAX_FILE_READ, resolved.confined);
       const content = (text || '(empty file)') + (size > MAX_FILE_READ ? `\n[file is ${size} bytes; the first ${MAX_FILE_READ} are shown]` : '');
       // The timeline row shows that the file was read, not its body.

@@ -96,6 +96,7 @@ const COMMANDS = {
   'files.search': true,
   'files.read': true,
   'files.asset': true,
+  'files.chatImage': true,
   'files.nativeAvailable': true,
   'files.nativeShow': true,
   'files.nativePosition': true,

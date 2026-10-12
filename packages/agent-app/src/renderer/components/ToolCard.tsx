@@ -19,6 +19,7 @@ import {MessageBody} from './MessageBody';
 import {Tip} from './Tooltip';
 import {AppGlyph} from './AppGlyph';
 import {openScreenshotTab} from './ComputerPip';
+import {ChatImage} from './ChatImage';
 
 type Glyph = React.ComponentType<{size?: number; strokeWidth?: number; 'aria-hidden'?: boolean | 'true'}>;
 /** Codex transcript glyphs: thin, monochrome, one per verb. */
@@ -100,15 +101,11 @@ function FileLinks({item,files}:{item:TimelineItem;files:{path:string;adds?:numb
   </React.Fragment>;})}{files.length>3&&<span className="tool-row-sep"> and {files.length-3} more</span>}</>;
 }
 
-/** "Viewed 4 images": a strip of thumbnails; each opens the image in the side pane. */
+/** "Viewed 4 images": a strip of real thumbnails (ChatImage). A path inside a chat folder opens in the side pane; any other
+ *  image the chat named (/tmp, a worktree under app data) is read through the chat itself and opens zoomed. */
 function ImageThumb({item,path}:{item:TimelineItem;path:string}) {
   const to=fileTarget(item,path);
-  const [url,setUrl]=useState<string>();
-  useEffect(()=>{if(!to)return;let live=true;invoke('files.asset',{folderId:to.folderId,path:to.path}).then(asset=>{if(live)setUrl(asset.dataUrl);},()=>{});return()=>{live=false;};},[to?.folderId,to?.path]);
-  if(!to)return <span className="tool-thumb is-missing" title={`${path} — outside this chat’s folders`}><ImageIcon size={16} aria-hidden="true"/></span>;
-  return <button type="button" className="tool-thumb" title={`${basename(path)} — Open in the side pane`} aria-label={`Open ${basename(path)}`} onClick={()=>void openFile(to.folderId,to.path)}>
-    {url?<img src={url} alt="" draggable={false} decoding="async" loading="lazy"/>:<ImageIcon size={16} aria-hidden="true"/>}
-  </button>;
+  return <ChatImage chatId={item.chatId} path={path} inFolder={to} onOpen={to?()=>void openFile(to.folderId,to.path):undefined}/>;
 }
 export function ImageThumbs({item,paths}:{item:TimelineItem;paths:readonly string[]}) {
   if(!paths.length)return null;

@@ -8,6 +8,8 @@ export interface McpServerSpec { command: string; args?: string[]; env?: Record<
 export interface AdapterRunInput {
   chat: Chat; cwd: string; prompt: string; model: string;
   images?: string[];
+  /** True when the selected model reports image input; tool reads of images (read_file) are then sent to it as pictures. */
+  vision?: boolean;
   reasoningEffort?: 'low' | 'medium' | 'high' | 'xhigh';
   /** Mode and domain instructions, already joined. */
   instructions?: string;

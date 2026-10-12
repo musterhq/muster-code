@@ -6,6 +6,8 @@ import {addComposerContext} from '../composerContext';
 import React, { useEffect, useRef, useState } from 'react';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import {ResourceLink, type ResourceContext} from './ResourceLink';
+import {ChatImage} from './ChatImage';
+import {activeChat} from '../store';
 import {MarkdownTable} from './MarkdownTable';
 import remarkGfm from 'remark-gfm';
 import { remarkLeadingLabels } from '../markdown-labels';
@@ -184,6 +186,24 @@ function SelectionQuote({ container }: { container: React.RefObject<HTMLDivEleme
   return <button type="button" className="md-quote" style={{ left: offer.left, top: offer.top }} onMouseDown={event => event.preventDefault()} onClick={quote} aria-label="Quote in reply" title="Quote in reply"><Quote size={12} />Quote</button>;
 }
 
+/** An image in a reply. A picture on this computer (an absolute path or file: link, the way an agent names one it made or looked at) shows at a readable size with click-to-zoom,
+ *  read through this chat; anything else stays text, since a reply must not fetch remote images. */
+function ReplyImage({src, alt}: {src?: string; alt?: string}): React.ReactElement {
+  const path = localImagePath(src);
+  const chat = activeChat();
+  if (path && chat) return <ChatImage chatId={chat.id} path={path} variant="inline"/>;
+  return <span className="md-unavailable-link">[Image: {alt || 'image'} — preview unavailable]</span>;
+}
+/** The local file a markdown image points at: `/abs/path.png` or `file:///abs/path.png`; undefined for anything else. */
+export function localImagePath(src?: string): string | undefined {
+  if (!src) return undefined;
+  let path = src.trim();
+  if (/^file:\/\//i.test(path)) { try { path = decodeURIComponent(new URL(path).pathname); } catch { return undefined; } }
+  else if (/^[A-Za-z][A-Za-z0-9+.-]*:/.test(path) && !/^[A-Za-z]:[\\/]/.test(path)) return undefined;
+  else { try { path = decodeURIComponent(path); } catch { /* keep as written */ } }
+  return (path.startsWith('/') || /^[A-Za-z]:[\\/]/.test(path)) && /\.(?:png|jpe?g|gif|webp|bmp|avif|svg)$/i.test(path) ? path : undefined;
+}
+
 function MessageBodyContent({ text, resourceContext, animate = false, linkFiles = false }: { text: string; resourceContext?: ResourceContext; animate?: boolean; linkFiles?: boolean }): React.ReactElement {
   // Replies link the files they mention (markdown-file-links.ts); documents and previews render as written.
   const remarkPlugins = React.useMemo(() => linkFiles ? [remarkGfm, createIncrementalMarkdownPlugin(), remarkLeadingLabels, remarkFileLinks] : [remarkGfm, createIncrementalMarkdownPlugin()], [linkFiles]);
@@ -205,6 +225,7 @@ function MessageBodyContent({ text, resourceContext, animate = false, linkFiles 
     };
     return {
       ...components,
+      img: ({src, alt}: any) => <ReplyImage src={src} alt={alt}/>,
       h1: heading(1), h2: heading(2), h3: heading(3),
       h4: heading(4), h5: heading(5), h6: heading(6),
       ...(resourceContext ? {
