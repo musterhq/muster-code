@@ -38,7 +38,7 @@ export class DeviceFeed {
   subscribe(listener: Listener): () => void { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; }
   private present(source: CanvasImageSource, width: number, height: number): void {
     if (this.canvas.width !== width || this.canvas.height !== height) { this.canvas.width = width; this.canvas.height = height; }
-    this.canvas.getContext('2d', {alpha: false})?.drawImage(source, 0, 0, width, height);
+    this.canvas.getContext?.('2d', {alpha: false})?.drawImage(source, 0, 0, width, height);
     this.width = width; this.height = height; this.lastFrameAt = Date.now(); this.frames++; this.error = undefined;
     for (const listener of [...this.listeners]) listener();
   }
@@ -126,5 +126,5 @@ export function useDeviceFeed(deviceId: string | undefined, active: boolean): {f
 export function paintInto(target: HTMLCanvasElement | null, feed: DeviceFeed | undefined): void {
   if (!target || !feed || !feed.width) return;
   if (target.width !== feed.width || target.height !== feed.height) { target.width = feed.width; target.height = feed.height; }
-  target.getContext('2d', {alpha: false})?.drawImage(feed.canvas, 0, 0);
+  target.getContext?.('2d', {alpha: false})?.drawImage(feed.canvas, 0, 0);
 }
