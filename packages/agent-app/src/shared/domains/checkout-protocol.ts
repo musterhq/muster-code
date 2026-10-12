@@ -143,12 +143,14 @@ export interface CheckoutLease {
   recheck: boolean;
   /** Set when the re-read found the task changed in a conflicting way: nothing is sent until the person chooses (send anyway, edit, or discard). */
   conflict: LeaseConflict | null;
+  /** Set when a hand-back, release or run-on-server found the task changed in Paperclip (cancelled, closed, reassigned): nothing was sent, the lease ended here, the worktree is kept. */
+  endNotice?: string | null;
 }
 export interface LeaseConflict { at: string; changes: string[]; status: WorkspaceStatus; assignee: string | null }
 /** A queued post, as the "N updates waiting" list shows it. */
 export interface PendingPost { id: number; type: 'comment' | 'patch' | 'cost'; kind: string; summary: string; body: string; at: string; editable: boolean }
 /** A lease as the screens see it: stale means silent for longer than the reminder hours. */
-export interface LeaseView extends CheckoutLease { thisMac: boolean; stale: boolean; staleHours: number; /** Whole days since check-out when idle for more than three days. */ staleDays: number | null; /** A plain-folder check-out in a very broad folder (home, Documents, Desktop, Downloads). */ broadFolder: boolean }
+export interface LeaseView extends CheckoutLease { /** Updates for this task the outbox gave up on after a day (Retry sends them again). */ stuck?: number; /** The server refused the sign-in (401): updates are held until the key changes or the person retries. */ authRequired?: boolean; thisMac: boolean; stale: boolean; staleHours: number; /** Whole days since check-out when idle for more than three days. */ staleDays: number | null; /** A plain-folder check-out in a very broad folder (home, Documents, Desktop, Downloads). */ broadFolder: boolean }
 /** Per project: `auto` hands back by itself when the local work is finished; `ask` offers it in a toast instead. */
 export type AutoMode = 'auto' | 'ask';
 export interface CheckoutSettings { staleHours: number; deviceName: string }
@@ -197,7 +199,7 @@ export interface HandBackPreview {
   /** Why hand-back is not possible yet ("Run the tests, or write why they were not run."). */
   blocked: string | null;
 }
-export interface OutboxStatus { pending: number; lastSyncAt: string | null; lastError: string | null }
+export interface OutboxStatus { pending: number; lastSyncAt: string | null; lastError: string | null; /** Updates the outbox gave up on (older than a day and never accepted): "N updates couldn't be sent · Retry". */ stuck?: number; /** The server refused the sign-in (401). */ authRequired?: boolean }
 
 export interface CheckoutCommands {
   'orgs.list': { input: { refresh?: boolean }; output: OrgsList };
@@ -234,6 +236,8 @@ export interface CheckoutCommands {
   'checkout.runOnServer': { input: { taskId: string; on: boolean }; output: LeaseView };
   /** Sends the queued posts (also runs on its own after a reconnect). */
   'checkout.sync': { input: Record<string, never>; output: OutboxStatus };
+  /** Sends the updates the outbox gave up on again (one task's, or all). */
+  'checkout.retry': { input: { taskId?: string }; output: OutboxStatus };
   'checkout.outbox': { input: Record<string, never>; output: OutboxStatus };
   /** "Work offline" on a checked-out task: nothing is sent until it is switched off (or the server is back, after an automatic offline). */
   'checkout.offline': { input: { taskId: string; on: boolean }; output: LeaseView };
@@ -264,5 +268,5 @@ export type CheckoutEvent = { type: 'checkoutChanged'; taskId: string | null } |
 export const CHECKOUT_COMMANDS = {
   'orgs.list': true, 'orgs.set': true, 'orgs.work': true, 'orgs.open': true, 'orgs.link': true, 'checkout.settings': true, 'checkout.bindings': true, 'checkout.bind': true, 'checkout.unbind': true, 'checkout.plan': true,
   'checkout.start': true, 'checkout.get': true, 'checkout.leases': true, 'checkout.decision': true, 'checkout.handback.preview': true, 'checkout.handback': true, 'checkout.release': true, 'checkout.runOnServer': true,
-  'checkout.sync': true, 'checkout.outbox': true, 'checkout.remind': true, 'checkout.auto': true, 'checkout.undo': true, 'checkout.countdown': true, 'checkout.handback.anyway': true, 'checkout.handback.runtests': true, 'checkout.countdowns': true, 'checkout.org': true, 'checkout.engine': true, 'checkout.review': true, 'checkout.offline': true, 'checkout.pending': true, 'checkout.pending.edit': true, 'checkout.resolve': true,
+  'checkout.sync': true, 'checkout.retry': true, 'checkout.outbox': true, 'checkout.remind': true, 'checkout.auto': true, 'checkout.undo': true, 'checkout.countdown': true, 'checkout.handback.anyway': true, 'checkout.handback.runtests': true, 'checkout.countdowns': true, 'checkout.org': true, 'checkout.engine': true, 'checkout.review': true, 'checkout.offline': true, 'checkout.pending': true, 'checkout.pending.edit': true, 'checkout.resolve': true,
 } as const satisfies Record<keyof CheckoutCommands, true>;

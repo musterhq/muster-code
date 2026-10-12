@@ -13,6 +13,7 @@ import { hasTestSetup } from '../checkout/folder.ts';
 import { badgeOf } from '../checkout/lease.ts';
 import { TurnLedger } from '../turn-ledger.ts';
 import { connectionFor } from '../server/connection.ts';
+import { RETRY_BASE_MS, retryDelay } from '../checkout/outbox-policy.ts';
 import { serverHubFor } from '../server/orgs.ts';
 import type { DomainContext, DomainModule } from './types.ts';
 
@@ -71,9 +72,16 @@ export function createCheckoutDomain(ctx: DomainContext): DomainModule {
     emit: taskId => { ctx.emit({ type: 'checkoutChanged', taskId }); ctx.emit({ type: 'projectsWorkspaceChanged', scopes: ['tasks'], taskIds: taskId ? [taskId] : [] }); schedule(); },
   });
   /** Posts that could not go (offline) are tried again every half minute, only while some are waiting. */
+  let failures = 0;
   const schedule = () => {
     if (retry || !store.pendingCount()) return;
-    retry = setTimeout(() => { retry = null; void svc().flush().catch(() => undefined).finally(schedule); }, 30_000);
+    // 30 s after a first failure, doubling to a 30 minute cap. A refused sign-in (401) is not retried at all: the check is local, and a new key is noticed within 30 s.
+    const wait = svc().authBlocked() ? RETRY_BASE_MS : retryDelay(failures);
+    retry = setTimeout(() => {
+      retry = null;
+      if (svc().authBlocked()) { schedule(); return; }
+      void svc().flush().catch(() => undefined).finally(() => { failures = store.syncState().lastError ? failures + 1 : 0; schedule(); });
+    }, wait);
     retry.unref?.();
   };
   /** A quiet session gets a "paused" note. One timer, only while a task is checked out here. */
@@ -149,6 +157,7 @@ export function createCheckoutDomain(ctx: DomainContext): DomainModule {
       'checkout.release': input => svc().release(id(input.taskId), typeof input.note === 'string' ? text(input.note, 2000) : undefined),
       'checkout.runOnServer': input => svc().runOnServer(id(input.taskId), input.on === true),
       'checkout.sync': () => svc().sync(),
+      'checkout.retry': input => svc().retry(typeof input.taskId === 'string' ? input.taskId : undefined),
       'checkout.outbox': () => svc().outbox(),
       'checkout.offline': input => svc().setOffline(id(input.taskId), input.on === true),
       'checkout.pending': input => svc().pending(id(input.taskId)),

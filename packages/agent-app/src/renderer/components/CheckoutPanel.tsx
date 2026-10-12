@@ -82,8 +82,12 @@ export function CheckoutNotes({ detail }: { detail: WorkspaceTaskDetail }): Reac
   if (!lease) return null;
   const waiting = lease.pending > 0;
   // Nothing relevant: no extra chrome at all.
-  if (!lease.offline && !waiting && !lease.stale && !lease.conflict && !lease.staleDays && !lease.broadFolder && !lease.heldBack) return null;
+  const stuck = lease.stuck ?? 0;
+  if (!lease.offline && !waiting && !lease.stale && !lease.conflict && !lease.staleDays && !lease.broadFolder && !lease.heldBack && !lease.endNotice && !lease.authRequired && !stuck) return null;
   return <div className="ws-checkout-notes" role="status">
+    {lease.endNotice && <p className="ws-checkout-note" data-tone="warn">{lease.endNotice}.</p>}
+    {lease.authRequired && <p className="ws-checkout-note" data-tone="warn">Sign in to Muster Server again. {waiting ? `${lease.pending} ${lease.pending === 1 ? 'update is' : 'updates are'} held` : 'Updates are held'} until you do. <button type="button" className="ws-link" onClick={() => void invoke('checkout.sync', {}).then(reload, fail)}>Try again</button></p>}
+    {stuck > 0 && <p className="ws-checkout-note" data-tone="warn">{stuck} {stuck === 1 ? 'update' : 'updates'} couldn’t be sent · <button type="button" className="ws-link" onClick={() => void invoke('checkout.retry', { taskId: lease.taskId }).then(reload, fail)}>Retry</button></p>}
     {lease.staleDays ? <StaleCheckout lease={lease} onChanged={reload}/> : null}
     {lease.heldBack && <p className="ws-checkout-note" data-tone="warn">Not handed back yet: {lease.heldBack.reason}
       {lease.heldBack.kind === 'no-tests' && <> <button type="button" className="ws-link" onClick={() => void invoke('checkout.handback.runtests', { taskId: lease.taskId }).then(reload, fail)}>Run tests and hand back</button> · <button type="button" className="ws-link" onClick={() => void invoke('checkout.handback.anyway', { taskId: lease.taskId }).then(reload, fail)}>Hand back anyway</button></>}
