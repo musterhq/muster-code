@@ -607,7 +607,7 @@ export class CheckoutService {
       if (isAuth(cause)) {
         // A refused sign-in is not a lost connection: the lease stays online, nothing is retried, and the task says to sign in again.
         this.authStop = this.credential();
-        store.setSyncState(done(), 'Sign in to Paperclip again. Updates are held until you do.');
+        store.setSyncState(done(), 'Sign in to Muster Server again. Updates are held until you do.');
         return;
       }
       store.setSyncState(done(), message(cause));
@@ -698,7 +698,7 @@ export class CheckoutService {
     }
   }
   /**
-   * The task changed in Paperclip, so a lease-ending change is not sent. Nothing queued for it is (a comment on someone else's task would be noise), the lease
+   * The task changed on Muster Server, so a lease-ending change is not sent. Nothing queued for it is (a comment on someone else's task would be noise), the lease
    * is ended here with a notice, and the worktree is kept.
    */
   private endHere(taskId: string, rows: readonly { id: number }[], why: string): void {

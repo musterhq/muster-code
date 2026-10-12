@@ -1451,25 +1451,25 @@ const handBackCalls = (h: { server: FakeServer }) => h.server.calls.filter(c => 
 async function readyToHandBack() { const h = setup(); await bound(h); const l = await h.svc.start({ taskId: 't1', model: OWN, confirm: true }); await h.svc.onTurn(l.chatId!, 'r1', 'completed'); return h; }
 const REVIEWER = { kind: 'agent' as const, id: 'a-qa' };
 
-test('#394 hand-back, release and run-on-server do not PATCH a task that was reassigned, cancelled or closed in Paperclip; the lease ends here and the worktree is kept', async () => {
+test('#394 hand-back, release and run-on-server do not PATCH a task that was reassigned, cancelled or closed on Muster Server; the lease ends here and the worktree is kept', async () => {
   const h = await readyToHandBack();
   h.server.tasks[0]!.assigneeUserId = BOB; h.server.tasks[0]!.assigneeId = `user:${BOB}`; h.server.tasks[0]!.assigneeLabel = 'Bob'; h.server.generation++;
   const view = await h.svc.handBack({ taskId: 't1', reviewer: REVIEWER, testsNote: 'n/a' });
   assert.deepEqual(handBackCalls(h), [], 'no PATCH, so Bob’s task is not reopened and no run is killed');
   assert.ok(!h.server.comments.get('t1')!.some(c => /Handed back for review/.test(c.body)), 'and no summary comment either');
   assert.equal(view.state, 'handed_back', 'the lease ends locally');
-  assert.match(view.endNotice!, /^RAG-1 was reassigned to Bob in Paperclip; your local work is kept in \/wt\//);
+  assert.match(view.endNotice!, /^RAG-1 was reassigned to Bob on Muster Server; your local work is kept in \/wt\//);
   assert.equal(h.svc.get('t1')!.pending, 0, 'nothing is left queued to leak out later'); assert.equal(view.conflict, null);
 
   const r = setup(); await bound(r); await r.svc.start({ taskId: 't2', take: true, model: OWN, confirm: true });
   r.server.tasks[1]!.status = 'cancelled'; r.server.generation++;
   const released = await r.svc.release('t2', 'note');
-  assert.ok(!r.server.calls.some(c => /^patch t2 .*"status":"todo"/.test(c)), 'a cancelled task is not set back to todo'); assert.match(released.endNotice!, /RAG-2 was cancelled in Paperclip; your local work is kept/);
+  assert.ok(!r.server.calls.some(c => /^patch t2 .*"status":"todo"/.test(c)), 'a cancelled task is not set back to todo'); assert.match(released.endNotice!, /RAG-2 was cancelled on Muster Server; your local work is kept/);
 
   const o = setup(); await bound(o); await o.svc.start({ taskId: 't1', model: OWN, confirm: true });
   o.server.tasks[0]!.status = 'done'; o.server.generation++;
   const callsBefore = o.server.calls.length; const ended = await o.svc.runOnServer('t1', true);
-  assert.ok(!o.server.calls.slice(callsBefore).some(c => c.startsWith('patch t1')), 'closed in Paperclip: not handed to the server agent'); assert.match(ended.endNotice!, /RAG-1 was closed in Paperclip/);
+  assert.ok(!o.server.calls.slice(callsBefore).some(c => c.startsWith('patch t1')), 'closed on Muster Server: not handed to the server agent'); assert.match(ended.endNotice!, /RAG-1 was closed on Muster Server/);
 });
 
 test('#394 a task that is still in progress and still yours is handed back as before', async () => {
@@ -1488,14 +1488,14 @@ test('#394 the persisted hand-back countdown checks the task too when it fires a
   const restarted = new CheckoutService((h.svc as unknown as { d: CheckoutDeps }).d);
   assert.equal(restarted.resumeCountdowns(), 1); h.advance(5 * 60_000); await h.fire();
   assert.deepEqual(handBackCalls(h), [], 'the cancelled task was not PATCHed');
-  assert.match(restarted.get('t1')!.endNotice!, /RAG-1 was cancelled in Paperclip; your local work is kept in/);
+  assert.match(restarted.get('t1')!.endNotice!, /RAG-1 was cancelled on Muster Server; your local work is kept in/);
 });
 
 test('#394 a 401 is a sign-in state, not offline: held without retries until the key changes, then sent', async () => {
   const h = await readyToHandBack(); h.server.token = 'old-key';
   h.server.unauthorized = true;
   const view = await h.svc.handBack({ taskId: 't1', reviewer: REVIEWER, testsNote: 'n/a' });
-  assert.equal(view.offline, null, 'not offline'); assert.equal(view.authRequired, true); assert.match((await h.svc.outbox()).lastError!, /Sign in to Paperclip again/);
+  assert.equal(view.offline, null, 'not offline'); assert.equal(view.authRequired, true); assert.match((await h.svc.outbox()).lastError!, /Sign in to Muster Server again/);
   h.server.unauthorized = false; const before = h.server.calls.length;
   await h.svc.flush(); await h.svc.flush(); assert.equal(h.server.calls.length, before, 'no request while the same key is blocked');
   assert.equal(h.svc.get('t1')!.pending > 0, true, 'the hand-back waits in the outbox');

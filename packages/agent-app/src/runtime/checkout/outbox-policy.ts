@@ -9,12 +9,12 @@ export interface Expect { status?: string; statusNot?: string[]; assigneeUserId?
 /** Why a lease-ending change must not be sent (null when the task still looks as expected). `label`: who holds it now. */
 export function whyNotSend(task: { key: string; status: string; assigneeId?: string | null; assigneeUserId?: string | null; assigneeLabel?: string | null } | null, key: string, expect: Expect): string | null {
   if (!task) return `${key} is no longer on the server`;
-  if (task.status === 'cancelled') return `${task.key} was cancelled in Paperclip`;
-  if (task.status === 'done') return `${task.key} was closed in Paperclip`;
-  if (expect.statusNot?.includes(task.status)) return `${task.key} is now ${task.status.replace('_', ' ')} in Paperclip`;
+  if (task.status === 'cancelled') return `${task.key} was cancelled on Muster Server`;
+  if (task.status === 'done') return `${task.key} was closed on Muster Server`;
+  if (expect.statusNot?.includes(task.status)) return `${task.key} is now ${task.status.replace('_', ' ')} on Muster Server`;
   const agent = task.assigneeId && !task.assigneeId.startsWith('user:') ? task.assigneeId : null;
-  if (expect.assigneeUserId !== undefined && (task.assigneeUserId ?? null) !== expect.assigneeUserId) return `${task.key} was reassigned to ${task.assigneeLabel ?? 'someone else'} in Paperclip`;
-  if (expect.assigneeAgentId !== undefined && agent !== expect.assigneeAgentId) return `${task.key} was reassigned to ${task.assigneeLabel ?? 'someone else'} in Paperclip`;
-  if (expect.status !== undefined && task.status !== expect.status) return `${task.key} is now ${task.status.replace('_', ' ')} in Paperclip`;
+  if (expect.assigneeUserId !== undefined && (task.assigneeUserId ?? null) !== expect.assigneeUserId) return `${task.key} was reassigned to ${task.assigneeLabel ?? 'someone else'} on Muster Server`;
+  if (expect.assigneeAgentId !== undefined && agent !== expect.assigneeAgentId) return `${task.key} was reassigned to ${task.assigneeLabel ?? 'someone else'} on Muster Server`;
+  if (expect.status !== undefined && task.status !== expect.status) return `${task.key} is now ${task.status.replace('_', ' ')} on Muster Server`;
   return null;
 }
