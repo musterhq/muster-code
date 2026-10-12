@@ -244,6 +244,8 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
   const snapshots = createSnapshotCoalescer(() => emit({ type: 'snapshot', snapshot: snapshot() }));
   const state = (): void => snapshots.request();
   const publishedTimelineRevisions = new Map<string, number>();
+  /** The last assistant message of the latest turn (after the last user message), or '' when the turn said nothing. */
+  const finalAssistantText = (chatId: string): string => { const items = store.timeline(chatId); for (let i = items.length - 1; i >= 0; i--) { const it = items[i]!; if (it.kind === 'user') return ''; if (it.kind === 'assistant' && it.text.trim()) return it.text; } return ''; };
   const timeline = (chatId: string) => {
     const after = publishedTimelineRevisions.get(chatId) ?? 0;
     const patch = store.timelineChanges(chatId, after);
@@ -267,7 +269,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
     if(!task.runChatId){projectTasks.failTaskStart({projectId:task.projectId,id:task.id,requestId:task.runRequestId,chatId:'',reason:'The saved Project task run has no linked chat. Reopen it before starting new work.'});continue;}
     const linked=store.chat(task.runChatId);
     if(!linked){projectTasks.failTaskStart({projectId:task.projectId,id:task.id,requestId:task.runRequestId,chatId:task.runChatId,reason:'The linked agent chat is missing. Reopen the task and inspect Project activity before retrying.'});continue;}
-    if(linked.status==='completed'||linked.status==='failed'||linked.status==='interrupted')projectTasks.settleRunForChat(linked.id,linked.status,linked.error);
+    if(linked.status==='completed'||linked.status==='failed'||linked.status==='interrupted')projectTasks.settleRunForChat(linked.id,linked.status,linked.error,finalAssistantText(linked.id));
     else if(linked.status==='idle')projectTasks.failTaskStart({projectId:task.projectId,id:task.id,requestId:task.runRequestId,chatId:task.runChatId,reason:'The app stopped before the linked agent chat accepted its request. Open the chat to review the saved draft.'});
   }
   const folderFor = (folderId: unknown) => { const folder = store.folder(id(folderId)); if (!folder) throw new Error('Folder does not exist.'); return folder; };
@@ -768,7 +770,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
           if(finalChat?.status==='completed'&&store.settleTitle(chatId))finalChat=store.chat(chatId);
           // CHAT-15: "until new activity" wakes when a run settles (one transition, unread + one notification).
           if(finalChat?.snoozeUntilActivity&&wake(chatId,'activity'))finalChat=store.chat(chatId);
-          if(finalChat&&(finalChat.status==='completed'||finalChat.status==='failed'||finalChat.status==='interrupted')){const task=projectTasks.settleRunForChat(chatId,finalChat.status,finalChat.error);if(task)emit({type:'projectChanged',projectId:task.projectId,taskId:task.id});}state();
+          if(finalChat&&(finalChat.status==='completed'||finalChat.status==='failed'||finalChat.status==='interrupted')){const task=projectTasks.settleRunForChat(chatId,finalChat.status,finalChat.error,finalAssistantText(chatId));if(task)emit({type:'projectChanged',projectId:task.projectId,taskId:task.id});}state();
           if (finalChat) { domainHooks.runSettled({chat:finalChat,runId:accepted.runId,status:finalChat.status}); afterRun(chatId, finalChat.status); }
           // A turn the app-server started itself (native goal or queue) while this run settled is adopted now.
           nativeTurns.drain(chatId); }

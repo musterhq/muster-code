@@ -360,7 +360,7 @@ export function createProjectsDomain(ctx: DomainContext): DomainModule {
   }
 
   // ── Dispatch ──────────────────────────────────────────────────────────────
-  const taskPrompt = (t: ProjectTask) => `Project task: ${t.title}\nTask ID: ${t.id}\nAcceptance criteria:\n${t.acceptance || '(not specified)'}\n\nWork only within the selected Project folder. Implement the task, report concrete changes and relevant verification, and do not claim the task is verified. Ask before expanding scope or taking an irreversible action.`;
+  const taskPrompt = (t: ProjectTask) => `Project task: ${t.title}\nTask ID: ${t.id}\nAcceptance criteria:\n${t.acceptance || '(not specified)'}\n\nWork only within the selected Project folder. Implement the task, report concrete changes and relevant verification, and do not claim the task is verified. Work autonomously and do the next obvious step without asking; stop to ask only before a destructive or irreversible action, or when a choice is genuinely ambiguous. End with a short summary of what you did and what is left, not a question.`;
   /** One agent run for a task: a scoped chat at the clamped permission mode, claimed on the task before the send. */
   async function dispatch(projectId: string, taskId: string, rev: number, trigger: 'user' | 'scheduler' | 'coordinator', folderId?: string, wake?: WakeInfo): Promise<{ chatId: string; runId: string }> {
     try { return await dispatchOne(projectId, taskId, rev, trigger, folderId, wake); } finally { gov.release(taskId); }
@@ -471,7 +471,9 @@ export function createProjectsDomain(ctx: DomainContext): DomainModule {
   }
   /** Moves running tasks with a pending approval or question to needs-input (and back once answered). */
   function reconcileInput(projectId: string): boolean {
-    const { tasks: store } = open(), live = store.listTasks(projectId).items.filter(t => (t.state === 'running' || t.state === 'needs-input') && t.runChatId);
+    const { tasks: store } = open(), running = (chatId: string) => Boolean(open().db.prepare("SELECT 1 FROM chats WHERE id = ? AND status IN ('running','stopping')").get(chatId));
+    // A settled run that ended with a question stays needs-input (#385); only a live chat's pending approval or question moves a task in or out.
+    const live = store.listTasks(projectId).items.filter(t => (t.state === 'running' || (t.state === 'needs-input' && running(t.runChatId ?? ''))) && t.runChatId);
     const waiting = waitingChats(live.map(t => t.runChatId!));
     let moved = false;
     for (const t of live) if ((t.state === 'needs-input') !== waiting.has(t.runChatId!)) moved = Boolean(store.markNeedsInput(t.runChatId!, waiting.has(t.runChatId!))) || moved;

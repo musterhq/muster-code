@@ -22,7 +22,7 @@ export function composeBundle(files: readonly BundleFile[], opts: { timer: boole
   if (get('TOOLS.md')) out.push('', 'Tools and environment notes (TOOLS.md):', clip(get('TOOLS.md'), 3000));
   if (opts.timer && get('HEARTBEAT.md')) out.push('', 'This run was started by your heartbeat timer. Work through this checklist (HEARTBEAT.md):', clip(get('HEARTBEAT.md'), 3000));
   const extra = files.filter(f => !['AGENTS.md', 'SOUL.md', 'TOOLS.md', 'HEARTBEAT.md'].includes(f.name) && f.text.trim()).map(f => f.name);
-  if (extra.length) out.push('', `More notes in your bundle (ask the user if you need them): ${extra.join(', ')}.`);
+  if (extra.length) out.push('', `More notes in your bundle (open them yourself if you need them): ${extra.join(', ')}.`);
   return out;
 }
 /** Names whose text differs between two file maps. */
