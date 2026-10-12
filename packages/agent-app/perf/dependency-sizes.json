@@ -1,37 +1,48 @@
 {
-  "generatedAt": "2026-09-23T18:05:51.553Z",
+  "generatedAt": "2026-10-12T04:09:00.332Z",
   "note": "Minified bytes each package contributes to the shipped bundles (renderer chunks are lazy where split). Regenerate with node scripts/dependency-report.mjs and commit with any dependency change.",
   "totals": {
-    "renderer": 6803544,
-    "main": 232667,
-    "preload": 1037,
-    "runtime": 1806915
+    "renderer": 9770053,
+    "main": 309734,
+    "preload": 1055,
+    "runtime": 2656396
   },
   "packages": [
     {
-      "name": "@shikijs/langs",
-      "bytes": 2812176,
+      "name": "(app source)",
+      "bytes": 5306211,
       "targets": {
-        "renderer": 2812176
+        "renderer": 3361176,
+        "main": 309246,
+        "preload": 1041,
+        "runtime": 1634748
       },
-      "version": "4.2.0",
+      "version": "0.3.8",
+      "license": "UNLICENSED",
+      "licenseFile": null,
+      "direct": false
+    },
+    {
+      "name": "@shikijs/langs",
+      "bytes": 2979375,
+      "targets": {
+        "renderer": 2979375
+      },
+      "version": "4.5.0",
       "license": "MIT",
       "licenseFile": "LICENSE",
       "direct": true
     },
     {
-      "name": "(app source)",
-      "bytes": 2746567,
+      "name": "three",
+      "bytes": 1117371,
       "targets": {
-        "renderer": 1725236,
-        "main": 232179,
-        "preload": 1023,
-        "runtime": 788129
+        "renderer": 1117371
       },
-      "version": "0.2.0",
-      "license": "UNLICENSED",
-      "licenseFile": null,
-      "direct": false
+      "version": "0.186.1",
+      "license": "MIT",
+      "licenseFile": "LICENSE",
+      "direct": true
     },
     {
       "name": "@shikijs/engine-oniguruma",
@@ -39,7 +50,7 @@
       "targets": {
         "renderer": 628935
       },
-      "version": "4.2.0",
+      "version": "4.5.0",
       "license": "MIT",
       "licenseFile": "LICENSE",
       "direct": false
@@ -68,9 +79,9 @@
     },
     {
       "name": "exceljs",
-      "bytes": 250978,
+      "bytes": 251366,
       "targets": {
-        "runtime": 250978
+        "runtime": 251366
       },
       "version": "4.4.0",
       "license": "MIT",
@@ -79,9 +90,9 @@
     },
     {
       "name": "react-dom",
-      "bytes": 209895,
+      "bytes": 209974,
       "targets": {
-        "renderer": 209895
+        "renderer": 209974
       },
       "version": "19.3.0",
       "license": "MIT",
@@ -90,9 +101,9 @@
     },
     {
       "name": "@base-ui/react",
-      "bytes": 162946,
+      "bytes": 162944,
       "targets": {
-        "renderer": 162946
+        "renderer": 162944
       },
       "version": "1.8.0",
       "license": "MIT",
@@ -101,9 +112,9 @@
     },
     {
       "name": "readable-stream",
-      "bytes": 160949,
+      "bytes": 161208,
       "targets": {
-        "runtime": 160949
+        "runtime": 161208
       },
       "version": "2.3.8",
       "license": "MIT",
@@ -112,9 +123,9 @@
     },
     {
       "name": "bluebird",
-      "bytes": 87240,
+      "bytes": 87287,
       "targets": {
-        "runtime": 87240
+        "runtime": 87287
       },
       "version": "3.4.7",
       "license": "MIT",
@@ -123,20 +134,20 @@
     },
     {
       "name": "lucide-react",
-      "bytes": 58198,
+      "bytes": 72716,
       "targets": {
-        "renderer": 58198
+        "renderer": 72716
       },
-      "version": "1.47.0",
+      "version": "1.50.0",
       "license": "ISC",
       "licenseFile": "LICENSE",
       "direct": true
     },
     {
       "name": "pako",
-      "bytes": 46463,
+      "bytes": 46479,
       "targets": {
-        "runtime": 46463
+        "runtime": 46479
       },
       "version": "1.0.11",
       "license": "(MIT AND Zlib)",
@@ -145,9 +156,9 @@
     },
     {
       "name": "jszip",
-      "bytes": 43569,
+      "bytes": 43603,
       "targets": {
-        "runtime": 43569
+        "runtime": 43603
       },
       "version": "3.10.2",
       "license": "(MIT OR GPL-3.0-or-later)",
@@ -178,9 +189,9 @@
     },
     {
       "name": "micromark-core-commonmark",
-      "bytes": 27289,
+      "bytes": 27330,
       "targets": {
-        "renderer": 27289
+        "renderer": 27330
       },
       "version": "2.0.3",
       "license": "MIT",
@@ -189,9 +200,9 @@
     },
     {
       "name": "ssf",
-      "bytes": 25023,
+      "bytes": 25197,
       "targets": {
-        "runtime": 25023
+        "runtime": 25197
       },
       "version": "0.11.2",
       "license": "Apache-2.0",
@@ -200,9 +211,9 @@
     },
     {
       "name": "async",
-      "bytes": 24084,
+      "bytes": 24431,
       "targets": {
-        "runtime": 24084
+        "runtime": 24431
       },
       "version": "3.2.6",
       "license": "MIT",
@@ -211,9 +222,9 @@
     },
     {
       "name": "@tanstack/virtual-core",
-      "bytes": 23842,
+      "bytes": 23825,
       "targets": {
-        "renderer": 23842
+        "renderer": 23825
       },
       "version": "3.17.11",
       "license": "MIT",
@@ -222,9 +233,9 @@
     },
     {
       "name": "saxes",
-      "bytes": 23733,
+      "bytes": 23734,
       "targets": {
-        "runtime": 23733
+        "runtime": 23734
       },
       "version": "5.0.1",
       "license": "ISC",
@@ -232,21 +243,10 @@
       "direct": false
     },
     {
-      "name": "fstream",
-      "bytes": 22251,
-      "targets": {
-        "runtime": 22251
-      },
-      "version": "1.0.12",
-      "license": "ISC",
-      "licenseFile": "LICENSE",
-      "direct": false
-    },
-    {
       "name": "big-integer",
-      "bytes": 22120,
+      "bytes": 22731,
       "targets": {
-        "runtime": 22120
+        "runtime": 22731
       },
       "version": "1.6.52",
       "license": "Unlicense",
@@ -254,10 +254,21 @@
       "direct": false
     },
     {
-      "name": "string_decoder",
-      "bytes": 22024,
+      "name": "fstream",
+      "bytes": 22266,
       "targets": {
-        "runtime": 22024
+        "runtime": 22266
+      },
+      "version": "1.0.12",
+      "license": "ISC",
+      "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
+      "name": "string_decoder",
+      "bytes": 22040,
+      "targets": {
+        "runtime": 22040
       },
       "version": "1.1.1",
       "license": "MIT",
@@ -277,10 +288,21 @@
       "direct": true
     },
     {
-      "name": "unzipper",
-      "bytes": 18333,
+      "name": "@shikijs/themes",
+      "bytes": 18992,
       "targets": {
-        "runtime": 18333
+        "renderer": 18992
+      },
+      "version": "4.5.0",
+      "license": "MIT",
+      "licenseFile": "LICENSE",
+      "direct": true
+    },
+    {
+      "name": "unzipper",
+      "bytes": 18349,
+      "targets": {
+        "runtime": 18349
       },
       "version": "0.10.14",
       "license": "MIT",
@@ -289,9 +311,9 @@
     },
     {
       "name": "@fast-csv/parse",
-      "bytes": 18235,
+      "bytes": 18295,
       "targets": {
-        "runtime": 18235
+        "runtime": 18295
       },
       "version": "4.3.6",
       "license": "MIT",
@@ -311,9 +333,9 @@
     },
     {
       "name": "minimatch",
-      "bytes": 17862,
+      "bytes": 17896,
       "targets": {
-        "runtime": 17862
+        "runtime": 17896
       },
       "version": "5.1.9",
       "license": "ISC",
@@ -322,20 +344,20 @@
     },
     {
       "name": "@shikijs/core",
-      "bytes": 16901,
+      "bytes": 17059,
       "targets": {
-        "renderer": 16901
+        "renderer": 17059
       },
-      "version": "4.2.0",
+      "version": "4.5.0",
       "license": "MIT",
       "licenseFile": "LICENSE",
       "direct": false
     },
     {
       "name": "glob",
-      "bytes": 16519,
+      "bytes": 16550,
       "targets": {
-        "runtime": 16519
+        "runtime": 16550
       },
       "version": "7.2.3",
       "license": "ISC",
@@ -344,9 +366,9 @@
     },
     {
       "name": "compress-commons",
-      "bytes": 16430,
+      "bytes": 16497,
       "targets": {
-        "runtime": 16430
+        "runtime": 16497
       },
       "version": "4.1.2",
       "license": "MIT",
@@ -355,9 +377,9 @@
     },
     {
       "name": "archiver",
-      "bytes": 14099,
+      "bytes": 14155,
       "targets": {
-        "runtime": 14099
+        "runtime": 14155
       },
       "version": "5.3.2",
       "license": "MIT",
@@ -365,21 +387,10 @@
       "direct": false
     },
     {
-      "name": "dayjs",
-      "bytes": 13499,
-      "targets": {
-        "runtime": 13499
-      },
-      "version": "1.11.23",
-      "license": "MIT",
-      "licenseFile": "LICENSE",
-      "direct": false
-    },
-    {
       "name": "@base-ui/utils",
-      "bytes": 13483,
+      "bytes": 13484,
       "targets": {
-        "renderer": 13483
+        "renderer": 13484
       },
       "version": "0.4.0",
       "license": "MIT",
@@ -388,20 +399,31 @@
     },
     {
       "name": "@shikijs/primitive",
-      "bytes": 13335,
+      "bytes": 13461,
       "targets": {
-        "renderer": 13335
+        "renderer": 13461
       },
-      "version": "4.2.0",
+      "version": "4.5.0",
+      "license": "MIT",
+      "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
+      "name": "dayjs",
+      "bytes": 13417,
+      "targets": {
+        "runtime": 13417
+      },
+      "version": "1.11.23",
       "license": "MIT",
       "licenseFile": "LICENSE",
       "direct": false
     },
     {
       "name": "lodash.groupby",
-      "bytes": 12637,
+      "bytes": 12735,
       "targets": {
-        "runtime": 12637
+        "runtime": 12735
       },
       "version": "4.6.0",
       "license": "MIT",
@@ -421,9 +443,9 @@
     },
     {
       "name": "graceful-fs",
-      "bytes": 10910,
+      "bytes": 10912,
       "targets": {
-        "runtime": 10910
+        "runtime": 10912
       },
       "version": "4.2.11",
       "license": "ISC",
@@ -432,9 +454,9 @@
     },
     {
       "name": "tar-stream",
-      "bytes": 10829,
+      "bytes": 10881,
       "targets": {
-        "runtime": 10829
+        "runtime": 10881
       },
       "version": "2.2.0",
       "license": "MIT",
@@ -454,9 +476,9 @@
     },
     {
       "name": "uuid",
-      "bytes": 10598,
+      "bytes": 10619,
       "targets": {
-        "runtime": 10598
+        "runtime": 10619
       },
       "version": "11.1.1",
       "license": "MIT",
@@ -465,9 +487,9 @@
     },
     {
       "name": "lodash.isequal",
-      "bytes": 10507,
+      "bytes": 10611,
       "targets": {
-        "runtime": 10507
+        "runtime": 10611
       },
       "version": "4.5.0",
       "license": "MIT",
@@ -476,9 +498,9 @@
     },
     {
       "name": "mdast-util-from-markdown",
-      "bytes": 10233,
+      "bytes": 10221,
       "targets": {
-        "renderer": 10233
+        "renderer": 10221
       },
       "version": "2.0.3",
       "license": "MIT",
@@ -487,9 +509,9 @@
     },
     {
       "name": "micromark",
-      "bytes": 9396,
+      "bytes": 9414,
       "targets": {
-        "renderer": 9396
+        "renderer": 9414
       },
       "version": "4.0.2",
       "license": "MIT",
@@ -497,21 +519,10 @@
       "direct": false
     },
     {
-      "name": "@shikijs/themes",
-      "bytes": 9074,
-      "targets": {
-        "renderer": 9074
-      },
-      "version": "4.2.0",
-      "license": "MIT",
-      "licenseFile": "LICENSE",
-      "direct": true
-    },
-    {
       "name": "react",
-      "bytes": 8394,
+      "bytes": 8479,
       "targets": {
-        "renderer": 8394
+        "renderer": 8479
       },
       "version": "19.3.0",
       "license": "MIT",
@@ -531,9 +542,9 @@
     },
     {
       "name": "@fast-csv/format",
-      "bytes": 7714,
+      "bytes": 7734,
       "targets": {
-        "runtime": 7714
+        "runtime": 7734
       },
       "version": "4.3.5",
       "license": "MIT",
@@ -553,9 +564,9 @@
     },
     {
       "name": "archiver-utils",
-      "bytes": 6785,
+      "bytes": 6827,
       "targets": {
-        "runtime": 6785
+        "runtime": 6827
       },
       "version": "2.1.0",
       "license": "MIT",
@@ -564,9 +575,9 @@
     },
     {
       "name": "@floating-ui/core",
-      "bytes": 6475,
+      "bytes": 6473,
       "targets": {
-        "renderer": 6475
+        "renderer": 6473
       },
       "version": "1.8.0",
       "license": "MIT",
@@ -575,9 +586,9 @@
     },
     {
       "name": "brace-expansion",
-      "bytes": 6280,
+      "bytes": 6319,
       "targets": {
-        "runtime": 6280
+        "runtime": 6319
       },
       "version": "2.1.7",
       "license": "MIT",
@@ -586,9 +597,9 @@
     },
     {
       "name": "tmp",
-      "bytes": 6127,
+      "bytes": 6128,
       "targets": {
-        "runtime": 6127
+        "runtime": 6128
       },
       "version": "0.2.7",
       "license": "MIT",
@@ -597,9 +608,9 @@
     },
     {
       "name": "hast-util-to-jsx-runtime",
-      "bytes": 5854,
+      "bytes": 5855,
       "targets": {
-        "renderer": 5854
+        "renderer": 5855
       },
       "version": "2.3.6",
       "license": "MIT",
@@ -607,25 +618,25 @@
       "direct": false
     },
     {
-      "name": "bl",
-      "bytes": 5654,
-      "targets": {
-        "runtime": 5654
-      },
-      "version": "4.1.0",
-      "license": "MIT",
-      "licenseFile": "LICENSE.md",
-      "direct": false
-    },
-    {
       "name": "lodash.union",
-      "bytes": 5649,
+      "bytes": 5685,
       "targets": {
-        "runtime": 5649
+        "runtime": 5685
       },
       "version": "4.6.0",
       "license": "MIT",
       "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
+      "name": "bl",
+      "bytes": 5664,
+      "targets": {
+        "runtime": 5664
+      },
+      "version": "4.1.0",
+      "license": "MIT",
+      "licenseFile": "LICENSE.md",
       "direct": false
     },
     {
@@ -641,9 +652,9 @@
     },
     {
       "name": "lodash.difference",
-      "bytes": 5561,
+      "bytes": 5594,
       "targets": {
-        "runtime": 5561
+        "runtime": 5594
       },
       "version": "4.5.0",
       "license": "MIT",
@@ -652,9 +663,9 @@
     },
     {
       "name": "vfile",
-      "bytes": 5145,
+      "bytes": 5146,
       "targets": {
-        "renderer": 5145
+        "renderer": 5146
       },
       "version": "6.0.3",
       "license": "MIT",
@@ -663,9 +674,9 @@
     },
     {
       "name": "safe-buffer",
-      "bytes": 4707,
+      "bytes": 4723,
       "targets": {
-        "runtime": 4707
+        "runtime": 4723
       },
       "version": "5.1.2",
       "license": "MIT",
@@ -674,9 +685,9 @@
     },
     {
       "name": "lodash.uniq",
-      "bytes": 4509,
+      "bytes": 4528,
       "targets": {
-        "runtime": 4509
+        "runtime": 4528
       },
       "version": "4.5.0",
       "license": "MIT",
@@ -685,9 +696,9 @@
     },
     {
       "name": "unified",
-      "bytes": 4168,
+      "bytes": 4167,
       "targets": {
-        "renderer": 4168
+        "renderer": 4167
       },
       "version": "11.0.5",
       "license": "MIT",
@@ -696,9 +707,9 @@
     },
     {
       "name": "xmlchars",
-      "bytes": 4149,
+      "bytes": 4152,
       "targets": {
-        "runtime": 4149
+        "runtime": 4152
       },
       "version": "2.2.0",
       "license": "MIT",
@@ -706,21 +717,10 @@
       "direct": false
     },
     {
-      "name": "micromark-extension-gfm-footnote",
-      "bytes": 4029,
-      "targets": {
-        "renderer": 4029
-      },
-      "version": "2.1.0",
-      "license": "MIT",
-      "licenseFile": "license",
-      "direct": false
-    },
-    {
       "name": "binary",
-      "bytes": 4029,
+      "bytes": 4051,
       "targets": {
-        "runtime": 4029
+        "runtime": 4051
       },
       "version": "0.3.0",
       "license": "MIT",
@@ -728,10 +728,21 @@
       "direct": false
     },
     {
-      "name": "traverse",
-      "bytes": 3920,
+      "name": "micromark-extension-gfm-footnote",
+      "bytes": 4032,
       "targets": {
-        "runtime": 3920
+        "renderer": 4032
+      },
+      "version": "2.1.0",
+      "license": "MIT",
+      "licenseFile": "license",
+      "direct": false
+    },
+    {
+      "name": "traverse",
+      "bytes": 3930,
+      "targets": {
+        "runtime": 3930
       },
       "version": "0.3.9",
       "license": "MIT/X11",
@@ -740,9 +751,9 @@
     },
     {
       "name": "rimraf",
-      "bytes": 3917,
+      "bytes": 3918,
       "targets": {
-        "runtime": 3917
+        "runtime": 3918
       },
       "version": "2.7.1",
       "license": "ISC",
@@ -762,9 +773,9 @@
     },
     {
       "name": "micromark-extension-gfm-autolink-literal",
-      "bytes": 3733,
+      "bytes": 3741,
       "targets": {
-        "renderer": 3733
+        "renderer": 3741
       },
       "version": "2.1.0",
       "license": "MIT",
@@ -784,9 +795,9 @@
     },
     {
       "name": "micromark-util-subtokenize",
-      "bytes": 3533,
+      "bytes": 3534,
       "targets": {
-        "renderer": 3533
+        "renderer": 3534
       },
       "version": "2.1.0",
       "license": "MIT",
@@ -795,9 +806,9 @@
     },
     {
       "name": "buffer-crc32",
-      "bytes": 3508,
+      "bytes": 3514,
       "targets": {
-        "runtime": 3508
+        "runtime": 3514
       },
       "version": "0.2.13",
       "license": "MIT",
@@ -817,9 +828,9 @@
     },
     {
       "name": "lie",
-      "bytes": 3450,
+      "bytes": 3451,
       "targets": {
-        "runtime": 3450
+        "runtime": 3451
       },
       "version": "3.3.0",
       "license": "MIT",
@@ -828,9 +839,9 @@
     },
     {
       "name": "readdir-glob",
-      "bytes": 3214,
+      "bytes": 3228,
       "targets": {
-        "runtime": 3214
+        "runtime": 3228
       },
       "version": "1.1.3",
       "license": "Apache-2.0",
@@ -839,9 +850,9 @@
     },
     {
       "name": "fs.realpath",
-      "bytes": 3096,
+      "bytes": 3111,
       "targets": {
-        "runtime": 3096
+        "runtime": 3111
       },
       "version": "1.0.0",
       "license": "ISC",
@@ -861,9 +872,9 @@
     },
     {
       "name": "buffers",
-      "bytes": 3030,
+      "bytes": 3034,
       "targets": {
-        "runtime": 3030
+        "runtime": 3034
       },
       "version": "0.1.1",
       "license": "UNKNOWN",
@@ -872,9 +883,9 @@
     },
     {
       "name": "@floating-ui/react-dom",
-      "bytes": 2815,
+      "bytes": 2808,
       "targets": {
-        "renderer": 2815
+        "renderer": 2808
       },
       "version": "2.1.9",
       "license": "MIT",
@@ -883,9 +894,9 @@
     },
     {
       "name": "react-markdown",
-      "bytes": 2803,
+      "bytes": 2800,
       "targets": {
-        "renderer": 2803
+        "renderer": 2800
       },
       "version": "10.1.0",
       "license": "MIT",
@@ -894,9 +905,9 @@
     },
     {
       "name": "lodash.defaults",
-      "bytes": 2618,
+      "bytes": 2639,
       "targets": {
-        "runtime": 2618
+        "runtime": 2639
       },
       "version": "4.2.0",
       "license": "MIT",
@@ -926,21 +937,10 @@
       "direct": false
     },
     {
-      "name": "crc-32",
-      "bytes": 1928,
-      "targets": {
-        "runtime": 1928
-      },
-      "version": "1.2.2",
-      "license": "Apache-2.0",
-      "licenseFile": "LICENSE",
-      "direct": false
-    },
-    {
       "name": "zip-stream",
-      "bytes": 1928,
+      "bytes": 1933,
       "targets": {
-        "runtime": 1928
+        "runtime": 1933
       },
       "version": "4.1.1",
       "license": "MIT",
@@ -948,10 +948,21 @@
       "direct": false
     },
     {
-      "name": "@tanstack/react-virtual",
-      "bytes": 1840,
+      "name": "crc-32",
+      "bytes": 1932,
       "targets": {
-        "renderer": 1840
+        "runtime": 1932
+      },
+      "version": "1.2.2",
+      "license": "Apache-2.0",
+      "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
+      "name": "@tanstack/react-virtual",
+      "bytes": 1834,
+      "targets": {
+        "renderer": 1834
       },
       "version": "3.14.13",
       "license": "MIT",
@@ -960,9 +971,9 @@
     },
     {
       "name": "chainsaw",
-      "bytes": 1785,
+      "bytes": 1790,
       "targets": {
-        "runtime": 1785
+        "runtime": 1790
       },
       "version": "0.1.0",
       "license": "MIT/X11",
@@ -982,9 +993,9 @@
     },
     {
       "name": "setimmediate",
-      "bytes": 1743,
+      "bytes": 1744,
       "targets": {
-        "runtime": 1743
+        "runtime": 1744
       },
       "version": "1.0.5",
       "license": "MIT",
@@ -1015,9 +1026,9 @@
     },
     {
       "name": "fast-csv",
-      "bytes": 1651,
+      "bytes": 1655,
       "targets": {
-        "runtime": 1651
+        "runtime": 1655
       },
       "version": "4.3.6",
       "license": "MIT",
@@ -1026,9 +1037,9 @@
     },
     {
       "name": "mdast-util-gfm-footnote",
-      "bytes": 1645,
+      "bytes": 1647,
       "targets": {
-        "renderer": 1645
+        "renderer": 1647
       },
       "version": "2.1.0",
       "license": "MIT",
@@ -1059,9 +1070,9 @@
     },
     {
       "name": "micromark-extension-gfm-strikethrough",
-      "bytes": 1553,
+      "bytes": 1556,
       "targets": {
-        "renderer": 1553
+        "renderer": 1556
       },
       "version": "2.1.0",
       "license": "MIT",
@@ -1070,9 +1081,9 @@
     },
     {
       "name": "end-of-stream",
-      "bytes": 1474,
+      "bytes": 1481,
       "targets": {
-        "runtime": 1474
+        "runtime": 1481
       },
       "version": "1.4.5",
       "license": "MIT",
@@ -1081,9 +1092,9 @@
     },
     {
       "name": "vfile-message",
-      "bytes": 1353,
+      "bytes": 1367,
       "targets": {
-        "renderer": 1353
+        "renderer": 1367
       },
       "version": "4.0.3",
       "license": "MIT",
@@ -1092,11 +1103,22 @@
     },
     {
       "name": "lodash.flatten",
-      "bytes": 1251,
+      "bytes": 1266,
       "targets": {
-        "runtime": 1251
+        "runtime": 1266
       },
       "version": "4.4.0",
+      "license": "MIT",
+      "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
+      "name": "crc32-stream",
+      "bytes": 1212,
+      "targets": {
+        "runtime": 1212
+      },
+      "version": "4.0.3",
       "license": "MIT",
       "licenseFile": "LICENSE",
       "direct": false
@@ -1108,17 +1130,6 @@
         "renderer": 1202
       },
       "version": "3.0.2",
-      "license": "MIT",
-      "licenseFile": "LICENSE",
-      "direct": false
-    },
-    {
-      "name": "crc32-stream",
-      "bytes": 1199,
-      "targets": {
-        "runtime": 1199
-      },
-      "version": "4.0.3",
       "license": "MIT",
       "licenseFile": "LICENSE",
       "direct": false
@@ -1158,9 +1169,9 @@
     },
     {
       "name": "core-util-is",
-      "bytes": 1087,
+      "bytes": 1088,
       "targets": {
-        "runtime": 1087
+        "runtime": 1088
       },
       "version": "1.0.3",
       "license": "MIT",
@@ -1169,9 +1180,9 @@
     },
     {
       "name": "immediate",
-      "bytes": 934,
+      "bytes": 935,
       "targets": {
-        "runtime": 934
+        "runtime": 935
       },
       "version": "3.0.6",
       "license": "MIT",
@@ -1191,9 +1202,9 @@
     },
     {
       "name": "buffer-indexof-polyfill",
-      "bytes": 906,
+      "bytes": 916,
       "targets": {
-        "runtime": 906
+        "runtime": 916
       },
       "version": "1.0.2",
       "license": "MIT",
@@ -1202,9 +1213,9 @@
     },
     {
       "name": "duplexer2",
-      "bytes": 902,
+      "bytes": 903,
       "targets": {
-        "runtime": 902
+        "runtime": 903
       },
       "version": "0.1.4",
       "license": "BSD-3-Clause",
@@ -1213,9 +1224,9 @@
     },
     {
       "name": "mkdirp",
-      "bytes": 899,
+      "bytes": 900,
       "targets": {
-        "runtime": 899
+        "runtime": 900
       },
       "version": "0.5.6",
       "license": "MIT",
@@ -1224,9 +1235,9 @@
     },
     {
       "name": "lodash.isfunction",
-      "bytes": 873,
+      "bytes": 885,
       "targets": {
-        "runtime": 873
+        "runtime": 885
       },
       "version": "3.0.9",
       "license": "MIT",
@@ -1301,9 +1312,9 @@
     },
     {
       "name": "lodash.escaperegexp",
-      "bytes": 738,
+      "bytes": 753,
       "targets": {
-        "runtime": 738
+        "runtime": 753
       },
       "version": "4.1.2",
       "license": "MIT",
@@ -1312,9 +1323,9 @@
     },
     {
       "name": "process-nextick-args",
-      "bytes": 716,
+      "bytes": 717,
       "targets": {
-        "runtime": 716
+        "runtime": 717
       },
       "version": "2.0.1",
       "license": "MIT",
@@ -1323,9 +1334,9 @@
     },
     {
       "name": "once",
-      "bytes": 674,
+      "bytes": 681,
       "targets": {
-        "runtime": 674
+        "runtime": 681
       },
       "version": "1.4.0",
       "license": "ISC",
@@ -1334,9 +1345,9 @@
     },
     {
       "name": "lazystream",
-      "bytes": 657,
+      "bytes": 667,
       "targets": {
-        "runtime": 657
+        "runtime": 667
       },
       "version": "1.0.1",
       "license": "MIT",
@@ -1356,9 +1367,9 @@
     },
     {
       "name": "lodash.isplainobject",
-      "bytes": 623,
+      "bytes": 632,
       "targets": {
-        "runtime": 623
+        "runtime": 632
       },
       "version": "4.0.6",
       "license": "MIT",
@@ -1367,9 +1378,9 @@
     },
     {
       "name": "balanced-match",
-      "bytes": 618,
+      "bytes": 630,
       "targets": {
-        "runtime": 618
+        "runtime": 630
       },
       "version": "1.0.2",
       "license": "MIT",
@@ -1422,9 +1433,9 @@
     },
     {
       "name": "micromark-util-sanitize-uri",
-      "bytes": 487,
+      "bytes": 489,
       "targets": {
-        "renderer": 487
+        "renderer": 489
       },
       "version": "2.0.1",
       "license": "MIT",
@@ -1433,9 +1444,9 @@
     },
     {
       "name": "inherits",
-      "bytes": 472,
+      "bytes": 474,
       "targets": {
-        "runtime": 472
+        "runtime": 474
       },
       "version": "2.0.4",
       "license": "ISC",
@@ -1444,9 +1455,9 @@
     },
     {
       "name": "inflight",
-      "bytes": 450,
+      "bytes": 454,
       "targets": {
-        "runtime": 450
+        "runtime": 454
       },
       "version": "1.0.6",
       "license": "ISC",
@@ -1455,13 +1466,24 @@
     },
     {
       "name": "micromark-util-character",
-      "bytes": 433,
+      "bytes": 435,
       "targets": {
-        "renderer": 433
+        "renderer": 435
       },
       "version": "2.1.1",
       "license": "MIT",
       "licenseFile": "license",
+      "direct": false
+    },
+    {
+      "name": "wrappy",
+      "bytes": 421,
+      "targets": {
+        "runtime": 421
+      },
+      "version": "1.0.2",
+      "license": "ISC",
+      "licenseFile": "LICENSE",
       "direct": false
     },
     {
@@ -1472,17 +1494,6 @@
       },
       "version": "1.0.14",
       "license": "MIT",
-      "licenseFile": "LICENSE",
-      "direct": false
-    },
-    {
-      "name": "wrappy",
-      "bytes": 415,
-      "targets": {
-        "runtime": 415
-      },
-      "version": "1.0.2",
-      "license": "ISC",
       "licenseFile": "LICENSE",
       "direct": false
     },
@@ -1499,9 +1510,9 @@
     },
     {
       "name": "normalize-path",
-      "bytes": 372,
+      "bytes": 375,
       "targets": {
-        "runtime": 372
+        "runtime": 375
       },
       "version": "3.0.0",
       "license": "MIT",
@@ -1510,9 +1521,9 @@
     },
     {
       "name": "micromark-util-combine-extensions",
-      "bytes": 369,
+      "bytes": 370,
       "targets": {
-        "renderer": 369
+        "renderer": 370
       },
       "version": "2.0.1",
       "license": "MIT",
@@ -1532,9 +1543,9 @@
     },
     {
       "name": "path-is-absolute",
-      "bytes": 317,
+      "bytes": 324,
       "targets": {
-        "runtime": 317
+        "runtime": 324
       },
       "version": "1.0.1",
       "license": "MIT",
@@ -1553,23 +1564,23 @@
       "direct": false
     },
     {
+      "name": "micromark-util-chunked",
+      "bytes": 302,
+      "targets": {
+        "renderer": 302
+      },
+      "version": "2.0.1",
+      "license": "MIT",
+      "licenseFile": "license",
+      "direct": false
+    },
+    {
       "name": "html-url-attributes",
       "bytes": 301,
       "targets": {
         "renderer": 301
       },
       "version": "3.0.1",
-      "license": "MIT",
-      "licenseFile": "license",
-      "direct": false
-    },
-    {
-      "name": "micromark-util-chunked",
-      "bytes": 299,
-      "targets": {
-        "renderer": 299
-      },
-      "version": "2.0.1",
       "license": "MIT",
       "licenseFile": "license",
       "direct": false
@@ -1609,9 +1620,9 @@
     },
     {
       "name": "concat-map",
-      "bytes": 237,
+      "bytes": 241,
       "targets": {
-        "runtime": 237
+        "runtime": 241
       },
       "version": "0.0.1",
       "license": "MIT",
@@ -1630,6 +1641,17 @@
       "direct": false
     },
     {
+      "name": "lodash.isboolean",
+      "bytes": 216,
+      "targets": {
+        "runtime": 216
+      },
+      "version": "3.0.3",
+      "license": "MIT",
+      "licenseFile": "LICENSE",
+      "direct": false
+    },
+    {
       "name": "is-plain-obj",
       "bytes": 212,
       "targets": {
@@ -1638,17 +1660,6 @@
       "version": "4.1.0",
       "license": "MIT",
       "licenseFile": "license",
-      "direct": false
-    },
-    {
-      "name": "lodash.isboolean",
-      "bytes": 212,
-      "targets": {
-        "runtime": 212
-      },
-      "version": "3.0.3",
-      "license": "MIT",
-      "licenseFile": "LICENSE",
       "direct": false
     },
     {
@@ -1675,9 +1686,9 @@
     },
     {
       "name": "listenercount",
-      "bytes": 201,
+      "bytes": 205,
       "targets": {
-        "runtime": 201
+        "runtime": 205
       },
       "version": "1.0.1",
       "license": "ISC",
@@ -1829,9 +1840,9 @@
     },
     {
       "name": "isarray",
-      "bytes": 118,
+      "bytes": 119,
       "targets": {
-        "runtime": 118
+        "runtime": 119
       },
       "version": "1.0.0",
       "license": "MIT",
@@ -1851,9 +1862,9 @@
     },
     {
       "name": "micromark-util-normalize-identifier",
-      "bytes": 99,
+      "bytes": 100,
       "targets": {
-        "renderer": 99
+        "renderer": 100
       },
       "version": "2.0.1",
       "license": "MIT",
@@ -1862,9 +1873,9 @@
     },
     {
       "name": "fs-constants",
-      "bytes": 79,
+      "bytes": 83,
       "targets": {
-        "runtime": 79
+        "runtime": 83
       },
       "version": "1.0.0",
       "license": "MIT",
@@ -1877,16 +1888,16 @@
       "targets": {
         "renderer": 75
       },
-      "version": "4.2.0",
+      "version": "4.5.0",
       "license": "MIT",
       "licenseFile": "LICENSE",
       "direct": false
     },
     {
       "name": "lodash.isundefined",
-      "bytes": 71,
+      "bytes": 75,
       "targets": {
-        "runtime": 71
+        "runtime": 75
       },
       "version": "3.0.1",
       "license": "MIT",
@@ -1895,9 +1906,9 @@
     },
     {
       "name": "lodash.isnil",
-      "bytes": 68,
+      "bytes": 71,
       "targets": {
-        "runtime": 68
+        "runtime": 71
       },
       "version": "4.0.0",
       "license": "MIT",
@@ -1917,9 +1928,9 @@
     },
     {
       "name": "util-deprecate",
-      "bytes": 59,
+      "bytes": 60,
       "targets": {
-        "runtime": 59
+        "runtime": 60
       },
       "version": "1.0.2",
       "license": "MIT",

@@ -1,5 +1,5 @@
 import React from 'react';
-import {AppWindow, Inbox, MessagesSquare, NotebookPen, Bot, Braces, File, FileArchive, FileAudio, FileCode, FileImage, FileLock, FileSpreadsheet, FileText, FileType, FileVideo, Files, Folder, FolderOpen, GitBranch, GitCompare, GitMerge, GitPullRequest, Globe, History, Monitor, PictureInPicture2, Presentation, SquareTerminal, type LucideIcon} from 'lucide-react';
+import {AppWindow, Box, Inbox, MessagesSquare, NotebookPen, Bot, Braces, File, FileArchive, FileAudio, FileCode, FileImage, FileLock, FileSpreadsheet, FileText, FileType, FileVideo, Files, Folder, FolderOpen, GitBranch, GitCompare, GitMerge, GitPullRequest, Globe, History, Monitor, PictureInPicture2, Presentation, SquareTerminal, type LucideIcon} from 'lucide-react';
 import type {WorkspaceTab} from '../store';
 import {fileIcon, type FileIconKind} from './filePresentation';
 import './file-type-icon.css';
@@ -7,7 +7,7 @@ import './file-type-icon.css';
 const GLYPHS: Record<FileIconKind, LucideIcon> = {
   folder: Folder, markdown: FileText, json: Braces, typescript: FileCode, javascript: FileCode, css: FileType, html: Globe,
   image: FileImage, pdf: FileText, sheet: FileSpreadsheet, doc: FileText, slides: Presentation, archive: FileArchive,
-  lock: FileLock, audio: FileAudio, video: FileVideo, code: FileCode, text: FileText, file: File,
+  lock: FileLock, audio: FileAudio, video: FileVideo, model: Box, code: FileCode, text: FileText, file: File,
 };
 
 /** Per-type file glyph with a quiet tone, shared by the tree, search results and resource tabs. */

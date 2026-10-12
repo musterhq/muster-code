@@ -25,6 +25,7 @@ import { toolEventDetails } from './tool-event-details.ts';
 import { applyProviderEvent, COMPACTION_TEXT, isForeignThreadEvent } from './context-telemetry.ts';
 import { listFiles, readFile, searchFiles } from './files.ts';
 import { readAsset } from './file-assets.ts';
+import { readModelChunk } from './file-models.ts';
 import {readDocument} from './document-preview.ts';
 import {readWorkbook} from './workbook-preview.ts';
 import {FileAnnotations} from './file-annotations.ts';
@@ -1278,6 +1279,12 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
         if (!loc) throw new Error('This file is no longer available.');
         return readAsset(loc.root, loc.rel);
       }
+      case 'attachments.modelChunk': {
+        const chatId = id(p.chatId); chatFor(chatId);
+        const loc = attachments.location(chatId, id(p.id));
+        if (!loc) throw new Error('This file is no longer available.');
+        return readModelChunk(loc.root, loc.rel, Number(p.offset), Number(p.length));
+      }
       case 'attachments.document': {
         const chatId = id(p.chatId); chatFor(chatId);
         const loc = attachments.location(chatId, id(p.id));
@@ -1483,6 +1490,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
         return annotations.add({folderId:folder.id,path,revision:text(p.revision,'revision',64),location:text(p.location,'location',256),quote:text(p.quote,'quote',2000),note:text(p.note,'note',4000)});
       }
       case 'files.asset': return readAsset(folderFor(p.folderId).path, text(p.path,'path'));
+      case 'files.modelChunk': return readModelChunk(folderFor(p.folderId).path, text(p.path,'path'), Number(p.offset), Number(p.length));
       case 'git.changes': { const root = folderFor(p.folderId).path; const result = await new AgentModeReviewHost(() => root).listChanges(); if (result.error) throw new Error(result.error); return result.files; }
       case 'git.status': return gitStatus(folderFor(p.folderId).path);
       case 'git.mutate': {

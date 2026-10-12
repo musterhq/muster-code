@@ -10,6 +10,7 @@ import {WorkbookFile} from './WorkbookFile';
 import {HighlightedSourceTable} from './HighlightedCode';
 import {codeLanguageFromPath} from './codeLanguage';
 import {HtmlPreview} from './FilePreviews';
+import {AttachmentModelPane} from './LazyModel';
 import {ResourceState} from './ResourceState';
 import {FileTypeIcon} from './FileTypeIcon';
 import {filePresentation, friendlyFileError, isLibreOfficeMissing} from './filePresentation';
@@ -24,6 +25,7 @@ type Loaded =
   | {kind: 'asset'; asset: Asset}
   | {kind: 'document'; document: DocumentPreview}
   | {kind: 'workbook'; workbook: WorkbookPreview}
+  | {kind: 'model'}
   | {kind: 'unsupported'; reason: string};
 type LoadState = {phase: 'loading'} | {phase: 'ready'; value: Loaded} | {phase: 'error'; error: string};
 
@@ -81,6 +83,8 @@ export function AttachmentTab({tab}: {tab: WorkspaceTab}): React.ReactElement {
         } else if (presentation === 'workbook') {
           const workbook = await invoke('attachments.workbook', {chatId, id: attachmentId});
           if (live) setState({phase: 'ready', value: {kind: 'workbook', workbook}});
+        } else if (presentation === 'model') {
+          if (live) setState({phase: 'ready', value: {kind: 'model'}});
         } else if (presentation === 'quicklook') {
           if (live) setState({phase: 'ready', value: {kind: 'unsupported', reason: QUICKLOOK_REASON}});
         } else if (presentation === 'binary') {
@@ -104,7 +108,8 @@ export function AttachmentTab({tab}: {tab: WorkspaceTab}): React.ReactElement {
     : <ResourceState kind="error" message={state.error} detail="This file was staged for this chat; retry if the runtime was briefly unavailable." onRetry={() => setAttempt(value => value + 1)}/>;
   else {
     const value = state.value;
-    if (value.kind === 'unsupported') content = <UnsupportedCard name={name} reason={value.reason}/>;
+    if (value.kind === 'model') content = <AttachmentModelPane chatId={chatId} attachmentId={attachmentId} name={name}/>;
+    else if (value.kind === 'unsupported') content = <UnsupportedCard name={name} reason={value.reason}/>;
     else if (value.kind === 'asset') content = presentation === 'image' ? <ImageFile asset={value.asset} name={name}/> : <AttachmentMedia asset={value.asset} name={name}/>;
     else if (value.kind === 'document') content = <PdfFile document={value.document} onLocation={() => {}}/>;
     else if (value.kind === 'workbook') content = <WorkbookFile workbook={value.workbook} onLocation={() => {}}/>;

@@ -1,0 +1,22 @@
+.model-viewer { position: relative; display: flex; flex: 1; min-height: 0; flex-direction: column; }
+.rich-block[data-variant='inline'] .model-viewer { aspect-ratio: 4 / 3; flex: none; }
+.rich-block[data-fullscreen='true'] .model-viewer { flex: 1; aspect-ratio: auto; }
+.model-stage { position: relative; flex: 1; min-height: 0; background: var(--bg-sunken); }
+.model-stage[hidden] { display: none; }
+.model-stage canvas { cursor: grab; }
+.model-stage canvas:active { cursor: grabbing; }
+.model-stage canvas:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
+.model-hint { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.model-progress { width: 160px; height: 4px; accent-color: var(--accent); }
+.model-toolbar { position: absolute; left: 50%; bottom: 12px; display: flex; align-items: center; gap: 4px; padding: 4px; transform: translateX(-50%); border: 1px solid var(--hairline); border-radius: var(--radius-full); background: color-mix(in srgb, var(--bg-raised) 88%, transparent); box-shadow: var(--shadow-sm); backdrop-filter: blur(8px); max-width: calc(100% - 24px); overflow-x: auto; scrollbar-width: none; }
+.model-toolbar .icon-button[aria-pressed='true'] { background: var(--bg-active); color: var(--text); }
+.model-segment { display: inline-flex; gap: 2px; margin: 0 2px; padding: 0 2px; border-inline: 1px solid var(--hairline); }
+.model-chip { padding: 4px 8px; border-radius: var(--radius-full); color: var(--text-dim); font-size: var(--fs-12); white-space: nowrap; }
+.model-chip:hover { background: var(--bg-hover); color: var(--text); }
+.model-chip[aria-pressed='true'] { background: var(--bg-active); color: var(--text); }
+.model-info { position: absolute; top: 12px; left: 12px; display: grid; gap: 4px; margin: 0; padding: 10px 12px; min-width: 200px; max-width: min(320px, calc(100% - 24px)); border: 1px solid var(--hairline); border-radius: var(--radius-8); background: color-mix(in srgb, var(--bg-raised) 90%, transparent); box-shadow: var(--shadow-sm); backdrop-filter: blur(8px); font-size: var(--fs-12); }
+.model-info > div { display: flex; justify-content: space-between; gap: 16px; }
+.model-info dt { color: var(--text-faint); }
+.model-info dd { margin: 0; color: var(--text); font-variant-numeric: tabular-nums; text-align: right; }
+.model-warning dd { color: var(--warn); text-align: left; }
+.model-source { flex: 1; min-height: 0; }
