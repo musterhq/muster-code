@@ -658,11 +658,12 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
             }
           },
           async onRequest(method, params) {
-            // After this turn ended, the warm app-server still asks for approvals: background sub-agents, a native goal
-            // continuation or queued turn (adopted as the chat's run). They get a card like any other request; only a
-            // stopped run (this one, or the adopted run now in the chat) declines.
+            // After this turn ended, the warm app-server still asks for approvals: background sub-agents (the provider
+            // still reports active work) or a native goal continuation or queued turn (adopted as the chat's run). They
+            // get a card like any other request. A stopped run, or a late callback with no work behind it, declines.
             const current = runs.get(chatId);
-            if (disposed || closing || run.stopped || (current && current !== run && current.stopped) || !store.chat(chatId)) return undefined;
+            const background = current ? current !== run && !current.stopped : provider.hasActiveWork?.(chatId) === true;
+            if (disposed || closing || run.stopped || (current !== run && !background) || !store.chat(chatId)) return undefined;
             seal();
             if (method === 'item/tool/requestUserInput') {
               const rawQuestions = Array.isArray(params.questions) ? params.questions : [];
