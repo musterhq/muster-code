@@ -205,7 +205,7 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version-file: packages/agent-app/.nvmrc
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: muster-agent-linux
           path: packages/agent-app/release-dist
