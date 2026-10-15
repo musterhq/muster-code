@@ -165,6 +165,52 @@ test('a started task runs in its own worktree of the project folder, never the c
   assert.match(execFileSync('git',['-C',repo,'worktree','list'],{encoding:'utf8'}),/muster\/rag-15/,'a reused worktree is kept when a Start fails');
 });
 
+test('#183 the scheduler runs an imported project\u2019s task in a worktree, never in the checkout',async t=>{
+  const {service,repo}=await fixture(t);
+  await service.invoke('paperclip.config.set',{mode:'local',companyId:COMPANY});
+  await service.invoke('paperclip.import',{companyId:COMPANY});
+  await service.invoke('paperclip.config.set',{mode:'off'});
+  const ws=await service.invoke('paperclip.snapshot',{});
+  const rag15=ws.tasks.find(x=>x.key==='RAG-15')!;
+  const project=(await service.invoke('project.list',undefined)).find(p=>p.name==='OSS Manager')!;
+  const cto=(await service.invoke('project.members.list',{projectId:project.id})).members.find(m=>m.name==='CTO')!;
+  await service.invoke('project.members.update',{projectId:project.id,id:cto.id,runner:{providerId:'hybrow',model:'m'}});
+  await service.invoke('paperclip.task.update',{taskId:rag15.id,status:'todo'});
+  await service.invoke('project.scheduler.set',{projectId:project.id,autoDispatch:true});
+  const until=async(check:()=>Promise<boolean>)=>{for(let n=0;n<100;n++){if(await check())return true;await new Promise(r=>setTimeout(r,50));}return false;};
+  const started=await until(async()=>(await service.invoke('app.snapshot',undefined)).chats.some(c=>c.projectId===project.id));
+  assert.ok(started,'the scheduler started a run');
+  assert.match(execFileSync('git',['-C',repo,'worktree','list'],{encoding:'utf8'}),/muster\/rag-\d+/,'in a worktree made for the task');
+  await service.invoke('project.scheduler.set',{projectId:project.id,autoDispatch:false});
+  await until(async()=>(await service.invoke('app.snapshot',undefined)).chats.every(c=>c.status!=='running'&&c.status!=='stopping'));
+  await new Promise(r=>setTimeout(r,300));
+  const snap=await service.invoke('app.snapshot',undefined);
+  const checkout=snap.folders.find(f=>f.id===project.primaryFolderId)!;
+  assert.ok(checkout);
+  assert.ok(snap.chats.filter(c=>c.projectId===project.id).every(c=>c.folderId!==checkout.id),'no scheduled run works in the checkout');
+  assert.ok(snap.chats.some(c=>c.projectId===project.id&&/muster-rag-\d+$/.test(snap.folders.find(f=>f.id===c.folderId)?.path??'')),'the run is in a task\u2019s worktree');
+});
+
+test('#183 when the scheduler cannot make a worktree for an imported project\u2019s task, nothing runs in the checkout instead',async t=>{
+  const {service,repo}=await fixture(t);
+  await service.invoke('paperclip.config.set',{mode:'local',companyId:COMPANY});
+  await service.invoke('paperclip.import',{companyId:COMPANY});
+  await service.invoke('paperclip.config.set',{mode:'off'});
+  const ws=await service.invoke('paperclip.snapshot',{});
+  const project=(await service.invoke('project.list',undefined)).find(p=>p.name==='OSS Manager')!;
+  const cto=(await service.invoke('project.members.list',{projectId:project.id})).members.find(m=>m.name==='CTO')!;
+  await service.invoke('project.members.update',{projectId:project.id,id:cto.id,runner:{providerId:'hybrow',model:'m'}});
+  await service.invoke('paperclip.task.update',{taskId:ws.tasks.find(x=>x.key==='RAG-15')!.id,status:'todo'});
+  await rm(join(repo,'.git'),{recursive:true,force:true}); // the checkout is no longer a git repository: no worktree can be made
+  await service.invoke('project.scheduler.set',{projectId:project.id,autoDispatch:true});
+  await new Promise(r=>setTimeout(r,1200));
+  await service.invoke('project.scheduler.set',{projectId:project.id,autoDispatch:false});
+  const snap=await service.invoke('app.snapshot',undefined);
+  assert.equal(snap.chats.filter(c=>c.projectId===project.id).length,0,'no run started in the checkout');
+  const activity=(await service.invoke('project.work',{projectId:project.id,activityLimit:60})).activity.items;
+  assert.ok(activity.some((a:any)=>a.kind==='scheduler.worktree'&&/worktree/.test(a.summary)),'and the project says why');
+});
+
 test('a company-wide approval that is also an issue approval keeps its task and project',async()=>{
   const {DatabaseSync}=await import('node:sqlite');
   const store=new SqliteImportStore(new DatabaseSync(':memory:'));

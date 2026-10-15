@@ -24,6 +24,10 @@ export type RunEnvironmentResolver = (chat: Chat, defaultCwd: string) => Promise
 /** G13: a per-agent tool policy decision for an approval request. null: no rule applies and the usual flow decides. */
 export type ToolPolicyResolver = (chat: Chat, method: string, params: Record<string, unknown>) => { effect: 'allow' | 'ask' | 'deny'; message: string } | null;
 
+/** A worktree made for one automated run: its folder (linked to the project) and how to take it back when nothing ran in it. */
+export interface AutomatedWorktree { folderId: string; undo(): Promise<void> }
+export type AutomatedWorktreeResolver = (projectId: string, taskId: string) => Promise<AutomatedWorktree | null>;
+
 /** The add and on hooks return an unsubscribe function; the set hooks replace a single resolver (undefined clears it). */
 export interface DomainHooks {
   addPromptContributor(fn: PromptContributor): () => void;
@@ -40,6 +44,10 @@ export interface DomainHooks {
   /** Records that a folder is the linked worktree Muster made for a task, the only kind of folder a Git-tab commit may carry an agent identity in. */
   setTaskWorktreeRecorder?(fn: ((projectId: string, taskId: string, folderId: string) => void) | undefined): void;
   noteTaskWorktree?(projectId: string, taskId: string, folderId: string): void;
+  /** Replaces the single resolver of the worktree an automated run (the scheduler, a wake) of an imported project's task works in (undefined clears it). It resolves to null for a project that is not imported. */
+  setAutomatedWorktree?(fn: AutomatedWorktreeResolver | undefined): void;
+  /** The worktree an automated run of this task must use, made (or reused) on demand; null when the task may use its project's own folder. Rejects when the worktree cannot be made: the run must not fall back to the checkout. */
+  automatedWorktree?(projectId: string, taskId: string): Promise<AutomatedWorktree | null>;
   /** The identity a commit in this folder carries, or null. Never throws. */
   commitIdentity?(folderId: string): { name: string; email: string } | null;
   /** Observes successful domain commands (e.g. Projects logging memory and environment writes to activity). Optional so bare test contexts need not provide it. */
