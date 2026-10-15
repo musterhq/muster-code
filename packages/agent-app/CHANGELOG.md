@@ -29,6 +29,7 @@ All notable changes to Muster Agent. Each `## <version>` section becomes the not
 - While Codex reconnects to the model, the chat shows "Reconnecting…" instead of looking stuck.
 - A message sent to a running agent is never delivered twice when the request is slow to answer.
 - A goal with a token budget no longer restarts the Codex process on every turn.
+- Tables in replies no longer cut cells off with an ellipsis. Text and inline code wrap inside the cell, a wide table scrolls sideways inside its own box, "Expand table cells" lifts the cell width cap, and Copy table copies every value in full. This applies to replies, Paperclip task threads, run reports, the file viewer's Markdown preview, pull request descriptions and memory answers.
 
 ## 0.3.11
 

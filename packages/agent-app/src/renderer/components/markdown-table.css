@@ -7,8 +7,12 @@
 .md-body .md-table tbody tr:last-child td { border-bottom:0; }
 .md-body .md-table thead th { padding-block:9px; font-weight:600; white-space:nowrap; color:var(--text); }
 .md-body .md-table tbody td { color:var(--text-dim); }
-.md-table[data-wrap='false'] th, .md-table[data-wrap='false'] td { overflow:hidden; max-width:384px; text-overflow:ellipsis; white-space:nowrap; }
-.md-table[data-wrap='true'] td { max-width:384px; white-space:normal; overflow-wrap:anywhere; }
+/* #425: cells never clip. Text and inline-code chips wrap inside the cell (no nowrap, no ellipsis); by default a
+   cell wraps at a readable width, "Expand table cells" lifts that cap, and a wide table scrolls inside .md-table-scroll. */
+.md-body .md-table td { overflow:visible; white-space:normal; overflow-wrap:anywhere; text-overflow:clip; }
+.md-body .md-table th code, .md-body .md-table td code { max-width:none; overflow:visible; white-space:break-spaces; overflow-wrap:anywhere; word-break:normal; text-overflow:clip; }
+.md-table[data-wrap='false'] td { max-width:384px; }
+.md-table[data-wrap='true'] td { max-width:none; }
 /* Wrap/copy float at the table's top-right on hover or focus; no toolbar row under every table. */
 .md-table-toolbar { position:absolute; top:4px; right:0; z-index:2; display:flex; align-items:center; gap:2px; padding:2px; border-radius:var(--radius-8); background:var(--bg-raised); box-shadow:0 0 0 1px color-mix(in srgb,var(--text) 7%,transparent); opacity:0; pointer-events:none; transition:opacity 130ms ease; }
 .md-table:hover .md-table-toolbar, .md-table:focus-within .md-table-toolbar { opacity:1; pointer-events:auto; }
