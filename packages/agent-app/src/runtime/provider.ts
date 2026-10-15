@@ -16,6 +16,8 @@ import { device } from '../shared/device-noun.ts';
 import {codexSubagentOverrides,subagentSupport} from './subagent-routes.ts';
 import {codexWindowOverrides, userCompactionKeys} from './codex-window-overrides.ts';
 import {unpackedPath} from './unpacked-path.ts';
+import {BROWSER_MCP, BROWSER_NOTE, browserToolStyle, routeBrowserNote} from '../shared/computer-use.ts';
+import type {McpServerSpec} from './adapters/types.ts';
 
 /** Identity of the test-only route `createProviderAdapter({available})` builds. */
 export const FIXTURE_PROVIDER = {id: 'fixture', bindingId: 'fixture-binding', model: 'fixture-model'} as const;
@@ -133,6 +135,16 @@ export const PROCESS_OWNERSHIP_RULE = 'Process ownership: only stop, kill or res
 /** #385: agent mode keeps going instead of ending turns with a permission question. Never added in ask or plan mode. */
 export const AGENT_AUTONOMY_RULE = 'Work autonomously until the task is done. Do the next obvious step without asking. Ask only before destructive or irreversible actions, or when a choice is genuinely ambiguous and changes the outcome. Do not end a turn with "Should I...?" or "Want me to...?" for work that is clearly part of the task: do it. End with a short summary of what you did and what is left, not a question.';
 export const runInstructions = (mode: Chat['mode'], extra?: string, subagents = true) => [modeInstructions(mode, subagents), mode === 'agent' ? AGENT_AUTONOMY_RULE : undefined, mode === 'agent' ? PROCESS_OWNERSHIP_RULE : undefined, extra].filter(Boolean).join('\n\n') || undefined;
+/** #424: the instructions, Muster's MCP servers and the native browser flag for a non-Codex route. Each route names the
+ *  browser tools exactly as its model sees them, or says plainly that it has none; the browser server goes only to routes
+ *  that load it (Claude Code, OpenCode, Grok), and HTTP routes get native browser tools wired to the same bridge. */
+export function adapterBrowser(driver: string | undefined, mode: Chat['mode'], developerInstructions: string | undefined, overrides: ProviderInput['configOverrides'], subagents = true): {instructions?: string; mcpServers?: Record<string, McpServerSpec>; browserTools?: true} {
+  const style = browserToolStyle(driver), offered = !!developerInstructions?.includes(BROWSER_NOTE);
+  const servers = mcpServersFromOverrides(overrides);
+  if (style === 'native' || style === 'none') delete servers[BROWSER_MCP];
+  const instructions = runInstructions(mode, routeBrowserNote(developerInstructions, style), subagents);
+  return {...(instructions ? {instructions} : {}), ...(Object.keys(servers).length ? {mcpServers: servers} : {}), ...(offered && style === 'native' ? {browserTools: true as const} : {})};
+}
 /** Test runners construct many services; they opt into real CLI/API adapters by passing a catalog. */
 const defaultCatalog = () => process.env.NODE_TEST_CONTEXT && process.env.MUSTER_PROVIDER_ADAPTERS !== '1' ? undefined : createAdapterCatalog();
 interface AdapterRun {controller: AbortController; completed: Promise<void>; /** Set by adapters that accept mid-turn messages (Claude Code). */ steer?: (text: string) => boolean}
@@ -204,8 +216,7 @@ export function createProviderAdapter(options: { core?: CoreClient; available?: 
         chat: input.chat, cwd: input.cwd, prompt: input.prompt, model, permissionMode: access.permissionMode, signal: owned.controller.signal,
         ...(input.images?.length ? {images: input.images} : {}), ...(route.info.models.find(entry => entry.id === model)?.images === true ? {vision: true} : {}), ...(input.reasoningEffort ? {reasoningEffort: input.reasoningEffort} : {}),
         ...(resumeThreadId ? {resumeThreadId} : {}),
-        instructions: runInstructions(input.chat.mode, input.developerInstructions, subagentSupport(route.info.driver) !== 'none'),
-        ...(Object.keys(mcpServersFromOverrides(input.configOverrides)).length ? {mcpServers: mcpServersFromOverrides(input.configOverrides)} : {}),
+        ...adapterBrowser(route.info.driver, input.chat.mode, input.developerInstructions, input.configOverrides, subagentSupport(route.info.driver) !== 'none'),
         ...(Object.keys(envFromOverrides(input.configOverrides)).length ? {env: envFromOverrides(input.configOverrides)} : {}),
         // The adapter runs its own tools (HTTP routes): they meet the same Project tool rules, user-process guard and approval cards as Codex's.
         authorize: async (method, params) => {

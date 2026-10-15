@@ -16,6 +16,8 @@ export interface AdapterRunInput {
   /** Muster's own tool servers for this run (in-app browser, terminal, mailbox…), from the domains' `mcp_servers.*`
    *  overrides. Adapters that can load MCP servers pass them to the model; the rest ignore them. */
   mcpServers?: Record<string, McpServerSpec>;
+  /** #424: offer Muster's in-app browser as native tools (HTTP routes); they call the same bridge as the MCP server. */
+  browserTools?: boolean;
   /** Extra environment for the run's process: the agent's git identity and the secrets lent to it. */
   env?: Record<string, string>;
   permissionMode: 'read-only' | 'workspace' | 'full';
