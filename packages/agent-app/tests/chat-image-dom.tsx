@@ -14,6 +14,8 @@ window.muster={invoke(command:string,input:{chatId?:string;folderId?:string;path
 }};
 const React=await import('react'),{createRoot}=await import('react-dom/client');
 const {ChatImage,resolveImageSource,clearImageCache,makeThumb}=await import('../src/renderer/components/ChatImage');
+/** Waits for the DOM to reach a state (a loaded CI runner can starve React's first render past any fixed sleep). */
+const until=async(check:()=>boolean,what:string,ms=5000)=>{for(const end=Date.now()+ms;Date.now()<end;await delay(10))if(check())return;assert.fail(`timed out waiting for ${what}`);};
 
 // Source resolution: folder paths read through the folder, other absolute paths through the chat, relative strays have none.
 assert.deepEqual(resolveImageSource('c1','/work/a.png',{folderId:'f1',path:'a.png'}),{kind:'folder',folderId:'f1',path:'a.png'});
@@ -27,7 +29,7 @@ assert.equal(await makeThumb(DATA,184,{width:4000,height:3000}),DATA);
 
 const root=createRoot(document.getElementById('root')!);
 root.render(<div><ChatImage chatId="c1" path="/tmp/render/one.png"/><ChatImage chatId="c1" path="/tmp/render/one.png"/><ChatImage chatId="c1" path="relative.png"/><ChatImage chatId="c1" path="/tmp/render/bad.png"/></div>);
-await delay(30);
+await until(()=>document.querySelectorAll('.chat-image img').length===2&&document.querySelectorAll('.chat-image.is-failed').length===1,'the pictures to load');
 const tiles=[...document.querySelectorAll('.chat-image')];
 assert.equal(tiles.length,4);
 const pictures=[...document.querySelectorAll('.chat-image img')];
@@ -40,16 +42,16 @@ assert.equal(tiles[3]!.className.includes('is-failed'),true);
 // An inline image is larger and opens a zoom dialog on click.
 clearImageCache();
 root.render(<ChatImage chatId="c1" path="/tmp/render/two.png" variant="inline"/>);
-await delay(30);
+await until(()=>!!document.querySelector('.chat-image-inline img'),'the inline picture');
 const inline=document.querySelector('.chat-image-inline') as HTMLElement;
 assert.ok(inline,'inline variant');assert.equal(inline.querySelector('img')!.getAttribute('alt'),'two.png');
 inline.click();
-await delay(30);
+await until(()=>!!document.querySelector('.chat-image-lightbox[role="dialog"]'),'the viewer to open');
 const dialog=document.querySelector('.chat-image-lightbox[role="dialog"]');
 assert.ok(dialog,'click opens the zoomable viewer');
 assert.ok(dialog!.querySelector('.image-file'),'the viewer has the zoom controls');
 (dialog!.querySelector('button[aria-label="Close image"]') as HTMLElement).click();
-await delay(10);
+await until(()=>!document.querySelector('.chat-image-lightbox'),'the viewer to close');
 assert.equal(document.querySelector('.chat-image-lightbox'),null,'close removes it');
 
 // Local image links in a reply.
