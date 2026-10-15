@@ -25,7 +25,7 @@ const REPO = mkdtempSync(join(tmpdir(), 'muster-repo-'));
 const ME = 'u-me', BOB = 'u-bob', CO = { id: 'co-rag', name: 'Ragnar', prefix: 'RAG' };
 interface Comment { id: string; body: string; authorUserId: string | null; createdAt: string; clientRequestId?: string }
 class FakeServer {
-  down = false; unauthorized = false; token: string | undefined = undefined; rejectPatch = false; costFail: string | null = null; runs: { id: string; agentId: string | null; taskId: string | null; status: string }[] = []; loseNextResponse = false; calls: string[] = []; policy: { type: 'review' | 'approval'; participants: { kind: 'agent' | 'user'; id: string }[] }[] = []; comments = new Map<string, Comment[]>(); docs = new Map<string, string>(); costs: Record<string, unknown>[] = []; generation = 1;
+  down = false; unauthorized = false; token: string | undefined = undefined; rejectPatch = false; costFail: string | null = null; runs: { id: string; agentId: string | null; taskId: string | null; status: string }[] = []; loseNextResponse = false; calls: string[] = []; policy: { type: 'review' | 'approval'; participants: { kind: 'agent' | 'user'; id: string }[] }[] = []; comments = new Map<string, Comment[]>(); docs = new Map<string, string>(); costs: Record<string, unknown>[] = []; generation = 1; description = 'Move the sources.';
   tasks: WorkspaceTask[]; agents: WorkspaceAgent[];
   constructor() {
     const t = (id: string, key: string, status: WorkspaceTask['status'], assignee: { user?: string; agent?: string }): WorkspaceTask => ({
@@ -63,7 +63,7 @@ class FakeServer {
       async postCostEvent(_co: string, body: Record<string, unknown>) { s.up(); if (s.costFail) throw new PaperclipError(s.costFail, 0, 'network'); s.costs.push(body); },
       async agentInstructions(id: string) { s.up(); return id === 'a-qa' ? 'Review like a skeptic.' : 'Be careful with Redis.'; },
       async issuePolicy() { s.up(); return s.policy; },
-      async taskDetail(id: string) { s.up(); const t = s.tasks.find(x => x.id === id)!; return { task: t, description: 'Move the sources.', comments: (s.comments.get(id) ?? []).map(c => ({ id: c.id, author: { kind: 'user' as const, id: c.authorUserId, label: 'Bob' }, body: c.body, createdAt: c.createdAt })), runs: [], addressee: null, composerNote: null, subtasks: ['t3'], blocking: [], receipts: [], cards: [{ kind: 'document' as const, id: 'd1', at: '', key: 'plan', title: 'Plan', format: 'markdown', body: '', revision: 1, revisions: [] }], mentionable: [] }; },
+      async taskDetail(id: string) { s.up(); const t = s.tasks.find(x => x.id === id)!; return { task: t, description: s.description, comments: (s.comments.get(id) ?? []).map(c => ({ id: c.id, author: { kind: 'user' as const, id: c.authorUserId, label: 'Bob' }, body: c.body, createdAt: c.createdAt })), runs: [], addressee: null, composerNote: null, subtasks: ['t3'], blocking: [], receipts: [], cards: [{ kind: 'document' as const, id: 'd1', at: '', key: 'plan', title: 'Plan', format: 'markdown', body: '', revision: 1, revisions: [] }], mentionable: [] }; },
     } as unknown as ServerBackend;
   }
 }
@@ -1344,15 +1344,17 @@ test('#345 stale check-outs: idle for more than 3 days shows how long ago and of
 
 test('#385: a task description past the 32,000-character cap is written whole to a self-ignoring .muster/task file and the brief points at it', async () => {
   const h = setup(); await bound(h);
+  h.server.description = 'Goal: do it.\n' + 'x'.repeat(40_000) + '\nEND-OF-TASK';
   const l = await h.svc.start({ taskId: 't1', model: { kind: 'org-agent', agentId: 'a-ceo' }, confirm: true });
   const wt = mkdtempSync(join(tmpdir(), 'muster-wt-')); h.store.putLease({ ...h.store.lease('t1')!, worktree: wt });
-  const copy = h.store.orgCopy('t1')!; copy.task.description = 'Goal: do it.\n' + 'x'.repeat(40_000) + '\nEND-OF-TASK'; h.store.putOrgCopy('t1', copy);
   const brief = (await h.svc.brief(l.chatId!))!;
   assert.ok(!brief.includes('END-OF-TASK'), 'the envelope is cut');
-  const m = brief.match(/The full text is in (\S+TASK\.md)/);
+  assert.match(brief, /The description continues in TASK\.md/);
+  const m = brief.match(/Before you start, read (\S+)\/TASK\.md/);
   assert.ok(m, 'the brief points at the file');
-  assert.match(readFileSync(m![1]!, 'utf8'), /END-OF-TASK/);
-  assert.equal(readFileSync(join(m![1]!, '..', '.gitignore'), 'utf8').trim(), '*');
+  assert.match(readFileSync(join(m![1]!, 'TASK.md'), 'utf8'), /END-OF-TASK/);
+  assert.equal(join(m![1]!, 'TASK.md'), join(wt, '.muster', 'task', 'TASK.md'));
+  assert.equal(readFileSync(join(m![1]!, '.gitignore'), 'utf8').trim(), '*');
   assert.match(brief, /local commits on the task branch/);
 });
 

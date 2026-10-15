@@ -1,7 +1,7 @@
 /** Hook registry behind DomainContext.hooks, plus the bounded runners the service calls. */
 import { isAbsolute } from 'node:path';
 import type { Chat } from '../../shared/protocol.ts';
-import type { AutomatedWorktreeResolver, ChatDefaults, ChatDefaultsResolver, CommandCompleted, DomainHooks, PromptContributor, ProviderEventInfo, ReasoningEffort, RunEnvironmentResolver, ToolPolicyResolver, RunOptions, RunOptionsContributor, RunSettled, RunStarted } from './types.ts';
+import type { AutomatedWorktreeResolver, TaskHistoryBriefResolver, ChatDefaults, ChatDefaultsResolver, CommandCompleted, DomainHooks, PromptContributor, ProviderEventInfo, ReasoningEffort, RunEnvironmentResolver, ToolPolicyResolver, RunOptions, RunOptionsContributor, RunSettled, RunStarted } from './types.ts';
 
 export const PROMPT_CONTRIBUTOR_TIMEOUT_MS = 2_000;
 export const PROMPT_CONTRIBUTION_MAX_BYTES = 8 * 1024;
@@ -30,6 +30,7 @@ export function createDomainHooks() {
   const commands = new Set<(event: CommandCompleted) => void>();
   let defaults: ChatDefaultsResolver | undefined, environment: RunEnvironmentResolver | undefined, toolPolicy: ToolPolicyResolver | undefined, commitIdentity: ((folderId: string) => { name: string; email: string } | null) | undefined, worktreeRecorder: ((projectId: string, taskId: string, folderId: string) => void) | undefined;
   let automated: AutomatedWorktreeResolver | undefined;
+  let historyBrief: TaskHistoryBriefResolver | undefined;
   const add = <T>(set: Set<T>, fn: T) => { set.add(fn); return () => { set.delete(fn); }; };
   const hooks: DomainHooks = {
     addPromptContributor: fn => add(prompts, fn),
@@ -45,6 +46,8 @@ export function createDomainHooks() {
     noteTaskWorktree(projectId, taskId, folderId) { try { worktreeRecorder?.(projectId, taskId, folderId); } catch { /* best effort */ } },
     setAutomatedWorktree(fn) { automated = fn; },
     automatedWorktree(projectId, taskId) { return automated ? automated(projectId, taskId) : Promise.resolve(null); },
+    setTaskHistoryBrief(fn) { historyBrief = fn; },
+    async taskHistoryBrief(input) { try { return historyBrief ? await historyBrief(input) : null; } catch { return null; } },
     commitIdentity(folderId) { try { return commitIdentity?.(folderId) ?? null; } catch { return null; } },
     onCommand: fn => add(commands, fn),
   };

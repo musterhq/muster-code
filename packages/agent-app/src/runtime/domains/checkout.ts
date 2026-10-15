@@ -145,7 +145,8 @@ export function createCheckoutDomain(ctx: DomainContext): DomainModule {
       'checkout.plan': input => svc().plan(id(input.taskId)),
       'checkout.start': input => svc().start({ taskId: id(input.taskId), take: input.take === true, confirm: input.confirm as true, model: input.model as never, ...(typeof input.folder === 'string' ? { folder: text(input.folder, 4096) } : {}), ...(typeof input.devBranch === 'string' ? { devBranch: text(input.devBranch, 200) } : {}) }),
       'checkout.get': input => ({ lease: svc().get(id(input.taskId)) }),
-      'checkout.org': async input => ({ copy: input.refresh === true ? await svc().copyOrg(id(input.taskId)) : svc().orgCopy(id(input.taskId)) }),
+      // The task's history stays on this Mac (it is written to the worktree); the screen gets the copy without it.
+      'checkout.org': async input => { const copy = input.refresh === true ? await svc().copyOrg(id(input.taskId)) : svc().orgCopy(id(input.taskId)); if (!copy) return { copy: null }; const { history: _history, ...rest } = copy as typeof copy & { history?: unknown }; return { copy: rest }; },
       'checkout.engine': input => svc().setEngine(id(input.taskId), { ...(input.model ? { model: input.model as never } : {}), ...(typeof input.reviewLocally === 'boolean' ? { reviewLocally: input.reviewLocally } : {}) }),
       'checkout.review': input => svc().startReview(id(input.taskId), typeof input.agentId === 'string' ? id(input.agentId) : undefined),
       'checkout.leases': () => ({ leases: svc().leases() }),

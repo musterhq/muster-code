@@ -216,7 +216,11 @@ export function createProjectsDomain(ctx: DomainContext): DomainModule {
     if (handoff) lastHandoff.set(chat.id, { packetId: handoff.id, version: handoff.version });
     // The prompt block is capped (8 KB), so what the run cannot work without goes first and the agent's bundle last: a long bundle is what gets cut (#383).
     const parts = task ? taskParts(task, chat.id) : null;
-    return { label: `Project context v${summary.version} (${summary.label})`, text: [...(parts?.first ?? []), ...(handoff ? handoffLines(handoff) : []), ...(parts?.deps ?? []), ...lines, ...(coordinator ? coordinatorLines(projectId) : []), ...(parts?.bundle ?? [])].join('\n') };
+    // A task imported from Muster Server brings its history on the server (thread, documents, earlier runs, branch): a compact brief right after the task's
+    // critical lines, pointing at the files written to the run's worktree (#434).
+    const runFolder = folder && 'path' in folder && typeof folder.path === 'string' ? { id: folder.id, path: folder.path } : null;
+    const history = task ? await ctx.hooks.taskHistoryBrief?.({ projectId, taskId: task.id, folder: runFolder }).catch(() => null) ?? null : null;
+    return { label: `Project context v${summary.version} (${summary.label})`, text: [...(parts?.first ?? []), ...(history ? ['', history] : []), ...(handoff ? handoffLines(handoff) : []), ...(parts?.deps ?? []), ...lines, ...(coordinator ? coordinatorLines(projectId) : []), ...(parts?.bundle ?? [])].join('\n') };
   };
 
   // ── Knowledge sources (PRJ-16) ────────────────────────────────────────────
