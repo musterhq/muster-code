@@ -20,11 +20,11 @@ function storedAnswers(item: TimelineItem): Record<string, string[]> {
 }
 /** Readable end state; a question closed without answers told the provider it was cancelled. */
 export function questionOutcome(item: TimelineItem): {label: string; detail?: string} {
-  if (item.data?.expiredReason === 'restart' || item.status === 'unavailable') return {label: 'Expired · reopen not possible', detail: 'Muster restarted while this question was open. The provider stopped waiting for it; send your answer as a new message.'};
+  if (item.status === 'unavailable' || (item.data?.expiredReason === 'restart' && item.status !== 'expired')) return {label: 'Lost when Muster restarted', detail: 'Muster restarted while this question was open. The provider stopped waiting for it; use Ask again, or send your answer as a new message.'};
   switch (item.status) {
     case 'answered': return {label: 'Answer sent'};
     case 'dismissed': return {label: 'Dismissed', detail: 'The provider was told the question was declined.'};
-    case 'expired': return {label: 'Expired', detail: 'No answer within 10 minutes; the provider was told the question was cancelled.'};
+    case 'expired': return {label: 'Expired', detail: 'No answer before the deadline; the provider was told the question was cancelled. Use Ask again to have it re-ask.'};
     case 'interrupted': return {label: 'Closed · the run stopped before an answer'};
     default: return {label: 'Closed'};
   }
@@ -59,6 +59,12 @@ export function PendingQuestion({ item }: { item: TimelineItem }): React.ReactEl
     try { await invoke('question.dismiss', { id: item.id }); }
     catch (cause) { setResponding(false); setError(cause instanceof Error ? cause.message : 'The question could not be dismissed.'); }
   };
+  const reask = async () => {
+    setError(''); setResponding(true);
+    try { await invoke('approval.reask', { id: item.id }); }
+    catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not ask again.'); }
+    finally { setResponding(false); }
+  };
   const outcome = item.status === 'pending' ? null : questionOutcome(item);
   return <section className={`pending-question${item.status === 'pending' ? '' : ' is-settled'}`} aria-label="Provider question">
     <h3>Input needed</h3>
@@ -72,6 +78,7 @@ export function PendingQuestion({ item }: { item: TimelineItem }): React.ReactEl
       <button type="button" className="pending-question-dismiss" onClick={() => void dismiss()}>Dismiss</button></div>}
     {responding && item.status === 'pending' && <span className="pending-question-status" role="status">Sending…</span>}
     {outcome && <p className="pending-question-outcome" role="status"><strong>{outcome.label}</strong>{outcome.detail && <span>{outcome.detail}</span>}</p>}
+    {(item.status === 'expired' || item.status === 'unavailable') && !item.data?.reaskedAt && <div className="pending-question-actions"><button type="button" className="pending-question-submit" disabled={responding} onClick={() => void reask()}>Ask again</button></div>}
     {error && <p className="pending-question-error" role="alert">{error}</p>}
   </section>;
 }

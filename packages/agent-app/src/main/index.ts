@@ -12,7 +12,7 @@ import {DesktopWorkspaces,commandAuthority,computerAuthority} from './desktop-wo
 import { pathToFileURL } from 'node:url';
 import { ARCHIVE_RUNNING_WARNING, type AgentEvent, type Commands, type Snapshot } from '../shared/protocol.ts';
 import {chatMenuTemplate,folderMenuTemplate,projectMenuTemplate,popupChoice,type ChatMenuCommand,type FolderMenuCommand,type ProjectMenuCommand} from './chat-menu.ts';
-import {attentionAllowed,createSettleTracker,notificationPrefs,notificationsMuted,wantedNotices,type NotificationPrefs} from './chat-notifications.ts';
+import {attentionAllowed,createAttentionTracker,createSettleTracker,notificationPrefs,notificationsMuted,wantedNotices,type NotificationPrefs} from './chat-notifications.ts';
 import { isCommandName } from './commands.ts';
 import { fileOperation, mutablePath } from '../runtime/file-operations.ts';
 import { accessSync, constants as fsConstants, existsSync, readFileSync, promises as fs } from 'node:fs';
@@ -166,6 +166,24 @@ async function main(): Promise<void> {
       toast.show();
     }
   };
+  // An approval or question raised out of sight gets one toast, and one reminder shortly before it closes.
+  const attentionTracker = createAttentionTracker();
+  let lastAttention: Snapshot['attention'];
+  const notifyAttention = (): void => {
+    const focused = window !== null && !window.isDestroyed() && window.isVisible() && window.isFocused();
+    const notices = attentionTracker(lastAttention, Date.now(), notifyPrefs, focused && lastActiveChatId ? lastActiveChatId : null);
+    if (!notices.length || !Notification.isSupported()) return;
+    for (const notice of notices.slice(0, 3)) {
+      const toast = new Notification({ title: notice.title, body: notice.body });
+      shownNotifications.add(toast);
+      if (shownNotifications.size > 12) shownNotifications.delete(shownNotifications.values().next().value!);
+      toast.on('click', () => { shownNotifications.delete(toast); void openLinkedChat(notice.chatId); });
+      toast.on('close', () => shownNotifications.delete(toast));
+      toast.show();
+    }
+  };
+  // Snapshots only arrive on change, so reminders need a clock of their own.
+  setInterval(() => { if (lastAttention?.totalRequests) notifyAttention(); }, 30_000).unref();
   // CHAT-15: a timed or activity wake carries exactly one notification (the runtime emits chatWoke once per transition).
   let lastActiveChatId: string | undefined;
   const justWoke = new Set<string>();
@@ -192,6 +210,8 @@ async function main(): Promise<void> {
       if ((before === 0) !== (runningChats === 0)) repaintPolicy?.();
       applyBadge(event.snapshot.attention?.totalRequests ?? 0);
       notifySettled(event.snapshot);
+      lastAttention = event.snapshot.attention;
+      notifyAttention();
     }
     if (window && !window.isDestroyed() && window.isVisible()) {
       window.webContents.send('muster:event', event);

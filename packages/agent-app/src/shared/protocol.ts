@@ -55,10 +55,10 @@ export const ARCHIVE_RUNNING_WARNING = 'Archiving stops nothing; the agent keeps
 export interface ChatExport { text: string; omitted: string[]; fileName: string }
 export interface PendingQuestionOption { label: string; description?: string; value?: string }
 export interface PendingQuestion { id: string; header: string; question: string; options: PendingQuestionOption[]; allowCustomAnswer: boolean; multiSelect: boolean; isSecret?: boolean; isOther?: boolean }
-export interface PendingQuestionData { method: 'item/tool/requestUserInput'; questions: PendingQuestion[] }
+export interface PendingQuestionData { method: 'item/tool/requestUserInput'; questions: PendingQuestion[]; expiresAt?: string; expiredReason?: 'restart' | 'timeout'; reaskedAt?: string }
 export interface TimelineItem { id: string; chatId: string; kind: 'user' | 'assistant' | 'reasoning' | 'tool' | 'approval' | 'question' | 'notice'; text: string; status?: string; createdAt: string; data?: Record<string, unknown> }
 /** `data` of an approval item. `kind` picks the card body; every field is optional because providers omit them. */
-export interface ApprovalData { method: string; kind: 'command' | 'fileChange' | 'mcp'; command?: string; cwd?: string; reason?: string; diff?: Array<{path: string; diff?: string; kind?: string}>; server?: string; tool?: string; args?: string; expiredReason?: 'restart'; /** R5: the command would stop a process the user started; never approvable for the whole session. */ protectsUserProcess?: boolean }
+export interface ApprovalData { method: string; kind: 'command' | 'fileChange' | 'mcp'; command?: string; cwd?: string; reason?: string; diff?: Array<{path: string; diff?: string; kind?: string}>; server?: string; tool?: string; args?: string; expiredReason?: 'restart' | 'timeout'; /** ISO deadline stored with the request; whether it has expired is decided at read time. */ expiresAt?: string; /** Set once the user asked the agent again after it expired. */ reaskedAt?: string; /** R5: the command would stop a process the user started; never approvable for the whole session. */ protectsUserProcess?: boolean }
 /** `acceptForSession` maps to the codex app-server decision of the same name: later identical requests in this session are not asked again. */
 export type ApprovalDecision = 'accept' | 'acceptForSession' | 'decline';
 export interface TimelineSnapshot { items: TimelineItem[]; revision: number }
@@ -224,8 +224,12 @@ export interface Commands extends DomainCommands, BrowserCommands, ScopedCompute
  'chat.stop': { input: {id: string}; output: void };
  /** `stillRunning` means the provider reports the saved turn as active; check again later. */
  'chat.reconcile': {input: {id: string}; output: {chat: Chat; resolved: boolean; reason: string; stillRunning?: boolean}};
+ /** Clears an unconfirmed-attempt block so the user is never stuck; the earlier attempt is left as it is. */
+ 'chat.continueAnyway': {input: {id: string}; output: Chat};
  /** Codex `thread/compact/start` on the chat's live provider session; a timeline row tracks intent, completion and failure. */
  'chat.compact': {input: {id: string; /** Skip the provider: continue in a fresh provider thread seeded with a summary of the transcript. */ fresh?: boolean}; output: void};
+ /** Asks the agent again after an approval or question expired or was lost to a restart. */
+ 'approval.reask': {input: {id: string}; output: {runId: string; requestId: string}};
  'approval.respond': { input: {id: string; approved: boolean; decision?: ApprovalDecision}; output: void };
  /** Declines the provider request (a cancel, never empty answers). */
  'question.dismiss': { input: {id: string}; output: void };

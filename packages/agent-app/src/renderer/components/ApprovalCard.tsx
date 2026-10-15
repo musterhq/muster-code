@@ -10,7 +10,7 @@ export const APPROVAL_OUTCOME:Record<string,string>={
   approved:'Approved',
   'approved-session':'Approved for this session',
   declined:'Denied',
-  expired:'Expired · no longer pending',
+  expired:'Timed out · not approved',
   interrupted:'Interrupted · the run stopped before a decision',
   unavailable:'Expired · reopen not possible',
 };
@@ -32,7 +32,14 @@ export function ApprovalCard({item}:{item:TimelineItem}):React.ReactElement {
     catch(cause){setBusy(null);setError(cause instanceof Error?cause.message:'The decision was not accepted.');}
   };
   const restart=data.expiredReason==='restart';
-  const outcome=restart?'Expired · reopen not possible':APPROVAL_OUTCOME[item.status??'']??(item.status??'Closed');
+  const outcome=restart?'Lost when Muster restarted':APPROVAL_OUTCOME[item.status??'']??(item.status??'Closed');
+  const canReask=(item.status==='expired'||item.status==='unavailable')&&!data.reaskedAt;
+  const reask=async()=>{
+    if(busy)return;setBusy('accept');setError('');
+    try{await invoke('approval.reask',{id:item.id});}
+    catch(cause){setError(cause instanceof Error?cause.message:'Could not ask again.');}
+    finally{setBusy(null);}
+  };
   return <div className={`approval-card${pending?'':' is-settled'}`} role="group" aria-label={TITLE[data.kind]}>
     <div className="approval-head"><Icon size={14} aria-hidden="true"/><strong>{TITLE[data.kind]}</strong>{data.kind==='mcp'&&data.server&&<span className="approval-origin">{data.server}</span>}</div>
     {data.reason&&<p className="approval-reason">{data.reason}</p>}
@@ -49,6 +56,8 @@ export function ApprovalCard({item}:{item:TimelineItem}):React.ReactElement {
       <button type="button" className="approval-deny" disabled={!!busy} aria-busy={busy==='decline'||undefined} onClick={()=>void respond('decline')}><X size={13} aria-hidden="true"/> Deny</button>
     </div>:<div className="approval-resolved" role="status">{outcome}</div>}
     {restart&&!pending&&<p className="approval-reason">Muster restarted while this request was open, so the provider stopped waiting for it.</p>}
+    {canReask&&<div className="approval-actions"><button type="button" className="approval-approve" disabled={!!busy} aria-busy={busy==='accept'||undefined} onClick={()=>void reask()}>Ask again</button></div>}
+    {data.reaskedAt&&<p className="approval-reason">Asked the agent again.</p>}
     {error&&<p className="approval-error" role="alert">{error}</p>}
   </div>;
 }

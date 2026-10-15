@@ -38,6 +38,12 @@ export class NotificationBridge {
   }
   /** Called with every runtime event. Cheap when no connector notifies. */
   touch(event: { type: string; projectId?: unknown }) {
+    // A chat waiting on an approval or question shows up only in the snapshot's attention list: wake the project that owns the chat.
+    if (event.type === 'snapshot') {
+      const snap = (event as { snapshot?: { chats?: { id: string; projectId?: string }[]; attention?: { chats?: { chatId: string }[] } } }).snapshot;
+      for (const g of snap?.attention?.chats ?? []) { const pid = snap?.chats?.find(c => c.id === g.chatId)?.projectId; if (typeof pid === 'string') this.touch({ type: 'projectChanged', projectId: pid }); }
+      return;
+    }
     if (typeof event.projectId !== 'string' || !['projectChanged', 'workChanged'].includes(event.type)) return;
     const projectId = event.projectId;
     if (this.timers.has(projectId)) return;
@@ -55,6 +61,13 @@ export class NotificationBridge {
     for (const i of gov.items) items.push({ key: `need:${i.id}`, text: `Needs you in ${projectName}: ${i.title}${i.why ? `\n${i.why}` : ''}${link}` });
     const ap = await rt.invoke('project.approvals.list', { projectId }) as { items: { id: string; kind: string; title: string; requestedBy: string; state: string }[] };
     for (const a of ap.items) if (a.state === 'pending' && a.kind === 'hire') items.push({ key: `approval:${a.id}`, text: `Approval in ${projectName}: ${a.title} (asked by ${a.requestedBy})${link}` });
+    // Chat approvals and questions waiting for a person (never their contents: the card carries the command or the answer options).
+    const snap = await rt.snapshot() as { chats?: { id: string; projectId?: string }[]; attention?: { chats?: { chatId: string; chatTitle: string; requests: { itemId: string; kind: string }[] }[] } };
+    const inProject = new Set((snap.chats ?? []).filter(c => c.projectId === projectId).map(c => c.id));
+    for (const g of snap.attention?.chats ?? []) {
+      if (!inProject.has(g.chatId)) continue;
+      for (const r of g.requests) items.push({ key: `approval:${r.itemId}`, text: `${r.kind === 'question' ? 'Question' : 'Approval'} in ${projectName}: "${g.chatTitle}" is waiting for ${r.kind === 'question' ? 'your answer' : 'your approval'}${link}` });
+    }
     const cards = await rt.invoke('work.summaries.list', { projectId }) as { cards: { id: string; title: string; rev: number | null; text: string }[] };
     for (const c of cards.cards) if (c.rev && c.text.trim()) items.push({ key: `summary:${c.id}:${c.rev}`, text: `${c.title} (${projectName}, revision ${c.rev})\n${c.text.trim().slice(0, 1500)}${link}` });
     return items;

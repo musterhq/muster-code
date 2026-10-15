@@ -38,3 +38,23 @@ test('G27: events debounce into one flush; projects nobody notifies for do nothi
   assert.ok((await store.connectorEvents('c1', 20)).some(e => e.status === 'notify-failed' && /channel_not_found/.test(e.detail ?? '')));
   bridge.dispose(); failing.dispose();
 });
+
+test('#381: chat approvals and questions in the project are posted under approval:<id>, without their contents', async () => {
+  const store = new SqliteServerStore(':memory:'), sent: { text: string; key: string | null }[] = [];
+  await store.createConnector({ id: 'c1', type: 'slack', name: 'c1', ownerUserId: 'u', scope: 'org', projectId: null, enabled: true, mode: 'socket', secretRefs: {}, config: { notifyChannel: 'C1', notifyProject: 'p1', notifyBacklog: true }, webhookPublicId: 'c1', createdAt: '', updatedAt: '' });
+  const snapshot = { projects: [{ id: 'p1', name: 'Support' }], chats: [{ id: 'chatA', projectId: 'p1' }, { id: 'chatB', projectId: 'other' }],
+    attention: { totalRequests: 3, chats: [
+      { chatId: 'chatA', chatTitle: 'Fix the build', requests: [{ itemId: 'i1', kind: 'approval', command: 'rm -rf secret-dir' }, { itemId: 'i2', kind: 'question' }] },
+      { chatId: 'chatB', chatTitle: 'Elsewhere', requests: [{ itemId: 'i3', kind: 'approval' }] }] } };
+  const runtime = { running: true, snapshot: async () => snapshot, invoke: async (cmd: string) => cmd === 'project.gov.summary' ? { items: [] } : cmd === 'project.approvals.list' ? { items: [] } : { cards: [] } };
+  const bridge = new NotificationBridge({ store, registry: () => ({ notify: async (_id: string, text: string, key: string | null) => { sent.push({ text, key }); } }) as never, runtime: () => runtime as never, publicUrl: () => null, log: () => undefined, debounceMs: 10 });
+  assert.equal(await bridge.flush('p1'), 2);
+  assert.deepEqual(sent.map(s => s.key).sort(), ['approval:i1', 'approval:i2']);
+  assert.match(sent.find(s => s.key === 'approval:i1')!.text, /Approval in Support: "Fix the build" is waiting for your approval/);
+  assert.match(sent.find(s => s.key === 'approval:i2')!.text, /Question in Support: "Fix the build" is waiting for your answer/);
+  assert.ok(!sent.some(s => /secret-dir|Elsewhere/.test(s.text)));
+  assert.equal(await bridge.flush('p1'), 0, 'deduped');
+  // A snapshot that lists a waiting chat wakes its project.
+  bridge.touch({ type: 'snapshot', snapshot } as never);
+  bridge.dispose();
+});

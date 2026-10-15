@@ -1,4 +1,6 @@
 import type { ChatStatus, Snapshot } from '../shared/protocol.ts';
+import type { PendingAttentionSummary } from '../shared/attention-protocol.ts';
+import { ATTENTION_REMINDER_LEAD_MS } from '../shared/attention-expiry.ts';
 import type { AppSettings } from '../shared/domains/settings-protocol.ts';
 
 export interface SettledNotice { chatId: string; title: string; body: string; status: 'completed' | 'failed' }
@@ -43,5 +45,35 @@ export function notificationPrefs(values: Partial<AppSettings> | undefined): Not
     'notifications.runs': values?.['notifications.runs'] ?? DEFAULT_NOTIFICATION_PREFS['notifications.runs'],
     'notifications.attention': values?.['notifications.attention'] ?? DEFAULT_NOTIFICATION_PREFS['notifications.attention'],
     'notifications.mutedUntil': values?.['notifications.mutedUntil'] ?? null,
+  };
+}
+
+export interface AttentionNotice { key: string; chatId: string; title: string; body: string; reminder: boolean }
+/**
+ * One notification when an approval or question is raised, and one reminder shortly before it expires. Both are gated by
+ * `attentionAllowed` (so a mute or "attention alerts off" silences them); a request raised while gated is never announced late.
+ * `viewingChatId` is the chat the user is looking at in a focused window, which needs no toast.
+ */
+export function createAttentionTracker() {
+  const announced = new Set<string>(), reminded = new Set<string>();
+  return (attention: PendingAttentionSummary | undefined, now: number, prefs: NotificationPrefs, viewingChatId: string | null): AttentionNotice[] => {
+    const live = new Set<string>(), notices: AttentionNotice[] = [];
+    const allowed = attentionAllowed(prefs, now);
+    for (const chat of attention?.chats ?? []) for (const request of chat.requests) {
+      live.add(request.itemId);
+      const what = request.kind === 'approval' ? 'approval' : 'answer';
+      const visible = allowed && viewingChatId !== chat.chatId;
+      if (!announced.has(request.itemId)) {
+        announced.add(request.itemId);
+        if (visible) notices.push({ key: request.itemId, chatId: chat.chatId, title: chat.chatTitle, body: request.kind === 'approval' ? 'Waiting for your approval' : 'Has a question for you', reminder: false });
+      }
+      const left = request.expiresAt ? Date.parse(request.expiresAt) - now : NaN;
+      if (Number.isFinite(left) && left > 0 && left <= ATTENTION_REMINDER_LEAD_MS && !reminded.has(request.itemId)) {
+        reminded.add(request.itemId);
+        if (visible) notices.push({ key: request.itemId, chatId: chat.chatId, title: chat.chatTitle, body: `Your ${what} is still needed · closes in ${Math.max(1, Math.round(left / 60_000))} min`, reminder: true });
+      }
+    }
+    for (const set of [announced, reminded]) for (const key of set) if (!live.has(key)) set.delete(key);
+    return notices;
   };
 }
