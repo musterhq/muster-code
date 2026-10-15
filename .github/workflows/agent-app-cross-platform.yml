@@ -58,7 +58,7 @@ jobs:
         # Download caches only (never node_modules): keyed on OS, CPU and the locked Electron version.
         shell: bash
         run: echo "version=$(node -p "require(process.env.GITHUB_WORKSPACE + '/packages/agent-app/package-lock.json').packages['node_modules/electron'].version")" >> "$GITHUB_OUTPUT"
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: |
             ~/Library/Caches/electron
