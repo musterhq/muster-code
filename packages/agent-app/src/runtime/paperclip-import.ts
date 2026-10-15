@@ -12,7 +12,7 @@
 import { realpathSync } from 'node:fs';
 import type { DatabaseSync } from 'node:sqlite';
 import type { ProjectDetails, ProjectTaskView, TaskState } from '../shared/domains/projects-protocol.ts';
-import type { ImportConflict, ImportPlan, ImportTargets, PaperclipImportReport } from '../shared/domains/paperclip-protocol.ts';
+import type { DeletedImport, ImportConflict, ImportPlan, ImportTargets, PaperclipImportReport } from '../shared/domains/paperclip-protocol.ts';
 import type { Folder } from '../shared/protocol.ts';
 import { normalizeRemote } from './memory-identity.ts';
 import { blockerIds } from './paperclip-map.ts';
@@ -54,7 +54,15 @@ export interface ImportStore {
   detachProject?(sourceProjectId: string, musterProjectId: string): void;
   writtenBy?(musterProjectId: string): { tasks: Set<string>; members: Set<string> };
   tasksOf?(companyId: string): { sourceId: string; musterId: string; key: string | null; data: Json }[];
+  /** Whether you deleted this project or task in Muster: an import skips it (see `bury`). */
+  buried?(kind: TombstoneKind, sourceId: string): boolean;
+  /** What you deleted here (one company's), for the import list. */
+  tombstones?(companyId?: string | null): Tombstone[];
+  /** Records that you deleted the Muster copy of a Paperclip project or task, keyed by the Paperclip id, so an import does not make it again. */
+  bury?(kind: TombstoneKind, sourceId: string, companyId: string | null, key: string | null, label: string): void;
 }
+export type TombstoneKind = 'project' | 'task';
+export interface Tombstone { kind: TombstoneKind; sourceId: string; companyId: string | null; key: string | null; label: string; at: string }
 
 /** The import tables live in the app database beside the Projects store. */
 export class SqliteImportStore implements ImportStore {
@@ -63,7 +71,8 @@ export class SqliteImportStore implements ImportStore {
       CREATE INDEX IF NOT EXISTS paperclip_import_map_muster ON paperclip_import_map(kind, muster_id);
       CREATE TABLE IF NOT EXISTS paperclip_import_comments (source_id TEXT NOT NULL, task_id TEXT NOT NULL, author_kind TEXT NOT NULL, author_label TEXT NOT NULL, body TEXT NOT NULL, created_at TEXT NOT NULL, run_id TEXT, PRIMARY KEY (source_id, task_id));
       CREATE INDEX IF NOT EXISTS paperclip_import_comments_task ON paperclip_import_comments(task_id, created_at);
-      CREATE TABLE IF NOT EXISTS paperclip_import_history (source_id TEXT NOT NULL, gen TEXT NOT NULL DEFAULT '', kind TEXT NOT NULL, task_id TEXT, project_id TEXT, title TEXT NOT NULL, status TEXT NOT NULL, detail TEXT NOT NULL, at TEXT NOT NULL, pending INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (source_id, gen));`);
+      CREATE TABLE IF NOT EXISTS paperclip_import_history (source_id TEXT NOT NULL, gen TEXT NOT NULL DEFAULT '', kind TEXT NOT NULL, task_id TEXT, project_id TEXT, title TEXT NOT NULL, status TEXT NOT NULL, detail TEXT NOT NULL, at TEXT NOT NULL, pending INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (source_id, gen));
+      CREATE TABLE IF NOT EXISTS paperclip_import_tombstones (kind TEXT NOT NULL, source_id TEXT NOT NULL, company_id TEXT, key TEXT, label TEXT NOT NULL DEFAULT '', at TEXT NOT NULL, PRIMARY KEY (kind, source_id));`);
     this.migrate();
   }
   /** Older databases keyed a comment by the Paperclip comment id alone and a history row by its id alone, so importing the same
@@ -97,6 +106,39 @@ export class SqliteImportStore implements ImportStore {
       tx("UPDATE paperclip_import_map SET kind = 'member:detached' WHERE kind = 'member' AND source_id = ?", row.source_id);
     }
     tx("UPDATE paperclip_import_history SET gen = ? WHERE project_id = ? AND gen = ''", `old:${musterProjectId}`, musterProjectId);
+  }
+  /** Records that you deleted the Muster copy of a Paperclip project or task. Keyed by the Paperclip id; the first deletion's time is kept. */
+  bury(kind: TombstoneKind, sourceId: string, companyId: string | null, key: string | null, label: string): void {
+    this.db.prepare('INSERT INTO paperclip_import_tombstones (kind, source_id, company_id, key, label, at) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(kind, source_id) DO UPDATE SET company_id = COALESCE(excluded.company_id, company_id), key = COALESCE(excluded.key, key), label = CASE WHEN excluded.label <> \'\' THEN excluded.label ELSE label END')
+      .run(kind, sourceId, companyId, key, label.slice(0, 200), new Date().toISOString());
+  }
+  buried(kind: TombstoneKind, sourceId: string): boolean {
+    return Boolean(this.db.prepare('SELECT 1 FROM paperclip_import_tombstones WHERE kind = ? AND source_id = ?').get(kind, sourceId));
+  }
+  /** What you deleted here and an import therefore skips (one company's, or all). */
+  tombstones(companyId?: string | null): Tombstone[] {
+    const rows = (companyId ? this.db.prepare('SELECT * FROM paperclip_import_tombstones WHERE company_id = ? OR company_id IS NULL ORDER BY at DESC').all(companyId) : this.db.prepare('SELECT * FROM paperclip_import_tombstones ORDER BY at DESC').all()) as { kind: string; source_id: string; company_id: string | null; key: string | null; label: string; at: string }[];
+    return rows.map(r => ({ kind: r.kind as TombstoneKind, sourceId: r.source_id, companyId: r.company_id, key: r.key, label: r.label, at: r.at }));
+  }
+  /**
+   * The explicit way back: forget the deletion so the next import makes the project (or task) again. The old link to the deleted Muster copy
+   * goes too (for a project, the links of its tasks), so it is made fresh instead of being taken for something deleted again.
+   */
+  restore(kind: TombstoneKind, sourceId: string): boolean {
+    const gone = this.db.prepare('DELETE FROM paperclip_import_tombstones WHERE kind = ? AND source_id = ?').run(kind, sourceId);
+    const row = this.db.prepare('SELECT muster_id FROM paperclip_import_map WHERE kind = ? AND source_id = ?').get(kind, sourceId) as { muster_id: string } | undefined;
+    if (row) {
+      this.db.prepare('DELETE FROM paperclip_import_map WHERE kind = ? AND source_id = ?').run(kind, sourceId);
+      if (kind === 'project') for (const t of this.db.prepare("SELECT source_id, data FROM paperclip_import_map WHERE kind = 'task'").all() as { source_id: string; data: string }[]) if (str((JSON.parse(t.data) as Json).projectId) === row.muster_id) this.db.prepare("DELETE FROM paperclip_import_map WHERE kind = 'task' AND source_id = ?").run(t.source_id);
+    }
+    return Number(gone.changes) > 0;
+  }
+  /** The Paperclip project or task a Muster one was imported from (the live link, not one set aside), for recording a deletion. */
+  sourceOf(kind: TombstoneKind, musterId: string): { sourceId: string; companyId: string | null; key: string | null; label: string } | undefined {
+    const row = this.db.prepare('SELECT source_id, key, data FROM paperclip_import_map WHERE kind = ? AND muster_id = ?').get(kind, musterId) as { source_id: string; key: string | null; data: string } | undefined;
+    if (!row) return undefined;
+    const data = JSON.parse(row.data) as Json, imported = obj(data.imported);
+    return { sourceId: row.source_id, companyId: str(data.companyId), key: row.key, label: str(imported.title) ?? str(imported.name) ?? str(data.name) ?? row.key ?? '' };
   }
   map(kind: string, sourceId: string) {
     const row = this.db.prepare('SELECT muster_id, data FROM paperclip_import_map WHERE kind = ? AND source_id = ?').get(kind, sourceId) as { muster_id: string; data: string } | undefined;
@@ -238,23 +280,29 @@ export async function planImport(companyId: string | null, deps: Pick<ImportDeps
   const company = companies.find(c => c.id === companyId) ?? companies[0];
   const listed = companies.map(c => ({ id: String(c.id), name: str(c.name) ?? 'Muster Server', prefix: str(c.issuePrefix) ?? '' }));
   if (!company) return { company: null, companies: listed, projects: [], local: deps.local };
-  const muster = new Map((await deps.invoke('project.list', undefined)).filter(p => !p.archived).map(p => [p.id, p]));
+  const everyMuster = await deps.invoke('project.list', undefined);
+  const muster = new Map(everyMuster.filter(p => !p.archived).map(p => [p.id, p]));
   const base = `/companies/${encodeURIComponent(String(company.id))}`;
   const projectsJson = await deps.get(`${base}/projects`);
   // Task counts per project, from the (paged) compact list; only counted, never kept.
   const counts = new Map<string, number>();
   try { for await (const page of deps.issuePages?.(String(company.id), 'view=compact') ?? single(deps.get, `${base}/issues?view=compact&limit=${PAGE}`)) for (const i of page) { const pid = str(i.projectId); if (pid) counts.set(pid, (counts.get(pid) ?? 0) + 1); } } catch { /* a count is a nicety */ }
   const projects: ImportPlan['projects'] = [];
+  const everyProject = new Set(everyMuster.map(p => p.id));
+  const deleted: DeletedImport[] = [];
   for (const p of arr(projectsJson)) {
     const id = String(p.id), codebase = obj(p.codebase), name = str(p.name) ?? 'Server project', localFolder = str(codebase.localFolder), repoUrl = str(codebase.repoUrl);
     const repo = repoUrl ? normalizeRemote(repoUrl) ?? repoUrl : null;
     const mapped = deps.store.map('project', id), mine = mapped ? muster.get(mapped.musterId) : undefined;
+    // You deleted it here: it is left out, with a way to bring it back.
+    if (deps.store.buried?.('project', id) || (mapped && !everyProject.has(mapped.musterId))) { deleted.push({ kind: 'project', id, label: name, key: null }); continue; }
     let existing: ImportPlan['projects'][number]['existing'] = 'new';
     const owner = mapped && mine ? await ownerOf(mapped, mine, deps) : undefined;
     if (owner) existing = owner.verdict === 'imported' ? 'imported' : owner.verdict === 'own' ? 'detached' : 'ask';
     projects.push({ id, name, repo, localFolder, taskCount: counts.get(id) ?? 0, existing, ...(owner?.added ? { added: owner.added } : {}) });
   }
-  return { company: { id: String(company.id), name: str(company.name) ?? 'Muster Server' }, companies: listed, projects, local: deps.local };
+  for (const t of deps.store.tombstones?.(String(company.id)) ?? []) if (t.kind === 'task') deleted.push({ kind: 'task', id: t.sourceId, label: t.label || t.key || 'Task', key: t.key });
+  return { company: { id: String(company.id), name: str(company.name) ?? 'Muster Server' }, companies: listed, projects, local: deps.local, ...(deleted.length ? { deleted } : {}) };
 }
 
 /**
@@ -290,7 +338,7 @@ const clip = (text: string, max = 60) => text.length > max ? `${text.slice(0, ma
 export async function importFromPaperclip(companyId: string, deps: ImportDeps): Promise<PaperclipImportReport> {
   const started = Date.now();
   const { get, invoke, store } = deps;
-  const report: PaperclipImportReport = { company: '', projects: { created: 0, updated: 0 }, tasks: { created: 0, updated: 0, skipped: 0 }, comments: 0, agents: 0, history: 0, needsYou: 0, notes: [], removed: 0, conflicts: [], noProject: 0, tookMs: 0, issues: 0 };
+  const report: PaperclipImportReport = { company: '', projects: { created: 0, updated: 0 }, tasks: { created: 0, updated: 0, skipped: 0 }, comments: 0, agents: 0, history: 0, needsYou: 0, notes: [], removed: 0, conflicts: [], noProject: 0, deleted: [], tookMs: 0, issues: 0 };
   const conflict = (c: ImportConflict) => { if (report.conflicts.length < 200) report.conflicts.push(c); };
   const base = `/companies/${encodeURIComponent(companyId)}`;
   const company = arr(await get('/companies')).find(c => c.id === companyId);
@@ -313,6 +361,13 @@ export async function importFromPaperclip(companyId: string, deps: ImportDeps): 
     const sourceId = String(p.id), codebase = obj(p.codebase), name = str(p.name) ?? 'Server project', goal = (str(p.description) ?? '').slice(0, 32768);
     const localFolder = str(codebase.localFolder), repoUrl = str(codebase.repoUrl), defaultRef = str(codebase.defaultRef);
     if (deps.targets?.[sourceId] === 'skip') { report.notes.push(`${name}: left out of this import.`); continue; }
+    // A project you deleted in Muster stays deleted: it is not made again unless you restore it. Seeing its link without the project is the same thing
+    // (deleted by an older build, or while the importer was not watching).
+    {
+      const link = store.map('project', sourceId);
+      if (!store.buried?.('project', sourceId) && link && !existing.has(link.musterId)) store.bury?.('project', sourceId, companyId, str(company.issuePrefix), name);
+      if (store.buried?.('project', sourceId)) { report.deleted.push({ kind: 'project', id: sourceId, label: name, key: null }); continue; }
+    }
     let folderId: string | null = null;
     if (localFolder && deps.local && deps.exists(localFolder)) { const want = home(localFolder); folderId = deps.folders().find(f => home(f.path) === want)?.id ?? (await invoke('folder.add', { path: localFolder })).id; }
     else if (localFolder && !deps.local) report.notes.push(`${name}: its folder (${localFolder}) is on the server, not ${device().lower}. Link your own checkout to the project yourself.`);
@@ -429,8 +484,15 @@ export async function importFromPaperclip(companyId: string, deps: ImportDeps): 
     const owner = memberId ? { kind: 'agent' as const, id: memberId } : { kind: 'user' as const, id: 'user' };
     const ownerKey = `${owner.kind}:${owner.id}`;
     const priority = PRIORITY[String(issue.priority)] ?? 2;
+    if (store.buried?.('task', sourceId)) { report.tasks.skipped++; report.deleted.push({ kind: 'task', id: sourceId, label: title, key: str(issue.identifier) }); continue; }
     const mapped = store.map('task', sourceId);
-    let task: ProjectTaskView | undefined = mapped ? await get1(projectId, mapped.musterId).catch(() => undefined) : undefined;
+    let missing = false;
+    let task: ProjectTaskView | undefined = mapped ? await get1(projectId, mapped.musterId).catch(cause => { missing = /task not found/i.test(cause instanceof Error ? cause.message : String(cause)); return undefined; }) : undefined;
+    // The task was made by an earlier import and is gone from the project: you deleted it. It is not made again unless you restore it.
+    if (mapped && !task && missing) {
+      store.bury?.('task', sourceId, companyId, str(issue.identifier), str(obj(mapped.data.imported).title) ?? title);
+      report.tasks.skipped++; report.deleted.push({ kind: 'task', id: sourceId, label: title, key: str(issue.identifier) }); continue;
+    }
     const last = obj(mapped?.data.imported);
     const wrote: Json = { title, acceptance, priority, owner: ownerKey, state: last.state };
     if (task) {
@@ -500,6 +562,10 @@ export async function importFromPaperclip(companyId: string, deps: ImportDeps): 
     catch (cause) { report.notes.push(`${row.key ?? row.sourceId}: removed on Muster Server, but it could not be cancelled here (${cause instanceof Error ? cause.message : String(cause)})`); continue; }
     store.setMap('task', row.sourceId, row.musterId, row.key, { ...row.data, removedAt: new Date().toISOString(), imported: { ...obj(row.data.imported), state: 'cancelled' } });
     report.removed++;
+  }
+  if (report.deleted.length) {
+    const projectsGone = report.deleted.filter(d => d.kind === 'project').length, tasksGone = report.deleted.length - projectsGone;
+    report.notes.push(`${[projectsGone && `${projectsGone} ${projectsGone === 1 ? 'project' : 'projects'}`, tasksGone && `${tasksGone} ${tasksGone === 1 ? 'task' : 'tasks'}`].filter(Boolean).join(' and ')} you deleted here ${report.deleted.length === 1 ? 'was' : 'were'} left out (${report.deleted.slice(0, 3).map(d => d.key ?? d.label).join(', ')}${report.deleted.length > 3 ? ', …' : ''}). Restore ${report.deleted.length === 1 ? 'it' : 'them'} in the import list to bring ${report.deleted.length === 1 ? 'it' : 'them'} back.`);
   }
   if (report.removed) report.notes.push(`${report.removed} ${report.removed === 1 ? 'task was' : 'tasks were'} deleted on Muster Server: cancelled here and flagged “Removed on Muster Server”.`);
   // A task that came back (restored in Paperclip) is no longer flagged.

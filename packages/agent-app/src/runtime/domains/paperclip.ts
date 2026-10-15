@@ -749,6 +749,13 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
     return { folderId: made.worktree.folder.id, undo: made.undo };
   });
 
+  // You deleted an imported project or task in Muster: remember it by its Paperclip id so an import does not make it again.
+  const offDeletes = context.hooks.onCommand?.(({ command, input }) => {
+    const kind = command === 'project.delete' ? 'project' : command === 'project.tasks.delete' ? 'task' : null;
+    if (!kind || typeof input.id !== 'string') return;
+    try { const store = imports(), from = store?.sourceOf(kind, input.id); if (store && from) store.bury(kind, from.sourceId, from.companyId, from.key, from.label); } catch { /* the deletion itself already happened */ }
+  });
+
   // --- the Dashboard (#132) -------------------------------------------------------------------------------------------------
   const dashboard = async (offset: number, projectId?: string) => {
     const now = Date.now(), since = new Date(now - (DASHBOARD_DAYS + 1) * 86_400_000).toISOString();
@@ -980,6 +987,12 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
         try { if (ledger().importHistory(paperclipHistory(context.db()))) queueEmit(['runs']); } catch { /* the Ledger never fails an import */ }
         return report;
       },
+      'paperclip.import.restore': input => {
+        if (input.kind !== 'project' && input.kind !== 'task') throw new Error('Unknown item.');
+        const store = imports();
+        if (!store) throw new Error('The import store is unavailable.');
+        return { restored: store.restore(input.kind, id(input.id)) };
+      },
       'paperclip.task.start': input => startTask(id(input.taskId)),
       'paperclip.dashboard': input => dashboard(typeof input.utcOffsetMinutes === 'number' ? Math.max(-840, Math.min(840, input.utcOffsetMinutes)) : 0, typeof input.projectId === 'string' && input.projectId ? id(input.projectId) : undefined),
       'paperclip.import.plan': async input => {
@@ -1020,7 +1033,7 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
       'paperclip.inbox.restore': input => { dismissDb().prepare('DELETE FROM inbox_dismissals WHERE id = ?').run(id(input.id)); queueEmit(['inbox']); return { ok: true as const }; },
       'paperclip.inbox.dismissed': () => ({ items: [...dismissed()].map(([itemId, at]) => ({ id: itemId, at })) }),
     },
-    dispose() { context.hooks.setAutomatedWorktree?.(undefined); history.disposed = true; if (history.timer) timers.clearTimeout(history.timer); history.timer = null; offLedger(); offConnection(); offSession(); signIn.dispose(); closeSocket(); stopPoll(); if (live.emitTimer) timers.clearTimeout(live.emitTimer); live.emitTimer = null; },
+    dispose() { offDeletes?.(); context.hooks.setAutomatedWorktree?.(undefined); history.disposed = true; if (history.timer) timers.clearTimeout(history.timer); history.timer = null; offLedger(); offConnection(); offSession(); signIn.dispose(); closeSocket(); stopPoll(); if (live.emitTimer) timers.clearTimeout(live.emitTimer); live.emitTimer = null; },
     power(event) { if (event.state === 'suspend') { closeSocket(); stopPoll(); } else if (live.visible) { ensureSocket(); if (!live.socket) schedulePoll(); } },
   };
 }

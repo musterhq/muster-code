@@ -211,6 +211,83 @@ test('#183 when the scheduler cannot make a worktree for an imported project\u20
   assert.ok(activity.some((a:any)=>a.kind==='scheduler.worktree'&&/worktree/.test(a.summary)),'and the project says why');
 });
 
+test('#248 a task you deleted in Muster is not made again by the next import; Restore brings it back',async t=>{
+  const {service}=await fixture(t);
+  const importAgain=async()=>{await service.invoke('paperclip.config.set',{mode:'local',companyId:COMPANY});const r=await service.invoke('paperclip.import',{companyId:COMPANY});await service.invoke('paperclip.config.set',{mode:'off'});return r;};
+  await importAgain();
+  const oss=(await service.invoke('project.list',undefined)).find(p=>p.name==='OSS Manager')!;
+  const find=async()=>(await service.invoke('paperclip.snapshot',{})).tasks.filter(x=>x.key==='RAG-15');
+  const [before]=await find();assert.ok(before);
+  const tasksBefore=(await service.invoke('project.work',{projectId:oss.id,activityLimit:1})).tasks.items.length;
+  const full=await service.invoke('project.tasks.get',{projectId:oss.id,id:before!.id});
+  await service.invoke('project.tasks.delete',{projectId:oss.id,id:before!.id,revision:full.revision});
+  assert.equal((await find()).length,0,'deleted here');
+  const again=await importAgain();
+  assert.equal((await find()).length,0,'the import does not make it again');
+  assert.deepEqual(again.deleted.map(d=>[d.kind,d.key]),[['task','RAG-15']],'and the report says what it left out');
+  assert.match(again.notes.join('\n'),/you deleted here was left out \(RAG-15\)/);
+  assert.equal((await service.invoke('project.work',{projectId:oss.id,activityLimit:1})).tasks.items.length,tasksBefore-1);
+  await importAgain();assert.equal((await find()).length,0,'still deleted on every later import');
+  await service.invoke('paperclip.config.set',{mode:'local',companyId:COMPANY});
+  const plan=await service.invoke('paperclip.import.plan',{companyId:COMPANY});
+  assert.deepEqual(plan.deleted?.map(d=>[d.kind,d.key]),[['task','RAG-15']],'the import list offers it for restore');
+  const source=plan.deleted![0]!.id;
+  await service.invoke('paperclip.config.set',{mode:'off'});
+  assert.deepEqual(await service.invoke('paperclip.import.restore',{kind:'task',id:source}),{restored:true});
+  const back=await importAgain();
+  assert.equal((await find()).length,1,'restored: made again, once');
+  assert.deepEqual(back.deleted,[]);
+  await importAgain();assert.equal((await find()).length,1,'and not duplicated');
+  await assert.rejects(()=>service.invoke('paperclip.import.restore',{kind:'nope',id:source} as never),/Unknown item/);
+});
+
+test('#182 a project you deleted in Muster is not made again (no stray copy); Restore brings it back with its tasks',async t=>{
+  const {service}=await fixture(t);
+  const importAgain=async()=>{await service.invoke('paperclip.config.set',{mode:'local',companyId:COMPANY});const r=await service.invoke('paperclip.import',{companyId:COMPANY});await service.invoke('paperclip.config.set',{mode:'off'});return r;};
+  await importAgain();
+  const projects=async()=>(await service.invoke('project.list',undefined));
+  const total=(await projects()).length, oss=(await projects()).find(p=>p.name==='OSS Manager')!;
+  await service.invoke('project.delete',{id:oss.id});
+  assert.equal((await projects()).length,total-1);
+  const again=await importAgain();
+  assert.equal((await projects()).length,total-1,'no new project appears in its place');
+  assert.equal((await projects()).filter(p=>p.name==='OSS Manager').length,0);
+  assert.deepEqual(again.deleted.filter(d=>d.kind==='project').map(d=>d.label),['OSS Manager']);
+  assert.deepEqual(again.projects,{created:0,updated:total-1},'the others are updated as usual');
+  const ws=await service.invoke('paperclip.snapshot',{});
+  assert.equal(ws.tasks.filter(x=>x.source==='paperclip'||true).filter(x=>x.key==='RAG-15').length,0,'its tasks stay away too');
+  await service.invoke('paperclip.config.set',{mode:'local',companyId:COMPANY});
+  const plan=await service.invoke('paperclip.import.plan',{companyId:COMPANY});
+  assert.deepEqual(plan.deleted?.map(d=>[d.kind,d.label]),[['project','OSS Manager']]);
+  assert.ok(!plan.projects.some(p=>p.name==='OSS Manager'),'it is not offered for import');
+  await service.invoke('paperclip.config.set',{mode:'off'});
+  await service.invoke('paperclip.import.restore',{kind:'project',id:plan.deleted![0]!.id});
+  const back=await importAgain();
+  assert.equal((await projects()).filter(p=>p.name==='OSS Manager').length,1,'restored: one project');
+  assert.equal(back.projects.created,1);
+  assert.equal((await service.invoke('paperclip.snapshot',{})).tasks.filter(x=>x.key==='RAG-15').length,1,'with its tasks');
+  assert.equal((await importAgain()).projects.created,0,'and it is not made a third time');
+});
+
+test('#248 the import store: a deletion is kept by the Paperclip id, once; restoring forgets the link to the deleted copy',async()=>{
+  const {DatabaseSync}=await import('node:sqlite');
+  const store=new SqliteImportStore(new DatabaseSync(':memory:'));
+  store.setMap('project','p-src','p-muster','RAG',{companyId:'c1',name:'OSS',imported:{name:'OSS'}});
+  store.setMap('task','t-src','t-muster','RAG-1',{projectId:'p-muster',companyId:'c1',imported:{title:'Fix it'}});
+  assert.deepEqual(store.sourceOf('task','t-muster'),{sourceId:'t-src',companyId:'c1',key:'RAG-1',label:'Fix it'});
+  assert.equal(store.sourceOf('task','nobody'),undefined);
+  store.bury('task','t-src','c1','RAG-1','Fix it');store.bury('task','t-src','c1','RAG-1','Fix it');
+  assert.equal(store.buried('task','t-src'),true);assert.equal(store.buried('project','t-src'),false,'kinds are kept apart');
+  assert.equal(store.tombstones('c1').length,1,'one row per deleted item');
+  assert.equal(store.tombstones('other').length,0,'another org does not see it');
+  store.bury('project','p-src','c1','RAG','OSS');
+  assert.equal(store.restore('project','p-src'),true);
+  assert.equal(store.map('project','p-src'),undefined,'the link to the deleted project goes');
+  assert.equal(store.map('task','t-src'),undefined,'and the links of its tasks');
+  assert.equal(store.restore('project','p-src'),false,'restoring twice is harmless');
+  assert.equal(store.buried('task','t-src'),true,'a task deleted on its own stays deleted');
+});
+
 test('a company-wide approval that is also an issue approval keeps its task and project',async()=>{
   const {DatabaseSync}=await import('node:sqlite');
   const store=new SqliteImportStore(new DatabaseSync(':memory:'));
@@ -637,7 +714,7 @@ test('upgrade M2: importing again after an older import keeps the old project’
   assert.equal(inbox.length,1,'one Inbox row for one decision');
 });
 
-test('upgrade M2: deleting an imported project and importing again restores all its comments',async t=>{
+test('upgrade M2: a deleted imported project stays deleted (#182); restoring it and importing again brings back all its comments',async t=>{
   const fx=await fixture(t);
   await fx.service.invoke('paperclip.config.set',{mode:'local',companyId:COMPANY});
   await fx.service.invoke('paperclip.import',{companyId:COMPANY});
@@ -646,7 +723,11 @@ test('upgrade M2: deleting an imported project and importing again restores all 
   const project=(await fx.service.invoke('project.list',undefined)).find(p=>p.name==='OSS Manager')!;
   await fx.service.invoke('project.delete',{id:project.id,confirm:project.name} as never).catch(()=>fx.service.invoke('project.delete',{id:project.id} as never));
   await fx.service.invoke('paperclip.import',{companyId:COMPANY});
-  assert.equal(await count(),first,'the re-created tasks carry every comment again');
+  assert.ok((await count())<first,'deleted means deleted: the import does not make it again');
+  const plan=await fx.service.invoke('paperclip.import.plan',{companyId:COMPANY});
+  await fx.service.invoke('paperclip.import.restore',{kind:'project',id:plan.deleted!.find(d=>d.label==='OSS Manager')!.id});
+  await fx.service.invoke('paperclip.import',{companyId:COMPANY});
+  assert.equal(await count(),first,'restored: the re-created tasks carry every comment again');
 });
 
 test('review M3: an imported agent whose runner cannot be mapped (an adapter Muster has no provider for, or Claude without a model) blocks its task start instead of using the project default',async t=>{

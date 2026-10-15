@@ -320,9 +320,13 @@ export interface PaperclipImportReport {
   conflicts: ImportConflict[];
   /** Issues with no project in Paperclip: they have nowhere to go in Muster and are not imported. */
   noProject: number;
+  /** Projects and tasks you deleted in Muster: skipped, not made again. Restore one to bring it back on the next import. */
+  deleted: DeletedImport[];
   /** How long the import took and how many issues it read. */
   tookMs: number; issues: number;
 }
+/** A project or task you deleted in Muster that an import leaves out, keyed by its id on the server. */
+export interface DeletedImport { kind: 'project' | 'task'; id: string; label: string; key: string | null }
 export interface ImportConflict { scope: 'project' | 'task'; label: string; field: string; kept: string; paperclip: string }
 /** `start`: Assign & start — the owner's first run starts at once, in a new worktree of the project's folder. */
 export interface TaskCreateInput {
@@ -361,7 +365,9 @@ export interface ImportPlanProject {
   added?: { tasks: number; members: number; chats: number };
 }
 /** `local`: Paperclip runs on this Mac, so its folders are linked; a remote server's paths are never touched. */
-export interface ImportPlan { company: { id: string; name: string } | null; companies: WorkspaceCompany[]; projects: ImportPlanProject[]; local: boolean }
+export interface ImportPlan { company: { id: string; name: string } | null; companies: WorkspaceCompany[]; projects: ImportPlanProject[]; local: boolean;
+  /** What you deleted here: left out of the import until you restore it. */
+  deleted?: DeletedImport[] }
 /** Per Paperclip project: 'skip' leaves it out of the import. Imports never write into a project you made in Muster. */
 export type ImportTargets = Record<string, 'skip' | 'import'>;
 
@@ -430,6 +436,8 @@ export interface PaperclipCommands {
   /** Answers a Needs-you card from the thread or the Inbox (Paperclip confirmations: accept, or reject with a reason;
    *  questions: `answers`, sent to Paperclip's respond endpoint). Only ever sent when you answer. */
   'paperclip.interaction.respond': { input: { taskId: string; interactionId: string; accept: boolean; reason?: string; answers?: PaperclipAnswer[] }; output: { ok: true } };
+  /** Brings back a project or task you deleted in Muster: the next import makes it again. Nothing is written to the server. */
+  'paperclip.import.restore': { input: { kind: 'project' | 'task'; id: string }; output: { restored: boolean } };
   /** Copies a Paperclip company into Muster's Projects with GET requests only. Idempotent. Nothing starts running. */
   /** `owners`: for a project the plan marked `ask`, whether it is `mine` (left alone) or `made` by the earlier import (updated). An unanswered one is skipped, never guessed. */
   'paperclip.import': { input: { mode?: PaperclipMode; baseUrl?: string; token?: string; companyId?: string; targets?: ImportTargets; owners?: Record<string, 'mine' | 'made'> }; output: PaperclipImportReport };
@@ -442,7 +450,7 @@ export const PAPERCLIP_COMMANDS = {
   'paperclip.config.get': true, 'paperclip.config.set': true, 'paperclip.signin.start': true, 'paperclip.signin.status': true, 'paperclip.signin.cancel': true, 'paperclip.signin.signout': true, 'paperclip.disconnect': true, 'paperclip.session.set': true, 'paperclip.session.clear': true, 'paperclip.test': true, 'paperclip.snapshot': true, 'paperclip.task': true,
   'paperclip.comment': true, 'paperclip.task.update': true, 'paperclip.task.create': true, 'paperclip.agent.pause': true, 'paperclip.agent.resume': true,
   'paperclip.pauseAll': true, 'paperclip.resumeAll': true, 'paperclip.approval.decide': true, 'paperclip.run.cancel': true, 'paperclip.run': true, 'paperclip.costs': true, 'paperclip.memory': true, 'paperclip.list': true, 'paperclip.output.fetch': true, 'paperclip.output.preview': true,
-  'paperclip.watch': true, 'paperclip.badge': true, 'paperclip.ledger': true, 'paperclip.ledger.backfill': true, 'paperclip.inbox.dismiss': true, 'paperclip.inbox.dismissed': true, 'paperclip.inbox.restore': true, 'paperclip.interaction.respond': true, 'paperclip.import': true, 'paperclip.task.start': true, 'paperclip.dashboard': true, 'paperclip.import.plan': true,
+  'paperclip.watch': true, 'paperclip.badge': true, 'paperclip.ledger': true, 'paperclip.ledger.backfill': true, 'paperclip.inbox.dismiss': true, 'paperclip.inbox.dismissed': true, 'paperclip.inbox.restore': true, 'paperclip.interaction.respond': true, 'paperclip.import': true, 'paperclip.import.restore': true, 'paperclip.task.start': true, 'paperclip.dashboard': true, 'paperclip.import.plan': true,
 } as const satisfies Record<keyof PaperclipCommands, true>;
 
 /** How much of a monthly budget is used: in dollars when the budget and the spend are priced, else in tokens when a
