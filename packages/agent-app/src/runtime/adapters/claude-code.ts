@@ -12,10 +12,13 @@ export const CLAUDE_CODE_MODELS = [CLAUDE_CODE_DEFAULT, ...CLAUDE_CODE_ALIASES];
 /** read-only (and every Ask/Plan chat) → plan; workspace → acceptEdits; full → bypassPermissions. */
 export const claudePermissionMode = (mode: AdapterRunInput['permissionMode']) => mode === 'full' ? 'bypassPermissions' : mode === 'workspace' ? 'acceptEdits' : 'plan';
 
-function mcpArgs(servers: AdapterRunInput['mcpServers']): string[] {
+/** #427: the sub-agent tools (Task, and Agent in newer builds) are allowed in every permission mode, so a print-mode run
+ *  (which cannot ask) never denies a sub-agent. A sub-agent still works under the chat's permission mode. */
+export const CLAUDE_SUBAGENT_TOOLS = ['Task', 'Agent'];
+function toolArgs(servers: AdapterRunInput['mcpServers']): string[] {
   const names = Object.keys(servers ?? {});
-  if (!names.length) return [];
-  return ['--mcp-config', JSON.stringify({mcpServers: Object.fromEntries(Object.entries(servers ?? {}).map(([name, spec]) => [name, spec.args ? spec : {...spec, ...launcherSpec(spec.command)}]))}), '--allowedTools', ...names.map(name => `mcp__${name}`)];
+  return [...(names.length ? ['--mcp-config', JSON.stringify({mcpServers: Object.fromEntries(Object.entries(servers ?? {}).map(([name, spec]) => [name, spec.args ? spec : {...spec, ...launcherSpec(spec.command)}]))})] : []),
+    '--allowedTools', ...CLAUDE_SUBAGENT_TOOLS, ...names.map(name => `mcp__${name}`)];
 }
 
 export function claudeArgs(input: AdapterRunInput, sessionId: string): string[] {
@@ -26,7 +29,7 @@ export function claudeArgs(input: AdapterRunInput, sessionId: string): string[] 
     '--input-format', 'stream-json',
     // Muster's own tool servers (in-app browser, terminal, mailbox…): loaded alongside the user's, and allowed, since
     // they are first-party and each enforces its own lease and scope. Both flags are variadic, so a flag follows them.
-    ...mcpArgs(input.mcpServers),
+    ...toolArgs(input.mcpServers),
     '--permission-mode', claudePermissionMode(input.permissionMode),
     ...(alias && alias !== 'default' ? ['--model', alias] : []),
     ...(input.reasoningEffort ? ['--effort', input.reasoningEffort] : []),

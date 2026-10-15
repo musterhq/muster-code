@@ -42,7 +42,7 @@ export const TASK_TOOL_NAMES = new Set(TASK_TOOL_SPECS.map(t => t.name));
 export const TASK_PROTOCOL_NAME = 'Muster task protocol';
 export const TASK_PROTOCOL = [
   '1. Check out. Read your task with task_get before you change anything; if you picked a task yourself, take it with task_checkout.',
-  '2. Work in small steps against the acceptance criteria, and keep the work in the task’s folder.',
+  '2. Work in small steps against the acceptance criteria, and keep the work in the task’s folder. Sub-agents are allowed for parallel pieces of this task when your tools offer them.',
   '3. Comment as you go with task_comment: what you did, what changed, what is left. Every run ends with a comment.',
   '4. Hand off with task_update: implemented when the acceptance criteria are met and you can say how you checked, or blocked with the reason and who can unblock it.',
   '5. Delegate with task_create under your task when you are allowed to; give each subtask an owner and acceptance criteria.',

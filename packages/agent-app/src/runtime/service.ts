@@ -18,6 +18,7 @@ import { AgentStore } from './store.ts';
 import { applyFolderAliases, canonicalFolderPath } from './folder-merge.ts';
 import { WorkspaceWatchService } from './workspace-watch.ts';
 import {claudeChildRow,claudeChildThread} from './subagent-rows.ts';
+import {asksForSubagents,subagentSupport,subagentsUnavailableText} from './subagent-routes.ts';
 import {appendCommandOutput,finishCommandOutput,stripAnsi} from './command-output-buffer.ts';
 import {OutputLog} from './output-log.ts';
 import {ProjectEventLog} from './project-event-log.ts';
@@ -446,6 +447,10 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
     // user's choice (the composer's "Switch to…" button), never done here: that would send the conversation to a different vendor.
     if (chat.mode === 'agent' && selectedProvider.models.find(entry => entry.id === chat.model)?.tools === false && !store.timeline(chatId).some(item => item.data?.kind === 'tools-unavailable' && item.data?.model === chat.model && item.data?.providerId === selectedProvider.id)) {
       store.appendItem(chatId, 'notice', `${selectedProvider.models.find(entry => entry.id === chat.model)?.name ?? chat.model} can’t run commands or edit files through ${selectedProvider.name}, so this chat answers without tools. Use “Switch to…” in the composer to pick a model with tools.`, 'completed', {kind: 'tools-unavailable', model: chat.model, providerId: selectedProvider.id});
+    }
+    // #427: a route with no sub-agent tool says so once, in one plain line, when the request asks for sub-agents (every chat type).
+    if (subagentSupport(selectedProvider.driver) === 'none' && asksForSubagents(prompt) && !store.timeline(chatId).some(item => item.data?.kind === 'subagents-unavailable' && item.data?.providerId === selectedProvider.id)) {
+      store.appendItem(chatId, 'notice', subagentsUnavailableText(selectedProvider.name), 'completed', {kind: 'subagents-unavailable', providerId: selectedProvider.id});
     }
     const bindingId=selectedProvider.bindingId??selectedProvider.id;
     if (chat.providerBindingId && chat.providerBindingId!==bindingId) throw new Error('The selected provider account or profile changed. Select it again before sending. Your draft is retained.');
