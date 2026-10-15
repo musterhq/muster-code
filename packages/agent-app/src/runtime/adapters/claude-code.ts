@@ -117,7 +117,8 @@ export function claudeStdin(input: Pick<AdapterRunInput, 'prompt' | 'images'>): 
 }
 
 /** Headless Claude Code (`claude -p --output-format stream-json`) in the chat folder. */
-export function claudeCodeAdapter(options: {binary: string; env?: NodeJS.ProcessEnv; spawn?: Spawn; killGraceMs?: number; backgroundTimeoutMs?: number}): RunnableAdapter {
+const STEER_GRACE_MS = 2500;
+export function claudeCodeAdapter(options: {binary: string; env?: NodeJS.ProcessEnv; spawn?: Spawn; killGraceMs?: number; backgroundTimeoutMs?: number; steerGraceMs?: number}): RunnableAdapter {
   const spawn = options.spawn ?? (nodeSpawn as unknown as Spawn);
   return {kind: 'cli', run(input) {
     return new Promise<AdapterRunResult>(resolve => {
@@ -130,7 +131,10 @@ export function claudeCodeAdapter(options: {binary: string; env?: NodeJS.Process
       try { child = spawn(launch.command, launch.args, {cwd: input.cwd, env: launch.env, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true}); }
       catch (error) { resolve({status: 'failed', finalMessage: '', dispatchState: 'not-dispatched', errorMessage: `Claude Code could not start: ${error instanceof Error ? error.message : String(error)}`}); return; }
       let accepted = false, settled = false, final: {ok: boolean; text: string} | undefined, stderr = '', streamedText = false;
-      let pending = 1, inputClosed = false;
+      // `pending` counts results still owed. The CLI folds a message that arrives mid-turn into that turn, so several
+      // steers can share ONE result: after a result, stdin stays open for a short grace while steers are unanswered.
+      let pending = 1, inputClosed = false, unanswered = 0, grace: ReturnType<typeof setTimeout> | undefined;
+      const graceMs = options.steerGraceMs ?? STEER_GRACE_MS;
       const closeInput = () => { if (inputClosed) return; inputClosed = true; try { child.stdin?.end(); } catch { /* already closed */ } };
       const tools = new Map<string, Record<string, unknown>>();
       // Task/Agent children run inside the CLI. Each is a child thread `<session>:<tool_use id>`; its events carry that
@@ -141,7 +145,7 @@ export function claudeCodeAdapter(options: {binary: string; env?: NodeJS.Process
       // A background child that never reports back must not hold stdin (and the chat's run) open forever.
       let watchdog: ReturnType<typeof setTimeout> | undefined;
       const maybeClose = () => {
-        if (pending > 0) return;
+        if (pending > 0 || grace) return;
         if (!backgroundRunning()) { clearTimeout(watchdog); watchdog = undefined; closeInput(); return; }
         watchdog ??= setTimeout(() => {
           for (const [id, run] of agents) if (run.background && run.state === 'running') { run.launched = true; settle(id, 'interrupted', 'Timed out waiting for this background agent to report back.'); }
@@ -161,7 +165,7 @@ export function claudeCodeAdapter(options: {binary: string; env?: NodeJS.Process
       };
       const accept = () => { if (!accepted) { accepted = true; input.onThreadReady(sessionId); input.onTurnAccepted({threadId: sessionId, turnId}); } };
       const threadFor = (parent: unknown) => typeof parent === 'string' && parent ? `${sessionId}:${parent}` : sessionId;
-      const finish = (result: AdapterRunResult) => { if (settled) return; settled = true; input.signal.removeEventListener('abort', abort); clearTimeout(killer); clearTimeout(watchdog); resolve(result); };
+      const finish = (result: AdapterRunResult) => { if (settled) return; settled = true; input.signal.removeEventListener('abort', abort); clearTimeout(killer); clearTimeout(watchdog); clearTimeout(grace); resolve(result); };
       let killer: ReturnType<typeof setTimeout> | undefined;
       const abort = () => { child.kill('SIGINT'); killer = setTimeout(() => child.kill('SIGKILL'), options.killGraceMs ?? 3000); };
       if (input.signal.aborted) abort(); else input.signal.addEventListener('abort', abort, {once: true});
@@ -172,6 +176,8 @@ export function claudeCodeAdapter(options: {binary: string; env?: NodeJS.Process
         const type = event.type;
         if (type === 'system' && event.subtype === 'init') { accept(); return; }
         accept();
+        // Work after a result means the unanswered steer started another turn: its result will follow.
+        if (grace && (type === 'assistant' || type === 'stream_event' || type === 'user')) { clearTimeout(grace); grace = undefined; }
         if (type === 'system' && (event.subtype === 'task_started' || event.subtype === 'task_notification')) {
           const toolUseId = text(event.tool_use_id) || taskTools.get(text(event.task_id)) || '', run = agents.get(toolUseId);
           if (event.subtype === 'task_started') {
@@ -260,7 +266,12 @@ export function claudeCodeAdapter(options: {binary: string; env?: NodeJS.Process
           final = {ok: event.is_error !== true && event.subtype === 'success', text: text(event.result)};
           // Each user message (the prompt, then any steers) ends in one result; the last one closes stdin so the run ends.
           // A background subagent keeps the CLI alive: closing stdin now would end it before it reports back.
-          pending--; maybeClose();
+          if (grace) { clearTimeout(grace); grace = undefined; }
+          if (unanswered > 0) {
+            // Steers written since the last result may have been folded into this turn, or may start another one.
+            unanswered = 0; pending = 1;
+            grace = setTimeout(() => { grace = undefined; pending = 0; maybeClose(); }, graceMs);
+          } else { pending = 0; maybeClose(); }
         }
       });
       child.on('error', error => finish({status: 'failed', finalMessage: '', dispatchState: accepted ? 'dispatched' : 'not-dispatched', ...(accepted ? {threadId: sessionId, turnId} : {}), errorMessage: `Claude Code could not start: ${error.message}`}));
@@ -277,8 +288,8 @@ export function claudeCodeAdapter(options: {binary: string; env?: NodeJS.Process
       child.stdin?.write(claudeStdin(input));
       input.onSteerable?.(message => {
         if (settled || inputClosed || !child.stdin || input.signal.aborted) return false;
-        pending++;
-        try { child.stdin.write(claudeUserMessage(message)); return true; } catch { pending--; return false; }
+        pending++; unanswered++;
+        try { child.stdin.write(claudeUserMessage(message)); if (grace) { clearTimeout(grace); grace = undefined; } return true; } catch { pending--; unanswered--; return false; }
       });
     });
   }};
