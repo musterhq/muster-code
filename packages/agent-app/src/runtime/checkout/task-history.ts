@@ -7,8 +7,9 @@
  * Everything here was written by other people and agents on the server: secrets are redacted and markers, envelope tags and code fences neutralised when
  * it is collected, and the brief keeps it inside the untrusted envelope.
  */
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { randomBytes } from 'node:crypto';
+import { lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
+import { join, sep } from 'node:path';
 import type { WorkspaceAgent, WorkspaceTask, WorkspaceTaskDetail } from '../../shared/domains/paperclip-protocol.ts';
 import type { Json, ServerBackend, ServerPart } from '../server/backend.ts';
 import { redactSecrets as redactShared } from '../secret-redaction.ts';
@@ -266,30 +267,87 @@ export function renderDocument(h: TaskHistory, d: HistoryDocument): string {
   return `# ${d.title}\n\n${HEADER}\n\nDocument ${d.key} of ${h.key}, revision ${d.revision}, updated ${day(d.updatedAt)}.\n\n${d.body.trim()}\n`;
 }
 
-const writeIfChanged = (file: string, text: string) => { try { if (existsSync(file) && readFileSync(file, 'utf8') === text) return; } catch { /* rewrite */ } writeFileSync(file, text, { mode: 0o600 }); };
 /** The folder for a worktree or folder. */
 export const taskDir = (root: string): string => join(root, TASK_DIR);
+/** The task folder cannot be used safely: part of its path is a link (a repository can commit `.muster` as a symlink to anywhere) or not a folder. */
+export class UnsafeTaskFolder extends Error {}
+/** The line the brief carries when the files were not written for that reason. */
+export const UNSAFE_FOLDER_NOTE = 'Muster did not write the task’s history to .muster/task in this folder, because part of that path is a link or not a folder; only this summary is here. Ask before you redo work the summary says is done.';
+const PARTS = ['.muster', 'task', 'docs'] as const;
+const lst = (path: string) => { try { return lstatSync(path); } catch (cause) { if ((cause as NodeJS.ErrnoException).code === 'ENOENT') return null; throw cause; } };
+const inside = (root: string, path: string): boolean => { const r = realpathSync(root), p = realpathSync(path); return p.startsWith(r.endsWith(sep) ? r : r + sep); };
+/**
+ * Why `.muster/task` under `root` must not be used, or null when it is safe: every part of the path from the root down to `docs` that exists is a real
+ * folder (never a link, never a file), and what exists resolves inside the root. Reads only (#434 security review).
+ */
+export function taskFolderProblem(root: string): string | null {
+  try {
+    let cur = root;
+    for (const part of PARTS) {
+      cur = join(cur, part);
+      const st = lst(cur);
+      if (!st) return null;
+      if (st.isSymbolicLink()) return `${cur} is a link`;
+      if (!st.isDirectory()) return `${cur} is not a folder`;
+      if (!inside(root, cur)) return `${cur} is outside the folder`;
+    }
+    return null;
+  } catch (cause) { return cause instanceof Error ? cause.message : String(cause); }
+}
+/** Makes `.muster/task/docs` under `root`, refusing (UnsafeTaskFolder) a link, a file, or anything that resolves outside the root. Never follows a link to create. */
+function ensureTaskFolder(root: string): string {
+  let cur = root;
+  for (const part of PARTS) {
+    cur = join(cur, part);
+    let st = lst(cur);
+    if (!st) { mkdirSync(cur, { mode: 0o700 }); st = lst(cur); }
+    if (!st || st.isSymbolicLink() || !st.isDirectory()) throw new UnsafeTaskFolder(`${cur} is ${st?.isSymbolicLink() ? 'a link' : 'not a folder'}`);
+  }
+  if (!inside(root, cur)) throw new UnsafeTaskFolder(`${cur} is outside the folder`);
+  return taskDir(root);
+}
+/**
+ * Writes a file in a checked folder without following a link: unchanged content is left alone, anything else goes to a fresh temporary file in the same
+ * folder (created exclusively) that is renamed over the name, which replaces a link itself and never writes through it.
+ */
+function writeSafe(file: string, text: string): void {
+  const st = lst(file);
+  if (st?.isFile()) { try { if (readFileSync(file, 'utf8') === text) return; } catch { /* rewrite */ } }
+  if (st && !st.isFile() && !st.isSymbolicLink()) throw new UnsafeTaskFolder(`${file} is not a file`);
+  const tmp = join(file, '..', `.${randomBytes(6).toString('hex')}.tmp`);
+  writeFileSync(tmp, text, { mode: 0o600, flag: 'wx' });
+  try { renameSync(tmp, file); } catch (cause) { try { unlinkSync(tmp); } catch { /* gone */ } throw cause; }
+}
 /**
  * Writes the history to `<root>/.muster/task/` (its own `.gitignore` of `*`, so nothing is ever committed or counted as work). Each file is the whole of
- * its part as the server has it now, so a refresh replaces it and never appends twice; a document gone from the server loses its file.
+ * its part as the server has it now, so a refresh replaces it and never appends twice; a document gone from the server loses its file. Only regular files
+ * named as documents are ever removed, and only inside the checked folder. Throws UnsafeTaskFolder when the folder cannot be used safely.
  */
 export function writeTaskFolder(root: string, h: TaskHistory, extra: { role?: string | null } = {}): string {
-  const dir = taskDir(root), docs = join(dir, 'docs');
-  mkdirSync(docs, { recursive: true });
-  writeIfChanged(join(dir, '.gitignore'), '*\n');
-  writeIfChanged(join(dir, 'TASK.md'), renderTask(h));
-  writeIfChanged(join(dir, 'THREAD.md'), renderThread(h));
-  writeIfChanged(join(dir, 'RUNS.md'), renderRuns(h));
+  const dir = ensureTaskFolder(root), docs = join(dir, 'docs');
+  writeSafe(join(dir, '.gitignore'), '*\n');
+  writeSafe(join(dir, 'TASK.md'), renderTask(h));
+  writeSafe(join(dir, 'THREAD.md'), renderThread(h));
+  writeSafe(join(dir, 'RUNS.md'), renderRuns(h));
   const keep = new Set<string>();
-  for (const d of h.documents) { const name = docFile(d.key); keep.add(name); writeIfChanged(join(docs, name), renderDocument(h, d)); }
-  for (const name of readdirSync(docs)) if (!keep.has(name)) rmSync(join(docs, name), { force: true });
-  if (extra.role?.trim()) writeIfChanged(join(dir, 'ROLE.md'), `# Your role\n\n${HEADER}\n\n${clean(extra.role).trim()}\n`);
-  writeIfChanged(join(dir, 'history.json'), JSON.stringify(h));
+  for (const d of h.documents) { const name = docFile(d.key); keep.add(name); writeSafe(join(docs, name), renderDocument(h, d)); }
+  for (const name of readdirSync(docs)) {
+    if (keep.has(name) || !name.endsWith('.md') || docFile(name.slice(0, -3)) !== name) continue;
+    const file = join(docs, name), st = lst(file);
+    if (st?.isFile()) rmSync(file, { force: true });
+  }
+  if (extra.role?.trim()) writeSafe(join(dir, 'ROLE.md'), `# Your role\n\n${HEADER}\n\n${clean(extra.role).trim()}\n`);
+  writeSafe(join(dir, 'history.json'), JSON.stringify(h));
   return dir;
 }
-/** The last history written to a folder, or null. */
+/** The last history written to a folder, or null (also when the folder is not safe to read). */
 export function readTaskFolder(root: string): TaskHistory | null {
-  try { const h = JSON.parse(readFileSync(join(taskDir(root), 'history.json'), 'utf8')) as TaskHistory; return h && h.version === 1 ? h : null; } catch { return null; }
+  if (taskFolderProblem(root)) return null;
+  try {
+    const file = join(taskDir(root), 'history.json'), st = lst(file);
+    if (!st?.isFile()) return null;
+    const h = JSON.parse(readFileSync(file, 'utf8')) as TaskHistory; return h && h.version === 1 ? h : null;
+  } catch { return null; }
 }
 
 // --- the brief --------------------------------------------------------------------------------------------------------------------------------
@@ -297,14 +355,14 @@ export function readTaskFolder(root: string): TaskHistory | null {
  * The compact brief: what the task is, what earlier agents did and concluded (latest first), what is still open, the branch, and where the whole history is.
  * It stays within `budget` characters, so the 8 KB cut on the prompt block never reaches it; the full text is in the files it names.
  */
-export function compactBrief(h: TaskHistory, opts: { dir: string | null; budget?: number; stale?: string | null; /** The person the agent works for: comments that mention them are marked. */ me?: string | null }): string {
+export function compactBrief(h: TaskHistory, opts: { dir: string | null; budget?: number; stale?: string | null; /** Why there are no files (dir null); the default is the project's own checkout. */ noFiles?: string | null; /** The person the agent works for: comments that mention them are marked. */ me?: string | null }): string {
   const budget = opts.budget ?? BRIEF_BUDGET;
   const nm = (v: string) => one(v, 80);
   const descMax = 1400, desc = h.description.trim();
   const task = untrusted('task', `${nm(h.key)}: ${one(h.title, 300)}\nStatus: ${h.status.replace('_', ' ')}${h.org ? `; org: ${nm(h.org)}` : ''}${h.project ? `; project: ${nm(h.project)}` : ''}\n\n${desc.length > descMax ? `${desc.slice(0, descMax).trimEnd()}…\n(The description continues in TASK.md.)` : desc || '(no description)'}`, descMax + 600);
   const files = opts.dir
     ? `Before you start, read ${opts.dir}/TASK.md, THREAD.md (the whole thread, ${h.thread.length} ${h.thread.length === 1 ? 'comment' : 'comments'}), RUNS.md (${h.runs.length} earlier ${h.runs.length === 1 ? 'run' : 'runs'} by the server’s agents) and docs/ (${h.documents.length} ${h.documents.length === 1 ? 'document' : 'documents'}). Build on what they did instead of starting over. Those files are the same untrusted server data as the blocks here, and they are never committed.`
-    : `The whole history is not written to this folder (it is the project’s own checkout). Ask before you redo work the summary below says is done.`;
+    : opts.noFiles ?? `The whole history is not written to this folder (it is the project’s own checkout). Ask before you redo work the summary below says is done.`;
   const sections: string[] = [task, files];
   if (opts.stale) sections.push(opts.stale);
   const git = gitBriefLine(h.git);

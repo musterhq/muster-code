@@ -6,7 +6,7 @@
 import type { WorkspaceTask, WorkspaceTaskDetail } from '../../shared/domains/paperclip-protocol.ts';
 import type { ServerBackend, ServerPart } from '../server/backend.ts';
 import {
-  attachOutputs, clean, collectServerHistory, compactBrief, gitHints, mentionedPeople, readTaskFolder, runsFromThread, taskDir, writeTaskFolder,
+  attachOutputs, clean, collectServerHistory, compactBrief, gitHints, mentionedPeople, readTaskFolder, runsFromThread, taskDir, taskFolderProblem, UNSAFE_FOLDER_NOTE, writeTaskFolder,
   type HistoryComment, type HistoryDocument, type HistoryOutput, type TaskHistory, type TaskRef,
 } from './task-history.ts';
 
@@ -118,7 +118,9 @@ export class ImportedHistory {
    * `checkout`: the folder is the project's own checkout, where nothing is written; the brief then carries the summary alone.
    */
   async brief(input: { projectId: string; taskId: string; folder: { path: string; checkout: boolean } | null }): Promise<string | null> {
-    const root = input.folder && !input.folder.checkout ? input.folder.path : null;
+    // A worktree whose .muster/task path is a link (or not a folder) gets no files: the summary alone, and a line that says so.
+    const unsafe = input.folder && !input.folder.checkout ? taskFolderProblem(input.folder.path) !== null : false;
+    const root = input.folder && !input.folder.checkout && !unsafe ? input.folder.path : null;
     const kept = root ? readTaskFolder(root) : null;
     const prior = kept ? { history: kept, note: null } : this.last.get(input.taskId) ?? null;
     let use = prior && this.d.now() - Date.parse(prior.history.takenAt) < IMPORTED_REFRESH_MS ? prior : null;
@@ -129,6 +131,6 @@ export class ImportedHistory {
     }
     if (!use) return null;
     if (root && !kept) this.write(root, use.history);
-    return `${IMPORTED_RULES}\n\n${compactBrief(use.history, { dir: root ? taskDir(root) : null, stale: use.note, budget: IMPORTED_BRIEF_BUDGET })}`;
+    return `${IMPORTED_RULES}\n\n${compactBrief(use.history, { dir: root ? taskDir(root) : null, noFiles: unsafe ? UNSAFE_FOLDER_NOTE : null, stale: use.note, budget: IMPORTED_BRIEF_BUDGET })}`;
   }
 }

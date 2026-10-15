@@ -4,7 +4,7 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { DatabaseSync } from 'node:sqlite';
-import { existsSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -13,7 +13,7 @@ import { CheckoutStore } from '../src/runtime/checkout/store.ts';
 import { OrgReader } from '../src/runtime/server/orgs.ts';
 import { PaperclipError } from '../src/runtime/paperclip-client.ts';
 import { realGit } from '../src/runtime/checkout/git-port.ts';
-import { BRIEF_BUDGET, compactBrief, gitHints, readTaskFolder, validBranch, type TaskHistory } from '../src/runtime/checkout/task-history.ts';
+import { BRIEF_BUDGET, compactBrief, gitHints, readTaskFolder, taskFolderProblem, UnsafeTaskFolder, UNSAFE_FOLDER_NOTE, validBranch, writeTaskFolder, type TaskHistory } from '../src/runtime/checkout/task-history.ts';
 import { historyFromImport, ImportedHistory, IMPORTED_RULES, type ImportedTask } from '../src/runtime/checkout/imported-history.ts';
 import type { ServerBackend, ServerPart } from '../src/runtime/server/backend.ts';
 import type { WorkspaceAgent, WorkspaceTask, WorkspaceTaskDetail } from '../src/shared/domains/paperclip-protocol.ts';
@@ -334,4 +334,66 @@ test('#434 imported Start and scheduler runs: the history is written to the run�
   const own = (await history.brief({ projectId: 'p', taskId: 'm1', folder: { path: checkout, checkout: true } }))!;
   assert.match(own, /not written to this folder/);
   assert.ok(!existsSync(join(checkout, '.muster')));
+});
+
+// --- security: a repository can commit .muster (or any part of the path) as a link -------------------------------------------------------------
+/** A stand-in for the person's own files outside the worktree. */
+function home() {
+  const dir = mkdtempSync(join(tmpdir(), 'muster-h-victim-'));
+  const files: Record<string, string> = { 'plan.md': 'my plan', 'notes.md': 'my notes', 'other.md': 'other', 'keep.txt': 'keep', 'TASK.md': 'mine', 'history.json': '{"version":1,"key":"FAKE"}' };
+  for (const [name, text] of Object.entries(files)) writeFileSync(join(dir, name), text);
+  const intact = () => { assert.deepEqual(readdirSync(dir).sort(), Object.keys(files).sort(), 'no file added or lost'); for (const [name, text] of Object.entries(files)) assert.equal(readFileSync(join(dir, name), 'utf8'), text, `${name} unchanged`); };
+  return { dir, intact };
+}
+const sample = (): TaskHistory => historyFromImport(importedTask(), Date.parse('2026-10-05T10:00:00Z'));
+
+test('#434 security: a docs folder that is a link to the person’s files is refused, and not one of their files is lost or changed', async () => {
+  const victim = home(), wt = mkdtempSync(join(tmpdir(), 'muster-h-wt-'));
+  mkdirSync(join(wt, '.muster', 'task'), { recursive: true });
+  symlinkSync(victim.dir, join(wt, '.muster', 'task', 'docs'));
+  assert.match(taskFolderProblem(wt)!, /is a link/);
+  assert.throws(() => writeTaskFolder(wt, sample()), UnsafeTaskFolder);
+  victim.intact();
+  // Through a check-out: the brief carries the summary alone and says why; nothing is written or removed.
+  const h = setup();
+  await h.reader.part(CO); await h.svc.bind(CO.id, 'p1', h.repo, 'dev');
+  const lease = await h.svc.start({ taskId: 't1', model: OWN, confirm: true });
+  const v2 = home();
+  // The repository now has docs/ as a link (as if it came with a pull).
+  const { rmSync } = await import('node:fs');
+  rmSync(join(lease.worktree!, '.muster', 'task', 'docs'), { recursive: true, force: true });
+  symlinkSync(v2.dir, join(lease.worktree!, '.muster', 'task', 'docs'));
+  h.advance(REFRESH_MS + 1);
+  const brief = (await h.svc.brief(lease.chatId!))!;
+  v2.intact();
+  assert.ok(brief.includes(UNSAFE_FOLDER_NOTE), 'one line says why');
+  assert.ok(!brief.includes('Before you start, read'), 'the brief does not point at files that were not written');
+  assert.match(brief, /Builder, succeeded/, 'the summary is still there');
+});
+
+test('#434 security: a .muster that is a link makes Muster refuse; a file that is a link is replaced, never written through', async () => {
+  const victim = home(), wt = mkdtempSync(join(tmpdir(), 'muster-h-wt-'));
+  symlinkSync(victim.dir, join(wt, '.muster'));
+  assert.throws(() => writeTaskFolder(wt, sample()), UnsafeTaskFolder);
+  assert.equal(readTaskFolder(wt), null, 'nothing is read through the link either');
+  victim.intact();
+  const history = new ImportedHistory({ now: () => Date.parse('2026-10-05T10:00:00Z'), local: async () => importedTask(), server: async () => null });
+  assert.equal(history.write(wt, sample()), null, 'the imported path refuses too');
+  const brief = (await history.brief({ projectId: 'p', taskId: 'm1', folder: { path: wt, checkout: false } }))!;
+  assert.ok(brief.includes(UNSAFE_FOLDER_NOTE)); victim.intact();
+  // A file that is a link (TASK.md → the person's file): the link is replaced by Muster's file; their file is untouched.
+  const v2 = home(), wt2 = mkdtempSync(join(tmpdir(), 'muster-h-wt-'));
+  mkdirSync(join(wt2, '.muster', 'task', 'docs'), { recursive: true });
+  symlinkSync(join(v2.dir, 'TASK.md'), join(wt2, '.muster', 'task', 'TASK.md'));
+  writeTaskFolder(wt2, sample());
+  v2.intact();
+  assert.ok(lstatSync(join(wt2, '.muster', 'task', 'TASK.md')).isFile());
+  assert.match(readFileSync(join(wt2, '.muster', 'task', 'TASK.md'), 'utf8'), /# RAG-15/);
+  // Only regular files named like documents are ever removed from docs/.
+  const docs = join(wt2, '.muster', 'task', 'docs');
+  mkdirSync(join(docs, 'sub.md')); writeFileSync(join(docs, 'readme.txt'), 'r'); writeFileSync(join(docs, '.hidden.md'), 'h'); writeFileSync(join(docs, 'gone.md'), 'g');
+  symlinkSync(join(v2.dir, 'notes.md'), join(docs, 'linked.md'));
+  writeTaskFolder(wt2, sample());
+  assert.deepEqual(readdirSync(docs).sort(), ['.hidden.md', 'linked.md', 'plan.md', 'readme.txt', 'sub.md'], 'a stale document file goes; links, folders and other files stay');
+  v2.intact();
 });
