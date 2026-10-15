@@ -79,7 +79,7 @@ test('Claude Code adapter runs in the chat folder and maps stream-json to timeli
   const running=adapter.run(input);
   await new Promise(resolve=>setImmediate(resolve));
   assert.equal(call?.command,'/bin/claude');assert.equal(call?.cwd,'/work');assert.equal(call?.env.ANTHROPIC_API_KEY,undefined);
-  assert.deepEqual(call?.args.slice(0,10),['-p','--output-format','stream-json','--verbose','--include-partial-messages','--input-format','stream-json','--permission-mode','plan','--model']);
+  assert.deepEqual(call?.args.slice(0,13),['-p','--output-format','stream-json','--verbose','--include-partial-messages','--input-format','stream-json','--allowedTools','Task','Agent','--permission-mode','plan','--model']);
   assert.ok(call?.args.includes('--effort'));assert.ok(call?.args.includes('--session-id'));assert.deepEqual(JSON.parse(fake.stdin()),{type:'user',message:{role:'user',content:[{type:'text',text:'hello'}]}},'the prompt goes in as a stream-json user message');
   fake.emit({type:'system',subtype:'init',session_id:'s'},
     {type:'stream_event',event:{type:'content_block_delta',delta:{type:'text_delta',text:'Looking'}}},
@@ -269,8 +269,8 @@ test('Claude Code gets Muster\'s own tool servers (in-app browser, terminal…) 
   const args=claudeArgs({chat:{id:'c1'} as any,cwd:'/w',prompt:'p',model:'claude-code/sonnet',permissionMode:'workspace',mcpServers:servers,signal:new AbortController().signal,onThreadReady(){},onTurnAccepted(){},onDelta(){},onReasoning(){},onEvent(){}},'s1');
   const at=args.indexOf('--mcp-config');
   assert.ok(at>0);assert.deepEqual(JSON.parse(args[at+1]!),{mcpServers:servers});
-  assert.equal(args[at+2],'--allowedTools');assert.equal(args[at+3],'mcp__muster_browser');
-  assert.ok(args[at+4]!.startsWith('--'),'a flag closes the variadic lists');
+  assert.equal(args[at+2],'--allowedTools');assert.deepEqual(args.slice(at+3,at+6),['Task','Agent','mcp__muster_browser']);
+  assert.ok(args[at+6]!.startsWith('--'),'a flag closes the variadic lists');
   assert.equal(claudeArgs({chat:{id:'c1'} as any,cwd:'/w',prompt:'p',model:'claude-code/sonnet',permissionMode:'workspace',signal:new AbortController().signal,onThreadReady(){},onTurnAccepted(){},onDelta(){},onReasoning(){},onEvent(){}},'s1').includes('--mcp-config'),false);
 });
 

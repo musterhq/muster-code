@@ -13,7 +13,7 @@ import {NativeUnavailableError} from './codex-native.ts';
 import {splitSecretOverrides} from './thread-config.ts';
 import {CODEX_LAUNCHER, envFromOverrides, mcpServersFromOverrides} from './adapters/shared.ts';
 import { device } from '../shared/device-noun.ts';
-import {canSpawnSubagents} from './subagent-routes.ts';
+import {codexSubagentOverrides,subagentSupport} from './subagent-routes.ts';
 import {unpackedPath} from './unpacked-path.ts';
 
 /** Identity of the test-only route `createProviderAdapter({available})` builds. */
@@ -203,7 +203,7 @@ export function createProviderAdapter(options: { core?: CoreClient; available?: 
         chat: input.chat, cwd: input.cwd, prompt: input.prompt, model, permissionMode: access.permissionMode, signal: owned.controller.signal,
         ...(input.images?.length ? {images: input.images} : {}), ...(route.info.models.find(entry => entry.id === model)?.images === true ? {vision: true} : {}), ...(input.reasoningEffort ? {reasoningEffort: input.reasoningEffort} : {}),
         ...(resumeThreadId ? {resumeThreadId} : {}),
-        instructions: runInstructions(input.chat.mode, input.developerInstructions, canSpawnSubagents(route.info.driver)),
+        instructions: runInstructions(input.chat.mode, input.developerInstructions, subagentSupport(route.info.driver) !== 'none'),
         ...(Object.keys(mcpServersFromOverrides(input.configOverrides)).length ? {mcpServers: mcpServersFromOverrides(input.configOverrides)} : {}),
         ...(Object.keys(envFromOverrides(input.configOverrides)).length ? {env: envFromOverrides(input.configOverrides)} : {}),
         // The adapter runs its own tools (HTTP routes): they meet the same Project tool rules, user-process guard and approval cards as Codex's.
@@ -334,7 +334,8 @@ export function createProviderAdapter(options: { core?: CoreClient; available?: 
           env: { MUSTER_PROVIDER_NODE: node.node, ...node.env, ...route.env }, transportOwner: session.owner, cacheKey: session.key,
           sandbox: access.sandbox, networkAccess: access.networkAccess, approvalPolicy: access.approvalPolicy, developerInstructions,
           ...(split.threadConfig ? { threadConfig: split.threadConfig } : {}),
-          configOverrides: [`agents.default_subagent_model=${JSON.stringify(model)}`, `agents.default_subagent_reasoning_effort=${JSON.stringify(reasoning)}`, ...featureOverrides, ...extraOverrides, `sandbox_workspace_write.network_access=${access.networkAccess}`],
+          // #427: sub-agents on, defaulting to the chat's own model (which this provider serves) in every chat type.
+          configOverrides: [...codexSubagentOverrides(model, reasoning), ...featureOverrides, ...extraOverrides, `sandbox_workspace_write.network_access=${access.networkAccess}`],
         };
         const observers = {
           onEvent(method:string,params:Record<string,unknown>){

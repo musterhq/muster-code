@@ -84,6 +84,10 @@ function catalogIds(path) {
 const ROUTER_MODEL = /^[A-Za-z0-9._:/+ -]{1,200}$/;
 const modelMatches = (provider, model, ids) => typeof model === 'string' && (provider === 'openai' ? OPENAI_MODEL.test(model) : (ids ? ids.has(model) : false) || ROUTER_MODEL.test(model));
 
+/** True when the provider is known to serve `model` as a sub-agent model: OpenAI ids on OpenAI's route, a catalog id on a gateway.
+ *  A gateway without a catalog cannot confirm one, so the chat's own model is used instead. */
+const servesExecutor = (provider, model, ids) => typeof model === 'string' && (provider === 'openai' ? OPENAI_MODEL.test(model) : !!ids && ids.has(model));
+
 /** Validated `-c key=value` overrides for a profile file. The profile names its provider; the file name
  *  `openai-direct` is reserved for OpenAI's own ChatGPT route. */
 function profileOverrides(profile, text) {
@@ -98,13 +102,17 @@ function profileOverrides(profile, text) {
   for (const key of multiline) if (allowed.has(key)) throw new Error('Unsupported multiline provider profile configuration.');
   const catalog = json(values, 'model_catalog_json');
   if (catalog !== undefined && (typeof catalog !== 'string' || !catalog)) throw new Error('Invalid provider catalog path.');
+  // #427: the profile's sub-agent model is forwarded only when this provider is known to serve it (an OpenAI model id on
+  // OpenAI's route, an id in the gateway's catalog). Otherwise it is left out instead of failing the launch, and Codex
+  // uses Muster's own `-c agents.default_subagent_model=<the chat's model>`, which the provider serves by definition.
   const executor = json(values, 'agents.default_subagent_model');
-  if (executor !== undefined && !modelMatches(provider, executor, catalogIds(catalog))) throw new Error('Executor model does not match the selected provider.');
+  const executorServed = executor !== undefined && servesExecutor(provider, executor, catalogIds(catalog));
   if (values.has(table + 'auth.args') && !Array.isArray(json(values, table + 'auth.args'))) throw new Error('The provider auth.args must be an array.');
   // A per-session sub-agent cap in the profile is not forwarded: Muster imposes no
   // worker limit of its own, so Codex's own default applies (a cap of 1 made every
   // second worker fail as "Agent failed", F51).
-  const forwarded = [...values].filter(([key]) => allowed.has(key) && key !== 'agents.max_concurrent_threads_per_session');
+  const forwarded = [...values].filter(([key]) => allowed.has(key) && key !== 'agents.max_concurrent_threads_per_session'
+    && (executorServed || (key !== 'agents.default_subagent_model' && key !== 'agents.default_subagent_reasoning_effort')));
   const definesTable = forwarded.some(([key]) => key.startsWith(table));
   return forwarded.map(([key, value]) => key + '=' + value).concat(
     provider === 'openai' ? ['forced_login_method="chatgpt"']
@@ -259,7 +267,7 @@ function selection(argv, env) {
   throw new Error('No Codex route selected. Set MUSTER_CODEX_PROFILE or MUSTER_CODEX_PROVIDER.');
 }
 
-module.exports = { profileOverrides, providerOverrides, parseToml, codexCommand, modelMatches, catalogFailure };
+module.exports = { profileOverrides, servesExecutor, providerOverrides, parseToml, codexCommand, modelMatches, catalogFailure };
 if (require.main === module) {
   try { const chosen = selection(process.argv, process.env); launch(chosen.selection, chosen.args); }
   catch (error) { process.stderr.write(error.message + '\n'); process.exitCode = 1; }
