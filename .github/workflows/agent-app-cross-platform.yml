@@ -177,7 +177,7 @@ jobs:
         shell: bash
         run: ls -la release-dist
 
-      - uses: actions/upload-artifact@v6
+      - uses: actions/upload-artifact@v7
         with:
           name: muster-agent-${{ matrix.os }}
           if-no-files-found: error
