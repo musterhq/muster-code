@@ -91,6 +91,27 @@ assert.equal(copied.length,1,'Copy table writes to the clipboard');
 assert.ok(copied[0]!.includes(longCode),'the copy has the full code value');
 assert.ok(copied[0]!.includes(longWord),'the copy has the full long word');
 
+// Every surface that renders Markdown tables: replies, Paperclip task threads and run reports (MessageBody), and the file
+// viewer's Markdown preview (MessageBody inside .file-markdown) all render through MarkdownTable and never clip.
+const {MessageBody}=await import('../src/renderer/components/MessageBody');
+const markdown=`| Setting | Meaning |\n| --- | --- |\n| \`${longCode}\` | ${longWord} |\n`;
+for(const [label,node] of [['reply',<MessageBody text={markdown}/>],['file viewer',<div className="file-markdown" data-kind="markdown"><MessageBody text={markdown}/></div>]] as const){
+  root.render(node);await delay(80);
+  const rendered=document.querySelector('.md-table');assert.ok(rendered,`${label}: the table renders through MarkdownTable`);
+  for(const cell of Array.from(rendered!.querySelectorAll('td'))){
+    assert.notEqual(style(cell,'text-overflow'),'ellipsis',`${label}: no ellipsis`);
+    assert.notEqual(style(cell,'overflow'),'hidden',`${label}: no hidden overflow`);
+    assert.notEqual(inherited(cell,'white-space'),'nowrap',`${label}: cells wrap`);
+    assert.equal(inherited(cell,'overflow-wrap'),'anywhere',`${label}: long words break`);
+  }
+  assert.ok(rendered!.textContent!.includes(longCode)&&rendered!.textContent!.includes(longWord),`${label}: full values are in the DOM`);
+}
+// The other Markdown renderers (PR descriptions, memory answers) map tables to the same component.
+for(const file of ['PullRequestTab.tsx','HindsightPanel.tsx']){
+  const source=readFileSync(join(renderer,'components',file),'utf8');
+  assert.match(source,/table: \(\{node: _node, \.\.\.props\}\) => <MarkdownTable/,`${file} renders tables through MarkdownTable`);
+}
+
 assert.deepEqual(errors,[]);
 root.unmount();
 console.log('markdown-table-dom: ok');
