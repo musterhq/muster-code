@@ -1,6 +1,6 @@
 import { createRequire } from 'node:module';
 import { randomUUID } from 'node:crypto';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { homedir } from 'node:os';
 import {awaitProviderListing,configuredProviderInstances,providerListingsSettled,providerNode,type ProviderInstance,revalidateProviderInstances} from './provider-instances.ts';
 import {createAdapterCatalog,type AdapterCatalog} from './adapters/index.ts';
@@ -14,6 +14,7 @@ import {splitSecretOverrides} from './thread-config.ts';
 import {CODEX_LAUNCHER, envFromOverrides, mcpServersFromOverrides} from './adapters/shared.ts';
 import { device } from '../shared/device-noun.ts';
 import {codexSubagentOverrides,subagentSupport} from './subagent-routes.ts';
+import {codexWindowOverrides, userCompactionKeys} from './codex-window-overrides.ts';
 import {unpackedPath} from './unpacked-path.ts';
 
 /** Identity of the test-only route `createProviderAdapter({available})` builds. */
@@ -300,7 +301,9 @@ export function createProviderAdapter(options: { core?: CoreClient; available?: 
       // Context budget: Codex features Muster does not use, and connector (apps) tool schemas a model without deferred
       // tool search would otherwise receive inline on every request, stay off unless this chat asked for a connector.
       const featureOverrides = leanCodexFeatureOverrides({toolSearch: route.info.models.find(entry => entry.id === model0)?.toolSearch, connectorsRequested: connectorChats.has(input.chat.id), policy: connectorPolicy()});
-      const signature = JSON.stringify([access, model0, input.reasoningEffort ?? 'medium', input.configOverrides ?? {}, featureOverrides, input.cwd, route.command, route.info.id, route.env]);
+      // #426: the model's own window and compaction point (catalog or router listing), unless the user set them in config.toml.
+      const windowOverrides = codexWindowOverrides(route.info.models.find(entry => entry.id === model0), userCompactionKeys(route.sessionsRoot ? dirname(route.sessionsRoot) : undefined));
+      const signature = JSON.stringify([access, model0, input.reasoningEffort ?? 'medium', input.configOverrides ?? {}, featureOverrides, windowOverrides, input.cwd, route.command, route.info.id, route.env]);
       if (previous && ((previous.signature !== undefined && previous.signature !== signature) || previous.stale) && !busyWithBackground(previous)) close(previous);
       if (!previous && sessions.size >= 64) {
         // Bound retained observers without evicting known background work.
@@ -335,7 +338,7 @@ export function createProviderAdapter(options: { core?: CoreClient; available?: 
           sandbox: access.sandbox, networkAccess: access.networkAccess, approvalPolicy: access.approvalPolicy, developerInstructions,
           ...(split.threadConfig ? { threadConfig: split.threadConfig } : {}),
           // #427: sub-agents on, defaulting to the chat's own model (which this provider serves) in every chat type.
-          configOverrides: [...codexSubagentOverrides(model, reasoning), ...featureOverrides, ...extraOverrides, `sandbox_workspace_write.network_access=${access.networkAccess}`],
+          configOverrides: [...codexSubagentOverrides(model, reasoning), ...featureOverrides, ...windowOverrides, ...extraOverrides, `sandbox_workspace_write.network_access=${access.networkAccess}`],
         };
         const observers = {
           onEvent(method:string,params:Record<string,unknown>){

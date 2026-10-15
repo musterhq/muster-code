@@ -499,7 +499,7 @@ export function Composer({ chat }: { chat: Chat }): React.ReactElement {
     if (!hasPayload || composing.current || sending || modelPending.current || settingsPending.current || chat.archived || recoveryNeeded) return;
     if (staging) { flash('Waiting for attachments to finish uploading'); return; }
     // /compact is Muster's own command: it runs here (or waits), and is never sent to the model.
-    if (isCompactCommand(text)) { if (running) { flash('Compact is available when the current run finishes'); return; } clearIfUnchanged(text); runCommand('compact'); return; }
+    if (isCompactCommand(text)) { clearIfUnchanged(text); if (running) flash('Compacts as soon as the current turn finishes'); runCommand('compact'); return; }
     if (running) { void followUp(false); return; }
     if (!confirmed && chat.queuePaused && queue.length) { setConfirmSend(true); return; }
     if (isCheckoutQueued(chat.id)) { flash('Already queued · starts when the other chat in this folder finishes'); return; }
@@ -866,7 +866,7 @@ export function Composer({ chat }: { chat: Chat }): React.ReactElement {
     flash(`Saved skill $${slug} · find it under / and +`);
     requestAnimationFrame(() => input.current?.focus());
   };
-  const commandDisabled = (id: ComposerCommandId) => id === 'stop' ? !running : id === 'plan' ? choicesDisabled : id === 'model' || id === 'access' ? settingsBlocked : id === 'goal' || id === 'project' || id === 'sketch' || id === 'terminal' ? chat.archived : id === 'compact' ? running || (!chat.providerThreadId && !timelineItems?.some(item => item.kind === 'user')) : id === 'init' || id === 'review' ? chat.archived || !chat.folderId : false;
+  const commandDisabled = (id: ComposerCommandId) => id === 'stop' ? !running : id === 'plan' ? choicesDisabled : id === 'model' || id === 'access' ? settingsBlocked : id === 'goal' || id === 'project' || id === 'sketch' || id === 'terminal' ? chat.archived : id === 'compact' ? (!chat.providerThreadId && !timelineItems?.some(item => item.kind === 'user')) : id === 'init' || id === 'review' ? chat.archived || !chat.folderId : false;
   const runCommand = (id: ComposerCommandId, range?: { start: number; end: number }) => {
     if (commandDisabled(id)) return;
     if (range) replaceRange(range.start, range.end, '');

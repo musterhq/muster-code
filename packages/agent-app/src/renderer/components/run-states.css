@@ -18,3 +18,10 @@
 .plan-card-execute:hover:not(:disabled) { opacity: .9; }
 .plan-card-execute:disabled { opacity: .5; cursor: default; }
 .plan-card-error { margin: 0; padding: 0 12px 8px; color: var(--danger); font-size: var(--fs-11); }
+/* #426: a failed compaction shows its whole reason and its two ways forward. */
+.compaction-row.is-failed { flex-wrap: wrap; }
+.compaction-row.is-failed .compaction-label { white-space: normal; overflow-wrap: anywhere; }
+.compaction-actions { display: inline-flex; flex-wrap: wrap; gap: 6px; }
+.compaction-actions button { padding: 3px 10px; border: 1px solid var(--hairline); border-radius: var(--radius-6); background: var(--bg-raised); color: var(--text); font-size: var(--fs-12); }
+.compaction-actions button:hover:not(:disabled) { background: var(--bg-hover); }
+.compaction-error { flex-basis: 100%; color: var(--danger); font-size: var(--fs-12); }

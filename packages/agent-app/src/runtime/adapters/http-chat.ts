@@ -213,7 +213,7 @@ export function entryAcceptsImages(entry: Record<string, unknown>): boolean | un
   for (const flag of [capabilities.vision, capabilities.image_input, capabilities.images, entry.vision, entry.supports_vision]) if (typeof flag === 'boolean') return flag;
   return undefined;
 }
-export interface ListedModel { id: string; name: string; owner?: string; chat?: boolean; /** The router reports image input (vision) for this model. */ images?: boolean; /** The router's own context size (`context_length`, `max_input_tokens`…), used as the window when the provider reports none. */ contextWindow?: number }
+export interface ListedModel { id: string; name: string; /** #426: a window from this listing (`context_length`), not a catalog. */ contextWindowSource?: 'listing'; owner?: string; chat?: boolean; /** The router reports image input (vision) for this model. */ images?: boolean; /** The router's own context size (`context_length`, `max_input_tokens`…), used as the window when the provider reports none. */ contextWindow?: number }
 /** A positive integer context size from a `/models` entry; routers name it differently. */
 export function listedContextWindow(entry: Record<string, unknown>): number | undefined {
   for (const key of ['context_length', 'max_input_tokens', 'context_window', 'contextWindow', 'max_context_length', 'input_token_limit']) { const value = entry[key]; if (typeof value === 'number' && Number.isInteger(value) && value > 0 && value <= 50_000_000) return value; }
@@ -239,7 +239,7 @@ export async function fetchModelList(url: string, headers: Record<string, string
       const tools = entry.capabilities && typeof entry.capabilities === 'object' ? (entry.capabilities as {tool_calling?: unknown}).tool_calling : undefined;
       const chat = !(typeof entry.type === 'string' && entry.type !== 'model') && !(output && !output.includes('text')) && tools !== false;
       const contextWindow = listedContextWindow(entry), images = entryAcceptsImages(entry);
-      return [{id, name: typeof name === 'string' && name.length <= 160 ? name.replace(/[\x00-\x1f]/g, '') : id, ...(typeof entry.owned_by === 'string' ? {owner: entry.owned_by.slice(0, 64)} : {}), chat, ...(images !== undefined ? {images} : {}), ...(contextWindow ? {contextWindow} : {})}];
+      return [{id, name: typeof name === 'string' && name.length <= 160 ? name.replace(/[\x00-\x1f]/g, '') : id, ...(typeof entry.owned_by === 'string' ? {owner: entry.owned_by.slice(0, 64)} : {}), chat, ...(images !== undefined ? {images} : {}), ...(contextWindow ? {contextWindow, contextWindowSource: 'listing' as const} : {})}];
     });
   } finally { clearTimeout(timer); }
 }

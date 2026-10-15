@@ -8,7 +8,8 @@ import { createHash } from 'node:crypto';
 import { promises as fs, existsSync, mkdirSync, copyFileSync, statSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { rescanProviderListings, setProviderListingStore } from './provider-instances.ts';
-import type { AgentEvent, ApprovalData, ApprovalDecision, Chat, ChatRecovery, Commands, PendingQuestion, PendingQuestionData, TimelineItem, WakeReason } from '../shared/protocol.ts';
+import type { AgentEvent, ApprovalData, ApprovalDecision, Chat, ChatRecovery, Commands, PendingQuestion, PendingQuestionData, ProviderInfo, TimelineItem, WakeReason } from '../shared/protocol.ts';
+import { CONTEXT_OVERFLOW, musterCompactAt } from '../shared/context-window.ts';
 import type { PendingAttentionSummary, AttentionRequest } from '../shared/attention-protocol.ts';
 import { discoverLocalProviders } from './provider-discovery.ts';
 import { homedir } from 'node:os';
@@ -187,7 +188,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
       // The provider request ended with the previous process; the card stays readable but cannot be reopened.
       if ((item.kind === 'question' || item.kind === 'approval') && item.status === 'pending') store.updateItem(item.id, item.text, 'unavailable', {...item.data, expiredReason:'restart'});
       // A manual compaction request in flight when the app closed: no new process will ever settle this row.
-      if (item.kind === 'notice' && item.data?.kind === 'compaction' && item.status === 'running') store.updateItem(item.id, 'Compaction status unknown: Muster restarted while it was in progress. History is unchanged.', 'failed', {...item.data, status: 'failed'});
+      if (item.kind === 'notice' && item.data?.kind === 'compaction' && item.status === 'running') store.updateItem(item.id, 'Compaction status unknown: Muster restarted while it was in progress. History is unchanged. Retry, or continue in a fresh thread with a summary.', 'failed', {...item.data, status: 'failed', actions: ['retry', 'fresh']});
     }
   }
   // PRJ-07: every Project change carries a durable per-Project sequence so clients detect and replay missed events.
@@ -334,45 +335,100 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
     for (const [itemId, pending] of approvals) if (pending.chatId === chatId) finishApproval(itemId, pending, 'decline', 'interrupted');
   }
   const compactions = new Map<string, string>();
+  /** #426: a compaction the provider started on its own (Codex `contextCompaction` item) shows "Compacting context…" until it settles. */
+  const nativeCompacting = new Map<string, string>();
   /** Settles a manual compaction row, or appends the automatic one. The source transcript here is never trimmed. */
   function compactionCompleted(chatId: string) {
     // A compacted thread summarises earlier messages: static context goes out again on the next turn.
     contextLedger.forget(chatId);
     const manual = compactions.get(chatId); compactions.delete(chatId);
+    const native = nativeCompacting.get(chatId); nativeCompacting.delete(chatId);
     const data = {kind:'compaction', status:'completed', ...(manual ? {manual:true} : {})};
-    if (manual) store.updateItem(manual, 'Context compacted', 'completed', data);
+    if (manual) { store.updateItem(manual, 'Context compacted', 'completed', data); if (native) store.updateItem(native, COMPACTION_TEXT, 'completed', {kind:'compaction', status:'completed'}); }
+    else if (native) store.updateItem(native, COMPACTION_TEXT, 'completed', data);
     else store.appendItem(chatId, 'notice', COMPACTION_TEXT, 'completed', data);
     timeline(chatId);
   }
+  /** #426: failure rows say why and offer Retry and "Continue in a fresh thread with a summary". */
+  const COMPACTION_ACTIONS = ['retry', 'fresh'] as const;
+  /** A /compact or "Compact now" while a turn runs: compacts as soon as that turn settles (row id, fresh). */
+  const deferredCompactions = new Map<string, {rowId: string; fresh: boolean}>();
+  /** In-flight compactions: a send waits for one to settle instead of racing it. */
+  const compactionRuns = new Map<string, Promise<void>>();
+  /** Drops the provider thread and seeds the next turn with a digest of the stored transcript (the provider-switch digest). */
+  async function compactFromTranscript(chatId: string, rowId: string, text: string, data: Record<string, unknown>) {
+    await provider.release?.(chatId).catch(() => undefined);
+    store.requireDigest(chatId);
+    store.updateChat(chatId, {providerThreadId: null, providerTurnId: null, providerThreadProviderId: null, providerThreadBindingId: null});
+    contextLedger.forget(chatId);
+    const telemetry = {...store.contextTelemetry(chatId), compacted: true, updatedAt: new Date().toISOString()};
+    store.setContextTelemetry(chatId, telemetry); emit({type: 'contextTelemetry', chatId, telemetry});
+    store.updateItem(rowId, text, 'completed', {kind:'compaction', status:'completed', ...data});
+    timeline(chatId); state();
+  }
+  const FROM_TRANSCRIPT = 'Context compacted from the saved transcript. The next message starts a fresh provider conversation with a summary of the earlier messages.';
   /** Manual compaction. A live provider session compacts its own thread. With none (a project chat after a restart, a thread retired by a
-   *  stopped turn, a provider switch) Muster compacts from the stored transcript: the thread is dropped and the next message starts a fresh
-   *  provider conversation seeded with the same summary digest a provider switch uses. */
-  async function compactChat(chatId: string): Promise<void> {
+   *  stopped turn, a provider switch, an imported chat, a route without native compaction) Muster compacts from the stored transcript: the
+   *  thread is dropped and the next message starts a fresh provider conversation seeded with the same summary digest a provider switch uses.
+   *  `fresh` skips the provider. While a turn runs, compaction waits for it (#426) instead of refusing. */
+  async function compactChat(chatId: string, options: {fresh?: boolean; rowId?: string} = {}): Promise<void> {
     const chat = chatFor(chatId);
-    if (runs.has(chatId) || busy(chat)) throw new Error('Wait for the current run to finish before compacting.');
-    if (!provider.compact) throw new Error('This provider cannot compact context.');
     if (compactions.has(chatId)) throw new Error('Compaction is already in progress.');
-    const row = store.appendItem(chatId, 'notice', 'Compacting context…', 'running', {kind:'compaction', status:'running', manual:true});
-    compactions.set(chatId, row.id); timeline(chatId);
-    try { await provider.compact(chatId); }
-    catch (error) {
-      const message = error instanceof Error ? error.message : '';
-      if (message.startsWith(NO_LIVE_SESSION.slice(0, 40)) && store.timeline(chatId).some(item => item.kind === 'user')) {
-        compactions.delete(chatId);
-        await provider.release?.(chatId).catch(() => undefined);
-        store.requireDigest(chatId);
-        store.updateChat(chatId, {providerThreadId: null, providerTurnId: null, providerThreadProviderId: null, providerThreadBindingId: null});
-        contextLedger.forget(chatId);
-        const telemetry = {...store.contextTelemetry(chatId), compacted: true, updatedAt: new Date().toISOString()};
-        store.setContextTelemetry(chatId, telemetry); emit({type: 'contextTelemetry', chatId, telemetry});
-        store.updateItem(row.id, 'Context compacted from the saved transcript. The next message starts a fresh provider conversation with a summary of the earlier messages.', 'completed', {kind:'compaction', status:'completed', manual:true});
-        timeline(chatId); state(); return;
-      }
-      if (compactions.get(chatId) === row.id) { compactions.delete(chatId); store.updateItem(row.id, `Compaction failed: ${message || 'the provider refused the request.'} History is unchanged.`, 'failed', {kind:'compaction', status:'failed', manual:true}); timeline(chatId); }
-      throw error;
+    if (runs.has(chatId) || busy(chat)) {
+      const waiting = deferredCompactions.get(chatId);
+      if (waiting) { if (options.fresh) waiting.fresh = true; return; }
+      const row = store.appendItem(chatId, 'notice', 'Compacting after the current turn finishes…', 'running', {kind:'compaction', status:'running', manual:true, deferred:true});
+      deferredCompactions.set(chatId, {rowId: row.id, fresh: !!options.fresh}); timeline(chatId); return;
     }
-    // The provider confirms with thread/compacted; a quiet provider still settles the row once the request was accepted.
-    compactionCompleted(chatId);
+    const existing = options.rowId ? store.item(options.rowId) : undefined;
+    const row = existing ?? store.appendItem(chatId, 'notice', 'Compacting context…', 'running', {kind:'compaction', status:'running', manual:true});
+    if (existing) store.updateItem(row.id, 'Compacting context…', 'running', {kind:'compaction', status:'running', manual:true});
+    compactions.set(chatId, row.id); timeline(chatId);
+    let settle!: () => void;
+    compactionRuns.set(chatId, new Promise<void>(resolve => { settle = resolve; }));
+    const fail = (reason: string) => {
+      if (compactions.get(chatId) === row.id) compactions.delete(chatId);
+      store.updateItem(row.id, `Compaction failed: ${reason.replace(/[.\s]+$/, '')}. History is unchanged. Retry, or continue in a fresh thread with a summary.`, 'failed', {kind:'compaction', status:'failed', manual:true, reason, actions:[...COMPACTION_ACTIONS]});
+      timeline(chatId);
+    };
+    try {
+      const history = store.timeline(chatId).some(item => item.kind === 'user');
+      if (options.fresh || !provider.compact) {
+        compactions.delete(chatId);
+        if (!history) { fail('there is no conversation to compact yet'); throw new Error('There is no conversation to compact yet.'); }
+        await compactFromTranscript(chatId, row.id, FROM_TRANSCRIPT, {manual:true, fresh:true}); return;
+      }
+      try { await provider.compact(chatId); }
+      catch (error) {
+        const message = error instanceof Error ? error.message : '';
+        if (message.startsWith(NO_LIVE_SESSION.slice(0, 40)) && history) {
+          compactions.delete(chatId);
+          await compactFromTranscript(chatId, row.id, FROM_TRANSCRIPT, {manual:true}); return;
+        }
+        fail(message || 'the provider refused the request');
+        throw error;
+      }
+      // The provider confirms with thread/compacted; a quiet provider still settles the row once the request was accepted.
+      compactionCompleted(chatId);
+    } finally {
+      compactionRuns.delete(chatId); settle();
+      if (!runs.has(chatId) && store.queue(chatId).length) dispatchQueued(chatId);
+    }
+  }
+  /** #426: before a turn, a chat at or over its model's compaction point is compacted first (Muster's own trigger), on every route.
+   *  The point follows the model's own window (catalog, router listing, provider report, then a default) and its catalog
+   *  auto_compact_token_limit; routes that compact natively get a late safety net instead. Never a silent stop at 100%. */
+  async function autoCompactBeforeTurn(chat: Chat, route: ProviderInfo): Promise<boolean> {
+    const telemetry = store.contextTelemetry(chat.id);
+    if (telemetry.compacted || telemetry.usedTokens === null || compactions.has(chat.id)) return false;
+    const model = route.models.find(entry => entry.id === chat.model);
+    const {at, window} = musterCompactAt(route.driver, model, telemetry.windowTokens);
+    if (telemetry.usedTokens < at || !store.timeline(chat.id).some(item => item.kind === 'user')) return false;
+    const used = `${Math.round(telemetry.usedTokens / 1000)}K of ${Math.round(window.tokens / 1000)}K tokens`;
+    const row = store.appendItem(chat.id, 'notice', `Compacting context before this message (${used} in use)…`, 'running', {kind:'compaction', status:'running', auto:true});
+    timeline(chat.id);
+    await compactFromTranscript(chat.id, row.id, `Context compacted automatically at ${used}. This message starts a fresh provider conversation with a summary of the earlier messages; the chat history here is unchanged.`, {auto:true, at, window:window.tokens, windowSource:window.source});
+    return true;
   }
   function settleQuestions(chatId: string) {
     for (const [itemId, pending] of questions) if (pending.chatId === chatId) finishQuestion(itemId, pending, null, 'interrupted');
@@ -402,6 +458,8 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
   async function send(chatId: string, prompt: string, requestId: string, skill?: string | string[], attachmentIds: string[] = [], invoked: {pluginIds?: string[]; effort?: ReasoningEffort; reuseUserItemId?: string} = {}) {
     // /compact is Muster's command in every chat type and provider: never a message for the model.
     if (isCompactCommand(prompt) && attachmentIds.length === 0 && skill === undefined) { await compactChat(chatId); return {runId: ''}; }
+    // A compaction in flight settles first: the next turn goes to the compacted (or fresh) thread.
+    await compactionRuns.get(chatId)?.catch(() => undefined);
     let chat = chatFor(chatId);
     const folder = chat.folderId ? folderFor(chat.folderId) : undefined;
     const skillIds = [...new Set(skill === undefined ? [] : Array.isArray(skill) ? skill : [skill])];
@@ -452,6 +510,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
     if (subagentSupport(selectedProvider.driver) === 'none' && asksForSubagents(prompt) && !store.timeline(chatId).some(item => item.data?.kind === 'subagents-unavailable' && item.data?.providerId === selectedProvider.id)) {
       store.appendItem(chatId, 'notice', subagentsUnavailableText(selectedProvider.name), 'completed', {kind: 'subagents-unavailable', providerId: selectedProvider.id});
     }
+    if (await autoCompactBeforeTurn(chat, selectedProvider)) chat = chatFor(chatId);
     const bindingId=selectedProvider.bindingId??selectedProvider.id;
     if (chat.providerBindingId && chat.providerBindingId!==bindingId) throw new Error('The selected provider account or profile changed. Select it again before sending. Your draft is retained.');
     const nativeMatches=chat.providerThreadProviderId===selectedProvider.id && chat.providerThreadBindingId===bindingId;
@@ -539,6 +598,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
         const dispatchThread = digest ? null : chat.providerThreadId ?? null;
         const pendingBlocks = new Set(contextLedger.pending(chatId, dispatchThread, staticBlocks));
         let compactedInRun = false;
+        let settledByItem = false;
         /** HTTP routes: how many user turns Muster's trimmed history still holds after this turn. */
         let retainedTurns: number | undefined;
         const sentSources = contributed.blocks.filter(block => pendingBlocks.has(block)).map(block => block.label);
@@ -581,7 +641,11 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
             if (child) { const row = claudeChildRow(method, params); if (row) store.upsertSubagentItem(chatId, child, row); return; }
             if (method === TOOLS_UNAVAILABLE_EVENT) { store.appendItem(chatId, 'notice', `${chat.model} can’t run commands or edit files through this route, so it answered without tools. Use “Switch to…” in the composer to pick a model with tools.`, 'completed', {kind: 'tools-unavailable', model: chat.model}); scheduleTimeline(chatId); return; }
             if (method === HISTORY_WINDOW_EVENT) { if (typeof params.retainedUserTurns === 'number') retainedTurns = params.retainedUserTurns; return; }
-            if (method === 'thread/compacted') { seal(); compactionCompleted(chatId); compactedInRun = true; }
+            const compactionItem = params.item && typeof params.item === 'object' && (params.item as Record<string, unknown>).type === 'contextCompaction';
+            if (method === 'item/started' && compactionItem && !compactions.has(chatId) && !nativeCompacting.has(chatId)) { seal(); nativeCompacting.set(chatId, store.appendItem(chatId, 'notice', 'Compacting context…', 'running', {kind:'compaction', status:'running', auto:true}).id); scheduleTimeline(chatId); return; }
+            // The compaction item and thread/compacted report the same compaction: whichever comes first settles it once.
+            if (method === 'item/completed' && compactionItem) { if (nativeCompacting.has(chatId) || compactions.has(chatId)) { seal(); compactionCompleted(chatId); compactedInRun = true; settledByItem = true; } return; }
+            if (method === 'thread/compacted') { seal(); if (settledByItem) settledByItem = false; else compactionCompleted(chatId); compactedInRun = true; }
             const ownRun = runs.get(chatId) === run, parentThread0 = store.chat(chatId)?.providerThreadId, parentEvent = !(typeof params.threadId === 'string' && parentThread0 && params.threadId !== parentThread0);
             if (method === 'error') {
               // Codex retries a dropped model connection itself (willRetry): say so instead of looking stuck.
@@ -797,8 +861,15 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
         // settled that attempt as failed, which Inbox and Pulse explain in a plain sentence and which may be run again.
         // A failure with no message at all stays unconfirmed (recovery-needed).
         const said = (result.errorMessage ?? '').replace(/\s+/g, ' ').trim().slice(0, 600);
-        const recovery: ChatRecovery | undefined = result.recovery ?? (run.stopped ? {kind:'cancelled',retryable:false,reason:'Stopped.'}
+        let recovery: ChatRecovery | undefined = result.recovery ?? (run.stopped ? {kind:'cancelled',retryable:false,reason:'Stopped.'}
           : result.status === 'failed' ? (said && result.dispatchState !== 'unknown' ? {kind:'failed',retryable:false,reason:`The provider attempt failed: ${said}`} : {kind:'recovery-needed',retryable:false,reason:'The provider attempt did not settle with confirmed outcome. Check its saved turn before continuing; the prompt was not resent.'}) : undefined);
+        // #426: the provider refused the turn because the conversation no longer fits the model's window. That is a settled
+        // refusal, never an unconfirmed attempt: say so, and offer compaction or a fresh thread with a summary.
+        if (recovery && recovery.kind !== 'cancelled' && !run.stopped && CONTEXT_OVERFLOW.test(`${said} ${recovery.reason}`)) {
+          const modelName = selectedProvider.models.find(entry => entry.id === chat.model)?.name ?? chat.model;
+          recovery = {kind:'failed', retryable:false, reason:`${modelName} refused this turn: the conversation no longer fits its context window.`};
+          store.appendItem(chatId, 'notice', `The conversation no longer fits ${modelName}’s context window. Compact it and send again, or continue in a fresh thread with a summary.`, 'failed', {kind:'compaction', status:'failed', reason:'context-overflow', actions:['retry','fresh']});
+        }
         if (result.threadId) persistIdentity(result.threadId,result.turnId);
         // Only a turn the provider actually took delivered its context blocks to the thread.
         if (result.status === 'completed' && result.dispatchState !== 'not-dispatched' && !compactedInRun) contextLedger.delivered(chatId, store.chat(chatId)?.providerThreadId, threadReset ? staticBlocks : [...pendingBlocks], retainedTurns);
@@ -823,6 +894,9 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
         // Background sub-agents can still be waiting on a card after the parent turn ended: keep it answerable.
         if (run.stopped || disposed || !provider.hasActiveWork?.(chatId)) { settleApprovals(chatId); settleQuestions(chatId); }
         runs.delete(chatId);
+        // #426: a compaction asked for during the turn runs now (before any queued message is dispatched).
+        const deferred = deferredCompactions.get(chatId);
+        if (deferred && !disposed) { deferredCompactions.delete(chatId); void compactChat(chatId, {fresh: deferred.fresh, rowId: deferred.rowId}).catch(() => undefined); }
         if (!disposed) { const timer = timers.get(chatId); if (timer) clearTimeout(timer); timers.delete(chatId); timeline(chatId); let finalChat=store.chat(chatId);
           // A result the user has not seen yet: marked unread until the chat is opened again.
           if(finalChat&&(finalChat.status==='completed'||finalChat.status==='failed')&&store.activeChatId()!==chatId&&store.setUnread(chatId,true))finalChat=store.chat(chatId);
@@ -845,7 +919,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
     queue.pause(chatId, status === 'interrupted' ? 'interrupted' : 'failed'); state();
   }
   function dispatchQueued(chatId: string) {
-    if (runs.has(chatId) || closing || disposed || queue.paused(chatId)) return;
+    if (runs.has(chatId) || closing || disposed || queue.paused(chatId) || compactions.has(chatId)) return;
     const chat = store.chat(chatId);
     if (!chat || chat.archived || chat.recovery?.kind === 'recovery-needed' || chat.status === 'running' || chat.status === 'stopping') return;
     // A refused head waits for Retry, Edit or Delete instead of being skipped.
@@ -1494,7 +1568,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
         const decision: ApprovalDecision = !p.approved ? 'decline' : p.decision === 'acceptForSession' ? 'acceptForSession' : 'accept';
         const pending = approvals.get(approvalId); if (!pending) throw new Error('This approval is no longer pending.'); finishApproval(approvalId, pending, decision, decision === 'decline' ? 'declined' : decision === 'acceptForSession' ? 'approved-session' : 'approved'); return; }
       case 'question.dismiss': { const questionId = id(p.id); const pending = questions.get(questionId); if (!pending) throw new Error('This question is no longer pending.'); finishQuestion(questionId, pending, null, 'dismissed'); return; }
-      case 'chat.compact': await compactChat(id(p.id)); return;
+      case 'chat.compact': await compactChat(id(p.id), {fresh: p.fresh === true}); return;
       case 'question.respond': {
         const questionId = id(p.id); const pending = questions.get(questionId); if (!pending) throw new Error('This question is no longer pending.');
         if (!p.answers || typeof p.answers !== 'object' || Array.isArray(p.answers)) throw new Error('Invalid question answers.');
