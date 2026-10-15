@@ -88,7 +88,11 @@ assert.ok(dockedCard.getAttribute('data-session')!.startsWith('c1|browser:'));
 main(shown()[0]!).click();await delay(40);          // second session -> second tab (the sidebar is not taken over)
 state=store.getState();
 assert.equal(state.tabs.length,3,'a second session opens beside the first');
-const sessionTabs=state.tabs.filter(tab=>tab.kind==='liveView');assert.equal(sessionTabs.length,2);
+// #423: the newest page is the one the agent's tab shows now, so it opens as the agent's live browser tab; the older page keeps its picture.
+const isSession=(tab:{kind:string;id:string})=>tab.kind==='liveView'||tab.id.startsWith('browser:agent-');
+const sessionTabs=state.tabs.filter(isSession);assert.equal(sessionTabs.length,2);
+assert.deepEqual(sessionTabs.map(tab=>tab.kind),['liveView','browser'],'the live session opens its real browser tab, never a "Starting…" placeholder');
+assert.equal(sessionTabs[1]!.id,'browser:agent-c1');
 assert.equal(state.tabs.some(tab=>tab.kind==='files'),true,'other tabs are kept');
 assert.equal(state.activeTabId,sessionTabs[1]!.id);
 assert.equal(tabsText().length,3);
@@ -99,8 +103,8 @@ store.activateTab(sessionTabs[0]!.id);await delay(30);
 assert.equal(document.querySelector('[data-session-tab]')!.getAttribute('data-session-tab'),sessionTabs[0]!.id);
 assert.equal(cards().filter(card=>card.hasAttribute('data-docked')).length,1);
 // Focusing an already-open tab from its PiP does not duplicate it.
-openSessionTab(ui.computerUi().frames.c1!);await delay(20);
-assert.equal(store.getState().tabs.filter(tab=>tab.kind==='liveView').length,2);
+openSessionTab({...ui.computerUi().frames.c1!,owner:'browser:agent-c1',profileId:'folder-repo'});await delay(20);
+assert.equal(store.getState().tabs.filter(isSession).length,2);
 // Closing a session tab returns it to the PiP; closing the sidebar shows every PiP.
 store.closeTab(sessionTabs[0]!.id);await delay(30);
 assert.equal(store.getState().tabs.length,2);
@@ -135,6 +139,14 @@ assert.equal(store.getState().tabs.length,tabCount,'no new tab was opened');
 const before=store.getState().tabs.length;
 visitSource({chatId:'c1',target:'browser',app:'gone',label:'x',at:Date.now(),owner:'browser:agent-gone',profileId:'personal'});
 assert.equal(store.getState().tabs.length,before,'no blank browser for a gone session');
+// #423: a picture-only tab for the agent's live page (an older layout, or opened before the session was bound) never sits
+// on "Starting…"/"Disconnected": it hands over to the agent's real browser tab.
+store.setResourcesHidden(false);
+const liveId=ui.liveViewTabId({chatId:'c1',target:'browser',app:'c.test',url:'https://c.test/'});
+store.openTab({id:liveId,kind:'liveView',title:'c.test',chatId:'c1'});await delay(60);
+assert.equal(store.getState().tabs.some(tab=>tab.id===liveId),false,'the placeholder tab is replaced');
+assert.equal(store.getState().activeTabId,'browser:agent-c1','the agent\'s live browser tab is shown instead');
+assert.ok(!document.body.textContent!.includes('Disconnected'),'no Disconnected label for a page the agent is driving');
 
 // The run ends: every card reads Ended with its last picture, no live dot.
 store.setResourcesHidden(true);await delay(20);

@@ -23,6 +23,8 @@ export const BROWSER_POPUP_GESTURE_MS=5000;
 /** An unanswered download is cancelled after this long. */
 export const BROWSER_DOWNLOAD_DECISION_MS=5*60_000;
 const MAX_FAVICON_BYTES=64*1024, MAX_CAPTURE_WIDTH=2560, POPUP_RETURN_CLOSE_MS=1500;
+/** #423: a page that has never been shown is laid out (and painted for the live preview) at this size, not 0×0. */
+export const OFFSCREEN_BROWSER_BOUNDS:BrowserBounds={x:0,y:0,width:1280,height:800};
 export interface BrowserRuntime {
   createView(options:WebContentsViewConstructorOptions):WebContentsView;
   getSession(partition:string):Session;
@@ -264,6 +266,10 @@ export class BrowserWorkspaceController {
     const view=this.runtime.createView({webPreferences:{session,...SECURE_PREFERENCES}});
     entry.emulation=undefined;
     view.setVisible(false);view.setBackgroundColor('#181818');view.webContents.setAudioMuted(true);
+    // A new view has 0×0 bounds until the pane positions it. An agent's tab can be driven long before that, and a 0×0
+    // page captures as an empty image, so the live preview never got a frame and the pane sat on "Starting…" (#423).
+    // The view is not in the window, so these bounds are never on screen; position() replaces them when it is shown.
+    view.setBounds(entry.hostBounds??OFFSCREEN_BROWSER_BOUNDS);
     // Hidden pages must not keep timers and animation running at foreground rates.
     (view.webContents as Partial<WebContents>).setBackgroundThrottling?.(true);
     entry.view=view;this.wire(entry,view);

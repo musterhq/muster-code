@@ -2,7 +2,7 @@ import {randomBytes, timingSafeEqual} from 'node:crypto';
 import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
-import {browserScopeProfile, type BrowserState} from '../../shared/browser-protocol.ts';
+import {agentBrowserOwner, browserScopeProfile, type BrowserState} from '../../shared/browser-protocol.ts';
 import type {AgentEvent, Snapshot} from '../../shared/protocol.ts';
 import type {ComputerControlOwner} from '../../shared/domains/computer-protocol.ts';
 import {launcherFile, nodeLauncherScript} from '../../runtime/launcher-script.ts';
@@ -17,6 +17,8 @@ export interface BridgeBrowser {
   back(owner: string): BrowserState;
   reload(owner: string): BrowserState;
   console(input: {owner: string}): {level: 'debug' | 'info' | 'warning' | 'error' | 'network'; message: string; source: string; line: number; at: number}[];
+  /** The tab's state without waking a discarded page (optional for test doubles). */
+  status?(owner: string): BrowserState;
   frame(owner: string, width?: number): Promise<{dataUrl: string; width: number; height: number; url: string; title: string} | undefined>;
 }
 export interface BridgeOptions {
@@ -30,7 +32,7 @@ export interface BridgeOptions {
   script: string;
 }
 /** One agent tab per chat; the renderer adopts it into the right pane under the same owner. */
-export const agentBrowserOwner = (chatId: string) => `browser:agent-${chatId}`;
+export {agentBrowserOwner};
 const FRAME_INTERVAL_MS = 1000, FRAME_IDLE_MS = 8000, MAX_BODY = 1024 * 1024;
 
 /** Launcher script Codex runs as the muster_browser MCP server (config overrides cannot carry an args array). */
@@ -91,9 +93,10 @@ export class BrowserBridge {
     // CUA-03/09: the user holding control revokes the agent's input lease.
     if (await this.options.lease(chatId) === 'user') return textResult('The user has taken control of the browser. Stop using browser tools and wait until they hand control back.', true);
     const owner = agentBrowserOwner(chatId), profileId = browserScopeProfile(chat), browser = this.options.browser;
+    let announced = false;
     const host: AgentBrowserHost = {
       has: () => browser.hasTab(owner),
-      open: url => { const opened = !browser.hasTab(owner), state = browser.agentOpen(owner, profileId, url); if (opened) this.options.emit({type: 'computerBrowserOpened', chatId, owner, profileId, url: state.url}); return state; },
+      open: url => { const opened = !browser.hasTab(owner), state = browser.agentOpen(owner, profileId, url); if (opened) { announced = true; this.options.emit({type: 'computerBrowserOpened', chatId, owner, profileId, url: state.url}); } return state; },
       page: () => browser.agentPage(owner),
       back: () => browser.back(owner),
       reload: () => browser.reload(owner),
@@ -103,7 +106,12 @@ export class BrowserBridge {
     };
     try {
       const outcome = await runBrowserTool(host, tool, args, {readOnly: chat.mode !== 'agent' || (chat.permissionMode ?? 'workspace') === 'read-only'});
-      if (browser.hasTab(owner)) this.pump(chatId, owner, profileId, outcome.action);
+      if (browser.hasTab(owner)) {
+        // #423: every call re-announces which tab the agent drives, so a renderer that reloaded, reconnected or opened
+        // the chat after the tab was created still binds the session to this tab (not a picture-only placeholder).
+        if (!announced) this.options.emit({type: 'computerBrowserOpened', chatId, owner, profileId, url: (() => { try { return browser.status?.(owner)?.url ?? ''; } catch { return ''; } })()});
+        this.pump(chatId, owner, profileId, outcome.action);
+      }
       return outcome.result;
     } catch (error) {
       return textResult(error instanceof Error ? error.message : String(error), true);
