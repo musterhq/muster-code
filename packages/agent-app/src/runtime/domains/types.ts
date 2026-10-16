@@ -27,6 +27,8 @@ export type ToolPolicyResolver = (chat: Chat, method: string, params: Record<str
 /** A worktree made for one automated run: its folder (linked to the project) and how to take it back when nothing ran in it. */
 export interface AutomatedWorktree { folderId: string; undo(): Promise<void> }
 export type AutomatedWorktreeResolver = (projectId: string, taskId: string) => Promise<AutomatedWorktree | null>;
+/** The brief of a server task's history for a run of it in `folder` (#434); null for a task that did not come from a server. */
+export type TaskHistoryBriefResolver = (input: { projectId: string; taskId: string; folder: { id: string; path: string } | null }) => Promise<string | null>;
 
 /** The add and on hooks return an unsubscribe function; the set hooks replace a single resolver (undefined clears it). */
 export interface DomainHooks {
@@ -48,6 +50,10 @@ export interface DomainHooks {
   setAutomatedWorktree?(fn: AutomatedWorktreeResolver | undefined): void;
   /** The worktree an automated run of this task must use, made (or reused) on demand; null when the task may use its project's own folder. Rejects when the worktree cannot be made: the run must not fall back to the checkout. */
   automatedWorktree?(projectId: string, taskId: string): Promise<AutomatedWorktree | null>;
+  /** Replaces the single resolver of an imported task's history brief (undefined clears it). */
+  setTaskHistoryBrief?(fn: TaskHistoryBriefResolver | undefined): void;
+  /** What a run of an imported task is told about the task's history on the server; null when there is none. Never throws. */
+  taskHistoryBrief?(input: Parameters<TaskHistoryBriefResolver>[0]): Promise<string | null>;
   /** The identity a commit in this folder carries, or null. Never throws. */
   commitIdentity?(folderId: string): { name: string; email: string } | null;
   /** Observes successful domain commands (e.g. Projects logging memory and environment writes to activity). Optional so bare test contexts need not provide it. */

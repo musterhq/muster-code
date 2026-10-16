@@ -41,6 +41,8 @@ import { attachTurnLedger, TurnLedger } from '../turn-ledger.ts';
 import { importLedgerHistory, paperclipHistory, type HistoryResult } from '../ledger-history.ts';
 import { LocalWorkspace, type Invoke, type LocalPart } from '../workspace-local.ts';
 import { importFromPaperclip, planImport, SqliteImportStore } from '../paperclip-import.ts';
+import { ImportedHistory, within } from '../checkout/imported-history.ts';
+import { realGit } from '../checkout/git-port.ts';
 import { buildCosts, groupsFromReceipts } from '../insight/costs.ts';
 import { buildDashboard, DASHBOARD_DAYS, ledgerAggregates, monthStart } from '../workspace-dashboard.ts';
 import type { DomainContext, DomainModule } from './types.ts';
@@ -685,6 +687,26 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
     return { connected: Boolean(snap.paperclip), inbox: urgent.length, liveRuns: snap.counts.liveRuns, mail, chatIds: [...new Set(urgent.flatMap(i => i.chatIds ?? []))], company: snap.paperclip?.company?.name ?? companies.find(c => c.id === (conn.config.companyId ?? companies[0]?.id))?.name ?? null, orgs };
   };
 
+  /** An imported task's history for its local runs (#434): from the server it came from when that is the one connected, else the import's copy. */
+  const importedHistory = new ImportedHistory({
+    now: () => Date.now(),
+    local: async (projectId, taskId) => {
+      const store = imports(), meta = store?.taskMeta(taskId), org = store?.projectOrg(projectId);
+      if (!store || !meta || org === undefined) return null;
+      const [detail, { project }, part] = await Promise.all([local.detail(taskId), local.projectFor(taskId), local.snapshot().catch(() => null)]);
+      const source = store.projectSource(projectId);
+      let server = 'Muster Server'; try { if (source?.serverOrigin) server = new URL(source.serverOrigin).host; } catch { /* the default */ }
+      return { detail, tasks: part?.tasks.filter(t => t.projectId === projectId) ?? [], sourceId: meta.sourceId, fullDescription: store.comments(taskId).find(c => c.sourceId === `description:${meta.sourceId}`)?.body ?? null, rows: store.history(projectId), org, project: project.name, server };
+    },
+    server: async projectId => {
+      const c = connection(), source = imports()?.projectSource(projectId);
+      if (!c || !source) return null;
+      // Only the server the project was imported from (an older import did not record it: then the same org).
+      if (source.serverOrigin ? source.serverOrigin !== originOf(conn.baseUrl()) : source.companyId !== (built?.companyId ?? conn.config.companyId ?? null)) return null;
+      await paperclipPart(false).catch(() => undefined);
+      return { backend: c, ...(built ? { part: built.part } : {}), label: (() => { try { return new URL(conn.baseUrl()).host; } catch { return originLabel(); } })() };
+    },
+  });
   /** Starts a Muster task's first run on its owner's runner, in a new worktree of the project's folder (never the checkout). */
   /**
    * The worktree a run of one task works in: a worktree of the project's folder on the task's own branch (reused when the task already has one),
@@ -694,10 +716,16 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
   const prepareWorktree = async (project: { id: string; primaryFolderId?: string | null; folderIds: readonly string[] }, task: { id: string; key: string }) => {
     const source = folders().find(f => f.id === project.primaryFolderId);
     if (!source) throw new Error('Link the project’s folder first: runs happen in a worktree of it.');
-    const meta = imports()?.projectMeta(project.id), base = typeof meta?.defaultRef === 'string' ? meta.defaultRef : undefined;
+    const meta = imports()?.projectMeta(project.id);
+    let base = typeof meta?.defaultRef === 'string' ? meta.defaultRef : undefined;
     const branch = `muster/${task.key.toLowerCase().replace(/[^a-z0-9-]+/g, '-')}`;
     // A worktree of its own: the run never touches the project's checkout. Starting again reuses this task's worktree.
     const reuse = (await context.invoke('git.worktree.list', { folderId: source.id }).catch(() => [])).find(w => !w.main && !w.prunable && (w.branch === branch || w.branch === `refs/heads/${branch}`));
+    // The task's history on the server (or the import's copy) before the first turn (#434). When its agents worked on a branch that is on the remote, a new
+    // worktree starts from it (fetched into the remote-tracking ref only: the checkout itself is left alone).
+    const gathered = await within(importedHistory.collect(project.id, task.id), 15_000).catch(() => undefined) ?? null;
+    let continuedFrom: string | null = null;
+    if (!reuse && gathered?.history.git.branch && realGit.remoteBranch) { continuedFrom = await realGit.remoteBranch(source.path, gathered.history.git.branch).catch(() => null); if (continuedFrom) base = continuedFrom; }
     const worktree = reuse ? { folder: await context.invoke('folder.add', { path: reuse.path }), path: reuse.path, branch } : await context.invoke('git.worktree.create', { folderId: source.id, branch, ...(base ? { base } : {}) });
     const undo = async () => {
       if (reuse) return;
@@ -710,6 +738,7 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
       context.hooks.noteTaskWorktree?.(project.id, task.id, worktree.folder.id);
       if (!project.folderIds.includes(worktree.folder.id)) await context.invoke('project.linkFolder', { id: project.id, folderId: worktree.folder.id });
     } catch (cause) { await undo(); throw cause; }
+    if (gathered) importedHistory.write(worktree.path, gathered.history, continuedFrom);
     return { worktree, source, undo };
   };
   const startTask = async (taskId: string) => {
@@ -741,6 +770,13 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
       throw cause;
     }
   };
+
+  // What a run of an imported task is told about its history on the server, refreshed on later turns (#434).
+  context.hooks.setTaskHistoryBrief?.(async ({ projectId, taskId, folder }) => {
+    if (!imports()?.taskMeta(taskId) || imports()?.projectOrg(projectId) === undefined) return null;
+    const { project } = await local.projectFor(taskId);
+    return importedHistory.brief({ projectId, taskId, folder: folder ? { path: folder.path, checkout: folder.id === project.primaryFolderId } : null });
+  });
 
   // Automated runs (the scheduler, a wake) of an imported project's task work in a worktree too, never in the project's own checkout.
   context.hooks.setAutomatedWorktree?.(async (projectId, taskId) => {
@@ -1071,7 +1107,7 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
       'paperclip.inbox.restore': input => { dismissDb().prepare('DELETE FROM inbox_dismissals WHERE id = ?').run(id(input.id)); queueEmit(['inbox']); return { ok: true as const }; },
       'paperclip.inbox.dismissed': () => ({ items: [...dismissed()].map(([itemId, at]) => ({ id: itemId, at })) }),
     },
-    dispose() { offDeletes?.(); context.hooks.setAutomatedWorktree?.(undefined); history.disposed = true; if (history.timer) timers.clearTimeout(history.timer); history.timer = null; offLedger(); offConnection(); offSession(); signIn.dispose(); closeSocket(); stopPoll(); if (live.emitTimer) timers.clearTimeout(live.emitTimer); live.emitTimer = null; },
+    dispose() { offDeletes?.(); context.hooks.setAutomatedWorktree?.(undefined); context.hooks.setTaskHistoryBrief?.(undefined); history.disposed = true; if (history.timer) timers.clearTimeout(history.timer); history.timer = null; offLedger(); offConnection(); offSession(); signIn.dispose(); closeSocket(); stopPoll(); if (live.emitTimer) timers.clearTimeout(live.emitTimer); live.emitTimer = null; },
     power(event) { if (event.state === 'suspend') { closeSocket(); stopPoll(); } else if (live.visible) { ensureSocket(); if (!live.socket) schedulePoll(); } },
   };
 }

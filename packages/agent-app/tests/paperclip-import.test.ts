@@ -31,10 +31,11 @@ async function fixture(t:TestContext){
     const body=route(raw,path,url.searchParams);
     return body===undefined?new Response('{"error":"not found"}',{status:404}):new Response(JSON.stringify(body),{status:200,headers:{'content-type':'application/json',etag:`W/"${path}"`}});
   }) as typeof fetch;
-  const provider:ProviderAdapter={info:()=>[{id:'hybrow',name:'Hybrow',available:true,identityMasked:'configured',models:[{id:'m',name:'m'}]}],stop:async()=>true,dispose(){},async run(){return {status:'completed',finalMessage:'done'};}};
+  const prompts:{cwd:string;prompt:string}[]=[];
+  const provider:ProviderAdapter={info:()=>[{id:'hybrow',name:'Hybrow',available:true,identityMasked:'configured',models:[{id:'m',name:'m'}]}],stop:async()=>true,dispose(){},async run(input){prompts.push({cwd:input.cwd,prompt:input.prompt});return {status:'completed',finalMessage:'done'};}};
   const service=createAgentService({dataDir,provider,onEvent(){}});
   t.after(async()=>{globalThis.fetch=realFetch;await service.dispose();await rm(dataDir,{recursive:true,force:true});});
-  return {raw,service,calls,repo};
+  return {raw,service,calls,repo,prompts};
 }
 function route(raw:Json,path:string,q:URLSearchParams):unknown{
   if(path==='/companies')return raw.companies;
@@ -189,6 +190,36 @@ test('#183 the scheduler runs an imported project\u2019s task in a worktree, nev
   assert.ok(checkout);
   assert.ok(snap.chats.filter(c=>c.projectId===project.id).every(c=>c.folderId!==checkout.id),'no scheduled run works in the checkout');
   assert.ok(snap.chats.some(c=>c.projectId===project.id&&/muster-rag-\d+$/.test(snap.folders.find(f=>f.id===c.folderId)?.path??'')),'the run is in a task\u2019s worktree');
+  // #434: the scheduled run's worktree carries the task's history too.
+  const runPath=snap.folders.find(f=>f.id===snap.chats.find(c=>c.projectId===project.id&&c.folderId!==checkout.id)?.folderId)!.path;
+  assert.match(await readFile(join(runPath,'.muster','task','THREAD.md'),'utf8'),/oldest first/,'the scheduled run starts with the task\u2019s history');
+});
+
+test('#434 Start and the scheduler bring an imported task\u2019s history: the whole thread and the documents in .muster/task of its worktree, and a brief that points at them',async t=>{
+  const {raw,service,prompts}=await fixture(t);
+  await service.invoke('paperclip.config.set',{mode:'local',companyId:COMPANY});
+  await service.invoke('paperclip.import',{companyId:COMPANY});
+  await service.invoke('paperclip.config.set',{mode:'off'});
+  const ws=await service.invoke('paperclip.snapshot',{});
+  const rag15=ws.tasks.find(x=>x.key==='RAG-15')!;
+  const project=(await service.invoke('project.list',undefined)).find(p=>p.name==='OSS Manager')!;
+  const cto=(await service.invoke('project.members.list',{projectId:project.id})).members.find(m=>m.name==='CTO')!;
+  await service.invoke('project.members.update',{projectId:project.id,id:cto.id,runner:{providerId:'hybrow',model:'m'}});
+  await service.invoke('paperclip.task.update',{taskId:rag15.id,status:'todo'});
+  const started=await service.invoke('paperclip.task.start',{taskId:rag15.id});
+  const dir=join(started.worktree,'.muster','task');
+  const source=(raw.perIssue[raw.issues.find((i:Json)=>i.identifier==='RAG-15').id].comments as Json[]).filter(c=>!c.deletedAt);
+  const thread=await readFile(join(dir,'THREAD.md'),'utf8');
+  assert.ok(source.length>0);
+  assert.match(thread,new RegExp(`${source.length} comments?, oldest first`),'every imported comment is on disk');
+  assert.equal((await readFile(join(dir,'.gitignore'),'utf8')),'*\n');
+  assert.match(await readFile(join(dir,'TASK.md'),'utf8'),/# RAG-15 · /);
+  assert.ok(execFileSync('git',['-C',started.worktree,'status','--porcelain'],{encoding:'utf8'}).split('\n').every(l=>!l.includes('.muster')),'never part of the work');
+  const until=async(check:()=>boolean)=>{for(let n=0;n<100&&!check();n++)await new Promise(r=>setTimeout(r,50));return check();};
+  assert.ok(await until(()=>prompts.some(p=>p.cwd===started.worktree)),'the run started');
+  const prompt=prompts.find(p=>p.cwd===started.worktree)!.prompt;
+  assert.ok(prompt.includes(`read ${dir}/TASK.md, THREAD.md (the whole thread, ${source.length} comment`),'the first turn is pointed at the history');
+  assert.match(prompt,/This task came from Muster Server/);
 });
 
 test('#183 when the scheduler cannot make a worktree for an imported project\u2019s task, nothing runs in the checkout instead',async t=>{
