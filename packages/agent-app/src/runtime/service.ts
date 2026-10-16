@@ -327,20 +327,30 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
     } catch { return null; }
   }
   /** Arms the expiry timer from the stored deadline. If a mute window now outlasts it, the deadline moves instead of expiring. */
+  /** Fires one request's expiry from its stored deadline. If a mute window now outlasts it, the deadline moves (and the timer re-arms) instead of expiring. */
+  async function expireDue(itemId: string, pending: {expiresAt: number; timer: ReturnType<typeof setTimeout>}, live: () => boolean, expire: () => void): Promise<void> {
+    if (!live()) return;
+    const muted = await mutedUntilMs(), extended = muted === null ? 0 : attentionDeadline(Date.now(), muted);
+    if (live() && extended > pending.expiresAt + 1000) {
+      pending.expiresAt = extended;
+      const item = store.item(itemId);
+      if (item) store.updateItem(itemId, item.text, item.status, {...item.data, expiresAt:new Date(extended).toISOString()});
+      armExpiry(itemId, pending, live, expire); state(); return;
+    }
+    if (live()) expire();
+  }
+  /** Arms the expiry timer from the stored deadline. */
   function armExpiry(itemId: string, pending: {expiresAt: number; timer: ReturnType<typeof setTimeout>}, live: () => boolean, expire: () => void): void {
     clearTimeout(pending.timer);
-    pending.timer = setTimeout(() => { void (async () => {
-      if (!live()) return;
-      const muted = await mutedUntilMs(), extended = muted === null ? 0 : attentionDeadline(Date.now(), muted);
-      if (live() && extended > pending.expiresAt + 1000) {
-        pending.expiresAt = extended;
-        const item = store.item(itemId);
-        if (item) store.updateItem(itemId, item.text, item.status, {...item.data, expiresAt:new Date(extended).toISOString()});
-        armExpiry(itemId, pending, live, expire); state(); return;
-      }
-      if (live()) expire();
-    })(); }, Math.max(0, pending.expiresAt - Date.now()));
+    pending.timer = setTimeout(() => { void expireDue(itemId, pending, live, expire); }, Math.max(0, pending.expiresAt - Date.now()));
     pending.timer.unref?.();
+  }
+  /** Expires every pending approval/question whose stored deadline has passed, through the same path the timer takes. Timers can run late after a sleep, so main calls this on wake and from its attention interval. */
+  async function sweepExpired(): Promise<number> {
+    const now = Date.now(), due: Array<Promise<void>> = [];
+    for (const [itemId, pending] of [...approvals]) if (pending.expiresAt <= now) due.push(expireDue(itemId, pending, () => approvals.get(itemId) === pending, () => finishApproval(itemId, pending, 'decline', 'expired')));
+    for (const [itemId, pending] of [...questions]) if (pending.expiresAt <= now) due.push(expireDue(itemId, pending, () => questions.get(itemId) === pending, () => finishQuestion(itemId, pending, null, 'expired')));
+    await Promise.all(due); return due.length;
   }
   /** Why an approval or question can no longer be answered, or null while it still applies. A live handler means the provider is still waiting; the step it was for must also still be unfinished. */
   function staleAttention(chatId: string, itemId: string): string | null {
@@ -351,22 +361,22 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
     if (tool && ['completed', 'failed', 'interrupted'].includes(tool.status ?? '')) return 'The step this request was for has already finished. Use Ask again if you still need it.';
     return null;
   }
-  function finishApproval(itemId: string, pending: PendingApproval, decision: ApprovalDecision, status: string) {
+  function finishApproval(itemId: string, pending: PendingApproval, decision: ApprovalDecision, status: string, reason?: 'stale') {
     if (approvals.get(itemId) !== pending) return;
     clearTimeout(pending.timer); approvals.delete(itemId);
     const item = store.item(itemId);
-    if (item) store.updateItem(itemId, item.text, status, status === 'expired' ? {...item.data, expiredReason:'timeout'} : item.data);
+    if (item) store.updateItem(itemId, item.text, status, status === 'expired' ? {...item.data, expiredReason:'timeout'} : reason ? {...item.data, expiredReason:reason} : item.data);
     if (status === 'expired') store.appendItem(pending.chatId, 'notice', 'An approval request timed out before you answered, so the agent was told it was not approved. Use Ask again to have it re-ask.', 'completed', {kind:'attention-expired', itemId});
     const toolItemId = typeof item?.data?.toolItemId === 'string' ? item.data.toolItemId : undefined, tool = toolItemId ? store.item(toolItemId) : undefined;
     if (tool?.data?.awaitingApproval === itemId) { const {awaitingApproval: _cleared, ...rest} = tool.data; store.updateItem(tool.id, tool.text, tool.status, rest); }
     timeline(pending.chatId); state(); pending.resolve(decision);
   }
-  function finishQuestion(itemId: string, pending: PendingQuestionRequest, answers: QuestionAnswers, status: string, receiptAnswers?: Record<string, {answers:string[]}>) {
+  function finishQuestion(itemId: string, pending: PendingQuestionRequest, answers: QuestionAnswers, status: string, receiptAnswers?: Record<string, {answers:string[]}>, reason?: 'stale') {
     if (questions.get(itemId) !== pending) return;
     clearTimeout(pending.timer); questions.delete(itemId);
     if (questionsByProviderKey.get(pending.providerKey) === itemId) questionsByProviderKey.delete(pending.providerKey);
     const item = store.item(itemId);
-    if (item) store.updateItem(itemId, item.text, status, {...item.data, ...(receiptAnswers ? {answers:receiptAnswers} : {}), ...(status === 'expired' ? {expiredReason:'timeout'} : {})});
+    if (item) store.updateItem(itemId, item.text, status, {...item.data, ...(receiptAnswers ? {answers:receiptAnswers} : {}), ...(status === 'expired' ? {expiredReason:'timeout'} : reason ? {expiredReason:reason} : {})});
     if (status === 'expired') store.appendItem(pending.chatId, 'notice', 'A question timed out before you answered, so the agent was told it was cancelled. Use Ask again to have it re-ask.', 'completed', {kind:'attention-expired', itemId});
     timeline(pending.chatId); state();
     pending.resolve(answers); pending.waiters.splice(0).forEach(resolve => resolve(answers));
@@ -1616,14 +1626,15 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
         const decision: ApprovalDecision = !p.approved ? 'decline' : p.decision === 'acceptForSession' ? 'acceptForSession' : 'accept';
         const pending = approvals.get(approvalId); if (!pending) throw new Error('This approval is no longer pending.');
         // Expiry is decided from the stored deadline, so a click that lands after it (or after a sleep) is never treated as consent.
-        if (Date.now() >= pending.expiresAt) { finishApproval(approvalId, pending, 'decline', 'expired'); throw new Error('This approval timed out before it was answered. Use Ask again.'); }
+        if (Date.now() >= pending.expiresAt) { finishApproval(approvalId, pending, 'decline', 'expired'); if (decision === 'decline') return; throw new Error('This approval timed out before it was answered. Use Ask again.'); }
         // A late yes is re-checked: the run must still be going and the step it was for must still be waiting.
-        if (decision !== 'decline') { const stale = staleAttention(pending.chatId, approvalId); if (stale) { finishApproval(approvalId, pending, 'decline', 'interrupted'); throw new Error(stale); } }
+        if (decision !== 'decline') { const stale = staleAttention(pending.chatId, approvalId); if (stale) { finishApproval(approvalId, pending, 'decline', 'interrupted', 'stale'); throw new Error(stale); } }
         finishApproval(approvalId, pending, decision, decision === 'decline' ? 'declined' : decision === 'acceptForSession' ? 'approved-session' : 'approved'); return; }
+      case 'attention.sweep': return {expired: await sweepExpired()};
       case 'approval.reask': {
         const itemId = id(p.id), item = store.item(itemId);
         if (!item || (item.kind !== 'approval' && item.kind !== 'question')) throw new Error('This request no longer exists.');
-        if (item.status !== 'expired' && item.status !== 'unavailable') throw new Error('This request is still open or was already answered.');
+        if (item.status !== 'expired' && item.status !== 'unavailable' && !(item.status === 'interrupted' && item.data?.expiredReason === 'stale')) throw new Error('This request is still open or was already answered.');
         if (item.data?.reaskedAt) throw new Error('The agent was already asked again.');
         const chatId = item.chatId, chat = chatFor(chatId);
         if (chat.archived) throw new Error('Restore this chat before asking again.');
@@ -1650,7 +1661,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
       case 'question.respond': {
         const questionId = id(p.id); const pending = questions.get(questionId); if (!pending) throw new Error('This question is no longer pending.');
         if (Date.now() >= pending.expiresAt) { finishQuestion(questionId, pending, null, 'expired'); throw new Error('This question timed out before it was answered. Use Ask again.'); }
-        { const stale = staleAttention(pending.chatId, questionId); if (stale) { finishQuestion(questionId, pending, null, 'interrupted'); throw new Error(stale); } }
+        { const stale = staleAttention(pending.chatId, questionId); if (stale) { finishQuestion(questionId, pending, null, 'interrupted', undefined, 'stale'); throw new Error(stale); } }
         if (!p.answers || typeof p.answers !== 'object' || Array.isArray(p.answers)) throw new Error('Invalid question answers.');
         const answers: Record<string, {answers: string[]}> = Object.create(null) as Record<string, {answers: string[]}>;
         const suppliedKeys = Object.getOwnPropertyNames(p.answers as object);

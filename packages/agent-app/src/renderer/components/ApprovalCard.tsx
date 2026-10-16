@@ -33,7 +33,7 @@ export function ApprovalCard({item}:{item:TimelineItem}):React.ReactElement {
   };
   const restart=data.expiredReason==='restart';
   const outcome=restart?'Lost when Muster restarted':APPROVAL_OUTCOME[item.status??'']??(item.status??'Closed');
-  const canReask=(item.status==='expired'||item.status==='unavailable')&&!data.reaskedAt;
+  const canReask=(item.status==='expired'||item.status==='unavailable'||(item.status==='interrupted'&&data.expiredReason==='stale'))&&!data.reaskedAt;
   const reask=async()=>{
     if(busy)return;setBusy('accept');setError('');
     try{await invoke('approval.reask',{id:item.id});}

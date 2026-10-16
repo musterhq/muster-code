@@ -78,7 +78,7 @@ export function PendingQuestion({ item }: { item: TimelineItem }): React.ReactEl
       <button type="button" className="pending-question-dismiss" onClick={() => void dismiss()}>Dismiss</button></div>}
     {responding && item.status === 'pending' && <span className="pending-question-status" role="status">Sending…</span>}
     {outcome && <p className="pending-question-outcome" role="status"><strong>{outcome.label}</strong>{outcome.detail && <span>{outcome.detail}</span>}</p>}
-    {(item.status === 'expired' || item.status === 'unavailable') && !item.data?.reaskedAt && <div className="pending-question-actions"><button type="button" className="pending-question-submit" disabled={responding} onClick={() => void reask()}>Ask again</button></div>}
+    {(item.status === 'expired' || item.status === 'unavailable' || (item.status === 'interrupted' && item.data?.expiredReason === 'stale')) && !item.data?.reaskedAt && <div className="pending-question-actions"><button type="button" className="pending-question-submit" disabled={responding} onClick={() => void reask()}>Ask again</button></div>}
     {error && <p className="pending-question-error" role="alert">{error}</p>}
   </section>;
 }

@@ -169,6 +169,8 @@ async function main(): Promise<void> {
   // An approval or question raised out of sight gets one toast, and one reminder shortly before it closes.
   const attentionTracker = createAttentionTracker();
   let lastAttention: Snapshot['attention'];
+  // Timers can fire late after a sleep: close every request past its stored deadline so cards and badges follow the clock.
+  const sweepAttention = (): Promise<unknown> => loaded.service.invoke('attention.sweep', {}).catch(() => undefined);
   const notifyAttention = (): void => {
     const focused = window !== null && !window.isDestroyed() && window.isVisible() && window.isFocused();
     const notices = attentionTracker(lastAttention, Date.now(), notifyPrefs, focused && lastActiveChatId ? lastActiveChatId : null);
@@ -183,7 +185,7 @@ async function main(): Promise<void> {
     }
   };
   // Snapshots only arrive on change, so reminders need a clock of their own.
-  setInterval(() => { if (lastAttention?.totalRequests) notifyAttention(); }, 30_000).unref();
+  setInterval(() => { if (lastAttention?.totalRequests) { void sweepAttention(); notifyAttention(); } }, 30_000).unref();
   // CHAT-15: a timed or activity wake carries exactly one notification (the runtime emits chatWoke once per transition).
   let lastActiveChatId: string | undefined;
   const justWoke = new Set<string>();
@@ -280,6 +282,7 @@ async function main(): Promise<void> {
   // provider sessions; sandboxes are re-inspected here because ScopedComputers lives in main. Lock/unlock are no-ops.
   const forwardPower=(state:'suspend'|'resume'|'lock-screen'|'unlock-screen')=>{
     void loaded.service.power?.({state}).catch(error=>console.warn(`power ${state} failed:`,error instanceof Error?error.message:error));
+    if(state==='resume')void sweepAttention();
     if(state==='resume')void computers.recheckAfterWake().catch(()=>undefined);
   };
   powerMonitor.on('suspend',()=>forwardPower('suspend'));

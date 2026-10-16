@@ -69,6 +69,7 @@ const COMMANDS = {
   'chat.reconcile': true,
   'chat.continueAnyway': true,
   'approval.reask': true,
+  'attention.sweep': true,
   'chat.contextTelemetry': true,
   'approval.respond': true,
   'question.respond': true,

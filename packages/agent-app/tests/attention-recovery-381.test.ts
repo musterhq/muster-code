@@ -214,3 +214,91 @@ test('approving is refused when the step it was for has already finished',async 
  await until(()=>decision!==undefined);
  assert.deepEqual(decision,{decision:'decline'});
 });
+
+test('a stale request closes with a stale marker and can be asked again (once, chat idle)',async t=>{
+ let release!:()=>void;const gate=new Promise<void>(r=>{release=r;});const prompts:string[]=[];
+ const {service}=await fixture(t,async input=>{
+  prompts.push(input.prompt);
+  if(prompts.length>1)return{status:'completed',finalMessage:'asked again'};
+  input.onEvent('item/started',{item:{type:'commandExecution',id:'tool-1',command:'ls',status:'inProgress'}});
+  const asked=input.onRequest('item/commandExecution/requestApproval',{command:'ls',itemId:'tool-1'});
+  await gate;
+  input.onEvent('item/completed',{item:{type:'commandExecution',id:'tool-1',command:'ls',status:'completed',aggregatedOutput:'',exitCode:0}});
+  await Promise.race([asked,delay(2000)]);
+  return{status:'completed',finalMessage:'done'};
+ });
+ const chat=await service.invoke('chat.create',{});await service.invoke('chat.setPermissionMode',{id:chat.id,permissionMode:'workspace'});
+ await service.invoke('chat.send',{id:chat.id,text:'go',requestId:randomUUID()});
+ await until(async()=>(await timelineOf(service,chat.id)).some(i=>i.kind==='approval'));
+ const card=(await timelineOf(service,chat.id)).find(i=>i.kind==='approval')!;
+ release();
+ await until(async()=>(await timelineOf(service,chat.id)).find(i=>i.id===card.data?.toolItemId)?.status==='completed');
+ await assert.rejects(service.invoke('approval.respond',{id:card.id,approved:true}),/Ask again/);
+ const closed=(await timelineOf(service,chat.id)).find(i=>i.id===card.id)!;
+ assert.equal(closed.status,'interrupted');assert.equal(closed.data?.expiredReason,'stale');
+ await until(async()=>(await service.invoke('app.snapshot',undefined)).chats[0]!.status!=='running');
+ await service.invoke('approval.reask',{id:card.id});
+ await until(()=>prompts.length===2);
+ await assert.rejects(service.invoke('approval.reask',{id:card.id}),/already asked/);
+});
+
+test('an interrupted request without the stale marker (a stopped run) cannot be asked again',async t=>{
+ const {service}=await fixture(t,async input=>{await input.onRequest('item/commandExecution/requestApproval',{command:'ls'});await delay(30);return{status:'completed',finalMessage:'done'};});
+ const chat=await service.invoke('chat.create',{});await service.invoke('chat.setPermissionMode',{id:chat.id,permissionMode:'workspace'});
+ await service.invoke('chat.send',{id:chat.id,text:'go',requestId:randomUUID()});
+ await until(async()=>(await timelineOf(service,chat.id)).some(i=>i.kind==='approval'));
+ const card=(await timelineOf(service,chat.id)).find(i=>i.kind==='approval')!;
+ await service.invoke('chat.stop',{id:chat.id});
+ assert.equal((await timelineOf(service,chat.id)).find(i=>i.id===card.id)?.status,'interrupted');
+ await assert.rejects(service.invoke('approval.reask',{id:card.id}),/still open or was already answered/);
+});
+
+test('attention tracker: a deadline a mute pushed out still gets its reminder; a request raised in a mute is announced after it',()=>{
+ const now=Date.parse('2026-10-16T10:00:00Z'),prefs=DEFAULT_NOTIFICATION_PREFS;
+ const summary=(expiresAt:number):PendingAttentionSummary=>({totalRequests:1,chats:[{chatId:'c1',chatTitle:'Fix build',approvalCount:1,questionCount:0,requests:[{itemId:'i1',kind:'approval',createdAt:new Date(now).toISOString(),expiresAt:new Date(expiresAt).toISOString(),sourceLabel:'Provider approval'}]}]});
+ const mutedPrefs={...prefs,'notifications.mutedUntil':new Date(now+3_600_000).toISOString()};
+ const track=createAttentionTracker();
+ // Raised and nearly due while muted: nothing shown, nothing consumed.
+ assert.equal(track(summary(now+ATTENTION_REMINDER_LEAD_MS-1000),now,mutedPrefs,null).length,0);
+ // The mute pushes the deadline out; once it ends the request is announced once...
+ const later=now+3_700_000,extended=later+10*60_000;
+ assert.deepEqual(track(summary(extended),later,prefs,null).map(n=>n.reminder),[false]);
+ // ...and the new deadline's final window still gets exactly one reminder.
+ const near=extended-ATTENTION_REMINDER_LEAD_MS+1000;
+ assert.deepEqual(track(summary(extended),near,prefs,null).map(n=>n.reminder),[true]);
+ assert.equal(track(summary(extended),near+1000,prefs,null).length,0);
+ // An already-reminded request whose deadline moves again is reminded for the new deadline.
+ const moved=extended+60*60_000;
+ assert.equal(track(summary(moved),moved-1000,prefs,null).filter(n=>n.reminder).length,1);
+});
+
+test('sweep expires every pending request past its stored deadline (as after a sleep), so cards close before a click',async t=>{
+ let decision:unknown;
+ const {service}=await fixture(t,async input=>{decision=await input.onRequest('item/commandExecution/requestApproval',{command:'ls'});return{status:'completed',finalMessage:'done'};});
+ const chat=await service.invoke('chat.create',{});await service.invoke('chat.setPermissionMode',{id:chat.id,permissionMode:'workspace'});
+ await service.invoke('chat.send',{id:chat.id,text:'go',requestId:randomUUID()});
+ await until(async()=>(await timelineOf(service,chat.id)).some(i=>i.kind==='approval'));
+ const card=(await timelineOf(service,chat.id)).find(i=>i.kind==='approval')!;
+ assert.deepEqual(await service.invoke('attention.sweep',{}),{expired:0},'nothing due yet');
+ assert.equal((await service.invoke('app.snapshot',undefined)).attention?.totalRequests,1);
+ const realNow=Date.now;Date.now=()=>realNow()+ATTENTION_WINDOW_MS+1000;
+ try { assert.deepEqual(await service.invoke('attention.sweep',{}),{expired:1}); } finally { Date.now=realNow; }
+ await until(()=>decision!==undefined);
+ assert.deepEqual(decision,{decision:'decline'});
+ assert.equal((await timelineOf(service,chat.id)).find(i=>i.id===card.id)?.status,'expired');
+ assert.ok(!(await service.invoke('app.snapshot',undefined)).attention?.totalRequests,'badge source is empty');
+});
+
+test('a late Deny on an expired approval closes quietly; a late Approve still errors',async t=>{
+ const decisions:unknown[]=[];
+ const {service}=await fixture(t,async input=>{decisions.push(await input.onRequest('item/commandExecution/requestApproval',{command:'ls'}));return{status:'completed',finalMessage:'done'};});
+ const chat=await service.invoke('chat.create',{});await service.invoke('chat.setPermissionMode',{id:chat.id,permissionMode:'workspace'});
+ await service.invoke('chat.send',{id:chat.id,text:'go',requestId:randomUUID()});
+ await until(async()=>(await timelineOf(service,chat.id)).some(i=>i.kind==='approval'));
+ const card=(await timelineOf(service,chat.id)).find(i=>i.kind==='approval')!;
+ const realNow=Date.now;Date.now=()=>realNow()+ATTENTION_WINDOW_MS+1000;
+ try { await service.invoke('approval.respond',{id:card.id,approved:false}); } finally { Date.now=realNow; }
+ await until(()=>decisions.length===1);
+ assert.deepEqual(decisions[0],{decision:'decline'});
+ assert.equal((await timelineOf(service,chat.id)).find(i=>i.id===card.id)?.status,'expired','recorded as expired, not declined');
+});

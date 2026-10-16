@@ -51,7 +51,8 @@ export function notificationPrefs(values: Partial<AppSettings> | undefined): Not
 export interface AttentionNotice { key: string; chatId: string; title: string; body: string; reminder: boolean }
 /**
  * One notification when an approval or question is raised, and one reminder shortly before it expires. Both are gated by
- * `attentionAllowed` (so a mute or "attention alerts off" silences them); a request raised while gated is never announced late.
+ * `attentionAllowed` (so a mute or "attention alerts off" silences them); a request raised while gated stays unannounced (and unreminded) until the gate lifts, then is announced once if still pending.
+ * The reminder is keyed by item and deadline, so a deadline a mute pushed out still gets one reminder in its own final window.
  * `viewingChatId` is the chat the user is looking at in a focused window, which needs no toast.
  */
 export function createAttentionTracker() {
@@ -60,16 +61,17 @@ export function createAttentionTracker() {
     const live = new Set<string>(), notices: AttentionNotice[] = [];
     const allowed = attentionAllowed(prefs, now);
     for (const chat of attention?.chats ?? []) for (const request of chat.requests) {
-      live.add(request.itemId);
+      const remindKey = `${request.itemId}@${request.expiresAt ?? ''}`;
+      live.add(request.itemId); live.add(remindKey);
       const what = request.kind === 'approval' ? 'approval' : 'answer';
       const visible = allowed && viewingChatId !== chat.chatId;
-      if (!announced.has(request.itemId)) {
+      if (allowed && !announced.has(request.itemId)) {
         announced.add(request.itemId);
         if (visible) notices.push({ key: request.itemId, chatId: chat.chatId, title: chat.chatTitle, body: request.kind === 'approval' ? 'Waiting for your approval' : 'Has a question for you', reminder: false });
       }
       const left = request.expiresAt ? Date.parse(request.expiresAt) - now : NaN;
-      if (Number.isFinite(left) && left > 0 && left <= ATTENTION_REMINDER_LEAD_MS && !reminded.has(request.itemId)) {
-        reminded.add(request.itemId);
+      if (Number.isFinite(left) && left > 0 && left <= ATTENTION_REMINDER_LEAD_MS && allowed && !reminded.has(remindKey)) {
+        reminded.add(remindKey);
         if (visible) notices.push({ key: request.itemId, chatId: chat.chatId, title: chat.chatTitle, body: `Your ${what} is still needed · closes in ${Math.max(1, Math.round(left / 60_000))} min`, reminder: true });
       }
     }
