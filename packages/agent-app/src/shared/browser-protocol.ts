@@ -90,3 +90,16 @@ export function browserScopeProfile(scope:{folderId?:string|null; projectId?:str
   if(scope?.folderId) return id('folder',scope.folderId);
   return 'personal';
 }
+
+/** A sub-agent's (or a parallel agent's) own browser session within a chat. */
+export const AGENT_BROWSER_SESSION=/^[a-zA-Z0-9_-]{1,32}$/;
+/** RUN-X1: the agent's browser tab for a chat. Main creates it under this owner and the right pane adopts it under the
+ * same owner, so the pane always shows the page the agent drives. A session key gives a parallel agent its own tab. */
+export function agentBrowserOwner(chatId:string,session?:string):string {
+  const key=session && AGENT_BROWSER_SESSION.test(session)?session:'';
+  const plain=`agent-${chatId}${key?`--${key}`:''}`;
+  if(plain.length<=128) return `browser:${plain}`;
+  // Too long for a tab identity: a stable short hash (FNV-1a, two seeds) keeps it unique per chat and session.
+  const hash=(seed:number)=>{let h=seed>>>0;for(const ch of `${chatId}\0${key}`){h^=ch.charCodeAt(0);h=Math.imul(h,16777619)>>>0;}return h.toString(36);};
+  return `browser:agent-${chatId.slice(0,96).replace(/-+$/,'')}-${hash(2166136261)}${hash(0x811c9dc4)}`;
+}
