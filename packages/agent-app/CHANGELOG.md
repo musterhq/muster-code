@@ -3,7 +3,9 @@
 All notable changes to Muster Agent. Each `## <version>` section becomes the notes of the
 `agent-v<version>` GitHub Release (`.github/workflows/agent-app-release.yml`).
 
-## Unreleased
+## 0.3.12
+
+The browser, steering, sub-agents and compaction work on every route, Paperclip tasks run locally with their full history, and approvals no longer expire behind your back.
 
 - The in-app browser now works on more model routes. Claude Code, OpenCode and Grok chats load Muster's browser tools, and OpenAI-compatible HTTP routes (OmniRoute, OpenRouter, custom connections) get them as built-in tools that drive the same browser tab, limited to opening and reading pages in read-only chats. Each route is told the exact tool names. Gemini CLI, Cursor CLI and the chat-only Anthropic API route say plainly that the browser is not available there, instead of naming tools they do not have.
 - A sub-agent can now pass its own session name to the browser tools and get its own tab, so agents working in parallel no longer fight over one page.
