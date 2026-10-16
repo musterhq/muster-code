@@ -3,7 +3,9 @@
 All notable changes to Muster Agent. Each `## <version>` section becomes the notes of the
 `agent-v<version>` GitHub Release (`.github/workflows/agent-app-release.yml`).
 
-## Unreleased
+## 0.3.13
+
+Replies in one turn read as one answer, and pictures that can no longer be read take one line instead of an empty frame.
 
 - Consecutive assistant replies within one turn now sit at the paragraph gap instead of a wide gap.
 - An image that cannot be read no longer leaves a large empty box in a reply's gallery: the hero collapses to one line, unreadable thumbnails are hidden, and a gallery where every image failed lists one line per image with no strip or Canvas button.
