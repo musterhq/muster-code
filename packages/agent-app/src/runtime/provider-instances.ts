@@ -81,7 +81,8 @@ export function catalogModels(family:'openai-direct'|'gateway'|(string&{}),list:
     const window=typeof entry.context_window==='number'&&entry.context_window>0?entry.context_window:typeof entry.contextWindow==='number'&&entry.contextWindow>0?entry.contextWindow:undefined;
     const search=entry.supports_search_tool??entry.supportsSearchTool;
     const pricing=catalogPricing(entry);
-    models.push({id:model,name,...catalogEfforts(entry),...(images!==undefined?{images}:{}),...(typeof search==='boolean'?{toolSearch:search}:{}),...(window?{contextWindow:window}:{}),...(pricing?{pricing}:{})});
+    const limit=typeof entry.auto_compact_token_limit==='number'&&entry.auto_compact_token_limit>0?entry.auto_compact_token_limit:typeof entry.autoCompactTokenLimit==='number'&&entry.autoCompactTokenLimit>0?entry.autoCompactTokenLimit:undefined;
+    models.push({id:model,name,...catalogEfforts(entry),...(images!==undefined?{images}:{}),...(typeof search==='boolean'?{toolSearch:search}:{}),...(window?{contextWindow:window,contextWindowSource:'catalog' as const}:{}),...(limit?{autoCompactTokenLimit:limit}:{}),...(pricing?{pricing}:{})});
   });
   if(list.length>MAX_CATALOG_ENTRIES)excluded.push({id:'catalog-overflow',name:`${list.length-MAX_CATALOG_ENTRIES} more catalog entries`,reason:`Only the first ${MAX_CATALOG_ENTRIES} catalog entries are read.`});
   return {models,excluded};
@@ -525,12 +526,12 @@ function homeInstances({fs,directory,codexHome,cli,node,env,track,validator,fetc
       if(route.kind==='gateway'&&route.baseUrl){
         const live=listing(route,env,fetcher);
         // The router's own context size fills in a model whose catalog gives none.
-        if(live.status==='ok')for(const model of models){const listed=live.value!.find(entry=>entry.id===model.id);if(!model.contextWindow&&listed?.contextWindow)model.contextWindow=listed.contextWindow;if(model.images===undefined&&listed?.images!==undefined)model.images=listed.images;}
+        if(live.status==='ok')for(const model of models){const listed=live.value!.find(entry=>entry.id===model.id);if(!model.contextWindow&&listed?.contextWindow){model.contextWindow=listed.contextWindow;model.contextWindowSource='listing';}if(model.images===undefined&&listed?.images!==undefined)model.images=listed.images;}
         if(live.status==='ok'&&!live.stale){
           for(const entry of routerAgents(live.value!))if(!models.some(model=>model.id===entry.id))models.push(entry);
           // Everything else the router serves is loaded too, off in the picker until switched on in Settings › Models.
           const known=new Set(models.map(model=>model.id));
-          for(const entry of live.value!)if(entry.chat!==false&&entry.owner!=='combo'&&!known.has(entry.id)){known.add(entry.id);models.push({id:entry.id,name:entry.name,hiddenByDefault:true,...(entry.images!==undefined?{images:entry.images}:{}),...(entry.owner?{group:entry.owner}:{}),...(entry.contextWindow?{contextWindow:entry.contextWindow}:{})});}
+          for(const entry of live.value!)if(entry.chat!==false&&entry.owner!=='combo'&&!known.has(entry.id)){known.add(entry.id);models.push({id:entry.id,name:entry.name,hiddenByDefault:true,...(entry.images!==undefined?{images:entry.images}:{}),...(entry.owner?{group:entry.owner}:{}),...(entry.contextWindow?{contextWindow:entry.contextWindow,contextWindowSource:'listing' as const}:{})});}
         }
       }
     }
@@ -543,7 +544,7 @@ function homeInstances({fs,directory,codexHome,cli,node,env,track,validator,fetc
       }
       listingInfo=listed.stale?{listing:'stale',...(listed.reason?{listingError:`${name} didn’t answer: ${listed.reason.replace(/[.\s]+$/,'')}. Retry.`}:{})}:{listing:'live'};
       const runnable=listed.value!.filter(entry=>entry.chat!==false);
-      models=runnable.slice(0,MAX_CATALOG_ENTRIES).map(({id,name,contextWindow,images})=>({id,name,...(images!==undefined?{images}:{}),...(contextWindow?{contextWindow}:{})}));catalogSource=`${route.baseUrl}/models${listed.stale?' (last saved list, refreshing)':''}`;
+      models=runnable.slice(0,MAX_CATALOG_ENTRIES).map(({id,name,contextWindow,images})=>({id,name,...(images!==undefined?{images}:{}),...(contextWindow?{contextWindow,contextWindowSource:'listing' as const}:{})}));catalogSource=`${route.baseUrl}/models${listed.stale?' (last saved list, refreshing)':''}`;
       if(listed.value!.length>runnable.length)excluded.push({id:'non-chat-models',name:`${listed.value!.length-runnable.length} image, audio and other models`,reason:'These models cannot run a chat.'});
       if(runnable.length>MAX_CATALOG_ENTRIES)excluded.push({id:'listing-overflow',name:`${runnable.length-MAX_CATALOG_ENTRIES} more models`,reason:`Only the first ${MAX_CATALOG_ENTRIES} listed models are offered; add model_catalog_json to choose.`});
     } else return fail(`[model_providers.${route.modelProvider}] has no base_url and no model catalog.`);

@@ -30,10 +30,24 @@ export function ReconnectingPill():React.ReactElement {
 /** Inline compaction row (Codex: "Context automatically compacted"); a manual compaction shows intent, completion or failure. */
 export function CompactionRow({item}:{item:TimelineItem}):React.ReactElement {
   const failed=item.status==='failed',running=item.status==='running';
+  // #426: a failed compaction says why and offers Retry and "Continue in a fresh thread with a summary".
+  const actions=failed&&Array.isArray(item.data?.actions)?item.data.actions as string[]:[];
+  const [busy,setBusy]=useState(false),[error,setError]=useState('');
+  const act=async(fresh:boolean)=>{
+    if(busy)return;setBusy(true);setError('');
+    try{await invoke('chat.compact',{id:item.chatId,...(fresh?{fresh:true}:{})});}
+    catch(cause){setError(cause instanceof Error?cause.message.replace(/^Error invoking remote method '[^']+': (?:Error: )?/,''):'Compaction failed.');}
+    finally{setBusy(false);}
+  };
   // Codex: a quiet one-liner ("Context automatically compacted") with a thin glyph; the detail is a tooltip.
-  return <div className={`compaction-row${failed?' is-failed':''}`} role="status" title={!running&&!failed?'Earlier turns were summarized for the model; this transcript is unchanged.':undefined}>
+  return <div className={`compaction-row${failed?' is-failed':''}${running?' is-running':''}`} role="status" aria-busy={running||undefined} title={!running&&!failed?'Earlier turns were summarized for the model; this transcript is unchanged.':undefined}>
     <span className="tool-glyph" aria-hidden="true"><Archive size={15} strokeWidth={1.6}/></span>
     <span className="compaction-label">{item.text}</span>
+    {actions.length>0&&<span className="compaction-actions">
+      {actions.includes('retry')&&<button type="button" disabled={busy} onClick={()=>void act(false)}>Retry</button>}
+      {actions.includes('fresh')&&<button type="button" disabled={busy} onClick={()=>void act(true)}>Continue in a fresh thread with a summary</button>}
+    </span>}
+    {error&&<span className="compaction-error" role="alert">{error}</span>}
   </div>;
 }
 

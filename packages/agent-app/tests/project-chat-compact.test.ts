@@ -65,7 +65,9 @@ test('router context_length becomes the model window',async()=>{
   assert.equal(catalogModels('gateway',[{slug:'a',context_window:1000}]).models[0]!.contextWindow,1000);
   const view=contextView({usedTokens:337,windowTokens:null,source:'live',compacted:false,updatedAt:null},872000);
   assert.equal(view.windowTokens,872000);assert.equal(view.remaining,872000-337);
-  assert.equal(contextView({usedTokens:337,windowTokens:200000,source:'live',compacted:false,updatedAt:null},872000).windowTokens,200000);
+  // #426: the model's own declared window wins over a reported one, so a 872K model is not shown full at 200K.
+  assert.equal(contextView({usedTokens:337,windowTokens:200000,source:'live',compacted:false,updatedAt:null},872000).windowTokens,872000);
+  assert.equal(contextView({usedTokens:337,windowTokens:200000,source:'live',compacted:false,updatedAt:null}).windowTokens,200000,'with no declared window the reported one is used');
 });
 
 test('errors lose the IPC prefix',()=>{
