@@ -390,6 +390,12 @@ export function Timeline({ items, chatId, onScrolled, running, planMode=false }:
     }
   }, [rows.length, totalSize, virtualizer]);
 
+  /** A reply straight after another reply of the same turn, with nothing visible between them. */
+  const continuesReply=(index:number):boolean=>{
+    if(folded(index)||rows[index]?.kind!=='assistant')return false;
+    let before=index-1;while(before>=0&&folded(before))before--;
+    return before>=0&&rows[before].kind==='assistant'&&turnModel.rowTurn[before]===turnModel.rowTurn[index]&&!turnEnds.get(before);
+  };
   return (
     <div className={`timeline-shell${turns.length?' timeline-with-navigation':''}`}>
     <TimelineNavigation turns={turns} currentId={currentTurn} canGoBack={backCount>0} onTurn={jumpToTurn} onBack={jumpBack} onLatest={jumpToLatest} searchQuery={searchQuery} onSearch={setSearchQuery} searchCount={searchMatches.length} searchIndex={searchIndex} onSearchStep={stepSearch}/>
@@ -401,14 +407,16 @@ export function Timeline({ items, chatId, onScrolled, running, planMode=false }:
         {virtualizer.getVirtualItems().map((v) => {
           const row=rows[v.index],hidden=folded(v.index),info=row.kind==='user'?turnModel.turns.get(row.id):undefined;
           // A reply straight after another reply of the same turn (nothing visible between) sits at the paragraph gap.
-          let before=v.index-1;while(before>=0&&folded(before))before--;
-          const continues=!hidden&&row.kind==='assistant'&&before>=0&&rows[before].kind==='assistant'&&turnModel.rowTurn[before]===turnModel.rowTurn[v.index]&&!turnEnds.get(before);
+          const continues=continuesReply(v.index);
+          // ...and the reply above it gives up its bottom spacing, so the two meet at exactly one paragraph gap.
+          let after=v.index+1;while(after<rows.length&&folded(after))after++;
+          const continued=!hidden&&after<rows.length&&continuesReply(after);
           return <div
             key={v.key}
             data-index={v.index}
             data-item-id={row.id}
             ref={virtualizer.measureElement}
-            className={hidden?'timeline-row is-folded':continues?'timeline-row is-reply-continuation':'timeline-row'}
+            className={hidden?'timeline-row is-folded':`timeline-row${continues?' is-reply-continuation':''}${continued?' has-reply-continuation':''}`}
             data-kind={row.kind}
             style={{ transform: `translateY(${v.start}px)` }}
           >
