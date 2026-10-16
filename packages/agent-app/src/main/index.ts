@@ -19,7 +19,7 @@ import { accessSync, constants as fsConstants, existsSync, readFileSync, promise
 import { resolveInside } from '../runtime/paths.ts';
 import {archiveNames,zipStore} from './zip.ts';
 import {BrowserWorkspaceController} from './browser-workspace.ts';
-import {BrowserBridge} from './agent-tools/browser-bridge.ts';
+import {BrowserBridge,BROWSER_BRIDGE_START_KEY} from './agent-tools/browser-bridge.ts';
 import {TERMINAL_MCP_LAUNCHER_ENV,TERMINAL_READ_MAX_BYTES,TerminalToolHost} from '../runtime/terminal-agent-tools.ts';
 import {accessibilityText,captureSource,captureSources,computerPermissions} from './computer-capture.ts';
 import {NativePreviewController} from './native-preview.ts';
@@ -345,7 +345,11 @@ async function main(): Promise<void> {
   // RUN-X1: the agent drives this same browser through the muster_browser MCP bridge; each chat's tab shows in the right pane.
   const browserBridge = new BrowserBridge({dir:path.join(dataDir,'agent-tools'),browser:browserWorkspace,execPath:process.execPath,script:unpackedPath(path.join(__dirname,'browser-mcp.cjs')),
     snapshot:()=>loaded.service.invoke('app.snapshot',undefined),lease:async chatId=>(await loaded.service.invoke('computer.lease',{chatId})).owner,emit:onEvent});
-  void browserBridge.start().then(launcher=>{process.env.MUSTER_BROWSER_MCP_LAUNCHER=launcher;},error=>console.warn(`Agent browser bridge unavailable: ${error instanceof Error?error.message:String(error)}`));
+  // #387/#424: started now (retried once), and again on first use if that failed; HTTP routes call it in-process.
+  const startBrowserBridge=()=>browserBridge.ensureStarted().then(launcher=>{process.env.MUSTER_BROWSER_MCP_LAUNCHER=launcher;return launcher;});
+  (globalThis as Record<symbol,unknown>)[BROWSER_BRIDGE_START_KEY]=startBrowserBridge;
+  const unregisterBrowserCaller=browserBridge.register();
+  void startBrowserBridge().catch(error=>console.warn(`Agent browser bridge unavailable: ${error instanceof Error?error.message:String(error)}`));
   window.on('hide',()=>nativePreview.hide());
   window.on('closed',()=>nativePreview.hide());
   window.webContents.on('did-start-loading',()=>{nativePreview.hide();processes.detachAll();});
@@ -897,7 +901,7 @@ async function main(): Promise<void> {
           if(failure?.status==='rejected')throw failure.reason;
         })().catch(error=>{disposal=undefined;throw error;});
         await withinDeadline(disposal, 5000);
-        browserBridge.dispose();
+        unregisterBrowserCaller();browserBridge.dispose();
         terminalTools.dispose();
         browserWorkspace.dispose();
         nativePreview.hide();

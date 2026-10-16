@@ -31,11 +31,24 @@ export function computerRunOptions(chat: { id: string; mode: string; permissionM
   };
 }
 
+/** #387: an agent turn that finds no launcher (the bridge failed to start at launch) starts it now, once, before giving up
+ *  on the browser for this turn. Main registers the starter; tests and Muster Server have none. */
+export async function ensureBrowserLauncher(chat: { mode: string }, wait = 5000): Promise<void> {
+  if (chat.mode !== 'agent') return;
+  const current = process.env[BROWSER_MCP_LAUNCHER_ENV];
+  if (current && path.isAbsolute(current) && fs.existsSync(current)) return;
+  const start = (globalThis as Record<symbol, unknown>)[Symbol.for('muster.browserBridgeStart')];
+  if (typeof start !== 'function') return;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  await Promise.race([Promise.resolve().then(() => (start as () => Promise<unknown>)()).catch(error => console.warn(`Agent browser bridge unavailable: ${error instanceof Error ? error.message : String(error)}`)), new Promise(resolve => { timer = setTimeout(resolve, wait); })]);
+  clearTimeout(timer);
+}
+
 /** Computer domain: tool screenshots, the take-control lease, macOS recovery, and the turn notes that keep computer use on. */
 export function createComputerDomain(context: DomainContext): DomainModule {
   const images = path.join(context.dataDir, 'tool-images');
   setToolImageStore(images);
-  const unsubscribe = context.hooks.addRunOptionsContributor(async chat => computerRunOptions(chat));
+  const unsubscribe = context.hooks.addRunOptionsContributor(async chat => { await ensureBrowserLauncher(chat); return computerRunOptions(chat); });
   return {
     handlers: {
       'computer.image': input => {

@@ -2,7 +2,24 @@ import {spawn as nodeSpawn, type ChildProcess} from 'node:child_process';
 import {randomUUID} from 'node:crypto';
 import {cliSpawn, jsonLines, text} from './shared.ts';
 import type {Spawn} from './claude-code.ts';
-import type {AdapterRunResult, RunnableAdapter} from './types.ts';
+import type {AdapterRunInput, AdapterRunResult, RunnableAdapter} from './types.ts';
+import {launcherSpec} from '../launcher-script.ts';
+import {BROWSER_MCP} from '../../shared/computer-use.ts';
+
+/** #424: Muster's tool servers (the in-app browser among them) as OpenCode `mcp` config, merged into any inline config the
+ *  user already set. OpenCode reads OPENCODE_CONFIG_CONTENT on top of its config files and names the tools `<server>_<tool>`. */
+export function openCodeMcpEnv(servers: AdapterRunInput['mcpServers'], existing?: string): Record<string, string> {
+  const names = Object.keys(servers ?? {});
+  if (!names.length) return {};
+  let config: Record<string, unknown> = {};
+  try { const parsed = existing ? JSON.parse(existing) : {}; if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) config = parsed; } catch { /* not JSON: replaced */ }
+  const mcp = {...(config.mcp && typeof config.mcp === 'object' ? config.mcp as Record<string, unknown> : {})};
+  for (const [name, spec] of Object.entries(servers!)) {
+    const run = spec.args ? spec : {...spec, ...launcherSpec(spec.command)};
+    mcp[name] = {type: 'local', command: [run.command, ...(run.args ?? [])], enabled: true, ...(spec.env ? {environment: spec.env} : {})};
+  }
+  return {OPENCODE_CONFIG_CONTENT: JSON.stringify({...config, mcp})};
+}
 
 /** Run a short CLI probe with a hard timeout and output cap. */
 export function probe(binary: string, args: string[], spawn: Spawn = nodeSpawn as unknown as Spawn, timeoutMs = 5000): Promise<string> {
@@ -45,6 +62,7 @@ export function openCodeToolItem(part: Record<string, unknown>, cwd: string): Re
     : tool === 'list' ? {type: 'commandExecution', command: `ls ${path}`, cwd, commandActions: [{type: 'listFiles', path}]}
     : tool === 'todowrite' ? {type: 'todoList', items: (Array.isArray(args.todos) ? args.todos : []).slice(0, 100).map(todo => ({text: text((todo as Record<string, unknown>)?.content), status: text((todo as Record<string, unknown>)?.status)}))}
     : tool === 'webfetch' || tool === 'websearch' ? {type: 'webSearch', query: text(args.url) || text(args.query)}
+    : tool.startsWith(`${BROWSER_MCP}_`) ? {type: 'mcpToolCall', server: BROWSER_MCP, tool: tool.slice(BROWSER_MCP.length + 1), arguments: args}
     : {type: 'dynamicToolCall', tool, name: tool, arguments: args};
   return {id, ...base, ...(text(state.title) ? {title: text(state.title)} : {}), ...(status ? {status, aggregatedOutput: output.slice(0, 256 * 1024), ...(status === 'failed' ? {success: false} : {})} : {})};
 }
@@ -61,7 +79,9 @@ export function openCodeAdapter(options: {binary: string; env?: NodeJS.ProcessEn
         // After the message: `--file` is an array option and would swallow a following positional.
         ...(input.images ?? []).flatMap(path => ['--file', path])];
       let child: ChildProcess;
-      const launch = cliSpawn(options.binary, args, input.env ? {...(options.env ?? process.env), ...input.env} : options.env ?? process.env);
+      const baseEnv = options.env ?? process.env;
+      const mcpEnv = openCodeMcpEnv(input.mcpServers, input.env?.OPENCODE_CONFIG_CONTENT ?? baseEnv.OPENCODE_CONFIG_CONTENT);
+      const launch = cliSpawn(options.binary, args, input.env || Object.keys(mcpEnv).length ? {...baseEnv, ...input.env, ...mcpEnv} : baseEnv);
       try { child = spawn(launch.command, launch.args, {cwd: input.cwd, env: launch.env, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true}); }
       catch (error) { resolve({status: 'failed', finalMessage: '', dispatchState: 'not-dispatched', errorMessage: `OpenCode could not start: ${error instanceof Error ? error.message : String(error)}`}); return; }
       let session = input.resumeThreadId, settled = false, failure = '', stderr = '', answer = '', killer: ReturnType<typeof setTimeout> | undefined;

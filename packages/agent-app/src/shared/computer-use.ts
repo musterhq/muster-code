@@ -11,7 +11,47 @@ const COMPUTER_USE_TOOL = /^(listApps|list_apps|snapshot|getAppState|get_app_sta
 const BROWSER_SERVER = /^muster[_-]browser$/i;
 
 export const BROWSER_TOOLS = ['browser_navigate', 'browser_snapshot', 'browser_click', 'browser_type', 'browser_press_key', 'browser_hover', 'browser_select_option', 'browser_scroll', 'browser_screenshot', 'browser_go_back', 'browser_reload', 'browser_wait_for', 'browser_console_messages'] as const;
-export const BROWSER_NOTE = `Muster has an in-app browser shown to the user in the right pane. For web pages prefer the ${BROWSER_MCP} MCP tools (${BROWSER_TOOLS.join(', ')}). When the user says "in-app browser", "the browser", "Muster's browser", "here" or "in the side pane", or asks to open, check or test a page or local app URL without naming another browser, use ${BROWSER_MCP}: not Safari or Chrome, not the computer-use plugin, and not curl. Flow: browser_navigate, browser_snapshot, act on [ref=eN], re-snapshot. The user watches this browser live and may take control; if a tool says the user has control, stop and wait for them.`;
+/** How a route reaches Muster's in-app browser: as MCP tools (Codex, Claude Code, OpenCode, Grok), as native function tools
+ *  (HTTP routes), or not at all (CLIs that take no MCP config from Muster, and chat-only APIs). */
+export type BrowserToolStyle = 'codex' | 'claude' | 'opencode' | 'acp' | 'native' | 'none';
+/** #424: the route matrix. Each style names the browser tools exactly as that route's model sees them. */
+export function browserToolStyle(driver: string | undefined): BrowserToolStyle {
+  switch (driver) {
+    case undefined: case 'codex-app-server': return 'codex';
+    case 'claude-code-cli': return 'claude';
+    case 'opencode-cli': return 'opencode';
+    case 'grok-acp': return 'acp';
+    case 'openai-chat-completions': return 'native';
+    default: return 'none';
+  }
+}
+/** The name the model calls a browser tool by on a route. */
+export function browserToolName(style: BrowserToolStyle, tool: string): string {
+  return style === 'claude' ? `mcp__${BROWSER_MCP}__${tool}` : style === 'opencode' ? `${BROWSER_MCP}_${tool}` : tool;
+}
+const BROWSER_WHEN = `When the user says "in-app browser", "the browser", "Muster's browser", "here" or "in the side pane", or asks to open, check or test a page or local app URL without naming another browser, use these tools: not Safari or Chrome, not the computer-use plugin, and not curl.`;
+const BROWSER_LIVE = 'The user watches this browser live and may take control; if a tool says the user has control, stop and wait for them.';
+const BROWSER_SESSION = 'Each chat drives one browser tab. A sub-agent working in parallel with others passes its own short session name (for example session: "reviewer") on every browser call to get its own tab.';
+/** The browser instructions for a route, with the exact tool names; the plain "no browser here" note for a route without one. */
+export function browserNote(style: BrowserToolStyle): string {
+  if (style === 'none') return NO_BROWSER_NOTE;
+  const name = (tool: string) => browserToolName(style, tool);
+  const tools = BROWSER_TOOLS.map(name).join(', ');
+  const how = style === 'codex' ? `For web pages prefer the ${BROWSER_MCP} MCP tools (${tools}).`
+    : style === 'native' ? `For web pages use the browser tools of this chat: ${tools}.`
+    : `For web pages use the ${BROWSER_MCP} MCP server's tools, named exactly: ${tools}.`;
+  return `Muster has an in-app browser shown to the user in the right pane. ${how} ${BROWSER_WHEN} Flow: ${name('browser_navigate')}, ${name('browser_snapshot')}, act on [ref=eN], re-snapshot. ${BROWSER_LIVE} ${BROWSER_SESSION}`;
+}
+/** Said plainly on a route that has no browser tool, so the model neither claims one nor hunts for another. */
+export const NO_BROWSER_NOTE = "This chat's route has no in-app browser tool, so you cannot open or drive pages in Muster's browser here. Do not claim to have used it. To check a page, ask the user to open it in Muster's browser, or read it with a command-line HTTP request if you can run commands.";
+export const BROWSER_NOTE = browserNote('codex');
+/** Swaps the Codex browser note (added by the computer domain) for the note of the route the turn runs on. */
+export function routeBrowserNote(instructions: string | undefined, style: BrowserToolStyle): string | undefined {
+  if (!instructions || style === 'codex' || !instructions.includes(BROWSER_NOTE)) return instructions;
+  // Native routes add their note with their tool list (only when the route takes tools at all).
+  const next = instructions.replace(BROWSER_NOTE, style === 'native' ? '' : browserNote(style)).replace(/\n{3,}/g, '\n\n').trim();
+  return next || undefined;
+}
 export const COMPUTER_USE_NOTE = 'For macOS desktop apps (outside the in-app browser) use the signed-in Codex computer-use plugin (computer-use / unified-computer-use): listApps, snapshot, click, type, scroll, then confirm consequential actions. Use the visualize plugin to save screenshots and embed them as ![alt](path) in the reply. Do not invent a second computer-use path.';
 export const READ_ONLY_NOTE = 'This chat is read-only: do not drive the computer or the browser beyond reading pages and taking screenshots.';
 

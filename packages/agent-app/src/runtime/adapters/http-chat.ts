@@ -2,7 +2,7 @@ import {randomUUID} from 'node:crypto';
 import {ConversationMemory, loadImages, responseError, sseEvents, type ChatMessage} from './shared.ts';
 import type {AdapterRunInput, AdapterRunResult, RunnableAdapter} from './types.ts';
 import {HISTORY_WINDOW_EVENT, TOOLS_UNAVAILABLE_EVENT} from '../context-budget.ts';
-import {executeTool, toolInstructions, toolSpecs, type ToolCall} from './http-tools.ts';
+import {browserOffered, executeTool, toolInstructions, toolSpecs, type ToolCall} from './http-tools.ts';
 
 export const CHAT_ONLY = 'Chat only · no tools';
 export const WITH_TOOLS = 'Shell and file tools';
@@ -122,11 +122,11 @@ async function turnBody(input: AdapterRunInput, memory: ConversationMemory, labe
       for (const message of extra) if (pictures.delete(message)) message.content = '[an earlier image was shown here and has been omitted to save space]';
       const seen: Array<{role: string; content: unknown[]}> = [];
       for (const call of calls) {
-        const result = await executeTool(call, {cwd: input.cwd, access: input.permissionMode, ...(input.vision ? {vision: true} : {}), visionNote, signal: input.signal, emit: input.onEvent, threadId, turnId, ...(input.authorize ? {authorize: input.authorize} : {}), ...(input.env ? {env: input.env} : {}), deadline});
+        const result = await executeTool(call, {chatId: input.chat.id, ...(browserOffered(input.browserTools) ? {browser: true} : {}), cwd: input.cwd, access: input.permissionMode, ...(input.vision ? {vision: true} : {}), visionNote, signal: input.signal, emit: input.onEvent, threadId, turnId, ...(input.authorize ? {authorize: input.authorize} : {}), ...(input.env ? {env: input.env} : {}), deadline});
         used.push(`${call.name}${result.ok ? '' : ' (failed)'}`);
         extra.push({role: 'tool', tool_call_id: call.id, content: result.content});
         // A tool message cannot carry a picture: it follows as a user message once every tool reply of this round is in.
-        if (result.image) seen.push({role: 'user', content: [{type: 'text', text: `Image returned by read_file (${result.image.name}):`}, {type: 'image_url', image_url: {url: `data:${result.image.mediaType};base64,${result.image.data}`}}]});
+        if (result.image) seen.push({role: 'user', content: [{type: 'text', text: `Image returned by ${call.name} (${result.image.name}):`}, {type: 'image_url', image_url: {url: `data:${result.image.mediaType};base64,${result.image.data}`}}]});
       }
       for (const message of seen) pictures.add(message);
       extra.push(...seen);
@@ -166,11 +166,12 @@ export function openAICompatibleAdapter(options: HttpOptions & {tools?: boolean}
     const key = options.apiKey();
     const images = loadImages(input.images);
     const user = images.length ? [{type: 'text', text: input.prompt}, ...images.map(image => ({type: 'image_url', image_url: {url: `data:${image.mediaType};base64,${image.data}`}}))] : input.prompt;
-    const system = [input.instructions, tools ? toolInstructions(input.permissionMode, input.cwd) : undefined].filter(Boolean).join('\n\n');
+    const browser = browserOffered(input.browserTools);
+    const system = [input.instructions, tools ? toolInstructions(input.permissionMode, input.cwd, browser) : undefined].filter(Boolean).join('\n\n');
     const messages = [...(system ? [{role: 'system', content: system}] : []), ...history, {role: 'user', content: user}, ...extra];
     return request(`${options.endpoint}/chat/completions`, {method: 'POST', redirect: 'error', signal: input.signal,
       headers: {'content-type': 'application/json', accept: 'text/event-stream', ...(key ? {authorization: `Bearer ${key}`} : {})},
-      body: JSON.stringify({model: input.model, stream: true, stream_options: {include_usage: true}, messages, ...(tools ? {tools: toolSpecs(input.permissionMode), tool_choice: 'auto'} : {})})});
+      body: JSON.stringify({model: input.model, stream: true, stream_options: {include_usage: true}, messages, ...(tools ? {tools: toolSpecs(input.permissionMode, browser), tool_choice: 'auto'} : {})})});
   }, async (response, emit) => {
     let usage: Record<string, unknown> | undefined;
     const pending = new Map<number, ToolCall>();
