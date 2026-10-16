@@ -116,6 +116,8 @@ interface OwnedSession {
 }
 const key = (id: string, providerId:string, bindingId:string) => `agent:${id}:${providerId}:${bindingId}`;
 /** Maps Codex `turn/steer` errors: no active turn → queue; review/compact → refuse with a reason; a turn-id mismatch → retry once. */
+/** Shown by the composer when a route's CLI or API cannot take a message while it works. */
+export const NO_MID_RUN_STEER = 'Queued — this route can’t take messages mid-run; it sends when this step ends';
 export function steerFailure(error: unknown): false | {refused: string} | 'retry' | 'uncertain' {
   const message = error instanceof Error ? error.message : String(error);
   if (/no active turn to steer/i.test(message)) return false;
@@ -474,7 +476,7 @@ export function createProviderAdapter(options: { core?: CoreClient; available?: 
     async steer(id, text) {
       // Adapter runs (Claude Code…) that accept mid-turn messages steer through their own channel.
       const adapterRun = adapterRuns.get(id);
-      if (adapterRun) return adapterRun.steer?.(text) === true;
+      if (adapterRun) return adapterRun.steer ? adapterRun.steer(text) : {refused: NO_MID_RUN_STEER};
       const session = sessions.get(id);
       if (disposed || !session?.active || session.stop || session.controller.signal.aborted || !core) return false;
       // Codex `turn/steer` always names the turn it expects, so a steer never lands in a newer turn.

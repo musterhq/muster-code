@@ -139,6 +139,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
   const attachments = new ChatAttachments(store.database(), options.dataDir);
   const domainHooks = createDomainHooks();
   const steered = new Map<string, string>();
+  const steerChains = new Map<string, Promise<void>>();
   const folderNotices = new Set<string>();
   /** Static context blocks each provider thread already holds; unchanged blocks are not re-sent every turn. */
   const contextLedger = new ContextLedger();
@@ -953,6 +954,13 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
   }
   /** Joins the live turn. Codex refusals (review/compact turns) come back as `reason`; anything else means "queue it". */
   async function steerRun(chat: Chat, message: string, requestId: string, chips: {skillIds?: string[]; pluginIds?: string[]; effort?: ReasoningEffort}): Promise<{steered: boolean; reason?: string}> {
+    // Steers go one at a time per chat, so several in a row reach the agent (and the transcript) in the order they were sent.
+    const turn = (steerChains.get(chat.id) ?? Promise.resolve()).then(() => steerNow(chat, message, requestId, chips));
+    const tail = turn.then(() => undefined, () => undefined);
+    steerChains.set(chat.id, tail); void tail.then(() => { if (steerChains.get(chat.id) === tail) steerChains.delete(chat.id); });
+    return turn;
+  }
+  async function steerNow(chat: Chat, message: string, requestId: string, chips: {skillIds?: string[]; pluginIds?: string[]; effort?: ReasoningEffort}): Promise<{steered: boolean; reason?: string}> {
     const chatId = chat.id, run = runs.get(chatId);
     if (!run || run.stopped || !provider.steer) return {steered:false};
     const instructions = await chipInstructions(chat, chips);

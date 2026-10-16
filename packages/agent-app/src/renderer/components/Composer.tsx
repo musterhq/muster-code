@@ -562,7 +562,7 @@ export function Composer({ chat }: { chat: Chat }): React.ReactElement {
     // The draft stays in the composer with the error, so the user decides.
     if (failed !== undefined) { setQueueError(runtimeMessage(failed)); return; }
     if (steered) { recall.current = null; clearIfUnchanged(value); setChips(() => []); setContext(() => []); flash('Sent to the running agent'); }
-    else await queueFollowUp(reason ? `${reason} Queued instead.` : 'Queued: agent could not accept a steer right now');
+    else await queueFollowUp(reason ? (/^Queued/.test(reason) ? reason : `${reason} Queued instead.`) : 'Queued: agent could not accept a steer right now');
   };
 
   /** Codex "Start in background" (⌥Enter): a new chat in the same folder, project and model gets this message; you stay here. */

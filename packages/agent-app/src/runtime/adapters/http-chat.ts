@@ -23,7 +23,13 @@ export const MAX_RESENT_ARGUMENT = 64 * 1024;
 export const resent = (args: string): string => !args ? '{}' : args.length <= MAX_RESENT_ARGUMENT ? args : JSON.stringify({note: `[arguments of ${args.length} characters omitted from the history to save space (kept: ${MAX_RESENT_ARGUMENT >> 10} KB per call); the call itself ran with them in full]`});
 
 /** Shared turn skeleton: history, identity callbacks, abort, result mapping and (for routes that offer tools) the tool loop. */
-async function turn(input: AdapterRunInput, memory: ConversationMemory, label: string, send: (history: ChatMessage[], extra: unknown[], tools: boolean) => Promise<Response>, stream: (response: Response, emit: (text: string) => void) => Promise<Streamed | undefined>, tooling?: {endpoint: string}): Promise<AdapterRunResult> {
+async function turn(input: AdapterRunInput, ...rest: [ConversationMemory, string, Parameters<typeof turnBody>[3], Parameters<typeof turnBody>[4], {endpoint: string}?]): Promise<AdapterRunResult> {
+  // Offered before the first request goes out, so a message sent right after Send is not lost; closed when the turn settles.
+  const lane = {steers: [] as string[], open: true};
+  input.onSteerable?.(text => { if (!lane.open || input.signal.aborted) return false; lane.steers.push(text); return true; });
+  try { return await turnBody(input, rest[0], rest[1], rest[2], rest[3], rest[4], lane); } finally { lane.open = false; }
+}
+async function turnBody(input: AdapterRunInput, memory: ConversationMemory, label: string, send: (history: ChatMessage[], extra: unknown[], tools: boolean) => Promise<Response>, stream: (response: Response, emit: (text: string) => void) => Promise<Streamed | undefined>, tooling: {endpoint: string} | undefined, lane: {steers: string[]; open: boolean}): Promise<AdapterRunResult> {
   const {threadId, history} = memory.open(input.resumeThreadId);
   input.onThreadReady(threadId);
   const fail = (message: string, extra: Partial<AdapterRunResult> = {}): AdapterRunResult => ({status: 'failed', finalMessage: '', threadId, dispatchState: 'not-dispatched', errorMessage: message, ...extra});
@@ -81,12 +87,33 @@ async function turn(input: AdapterRunInput, memory: ConversationMemory, label: s
       if (!got) { answer += note; input.onDelta(note); }
     }
   };
+  // Steers (a message sent while this turn runs) join the conversation before the next request: this loop owns its rounds.
+  const steers = lane.steers, injected: ChatMessage[] = [];
+  let mark = 0;
+  const takeSteers = (): boolean => {
+    if (!steers.length) return false;
+    const segment = answer.slice(mark); mark = answer.length;
+    if (segment.trim()) injected.push({role: 'assistant', content: segment});
+    for (const text of steers.splice(0)) { extra.push({role: 'user', content: text}); injected.push({role: 'user', content: text}); }
+    return true;
+  };
+  /** What the next turn remembers: the prompt, each steer in order with the reply before it, then the rest of the answer. */
+  const remember = (tail: string): ChatMessage[] => [...history, {role: 'user', content: input.prompt}, ...injected, ...(tail.trim() || !injected.length ? [{role: 'assistant' as const, content: tail}] : [])];
   try {
-    for (let round = 0; ; round++) {
+    for (let round = 0, roundStart = 0; ; round++, roundStart = answer.length) {
       const streamed = await stream(response, delta => { answer += delta; input.onDelta(delta); });
       if (streamed?.usage) usages.push(streamed.usage as {inputTokens?: number; outputTokens?: number; totalTokens?: number});
       let calls = streamed?.calls ?? [];
-      if (!toolsOn || !calls.length || input.signal.aborted) break;
+      if (input.signal.aborted) break;
+      if (!toolsOn || !calls.length) {
+        // A steer that arrived during the last stream gets one more round, after the reply it interrupted.
+        if (!steers.length || round >= MAX_TOOL_ROUNDS) break;
+        extra.push({role: 'assistant', content: answer.slice(roundStart) || '(no reply)'});
+        takeSteers();
+        response = await send(history, extra, toolsOn);
+        if (!response.ok || !response.body) throw new Error(response.ok ? `${label} returned an empty stream.` : await responseError(response, label));
+        continue;
+      }
       if (round >= MAX_TOOL_ROUNDS || callsThisTurn >= MAX_CALLS_PER_TURN || Date.now() > deadline) { await closingStatus(); break; }
       calls = calls.slice(0, Math.min(MAX_CALLS_PER_ROUND, MAX_CALLS_PER_TURN - callsThisTurn));
       callsThisTurn += calls.length;
@@ -104,10 +131,12 @@ async function turn(input: AdapterRunInput, memory: ConversationMemory, label: s
       for (const message of seen) pictures.add(message);
       extra.push(...seen);
       trimExtra();
+      takeSteers();
       if (input.signal.aborted) break;
       response = await send(history, extra, true);
       if (!response.ok || !response.body) throw new Error(response.ok ? `${label} returned an empty stream.` : await responseError(response, label));
     }
+    lane.open = false;
     if (usages.length === 1) input.onEvent('thread/tokenUsage/updated', {threadId, turnId, tokenUsage: {last: usages[0]}});
     else if (usages.length > 1) {
       // Each round re-sends the conversation: the last input size is the context in use, the outputs add up.
@@ -115,12 +144,13 @@ async function turn(input: AdapterRunInput, memory: ConversationMemory, label: s
       input.onEvent('thread/tokenUsage/updated', {threadId, turnId, tokenUsage: {last: {inputTokens: last.inputTokens ?? 0, outputTokens, totalTokens: (last.inputTokens ?? 0) + outputTokens}}});
     }
   } catch (error) {
+    lane.open = false;
     const stopped = input.signal.aborted;
-    if (answer || used.length) memory.commit(threadId, [...history, {role: 'user', content: input.prompt}, {role: 'assistant', content: `${answer}${used.length ? `\n\n[Tools used before this stopped: ${used.slice(0, 40).join(', ')}]` : ''}`}]);
+    if (answer || used.length) memory.commit(threadId, remember(`${answer.slice(mark)}${used.length ? `\n\n[Tools used before this stopped: ${used.slice(0, 40).join(', ')}]` : ''}`));
     return {status: 'failed', finalMessage: '', threadId, turnId, dispatchState: 'dispatched', errorMessage: stopped ? 'Stopped.' : error instanceof Error ? error.message.slice(0, 300) : `${label} stream failed.`};
   }
-  const remembered = used.length ? `${answer}\n\n[Tools used this turn: ${used.slice(0, 40).join(', ')}]` : answer;
-  const retained = memory.commit(threadId, [...history, {role: 'user', content: input.prompt}, {role: 'assistant', content: remembered}]);
+  const tail = answer.slice(mark), remembered = used.length ? `${tail}\n\n[Tools used this turn: ${used.slice(0, 40).join(', ')}]` : tail;
+  const retained = memory.commit(threadId, remember(remembered));
   // Muster trims this history (80 messages / 400k chars): say how many user turns survive, so static context
   // carried by a trimmed-out turn is sent again (service.ts → ContextLedger).
   input.onEvent(HISTORY_WINDOW_EVENT, {threadId, turnId, retainedUserTurns: retained.retainedUserTurns, trimmed: retained.trimmed});
@@ -176,12 +206,12 @@ export const ANTHROPIC_API = 'https://api.anthropic.com/v1';
 export function anthropicAdapter(options: Omit<HttpOptions, 'endpoint' | 'label'> & {endpoint?: string; label?: string}): RunnableAdapter {
   const memory = options.memory ?? new ConversationMemory();
   const request = options.fetch ?? fetch, endpoint = options.endpoint ?? ANTHROPIC_API, label = options.label ?? 'Anthropic';
-  return {kind: 'http', run: input => turn(input, memory, label, (history) => {
+  return {kind: 'http', run: input => turn(input, memory, label, (history, extra) => {
     const images = loadImages(input.images);
     const user = images.length ? [...images.map(image => ({type: 'image', source: {type: 'base64', media_type: image.mediaType, data: image.data}})), {type: 'text', text: input.prompt}] : input.prompt;
     return request(`${endpoint}/messages`, {method: 'POST', redirect: 'error', signal: input.signal,
       headers: {'content-type': 'application/json', accept: 'text/event-stream', 'x-api-key': options.apiKey() ?? '', 'anthropic-version': '2023-06-01'},
-      body: JSON.stringify({model: input.model, max_tokens: 16_000, stream: true, ...(input.instructions ? {system: input.instructions} : {}), messages: [...history, {role: 'user', content: user}]})});
+      body: JSON.stringify({model: input.model, max_tokens: 16_000, stream: true, ...(input.instructions ? {system: input.instructions} : {}), messages: [...history, {role: 'user', content: user}, ...extra]})});
   }, async (response, emit) => {
     let input_tokens: unknown, output_tokens: unknown;
     for await (const {event, data} of sseEvents(response.body!)) {
