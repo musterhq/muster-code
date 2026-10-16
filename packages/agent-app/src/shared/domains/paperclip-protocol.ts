@@ -200,13 +200,25 @@ export type ThreadCard =
   | { kind: 'delegated'; id: string; at: string; from: string | null; to: string | null; taskId: string; key: string; title: string; brief: string }
   /** `memory`: the Muster notes carried to the next agent with the work. */
   | { kind: 'handoff'; id: string; at: string; from: string | null; to: string | null; summary: string; memory: { text: string; source: string }[] }
-  | { kind: 'needs'; id: string; at: string; from: string | null; prompt: string; detail: string | null; status: 'pending' | 'resolved' | 'cancelled'; resolution: string | null;
+  | { kind: 'needs'; id: string; at: string; from: string | null; prompt: string; detail: string | null; status: 'pending' | 'resolved' | 'cancelled' | 'failed'; resolution: string | null;
       /** Answerable here when set: a Paperclip confirmation, accepted or rejected in place. */ interactionId: string | null; acceptLabel: string | null; rejectLabel: string | null;
       /** A Muster run waiting on you: its chat, and the pending question or approval item there, answered in place
        *  (question.respond / approval.respond) so the waiting run continues. */
       chatId?: string | null; pending?: TimelineItem | null;
       /** A Paperclip ask_user_questions interaction: its questions, answered in place through Paperclip's respond endpoint. */
-      questions?: PaperclipQuestion[]; submitLabel?: string | null }
+      questions?: PaperclipQuestion[]; submitLabel?: string | null;
+      /** The other Paperclip interaction kinds (suggested tasks, a checklist, item verdicts, a connection request): what to list and how it is answered. */
+      ask?: PaperclipAsk;
+      /** A tool call waiting for approval (or already run): the tool, its risk, a preview and an arguments summary, and the result once it ran. */
+      tool?: PaperclipToolAction;
+      /** A proposal to give an agent a secret by name (the value is never in the payload). */
+      secret?: { label: string; target: string; path: string; why: string; outcome: string | null };
+      /** Why Approve is switched off right now (the server is still preparing the workspace). */
+      blocker?: string | null;
+      /** The agent could not pick the work back up after the answer: one plain sentence. */
+      notice?: string | null;
+      /** Declining needs a reason. */
+      rejectRequiresReason?: boolean; rejectReasonLabel?: string | null }
   /** `approvalId`: set while it is pending in the linked Paperclip, so Approve / Reject / Request revision act on it. */
   | { kind: 'approval'; id: string; at: string; title: string; status: string; approvalId?: string; detail?: string; requestedBy?: string | null; verbs?: ApprovalDecision[] }
   /** A Paperclip task document (a plan is the document with key `plan`): its latest body and revision history. */
@@ -221,8 +233,17 @@ export type ThreadCard =
   | { kind: 'suggestion'; id: string; at: string; suggestion: Suggestion }
   /** An agent asking for a secret by name (G23). You enter the value in the card; the agent never sees it. */
   | { kind: 'secret'; id: string; at: string; proposal: SecretProposal; secureStorage: boolean };
-/** One question of a Paperclip ask_user_questions interaction. */
-export interface PaperclipQuestion { id: string; prompt: string; helpText: string | null; multi: boolean; allowOther: boolean;
+/** What a Paperclip interaction other than a plain confirmation or question set asks for. */
+export type PaperclipAsk =
+  | { kind: 'tasks'; tasks: { key: string; title: string; description: string | null; priority: string | null; parentKey: string | null }[]; reason: string | null; selected: string[] }
+  | { kind: 'checkbox'; options: { id: string; label: string; description: string | null }[]; selected: string[]; min: number; max: number | null }
+  | { kind: 'verdicts'; items: { id: string; label: string; description: string | null; preview: string | null; href: string | null }[]; verdicts: ('approve' | 'reject' | 'defer')[]; requireReasonOn: ('approve' | 'reject' | 'defer')[]; reasonLabel: string | null; allowBulkApprove: boolean }
+  | { kind: 'connection'; service: string; agent: string; phase: string };
+export interface PaperclipToolAction { name: string; app: string | null; risk: 'read' | 'write' | 'destructive'; preview: string; args: string; expiresAt: string | null; result: { status: 'approved' | 'executing' | 'executed' | 'failed' | 'expired'; text: string; href: string | null } | null }
+/** One verdict for an item of a request_item_verdicts interaction. */
+export interface PaperclipVerdict { id: string; verdict: 'approve' | 'reject' | 'defer'; reason?: string }
+/** One question of a Paperclip ask_user_questions interaction. `required: false` means it may be left unanswered. */
+export interface PaperclipQuestion { id: string; prompt: string; helpText: string | null; multi: boolean; allowOther: boolean; required?: boolean;
   /** Paperclip's free-text option ("Other"): its id goes in `optionIds` with the text. It is not listed in `options`. */
   otherOptionId?: string | null;
   options: { id: string; label: string; description: string | null }[] }
@@ -392,7 +413,7 @@ export interface PaperclipCommands {
   /** Muster's projects, tasks, agents, runs and needs-you items, plus the linked Paperclip's (ETag-revalidated), in one read. */
   'paperclip.snapshot': { input: { refresh?: boolean }; output: WorkspaceSnapshot };
   'paperclip.task': { input: { id: string }; output: WorkspaceTaskDetail };
-  'paperclip.comment': { input: { taskId: string; body: string }; output: WorkspaceComment };
+  'paperclip.comment': { input: { taskId: string; body: string; clientRequestId?: string }; output: WorkspaceComment };
   /** Only the fields you pass are changed. `assigneeId`: an agent id, `user:<id>` for a person (clears the agent), or null to unassign (Paperclip tasks only for priority and assignee). */
   'paperclip.task.update': { input: { taskId: string; status?: WorkspaceStatus; priority?: WorkspacePriority; assigneeId?: string | null }; output: WorkspaceTask };
   'paperclip.task.create': { input: TaskCreateInput; output: WorkspaceTask & { started?: TaskStartResult; startError?: string } };
@@ -435,7 +456,12 @@ export interface PaperclipCommands {
   'paperclip.inbox.restore': { input: { id: string }; output: { ok: true } };
   /** Answers a Needs-you card from the thread or the Inbox (Paperclip confirmations: accept, or reject with a reason;
    *  questions: `answers`, sent to Paperclip's respond endpoint). Only ever sent when you answer. */
-  'paperclip.interaction.respond': { input: { taskId: string; interactionId: string; accept: boolean; reason?: string; answers?: PaperclipAnswer[] }; output: { ok: true } };
+  'paperclip.interaction.respond': { input: { taskId: string; interactionId: string; accept: boolean; reason?: string; answers?: PaperclipAnswer[];
+    /** Suggested tasks you accept (their clientKeys), and the boxes you ticked. */ selectedClientKeys?: string[]; selectedOptionIds?: string[];
+    /** One verdict per item (request_item_verdicts). */ verdicts?: PaperclipVerdict[];
+    /** A connection request: declined here; connecting is done on the server. */ connection?: boolean }; output: { ok: true } };
+  /** An image an agent attached on the connected server (`/api/attachments/<id>/content`), fetched with this connection's own sign-in. Nothing else is fetched. */
+  'paperclip.attachment.image': { input: { src: string }; output: { dataUrl: string } };
   /** Brings back a project or task you deleted in Muster: the next import makes it again. Nothing is written to the server. */
   'paperclip.import.restore': { input: { kind: 'project' | 'task'; id: string }; output: { restored: boolean } };
   /** Copies a Paperclip company into Muster's Projects with GET requests only. Idempotent. Nothing starts running. */
@@ -450,7 +476,7 @@ export const PAPERCLIP_COMMANDS = {
   'paperclip.config.get': true, 'paperclip.config.set': true, 'paperclip.signin.start': true, 'paperclip.signin.status': true, 'paperclip.signin.cancel': true, 'paperclip.signin.signout': true, 'paperclip.disconnect': true, 'paperclip.session.set': true, 'paperclip.session.clear': true, 'paperclip.test': true, 'paperclip.snapshot': true, 'paperclip.task': true,
   'paperclip.comment': true, 'paperclip.task.update': true, 'paperclip.task.create': true, 'paperclip.agent.pause': true, 'paperclip.agent.resume': true,
   'paperclip.pauseAll': true, 'paperclip.resumeAll': true, 'paperclip.approval.decide': true, 'paperclip.run.cancel': true, 'paperclip.run': true, 'paperclip.costs': true, 'paperclip.memory': true, 'paperclip.list': true, 'paperclip.output.fetch': true, 'paperclip.output.preview': true,
-  'paperclip.watch': true, 'paperclip.badge': true, 'paperclip.ledger': true, 'paperclip.ledger.backfill': true, 'paperclip.inbox.dismiss': true, 'paperclip.inbox.dismissed': true, 'paperclip.inbox.restore': true, 'paperclip.interaction.respond': true, 'paperclip.import': true, 'paperclip.import.restore': true, 'paperclip.task.start': true, 'paperclip.dashboard': true, 'paperclip.import.plan': true,
+  'paperclip.watch': true, 'paperclip.badge': true, 'paperclip.ledger': true, 'paperclip.ledger.backfill': true, 'paperclip.inbox.dismiss': true, 'paperclip.inbox.dismissed': true, 'paperclip.inbox.restore': true, 'paperclip.interaction.respond': true, 'paperclip.attachment.image': true, 'paperclip.import.restore': true, 'paperclip.import': true, 'paperclip.task.start': true, 'paperclip.dashboard': true, 'paperclip.import.plan': true,
 } as const satisfies Record<keyof PaperclipCommands, true>;
 
 /** How much of a monthly budget is used: in dollars when the budget and the spend are priced, else in tokens when a

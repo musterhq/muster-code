@@ -7,6 +7,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import {ResourceLink, type ResourceContext} from './ResourceLink';
 import {ChatImage} from './ChatImage';
+import {invoke} from '../bridge';
 import {GalleryCoverage} from './ImageGallery';
 import {activeChat} from '../store';
 import {MarkdownTable} from './MarkdownTable';
@@ -196,7 +197,21 @@ function ReplyImage({src, alt}: {src?: string; alt?: string}): React.ReactElemen
   // The turn's gallery already shows this picture.
   if (path && covered.has(path)) return <></>;
   if (path && chat) return <ChatImage chatId={chat.id} path={path} variant="inline"/>;
+  if (isServerAttachment(src)) return <ServerImage src={src!} alt={alt}/>;
   return <span className="md-unavailable-link">[Image: {alt || 'image'} — preview unavailable]</span>;
+}
+/** An image attached on the connected server (`/api/attachments/<id>/content`, relative or on the server's own address). */
+export const isServerAttachment = (src?: string): boolean => Boolean(src) && /^(?:https?:\/\/[^/]+)?\/api\/attachments\/[0-9a-f-]{8,64}\/content$/i.test(src!.trim());
+/** Fetched with the connection's own sign-in (the server's attachments need it), then shown inline; a failure is a sentence, never a broken picture. */
+function ServerImage({src, alt}: {src: string; alt?: string}): React.ReactElement {
+  const [state, setState] = React.useState<{url: string} | {error: string} | null>(null);
+  React.useEffect(() => {
+    let live = true;
+    void invoke('paperclip.attachment.image', {src}).then(r => { if (live) setState({url: r.dataUrl}); }, () => { if (live) setState({error: 'unavailable'}); });
+    return () => { live = false; };
+  }, [src]);
+  if (state && 'url' in state) return <img className="md-server-image" src={state.url} alt={alt ?? ''} loading="lazy"/>;
+  return <span className="md-unavailable-link">{state ? `[Image: ${alt || 'image'} — could not be loaded from the server]` : `[Image: ${alt || 'image'} — loading]`}</span>;
 }
 /** The local file a markdown image points at: `/abs/path.png` or `file:///abs/path.png`; undefined for anything else. */
 export function localImagePath(src?: string): string | undefined {

@@ -24,6 +24,7 @@ Object.defineProperty(window.HTMLElement.prototype,'scrollTop',{configurable:tru
 Object.defineProperty(window.document,'visibilityState',{get(){return 'visible';}});
 
 const now=new Date().toISOString();
+const later=new Date(Date.parse(now)+5000).toISOString(),later2=new Date(Date.parse(now)+6000).toISOString();
 const task=(id:string,key:string,title:string,status:string,extra:object={})=>({id,key,title,status,priority:'high',source:'paperclip',projectId:'p1',parentId:null,goalId:null,assigneeId:'cto',assigneeLabel:'CTO',createdAt:now,updatedAt:now,startedAt:null,completedAt:null,live:false,blockedByIds:[],origin:'CEO',...extra});
 const agent=(id:string,name:string,reportsTo:string|null,status='idle')=>({id,name,role:id,title:`${name} title`,model:'claude-opus-5-5',adapter:'claude_local',source:'paperclip',status,reportsTo,lastActiveAt:now,error:null,pausable:true,capabilities:`${name} does things.`});
 const snapshot={paperclip:{origin:'This Mac',company:{id:'c',name:'RagnarDataOps',prefix:'RAG'},companies:[],live:'socket'},
@@ -48,6 +49,12 @@ const calls:{command:string;input:any}[]=[];
       {kind:'approval',id:'approval:ap9',at:now,title:'Hire Nova as Data Engineer',status:'pending',approvalId:'ap9',detail:'Role: engineer',requestedBy:'CTO',verbs:['approve','reject','request_revision']},
       {kind:'document',id:'document:d1',at:now,key:'plan',title:'Q4 plan',format:'markdown',body:'# Plan\n\nShip it.',revision:3,revisions:[{number:3,summary:'add dashboard',at:now,by:'CTO'},{number:2,summary:'add ship',at:now,by:'CTO'},{number:1,summary:'first draft',at:now,by:null}]},
       {kind:'workproduct',id:'workproduct:w1',at:now,type:'pull_request',title:'PR #12',status:'ready_for_review',provider:'github',url:'https://github.com/x/y/pull/12',summary:'Kafka'}]};
+  if(command==='paperclip.task'&&input.id==='t-ask')return {task:snapshot.tasks[0],description:'',comments:[],runs:[],addressee:{id:'cto',label:'CTO'},composerNote:null,subtasks:[],blocking:[],receipts:[],mentionable:[],
+    cards:[{kind:'needs',id:'interaction:int-s',at:now,from:'CTO',prompt:'Split it into two tasks?',detail:null,status:'pending',resolution:null,interactionId:'int-s',acceptLabel:null,rejectLabel:null,
+        ask:{kind:'tasks',reason:null,selected:['k1','k2'],tasks:[{key:'k1',title:'Write the schema',description:null,priority:'high',parentKey:null},{key:'k2',title:'Backfill rows',description:'Run once',priority:null,parentKey:'k1'}]}},
+      {kind:'needs',id:'interaction:int-t',at:later,from:'CTO',prompt:'Run Delete mail?',detail:null,status:'pending',resolution:null,interactionId:'int-t',acceptLabel:null,rejectLabel:null,
+        tool:{name:'Delete mail',app:'Mail',risk:'destructive',preview:'Deletes **3** messages',args:'{"ids":[1,2,3]}',expiresAt:null,result:null},blocker:'The workspace is still being prepared on the server. You can approve once it is ready.'},
+      {kind:'needs',id:'interaction:int-f',at:later2,from:'CTO',prompt:'Ship it?',detail:null,status:'failed',resolution:'This did not go through.',interactionId:null,acceptLabel:null,rejectLabel:null,notice:'The agent could not pick the work back up after 3 tries. It needs someone to look at it.'}]};
   if(command==='paperclip.task'&&input.id==='t4')return {task:snapshot.tasks[2],description:'',comments:[],runs:[{id:'a9',agentId:'qa',taskId:'t4',status:'failed',trigger:'user',source:'local',createdAt:now,startedAt:now,finishedAt:now,error:'The provider attempt failed: rate_limited',cancellable:false,chatId:'c-run'}],addressee:{id:'qa',label:'QA'},composerNote:null,subtasks:[],blocking:[],receipts:[],mentionable:[],
     cards:[{kind:'needs',id:'needs:q1',at:now,from:'QA',prompt:'Which colour should the banner be?',detail:null,status:'pending',resolution:null,interactionId:null,acceptLabel:null,rejectLabel:null,chatId:'c-run',
       pending:{id:'q1',chatId:'c-run',kind:'question',text:'The provider needs your input.',status:'pending',createdAt:now,data:{method:'item/tool/requestUserInput',questions:[{id:'color',header:'Colour',question:'Which colour should the banner be?',options:[{label:'Blue'},{label:'Green'}],allowCustomAnswer:false,multiSelect:false}]}}},
@@ -124,7 +131,9 @@ box.selectionStart=4;descriptor!.set!.call(box,'@CT');box.selectionStart=3;box.d
 assert.deepEqual(text('.ws-mentions button'),['CTCTOAgent'],'typing @ offers people and agents, each marked Person or Agent');
 descriptor!.set!.call(box,'@CTO rebase onto dev');box.dispatchEvent(new window.Event('input',{bubbles:true}));await delay(40);
 document.querySelector('.ws-composer')!.dispatchEvent(new window.Event('submit',{bubbles:true,cancelable:true}));await delay(80);
-assert.deepEqual(calls.find(c=>c.command==='paperclip.comment')?.input,{taskId:'t1',body:'[@CTO](agent://cto) rebase onto dev'},'a server comment carries the chip Paperclip’s own composer writes');
+{const sent=calls.find(c=>c.command==='paperclip.comment')?.input;
+assert.deepEqual({taskId:sent.taskId,body:sent.body},{taskId:'t1',body:'[@CTO](agent://cto) rebase onto dev'},'a server comment carries the chip Paperclip’s own composer writes');
+assert.match(sent.clientRequestId,/^[0-9a-f-]{36}$/,'and the id of its draft, so a retry is the same comment');}
 // A Muster run's question is answered from its task card through question.respond (not "reply below").
 openHub('task','t4');await delay(150);
 {
@@ -171,6 +180,30 @@ openHub('task','t15');await delay(150);
   await click(wp.querySelector('a'));
   assert.deepEqual(calls.find(c=>c.command==='link.open')?.input,{url:'https://github.com/x/y/pull/12'},'opened through link.open (the window denies direct opens)');
   assert.match(wp.textContent!,/pull request PR #12 · github · Kafka.*ready for review/);
+}
+openHub('task','t-ask');await delay(150);
+{
+  // #395: suggested tasks are listed and accepted with the ticked keys; a tool confirmation names the tool and its risk and waits on a blocker; a failed card is not "Answered."
+  const needs=[...document.querySelectorAll('.ws-card-sys[data-kind="needs"]')] as any[];
+  const tasksCard=needs.find(c=>/Split it into two tasks/.test(c.textContent))!;
+  assert.deepEqual([...tasksCard.querySelectorAll('.ws-ask-list li')].map((li:any)=>li.textContent.replace(/\s+/g,' ').trim()),['Write the schemahigh','Backfill rowsRun once'],'every suggested task is listed');
+  const boxes=[...tasksCard.querySelectorAll('input[type="checkbox"]')] as any[];
+  assert.deepEqual(boxes.map(b=>b.checked),[true,true]);
+  const boxProps=Object.keys(boxes[1]).find(k=>k.startsWith('__reactProps'))!;
+  boxes[1][boxProps].onChange({target:boxes[1],currentTarget:boxes[1]});await delay(40);
+  await click([...tasksCard.querySelectorAll('button')].find((b:any)=>/^Create 1$/.test(b.textContent)));
+  assert.deepEqual(calls.find(c=>c.command==='paperclip.interaction.respond'&&c.input.selectedClientKeys)?.input,{taskId:'t1',interactionId:'int-s',accept:true,selectedClientKeys:['k1']});
+  const nowCards=[...document.querySelectorAll('.ws-card-sys[data-kind="needs"]')] as any[];
+  const toolCard=nowCards.find(c=>/Run Delete mail/.test(c.textContent))!;
+  assert.match(toolCard.textContent,/Delete mail[\s\S]*Mail[\s\S]*Destructive/);
+  assert.match(toolCard.textContent,/Deletes 3 messages/);
+  assert.match(toolCard.textContent,/"ids": \[/,'the arguments are shown');
+  assert.match(toolCard.textContent,/still being prepared on the server/);
+  assert.ok([...toolCard.querySelectorAll('button')].find((b:any)=>/Approve and run/.test(b.textContent)).disabled,'Approve is off while the workspace is being prepared');
+  const failedCard=nowCards.find(c=>/Ship it\?/.test(c.textContent))!;
+  assert.match(failedCard.textContent,/Did not go through[\s\S]*Failed[\s\S]*did not go through/);
+  assert.doesNotMatch(failedCard.textContent,/Answered\./);
+  assert.match(failedCard.textContent,/after 3 tries/,'a resume failure is shown');
 }
 root.unmount();await delay(30);
 assert.equal(calls.filter(c=>c.command==='paperclip.watch').at(-1)!.input.visible,false,'leaving the hub stops live updates');

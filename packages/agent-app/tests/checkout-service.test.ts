@@ -738,14 +738,17 @@ test('M4: a refused reassignment does not leave a hand-back summary on the task:
   assert.ok(!h.server.comments.get('t1')!.some(c => /Handed back for review/.test(c.body)), 'no summary without the reassignment');
 });
 
-test('M5: a cost event whose delivery is unknown (timeout) is not sent twice; one that clearly never left is retried', async () => {
+test('M5: a cost event carries an idempotency key, so one whose delivery is unknown (timeout) is sent again and counted once (#395)', async () => {
   const h = setup(); await bound(h);
   const l = await h.svc.start({ taskId: 't1', model: OWN, confirm: true });
   h.server.costFail = 'The request timed out'; await h.svc.onTurn(l.chatId!, 'r1', 'completed'); await h.svc.sync();
-  assert.equal(h.svc.get('t1')!.pending, 0, 'not queued for a second try: the server may have counted it');
-  h.server.costFail = null; await h.svc.sync(); assert.equal(h.server.costs.length, 0, 'and it is not posted later');
+  assert.ok(h.svc.get('t1')!.pending >= 1, 'kept for another try: the key makes a repeat safe');
+  h.server.costFail = null; await h.svc.sync();
+  assert.equal(h.server.costs.length, 1, 'and it is posted on the next flush');
+  assert.equal(h.server.costs[0]!.idempotencyKey, 'muster-local:r1', 'with a key built from the run');
   h.server.down = true; await h.svc.onTurn(l.chatId!, 'r2', 'completed'); assert.ok(h.svc.get('t1')!.pending >= 1, 'a refused connection is retried');
-  h.server.down = false; await h.svc.sync(); assert.equal(h.server.costs.length, 1);
+  h.server.down = false; await h.svc.sync(); assert.equal(h.server.costs.length, 2);
+  assert.deepEqual(h.server.costs.map(c => c.idempotencyKey), ['muster-local:r1', 'muster-local:r2']);
 });
 
 test('M6: the org copy is a private file, only the roles in use are copied with instructions, and it is deleted when the check-out ends, the org is unticked or the server is disconnected', async () => {

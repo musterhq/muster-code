@@ -13,6 +13,7 @@
  *   Hidden means no timers at all. Muster's own data needs none: its changes already arrive as events.
  */
 import { execFile } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { stat } from 'node:fs/promises';
 import { basename, join } from 'node:path';
@@ -32,7 +33,7 @@ import { detectBackend } from '../server/detect.ts';
 import { normalizeBaseUrl as normalizeUrl } from '../paperclip-client.ts';
 import { connectionFor, isLoopback as connectionLoopback, originOf } from '../server/connection.ts';
 import { arr, mapBudgets } from '../paperclip-map.ts';
-import { cachedOutput, localOutput, MAX_OUTPUT_BYTES, nameWithExtension, outputCacheRoot, outputMime, previewOutput, projectRelativePath, sanitizeOutputName, storeOutput } from '../server-outputs.ts';
+import { cachedOutput, localOutput, MAX_OUTPUT_BYTES, nameWithExtension, outputCacheRoot, outputMime, PREVIEW_IMAGE_BYTES, previewOutput, projectRelativePath, sanitizeOutputName, storeOutput } from '../server-outputs.ts';
 import { OrgReader, serverHubFor } from '../server/orgs.ts';
 import { leadAgentIds, normalizeOrgSetting, scopeInbox } from '../../shared/org-work.ts';
 import { SecretStore } from '../secret-store.ts';
@@ -845,7 +846,9 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
       'paperclip.comment': async input => {
         const taskId = id(input.taskId), body = text(input.body, 'Message', 20_000);
         if (await owner('task', taskId) === 'local') { const comment = await local.comment(taskId, body); queueEmit(['tasks'], taskId); return comment; }
-        const created = await api().comment(taskId, body, built?.agents ?? new Map());
+        // One id per draft: a send that timed out and is sent again is the same comment to the server, never a second one. The app makes one when the caller did not.
+        const requestId = typeof input.clientRequestId === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(input.clientRequestId) ? input.clientRequestId : randomUUID();
+        const created = await api().comment(taskId, body, built?.agents ?? new Map(), requestId);
         queueEmit(['tasks'], taskId);
         return created;
       },
@@ -956,15 +959,39 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
             const key = (v: unknown) => { if (typeof v !== 'string' || !v.trim() || v.length > 160 || /[\u0000-\u001f]/.test(v)) throw new Error('Unknown answer.'); return v; };
             const optionIds = Array.isArray(answer.optionIds) ? answer.optionIds.slice(0, 129).map(key) : [];
             const otherText = typeof answer.otherText === 'string' && answer.otherText.trim() ? answer.otherText.slice(0, 100_000) : null;
-            if (!optionIds.length && !otherText) throw new Error('Answer every question.');
+            if (!optionIds.length && !otherText) return null;
             return { questionId: key(answer.questionId), optionIds, ...(otherText ? { otherText } : {}) };
-          });
+          }).filter((a): a is NonNullable<typeof a> => a !== null);
+          // An optional question left empty is not sent (the card leaves it out); the server checks the required ones. Nothing at all is never sent.
           if (!answers.length) throw new Error('Answer every question.');
           await api().respond(taskId, interactionId, { accept: true, answers });
           queueEmit(['tasks', 'inbox'], taskId);
           return { ok: true };
         }
-        await api().respond(taskId, interactionId, { accept: input.accept === true, ...(reason ? { reason } : {}) });
+        // Ticked suggested tasks (their clientKeys) and ticked boxes: short unique ids, as many as the server accepts.
+        const ids = (value: unknown, max: number): string[] | undefined => {
+          if (value === undefined) return undefined;
+          if (!Array.isArray(value) || value.length > max) throw new Error('Unknown selection.');
+          const out = value.map(v => { if (typeof v !== 'string' || !v.trim() || v.length > 120 || /[\u0000-\u001f]/.test(v)) throw new Error('Unknown selection.'); return v; });
+          if (new Set(out).size !== out.length) throw new Error('Unknown selection.');
+          return out;
+        };
+        const selectedClientKeys = ids(input.selectedClientKeys, 50), selectedOptionIds = ids(input.selectedOptionIds, 200);
+        if (selectedClientKeys && !selectedClientKeys.length && input.accept === true) throw new Error('Choose at least one task, or decline them all.');
+        if (Array.isArray(input.verdicts)) {
+          const VERDICTS = ['approve', 'reject', 'defer'];
+          const verdicts = input.verdicts.slice(0, 200).map(v => {
+            const row = v as { id?: unknown; verdict?: unknown; reason?: unknown };
+            if (typeof row.id !== 'string' || !row.id.trim() || row.id.length > 120 || typeof row.verdict !== 'string' || !VERDICTS.includes(row.verdict)) throw new Error('Unknown verdict.');
+            const why = typeof row.reason === 'string' && row.reason.trim() ? row.reason.trim().slice(0, 4000) : undefined;
+            return { id: row.id, verdict: row.verdict as 'approve' | 'reject' | 'defer', ...(why ? { reason: why } : {}) };
+          });
+          if (!verdicts.length || new Set(verdicts.map(v => v.id)).size !== verdicts.length) throw new Error('Give each item one verdict.');
+          await api().respond(taskId, interactionId, { accept: true, verdicts });
+          queueEmit(['tasks', 'inbox'], taskId);
+          return { ok: true };
+        }
+        await api().respond(taskId, interactionId, { accept: input.accept === true, ...(reason ? { reason } : {}), ...(selectedClientKeys ? { selectedClientKeys } : {}), ...(selectedOptionIds ? { selectedOptionIds } : {}), ...(input.connection === true ? { connection: true } : {}) });
         queueEmit(['tasks', 'inbox'], taskId);
         return { ok: true };
       },
@@ -1011,6 +1038,17 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
       'paperclip.output.fetch': async input => {
         if (typeof input.id !== 'string' || !/^[\w:.-]{1,200}$/.test(input.id)) throw new Error('Unknown output.');
         return openOutput(input.id, typeof input.projectId === 'string' ? input.projectId : undefined, input.preferServer === true);
+      },
+      'paperclip.attachment.image': async input => {
+        // Only an image on the connected server's own attachment route is fetched, and with this connection's own sign-in (an attachment needs it).
+        const src = typeof input.src === 'string' ? input.src.trim() : '';
+        const m = /^(?:(https?:\/\/[^/]+))?(\/api\/attachments\/[0-9a-f-]{8,64}\/content)$/i.exec(src);
+        const c = connection();
+        if (!m || !c?.outputContent || (m[1] && originOf(m[1]) !== originOf(conn.baseUrl()))) throw new Error('This picture is not on the connected server.');
+        const file = await c.outputContent({ source: 'attachment', issueId: '-', issueKey: '-', contentType: null, contentPath: m[2], href: m[2], downloadable: true }, PREVIEW_IMAGE_BYTES);
+        const mime = (file.contentType ?? '').split(';')[0]!.trim().toLowerCase();
+        if (!/^image\/(png|jpe?g|gif|webp|bmp|avif)$/.test(mime)) throw new Error('This attachment is not a picture Muster can show.');
+        return { dataUrl: `data:${mime};base64,${file.bytes.toString('base64')}` };
       },
       'paperclip.output.preview': async input => previewOutput(connection() ? [outputCache()] : [], input.path as string),
       'paperclip.watch': input => {

@@ -204,10 +204,15 @@ export class PaperclipBackend implements ServerBackend, PersonalAccess {
     const path = decision === 'approve' ? 'approve' : decision === 'reject' ? 'reject' : 'request-revision';
     await this.client.send('POST', `/approvals/${enc(id)}/${path}`, { decisionNote: note });
   }
-  async respond(taskId: string, interactionId: string, input: { accept: boolean; reason?: string; answers?: { questionId: string; optionIds: string[]; otherText?: string | null }[] }): Promise<void> {
+  async respond(taskId: string, interactionId: string, input: Parameters<ServerBackend['respond']>[2]): Promise<void> {
     const base = `/issues/${enc(taskId)}/interactions/${enc(interactionId)}`;
     if (input.answers) { await this.client.send('POST', `${base}/respond`, { answers: input.answers }); return; }
-    await this.client.send('POST', `${base}/${input.accept ? 'accept' : 'reject'}`, input.accept ? {} : { ...(input.reason ? { reason: input.reason } : {}) });
+    // Item verdicts have their own endpoint: one verdict per item (and a reason where the request asks for one).
+    if (input.verdicts) { await this.client.send('POST', `${base}/verdicts`, { verdicts: input.verdicts.map(v => ({ id: v.id, verdict: v.verdict, ...(v.reason ? { reason: v.reason } : {}) })) }); return; }
+    // A connection request is declined through its own endpoint; connecting happens on the server, in the app's own sign-in.
+    if (input.connection) { await this.client.send('POST', `/connection-intents/${enc(interactionId)}/decline`, input.reason ? { reason: input.reason } : {}); return; }
+    if (input.accept) await this.client.send('POST', `${base}/accept`, { ...(input.selectedClientKeys ? { selectedClientKeys: input.selectedClientKeys } : {}), ...(input.selectedOptionIds ? { selectedOptionIds: input.selectedOptionIds } : {}) });
+    else await this.client.send('POST', `${base}/reject`, input.reason ? { reason: input.reason } : {});
   }
 
   async receipts(company: WorkspaceCompany, limit: number, agents: ReadonlyMap<string, WorkspaceAgent>): Promise<LedgerEntry[]> {

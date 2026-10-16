@@ -625,7 +625,7 @@ export class CheckoutService {
   /**
    * Rows go in order. A hand-back's reassignment goes BEFORE its summary comment, and a refused change (the person lost the right, the task moved) stops the pair:
    * the comment is dropped, the lease is put back to checked out with a visible conflict, so the Mac and the server never disagree silently (M4). Consecutive
-   * comments are batched (newest context/tests only, no repeats, nothing the server already shows). A cost event whose delivery is unknown is not sent twice (M5).
+   * comments are batched (newest context/tests only, no repeats, nothing the server already shows). A cost event carries an idempotency key, so one whose delivery is unknown is sent again and counted once (M5).
    */
   private async sendRows(backend: ServerBackend & PersonalAccess, taskId: string, userId: string, fast = false, force = false): Promise<void> {
     const store = this.d.store;
@@ -675,13 +675,16 @@ export class CheckoutService {
         i++; continue;
       }
       if (row.type === 'cost') {
-        try { await backend.postCostEvent(store.lease(taskId)?.orgId ?? row.orgId, JSON.parse(row.body) as Record<string, unknown>); store.markPosted(row.id, done()); }
+        try {
+          // The event carries an idempotency key (rows queued before that existed get one from their run), so a send whose answer was lost is simply sent again.
+          const body = JSON.parse(row.body) as Record<string, unknown>;
+          if (typeof body.idempotencyKey !== 'string' || !body.idempotencyKey) body.idempotencyKey = `muster-local:${row.key.replace(/^cost:/, '')}`;
+          await backend.postCostEvent(store.lease(taskId)?.orgId ?? row.orgId, body); store.markPosted(row.id, done());
+        }
         catch (cause) {
-          // A timeout or a lost response may have been recorded: the server has no way to ask, and posting again would count the turn twice. Not clearly undelivered means not retried.
-          const clear = /ECONNREFUSED|ENOTFOUND|EAI_AGAIN|ENETUNREACH|EHOSTUNREACH|offline/i.test(message(cause));
-          if (isNetwork(cause) && !clear) { store.markPosted(row.id, done()); store.markFailed(row.id, `unconfirmed: ${message(cause)}; not retried, to avoid counting the turn twice`, false); }
-          else if (isAuth(cause)) { store.markFailed(row.id, message(cause), false); throw cause; }
-          else { store.markFailed(row.id, message(cause), !isNetwork(cause)); if (isNetwork(cause)) throw cause; }
+          if (isAuth(cause)) { store.markFailed(row.id, message(cause), false); throw cause; }
+          // Not delivered, or delivered with the answer lost: either way the same key goes again on the next flush, and the server counts the turn once.
+          store.markFailed(row.id, message(cause), !isNetwork(cause)); if (isNetwork(cause)) throw cause;
         }
         i++; continue;
       }
