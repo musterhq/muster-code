@@ -125,6 +125,14 @@
   padding: 4px 8px 6px;
   color: color-mix(in srgb, var(--text) 88%, transparent);
 }
+/* #442: consecutive replies in one turn read as one answer. The reply above gives up its bottom spacing (row, message and its
+   last block's margin) and the reply below its top spacing, so the two meet at exactly one paragraph gap (--md-gap). */
+.timeline-row.has-reply-continuation { padding-bottom: 0; }
+.timeline-row.has-reply-continuation .msg-assistant { padding-bottom: 0; }
+.timeline-row.has-reply-continuation .msg-assistant > .md-body > :last-child { margin-bottom: 0; }
+.timeline-row.is-reply-continuation { padding-top: 0; }
+.timeline-row.is-reply-continuation .msg-assistant { padding-top: 0; }
+.timeline-row.is-reply-continuation .msg-assistant > .md-body > :first-child { margin-top: var(--md-gap); }
 .timeline-row .msg-assistant > .md-body { font-size: var(--chat-font-size); font-weight: 430; line-height: var(--md-leading); letter-spacing: 0; }
 /* One compact gap between blocks (adjacent margins collapse): paragraph to paragraph, to a list, to a quote. */
 .md-body p, .md-body ul, .md-body ol, .md-body blockquote { margin-block: var(--md-gap); }

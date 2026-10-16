@@ -16,6 +16,9 @@
 .image-gallery-hero-hit img { width: 100%; height: 100%; display: block; object-fit: contain; }
 .image-gallery-hero-hit:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; border-radius: var(--radius-12); }
 .image-gallery-error { font-size: var(--fs-12); }
+.image-gallery-failures { display: flex; flex-direction: column; gap: 2px; margin: 0; padding: 0; list-style: none; }
+.image-gallery-failure { display: flex; align-items: center; gap: 6px; min-width: 0; padding: 1px 0 1px 4px; color: var(--text-faint); }
+.image-gallery-failure .image-gallery-error { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .image-gallery-canvas { position: absolute; right: 8px; bottom: 8px; display: inline-flex; align-items: center; gap: 5px; padding: 4px 9px; border: 0; border-radius: var(--radius-8); background: color-mix(in srgb, var(--bg) 62%, transparent); color: var(--text); font: inherit; font-size: var(--fs-12); backdrop-filter: blur(6px); cursor: pointer; }
 .image-gallery-canvas:hover { background: color-mix(in srgb, var(--bg) 80%, transparent); }
 .image-gallery-canvas:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
