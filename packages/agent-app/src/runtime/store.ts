@@ -884,15 +884,24 @@ export class AgentStore {
     });
   }
 
-  /** Crash recovery: any chat still running/stopping was orphaned by a dead process. */
-  recoverOrphanedRuns(): string[] {
+  /** Crash recovery: any chat still running/stopping was orphaned by a dead process.
+   *  `isLocalRoute` names routes that run inside Muster (their work died with the process): those are plainly interrupted,
+   *  never "recovery needed", because there is nothing at a provider to ask. */
+  recoverOrphanedRuns(isLocalRoute: (chat: Chat) => boolean = () => false): string[] {
     return this.tx(() => {
       const rows = this.db.prepare("SELECT id FROM chats WHERE status IN ('running', 'stopping')").all() as unknown as { id: string }[];
       for (const { id } of rows) {
-        const recovery: ChatRecovery = {kind:'recovery-needed',retryable:false,reason:'May still be running at the provider · Check status before sending another message.'};
-        // Interrupted, not failed: the provider may still finish the turn; RecoveryNotice checks it.
-        this.updateChatRaw(id, { status: 'interrupted', error: recovery.reason, recovery:JSON.stringify(recovery) });
-        this.appendItem(id, 'notice', recovery.reason, 'recovery-needed', {recovery});
+        const chat = this.chat(id);
+        if (chat && isLocalRoute(chat)) {
+          const reason = 'Muster closed while this was running. Nothing is still running; check the folder for partial changes, then send a new message.';
+          this.updateChatRaw(id, { status: 'interrupted', error: reason, recovery: null });
+          this.appendItem(id, 'notice', reason, 'interrupted', {kind: 'local-interrupted'});
+        } else {
+          const recovery: ChatRecovery = {kind:'recovery-needed',retryable:false,reason:'May still be running at the provider · Check status before sending another message.'};
+          // Interrupted, not failed: the provider may still finish the turn; RecoveryNotice checks it.
+          this.updateChatRaw(id, { status: 'interrupted', error: recovery.reason, recovery:JSON.stringify(recovery) });
+          this.appendItem(id, 'notice', recovery.reason, 'recovery-needed', {recovery});
+        }
         this.settleSubagentItems(id);
         this.interruptRunningChildren(id);
       }
