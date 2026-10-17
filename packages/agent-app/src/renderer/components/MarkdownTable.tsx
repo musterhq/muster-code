@@ -14,7 +14,8 @@ export function MarkdownTable({children,...props}:React.ComponentProps<'table'>)
  useEffect(()=>()=>clearTimeout(timer.current),[]);
  useEffect(()=>{if(!menu)return;root.current?.querySelector<HTMLButtonElement>('.md-table-copy-menu button')?.focus();const close=(e:PointerEvent)=>{if(!root.current?.contains(e.target as Node))setMenu(false);};document.addEventListener('pointerdown',close);return()=>document.removeEventListener('pointerdown',close);},[menu]);
  const copy=async(format:'markdown'|'csv')=>{
-  const rows=Array.from(table.current?.rows??[]).map(row=>Array.from(row.cells).map(cell=>cell.textContent??''));
+  // Every cell's full text (textContent), never what is visible: a cell's styling cannot shorten the copy.
+  const rows=Array.from(table.current?.querySelectorAll('tr')??[]).map(row=>Array.from(row.children).filter(cell=>/^T[HD]$/.test(cell.tagName)).map(cell=>cell.textContent??''));
   try{await copyText(serializeTable(rows,format));setFeedback('Copied');}catch{setFeedback('Copy failed');}
   setMenu(false);copyButton.current?.focus();clearTimeout(timer.current);timer.current=setTimeout(()=>setFeedback(''),1600);
  };

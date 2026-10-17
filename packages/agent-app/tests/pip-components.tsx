@@ -13,12 +13,15 @@ Object.assign(globalThis,{getComputedStyle:styles});(window as any).getComputedS
 window.HTMLElement.prototype.getBoundingClientRect=()=>({x:0,y:0,width:300,height:188,top:0,left:0,right:300,bottom:188});
 (window as any).innerWidth=1400;(window as any).innerHeight=900;
 const calls:{command:string;input:any}[]=[];
-const chat={id:'c1',title:'Research',folderId:'repo',pinned:false,archived:false,draft:'',status:'completed',updatedAt:'',model:'test',mode:'agent'};
+const chat={id:'c1',title:'Research',folderId:'repo',pinned:false,archived:false,draft:'',status:'running',updatedAt:'',model:'test',mode:'agent'};
 const snapshot={chats:[chat],folders:[{id:'repo',name:'repo',path:'/repo'}],projects:[],version:1,activeChatId:'c1'};
-(window as any).muster={subscribe(){return()=>{};},async invoke(command:string,input:any){
+const listeners=new Set<(event:any)=>void>();
+// A browser step from minutes ago (a past session in the transcript): it must never get a PiP.
+const oldStep={id:'old1',chatId:'c1',kind:'tool',text:'',status:'completed',createdAt:new Date(Date.now()-10*60_000).toISOString(),data:{type:'mcpToolCall',server:'computer-use',tool:'screenshot',arguments:'{"app":"Mail"}'}};
+(window as any).muster={subscribe(listener:any){listeners.add(listener);return()=>listeners.delete(listener);},async invoke(command:string,input:any){
   calls.push({command,input});
   if(command==='app.snapshot')return snapshot;
-  if(command==='chat.timeline')return {items:[],cursor:null};
+  if(command==='chat.timeline')return {items:[oldStep],cursor:null};
   if(command==='browser.status')throw new Error('closed');
   return undefined;
 }};
@@ -26,7 +29,7 @@ const React=await import('react');
 const {createRoot}=await import('react-dom/client');
 const store=await import('../src/renderer/store');
 const ui=await import('../src/renderer/computerUse');
-const {ComputerPip,openSessionTab}=await import('../src/renderer/components/ComputerPip');
+const {ComputerPip,openSessionTab,visitSource}=await import('../src/renderer/components/ComputerPip');
 const {Workspace}=await import('../src/renderer/components/Workspace');
 const {saveWorkspace,readWorkspace}=await import('../src/renderer/workspacePersistence');
 await store.boot();await delay(30);
@@ -49,7 +52,10 @@ const tabsText=()=>[...document.querySelectorAll('[role="tab"]')].map(tab=>tab.t
 
 // 5. No auto-start: two idle PiPs, no tab, no sidebar, no browser session.
 assert.deepEqual(errors,[]);
-assert.equal(cards().length,2,'both sessions show as PiPs');
+assert.equal(cards().length,2,'both live sessions show as PiPs, the past transcript session does not');
+assert.equal(document.querySelector('.pip-empty'),null,'a card with a frame never shows a placeholder');
+assert.equal(cards().every(card=>!!card.querySelector('img')),true,'every card shows its real frame');
+assert.ok(!document.body.textContent!.includes('Ended'),'live sessions are not labelled ended');
 assert.equal(store.getState().tabs.length,0);assert.equal(store.getState().resourcesHidden,true,'the sidebar stays closed');
 assert.equal(calls.some(call=>call.command.startsWith('browser.')&&call.command!=='browser.status'),false,'no browser session started');
 assert.equal(shown().length,2);
@@ -82,7 +88,11 @@ assert.ok(dockedCard.getAttribute('data-session')!.startsWith('c1|browser:'));
 main(shown()[0]!).click();await delay(40);          // second session -> second tab (the sidebar is not taken over)
 state=store.getState();
 assert.equal(state.tabs.length,3,'a second session opens beside the first');
-const sessionTabs=state.tabs.filter(tab=>tab.kind==='liveView');assert.equal(sessionTabs.length,2);
+// #423: the newest page is the one the agent's tab shows now, so it opens as the agent's live browser tab; the older page keeps its picture.
+const isSession=(tab:{kind:string;id:string})=>tab.kind==='liveView'||tab.id.startsWith('browser:agent-');
+const sessionTabs=state.tabs.filter(isSession);assert.equal(sessionTabs.length,2);
+assert.deepEqual(sessionTabs.map(tab=>tab.kind),['liveView','browser'],'the live session opens its real browser tab, never a "Starting…" placeholder');
+assert.equal(sessionTabs[1]!.id,'browser:agent-c1');
 assert.equal(state.tabs.some(tab=>tab.kind==='files'),true,'other tabs are kept');
 assert.equal(state.activeTabId,sessionTabs[1]!.id);
 assert.equal(tabsText().length,3);
@@ -93,8 +103,8 @@ store.activateTab(sessionTabs[0]!.id);await delay(30);
 assert.equal(document.querySelector('[data-session-tab]')!.getAttribute('data-session-tab'),sessionTabs[0]!.id);
 assert.equal(cards().filter(card=>card.hasAttribute('data-docked')).length,1);
 // Focusing an already-open tab from its PiP does not duplicate it.
-openSessionTab(ui.computerUi().frames.c1!);await delay(20);
-assert.equal(store.getState().tabs.filter(tab=>tab.kind==='liveView').length,2);
+openSessionTab({...ui.computerUi().frames.c1!,owner:'browser:agent-c1',profileId:'folder-repo'});await delay(20);
+assert.equal(store.getState().tabs.filter(isSession).length,2);
 // Closing a session tab returns it to the PiP; closing the sidebar shows every PiP.
 store.closeTab(sessionTabs[0]!.id);await delay(30);
 assert.equal(store.getState().tabs.length,2);
@@ -110,6 +120,59 @@ const saved=new Map<string,string>();
 saveWorkspace({setItem:(k,v)=>void saved.set(k,v)},{tabs:[...store.getState().tabs,{id:'browser:agent-c1',kind:'browser',browserProfileId:'personal',url:'https://a.test/',title:'Browser'}],activeTabId:null});
 const restored=readWorkspace({getItem:k=>saved.get(k)??null});
 assert.equal(restored.tabs.some(tab=>(tab.kind as string)==='liveView'||tab.id.startsWith('browser:agent-')),false);
+
+// Clicking a PiP opens the session's existing agent browser tab (no new or blank tab).
+store.setResourcesHidden(false);
+for(const tab of store.getState().tabs.filter(tab=>tab.kind==='liveView'))store.closeTab(tab.id);
+store.openTab({id:'browser:agent-c1',kind:'browser',browserProfileId:'personal',url:'https://c.test/',title:'c.test',chatId:'c1'});
+store.activateTab('files:repo');await delay(20);
+ui.applyComputerEvent({type:'computerFrame',frame:{...frame('c.test',Date.now()),owner:'browser:agent-c1'}});await delay(40);
+const tabCount=store.getState().tabs.length;
+store.setResourcesHidden(true);await delay(20);
+const cCard=shown().find(card=>keyOf(card).endsWith('browser:c.test'))!;
+assert.ok(cCard,'the c.test session has a card');
+if(!cCard.classList.contains('is-front')){main(cCard).click();await delay(20);}
+main(front()).click();await delay(40);
+assert.equal(store.getState().activeTabId,'browser:agent-c1','click focuses the session\'s existing tab');
+assert.equal(store.getState().tabs.length,tabCount,'no new tab was opened');
+// A session with no tab and no page to show never opens a blank browser.
+const before=store.getState().tabs.length;
+visitSource({chatId:'c1',target:'browser',app:'gone',label:'x',at:Date.now(),owner:'browser:agent-gone',profileId:'personal'});
+assert.equal(store.getState().tabs.length,before,'no blank browser for a gone session');
+// #423: a picture-only tab for the agent's live page (an older layout, or opened before the session was bound) never sits
+// on "Starting…"/"Disconnected": it hands over to the agent's real browser tab.
+store.setResourcesHidden(false);
+const liveId=ui.liveViewTabId({chatId:'c1',target:'browser',app:'c.test',url:'https://c.test/'});
+store.openTab({id:liveId,kind:'liveView',title:'c.test',chatId:'c1'});await delay(60);
+assert.equal(store.getState().tabs.some(tab=>tab.id===liveId),false,'the placeholder tab is replaced');
+assert.equal(store.getState().activeTabId,'browser:agent-c1','the agent\'s live browser tab is shown instead');
+assert.ok(!document.body.textContent!.includes('Disconnected'),'no Disconnected label for a page the agent is driving');
+
+// The run ends: every card reads Ended with its last picture, no live dot.
+store.setResourcesHidden(true);await delay(20);
+assert.ok(document.querySelector('.pip-card-status'),'a live card has a status dot');
+assert.ok(document.querySelector('.pip-card-status[aria-label]'),'the live dot has an accessible label');
+const ended={...snapshot,chats:[{...chat,status:'completed'}]};
+for(const listener of [...listeners])listener({type:'snapshot',snapshot:ended});
+await delay(80);
+assert.ok(cards().length>0,'an ended session lingers briefly');
+assert.ok([...document.querySelectorAll('.pip-ended-badge')].every(node=>node.textContent==='Ended')&&document.querySelectorAll('.pip-ended-badge').length>0,'it says Ended');
+assert.equal(document.querySelector('.pip-card-status'),null,'no live dot once ended');
+assert.ok(cards().every(card=>card.querySelector('img')),'it keeps its last frame');
+
+// The window loses focus: ticks are gated, so the Ended card is not removed yet. When it returns, the clock catches up.
+const {installWindowActivity}=await import('../src/renderer/windowActivity');
+installWindowActivity();
+let focused=true;(document as any).hasFocus=()=>focused;
+focused=false;window.dispatchEvent(new window.Event('blur'));
+const realNow=Date.now;let skew=0;Date.now=()=>realNow()+skew;
+skew=ui.ENDED_LINGER_MS+1000;
+await delay(1300);
+assert.ok(cards().length>0,'while the window is inactive nothing ticks');
+focused=true;window.dispatchEvent(new window.Event('focus'));
+await delay(100);
+assert.equal(cards().length,0,'after the window is active again the ended PiP is removed');
+Date.now=realNow;
 assert.deepEqual(errors,[]);
 console.log('pip-components ok');
 process.exit(0);

@@ -52,7 +52,7 @@ const emit=()=>{for(const listener of listeners)listener({type:'snapshot',snapsh
   if(command==='goals.pause'){chat={...chat,goal:{...chat.goal,status:'paused',reason:'user',startedAt:null,accumulatedMs:65_000}};emit();return chat.goal;}
   if(command==='goals.clear'){const {goal:_goal,...rest}=chat;chat=rest;emit();return undefined;}
   if(command==='skills.create')return {id:'/home/.codex/skills/weekly-report',slug:'weekly-report',path:'/home/.codex/skills/weekly-report/SKILL.md',replaced:false};
-  if(command==='chat.steer')return {steered:false};
+  if(command==='chat.steer'){if(input.text==='steer in flight')throw new Error('The runtime did not answer.');return {steered:false};}
   if(command==='providers.usage')return [];
   // CMP-19 prompt stashes: an in-memory runtime.
   if(command==='stashes.save'){const stash={id:`stash-${stashes.length+1}`,name:input.name||input.text.split('\n')[0],text:input.text,chips:input.chips??[],context:input.context??[],...(input.effort?{effort:input.effort}:{}),attachments:(input.attachmentIds??[]).map((id:string)=>({id:`copy-${id}`,name:`${id}.txt`,mime:'text/plain',size:1,kind:'file'})),chatId:input.chatId,createdAt:'',updatedAt:new Date().toISOString()};stashes.unshift(stash);return stash;}
@@ -334,6 +334,13 @@ await key(byTest('composer-input')!,'Enter',{metaKey:true});await delay(30);
 assert.ok(calls.some(call=>call.command==='chat.steer'&&call.input.text==='steer now'));
 assert.ok(calls.some(call=>call.command==='chat.queue.add'&&call.input.text==='steer now'),'a refused steer falls back to the queue');
 assert.match(document.querySelector('.composer-status')?.textContent??'',/Queued: agent could not accept a steer right now/);
+// #380: a steer that failed in flight may already have reached the agent, so it is not queued as well (no double send).
+store.setComposerDraft('chat','steer in flight');await delay(20);
+await key(byTest('composer-input')!,'Enter',{metaKey:true});await delay(30);
+assert.ok(calls.some(call=>call.command==='chat.steer'&&call.input.text==='steer in flight'));
+assert.ok(!calls.some(call=>call.command==='chat.queue.add'&&call.input.text==='steer in flight'),'a failed steer is never also queued');
+assert.equal(store.getState().composerDrafts.chat.text,'steer in flight','the draft stays for the user to decide');
+store.setComposerDraft('chat','');await delay(20);
 // Chips travel with queued messages and render on the queued row.
 store.setComposerDraft('chat','/pd');generation++;await render();
 await key(byTest('composer-input')!,'Enter');await delay(30);

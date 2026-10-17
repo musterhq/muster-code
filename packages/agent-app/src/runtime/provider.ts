@@ -1,6 +1,6 @@
 import { createRequire } from 'node:module';
 import { randomUUID } from 'node:crypto';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { homedir } from 'node:os';
 import {awaitProviderListing,configuredProviderInstances,providerListingsSettled,providerNode,type ProviderInstance,revalidateProviderInstances} from './provider-instances.ts';
 import {createAdapterCatalog,type AdapterCatalog} from './adapters/index.ts';
@@ -14,13 +14,19 @@ import {splitSecretOverrides} from './thread-config.ts';
 import {CODEX_LAUNCHER, envFromOverrides, mcpServersFromOverrides} from './adapters/shared.ts';
 import { device } from '../shared/device-noun.ts';
 import { RICH_CONTENT_GUIDANCE } from '../shared/rich-block.ts';
+import {codexSubagentOverrides,subagentSupport} from './subagent-routes.ts';
+import {codexWindowOverrides, userCompactionKeys} from './codex-window-overrides.ts';
 import {unpackedPath} from './unpacked-path.ts';
+import {BROWSER_MCP, BROWSER_NOTE, browserToolStyle, routeBrowserNote} from '../shared/computer-use.ts';
+import type {McpServerSpec} from './adapters/types.ts';
 
 /** Identity of the test-only route `createProviderAdapter({available})` builds. */
 export const FIXTURE_PROVIDER = {id: 'fixture', bindingId: 'fixture-binding', model: 'fixture-model'} as const;
 /** The legacy-core turn ceiling is logged once, so a killed long turn is never a silent failure. */
 let lifecycleWarned = false;
 
+/** No in-memory provider session holds the chat's thread (new process, switched provider, retired after a stopped or failed turn). */
+export const NO_LIVE_SESSION = 'No live provider session holds this thread. Send a message first, then compact.';
 export class ProviderPreDispatchError extends Error {
   readonly dispatchState = 'not-dispatched' as const;
 }
@@ -45,8 +51,11 @@ export interface ProviderInput {
   onReasoning(text: string): void;
   onEvent(method: string, params: Record<string, unknown>): void;
   onRequest(method: string, params: Record<string, unknown>): Promise<Record<string, unknown> | undefined>;
+  /** The saved provider thread could not be resumed and a fresh one starts. Returns text (a digest of the earlier
+   *  conversation) to send ahead of this turn's prompt. */
+  onThreadReset?(previousThreadId: string): string | undefined;
 }
-export interface ProviderResult { status: 'completed' | 'failed'; finalMessage: string; threadId?: string; errorMessage?: string; dispatchState?: 'not-dispatched' | 'dispatched' | 'unknown'; turnId?: string; recovery?: ProviderRecovery; failure?: {kind: 'rpc-rejected' | 'request-timeout' | 'aborted'; method?: string; statusCode?: number; retryAfterMs?: number; requestId?: string} }
+export interface ProviderResult { status: 'completed' | 'failed'; finalMessage: string; threadId?: string; errorMessage?: string; dispatchState?: 'not-dispatched' | 'dispatched' | 'unknown'; turnId?: string; recovery?: ProviderRecovery; threadReset?: boolean; failure?: {kind: 'rpc-rejected' | 'request-timeout' | 'aborted'; method?: string; statusCode?: number; retryAfterMs?: number; requestId?: string} }
 export interface ProviderAdapter {
   run(input: ProviderInput): Promise<ProviderResult>;
   /** True means an owned stop request settled locally; inspect recovery for remote certainty. */
@@ -84,6 +93,10 @@ export interface CoreClient {
   interruptActiveCodexTurn(owner: string, key: string): Promise<boolean>;
   steerActiveCodexTurn?(text: string, owner: string, key?: string): Promise<boolean>;
   clearCodexAppServerSessions(owner: string): void;
+  /** Newer cores: whether a live app-server still serves the conversation. */
+  hasLiveCodexConversation?(key: string, owner?: string): boolean;
+  /** Newer cores: re-open a persisted thread on a warm app-server without starting a turn. */
+  openCodexConversation?(input: Record<string, unknown>): Promise<{threadId: string}>;
   queryCodexAppServer?(method: string, params: Record<string, unknown>, options: Record<string, unknown>): Promise<Record<string, unknown>>;
 }
 const OWNER = 'muster-agent-app';
@@ -101,23 +114,41 @@ interface OwnedSession {
   stop?: Promise<boolean>; closeTimer?: ReturnType<typeof setTimeout>;
   /** A turn the app-server started on its own while no Muster run was in flight (goal continuation, queued item). */
   idleTurnId?: string;
+  /** Launch configuration and observers of the last run, to re-open the thread after the idle timer closed its app-server. */
+  reopen?: Record<string, unknown>;
 }
 const key = (id: string, providerId:string, bindingId:string) => `agent:${id}:${providerId}:${bindingId}`;
 /** Maps Codex `turn/steer` errors: no active turn → queue; review/compact → refuse with a reason; a turn-id mismatch → retry once. */
-export function steerFailure(error: unknown): false | {refused: string} | 'retry' {
+/** Shown by the composer when a route's CLI or API cannot take a message while it works. */
+export const NO_MID_RUN_STEER = 'Queued — this route can’t take messages mid-run; it sends when this step ends';
+export function steerFailure(error: unknown): false | {refused: string} | 'retry' | 'uncertain' {
   const message = error instanceof Error ? error.message : String(error);
   if (/no active turn to steer/i.test(message)) return false;
+  // A timed-out request may already have been accepted: sending it again (or queueing it) would deliver it twice.
+  if (/timed out/i.test(message)) return 'uncertain';
   const kind = /cannot steer a (review|compact) turn/i.exec(message)?.[1]?.toLowerCase();
   if (kind) return {refused: `A ${kind} turn can’t be steered.`};
   return 'retry';
 }
 
 /** Bundled from the existing headless core client; no VSCode or private provider APIs. */
-const modeInstructions = (mode: Chat['mode']) => mode === 'ask' ? 'Answer and inspect only. Do not modify files, execute mutations or request expanded access.' : mode === 'plan' ? 'Produce a reviewable plan. Do not change files or request expanded access. Do not spawn sub-agents to implement changes: implementation starts only after the user executes the plan. Put the complete plan in your final message.' : undefined;
+const modeInstructions = (mode: Chat['mode'], subagents = true) => mode === 'ask' ? 'Answer and inspect only. Do not modify files, execute mutations or request expanded access.' : mode === 'plan' ? 'Produce a reviewable plan. Do not change files or request expanded access. ' + (subagents ? 'Do not spawn sub-agents to implement changes: implementation starts only after the user executes the plan. ' : 'Implementation starts only after the user executes the plan. ') + 'Put the complete plan in your final message.' : undefined;
 /** Process ownership (F41/F50): the agent may only clean up what it started itself. */
 export const PROCESS_OWNERSHIP_RULE = 'Process ownership: only stop, kill or restart processes you started yourself in this conversation. Never kill processes by port or name without confirming you started them; the user\'s terminals and dev servers are theirs even when they look orphaned. If a port you need is busy, pick another port. Stop long-running processes you started (dev servers, watchers) before ending your turn unless the user asked you to keep them running.';
+/** #385: agent mode keeps going instead of ending turns with a permission question. Never added in ask or plan mode. */
+export const AGENT_AUTONOMY_RULE = 'Work autonomously until the task is done. Do the next obvious step without asking. Ask only before destructive or irreversible actions, or when a choice is genuinely ambiguous and changes the outcome. Do not end a turn with "Should I...?" or "Want me to...?" for work that is clearly part of the task: do it. End with a short summary of what you did and what is left, not a question.';
 /** Every route, every mode: the app draws ```mermaid, ```chart and ```html-report fences (shared/rich-block.ts). */
-const runInstructions = (mode: Chat['mode'], extra?: string) => [modeInstructions(mode), mode === 'agent' ? PROCESS_OWNERSHIP_RULE : undefined, RICH_CONTENT_GUIDANCE, extra].filter(Boolean).join('\n\n') || undefined;
+export const runInstructions = (mode: Chat['mode'], extra?: string, subagents = true) => [modeInstructions(mode, subagents), mode === 'agent' ? AGENT_AUTONOMY_RULE : undefined, mode === 'agent' ? PROCESS_OWNERSHIP_RULE : undefined, RICH_CONTENT_GUIDANCE, extra].filter(Boolean).join('\n\n') || undefined;
+/** #424: the instructions, Muster's MCP servers and the native browser flag for a non-Codex route. Each route names the
+ *  browser tools exactly as its model sees them, or says plainly that it has none; the browser server goes only to routes
+ *  that load it (Claude Code, OpenCode, Grok), and HTTP routes get native browser tools wired to the same bridge. */
+export function adapterBrowser(driver: string | undefined, mode: Chat['mode'], developerInstructions: string | undefined, overrides: ProviderInput['configOverrides'], subagents = true): {instructions?: string; mcpServers?: Record<string, McpServerSpec>; browserTools?: true} {
+  const style = browserToolStyle(driver), offered = !!developerInstructions?.includes(BROWSER_NOTE);
+  const servers = mcpServersFromOverrides(overrides);
+  if (style === 'native' || style === 'none') delete servers[BROWSER_MCP];
+  const instructions = runInstructions(mode, routeBrowserNote(developerInstructions, style), subagents);
+  return {...(instructions ? {instructions} : {}), ...(Object.keys(servers).length ? {mcpServers: servers} : {}), ...(offered && style === 'native' ? {browserTools: true as const} : {})};
+}
 /** Test runners construct many services; they opt into real CLI/API adapters by passing a catalog. */
 const defaultCatalog = () => process.env.NODE_TEST_CONTEXT && process.env.MUSTER_PROVIDER_ADAPTERS !== '1' ? undefined : createAdapterCatalog();
 interface AdapterRun {controller: AbortController; completed: Promise<void>; /** Set by adapters that accept mid-turn messages (Claude Code). */ steer?: (text: string) => boolean}
@@ -144,6 +175,14 @@ export function createProviderAdapter(options: { core?: CoreClient; available?: 
     command:options.command??unpackedPath(join(__dirname,'resources',CODEX_LAUNCHER)),env:{},sessionsRoot:join(process.env.CODEX_HOME||join(homedir(),'.codex'),'sessions'),
   }] : [...configuredProviderInstances(), ...catalog?.instances() ?? []]);
   const close = (session: OwnedSession) => core?.clearCodexAppServerSessions(session.owner);
+  /** Background turns recorded on a session whose app-server has since exited can never complete: forget them,
+   *  or provider switch and release refuse until restart. */
+  const settleDeadWork = (session: OwnedSession) => {
+    if (session.active || session.stop || !(session.liveTurns.size || session.workOverflow)) return;
+    if (typeof core?.hasLiveCodexConversation !== 'function' || core.hasLiveCodexConversation(session.key, session.owner)) return;
+    session.liveTurns.clear(); session.workOverflow = false;
+  };
+  const busyWithBackground = (session: OwnedSession) => { settleDeadWork(session); return session.liveTurns.size > 0 || !!session.workOverflow; };
   const cancel = (id: string, session: OwnedSession): Promise<boolean> => {
     if (session.stop) return session.stop;
     session.controller.abort();
@@ -179,10 +218,9 @@ export function createProviderAdapter(options: { core?: CoreClient; available?: 
     try {
       const result = await route.adapter!.run({
         chat: input.chat, cwd: input.cwd, prompt: input.prompt, model, permissionMode: access.permissionMode, signal: owned.controller.signal,
-        ...(input.images?.length ? {images: input.images} : {}), ...(input.reasoningEffort ? {reasoningEffort: input.reasoningEffort} : {}),
+        ...(input.images?.length ? {images: input.images} : {}), ...(route.info.models.find(entry => entry.id === model)?.images === true ? {vision: true} : {}), ...(input.reasoningEffort ? {reasoningEffort: input.reasoningEffort} : {}),
         ...(resumeThreadId ? {resumeThreadId} : {}),
-        instructions: runInstructions(input.chat.mode, input.developerInstructions),
-        ...(Object.keys(mcpServersFromOverrides(input.configOverrides)).length ? {mcpServers: mcpServersFromOverrides(input.configOverrides)} : {}),
+        ...adapterBrowser(route.info.driver, input.chat.mode, input.developerInstructions, input.configOverrides, subagentSupport(route.info.driver) !== 'none'),
         ...(Object.keys(envFromOverrides(input.configOverrides)).length ? {env: envFromOverrides(input.configOverrides)} : {}),
         // The adapter runs its own tools (HTTP routes): they meet the same Project tool rules, user-process guard and approval cards as Codex's.
         authorize: async (method, params) => {
@@ -227,7 +265,7 @@ export function createProviderAdapter(options: { core?: CoreClient; available?: 
     markStale() {
       revalidateProviderInstances();
       let marked = 0;
-      for (const session of sessions.values()) if (!session.active && !session.stop && !session.liveTurns.size && !session.workOverflow) { session.stale = true; marked++; }
+      for (const session of sessions.values()) if (!session.active && !session.stop && !busyWithBackground(session)) { session.stale = true; marked++; }
       return marked;
     },
     async run(input) {
@@ -243,19 +281,19 @@ export function createProviderAdapter(options: { core?: CoreClient; available?: 
       const bindingId=route.info.bindingId??route.info.id;
       if (input.chat.providerBindingId && input.chat.providerBindingId!==bindingId) throw new ProviderPreDispatchError('The selected provider account or profile changed. Select it again before running.');
       if (previous && (previous.providerId!==route.info.id || previous.bindingId!==bindingId)) {
-        if (previous.liveTurns.size || previous.workOverflow) throw new ProviderPreDispatchError('Background provider work must finish before switching providers.');
+        if (busyWithBackground(previous)) throw new ProviderPreDispatchError('Background provider work must finish before switching providers.');
         previous.controller.abort();close(previous);sessions.delete(input.chat.id);previous=undefined;
       }
       const resumeThread = input.chat.providerThreadProviderId===route.info.id && input.chat.providerThreadBindingId===bindingId ? input.chat.providerThreadId : undefined;
       if (route.adapter) {
         if (previous) {
-          if (previous.liveTurns.size || previous.workOverflow) throw new ProviderPreDispatchError('Background provider work must finish before switching providers.');
+          if (busyWithBackground(previous)) throw new ProviderPreDispatchError('Background provider work must finish before switching providers.');
           previous.controller.abort();close(previous);sessions.delete(input.chat.id);
         }
         return runAdapter(route, input, resumeThread);
       }
       if(previous && input.chat.providerThreadId && !resumeThread) {
-        if(previous.liveTurns.size || previous.workOverflow) throw new ProviderPreDispatchError('Background provider work must finish before replacing a stale continuation.');
+        if(busyWithBackground(previous)) throw new ProviderPreDispatchError('Background provider work must finish before replacing a stale continuation.');
         previous.controller.abort();close(previous);sessions.delete(input.chat.id);previous=undefined;
       }
       const lifecycleSupported = beforeDispatch(() => client().CODEX_RUN_LIFECYCLE_VERSION === 1);
@@ -278,12 +316,14 @@ export function createProviderAdapter(options: { core?: CoreClient; available?: 
       // Context budget: Codex features Muster does not use, and connector (apps) tool schemas a model without deferred
       // tool search would otherwise receive inline on every request, stay off unless this chat asked for a connector.
       const featureOverrides = leanCodexFeatureOverrides({toolSearch: route.info.models.find(entry => entry.id === model0)?.toolSearch, connectorsRequested: connectorChats.has(input.chat.id), policy: connectorPolicy()});
-      const signature = JSON.stringify([access, model0, input.reasoningEffort ?? 'medium', input.configOverrides ?? {}, featureOverrides, input.cwd, route.command, route.info.id, route.env]);
-      if (previous && ((previous.signature !== undefined && previous.signature !== signature) || previous.stale) && !previous.liveTurns.size && !previous.workOverflow) close(previous);
+      // #426: the model's own window and compaction point (catalog or router listing), unless the user set them in config.toml.
+      const windowOverrides = codexWindowOverrides(route.info.models.find(entry => entry.id === model0), userCompactionKeys(route.sessionsRoot ? dirname(route.sessionsRoot) : undefined));
+      const signature = JSON.stringify([access, model0, input.reasoningEffort ?? 'medium', input.configOverrides ?? {}, featureOverrides, windowOverrides, input.cwd, route.command, route.info.id, route.env]);
+      if (previous && ((previous.signature !== undefined && previous.signature !== signature) || previous.stale) && !busyWithBackground(previous)) close(previous);
       if (!previous && sessions.size >= 64) {
         // Bound retained observers without evicting known background work.
         for (const [id, idle] of sessions) {
-          if (idle.active || idle.stop || idle.liveTurns.size || idle.workOverflow) continue;
+          if (idle.active || idle.stop || busyWithBackground(idle)) continue;
           idle.controller.abort(); close(idle); sessions.delete(id); break;
         }
         if (sessions.size >= 64) throw new ProviderPreDispatchError('Provider session capacity reached. Stop an existing chat before starting another.');
@@ -307,32 +347,15 @@ export function createProviderAdapter(options: { core?: CoreClient; available?: 
         const developerInstructions = runInstructions(input.chat.mode, input.developerInstructions);
         const split = splitSecretOverrides(input.configOverrides);
         const extraOverrides = Object.entries(split.args).filter(([name]) => /^[A-Za-z0-9_.-]{1,128}$/.test(name) && !/^(sandbox|approval_policy)/.test(name)).map(([name, value]) => `${name}=${JSON.stringify(value)}`);
-        const result=await client().runCodexAppServer({
-          prompt: input.prompt, cwd: input.cwd, command: route.command, model, reasoning,
-          ...(input.images?.length ? { images: input.images } : {}),
+        const launch = {
+          cwd: input.cwd, command: route.command, model, reasoning,
           env: { MUSTER_PROVIDER_NODE: node.node, ...node.env, ...route.env }, transportOwner: session.owner, cacheKey: session.key,
-          ...budgetOptions,
-          ...(lifecycleSupported ? {
-            signal: session.controller.signal,
-            onThreadReady(threadId: string) { session.threadId = threadId; input.onThreadReady?.(threadId); },
-            onTurnAccepted(identity: {threadId: string; turnId: string; dispatchState: 'dispatched'}) {
-              session.threadId = identity.threadId; session.turnId = identity.turnId; session.activity = true;
-              input.onTurnAccepted?.(identity);
-            },
-          } : {}),
-          keepAlive: true, threadId: resumeThread,
-          sandbox: access.sandbox,
-          networkAccess: access.networkAccess, approvalPolicy: access.approvalPolicy,
-          developerInstructions,
-          // Codex keeps a turn's collaboration mode for later turns and for sub-agents spawned
-          // in them. Leaving Plan must reset it explicitly, or "Execute plan" workers stay in
-          // Plan mode and can only describe patches (F53).
-          collaborationMode: input.chat.mode === 'plan' ? { mode: 'plan', settings: { model, reasoning_effort: reasoning } }
-            : previous?.mode === 'plan' || (!previous && resumeThread) ? { mode: 'default', settings: { model, reasoning_effort: reasoning } } : undefined,
+          sandbox: access.sandbox, networkAccess: access.networkAccess, approvalPolicy: access.approvalPolicy, developerInstructions,
           ...(split.threadConfig ? { threadConfig: split.threadConfig } : {}),
-          configOverrides: [`agents.default_subagent_model=${JSON.stringify(model)}`, `agents.default_subagent_reasoning_effort=${JSON.stringify(reasoning)}`, ...featureOverrides, ...extraOverrides, `sandbox_workspace_write.network_access=${access.networkAccess}`],
-          onDelta(text: string) { session.activity = true; if (!lateCancellation()) input.onDelta(text); },
-          onReasoningDelta(text: string) { session.activity = true; if (!lateCancellation()) input.onReasoning(text); },
+          // #427: sub-agents on, defaulting to the chat's own model (which this provider serves) in every chat type.
+          configOverrides: [...codexSubagentOverrides(model, reasoning), ...featureOverrides, ...windowOverrides, ...extraOverrides, `sandbox_workspace_write.network_access=${access.networkAccess}`],
+        };
+        const observers = {
           onEvent(method:string,params:Record<string,unknown>){
             const turn = params.turn as Record<string, unknown> | undefined;
             const thread = params.thread as Record<string, unknown> | undefined;
@@ -370,11 +393,37 @@ export function createProviderAdapter(options: { core?: CoreClient; available?: 
             if(method==='item/completed'&&item?.type==='commandExecution'&&typeof item.id==='string'&&typeof params.turnId==='string'){
               if(commands.size<64)commands.set(item.id,{params,item,turnId:params.turnId,output:typeof item.aggregatedOutput==='string'?item.aggregatedOutput:''});
             }
-          }, onRequest(method: string, params: Record<string, unknown>) {
+          },
+          onRequest(method: string, params: Record<string, unknown>) {
             session.activity = true;
             if (lateCancellation()) return Promise.resolve(undefined);
             return requestWhileOwned(session.controller.signal, () => input.onRequest(method, params));
           },
+        };
+        // The same app-server launch and observers re-open this thread when /compact finds the idle timer closed it.
+        session.reopen = {...launch, ...observers};
+        const result=await client().runCodexAppServer({
+          ...launch, ...observers,
+          prompt: input.prompt,
+          ...(input.images?.length ? { images: input.images } : {}),
+          ...budgetOptions,
+          ...(lifecycleSupported ? {
+            signal: session.controller.signal,
+            onThreadReady(threadId: string) { session.threadId = threadId; input.onThreadReady?.(threadId); },
+            onTurnAccepted(identity: {threadId: string; turnId: string; dispatchState: 'dispatched'}) {
+              session.threadId = identity.threadId; session.turnId = identity.turnId; session.activity = true;
+              input.onTurnAccepted?.(identity);
+            },
+          } : {}),
+          ...(input.onThreadReset ? { onThreadReset: (previousThreadId: string) => lateCancellation() ? undefined : input.onThreadReset?.(previousThreadId) } : {}),
+          keepAlive: true, threadId: resumeThread,
+          // Codex keeps a turn's collaboration mode for later turns and for sub-agents spawned
+          // in them. Leaving Plan must reset it explicitly, or "Execute plan" workers stay in
+          // Plan mode and can only describe patches (F53).
+          collaborationMode: input.chat.mode === 'plan' ? { mode: 'plan', settings: { model, reasoning_effort: reasoning } }
+            : previous?.mode === 'plan' || (!previous && resumeThread) ? { mode: 'default', settings: { model, reasoning_effort: reasoning } } : undefined,
+          onDelta(text: string) { session.activity = true; if (!lateCancellation()) input.onDelta(text); },
+          onReasoningDelta(text: string) { session.activity = true; if (!lateCancellation()) input.onReasoning(text); },
         });
         if(commands.size&&result.threadId&&!session.controller.signal.aborted&&!disposed){
           try{
@@ -430,17 +479,17 @@ export function createProviderAdapter(options: { core?: CoreClient; available?: 
       return query(method, params, {command: route.command, timeoutMs});
     },
     onIdleEvent(listener) { idleListeners.add(listener); return () => { idleListeners.delete(listener); }; },
-    hasActiveWork(id) { const session=sessions.get(id); return adapterRuns.has(id) || (!!session && (session.active || !!session.stop || session.liveTurns.size>0 || !!session.workOverflow)); },
+    hasActiveWork(id) { const session=sessions.get(id); return adapterRuns.has(id) || (!!session && (session.active || !!session.stop || busyWithBackground(session))); },
     async release(id) {
       if(adapterRuns.has(id))throw new Error('Wait for this chat to finish before switching providers.');
       const session=sessions.get(id);if(!session)return;
-      if(session.active || session.stop || session.liveTurns.size || session.workOverflow)throw new Error('Wait for this chat and its background agents before switching providers.');
+      if(session.active || session.stop || busyWithBackground(session))throw new Error('Wait for this chat and its background agents before switching providers.');
       session.controller.abort();close(session);sessions.delete(id);
     },
     async steer(id, text) {
       // Adapter runs (Claude Code…) that accept mid-turn messages steer through their own channel.
       const adapterRun = adapterRuns.get(id);
-      if (adapterRun) return adapterRun.steer?.(text) === true;
+      if (adapterRun) return adapterRun.steer ? adapterRun.steer(text) : {refused: NO_MID_RUN_STEER};
       const session = sessions.get(id);
       if (disposed || !session?.active || session.stop || session.controller.signal.aborted || !core) return false;
       // Codex `turn/steer` always names the turn it expects, so a steer never lands in a newer turn.
@@ -450,6 +499,8 @@ export function createProviderAdapter(options: { core?: CoreClient; available?: 
           return true;
         } catch (error) {
           const verdict = steerFailure(error);
+          // Possibly accepted already: never resend it, and never let the caller queue it as well.
+          if (verdict === 'uncertain') return true;
           if (verdict !== 'retry') return verdict;
           // Mismatch or transport trouble: retry once against the core's own view of the active turn.
         }
@@ -459,9 +510,18 @@ export function createProviderAdapter(options: { core?: CoreClient; available?: 
     },
     async compact(id) {
       const session = sessions.get(id);
-      if (disposed || !core || !session?.threadId || session.retired || session.controller.signal.aborted) throw new Error('No live provider session holds this thread. Send a message first, then compact.');
+      if (disposed || !core || !session?.threadId || session.retired || session.controller.signal.aborted) throw new Error(NO_LIVE_SESSION);
       if (session.active || session.stop) throw new Error('Wait for the current run to finish before compacting.');
-      await core.callCodexConversation(session.key, 'thread/compact/start', {threadId: session.threadId}, {transportOwner: session.owner, requireOwner: true, timeoutMs: 30_000});
+      // The idle timer closed this chat's app-server: resume the thread on a fresh one and compact natively there.
+      if (session.reopen && typeof core.openCodexConversation === 'function' && core.hasLiveCodexConversation?.(session.key, session.owner) === false) {
+        try { await core.openCodexConversation({...session.reopen, threadId: session.threadId, keepAlive: true}); }
+        catch { throw new Error(NO_LIVE_SESSION); }
+      }
+      try { await core.callCodexConversation(session.key, 'thread/compact/start', {threadId: session.threadId}, {transportOwner: session.owner, requireOwner: true, timeoutMs: 30_000}); }
+      catch (error) {
+        if (error instanceof Error && /no live app-server owner/i.test(error.message)) throw new Error(NO_LIVE_SESSION);
+        throw error;
+      }
     },
     async stop(id) {
       const owned = adapterRuns.get(id);

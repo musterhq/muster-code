@@ -27,6 +27,9 @@ export interface GitPort {
   state(path: string): Promise<string>;
   /** What this branch changed for review: `git diff --shortstat <merge-base of the first resolvable base and HEAD>..HEAD`, minus gitignored and build output, plus uncommitted changes when there are any. */
   summaryStat(path: string, bases: readonly string[]): Promise<WorkStat>;
+  /** Fetches one branch from the repository's remote (origin, else the first) into its remote-tracking ref and returns that ref (`origin/<branch>`), or null when the remote has no such branch.
+   *  Only the remote-tracking ref changes: the person's checkout, branches and files are left alone (#434). Absent: work never starts from a server branch. */
+  remoteBranch?(path: string, branch: string): Promise<string | null>;
 }
 /** Folders that hold build output or installed packages: never part of "what changed" in a hand-back, even when a repository tracks them. */
 export const BUILD_DIRS = ['node_modules', 'dist', 'build', 'out', '.next', '.nuxt', 'coverage', '__pycache__', '.venv'];
@@ -125,6 +128,16 @@ export const realGit: GitPort = {
       await git(path, ['commit', '-q', '-m', message]);
       return { committed: true, message: 'Committed.' };
     } catch (cause) { return { committed: false, message: `Could not commit: ${cause instanceof Error ? cause.message.split('\n')[0] : String(cause)}` }; }
+  },
+  async remoteBranch(path, branch) {
+    if (!/^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/.test(branch) || branch.includes('..')) return null;
+    const ok = await git(path, ['check-ref-format', '--branch', branch]).then(() => true, () => false);
+    if (!ok) return null;
+    const remotes = (await git(path, ['remote']).catch(() => '')).split('\n').filter(Boolean), remote = remotes.includes('origin') ? 'origin' : remotes[0];
+    if (!remote) return null;
+    try { await git(path, ['fetch', '--quiet', '--no-tags', remote, `+refs/heads/${branch}:refs/remotes/${remote}/${branch}`], 60_000); }
+    catch { return null; }
+    return (await git(path, ['rev-parse', '--verify', '--quiet', `refs/remotes/${remote}/${branch}^{commit}`]).catch(() => '')).trim() ? `${remote}/${branch}` : null;
   },
   async push(path, branch) {
     // The remote the project came from: origin when there is one, else the first listed.

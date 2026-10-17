@@ -104,7 +104,13 @@ export interface CheckoutLease {
   /** The state of the work (HEAD and changes, or the folder's files) when `autoOff` was set. A later turn that changes it switches automatic hand-back back on. */
   armedState?: string | null;
   /** Why Muster has not handed back (shown on the task only; never posted to the server). */
-  heldBack?: { reason: string; at: string } | null;
+  heldBack?: { reason: string; at: string; /** 'no-tests': held only because no test run came after the last change; the task offers "Run tests and hand back" and "Hand back anyway". */ kind?: 'no-tests' } | null;
+  /** An automatic hand-back countdown in progress, saved so a restart picks it up again (#383). */
+  countdown?: { endsAt: string; plan: { recipient: { kind: 'agent' | 'user'; id: string; name: string }; prUrl?: string; summary?: string; inPlace: boolean; commit?: boolean } } | null;
+  /** Other chats whose folder is this check-out's worktree, linked to it so their activity and turns count (a re-check-out or a chat opened by hand in the worktree). */
+  linkedChats?: string[];
+  /** "Run tests and hand back" was pressed: the next finished turn hands back as if the person had said it is done (the test gate still applies). */
+  afterTests?: boolean;
   /** Who the task was handed to (so Undo can refuse once someone else has acted on it). */
   handedTo: { kind: 'agent' | 'user'; id: string; name: string } | null;
   taskId: string; orgId: string; key: string; title: string; projectId: string | null;
@@ -115,6 +121,8 @@ export interface CheckoutLease {
   worktree: string | null; branch: string | null; chatId: string | null; folderId: string | null;
   /** The commit the worktree started from (the dev branch tip), the base of every "files changed" count. */
   baseSha: string | null;
+  /** The server agents' branch this worktree was started from (`origin/<branch>`), when it was on the remote (#434). */
+  continuedFrom?: string | null;
   model: ModelChoice; modelLabel: string;
   /** "Run on server": the person chose to run this task's agent on the server while keeping it. Off by default. */
   runOnServer: boolean;
@@ -137,12 +145,14 @@ export interface CheckoutLease {
   recheck: boolean;
   /** Set when the re-read found the task changed in a conflicting way: nothing is sent until the person chooses (send anyway, edit, or discard). */
   conflict: LeaseConflict | null;
+  /** Set when a hand-back, release or run-on-server found the task changed in Paperclip (cancelled, closed, reassigned): nothing was sent, the lease ended here, the worktree is kept. */
+  endNotice?: string | null;
 }
 export interface LeaseConflict { at: string; changes: string[]; status: WorkspaceStatus; assignee: string | null }
 /** A queued post, as the "N updates waiting" list shows it. */
 export interface PendingPost { id: number; type: 'comment' | 'patch' | 'cost'; kind: string; summary: string; body: string; at: string; editable: boolean }
 /** A lease as the screens see it: stale means silent for longer than the reminder hours. */
-export interface LeaseView extends CheckoutLease { thisMac: boolean; stale: boolean; staleHours: number; /** Whole days since check-out when idle for more than three days. */ staleDays: number | null; /** A plain-folder check-out in a very broad folder (home, Documents, Desktop, Downloads). */ broadFolder: boolean }
+export interface LeaseView extends CheckoutLease { /** Updates for this task the outbox gave up on after a day (Retry sends them again). */ stuck?: number; /** The server refused the sign-in (401): updates are held until the key changes or the person retries. */ authRequired?: boolean; thisMac: boolean; stale: boolean; staleHours: number; /** Whole days since check-out when idle for more than three days. */ staleDays: number | null; /** A plain-folder check-out in a very broad folder (home, Documents, Desktop, Downloads). */ broadFolder: boolean }
 /** Per project: `auto` hands back by itself when the local work is finished; `ask` offers it in a toast instead. */
 export type AutoMode = 'auto' | 'ask';
 export interface CheckoutSettings { staleHours: number; deviceName: string }
@@ -191,7 +201,7 @@ export interface HandBackPreview {
   /** Why hand-back is not possible yet ("Run the tests, or write why they were not run."). */
   blocked: string | null;
 }
-export interface OutboxStatus { pending: number; lastSyncAt: string | null; lastError: string | null }
+export interface OutboxStatus { pending: number; lastSyncAt: string | null; lastError: string | null; /** Updates the outbox gave up on (older than a day and never accepted): "N updates couldn't be sent · Retry". */ stuck?: number; /** The server refused the sign-in (401). */ authRequired?: boolean }
 
 export interface CheckoutCommands {
   'orgs.list': { input: { refresh?: boolean }; output: OrgsList };
@@ -228,6 +238,8 @@ export interface CheckoutCommands {
   'checkout.runOnServer': { input: { taskId: string; on: boolean }; output: LeaseView };
   /** Sends the queued posts (also runs on its own after a reconnect). */
   'checkout.sync': { input: Record<string, never>; output: OutboxStatus };
+  /** Sends the updates the outbox gave up on again (one task's, or all). */
+  'checkout.retry': { input: { taskId?: string }; output: OutboxStatus };
   'checkout.outbox': { input: Record<string, never>; output: OutboxStatus };
   /** "Work offline" on a checked-out task: nothing is sent until it is switched off (or the server is back, after an automatic offline). */
   'checkout.offline': { input: { taskId: string; on: boolean }; output: LeaseView };
@@ -245,6 +257,10 @@ export interface CheckoutCommands {
   'checkout.undo': { input: { taskId: string }; output: LeaseView };
   /** The 60-second countdown before an automatic hand-back: hand back now, or keep working (cancels it until the work changes again). */
   'checkout.countdown': { input: { taskId: string; action: 'now' | 'keep' }; output: { ok: true } };
+  /** Held for want of a test run: hand back now without one ("Hand back anyway"). The reason is written on the hand-back. */
+  'checkout.handback.anyway': { input: { taskId: string }; output: LeaseView };
+  /** Held for want of a test run: ask the agent to run the tests, then hand back when they pass ("Run tests and hand back"). */
+  'checkout.handback.runtests': { input: { taskId: string }; output: LeaseView };
   /** Countdowns running now (so a reloaded window shows them again). */
   'checkout.countdowns': { input: Record<string, never>; output: { countdowns: { taskId: string; key: string; to: string; endsAt: string }[] } };
 }
@@ -254,5 +270,5 @@ export type CheckoutEvent = { type: 'checkoutChanged'; taskId: string | null } |
 export const CHECKOUT_COMMANDS = {
   'orgs.list': true, 'orgs.set': true, 'orgs.work': true, 'orgs.open': true, 'orgs.link': true, 'checkout.settings': true, 'checkout.bindings': true, 'checkout.bind': true, 'checkout.unbind': true, 'checkout.plan': true,
   'checkout.start': true, 'checkout.get': true, 'checkout.leases': true, 'checkout.decision': true, 'checkout.handback.preview': true, 'checkout.handback': true, 'checkout.release': true, 'checkout.runOnServer': true,
-  'checkout.sync': true, 'checkout.outbox': true, 'checkout.remind': true, 'checkout.auto': true, 'checkout.undo': true, 'checkout.countdown': true, 'checkout.countdowns': true, 'checkout.org': true, 'checkout.engine': true, 'checkout.review': true, 'checkout.offline': true, 'checkout.pending': true, 'checkout.pending.edit': true, 'checkout.resolve': true,
+  'checkout.sync': true, 'checkout.retry': true, 'checkout.outbox': true, 'checkout.remind': true, 'checkout.auto': true, 'checkout.undo': true, 'checkout.countdown': true, 'checkout.handback.anyway': true, 'checkout.handback.runtests': true, 'checkout.countdowns': true, 'checkout.org': true, 'checkout.engine': true, 'checkout.review': true, 'checkout.offline': true, 'checkout.pending': true, 'checkout.pending.edit': true, 'checkout.resolve': true,
 } as const satisfies Record<keyof CheckoutCommands, true>;

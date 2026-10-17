@@ -14,8 +14,11 @@ import type {
 import { agentBrief, mapAgentToLocal, type LocalProvider } from './tiers.ts';
 import { changeCount, describeChanges, diffSnapshots, ensureMusterFolder, folderName, isBroadFolder, musterFolderPath, snapshotFolder, validateFolder, type FileSnapshot } from './folder.ts';
 import { createHash } from 'node:crypto';
+import { existsSync } from 'node:fs';
+import { asksOpenQuestion } from '../project-tasks.ts';
 import { homedir } from 'node:os';
 import { costEventFor, payerOf, type ProviderPayInfo } from './costs.ts';
+import { credentialId, GIVE_UP_MS, whyNotSend, type Expect } from './outbox-policy.ts';
 import { canCheckout, checkoutComment, checkoutText, deriveLease, LeaseError, markerFor, newLease, transition, toView } from './lease.ts';
 /** How long an automatic hand-back can be taken back. */
 export const UNDO_MS = 2 * 60_000;
@@ -23,10 +26,12 @@ export const UNDO_MS = 2 * 60_000;
 export const CONTEXT_EVERY_MS = 30 * 60_000;
 /** The countdown before an automatic hand-back goes through. */
 export const COUNTDOWN_MS = 60_000;
+/** A countdown that ran out while the app was closed still waits this long after the app comes back, so it can be cancelled. */
+export const RESUME_GRACE_MS = 10_000;
 /** A check-out silent this long gets one note on the server (once per check-out). */
 export const IDLE_NOTE_MS = 24 * 60 * 60_000;
 /** What an automatic hand-back will do when the countdown ends. */
-interface AutoPlan { recipient: { kind: 'agent' | 'user'; id: string; name: string }; prUrl?: string; summary?: string; inPlace: boolean }
+interface AutoPlan { recipient: { kind: 'agent' | 'user'; id: string; name: string }; prUrl?: string; summary?: string; inPlace: boolean; /** Uncommitted work to commit once the countdown ends (never before). */ commit?: boolean }
 /** A short stable fingerprint of a folder's files (paths and content hashes), to tell whether the work changed. */
 const fingerprintOf = (snapshot: FileSnapshot): string => { const h = createHash('sha1'); for (const [path, e] of Object.entries(snapshot)) h.update(`${path}\0${e.sha1 ?? `${e.size}:${e.mtimeMs}`}\n`); return h.digest('hex'); };
 import {
@@ -40,7 +45,17 @@ import type { PersonalAccess, ServerBackend, ServerPart } from '../server/backen
 import { PaperclipError } from '../paperclip-client.ts';
 import { TEST_COMMAND } from '../turn-ledger.ts';
 import { ENVELOPE_RULES, neutralizeServerText, sanitizeOut, untrusted } from './sanitize.ts';
+import { join as joinPath } from 'node:path';
+import { collectServerHistory, compactBrief, taskDir, taskFolderProblem, UNSAFE_FOLDER_NOTE, writeTaskFolder, type TaskHistory } from './task-history.ts';
+import type { WorkspaceTaskDetail } from '../../shared/domains/paperclip-protocol.ts';
 import { device } from '../../shared/device-noun.ts';
+
+/** The org copy as kept on this Mac: the task's history rides with it (#434), so a turn without the server still has the last one. */
+type StoredCopy = LocalOrgCopy & { history?: TaskHistory };
+/** A copy older than this is refreshed before a turn (new comments and runs since). */
+export const REFRESH_MS = 60_000;
+/** How long a turn waits for that refresh before it goes on with the last copy (prompt contributors get two seconds in all). */
+export const REFRESH_WAIT_MS = 1_200;
 
 export type LocalProviderInfo = LocalProvider & ProviderPayInfo;
 export interface ChatPort {
@@ -48,6 +63,12 @@ export interface ChatPort {
   create(folderId: string): Promise<{ id: string }>;
   select(chatId: string, providerId: string, model: string): Promise<void>;
   rename(chatId: string, title: string): Promise<void>;
+  /** Sends a message in a chat (the agent's next turn). Absent: "Run tests and hand back" is unavailable. */
+  send?(chatId: string, text: string): Promise<void>;
+  /** Chats whose folder is this path, with when each was last active (ms). Absent: only the chat check-out made counts. */
+  inFolder?(path: string): Promise<{ id: string; activeAt: number }[]>;
+  /** The folder path a chat lives in, or null. */
+  folderOf?(chatId: string): string | null;
   /** The chat's timeline items, oldest first: messages (who wrote them) and tool runs with their output. Facts (a test ran, a file changed) are read from tool runs only. */
   timeline(chatId: string): Promise<TimelineEntry[]>;
 }
@@ -86,6 +107,8 @@ export interface CheckoutDeps {
   home?: () => string;
   /** Whether a folder has a recognised way to run tests. Absent: assume it does (the test gate applies). */
   testSetup?: (dir: string) => Promise<boolean>;
+  /** Whether a path exists on disk (a re-check-out reuses the old worktree only when it is still there). Absent: the file system. */
+  exists?: (path: string) => boolean;
   /** Waits before a flush (so a burst of turns makes one document write). Tests pass an immediate one. */
   later?(fn: () => void, ms: number): void;
 }
@@ -97,7 +120,9 @@ const personal = (backend: ServerBackend | null): ServerBackend & PersonalAccess
   if (!backend.whoami || !backend.patchTask || !backend.rawComments || !backend.putDocument || !backend.postCostEvent || !backend.agentInstructions || !backend.issuePolicy) throw new Error('Work locally needs a server that can assign tasks to people. This one cannot be worked on locally yet.');
   return backend as ServerBackend & PersonalAccess;
 };
-const isNetwork = (cause: unknown): boolean => !(cause instanceof PaperclipError) || cause.status === 0 || cause.status >= 500 || cause.status === 401 || cause.status === 408 || cause.status === 429 || cause.stage === 'network';
+/** A 401 is the sign-in being refused (an expired or revoked key), not a lost connection: it waits for a new key instead of going offline. */
+const isAuth = (cause: unknown): boolean => cause instanceof PaperclipError && cause.status === 401;
+const isNetwork = (cause: unknown): boolean => !(cause instanceof PaperclipError) || cause.status === 0 || cause.status >= 500 || cause.status === 408 || cause.status === 429 || cause.stage === 'network';
 
 /** The two ways a hand-back can reach the next person or agent; today only reassign. Swappable (reviewers/approvers) without touching the flow. */
 export interface HandBackStrategy {
@@ -130,7 +155,7 @@ export class CheckoutService {
   }
   get deviceId(): string { return this.d.store.deviceId(); }
   get device(): string { return this.d.store.deviceName(this.d.deviceNameDefault()); }
-  private view(lease: CheckoutLease): LeaseView { return toView({ ...lease, pending: this.d.store.pendingCount(lease.taskId) }, this.deviceId, this.d.now(), this.d.store.staleHours(), lease.kind === 'folder' && isBroadFolder(lease.worktree, this.home())); }
+  private view(lease: CheckoutLease): LeaseView { return toView({ ...lease, pending: this.d.store.pendingCount(lease.taskId), stuck: this.d.store.stuckCount(lease.taskId), authRequired: this.authBlocked() } as CheckoutLease, this.deviceId, this.d.now(), this.d.store.staleHours(), lease.kind === 'folder' && isBroadFolder(lease.worktree, this.home())); }
 
   // --- finding the task -------------------------------------------------------------------------------------------------------------
   /**
@@ -249,33 +274,54 @@ export class CheckoutService {
 
     const model = this.resolveModel(input.model, part);
     const inPlace = binding.kind === 'folder';
+    // The task's whole history, read before anything is made: it names the branch the server's agents worked on, and it is what the first turn starts from (#434).
+    const gathered = await this.gather(company, part, task, backend).catch(() => null);
+    // Checking the same task out again picks up where it was: the worktree and the chat it already has, never a "-2" copy (#383).
+    const prior = existing && existing.worktree && existing.kind === (inPlace ? 'folder' : 'git') && (inPlace ? existing.worktree === binding.path : existing.branch && (this.d.exists ?? existsSync)(existing.worktree) && await this.d.git.headSha(existing.worktree).then(() => true, () => false)) ? existing : null;
     // Local steps first (they fail more often and can be undone), then the server's. A plain folder is used as it is: no worktree, no branch, no git at all.
-    let tree: { path: string; branch: string | null }, baseSha: string | null = null;
+    let tree: { path: string; branch: string | null }, baseSha: string | null = null, continuedFrom: string | null = null;
     if (inPlace) { await validateFolder(binding.path, this.home()); tree = { path: binding.path, branch: null }; }
-    else { tree = await this.d.worktrees.create(binding.path, `muster/${task.key}`, binding.devBranch); baseSha = await this.d.git.headSha(binding.path, binding.devBranch).catch(() => null); }
+    else if (prior) { tree = { path: prior.worktree!, branch: prior.branch }; baseSha = prior.baseSha; continuedFrom = prior.continuedFrom ?? null; }
+    else {
+      // The server's agents worked on a branch that is on the remote: the worktree starts from it (fetched into its remote-tracking ref only), so their commits are here.
+      const serverBranch = gathered?.git.branch ?? null;
+      continuedFrom = serverBranch && this.d.git.remoteBranch ? await this.d.git.remoteBranch(binding.path, serverBranch).catch(() => null) : null;
+      const base = continuedFrom ?? binding.devBranch;
+      tree = await this.d.worktrees.create(binding.path, `muster/${task.key}`, base); baseSha = await this.d.git.headSha(binding.path, base).catch(() => null);
+    }
     const snapshot = inPlace ? await snapshotFolder(tree.path) : null;
     const folder = await this.d.chats.addFolder(tree.path);
-    const chat = await this.d.chats.create(folder.id);
+    // The chat that already works in this folder: the lease's own if it is still there, else the most recently active one.
+    const known = prior ? (await this.d.chats.inFolder?.(tree.path).catch(() => [])) ?? [] : [];
+    const kept = prior ? known.find(c => c.id === prior.chatId) ?? [...known].sort((a, b) => b.activeAt - a.activeAt)[0] : undefined;
+    const chat = kept ?? await this.d.chats.create(folder.id);
     await this.d.chats.select(chat.id, model.providerId, model.model);
-    await this.d.chats.rename(chat.id, `${task.key} · ${task.title}`.slice(0, 120)).catch(() => undefined);
+    if (!kept) await this.d.chats.rename(chat.id, `${task.key} · ${task.title}`.slice(0, 120)).catch(() => undefined);
 
     const at = iso(this.d.now());
     const previous = { status: task.status, assigneeUserId: task.assigneeUserId ?? null, assigneeAgentId: task.assigneeId && !task.assigneeId.startsWith('user:') ? task.assigneeId : null };
     const armedFrom = inPlace ? null : await this.d.git.headSha(tree.path).catch(() => baseSha);
-    const lease: CheckoutLease = { ...newLease({ origin: this.origin(), userId: me.id, taskId: task.id, orgId: company.id, key: task.key, title: task.title, projectId: task.projectId, deviceId: this.deviceId, device: this.device, model: input.model, modelLabel: model.label, at, previous }), kind: binding.kind ?? 'git', worktree: tree.path, branch: tree.branch, chatId: chat.id, folderId: folder.id, baseSha, armedFrom };
+    const lease: CheckoutLease = { ...newLease({ origin: this.origin(), userId: me.id, taskId: task.id, orgId: company.id, key: task.key, title: task.title, projectId: task.projectId, deviceId: this.deviceId, device: this.device, model: input.model, modelLabel: model.label, at, previous }), kind: binding.kind ?? 'git', worktree: tree.path, branch: tree.branch, chatId: chat.id, folderId: folder.id, baseSha, armedFrom, ...(continuedFrom ? { continuedFrom } : {}), ...(known.length > 1 ? { linkedChats: known.filter(c => c.id !== chat.id).map(c => c.id) } : {}) };
     this.d.store.putLease(lease);
     if (snapshot) this.d.store.putSnapshot(task.id, snapshot);
-    // The org as it stands now, copied read-only so the whole workflow runs here (definitions only: no keys, no adapter environment).
-    await this.copyOrg(task.id).catch(() => undefined);
+    // The org as it stands now, copied read-only so the whole workflow runs here (definitions only: no keys, no adapter environment), and the task's
+    // history written to the worktree or folder before the first turn. A copy that cannot be taken now is taken again by the first turn's brief.
+    await this.copyOrg(task.id, gathered ?? undefined).catch(() => undefined);
     this.enqueuePatch(task.id, company.id, `checkout:${at}`, { status: 'in_progress', assigneeUserId: me.id, assigneeAgentId: null }, at);
     this.enq({ taskId: task.id, orgId: company.id, type: 'comment', key: `checkout:${at}`, kind: 'checkout', body: checkoutComment(this.device, this.deviceId, me.name ?? me.id, at), at });
     await this.flush(task.id);
     this.d.emit(task.id);
     return this.view(this.d.store.lease(task.id)!);
   }
-  private enqueuePatch(taskId: string, orgId: string, key: string, patch: Record<string, unknown>, at: string, cond?: Record<string, unknown>): void {
-    this.enq({ taskId, orgId, type: 'patch', key: `patch:${key}`, kind: 'patch', body: JSON.stringify(cond ? { patch, if: cond } : patch), at });
+  private enqueuePatch(taskId: string, orgId: string, key: string, patch: Record<string, unknown>, at: string, cond?: Record<string, unknown>, expect?: Expect): void {
+    this.enq({ taskId, orgId, type: 'patch', key: `patch:${key}`, kind: 'patch', body: JSON.stringify(cond || expect ? { patch, ...(cond ? { if: cond } : {}), ...(expect ? { expect } : {}) } : patch), at });
   }
+  /** What a lease-ending change expects to find: the task still in progress and still the person's (on the server's agent: not closed). Checked again when it is sent. */
+  private expectHeld(lease: CheckoutLease, meId: string): Expect { return lease.runOnServer ? { statusNot: ['done', 'cancelled'] } : { status: 'in_progress', assigneeUserId: meId }; }
+  /** A server that answered 401 to this key: nothing is retried until the key changes, or the person presses Sync or Retry. */
+  private authStop: string | null = null;
+  private credential(): string { return credentialId(this.d.backend()?.endpoint?.token); }
+  authBlocked(): boolean { return this.authStop !== null && this.authStop === this.credential(); }
   private resolveModel(choice: ModelChoice, part: ServerPart): { providerId: string; model: string; label: string } {
     const providers = this.d.providers().filter(p => p.available);
     if (choice.kind === 'own') {
@@ -293,8 +339,16 @@ export class CheckoutService {
 
   // --- what the local chat is told about the task -----------------------------------------------------------------------------------------
   // --- the local copy of the org -----------------------------------------------------------------------------------------------------------
-  /** Takes (or refreshes) the read-only copy: agents with their instructions, skills, adapter and model; the task's context; the execution policy. */
-  async copyOrg(ref: string): Promise<LocalOrgCopy> {
+  /** The task's whole history from the server (#434): thread, documents, earlier runs and their outputs, the branch. */
+  private async gather(company: WorkspaceCompany, part: ServerPart, task: WorkspaceTask, backend: ServerBackend & PersonalAccess, detail?: WorkspaceTaskDetail): Promise<TaskHistory> {
+    const project = task.projectId ? part.projects.find(p => p.id === task.projectId) : undefined;
+    return collectServerHistory(backend, {
+      issueId: task.id, part, agents: this.agentsOf(part), ...(detail ? { detail } : {}), server: this.d.serverLabel(), org: company.name, project: project?.name ?? null, repo: project?.repo ?? null,
+      decisions: this.d.store.history(task.id, 'decision').map(r => r.body.replace(/^\*\*Decision\*\*\s*/, '').trim()), now: () => this.d.now(),
+    });
+  }
+  /** Takes (or refreshes) the read-only copy: agents with their instructions, skills, adapter and model; the task's context and history; the execution policy. */
+  async copyOrg(ref: string, gathered?: TaskHistory): Promise<LocalOrgCopy> {
     const { company, part, task, backend } = await this.locate(ref, { cacheOnly: false });
     const agents = this.agentsOf(part);
     const list = part.agents.filter(a => a.status !== 'terminated').slice(0, 60);
@@ -305,6 +359,7 @@ export class CheckoutService {
     const needed = list.filter(a => roles.has(a.id));
     for (let n = 0; n < needed.length; n += 6) await Promise.all(needed.slice(n, n + 6).map(async a => { instructions.set(a.id, await backend.agentInstructions(a.id).catch(() => '')); }));
     const detail = await backend.taskDetail(task.id, { agents, part, memory: async () => [] });
+    const history = gathered ?? await this.gather(company, part, task, backend, detail);
     const people = new Map((part.people ?? []).map(p => [p.id, p.name]));
     const policy: PolicyStage[] = (await backend.issuePolicy(task.id).catch(() => [])).map(st => ({ type: st.type, participants: st.participants.map(p => ({ ...p, name: p.kind === 'agent' ? agents.get(p.id)?.name ?? 'Agent' : people.get(p.id) ?? 'A person' })) }));
     const byId = new Map(part.tasks.map(t => [t.id, t]));
@@ -323,11 +378,51 @@ export class CheckoutService {
         decisions: this.d.store.history(task.id, 'decision').map(r => r.body.replace(/^\*\*Decision\*\*\s*/, '').trim()),
       },
       policy,
-    };
+      history,
+    } as StoredCopy;
     this.d.store.putOrgCopy(task.id, copy);
+    const held = this.d.store.lease(task.id);
+    if (held?.worktree) this.writeHistory(held, copy);
     return copy;
   }
   orgCopy(ref: string): LocalOrgCopy | null { const l = this.ownLeases().find(x => x.taskId === ref || x.key === ref); return this.d.store.orgCopy(l?.taskId ?? ref); }
+
+  // --- the task's history on disk (#434) -----------------------------------------------------------------------------------------------------
+  /** Writes the copy's history to `.muster/task/` in the worktree or folder. Never throws: the brief still carries the summary. */
+  private writeHistory(lease: CheckoutLease, copy: LocalOrgCopy): string | null {
+    const history = (copy as StoredCopy).history;
+    if (!history || !lease.worktree) return null;
+    try {
+      const maker = lease.model.kind === 'org-agent' ? copy.agents.find(a => a.id === (lease.model as { agentId: string }).agentId) : undefined;
+      return writeTaskFolder(lease.worktree, { ...history, git: { ...history.git, continuedFrom: lease.continuedFrom ?? null } }, { role: maker?.instructions ?? null });
+    } catch { return null; }
+  }
+  private readonly refreshing = new Map<string, Promise<LocalOrgCopy>>();
+  /**
+   * The copy a turn starts from: refreshed when it is older than a minute (new comments and runs since), within a short wait so the turn is never held up;
+   * a refresh that is slower goes on in the background. When the server cannot be reached the last copy is used and the brief says so in one line.
+   */
+  private async freshCopy(lease: CheckoutLease): Promise<{ copy: LocalOrgCopy | null; note: string | null }> {
+    const have = this.d.store.orgCopy(lease.taskId);
+    const ready = (copy: LocalOrgCopy | null, note: string | null) => {
+      if (copy && lease.worktree && !existsSync(joinPath(taskDir(lease.worktree), 'TASK.md'))) this.writeHistory(lease, copy);
+      return { copy, note };
+    };
+    if (have && (have as StoredCopy).history && this.d.now() - Date.parse(have.takenAt) < REFRESH_MS) return ready(have, null);
+    if (lease.offline) return ready(have, have ? `This task is offline, so this is the copy of the server taken at ${have.takenAt}.` : 'This task is offline and no copy of the server was taken yet, so only its title is known.');
+    let run = this.refreshing.get(lease.taskId);
+    if (!run) {
+      run = this.copyOrg(lease.taskId).finally(() => this.refreshing.delete(lease.taskId));
+      run.catch(() => undefined);
+      this.refreshing.set(lease.taskId, run);
+    }
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const outcome = await Promise.race([run.then(copy => ({ copy }), () => ({ failed: true as const })), new Promise<{ slow: true }>(resolve => { timer = setTimeout(() => resolve({ slow: true }), REFRESH_WAIT_MS); timer.unref?.(); })]).finally(() => clearTimeout(timer));
+    if ('copy' in outcome) return ready(outcome.copy, null);
+    const last = this.d.store.orgCopy(lease.taskId);
+    if (!last) return ready(null, 'Muster Server could not be reached and no copy of this task was taken yet, so only its title is known. Ask the person for the task’s context before you start.');
+    return ready(last, 'failed' in outcome ? `Muster Server could not be reached just now, so this is the copy taken at ${last.takenAt}.` : `Muster Server is slow to answer, so this is the copy taken at ${last.takenAt}; it is being refreshed.`);
+  }
 
   /**
    * What the local session is told: the task and its context from the local copy, the org's workflow, and (for "Org agents") the maker's instructions. All of
@@ -335,34 +430,41 @@ export class CheckoutService {
    * A local review session gets the reviewer's role instead. Nothing here tells the agent how to trigger a hand-back; that comes from facts Muster checks.
    */
   async brief(chatId: string): Promise<string | null> {
-    const lease = this.d.store.leaseForChat(chatId, this.origin());
+    const lease = this.leaseForChat(chatId);
     if (!lease) return null;
-    const copy = this.d.store.orgCopy(lease.taskId), me = this.d.reader.remembered();
-    if (!copy) return `You are working locally on server task ${lease.key}. Work from this chat; Muster reports your milestones and syncs when it can.\n\n${untrusted('task title', lease.title, 300)}\n\n${ENVELOPE_RULES}`;
+    const { copy, note } = await this.freshCopy(lease);
+    if (!copy) return `You are working locally on server task ${lease.key}. Work from this chat; Muster reports your milestones and syncs when it can.\n\n${untrusted('task title', lease.title, 300)}${note ? `\n\n${note}` : ''}\n\n${ENVELOPE_RULES}`;
     const t = copy.task, review = lease.reviewChats.find(r => r.chatId === chatId);
     const agentName = (id: string | null) => copy.agents.find(a => a.id === id)?.name;
     const inPlace = lease.kind === 'folder';
     const lines: string[] = [inPlace ? 'You are working locally on a server task. Everything runs on '+device().lower+', in this folder, which is used as it is: there is no branch and nothing to commit or push; nothing runs on the server until hand-back.' : 'You are working locally on a server task. Everything runs on '+device().lower+', in this worktree; nothing runs on the server until hand-back.', ENVELOPE_RULES];
     // Every name below (org, project, task key, agents, reviewers, skills) is chosen by someone on the server, so it all lives inside the envelope too.
     const nm = (v: string | null | undefined) => neutralizeServerText(String(v ?? '')).replace(/\s+/g, ' ').trim().slice(0, 80);
-    lines.push(untrusted('task', `${nm(t.key)}: ${t.title}\nOrg: ${nm(copy.orgName)}${copy.project ? `; project: ${nm(copy.project.name)}` : ''}\n\n${t.description}`));
-    if (t.parent) lines.push(untrusted('parent task', `${t.parent.key} · ${t.parent.title}`, 400));
-    if (t.blockedBy.length) lines.push(untrusted('blocked by', t.blockedBy.map(b => `${b.key} (${b.status.replace('_', ' ')})`).join(', '), 1000));
-    if (t.subtasks.length) lines.push(untrusted('subtasks', t.subtasks.map(b => `${b.key} ${b.title} (${b.status.replace('_', ' ')})`).join('\n'), 2000));
-    if (t.documents.length) lines.push(untrusted('documents on the task', t.documents.map(d => d.title || d.key).join(', '), 1000));
-    if (t.thread.length) lines.push(untrusted('recent thread, newest last', t.thread.slice(-12).map(c => `- ${c.author}${me && c.body.includes(`user://${me.id}`) ? ' (asked the person you work for)' : ''}: ${c.body.replace(/\s+/g, ' ').slice(0, 500)}`).join('\n'), 6000));
+    const history = (copy as StoredCopy).history;
+    // A worktree or folder whose .muster/task path is a link (or not a folder) gets no files: the summary alone, and a line that says so.
+    const unsafe = lease.worktree ? taskFolderProblem(lease.worktree) !== null : false;
+    // The compact brief (#434): what the task is, what earlier agents did, what is open, the branch, and where the whole history is on disk.
+    if (history) lines.push(compactBrief({ ...history, git: { ...history.git, continuedFrom: lease.continuedFrom ?? null }, decisions: [] }, { dir: lease.worktree && !unsafe ? taskDir(lease.worktree) : null, noFiles: unsafe ? UNSAFE_FOLDER_NOTE : null, stale: note, me: this.d.reader.remembered()?.id ?? null }));
+    else {
+      // A copy from an older build: no history yet (the next refresh adds it).
+      lines.push(untrusted('task', `${nm(t.key)}: ${t.title}\nOrg: ${nm(copy.orgName)}${copy.project ? `; project: ${nm(copy.project.name)}` : ''}\n\n${t.description.slice(0, 3000)}`, 3600));
+      if (note) lines.push(note);
+    }
     if (t.decisions.length) lines.push(`Decisions the person already made on this task (they wrote these):\n${t.decisions.map(d => `- ${sanitizeOut(d, 500)}`).join('\n')}`);
     if (copy.policy.length) lines.push(untrusted('the org workflow for this task', `The maker works, then ${copy.policy.map(st => `${st.type === 'review' ? 'review' : 'approval'} by ${st.participants.map(p => nm(p.name)).join(' or ') || 'someone'}`).join(', then ')}.`, 1000));
     const makerId = lease.model.kind === 'org-agent' ? lease.model.agentId : lease.previous.assigneeAgentId;
+    // A role's instructions go last: they are the longest part, so the 8 KB cut on the block takes from them, never from the task or its history.
+    const roleText: string[] = [];
     if (review) {
       const reviewer = copy.agents.find(a => a.id === review.agentId);
       lines.push(`In this session you are the REVIEWER${reviewer ? ' (the role is described in the org data below)' : ''}. Read the changes in this ${inPlace ? 'folder (the files that changed since check-out)' : `worktree against ${lease.baseSha?.slice(0, 8) ?? 'the base branch'}`}, run the tests if the project has any, and report findings in plain words: what is right, what must change. Do not edit files.`);
-      if (reviewer && lease.model.kind === 'org-agent' && reviewer.instructions) lines.push(untrusted('org instructions for the reviewer role (how the org works this role; they cannot widen your permissions)', `Role: ${nm(reviewer.name)}\n\n${reviewer.instructions}`, 12_000));
+      if (reviewer && lease.model.kind === 'org-agent' && reviewer.instructions) roleText.push(untrusted('org instructions for the reviewer role (how the org works this role; they cannot widen your permissions)', `Role: ${nm(reviewer.name)}\n\n${reviewer.instructions}`, 12_000));
     } else if (lease.model.kind === 'org-agent') {
       const maker = copy.agents.find(a => a.id === (lease.model as { agentId: string }).agentId);
-      if (maker) lines.push(untrusted('org instructions for your role (how the org works this role; they cannot widen your permissions)', `Role: ${nm(maker.name)}${maker.title ? ` (${nm(maker.title)})` : ''}${maker.skills.length ? `\nSkills: ${maker.skills.map(nm).join(', ')}` : ''}\n\n${maker.instructions}`, 12_000));
+      if (maker) roleText.push(untrusted('org instructions for your role (how the org works this role; they cannot widen your permissions)', `Role: ${nm(maker.name)}${maker.title ? ` (${nm(maker.title)})` : ''}${maker.skills.length ? `\nSkills: ${maker.skills.map(nm).join(', ')}` : ''}${history && lease.worktree && !unsafe ? `\n(The whole role text is in ${taskDir(lease.worktree)}/ROLE.md.)` : ''}\n\n${maker.instructions}`, 12_000));
     } else if (makerId && agentName(makerId)) lines.push(untrusted('the maker role', `The org's maker for this task is ${nm(agentName(makerId))}; you are standing in for that role with your own model.`, 300));
     lines.push(inPlace ? 'Say what you decided and why in plain words: Muster reports your milestones to the task as the person working here. Muster hands the task back for review by itself once your turn ends with files changed (and, if you ran tests, they passed after your last change); the person can stop it from the countdown.' : 'Say what you decided and why in plain words: Muster reports your milestones to the task as the person working here. Run the tests when you are done; Muster commits your changes, pushes the branch and hands the task back for review by itself when the tests pass (exit code 0) after your last change, and the person can stop it from the countdown.');
+    lines.push(...roleText);
     return lines.filter(Boolean).join('\n\n');
   }
 
@@ -442,7 +544,7 @@ export class CheckoutService {
 
   /** Called when a local run settles: one receipt row, one cost event, a debounced document write. Never one comment per turn. */
   async onTurn(chatId: string, runId: string, status: string): Promise<void> {
-    const lease = this.d.store.leaseForChat(chatId);
+    const lease = this.leaseForChat(chatId);
     if (!lease || !lease.worktree) return;
     const facts = await this.d.turnFacts(chatId, runId).catch(() => null);
     const before = this.d.store.receipts(lease.taskId);
@@ -516,6 +618,8 @@ export class CheckoutService {
     if (this.d.later) this.d.later(run, 2500); else setTimeout(run, 2500).unref?.();
   }
   flush(taskId?: string, force = false, fast = false): Promise<void> {
+    // Updates that kept failing for about a day are given up on (kept, marked, with a Retry); the rest of the queue goes on.
+    if (this.d.store.giveUp(iso(this.d.now() - GIVE_UP_MS))) this.d.emit(null);
     const ids = taskId ? [taskId] : [...new Set(this.d.store.pending().filter(r => r.origin === this.origin()).map(r => r.taskId)), ...this.ownLeases().filter(l => this.d.store.docDirty(l.taskId)).map(l => l.taskId)];
     // Calls for one task run one after the other: a caller that arrives mid-flush gets a fresh run after it, not the finished one's result.
     return Promise.all([...new Set(ids)].map(id => { const run = (this.flushing.get(id) ?? Promise.resolve()).then(() => this.flushLoop(id, force, fast)); this.flushing.set(id, run); return run.finally(() => { if (this.flushing.get(id) === run) this.flushing.delete(id); }); })).then(() => undefined);
@@ -537,6 +641,8 @@ export class CheckoutService {
     if (lease && lease.origin !== this.origin()) return;
     // Offline by choice: nothing leaves this Mac. Everything stays queued (with its own client id) until the switch is off.
     if (lease?.offline === 'manual') return;
+    // The server refused this key (401): no request goes until the key changes.
+    if (this.authBlocked() && !force) return;
     // A conflict found by the last re-read waits for the person's choice.
     if (lease?.conflict && !force) return;
     let backend: (ServerBackend & PersonalAccess) | null = null;
@@ -552,13 +658,19 @@ export class CheckoutService {
         const conflict = await this.detectConflict(lease);
         if (conflict) { store.putLease(transition(lease, { type: 'conflict', at: done(), conflict })); store.setSyncState(done(), 'The task changed on the server while you were offline.'); this.d.emit(taskId); return; }
       }
-      await this.sendRows(backend, taskId, me?.id ?? lease?.userId ?? '', fast);
+      await this.sendRows(backend, taskId, me?.id ?? lease?.userId ?? '', fast, force);
       if (fast) { if (this.d.store.pendingCount(taskId) || store.docDirty(taskId)) this.scheduleFlush(taskId); }
       else if (store.docDirty(taskId) && store.lease(taskId)?.conflict === null) await this.writeWorkLog(backend, taskId);
       lease = store.lease(taskId);
       if (lease && !lease.conflict && (lease.offline === 'auto' || lease.recheck)) store.putLease({ ...transition(lease, { type: 'online', at: done() }), recheck: false });
       store.setSyncState(done(), null);
     } catch (cause) {
+      if (isAuth(cause)) {
+        // A refused sign-in is not a lost connection: the lease stays online, nothing is retried, and the task says to sign in again.
+        this.authStop = this.credential();
+        store.setSyncState(done(), 'Sign in to Muster Server again. Updates are held until you do.');
+        return;
+      }
       store.setSyncState(done(), message(cause));
       // The server cannot be reached: work on offline. The queue keeps every post; the next flush (or Sync) tries again.
       const now = store.lease(taskId);
@@ -574,9 +686,9 @@ export class CheckoutService {
   /**
    * Rows go in order. A hand-back's reassignment goes BEFORE its summary comment, and a refused change (the person lost the right, the task moved) stops the pair:
    * the comment is dropped, the lease is put back to checked out with a visible conflict, so the Mac and the server never disagree silently (M4). Consecutive
-   * comments are batched (newest context/tests only, no repeats, nothing the server already shows). A cost event whose delivery is unknown is not sent twice (M5).
+   * comments are batched (newest context/tests only, no repeats, nothing the server already shows). A cost event carries an idempotency key, so one whose delivery is unknown is sent again and counted once (M5).
    */
-  private async sendRows(backend: ServerBackend & PersonalAccess, taskId: string, userId: string, fast = false): Promise<void> {
+  private async sendRows(backend: ServerBackend & PersonalAccess, taskId: string, userId: string, fast = false, force = false): Promise<void> {
     const store = this.d.store;
     // Fast (a hand-back that was just made): its reassignment, with the summary inside, goes before anything else that is waiting.
     const rows = fast ? [...this.pendingFor(taskId)].sort((a, b) => Number(b.type === 'patch' && b.key.startsWith('patch:handback:')) - Number(a.type === 'patch' && a.key.startsWith('patch:handback:'))) : this.pendingFor(taskId);
@@ -589,9 +701,17 @@ export class CheckoutService {
       const row = rows[i]!;
       if (folded.has(row.id)) { i++; continue; }
       if (row.type === 'patch') {
-        const parsed = JSON.parse(row.body) as { patch?: Parameters<PersonalAccess['patchTask']>[1]; if?: { status?: string; assigneeAgentId?: string | null; assigneeUserId?: string | null } } & Parameters<PersonalAccess['patchTask']>[1];
+        const parsed = JSON.parse(row.body) as { patch?: Parameters<PersonalAccess['patchTask']>[1]; if?: { status?: string; assigneeAgentId?: string | null; assigneeUserId?: string | null }; expect?: Expect } & Parameters<PersonalAccess['patchTask']>[1];
         const patch = parsed.patch ?? parsed;
         try {
+          // A lease-ending change (hand-back, release, run on the server) is sent only if the task still looks the way check-out left it. A cancelled,
+          // closed or reassigned task is left alone: the lease ends here, the worktree stays, and the person is told. "Send anyway" skips this.
+          if (parsed.expect && !force) {
+            const lease = store.lease(taskId), company = (await this.d.reader.orgs()).find(c => c.id === lease?.orgId);
+            const now = company ? await this.d.reader.task(company, taskId) : null;
+            const why = whyNotSend(now, lease?.key ?? taskId, parsed.expect);
+            if (why) { this.endHere(taskId, rows, why); return; }
+          }
           // A precondition (Undo): only if the task still looks the way hand-back left it.
           if (parsed.if) { const lease = store.lease(taskId), company = (await this.d.reader.orgs()).find(c => c.id === lease?.orgId), t = company ? (await this.d.reader.task(company, taskId)) ?? undefined : undefined;
             const ok = t && (parsed.if.status === undefined || t.status === parsed.if.status) && (parsed.if.assigneeAgentId === undefined || (t.assigneeId ?? null) === parsed.if.assigneeAgentId) && (parsed.if.assigneeUserId === undefined || (t.assigneeUserId ?? null) === parsed.if.assigneeUserId);
@@ -604,7 +724,7 @@ export class CheckoutService {
           if (pair) { store.markPosted(pair.id, done()); folded.add(pair.id); }
           if (fast && row.key.startsWith('patch:handback:')) return;
         } catch (cause) {
-          if (isNetwork(cause)) { store.markFailed(row.id, message(cause), false); throw cause; }
+          if (isNetwork(cause) || isAuth(cause)) { store.markFailed(row.id, message(cause), false); throw cause; }
           // The server refused: the paired comment (same key without the "patch:" prefix) is not sent, and the lease says so.
           store.markFailed(row.id, message(cause), true);
           for (const other of rows) if (other.key === row.key.replace(/^patch:/, '')) { store.markFailed(other.id, 'The paired change was refused.', true); }
@@ -616,12 +736,16 @@ export class CheckoutService {
         i++; continue;
       }
       if (row.type === 'cost') {
-        try { await backend.postCostEvent(store.lease(taskId)?.orgId ?? row.orgId, JSON.parse(row.body) as Record<string, unknown>); store.markPosted(row.id, done()); }
+        try {
+          // The event carries an idempotency key (rows queued before that existed get one from their run), so a send whose answer was lost is simply sent again.
+          const body = JSON.parse(row.body) as Record<string, unknown>;
+          if (typeof body.idempotencyKey !== 'string' || !body.idempotencyKey) body.idempotencyKey = `muster-local:${row.key.replace(/^cost:/, '')}`;
+          await backend.postCostEvent(store.lease(taskId)?.orgId ?? row.orgId, body); store.markPosted(row.id, done());
+        }
         catch (cause) {
-          // A timeout or a lost response may have been recorded: the server has no way to ask, and posting again would count the turn twice. Not clearly undelivered means not retried.
-          const clear = /ECONNREFUSED|ENOTFOUND|EAI_AGAIN|ENETUNREACH|EHOSTUNREACH|offline/i.test(message(cause));
-          if (isNetwork(cause) && !clear) { store.markPosted(row.id, done()); store.markFailed(row.id, `unconfirmed: ${message(cause)}; not retried, to avoid counting the turn twice`, false); }
-          else { store.markFailed(row.id, message(cause), !isNetwork(cause)); if (isNetwork(cause)) throw cause; }
+          if (isAuth(cause)) { store.markFailed(row.id, message(cause), false); throw cause; }
+          // Not delivered, or delivered with the answer lost: either way the same key goes again on the next flush, and the server counts the turn once.
+          store.markFailed(row.id, message(cause), !isNetwork(cause)); if (isNetwork(cause)) throw cause;
         }
         i++; continue;
       }
@@ -633,9 +757,28 @@ export class CheckoutService {
       for (const r of post) {
         const row2 = group.find(g => g.key === r.key)!;
         try { await backend.comment!(taskId, reportComment(r), agentMap, row2.clientId); store.markPosted(row2.id, done()); }
-        catch (cause) { store.markFailed(row2.id, message(cause), !isNetwork(cause)); if (isNetwork(cause)) throw cause; }
+        catch (cause) { store.markFailed(row2.id, message(cause), !isNetwork(cause) && !isAuth(cause)); if (isNetwork(cause) || isAuth(cause)) throw cause; }
       }
     }
+  }
+  /**
+   * The task changed on Muster Server, so a lease-ending change is not sent. Nothing queued for it is (a comment on someone else's task would be noise), the lease
+   * is ended here with a notice, and the worktree is kept.
+   */
+  private endHere(taskId: string, rows: readonly { id: number }[], why: string): void {
+    const store = this.d.store, at = iso(this.d.now());
+    let lease = store.lease(taskId);
+    const where = lease?.worktree ? lease.worktree : device().lower;
+    const notice = `${why}; your local work is kept in ${where}`;
+    for (const r of rows) store.markFailed(r.id, `Not sent: ${why}.`, true);
+    for (const r of this.pendingFor(taskId)) store.markFailed(r.id, `Not sent: ${why}.`, true);
+    store.markDocPosted(taskId);
+    if (lease) {
+      if (lease.state === 'checked_out') lease = transition(lease, { type: 'release', at });
+      store.putLease({ ...lease, endNotice: notice, conflict: null, offline: null, recheck: false, countdown: null });
+    }
+    store.setSyncState(at, notice);
+    this.d.emit(taskId);
   }
   /** What a re-read of the task finds different from what check-out left: a different assignee, or a status that is no longer In progress. An org the server no longer lists is a conflict too (H3). */
   private async detectConflict(lease: CheckoutLease): Promise<NonNullable<CheckoutLease['conflict']> | null> {
@@ -660,8 +803,10 @@ export class CheckoutService {
     await backend.putDocument(taskId, WORK_LOG_KEY, { title: 'Local work log', body, changeSummary: `${receipts.length} local ${receipts.length === 1 ? 'turn' : 'turns'}` });
     this.d.store.markDocPosted(taskId);
   }
-  async outbox(): Promise<OutboxStatus> { return { pending: this.d.store.pendingCount(), ...this.d.store.syncState() }; }
-  async sync(): Promise<OutboxStatus> { await this.flush(); return this.outbox(); }
+  async outbox(): Promise<OutboxStatus> { return { pending: this.d.store.pendingCount(), ...this.d.store.syncState(), stuck: this.d.store.stuckCount(), authRequired: this.authBlocked() }; }
+  async sync(): Promise<OutboxStatus> { this.authStop = null; await this.flush(); return this.outbox(); }
+  /** "N updates couldn't be sent · Retry": puts the given-up updates back in the queue and sends them. */
+  async retry(taskId?: string): Promise<OutboxStatus> { this.authStop = null; this.d.store.revive(taskId); this.d.emit(taskId ?? null); await this.flush(taskId); return this.outbox(); }
 
   // --- automatic hand-back -----------------------------------------------------------------------------------------------------------------
   /**
@@ -686,8 +831,12 @@ export class CheckoutService {
     if (this.d.queued?.(chatId)) return;
     const timeline = await this.d.chats.timeline(chatId).catch(() => [] as TimelineEntry[]);
     if (timeline.some(e => (e.kind === 'question' || e.kind === 'approval') && e.status === 'pending')) return;
-    const said = userSaysDone(lastUserText(timeline));
-    const held = (reason: string) => this.hold(taskId, reason);
+    // "Run tests and hand back" was pressed: this turn is the one that ran them, so it counts as the person saying it is done (the test gate below still applies).
+    const said = userSaysDone(lastUserText(timeline)) || lease.afterTests === true;
+    if (lease.afterTests) this.d.store.putLease({ ...this.d.store.lease(taskId)!, afterTests: false });
+    // An agent that ends on a question ("Should I commit item 1 now?") has not finished: nothing is committed or handed back until it is answered, unless the person says it is done.
+    if (!said && asksOpenQuestion([...timeline].reverse().find(e => e.kind === 'assistant')?.text)) return;
+    const held = (reason: string, kind?: 'no-tests') => this.hold(taskId, reason, kind);
     const wt = lease.worktree;
     // The work as it stands, to tell "new work" from "the same work as when the person said stop".
     const snapshot = inPlace ? await snapshotFolder(wt).catch(() => null) : null;
@@ -697,31 +846,30 @@ export class CheckoutService {
       this.d.store.putLease({ ...this.d.store.lease(taskId)!, autoOff: false, armedState: null });
     }
     const run = lastTestRun(timeline);
-    let prUrl: string | undefined, label = said ? 'you said it is done' : 'the work looks finished';
+    let commit = false, prUrl: string | undefined, label = said ? 'you said it is done' : 'the work looks finished';
     if (inPlace) {
       const before = this.d.store.snapshot(taskId), changes = before && snapshot ? diffSnapshots(before, snapshot) : null;
       const changed = Boolean(changes && changeCount(changes));
       if (!changed && !said) return;
       // A plain folder is gated only when it has a test setup AND tests were run (its work is rarely code); then they must have passed after the last change.
       if ((await this.hasTests(wt)) && run !== null) {
-        if (!run.done || !run.afterLastChange) { if (said) held('Tests have not run since the last change.'); return; }
+        if (!run.done || !run.afterLastChange) { if (said) held('Tests have not run since the last change.', 'no-tests'); return; }
         if (!run.exitOk) { held('The last test run did not finish with exit code 0.'); return; }
         if (run.summary && run.summary.failed > 0) { held(`${run.summary.failed} ${run.summary.failed === 1 ? 'test is' : 'tests are'} failing (${run.summary.passed} passed).`); return; }
       }
     } else {
       // Tests: a real runner after the last change that exited 0. A project with no recognised test setup has no gate.
       if (await this.hasTests(wt)) {
-        if (!run || !run.done || !run.afterLastChange) { if (said) held('No test run came after the last change.'); return; }
+        if (!run || !run.done || !run.afterLastChange) { if (said) held('No test run came after the last change.', 'no-tests'); return; }
         if (!run.exitOk) { held('The last test run did not finish with exit code 0.'); return; }
         if (run.summary && run.summary.failed > 0) { held(`${run.summary.failed} ${run.summary.failed === 1 ? 'test is' : 'tests are'} failing (${run.summary.passed} passed).`); return; }
       }
-      // Uncommitted work is committed by Muster as the person (their own git identity), never on the agent's say-so.
-      if (!(await this.d.git.isClean(wt).catch(() => false))) {
-        const made = await this.d.git.commitAll(wt, `${lease.key}: ${sanitizeOut(lease.title, 100)}`).catch((cause: unknown) => ({ committed: false, message: String(cause) }));
-        if (!made.committed) { held(`Muster could not commit the changes on ${lease.branch}: ${made.message.replace(/\s+/g, ' ').slice(0, 200)}`); return; }
-      }
+      // Uncommitted work is committed by Muster as the person (their own git identity), never on the agent's say-so, and only once the hand-back is really going
+      // ahead (after the countdown, or at once when the person said it), never while it could still be cancelled.
+      const dirty = !(await this.d.git.isClean(wt).catch(() => false));
+      commit = dirty;
       const head = await this.d.git.headSha(wt).catch(() => null);
-      if (!head || head === lease.armedFrom) { if (said) held(`Nothing has been committed on ${lease.branch} since the check-out.`); return; }
+      if (!dirty && (!head || head === lease.armedFrom)) { if (said) held(`Nothing has been committed on ${lease.branch} since the check-out.`); return; }
       // The pull request: a link in the agent's words is only a link once gh confirms it belongs to this branch of this repository.
       const prText = [...timeline].reverse().find(e => e.kind === 'assistant')?.text ?? '';
       const prCandidate = /https:\/\/[\w.-]+\/[\w.-]+\/[\w.-]+\/pull\/\d+/.exec(prText)?.[0];
@@ -731,8 +879,11 @@ export class CheckoutService {
     if (!recipient) { held('The work looks finished but there is no reviewer or originator to give it to. Hand it back from the task when you choose who.'); return; }
     if (said && lease.autoOff) this.d.store.putLease({ ...this.d.store.lease(taskId)!, autoOff: false, armedState: null });
     this.clearHold(taskId);
-    const plan = { recipient, ...(prUrl ? { prUrl } : {}), ...(receipt.summary ? { summary: receipt.summary } : {}), inPlace };
-    if (this.d.store.autoMode(this.origin(), lease.orgId, lease.projectId) === 'ask') { this.d.notify?.({ type: 'handBackReady', taskId, key: lease.key, to: recipient.name, recipient: { kind: recipient.kind, id: recipient.id }, reason: label }); return; }
+    const plan: AutoPlan = { recipient, ...(prUrl ? { prUrl } : {}), ...(receipt.summary ? { summary: receipt.summary } : {}), inPlace, ...(commit ? { commit } : {}) };
+    if (this.d.store.autoMode(this.origin(), lease.orgId, lease.projectId) === 'ask') {
+      // "Ask me" has no countdown: whoever presses Hand back finds the work committed.
+      if (!(await this.commitPending(taskId, plan))) return;
+      this.d.notify?.({ type: 'handBackReady', taskId, key: lease.key, to: recipient.name, recipient: { kind: recipient.kind, id: recipient.id }, reason: label }); return; }
     if (said) { await this.finishHandBack(taskId, plan); return; }
     this.startCountdown(lease, plan);
   }
@@ -741,19 +892,37 @@ export class CheckoutService {
   /** Countdowns running now. */
   activeCountdowns(): { taskId: string; key: string; to: string; endsAt: string }[] { return [...this.countdowns].map(([taskId, c]) => ({ taskId, key: c.key, to: c.to, endsAt: c.endsAt })); }
   private startCountdown(lease: CheckoutLease, plan: AutoPlan): void {
-    const ms = this.d.countdown?.ms ?? COUNTDOWN_MS, endsAt = iso(this.d.now() + ms);
-    // The push happens while the countdown runs, so the hand-back itself is just the one request to the server.
-    const pushing = !plan.inPlace && lease.worktree && lease.branch ? this.d.git.pushedHead(lease.worktree, lease.branch).catch(() => false).then(already => already ? undefined : this.d.git.push(lease.worktree!, lease.branch!)).catch(() => undefined) : Promise.resolve();
+    const ms = this.d.countdown?.ms ?? COUNTDOWN_MS;
+    // The push happens while the countdown runs, so the hand-back itself is just the one request to the server. Work still to be committed is committed (and pushed) after it, not before.
+    const pushing = !plan.commit && !plan.inPlace && lease.worktree && lease.branch ? this.d.git.pushedHead(lease.worktree, lease.branch).catch(() => false).then(already => already ? undefined : this.d.git.push(lease.worktree!, lease.branch!)).catch(() => undefined) : Promise.resolve();
+    this.armCountdown(lease, plan, ms, pushing);
+  }
+  /** Runs the clock and saves it on the check-out, so a restart picks the countdown up again instead of losing it. */
+  private armCountdown(lease: CheckoutLease, plan: AutoPlan, ms: number, pushing: Promise<unknown>): void {
+    const endsAt = iso(this.d.now() + ms);
     const schedule = this.d.countdown?.schedule ?? ((fn: () => void, wait: number) => { const t = setTimeout(fn, wait); t.unref?.(); return () => clearTimeout(t); });
     const cancel = schedule(() => { void this.finishCountdown(lease.taskId); }, ms);
     this.countdowns.set(lease.taskId, { key: lease.key, to: plan.recipient.name, endsAt, cancel, plan, pushing });
+    const current = this.d.store.lease(lease.taskId);
+    if (current) this.d.store.putLease({ ...current, countdown: { endsAt, plan } });
     this.d.notify?.({ type: 'handBackCountdown', taskId: lease.taskId, key: lease.key, to: plan.recipient.name, endsAt });
   }
+  /** After a restart: countdowns that were running are started again (one that ran out while the app was closed gets a short grace so the toast can be seen). */
+  resumeCountdowns(): number {
+    let n = 0;
+    for (const lease of this.ownOpen()) {
+      if (!lease.countdown || lease.runOnServer || this.countdowns.has(lease.taskId)) continue;
+      const left = Date.parse(lease.countdown.endsAt) - this.d.now();
+      this.armCountdown(lease, lease.countdown.plan, Math.max(left, RESUME_GRACE_MS), Promise.resolve()); n++;
+    }
+    return n;
+  }
+  private clearSavedCountdown(taskId: string): void { const lease = this.d.store.lease(taskId); if (lease?.countdown) this.d.store.putLease({ ...lease, countdown: null }); }
   /** Stops a countdown without handing back. Quiet unless asked to tell the screens. */
   private dropCountdown(taskId: string, tell = true): boolean {
     const c = this.countdowns.get(taskId);
     if (!c) return false;
-    c.cancel(); this.countdowns.delete(taskId);
+    c.cancel(); this.countdowns.delete(taskId); this.clearSavedCountdown(taskId);
     if (tell) this.d.notify?.({ type: 'handBackCountdownEnded', taskId });
     return true;
   }
@@ -761,7 +930,7 @@ export class CheckoutService {
   private async finishCountdown(taskId: string): Promise<void> {
     const c = this.countdowns.get(taskId);
     if (!c) return;
-    c.cancel(); this.countdowns.delete(taskId);
+    c.cancel(); this.countdowns.delete(taskId); this.clearSavedCountdown(taskId);
     this.d.notify?.({ type: 'handBackCountdownEnded', taskId });
     await c.pushing;
     await this.finishHandBack(taskId, c.plan);
@@ -769,6 +938,7 @@ export class CheckoutService {
   private async finishHandBack(taskId: string, plan: AutoPlan): Promise<void> {
     const lease = this.d.store.lease(taskId);
     if (!lease || lease.state !== 'checked_out' || lease.origin !== this.origin()) return;
+    if (!(await this.commitPending(taskId, plan))) return;
     try {
       await this.handBack({ taskId, reviewer: { kind: plan.recipient.kind, id: plan.recipient.id }, ...(plan.prUrl ? { prUrl: plan.prUrl } : {}), ...(plan.summary ? { summary: plan.summary } : {}), push: !plan.inPlace });
       this.d.notify?.({ type: 'handedBack', taskId, key: lease.key, to: plan.recipient.name, undoUntil: iso(this.d.now() + UNDO_MS) });
@@ -783,7 +953,29 @@ export class CheckoutService {
     this.d.emit(lease.taskId);
   }
   /** A run started on the task's chat: the person is working again, so a countdown in progress is dropped (the next finished turn starts a new one). */
-  runStarted(chatId: string): void { const lease = this.d.store.leaseForChat(chatId, this.origin()); if (lease) this.dropCountdown(lease.taskId); }
+  runStarted(chatId: string): void { const lease = this.leaseForChat(chatId); if (lease) this.dropCountdown(lease.taskId); }
+  /**
+   * The open check-out a chat belongs to: the chat check-out made, a review chat, one linked earlier, or any other chat whose folder is the check-out's worktree
+   * (opened by hand, or left from before a re-check-out). The last kind is linked on the spot, so its turns and activity count from then on (#383).
+   */
+  leaseForChat(chatId: string): CheckoutLease | null {
+    const own = this.d.store.leaseForChat(chatId, this.origin());
+    if (own) return own;
+    const dir = this.d.chats.folderOf?.(chatId);
+    const lease = dir ? this.ownOpen().find(l => l.worktree && !l.runOnServer && l.worktree.replace(/[\\/]+$/, '') === dir.replace(/[\\/]+$/, '')) : undefined;
+    if (!lease) return null;
+    const next = { ...lease, linkedChats: [...new Set([...(lease.linkedChats ?? []), chatId])] };
+    this.d.store.putLease(next);
+    return next;
+  }
+  /** When any chat in the check-out's worktree last did anything (ms), linking the ones not linked yet. */
+  private async folderActivity(lease: CheckoutLease): Promise<number> {
+    if (!lease.worktree || !this.d.chats.inFolder) return 0;
+    const chats = await this.d.chats.inFolder(lease.worktree).catch(() => []);
+    const fresh = chats.map(c => c.id).filter(id => id !== lease.chatId && !lease.linkedChats?.includes(id) && !lease.reviewChats.some(r => r.chatId === id));
+    if (fresh.length) { const current = this.d.store.lease(lease.taskId); if (current) this.d.store.putLease({ ...current, linkedChats: [...(current.linkedChats ?? []), ...fresh] }); }
+    return chats.reduce((latest, c) => Math.max(latest, c.activeAt), 0);
+  }
   /** The state of the work now, to tell later whether anything new happened. */
   private async workState(lease: CheckoutLease): Promise<string | null> {
     if (!lease.worktree) return null;
@@ -791,11 +983,44 @@ export class CheckoutService {
     return this.d.git.state(lease.worktree).catch(() => null);
   }
   /** Why Muster has not handed back: shown on the task, never posted to the server. */
-  private hold(taskId: string, reason: string): void {
+  private hold(taskId: string, reason: string, kind?: 'no-tests'): void {
     const lease = this.d.store.lease(taskId);
-    if (!lease || lease.heldBack?.reason === reason) return;
-    this.d.store.putLease({ ...lease, heldBack: { reason, at: iso(this.d.now()) } });
+    if (!lease || (lease.heldBack?.reason === reason && lease.heldBack.kind === kind)) return;
+    this.d.store.putLease({ ...lease, heldBack: { reason, at: iso(this.d.now()), ...(kind ? { kind } : {}) } });
     this.d.emit(taskId);
+  }
+  /** Commits uncommitted work as the person, now that the hand-back is going ahead. False (and the reason held) when the commit failed. */
+  private async commitPending(taskId: string, plan: AutoPlan): Promise<boolean> {
+    const lease = this.d.store.lease(taskId);
+    if (!plan.commit || !lease?.worktree || plan.inPlace) return true;
+    if (await this.d.git.isClean(lease.worktree).catch(() => false)) return true;
+    const made = await this.d.git.commitAll(lease.worktree, `${lease.key}: ${sanitizeOut(lease.title, 100)}`).catch((cause: unknown) => ({ committed: false, message: String(cause) }));
+    if (made.committed) return true;
+    this.hold(taskId, `Muster could not commit the changes on ${lease.branch}: ${made.message.replace(/\s+/g, ' ').slice(0, 200)}`);
+    return false;
+  }
+  /** "Hand back anyway": the hand-back was held for want of a test run, and the person chooses to go ahead. The hand-back says no tests were run. */
+  async handBackAnyway(ref: string): Promise<LeaseView> {
+    const lease = this.requireOpen(ref);
+    const recipient = await this.recipientFor(lease).catch(() => null);
+    if (!recipient) throw new Error('There is no reviewer or originator to give it to. Hand it back from the task when you choose who.');
+    this.dropCountdown(lease.taskId);
+    if (!(await this.commitPending(lease.taskId, { recipient, inPlace: lease.kind === 'folder', commit: true }))) throw new Error(this.d.store.lease(lease.taskId)?.heldBack?.reason ?? 'Muster could not commit the changes.');
+    this.clearHold(lease.taskId);
+    const view = await this.handBack({ taskId: lease.taskId, reviewer: { kind: recipient.kind, id: recipient.id }, testsNote: 'Handed back without a test run: the person chose Hand back anyway.', push: lease.kind !== 'folder' });
+    this.d.notify?.({ type: 'handedBack', taskId: lease.taskId, key: lease.key, to: recipient.name, undoUntil: iso(this.d.now() + UNDO_MS) });
+    return view;
+  }
+  /** "Run tests and hand back": asks the agent to run the tests; the turn that does counts as the person saying it is done, and the test gate still applies. */
+  async runTestsAndHandBack(ref: string): Promise<LeaseView> {
+    const lease = this.requireOpen(ref);
+    if (!this.d.chats.send || !lease.chatId) throw new Error('Open the task chat and ask for the tests to be run.');
+    this.dropCountdown(lease.taskId);
+    this.d.store.putLease({ ...lease, afterTests: true, heldBack: null });
+    try { await this.d.chats.send(lease.chatId, 'Run the project’s tests now and report the result. Muster hands the task back when they pass.'); }
+    catch (cause) { this.d.store.putLease({ ...this.d.store.lease(lease.taskId)!, afterTests: false, heldBack: lease.heldBack ?? null }); throw cause; }
+    this.d.emit(lease.taskId);
+    return this.view(this.d.store.lease(lease.taskId)!);
   }
   private clearHold(taskId: string): void { const lease = this.d.store.lease(taskId); if (lease?.heldBack) { this.d.store.putLease({ ...lease, heldBack: null }); this.d.emit(taskId); } }
   /** Who a finished task goes to: the task's own review and approval policy first, then whoever opened it, then a QA agent, then the agent who had the task before it was checked out. */
@@ -820,11 +1045,15 @@ export class CheckoutService {
     let posted = 0;
     for (const lease of this.ownOpen()) {
       if (lease.offline === 'manual' || lease.pausedNoteAt) continue;
-      const last = Date.parse(lease.lastActivityAt);
+      let last = Date.parse(lease.lastActivityAt);
+      if (!(this.d.now() - last >= IDLE_NOTE_MS)) continue;
+      // Work in any chat of this worktree is activity, whichever chat the lease started with: nothing is "paused" while the person is working there.
+      const active = await this.folderActivity(lease);
+      if (active > last) { last = active; this.d.store.putLease({ ...this.d.store.lease(lease.taskId)!, lastActivityAt: iso(active) }); }
       if (!(this.d.now() - last >= IDLE_NOTE_MS)) continue;
       const at = iso(this.d.now());
       this.enq({ taskId: lease.taskId, orgId: lease.orgId, type: 'comment', key: `paused:${lease.taskId}`, kind: 'note', body: `**Paused.** No activity for a day. It is still checked out on ${lease.device}; nothing was handed back.`, at });
-      this.d.store.putLease(transition(lease, { type: 'paused', at })); posted++;
+      this.d.store.putLease(transition(this.d.store.lease(lease.taskId)!, { type: 'paused', at })); posted++;
       this.scheduleFlush(lease.taskId);
     }
     return posted;
@@ -930,7 +1159,7 @@ export class CheckoutService {
     const key = `handback:${at}`;
     // 3. the summary comment and the reassignment, in that order, through the outbox. The lease ends only after both are queued.
     // The reassignment goes first: if the server refuses it, the summary is not posted either (M4).
-    this.enqueuePatch(lease.taskId, lease.orgId, key, strategy.patch, at);
+    this.enqueuePatch(lease.taskId, lease.orgId, key, strategy.patch, at, undefined, this.expectHeld(lease, me.id));
     this.enq({ taskId: lease.taskId, orgId: lease.orgId, type: 'comment', key, kind: 'handback', body: summary, at });
     this.d.store.markDocDirty(lease.taskId);
     const ended = { ...transition(lease, { type: 'handback', at, prUrl: prUrl ?? null }), handedTo: { kind: input.reviewer.kind, id: input.reviewer.id, name: reviewerName } };
@@ -952,7 +1181,7 @@ export class CheckoutService {
     const back = lease.previous;
     // Back as it was: the old agent (it wakes again), or the person's own task, or whoever held it, in the status it had.
     const status: WorkspaceStatus = back.status;
-    this.enqueuePatch(lease.taskId, lease.orgId, key, { status, assigneeUserId: back.assigneeAgentId ? null : back.assigneeUserId, assigneeAgentId: back.assigneeAgentId }, at);
+    this.enqueuePatch(lease.taskId, lease.orgId, key, { status, assigneeUserId: back.assigneeAgentId ? null : back.assigneeUserId, assigneeAgentId: back.assigneeAgentId }, at, undefined, this.expectHeld(lease, lease.userId));
     this.enq({ taskId: lease.taskId, orgId: lease.orgId, type: 'comment', key, kind: 'release', body: releaseBody(lease.device, note), at });
     this.d.store.putLease(transition(lease, { type: 'release', at }));
     this.d.store.deleteOrgCopy(lease.taskId); this.d.store.deleteSnapshot(lease.taskId);
@@ -967,7 +1196,7 @@ export class CheckoutService {
     if (on && !agentId) throw new Error('No org agent is available to run this on the server.');
     const key = `server:${on}:${at}`;
     const agent = part.agents.find(a => a.id === agentId);
-    this.enqueuePatch(lease.taskId, lease.orgId, key, on ? { assigneeAgentId: agentId, assigneeUserId: null, status: 'in_progress' } : { assigneeUserId: me.id, assigneeAgentId: null }, at);
+    this.enqueuePatch(lease.taskId, lease.orgId, key, on ? { assigneeAgentId: agentId, assigneeUserId: null, status: 'in_progress' } : { assigneeUserId: me.id, assigneeAgentId: null }, at, undefined, this.expectHeld(lease, me.id));
     this.enq({ taskId: lease.taskId, orgId: lease.orgId, type: 'comment', key, kind: 'note', at, body: on ? `Running this on the server with ${agent?.name ?? 'the org agent'} · it stays with ${me.name ?? 'me'} · via Muster` : 'Back on '+device().lower+' · via Muster' });
     this.d.store.putLease(transition(lease, { type: 'run-on-server', on, at }));
     await this.flush(lease.taskId);
@@ -1067,4 +1296,6 @@ export function lastTestRun(timeline: readonly TimelineEntry[]): { done: boolean
 /** The person's own words, without the context Muster adds around them. */
 export const lastUserText = (timeline: readonly TimelineEntry[]): string => { const m = [...timeline].reverse().find(e => e.kind === 'user'); return m ? m.text.replace(/<context\b[\s\S]*?<\/context>/gi, '').trim() : ''; };
 /** The person says it is done: the whole message is a short completion phrase. Only their own message counts, so nothing the server or the model writes can say it. */
-export const userSaysDone = (text: string): boolean => /^(?:(?:ok(?:ay)?|yes|great|good|perfect|thanks?)[,.!\s-]+)?(?:done|all done|that'?s done|we'?re done|i'?m done|finished|ship it|ship it now|looks good,? ship it|hand (?:it )?back|hand it over|send it back|\/handback|\/done)\s*[.!]*$/i.test(text.trim()) && text.trim().length <= 40;
+const HAND_PHRASE = String.raw`(?:please\s+)?(?:hand\s+(?:it\s+|this\s+)?(?:back|over)|send\s+it\s+back)(?:\s+(?:now|please))?|ship\s+it(?:\s+now)?|looks\s+good,?\s+ship\s+it|\/handback|\/done`;
+const DONE_PHRASE = String.raw`(?:(?:i(?:'?m|\s+am)|we(?:'?re|\s+are)|that'?s|it'?s)\s+)?(?:all\s+)?(?:done|finished)(?:\s+(?:here|now|with\s+(?:it|this)))?`;
+export const userSaysDone = (text: string): boolean => new RegExp(String.raw`^(?:(?:ok(?:ay)?|yes|yep|yeah|great|good|perfect|alright|right|so|thanks?)[,.!\s-]+)?(?:${DONE_PHRASE}(?:[,.!\s-]+(?:and\s+)?(?:${HAND_PHRASE}))?|${HAND_PHRASE})\s*[.!]*$`, 'i').test(text.trim()) && text.trim().length <= 50;

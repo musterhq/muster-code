@@ -31,10 +31,11 @@ async function fixture(t:TestContext){
     const body=route(raw,path,url.searchParams);
     return body===undefined?new Response('{"error":"not found"}',{status:404}):new Response(JSON.stringify(body),{status:200,headers:{'content-type':'application/json',etag:`W/"${path}"`}});
   }) as typeof fetch;
-  const provider:ProviderAdapter={info:()=>[{id:'hybrow',name:'Hybrow',available:true,identityMasked:'configured',models:[{id:'m',name:'m'}]}],stop:async()=>true,dispose(){},async run(){return {status:'completed',finalMessage:'done'};}};
+  const prompts:{cwd:string;prompt:string}[]=[];
+  const provider:ProviderAdapter={info:()=>[{id:'hybrow',name:'Hybrow',available:true,identityMasked:'configured',models:[{id:'m',name:'m'}]}],stop:async()=>true,dispose(){},async run(input){prompts.push({cwd:input.cwd,prompt:input.prompt});return {status:'completed',finalMessage:'done'};}};
   const service=createAgentService({dataDir,provider,onEvent(){}});
   t.after(async()=>{globalThis.fetch=realFetch;await service.dispose();await rm(dataDir,{recursive:true,force:true});});
-  return {raw,service,calls,repo};
+  return {raw,service,calls,repo,prompts};
 }
 function route(raw:Json,path:string,q:URLSearchParams):unknown{
   if(path==='/companies')return raw.companies;
@@ -163,6 +164,159 @@ test('a started task runs in its own worktree of the project folder, never the c
   // Starting again reuses the task's worktree instead of failing on the checked-out branch; the dispatch refusal is what surfaces.
   await assert.rejects(()=>service.invoke('paperclip.task.start',{taskId:rag15.id}),(e:Error)=>!/already checked out/.test(e.message));
   assert.match(execFileSync('git',['-C',repo,'worktree','list'],{encoding:'utf8'}),/muster\/rag-15/,'a reused worktree is kept when a Start fails');
+});
+
+test('#183 the scheduler runs an imported project\u2019s task in a worktree, never in the checkout',async t=>{
+  const {service,repo}=await fixture(t);
+  await service.invoke('paperclip.config.set',{mode:'local',companyId:COMPANY});
+  await service.invoke('paperclip.import',{companyId:COMPANY});
+  await service.invoke('paperclip.config.set',{mode:'off'});
+  const ws=await service.invoke('paperclip.snapshot',{});
+  const rag15=ws.tasks.find(x=>x.key==='RAG-15')!;
+  const project=(await service.invoke('project.list',undefined)).find(p=>p.name==='OSS Manager')!;
+  const cto=(await service.invoke('project.members.list',{projectId:project.id})).members.find(m=>m.name==='CTO')!;
+  await service.invoke('project.members.update',{projectId:project.id,id:cto.id,runner:{providerId:'hybrow',model:'m'}});
+  await service.invoke('paperclip.task.update',{taskId:rag15.id,status:'todo'});
+  await service.invoke('project.scheduler.set',{projectId:project.id,autoDispatch:true});
+  const until=async(check:()=>Promise<boolean>)=>{for(let n=0;n<100;n++){if(await check())return true;await new Promise(r=>setTimeout(r,50));}return false;};
+  const started=await until(async()=>(await service.invoke('app.snapshot',undefined)).chats.some(c=>c.projectId===project.id));
+  assert.ok(started,'the scheduler started a run');
+  assert.match(execFileSync('git',['-C',repo,'worktree','list'],{encoding:'utf8'}),/muster\/rag-\d+/,'in a worktree made for the task');
+  await service.invoke('project.scheduler.set',{projectId:project.id,autoDispatch:false});
+  await until(async()=>(await service.invoke('app.snapshot',undefined)).chats.every(c=>c.status!=='running'&&c.status!=='stopping'));
+  await new Promise(r=>setTimeout(r,300));
+  const snap=await service.invoke('app.snapshot',undefined);
+  const checkout=snap.folders.find(f=>f.id===project.primaryFolderId)!;
+  assert.ok(checkout);
+  assert.ok(snap.chats.filter(c=>c.projectId===project.id).every(c=>c.folderId!==checkout.id),'no scheduled run works in the checkout');
+  assert.ok(snap.chats.some(c=>c.projectId===project.id&&/muster-rag-\d+$/.test(snap.folders.find(f=>f.id===c.folderId)?.path??'')),'the run is in a task\u2019s worktree');
+  // #434: the scheduled run's worktree carries the task's history too.
+  const runPath=snap.folders.find(f=>f.id===snap.chats.find(c=>c.projectId===project.id&&c.folderId!==checkout.id)?.folderId)!.path;
+  assert.match(await readFile(join(runPath,'.muster','task','THREAD.md'),'utf8'),/oldest first/,'the scheduled run starts with the task\u2019s history');
+});
+
+test('#434 Start and the scheduler bring an imported task\u2019s history: the whole thread and the documents in .muster/task of its worktree, and a brief that points at them',async t=>{
+  const {raw,service,prompts}=await fixture(t);
+  await service.invoke('paperclip.config.set',{mode:'local',companyId:COMPANY});
+  await service.invoke('paperclip.import',{companyId:COMPANY});
+  await service.invoke('paperclip.config.set',{mode:'off'});
+  const ws=await service.invoke('paperclip.snapshot',{});
+  const rag15=ws.tasks.find(x=>x.key==='RAG-15')!;
+  const project=(await service.invoke('project.list',undefined)).find(p=>p.name==='OSS Manager')!;
+  const cto=(await service.invoke('project.members.list',{projectId:project.id})).members.find(m=>m.name==='CTO')!;
+  await service.invoke('project.members.update',{projectId:project.id,id:cto.id,runner:{providerId:'hybrow',model:'m'}});
+  await service.invoke('paperclip.task.update',{taskId:rag15.id,status:'todo'});
+  const started=await service.invoke('paperclip.task.start',{taskId:rag15.id});
+  const dir=join(started.worktree,'.muster','task');
+  const source=(raw.perIssue[raw.issues.find((i:Json)=>i.identifier==='RAG-15').id].comments as Json[]).filter(c=>!c.deletedAt);
+  const thread=await readFile(join(dir,'THREAD.md'),'utf8');
+  assert.ok(source.length>0);
+  assert.match(thread,new RegExp(`${source.length} comments?, oldest first`),'every imported comment is on disk');
+  assert.equal((await readFile(join(dir,'.gitignore'),'utf8')),'*\n');
+  assert.match(await readFile(join(dir,'TASK.md'),'utf8'),/# RAG-15 · /);
+  assert.ok(execFileSync('git',['-C',started.worktree,'status','--porcelain'],{encoding:'utf8'}).split('\n').every(l=>!l.includes('.muster')),'never part of the work');
+  const until=async(check:()=>boolean)=>{for(let n=0;n<100&&!check();n++)await new Promise(r=>setTimeout(r,50));return check();};
+  assert.ok(await until(()=>prompts.some(p=>p.cwd===started.worktree)),'the run started');
+  const prompt=prompts.find(p=>p.cwd===started.worktree)!.prompt;
+  assert.ok(prompt.includes(`read ${dir}/TASK.md, THREAD.md (the whole thread, ${source.length} comment`),'the first turn is pointed at the history');
+  assert.match(prompt,/This task came from Muster Server/);
+});
+
+test('#183 when the scheduler cannot make a worktree for an imported project\u2019s task, nothing runs in the checkout instead',async t=>{
+  const {service,repo}=await fixture(t);
+  await service.invoke('paperclip.config.set',{mode:'local',companyId:COMPANY});
+  await service.invoke('paperclip.import',{companyId:COMPANY});
+  await service.invoke('paperclip.config.set',{mode:'off'});
+  const ws=await service.invoke('paperclip.snapshot',{});
+  const project=(await service.invoke('project.list',undefined)).find(p=>p.name==='OSS Manager')!;
+  const cto=(await service.invoke('project.members.list',{projectId:project.id})).members.find(m=>m.name==='CTO')!;
+  await service.invoke('project.members.update',{projectId:project.id,id:cto.id,runner:{providerId:'hybrow',model:'m'}});
+  await service.invoke('paperclip.task.update',{taskId:ws.tasks.find(x=>x.key==='RAG-15')!.id,status:'todo'});
+  await rm(join(repo,'.git'),{recursive:true,force:true}); // the checkout is no longer a git repository: no worktree can be made
+  await service.invoke('project.scheduler.set',{projectId:project.id,autoDispatch:true});
+  await new Promise(r=>setTimeout(r,1200));
+  await service.invoke('project.scheduler.set',{projectId:project.id,autoDispatch:false});
+  const snap=await service.invoke('app.snapshot',undefined);
+  assert.equal(snap.chats.filter(c=>c.projectId===project.id).length,0,'no run started in the checkout');
+  const activity=(await service.invoke('project.work',{projectId:project.id,activityLimit:60})).activity.items;
+  assert.ok(activity.some((a:any)=>a.kind==='scheduler.worktree'&&/worktree/.test(a.summary)),'and the project says why');
+});
+
+test('#248 a task you deleted in Muster is not made again by the next import; Restore brings it back',async t=>{
+  const {service}=await fixture(t);
+  const importAgain=async()=>{await service.invoke('paperclip.config.set',{mode:'local',companyId:COMPANY});const r=await service.invoke('paperclip.import',{companyId:COMPANY});await service.invoke('paperclip.config.set',{mode:'off'});return r;};
+  await importAgain();
+  const oss=(await service.invoke('project.list',undefined)).find(p=>p.name==='OSS Manager')!;
+  const find=async()=>(await service.invoke('paperclip.snapshot',{})).tasks.filter(x=>x.key==='RAG-15');
+  const [before]=await find();assert.ok(before);
+  const tasksBefore=(await service.invoke('project.work',{projectId:oss.id,activityLimit:1})).tasks.items.length;
+  const full=await service.invoke('project.tasks.get',{projectId:oss.id,id:before!.id});
+  await service.invoke('project.tasks.delete',{projectId:oss.id,id:before!.id,revision:full.revision});
+  assert.equal((await find()).length,0,'deleted here');
+  const again=await importAgain();
+  assert.equal((await find()).length,0,'the import does not make it again');
+  assert.deepEqual(again.deleted.map(d=>[d.kind,d.key]),[['task','RAG-15']],'and the report says what it left out');
+  assert.match(again.notes.join('\n'),/you deleted here was left out \(RAG-15\)/);
+  assert.equal((await service.invoke('project.work',{projectId:oss.id,activityLimit:1})).tasks.items.length,tasksBefore-1);
+  await importAgain();assert.equal((await find()).length,0,'still deleted on every later import');
+  await service.invoke('paperclip.config.set',{mode:'local',companyId:COMPANY});
+  const plan=await service.invoke('paperclip.import.plan',{companyId:COMPANY});
+  assert.deepEqual(plan.deleted?.map(d=>[d.kind,d.key]),[['task','RAG-15']],'the import list offers it for restore');
+  const source=plan.deleted![0]!.id;
+  await service.invoke('paperclip.config.set',{mode:'off'});
+  assert.deepEqual(await service.invoke('paperclip.import.restore',{kind:'task',id:source}),{restored:true});
+  const back=await importAgain();
+  assert.equal((await find()).length,1,'restored: made again, once');
+  assert.deepEqual(back.deleted,[]);
+  await importAgain();assert.equal((await find()).length,1,'and not duplicated');
+  await assert.rejects(()=>service.invoke('paperclip.import.restore',{kind:'nope',id:source} as never),/Unknown item/);
+});
+
+test('#182 a project you deleted in Muster is not made again (no stray copy); Restore brings it back with its tasks',async t=>{
+  const {service}=await fixture(t);
+  const importAgain=async()=>{await service.invoke('paperclip.config.set',{mode:'local',companyId:COMPANY});const r=await service.invoke('paperclip.import',{companyId:COMPANY});await service.invoke('paperclip.config.set',{mode:'off'});return r;};
+  await importAgain();
+  const projects=async()=>(await service.invoke('project.list',undefined));
+  const total=(await projects()).length, oss=(await projects()).find(p=>p.name==='OSS Manager')!;
+  await service.invoke('project.delete',{id:oss.id});
+  assert.equal((await projects()).length,total-1);
+  const again=await importAgain();
+  assert.equal((await projects()).length,total-1,'no new project appears in its place');
+  assert.equal((await projects()).filter(p=>p.name==='OSS Manager').length,0);
+  assert.deepEqual(again.deleted.filter(d=>d.kind==='project').map(d=>d.label),['OSS Manager']);
+  assert.deepEqual(again.projects,{created:0,updated:total-1},'the others are updated as usual');
+  const ws=await service.invoke('paperclip.snapshot',{});
+  assert.equal(ws.tasks.filter(x=>x.source==='paperclip'||true).filter(x=>x.key==='RAG-15').length,0,'its tasks stay away too');
+  await service.invoke('paperclip.config.set',{mode:'local',companyId:COMPANY});
+  const plan=await service.invoke('paperclip.import.plan',{companyId:COMPANY});
+  assert.deepEqual(plan.deleted?.map(d=>[d.kind,d.label]),[['project','OSS Manager']]);
+  assert.ok(!plan.projects.some(p=>p.name==='OSS Manager'),'it is not offered for import');
+  await service.invoke('paperclip.config.set',{mode:'off'});
+  await service.invoke('paperclip.import.restore',{kind:'project',id:plan.deleted![0]!.id});
+  const back=await importAgain();
+  assert.equal((await projects()).filter(p=>p.name==='OSS Manager').length,1,'restored: one project');
+  assert.equal(back.projects.created,1);
+  assert.equal((await service.invoke('paperclip.snapshot',{})).tasks.filter(x=>x.key==='RAG-15').length,1,'with its tasks');
+  assert.equal((await importAgain()).projects.created,0,'and it is not made a third time');
+});
+
+test('#248 the import store: a deletion is kept by the Paperclip id, once; restoring forgets the link to the deleted copy',async()=>{
+  const {DatabaseSync}=await import('node:sqlite');
+  const store=new SqliteImportStore(new DatabaseSync(':memory:'));
+  store.setMap('project','p-src','p-muster','RAG',{companyId:'c1',name:'OSS',imported:{name:'OSS'}});
+  store.setMap('task','t-src','t-muster','RAG-1',{projectId:'p-muster',companyId:'c1',imported:{title:'Fix it'}});
+  assert.deepEqual(store.sourceOf('task','t-muster'),{sourceId:'t-src',companyId:'c1',key:'RAG-1',label:'Fix it'});
+  assert.equal(store.sourceOf('task','nobody'),undefined);
+  store.bury('task','t-src','c1','RAG-1','Fix it');store.bury('task','t-src','c1','RAG-1','Fix it');
+  assert.equal(store.buried('task','t-src'),true);assert.equal(store.buried('project','t-src'),false,'kinds are kept apart');
+  assert.equal(store.tombstones('c1').length,1,'one row per deleted item');
+  assert.equal(store.tombstones('other').length,0,'another org does not see it');
+  store.bury('project','p-src','c1','RAG','OSS');
+  assert.equal(store.restore('project','p-src'),true);
+  assert.equal(store.map('project','p-src'),undefined,'the link to the deleted project goes');
+  assert.equal(store.map('task','t-src'),undefined,'and the links of its tasks');
+  assert.equal(store.restore('project','p-src'),false,'restoring twice is harmless');
+  assert.equal(store.buried('task','t-src'),true,'a task deleted on its own stays deleted');
 });
 
 test('a company-wide approval that is also an issue approval keeps its task and project',async()=>{
@@ -591,7 +745,7 @@ test('upgrade M2: importing again after an older import keeps the old project’
   assert.equal(inbox.length,1,'one Inbox row for one decision');
 });
 
-test('upgrade M2: deleting an imported project and importing again restores all its comments',async t=>{
+test('upgrade M2: a deleted imported project stays deleted (#182); restoring it and importing again brings back all its comments',async t=>{
   const fx=await fixture(t);
   await fx.service.invoke('paperclip.config.set',{mode:'local',companyId:COMPANY});
   await fx.service.invoke('paperclip.import',{companyId:COMPANY});
@@ -600,7 +754,11 @@ test('upgrade M2: deleting an imported project and importing again restores all 
   const project=(await fx.service.invoke('project.list',undefined)).find(p=>p.name==='OSS Manager')!;
   await fx.service.invoke('project.delete',{id:project.id,confirm:project.name} as never).catch(()=>fx.service.invoke('project.delete',{id:project.id} as never));
   await fx.service.invoke('paperclip.import',{companyId:COMPANY});
-  assert.equal(await count(),first,'the re-created tasks carry every comment again');
+  assert.ok((await count())<first,'deleted means deleted: the import does not make it again');
+  const plan=await fx.service.invoke('paperclip.import.plan',{companyId:COMPANY});
+  await fx.service.invoke('paperclip.import.restore',{kind:'project',id:plan.deleted!.find(d=>d.label==='OSS Manager')!.id});
+  await fx.service.invoke('paperclip.import',{companyId:COMPANY});
+  assert.equal(await count(),first,'restored: the re-created tasks carry every comment again');
 });
 
 test('review M3: an imported agent whose runner cannot be mapped (an adapter Muster has no provider for, or Claude without a model) blocks its task start instead of using the project default',async t=>{

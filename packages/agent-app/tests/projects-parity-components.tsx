@@ -281,6 +281,20 @@ root3.unmount();
   rootAsk.unmount();
 }
 
+{
+  // #182/#248: what you deleted here is listed apart, left out of the import, and comes back only through Restore.
+  const rootGone=createRoot(document.getElementById('root')!,{onUncaughtError:(e:unknown)=>{(errors as unknown[]).push(e);}});
+  const restored:string[]=[];
+  rootGone.render(<ImportMapping plan={{company:{id:'c',name:'RagnarDataOps'},companies:[],local:true,projects:[{id:'pc1',name:'Docs',repo:null,localFolder:null,taskCount:2,existing:'new'}],deleted:[{kind:'project',id:'pc7',label:'Old board',key:null},{kind:'task',id:'t9',label:'Fix login',key:'RAG-9'}]} as any} targets={{pc1:'import'}} busy={false} onChange={()=>{}} onCancel={()=>{}} onImport={()=>{}} onRestore={(k,id)=>{restored.push(`${k}:${id}`);}}/>);
+  await delay(60);
+  assert.deepEqual(text('.ws-import-map .ws-row-title'),['Docs','Old board','RAG-9 · Fix login']);
+  assert.match(text('.ws-import-deleted h4')[0],/Deleted here/);
+  assert.equal((button(/^Import 1 project$/) as HTMLButtonElement).disabled,false,'deleted ones are not part of the count');
+  await click(document.querySelector('button[aria-label="Restore Fix login"]'));
+  assert.deepEqual(restored,['task:t9']);
+  rootGone.unmount();
+}
+
 // S44: "Open project" from the sidebar lands on the project the first time, even when React discards a first render.
 {
   const {StrictMode,Suspense,lazy}=await import('react');

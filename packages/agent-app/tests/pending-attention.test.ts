@@ -7,6 +7,7 @@ import {randomUUID} from 'node:crypto';
 import {setTimeout as delay} from 'node:timers/promises';
 import {createAgentService} from '../src/runtime/service.ts';
 import {AgentStore} from '../src/runtime/store.ts';
+import {ATTENTION_WINDOW_MS} from '../src/shared/attention-expiry.ts';
 import {type ProviderAdapter,type ProviderInput} from '../src/runtime/provider.ts';
 /** A fixture model id: tests never depend on a particular provider's catalog. */
 const MODEL='fixture-model';
@@ -66,7 +67,8 @@ test('expiration clears both handler kinds and publishes the empty summary',asyn
  await service.invoke('chat.send',{id:chat.id,text:'ask',requestId:randomUUID()});
  await until(async()=>(await service.invoke('app.snapshot',undefined)).attention?.totalRequests===2);
  assert.equal((await service.invoke('app.snapshot',undefined)).attention?.totalRequests,2);
- t.mock.timers.tick(600_000);
+ t.mock.timers.tick(ATTENTION_WINDOW_MS);
+ await until(async()=>(await service.invoke('app.snapshot',undefined)).attention?.totalRequests===0);
  assert.equal((await service.invoke('app.snapshot',undefined)).attention?.totalRequests,0);
  const items=(await service.invoke('chat.timeline',{id:chat.id})).items.filter(i=>i.kind==='approval'||i.kind==='question');
  assert.deepEqual(items.map(i=>i.status),['expired','expired']);

@@ -1,0 +1,341 @@
+{
+ "client_version": "0.162.0",
+ "models": [
+  {
+   "slug": "gpt-6.1-sol",
+   "display_name": "GPT-6.1-Sol",
+   "default_reasoning_level": "low",
+   "visibility": "list",
+   "priority": 1,
+   "supported_in_api": true,
+   "upgrade": null,
+   "context_window": 272000,
+   "input_modalities": [
+    "text",
+    "image"
+   ],
+   "supports_search_tool": true,
+   "supported_reasoning_levels": [
+    {
+     "effort": "low"
+    },
+    {
+     "effort": "medium"
+    },
+    {
+     "effort": "high"
+    },
+    {
+     "effort": "xhigh"
+    },
+    {
+     "effort": "max"
+    },
+    {
+     "effort": "ultra"
+    }
+   ]
+  },
+  {
+   "slug": "gpt-6-astra",
+   "display_name": "GPT-6-Astra",
+   "default_reasoning_level": "medium",
+   "visibility": "list",
+   "priority": 2,
+   "supported_in_api": true,
+   "upgrade": null,
+   "context_window": 272000,
+   "input_modalities": [
+    "text",
+    "image"
+   ],
+   "supports_search_tool": true,
+   "supported_reasoning_levels": [
+    {
+     "effort": "low"
+    },
+    {
+     "effort": "medium"
+    },
+    {
+     "effort": "high"
+    },
+    {
+     "effort": "xhigh"
+    },
+    {
+     "effort": "max"
+    },
+    {
+     "effort": "ultra"
+    }
+   ]
+  },
+  {
+   "slug": "gpt-6-sol",
+   "display_name": "GPT-6-Sol",
+   "default_reasoning_level": "medium",
+   "visibility": "list",
+   "priority": 3,
+   "supported_in_api": true,
+   "upgrade": null,
+   "context_window": 272000,
+   "input_modalities": [
+    "text",
+    "image"
+   ],
+   "supports_search_tool": true,
+   "supported_reasoning_levels": [
+    {
+     "effort": "low"
+    },
+    {
+     "effort": "medium"
+    },
+    {
+     "effort": "high"
+    },
+    {
+     "effort": "xhigh"
+    },
+    {
+     "effort": "max"
+    },
+    {
+     "effort": "ultra"
+    }
+   ]
+  },
+  {
+   "slug": "gpt-6-luna",
+   "display_name": "GPT-6-Luna",
+   "default_reasoning_level": "medium",
+   "visibility": "list",
+   "priority": 4,
+   "supported_in_api": true,
+   "upgrade": null,
+   "context_window": 272000,
+   "input_modalities": [
+    "text",
+    "image"
+   ],
+   "supports_search_tool": true,
+   "supported_reasoning_levels": [
+    {
+     "effort": "low"
+    },
+    {
+     "effort": "medium"
+    },
+    {
+     "effort": "high"
+    },
+    {
+     "effort": "xhigh"
+    },
+    {
+     "effort": "max"
+    }
+   ]
+  },
+  {
+   "slug": "gpt-reserve",
+   "display_name": "GPT-Reserve",
+   "default_reasoning_level": "medium",
+   "visibility": "hide",
+   "priority": 4,
+   "supported_in_api": true,
+   "upgrade": null,
+   "context_window": 272000,
+   "input_modalities": [
+    "text",
+    "image"
+   ],
+   "supports_search_tool": true,
+   "supported_reasoning_levels": [
+    {
+     "effort": "low"
+    },
+    {
+     "effort": "medium"
+    },
+    {
+     "effort": "high"
+    },
+    {
+     "effort": "xhigh"
+    },
+    {
+     "effort": "max"
+    }
+   ]
+  },
+  {
+   "slug": "gpt-5.6-sol",
+   "display_name": "GPT-5.6-Sol",
+   "default_reasoning_level": "low",
+   "visibility": "list",
+   "priority": 5,
+   "supported_in_api": true,
+   "upgrade": null,
+   "context_window": 272000,
+   "input_modalities": [
+    "text",
+    "image"
+   ],
+   "supports_search_tool": true,
+   "supported_reasoning_levels": [
+    {
+     "effort": "low"
+    },
+    {
+     "effort": "medium"
+    },
+    {
+     "effort": "high"
+    },
+    {
+     "effort": "xhigh"
+    },
+    {
+     "effort": "max"
+    },
+    {
+     "effort": "ultra"
+    }
+   ]
+  },
+  {
+   "slug": "gpt-5.6-terra",
+   "display_name": "GPT-5.6-Terra",
+   "default_reasoning_level": "medium",
+   "visibility": "list",
+   "priority": 8,
+   "supported_in_api": true,
+   "upgrade": null,
+   "context_window": 272000,
+   "input_modalities": [
+    "text",
+    "image"
+   ],
+   "supports_search_tool": true,
+   "supported_reasoning_levels": [
+    {
+     "effort": "low"
+    },
+    {
+     "effort": "medium"
+    },
+    {
+     "effort": "high"
+    },
+    {
+     "effort": "xhigh"
+    },
+    {
+     "effort": "max"
+    },
+    {
+     "effort": "ultra"
+    }
+   ]
+  },
+  {
+   "slug": "gpt-5.6-luna",
+   "display_name": "GPT-5.6-Luna",
+   "default_reasoning_level": "medium",
+   "visibility": "list",
+   "priority": 9,
+   "supported_in_api": true,
+   "upgrade": null,
+   "context_window": 272000,
+   "input_modalities": [
+    "text",
+    "image"
+   ],
+   "supports_search_tool": true,
+   "supported_reasoning_levels": [
+    {
+     "effort": "low"
+    },
+    {
+     "effort": "medium"
+    },
+    {
+     "effort": "high"
+    },
+    {
+     "effort": "xhigh"
+    },
+    {
+     "effort": "max"
+    }
+   ]
+  },
+  {
+   "slug": "gpt-5.5",
+   "display_name": "GPT-5.5",
+   "default_reasoning_level": "medium",
+   "visibility": "hide",
+   "priority": 13,
+   "supported_in_api": true,
+   "upgrade": {
+    "model": "gpt-6.1-sol",
+    "migration_markdown": "GPT-5.5 retires on October 14, 2026. Switch to GPT-6.1 Sol to continue working in Codex.",
+    "retirement_at": "2026-10-14T19:00:00Z"
+   },
+   "context_window": 272000,
+   "input_modalities": [
+    "text",
+    "image"
+   ],
+   "supports_search_tool": true,
+   "supported_reasoning_levels": [
+    {
+     "effort": "low"
+    },
+    {
+     "effort": "medium"
+    },
+    {
+     "effort": "high"
+    },
+    {
+     "effort": "xhigh"
+    }
+   ]
+  },
+  {
+   "slug": "codex-auto-review",
+   "display_name": "Codex Auto Review",
+   "default_reasoning_level": "medium",
+   "visibility": "hide",
+   "priority": 43,
+   "supported_in_api": true,
+   "upgrade": null,
+   "context_window": 272000,
+   "input_modalities": [
+    "text",
+    "image"
+   ],
+   "supports_search_tool": true,
+   "supported_reasoning_levels": [
+    {
+     "effort": "low"
+    },
+    {
+     "effort": "medium"
+    },
+    {
+     "effort": "high"
+    },
+    {
+     "effort": "xhigh"
+    },
+    {
+     "effort": "max"
+    }
+   ]
+  }
+ ]
+}

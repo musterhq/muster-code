@@ -14,13 +14,14 @@ import {DesktopWorkspaces,commandAuthority,computerAuthority} from './desktop-wo
 import { pathToFileURL } from 'node:url';
 import { ARCHIVE_RUNNING_WARNING, type AgentEvent, type Commands, type Snapshot } from '../shared/protocol.ts';
 import {chatMenuTemplate,folderMenuTemplate,projectMenuTemplate,popupChoice,type ChatMenuCommand,type FolderMenuCommand,type ProjectMenuCommand} from './chat-menu.ts';
-import {attentionAllowed,createSettleTracker,notificationPrefs,notificationsMuted,wantedNotices,type NotificationPrefs} from './chat-notifications.ts';
+import {attentionAllowed,createAttentionTracker,createSettleTracker,notificationPrefs,notificationsMuted,wantedNotices,type NotificationPrefs} from './chat-notifications.ts';
 import { isCommandName } from './commands.ts';
 import { fileOperation, mutablePath } from '../runtime/file-operations.ts';
 import { accessSync, constants as fsConstants, existsSync, readFileSync, promises as fs } from 'node:fs';
 import { resolveInside } from '../runtime/paths.ts';
+import {archiveNames,zipStore} from './zip.ts';
 import {BrowserWorkspaceController} from './browser-workspace.ts';
-import {BrowserBridge} from './agent-tools/browser-bridge.ts';
+import {BrowserBridge,BROWSER_BRIDGE_START_KEY} from './agent-tools/browser-bridge.ts';
 import {TERMINAL_MCP_LAUNCHER_ENV,TERMINAL_READ_MAX_BYTES,TerminalToolHost} from '../runtime/terminal-agent-tools.ts';
 import {accessibilityText,captureSource,captureSources,computerPermissions} from './computer-capture.ts';
 import {NativePreviewController} from './native-preview.ts';
@@ -169,6 +170,26 @@ async function main(): Promise<void> {
       toast.show();
     }
   };
+  // An approval or question raised out of sight gets one toast, and one reminder shortly before it closes.
+  const attentionTracker = createAttentionTracker();
+  let lastAttention: Snapshot['attention'];
+  // Timers can fire late after a sleep: close every request past its stored deadline so cards and badges follow the clock.
+  const sweepAttention = (): Promise<unknown> => loaded.service.invoke('attention.sweep', {}).catch(() => undefined);
+  const notifyAttention = (): void => {
+    const focused = window !== null && !window.isDestroyed() && window.isVisible() && window.isFocused();
+    const notices = attentionTracker(lastAttention, Date.now(), notifyPrefs, focused && lastActiveChatId ? lastActiveChatId : null);
+    if (!notices.length || !Notification.isSupported()) return;
+    for (const notice of notices.slice(0, 3)) {
+      const toast = new Notification({ title: notice.title, body: notice.body });
+      shownNotifications.add(toast);
+      if (shownNotifications.size > 12) shownNotifications.delete(shownNotifications.values().next().value!);
+      toast.on('click', () => { shownNotifications.delete(toast); void openLinkedChat(notice.chatId); });
+      toast.on('close', () => shownNotifications.delete(toast));
+      toast.show();
+    }
+  };
+  // Snapshots only arrive on change, so reminders need a clock of their own.
+  setInterval(() => { if (lastAttention?.totalRequests) { void sweepAttention(); notifyAttention(); } }, 30_000).unref();
   // CHAT-15: a timed or activity wake carries exactly one notification (the runtime emits chatWoke once per transition).
   let lastActiveChatId: string | undefined;
   const justWoke = new Set<string>();
@@ -195,6 +216,8 @@ async function main(): Promise<void> {
       if ((before === 0) !== (runningChats === 0)) repaintPolicy?.();
       applyBadge(event.snapshot.attention?.totalRequests ?? 0);
       notifySettled(event.snapshot);
+      lastAttention = event.snapshot.attention;
+      notifyAttention();
     }
     if (window && !window.isDestroyed() && window.isVisible()) {
       window.webContents.send('muster:event', event);
@@ -263,6 +286,7 @@ async function main(): Promise<void> {
   // provider sessions; sandboxes are re-inspected here because ScopedComputers lives in main. Lock/unlock are no-ops.
   const forwardPower=(state:'suspend'|'resume'|'lock-screen'|'unlock-screen')=>{
     void loaded.service.power?.({state}).catch(error=>console.warn(`power ${state} failed:`,error instanceof Error?error.message:error));
+    if(state==='resume')void sweepAttention();
     if(state==='resume')void computers.recheckAfterWake().catch(()=>undefined);
   };
   powerMonitor.on('suspend',()=>forwardPower('suspend'));
@@ -340,7 +364,11 @@ async function main(): Promise<void> {
   // RUN-X1: the agent drives this same browser through the muster_browser MCP bridge; each chat's tab shows in the right pane.
   const browserBridge = new BrowserBridge({dir:path.join(dataDir,'agent-tools'),browser:browserWorkspace,execPath:process.execPath,script:unpackedPath(path.join(__dirname,'browser-mcp.cjs')),
     snapshot:()=>loaded.service.invoke('app.snapshot',undefined),lease:async chatId=>(await loaded.service.invoke('computer.lease',{chatId})).owner,emit:onEvent});
-  void browserBridge.start().then(launcher=>{process.env.MUSTER_BROWSER_MCP_LAUNCHER=launcher;},error=>console.warn(`Agent browser bridge unavailable: ${error instanceof Error?error.message:String(error)}`));
+  // #387/#424: started now (retried once), and again on first use if that failed; HTTP routes call it in-process.
+  const startBrowserBridge=()=>browserBridge.ensureStarted().then(launcher=>{process.env.MUSTER_BROWSER_MCP_LAUNCHER=launcher;return launcher;});
+  (globalThis as Record<symbol,unknown>)[BROWSER_BRIDGE_START_KEY]=startBrowserBridge;
+  const unregisterBrowserCaller=browserBridge.register();
+  void startBrowserBridge().catch(error=>console.warn(`Agent browser bridge unavailable: ${error instanceof Error?error.message:String(error)}`));
   window.on('hide',()=>nativePreview.hide());
   window.on('closed',()=>nativePreview.hide());
   window.webContents.on('did-start-loading',()=>{nativePreview.hide();processes.detachAll();});
@@ -646,6 +674,23 @@ async function main(): Promise<void> {
       await fs.copyFile(source,result.filePath);
       return {saved:true,fileName:path.basename(result.filePath)};
     }
+    if(command==='files.downloadImages'){
+      if(!service||!window||window.isDestroyed())throw new Error('Agent service is unavailable.');
+      const request=input as Commands['files.downloadImages']['input'];
+      if(!request||typeof request.chatId!=='string'||!Array.isArray(request.images)||request.images.length<1||request.images.length>60)throw new Error('Invalid Download all request.');
+      // Every image is read through the preview gates: a folder image stays inside its folder, any other path must be named by this chat's own rows.
+      const files:{path:string;data:Buffer}[]=[];
+      for(const image of request.images){
+        if(!image||typeof image.path!=='string'||!image.path||image.path.length>4096||(image.folderId!==undefined&&typeof image.folderId!=='string'))throw new Error('Invalid Download all request.');
+        const asset=image.folderId?await service.invoke('files.asset',{folderId:image.folderId,path:image.path}):await service.invoke('files.chatImage',{chatId:request.chatId,path:image.path});
+        files.push({path:image.path,data:Buffer.from(asset.dataUrl.slice(asset.dataUrl.indexOf(',')+1),'base64')});
+      }
+      const names=archiveNames(files.map(file=>file.path));
+      const result=await dialog.showSaveDialog(window,{title:'Download images',defaultPath:path.join(app.getPath('downloads'),'muster-images.zip'),filters:[{name:'Zip archive',extensions:['zip']}]});
+      if(result.canceled||!result.filePath)return {saved:false};
+      await fs.writeFile(result.filePath,zipStore(files.map((file,index)=>({name:names[index]!,data:file.data}))));
+      return {saved:true,fileName:path.basename(result.filePath),count:files.length};
+    }
     if(command==='paperclip.output.save'){
       if(!service||!window||window.isDestroyed())throw new Error('Agent service is unavailable.');
       const request=input as Commands['paperclip.output.save']['input'];
@@ -898,7 +943,7 @@ async function main(): Promise<void> {
           if(failure?.status==='rejected')throw failure.reason;
         })().catch(error=>{disposal=undefined;throw error;});
         await withinDeadline(disposal, 5000);
-        browserBridge.dispose();
+        unregisterBrowserCaller();browserBridge.dispose();
         terminalTools.dispose();
         browserWorkspace.dispose();
         nativePreview.hide();

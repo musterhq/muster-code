@@ -35,10 +35,11 @@ import {useStoreSelector} from '../useStore';
 import {useLatestTurnFiles} from '../reviewState';
 import {EnvironmentFooter} from './EnvironmentFooter';
 import { StatusDot } from './StatusDot';
-import { ToolCard } from './ToolCard';
+import { ToolCard, TurnGallery } from './ToolCard';
+import { GalleryCoverage } from './ImageGallery';
 import { ActivityGroup } from './ActivityGroup';
-import { summarizeActivity, type TranscriptEntry } from './activityGrouping';
-import { MessageBody } from './MessageBody';
+import { summarizeActivity, viewedImages, type TranscriptEntry } from './activityGrouping';
+import { MessageBody, localImagePath } from './MessageBody';
 import {LiveAnnouncer,LiveTurnHeader,TurnHeader,WorkingTail} from './TurnStatus';
 import {ReasoningRow} from './ReasoningRow';
 import {TurnFileChanges} from './TurnFileChanges';
@@ -116,7 +117,7 @@ interface TurnHeaderProps {durationMs:number|null;open:boolean;onToggle:()=>void
 /** A live turn's header: "Working for …" since its user message. */
 interface LiveTurnProps {live:string}
 interface EditingProps {onSubmit:(text:string,mode:EditResendMode,restoreFiles?:Array<{path:string;afterHash:string}>)=>Promise<boolean>;onCancel:()=>void}
-function TimelineCardImpl({ item, nextAt, reveal, turn, tail=false, actions, editing, plan=false, meta=true }: { item: TranscriptEntry; nextAt?:string; reveal?:string; turn?:TurnHeaderProps|LiveTurnProps; tail?:boolean; actions?:MessageActions; editing?:EditingProps; plan?:boolean; meta?:boolean }): React.ReactElement {
+function TimelineCardImpl({ item, nextAt, reveal, turn, tail=false, actions, editing, plan=false, meta=true, gallery }: { gallery?:readonly string[]; item: TranscriptEntry; nextAt?:string; reveal?:string; turn?:TurnHeaderProps|LiveTurnProps; tail?:boolean; actions?:MessageActions; editing?:EditingProps; plan?:boolean; meta?:boolean }): React.ReactElement {
   switch (item.kind) {
     case 'activity': return <ActivityGroup items={item.items} reveal={reveal} live={tail}/>;
     case 'user':
@@ -131,6 +132,7 @@ function TimelineCardImpl({ item, nextAt, reveal, turn, tail=false, actions, edi
       return (
         <div className="msg msg-assistant">
           <MessageBody text={item.text} animate linkFiles reports />
+          {gallery&&<TurnGallery chatId={item.chatId} paths={gallery}/>}
           {meta&&<MessageMeta text={item.text} createdAt={item.createdAt} label="Copy response" actions={actions}/>}
         </div>
       );
@@ -148,7 +150,7 @@ function TimelineCardImpl({ item, nextAt, reveal, turn, tail=false, actions, edi
 const sameKeys=(a?:object,b?:object)=>a===b||(!!a&&!!b&&Object.keys(a).join()===Object.keys(b).join());
 const sameTurn=(a?:TurnHeaderProps|LiveTurnProps,b?:TurnHeaderProps|LiveTurnProps)=>a===b||(!!a&&!!b&&('live' in a?'live' in b&&a.live===b.live:!('live' in b)&&a.durationMs===b.durationMs&&a.open===b.open&&a.summary===b.summary));
 /** Finished rows skip re-rendering while the tail streams. */
-const TimelineCard=React.memo(TimelineCardImpl,(a,b)=>a.item===b.item&&a.nextAt===b.nextAt&&a.reveal===b.reveal&&a.tail===b.tail&&a.plan===b.plan&&a.meta===b.meta&&sameKeys(a.actions,b.actions)&&!a.editing===!b.editing&&sameTurn(a.turn,b.turn));
+const TimelineCard=React.memo(TimelineCardImpl,(a,b)=>a.item===b.item&&a.nextAt===b.nextAt&&a.reveal===b.reveal&&a.tail===b.tail&&a.plan===b.plan&&a.meta===b.meta&&a.gallery===b.gallery&&sameKeys(a.actions,b.actions)&&!a.editing===!b.editing&&sameTurn(a.turn,b.turn));
 
 const turnDisclosures=new Map<string,boolean>();
 function rememberTurn(id:string,open:boolean){turnDisclosures.delete(id);turnDisclosures.set(id,open);if(turnDisclosures.size>300)turnDisclosures.delete(turnDisclosures.keys().next().value!);}
@@ -164,6 +166,20 @@ export function textRanges(root:Node,needle:string,limit=400):Range[] {
 }
 type HighlightRegistry={set(name:string,value:unknown):void;delete(name:string):void};
 const highlightApi=()=>{const css=(globalThis as {CSS?:{highlights?:HighlightRegistry}}).CSS,Ctor=(globalThis as {Highlight?:new(...ranges:Range[])=>unknown}).Highlight;return css?.highlights&&Ctor?{registry:css.highlights,Ctor}:null;};
+
+/** Images a turn names, in order: the ones its tool rows viewed and the local pictures its replies embed. Cached per row so a
+ *  streamed token only re-reads the row that grew. */
+const MARKDOWN_IMAGE=/!\[[^\]]*\]\(\s*<?([^)\s>]+)>?[^)]*\)/g;
+const scanned=new WeakMap<object,{size:number;paths:string[]}>();
+function rowImages(row:TranscriptEntry):string[] {
+  if(row.kind!=='activity'&&row.kind!=='assistant')return [];
+  const size=row.kind==='activity'?row.items.length+row.items.reduce((n,item)=>n+(item.status==='completed'?1:0),0):row.text.length,hit=scanned.get(row);
+  if(hit&&hit.size===size)return hit.paths;
+  const paths=row.kind==='activity'?viewedImages(row.items):[...row.text.matchAll(MARKDOWN_IMAGE)].flatMap(match=>{const path=localImagePath(match[1]);return path?[path]:[];});
+  scanned.set(row,{size,paths});return paths;
+}
+interface TurnGalleryModel {key:string;paths:string[];covered:ReadonlySet<string>}
+const NO_COVERAGE:ReadonlySet<string>=new Set();
 const TAIL_HEIGHT=40;
 
 export function Timeline({ items, chatId, onScrolled, running, planMode=false }: { items: TimelineItem[]; chatId:string; onScrolled?: (scrolled:boolean)=>void; running?:boolean; planMode?:boolean }): React.ReactElement {
@@ -186,6 +202,21 @@ export function Timeline({ items, chatId, onScrolled, running, planMode=false }:
     }
     return map;
   },[rows,turnModel]);
+  // One gallery per turn that viewed or embedded two or more images, shown under its last reply. Entries keep their identity while
+  // their images are unchanged, so a streamed token never re-renders the gallery.
+  const galleryMemo=useRef(new Map<string,TurnGalleryModel>());
+  const galleries=useMemo(()=>{
+    const next=new Map<string,TurnGalleryModel&{reply:string}>();
+    for(const [id,info] of turnModel.turns){
+      let reply:string|undefined;const paths:string[]=[];
+      for(let index=info.row+1;index<=info.end;index++){const row=rows[index];if(row.kind==='assistant')reply=row.id;for(const path of rowImages(row))if(!paths.includes(path))paths.push(path);}
+      if(!reply||paths.length<2)continue;
+      const key=reply+'\0'+paths.join('\0'),old=galleryMemo.current.get(id);
+      next.set(id,old?.key===key?Object.assign(old,{reply}):{key,paths,covered:new Set(paths),reply});
+    }
+    galleryMemo.current=next;return next;
+  },[rows,turnModel]);
+  const galleryByReply=useMemo(()=>new Map([...galleries.values()].map(model=>[model.reply,model])),[galleries]);
   // Files Git saw the latest turn change: a shell-editing model leaves no fileChange item, so the transcript's Edited rows follow Git too.
   const gitTurnFiles=useLatestTurnFiles(chatId,useStoreSelector(state=>state.snapshot?.chats.find(c=>c.id===chatId)?.folderId??undefined),running?'running':'idle')?.files.length??0;
   const turnEnds=useMemo(()=>new Map([...turnModel.turns.values()].map(info=>[info.end,info.id])),[turnModel]);
@@ -359,6 +390,12 @@ export function Timeline({ items, chatId, onScrolled, running, planMode=false }:
     }
   }, [rows.length, totalSize, virtualizer]);
 
+  /** A reply straight after another reply of the same turn, with nothing visible between them. */
+  const continuesReply=(index:number):boolean=>{
+    if(folded(index)||rows[index]?.kind!=='assistant')return false;
+    let before=index-1;while(before>=0&&folded(before))before--;
+    return before>=0&&rows[before].kind==='assistant'&&turnModel.rowTurn[before]===turnModel.rowTurn[index]&&!turnEnds.get(before);
+  };
   return (
     <div className={`timeline-shell${turns.length?' timeline-with-navigation':''}`}>
     <TimelineNavigation turns={turns} currentId={currentTurn} canGoBack={backCount>0} onTurn={jumpToTurn} onBack={jumpBack} onLatest={jumpToLatest} searchQuery={searchQuery} onSearch={setSearchQuery} searchCount={searchMatches.length} searchIndex={searchIndex} onSearchStep={stepSearch}/>
@@ -369,18 +406,23 @@ export function Timeline({ items, chatId, onScrolled, running, planMode=false }:
       >
         {virtualizer.getVirtualItems().map((v) => {
           const row=rows[v.index],hidden=folded(v.index),info=row.kind==='user'?turnModel.turns.get(row.id):undefined;
+          // A reply straight after another reply of the same turn (nothing visible between) sits at the paragraph gap.
+          const continues=continuesReply(v.index);
+          // ...and the reply above it gives up its bottom spacing, so the two meet at exactly one paragraph gap.
+          let after=v.index+1;while(after<rows.length&&folded(after))after++;
+          const continued=!hidden&&after<rows.length&&continuesReply(after);
           return <div
             key={v.key}
             data-index={v.index}
             data-item-id={row.id}
             ref={virtualizer.measureElement}
-            className={hidden?'timeline-row is-folded':'timeline-row'}
+            className={hidden?'timeline-row is-folded':`timeline-row${continues?' is-reply-continuation':''}${continued?' has-reply-continuation':''}`}
             data-kind={row.kind}
             style={{ transform: `translateY(${v.start}px)` }}
           >
-            {!hidden&&<AreaBoundary area="this message" scope="item" resetKey={row}><TimelineCard item={row} meta={row.kind!=='assistant'||finalReplies.has(row.id)} plan={row.kind==='assistant'&&row.id===planId} actions={actionsFor(row)} editing={editingFor(row)} tail={live&&v.index===rows.length-1} nextAt={row.kind==='reasoning'?rowStart(rows[v.index+1]):undefined}
+            {!hidden&&<AreaBoundary area="this message" scope="item" resetKey={row}><GalleryCoverage.Provider value={galleries.get(turnModel.rowTurn[v.index]??'')?.covered??NO_COVERAGE}><TimelineCard gallery={galleryByReply.get(row.id)?.paths} item={row} meta={row.kind!=='assistant'||finalReplies.has(row.id)} plan={row.kind==='assistant'&&row.id===planId} actions={actionsFor(row)} editing={editingFor(row)} tail={live&&v.index===rows.length-1} nextAt={row.kind==='reasoning'?rowStart(rows[v.index+1]):undefined}
               reveal={activeMatch?.rowIndex===v.index?activeMatch.itemId:undefined}
-              turn={info&&info.complete&&info.work>0?{durationMs:info.durationMs,open:isTurnOpen(info.id),onToggle:()=>setTurn(info.id,!isTurnOpen(info.id)),summary:turnWork.get(info.id)?.summary}:info&&!info.complete&&live&&info.id===turnModel.last?{live:rowStart(row)??''}:undefined}/></AreaBoundary>}
+              turn={info&&info.complete&&info.work>0?{durationMs:info.durationMs,open:isTurnOpen(info.id),onToggle:()=>setTurn(info.id,!isTurnOpen(info.id)),summary:turnWork.get(info.id)?.summary}:info&&!info.complete&&live&&info.id===turnModel.last?{live:rowStart(row)??''}:undefined}/></GalleryCoverage.Provider></AreaBoundary>}
             {(()=>{
               // Edits stay visible after a turn even when its work is folded (Codex/Cursor): one Edited row per file, full diffs.
               const turnId=turnEnds.get(v.index),end=turnId?turnModel.turns.get(turnId):undefined,work=turnId?turnWork.get(turnId):undefined;

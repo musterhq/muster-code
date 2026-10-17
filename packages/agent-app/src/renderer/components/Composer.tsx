@@ -8,6 +8,7 @@ import { forkChat } from '../messageActions';
 import { runMenuAction } from '../menuActions';
 import { discardAttachment, listAttachments, previewAttachment, readFileBase64, runtimeMessage, stageAttachment } from '../composerBridge';
 import { ModelPicker } from './ModelPicker';
+import { isCompactCommand } from '../../shared/compact-command';
 import { createChat, flushComposerDraft, getState, loadPlugins, loadProviders, loadSkills, refreshProvidersQuietly, notifyError, notifySuccess, openAppSettings, openBrowserTab, openFile, openPluginsScreen, openProjectsScreen, openTab, selectChat, sendMessage, setComposerDraft, setFollowUpMode, snapshotRevision, stopChat, updateChat } from '../store';
 import { ADD_CONTEXT_EVENT, loadComposerMemory, normalizeContextChip, saveComposerMemory, serializeContext, type ContextChip } from '../composerContext';
 import { setTerminalDock, setTerminalPaneView, terminalDock } from '../processSummary';
@@ -497,6 +498,8 @@ export function Composer({ chat }: { chat: Chat }): React.ReactElement {
     if (noProvider && !running) { setConnectAsk(true); return; }
     if (!hasPayload || composing.current || sending || modelPending.current || settingsPending.current || chat.archived || recoveryNeeded) return;
     if (staging) { flash('Waiting for attachments to finish uploading'); return; }
+    // /compact is Muster's own command: it runs here (or waits), and is never sent to the model.
+    if (isCompactCommand(text)) { clearIfUnchanged(text); if (running) flash('Compacts as soon as the current turn finishes'); runCommand('compact'); return; }
     if (running) { void followUp(false); return; }
     if (!confirmed && chat.queuePaused && queue.length) { setConfirmSend(true); return; }
     if (isCheckoutQueued(chat.id)) { flash('Already queued · starts when the other chat in this folder finishes'); return; }
@@ -550,12 +553,16 @@ export function Composer({ chat }: { chat: Chat }): React.ReactElement {
     queuePending.current = true; setQueueing(true); setQueueError('');
     let steered = false;
     let reason = '';
+    let failed: unknown;
     try { const result = await invoke('chat.steer', { id: chat.id, text: outgoing(value), requestId: crypto.randomUUID(), ...extras }); steered = Boolean(result?.steered); reason = result?.reason ?? ''; }
-    catch { steered = false; }
+    catch (cause) { failed = cause; }
     finally { queuePending.current = false; setQueueing(false); }
     if (currentDraft.current.chatId !== chat.id) return;
+    // A steer that failed in flight may already have reached the agent: queueing it too would send it twice.
+    // The draft stays in the composer with the error, so the user decides.
+    if (failed !== undefined) { setQueueError(runtimeMessage(failed)); return; }
     if (steered) { recall.current = null; clearIfUnchanged(value); setChips(() => []); setContext(() => []); flash('Sent to the running agent'); }
-    else await queueFollowUp(reason ? `${reason} Queued instead.` : 'Queued: agent could not accept a steer right now');
+    else await queueFollowUp(reason ? (/^Queued/.test(reason) ? reason : `${reason} Queued instead.`) : 'Queued: agent could not accept a steer right now');
   };
 
   /** Codex "Start in background" (⌥Enter): a new chat in the same folder, project and model gets this message; you stay here. */
@@ -859,7 +866,7 @@ export function Composer({ chat }: { chat: Chat }): React.ReactElement {
     flash(`Saved skill $${slug} · find it under / and +`);
     requestAnimationFrame(() => input.current?.focus());
   };
-  const commandDisabled = (id: ComposerCommandId) => id === 'stop' ? !running : id === 'plan' ? choicesDisabled : id === 'model' || id === 'access' ? settingsBlocked : id === 'goal' || id === 'project' || id === 'sketch' || id === 'terminal' ? chat.archived : id === 'compact' ? running || !chat.providerThreadId : id === 'init' || id === 'review' ? chat.archived || !chat.folderId : false;
+  const commandDisabled = (id: ComposerCommandId) => id === 'stop' ? !running : id === 'plan' ? choicesDisabled : id === 'model' || id === 'access' ? settingsBlocked : id === 'goal' || id === 'project' || id === 'sketch' || id === 'terminal' ? chat.archived : id === 'compact' ? (!chat.providerThreadId && !timelineItems?.some(item => item.kind === 'user')) : id === 'init' || id === 'review' ? chat.archived || !chat.folderId : false;
   const runCommand = (id: ComposerCommandId, range?: { start: number; end: number }) => {
     if (commandDisabled(id)) return;
     if (range) replaceRange(range.start, range.end, '');

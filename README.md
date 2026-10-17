@@ -2,10 +2,16 @@
 
 # Muster Agent
 
-**The agentic development client that remembers.**
+**The open-source AI Development Environment (ADE) that remembers.**
 
-A native macOS app where coding agents work in your folders, with long-term memory, sandboxed
-computers, and the model providers you already have, all in one window.
+A desktop app for macOS, Windows and Linux where coding agents work in your folders, with long-term
+memory, sandboxes, and the agents, routers and models you already use, all in one window.
+
+<sub>Works with Codex, Claude Code, Cursor, Gemini CLI, OpenCode and Grok, any OpenAI-compatible router
+(OmniRoute, OpenRouter, LiteLLM) and local models (Ollama, LM Studio). Paperclip tasks run locally with
+automatic hand-back.</sub>
+
+**Made in India** 🇮🇳 · [themuster.dev](https://themuster.dev)
 
 
 https://github.com/user-attachments/assets/9602a60c-2faf-4138-92a1-7d850d0b44ab
@@ -14,6 +20,7 @@ https://github.com/user-attachments/assets/9602a60c-2faf-4138-92a1-7d850d0b44ab
 [![Latest release](https://img.shields.io/github/v/release/musterhq/muster-code?filter=agent-v*&label=release&color=2f6feb)](https://github.com/musterhq/muster-code/releases/latest)
 [![macOS · Windows · Linux](https://img.shields.io/badge/macOS%20·%20Windows%20·%20Linux-download-111)](https://github.com/musterhq/muster-code/releases/latest)
 [![GitHub stars](https://img.shields.io/github/stars/musterhq/muster-code?style=flat&color=f5c518)](https://github.com/musterhq/muster-code/stargazers)
+[![Made in India](https://img.shields.io/badge/Made%20in-India-ff9933)](https://themuster.dev)
 
 ### [⬇ Download Muster Agent](https://github.com/musterhq/muster-code/releases/latest)
 
@@ -333,3 +340,5 @@ Base: Code-OSS 1.126 (Electron 42, Node 24 with node:sqlite), from prebuilt Code
 ## License
 
 MIT — see [LICENSE](LICENSE). Third-party components are listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
+Made in India. Codex, ChatGPT and OpenAI are trademarks of OpenAI; Claude and Claude Code are trademarks of Anthropic; Cursor is a trademark of Anysphere; Gemini is a trademark of Google LLC. Muster Agent is an independent open-source project and is not affiliated with or endorsed by them.

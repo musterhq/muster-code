@@ -1,6 +1,8 @@
 /** The in-app browser tools the agent sees through the muster_browser MCP server. Pure: no Electron. */
 export interface BrowserToolSpec { name: string; description: string; mutates: boolean; inputSchema: Record<string, unknown> }
-const obj = (properties: Record<string, unknown>, required: string[] = []) => ({type: 'object', properties, required, additionalProperties: false});
+/** #424: a sub-agent's own tab. Optional on every tool; without it the chat's main tab is used. */
+const session = {session: {type: 'string', description: 'Optional short name (letters, digits, - or _) of your own browser tab, for a sub-agent working in parallel with others. Omit it to use the chat\'s tab.'}};
+const obj = (properties: Record<string, unknown>, required: string[] = []) => ({type: 'object', properties: {...properties, ...session}, required, additionalProperties: false});
 const target = {ref: {type: 'string', description: 'Element ref from browser_snapshot, e.g. e12'}, element: {type: 'string', description: 'Human-readable element description shown to the user'}, selector: {type: 'string', description: 'CSS selector, when no ref applies'}};
 export const BROWSER_TOOL_SPECS: readonly BrowserToolSpec[] = [
   {name: 'browser_navigate', mutates: false, description: 'Open a URL in the in-app browser the user watches in the right pane. Returns a page snapshot.', inputSchema: obj({url: {type: 'string'}}, ['url'])},

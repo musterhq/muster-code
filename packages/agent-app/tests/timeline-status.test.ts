@@ -83,8 +83,9 @@ test('thread/compacted appends a compaction row; manual compact records intent t
  await service.invoke('chat.compact',{id:chat.id});
  assert.deepEqual((await rows()).at(-1),'completed:Context compacted');
  fail=true;
- await assert.rejects(service.invoke('chat.compact',{id:chat.id}),/No live provider session/);
- assert.match((await rows()).at(-1)!,/^failed:Compaction failed: No live provider session/);
+ // No live session: Muster compacts from the stored transcript instead of failing.
+ await service.invoke('chat.compact',{id:chat.id});
+ assert.match((await rows()).at(-1)!,/^completed:Context compacted from the saved transcript/);
 });
 
 test('reasoning streams into its own rows: parts separated, a completion-only summary still arrives, never duplicated', async t=>{

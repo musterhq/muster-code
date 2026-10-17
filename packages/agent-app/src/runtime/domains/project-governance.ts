@@ -25,7 +25,7 @@ import { forgetLiterals, lendLiterals } from '../literal-redaction.ts';
 import { activeSecretStore, SecretStore } from '../secret-store.ts';
 import { isAdapterProvider } from '../adapters/index.ts';
 import type { Actor, ProjectTask, ProjectTaskStore } from '../project-tasks.ts';
-import { composeBundle, validateFile, checkBundle, changedNames } from '../governance/bundle.ts';
+import { composeBundle, heartbeatLines, validateFile, checkBundle, changedNames } from '../governance/bundle.ts';
 import { hireRequests, reviewVerdict, secretRequests, subtaskRequests, watchdogVerdict } from '../governance/blocks.ts';
 import { envOverrides, validateIdentity } from '../governance/git-identity.ts';
 import { classifyRun, commentRequiredPrompt, continuationPrompt, failureKind, retryDelayMs, type RunFacts } from '../governance/liveness.ts';
@@ -1007,30 +1007,37 @@ export function createGovernance(ctx: DomainContext, deps: GovernanceDeps) {
   }
 
   // ── run seams: prompt lines, run options, dispatch preparation ───────────────
-  /** The lines a task run gets about its agent: bundle, why it started, review feedback, what it may do. */
-  function taskLines(task: ProjectTask, chatId: string): string[] {
-    const projectId = task.projectId, mid = ownerMemberId(task), m = mid ? memberOf(projectId, mid) : undefined, out: string[] = [];
-    if (!m || m.kind !== 'agent') return out;
+  /**
+   * The lines a task run gets about its agent, in two parts. `critical` is what the run cannot work without (why it started, the reviewer's requested changes, the git
+   * identity, the task protocol, the heartbeat checklist on a timer wake); `bundle` is the agent's own instruction files. The prompt block is capped, so the caller puts
+   * `critical` first and the bundle last: a long bundle is what gets cut, never the feedback or the protocol.
+   */
+  function taskSections(task: ProjectTask, chatId: string): { critical: string[]; bundle: string[] } {
+    const projectId = task.projectId, mid = ownerMemberId(task), m = mid ? memberOf(projectId, mid) : undefined, critical: string[] = [], bundle: string[] = [];
+    if (!m || m.kind !== 'agent') return { critical, bundle };
     const meta = gov().runMeta(chatId), g = agentGov(projectId, m.id);
-    const files = bundleFiles(projectId, m);
-    const bundle = composeBundle(files, { timer: meta?.reason === 'timer', name: m.name });
-    if (m.title || bundle.length) {
+    const files = bundleFiles(projectId, m), timer = meta?.reason === 'timer';
+    const composed = composeBundle(files, { timer: false, name: m.name });
+    if (m.title || composed.length) {
       const boss = m.reportsTo ? memberOf(projectId, m.reportsTo) : undefined;
-      out.push(`You are ${m.name}${m.title ? `, ${m.title}` : ''}${boss ? `, reporting to ${boss.name}` : ''}.`, ...bundle);
+      critical.push(`You are ${m.name}${m.title ? `, ${m.title}` : ''}${boss ? `, reporting to ${boss.name}` : ''}.`);
+      bundle.push(...composed);
     }
-    if (meta && !meta.settledAt && meta.reason !== 'user' && meta.reason !== 'assignment') out.push(`Why this run started: ${RUN_REASON_LABEL[meta.reason]}${meta.note ? ` — ${clip(meta.note, 600)}` : ''}.`);
+    if (meta && !meta.settledAt && meta.reason !== 'user' && meta.reason !== 'assignment') critical.push(`Why this run started: ${RUN_REASON_LABEL[meta.reason]}${meta.note ? ` — ${clip(meta.note, 600)}` : ''}.`);
     const stage = gov().stage(task.id);
-    if (stage?.status === 'changes_requested' && stage.feedback) out.push(`Changes were requested (round ${stage.round}) by ${stage.history.at(-1)?.by ?? 'your reviewer'} — address this first:`, clip(stage.feedback, 1500));
+    if (stage?.status === 'changes_requested' && stage.feedback) critical.push(`Changes were requested (round ${stage.round}) by ${stage.history.at(-1)?.by ?? 'your reviewer'} — address this first:`, clip(stage.feedback, 1500));
+    if (timer) critical.push(...heartbeatLines(files));
     const lend = lendable(projectId, m, chatId, false);
-    if (lend.length) out.push(`Secrets lent to this run as environment variables: ${lend.join(', ')}. Never print or write their values.`);
-    if (g.gitIdentity) out.push(`Commit as ${g.gitIdentity.name} <${g.gitIdentity.email}> (already set in your environment).`);
-    out.push('Need a credential you were not given? Do not ask for it in chat. End your reply with ```muster-secret-request {"name":"NAME","purpose":"why"}```; the user approves it.');
-    if (g.capabilities.canAssign) out.push(`You may create subtasks${g.capabilities.assignScope === 'project' ? ' anywhere in the project' : ' under this task'} and hand them to teammates: end your reply with \`\`\`muster-subtasks [{"title":"…","acceptance":"…","assignee":"Name"}]\`\`\`.`);
-    if (g.capabilities.canHire) out.push('You may propose a new teammate: ```muster-hire {"name":"…","title":"…","instructions":"…"}``` or the agent_propose_hire tool.');
-    out.push(`Tools (muster_tasks): task_get, task_list, agent_list, task_comment, task_update, task_create, task_assign, task_checkout, task_document_upsert, task_ask_questions, task_request_confirmation, agent_propose_hire.`, 'Muster task protocol:', TASK_PROTOCOL);
-    if (settings(projectId).runComment !== 'off') out.push('End every run with a short comment on the task: what you did, what changed, what is left.');
-    return out;
+    if (lend.length) critical.push(`Secrets lent to this run as environment variables: ${lend.join(', ')}. Never print or write their values.`);
+    if (g.gitIdentity) critical.push(`Commit as ${g.gitIdentity.name} <${g.gitIdentity.email}> (already set in your environment).`);
+    critical.push('Need a credential you were not given? Do not ask for it in chat. End your reply with ```muster-secret-request {"name":"NAME","purpose":"why"}```; the user approves it.');
+    if (g.capabilities.canAssign) critical.push(`You may create subtasks${g.capabilities.assignScope === 'project' ? ' anywhere in the project' : ' under this task'} and hand them to teammates: end your reply with \`\`\`muster-subtasks [{"title":"…","acceptance":"…","assignee":"Name"}]\`\`\`.`);
+    if (g.capabilities.canHire) critical.push('You may propose a new teammate: ```muster-hire {"name":"…","title":"…","instructions":"…"}``` or the agent_propose_hire tool.');
+    critical.push(`Tools (muster_tasks): task_get, task_list, agent_list, task_comment, task_update, task_create, task_assign, task_checkout, task_document_upsert, task_ask_questions, task_request_confirmation, agent_propose_hire.`, 'Muster task protocol:', TASK_PROTOCOL);
+    if (settings(projectId).runComment !== 'off') critical.push('End every run with a short comment on the task: what you did, what changed, what is left.');
+    return { critical, bundle };
   }
+  const taskLines = (task: ProjectTask, chatId: string): string[] => { const { critical, bundle } = taskSections(task, chatId); return [...critical, ...bundle]; };
   const canLend = (providerId: string | undefined) => !providerId || providerId === 'claude-code' || providerId === 'opencode' || !isAdapterProvider(providerId);
   /** Names of the granted, current secrets this run can receive. `log` records the lending in the audit. */
   function lendable(projectId: string, m: ProjectMember, chatId: string, log: boolean): string[] {
@@ -1330,7 +1337,7 @@ export function createGovernance(ctx: DomainContext, deps: GovernanceDeps) {
   }
   return {
     handlers: commands() as unknown as Record<string, DomainHandler>,
-    gate, preflight, release, held, identityForFolder, noteWorktree, clampAccess, beforeSend, prepareDispatch, taskLines, runOptions, decideTool, started, settled, idle, purgeTask, purgeProject, memberGone, taskView, holdFor, evaluate: scheduleEval, armAll, dispose,
+    gate, preflight, release, held, identityForFolder, noteWorktree, clampAccess, beforeSend, prepareDispatch, taskLines, taskSections, runOptions, decideTool, started, settled, idle, purgeTask, purgeProject, memberGone, taskView, holdFor, evaluate: scheduleEval, armAll, dispose,
     /** For tests: the stores and queues behind the commands. */
     internals: { gov, wakeQueue, heartbeatTimers, retryTimers, tick, fireMonitors, evaluateWatchdogs, readyTaskFor, recoveryItems, effectivePolicy, startStage },
   };

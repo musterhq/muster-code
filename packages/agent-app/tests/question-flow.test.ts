@@ -7,6 +7,7 @@ import { randomUUID } from 'node:crypto';
 import { createAgentService } from '../src/runtime/service.ts';
 import type { ProviderAdapter } from '../src/runtime/provider.ts';
 import { AgentStore } from '../src/runtime/store.ts';
+import { ATTENTION_WINDOW_MS } from '../src/shared/attention-expiry.ts';
 
 const waitForQuestion = async (service: ReturnType<typeof createAgentService>, chatId: string) => {
   for (let i = 0; i < 100; i += 1) {
@@ -179,7 +180,7 @@ test('expiry sends a cancel and a restart keeps the question as expired with its
     let item;
     for (let i = 0; i < 200 && !item; i += 1) { item = (await service.invoke('chat.select', { id: chat.id })).find(candidate => candidate.kind === 'question'); if (!item) await new Promise(resolve => setImmediate(resolve)); }
     assert.ok(item);
-    t.mock.timers.tick(10 * 60_000);
+    t.mock.timers.tick(ATTENTION_WINDOW_MS);
     for (let i = 0; i < 200 && !answers.length; i += 1) await new Promise(resolve => setImmediate(resolve));
     assert.equal((answers[0] as Record<string, unknown>).action, 'cancel');
     assert.equal((await service.invoke('chat.select', { id: chat.id })).find(candidate => candidate.id === item.id)?.status, 'expired');

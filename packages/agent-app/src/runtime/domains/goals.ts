@@ -43,10 +43,10 @@ const AUDIT = [
   'Never ask the user for permission or confirmation to proceed (no "say go", "want me to continue?", "shall I…"): the user already asked you to keep going. Take the next step yourself; end a turn with a question only when you are truly blocked on information only the user has.',
   'Do not re-run verification that already passed unless files changed since. Do not leave long-running processes (dev servers, watchers) running at the end of a turn, and never stop or kill processes you did not start yourself (the user\'s terminals and servers are off-limits).',
 ].join('\n');
-/** Model-declared completion in prose, for turns that finish the work but forget the update line. */
+/** The model says in prose that the goal is done. That never closes a goal ("Phase 1 is complete" is not the goal); it only earns the completion check on the next turn, where the model must settle with the update line. */
 const DECLARED_DONE = /\b(?:the\s+)?goal\s+(?:is\s+|has\s+been\s+)?(?:now\s+)?(?:complete|completed|achieved|met|satisfied|done)\b|\ball\s+(?:goal\s+)?requirements\s+(?:are\s+|have\s+been\s+)?(?:now\s+)?(?:met|satisfied|complete|verified)\b/i;
 /** Added to the goal instructions after a goal turn that did no tool work: settle instead of re-verifying. */
-export const GOAL_COMPLETION_CHECK = `Your last goal turn did no tool work. If every requirement is already met and verified, do not re-verify: give the completion audit and end with ${GOAL_UPDATE_CALL}(status="complete") now. Otherwise take the next concrete action without asking for permission.`;
+export const GOAL_COMPLETION_CHECK = `Your last goal turn did no tool work, or only said in prose that the goal is done (that does not close it). If every requirement is already met and verified, do not re-verify: give the completion audit and end with ${GOAL_UPDATE_CALL}(status="complete") now. Otherwise take the next concrete action without asking for permission.`;
 /** Goal turns carry only a short request; the fenced objective and the audit rules travel as developer instructions. */
 export const goalKickoff = (_text: string) => 'Start working toward the goal.';
 export const goalContinuation = (_text: string) => 'Continue working toward the goal.';
@@ -58,7 +58,7 @@ export function goalUpdate(text: string): 'complete' | 'blocked' | null {
   for (const match of text.matchAll(UPDATE)) last = match[1]!.toLowerCase() as 'complete' | 'blocked';
   return last;
 }
-/** The model said, in prose, that the goal is done (no update line). Only negation-free sentences count. */
+/** The model claimed, in prose, that the goal is done (no update line). Only negation-free sentences count. Used for the completion check, never to close the goal. */
 export function goalDeclaredDone(text: string): boolean {
   return text.split(/(?<=[.!?\n])\s+/).some(sentence => DECLARED_DONE.test(sentence) && !/\b(?:not|n't|never|until|once|when|before|if|remaining|yet)\b/i.test(sentence));
 }
@@ -76,6 +76,7 @@ export function createGoalsDomain(ctx: DomainContext): DomainModule {
   const stalls = new Map<string, { empty: number; failed: number }>();
   /** Chats whose last goal turn did no tool work; the next continuation asks for completion instead. */
   const idleTurns = new Map<string, number>();
+  const claimedDone = new Set<string>();
   /** Chats whose running turn was dispatched by the goal loop (not typed by the user). */
   const goalTurns = new Set<string>();
   let disposed = false;
@@ -90,7 +91,7 @@ export function createGoalsDomain(ctx: DomainContext): DomainModule {
   const cancel = (id: string) => { const timer = timers.get(id); if (timer) { clearTimeout(timer); timers.delete(id); } };
   /** Stops the clock: folds the active span into accumulatedMs. */
   const halt = (goal: ChatGoal, next: Exclude<GoalStatus, 'active'>, reason?: GoalPauseReason): ChatGoal => {
-    cancel(goal.chatId); stalls.delete(goal.chatId); idleTurns.delete(goal.chatId); goalTurns.delete(goal.chatId);
+    cancel(goal.chatId); stalls.delete(goal.chatId); idleTurns.delete(goal.chatId); claimedDone.delete(goal.chatId); goalTurns.delete(goal.chatId);
     const now = Date.now(), span = goal.startedAt ? Math.max(0, now - Date.parse(goal.startedAt)) : 0;
     const { reason: _previous, completedAt: _completed, ...rest } = goal;
     return write({ ...rest, status: next, ...(reason ? { reason } : {}), startedAt: null, accumulatedMs: goal.accumulatedMs + span, ...(next === 'complete' ? { completedAt: new Date(now).toISOString() } : {}) });
@@ -117,7 +118,7 @@ export function createGoalsDomain(ctx: DomainContext): DomainModule {
   };
   /** Folds the app-server's view of the goal (status, objective, budget, accounting) into Muster's row. */
   const adopt = (goal: ChatGoal, snapshot: NativeGoalSnapshot, reason?: GoalPauseReason): ChatGoal => {
-    cancel(goal.chatId); stalls.delete(goal.chatId); idleTurns.delete(goal.chatId); goalTurns.delete(goal.chatId);
+    cancel(goal.chatId); stalls.delete(goal.chatId); idleTurns.delete(goal.chatId); claimedDone.delete(goal.chatId); goalTurns.delete(goal.chatId);
     const next = snapshot.status ?? goal.status, now = Date.now(), iso = new Date(now).toISOString();
     let accumulatedMs = goal.accumulatedMs, startedAt = goal.startedAt;
     if (snapshot.timeUsedSeconds !== undefined) { accumulatedMs = snapshot.timeUsedSeconds * 1000; startedAt = next === 'active' ? iso : null; }
@@ -205,7 +206,9 @@ export function createGoalsDomain(ctx: DomainContext): DomainModule {
         const configOverrides = ctx.native ? { 'features.goals': true } : undefined;
         if (goal.native) return configOverrides ? { configOverrides } : null;
         const spent = goal.tokenBudget ? `Token budget: ${goal.tokensUsed ?? 0} of ${goal.tokenBudget} tokens used.${(goal.tokensUsed ?? 0) >= goal.tokenBudget * 0.9 ? ' The budget is nearly spent: wrap up this turn soon.' : ''}` : '';
-        return { developerInstructions: [goalInstructions(goal.text), spent, idleTurns.get(chat.id) ? GOAL_COMPLETION_CHECK : ''].filter(Boolean).join('\n\n'), ...(configOverrides ? { configOverrides } : {}) };
+        // The budget line changes every turn, so it travels with the turn: in the developer instructions (which key the chat's
+        // warm app-server) it restarted the app-server on every goal turn.
+        return { developerInstructions: [goalInstructions(goal.text), idleTurns.get(chat.id) || claimedDone.has(chat.id) ? GOAL_COMPLETION_CHECK : ''].filter(Boolean).join('\n\n'), ...(spent ? { turnContext: spent } : {}), ...(configOverrides ? { configOverrides } : {}) };
       });
       // Any turn starting (a user message, a queued follow-up) supersedes a pending continuation.
       const offStarted = ctx.hooks.onRunStarted(run => cancel(run.chat.id));
@@ -226,8 +229,8 @@ export function createGoalsDomain(ctx: DomainContext): DomainModule {
     if (goal.tokenBudget && (goal.tokensUsed ?? 0) >= goal.tokenBudget) { idleTurns.delete(id); halt(goal, 'budget_limited'); return; }
     const wasGoalTurn = goalTurns.delete(id);
     if (run.status === 'completed' && text.trim()) {
-      // A completed turn that declares the goal met settles it (F37).
-      if (goalDeclaredDone(text)) { halt(goal, 'complete'); return; }
+      // A prose claim of completion does not close the goal: only the update_goal status does. It earns the completion check on the next turn.
+      if (goalDeclaredDone(text)) claimedDone.add(id); else claimedDone.delete(id);
       // Goal turns with no tool work (re-verifying, summarising) get a completion nudge;
       // GOAL_STALL_TURNS of them in a row mean the goal has stalled.
       if (!wasGoalTurn || lastTurnHadTools(id)) idleTurns.delete(id);
@@ -292,7 +295,7 @@ export function createGoalsDomain(ctx: DomainContext): DomainModule {
         const chat = ctx.store.chat(id);
         if (!chat) throw new Error('Chat does not exist.');
         if (chat.archived) throw new Error('Restore this chat before setting a goal.');
-        cancel(id); stalls.delete(id); idleTurns.delete(id); resync.delete(id);
+        cancel(id); stalls.delete(id); idleTurns.delete(id); claimedDone.delete(id); resync.delete(id);
         const previous = read(id), now = new Date().toISOString();
         const fresh: ChatGoal = { chatId: id, text, status: 'active', createdAt: now, startedAt: now, accumulatedMs: 0, turns: 0, maxTurns: GOAL_MAX_AUTO_TURNS, updatedAt: now, tokenBudget, tokensUsed: 0 };
         // Codex-backed chat with a live app-server that has thread/goal/*: the app-server owns the goal and starts it when the thread is idle.

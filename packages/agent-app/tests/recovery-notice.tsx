@@ -62,7 +62,11 @@ assert.equal(button()?.hasAttribute('disabled'),true);assert.ok(text().includes(
 root.render(<RecoveryNotice chat={{...rejected,recovery:{...rejected.recovery,retryable:false}}}/>);await delay(20);
 assert.ok(!button(),'a non-retryable rejection shows the reason only');assert.ok(text().includes('temporarily unavailable'));
 root.render(<RecoveryNotice chat={{...base,recovery:{kind:'recovery-needed',retryable:false,reason:'The provider may have accepted this turn.'}}}/>);await delay(20);
-assert.equal(button()?.textContent,'Check provider status');assert.equal(document.querySelectorAll('.chat-error-banner button').length,1);
+assert.equal(button()?.textContent,'Check provider status');assert.equal(document.querySelectorAll('.chat-error-banner button').length,2);
+// #381: an unresolvable check never traps the user; the override is always offered and goes through the runtime.
+const proceed=document.querySelector<HTMLButtonElement>('[data-testid="recovery-continue-anyway"]');
+assert.equal(proceed?.textContent,'Continue anyway');proceed!.click();await delay(20);
+assert.ok(invoked.some(call=>call.command==='chat.continueAnyway'&&call.input.id==='chat-1'),'Continue anyway invokes the runtime override');
 root.render(<RecoveryNotice chat={{...base,error:undefined}}/>);await delay(20);
 assert.ok(!document.querySelector('.chat-error-banner'),'nothing to recover renders nothing');
 // PER-08 (F42/F43): a user Stop is neutral: no red failure, no button to resolve before sending again.

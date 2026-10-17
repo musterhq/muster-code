@@ -8,7 +8,7 @@ import {catalogPricing,type ExcludedModel} from '../shared/model-catalog.ts';
 import type {RunnableAdapter, Validation} from './adapters/types.ts';
 import {CODEX_LAUNCHER, findBinary, locateCli, Validator} from './adapters/shared.ts';
 import {unpackedPath} from './unpacked-path.ts';
-import {fetchModelList,type ListedModel} from './adapters/http-chat.ts';
+import {entryAcceptsImages,fetchModelList,type ListedModel} from './adapters/http-chat.ts';
 import {readCodexCatalog} from './codex-catalog.ts';
 import {codexAuthHeaders,inlineStringTable,type CodexProviderAuth} from './codex-provider-auth.ts';
 
@@ -63,7 +63,7 @@ export function routerAgents(listed:readonly ListedModel[]):Models {
     const first=words(rest.length?head!:id);const title=first.charAt(0).toUpperCase()+first.slice(1);return rest.length?`${title} · ${words(rest.join('/'))}`:title;};
   // Named agents (planner, advisor, executor…) first, then auto/… routes.
   const combos=listed.filter(entry=>entry.owner==='combo'&&entry.chat!==false);
-  return [...combos.filter(entry=>!entry.id.includes('/')),...combos.filter(entry=>entry.id.includes('/'))].slice(0,200).map(entry=>({id:entry.id,name:entry.name&&entry.name!==entry.id?entry.name:pretty(entry.id)}));
+  return [...combos.filter(entry=>!entry.id.includes('/')),...combos.filter(entry=>entry.id.includes('/'))].slice(0,200).map(entry=>({id:entry.id,name:entry.name&&entry.name!==entry.id?entry.name:pretty(entry.id),...(entry.images!==undefined?{images:entry.images}:{}),...(entry.contextWindow?{contextWindow:entry.contextWindow}:{})}));
 }
 export function catalogModels(family:'openai-direct'|'gateway'|(string&{}),list:readonly unknown[]):{models:ProviderInfo['models'];excluded:ExcludedModel[]} {
   const models:ProviderInfo['models']=[],excluded:ExcludedModel[]=[];
@@ -77,11 +77,12 @@ export function catalogModels(family:'openai-direct'|'gateway'|(string&{}),list:
     if(models.some(m=>m.id===model)){excluded.push({id:model,name,reason:'Listed more than once in the catalog; the first entry is used.'});return;}
     if(entry.hidden===true||entry.visibility==='hide'||entry.visibility==='hidden'){excluded.push({id:model,name,reason:'The provider catalog marks this model hidden.'});return;}
     if(family==='openai-direct'&&!directModel(model)){excluded.push({id:model,name,reason:'OpenAI Direct runs OpenAI model ids only; use a gateway profile for this model.'});return;}
-    const modalities=entry.input_modalities??entry.inputModalities;
+    const images=entryAcceptsImages(entry);
     const window=typeof entry.context_window==='number'&&entry.context_window>0?entry.context_window:typeof entry.contextWindow==='number'&&entry.contextWindow>0?entry.contextWindow:undefined;
     const search=entry.supports_search_tool??entry.supportsSearchTool;
     const pricing=catalogPricing(entry);
-    models.push({id:model,name,...catalogEfforts(entry),...(Array.isArray(modalities)?{images:modalities.includes('image')}:{}),...(typeof search==='boolean'?{toolSearch:search}:{}),...(window?{contextWindow:window}:{}),...(pricing?{pricing}:{})});
+    const limit=typeof entry.auto_compact_token_limit==='number'&&entry.auto_compact_token_limit>0?entry.auto_compact_token_limit:typeof entry.autoCompactTokenLimit==='number'&&entry.autoCompactTokenLimit>0?entry.autoCompactTokenLimit:undefined;
+    models.push({id:model,name,...catalogEfforts(entry),...(images!==undefined?{images}:{}),...(typeof search==='boolean'?{toolSearch:search}:{}),...(window?{contextWindow:window,contextWindowSource:'catalog' as const}:{}),...(limit?{autoCompactTokenLimit:limit}:{}),...(pricing?{pricing}:{})});
   });
   if(list.length>MAX_CATALOG_ENTRIES)excluded.push({id:'catalog-overflow',name:`${list.length-MAX_CATALOG_ENTRIES} more catalog entries`,reason:`Only the first ${MAX_CATALOG_ENTRIES} catalog entries are read.`});
   return {models,excluded};
@@ -347,7 +348,7 @@ function loadPersisted(entry:ListingEntry):ListedModel[]|null {
     const parsed=JSON.parse(boundedFile(nodeFs,file)) as {models?:unknown};
     if(Array.isArray(parsed.models)&&parsed.models.length)entry.persisted=parsed.models.flatMap((item:unknown)=>{
       const row=item&&typeof item==='object'?item as Record<string,unknown>:{};
-      return typeof row.id==='string'&&row.id.length<=200&&typeof row.name==='string'?[{id:row.id,name:row.name,...(typeof row.owner==='string'?{owner:row.owner}:{}),...(typeof row.chat==='boolean'?{chat:row.chat}:{})} as ListedModel]:[];
+      return typeof row.id==='string'&&row.id.length<=200&&typeof row.name==='string'?[{id:row.id,name:row.name,...(typeof row.owner==='string'?{owner:row.owner}:{}),...(typeof row.chat==='boolean'?{chat:row.chat}:{}),...(typeof row.contextWindow==='number'&&row.contextWindow>0?{contextWindow:row.contextWindow}:{})} as ListedModel]:[];
     });
     if(!entry.persisted?.length)entry.persisted=null;
   } catch {entry.persisted=null;}
@@ -508,7 +509,9 @@ function homeInstances({fs,directory,codexHome,cli,node,env,track,validator,fetc
       list=catalog.models;incremental=catalog.incremental;catalogSource='its model catalog';
     } else if(route.kind==='chatgpt'){
       // Codex keeps the model list of a ChatGPT sign-in in its own cache.
-      try {const cache=JSON.parse(boundedFile(fs,track(join(codexHome,'models_cache.json')))) as {models?:unknown};if(Array.isArray(cache.models)){list=cache.models;catalogSource='Codex’s model cache';}} catch {list=undefined;}
+      // Read like a model catalog (16 MB bound, not the 1 MB config bound): the cache carries every model's instructions and grows with each Codex release.
+      const cache=readCodexCatalog(track(join(codexHome,'models_cache.json')),fs);
+      if(cache.ok){list=cache.models;catalogSource='Codex’s model cache';}
       if(!list)return fail('Codex has not listed this account’s models yet. Run `codex` once, or set model_catalog_json in config.toml.');
     }
     let models:Models,excluded:ExcludedModel[]=[],listingKey:string|undefined,listingInfo:Pick<ProviderInfo,'listing'|'listingError'>={};
@@ -522,11 +525,13 @@ function homeInstances({fs,directory,codexHome,cli,node,env,track,validator,fetc
       // While the listing loads, or if it fails, the catalog alone is offered.
       if(route.kind==='gateway'&&route.baseUrl){
         const live=listing(route,env,fetcher);
+        // The router's own context size fills in a model whose catalog gives none.
+        if(live.status==='ok')for(const model of models){const listed=live.value!.find(entry=>entry.id===model.id);if(!model.contextWindow&&listed?.contextWindow){model.contextWindow=listed.contextWindow;model.contextWindowSource='listing';}if(model.images===undefined&&listed?.images!==undefined)model.images=listed.images;}
         if(live.status==='ok'&&!live.stale){
           for(const entry of routerAgents(live.value!))if(!models.some(model=>model.id===entry.id))models.push(entry);
           // Everything else the router serves is loaded too, off in the picker until switched on in Settings › Models.
           const known=new Set(models.map(model=>model.id));
-          for(const entry of live.value!)if(entry.chat!==false&&entry.owner!=='combo'&&!known.has(entry.id)){known.add(entry.id);models.push({id:entry.id,name:entry.name,hiddenByDefault:true,...(entry.owner?{group:entry.owner}:{})});}
+          for(const entry of live.value!)if(entry.chat!==false&&entry.owner!=='combo'&&!known.has(entry.id)){known.add(entry.id);models.push({id:entry.id,name:entry.name,hiddenByDefault:true,...(entry.images!==undefined?{images:entry.images}:{}),...(entry.owner?{group:entry.owner}:{}),...(entry.contextWindow?{contextWindow:entry.contextWindow,contextWindowSource:'listing' as const}:{})});}
         }
       }
     }
@@ -539,7 +544,7 @@ function homeInstances({fs,directory,codexHome,cli,node,env,track,validator,fetc
       }
       listingInfo=listed.stale?{listing:'stale',...(listed.reason?{listingError:`${name} didn’t answer: ${listed.reason.replace(/[.\s]+$/,'')}. Retry.`}:{})}:{listing:'live'};
       const runnable=listed.value!.filter(entry=>entry.chat!==false);
-      models=runnable.slice(0,MAX_CATALOG_ENTRIES).map(({id,name})=>({id,name}));catalogSource=`${route.baseUrl}/models${listed.stale?' (last saved list, refreshing)':''}`;
+      models=runnable.slice(0,MAX_CATALOG_ENTRIES).map(({id,name,contextWindow,images})=>({id,name,...(images!==undefined?{images}:{}),...(contextWindow?{contextWindow,contextWindowSource:'listing' as const}:{})}));catalogSource=`${route.baseUrl}/models${listed.stale?' (last saved list, refreshing)':''}`;
       if(listed.value!.length>runnable.length)excluded.push({id:'non-chat-models',name:`${listed.value!.length-runnable.length} image, audio and other models`,reason:'These models cannot run a chat.'});
       if(runnable.length>MAX_CATALOG_ENTRIES)excluded.push({id:'listing-overflow',name:`${runnable.length-MAX_CATALOG_ENTRIES} more models`,reason:`Only the first ${MAX_CATALOG_ENTRIES} listed models are offered; add model_catalog_json to choose.`});
     } else return fail(`[model_providers.${route.modelProvider}] has no base_url and no model catalog.`);

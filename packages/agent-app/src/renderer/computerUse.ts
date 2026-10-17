@@ -4,6 +4,7 @@ import {useSyncExternalStore} from 'react';
 import type {TimelineItem} from '../shared/protocol.ts';
 import type {ComputerControlOwner, ComputerFrame} from '../shared/domains/computer-protocol.ts';
 import {computerAction, computerUseTarget, type ComputerTarget} from '../shared/computer-use.ts';
+import {agentBrowserOwner, browserScopeProfile} from '../shared/browser-protocol.ts';
 import {subscribe} from './bridge.ts';
 import {orderByRaise, raiseKey} from './pipLayout.ts';
 
@@ -13,8 +14,11 @@ export const PIP_MIN = 220, PIP_MAX = 480, PIP_DEFAULT = 300;
 export const PIP_STACK_MAX = 4;
 /** CUA-09: a frame older than this is stale; older than the second, the feed is disconnected. */
 export const STALE_MS = 2000, DISCONNECTED_MS = 10_000;
-/** The PiP goes away this long after the last computer-use activity once the run is idle. */
-export const HIDE_AFTER_MS = 45_000;
+/** A session is live while the run is going and it acted this recently (browser frames are pumped about once a second
+ * after each action); a run that moves on to unrelated work leaves it behind. */
+export const LIVE_MS = 60_000;
+/** A session that ended shows an "Ended" PiP with its last picture for this long, then the PiP is removed. */
+export const ENDED_LINGER_MS = 6000;
 export interface ToolShot {id?: string; dataUrl?: string; mime?: string; width?: number; height?: number; bytes?: number}
 /** What the PiP shows: a pushed browser frame or the newest computer-use screenshot in the transcript. */
 export interface PipSource {
@@ -131,16 +135,43 @@ export const sessionKey = (source: Pick<PipSource, 'chatId' | 'target' | 'app' |
 /** The right-sidebar tab a session opens as: the agent's real browser tab when it has one, else a live-view tab. */
 export function sessionTabId(source: Pick<PipSource, 'chatId' | 'target' | 'app' | 'url' | 'owner' | 'profileId'>): string {
   if (source.target === 'browser' && source.owner && source.profileId) return source.owner;
-  return `live:${source.chatId}:${sourceKey(source).replace(/[^a-zA-Z0-9_.:-]+/g, '-')}`;
+  return liveViewTabId(source);
+}
+/** The picture-only live-view tab of a session (a desktop app, or a browser session not yet bound to its tab). */
+export const liveViewTabId = (source: Pick<PipSource, 'chatId' | 'target' | 'app' | 'url'>): string => `live:${source.chatId}:${sourceKey(source).replace(/[^a-zA-Z0-9_.:-]+/g, '-')}`;
+export interface AgentBrowserBinding {owner: string; profileId: string}
+/** #423: which browser tab the chat's agent drives. Main announces it (computerBrowserOpened, on every browser call);
+ * before that reaches this window (a reload, a chat opened mid-run) it is the chat's own agent tab, which main names the
+ * same way. Never undefined for a known chat, so a browser session always opens its live tab, not a picture placeholder. */
+export function agentBrowserBinding(chatId: string, chat: {folderId?: string | null; projectId?: string | null} | undefined, announced?: {owner: string; profileId: string}): AgentBrowserBinding | undefined {
+  if (announced?.owner && announced.profileId) return {owner: announced.owner, profileId: announced.profileId};
+  return chat ? {owner: agentBrowserOwner(chatId), profileId: browserScopeProfile(chat)} : undefined;
+}
+/** Transcript browser steps carry no tab. The newest browser session is the page the agent's tab shows now: bind it to
+ * that tab so the PiP and the sidebar open the live page. Older pages keep their last picture. */
+export function bindAgentBrowser(sources: readonly PipSource[], binding: AgentBrowserBinding | undefined): PipSource[] {
+  const newest = sources.reduce<PipSource | undefined>((best, source) => source.target === 'browser' && (!best || source.at > best.at) ? source : best, undefined);
+  if (!binding || !newest || (newest.owner && newest.profileId)) return [...sources];
+  return sources.map(source => source === newest ? {...source, owner: binding.owner, profileId: binding.profileId} : source);
 }
 /** Cards in front-to-back order: sessions the user raised first (latest raise in front), the rest by recency. */
 export const orderPipSources = (sources: readonly PipSource[], raised: readonly string[]): PipSource[] => orderByRaise(sources, sessionKey, raised);
 /** A session is shown in exactly one place: while its tab is the visible one in the sidebar, its PiP card steps aside. */
 export const dockedSessions = (sources: readonly PipSource[], visibleTabId: string | null | undefined): Set<string> =>
   new Set(visibleTabId ? sources.filter(source => sessionTabId(source) === visibleTabId).map(sessionKey) : []);
-export function pipShouldShow(source: PipSource | undefined, running: boolean, now: number): boolean {
-  return !!source && (running || now - source.at < HIDE_AFTER_MS);
+export type PipPhase = 'live' | 'ended' | 'gone';
+/** Whether a session still has a PiP. Only a live agent browser or computer-use session does (the chat is running and the
+ * session acted within LIVE_MS; a step stuck "running" from long ago does not keep it alive); when it ends it lingers as "Ended" for ENDED_LINGER_MS and goes.
+ * `runEndedAt` is when this window saw the run stop; a chat opened later has none, so past sessions never get a PiP. */
+export function pipPhase(source: PipSource | undefined, running: boolean, now: number, runEndedAt = 0): PipPhase {
+  if (!source) return 'gone';
+  const liveUntil = source.at + LIVE_MS;
+  if (running && now < liveUntil) return 'live';
+  // Only a session that was still live when the run stopped lingers; one that had gone quiet long before is already past.
+  const endedAt = running ? liveUntil : runEndedAt > 0 && runEndedAt < liveUntil ? Math.max(source.at, runEndedAt) : source.at;
+  return now - endedAt < ENDED_LINGER_MS ? 'ended' : 'gone';
 }
+export const pipShouldShow = (source: PipSource | undefined, running: boolean, now: number, runEndedAt = 0): boolean => pipPhase(source, running, now, runEndedAt) !== 'gone';
 export function frameSource(frame: ComputerFrame): PipSource {
   return {chatId: frame.chatId, target: 'browser', app: frame.title || hostOf(frame.url), label: frame.action ?? (frame.title || hostOf(frame.url)), at: frame.at, image: {dataUrl: frame.dataUrl, width: frame.width, height: frame.height, mime: 'image/jpeg'}, url: frame.url, owner: frame.owner, profileId: frame.profileId};
 }

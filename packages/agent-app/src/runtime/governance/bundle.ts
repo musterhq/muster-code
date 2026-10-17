@@ -13,6 +13,11 @@ export function checkBundle(files: readonly { name: string; text: string }[]): v
   if (total > BUNDLE_LIMITS.maxTotalChars) throw new Error(`The bundle is over ${BUNDLE_LIMITS.maxTotalChars.toLocaleString('en-US')} characters in total.`);
 }
 const clip = (s: string, n: number) => s.length > n ? `${s.slice(0, n - 1)}…` : s;
+/** The heartbeat checklist, for a run a timer started. It is task-critical, so the prompt places it ahead of the rest of the bundle. */
+export function heartbeatLines(files: readonly BundleFile[]): string[] {
+  const text = files.find(f => f.name === 'HEARTBEAT.md')?.text.trim() ?? '';
+  return text ? ['', 'This run was started by your heartbeat timer. Work through this checklist (HEARTBEAT.md):', clip(text, 3000)] : [];
+}
 /** The prompt text of an agent's bundle. AGENTS.md leads; SOUL.md and TOOLS.md ride with every run; HEARTBEAT.md only on a timer wake; any other file is listed by name only. */
 export function composeBundle(files: readonly BundleFile[], opts: { timer: boolean; name: string }): string[] {
   const get = (n: string) => files.find(f => f.name === n)?.text.trim() ?? '';
@@ -20,9 +25,9 @@ export function composeBundle(files: readonly BundleFile[], opts: { timer: boole
   if (get(BUNDLE_MAIN)) out.push(`${opts.name}'s instructions — follow these:`, clip(get(BUNDLE_MAIN), 6000));
   if (get('SOUL.md')) out.push('', 'Persona (SOUL.md):', clip(get('SOUL.md'), 3000));
   if (get('TOOLS.md')) out.push('', 'Tools and environment notes (TOOLS.md):', clip(get('TOOLS.md'), 3000));
-  if (opts.timer && get('HEARTBEAT.md')) out.push('', 'This run was started by your heartbeat timer. Work through this checklist (HEARTBEAT.md):', clip(get('HEARTBEAT.md'), 3000));
+  if (opts.timer) out.push(...heartbeatLines(files));
   const extra = files.filter(f => !['AGENTS.md', 'SOUL.md', 'TOOLS.md', 'HEARTBEAT.md'].includes(f.name) && f.text.trim()).map(f => f.name);
-  if (extra.length) out.push('', `More notes in your bundle (ask the user if you need them): ${extra.join(', ')}.`);
+  if (extra.length) out.push('', `More notes in your bundle (open them yourself if you need them): ${extra.join(', ')}.`);
   return out;
 }
 /** Names whose text differs between two file maps. */

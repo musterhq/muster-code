@@ -129,6 +129,31 @@ test('M1: a round runs at most 16 tool calls and a stream may not open an unboun
   const flood=openAICompatibleAdapter({endpoint:'https://flood.example/v1',apiKey:()=>'k',label:'Flood',memory:new ConversationMemory(),fetch:(async()=>many(500)) as typeof fetch});
   const failed=await flood.run(baseInput(ws));assert.equal(failed.status,'failed');assert.match(failed.errorMessage??'',/too many or oversized/);
 });
+test('#373: a turn goes past 40 tool rounds',async t=>{
+  const {ws}=await sandbox(t);await writeFile(join(ws,'a.txt'),'a');
+  let n=0;const adapter=openAICompatibleAdapter({endpoint:'https://long.example/v1',apiKey:()=>'k',label:'Long',memory:new ConversationMemory(),fetch:(async()=>++n<=60?sse([{choices:[{delta:{tool_calls:[{index:0,id:'c',function:{name:'read_file',arguments:'{"path":"a.txt"}'}}]}}]}]):sse([{choices:[{delta:{content:'all done'}}]}])) as typeof fetch});
+  const result=await adapter.run(baseInput(ws));
+  assert.equal(result.status,'completed');assert.equal(result.finalMessage,'all done');assert.equal(n,61);
+});
+test('#373: at the cap one last request without tools streams a short status',async t=>{
+  const {ws}=await sandbox(t);await writeFile(join(ws,'a.txt'),'a');
+  const bodies:Array<{tools?:unknown;messages:Array<{role:string;content?:string}>}>=[];let n=0;const deltas:string[]=[];
+  const adapter=openAICompatibleAdapter({endpoint:'https://cap.example/v1',apiKey:()=>'k',label:'Cap',memory:new ConversationMemory(),fetch:(async(_u:string|URL|Request,init?:RequestInit)=>{const body=JSON.parse(String(init?.body));bodies.push(body);return body.tools?sse([{choices:[{delta:{tool_calls:[{index:0,id:`c${++n}`,function:{name:'read_file',arguments:'{"path":"a.txt"}'}}]}}]}]):sse([{choices:[{delta:{content:'Read the file 400 times; next, summarise.'}}]}]);}) as typeof fetch});
+  const result=await adapter.run(baseInput(ws,{onDelta:d=>deltas.push(d)}));
+  assert.equal(result.status,'completed');assert.equal(bodies.length,402);
+  const last=bodies.at(-1)!;assert.equal(last.tools,undefined);assert.match(last.messages.at(-1)!.content??'',/2-3 sentences/);
+  assert.match(result.finalMessage,/Read the file 400 times/);assert.doesNotMatch(result.finalMessage,/Stopped:/);
+});
+test('#373: if the status request fails the old note is used',async t=>{
+  const {ws}=await sandbox(t);await writeFile(join(ws,'a.txt'),'a');
+  let n=0;const adapter=openAICompatibleAdapter({endpoint:'https://capfail.example/v1',apiKey:()=>'k',label:'CapFail',memory:new ConversationMemory(),fetch:(async(_u:string|URL|Request,init?:RequestInit)=>JSON.parse(String(init?.body)).tools?sse([{choices:[{delta:{tool_calls:[{index:0,id:`c${++n}`,function:{name:'read_file',arguments:'{"path":"a.txt"}'}}]}}]}]):new Response('boom',{status:500})) as typeof fetch});
+  const result=await adapter.run(baseInput(ws));
+  assert.equal(result.status,'completed');assert.match(result.finalMessage,/\(Stopped: this turn reached its limit/);
+});
+test('#372: the tool instructions say there is no sub-agent tool',async()=>{
+  const {toolInstructions}=await import('../src/runtime/adapters/http-tools.ts');
+  assert.match(toolInstructions('read-only','/w'),/no sub-agent tool[^.]*do the work directly/);
+});
 test('M2: read_file reads a limited slice of a big file; edit_file refuses huge files',async t=>{
   const {ws}=await sandbox(t);await writeFile(join(ws,'big.log'),Buffer.alloc(8*1024*1024,'a'));
   const result=await executeTool(call('read_file',{path:'big.log'}),ctx(ws,'read-only'));

@@ -40,6 +40,19 @@ const TASK_COLUMNS=[['run_chat_id','TEXT'],['run_request_id','TEXT'],['run_error
 export const ACTIVITY_CATEGORY_SQL="CASE WHEN kind LIKE 'task.run-%' OR kind IN ('task.budget-exceeded','task.needs-input') THEN 'runs' WHEN kind LIKE 'task.%' THEN 'tasks' WHEN kind LIKE 'decision.%' THEN 'decisions' WHEN kind LIKE 'coordinator.%' OR kind='project.coordinator' THEN 'coordinator' WHEN kind LIKE 'memory.%' THEN 'memory' WHEN kind LIKE 'environment.%' THEN 'environment' WHEN kind LIKE 'chat.%' THEN 'chats' WHEN kind LIKE 'member.%' THEN 'members' ELSE 'project' END";
 const STALE='Stale write — task was modified. Refresh and retry.';
 
+/** #385: a finished run whose last message asks the person something is waiting for them, not implemented. */
+export function endsWithQuestion(text?: string): boolean {
+  const t = (text ?? '').replace(/```[\s\S]*?```/g, '').trim();
+  if (!t) return false;
+  return /\?[\s"'”’)*_\]]*$/.test(t) || /^[\s*_>#-]*(should i|shall i|want me to|do you want)\b/i.test(t);
+}
+/** An unfinished run: the last message ends on a question, or offers to do the next step ("Should I / Shall I / Want me to / Do you want / Would you like") in its closing paragraph. Builds on endsWithQuestion (#383). */
+export function asksOpenQuestion(text?: string): boolean {
+  if (endsWithQuestion(text)) return true;
+  const t = (text ?? '').replace(/```[\s\S]*?```/g, '').trim();
+  const last = t.split(/\n\s*\n/).pop() ?? '';
+  return /\b(?:should i|shall i|want me to|do you want|would you like)\b/i.test(last);
+}
 export class ProjectTaskStore {
  private db:DatabaseSync;
  private depth=0;
@@ -111,7 +124,7 @@ export class ProjectTaskStore {
  startTask(i:{projectId:string;id:string;revision:number;requestId:string;chatId:string},actor:Actor='user'):ProjectTask{return this.tx(()=>{const t=this.assertTaskProject(i.projectId,i.id);if(t.runRequestId===i.requestId&&t.runChatId)return t;this.assertCanStartTask(i);this.write(t,{status:'running',run_chat_id:i.chatId,run_request_id:i.requestId,run_error:null,blocked_by:null});this.log(i.projectId,actor,'task.run-started',`Started "${t.title}" in an agent chat`,i.chatId);return this.fresh(t.id)})}
  failTaskStart(i:{projectId:string;id:string;requestId:string;chatId:string;reason:string}):ProjectTask|undefined{return this.tx(()=>{const t=this.assertTaskProject(i.projectId,i.id);if(t.runRequestId!==i.requestId||t.runChatId!==i.chatId||(t.state!=='running'&&t.state!=='needs-input'))return undefined;const reason=i.reason.slice(0,2000);this.write(t,{status:'blocked',run_error:reason});this.closeAttempts(i.chatId,'failed',reason);this.log(i.projectId,'system','task.run-failed',`Could not dispatch "${t.title}": ${reason}`,i.chatId);return this.fresh(t.id)})}
  /** A finished run: completed → implemented, failed → failed, interrupted → blocked. Verification stays a separate human step. */
- settleRunForChat(chatId:string,status:'completed'|'failed'|'interrupted',error?:string):ProjectTask|undefined{return this.tx(()=>{const t=this.taskForChat(chatId);if(!t)return;const next:TaskState=status==='completed'?'implemented':status==='failed'?'failed':'blocked',reason=status==='completed'?null:(error||`Agent run ${status}. Open the linked chat to review or recover it.`).slice(0,2000);this.write(t,{status:next,run_error:reason});this.closeAttempts(chatId,status,reason??undefined);this.log(t.projectId,'agent',`task.run-${next}`,`Agent work for "${t.title}" ${status==='completed'?'finished; review and verify it':status==='failed'?'failed':'stopped'}.`,chatId);return this.fresh(t.id)})}
+ settleRunForChat(chatId:string,status:'completed'|'failed'|'interrupted',error?:string,finalMessage?:string):ProjectTask|undefined{return this.tx(()=>{const t=this.taskForChat(chatId);if(!t)return;const asks=status==='completed'&&endsWithQuestion(finalMessage);const next:TaskState=asks?'needs-input':status==='completed'?'implemented':status==='failed'?'failed':'blocked',reason=status==='completed'?null:(error||`Agent run ${status}. Open the linked chat to review or recover it.`).slice(0,2000);this.write(t,{status:next,run_error:reason});this.closeAttempts(chatId,status,reason??undefined);this.log(t.projectId,'agent',`task.run-${next}`,`Agent work for "${t.title}" ${asks?'ended with a question; it is waiting for your answer':status==='completed'?'finished; review and verify it':status==='failed'?'failed':'stopped'}.`,chatId);return this.fresh(t.id)})}
  /** Continues a settled task in its own chat (empty-turn continuations, retries, comment follow-ups): running again, same chat and worktree. */
  resumeRun(i:{projectId:string;id:string;chatId:string;note:string},actor:Actor='scheduler'):ProjectTask{return this.tx(()=>{const t=this.assertTaskProject(i.projectId,i.id);if(t.runChatId!==i.chatId)throw Error('That chat is not this task\u2019s run.');if(t.state==='running'||t.state==='needs-input')return t;if(!['implemented','failed','blocked','review','todo'].includes(t.state))throw Error(`A ${t.state} task cannot continue.`);this.write(t,{status:'running',run_error:null,blocked_by:null});this.log(i.projectId,actor,'task.run-resumed',i.note.slice(0,900),i.chatId);return this.fresh(t.id)})}
  /** A pending approval or question in the task's live chat moves it to needs-input; answering it moves it back to running. */

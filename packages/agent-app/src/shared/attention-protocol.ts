@@ -3,6 +3,8 @@ export interface AttentionRequest {
   itemId: string;
   kind: 'approval' | 'question';
   createdAt: string;
+  /** ISO deadline; the request is closed after this. */
+  expiresAt?: string;
   sourceLabel: 'Provider approval' | 'Provider question';
 }
 export interface ChatAttention {
