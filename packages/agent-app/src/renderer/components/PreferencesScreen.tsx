@@ -236,11 +236,14 @@ function MemorySection():React.ReactElement {
   const folderId=activeChat()?.folderId;
   const [config,setConfig]=useState<MemoryConfigView>();
   const [editing,setEditing]=useState(false);
+  const saves=useRef(0);
   useEffect(()=>{let live=true;void invoke('memory.config.get',{}).then(result=>{if(live)setConfig(result);},()=>{});return ()=>{live=false;};},[]);
   const patch=(next:Pick<MemoryConfigView,'autoRecall'|'autoRetain'>)=>{
     if(!config)return;
     const merged={...config,...next};setConfig(merged);
-    void invoke('memory.config.set',{endpoint:merged.endpoint,autoRecall:merged.autoRecall,autoRetain:merged.autoRetain}).then(setConfig,cause=>{setConfig(config);notifyError(cause);});
+    // Only the newest save may update the row, and a failed one re-reads the real settings rather than rolling back to a stale copy that would undo a later save.
+    const mine=++saves.current;
+    void invoke('memory.config.set',{endpoint:merged.endpoint,autoRecall:merged.autoRecall,autoRetain:merged.autoRetain}).then(result=>{if(mine===saves.current)setConfig(result);},cause=>{notifyError(cause);if(mine===saves.current)void invoke('memory.config.get',{}).then(setConfig,()=>setConfig(config));});
   };
   return <div className="preference-group">
     <Row title="Memory" scope={folderId?'This chat’s folder and your personal memory':'Your personal memory'} description="Review, search, add and remove what agents remember.">
