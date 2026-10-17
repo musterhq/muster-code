@@ -351,12 +351,19 @@ export class DeviceManager {
     this.updateSession(live, {control: owner});
     return live.session;
   }
+  /** simctl right after a cold boot can stall on CoreSimulator for well over 20 s (CI saw listapps and launch time out):
+   *  60 s, and one more try when the first attempt was killed by the time limit. */
+  private simctlPatient(args: string[]): Promise<string> {
+    const once = () => this.deps.run('/usr/bin/xcrun', ['simctl', ...args], {timeoutMs: 60_000});
+    const timedOut = (error: unknown) => { const text = String(error instanceof Error ? error.message : error).trim(); return /timed? ?out|ETIMEDOUT|SIGTERM/i.test(text) || /^Command failed: \S+ simctl [^\n]*$/.test(text); };
+    return once().catch(error => timedOut(error) ? once() : Promise.reject(error));
+  }
   /** Apps installed on a running device: the user's own first. Android lists third-party packages plus a few system ones the agent may need. */
   async apps(rawId: unknown): Promise<DeviceApp[]> {
     this.ready();
     const device = await this.find(validId(rawId));
     if (device.state !== 'booted') throw new Error(`${deviceTitle(device)} is not running.`);
-    if (device.platform === 'ios') return parseSimctlApps(await this.deps.run('/usr/bin/xcrun', ['simctl', 'listapps', device.id], {timeoutMs: 20_000}));
+    if (device.platform === 'ios') return parseSimctlApps(await this.simctlPatient(['listapps', device.id]));
     const adb = androidTools(this.deps).adb;
     const [user, system] = await Promise.all([
       this.deps.run(adb, ['-s', device.id, 'shell', 'pm', 'list', 'packages', '-3'], {timeoutMs: 15_000}),
@@ -372,9 +379,7 @@ export class DeviceManager {
     if (!live) throw new Error('Open the device first.');
     if (from === 'agent' && live.session.control === 'user') throw new Error('The user has taken control of this device.');
     if (live.session.platform === 'ios') {
-      // The first launch after a cold boot can wait on SpringBoard for a long while; one retry covers a stuck first attempt.
-      const launch = () => this.deps.run('/usr/bin/xcrun', ['simctl', 'launch', id, app], {timeoutMs: 60_000});
-      await launch().catch(error => /timed? ?out|ETIMEDOUT|SIGTERM|Command failed: \S+ simctl launch \S+ \S+$/i.test(String(error instanceof Error ? error.message : error).trim()) ? launch() : Promise.reject(error)).catch(error => {
+      await this.simctlPatient(['launch', id, app]).catch(error => {
         throw new Error(/not installed|FBSOpenApplicationServiceErrorDomain|found nothing|No such|code=4\b/i.test(errorLine(error)) ? `${app} is not installed on ${live.session.name}. Use device_apps to see what is.` : `Could not launch ${app}: ${errorLine(error)}`);
       });
       return;
