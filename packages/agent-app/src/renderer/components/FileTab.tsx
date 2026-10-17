@@ -196,7 +196,7 @@ export function FileEditor({folderId, path, tabId, onSaved}: {folderId: string; 
     } catch (cause) { setSaveError(friendlyFileError(cause)); }
     finally { setSaving(false); }
   }, [state, saving, folderId, path, onSaved]);
-  const discardAndReload = () => { setConflict(false); void invoke('files.readFull', {folderId, path}).then(value => setState({phase: 'ready', original: value.text, draft: value.text, revision: value.revision})); };
+  const discardAndReload = () => { setSaveError(''); void invoke('files.readFull', {folderId, path}).then(value => { setConflict(false); setState({phase: 'ready', original: value.text, draft: value.text, revision: value.revision}); }, cause => setSaveError(friendlyFileError(cause))); };
   if (state.phase === 'loading') return <ResourceState kind="loading" label={`Loading ${path}`} rows={6}/>;
   if (state.phase === 'error') return <ResourceState kind="error" message={state.message}/>;
   const lineCount = state.draft.split('\n').length;

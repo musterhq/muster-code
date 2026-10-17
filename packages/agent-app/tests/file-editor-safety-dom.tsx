@@ -9,14 +9,16 @@ const {window} = parseHTML('<html><body><div id="root"></div></body></html>');
 Object.assign(globalThis, {window, document: window.document, HTMLElement: window.HTMLElement, Element: window.Element, MutationObserver: window.MutationObserver, localStorage: {getItem: () => null, setItem() {}}, requestAnimationFrame: (cb: () => void) => setTimeout(cb, 0), cancelAnimationFrame: clearTimeout, ResizeObserver: class {observe() {} unobserve() {} disconnect() {}}, getComputedStyle: () => ({})});
 window.HTMLElement.prototype.getBoundingClientRect = () => ({height: 500, width: 800, top: 0, left: 0, bottom: 500, right: 800});
 
+let failRead = false;
+let conflictNext = false;
 let readFull: any = {path: 'a.txt', text: 'hello', truncated: false, revision: 'r1', encodingWarning: false};
 const writes: any[] = [];
 let releaseWrite: (() => void) | undefined;
 window.muster = {
   subscribe: () => () => {},
   async invoke(command: string, input: any) {
-    if (command === 'files.readFull') return readFull;
-    if (command === 'files.write') { writes.push(input); await new Promise<void>(resolve => { releaseWrite = resolve; }); return {conflict: false, revision: 'r2'}; }
+    if (command === 'files.readFull') { if (failRead) throw new Error('disk gone'); return readFull; }
+    if (command === 'files.write') { writes.push(input); if (conflictNext) return {conflict: true}; await new Promise<void>(resolve => { releaseWrite = resolve; }); return {conflict: false, revision: 'r2'}; }
     return undefined;
   },
 };
@@ -57,5 +59,21 @@ releaseWrite!();
 await until(() => !document.querySelector('.file-editor-status')!.textContent!.includes('Saving'), 'save finished');
 assert.equal(area()!.value, 'hello world, and more', 'keystrokes typed during the save are kept');
 assert.match(document.querySelector('.file-editor-status')!.textContent!, /Unsaved changes/, 'and still count as unsaved');
+
+// 4. A failed "Discard your edit and reload" keeps the conflict banner and says why, instead of vanishing with an unhandled rejection.
+const rejections: unknown[] = [];
+process.on('unhandledRejection', reason => rejections.push(reason));
+conflictNext = true;
+await mount('c.txt');
+await until(() => !!area(), 'editor opens');
+await type('changed');
+document.querySelector<HTMLButtonElement>('.file-editor-status button')!.click();
+await until(() => !!document.querySelector('.file-editor-conflict'), 'conflict banner');
+failRead = true;
+[...document.querySelectorAll<HTMLButtonElement>('.file-editor-conflict button')].find(b => /Discard/.test(b.textContent ?? ''))!.click();
+await delay(60);
+assert.ok(document.querySelector('.file-editor-conflict'), 'the conflict banner stays when the reload fails');
+assert.match(document.querySelector('.file-action-error')?.textContent ?? '', /disk gone|could not|Could not/i, 'the failure is shown');
+assert.equal(rejections.length, 0, 'no unhandled rejection');
 assert.deepEqual(errors, []);
 process.exit(0);
