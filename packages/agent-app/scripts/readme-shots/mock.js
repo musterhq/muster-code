@@ -372,7 +372,10 @@ if (OPTS.devices) {
     const u = Math.min(w, h) / 100, wide = w > h * 0.9, tablet = frame.form === 'tablet';
     wallpaper(g, w, h, ['#123a37', '#24625a', '#7fae8e', '#e7d7a3']);
     const fs = u * (wide ? 2.6 : 3.6);
-    g.fillStyle = '#fff'; g.font = `500 ${fs}px Roboto, Helvetica, Arial`; g.textBaseline = 'top'; g.fillText('9:30', u * 4.5, u * 2.2); statusIcons(g, w - u * 4.5, u * 2.4, fs * 0.85, true);
+    g.fillStyle = '#fff'; g.font = `500 ${fs}px Roboto, Helvetica, Arial`; g.textBaseline = 'top'; g.fillText('9:30', u * 4.5, u * 2.2);
+    // Status icons sit left of a corner camera, as Android lays them out around the cut-out.
+    const cut = frame.cutout ?? {kind: 'none', x: 0.5};
+    statusIcons(g, cut.kind === 'punch-side' && cut.x > 0.5 ? w * cut.x - u * 5 : w - u * 4.5, u * 2.4, fs * 0.85, true);
     // An at-a-glance line: date and weather in plain text.
     g.font = `400 ${u * (wide ? 3.2 : 5)}px Roboto, Helvetica, Arial`; g.fillText('Tue, Oct 14', u * 6, u * (wide ? 9 : 13));
     g.font = `400 ${u * (wide ? 2.2 : 3.4)}px Roboto, Helvetica, Arial`; g.globalAlpha = 0.85; g.fillText('☀  18°  ·  Light breeze', u * 6, u * (wide ? 13.5 : 20)); g.globalAlpha = 1;

@@ -12,7 +12,7 @@ picture-in-picture card, and through agent tools.
 | `src/main/devices/link.ts` | Main's own client of the helper: MJPEG (iOS) and H.264 (Android) video, input sockets, flow control, reconnects. |
 | `src/main/devices/manager.ts` | Settings, lifetimes, boot and shutdown, sessions, screenshots. |
 | `src/main/devices/agent-tools.ts` | The `muster_device` MCP tools: `device_list`, `device_open`, `device_screenshot`, `device_tap`, `device_type`, `device_apps`, `device_launch_app`, `device_button`, `device_close`. |
-| `src/main/devices/models.ts` | Opt-in download and cache of Apple's device models (see below). |
+| `src/shared/device-frames.ts` | The parametric frame spec, the built-in families, deriving a spec from simctl and AVD data, and the layout both views draw. |
 | `src/renderer/devices/*`, `src/renderer/components/devices/*` | Feed decoding, the live view, the 3D frame, Settings, the PiP card. |
 | `resources/device-helper/` | The helper's `package.json` and `package-lock.json`, shipped instead of the helper itself. |
 
@@ -39,29 +39,36 @@ picture-in-picture card, and through agent tools.
   load no MCP servers (API-only models) get neither the server nor the note about it. The tool host listens on 127.0.0.1 behind a random bearer token kept in a 0600 file, like Muster's other agent
   tools, and Project tool rules (`mcp` match, e.g. `muster_device/device_tap`) apply.
 
-## Apple device models (opt-in)
+## Device frames
 
-Muster does not commit, bundle or redistribute any Apple-derived 3D asset. With "Apple device models in 3D" on, main
-downloads Apple's public AR Quick Look files from apple.com on the user's computer and checks their SHA-256:
+Every device is drawn in its own frame, from one parametric spec (`src/shared/device-frames.ts`): screen size and
+aspect, the display's corner radius, the cut-out (none, Dynamic Island, notch, waterdrop, centre or side punch-hole: kind,
+size, position), bezels, edge (flat or curved), colour, buttons (edge, position, length, kind), extras (Home button,
+bezel camera, speaker, hinge, TV stand) and the form: phone, foldable (open and folded), tablet, round or square watch,
+TV, automotive. The flat view draws it in SVG/CSS (`DeviceFrameFlat.tsx`) and the 3D view builds its body from the same
+layout (`src/renderer/devices/bodies.ts`), so both always show the same device.
 
-| Model | Source | SHA-256 |
-|---|---|---|
-| iPhone | `https://www.apple.com/105/media/us/iphone-18-pro/2026/591df885-5ee2-4173-86e6-401021249f7c/ar/iphone-18-pro-e-sim.usdz` | `0f2dac354fbc6505e7917983de460f2cc68e253f96aabf52e9f0468a4803f317` |
-| iPad | `https://www.apple.com/105/media/us/ipad-pro/2025/adee90db-c01e-430d-b726-fe64c0063f08/ar/ipad-pro-space-black.usdz` | `48098daf7c49117c81a4e4e1808899b93fad081faeba6c8b65124946b83b5ac6` |
+Where the spec comes from:
 
-Apple grants no redistribution licence for these files, which is why Muster downloads them on the user's computer
-instead of shipping them. The renderer then converts each file locally
-(`src/renderer/devices/appleModels.ts`): parse with three.js `USDLoader` (plus USD `PayloadListOp` support, which
-Apple's files need), keep the body prim and its display mesh, bake transforms, rotate so the display faces +Z with its
-long side up, centre and scale the display to 2.2 units, replace the marketing picture with the live-screen placeholder
-and planar UVs, cap textures at 1024 px, and export a binary glTF that main caches under app data. Turning the option off
-deletes every downloaded and converted file. Any failure (offline, checksum mismatch, a file that changed) falls back to
-Muster's own bodies with a quiet note.
+- **iOS:** the simulator's device type from `simctl list devices` (e.g. `SimDeviceType.iPhone-16-Pro`). iPhones map to
+  Dynamic Island (14 Pro, 15 and later, Air; 16 and later add the Camera Control), notch (X to 14, 16e) or Home button
+  (SE, 8 and earlier); iPads to no Home button (camera on the long edge), mini (camera on the short edge) or Home button.
+- **Android:** the AVD's own files, `<avd>.ini` → `config.ini`, overlaid by `hardware-qemu.ini` while it runs:
+  `hw.device.name`, `hw.device.manufacturer`, `hw.lcd.width`/`height`/`density`, `tag.id`, `skin.name`/`skin.path`,
+  `hw.sensor.hinge` and display regions. A running emulator also reports its display cut-out (`dumpsys window
+  displays`, with `wm size`). Built-in specs cover Pixel generations (punch-hole, side punch-hole, forehead, notch,
+  curved Pro), Pixel Fold, Pixel Tablet, centre punch-hole phones (Samsung-style), small phones, Wear OS round and
+  square, TV and automotive. Anything else gets a generic Android spec computed from its own screen size, density and
+  reported cut-out, so a device never wears another OS's frame.
+- **Foldables** follow their posture: the folded spec is used while the picture has the outer display's shape.
 
-## Muster's own bodies
+What is drawn over the live picture: only the cut-out, where the device has it (the simulator and emulator streams do
+not include the island or the punch-hole, which the device's own status bar lays out around). The picture is masked to
+the display's real corner radius.
 
-`src/renderer/devices/bodies.ts` builds stylised generic phone, tablet and foldable bodies from three.js primitives in
-code. They are original to this repository (MIT) and use no external model, scan or trade dress. Android always uses them.
+Muster draws every frame itself from these numbers. No device maker's artwork, photo, mesh or wallpaper is bundled,
+downloaded or converted (an earlier opt-in download of Apple's AR models was removed). The Android SDK's emulator skins
+are not used; the parametric frames cover the same devices.
 
 ## Verification
 

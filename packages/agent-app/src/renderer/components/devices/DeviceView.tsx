@@ -104,6 +104,7 @@ export function DeviceView({session, visible}: {session: DeviceSession; visible:
   const status = session.state === 'live' && !ready ? 'starting' : session.state;
   const ios = session.platform === 'ios';
   const frame = frameOf(session);
+  const handheld = frame.form === 'phone' || frame.form === 'foldable' || frame.form === 'tablet';
   const toChat = !!getState().activeChatId;
   return <section className="device-view" aria-label={`${session.name} live view`} data-platform={session.platform} data-form={session.formFactor} data-state={status} data-mode={mode}>
     <header className="device-view-head">
@@ -138,9 +139,10 @@ export function DeviceView({session, visible}: {session: DeviceSession; visible:
         </> : <>
           <RailButton label="Back" icon={<NavGlyph kind="back"/>} onClick={() => press('back')} disabled={!session.inputReady}/>
           <RailButton label="Home" icon={<NavGlyph kind="home"/>} onClick={() => press('home')} disabled={!session.inputReady}/>
-          <RailButton label="Recents" icon={<NavGlyph kind="recents"/>} onClick={() => press('appSwitcher')} disabled={!session.inputReady}/>
-          <RailButton label="Rotate" icon={<RotateCw size={15}/>} onClick={() => void deviceAction(() => invoke('devices.rotate', {id: session.deviceId}))}/>
-          <RailButton label="Power" icon={<Power size={15}/>} onClick={() => press('power')}/>
+          {/* Watches, TVs and car displays have no Recents and do not rotate. */}
+          {handheld && <RailButton label="Recents" icon={<NavGlyph kind="recents"/>} onClick={() => press('appSwitcher')} disabled={!session.inputReady}/>}
+          {handheld && <RailButton label="Rotate" icon={<RotateCw size={15}/>} onClick={() => void deviceAction(() => invoke('devices.rotate', {id: session.deviceId}))}/>}
+          {frame.form !== 'automotive' && <RailButton label="Power" icon={<Power size={15}/>} onClick={() => press('power')}/>}
         </>}
         <span className="device-rail-gap"/>
         <RailButton label={ios ? (toChat ? 'Screenshot to Chat' : 'Save Screenshot') : (toChat ? 'Take screenshot to chat' : 'Take screenshot')} icon={<Camera size={15}/>} onClick={() => void captureScreenshot(session, toChat ? 'attach' : 'save')}/>

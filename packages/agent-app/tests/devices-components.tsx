@@ -202,9 +202,10 @@ root.unmount();
       assert.ok(!rail.includes('Back')&&!rail.includes('Recents'),`${label}: no Android buttons on iOS`);
       assert.equal(rail.at(-1),'Shut Down Simulator');
     }else{
-      assert.deepEqual(rail.slice(0,5),['Back','Home','Recents','Rotate','Power'],`${label}: Android controls`);
+      const handheld=!['android-tv','wear-round'].includes(frameId);
+      assert.deepEqual(rail.slice(0,handheld?5:3),handheld?['Back','Home','Recents','Rotate','Power']:['Back','Home','Power'],`${label}: Android controls`);
       assert.ok(!rail.includes('Lock')&&!rail.includes('App Switcher'),`${label}: no iOS buttons on Android`);
-      assert.equal(host.querySelectorAll('.device-rail svg.device-nav-glyph').length,3,'Back, Home and Recents use Android\'s own glyphs');
+      assert.equal(host.querySelectorAll('.device-rail svg.device-nav-glyph').length,handheld?3:2,'Back, Home (and Recents) use Android\'s own glyphs');
       assert.equal(rail.at(-1),'Stop emulator');
     }
   }
