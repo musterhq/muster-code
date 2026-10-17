@@ -7,7 +7,7 @@ import {mkdtemp,rm,mkdir,writeFile,copyFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {openAICompatibleAdapter,anthropicAdapter} from '../src/runtime/adapters/http-chat.ts';
-import {claudeCodeAdapter,claudeArgs,claudeToolItem,type Spawn} from '../src/runtime/adapters/claude-code.ts';
+import {claudeCodeAdapter,claudeArgs,claudeSteerText,claudeToolItem,type Spawn} from '../src/runtime/adapters/claude-code.ts';
 import {openCodeAdapter,openCodeCapabilities} from '../src/runtime/adapters/opencode.ts';
 import {createAdapterCatalog} from '../src/runtime/adapters/index.ts';
 import {ConversationMemory,Validator} from '../src/runtime/adapters/shared.ts';
@@ -286,7 +286,7 @@ test('Claude Code takes a steer mid-turn: the message joins the run, stdin close
   fake.emit({type:'system',subtype:'init',session_id:'s'},{type:'assistant',message:{content:[{type:'text',text:'Counting'}]}});
   assert.equal(send!('Also say BANANA'),true);
   const lines=fake.stdin().trim().split('\n').map(line=>JSON.parse(line));
-  assert.deepEqual(lines.map(line=>line.message.content[0].text),['hello','Also say BANANA']);
+  assert.deepEqual(lines.map(line=>line.message.content[0].text),['hello',claudeSteerText('Also say BANANA')]);
   fake.emit({type:'result',subtype:'success',result:'1 2 3'});
   await new Promise(resolve=>setImmediate(resolve));
   assert.equal(ended,false,'one result per message: the run waits for the steer’s answer');

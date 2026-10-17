@@ -107,6 +107,10 @@ const handBack = (content: string): string => { const at = content.indexOf('The 
 /** The turn's stdin: the plain prompt, or with images one stream-json user message whose
  *  image content blocks carry the attachment bytes (the model sees them directly). */
 export const claudeUserMessage = (text: string): string => JSON.stringify({type: 'user', message: {role: 'user', content: [{type: 'text', text}]}}) + '\n';
+/** A steer is written as another user message. Said bare, the model often answers just it and ends the turn with the
+ *  original task half done: frame it as a correction to fold in, then keep working. */
+export const claudeSteerText = (text: string): string =>
+  `[The user sent this while you were working. Take it into account and continue the current task; do not stop after acknowledging it. If it changes the task, adjust and keep going until the task is done.]\n\n${text}`;
 export function claudeStdin(input: Pick<AdapterRunInput, 'prompt' | 'images'>): string {
   if (!input.images?.length) return claudeUserMessage(input.prompt);
   const images = loadImages(input.images);
@@ -289,7 +293,7 @@ export function claudeCodeAdapter(options: {binary: string; env?: NodeJS.Process
       input.onSteerable?.(message => {
         if (settled || inputClosed || !child.stdin || input.signal.aborted) return false;
         pending++; unanswered++;
-        try { child.stdin.write(claudeUserMessage(message)); if (grace) { clearTimeout(grace); grace = undefined; } return true; } catch { pending--; unanswered--; return false; }
+        try { child.stdin.write(claudeUserMessage(claudeSteerText(message))); if (grace) { clearTimeout(grace); grace = undefined; } return true; } catch { pending--; unanswered--; return false; }
       });
     });
   }};

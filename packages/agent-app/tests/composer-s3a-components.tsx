@@ -218,12 +218,13 @@ assert.deepEqual(chat.queue.map((item:any)=>item.text),['First follow-up','Secon
 assert.ok(store.getState().notices.some(notice=>notice.message==='Queued message restored'));
 // CR-15: the queueing toggle flips the Follow-up behavior from the + menu while a turn runs.
 (byTest('composer-plus') as HTMLButtonElement).click();await delay(60);
-const toggle=Array.from(document.querySelectorAll<HTMLButtonElement>('[data-testid="composer-row"]')).find(row=>row.querySelector('.composer-row-label')?.textContent==='Turn off queueing')!;assert.ok(toggle);
+// Steer is the default, so the row offers to turn queueing on.
+const toggle=Array.from(document.querySelectorAll<HTMLButtonElement>('[data-testid="composer-row"]')).find(row=>row.querySelector('.composer-row-label')?.textContent==='Turn on queueing')!;assert.ok(toggle);
 toggle.click();await delay(40);
-assert.equal(store.getState().followUpMode,'steer');
+assert.equal(store.getState().followUpMode,'queue');
 (byTest('composer-plus') as HTMLButtonElement).click();await delay(60);
-assert.ok(Array.from(document.querySelectorAll('[data-testid="composer-row"] .composer-row-label')).some(node=>node.textContent==='Turn on queueing'));
-store.setFollowUpMode('queue');await key(document.querySelector('[role="dialog"][aria-label="Add files and more"]')!,'Escape');
+assert.ok(Array.from(document.querySelectorAll('[data-testid="composer-row"] .composer-row-label')).some(node=>node.textContent==='Turn off queueing'));
+store.setFollowUpMode('steer');await key(document.querySelector('[role="dialog"][aria-label="Add files and more"]')!,'Escape');
 chat={...chat,status:'completed',queue:undefined};emit();await delay(40);
 
 // linkedom's click() never toggles a checkbox: flip it through the prototype setter (so React's tracker sees a change), then click.
