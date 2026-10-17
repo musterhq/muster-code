@@ -29,3 +29,11 @@ test('saving a file keeps its permissions, so a script stays executable', { skip
   assert.equal(saved.conflict, false);
   assert.equal((await stat(join(dir, 'run.sh'))).mode & 0o777, 0o755);
 });
+
+test('content search returns folder-relative paths whether or not ripgrep is installed', { skip: spawnSync('rg', ['--version']).status !== 0 }, async () => {
+  const dir = await workspace();
+  await mkdir(join(dir, 'sub'));
+  await writeFile(join(dir, 'sub', 'a.txt'), 'needle here\n', 'utf8');
+  const result = await searchContent(dir, '', 'needle');
+  assert.deepEqual(result.matches.map(match => match.path), ['sub/a.txt']);
+});

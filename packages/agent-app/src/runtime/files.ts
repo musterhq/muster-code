@@ -232,7 +232,8 @@ function searchWithRipgrep(base: string, query: string, options: ContentSearchOp
         buffered = buffered.slice(newline + 1);
         const match = /^(.*?):(\d+):(.*)$/.exec(line);
         if (!match) continue;
-        if (matches.length < SEARCH_CAP) matches.push({path: match[1], line: Number(match[2]), text: match[3].slice(0, 500)});
+        // ripgrep prefixes "./" when given "."; the JS walk never does, so results stay folder-relative either way.
+        if (matches.length < SEARCH_CAP) matches.push({path: match[1].replace(/^\.[\\/]/, ''), line: Number(match[2]), text: match[3].slice(0, 500)});
         else truncated = true;
       }
     });
