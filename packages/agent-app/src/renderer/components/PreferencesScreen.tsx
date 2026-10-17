@@ -123,6 +123,12 @@ function GeneralSection({settings,set}:{settings:AppSettings;set:Setter}):React.
     <NotificationsGroup settings={settings} set={set}/>
     <h3 className="preference-group-title">Conversations</h3>
     <div className="preference-group">
+      <Row setting="chats.resumeAfterLimit" title="Continue when a usage limit resets" scope="All chats · each chat can opt out" description="A run that stops on a provider usage limit shows Limited and continues by itself at the reset. Queued messages follow in order.">
+        <Switch label="Continue when a usage limit resets" checked={settings['chats.resumeAfterLimit']} onChange={value=>set('chats.resumeAfterLimit',value)}/>
+      </Row>
+      <Row setting="chats.resumeAfterRestart" title="Continue interrupted chats after a restart" scope="All chats" description="Chats that were working when Muster closed continue after the next start. A chat waiting for your approval or answer is left for you.">
+        <Switch label="Continue interrupted chats after a restart" checked={settings['chats.resumeAfterRestart']} onChange={value=>set('chats.resumeAfterRestart',value)}/>
+      </Row>
       <Row title="Import conversations" scope="Codex CLI and desktop · Claude Code · ChatGPT export" description="Bring earlier sessions in as chats, matched to your folders by their working directory. The sources are only read; keys and tokens are redacted.">
         <button type="button" className="settings-button secondary" onClick={()=>openImportConversations()}><Download size={14}/>Import…</button>
       </Row>

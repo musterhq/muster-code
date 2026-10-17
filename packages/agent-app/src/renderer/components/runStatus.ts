@@ -1,10 +1,12 @@
 import type {Chat, ChatStatus, TimelineItem} from '../../shared/protocol';
 import {classifyTool} from './toolPresentation.ts';
 
-/** Header status: an open approval or question outranks running; a stall shows Reconnecting; an idle chat with queued follow-ups shows Queued.
+/** Header status: a usage limit waiting to reset shows Limited; an open approval or question outranks running; a stall shows Reconnecting; an idle chat with queued follow-ups shows Queued.
  *  Kept in its own non-JSX module so it (and planCardId below) can be unit tested with plain `node --test`, no DOM. */
-export function displayStatus(chat:Pick<Chat,'status'|'queue'>,items:readonly TimelineItem[],stalled=false):ChatStatus {
+export function displayStatus(chat:Pick<Chat,'status'|'queue'|'autoResume'>,items:readonly TimelineItem[],stalled=false):ChatStatus {
   const live=chat.status==='running'||chat.status==='stopping';
+  // #448: a run stopped on a usage limit reads Limited until it continues (or the retries gave up).
+  if(!live&&chat.autoResume&&!chat.autoResume.gaveUp)return 'limited';
   if(live&&items.some(item=>(item.kind==='approval'||item.kind==='question')&&item.status==='pending'))return 'waiting';
   if(live&&stalled)return 'reconnecting';
   if(!live&&chat.queue?.length&&chat.status!=='failed'&&chat.status!=='interrupted')return 'queued';
