@@ -131,6 +131,8 @@ export function hubEnv(base: NodeJS.ProcessEnv, stateDir: string, androidSdk: st
   return env;
 }
 
+/** The last lines the helper printed, for an error; the startup banner (which holds the token) is never included. */
+const tail = (out: string) => out.split('\n').filter(line => line.trim() && !/token=/.test(line)).slice(-2).join(' ').slice(0, 300);
 /** Starts the hub and resolves once it printed its banner and answers /readyz. */
 export function startHub(input: {node: string; paths: HelperPaths; env: NodeJS.ProcessEnv; spawn?: Spawn; fetch?: typeof fetch; timeoutMs?: number; onExit?: (code: number | null) => void}): Promise<{endpoint: HubEndpoint; child: ChildProcess}> {
   const child = (input.spawn ?? defaultSpawn)(input.node, hubArgs(input.paths.entry), {cwd: input.paths.installDir, env: input.env});
@@ -138,7 +140,8 @@ export function startHub(input: {node: string; paths: HelperPaths; env: NodeJS.P
   return new Promise((resolve, reject) => {
     let out = '', settled = false;
     const fail = (error: Error) => { if (settled) return; settled = true; clearTimeout(timer); try { child.kill('SIGTERM'); } catch {} reject(error); };
-    const timer = setTimeout(() => fail(new Error('The device helper did not start in time.')), input.timeoutMs ?? 30_000);
+    // A cold first start right after a simulator boot can take well over 30 s on a busy machine (CI saw it).
+    const timer = setTimeout(() => fail(new Error(`The device helper did not start in time. ${tail(out)}`.trim())), input.timeoutMs ?? 90_000);
     child.stderr?.on('data', chunk => { out = (out + String(chunk)).slice(-8000); });
     child.stdout?.on('data', async chunk => {
       if (settled) return;
@@ -157,7 +160,7 @@ export function startHub(input: {node: string; paths: HelperPaths; env: NodeJS.P
       resolve({endpoint: {origin, token: banner.token, pid: child.pid ?? 0}, child});
     });
     child.once('error', error => fail(error));
-    child.once('exit', code => { input.onExit?.(code); fail(new Error(`The device helper stopped during startup (exit ${code}). ${out.split('\n').filter(Boolean).slice(-2).join(' ').slice(0, 300)}`.trim())); });
+    child.once('exit', code => { input.onExit?.(code); fail(new Error(`The device helper stopped during startup (exit ${code}). ${tail(out)}`.trim())); });
   });
 }
 
