@@ -3,6 +3,10 @@
 All notable changes to Muster Agent. Each `## <version>` section becomes the notes of the
 `agent-v<version>` GitHub Release (`.github/workflows/agent-app-release.yml`).
 
+## Unreleased
+
+- The agent can ask you a question without stopping: it shows the usual question card with the choice it is continuing with, and keeps working. Answer whenever you like; the answer reaches the running agent right away, or becomes the next message once the run has ended.
+
 ## 0.3.13
 
 Replies in one turn read as one answer, and pictures that can no longer be read take one line instead of an empty frame.
