@@ -29,6 +29,18 @@ function hasInvalidUtf8(buffer: Buffer): boolean {
   catch { return true; }
 }
 
+/** A byte-limited preview can end inside a multi-byte character; drop that partial tail so it is neither shown as U+FFFD nor mistaken for bad encoding. */
+function withoutPartialUtf8Tail(buffer: Uint8Array): Buffer {
+  for (let back = 1; back <= Math.min(3, buffer.length); back++) {
+    const byte = buffer[buffer.length - back]!;
+    if ((byte & 0xc0) === 0x80) continue; // continuation byte: keep looking for its lead byte
+    const needed = byte >= 0xf0 ? 4 : byte >= 0xe0 ? 3 : byte >= 0xc0 ? 2 : 1;
+    const kept = needed > back ? buffer.subarray(0, buffer.length - back) : buffer;
+    return Buffer.from(kept.buffer, kept.byteOffset, kept.byteLength);
+  }
+  return Buffer.from(buffer.buffer, buffer.byteOffset, buffer.byteLength);
+}
+
 function fileRevision(stat: {mtimeMs: number; size: number}): string {
   return `${stat.mtimeMs.toString(36)}:${stat.size.toString(36)}`;
 }
@@ -85,9 +97,10 @@ export async function readFile(root: string, rel: string): Promise<{ path: strin
       if (!chunk.bytesRead) break;
       bytesRead += chunk.bytesRead;
     }
-    const shown = buffer.subarray(0, Math.min(bytesRead, limit));
+    let shown: Buffer = buffer.subarray(0, Math.min(bytesRead, limit));
     // Excel Unicode Text exports have a UTF-16 BOM. Never guess binary encoding.
     const utf16 = table && shown.length >= 2 && (shown[0] === 255 && shown[1] === 254 ? 'utf-16le' : shown[0] === 254 && shown[1] === 255 ? 'utf-16be' : '');
+    if (!utf16 && bytesRead > limit) shown = withoutPartialUtf8Tail(shown);
     if (!utf16 && looksBinary(shown)) throw new Error(`Binary file (no text preview): ${rel}`);
     const text = utf16 ? new TextDecoder(utf16).decode(shown) : shown.toString('utf8');
     return { path: rel, text, truncated: bytesRead > limit, revision: fileRevision(stat), encodingWarning: !utf16 && hasInvalidUtf8(shown) };
@@ -112,7 +125,8 @@ export async function readFileFull(root: string, rel: string): Promise<{ path: s
       if (!chunk.bytesRead) break;
       bytesRead += chunk.bytesRead;
     }
-    const shown = buffer.subarray(0, Math.min(bytesRead, limit));
+    let shown: Buffer = buffer.subarray(0, Math.min(bytesRead, limit));
+    if (bytesRead > limit) shown = withoutPartialUtf8Tail(shown);
     if (looksBinary(shown)) throw new Error(`Binary file (no text preview): ${rel}`);
     return { path: rel, text: shown.toString('utf8'), truncated: bytesRead > limit, revision: fileRevision(stat), encodingWarning: hasInvalidUtf8(shown) };
   } finally {

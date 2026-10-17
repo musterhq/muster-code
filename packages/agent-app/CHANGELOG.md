@@ -6,6 +6,7 @@ All notable changes to Muster Agent. Each `## <version>` section becomes the not
 ## Unreleased
 
 - Typechecking runs on tsc-rs, about twice as fast and using a third less memory, with a CI guard that compares it with the official compiler
+- A long text file with accents, symbols or non-Latin text no longer shows a false "not valid UTF-8" warning (and a stray replacement character) at the end of its preview.
 
 ## 0.3.13
 
