@@ -8,6 +8,7 @@ All notable changes to Muster Agent. Each `## <version>` section becomes the not
 - Typechecking runs on tsc-rs, about twice as fast and using a third less memory, with a CI guard that compares it with the official compiler
 - Token totals no longer read as 1000K, very large ones show in billions, and a negative cost shows a dash
 - A turn's receipt no longer shows 1000.0k tokens, and counts in the billions show a B
+- An organisation whose name starts with an emoji shows the whole emoji in its avatar instead of a broken character
 
 ## 0.3.13
 
