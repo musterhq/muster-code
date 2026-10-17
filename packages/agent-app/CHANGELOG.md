@@ -13,6 +13,7 @@ All notable changes to Muster Agent. Each `## <version>` section becomes the not
 - Open 3D models in Muster. GLB, glTF (with Draco or meshopt compression), OBJ with MTL, STL, PLY and FBX files open as an interactive preview in the file viewer, from chat attachments and from the Outputs tab: drag to rotate with momentum, scroll to zoom, shift-drag to pan, arrow keys to orbit, Front / 3/4 / Top / Right views, wireframe, model info (vertices, triangles, size), and save an image of the current view. Text formats (OBJ, glTF) keep a Source toggle.
 - Large models stay smooth: files are read in 4 MiB pieces, parsed in a background worker, and sent to the graphics card a few megabytes per frame, so a 50 MB model opens without freezing the window. Textures and companion files are read only from the model's own folder.
 - The 3D view draws only when something changes. Idle, hidden or inactive windows cost no graphics work, and closing a model releases its graphics memory.
+- Typechecking runs on tsc-rs, about twice as fast and using a third less memory, with a CI guard that compares it with the official compiler
 
 ## 0.3.13
 
