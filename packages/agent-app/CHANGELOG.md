@@ -6,6 +6,7 @@ All notable changes to Muster Agent. Each `## <version>` section becomes the not
 ## Unreleased
 
 - Typechecking runs on tsc-rs, about twice as fast and using a third less memory, with a CI guard that compares it with the official compiler
+- Files downloaded in the in-app browser no longer keep invisible text-direction characters in their names, so a name can't disguise its real extension.
 
 ## 0.3.13
 
