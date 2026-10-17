@@ -32,7 +32,7 @@ import { loadAgentService, type AgentService } from './service-loader.ts';
 import { clampGeometry, DEFAULT_GEOMETRY, MIN_HEIGHT, MIN_WIDTH, planDisplayChange, WindowStateStore, type WindowGeometry } from './window-state.ts';
 import {chatIdFromArgs,chatIdFromLink} from './chat-links.ts';
 import {parseTaskLink,taskLinkFromArgs,type TaskLink} from '../shared/task-link.ts';
-import {attentionBadge,createCrashTracker,isRendererCrash} from './app-shell.ts';
+import {createBadgeTracker,createCrashTracker,isRendererCrash} from './app-shell.ts';
 import {MENU_CHANNEL,MENU_CLOSE_CHANNEL,type MenuAction} from '../shared/menu-protocol.ts';
 import {installProcessGuard} from './process-guard.ts';
 import {passwordStoreSwitch} from './linux-launch.ts';
@@ -126,7 +126,7 @@ async function main(): Promise<void> {
   const dataDir = path.join(app.getPath('userData'), 'agent-data');
   // Pending approvals/questions badge the dock while the window is not in front.
   let attentionCount = 0;
-  let shownBadge = '';
+  const badgeTracker = createBadgeTracker();
   // AUT-05: monitoring notifications follow the user's settings (mute, failures only, attention alerts off).
   let notifyPrefs: NotificationPrefs = notificationPrefs(undefined);
   let pendingAttention = 0;
@@ -134,10 +134,9 @@ async function main(): Promise<void> {
     pendingAttention = requested;
     const next = attentionAllowed(notifyPrefs, Date.now()) ? requested : 0;
     const focused = window !== null && !window.isDestroyed() && window.isVisible() && window.isFocused();
-    const update = attentionBadge(attentionCount, next, focused);
+    const update = badgeTracker(next, focused);
     attentionCount = next;
-    if (!update || (update.badge === shownBadge && !update.bounce)) return;
-    shownBadge = update.badge;
+    if (!update) return;
     if (process.platform === 'darwin') {
       app.dock?.setBadge(update.badge);
       if (update.bounce) app.dock?.bounce('informational');
@@ -370,6 +369,7 @@ async function main(): Promise<void> {
   };
   syncTransparency();
   nativeTheme.on('updated', syncTransparency);
+  window.on('blur', () => applyBadge(attentionCount));
   window.on('focus', () => { applyBadge(attentionCount); if (!isMac) window?.flashFrame(false); });
 
   // --- Renderer crash recovery ---------------------------------------------
