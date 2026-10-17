@@ -9,14 +9,15 @@
  * stripped of HTML comments (so no spoofed `muster:` marker), of `agent://` and `user://` link targets (those chips wake agents and notify people, which only
  * the person may do), and has secrets redacted. Only Muster itself appends markers and writes mentions.
  */
-const SECRET_NAME = '[A-Za-z0-9_.-]*(?:KEY|TOKEN|SECRET|PASSWORD|PASSWD|PWD|CREDENTIAL|AUTH|COOKIE|SESSION)[A-Za-z0-9_.-]*';
+// Bounded on both sides: an open-ended run on each side made a long run of name characters quadratic (server text is untrusted and can be large).
+const SECRET_NAME = '[A-Za-z0-9_.-]{0,64}(?:KEY|TOKEN|SECRET|PASSWORD|PASSWD|PWD|CREDENTIAL|AUTH|COOKIE|SESSION)[A-Za-z0-9_.-]{0,64}';
 const SECRET_PATTERNS: [RegExp, string | ((m: string, ...g: string[]) => string)][] = [
   [new RegExp(`(["'])(${SECRET_NAME})\\1(\\s*:\\s*)(?:"[^"\\n]*"|'[^'\\n]*'|[^\\s,}]+)`, 'gi'), (_m, q: string, name: string, sep: string) => `${q}${name}${q}${sep}"[redacted]"`],
   [/\bhttps:\/\/hooks\.slack\.com\/services\/[A-Za-z0-9/_-]+/g, '[redacted webhook]'],
   [/\b(?:npm_[A-Za-z0-9]{30,}|AIza[0-9A-Za-z_-]{30,}|(?:sk|rk|pk)_(?:live|test)_[A-Za-z0-9]{16,})\b/g, '[redacted key]'],
-  [/\b([a-z][a-z0-9+.-]*:\/\/)[^\s/@:]+:[^\s/@]+@/gi, '$1[redacted]@'],
+  [/(?<![a-z0-9+.-])([a-z][a-z0-9+.-]{0,31}:\/\/)[^\s/@:]+:[^\s/@]+@/gi, '$1[redacted]@'],
   [/-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?(?:-----END [A-Z ]*PRIVATE KEY-----|$)/g, '[redacted private key]'],
-  [new RegExp(`\\b(${SECRET_NAME})\\b(\\s*[=:]\\s*)(?:(?:Bearer|Basic|Token)\\s+)?(?:"[^"\\n]*"|'[^'\\n]*'|[^\\s"',;]+)`, 'gi'), (_m, name: string, sep: string) => `${name}${sep}[redacted]`],
+  [new RegExp(`(?<![A-Za-z0-9_.-])(${SECRET_NAME})\\b(\\s*[=:]\\s*)(?:(?:Bearer|Basic|Token)\\s+)?(?:"[^"\\n]*"|'[^'\\n]*'|[^\\s"',;]+)`, 'gi'), (_m, name: string, sep: string) => `${name}${sep}[redacted]`],
   [/\bAKIA[0-9A-Z]{16}\b/g, '[redacted key]'],
   [/\b(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,})\b/g, '[redacted token]'],
   [/\bsk-(?:ant-|proj-)?[A-Za-z0-9_-]{20,}\b/g, '[redacted key]'],
