@@ -3,6 +3,11 @@
 All notable changes to Muster Agent. Each `## <version>` section becomes the notes of the
 `agent-v<version>` GitHub Release (`.github/workflows/agent-app-release.yml`).
 
+## Unreleased
+
+- Memory: facts and preferences you told Muster once now carry into project and folder chats, and recall looks at your task and recent messages (not just "continue"), with a longer wait for the memory service.
+- Memory context is sent again on the next turn after a compaction or a model/provider change.
+
 ## 0.3.13
 
 Replies in one turn read as one answer, and pictures that can no longer be read take one line instead of an empty frame.
