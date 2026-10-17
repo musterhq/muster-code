@@ -116,3 +116,14 @@ test('G36: items from automations, timers and heartbeats are marked routine and 
   assert.equal(readHideRoutine(mem), false); writeHideRoutine(mem, true); assert.equal(readHideRoutine(mem), true); writeHideRoutine(mem, false); assert.equal(readHideRoutine(mem), false);
   assert.equal(readHideRoutine(undefined), false);
 });
+
+test('single-key shortcuts follow the physical letter on non-Latin layouts', () => {
+  const t0 = 1_000;
+  // Russian layout: the physical C key types "с", G types "п", I types "ш".
+  assert.equal(resolveShortcut(IDLE, { ...key('с'), code: 'KeyC' }, t0).action, 'new-task');
+  const armed = resolveShortcut(IDLE, { ...key('п'), code: 'KeyG' }, t0);
+  assert.equal(armed.consume, true, 'g arms the chord');
+  assert.equal(resolveShortcut(armed.next, { ...key('ш'), code: 'KeyI' }, t0 + 100).action, 'go-inbox');
+  // A Latin layout that rearranges letters (Dvorak) keeps what the key types.
+  assert.equal(resolveShortcut(IDLE, { ...key('j'), code: 'KeyC' }, t0).action, 'next-row');
+});

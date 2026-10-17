@@ -8,6 +8,7 @@ All notable changes to Muster Agent. Each `## <version>` section becomes the not
 - Typechecking runs on tsc-rs, about twice as fast and using a third less memory, with a CI guard that compares it with the official compiler
 - Pressing Enter to confirm a Japanese, Chinese or Korean composition in search, quick open, renaming and the branch and owner pickers no longer also runs the highlighted row or saves a half-typed name
 - Searching with an emoji in the command palette and chat search highlights the whole emoji instead of showing a broken character
+- The single-key shortcuts (c, g then i, j, k and the rest) now work on Russian, Greek and other non-Latin keyboard layouts
 
 ## 0.3.13
 
