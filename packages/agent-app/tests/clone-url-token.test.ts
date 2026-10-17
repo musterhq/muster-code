@@ -24,7 +24,7 @@ test('clone URLs whose username is a token are rejected', () => {
 });
 
 test('ordinary usernames and transports stay accepted', () => {
-  for (const url of ['https://alice@bitbucket.org/team/repo.git', 'ssh://git@host.example/o/r.git', 'git@github.com:o/r.git', 'https://github.com/o/r.git', 'ssh://deploy-user@host.example:2222/o/r']) {
+  for (const url of ['https://alice@bitbucket.org/team/repo.git', 'ssh://git@host.example/o/r.git', 'git@github.com:o/r.git', 'https://github.com/o/r.git', 'ssh://deploy-user@host.example:2222/o/r', 'https://christopher-alexander-smith@bitbucket.org/team/repo.git', 'https://christopheralexandersmith@bitbucket.org/team/repo.git']) {
     assert.equal(validateCloneUrl(url), url);
   }
   assert.throws(() => validateCloneUrl('https://user:secret@github.com/o/r'), /Remove the password/);

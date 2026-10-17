@@ -14,12 +14,14 @@ let cloneTimeoutMs = CLONE_TIMEOUT_MS;
 /** Test seam: shorten the clone timeout (undefined restores 30 minutes). */
 export function setCloneTimeoutForTests(ms?: number): void { cloneTimeoutMs = ms ?? CLONE_TIMEOUT_MS; }
 
-/** A username that is really a credential: known token prefixes, token-auth pseudo-users, or a long opaque string. Checked after percent-decoding. */
+/** A username that is really a credential: known token prefixes, token-auth pseudo-users, or a long opaque string (32+ characters, or 20+ of mixed case and digits). Checked after percent-decoding. */
 function looksLikeCredential(username: string): boolean {
   let name = username;
   try { name = decodeURIComponent(username); } catch { /* keep the raw text */ }
   return /^(?:gh[pousr]_|github_pat_|glpat-)/i.test(name) || /^(?:x-access-token|x-token-auth|x-oauth-basic|oauth2)$/i.test(name)
-    || /^[A-Za-z0-9_-]{20,}$/.test(name) || /^[0-9a-f]{40}$/i.test(name);
+    || /^[0-9a-f]{40}$/i.test(name) || /^[A-Za-z0-9_-]{32,}$/.test(name)
+    // 20+ characters of mixed-case letters and digits with no hyphen: an opaque token, not a long human username like `christopher-alexander-smith`.
+    || (/^[A-Za-z0-9_]{20,}$/.test(name) && /[a-z]/.test(name) && /[A-Z]/.test(name) && /\d/.test(name));
 }
 
 /** Accepted transports: https/http, ssh://, git://, scp-like `user@host:path`, and local paths / file:// (local clones). */
