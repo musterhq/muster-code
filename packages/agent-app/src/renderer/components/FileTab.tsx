@@ -156,7 +156,7 @@ function selectedLines(container: HTMLElement | null): {start: number; end: numb
 // Editing (WRK-08): a textarea editor with line numbers, Cmd+S to save, and a
 // conflict prompt when the file changed on disk since it was loaded.
 
-function FileEditor({folderId, path, tabId, onSaved}: {folderId: string; path: string; tabId: string; onSaved: () => void}): React.ReactElement {
+export function FileEditor({folderId, path, tabId, onSaved}: {folderId: string; path: string; tabId: string; onSaved: () => void}): React.ReactElement {
   const [state, setState] = useState<{phase: 'loading'} | {phase: 'ready'; original: string; draft: string; revision: string} | {phase: 'error'; message: string}>({phase: 'loading'});
   const [saving, setSaving] = useState(false);
   const [conflict, setConflict] = useState(false);
@@ -167,7 +167,13 @@ function FileEditor({folderId, path, tabId, onSaved}: {folderId: string; path: s
     let live = true;
     setState({phase: 'loading'});
     void invoke('files.readFull', {folderId, path}).then(
-      value => { if (live) setState({phase: 'ready', original: value.text, draft: value.text, revision: value.revision}); },
+      value => {
+        if (!live) return;
+        // Saving writes the whole buffer back, so a file that was not read faithfully must never be editable.
+        if (value.truncated) setState({phase: 'error', message: 'This file is too large to edit here, so it was not opened for editing. Open it in an editor instead.'});
+        else if (value.encodingWarning) setState({phase: 'error', message: 'This file has bytes that are not valid UTF-8, so editing it here would replace them. Open it in an editor instead.'});
+        else setState({phase: 'ready', original: value.text, draft: value.text, revision: value.revision});
+      },
       cause => { if (live) setState({phase: 'error', message: friendlyFileError(cause)}); },
     );
     return () => { live = false; };
@@ -179,9 +185,11 @@ function FileEditor({folderId, path, tabId, onSaved}: {folderId: string; path: s
     if (state.phase !== 'ready' || saving) return;
     setSaving(true); setSaveError('');
     try {
-      const result = await invoke('files.write', {folderId, path, text: state.draft, ...(force ? {} : {expectedRevision: state.revision})});
+      const saved = state.draft;
+      const result = await invoke('files.write', {folderId, path, text: saved, ...(force ? {} : {expectedRevision: state.revision})});
       if (result.conflict) { setConflict(true); return; }
-      setState({phase: 'ready', original: state.draft, draft: state.draft, revision: result.revision});
+      // Keep whatever was typed while the write was in flight; only the saved baseline moves.
+      setState(prior => prior.phase === 'ready' ? {phase: 'ready', original: saved, draft: prior.draft, revision: result.revision} : prior);
       setConflict(false);
       void refreshFileBody(folderId, path);
       onSaved();
