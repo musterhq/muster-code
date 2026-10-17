@@ -3,6 +3,10 @@
 All notable changes to Muster Agent. Each `## <version>` section becomes the notes of the
 `agent-v<version>` GitHub Release (`.github/workflows/agent-app-release.yml`).
 
+## Unreleased
+
+- The browser tab an agent is working in now stays usable when you close the browser panel mid-run: it is no longer frozen or discarded while in use, live previews revive it, and browser tool calls retry safely after a dropped connection (never repeating a click or keystroke).
+
 ## 0.3.13
 
 Replies in one turn read as one answer, and pictures that can no longer be read take one line instead of an empty frame.
