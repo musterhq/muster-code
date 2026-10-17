@@ -98,7 +98,7 @@ async function turnBody(input: AdapterRunInput, memory: ConversationMemory, labe
     return true;
   };
   /** What the next turn remembers: the prompt, each steer in order with the reply before it, then the rest of the answer. */
-  const remember = (tail: string): ChatMessage[] => [...history, {role: 'user', content: input.prompt}, ...injected, ...(tail.trim() || !injected.length ? [{role: 'assistant' as const, content: tail}] : [])];
+  const remember = (tail: string): ChatMessage[] => [...history, {role: 'user', content: input.prompt}, ...injected, ...(tail.trim() || !injected.length ? [{role: 'assistant' as const, content: tail.trim() ? tail : '(no reply)'}] : [])];
   try {
     for (let round = 0, roundStart = 0; ; round++, roundStart = answer.length) {
       const streamed = await stream(response, delta => { answer += delta; input.onDelta(delta); });

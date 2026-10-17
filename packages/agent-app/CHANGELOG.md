@@ -7,6 +7,10 @@ All notable changes to Muster Agent. Each `## <version>` section becomes the not
 
 - Typechecking runs on tsc-rs, about twice as fast and using a third less memory, with a CI guard that compares it with the official compiler
 
+- On router and API routes, command output and files read by the agent keep every character: accented and other multi-byte characters no longer turn into "�" where the output was split.
+- edit_file on router and API routes now refuses a file that is not UTF-8 text instead of quietly changing bytes elsewhere in it.
+- Long chats on the Anthropic API route no longer break after a message sent mid-reply or a reply with no text: the history sent to the model always starts with your message and never holds an empty reply.
+
 ## 0.3.13
 
 Replies in one turn read as one answer, and pictures that can no longer be read take one line instead of an empty frame.

@@ -87,6 +87,8 @@ export class ConversationMemory {
   commit(threadId: string, messages: ChatMessage[]): {retainedUserTurns: number; trimmed: boolean} {
     let kept = messages.slice(-80), size = kept.reduce((n, m) => n + m.content.length, 0);
     while (kept.length > 2 && size > this.maxChars) { size -= kept[0]!.content.length + kept[1]!.content.length; kept = kept.slice(2); }
+    // A steer makes two user messages in a row, so a cut can land on a reply; a resent history must open with the user.
+    while (kept.length > 1 && kept[0]!.role !== 'user') kept = kept.slice(1);
     this.threads.delete(threadId); this.threads.set(threadId, kept);
     while (this.threads.size > this.maxThreads) this.threads.delete(this.threads.keys().next().value!);
     const file = this.file(threadId);
