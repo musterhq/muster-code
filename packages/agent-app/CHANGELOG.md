@@ -7,6 +7,11 @@ All notable changes to Muster Agent. Each `## <version>` section becomes the not
 
 - Typechecking runs on tsc-rs, about twice as fast and using a third less memory, with a CI guard that compares it with the official compiler
 
+## Unreleased
+
+- Long streamed replies cost much less: the reply is saved about 30 times a second instead of on every token. With 20 chats streaming 600 KB replies at once, the runtime finishes in about a third of the time.
+- Search highlights in messages containing the Turkish "İ" now mark the matched words instead of text shifted beside them.
+
 ## 0.3.13
 
 Replies in one turn read as one answer, and pictures that can no longer be read take one line instead of an empty frame.
