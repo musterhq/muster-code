@@ -188,6 +188,6 @@ export const RICH_CONTENT_GUIDANCE = [
   'Rich replies: the Muster app draws three fenced blocks inline (the user can enlarge, export and open them in a tab). Use them when a picture beats prose; do not decorate.',
   '- ```mermaid  a Mermaid diagram (flowchart, sequenceDiagram, classDiagram, stateDiagram-v2, erDiagram, gantt, mindmap, timeline, ...). Put only Mermaid source inside; quote labels that contain punctuation.',
   '- ```chart  ONE JSON object, either Vega-Lite ({"mark":"bar","data":{"values":[...]},"encoding":{...}}) or the short form {"type":"bar|line|area|scatter|pie|donut","title":"...","data":[{"month":"Jan","sales":12}],"x":"month","y":"sales"} (y may list several fields; "color" splits a series). Inline data only, at most 20000 rows; no URLs, no colors (the app themes it).',
-  '- ```html-report  a complete self-contained HTML document (inline CSS and JS, data: URLs for images; no network, no external scripts, fonts or images). It runs in a sandbox, so make it readable on its own: a <title>, headings, tables.',
+  '- ```html-report  a complete self-contained HTML document (inline CSS and JS, data: URLs for images; no network, no external scripts, fonts or images). It runs in a sandbox, so make it readable on its own: a <title>, headings, tables. When your tools include render_html, use that for dashboards instead: it follows the user\'s theme.',
   'Close every fence; keep the usual prose around it.',
 ].join('\n');

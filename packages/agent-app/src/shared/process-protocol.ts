@@ -35,7 +35,7 @@ export interface ProcessOutputPage {start:number;end:number;size:number;text:str
 /** S3-E: a TCP port a shell, command or agent process of this conversation listens on.
  * The renderer gets an opaque id (never a PID or command line); stopping resolves it again in main. */
 export type ListenerSource={kind:'terminal';id:string}|{kind:'process';processId:string}|{kind:'agent'};
-export interface ListeningPort {id:string;port:number;address:string;name:string;owner:TerminalOwner;source:ListenerSource}
+export interface ListeningPort {id:string;port:number;address:string;name:string;owner:TerminalOwner;source:ListenerSource;/** #html-preview: answers HTTP with a page (a dev server), so the chat offers to preview it. Absent while unknown. */web?:boolean}
 /** `supported:false` when this platform has no lsof (ports are then simply not shown). */
 export interface ProcessPortsSnapshot {chatId:string;ports:ListeningPort[];supported:boolean;scannedAt:string}
 export type ProcessEvent={type:'processSession';leaseId:string;session:ProcessSnapshot}|{type:'processMetadata';summary:ProcessSummarySnapshot}|{type:'terminalData';id:string;data:string;start:number}|{type:'terminalExit';id:string;code:number|null};

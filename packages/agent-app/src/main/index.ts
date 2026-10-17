@@ -3,6 +3,7 @@ import {execFile} from 'node:child_process';
 import {BrowserSessionVault} from './browser-session-vault.ts';
 import {PLUGIN_SCHEME,PluginUiRegistry} from './plugin-ui.ts';
 import {REPORT_SCHEME,ReportRegistry,printReport} from './report-origin.ts';
+import {HtmlRenderStore} from './agent-tools/html-render-store.ts';
 import {exportFileName} from '../shared/rich-block.ts';
 import {applyThemeSource,themeFromSettingsResult,windowBackground} from './theme';
 import path from 'node:path';
@@ -362,7 +363,10 @@ async function main(): Promise<void> {
     return printSession;
   };
   // RUN-X1: the agent drives this same browser through the muster_browser MCP bridge; each chat's tab shows in the right pane.
+  // #html-preview: pages agents show inline (render_html) and workspace .html files opened with preview_open.
+  const htmlRenders = new HtmlRenderStore(path.join(dataDir,'html-renders'));
   const browserBridge = new BrowserBridge({dir:path.join(dataDir,'agent-tools'),browser:browserWorkspace,execPath:process.execPath,script:unpackedPath(path.join(__dirname,'browser-mcp.cjs')),
+    renders:htmlRenders,realpath:file=>fs.realpath(file),readFile:async file=>{const stat=await fs.stat(file);if(!stat.isFile())throw new Error('Not a file.');if(stat.size>4_000_000)throw new Error(`This file is ${(stat.size/1_000_000).toFixed(1)} MB; previews take at most 4 MB. Serve it with a dev server and preview its URL instead.`);return fs.readFile(file,'utf8');},
     snapshot:()=>loaded.service.invoke('app.snapshot',undefined),lease:async chatId=>(await loaded.service.invoke('computer.lease',{chatId})).owner,emit:onEvent});
   // #387/#424: started now (retried once), and again on first use if that failed; HTTP routes call it in-process.
   const startBrowserBridge=()=>browserBridge.ensureStarted().then(launcher=>{process.env.MUSTER_BROWSER_MCP_LAUNCHER=launcher;return launcher;});
@@ -592,9 +596,18 @@ async function main(): Promise<void> {
       case 'reports.open': {
         const request = input as Commands['reports.open']['input'];
         if (!request || typeof request.html !== 'string' || (request.scripts !== undefined && typeof request.scripts !== 'boolean')) throw new Error('Nothing to show.');
-        const { url, token } = reports.register({ html: request.html, ...(request.scripts === false ? { scripts: false } : {}), ...(typeof request.key === 'string' ? { key: request.key } : {}) });
+        const { url, token } = reports.register({ html: request.html, ...(request.scripts === false ? { scripts: false } : {}), ...(typeof request.key === 'string' ? { key: request.key } : {}), ...(request.themed === true ? { themed: true } : {}) });
         return { url, token };
       }
+      case 'htmlRenders.open': {
+        // The page comes from main's own store, and so does its network grant: the renderer only names the page.
+        const page = htmlRenders.view((input as Commands['htmlRenders.open']['input'])?.id);
+        if (!page) throw new Error('This page is no longer available.');
+        const { url, token } = reports.register({ html: page.html, scripts: true, themed: true, key: `render:${page.id}:${page.networkAllowed ? 'net' : 'local'}`, network: page.networkAllowed });
+        return { url, token, page };
+      }
+      case 'htmlRenders.allowNetwork': return htmlRenders.allowNetwork((input as Commands['htmlRenders.allowNetwork']['input'])?.id);
+      case 'previews.open': { const request = input as Commands['previews.open']['input']; return browserBridge.openPreview(request?.chatId, request?.url, request?.panel === true); }
       case 'reports.pdf': {
         if (!window || window.isDestroyed()) throw new Error('The window is unavailable.');
         const request = input as Commands['reports.pdf']['input'];

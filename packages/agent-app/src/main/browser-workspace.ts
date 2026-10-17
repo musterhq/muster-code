@@ -64,7 +64,7 @@ interface Entry {
   owner:string; profileId:string; surfaceId:string;
   /** Undefined while discarded: the tab keeps its URL/history but owns no renderer process. */
   view?:WebContentsView; attached:boolean;
-  url:string; title:string; favicon?:string; revision:number; error?:string; notice?:string; navigation:number;
+  url:string; title:string; favicon?:string; revision:number; error?:string; loadError?:{url:string;code:number;description:string}; notice?:string; navigation:number;
   certificateError?:{url:string;code:string};
   lastUsed:number; hiddenAt:number; history?:SavedBrowserHistory;
   viewport:BrowserViewport; hostBounds?:BrowserBounds; emulation?:string;
@@ -222,7 +222,7 @@ export class BrowserWorkspaceController {
       canGoBack:contents?contents.navigationHistory.canGoBack():!!history && history.index>0,
       canGoForward:contents?contents.navigationHistory.canGoForward():!!history && history.index<history.entries.length-1,
       visible:entry.attached,viewport:entry.viewport,consoleCount:entry.consoleTotal,consoleErrors:entry.consoleErrors,
-      ...(entry.favicon?{favicon:entry.favicon}:{}),...(entry.error?{error:entry.error}:{}),...(entry.certificateError?{certificateError:{...entry.certificateError}}:{}),
+      ...(entry.favicon?{favicon:entry.favicon}:{}),...(entry.error?{error:entry.error}:{}),...(entry.loadError?{loadError:{...entry.loadError}}:{}),...(entry.certificateError?{certificateError:{...entry.certificateError}}:{}),
       ...(entry.notice?{notice:entry.notice}:{}),...(entry.download?{download:{...entry.download.info}}:{}),...(entry.popup?{popup:{url:entry.popup.url,title:entry.popup.title.slice(0,256)}}:{})};
   }
   private publish(entry:Entry):void {
@@ -298,12 +298,12 @@ export class BrowserWorkspaceController {
       event.preventDefault();callback(false); // Never trusted in-app; the user may open the site externally.
       if(!current() || isMainFrame===false)return;
       let safe:string;try {safe=browserURL(url);} catch {return;}
-      entry.certificateError={url:safe,code:String(code).slice(0,120)};entry.error=undefined;this.publish(entry);
+      entry.certificateError={url:safe,code:String(code).slice(0,120)};entry.error=undefined;entry.loadError=undefined;this.publish(entry);
     });
     contents.on('did-start-navigation',(_event,url,_inPlace,isMainFrame)=>{
       if(!current() || !isMainFrame)return;
       const origin=originOf(entry.url);
-      if(setURL(url)){if(originOf(entry.url)!==origin)entry.favicon=undefined;entry.error=undefined;entry.notice=undefined;entry.certificateError=undefined;this.publish(entry);}
+      if(setURL(url)){if(originOf(entry.url)!==origin)entry.favicon=undefined;entry.error=undefined;entry.loadError=undefined;entry.notice=undefined;entry.certificateError=undefined;this.publish(entry);}
     });
     contents.on('did-redirect-navigation',(_event,url,_inPlace,isMainFrame)=>{if(current() && isMainFrame && setURL(url))this.publish(entry);});
     contents.on('did-navigate',(_event,url)=>{if(current() && setURL(url))this.publish(entry);});
@@ -315,7 +315,7 @@ export class BrowserWorkspaceController {
       if(!current() || !isMainFrame || code===-3) return; // User stop/replacement is not a load failure.
       try {if(browserURL(url)!==entry.url)return;}catch{return;}
       if(entry.certificateError && code<=-200 && code>-300) return; // The interstitial already explains it.
-      entry.error=`Could not load this page (${code}): ${description.slice(0,240)}`;this.publish(entry);
+      entry.error=`Could not load this page (${code}): ${description.slice(0,240)}`;entry.loadError={url:entry.url,code,description:description.slice(0,120)};this.publish(entry);
     });
     contents.on('render-process-gone',()=>{if(!current())return;entry.error='This browser page stopped unexpectedly. Reload to try again.';this.detach(entry);this.publish(entry);});
     contents.on('destroyed',()=>{
@@ -460,7 +460,7 @@ export class BrowserWorkspaceController {
     const index=history?Math.max(0,Math.min(history.entries.length-1,history.index+historyOffset)):0;
     const access=view.webContents.navigationHistory as unknown as HistoryAccess;
     if(history && access.restore){
-      const navigation=++entry.navigation;entry.url=history.entries[index].url;entry.error=undefined;entry.notice=undefined;
+      const navigation=++entry.navigation;entry.url=history.entries[index].url;entry.error=undefined;entry.loadError=undefined;entry.notice=undefined;
       void access.restore({entries:history.entries,index}).catch(()=>{
         if(entry.view!==view || navigation!==entry.navigation || view.webContents.isDestroyed()) return;
         this.load(entry,entry.url);
@@ -551,7 +551,7 @@ export class BrowserWorkspaceController {
   }
   private load(entry:Entry,url:string):void {
     const view=entry.view;if(!view) return;
-    const navigation=++entry.navigation;entry.url=url;entry.error=undefined;entry.notice=undefined;
+    const navigation=++entry.navigation;entry.url=url;entry.error=undefined;entry.loadError=undefined;entry.notice=undefined;
     void view.webContents.loadURL(url).catch(error=>{
       if(this.entries.get(entry.owner)!==entry || entry.view!==view || navigation!==entry.navigation || view.webContents.isDestroyed() || (error as {code?:string}).code==='ERR_ABORTED') return;
       entry.error=error instanceof Error?error.message.slice(0,320):'The page could not be loaded.';this.publish(entry);
@@ -563,7 +563,7 @@ export class BrowserWorkspaceController {
     // A discarded page is recreated directly at the neighbouring history entry.
     if(!this.record(owner).view) return this.snapshot(this.entry(owner,offset));
     const entry=this.entry(owner),history=entry.view.webContents.navigationHistory;
-    if(offset<0?history.canGoBack():history.canGoForward()){entry.navigation++;entry.error=undefined;if(offset<0)history.goBack();else history.goForward();}
+    if(offset<0?history.canGoBack():history.canGoForward()){entry.navigation++;entry.error=undefined;entry.loadError=undefined;if(offset<0)history.goBack();else history.goForward();}
     this.publish(entry);return this.snapshot(entry);
   }
   back(owner:string):BrowserState {return this.step(owner,-1);}
@@ -571,7 +571,7 @@ export class BrowserWorkspaceController {
   reload(owner:string):BrowserState {
     // Recreating a discarded page is its reload.
     if(!this.record(owner).view) return this.snapshot(this.entry(owner));
-    const entry=this.entry(owner);entry.navigation++;entry.error=undefined;entry.notice=undefined;entry.view.webContents.reload();this.publish(entry);return this.snapshot(entry);
+    const entry=this.entry(owner);entry.navigation++;entry.error=undefined;entry.loadError=undefined;entry.notice=undefined;entry.view.webContents.reload();this.publish(entry);return this.snapshot(entry);
   }
   stop(owner:string):BrowserState {
     const entry=this.record(owner);

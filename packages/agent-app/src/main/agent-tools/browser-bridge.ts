@@ -7,7 +7,10 @@ import type {AgentEvent, Snapshot} from '../../shared/protocol.ts';
 import type {ComputerControlOwner} from '../../shared/domains/computer-protocol.ts';
 import {launcherFile, nodeLauncherScript} from '../../runtime/launcher-script.ts';
 import {runBrowserTool, type AgentBrowserHost, type AgentPage} from './browser-actions.ts';
-import {BROWSER_TOOL_NAMES, textResult, type McpToolResult} from './browser-tools.ts';
+import {BROWSER_TOOL_NAMES, PREVIEW_TOOL_NAMES, textResult, type McpToolResult} from './browser-tools.ts';
+import type {HtmlRenderStore} from './html-render-store.ts';
+import {htmlRenderRef} from '../../shared/html-render.ts';
+import {previewFilePath, previewUrl, describeLoadError} from '../../shared/preview.ts';
 
 /** What the bridge needs from the browser workspace (BrowserWorkspaceController satisfies it). */
 export interface BridgeBrowser {
@@ -20,6 +23,8 @@ export interface BridgeBrowser {
   /** The tab's state without waking a discarded page (optional for test doubles). */
   status?(owner: string): BrowserState;
   frame(owner: string, width?: number): Promise<{dataUrl: string; width: number; height: number; url: string; title: string} | undefined>;
+  /** Closes the tab (preview_close); optional for test doubles. */
+  close?(owner: string): void;
 }
 export interface BridgeOptions {
   dir: string;
@@ -27,6 +32,12 @@ export interface BridgeOptions {
   snapshot(): Promise<Snapshot>;
   lease(chatId: string): Promise<ComputerControlOwner>;
   emit(event: AgentEvent): void;
+  /** render_html pages (#html-preview); without it the tool says it is unavailable. */
+  renders?: HtmlRenderStore;
+  /** Reads an .html file for preview_open(file): absolute, already checked to be inside the chat's folder. */
+  readFile?(path: string): Promise<string>;
+  /** Resolves symlinks, so a link inside the folder can never point a preview outside it. */
+  realpath?(path: string): Promise<string>;
   /** Node binary (Electron with ELECTRON_RUN_AS_NODE) and the bundled stdio server. */
   execPath: string;
   script: string;
@@ -128,14 +139,37 @@ export class BrowserBridge {
     }, timeoutMs); timer.unref?.(); });
     return Promise.race([next, late]).finally(() => clearTimeout(timer));
   }
-  private async execute(chatId: string, tool: string, args: unknown, session?: string): Promise<McpToolResult> {
+  private async execute(chatId: string, tool: string, args: unknown, session?: string, nested = false): Promise<McpToolResult> {
     if (this.disposed) return textResult('Muster is closing.', true);
+    if (nested && PREVIEW_TOOL_NAMES.has(tool)) return textResult('Unsupported.', true);
     const snapshot = await this.options.snapshot();
     const chat = snapshot.chats.find(item => item.id === chatId);
     if (!chat) return textResult('This chat no longer exists in Muster.', true);
     // CUA-03/09: the user holding control revokes the agent's input lease.
+    if (tool === 'render_html') return this.renderHtml(chat, args);
     if (await this.options.lease(chatId) === 'user') return textResult('The user has taken control of the browser. Stop using browser tools and wait until they hand control back.', true);
     const owner = agentBrowserOwner(chatId, session), profileId = browserScopeProfile(chat), browser = this.options.browser;
+    if (tool === 'preview_close') {
+      if (!browser.hasTab(owner)) return textResult('No preview is open.');
+      browser.close?.(owner);
+      this.options.emit({type: 'previewClosed', chatId, owner});
+      return textResult('Closed the preview.');
+    }
+    if (tool === 'preview_open') {
+      const input = args && typeof args === 'object' ? args as Record<string, unknown> : {};
+      if (typeof input.file === 'string' && input.file.trim()) return this.previewFile(chat, snapshot, input.file);
+      const url = previewUrl(input.url);
+      if (!url) return textResult('preview_open needs a url (http or https, e.g. http://localhost:5173) or the path of an .html file in the workspace.', true);
+      const panel = input.panel === true;
+      // The same tab, page load and snapshot as browser_navigate; then the person is shown it.
+      const navigated = await this.execute(chatId, 'browser_navigate', {url}, session, true);
+      const state = (() => { try { return browser.status?.(owner); } catch { return undefined; } })();
+      this.options.emit({type: 'previewShown', chatId, owner, profileId, url: state?.url ?? url, panel});
+      if (state?.loadError) return textResult(`${url} could not be reached: ${describeLoadError(state.loadError.description)} (${state.loadError.code}). If it is your dev server, check that it is running and listening on that port, then call preview_open again. The user sees the same message in the preview.`, true);
+      if (navigated.isError) return navigated;
+      const text = navigated.content.find(part => part.type === 'text');
+      return textResult(`Showing ${url} to the user ${panel ? 'in the right pane' : 'in a live mini player in the chat (one click opens it in the right pane)'}.\n\n${text && text.type === 'text' ? text.text : ''}`.trim());
+    }
     let announced = false;
     const host: AgentBrowserHost = {
       has: () => browser.hasTab(owner),
@@ -159,6 +193,55 @@ export class BrowserBridge {
     } catch (error) {
       return textResult(error instanceof Error ? error.message : String(error), true);
     }
+  }
+  /** A local server card's "Mini player" / "Open": the person asks; the chat's agent tab opens the URL and streams frames. */
+  async openPreview(chatId: unknown, rawUrl: unknown, panel = false): Promise<{owner: string; profileId: string; url: string}> {
+    if (typeof chatId !== 'string' || !/^[a-zA-Z0-9_-]{1,120}$/.test(chatId)) throw new Error('Open a chat first.');
+    const url = previewUrl(rawUrl);
+    if (!url) throw new Error('Only http and https addresses can be previewed.');
+    const snapshot = await this.options.snapshot();
+    const chat = snapshot.chats.find(item => item.id === chatId);
+    if (!chat) throw new Error('This chat no longer exists in Muster.');
+    const owner = agentBrowserOwner(chatId), profileId = browserScopeProfile(chat), browser = this.options.browser;
+    const opened = !browser.hasTab(owner), state = browser.agentOpen(owner, profileId, url);
+    if (opened) this.options.emit({type: 'computerBrowserOpened', chatId, owner, profileId, url: state.url});
+    this.options.emit({type: 'previewShown', chatId, owner, profileId, url: state.url, panel});
+    this.pump(chatId, owner, profileId, `Opened ${url}`);
+    return {owner, profileId, url: state.url};
+  }
+  /** render_html: stores the page and answers with its reference; the transcript card draws it from the tool row. A Full
+   *  access chat that asked for network gets it up front (Full access never prompts); otherwise the person decides on the card. */
+  private renderHtml(chat: Snapshot['chats'][number], args: unknown): McpToolResult {
+    const store = this.options.renders;
+    if (!store) return textResult('Inline pages are not available in this Muster window.', true);
+    const input = args && typeof args === 'object' ? args as Record<string, unknown> : {};
+    try {
+      const full = chat.mode === 'agent' && chat.permissionMode === 'full';
+      const page = store.create({chatId: chat.id, title: input.title, html: input.html, network: input.network, allowNetwork: full});
+      const network = !page.networkRequested ? 'It has no network access.' : page.networkAllowed ? 'Network access (https only) is allowed for it.' : 'It asked for network access; the user is asked on the card and it shows without remote content until they allow it.';
+      return textResult(`Shown to the user inline as “${page.title}” (${htmlRenderRef(page.id)}). ${network} Don't mention or describe the page; reply with only what it doesn't already say.`);
+    } catch (error) { return textResult(error instanceof Error ? error.message : String(error), true); }
+  }
+  /** preview_open(file): an .html file inside the chat's folder, shown as a sandboxed page (no network) in the right pane. */
+  private async previewFile(chat: Snapshot['chats'][number], snapshot: Snapshot, file: string): Promise<McpToolResult> {
+    const store = this.options.renders, read = this.options.readFile, real = this.options.realpath;
+    const root = snapshot.folders.find(folder => folder.id === chat.folderId)?.path;
+    if (!store || !read || !real) return textResult('File previews are not available in this Muster window.', true);
+    if (!root) return textResult('This chat has no folder, so there is no workspace file to preview. Use render_html instead.', true);
+    let target: string;
+    try {
+      const candidate = previewFilePath(root, file);
+      if (!candidate) return textResult('preview_open(file) takes an .html or .htm file inside this chat\'s folder.', true);
+      const [resolvedRoot, resolved] = await Promise.all([real(root), real(candidate)]);
+      if (!previewFilePath(resolvedRoot, resolved)) return textResult('That file is outside this chat\'s folder.', true);
+      target = resolved;
+    } catch { return textResult(`No such file: ${file}`, true); }
+    try {
+      const html = await read(target);
+      const page = store.create({chatId: chat.id, title: path.basename(target), html, maxBytes: 4_000_000});
+      this.options.emit({type: 'previewFile', chatId: chat.id, renderId: page.id, title: page.title});
+      return textResult(`Opened ${path.basename(target)} in the right pane as a sandboxed page (no network; relative CSS, JS and images do not load: inline them, or serve the folder with a dev server and preview its URL).`);
+    } catch (error) { return textResult(error instanceof Error ? error.message : String(error), true); }
   }
   /** Live PiP frames: one now, then about once a second until the agent has been idle for a while. Frames never reach the model. */
   private pump(chatId: string, owner: string, profileId: string, action: string): void {

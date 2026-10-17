@@ -56,6 +56,11 @@
 .browser-interstitial p { margin:0; font-size:var(--fs-14); color:var(--text); }
 .browser-interstitial > span { max-width:420px; font-size:var(--fs-12); line-height:1.5; overflow-wrap:anywhere; }
 .browser-interstitial .browser-actions { justify-content:center; margin-top:4px; }
+/* #html-preview: unreachable page (dev server down, refused, DNS). */
+.browser-unreachable > svg { color:var(--text-faint); }
+.browser-unreachable b { color:var(--text); font-weight:560; }
+.browser-unreachable-tips { margin:0; padding:8px 12px 8px 28px; max-width:420px; border:1px solid var(--hairline); border-radius:var(--radius-8); background:var(--bg-raised); text-align:left; font-size:var(--fs-12); line-height:1.6; color:var(--text-dim); }
+.browser-unreachable-code { font:var(--fs-11)/1.4 var(--mono); letter-spacing:.02em; color:var(--text-faint); }
 /* Console drawer. */
 .browser-console { display:flex; flex-direction:column; flex:none; height:clamp(120px,32%,260px); border-top:1px solid var(--hairline); background:var(--bg-sunken); }
 .browser-console header { display:flex; align-items:center; gap:8px; flex:none; height:30px; padding:0 6px 0 12px; border-bottom:1px solid var(--hairline); font-size:var(--fs-11); color:var(--text-faint); }
