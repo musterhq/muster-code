@@ -46,3 +46,10 @@ test('a binary file whose extension is constructor has no image preview', async 
   assert.equal(diff.binary, true);
   assert.equal(diff.image, undefined);
 });
+
+test('credential redaction masks a password that contains an @', () => {
+  const masked = redactGitText('fatal: unable to access https://user:p@ssw0rd@github.com/o/r.git/');
+  assert.ok(!masked.includes('ssw0rd'), masked);
+  assert.ok(masked.includes('@github.com/o/r.git'), masked);
+  assert.equal(redactGitText('see https://example.com/page?email=a@b.c'), 'see https://example.com/page?email=a@b.c');
+});
