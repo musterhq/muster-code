@@ -8,9 +8,9 @@
  * axes and scale normalised, textures capped at 1024 px) and hands the result back here to cache. Any failure, or being
  * offline, falls back to Muster's own procedural bodies. Android always uses Muster's own bodies.
  *
- * Provenance: URLs and checksums cross-checked against T3 Code's apps/web/src/components/device/models/sources.json
- * (MIT code; it states no redistribution licence for the Apple assets themselves, which is why we download instead).
- * Re-verified 2026-10-12: both URLs answered 200 and matched the checksums below.
+ * Provenance: Apple's public AR Quick Look files on apple.com. No redistribution licence is granted for these assets,
+ * which is why Muster downloads them on the user's computer instead of shipping them.
+ * Verified 2026-10-12: both URLs answered 200 and matched the checksums below.
  */
 import {createHash} from 'node:crypto';
 import fs from 'node:fs';

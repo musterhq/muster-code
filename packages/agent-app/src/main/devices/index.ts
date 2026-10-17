@@ -68,6 +68,9 @@ export function wireDevices(input: {
         return manager.input(id, {kind: 'touch', phase: 'end', x, y}, 'agent');
       },
       type: (id, text) => manager.input(id, {kind: 'text', text}, 'agent'),
+      apps: id => manager.apps(id),
+      launchApp: (id, app) => manager.launchApp(id, app, 'agent'),
+      button: (id, button) => manager.button(id, button, 'agent'),
     }});
     try { const launcher = await toolHost.start(); if (manager.agentAccess) process.env[DEVICE_MCP_LAUNCHER_ENV] = launcher; }
     catch (error) { console.warn(`Agent device tools unavailable: ${error instanceof Error ? error.message : String(error)}`); }

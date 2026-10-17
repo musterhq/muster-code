@@ -98,9 +98,12 @@ export function acquireFeed(deviceId: string): DeviceFeed {
 export function releaseFeed(feed: DeviceFeed): void { if (feed.release()) feeds.delete(feed.deviceId); }
 
 let viewerSeq = 0;
+/** What a viewer's layout depends on: the picture size and the error. Frames that keep both re-render nothing. */
+const shapeOf = (feed: DeviceFeed) => `${feed.width}x${feed.height}|${feed.error ?? ''}`;
 /**
- * A viewer of a device: holds the shared feed, tells main whether this viewer is on screen (video runs only while one
- * is), and returns the feed plus a counter that changes with every new picture.
+ * A viewer of a device: holds the shared feed and tells main whether this viewer is on screen (video runs only while
+ * one is). `tick` changes only when the picture's size or error changes (first frame, rotation, a decoder failure), so
+ * a 30 fps stream does not re-render React; viewers draw each frame through `useFeedPaint`.
  */
 export function useDeviceFeed(deviceId: string | undefined, active: boolean): {feed?: DeviceFeed; tick: number} {
   const [feed, setFeed] = useState<DeviceFeed>();
@@ -110,7 +113,8 @@ export function useDeviceFeed(deviceId: string | undefined, active: boolean): {f
     if (!deviceId) return;
     const next = acquireFeed(deviceId);
     setFeed(next);
-    const off = next.subscribe(() => setTick(value => value + 1));
+    let shape = shapeOf(next);
+    const off = next.subscribe(() => { const now = shapeOf(next); if (now !== shape) { shape = now; setTick(value => value + 1); } });
     return () => { off(); releaseFeed(next); setFeed(undefined); };
   }, [deviceId]);
   useEffect(() => {
@@ -120,6 +124,17 @@ export function useDeviceFeed(deviceId: string | undefined, active: boolean): {f
     return () => { if (active) void invoke('devices.view', {id, viewer: name, active: false}).catch(() => undefined); };
   }, [deviceId, active]);
   return {feed, tick};
+}
+/** Calls `paint` for every new picture (outside React) and once whenever `deps` change, e.g. a canvas remounts. */
+export function useFeedPaint(feed: DeviceFeed | undefined, paint: (feed: DeviceFeed, frame: number) => void, deps: readonly unknown[] = []): void {
+  const latest = useRef(paint);
+  latest.current = paint;
+  useEffect(() => {
+    if (!feed) return;
+    if (feed.width) latest.current(feed, feed.frames);
+    return feed.subscribe(() => { if (feed.width) latest.current(feed, feed.frames); });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [feed, ...deps]);
 }
 
 /** Copies the feed's latest picture into a viewer canvas sized to its box (device pixels), only when a frame arrived. */

@@ -11,7 +11,7 @@ picture-in-picture card, and through agent tools.
 | `src/main/devices/helper.ts` | Installs and runs the pinned helper (Expo Device Hub 0.15.3). |
 | `src/main/devices/link.ts` | Main's own client of the helper: MJPEG (iOS) and H.264 (Android) video, input sockets, flow control, reconnects. |
 | `src/main/devices/manager.ts` | Settings, lifetimes, boot and shutdown, sessions, screenshots. |
-| `src/main/devices/agent-tools.ts` | The `muster_device` MCP tools. |
+| `src/main/devices/agent-tools.ts` | The `muster_device` MCP tools: `device_list`, `device_open`, `device_screenshot`, `device_tap`, `device_type`, `device_apps`, `device_launch_app`, `device_button`, `device_close`. |
 | `src/main/devices/models.ts` | Opt-in download and cache of Apple's device models (see below). |
 | `src/renderer/devices/*`, `src/renderer/components/devices/*` | Feed decoding, the live view, the 3D frame, Settings, the PiP card. |
 | `resources/device-helper/` | The helper's `package.json` and `package-lock.json`, shipped instead of the helper itself. |
@@ -34,7 +34,9 @@ picture-in-picture card, and through agent tools.
 - **Agents are a separate opt-in.** The MCP server is added to a run only when Devices and "Let agents use devices" are
   both on and the chat is in Agent mode; every call re-checks that. Read-only chats can list and screenshot only. Taps and
   typing need a session the agent opened for its own chat (so the user sees it live), and stop as soon as the user takes
-  control. The tool host listens on 127.0.0.1 behind a random bearer token kept in a 0600 file, like Muster's other agent
+  control. Launching an app runs a fixed command (`simctl launch <udid> <bundle id>`, or `adb shell monkey -p <package>
+  -c android.intent.category.LAUNCHER 1`) with the id checked against a strict pattern, so no text reaches a shell. Routes that
+  load no MCP servers (API-only models) get neither the server nor the note about it. The tool host listens on 127.0.0.1 behind a random bearer token kept in a 0600 file, like Muster's other agent
   tools, and Project tool rules (`mcp` match, e.g. `muster_device/device_tap`) apply.
 
 ## Apple device models (opt-in)
@@ -47,8 +49,8 @@ downloads Apple's public AR Quick Look files from apple.com on the user's comput
 | iPhone | `https://www.apple.com/105/media/us/iphone-18-pro/2026/591df885-5ee2-4173-86e6-401021249f7c/ar/iphone-18-pro-e-sim.usdz` | `0f2dac354fbc6505e7917983de460f2cc68e253f96aabf52e9f0468a4803f317` |
 | iPad | `https://www.apple.com/105/media/us/ipad-pro/2025/adee90db-c01e-430d-b726-fe64c0063f08/ar/ipad-pro-space-black.usdz` | `48098daf7c49117c81a4e4e1808899b93fad081faeba6c8b65124946b83b5ac6` |
 
-URLs and checksums were cross-checked against T3 Code's `apps/web/src/components/device/models/sources.json` (whose
-README states no redistribution licence for the assets themselves). The renderer then converts each file locally
+Apple grants no redistribution licence for these files, which is why Muster downloads them on the user's computer
+instead of shipping them. The renderer then converts each file locally
 (`src/renderer/devices/appleModels.ts`): parse with three.js `USDLoader` (plus USD `PayloadListOp` support, which
 Apple's files need), keep the body prim and its display mesh, bake transforms, rotate so the display faces +Z with its
 long side up, centre and scale the display to 2.2 units, replace the marketing picture with the live-screen placeholder
@@ -66,3 +68,12 @@ code. They are original to this repository (MIT) and use no external model, scan
 `.github/workflows/agent-app-devices.yml` boots an iOS Simulator (macOS runner) and an Android Emulator (Linux, KVM)
 headless, installs the helper exactly as the app does, and streams a first frame through it, then checks input, presses
 Home and takes a screenshot. The frame, screenshot and a step report are uploaded as artifacts.
+
+## Performance
+
+Nothing runs between frames: no animation loop, no timers. Video flows only while a viewer (the tab or a PiP card) is
+on screen in a focused window; an unwatched device costs nothing. Each frame is decoded once into a shared canvas and
+copied into each viewer outside React, so the view re-renders only when the picture's size changes (first frame,
+rotation). `scripts/readme-shots/device-perf.mjs` measures it in headless Chrome: at 30 fps over 5 s, flat view script
+time 1.6 ms (96 ms before frames bypassed React), 3D view 49 ms (149 ms), PiP card 1.5 ms (22 ms), zero React commits per
+frame, and no animation frames or long tasks while idle.

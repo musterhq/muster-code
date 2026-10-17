@@ -12,12 +12,14 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type {ChildProcess} from 'node:child_process';
 import {deviceId as validId, deviceTitle, type DeviceButton, type DeviceEvent, type DeviceInfo, type DeviceInput, type DeviceList, type DeviceSession, type DeviceSetup} from '../../shared/device-protocol.ts';
-import {androidTools, checkAndroid, checkIos, checkNode, errorLine, listAndroid, listIos, type ProbeDeps} from './discovery.ts';
+import {androidTools, APP_ID, checkAndroid, checkIos, checkNode, errorLine, listAndroid, listIos, parseAdbPackages, parseSimctlApps, sortApps, type DeviceApp, type ProbeDeps} from './discovery.ts';
 import {HELPER_DOWNLOAD_MB, HELPER_VERSION, helperInstalled, helperPaths, hubEnv, installHelper, killServeSimHelpers, startHub, type HelperPaths, type HubEndpoint, type Spawn} from './helper.ts';
 import {DeviceLink, type LinkDeps, type LinkFrame} from './link.ts';
 import {AppleModels} from './models.ts';
 
 export const HUB_IDLE_MS = 45_000;
+/** System packages worth offering an agent on Android (settings, browser, the usual Google apps). */
+const ANDROID_SYSTEM_APPS = /^(?:com\.android\.(?:settings|chrome|contacts|dialer|camera2|deskclock|calculator2?|documentsui)|com\.google\.android\.(?:apps\.(?:maps|photos|messaging|nexuslauncher)|calendar|contacts|dialer|gm|youtube))$/;
 export interface DeviceManagerDeps extends ProbeDeps {
   userData: string;
   /** Folder holding the shipped device-helper/package.json and package-lock.json. */
@@ -348,6 +350,37 @@ export class DeviceManager {
     if (!live) throw new Error('Open the device first.');
     this.updateSession(live, {control: owner});
     return live.session;
+  }
+  /** Apps installed on a running device: the user's own first. Android lists third-party packages plus a few system ones the agent may need. */
+  async apps(rawId: unknown): Promise<DeviceApp[]> {
+    this.ready();
+    const device = await this.find(validId(rawId));
+    if (device.state !== 'booted') throw new Error(`${deviceTitle(device)} is not running.`);
+    if (device.platform === 'ios') return parseSimctlApps(await this.deps.run('/usr/bin/xcrun', ['simctl', 'listapps', device.id], {timeoutMs: 20_000}));
+    const adb = androidTools(this.deps).adb;
+    const [user, system] = await Promise.all([
+      this.deps.run(adb, ['-s', device.id, 'shell', 'pm', 'list', 'packages', '-3'], {timeoutMs: 15_000}),
+      this.deps.run(adb, ['-s', device.id, 'shell', 'pm', 'list', 'packages', '-s'], {timeoutMs: 15_000}).catch(() => ''),
+    ]);
+    return sortApps([...parseAdbPackages(user, true), ...parseAdbPackages(system, false).filter(app => ANDROID_SYSTEM_APPS.test(app.id))]);
+  }
+  /** Launches an installed app by bundle id (iOS) or package name (Android) on an open session's device. */
+  async launchApp(rawId: unknown, app: unknown, from: 'user' | 'agent' = 'user'): Promise<void> {
+    this.ready();
+    const id = validId(rawId), live = this.live.get(id);
+    if (typeof app !== 'string' || !APP_ID.test(app)) throw new Error('Pass the app\'s bundle id (iOS) or package name (Android).');
+    if (!live) throw new Error('Open the device first.');
+    if (from === 'agent' && live.session.control === 'user') throw new Error('The user has taken control of this device.');
+    if (live.session.platform === 'ios') {
+      await this.deps.run('/usr/bin/xcrun', ['simctl', 'launch', id, app], {timeoutMs: 30_000}).catch(error => {
+        throw new Error(/not installed|FBSOpenApplicationServiceErrorDomain|found nothing|No such|code=4\b/i.test(errorLine(error)) ? `${app} is not installed on ${live.session.name}. Use device_apps to see what is.` : `Could not launch ${app}: ${errorLine(error)}`);
+      });
+      return;
+    }
+    // monkey starts the package's launcher activity; it needs no activity name and runs nothing else.
+    const out = await this.deps.run(androidTools(this.deps).adb, ['-s', id, 'shell', 'monkey', '-p', app, '-c', 'android.intent.category.LAUNCHER', '1'], {timeoutMs: 30_000})
+      .catch(error => { throw new Error(`Could not launch ${app}: ${errorLine(error)}`); });
+    if (/No activities found|monkey aborted|Error:/i.test(out)) throw new Error(`${app} is not installed on ${live.session.name}, or has no launcher screen. Use device_apps to see what is.`);
   }
   /** A PNG of the device screen straight from simctl or adb (works whether or not anything is streaming). */
   async screenshot(rawId: unknown): Promise<{png: Buffer; width: number; height: number}> {

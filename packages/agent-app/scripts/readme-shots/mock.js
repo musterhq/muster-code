@@ -328,6 +328,11 @@ if (OPTS.devices) {
     void tick();
   };
   window.musterDevices = {onFrame(listener) { frameListeners.add(listener); return () => frameListeners.delete(listener); }, ack() {}, input() {}};
+  // Perf probe: a steady stream of `count` frames at `fps` (one pre-encoded JPEG, as main forwards a helper's MJPEG).
+  window.__devicePump = async (count, fps) => {
+    const data = new Uint8Array(await (await draw()).arrayBuffer());
+    for (let i = 0; i < count; i++) { for (const listener of [...frameListeners]) listener({deviceId: pick.id, codec: 'jpeg', key: true, data}); await new Promise(r => setTimeout(r, 1000 / fps)); }
+  };
   if (OPTS.devicesTab) setTimeout(() => window.__shots?.store?.openTab(OPTS.devicesTab === 'picker' ? {id: 'devices', kind: 'device', title: 'Devices'} : {id: `device:${pick.id}`, kind: 'device', deviceId: pick.id, title: pick.name.replace(/_/g, ' ')}), 600);
 }
 window.__mockHandlers = handlers;

@@ -131,3 +131,27 @@ export async function checkNode(deps: ProbeDeps, node: string | undefined, npm: 
 }
 
 export const errorLine = (error: unknown): string => (error instanceof Error ? error.message : String(error)).split('\n').find(line => line.trim())?.trim().slice(0, 240) ?? 'Unknown error';
+
+// --- Installed apps (agent tools) ---------------------------------------------------------------------------------
+
+export interface DeviceApp {id: string; name: string; user: boolean}
+/** An app id that reaches simctl or adb as an argument: a bundle id or package name, never a flag or a path. */
+export const APP_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,254}$/;
+/** `xcrun simctl listapps <udid>` (an old-style plist): bundle id, display name and whether the user installed it. */
+export function parseSimctlApps(text: string): DeviceApp[] {
+  const out: DeviceApp[] = [];
+  for (const block of text.split(/\n\s{4}"?[A-Za-z0-9._-]+"?\s*=\s*\{/).slice(1)) {
+    const field = (name: string) => new RegExp(`\\n\\s*${name}\\s*=\\s*(?:"((?:[^"\\\\]|\\\\.)*)"|([^;\\n]+));`).exec(`\n${block}`);
+    const value = (name: string) => { const m = field(name); return (m?.[1] ?? m?.[2])?.trim(); };
+    const id = value('CFBundleIdentifier');
+    if (!id || !APP_ID.test(id)) continue;
+    out.push({id, name: value('CFBundleDisplayName') || value('CFBundleName') || id, user: value('ApplicationType') === 'User'});
+  }
+  return sortApps(out);
+}
+/** `adb shell pm list packages [-3]`: one `package:<name>` per line. */
+export function parseAdbPackages(stdout: string, user: boolean): DeviceApp[] {
+  return stdout.split(/\r?\n/).map(line => /^package:([A-Za-z0-9._]+)\s*$/.exec(line.trim())?.[1]).filter((id): id is string => !!id && APP_ID.test(id)).map(id => ({id, name: id, user}));
+}
+/** The user's own apps first, then by name. */
+export const sortApps = (apps: DeviceApp[]): DeviceApp[] => apps.sort((a, b) => Number(b.user) - Number(a.user) || a.name.localeCompare(b.name));

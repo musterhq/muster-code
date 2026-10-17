@@ -14,7 +14,7 @@ import type {DeviceSession, DeviceSetup} from '../../../shared/device-protocol';
 import {invoke} from '../../bridge';
 import {deviceUi} from '../../deviceSessions';
 import {isWindowActive, onWindowActivity} from '../../windowActivity';
-import type {DeviceFeed} from '../../devices/deviceFeed';
+import {useFeedPaint, type DeviceFeed} from '../../devices/deviceFeed';
 import {buildBody, SCREEN_NAME} from '../../devices/bodies';
 import {orientScreen} from './orientScreen';
 import {Engine, resolveCssColor, uvToPixel, type FrameTexture} from '../../three-engine';
@@ -56,7 +56,7 @@ const bodyColors = () => {
   const body = tokenColor('--device-body', [52, 54, 59]), ground = tokenColor('--bg-sunken', [12, 12, 12]);
   return {body, trim: body.clone().multiplyScalar(0.8), lens: ground, screenOff: ground};
 };
-export default function DeviceFrame3D({session, feed, tick, onFallback}: {session: DeviceSession; feed?: DeviceFeed; tick: number; onFallback(): void}): React.ReactElement {
+export default function DeviceFrame3D({session, feed, onFallback}: {session: DeviceSession; feed?: DeviceFeed; onFallback(): void}): React.ReactElement {
   const host = useRef<HTMLDivElement>(null);
   const engine = useRef<Engine | null>(null);
   const screen = useRef<Mesh | null>(null);
@@ -138,8 +138,8 @@ export default function DeviceFrame3D({session, feed, tick, onFallback}: {sessio
     return () => { live = false; offTheme(); stream.current = null; streamSize.current = ''; created.dispose(); engine.current = null; screen.current = null; body.current = null; };
   }, [session.deviceId, session.formFactor]);
 
-  // A new picture: hand the feed canvas to the frame texture (the engine renders once).
-  useEffect(() => { if (feed?.width) ensureStream()?.update(feed.canvas); }, [tick, feed]);
+  // A new picture: hand the feed canvas to the frame texture (the engine renders once), outside React.
+  useFeedPaint(feed, current => { ensureStream()?.update(current.canvas); });
   useEffect(() => { applyOrientation(); }, [landscape]);
 
   const pointer = useRef<{id: number; last: {x: number; y: number}} | null>(null);

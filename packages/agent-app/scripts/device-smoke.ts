@@ -2,8 +2,8 @@
  * Real-device smoke test for Devices (#363), run in CI (.github/workflows/agent-app-devices.yml) on a macOS runner with
  * Xcode (iOS Simulator) and on Linux with KVM (Android Emulator). It drives the same main-process code the app uses:
  * installs the pinned helper with npm ci from the shipped lockfile, starts it on loopback with a token, boots a device
- * headless, streams until the first frame arrives through the helper, checks input is admitted, presses Home, takes a
- * screenshot, then shuts everything down. Artifacts (first frame, screenshot, a JSON report) go to $SMOKE_OUT.
+ * headless, streams until the first frame arrives through the helper, checks input is admitted, presses Home, lists apps,
+ * launches Settings, takes screenshots, then shuts everything down. Artifacts (first frame, screenshot, a JSON report) go to $SMOKE_OUT.
  *
  *   node --experimental-transform-types scripts/device-smoke.ts ios|android
  */
@@ -71,6 +71,16 @@ try {
   if (!admitted) throw new Error('The device did not admit input.');
   await manager.button(session.deviceId, 'home');
   step('pressed home');
+  // The agent tools' app path: list installed apps, launch the system Settings app, then go home again.
+  const apps = await manager.apps(session.deviceId);
+  const settings = platform === 'ios' ? 'com.apple.Preferences' : 'com.android.settings';
+  step('apps', {count: apps.length, settings: apps.some(app => app.id === settings)});
+  if (!apps.some(app => app.id === settings)) throw new Error(`${settings} is not in the app list.`);
+  await manager.launchApp(session.deviceId, settings, 'agent');
+  step('launched settings');
+  const launched = await manager.screenshot(session.deviceId);
+  fs.writeFileSync(path.join(out, `${platform}-settings.png`), launched.png);
+  await manager.button(session.deviceId, 'home');
   const shot = await manager.screenshot(session.deviceId);
   fs.writeFileSync(path.join(out, `${platform}-screenshot.png`), shot.png);
   step('screenshot', {width: shot.width, height: shot.height});

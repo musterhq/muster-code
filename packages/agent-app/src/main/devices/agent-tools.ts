@@ -29,10 +29,14 @@ export const DEVICE_TOOL_SPECS = [
   {name: 'device_screenshot', description: 'Capture the device screen as a PNG. Coordinates for device_tap are pixels in this image.', inputSchema: {type: 'object', properties: {device: DEVICE_ARG}, required: ['device']}},
   {name: 'device_tap', description: 'Tap the screen at a point given in pixels of the most recent device_screenshot of this device. Needs an open session (device_open).', inputSchema: {type: 'object', properties: {device: DEVICE_ARG, x: {type: 'number', minimum: 0}, y: {type: 'number', minimum: 0}}, required: ['device', 'x', 'y']}},
   {name: 'device_type', description: 'Type text into the focused field on the device (tap the field first). iOS accepts US-keyboard ASCII. Needs an open session.', inputSchema: {type: 'object', properties: {device: DEVICE_ARG, text: {type: 'string', maxLength: 2000}}, required: ['device', 'text']}},
+  {name: 'device_apps', description: 'List the apps installed on a running device: bundle id (iOS) or package name (Android) and display name, the user\'s own apps first. Use an id with device_launch_app.', inputSchema: {type: 'object', properties: {device: DEVICE_ARG}, required: ['device']}},
+  {name: 'device_launch_app', description: 'Launch an installed app by its bundle id (iOS, e.g. com.apple.Preferences) or package name (Android, e.g. com.android.settings). Needs an open session (device_open). Take a device_screenshot afterwards.', inputSchema: {type: 'object', properties: {device: DEVICE_ARG, app: {type: 'string', description: 'Bundle id or package name from device_apps.', maxLength: 255}}, required: ['device', 'app']}},
+  {name: 'device_button', description: 'Press a hardware button: home, back (Android only) or app_switcher. Needs an open session.', inputSchema: {type: 'object', properties: {device: DEVICE_ARG, button: {type: 'string', enum: ['home', 'back', 'app_switcher']}}, required: ['device', 'button']}},
   {name: 'device_close', description: 'Close the live session you opened. The device keeps running.', inputSchema: {type: 'object', properties: {device: DEVICE_ARG}, required: ['device']}},
 ] as const;
 export const DEVICE_TOOL_NAMES = new Set<string>(DEVICE_TOOL_SPECS.map(spec => spec.name));
-const MUTATING = new Set(['device_open', 'device_tap', 'device_type', 'device_close']);
+const MUTATING = new Set(['device_open', 'device_tap', 'device_type', 'device_launch_app', 'device_button', 'device_close']);
+const AGENT_BUTTONS: Record<string, 'home' | 'back' | 'appSwitcher'> = {home: 'home', back: 'back', app_switcher: 'appSwitcher'};
 
 /** What the tools need from main: the device manager's methods plus the chat's mode. */
 export interface DeviceToolTarget {
@@ -46,6 +50,9 @@ export interface DeviceToolTarget {
   waitForInput(id: string): Promise<boolean>;
   tap(id: string, x: number, y: number): Promise<boolean>;
   type(id: string, value: string): boolean;
+  apps(id: string): Promise<{id: string; name: string; user: boolean}[]>;
+  launchApp(id: string, app: string): Promise<void>;
+  button(id: string, button: 'home' | 'back' | 'appSwitcher'): Promise<void>;
 }
 const shotSizes = new Map<string, {width: number; height: number}>();
 const id = (value: unknown): string | null => typeof value === 'string' && /^[A-Za-z0-9._:-]{1,140}$/.test(value) && !value.startsWith('-') ? value : null;
@@ -79,6 +86,28 @@ export async function runDeviceTool(target: DeviceToolTarget, chatId: string, to
         shotSizes.set(device, {width: shot.width, height: shot.height});
         if (shotSizes.size > 64) shotSizes.delete(shotSizes.keys().next().value!);
         return {content: [{type: 'image', data: shot.png.toString('base64'), mimeType: 'image/png'}, {type: 'text', text: `Screenshot ${shot.width}×${shot.height} px.`}]};
+      }
+      case 'device_apps': {
+        const apps = await target.apps(device);
+        if (!apps.length) return text('No apps were found on this device.');
+        const shown = apps.slice(0, 200);
+        return text(shown.map(app => `${app.id} · ${app.name}${app.user ? '' : ' · system'}`).join('\n') + (apps.length > shown.length ? `\n… and ${apps.length - shown.length} more system apps.` : ''));
+      }
+      case 'device_launch_app': case 'device_button': {
+        if (!session) return text('Open the device first with device_open.', true);
+        if (foreign) return text('Another chat\'s agent is using this device.', true);
+        if (session.control === 'user') return text('The user has taken control of this device. Stop and wait until they hand it back.', true);
+        if (tool === 'device_launch_app') {
+          if (typeof args.app !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,254}$/.test(args.app)) return text('Pass the app\'s bundle id (iOS) or package name (Android); device_apps lists them.', true);
+          await target.launchApp(device, args.app);
+          return text(`Launched ${args.app}. Take a device_screenshot to see it.`);
+        }
+        const button = typeof args.button === 'string' ? AGENT_BUTTONS[args.button] : undefined;
+        if (!button) return text('Pass button: home, back or app_switcher.', true);
+        if (button === 'back' && session.platform === 'ios') return text('iOS has no Back button; use the app\'s own back control or home.', true);
+        if (!(await target.waitForInput(device))) return text('The device is not accepting input yet. Try again in a few seconds.', true);
+        await target.button(device, button);
+        return text(`Pressed ${args.button}.`);
       }
       case 'device_tap': case 'device_type': {
         if (!session) return text('Open the device first with device_open.', true);

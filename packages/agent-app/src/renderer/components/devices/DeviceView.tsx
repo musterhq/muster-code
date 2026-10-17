@@ -10,7 +10,7 @@ import {invoke} from '../../bridge';
 import {closeTab, getState, notifyError, notifySuccess} from '../../store';
 import {stageAttachment} from '../../composerBridge';
 import {deviceTabId} from '../../deviceSessions';
-import {useDeviceFeed, paintInto, type DeviceFeed} from '../../devices/deviceFeed';
+import {useDeviceFeed, useFeedPaint, paintInto, type DeviceFeed} from '../../devices/deviceFeed';
 import {clampedPointOnScreen, containRect, pointOnScreen} from '../../devices/geometry';
 import {Tip} from '../Tooltip';
 import {threeAvailable} from '../../devices/webgl';
@@ -84,15 +84,16 @@ function RailButton({label, icon, onClick, disabled, pressed}: {label: string; i
 }
 
 export function DeviceView({session, visible}: {session: DeviceSession; visible: boolean}): React.ReactElement {
-  const {feed, tick} = useDeviceFeed(session.deviceId, visible);
+  const {feed} = useDeviceFeed(session.deviceId, visible);
   const canvas = useRef<HTMLCanvasElement>(null);
   const [mode, setMode] = useState<'flat' | '3d'>(() => { try { return localStorage.getItem('muster.deviceView') === '3d' && threeAvailable() ? '3d' : 'flat'; } catch { return 'flat'; } });
   const input = useDeviceInput(session, feed);
-  useEffect(() => { if (mode === 'flat') paintInto(canvas.current, feed); }, [tick, feed, mode]);
+  const ready = !!feed?.width;
+  // Each frame is copied straight into the canvas; React re-renders only when the picture's size changes.
+  useFeedPaint(feed, current => { if (mode === 'flat') paintInto(canvas.current, current); }, [mode, ready]);
   const press = useCallback((button: DeviceButton) => void deviceAction(() => invoke('devices.button', {id: session.deviceId, button})), [session.deviceId]);
   const setView = (next: 'flat' | '3d') => { setMode(next); try { localStorage.setItem('muster.deviceView', next); } catch {} };
   const agent = !!session.chatId;
-  const ready = !!feed?.width;
   const status = session.state === 'live' && !ready ? 'starting' : session.state;
   const ios = session.platform === 'ios';
   return <section className="device-view" aria-label={`${session.name} live view`} data-platform={session.platform} data-form={session.formFactor} data-state={status} data-mode={mode}>
@@ -109,7 +110,7 @@ export function DeviceView({session, visible}: {session: DeviceSession; visible:
     <div className="device-view-body">
       <div className="device-stage">
         {mode === '3d'
-          ? <Suspense fallback={<div className="device-screen-skeleton is-3d" aria-hidden="true"/>}><DeviceFrame3D session={session} feed={feed} tick={tick} onFallback={() => setView('flat')}/></Suspense>
+          ? <Suspense fallback={<div className="device-screen-skeleton is-3d" aria-hidden="true"/>}><DeviceFrame3D session={session} feed={feed} onFallback={() => setView('flat')}/></Suspense>
           : <div className="device-bezel" style={{'--ratio': ready ? feed!.width / feed!.height : session.formFactor === 'tablet' ? 0.75 : 9 / 19.5} as React.CSSProperties}>
             <canvas ref={canvas} className="device-screen" tabIndex={0} role="img" aria-roledescription="device screen"
               aria-label={`${session.name} screen. Click to tap, drag to swipe; while focused, typing goes to the device.`}

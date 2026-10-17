@@ -125,7 +125,7 @@ export const DEVICE_ACK_CHANNEL = 'muster:device-ack';
 export const DEVICE_INPUT_CHANNEL = 'muster:device-input';
 export const DEVICE_MCP = 'muster_device';
 export const DEVICE_MCP_LAUNCHER_ENV = 'MUSTER_DEVICE_MCP_LAUNCHER';
-export const DEVICE_NOTE = `Devices: this computer's iOS Simulators and Android Emulators are available through the ${DEVICE_MCP} MCP tools (device_list, device_open, device_screenshot, device_tap, device_type, device_close). Prefer them over raw simctl or adb for looking at and driving a device: device_open shows the session to the user live, then screenshot, tap at pixel coordinates of that screenshot, and screenshot again to check. If a tool says the user has control, stop and wait.`;
+export const DEVICE_NOTE = `Devices: this computer's iOS Simulators and Android Emulators are available through the ${DEVICE_MCP} MCP tools (device_list, device_open, device_screenshot, device_tap, device_type, device_apps, device_launch_app, device_button, device_close). Prefer them over raw simctl or adb for looking at and driving a device: device_open shows the session to the user live, then screenshot, tap at pixel coordinates of that screenshot, and screenshot again to check. To start an app, find its id with device_apps and use device_launch_app; device_button presses home, back (Android) or the app switcher. If a tool says the user has control, stop and wait.`;
 
 const DEVICE_ID = /^(?:[A-Fa-f0-9-]{8,64}|emulator-\d{2,5}|avd:[A-Za-z0-9._-]{1,128}|[A-Za-z0-9._:-]{1,128})$/;
 /** Device ids reach simctl and adb as arguments: only plain identifiers, never flags or paths. */

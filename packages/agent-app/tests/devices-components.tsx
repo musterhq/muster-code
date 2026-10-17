@@ -127,7 +127,34 @@ saveWorkspace({setItem:(k,v)=>void saved.set(k,v)},{tabs:store.getState().tabs,a
 assert.equal(readWorkspace({getItem:k=>saved.get(k)??null}).tabs.some(tab=>(tab.kind as string)==='device'),false);
 root.unmount();
 
-// 6. No desktop bridge: a plain note, nothing else.
+// 6. A 30 fps stream paints each frame outside React: viewers re-render on the first picture and on a size change
+//    (rotation), never per frame.
+{
+  const frameListeners=new Set<(frame:any)=>void>();let acks=0;
+  (window as any).musterDevices={onFrame(listener:any){frameListeners.add(listener);return()=>frameListeners.delete(listener);},ack(){acks++;},input(){}};
+  let size={width:390,height:844};
+  (globalThis as any).createImageBitmap=async()=>({...size,close(){}});
+  const {useDeviceFeed,useFeedPaint}=await import('../src/renderer/devices/deviceFeed');
+  let renders=0,paints=0;
+  function Viewer(){renders++;const {feed}=useDeviceFeed(IPHONE,true);useFeedPaint(feed,()=>{paints++;});return <span data-size={feed?.width?`${feed.width}x${feed.height}`:'none'}/>;}
+  const host=document.createElement('div');document.body.appendChild(host);
+  const viewerRoot=createRoot(host);viewerRoot.render(<Viewer/>);
+  await until(()=>frameListeners.size===1,'the viewer subscribing to frames');
+  const push=async(n:number)=>{for(let i=0;i<n;i++){for(const listener of [...frameListeners])listener({deviceId:IPHONE,codec:'jpeg',key:true,data:new Uint8Array([0xff,0xd8,0xff,0xd9])});await delay(1);}};
+  await push(1);await until(()=>host.querySelector('[data-size="390x844"]')!==null,'the first picture');
+  const afterFirst=renders;
+  await push(30);await until(()=>paints>=31,'every frame painted');
+  assert.equal(renders,afterFirst,'thirty more frames re-render nothing');
+  assert.equal(acks,31,'each decoded frame is acknowledged, so main sends the next');
+  size={width:844,height:390};await push(1);await until(()=>host.querySelector('[data-size="844x390"]')!==null,'the rotated picture');
+  assert.ok(renders>afterFirst&&renders<=afterFirst+2,'a size change re-renders once');
+  viewerRoot.unmount();
+  assert.equal(frameListeners.size,0,'unmounting the last viewer releases the feed');
+  assert.ok(calls.some(c=>c.command==='devices.view'&&c.input.active===false),'and tells main the viewer left');
+  host.remove();
+}
+
+// 7. No desktop bridge: a plain note, nothing else.
 delete (window as any).musterDevices;
 const noBridge=createRoot(document.getElementById('root')!);
 noBridge.render(<DeviceTab tab={{id:'devices',title:'Devices'}} visible/>);await until(()=>/desktop app/.test(text()),'the note');

@@ -7,7 +7,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {EventEmitter} from 'node:events';
 import {PassThrough} from 'node:stream';
-import {androidFormFactor, androidSdkRoot, checkAndroid, checkIos, checkNode, parseAdbDevices, parseAvdList, parseSimctlDevices, listAndroid, type ProbeDeps} from '../src/main/devices/discovery.ts';
+import {androidFormFactor, androidSdkRoot, checkAndroid, checkIos, checkNode, parseAdbDevices, parseAdbPackages, parseAvdList, parseSimctlApps, parseSimctlDevices, listAndroid, type ProbeDeps} from '../src/main/devices/discovery.ts';
 import {FrameGate, hasIdr, iosPacket, IOS_TAG, MjpegParser, semuInfo, SEMU_MAGIC} from '../src/main/devices/frames.ts';
 import {hidForChar, hidUsageForCode, androidKeycode} from '../src/main/devices/keys.ts';
 import {deviceButton, deviceId, parseDeviceInput, DEVICE_COMMANDS} from '../src/shared/device-protocol.ts';
@@ -16,6 +16,8 @@ import {DeviceManager} from '../src/main/devices/manager.ts';
 import {DeviceLink, rawPoint, H264_BACKLOG} from '../src/main/devices/link.ts';
 import {DeviceToolHost, runDeviceTool, type DeviceToolTarget} from '../src/main/devices/agent-tools.ts';
 import {computerRunOptions} from '../src/runtime/domains/computer.ts';
+import {adapterBrowser} from '../src/runtime/provider.ts';
+import {DEVICE_MCP, DEVICE_NOTE} from '../src/shared/device-protocol.ts';
 import {isCommandName} from '../src/main/commands.ts';
 
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'muster-devices-'));
@@ -308,9 +310,10 @@ test('Android link: H.264 forwarded in order, a backlog skips to the next keyfra
 
 // --- Agent tools --------------------------------------------------------------------------------------------------
 
-function toolTarget(overrides: Partial<DeviceToolTarget> = {}): DeviceToolTarget & {taps: number[][]} {
-  const taps: number[][] = [];
-  return {taps, agentAccess: () => true, chat: async () => ({mode: 'agent', permissionMode: 'workspace'}),
+function toolTarget(overrides: Partial<DeviceToolTarget> = {}): DeviceToolTarget & {taps: number[][]; calls: string[][]} {
+  const taps: number[][] = [], calls: string[][] = [];
+  return {taps, calls, apps: async () => [{id: 'com.example.taskboard', name: 'Taskboard', user: true}, {id: 'com.android.settings', name: 'com.android.settings', user: false}],
+    launchApp: async (id, app) => { calls.push(['launch', id, app]); }, button: async (id, button) => { calls.push(['button', id, button]); }, agentAccess: () => true, chat: async () => ({mode: 'agent', permissionMode: 'workspace'}),
     list: async () => [{id: 'emulator-5554', name: 'Pixel_9', platform: 'android', osVersion: 'Android 16', state: 'booted'}],
     session: () => ({deviceId: 'emulator-5554', name: 'Pixel 9', platform: 'android', formFactor: 'phone', chatId: 'c1', openedBy: 'agent', control: 'agent', state: 'live', inputReady: true, openedAt: 0}),
     open: async () => ({deviceId: 'emulator-5554', name: 'Pixel 9', platform: 'android', formFactor: 'phone', chatId: 'c1', openedBy: 'agent', control: 'agent', state: 'live', inputReady: true, openedAt: 0}),
@@ -340,6 +343,94 @@ test('agent tools: consent re-checked per call, read-only chats look only, user 
   assert.match(textOf(await runDeviceTool(foreign, 'c1', 'device_close', {device: 'emulator-5554'})), /leave it open/);
   assert.match(textOf(await runDeviceTool(toolTarget({session: () => undefined}), 'c1', 'device_tap', {device: 'emulator-5554', x: 1, y: 1})), /device_open/);
   assert.match(textOf(await runDeviceTool(target, 'c1', 'device_open', {device: '-rf'})), /device id/);
+});
+
+test('agent tools: list apps, launch one, press buttons; each needs this chat\'s open session and stops under user control', async () => {
+  const target = toolTarget();
+  assert.match(textOf(await runDeviceTool(target, 'c1', 'device_apps', {device: 'emulator-5554'})), /com\.example\.taskboard · Taskboard\ncom\.android\.settings · com\.android\.settings · system/);
+  assert.match(textOf(await runDeviceTool(target, 'c1', 'device_launch_app', {device: 'emulator-5554', app: 'com.example.taskboard'})), /Launched com\.example\.taskboard/);
+  assert.match(textOf(await runDeviceTool(target, 'c1', 'device_button', {device: 'emulator-5554', button: 'app_switcher'})), /Pressed app_switcher/);
+  assert.deepEqual(target.calls, [['launch', 'emulator-5554', 'com.example.taskboard'], ['button', 'emulator-5554', 'appSwitcher']]);
+  for (const app of ['-n evil', '../x', '', 'a b']) assert.equal((await runDeviceTool(target, 'c1', 'device_launch_app', {device: 'emulator-5554', app})).isError, true, `refuses ${JSON.stringify(app)}`);
+  assert.equal((await runDeviceTool(target, 'c1', 'device_button', {device: 'emulator-5554', button: 'power'})).isError, true, 'only home, back and app switcher');
+  const ios = toolTarget({session: () => ({...(toolTarget().session('x')!), platform: 'ios'})});
+  assert.match(textOf(await runDeviceTool(ios, 'c1', 'device_button', {device: 'emulator-5554', button: 'back'})), /no Back button/);
+  const userHasIt = toolTarget({session: () => ({...(toolTarget().session('x')!), control: 'user'})});
+  assert.match(textOf(await runDeviceTool(userHasIt, 'c1', 'device_launch_app', {device: 'emulator-5554', app: 'com.example.taskboard'})), /taken control/);
+  assert.deepEqual(userHasIt.calls, []);
+  const readOnly = toolTarget({chat: async () => ({mode: 'agent', permissionMode: 'read-only'})});
+  assert.match(textOf(await runDeviceTool(readOnly, 'c1', 'device_launch_app', {device: 'emulator-5554', app: 'com.example.taskboard'})), /read-only/);
+  assert.equal((await runDeviceTool(readOnly, 'c1', 'device_apps', {device: 'emulator-5554'})).isError, undefined, 'listing apps is read-only');
+  assert.match(textOf(await runDeviceTool(toolTarget({session: () => undefined}), 'c1', 'device_button', {device: 'emulator-5554', button: 'home'})), /device_open/);
+  const failing = toolTarget({launchApp: async () => { throw new Error('com.x is not installed on Pixel 9. Use device_apps to see what is.'); }});
+  const failed = await runDeviceTool(failing, 'c1', 'device_launch_app', {device: 'emulator-5554', app: 'com.x'});
+  assert.equal(failed.isError, true);assert.match(textOf(failed), /not installed/);
+});
+
+test('installed apps: simctl listapps and pm list parsed, user apps first; launch runs fixed argv only', async () => {
+  const listapps = `{
+    "com.apple.Preferences" =     {
+        ApplicationType = System;
+        CFBundleDisplayName = Settings;
+        CFBundleIdentifier = "com.apple.Preferences";
+    };
+    "dev.muster.taskboard" =     {
+        ApplicationType = User;
+        CFBundleDisplayName = "Task Board";
+        CFBundleIdentifier = "dev.muster.taskboard";
+        CFBundleName = taskboard;
+    };
+    "com.apple.mobilesafari" =     {
+        ApplicationType = System;
+        CFBundleName = Safari;
+        CFBundleIdentifier = "com.apple.mobilesafari";
+    };
+}`;
+  assert.deepEqual(parseSimctlApps(listapps), [{id: 'dev.muster.taskboard', name: 'Task Board', user: true}, {id: 'com.apple.mobilesafari', name: 'Safari', user: false}, {id: 'com.apple.Preferences', name: 'Settings', user: false}]);
+  assert.deepEqual(parseSimctlApps('garbage'), []);
+  assert.deepEqual(parseAdbPackages('package:com.example.app\r\npackage:-x\nnoise\npackage:org.foo\n', true).map(app => app.id), ['com.example.app', 'org.foo']);
+
+  const dir = tmp();
+  fs.writeFileSync(path.join(dir, 'devices.json'), JSON.stringify({enabled: true}));
+  const installed = helperPaths(path.join(dir, 'tools'));
+  fs.mkdirSync(path.dirname(installed.entry), {recursive: true});fs.writeFileSync(installed.entry, '');fs.writeFileSync(installed.sentinel, '0.15.3\n');
+  const runs: string[][] = [];
+  const {manager} = managerFixture({userData: dir, run: async (file, args) => {
+    runs.push([path.basename(file), ...args]);
+    if (args[0] === '-p') return '/Applications/Xcode.app/Contents/Developer';
+    if (args.join(' ') === 'simctl list devices --json') return JSON.stringify({devices: {'com.apple.CoreSimulator.SimRuntime.iOS-26-0': [{udid: 'BBBBBBBB-2222', name: 'iPhone 17 Pro', state: 'Booted', isAvailable: true, deviceTypeIdentifier: 'iPhone-17-Pro'}]}});
+    if (args[0] === 'simctl' && args[1] === 'listapps') return listapps;
+    if (args[0] === 'simctl' && args[1] === 'launch' && args[3] === 'com.missing') throw new Error('An error was encountered processing the command (domain=FBSOpenApplicationServiceErrorDomain, code=4)');
+    if (args.includes('monkey')) return args.includes('com.none') ? '** No activities found to run, monkey aborted.' : 'Events injected: 1';
+    return '';
+  }});
+  assert.deepEqual((await manager.apps('BBBBBBBB-2222')).map(app => app.id), ['dev.muster.taskboard', 'com.apple.mobilesafari', 'com.apple.Preferences']);
+  await assert.rejects(manager.launchApp('BBBBBBBB-2222', 'dev.muster.taskboard'), /Open the device first/);
+  const live = (platform: 'ios' | 'android', id: string) => (manager as unknown as {live: Map<string, unknown>}).live.set(id, {viewers: new Set(), link: {close() {}}, session: {deviceId: id, name: 'Device', platform, formFactor: 'phone', openedBy: 'agent', chatId: 'c1', control: 'agent', state: 'live', inputReady: true, openedAt: 0}});
+  live('ios', 'BBBBBBBB-2222');
+  await manager.launchApp('BBBBBBBB-2222', 'dev.muster.taskboard', 'agent');
+  assert.deepEqual(runs.at(-1), ['xcrun', 'simctl', 'launch', 'BBBBBBBB-2222', 'dev.muster.taskboard']);
+  await assert.rejects(manager.launchApp('BBBBBBBB-2222', 'com.missing', 'agent'), /not installed on Device/);
+  await assert.rejects(manager.launchApp('BBBBBBBB-2222', '--console', 'agent'), /bundle id/);
+  live('android', 'emulator-5554');
+  await manager.launchApp('emulator-5554', 'com.example.app', 'agent');
+  assert.deepEqual(runs.at(-1), ['adb', '-s', 'emulator-5554', 'shell', 'monkey', '-p', 'com.example.app', '-c', 'android.intent.category.LAUNCHER', '1']);
+  await assert.rejects(manager.launchApp('emulator-5554', 'com.none', 'agent'), /no launcher screen/);
+  manager.control('emulator-5554', 'user');
+  await assert.rejects(manager.launchApp('emulator-5554', 'com.example.app', 'agent'), /taken control/);
+  fs.rmSync(dir, {recursive: true, force: true});
+});
+
+test('routes without MCP never hear about the device tools; MCP routes get the server and the note', () => {
+  const overrides = {[`mcp_servers.${DEVICE_MCP}.command`]: '/tmp/launcher', [`mcp_servers.${DEVICE_MCP}.env.MUSTER_CHAT_ID`]: 'c1'};
+  const claude = adapterBrowser('claude-code-cli', 'agent', `Intro.\n\n${DEVICE_NOTE}`, overrides);
+  assert.ok(claude.mcpServers?.[DEVICE_MCP]);assert.ok(claude.instructions?.includes(DEVICE_NOTE));
+  for (const driver of ['openai-chat-completions', 'gemini-cli']) {
+    const http = adapterBrowser(driver, 'agent', `Intro.\n\n${DEVICE_NOTE}`, overrides);
+    assert.equal(http.mcpServers?.[DEVICE_MCP], undefined, driver);
+    assert.ok(!http.instructions?.includes('muster_device'), `${driver} gets no device note`);
+    assert.ok(http.instructions?.includes('Intro.'));
+  }
 });
 
 test('agent tool host: bearer token required, launcher written 0700 and endpoint 0600, run options add the server only when allowed', async () => {
