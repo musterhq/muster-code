@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import {toolEventDetails} from '../src/runtime/tool-event-details.ts';
 import {classifyTool} from '../src/renderer/components/toolPresentation.ts';
+import {createTimelineProjection} from '../src/renderer/components/timeline-navigation-model.ts';
 import {groupActivity,summarizeActivity} from '../src/renderer/components/activityGrouping.ts';
 import type {TimelineItem} from '../src/shared/protocol.ts';
 const item=(id:string,data:Record<string,unknown>,status='completed'):TimelineItem=>({id,chatId:'chat',kind:'tool',text:'',createdAt:'',status,data});
@@ -32,4 +33,9 @@ test('metadata is bounded and typed; mixed or unreported shell actions stay comm
  const agent=toolEventDetails({agentNickname:'Mira',agentRole:'reviewer',unrelatedSecret:'omit'});
  assert.deepEqual(agent,{agentNickname:'Mira',agentRole:'reviewer'});
  assert.equal(String(toolEventDetails({agentNickname:'x'.repeat(1000)}).agentNickname).length,256);
+});
+test('memory offers stay out of the transcript (they live in the Memory inbox)',()=>{
+  const offer:TimelineItem={id:'o',chatId:'chat',kind:'notice',text:'Suggested a note',createdAt:'',status:'offer',data:{kind:'memory-offer',runId:'r',summary:'s'}};
+  const other:TimelineItem={...offer,id:'n',text:'Compacted',status:undefined,data:{kind:'compaction'}};
+  assert.deepEqual(createTimelineProjection()([offer,other]).rows.map(row=>row.id),['n']);
 });
