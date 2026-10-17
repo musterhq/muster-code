@@ -155,3 +155,19 @@ test('source folders named build are not silently excluded', async (t) => {
   await writeFile(join(root, 'build', 'source.ts'), 'export const source = true;');
   await waitFor(() => changed.length > 0);
 });
+
+test('build output directories do not trigger refreshes, source files still do', async (t) => {
+  const root = await makeRoot(t);
+  await mkdir(join(root, 'dist'));
+  await mkdir(join(root, 'target', 'debug'), { recursive: true });
+  await mkdir(join(root, 'src'));
+  const { svc, changed } = makeService(t);
+  await svc.watch('f', root);
+  await settle(changed);
+  await writeFile(join(root, 'dist', 'bundle.js'), 'x');
+  await writeFile(join(root, 'target', 'debug', 'app'), 'x');
+  await sleep(QUIET_MS);
+  assert.deepEqual(changed, []);
+  await writeFile(join(root, 'src', 'a.ts'), 'x');
+  await waitFor(() => changed.length > 0);
+});
