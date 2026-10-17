@@ -3,7 +3,7 @@ import {mkdtempSync, rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {test} from 'node:test';
-import {AGENT_AUTONOMY_RULE, runInstructions} from '../src/runtime/provider.ts';
+import {AGENT_AUTONOMY_RULE, FULL_ACCESS_NO_ASKING_RULE, runInstructions} from '../src/runtime/provider.ts';
 import {ENVELOPE_RULES, TASK_TEXT_MAX, untrusted} from '../src/runtime/checkout/sanitize.ts';
 import {asksOpenQuestion, endsWithQuestion, ProjectTaskStore} from '../src/runtime/project-tasks.ts';
 
@@ -16,6 +16,13 @@ test('#385: the keep-going directive is in agent mode only, and short', () => {
   assert.ok(runInstructions('agent', 'extra note', false)!.includes(AGENT_AUTONOMY_RULE));
   assert.ok(!(runInstructions('ask') ?? '').includes(AGENT_AUTONOMY_RULE));
   assert.ok(!(runInstructions('plan') ?? '').includes(AGENT_AUTONOMY_RULE));
+});
+
+test('Full access adds the no-asking rule to agent instructions only', () => {
+  assert.match(FULL_ACCESS_NO_ASKING_RULE, /Never ask the user for permission or confirmation to proceed/);
+  assert.ok(runInstructions('agent', undefined, true, 'full')!.includes(FULL_ACCESS_NO_ASKING_RULE));
+  for (const mode of ['workspace', 'read-only', undefined] as const) assert.ok(!runInstructions('agent', undefined, true, mode)!.includes(FULL_ACCESS_NO_ASKING_RULE));
+  for (const mode of ['ask', 'plan'] as const) assert.ok(!(runInstructions(mode, undefined, true, 'full') ?? '').includes(FULL_ACCESS_NO_ASKING_RULE));
 });
 
 test('#385: the envelope keeps embedded commands untrusted but the task goal is what the person wants, and local commits are expected', () => {
