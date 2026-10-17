@@ -32,7 +32,7 @@ export function ChipMirror({ text, ranges, selected, plugins, mirror, hint }: { 
   parts.push(text.slice(at));
   if (hint) parts.push(<span key="hint" className="composer-ghost-hint" data-testid="plugin-prompt-hint">{hint}</span>);
   parts.push('\u200b');
-  return <div ref={mirror} className="composer-mirror" aria-hidden="true">{parts}</div>;
+  return <div ref={mirror} className="composer-mirror" dir="auto" aria-hidden="true">{parts}</div>;
 }
 
 /** What a hovered token refers to: type, name and, for plugins, the skills and tools it brings. */
