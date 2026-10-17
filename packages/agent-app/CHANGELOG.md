@@ -3,6 +3,11 @@
 All notable changes to Muster Agent. Each `## <version>` section becomes the notes of the
 `agent-v<version>` GitHub Release (`.github/workflows/agent-app-release.yml`).
 
+## Unreleased
+
+- Project task runs now keep working while a build, test or deploy is running instead of stopping to wait, and only stop for decisions the user must make.
+- Agents post the task handoff comment themselves instead of drafting it and asking whether to post it.
+
 ## 0.3.13
 
 Replies in one turn read as one answer, and pictures that can no longer be read take one line instead of an empty frame.
