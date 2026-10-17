@@ -63,25 +63,28 @@ export class WakeQueue {
     if (why) return this.record(r, 'refused', why);
     const key = this.key(r.projectId, r.memberId, r.taskId), waiting = this.pending.get(key);
     // Coalesce into a wake that is already waiting: one run will carry every reason and note.
-    if (waiting) {
-      waiting.reasons.add(r.reason); if (r.note) waiting.notes.push(r.note); waiting.force ||= Boolean(r.force);
-      const merged = (this.d.store.getWake(waiting.wakeId)?.merged ?? 1) + 1;
-      this.d.store.updateWake(waiting.wakeId, { merged, detail: `${waiting.kind === 'deferred' ? 'Waiting for the current run to end' : 'Waiting for the minimum gap'}; ${merged} requests will start one run.` });
-      this.d.changed(r.projectId);
-      return this.record(r, 'coalesced', `Merged into a wake already waiting (${[...waiting.reasons].join(', ')}).`, { merged: 1 });
-    }
+    if (waiting) return this.merge(r, waiting);
     const policy = this.d.heartbeat(r.projectId, r.memberId);
     // A run is live on this task: deliver once it ends, as one follow-up.
     if (t?.live) return this.wait(r, 'deferred', `${m!.name} is working on this task now; one follow-up starts when the run ends.`, 0);
     // Storm cap: wakes per minute across the project.
     const storm = await this.stormed(r.projectId, r.memberId);
     if (storm) return this.record(r, 'storm', `${storm.count} wakes in the last minute reached the limit of ${storm.perMinute}. ${m!.name} was paused until you resume it.`);
+    // The storm check yielded: another request for this key may have started waiting meanwhile. Join it rather than start a second timer.
+    const raced = this.pending.get(key); if (raced) return this.merge(r, raced);
     const last = this.d.store.lastStart(r.projectId, r.memberId), gapMs = policy.minGapSec * 1000;
     const wait = last && !r.force ? Date.parse(last) + gapMs - this.d.now() : 0;
     if (wait > 0) return this.wait(r, 'throttle', `Throttled: ${m!.name} was woken ${Math.max(1, Math.round((gapMs - wait) / 1000))} s ago; this starts in ${Math.ceil(wait / 1000)} s.`, wait);
     return this.start(r, [r.reason], r.note ? [r.note] : [], null);
   }
 
+  private merge(r: WakeRequest, waiting: Pending): WakeRecord {
+    waiting.reasons.add(r.reason); if (r.note) waiting.notes.push(r.note); waiting.force ||= Boolean(r.force);
+    const merged = (this.d.store.getWake(waiting.wakeId)?.merged ?? 1) + 1;
+    this.d.store.updateWake(waiting.wakeId, { merged, detail: `${waiting.kind === 'deferred' ? 'Waiting for the current run to end' : 'Waiting for the minimum gap'}; ${merged} requests will start one run.` });
+    this.d.changed(r.projectId);
+    return this.record(r, 'coalesced', `Merged into a wake already waiting (${[...waiting.reasons].join(', ')}).`, { merged: 1 });
+  }
   /** The storm cap is per agent: only the agent that is storming is paused. Checked on every path that starts a run. */
   private async stormed(projectId: string, memberId: string): Promise<{ count: number; perMinute: number } | null> {
     const perMinute = this.d.settings(projectId).stormPerMinute, count = this.d.store.wakeCount(projectId, new Date(this.d.now() - 60_000).toISOString(), memberId);
