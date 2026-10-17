@@ -9,7 +9,9 @@ picture-in-picture card, and through agent tools.
 |---|---|
 | `src/main/devices/discovery.ts` | Read-only checks and discovery: `xcode-select`, `xcrun simctl list`, `adb devices`, `emulator -list-avds`. |
 | `src/main/devices/helper.ts` | Installs and runs the pinned helper (Expo Device Hub 0.15.3). |
-| `src/main/devices/link.ts` | Main's own client of the helper: MJPEG (iOS) and H.264 (Android) video, input sockets, flow control, reconnects. |
+| `src/main/devices/link.ts` | Main's own client of the helper: H.264 video (iOS AVCC, Android SEMU) with MJPEG as the iOS fallback, input sockets, flow control, reconnects. |
+| `src/main/devices/chrome.ts` | Real device frames read at runtime: Xcode's DeviceKit chrome (through the helper) and the AVD's Android SDK skin. |
+| `src/main/devices/models.ts`, `src/renderer/devices/appleModels.ts` | Realistic 3D models downloaded on demand from apple.com, verified, converted and cached locally. |
 | `src/main/devices/manager.ts` | Settings, lifetimes, boot and shutdown, sessions, screenshots. |
 | `src/main/devices/agent-tools.ts` | The `muster_device` MCP tools: `device_list`, `device_open`, `device_screenshot`, `device_tap`, `device_type`, `device_apps`, `device_launch_app`, `device_button`, `device_close`. |
 | `src/shared/device-frames.ts` | The parametric frame spec, the built-in families, deriving a spec from simctl and AVD data, and the layout both views draw. |
@@ -66,9 +68,39 @@ What is drawn over the live picture: only the cut-out, where the device has it (
 not include the island or the punch-hole, which the device's own status bar lays out around). The picture is masked to
 the display's real corner radius.
 
-Muster draws every frame itself from these numbers. No device maker's artwork, photo, mesh or wallpaper is bundled,
-downloaded or converted (an earlier opt-in download of Apple's AR models was removed). The Android SDK's emulator skins
-are not used; the parametric frames cover the same devices.
+### Real frames from the user's own tools
+
+When the user's tools have them, the flat view draws the device's real frame instead, read at runtime and never copied
+into Muster: for a simulator, the DeviceKit chrome Apple's Simulator draws (the helper reads the device type's profile
+and its `.devicechrome` bundle under `/Library/Developer` and rasterises it; main fetches the parsed descriptor and the
+allowlisted images from the helper's read-only loopback routes `GET /grid/api` and `GET /grid/api/devicekit-chrome`);
+for an emulator, the AVD's skin from the Android SDK (`skin.path`/`skin.name` → `skins/<name>/layout` and its images,
+Apache-2.0, with the display mask when it matches). The live picture sits in the frame's screen rectangle, masked to its
+corners; only the cut-out is drawn over it. Sliced chromes, mismatched skins, missing tools and landscape use the
+parametric frame. Each device's frame source is logged, and the CI device smoke records it.
+
+## Streaming
+
+- **iOS:** H.264 from the helper's AVCC route (`/helper/<udid>/stream.avcc`): a seed JPEG, an avcC decoder description,
+  then length-prefixed access units, at the simulator's native 60 fps. Main demuxes and forwards them in order; the
+  renderer decodes with WebCodecs after `isConfigSupported` (some decoders reject the simulators' High 5.1 profile) and
+  acknowledges each decoded frame. About a second behind, main reopens the subscription, which starts with a fresh
+  keyframe. A window that cannot decode H.264 asks main to stream MJPEG for that device instead.
+- **Android:** scrcpy's H.264 inside SEMU frames on the helper's socket (Annex-B, configured from the first keyframe's
+  SPS); a backlog skips to the next keyframe and asks the encoder for one.
+- The approach (AVCC demuxing, the probe and the MJPEG fallback) adapts T3 Code's device stream client (MIT; see
+  `THIRD-PARTY-NOTICES.md`). The renderer still never reaches the helper: frames come over IPC and input goes through main.
+
+## Realistic 3D models
+
+For an iPhone with Dynamic Island or an iPad, the 3D view can show the real device: the first time it needs one, main
+downloads Apple's AR Quick Look file from apple.com (pinned URL), refuses it unless its SHA-256 matches, and caches it
+under app data; the renderer converts it in JavaScript (body extracted, axes and scale normalised, the baked screen
+replaced by the named live screen, textures at most 1024 px as WebP) and the GLB is cached too. Muster's own body shows
+until it is ready, and stays when offline or on any failure. A one-time note says "Downloads device models from
+apple.com"; Settings has the switch (on by default), and turning it off deletes the cache. `metadata.json` in the cache
+records each file's source URL, checksum, author (Apple Inc.) and that it has no open-source or redistribution licence.
+Nothing Apple-derived is committed, bundled or uploaded.
 
 ## Verification
 

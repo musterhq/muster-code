@@ -5,7 +5,10 @@
  * - Video runs only while a viewer is active (a visible tab or PiP card in a window that is in front); with none, the
  *   stream is closed, so an unwatched device costs nothing.
  * - Input stays connected while the session is open, so an agent's tap works with no viewer.
- * - iOS: MJPEG over HTTP (parsed here, JPEGs forwarded with latest-frame-wins flow control) + the helper's input socket.
+ * - iOS: H.264 over HTTP (the helper's AVCC body, demuxed here and forwarded in order; a renderer that falls behind
+ *   reopens it for a fresh keyframe), or MJPEG with latest-frame-wins flow control when the window cannot decode H.264;
+ *   input on the helper's binary socket. The H.264 flow adapts T3 Code's device stream client (MIT, Copyright (c) 2026
+ *   T3 Tools Inc.; see THIRD-PARTY-NOTICES.md).
  *   Android: an H.264 socket (forwarded in order; on backlog, dropped up to the next keyframe) + an input-only socket.
  * - Every failure reconnects with backoff; after the first frame never arrives, the state says so in plain English.
  */
