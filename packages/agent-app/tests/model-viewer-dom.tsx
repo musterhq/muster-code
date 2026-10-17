@@ -127,7 +127,8 @@ files.set('models/cube.glb', model.cubeGlb());
   assert.ok(retry, 'Try again is offered');
   retry.click();
   await waitFor(() => state() === 'ready', 'recovery after Try again');
-  assert.equal(q('.rich-block > .rich-sr[role="status"]')?.textContent, '3D model · GLB ready: cube.glb');
+  // The announcement follows the state on the next commit; a loaded runner can see the state first.
+  await waitFor(() => q('.rich-block > .rich-sr[role="status"]')?.textContent === '3D model · GLB ready: cube.glb', 'the ready announcement');
   r.unmount();
 }
 
