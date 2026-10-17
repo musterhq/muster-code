@@ -217,3 +217,12 @@ test('NAV-11: folders, Projects and files as explicit result types', () => {
   assert.deepEqual(files.map(row => [row.name, row.dir]), [['util.ts', 'src/lib']]);
   assert.deepEqual(files[0].nameRanges, [[0, 4]]);
 });
+
+test('fuzzyMatch ranges never cut an emoji in half', () => {
+  const single = fuzzyMatch('😀', 'ship 😀 now')!;
+  assert.deepEqual(single.ranges, [[5, 7]], 'the whole surrogate pair is one highlighted span');
+  assert.deepEqual(splitHighlight('ship 😀 now', single.ranges).filter(part => part.highlighted).map(part => part.text), ['😀']);
+  const double = fuzzyMatch('😀😀', 'a😀😀b')!;
+  assert.deepEqual(double.ranges, [[1, 5]], 'adjacent emoji merge into one span');
+  for (const part of splitHighlight('a😀😀b', double.ranges)) assert.equal(part.text.isWellFormed(), true, `"${part.text}" is well formed`);
+});

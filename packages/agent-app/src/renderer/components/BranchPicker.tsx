@@ -1,4 +1,5 @@
 import React, {useEffect, useId, useMemo, useRef, useState} from 'react';
+import {imeComposing} from '../ime';
 import {Popover} from '@base-ui/react/popover';
 import {ArrowLeft, Check, FolderGit2, GitBranch, GitBranchPlus, Loader2, Search} from 'lucide-react';
 import type {Snapshot} from '../../shared/protocol';
@@ -158,7 +159,7 @@ function BranchPickerContent({folder, initialMode, close}: {folder: Folder; init
   const onKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
     if (event.key === 'ArrowDown') { event.preventDefault(); move(1); }
     else if (event.key === 'ArrowUp') { event.preventDefault(); move(-1); }
-    else if (event.key === 'Enter' && focused && !busy) { event.preventDefault(); focused.run(); }
+    else if (event.key === 'Enter' && focused && !busy && !imeComposing(event)) { event.preventDefault(); focused.run(); }
     else if (event.key === 'Backspace' && !query && mode !== initialMode) { event.preventDefault(); setMode(initialMode); }
   };
 
