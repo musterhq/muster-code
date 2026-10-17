@@ -37,7 +37,9 @@ test('BASE_TOKENS equals the stylesheet values, so Muster Light/Dark are the shi
 });
 
 test('every colour token in the :root blocks is themeable or deliberately fixed', () => {
-  const FIXED = new Set(['focus-ring', 'on-tint', 'media-bg', 'paper', 'paper-ink', 'media-scrim', 'on-media', 'shadow-xs', 'shadow-sm', 'shadow-popover', 'shadow-dialog']);
+  // Device frames (#363) are physical finishes and a powered-off screen: the same in every theme.
+  const DEVICE = ['device-frame-dark', 'device-frame-titanium', 'device-frame-light', 'device-frame-rim', 'device-frame-rim-bright', 'device-frame-rim-dark', 'device-frame-mark', 'device-frame-mark-edge', 'device-frame-home', 'device-screen-off'];
+  const FIXED = new Set(['focus-ring', 'on-tint', 'media-bg', 'paper', 'paper-ink', 'media-scrim', 'on-media', 'shadow-xs', 'shadow-sm', 'shadow-popover', 'shadow-dialog', ...DEVICE]);
   const all = {...block(':root'), ...block(":root[data-theme='light']")};
   const colourish = Object.entries(all).filter(([, v]) => /^(#|rgb|hsl|color-mix)/.test(v)).map(([k]) => k);
   const missing = colourish.filter(k => !(TOKEN_KEYS as string[]).includes(k) && !FIXED.has(k));
