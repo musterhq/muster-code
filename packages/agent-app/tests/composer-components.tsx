@@ -448,6 +448,19 @@ assert.deepEqual(calls.filter(call=>call.command==='stashes.restore').at(-1)!.in
 assert.equal(store.getState().composerDrafts.chat.text,'Already typed\n\nRefactor the parser\nand add tests','restored text joins the draft');
 assert.ok((document.querySelector('.composer-attachments')?.textContent??'').includes('notes.txt'),'the stashed file is back in the attachment strip');
 assert.equal(stashPanel(),null);assert.equal(stashes.length,1);
+// A run stopped before its message was dispatched: the runtime hands the text back as chat.draft; the empty local draft must not hide it.
+chat={...chat,status:'running',draft:''};emit();await delay(30);
+store.setComposerDraft('chat','');await delay(20);
+chat={...chat,status:'interrupted',draft:'do not lose me'};emit();await delay(50);
+assert.equal(store.getState().composerDrafts.chat.text,'do not lose me','stop-before-dispatch restores the draft');
+// A paused queue no longer asks "Send message?": the message just sends and the held items stay queued.
+chat={...chat,status:'interrupted',queuePaused:'interrupted',queue:[{id:'h1',text:'held',requestId:'rh',attachmentIds:[],createdAt:''}]};emit();await delay(30);
+calls.length=0;
+await key(byTest('composer-input') as HTMLTextAreaElement,'Enter');await delay(40);
+assert.ok(!byTest('queue-send-confirm'));
+assert.ok(calls.some(call=>call.command==='chat.send'&&call.input.text==='do not lose me'),'sent without a prompt');
+assert.ok(!calls.some(call=>call.command==='chat.queue.clear'),'held messages are never cleared');
+chat={...chat,status:'completed',queuePaused:undefined,queue:undefined,draft:''};emit();await delay(30);
 store.setComposerDraft('chat','');await delay(20);
 assert.deepEqual(errors,[]);root.unmount();await delay(15);
 console.log('Composer component checks passed: Codex toolbar without a mode picker, + menu (Add/Plugins/Skills, icons, filter, plan toggle, project, goal strip, record a skill, sketch), mid-run access, access levels with confirmation, provider-grouped model picker with effort, / skills+commands chips, @ files/plugins chips with Backspace selection, structured send payload, attachments, queue/steer, Esc-Esc stop and stopping state.');
