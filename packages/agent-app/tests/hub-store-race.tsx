@@ -33,6 +33,16 @@ of('orgs.work')[1].resolve({ connected: true, me: null, fetchedAt: 'b', orgs: [{
 await w2;
 of('orgs.work')[0].resolve({ connected: true, me: null, fetchedAt: 'a', orgs: [{ org: { id: 'old' } }] });
 await w1;
-const { useMyWork } = org; void useMyWork;
+// The store state is only readable through the hook, so mount a probe component and read what it renders.
+const { parseHTML } = (await import('node:module')).createRequire(import.meta.url)('linkedom');
+const { window: dom } = parseHTML('<html><body><div id="root"></div></body></html>');
+Object.assign(globalThis, { document: Object.assign(dom.document, { }), HTMLElement: dom.HTMLElement, Element: dom.Element });
+Object.defineProperty(dom.document, 'visibilityState', { get() { return 'visible'; } });
+const React = await import('react');
+const { createRoot } = await import('react-dom/client');
+const Probe = () => { const { work } = org.useMyWork(false); return <p id="seen">{work?.fetchedAt ?? 'none'}</p>; };
+createRoot(dom.document.getElementById('root')!).render(<Probe/>);
+await until(() => dom.document.getElementById('seen')?.textContent === 'b');
+assert.equal(dom.document.getElementById('seen')?.textContent, 'b', 'older My work read must not overwrite the newer one');
 console.log('hub-store-race ok');
 process.exit(0);
