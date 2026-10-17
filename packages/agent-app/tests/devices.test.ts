@@ -205,10 +205,10 @@ test('manager: off by default; agent access is a separate opt-in that never outl
   await manager.configure({agentControl: true});
   assert.equal(manager.agentAccess, false, 'no tools until the helper is installed');
   const file = path.join(dir, 'devices.json');
-  assert.deepEqual(JSON.parse(fs.readFileSync(file, 'utf8')), {enabled: true, agentControl: true});
+  assert.deepEqual(JSON.parse(fs.readFileSync(file, 'utf8')), {enabled: true, agentControl: true, appleModels: true});
   if (process.platform !== 'win32') assert.equal(fs.statSync(file).mode & 0o777, 0o600);
   await manager.configure({enabled: false});
-  assert.deepEqual(JSON.parse(fs.readFileSync(file, 'utf8')), {enabled: false, agentControl: false}, 'turning devices off also turns agent access off');
+  assert.deepEqual(JSON.parse(fs.readFileSync(file, 'utf8')), {enabled: false, agentControl: false, appleModels: true}, 'turning devices off also turns agent access off');
   assert.deepEqual(access, []);
   await assert.rejects(manager.configure({enabled: 'yes'}), /Choose whether devices are on/);
   fs.rmSync(dir, {recursive: true, force: true});
@@ -553,4 +553,84 @@ test('AVD config is read from the AVD folder (config.ini overlaid by hardware-qe
   const [phone] = await listIos({...deps, run, exists: () => true, platform: 'darwin'});
   assert.equal(phone!.frame!.id, 'iphone-home');
   fs.rmSync(dir, {recursive: true, force: true});
+});
+
+test('realistic models: SHA-256 mismatch refused, cache hit, offline fallback, metadata records source and no licence', async () => {
+  const {AppleModels, sha256, ASSET_LICENSE} = await import('../src/main/devices/models.ts');
+  const dir = tmp();
+  const good = Buffer.from('fake usdz bytes');
+  const source = {id: 'iphone' as const, label: 'iPhone', url: 'https://www.apple.com/x.usdz', sha256: sha256(good), bodyNode: 'B', screenNode: 'S'};
+  let body: Buffer | null = good, fetched = 0;
+  const fetchFn = (async (url: string) => { fetched++; assert.equal(url, source.url); if (!body) throw new TypeError('fetch failed'); return new Response(new Uint8Array(body)); }) as typeof fetch;
+  const models = new AppleModels(dir, fetchFn, () => {}, [source]);
+  // Offline: a plain reason, nothing cached, and the next try works once online.
+  body = null;
+  await assert.rejects(models.get('iphone'), /Could not download the iPhone model from apple.com/);
+  assert.equal(models.status()[0]!.state, 'failed');
+  body = good;
+  const first = await models.get('iphone');
+  assert.deepEqual(Buffer.from(first.usdz!), good);assert.equal(first.bodyNode, 'B');
+  // Cache hit: the verified download is reused, and a stored conversion is returned without any download.
+  await models.get('iphone');assert.equal(fetched, 2, 'a verified download is reused');
+  const glb = Buffer.concat([Buffer.from('glTF'), Buffer.alloc(32)]);
+  models.store('iphone', new Uint8Array(glb));
+  const cached = await models.get('iphone');
+  assert.deepEqual(Buffer.from(cached.glb!), glb);assert.equal(cached.usdz, undefined);assert.equal(fetched, 2);
+  const meta = JSON.parse(fs.readFileSync(path.join(dir, 'device-models', 'metadata.json'), 'utf8'));
+  assert.equal(meta.models.iphone.sourceUrl, source.url);assert.equal(meta.models.iphone.sourceSha256, source.sha256);
+  assert.equal(meta.models.iphone.assetLicense, ASSET_LICENSE);assert.match(ASSET_LICENSE, /No open-source or redistribution license/);
+  assert.ok(meta.models.iphone.downloadedAt && meta.models.iphone.convertedAt);
+  assert.throws(() => models.store('iphone', new Uint8Array([1, 2, 3])), /Invalid converted model/);
+  // Mismatch: refused with a clear message, nothing kept.
+  models.clear();
+  body = Buffer.from('tampered');
+  await assert.rejects(models.get('iphone'), /did not match its expected checksum, so it was refused/);
+  assert.ok(!fs.existsSync(path.join(dir, 'device-models', 'source')), 'a refused file is never written');
+  const evil = new AppleModels(dir, (async () => new Response(good)) as typeof fetch, () => {}, [{...source, url: 'https://evil.example/x.usdz'}]);
+  await assert.rejects(evil.get('iphone'), /only downloaded from apple.com/);
+  await assert.rejects(models.get('android'), /Unknown device model/);
+  fs.rmSync(dir, {recursive: true, force: true});
+});
+
+test('realistic models in the renderer: only matching frames ask, any failure keeps Muster\'s own body, a later try can succeed', async () => {
+  const {realModelFor, realModelGlb, resetRealModels, takeModelsNote, MODELS_NOTE} = await import('../src/renderer/devices/realModels.ts');
+  const {iosFrame, androidFrame} = await import('../src/shared/device-frames.ts');
+  assert.equal(realModelFor(iosFrame(undefined, 'iPhone 17 Pro')), 'iphone');assert.equal(realModelFor(iosFrame(undefined, 'iPad Pro 13-inch (M5)')), 'ipad');
+  assert.equal(realModelFor(iosFrame(undefined, 'iPhone SE (3rd generation)')), null);assert.equal(realModelFor(androidFrame({}, 'Pixel_9')), null, 'Android never uses Apple models');
+  resetRealModels();
+  const offline = (async () => { throw new Error('Could not download the iPhone model from apple.com. Check your connection.'); }) as never;
+  const warn = console.warn; console.warn = () => {};
+  try { assert.equal(await realModelGlb('iphone', offline, async () => new ArrayBuffer(0)), null, 'offline: the parametric body stays'); } finally { console.warn = warn; }
+  const stored: unknown[] = [];
+  const online = (async (command: string, input: {glb?: Uint8Array}) => { if (command === 'devices.modelStore') { stored.push(input.glb); return undefined; } return {id: 'iphone', bodyNode: 'B', screenNode: 'S', usdz: new Uint8Array([1])}; }) as never;
+  const glb = await realModelGlb('iphone', online, async () => new Uint8Array([0x67, 0x6c, 0x54, 0x46]).buffer);
+  assert.deepEqual([...glb!], [0x67, 0x6c, 0x54, 0x46], 'a later try converts and caches');assert.equal(stored.length, 1);
+  const memory = new Map<string, string>(), storage = {getItem: (k: string) => memory.get(k) ?? null, setItem: (k: string, v: string) => void memory.set(k, v)};
+  assert.equal(takeModelsNote(storage), true);assert.equal(takeModelsNote(storage), false, 'the note shows once');assert.equal(MODELS_NOTE, 'Downloads device models from apple.com');
+});
+
+test('realistic model conversion: a USDZ becomes one body with the named live screen, display height 2.2, 0..1 screen UVs', async () => {
+  const {zipSync, strToU8} = await import('three/addons/libs/fflate.module.js');
+  // A tiny synthetic USDZ in the shape of Apple's files: a body prim holding a shell and a display mesh, plus an
+  // unrelated prim that must be dropped. Made here; it contains no Apple data.
+  const quad = (name: string, w: number, h: number, z: number) => `def Mesh "${name}" {\n  int[] faceVertexCounts = [4]\n  int[] faceVertexIndices = [0, 1, 2, 3]\n  point3f[] points = [(${-w}, ${-h}, ${z}), (${w}, ${-h}, ${z}), (${w}, ${h}, ${z}), (${-w}, ${h}, ${z})]\n}`;
+  const usda = `#usda 1.0\n(\n  upAxis = "Y"\n)\ndef Xform "Root" {\n def Xform "BodyX" {\n  ${quad('ShellX', 0.42, 0.92, -0.05)}\n  ${quad('ScreenX', 0.38, 0.85, 0.05)}\n }\n def Xform "Extra" {\n  ${quad('Stand', 2, 2, -1)}\n }\n}\n`;
+  const usdz = zipSync({'model.usda': [strToU8(usda), {level: 0}]});
+  // Node has no FileReader; the exporter's binary path needs one.
+  (globalThis as any).FileReader ??= class { result: ArrayBuffer | null = null; onloadend: (() => void) | null = null; readAsArrayBuffer(blob: Blob) { void blob.arrayBuffer().then(b => { this.result = b; this.onloadend?.(); }); } readAsDataURL(blob: Blob) { void blob.arrayBuffer().then(b => { (this as any).result = `data:application/octet-stream;base64,${Buffer.from(b).toString('base64')}`; this.onloadend?.(); }); } };
+  const {convertAppleModel, loadDeviceGlb} = await import('../src/renderer/devices/appleModels.ts');
+  const {SCREEN_NAME, SCREEN_HEIGHT} = await import('../src/renderer/devices/bodies.ts');
+  const glb = await convertAppleModel(usdz, 'BodyX', 'ScreenX');
+  assert.equal(Buffer.from(glb).toString('latin1', 0, 4), 'glTF');
+  const scene = await loadDeviceGlb(new Uint8Array(glb));
+  const names: string[] = []; scene.traverse((node: any) => { if (node.isMesh) names.push(node.name); });
+  assert.ok(names.includes(SCREEN_NAME), `the display is the named live screen (${names.join(', ')})`);
+  assert.ok(!names.includes('Stand'), 'unrelated prims are dropped');
+  const screen = scene.getObjectByName(SCREEN_NAME) as any;
+  screen.geometry.computeBoundingBox();
+  const size = screen.geometry.boundingBox.max.clone().sub(screen.geometry.boundingBox.min);
+  assert.ok(Math.abs(size.y - SCREEN_HEIGHT) < 1e-3, `display height ${size.y}`);
+  const uv = screen.geometry.attributes.uv; let min = Infinity, max = -Infinity;
+  for (let i = 0; i < uv.count; i++) { min = Math.min(min, uv.getX(i), uv.getY(i)); max = Math.max(max, uv.getX(i), uv.getY(i)); }
+  assert.ok(min >= -1e-6 && max <= 1 + 1e-6 && max > 0.99, 'screen UVs span 0..1');
 });

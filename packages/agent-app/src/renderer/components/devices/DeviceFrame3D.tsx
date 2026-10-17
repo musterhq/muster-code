@@ -9,7 +9,7 @@
  * the device's pixel (engine.pick + uvToPixel). Rendering is on demand: a new frame or an interaction, nothing else.
  * No WebGL falls back to the flat view.
  */
-import React, {useEffect, useRef} from 'react';
+import React, {useEffect, useRef, useState} from 'react';
 import {Color, MeshBasicMaterial, SRGBColorSpace, type Mesh, type Object3D} from 'three';
 import type {DeviceSession} from '../../../shared/device-protocol';
 import {frameForPicture, type FrameSpec} from '../../../shared/device-frames';
@@ -19,6 +19,9 @@ import {buildBody, SCREEN_NAME} from '../../devices/bodies';
 import {orientScreen} from './orientScreen';
 import {frameOf, frameTurns} from './DeviceFrameFlat';
 import {Engine, uvToPixel, type FrameTexture} from '../../three-engine';
+import {invoke} from '../../bridge';
+import {deviceUi} from '../../deviceSessions';
+import {MODELS_NOTE, realModelFor, realModelGlb, takeModelsNote} from '../../devices/realModels';
 
 const BODY: Record<FrameSpec['color'], number> = {dark: 0x1c1d20, titanium: 0x6a6761, light: 0xd7d5d0};
 const bodyColors = (spec: FrameSpec) => {
@@ -94,10 +97,27 @@ export default function DeviceFrame3D({session, feed, onFallback}: {session: Dev
     engine.current = created;
     return () => { stream.current = null; streamSize.current = ''; created.dispose(); engine.current = null; screen.current = null; body.current = null; };
   }, [session.deviceId]);
+  const [note, setNote] = useState<string>();
   useEffect(() => {
     if (!engine.current) return;
+    let live = true;
     const current = feedRef.current;
+    // Muster's own body at once; the realistic model (when this device has one and the option is on) replaces it when ready.
     mount(buildBody(spec, current?.width ? (turned ? {width: current.height, height: current.width} : {width: current.width, height: current.height}) : undefined, bodyColors(spec)));
+    const real = realModelFor(spec);
+    if (real && deviceUi().setup?.appleModels !== false) {
+      const cached = deviceUi().setup?.models.find(model => model.id === real)?.state === 'converted';
+      if (!cached && takeModelsNote(typeof localStorage === 'undefined' ? undefined : localStorage)) setNote(MODELS_NOTE);
+      void realModelGlb(real, invoke as never, async (usdz, body, screen) => (await import('../../devices/appleModels')).convertAppleModel(usdz, body, screen))
+        .then(async glb => {
+          if (!live || !glb) return;
+          const {loadDeviceGlb} = await import('../../devices/appleModels');
+          const model = await loadDeviceGlb(glb).catch(() => null);
+          if (live && model) mount(model);
+        })
+        .finally(() => { if (live) setNote(undefined); });
+    }
+    return () => { live = false; };
   }, [session.deviceId, shapeKey]);
 
   // A new picture: hand the feed canvas to the frame texture (the engine renders once), outside React.
@@ -127,5 +147,6 @@ export default function DeviceFrame3D({session, feed, onFallback}: {session: Dev
     onPointerUp={event => { const p = pointer.current; if (!p || p.id !== event.pointerId) return; pointer.current = null; send('end', touchAt(event) ?? p.last); }}
     onPointerCancel={() => { pointer.current = null; }}
     onDoubleClick={event => { if (!touchAt(event)) engine.current?.snapToFront(); }} data-frame={spec.id}>
+    {note && <span className="device-3d-note" role="status">{note}</span>}
   </div>;
 }

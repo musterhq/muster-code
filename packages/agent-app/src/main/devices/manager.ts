@@ -15,6 +15,7 @@ import {deviceId as validId, deviceTitle, type DeviceButton, type DeviceEvent, t
 import {androidTools, APP_ID, checkAndroid, checkIos, checkNode, errorLine, listAndroid, listIos, parseAdbPackages, parseSimctlApps, sortApps, type DeviceApp, type ProbeDeps} from './discovery.ts';
 import {HELPER_DOWNLOAD_MB, HELPER_VERSION, helperInstalled, helperPaths, hubEnv, installHelper, killServeSimHelpers, startHub, type HelperPaths, type HubEndpoint, type Spawn} from './helper.ts';
 import {DeviceLink, type LinkDeps, type LinkFrame} from './link.ts';
+import {AppleModels} from './models.ts';
 
 export const HUB_IDLE_MS = 45_000;
 /** System packages worth offering an agent on Android (settings, browser, the usual Google apps). */
@@ -36,7 +37,7 @@ export interface DeviceManagerDeps extends ProbeDeps {
   setTimeout?: typeof setTimeout;
   clearTimeout?: typeof clearTimeout;
 }
-interface Settings {enabled: boolean; agentControl: boolean}
+interface Settings {enabled: boolean; agentControl: boolean; appleModels: boolean}
 interface Live {session: DeviceSession; link: DeviceLink; viewers: Set<string>}
 
 export class DeviceManager {
@@ -67,7 +68,16 @@ export class DeviceManager {
     this.settings = readSettings(this.settingsFile);
     this.helperState = helperInstalled(this.paths) ? 'installed' : 'absent';
     this.timers = {set: deps.setTimeout ?? setTimeout, clear: deps.clearTimeout ?? clearTimeout};
+    this.appleModels = new AppleModels(deps.userData, deps.fetch, () => void this.publishSetup());
   }
+  readonly appleModels: AppleModels;
+  /** A realistic model for the 3D view, downloaded on first use (the option is on by default). */
+  async model(id: unknown) {
+    this.ready();
+    if (!this.settings.appleModels) throw new Error('Realistic device models are off.');
+    return this.appleModels.get(id);
+  }
+  storeModel(id: unknown, glb: unknown): void { this.ready(); if (!this.settings.appleModels) throw new Error('Realistic device models are off.'); this.appleModels.store(id, glb); }
 
   get agentAccess(): boolean { return this.settings.enabled && this.settings.agentControl && this.helperState === 'installed'; }
 
@@ -78,20 +88,23 @@ export class DeviceManager {
       this.setupCache = {at: Date.now(), ios, android, node};
     }
     const {ios, android, node} = this.setupCache;
-    return {enabled: this.settings.enabled, agentControl: this.settings.agentControl, ios, android, node,
+    return {enabled: this.settings.enabled, agentControl: this.settings.agentControl, appleModels: this.settings.appleModels, models: this.appleModels.status(), ios, android, node,
       host: this.deps.platform === 'darwin' || this.deps.platform === 'win32' ? this.deps.platform : 'linux',
       helper: {state: this.helperState, version: HELPER_VERSION, downloadMB: HELPER_DOWNLOAD_MB, running: !!this.hub, ...(this.helperProgress ? {progress: this.helperProgress} : {}), ...(this.helperError ? {error: this.helperError} : {})}};
   }
   private async publishSetup(): Promise<DeviceSetup> { const setup = await this.setup(); this.deps.emit({type: 'deviceSetup', setup}); return setup; }
 
-  async configure(input: {enabled?: unknown; agentControl?: unknown}): Promise<DeviceSetup> {
+  async configure(input: {enabled?: unknown; agentControl?: unknown; appleModels?: unknown}): Promise<DeviceSetup> {
     if (input.enabled !== undefined && typeof input.enabled !== 'boolean') throw new Error('Choose whether devices are on.');
     if (input.agentControl !== undefined && typeof input.agentControl !== 'boolean') throw new Error('Choose whether agents may use devices.');
+    if (input.appleModels !== undefined && typeof input.appleModels !== 'boolean') throw new Error('Choose whether to download realistic device models.');
     const before = this.agentAccess;
-    const next = {...this.settings, ...(input.enabled !== undefined ? {enabled: input.enabled} : {}), ...(input.agentControl !== undefined ? {agentControl: input.agentControl} : {})};
+    const next = {...this.settings, ...(input.enabled !== undefined ? {enabled: input.enabled} : {}), ...(input.agentControl !== undefined ? {agentControl: input.agentControl} : {}), ...(input.appleModels !== undefined ? {appleModels: input.appleModels} : {})};
     if (input.agentControl === true && !next.enabled) throw new Error('Turn devices on first.');
     // Agent access never outlives devices being on.
     if (!next.enabled) next.agentControl = false;
+    // Turning the models off deletes every downloaded and converted file.
+    if (this.settings.appleModels && !next.appleModels) this.appleModels.clear();
     this.settings = next;
     writeSettings(this.settingsFile, next);
     if (!next.enabled) await this.stopAll();
@@ -412,7 +425,7 @@ function bootFailure(device: DeviceInfo, error: unknown): string {
   return `${name} could not start. ${text}`;
 }
 function readSettings(file: string): Settings {
-  try { const value = JSON.parse(fs.readFileSync(file, 'utf8')); const on = value.enabled === true; return {enabled: on, agentControl: on && value.agentControl === true}; } catch { return {enabled: false, agentControl: false}; }
+  try { const value = JSON.parse(fs.readFileSync(file, 'utf8')); const on = value.enabled === true; return {enabled: on, agentControl: on && value.agentControl === true, appleModels: value.appleModels !== false}; } catch { return {enabled: false, agentControl: false, appleModels: true}; }
 }
 function writeSettings(file: string, settings: Settings): void {
   fs.mkdirSync(path.dirname(file), {recursive: true});

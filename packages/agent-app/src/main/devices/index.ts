@@ -107,6 +107,8 @@ export function wireDevices(input: {
       case 'devices.rotate': return manager.rotate(request.id);
       case 'devices.screenshot': { const shot = await manager.screenshot(request.id); return {dataUrl: `data:image/png;base64,${shot.png.toString('base64')}`, width: shot.width, height: shot.height}; }
       case 'devices.control': return manager.control(request.id, request.owner);
+      case 'devices.model': return manager.model(request.id);
+      case 'devices.modelStore': return manager.storeModel(request.id, request.glb);
     }
   };
   return {
