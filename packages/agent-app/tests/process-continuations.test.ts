@@ -10,7 +10,7 @@ import {ResourceScheduler} from '../src/runtime/resource-scheduler.ts';
 import {continuationRequestId, outputTail, ProcessContinuations, processContinuationText, type ChatLike, type ProcessExit} from '../src/runtime/process-continuations.ts';
 import {classifyRun, endsWithPromise} from '../src/runtime/governance/liveness.ts';
 import {AGENT_AUTONOMY_RULE, NO_PROMISE_RULE, runInstructions} from '../src/runtime/provider.ts';
-import {isActiveProcess, type ProcessSnapshot} from '../src/shared/process-protocol.ts';
+import {isActiveProcess, type ProcessSnapshot, type ProcessStart} from '../src/shared/process-protocol.ts';
 
 const roomy = () => ({resources: new ResourceScheduler({sample: () => ({freeBytes: 16 * 2 ** 30, totalBytes: 24 * 2 ** 30, load1: 0, cpus: 8}), policy: {maxHeavy: 8}})});
 
@@ -118,4 +118,122 @@ test('agent-mode instructions forbid ending a turn on a promise', () => {
   assert.ok(runInstructions('agent')!.includes(AGENT_AUTONOMY_RULE));
   assert.ok(!(runInstructions('ask') ?? '').includes(NO_PROMISE_RULE));
   assert.ok(!(runInstructions('plan') ?? '').includes(NO_PROMISE_RULE));
+});
+
+// ---- the real source: the muster_background agent tool ------------------------------------------------------
+import {spawn} from 'node:child_process';
+import {BACKGROUND_MCP, BACKGROUND_TOOL_NOTE, BackgroundToolHost, callBackgroundTool} from '../src/runtime/background-agent-tools.ts';
+import {backgroundRunOptions} from '../src/runtime/domains/terminal.ts';
+import {commandAuthority} from '../src/main/desktop-workspaces.ts';
+import type {Snapshot} from '../src/shared/protocol.ts';
+
+const resultText = (r: {content: {text: string}[]}) => r.content.map(c => c.text).join('\n');
+
+test('run_background starts an agent-owned process mid-turn; its exit after the turn queues one follow-up', async () => {
+  const directory = await fs.mkdtemp(join(tmpdir(), 'muster-bg-'));
+  let chatStatus: ChatLike['status'] = 'running', full = true;
+  const authorityCalls: unknown[] = [];
+  const queued: {chatId: string; text: string}[] = [];
+  let continuations!: ProcessContinuations;
+  const registry = new ProcessSessions(join(directory, 'commands.json'), async input => { authorityCalls.push(input); return {cwd: directory, fullAccessAcknowledged: full}; }, () => {}, undefined, {...roomy(), onExit: s => continuations.exited(s)});
+  continuations = new ProcessContinuations({agentProcesses: chatId => registry.agentProcesses(chatId), enqueue: (chatId, text) => { queued.push({chatId, text}); }});
+  try {
+    await registry.ready();
+    continuations.observe([{id: 'chat', status: chatStatus}]);
+    const started = await callBackgroundTool(registry, 'chat', 'run_background', {command: `"${process.execPath}" -e "console.log('compiled 12 files');setTimeout(()=>process.exit(1),400)"`, label: 'build', purpose: 'build'});
+    assert.ok(!started.isError, resultText(started));
+    assert.match(resultText(started), /Started process:[0-9a-f-]+ "build"/);
+    assert.ok(authorityCalls.some(c => (c as {operation: string; agent?: boolean}).operation === 'start' && (c as {agent?: boolean}).agent === true), 'the start is marked as the agent’s');
+    const [s] = (await registry.list({chatId: 'chat'})).sessions;
+    assert.equal(s.owner, 'agent');
+    for (let i = 0; i < 40 && !(await registry.list({chatId: 'chat'})).sessions[0].output.includes('compiled'); i++) await delay(25);
+    assert.match(resultText(await callBackgroundTool(registry, 'chat', 'read_background', {id: s.processId})), /"build" running[\s\S]*compiled 12 files/);
+    assert.match(resultText(await callBackgroundTool(registry, 'chat', 'read_background', {})), /"build" running/);
+    // The turn ends ("I'll report back when the build finishes") while it runs.
+    chatStatus = 'completed'; continuations.observe([{id: 'chat', status: chatStatus}]);
+    for (let i = 0; i < 80 && !queued.length; i++) await delay(25);
+    assert.equal(queued.length, 1);
+    assert.match(queued[0].text, /"build" exited \(exit code 1\)[\s\S]*compiled 12 files/);
+    // Read-only / Workspace chats: ProcessSessions refuses the start, surfaced as a tool error.
+    full = false;
+    const refused = await callBackgroundTool(registry, 'chat', 'run_background', {command: 'echo hi'});
+    assert.equal(refused.isError, true); assert.match(resultText(refused), /Full access/);
+    assert.equal((await callBackgroundTool(registry, 'chat', 'stop_background', {id: 'process:nope'})).isError, true);
+    assert.equal((await callBackgroundTool(registry, 'chat', 'run_background', {})).isError, true);
+  } finally { await registry.dispose(); await fs.rm(directory, {recursive: true, force: true}); }
+});
+
+test('stop_background stops only the agent’s own process, and a stopped process sends no follow-up', async () => {
+  const directory = await fs.mkdtemp(join(tmpdir(), 'muster-bg-stop-'));
+  const queued: string[] = [];
+  let continuations!: ProcessContinuations;
+  const registry = new ProcessSessions(join(directory, 'commands.json'), async () => ({cwd: directory, fullAccessAcknowledged: true}), () => {}, undefined, {...roomy(), onExit: s => continuations.exited(s)});
+  continuations = new ProcessContinuations({agentProcesses: chatId => registry.agentProcesses(chatId), enqueue: (_c, text) => { queued.push(text); }});
+  try {
+    await registry.ready();
+    const user = await registry.start({chatId: 'chat', requestId: 'user-run', command: process.execPath, args: ['-e', 'setTimeout(()=>{},2000)'], label: 'user server'});
+    assert.match(resultText(await callBackgroundTool(registry, 'chat', 'stop_background', {id: user.processId})), /No background process/);
+    assert.equal(registry.userProcessGroups().length, 1, 'only the user’s command is guarded as the user’s');
+    continuations.observe([{id: 'chat', status: 'running'}]);
+    const started = resultText(await callBackgroundTool(registry, 'chat', 'run_background', {command: `"${process.execPath}" -e "setTimeout(()=>{},5000)"`}));
+    const id = /Started (process:[0-9a-f-]+)/.exec(started)![1];
+    assert.equal(registry.userProcessGroups().length, 1);
+    continuations.observe([{id: 'chat', status: 'completed'}]);
+    for (let i = 0; i < 80 && (await registry.list({chatId: 'chat'})).sessions.find(x => x.processId === id)!.status !== 'running'; i++) await delay(25);
+    assert.match(resultText(await callBackgroundTool(registry, 'chat', 'stop_background', {id})), /Stopping/);
+    for (let i = 0; i < 80 && registry.agentProcesses('chat').length; i++) await delay(25);
+    assert.equal(registry.agentProcesses('chat').length, 0);
+    assert.equal(queued.length, 0, queued.join('|'));
+  } finally { await registry.dispose(); await fs.rm(directory, {recursive: true, force: true}); }
+});
+
+test('commandAuthority: the agent may start mid-turn, but only in Agent mode with Full access', async () => {
+  const dir = await fs.mkdtemp(join(tmpdir(), 'muster-bg-auth-'));
+  const snap = (chat: Record<string, unknown>) => ({chats: [{id: 'chat', archived: false, status: 'running', mode: 'agent', permissionMode: 'full', ...chat}], folders: []}) as unknown as Snapshot;
+  try {
+    await assert.rejects(commandAuthority(snap({}), dir, {chatId: 'chat', operation: 'start'}), /Wait for the current agent attempt/);
+    assert.deepEqual(await commandAuthority(snap({}), dir, {chatId: 'chat', operation: 'start', agent: true}), {cwd: join(dir, 'command-workspaces', 'chat'), fullAccessAcknowledged: true});
+    for (const permissionMode of ['read-only', 'workspace']) await assert.rejects(commandAuthority(snap({permissionMode}), dir, {chatId: 'chat', operation: 'start', agent: true}), /Full access/);
+    await assert.rejects(commandAuthority(snap({mode: 'ask'}), dir, {chatId: 'chat', operation: 'start', agent: true}), /Full access/);
+  } finally { await fs.rm(dir, {recursive: true, force: true}); }
+});
+
+test('the muster_background server is offered only in Agent mode with Full access, with its instruction', async () => {
+  const dir = await fs.mkdtemp(join(tmpdir(), 'muster-bg-opts-')), launcher = join(dir, 'muster-background-mcp');
+  await fs.writeFile(launcher, '#!/bin/sh\n', {mode: 0o700});
+  try {
+    const opts = backgroundRunOptions({id: 'chat', mode: 'agent', permissionMode: 'full'}, launcher)!;
+    assert.equal(opts.configOverrides[`mcp_servers.${BACKGROUND_MCP}.command`], launcher);
+    assert.equal(opts.configOverrides[`mcp_servers.${BACKGROUND_MCP}.env.MUSTER_CHAT_ID`], 'chat');
+    assert.equal(opts.developerInstructions, BACKGROUND_TOOL_NOTE);
+    assert.match(BACKGROUND_TOOL_NOTE, /run_background[\s\S]*wakes this chat/);
+    for (const chat of [{mode: 'agent', permissionMode: 'workspace'}, {mode: 'agent', permissionMode: 'read-only'}, {mode: 'ask', permissionMode: 'full'}, {mode: 'plan', permissionMode: 'full'}] as const) assert.equal(backgroundRunOptions({id: 'chat', ...chat}, launcher), null);
+    assert.equal(backgroundRunOptions({id: 'chat', mode: 'agent', permissionMode: 'full'}, join(dir, 'missing')), null);
+  } finally { await fs.rm(dir, {recursive: true, force: true}); }
+});
+
+test('the stdio MCP server lists the tools and forwards a call with its arguments to the host', async t => {
+  const dir = await fs.mkdtemp(join(tmpdir(), 'muster-bg-mcp-'));
+  const calls: unknown[] = [];
+  const host = new BackgroundToolHost({dir, execPath: process.execPath, processes: {
+    start: async (input, options) => { calls.push({input, options}); return {chatId: input.chatId, processId: 'process:x', generation: 1, sequence: 0, status: 'running', label: input.label!, purpose: input.purpose!, startedAt: '', updatedAt: '', output: '', truncated: false, exitCode: null, owner: 'agent'}; },
+    list: async () => ({chatId: 'chat', sessions: []}), stop: async () => { throw new Error('nope'); },
+  }});
+  t.after(async () => { host.dispose(); await fs.rm(dir, {recursive: true, force: true}); });
+  await host.start();
+  assert.match(resultText(await host.call('../x', 'run_background', {command: 'x'})), /without a chat/);
+  const child = spawn(process.execPath, [join(dir, 'muster-background-mcp.cjs'), join(dir, 'background-endpoint.json')], {env: {...process.env, MUSTER_CHAT_ID: 'chat'}, stdio: ['pipe', 'pipe', 'inherit']});
+  let out = '';
+  child.stdout.setEncoding('utf8'); child.stdout.on('data', d => { out += d; });
+  const send = (m: unknown) => child.stdin.write(JSON.stringify(m) + '\n');
+  const reply = async (id: number) => { for (let i = 0; i < 200; i++) { const line = out.split('\n').find(l => l.includes(`"id":${id}`)); if (line) return JSON.parse(line); await delay(20); } throw new Error('no reply'); };
+  try {
+    send({jsonrpc: '2.0', id: 1, method: 'initialize', params: {}});
+    assert.match((await reply(1)).result.instructions, /run_background/);
+    send({jsonrpc: '2.0', id: 2, method: 'tools/list'});
+    assert.deepEqual((await reply(2)).result.tools.map((x: {name: string}) => x.name), ['run_background', 'read_background', 'stop_background']);
+    send({jsonrpc: '2.0', id: 3, method: 'tools/call', params: {name: 'run_background', arguments: {command: 'npm run build', label: 'build', purpose: 'build'}}});
+    assert.match((await reply(3)).result.content[0].text, /Started process:x "build" running/);
+    assert.deepEqual(calls.map(c => { const {input, options} = c as {input: ProcessStart; options: unknown}; return {chatId: input.chatId, command: input.command, purpose: input.purpose, options}; }), [{chatId: 'chat', command: 'npm run build', purpose: 'build', options: {owner: 'agent'}}]);
+  } finally { child.kill(); }
 });

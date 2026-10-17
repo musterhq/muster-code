@@ -22,6 +22,7 @@ import {archiveNames,zipStore} from './zip.ts';
 import {BrowserWorkspaceController} from './browser-workspace.ts';
 import {BrowserBridge,BROWSER_BRIDGE_START_KEY} from './agent-tools/browser-bridge.ts';
 import {TERMINAL_MCP_LAUNCHER_ENV,TERMINAL_READ_MAX_BYTES,TerminalToolHost} from '../runtime/terminal-agent-tools.ts';
+import {BACKGROUND_MCP_LAUNCHER_ENV,BackgroundToolHost} from '../runtime/background-agent-tools.ts';
 import {accessibilityText,captureSource,captureSources,computerPermissions} from './computer-capture.ts';
 import {NativePreviewController} from './native-preview.ts';
 import { buildMenuTemplate } from './menu.ts';
@@ -255,6 +256,9 @@ async function main(): Promise<void> {
     allowed:async chatId=>(await loaded.service.invoke('terminalAccess.get',{chatId})).allowed,
     tails:chatId=>processes.terminals.agentTails(chatId,TERMINAL_READ_MAX_BYTES*2)});
   void terminalTools.start().then(launcher=>{process.env[TERMINAL_MCP_LAUNCHER_ENV]=launcher;},error=>console.warn(`Agent terminal tool unavailable: ${error instanceof Error?error.message:String(error)}`));
+  // Agent-owned long-running commands: the source of the exit follow-ups above.
+  const backgroundTools = new BackgroundToolHost({dir:path.join(dataDir,'agent-tools','background'),execPath:process.execPath,processes});
+  void backgroundTools.start().then(launcher=>{process.env[BACKGROUND_MCP_LAUNCHER_ENV]=launcher;},error=>console.warn(`Agent background tool unavailable: ${error instanceof Error?error.message:String(error)}`));
   userProcessGroups = () => processes.userProcessGroups();
   userProcessTargets = () => processes.userProcessTargets();
   const computers = new ScopedComputers({
@@ -911,7 +915,7 @@ async function main(): Promise<void> {
         })().catch(error=>{disposal=undefined;throw error;});
         await withinDeadline(disposal, 5000);
         unregisterBrowserCaller();browserBridge.dispose();
-        terminalTools.dispose();
+        terminalTools.dispose(); backgroundTools.dispose();
         browserWorkspace.dispose();
         nativePreview.hide();
       }

@@ -16,7 +16,8 @@ export const MAX_OWNED_PROCESSES=4;
 export const MAX_PROCESS_HISTORY=32;
 const MAX_RECEIPTS=2048,MAX_STATE_BYTES=24*1024*1024;
 /** 'terminal' opens a user-driven PTY: it resolves a cwd but never requires Full access. */
-export type ProcessAuthorize=(input:{chatId:string;operation:'read'|'start'|'stop'|'terminal';folderId?:string})=>Promise<{cwd?:string;fullAccessAcknowledged?:boolean}>;
+/** `agent` marks a start the chat's own agent asked for mid-turn (the muster_background tool). */
+export type ProcessAuthorize=(input:{chatId:string;operation:'read'|'start'|'stop'|'terminal';folderId?:string;agent?:boolean})=>Promise<{cwd?:string;fullAccessAcknowledged?:boolean}>;
 interface Receipt {requestId:string;fingerprint:string;session:ProcessSnapshot}
 interface Handle {child:ChildProcess;stopping:boolean;finished:boolean;done:Promise<void>;resolve:()=>void;timer?:ReturnType<typeof setTimeout>;closed?:{code:number|null;signal?:string}}
 const validId=(value:unknown):value is string=>typeof value==='string'&&/^[a-zA-Z0-9:_-]{1,160}$/.test(value);
@@ -163,7 +164,7 @@ export class ProcessSessions {
    * Handed to the agent so it never treats them as its own orphans (F41/F50). Never sent to the renderer. */
   userProcessGroups():{pgid:number;label:string;chatId:string;cwd?:string}[] {
     const groups:{pgid:number;label:string;chatId:string;cwd?:string}[]=[];
-    for(const [processId,handle] of this.handles){const session=this.sessions.get(processId);if(!handle.finished&&handle.child.pid&&session)groups.push({pgid:handle.child.pid,label:session.label,chatId:session.chatId});}
+    for(const [processId,handle] of this.handles){const session=this.sessions.get(processId);if(!handle.finished&&handle.child.pid&&session&&session.owner!=='agent')groups.push({pgid:handle.child.pid,label:session.label,chatId:session.chatId});}
     return [...groups,...this.terminals.userProcessGroups()];
   }
   /** R5: user groups enriched with their listening ports, member PIDs and process names, for the kill guard. */
@@ -222,9 +223,9 @@ export class ProcessSessions {
   /** Live processes of a chat that the agent started (never the user's Commands-tab commands). */
   agentProcesses(chat:string):string[] {return [...this.sessions.values()].filter(session=>session.chatId===chat&&session.owner==='agent'&&isActiveProcess(session.status)).map(session=>session.processId);}
   hasRunning(chat:string):boolean {return [...this.sessions.values()].some(session=>session.chatId===chat&&isActiveProcess(session.status));}
-  private async allowed(chat:unknown,operation:'read'|'start'|'stop') {
+  private async allowed(chat:unknown,operation:'read'|'start'|'stop',agent=false) {
     chatId(chat);await this.ready();if(this.disposed||(operation==='start'&&this.closing))throw new Error('Command workspace is closing.');
-    return this.authorize({chatId:chat,operation});
+    return this.authorize({chatId:chat,operation,...(agent?{agent:true}:{})});
   }
   async list(input:{chatId:string}):Promise<ProcessListSnapshot> {
     await this.allowed(input?.chatId,'read');return {chatId:input.chatId,sessions:[...this.sessions.values()].filter(session=>session.chatId===input.chatId).map(clone)};
@@ -259,7 +260,7 @@ export class ProcessSessions {
     try{return await promise;}finally{if(this.pending.get(input.requestId)?.promise===promise)this.pending.delete(input.requestId);}
   }
   private async launch(input:ProcessStart,fingerprint:string,owner:'agent'|'user'='user'):Promise<ProcessSnapshot> {
-    const authority=await this.allowed(input.chatId,'start');
+    const authority=await this.allowed(input.chatId,'start',owner==='agent');
     if(!authority.fullAccessAcknowledged)throw new Error('Host commands require explicitly acknowledged Full access in Agent mode. Workspace access cannot sandbox a host shell.');
     if(typeof authority.cwd!=='string'||!isAbsolute(authority.cwd)||authority.cwd.includes('\0'))throw new Error('The command workspace is unavailable.');
     if(this.closing)throw new Error('Command workspace is closing.');
