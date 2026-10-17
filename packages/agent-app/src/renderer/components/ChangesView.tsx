@@ -3,7 +3,7 @@ import {ArrowRight, ChevronRight, Eye, GitCompare, ListCollapse, ListTree, Minus
 import type {ChangedFile, GitLocalFile} from '../../shared/protocol';
 import type {ReviewChange} from '../../shared/domains/review-protocol';
 import {loadGitChanges, openConflictTab, openDiff} from '../store';
-import {useStore} from '../useStore';
+import {useStoreSlice} from '../useStore';
 import {nextChangeIndex} from '../changesNavigation';
 import {baselineKey, refreshReviewChanges, setReviewBaseline, useReviewBaseline, useReviewChanges} from '../reviewState';
 import {reviewViewedKey, useViewedVersion, viewedState} from '../diff-preferences';
@@ -151,7 +151,7 @@ function StatusSection({side, files, children, action}: {side: Side; files: GitL
  * top. "Compare against" switches to a read-only list of what differs from a branch, commit or agent turn.
  */
 export function ChangesView({folderId, repo}: {folderId: string; repo: GitRepository}): React.ReactElement {
-  const state = useStore();
+  const state = useStoreSlice('gitChanges');
   const [baseline, setBaseline] = useReviewBaseline(folderId);
   // HEAD keeps the store's list (shared with the rest of the app); every baseline also reads the review host, which adds
   // binary/mode metadata and per-file revisions for Viewed marks (DIF-11). Other baselines come only from the host.

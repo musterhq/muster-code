@@ -39,9 +39,10 @@ const React=await import('react'),{createRoot}=await import('react-dom/client');
 const store=await import('../src/renderer/store'),{Sidebar}=await import('../src/renderer/components/Sidebar');
 const {Composer}=await import('../src/renderer/components/Composer'),{SummaryCard}=await import('../src/renderer/components/SummaryCard');
 const {ResourceLink}=await import('../src/renderer/components/ResourceLink');
+const {ChangesView}=await import('../src/renderer/components/ChangesView');
 const {shareStructure}=await import('../src/renderer/structuralShare');
 const {useStoreSlice}=await import('../src/renderer/useStore');
-const commits:Record<string,number>={sidebar:0,summary:0,composer:0,links:0};
+const commits:Record<string,number>={sidebar:0,summary:0,composer:0,links:0,changes:0,processes:0};
 const count=(id:string)=>()=>{commits[id]++;};
 function Probe({id,keys}:{id:string;keys:any[]}){const slice=useStoreSlice(...keys);void slice;commits[id]++;return null;}
 function Screen(){
@@ -50,6 +51,7 @@ function Screen(){
     <React.Profiler id="sidebar" onRender={count('sidebar')}><Sidebar/></React.Profiler>
     <React.Profiler id="summary" onRender={count('summary')}><SummaryCard/></React.Profiler>
     <React.Profiler id="links" onRender={count('links')}>{[1,2,3].map(n=><ResourceLink key={n} href="https://example.com/x">link</ResourceLink>)}</React.Profiler>
+    <React.Profiler id="changes" onRender={count('changes')}><ChangesView folderId="folder" repo={{root:'/fixture',branch:'main'} as any}/></React.Profiler>
     {chat&&<React.Profiler id="composer" onRender={count('composer')}><Composer chat={chat}/></React.Profiler>}
     <Probe id="probe" keys={['snapshot','activeChatId']}/>
   </>;
@@ -64,9 +66,10 @@ await delay(100);
 reset();
 for(let i=1;i<=20;i++){listener({type:'timelinePatch',chatId:'one',patch:{after:i,revision:i+1,items:[{id:'a1',chatId:'one',kind:'assistant',text:'hi'+' tok'.repeat(i),createdAt:''}]}});await delay(8);}
 await delay(60);
-console.log('composer commits for 20 streamed tokens',commits.composer,'links',commits.links,'sidebar',commits.sidebar,'summary',commits.summary);
+console.log('composer commits for 20 streamed tokens',commits.composer,'links',commits.links,'changes',commits.changes,'sidebar',commits.sidebar,'summary',commits.summary);
 assert.match(JSON.stringify(store.getState().timelines.one.value),/tok tok tok/);
 assert.ok(commits.composer<=2,`streaming a token must not re-render the composer (${commits.composer} commits for 20 tokens)`);
 assert.ok(commits.links<=2,`streaming a token must not re-render resource links (${commits.links} commits for 20 tokens)`);
+assert.ok(commits.changes<=2,`streaming a token must not re-render the changes view (${commits.changes} commits for 20 tokens)`);
 assert.deepEqual(errors,[]);
 process.exit(0);

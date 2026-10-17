@@ -5,7 +5,7 @@ import type {Snapshot} from '../../shared/protocol';
 import type {GitBranches} from '../../shared/domains/git-protocol';
 import {invoke} from '../bridge';
 import {createChat, loadGitChanges, notifyError, notifySuccess, openChangesTab, openConflictTab} from '../store';
-import {useStore} from '../useStore';
+import {useStoreSlice} from '../useStore';
 import {GitSync} from './GitStatus';
 import './branch-picker.css';
 import { plural } from '../../shared/wording.ts';
@@ -64,7 +64,7 @@ export function BranchPicker({folder, className, children, label, side = 'bottom
 }
 
 function BranchPickerContent({folder, initialMode, close}: {folder: Folder; initialMode: BranchMode; close: () => void}): React.ReactElement {
-  const state = useStore();
+  const state = useStoreSlice('snapshot');
   const running = folderRunning(state.snapshot, folder.id);
   const [mode, setMode] = useState<BranchMode>(initialMode);
   const [query, setQuery] = useState('');
