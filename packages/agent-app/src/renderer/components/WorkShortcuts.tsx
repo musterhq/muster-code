@@ -5,6 +5,7 @@
 import React, { Suspense, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { ModalSheet } from './ModalSheet';
 import { lazyNamed } from '../lazyScreens';
+import { AreaBoundary } from './AreaBoundary';
 import { openSpotlightSearch } from './SpotlightSearch';
 import { currentProject } from '../projectFocus';
 import { hubRoute, openHub, undoInbox, useWorkspace } from '../hubStore';
@@ -105,7 +106,8 @@ function NewTaskHost({ onClose }: { onClose: () => void }): React.ReactElement {
   const snapshot = ws.snapshot;
   const fromTask = route.page === 'task' && route.arg ? snapshot?.tasks.find(t => t.id === route.arg || t.key === route.arg)?.projectId ?? null : null;
   const project = getState().screen === 'projects' ? currentProject() : route.page === 'project' ? route.arg : fromTask;
-  return <Suspense fallback={null}><NewTaskSheet open snapshot={snapshot} projectId={project} onClose={onClose} onCreated={(id: string) => openHub('task', id)}/></Suspense>;
+  // A chunk that fails to load stays inside this boundary (with its Reload area) instead of reaching the window boundary.
+  return <AreaBoundary area="the new task form" scope="item"><Suspense fallback={null}><NewTaskSheet open snapshot={snapshot} projectId={project} onClose={onClose} onCreated={(id: string) => openHub('task', id)}/></Suspense></AreaBoundary>;
 }
 
 function Cheatsheet({ onClose }: { onClose: () => void }): React.ReactElement {
