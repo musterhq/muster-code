@@ -19,3 +19,13 @@ test('a valid UTF-8 file cut at the preview limit is not reported as having an e
   assert.equal(result.encodingWarning, false);
   assert.equal(result.text.includes('�'), false);
 });
+
+test('saving a file keeps its permissions, so a script stays executable', { skip: process.platform === 'win32' }, async () => {
+  const dir = await workspace();
+  await writeFile(join(dir, 'run.sh'), '#!/bin/sh\necho 1\n', 'utf8');
+  await chmod(join(dir, 'run.sh'), 0o755);
+  const first = await readBody(dir, 'run.sh');
+  const saved = await saveBody(dir, 'run.sh', '#!/bin/sh\necho 2\n', first.revision);
+  assert.equal(saved.conflict, false);
+  assert.equal((await stat(join(dir, 'run.sh'))).mode & 0o777, 0o755);
+});

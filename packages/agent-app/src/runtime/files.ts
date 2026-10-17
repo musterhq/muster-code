@@ -143,8 +143,10 @@ export async function writeFile(root: string, rel: string, text: string, expecte
     if (current !== expectedRevision) return { conflict: true };
   }
   const tmp = `${abs}.muster-tmp-${randomBytes(6).toString('hex')}`;
+  // The replacement keeps the original's permission bits (a saved script stays executable).
+  const mode = await fs.stat(abs).then(stat => stat.mode & 0o7777, () => undefined);
   await fs.writeFile(tmp, text, 'utf8');
-  try { await fs.rename(tmp, abs); }
+  try { if (mode !== undefined) await fs.chmod(tmp, mode).catch(() => {}); await fs.rename(tmp, abs); }
   catch (error) { await fs.rm(tmp, {force: true}).catch(() => {}); throw error; }
   return { conflict: false, revision: fileRevision(await fs.stat(abs)) };
 }
