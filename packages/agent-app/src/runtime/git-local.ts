@@ -383,13 +383,19 @@ async function commitish(real: string, value: unknown): Promise<string> {
   return sha;
 }
 
+/** The checked-out branch name, or '' when detached. `symbolic-ref --short` would answer `heads/x` when a tag is also named x. */
+export async function currentBranch(real: string): Promise<string> {
+  const ref = (await git(real, ['symbolic-ref', '--quiet', 'HEAD']).catch(() => '')).trim();
+  return ref.startsWith('refs/heads/') ? ref.slice('refs/heads/'.length) : '';
+}
+
 const BRANCH_LIMIT = 500;
 export async function listBranches(root: string): Promise<GitBranches> {
   const real = await repository(root);
   const [refs, head, reflog] = await Promise.all([
     git(real, ['for-each-ref', '--sort=-committerdate', `--count=${BRANCH_LIMIT + 1}`,
-      '--format=%(refname:short)%00%(upstream:short)%00%(upstream:track,nobracket)%00%(committerdate:iso-strict)%00%(worktreepath)%00', 'refs/heads']),
-    git(real, ['symbolic-ref', '--quiet', '--short', 'HEAD']).catch(() => ''),
+      '--format=%(refname:lstrip=2)%00%(upstream:short)%00%(upstream:track,nobracket)%00%(committerdate:iso-strict)%00%(worktreepath)%00', 'refs/heads']),
+    currentBranch(real),
     git(real, ['reflog', 'show', '--format=%gs', '-n', '300', 'HEAD']).catch(() => ''),
   ]);
   const fields = refs.split('\0');
@@ -425,7 +431,7 @@ export async function gitInfo(root: string): Promise<GitRepoInfo> {
   const real = await repository(root);
   const [paths, head, remotes] = await Promise.all([
     git(real, ['rev-parse', '--path-format=absolute', '--git-dir', '--git-common-dir', '--git-path', 'FETCH_HEAD']),
-    git(real, ['symbolic-ref', '--quiet', '--short', 'HEAD']).catch(() => ''),
+    currentBranch(real),
     git(real, ['remote']).catch(() => ''),
   ]);
   const [gitDir = '', commonDir = '', fetchHead = ''] = paths.trimEnd().split('\n');
