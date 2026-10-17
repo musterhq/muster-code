@@ -450,7 +450,45 @@ if (OPTS.devices) {
     };
     void tick();
   };
-  window.musterDevices = {onFrame(listener) { frameListeners.add(listener); return () => frameListeners.delete(listener); }, ack() {}, input() {}};
+  // Every frame the renderer finishes is acknowledged; the times give send-to-screen latency for the stream probe.
+  const ackTimes = [];
+  window.musterDevices = {onFrame(listener) { frameListeners.add(listener); return () => frameListeners.delete(listener); }, ack() { ackTimes.push(performance.now()); }, input() {}};
+  // Stream probe: the same animated (scrolling) home screen, pre-encoded as JPEG frames or as H.264 in the AVCC form the
+  // simulator helper sends (a description, then key and delta frames), so playing it measures only the renderer's side.
+  let prepared = null;
+  const animate = (g, w, h, i) => { g.save(); g.translate(0, -(i * 6) % Math.round(h * 0.25)); const frame = pictureFrame(); if (!frame || frame.os === 'ios') iosHome(g, w, h * 1.3, frame ?? {form: 'phone'}); else androidHome(g, w, h * 1.3, frame); g.restore(); g.fillStyle = 'rgba(255,255,255,.9)'; g.fillRect(0, h - 6, (i % 60) / 60 * w, 6); };
+  window.__devicePrepare = async (kind, count) => {
+    const frame = pictureFrame(), sw = frame ? frame.screen.width : 1179, sh = frame ? frame.screen.height : 2556;
+    const k = Math.min(1, 1280 / Math.max(sw, sh)), w = Math.round(sw * k / 2) * 2, h = Math.round(sh * k / 2) * 2;
+    const canvas = new OffscreenCanvas(w, h), g = canvas.getContext('2d');
+    if (kind === 'jpeg') {
+      const frames = [];
+      for (let i = 0; i < count; i++) { animate(g, w, h, i); frames.push({codec: 'jpeg', key: true, data: new Uint8Array(await (await canvas.convertToBlob({type: 'image/jpeg', quality: 0.72})).arrayBuffer())}); }
+      prepared = frames; return {kind, count: frames.length, width: w, height: h, bytes: frames.reduce((n, f) => n + f.data.length, 0)};
+    }
+    const frames = [];
+    const encoder = new VideoEncoder({output: (chunk, meta) => {
+      if (meta?.decoderConfig?.description) frames.push({codec: 'h264', format: 'avcc', config: true, key: false, data: new Uint8Array(meta.decoderConfig.description)});
+      const data = new Uint8Array(chunk.byteLength); chunk.copyTo(data); frames.push({codec: 'h264', format: 'avcc', key: chunk.type === 'key', data});
+    }, error: e => console.error(e)});
+    encoder.configure({codec: 'avc1.640033', width: w, height: h, bitrate: 6_000_000, framerate: 60, latencyMode: 'realtime', avc: {format: 'avc'}});
+    for (let i = 0; i < count; i++) { animate(g, w, h, i); const vf = new VideoFrame(canvas, {timestamp: i * 16_667}); encoder.encode(vf, {keyFrame: i === 0}); vf.close(); }
+    await encoder.flush(); encoder.close();
+    prepared = frames; return {kind, count: frames.filter(f => !f.config).length, width: w, height: h, bytes: frames.reduce((n, f) => n + f.data.length, 0)};
+  };
+  window.__devicePlay = async (fps) => {
+    const frames = prepared ?? []; ackTimes.length = 0;
+    const sent = [], start = performance.now();
+    for (const frame of frames) {
+      if (!frame.config) sent.push(performance.now());
+      for (const listener of [...frameListeners]) listener({deviceId: pick.id, ...frame});
+      if (!frame.config) await new Promise(r => setTimeout(r, 1000 / fps));
+    }
+    await new Promise(r => setTimeout(r, 300));
+    const latencies = ackTimes.map((t, i) => sent[i] !== undefined ? t - sent[i] : null).filter(v => v !== null).sort((a, b) => a - b);
+    const seconds = (performance.now() - start - 300) / 1000;
+    return {sent: sent.length, presented: ackTimes.length, presentedFps: +(ackTimes.length / seconds).toFixed(1), latencyMs: latencies.length ? {median: +latencies[latencies.length >> 1].toFixed(1), p90: +latencies[Math.floor(latencies.length * 0.9)].toFixed(1)} : null};
+  };
   // Perf probe: a steady stream of `count` frames at `fps` (one pre-encoded JPEG, as main forwards a helper's MJPEG).
   window.__devicePump = async (count, fps) => {
     const data = new Uint8Array(await (await draw()).arrayBuffer());
