@@ -4,7 +4,6 @@ import { badgeCount, buildActivity } from '../inboxModel';
 import { NAMES } from '../../shared/workspace-names';
 import { taskWorktreeFolderIds } from '../taskWorktrees';
 import type { WorkspaceProject, WorkspaceTask } from '../../shared/domains/paperclip-protocol';
-import { NewTaskSheet } from './HubSetup';
 import {
   AlarmClock,
   AlarmClockOff,

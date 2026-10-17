@@ -5,6 +5,7 @@ All notable changes to Muster Agent. Each `## <version>` section becomes the not
 
 ## Unreleased
 
+- The window loads less code before it first paints: the new-task form and the project task page now load when first opened, cutting the startup JavaScript by about 87 KB (1.90 MB to 1.81 MB).
 - Typechecking runs on tsc-rs, about twice as fast and using a third less memory, with a CI guard that compares it with the official compiler
 
 ## 0.3.13

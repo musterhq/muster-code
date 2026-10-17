@@ -2,9 +2,9 @@
  * Keyboard shortcuts for the work surfaces (C3): the listener, the cheatsheet (`?`) and the "new task" sheet (`c`). The rules
  * are in `shortcuts.ts`. Nothing runs until a key is pressed on the Inbox, task, Roster, Outputs, Ledger or Projects screens.
  */
-import React, { useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import React, { Suspense, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { ModalSheet } from './ModalSheet';
-import { NewTaskSheet } from './HubSetup';
+import { lazyNamed } from '../lazyScreens';
 import { openSpotlightSearch } from './SpotlightSearch';
 import { currentProject } from '../projectFocus';
 import { hubRoute, openHub, undoInbox, useWorkspace } from '../hubStore';
@@ -95,6 +95,9 @@ export function WorkShortcutsHost(): React.ReactElement | null {
   </>;
 }
 
+// The sheet's module (the hub's setup forms) loads on the first `c`, not at startup.
+const NewTaskSheet = lazyNamed(() => import('./HubSetup'), 'NewTaskSheet');
+
 /** The project a new task should start in: the open project, the open task's project, else the sheet's own default. */
 function NewTaskHost({ onClose }: { onClose: () => void }): React.ReactElement {
   const ws = useWorkspace();
@@ -102,7 +105,7 @@ function NewTaskHost({ onClose }: { onClose: () => void }): React.ReactElement {
   const snapshot = ws.snapshot;
   const fromTask = route.page === 'task' && route.arg ? snapshot?.tasks.find(t => t.id === route.arg || t.key === route.arg)?.projectId ?? null : null;
   const project = getState().screen === 'projects' ? currentProject() : route.page === 'project' ? route.arg : fromTask;
-  return <NewTaskSheet open snapshot={snapshot} projectId={project} onClose={onClose} onCreated={id => openHub('task', id)}/>;
+  return <Suspense fallback={null}><NewTaskSheet open snapshot={snapshot} projectId={project} onClose={onClose} onCreated={(id: string) => openHub('task', id)}/></Suspense>;
 }
 
 function Cheatsheet({ onClose }: { onClose: () => void }): React.ReactElement {
