@@ -16,3 +16,13 @@ test('creating a task ignores a priority that is an Object.prototype key', async
   assert.equal(added.length, 4);
   for (const call of added) assert.equal(typeof call.priority, 'undefined', String(call.priority));
 });
+
+test('search scope prefixes named after Object.prototype keys are plain words', async () => {
+  const {parseSearch} = await import('../src/shared/search-query.ts');
+  for (const word of ['constructor', 'toString', '__proto__', 'hasOwnProperty', 'valueOf']) {
+    const parsed = parseSearch(`${word}:foo`);
+    assert.equal(parsed.scope, 'all', word);
+    assert.equal(parsed.text, `${word}:foo`, word);
+    assert.equal(parseSearch(`in:${word}`).scope, 'all', `in:${word}`);
+  }
+});
