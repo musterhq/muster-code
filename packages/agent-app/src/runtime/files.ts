@@ -3,6 +3,7 @@ import { promises as fs, type Dir } from 'node:fs';
 import { spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { join, relative } from 'node:path';
+import { createContext, Script } from 'node:vm';
 import type { FileEntry } from '../shared/protocol.ts';
 import { resolveInside } from './paths.ts';
 
@@ -228,8 +229,11 @@ function searchWithRipgrep(base: string, query: string, options: ContentSearchOp
   });
 }
 
+/** The regex scan of one file's lines, run where the search deadline can interrupt it. */
+const SCAN_LINES = new Script('(function(){var r=[];for(var i=0;i<lines.length;i++){pattern.lastIndex=0;if(pattern.test(lines[i]))r.push(i);}return r;})()');
 async function searchWithJs(base: string, query: string, options: ContentSearchOptions, signal: AbortSignal): Promise<ContentSearchResult> {
   const deadline = Date.now() + SEARCH_TIMEOUT_MS;
+  let scanContext: ReturnType<typeof createContext> | undefined;
   let pattern: RegExp | null = null;
   try { pattern = options.regex ? new RegExp(query, options.caseSensitive ? 'g' : 'gi') : null; } catch { throw new Error('Invalid regular expression.'); }
   const needle = options.caseSensitive ? query : query.toLowerCase();
@@ -254,8 +258,17 @@ async function searchWithJs(base: string, query: string, options: ContentSearchO
         text = buffer.toString('utf8');
       } catch { continue; }
       const lines = text.split('\n');
+      // A pattern with catastrophic backtracking would freeze the app: scan the file in a context that can be interrupted at the deadline.
+      let hits: Set<number> | null = null;
+      if (pattern) {
+        // One context per search, not per file: creating a context costs about a millisecond.
+        scanContext ??= createContext({pattern, lines: [] as string[]});
+        scanContext.lines = lines;
+        try { hits = new Set(SCAN_LINES.runInContext(scanContext, {timeout: Math.max(50, deadline - Date.now())}) as number[]); }
+        catch { truncated = true; break; }
+      }
       for (let i = 0; i < lines.length; i++) {
-        const found = pattern ? (pattern.lastIndex = 0, pattern.test(lines[i])) : lines[i].toLowerCase().includes(needle);
+        const found = hits ? hits.has(i) : lines[i].toLowerCase().includes(needle);
         if (!found) continue;
         matches.push({path: rel, line: i + 1, text: lines[i].slice(0, 500)});
         if (matches.length >= SEARCH_CAP) { truncated = true; break; }
