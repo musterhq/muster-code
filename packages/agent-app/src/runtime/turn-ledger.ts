@@ -79,6 +79,10 @@ export class TurnLedger {
       if (row.prev_hash !== prev || entryHash(prev, JSON.parse(row.body) as Body) !== row.hash) return { ok: false, entries: count, head: prev, brokenAt: row.seq };
       prev = row.hash;
     }
+    // Entries cut from the end leave the chain internally consistent; AUTOINCREMENT remembers the highest seq ever issued.
+    let issued = 0, last = 0;
+    try { issued = Number((this.db.prepare("SELECT seq FROM sqlite_sequence WHERE name = 'turn_ledger'").get() as { seq: number } | undefined)?.seq ?? 0); last = Number((this.db.prepare('SELECT MAX(seq) AS seq FROM turn_ledger').get() as { seq: number | null }).seq ?? 0); } catch { /* no sequence table yet: nothing was ever appended */ }
+    if (issued > last) return { ok: false, entries: count, head: prev, brokenAt: last + 1 };
     return { ok: true, entries: count, head: prev, brokenAt: null };
   }
 }

@@ -184,7 +184,7 @@ export class GovernanceStore {
   wakeCount(projectId: string, sinceIso: string, memberId?: string): number {
     return Number((this.db.prepare(`SELECT COUNT(*) AS n FROM wakes WHERE project_id=? AND status IN ('started','storm') AND created_at>=?${memberId ? ' AND member_id=?' : ''}`).get(...(memberId ? [projectId, sinceIso, memberId] : [projectId, sinceIso])) as { n: number }).n);
   }
-  lastStart(projectId: string, memberId: string): string | null { const r = this.db.prepare("SELECT created_at FROM wakes WHERE project_id=? AND member_id=? AND status='started' ORDER BY created_at DESC LIMIT 1").get(projectId, memberId) as { created_at: string } | undefined; return r?.created_at ?? null; }
+  lastStart(projectId: string, memberId: string): string | null { const r = this.db.prepare("SELECT COALESCE(delivered_at,created_at) AS at FROM wakes WHERE project_id=? AND member_id=? AND status='started' ORDER BY COALESCE(delivered_at,created_at) DESC LIMIT 1").get(projectId, memberId) as { at: string } | undefined; return r?.at ?? null; }
 
   runMeta(chatId: string): RunMeta | undefined { const r = this.db.prepare('SELECT * FROM run_meta WHERE chat_id=?').get(chatId) as Record<string, unknown> | undefined; return r ? this.meta(r) : undefined; }
   private meta(r: Record<string, unknown>): RunMeta { return { chatId: String(r.chat_id), taskId: str(r.task_id), memberId: str(r.member_id), reason: r.reason as RunReason, liveness: (str(r.liveness) as Liveness | null), comment: (str(r.comment) as CommentState | null), continuations: Number(r.continuations), retries: Number(r.retries), note: str(r.note), createdAt: String(r.created_at), settledAt: str(r.settled_at), pendingAt: str(r.pending_at) }; }
