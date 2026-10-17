@@ -1,4 +1,5 @@
 import { promises as fs } from 'node:fs';
+import { randomBytes } from 'node:crypto';
 import { isAbsolute, join, sep } from 'node:path';
 
 // Mutations reject symlink components rather than modifying their targets.
@@ -59,6 +60,7 @@ export async function moveFile(root: string, from: string, to: string): Promise<
     const target = await mutablePath(root, to);
     if (source === target) return;
     const before = await fs.lstat(source);
+    if (before.isDirectory() && target.startsWith(source + sep)) throw new Error('A folder cannot be moved into itself.');
     if (before.isDirectory()) {
       // Directories cannot be hardlinked; verify the destination is free, then rename
       // (same volume only, and this is not atomic against a concurrent create — best effort).

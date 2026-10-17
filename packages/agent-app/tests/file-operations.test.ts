@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import {mkdtemp, mkdir, readFile, rm, symlink, writeFile} from 'node:fs/promises';
+import {mkdtemp, mkdir, readFile, readdir, rm, stat, symlink, writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {afterEach, test} from 'node:test';
@@ -72,4 +72,10 @@ test('files.write refuses a stale revision and otherwise writes atomically',asyn
   const second=await writeFileAtomic(dir,'doc.txt','v3', first.conflict?undefined:first.revision);
   assert.equal(second.conflict,false);
   assert.equal(await readFile(join(dir,'doc.txt'),'utf8'),'v3');
+});
+
+test('a folder cannot be moved into itself and says so plainly',async()=>{
+  const dir=await workspace();
+  await mkdir(join(dir,'a'));
+  await assert.rejects(moveFile(dir,'a','a/b'),/into itself/i);
 });
