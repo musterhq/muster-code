@@ -26,6 +26,12 @@ export const COALESCE_MS = 150;
 /** Any path containing one of these segments is dropped (dir or file). */
 const IGNORED_SEGMENTS: Record<string, true> = {
   node_modules: true,
+  // Build output: a compile writes thousands of files here and would refresh the file tree every 150 ms.
+  dist: true,
+  target: true,
+  '.next': true,
+  '.turbo': true,
+  __pycache__: true,
   '.DS_Store': true,
 };
 /** Direct `.git/` children whose changes matter to review; plus `.git/refs/**`. */

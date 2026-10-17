@@ -6,6 +6,8 @@ All notable changes to Muster Agent. Each `## <version>` section becomes the not
 ## Unreleased
 
 - Typechecking runs on tsc-rs, about twice as fast and using a third less memory, with a CI guard that compares it with the official compiler
+- Quick open now finds files you or the agent just created, moved or changed instead of showing a list up to 30 seconds old.
+- Building a project no longer makes the Files pane and Changes list refresh continuously: changes inside dist, target, .next, .turbo and __pycache__ are ignored.
 
 ## 0.3.13
 
