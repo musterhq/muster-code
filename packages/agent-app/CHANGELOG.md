@@ -3,6 +3,11 @@
 All notable changes to Muster Agent. Each `## <version>` section becomes the notes of the
 `agent-v<version>` GitHub Release (`.github/workflows/agent-app-release.yml`).
 
+## Unreleased
+
+- In Full access the agent no longer ends a turn asking whether to push, commit, install or continue; it just does it.
+- Chats on API-key routes only ask before irreversibly deleting user data, not before push, install or restart.
+
 ## 0.3.13
 
 Replies in one turn read as one answer, and pictures that can no longer be read take one line instead of an empty frame.
