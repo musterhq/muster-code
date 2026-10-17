@@ -7,6 +7,11 @@ All notable changes to Muster Agent. Each `## <version>` section becomes the not
 
 - Typechecking runs on tsc-rs, about twice as fast and using a third less memory, with a CI guard that compares it with the official compiler
 
+## Unreleased
+
+- Very long text from Muster Server (task descriptions, comments) no longer stalls the app while secrets are removed from it.
+- A server status or kind named like "constructor" falls back to the default label instead of breaking the display.
+
 ## 0.3.13
 
 Replies in one turn read as one answer, and pictures that can no longer be read take one line instead of an empty frame.

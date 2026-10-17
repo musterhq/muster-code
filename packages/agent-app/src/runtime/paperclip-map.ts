@@ -22,6 +22,7 @@ export const mapCompany = (c: Json): WorkspaceCompany => ({ id: String(c.id), na
 /** Skill names the org gave an agent (`adapterConfig.paperclipSkillSync.desiredSkills`). Never anything from `env`. */
 const skillsOf = (adapter: Json): string[] => Array.isArray(obj(adapter.paperclipSkillSync).desiredSkills) ? (obj(adapter.paperclipSkillSync).desiredSkills as unknown[]).filter((v): v is string => typeof v === 'string').map(v => v.split('/').pop()!).slice(0, 40) : [];
 const AGENT_STATE: Record<string, AgentState> = { active: 'active', idle: 'idle', running: 'running', paused: 'paused', error: 'error', pending_approval: 'pending', terminated: 'terminated' };
+Object.setPrototypeOf(AGENT_STATE, null); // server-supplied keys must not reach Object.prototype
 export function mapAgent(a: Json): WorkspaceAgent {
   const adapter = obj(a.adapterConfig);
   return {
@@ -77,6 +78,7 @@ export function mapProject(p: Json, tasks: readonly WorkspaceTask[]): WorkspaceP
 export const mapGoal = (g: Json): WorkspaceGoal => ({ id: String(g.id), title: str(g.title) ?? 'Goal', status: str(g.status) ?? 'active', level: str(g.level), parentId: str(g.parentId), ownerAgentId: str(g.ownerAgentId) });
 
 const RUN_STATE: Record<string, RunState> = { queued: 'queued', scheduled_retry: 'queued', running: 'running', succeeded: 'succeeded', failed: 'failed', cancelled: 'cancelled', timed_out: 'timed_out', interrupted: 'interrupted' };
+Object.setPrototypeOf(RUN_STATE, null); // server-supplied keys must not reach Object.prototype
 /**
  * Paperclip answers about a run in two shapes: a heartbeat run (`/heartbeat-runs`, `/live-runs`: `id` and a `contextSnapshot` holding
  * the task) and an issue's run row (`/issues/:id/runs`: `runId` and `contextIssueId`, no `id`, no snapshot). Both must give the same
@@ -95,6 +97,7 @@ const ATTENTION_KIND: Record<string, InboxKind> = {
   approval: 'approval', decision: 'approval', join_request: 'approval', issue_thread_interaction: 'question', blocker_attention: 'blocked', review: 'review',
   productivity_review: 'review', failed_run: 'failed_run', agent_error_alert: 'agent_error', budget_alert: 'budget', recovery_action: 'other',
 };
+Object.setPrototypeOf(ATTENTION_KIND, null); // server-supplied keys must not reach Object.prototype
 /** Muster's own words for why an item is in the Inbox; Paperclip's `whyNow` speaks of its board and issue threads. */
 const WHY: Record<string, string> = {
   approval: 'Waiting for your approval.', decision: 'Waiting for your decision.', join_request: 'Someone asked to join. Approve or decline.',
@@ -102,6 +105,7 @@ const WHY: Record<string, string> = {
   review: 'Waiting for your review.', productivity_review: 'Waiting for your review of recent work.', failed_run: 'The run ended with an error.',
   agent_error_alert: 'The agent stopped with an error. Open it to see why.', budget_alert: 'An agent is close to or over its budget.', recovery_action: 'Needs a recovery step before work can go on.',
 };
+Object.setPrototypeOf(WHY, null); // server-supplied keys must not reach Object.prototype
 const SEVERITY = new Set(['critical', 'high', 'medium', 'low']);
 export function mapAttention(item: Json): WorkspaceInboxItem {
   const subject = obj(item.subject), related = obj(item.relatedIssue);
@@ -116,10 +120,12 @@ export function mapAttention(item: Json): WorkspaceInboxItem {
   };
 }
 const VERB: Record<string, ApprovalDecision> = { approve: 'approve', reject: 'reject', request_revision: 'request_revision' };
+Object.setPrototypeOf(VERB, null); // server-supplied keys must not reach Object.prototype
 /** The approval decisions Paperclip lists for an item; all three when it lists none. */
 const verbsOf = (value: unknown): ApprovalDecision[] => { const found = arr(value).map(v => VERB[String(v.id)]).filter((v): v is ApprovalDecision => Boolean(v)); return found.length ? found : ['approve', 'reject', 'request_revision']; };
 
 const APPROVAL_TITLE: Record<string, string> = { hire_agent: 'Hire an agent', approve_ceo_strategy: 'Approve the CEO’s strategy', budget_override_required: 'Budget override', request_board_approval: 'Board approval' };
+Object.setPrototypeOf(APPROVAL_TITLE, null); // server-supplied keys must not reach Object.prototype
 /** A Paperclip approval (hire, strategy, budget override, board request) waiting on the board. */
 export function mapApproval(a: Json, agents: ReadonlyMap<string, WorkspaceAgent>): WorkspaceApproval {
   const payload = obj(a.payload), type = String(a.type ?? 'request_board_approval');
@@ -291,7 +297,9 @@ const OUTCOME: Record<string, string> = {
   stale_target: 'No longer applies: what it was about changed after it was asked.', skipped: 'Skipped.', withdrawn: 'Withdrawn.', issue_closed: 'Closed with the task.', addressee_deleted: 'Closed: the agent it was for was removed.',
   resolved: 'Answered.', cancelled: 'Cancelled.', connected: 'Connected.', declined: 'Declined.', superseded: 'Replaced by a newer request.', expired: 'Expired.',
 };
+Object.setPrototypeOf(OUTCOME, null); // server-supplied keys must not reach Object.prototype
 const TOOL_STATUS: Record<string, string> = { approved: 'Approved. Waiting to run.', executing: 'Approved. Running now.', executed: 'Ran.', failed: 'Did not run.', expired: 'Expired before it ran.' };
+Object.setPrototypeOf(TOOL_STATUS, null); // server-supplied keys must not reach Object.prototype
 const toolOf = (payload: Json, result: Json): PaperclipToolAction | undefined => {
   const t = obj(payload.toolAction);
   if (!str(t.toolName) && !str(t.toolDisplayName)) return undefined;
