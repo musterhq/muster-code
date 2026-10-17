@@ -7,6 +7,13 @@ All notable changes to Muster Agent. Each `## <version>` section becomes the not
 
 - Typechecking runs on tsc-rs, about twice as fast and using a third less memory, with a CI guard that compares it with the official compiler
 
+## Unreleased
+
+- The branch list and repository info name your branch correctly when a tag has the same name (it showed "heads/<name>").
+- Blame, history and "mark resolved" work for files whose names start with "-".
+- A GitHub remote written with capital letters in the host name (GitHub.com) is recognised for pull requests and compare links.
+- Comparing two refs where a submodule moved shows the "Subproject commit" change instead of a commit log or an error.
+
 ## 0.3.13
 
 Replies in one turn read as one answer, and pictures that can no longer be read take one line instead of an empty frame.
