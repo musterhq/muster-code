@@ -11,6 +11,7 @@ import { hubRoute, openHub, refreshWorkspace, workspaceSnapshot } from './hubSto
 interface State { work: MyWork | null; error: string }
 let state: State = { work: null, error: '' };
 const listeners = new Set<() => void>();
+let reads = 0;
 let viewers = 0, timer: ReturnType<typeof setTimeout> | null = null, dirty = true, inflight: Promise<void> | null = null, off: (() => void) | null = null;
 const hidden = () => typeof document !== 'undefined' && document.visibilityState === 'hidden';
 const set = (next: State) => { state = next; for (const l of listeners) l(); };
@@ -19,8 +20,10 @@ const same = (a: MyWork | null, b: MyWork): boolean => Boolean(a) && JSON.string
 export function loadMyWork(refresh = false): Promise<void> {
   if (inflight && !refresh) return inflight;
   dirty = false;
-  inflight = invoke('orgs.work', refresh ? { refresh: true } : {}).then(work => { if (!same(state.work, work) || state.error) set({ work, error: '' }); }, cause => set({ work: state.work, error: cause instanceof Error ? cause.message : String(cause) })).finally(() => { inflight = null; });
-  return inflight;
+  const mine = ++reads;
+  const read: Promise<void> = invoke('orgs.work', refresh ? { refresh: true } : {}).then(work => { if (mine === reads && (!same(state.work, work) || state.error)) set({ work, error: '' }); }, cause => { if (mine === reads) set({ work: state.work, error: cause instanceof Error ? cause.message : String(cause) }); }).finally(() => { if (inflight === read) inflight = null; });
+  inflight = read;
+  return read;
 }
 function schedule(delay = 400) {
   if (!viewers || hidden()) { dirty = true; return; }
