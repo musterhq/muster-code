@@ -107,7 +107,7 @@ function UserMessage({item,reveal}:{item:TimelineItem;reveal:boolean}) {
   return <>
     {attachments.length>0&&<div className="msg-attachments" aria-label="Attachments">{attachments.map(attachment=><Attachment key={attachment.id} chatId={item.chatId} attachment={attachment}/>)}</div>}
     <div className={`msg msg-user${long&&!expanded?' is-clamped':''}`}>
-      <div className="msg-text"><MentionText chatId={item.chatId} text={item.text}/></div>
+      <div className="msg-text" dir="auto"><MentionText chatId={item.chatId} text={item.text}/></div>
       {long&&<button type="button" className="msg-user-more" aria-expanded={expanded} onClick={()=>setExpanded(!expanded)}>{expanded?'Show less':'Show more'}</button>}
     </div>
   </>;
@@ -466,7 +466,7 @@ export function ChatView(): React.ReactElement {
     <div className="chat">
       <header className="chat-head" data-scrolled={scrolled||undefined}>
         <StatusDot status={headStatus} showLabel={headStatus!=='idle'&&headStatus!=='completed'} />
-        <span className="chat-head-title" title={folder ? `${chat.title} — ${folder.path}` : chat.title}>
+        <span className="chat-head-title" dir="auto" title={folder ? `${chat.title} — ${folder.path}` : chat.title}>
           {chat.title}
         </span>
         {folder && <span className="chat-head-folder" title={folder.path}><Folder size={12} aria-hidden="true"/>{folder.name}</span>}
