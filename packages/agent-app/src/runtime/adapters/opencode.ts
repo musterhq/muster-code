@@ -1,6 +1,7 @@
 import {spawn as nodeSpawn, type ChildProcess} from 'node:child_process';
 import {randomUUID} from 'node:crypto';
 import {cliSpawn, jsonLines, text} from './shared.ts';
+import {killTree} from './cli-common.ts';
 import type {Spawn} from './claude-code.ts';
 import type {AdapterRunInput, AdapterRunResult, RunnableAdapter} from './types.ts';
 import {launcherSpec} from '../launcher-script.ts';
@@ -82,13 +83,15 @@ export function openCodeAdapter(options: {binary: string; env?: NodeJS.ProcessEn
       const baseEnv = options.env ?? process.env;
       const mcpEnv = openCodeMcpEnv(input.mcpServers, input.env?.OPENCODE_CONFIG_CONTENT ?? baseEnv.OPENCODE_CONFIG_CONTENT);
       const launch = cliSpawn(options.binary, args, input.env || Object.keys(mcpEnv).length ? {...baseEnv, ...input.env, ...mcpEnv} : baseEnv);
-      try { child = spawn(launch.command, launch.args, {cwd: input.cwd, env: launch.env, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true}); }
+      try { child = spawn(launch.command, launch.args, {cwd: input.cwd, env: launch.env, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true, detached: process.platform !== 'win32'}); }
       catch (error) { resolve({status: 'failed', finalMessage: '', dispatchState: 'not-dispatched', errorMessage: `OpenCode could not start: ${error instanceof Error ? error.message : String(error)}`}); return; }
       let session = input.resumeThreadId, settled = false, failure = '', stderr = '', answer = '', killer: ReturnType<typeof setTimeout> | undefined;
       const started = new Set<string>();
       // The first session id is the turn's own; a later id (a child session) must not re-bind the chat.
       const accept = (id: string) => { if (started.has('\0accepted')) return; session = id; started.add('\0accepted'); input.onThreadReady(id); input.onTurnAccepted({threadId: id, turnId}); };
-      const abort = () => { child.kill('SIGINT'); killer = setTimeout(() => child.kill('SIGKILL'), options.killGraceMs ?? 3000); };
+      // SIGINT first, then the whole process group: a command OpenCode started must not outlive Stop or hold the run open.
+      const abort = () => { child.kill('SIGINT'); killer = setTimeout(() => killTree(child, 'SIGKILL'), options.killGraceMs ?? 3000); };
+      child.on('exit', () => { if (input.signal.aborted) killTree(child, 'SIGKILL'); });
       if (input.signal.aborted) abort(); else input.signal.addEventListener('abort', abort, {once: true});
       const finish = (result: AdapterRunResult) => { if (settled) return; settled = true; clearTimeout(killer); input.signal.removeEventListener('abort', abort); resolve(result); };
       child.stderr?.setEncoding('utf8'); child.stderr?.on('data', (chunk: string) => { stderr = (stderr + chunk).slice(-4096); });
