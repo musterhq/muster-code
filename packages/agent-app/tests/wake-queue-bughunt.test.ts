@@ -37,3 +37,21 @@ test('two simultaneous wakes inside the minimum gap coalesce into one waiting wa
     assert.deepEqual(h.delivered[1]!.sort(), ['comment', 'mention']);
   } finally { h.done(); }
 });
+
+test('the minimum gap is measured from when a delayed wake actually started, not from when it was first requested', async () => {
+  const h = queue();
+  try {
+    await h.q.request({ projectId: 'p', memberId: 'm', taskId: 't', reason: 'assignment' }); // starts at 0 s
+    await h.clock.advance(10_000);
+    const b = await h.q.request({ projectId: 'p', memberId: 'm', taskId: 't', reason: 'comment' }); // throttled at 10 s, starts at 30 s
+    assert.equal(b.status, 'throttled');
+    await h.clock.advance(21_000); // 31 s
+    assert.equal(h.delivered.length, 2);
+    const c = await h.q.request({ projectId: 'p', memberId: 'm', taskId: 't', reason: 'mention' });
+    assert.equal(c.status, 'throttled');
+    await h.clock.advance(25_000); // 56 s: only 26 s after the run that started at 30 s
+    assert.equal(h.delivered.length, 2, 'still inside the 30 s gap');
+    await h.clock.advance(10_000); // 66 s
+    assert.equal(h.delivered.length, 3);
+  } finally { h.done(); }
+});
