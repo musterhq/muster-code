@@ -7,6 +7,11 @@ All notable changes to Muster Agent. Each `## <version>` section becomes the not
 
 - Typechecking runs on tsc-rs, about twice as fast and using a third less memory, with a CI guard that compares it with the official compiler
 
+## Unreleased
+
+- Double-clicking Check out, or Hand back, on a Muster Server task no longer runs it twice (two worktrees and chats, or two pushes and two posts).
+- A device name containing "-->" is shown correctly in check-out markers.
+
 ## 0.3.13
 
 Replies in one turn read as one answer, and pictures that can no longer be read take one line instead of an empty frame.

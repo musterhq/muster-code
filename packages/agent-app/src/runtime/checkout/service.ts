@@ -246,7 +246,16 @@ export class CheckoutService {
   }
 
   // --- check out ------------------------------------------------------------------------------------------------------------------------
+  /** Task refs with a check-out under way: a second click while the first is still making its worktree is refused, not run beside it. */
+  private readonly starting = new Set<string>();
   async start(input: CheckoutStartInput): Promise<LeaseView> {
+    if (input.confirm !== true) throw new Error('Check out shows what it will post first. Confirm to continue.');
+    const ref = String(input.taskId);
+    if (this.starting.has(ref)) throw new LeaseError(`${ref} is already being checked out on ${device().lower}.`, 'conflict');
+    this.starting.add(ref);
+    try { return await this.startOnce(input); } finally { this.starting.delete(ref); }
+  }
+  private async startOnce(input: CheckoutStartInput): Promise<LeaseView> {
     if (input.confirm !== true) throw new Error('Check out shows what it will post first. Confirm to continue.');
     const { company, part, task, me, backend } = await this.locate(input.taskId, { fresh: true });
     if (task.status === 'done' || task.status === 'cancelled') throw new Error(`${task.key} is ${task.status === 'done' ? 'done' : 'cancelled'}. Reopen it on the server first.`);
@@ -1123,8 +1132,15 @@ export class CheckoutService {
       prUrl: lease.prUrl, summary: `${lease.key}: ${lease.title}`, decisions, reviewers, policy, reviewedLocally: lease.reviewChats.map(r => r.label), blocked: testsRun || noTests || inPlace ? null : 'Run the tests, or write why they were not run.',
     };
   }
+  /** Tasks whose hand-back is under way (it pushes and reads the server before it ends the lease): a second one, or a release, waits for the answer instead of running beside it. */
+  private readonly handingBack = new Set<string>();
   async handBack(input: HandBackInput): Promise<LeaseView> {
     const lease = this.requireOpen(input.taskId);
+    if (this.handingBack.has(lease.taskId)) throw new LeaseError('This task is already being handed back.', 'ended');
+    this.handingBack.add(lease.taskId);
+    try { return await this.handBackOnce(input, lease); } finally { this.handingBack.delete(lease.taskId); }
+  }
+  private async handBackOnce(input: HandBackInput, lease: CheckoutLease): Promise<LeaseView> {
     this.dropCountdown(lease.taskId);
     const { company, part, task, me, backend } = await this.locate(lease.taskId);
     const receipts = this.d.store.receipts(lease.taskId), testsRun = receipts.some(r => r.tests > 0);
@@ -1176,6 +1192,7 @@ export class CheckoutService {
   // --- release and the escape hatch ----------------------------------------------------------------------------------------------------------
   async release(ref: string, note?: string): Promise<LeaseView> {
     const lease = this.requireOpen(ref), at = iso(this.d.now());
+    if (this.handingBack.has(lease.taskId)) throw new LeaseError('This task is being handed back right now.', 'ended');
     this.dropCountdown(lease.taskId);
     const key = `release:${at}`;
     const back = lease.previous;
