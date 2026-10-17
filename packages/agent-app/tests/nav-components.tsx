@@ -201,7 +201,7 @@ await press('Escape');await delay(40);assert.ok(!/Single-key shortcuts/.test(tex
 await press('g');await press('i');assert.equal(hub.hubRoute().page,'inbox');
 await press('g');await press('r');assert.equal(hub.hubRoute().page,'roster');
 await press('g');await press('l');assert.equal(hub.hubRoute().page,'ledger');
-await press('c');await delay(150);assert.match(text(),/New task/);assert.ok(document.querySelector('.ws-new-task'),'c opens the new-task sheet');
+await press('c');for(let i=0;i<150&&!document.querySelector('.ws-new-task');i++)await delay(20);/* the sheet's module loads on first use */assert.match(text(),/New task/);assert.ok(document.querySelector('.ws-new-task'),'c opens the new-task sheet');
 await press('Escape');await delay(60);
 const typing=document.createElement('input');document.body.appendChild(typing);await press('g',{target:typing});await press('i',{target:typing});Object.defineProperty(document,'activeElement',{configurable:true,get:()=>null});assert.equal(hub.hubRoute().page,'ledger','typing in a field never triggers a shortcut');
 await press('g',{metaKey:true});await press('d');assert.notEqual(hub.hubRoute().page,'dashboard','a modified g does not arm the chord');
