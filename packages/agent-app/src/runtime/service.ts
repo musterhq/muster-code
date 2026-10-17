@@ -8,7 +8,7 @@ import { createHash } from 'node:crypto';
 import { promises as fs, existsSync, mkdirSync, copyFileSync, statSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { rescanProviderListings, setProviderListingStore } from './provider-instances.ts';
-import type { AgentEvent, ApprovalData, ApprovalDecision, Chat, ChatRecovery, Commands, PendingQuestion, PendingQuestionData, ProviderInfo, TimelineItem, WakeReason } from '../shared/protocol.ts';
+import type { AgentEvent, ApprovalData, ApprovalDecision, Chat, ChatRecovery, Commands, PendingQuestion, PendingQuestionData, ProviderInfo, QueuedMessage, ChatFallback, TimelineItem, WakeReason } from '../shared/protocol.ts';
 import { CONTEXT_OVERFLOW, musterCompactAt } from '../shared/context-window.ts';
 import type { PendingAttentionSummary, AttentionRequest } from '../shared/attention-protocol.ts';
 import { discoverLocalProviders } from './provider-discovery.ts';
@@ -42,7 +42,10 @@ import {providerAccessPolicy} from './provider-run-lifecycle.ts';
 import {parseKillIntent, userProcessThreat, type UserProcessTarget, type UserProcessThreat} from './user-process-guard.ts';
 import {reconcileProviderTurn, type ReconciliationInput, type ReconciliationResult} from './provider-reconciliation.ts';
 import { ProjectTaskStore, type TaskStatus } from './project-tasks.ts';
-import { ChatQueue, queueActionAfter } from './chat-queue.ts';
+import { ChatQueue, QueueChangedError, queueActionAfter } from './chat-queue.ts';
+import { AutoResumeStore, LIMIT_MAX_ATTEMPTS, limitClass, NATIVE_CONTINUATION, RESTART_CONTINUATION, autoResumeTiming, autoResumeView, hasNativeSession, isChatFallback, isUsageLimit, MAX_CHAT_FALLBACKS, limitResumeAt, resetClock, type AutoResumeRow } from './auto-resume.ts';
+import { liveProviderUsage } from './provider-usage.ts';
+import type { ProviderUsage } from '../shared/domains/providers-protocol.ts';
 import { createNativeThreadBridge } from './codex-native.ts';
 import { createNativeTurnObserver } from './native-turns.ts';
 import { createNativeQueueMirror } from './native-queue.ts';
@@ -98,7 +101,7 @@ function detail(value: unknown): string {
   if (typeof value === 'string') return value.slice(0, 65536);
   try { return JSON.stringify(value ?? {}).slice(0, 65536); } catch { return 'Details unavailable'; }
 }
-interface ActiveRun { cwd: string; stopped: boolean; promise?: Promise<void>; retry: AbortController; seal?(): void }
+interface ActiveRun { cwd: string; stopped: boolean; prompt?: string; promise?: Promise<void>; retry: AbortController; seal?(): void; /** #448: the run ended on a provider usage limit. */ limit?: {text: string; retryAfterMs?: number; notDispatched: boolean; prompt: string; attachmentIds: string[]}; /** #449: Muster quit under this run (not a user Stop); `shutdown` when it continues after the next start. */ quit?: boolean; shutdown?: boolean }
 interface PendingApproval { chatId: string; createdAt: string; expiresAt: number; resolve(decision: ApprovalDecision): void; timer: ReturnType<typeof setTimeout> }
 /** `null` answers mean the question was dismissed, expired or interrupted: the provider gets a cancel, never empty answers. */
 type QuestionAnswers = Record<string, {answers: string[]}> | null;
@@ -138,6 +141,8 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
   // M4 (#319): ids merged by the duplicate-folder migration are remapped in the stores that keep their own database files.
   try { const aliases = store.pendingFolderAliases(); if (Object.keys(aliases).length && applyFolderAliases(options.dataDir, aliases)) store.clearFolderAliases(); } catch { /* retried on the next start */ }
   const queue = new ChatQueue(store);
+  /** #450: chats whose queue head is being sent right now (its row stays queued until the receipt is recorded). */
+  const dispatching = new Set<string>();
   const attachments = new ChatAttachments(store.database(), options.dataDir);
   const domainHooks = createDomainHooks();
   const steered = new Map<string, string>();
@@ -185,7 +190,40 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
   let closing = false;
   let disposal: Promise<void> | undefined;
   const invocations = new Set<Promise<unknown>>();
-  store.recoverOrphanedRuns(chat => isAdapterProvider(chat.providerThreadProviderId ?? chat.providerId ?? ''));
+  // #448/#449: pending automatic continuations live in SQLite, so they are re-armed after a restart.
+  const autoResume = new AutoResumeStore(store.database());
+  /** #449: chats that were working when Muster closed and may continue after this start. Never one that was waiting on an
+   *  approval or a question (that decision is the user's), never one being stopped, never a continuation cut short again. */
+  const restartCandidates: string[] = [];
+  for (const chat of store.snapshot().chats) {
+    const prior = autoResume.get(chat.id);
+    // A clean quit settled the run already and left a 'shutdown' row (with its prompt) to continue from.
+    if (prior?.state === 'shutdown') {
+      if (chat.archived) { autoResume.delete(chat.id); continue; }
+      restartCandidates.push(chat.id);
+      if (store.queue(chat.id).length && !queue.paused(chat.id)) queue.pause(chat.id, 'interrupted');
+      continue;
+    }
+    if (chat.status !== 'running' && chat.status !== 'stopping') {
+      if (prior?.state === 'running') {
+        autoResume.delete(chat.id);
+        // Its continuation was cut short by the quit (the quit settled it as interrupted): never continue it a second time.
+        if (prior.kind === 'restart' && chat.status === 'interrupted') store.appendItem(chat.id, 'notice', 'Muster closed again before the automatic continuation finished, so it was not continued again. Send a message to continue.', 'completed', {kind:'auto-resume', reason:'restart-again'});
+      }
+      continue;
+    }
+    if (prior?.state === 'running') {
+      autoResume.delete(chat.id);
+      if (prior.kind === 'restart') { store.appendItem(chat.id, 'notice', 'Muster closed again before the automatic continuation finished, so it was not continued again. Send a message to continue.', 'completed', {kind:'auto-resume', reason:'restart-again'}); continue; }
+    }
+    if (chat.status !== 'running' || chat.archived) continue;
+    if (store.timeline(chat.id).some(item => (item.kind === 'approval' || item.kind === 'question') && item.status === 'pending')) continue;
+    restartCandidates.push(chat.id);
+  }
+  const orphaned = store.recoverOrphanedRuns(chat => isAdapterProvider(chat.providerThreadProviderId ?? chat.providerId ?? ''));
+  // #450: rows already sent are dropped and natively held rows come back; an orphaned chat's queue waits for it to continue.
+  queue.recoverAtBoot();
+  for (const chatId of orphaned) if (store.queue(chatId).length && !queue.paused(chatId)) queue.pause(chatId, 'interrupted');
   for (const chat of store.snapshot().chats) {
     for (const item of store.timeline(chat.id)) {
       // The provider request ended with the previous process; the card stays readable but cannot be reopened.
@@ -210,6 +248,11 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
     folderId => emit({type:'workspaceChanged',folderId}),
     (folderId,error) => { watchedFolders.delete(folderId); emit({type:'notice',message:`Live file updates stopped: ${error.message}`}); },
   );
+  /** Queue chips and pause, the goal strip and a usage limit's resume (#448) ride on the snapshot's chats. */
+  function decorateChat(chat: Chat, goal: ChatGoal | undefined, resume: AutoResumeRow | undefined, fallbacks: ChatFallback[] | undefined = autoResume.fallbacks(chat.id)): Chat {
+    const decorated = queue.decorate(chat), view = autoResumeView(resume);
+    return {...decorated, ...(goal ? {goal} : {}), ...(view ? {autoResume: view} : {}), ...(fallbacks?.length ? {fallbacks} : {})};
+  }
   /** Goals live in the goals domain table; chats carry them so the composer strip survives restarts. */
   const goalsByChat = (): Map<string, ChatGoal> => {
     // Before the domains exist (during construction) there are simply no goals to show.
@@ -225,8 +268,8 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
     folderStats.set(path, {at, missing}); return missing;
   };
   const snapshot = () => {
-    const stored = store.snapshot(), goals = goalsByChat();
-    const current = {...stored, folders: stored.folders.map(folder => folderMissing(folder.path) ? {...folder, missing: true} : folder), chats: stored.chats.map(chat => { const decorated = queue.decorate(chat), goal = goals.get(chat.id); return goal ? {...decorated, goal} : decorated; })};
+    const stored = store.snapshot(), goals = goalsByChat(), resumes = new Map(autoResume.all().map(row => [row.chatId, row])), fallbacks = autoResume.allFallbacks();
+    const current = {...stored, folders: stored.folders.map(folder => folderMissing(folder.path) ? {...folder, missing: true} : folder), chats: stored.chats.map(chat => decorateChat(chat, goals.get(chat.id), resumes.get(chat.id), fallbacks.get(chat.id)))};
     const requests = new Map<string, AttentionRequest[]>();
     const add = (chatId: string, request: AttentionRequest) => {
       const group = requests.get(chatId) ?? []; group.push(request); requests.set(chatId, group);
@@ -505,7 +548,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
     if (defaults.providerId && defaults.model?.trim()) return { providerId: defaults.providerId, model: defaults.model.trim(), ...(defaults.effort ? { effort: defaults.effort } : {}) };
     return firstReadyModel(provider.info());
   }
-  async function send(chatId: string, prompt: string, requestId: string, skill?: string | string[], attachmentIds: string[] = [], invoked: {pluginIds?: string[]; effort?: ReasoningEffort; reuseUserItemId?: string} = {}) {
+  async function send(chatId: string, prompt: string, requestId: string, skill?: string | string[], attachmentIds: string[] = [], invoked: {pluginIds?: string[]; effort?: ReasoningEffort; reuseUserItemId?: string; queued?: QueuedMessage; userData?: Record<string, unknown>} = {}) {
     // /compact is Muster's command in every chat type and provider: never a message for the model.
     if (isCompactCommand(prompt) && attachmentIds.length === 0 && skill === undefined) { await compactChat(chatId); return {runId: ''}; }
     // A compaction in flight settles first: the next turn goes to the compacted (or fresh) thread.
@@ -572,7 +615,10 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
     // A fork (or a replaced turn) starts a fresh provider conversation: carry the visible history once, bounded.
     const digest = store.needsDigest(chatId) ? transcriptDigest(store.timeline(chatId)) : '';
     const files = attachments.resolve(chatId, attachmentIds);
-    const accepted = store.recordSend(chatId, requestId, prompt, fingerprint, {...(files.length ? {userData: {attachments: files.map(({path: _path, ...ref}) => ({...ref, state: 'sent'}))}, within: () => attachments.markSent(attachmentIds)} : {}), ...(invoked.reuseUserItemId ? {reuseUserItemId: invoked.reuseUserItemId} : {})});
+    // #450: a queued message leaves the queue in the same transaction that records its receipt.
+    const queued = invoked.queued;
+    const userData = {...(invoked.userData ?? {}), ...(files.length ? {attachments: files.map(({path: _path, ...ref}) => ({...ref, state: 'sent'}))} : {})};
+    const accepted = store.recordSend(chatId, requestId, prompt, fingerprint, {...(Object.keys(userData).length ? {userData} : {}), ...(files.length || queued ? {within: () => { if (files.length) attachments.markSent(attachmentIds); if (queued) queue.consume(chatId, queued); }} : {}), ...(invoked.reuseUserItemId ? {reuseUserItemId: invoked.reuseUserItemId} : {})});
     if (accepted.replay) return {runId: accepted.runId};
     if (!digest) store.clearDigest(chatId);
     // Several chats may work in one folder (as in Codex). Warn once per chat
@@ -592,7 +638,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
       store.appendItem(chatId, 'notice', `${modelName} (${selectedProvider.name}) can’t view images, so ${attachedImages.length === 1 ? `“${attachedImages[0]!.name}” was` : `${attachedImages.length} images were`} not sent to the model. Switch to a vision model to include ${attachedImages.length === 1 ? 'it' : 'them'}.`, 'completed', {kind: 'images-unsupported', names: attachedImages.map(file => file.name)});
     }
     const fileLines = [attachedFileLines(files), blind ? `The user attached ${attachedImages.length === 1 ? 'an image' : `${attachedImages.length} images`} (${attachedImages.map(file => file.name).join(', ')}) that this model cannot view. Do not guess or describe ${attachedImages.length === 1 ? 'its' : 'their'} contents; tell the user you cannot see ${attachedImages.length === 1 ? 'it' : 'them'} if it matters.` : ''].filter(Boolean).join('\n');
-    const run: ActiveRun = {cwd, stopped: false, retry: new AbortController()}; runs.set(chatId, run); state(); timeline(chatId);
+    const run: ActiveRun = {cwd, stopped: false, retry: new AbortController(), prompt}; runs.set(chatId, run); state(); timeline(chatId);
     let segment: TimelineItem | undefined;
     let producedAssistant = false;
     const toolIds = new Map<string, string>();
@@ -912,7 +958,8 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
         // settled that attempt as failed, which Inbox and Pulse explain in a plain sentence and which may be run again.
         // A failure with no message at all stays unconfirmed (recovery-needed).
         const said = (result.errorMessage ?? '').replace(/\s+/g, ' ').trim().slice(0, 600);
-        let recovery: ChatRecovery | undefined = result.recovery ?? (run.stopped ? {kind:'cancelled',retryable:false,reason:'Stopped.'}
+        // A quit is not a Stop (#449), but a provider that may still be running the turn keeps that state for the check.
+        let recovery: ChatRecovery | undefined = run.quit && result.recovery?.kind !== 'recovery-needed' ? shutdownRecovery(!!run.shutdown) : result.recovery ?? (run.stopped ? {kind:'cancelled',retryable:false,reason:'Stopped.'}
           : result.status === 'failed' ? (said && result.dispatchState !== 'unknown' ? {kind:'failed',retryable:false,reason:`The provider attempt failed: ${said}`} : {kind:'recovery-needed',retryable:false,reason:'The provider attempt did not settle with confirmed outcome. Check its saved turn before continuing; the prompt was not resent.'}) : undefined);
         // #426: the provider refused the turn because the conversation no longer fits the model's window. That is a settled
         // refusal, never an unconfirmed attempt: say so, and offer compaction or a fresh thread with a summary.
@@ -920,6 +967,12 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
           const modelName = selectedProvider.models.find(entry => entry.id === chat.model)?.name ?? chat.model;
           recovery = {kind:'failed', retryable:false, reason:`${modelName} refused this turn: the conversation no longer fits its context window.`};
           store.appendItem(chatId, 'notice', `The conversation no longer fits ${modelName}’s context window. Compact it and send again, or continue in a fresh thread with a summary.`, 'failed', {kind:'compaction', status:'failed', reason:'context-overflow', actions:['retry','fresh']});
+        }
+        // #448: a provider usage or rate limit. Its own refusal ended the turn, so it is settled (never "may still be running"),
+        // and the chat waits for the reset to continue.
+        if (recovery && recovery.kind !== 'cancelled' && !run.stopped && isUsageLimit(`${said} ${recovery.kind === 'recovery-needed' ? '' : recovery.reason}`)) {
+          if (recovery.kind === 'recovery-needed') recovery = {kind:'failed', retryable:false, reason:`The provider attempt failed: ${said}`};
+          run.limit = {text:`${said} ${recovery.reason}`, ...(result.failure?.retryAfterMs ? {retryAfterMs:result.failure.retryAfterMs} : {}), notDispatched: result.dispatchState === 'not-dispatched', prompt, attachmentIds};
         }
         if (result.threadId) persistIdentity(result.threadId,result.turnId);
         // Only a turn the provider actually took delivered its context blocks to the thread.
@@ -932,7 +985,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
       } catch (error) {
         if (!disposed) {
           seal();
-          const recovery: ChatRecovery = error instanceof ProviderPreDispatchError
+          const recovery: ChatRecovery = run.quit ? shutdownRecovery(!!run.shutdown) : error instanceof ProviderPreDispatchError
             ? {kind:'failed',retryable:true,reason:error.message}
             : run.stopped ? {kind:'cancelled',retryable:false,reason:'Stopped.'}
             : {kind:'recovery-needed',retryable:false,reason:'The provider attempt ended without a confirmed outcome. Check its saved turn before continuing; the prompt was not resent.'};
@@ -943,7 +996,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
         }
       } finally {
         // Background sub-agents can still be waiting on a card after the parent turn ended: keep it answerable.
-        if (run.stopped || disposed || !provider.hasActiveWork?.(chatId)) { settleApprovals(chatId); settleQuestions(chatId); }
+        if (run.stopped || disposed || !provider.hasActiveWork?.(chatId)) { settleApprovals(chatId); settleQuestions(chatId); seal(); store.settleRunningTools(chatId); }
         runs.delete(chatId);
         // #426: a compaction asked for during the turn runs now (before any queued message is dispatched).
         const deferred = deferredCompactions.get(chatId);
@@ -956,7 +1009,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
           // CHAT-15: "until new activity" wakes when a run settles (one transition, unread + one notification).
           if(finalChat?.snoozeUntilActivity&&wake(chatId,'activity'))finalChat=store.chat(chatId);
           if(finalChat&&(finalChat.status==='completed'||finalChat.status==='failed'||finalChat.status==='interrupted')){const task=projectTasks.settleRunForChat(chatId,finalChat.status,finalChat.error,finalAssistantText(chatId));if(task)emit({type:'projectChanged',projectId:task.projectId,taskId:task.id});}state();
-          if (finalChat) { domainHooks.runSettled({chat:finalChat,runId:accepted.runId,status:finalChat.status}); afterRun(chatId, finalChat.status); }
+          if (finalChat) { domainHooks.runSettled({chat:finalChat,runId:accepted.runId,status:finalChat.status}); settleAutoResume(chatId, run, finalChat); afterRun(chatId, finalChat.status); }
           // A turn the app-server started itself (native goal or queue) while this run settled is adopted now.
           nativeTurns.drain(chatId); }
       }
@@ -967,7 +1020,163 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
   function afterRun(chatId: string, status: Chat['status']) {
     if (!store.queue(chatId).length || closing || disposed) return;
     if (queueActionAfter(status) === 'dispatch') { dispatchQueued(chatId); return; }
-    queue.pause(chatId, status === 'interrupted' ? 'interrupted' : 'failed'); state();
+    // #448: behind a usage limit the queue waits for the continuation, then sends in order.
+    const waiting = autoResume.get(chatId);
+    queue.pause(chatId, waiting?.kind === 'limit' && waiting.state === 'armed' ? 'limited' : status === 'interrupted' ? 'interrupted' : 'failed'); state();
+  }
+  // --- #448 / #449: automatic continuation after a usage limit resets, and after a restart ---
+  /** A run Muster's own quit interrupted: a neutral ending (never "Stopped", never "will not resume"). */
+ const shutdownRecovery = (continues: boolean): ChatRecovery => ({kind:'cancelled', retryable:false, reason: continues && settingOn('chats.resumeAfterRestart') ? 'Muster quit while this was working. It continues when Muster starts again.' : 'Muster quit while this was working. Send a message to continue.'});
+  const resumeTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  /** Settings are read live (sync handler); anything unreadable keeps the default, on. */
+  const settingOn = (key: 'chats.resumeAfterLimit' | 'chats.resumeAfterRestart'): boolean => {
+    try { const result = domains.handlers.get('settings.get')?.({}) as {values?: Record<string, unknown>} | undefined; return result?.values?.[key] !== false; } catch { return true; }
+  };
+  /** Codex usage windows for this chat's route (live, else its session logs). */
+  function usageFor(chat: Chat): ProviderUsage[] {
+    const rows: ProviderUsage[] = [];
+    const id = chat.providerThreadProviderId ?? chat.providerId;
+    if (!id) return rows;
+    const live = liveProviderUsage(id); if (live) rows.push(live);
+    try { const listed = domains.handlers.get('providers.usage')?.({id}); if (Array.isArray(listed)) rows.push(...(listed as ProviderUsage[])); } catch { /* no usage source for this route */ }
+    return rows;
+  }
+  function cancelResumeTimer(chatId: string) { const timer = resumeTimers.get(chatId); if (timer) clearTimeout(timer); resumeTimers.delete(chatId); }
+  function clearAutoResume(chatId: string) { cancelResumeTimer(chatId); autoResume.delete(chatId); }
+  /** Timers wake at most hourly to re-read the stored time, so a long wait survives clock changes and sleep. */
+  function armResume(chatId: string) {
+    cancelResumeTimer(chatId);
+    const row = autoResume.get(chatId);
+    if (!row || row.state !== 'armed' || disposed || closing) return;
+    const wait = Math.min(Math.max((row.resumeAt ? Date.parse(row.resumeAt) : Date.now()) - Date.now(), 0), 60 * 60_000);
+    const timer = setTimeout(() => {
+      resumeTimers.delete(chatId);
+      const current = autoResume.get(chatId);
+      if (current?.state === 'armed' && current.resumeAt && Date.parse(current.resumeAt) > Date.now() + 250) { armResume(chatId); return; }
+      void fireResume(chatId);
+    }, wait);
+    timer.unref?.();
+    resumeTimers.set(chatId, timer);
+  }
+  function autoResumeNotice(row: AutoResumeRow, text: string): string {
+    const item = row.noticeId ? store.item(row.noticeId) : undefined;
+    if (item && item.chatId === row.chatId) { store.updateItem(item.id, text, 'completed', {...item.data, kind:'auto-resume'}); return item.id; }
+    return store.appendItem(row.chatId, 'notice', text, 'completed', {kind:'auto-resume', reason:row.kind}).id;
+  }
+  /** The next model in this chat's opt-in fallback list (after the current one), available and listing the model. */
+  function nextFallback(chat: Chat): {providerId: string; model: string; bindingId: string; name: string} | undefined {
+    const list = autoResume.fallbacks(chat.id);
+    if (!list.length) return undefined;
+    const current = list.findIndex(entry => entry.providerId === chat.providerId && entry.model === chat.model);
+    for (const entry of list.slice(current + 1)) {
+      if (entry.providerId === chat.providerId && entry.model === chat.model) continue;
+      const route = provider.info().find(candidate => candidate.id === entry.providerId && candidate.available && (candidate.models.length === 0 || candidate.models.some(model => model.id === entry.model)));
+      if (route) return {providerId: route.id, model: entry.model, bindingId: route.bindingId ?? route.id, name: route.models.find(model => model.id === entry.model)?.name ?? entry.model};
+    }
+    return undefined;
+  }
+  /** Moves a limited chat to its next fallback and continues at once. False when there is none to use. */
+  function useFallback(chatId: string): boolean {
+    const chat = store.chat(chatId), row = autoResume.get(chatId);
+    if (!chat || !row || row.kind !== 'limit' || busy(chat) || runs.has(chatId) || providerSelections.has(chatId)) return false;
+    const next = nextFallback(chat);
+    if (!next) return false;
+    const was = provider.info().find(entry => entry.id === chat.providerId)?.models.find(model => model.id === chat.model)?.name ?? chat.model;
+    store.updateChat(chatId, {providerId: next.providerId, providerBindingId: next.bindingId, model: next.model});
+    store.appendItem(chatId, 'notice', `${was} is limited, so this chat continues with ${next.name}, its fallback model.`, 'completed', {kind:'auto-resume', reason:'fallback', providerId: next.providerId, model: next.model});
+    // A fresh conversation on the fallback: never "the limit has reset".
+    autoResume.update(chatId, {state:'armed', resumeAt:new Date().toISOString(), native:false});
+    timeline(chatId); state();
+    queueMicrotask(() => { void fireResume(chatId); });
+    return true;
+  }
+  /** A run settled: a usage limit arms (or backs off) the resume; anything else ends the automatic continuation it was. */
+  function settleAutoResume(chatId: string, run: ActiveRun, chat: Chat) {
+    const row = autoResume.get(chatId);
+    // A quit leaves the row for the next launch (a 'shutdown' row, or a continuation that must not run twice).
+    if (run.quit) return;
+    if (!run.limit || run.stopped) { if (row && (row.state === 'running' || run.stopped || chat.status === 'completed')) clearAutoResume(chatId); return; }
+    const again = row?.kind === 'limit' && row.state === 'running';
+    const attempts = again ? row.attempts + 1 : 0, kind = limitClass(run.limit.text) ?? 'quota';
+    // A refused turn that never started re-runs its own prompt; one that did work continues from where it stopped.
+    const reuse = run.limit.notDispatched ? [...store.timeline(chatId)].reverse().find(item => item.kind === 'user' && item.data?.steered !== true && item.data?.autoResume === undefined) : undefined;
+    const base: Omit<AutoResumeRow, 'createdAt' | 'state' | 'resumeAt' | 'attempts' | 'noticeId'> = again && row.prompt !== undefined
+      ? {...row, limitClass: kind}
+      : {chatId, kind:'limit', limitClass: kind, prompt: reuse ? reuse.text : null, reuseItemId: reuse?.id ?? null, attachmentIds: reuse ? run.limit.attachmentIds : [], native: hasNativeSession(chat)};
+    const noticeId = again ? row.noticeId : null;
+    if (attempts >= LIMIT_MAX_ATTEMPTS[kind]) {
+      const stopped = autoResume.set({...base, state:'gave-up', resumeAt:null, attempts, noticeId});
+      autoResume.update(chatId, {noticeId: autoResumeNotice(stopped, `Still limited after ${attempts} automatic tries, so Muster stopped continuing this chat. Send a message once the limit resets.`)});
+      cancelResumeTimer(chatId);
+      useFallback(chatId);
+      return;
+    }
+    const {at} = limitResumeAt({text: run.limit.text, usage: usageFor(chat), ...(run.limit.retryAfterMs ? {retryAfterMs: run.limit.retryAfterMs} : {}), attempts});
+    let next = autoResume.set({...base, state: again || settingOn('chats.resumeAfterLimit') ? 'armed' : 'off', resumeAt: new Date(at).toISOString(), attempts, noticeId});
+    // An opt-in fallback model continues at once instead of waiting for the reset.
+    if (next.state === 'armed' && useFallback(chatId)) return;
+    // Said once: the first refusal after a reset adds one line; later ones update it.
+    if (again) next = autoResume.update(chatId, {noticeId: autoResumeNotice(next, `The provider still refused at reset. Muster tries again at ${resetClock(at)}${attempts + 1 < LIMIT_MAX_ATTEMPTS[kind] ? '' : ', for the last time'}.`)})!;
+    armResume(chatId);
+  }
+  /** Continues a chat at its stored time: the limited turn's own prompt (never dispatched), or a short continuation. */
+  async function fireResume(chatId: string): Promise<void> {
+    cancelResumeTimer(chatId);
+    const row = autoResume.get(chatId);
+    if (!row || row.state !== 'armed' || disposed || closing) return;
+    const chat = store.chat(chatId);
+    if (!chat || chat.archived) { clearAutoResume(chatId); state(); return; }
+    // The user (or another run) already took over; nothing to continue.
+    if (runs.has(chatId) || busy(chat) || dispatching.has(chatId) || compactions.has(chatId) || chat.recovery?.kind === 'recovery-needed') { if (row.kind === 'restart' || busy(chat)) clearAutoResume(chatId); state(); return; }
+    if (!settingOn(row.kind === 'limit' ? 'chats.resumeAfterLimit' : 'chats.resumeAfterRestart')) { if (row.kind === 'limit') autoResume.update(chatId, {state:'off'}); else autoResume.delete(chatId); state(); return; }
+    autoResume.update(chatId, {state:'running'});
+    // Queued messages wait for this continuation, then send in order once it completes.
+    if (queue.paused(chatId)) queue.resume(chatId);
+    const draft = chat.draft, requestId = `auto-${row.kind}-${randomUUID()}`;
+    const rerun = row.kind === 'limit' && row.reuseItemId && row.prompt && store.item(row.reuseItemId)?.chatId === chatId;
+    const native = row.native && hasNativeSession(chat);
+    // After a restart a route without a session is told what happened; after a limit the short line is enough.
+    const text = rerun ? row.prompt! : row.kind === 'restart' && !native ? RESTART_CONTINUATION : NATIVE_CONTINUATION;
+    try {
+      await send(chatId, text, requestId, undefined, rerun ? row.attachmentIds : [], rerun ? {reuseUserItemId: row.reuseItemId!} : {userData: {autoResume: row.kind}});
+      // The send took the composer's text with it; a draft the user was writing (not the limited prompt) is kept.
+      if (draft && draft !== row.prompt) store.updateChat(chatId, {draft});
+    } catch (error) {
+      if (disposed) return;
+      const reason = (error instanceof Error ? error.message : String(error)).replace(/[.\s]+$/, '');
+      const current = autoResume.get(chatId);
+      if (row.kind === 'limit' && current) {
+        // Treated as one more refusal: back off, never retry at once.
+        const attempts = current.attempts + 1, kind = current.limitClass ?? 'quota';
+        if (attempts >= LIMIT_MAX_ATTEMPTS[kind]) { autoResume.update(chatId, {state:'gave-up', attempts, resumeAt:null}); autoResume.update(chatId, {noticeId: autoResumeNotice(autoResume.get(chatId)!, `Muster could not continue this chat after the limit: ${reason}. It stopped trying; send a message to continue.`)}); }
+        else { autoResume.update(chatId, {state:'armed', attempts, resumeAt: new Date(limitResumeAt({text: kind === 'rate' ? '429' : 'usage limit', attempts}).at).toISOString()}); armResume(chatId); }
+      } else {
+        clearAutoResume(chatId);
+        store.appendItem(chatId, 'notice', `Muster could not continue this chat after the restart: ${reason}. Send a message to continue.`, 'completed', {kind:'auto-resume', reason:'restart-failed'});
+      }
+      timeline(chatId);
+    }
+    state();
+  }
+  /** #449, after launch: re-arm stored limit resumes, and continue the chats that were working when Muster closed. */
+  async function bootAutoResume(): Promise<void> {
+    for (const row of autoResume.all()) if (row.kind === 'limit' && row.state === 'armed') armResume(row.chatId);
+    if (!restartCandidates.length) return;
+    if (!settingOn('chats.resumeAfterRestart')) { for (const chatId of restartCandidates) if (autoResume.get(chatId)?.kind === 'restart') autoResume.delete(chatId); return; }
+    await firstProviderProbe();
+    await new Promise(resolve => { const timer = setTimeout(resolve, autoResumeTiming.restartDelayMs); timer.unref?.(); });
+    if (disposed || closing) return;
+    for (const chatId of restartCandidates) {
+      const chat = store.chat(chatId);
+      const prior = autoResume.get(chatId);
+      if (!chat || chat.archived || busy(chat) || (prior && prior.state !== 'shutdown')) continue;
+      const native = hasNativeSession(chat);
+      const row = {chatId, kind:'restart' as const, attempts:0, prompt: prior?.prompt ?? null, reuseItemId:null, attachmentIds:[], noticeId:null, native};
+      // A provider-side attempt is checked first (RecoveryNotice, "Continue anyway"); a check that finds it interrupted continues it.
+      if (chat.recovery?.kind === 'recovery-needed') { autoResume.set({...row, state:'check', resumeAt:null}); continue; }
+      autoResume.set({...row, state:'armed', resumeAt:new Date().toISOString()});
+      await fireResume(chatId);
+    }
   }
   function dispatchQueued(chatId: string) {
     if (runs.has(chatId) || closing || disposed || queue.paused(chatId) || compactions.has(chatId)) return;
@@ -980,13 +1189,25 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
     const head = queue.list(chatId)[0];
     if (head && nativeQueue.pending(head.id)) return;
     if (nativeQueue.owns(chatId)) { void nativeQueue.start(chatId).then(started => { if (!started) dispatchQueued(chatId); }); return; }
-    const item = queue.take(chatId);
+    // #450: one dispatch per chat at a time; the head stays queued (and survives a quit) until its send is recorded.
+    if (dispatching.has(chatId)) return;
+    const item = queue.head(chatId);
     if (!item) return;
-    state();
-    const pending = send(chatId, item.text, item.requestId, item.skillIds?.length ? item.skillIds : undefined, item.attachmentIds, {pluginIds: item.pluginIds ?? [], ...(item.effort ? {effort: item.effort} : {})}).catch(error => {
+    // Already sent under this request id (a replay): drop the row instead of sending it again.
+    if (store.receipt(item.requestId)) { queue.dropSent(chatId, item.id); state(); dispatchQueued(chatId); return; }
+    dispatching.add(chatId);
+    const pending = send(chatId, item.text, item.requestId, item.skillIds?.length ? item.skillIds : undefined, item.attachmentIds, {pluginIds: item.pluginIds ?? [], ...(item.effort ? {effort: item.effort} : {}), queued: item}).then(() => {
+      dispatching.delete(chatId);
+      // Handled without a turn (an edited row that became /compact): it never leaves the queue on its own.
+      if (!disposed && queue.list(chatId).some(entry => entry.id === item.id) && !store.receipt(item.requestId) && !runs.has(chatId)) queue.dropSent(chatId, item.id);
+      state();
+    }, error => {
+      dispatching.delete(chatId);
       if (disposed) return;
+      // Edited or removed while the send was being prepared: nothing was sent; the queue as it is now goes next.
+      if (error instanceof QueueChangedError) { state(); if (!runs.has(chatId)) dispatchQueued(chatId); return; }
       const reason = error instanceof Error ? error.message : String(error);
-      if (!store.receipt(item.requestId)) queue.restore(chatId, item, reason);
+      if (!store.receipt(item.requestId) && queue.list(chatId).some(entry => entry.id === item.id)) queue.fail(item.id, reason);
       store.appendItem(chatId, 'notice', `Queued message was not sent: ${reason}`, 'failed', {kind:'queue-failed', queueId:item.id});
       timeline(chatId); state();
     });
@@ -1106,6 +1327,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
     timeline(chat.id);
   }
   async function deleteChat(chatId: string): Promise<void> {
+    clearAutoResume(chatId);
     for (const item of queue.list(chatId)) queue.remove(chatId, item.id);
     const run = runs.get(chatId);
     if (run) {
@@ -1388,6 +1610,8 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
         // A message the user sends by hand resumes a paused queue once its turn completes (Codex); goal turns do not.
         const requestId = id(p.requestId);
         if (!requestId.startsWith('goal-') && queue.paused(chatId)) { queue.resume(chatId); state(); }
+        // #448/#449: the user took over; a pending automatic continuation is dropped.
+        if (autoResume.get(chatId)) { clearAutoResume(chatId); state(); }
         return send(chatId, text(p.text, 'message', MAX_QUEUED_TEXT), requestId, skillIds.length ? skillIds : undefined, attachmentIds, {pluginIds, ...(p.effort !== undefined ? {effort: p.effort as ReasoningEffort} : {})});
       }
       case 'chat.queue.add': {
@@ -1591,6 +1815,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
         if (last === undefined || index < last) throw new Error('Only the latest turn can be retried.');
         const prompt = items[last]!;
         if (!prompt.text.trim()) throw new Error('This turn only sent files. Attach them again to retry.');
+        if (autoResume.get(chatId)) clearAutoResume(chatId);
         // F46: re-run the original prompt without appending a second copy of it to the transcript.
         const result = await send(chatId, prompt.text, requestId, undefined, [], {reuseUserItemId: prompt.id});
         return {runId: result.runId, requestId};
@@ -1599,6 +1824,8 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
         // Codex pauses an active goal before interrupting, so the stop never triggers a continuation.
         if (goalsByChat().get(chatId)?.status === 'active') { try { await domains.handlers.get('goals.pause')?.({chatId}); } catch { /* the goal was cleared meanwhile */ } }
         run.stopped = true; run.retry.abort(); store.updateChat(chatId, {status: 'stopping'}); settleApprovals(chatId); settleQuestions(chatId); state(); await provider.stop(chatId);
+        // Tool rows the stopped turn left running read Interrupted, not a spinner forever.
+        if (store.settleRunningTools(chatId)) timeline(chatId);
         // A turn the app-server started itself settles on its own turn/completed; if its session is gone, settle it here.
         nativeTurns.stopped(chatId, !!provider.nativeThread?.(chatId)); return; }
       case 'chat.reconcile': {
@@ -1618,7 +1845,14 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
           if (!result.resolved || !result.terminalStatus) return {chat:current,resolved:false,reason:result.reason,...(/still active/i.test(result.reason) ? {stillRunning:true} : {})};
           const updated=store.updateChat(chatId,{recovery:null,error:null,status:result.terminalStatus === 'completed' ? 'completed' : result.terminalStatus === 'interrupted' ? 'interrupted' : 'failed'});
           store.appendItem(chatId,'notice',result.reason,'completed',{providerThreadId:chat.providerThreadId,providerTurnId:chat.providerTurnId,reconciledStatus:result.terminalStatus});
-          timeline(chatId);state();return {chat:updated,resolved:true,reason:result.reason};
+          timeline(chatId);state();
+          // #449: the check found the restart-interrupted turn ended: continue it in the same thread (or drop the wait when it completed).
+          const waiting = autoResume.get(chatId);
+          if (waiting?.kind === 'restart' && waiting.state === 'check') {
+            if (result.terminalStatus === 'completed' || !settingOn('chats.resumeAfterRestart')) clearAutoResume(chatId);
+            else { autoResume.update(chatId, {state:'armed', resumeAt:new Date().toISOString(), native: hasNativeSession(updated)}); void fireResume(chatId); }
+          }
+          return {chat:updated,resolved:true,reason:result.reason};
         } finally {reconciliations.delete(chatId);}
       }
       case 'approval.respond': { const approvalId = id(p.id); if (typeof p.approved !== 'boolean') throw new Error('Invalid approval decision.');
@@ -1647,12 +1881,39 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
         store.updateItem(item.id, item.text, item.status, {...item.data, reaskedAt: new Date().toISOString()}); timeline(chatId);
         return send(chatId, message, requestId);
       }
+      case 'chat.autoResume': {
+        const chatId = id(p.id); chatFor(chatId);
+        if (typeof p.resume !== 'boolean') throw new Error('Invalid resume choice.');
+        const row = autoResume.get(chatId);
+        if (!row || row.kind !== 'limit' || row.state === 'running') throw new Error('This chat is not waiting for a usage limit.');
+        if (p.resume) {
+          const at = Math.max(row.resumeAt ? Date.parse(row.resumeAt) : 0, Date.now() + autoResumeTiming.minWaitMs);
+          autoResume.update(chatId, {state:'armed', resumeAt: new Date(at).toISOString(), ...(row.state === 'gave-up' ? {attempts: 0} : {})});
+          armResume(chatId);
+        } else { cancelResumeTimer(chatId); autoResume.update(chatId, {state:'off'}); }
+        if (queue.paused(chatId) && store.queue(chatId).length) queue.pause(chatId, p.resume ? 'limited' : 'failed');
+        state();
+        return decorateChat(chatFor(chatId), goalsByChat().get(chatId), autoResume.get(chatId));
+      }
+      case 'chat.fallbacks': {
+        const chatId = id(p.id); chatFor(chatId);
+        if (!Array.isArray(p.fallbacks) || p.fallbacks.length > MAX_CHAT_FALLBACKS || !p.fallbacks.every(isChatFallback)) throw new Error(`Choose at most ${MAX_CHAT_FALLBACKS} fallback models.`);
+        const list = p.fallbacks.filter((entry, index, all) => all.findIndex(other => other.providerId === entry.providerId && other.model === entry.model) === index);
+        autoResume.setFallbacks(chatId, list);
+        // Chosen while the chat waits on a limit: it continues on the fallback now.
+        const waiting = autoResume.get(chatId);
+        if (waiting?.kind === 'limit' && (waiting.state === 'armed' || waiting.state === 'off' || waiting.state === 'gave-up') && list.length) { cancelResumeTimer(chatId); useFallback(chatId); }
+        state();
+        return decorateChat(chatFor(chatId), goalsByChat().get(chatId), autoResume.get(chatId));
+      }
       case 'chat.continueAnyway': {
         const chatId = id(p.id), chat = chatFor(chatId);
         if (runs.has(chatId) || chat.status === 'running' || chat.status === 'stopping') throw new Error('This attempt is still running here. Stop it or wait first.');
         if (chat.recovery?.kind !== 'recovery-needed') return chat;
         // The user's own call: the earlier attempt stays unconfirmed and is recorded as such, but it no longer blocks the chat.
         const updated = store.updateChat(chatId, {recovery: null, error: null, status: 'interrupted'});
+        // The user's call replaces the automatic continuation that waited for this check.
+        if (autoResume.get(chatId)?.state === 'check') clearAutoResume(chatId);
         store.appendItem(chatId, 'notice', 'Continued without confirming the earlier attempt. It may still have been working at the provider; nothing was resent.', 'completed', {kind: 'continue-anyway', providerThreadId: chat.providerThreadId, providerTurnId: chat.providerTurnId});
         timeline(chatId); state(); return updated;
       }
@@ -1869,6 +2130,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
   }
   scheduleSnoozes();
   queueMicrotask(() => { void sweepIdleChats(); });
+  queueMicrotask(() => { void bootAutoResume().catch(() => undefined); });
   archiveTimer = setInterval(() => { void sweepIdleChats(); }, 60 * 60_000); archiveTimer.unref?.();
   /** SBX-13: lock-screen / unlock-screen are accepted and ignored. */
   function powerEvent(input: {state: PowerState}): Promise<PowerOutcome> {
@@ -1881,9 +2143,21 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
     closing = true;
     if (snoozeTimer) clearTimeout(snoozeTimer);
     if (archiveTimer) clearInterval(archiveTimer);
+    for (const timer of resumeTimers.values()) clearTimeout(timer); resumeTimers.clear();
     disposal = (async () => {
       watcher.dispose(); watchedFolders.clear();
-      for (const [chatId, run] of runs) { run.stopped = true; run.retry.abort(); settleApprovals(chatId); settleQuestions(chatId); }
+      for (const [chatId, run] of runs) {
+        // #449: a quit is not a Stop. The live turn is kept as interrupted by shutdown (its thread and turn ids are already
+        // on the chat; the prompt goes in the row) and continues after the next start. Never one waiting on an approval or
+        // question, one the user was already stopping, or a continuation that was itself cut short.
+        const prior = autoResume.get(chatId), chat = store.chat(chatId);
+        if (!run.stopped) run.quit = true;
+        if (chat && !run.stopped && !approvalsFor(chatId) && !(prior?.kind === 'restart' && prior.state === 'running')) {
+          run.shutdown = true;
+          autoResume.set({chatId, kind:'restart', state:'shutdown', resumeAt:null, attempts:0, prompt: run.prompt ?? null, reuseItemId:null, attachmentIds:[], noticeId:null, native: hasNativeSession(chat)});
+        }
+        run.stopped = true; run.retry.abort(); settleApprovals(chatId); settleQuestions(chatId);
+      }
       offIdleEvents?.(); offQueueEvents(); nativeTurns.dispose();
       provider.dispose();
       // Main owns the user-visible deadline. Keep the database open until all

@@ -3,6 +3,16 @@
 All notable changes to Muster Agent. Each `## <version>` section becomes the notes of the
 `agent-v<version>` GitHub Release (`.github/workflows/agent-app-release.yml`).
 
+## Unreleased
+
+- When a run stops on a provider usage or rate limit, the chat now shows **Limited** with the reset time (from the usage windows Muster reads, or the provider's own message) and continues by itself at the reset. Queued messages wait and then send in order. Each chat can choose "Resume at reset" or "Don't resume", and Settings › General › "Continue when a usage limit resets" turns it off everywhere. The wait survives a restart. If the provider still refuses, Muster backs off, says so once, and stops after a few tries instead of looping. A rate limit or outage (429, 503) is retried sooner than a usage window.
+- A limited chat can opt in to a fallback model: pick one in the Limited row and the chat continues on it straight away, with the earlier conversation as a summary. Off by default.
+- Quitting Muster no longer counts as stopping your runs. A turn that was working when Muster quit or crashed now continues after the next start: Codex threads and Claude Code (and other CLI) sessions resume the same session, other routes get a short "Muster restarted…" message. A chat waiting for your approval or answer is left for you, a chat that needs its provider status checked keeps "Continue anyway", and a continuation is never repeated if Muster closes again during it. Turn it off in Settings › General › "Continue interrupted chats after a restart".
+- Installing an update no longer quits over running work: Muster says it will update when the work finishes, then installs.
+- Launch and connection failures that never reached the provider are now retried five times with growing waits (1 to 16 seconds) instead of twice.
+- Queued messages can no longer be lost or sent twice around a quit: a message leaves the queue only in the same step that records it as sent, a message already sent is dropped at launch, and messages the Codex app-server held come back to Muster's own queue.
+- Tool rows no longer keep spinning after a Stop, a crash or a quit; they show as interrupted.
+
 ## 0.3.13
 
 Replies in one turn read as one answer, and pictures that can no longer be read take one line instead of an empty frame.
