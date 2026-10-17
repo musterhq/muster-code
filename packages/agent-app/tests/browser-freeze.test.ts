@@ -49,6 +49,8 @@ test('agent use thaws a hidden page; the sweeper refreezes it once idle',()=>{
   assert.equal(views[0].webContents.states(),'frozen,active');
   assert.equal(controller.freezeIdle(),0,'recently used pages stay awake');
   tick(15_000);
+  assert.equal(controller.freezeIdle(),0,'a tab an agent tool just drove is held awake past the idle window');
+  tick(3*60_000);
   assert.equal(controller.freezeIdle(),1);
   assert.equal(views[0].webContents.states(),'frozen,active,frozen');
   controller.dispose();
