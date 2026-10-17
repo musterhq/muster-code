@@ -121,13 +121,15 @@ files.set('models/cube.glb', model.cubeGlb());
   await waitFor(() => state() === 'error', 'read error');
   assert.match(text(q('.resource-state-error')), /Couldn't open this 3D model/);
   assert.match(text(q('.resource-state-error')), /could not read this resource/);
-  assert.equal(q('.rich-block > .rich-sr[role="status"]')?.textContent, 'Couldn’t render this model.', 'announced to assistive tech');
+  // The announcement commits just after the state; wait for it rather than reading it on the same tick.
+  await waitFor(() => q('.rich-block > .rich-sr[role="status"]')?.textContent === 'Couldn’t render this model.', 'announced to assistive tech');
   failRead = null;
   const retry = [...root.querySelectorAll('.resource-state-actions button')].find(b => b.textContent === 'Try again') as HTMLElement;
   assert.ok(retry, 'Try again is offered');
   retry.click();
   await waitFor(() => state() === 'ready', 'recovery after Try again');
-  assert.equal(q('.rich-block > .rich-sr[role="status"]')?.textContent, '3D model · GLB ready: cube.glb');
+  // The announcement follows the state on the next commit; a loaded runner can see the state first.
+  await waitFor(() => q('.rich-block > .rich-sr[role="status"]')?.textContent === '3D model · GLB ready: cube.glb', 'the ready announcement');
   r.unmount();
 }
 

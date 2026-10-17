@@ -18,6 +18,7 @@ import {codexSubagentOverrides,subagentSupport} from './subagent-routes.ts';
 import {codexWindowOverrides, userCompactionKeys} from './codex-window-overrides.ts';
 import {unpackedPath} from './unpacked-path.ts';
 import {BROWSER_MCP, BROWSER_NOTE, browserToolStyle, routeBrowserNote} from '../shared/computer-use.ts';
+import {DEVICE_MCP, DEVICE_NOTE} from '../shared/device-protocol.ts';
 import type {McpServerSpec} from './adapters/types.ts';
 
 /** Identity of the test-only route `createProviderAdapter({available})` builds. */
@@ -145,8 +146,12 @@ export const runInstructions = (mode: Chat['mode'], extra?: string, subagents = 
 export function adapterBrowser(driver: string | undefined, mode: Chat['mode'], developerInstructions: string | undefined, overrides: ProviderInput['configOverrides'], subagents = true): {instructions?: string; mcpServers?: Record<string, McpServerSpec>; browserTools?: true} {
   const style = browserToolStyle(driver), offered = !!developerInstructions?.includes(BROWSER_NOTE);
   const servers = mcpServersFromOverrides(overrides);
-  if (style === 'native' || style === 'none') delete servers[BROWSER_MCP];
-  const instructions = runInstructions(mode, routeBrowserNote(developerInstructions, style), subagents);
+  // Routes that load no MCP servers never hear about tools they cannot call: the browser (native routes get their own)
+  // and the device tools (#363).
+  const noMcp = style === 'native' || style === 'none';
+  if (noMcp) { delete servers[BROWSER_MCP]; delete servers[DEVICE_MCP]; }
+  const routed = routeBrowserNote(developerInstructions, style);
+  const instructions = runInstructions(mode, noMcp && routed?.includes(DEVICE_NOTE) ? routed.replace(DEVICE_NOTE, '').replace(/\n{3,}/g, '\n\n').trim() || undefined : routed, subagents);
   return {...(instructions ? {instructions} : {}), ...(Object.keys(servers).length ? {mcpServers: servers} : {}), ...(offered && style === 'native' ? {browserTools: true as const} : {})};
 }
 /** Test runners construct many services; they opt into real CLI/API adapters by passing a catalog. */

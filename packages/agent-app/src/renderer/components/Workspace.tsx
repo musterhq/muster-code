@@ -51,7 +51,7 @@ import {AttachmentTab} from './AttachmentTab';
 import {DiffView} from './DiffView';
 import {ConflictTab} from './ConflictTab';
 import {GitTab} from './GitTab';
-import {LazyBoundary,LazyScopedComputerTab} from '../lazyScreens';
+import {LazyBoundary,LazyDeviceTab,LazyScopedComputerTab} from '../lazyScreens';
 import {AreaBoundary} from './AreaBoundary';
 import {ProcessesTab, openTerminalTab} from './ProcessesTab';
 import {BrowserTab} from './BrowserTab';
@@ -228,6 +228,8 @@ function TabBody({ tab, visible, onToggleResourceMaximize, resourceMaximized }: 
       return <RichTab tab={tab}/>;
     case 'liveView':
       return <LiveViewTab tab={tab}/>;
+    case 'device':
+      return <LazyBoundary label="device"><LazyDeviceTab tab={tab} visible={visible}/></LazyBoundary>;
   }
 }
 

@@ -1,11 +1,12 @@
 import React, {useEffect, useId, useMemo, useRef, useState} from 'react';
 import {Popover} from '@base-ui/react/popover';
-import {Bot, Inbox, Files as FileIcon, GitCompare, Globe, History, MessagesSquare, NotebookPen, Plus, Search, SquareTerminal} from 'lucide-react';
+import {Bot, Smartphone, Inbox, Files as FileIcon, GitCompare, Globe, History, MessagesSquare, NotebookPen, Plus, Search, SquareTerminal} from 'lucide-react';
 import {createCanvas, openSideChat, selectedText, sideChatBindingForTab} from '../artifacts';
 import {openBrowserTab, openChangesTab, openFile, openFilesTab, openInboxTab, openSubagentsTab, openTab, pickFolder, type WorkspaceTab} from '../store';
 import {useStore} from '../useStore';
 import {browserAddress} from '../../shared/browser-protocol';
 import {useFileSearch} from './FileSearch';
+import {DEVICES_TAB_ID, devicesAvailable} from '../deviceSessions';
 import {FileTypeIcon, ResourceTabIcon} from './FileTypeIcon';
 import {openTerminalTab} from './ProcessesTab';
 
@@ -94,6 +95,8 @@ function ResourceAddContent({close}: {close: () => void}): React.ReactElement {
       })(),
       {id: 'inbox', group: 'new', label: 'Inbox', detail: chat ? undefined : 'Open a chat first', icon: <Inbox size={14} aria-hidden="true"/>, disabled: !chat, run: act(() => chat && openInboxTab(chat.id, chat.title || 'Chat'))},
       {id: 'subagents', group: 'new', label: 'Subagents', detail: chat ? undefined : 'Open a chat first', icon: <Bot size={14} aria-hidden="true"/>, disabled: !chat, run: act(() => chat && openSubagentsTab(chat.id, folder?.id, folder?.name ?? chat.title))},
+      // #363: simulators and emulators (desktop app only).
+      ...(devicesAvailable() ? [{id: 'devices', group: 'new' as const, label: 'Devices', detail: 'iOS Simulators and Android Emulators', icon: <Smartphone size={14} aria-hidden="true"/>, run: act(() => openTab({id: DEVICES_TAB_ID, kind: 'device', title: 'Devices'}))}] : []),
     ];
     list.push(...kinds.filter(option => !needle || option.label.toLowerCase().includes(needle)));
     for (const tab of recentlyClosedTabs()) {
