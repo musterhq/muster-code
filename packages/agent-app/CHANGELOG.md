@@ -9,6 +9,7 @@ All notable changes to Muster Agent. Each `## <version>` section becomes the not
 - The Inbox no longer shows an empty list when the group you filtered by has no items left
 - Archive and delete project confirmations offer Try again when the impact check fails
 - In Settings > Memory, a failed save no longer undoes a later toggle that went through
+- In Settings, a quiet-hours or device-name value the app rejects is put back to the saved one instead of staying on screen as if saved
 
 ## 0.3.13
 
