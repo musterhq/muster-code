@@ -5,12 +5,13 @@ import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import {createRequire} from 'node:module';
 import {mkdtemp,rm,writeFile} from 'node:fs/promises';
+import {existsSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join,resolve} from 'node:path';
 
 const bundle=resolve(import.meta.dirname,'../dist/runtime/core-client.cjs');
 
-test('visible reasoning text streams as thinking; a summarised item is not shown twice', async t => {
+test('visible reasoning text streams as thinking; a summarised item is not shown twice', {skip: existsSync(bundle) ? false : `${bundle} is missing; run npm run build first`}, async t => {
   const root=await mkdtemp(join(tmpdir(),'muster-reasoning-'));t.after(()=>rm(root,{recursive:true,force:true}));
   const server=join(root,'fake-app-server.cjs'),command=join(root,'fake-codex.sh');
   await writeFile(server,`const send=m=>process.stdout.write(JSON.stringify(m)+'\\n');
