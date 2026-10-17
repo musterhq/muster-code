@@ -7,7 +7,10 @@ import type { NativeThreadBridge } from '../codex-native.ts';
 export type ReasoningEffort = 'low' | 'medium' | 'high' | 'xhigh';
 export interface PromptContribution { label: string; text: string }
 export type PromptContributor = (input: { chat: Chat; folder?: Folder; project?: Project; prompt: string; signal: AbortSignal }) => Promise<PromptContribution | null>;
-export interface RunOptions { reasoningEffort?: ReasoningEffort; configOverrides?: Record<string, unknown>; developerInstructions?: string }
+export interface RunOptions { reasoningEffort?: ReasoningEffort; configOverrides?: Record<string, unknown>; developerInstructions?: string;
+  /** Notes for this turn only (a goal's token budget). Sent with the message, so a per-turn change never alters the
+   *  developer instructions that key the warm app-server. */
+  turnContext?: string }
 export type RunOptionsContributor = (chat: Chat) => Promise<RunOptions | null>;
 export interface RunStarted { chat: Chat; runId: string; cwd: string }
 export interface RunSettled { chat: Chat; runId: string; status: ChatStatus }
@@ -20,6 +23,12 @@ export interface CommandCompleted { command: string; input: Record<string, unkno
 export type RunEnvironmentResolver = (chat: Chat, defaultCwd: string) => Promise<{ cwd: string }>;
 /** G13: a per-agent tool policy decision for an approval request. null: no rule applies and the usual flow decides. */
 export type ToolPolicyResolver = (chat: Chat, method: string, params: Record<string, unknown>) => { effect: 'allow' | 'ask' | 'deny'; message: string } | null;
+
+/** A worktree made for one automated run: its folder (linked to the project) and how to take it back when nothing ran in it. */
+export interface AutomatedWorktree { folderId: string; undo(): Promise<void> }
+export type AutomatedWorktreeResolver = (projectId: string, taskId: string) => Promise<AutomatedWorktree | null>;
+/** The brief of a server task's history for a run of it in `folder` (#434); null for a task that did not come from a server. */
+export type TaskHistoryBriefResolver = (input: { projectId: string; taskId: string; folder: { id: string; path: string } | null }) => Promise<string | null>;
 
 /** The add and on hooks return an unsubscribe function; the set hooks replace a single resolver (undefined clears it). */
 export interface DomainHooks {
@@ -37,6 +46,14 @@ export interface DomainHooks {
   /** Records that a folder is the linked worktree Muster made for a task, the only kind of folder a Git-tab commit may carry an agent identity in. */
   setTaskWorktreeRecorder?(fn: ((projectId: string, taskId: string, folderId: string) => void) | undefined): void;
   noteTaskWorktree?(projectId: string, taskId: string, folderId: string): void;
+  /** Replaces the single resolver of the worktree an automated run (the scheduler, a wake) of an imported project's task works in (undefined clears it). It resolves to null for a project that is not imported. */
+  setAutomatedWorktree?(fn: AutomatedWorktreeResolver | undefined): void;
+  /** The worktree an automated run of this task must use, made (or reused) on demand; null when the task may use its project's own folder. Rejects when the worktree cannot be made: the run must not fall back to the checkout. */
+  automatedWorktree?(projectId: string, taskId: string): Promise<AutomatedWorktree | null>;
+  /** Replaces the single resolver of an imported task's history brief (undefined clears it). */
+  setTaskHistoryBrief?(fn: TaskHistoryBriefResolver | undefined): void;
+  /** What a run of an imported task is told about the task's history on the server; null when there is none. Never throws. */
+  taskHistoryBrief?(input: Parameters<TaskHistoryBriefResolver>[0]): Promise<string | null>;
   /** The identity a commit in this folder carries, or null. Never throws. */
   commitIdentity?(folderId: string): { name: string; email: string } | null;
   /** Observes successful domain commands (e.g. Projects logging memory and environment writes to activity). Optional so bare test contexts need not provide it. */

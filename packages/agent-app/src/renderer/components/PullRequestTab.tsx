@@ -1,5 +1,6 @@
 import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import ReactMarkdown from 'react-markdown';
+import {MarkdownTable} from './MarkdownTable';
 import remarkGfm from 'remark-gfm';
 import {ArrowUpRight, ChevronDown, ChevronRight, GitPullRequest, Loader2, MessageSquare, RefreshCw} from 'lucide-react';
 import type {
@@ -46,7 +47,7 @@ const safeLink = (url: string) => safeUrl(url) ?? '';
 function Markdown({text}: {text: string}): React.ReactElement {
   if (!text.trim()) return <p className="pr-muted">No description provided.</p>;
   return <div className="md-body pr-markdown"><ReactMarkdown remarkPlugins={[remarkGfm]} skipHtml urlTransform={safeLink}
-    components={{a: ({href, children}) => <a href={href} onClick={event => { event.preventDefault(); if (href) openBrowserTab(href); }}>{children}</a>}}>{text}</ReactMarkdown></div>;
+    components={{table: ({node: _node, ...props}) => <MarkdownTable {...props}/>, a: ({href, children}) => <a href={href} onClick={event => { event.preventDefault(); if (href) openBrowserTab(href); }}>{children}</a>}}>{text}</ReactMarkdown></div>;
 }
 
 const when = (value: string | null | undefined) => value ? relativeLabel(value) : '';

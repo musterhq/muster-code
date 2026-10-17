@@ -25,7 +25,7 @@ async function fixture(t:TestContext){
     const json=(v:unknown)=>new Response(JSON.stringify(v),{status:200,headers:{'content-type':'application/json'}});
     const limit=q.get('limit')?Number(q.get('limit')):null,offset=q.get('offset')?Number(q.get('offset')):null;
     if(path==='/companies')return json([{id:COMPANY,name:'BigCo',issuePrefix:'BIG',status:'active'}]);
-    if(path===`/companies/${COMPANY}/issues`){requests.push({path,limit,offset,after:null});const sorted=[...issues].sort((a,b)=>a.id.localeCompare(b.id));return json(sorted.slice(offset??0,(offset??0)+Math.min(limit??500,1000)));}
+    if(path===`/companies/${COMPANY}/issues`){const afterId=q.get('afterId');requests.push({path,limit,offset,after:afterId});const sorted=[...issues].sort((a,b)=>a.id.localeCompare(b.id)).filter(x=>!afterId||String(x.id)>afterId);return json(sorted.slice(offset??0,(offset??0)+Math.min(limit??500,1000)));}
     if(path===`/companies/${COMPANY}/projects`)return json([{id:PROJECT,name:'Big project',description:'A big one',codebase:{}}]);
     if(path===`/companies/${COMPANY}/agents`)return json([{id:AGENT,name:'Atlas',role:'engineer',title:'Lead',status:'idle',adapterType:'process',adapterConfig:{}}]);
     if(path===`/companies/${COMPANY}/heartbeat-runs`||path===`/companies/${COMPANY}/live-runs`||path===`/companies/${COMPANY}/goals`||path===`/companies/${COMPANY}/approvals`||path===`/companies/${COMPANY}/labels`)return json([]);
@@ -51,7 +51,8 @@ test('F1/F2: a linked org with more than 1000 issues and an issue with 500+ comm
   assert.equal(snap.paperclip?.stale,undefined);
   const pages=requests.filter(r=>/issues$/.test(r.path));
   assert.ok(pages.length>=2&&pages.every(r=>(r.limit??0)<=1000),'issues arrive in pages of at most 1000');
-  assert.deepEqual(pages.slice(0,2).map(r=>r.offset??0),[0,1000],'the next page starts where the last ended');
+  assert.deepEqual(pages.slice(0,2).map(r=>r.after),[null,'i00999'],'the next page starts after the last id of the one before');
+  assert.ok(pages.every(r=>r.offset===null),'no offset is sent: an offset over id order can skip a row');
   const detail=await service.invoke('paperclip.task',{id:'i00000'});
   assert.equal(detail.comments.length,COMMENTS,'every comment is shown');
   assert.equal(detail.comments[0].body,'Comment 1');assert.equal(detail.comments.at(-1)!.body,`Comment ${COMMENTS}`,'oldest first, in order');

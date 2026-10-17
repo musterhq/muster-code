@@ -13,7 +13,7 @@
  * Output is a base64 data: URL; no filesystem paths or file:// URLs leak out.
  */
 import { constants, promises as fs } from 'node:fs';
-import { extname } from 'node:path';
+import { basename, dirname, extname, isAbsolute } from 'node:path';
 import { resolveInside } from './paths.ts';
 
 const MAX_BYTES = 8 * 1024 * 1024;
@@ -146,9 +146,21 @@ const SIZERS: Record<Format, (buffer: Buffer) => { width: number; height: number
 
 export interface AssetResult { mime: string; dataUrl: string; size: number; width: number; height: number }
 
-export async function readAsset(root: string, rel: string): Promise<AssetResult> {
+export interface AssetOptions { /** Images only: audio/video is refused. */ imagesOnly?: boolean; /** Byte cap for an image; defaults to 8 MiB. */ maxBytes?: number }
+/** Largest image the chat thumbnails and viewer read from outside a project folder. */
+export const MAX_CHAT_IMAGE_BYTES = 20 * 1024 * 1024;
+
+/** An image a chat's own tool rows named, wherever it lives (/tmp, a worktree under app data, any absolute path).
+ *  Image extensions and magic bytes only, no symlinked leaf, 20 MiB cap, never a directory. The caller must already have
+ *  checked that the path came from that chat (service.ts `files.chatImage`). */
+export function readChatImage(absolute: string): Promise<AssetResult> {
+  if (!isAbsolute(absolute) || absolute.includes('\0')) return Promise.reject(new Error('Not an absolute path.'));
+  return readAsset(dirname(absolute), basename(absolute), { imagesOnly: true, maxBytes: MAX_CHAT_IMAGE_BYTES });
+}
+
+export async function readAsset(root: string, rel: string, options: AssetOptions = {}): Promise<AssetResult> {
   const expected = EXTENSIONS[extname(rel).toLowerCase()];
-  const media = MEDIA[extname(rel).toLowerCase()];
+  const media = options.imagesOnly ? undefined : MEDIA[extname(rel).toLowerCase()];
   if (!expected && !media) throw new Error(`Unsupported image type: ${rel}. Only PNG, JPEG, GIF, WebP, BMP, AVIF, SVG and common audio/video files are allowed.`);
   const abs = await resolveInside(root, rel);
   // O_NOFOLLOW: resolveInside already returned a realpath, so a symlink at the
@@ -163,7 +175,7 @@ export async function readAsset(root: string, rel: string): Promise<AssetResult>
   try {
     const stat = await handle.stat();
     if (!stat.isFile()) throw new Error(`Not a file: ${rel}`);
-    const cap = media ? MAX_MEDIA_BYTES : MAX_BYTES;
+    const cap = media ? MAX_MEDIA_BYTES : options.maxBytes ?? MAX_BYTES;
     if (stat.size > cap) throw new Error(`${media ? 'Media file' : 'Image'} exceeds ${cap / (1024 * 1024)} MiB limit: ${rel}`);
     const buffer = Buffer.alloc(stat.size);
     const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);

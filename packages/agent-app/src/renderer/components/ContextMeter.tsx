@@ -2,6 +2,9 @@ import React, {useState} from 'react';
 import {Popover} from '@base-ui/react/popover';
 import type { ContextTelemetry } from '../../shared/protocol';
 import {invoke} from '../bridge';
+import {cleanIpcError} from './resourceErrors';
+import {contextView} from '../contextView';
+export {contextView};
 import {useStoreSelector} from '../useStore';
 import {ChatUsageSection} from './UsageCost';
 import './context-meter.css';
@@ -12,17 +15,6 @@ export function formatTokens(n: number): string {
   return String(n);
 }
 
-/** The meter's view: reported values win; before any report the catalog window gives an 'Estimated' state with nothing used. */
-export function contextView(telemetry: ContextTelemetry, catalogWindow?: number) {
-  const estimated = telemetry.source === null && telemetry.usedTokens === null && telemetry.windowTokens === null && !!catalogWindow;
-  const usedTokens = estimated ? 0 : telemetry.usedTokens;
-  const windowTokens = telemetry.windowTokens ?? (estimated ? catalogWindow! : null);
-  const percent = usedTokens !== null && windowTokens !== null ? Math.min(100, Math.round((usedTokens / windowTokens) * 100)) : null;
-  const remaining = usedTokens !== null && windowTokens !== null ? Math.max(0, windowTokens - usedTokens) : null;
-  const source = estimated ? 'Estimated from the model catalog' : telemetry.source === 'live' ? 'Codex app-server · live' : telemetry.source === 'restored' ? 'Codex app-server · restored from last session' : 'Not reported yet';
-  return {estimated, usedTokens, windowTokens, percent, remaining, source};
-}
-
 /**
  * Context-window occupancy meter. Unknown values render as "Unavailable" —
  * never a fabricated zero or full bar. Before the first provider report the
@@ -31,13 +23,14 @@ export function contextView(telemetry: ContextTelemetry, catalogWindow?: number)
 export function ContextMeter({ telemetry }: { telemetry: ContextTelemetry }): React.ReactElement {
   const chatId = useStoreSelector(state => state.activeChatId);
   const running = useStoreSelector(state => { const chat = state.snapshot?.chats.find(c => c.id === state.activeChatId); return !chat || chat.status === 'running' || chat.status === 'stopping'; });
-  const catalogWindow = useStoreSelector(state => {
+  // #426: the chat's model entry (window, its source, catalog compaction limit): the meter and Muster's compaction share one basis.
+  const model = useStoreSelector(state => {
     const chat = state.snapshot?.chats.find(c => c.id === state.activeChatId);
-    return chat ? state.providers.value?.find(p => p.id === chat.providerId)?.models.find(m => m.id === chat.model)?.contextWindow : undefined;
+    return chat ? state.providers.value?.find(p => p.id === chat.providerId)?.models.find(m => m.id === chat.model) : undefined;
   });
   const [compacting, setCompacting] = useState(false), [compactError, setCompactError] = useState('');
   const { compacted, source } = telemetry;
-  const { estimated, usedTokens, windowTokens, percent, remaining, source: sourceLabel } = contextView(telemetry, catalogWindow);
+  const { estimated, usedTokens, windowTokens, percent, remaining, source: sourceLabel, compactAt } = contextView(telemetry, model);
   const usedLabel = usedTokens === null ? 'Unavailable' : formatTokens(usedTokens);
   const limitLabel = windowTokens === null ? 'Unavailable' : formatTokens(windowTokens);
   const detail = percent !== null
@@ -50,7 +43,7 @@ export function ContextMeter({ telemetry }: { telemetry: ContextTelemetry }): Re
     if (!chatId || compacting) return;
     setCompacting(true); setCompactError('');
     try { await invoke('chat.compact', { id: chatId }); }
-    catch (error) { setCompactError(error instanceof Error ? error.message : 'Compaction failed.'); }
+    catch (error) { setCompactError(cleanIpcError(error) || 'Compaction failed.'); }
     finally { setCompacting(false); }
   };
   return (
@@ -75,6 +68,7 @@ export function ContextMeter({ telemetry }: { telemetry: ContextTelemetry }): Re
             <div><dt>Remaining</dt><dd>{remaining?.toLocaleString() ?? 'Unavailable'}</dd></div>
             <div><dt>Window size</dt><dd>{windowTokens?.toLocaleString() ?? 'Unavailable'}</dd></div>
             <div><dt>Source</dt><dd>{sourceLabel}</dd></div>
+            {compactAt !== null && <div><dt>Compacts at</dt><dd>{compactAt.toLocaleString()}</dd></div>}
           </dl>
           <section className="context-breakdown" aria-label="Context breakdown">
             <h3>Breakdown</h3>
@@ -85,7 +79,7 @@ export function ContextMeter({ telemetry }: { telemetry: ContextTelemetry }): Re
           {source === 'restored' && <p>Last recorded usage from the previous session. Updates when the provider reports new usage.</p>}
           {compacted && <p>Earlier history was compacted. The next usage report will update this estimate.</p>}
           <div className="context-actions">
-            <button type="button" disabled={!chatId || running || compacting} aria-busy={compacting || undefined} onClick={() => void compact()} title={running ? 'Available when the current run finishes' : 'Summarize earlier turns at the provider to free context'}>{compacting ? 'Compacting…' : 'Compact now'}</button>
+            <button type="button" disabled={!chatId || compacting} aria-busy={compacting || undefined} onClick={() => void compact()} title={running ? 'Compacts as soon as the current turn finishes' : 'Summarize earlier turns at the provider to free context'}>{compacting ? 'Compacting…' : running ? 'Compact after this turn' : 'Compact now'}</button>
             <span>The transcript here keeps every message.</span>
           </div>
           {compactError && <p className="context-error" role="alert">{compactError}</p>}

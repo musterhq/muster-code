@@ -10,7 +10,7 @@ import { ArrowDown, ArrowRight, ArrowUp, Brain, CircleHelp, FileText, GitBranch,
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { LedgerEntry, PaperclipQuestion, ThreadCard, WorkspaceComment, WorkspaceMemory, WorkspacePriority, WorkspaceSnapshot, WorkspaceStatus, WorkspaceTaskDetail } from '../../shared/domains/paperclip-protocol';
 import type { Vote } from '../../shared/domains/work-protocol';
-import { PRIORITY_NAME, STATUS_LABEL, WORKSPACE_PRIORITIES, WORKSPACE_STATUSES } from '../../shared/domains/paperclip-protocol';
+import { buildPaperclipAnswer, PRIORITY_NAME, STATUS_LABEL, WORKSPACE_PRIORITIES, WORKSPACE_STATUSES } from '../../shared/domains/paperclip-protocol';
 import { NAMES } from '../../shared/workspace-names';
 import { invoke } from '../bridge';
 import { onTasksChanged } from '../hubStore';
@@ -20,6 +20,7 @@ import { ApprovalActions, LiveCount, Monogram, Receipt, RUN_STATE_LABEL, StateCh
 import { ApprovalCard } from './ApprovalCard';
 import { MessageBody } from './MessageBody';
 import { PendingQuestion } from './PendingQuestion';
+import { ServerDecision, ToolActionView } from './ServerDecision';
 import { ResourceState } from './ResourceState';
 import { Tip } from './Tooltip';
 import { SkillFromTask } from './SkillStudio';
@@ -124,15 +125,6 @@ function Thread({ detail, snapshot, onChanged, onOpenTask, onOpenAgent, properti
 
 /** System cards between turns, built from the app's card and chip styles. */
 function Card({ card, taskId, projectId, who, onOpenTask, onChanged }: { card: ThreadCard; taskId: string; projectId: string; who: (name: string | null) => React.ReactNode; onOpenTask: (id: string) => void; onChanged: () => void }): React.ReactElement {
-  const [busy, setBusy] = useState(false);
-  const [reason, setReason] = useState('');
-  const [rejecting, setRejecting] = useState(false);
-  const respond = async (accept: boolean) => {
-    if (card.kind !== 'needs' || !card.interactionId) return;
-    setBusy(true);
-    try { await invoke('paperclip.interaction.respond', { taskId, interactionId: card.interactionId, accept, ...(reason.trim() ? { reason: reason.trim() } : {}) }); notifySuccess(accept ? 'Approved.' : 'Sent back with your reason.'); onChanged(); }
-    catch (cause) { notifyError(cause); } finally { setBusy(false); }
-  };
   if (card.kind === 'delegated') return <div className="ws-card-sys" data-kind="delegated">
     <GitBranch size={14} aria-hidden="true"/><span className="ws-card-sys-text"><strong>Delegated</strong> {who(card.from)}<ArrowRight size={12} aria-hidden="true" className="ws-message-arrow"/>{who(card.to)} · <button type="button" className="ws-link" onClick={() => onOpenTask(card.taskId)}>{card.key}</button> {card.title}</span>
     <time className="ws-message-time" title={exactTime(card.at)}>{agoLabel(card.at)}</time>
@@ -153,20 +145,18 @@ function Card({ card, taskId, projectId, who, onOpenTask, onChanged }: { card: T
   if (card.kind === 'suggestion') return <SuggestionCard suggestion={card.suggestion} projectId={projectId} onChanged={onChanged}/>;
   if (card.kind === 'stage') return <StageCard stage={card.stage} taskId={taskId} projectId={projectId} onChanged={onChanged}/>;
   return <div className="ws-card-sys" data-kind="needs" data-status={card.status}>
-    <CircleHelp size={14} aria-hidden="true"/><span className="ws-card-sys-text"><strong>{card.status === 'pending' ? 'Needs you' : 'Decision'}</strong>{card.from ? <> · {who(card.from)} asks</> : null}</span>
+    <CircleHelp size={14} aria-hidden="true"/><span className="ws-card-sys-text"><strong>{card.status === 'pending' ? 'Needs you' : card.status === 'failed' ? 'Did not go through' : 'Decision'}</strong>{card.from ? <> · {who(card.from)} asks</> : null}</span>
     <time className="ws-message-time" title={exactTime(card.at)}>{agoLabel(card.at)}</time>
     {!card.pending && !card.questions?.length && <p className="ws-card-prompt">{card.prompt}</p>}
     {card.detail && card.status === 'pending' && <details className="ws-card-detail"><summary>Details</summary><MessageBody text={card.detail}/></details>}
-    {card.status !== 'pending' ? <p className="ws-faint ws-card-resolution">{card.status === 'cancelled' ? 'Withdrawn.' : card.resolution ?? 'Answered.'}</p>
+    {card.tool && card.status !== 'pending' && <ToolActionView tool={card.tool}/>}
+    {card.status !== 'pending' ? <p className="ws-faint ws-card-resolution" data-status={card.status}>{card.status === 'failed' ? <><StateChip tone="danger">Failed</StateChip> </> : null}{card.status === 'cancelled' ? card.resolution ?? 'Withdrawn.' : card.resolution ?? (card.status === 'failed' ? 'This did not go through.' : 'Answered.')}</p>
       : card.questions?.length && card.interactionId ? <PaperclipQuestions taskId={taskId} interactionId={card.interactionId} questions={card.questions} submitLabel={card.submitLabel ?? null} onChanged={onChanged}/>
       : card.pending ? (card.pending.kind === 'question' ? <PendingQuestion item={card.pending}/> : <ApprovalCard item={card.pending}/>)
       : card.chatId ? <p className="ws-faint ws-card-resolution">Answer it in <button type="button" className="ws-link" onClick={() => { void selectChat(card.chatId!); closeSettings(); }}>the run chat</button>.</p>
-      : card.interactionId ? <div className="ws-card-actions">
-          {rejecting && <input className="ws-card-reason" aria-label="What should change?" placeholder="What should change?" value={reason} onChange={e => setReason(e.target.value)}/>}
-          <button type="button" className="settings-button secondary" disabled={busy || (rejecting && !reason.trim())} onClick={() => rejecting ? void respond(false) : setRejecting(true)}>{card.rejectLabel ?? 'Request changes'}</button>
-          <button type="button" className="settings-button" disabled={busy} onClick={() => void respond(true)}>{card.acceptLabel ?? 'Approve'}</button>
-        </div>
+      : card.interactionId ? <ServerDecision card={card} taskId={taskId} onChanged={onChanged}/>
       : <p className="ws-faint ws-card-resolution">Answer it by replying below.</p>}
+    {card.notice && <p className="ws-faint ws-card-resolution" role="status" data-kind="resume">{card.notice}</p>}
   </div>;
 }
 
@@ -186,24 +176,36 @@ function DocumentCard({ card }: { card: Extract<ThreadCard, { kind: 'document' }
 function PaperclipQuestions({ taskId, interactionId, questions, submitLabel, onChanged }: { taskId: string; interactionId: string; questions: PaperclipQuestion[]; submitLabel: string | null; onChanged: () => void }): React.ReactElement {
   const [picked, setPicked] = useState<Record<string, string[]>>({});
   const [other, setOther] = useState<Record<string, string>>({});
+  // "Other" is a choice of its own; a question with no options is only the text field.
+  const [otherOn, setOtherOn] = useState<Record<string, boolean>>({});
+  const otherField = useRef<Record<string, HTMLInputElement | null>>({});
   const [busy, setBusy] = useState(false);
-  const answered = (q: PaperclipQuestion) => (picked[q.id]?.length ?? 0) > 0 || Boolean(other[q.id]?.trim());
+  const otherShown = (q: PaperclipQuestion) => q.allowOther && (q.options.length === 0 || otherOn[q.id] === true);
+  const answered = (q: PaperclipQuestion) => (picked[q.id]?.length ?? 0) > 0 || (otherShown(q) && Boolean(other[q.id]?.trim()));
+  // A question marked optional may stay empty; it is then left out of the answer.
+  const satisfied = (q: PaperclipQuestion) => q.required === false || answered(q);
+  const chooseOther = (q: PaperclipQuestion, on: boolean) => {
+    setOtherOn(current => ({ ...current, [q.id]: on }));
+    if (on && !q.multi) setPicked(current => ({ ...current, [q.id]: [] }));
+    if (on) setTimeout(() => otherField.current[q.id]?.focus(), 0);
+  };
   const send = async () => {
-    if (busy || !questions.every(answered)) return;
+    if (busy || !questions.every(satisfied) || !questions.some(answered)) return;
     setBusy(true);
     try {
-      await invoke('paperclip.interaction.respond', { taskId, interactionId, accept: true, answers: questions.map(q => ({ questionId: q.id, optionIds: picked[q.id] ?? [], ...(other[q.id]?.trim() ? { otherText: other[q.id].trim() } : {}) })) });
+      await invoke('paperclip.interaction.respond', { taskId, interactionId, accept: true, answers: questions.filter(answered).map(q => buildPaperclipAnswer(q, picked[q.id] ?? [], otherShown(q) ? other[q.id] ?? '' : '')) });
       notifySuccess('Answer sent.'); onChanged();
     } catch (cause) { notifyError(cause); setBusy(false); }
   };
   return <section className="pending-question" aria-label="Questions">
     {questions.map(q => <fieldset key={q.id} disabled={busy}>
-      <p>{q.prompt}</p>
+      <p>{q.prompt}{q.required === false ? <span className="ws-faint"> (optional)</span> : null}</p>
       {q.helpText && <p className="ws-faint">{q.helpText}</p>}
-      {q.options.map(option => { const on = picked[q.id]?.includes(option.id) ?? false; return <label key={option.id} className="pending-question-option"><input type={q.multi ? 'checkbox' : 'radio'} name={`${interactionId}:${q.id}`} checked={on} onChange={() => setPicked(current => ({ ...current, [q.id]: q.multi ? (on ? (current[q.id] ?? []).filter(x => x !== option.id) : [...(current[q.id] ?? []), option.id]) : [option.id] }))}/> <span>{option.label}{option.description && <small>{option.description}</small>}</span></label>; })}
-      {q.allowOther && <label className="pending-question-custom">Other answer<input type="text" value={other[q.id] ?? ''} onChange={e => setOther(current => ({ ...current, [q.id]: e.target.value }))} placeholder="Or type a custom response"/></label>}
+      {q.options.map(option => { const on = picked[q.id]?.includes(option.id) ?? false; return <label key={option.id} className="pending-question-option"><input type={q.multi ? 'checkbox' : 'radio'} name={`${interactionId}:${q.id}`} checked={on} onChange={() => { setPicked(current => ({ ...current, [q.id]: q.multi ? (on ? (current[q.id] ?? []).filter(x => x !== option.id) : [...(current[q.id] ?? []), option.id]) : [option.id] })); if (!q.multi) setOtherOn(current => ({ ...current, [q.id]: false })); }}/> <span>{option.label}{option.description && <small>{option.description}</small>}</span></label>; })}
+      {q.allowOther && q.options.length > 0 && <label className="pending-question-option"><input type={q.multi ? 'checkbox' : 'radio'} name={`${interactionId}:${q.id}`} checked={otherOn[q.id] === true} onChange={() => chooseOther(q, !(otherOn[q.id] === true))}/> <span>Other</span></label>}
+      {otherShown(q) && <label className="pending-question-custom">{q.options.length ? 'Other answer' : 'Your answer'}<input type="text" ref={el => { otherField.current[q.id] = el; }} value={other[q.id] ?? ''} onChange={e => setOther(current => ({ ...current, [q.id]: e.target.value }))} placeholder="Type your own answer"/></label>}
     </fieldset>)}
-    <div className="pending-question-actions"><button type="button" className="pending-question-submit" disabled={busy || !questions.every(answered)} onClick={() => void send()}>{busy ? 'Sending…' : submitLabel ?? 'Send answer'}</button></div>
+    <div className="pending-question-actions"><button type="button" className="pending-question-submit" disabled={busy || !questions.every(satisfied) || !questions.some(answered)} onClick={() => void send()}>{busy ? 'Sending…' : submitLabel ?? 'Send answer'}</button></div>
   </section>;
 }
 
@@ -214,6 +216,7 @@ function Composer({ detail, snapshot, onSent }: { detail: WorkspaceTaskDetail; s
   const [mention, setMention] = useState<{ query: string; start: number } | null>(null);
   const [mode, setMode] = useState<'message' | 'note'>('message');
   const field = useRef<HTMLTextAreaElement>(null);
+  const draftId = useRef<string | null>(null);
   const local = detail.task.source === 'local' && Boolean(detail.task.projectId);
   const owners = local ? snapshot.agents.filter(a => a.source === 'local' && a.projectId === detail.task.projectId && a.memberId && a.memberId !== 'agent' && a.status !== 'pending' && a.status !== 'terminated') : [];
   // An @-mention of an agent that does not own the task offers to hand the task over: only the owner runs it.
@@ -243,12 +246,17 @@ function Composer({ detail, snapshot, onSent }: { detail: WorkspaceTaskDetail; s
     setBusy(true);
     try {
       if (local && mode === 'note') await invoke('project.tasks.note', { projectId: detail.task.projectId!, id: detail.task.id, text: body });
-      else await invoke('paperclip.comment', { taskId: detail.task.id, body: server ? chipMentions(body, detail.mentionable) : body });
-      setText(''); onSent();
+      else {
+        // One id per draft: if the send times out and you press Send again, the server keeps one comment. Editing the text makes a new draft.
+        const clientRequestId = draftId.current ??= crypto.randomUUID();
+        await invoke('paperclip.comment', { taskId: detail.task.id, body: server ? chipMentions(body, detail.mentionable) : body, clientRequestId });
+      }
+      draftId.current = null; setText(''); onSent();
     }
     catch (cause) { notifyError(cause); } finally { setBusy(false); requestAnimationFrame(() => field.current?.focus()); }
   };
   const onChange = (value: string, caret: number) => {
+    if (value !== text) draftId.current = null;
     setText(value);
     const before = value.slice(0, caret), at = /(^|\s)@([\p{L}\p{N} ]{0,24})$/u.exec(before);
     setMention(at ? { query: at[2], start: caret - at[2].length - 1 } : null);

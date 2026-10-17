@@ -16,7 +16,7 @@ export async function handleMcpMessage(message: Message, options: McpServerOptio
     case 'tools/call': {
       const name = typeof message.params?.name === 'string' ? message.params.name : '';
       let result: McpToolResult;
-      try { result = await options.call(name, message.params?.arguments ?? {}); } catch (error) { result = textResult(`Muster’s browser is not reachable: ${error instanceof Error ? error.message : String(error)}. Is Muster still open?`, true); }
+      try { result = await options.call(name, message.params?.arguments ?? {}); } catch (error) { result = textResult(`Muster’s browser is not reachable (${error instanceof Error ? error.message : String(error)}), even after a retry. Muster may be restarting or closed: try the browser tool again in a few seconds, and if it still fails, ask the user to check that Muster is open.`, true); }
       respond({result}); return;
     }
     default:
@@ -25,16 +25,29 @@ export async function handleMcpMessage(message: Message, options: McpServerOptio
   }
 }
 
+/** One bridge request; the endpoint file is re-read every time (a relaunched Muster listens on a new port and token). */
+export type BridgeRequest = (tool: string, args: unknown) => Promise<McpToolResult>;
+/** #387: a refused connection, a stale token (403) or a missing endpoint file while Muster restarts gets one retry. A
+ *  timeout does not: the bridge answers every call within its own limit, so a timeout means the call already ran. */
+export async function callWithRetry(request: BridgeRequest, tool: string, args: unknown, delayMs = 750): Promise<McpToolResult> {
+  try { return await request(tool, args); }
+  catch (error) {
+    if (error instanceof Error && /timeout|aborted/i.test(`${error.name} ${error.message}`)) throw new Error(`no answer within 110 s`);
+    await new Promise(resolve => setTimeout(resolve, delayMs));
+    return await request(tool, args);
+  }
+}
+
 function main(): void {
-  const endpointFile = process.argv[2], chatId = process.env.MUSTER_CHAT_ID ?? '';
+  const endpointFile = process.argv[2], chatId = process.env.MUSTER_CHAT_ID ?? '', session = process.env.MUSTER_BROWSER_SESSION ?? '';
   const endpoint = (): {url: string; token: string} => JSON.parse(fs.readFileSync(endpointFile!, 'utf8'));
-  const call = async (tool: string, args: unknown): Promise<McpToolResult> => {
-    // Re-read each call: a relaunched Muster listens on a new port with a new token.
+  const request: BridgeRequest = async (tool, args) => {
     const {url, token} = endpoint();
-    const response = await fetch(url, {method: 'POST', headers: {'content-type': 'application/json', authorization: `Bearer ${token}`}, body: JSON.stringify({chatId, tool, arguments: args}), signal: AbortSignal.timeout(110_000)});
+    const response = await fetch(url, {method: 'POST', headers: {'content-type': 'application/json', authorization: `Bearer ${token}`}, body: JSON.stringify({chatId, tool, arguments: args, ...(session ? {session} : {})}), signal: AbortSignal.timeout(110_000)});
     if (!response.ok) throw new Error(`bridge answered ${response.status}`);
     return await response.json() as McpToolResult;
   };
+  const call = (tool: string, args: unknown) => callWithRetry(request, tool, args);
   const write = (line: string) => { process.stdout.write(line + '\n'); };
   let buffer = '';
   process.stdin.setEncoding('utf8');

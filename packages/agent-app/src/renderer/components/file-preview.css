@@ -234,7 +234,7 @@
 .media-file video { flex: 1; min-height: 0; width: 100%; background:  var(--media-bg); }
 .media-file audio { width: calc(100% - 48px); margin: 32px 24px; }
 .html-preview { display: flex; flex: 1; min-height: 0; padding: 14px; overflow: auto; }
-.html-preview iframe { flex: 1; min-height: 0; width: 100%; border: 1px solid rgb(var(--fg-rgb) / 7.8%); border-radius: var(--radius-8); background:  var(--paper); color-scheme: light; }
+.html-preview .sandboxed-html { flex: 1; min-height: 0; width: 100%; border: 1px solid rgb(var(--fg-rgb) / 7.8%); border-radius: var(--radius-8); overflow: hidden; }
 @media (prefers-reduced-motion: reduce) { .file-exit-actions button { transition: none; } }
 
 /* Truncated-preview "Load full file" action reuses the exit-actions button look. */

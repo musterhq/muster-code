@@ -8,7 +8,8 @@ import { createHash } from 'node:crypto';
 import { promises as fs, existsSync, mkdirSync, copyFileSync, statSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { rescanProviderListings, setProviderListingStore } from './provider-instances.ts';
-import type { AgentEvent, ApprovalData, ApprovalDecision, Chat, ChatRecovery, Commands, PendingQuestion, PendingQuestionData, TimelineItem, WakeReason } from '../shared/protocol.ts';
+import type { AgentEvent, ApprovalData, ApprovalDecision, Chat, ChatRecovery, Commands, PendingQuestion, PendingQuestionData, ProviderInfo, TimelineItem, WakeReason } from '../shared/protocol.ts';
+import { CONTEXT_OVERFLOW, musterCompactAt } from '../shared/context-window.ts';
 import type { PendingAttentionSummary, AttentionRequest } from '../shared/attention-protocol.ts';
 import { discoverLocalProviders } from './provider-discovery.ts';
 import { homedir } from 'node:os';
@@ -18,13 +19,14 @@ import { AgentStore } from './store.ts';
 import { applyFolderAliases, canonicalFolderPath } from './folder-merge.ts';
 import { WorkspaceWatchService } from './workspace-watch.ts';
 import {claudeChildRow,claudeChildThread} from './subagent-rows.ts';
+import {asksForSubagents,subagentSupport,subagentsUnavailableText} from './subagent-routes.ts';
 import {appendCommandOutput,finishCommandOutput,stripAnsi} from './command-output-buffer.ts';
 import {OutputLog} from './output-log.ts';
 import {ProjectEventLog} from './project-event-log.ts';
 import { toolEventDetails } from './tool-event-details.ts';
 import { applyProviderEvent, COMPACTION_TEXT, isForeignThreadEvent } from './context-telemetry.ts';
 import { listFiles, readFile, searchFiles } from './files.ts';
-import { readAsset } from './file-assets.ts';
+import { readAsset, readChatImage } from './file-assets.ts';
 import { readModelChunk } from './file-models.ts';
 import {readDocument} from './document-preview.ts';
 import {readWorkbook} from './workbook-preview.ts';
@@ -34,7 +36,8 @@ import { AgentModeReviewHost } from './review.ts';
 import {dirtyFileCount, gitStatus, mutateGit, pushGit, listPullRequests, compareUrl} from './git-local.ts';
 import {createEntry, moveFile} from './file-operations.ts';
 import { isElicitationRequest, elicitationPolicy, elicitationResult, elicitationText, elicitationServer } from '../shared/computer-use.ts';
-import { createProviderAdapter, ProviderPreDispatchError, type ProviderAdapter, type ProviderResult } from './provider.ts';
+import { isCompactCommand } from '../shared/compact-command.ts';
+import { createProviderAdapter, NO_LIVE_SESSION, ProviderPreDispatchError, type ProviderAdapter, type ProviderResult } from './provider.ts';
 import { discoverPlugins, discoverSkills, invokedPluginContext, resolveAttachedSkill, resolveInvokedPlugins } from './plugin-library.ts';
 import {providerAccessPolicy} from './provider-run-lifecycle.ts';
 import {parseKillIntent, userProcessThreat, type UserProcessTarget, type UserProcessThreat} from './user-process-guard.ts';
@@ -54,6 +57,8 @@ import { createPowerEvents, isPowerState, type PowerOutcome, type PowerState } f
 import { ARCHIVE_RUNNING_WARNING, MAX_ATTACHMENTS_PER_MESSAGE, MAX_ATTACHMENT_BYTES, MAX_QUEUED_MESSAGES, MAX_QUEUED_TEXT, REASONING_EFFORTS, type ReasoningEffort } from '../shared/protocol.ts';
 import type { ChatGoal } from '../shared/domains/goals-protocol.ts';
 import { firstReadyModel } from '../shared/domains/settings-protocol.ts';
+import { attentionDeadline, pendingStatusAtRead } from '../shared/attention-expiry.ts';
+import { isAdapterProvider } from './adapters/index.ts';
 import { createSkill } from './skill-authoring.ts';
 import { exportChat, isChatExportFormat } from './chat-export.ts';
 import { redactSecrets } from './secret-redaction.ts';
@@ -95,10 +100,10 @@ function detail(value: unknown): string {
   try { return JSON.stringify(value ?? {}).slice(0, 65536); } catch { return 'Details unavailable'; }
 }
 interface ActiveRun { cwd: string; stopped: boolean; promise?: Promise<void>; retry: AbortController; seal?(): void }
-interface PendingApproval { chatId: string; createdAt: string; resolve(decision: ApprovalDecision): void; timer: ReturnType<typeof setTimeout> }
+interface PendingApproval { chatId: string; createdAt: string; expiresAt: number; resolve(decision: ApprovalDecision): void; timer: ReturnType<typeof setTimeout> }
 /** `null` answers mean the question was dismissed, expired or interrupted: the provider gets a cancel, never empty answers. */
 type QuestionAnswers = Record<string, {answers: string[]}> | null;
-interface PendingQuestionRequest { chatId: string; createdAt: string; providerKey: string; itemId: string; questions: PendingQuestion[]; resolve(answers: QuestionAnswers): void; waiters: Array<(answers: QuestionAnswers) => void>; timer: ReturnType<typeof setTimeout> }
+interface PendingQuestionRequest { chatId: string; createdAt: string; expiresAt: number; providerKey: string; itemId: string; questions: PendingQuestion[]; resolve(answers: QuestionAnswers): void; waiters: Array<(answers: QuestionAnswers) => void>; timer: ReturnType<typeof setTimeout> }
 /** The codex app-server's own decline envelope; a question without `answers` is cancelled at the provider. */
 const CANCELLED_REQUEST = {decision:'decline', action:'cancel', content:null, _meta:null};
 /** How long a chat created right after launch waits for the first provider probe before resolving defaults. */
@@ -137,6 +142,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
   const attachments = new ChatAttachments(store.database(), options.dataDir);
   const domainHooks = createDomainHooks();
   const steered = new Map<string, string>();
+  const steerChains = new Map<string, Promise<void>>();
   const folderNotices = new Set<string>();
   /** Static context blocks each provider thread already holds; unchanged blocks are not re-sent every turn. */
   const contextLedger = new ContextLedger();
@@ -180,13 +186,14 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
   let closing = false;
   let disposal: Promise<void> | undefined;
   const invocations = new Set<Promise<unknown>>();
-  store.recoverOrphanedRuns();
+  store.recoverOrphanedRuns(chat => isAdapterProvider(chat.providerThreadProviderId ?? chat.providerId ?? ''));
   for (const chat of store.snapshot().chats) {
     for (const item of store.timeline(chat.id)) {
       // The provider request ended with the previous process; the card stays readable but cannot be reopened.
-      if ((item.kind === 'question' || item.kind === 'approval') && item.status === 'pending') store.updateItem(item.id, item.text, 'unavailable', {...item.data, expiredReason:'restart'});
+      // No handler survives a restart. The same read-time rule decides: past its stored deadline it expired, otherwise it was lost.
+      if ((item.kind === 'question' || item.kind === 'approval') && item.status === 'pending') { const settled = pendingStatusAtRead(item, Date.now(), false); store.updateItem(item.id, item.text, settled.status, {...item.data, expiredReason:settled.reason}); }
       // A manual compaction request in flight when the app closed: no new process will ever settle this row.
-      if (item.kind === 'notice' && item.data?.kind === 'compaction' && item.status === 'running') store.updateItem(item.id, 'Compaction status unknown: Muster restarted while it was in progress. History is unchanged.', 'failed', {...item.data, status: 'failed'});
+      if (item.kind === 'notice' && item.data?.kind === 'compaction' && item.status === 'running') store.updateItem(item.id, 'Compaction status unknown: Muster restarted while it was in progress. History is unchanged. Retry, or continue in a fresh thread with a summary.', 'failed', {...item.data, status: 'failed', actions: ['retry', 'fresh']});
     }
   }
   // PRJ-07: every Project change carries a durable per-Project sequence so clients detect and replay missed events.
@@ -227,8 +234,8 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
     };
     // Only an owned live resolver makes a persisted request actionable. Never
     // copy provider payloads, question options, commands, or answers here.
-    for (const [itemId, pending] of approvals) add(pending.chatId, {itemId, kind:'approval', createdAt:pending.createdAt, sourceLabel:'Provider approval'});
-    for (const [itemId, pending] of questions) add(pending.chatId, {itemId, kind:'question', createdAt:pending.createdAt, sourceLabel:'Provider question'});
+    for (const [itemId, pending] of approvals) add(pending.chatId, {itemId, kind:'approval', createdAt:pending.createdAt, expiresAt:new Date(pending.expiresAt).toISOString(), sourceLabel:'Provider approval'});
+    for (const [itemId, pending] of questions) add(pending.chatId, {itemId, kind:'question', createdAt:pending.createdAt, expiresAt:new Date(pending.expiresAt).toISOString(), sourceLabel:'Provider question'});
     const attention: PendingAttentionSummary = {totalRequests:0, chats:[]};
     for (const chat of current.chats) {
       const items = requests.get(chat.id); if (!items?.length) continue;
@@ -244,6 +251,8 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
   const snapshots = createSnapshotCoalescer(() => emit({ type: 'snapshot', snapshot: snapshot() }));
   const state = (): void => snapshots.request();
   const publishedTimelineRevisions = new Map<string, number>();
+  /** The last assistant message of the latest turn (after the last user message), or '' when the turn said nothing. */
+  const finalAssistantText = (chatId: string): string => { const items = store.timeline(chatId); for (let i = items.length - 1; i >= 0; i--) { const it = items[i]!; if (it.kind === 'user') return ''; if (it.kind === 'assistant' && it.text.trim()) return it.text; } return ''; };
   const timeline = (chatId: string) => {
     const after = publishedTimelineRevisions.get(chatId) ?? 0;
     const patch = store.timelineChanges(chatId, after);
@@ -267,7 +276,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
     if(!task.runChatId){projectTasks.failTaskStart({projectId:task.projectId,id:task.id,requestId:task.runRequestId,chatId:'',reason:'The saved Project task run has no linked chat. Reopen it before starting new work.'});continue;}
     const linked=store.chat(task.runChatId);
     if(!linked){projectTasks.failTaskStart({projectId:task.projectId,id:task.id,requestId:task.runRequestId,chatId:task.runChatId,reason:'The linked agent chat is missing. Reopen the task and inspect Project activity before retrying.'});continue;}
-    if(linked.status==='completed'||linked.status==='failed'||linked.status==='interrupted')projectTasks.settleRunForChat(linked.id,linked.status,linked.error);
+    if(linked.status==='completed'||linked.status==='failed'||linked.status==='interrupted')projectTasks.settleRunForChat(linked.id,linked.status,linked.error,finalAssistantText(linked.id));
     else if(linked.status==='idle')projectTasks.failTaskStart({projectId:task.projectId,id:task.id,requestId:task.runRequestId,chatId:task.runChatId,reason:'The app stopped before the linked agent chat accepted its request. Open the chat to review the saved draft.'});
   }
   const folderFor = (folderId: unknown) => { const folder = store.folder(id(folderId)); if (!folder) throw new Error('Folder does not exist.'); return folder; };
@@ -309,21 +318,67 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
     if (actual.some((scope, index) => scope.kind !== expected[index]!.kind || scope.id !== expected[index]!.id)) throw new Error('Memory scopes must match the selected context.');
     return actual;
   };
-  function finishApproval(itemId: string, pending: PendingApproval, decision: ApprovalDecision, status: string) {
+  /** The end of the user's notification mute, if one is active: a request raised or still open then is not allowed to lapse unseen. */
+  async function mutedUntilMs(): Promise<number | null> {
+    try {
+      const settings = await domains.handlers.get('settings.get')?.({}) as {values?: Record<string, unknown>} | undefined;
+      const value = settings?.values?.['notifications.mutedUntil'];
+      const at = typeof value === 'string' ? Date.parse(value) : NaN;
+      return Number.isFinite(at) && at > Date.now() ? at : null;
+    } catch { return null; }
+  }
+  /** Arms the expiry timer from the stored deadline. If a mute window now outlasts it, the deadline moves instead of expiring. */
+  /** Fires one request's expiry from its stored deadline. If a mute window now outlasts it, the deadline moves (and the timer re-arms) instead of expiring. */
+  async function expireDue(itemId: string, pending: {expiresAt: number; timer: ReturnType<typeof setTimeout>}, live: () => boolean, expire: () => void): Promise<void> {
+    if (!live()) return;
+    const muted = await mutedUntilMs(), extended = muted === null ? 0 : attentionDeadline(Date.now(), muted);
+    if (live() && extended > pending.expiresAt + 1000) {
+      pending.expiresAt = extended;
+      const item = store.item(itemId);
+      if (item) store.updateItem(itemId, item.text, item.status, {...item.data, expiresAt:new Date(extended).toISOString()});
+      armExpiry(itemId, pending, live, expire); state(); return;
+    }
+    if (live()) expire();
+  }
+  /** Arms the expiry timer from the stored deadline. */
+  function armExpiry(itemId: string, pending: {expiresAt: number; timer: ReturnType<typeof setTimeout>}, live: () => boolean, expire: () => void): void {
+    clearTimeout(pending.timer);
+    pending.timer = setTimeout(() => { void expireDue(itemId, pending, live, expire); }, Math.max(0, pending.expiresAt - Date.now()));
+    pending.timer.unref?.();
+  }
+  /** Expires every pending approval/question whose stored deadline has passed, through the same path the timer takes. Timers can run late after a sleep, so main calls this on wake and from its attention interval. */
+  async function sweepExpired(): Promise<number> {
+    const now = Date.now(), due: Array<Promise<void>> = [];
+    for (const [itemId, pending] of [...approvals]) if (pending.expiresAt <= now) due.push(expireDue(itemId, pending, () => approvals.get(itemId) === pending, () => finishApproval(itemId, pending, 'decline', 'expired')));
+    for (const [itemId, pending] of [...questions]) if (pending.expiresAt <= now) due.push(expireDue(itemId, pending, () => questions.get(itemId) === pending, () => finishQuestion(itemId, pending, null, 'expired')));
+    await Promise.all(due); return due.length;
+  }
+  /** Why an approval or question can no longer be answered, or null while it still applies. A live handler means the provider is still waiting; the step it was for must also still be unfinished. */
+  function staleAttention(chatId: string, itemId: string): string | null {
+    const chat = store.chat(chatId);
+    // Background sub-agents can ask after the turn ended, so a settled chat is fine; a missing or archived one is not.
+    if (!chat || chat.archived) return 'This chat is no longer available, so the request no longer applies.';
+    const item = store.item(itemId), toolItemId = typeof item?.data?.toolItemId === 'string' ? item.data.toolItemId : undefined, tool = toolItemId ? store.item(toolItemId) : undefined;
+    if (tool && ['completed', 'failed', 'interrupted'].includes(tool.status ?? '')) return 'The step this request was for has already finished. Use Ask again if you still need it.';
+    return null;
+  }
+  function finishApproval(itemId: string, pending: PendingApproval, decision: ApprovalDecision, status: string, reason?: 'stale') {
     if (approvals.get(itemId) !== pending) return;
     clearTimeout(pending.timer); approvals.delete(itemId);
     const item = store.item(itemId);
-    if (item) store.updateItem(itemId, item.text, status, item.data);
+    if (item) store.updateItem(itemId, item.text, status, status === 'expired' ? {...item.data, expiredReason:'timeout'} : reason ? {...item.data, expiredReason:reason} : item.data);
+    if (status === 'expired') store.appendItem(pending.chatId, 'notice', 'An approval request timed out before you answered, so the agent was told it was not approved. Use Ask again to have it re-ask.', 'completed', {kind:'attention-expired', itemId});
     const toolItemId = typeof item?.data?.toolItemId === 'string' ? item.data.toolItemId : undefined, tool = toolItemId ? store.item(toolItemId) : undefined;
     if (tool?.data?.awaitingApproval === itemId) { const {awaitingApproval: _cleared, ...rest} = tool.data; store.updateItem(tool.id, tool.text, tool.status, rest); }
     timeline(pending.chatId); state(); pending.resolve(decision);
   }
-  function finishQuestion(itemId: string, pending: PendingQuestionRequest, answers: QuestionAnswers, status: string, receiptAnswers?: Record<string, {answers:string[]}>) {
+  function finishQuestion(itemId: string, pending: PendingQuestionRequest, answers: QuestionAnswers, status: string, receiptAnswers?: Record<string, {answers:string[]}>, reason?: 'stale') {
     if (questions.get(itemId) !== pending) return;
     clearTimeout(pending.timer); questions.delete(itemId);
     if (questionsByProviderKey.get(pending.providerKey) === itemId) questionsByProviderKey.delete(pending.providerKey);
     const item = store.item(itemId);
-    if (item) store.updateItem(itemId, item.text, status, receiptAnswers ? {...item.data, answers:receiptAnswers} : item.data);
+    if (item) store.updateItem(itemId, item.text, status, {...item.data, ...(receiptAnswers ? {answers:receiptAnswers} : {}), ...(status === 'expired' ? {expiredReason:'timeout'} : reason ? {expiredReason:reason} : {})});
+    if (status === 'expired') store.appendItem(pending.chatId, 'notice', 'A question timed out before you answered, so the agent was told it was cancelled. Use Ask again to have it re-ask.', 'completed', {kind:'attention-expired', itemId});
     timeline(pending.chatId); state();
     pending.resolve(answers); pending.waiters.splice(0).forEach(resolve => resolve(answers));
   }
@@ -331,15 +386,100 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
     for (const [itemId, pending] of approvals) if (pending.chatId === chatId) finishApproval(itemId, pending, 'decline', 'interrupted');
   }
   const compactions = new Map<string, string>();
+  /** #426: a compaction the provider started on its own (Codex `contextCompaction` item) shows "Compacting context…" until it settles. */
+  const nativeCompacting = new Map<string, string>();
   /** Settles a manual compaction row, or appends the automatic one. The source transcript here is never trimmed. */
   function compactionCompleted(chatId: string) {
     // A compacted thread summarises earlier messages: static context goes out again on the next turn.
     contextLedger.forget(chatId);
     const manual = compactions.get(chatId); compactions.delete(chatId);
+    const native = nativeCompacting.get(chatId); nativeCompacting.delete(chatId);
     const data = {kind:'compaction', status:'completed', ...(manual ? {manual:true} : {})};
-    if (manual) store.updateItem(manual, 'Context compacted', 'completed', data);
+    if (manual) { store.updateItem(manual, 'Context compacted', 'completed', data); if (native) store.updateItem(native, COMPACTION_TEXT, 'completed', {kind:'compaction', status:'completed'}); }
+    else if (native) store.updateItem(native, COMPACTION_TEXT, 'completed', data);
     else store.appendItem(chatId, 'notice', COMPACTION_TEXT, 'completed', data);
     timeline(chatId);
+  }
+  /** #426: failure rows say why and offer Retry and "Continue in a fresh thread with a summary". */
+  const COMPACTION_ACTIONS = ['retry', 'fresh'] as const;
+  /** A /compact or "Compact now" while a turn runs: compacts as soon as that turn settles (row id, fresh). */
+  const deferredCompactions = new Map<string, {rowId: string; fresh: boolean}>();
+  /** In-flight compactions: a send waits for one to settle instead of racing it. */
+  const compactionRuns = new Map<string, Promise<void>>();
+  /** Drops the provider thread and seeds the next turn with a digest of the stored transcript (the provider-switch digest). */
+  async function compactFromTranscript(chatId: string, rowId: string, text: string, data: Record<string, unknown>) {
+    await provider.release?.(chatId).catch(() => undefined);
+    store.requireDigest(chatId);
+    store.updateChat(chatId, {providerThreadId: null, providerTurnId: null, providerThreadProviderId: null, providerThreadBindingId: null});
+    contextLedger.forget(chatId);
+    const telemetry = {...store.contextTelemetry(chatId), compacted: true, updatedAt: new Date().toISOString()};
+    store.setContextTelemetry(chatId, telemetry); emit({type: 'contextTelemetry', chatId, telemetry});
+    store.updateItem(rowId, text, 'completed', {kind:'compaction', status:'completed', ...data});
+    timeline(chatId); state();
+  }
+  const FROM_TRANSCRIPT = 'Context compacted from the saved transcript. The next message starts a fresh provider conversation with a summary of the earlier messages.';
+  /** Manual compaction. A live provider session compacts its own thread. With none (a project chat after a restart, a thread retired by a
+   *  stopped turn, a provider switch, an imported chat, a route without native compaction) Muster compacts from the stored transcript: the
+   *  thread is dropped and the next message starts a fresh provider conversation seeded with the same summary digest a provider switch uses.
+   *  `fresh` skips the provider. While a turn runs, compaction waits for it (#426) instead of refusing. */
+  async function compactChat(chatId: string, options: {fresh?: boolean; rowId?: string} = {}): Promise<void> {
+    const chat = chatFor(chatId);
+    if (compactions.has(chatId)) throw new Error('Compaction is already in progress.');
+    if (runs.has(chatId) || busy(chat)) {
+      const waiting = deferredCompactions.get(chatId);
+      if (waiting) { if (options.fresh) waiting.fresh = true; return; }
+      const row = store.appendItem(chatId, 'notice', 'Compacting after the current turn finishes…', 'running', {kind:'compaction', status:'running', manual:true, deferred:true});
+      deferredCompactions.set(chatId, {rowId: row.id, fresh: !!options.fresh}); timeline(chatId); return;
+    }
+    const existing = options.rowId ? store.item(options.rowId) : undefined;
+    const row = existing ?? store.appendItem(chatId, 'notice', 'Compacting context…', 'running', {kind:'compaction', status:'running', manual:true});
+    if (existing) store.updateItem(row.id, 'Compacting context…', 'running', {kind:'compaction', status:'running', manual:true});
+    compactions.set(chatId, row.id); timeline(chatId);
+    let settle!: () => void;
+    compactionRuns.set(chatId, new Promise<void>(resolve => { settle = resolve; }));
+    const fail = (reason: string) => {
+      if (compactions.get(chatId) === row.id) compactions.delete(chatId);
+      store.updateItem(row.id, `Compaction failed: ${reason.replace(/[.\s]+$/, '')}. History is unchanged. Retry, or continue in a fresh thread with a summary.`, 'failed', {kind:'compaction', status:'failed', manual:true, reason, actions:[...COMPACTION_ACTIONS]});
+      timeline(chatId);
+    };
+    try {
+      const history = store.timeline(chatId).some(item => item.kind === 'user');
+      if (options.fresh || !provider.compact) {
+        compactions.delete(chatId);
+        if (!history) { fail('there is no conversation to compact yet'); throw new Error('There is no conversation to compact yet.'); }
+        await compactFromTranscript(chatId, row.id, FROM_TRANSCRIPT, {manual:true, fresh:true}); return;
+      }
+      try { await provider.compact(chatId); }
+      catch (error) {
+        const message = error instanceof Error ? error.message : '';
+        if (message.startsWith(NO_LIVE_SESSION.slice(0, 40)) && history) {
+          compactions.delete(chatId);
+          await compactFromTranscript(chatId, row.id, FROM_TRANSCRIPT, {manual:true}); return;
+        }
+        fail(message || 'the provider refused the request');
+        throw error;
+      }
+      // The provider confirms with thread/compacted; a quiet provider still settles the row once the request was accepted.
+      compactionCompleted(chatId);
+    } finally {
+      compactionRuns.delete(chatId); settle();
+      if (!runs.has(chatId) && store.queue(chatId).length) dispatchQueued(chatId);
+    }
+  }
+  /** #426: before a turn, a chat at or over its model's compaction point is compacted first (Muster's own trigger), on every route.
+   *  The point follows the model's own window (catalog, router listing, provider report, then a default) and its catalog
+   *  auto_compact_token_limit; routes that compact natively get a late safety net instead. Never a silent stop at 100%. */
+  async function autoCompactBeforeTurn(chat: Chat, route: ProviderInfo): Promise<boolean> {
+    const telemetry = store.contextTelemetry(chat.id);
+    if (telemetry.compacted || telemetry.usedTokens === null || compactions.has(chat.id)) return false;
+    const model = route.models.find(entry => entry.id === chat.model);
+    const {at, window} = musterCompactAt(route.driver, model, telemetry.windowTokens);
+    if (telemetry.usedTokens < at || !store.timeline(chat.id).some(item => item.kind === 'user')) return false;
+    const used = `${Math.round(telemetry.usedTokens / 1000)}K of ${Math.round(window.tokens / 1000)}K tokens`;
+    const row = store.appendItem(chat.id, 'notice', `Compacting context before this message (${used} in use)…`, 'running', {kind:'compaction', status:'running', auto:true});
+    timeline(chat.id);
+    await compactFromTranscript(chat.id, row.id, `Context compacted automatically at ${used}. This message starts a fresh provider conversation with a summary of the earlier messages; the chat history here is unchanged.`, {auto:true, at, window:window.tokens, windowSource:window.source});
+    return true;
   }
   function settleQuestions(chatId: string) {
     for (const [itemId, pending] of questions) if (pending.chatId === chatId) finishQuestion(itemId, pending, null, 'interrupted');
@@ -367,6 +507,10 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
     return firstReadyModel(provider.info());
   }
   async function send(chatId: string, prompt: string, requestId: string, skill?: string | string[], attachmentIds: string[] = [], invoked: {pluginIds?: string[]; effort?: ReasoningEffort; reuseUserItemId?: string} = {}) {
+    // /compact is Muster's command in every chat type and provider: never a message for the model.
+    if (isCompactCommand(prompt) && attachmentIds.length === 0 && skill === undefined) { await compactChat(chatId); return {runId: ''}; }
+    // A compaction in flight settles first: the next turn goes to the compacted (or fresh) thread.
+    await compactionRuns.get(chatId)?.catch(() => undefined);
     let chat = chatFor(chatId);
     const folder = chat.folderId ? folderFor(chat.folderId) : undefined;
     const skillIds = [...new Set(skill === undefined ? [] : Array.isArray(skill) ? skill : [skill])];
@@ -413,6 +557,11 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
     if (chat.mode === 'agent' && selectedProvider.models.find(entry => entry.id === chat.model)?.tools === false && !store.timeline(chatId).some(item => item.data?.kind === 'tools-unavailable' && item.data?.model === chat.model && item.data?.providerId === selectedProvider.id)) {
       store.appendItem(chatId, 'notice', `${selectedProvider.models.find(entry => entry.id === chat.model)?.name ?? chat.model} can’t run commands or edit files through ${selectedProvider.name}, so this chat answers without tools. Use “Switch to…” in the composer to pick a model with tools.`, 'completed', {kind: 'tools-unavailable', model: chat.model, providerId: selectedProvider.id});
     }
+    // #427: a route with no sub-agent tool says so once, in one plain line, when the request asks for sub-agents (every chat type).
+    if (subagentSupport(selectedProvider.driver) === 'none' && asksForSubagents(prompt) && !store.timeline(chatId).some(item => item.data?.kind === 'subagents-unavailable' && item.data?.providerId === selectedProvider.id)) {
+      store.appendItem(chatId, 'notice', subagentsUnavailableText(selectedProvider.name), 'completed', {kind: 'subagents-unavailable', providerId: selectedProvider.id});
+    }
+    if (await autoCompactBeforeTurn(chat, selectedProvider)) chat = chatFor(chatId);
     const bindingId=selectedProvider.bindingId??selectedProvider.id;
     if (chat.providerBindingId && chat.providerBindingId!==bindingId) throw new Error('The selected provider account or profile changed. Select it again before sending. Your draft is retained.');
     const nativeMatches=chat.providerThreadProviderId===selectedProvider.id && chat.providerThreadBindingId===bindingId;
@@ -452,8 +601,20 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
     const toolStarted = new Map<string, number>();
     /** Provider reasoning items whose text arrived as deltas; their completion must not repeat it. */
     const reasoningStreamed = new Set<string>();
+    /** Assistant message items whose text arrived as deltas. One that completes without any is written whole, so a
+     *  final answer the provider never streamed is not lost behind an earlier streamed message. */
+    const messageStreamed = new Set<string>();
+    let anonymousMessageDelta = false;
+    /** "Reconnecting…" while the provider retries its model connection (Codex `error` with willRetry). */
+    let reconnectNotice: TimelineItem | undefined;
+    const reconnected = (status: 'completed' | 'failed' = 'completed') => {
+      if (!reconnectNotice) return;
+      store.updateItem(reconnectNotice.id, status === 'completed' ? 'Reconnected.' : reconnectNotice.text, status, reconnectNotice.data);
+      reconnectNotice = undefined; scheduleTimeline(chatId);
+    };
     const append = (kind: 'assistant' | 'reasoning', delta: string) => {
       if (disposed || !runs.has(chatId) || !delta) return;
+      if (reconnectNotice) reconnected();
       if (kind === 'assistant') producedAssistant = true;
       if (segment && segment.kind !== kind) seal();
       if (!segment) segment = store.appendItem(chatId, kind, '', 'running');
@@ -488,12 +649,16 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
         const dispatchThread = digest ? null : chat.providerThreadId ?? null;
         const pendingBlocks = new Set(contextLedger.pending(chatId, dispatchThread, staticBlocks));
         let compactedInRun = false;
+        let settledByItem = false;
         /** HTTP routes: how many user turns Muster's trimmed history still holds after this turn. */
         let retainedTurns: number | undefined;
         const sentSources = contributed.blocks.filter(block => pendingBlocks.has(block)).map(block => block.label);
         if (sentSources.length) { store.appendItem(chatId,'notice',`Context from ${sentSources.join(', ')}`,'completed',{kind:'context-sources',sources:sentSources}); scheduleTimeline(chatId); }
         const sent = (block: ContextBlock | undefined) => block && pendingBlocks.has(block) ? block.text : '';
-        const preamble = [sent(projectBlock), digest, skillContext, ...contributed.blocks.map(sent), sent(ownershipBlock)].filter(Boolean).join('\n\n');
+        // Per-turn notes (a goal's token budget) ride in the message, never in the developer instructions: those key the
+        // warm app-server, so a line that changes every turn would restart it every turn.
+        const preamble = [sent(projectBlock), digest, skillContext, ...contributed.blocks.map(sent), sent(ownershipBlock), runOptions.turnContext].filter(Boolean).join('\n\n');
+        let threadReset = false;
         const request = [prompt, fileLines].filter(Boolean).join('\n\n');
         const contextualPrompt = preamble ? `${preamble}\n\nCurrent user request:\n${request}` : request;
         let retryNotice: TimelineItem | undefined;
@@ -504,6 +669,18 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
           ...(runOptions.configOverrides ? {configOverrides: runOptions.configOverrides as Record<string, string | number | boolean | string[]>} : {}), ...(runOptions.developerInstructions ? {developerInstructions: runOptions.developerInstructions} : {}),
           onDelta: delta => append('assistant', delta), onReasoning: delta => append('reasoning', delta),
           onThreadReady: threadId => persistIdentity(threadId),
+          // The saved provider thread is gone (pruned or deleted): the fresh one gets the earlier conversation and the
+          // context blocks the old thread already held, and the user is told.
+          onThreadReset() {
+            if (disposed || runs.get(chatId) !== run) return undefined;
+            threadReset = true;
+            const items = store.timeline(chatId);
+            let last = items.length - 1;
+            while (last >= 0 && items[last]!.kind !== 'user') last--;
+            store.appendItem(chatId, 'notice', 'The saved provider conversation could not be resumed, so a fresh one started with a summary of the earlier messages. The displayed chat history is retained.', 'completed', {kind: 'thread-reset'});
+            scheduleTimeline(chatId);
+            return [transcriptDigest(items.slice(0, Math.max(0, last))), ...staticBlocks.filter(block => !pendingBlocks.has(block)).map(block => block.text)].filter(Boolean).join('\n\n') || undefined;
+          },
           onTurnAccepted: identity => persistIdentity(identity.threadId,identity.turnId),
           onEvent(method, params) {
             if (disposed) return;
@@ -515,7 +692,31 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
             if (child) { const row = claudeChildRow(method, params); if (row) store.upsertSubagentItem(chatId, child, row); return; }
             if (method === TOOLS_UNAVAILABLE_EVENT) { store.appendItem(chatId, 'notice', `${chat.model} can’t run commands or edit files through this route, so it answered without tools. Use “Switch to…” in the composer to pick a model with tools.`, 'completed', {kind: 'tools-unavailable', model: chat.model}); scheduleTimeline(chatId); return; }
             if (method === HISTORY_WINDOW_EVENT) { if (typeof params.retainedUserTurns === 'number') retainedTurns = params.retainedUserTurns; return; }
-            if (method === 'thread/compacted') { seal(); compactionCompleted(chatId); compactedInRun = true; }
+            const compactionItem = params.item && typeof params.item === 'object' && (params.item as Record<string, unknown>).type === 'contextCompaction';
+            if (method === 'item/started' && compactionItem && !compactions.has(chatId) && !nativeCompacting.has(chatId)) { seal(); nativeCompacting.set(chatId, store.appendItem(chatId, 'notice', 'Compacting context…', 'running', {kind:'compaction', status:'running', auto:true}).id); scheduleTimeline(chatId); return; }
+            // The compaction item and thread/compacted report the same compaction: whichever comes first settles it once.
+            if (method === 'item/completed' && compactionItem) { if (nativeCompacting.has(chatId) || compactions.has(chatId)) { seal(); compactionCompleted(chatId); compactedInRun = true; settledByItem = true; } return; }
+            if (method === 'thread/compacted') { seal(); if (settledByItem) settledByItem = false; else compactionCompleted(chatId); compactedInRun = true; }
+            const ownRun = runs.get(chatId) === run, parentThread0 = store.chat(chatId)?.providerThreadId, parentEvent = !(typeof params.threadId === 'string' && parentThread0 && params.threadId !== parentThread0);
+            if (method === 'error') {
+              // Codex retries a dropped model connection itself (willRetry): say so instead of looking stuck.
+              if (!ownRun || !parentEvent || params.willRetry !== true) return;
+              const error = params.error && typeof params.error === 'object' ? params.error as Record<string, unknown> : {};
+              const why = typeof error.message === 'string' ? error.message.replace(/\s+/g, ' ').trim().slice(0, 300) : '';
+              const text = why ? `Reconnecting… ${why}` : 'Reconnecting…';
+              seal();
+              if (reconnectNotice) { reconnectNotice = {...reconnectNotice, text}; store.updateItem(reconnectNotice.id, text, 'running', reconnectNotice.data); }
+              else reconnectNotice = store.appendItem(chatId, 'notice', text, 'running', {kind: 'reconnecting'});
+              scheduleTimeline(chatId); return;
+            }
+            if (reconnectNotice && ownRun && method.startsWith('item/')) reconnected();
+            if (method === 'item/agentMessage/delta' && parentEvent) { if (typeof params.itemId === 'string' && params.itemId) messageStreamed.add(params.itemId); else anonymousMessageDelta = true; }
+            if (method === 'item/completed' && ownRun && parentEvent && !anonymousMessageDelta) {
+              const message = params.item && typeof params.item === 'object' ? params.item as Record<string, unknown> : undefined;
+              if (message?.type === 'agentMessage' && typeof message.id === 'string' && message.id && !messageStreamed.has(message.id) && typeof message.text === 'string' && message.text.trim()) {
+                messageStreamed.add(message.id); seal(); append('assistant', message.text); seal(); return;
+              }
+            }
             const item = params.item && typeof params.item === 'object' ? params.item as Record<string, unknown> : params;
             const type = String(item.type ?? '');
             // Reasoning text streams through onReasoning (summary deltas). These events only frame it:
@@ -579,7 +780,12 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
             }
           },
           async onRequest(method, params) {
-            if (disposed || closing || run.stopped || runs.get(chatId) !== run) return undefined;
+            // After this turn ended, the warm app-server still asks for approvals: background sub-agents (the provider
+            // still reports active work) or a native goal continuation or queued turn (adopted as the chat's run). They
+            // get a card like any other request. A stopped run, or a late callback with no work behind it, declines.
+            const current = runs.get(chatId);
+            const background = current ? current !== run && !current.stopped : provider.hasActiveWork?.(chatId) === true;
+            if (disposed || closing || run.stopped || (current !== run && !background) || !store.chat(chatId)) return undefined;
             seal();
             if (method === 'item/tool/requestUserInput') {
               const rawQuestions = Array.isArray(params.questions) ? params.questions : [];
@@ -615,14 +821,13 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
                 if (existing.waiters.length >= 8) throw new Error('Too many duplicate provider question requests.');
                 return await new Promise<Record<string, unknown>>(resolve => existing.waiters.push(answers => resolve(answers ? { answers } : CANCELLED_REQUEST)));
               }
-              const item = store.appendItem(chatId, 'question', 'The provider needs your input.', 'pending', { method, questions: parsed } satisfies PendingQuestionData);
+              const expiresAt = attentionDeadline(Date.now(), await mutedUntilMs());
+              const item = store.appendItem(chatId, 'question', 'The provider needs your input.', 'pending', { method, questions: parsed, expiresAt: new Date(expiresAt).toISOString() } satisfies PendingQuestionData);
               timeline(chatId);
               return await new Promise<Record<string, unknown>>(resolve => {
                 let pending!: PendingQuestionRequest;
-                const timer = setTimeout(() => {
-                  finishQuestion(item.id, pending, null, 'expired');
-                }, 10 * 60_000);
-                pending = { chatId, createdAt:item.createdAt, providerKey, itemId: item.id, questions: parsed, resolve: answers => resolve(answers ? { answers } : CANCELLED_REQUEST), waiters: [], timer };
+                pending = { chatId, createdAt:item.createdAt, expiresAt, providerKey, itemId: item.id, questions: parsed, resolve: answers => resolve(answers ? { answers } : CANCELLED_REQUEST), waiters: [], timer: undefined as never };
+                armExpiry(item.id, pending, () => questions.get(item.id) === pending, () => finishQuestion(item.id, pending, null, 'expired'));
                 questions.set(item.id, pending); questionsByProviderKey.set(providerKey, item.id); wakeForAttention(chatId); state();
               });
             }
@@ -631,13 +836,14 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
               const policy = elicitationPolicy(access.permissionMode, server);
               if (policy !== 'ask') return elicitationResult(policy === 'accept');
               const text = elicitationText(params);
-              const item = store.appendItem(chatId, 'approval', `${server || 'Computer use'} asks: ${text}`, 'pending', { method, kind: 'mcp', elicitation: true, reason: text, ...(server ? { server } : {}) });
+              const expiresAt = attentionDeadline(Date.now(), await mutedUntilMs());
+              const item = store.appendItem(chatId, 'approval', `${server || 'Computer use'} asks: ${text}`, 'pending', { method, kind: 'mcp', elicitation: true, reason: text, expiresAt: new Date(expiresAt).toISOString(), ...(server ? { server } : {}) });
               const approvalId = item.id;
               timeline(chatId);
               const decision = await new Promise<ApprovalDecision>(resolve => {
                 let pending!: PendingApproval;
-                const timer = setTimeout(() => finishApproval(approvalId, pending, 'decline', 'expired'), 10 * 60_000);
-                pending = { chatId, createdAt: item.createdAt, resolve, timer };
+                pending = { chatId, createdAt: item.createdAt, expiresAt, resolve, timer: undefined as never };
+                armExpiry(approvalId, pending, () => approvals.get(approvalId) === pending, () => finishApproval(approvalId, pending, 'decline', 'expired'));
                 approvals.set(approvalId, pending); wakeForAttention(chatId); state();
               });
               return elicitationResult(decision !== 'decline');
@@ -659,7 +865,8 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
             const change = typeof params.itemId === 'string' && toolIds.has(params.itemId) ? store.item(toolIds.get(params.itemId)!)?.data?.changes : params.changes;
             const data: ApprovalData = {...approvalData(method, params, change), ...(threat ? {reason: threat.message, protectsUserProcess: true} : {})};
             const toolItemId = typeof params.itemId === 'string' ? toolIds.get(params.itemId) : undefined;
-            const item = store.appendItem(chatId, 'approval', detail(params.command ?? params.reason ?? params.changes ?? data.tool ?? data.kind), 'pending', {...data, ...(toolItemId ? {toolItemId} : {})});
+            const expiresAt = attentionDeadline(Date.now(), await mutedUntilMs());
+            const item = store.appendItem(chatId, 'approval', detail(params.command ?? params.reason ?? params.changes ?? data.tool ?? data.kind), 'pending', {...data, expiresAt: new Date(expiresAt).toISOString(), ...(toolItemId ? {toolItemId} : {})});
             const approvalId = item.id;
             // F60: the tool row the provider already started is blocked on this card, not running. Flag it so the
             // row reads "Waiting for approval"; finishApproval (or the item's completion) clears the flag.
@@ -668,8 +875,8 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
             timeline(chatId);
             const decision = await new Promise<ApprovalDecision>(resolve => {
               let pending!: PendingApproval;
-              const timer = setTimeout(() => finishApproval(approvalId, pending, 'decline', 'expired'), 10 * 60_000);
-              pending = {chatId, createdAt:item.createdAt, resolve, timer};
+              pending = {chatId, createdAt:item.createdAt, expiresAt, resolve, timer: undefined as never};
+              armExpiry(approvalId, pending, () => approvals.get(approvalId) === pending, () => finishApproval(approvalId, pending, 'decline', 'expired'));
               approvals.set(approvalId, pending); wakeForAttention(chatId); state();
             });
             // Never let the provider remember a stop-the-user's-process approval for the rest of the session.
@@ -700,16 +907,24 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
         }
         if (disposed) return;
         seal();
+        reconnected(result.status === 'completed' ? 'completed' : 'failed');
         if (!producedAssistant && result.finalMessage) store.appendItem(chatId, 'assistant', result.finalMessage, 'completed');
         // The provider's own words are kept (S36): an adapter that reports a failure with a message (rate_limited, auth…)
         // settled that attempt as failed, which Inbox and Pulse explain in a plain sentence and which may be run again.
         // A failure with no message at all stays unconfirmed (recovery-needed).
         const said = (result.errorMessage ?? '').replace(/\s+/g, ' ').trim().slice(0, 600);
-        const recovery: ChatRecovery | undefined = result.recovery ?? (run.stopped ? {kind:'cancelled',retryable:false,reason:'Stopped.'}
+        let recovery: ChatRecovery | undefined = result.recovery ?? (run.stopped ? {kind:'cancelled',retryable:false,reason:'Stopped.'}
           : result.status === 'failed' ? (said && result.dispatchState !== 'unknown' ? {kind:'failed',retryable:false,reason:`The provider attempt failed: ${said}`} : {kind:'recovery-needed',retryable:false,reason:'The provider attempt did not settle with confirmed outcome. Check its saved turn before continuing; the prompt was not resent.'}) : undefined);
+        // #426: the provider refused the turn because the conversation no longer fits the model's window. That is a settled
+        // refusal, never an unconfirmed attempt: say so, and offer compaction or a fresh thread with a summary.
+        if (recovery && recovery.kind !== 'cancelled' && !run.stopped && CONTEXT_OVERFLOW.test(`${said} ${recovery.reason}`)) {
+          const modelName = selectedProvider.models.find(entry => entry.id === chat.model)?.name ?? chat.model;
+          recovery = {kind:'failed', retryable:false, reason:`${modelName} refused this turn: the conversation no longer fits its context window.`};
+          store.appendItem(chatId, 'notice', `The conversation no longer fits ${modelName}’s context window. Compact it and send again, or continue in a fresh thread with a summary.`, 'failed', {kind:'compaction', status:'failed', reason:'context-overflow', actions:['retry','fresh']});
+        }
         if (result.threadId) persistIdentity(result.threadId,result.turnId);
         // Only a turn the provider actually took delivered its context blocks to the thread.
-        if (result.status === 'completed' && result.dispatchState !== 'not-dispatched' && !compactedInRun) contextLedger.delivered(chatId, store.chat(chatId)?.providerThreadId, [...pendingBlocks], retainedTurns);
+        if (result.status === 'completed' && result.dispatchState !== 'not-dispatched' && !compactedInRun) contextLedger.delivered(chatId, store.chat(chatId)?.providerThreadId, threadReset ? staticBlocks : [...pendingBlocks], retainedTurns);
         else if (result.dispatchState !== 'not-dispatched') contextLedger.forget(chatId);
         if (recovery) store.appendItem(chatId,'notice',recovery.reason,recovery.kind,{recovery,providerThreadId:store.chat(chatId)?.providerThreadId,providerTurnId:store.chat(chatId)?.providerTurnId});
         const restoreDraft=result.status==='failed' && result.dispatchState==='not-dispatched' && recovery?.kind!=='recovery-needed' && store.chat(chatId)?.draft==='';
@@ -728,7 +943,12 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
           store.updateChat(chatId,{status:recovery.kind==='cancelled'?'interrupted':'failed',error:recovery.reason,recovery,...(restore?{draft:prompt}:{})});
         }
       } finally {
-        settleApprovals(chatId); settleQuestions(chatId); runs.delete(chatId);
+        // Background sub-agents can still be waiting on a card after the parent turn ended: keep it answerable.
+        if (run.stopped || disposed || !provider.hasActiveWork?.(chatId)) { settleApprovals(chatId); settleQuestions(chatId); }
+        runs.delete(chatId);
+        // #426: a compaction asked for during the turn runs now (before any queued message is dispatched).
+        const deferred = deferredCompactions.get(chatId);
+        if (deferred && !disposed) { deferredCompactions.delete(chatId); void compactChat(chatId, {fresh: deferred.fresh, rowId: deferred.rowId}).catch(() => undefined); }
         if (!disposed) { const timer = timers.get(chatId); if (timer) clearTimeout(timer); timers.delete(chatId); timeline(chatId); let finalChat=store.chat(chatId);
           // A result the user has not seen yet: marked unread until the chat is opened again.
           if(finalChat&&(finalChat.status==='completed'||finalChat.status==='failed')&&store.activeChatId()!==chatId&&store.setUnread(chatId,true))finalChat=store.chat(chatId);
@@ -736,7 +956,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
           if(finalChat?.status==='completed'&&store.settleTitle(chatId))finalChat=store.chat(chatId);
           // CHAT-15: "until new activity" wakes when a run settles (one transition, unread + one notification).
           if(finalChat?.snoozeUntilActivity&&wake(chatId,'activity'))finalChat=store.chat(chatId);
-          if(finalChat&&(finalChat.status==='completed'||finalChat.status==='failed'||finalChat.status==='interrupted')){const task=projectTasks.settleRunForChat(chatId,finalChat.status,finalChat.error);if(task)emit({type:'projectChanged',projectId:task.projectId,taskId:task.id});}state();
+          if(finalChat&&(finalChat.status==='completed'||finalChat.status==='failed'||finalChat.status==='interrupted')){const task=projectTasks.settleRunForChat(chatId,finalChat.status,finalChat.error,finalAssistantText(chatId));if(task)emit({type:'projectChanged',projectId:task.projectId,taskId:task.id});}state();
           if (finalChat) { domainHooks.runSettled({chat:finalChat,runId:accepted.runId,status:finalChat.status}); afterRun(chatId, finalChat.status); }
           // A turn the app-server started itself (native goal or queue) while this run settled is adopted now.
           nativeTurns.drain(chatId); }
@@ -751,7 +971,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
     queue.pause(chatId, status === 'interrupted' ? 'interrupted' : 'failed'); state();
   }
   function dispatchQueued(chatId: string) {
-    if (runs.has(chatId) || closing || disposed || queue.paused(chatId)) return;
+    if (runs.has(chatId) || closing || disposed || queue.paused(chatId) || compactions.has(chatId)) return;
     const chat = store.chat(chatId);
     if (!chat || chat.archived || chat.recovery?.kind === 'recovery-needed' || chat.status === 'running' || chat.status === 'stopping') return;
     // A refused head waits for Retry, Edit or Delete instead of being skipped.
@@ -785,6 +1005,13 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
   }
   /** Joins the live turn. Codex refusals (review/compact turns) come back as `reason`; anything else means "queue it". */
   async function steerRun(chat: Chat, message: string, requestId: string, chips: {skillIds?: string[]; pluginIds?: string[]; effort?: ReasoningEffort}): Promise<{steered: boolean; reason?: string}> {
+    // Steers go one at a time per chat, so several in a row reach the agent (and the transcript) in the order they were sent.
+    const turn = (steerChains.get(chat.id) ?? Promise.resolve()).then(() => steerNow(chat, message, requestId, chips));
+    const tail = turn.then(() => undefined, () => undefined);
+    steerChains.set(chat.id, tail); void tail.then(() => { if (steerChains.get(chat.id) === tail) steerChains.delete(chat.id); });
+    return turn;
+  }
+  async function steerNow(chat: Chat, message: string, requestId: string, chips: {skillIds?: string[]; pluginIds?: string[]; effort?: ReasoningEffort}): Promise<{steered: boolean; reason?: string}> {
     const chatId = chat.id, run = runs.get(chatId);
     if (!run || run.stopped || !provider.steer) return {steered:false};
     const instructions = await chipInstructions(chat, chips);
@@ -1166,6 +1393,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
       }
       case 'chat.queue.add': {
         const chatId = id(p.id), chat = chatFor(chatId), attachmentIds = ids(p.attachmentIds, MAX_ATTACHMENTS_PER_MESSAGE);
+        if (isCompactCommand(p.text)) throw new Error('/compact runs when the current run finishes. It is not queued as a message.');
         if (chat.archived) throw new Error('Restore this chat before sending.');
         attachments.resolve(chatId, attachmentIds);
         const owned = queue.attachmentIds(chatId);
@@ -1206,6 +1434,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
       case 'chat.steer': {
         const chatId = id(p.id), message = text(p.text, 'message', MAX_QUEUED_TEXT), requestId = id(p.requestId), chat = chatFor(chatId);
         if (!message.trim()) throw new Error('Write a message first.');
+        if (isCompactCommand(message)) throw new Error('/compact runs when the current run finishes. It is not sent to the running agent.');
         const previous = steered.get(requestId);
         if (previous) { if (previous !== chatId) throw new Error('Request identity conflicts with its original message.'); return {steered:true}; }
         // A live turn cannot take files; the composer queues them instead.
@@ -1402,25 +1631,44 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
       case 'approval.respond': { const approvalId = id(p.id); if (typeof p.approved !== 'boolean') throw new Error('Invalid approval decision.');
         if (p.decision !== undefined && !['accept','acceptForSession','decline'].includes(p.decision as string)) throw new Error('Invalid approval decision.');
         const decision: ApprovalDecision = !p.approved ? 'decline' : p.decision === 'acceptForSession' ? 'acceptForSession' : 'accept';
-        const pending = approvals.get(approvalId); if (!pending) throw new Error('This approval is no longer pending.'); finishApproval(approvalId, pending, decision, decision === 'decline' ? 'declined' : decision === 'acceptForSession' ? 'approved-session' : 'approved'); return; }
-      case 'question.dismiss': { const questionId = id(p.id); const pending = questions.get(questionId); if (!pending) throw new Error('This question is no longer pending.'); finishQuestion(questionId, pending, null, 'dismissed'); return; }
-      case 'chat.compact': {
-        const chatId = id(p.id), chat = chatFor(chatId);
-        if (runs.has(chatId) || busy(chat)) throw new Error('Wait for the current run to finish before compacting.');
-        if (!provider.compact) throw new Error('This provider cannot compact context.');
-        if (compactions.has(chatId)) throw new Error('Compaction is already in progress.');
-        const row = store.appendItem(chatId, 'notice', 'Compacting context…', 'running', {kind:'compaction', status:'running', manual:true});
-        compactions.set(chatId, row.id); timeline(chatId);
-        try { await provider.compact(chatId); }
-        catch (error) {
-          if (compactions.get(chatId) === row.id) { compactions.delete(chatId); store.updateItem(row.id, `Compaction failed: ${error instanceof Error ? error.message : 'the provider refused the request.'} History is unchanged.`, 'failed', {kind:'compaction', status:'failed', manual:true}); timeline(chatId); }
-          throw error;
-        }
-        // The provider confirms with thread/compacted; a quiet provider still settles the row once the request was accepted.
-        compactionCompleted(chatId); return;
+        const pending = approvals.get(approvalId); if (!pending) throw new Error('This approval is no longer pending.');
+        // Expiry is decided from the stored deadline, so a click that lands after it (or after a sleep) is never treated as consent.
+        if (Date.now() >= pending.expiresAt) { finishApproval(approvalId, pending, 'decline', 'expired'); if (decision === 'decline') return; throw new Error('This approval timed out before it was answered. Use Ask again.'); }
+        // A late yes is re-checked: the run must still be going and the step it was for must still be waiting.
+        if (decision !== 'decline') { const stale = staleAttention(pending.chatId, approvalId); if (stale) { finishApproval(approvalId, pending, 'decline', 'interrupted', 'stale'); throw new Error(stale); } }
+        finishApproval(approvalId, pending, decision, decision === 'decline' ? 'declined' : decision === 'acceptForSession' ? 'approved-session' : 'approved'); return; }
+      case 'attention.sweep': return {expired: await sweepExpired()};
+      case 'approval.reask': {
+        const itemId = id(p.id), item = store.item(itemId);
+        if (!item || (item.kind !== 'approval' && item.kind !== 'question')) throw new Error('This request no longer exists.');
+        if (item.status !== 'expired' && item.status !== 'unavailable' && !(item.status === 'interrupted' && item.data?.expiredReason === 'stale')) throw new Error('This request is still open or was already answered.');
+        if (item.data?.reaskedAt) throw new Error('The agent was already asked again.');
+        const chatId = item.chatId, chat = chatFor(chatId);
+        if (chat.archived) throw new Error('Restore this chat before asking again.');
+        if (runs.has(chatId) || chat.status === 'running' || chat.status === 'stopping') throw new Error('Wait for the agent to finish, then ask again.');
+        const subject = item.kind === 'approval' ? detail(item.data?.command ?? item.data?.reason ?? item.data?.tool ?? item.text).slice(0, 300) : 'the question you asked me';
+        const message = item.kind === 'approval'
+          ? `The approval request timed out before I could answer (${subject}). Please ask again if you still need it.`
+          : `I did not get to answer ${subject} in time. Please ask again.`;
+        const requestId = randomUUID();
+        store.updateItem(item.id, item.text, item.status, {...item.data, reaskedAt: new Date().toISOString()}); timeline(chatId);
+        return send(chatId, message, requestId);
       }
+      case 'chat.continueAnyway': {
+        const chatId = id(p.id), chat = chatFor(chatId);
+        if (runs.has(chatId) || chat.status === 'running' || chat.status === 'stopping') throw new Error('This attempt is still running here. Stop it or wait first.');
+        if (chat.recovery?.kind !== 'recovery-needed') return chat;
+        // The user's own call: the earlier attempt stays unconfirmed and is recorded as such, but it no longer blocks the chat.
+        const updated = store.updateChat(chatId, {recovery: null, error: null, status: 'interrupted'});
+        store.appendItem(chatId, 'notice', 'Continued without confirming the earlier attempt. It may still have been working at the provider; nothing was resent.', 'completed', {kind: 'continue-anyway', providerThreadId: chat.providerThreadId, providerTurnId: chat.providerTurnId});
+        timeline(chatId); state(); return updated;
+      }
+      case 'question.dismiss': { const questionId = id(p.id); const pending = questions.get(questionId); if (!pending) throw new Error('This question is no longer pending.'); finishQuestion(questionId, pending, null, 'dismissed'); return; }
+      case 'chat.compact': await compactChat(id(p.id), {fresh: p.fresh === true}); return;
       case 'question.respond': {
         const questionId = id(p.id); const pending = questions.get(questionId); if (!pending) throw new Error('This question is no longer pending.');
+        if (Date.now() >= pending.expiresAt) { finishQuestion(questionId, pending, null, 'expired'); throw new Error('This question timed out before it was answered. Use Ask again.'); }
+        { const stale = staleAttention(pending.chatId, questionId); if (stale) { finishQuestion(questionId, pending, null, 'interrupted', undefined, 'stale'); throw new Error(stale); } }
         if (!p.answers || typeof p.answers !== 'object' || Array.isArray(p.answers)) throw new Error('Invalid question answers.');
         const answers: Record<string, {answers: string[]}> = Object.create(null) as Record<string, {answers: string[]}>;
         const suppliedKeys = Object.getOwnPropertyNames(p.answers as object);
@@ -1491,6 +1739,12 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
       }
       case 'files.asset': return readAsset(folderFor(p.folderId).path, text(p.path,'path'));
       case 'files.modelChunk': return readModelChunk(folderFor(p.folderId).path, text(p.path,'path'), Number(p.offset), Number(p.length));
+      case 'files.chatImage': {
+        const chatId = id(p.chatId), path = text(p.path, 'path', 4096);
+        chatFor(chatId);
+        if (!store.chatMentionsPath(chatId, path)) throw new Error('That image is not part of this chat.');
+        return readChatImage(path);
+      }
       case 'git.changes': { const root = folderFor(p.folderId).path; const result = await new AgentModeReviewHost(() => root).listChanges(); if (result.error) throw new Error(result.error); return result.files; }
       case 'git.status': return gitStatus(folderFor(p.folderId).path);
       case 'git.mutate': {

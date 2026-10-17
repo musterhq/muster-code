@@ -6,6 +6,10 @@ import {addComposerContext} from '../composerContext';
 import React, { useEffect, useRef, useState } from 'react';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import {ResourceLink, type ResourceContext} from './ResourceLink';
+import {ChatImage} from './ChatImage';
+import {invoke} from '../bridge';
+import {GalleryCoverage} from './ImageGallery';
+import {activeChat} from '../store';
 import {MarkdownTable} from './MarkdownTable';
 import remarkGfm from 'remark-gfm';
 import { remarkLeadingLabels } from '../markdown-labels';
@@ -13,6 +17,9 @@ import { createIncrementalMarkdownPlugin } from '../markdown-incremental';
 import {markdownHeadingId} from './markdownAnchors';
 import {HighlightedCode} from './HighlightedCode';
 import {inferMarkdownCodeLanguages} from './codeLanguage';
+import {remarkRichFences} from '../markdown-rich-fences';
+import {richKindOfFence} from '../../shared/rich-fence';
+import {RichFence, RichPreload} from './RichFence';
 
 import './message-body.css';
 
@@ -97,15 +104,24 @@ export function languageLabel(lang?: string): string {
   return LANGUAGE_NAMES[key] ?? (lang.length <= 4 ? lang.toUpperCase() : lang[0]!.toUpperCase() + lang.slice(1));
 }
 
+/** Whether this body may run an agent's ```html-report fences (in a sandbox). Only the surfaces that show an agent's or the user's own text opt in: a README, a teammate's comment or an installed skill never do. A context, not a prop on `pre`, so the renderer map stays stable while a reply streams. */
+const ReportsContext = React.createContext(false);
+
 function Pre({ children }: { children?: React.ReactNode }): React.ReactElement {
   const child = Array.isArray(children) ? children[0] : children;
   const [wrap, setWrap] = useState(false);
+  const reports = React.useContext(ReportsContext);
   if (React.isValidElement<{ className?: string; children?: React.ReactNode }>(child)) {
     const lang = /language-([\w+-]+)/.exec(child.props.className ?? '')?.[1];
     // The fence's closing newline is not a code line (QA: a blank line trailed every block).
     const text = codeText(child.props.children).replace(/\r?\n$/, '');
+    // A closed ```mermaid / ```chart / ```html-report fence is drawn; one still streaming stays code until it closes.
+    const rich = richKindOfFence(lang);
+    const open = (child.props as Record<string, unknown>)['data-fence-open'] === 'true' || (child.props as Record<string, unknown>).dataFenceOpen === 'true';
+    if (rich && !open && (rich !== 'report' || reports)) return <RichFence kind={rich} source={text}/>;
     return (
       <div className="md-code">
+        {rich && open && (rich !== 'report' || reports) && <RichPreload kind={rich}/>}
         <div className="md-code-head">
           <span className="md-code-lang"><Code size={13} aria-hidden="true" />{languageLabel(lang)}</span>
           <span className="md-code-actions">
@@ -184,9 +200,44 @@ function SelectionQuote({ container }: { container: React.RefObject<HTMLDivEleme
   return <button type="button" className="md-quote" style={{ left: offer.left, top: offer.top }} onMouseDown={event => event.preventDefault()} onClick={quote} aria-label="Quote in reply" title="Quote in reply"><Quote size={12} />Quote</button>;
 }
 
-function MessageBodyContent({ text, resourceContext, animate = false, linkFiles = false }: { text: string; resourceContext?: ResourceContext; animate?: boolean; linkFiles?: boolean }): React.ReactElement {
+/** An image in a reply. A picture on this computer (an absolute path or file: link, the way an agent names one it made or looked at) shows at a readable size with click-to-zoom,
+ *  read through this chat; anything else stays text, since a reply must not fetch remote images. */
+function ReplyImage({src, alt}: {src?: string; alt?: string}): React.ReactElement {
+  const path = localImagePath(src);
+  const chat = activeChat();
+  const covered = React.useContext(GalleryCoverage);
+  // The turn's gallery already shows this picture.
+  if (path && covered.has(path)) return <></>;
+  if (path && chat) return <ChatImage chatId={chat.id} path={path} variant="inline"/>;
+  if (isServerAttachment(src)) return <ServerImage src={src!} alt={alt}/>;
+  return <span className="md-unavailable-link">[Image: {alt || 'image'} — preview unavailable]</span>;
+}
+/** An image attached on the connected server (`/api/attachments/<id>/content`, relative or on the server's own address). */
+export const isServerAttachment = (src?: string): boolean => Boolean(src) && /^(?:https?:\/\/[^/]+)?\/api\/attachments\/[0-9a-f-]{8,64}\/content$/i.test(src!.trim());
+/** Fetched with the connection's own sign-in (the server's attachments need it), then shown inline; a failure is a sentence, never a broken picture. */
+function ServerImage({src, alt}: {src: string; alt?: string}): React.ReactElement {
+  const [state, setState] = React.useState<{url: string} | {error: string} | null>(null);
+  React.useEffect(() => {
+    let live = true;
+    void invoke('paperclip.attachment.image', {src}).then(r => { if (live) setState({url: r.dataUrl}); }, () => { if (live) setState({error: 'unavailable'}); });
+    return () => { live = false; };
+  }, [src]);
+  if (state && 'url' in state) return <img className="md-server-image" src={state.url} alt={alt ?? ''} loading="lazy"/>;
+  return <span className="md-unavailable-link">{state ? `[Image: ${alt || 'image'} — could not be loaded from the server]` : `[Image: ${alt || 'image'} — loading]`}</span>;
+}
+/** The local file a markdown image points at: `/abs/path.png` or `file:///abs/path.png`; undefined for anything else. */
+export function localImagePath(src?: string): string | undefined {
+  if (!src) return undefined;
+  let path = src.trim();
+  if (/^file:\/\//i.test(path)) { try { path = decodeURIComponent(new URL(path).pathname); } catch { return undefined; } }
+  else if (/^[A-Za-z][A-Za-z0-9+.-]*:/.test(path) && !/^[A-Za-z]:[\\/]/.test(path)) return undefined;
+  else { try { path = decodeURIComponent(path); } catch { /* keep as written */ } }
+  return (path.startsWith('/') || /^[A-Za-z]:[\\/]/.test(path)) && /\.(?:png|jpe?g|gif|webp|bmp|avif|svg)$/i.test(path) ? path : undefined;
+}
+
+function MessageBodyContent({ text, resourceContext, animate = false, linkFiles = false, reports = false }: { text: string; resourceContext?: ResourceContext; animate?: boolean; linkFiles?: boolean; reports?: boolean }): React.ReactElement {
   // Replies link the files they mention (markdown-file-links.ts); documents and previews render as written.
-  const remarkPlugins = React.useMemo(() => linkFiles ? [remarkGfm, createIncrementalMarkdownPlugin(), remarkLeadingLabels, remarkFileLinks] : [remarkGfm, createIncrementalMarkdownPlugin()], [linkFiles]);
+  const remarkPlugins = React.useMemo(() => linkFiles ? [remarkGfm, createIncrementalMarkdownPlugin(), remarkRichFences, remarkLeadingLabels, remarkFileLinks] : [remarkGfm, createIncrementalMarkdownPlugin(), remarkRichFences], [linkFiles]);
   const renderedText = React.useMemo(() => inferMarkdownCodeLanguages(text), [text]);
   // Streaming fade (markdown-fade.ts): text that arrives after the first render fades in.
   const fade = useRef<FadeState | null>(null);
@@ -205,6 +256,7 @@ function MessageBodyContent({ text, resourceContext, animate = false, linkFiles 
     };
     return {
       ...components,
+      img: ({src, alt}: any) => <ReplyImage src={src} alt={alt}/>,
       h1: heading(1), h2: heading(2), h3: heading(3),
       h4: heading(4), h5: heading(5), h6: heading(6),
       ...(resourceContext ? {
@@ -216,6 +268,7 @@ function MessageBodyContent({ text, resourceContext, animate = false, linkFiles 
   }, [text, resourceContext?.folderId, resourceContext?.path]);
   const body = useRef<HTMLDivElement>(null);
   return (
+    <ReportsContext.Provider value={reports}>
     <div className="md-body" ref={body}>
       <ReactMarkdown
         remarkPlugins={remarkPlugins}
@@ -228,6 +281,7 @@ function MessageBodyContent({ text, resourceContext, animate = false, linkFiles 
       </ReactMarkdown>
       <SelectionQuote container={body} />
     </div>
+    </ReportsContext.Provider>
   );
 }
 
@@ -237,6 +291,7 @@ export const MessageBody = React.memo(MessageBodyContent, (previous, next) =>
   previous.text === next.text &&
   previous.animate === next.animate &&
   previous.linkFiles === next.linkFiles &&
+  previous.reports === next.reports &&
   previous.resourceContext?.folderId === next.resourceContext?.folderId &&
   previous.resourceContext?.path === next.resourceContext?.path,
 );

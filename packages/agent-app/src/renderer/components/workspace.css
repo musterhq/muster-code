@@ -148,6 +148,8 @@ button.task-caret:hover { background: var(--bg-active); color: var(--text); }
 /* Import mapping ------------------------------------------------------------------------------------------------------------ */
 .ws-import-map { display: flex; flex-direction: column; gap: 10px; padding: 14px; border: 1px solid var(--hairline); border-radius: var(--radius-10); background: var(--bg-raised); }
 .ws-import-map h3 { margin: 0; font-size: var(--fs-14); font-weight: 600; }
+.ws-import-deleted { display: flex; flex-direction: column; gap: 6px; }
+.ws-import-deleted h4 { margin: 0; font-size: var(--fs-13); font-weight: 600; color: var(--text); }
 .ws-import-map-row .ws-select { max-width: 240px; }
 
 /* Dashboard ---------------------------------------------------------------------------------------------------------------- */

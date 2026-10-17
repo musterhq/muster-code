@@ -25,7 +25,7 @@ const REPO = mkdtempSync(join(tmpdir(), 'muster-repo-'));
 const ME = 'u-me', BOB = 'u-bob', CO = { id: 'co-rag', name: 'Ragnar', prefix: 'RAG' };
 interface Comment { id: string; body: string; authorUserId: string | null; createdAt: string; clientRequestId?: string }
 class FakeServer {
-  down = false; rejectPatch = false; costFail: string | null = null; runs: { id: string; agentId: string | null; taskId: string | null; status: string }[] = []; loseNextResponse = false; calls: string[] = []; policy: { type: 'review' | 'approval'; participants: { kind: 'agent' | 'user'; id: string }[] }[] = []; comments = new Map<string, Comment[]>(); docs = new Map<string, string>(); costs: Record<string, unknown>[] = []; generation = 1;
+  down = false; unauthorized = false; token: string | undefined = undefined; rejectPatch = false; costFail: string | null = null; runs: { id: string; agentId: string | null; taskId: string | null; status: string }[] = []; loseNextResponse = false; calls: string[] = []; policy: { type: 'review' | 'approval'; participants: { kind: 'agent' | 'user'; id: string }[] }[] = []; comments = new Map<string, Comment[]>(); docs = new Map<string, string>(); costs: Record<string, unknown>[] = []; generation = 1; description = 'Move the sources.';
   tasks: WorkspaceTask[]; agents: WorkspaceAgent[];
   constructor() {
     const t = (id: string, key: string, status: WorkspaceTask['status'], assignee: { user?: string; agent?: string }): WorkspaceTask => ({
@@ -38,12 +38,12 @@ class FakeServer {
     this.agents = [{ ...agent('a-ceo', 'Head Muster', 'ceo', 'claude_local', 'claude-opus-4'), skills: ['paperclip', 'para-memory-files'] }, agent('a-qa', 'QA Lead', 'qa', 'process', 'x')];
   }
   patchCount = 0; foldedComments = 0;
-  private up() { if (this.down) throw new PaperclipError('connect ECONNREFUSED', 0, 'network'); }
+  private up() { if (this.down) throw new PaperclipError('connect ECONNREFUSED', 0, 'network'); if (this.unauthorized) throw new PaperclipError('Muster Server refused the API token (401).', 401, 'auth'); }
   part(): ServerPart { return { tasks: this.tasks.map(t => ({ ...t })), agents: this.agents, projects: [{ id: 'p-redis', name: 'Redis', status: 'in_progress', description: '', source: 'paperclip', repo: null, cwd: null, taskCount: 3, openCount: 3, paused: false, memory: null }], runs: this.runs as never, inbox: [], goals: [], approvals: [], labels: [], people: [{ id: ME, name: 'Dhairya' }, { id: BOB, name: 'Bob Rivera' }] }; }
   backend(): ServerBackend {
     const s = this;
     return {
-      kind: 'paperclip', endpoint: { baseUrl: 'http://x' }, get generation() { return s.generation; }, invalidate() {},
+      kind: 'paperclip', endpoint: { baseUrl: 'http://x', ...(s.token ? { token: s.token } : {}) }, get generation() { return s.generation; }, invalidate() {},
       async companies() { s.up(); return [CO]; },
       async read() { s.up(); return s.part(); },
       async whoami() { s.up(); return { id: ME, name: 'Dhairya', email: null }; },
@@ -63,7 +63,7 @@ class FakeServer {
       async postCostEvent(_co: string, body: Record<string, unknown>) { s.up(); if (s.costFail) throw new PaperclipError(s.costFail, 0, 'network'); s.costs.push(body); },
       async agentInstructions(id: string) { s.up(); return id === 'a-qa' ? 'Review like a skeptic.' : 'Be careful with Redis.'; },
       async issuePolicy() { s.up(); return s.policy; },
-      async taskDetail(id: string) { s.up(); const t = s.tasks.find(x => x.id === id)!; return { task: t, description: 'Move the sources.', comments: (s.comments.get(id) ?? []).map(c => ({ id: c.id, author: { kind: 'user' as const, id: c.authorUserId, label: 'Bob' }, body: c.body, createdAt: c.createdAt })), runs: [], addressee: null, composerNote: null, subtasks: ['t3'], blocking: [], receipts: [], cards: [{ kind: 'document' as const, id: 'd1', at: '', key: 'plan', title: 'Plan', format: 'markdown', body: '', revision: 1, revisions: [] }], mentionable: [] }; },
+      async taskDetail(id: string) { s.up(); const t = s.tasks.find(x => x.id === id)!; return { task: t, description: s.description, comments: (s.comments.get(id) ?? []).map(c => ({ id: c.id, author: { kind: 'user' as const, id: c.authorUserId, label: 'Bob' }, body: c.body, createdAt: c.createdAt })), runs: [], addressee: null, composerNote: null, subtasks: ['t3'], blocking: [], receipts: [], cards: [{ kind: 'document' as const, id: 'd1', at: '', key: 'plan', title: 'Plan', format: 'markdown', body: '', revision: 1, revisions: [] }], mentionable: [] }; },
     } as unknown as ServerBackend;
   }
 }
@@ -83,6 +83,7 @@ function setup(opts: { tests?: number; lazy?: boolean } = {}) {
   // The local chat as the timeline shows it: the person's message, a file change, a test run (tool output), and the agent's last message.
   const tl = { user: 'Implement it.', change: true, test: 'ℹ pass 12\nℹ fail 1' as string | null, testStatus: 'completed', exit: 0 as number, testCommand: 'npm test', after: null as { command: string } | null, final: 'Worked on it.', trailingTool: null as string | null, outcome: 'completed', question: false };
   const events: unknown[] = [];
+  const chatList: { id: string; path: string; activeAt: number }[] = [], sent: [string, string][] = [];
   const settings: Record<string, never> = {};
   const reader = new OrgReader({ backend: () => server.backend(), settings: () => settings, activeId: () => CO.id, serverLabel: () => 'aiteam', remembered: () => ({ id: ME, name: 'Dhairya' }), remember() {} });
   const timeline = async (): Promise<TimelineEntry[]> => [
@@ -98,7 +99,8 @@ function setup(opts: { tests?: number; lazy?: boolean } = {}) {
     store, backend: () => server.backend(), reader,
     git: counted(gitCalls, { isRepo: async () => repo, defaultBranch: async (_p, preferred) => preferred ?? 'dev', headSha: async () => head, stat: async () => ({ count: 2, added: 20, removed: 3 }), push: async (_p, b) => { if (pushOk) { pushed.push(b); pushedHead = true; } return { pushed: pushOk, ...(noRemote ? { noRemote: true } : {}), message: pushOk ? `Pushed ${b}.` : noRemote ? 'This repository has no remote.' : 'Could not push: no network' }; }, commitAll: async (_p, message) => { if (!commitOk) return { committed: false, message: 'Git has no name and email set.' }; commits.push(message); head = `commit${commits.length}`; clean = true; pushedHead = false; return { committed: true, message: 'Committed.' }; }, pushedHead: async () => pushedHead, isClean: async () => clean, state: async () => `${head}|${clean ? 'clean' : 'dirty'}|${salt}`, summaryStat: async (_p, bases) => { statCalls.push([...bases]); if (statFails) throw new Error('no merge base'); return stat; }, verifyPr: async (_p, url) => prOk.has(url) }),
     worktrees: { create: async (_root, branch) => { worktrees.push(branch); return { path: `/wt/${branch.replace('/', '-')}`, branch }; } },
-    chats: { addFolder: async p => ({ id: `f:${p}` }), create: async f => ({ id: `chat:${f}:${++chatSeq}` }), select: async () => {}, rename: async () => {}, timeline },
+    chats: { addFolder: async p => ({ id: `f:${p}` }), create: async f => { const id = `chat:${f}:${++chatSeq}`; chatList.push({ id, path: f.replace(/^f:/, ''), activeAt: clock }); return { id }; }, select: async () => {}, rename: async () => {}, timeline, send: async (c, text) => { sent.push([c, text]); }, inFolder: async p => chatList.filter(c => c.path === p).map(c => ({ id: c.id, activeAt: c.activeAt })), folderOf: id => chatList.find(c => c.id === id)?.path ?? null },
+    exists: () => true,
     providers: () => providers, home: () => homeDir, testSetup: async () => hasTests,
     turnFacts: async () => ({ tokens: { input: 1000, cached: 100, output: 200 }, tests: opts.tests ?? 1, model: 'claude-opus-4', provider: 'claude-code', costUsd: 0.5, durationMs: 4000, outcome: tl.outcome }),
     serverLabel: () => 'aiteam', origin: () => origin, deviceNameDefault: () => 'Dhairya’s MacBook', now: () => clock, emit: id => emitted.push(id), notify: e => events.push(e), later: fn => { if (!opts.lazy) fn(); },
@@ -111,7 +113,7 @@ function setup(opts: { tests?: number; lazy?: boolean } = {}) {
   svc.onTurn = async (...args) => { await rawOnTurn(...args); if (autoFire) await fire(); };
   /** Lets the 60 second countdown run out (or says there is none). */
   const fire = async (sync = true): Promise<number> => { const live = wait.filter(t => t.live); wait = wait.filter(t => !live.includes(t)); for (const t of live) { t.live = false; t.fn(); } await new Promise(r => setTimeout(r, 20)); if (sync) await svc.sync(); return live.length; };
-  return { events, fire, hold: (v = true) => { autoFire = !v; }, countdownMs: () => wait.filter(t => t.live).map(t => t.ms), statCalls, setSalt: (v: number) => { salt = v; }, setStatFails: (v: boolean) => { statFails = v; }, setStat: (v: typeof stat) => { stat = v; }, setQueued: (v: boolean) => { queuedMore = v; }, tl, orgDir, homeDir, gitCalls, commits, setNoRemote: (v: boolean) => { noRemote = v; }, setCommitOk: (v: boolean) => { commitOk = v; }, setHasTests: (v: boolean) => { hasTests = v; }, setRepo: (v: boolean) => { repo = v; }, dirty: () => !clean, setClean: (v: boolean) => { clean = v; }, setHead: (v: string) => { head = v; }, setPushedHead: (v: boolean) => { pushedHead = v; }, setOrigin: (v: string) => { origin = v; }, prOk, server, db, store, svc, reader, advance: (ms: number) => { clock += ms; }, worktrees, pushed, emitted, setPush: (v: boolean) => { pushOk = v; }, now: () => clock };
+  return { events, chatList, sent, fire, hold: (v = true) => { autoFire = !v; }, countdownMs: () => wait.filter(t => t.live).map(t => t.ms), statCalls, setSalt: (v: number) => { salt = v; }, setStatFails: (v: boolean) => { statFails = v; }, setStat: (v: typeof stat) => { stat = v; }, setQueued: (v: boolean) => { queuedMore = v; }, tl, orgDir, homeDir, gitCalls, commits, setNoRemote: (v: boolean) => { noRemote = v; }, setCommitOk: (v: boolean) => { commitOk = v; }, setHasTests: (v: boolean) => { hasTests = v; }, setRepo: (v: boolean) => { repo = v; }, dirty: () => !clean, setClean: (v: boolean) => { clean = v; }, setHead: (v: string) => { head = v; }, setPushedHead: (v: boolean) => { pushedHead = v; }, setOrigin: (v: string) => { origin = v; }, prOk, server, db, store, svc, reader, advance: (ms: number) => { clock += ms; }, worktrees, pushed, emitted, setPush: (v: boolean) => { pushOk = v; }, now: () => clock };
 }
 /** The fake git, with every call counted (a plain folder must make none). */
 function counted<T extends object>(calls: string[], target: T): T { return new Proxy(target, { get: (t, k) => { const v = (t as Record<string | symbol, unknown>)[k]; return typeof v === 'function' ? (...args: unknown[]) => { calls.push(String(k)); return (v as (...a: unknown[]) => unknown)(...args); } : v; } }); }
@@ -736,14 +738,17 @@ test('M4: a refused reassignment does not leave a hand-back summary on the task:
   assert.ok(!h.server.comments.get('t1')!.some(c => /Handed back for review/.test(c.body)), 'no summary without the reassignment');
 });
 
-test('M5: a cost event whose delivery is unknown (timeout) is not sent twice; one that clearly never left is retried', async () => {
+test('M5: a cost event carries an idempotency key, so one whose delivery is unknown (timeout) is sent again and counted once (#395)', async () => {
   const h = setup(); await bound(h);
   const l = await h.svc.start({ taskId: 't1', model: OWN, confirm: true });
   h.server.costFail = 'The request timed out'; await h.svc.onTurn(l.chatId!, 'r1', 'completed'); await h.svc.sync();
-  assert.equal(h.svc.get('t1')!.pending, 0, 'not queued for a second try: the server may have counted it');
-  h.server.costFail = null; await h.svc.sync(); assert.equal(h.server.costs.length, 0, 'and it is not posted later');
+  assert.ok(h.svc.get('t1')!.pending >= 1, 'kept for another try: the key makes a repeat safe');
+  h.server.costFail = null; await h.svc.sync();
+  assert.equal(h.server.costs.length, 1, 'and it is posted on the next flush');
+  assert.equal(h.server.costs[0]!.idempotencyKey, 'muster-local:r1', 'with a key built from the run');
   h.server.down = true; await h.svc.onTurn(l.chatId!, 'r2', 'completed'); assert.ok(h.svc.get('t1')!.pending >= 1, 'a refused connection is retried');
-  h.server.down = false; await h.svc.sync(); assert.equal(h.server.costs.length, 1);
+  h.server.down = false; await h.svc.sync(); assert.equal(h.server.costs.length, 2);
+  assert.deepEqual(h.server.costs.map(c => c.idempotencyKey), ['muster-local:r1', 'muster-local:r2']);
 });
 
 test('M6: the org copy is a private file, only the roles in use are copied with instructions, and it is deleted when the check-out ends, the org is unticked or the server is disconnected', async () => {
@@ -1210,8 +1215,9 @@ test('#345 git, exit 0: the turn ends with a commit and a passing run (parsed or
 
 test('#345 git with no test setup: a commit past the check-out is enough; Muster commits the uncommitted work as the person and pushes it itself', async () => {
   const { h, chat } = await finishedGit({ tests: 0 }); h.setHasTests(false); h.tl.test = null; h.setClean(false);
-  await h.svc.onTurn(chat, 'r1', 'completed'); assert.deepEqual(h.commits, ['RAG-1: Task RAG-1']); assert.deepEqual(h.pushed, ['muster/RAG-1'], 'pushed during the countdown');
-  await h.fire(); assert.equal(h.svc.get('t1')!.state, 'handed_back'); assert.match(handedBack(h)!, /No tests in this project\./); assert.deepEqual(h.pushed, ['muster/RAG-1'], 'and not pushed twice');
+  await h.svc.onTurn(chat, 'r1', 'completed'); assert.deepEqual(h.commits, [], '#383: nothing is committed while the countdown could still be cancelled'); assert.deepEqual(h.pushed, []);
+  await h.fire(); assert.deepEqual(h.commits, ['RAG-1: Task RAG-1'], 'committed once the countdown ran out'); assert.deepEqual(h.pushed, ['muster/RAG-1'], 'and pushed by the hand-back');
+  assert.equal(h.svc.get('t1')!.state, 'handed_back'); assert.match(handedBack(h)!, /No tests in this project\./); assert.deepEqual(h.pushed, ['muster/RAG-1'], 'and not pushed twice');
 });
 
 test('#345 git with no remote: the hand-back still goes through, with the branch noted as local', async () => {
@@ -1334,4 +1340,182 @@ test('#345 stale check-outs: idle for more than 3 days shows how long ago and of
   const b = setup(); mkdirSync(join(b.homeDir, 'Documents'), { recursive: true }); b.setRepo(false); await b.reader.part(CO); await b.svc.bind(CO.id, 'p-redis', join(b.homeDir, 'Documents'));
   assert.equal((await b.svc.plan('t1')).broadFolder, true, 'the check-out sheet warns'); const lb = await b.svc.start({ taskId: 't1', model: OWN, confirm: true }); assert.equal(lb.broadFolder, true, 'and so does the task');
   const ok = setup(); await plain(ok); assert.equal((await ok.svc.plan('t1')).broadFolder, false);
+});
+
+test('#385: a task description past the 32,000-character cap is written whole to a self-ignoring .muster/task file and the brief points at it', async () => {
+  const h = setup(); await bound(h);
+  h.server.description = 'Goal: do it.\n' + 'x'.repeat(40_000) + '\nEND-OF-TASK';
+  const l = await h.svc.start({ taskId: 't1', model: { kind: 'org-agent', agentId: 'a-ceo' }, confirm: true });
+  const wt = mkdtempSync(join(tmpdir(), 'muster-wt-')); h.store.putLease({ ...h.store.lease('t1')!, worktree: wt });
+  const brief = (await h.svc.brief(l.chatId!))!;
+  assert.ok(!brief.includes('END-OF-TASK'), 'the envelope is cut');
+  assert.match(brief, /The description continues in TASK\.md/);
+  const m = brief.match(/Before you start, read (\S+)\/TASK\.md/);
+  assert.ok(m, 'the brief points at the file');
+  assert.match(readFileSync(join(m![1]!, 'TASK.md'), 'utf8'), /END-OF-TASK/);
+  assert.equal(join(m![1]!, 'TASK.md'), join(wt, '.muster', 'task', 'TASK.md'));
+  assert.equal(readFileSync(join(m![1]!, '.gitignore'), 'utf8').trim(), '*');
+  assert.match(brief, /local commits on the task branch/);
+});
+
+// --- #383: hand-back must not fire on unfinished work ---------------------------------------------------------------------------------------
+test('#383 done phrases: "I am done", "done hand back", "hand it back", "finished", "all done" count; questions and negations do not', () => {
+  for (const yes of ['I am done', "I'm done.", 'done', 'Done hand back', 'done, hand it back', 'done and hand back', 'hand it back', 'Hand it back please', 'finished', 'all done', "it's all done", 'ok, all done!', 'we are done', 'yes done', "that's done", 'ship it']) assert.equal(userSaysDone(yes), true, yes);
+  for (const no of ['I am not done', 'is it done?', 'not finished yet', 'almost done, keep going', 'done with the first part, now do the second part of the migration please', 'hand back the keys to Bob and tell him everything', '']) assert.equal(userSaysDone(no), false, no);
+});
+
+test('#383 a final message that asks something is not finished: no countdown, no commit; the person saying done still goes ahead', async () => {
+  for (const final of ['Should I commit item 1 now?', 'Item 1 is ready. Want me to commit it and move on to item 2', 'All set.\n\nWould you like me to also add docs?', 'Is this what you meant?']) {
+    const { h, chat } = await finishedGit(); h.setHead('def456'); h.setClean(false); h.tl.test = GREEN; h.tl.final = final; h.tl.user = 'add the cache';
+    await h.svc.onTurn(chat, 'r1', 'completed');
+    assert.deepEqual(h.countdownMs(), [], final); assert.deepEqual(h.commits, [], `${final}: nothing committed`); assert.equal(h.svc.get('t1')!.state, 'checked_out');
+  }
+  const { h, chat } = await finishedGit(); h.setHead('def456'); h.tl.test = GREEN; h.tl.final = 'Tested and pushed. Let me know what you think.'; h.tl.user = 'add the cache';
+  await h.svc.onTurn(chat, 'r1', 'completed'); assert.deepEqual(h.countdownMs(), [60_000], 'a statement is not a question');
+  const said = await finishedGit(); said.h.setHead('def456'); said.h.tl.test = GREEN; said.h.tl.final = 'Should I commit item 1 now?'; said.h.tl.user = 'I am done';
+  await said.h.svc.onTurn(said.chat, 'r1', 'completed'); await said.h.fire(); assert.equal(said.h.svc.get('t1')!.state, 'handed_back', 'the person said it is done');
+});
+
+test('#383 uncommitted work is committed only after the countdown; Keep working leaves it uncommitted', async () => {
+  const { h, chat } = await finishedGit(); h.setHead('def456'); h.setClean(false); h.tl.test = GREEN; h.tl.user = 'add the cache';
+  await h.svc.onTurn(chat, 'r1', 'completed');
+  assert.deepEqual(h.countdownMs(), [60_000]); assert.deepEqual(h.commits, []);
+  await h.svc.countdown('t1', 'keep'); await h.fire(); assert.deepEqual(h.commits, [], 'cancelled: never committed'); assert.equal(h.svc.get('t1')!.state, 'checked_out');
+  const g = await finishedGit(); g.h.setHead('def456'); g.h.setClean(false); g.h.tl.test = GREEN; g.h.tl.user = 'add the cache';
+  await g.h.svc.onTurn(g.chat, 'r1', 'completed'); assert.deepEqual(g.h.commits, []);
+  await g.h.svc.countdown('t1', 'now'); assert.deepEqual(g.h.commits, ['RAG-1: Task RAG-1'], 'Hand back now commits first'); assert.equal(g.h.svc.get('t1')!.state, 'handed_back');
+});
+
+test('#383 the countdown is saved on the check-out: a restart picks it up again, and one that ran out while closed gets a short grace', async () => {
+  const { h, chat } = await finishedGit(); h.setHead('def456'); h.tl.test = GREEN; h.tl.user = 'add the cache';
+  await h.svc.onTurn(chat, 'r1', 'completed');
+  const saved = h.svc.get('t1')!.countdown; assert.ok(saved, 'saved with the lease'); assert.equal(saved!.plan.recipient.name, 'QA Lead');
+  await h.fire(); assert.equal(h.svc.get('t1')!.state, 'handed_back'); assert.equal(h.svc.get('t1')!.countdown ?? null, null, 'cleared when it ends');
+  const again = await finishedGit(); again.h.setHead('def456'); again.h.tl.test = GREEN; again.h.tl.user = 'add the cache';
+  await again.h.svc.onTurn(again.chat, 'r1', 'completed'); assert.deepEqual(again.h.countdownMs(), [60_000]);
+  const d2 = (again.h.svc as unknown as { d: CheckoutDeps }).d, restarted = new CheckoutService(d2);
+  assert.deepEqual(restarted.activeCountdowns(), [], 'a new process has no timers');
+  again.h.advance(5 * 60_000);
+  assert.equal(restarted.resumeCountdowns(), 1); assert.equal(restarted.resumeCountdowns(), 0, 'not started twice');
+  assert.deepEqual(restarted.activeCountdowns().map(c => c.taskId), ['t1']);
+  assert.ok(again.h.countdownMs().includes(10_000), 'ran out while closed: ten seconds of grace');
+  await again.h.fire(); assert.equal(restarted.get('t1')!.state, 'handed_back'); assert.equal(restarted.get('t1')!.countdown ?? null, null);
+});
+
+test('#383 held for want of a test run: Hand back anyway goes ahead with a note; Run tests and hand back asks the agent and then hands back', async () => {
+  const a = await finishedGit({ tests: 0 }); a.h.setHead('def456'); a.h.setClean(false); a.h.tl.test = null; a.h.tl.user = 'I am done';
+  await a.h.svc.onTurn(a.chat, 'r1', 'completed');
+  assert.equal(a.h.svc.get('t1')!.heldBack?.kind, 'no-tests'); assert.match(a.h.svc.get('t1')!.heldBack!.reason, /No test run came after the last change/);
+  await a.h.svc.handBackAnyway('t1'); await a.h.svc.sync();
+  assert.equal(a.h.svc.get('t1')!.state, 'handed_back'); assert.deepEqual(a.h.commits, ['RAG-1: Task RAG-1']); assert.match(handedBack(a.h)!, /without a test run/);
+  const b = await finishedGit(); b.h.setHead('def456'); b.h.tl.test = null; b.h.tl.user = 'done hand back';
+  await b.h.svc.onTurn(b.chat, 'r1', 'completed'); assert.equal(b.h.svc.get('t1')!.heldBack?.kind, 'no-tests');
+  await b.h.svc.runTestsAndHandBack('t1');
+  assert.equal(b.h.sent.length, 1); assert.match(b.h.sent[0]![1], /Run the project’s tests/); assert.equal(b.h.svc.get('t1')!.heldBack ?? null, null);
+  b.h.tl.user = 'Run the project’s tests now'; b.h.tl.test = GREEN;
+  await b.h.svc.onTurn(b.chat, 'r2', 'completed'); await b.h.fire();
+  assert.equal(b.h.svc.get('t1')!.state, 'handed_back', 'the turn that ran the tests counts as done');
+  const c = await finishedGit(); c.h.setHead('def456'); c.h.tl.test = null; c.h.tl.user = 'done';
+  await c.h.svc.onTurn(c.chat, 'r1', 'completed'); await c.h.svc.runTestsAndHandBack('t1');
+  c.h.tl.user = 'Run the tests'; c.h.tl.test = 'ℹ pass 1\nℹ fail 2'; await c.h.svc.onTurn(c.chat, 'r2', 'completed');
+  assert.equal(c.h.svc.get('t1')!.state, 'checked_out', 'failing tests still hold it'); assert.match(c.h.svc.get('t1')!.heldBack!.reason, /failing/);
+});
+
+test('#383 checking the same task out again reuses its worktree and chat (no "-2"), and any chat in the worktree counts for the lease', async () => {
+  const h = setup(); await bound(h);
+  const first = await h.svc.start({ taskId: 't1', model: OWN, confirm: true });
+  assert.deepEqual(h.worktrees, ['muster/RAG-1']);
+  // A second chat is opened by hand in the same worktree; its turns and activity belong to the check-out.
+  const manual = { id: 'chat:manual', path: first.worktree!, activeAt: h.now() }; h.chatList.push(manual);
+  assert.equal(h.svc.leaseForChat('chat:manual')?.taskId, 't1'); assert.deepEqual(h.svc.get('t1')!.linkedChats, ['chat:manual']);
+  assert.equal(h.svc.leaseForChat('chat:elsewhere'), null);
+  await h.svc.release('t1', 'back later');
+  const again = await h.svc.start({ taskId: 't1', model: OWN, confirm: true });
+  assert.deepEqual(h.worktrees, ['muster/RAG-1'], 'no second worktree'); assert.equal(again.worktree, first.worktree); assert.equal(again.branch, 'muster/RAG-1');
+  assert.ok([first.chatId, 'chat:manual'].includes(again.chatId!), 'an existing chat, not a new one'); assert.equal(h.chatList.length, 2, 'no extra chat was made');
+  // When the worktree is gone, a fresh one is made as before.
+  const gone = setup(); await bound(gone); (gone.svc as unknown as { d: CheckoutDeps }).d.exists = () => false;
+  await gone.svc.start({ taskId: 't1', model: OWN, confirm: true }); await gone.svc.release('t1', 'x'); await gone.svc.start({ taskId: 't1', model: OWN, confirm: true });
+  assert.equal(gone.worktrees.length, 2);
+});
+
+test('#383 no "Paused" note while any chat in the worktree was active', async () => {
+  const h = setup(); await bound(h); const l = await h.svc.start({ taskId: 't1', model: OWN, confirm: true });
+  const other = { id: 'chat:manual', path: l.worktree!, activeAt: h.now() }; h.chatList.push(other);
+  h.advance(30 * 3_600_000); other.activeAt = h.now() - 60_000;
+  assert.equal(await h.svc.checkIdle(), 0, 'the other chat was active a minute ago'); await h.svc.sync(); assert.deepEqual(serverNotes(h), []);
+  assert.equal(h.svc.get('t1')!.lastActivityAt, new Date(other.activeAt).toISOString());
+  h.advance(30 * 3_600_000); assert.equal(await h.svc.checkIdle(), 1, 'quiet everywhere: now it is posted'); await h.svc.sync(); assert.equal(serverNotes(h).length, 1);
+  assert.deepEqual(h.svc.get('t1')!.linkedChats, ['chat:manual']);
+});
+
+
+// --- #394: lease-ending changes check the task first; a refused sign-in is not "offline"; the outbox backs off and gives up ------------------------------
+import { RETRY_BASE_MS, RETRY_MAX_MS, retryDelay, whyNotSend } from '../src/runtime/checkout/outbox-policy.ts';
+const handBackCalls = (h: { server: FakeServer }) => h.server.calls.filter(c => /^patch t1 .*in_review/.test(c));
+async function readyToHandBack() { const h = setup(); await bound(h); const l = await h.svc.start({ taskId: 't1', model: OWN, confirm: true }); await h.svc.onTurn(l.chatId!, 'r1', 'completed'); return h; }
+const REVIEWER = { kind: 'agent' as const, id: 'a-qa' };
+
+test('#394 hand-back, release and run-on-server do not PATCH a task that was reassigned, cancelled or closed on Muster Server; the lease ends here and the worktree is kept', async () => {
+  const h = await readyToHandBack();
+  h.server.tasks[0]!.assigneeUserId = BOB; h.server.tasks[0]!.assigneeId = `user:${BOB}`; h.server.tasks[0]!.assigneeLabel = 'Bob'; h.server.generation++;
+  const view = await h.svc.handBack({ taskId: 't1', reviewer: REVIEWER, testsNote: 'n/a' });
+  assert.deepEqual(handBackCalls(h), [], 'no PATCH, so Bob’s task is not reopened and no run is killed');
+  assert.ok(!h.server.comments.get('t1')!.some(c => /Handed back for review/.test(c.body)), 'and no summary comment either');
+  assert.equal(view.state, 'handed_back', 'the lease ends locally');
+  assert.match(view.endNotice!, /^RAG-1 was reassigned to Bob on Muster Server; your local work is kept in \/wt\//);
+  assert.equal(h.svc.get('t1')!.pending, 0, 'nothing is left queued to leak out later'); assert.equal(view.conflict, null);
+
+  const r = setup(); await bound(r); await r.svc.start({ taskId: 't2', take: true, model: OWN, confirm: true });
+  r.server.tasks[1]!.status = 'cancelled'; r.server.generation++;
+  const released = await r.svc.release('t2', 'note');
+  assert.ok(!r.server.calls.some(c => /^patch t2 .*"status":"todo"/.test(c)), 'a cancelled task is not set back to todo'); assert.match(released.endNotice!, /RAG-2 was cancelled on Muster Server; your local work is kept/);
+
+  const o = setup(); await bound(o); await o.svc.start({ taskId: 't1', model: OWN, confirm: true });
+  o.server.tasks[0]!.status = 'done'; o.server.generation++;
+  const callsBefore = o.server.calls.length; const ended = await o.svc.runOnServer('t1', true);
+  assert.ok(!o.server.calls.slice(callsBefore).some(c => c.startsWith('patch t1')), 'closed on Muster Server: not handed to the server agent'); assert.match(ended.endNotice!, /RAG-1 was closed on Muster Server/);
+});
+
+test('#394 a task that is still in progress and still yours is handed back as before', async () => {
+  const h = await readyToHandBack();
+  const view = await h.svc.handBack({ taskId: 't1', reviewer: REVIEWER, testsNote: 'n/a' });
+  assert.equal(handBackCalls(h).length, 1); assert.equal(view.endNotice ?? null, null);
+  assert.equal(whyNotSend({ key: 'RAG-1', status: 'in_progress', assigneeUserId: ME }, 'RAG-1', { status: 'in_progress', assigneeUserId: ME }), null);
+  assert.match(whyNotSend({ key: 'RAG-1', status: 'in_review', assigneeUserId: ME }, 'RAG-1', { status: 'in_progress', assigneeUserId: ME })!, /now in review/);
+  assert.match(whyNotSend(null, 'RAG-1', {})!, /no longer on the server/);
+});
+
+test('#394 the persisted hand-back countdown checks the task too when it fires after a restart', async () => {
+  const { h, chat } = await finishedGit(); h.setHead('def456'); h.tl.test = GREEN; h.tl.user = 'add the cache';
+  await h.svc.onTurn(chat, 'r1', 'completed'); assert.ok(h.svc.get('t1')!.countdown, 'saved with the lease');
+  h.server.tasks[0]!.status = 'cancelled'; h.server.generation++;
+  const restarted = new CheckoutService((h.svc as unknown as { d: CheckoutDeps }).d);
+  assert.equal(restarted.resumeCountdowns(), 1); h.advance(5 * 60_000); await h.fire();
+  assert.deepEqual(handBackCalls(h), [], 'the cancelled task was not PATCHed');
+  assert.match(restarted.get('t1')!.endNotice!, /RAG-1 was cancelled on Muster Server; your local work is kept in/);
+});
+
+test('#394 a 401 is a sign-in state, not offline: held without retries until the key changes, then sent', async () => {
+  const h = await readyToHandBack(); h.server.token = 'old-key';
+  h.server.unauthorized = true;
+  const view = await h.svc.handBack({ taskId: 't1', reviewer: REVIEWER, testsNote: 'n/a' });
+  assert.equal(view.offline, null, 'not offline'); assert.equal(view.authRequired, true); assert.match((await h.svc.outbox()).lastError!, /Sign in to Muster Server again/);
+  h.server.unauthorized = false; const before = h.server.calls.length;
+  await h.svc.flush(); await h.svc.flush(); assert.equal(h.server.calls.length, before, 'no request while the same key is blocked');
+  assert.equal(h.svc.get('t1')!.pending > 0, true, 'the hand-back waits in the outbox');
+  h.server.token = 'new-key'; await h.svc.flush();
+  assert.equal(handBackCalls(h).length, 1, 'a new key sends it'); assert.equal(h.svc.get('t1')!.authRequired, false);
+});
+
+test('#394 outbox: 30 s doubling to a 30 minute cap; an update that kept failing for a day is given up on, counted, and Retry sends it', async () => {
+  assert.deepEqual([0, 1, 2, 5, 6, 7, 20].map(retryDelay), [30_000, 60_000, 120_000, 960_000, RETRY_MAX_MS, RETRY_MAX_MS, RETRY_MAX_MS]); assert.equal(RETRY_BASE_MS, 30_000);
+  const h = await readyToHandBack(); h.server.down = true;
+  await h.svc.handBack({ taskId: 't1', reviewer: REVIEWER, testsNote: 'n/a' }).catch(() => undefined);
+  assert.ok(h.svc.get('t1')!.pending > 0); assert.equal((await h.svc.outbox()).stuck, 0, 'not yet');
+  h.advance(23 * 3_600_000); await h.svc.sync(); assert.equal((await h.svc.outbox()).stuck, 0, 'under a day');
+  h.advance(2 * 3_600_000); await h.svc.sync();
+  const status = await h.svc.outbox(); assert.equal(status.pending, 0); assert.ok(status.stuck! >= 1, 'given up: “N updates couldn’t be sent”'); assert.equal(h.svc.get('t1')!.stuck, status.stuck);
+  h.server.down = false; await h.svc.retry('t1');
+  assert.equal((await h.svc.outbox()).stuck, 0); assert.equal(handBackCalls(h).length, 1, 'Retry sent it');
 });

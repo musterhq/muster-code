@@ -7,6 +7,7 @@
  * the model catalog path they name. Credentials are never read; readiness comes from the regular provider list.
  */
 import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { homedir } from 'node:os';
 import { isAbsolute, join } from 'node:path';
 import type { ProviderInfo } from '../shared/protocol.ts';
@@ -52,8 +53,9 @@ export function fingerprint(paths: readonly string[], stat: (path: string) => st
 }
 const defaultStat = (path: string) => { try { const s = statSync(path); return `${s.mtimeMs}:${s.size}:${s.ino}`; } catch { return '-'; } };
 
-/** Ready providers and their model counts, as a stable string. */
-export const readySignature = (providers: readonly ProviderInfo[]): string => providers.filter(p => p.available).map(p => `${p.id}:${p.models.length}`).sort().join('|');
+/** Ready providers and their model lists, as a stable string. The ids (not just the count) are part of it: a refreshed
+ *  Codex cache that swaps one model for another keeps the count, and must still reach the picker. */
+export const readySignature = (providers: readonly ProviderInfo[]): string => providers.filter(p => p.available).map(p => `${p.id}:${p.models.length}:${createHash('sha1').update(p.models.map(m => m.id).join('\n')).digest('hex').slice(0, 12)}`).sort().join('|');
 
 /** Providers that became ready (or gained models) between two listings. */
 export function newlyReady(before: readonly ProviderInfo[] | null, after: readonly ProviderInfo[]): ProvidersChange['connected'] {

@@ -292,6 +292,16 @@ lease={...lease,conflict:null,pending:0,offline:null,stale:true,staleDays:4,broa
 await show(<CheckoutNotes detail={detail()}/>);
 assert.ok(body().includes('Checked out 4 days ago · idle'),'idle for days: said plainly'); assert.deepEqual(text('[data-stale-checkout] button'),['Hand back','Release']); assert.ok(!body().includes('Quiet for'),'the hours reminder gives way to it');
 assert.ok(body().includes('very broad folder')&&body().includes('Not handed back yet: The last test run did not finish with exit code 0.'));
+// held for want of a test run: two choices, each the person's own click (#383)
+lease={...lease,staleDays:null,stale:false,broadFolder:false,heldBack:{reason:'No test run came after the last change.',at:iso(0),kind:'no-tests'}};
+await show(<CheckoutNotes detail={detail()}/>);
+assert.deepEqual(text('.ws-checkout-note button'),['Run tests and hand back','Hand back anyway']);
+calls.length=0; await click(byText('.ws-checkout-note button','Hand back anyway')); assert.equal(calls.find(c=>c.command==='checkout.handback.anyway')?.input.taskId,'t1');
+await click(byText('.ws-checkout-note button','Run tests and hand back')); assert.equal(calls.find(c=>c.command==='checkout.handback.runtests')?.input.taskId,'t1');
+lease={...lease,heldBack:{reason:'The last test run did not finish with exit code 0.',at:iso(0)}};
+await show(<CheckoutNotes detail={detail()}/>); assert.deepEqual(text('.ws-checkout-note button'),[],'any other hold has no buttons');
+lease={...lease,stale:true,staleDays:4,broadFolder:true};
+await show(<CheckoutNotes detail={detail()}/>);
 calls.length=0; await click(byText('[data-stale-checkout] button','Release')); assert.equal(calls.find(c=>c.command==='checkout.release')?.input.taskId,'t1','Release is the person\'s click; nothing is released by itself');
 await click(byText('[data-stale-checkout] button','Hand back')); assert.ok(document.querySelector('.ws-hand-back'),'Hand back opens the usual sheet with the recipient filled in');
 // My work: the idle row says so, with the same two choices

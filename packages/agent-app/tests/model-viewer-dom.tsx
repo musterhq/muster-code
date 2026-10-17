@@ -42,7 +42,7 @@ async function waitFor<T>(read: () => T | null | false | undefined, what: string
   for (;;) { const v = read(); if (v) return v; if (Date.now() > end) throw new Error(`timed out waiting for ${what}\n${root.innerHTML.slice(0, 600)}`); await delay(15); }
 }
 const q = <T extends Element>(selector: string) => root.querySelector<T>(selector);
-const state = () => q('.rich-block')?.getAttribute('data-state');
+const state = () => q('.rich-block')?.getAttribute('data-status');
 
 // A fake WebGL renderer and a Worker that parses in-process, so the whole pipeline runs without a GPU or threads.
 const live = {renderers: 0, disposed: 0, lost: 0, renders: 0, workers: 0, terminated: 0};
@@ -68,9 +68,9 @@ const file = (path: string, extra: Record<string, unknown> = {}) => ({source: {k
   const r = createRoot(root);
   r.render(<ModelViewer source={{kind: 'file', folderId: 'f1', path: 'models/a.glb'}}/>);
   await waitFor(() => state() === 'error', 'the no-WebGL error');
-  assert.match(text(q('.rich-block-error')), /3D preview isn't available here/);
-  assert.match(text(q('.rich-block-error')), /Reveal in|Copy path/);
-  assert.equal(q('.rich-block-error-actions button')?.textContent?.includes('Try again'), false, 'retrying cannot fix missing WebGL');
+  assert.match(text(q('.resource-state-error')), /3D preview isn't available here/);
+  assert.match(text(q('.resource-state-error')), /Reveal in|Copy path/);
+  assert.equal(q('.resource-state-actions button')?.textContent?.includes('Try again'), false, 'retrying cannot fix missing WebGL');
   r.unmount();
 }
 
@@ -82,7 +82,7 @@ files.set('models/cube.glb', model.cubeGlb());
   await waitFor(() => state() === 'loading' || state() === 'ready', 'loading');
   await waitFor(() => state() === 'ready', 'ready');
   assert.equal(q('.rich-block')?.getAttribute('aria-label'), '3D model · GLB: cube.glb');
-  assert.match(text(q('.rich-block-head')), /cube\.glb.*3D model · GLB/);
+  assert.match(text(q('.rich-head')), /cube\.glb.*3D model · GLB/);
   assert.ok(q('canvas'), 'the canvas is mounted');
   assert.equal(q('canvas')?.getAttribute('aria-label'), '3D model: cube.glb');
   assert.ok(q('canvas')?.getAttribute('tabindex') === '0', 'keyboard reachable');
@@ -119,15 +119,15 @@ files.set('models/cube.glb', model.cubeGlb());
   failRead = 'EACCES: permission denied';
   const r = mount(file('models/cube.glb'));
   await waitFor(() => state() === 'error', 'read error');
-  assert.match(text(q('.rich-block-error')), /Couldn't open this 3D model/);
-  assert.match(text(q('.rich-block-error')), /could not read this resource/);
-  assert.equal(q('.rich-block-live')?.textContent, "Couldn't open this 3D model", 'announced to assistive tech');
+  assert.match(text(q('.resource-state-error')), /Couldn't open this 3D model/);
+  assert.match(text(q('.resource-state-error')), /could not read this resource/);
+  assert.equal(q('.rich-block > .rich-sr[role="status"]')?.textContent, 'Couldn’t render this model.', 'announced to assistive tech');
   failRead = null;
-  const retry = [...root.querySelectorAll('.rich-block-error-actions button')].find(b => b.textContent === 'Try again') as HTMLElement;
+  const retry = [...root.querySelectorAll('.resource-state-actions button')].find(b => b.textContent === 'Try again') as HTMLElement;
   assert.ok(retry, 'Try again is offered');
   retry.click();
   await waitFor(() => state() === 'ready', 'recovery after Try again');
-  assert.equal(q('.rich-block-live')?.textContent, 'cube.glb loaded');
+  assert.equal(q('.rich-block > .rich-sr[role="status"]')?.textContent, '3D model · GLB ready: cube.glb');
   r.unmount();
 }
 
@@ -138,7 +138,7 @@ files.set('models/nope.glb', new TextEncoder().encode('this is not a glb'));
 for (const [path, pattern] of [['models/cut.glb', /cut off|too short/], ['models/empty.glb', /empty/], ['models/nope.glb', /too short|not a GLB/], ['models/missing.glb', /no longer available/]] as const) {
   const r = mount(file(path));
   await waitFor(() => state() === 'error', `${path} error`);
-  assert.match(text(q('.rich-block-error')), pattern, path);
+  assert.match(text(q('.resource-state-error')), pattern, path);
   r.unmount();
   await delay(5);
 }
@@ -166,7 +166,7 @@ files.set('attachment:att1', model.stlBinary());
   assert.ok(calls.every(c => c.command !== 'files.modelChunk'));
   assert.equal(calls[0]!.command, 'attachments.modelChunk');
   assert.equal(calls[0]!.input.chatId, 'c1');
-  assert.match(q('.rich-block-head')?.textContent ?? '', /part\.stl/);
+  assert.match(q('.rich-head')?.textContent ?? '', /part\.stl/);
   assert.equal(root.querySelector('.model-chip[aria-pressed]'), null, 'binary STL has no source view');
   r.unmount();
 }

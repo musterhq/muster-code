@@ -1,6 +1,6 @@
 /** Paperclip JSON -> the Projects workspace shapes (shared/domains/paperclip-protocol.ts). Pure, so tests feed recorded payloads. */
 import type {
-  ApprovalDecision, PaperclipBudgetPolicy, ThreadCard, LedgerEntry, AgentState, InboxKind, RunState, WorkspaceAgent, WorkspaceComment, WorkspaceCompany, WorkspaceGoal, WorkspaceInboxItem, WorkspacePriority,
+  ApprovalDecision, PaperclipAsk, PaperclipBudgetPolicy, PaperclipToolAction, ThreadCard, LedgerEntry, AgentState, InboxKind, RunState, WorkspaceAgent, WorkspaceComment, WorkspaceCompany, WorkspaceGoal, WorkspaceInboxItem, WorkspacePriority,
   ServerOutputRef, WorkspaceApproval, WorkspaceProject, WorkspaceRow, WorkspaceRun, WorkspaceStatus, WorkspaceTask,
 } from '../shared/domains/paperclip-protocol.ts';
 import { OPEN_STATUSES, WORKSPACE_STATUSES } from '../shared/domains/paperclip-protocol.ts';
@@ -102,14 +102,14 @@ const WHY: Record<string, string> = {
   review: 'Waiting for your review.', productivity_review: 'Waiting for your review of recent work.', failed_run: 'The run ended with an error.',
   agent_error_alert: 'The agent stopped with an error. Open it to see why.', budget_alert: 'An agent is close to or over its budget.', recovery_action: 'Needs a recovery step before work can go on.',
 };
-const SEVERITY = new Set(['high', 'medium', 'low']);
+const SEVERITY = new Set(['critical', 'high', 'medium', 'low']);
 export function mapAttention(item: Json): WorkspaceInboxItem {
   const subject = obj(item.subject), related = obj(item.relatedIssue);
   const identifier = str(subject.identifier) ?? (subject.kind === 'interaction' ? str(related.identifier) : null);
   return {
     id: String(item.id ?? item.dedupKey), kind: ATTENTION_KIND[String(item.sourceKind)] ?? 'other',
     title: `${identifier ? `${identifier} · ` : ''}${str(subject.title) ?? str(related.title) ?? 'Needs attention'}`,
-    why: WHY[String(item.sourceKind)] ?? 'Needs your attention.', severity: SEVERITY.has(String(item.severity)) ? item.severity as 'high' : 'medium', at: iso(item.activityAt, iso(item.updatedAt)),
+    why: WHY[String(item.sourceKind)] ?? 'Needs your attention.', severity: SEVERITY.has(String(item.severity)) ? item.severity as 'high' : 'medium', at: iso(item.activityAt, iso(item.updatedAt)), scoped: true,
     taskId: subject.kind === 'issue' ? str(subject.id) : str(related.id), agentId: subject.kind === 'agent' ? str(subject.id) : null, runId: subject.kind === 'run' ? str(subject.id) : null,
     // An approval row is decided from the row: its id and the decisions Paperclip offers for it.
     ...(item.sourceKind === 'approval' && subject.kind === 'approval' && str(subject.id) ? { approvalId: String(subject.id), approvalVerbs: verbsOf(item.decisionVerbs) } : {}),
@@ -139,19 +139,40 @@ export function mapApproval(a: Json, agents: ReadonlyMap<string, WorkspaceAgent>
 
 /** The @mention chip of a person in a comment: `[@Name](user://<id>)`. */
 export const mentionsUser = (body: string, userId: string): boolean => body.includes(`(user://${userId})`) || body.includes(`(user://${userId}?`);
+/** Paperclip cuts an activity row's `bodySnippet` at this many characters. */
+export const SNIPPET_LIMIT = 120;
+/** Activity rows that may be a mention of the person but whose snippet was cut before the chip could show: their full comment is read. */
+export function mentionCandidates(rows: readonly Json[], meId: string | null): Json[] {
+  if (!meId) return [];
+  return rows.filter(row => {
+    if (row.action !== 'issue.comment_added' || row.actorId === meId) return false;
+    const snippet = str(obj(row.details).bodySnippet);
+    return Boolean(snippet) && snippet!.length >= SNIPPET_LIMIT && !mentionsUser(snippet!, meId);
+  });
+}
 /**
  * Comments that tag the person, as Inbox items. Paperclip's attention feed has no mention kind, so the company activity feed is read for
- * `issue.comment_added` rows whose snippet carries the person's mention chip. One item per comment; the person's own comments never count.
+ * `issue.comment_added` rows whose comment carries the person's mention chip: the snippet, or `bodies` (commentId to the full comment) when
+ * the snippet was cut. One item per comment; the person's own comments never count. A mention is cleared once the person has opened the
+ * task: Paperclip logs `issue.read_marked` for their user at that moment (POST /issues/:id/read), and a mention older than it is read.
  */
-export function mapMentions(rows: readonly Json[], meId: string | null, agents: ReadonlyMap<string, WorkspaceAgent>, people?: ReadonlyMap<string, string>): WorkspaceInboxItem[] {
+export function mapMentions(rows: readonly Json[], meId: string | null, agents: ReadonlyMap<string, WorkspaceAgent>, people?: ReadonlyMap<string, string>, bodies?: ReadonlyMap<string, string>): WorkspaceInboxItem[] {
   if (!meId) return [];
+  const readAt = new Map<string, number>();
+  for (const row of rows) {
+    if (row.action !== 'issue.read_marked' || (str(obj(row.details).userId) ?? str(row.actorId)) !== meId) continue;
+    const at = Date.parse(iso(row.createdAt)), task = str(row.entityId);
+    if (task && Number.isFinite(at) && at > (readAt.get(task) ?? 0)) readAt.set(task, at);
+  }
   const out: WorkspaceInboxItem[] = [];
   for (const row of rows) {
     if (row.action !== 'issue.comment_added' || row.actorId === meId) continue;
-    const d = obj(row.details), snippet = str(d.bodySnippet);
-    if (!snippet || !mentionsUser(snippet, meId)) continue;
+    const d = obj(row.details), commentId = str(d.commentId), text = (commentId ? bodies?.get(commentId) : undefined) ?? str(d.bodySnippet);
+    if (!text || !mentionsUser(text, meId)) continue;
+    const task = str(row.entityId), at = Date.parse(iso(row.createdAt));
+    if (task && Number.isFinite(at) && (readAt.get(task) ?? 0) >= at) continue;
     const by = str(row.agentId) ? agents.get(String(row.agentId))?.name ?? 'An agent' : people?.get(String(row.actorId)) ?? 'Someone';
-    out.push({ id: `mention:${str(d.commentId) ?? str(row.id)}`, kind: 'mention', title: `${str(d.identifier) ? `${d.identifier} · ` : ''}${str(d.issueTitle) ?? 'A task'}`, why: `${by} mentioned you in a comment.`, severity: 'medium', at: iso(row.createdAt), taskId: str(row.entityId), agentId: null, runId: null });
+    out.push({ id: `mention:${commentId ?? str(row.id)}`, kind: 'mention', title: `${str(d.identifier) ? `${d.identifier} · ` : ''}${str(d.issueTitle) ?? 'A task'}`, why: `${by} mentioned you in a comment.`, severity: 'medium', at: iso(row.createdAt), taskId: task, agentId: null, runId: null });
   }
   return out;
 }
@@ -178,7 +199,7 @@ export function buildInbox(attention: readonly WorkspaceInboxItem[], tasks: read
     if (task && (task.status === 'done' || task.status === 'cancelled')) continue;
     items.push({ id: `run:${run.id}`, kind: 'failed_run', title: `${agents.get(run.agentId ?? '')?.name ?? 'An agent'}'s run failed${task ? ` on ${task.key}` : ''}`, why: run.error ?? 'The run ended with an error.', severity: 'medium', at: run.finishedAt ?? run.createdAt, taskId: run.taskId, agentId: run.agentId, runId: run.id });
   }
-  const rank = { high: 0, medium: 1, low: 2 } as const;
+  const rank = { critical: -1, high: 0, medium: 1, low: 2 } as const;
   return items.sort((a, b) => rank[a.severity] - rank[b.severity] || b.at.localeCompare(a.at));
 }
 
@@ -251,25 +272,127 @@ export function mapReceipt(r: Json, agents: ReadonlyMap<string, WorkspaceAgent>)
   };
 }
 
-/** Needs-you cards from a Paperclip issue's thread interactions (confirmations, questions, suggested tasks). */
+/** What the person answered on a resolved ask_user_questions set: the chosen labels, and "Other: text" for a typed answer. */
+function answeredSummary(i: Json, payload: Json, result: Json): string | null {
+  if (i.kind !== 'ask_user_questions') return null;
+  const questions = arr(payload.questions), parts: string[] = [];
+  for (const a of arr(result.answers)) {
+    const q = questions.find(x => str(x.id) === str(a.questionId)), options = arr(q?.options);
+    const ids = Array.isArray(a.optionIds) ? a.optionIds : [], labels = ids.map(id => options.find(o => o.id === id)).filter((o): o is Json => Boolean(o) && o!.freeText !== true).map(o => str(o.label) ?? String(o.id));
+    const other = str(a.otherText);
+    const text = [...labels, ...(other ? [`Other: ${other}`] : [])].join(', ');
+    if (text) parts.push(questions.length > 1 ? `${str(q?.prompt) ?? 'Question'} ${text}` : text);
+  }
+  return parts.length ? parts.join(' · ').slice(0, 1200) : null;
+}
+/** Muster's own words for how a confirmation ended (Paperclip's outcome names are its own). */
+const OUTCOME: Record<string, string> = {
+  accepted: 'Approved.', rejected: 'Declined.', superseded_by_comment: 'Replaced: a newer comment came in before this was answered.', superseded_by_newer_request: 'Replaced by a newer request.',
+  stale_target: 'No longer applies: what it was about changed after it was asked.', skipped: 'Skipped.', withdrawn: 'Withdrawn.', issue_closed: 'Closed with the task.', addressee_deleted: 'Closed: the agent it was for was removed.',
+  resolved: 'Answered.', cancelled: 'Cancelled.', connected: 'Connected.', declined: 'Declined.', superseded: 'Replaced by a newer request.', expired: 'Expired.',
+};
+const TOOL_STATUS: Record<string, string> = { approved: 'Approved. Waiting to run.', executing: 'Approved. Running now.', executed: 'Ran.', failed: 'Did not run.', expired: 'Expired before it ran.' };
+const toolOf = (payload: Json, result: Json): PaperclipToolAction | undefined => {
+  const t = obj(payload.toolAction);
+  if (!str(t.toolName) && !str(t.toolDisplayName)) return undefined;
+  const r = obj(result.toolAction), status = str(r.status) as NonNullable<PaperclipToolAction['result']>['status'] | null;
+  const risk = t.risk === 'write' || t.risk === 'destructive' ? t.risk : 'read';
+  const detail = status === 'failed' ? str(r.errorMessage) ?? str(r.errorCode) : str(r.resultSummary);
+  return {
+    name: str(t.toolDisplayName) ?? String(t.toolName), app: str(t.appDisplayName), risk, preview: (str(t.previewMarkdown) ?? '').slice(0, 4000), args: (str(t.argumentsSummaryJson) ?? '').slice(0, 4000), expiresAt: str(t.expiresAt),
+    result: status && TOOL_STATUS[status] ? { status, text: `${TOOL_STATUS[status]}${detail ? ` ${detail}` : ''}`.slice(0, 600), href: str(r.resultHref) } : null,
+  };
+};
+const resumeNotice = (result: Json): string | null => {
+  const f = obj(result.resumeFailure);
+  if (!str(f.status)) return null;
+  return f.status === 'retrying' ? `The agent could not pick the work back up (try ${Number(f.attempt) || 1} of ${Number(f.maxAttempts) || 1}). It is trying again.` : `The agent could not pick the work back up after ${Number(f.maxAttempts) || Number(f.attempt) || 1} tries. It needs someone to look at it.`;
+};
+/** How a resolved interaction ended, in plain words. */
+function resolutionOf(i: Json, payload: Json, result: Json, status: string): string | null {
+  const reason = str(result.reason) ?? str(result.cancellationReason) ?? str(result.rejectionReason);
+  const outcome = str(result.outcome), kind = String(i.kind);
+  const tool = toolOf(payload, result);
+  if (tool?.result) return tool.result.text;
+  const secret = str(obj(result.secretProposal).status);
+  if (secret) return `Secret request ${secret}.`;
+  if (kind === 'ask_user_questions') { const answered = answeredSummary(i, payload, result); if (answered) return answered; }
+  if (kind === 'request_item_verdicts' && Array.isArray(result.items)) {
+    const counts: Record<string, number> = {};
+    for (const item of arr(result.items)) counts[String(item.verdict)] = (counts[String(item.verdict)] ?? 0) + 1;
+    const parts = (['approve', 'reject', 'defer'] as const).filter(v => counts[v]).map(v => `${counts[v]} ${v === 'approve' ? 'approved' : v === 'reject' ? 'declined' : 'deferred'}`);
+    if (parts.length && outcome === 'resolved') return `${parts.join(', ')}.`;
+  }
+  if (kind === 'suggest_tasks' && !outcome) {
+    const made = arr(result.createdTasks).length;
+    if (made) return `Created ${made} ${made === 1 ? 'task' : 'tasks'}.`;
+    if (str(result.rejectionReason)) return `Declined: ${result.rejectionReason}`;
+  }
+  if (kind === 'request_checkbox_confirmation' && Array.isArray(result.selectedOptionIds) && (outcome === 'accepted' || !outcome)) {
+    const options = arr(payload.options), labels = (result.selectedOptionIds as unknown[]).map(id => str(options.find(o => o.id === id)?.label) ?? String(id));
+    if (labels.length) return `Approved: ${labels.join(', ')}.`;
+  }
+  if (status === 'failed') return `This did not go through.${reason ? ` ${reason}` : ''}`;
+  if (outcome) return `${OUTCOME[outcome] ?? 'Closed.'}${reason && outcome !== 'accepted' ? ` ${reason}` : ''}`;
+  if (status === 'accepted') return OUTCOME.accepted!;
+  if (status === 'rejected') return `${OUTCOME.rejected}${reason ? ` ${reason}` : ''}`;
+  return null;
+}
+const ANSWERABLE = new Set(['request_confirmation', 'suggest_tasks', 'request_checkbox_confirmation', 'request_item_verdicts', 'connection_intent']);
+function askOf(i: Json, payload: Json): PaperclipAsk | undefined {
+  const kind = String(i.kind);
+  if (kind === 'suggest_tasks') {
+    const tasks = arr(payload.tasks).filter(t => str(t.clientKey)).map(t => ({ key: String(t.clientKey), title: str(t.title) ?? 'Task', description: str(t.description)?.slice(0, 1200) ?? null, priority: str(t.priority), parentKey: str(t.parentClientKey) })).filter((t, n, all) => all.findIndex(x => x.key === t.key) === n);
+    return { kind: 'tasks', tasks, reason: str(payload.reason), selected: tasks.map(t => t.key) };
+  }
+  if (kind === 'request_checkbox_confirmation') {
+    const options = arr(payload.options).filter(o => str(o.id)).map(o => ({ id: String(o.id), label: str(o.label) ?? String(o.id), description: str(o.description) }));
+    const defaults = Array.isArray(payload.defaultSelectedOptionIds) ? (payload.defaultSelectedOptionIds as unknown[]).filter((v): v is string => typeof v === 'string' && options.some(o => o.id === v)) : [];
+    return { kind: 'checkbox', options, selected: defaults, min: Math.max(0, Number(payload.minSelected) || 0), max: typeof payload.maxSelected === 'number' ? payload.maxSelected : null };
+  }
+  if (kind === 'request_item_verdicts') {
+    const VERDICTS = ['approve', 'reject', 'defer'] as const, pick = (v: unknown) => Array.isArray(v) ? VERDICTS.filter(x => (v as unknown[]).includes(x)) : [];
+    const listed = pick(payload.verdicts);
+    return { kind: 'verdicts', items: arr(payload.items).filter(t => str(t.id)).map(t => ({ id: String(t.id), label: str(t.label) ?? String(t.id), description: str(t.description), preview: str(t.previewMarkdown)?.slice(0, 4000) ?? null, href: str(t.href) })),
+      verdicts: listed.length ? listed : [...VERDICTS], requireReasonOn: pick(payload.requireReasonOn), reasonLabel: str(payload.reasonLabel), allowBulkApprove: payload.allowBulkApprove === true };
+  }
+  if (kind === 'connection_intent') return { kind: 'connection', service: str(payload.serviceName) ?? 'an app', agent: str(payload.requestingAgentName) ?? 'An agent', phase: str(payload.phase) ?? 'requested' };
+  return undefined;
+}
 export function mapInteraction(i: Json, agents: ReadonlyMap<string, WorkspaceAgent>): ThreadCard {
-  const payload = obj(i.payload), result = obj(i.result), status = String(i.status ?? 'pending');
+  const payload = obj(i.payload), result = obj(i.result), status = String(i.status ?? 'pending'), kind = String(i.kind);
   const questions = arr(payload.questions).map(q => str(q.prompt) ?? str(q.question)).filter(Boolean);
   // ask_user_questions is answerable here too, through Paperclip's respond endpoint.
-  const asking = i.kind === 'ask_user_questions' && status === 'pending'
-    ? arr(payload.questions).filter(q => str(q.id) && arr(q.options).length).map(q => ({ id: String(q.id), prompt: str(q.prompt) ?? str(q.question) ?? 'Question', helpText: str(q.helpText), multi: q.selectionMode === 'multi', allowOther: q.allowOther === true,
-      options: arr(q.options).filter(o => str(o.id)).map(o => ({ id: String(o.id), label: str(o.label) ?? String(o.id), description: str(o.description) })) }))
+  const asking = kind === 'ask_user_questions' && status === 'pending'
+    ? arr(payload.questions).filter(q => str(q.id)).map(q => {
+      const all = arr(q.options).filter(o => str(o.id)), free = all.find(o => o.freeText === true);
+      // Paperclip: "Other" is on unless allowOther is false, and the usual form is an option marked freeText. A question with no options is text-only.
+      return { id: String(q.id), prompt: str(q.prompt) ?? str(q.question) ?? 'Question', helpText: str(q.helpText), multi: q.selectionMode === 'multi', required: q.required !== false, allowOther: q.allowOther !== false || free !== undefined || all.length === 0, otherOptionId: free ? String(free.id) : null,
+        options: all.filter(o => o !== free).map(o => ({ id: String(o.id), label: str(o.label) ?? String(o.id), description: str(o.description) })) };
+    })
     : [];
-  return {
+  const pending = status === 'pending';
+  const ask = pending ? askOf(i, payload) : undefined;
+  const tool = toolOf(payload, result);
+  const proposal = obj(payload.secretProposal), proposalResult = str(obj(result.secretProposal).status);
+  const connection = obj(payload.connectionAuthorization);
+  const heading = ask?.kind === 'connection' ? `${ask.agent} needs you to connect ${ask.service}.` : kind === 'connection_intent' ? `Connect ${str(payload.serviceName) ?? 'an app'}.` : str(connection.providerName) ? `${str(connection.requestingAgentName) ?? 'An agent'} needs your ${connection.providerName} sign-in.` : null;
+  const prompt = str(payload.prompt) ?? (questions.length ? questions.join(' · ') : str(payload.title) ?? str(i.title) ?? str(i.summary) ?? heading ?? (kind === 'suggest_tasks' ? str(payload.reason) : null) ?? (tool ? `Run ${tool.name}?` : 'An agent needs your decision.'));
+  const blocker = i.acceptanceBlocker === 'workspace_sync_pending' && pending ? 'The workspace is still being prepared on the server. You can approve once it is ready.' : null;
+  const mapped: Extract<ThreadCard, { kind: 'needs' }> = {
     kind: 'needs', id: `interaction:${i.id}`, at: iso(i.createdAt), from: agents.get(str(i.createdByAgentId) ?? '')?.name ?? null,
-    prompt: str(payload.prompt) ?? (questions.length ? questions.join(' · ') : str(payload.title) ?? 'An agent needs your decision.'),
-    detail: str(payload.detailsMarkdown)?.slice(0, 1200) ?? null,
-    status: status === 'pending' ? 'pending' : status === 'cancelled' || status === 'withdrawn' || status === 'expired' ? 'cancelled' : 'resolved',
-    resolution: str(result.outcome) ? `${result.outcome}${str(result.reason) ? `: ${result.reason}` : ''}` : null,
-    interactionId: (i.kind === 'request_confirmation' || asking.length > 0) && status === 'pending' ? String(i.id) : null,
+    prompt, detail: str(payload.detailsMarkdown)?.slice(0, 1200) ?? null,
+    status: pending ? 'pending' : status === 'failed' ? 'failed' : status === 'cancelled' || status === 'withdrawn' || status === 'expired' ? 'cancelled' : 'resolved',
+    resolution: resolutionOf(i, payload, result, status),
+    interactionId: (ANSWERABLE.has(kind) || asking.length > 0) && pending ? String(i.id) : null,
     acceptLabel: str(payload.acceptLabel), rejectLabel: str(payload.rejectLabel),
     ...(asking.length ? { questions: asking, submitLabel: str(payload.submitLabel) } : {}),
+    ...(ask ? { ask } : {}), ...(tool ? { tool } : {}), ...(blocker ? { blocker } : {}),
+    ...(str(proposal.proposalId) ? { secret: { label: str(proposal.sourceSecretLabel) ?? 'a secret', target: str(proposal.targetAgentName) ?? 'an agent', path: str(proposal.configPath) ?? '', why: str(proposal.justification) ?? '', outcome: proposalResult ? `Secret request ${proposalResult}.` : null } } : {}),
+    ...(resumeNotice(result) ? { notice: resumeNotice(result) } : {}),
+    ...(payload.rejectRequiresReason === true ? { rejectRequiresReason: true, rejectReasonLabel: str(payload.rejectReasonLabel) } : {}),
   };
+  return mapped;
 }
 
 /** A task document (a plan is the one with key `plan`) with its revisions, newest first. */

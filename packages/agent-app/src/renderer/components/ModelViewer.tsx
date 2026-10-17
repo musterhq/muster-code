@@ -4,7 +4,7 @@
  * Surfaces: file tab, chat attachment tab, and (inline) any host that renders <ModelViewer variant="inline">.
  */
 import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
-import {Box, Camera, Grid3x3, Home, Info} from 'lucide-react';
+import {Camera, Grid3x3, Home, Info} from 'lucide-react';
 import {invoke} from '../bridge';
 import {isWindowActive, onWindowActivity} from '../windowActivity';
 import {Engine, CAMERA_PRESETS, type CameraPreset, type EngineOptions} from '../three-engine';
@@ -158,7 +158,6 @@ export function ModelViewer({source, variant = 'tab', revision, onOpenInTab, hoo
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   }, [engine, name]);
 
-  const copyPath = useCallback(() => { void invoke('clipboard.write', {text: path}).catch(() => {}); }, [path]);
   const ready = phase.kind === 'ready';
   const failure = engineError
     ? {title: "3D preview isn't available here", detail: /webgl/i.test(engineError) ? 'This device or session has no WebGL support, so Muster cannot draw 3D views. Open the file in another app instead.' : engineError, retry: false}
@@ -170,19 +169,16 @@ export function ModelViewer({source, variant = 'tab', revision, onOpenInTab, hoo
 
   const exit = source.kind === 'file' ? <FileExitActions folderId={source.folderId} path={source.path}/> : null;
   return <RichBlock
-    variant={variant}
-    icon={<Box size={14}/>} title={name} kindLabel={`3D model · ${label}`}
-    state={failure ? 'error' : loading ? 'loading' : 'ready'}
-    loadingLabel={loading ? STEP_LABEL[loading.step] : 'Preparing 3D view'}
-    loadingDetail={loading?.step === 'reading' && loading.fraction > 0 ? <progress className="model-progress" max={1} value={loading.fraction} aria-label="Reading file"/> : undefined}
-    errorTitle={failure?.title} errorDetail={failure?.detail}
-    errorActions={<>{failure?.retry && <button type="button" onClick={() => setAttempt(value => value + 1)}>Try again</button>}{exit}</>}
-    actions={{
-      copySource: {label: 'Copy path', onSelect: copyPath},
-      download: {label: 'Save image of this view', onSelect: () => void exportImage(), disabled: !ready || view !== 'model'},
-      openInTab: variant === 'inline' && onOpenInTab ? {label: 'Open in tab', onSelect: onOpenInTab} : undefined,
-      fullScreen: true,
-    }}>
+    kind="model" persistent variant={variant}
+    title={name} kindLabel={`3D model · ${label}`}
+    status={failure ? 'error' : loading ? 'loading' : 'ready'}
+    loadingLabel={loading ? `${STEP_LABEL[loading.step]}…` : 'Preparing 3D view…'}
+    {...(loading?.step === 'reading' && loading.fraction > 0 ? {loadingDetail: <progress className="model-progress" max={1} value={loading.fraction} aria-label="Reading file"/>} : {})}
+    {...(failure ? {error: {message: failure.title, detail: failure.detail, actions: <>{failure.retry && <button type="button" onClick={() => setAttempt(value => value + 1)}>Try again</button>}{exit}</>}} : {})}
+    source={path} copyLabel="Copy path"
+    exports={[{id: 'image', label: 'Save image of this view', disabled: view !== 'model', run: exportImage}]}
+    {...(variant === 'inline' && onOpenInTab ? {onOpenInTab} : {})}
+    description={`${name}. ${hint}`}>
     <div className="model-viewer" data-ready={ready} data-view={view}>
       <div className="model-stage" ref={container} hidden={view === 'source'} aria-describedby={`model-hint-${sourceKey.length}`}>
         <span id={`model-hint-${sourceKey.length}`} className="model-hint">{hint}</span>

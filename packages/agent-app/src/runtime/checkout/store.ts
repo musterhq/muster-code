@@ -75,7 +75,7 @@ export class CheckoutStore {
   lease(taskId: string): CheckoutLease | null { const r = this.d().prepare('SELECT json FROM checkout_leases WHERE task_id = ?').get(taskId) as { json: string } | undefined; return r ? JSON.parse(r.json) as CheckoutLease : null; }
   leases(): CheckoutLease[] { return (this.d().prepare('SELECT json FROM checkout_leases ORDER BY task_id').all() as { json: string }[]).map(r => JSON.parse(r.json) as CheckoutLease); }
   openLeases(): CheckoutLease[] { return this.leases().filter(l => l.state === 'checked_out'); }
-  leaseForChat(chatId: string, origin?: string): CheckoutLease | null { return this.openLeases().find(l => (origin === undefined || l.origin === origin) && (l.chatId === chatId || l.reviewChats?.some(r => r.chatId === chatId))) ?? null; }
+  leaseForChat(chatId: string, origin?: string): CheckoutLease | null { return this.openLeases().find(l => (origin === undefined || l.origin === origin) && (l.chatId === chatId || l.linkedChats?.includes(chatId) || l.reviewChats?.some(r => r.chatId === chatId))) ?? null; }
   /** Org copies are files, not database rows: a private folder (0700) with a file per task (0600), deleted when the check-out ends (security review M6). */
   private copyFile(taskId: string): string | null { return this.dir ? join(this.dir, `org-${createHash('sha256').update(taskId).digest('hex').slice(0, 24)}.json`) : null; }
   private memory = new Map<string, LocalOrgCopy>();
@@ -141,6 +141,21 @@ export class CheckoutStore {
   discard(taskId: string): number { return Number(this.d().prepare('DELETE FROM checkout_outbox WHERE task_id = ? AND posted_at IS NULL').run(taskId).changes); }
   markPosted(id: number, at: string): void { this.d().prepare('UPDATE checkout_outbox SET posted_at = ?, last_error = NULL WHERE id = ?').run(at, id); }
   markFailed(id: number, error: string, dead = false): void { this.d().prepare('UPDATE checkout_outbox SET attempts = attempts + 1, last_error = ?, dead = ? WHERE id = ?').run(error.slice(0, 500), dead ? 1 : 0, id); }
+  /** Gives up on updates that failed and are older than `before` (an ISO time): they stay in the history, marked, and Retry can revive them. Returns how many. */
+  giveUp(before: string): number {
+    return Number(this.d().prepare("UPDATE checkout_outbox SET dead = 1, last_error = 'gave up: ' || COALESCE(last_error, 'could not be sent') WHERE posted_at IS NULL AND dead = 0 AND at < ? AND (attempts > 0 OR task_id IN (SELECT task_id FROM checkout_outbox WHERE posted_at IS NULL AND attempts > 0))").run(before).changes);
+  }
+  /** Updates the outbox gave up on (not the ones the server refused). */
+  stuckCount(taskId?: string): number {
+    const sql = "SELECT COUNT(*) AS n FROM checkout_outbox WHERE posted_at IS NULL AND dead = 1 AND last_error LIKE 'gave up:%'";
+    const r = (taskId ? this.d().prepare(`${sql} AND task_id = ?`).get(taskId) : this.d().prepare(sql).get()) as { n: number };
+    return Number(r.n);
+  }
+  /** Puts given-up updates back in the queue, as new. Returns how many. */
+  revive(taskId?: string): number {
+    const sql = "UPDATE checkout_outbox SET dead = 0, attempts = 0, last_error = NULL WHERE posted_at IS NULL AND dead = 1 AND last_error LIKE 'gave up:%'";
+    return Number((taskId ? this.d().prepare(`${sql} AND task_id = ?`).run(taskId) : this.d().prepare(sql).run()).changes);
+  }
   /** The reports of a task as the batcher sees them. */
   toReport(row: OutboxRow): Report { return { key: row.key, kind: row.kind as ReportKind, body: row.body, at: row.at }; }
 

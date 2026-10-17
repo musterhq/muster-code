@@ -1,11 +1,14 @@
 import type {ScopedComputerRef} from '../shared/scoped-computer-protocol';
 import {browserURL} from '../shared/browser-protocol.ts';
+import {MAX_SAVED_RICH_SOURCE, richTabId, type RichKind} from '../shared/rich-fence.ts';
 export interface SavedTab {
   id: string;
-  kind: 'files' | 'git' | 'changes' | 'file' | 'diff' | 'subagents' | 'browser' | 'computer' | 'processes' | 'attachment' | 'pullRequest' | 'history' | 'conflict' | 'canvas' | 'sideChat' | 'pluginUi' | 'inbox' | 'liveView' | 'device';
+  kind: 'files' | 'git' | 'changes' | 'file' | 'diff' | 'subagents' | 'browser' | 'computer' | 'processes' | 'attachment' | 'pullRequest' | 'history' | 'conflict' | 'canvas' | 'sideChat' | 'pluginUi' | 'inbox' | 'liveView' | 'rich' | 'device';
   gitView?: 'changes' | 'history' | 'pullRequest';
   sha?: string;
   canvasId?: string;
+  richKind?: RichKind;
+  richSource?: string;
   pluginId?: string;
   appName?: string;
   scope?:ScopedComputerRef;
@@ -73,6 +76,14 @@ export function readWorkspace(storage: Pick<Storage, 'getItem'>, scope = 'person
       if (t?.kind === 'canvas' || t?.kind === 'sideChat' || t?.kind === 'pluginUi') {
         const saved = savedArtifactTab(t);
         if (saved && !tabs.some(tab => tab.id === saved.id)) tabs.push(saved);
+        continue;
+      }
+      if (t?.kind === 'rich') {
+        // A rich block restores only when its source is small enough to have been saved with the tab; bigger ones reopen from the chat.
+        if (['diagram', 'chart', 'report'].includes(t.richKind) && typeof t.richSource === 'string' && t.richSource.length > 0 && t.richSource.length <= MAX_SAVED_RICH_SOURCE && typeof t.title === 'string' && t.title.length <= 4096) {
+          const id = richTabId(t.richKind, t.richSource);
+          if (!tabs.some(tab => tab.id === id)) tabs.push({id, kind: 'rich', richKind: t.richKind, richSource: t.richSource, title: t.title, ...(t.pinned === true ? {pinned: true} : {})});
+        }
         continue;
       }
       if (t?.kind === 'inbox') {
@@ -147,7 +158,7 @@ export function redactBrowserURL(value: string): string {
 
 export function saveWorkspace(storage: Pick<Storage, 'setItem'>, workspace: SavedWorkspace, scope = 'personal'): boolean {
   try {
-    storage.setItem(storageKey(scope), JSON.stringify({version:2, scope, tabs:workspace.tabs.filter(tab=>tab.kind!=='liveView'&&tab.kind!=='device'&&!(tab.kind==='browser'&&tab.id.startsWith('browser:agent-'))).slice(0,MAX_TABS).map(tab=>{
+    storage.setItem(storageKey(scope), JSON.stringify({version:2, scope, tabs:workspace.tabs.filter(tab=>tab.kind!=='liveView'&&tab.kind!=='device'&&!(tab.kind==='rich'&&(tab.richSource?.length??0)>MAX_SAVED_RICH_SOURCE)&&!(tab.kind==='browser'&&tab.id.startsWith('browser:agent-'))).slice(0,MAX_TABS).map(tab=>{
       if(tab.kind!=='browser')return tab;
       let url='about:blank';
       try {if(tab.url!==undefined)url=redactBrowserURL(browserURL(tab.url));} catch {}

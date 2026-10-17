@@ -11,6 +11,7 @@ import {SERVER_SECRET as PAPERCLIP_SECRET_ID} from '../src/runtime/server/config
 import {normalizeBaseUrl} from '../src/runtime/paperclip-client.ts';
 import {SqliteImportStore} from '../src/runtime/paperclip-import.ts';
 import {buildInbox,mapAttention,mapInteraction,mapIssue,mapRoutine} from '../src/runtime/paperclip-map.ts';
+import {buildPaperclipAnswer} from '../src/shared/domains/paperclip-protocol.ts';
 import type {DomainContext} from '../src/runtime/domains/types.ts';
 import type {SocketFactory} from '../src/runtime/paperclip-client.ts';
 
@@ -163,9 +164,9 @@ test('the thread renders comments (deleted ones hidden) and the composer address
   await h.call('paperclip.task.update',{taskId:'RAG-12',status:'in_review'});
   await h.call('paperclip.run.cancel',{id:'r-1'});
   await h.call('paperclip.pauseAll',{source:'paperclip'});
-  const writes=h.server.calls.filter(c=>c.method!=='GET').map(c=>`${c.method} ${c.url} ${JSON.stringify(c.body)}`);
+  const writes=h.server.calls.filter(c=>c.method!=='GET').map(c=>`${c.method} ${c.url} ${JSON.stringify(c.body)}`.replace(/"clientRequestId":"[0-9a-f-]{36}"/,'"clientRequestId":"<id>"'));
   assert.deepEqual(writes,[
-    'POST /api/issues/RAG-12/comments {"body":"Please rebase."}','PATCH /api/issues/RAG-12 {"status":"in_review"}','POST /api/heartbeat-runs/r-1/cancel {}',
+    'POST /api/issues/RAG-12/comments {"body":"Please rebase.","clientRequestId":"<id>"}','PATCH /api/issues/RAG-12 {"status":"in_review"}','POST /api/heartbeat-runs/r-1/cancel {}',
     'POST /api/agents/a-ceo/pause {}','POST /api/agents/a-cto/pause {}','POST /api/agents/a-qa/pause {}',
   ],'Pause all skips agents already paused');
   await assert.rejects(()=>h.call('paperclip.task.update',{taskId:'RAG-12',status:'shipped'}),/Unknown status/);
@@ -487,7 +488,7 @@ test('a Paperclip question set (ask_user_questions) is answerable in place throu
   const card=mapInteraction(pending as any,new Map([['a-cto',{name:'CTO'} as any]])) as any;
   assert.equal(card.interactionId,'int-q','answerable, not display-only');
   assert.equal(card.from,'CTO');assert.equal(card.submitLabel,'Send');
-  assert.deepEqual(card.questions.map((q:any)=>`${q.id}:${q.multi}:${q.allowOther}:${q.options.map((o:any)=>o.id).join('/')}`),['scope:false:true:mig/all','envs:true:false:dev/prod']);
+  assert.deepEqual(card.questions.map((q:any)=>`${q.id}:${q.multi}:${q.allowOther}:${q.options.map((o:any)=>o.id).join('/')}`),['scope:false:true:mig/all','envs:true:true:dev/prod']);
   assert.equal((mapInteraction({...pending,status:'answered'} as any,new Map()) as any).questions,undefined,'an answered set is history');
   const h=await harness(t);
   await h.call('paperclip.config.set',{mode:'local'});
@@ -496,6 +497,26 @@ test('a Paperclip question set (ask_user_questions) is answerable in place throu
   await h.call('paperclip.interaction.respond',{taskId:'RAG-12',interactionId:'int-q',accept:true,answers:[{questionId:'scope',optionIds:[],otherText:'Only the wizard'},{questionId:'envs',optionIds:['dev','prod']}]});
   assert.deepEqual(h.server.calls.filter(c=>c.method==='POST').map(c=>`${c.url} ${JSON.stringify(c.body)}`),['/api/issues/RAG-12/interactions/int-q/respond {"answers":[{"questionId":"scope","optionIds":[],"otherText":"Only the wizard"},{"questionId":"envs","optionIds":["dev","prod"]}]}']);
   await assert.rejects(()=>h.call('paperclip.interaction.respond',{taskId:'RAG-12',interactionId:'int-q',accept:true,answers:[{questionId:'scope',optionIds:[]}]}),/Answer every question/);
+});
+
+test('Paperclip "Other": a freeText option, an omitted allowOther and a text-only question all map, and the answer carries the free-text id (#388)',()=>{
+  const agents=new Map();
+  const card=mapInteraction({id:'q1',kind:'ask_user_questions',status:'pending',createdAt:now,payload:{questions:[
+    {id:'a',prompt:'Pick',selectionMode:'single',allowOther:false,options:[{id:'x',label:'X'},{id:'other',label:'Other',freeText:true}]},
+    {id:'b',prompt:'Left out',options:[{id:'y',label:'Y'}]},
+    {id:'c',prompt:'Strict',allowOther:false,options:[{id:'z',label:'Z'}]},
+    {id:'d',prompt:'Say it'}]}} as any,agents) as any;
+  const [a,b,c,d]=card.questions;
+  assert.deepEqual([a.allowOther,a.otherOptionId,a.options.map((o:any)=>o.id)],[true,'other',['x']],'freeText option becomes Other and leaves the list');
+  assert.equal(b.allowOther,true,'allowOther omitted means on');
+  assert.equal(c.allowOther,false);
+  assert.deepEqual([d.allowOther,d.options.length],[true,0],'a text-only question is kept');
+  assert.deepEqual(buildPaperclipAnswer(a,['x'],'  mine '),{questionId:'a',optionIds:['other'],otherText:'mine'});
+  assert.deepEqual(buildPaperclipAnswer({...a,multi:true},['x'],'mine'),{questionId:'a',optionIds:['x','other'],otherText:'mine'});
+  assert.deepEqual(buildPaperclipAnswer(b,['y'],''),{questionId:'b',optionIds:['y']});
+  assert.deepEqual(buildPaperclipAnswer(d,[],'text'),{questionId:'d',optionIds:[],otherText:'text'},'no freeText option: empty ids plus the text');
+  const done=mapInteraction({id:'q1',kind:'ask_user_questions',status:'answered',createdAt:now,payload:{questions:[{id:'a',prompt:'Pick',options:[{id:'x',label:'X'},{id:'other',label:'Other',freeText:true}]}]},result:{answers:[{questionId:'a',optionIds:['other'],otherText:'mine'}]}} as any,agents) as any;
+  assert.equal(done.resolution,'Other: mine');
 });
 
 test('inbox dismissals persist by item id and time; a dismissed Paperclip or project item leaves the runtime badge until it changes',async t=>{
@@ -715,4 +736,54 @@ test('#302: with coalescing off (0 ms) every forced refresh reads, as before',as
   const first=reads(h.server.calls);
   for(let i=0;i<3;i++)await h.call('paperclip.snapshot',{refresh:true});
   assert.equal(reads(h.server.calls),first+3);
+});
+
+test('#395: suggested tasks, a checklist, item verdicts and a connection request are answered through the domain; bad selections never reach the server',async t=>{
+  const h=await harness(t);
+  await h.call('paperclip.config.set',{mode:'local'});
+  await h.call('paperclip.snapshot');
+  await h.call('paperclip.interaction.respond',{taskId:'RAG-12',interactionId:'s1',accept:true,selectedClientKeys:['k1','k2']});
+  await h.call('paperclip.interaction.respond',{taskId:'RAG-12',interactionId:'c1',accept:true,selectedOptionIds:['a']});
+  await h.call('paperclip.interaction.respond',{taskId:'RAG-12',interactionId:'v1',accept:true,verdicts:[{id:'x',verdict:'approve'},{id:'y',verdict:'reject',reason:'Too broad'}]});
+  await h.call('paperclip.interaction.respond',{taskId:'RAG-12',interactionId:'n1',accept:false,connection:true});
+  assert.deepEqual(h.server.calls.filter(c=>c.method==='POST').map(c=>`${c.url} ${JSON.stringify(c.body)}`),[
+    '/api/issues/RAG-12/interactions/s1/accept {"selectedClientKeys":["k1","k2"]}','/api/issues/RAG-12/interactions/c1/accept {"selectedOptionIds":["a"]}',
+    '/api/issues/RAG-12/interactions/v1/verdicts {"verdicts":[{"id":"x","verdict":"approve"},{"id":"y","verdict":"reject","reason":"Too broad"}]}','/api/connection-intents/n1/decline {}']);
+  const before=h.server.calls.length;
+  await assert.rejects(()=>h.call('paperclip.interaction.respond',{taskId:'RAG-12',interactionId:'s1',accept:true,selectedClientKeys:['k1','k1']}),/Unknown selection/);
+  await assert.rejects(()=>h.call('paperclip.interaction.respond',{taskId:'RAG-12',interactionId:'s1',accept:true,selectedClientKeys:[]}),/at least one task/);
+  await assert.rejects(()=>h.call('paperclip.interaction.respond',{taskId:'RAG-12',interactionId:'v1',accept:true,verdicts:[{id:'x',verdict:'maybe'}]}),/Unknown verdict/);
+  await assert.rejects(()=>h.call('paperclip.interaction.respond',{taskId:'RAG-12',interactionId:'v1',accept:true,verdicts:[{id:'x',verdict:'approve'},{id:'x',verdict:'reject'}]}),/one verdict/);
+  assert.equal(h.server.calls.length,before,'nothing was sent');
+});
+
+test('#395: an optional question may stay empty and is left out of the answer; a comment keeps the id its draft gave it',async t=>{
+  const h=await harness(t);
+  await h.call('paperclip.config.set',{mode:'local'});
+  await h.call('paperclip.snapshot');
+  await h.call('paperclip.interaction.respond',{taskId:'RAG-12',interactionId:'q1',accept:true,answers:[{questionId:'a',optionIds:['x']},{questionId:'b',optionIds:[]}]});
+  const id='3f1f1d4e-7a2b-4c1d-9a55-0d4f5a5b6c7d';
+  await h.call('paperclip.comment',{taskId:'RAG-12',body:'One',clientRequestId:id});
+  await h.call('paperclip.comment',{taskId:'RAG-12',body:'One',clientRequestId:id});
+  await h.call('paperclip.comment',{taskId:'RAG-12',body:'Two',clientRequestId:'not-an-id'});
+  const posts=h.server.calls.filter(c=>c.method==='POST') as {body:any}[];
+  assert.deepEqual(posts[0]!.body,{answers:[{questionId:'a',optionIds:['x']}]});
+  assert.deepEqual([posts[1]!.body.clientRequestId,posts[2]!.body.clientRequestId],[id,id],'a retry is the same comment to the server');
+  assert.match(posts[3]!.body.clientRequestId,/^[0-9a-f-]{36}$/,'a missing or malformed id is replaced, never forwarded');
+});
+
+test('#395: a picture attached on the connected server is fetched with the connection’s own sign-in; nothing else is',async t=>{
+  const png=Buffer.from('89504e470d0a1a0a','hex');
+  const seen:{url:string;auth?:string}[]=[];
+  const h0=await harness(t);
+  const h=await harness(t,{fetch:async(input,init)=>{const url=new URL(input);if(url.pathname.startsWith('/api/attachments/')){seen.push({url:url.pathname,auth:(init?.headers as Record<string,string>|undefined)?.authorization});return url.pathname.includes('0000aaaa')?new Response(png,{status:200,headers:{'content-type':'image/png'}}):new Response('<svg/>',{status:200,headers:{'content-type':'image/svg+xml'}});}return h0.server.fetch(input,init);}});
+  await h.call('paperclip.config.set',{mode:'custom',baseUrl:'https://pc.example.com',token:'pcp_board_abc',companyId:COMPANY});
+  const ok=await h.call('paperclip.attachment.image',{src:'/api/attachments/0000aaaa-0000-4000-8000-000000000001/content'});
+  assert.equal(ok.dataUrl,`data:image/png;base64,${png.toString('base64')}`);
+  assert.deepEqual(seen,[{url:'/api/attachments/0000aaaa-0000-4000-8000-000000000001/content',auth:'Bearer pcp_board_abc'}]);
+  await h.call('paperclip.attachment.image',{src:'https://pc.example.com/api/attachments/0000aaaa-0000-4000-8000-000000000001/content'});
+  await assert.rejects(()=>h.call('paperclip.attachment.image',{src:'https://evil.example.com/api/attachments/0000aaaa-0000-4000-8000-000000000001/content'}),/not on the connected server/);
+  await assert.rejects(()=>h.call('paperclip.attachment.image',{src:'/api/issues/RAG-12'}),/not on the connected server/);
+  await assert.rejects(()=>h.call('paperclip.attachment.image',{src:'/api/attachments/0000bbbb-0000-4000-8000-000000000002/content'}),/not a picture/);
+  assert.equal(seen.length,3,'only the allowed addresses were fetched');
 });

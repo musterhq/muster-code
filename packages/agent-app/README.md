@@ -201,6 +201,11 @@ are covered in `packages/agent-app/docs/RELEASE.md`.
   `MUSTER_CORE_CLIENT_ENTRY`, `MUSTER_RUNTIME_SOURCE_ROOT` and `MUSTER_SANDBOX_SOURCE_ROOT`; the
   build log prints which source each bundle used. `npm run vendor:sync` refreshes `vendor/` from them.
 
+## Model lists
+
+- ChatGPT (Codex): read from Codex's own `$CODEX_HOME/models_cache.json` on every scan; every model it lists as visible is offered.
+- Claude Code: the catalog shipped in `src/runtime/catalogs/anthropic-models.json`, plus the live Anthropic `/v1/models` list when `ANTHROPIC_API_KEY` is set. To override it between releases, put a file of the same shape at `<data dir>/anthropic-models.json` or `~/.muster/anthropic-models.json`. An override with an `updated` date (YYYY-MM-DD) older than the shipped catalog is ignored, so an app update always wins over a stale copy; omit `updated` for your own list that always wins.
+
 ## Layout
 
 - `src/main/` — Electron main process: window lifecycle, native menu,
