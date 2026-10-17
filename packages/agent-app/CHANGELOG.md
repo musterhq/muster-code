@@ -6,6 +6,8 @@ All notable changes to Muster Agent. Each `## <version>` section becomes the not
 ## Unreleased
 
 - Typechecking runs on tsc-rs, about twice as fast and using a third less memory, with a CI guard that compares it with the official compiler
+- Context you attach while a message is still sending is kept for the next message instead of being cleared with the one that was sent
+- Alt+Arrow reordering of queued follow-ups keeps working after the message you were editing was sent
 
 ## 0.3.13
 
