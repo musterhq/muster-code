@@ -395,12 +395,14 @@ test('installed apps: simctl listapps and pm list parsed, user apps first; launc
   const installed = helperPaths(path.join(dir, 'tools'));
   fs.mkdirSync(path.dirname(installed.entry), {recursive: true});fs.writeFileSync(installed.entry, '');fs.writeFileSync(installed.sentinel, '0.15.3\n');
   const runs: string[][] = [];
+  let slowTried = false;
   const {manager} = managerFixture({userData: dir, run: async (file, args) => {
     runs.push([path.basename(file), ...args]);
     if (args[0] === '-p') return '/Applications/Xcode.app/Contents/Developer';
     if (args.join(' ') === 'simctl list devices --json') return JSON.stringify({devices: {'com.apple.CoreSimulator.SimRuntime.iOS-26-0': [{udid: 'BBBBBBBB-2222', name: 'iPhone 17 Pro', state: 'Booted', isAvailable: true, deviceTypeIdentifier: 'iPhone-17-Pro'}]}});
     if (args[0] === 'simctl' && args[1] === 'listapps') return listapps;
     if (args[0] === 'simctl' && args[1] === 'launch' && args[3] === 'com.missing') throw new Error('An error was encountered processing the command (domain=FBSOpenApplicationServiceErrorDomain, code=4)');
+    if (args[0] === 'simctl' && args[1] === 'launch' && args[3] === 'com.slow' && !slowTried) { slowTried = true; throw new Error('Command failed: /usr/bin/xcrun simctl launch BBBBBBBB-2222 com.slow'); }
     if (args.includes('monkey')) return args.includes('com.none') ? '** No activities found to run, monkey aborted.' : 'Events injected: 1';
     return '';
   }});
@@ -411,6 +413,8 @@ test('installed apps: simctl listapps and pm list parsed, user apps first; launc
   await manager.launchApp('BBBBBBBB-2222', 'dev.muster.taskboard', 'agent');
   assert.deepEqual(runs.at(-1), ['xcrun', 'simctl', 'launch', 'BBBBBBBB-2222', 'dev.muster.taskboard']);
   await assert.rejects(manager.launchApp('BBBBBBBB-2222', 'com.missing', 'agent'), /not installed on Device/);
+  await manager.launchApp('BBBBBBBB-2222', 'com.slow', 'agent');
+  assert.equal(runs.filter(run => run.includes('com.slow')).length, 2, 'a launch that timed out after a cold boot is tried once more');
   await assert.rejects(manager.launchApp('BBBBBBBB-2222', '--console', 'agent'), /bundle id/);
   live('android', 'emulator-5554');
   await manager.launchApp('emulator-5554', 'com.example.app', 'agent');

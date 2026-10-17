@@ -372,7 +372,9 @@ export class DeviceManager {
     if (!live) throw new Error('Open the device first.');
     if (from === 'agent' && live.session.control === 'user') throw new Error('The user has taken control of this device.');
     if (live.session.platform === 'ios') {
-      await this.deps.run('/usr/bin/xcrun', ['simctl', 'launch', id, app], {timeoutMs: 30_000}).catch(error => {
+      // The first launch after a cold boot can wait on SpringBoard for a long while; one retry covers a stuck first attempt.
+      const launch = () => this.deps.run('/usr/bin/xcrun', ['simctl', 'launch', id, app], {timeoutMs: 60_000});
+      await launch().catch(error => /timed? ?out|ETIMEDOUT|SIGTERM|Command failed: \S+ simctl launch \S+ \S+$/i.test(String(error instanceof Error ? error.message : error).trim()) ? launch() : Promise.reject(error)).catch(error => {
         throw new Error(/not installed|FBSOpenApplicationServiceErrorDomain|found nothing|No such|code=4\b/i.test(errorLine(error)) ? `${app} is not installed on ${live.session.name}. Use device_apps to see what is.` : `Could not launch ${app}: ${errorLine(error)}`);
       });
       return;
