@@ -7,6 +7,12 @@ All notable changes to Muster Agent. Each `## <version>` section becomes the not
 
 - Typechecking runs on tsc-rs, about twice as fast and using a third less memory, with a CI guard that compares it with the official compiler
 
+## Unreleased
+
+- Two wakes for the same agent arriving together now merge into one instead of leaving a stuck "throttled" wake and a stray timer, and the minimum gap between wakes counts from when the last wake actually ran.
+- A Project tool rule with many "*" no longer freezes the app when the agent runs a long command.
+- The Ledger's integrity check now reports entries removed from the end of the chain.
+
 ## 0.3.13
 
 Replies in one turn read as one answer, and pictures that can no longer be read take one line instead of an empty frame.
