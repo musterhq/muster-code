@@ -45,3 +45,8 @@ test('markResolved accepts a dash-named conflicted file', async () => {
   const state = await markResolved(dir, ['-c.txt']);
   assert.equal(state.files.length, 0);
 });
+
+test('GitHub remotes are recognised whatever the case of the host name', () => {
+  assert.equal(githubWebUrl('https://GitHub.com/o/r.git'), 'https://github.com/o/r');
+  assert.equal(githubWebUrl('git@GITHUB.COM:o/r.git'), 'https://github.com/o/r');
+});

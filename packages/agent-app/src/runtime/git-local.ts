@@ -111,7 +111,7 @@ async function repository(root: string): Promise<string> {
 /** Web URL for a GitHub remote in any of git's URL syntaxes; undefined for anything else. */
 export function githubWebUrl(remote: string): string | undefined {
   const value = remote.trim();
-  const match = /^(?:(?:ssh|git|https?):\/\/(?:[^@\/]+@)?|(?:[^@\/:]+@)?)(?:www\.)?github\.com(?::\d+)?[\/:]([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+?)(?:\.git)?\/?$/.exec(value);
+  const match = /^(?:(?:ssh|git|https?):\/\/(?:[^@\/]+@)?|(?:[^@\/:]+@)?)(?:www\.)?github\.com(?::\d+)?[\/:]([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+?)(?:\.git)?\/?$/i.exec(value);
   if (!match) return undefined;
   const [, owner, repo] = match;
   if (!repo || repo === '.' || repo === '..' || owner === '.' || owner === '..') return undefined;
