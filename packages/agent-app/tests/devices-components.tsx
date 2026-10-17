@@ -71,7 +71,7 @@ settingsRoot.unmount();
 // 2. Picker: platform note for a missing Xcode, devices listed, Start/Open, a session opens its tab.
 const root=createRoot(document.getElementById('root')!,{onUncaughtError:error=>errors.push(error)});
 root.render(<><ComputerPip/><Workspace/></>);
-store.openTab({id:'devices',kind:'device',title:'Devices'});await until(()=>/Android Emulators/.test(text()),'the picker');
+store.openTab({id:'devices',kind:'device',title:'Devices'});await until(()=>/Android Emulators/.test(text())&&/Pixel 9/.test(text()),'the picker with its devices');
 assert.match(text(),/Android Emulators/);assert.match(text(),/Pixel 9/,'AVD names read with spaces');
 assert.match(text(),/Xcode is not installed/,'iOS group explains what is missing');
 assert.ok(button('Start'),'a stopped AVD can be started');
