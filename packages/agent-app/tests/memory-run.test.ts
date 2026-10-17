@@ -129,20 +129,21 @@ test('remembered text and run lessons retain with scope tags, a timestamp and a 
   await assert.rejects(f.call('memory.retainFromRun', {chatId: f.chat.id, runId: 'run-7', summary: 'again'}), /already remembered/);
   assert.equal((await f.call('memory.offers', {folderId: f.folder.id})).offers.length, 0, 'a saved offer leaves the Memory screen');
 
-  f.store.appendItem(f.chat.id, 'user', 'Speed up the build');
-  f.store.appendItem(f.chat.id, 'tool', 'Edited tsconfig.json', 'completed', {type: 'fileChange'});
-  f.store.appendItem(f.chat.id, 'tool', 'npm run build', 'completed');
-  f.store.appendItem(f.chat.id, 'assistant', 'Cached the TypeScript program between builds.');
-  f.runtime.runSettled({chat: f.chat, runId: 'run-8', status: 'completed'});
+  const second = f.store.createChat({folderId: f.folder.id, model: 'm', mode: 'agent'}); // the first chat already used today's offer
+  f.store.appendItem(second.id, 'user', 'Speed up the build');
+  f.store.appendItem(second.id, 'tool', 'Edited tsconfig.json', 'completed', {type: 'fileChange'});
+  f.store.appendItem(second.id, 'tool', 'npm run build', 'completed');
+  f.store.appendItem(second.id, 'assistant', 'Cached the TypeScript program between builds.');
+  f.runtime.runSettled({chat: second, runId: 'run-8', status: 'completed'});
   await new Promise(resolve => setTimeout(resolve, 20));
   const pending = (await f.call('memory.offers', {folderId: f.folder.id})).offers;
   assert.equal(pending.length, 1);
   assert.equal(pending[0].runId, 'run-8');
   assert.match(pending[0].summary, /^Speed up the build\nCached/);
   assert.equal((await f.call('memory.offers', {})).offers.length, 0, 'offers stay in their chat scope');
-  assert.deepEqual(await f.call('memory.offer.dismiss', {chatId: f.chat.id, runId: 'run-8'}), {dismissed: true});
+  assert.deepEqual(await f.call('memory.offer.dismiss', {chatId: second.id, runId: 'run-8'}), {dismissed: true});
   assert.equal((await f.call('memory.offers', {folderId: f.folder.id})).offers.length, 0);
-  assert.deepEqual(await f.call('memory.offer.dismiss', {chatId: f.chat.id, runId: 'run-8'}), {dismissed: false});
+  assert.deepEqual(await f.call('memory.offer.dismiss', {chatId: second.id, runId: 'run-8'}), {dismissed: false});
 });
 
 test('settings persist encrypted, drive Hindsight and report stage-specific test failures', async t => {
@@ -263,6 +264,25 @@ test('offer history survives a restart and is dropped for deleted chats', async 
   const other = f.store.createChat({folderId: f.folder.id, model: 'm', mode: 'agent'});
   assert.equal(await offer(other), 1);
   assert.equal(rows(f.chat.id), 0, 'a deleted chat\'s history is pruned');
+});
+
+test('many turns in one chat list at most one offer per day, the rest are held, and the throttle survives a restart', async t => {
+  const f = await fixture(t);
+  const turn = async (n: number) => {
+    f.store.appendItem(f.chat.id, 'user', ['Rotate the signing keys', 'Translate the onboarding emails', 'Profile the checkout latency', 'Archive stale feature flags', 'Document the retry budget', 'Tighten the upload limits'][n - 1]!);
+    f.store.appendItem(f.chat.id, 'tool', `Edited module${n}.ts`, 'completed', {type: 'fileChange'});
+    f.store.appendItem(f.chat.id, 'assistant', ['Signing keys now rotate nightly through the vault job.', 'Onboarding emails now ship in nine locales with fallbacks.', 'Checkout latency was the tax lookup, so it is cached now.', 'Removed forty dead feature flags from the config files.', 'Retries now cap at five attempts with random jitter added.', 'Uploads now reject any file larger than fifty megabytes.'][n - 1]!);
+    f.runtime.runSettled({chat: f.chat, runId: `run-day-${n}`, status: 'completed'});
+    await new Promise(resolve => setTimeout(resolve, 20));
+  };
+  for (let n = 1; n <= 5; n++) await turn(n);
+  const offerRows = () => f.store.timeline(f.chat.id).filter((entry: TimelineItem) => entry.data?.kind === 'memory-offer');
+  assert.equal(offerRows().filter(row => row.status === 'offer').length, 1, 'one listed offer per chat per day');
+  assert.equal(offerRows().length, 5, 'every candidate is still recorded');
+  assert.equal((await f.call('memory.offers', {folderId: f.folder.id})).offers.length, 1);
+  f.restart();
+  await turn(6);
+  assert.equal(offerRows().filter(row => row.status === 'offer').length, 1, 'a restart does not reset the daily throttle');
 });
 
 test('MEM-X2: the recall chip previews the next turn locally and a removed note stays out of the run', async t => {
