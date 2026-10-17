@@ -153,3 +153,18 @@ test('the shared diff worker client cancels superseded requests, releases after 
     assert.equal(diffWorkerCount(), 0, 'every pooled worker is released after 60s idle');
   } finally { mock.timers.reset(); }
 });
+
+test('a new, deleted or heavily extended file still previews instead of reporting a change that is too complex', () => {
+  const big = lines(3000);
+  const created = buildDiff('', big);
+  assert.equal(created.rows.length, 3000, 'a newly created 3,000-line file lists every line as added');
+  assert.ok(created.rows.every(row => row.type === 'add'));
+  const removed = buildDiff(big, '');
+  assert.equal(removed.rows.length, 3000, 'a deleted 3,000-line file lists every line as removed');
+  assert.ok(removed.rows.every(row => row.type === 'del'));
+  const head = lines(20, 'head'), tail = lines(20, 'tail');
+  const grown = buildDiff(head + tail, head + big + tail);
+  assert.deepEqual(grown.rows.map(row => row.type).filter(type => type === 'add').length, 3000, 'a large block inserted between untouched text shows as added lines');
+  assert.equal(grown.rows.filter(row => row.type === 'context').length, 40);
+  assert.equal(grown.rows.filter(row => row.type === 'add').at(-1)!.type === 'add' && (grown.rows.filter(row => row.type === 'add').at(-1) as {newNo: number}).newNo, 3020);
+});

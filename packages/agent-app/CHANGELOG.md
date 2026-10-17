@@ -6,6 +6,10 @@ All notable changes to Muster Agent. Each `## <version>` section becomes the not
 ## Unreleased
 
 - Typechecking runs on tsc-rs, about twice as fast and using a third less memory, with a CI guard that compares it with the official compiler
+- A confirmation or Undo notice now appears even when four unread error notices are already on screen, instead of being dropped silently
+- Diff previews of a newly created or deleted file with more than about 2,000 lines, or of a long block added to an otherwise unchanged file, show the lines instead of saying the change is too complex
+- Cloning a repository from the setup guide no longer leaves a background timer running that could reopen the guide minutes later when you add a folder another way
+- The update button now recovers if the first update check fails while the app is starting, instead of staying missing until you restart
 
 ## 0.3.13
 

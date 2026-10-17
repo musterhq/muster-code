@@ -313,8 +313,10 @@ export function pushNotice(message: string, options: {kind?: NoticeKind; action?
   const notice: Notice = {id: ++noticeSeq, message, kind, count: 1, ...(options.action ? {action: options.action} : {}), ...(options.secondary ? {secondary: options.secondary} : {}), ...(options.countdown ? {countdown: options.countdown} : {}), ...(options.lifetimeMs ? {lifetimeMs: options.lifetimeMs} : {})};
   let notices = [...state.notices, notice];
   while (notices.length > MAX_NOTICES) {
-    // Drop the oldest transient row first; persistent errors leave only when errors alone overflow.
-    const drop = notices.find(n => n.kind !== 'error') ?? notices[0]!;
+    // Drop the oldest transient row first; persistent errors leave only when errors alone overflow. The notice just
+    // pushed is never the one dropped: it may carry the Undo for something that already happened.
+    const older = notices.filter(n => n !== notice);
+    const drop = older.find(n => n.kind !== 'error') ?? older[0]!;
     clearTimeout(noticeTimers.get(drop.id)); noticeTimers.delete(drop.id);
     notices = notices.filter(n => n !== drop);
   }
