@@ -7,6 +7,7 @@ All notable changes to Muster Agent. Each `## <version>` section becomes the not
 
 - Typechecking runs on tsc-rs, about twice as fast and using a third less memory, with a CI guard that compares it with the official compiler
 - A confirmation or Undo notice now appears even when four unread error notices are already on screen, instead of being dropped silently
+- Diff previews of a newly created or deleted file with more than about 2,000 lines, or of a long block added to an otherwise unchanged file, show the lines instead of saying the change is too complex
 
 ## 0.3.13
 
