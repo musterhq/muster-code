@@ -17,6 +17,7 @@ import {codexSubagentOverrides,subagentSupport} from './subagent-routes.ts';
 import {codexWindowOverrides, userCompactionKeys} from './codex-window-overrides.ts';
 import {unpackedPath} from './unpacked-path.ts';
 import {BROWSER_MCP, BROWSER_NOTE, browserToolStyle, routeBrowserNote} from '../shared/computer-use.ts';
+import {ASK_USER_METHOD, ASK_USER_RULE} from './ask-user.ts';
 import type {McpServerSpec} from './adapters/types.ts';
 
 /** Identity of the test-only route `createProviderAdapter({available})` builds. */
@@ -136,7 +137,7 @@ const modeInstructions = (mode: Chat['mode'], subagents = true) => mode === 'ask
 export const PROCESS_OWNERSHIP_RULE = 'Process ownership: only stop, kill or restart processes you started yourself in this conversation. Never kill processes by port or name without confirming you started them; the user\'s terminals and dev servers are theirs even when they look orphaned. If a port you need is busy, pick another port. Stop long-running processes you started (dev servers, watchers) before ending your turn unless the user asked you to keep them running.';
 /** #385: agent mode keeps going instead of ending turns with a permission question. Never added in ask or plan mode. */
 export const AGENT_AUTONOMY_RULE = 'Work autonomously until the task is done. Do the next obvious step without asking. Ask only before destructive or irreversible actions, or when a choice is genuinely ambiguous and changes the outcome. Do not end a turn with "Should I...?" or "Want me to...?" for work that is clearly part of the task: do it. End with a short summary of what you did and what is left, not a question.';
-export const runInstructions = (mode: Chat['mode'], extra?: string, subagents = true) => [modeInstructions(mode, subagents), mode === 'agent' ? AGENT_AUTONOMY_RULE : undefined, mode === 'agent' ? PROCESS_OWNERSHIP_RULE : undefined, extra].filter(Boolean).join('\n\n') || undefined;
+export const runInstructions = (mode: Chat['mode'], extra?: string, subagents = true) => [modeInstructions(mode, subagents), mode === 'agent' ? AGENT_AUTONOMY_RULE : undefined, mode === 'agent' ? ASK_USER_RULE : undefined, mode === 'agent' ? PROCESS_OWNERSHIP_RULE : undefined, extra].filter(Boolean).join('\n\n') || undefined;
 /** #424: the instructions, Muster's MCP servers and the native browser flag for a non-Codex route. Each route names the
  *  browser tools exactly as its model sees them, or says plainly that it has none; the browser server goes only to routes
  *  that load it (Claude Code, OpenCode, Grok), and HTTP routes get native browser tools wired to the same bridge. */
@@ -227,6 +228,11 @@ export function createProviderAdapter(options: { core?: CoreClient; available?: 
           if (owned.controller.signal.aborted) return false;
           const decision = answer?.decision;
           return answer === undefined || decision === 'accept' || decision === 'acceptForSession';
+        },
+        // ask_user never waits: the service posts the card and answers with the default at once.
+        askUser: async args => {
+          const answer = live() ? await input.onRequest(ASK_USER_METHOD, args).catch(() => undefined) : undefined;
+          return typeof answer?.text === 'string' ? answer.text : 'The question could not be shown. Continue with your default.';
         },
         onThreadReady: threadId => { if (live()) input.onThreadReady?.(threadId); },
         onTurnAccepted: identity => { activity = true; if (live()) input.onTurnAccepted?.({...identity, dispatchState: 'dispatched'}); },
