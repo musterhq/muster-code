@@ -79,3 +79,17 @@ test('a folder cannot be moved into itself and says so plainly',async()=>{
   await mkdir(join(dir,'a'));
   await assert.rejects(moveFile(dir,'a','a/b'),/into itself/i);
 });
+
+test('renaming a file or folder to a different capitalisation works on case-insensitive disks',async()=>{
+  const dir=await workspace();
+  await writeFile(join(dir,'probe.tmp'),'');
+  if(await stat(join(dir,'PROBE.TMP')).then(()=>false,()=>true))return;// case-sensitive disk: nothing to prove
+  await writeFile(join(dir,'Readme.md'),'keep');
+  await mkdir(join(dir,'Docs'));
+  await moveFile(dir,'Readme.md','README.md');
+  await moveFile(dir,'Docs','docs');
+  const names=await readdir(dir);
+  assert.ok(names.includes('README.md')&&!names.includes('Readme.md'));
+  assert.ok(names.includes('docs')&&!names.includes('Docs'));
+  assert.equal(await readFile(join(dir,'README.md'),'utf8'),'keep');
+});
