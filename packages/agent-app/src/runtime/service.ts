@@ -979,7 +979,8 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
         if (result.status === 'completed' && result.dispatchState !== 'not-dispatched' && !compactedInRun) contextLedger.delivered(chatId, store.chat(chatId)?.providerThreadId, threadReset ? staticBlocks : [...pendingBlocks], retainedTurns);
         else if (result.dispatchState !== 'not-dispatched') contextLedger.forget(chatId);
         if (recovery) store.appendItem(chatId,'notice',recovery.reason,recovery.kind,{recovery,providerThreadId:store.chat(chatId)?.providerThreadId,providerTurnId:store.chat(chatId)?.providerTurnId});
-        const restoreDraft=result.status==='failed' && result.dispatchState==='not-dispatched' && recovery?.kind!=='recovery-needed' && store.chat(chatId)?.draft==='';
+        // #448: a limited turn that never started re-runs its own prompt at reset, so it is not also handed back as a draft (sent twice).
+        const restoreDraft=result.status==='failed' && result.dispatchState==='not-dispatched' && recovery?.kind!=='recovery-needed' && store.chat(chatId)?.draft==='' && !(run.limit && settingOn('chats.resumeAfterLimit'));
         if (restoreDraft && attachmentIds.length) attachments.restage(attachmentIds);
         store.updateChat(chatId, {status:recovery?.kind === 'recovery-needed' ? 'failed' : run.stopped ? 'interrupted' : result.status,recovery:recovery ?? null,error:recovery?.reason ?? result.errorMessage ?? null,...(restoreDraft?{draft:prompt}:{})});
       } catch (error) {

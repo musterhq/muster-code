@@ -115,6 +115,22 @@ test('a turn refused before it started re-runs its own prompt once, without a se
   assert.equal((await snapshotChat(service,chat.id)).draft,'','the restored draft was the prompt that ran');
 });
 
+test('a limited turn that never started waits as Limited without handing its prompt back as a draft, then re-runs it at reset',async t=>{
+  fastTiming(t);
+  const dataDir=await directory(t);
+  // Not retryable: the transient admission retry does not take it, so the usage-limit continuation does.
+  const {provider,calls}=scripted(call=>call===1?{status:'failed',finalMessage:'',dispatchState:'not-dispatched',errorMessage:'Claude AI usage limit reached. Try again in 1 seconds.',recovery:{kind:'failed',retryable:false,reason:'The provider attempt failed: Claude AI usage limit reached. Try again in 1 seconds.'}}:undefined);
+  const service=createAgentService({dataDir,provider,onEvent(){}});t.after(()=>service.dispose());
+  const chat=await service.invoke('chat.create',{});
+  await service.invoke('chat.send',{id:chat.id,text:'write the report',requestId:'first'});
+  await until(async()=>(await snapshotChat(service,chat.id)).autoResume?.resume===true);
+  assert.equal((await snapshotChat(service,chat.id)).draft,'','the prompt re-runs at reset, so it is not also put back in the composer (it would be sent twice)');
+  await until(()=>calls.length===2);
+  assert.equal(calls[1]!.prompt,'write the report');
+  await until(async()=>(await snapshotChat(service,chat.id)).status==='completed');
+  assert.equal((await items(service,chat.id)).filter(item=>item.kind==='user').length,1);
+});
+
 test('a provider that still refuses backs off, says so once, and gives up instead of looping',async t=>{
   fastTiming(t);
   const dataDir=await directory(t);

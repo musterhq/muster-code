@@ -14,7 +14,7 @@ import type { Chat, ChatAutoResume, ChatFallback } from '../shared/protocol.ts';
 import type { ProviderUsage, ProviderUsageWindow } from '../shared/domains/providers-protocol.ts';
 import { isAdapterProvider } from './adapters/index.ts';
 
-/** Quota and usage-window refusals: a Codex/ChatGPT window, Claude's 5-hour or weekly limit, insufficient quota. */
+/** Quota and usage-window refusals: a Codex usage window, Claude's 5-hour or weekly limit, insufficient quota. */
 const QUOTA = /usage[ _-]?limit|quota|insufficient_quota|(?:hour|weekly|session|daily|opus|sonnet)[ -]?limit|limit (?:reached|exceeded)|hit your limit/i;
 /** Rate limits and outages: a 429 (also after the provider's own retries), a 503, an overloaded or at-capacity service. */
 const RATE = /rate[ _-]?limit(?:ed)?|\b429\b|too many requests|\b503\b|overloaded|server is busy|at capacity|admission is temporarily unavailable|admission stayed unavailable/i;

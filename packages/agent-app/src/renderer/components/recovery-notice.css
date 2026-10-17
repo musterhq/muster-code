@@ -3,4 +3,4 @@
 .chat-error-banner .limit-choice .workspace-inline-link[aria-pressed='true'] { font-weight: 600; text-decoration: none; cursor: default; }
 .chat-error-banner .limit-choice .workspace-inline-link[aria-pressed='false'] { opacity: 0.8; }
 .chat-error-banner .limit-fallback { display: inline-flex; margin-left: 12px; vertical-align: middle; }
-.chat-error-banner .limit-fallback .default-model-trigger.settings-button { min-height: 0; height: auto; padding: 2px 8px; font-size: 12px; }
+.chat-error-banner .limit-fallback .default-model-trigger.settings-button { min-height: 0; height: auto; padding: 2px 8px; font-size: var(--fs-12); }
