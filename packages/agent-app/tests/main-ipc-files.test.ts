@@ -37,3 +37,11 @@ test('content search returns folder-relative paths whether or not ripgrep is ins
   const result = await searchContent(dir, '', 'needle');
   assert.deepEqual(result.matches.map(match => match.path), ['sub/a.txt']);
 });
+
+test('a folder registered at a filesystem root still resolves paths inside it', async () => {
+  const {resolveInside} = await import('../src/runtime/paths.ts');
+  const {parse} = await import('node:path');
+  const top = parse(process.cwd()).root;
+  const target = await resolveInside(top, 'usr');
+  assert.equal(target, join(top, 'usr'));
+});
