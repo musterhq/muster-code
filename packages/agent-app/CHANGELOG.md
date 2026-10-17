@@ -7,6 +7,7 @@ All notable changes to Muster Agent. Each `## <version>` section becomes the not
 
 - Typechecking runs on tsc-rs, about twice as fast and using a third less memory, with a CI guard that compares it with the official compiler
 - Arabic, Hebrew and other right-to-left messages, replies, lists and chat titles now read and align right-to-left instead of left-to-right
+- Typing in Arabic or Hebrew in the message box now flows right-to-left, and sidebar chat titles follow their own direction
 
 ## 0.3.13
 
