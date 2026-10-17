@@ -205,10 +205,10 @@ test('manager: off by default; agent access is a separate opt-in that never outl
   await manager.configure({agentControl: true});
   assert.equal(manager.agentAccess, false, 'no tools until the helper is installed');
   const file = path.join(dir, 'devices.json');
-  assert.deepEqual(JSON.parse(fs.readFileSync(file, 'utf8')), {enabled: true, agentControl: true, appleModels: false});
+  assert.deepEqual(JSON.parse(fs.readFileSync(file, 'utf8')), {enabled: true, agentControl: true});
   if (process.platform !== 'win32') assert.equal(fs.statSync(file).mode & 0o777, 0o600);
   await manager.configure({enabled: false});
-  assert.deepEqual(JSON.parse(fs.readFileSync(file, 'utf8')), {enabled: false, agentControl: false, appleModels: false}, 'turning devices off also turns agent access off');
+  assert.deepEqual(JSON.parse(fs.readFileSync(file, 'utf8')), {enabled: false, agentControl: false}, 'turning devices off also turns agent access off');
   assert.deepEqual(access, []);
   await assert.rejects(manager.configure({enabled: 'yes'}), /Choose whether devices are on/);
   fs.rmSync(dir, {recursive: true, force: true});
@@ -457,60 +457,27 @@ test('agent tool host: bearer token required, launcher written 0700 and endpoint
   fs.rmSync(dir, {recursive: true, force: true});
 });
 
-test('Apple models: opt-in only, https from apple.com, checksum verified, converted GLB cached, cleared when turned off', async () => {
-  const {AppleModels, sha256} = await import('../src/main/devices/models.ts');
-  const dir = tmp();
-  const good = Buffer.from('fake usdz bytes');
-  const source = {id: 'iphone' as const, label: 'iPhone', url: 'https://www.apple.com/x.usdz', sha256: sha256(good), bodyNode: 'B', screenNode: 'S'};
-  let body = good, fetched = 0;
-  const models = new AppleModels(dir, (async (url: string) => { fetched++; assert.equal(url, source.url); return new Response(body); }) as typeof fetch, () => {}, [source]);
-  assert.equal(models.status()[0]!.state, 'absent');
-  const first = await models.get('iphone');
-  assert.deepEqual(Buffer.from(first.usdz!), good);assert.equal(first.glb, undefined);assert.equal(first.bodyNode, 'B');
-  await models.get('iphone');assert.equal(fetched, 1, 'a verified download is reused');
-  assert.throws(() => models.store('iphone', new Uint8Array([1, 2, 3])), /Invalid converted model/);
-  const glb = Buffer.concat([Buffer.from('glTF'), Buffer.alloc(32)]);
-  models.store('iphone', new Uint8Array(glb));
-  assert.equal(models.status()[0]!.state, 'converted');assert.deepEqual(Buffer.from((await models.get('iphone')).glb!), glb);
-  models.clear();assert.equal(models.status()[0]!.state, 'absent');assert.ok(!fs.existsSync(path.join(dir, 'device-models')));
-  body = Buffer.from('tampered');
-  await assert.rejects(models.get('iphone'), /checksum mismatch/);assert.equal(models.status()[0]!.state, 'failed');
-  const evil = new AppleModels(dir, (async () => new Response(good)) as typeof fetch, () => {}, [{...source, url: 'https://evil.example/x.usdz'}]);
-  await assert.rejects(evil.get('iphone'), /only downloaded from apple.com/);
-  await assert.rejects(models.get('android'), /Unknown device model/);
-  fs.rmSync(dir, {recursive: true, force: true});
-});
-
-test('3D bodies: Muster-made phone, tablet and foldable each carry one live screen with 0..1 UVs at the standard height', async () => {
+test('3D bodies: built from each frame spec with one live screen (0..1 UVs, long side at the standard height), the cut-out and the spec\'s buttons', async () => {
   const {buildBody, SCREEN_NAME, SCREEN_HEIGHT} = await import('../src/renderer/devices/bodies.ts');
+  const {FRAME_SPECS} = await import('../src/shared/device-frames.ts');
   const {Color} = await import('three');
   const colors = {body: new Color(0.2, 0.2, 0.2), trim: new Color(0.1, 0.1, 0.1), lens: new Color(0, 0, 0), screenOff: new Color(0, 0, 0)};
-  for (const [form, aspect] of [['phone', 0.46], ['tablet', 0.75], ['foldable', 0.9]] as const) {
-    const body = buildBody(form, aspect, colors);
-    const screens: any[] = [];
-    body.traverse((node: any) => { if (node.name === SCREEN_NAME) screens.push(node); });
-    assert.equal(screens.length, 1, form);
+  for (const spec of Object.values(FRAME_SPECS)) {
+    const body = buildBody(spec, undefined, colors);
+    const screens: any[] = [], cutouts: any[] = [], buttons: string[] = [];
+    body.traverse((node: any) => { if (node.name === SCREEN_NAME) screens.push(node); if (node.name === 'muster-cutout') cutouts.push(node); if (node.name.startsWith('muster-button-')) buttons.push(node.name.slice(14)); });
+    assert.equal(screens.length, 1, spec.id);
     const geometry = screens[0].geometry; geometry.computeBoundingBox();
     const size = geometry.boundingBox.max.clone().sub(geometry.boundingBox.min);
-    assert.ok(Math.abs(size.y - SCREEN_HEIGHT) < 1e-6, `${form} screen height`);
-    assert.ok(Math.abs(size.x / size.y - aspect) < 1e-6, `${form} screen aspect`);
+    assert.ok(Math.abs(Math.max(size.x, size.y) - SCREEN_HEIGHT) < 1e-3, `${spec.id} screen long side`);
+    assert.ok(Math.abs(size.x / size.y - spec.screen.width / spec.screen.height) < 1e-2, `${spec.id} screen aspect`);
     const uv = geometry.attributes.uv;
     let min = Infinity, max = -Infinity;
     for (let i = 0; i < uv.count; i++) { min = Math.min(min, uv.getX(i), uv.getY(i)); max = Math.max(max, uv.getX(i), uv.getY(i)); }
-    assert.ok(min >= -1e-6 && max <= 1 + 1e-6 && max > 0.99, `${form} UVs span 0..1`);
+    assert.ok(min >= -1e-6 && max <= 1 + 1e-6 && max > 0.99, `${spec.id} UVs span 0..1`);
+    assert.equal(cutouts.length, spec.cutout.kind === 'none' ? 0 : 1, `${spec.id} cut-out`);
+    assert.deepEqual(buttons.sort(), spec.buttons.map(b => b.kind).sort(), `${spec.id} buttons`);
   }
-});
-
-test('Apple conversion geometry: the display frame comes from its triangles, not an axis-aligned box', async () => {
-  const {displayFrame} = await import('../src/renderer/devices/appleModels.ts');
-  const {Vector3, Matrix4, PlaneGeometry} = await import('three');
-  // A 1×2 display tilted 30° about X and moved: the frame must recover its normal, its long side and its height.
-  const plane = new PlaneGeometry(1, 2, 4, 8).applyMatrix4(new Matrix4().makeRotationX(Math.PI / 6)).translate(3, 1, -2);
-  const frame = displayFrame(plane.attributes.position as any, plane.index ? plane.index.array : null);
-  assert.ok(Math.abs(Math.abs(frame.normal.dot(new Vector3(0, 0, 1).applyMatrix4(new Matrix4().makeRotationX(Math.PI / 6)))) - 1) < 1e-3, 'normal');
-  assert.ok(Math.abs(frame.height - 2) < 1e-6, 'height along the long side');
-  assert.ok(frame.center.distanceTo(new Vector3(3, 1, -2)) < 1e-6, 'centre');
-  assert.ok(frame.up.y > 0, 'not upside down');
 });
 
 test('3D screen orientation: a landscape picture turns the screen UVs a quarter so hits still name the picture pixel', async () => {
@@ -523,4 +490,65 @@ test('3D screen orientation: a landscape picture turns the screen UVs a quarter 
   for (let i = 0; i < before.length; i += 2) { assert.equal(turned[i], 1 - before[i + 1]!); assert.equal(turned[i + 1], before[i]); }
   orientScreen(mesh, false);
   assert.deepEqual(Array.from(mesh.geometry.attributes.uv!.array as ArrayLike<number>), before, 'portrait restores the original UVs');
+});
+
+test('frame specs: iOS from the simctl device type, Android from the AVD config; unknown devices get their own OS\'s generic frame', async () => {
+  const {iosFrame, androidFrame, parseIni, parseCutout, frameForPicture, frameLayout} = await import('../src/shared/device-frames.ts');
+  const ios = (type: string, name = type.replace(/-/g, ' ')) => iosFrame(`com.apple.CoreSimulator.SimDeviceType.${type}`, name).id;
+  assert.equal(ios('iPhone-17-Pro'), 'iphone-island');assert.equal(ios('iPhone-15'), 'iphone-island');assert.equal(ios('iPhone-14-Pro'), 'iphone-island');assert.equal(ios('iPhone-Air'), 'iphone-island');
+  assert.equal(ios('iPhone-16e'), 'iphone-notch');assert.equal(ios('iPhone-14'), 'iphone-notch');assert.equal(ios('iPhone-11'), 'iphone-notch');
+  assert.equal(ios('iPhone-SE-3rd-generation', 'iPhone SE (3rd generation)'), 'iphone-home');assert.equal(ios('iPhone-8'), 'iphone-home');
+  assert.equal(ios('iPad-Pro-13-inch-M5', 'iPad Pro 13-inch (M5)'), 'ipad');assert.equal(ios('iPad-10th-generation', 'iPad (10th generation)'), 'ipad');
+  assert.equal(ios('iPad-9th-generation', 'iPad (9th generation)'), 'ipad-home');assert.equal(ios('iPad-mini-A17-Pro', 'iPad mini (A17 Pro)'), 'ipad-mini');
+  assert.equal(iosFrame(undefined, 'Some Future Phone').os, 'ios', 'an unknown iOS device stays an iOS frame');
+  assert.ok(iosFrame(undefined, 'iPhone 17 Pro').buttons.some(b => b.kind === 'camera' && b.edge === 'right'), 'iPhone 16 and later: Camera Control on the right');
+  const island = iosFrame(undefined, 'iPhone 17 Pro');
+  assert.deepEqual(island.buttons.filter(b => b.edge === 'left').map(b => b.kind), ['action', 'volume', 'volume']);assert.deepEqual(island.buttons.filter(b => b.edge === 'right').map(b => b.kind), ['power', 'camera']);
+
+  const avd = (text: string, name = 'Device') => androidFrame(parseIni(text), name);
+  assert.equal(avd('hw.device.name=pixel_9\nhw.lcd.width=1080\nhw.lcd.height=2424').id, 'pixel-pill');
+  assert.equal(avd('hw.device.name=pixel_8').id, 'pixel');assert.equal(avd('hw.device.name=pixel_7_pro').id, 'pixel-curved');assert.equal(avd('hw.device.name=pixel_5').id, 'pixel-side-punch');
+  assert.equal(avd('hw.device.name=pixel_4').id, 'pixel-bezel');assert.equal(avd('hw.device.name=pixel_3_xl').id, 'pixel-notch');assert.equal(avd('hw.device.name=pixel_2').id, 'android-classic-phone');
+  const fold = avd('hw.device.name=pixel_9_pro_fold\nhw.sensor.hinge=yes');
+  assert.equal(fold.id, 'pixel-fold');assert.equal(frameForPicture(fold, {width: 2076, height: 2152}).id, 'pixel-fold', 'open: the inner display');
+  assert.equal(frameForPicture(fold, {width: 1080, height: 2092}).id, 'pixel-fold-folded', 'folded: the outer display');
+  assert.equal(avd('hw.device.name=pixel_tablet').id, 'pixel-tablet');
+  assert.equal(avd('hw.device.name=SM-S921B\nhw.device.manufacturer=Samsung').id, 'android-centre-punch');
+  assert.equal(avd('hw.device.name=wearos_large_round\ntag.id=android-wear').id, 'wear-round');assert.equal(avd('hw.device.name=wearos_square\ntag.id=android-wear').id, 'wear-square');
+  assert.equal(avd('hw.device.name=tv_1080p\ntag.id=google-tv').id, 'android-tv');assert.equal(avd('hw.device.name=automotive_1024p_landscape\ntag.id=android-automotive').id, 'android-automotive');
+  assert.equal(avd('hw.device.name=small_phone').id, 'android-small-phone');
+  const unknown = avd('hw.device.name=acme_x1\nhw.lcd.width=1200\nhw.lcd.height=2640\nhw.lcd.density=480');
+  assert.equal(unknown.os, 'android');assert.equal(unknown.id, 'android-generic-phone');assert.deepEqual(unknown.screen, {width: 1200, height: 2640}, 'its own screen size');
+  assert.equal(avd('hw.device.name=acme_tab\nhw.lcd.width=1600\nhw.lcd.height=2560\nhw.lcd.density=320').id, 'android-generic-tablet');
+  assert.equal(androidFrame({}, 'Pixel_9_API_36').id, 'pixel-pill', 'the AVD name is the fallback');
+  // The cut-out Android reports for a generic device.
+  const dumpsys = 'mDisplayCutout=DisplayCutout{insets=Rect(0, 136 - 0, 0) waterfall=Insets{left=0, top=0, right=0, bottom=0} boundingRect={Bounds=[Rect(0, 0 - 0, 0), Rect(498, 0 - 582, 136), Rect(0, 0 - 0, 0), Rect(0, 0 - 0, 0)]} cutoutPathParserInfo={}}';
+  const cutout = parseCutout(dumpsys, 1080)!;
+  assert.equal(cutout.kind, 'punch-center');assert.ok(Math.abs(cutout.x - 0.5) < 0.01);
+  assert.equal(androidFrame(parseIni('hw.device.name=acme_x1'), 'acme', cutout).cutout.kind, 'punch-center');
+  assert.equal(parseCutout('no cutout here', 1080), undefined);
+  assert.equal(parseCutout('DisplayCutout{insets=Rect(0, 0 - 0, 0) boundingRect={Bounds=[Rect(0, 0 - 0, 0), Rect(0, 0 - 0, 0), Rect(0, 0 - 0, 0), Rect(0, 0 - 0, 0)]}}', 1080)!.kind, 'none');
+  // Layout: a landscape picture turns a portrait device once; the island moves to the left edge.
+  const upright = frameLayout(island, {width: 1206, height: 2622}), turned = frameLayout(island, {width: 2622, height: 1206}, 1);
+  assert.ok(upright.width < upright.height && turned.width > turned.height);
+  assert.ok(Math.abs(turned.glass.w / turned.glass.h - 2622 / 1206) < 1e-6, 'the screen keeps the picture\'s proportions');
+  assert.equal(turned.buttons.find(b => b.kind === 'power')!.edge, 'top', 'the right edge is on top after a counter-clockwise turn');
+});
+
+test('AVD config is read from the AVD folder (config.ini overlaid by hardware-qemu.ini); discovery attaches the derived frame', async () => {
+  const dir = tmp(), avdDir = path.join(dir, 'avd');
+  fs.mkdirSync(path.join(avdDir, 'Fold.avd'), {recursive: true});
+  fs.writeFileSync(path.join(avdDir, 'Fold.ini'), `path=${path.join(avdDir, 'Fold.avd')}\n`);
+  fs.writeFileSync(path.join(avdDir, 'Fold.avd', 'config.ini'), 'hw.device.name=pixel_9_pro_fold\nhw.lcd.width=2076\n');
+  fs.writeFileSync(path.join(avdDir, 'Fold.avd', 'hardware-qemu.ini'), 'hw.lcd.width=2152\n');
+  const {readAvdConfig, listAndroid, listIos} = await import('../src/main/devices/discovery.ts');
+  const deps = {env: {ANDROID_AVD_HOME: avdDir}, home: dir, readText: (file: string) => { try { return fs.readFileSync(file, 'utf8'); } catch { return undefined; } }};
+  assert.deepEqual(readAvdConfig(deps, 'Fold'), {'hw.device.name': 'pixel_9_pro_fold', 'hw.lcd.width': '2152'});
+  assert.deepEqual(readAvdConfig(deps, '../etc'), {}, 'names that are not plain identifiers read nothing');
+  const run = async (_file: string, args: string[]) => args[0] === '-list-avds' ? 'Fold\n' : args.join(' ') === 'simctl list devices --json' ? JSON.stringify({devices: {'com.apple.CoreSimulator.SimRuntime.iOS-26-0': [{udid: 'BBBBBBBB-2222', name: 'iPhone SE (3rd generation)', state: 'Shutdown', isAvailable: true, deviceTypeIdentifier: 'com.apple.CoreSimulator.SimDeviceType.iPhone-SE-3rd-generation'}]}}) : '';
+  const [android] = await listAndroid({...deps, run, exists: () => true, platform: 'darwin'});
+  assert.equal(android!.frame!.id, 'pixel-fold');assert.equal(android!.formFactor, 'foldable');
+  const [phone] = await listIos({...deps, run, exists: () => true, platform: 'darwin'});
+  assert.equal(phone!.frame!.id, 'iphone-home');
+  fs.rmSync(dir, {recursive: true, force: true});
 });

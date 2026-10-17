@@ -1,61 +1,31 @@
 /**
- * The 3D device frame (#363, lazy chunk), built on the shared three-engine (#362): the live screen on a device body you
- * can turn. Dragging the body or the background turns it (yaw only, with momentum; near the front it eases back, F or
- * a double-click faces it again); a press on the screen is a touch, mapped from the screen's texture coordinate back to
- * the device's pixel (engine.pick + uvToPixel). Rendering is on demand: a new frame or an interaction, nothing else.
+ * The 3D device frame (#363, lazy chunk), built on the shared three-engine (#362): the live screen on the device's own
+ * body, which you can turn. The body comes from the same frame spec as the flat view (bodies.ts ← shared/device-frames.ts),
+ * so an iPhone has its island and side buttons, a Pixel its punch-hole and camera bar, a tablet its even bezels, and an
+ * open foldable switches body when the emulator changes posture (its picture changes shape).
  *
- * Bodies: Apple's own iPhone/iPad models when the user opted in (downloaded from apple.com and converted on this
- * computer, see appleModels.ts), otherwise Muster's own procedural bodies (bodies.ts). The flat view is always one click
- * away; no WebGL falls back to it, and a model that fails falls back to our own body with a quiet note.
+ * Dragging the body or the background turns it (yaw only, with momentum; near the front it eases back, F or a
+ * double-click faces it again); a press on the screen is a touch, mapped from the screen's texture coordinate back to
+ * the device's pixel (engine.pick + uvToPixel). Rendering is on demand: a new frame or an interaction, nothing else.
+ * No WebGL falls back to the flat view.
  */
-import React, {useEffect, useRef, useState} from 'react';
-import {Color, MeshBasicMaterial, SRGBColorSpace, type Group, type Mesh, type Object3D} from 'three';
-import type {DeviceSession, DeviceSetup} from '../../../shared/device-protocol';
-import {invoke} from '../../bridge';
-import {deviceUi} from '../../deviceSessions';
+import React, {useEffect, useRef} from 'react';
+import {Color, MeshBasicMaterial, SRGBColorSpace, type Mesh, type Object3D} from 'three';
+import type {DeviceSession} from '../../../shared/device-protocol';
+import {frameForPicture, type FrameSpec} from '../../../shared/device-frames';
 import {isWindowActive, onWindowActivity} from '../../windowActivity';
 import {useFeedPaint, type DeviceFeed} from '../../devices/deviceFeed';
 import {buildBody, SCREEN_NAME} from '../../devices/bodies';
 import {orientScreen} from './orientScreen';
-import {Engine, resolveCssColor, uvToPixel, type FrameTexture} from '../../three-engine';
+import {frameOf, frameTurns} from './DeviceFrameFlat';
+import {Engine, uvToPixel, type FrameTexture} from '../../three-engine';
 
-const modelCache = new Map<string, Promise<Uint8Array | null>>();
-
-/** Apple's model for this simulator when the user opted in; null (use our own body) on any failure. */
-async function appleModel(session: DeviceSession, known: DeviceSetup | undefined): Promise<Group | null> {
-  if (session.platform !== 'ios' || session.formFactor === 'foldable') return null;
-  const setup = known ?? await invoke('devices.setup', undefined).catch(() => undefined);
-  if (!setup?.appleModels) return null;
-  const id = session.formFactor === 'tablet' ? 'ipad' : 'iphone';
-  let pending = modelCache.get(id);
-  if (!pending) {
-    pending = (async () => {
-      const result = await invoke('devices.model', {id});
-      if (result.glb) return result.glb;
-      if (!result.usdz) return null;
-      const {convertAppleModel} = await import('../../devices/appleModels');
-      const glb = new Uint8Array(await convertAppleModel(result.usdz, result.bodyNode, result.screenNode));
-      await invoke('devices.modelStore', {id, glb});
-      return glb;
-    })().catch(error => { console.warn(`Apple ${id} model unavailable, using Muster's own body:`, error instanceof Error ? error.message : error); return null; });
-    modelCache.set(id, pending);
-    void pending.then(value => { if (!value) modelCache.delete(id); });
-  }
-  const glb = await pending;
-  if (!glb) return null;
-  const {loadDeviceGlb} = await import('../../devices/appleModels');
-  return loadDeviceGlb(glb).catch(() => null);
-}
-
-const tokenColor = (name: string, fallback: [number, number, number]) => {
-  const value = typeof getComputedStyle === 'function' ? getComputedStyle(document.documentElement).getPropertyValue(name).trim() : '';
-  const rgb = resolveCssColor(value) ?? fallback;
-  return new Color().setRGB(rgb[0] / 255, rgb[1] / 255, rgb[2] / 255, SRGBColorSpace);
+const BODY: Record<FrameSpec['color'], number> = {dark: 0x1c1d20, titanium: 0x6a6761, light: 0xd7d5d0};
+const bodyColors = (spec: FrameSpec) => {
+  const body = new Color().setHex(BODY[spec.color], SRGBColorSpace);
+  return {body, trim: body.clone().multiplyScalar(0.82), lens: new Color().setHex(0x0b0b0c, SRGBColorSpace), screenOff: new Color().setHex(0x000000, SRGBColorSpace)};
 };
-const bodyColors = () => {
-  const body = tokenColor('--device-body', [52, 54, 59]), ground = tokenColor('--bg-sunken', [12, 12, 12]);
-  return {body, trim: body.clone().multiplyScalar(0.8), lens: ground, screenOff: ground};
-};
+
 export default function DeviceFrame3D({session, feed, onFallback}: {session: DeviceSession; feed?: DeviceFeed; onFallback(): void}): React.ReactElement {
   const host = useRef<HTMLDivElement>(null);
   const engine = useRef<Engine | null>(null);
@@ -65,15 +35,20 @@ export default function DeviceFrame3D({session, feed, onFallback}: {session: Dev
   const streamSize = useRef('');
   const feedRef = useRef(feed);
   feedRef.current = feed;
-  const [note, setNote] = useState<string>();
-  const landscape = !!feed?.width && feed.width > feed.height;
-  const landscapeRef = useRef(landscape);
-  landscapeRef.current = landscape;
+  const picture = feed?.width ? {width: feed.width, height: feed.height} : undefined;
+  const spec = frameForPicture(frameOf(session), picture);
+  // The picture in the other orientation than the device's natural one turns the body a quarter.
+  const turned = frameTurns(spec, picture, session.screen?.orientation) % 2 === 1;
+  const turnedRef = useRef(turned);
+  turnedRef.current = turned;
+  // The body is rebuilt only when the device's shape changes: another spec (a foldable's posture) or picture proportions.
+  const naturalAspect = picture ? (turned ? picture.height / picture.width : picture.width / picture.height) : 0;
+  const shapeKey = `${spec.id}:${naturalAspect.toFixed(3)}`;
 
   const applyOrientation = () => {
     if (!body.current || !screen.current) return;
-    body.current.rotation.z = landscapeRef.current ? Math.PI / 2 : 0;
-    orientScreen(screen.current, landscapeRef.current);
+    body.current.rotation.z = turnedRef.current ? Math.PI / 2 : 0;
+    orientScreen(screen.current, turnedRef.current);
     engine.current?.invalidate();
   };
   // A fresh texture for a new picture size (WebGL keeps a texture's size once uploaded).
@@ -89,11 +64,25 @@ export default function DeviceFrame3D({session, feed, onFallback}: {session: Dev
     }
     return stream.current;
   };
+  const mount = (object: Object3D) => {
+    const e = engine.current;
+    if (!e) return;
+    const found = object.getObjectByName(SCREEN_NAME) as Mesh | undefined;
+    if (!found) return;
+    screen.current = found;
+    if (body.current) e.remove(body.current);
+    body.current = object;
+    e.add(object);
+    streamSize.current = '';
+    const target = ensureStream(), current = feedRef.current;
+    if (target && current?.width) target.update(current.canvas);
+    applyOrientation();
+    e.frame(object, {preset: 'front', padding: 0.86});
+  };
 
   useEffect(() => {
     const el = host.current;
     if (!el) return;
-    let live = true;
     let created: Engine;
     try {
       created = new Engine({container: el, lighting: 'soft', fov: 30, label: `${session.name} in 3D. Drag to turn it, press F or double-click to face it, click the screen to tap.`,
@@ -103,44 +92,17 @@ export default function DeviceFrame3D({session, feed, onFallback}: {session: Dev
         dragFilter: event => !screen.current || !created.pick(event.clientX, event.clientY, screen.current)});
     } catch { onFallback(); return; }
     engine.current = created;
-    const mount = (object: Object3D) => {
-      if (!live) return;
-      const found = object.getObjectByName(SCREEN_NAME) as Mesh | undefined;
-      if (!found) { setNote('This model has no screen; showing Muster’s own.'); return; }
-      found.material = new MeshBasicMaterial({color: bodyColors().screenOff, toneMapped: false});
-      screen.current = found;
-      if (body.current) created.remove(body.current);
-      body.current = object;
-      created.add(object);
-      streamSize.current = '';
-      const target = ensureStream(), current = feedRef.current;
-      if (target && current?.width) target.update(current.canvas);
-      applyOrientation();
-      created.frame(object, {preset: 'front', padding: 0.86});
-    };
+    return () => { stream.current = null; streamSize.current = ''; created.dispose(); engine.current = null; screen.current = null; body.current = null; };
+  }, [session.deviceId]);
+  useEffect(() => {
+    if (!engine.current) return;
     const current = feedRef.current;
-    const aspect = current?.width ? Math.min(current.width, current.height) / Math.max(current.width, current.height) : session.formFactor === 'tablet' ? 0.75 : 0.46;
-    void appleModel(session, deviceUi().setup).then(model => {
-      if (!live) return;
-      if (model) mount(model);
-      else {
-        if (session.platform === 'ios' && deviceUi().setup?.appleModels) setNote('Apple’s model is not available right now; showing Muster’s own.');
-        mount(buildBody(session.formFactor, aspect, bodyColors()));
-      }
-    });
-    // Our own body follows the theme; Apple's keeps its own materials.
-    const offTheme = created.onThemeChange(() => {
-      if (!body.current?.name.startsWith('muster-')) return;
-      const colors = bodyColors();
-      body.current.traverse(node => { const material = (node as Mesh).material as {color?: Color; metalness?: number} | undefined; if (material?.color && material.metalness !== undefined && material.metalness > 0.4) material.color.copy(colors.body); });
-      created.invalidate();
-    });
-    return () => { live = false; offTheme(); stream.current = null; streamSize.current = ''; created.dispose(); engine.current = null; screen.current = null; body.current = null; };
-  }, [session.deviceId, session.formFactor]);
+    mount(buildBody(spec, current?.width ? (turned ? {width: current.height, height: current.width} : {width: current.width, height: current.height}) : undefined, bodyColors(spec)));
+  }, [session.deviceId, shapeKey]);
 
   // A new picture: hand the feed canvas to the frame texture (the engine renders once), outside React.
   useFeedPaint(feed, current => { ensureStream()?.update(current.canvas); });
-  useEffect(() => { applyOrientation(); }, [landscape]);
+  useEffect(() => { applyOrientation(); }, [turned]);
 
   const pointer = useRef<{id: number; last: {x: number; y: number}} | null>(null);
   const touchAt = (event: {clientX: number; clientY: number}): {x: number; y: number} | null => {
@@ -164,7 +126,6 @@ export default function DeviceFrame3D({session, feed, onFallback}: {session: Dev
     onPointerMove={event => { const p = pointer.current; if (!p || p.id !== event.pointerId) return; const point = touchAt(event); if (point) { p.last = point; send('move', point); } }}
     onPointerUp={event => { const p = pointer.current; if (!p || p.id !== event.pointerId) return; pointer.current = null; send('end', touchAt(event) ?? p.last); }}
     onPointerCancel={() => { pointer.current = null; }}
-    onDoubleClick={event => { if (!touchAt(event)) engine.current?.snapToFront(); }}>
-    {note && <span className="device-3d-note" role="status">{note}</span>}
+    onDoubleClick={event => { if (!touchAt(event)) engine.current?.snapToFront(); }} data-frame={spec.id}>
   </div>;
 }

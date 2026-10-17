@@ -272,50 +272,170 @@ const handlers = {
 };
 
 // ---- devices (#363): a fictional Xcode + Android SDK, the helper, and live screens drawn on a canvas -----------------
+// Every device carries the frame spec main would derive (simctl device type, or the AVD's config.ini), and shows a home
+// screen in its own OS's style. All art is drawn here from plain shapes: no maker icons, wallpapers or marks.
 if (OPTS.devices) {
   const mode = OPTS.devices;
   const ok = (detail) => ({available: true, detail});
-  const setup = () => ({enabled: !['off', 'missing'].includes(mode), agentControl: mode === 'agent', appleModels: mode === 'agent', models: [{id: 'iphone', label: 'iPhone', state: mode === 'agent' ? 'converted' : 'absent'}, {id: 'ipad', label: 'iPad', state: mode === 'agent' ? 'converted' : 'absent'}], host: OPTS.host ?? 'darwin',
+  const setup = () => ({enabled: !['off', 'missing'].includes(mode), agentControl: mode === 'agent', host: OPTS.host ?? 'darwin',
     helper: {state: mode === 'installing' ? 'installing' : mode === 'failed' ? 'failed' : mode === 'off' || mode === 'missing' ? 'absent' : 'installed', version: '0.15.3', downloadMB: 26, running: ['live', 'agent', 'tablet', 'android', 'error'].includes(mode), ...(mode === 'installing' ? {progress: 'Downloading the device helper…'} : {}), ...(mode === 'failed' ? {error: 'Could not reach the npm registry. Check your internet connection (or proxy) and try again.'} : {})},
     ios: mode === 'missing' ? {available: false, reason: 'Xcode is not installed.', fix: ['Install Xcode from the App Store.', 'Open Xcode once and let it install its components.', 'In Terminal run: sudo xcode-select -s /Applications/Xcode.app']} : ok('Xcode 26.1'),
     android: mode === 'missing' ? {available: false, reason: 'Android SDK not found.', fix: ['Install Android Studio from developer.android.com/studio.', 'In Android Studio open Settings › Languages & Frameworks › Android SDK and install the Android Emulator and Android SDK Platform-Tools.', 'Create a virtual device in Device Manager.'], detail: 'Looked in ~/Library/Android/sdk'} : ok('Android SDK at ~/Library/Android/sdk'),
     node: ok('24.4.0')});
-  const list = {devices: mode === 'empty' ? [] : [
-    {id: '6B1F0C4A-2E7D-4C55-9A0B-1F2E3D4C5B6A', name: 'iPhone 17 Pro', platform: 'ios', osVersion: 'iOS 26.0', state: 'booted', formFactor: 'phone'},
-    {id: '9C2D7E1B-4F3A-4B8C-8D9E-0A1B2C3D4E5F', name: 'iPad Pro 13-inch (M5)', platform: 'ios', osVersion: 'iOS 26.0', state: mode === 'tablet' ? 'booted' : 'shutdown', formFactor: 'tablet'},
-    {id: 'emulator-5554', name: 'Pixel_9_API_36', platform: 'android', osVersion: 'Android 16', state: mode === 'android' ? 'booted' : 'shutdown', formFactor: 'phone'},
-    {id: 'avd:Pixel_Fold_API_35', name: 'Pixel_Fold_API_35', platform: 'android', osVersion: 'Android', state: 'shutdown', formFactor: 'foldable'},
-  ], errors: [], checkedAt: Date.now()};
-  const pick = mode === 'tablet' ? list.devices[1] : mode === 'android' ? list.devices[2] : list.devices[0];
-  const sessions = ['live', 'agent', 'tablet', 'android', 'error', 'starting'].includes(mode) && pick ? [{deviceId: pick.id, name: pick.name.replace(/_/g, ' '), platform: pick.platform, formFactor: pick.formFactor, ...(mode === 'agent' ? {chatId: activeChatId} : {}), openedBy: mode === 'agent' ? 'agent' : 'user', control: 'agent', state: mode === 'error' ? 'error' : mode === 'starting' ? 'starting' : 'live', ...(mode === 'error' ? {error: 'No video arrived from the device. Reconnect to try again.'} : {}), inputReady: mode !== 'starting', openedAt: Date.now() - 60_000}] : [];
-  Object.assign(handlers, {
-    'devices.setup': setup, 'devices.list': () => list, 'devices.sessions': () => sessions,
-    'devices.configure': setup, 'devices.installHelper': setup, 'devices.view': ({active}) => { if (active && mode !== 'error' && mode !== 'starting') pump(); return null; },
-    'devices.open': ({id}) => sessions.find(x => x.deviceId === id) ?? sessions[0], 'devices.close': () => null, 'devices.button': () => null, 'devices.rotate': () => null, 'devices.control': ({id, owner}) => ({...sessions[0], control: owner}),
-  });
-  const frameListeners = new Set();
-  const draw = () => {
-    const tablet = pick.formFactor === 'tablet', android = pick.platform === 'android';
-    const w = tablet ? 820 : android ? 412 : 393, h = tablet ? 1180 : android ? 915 : 852, k = 2;
-    const c = new OffscreenCanvas(w * k, h * k), g = c.getContext('2d'); g.scale(k, k);
-    const sky = g.createLinearGradient(0, 0, w, h); sky.addColorStop(0, android ? '#1d3b2a' : '#2a3f9e'); sky.addColorStop(0.55, android ? '#3f7d5a' : '#7a4fc4'); sky.addColorStop(1, android ? '#d9c27a' : '#f08a6a');
-    g.fillStyle = sky; g.fillRect(0, 0, w, h);
-    g.fillStyle = '#fff'; g.font = '600 15px -apple-system, Helvetica'; g.fillText('9:41', android ? 20 : 34, 22);
-    g.fillRect(w - (android ? 52 : 62), 12, 24, 11); g.fillRect(w - (android ? 80 : 92), 13, 18, 10);
-    const names = ['Messages', 'Calendar', 'Photos', 'Camera', 'Mail', 'Clock', 'Maps', 'Weather', 'Notes', 'Reminders', 'Taskboard', 'Settings', 'Music', 'Files', 'Health', 'Wallet'];
-    const hues = [140, 4, 40, 220, 210, 0, 120, 200, 48, 20, 250, 220, 340, 205, 350, 30];
-    const cols = tablet ? 6 : 4, size = tablet ? 74 : 60, gapX = (w - cols * size) / (cols + 1), top = tablet ? 90 : 70;
-    names.slice(0, tablet ? 18 : 16).forEach((name, i) => {
-      const x = gapX + (i % cols) * (size + gapX), y = top + Math.floor(i / cols) * (size + 34);
-      g.fillStyle = `hsl(${hues[i % hues.length]} 70% ${name === 'Taskboard' ? 45 : 55}%)`; g.beginPath(); g.roundRect(x, y, size, size, android ? size / 2 : size * 0.23); g.fill();
-      g.fillStyle = 'rgba(255,255,255,.9)'; g.beginPath(); g.roundRect(x + size * 0.3, y + size * 0.3, size * 0.4, size * 0.4, 6); g.fill();
-      g.fillStyle = '#fff'; g.font = '500 11px -apple-system, Helvetica'; g.textAlign = 'center'; g.fillText(name, x + size / 2, y + size + 15); g.textAlign = 'start';
-    });
-    g.fillStyle = 'rgba(255,255,255,.28)'; g.beginPath(); g.roundRect(14, h - (android ? 110 : 106), w - 28, 84, android ? 42 : 30); g.fill();
-    if (android) { g.fillStyle = 'rgba(255,255,255,.75)'; g.beginPath(); g.roundRect(w / 2 - 50, h - 12, 100, 4, 2); g.fill(); }
-    else { g.fillStyle = 'rgba(255,255,255,.85)'; g.beginPath(); g.roundRect(w / 2 - 68, h - 10, 136, 5, 3); g.fill(); }
-    return c.convertToBlob({type: 'image/jpeg', quality: 0.86});
+  const FIXTURES = {
+    iphone17pro: {id: '6B1F0C4A-2E7D-4C55-9A0B-1F2E3D4C5B6A', name: 'iPhone 17 Pro', platform: 'ios', osVersion: 'iOS 26.0', type: 'iPhone-17-Pro'},
+    iphone16e: {id: '1A2B3C4D-1111-4C55-9A0B-1F2E3D4C5B6A', name: 'iPhone 16e', platform: 'ios', osVersion: 'iOS 26.0', type: 'iPhone-16e'},
+    iphonese: {id: '1A2B3C4D-2222-4C55-9A0B-1F2E3D4C5B6A', name: 'iPhone SE (3rd generation)', platform: 'ios', osVersion: 'iOS 26.0', type: 'iPhone-SE-3rd-generation'},
+    ipadpro: {id: '9C2D7E1B-4F3A-4B8C-8D9E-0A1B2C3D4E5F', name: 'iPad Pro 13-inch (M5)', platform: 'ios', osVersion: 'iOS 26.0', type: 'iPad-Pro-13-inch-M5'},
+    ipad9: {id: '9C2D7E1B-3333-4B8C-8D9E-0A1B2C3D4E5F', name: 'iPad (9th generation)', platform: 'ios', osVersion: 'iOS 18.6', type: 'iPad-9th-generation'},
+    pixel9: {id: 'emulator-5554', name: 'Pixel_9_API_36', platform: 'android', osVersion: 'Android 16', avd: 'hw.device.name=pixel_9\nhw.lcd.width=1080\nhw.lcd.height=2424\nhw.lcd.density=420'},
+    pixelfold: {id: 'emulator-5556', name: 'Pixel_9_Pro_Fold_API_35', platform: 'android', osVersion: 'Android 15', avd: 'hw.device.name=pixel_9_pro_fold\nhw.sensor.hinge=yes'},
+    pixeltablet: {id: 'emulator-5558', name: 'Pixel_Tablet_API_35', platform: 'android', osVersion: 'Android 15', avd: 'hw.device.name=pixel_tablet\nhw.lcd.width=2560\nhw.lcd.height=1600\nhw.lcd.density=320'},
+    centrepunch: {id: 'emulator-5560', name: 'Centre_Punch_Phone_API_35', platform: 'android', osVersion: 'Android 15', avd: 'hw.device.name=SM-S921B\nhw.device.manufacturer=Samsung\nhw.lcd.width=1080\nhw.lcd.height=2340'},
+    wear: {id: 'emulator-5562', name: 'Wear_OS_Large_Round_API_34', platform: 'android', osVersion: 'Android 14', avd: 'hw.device.name=wearos_large_round\ntag.id=android-wear\nhw.lcd.width=454\nhw.lcd.height=454'},
+    tv: {id: 'emulator-5564', name: 'Television_1080p_API_34', platform: 'android', osVersion: 'Android 14', avd: 'hw.device.name=tv_1080p\ntag.id=google-tv\nhw.lcd.width=1920\nhw.lcd.height=1080'},
+    auto: {id: 'emulator-5566', name: 'Automotive_1024p_API_34', platform: 'android', osVersion: 'Android 14', avd: 'hw.device.name=automotive_1024p_landscape\ntag.id=android-automotive\nhw.lcd.width=1408\nhw.lcd.height=792'},
+    unknown: {id: 'emulator-5568', name: 'Acme_X1_API_35', platform: 'android', osVersion: 'Android 15', avd: 'hw.device.name=acme_x1\nhw.lcd.width=1200\nhw.lcd.height=2640\nhw.lcd.density=480'},
   };
+  const key = OPTS.deviceKey ?? (mode === 'tablet' ? 'ipadpro' : mode === 'android' ? 'pixel9' : 'iphone17pro');
+  const frames = () => window.__shots?.deviceFrames;
+  const frameOf = (fixture) => { const f = frames(); if (!f) return undefined; return fixture.platform === 'ios' ? f.iosFrame(`com.apple.CoreSimulator.SimDeviceType.${fixture.type}`, fixture.name) : f.androidFrame(f.parseIni(fixture.avd), fixture.name); };
+  const form = (frame) => frame?.form === 'tablet' ? 'tablet' : frame?.form === 'foldable' ? 'foldable' : 'phone';
+  const info = (k, fixture) => { const frame = frameOf(fixture); return {id: fixture.id, name: fixture.name, platform: fixture.platform, osVersion: fixture.osVersion, state: k === key && mode !== 'off' ? 'booted' : k === 'iphone17pro' || k === 'pixel9' ? 'booted' : 'shutdown', formFactor: form(frame), ...(frame ? {frame} : {})}; };
+  const list = () => ({devices: mode === 'empty' ? [] : Object.entries(FIXTURES).map(([k, fixture]) => info(k, fixture)), errors: [], checkedAt: Date.now()});
+  const pick = FIXTURES[key];
+  const sessionList = () => {
+    if (!['live', 'agent', 'tablet', 'android', 'error', 'starting'].includes(mode) || !pick) return [];
+    const device = info(key, pick);
+    return [{deviceId: pick.id, name: pick.name.replace(/_/g, ' '), platform: pick.platform, formFactor: device.formFactor, ...(device.frame ? {frame: device.frame} : {}), ...(mode === 'agent' ? {chatId: activeChatId} : {}), openedBy: mode === 'agent' ? 'agent' : 'user', control: 'agent', state: mode === 'error' ? 'error' : mode === 'starting' ? 'starting' : 'live', ...(mode === 'error' ? {error: 'No video arrived from the device. Reconnect to try again.'} : {}), inputReady: mode !== 'starting', openedAt: Date.now() - 60_000}];
+  };
+  Object.assign(handlers, {
+    'devices.setup': setup, 'devices.list': list, 'devices.sessions': sessionList,
+    'devices.configure': setup, 'devices.installHelper': setup, 'devices.view': ({active}) => { if (active && mode !== 'error' && mode !== 'starting') pump(); return null; },
+    'devices.open': ({id}) => sessionList().find(x => x.deviceId === id) ?? sessionList()[0], 'devices.close': () => null, 'devices.button': () => null, 'devices.rotate': () => null, 'devices.control': ({owner}) => ({...sessionList()[0], control: owner}),
+  });
+
+  // --- Screens: an iOS-style home screen, an Android launcher, a watch face, a TV home and a car dashboard ----------
+  const PALETTE = ['#e6624f', '#f0a33b', '#f2cf4a', '#5cbf72', '#3fb3a8', '#4f9be8', '#6f72e8', '#a46be0', '#e0679d', '#8e9aa6', '#46c0de', '#f07f3c', '#7ac36a', '#d65a5a', '#5b7be0', '#c69a54'];
+  const NAMES = ['Notes', 'Mail', 'Photos', 'Camera', 'Clock', 'Maps', 'Weather', 'Music', 'Files', 'Tasks', 'Wallet', 'Health', 'Books', 'Calendar', 'Podcasts', 'Settings', 'Taskboard', 'Calculator', 'Contacts', 'Messages', 'Phone', 'News', 'Store', 'Translate'];
+  const glyph = (g, x, y, size, i, color = 'rgba(255,255,255,.92)') => {
+    // Plain geometric glyphs: a circle, a bar stack, a triangle, a ring… (never anyone's icon).
+    g.save(); g.fillStyle = color; g.strokeStyle = color; g.lineWidth = size * 0.07; const c = size / 2, r = size * 0.2;
+    switch (i % 6) {
+      case 0: g.beginPath(); g.arc(x + c, y + c, r, 0, Math.PI * 2); g.fill(); break;
+      case 1: for (let k = 0; k < 3; k++) g.fillRect(x + size * 0.3, y + size * (0.32 + k * 0.13), size * 0.4, size * 0.07); break;
+      case 2: g.beginPath(); g.moveTo(x + c, y + size * 0.3); g.lineTo(x + size * 0.7, y + size * 0.68); g.lineTo(x + size * 0.3, y + size * 0.68); g.closePath(); g.fill(); break;
+      case 3: g.beginPath(); g.arc(x + c, y + c, r, 0, Math.PI * 2); g.stroke(); break;
+      case 4: g.beginPath(); g.roundRect(x + size * 0.3, y + size * 0.3, size * 0.4, size * 0.4, size * 0.08); g.fill(); break;
+      default: g.beginPath(); g.moveTo(x + size * 0.3, y + c); g.lineTo(x + c, y + size * 0.3); g.lineTo(x + size * 0.7, y + c); g.lineTo(x + c, y + size * 0.7); g.closePath(); g.fill();
+    }
+    g.restore();
+  };
+  const wallpaper = (g, w, h, stops) => { const sky = g.createLinearGradient(0, 0, w * 0.4, h); stops.forEach((c, i) => sky.addColorStop(i / (stops.length - 1), c)); g.fillStyle = sky; g.fillRect(0, 0, w, h);
+    g.globalAlpha = 0.18; g.fillStyle = '#fff'; g.beginPath(); g.ellipse(w * 0.8, h * 0.25, w * 0.5, w * 0.35, 0.4, 0, Math.PI * 2); g.fill(); g.globalAlpha = 1; };
+  const statusIcons = (g, right, y, s, android) => {
+    g.fillStyle = '#fff';
+    if (android) { // wifi wedge, cell wedge, upright battery
+      g.beginPath(); g.moveTo(right - s * 3.2, y + s * 0.95); g.lineTo(right - s * 4.2, y + s * 0.15); g.lineTo(right - s * 2.2, y + s * 0.15); g.closePath(); g.fill();
+      g.beginPath(); g.moveTo(right - s * 1.6, y + s); g.lineTo(right - s * 1.6, y); g.lineTo(right - s * 2.5, y + s); g.closePath(); g.fill();
+      g.fillRect(right - s * 0.8, y - s * 0.05, s * 0.55, s * 1.05);
+    } else { // signal bars, wifi fan, landscape battery
+      for (let k = 0; k < 4; k++) g.fillRect(right - s * 5.2 + k * s * 0.32, y + s * (0.75 - k * 0.22), s * 0.22, s * (0.25 + k * 0.22));
+      g.beginPath(); g.moveTo(right - s * 3.0, y + s); g.arc(right - s * 3.0, y + s, s * 0.95, -Math.PI * 0.78, -Math.PI * 0.22); g.closePath(); g.fill();
+      g.beginPath(); g.roundRect(right - s * 1.85, y + s * 0.12, s * 1.55, s * 0.8, s * 0.2); g.fill(); g.fillRect(right - s * 0.25, y + s * 0.38, s * 0.12, s * 0.3);
+    }
+  };
+  const iosHome = (g, w, h, frame) => {
+    const tablet = frame.form === 'tablet', homeButton = !!frame.home, u = Math.min(w, h) / 100;
+    wallpaper(g, w, h, ['#24306e', '#5a3fa0', '#c86b8f', '#f2a77a']);
+    // Status bar: time at the left, indicators at the right, clear of the island or notch in the middle.
+    const sbY = homeButton ? u * 1.6 : tablet ? u * 1.6 : u * 4.2, fs = tablet ? u * 2.1 : u * 4.1;
+    g.fillStyle = '#fff'; g.font = `600 ${fs}px -apple-system, Helvetica, Arial`; g.textBaseline = 'top';
+    g.fillText('9:41', tablet || homeButton ? u * 3 : w * 0.12, sbY); statusIcons(g, w - (tablet || homeButton ? u * 3 : w * 0.09), sbY + fs * 0.05, fs * 0.8, false);
+    const cols = tablet ? (w > h ? 8 : 6) : 4, size = tablet ? u * 9.5 : u * 15.5, gap = (w - cols * size) / (cols + 1), top = tablet ? u * 9 : homeButton ? u * 9 : u * 15;
+    const rows = tablet ? 4 : 5;
+    for (let i = 0; i < cols * rows; i++) {
+      const x = gap + (i % cols) * (size + gap), y = top + Math.floor(i / cols) * (size + u * (tablet ? 7 : 8.5));
+      g.fillStyle = PALETTE[i % PALETTE.length]; g.beginPath(); g.roundRect(x, y, size, size, size * 0.225); g.fill();
+      glyph(g, x, y, size, i);
+      g.fillStyle = '#fff'; g.font = `500 ${tablet ? u * 1.5 : u * 2.7}px -apple-system, Helvetica, Arial`; g.textAlign = 'center'; g.fillText(NAMES[i % NAMES.length], x + size / 2, y + size + u * 1.2); g.textAlign = 'start';
+    }
+    // Page dots, the frosted dock, the home indicator.
+    const dockH = size + u * (tablet ? 3 : 5), dockY = h - dockH - (homeButton ? u * 2 : u * 4.5);
+    g.fillStyle = 'rgba(255,255,255,.9)'; for (let k = 0; k < 3; k++) { g.globalAlpha = k ? 0.45 : 0.95; g.beginPath(); g.arc(w / 2 + (k - 1) * u * 2.4, dockY - u * 3, u * 0.75, 0, Math.PI * 2); g.fill(); } g.globalAlpha = 1;
+    g.fillStyle = 'rgba(255,255,255,.26)'; g.beginPath(); g.roundRect(tablet ? w * 0.3 : u * 3, dockY, tablet ? w * 0.4 : w - u * 6, dockH, tablet ? u * 3 : u * 8); g.fill();
+    const dockN = 4, dockW = tablet ? w * 0.4 : w - u * 6, dx0 = tablet ? w * 0.3 : u * 3, dgap = (dockW - dockN * size) / (dockN + 1);
+    for (let k = 0; k < dockN; k++) { const x = dx0 + dgap + k * (size + dgap), y = dockY + (dockH - size) / 2; g.fillStyle = PALETTE[(k * 5 + 3) % PALETTE.length]; g.beginPath(); g.roundRect(x, y, size, size, size * 0.225); g.fill(); glyph(g, x, y, size, k + 2); }
+    if (!homeButton) { g.fillStyle = 'rgba(255,255,255,.85)'; g.beginPath(); g.roundRect(w / 2 - w * 0.17, h - u * 1.6, w * 0.34, u * 0.9, u * 0.45); g.fill(); }
+  };
+  const androidHome = (g, w, h, frame) => {
+    const u = Math.min(w, h) / 100, wide = w > h * 0.9, tablet = frame.form === 'tablet';
+    wallpaper(g, w, h, ['#123a37', '#24625a', '#7fae8e', '#e7d7a3']);
+    const fs = u * (wide ? 2.6 : 3.6);
+    g.fillStyle = '#fff'; g.font = `500 ${fs}px Roboto, Helvetica, Arial`; g.textBaseline = 'top'; g.fillText('9:30', u * 4.5, u * 2.2); statusIcons(g, w - u * 4.5, u * 2.4, fs * 0.85, true);
+    // An at-a-glance line: date and weather in plain text.
+    g.font = `400 ${u * (wide ? 3.2 : 5)}px Roboto, Helvetica, Arial`; g.fillText('Tue, Oct 14', u * 6, u * (wide ? 9 : 13));
+    g.font = `400 ${u * (wide ? 2.2 : 3.4)}px Roboto, Helvetica, Arial`; g.globalAlpha = 0.85; g.fillText('☀  18°  ·  Light breeze', u * 6, u * (wide ? 13.5 : 20)); g.globalAlpha = 1;
+    const cols = wide ? (tablet ? 7 : 6) : 4, size = u * (wide ? 9 : 14), gap = (w - cols * size) / (cols + 1), rowH = size + u * (wide ? 6 : 7), favTop = h - (wide ? u * 22 : u * 33), rowsTop = favTop - rowH * 2 - u * (wide ? 4 : 6);
+    for (let i = 0; i < cols * 2; i++) {
+      const x = gap + (i % cols) * (size + gap), y = rowsTop + Math.floor(i / cols) * rowH;
+      g.fillStyle = PALETTE[(i * 3 + 1) % PALETTE.length]; g.beginPath(); g.arc(x + size / 2, y + size / 2, size / 2, 0, Math.PI * 2); g.fill(); glyph(g, x, y, size, i + 1);
+      g.fillStyle = '#fff'; g.font = `400 ${u * (wide ? 1.9 : 2.8)}px Roboto, Helvetica, Arial`; g.textAlign = 'center'; g.fillText(NAMES[(i + 5) % NAMES.length], x + size / 2, y + size + u * 1.2); g.textAlign = 'start';
+    }
+    // Favourites row, the search pill, the gesture handle (or a tablet's taskbar).
+    const favY = favTop;
+    for (let i = 0; i < cols; i++) { const x = gap + i * (size + gap); g.fillStyle = PALETTE[(i * 7 + 2) % PALETTE.length]; g.beginPath(); g.arc(x + size / 2, favY + size / 2, size / 2, 0, Math.PI * 2); g.fill(); glyph(g, x, favY, size, i + 3); }
+    const pillH = u * (wide ? 6.5 : 11), pillY = h - (wide ? u * 10 : u * 15);
+    g.fillStyle = 'rgba(255,255,255,.88)'; g.beginPath(); g.roundRect(u * 5, pillY, w - u * 10, pillH, pillH / 2); g.fill();
+    g.fillStyle = '#5f6b6a'; g.font = `400 ${pillH * 0.36}px Roboto, Helvetica, Arial`; g.fillText('Search', u * 5 + pillH * 0.55, pillY + pillH * 0.3);
+    g.beginPath(); g.arc(w - u * 5 - pillH * 0.5, pillY + pillH / 2, pillH * 0.16, 0, Math.PI * 2); g.fill();
+    g.fillStyle = 'rgba(255,255,255,.8)'; g.beginPath(); g.roundRect(w / 2 - u * 9, h - u * 2.4, u * 18, u * 0.9, u * 0.45); g.fill();
+  };
+  const watchFace = (g, w, h) => {
+    g.fillStyle = '#000'; g.fillRect(0, 0, w, h); const u = w / 100;
+    g.strokeStyle = '#3fb3a8'; g.lineWidth = u * 2.2; g.beginPath(); g.arc(w / 2, h / 2, w * 0.43, -Math.PI / 2, Math.PI * 0.9); g.stroke();
+    g.fillStyle = '#fff'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.font = `300 ${u * 24}px Roboto, Helvetica, Arial`; g.fillText('10:09', w / 2, h * 0.46);
+    g.font = `400 ${u * 6.5}px Roboto, Helvetica, Arial`; g.fillStyle = '#9fd9d2'; g.fillText('TUE 14', w / 2, h * 0.64);
+    for (const [k, color] of [[-1, '#f0a33b'], [1, '#4f9be8']]) { g.fillStyle = color; g.beginPath(); g.arc(w / 2 + k * w * 0.18, h * 0.8, u * 4.5, 0, Math.PI * 2); g.fill(); }
+    g.textAlign = 'start';
+  };
+  const tvHome = (g, w, h) => {
+    const u = h / 100; g.fillStyle = '#0f1216'; g.fillRect(0, 0, w, h);
+    g.fillStyle = '#fff'; g.font = `500 ${u * 4}px Roboto, Helvetica, Arial`; g.textBaseline = 'top'; g.fillText('For you', u * 6, u * 6);
+    ['Movies', 'Shows', 'Apps', 'Library'].forEach((t, i) => { g.fillStyle = i ? 'rgba(255,255,255,.12)' : '#e8eaed'; g.beginPath(); g.roundRect(u * (28 + i * 18), u * 5, u * 16, u * 6, u * 3); g.fill(); g.fillStyle = i ? '#e8eaed' : '#0f1216'; g.font = `500 ${u * 2.6}px Roboto, Helvetica, Arial`; g.fillText(t, u * (31 + i * 18), u * 6.6); });
+    const hero = g.createLinearGradient(0, 0, w, 0); hero.addColorStop(0, '#2c4f7c'); hero.addColorStop(1, '#7a3f6e'); g.fillStyle = hero; g.beginPath(); g.roundRect(u * 6, u * 16, w - u * 12, u * 38, u * 2); g.fill();
+    g.fillStyle = '#fff'; g.font = `600 ${u * 6}px Roboto, Helvetica, Arial`; g.fillText('Featured tonight', u * 12, u * 36);
+    for (let r = 0; r < 2; r++) for (let i = 0; i < 6; i++) { g.fillStyle = PALETTE[(i * 3 + r * 5) % PALETTE.length]; g.beginPath(); g.roundRect(u * 6 + i * (w - u * 12) / 6, u * (60 + r * 20), (w - u * 12) / 6 - u * 2, u * 16, u * 1.5); g.fill(); }
+  };
+  const carHome = (g, w, h) => {
+    const u = h / 100; g.fillStyle = '#111417'; g.fillRect(0, 0, w, h);
+    g.fillStyle = '#1d2a26'; g.beginPath(); g.roundRect(u * 4, u * 4, w * 0.6, u * 78, u * 4); g.fill();
+    g.strokeStyle = '#3c6b5d'; g.lineWidth = u * 1.5; for (let i = 0; i < 6; i++) { g.beginPath(); g.moveTo(u * 4 + i * w * 0.1, u * 4); g.lineTo(u * 4 + i * w * 0.12 + u * 20, u * 82); g.stroke(); }
+    g.strokeStyle = '#4f9be8'; g.lineWidth = u * 2.5; g.beginPath(); g.moveTo(w * 0.1, u * 70); g.quadraticCurveTo(w * 0.3, u * 30, w * 0.55, u * 20); g.stroke();
+    g.fillStyle = '#1e2226'; g.beginPath(); g.roundRect(w * 0.64 + u * 2, u * 4, w * 0.36 - u * 6, u * 78, u * 4); g.fill();
+    g.fillStyle = '#c69a54'; g.beginPath(); g.roundRect(w * 0.64 + u * 6, u * 10, u * 28, u * 28, u * 3); g.fill();
+    g.fillStyle = '#fff'; g.font = `500 ${u * 5}px Roboto, Helvetica, Arial`; g.textBaseline = 'top'; g.fillText('Morning drive', w * 0.64 + u * 6, u * 44); g.globalAlpha = 0.7; g.font = `400 ${u * 3.6}px Roboto, Helvetica, Arial`; g.fillText('Playlist · 42 min', w * 0.64 + u * 6, u * 52); g.globalAlpha = 1;
+    g.fillStyle = '#0b0d0f'; g.fillRect(0, u * 86, w, u * 14);
+    for (let i = 0; i < 6; i++) { g.fillStyle = 'rgba(255,255,255,.8)'; glyph(g, w * 0.2 + i * w * 0.11, u * 87, u * 12, i, 'rgba(255,255,255,.8)'); }
+  };
+  const pictureFrame = () => {
+    const device = info(key, pick), frame = device.frame;
+    if (!frame) return null;
+    return OPTS.folded && frame.folded ? frame.folded : frame;
+  };
+  const draw = () => {
+    const frame = pictureFrame();
+    const sw = frame ? frame.screen.width : 1179, sh = frame ? frame.screen.height : 2556;
+    const k = Math.min(1, 1100 / Math.max(sw, sh)), w = Math.round(sw * k), h = Math.round(sh * k);
+    const c = new OffscreenCanvas(w, h), g = c.getContext('2d');
+    if (!frame || frame.os === 'ios') iosHome(g, w, h, frame ?? {form: 'phone'});
+    else if (frame.form === 'watch-round' || frame.form === 'watch-square') watchFace(g, w, h);
+    else if (frame.form === 'tv') tvHome(g, w, h);
+    else if (frame.form === 'automotive') carHome(g, w, h);
+    else androidHome(g, w, h, frame);
+    return c.convertToBlob({type: 'image/jpeg', quality: 0.88});
+  };
+  const frameListeners = new Set();
   let pumping = false;
   const pump = () => {
     if (pumping) return; pumping = true;
@@ -333,7 +453,6 @@ if (OPTS.devices) {
     const data = new Uint8Array(await (await draw()).arrayBuffer());
     for (let i = 0; i < count; i++) { for (const listener of [...frameListeners]) listener({deviceId: pick.id, codec: 'jpeg', key: true, data}); await new Promise(r => setTimeout(r, 1000 / fps)); }
   };
-  if (OPTS.devicesTab) setTimeout(() => window.__shots?.store?.openTab(OPTS.devicesTab === 'picker' ? {id: 'devices', kind: 'device', title: 'Devices'} : {id: `device:${pick.id}`, kind: 'device', deviceId: pick.id, title: pick.name.replace(/_/g, ' ')}), 600);
 }
 window.__mockHandlers = handlers;
 

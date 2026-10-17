@@ -10,13 +10,26 @@
 .device-agent-chip { padding:1px 7px; border-radius:var(--radius-full); border:1px solid var(--hairline); font-size:var(--fs-10); }
 .device-view-body { display:flex; flex:1; min-height:0; }
 .device-stage { position:relative; flex:1; min-width:0; display:flex; align-items:center; justify-content:center; padding:16px; background:var(--bg-sunken); container-type:size; }
-/* The body keeps the picture's proportions at any pane size: as wide as fits both the width and the height. */
-.device-bezel { position:relative; width:min(100cqw, 100cqh * var(--ratio, 0.46)); aspect-ratio:var(--ratio, 0.46); padding:10px; border-radius:var(--radius-16); background:var(--media-bg); box-shadow:0 0 0 1px var(--hairline), var(--shadow-sm); box-sizing:border-box; }
-.device-view[data-form='tablet'] .device-bezel { border-radius:var(--radius-12); padding:14px; }
-.device-screen { display:block; width:100%; height:100%; object-fit:contain; border-radius:var(--radius-12); background:var(--media-bg); touch-action:none; cursor:default; outline:none; }
-.device-view[data-form='tablet'] .device-screen { border-radius:var(--radius-8); }
-.device-screen:focus-visible { box-shadow:0 0 0 2px var(--accent); }
-.device-screen-skeleton { position:absolute; inset:10px; border-radius:inherit; background:linear-gradient(100deg, transparent 30%, var(--bg-hover) 50%, transparent 70%) 0 0/200% 100%; animation:pip-shimmer 1.4s linear infinite; }
+/* The device's own frame (DeviceFrameFlat): fits the stage at the device's proportions, at any pane size. */
+.device-frame { --frame-body:#1c1d20; --frame-rim:rgba(255,255,255,.14); position:relative; width:min(100cqw, 100cqh * var(--frame-aspect, 0.5)); aspect-ratio:var(--frame-aspect, 0.5); flex:none; }
+.device-frame[data-color='titanium'] { --frame-body:#5f5c57; --frame-rim:rgba(255,255,255,.22); }
+.device-frame[data-color='light'] { --frame-body:#d7d5d0; --frame-rim:rgba(0,0,0,.18); }
+.device-frame-art, .device-frame-cutouts { position:absolute; inset:0; width:100%; height:100%; overflow:visible; pointer-events:none; }
+.device-frame-body { fill:var(--frame-body); stroke:var(--frame-rim); stroke-width:.006; }
+.device-frame[data-edge='flat'] .device-frame-body { stroke-width:.009; }
+.device-frame-sheen { pointer-events:none; }
+.device-frame-button { fill:var(--frame-body); stroke:var(--frame-rim); stroke-width:.004; }
+.device-frame-stand { fill:var(--frame-body); stroke:var(--frame-rim); stroke-width:.004; }
+.device-frame-mark { fill:#0a0a0b; stroke:rgba(255,255,255,.08); stroke-width:.003; }
+.device-frame-home { fill:none; stroke:rgba(127,127,127,.6); stroke-width:.008; }
+.device-frame-cutout { fill:#000; }
+.device-frame-glass { position:absolute; overflow:hidden; background:#000; }
+.device-frame-glass > .device-screen { display:block; width:100%; height:100%; object-fit:contain; background:#000; touch-action:none; cursor:default; outline:none; }
+.device-frame-glass > .device-screen:focus-visible { box-shadow:inset 0 0 0 2px var(--accent); }
+.device-frame-glass > .device-screen-skeleton { inset:0; }
+.device-thumb-stage { position:absolute; inset:8px; display:flex; align-items:center; justify-content:center; container-type:size; }
+.device-thumb-stage .device-frame-glass > canvas { display:block; width:100%; height:100%; }
+.device-screen-skeleton { position:absolute; inset:0; border-radius:inherit; background:linear-gradient(100deg, transparent 30%, var(--bg-hover) 50%, transparent 70%) 0 0/200% 100%; animation:pip-shimmer 1.4s linear infinite; }
 .device-overlay { position:absolute; left:50%; bottom:22px; transform:translateX(-50%); display:flex; align-items:center; gap:8px; max-width:calc(100% - 32px); padding:6px 12px; border-radius:var(--radius-full); background:var(--media-scrim); color:var(--on-media); font-size:var(--fs-12); }
 .device-overlay.is-error { top:50%; bottom:auto; transform:translate(-50%,-50%); flex-direction:column; align-items:flex-start; gap:6px; padding:14px 16px; border-radius:var(--radius-8); background:var(--bg-raised); color:var(--text); box-shadow:0 0 0 1px var(--hairline), var(--shadow-sm); max-width:300px; }
 .device-overlay.is-error span { color:var(--text-dim); }
@@ -30,7 +43,6 @@
 .device-rail-button[aria-pressed='true'] { background:var(--bg-hover); color:var(--accent); }
 .device-rail-button:disabled { opacity:.4; cursor:default; }
 .device-rail-button:focus-visible { outline:2px solid var(--accent); outline-offset:1px; }
-.device-thumb { position:absolute; inset:0; width:100%; height:100%; object-fit:contain; }
 .device-thumb-backdrop { position:absolute; inset:-8%; width:116%; height:116%; object-fit:cover; filter:blur(18px) saturate(1.1); opacity:.5; background:var(--media-bg); }
 .device-empty { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:8px; padding:24px; text-align:center; color:var(--text-dim); font-size:var(--fs-12); }
 .device-empty strong { color:var(--text); font-size:var(--fs-13); font-weight:500; }
@@ -63,3 +75,5 @@
 .device-3d-note { position:absolute; z-index:1; left:12px; bottom:10px; color:var(--text-faint); font-size:var(--fs-11); }
 .device-screen-skeleton.is-3d { position:relative; inset:auto; width:40%; height:70%; border-radius:var(--radius-16); }
 .device-view[data-mode='3d'] .device-stage { padding:0; }
+/* Android navigation glyphs on the rail (Back ◁, Home ○, Recents □). */
+.device-rail-button svg.device-nav-glyph { width:14px; height:14px; fill:none; stroke:currentColor; stroke-width:1.8; stroke-linejoin:round; }

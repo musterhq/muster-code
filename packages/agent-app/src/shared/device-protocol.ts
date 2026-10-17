@@ -6,6 +6,7 @@
  * sees these commands, the events below, and frames pushed over a dedicated IPC channel. Agents reach devices through
  * the muster_device MCP tools, which exist only while the separate "Let agents use devices" setting is on.
  */
+import type {FrameSpec} from './device-frames.ts';
 export type DevicePlatform = 'ios' | 'android';
 /** Body shape for the frame and the 3D model; derived from the simulator type or the AVD profile. */
 export type DeviceFormFactor = 'phone' | 'tablet' | 'foldable';
@@ -19,6 +20,8 @@ export interface DeviceInfo {
   osVersion: string;
   state: DeviceState;
   formFactor: DeviceFormFactor;
+  /** How the device looks (flat and 3D), from its simctl device type or AVD profile (shared/device-frames.ts). */
+  frame?: FrameSpec;
 }
 export interface PlatformCheck {
   available: boolean;
@@ -50,9 +53,6 @@ export interface DeviceSetup {
   android: PlatformCheck;
   /** Node.js runs the helper and npm installs it. */
   node: PlatformCheck;
-  /** Opt-in: download Apple's own iPhone and iPad models from apple.com for the 3D view (never bundled by Muster). */
-  appleModels: boolean;
-  models: {id: 'iphone' | 'ipad'; label: string; state: 'absent' | 'downloading' | 'ready' | 'converted' | 'failed'; error?: string}[];
   /** The desktop platform: iOS is hidden (with a note) anywhere but macOS. */
   host: 'darwin' | 'win32' | 'linux';
 }
@@ -66,6 +66,7 @@ export interface DeviceSession {
   name: string;
   platform: DevicePlatform;
   formFactor: DeviceFormFactor;
+  frame?: FrameSpec;
   /** The chat whose agent opened it; absent for a session the user opened. */
   chatId?: string;
   openedBy: 'user' | 'agent';
@@ -92,7 +93,7 @@ export interface DeviceBridge { onFrame(listener: (frame: DeviceFrame) => void):
 export interface DeviceCommands {
   'devices.setup': { input: undefined; output: DeviceSetup };
   /** Turning devices off stops Muster's helper and every session; the user's simulators keep running. */
-  'devices.configure': { input: { enabled?: boolean; agentControl?: boolean; appleModels?: boolean }; output: DeviceSetup };
+  'devices.configure': { input: { enabled?: boolean; agentControl?: boolean }; output: DeviceSetup };
   /** Downloads and installs the pinned helper (npm ci of a lockfile shipped with the app, scripts disabled). */
   'devices.installHelper': { input: undefined; output: DeviceSetup };
   'devices.list': { input: { refresh?: boolean } | undefined; output: DeviceList };
@@ -109,15 +110,12 @@ export interface DeviceCommands {
   'devices.screenshot': { input: { id: string }; output: { dataUrl: string; width: number; height: number } };
   /** Taking control pauses agent input on the device; 'agent' hands it back. */
   'devices.control': { input: { id: string; owner: 'agent' | 'user' }; output: DeviceSession };
-  /** An Apple model for the 3D view: the cached conversion, or the verified download to convert (only when opted in). */
-  'devices.model': { input: { id: 'iphone' | 'ipad' }; output: { id: string; bodyNode: string; screenNode: string; glb?: Uint8Array; usdz?: Uint8Array } };
-  'devices.modelStore': { input: { id: 'iphone' | 'ipad'; glb: Uint8Array }; output: void };
 }
 export type DeviceEvent =
   | { type: 'deviceSetup'; setup: DeviceSetup }
   | { type: 'deviceList'; list: DeviceList }
   | { type: 'deviceSessions'; sessions: DeviceSession[] };
-export const DEVICE_COMMANDS = {'devices.setup': true, 'devices.configure': true, 'devices.installHelper': true, 'devices.list': true, 'devices.boot': true, 'devices.shutdown': true, 'devices.open': true, 'devices.close': true, 'devices.sessions': true, 'devices.view': true, 'devices.button': true, 'devices.rotate': true, 'devices.screenshot': true, 'devices.control': true, 'devices.model': true, 'devices.modelStore': true} as const satisfies Record<keyof DeviceCommands, true>;
+export const DEVICE_COMMANDS = {'devices.setup': true, 'devices.configure': true, 'devices.installHelper': true, 'devices.list': true, 'devices.boot': true, 'devices.shutdown': true, 'devices.open': true, 'devices.close': true, 'devices.sessions': true, 'devices.view': true, 'devices.button': true, 'devices.rotate': true, 'devices.screenshot': true, 'devices.control': true} as const satisfies Record<keyof DeviceCommands, true>;
 
 /** IPC: main → renderer frames, renderer → main frame acknowledgements (flow control) and input. */
 export const DEVICE_FRAME_CHANNEL = 'muster:device-frame';

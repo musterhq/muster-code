@@ -28,7 +28,8 @@ const runBuffer = (file: string, args: string[], options: {timeoutMs?: number} =
 
 let first: ((frame: LinkFrame) => void) | undefined;
 const manager = new DeviceManager({
-  userData, manifestDir: path.join(here, '..', 'resources', 'device-helper'), run, runBuffer, exists: fs.existsSync, env: process.env, home: os.homedir(), platform: process.platform,
+  userData, manifestDir: path.join(here, '..', 'resources', 'device-helper'), run, runBuffer, exists: fs.existsSync,
+  readText: file => { try { return fs.readFileSync(file, 'utf8'); } catch { return undefined; } }, env: process.env, home: os.homedir(), platform: process.platform,
   locate: name => locateCli(name, process.env, os.homedir()),
   spawn: (command, args, options) => spawn(command, args, {...options, stdio: ['ignore', 'pipe', 'pipe']}),
   fetch: (...args) => fetch(...args),
@@ -51,6 +52,8 @@ try {
   const pick = list.devices.filter(d => d.platform === platform).sort((a, b) => Number(b.state === 'booted') - Number(a.state === 'booted') || Number(a.formFactor !== 'phone') - Number(b.formFactor !== 'phone'))[0];
   if (!pick) throw new Error(`No ${platform} device to test with.`);
   step('device', pick);
+  // The frame Muster derived for it (simctl device type, or the AVD's config and reported cut-out).
+  step('frame', {id: pick.frame?.id, family: pick.frame?.family, source: pick.frame?.source, cutout: pick.frame?.cutout});
   const frame = new Promise<LinkFrame>((resolve) => { first = f => { if (f.data.length && (f.codec === 'jpeg' || f.key)) { first = undefined; resolve(f); } }; });
   const session = await deadline(manager.open(pick.id), 6 * 60_000, 'boot and open');
   step('opened', {state: session.state});

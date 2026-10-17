@@ -1,10 +1,11 @@
 /**
- * The live device view (#363): the screen in a flat device frame, touch and keyboard straight to the device, and the
- * controls rail (Home, App switcher, Rotate, Lock, Screenshot, Back on Android, 3D, Shut down). Every state is spelled
+ * The live device view (#363): the screen in the device's own frame (flat or 3D, from its frame spec), touch and
+ * keyboard straight to the device, and a controls rail in the device's own OS terms: iOS has Home, App Switcher, Rotate,
+ * Lock; Android has Back, Home, Recents (with Android's own glyphs), Rotate, Power. Both: screenshot, 3D, shut down. Every state is spelled
  * out: starting, reconnecting (the last picture stays), error with Reconnect, and an agent's session with Take control.
  */
 import React, {Suspense, lazy, useCallback, useEffect, useRef, useState} from 'react';
-import {Box, Camera, Hand, House, LayoutGrid, Lock, Play, Power, RefreshCw, RotateCw, Undo2, X} from 'lucide-react';
+import {Box, Camera, Hand, House, LayoutGrid, Lock, Play, Power, PowerOff, RefreshCw, RotateCw, X} from 'lucide-react';
 import type {DeviceButton, DeviceSession} from '../../../shared/device-protocol';
 import {invoke} from '../../bridge';
 import {closeTab, getState, notifyError, notifySuccess} from '../../store';
@@ -14,6 +15,7 @@ import {useDeviceFeed, useFeedPaint, paintInto, type DeviceFeed} from '../../dev
 import {clampedPointOnScreen, containRect, pointOnScreen} from '../../devices/geometry';
 import {Tip} from '../Tooltip';
 import {threeAvailable} from '../../devices/webgl';
+import {DeviceFrameFlat, frameOf} from './DeviceFrameFlat';
 // three.js and the device bodies load only when someone turns on the 3D view.
 const DeviceFrame3D = lazy(() => import('./DeviceFrame3D'));
 
@@ -79,6 +81,11 @@ async function captureScreenshot(session: DeviceSession, mode: 'attach' | 'save'
   } catch (cause) { notifyError(cause); }
 }
 
+/** Android's navigation glyphs: Back ◁, Home ○, Recents □. */
+const NavGlyph = ({kind}: {kind: 'back' | 'home' | 'recents'}) => <svg className="device-nav-glyph" viewBox="0 0 16 16" aria-hidden="true">
+  {kind === 'back' ? <path d="M11 3.2 4.6 8 11 12.8Z"/> : kind === 'home' ? <circle cx="8" cy="8" r="4.8"/> : <rect x="3.6" y="3.6" width="8.8" height="8.8" rx="1.2"/>}
+</svg>;
+
 function RailButton({label, icon, onClick, disabled, pressed}: {label: string; icon: React.ReactNode; onClick: () => void; disabled?: boolean; pressed?: boolean}) {
   return <Tip label={label}><button type="button" className="device-rail-button" aria-label={label} aria-pressed={pressed} disabled={disabled} onClick={onClick}>{icon}</button></Tip>;
 }
@@ -96,6 +103,8 @@ export function DeviceView({session, visible}: {session: DeviceSession; visible:
   const agent = !!session.chatId;
   const status = session.state === 'live' && !ready ? 'starting' : session.state;
   const ios = session.platform === 'ios';
+  const frame = frameOf(session);
+  const toChat = !!getState().activeChatId;
   return <section className="device-view" aria-label={`${session.name} live view`} data-platform={session.platform} data-form={session.formFactor} data-state={status} data-mode={mode}>
     <header className="device-view-head">
       <span className="device-view-title">{session.name}</span>
@@ -111,26 +120,33 @@ export function DeviceView({session, visible}: {session: DeviceSession; visible:
       <div className="device-stage">
         {mode === '3d'
           ? <Suspense fallback={<div className="device-screen-skeleton is-3d" aria-hidden="true"/>}><DeviceFrame3D session={session} feed={feed} onFallback={() => setView('flat')}/></Suspense>
-          : <div className="device-bezel" style={{'--ratio': ready ? feed!.width / feed!.height : session.formFactor === 'tablet' ? 0.75 : 9 / 19.5} as React.CSSProperties}>
+          : <DeviceFrameFlat spec={frame} picture={ready ? {width: feed!.width, height: feed!.height} : undefined} orientation={session.screen?.orientation}>
             <canvas ref={canvas} className="device-screen" tabIndex={0} role="img" aria-roledescription="device screen"
               aria-label={`${session.name} screen. Click to tap, drag to swipe; while focused, typing goes to the device.`}
               onPointerDown={input.onPointerDown} onPointerMove={input.onPointerMove} onPointerUp={input.onPointerUp} onPointerCancel={input.onPointerUp}
               onKeyDown={event => input.onKey(event, 'down')} onKeyUp={event => input.onKey(event, 'up')} onPaste={input.onPaste}/>
             {!ready && status !== 'error' && <div className="device-screen-skeleton" aria-hidden="true"/>}
-          </div>}
+          </DeviceFrameFlat>}
         {status !== 'live' && <DeviceOverlay session={session} status={status} hasPicture={ready} error={feed?.error}/>}
       </div>
-      <nav className="device-rail" aria-label={`${session.name} controls`}>
-        <RailButton label="Home" icon={<House size={15}/>} onClick={() => press('home')} disabled={!session.inputReady}/>
-        <RailButton label="App switcher" icon={<LayoutGrid size={15}/>} onClick={() => press('appSwitcher')} disabled={!session.inputReady}/>
-        {!ios && <RailButton label="Back" icon={<Undo2 size={15}/>} onClick={() => press('back')} disabled={!session.inputReady}/>}
-        <RailButton label="Rotate" icon={<RotateCw size={15}/>} onClick={() => void deviceAction(() => invoke('devices.rotate', {id: session.deviceId}))} disabled={ios && !session.inputReady}/>
-        <RailButton label={ios ? 'Lock' : 'Power'} icon={<Lock size={15}/>} onClick={() => press('power')} disabled={ios && !session.inputReady}/>
+      <nav className="device-rail" aria-label={`${session.name} controls`} data-os={session.platform}>
+        {ios ? <>
+          <RailButton label="Home" icon={<House size={15}/>} onClick={() => press('home')} disabled={!session.inputReady}/>
+          <RailButton label="App Switcher" icon={<LayoutGrid size={15}/>} onClick={() => press('appSwitcher')} disabled={!session.inputReady}/>
+          <RailButton label="Rotate" icon={<RotateCw size={15}/>} onClick={() => void deviceAction(() => invoke('devices.rotate', {id: session.deviceId}))} disabled={!session.inputReady}/>
+          <RailButton label="Lock" icon={<Lock size={15}/>} onClick={() => press('power')} disabled={!session.inputReady}/>
+        </> : <>
+          <RailButton label="Back" icon={<NavGlyph kind="back"/>} onClick={() => press('back')} disabled={!session.inputReady}/>
+          <RailButton label="Home" icon={<NavGlyph kind="home"/>} onClick={() => press('home')} disabled={!session.inputReady}/>
+          <RailButton label="Recents" icon={<NavGlyph kind="recents"/>} onClick={() => press('appSwitcher')} disabled={!session.inputReady}/>
+          <RailButton label="Rotate" icon={<RotateCw size={15}/>} onClick={() => void deviceAction(() => invoke('devices.rotate', {id: session.deviceId}))}/>
+          <RailButton label="Power" icon={<Power size={15}/>} onClick={() => press('power')}/>
+        </>}
         <span className="device-rail-gap"/>
-        <RailButton label={getState().activeChatId ? 'Screenshot to chat' : 'Save screenshot'} icon={<Camera size={15}/>} onClick={() => void captureScreenshot(session, getState().activeChatId ? 'attach' : 'save')}/>
+        <RailButton label={ios ? (toChat ? 'Screenshot to Chat' : 'Save Screenshot') : (toChat ? 'Take screenshot to chat' : 'Take screenshot')} icon={<Camera size={15}/>} onClick={() => void captureScreenshot(session, toChat ? 'attach' : 'save')}/>
         {threeAvailable() && <RailButton label={mode === '3d' ? 'Flat view' : '3D view'} icon={<Box size={15}/>} pressed={mode === '3d'} onClick={() => setView(mode === '3d' ? 'flat' : '3d')}/>}
         <span className="device-rail-gap"/>
-        <RailButton label="Shut down the device" icon={<Power size={15}/>} onClick={() => void deviceAction(async () => { await invoke('devices.shutdown', {id: session.deviceId}); closeTab(deviceTabId(session.deviceId)); })}/>
+        <RailButton label={ios ? 'Shut Down Simulator' : 'Stop emulator'} icon={ios ? <Power size={15}/> : <PowerOff size={15}/>} onClick={() => void deviceAction(async () => { await invoke('devices.shutdown', {id: session.deviceId}); closeTab(deviceTabId(session.deviceId)); })}/>
       </nav>
     </div>
   </section>;

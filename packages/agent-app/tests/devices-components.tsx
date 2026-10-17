@@ -19,7 +19,7 @@ const calls:{command:string;input:any}[]=[];
 const chat={id:'c1',title:'Research',folderId:'repo',pinned:false,archived:false,draft:'',status:'idle',updatedAt:'',model:'test',mode:'agent'};
 const snapshot={chats:[chat],folders:[{id:'repo',name:'repo',path:'/repo'}],projects:[],version:1,activeChatId:'c1'};
 const ok=(detail:string)=>({available:true,detail});
-let setup:any={enabled:false,agentControl:false,appleModels:false,models:[{id:'iphone',label:'iPhone',state:'absent'},{id:'ipad',label:'iPad',state:'absent'}],host:'darwin',helper:{state:'absent',version:'0.15.3',downloadMB:26,running:false},ios:{available:false,reason:'Xcode is not installed.',fix:['Install Xcode from the App Store.']},android:ok('Android SDK at ~/sdk'),node:ok('24.4.0')};
+let setup:any={enabled:false,agentControl:false,host:'darwin',helper:{state:'absent',version:'0.15.3',downloadMB:26,running:false},ios:{available:false,reason:'Xcode is not installed.',fix:['Install Xcode from the App Store.']},android:ok('Android SDK at ~/sdk'),node:ok('24.4.0')};
 const list={devices:[{id:IPHONE,name:'iPhone 17 Pro',platform:'ios',osVersion:'iOS 26.0',state:'booted',formFactor:'phone'},{id:'avd:Pixel_9',name:'Pixel_9',platform:'android',osVersion:'Android',state:'shutdown',formFactor:'phone'}],errors:[],checkedAt:1};
 let sessions:any[]=[];
 const listeners=new Set<(event:any)=>void>();
@@ -65,8 +65,7 @@ assert.deepEqual(calls.filter(c=>c.command.startsWith('devices.configure')||c.co
 assert.equal(toggles()[0]!.getAttribute('aria-checked'),'true');assert.equal(toggles()[1]!.disabled,false);
 toggles()[1]!.click();await delay(40);
 assert.deepEqual(calls.at(-1),{command:'devices.configure',input:{agentControl:true}});
-assert.match(text(),/Downloads Apple's device models from apple.com to this Mac for the 3D view/,'the Apple model download is disclosed, opt-in');
-assert.equal(toggles()[2]!.getAttribute('aria-checked'),'false');
+assert.equal(toggles().length,2,'only the two device switches: no download of anyone else\'s device models');
 settingsRoot.unmount();
 
 // 2. Picker: platform note for a missing Xcode, devices listed, Start/Open, a session opens its tab.
@@ -86,7 +85,7 @@ assert.equal(state.activeTabId,`device:${IPHONE}`,'opening a device shows its ta
 assert.ok(document.querySelector('.device-view'),'the live view renders');
 assert.equal(document.querySelectorAll('.pip-card:not([data-docked])').length,0,'its PiP card steps aside while the tab is on screen');
 // Controls: Home goes through the command; touch on the screen goes to the device as normalized input.
-for(const label of ['Home','App switcher','Rotate','Lock','Shut down the device'])assert.ok(document.querySelector(`[aria-label="${label}"]`),label);
+for(const label of ['Home','App Switcher','Rotate','Lock','Shut Down Simulator'])assert.ok(document.querySelector(`[aria-label="${label}"]`),label);
 assert.equal(document.querySelector('[aria-label="Back"]'),null,'iOS has no Back button');
 (document.querySelector('[aria-label="Home"]') as HTMLButtonElement).click();await delay(20);
 assert.deepEqual(calls.at(-1),{command:'devices.button',input:{id:IPHONE,button:'home'}});
@@ -154,7 +153,65 @@ root.unmount();
   host.remove();
 }
 
-// 7. No desktop bridge: a plain note, nothing else.
+// 7. Each device wears its own frame, picked from what it reports (simctl device type, AVD config, the picture's shape
+//    for a foldable's posture); the rail uses the device's own OS terms.
+{
+  const frameListeners=new Set<(frame:any)=>void>();
+  (window as any).musterDevices={onFrame(listener:any){frameListeners.add(listener);return()=>frameListeners.delete(listener);},ack(){},input(){}};
+  let size={width:1080,height:2400};
+  (globalThis as any).createImageBitmap=async()=>({...size,close(){}});
+  const {DeviceView}=await import('../src/renderer/components/devices/DeviceView');
+  const F=await import('../src/shared/device-frames');
+  const ios=(type:string,name:string)=>({platform:'ios',name,frame:F.iosFrame(`com.apple.CoreSimulator.SimDeviceType.${type}`,name)});
+  const avd=(config:string,name:string)=>({platform:'android',name,frame:F.androidFrame(F.parseIni(config),name)});
+  const cases:[string,any,{width:number;height:number},string,string][]=[
+    ['iPhone with Dynamic Island',ios('iPhone-17-Pro','iPhone 17 Pro'),{width:1206,height:2622},'iphone-island','island'],
+    ['iPhone with notch',ios('iPhone-16e','iPhone 16e'),{width:1170,height:2532},'iphone-notch','notch'],
+    ['iPhone SE',ios('iPhone-SE-3rd-generation','iPhone SE (3rd generation)'),{width:750,height:1334},'iphone-home','none'],
+    ['iPad without Home button',ios('iPad-Pro-13-inch-M5','iPad Pro 13-inch (M5)'),{width:2064,height:2752},'ipad','none'],
+    ['iPad with Home button',ios('iPad-9th-generation','iPad (9th generation)'),{width:1620,height:2160},'ipad-home','none'],
+    ['Pixel',avd('hw.device.name=pixel_8','Pixel_8_API_35'),{width:1080,height:2400},'pixel','punch-center'],
+    ['Pixel Fold, open',avd('hw.device.name=pixel_9_pro_fold\nhw.sensor.hinge=yes','Pixel_9_Pro_Fold'),{width:2076,height:2152},'pixel-fold','punch-side'],
+    ['Pixel Fold, folded',avd('hw.device.name=pixel_9_pro_fold\nhw.sensor.hinge=yes','Pixel_9_Pro_Fold'),{width:1080,height:2092},'pixel-fold-folded','punch-center'],
+    ['Pixel Tablet',avd('hw.device.name=pixel_tablet','Pixel_Tablet'),{width:2560,height:1600},'pixel-tablet','none'],
+    ['Samsung-style phone',avd('hw.device.name=SM-S921B\nhw.device.manufacturer=Samsung','Centre_Punch'),{width:1080,height:2340},'android-centre-punch','punch-center'],
+    ['Wear OS',avd('hw.device.name=wearos_large_round\ntag.id=android-wear','Wear'),{width:454,height:454},'wear-round','none'],
+    ['TV',avd('hw.device.name=tv_1080p\ntag.id=google-tv','TV'),{width:1920,height:1080},'android-tv','none'],
+    ['unknown phone',avd('hw.device.name=acme_x1\nhw.lcd.width=1200\nhw.lcd.height=2640\nhw.lcd.density=480','Acme_X1'),{width:1200,height:2640},'android-generic-phone','none'],
+    ['a session with no spec (name only)',{platform:'android',name:'Pixel_9_API_36'},{width:1080,height:2424},'pixel-pill','punch-center'],
+  ];
+  const host=document.createElement('div');document.body.appendChild(host);
+  const viewRoot=createRoot(host);
+  for(const [label,device,picture,frameId,cutout] of cases){
+    size=picture;
+    const session={deviceId:`dev-${frameId}-${picture.width}`,formFactor:'phone',openedBy:'user',control:'agent',state:'live',inputReady:true,openedAt:1,...device};
+    viewRoot.render(<DeviceView session={session} visible/>);
+    // Frames go out on every check until the new view (which subscribes after its first render) has drawn one.
+    const push=()=>{for(const listener of [...frameListeners])listener({deviceId:session.deviceId,codec:'jpeg',key:true,data:new Uint8Array([0xff,0xd8,0xff,0xd9])});};
+    await until(()=>{push();return host.querySelector(`.device-frame[data-frame="${frameId}"]`)!==null&&host.querySelector('.device-view')?.getAttribute('data-state')==='live';},`${label}: frame ${frameId} (got ${host.querySelector('.device-frame')?.getAttribute('data-frame')})`);
+    const frame=host.querySelector('.device-frame')!;
+    assert.equal(frame.getAttribute('data-os'),device.platform,`${label}: the frame is its own OS's`);
+    assert.equal(frame.getAttribute('data-cutout'),cutout,`${label}: cut-out`);
+    assert.equal(host.querySelectorAll('.device-frame-cutout').length,cutout==='none'?0:1,`${label}: the cut-out is drawn once, over the screen`);
+    if(frameId.endsWith('-home'))assert.ok(host.querySelector('.device-frame-home'),`${label}: a Home button`);
+    if(frameId==='android-tv')assert.ok(host.querySelector('.device-frame-stand'),'a TV stands on its stand');
+    // The rail speaks the device's OS.
+    const rail=[...host.querySelectorAll('.device-rail button')].map(b=>b.getAttribute('aria-label'));
+    if(device.platform==='ios'){
+      assert.deepEqual(rail.slice(0,4),['Home','App Switcher','Rotate','Lock'],`${label}: iOS controls`);
+      assert.ok(!rail.includes('Back')&&!rail.includes('Recents'),`${label}: no Android buttons on iOS`);
+      assert.equal(rail.at(-1),'Shut Down Simulator');
+    }else{
+      assert.deepEqual(rail.slice(0,5),['Back','Home','Recents','Rotate','Power'],`${label}: Android controls`);
+      assert.ok(!rail.includes('Lock')&&!rail.includes('App Switcher'),`${label}: no iOS buttons on Android`);
+      assert.equal(host.querySelectorAll('.device-rail svg.device-nav-glyph').length,3,'Back, Home and Recents use Android\'s own glyphs');
+      assert.equal(rail.at(-1),'Stop emulator');
+    }
+  }
+  viewRoot.unmount();host.remove();
+}
+
+// 8. No desktop bridge: a plain note, nothing else.
 delete (window as any).musterDevices;
 const noBridge=createRoot(document.getElementById('root')!);
 noBridge.render(<DeviceTab tab={{id:'devices',title:'Devices'}} visible/>);await until(()=>/desktop app/.test(text()),'the note');

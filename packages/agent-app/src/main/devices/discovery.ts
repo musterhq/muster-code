@@ -6,6 +6,7 @@
 import path from 'node:path';
 import type {DeviceFormFactor, DeviceInfo, PlatformCheck} from '../../shared/device-protocol.ts';
 import {device} from '../../shared/device-noun.ts';
+import {androidFrame, iosFrame, parseCutout, parseIni, type AvdConfig, type FrameSpec} from '../../shared/device-frames.ts';
 
 export type Run = (file: string, args: string[], options?: {timeoutMs?: number; env?: NodeJS.ProcessEnv}) => Promise<string>;
 export interface ProbeDeps {
@@ -14,6 +15,8 @@ export interface ProbeDeps {
   env: NodeJS.ProcessEnv;
   home: string;
   platform: NodeJS.Platform;
+  /** Reads a small text file (AVD configuration); undefined when it is missing. */
+  readText?(file: string): string | undefined;
 }
 
 // --- iOS ---------------------------------------------------------------------------------------------------------
@@ -34,7 +37,7 @@ export function parseSimctlDevices(json: string): DeviceInfo[] {
       const formFactor: DeviceFormFactor | null = /iPad/i.test(type) ? 'tablet' : /iPhone/i.test(type) ? (/Fold|Duo/i.test(type) ? 'foldable' : 'phone') : null;
       if (!formFactor) continue;
       const state = String(device.state ?? '').toLowerCase();
-      out.push({id: device.udid, name: device.name, platform: 'ios', osVersion: `iOS ${os[1]}.${os[2]}`, formFactor,
+      out.push({id: device.udid, name: device.name, platform: 'ios', osVersion: `iOS ${os[1]}.${os[2]}`, formFactor, frame: iosFrame(typeof device.deviceTypeIdentifier === 'string' ? device.deviceTypeIdentifier : undefined, device.name),
         state: state === 'booted' ? 'booted' : state === 'booting' ? 'booting' : state === 'shutting down' ? 'shutting-down' : 'shutdown'});
     }
   }
@@ -95,6 +98,19 @@ export function androidFormFactor(name: string): DeviceFormFactor {
   if (/tablet|pixel[ _-]?c\b|tab\b|pixel[ _-]?tablet/i.test(name)) return 'tablet';
   return 'phone';
 }
+/** Where AVDs live: ANDROID_AVD_HOME, else ANDROID_USER_HOME/avd, else ~/.android/avd. */
+export function avdHome(env: NodeJS.ProcessEnv, home: string): string {
+  return env.ANDROID_AVD_HOME?.trim() || (env.ANDROID_USER_HOME?.trim() ? path.join(env.ANDROID_USER_HOME.trim(), 'avd') : path.join(home, '.android', 'avd'));
+}
+/** An AVD's own description: `<name>.ini` points at its folder; config.ini there, overlaid by hardware-qemu.ini while it runs. */
+export function readAvdConfig(deps: Pick<ProbeDeps, 'env' | 'home' | 'readText'>, name: string): AvdConfig {
+  if (!deps.readText || !/^[A-Za-z0-9._-]{1,128}$/.test(name)) return {};
+  const root = avdHome(deps.env, deps.home);
+  const pointer = parseIni(deps.readText(path.join(root, `${name}.ini`)) ?? '');
+  const dir = pointer.path && path.isAbsolute(pointer.path) ? pointer.path : path.join(root, `${name}.avd`);
+  return {...parseIni(deps.readText(path.join(dir, 'config.ini')) ?? ''), ...parseIni(deps.readText(path.join(dir, 'hardware-qemu.ini')) ?? '')};
+}
+const formOf = (frame: FrameSpec, name: string) => frame.form === 'foldable' ? 'foldable' as const : frame.form === 'tablet' ? 'tablet' as const : frame.form === 'phone' ? 'phone' as const : androidFormFactor(name);
 export async function listAndroid(deps: ProbeDeps): Promise<DeviceInfo[]> {
   const tools = androidTools(deps);
   const [adbOut, avdOut] = await Promise.all([
@@ -109,10 +125,24 @@ export async function listAndroid(deps: ProbeDeps): Promise<DeviceInfo[]> {
     const avd = (await deps.run(tools.adb, ['-s', serial, 'emu', 'avd', 'name'], {timeoutMs: 5000}).catch(() => '')).split(/\r?\n/)[0]?.trim() || serial;
     const release = state === 'device' ? (await deps.run(tools.adb, ['-s', serial, 'shell', 'getprop', 'ro.build.version.release'], {timeoutMs: 5000}).catch(() => '')).trim() : '';
     const booted = state === 'device' && (await deps.run(tools.adb, ['-s', serial, 'shell', 'getprop', 'sys.boot_completed'], {timeoutMs: 5000}).catch(() => '')).trim() === '1';
+    // The cut-out Android itself reports (a generic device's only source for it).
+    let cutout;
+    if (booted) {
+      const [displays, size] = await Promise.all([
+        deps.run(tools.adb, ['-s', serial, 'shell', 'dumpsys', 'window', 'displays'], {timeoutMs: 5000}).catch(() => ''),
+        deps.run(tools.adb, ['-s', serial, 'shell', 'wm', 'size'], {timeoutMs: 5000}).catch(() => ''),
+      ]);
+      const physical = /(\d+)x(\d+)/.exec(size);
+      cutout = physical ? parseCutout(displays, Math.min(Number(physical[1]), Number(physical[2]))) : undefined;
+    }
     named.add(avd);
-    out.push({id: serial, name: avd, platform: 'android', osVersion: release ? `Android ${release}` : 'Android', formFactor: androidFormFactor(avd), state: booted ? 'booted' : 'booting'});
+    const frame = androidFrame(readAvdConfig(deps, avd), avd, cutout);
+    out.push({id: serial, name: avd, platform: 'android', osVersion: release ? `Android ${release}` : 'Android', formFactor: formOf(frame, avd), frame, state: booted ? 'booted' : 'booting'});
   }
-  for (const avd of parseAvdList(avdOut)) if (!named.has(avd)) out.push({id: `avd:${avd}`, name: avd, platform: 'android', osVersion: 'Android', formFactor: androidFormFactor(avd), state: 'shutdown'});
+  for (const avd of parseAvdList(avdOut)) if (!named.has(avd)) {
+    const frame = androidFrame(readAvdConfig(deps, avd), avd);
+    out.push({id: `avd:${avd}`, name: avd, platform: 'android', osVersion: 'Android', formFactor: formOf(frame, avd), frame, state: 'shutdown'});
+  }
   return out;
 }
 
