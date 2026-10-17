@@ -230,7 +230,7 @@ export class LocalWorkspace {
       if (m.pendingAt) throw new Error(`${m.name} is waiting for approval. Approve the hire first.`);
     }
     const owner = input.assigneeId === 'user:local' ? { kind: 'user' as const, id: LOCAL_OWNER_ID } : member ? { kind: 'agent' as const, id: member } : { kind: 'agent' as const, id: DEFAULT_AGENT_ID };
-    const priority = input.priority && input.priority in PRIORITY_IN ? PRIORITY_IN[input.priority] : undefined;
+    const priority = typeof input.priority === 'string' && Object.hasOwn(PRIORITY_IN, input.priority) ? PRIORITY_IN[input.priority] : undefined;
     const created = await this.invoke('project.tasks.add', { projectId, title, acceptance: description, dependencies: [], owner, ...(priority !== undefined ? { priority } : {}), ...(input.parentId ? { parentId: input.parentId } : {}) });
     return (await this.locate(created.id)).view;
   }
