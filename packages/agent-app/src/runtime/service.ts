@@ -570,7 +570,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
     }
     const access = providerAccessPolicy(chat);
     // A fork (or a replaced turn) starts a fresh provider conversation: carry the visible history once, bounded.
-    const digest = store.needsDigest(chatId) ? transcriptDigest(store.timeline(chatId)) : '';
+    const digest = store.needsDigest(chatId) ? transcriptDigest(store.timeline(chatId), cwd) : '';
     const files = attachments.resolve(chatId, attachmentIds);
     const accepted = store.recordSend(chatId, requestId, prompt, fingerprint, {...(files.length ? {userData: {attachments: files.map(({path: _path, ...ref}) => ({...ref, state: 'sent'}))}, within: () => attachments.markSent(attachmentIds)} : {}), ...(invoked.reuseUserItemId ? {reuseUserItemId: invoked.reuseUserItemId} : {})});
     if (accepted.replay) return {runId: accepted.runId};
@@ -678,7 +678,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
             while (last >= 0 && items[last]!.kind !== 'user') last--;
             store.appendItem(chatId, 'notice', 'The saved provider conversation could not be resumed, so a fresh one started with a summary of the earlier messages. The displayed chat history is retained.', 'completed', {kind: 'thread-reset'});
             scheduleTimeline(chatId);
-            return [transcriptDigest(items.slice(0, Math.max(0, last))), ...staticBlocks.filter(block => !pendingBlocks.has(block)).map(block => block.text)].filter(Boolean).join('\n\n') || undefined;
+            return [transcriptDigest(items.slice(0, Math.max(0, last)), cwd), ...staticBlocks.filter(block => !pendingBlocks.has(block)).map(block => block.text)].filter(Boolean).join('\n\n') || undefined;
           },
           onTurnAccepted: identity => persistIdentity(identity.threadId,identity.turnId),
           onEvent(method, params) {

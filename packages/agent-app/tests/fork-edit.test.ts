@@ -5,7 +5,7 @@ import {execFileSync} from 'node:child_process';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {createAgentService} from '../src/runtime/service.ts';
-import {transcriptDigest,FORK_DIGEST_BYTES} from '../src/runtime/chat-fork.ts';
+import {transcriptDigest,workspaceGitState,FORK_DIGEST_BYTES} from '../src/runtime/chat-fork.ts';
 import type {ProviderAdapter,ProviderInput,ProviderResult} from '../src/runtime/provider.ts';
 import type {AgentEvent,TimelineItem} from '../src/shared/protocol.ts';
 
@@ -131,7 +131,7 @@ test('transcript digest keeps the newest 30 items within 24 KB, oldest first, an
   const many=Array.from({length:40},(_,n)=>item(n,n%2?'assistant':'user',`message ${n}`));
   const digest=transcriptDigest(many);
   assert.doesNotMatch(digest,/message 9\b/);assert.match(digest,/message 10\b/);assert.match(digest,/message 39\b/);
-  assert.ok(digest.indexOf('message 10')<digest.indexOf('message 39'));
+  assert.ok(digest.indexOf('message 10')<digest.indexOf('message 11'));
   assert.ok(Buffer.byteLength(transcriptDigest(Array.from({length:30},(_,n)=>item(n,'user','x'.repeat(5000)))))<=FORK_DIGEST_BYTES+400);
   const tools=transcriptDigest([item(1,'tool','npm test\nSECRET OUTPUT')]);
   assert.match(tools,/Tool \(completed\): npm test/);assert.doesNotMatch(tools,/SECRET/);
@@ -154,4 +154,32 @@ test('an edit refused before dispatch leaves no empty fork behind, and a refused
   assert.equal(await count(),before,'trying again never piles up forks');
   await assert.rejects(service.invoke('chat.editResend',{id:chat.id,itemId:prompt.id,text:'third',requestId:'r3',mode:'replace'}));
   assert.equal((await service.invoke('app.snapshot',undefined)).chats.find(c=>c.id===chat.id)?.draft,'third','the replaced prompt survives in the composer');
+});
+
+test('digest on a busy turn still leads with the task: first request, last 5 user messages, last summary and git state',async t=>{
+  const repo=await directory(t),run=(...a:string[])=>execFileSync('git',['-C',repo,...a],{stdio:'ignore'});
+  run('init','-q','-b','feature-x');await writeFile(join(repo,'a.txt'),'a');run('add','.');run('-c','user.name=t','-c','user.email=t@t','commit','-qm','init');await writeFile(join(repo,'dirty.txt'),'x');
+  const item=(n:number,kind:TimelineItem['kind'],text:string):TimelineItem=>({id:`i${n}`,chatId:'c',kind,text,createdAt:'2026-01-01T00:00:00.000Z',...(kind==='tool'?{status:'completed',data:{name:text}}:{})});
+  const items:TimelineItem[]=[item(0,'user','FIRST-TASK build the importer')];
+  for(let n=1;n<=8;n++){items.push(item(n*10,'user',`ask-${n}`));for(let k=1;k<=4;k++)items.push(item(n*10+k,'tool',`tool-${n}-${k}`));}
+  items.push(item(500,'assistant','LAST-SUMMARY importer half done'));
+  for(let k=0;k<30;k++)items.push(item(600+k,'tool',`late-tool-${k}`));
+  const digest=transcriptDigest(items,repo);
+  assert.match(digest,/FIRST-TASK build the importer/);
+  for(const n of [4,5,6,7,8])assert.match(digest,new RegExp(`ask-${n}\\b`));
+  assert.doesNotMatch(digest,/ask-3\b/);
+  assert.match(digest,/LAST-SUMMARY importer half done/);
+  assert.match(digest,/Branch: feature-x/);assert.match(digest,/\?\? dirty\.txt/);
+  assert.ok(digest.indexOf('FIRST-TASK')<digest.indexOf('late-tool-29'));
+  assert.ok(Buffer.byteLength(digest)<=FORK_DIGEST_BYTES+400);
+});
+
+test('digest skips git state outside a repository and still respects the budget',async t=>{
+  const plain=await directory(t);
+  const item=(n:number,kind:TimelineItem['kind'],text:string):TimelineItem=>({id:`i${n}`,chatId:'c',kind,text,createdAt:'2026-01-01T00:00:00.000Z'});
+  const digest=transcriptDigest([item(1,'user','do the thing'),item(2,'assistant','done')],plain);
+  assert.match(digest,/do the thing/);assert.doesNotMatch(digest,/Branch:|Workspace state/);
+  assert.equal(workspaceGitState(join(plain,'missing')),'');assert.equal(workspaceGitState(undefined),'');
+  const big=Array.from({length:60},(_,n)=>item(n,n%2?'assistant':'user','y'.repeat(6000)));
+  assert.ok(Buffer.byteLength(transcriptDigest(big,plain))<=FORK_DIGEST_BYTES+400);
 });
