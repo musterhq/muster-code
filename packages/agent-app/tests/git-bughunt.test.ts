@@ -50,3 +50,13 @@ test('GitHub remotes are recognised whatever the case of the host name', () => {
   assert.equal(githubWebUrl('https://GitHub.com/o/r.git'), 'https://github.com/o/r');
   assert.equal(githubWebUrl('git@GITHUB.COM:o/r.git'), 'https://github.com/o/r');
 });
+
+test('ref diff shows a submodule pointer as a Subproject commit line', async () => {
+  const dir = repo(), sub = repo();
+  g(dir, '-c', 'protocol.file.allow=always', 'submodule', 'add', '-q', sub, 'sm');
+  g(dir, 'commit', '-q', '-m', 'add submodule');
+  const pinned = g(dir, 'rev-parse', 'HEAD:sm').trim();
+  const diff = await refDiff(dir, {base: 'HEAD~1', head: 'HEAD', path: 'sm'});
+  assert.equal(diff.before, '');
+  assert.equal(diff.after, `Subproject commit ${pinned}\n`);
+});

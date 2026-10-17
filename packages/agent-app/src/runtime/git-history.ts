@@ -112,6 +112,10 @@ export async function compareRefs(root: string, input: {base: unknown; head: unk
 }
 
 async function blobAt(real: string, sha: string, path: string): Promise<{text: string; truncated: boolean} | null> {
+  // A submodule is a gitlink, not a blob: `git show` on it prints (or fails to find) the pinned commit, so show git's own pointer line.
+  const entry = (await runGit(real, ['ls-tree', '-z', sha, '--', path]).catch(() => '')).split('\0')[0] ?? '';
+  const gitlink = /^160000 commit ([0-9a-f]+)\t/.exec(entry);
+  if (gitlink) return {text: `Subproject commit ${gitlink[1]}\n`, truncated: false};
   const exists = await runGit(real, ['cat-file', '-e', `${sha}:${path}`]).then(() => true, () => false);
   if (!exists) return null;
   try {
