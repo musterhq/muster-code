@@ -33,6 +33,12 @@ export function avcCodecFromAnnexB(buf: Uint8Array): string | null {
   }
   return null;
 }
+/** WebCodecs `avc1.PPCCLL` from an avcC decoder description (iOS AVCC stream); null when it is not one. */
+export function avcCodecFromDescription(avcc: Uint8Array): string | null {
+  if (avcc.length < 4 || avcc[0] !== 1) return null;
+  const hex = (byte: number) => byte.toString(16).padStart(2, '0');
+  return `avc1.${hex(avcc[1]!)}${hex(avcc[2]!)}${hex(avcc[3]!)}`;
+}
 /** "Live", "Stale · 4s", or "Reconnecting" for the header pill. */
 export type FeedHealth = 'live' | 'stale' | 'waiting';
 export function feedHealth(lastFrameAt: number | undefined, now: number, staleMs = 3000): FeedHealth {

@@ -242,13 +242,14 @@ class FakeSocket {
 }
 const hub = async () => ({origin: 'http://127.0.0.1:5555', token: 'tok', pid: 1});
 
-test('iOS link: attaches the helper with the bearer token, streams MJPEG only while viewed, flow-controlled', async () => {
+test('iOS link: attaches the helper with the bearer token, streams MJPEG (a helper without H.264) only while viewed, flow-controlled', async () => {
   FakeSocket.all = [];
   const requests: {url: string; auth: string | null}[] = [];
   let push!: (chunk: Uint8Array) => void, end!: () => void;
   const fetchFn = (async (url: string, init: RequestInit = {}) => {
     requests.push({url, auth: new Headers(init.headers).get('authorization')});
     if (url.endsWith('/grid/api/start')) return new Response('{"ok":true}');
+    if (url.endsWith('/stream.avcc')) return new Response('{"error":"not found"}', {status: 404});
     const body = new ReadableStream<Uint8Array>({start(controller) { push = chunk => controller.enqueue(chunk); end = () => controller.close(); init.signal?.addEventListener('abort', () => { try { controller.error(new Error('aborted')); } catch {} }); }});
     return new Response(body);
   }) as typeof fetch;
@@ -260,8 +261,9 @@ test('iOS link: attaches the helper with the bearer token, streams MJPEG only wh
   const input = FakeSocket.all[0]!;
   assert.match(input.url, /^ws:\/\/127\.0\.0\.1:5555\/vendor\/serve-sim\/helper\/ws\?device=BBBBBBBB-2222$/);assert.equal(input.headers.authorization, 'Bearer tok');
   assert.ok(!input.url.includes('tok'), 'the token never travels in a URL');
-  link.setViewing(true);await new Promise(r => setTimeout(r, 10));
-  assert.ok(requests.some(r => r.url.endsWith('/helper/BBBBBBBB-2222/stream.mjpeg') && r.auth === 'Bearer tok'));
+  link.setViewing(true);await new Promise(r => setTimeout(r, 20));
+  assert.ok(requests.some(r => r.url.endsWith('/helper/BBBBBBBB-2222/stream.avcc')), 'H.264 is tried first');
+  assert.ok(requests.some(r => r.url.endsWith('/helper/BBBBBBBB-2222/stream.mjpeg') && r.auth === 'Bearer tok'), 'and MJPEG when the helper has no H.264 route');
   push(Buffer.concat([part(jpeg(1)), part(jpeg(2)), part(jpeg(3)), part(jpeg(4))]));await new Promise(r => setTimeout(r, 10));
   assert.deepEqual(frames.map(f => f[2]), [1, 2], 'two in flight, the rest held');
   assert.equal(states.at(-1), 'live');
@@ -278,6 +280,50 @@ test('iOS link: attaches the helper with the bearer token, streams MJPEG only wh
   void end;
   link.close();
   assert.equal(input.readyState, 3);
+});
+
+test('iOS H.264: AVCC envelopes demuxed however they arrive; seed, description and frames forwarded in order; a backlog reopens for a fresh keyframe; MJPEG on request', async () => {
+  const {AvccDemuxer, avcCodecFromDescription} = await import('../src/main/devices/frames.ts');
+  const envelope = (tag: number, payload: number[]) => { const b = Buffer.alloc(5 + payload.length); b.writeUInt32BE(1 + payload.length, 0); b[4] = tag; Buffer.from(payload).copy(b, 5); return b; };
+  const description = [1, 0x64, 0x00, 0x33, 0xff];
+  const body = Buffer.concat([envelope(4, [0xff, 0xd8, 9, 0xff, 0xd9]), envelope(1, description), envelope(9, [1, 2]), envelope(2, [0, 0, 0, 1, 0x65]), envelope(3, [0, 0, 0, 1, 0x41])]);
+  // Byte by byte and all at once give the same chunks; an unknown tag (9) is skipped.
+  for (const step of [1, 7, body.length]) {
+    const demuxer = new AvccDemuxer(), kinds: string[] = [];
+    for (let i = 0; i < body.length; i += step) for (const chunk of demuxer.push(body.subarray(i, i + step))) kinds.push(chunk.kind);
+    assert.deepEqual(kinds, ['seed', 'description', 'keyframe', 'delta'], `split every ${step}`);
+  }
+  const huge = Buffer.alloc(4); huge.writeUInt32BE(0x7fffffff, 0);
+  assert.throws(() => new AvccDemuxer().push(huge), /corrupt/);
+  assert.equal(avcCodecFromDescription(new Uint8Array(description)), 'avc1.640033', 'High 5.1, the profile some decoders reject');
+  assert.equal(avcCodecFromDescription(new Uint8Array([0, 0, 0, 0])), null);
+
+  FakeSocket.all = [];
+  const requests: string[] = [];
+  const streams: {push(chunk: Uint8Array): void}[] = [];
+  const fetchFn = (async (url: string, init: RequestInit = {}) => {
+    requests.push(url);
+    if (url.endsWith('/grid/api/start')) return new Response('{"ok":true}');
+    const stream = new ReadableStream<Uint8Array>({start(controller) { streams.push({push: chunk => controller.enqueue(chunk)}); init.signal?.addEventListener('abort', () => { try { controller.error(new Error('aborted')); } catch {} }); }});
+    return new Response(stream);
+  }) as typeof fetch;
+  const frames: {codec: string; format?: string; config?: boolean; key: boolean}[] = [];
+  const link = new DeviceLink('ios', 'BBBBBBBB-2222', {hub, fetch: fetchFn, socket: (url, headers) => new FakeSocket(url, headers) as never, setTimeout, clearTimeout},
+    {frame: f => frames.push({codec: f.codec, format: f.format, config: f.config, key: f.key}), state: () => {}, screen: () => {}, input: () => {}});
+  await link.start();
+  link.setViewing(true);await new Promise(r => setTimeout(r, 20));
+  assert.ok(requests.at(-1)!.endsWith('/helper/BBBBBBBB-2222/stream.avcc'));
+  streams.at(-1)!.push(body);await new Promise(r => setTimeout(r, 10));
+  assert.deepEqual(frames, [{codec: 'jpeg', format: undefined, config: undefined, key: true}, {codec: 'h264', format: 'avcc', config: true, key: false}, {codec: 'h264', format: 'avcc', config: undefined, key: true}, {codec: 'h264', format: 'avcc', config: undefined, key: false}]);
+  assert.equal(link.stats.transport, 'avcc');assert.equal(link.stats.frames, 3);assert.equal(link.stats.keyframes, 2);
+  // Unacknowledged frames pile up: the subscription is reopened (a fresh one starts with a keyframe), never queued.
+  const opened = requests.filter(url => url.endsWith('stream.avcc')).length;
+  streams.at(-1)!.push(Buffer.concat(Array.from({length: H264_BACKLOG + 2}, () => envelope(3, [0, 0, 0, 1, 0x41]))));await new Promise(r => setTimeout(r, 20));
+  assert.equal(requests.filter(url => url.endsWith('stream.avcc')).length, opened + 1, 'reopened once');assert.equal(link.stats.restarts, 1);
+  // The window cannot decode it: MJPEG from now on.
+  link.preferMjpeg();await new Promise(r => setTimeout(r, 20));
+  assert.ok(requests.at(-1)!.endsWith('/helper/BBBBBBBB-2222/stream.mjpeg'));
+  link.close();
 });
 
 test('Android link: H.264 forwarded in order, a backlog skips to the next keyframe and asks for one', async () => {

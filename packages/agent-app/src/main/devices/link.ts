@@ -10,14 +10,16 @@
  * - Every failure reconnects with backoff; after the first frame never arrives, the state says so in plain English.
  */
 import type {DeviceInput, DeviceOrientation, DevicePlatform, DeviceScreen, DeviceSessionState} from '../../shared/device-protocol.ts';
-import {FrameGate, IOS_TAG, iosPacket, MjpegParser, semuInfo} from './frames.ts';
+import {AvccDemuxer, FrameGate, IOS_TAG, iosPacket, MjpegParser, semuInfo} from './frames.ts';
 import {androidKeycode, hidForChar, hidUsageForCode} from './keys.ts';
 import type {HubEndpoint} from './helper.ts';
 
 export const FIRST_FRAME_TIMEOUT_MS = 15_000, RETRY_MS = [1000, 2000, 4000, 8000];
 /** Unacknowledged H.264 units before the link drops to the next keyframe (about one second at 30 fps). */
 export const H264_BACKLOG = 30;
-export interface LinkFrame {codec: 'jpeg' | 'h264'; key: boolean; data: Buffer; pts?: number; reset?: boolean}
+export interface LinkFrame {codec: 'jpeg' | 'h264'; key: boolean; data: Buffer; pts?: number; reset?: boolean; format?: 'annexb' | 'avcc'; config?: boolean}
+/** What a link is streaming and how much (diagnostics, the CI smoke's measurements). */
+export interface LinkStats {transport: 'avcc' | 'mjpeg' | 'semu' | 'none'; frames: number; keyframes: number; bytes: number; restarts: number; since: number}
 export interface LinkEvents {
   frame(frame: LinkFrame): void;
   state(state: DeviceSessionState, detail?: string): void;
@@ -50,6 +52,9 @@ export class DeviceLink {
   private gate = new FrameGate(2);
   private h264Backlog = 0;
   private dropping = false;
+  /** iOS: H.264 (AVCC) unless this window cannot decode it or the helper does not offer it, then MJPEG. */
+  private mjpegOnly = false;
+  stats: LinkStats = {transport: 'none', frames: 0, keyframes: 0, bytes: 0, restarts: 0, since: Date.now()};
   screen?: DeviceScreen;
   constructor(readonly platform: DevicePlatform, readonly deviceId: string, private readonly deps: LinkDeps, private readonly events: LinkEvents) {}
 
@@ -78,9 +83,9 @@ export class DeviceLink {
     else this.stopVideo();
   }
   ack(): void {
-    if (this.platform === 'android') { this.h264Backlog = Math.max(0, this.h264Backlog - 1); return; }
+    if (this.platform === 'android' || this.stats.transport === 'avcc') { this.h264Backlog = Math.max(0, this.h264Backlog - 1); return; }
     const next = this.gate.ack();
-    if (next) this.events.frame({codec: 'jpeg', key: true, data: next});
+    if (next) this.forward({codec: 'jpeg', key: true, data: next}, 'mjpeg');
   }
 
   private async startVideo(): Promise<void> {
@@ -92,7 +97,7 @@ export class DeviceLink {
     let hub: HubEndpoint;
     try { hub = await this.deps.hub(); } catch (error) { this.videoFailed(message(error)); return; }
     if (this.closed || !this.viewing) return;
-    if (this.platform === 'ios') void this.readMjpeg(hub);
+    if (this.platform === 'ios') void (this.mjpegOnly ? this.readMjpeg(hub) : this.readAvcc(hub));
     else this.openAndroidVideo(hub);
   }
   /** Android's video socket is also its input socket (serve-emu keeps one connection per device); closing it reopens
@@ -122,9 +127,58 @@ export class DeviceLink {
     this.events.state('reconnecting', detail);
     this.retryTimer = this.deps.setTimeout(() => void this.startVideo(), wait);
   }
+  /** The renderer cannot decode H.264: stream MJPEG from now on. */
+  preferMjpeg(): void { if (this.platform !== 'ios' || this.mjpegOnly) return; this.mjpegOnly = true; if (this.viewing) { this.retries = 0; void this.startVideo(); } }
+  private count(frame: LinkFrame, transport: LinkStats['transport']): void {
+    if (this.stats.transport !== transport) this.stats = {transport, frames: 0, keyframes: 0, bytes: 0, restarts: this.stats.restarts, since: Date.now()};
+    if (frame.config) return;
+    this.stats.frames++; this.stats.bytes += frame.data.length; if (frame.key) this.stats.keyframes++;
+  }
   /** Restarts video after an error (the Reconnect button). */
   reconnect(): void { this.retries = 0; if (this.viewing) void this.startVideo(); if (!this.inputSocket) void this.deps.hub().then(hub => this.connectInput(hub), () => {}); }
 
+  /**
+   * iOS H.264: serve-sim's AVCC body, demuxed here and forwarded in order (a seed JPEG first, then the decoder
+   * description, then access units). If the renderer falls behind, the subscription is reopened: a fresh one starts
+   * with a new description and keyframe, where waiting could take minutes on an idle simulator.
+   */
+  private async readAvcc(hub: HubEndpoint): Promise<void> {
+    const controller = new AbortController();
+    this.video = controller;
+    const demuxer = new AvccDemuxer();
+    this.h264Backlog = 0;
+    try {
+      const response = await this.deps.fetch(`${hub.origin}/vendor/serve-sim/helper/${encodeURIComponent(this.deviceId)}/stream.avcc`, {headers: this.auth(hub), signal: controller.signal});
+      // A helper without the H.264 route (or locked to another transport) still streams MJPEG.
+      if (response.status === 404 || response.status === 405 || response.status === 409) { await response.body?.cancel().catch(() => {}); this.mjpegOnly = true; if (!controller.signal.aborted) void this.startVideo(); return; }
+      if (!response.ok || !response.body) throw new Error(response.status === 401 ? 'The device helper refused the connection.' : `The simulator stream answered ${response.status}.`);
+      const reader = response.body.getReader();
+      for (;;) {
+        const {done, value} = await reader.read();
+        if (done || controller.signal.aborted) break;
+        for (const chunk of demuxer.push(value)) {
+          if (controller.signal.aborted) break;
+          if (chunk.kind === 'seed') { this.frameArrived(); this.forward({codec: 'jpeg', key: true, data: chunk.payload}, 'avcc'); continue; }
+          if (chunk.kind === 'description') { this.forward({codec: 'h264', format: 'avcc', config: true, key: false, data: chunk.payload}, 'avcc'); continue; }
+          if (this.h264Backlog >= H264_BACKLOG) {
+            // Behind by about a second: start over from a fresh keyframe rather than queue more.
+            this.stats.restarts++;
+            controller.abort();
+            this.retries = 0;
+            void this.startVideo();
+            return;
+          }
+          this.frameArrived();
+          this.h264Backlog++;
+          this.forward({codec: 'h264', format: 'avcc', key: chunk.kind === 'keyframe', data: chunk.payload}, 'avcc');
+        }
+      }
+      if (!controller.signal.aborted) this.videoFailed('The simulator stream ended.');
+    } catch (error) {
+      if (!controller.signal.aborted) this.videoFailed(message(error));
+    }
+  }
+  private forward(frame: LinkFrame, transport: LinkStats['transport']): void { this.count(frame, transport); this.events.frame(frame); }
   private async readMjpeg(hub: HubEndpoint): Promise<void> {
     const controller = new AbortController();
     this.video = controller;
@@ -139,7 +193,7 @@ export class DeviceLink {
         for (const jpeg of parser.push(value)) {
           this.frameArrived();
           const out = this.gate.offer(jpeg, true);
-          if (out) this.events.frame({codec: 'jpeg', key: true, data: out});
+          if (out) this.forward({codec: 'jpeg', key: true, data: out}, 'mjpeg');
         }
       }
       if (!controller.signal.aborted) this.videoFailed('The simulator stream ended.');
@@ -175,7 +229,7 @@ export class DeviceLink {
       }
       this.frameArrived();
       this.h264Backlog++;
-      this.events.frame({codec: 'h264', key: info.key, data: Buffer.from(bytes.subarray(info.payloadOffset)), ...(info.pts !== undefined ? {pts: info.pts} : {})});
+      this.forward({codec: 'h264', format: 'annexb', key: info.key, data: Buffer.from(bytes.subarray(info.payloadOffset)), ...(info.pts !== undefined ? {pts: info.pts} : {})}, 'semu');
     };
     socket.onclose = event => {
       if (this.videoSocket !== socket) return;

@@ -109,8 +109,10 @@ export function parseHubBanner(text: string): {port: number; token: string} | nu
   return match ? {port: Number(match[1]), token: match[2]!} : null;
 }
 export function hubArgs(entry: string): string[] {
-  // MJPEG for iOS (decoded with createImageBitmap); Android sends scrcpy's H.264 over its socket (WebCodecs in the renderer).
-  return [entry, '--host', '127.0.0.1', '--port', '0', '--require-token', '--transport', 'mjpeg', '--stream-source', 'scrcpy', '--max-dimension', '1280', '--mjpeg-quality', '0.72', '--video-fps', '30', '--hide-sidebar', '--hide-boot-device'];
+  // Plain HTTP transports (never WebRTC, which locks the H.264 route): iOS H.264 over the AVCC route with MJPEG as the
+  // fallback, Android scrcpy H.264 over its socket; both decoded with WebCodecs in the renderer. 60 fps is the
+  // simulators' and emulators' native rate; 1280 px on the long side matches a sidebar pane on a 2x display.
+  return [entry, '--host', '127.0.0.1', '--port', '0', '--require-token', '--transport', 'mjpeg', '--stream-source', 'scrcpy', '--max-dimension', '1280', '--mjpeg-quality', '0.72', '--video-fps', '60', '--hide-sidebar', '--hide-boot-device'];
 }
 /** Only what the helper needs reaches it: no API keys, tokens or Muster internals from the app's own environment. */
 const HUB_ENV_ALLOW = /^(PATH|Path|HOME|USER|LOGNAME|SHELL|LANG|LC_[A-Z]+|TZ|DEVELOPER_DIR|XDG_RUNTIME_DIR|XDG_CONFIG_HOME|ANDROID_AVD_HOME|ANDROID_EMULATOR_HOME|ANDROID_USER_HOME|JAVA_HOME|SystemRoot|SYSTEMROOT|windir|WINDIR|ComSpec|COMSPEC|PATHEXT|USERPROFILE|LOCALAPPDATA|APPDATA|ProgramData|ProgramFiles|ProgramFiles\(x86\)|SystemDrive|HOMEDRIVE|HOMEPATH|NUMBER_OF_PROCESSORS|PROCESSOR_ARCHITECTURE)$/;

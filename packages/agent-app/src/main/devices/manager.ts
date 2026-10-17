@@ -281,7 +281,7 @@ export class DeviceManager {
       openedBy: by.chatId ? 'agent' : 'user', control: 'agent', state: 'starting', inputReady: false, openedAt: Date.now()};
     const live: Live = {session, viewers: new Set(), link: undefined as unknown as DeviceLink};
     live.link = new DeviceLink(device.platform, device.id, {hub: () => this.hubEndpoint(), fetch: this.deps.fetch, socket: this.deps.socket, setTimeout: this.timers.set, clearTimeout: this.timers.clear}, {
-      frame: frame => { if (this.live.get(device.id) !== live) return; live.session = {...live.session, lastFrameAt: Date.now()}; this.deps.frame(device.id, frame); },
+      frame: frame => { if (this.live.get(device.id) !== live) return; live.session.lastFrameAt = Date.now(); this.deps.frame(device.id, frame); },
       state: (state, detail) => { if (this.live.get(device.id) === live) this.updateSession(live, {state, ...(detail ? {error: detail} : {})}); },
       screen: screen => { if (this.live.get(device.id) === live) this.updateSession(live, {screen}); },
       input: ready => { if (this.live.get(device.id) === live) this.updateSession(live, {inputReady: ready}); },
@@ -326,6 +326,10 @@ export class DeviceManager {
     return live.link.input(input);
   }
   liveSession(id: string): DeviceSession | undefined { return this.live.get(id)?.session; }
+  /** What a session is streaming and how much (diagnostics). */
+  liveStats(id: string) { return this.live.get(id)?.link.stats; }
+  /** The renderer cannot decode this simulator's H.264: switch it to MJPEG. */
+  streamFallback(rawId: unknown): void { const live = this.live.get(validId(rawId)); live?.link.preferMjpeg(); }
   async waitForInput(id: string, ms?: number): Promise<boolean> { return (await this.live.get(id)?.link.waitForInput(ms)) ?? false; }
   async button(rawId: unknown, button: DeviceButton, from: 'user' | 'agent' = 'user'): Promise<void> {
     const id = validId(rawId), live = this.live.get(id);

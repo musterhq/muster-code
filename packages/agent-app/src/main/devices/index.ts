@@ -50,7 +50,7 @@ export function wireDevices(input: {
     frame: (deviceId, frame) => {
       const window = input.window();
       if (!window || window.isDestroyed()) return;
-      window.webContents.send(DEVICE_FRAME_CHANNEL, {deviceId, codec: frame.codec, key: frame.key, data: frame.data, ...(frame.pts !== undefined ? {pts: frame.pts} : {}), ...(frame.reset ? {reset: true} : {})});
+      window.webContents.send(DEVICE_FRAME_CHANNEL, {deviceId, codec: frame.codec, key: frame.key, data: frame.data, ...(frame.pts !== undefined ? {pts: frame.pts} : {}), ...(frame.reset ? {reset: true} : {}), ...(frame.format ? {format: frame.format} : {}), ...(frame.config ? {config: true} : {})});
     },
     agentAccessChanged: setAgentAccess,
   });
@@ -107,6 +107,7 @@ export function wireDevices(input: {
       case 'devices.rotate': return manager.rotate(request.id);
       case 'devices.screenshot': { const shot = await manager.screenshot(request.id); return {dataUrl: `data:image/png;base64,${shot.png.toString('base64')}`, width: shot.width, height: shot.height}; }
       case 'devices.control': return manager.control(request.id, request.owner);
+      case 'devices.streamFallback': return manager.streamFallback(request.id);
       case 'devices.model': return manager.model(request.id);
       case 'devices.modelStore': return manager.storeModel(request.id, request.glb);
     }

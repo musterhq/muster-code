@@ -27,6 +27,8 @@ const run = (file: string, args: string[], options: {timeoutMs?: number} = {}) =
 const runBuffer = (file: string, args: string[], options: {timeoutMs?: number} = {}) => new Promise<Buffer>((resolve, reject) => execFile(file, args, {timeout: options.timeoutMs ?? 60_000, maxBuffer: 64 * 1024 * 1024, encoding: 'buffer'}, (error, stdout, stderr) => error ? reject(new Error(String(stderr || error.message))) : resolve(stdout)));
 
 let first: ((frame: LinkFrame) => void) | undefined;
+/** Every forwarded frame (measurements), acknowledged at once like a renderer that keeps up. */
+let onFrame: ((frame: LinkFrame) => void) | undefined;
 const manager = new DeviceManager({
   userData, manifestDir: path.join(here, '..', 'resources', 'device-helper'), run, runBuffer, exists: fs.existsSync,
   readText: file => { try { return fs.readFileSync(file, 'utf8'); } catch { return undefined; } }, env: process.env, home: os.homedir(), platform: process.platform,
@@ -35,7 +37,7 @@ const manager = new DeviceManager({
   fetch: (...args) => fetch(...args),
   socket: (url, headers) => new (WebSocket as unknown as new (url: string, init: {headers: Record<string, string>}) => WebSocket)(url, {headers}) as never,
   emit: event => { if (event.type === 'deviceSessions') step('sessions', event.sessions.map(s => ({state: s.state, input: s.inputReady, error: s.error}))); },
-  frame: (_id, frame) => first?.(frame),
+  frame: (id, frame) => { first?.(frame); onFrame?.(frame); if (!frame.config) manager.ack(id); },
 });
 
 const deadline = <T>(promise: Promise<T>, ms: number, what: string) => Promise.race([promise, new Promise<never>((_, reject) => setTimeout(() => reject(new Error(`${what} timed out after ${ms / 1000}s`)), ms))]);
@@ -54,7 +56,7 @@ try {
   step('device', pick);
   // The frame Muster derived for it (simctl device type, or the AVD's config and reported cut-out).
   step('frame', {id: pick.frame?.id, family: pick.frame?.family, source: pick.frame?.source, cutout: pick.frame?.cutout});
-  const frame = new Promise<LinkFrame>((resolve) => { first = f => { if (f.data.length && (f.codec === 'jpeg' || f.key)) { first = undefined; resolve(f); } }; });
+  const frame = new Promise<LinkFrame>((resolve) => { first = f => { if (f.data.length && !f.config && (f.codec === 'jpeg' || f.key)) { first = undefined; resolve(f); } }; });
   const session = await deadline(manager.open(pick.id), 6 * 60_000, 'boot and open');
   step('opened', {state: session.state});
   manager.view(session.deviceId, 'smoke', true);
@@ -62,7 +64,7 @@ try {
   const file = path.join(out, `${platform}-first-frame.${got.codec === 'jpeg' ? 'jpg' : 'h264'}`);
   fs.writeFileSync(file, got.data);
   if (got.codec === 'jpeg' && !(got.data[0] === 0xff && got.data[1] === 0xd8)) throw new Error('The first frame is not a JPEG.');
-  if (got.codec === 'h264') {
+  if (got.codec === 'h264' && got.format !== 'avcc') {
     const {avcCodecFromAnnexB} = await import('../src/renderer/devices/geometry.ts');
     const codec = avcCodecFromAnnexB(got.data);
     if (!codec) throw new Error('The first H.264 keyframe carries no SPS.');
@@ -83,6 +85,39 @@ try {
   step('launched settings');
   const launched = await manager.screenshot(session.deviceId);
   fs.writeFileSync(path.join(out, `${platform}-settings.png`), launched.png);
+  // Smoothness and cost, per transport: 5 s of swiping in Settings (so the screen keeps changing).
+  const measure = async (label: string) => {
+    await new Promise(r => setTimeout(r, 1500));
+    let frames = 0, bytes = 0, waiting: number | undefined;
+    const latencies: number[] = [];
+    onFrame = frame => { if (frame.config) return; frames++; bytes += frame.data.length; if (waiting !== undefined) { latencies.push(performance.now() - waiting); waiting = undefined; } };
+    const cpu = process.cpuUsage(), started = performance.now();
+    while (performance.now() - started < 5000) {
+      for (const [from, to] of [[0.75, 0.3], [0.3, 0.75]] as const) {
+        waiting = performance.now();
+        manager.input(session.deviceId, {kind: 'touch', phase: 'begin', x: 0.5, y: from}, 'agent');
+        for (let i = 1; i <= 12; i++) { await new Promise(r => setTimeout(r, 16)); manager.input(session.deviceId, {kind: 'touch', phase: 'move', x: 0.5, y: from + (to - from) * i / 12}, 'agent'); }
+        manager.input(session.deviceId, {kind: 'touch', phase: 'end', x: 0.5, y: to}, 'agent');
+        await new Promise(r => setTimeout(r, 250));
+      }
+    }
+    const seconds = (performance.now() - started) / 1000, used = process.cpuUsage(cpu);
+    onFrame = undefined;
+    latencies.sort((a, b) => a - b);
+    const result = {label, transport: manager.liveStats(session.deviceId)?.transport, fps: +(frames / seconds).toFixed(1), kbps: Math.round(bytes * 8 / seconds / 1000),
+      mainCpuPct: +((used.user + used.system) / 1000 / (seconds * 1000) * 100).toFixed(1), inputToFrameMs: latencies.length ? {median: Math.round(latencies[latencies.length >> 1]!), p90: Math.round(latencies[Math.floor(latencies.length * 0.9)]!)} : null,
+      restarts: manager.liveStats(session.deviceId)?.restarts};
+    step('measure', result);
+    return result;
+  };
+  const measurements = [await measure(platform === 'ios' ? 'after: H.264 (AVCC)' : 'H.264 (scrcpy)')];
+  if (platform === 'ios') {
+    // Before: the MJPEG stream this replaced (also the fallback for windows that cannot decode H.264).
+    manager.streamFallback(session.deviceId);
+    for (let i = 0; i < 50 && manager.liveStats(session.deviceId)?.transport !== 'mjpeg'; i++) await new Promise(r => setTimeout(r, 100));
+    measurements.push(await measure('before: MJPEG'));
+  }
+  report.measurements = measurements;
   await manager.button(session.deviceId, 'home');
   const shot = await manager.screenshot(session.deviceId);
   fs.writeFileSync(path.join(out, `${platform}-screenshot.png`), shot.png);

@@ -104,3 +104,50 @@ export class FrameGate {
   reset(): void { this.inFlight = 0; this.pending = null; }
   get waiting(): number { return this.inFlight; }
 }
+
+// --- iOS H.264: serve-sim's AVCC body ----------------------------------------------------------------------------
+// `GET /helper/<udid>/stream.avcc` is an endless HTTP body of envelopes: u32 big-endian length, then a one-byte tag and
+// the payload (length counts the tag). Tags: 1 the decoder description (an avcC record), 2 a keyframe, 3 a delta frame,
+// both as AVCC length-prefixed NAL units, 4 a seed JPEG sent before the first encoded frame.
+// Adapted from T3 Code's AvccDemuxer (packages/client-runtime/src/device/stream.ts), MIT, Copyright (c) 2026 T3 Tools
+// Inc.; see THIRD_PARTY_NOTICES.md.
+export type AvccKind = 'description' | 'keyframe' | 'delta' | 'seed';
+export interface AvccChunk {kind: AvccKind; payload: Buffer}
+const AVCC_TAGS: Record<number, AvccKind | undefined> = {1: 'description', 2: 'keyframe', 3: 'delta', 4: 'seed'};
+/** Envelopes larger than this are corrupt (a keyframe at native resolution is far smaller). */
+export const MAX_AVCC_ENVELOPE = 32 * 1024 * 1024;
+export class AvccDemuxer {
+  private buffer = Buffer.alloc(64 * 1024);
+  private length = 0;
+  push(bytes: Uint8Array): AvccChunk[] {
+    if (this.length + bytes.length > this.buffer.length) {
+      let capacity = this.buffer.length;
+      while (capacity < this.length + bytes.length) capacity *= 2;
+      const grown = Buffer.alloc(capacity);
+      this.buffer.copy(grown, 0, 0, this.length);
+      this.buffer = grown;
+    }
+    this.buffer.set(bytes, this.length);
+    this.length += bytes.length;
+    const chunks: AvccChunk[] = [];
+    let offset = 0;
+    while (this.length - offset >= 4) {
+      const size = this.buffer.readUInt32BE(offset);
+      if (size > MAX_AVCC_ENVELOPE) throw new Error('The simulator stream is corrupt.');
+      if (this.length - offset - 4 < size) break;
+      const kind = size >= 1 ? AVCC_TAGS[this.buffer[offset + 4]!] : undefined;
+      // Unknown tags are skipped: newer helpers may add envelope types.
+      if (kind) chunks.push({kind, payload: Buffer.from(this.buffer.subarray(offset + 5, offset + 4 + size))});
+      offset += 4 + size;
+    }
+    if (offset > 0) { this.buffer.copyWithin(0, offset, this.length); this.length -= offset; }
+    return chunks;
+  }
+  reset(): void { this.length = 0; }
+}
+/** WebCodecs `avc1.PPCCLL` from an avcC decoder description (profile, compatibility, level are bytes 1..3). */
+export function avcCodecFromDescription(avcc: Uint8Array): string | null {
+  if (avcc.length < 4 || avcc[0] !== 1) return null;
+  const hex = (byte: number) => byte.toString(16).padStart(2, '0');
+  return `avc1.${hex(avcc[1]!)}${hex(avcc[2]!)}${hex(avcc[3]!)}`;
+}

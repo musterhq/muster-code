@@ -89,7 +89,9 @@ export type DeviceInput =
   | { kind: 'key'; phase: 'down' | 'up'; code: string; key: string }
   | { kind: 'text'; text: string };
 /** A frame pushed to the renderer on DEVICE_FRAME_CHANNEL. JPEG frames are whole pictures; H.264 is an access unit. */
-export interface DeviceFrame { deviceId: string; codec: 'jpeg' | 'h264'; key: boolean; data: Uint8Array; pts?: number; /** The emulator's encoder restarted: rebuild the decoder from the next keyframe. */ reset?: boolean }
+export interface DeviceFrame { deviceId: string; codec: 'jpeg' | 'h264'; key: boolean; data: Uint8Array; pts?: number; /** The emulator's encoder restarted: rebuild the decoder from the next keyframe. */ reset?: boolean;
+  /** H.264 framing: Annex-B start codes (Android) or AVCC length prefixes with a separate description (iOS). */ format?: 'annexb' | 'avcc';
+  /** An avcC decoder description (iOS): configure the decoder from it, then decode the AVCC frames that follow. */ config?: boolean }
 /** window.musterDevices in the desktop app (absent in a browser host). */
 export interface DeviceBridge { onFrame(listener: (frame: DeviceFrame) => void): () => void; ack(deviceId: string): void; input(deviceId: string, input: DeviceInput): void }
 
@@ -113,6 +115,8 @@ export interface DeviceCommands {
   'devices.screenshot': { input: { id: string }; output: { dataUrl: string; width: number; height: number } };
   /** Taking control pauses agent input on the device; 'agent' hands it back. */
   'devices.control': { input: { id: string; owner: 'agent' | 'user' }; output: DeviceSession };
+  /** This window cannot decode the simulator's H.264 (no WebCodecs, or its profile is unsupported): stream MJPEG instead. */
+  'devices.streamFallback': { input: { id: string }; output: void };
   /** A realistic 3D model: the cached conversion, or the verified apple.com download for the renderer to convert. */
   'devices.model': { input: { id: 'iphone' | 'ipad' }; output: { id: string; bodyNode: string; screenNode: string; glb?: Uint8Array; usdz?: Uint8Array } };
   'devices.modelStore': { input: { id: 'iphone' | 'ipad'; glb: Uint8Array }; output: void };
@@ -121,7 +125,7 @@ export type DeviceEvent =
   | { type: 'deviceSetup'; setup: DeviceSetup }
   | { type: 'deviceList'; list: DeviceList }
   | { type: 'deviceSessions'; sessions: DeviceSession[] };
-export const DEVICE_COMMANDS = {'devices.setup': true, 'devices.configure': true, 'devices.installHelper': true, 'devices.list': true, 'devices.boot': true, 'devices.shutdown': true, 'devices.open': true, 'devices.close': true, 'devices.sessions': true, 'devices.view': true, 'devices.button': true, 'devices.rotate': true, 'devices.screenshot': true, 'devices.control': true, 'devices.model': true, 'devices.modelStore': true} as const satisfies Record<keyof DeviceCommands, true>;
+export const DEVICE_COMMANDS = {'devices.setup': true, 'devices.configure': true, 'devices.installHelper': true, 'devices.list': true, 'devices.boot': true, 'devices.shutdown': true, 'devices.open': true, 'devices.close': true, 'devices.sessions': true, 'devices.view': true, 'devices.button': true, 'devices.rotate': true, 'devices.screenshot': true, 'devices.control': true, 'devices.streamFallback': true, 'devices.model': true, 'devices.modelStore': true} as const satisfies Record<keyof DeviceCommands, true>;
 
 /** IPC: main → renderer frames, renderer → main frame acknowledgements (flow control) and input. */
 export const DEVICE_FRAME_CHANNEL = 'muster:device-frame';

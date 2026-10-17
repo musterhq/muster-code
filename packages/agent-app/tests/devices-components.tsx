@@ -154,6 +154,40 @@ root.unmount();
   host.remove();
 }
 
+// 6b. iOS H.264: the feed configures WebCodecs from the AVCC description and decodes the frames that follow (queued while
+//     the decoder is being set up); a description this window cannot decode makes main stream MJPEG instead.
+{
+  const frameListeners=new Set<(frame:any)=>void>();let acks=0;
+  (window as any).musterDevices={onFrame(listener:any){frameListeners.add(listener);return()=>frameListeners.delete(listener);},ack(){acks++;},input(){}};
+  let supported=true;const configs:any[]=[],decoded:string[]=[];
+  (globalThis as any).EncodedVideoChunk=class{type:string;constructor(init:any){this.type=init.type;}};
+  (globalThis as any).VideoDecoder=class{state='unconfigured';output:any;decodeQueueSize=0;constructor(init:any){this.output=init.output;}
+    static async isConfigSupported(config:any){return {supported,config};}
+    configure(config:any){configs.push(config);this.state='configured';}
+    decode(chunk:any){decoded.push(chunk.type);this.output({displayWidth:1179,displayHeight:2556,close(){}});}
+    close(){this.state='closed';}};
+  const {acquireFeed,releaseFeed}=await import('../src/renderer/devices/deviceFeed');
+  const deviceId='AVCC-1111-2222';
+  const before=calls.length;
+  const feed=acquireFeed(deviceId);
+  const send=(frame:any)=>{for(const listener of [...frameListeners])listener({deviceId,...frame});};
+  send({codec:'h264',format:'avcc',config:true,key:false,data:new Uint8Array([1,0x64,0x00,0x33,0xff])});
+  // These arrive while the decoder is still being configured: they are kept and decoded in order.
+  send({codec:'h264',format:'avcc',key:true,data:new Uint8Array([0,0,0,1,0x65])});
+  send({codec:'h264',format:'avcc',key:false,data:new Uint8Array([0,0,0,1,0x41])});
+  await until(()=>decoded.length===2,'both frames decoded');
+  assert.equal(configs[0].codec,'avc1.640033');assert.deepEqual([...configs[0].description],[1,0x64,0x00,0x33,0xff]);assert.equal(configs[0].optimizeForLatency,true);
+  assert.deepEqual(decoded,['key','delta']);assert.equal(acks,2,'each decoded frame is acknowledged');
+  assert.equal(feed.width,1179);assert.equal(feed.height,2556);
+  // A description this window cannot decode: main is asked once to stream MJPEG.
+  supported=false;
+  send({codec:'h264',format:'avcc',config:true,key:false,data:new Uint8Array([1,0x64,0x00,0x33,0xff])});
+  await until(()=>calls.slice(before).some(c=>c.command==='devices.streamFallback'),'the MJPEG fallback request');
+  assert.deepEqual(calls.slice(before).filter(c=>c.command==='devices.streamFallback').map(c=>c.input),[{id:deviceId}]);
+  releaseFeed(feed);
+  delete (globalThis as any).VideoDecoder;delete (globalThis as any).EncodedVideoChunk;
+}
+
 // 7. Each device wears its own frame, picked from what it reports (simctl device type, AVD config, the picture's shape
 //    for a foldable's posture); the rail uses the device's own OS terms.
 {
