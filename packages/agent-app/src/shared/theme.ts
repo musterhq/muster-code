@@ -199,7 +199,9 @@ export function isCleanThemeList(raw: unknown): raw is Theme[] {
   if (!parsed) return false;
   return parsed.every((theme, i) => {
     const r = (raw as Array<{name: unknown; tokens: Record<string, unknown>}>)[i];
-    return r.name === theme.name && Object.keys(r.tokens).length === Object.keys(theme.tokens).length;
+    // Nothing may be dropped or trimmed, and nothing may ride along: an extra theme field would be stored verbatim.
+    return r.name === theme.name && Object.keys(r).length === 4 && Object.keys(r.tokens).length === Object.keys(theme.tokens).length
+      && Object.entries(theme.tokens).every(([key, value]) => r.tokens[key] === value);
   });
 }
 

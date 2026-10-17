@@ -26,3 +26,12 @@ test('search scope prefixes named after Object.prototype keys are plain words', 
     assert.equal(parseSearch(`in:${word}`).scope, 'all', `in:${word}`);
   }
 });
+
+test('a custom theme list with extra fields or untrimmed token values is rejected, not stored as given', async () => {
+  const {validateSetting} = await import('../src/shared/domains/settings-protocol.ts');
+  const theme = {id: 'mine', name: 'Mine', base: 'dark', tokens: {bg: '#101010'}};
+  assert.deepEqual(validateSetting('appearance.customThemes', [theme]), [theme]);
+  assert.throws(() => validateSetting('appearance.customThemes', [{...theme, notes: 'x'.repeat(100_000)}]), /customThemes/);
+  assert.throws(() => validateSetting('appearance.customThemes', [{...theme, tokens: {...theme.tokens, extra: 'x'}}]), /customThemes/);
+  assert.throws(() => validateSetting('appearance.customThemes', [{...theme, tokens: {bg: '  #101010  '}}]), /customThemes/);
+});
