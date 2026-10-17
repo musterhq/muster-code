@@ -7,6 +7,13 @@ All notable changes to Muster Agent. Each `## <version>` section becomes the not
 
 - Typechecking runs on tsc-rs, about twice as fast and using a third less memory, with a CI guard that compares it with the official compiler
 
+## Unreleased
+
+- Review marks a renamed binary file as binary.
+- Undo on a deleted or changed symbolic link restores the link, not a text file holding its target.
+- A binary file named like `x.constructor` no longer gets a broken image preview in review.
+- Git error messages hide the whole password of a remote URL even when the password contains "@".
+
 ## 0.3.13
 
 Replies in one turn read as one answer, and pictures that can no longer be read take one line instead of an empty frame.
