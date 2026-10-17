@@ -6,6 +6,10 @@ All notable changes to Muster Agent. Each `## <version>` section becomes the not
 ## Unreleased
 
 - Typechecking runs on tsc-rs, about twice as fast and using a third less memory, with a CI guard that compares it with the official compiler
+- A long text file with accents, symbols or non-Latin text no longer shows a false "not valid UTF-8" warning (and a stray replacement character) at the end of its preview.
+- Saving a script from Muster's editor no longer removes its executable permission.
+- Searching file contents no longer lists results as "./src/a.ts" when ripgrep is installed, so a result opens the same tab as the file tree entry.
+- A folder added at a drive root (D:\\ or /) now lists, reads and searches normally instead of reporting that every path escapes the folder.
 
 ## 0.3.13
 
