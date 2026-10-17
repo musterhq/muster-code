@@ -1,3 +1,4 @@
+import type {HtmlRenderView} from '../html-render.ts';
 /**
  * Artifacts domain contract: canvases (WRK-12), side chats bound to a resource (WRK-13) and sandboxed plugin UI
  * entries (EXT-10). The allowlist and service dispatch pick these commands up through shared/domains/index.ts.
@@ -62,7 +63,13 @@ export interface ArtifactsCommands {
   /** Registers the entry with the desktop shell's isolated `muster-plugin:` origin and returns the frame URL (main). */
   'plugins.ui.open': { input: { pluginId: string; app: string }; output: { url: string; title: string } };
   /** Visuals: registers untrusted HTML (a report, a Canvas page) with the desktop shell's isolated `muster-report:` origin and returns the frame URL (main). `key` re-uses one document across edits. */
-  'reports.open': { input: { html: string; scripts?: boolean; key?: string }; output: { url: string; token: string } };
+  'reports.open': { input: { html: string; scripts?: boolean; key?: string; /** Muster's live theme variables and link handling (agent pages). */ themed?: boolean }; output: { url: string; token: string } };
+  /** render_html (#html-preview): a stored agent page, served themed; with network only when the person allowed it for this page (main). */
+  'htmlRenders.open': { input: { id: string }; output: { url: string; token: string; page: HtmlRenderView } };
+  /** The person allows network (https only) for one stored page that asked for it (main). */
+  'htmlRenders.allowNetwork': { input: { id: string }; output: HtmlRenderView };
+  /** A local server card's "Mini player": the chat's agent browser tab opens the URL and streams to the mini player (main). */
+  'previews.open': { input: { chatId: string; url: string; panel?: boolean }; output: { owner: string; profileId: string; url: string } };
   /** Visuals: prints a registered report to PDF in a hidden sandboxed window and writes it where the person chooses (main). */
   'reports.pdf': { input: { token: string; title?: string }; output: { saved: boolean; fileName?: string } };
 }
@@ -76,7 +83,7 @@ export const ARTIFACTS_COMMANDS = {
   'artifacts.sideChat.create': true, 'artifacts.sideChat.list': true, 'artifacts.sideChat.promote': true, 'artifacts.sideChat.discard': true,
   'artifacts.authorize': true, 'artifacts.read': true,
   'plugins.ui.entry': true, 'plugins.ui.open': true,
-  'reports.open': true, 'reports.pdf': true,
+  'reports.open': true, 'reports.pdf': true, 'htmlRenders.open': true, 'htmlRenders.allowNetwork': true, 'previews.open': true,
 } as const satisfies Record<keyof ArtifactsCommands, true>;
 
 /** Short label for a side chat's tab and header. */

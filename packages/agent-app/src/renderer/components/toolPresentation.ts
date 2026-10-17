@@ -1,8 +1,9 @@
-import {computerAction,type ComputerAction} from '../../shared/computer-use.ts';
+import {computerAction,parseArguments,type ComputerAction} from '../../shared/computer-use.ts';
+import {htmlRenderIdOf,htmlRenderTitle,isHtmlRenderTool} from '../../shared/html-render.ts';
 import {countPatch,itemPatches} from '../patchModel.ts';
 export type ToolKind = 'read' | 'edit' | 'search' | 'list' | 'command' | 'subagent' | 'mcp' | 'computer' | 'generic';
 export interface FileStat {path:string;adds:number;dels:number}
-export interface ToolPresentation {kind:ToolKind;verb:string;runningVerb:string;subject:string;paths?:string[];/** Reads that only looked at images (Codex "Viewed 4 images"). */images?:string[];files?:FileStat[];adds?:number;dels?:number;plan?:boolean;/** The plan's own markdown text (ExitPlanMode, or a native plan item) when it wasn't submitted as a steps array. */planText?:string;computer?:ComputerAction}
+export interface ToolPresentation {kind:ToolKind;verb:string;runningVerb:string;subject:string;paths?:string[];/** Reads that only looked at images (Codex "Viewed 4 images"). */images?:string[];files?:FileStat[];adds?:number;dels?:number;plan?:boolean;/** The plan's own markdown text (ExitPlanMode, or a native plan item) when it wasn't submitted as a steps array. */planText?:string;computer?:ComputerAction;/** render_html: the stored page the row draws inline (#html-preview). */htmlRender?:{id?:string;title:string}}
 const string=(value:unknown):string=>typeof value==='string'?value:'';
 const objects=(value:unknown):Record<string,unknown>[]=>Array.isArray(value)?value.filter(v=>v&&typeof v==='object'):[];
 export function classifyTool(data:Record<string,unknown>|undefined):ToolPresentation {
@@ -35,6 +36,11 @@ export function classifyTool(data:Record<string,unknown>|undefined):ToolPresenta
    if(Array.isArray(parsed)) named=parsed.map(entry=>entry&&typeof entry==='object'&&typeof entry.name==='string'?entry.name:'').filter(Boolean).slice(0,3).join(', ');
   } catch {}
   return {kind:'subagent',verb:data?.tool==='wait'?'Waited for agents':'Agent action',runningVerb:data?.tool==='wait'?'Waiting for agents':'Working with agents',subject:named||string(data?.prompt)||string(data?.tool)||subject};
+ }
+ // #html-preview: a page the agent showed inline. The row says so; the page itself is drawn under it.
+ if((type==='mcpToolCall'||type==='dynamicToolCall'||!type)&&isHtmlRenderTool(data)){
+  const title=htmlRenderTitle(parseArguments(data?.arguments).title),id=htmlRenderIdOf(data);
+  return {kind:'mcp',verb:'Showed',runningVerb:'Rendering',subject:title,htmlRender:{title,...(id?{id}:{})}};
  }
  // CUA-04: computer and browser use read as actions ("Clicked “Send” in Mail"), never as a generic MCP call.
  const action=type==='mcpToolCall'||type==='dynamicToolCall'?computerAction(data):undefined;

@@ -198,6 +198,9 @@ export function createArtifactsDomain(context: DomainContext): DomainModule {
       'plugins.ui.open': () => { throw new Error('Plugin UI opens in the Muster desktop app only.'); },
       'reports.open': () => { throw new Error('Reports open in the Muster desktop app only.'); },
       'reports.pdf': () => { throw new Error('Reports print in the Muster desktop app only.'); },
+      'htmlRenders.open': () => { throw new Error('Inline pages open in the Muster desktop app only.'); },
+      'htmlRenders.allowNetwork': () => { throw new Error('Inline pages open in the Muster desktop app only.'); },
+      'previews.open': () => { throw new Error('Previews open in the Muster desktop app only.'); },
     },
     dispose() { removeRunOptions(); removePrompt(); host?.dispose(); },
   };

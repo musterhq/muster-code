@@ -1,6 +1,6 @@
 import type {KeyboardInputEvent, MouseInputEvent} from 'electron';
 import type {BrowserConsoleEntry, BrowserState} from '../../shared/browser-protocol.ts';
-import {AGENT_WORLD, BROWSER_TOOL_SPECS, CLICK_BODY, DOUBLE_CLICK_BODY, HOVER_BODY, SNAPSHOT_SCRIPT, argNumber, argString, electronKey, elementScript, focusBody, formatSnapshot, resolveScript, scrollBody, selectBody, textPresentScript, textResult, toolArgs, type McpToolResult} from './browser-tools.ts';
+import {AGENT_WORLD, BROWSER_TOOL_SPECS, CLICK_BODY, cursorScript, DOUBLE_CLICK_BODY, HOVER_BODY, SNAPSHOT_SCRIPT, argNumber, argString, electronKey, elementScript, focusBody, formatSnapshot, resolveScript, scrollBody, selectBody, textPresentScript, textResult, toolArgs, type McpToolResult} from './browser-tools.ts';
 
 /** The narrow slice of WebContents the agent drives; tests pass a fake. */
 export interface AgentContents {
@@ -33,6 +33,8 @@ async function snapshotText(page: AgentPage): Promise<string> {
   try { return formatSnapshot(await run(page, SNAPSHOT_SCRIPT)); }
   catch (error) { return `The page could not be read: ${error instanceof Error ? error.message : String(error)}`; }
 }
+/** Draws the agent cursor at the target; never fails the action (a page may block it, or the element may be gone). */
+const mark = (page: AgentPage, ref: string, selector: string, phase: 'move' | 'click') => (ref || selector) ? run(page, cursorScript(ref, selector, phase)).catch(() => undefined) : Promise.resolve(undefined);
 const failed = (value: unknown): string | undefined => { const row = toolArgs(value); return typeof row.error === 'string' ? row.error : undefined; };
 function key(page: AgentPage, name: string): void {
   const keyCode = electronKey(name);
@@ -46,6 +48,7 @@ async function click(page: AgentPage, ref: string, selector: string, double: boo
   if (page.attached && page.fill) {
     const point = toolArgs(await run(page, resolveScript(ref, selector)));
     if (typeof point.error === 'string') return point.error;
+    await mark(page, ref, selector, 'click');
     const zoom = page.contents.getZoomFactor() || 1, x = Math.round(Number(point.x) * zoom), y = Math.round(Number(point.y) * zoom);
     page.contents.sendInputEvent({type: 'mouseMove', x, y});
     for (let count = 1; count <= (double ? 2 : 1); count++) {
@@ -54,7 +57,9 @@ async function click(page: AgentPage, ref: string, selector: string, double: boo
     }
     return undefined;
   }
-  return failed(await run(page, elementScript(ref, selector, double ? DOUBLE_CLICK_BODY : CLICK_BODY)));
+  const error = failed(await run(page, elementScript(ref, selector, double ? DOUBLE_CLICK_BODY : CLICK_BODY)));
+  if (!error) await mark(page, ref, selector, 'click');
+  return error;
 }
 
 /** Runs one tool call against the chat's browser. Read-only chats may look but not act. */
@@ -93,9 +98,10 @@ export async function runBrowserTool(host: AgentBrowserHost, tool: string, rawAr
       if (page.attached && page.fill) {
         const point = toolArgs(await run(page, resolveScript(ref, selector)));
         if (typeof point.error === 'string') return {result: textResult(point.error, true), action: ''};
+        await mark(page, ref, selector, 'move');
         const zoom = page.contents.getZoomFactor() || 1;
         page.contents.sendInputEvent({type: 'mouseMove', x: Math.round(Number(point.x) * zoom), y: Math.round(Number(point.y) * zoom)});
-      } else { const error = failed(await run(page, elementScript(ref, selector, HOVER_BODY))); if (error) return {result: textResult(error, true), action: ''}; }
+      } else { const error = failed(await run(page, elementScript(ref, selector, HOVER_BODY))); if (error) return {result: textResult(error, true), action: ''}; await mark(page, ref, selector, 'move'); }
       await sleep(200);
       return {result: textResult(await snapshotText(page)), action: `Hovered “${element}”`};
     }
@@ -106,6 +112,7 @@ export async function runBrowserTool(host: AgentBrowserHost, tool: string, rawAr
         const focused = toolArgs(await run(page, elementScript(ref, selector, focusBody(args.clear === true))));
         if (typeof focused.error === 'string') return {result: textResult(focused.error, true), action: ''};
         secret ||= focused.password === true;
+        await mark(page, ref, selector, 'click');
       }
       await page.contents.insertText(text);
       if (args.submit === true) key(page, 'Enter');
@@ -123,6 +130,7 @@ export async function runBrowserTool(host: AgentBrowserHost, tool: string, rawAr
       const values = Array.isArray(args.values) ? args.values.filter((value): value is string => typeof value === 'string').slice(0, 32).map(value => value.slice(0, 512)) : [];
       const error = failed(await run(page, elementScript(ref, selector, selectBody(values))));
       if (error) return {result: textResult(error, true), action: ''};
+      await mark(page, ref, selector, 'click');
       await settle(page, 3000);
       return {result: textResult(await snapshotText(page)), action: `Selected ${values.join(', ')}`};
     }
