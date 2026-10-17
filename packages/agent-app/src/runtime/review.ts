@@ -489,6 +489,16 @@ async function toplevel(root: string): Promise<{ top: string; prefix: string }> 
 async function writeWorktree(root: string, path: string, content: Buffer | string | null, mode?: string): Promise<void> {
   const abs = await resolveInside(root, path);
   if (content === null) { await fs.rm(abs, { force: true }); return; }
+  if (mode === "120000") {
+    // A symlink's blob is its target text: restore a link, never a regular file holding that text.
+    await fs.mkdir(dirname(abs), { recursive: true });
+    const existing = await fs.lstat(abs).catch(() => undefined);
+    if (existing?.isDirectory()) throw new Error(`Not a file: ${path}`);
+    const temp = join(dirname(abs), `.${basename(abs)}.muster-${randomUUID().slice(0, 8)}`);
+    try { await fs.symlink(content.toString(), temp); await fs.rename(temp, abs); }
+    catch (error) { await fs.rm(temp, { force: true }); throw error; }
+    return;
+  }
   const previous = await fs.stat(abs).catch(() => undefined);
   if (previous && !previous.isFile()) throw new Error(`Not a file: ${path}`);
   await fs.mkdir(dirname(abs), { recursive: true });
@@ -512,7 +522,7 @@ async function writeIndex(root: string, path: string, content: Buffer | string |
   }
   const hashed = await git(top, ["hash-object", "-w", "--stdin"], { input: content });
   if (!hashed.ok) throw new Error(hashed.stderr || "Git could not store the content.");
-  const updated = await git(top, ["update-index", "--add", "--cacheinfo", `${mode === "100755" ? "100755" : "100644"},${hashed.stdout.toString("utf8").trim()},${target}`]);
+  const updated = await git(top, ["update-index", "--add", "--cacheinfo", `${mode === "100755" || mode === "120000" ? mode : "100644"},${hashed.stdout.toString("utf8").trim()},${target}`]);
   if (!updated.ok) throw new Error(updated.stderr || "Git could not update the index.");
 }
 

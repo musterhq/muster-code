@@ -28,3 +28,13 @@ test('review changes flags a renamed binary file as binary', async () => {
   assert.ok(file, JSON.stringify(changes.files));
   assert.equal(file.binary, true);
 });
+
+test('undoing a deleted symlink restores a symlink', async () => {
+  const dir = repo();
+  symlinkSync('a.txt', join(dir, 'link')); g(dir, 'add', '.'); g(dir, 'commit', '-q', '-m', 'link');
+  rmSync(join(dir, 'link'));
+  const changes = await reviewChanges(dir, 'head');
+  const file = changes.files.find(f => f.path === 'link')!;
+  await undoFile(dir, {path: 'link', baseline: 'head', expectedAfterHash: file.afterHash});
+  assert.equal(g(dir, 'status', '--porcelain').trim(), '');
+});
