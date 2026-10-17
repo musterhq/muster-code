@@ -36,6 +36,7 @@ interface WorkspaceState { snapshot: WorkspaceSnapshot | null; error: string; lo
 let state: WorkspaceState = { snapshot: null, error: '', loading: false };
 const listeners = new Set<() => void>();
 const set = (patch: Partial<WorkspaceState>) => { state = { ...state, ...patch }; for (const l of listeners) l(); };
+let snapshotReads = 0;
 let viewers = 0, dirty = true, inflight: Promise<void> | null = null, timer: ReturnType<typeof setTimeout> | null = null;
 const taskListeners = new Set<(ids: string[]) => void>();
 const hidden = () => typeof document !== 'undefined' && document.visibilityState === 'hidden';
@@ -46,10 +47,13 @@ export function refreshWorkspace(refresh = false): Promise<void> {
   if (inflight && !refresh) return inflight;
   dirty = false;
   if (!state.snapshot) set({ loading: true });
-  inflight = invoke('paperclip.snapshot', refresh ? { refresh: true } : {})
-    .then(snapshot => set({ snapshot, error: '', loading: false }), cause => set({ error: cause instanceof Error ? cause.message : String(cause), loading: false }))
-    .finally(() => { inflight = null; });
-  return inflight;
+  // Only the newest read may land: a slower read started before an org switch must not bring the old org back.
+  const mine = ++snapshotReads;
+  const read: Promise<void> = invoke('paperclip.snapshot', refresh ? { refresh: true } : {})
+    .then(snapshot => { if (mine === snapshotReads) set({ snapshot, error: '', loading: false }); }, cause => { if (mine === snapshotReads) set({ error: cause instanceof Error ? cause.message : String(cause), loading: false }); })
+    .finally(() => { if (inflight === read) inflight = null; });
+  inflight = read;
+  return read;
 }
 function schedule(delay = 250) {
   if (!viewers || hidden()) { dirty = true; return; }
