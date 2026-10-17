@@ -16,6 +16,9 @@ class Contents extends EventEmitter {
     restore:(options:{entries:any[];index?:number})=>{this.restored=options;this.entries=options.entries.map(entry=>({...entry}));this.index=options.index??this.entries.length-1;this.emit('did-navigate',{},this.entries[this.index].url);return Promise.resolve();},
   };
   loadURL(url:string){this.entries=this.entries.slice(0,this.index+1);this.entries.push({url,title:url,pageState:'state'});this.index++;this.emit('did-start-navigation',{},url,false,true);return Promise.resolve();}
+  lifecycle:string[]=[];attachedDebugger=false;
+  debugger={isAttached:()=>this.attachedDebugger,attach:()=>{this.attachedDebugger=true;},sendCommand:(_m:string,p:{state:string})=>{this.lifecycle.push(p.state);return Promise.resolve();}};
+  capturePage(){return Promise.resolve({isEmpty:()=>false,getSize:()=>({width:100,height:80}),resize(){return this;},toJPEG:()=>Buffer.from('x')});}
   isDestroyed(){return this.destroyed;}
   getTitle(){return this.title;}
   isLoading(){return this.loading;}
@@ -138,4 +141,37 @@ test('saved history is bounded and rejects entries outside the HTTP(S) policy',(
   assert.equal(savedBrowserHistory([{url:'file:///etc/passwd',title:''}],0),undefined);
   assert.equal(savedBrowserHistory([],0),undefined);
   assert.equal(savedBrowserHistory(many,500),undefined);
+});
+
+test('frame() on a frozen tab thaws it and on a discarded tab recreates it',async()=>{
+  const {controller,open,show,hide,liveViews,views}=fixture();
+  open('a');show('a');hide('a');
+  assert.equal(controller.frozenCount(),1,'hiding freezes the tab');
+  const frame=await controller.frame('browser:a');
+  assert.ok(frame,'a frozen tab still yields a frame');assert.equal(controller.frozenCount(),0);
+  assert.equal(views[0].webContents.lifecycle.at(-1),'active');
+  for(const id of ['b','c','d','e']){open(id);show(id);hide(id);}
+  assert.equal(controller.stats().live,MAX_LIVE_BROWSER_VIEWS);
+  const before=liveViews().length;
+  assert.ok(await controller.frame('browser:b'),'frame revives a discarded tab');
+  assert.ok(liveViews().length>=Math.min(before,MAX_LIVE_BROWSER_VIEWS));
+  assert.equal(await controller.frame('browser:missing'),undefined);
+});
+
+test('a tab an agent tool is using is neither frozen nor discarded by the memory paths',()=>{
+  const {controller,open,show,hide,tick,liveViews}=fixture({maxLiveViews:2,idleDiscardMs:1000});
+  open('a');show('a');
+  controller.agentOpen('browser:a','personal');
+  hide('a');
+  assert.equal(controller.frozenCount(),0,'closing the panel does not freeze an in-use tab');
+  for(const id of ['b','c','d']){open(id);show(id);hide(id);}
+  assert.ok(liveViews().some(view=>view.webContents.entries[0]?.url.endsWith('/a')),'the in-use tab keeps its renderer');
+  tick(5000);
+  controller.discardIdle();
+  assert.ok(liveViews().some(view=>view.webContents.entries[0]?.url.endsWith('/a')));
+  tick(4*60_000);
+  controller.freezeIdle();
+  assert.ok(controller.frozenCount()>=1,'once the agent is done, the tab is frozen again');
+  controller.discardIdle();
+  assert.ok(!liveViews().some(view=>view.webContents.entries[0]?.url.endsWith('/a')),'and may then be discarded');
 });
