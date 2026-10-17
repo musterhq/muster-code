@@ -5,6 +5,7 @@ All notable changes to Muster Agent. Each `## <version>` section becomes the not
 
 ## Unreleased
 
+- The agent's rule about not stopping processes it did not start now applies to local processes only. Remote hosts, systemd or launchd services, and anything you explicitly ask it to stop or restart are no longer refused.
 - Typechecking runs on tsc-rs, about twice as fast and using a third less memory, with a CI guard that compares it with the official compiler
 
 ## 0.3.13
