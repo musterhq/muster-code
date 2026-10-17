@@ -69,7 +69,10 @@ export class ProcessSessions {
   /** S3-E: listening ports per shell / command / agent process (one cached lsof scan). */
   readonly listeningPorts:ListeningPorts;
   private portRoot:number;
-  constructor(private filePath:string,private authorize:ProcessAuthorize,private emit:(event:ProcessEvent)=>void,terminalLaunch?:TerminalLaunch,options:{outputLog?:OutputLog;resources?:ResourceScheduler;ports?:ListeningPorts;portRoot?:number;terminal?:TerminalOptions}={}) {
+  /** Called once when a process this owner spawned ends (exited, failed or stopped), with its final snapshot. */
+  private onExit?:(session:ProcessSnapshot)=>void;
+  constructor(private filePath:string,private authorize:ProcessAuthorize,private emit:(event:ProcessEvent)=>void,terminalLaunch?:TerminalLaunch,options:{outputLog?:OutputLog;resources?:ResourceScheduler;ports?:ListeningPorts;portRoot?:number;terminal?:TerminalOptions;onExit?:(session:ProcessSnapshot)=>void}={}) {
+    this.onExit=options.onExit;
     this.listeningPorts=options.ports??new ListeningPorts();this.portRoot=options.portRoot??process.pid;
     this.terminals=new TerminalSessions(join(dirname(filePath),'terminal-sessions.json'),authorize,emit,terminalLaunch,options.terminal);
     this.outputLog=options.outputLog??new OutputLog(join(dirname(filePath),'output-logs'));
@@ -216,6 +219,8 @@ export class ProcessSessions {
     try{process.kill(ownGroup?-row.pgid:row.pid,'SIGTERM');}
     catch(error){if((error as NodeJS.ErrnoException).code!=='ESRCH')throw new Error('The server could not be stopped.');}
   }
+  /** Live processes of a chat that the agent started (never the user's Commands-tab commands). */
+  agentProcesses(chat:string):string[] {return [...this.sessions.values()].filter(session=>session.chatId===chat&&session.owner==='agent'&&isActiveProcess(session.status)).map(session=>session.processId);}
   hasRunning(chat:string):boolean {return [...this.sessions.values()].some(session=>session.chatId===chat&&isActiveProcess(session.status));}
   private async allowed(chat:unknown,operation:'read'|'start'|'stop') {
     chatId(chat);await this.ready();if(this.disposed||(operation==='start'&&this.closing))throw new Error('Command workspace is closing.');
@@ -238,9 +243,11 @@ export class ProcessSessions {
     this.leases.delete(input.leaseId);
   }
   detachAll():void {this.leases.clear();}
-  async start(input:ProcessStart):Promise<ProcessSnapshot> {
+  /** `owner` is set only by trusted main-process callers; the renderer's processes.start never passes it. */
+  async start(input:ProcessStart,options:{owner?:'agent'|'user'}={}):Promise<ProcessSnapshot> {
     validateStart(input);await this.allowed(input.chatId,'read');
-    const fingerprint=createHash('sha256').update(JSON.stringify({chatId:input.chatId,command:input.command,args:input.args??null,label:input.label??'',purpose:input.purpose??'command'})).digest('hex');
+    const owner=options.owner==='agent'?'agent':'user';
+    const fingerprint=createHash('sha256').update(JSON.stringify({chatId:input.chatId,command:input.command,args:input.args??null,label:input.label??'',purpose:input.purpose??'command',...(owner==='agent'?{owner}:{})})).digest('hex');
     const prior=this.receipts.get(input.requestId),pending=this.pending.get(input.requestId);
     if(prior){
       if(prior.fingerprint!==fingerprint||prior.session.chatId!==input.chatId)throw new Error('This command request identity has already been used for different work.');
@@ -248,10 +255,10 @@ export class ProcessSessions {
       return clone(this.sessions.get(prior.session.processId)??{...prior.session,error:prior.session.error??'Output history is no longer retained for this command.'});
     }
     if(pending){if(pending.fingerprint!==fingerprint)throw new Error('This command request identity is already in use.');return pending.promise;}
-    const promise=this.launch(input,fingerprint);this.pending.set(input.requestId,{fingerprint,promise});
+    const promise=this.launch(input,fingerprint,owner);this.pending.set(input.requestId,{fingerprint,promise});
     try{return await promise;}finally{if(this.pending.get(input.requestId)?.promise===promise)this.pending.delete(input.requestId);}
   }
-  private async launch(input:ProcessStart,fingerprint:string):Promise<ProcessSnapshot> {
+  private async launch(input:ProcessStart,fingerprint:string,owner:'agent'|'user'='user'):Promise<ProcessSnapshot> {
     const authority=await this.allowed(input.chatId,'start');
     if(!authority.fullAccessAcknowledged)throw new Error('Host commands require explicitly acknowledged Full access in Agent mode. Workspace access cannot sandbox a host shell.');
     if(typeof authority.cwd!=='string'||!isAbsolute(authority.cwd)||authority.cwd.includes('\0'))throw new Error('The command workspace is unavailable.');
@@ -259,7 +266,7 @@ export class ProcessSessions {
     if([...this.sessions.values()].filter(session=>isActiveProcess(session.status)).length>=MAX_OWNED_PROCESSES)throw new Error('Stop a running command before starting another (maximum 4).');
     if(this.receipts.size>=MAX_RECEIPTS)throw new Error('The durable command receipt limit has been reached. No command was started.');
     const now=new Date().toISOString();
-    const session:ProcessSnapshot={chatId:input.chatId,processId:`process:${randomUUID()}`,generation:1,sequence:0,status:'starting',label:input.label?.trim()||'Command',purpose:input.purpose??'command',command:input.command,...(input.args?{args:[...input.args]}:{}),startedAt:now,updatedAt:now,output:'',truncated:false,exitCode:null,owner:'user'};
+    const session:ProcessSnapshot={chatId:input.chatId,processId:`process:${randomUUID()}`,generation:1,sequence:0,status:'starting',label:input.label?.trim()||'Command',purpose:input.purpose??'command',command:input.command,...(input.args?{args:[...input.args]}:{}),startedAt:now,updatedAt:now,output:'',truncated:false,exitCode:null,owner};
     this.sessions.set(session.processId,session);this.receipts.set(input.requestId,{requestId:input.requestId,fingerprint,session:receiptSnapshot(session)});this.publish(session);
     try{await this.save();}catch{session.status='failed';session.error='The command receipt could not be saved. The command was not started.';this.publish(session);throw new Error(session.error);}
     if(session.purpose==='build'||session.purpose==='test'){
@@ -313,6 +320,7 @@ export class ProcessSessions {
     if(handle.finished)return;handle.finished=true;clearTimeout(handle.timer);this.handles.delete(session.processId);this.dirty.delete(session.processId);this.releaseHeavy(session.processId);
     session.status=status;session.exitCode=exitCode;if(signal)session.signal=signal;if(error)session.error=error;
     this.publish(session);this.prune();this.scheduleSave();handle.resolve();
+    try{this.onExit?.(clone(session));}catch{/* an exit observer never breaks process bookkeeping */}
   }
   private releaseHeavy(processId:string):void {this.heavyLeases.get(processId)?.release();this.heavyLeases.delete(processId);}
   /** PER-05: page backwards through a command's (or an agent tool row's) full durable output. */

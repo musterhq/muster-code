@@ -7,6 +7,7 @@ import path from 'node:path';
 import { writeProjectExportFile, projectExportFilename } from './project-export-file.ts';
 import {createRequire} from 'node:module';
 import {ProcessSessions} from '../runtime/process-sessions.ts';
+import {ProcessContinuations} from '../runtime/process-continuations.ts';
 import {ScopedComputers} from '../runtime/scoped-computers.ts';
 import {DesktopWorkspaces,commandAuthority,computerAuthority} from './desktop-workspaces.ts';
 import { pathToFileURL } from 'node:url';
@@ -75,6 +76,8 @@ async function main(): Promise<void> {
   });
   let service: AgentService | null = null;
   let runningChats = 0;
+  /** A background process the agent left running at the end of its turn wakes the chat when it exits. */
+  let processContinuations: ProcessContinuations | undefined;
   let repaintPolicy: (() => void) | undefined;
   let disposal: Promise<void> | undefined;
   let shutdownStarted = false;
@@ -212,6 +215,7 @@ async function main(): Promise<void> {
       if ((before === 0) !== (runningChats === 0)) repaintPolicy?.();
       applyBadge(event.snapshot.attention?.totalRequests ?? 0);
       notifySettled(event.snapshot);
+      processContinuations?.observe(event.snapshot.chats);
       lastAttention = event.snapshot.attention;
       notifyAttention();
     }
@@ -240,7 +244,12 @@ async function main(): Promise<void> {
   };
   // CR-18: new terminals launch the Integrated terminal shell chosen in Preferences (login shell when unset or missing).
   const processes = new ProcessSessions(path.join(dataDir,'process-sessions.json'),async input=>commandAuthority(await loaded.service.invoke('app.snapshot',undefined),dataDir,input),onEvent,undefined,
-    {terminal:{shell:async()=>(await loaded.service.invoke('settings.get',{})).values['terminal.shell']}});
+    {terminal:{shell:async()=>(await loaded.service.invoke('settings.get',{})).values['terminal.shell']},onExit:session=>processContinuations?.exited(session)});
+  processContinuations = new ProcessContinuations({
+    agentProcesses:chatId=>processes.agentProcesses(chatId),
+    // The same queue a typed follow-up goes through: it waits for a running turn and holds while the queue is paused.
+    enqueue:(chatId,text,requestId)=>loaded.service.invoke('chat.queue.add',{id:chatId,text,requestId}),
+  });
   // C3.b4: read_thread_terminal for chats whose user allowed it; consent is re-checked on every call.
   const terminalTools = new TerminalToolHost({dir:path.join(dataDir,'agent-tools','terminal'),execPath:process.execPath,
     allowed:async chatId=>(await loaded.service.invoke('terminalAccess.get',{chatId})).allowed,
