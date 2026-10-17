@@ -5,7 +5,9 @@ All notable changes to Muster Agent. Each `## <version>` section becomes the not
 
 ## Unreleased
 
+- Long replies stay smooth while they stream: the message box and every link in the transcript no longer redraw on each new word
 - Typechecking runs on tsc-rs, about twice as fast and using a third less memory, with a CI guard that compares it with the official compiler
+- The Changes tab, Processes tab, Subagents tab and branch picker no longer redraw on every streamed word or keystroke while open
 
 ## 0.3.13
 

@@ -5,7 +5,7 @@ import {EarlierOutput} from './EarlierOutput';
 import {Check,ChevronRight,CircleCheck,CircleDot,CircleHelp,CircleX,Copy,Eraser,FlaskConical,Globe,Hammer,MessageSquarePlus,PanelBottom,PanelRight,Pencil,Play,Plus,RefreshCw,Search,Square,SquareTerminal,Trash2,Wrench,X} from 'lucide-react';
 import {Collapsible as Disclosure} from '@base-ui/react/collapsible';
 import {invoke,subscribe} from '../bridge';
-import {useStore,useStoreSelector} from '../useStore';
+import {useStoreSlice,useStoreSelector} from '../useStore';
 import {openBrowserTab,openTab,selectChat,stopChat} from '../store';
 import {copyText} from '../clipboard';
 import {addComposerContext,type ContextChipSource} from '../composerContext';
@@ -140,7 +140,7 @@ type OwnedCommands=ReturnType<typeof useOwnedCommands>;
 
 /** "Run a command": a non-interactive command with captured output (Full access only). */
 function CommandLauncher({chatId,active,commands}:{chatId:string;active:boolean;commands:OwnedCommands}) {
-  const app=useStore(),chat=app.snapshot?.chats.find(chat=>chat.id===chatId);
+  const app=useStoreSlice('snapshot','sending'),chat=app.snapshot?.chats.find(chat=>chat.id===chatId);
   const [command,setCommand]=useState(''),[label,setLabel]=useState(''),[purpose,setPurpose]=useState<ProcessPurpose>('command'),[starting,setStarting]=useState(false),[startError,setStartError]=useState('');
   const pending=useRef(false),request=useRef<{signature:string;id:string}|null>(null);
   const draft=useRef({command,label,purpose});draft.current={command,label,purpose};
