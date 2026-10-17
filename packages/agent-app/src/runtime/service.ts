@@ -252,7 +252,10 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
   const publishedTimelineRevisions = new Map<string, number>();
   /** The last assistant message of the latest turn (after the last user message), or '' when the turn said nothing. */
   const finalAssistantText = (chatId: string): string => { const items = store.timeline(chatId); for (let i = items.length - 1; i >= 0; i--) { const it = items[i]!; if (it.kind === 'user') return ''; if (it.kind === 'assistant' && it.text.trim()) return it.text; } return ''; };
+  /** The streaming reply of each running chat, written to the store at most once per timeline publish (not once per delta). */
+  const segmentFlushes = new Map<string, () => void>();
   const timeline = (chatId: string) => {
+    segmentFlushes.get(chatId)?.();
     const after = publishedTimelineRevisions.get(chatId) ?? 0;
     const patch = store.timelineChanges(chatId, after);
     if (patch.revision > after) {
@@ -617,9 +620,14 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
       if (kind === 'assistant') producedAssistant = true;
       if (segment && segment.kind !== kind) seal();
       if (!segment) segment = store.appendItem(chatId, kind, '', 'running');
-      segment = {...segment, text: segment.text + delta}; store.updateItem(segment.id, segment.text, 'running'); scheduleTimeline(chatId);
+      // Rewriting the whole growing text on every delta made a long reply O(n²) in SQLite writes; the text is
+      // written when the next timeline patch goes out (≤33 ms later) and when the segment is sealed.
+      segment = {...segment, text: segment.text + delta}; segmentDirty = true; scheduleTimeline(chatId);
     };
-    const seal = () => { if (segment) store.updateItem(segment.id, segment.text, 'completed'); segment = undefined; };
+    let segmentDirty = false;
+    const flushSegment = () => { if (segment && segmentDirty && !disposed) store.updateItem(segment.id, segment.text, 'running'); segmentDirty = false; };
+    segmentFlushes.set(chatId, flushSegment);
+    const seal = () => { if (segment) store.updateItem(segment.id, segment.text, 'completed'); segment = undefined; segmentDirty = false; };
     run.seal = seal;
     run.promise = (async () => {
       try {
@@ -944,6 +952,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
       } finally {
         // Background sub-agents can still be waiting on a card after the parent turn ended: keep it answerable.
         if (run.stopped || disposed || !provider.hasActiveWork?.(chatId)) { settleApprovals(chatId); settleQuestions(chatId); }
+        flushSegment(); if (segmentFlushes.get(chatId) === flushSegment) segmentFlushes.delete(chatId);
         runs.delete(chatId);
         // #426: a compaction asked for during the turn runs now (before any queued message is dispatched).
         const deferred = deferredCompactions.get(chatId);
