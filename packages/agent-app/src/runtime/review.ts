@@ -408,7 +408,15 @@ export async function reviewChanges(root: string, baseline: ReviewBaseline, base
   const roots = untracked.size ? await untrackedRoots(root) : [];
   const counts = numstat.ok ? parseNumstat(numstat.stdout) : new Map<string, { adds: number; dels: number }>();
   const binary = new Set<string>();
-  if (numstat.ok) for (const field of nulFields(numstat.stdout)) if (field.startsWith("-\t-\t") && field.length > 4) binary.add(field.slice(4));
+  if (numstat.ok) {
+    const fields = nulFields(numstat.stdout);
+    // A rename/copy is `-\t-\t` followed by the old and new path fields (keyed by the new path).
+    for (let index = 0; index < fields.length; index++) {
+      if (!fields[index].startsWith("-\t-\t")) continue;
+      if (fields[index].length > 4) binary.add(fields[index].slice(4));
+      else { const target = fields[index + 2]; if (target !== undefined) binary.add(target); index += 2; }
+    }
+  }
   const files: ReviewChange[] = entries.slice(0, MAX_FILES).map(entry => {
     const count = counts.get(entry.path) ?? { adds: 0, dels: 0 };
     const status = entry.status === "added" && untracked.has(entry.path) ? "untracked" : entry.status;
