@@ -5,7 +5,9 @@ All notable changes to Muster Agent. Each `## <version>` section becomes the not
 
 ## Unreleased
 
+- The file editor no longer lets you save over a file it could not read faithfully (not valid UTF-8, or larger than the full-read limit), and text typed while a save is finishing is no longer thrown away
 - Typechecking runs on tsc-rs, about twice as fast and using a third less memory, with a CI guard that compares it with the official compiler
+- In the file editor, "Discard your edit and reload" now keeps the conflict notice and shows the error if the file cannot be re-read
 
 ## 0.3.13
 
