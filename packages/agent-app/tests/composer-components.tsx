@@ -316,27 +316,29 @@ assert.ok(!store.getState().tabs.some(t=>t.kind==='attachment'),'a non-activatin
 await click('[aria-label="Remove photo.png"]');await delay(20);
 assert.ok(!store.getState().tabs.some(t=>t.kind==='attachment'),'removing the tile never opens it');
 assert.ok(calls.some(call=>call.command==='attachments.discard'&&call.input.id===previewCall!.input.id));
-// While running, Enter queues and Cmd+Enter steers with a queue fallback.
+// While running, Enter steers (a refused steer falls back to the queue) and Cmd+Enter queues.
 chat={...chat,status:'running',mode:'agent'};emit();await delay(35);
 assert.ok(document.querySelector('.composer-run-spinner'),'run spinner left of the model');
 assert.equal(byTest('composer-primary')!.getAttribute('aria-label'),'Stop','empty draft while running shows Stop');
 store.setComposerDraft('chat','follow up');await delay(20);
 let textarea=byTest('composer-input') as HTMLTextAreaElement;
 assert.equal(textarea.getAttribute('placeholder'),'Working…');
-assert.equal(byTest('composer-primary')!.getAttribute('aria-label'),'Queue (Enter) · Steer ⌘Enter');assert.ok(document.querySelector('.composer-stop.is-ghost'));
-await key(textarea,'Enter');await delay(20);
-const queued=calls.find(call=>call.command==='chat.queue.add')!;assert.ok(queued,'Enter while running queues');
+assert.equal(store.getState().followUpMode,'steer','Steer is the default with nothing stored');
+assert.equal(byTest('composer-primary')!.getAttribute('aria-label'),'Steer (Enter) · Queue ⌘Enter');assert.ok(document.querySelector('.composer-stop.is-ghost'));
+await key(textarea,'Enter');await delay(30);
+assert.ok(calls.some(call=>call.command==='chat.steer'&&call.input.text==='follow up'),'Enter while running steers by default');
+const queued=calls.find(call=>call.command==='chat.queue.add')!;assert.ok(queued,'a refused steer falls back to the queue');
 assert.equal(queued.input.text,'follow up');
+assert.match(document.querySelector('.composer-status')?.textContent??'',/Queued: agent could not accept a steer right now/);
 assert.equal(store.getState().composerDrafts.chat.text,'','queued text leaves the draft');
 assert.ok(document.querySelector('[data-testid="queue-item"]')?.textContent?.includes('follow up'),'queued row appears immediately');
-store.setComposerDraft('chat','steer now');await delay(20);
+store.setComposerDraft('chat','queue me');await delay(20);
 await key(byTest('composer-input')!,'Enter',{metaKey:true});await delay(30);
-assert.ok(calls.some(call=>call.command==='chat.steer'&&call.input.text==='steer now'));
-assert.ok(calls.some(call=>call.command==='chat.queue.add'&&call.input.text==='steer now'),'a refused steer falls back to the queue');
-assert.match(document.querySelector('.composer-status')?.textContent??'',/Queued: agent could not accept a steer right now/);
+assert.ok(!calls.some(call=>call.command==='chat.steer'&&call.input.text==='queue me'),'Cmd+Enter does the opposite: it queues without steering');
+assert.ok(calls.some(call=>call.command==='chat.queue.add'&&call.input.text==='queue me'));
 // #380: a steer that failed in flight may already have reached the agent, so it is not queued as well (no double send).
 store.setComposerDraft('chat','steer in flight');await delay(20);
-await key(byTest('composer-input')!,'Enter',{metaKey:true});await delay(30);
+await key(byTest('composer-input')!,'Enter');await delay(30);
 assert.ok(calls.some(call=>call.command==='chat.steer'&&call.input.text==='steer in flight'));
 assert.ok(!calls.some(call=>call.command==='chat.queue.add'&&call.input.text==='steer in flight'),'a failed steer is never also queued');
 assert.equal(store.getState().composerDrafts.chat.text,'steer in flight','the draft stays for the user to decide');

@@ -336,8 +336,8 @@ export function PreferencesScreen():React.ReactElement {
           </div>}
           {section==='chat'&&<>
             <div className="preference-group">
-              <Row title="Follow-up behavior" scope={device().title+" · while a chat runs"} description={`Queue follow-ups while Muster runs or steer the current run. Press ${MAC?'⌘':'Ctrl+'}Enter to do the opposite for one message.`}>
-                <Segmented label="Follow-up behavior" value={state.followUpMode} options={[{value:'queue',label:'Queue'},{value:'steer',label:'Steer'}]} onChange={setFollowUpMode}/>
+              <Row title="Enter while running" scope={device().title+" · while a chat runs"} description={`Steer sends your message into the current run so the agent adjusts and keeps going; Queue holds it until the run ends. Press ${MAC?'⌘':'Ctrl+'}Enter to do the opposite for one message.`}>
+                <Segmented label="Enter while running" value={state.followUpMode} options={[{value:'steer',label:'Steer'},{value:'queue',label:'Queue'}]} onChange={setFollowUpMode}/>
               </Row>
               <Row setting="chat.responseStyle" title="Response style" scope="New runs · Codex-based models" description={settings['chat.responseStyle']==='pragmatic'?'Short, direct answers that stick to the result.':settings['chat.responseStyle']==='friendly'?'Explains what it did and why, in a warmer tone.':'Uses the personality set in your Codex config, otherwise Friendly.'}>
                 <Segmented label="Response style" value={settings['chat.responseStyle']} options={[{value:'auto',label:'Automatic'},{value:'friendly',label:'Friendly'},{value:'pragmatic',label:'Pragmatic'}]} onChange={value=>set('chat.responseStyle',value)}/>

@@ -3,6 +3,11 @@
 All notable changes to Muster Agent. Each `## <version>` section becomes the notes of the
 `agent-v<version>` GitHub Release (`.github/workflows/agent-app-release.yml`).
 
+## Unreleased
+
+- Enter while a run is going now steers it by default (Cmd/Ctrl+Enter queues instead). Settings › Chat › "Enter while running" switches the default back to Queue.
+- Steering is more reliable: on the Claude Code route a steer folds into the current task instead of ending it, a message an API route can no longer read is queued instead of being lost, and a Codex steer error is shown with the message queued.
+
 ## 0.3.13
 
 Replies in one turn read as one answer, and pictures that can no longer be read take one line instead of an empty frame.
