@@ -77,3 +77,4 @@
 .device-view[data-mode='3d'] .device-stage { padding:0; }
 /* Android navigation glyphs on the rail (Back ◁, Home ○, Recents □). */
 .device-rail-button svg.device-nav-glyph { width:14px; height:14px; fill:none; stroke:currentColor; stroke-width:1.8; stroke-linejoin:round; }
+.device-native-part { position:absolute; display:block; pointer-events:none; user-select:none; }

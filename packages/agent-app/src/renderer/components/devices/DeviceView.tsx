@@ -15,7 +15,7 @@ import {useDeviceFeed, useFeedPaint, paintInto, type DeviceFeed} from '../../dev
 import {clampedPointOnScreen, containRect, pointOnScreen} from '../../devices/geometry';
 import {Tip} from '../Tooltip';
 import {threeAvailable} from '../../devices/webgl';
-import {DeviceFrameFlat, frameOf} from './DeviceFrameFlat';
+import {DeviceFrameFlat, frameOf, useDeviceChrome} from './DeviceFrameFlat';
 // three.js and the device bodies load only when someone turns on the 3D view.
 const DeviceFrame3D = lazy(() => import('./DeviceFrame3D'));
 
@@ -104,6 +104,7 @@ export function DeviceView({session, visible}: {session: DeviceSession; visible:
   const status = session.state === 'live' && !ready ? 'starting' : session.state;
   const ios = session.platform === 'ios';
   const frame = frameOf(session);
+  const chrome = useDeviceChrome(session.deviceId);
   const handheld = frame.form === 'phone' || frame.form === 'foldable' || frame.form === 'tablet';
   const toChat = !!getState().activeChatId;
   return <section className="device-view" aria-label={`${session.name} live view`} data-platform={session.platform} data-form={session.formFactor} data-state={status} data-mode={mode}>
@@ -121,7 +122,7 @@ export function DeviceView({session, visible}: {session: DeviceSession; visible:
       <div className="device-stage">
         {mode === '3d'
           ? <Suspense fallback={<div className="device-screen-skeleton is-3d" aria-hidden="true"/>}><DeviceFrame3D session={session} feed={feed} onFallback={() => setView('flat')}/></Suspense>
-          : <DeviceFrameFlat spec={frame} picture={ready ? {width: feed!.width, height: feed!.height} : undefined} orientation={session.screen?.orientation}>
+          : <DeviceFrameFlat spec={frame} chrome={chrome} picture={ready ? {width: feed!.width, height: feed!.height} : undefined} orientation={session.screen?.orientation}>
             <canvas ref={canvas} className="device-screen" tabIndex={0} role="img" aria-roledescription="device screen"
               aria-label={`${session.name} screen. Click to tap, drag to swipe; while focused, typing goes to the device.`}
               onPointerDown={input.onPointerDown} onPointerMove={input.onPointerMove} onPointerUp={input.onPointerUp} onPointerCancel={input.onPointerUp}

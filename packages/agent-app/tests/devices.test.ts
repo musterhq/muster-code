@@ -680,3 +680,99 @@ test('realistic model conversion: a USDZ becomes one body with the named live sc
   for (let i = 0; i < uv.count; i++) { min = Math.min(min, uv.getX(i), uv.getY(i)); max = Math.max(max, uv.getX(i), uv.getY(i)); }
   assert.ok(min >= -1e-6 && max <= 1 + 1e-6 && max > 0.99, 'screen UVs span 0..1');
 });
+
+// A tiny solid PNG of the given size, made here (no device art), for the frame readers.
+function png(width: number, height: number): Buffer {
+  const zlib = require('node:zlib') as typeof import('node:zlib');
+  const chunk = (type: string, data: Buffer) => { const out = Buffer.alloc(12 + data.length); out.writeUInt32BE(data.length, 0); out.write(type, 4, 'latin1'); data.copy(out, 8); out.writeUInt32BE(zlib.crc32(Buffer.concat([Buffer.from(type, 'latin1'), data])) >>> 0, 8 + data.length); return out; };
+  const ihdr = Buffer.alloc(13); ihdr.writeUInt32BE(width, 0); ihdr.writeUInt32BE(height, 4); ihdr[8] = 8; ihdr[9] = 6;
+  const rows = Buffer.alloc((width * 4 + 1) * height);
+  return Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), chunk('IHDR', ihdr), chunk('IDAT', zlib.deflateSync(rows)), chunk('IEND', Buffer.alloc(0))]);
+}
+import {createRequire} from 'node:module';
+const require = createRequire(import.meta.url);
+
+test('real frames, iOS: the helper\'s DeviceKit descriptor is read and validated; images come from its read-only route; sliced chromes fall back', async () => {
+  const {parseHubChrome} = await import('../src/main/devices/chrome.ts');
+  // Synthetic, in the shape the helper returns for a simulator; the numbers are made up.
+  const descriptor = {devices: [{device: 'BBBBBBBB-2222', name: 'iPhone 17 Pro', chrome: {identifier: 'phone11', frame: {width: 436, height: 902}, body: {x: 10, y: 8, width: 416, height: 886}, screen: {x: 27, y: 25, width: 402, height: 874},
+    screenRadius: 55, screenCornerRadii: {topLeft: 55, topRight: 55, bottomRight: 55, bottomLeft: 55}, compositeImage: 'PhoneComposite', buttons: [{name: 'Action', image: 'ActionButton', onTop: false, frame: {x: 0, y: 160, width: 12, height: 40}}, {name: 'Bad', image: '../../etc/passwd', frame: {x: 0, y: 0, width: 1, height: 1}}]}}]};
+  const parsed = parseHubChrome(descriptor, 'bbbbbbbb-2222')!;
+  assert.equal(parsed.identifier, 'phone11');assert.equal(parsed.composite, 'PhoneComposite');
+  assert.deepEqual(parsed.screen, {x: 27, y: 25, w: 402, h: 874});assert.deepEqual(parsed.radii, [55, 55, 55, 55]);
+  assert.deepEqual(parsed.buttons.map(b => b.image), ['ActionButton'], 'image names that are paths are dropped');
+  assert.equal(parseHubChrome({devices: [{device: 'BBBBBBBB-2222', chrome: {...descriptor.devices[0]!.chrome, compositeImage: undefined}}]}, 'BBBBBBBB-2222'), null, 'a sliced chrome uses the parametric frame');
+  assert.equal(parseHubChrome({devices: [{device: 'BBBBBBBB-2222', chrome: {...descriptor.devices[0]!.chrome, identifier: '../x'}}]}, 'BBBBBBBB-2222'), null);
+  assert.equal(parseHubChrome({devices: []}, 'BBBBBBBB-2222'), null);
+
+  const dir = tmp();
+  fs.writeFileSync(path.join(dir, 'devices.json'), JSON.stringify({enabled: true}));
+  const installed = helperPaths(path.join(dir, 'tools'));
+  fs.mkdirSync(path.dirname(installed.entry), {recursive: true});fs.writeFileSync(installed.entry, '');fs.writeFileSync(installed.sentinel, '0.15.3\n');
+  const requests: string[] = [];
+  const fetchFn = (async (url: string, init: RequestInit = {}) => {
+    requests.push(url);assert.equal(new Headers(init.headers).get('authorization'), 'Bearer tok');
+    if (url.endsWith('/vendor/serve-sim/grid/api')) return Response.json(descriptor);
+    if (url.includes('/vendor/serve-sim/grid/api/devicekit-chrome?')) return new Response(new Uint8Array(png(4, 4)));
+    return new Response('', {status: 404});
+  }) as typeof fetch;
+  const {manager} = managerFixture({userData: dir, fetch: fetchFn, run: async (_file, args) => {
+    if (args[0] === '-p') return '/Applications/Xcode.app/Contents/Developer';
+    if (args.join(' ') === 'simctl list devices --json') return JSON.stringify({devices: {'com.apple.CoreSimulator.SimRuntime.iOS-26-0': [{udid: 'BBBBBBBB-2222', name: 'iPhone 17 Pro', state: 'Booted', isAvailable: true, deviceTypeIdentifier: 'com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro'}]}});
+    return '';
+  }});
+  (manager as unknown as {hub: unknown}).hub = {endpoint: {origin: 'http://127.0.0.1:5555', token: 'tok', pid: 1}, child: {kill() {}}};
+  const info = console.info; console.info = () => {};
+  try {
+    const chrome = (await manager.chrome('BBBBBBBB-2222'))!;
+    assert.equal(chrome.source, 'xcode');assert.match(chrome.detail, /DeviceKit chrome phone11/);
+    assert.equal(chrome.width, 436);assert.deepEqual(chrome.image.rect, {x: 10, y: 8, w: 416, h: 886});assert.match(chrome.image.dataUrl, /^data:image\/png;base64,/);
+    assert.equal(chrome.buttons.length, 1);
+    assert.ok(requests.every(url => url.startsWith('http://127.0.0.1:5555/vendor/serve-sim/grid/api')), 'only the helper\'s read routes');
+    assert.ok(requests.some(url => url.includes('chrome=phone11&image=PhoneComposite')));
+    const again = await manager.chrome('BBBBBBBB-2222');assert.equal(again, chrome, 'read once per device');
+  } finally { console.info = info; }
+  fs.rmSync(dir, {recursive: true, force: true});
+});
+
+test('real frames, Android: the AVD\'s SDK skin layout and images; mismatched or missing skins fall back', async () => {
+  const {parseSkinLayout, skinPortrait, skinDir, imageSize, androidSkinChrome} = await import('../src/main/devices/chrome.ts');
+  // A layout in the emulator skin format, written for this test (no SDK file is copied).
+  const layout = `parts {\n    device {\n        display {\n            width   40\n            height  80\n            x       0\n            y       0\n        }\n    }\n    portrait {\n        background {\n            image   back.png\n        }\n        foreground {\n            mask    mask.png\n        }\n    }\n}\nlayouts {\n    portrait {\n        width     50\n        height    96\n        color     0x000000\n        event     EV_SW:0:1\n\n        part1 {\n            name    portrait\n            x       0\n            y       0\n        }\n        part2 {\n            name    device\n            x       5\n            y       8\n        }\n    }\n}\n`;
+  assert.deepEqual(skinPortrait(parseSkinLayout(layout)), {width: 50, height: 96, background: 'back.png', screen: {x: 5, y: 8, w: 40, h: 80}, mask: 'mask.png'});
+  assert.equal(skinDir({'skin.path': '_no_skin'}, '/sdk'), null);
+  assert.equal(skinDir({'skin.path': 'skins/pixel_6'}, '/sdk'), path.join('/sdk', 'skins/pixel_6'));
+  assert.equal(skinDir({'skin.name': 'pixel_6'}, '/sdk'), path.join('/sdk', 'skins', 'pixel_6'));
+  assert.equal(skinDir({'skin.path': '/etc'}, '/sdk'), null, 'never outside a skins folder');
+  assert.deepEqual(imageSize(png(7, 9)), {width: 7, height: 9});
+  const webp = Buffer.alloc(30); webp.write('RIFF', 0, 'latin1'); webp.write('WEBP', 8, 'latin1'); webp.write('VP8X', 12, 'latin1'); webp.writeUIntLE(1079, 24, 3); webp.writeUIntLE(2399, 27, 3);
+  assert.deepEqual(imageSize(webp), {width: 1080, height: 2400});
+
+  const sdk = tmp(), skin = path.join(sdk, 'skins', 'test_phone');
+  fs.mkdirSync(skin, {recursive: true});
+  fs.writeFileSync(path.join(skin, 'layout'), layout);fs.writeFileSync(path.join(skin, 'back.png'), png(50, 96));fs.writeFileSync(path.join(skin, 'mask.png'), png(40, 80));
+  const read = {text: (file: string) => { try { return fs.readFileSync(file, 'utf8'); } catch { return undefined; } }, bytes: (file: string) => { try { return new Uint8Array(fs.readFileSync(file)); } catch { return undefined; } }};
+  const chrome = androidSkinChrome(skin, read)!;
+  assert.equal(chrome.source, 'android-skin');assert.match(chrome.detail, /Android SDK skin test_phone \(Apache-2\.0\)/);
+  assert.deepEqual(chrome.screen, {x: 5, y: 8, w: 40, h: 80, radii: [0, 0, 0, 0]});assert.match(chrome.mask!, /^data:image\/png/);
+  fs.writeFileSync(path.join(skin, 'mask.png'), png(10, 10));
+  assert.equal(androidSkinChrome(skin, read)!.mask, undefined, 'a mask that is not display-sized is not applied');
+  fs.writeFileSync(path.join(skin, 'back.png'), png(60, 96));
+  assert.equal(androidSkinChrome(skin, read), null, 'a background that does not match the layout falls back');
+  assert.equal(androidSkinChrome(path.join(sdk, 'skins', 'missing'), read), null);
+
+  // Through the manager: the AVD config names the skin; the SDK is the user's.
+  fs.writeFileSync(path.join(skin, 'back.png'), png(50, 96));
+  const dir = tmp(), avdDir = path.join(dir, 'avd');
+  fs.mkdirSync(path.join(avdDir, 'Test.avd'), {recursive: true});
+  fs.writeFileSync(path.join(avdDir, 'Test.ini'), `path=${path.join(avdDir, 'Test.avd')}\n`);
+  fs.writeFileSync(path.join(avdDir, 'Test.avd', 'config.ini'), 'hw.device.name=pixel_8\nskin.name=test_phone\nskin.path=skins/test_phone\n');
+  fs.writeFileSync(path.join(dir, 'devices.json'), JSON.stringify({enabled: true}));
+  const installed = helperPaths(path.join(dir, 'tools'));
+  fs.mkdirSync(path.dirname(installed.entry), {recursive: true});fs.writeFileSync(installed.entry, '');fs.writeFileSync(installed.sentinel, '0.15.3\n');
+  const {manager} = managerFixture({userData: dir, env: {ANDROID_HOME: sdk, ANDROID_AVD_HOME: avdDir}, readText: read.text, readBytes: read.bytes,
+    run: async (_file, args) => args[0] === '-list-avds' ? 'Test\n' : args[0] === '-p' ? '' : ''});
+  const info = console.info; console.info = () => {};
+  try { const viaManager = (await manager.chrome('avd:Test'))!; assert.equal(viaManager.source, 'android-skin');assert.equal(viaManager.width, 50); } finally { console.info = info; }
+  fs.rmSync(dir, {recursive: true, force: true});fs.rmSync(sdk, {recursive: true, force: true});
+});

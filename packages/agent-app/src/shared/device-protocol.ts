@@ -63,6 +63,26 @@ export interface DeviceList { devices: DeviceInfo[]; errors: string[]; checkedAt
 export type DeviceSessionState = 'starting' | 'live' | 'reconnecting' | 'error';
 export type DeviceOrientation = 'portrait' | 'landscape_left' | 'portrait_upside_down' | 'landscape_right';
 export interface DeviceScreen { width: number; height: number; orientation: DeviceOrientation }
+export interface DeviceRect {x: number; y: number; w: number; h: number}
+/**
+ * A real device frame read at runtime from the user's own tools (main/devices/chrome.ts): Xcode's DeviceKit chrome for
+ * a simulator, the AVD's skin from the Android SDK for an emulator. Never bundled or downloaded; images travel in memory.
+ * Units are the chrome's own (points or skin pixels); the renderer scales the whole thing.
+ */
+export interface DeviceChrome {
+  source: 'xcode' | 'android-skin';
+  /** Where it came from, for diagnostics ("DeviceKit phone11", "Android SDK skin pixel_6 (Apache-2.0)"). */
+  detail: string;
+  width: number; height: number;
+  /** The frame picture and where it sits. */
+  image: {rect: DeviceRect; dataUrl: string};
+  /** Where the live picture goes, with its corner radii (top-left, top-right, bottom-right, bottom-left). */
+  screen: DeviceRect & {radii: [number, number, number, number]};
+  /** An alpha mask for the display (Android skins that ship one). */
+  mask?: string;
+  /** Hardware buttons drawn as separate images (iOS), under or over the frame. */
+  buttons: {rect: DeviceRect; dataUrl: string; onTop: boolean}[];
+}
 /** One live device view. Opened by the user (a sidebar tab) or by an agent (device_open, tied to its chat). */
 export interface DeviceSession {
   deviceId: string;
@@ -117,6 +137,8 @@ export interface DeviceCommands {
   'devices.control': { input: { id: string; owner: 'agent' | 'user' }; output: DeviceSession };
   /** This window cannot decode the simulator's H.264 (no WebCodecs, or its profile is unsupported): stream MJPEG instead. */
   'devices.streamFallback': { input: { id: string }; output: void };
+  /** The device's real frame from the user's own Xcode or Android SDK, or null (the parametric frame is used). */
+  'devices.chrome': { input: { id: string }; output: DeviceChrome | null };
   /** A realistic 3D model: the cached conversion, or the verified apple.com download for the renderer to convert. */
   'devices.model': { input: { id: 'iphone' | 'ipad' }; output: { id: string; bodyNode: string; screenNode: string; glb?: Uint8Array; usdz?: Uint8Array } };
   'devices.modelStore': { input: { id: 'iphone' | 'ipad'; glb: Uint8Array }; output: void };
@@ -125,7 +147,7 @@ export type DeviceEvent =
   | { type: 'deviceSetup'; setup: DeviceSetup }
   | { type: 'deviceList'; list: DeviceList }
   | { type: 'deviceSessions'; sessions: DeviceSession[] };
-export const DEVICE_COMMANDS = {'devices.setup': true, 'devices.configure': true, 'devices.installHelper': true, 'devices.list': true, 'devices.boot': true, 'devices.shutdown': true, 'devices.open': true, 'devices.close': true, 'devices.sessions': true, 'devices.view': true, 'devices.button': true, 'devices.rotate': true, 'devices.screenshot': true, 'devices.control': true, 'devices.streamFallback': true, 'devices.model': true, 'devices.modelStore': true} as const satisfies Record<keyof DeviceCommands, true>;
+export const DEVICE_COMMANDS = {'devices.setup': true, 'devices.configure': true, 'devices.installHelper': true, 'devices.list': true, 'devices.boot': true, 'devices.shutdown': true, 'devices.open': true, 'devices.close': true, 'devices.sessions': true, 'devices.view': true, 'devices.button': true, 'devices.rotate': true, 'devices.screenshot': true, 'devices.control': true, 'devices.streamFallback': true, 'devices.chrome': true, 'devices.model': true, 'devices.modelStore': true} as const satisfies Record<keyof DeviceCommands, true>;
 
 /** IPC: main → renderer frames, renderer → main frame acknowledgements (flow control) and input. */
 export const DEVICE_FRAME_CHANNEL = 'muster:device-frame';

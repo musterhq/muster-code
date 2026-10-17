@@ -59,6 +59,10 @@ try {
   const frame = new Promise<LinkFrame>((resolve) => { first = f => { if (f.data.length && !f.config && (f.codec === 'jpeg' || f.key)) { first = undefined; resolve(f); } }; });
   const session = await deadline(manager.open(pick.id), 6 * 60_000, 'boot and open');
   step('opened', {state: session.state});
+  // Which frame the view would draw: the device's own (Xcode chrome or SDK skin, read at runtime) or the parametric one.
+  // Only its description is logged; the images are never saved.
+  const chrome = await manager.chrome(session.deviceId).catch(error => { step('frame source error', String(error)); return null; });
+  step('frame source', chrome ? {source: chrome.source, detail: chrome.detail, size: [chrome.width, chrome.height], screen: chrome.screen, buttons: chrome.buttons.length, imageBytes: chrome.image.dataUrl.length, mask: !!chrome.mask} : 'parametric');
   manager.view(session.deviceId, 'smoke', true);
   const got = await deadline(frame, 120_000, 'first frame');
   const file = path.join(out, `${platform}-first-frame.${got.codec === 'jpeg' ? 'jpg' : 'h264'}`);

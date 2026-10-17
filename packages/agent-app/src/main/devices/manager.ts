@@ -16,6 +16,9 @@ import {androidTools, APP_ID, checkAndroid, checkIos, checkNode, errorLine, list
 import {HELPER_DOWNLOAD_MB, HELPER_VERSION, helperInstalled, helperPaths, hubEnv, installHelper, killServeSimHelpers, startHub, type HelperPaths, type HubEndpoint, type Spawn} from './helper.ts';
 import {DeviceLink, type LinkDeps, type LinkFrame} from './link.ts';
 import {AppleModels} from './models.ts';
+import {androidSkinChrome, dataUrl, parseHubChrome, skinDir} from './chrome.ts';
+import {readAvdConfig} from './discovery.ts';
+import type {DeviceChrome} from '../../shared/device-protocol.ts';
 
 export const HUB_IDLE_MS = 45_000;
 /** System packages worth offering an agent on Android (settings, browser, the usual Google apps). */
@@ -328,6 +331,45 @@ export class DeviceManager {
   liveSession(id: string): DeviceSession | undefined { return this.live.get(id)?.session; }
   /** What a session is streaming and how much (diagnostics). */
   liveStats(id: string) { return this.live.get(id)?.link.stats; }
+  private chromes = new Map<string, Promise<DeviceChrome | null>>();
+  /** The device's real frame from the user's own Xcode (through the helper) or Android SDK; null to use the parametric one. */
+  chrome(rawId: unknown): Promise<DeviceChrome | null> {
+    this.ready();
+    const id = validId(rawId);
+    let pending = this.chromes.get(id);
+    if (!pending) {
+      pending = this.readChrome(id).catch(error => { console.warn(`Device frame for ${id}: ${errorLine(error)}; using Muster's own frame.`); return null; })
+        .then(chrome => { console.info(`Device frame for ${id}: ${chrome ? chrome.detail : 'parametric (no Xcode chrome or SDK skin)'}`); return chrome; });
+      this.chromes.set(id, pending);
+    }
+    return pending;
+  }
+  private async readChrome(id: string): Promise<DeviceChrome | null> {
+    const device = await this.find(id);
+    if (device.platform === 'android') {
+      const dir = skinDir(readAvdConfig(this.deps, device.name), androidTools(this.deps).sdk);
+      return dir ? androidSkinChrome(dir, {text: file => this.deps.readText?.(file), bytes: file => this.deps.readBytes?.(file)}) : null;
+    }
+    if (this.deps.platform !== 'darwin') return null;
+    // Read-only routes of the loopback helper: the parsed DeviceKit descriptor, then its rasterised images.
+    const hub = await this.hubEndpoint();
+    const get = async (pathname: string) => {
+      const response = await this.deps.fetch(`${hub.origin}${pathname}`, {headers: {authorization: `Bearer ${hub.token}`}, signal: AbortSignal.timeout(20_000)});
+      if (!response.ok) throw new Error(`the helper answered ${response.status}`);
+      return response;
+    };
+    const described = parseHubChrome(await (await get('/vendor/serve-sim/grid/api')).json(), id);
+    if (!described) return null;
+    const image = async (name: string) => {
+      const bytes = new Uint8Array(await (await get(`/vendor/serve-sim/grid/api/devicekit-chrome?chrome=${encodeURIComponent(described.identifier)}&image=${encodeURIComponent(name)}`)).arrayBuffer());
+      if (bytes.length < 24 || Buffer.from(bytes.subarray(0, 4)).readUInt32BE(0) !== 0x89504e47) throw new Error('a chrome image was not a PNG');
+      return dataUrl(bytes, 'image/png');
+    };
+    const [composite, ...buttons] = await Promise.all([image(described.composite), ...described.buttons.map(button => image(button.image).catch(() => null))]);
+    return {source: 'xcode', detail: `Xcode DeviceKit chrome ${described.identifier}, read from this Mac's Xcode`, width: described.width, height: described.height,
+      image: {rect: described.body, dataUrl: composite!}, screen: {...described.screen, radii: described.radii},
+      buttons: described.buttons.flatMap((button, i) => buttons[i] ? [{rect: button.rect, onTop: button.onTop, dataUrl: buttons[i]!}] : [])};
+  }
   /** The renderer cannot decode this simulator's H.264: switch it to MJPEG. */
   streamFallback(rawId: unknown): void { const live = this.live.get(validId(rawId)); live?.link.preferMjpeg(); }
   async waitForInput(id: string, ms?: number): Promise<boolean> { return (await this.live.get(id)?.link.waitForInput(ms)) ?? false; }

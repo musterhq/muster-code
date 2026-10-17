@@ -247,6 +247,29 @@ root.unmount();
   viewRoot.unmount();host.remove();
 }
 
+// 7b. A real frame from the user's own tools (Xcode chrome or SDK skin) is drawn upright with the live screen in its
+//     screen rectangle and the cut-out on it; a turned device uses the parametric frame.
+{
+  const {DeviceFrameFlat}=await import('../src/renderer/components/devices/DeviceFrameFlat');
+  const F=await import('../src/shared/device-frames');
+  const spec=F.iosFrame(undefined,'iPhone 17 Pro');
+  const chrome:any={source:'xcode',detail:'Xcode DeviceKit chrome phone11',width:436,height:902,image:{rect:{x:10,y:8,w:416,h:886},dataUrl:'data:image/png;base64,AA=='},screen:{x:17,y:14,w:402,h:874,radii:[55,55,55,55]},buttons:[{rect:{x:0,y:160,w:12,h:40},dataUrl:'data:image/png;base64,AA==',onTop:false}]};
+  const host=document.createElement('div');document.body.appendChild(host);const frameRoot=createRoot(host);
+  frameRoot.render(<DeviceFrameFlat spec={spec} chrome={chrome} picture={{width:1206,height:2622}}><canvas className="device-screen"/></DeviceFrameFlat>);
+  await until(()=>host.querySelector('.device-frame.is-native')!==null,'the native frame');
+  const native=host.querySelector('.device-frame')!;
+  assert.equal(native.getAttribute('data-frame-source'),'xcode');
+  assert.equal(host.querySelectorAll('img.device-native-part').length,2,'the frame picture and its button');
+  const glass=host.querySelector('.device-frame-glass') as HTMLElement;
+  assert.equal(glass.style.left,`${(17/436)*100}%`);assert.equal(glass.style.width,`${(402/436)*100}%`);
+  assert.ok(glass.querySelector('canvas.device-screen'),'the live screen sits in the real screen rectangle');
+  assert.equal(host.querySelectorAll('.device-frame-cutout').length,1,'the island is drawn over the screen');
+  frameRoot.render(<DeviceFrameFlat spec={spec} chrome={chrome} picture={{width:2622,height:1206}} orientation="landscape_left"><canvas className="device-screen"/></DeviceFrameFlat>);
+  await until(()=>!host.querySelector('.device-frame.is-native'),'the parametric frame for a turned device');
+  assert.equal(host.querySelector('.device-frame')!.getAttribute('data-turns'),'1');
+  frameRoot.unmount();host.remove();
+}
+
 // 8. No desktop bridge: a plain note, nothing else.
 delete (window as any).musterDevices;
 const noBridge=createRoot(document.getElementById('root')!);

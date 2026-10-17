@@ -41,6 +41,7 @@ export function wireDevices(input: {
     userData: input.userData, manifestDir: input.manifestDir, run, runBuffer, exists: existsSync, env: process.env, home, platform: process.platform,
     // AVD config files only (small text); anything large or missing reads as absent.
     readText: file => { try { return statSync(file).size <= 256 * 1024 ? readFileSync(file, 'utf8') : undefined; } catch { return undefined; } },
+    readBytes: file => { try { return statSync(file).size <= 12 * 1024 * 1024 ? readFileSync(file) : undefined; } catch { return undefined; } },
     locate: name => locateCli(name, process.env, home),
     spawn: (command, args, options) => spawn(command, args, {...options, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true}),
     fetch: (...args) => fetch(...args),
@@ -108,6 +109,7 @@ export function wireDevices(input: {
       case 'devices.screenshot': { const shot = await manager.screenshot(request.id); return {dataUrl: `data:image/png;base64,${shot.png.toString('base64')}`, width: shot.width, height: shot.height}; }
       case 'devices.control': return manager.control(request.id, request.owner);
       case 'devices.streamFallback': return manager.streamFallback(request.id);
+      case 'devices.chrome': return manager.chrome(request.id);
       case 'devices.model': return manager.model(request.id);
       case 'devices.modelStore': return manager.storeModel(request.id, request.glb);
     }

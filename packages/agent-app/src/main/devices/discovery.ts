@@ -17,6 +17,8 @@ export interface ProbeDeps {
   platform: NodeJS.Platform;
   /** Reads a small text file (AVD configuration); undefined when it is missing. */
   readText?(file: string): string | undefined;
+  /** Reads a small binary file (an emulator skin image); undefined when missing or too large. */
+  readBytes?(file: string): Uint8Array | undefined;
 }
 
 // --- iOS ---------------------------------------------------------------------------------------------------------
