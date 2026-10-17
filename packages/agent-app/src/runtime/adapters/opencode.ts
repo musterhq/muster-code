@@ -76,7 +76,7 @@ export function openCodeAdapter(options: {binary: string; env?: NodeJS.ProcessEn
       const model = input.model.replace(/^opencode\//, ''), turnId = randomUUID();
       const args = ['run', '--format', 'json', '--agent', input.permissionMode === 'read-only' ? 'plan' : 'build',
         ...(model && model !== 'default' ? ['--model', model] : []), ...(input.resumeThreadId ? ['--session', input.resumeThreadId] : []),
-        // A message starting with "-" would be parsed as an option (yargs); a leading space keeps it the message, as for Cursor.
+        // A message starting with "-" would be parsed as an option (yargs); a leading space keeps it the message.
         ((message: string) => message.startsWith('-') ? ` ${message}` : message)(input.instructions ? `${input.instructions}\n\n${input.prompt}` : input.prompt),
         // After the message: `--file` is an array option and would swallow a following positional.
         ...(input.images ?? []).flatMap(path => ['--file', path])];
