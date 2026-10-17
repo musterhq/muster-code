@@ -185,7 +185,8 @@ export function androidFrame(config: AvdConfig, avdName: string, cutout?: FrameC
   if (/wear/.test(tags) || /^wear/.test(device)) return /round|circular/.test(`${device} ${skin}`) || config['hw.lcd.circular'] === 'true' ? sized(WEAR_ROUND) : sized(WEAR_SQUARE);
   if (/android-tv|google-tv|\btv\b/.test(tags) || /^tv_|_tv$|television/.test(device)) return sized(TV);
   if (/automotive/.test(tags) || /automotive/.test(device)) return sized(AUTOMOTIVE);
-  const foldable = /fold|flip/.test(device) || config['hw.sensor.hinge'] === 'yes' || Object.keys(config).some(key => key.startsWith('hw.displayregion.'));
+  // AVDs carry default (empty) display-region keys and a hinge setting of "no": only a real hinge or second region counts.
+  const foldable = /fold|flip/.test(device) || config['hw.sensor.hinge'] === 'yes' || Number(config['hw.displayregion.0.1.width'] ?? 0) > 0;
 
   // Known families by hardware profile.
   if (/pixel(_\d+)?(_pro)?_fold|^pixel_fold/.test(device)) return PIXEL_FOLD;

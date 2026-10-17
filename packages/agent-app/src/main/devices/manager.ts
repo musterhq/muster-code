@@ -135,7 +135,9 @@ export class DeviceManager {
     const node = this.deps.locate('node');
     if (!node) return Promise.reject(new Error('Node.js was not found, so the device helper cannot run. Install Node.js 20 or later and restart Muster.'));
     const env = hubEnv(this.deps.env, this.paths.stateDir, androidTools(this.deps).sdk, this.deps.platform);
-    this.hubStarting = startHub({node, paths: this.paths, env, spawn: this.deps.spawn, fetch: this.deps.fetch, onExit: () => this.hubExited()})
+    const start = () => startHub({node, paths: this.paths, env, spawn: this.deps.spawn, fetch: this.deps.fetch, onExit: () => this.hubExited()});
+    // A first start right after a cold simulator boot can stall without printing anything (seen in CI); one fresh try clears it.
+    this.hubStarting = start().catch(error => /did not start in time/.test(error instanceof Error ? error.message : String(error)) ? start() : Promise.reject(error))
       .then(started => {
         this.hub = started;
         // A bounded tail of the helper's own log for diagnostics; the token never appears in it (it was only in the banner).

@@ -507,7 +507,9 @@ test('frame specs: iOS from the simctl device type, Android from the AVD config;
 
   const avd = (text: string, name = 'Device') => androidFrame(parseIni(text), name);
   assert.equal(avd('hw.device.name=pixel_9\nhw.lcd.width=1080\nhw.lcd.height=2424').id, 'pixel-pill');
-  assert.equal(avd('hw.device.name=pixel_8').id, 'pixel');assert.equal(avd('hw.device.name=pixel_7_pro').id, 'pixel-curved');assert.equal(avd('hw.device.name=pixel_5').id, 'pixel-side-punch');
+  assert.equal(avd('hw.device.name=pixel_8').id, 'pixel');
+  // A real Pixel 6 AVD (as CI's emulator writes it): default display-region keys and no hinge are not a foldable.
+  assert.equal(avd('hw.device.name=pixel_6\nhw.sensor.hinge=no\nhw.displayRegion.0.1.width=0\nhw.displayRegion.0.1.height=0\nhw.displayRegion.0.1.xOffset=-1\nhw.lcd.width=1080\nhw.lcd.height=2400').id, 'pixel');assert.equal(avd('hw.device.name=pixel_7_pro').id, 'pixel-curved');assert.equal(avd('hw.device.name=pixel_5').id, 'pixel-side-punch');
   assert.equal(avd('hw.device.name=pixel_4').id, 'pixel-bezel');assert.equal(avd('hw.device.name=pixel_3_xl').id, 'pixel-notch');assert.equal(avd('hw.device.name=pixel_2').id, 'android-classic-phone');
   const fold = avd('hw.device.name=pixel_9_pro_fold\nhw.sensor.hinge=yes');
   assert.equal(fold.id, 'pixel-fold');assert.equal(frameForPicture(fold, {width: 2076, height: 2152}).id, 'pixel-fold', 'open: the inner display');

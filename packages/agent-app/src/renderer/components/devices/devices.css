@@ -11,20 +11,20 @@
 .device-view-body { display:flex; flex:1; min-height:0; }
 .device-stage { position:relative; flex:1; min-width:0; display:flex; align-items:center; justify-content:center; padding:16px; background:var(--bg-sunken); container-type:size; }
 /* The device's own frame (DeviceFrameFlat): fits the stage at the device's proportions, at any pane size. */
-.device-frame { --frame-body:#1c1d20; --frame-rim:rgba(255,255,255,.14); position:relative; width:min(100cqw, 100cqh * var(--frame-aspect, 0.5)); aspect-ratio:var(--frame-aspect, 0.5); flex:none; }
-.device-frame[data-color='titanium'] { --frame-body:#5f5c57; --frame-rim:rgba(255,255,255,.22); }
-.device-frame[data-color='light'] { --frame-body:#d7d5d0; --frame-rim:rgba(0,0,0,.18); }
+.device-frame { --frame-body:var(--device-frame-dark); --frame-rim:var(--device-frame-rim); position:relative; width:min(100cqw, 100cqh * var(--frame-aspect, 0.5)); aspect-ratio:var(--frame-aspect, 0.5); flex:none; }
+.device-frame[data-color='titanium'] { --frame-body:var(--device-frame-titanium); --frame-rim:var(--device-frame-rim-bright); }
+.device-frame[data-color='light'] { --frame-body:var(--device-frame-light); --frame-rim:var(--device-frame-rim-dark); }
 .device-frame-art, .device-frame-cutouts { position:absolute; inset:0; width:100%; height:100%; overflow:visible; pointer-events:none; }
 .device-frame-body { fill:var(--frame-body); stroke:var(--frame-rim); stroke-width:.006; }
 .device-frame[data-edge='flat'] .device-frame-body { stroke-width:.009; }
 .device-frame-sheen { pointer-events:none; }
 .device-frame-button { fill:var(--frame-body); stroke:var(--frame-rim); stroke-width:.004; }
 .device-frame-stand { fill:var(--frame-body); stroke:var(--frame-rim); stroke-width:.004; }
-.device-frame-mark { fill:#0a0a0b; stroke:rgba(255,255,255,.08); stroke-width:.003; }
-.device-frame-home { fill:none; stroke:rgba(127,127,127,.6); stroke-width:.008; }
-.device-frame-cutout { fill:#000; }
-.device-frame-glass { position:absolute; overflow:hidden; background:#000; }
-.device-frame-glass > .device-screen { display:block; width:100%; height:100%; object-fit:contain; background:#000; touch-action:none; cursor:default; outline:none; }
+.device-frame-mark { fill:var(--device-frame-mark); stroke:var(--device-frame-mark-edge); stroke-width:.003; }
+.device-frame-home { fill:none; stroke:var(--device-frame-home); stroke-width:.008; }
+.device-frame-cutout { fill:var(--device-screen-off); }
+.device-frame-glass { position:absolute; overflow:hidden; background:var(--device-screen-off); }
+.device-frame-glass > .device-screen { display:block; width:100%; height:100%; object-fit:contain; background:var(--device-screen-off); touch-action:none; cursor:default; outline:none; }
 .device-frame-glass > .device-screen:focus-visible { box-shadow:inset 0 0 0 2px var(--accent); }
 .device-frame-glass > .device-screen-skeleton { inset:0; }
 .device-thumb-stage { position:absolute; inset:8px; display:flex; align-items:center; justify-content:center; container-type:size; }

@@ -85,8 +85,18 @@
   --violet: #a8abea;
   --pink: #df8fc1;
   --media-bg: #0b0c0c;
-  /* #363 3D device frame: Muster's own device bodies take the faint text colour, so every theme gets a contrasting body. */
+  /* #363 device frames: physical device finishes, the same in every theme (a device does not change colour with the app). */
   --device-body: var(--text-faint);
+  --device-frame-dark: #1c1d20;
+  --device-frame-titanium: #5f5c57;
+  --device-frame-light: #d7d5d0;
+  --device-frame-rim: rgba(255,255,255,.14);
+  --device-frame-rim-bright: rgba(255,255,255,.22);
+  --device-frame-rim-dark: rgba(0,0,0,.18);
+  --device-frame-mark: #0a0a0b;
+  --device-frame-mark-edge: rgba(255,255,255,.08);
+  --device-frame-home: rgba(127,127,127,.6);
+  --device-screen-off: #000;
   --paper: #ffffff;
   --paper-ink: #1d1d1f;
   /* Lightness for hue-keyed text (chips, plugin monograms, agent identity): readable on the theme's surface. */
