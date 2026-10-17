@@ -246,7 +246,16 @@ export class CheckoutService {
   }
 
   // --- check out ------------------------------------------------------------------------------------------------------------------------
+  /** Task refs with a check-out under way: a second click while the first is still making its worktree is refused, not run beside it. */
+  private readonly starting = new Set<string>();
   async start(input: CheckoutStartInput): Promise<LeaseView> {
+    if (input.confirm !== true) throw new Error('Check out shows what it will post first. Confirm to continue.');
+    const ref = String(input.taskId);
+    if (this.starting.has(ref)) throw new LeaseError(`${ref} is already being checked out on ${device().lower}.`, 'conflict');
+    this.starting.add(ref);
+    try { return await this.startOnce(input); } finally { this.starting.delete(ref); }
+  }
+  private async startOnce(input: CheckoutStartInput): Promise<LeaseView> {
     if (input.confirm !== true) throw new Error('Check out shows what it will post first. Confirm to continue.');
     const { company, part, task, me, backend } = await this.locate(input.taskId, { fresh: true });
     if (task.status === 'done' || task.status === 'cancelled') throw new Error(`${task.key} is ${task.status === 'done' ? 'done' : 'cancelled'}. Reopen it on the server first.`);
