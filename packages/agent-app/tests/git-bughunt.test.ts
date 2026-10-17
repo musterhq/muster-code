@@ -27,3 +27,21 @@ test('branch list names a branch correctly when a tag has the same name', async 
   assert.ok(branches.local.some(b => b.name === 'release'), JSON.stringify(branches.local));
   assert.equal((await gitInfo(dir)).branch, 'release');
 });
+
+test('blame accepts a file whose name starts with a dash', async () => {
+  const dir = repo();
+  writeFileSync(join(dir, '-dash.txt'), 'x\n'); g(dir, 'add', '--', '-dash.txt'); g(dir, 'commit', '-q', '-m', 'dash');
+  const blame = await blameFile(dir, '-dash.txt');
+  assert.equal(blame.lines.length, 1);
+});
+
+test('markResolved accepts a dash-named conflicted file', async () => {
+  const dir = repo();
+  writeFileSync(join(dir, '-c.txt'), 'base\n'); g(dir, 'add', '--', '-c.txt'); g(dir, 'commit', '-q', '-m', 'c');
+  g(dir, 'switch', '-q', '-c', 'o'); writeFileSync(join(dir, '-c.txt'), 'o\n'); g(dir, 'commit', '-qam', 'o');
+  g(dir, 'switch', '-q', 'main'); writeFileSync(join(dir, '-c.txt'), 'm\n'); g(dir, 'commit', '-qam', 'm');
+  try { g(dir, 'merge', 'o'); } catch { /* conflict */ }
+  writeFileSync(join(dir, '-c.txt'), 'done\n');
+  const state = await markResolved(dir, ['-c.txt']);
+  assert.equal(state.files.length, 0);
+});

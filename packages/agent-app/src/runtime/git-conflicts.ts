@@ -17,7 +17,7 @@ const STATUS_TEXT: Record<string, string> = {
 const NO_EDITOR = {GIT_EDITOR: 'true', GIT_SEQUENCE_EDITOR: 'true'};
 
 function relativePath(value: unknown): string {
-  if (typeof value !== 'string' || !value || value.length > 4096 || value.includes('\0') || value.startsWith('-')) throw new Error('Choose a conflicted file.');
+  if (typeof value !== 'string' || !value || value.length > 4096 || value.includes('\0')) throw new Error('Choose a conflicted file.');
   return value;
 }
 

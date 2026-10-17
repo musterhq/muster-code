@@ -9,7 +9,7 @@ const LOG_LIMIT = 100, FILE_LIMIT = 1000, SIDE_BYTES = 512 * 1024, BLAME_LINES =
 const EMPTY_TREE = GIT_EMPTY_TREE;
 
 function relativePath(value: unknown): string {
-  if (typeof value !== 'string' || !value || value.length > 4096 || value.includes('\0') || value.startsWith('-')) throw new Error('Choose a file in this repository.');
+  if (typeof value !== 'string' || !value || value.length > 4096 || value.includes('\0')) throw new Error('Choose a file in this repository.');
   return value;
 }
 
