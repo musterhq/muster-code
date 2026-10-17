@@ -131,3 +131,14 @@ test('two simultaneous check-outs of one task make one worktree, one chat and on
   assert.equal(h.chatList.length, 1, 'one chat');
   assert.equal(h.server.comments.get('t1')!.length, 1, 'one check-out comment');
 });
+
+test('two simultaneous hand-backs of one task push once and hand back once', async () => {
+  const h = setup(); await h.reader.part(CO);
+  await h.svc.bind(CO.id, 'p-redis', REPO, 'dev');
+  const lease = await h.svc.start({ taskId: 't1', model: OWN, confirm: true });
+  await h.svc.onTurn(lease.chatId!, 'r1', 'completed');
+  const results = await Promise.allSettled([1, 2].map(() => h.svc.handBack({ taskId: 't1', reviewer: { kind: 'agent', id: 'a-qa' }, summary: 'Ready.' })));
+  assert.equal(results.filter(r => r.status === 'fulfilled').length, 1, 'the second click is refused as already handed back');
+  assert.deepEqual(h.pushed, ['muster/RAG-1'], 'pushed once');
+  assert.equal(h.server.comments.get('t1')!.filter(c => /Handed back for review/.test(c.body)).length, 1);
+});
