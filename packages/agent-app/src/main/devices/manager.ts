@@ -400,7 +400,7 @@ export class DeviceManager {
       const dir = fs.mkdtempSync(path.join(this.paths.stateDir, 'shot-'));
       try {
         const file = path.join(dir, 'screen.png');
-        await this.deps.run('/usr/bin/xcrun', ['simctl', 'io', device.id, 'screenshot', '--type=png', file], {timeoutMs: 20_000});
+        await this.simctlPatient(['io', device.id, 'screenshot', '--type=png', file]);
         png = fs.readFileSync(file);
       } finally { fs.rmSync(dir, {recursive: true, force: true}); }
     } else png = await this.deps.runBuffer(androidTools(this.deps).adb, ['-s', device.id, 'exec-out', 'screencap', '-p'], {timeoutMs: 20_000});
