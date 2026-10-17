@@ -38,3 +38,11 @@ test('undoing a deleted symlink restores a symlink', async () => {
   await undoFile(dir, {path: 'link', baseline: 'head', expectedAfterHash: file.afterHash});
   assert.equal(g(dir, 'status', '--porcelain').trim(), '');
 });
+
+test('a binary file whose extension is constructor has no image preview', async () => {
+  const dir = repo();
+  writeFileSync(join(dir, 'blob.constructor'), Buffer.from([0, 1, 2, 3, 0, 255]));
+  const diff = await reviewFileDiff(dir, 'blob.constructor', 'head');
+  assert.equal(diff.binary, true);
+  assert.equal(diff.image, undefined);
+});

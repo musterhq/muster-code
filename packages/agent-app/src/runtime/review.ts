@@ -464,7 +464,7 @@ async function readDiff(root: string, path: string, baseline: ReviewBaseline, ba
     tooLarge(afterSize) ? Buffer.alloc(0) : blob(root, entry.newSha),
   ]);
   const binary = looksBinary(beforeBuffer) || looksBinary(afterBuffer);
-  const mime = IMAGE_MIME[path.split(".").pop()?.toLowerCase() ?? ""];
+  const extension = path.split(".").pop()?.toLowerCase() ?? "", mime = Object.hasOwn(IMAGE_MIME, extension) ? IMAGE_MIME[extension] : undefined;
   const dataUrl = (buffer: Buffer, size: number) => size && size <= IMAGE_BYTES && buffer.length === size ? `data:${mime};base64,${buffer.toString("base64")}` : undefined;
   const image = mime && (binary || mime === "image/svg+xml") ? { mime, ...(entry.oldSha ? { before: dataUrl(beforeBuffer, beforeSize) } : {}), ...(entry.newSha ? { after: dataUrl(afterBuffer, afterSize) } : {}) } : undefined;
   const truncated = !binary && (beforeSize > MAX_SIDE_BYTES || afterSize > MAX_SIDE_BYTES);
