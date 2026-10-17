@@ -3,6 +3,11 @@
 All notable changes to Muster Agent. Each `## <version>` section becomes the notes of the
 `agent-v<version>` GitHub Release (`.github/workflows/agent-app-release.yml`).
 
+## Unreleased
+
+- After you stop a run, sending a new message no longer asks whether to clear the queue and never drops it: the held messages stay queued and run, in order, after the new one.
+- If a run is stopped before your message was sent, your text comes back into the composer instead of disappearing.
+
 ## 0.3.13
 
 Replies in one turn read as one answer, and pictures that can no longer be read take one line instead of an empty frame.
