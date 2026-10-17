@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import React from 'react';
 import {renderToStaticMarkup} from 'react-dom/server';
 const {OrgAvatar}=await import('../src/renderer/components/OrgSidebar');
-const initial=(name:string)=>renderToStaticMarkup(<OrgAvatar name={name}/>).replace(/<[^>]+>/g,'');
+const initial=(name:string)=>(renderToStaticMarkup(<OrgAvatar name={name}/>).match(/>([^<]*)<\/span>/)??[])[1];
 assert.equal(initial('🚀 Launch'),'🚀');
 assert.equal(initial('  ragnar'),'R');
 assert.equal(initial('𝔸lpha'),'𝔸');

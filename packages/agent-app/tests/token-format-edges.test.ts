@@ -11,6 +11,8 @@ test('token counts never read as a thousand of the next unit', () => {
 test('very large token counts get a billions unit', () => {
   assert.equal(formatTokenCount(2_500_000_000), '2.5B');
   assert.equal(formatTokenCount(1e12), '1000B');
+  assert.equal(formatTokenCount(999_999_999), '1B');
+  assert.equal(formatTokenCount(999_499_999), '999M');
 });
 test('a negative cost is not shown as under a cent', () => {
   assert.equal(formatUsd(-5), '—');

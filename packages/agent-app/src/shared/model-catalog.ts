@@ -91,7 +91,7 @@ export function formatTokenCount(tokens: number): string {
   if (!Number.isFinite(tokens) || tokens < 0) return '—';
   if (tokens < 1000) return String(Math.round(tokens));
   // 999,999 reads as 1M, not 1000K.
-  const [value, unit] = tokens >= 1_000_000_000 ? [tokens / 1_000_000_000, 'B'] : tokens >= 999_500 ? [tokens / 1_000_000, 'M'] : tokens >= 1_000_000 ? [tokens / 1_000_000, 'M'] : [tokens / 1000, 'K'];
+  const [value, unit] = tokens >= 999_500_000 ? [tokens / 1_000_000_000, 'B'] : tokens >= 999_500 ? [tokens / 1_000_000, 'M'] : [tokens / 1000, 'K'];
   return `${value >= 100 || Number.isInteger(value) ? Math.round(value) : value.toFixed(1).replace(/\.0$/, '')}${unit}`;
 }
 
