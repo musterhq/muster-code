@@ -331,8 +331,10 @@ export function createProviderAdapter(options: { core?: CoreClient; available?: 
       const completed = new Promise<void>(resolve => { finish = resolve; });
       const session: OwnedSession = { owner: previous?.owner ?? `${OWNER}:${instance}:${input.chat.id}:${route.info.id}:${bindingId}`, key:key(input.chat.id,route.info.id,bindingId), providerId:route.info.id,bindingId, controller: new AbortController(), active: true, activity: false, terminalTurns: new Set(), liveTurns: previous?.liveTurns ?? new Set(), workOverflow: previous?.workOverflow, threadId: resumeThread ?? previous?.threadId, completed, finish, signature, mode: input.chat.mode };
       sessions.set(input.chat.id, session);
+      // Set when bounded network reconnects give up: later callbacks from the abandoned transport are dropped.
+      let networkGaveUp = false;
       const lateCancellation = () => {
-        if (!session.controller.signal.aborted && !session.retired && !disposed) return false;
+        if (!session.controller.signal.aborted && !disposed && !networkGaveUp) return false;
         // Legacy core has no pre-dispatch AbortSignal. Its late client is
         // closed on first callback/settlement; new core checks signal before dispatch.
         if (sessions.get(input.chat.id) === session) close(session);
@@ -342,6 +344,7 @@ export function createProviderAdapter(options: { core?: CoreClient; available?: 
       let networkError: string | undefined;
       const networkStopped: Promise<ProviderResult> = reconnect.failed.then(reason => {
         networkError = `${reason} Automatic reconnects stopped. Earlier work may have reached the provider; review it before retrying.`;
+        networkGaveUp = true;
         session.retired = true;
         close(session);
         return {status: 'failed' as const, finalMessage: '', dispatchState: 'unknown' as const, errorMessage: networkError, threadId: session.threadId, turnId: session.turnId};
@@ -388,17 +391,18 @@ export function createProviderAdapter(options: { core?: CoreClient; available?: 
                 if (session.terminalTurns.size < 64) session.terminalTurns.add(identity);
               }
             }
-            if (method.startsWith('item/') || method === 'turn/started') session.activity = true;
+            const itemEvent = method.startsWith('item/');
+            if (itemEvent || method === 'turn/started') session.activity = true;
             if (lateCancellation()) return;
             if (routeIdle && sessions.get(input.chat.id) === session) {
               // Between Muster runs the warm session still reports turns the app-server starts itself.
               for (const listener of idleListeners) { try { listener(input.chat.id, method, params); } catch { /* observers must not break the stream */ } }
               if (method === 'turn/completed' && params.threadId === session.threadId && turn?.id === session.idleTurnId) session.idleTurnId = undefined;
             }
-            const parentEvent = !session.threadId || !params.threadId || params.threadId === session.threadId;
-            if (parentEvent && session.active) {
-              if (method === 'error') reconnect.observe(params);
-              else if (method.startsWith('item/')) reconnect.progress();
+            // The core forwards every streamed delta here first as its item/* notification, so this is the one progress signal.
+            if ((itemEvent ? reconnect.armed : method === 'error') && session.active
+              && (!session.threadId || !params.threadId || params.threadId === session.threadId)) {
+              if (itemEvent) reconnect.progress(); else reconnect.observe(params);
             }
             input.onEvent(method,params);
             const item=params.item as Record<string,unknown>|undefined;
@@ -434,8 +438,8 @@ export function createProviderAdapter(options: { core?: CoreClient; available?: 
           // Plan mode and can only describe patches (F53).
           collaborationMode: input.chat.mode === 'plan' ? { mode: 'plan', settings: { model, reasoning_effort: reasoning } }
             : previous?.mode === 'plan' || (!previous && resumeThread) ? { mode: 'default', settings: { model, reasoning_effort: reasoning } } : undefined,
-          onDelta(text: string) { session.activity = true; if (!lateCancellation()) { reconnect.progress(); input.onDelta(text); } },
-          onReasoningDelta(text: string) { session.activity = true; if (!lateCancellation()) { reconnect.progress(); input.onReasoning(text); } },
+          onDelta(text: string) { session.activity = true; if (!lateCancellation()) input.onDelta(text); },
+          onReasoningDelta(text: string) { session.activity = true; if (!lateCancellation()) input.onReasoning(text); },
         })]);
         if(commands.size&&result.threadId&&!session.controller.signal.aborted&&!disposed){
           try{

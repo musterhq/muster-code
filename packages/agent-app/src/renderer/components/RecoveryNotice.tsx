@@ -67,8 +67,9 @@ export function RecoveryNotice({chat,onRetry}:{chat:Chat;onRetry?:()=>Promise<vo
     {uncertain && <><p>Your draft is retained. Check the existing attempt before sending again.</p><button type="button" className="workspace-inline-link" disabled={checking || active} onClick={()=>void check()}>{checking?'Checking provider status…':stillRunning?'Check now':'Check provider status'}</button> <button type="button" className="workspace-inline-link" data-testid="recovery-continue-anyway" disabled={active} title="Skip the check. The earlier attempt may still be working; nothing is resent." onClick={()=>void proceed()}>Continue anyway</button></>}
     {rejected && <><p>{draft?'No turn was dispatched; your draft is retained.':'No turn was dispatched. Write a message to retry.'}</p><button type="button" className="workspace-inline-link" aria-busy={retrying||undefined} disabled={retrying || sending || active || !draft} onClick={()=>void retry()}>{retrying?'Retrying…':'Retry now'}</button></>}
     {failed && <button type="button" className="workspace-inline-link" aria-busy={retrying||undefined} disabled={retrying || sending || active || (!draft && !onRetry)} onClick={()=>{
-      if (draft) void retry();
-      else if (onRetry) { setRetrying(true); void onRetry().finally(()=>setRetrying(false)); }
+      // Retry re-runs the failed turn; it never sends a follow-up the user is still typing.
+      if (onRetry) { if (pending.current) return; pending.current=true; setRetrying(true); void onRetry().finally(()=>{pending.current=false; setRetrying(false);}); }
+      else void retry();
     }}>{retrying?'Retrying…':'Retry'}</button>}
     {chat.recovery?.auth && <button type="button" className="workspace-inline-link" data-testid="recovery-open-providers" onClick={()=>openProvidersTab()}>Open Accounts &amp; providers</button>}
     {result && <p>{result}</p>}

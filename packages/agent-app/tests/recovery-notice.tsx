@@ -93,5 +93,12 @@ button()!.click();await delay(20);
 assert.equal(networkRetries,1);assert.equal(button()?.textContent,'Retrying…');assert.equal(button()?.hasAttribute('disabled'),true);
 finishRetry();await delay(20);
 assert.equal(button()?.textContent,'Retry');
+// Retry re-runs the failed turn: a follow-up the user is typing is never sent in its place.
+setComposerDraft('chat-1','A follow-up I am still writing');await delay(20);
+const sendsBefore=invoked.filter(call=>call.command==='chat.send').length;
+button()!.click();await delay(20);
+assert.equal(networkRetries,2,'Retry uses the turn retry');assert.equal(invoked.filter(call=>call.command==='chat.send').length,sendsBefore,'the draft is not sent');
+finishRetry();await delay(20);
+setComposerDraft('chat-1','');
 root.unmount();assert.deepEqual(errors,[]);
 console.log('PASS: admission-rejected Retry now sends the retained draft with busy/disabled states; recovery-needed keeps the reconcile button');

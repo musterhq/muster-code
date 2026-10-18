@@ -6,7 +6,6 @@ All notable changes to Muster Agent. Each `## <version>` section becomes the not
 ## Unreleased
 
 - Stop failed network reconnects after three attempts or 30 seconds, explain proxy, DNS, TLS and refused connections, and offer Retry.
-
 - Typechecking runs on tsc-rs, about twice as fast and using a third less memory, with a CI guard that compares it with the official compiler
 
 ## 0.3.13

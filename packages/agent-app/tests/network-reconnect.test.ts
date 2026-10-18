@@ -18,7 +18,7 @@ function failingTransport(settleOnClose = false) {
     clearCodexAppServerSessions() {closed++; if (settleOnClose) finish({status: 'failed', finalMessage: '', errorMessage: 'transport closed'});},
   };
   const adapter = createProviderAdapter({core, available: () => true, command: '/unused'});
-  return {adapter, closed: () => closed, emit(params = proxyError) {(args.onEvent as ProviderInput['onEvent'])('error', params);}, delta() {(args.onDelta as (text: string) => void)('late');}, finish() {finish({status: 'completed', finalMessage: 'done'});}};
+  return {adapter, closed: () => closed, emit(params = proxyError) {(args.onEvent as ProviderInput['onEvent'])('error', params);}, delta() {(args.onEvent as ProviderInput['onEvent'])('item/agentMessage/delta', {itemId: 'm', delta: 'late'}); (args.onDelta as (text: string) => void)('late');}, finish() {finish({status: 'completed', finalMessage: 'done'});}};
 }
 
 test('failing transport stops after three reconnect failures, explains proxy and allows manual retry', async () => {
@@ -111,4 +111,47 @@ test('HTTP fetch failures explain nested proxy, DNS, TLS and refused causes with
     assert.match(result.errorMessage ?? '', expected);
     assert.doesNotMatch(result.errorMessage ?? '', /secret|user:/);
   }
+});
+
+test('numbered provider retries reach the provider fallback; the deadline still bounds them', async t => {
+  t.mock.timers.enable({apis: ['setTimeout']});
+  const f = failingTransport();
+  const run = f.adapter.run(input());
+  // Codex exhausts WebSockets (n/5) and then falls back to HTTPS on its own: the count must not stop that early.
+  for (let n = 1; n <= 5; n++) f.emit({willRetry: true, error: {message: `Reconnecting... ${n}/5 (stream disconnected before completion: Connection refused (os error 61))`}});
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(f.closed(), 0, 'numbered retries are left to the provider');
+  t.mock.timers.tick(NETWORK_RECONNECT_DEADLINE_MS);
+  const result = await run;
+  assert.equal(result.status, 'failed');
+  assert.match(result.recovery?.reason ?? '', /connection was refused/);
+  f.adapter.dispose();
+});
+
+test('a numbered retry that recovers keeps the turn; open-ended waits are still counted', async () => {
+  const f = failingTransport();
+  const run = f.adapter.run(input());
+  for (let n = 1; n <= 5; n++) f.emit({willRetry: true, error: {message: `Reconnecting... ${n}/5 (stream disconnected before completion: error sending request)`}});
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(f.closed(), 0, 'numbered retries are left to the provider');
+  f.delta();
+  for (let i = 0; i < 2; i++) f.emit({willRetry: true, error: {message: 'Reconnecting... waiting for network (Connection failed: error sending request)'}});
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(f.closed(), 0);
+  f.emit({willRetry: true, error: {message: 'Reconnecting... waiting for network (Connection failed: error sending request)'}});
+  const result = await run;
+  assert.equal(result.status, 'failed');
+  assert.match(result.recovery?.reason ?? '', /network connection to the provider failed/);
+  f.adapter.dispose();
+});
+
+test('a host name is not a cause, and unclassified transport text never shows credentials', async () => {
+  const {networkFailure} = await import('../src/runtime/network-failure.ts');
+  assert.match(networkFailure(new Error('error sending request for url (https://llm-proxy.example/v1/responses): Connection refused')) ?? '', /connection was refused/);
+  assert.match(networkFailure(new Error('error sending request for url (https://dnsdemo.example/v1)')) ?? '', /network connection to the provider failed/);
+  const error = new Error('unexpected reply from https://user:secret@gateway.invalid/v1');
+  const adapter = openAICompatibleAdapter({endpoint: 'https://invalid/v1', label: 'Example', apiKey: () => 'key', tools: false, fetch: async () => {throw error;}});
+  const result = await adapter.run({...input(), model: 'model', permissionMode: 'read-only', signal: new AbortController().signal, onThreadReady() {}, onTurnAccepted() {}} as AdapterRunInput);
+  assert.match(result.errorMessage ?? '', /Could not reach Example/);
+  assert.doesNotMatch(result.errorMessage ?? '', /secret/);
 });
