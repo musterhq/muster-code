@@ -3,7 +3,7 @@ import {chatGroup,compareChats,type ChatSort} from './chatNavigation.ts';
 
 export const NAV_HISTORY_LIMIT=50;
 
-/** Bounded back/forward stacks over chat selection. Pure: the store binding lives in menuActions. */
+/** Bounded back/forward stacks over app locations (a chat, a Settings section, a screen). Pure: the store binding lives in menuActions. */
 export class NavHistory {
   private current:string|null=null;
   private readonly back:string[]=[];
@@ -53,7 +53,8 @@ export class NavHistory {
 
 export interface NavHistoryDeps {
   subscribe(listener:()=>void):()=>void;
-  activeChatId():string|null;
+  /** The location now on screen, or null when it is not one to return to (e.g. a New chat draft). */
+  current():string|null;
   exists(id:string):boolean;
   select(id:string):void;
 }
@@ -67,8 +68,8 @@ export interface NavHistoryHandle {
 
 /** Bind a history to a store-like source; selection made through goBack/goForward is suppressed from recording. */
 export function installNavHistory(deps:NavHistoryDeps,history=new NavHistory()):NavHistoryHandle {
-  history.track(deps.activeChatId());
-  const unsubscribe=deps.subscribe(()=>history.track(deps.activeChatId()));
+  history.track(deps.current());
+  const unsubscribe=deps.subscribe(()=>history.track(deps.current()));
   const go=(id:string|null)=>{
     if(id===null)return false;
     history.suppressed(()=>deps.select(id));
