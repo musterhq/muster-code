@@ -47,7 +47,7 @@ import { createNativeThreadBridge } from './codex-native.ts';
 import { createNativeTurnObserver } from './native-turns.ts';
 import { createNativeQueueMirror } from './native-queue.ts';
 import { ChatAttachments, attachedFileLines } from './attachments.ts';
-import { admissionRetryText, withAdmissionRetry } from './admission-retry.ts';
+import { admissionRetryText, asSentence, retryClock, withAdmissionRetry } from './admission-retry.ts';
 import { ContextLedger, HISTORY_WINDOW_EVENT, TOOLS_UNAVAILABLE_EVENT, requestsConnectors, type ContextBlock } from './context-budget.ts';
 import { createDomainHooks } from './domains/hooks.ts';
 import { createDomains } from './domains/index.ts';
@@ -895,14 +895,16 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
         let result = retried.result;
         if (retryNotice && !disposed) {
           const sent = !retried.cancelled && result.recovery?.kind !== 'admission-rejected' && result.recovery?.kind !== 'failed';
-          const lead = retryReason === 'transient' ? 'Provider attempt did not start.' : retryDetail ?? 'The provider is temporarily unavailable.';
-          store.updateItem(retryNotice.id, retried.cancelled ? 'Stopped while waiting to retry the provider.' : sent ? `${lead} Sent after ${retried.retries} ${retried.retries === 1 ? 'retry' : 'retries'}.` : `${lead} Gave up after ${retried.retries} automatic retries.`, retried.cancelled ? 'cancelled' : sent ? 'completed' : 'failed', {...store.item(retryNotice.id)?.data, retryAt: null});
+          const lead = retryReason === 'transient' ? 'Provider attempt did not start.' : retryDetail ? asSentence(retryDetail) : 'The provider is temporarily unavailable.';
+          store.updateItem(retryNotice.id, retried.cancelled ? 'Stopped while waiting to retry the provider.' : sent ? `${lead} Sent after ${retried.retries} ${retried.retries === 1 ? 'retry' : 'retries'}.` : `${lead} Gave up after ${retried.retries} automatic ${retried.retries === 1 ? 'retry' : 'retries'}.`, retried.cancelled ? 'cancelled' : sent ? 'completed' : 'failed', {...store.item(retryNotice.id)?.data, retryAt: null});
         }
         if (retried.cancelled) result = {...result, recovery: {kind:'cancelled',retryable:false,reason:'Stopped while waiting to retry the provider. The request was not accepted.'}};
         else if (retried.retries && result.recovery?.kind === 'failed') result = {...result, recovery: {...result.recovery, reason: `${result.recovery.reason} (after ${retried.retries} automatic ${retried.retries === 1 ? 'retry' : 'retries'})`}};
         else if (retried.retries && result.recovery?.kind === 'admission-rejected') {
-          result = {...result, recovery: {...result.recovery, reason: `${result.recovery.reason} Stopped after ${retried.retries} automatic retries.`}};
+          result = {...result, recovery: {...result.recovery, reason: `${result.recovery.reason} Stopped after ${retried.retries} automatic ${retried.retries === 1 ? 'retry' : 'retries'}.`}};
         }
+        // The provider asked for a longer wait than a run is held open: say when, rather than retrying early.
+        if (retried.retryAt && result.recovery?.kind === 'admission-rejected') result = {...result, recovery: {...result.recovery, reason: `${result.recovery.reason} The provider asked to wait until ${retryClock(retried.retryAt)}.`}};
         if (disposed) return;
         seal();
         reconnected(result.status === 'completed' ? 'completed' : 'failed');

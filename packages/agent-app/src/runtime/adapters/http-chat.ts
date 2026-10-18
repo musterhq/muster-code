@@ -1,5 +1,5 @@
 import {randomUUID} from 'node:crypto';
-import {ConversationMemory, loadImages, responseError, sseEvents, type ChatMessage} from './shared.ts';
+import {ConversationMemory, loadImages, responseError, retryAfterMs, sseEvents, type ChatMessage} from './shared.ts';
 import type {AdapterRunInput, AdapterRunResult, RunnableAdapter} from './types.ts';
 import {HISTORY_WINDOW_EVENT, TOOLS_UNAVAILABLE_EVENT} from '../context-budget.ts';
 import {browserOffered, executeTool, toolInstructions, toolSpecs, type ToolCall} from './http-tools.ts';
@@ -53,11 +53,8 @@ async function turnBody(input: AdapterRunInput, memory: ConversationMemory, labe
     }
   }
   if (!response.ok) {
-    const header = response.headers.get('retry-after');
-    const seconds = header !== null && /^\d+(?:\.\d+)?$/.test(header.trim()) ? Number(header) : NaN;
-    const delay = Number.isFinite(seconds) ? seconds * 1000 : header ? Date.parse(header) - Date.now() : NaN;
-    const retryAfterMs = Number.isFinite(delay) && delay >= 0 ? Math.ceil(delay) : undefined;
-    return fail(await responseError(response, label), {statusCode: response.status, ...(retryAfterMs !== undefined ? {retryAfterMs} : {})});
+    const wait = retryAfterMs(response.headers);
+    return fail(await responseError(response, label), {statusCode: response.status, ...(wait !== undefined ? {retryAfterMs: wait} : {})});
   }
   if (!response.body) return {status: 'failed', finalMessage: '', threadId, dispatchState: 'dispatched', errorMessage: `${label} returned an empty stream.`};
   const turnId = randomUUID();

@@ -1,4 +1,5 @@
 import type {Chat, ChatPermissionMode} from '../shared/protocol.ts';
+import {asSentence} from './admission-retry.ts';
 
 /** A task may span many provider turns. Its durable lifetime belongs to the
  * service; core budget support must be feature-detected before dispatch. */
@@ -91,7 +92,7 @@ export function classifyProviderFailure(result: DispatchResult, evidence: { acti
   };
   if (definitelyNotDispatched && ([503, 429].includes(result.failure?.statusCode ?? 0) || /(?:\b(?:503|429)\b|chat admission capacity is temporarily unavailable)/i.test(result.errorMessage ?? ''))) return {
     kind: 'admission-rejected', retryable: true,
-    reason: `${result.failure?.statusCode === 429 || /\b429\b/.test(result.errorMessage ?? '') ? `Rate limited by ${evidence.provider?.name ?? 'the provider'} (429).` : 'The provider is temporarily unavailable.'}${result.errorMessage ? ` ${result.errorMessage.replace(/\s+/g, ' ').trim().slice(0, 600)}` : ''} The request was not accepted. Try again later.${evidence.resetEta ? ` ${evidence.resetEta}` : ''}`,
+    reason: `${result.failure?.statusCode === 429 || /\b429\b/.test(result.errorMessage ?? '') ? `Rate limited by ${evidence.provider?.name ?? 'the provider'} (429).` : 'The provider is temporarily unavailable.'}${result.errorMessage ? ` ${asSentence(result.errorMessage.replace(/\s+/g, ' ').slice(0, 600))}` : ''} The request was not accepted. Try again later.${evidence.resetEta ? ` ${evidence.resetEta}` : ''}`,
   };
   // Keep the provider's own words: a generic sentence hid the real cause (F19/F45/F55).
   // A turn that provably never dispatched is safe to resend, so it is retryable.

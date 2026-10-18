@@ -53,6 +53,22 @@ export async function* sseEvents(body: ReadableStream<Uint8Array>, maxLine = 4 *
   } finally { await reader.cancel().catch(() => {}); }
 }
 
+/** Milliseconds a non-2xx response asks the client to wait, or undefined when it names no usable wait.
+ *  Reads `retry-after-ms` (sent by some OpenAI-compatible routers) and then `retry-after` as delta-seconds or an
+ *  HTTP-date (RFC 9110 §10.2.3). A date already past means "now" (0). Negative, NaN, empty and free-text values
+ *  are ignored; a too-large number becomes MAX_SAFE_INTEGER so callers' caps apply instead of a silent fallback. */
+export function retryAfterMs(headers: Pick<Headers, 'get'>, now: number = Date.now()): number | undefined {
+  const millis = headers.get('retry-after-ms')?.trim();
+  if (millis && /^\d+(?:\.\d+)?$/.test(millis)) return Math.min(Math.ceil(Number(millis)), Number.MAX_SAFE_INTEGER);
+  const value = headers.get('retry-after')?.trim();
+  if (!value) return undefined;
+  if (/^\d+(?:\.\d+)?$/.test(value)) return Math.min(Math.ceil(Number(value) * 1000), Number.MAX_SAFE_INTEGER);
+  // HTTP-date only: a weekday or month name and a time. Date.parse alone accepts "-5" or "1.5.2030" as dates.
+  if (!/^[A-Za-z]{3,9},? .*\d{1,2}:\d{2}(?::\d{2})?/.test(value)) return undefined;
+  const at = Date.parse(value);
+  return Number.isFinite(at) ? Math.max(0, Math.ceil(at - now)) : undefined;
+}
+
 /** A short, secret-free error line from a non-2xx response. */
 export async function responseError(response: Response, label: string): Promise<string> {
   let text = '';
