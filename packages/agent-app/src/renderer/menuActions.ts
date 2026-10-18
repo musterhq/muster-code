@@ -11,19 +11,37 @@ import {focusComposer} from './focus';
 import {transitionLayout} from './layoutMotion';
 import {chatOrder,installNavHistory,neighbourChat,type NavHistoryHandle} from './navHistory';
 import {
-  activeChat,closeTab,getState,notifyError,notifySuccess,openAppSettings,
+  activeChat,closeTab,getState,notifyError,notifySuccess,openAppSettings,openAutomationsScreen,openHubScreen,openMemoryScreen,openProjectsScreen,type SettingsSection,
   selectChat,setNavHidden,setResourcesHidden,subscribeStore,toggleSummary,updateChat,wakeChat,
 } from './store';
 
 // --- Back / forward --------------------------------------------------------
+// History is over locations, like a browser: a chat, a Settings section, Memory for a folder, or a whole screen.
+const SCREENS:Record<string,()=>void>={projects:openProjectsScreen,automations:openAutomationsScreen,hub:openHubScreen};
+export function currentLocation():string|null {
+  const s=getState();
+  if(s.screen==='work')return s.activeChatId?`chat:${s.activeChatId}`:null;
+  if(s.screen==='settings')return `settings:${s.settingsSection}`;
+  if(s.screen==='memory')return `memory:${s.memoryFolderId??''}`;
+  return SCREENS[s.screen]?`screen:${s.screen}`:null;
+}
+function locationExists(location:string):boolean {
+  const [kind,...rest]=location.split(':'),value=rest.join(':');
+  if(kind==='chat')return getState().snapshot?.chats.some(chat=>chat.id===value)??false;
+  if(kind==='memory')return !value||(getState().snapshot?.folders.some(folder=>folder.id===value)??false);
+  return kind==='settings'||(kind==='screen'&&value in SCREENS);
+}
+function restoreLocation(location:string):void {
+  const [kind,...rest]=location.split(':'),value=rest.join(':');
+  closeNewChat();
+  if(kind==='chat')void selectChat(value);
+  else if(kind==='settings')openAppSettings(value as SettingsSection);
+  else if(kind==='memory')openMemoryScreen(value||undefined);
+  else SCREENS[value]?.();
+}
 let navigation:NavHistoryHandle|null=null;
 function nav():NavHistoryHandle {
-  navigation??=installNavHistory({
-    subscribe:subscribeStore,
-    activeChatId:()=>getState().activeChatId,
-    exists:id=>getState().snapshot?.chats.some(chat=>chat.id===id)??false,
-    select:id=>{closeNewChat();void selectChat(id);},
-  });
+  navigation??=installNavHistory({subscribe:subscribeStore,current:currentLocation,exists:locationExists,select:restoreLocation});
   return navigation;
 }
 export function goBack():boolean {return nav().goBack();}
