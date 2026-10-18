@@ -286,9 +286,9 @@ export async function listChecks(root:string, number:number, refresh = false):Pr
       checkRuns(),
       request<{statuses?:Record<string, unknown>[]}>(real, {method: 'GET', path: `${repoPath(s)}/commits/${sha}/status?per_page=100`}).catch(error => { if (error instanceof GitHubError && error.code === 'not_found') return {statuses: []}; throw error; }),
     ]);
-    // Re-runs create new check runs with the same name: keep the newest per name.
+    // Re-runs create new check runs with the same name in the same check suite: keep the newest per name and suite, so same-named jobs of different workflows stay separate.
     const latest = new Map<string, Record<string, unknown>>();
-    for (const run of runs?.check_runs ?? []) { const key = str(run.name); const prior = latest.get(key); if (!prior || num(run.id) > num(prior.id)) latest.set(key, run); }
+    for (const run of runs?.check_runs ?? []) { const suite = (run.check_suite as {id?:unknown} | undefined)?.id; const key = `${str(run.name)}\0${suite === undefined ? '' : String(suite)}`; const prior = latest.get(key); if (!prior || num(run.id) > num(prior.id)) latest.set(key, run); }
     const items = [...[...latest.values()].map(checkFromRun), ...(combined?.statuses ?? []).map(checkFromStatus)];
     const order = (check:GitHubCheck) => check.status !== 'completed' ? 1 : check.conclusion === 'success' ? 3 : check.conclusion === 'skipped' || check.conclusion === 'neutral' ? 4 : 0;
     items.sort((a, b) => order(a) - order(b) || a.name.localeCompare(b.name));

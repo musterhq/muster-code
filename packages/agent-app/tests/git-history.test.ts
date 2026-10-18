@@ -313,3 +313,18 @@ test('a conflicted file larger than the view cap is never overwritten with its c
   assert.equal(await readFile(join(dir, 'a.txt'), 'utf8'), before, 'the working file keeps its tail');
   await run(dir, ['merge', '--abort']);
 });
+
+test('a diff of exactly 1000 files is not truncated; 1001 is', async () => {
+  const dir = await repo();
+  await run(dir, ['checkout', '-q', '-b', 'many']);
+  await mkdir(join(dir, 'm'));
+  for (let i = 0; i < 1001; i++) await writeFile(join(dir, 'm', `f${i}.txt`), 'x\n');
+  await run(dir, ['add', '-A']);
+  await run(dir, ['reset', '-q', '--', 'm/f1000.txt']);
+  await run(dir, ['commit', '-q', '-m', 'exact']);
+  const exact = await compareRefs(dir, {base: 'main', head: 'many'});
+  assert.equal(exact.files.length, 1000); assert.equal(exact.truncated, false);
+  await run(dir, ['add', '-A']); await run(dir, ['commit', '-q', '-m', 'over']);
+  const over = await compareRefs(dir, {base: 'main', head: 'many'});
+  assert.equal(over.files.length, 1000); assert.equal(over.truncated, true);
+});

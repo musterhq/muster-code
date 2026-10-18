@@ -275,3 +275,16 @@ test('pull request tabs persist as references and restore into the folder\'s Git
   ]);
   assert.equal(saved.activeTabId, 'git:f1');
 });
+
+test('checks: same-named jobs from different workflows are kept separate', async () => {
+  const {repo: dir} = await repo();
+  mockGitHub(PULL,
+    on('GET', /commits\/abc123\/check-runs/, () => ok({check_runs: [
+      {id: 1, name: 'build', status: 'completed', conclusion: 'failure', check_suite: {id: 10}},
+      {id: 2, name: 'build', status: 'completed', conclusion: 'success', check_suite: {id: 20}},
+    ]})),
+    on('GET', /commits\/abc123\/status/, () => ok({statuses: []})));
+  const checks = await listChecks(dir, 7);
+  assert.equal(checks.items.length, 2);
+  assert.deepEqual(checks.summary, {passed: 1, failed: 1, pending: 0, skipped: 0});
+});
