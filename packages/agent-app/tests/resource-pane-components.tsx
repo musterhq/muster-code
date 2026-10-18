@@ -191,6 +191,7 @@ assert.equal(calls.filter(call=>call.command==='files.trash').length,0,'opening 
 confirmAction('Cancel').click();await delay(30);
 assert.equal(confirmation(),null);
 assert.equal(calls.filter(call=>call.command==='files.trash').length,0,'cancelling leaves the file alone');
+store.openTab({id:'file:f:new.txt',kind:'file',folderId:'f',path:'new.txt',title:'new.txt'},{preview:false});store.activateTab('git:f');await delay(60);
 discard()!.click();await delay(30);
 trashFails=true;
 confirmAction('Move to Trash').click();await delay(50);
@@ -198,6 +199,7 @@ assert.match(confirmation()?.textContent??'',/Trash unavailable/,'a failed disca
 trashFails=false;
 confirmAction('Move to Trash').click();await delay(80);
 assert.equal(confirmation(),null);
+assert.equal(store.getState().tabs.some(tab=>tab.id==='file:f:new.txt'),false,'discarding from Changes closes the file\'s open editor tab');
 assert.deepEqual(calls.filter(call=>call.command==='files.trash').at(-1)?.input,{folderId:'f',path:'new.txt'});
 await store.openDiff('f','new.txt','unstaged');await delay(120);
 assert.ok(host.querySelector('.diff-head button[aria-label="Discard new.txt"]'),'the untracked diff also offers Discard');

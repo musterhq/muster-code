@@ -306,7 +306,7 @@ export const DiffView = React.memo(function DiffView({tab}:{tab:WorkspaceTab}) {
       {fileStatus&&<GitStatusBadge status={fileStatus}/>}
       {model&&!reviewed?.binary&&<span className="diff-stats"><span className="diff-stat-add git-add">+{model.stats.adds}</span><span className="diff-stat-del git-del">−{model.stats.dels}</span></span>}
       {baselineControl}
-      {fileStatus==='untracked' && <DiscardUntracked folderId={folderId} path={path} disabled={busy} className="diff-toggle diff-file-action" onDiscard={() => closeTab(tab.id)}/>}
+      {fileStatus==='untracked' && <DiscardUntracked folderId={folderId} path={path} disabled={busy} className="diff-toggle diff-file-action" text="Discard file"/>}
       {fileStatus!=='untracked'&&reviewed&&(reviewed.beforeHash!==reviewed.afterHash)&&<button className="diff-toggle diff-file-action" disabled={busy} title={baseline==='staged'?'Unstage the whole file':'Revert the whole file to the baseline'} onClick={undoAll}>{baseline==='staged'?<Minus size={12} aria-hidden="true"/>:<Undo2 size={12} aria-hidden="true"/>}{baseline==='staged'?'Unstage file':'Undo file'}</button>}
       {runId&&hunks.some(hunk=>!kept.has(hunk.id))&&!kept.has('*')&&<button className="diff-toggle diff-file-action is-primary" disabled={busy} title="Accept every change in this file" onClick={()=>keep(['*'])}><Check size={12} aria-hidden="true"/>Keep all</button>}
       <button className="icon-button" aria-label="Open current file" onClick={() => void openFile(folderId,path)}><FileText size={14}/></button>
