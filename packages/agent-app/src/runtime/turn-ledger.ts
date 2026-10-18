@@ -103,7 +103,8 @@ export async function filesChanged(cwd: string, beforeTree: string | null): Prom
 }
 
 export const TOOL_TYPES = new Set(['commandExecution', 'mcpToolCall', 'dynamicToolCall', 'fileChange', 'webSearch', 'imageView']);
-interface Open { startedAt: number; cwd: string; usage: UsageTotals; cursor?: UsageCursor; tools: Map<string, number>; approvals: number; tests: number }
+const MAX_OPEN_RUNS = 1000;
+interface Open { chatId: string; startedAt: number; cwd: string; usage: UsageTotals; cursor?: UsageCursor; tools: Map<string, number>; approvals: number; tests: number }
 /** How a tool shows in a Receipt: `server/tool` for MCP, `shell` for commands, else the item type. */
 export const toolName = (type: string, server: unknown, tool: unknown) => type === 'mcpToolCall' ? `${server ?? 'mcp'}/${tool ?? 'tool'}` : type === 'commandExecution' ? 'shell' : type;
 export const TEST_COMMAND = /\b(npm|pnpm|yarn|bun)\s+(run\s+)?test\b|\bpytest\b|\bgo\s+test\b|\bcargo\s+test\b|\bnode\s+--test\b|\bvitest\b|\bjest\b|\bmake\s+test\b/;
@@ -117,7 +118,20 @@ export function attachTurnLedger(context: DomainContext, ledger: () => TurnLedge
   if (!hooks?.onRunStarted || !hooks.onRunSettled || !hooks.onProviderEvent) return () => undefined;
   const open = new Map<string, Open>();
   const byChat = new Map<string, string>();
-  const offStart = hooks.onRunStarted(run => { open.set(run.runId, { startedAt: Date.now(), cwd: run.cwd, usage: { ...ZERO_USAGE }, tools: new Map(), approvals: 0, tests: 0 }); byChat.set(run.chat.id, run.runId); });
+  const release = (runId: string) => {
+    const turn = open.get(runId);
+    open.delete(runId);
+    if (turn && byChat.get(turn.chatId) === runId) byChat.delete(turn.chatId);
+    return turn;
+  };
+  const offStart = hooks.onRunStarted(run => {
+    const previous = byChat.get(run.chat.id);
+    if (previous) release(previous);
+    // Bound abandoned runs without timers or work on provider events. Evicted runs produce no partial receipts.
+    if (open.size >= MAX_OPEN_RUNS) release(open.keys().next().value!);
+    open.set(run.runId, { chatId: run.chat.id, startedAt: Date.now(), cwd: run.cwd, usage: { ...ZERO_USAGE }, tools: new Map(), approvals: 0, tests: 0 });
+    byChat.set(run.chat.id, run.runId);
+  });
   const offEvent = hooks.onProviderEvent(event => {
     const runId = byChat.get(event.chat.id), turn = runId ? open.get(runId) : undefined;
     if (!turn) return;
@@ -133,8 +147,7 @@ export function attachTurnLedger(context: DomainContext, ledger: () => TurnLedge
     }
   });
   const offSettled = hooks.onRunSettled(async run => {
-    const turn = open.get(run.runId);
-    open.delete(run.runId);
+    const turn = release(run.runId);
     if (!turn) return;
     try {
       // Files cost a second full-tree snapshot, taken for every turn that has a baseline. That includes a Work locally chat
