@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Copy, LogOut } from 'lucide-react';
 import { notifySuccess } from '../../store';
-import { guarded, useActionPending } from './serverAction';
+import { useServerAction, type Guarded } from './serverAction';
 import { ProjectPeople, RemoteAgents, Channels } from './ServerWork';
 import { serverBridge, type ServerBridge, type ServerUser } from '../../webHost.ts';
 
@@ -30,7 +30,7 @@ function useServer<T>(server: ServerBridge, command: string, input: Record<strin
   useEffect(reload, [reload]);
   return { value, reload, error };
 }
-function act(run: () => Promise<unknown>, done: () => void, success?: string, onError?: (m: string) => void) {
+function act(guarded: Guarded, run: () => Promise<unknown>, done: () => void, success?: string, onError?: (m: string) => void) {
   void guarded(() => run().then(() => { if (success) notifySuccess(success); done(); }, e => onError?.(errorText(e))));
 }
 
@@ -55,18 +55,20 @@ export function ServerSettings(): React.ReactElement {
 function OrgName({ server }: { server: ServerBridge }): React.ReactElement {
   const [name, setName] = useState(server.info().server?.name === 'Muster Server' ? '' : server.info().server?.name ?? '');
   const [error, setError] = useState('');
+  const { busy, guarded } = useServerAction();
   useEffect(() => { server.invoke<{ server?: { name?: string | null } }>('server.me').then(me => setName(me.server?.name ?? ''), () => undefined); }, [server]);
   return <section aria-label="Organisation name">
     <h3 className="preference-group-title">Organisation name</h3>
     <div className="preference-group"><div className="preference-row"><span className="preference-copy"><strong>What people call this server</strong><span>Shown in the Muster app instead of the server's address. Up to 80 characters.</span></span>
       <span className="preference-control server-inline"><input type="text" value={name} maxLength={80} placeholder="Acme" onChange={e => setName(e.target.value)} aria-label="Organisation name"/>
-        <button type="button" className="settings-button secondary" onClick={() => act(() => server.invoke('server.org.set', { name }), () => setError(''), 'Organisation name saved.', setError)}>Save</button></span></div></div>
+        <button type="button" className="settings-button secondary" disabled={busy} onClick={() => act(guarded, () => server.invoke('server.org.set', { name }), () => setError(''), 'Organisation name saved.', setError)}>Save</button></span></div></div>
     {error && <p role="alert" className="settings-error">{error}</p>}
   </section>;
 }
 
 function Account({ server, me }: { server: ServerBridge; me: ServerUser }): React.ReactElement {
   const [current, setCurrent] = useState(''), [next, setNext] = useState(''), [error, setError] = useState('');
+  const { busy, guarded } = useServerAction();
   return <section aria-label="Your account">
     <h3 className="preference-group-title">Your account</h3>
     <div className="preference-group">
@@ -76,7 +78,7 @@ function Account({ server, me }: { server: ServerBridge; me: ServerUser }): Reac
         <span className="preference-control server-inline">
           <input type="password" aria-label="Current password" placeholder="Current" value={current} onChange={e => setCurrent(e.target.value)} autoComplete="current-password"/>
           <input type="password" aria-label="New password" placeholder="New" value={next} onChange={e => setNext(e.target.value)} autoComplete="new-password"/>
-          <button type="button" className="settings-button secondary" disabled={!current || next.length < 10} onClick={() => act(() => server.invoke('server.password.change', { current, next }), () => void server.signOut(), 'Password changed.', setError)}>Change</button>
+          <button type="button" className="settings-button secondary" disabled={busy || !current || next.length < 10} onClick={() => act(guarded, () => server.invoke('server.password.change', { current, next }), () => void server.signOut(), 'Password changed.', setError)}>Change</button>
         </span></div>
     </div>
     {error && <p role="alert" className="settings-error">{error}</p>}
@@ -86,21 +88,22 @@ function Account({ server, me }: { server: ServerBridge; me: ServerUser }): Reac
 function People({ server, me }: { server: ServerBridge; me: ServerUser }): React.ReactElement {
   const { value, reload, error } = useServer<PersonRow[]>(server, 'server.users.list');
   const [actionError, setActionError] = useState('');
+  const { busy, guarded } = useServerAction();
   return <section aria-label="People">
     <h3 className="preference-group-title">People and roles</h3>
     <table className="server-table"><thead><tr><th>Person</th><th>Role</th><th>Status</th><th>Sessions</th><th>Projects</th><th>Last sign-in</th><th/></tr></thead>
       <tbody>{(value ?? []).map(u => <tr key={u.id}>
         <td><strong>{u.displayName}</strong><span className="ws-faint"> @{u.username}</span></td>
-        <td><select className="ws-select" aria-label={`Role for ${u.username}`} value={u.role} disabled={u.id === me.id || (u.role === 'owner' && me.role !== 'owner')}
-          onChange={e => act(() => server.invoke('server.users.role', { userId: u.id, role: e.target.value }), reload, `${u.username} is now ${e.target.value}.`, setActionError)}>
+        <td><select className="ws-select" aria-label={`Role for ${u.username}`} value={u.role} disabled={busy || u.id === me.id || (u.role === 'owner' && me.role !== 'owner')}
+          onChange={e => act(guarded, () => server.invoke('server.users.role', { userId: u.id, role: e.target.value }), reload, `${u.username} is now ${e.target.value}.`, setActionError)}>
           {ROLES.filter(r => r !== 'owner' || me.role === 'owner' || u.role === 'owner').map(r => <option key={r} value={r}>{r}</option>)}</select></td>
         <td><span className="ws-chip" data-tone={u.status === 'active' ? 'ok' : 'danger'}>{u.status}</span></td>
         <td>{u.activeSessions}</td>
         <td>{u.projects.length ? u.projects.map(p => `${p.name} (${p.role})`).join(', ') : <span className="ws-faint">none</span>}</td>
         <td>{when(u.lastLoginAt)}</td>
         <td>{u.id !== me.id && (u.status === 'active'
-          ? <button type="button" className="settings-button secondary" onClick={() => act(() => server.invoke('server.users.revoke', { userId: u.id }), reload, `Revoked ${u.username}. Their sessions and tokens ended.`, setActionError)}>Revoke</button>
-          : <button type="button" className="settings-button secondary" onClick={() => act(() => server.invoke('server.users.restore', { userId: u.id }), reload, `Restored ${u.username}.`, setActionError)}>Restore</button>)}</td>
+          ? <button type="button" className="settings-button secondary" disabled={busy} onClick={() => act(guarded, () => server.invoke('server.users.revoke', { userId: u.id }), reload, `Revoked ${u.username}. Their sessions and tokens ended.`, setActionError)}>Revoke</button>
+          : <button type="button" className="settings-button secondary" disabled={busy} onClick={() => act(guarded, () => server.invoke('server.users.restore', { userId: u.id }), reload, `Restored ${u.username}.`, setActionError)}>Restore</button>)}</td>
       </tr>)}</tbody></table>
     {(error || actionError) && <p role="alert" className="settings-error">{error || actionError}</p>}
   </section>;
@@ -109,8 +112,8 @@ function People({ server, me }: { server: ServerBridge; me: ServerUser }): React
 function Invites({ server }: { server: ServerBridge }): React.ReactElement {
   const { value, reload, error } = useServer<InviteRow[]>(server, 'server.invites.list');
   const [role, setRole] = useState<Role>('member'), [expires, setExpires] = useState('7d'), [link, setLink] = useState(''), [actionError, setActionError] = useState('');
-  const busy = useActionPending();
-  const create = () => act(async () => { const r = await server.invoke<{ url: string }>('server.invites.create', { role, expires }); setLink(r.url); }, reload, undefined, setActionError);
+  const { busy, guarded } = useServerAction();
+  const create = () => act(guarded, async () => { const r = await server.invoke<{ url: string }>('server.invites.create', { role, expires }); setLink(r.url); }, reload, undefined, setActionError);
   return <section aria-label="Invites">
     <h3 className="preference-group-title">Invites</h3>
     <div className="preference-group"><div className="preference-row"><span className="preference-copy"><strong>New invite link</strong><span>Single use. It expires if nobody uses it.</span></span>
@@ -122,7 +125,7 @@ function Invites({ server }: { server: ServerBridge }): React.ReactElement {
     {link && <p className="server-link"><code>{link}</code> <button type="button" className="settings-button secondary" onClick={() => void navigator.clipboard.writeText(link).then(() => notifySuccess('Invite link copied.'))}><Copy size={13} aria-hidden="true"/> Copy</button></p>}
     {value && value.length > 0 && <table className="server-table"><thead><tr><th>Role</th><th>Status</th><th>Expires</th><th/></tr></thead>
       <tbody>{value.map(i => <tr key={i.id}><td>{i.role}</td><td><span className="ws-chip" data-tone={i.status === 'pending' ? 'accent' : undefined}>{i.status}</span></td><td>{when(i.expiresAt)}</td>
-        <td>{i.status === 'pending' && <button type="button" className="settings-button secondary" disabled={busy} onClick={() => act(() => server.invoke('server.invites.revoke', { id: i.id }), reload, 'Invite revoked.', setActionError)}>Revoke</button>}</td></tr>)}</tbody></table>}
+        <td>{i.status === 'pending' && <button type="button" className="settings-button secondary" disabled={busy} onClick={() => act(guarded, () => server.invoke('server.invites.revoke', { id: i.id }), reload, 'Invite revoked.', setActionError)}>Revoke</button>}</td></tr>)}</tbody></table>}
     {(error || actionError) && <p role="alert" className="settings-error">{error || actionError}</p>}
   </section>;
 }
@@ -131,6 +134,7 @@ function Access({ server }: { server: ServerBridge }): React.ReactElement {
   const people = useServer<PersonRow[]>(server, 'server.users.list');
   const list = useServer<AccessList>(server, 'server.access.list');
   const [userId, setUserId] = useState(''), [projectId, setProjectId] = useState(''), [role, setRole] = useState('editor'), [actionError, setActionError] = useState('');
+  const { busy, guarded } = useServerAction();
   const reload = () => { list.reload(); people.reload(); };
   const name = (id: string) => list.value?.projects.find(p => p.id === id)?.name ?? id;
   const who = (id: string) => people.value?.find(u => u.id === id)?.username ?? id;
@@ -142,11 +146,11 @@ function Access({ server }: { server: ServerBridge }): React.ReactElement {
         <select className="ws-select" aria-label="Person" value={userId} onChange={e => setUserId(e.target.value)}><option value="">Person…</option>{(people.value ?? []).filter(u => u.role === 'member' || u.role === 'viewer').map(u => <option key={u.id} value={u.id}>@{u.username}</option>)}</select>
         <select className="ws-select" aria-label="Project" value={projectId} onChange={e => setProjectId(e.target.value)}><option value="">Project…</option>{(list.value?.projects ?? []).map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select>
         <select className="ws-select" aria-label="Project role" value={role} onChange={e => setRole(e.target.value)}><option value="owner">owner</option><option value="editor">editor</option><option value="viewer">viewer</option></select>
-        <button type="button" className="settings-button" disabled={!userId || !projectId} onClick={() => act(() => server.invoke('server.access.set', { userId, projectId, role }), reload, 'Project shared.', setActionError)}>Share</button>
+        <button type="button" className="settings-button" disabled={busy || !userId || !projectId} onClick={() => act(guarded, () => server.invoke('server.access.set', { userId, projectId, role }), reload, 'Project shared.', setActionError)}>Share</button>
       </span></div></div>
     {list.value && list.value.access.length > 0 && <table className="server-table"><thead><tr><th>Project</th><th>Person</th><th>Role</th><th/></tr></thead>
       <tbody>{list.value.access.map(a => <tr key={`${a.projectId}:${a.userId}`}><td>{name(a.projectId)}</td><td>@{who(a.userId)}</td><td>{a.role}</td>
-        <td><button type="button" className="settings-button secondary" onClick={() => act(() => server.invoke('server.access.remove', { userId: a.userId, projectId: a.projectId }), reload, 'Access removed.', setActionError)}>Remove</button></td></tr>)}</tbody></table>}
+        <td><button type="button" className="settings-button secondary" disabled={busy} onClick={() => act(guarded, () => server.invoke('server.access.remove', { userId: a.userId, projectId: a.projectId }), reload, 'Access removed.', setActionError)}>Remove</button></td></tr>)}</tbody></table>}
     {(list.error || actionError) && <p role="alert" className="settings-error">{list.error || actionError}</p>}
   </section>;
 }
@@ -172,11 +176,12 @@ function Cost({ server }: { server: ServerBridge }): React.ReactElement {
 function Sessions({ server }: { server: ServerBridge }): React.ReactElement {
   const { value, reload, error } = useServer<SessionRow[]>(server, 'server.sessions.list');
   const [actionError, setActionError] = useState('');
+  const { busy, guarded } = useServerAction();
   return <section aria-label="Active sessions">
     <h3 className="preference-group-title">Active sessions</h3>
     <table className="server-table"><thead><tr><th>Person</th><th>Address</th><th>Last seen</th><th/></tr></thead>
       <tbody>{(value ?? []).map(s => <tr key={s.id}><td>@{s.username}{s.current && <span className="ws-chip" data-tone="accent">this browser</span>}</td><td>{s.ip ?? '—'}</td><td>{when(s.lastSeenAt)}</td>
-        <td>{!s.current && <button type="button" className="settings-button secondary" onClick={() => act(() => server.invoke('server.sessions.revoke', { id: s.id }), reload, 'Session ended.', setActionError)}>End</button>}</td></tr>)}</tbody></table>
+        <td>{!s.current && <button type="button" className="settings-button secondary" disabled={busy} onClick={() => act(guarded, () => server.invoke('server.sessions.revoke', { id: s.id }), reload, 'Session ended.', setActionError)}>End</button>}</td></tr>)}</tbody></table>
     {(error || actionError) && <p role="alert" className="settings-error">{error || actionError}</p>}
   </section>;
 }
