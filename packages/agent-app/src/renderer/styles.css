@@ -592,16 +592,29 @@ textarea:focus-visible {
 .notices {
   position: fixed;
   top: 52px;
-  /* Follow the card when the right pane moves it; fall back when it is hidden or absent. */
-  left: max(16px, calc(anchor(--chat-summary left, 100vw) - 390px));
-  right: max(16px, calc(100vw - anchor(--chat-summary left, 100vw) + 10px));
+  right: 16px;
   display: flex;
   flex-direction: column;
   align-items: flex-end;
   gap: 6px;
-  width: auto;
+  width: min(380px, calc(100vw - 32px));
   z-index: 30;
   pointer-events: none;
+}
+/* The stack keeps its corner (16px in, up to 380px wide) unless the chat summary card (anchor
+   --chat-summary, summary-card.css) reaches into it: then it ends 10px left of the card, following
+   the card as the right pane opens, resizes or the card folds. The --notice-shift-* flags are 1 when
+   the card reaches in, else 0. A hidden or absent card resolves the anchor() fallbacks to a card far
+   outside the window. In left, anchor() is measured from the window's left edge; in right, from its
+   right edge. Without anchor positioning or sign() the corner placement above applies. */
+@supports (anchor-name: --a) and (width: calc(1px * sign(1px))) {
+  .notices {
+    width: auto;
+    --notice-shift-left: clamp(0, sign(anchor(--chat-summary right, -100000px) - (100vw - 396px)), 1);
+    --notice-shift-right: clamp(0, sign(396px - anchor(--chat-summary right, 100000px)), 1);
+    left: max(16px, calc(100vw - 396px - var(--notice-shift-left) * (100vw - 6px - anchor(--chat-summary left, 0px))));
+    right: calc(16px + var(--notice-shift-right) * (anchor(--chat-summary left, 0px) - 6px));
+  }
 }
 .notice {
   display: flex;
