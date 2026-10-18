@@ -18,6 +18,8 @@ import {codexWindowOverrides, userCompactionKeys} from './codex-window-overrides
 import {unpackedPath} from './unpacked-path.ts';
 import {BROWSER_MCP, BROWSER_NOTE, browserToolStyle, routeBrowserNote} from '../shared/computer-use.ts';
 import type {McpServerSpec} from './adapters/types.ts';
+import {SANDBOX_MCP_SERVER} from '../shared/sandbox-routes.ts';
+import {routeSandboxNote} from './sandbox-note.ts';
 
 /** Identity of the test-only route `createProviderAdapter({available})` builds. */
 export const FIXTURE_PROVIDER = {id: 'fixture', bindingId: 'fixture-binding', model: 'fixture-model'} as const;
@@ -144,9 +146,16 @@ export function adapterBrowser(driver: string | undefined, mode: Chat['mode'], d
   const style = browserToolStyle(driver), offered = !!developerInstructions?.includes(BROWSER_NOTE);
   const servers = mcpServersFromOverrides(overrides);
   if (style === 'native' || style === 'none') delete servers[BROWSER_MCP];
-  const instructions = runInstructions(mode, routeBrowserNote(developerInstructions, style), subagents);
+  const instructions = runInstructions(mode, routeSandboxNote(routeBrowserNote(developerInstructions, style), driver), subagents);
   return {...(instructions ? {instructions} : {}), ...(Object.keys(servers).length ? {mcpServers: servers} : {}), ...(offered && style === 'native' ? {browserTools: true as const} : {})};
 }
+/** #653: a run carries the muster_sandbox server only while its chat is sandboxed (domains/sandbox.ts adds it). */
+export const sandboxedRun = (overrides: ProviderInput['configOverrides']): boolean => typeof overrides?.[`mcp_servers.${SANDBOX_MCP_SERVER}.command`] === 'string';
+/** #653: a sandboxed run's host access is read-only whatever the chat's own setting says, so no route can change this Mac
+ *  while the Sandbox chip shows. Raising access goes through leaving the sandbox (sandbox.chatEnvironment.set). */
+export const runAccessPolicy = (chat: Chat, overrides: ProviderInput['configOverrides']) => providerAccessPolicy(sandboxedRun(overrides) ? {...chat, permissionMode: 'read-only'} : chat);
+/** #653: Codex's own shell tools are switched off for a sandboxed run; its read-only OS sandbox already refuses host writes. */
+export const CODEX_SANDBOX_FEATURES = ['features.shell_tool=false', 'features.unified_exec=false'] as const;
 /** Test runners construct many services; they opt into real CLI/API adapters by passing a catalog. */
 const defaultCatalog = () => process.env.NODE_TEST_CONTEXT && process.env.MUSTER_PROVIDER_ADAPTERS !== '1' ? undefined : createAdapterCatalog();
 interface AdapterRun {controller: AbortController; completed: Promise<void>; /** Set by adapters that accept mid-turn messages (Claude Code). */ steer?: (text: string) => boolean}
@@ -205,7 +214,7 @@ export function createProviderAdapter(options: { core?: CoreClient; available?: 
   };
   /** Claude Code, OpenCode and HTTP routes: one owned local attempt per chat, no app-server session. */
   async function runAdapter(route: ProviderInstance, input: ProviderInput, resumeThreadId: string | undefined): Promise<ProviderResult> {
-    const access = beforeDispatch(() => providerAccessPolicy(input.chat));
+    const access = beforeDispatch(() => runAccessPolicy(input.chat, input.configOverrides));
     const model = input.chat.model || route.info.models[0]?.id;
     if (!model) throw new ProviderPreDispatchError('The selected provider reports no models.');
     let finish!: () => void;
@@ -216,6 +225,7 @@ export function createProviderAdapter(options: { core?: CoreClient; available?: 
     try {
       const result = await route.adapter!.run({
         chat: input.chat, cwd: input.cwd, prompt: input.prompt, model, permissionMode: access.permissionMode, signal: owned.controller.signal,
+        ...(sandboxedRun(input.configOverrides) ? {sandboxed: true} : {}),
         ...(input.images?.length ? {images: input.images} : {}), ...(route.info.models.find(entry => entry.id === model)?.images === true ? {vision: true} : {}), ...(input.reasoningEffort ? {reasoningEffort: input.reasoningEffort} : {}),
         ...(resumeThreadId ? {resumeThreadId} : {}),
         ...adapterBrowser(route.info.driver, input.chat.mode, input.developerInstructions, input.configOverrides, subagentSupport(route.info.driver) !== 'none'),
@@ -297,7 +307,7 @@ export function createProviderAdapter(options: { core?: CoreClient; available?: 
       const lifecycleSupported = beforeDispatch(() => client().CODEX_RUN_LIFECYCLE_VERSION === 1);
       if (!lifecycleSupported && !lifecycleWarned) { lifecycleWarned = true; console.warn(lifecycleDiagnostic(false)); }
       const budgetOptions = beforeDispatch(() => coreBudgetOptions(input.budgets, lifecycleSupported));
-      const access = beforeDispatch(() => providerAccessPolicy(input.chat));
+      const access = beforeDispatch(() => runAccessPolicy(input.chat, input.configOverrides));
       // Retire the prior observer before changing callbacks or mode. The core
       // normally keeps this process warm; the same chat owner remains stable.
       previous?.controller.abort();
@@ -313,7 +323,8 @@ export function createProviderAdapter(options: { core?: CoreClient; available?: 
       if (input.connectorsRequested) connectorChats.add(input.chat.id);
       // Context budget: Codex features Muster does not use, and connector (apps) tool schemas a model without deferred
       // tool search would otherwise receive inline on every request, stay off unless this chat asked for a connector.
-      const featureOverrides = leanCodexFeatureOverrides({toolSearch: route.info.models.find(entry => entry.id === model0)?.toolSearch, connectorsRequested: connectorChats.has(input.chat.id), policy: connectorPolicy()});
+      const featureOverrides = [...leanCodexFeatureOverrides({toolSearch: route.info.models.find(entry => entry.id === model0)?.toolSearch, connectorsRequested: connectorChats.has(input.chat.id), policy: connectorPolicy()}),
+        ...(sandboxedRun(input.configOverrides) ? CODEX_SANDBOX_FEATURES : [])];
       // #426: the model's own window and compaction point (catalog or router listing), unless the user set them in config.toml.
       const windowOverrides = codexWindowOverrides(route.info.models.find(entry => entry.id === model0), userCompactionKeys(route.sessionsRoot ? dirname(route.sessionsRoot) : undefined));
       const signature = JSON.stringify([access, model0, input.reasoningEffort ?? 'medium', input.configOverrides ?? {}, featureOverrides, windowOverrides, input.cwd, route.command, route.info.id, route.env]);

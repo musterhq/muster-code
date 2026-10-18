@@ -8,17 +8,30 @@ import {BROWSER_MCP} from '../../shared/computer-use.ts';
 
 /** #424: Muster's tool servers (the in-app browser among them) as OpenCode `mcp` config, merged into any inline config the
  *  user already set. OpenCode reads OPENCODE_CONFIG_CONTENT on top of its config files and names the tools `<server>_<tool>`. */
-export function openCodeMcpEnv(servers: AdapterRunInput['mcpServers'], existing?: string): Record<string, string> {
+export function openCodeMcpEnv(servers: AdapterRunInput['mcpServers'], existing?: string, sandboxed = false): Record<string, string> {
   const names = Object.keys(servers ?? {});
-  if (!names.length) return {};
+  if (!names.length && !sandboxed) return {};
   let config: Record<string, unknown> = {};
   try { const parsed = existing ? JSON.parse(existing) : {}; if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) config = parsed; } catch { /* not JSON: replaced */ }
   const mcp = {...(config.mcp && typeof config.mcp === 'object' ? config.mcp as Record<string, unknown> : {})};
-  for (const [name, spec] of Object.entries(servers!)) {
+  for (const [name, spec] of Object.entries(servers ?? {})) {
     const run = spec.args ? spec : {...spec, ...launcherSpec(spec.command)};
     mcp[name] = {type: 'local', command: [run.command, ...(run.args ?? [])], enabled: true, ...(spec.env ? {environment: spec.env} : {})};
   }
-  return {OPENCODE_CONFIG_CONTENT: JSON.stringify({...config, mcp})};
+  return {OPENCODE_CONFIG_CONTENT: JSON.stringify(sandboxed ? openCodeSandboxConfig({...config, mcp}) : {...config, mcp})};
+}
+
+const record = (value: unknown): Record<string, unknown> => value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
+/** #653: OpenCode's host tools that run commands or change files. */
+export const OPENCODE_SANDBOX_DENIED_TOOLS = ['bash', 'edit', 'write', 'patch'] as const;
+/** #653: a sandboxed run uses the plan agent with its host shell and edit tools removed and denied (globally too, so a
+ *  sub-agent cannot pick them up). Reads stay; commands and edits go through the muster_sandbox tools. */
+export function openCodeSandboxConfig(config: Record<string, unknown>): Record<string, unknown> {
+  const off = Object.fromEntries(OPENCODE_SANDBOX_DENIED_TOOLS.map(tool => [tool, false]));
+  const deny = {edit: 'deny', bash: 'deny'};
+  const agents = record(config.agent), plan = record(agents.plan);
+  return {...config, tools: {...record(config.tools), ...off}, permission: {...record(config.permission), ...deny},
+    agent: {...agents, plan: {...plan, tools: {...record(plan.tools), ...off}, permission: {...record(plan.permission), ...deny}}}};
 }
 
 /** Run a short CLI probe with a hard timeout and output cap. */
@@ -73,14 +86,14 @@ export function openCodeAdapter(options: {binary: string; env?: NodeJS.ProcessEn
   return {kind: 'cli', run(input) {
     return new Promise<AdapterRunResult>(resolve => {
       const model = input.model.replace(/^opencode\//, ''), turnId = randomUUID();
-      const args = ['run', '--format', 'json', '--agent', input.permissionMode === 'read-only' ? 'plan' : 'build',
+      const args = ['run', '--format', 'json', '--agent', input.permissionMode === 'read-only' || input.sandboxed ? 'plan' : 'build',
         ...(model && model !== 'default' ? ['--model', model] : []), ...(input.resumeThreadId ? ['--session', input.resumeThreadId] : []),
         input.instructions ? `${input.instructions}\n\n${input.prompt}` : input.prompt,
         // After the message: `--file` is an array option and would swallow a following positional.
         ...(input.images ?? []).flatMap(path => ['--file', path])];
       let child: ChildProcess;
       const baseEnv = options.env ?? process.env;
-      const mcpEnv = openCodeMcpEnv(input.mcpServers, input.env?.OPENCODE_CONFIG_CONTENT ?? baseEnv.OPENCODE_CONFIG_CONTENT);
+      const mcpEnv = openCodeMcpEnv(input.mcpServers, input.env?.OPENCODE_CONFIG_CONTENT ?? baseEnv.OPENCODE_CONFIG_CONTENT, input.sandboxed);
       const launch = cliSpawn(options.binary, args, input.env || Object.keys(mcpEnv).length ? {...baseEnv, ...input.env, ...mcpEnv} : baseEnv);
       try { child = spawn(launch.command, launch.args, {cwd: input.cwd, env: launch.env, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true}); }
       catch (error) { resolve({status: 'failed', finalMessage: '', dispatchState: 'not-dispatched', errorMessage: `OpenCode could not start: ${error instanceof Error ? error.message : String(error)}`}); return; }
