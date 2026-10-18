@@ -13,7 +13,7 @@ import { createHash } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import type { DatabaseSync } from 'node:sqlite';
 import type { LedgerEntry, LedgerFile } from '../shared/domains/paperclip-protocol.ts';
-import { estimateCostUsd, ZERO_USAGE, type UsageTotals } from '../shared/model-catalog.ts';
+import { estimateCostUsd, modelKey, ZERO_USAGE, type UsageTotals } from '../shared/model-catalog.ts';
 import { usageStep, type UsageCursor } from './model-usage.ts';
 import { ReviewBaselineStore, snapshotTree } from './review-baseline.ts';
 import type { DomainContext } from './domains/types.ts';
@@ -147,7 +147,11 @@ export function attachTurnLedger(context: DomainContext, ledger: () => TurnLedge
         const baseline = context.db().prepare('SELECT tree_sha FROM review_baselines WHERE run_id = ?').get(run.runId) as { tree_sha: string | null } | undefined;
         files = await filesChanged(turn.cwd, baseline?.tree_sha ?? null);
       } catch { files = null; }
-      const pricing = (() => { try { const provider = context.modelCatalog?.().providers.find(p => p.id === run.chat.providerId) as unknown as { models?: { id: string; pricing?: unknown }[] } | undefined; return provider?.models?.find(m => m.id === run.chat.model)?.pricing ?? null; } catch { return null; } })();
+      let pricing = (() => { try { const provider = context.modelCatalog?.().providers.find(p => p.id === run.chat.providerId) as unknown as { models?: { id: string; pricing?: unknown }[] } | undefined; return provider?.models?.find(m => m.id === run.chat.model)?.pricing ?? null; } catch { return null; } })();
+      if (!pricing && run.chat.providerId && run.chat.model) {
+        // Resolve Settings prices once at settlement, never on provider events.
+        try { const policy = await context.invoke('models.policy.get', {}); pricing = policy.pricing[modelKey(run.chat.providerId, run.chat.model)] ?? null; } catch { /* unknown price; still record the turn */ }
+      }
       const endedAt = new Date().toISOString();
       // A task run is the task's: its Roster owner, the task, trigger "task" (Costs, Timeline and task links key on these).
       const owner = run.chat.projectId && attribute ? await attribute({ chatId: run.chat.id, projectId: run.chat.projectId }).catch(() => null) : null;
