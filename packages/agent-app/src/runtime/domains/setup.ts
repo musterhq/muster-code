@@ -4,7 +4,7 @@
  */
 import { execFile } from 'node:child_process';
 import { chmodSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import type { ProviderInfo } from '../../shared/protocol.ts';
 import { automaticDefaultModel, isSetupStep, readyProviderSet, type AutoDefaultMemory, SETUP_STEPS, type SetupProgress, type SetupSettingsPane, type SetupStep } from '../../shared/domains/setup-protocol.ts';
 import { isCliTool } from '../cli-maintenance.ts';
@@ -66,6 +66,7 @@ export function createSetupDomain(context: DomainContext, options: SetupDomainOp
 
   // The automatic default never overrides a deliberate choice: it is applied at most once per set of ready providers,
   // and never again once the user set, changed or reset the default model (UI, reset or settings import).
+  const seenFile = join(context.dataDir, 'setup-announced-providers.json');
   const memoryFile = join(context.dataDir, 'setup-default-model.json');
   const readMemory = (): AutoDefaultMemory => {
     try { const raw = JSON.parse(readFileSync(memoryFile, 'utf8')) as Partial<AutoDefaultMemory>; return { userSetAt: typeof raw.userSetAt === 'string' ? raw.userSetAt : null, auto: raw.auto && typeof raw.auto === 'object' && typeof raw.auto.providers === 'string' ? raw.auto : null }; }
@@ -90,6 +91,10 @@ export function createSetupDomain(context: DomainContext, options: SetupDomainOp
   if (watching) {
     const tuning = options.watch || {};
     watch = createProviderWatch({
+      seen: {
+        read: () => { try { const raw = JSON.parse(readFileSync(seenFile, 'utf8')); return Array.isArray(raw) ? raw.filter((id): id is string => typeof id === 'string') : []; } catch { return []; } },
+        write: ids => { mkdirSync(dirname(seenFile), { recursive: true }); const temp = `${seenFile}.${process.pid}.tmp`; writeFileSync(temp, JSON.stringify(ids), { mode: 0o600 }); renameSync(temp, seenFile); },
+      },
       list, paths: tuning.paths ?? (() => watchedProviderPaths({ dataDir: context.dataDir })),
       ...(tuning.stat ? { stat: tuning.stat } : {}), ...(tuning.intervalMs ? { intervalMs: tuning.intervalMs } : {}), ...(tuning.debounceMs ? { debounceMs: tuning.debounceMs } : {}),
       ...(context.modelCatalogReady ? { ready: context.modelCatalogReady } : {}),

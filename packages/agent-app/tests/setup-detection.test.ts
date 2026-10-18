@@ -247,3 +247,19 @@ test('the picker does not offer an installed but signed-out Claude Code as ready
   assert.deepEqual([out.available, out.status], [false, 'error']);
   assert.match(out.error ?? '', /not signed in/);
 });
+
+test('a provider already announced is not announced again when it becomes ready after a later launch', async t => {
+  let ids: string[] = [], ready = false;
+  const run = async (readyAtLaunch: boolean) => {
+    const changes: ProvidersChange[] = [];
+    ready = readyAtLaunch;
+    const watch = createProviderWatch({paths: () => [], list: async () => [provider('claude-code', ready, 10)], emit: change => changes.push(change), seen: {read: () => ids, write: next => { ids = next; }}, intervalMs: 1000, debounceMs: 5});
+    t.after(() => watch.dispose());
+    await watch.start();
+    ready = true;
+    await watch.refresh();
+    return changes.flatMap(change => change.connected.map(row => row.id));
+  };
+  assert.deepEqual(await run(false), ['claude-code'], 'first connect is announced');
+  assert.deepEqual(await run(false), [], 'a later launch where it becomes ready again stays quiet');
+});

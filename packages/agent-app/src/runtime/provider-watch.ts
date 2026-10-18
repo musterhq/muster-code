@@ -71,6 +71,8 @@ export interface ProviderWatchOptions {
   onReady?(providers: ProviderInfo[]): void | Promise<void>;
   /** Awaited before the first (launch) probe, e.g. the adapter catalog's first validation. */
   ready?(): Promise<void>;
+  /** Providers already announced as connected, kept across launches so the notice marks a real change only. */
+  seen?: { read(): string[]; write(ids: string[]): void };
   stat?(path: string): string;
   intervalMs?: number;
   /** Quiet time after a file change before re-probing: a sign-in writes several files in a burst. */
@@ -91,7 +93,16 @@ export function createProviderWatch(options: ProviderWatchOptions) {
       const signature = readySignature(providers);
       const initial = last === null;
       if (initial || signature !== lastSignature) {
-        const connected = initial ? [] : newlyReady(last, providers);
+        let connected = initial ? [] : newlyReady(last, providers);
+        if (options.seen) {
+          try {
+            const seen = new Set(options.seen.read()), before = [...seen].sort().join(',');
+            if (!initial) for (const p of last ?? []) if (p.available && !providers.some(q => q.id === p.id && q.available)) seen.delete(p.id);
+            connected = connected.filter(row => !seen.has(row.id));
+            for (const p of providers) if (p.available) seen.add(p.id);
+            if ([...seen].sort().join(',') !== before) options.seen.write([...seen]);
+          } catch { /* remembering announcements never breaks detection */ }
+        }
         last = providers; lastSignature = signature;
         options.emit({ providers, connected, reason: initial ? 'launch' : reason });
         try { await options.onReady?.(providers); } catch { /* a default-model write failing never breaks detection */ }
