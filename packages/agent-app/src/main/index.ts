@@ -837,6 +837,8 @@ async function main(): Promise<void> {
     window.focus();
     window.webContents.send(MENU_CHANNEL, action);
   };
+  // Three-finger trackpad swipe (macOS "Swipe between pages" set to three fingers): Back / Forward. Two-finger swipes are handled in the renderer.
+  window?.on('swipe', (_event, direction) => { if (direction === 'left') sendMenuAction('back'); else if (direction === 'right') sendMenuAction('forward'); });
   ipcMain.on(MENU_CLOSE_CHANNEL, (event) => {
     if (!isTrustedSender(event.senderFrame, event.sender.id)) return;
     window?.close();
