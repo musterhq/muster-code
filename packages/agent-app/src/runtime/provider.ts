@@ -1,3 +1,4 @@
+import {networkReconnectGuard} from './network-failure.ts';
 import { createRequire } from 'node:module';
 import { randomUUID } from 'node:crypto';
 import { dirname, join } from 'node:path';
@@ -331,12 +332,20 @@ export function createProviderAdapter(options: { core?: CoreClient; available?: 
       const session: OwnedSession = { owner: previous?.owner ?? `${OWNER}:${instance}:${input.chat.id}:${route.info.id}:${bindingId}`, key:key(input.chat.id,route.info.id,bindingId), providerId:route.info.id,bindingId, controller: new AbortController(), active: true, activity: false, terminalTurns: new Set(), liveTurns: previous?.liveTurns ?? new Set(), workOverflow: previous?.workOverflow, threadId: resumeThread ?? previous?.threadId, completed, finish, signature, mode: input.chat.mode };
       sessions.set(input.chat.id, session);
       const lateCancellation = () => {
-        if (!session.controller.signal.aborted && !disposed) return false;
+        if (!session.controller.signal.aborted && !session.retired && !disposed) return false;
         // Legacy core has no pre-dispatch AbortSignal. Its late client is
         // closed on first callback/settlement; new core checks signal before dispatch.
         if (sessions.get(input.chat.id) === session) close(session);
         return true;
       };
+      const reconnect = networkReconnectGuard();
+      let networkError: string | undefined;
+      const networkStopped: Promise<ProviderResult> = reconnect.failed.then(reason => {
+        networkError = `${reason} Automatic reconnects stopped. Earlier work may have reached the provider; review it before retrying.`;
+        session.retired = true;
+        close(session);
+        return {status: 'failed' as const, finalMessage: '', dispatchState: 'unknown' as const, errorMessage: networkError, threadId: session.threadId, turnId: session.turnId};
+      });
       try {
         const node = providerNode();
         const commands=new Map<string,{params:Record<string,unknown>;item:Record<string,unknown>;turnId:string;output:string}>();
@@ -386,6 +395,11 @@ export function createProviderAdapter(options: { core?: CoreClient; available?: 
               for (const listener of idleListeners) { try { listener(input.chat.id, method, params); } catch { /* observers must not break the stream */ } }
               if (method === 'turn/completed' && params.threadId === session.threadId && turn?.id === session.idleTurnId) session.idleTurnId = undefined;
             }
+            const parentEvent = !session.threadId || !params.threadId || params.threadId === session.threadId;
+            if (parentEvent && session.active) {
+              if (method === 'error') reconnect.observe(params);
+              else if (method.startsWith('item/')) reconnect.progress();
+            }
             input.onEvent(method,params);
             const item=params.item as Record<string,unknown>|undefined;
             if(method==='item/completed'&&item?.type==='commandExecution'&&typeof item.id==='string'&&typeof params.turnId==='string'){
@@ -400,7 +414,7 @@ export function createProviderAdapter(options: { core?: CoreClient; available?: 
         };
         // The same app-server launch and observers re-open this thread when /compact finds the idle timer closed it.
         session.reopen = {...launch, ...observers};
-        const result=await client().runCodexAppServer({
+        const result=await Promise.race([networkStopped, client().runCodexAppServer({
           ...launch, ...observers,
           prompt: input.prompt,
           ...(input.images?.length ? { images: input.images } : {}),
@@ -420,9 +434,9 @@ export function createProviderAdapter(options: { core?: CoreClient; available?: 
           // Plan mode and can only describe patches (F53).
           collaborationMode: input.chat.mode === 'plan' ? { mode: 'plan', settings: { model, reasoning_effort: reasoning } }
             : previous?.mode === 'plan' || (!previous && resumeThread) ? { mode: 'default', settings: { model, reasoning_effort: reasoning } } : undefined,
-          onDelta(text: string) { session.activity = true; if (!lateCancellation()) input.onDelta(text); },
-          onReasoningDelta(text: string) { session.activity = true; if (!lateCancellation()) input.onReasoning(text); },
-        });
+          onDelta(text: string) { session.activity = true; if (!lateCancellation()) { reconnect.progress(); input.onDelta(text); } },
+          onReasoningDelta(text: string) { session.activity = true; if (!lateCancellation()) { reconnect.progress(); input.onReasoning(text); } },
+        })]);
         if(commands.size&&result.threadId&&!session.controller.signal.aborted&&!disposed){
           try{
             const response=await client().callCodexConversation(session.key,'thread/read',{threadId:result.threadId,includeTurns:false},{transportOwner:session.owner,requireOwner:true,timeoutMs:2500});
@@ -440,15 +454,17 @@ export function createProviderAdapter(options: { core?: CoreClient; available?: 
         // A resets-in-N-min ETA, when the provider is near capacity, is appended to an
         // admission-rejected reason so the user knows roughly when to retry instead of guessing.
         const resetEta = formatResetEta(currentProviderUsage(route.info.id, route.sessionsRoot, route.info.codex?.modelProvider));
-        const recovery = classifyProviderFailure(result, { activity: session.activity, terminal, cancelled: session.controller.signal.aborted, resetEta, provider: route.info });
+        const recovery: ProviderRecovery | undefined = networkError && !session.controller.signal.aborted ? {kind: 'failed', retryable: true, reason: networkError} : classifyProviderFailure(result, { activity: session.activity, terminal, cancelled: session.controller.signal.aborted, resetEta, provider: route.info });
         if (result.status === 'failed') session.retired = true;
-        return { ...result, ...(session.controller.signal.aborted ? { status: 'failed' as const, errorMessage: recovery?.reason } : {}), ...(recovery ? { recovery } : {}) };
+        return { ...result, ...(networkError ? {status: 'failed' as const, errorMessage: networkError, threadId: session.threadId, turnId: session.turnId} : {}), ...(session.controller.signal.aborted ? { status: 'failed' as const, errorMessage: recovery?.reason } : {}), ...(recovery ? { recovery } : {}) };
       } catch (error) {
         session.retired = true;
         close(session);
         const result: ProviderResult = { status: 'failed', finalMessage: '', errorMessage: error instanceof Error ? error.message : String(error), dispatchState: 'unknown', ...(session.threadId ? { threadId: session.threadId } : {}), ...(session.turnId ? { turnId: session.turnId } : {}) };
+        if (networkError && !session.controller.signal.aborted) return {...result, errorMessage: networkError, recovery: {kind: 'failed', retryable: true, reason: networkError}};
         return { ...result, recovery: classifyProviderFailure(result, { activity: session.activity, terminal: false, cancelled: session.controller.signal.aborted, resetEta: formatResetEta(currentProviderUsage(route.info.id, route.sessionsRoot, route.info.codex?.modelProvider)), provider: route.info }) };
       } finally {
+        reconnect.dispose();
         session.active = false;
         if (session.retired) session.controller.abort();
         if (session.controller.signal.aborted || disposed) close(session);

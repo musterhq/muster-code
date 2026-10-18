@@ -6,15 +6,16 @@ import {useStoreSelector} from '../useStore';
 import './recovery-notice.css';
 
 /** Checking reads the saved provider attempt; it never sends the message again.
- * Retry is offered only for an admission rejection the runtime classified as
- * retryable, i.e. it proved no turn was dispatched; it resends the retained draft. */
+ * Admission Retry resends the retained draft. Failed network attempts can also
+ * offer an explicit retry of the last turn after the transport has been closed. */
 /** While the provider reports the saved turn as active, status is re-read on this cadence until it settles or the cap passes. */
 export const RECONCILE_POLL_MS=30_000, RECONCILE_POLL_LIMIT_MS=30*60_000;
-export function RecoveryNotice({chat}:{chat:Chat}) {
+export function RecoveryNotice({chat,onRetry}:{chat:Chat;onRetry?:()=>Promise<void>}) {
   const [checking,setChecking]=useState(false),[retrying,setRetrying]=useState(false),[result,setResult]=useState(''),[stillRunning,setStillRunning]=useState(false);
   const pending=useRef(false);
   const uncertain=chat.recovery?.kind==='recovery-needed';
   const rejected=chat.recovery?.kind==='admission-rejected' && chat.recovery.retryable;
+  const failed=chat.recovery?.kind==='failed' && chat.recovery.retryable;
   const active=chat.status==='running' || chat.status==='stopping';
   // The composer's live draft, not the last persisted snapshot: sending a stale
   // chat.draft would send old text and then clear the newer composer contents.
@@ -57,7 +58,7 @@ export function RecoveryNotice({chat}:{chat:Chat}) {
     catch(error){setResult(error instanceof Error?error.message:'Could not continue.');}
     finally {pending.current=false;}
   };
-  if(!chat.error && !uncertain && !rejected)return null;
+  if(!chat.error && !uncertain && !rejected && !failed)return null;
   // PER-08 (F42/F43): a user Stop is a normal ending: a neutral "Stopped" note, never a red failure,
   // and nothing to resolve before sending again (the composer is not blocked for 'cancelled').
   const stopped=chat.recovery?.kind==='cancelled';
@@ -65,6 +66,10 @@ export function RecoveryNotice({chat}:{chat:Chat}) {
     <span>{stillRunning?'Still running at the provider. This updates when it finishes.':chat.recovery?.reason || chat.error}</span>
     {uncertain && <><p>Your draft is retained. Check the existing attempt before sending again.</p><button type="button" className="workspace-inline-link" disabled={checking || active} onClick={()=>void check()}>{checking?'Checking provider status…':stillRunning?'Check now':'Check provider status'}</button> <button type="button" className="workspace-inline-link" data-testid="recovery-continue-anyway" disabled={active} title="Skip the check. The earlier attempt may still be working; nothing is resent." onClick={()=>void proceed()}>Continue anyway</button></>}
     {rejected && <><p>{draft?'No turn was dispatched; your draft is retained.':'No turn was dispatched. Write a message to retry.'}</p><button type="button" className="workspace-inline-link" aria-busy={retrying||undefined} disabled={retrying || sending || active || !draft} onClick={()=>void retry()}>{retrying?'Retrying…':'Retry now'}</button></>}
+    {failed && <button type="button" className="workspace-inline-link" aria-busy={retrying||undefined} disabled={retrying || sending || active || (!draft && !onRetry)} onClick={()=>{
+      if (draft) void retry();
+      else if (onRetry) { setRetrying(true); void onRetry().finally(()=>setRetrying(false)); }
+    }}>{retrying?'Retrying…':'Retry'}</button>}
     {chat.recovery?.auth && <button type="button" className="workspace-inline-link" data-testid="recovery-open-providers" onClick={()=>openProvidersTab()}>Open Accounts &amp; providers</button>}
     {result && <p>{result}</p>}
   </div>;

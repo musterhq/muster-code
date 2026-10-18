@@ -83,5 +83,15 @@ assert.equal(button()?.textContent,'Open Accounts & providers');
 button()!.click();await delay(20);
 const {getState}=await import('../src/renderer/store');
 assert.equal(getState().screen,'settings');assert.equal(getState().settingsSection,'providers');
+// A closed network transport offers manual Retry even after the draft was consumed.
+setComposerDraft('chat-1','');
+let networkRetries=0,finishRetry!:()=>void;
+root.render(<RecoveryNotice chat={{...base,draft:'',error:'The HTTPS proxy failed.',recovery:{kind:'failed',retryable:true,reason:'The HTTPS proxy failed.'}}} onRetry={async()=>{networkRetries++;await new Promise<void>(resolve=>{finishRetry=resolve;});}}/>);await delay(20);
+assert.ok(text().includes('HTTPS proxy'));
+assert.equal(button()?.textContent,'Retry');assert.equal(button()?.hasAttribute('disabled'),false);
+button()!.click();await delay(20);
+assert.equal(networkRetries,1);assert.equal(button()?.textContent,'Retrying…');assert.equal(button()?.hasAttribute('disabled'),true);
+finishRetry();await delay(20);
+assert.equal(button()?.textContent,'Retry');
 root.unmount();assert.deepEqual(errors,[]);
 console.log('PASS: admission-rejected Retry now sends the retained draft with busy/disabled states; recovery-needed keeps the reconcile button');
