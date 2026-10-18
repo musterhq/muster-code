@@ -230,7 +230,9 @@ export class TerminalSessions {
   }
   /** Close: hang up the shell (and its jobs), escalate to SIGKILL, and wait for the reap. */
   async kill(input:{id:string}):Promise<void> {
-    const entry=this.entry(input?.id);
+    if(!validId(input?.id))throw new Error('Invalid terminal.');
+    const entry=this.entries.get(input.id);
+    if(!entry)return;
     if(entry.info.status!=='running'){this.entries.delete(entry.info.id);this.scheduleSave();return;}
     entry.closing=true;await this.hangUp(entry);
   }

@@ -149,3 +149,26 @@ test('terminal authority needs no Full access, while agent command starts still 
     await assert.rejects(commandAuthority(snapshot,appData,{chatId:'chat',operation:'start'}),/Wait for the current agent attempt|Full access/);
   }finally{await fs.rm(appData,{recursive:true,force:true});}
 });
+
+test('opening and closing a terminal 20 times leaves no sessions behind',async()=>{
+  const f=await fixture({file:'/bin/sh',args:['-c','sleep 30']});
+  try{
+    for(let round=0;round<20;round++){
+      const info=await f.terminals.create({chatId:'chat',cols:80,rows:24});
+      await f.terminals.kill({id:info.id});
+    }
+    assert.equal(f.terminals.running(),0);
+    assert.deepEqual(await f.terminals.list({chatId:'chat'}),[]);
+  }finally{await f.close();}
+});
+
+test('closing a terminal that already ended removes it, and a second close is a no-op',async()=>{
+  const f=await fixture({file:'/bin/sh',args:['-c','exit 0']});
+  try{
+    const info=await f.terminals.create({chatId:'chat',cols:80,rows:24});
+    await until(()=>f.events.some(event=>event.type==='terminalExit'&&event.id===info.id),'exit');
+    await f.terminals.kill({id:info.id});
+    assert.deepEqual(await f.terminals.list({chatId:'chat'}),[]);
+    await f.terminals.kill({id:info.id});
+  }finally{await f.close();}
+});
