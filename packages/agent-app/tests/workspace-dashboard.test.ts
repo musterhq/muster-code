@@ -71,3 +71,14 @@ test('buildDashboard: 14 days of run activity, tasks by day and status, and spen
   assert.deepEqual(withPc.tasksByDay.at(-1)!.counts, { blocked: 1 });
   assert.equal(withPc.activity[0].source, 'paperclip');
 });
+
+test('turns the provider left unpriced are priced from the catalog or model policy, and the rest stay unpriced', () => {
+  const db = new DatabaseSync(':memory:');
+  const l = new TurnLedger(db);
+  const turn = (i: number, model: string | null, cost: number | null) => ({ ...body(i, '2026-09-29T09:00:00.000Z', 'completed', cost), provider: model ? 'p' : null, model, tokens: { input: 1_000_000, cached: 0, output: 1_000_000, reasoning: 0 } });
+  l.append(turn(1, 'known', null)); l.append(turn(2, 'unknown', null)); l.append(turn(3, 'known', 0.5)); l.append(turn(4, null, null));
+  const since = new Date(NOW - 15 * 86_400_000).toISOString();
+  const priceOf = (provider: string, model: string) => (provider === 'p' && model === 'known' ? { inputPerMTok: 1, outputPerMTok: 2 } as any : null);
+  const a = ledgerAggregates(db, { since, monthStart: monthStart(NOW, 0), offset: 0, skipImportedPaperclip: false, priceOf });
+  assert.deepEqual(a.spend, { usd: 3.5, priced: 2, unpriced: 2, tokens: 8_000_000 });
+});

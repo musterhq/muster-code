@@ -7,6 +7,7 @@
  * A month with turns but no prices reports `usd: null` ("unpriced"), never $0.
  */
 import type { DatabaseSync } from 'node:sqlite';
+import { estimateCostUsd, type ModelPricing } from '../shared/model-catalog.ts';
 import type { ProjectStats, TaskState } from '../shared/domains/projects-protocol.ts';
 import type { DashboardData, DashboardDay, LedgerEntry, WorkspaceRow, WorkspaceStatus, WorkspaceTask } from '../shared/domains/paperclip-protocol.ts';
 
@@ -38,7 +39,7 @@ export interface LedgerAggregates { turns: { day: string; outcome: string | null
  * Two grouped queries over the Ledger. `skipImportedPaperclip`: when a Paperclip is linked its own runs are counted
  * from Paperclip, so the imported copies of them (history rows with no chat) are left out here.
  */
-export function ledgerAggregates(db: DatabaseSync, input: { since: string; monthStart: string; offset: number; skipImportedPaperclip: boolean; projectId?: string }): LedgerAggregates {
+export function ledgerAggregates(db: DatabaseSync, input: { since: string; monthStart: string; offset: number; skipImportedPaperclip: boolean; projectId?: string; priceOf?: (providerId: string, model: string) => ModelPricing | null | undefined }): LedgerAggregates {
   const mod = tzModifier(input.offset), scope = input.projectId ? 'AND project_id = ?' : '', history = `${input.skipImportedPaperclip ? 'AND chat_id IS NOT NULL' : ''} ${scope}`;
   const p = input.projectId ? [input.projectId] : [];
   const turns = (db.prepare(`SELECT day, outcome, COUNT(*) AS n FROM (
@@ -50,7 +51,19 @@ export function ledgerAggregates(db: DatabaseSync, input: { since: string; month
       SELECT json_extract(body, '$.costUsd') AS cost, ${tokens} AS tokens FROM turn_ledger WHERE created_at >= ? ${scope}
       UNION ALL SELECT json_extract(body, '$.costUsd') AS cost, ${tokens} AS tokens FROM turn_ledger_history WHERE ended_at >= ? ${history}
     )`).get(input.monthStart, ...p, input.monthStart, ...p) as { usd: number; priced: number; unpriced: number; tokens: number };
-  return { turns, spend: { usd: Number(spend.usd), priced: Number(spend.priced), unpriced: Number(spend.unpriced), tokens: Number(spend.tokens) } };
+  let usd = Number(spend.usd), priced = Number(spend.priced), unpriced = Number(spend.unpriced);
+  if (input.priceOf && unpriced) {
+    const rows = db.prepare(`SELECT provider, model, SUM(i) AS i, SUM(c) AS c, SUM(o) AS o, COUNT(*) AS n FROM (
+        SELECT json_extract(body, '$.provider') AS provider, json_extract(body, '$.model') AS model, COALESCE(json_extract(body, '$.tokens.input'), 0) AS i, COALESCE(json_extract(body, '$.tokens.cached'), 0) AS c, COALESCE(json_extract(body, '$.tokens.output'), 0) AS o FROM turn_ledger WHERE created_at >= ? AND json_extract(body, '$.costUsd') IS NULL ${scope}
+        UNION ALL SELECT json_extract(body, '$.provider'), json_extract(body, '$.model'), COALESCE(json_extract(body, '$.tokens.input'), 0), COALESCE(json_extract(body, '$.tokens.cached'), 0), COALESCE(json_extract(body, '$.tokens.output'), 0) FROM turn_ledger_history WHERE ended_at >= ? AND json_extract(body, '$.costUsd') IS NULL ${history}
+      ) WHERE provider IS NOT NULL AND model IS NOT NULL GROUP BY provider, model`).all(input.monthStart, ...p, input.monthStart, ...p) as { provider: string; model: string; i: number; c: number; o: number; n: number }[];
+    for (const row of rows) {
+      const cost = estimateCostUsd({ inputTokens: Number(row.i), cachedInputTokens: Number(row.c), outputTokens: Number(row.o), reasoningOutputTokens: 0, requests: 0 }, input.priceOf(row.provider, row.model));
+      if (cost === null) continue;
+      usd += cost; priced += Number(row.n); unpriced -= Number(row.n);
+    }
+  }
+  return { turns, spend: { usd, priced, unpriced, tokens: Number(spend.tokens) } };
 }
 
 export interface DashboardInputs {

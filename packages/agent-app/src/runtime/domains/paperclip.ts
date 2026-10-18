@@ -44,6 +44,7 @@ import { importFromPaperclip, planImport, SqliteImportStore } from '../paperclip
 import { ImportedHistory, within } from '../checkout/imported-history.ts';
 import { realGit } from '../checkout/git-port.ts';
 import { buildCosts, groupsFromReceipts } from '../insight/costs.ts';
+import { effectivePricing, type ModelPricing } from '../../shared/model-catalog.ts';
 import { buildDashboard, DASHBOARD_DAYS, ledgerAggregates, monthStart } from '../workspace-dashboard.ts';
 import type { DomainContext, DomainModule } from './types.ts';
 import { device } from '../../shared/device-noun.ts';
@@ -794,6 +795,14 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
   });
 
   // --- the Dashboard (#132) -------------------------------------------------------------------------------------------------
+  const pricingLookup = async () => {
+    const policy = await context.invoke('models.policy.get', {}).catch(() => null);
+    return (providerId: string, model: string) => {
+      let catalog: ModelPricing | undefined;
+      try { catalog = (context.modelCatalog?.().providers.find(p => p.id === providerId) as unknown as { models?: { id: string; pricing?: ModelPricing }[] } | undefined)?.models?.find(m => m.id === model)?.pricing; } catch { catalog = undefined; }
+      return policy ? effectivePricing(policy, providerId, model, catalog) : catalog ?? null;
+    };
+  };
   const dashboard = async (offset: number, projectId?: string) => {
     const now = Date.now(), since = new Date(now - (DASHBOARD_DAYS + 1) * 86_400_000).toISOString();
     ledger();
@@ -810,7 +819,7 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
       }
     }
     const [aggregates, stats] = [
-      ledgerAggregates(context.db(), { since, monthStart: monthStart(now, offset), offset, skipImportedPaperclip: paperclip !== null, ...(projectId ? { projectId } : {}) }),
+      ledgerAggregates(context.db(), { since, monthStart: monthStart(now, offset), offset, skipImportedPaperclip: paperclip !== null, priceOf: await pricingLookup(), ...(projectId ? { projectId } : {}) }),
       // A project's Dashboard tab and Budget read that project's tasks, runs and activity; a Paperclip project has none here.
       projectId && paperclip ? null : await context.invoke('project.stats', { days: DASHBOARD_DAYS + 1, utcOffsetMinutes: offset, activityLimit: 12, ...(projectId ? { projectId } : {}) }).catch(() => null),
     ];
