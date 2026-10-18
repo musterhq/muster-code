@@ -305,11 +305,13 @@ export const DiffView = React.memo(function DiffView({tab}:{tab:WorkspaceTab}) {
       {reviewed?.mode&&<span className="diff-mode" title="File mode change">{MODE_LABEL[reviewed.mode.old??'']??reviewed.mode.old??'none'} → {MODE_LABEL[reviewed.mode.new??'']??reviewed.mode.new??'none'}</span>}
       {fileStatus&&<GitStatusBadge status={fileStatus}/>}
       {model&&!reviewed?.binary&&<span className="diff-stats"><span className="diff-stat-add git-add">+{model.stats.adds}</span><span className="diff-stat-del git-del">−{model.stats.dels}</span></span>}
+      <div className="diff-head-actions">
       {baselineControl}
       {fileStatus==='untracked' && <DiscardUntracked folderId={folderId} path={path} disabled={busy} className="diff-toggle diff-file-action" text="Discard file"/>}
       {fileStatus!=='untracked'&&reviewed&&(reviewed.beforeHash!==reviewed.afterHash)&&<button className="diff-toggle diff-file-action" disabled={busy} title={baseline==='staged'?'Unstage the whole file':'Revert the whole file to the baseline'} onClick={undoAll}>{baseline==='staged'?<Minus size={12} aria-hidden="true"/>:<Undo2 size={12} aria-hidden="true"/>}{baseline==='staged'?'Unstage file':'Undo file'}</button>}
       {runId&&hunks.some(hunk=>!kept.has(hunk.id))&&!kept.has('*')&&<button className="diff-toggle diff-file-action is-primary" disabled={busy} title="Accept every change in this file" onClick={()=>keep(['*'])}><Check size={12} aria-hidden="true"/>Keep all</button>}
       <button className="icon-button" aria-label="Open current file" onClick={() => void openFile(folderId,path)}><FileText size={14}/></button>
+      </div>
     </header>;
   const notice = problem && <div className="diff-review-notice" role="alert"><TriangleAlert size={13} aria-hidden="true"/><span>{problem.message}</span>
     {problem.hunkId&&problem.relocatable&&<button type="button" disabled={busy} onClick={()=>undoHunk(problem.hunkId!,true)}>{undoLabel} at matching lines</button>}
