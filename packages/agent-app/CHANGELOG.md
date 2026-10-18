@@ -7,10 +7,13 @@ All notable changes to Muster Agent. Each `## <version>` section becomes the not
 
 - Each organisation in the sidebar now has All tasks (the org's whole board), Dashboard and Roster rows. Opening one switches to that org first, so they work for every org, not only the active one.
 - The sidebar's organisations and My work show the last copy straight away on start while the slow server read refreshes them, instead of appearing late or staying empty.
+- Stopping a turn settles unfinished tool rows as Stopped, retaining partial output after reopening; denied, rule-blocked and timed-out commands say Did not run instead of Ran or failed, and activity summaries count them the same way.
 - Back and Forward (⌘[ / ⌘]) work like a browser: they return through Settings sections, Inbox, Projects, Automations and Memory as well as chats, instead of skipping everything but chats. A two-finger trackpad swipe (or three-finger, if macOS is set that way) does the same; code blocks, diffs and tables that scroll sideways keep their swipe.
 - The diff tab header keeps the file name readable in narrow panes and wraps the compare picker and file actions onto their own row instead of cutting them off.
 - The dark theme is darker and less grey: near-black surfaces and a deeper sidebar glass tint, with the blur kept.
 - Chats show a quiet "Today 0:52" divider where a conversation starts or resumes after a 30-minute pause or on a new day.
+- Stopping a turn settles unfinished tool rows as Stopped, retaining partial output after reopening; denied commands say Did not run.
+
 - Codex offers GPT-6.1 Sol, GPT-6 Sol and GPT-6 Luna when its model cache is unavailable; a readable provider catalog keeps precedence.
 - Untracked files can be discarded to Trash with confirmation from Changes or a diff, file actions stay visible, and opening a diff preserves the Changes compare mode.
 
