@@ -14,13 +14,18 @@ Object.assign(globalThis,{window,document:window.document,Node:window.Node,HTMLE
 let focused:any=null;
 window.HTMLElement.prototype.focus=function(){focused=this;};
 Object.defineProperty(window.document,'activeElement',{configurable:true,get:()=>focused??window.document.body});
-window.muster={subscribe(){return()=>{}},async invoke(command:string){if(command==='models.policy.get')return {hidden:[],shown:[],pricing:{}};return null;}} as any;
+const usageListeners=new Set<(event:any)=>void>();
+let usageReads=0;
+const future=new Date(Date.now()+3_600_000).toISOString();
+let usageRows:any[]=[{providerId:'hybrow',primary:null,secondary:{usedPercent:100,windowMinutes:43200,resetsAt:future},source:'live',updatedAt:new Date().toISOString()}];
+window.muster={subscribe(listener:any){usageListeners.add(listener);return()=>usageListeners.delete(listener)},async invoke(command:string){if(command==='models.policy.get')return {hidden:[],shown:[],pricing:{}};if(command==='providers.usage'){usageReads++;return usageRows;}return null;}} as any;
 
 const React=await import('react');
 const {createRoot}=await import('react-dom/client');
+const {ProviderUsageWarning,exhaustedUsage}=await import('../src/renderer/components/ProviderUsage');
 const {ModelPicker}=await import('../src/renderer/components/ModelPicker');
 const providers:any[]=[
-  {id:'hybrow',name:'Hybrow OmniRoute',available:true,identityMasked:'',models:[
+  {id:'hybrow',codex:true,name:'Hybrow OmniRoute',available:true,identityMasked:'',models:[
     {id:'claude/claude-fable-5',name:'Claude Fable 5',contextWindow:1_000_000,images:true},
     {id:'advisor',name:'Advisor'},{id:'executor',name:'Executor'},
     ...Array.from({length:40},(_,i)=>({id:`auto/route-${String(i).padStart(2,'0')}`,name:`Auto · route ${i}`})),
@@ -69,7 +74,8 @@ assert.equal(manage,1);
 (document.querySelector('[role="tab"][aria-label="ChatGPT"]') as HTMLButtonElement).click();await delay(20);
 assert.deepEqual(names(),['GPT-6','GPT-6 Mini']);
 (document.querySelector('[role="tab"][aria-label="All providers"]') as HTMLButtonElement).click();await delay(20);
-assert.deepEqual(q('.model-picker-section').map(node=>node.textContent),['Hybrow OmniRoute','ChatGPT','Claude Code']);
+assert.deepEqual(q('.model-picker-section').map(node=>node.textContent),['Hybrow OmniRoute · Usage limit reached','ChatGPT','Claude Code']);
+assert.equal(q('.model-picker-limit').length,1,'exhausted provider is flagged while other providers remain available');
 // Search spans every provider, whatever the tab; routes that match are listed inline.
 (document.querySelector('[role="tab"][aria-label="Claude Code"]') as HTMLButtonElement).click();await delay(20);
 await type('gpt 6');
@@ -111,5 +117,30 @@ options()[0]!.click();
 assert.equal(empty,1);
 assert.equal(document.querySelector('.model-picker-effort'),null,'no reasoning control without efforts');
 root.unmount();
+
+const baselineListeners=usageListeners.size;
+// Both composers mount this isolated warning: visible without opening a picker or hovering.
+usageRows=usageRows.map(row=>({...row,providerId:'codex'}));
+root=createRoot(host,{onUncaughtError:error=>(errors as unknown[]).push(error)});
+root.render(<ProviderUsageWarning providerId="codex"/>);
+await delay(40);
+assert.match(host.textContent??'',/Provider usage limit reached.*resets.*Choose another provider before sending/);
+const reads=usageReads;
+usageRows=[{...usageRows[0],secondary:{...usageRows[0].secondary,usedPercent:21}}];
+for(const listener of usageListeners)listener({type:'providerUsage',usage:usageRows[0]});
+await delay(20);
+assert.equal(host.textContent,'','live recovery removes the warning');
+assert.equal(usageReads,reads,'usage events do not refetch or poll');
+usageRows=[{...usageRows[0],primary:{usedPercent:100,windowMinutes:300,resetsAt:null}}];
+for(const listener of usageListeners)listener({type:'providerUsage',usage:usageRows[0]});
+await delay(20);
+assert.match(host.textContent??'',/reset time not reported/,'primary exhaustion without a reset is still warned');
+root.render(<ProviderUsageWarning providerId="claude-code"/>);
+await delay(20);
+assert.equal(host.textContent,'','switching providers does not retain the previous provider warning');
+root.unmount();
+assert.equal(usageListeners.size,baselineListeners,'usage listeners are cleaned up');
+assert.equal(exhaustedUsage(undefined),undefined);
+assert.equal(exhaustedUsage({...usageRows[0],primary:{usedPercent:100,windowMinutes:300,resetsAt:'2020-01-01T00:00:00Z'}}),undefined,'passed resets do not establish exhaustion');
 assert.deepEqual(errors,[]);
 console.log('Shared model picker passed: opens on the current provider, compact rows, collapsed Auto routes, cross-provider search, hidden note, keyboard, default row.');

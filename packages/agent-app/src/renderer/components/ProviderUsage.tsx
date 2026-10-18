@@ -27,17 +27,44 @@ export function resetEta(usage: ProviderUsage | undefined, now = Date.now()): st
   return blocking ? resetLabel(blocking.resetsAt, now) : undefined;
 }
 
-/** Latest usage for one provider; live `providerUsage` events replace it without refetching. */
-export function useProviderUsage(providerId: string | undefined, enabled = true): {usage?: ProviderUsage; loaded: boolean} {
-  const [state, setState] = useState<{usage?: ProviderUsage; loaded: boolean}>({loaded: false});
+/** Usage is read once on mount/selection change, then updated only by usage events. */
+export function useProviderUsages(enabled = true, providerId?: string): {rows: ProviderUsage[]; loaded: boolean} {
+  const [state, setState] = useState<{rows: ProviderUsage[]; loaded: boolean}>({rows: [], loaded: false});
   useEffect(() => {
-    if (!enabled || !reportsUsage(providerId)) return;
+    setState({rows: [], loaded: false});
+    if (!enabled) return;
     let live = true;
-    invoke('providers.usage', {id: providerId}).then(rows => { if (live) setState({usage: rows.find(row => row.providerId === providerId), loaded: true}); }, () => { if (live) setState({loaded: true}); });
-    const off = subscribe(event => { if (event.type === 'providerUsage' && event.usage.providerId === providerId) setState({usage: event.usage, loaded: true}); });
+    const events = new Map<string, ProviderUsage>();
+    const off = subscribe(event => {
+      if (event.type !== 'providerUsage' || (providerId && event.usage.providerId !== providerId)) return;
+      events.set(event.usage.providerId, event.usage);
+      setState(current => ({rows: [...current.rows.filter(row => row.providerId !== event.usage.providerId), event.usage], loaded: true}));
+    });
+    invoke('providers.usage', providerId ? {id: providerId} : {}).then(rows => {
+      if (live) setState({rows: [...rows.filter(row => !events.has(row.providerId)), ...events.values()], loaded: true});
+    }, () => { if (live) setState(current => ({...current, loaded: true})); });
     return () => { live = false; off(); };
   }, [providerId, enabled]);
   return state;
+}
+
+/** Latest usage for one provider; live `providerUsage` events replace it without refetching. */
+export function useProviderUsage(providerId: string | undefined, enabled = true): {usage?: ProviderUsage; loaded: boolean} {
+  const {rows, loaded} = useProviderUsages(enabled && reportsUsage(providerId), providerId);
+  return {usage: rows.find(row => row.providerId === providerId), loaded};
+}
+
+/** A passed reset means the old snapshot no longer establishes an exhausted window. */
+export function exhaustedUsage(usage: ProviderUsage | undefined, now = Date.now()): ProviderUsageWindow | undefined {
+  return [usage?.primary, usage?.secondary].find((w): w is ProviderUsageWindow => Boolean(w && w.usedPercent >= 100 && (!w.resetsAt || !(Date.parse(w.resetsAt) <= now))));
+}
+
+/** Kept in a child so usage events never rerender the composer or subscribe to streamed tokens. */
+export function ProviderUsageWarning({providerId}: {providerId: string | undefined}) {
+  const {usage} = useProviderUsage(providerId);
+  const exhausted = exhaustedUsage(usage);
+  if (!exhausted) return null;
+  return <p className="composer-image-warning" role="status">Provider usage limit reached · {resetLabel(exhausted.resetsAt)}. Choose another provider before sending.</p>;
 }
 
 function Meter({window: w}: {window: ProviderUsageWindow}) {
