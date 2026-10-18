@@ -41,7 +41,7 @@ export function useProviderUsages(enabled = true, providerId?: string): {rows: P
       setState(current => ({rows: [...current.rows.filter(row => row.providerId !== event.usage.providerId), event.usage], loaded: true}));
     });
     invoke('providers.usage', providerId ? {id: providerId} : {}).then(rows => {
-      if (live) setState({rows: [...rows.filter(row => !events.has(row.providerId)), ...events.values()], loaded: true});
+      if (live) setState({rows: [...(Array.isArray(rows) ? rows : []).filter(row => !events.has(row.providerId)), ...events.values()], loaded: true});
     }, () => { if (live) setState(current => ({...current, loaded: true})); });
     return () => { live = false; off(); };
   }, [providerId, enabled]);
@@ -81,7 +81,8 @@ function readSharedUsage(): void {
   if (shared.reading || Date.now() - shared.readAt < SHARED_USAGE_TTL_MS) return;
   shared.reading = true;
   invoke('providers.usage', {}).then(rows => {
-    const next = new Map(rows.map(row => [row.providerId, row] as const));
+    // A runtime without usage support answers nothing: treat it as no rows rather than failing the read.
+    const next = new Map((Array.isArray(rows) ? rows : []).map(row => [row.providerId, row] as const));
     // An event that landed during the read is newer than the snapshot it raced.
     for (const [id, row] of shared.rows) if (row.updatedAt > (next.get(id)?.updatedAt ?? '')) next.set(id, row);
     shared.rows = next;
