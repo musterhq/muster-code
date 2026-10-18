@@ -662,6 +662,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
         const contextualPrompt = preamble ? `${preamble}\n\nCurrent user request:\n${request}` : request;
         let retryNotice: TimelineItem | undefined;
         let retryReason = 'admission' as 'admission' | 'transient';
+        let retryDetail: string | undefined;
         const stoppedBeforeDispatch: ProviderResult = {status:'failed',finalMessage:'',dispatchState:'not-dispatched',recovery:{kind:'cancelled',retryable:false,reason:'Stopped before the request was sent.'}};
         const attempt = () => run.stopped ? Promise.resolve(stoppedBeforeDispatch) : provider.run({ chat: {...chat,providerTurnId:undefined,recovery:undefined}, cwd, prompt: contextualPrompt,
           ...(images.length ? {images} : {}), ...(effort ?? runOptions.reasoningEffort ? {reasoningEffort: effort ?? runOptions.reasoningEffort} : {}), ...(requestsConnectors(prompt) ? {connectorsRequested: true} : {}),
@@ -885,6 +886,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
         const retried = await withAdmissionRetry(attempt, {signal: run.retry.signal, onWait(wait) {
           if (disposed) return;
           retryReason = wait.reason ?? 'admission';
+          retryDetail = wait.detail;
           const data = {kind:'admission-retry', reason: retryReason, attempt: wait.attempt, max: wait.max, retryAt: wait.retryAt};
           if (retryNotice) store.updateItem(retryNotice.id, admissionRetryText(wait), 'running', data);
           else retryNotice = store.appendItem(chatId, 'notice', admissionRetryText(wait), 'running', data);
@@ -893,16 +895,13 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
         let result = retried.result;
         if (retryNotice && !disposed) {
           const sent = !retried.cancelled && result.recovery?.kind !== 'admission-rejected' && result.recovery?.kind !== 'failed';
-          const lead = retryReason === 'transient' ? 'Provider attempt did not start.' : 'Provider at capacity.';
+          const lead = retryReason === 'transient' ? 'Provider attempt did not start.' : retryDetail ?? 'The provider is temporarily unavailable.';
           store.updateItem(retryNotice.id, retried.cancelled ? 'Stopped while waiting to retry the provider.' : sent ? `${lead} Sent after ${retried.retries} ${retried.retries === 1 ? 'retry' : 'retries'}.` : `${lead} Gave up after ${retried.retries} automatic retries.`, retried.cancelled ? 'cancelled' : sent ? 'completed' : 'failed', {...store.item(retryNotice.id)?.data, retryAt: null});
         }
-        if (retried.cancelled) result = {...result, recovery: {kind:'cancelled',retryable:false,reason:'Stopped while waiting to retry the provider. No turn was dispatched.'}};
+        if (retried.cancelled) result = {...result, recovery: {kind:'cancelled',retryable:false,reason:'Stopped while waiting to retry the provider. The request was not accepted.'}};
         else if (retried.retries && result.recovery?.kind === 'failed') result = {...result, recovery: {...result.recovery, reason: `${result.recovery.reason} (after ${retried.retries} automatic ${retried.retries === 1 ? 'retry' : 'retries'})`}};
         else if (retried.retries && result.recovery?.kind === 'admission-rejected') {
-          // Carry the trailing "Resets in N min." sentence (if any) from the pre-retry reason
-          // instead of dropping it when the message is rebuilt for the gave-up-after-N-retries case.
-          const eta = / Resets [^.]*\.$/.exec(result.recovery.reason)?.[0] ?? '';
-          result = {...result, recovery: {...result.recovery, reason: `Provider admission stayed unavailable after ${retried.retries} automatic retries. No turn was dispatched; your message is back in the composer.${eta}`}};
+          result = {...result, recovery: {...result.recovery, reason: `${result.recovery.reason} Stopped after ${retried.retries} automatic retries.`}};
         }
         if (disposed) return;
         seal();

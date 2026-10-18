@@ -63,6 +63,7 @@ export async function responseError(response: Response, label: string): Promise<
   let message = '';
   try { const parsed = JSON.parse(text) as {error?: {message?: unknown} | string; message?: unknown}; const raw = typeof parsed.error === 'string' ? parsed.error : parsed.error?.message ?? parsed.message; if (typeof raw === 'string') message = raw; } catch { message = ''; }
   message = message.replace(/[\x00-\x1f]+/g, ' ').replace(/\b(sk|key|token)[-_][A-Za-z0-9_-]{8,}/gi, '[redacted]').slice(0, 300);
+  if (response.status === 429) return `Rate limited by ${label} (429)${message ? `: ${message}` : '.'}`;
   return `${label} returned HTTP ${response.status}${message ? `: ${message}` : '.'}`;
 }
 

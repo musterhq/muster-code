@@ -5,10 +5,10 @@
  */
 export const ADMISSION_RETRY_SCHEDULE_MS = [5_000, 10_000, 20_000, 40_000, 60_000] as const;
 export const ADMISSION_RETRY_MAX = ADMISSION_RETRY_SCHEDULE_MS.length;
-const RETRY_AFTER_CAP_MS = 5 * 60_000;
+const MAX_TIMER_MS = 2_147_483_647;
 
-export interface AdmissionOutcome { recovery?: {kind: string; retryable?: boolean}; dispatchState?: string; turnId?: string; failure?: {retryAfterMs?: number} }
-export interface AdmissionWait { attempt: number; max: number; delayMs: number; retryAt: string; reason?: 'admission' | 'transient' }
+export interface AdmissionOutcome { errorMessage?: string; recovery?: {kind: string; retryable?: boolean; reason?: string}; dispatchState?: string; turnId?: string; failure?: {retryAfterMs?: number; statusCode?: number} }
+export interface AdmissionWait { attempt: number; max: number; delayMs: number; retryAt: string; reason?: 'admission' | 'transient'; detail?: string }
 /** Short, bounded schedule for transient launch/handshake failures that provably never dispatched. */
 export const TRANSIENT_RETRY_SCHEDULE_MS = [750, 2_000] as const;
 export const TRANSIENT_RETRY_MAX = TRANSIENT_RETRY_SCHEDULE_MS.length;
@@ -24,14 +24,15 @@ export function isSafeAdmissionRejection(result: AdmissionOutcome): boolean {
 
 /** attempt is 1-based. Retry-After wins when present; otherwise the schedule with ±20% jitter. */
 export function admissionRetryDelay(attempt: number, retryAfterMs?: number, random: () => number = Math.random): number {
-  if (typeof retryAfterMs === 'number' && Number.isFinite(retryAfterMs) && retryAfterMs > 0) return Math.min(Math.max(Math.round(retryAfterMs), 1_000), RETRY_AFTER_CAP_MS);
+  if (typeof retryAfterMs === 'number' && Number.isFinite(retryAfterMs) && retryAfterMs >= 0) return Math.max(Math.ceil(retryAfterMs), 1_000);
   const base = ADMISSION_RETRY_SCHEDULE_MS[Math.min(Math.max(attempt, 1), ADMISSION_RETRY_MAX) - 1]!;
   return Math.round(base * (0.8 + random() * 0.4));
 }
 
-export function admissionRetryText(wait: Pick<AdmissionWait, 'attempt' | 'max' | 'delayMs' | 'reason'>): string {
+export function admissionRetryText(wait: Pick<AdmissionWait, 'attempt' | 'max' | 'delayMs' | 'reason' | 'detail'> & {retryAt?: string}): string {
   if (wait.reason === 'transient') return `Provider attempt did not start. Retrying in ${Math.max(1, Math.round(wait.delayMs / 1000))}s (attempt ${wait.attempt}/${wait.max})`;
-  return `Provider at capacity. Retrying in ${Math.max(1, Math.round(wait.delayMs / 1000))}s (attempt ${wait.attempt}/${wait.max})`;
+  if (wait.detail && wait.retryAt) return `${wait.detail} Retrying at ${new Date(wait.retryAt).toLocaleTimeString()} (attempt ${wait.attempt}/${wait.max})`;
+  return `The provider is temporarily unavailable. Retrying in ${Math.max(1, Math.round(wait.delayMs / 1000))}s (attempt ${wait.attempt}/${wait.max})`;
 }
 
 /** Resolves true after `ms`, false as soon as `signal` aborts. */
@@ -62,9 +63,11 @@ export async function withAdmissionRetry<R extends AdmissionOutcome>(attempt: ()
       continue;
     }
     if (!isSafeAdmissionRejection(result) || retries >= ADMISSION_RETRY_MAX || options.signal.aborted) return {result, retries: retries + transient, cancelled: options.signal.aborted && (isSafeAdmissionRejection(result) || isSafeTransientFailure(result))};
+    const delayMs = admissionRetryDelay(retries + 1, result.failure?.retryAfterMs, options.random);
+    // A longer timer would overflow and retry immediately. Leave this for a manual retry.
+    if (delayMs > MAX_TIMER_MS) return {result, retries: retries + transient, cancelled: false};
     retries++;
-    const delayMs = admissionRetryDelay(retries, result.failure?.retryAfterMs, options.random);
-    options.onWait({attempt: retries, max: ADMISSION_RETRY_MAX, delayMs, retryAt: new Date((options.now ?? Date.now)() + delayMs).toISOString(), reason: 'admission'});
+    options.onWait({attempt: retries, max: ADMISSION_RETRY_MAX, delayMs, retryAt: new Date((options.now ?? Date.now)() + delayMs).toISOString(), reason: 'admission', ...(result.failure?.statusCode === 429 ? {detail: result.errorMessage ?? result.recovery?.reason} : {})});
     if (!(await waitForRetry(delayMs, options.signal))) return {result, retries, cancelled: true};
   }
 }

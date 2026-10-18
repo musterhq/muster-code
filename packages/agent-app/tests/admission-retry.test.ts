@@ -4,20 +4,22 @@ import {mkdtemp,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {createAgentService} from '../src/runtime/service.ts';
-import type {ProviderAdapter,ProviderResult} from '../src/runtime/provider.ts';
+import {createProviderAdapter,type ProviderAdapter,type ProviderResult} from '../src/runtime/provider.ts';
 import {ADMISSION_RETRY_MAX,admissionRetryDelay,admissionRetryText,isSafeAdmissionRejection,withAdmissionRetry} from '../src/runtime/admission-retry.ts';
+
+import {openAICompatibleAdapter} from '../src/runtime/adapters/http-chat.ts';
 
 const info:ProviderAdapter['info']=()=>[{id:'hybrow',name:'Fixture',available:true,identityMasked:'fixture',models:[{id:'claude/claude-fable-5',name:'Fixture'}]}];
 const rejected=(retryAfterMs?:number):ProviderResult=>({status:'failed',finalMessage:'',dispatchState:'not-dispatched',errorMessage:'503',recovery:{kind:'admission-rejected',retryable:true,reason:'Provider admission is temporarily unavailable.'},...(retryAfterMs?{failure:{kind:'rpc-rejected',statusCode:503,retryAfterMs}}:{})});
 const flush=async(rounds=20)=>{for(let i=0;i<rounds;i++)await new Promise(resolve=>setImmediate(resolve));};
 async function directory(t:TestContext){const path=await mkdtemp(join(tmpdir(),'muster-admission-'));t.after(()=>rm(path,{recursive:true,force:true}));return path;}
 
-test('schedule: 5/10/20/40/60s with ±20% jitter; Retry-After wins and is bounded',()=>{
+test('schedule: 5/10/20/40/60s with ±20% jitter; Retry-After wins without shortening the requested wait',()=>{
   assert.deepEqual([1,2,3,4,5].map(n=>admissionRetryDelay(n,undefined,()=>0.5)),[5000,10000,20000,40000,60000]);
   assert.equal(admissionRetryDelay(1,undefined,()=>0),4000);assert.equal(admissionRetryDelay(1,undefined,()=>1),6000);
   assert.equal(admissionRetryDelay(5,undefined,()=>1),72000);
-  assert.equal(admissionRetryDelay(2,3000),3000);assert.equal(admissionRetryDelay(2,10),1000);assert.equal(admissionRetryDelay(2,3_600_000),300_000);
-  assert.equal(admissionRetryText({attempt:2,max:5,delayMs:9600}),'Provider at capacity. Retrying in 10s (attempt 2/5)');
+  assert.equal(admissionRetryDelay(2,3000),3000);assert.equal(admissionRetryDelay(2,10),1000);assert.equal(admissionRetryDelay(2,3_600_000),3_600_000);
+  assert.equal(admissionRetryText({attempt:2,max:5,delayMs:9600}),'The provider is temporarily unavailable. Retrying in 10s (attempt 2/5)');
   assert.equal(isSafeAdmissionRejection(rejected()),true);
   assert.equal(isSafeAdmissionRejection({...rejected(),dispatchState:'unknown'}),false);
   assert.equal(isSafeAdmissionRejection({...rejected(),turnId:'turn'}),false);
@@ -54,7 +56,7 @@ test('service retries a not-dispatched 503 with one in-place notice, then comple
   await service.invoke('chat.send',{id:chat.id,text:'hello',requestId:'hello'});
   await flush();assert.equal(calls,1);
   let notices=(await service.invoke('chat.timeline',{id:chat.id})).items.filter(item=>item.data?.kind==='admission-retry');
-  assert.equal(notices.length,1);assert.equal(notices[0]!.text,'Provider at capacity. Retrying in 2s (attempt 1/5)');assert.equal(notices[0]!.status,'running');
+  assert.equal(notices.length,1);assert.equal(notices[0]!.text,'The provider is temporarily unavailable. Retrying in 2s (attempt 1/5)');assert.equal(notices[0]!.status,'running');
   assert.equal(notices[0]!.data?.retryAt,'2026-09-23T00:00:02.000Z');
   assert.equal((await service.invoke('app.snapshot',undefined)).chats[0]!.status,'running');
   mock.timers.tick(2000);await flush();assert.equal(calls,2);
@@ -65,7 +67,7 @@ test('service retries a not-dispatched 503 with one in-place notice, then comple
   assert.equal(final.status,'completed');assert.equal(final.recovery,undefined);
   const items=(await service.invoke('chat.timeline',{id:chat.id})).items;
   const notice=items.find(item=>item.data?.kind==='admission-retry')!;
-  assert.equal(notice.status,'completed');assert.equal(notice.text,'Provider at capacity. Sent after 2 retries.');
+  assert.equal(notice.status,'completed');assert.equal(notice.text,'The provider is temporarily unavailable. Sent after 2 retries.');
   assert.equal(items.filter(item=>item.kind==='user').length,1);
   mock.timers.tick(100);await service.dispose();
 });
@@ -94,4 +96,55 @@ test('chat.stop cancels a pending retry; exhausted retries keep the admission re
   assert.equal(chat.status,'failed');assert.equal(chat.recovery?.kind,'admission-rejected');assert.match(chat.recovery!.reason,/after 5 automatic retries/);assert.equal(chat.draft,'keep trying');
   assert.equal((await service.invoke('chat.timeline',{id:exhausted.id})).items.find(item=>item.data?.kind==='admission-retry')?.status,'failed');
   mock.timers.tick(100);await service.dispose();
+});
+
+
+test('HTTP 429 honours each Retry-After through the service and keeps final composer copy truthful',async t=>{
+  const dataDir=await directory(t);
+  mock.timers.enable({apis:['setTimeout','Date'],now:Date.parse('2026-10-18T00:00:00Z')});t.after(()=>mock.timers.reset());
+  const sentAt:number[]=[];
+  const delays=[30_000,45_000,600_000,30_000,30_000];
+  const adapter=openAICompatibleAdapter({endpoint:'https://fixture.example/v1',apiKey:()=>undefined,label:'Fixture',tools:false,fetch:async()=>{
+    sentAt.push(Date.now());
+    const delay=delays[sentAt.length-1]??30_000;
+    // Cover both header formats and a wait beyond the old five-minute cap.
+    const retryAfter=sentAt.length===2?new Date(Date.now()+delay).toUTCString():String(delay/1000);
+    return new Response(JSON.stringify({error:{message:'Rate limit reached for mock-model. Please try again later.'}}),{status:429,headers:{'retry-after':retryAfter}});
+  }});
+  const provider=createProviderAdapter({instances:()=>[{info:info()[0]!,command:'',env:{},sessionsRoot:'',adapter}]});
+  const service=createAgentService({dataDir,provider,onEvent(){}});t.after(()=>service.dispose());
+  const chat=await service.invoke('chat.create',{});
+  await service.invoke('chat.send',{id:chat.id,text:'hello',requestId:'rate-limit'});
+  for(let i=0;i<delays.length;i++){
+    await flush();assert.equal(sentAt.length,i+1);
+    const notices=(await service.invoke('chat.timeline',{id:chat.id})).items.filter(item=>item.data?.kind==='admission-retry');
+    assert.equal(notices.length,1);
+    const notice=notices[0]!;
+    assert.match(notice.text,/Rate limited by Fixture \(429\): Rate limit reached for mock-model/);
+    assert.match(notice.text,/Retrying at /);
+    assert.doesNotMatch(notice.text,/admission|dispatched|at capacity|composer/);
+    assert.equal(notice.data?.retryAt,new Date(Date.now()+delays[i]!).toISOString());
+    // Preserve a newer draft instead of claiming the failed message is in the composer.
+    if(i===0)await service.invoke('chat.update',{id:chat.id,draft:'next message'});
+    mock.timers.tick(delays[i]!-1);await flush();assert.equal(sentAt.length,i+1);
+    mock.timers.tick(1);
+  }
+  await flush();assert.equal(sentAt.length,6);
+  assert.deepEqual(sentAt.slice(1).map((at,i)=>at-sentAt[i]!),delays);
+  const final=(await service.invoke('app.snapshot',undefined)).chats.find(item=>item.id===chat.id)!;
+  assert.equal(final.status,'failed');assert.equal(final.draft,'next message');
+  assert.match(final.recovery!.reason,/Rate limited by Fixture \(429\): Rate limit reached/);
+  assert.match(final.recovery!.reason,/after 5 automatic retries/);
+  const items=(await service.invoke('chat.timeline',{id:chat.id})).items;
+  assert.equal(items.filter(item=>item.kind==='user').length,1);
+  for(const copy of [final.error!,final.recovery!.reason,...items.filter(item=>item.status==='failed').map(item=>item.text)]){
+    assert.doesNotMatch(copy,/admission|dispatched|back in the composer|at capacity/);
+  }
+  mock.timers.tick(100);
+});
+
+test('a Retry-After beyond the timer limit never overflows into an immediate retry',async()=>{
+  let calls=0;
+  const outcome=await withAdmissionRetry(async()=>{calls++;return rejected(2_147_483_648);},{signal:new AbortController().signal,onWait(){assert.fail('must not schedule an overflowing timer');}});
+  assert.equal(calls,1);assert.equal(outcome.retries,0);
 });

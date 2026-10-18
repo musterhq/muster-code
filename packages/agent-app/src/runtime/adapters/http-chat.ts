@@ -52,7 +52,13 @@ async function turnBody(input: AdapterRunInput, memory: ConversationMemory, labe
       catch (error) { return fail(`Could not reach ${label}: ${error instanceof Error ? error.message.slice(0, 200) : 'network error'}.`); }
     }
   }
-  if (!response.ok) return fail(await responseError(response, label), {statusCode: response.status});
+  if (!response.ok) {
+    const header = response.headers.get('retry-after');
+    const seconds = header !== null && /^\d+(?:\.\d+)?$/.test(header.trim()) ? Number(header) : NaN;
+    const delay = Number.isFinite(seconds) ? seconds * 1000 : header ? Date.parse(header) - Date.now() : NaN;
+    const retryAfterMs = Number.isFinite(delay) && delay >= 0 ? Math.ceil(delay) : undefined;
+    return fail(await responseError(response, label), {statusCode: response.status, ...(retryAfterMs !== undefined ? {retryAfterMs} : {})});
+  }
   if (!response.body) return {status: 'failed', finalMessage: '', threadId, dispatchState: 'dispatched', errorMessage: `${label} returned an empty stream.`};
   const turnId = randomUUID();
   input.onTurnAccepted({threadId, turnId});
