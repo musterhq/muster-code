@@ -50,7 +50,7 @@ test('NAV-12: context-dependent prerequisites', () => {
   assert.equal(commandState('stop', withChat({status: 'running'})).enabled, true);
   assert.equal(commandState('stop', withChat({status: 'stopping'})).reason, 'Already stopping');
   assert.equal(commandState('search-files', withChat({folderName: undefined})).reason, 'This chat has no folder');
-  assert.equal(commandState('back', idle).reason, 'No earlier chat in history');
+  assert.equal(commandState('back', idle).reason, 'Nothing earlier in this window');
   assert.equal(commandState('back', {...idle, canBack: true}).enabled, true);
   assert.equal(commandState('next-chat', {...idle, chatCount: 1}).enabled, false);
   assert.equal(commandState('mark-unread', withChat({unread: true})).reason, 'Already unread');

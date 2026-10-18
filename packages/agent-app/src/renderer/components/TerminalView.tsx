@@ -53,7 +53,7 @@ function listen():void {
 function css(name:string,fallback:string):string {
   try{return getComputedStyle(document.documentElement).getPropertyValue(name).trim()||fallback;}catch{return fallback;}
 }
-const terminalTheme=()=>({background:css('--bg','#161616'),foreground:css('--text','#e8e8e8'),cursor:css('--text','#e8e8e8'),selectionBackground:'rgba(145,171,194,0.35)'});
+const terminalTheme=()=>({background:css('--bg','#0e0e0e'),foreground:css('--text','#e8e8e8'),cursor:css('--text','#e8e8e8'),selectionBackground:'rgba(145,171,194,0.35)'});
 /** #324: open terminals follow a colour-theme change (xterm reads colours once, so it must be told). */
 if(typeof window!=='undefined')window.addEventListener('muster-theme-change',()=>{
   const next=terminalTheme();
