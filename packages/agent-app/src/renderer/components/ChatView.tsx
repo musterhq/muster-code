@@ -44,6 +44,7 @@ import {LiveAnnouncer,LiveTurnHeader,TurnHeader,WorkingTail} from './TurnStatus'
 import {ReasoningRow} from './ReasoningRow';
 import {TurnFileChanges} from './TurnFileChanges';
 import {describeTurns,foldable,rowStart} from './turnStatusModel';
+import {dividerLabel,dividerRows} from '../dayDividers';
 import {attachmentPreview} from '../timelineBridge';
 import {attachmentPdfThumbnail,isPdf} from '../pdfThumbnail';
 import {openAttachment, openAttachmentOnKey} from '../attachmentOpen';
@@ -171,6 +172,12 @@ const highlightApi=()=>{const css=(globalThis as {CSS?:{highlights?:HighlightReg
  *  streamed token only re-reads the row that grew. */
 const MARKDOWN_IMAGE=/!\[[^\]]*\]\(\s*<?([^)\s>]+)>?[^)]*\)/g;
 const scanned=new WeakMap<object,{size:number;paths:string[]}>();
+/** "Today 0:52" above a message that opens the chat or resumes it after a pause. */
+const DayDivider=React.memo(function DayDivider({at}:{at:number}){
+  const {day,time}=dividerLabel(at);
+  return <div className="day-divider" role="separator" aria-label={`${day} ${time}`}><time dateTime={new Date(at).toISOString()}><b>{day}</b> {time}</time></div>;
+});
+
 function rowImages(row:TranscriptEntry):string[] {
   if(row.kind!=='activity'&&row.kind!=='assistant')return [];
   const size=row.kind==='activity'?row.items.length+row.items.reduce((n,item)=>n+(item.status==='completed'?1:0),0):row.text.length,hit=scanned.get(row);
@@ -185,6 +192,7 @@ const TAIL_HEIGHT=40;
 export function Timeline({ items, chatId, onScrolled, running, planMode=false }: { items: TimelineItem[]; chatId:string; onScrolled?: (scrolled:boolean)=>void; running?:boolean; planMode?:boolean }): React.ReactElement {
   const project=useMemo(()=>createTimelineProjection(),[]);
   const {rows,turns,rowIndexes}=useMemo(()=>project(items),[items,project]);
+  const dividers=useMemo(()=>dividerRows(rows),[rows]);
   const live=running??items.some(item=>item.status==='running');
   // Plan mode: the settled final answer of the latest turn is the plan.
   const planId=useMemo(()=>planCardId(items,planMode,live),[items,planMode,live]);
@@ -420,6 +428,7 @@ export function Timeline({ items, chatId, onScrolled, running, planMode=false }:
             data-kind={row.kind}
             style={{ transform: `translateY(${v.start}px)` }}
           >
+            {!hidden&&dividers.has(v.index)&&<DayDivider at={dividers.get(v.index)!}/>}
             {!hidden&&<AreaBoundary area="this message" scope="item" resetKey={row}><GalleryCoverage.Provider value={galleries.get(turnModel.rowTurn[v.index]??'')?.covered??NO_COVERAGE}><TimelineCard gallery={galleryByReply.get(row.id)?.paths} item={row} meta={row.kind!=='assistant'||finalReplies.has(row.id)} plan={row.kind==='assistant'&&row.id===planId} actions={actionsFor(row)} editing={editingFor(row)} tail={live&&v.index===rows.length-1} nextAt={row.kind==='reasoning'?rowStart(rows[v.index+1]):undefined}
               reveal={activeMatch?.rowIndex===v.index?activeMatch.itemId:undefined}
               turn={info&&info.complete&&info.work>0?{durationMs:info.durationMs,open:isTurnOpen(info.id),onToggle:()=>setTurn(info.id,!isTurnOpen(info.id)),summary:turnWork.get(info.id)?.summary}:info&&!info.complete&&live&&info.id===turnModel.last?{live:rowStart(row)??''}:undefined}/></GalleryCoverage.Provider></AreaBoundary>}
