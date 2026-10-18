@@ -17,6 +17,7 @@ import { createIncrementalMarkdownPlugin } from '../markdown-incremental';
 import {markdownHeadingId} from './markdownAnchors';
 import {HighlightedCode} from './HighlightedCode';
 import {inferMarkdownCodeLanguages} from './codeLanguage';
+import {remarkProseBreaks} from '../markdown-breaks';
 
 import './message-body.css';
 
@@ -225,7 +226,7 @@ export function localImagePath(src?: string): string | undefined {
 
 function MessageBodyContent({ text, resourceContext, animate = false, linkFiles = false }: { text: string; resourceContext?: ResourceContext; animate?: boolean; linkFiles?: boolean }): React.ReactElement {
   // Replies link the files they mention (markdown-file-links.ts); documents and previews render as written.
-  const remarkPlugins = React.useMemo(() => linkFiles ? [remarkGfm, createIncrementalMarkdownPlugin(), remarkLeadingLabels, remarkFileLinks] : [remarkGfm, createIncrementalMarkdownPlugin()], [linkFiles]);
+  const remarkPlugins = React.useMemo(() => linkFiles ? [remarkGfm, createIncrementalMarkdownPlugin(), remarkLeadingLabels, remarkFileLinks, remarkProseBreaks] : [remarkGfm, createIncrementalMarkdownPlugin(), remarkProseBreaks], [linkFiles]);
   const renderedText = React.useMemo(() => inferMarkdownCodeLanguages(text), [text]);
   // Streaming fade (markdown-fade.ts): text that arrives after the first render fades in.
   const fade = useRef<FadeState | null>(null);
