@@ -172,6 +172,8 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
   let built: { generation: number; companyId: string; part: PaperclipPart; agents: Map<string, WorkspaceAgent> } | null = null;
   let companies: PaperclipLink['companies'] = [];
   let inflight: Promise<PaperclipPart> | null = null, lastError: string | undefined;
+  /** Bumped when the connection or its org changes: a read started before that belongs to the old org (#445). */
+  let orgEpoch = 0, inflightEpoch = -1;
   const REFRESH_COALESCE_MS = options.refreshCoalesceMs ?? 2500;
   let readDoneAt = 0, readEpoch = -1, changeEpoch = 0;
   const chooseCompany = async (api: ServerBackend) => {
@@ -181,17 +183,20 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
     return chosen;
   };
   const readPaperclip = async (api: ServerBackend): Promise<PaperclipPart> => {
+    const epoch = orgEpoch;
     const company = await chooseCompany(api);
     const fresh = live.fresh; live.fresh = false;
     const part = await api.read(company, built ? { generation: built.generation, companyId: built.companyId, part: built.part } : undefined, { fresh });
+    // The org was switched while this read ran: what it read is the old org's, so it must not become what every screen reads.
+    if (epoch !== orgEpoch) return part;
     if (built && built.part === part && built.companyId === company.id) return part;
     built = { generation: api.generation, companyId: company.id, part, agents: new Map(part.agents.map(a => [a.id, a])) };
     return part;
   };
   /** The connection changed (here, or by signing in from Settings): drop what was read from the old one and tell the screens. */
   /** The session cookie arrived, expired or was cleared: only the live socket is rebuilt; the next read tries it first. */
-  const offSession = conn.onSession(() => { live.refusedAt = 0; closeSocket(); backend = null; built = null; if (conn.sessionState() !== 'expired') ensureSocket(); queueEmit(['config']); });
-  const offConnection = conn.onChange(() => { changeEpoch++; hub.reader?.reset(); live.refusedAt = 0; closeSocket(); stopPoll(); built = null; backend = null; companies = []; lastError = undefined; queueEmit(['config', 'tasks', 'runs', 'agents', 'inbox']); });
+  const offSession = conn.onSession(() => { orgEpoch++; live.refusedAt = 0; closeSocket(); backend = null; built = null; if (conn.sessionState() !== 'expired') ensureSocket(); queueEmit(['config']); });
+  const offConnection = conn.onChange(() => { changeEpoch++; orgEpoch++; hub.reader?.reset(); live.refusedAt = 0; closeSocket(); stopPoll(); built = null; backend = null; companies = []; lastError = undefined; queueEmit(['config', 'tasks', 'runs', 'agents', 'inbox']); });
   /** Records the last read's outcome. Going offline (ok → stale) or coming back (stale → ok) is an update the screens
    *  must see at once: the banner and "· offline" come from it, so it is emitted rather than waiting for a reload. */
   const linkError = (next: string | undefined) => {
@@ -211,14 +216,20 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
     if (refresh && !coalesced) api.invalidate();
     if (!coalesced) {
       const startedAt = changeEpoch;
+      // A read still running for the org before a switch is not joined: it would answer with the old org.
+      if (inflight && inflightEpoch !== orgEpoch) inflight = null;
+      if (!inflight) inflightEpoch = orgEpoch;
       inflight ??= readPaperclip(api).then(part => { linkError(undefined); ensureSocket(); readDoneAt = Date.now(); readEpoch = startedAt; return part; }, cause => {
         linkError(cause instanceof Error ? cause.message : String(cause));
         if (built) return built.part;
         throw cause;
-      }).finally(() => { inflight = null; });
+      });
+      const mine = inflight;
+      void mine.finally(() => { if (inflight === mine) inflight = null; }).catch(() => undefined);
     }
+    const pending = inflight;
     try {
-      const part = coalesced ? built!.part : await inflight!;
+      const part = coalesced ? built!.part : await pending!;
       return { part, link: { origin: originLabel(), company: companies.find(c => c.id === built?.companyId) ?? null, companies, live: live.channel, ...(conn.view().reconnect && live.channel !== 'socket' ? { reconnect: true, baseUrl: conn.baseUrl() } : {}), ...(lastError ? { stale: lastError, cached: true } : {}) } };
     } catch (cause) {
       return { part: null, link: { origin: originLabel(), company: null, companies, live: 'off', stale: cause instanceof Error ? cause.message : String(cause), cached: false } };
@@ -597,7 +608,7 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
       try {
         await paperclipPart(false);
         if (!built) throw new Error(lastError ?? 'not reachable');
-        remote = await c.rows(kind, companies.find(x => x.id === built!.companyId) ?? { id: built.companyId, name: originLabel(), prefix: '' });
+        remote = await c.rows(kind, companies.find(x => x.id === built!.companyId) ?? { id: built.companyId, name: originLabel(), prefix: '' }, { agents: built.agents, people: new Map((built.part.people ?? []).map(p => [p.id, p.name])) });
         // An event about a task belongs to that task's project: what lets a project's Activity show only its own.
         if (kind === 'audit') { const projectOfTask = new Map(built.part.tasks.map(t => [t.id, t.projectId])); remote = remote.map(r => r.projectId || !r.taskId ? r : { ...r, projectId: projectOfTask.get(r.taskId) ?? null }); }
       } catch (cause) { note = `Muster Server could not be read: ${cause instanceof Error ? cause.message : String(cause)}`; }
@@ -800,10 +811,12 @@ export function createPaperclipDomain(context: DomainContext, options: Paperclip
     const c = connection();
     let paperclip: Parameters<typeof buildDashboard>[0]['paperclip'] = null, budgets: DashboardData['budgets'];
     if (c && (!projectId || await owner('project', projectId) === 'paperclip')) {
-      await paperclipPart(false);
+      // The Dashboard refetches when the workspace snapshot changes, so the org's last read is current: it is reused instead of
+      // reading every task page again (#445). A switched org has no read yet (`built` was dropped) and is read here.
+      if (!built) await paperclipPart(false);
       if (built) {
         const company = companies.find(x => x.id === built!.companyId) ?? { id: built.companyId, name: originLabel(), prefix: '' };
-        const remote = await c.dashboard(company, built.agents);
+        const remote = await c.dashboard(company, built.agents, new Map((built.part.people ?? []).map(p => [p.id, p.name])));
         if (remote.budgets) budgets = { ...mapBudgets(remote.budgets), company: company.name };
         const inProject = projectId ? new Set(built.part.tasks.filter(t => t.projectId === projectId).map(t => t.id)) : null;
         paperclip = { receipts: remote.receipts.filter(r => !inProject || (r.taskId !== null && inProject.has(r.taskId))), tasks: built.part.tasks.filter(t => !projectId || t.projectId === projectId), activity: remote.activity, name: company.name };
