@@ -1451,7 +1451,7 @@ test('#383 no "Paused" note while any chat in the worktree was active', async ()
 
 
 // --- #394: lease-ending changes check the task first; a refused sign-in is not "offline"; the outbox backs off and gives up ------------------------------
-import { RETRY_BASE_MS, RETRY_MAX_MS, retryDelay, whyNotSend } from '../src/runtime/checkout/outbox-policy.ts';
+import { OutboxBackoff, RETRY_BASE_MS, RETRY_MAX_MS, retryDelay, whyNotSend } from '../src/runtime/checkout/outbox-policy.ts';
 const handBackCalls = (h: { server: FakeServer }) => h.server.calls.filter(c => /^patch t1 .*in_review/.test(c));
 async function readyToHandBack() { const h = setup(); await bound(h); const l = await h.svc.start({ taskId: 't1', model: OWN, confirm: true }); await h.svc.onTurn(l.chatId!, 'r1', 'completed'); return h; }
 const REVIEWER = { kind: 'agent' as const, id: 'a-qa' };
@@ -1518,4 +1518,15 @@ test('#394 outbox: 30 s doubling to a 30 minute cap; an update that kept failing
   const status = await h.svc.outbox(); assert.equal(status.pending, 0); assert.ok(status.stuck! >= 1, 'given up: “N updates couldn’t be sent”'); assert.equal(h.svc.get('t1')!.stuck, status.stuck);
   h.server.down = false; await h.svc.retry('t1');
   assert.equal((await h.svc.outbox()).stuck, 0); assert.equal(handBackCalls(h).length, 1, 'Retry sent it');
+});
+
+test('outbox backoff starts over when the queue empties by any path, so a later failure waits the base time', () => {
+  const backoff = new OutboxBackoff();
+  for (let n = 0; n < 6; n++) backoff.settled(true, 1);
+  assert.equal(backoff.wait(false), RETRY_MAX_MS, 'backed off to the cap');
+  backoff.observe(0);
+  assert.equal(backoff.wait(false), RETRY_BASE_MS, 'drained elsewhere: back to the base wait');
+  backoff.settled(true, 1); assert.equal(backoff.wait(false), retryDelay(1));
+  backoff.settled(true, 0); assert.equal(backoff.wait(false), RETRY_BASE_MS, 'a failed flush that left nothing waiting does not count');
+  assert.equal(backoff.wait(true), RETRY_BASE_MS, 'a refused sign-in polls at the base wait');
 });

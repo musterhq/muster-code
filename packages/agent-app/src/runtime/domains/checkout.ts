@@ -13,7 +13,7 @@ import { hasTestSetup } from '../checkout/folder.ts';
 import { badgeOf } from '../checkout/lease.ts';
 import { TurnLedger } from '../turn-ledger.ts';
 import { connectionFor } from '../server/connection.ts';
-import { RETRY_BASE_MS, retryDelay } from '../checkout/outbox-policy.ts';
+import { OutboxBackoff } from '../checkout/outbox-policy.ts';
 import { serverHubFor } from '../server/orgs.ts';
 import type { DomainContext, DomainModule } from './types.ts';
 
@@ -72,15 +72,17 @@ export function createCheckoutDomain(ctx: DomainContext): DomainModule {
     emit: taskId => { ctx.emit({ type: 'checkoutChanged', taskId }); ctx.emit({ type: 'projectsWorkspaceChanged', scopes: ['tasks'], taskIds: taskId ? [taskId] : [] }); schedule(); },
   });
   /** Posts that could not go (offline) are tried again every half minute, only while some are waiting. */
-  let failures = 0;
+  const backoff = new OutboxBackoff();
   const schedule = () => {
-    if (retry || !store.pendingCount()) return;
+    const pending = store.pendingCount();
+    backoff.observe(pending);
+    if (retry || !pending) return;
     // 30 s after a first failure, doubling to a 30 minute cap. A refused sign-in (401) is not retried at all: the check is local, and a new key is noticed within 30 s.
-    const wait = svc().authBlocked() ? RETRY_BASE_MS : retryDelay(failures);
+    const wait = backoff.wait(svc().authBlocked());
     retry = setTimeout(() => {
       retry = null;
       if (svc().authBlocked()) { schedule(); return; }
-      void svc().flush().catch(() => undefined).finally(() => { failures = store.syncState().lastError ? failures + 1 : 0; schedule(); });
+      void svc().flush().catch(() => undefined).finally(() => { backoff.settled(Boolean(store.syncState().lastError), store.pendingCount()); schedule(); });
     }, wait);
     retry.unref?.();
   };
