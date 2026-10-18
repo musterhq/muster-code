@@ -21,7 +21,7 @@ const text=()=>document.querySelector('.chat-error-banner')?.textContent??'';
 
 root.render(<RecoveryNotice chat={rejected}/>);await delay(20);
 assert.ok(text().includes('Provider admission is temporarily unavailable'),'reason text is shown');
-assert.ok(text().includes('your draft is retained'));
+assert.ok(text().includes('Your draft is retained.'));assert.ok(!/dispatched|admission/i.test(document.querySelector('.chat-error-banner p')?.textContent??''),'the banner adds no runtime jargon');
 assert.equal(button()?.textContent,'Retry now');assert.equal(button()?.hasAttribute('disabled'),false);
 button()!.click();await delay(30);
 assert.equal(button()?.textContent,'Retrying…','busy label while the send is in flight');

@@ -1,7 +1,7 @@
 import {networkFailure} from '../network-failure.ts';
 import {redactSecrets} from '../secret-redaction.ts';
 import {randomUUID} from 'node:crypto';
-import {ConversationMemory, loadImages, responseError, sseEvents, type ChatMessage} from './shared.ts';
+import {ConversationMemory, loadImages, responseError, retryAfterMs, sseEvents, type ChatMessage} from './shared.ts';
 import type {AdapterRunInput, AdapterRunResult, RunnableAdapter} from './types.ts';
 import {HISTORY_WINDOW_EVENT, TOOLS_UNAVAILABLE_EVENT} from '../context-budget.ts';
 import {browserOffered, executeTool, toolInstructions, toolSpecs, type ToolCall} from './http-tools.ts';
@@ -54,7 +54,10 @@ async function turnBody(input: AdapterRunInput, memory: ConversationMemory, labe
       catch (error) { return fail(networkFailure(error) ?? `Could not reach ${label}: ${error instanceof Error ? redactSecrets(error.message.slice(0, 200)) : 'network error'}.`); }
     }
   }
-  if (!response.ok) return fail(await responseError(response, label), {statusCode: response.status});
+  if (!response.ok) {
+    const wait = retryAfterMs(response.headers);
+    return fail(await responseError(response, label), {statusCode: response.status, ...(wait !== undefined ? {retryAfterMs: wait} : {})});
+  }
   if (!response.body) return {status: 'failed', finalMessage: '', threadId, dispatchState: 'dispatched', errorMessage: `${label} returned an empty stream.`};
   const turnId = randomUUID();
   input.onTurnAccepted({threadId, turnId});

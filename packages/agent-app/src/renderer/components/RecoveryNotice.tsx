@@ -6,8 +6,9 @@ import {useStoreSelector} from '../useStore';
 import './recovery-notice.css';
 
 /** Checking reads the saved provider attempt; it never sends the message again.
- * Admission Retry resends the retained draft. Failed network attempts can also
- * offer an explicit retry of the last turn after the transport has been closed. */
+ * Admission Retry is offered only for a rejection the runtime classified as retryable, i.e. it proved the provider
+ * did not accept the request; it resends the retained draft. Failed network attempts can also offer an explicit retry
+ * of the last turn after the transport has been closed. */
 /** While the provider reports the saved turn as active, status is re-read on this cadence until it settles or the cap passes. */
 export const RECONCILE_POLL_MS=30_000, RECONCILE_POLL_LIMIT_MS=30*60_000;
 export function RecoveryNotice({chat,onRetry}:{chat:Chat;onRetry?:()=>Promise<void>}) {
@@ -65,7 +66,7 @@ export function RecoveryNotice({chat,onRetry}:{chat:Chat;onRetry?:()=>Promise<vo
   return <div className={interrupted||stopped?'chat-error-banner is-interrupted':'chat-error-banner'} role="status" data-recovery={chat.recovery?.kind}>
     <span>{stillRunning?'Still running at the provider. This updates when it finishes.':chat.recovery?.reason || chat.error}</span>
     {uncertain && <><p>Your draft is retained. Check the existing attempt before sending again.</p><button type="button" className="workspace-inline-link" disabled={checking || active} onClick={()=>void check()}>{checking?'Checking provider status…':stillRunning?'Check now':'Check provider status'}</button> <button type="button" className="workspace-inline-link" data-testid="recovery-continue-anyway" disabled={active} title="Skip the check. The earlier attempt may still be working; nothing is resent." onClick={()=>void proceed()}>Continue anyway</button></>}
-    {rejected && <><p>{draft?'No turn was dispatched; your draft is retained.':'No turn was dispatched. Write a message to retry.'}</p><button type="button" className="workspace-inline-link" aria-busy={retrying||undefined} disabled={retrying || sending || active || !draft} onClick={()=>void retry()}>{retrying?'Retrying…':'Retry now'}</button></>}
+    {rejected && <><p>{draft?'Your draft is retained.':'Write a message to retry.'}</p><button type="button" className="workspace-inline-link" aria-busy={retrying||undefined} disabled={retrying || sending || active || !draft} onClick={()=>void retry()}>{retrying?'Retrying…':'Retry now'}</button></>}
     {failed && <button type="button" className="workspace-inline-link" aria-busy={retrying||undefined} disabled={retrying || sending || active || (!draft && !onRetry)} onClick={()=>{
       // Retry re-runs the failed turn; it never sends a follow-up the user is still typing.
       if (onRetry) { if (pending.current) return; pending.current=true; setRetrying(true); void onRetry().finally(()=>{pending.current=false; setRetrying(false);}); }
