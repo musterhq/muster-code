@@ -5,9 +5,10 @@ All notable changes to Muster Agent. Each `## <version>` section becomes the not
 
 ## Unreleased
 
-- Exhausted provider usage is flagged in the new-chat and chat composers and in the model picker, with reset timing and guidance to choose another provider.
-
+- Back and Forward (⌘[ / ⌘]) work like a browser: they return through Settings sections, Inbox, Projects, Automations and Memory as well as chats, instead of skipping everything but chats. A two-finger trackpad swipe (or three-finger, if macOS is set that way) does the same; code blocks, diffs and tables that scroll sideways keep their swipe.
+- When the selected provider has used up its limit, the composer says so before you send, with when it resets and a Dismiss button; the model picker marks that provider "Limit reached".
 - The diff tab header keeps the file name readable in narrow panes and wraps the compare picker and file actions onto their own row instead of cutting them off.
+- The dark theme is darker and less grey: near-black surfaces and a deeper sidebar glass tint, with the blur kept.
 - Codex offers GPT-6.1 Sol, GPT-6 Sol and GPT-6 Luna when its model cache is unavailable; a readable provider catalog keeps precedence.
 - Untracked files can be discarded to Trash with confirmation from Changes or a diff, file actions stay visible, and opening a diff preserves the Changes compare mode.
 
