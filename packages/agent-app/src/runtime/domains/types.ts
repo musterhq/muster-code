@@ -73,6 +73,8 @@ export interface DomainContext {
   modelCatalog?(): { providers: ProviderInfo[]; builtin: { providerId: string; model: string } };
   /** Settles once the first provider probe has (or a short grace period has passed); instant afterwards. */
   modelCatalogReady?(): Promise<void>;
+  /** Settles when every provider check has finished, however long that takes (no grace period). */
+  providersSettled?(): Promise<void>;
   /** Codex app-server native thread APIs (goals, queue, projects) behind a capability probe. Absent in bare test contexts. */
   native?: NativeThreadBridge;
 }

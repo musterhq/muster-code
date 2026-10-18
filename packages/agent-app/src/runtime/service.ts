@@ -1806,6 +1806,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
     folderFor: folderId => folderFor(folderId), invoke, hooks: domainHooks.hooks,
     modelCatalog: () => { const providers = provider.info(); return {providers, builtin: firstReadyModel(providers)}; },
     modelCatalogReady: firstProviderProbe,
+    providersSettled: () => Promise.resolve(provider.ready?.()).catch(() => undefined),
     ...(native ? {native} : {}),
   }, options.domains);
   // --- CHAT-15 snooze and wake · CHAT-16 auto-archive ------------------------------------------------

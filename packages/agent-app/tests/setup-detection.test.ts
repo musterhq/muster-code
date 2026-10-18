@@ -248,18 +248,37 @@ test('the picker does not offer an installed but signed-out Claude Code as ready
   assert.match(out.error ?? '', /not signed in/);
 });
 
-test('a provider already announced is not announced again when it becomes ready after a later launch', async t => {
-  let ids: string[] = [], ready = false;
-  const run = async (readyAtLaunch: boolean) => {
-    const changes: ProvidersChange[] = [];
-    ready = readyAtLaunch;
-    const watch = createProviderWatch({paths: () => [], list: async () => [provider('claude-code', ready, 10)], emit: change => changes.push(change), seen: {read: () => ids, write: next => { ids = next; }}, intervalMs: 1000, debounceMs: 5});
-    t.after(() => watch.dispose());
-    await watch.start();
-    ready = true;
-    await watch.refresh();
-    return changes.flatMap(change => change.connected.map(row => row.id));
-  };
-  assert.deepEqual(await run(false), ['claude-code'], 'first connect is announced');
-  assert.deepEqual(await run(false), [], 'a later launch where it becomes ready again stays quiet');
+test('the connected notice marks a real change only: not a launch check finishing, not a re-check (#590)', async t => {
+  type Row = 'ready' | 'checking' | 'error' | 'absent';
+  let rows: Record<string, Row> = {};
+  let settle: () => void = () => undefined;
+  const changes: ProvidersChange[] = [];
+  const row = (id: string, state: Row) => provider(id, state === 'ready', 10, state === 'checking' ? {checking: true} : state === 'error' ? {status: 'error', error: 'not signed in'} : {});
+  const watch = createProviderWatch({paths: () => [], list: async () => Object.entries(rows).filter(([, state]) => state !== 'absent').map(([id, state]) => row(id, state)),
+    emit: change => changes.push(change), settled: () => new Promise<void>(resolve => { settle = resolve; }), intervalMs: 1000, debounceMs: 5});
+  t.after(() => watch.dispose());
+  const step = async (next: Record<string, Row>) => { rows = {...rows, ...next}; const before = changes.length; await watch.refresh(); return changes.slice(before).flatMap(change => change.connected.map(c => c.id)); };
+  // Launch: Claude Code is still being checked (its check outlasted the launch grace); Codex is ready; OpenCode is signed out.
+  rows = {'claude-code': 'checking', codex: 'ready', opencode: 'error'};
+  await watch.start();
+  assert.deepEqual(changes.flatMap(change => change.connected), [], 'the launch listing announces nothing');
+  assert.deepEqual(await step({'claude-code': 'ready'}), [], 'a launch check that finishes ready is not news: it was connected before launch');
+  assert.deepEqual(await step({opencode: 'ready'}), ['opencode'], 'signing in to a provider that was signed out at launch is announced');
+  assert.deepEqual(await step({'claude-code': 'checking'}), [], 'Claude Code re-checks its sign-in when it rewrites its own files');
+  assert.deepEqual(await step({'claude-code': 'ready'}), [], 'and the re-check passing is not a reconnect');
+  assert.deepEqual(await step({codex: 'error'}), []);
+  assert.deepEqual(await step({codex: 'checking'}), []);
+  assert.deepEqual(await step({codex: 'ready', grok: 'ready'}), ['codex', 'grok'], 'a reconnect after a failure, and a new provider, are both announced');
+  assert.deepEqual(await step({grok: 'absent'}), []);
+  assert.deepEqual(await step({grok: 'ready'}), ['grok'], 'a provider that left the list and came back ready is announced');
+  // A check that is still running at launch is waited for once, so a sign-out found then is known.
+  const second: ProvidersChange[] = [];
+  rows = {'claude-code': 'checking'};
+  const later = createProviderWatch({paths: () => [], list: async () => Object.entries(rows).map(([id, state]) => row(id, state)), emit: change => second.push(change), settled: () => new Promise<void>(resolve => { settle = resolve; }), intervalMs: 1000, debounceMs: 5});
+  t.after(() => later.dispose());
+  await later.start();
+  rows = {'claude-code': 'error'}; settle(); await delay(20);
+  rows = {'claude-code': 'checking'}; await later.refresh();
+  rows = {'claude-code': 'ready'}; await later.refresh();
+  assert.deepEqual(second.flatMap(change => change.connected.map(c => c.id)), ['claude-code'], 'signed out at launch (found once its check finished), then signed in: announced');
 });
