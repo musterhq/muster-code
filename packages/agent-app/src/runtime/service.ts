@@ -399,6 +399,21 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
     else store.appendItem(chatId, 'notice', COMPACTION_TEXT, 'completed', data);
     timeline(chatId);
   }
+  /** #583: a manual compaction the provider accepted is settled at once; Codex reports that same compaction (its
+   *  contextCompaction item, then thread/compacted) only afterwards. Those reports must not add an automatic row. */
+  const acceptedCompactions = new Map<string, number>();
+  const ACCEPTED_REPORT_MS = 120_000;
+  function acceptedReport(chatId: string): boolean {
+    const at = acceptedCompactions.get(chatId);
+    if (at === undefined) return false;
+    if (Date.now() - at <= ACCEPTED_REPORT_MS) return true;
+    acceptedCompactions.delete(chatId); return false;
+  }
+  /** Consumes the provider's report of an accepted manual compaction: the thread was compacted, and its row already says so. */
+  function absorbAcceptedReport(chatId: string): boolean {
+    if (!acceptedReport(chatId)) return false;
+    acceptedCompactions.delete(chatId); contextLedger.forget(chatId); return true;
+  }
   /** #426: failure rows say why and offer Retry and "Continue in a fresh thread with a summary". */
   const COMPACTION_ACTIONS = ['retry', 'fresh'] as const;
   /** A /compact or "Compact now" while a turn runs: compacts as soon as that turn settles (row id, fresh). */
@@ -433,7 +448,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
     const existing = options.rowId ? store.item(options.rowId) : undefined;
     const row = existing ?? store.appendItem(chatId, 'notice', 'Compacting context…', 'running', {kind:'compaction', status:'running', manual:true});
     if (existing) store.updateItem(row.id, 'Compacting context…', 'running', {kind:'compaction', status:'running', manual:true});
-    compactions.set(chatId, row.id); timeline(chatId);
+    compactions.set(chatId, row.id); acceptedCompactions.delete(chatId); timeline(chatId);
     let settle!: () => void;
     compactionRuns.set(chatId, new Promise<void>(resolve => { settle = resolve; }));
     const fail = (reason: string) => {
@@ -459,7 +474,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
         throw error;
       }
       // The provider confirms with thread/compacted; a quiet provider still settles the row once the request was accepted.
-      if (compactions.get(chatId) === row.id) compactionCompleted(chatId);
+      if (compactions.get(chatId) === row.id) { compactionCompleted(chatId); acceptedCompactions.set(chatId, Date.now()); }
     } finally {
       compactionRuns.delete(chatId); settle();
       if (!runs.has(chatId) && store.queue(chatId).length) dispatchQueued(chatId);
@@ -692,10 +707,14 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
             if (method === TOOLS_UNAVAILABLE_EVENT) { store.appendItem(chatId, 'notice', `${chat.model} can’t run commands or edit files through this route, so it answered without tools. Use “Switch to…” in the composer to pick a model with tools.`, 'completed', {kind: 'tools-unavailable', model: chat.model}); scheduleTimeline(chatId); return; }
             if (method === HISTORY_WINDOW_EVENT) { if (typeof params.retainedUserTurns === 'number') retainedTurns = params.retainedUserTurns; return; }
             const compactionItem = params.item && typeof params.item === 'object' && (params.item as Record<string, unknown>).type === 'contextCompaction';
-            if (method === 'item/started' && compactionItem && !compactions.has(chatId) && !nativeCompacting.has(chatId)) { seal(); nativeCompacting.set(chatId, store.appendItem(chatId, 'notice', 'Compacting context…', 'running', {kind:'compaction', status:'running', auto:true}).id); scheduleTimeline(chatId); return; }
+            if (method === 'item/started' && compactionItem && !compactions.has(chatId) && !nativeCompacting.has(chatId) && !acceptedReport(chatId)) { seal(); nativeCompacting.set(chatId, store.appendItem(chatId, 'notice', 'Compacting context…', 'running', {kind:'compaction', status:'running', auto:true}).id); scheduleTimeline(chatId); return; }
             // The compaction item and thread/compacted report the same compaction: whichever comes first settles it once.
-            if (method === 'item/completed' && compactionItem) { if (nativeCompacting.has(chatId) || compactions.has(chatId)) { seal(); compactionCompleted(chatId); compactedInRun = true; settledByItem = true; } return; }
-            if (method === 'thread/compacted') { seal(); if (settledByItem) settledByItem = false; else compactionCompleted(chatId); compactedInRun = true; }
+            if (method === 'item/completed' && compactionItem) {
+              if (nativeCompacting.has(chatId) || compactions.has(chatId)) { seal(); compactionCompleted(chatId); compactedInRun = true; settledByItem = true; }
+              else if (absorbAcceptedReport(chatId)) { seal(); compactedInRun = true; settledByItem = true; }
+              return;
+            }
+            if (method === 'thread/compacted') { seal(); if (settledByItem) settledByItem = false; else if (!absorbAcceptedReport(chatId)) compactionCompleted(chatId); compactedInRun = true; }
             const ownRun = runs.get(chatId) === run, parentThread0 = store.chat(chatId)?.providerThreadId, parentEvent = !(typeof params.threadId === 'string' && parentThread0 && params.threadId !== parentThread0);
             if (method === 'error') {
               // Codex retries a dropped model connection itself (willRetry): say so instead of looking stuck.

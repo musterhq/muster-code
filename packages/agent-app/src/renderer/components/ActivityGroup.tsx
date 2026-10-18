@@ -2,7 +2,7 @@ import React,{useEffect,useId,useMemo,useRef,useState} from 'react';
 import {ChevronRight} from 'lucide-react';
 import type {TimelineItem} from '../../shared/protocol';
 import {ImageThumbs,ToolCard,ToolGlyph} from './ToolCard';
-import type {SubagentLifecycleEvent} from '../subagentActivity';
+import type {SubagentActivity,SubagentLifecycleEvent} from '../subagentActivity';
 import {activityApp,activityKind,segmentActivity,subagentRowLabel,subagentRowReason,summarizeActivity,viewedImages,type ActivitySegment} from './activityGrouping';
 import {AgentGlyph} from '../agentIdentity';
 import {selectSubagent} from '../subagentActivity';
@@ -23,8 +23,8 @@ function SubagentRow({row}:{row:Extract<ActivitySegment,{kind:'subagents'}>}) {
 }
 /** `reveal` names an item holding the active find match: its group, page and card open.
  * `live`: this activity is still the tail of a running turn, so it stays open between tool calls. */
-export function ActivityGroup({items,reveal,live=false,prior}:{items:TimelineItem[];reveal?:string;live?:boolean;prior?:ReadonlyMap<string,SubagentLifecycleEvent>}) {
-  const segments=useMemo(()=>segmentActivity(items,prior),[items,items.length,prior]);
+export function ActivityGroup({items,reveal,live=false,prior,agents}:{items:TimelineItem[];reveal?:string;live?:boolean;prior?:ReadonlyMap<string,SubagentLifecycleEvent>;agents?:readonly SubagentActivity[]}) {
+  const segments=useMemo(()=>segmentActivity(items,prior,agents),[items,items.length,prior,agents]);
   if(segments.length===1&&segments[0].kind==='tools')return <ToolGroup items={segments[0].items} reveal={reveal} live={live}/>;
   return <>{segments.map((segment,index)=>segment.kind==='tools'?<ToolGroup key={segment.id} items={segment.items} reveal={reveal} live={live&&index===segments.length-1}/>:<SubagentRow key={segment.id} row={segment}/>)}</>;
 }

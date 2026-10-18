@@ -120,7 +120,7 @@ interface LiveTurnProps {live:string}
 interface EditingProps {onSubmit:(text:string,mode:EditResendMode,restoreFiles?:Array<{path:string;afterHash:string}>)=>Promise<boolean>;onCancel:()=>void}
 function TimelineCardImpl({ item, nextAt, reveal, turn, tail=false, actions, editing, plan=false, meta=true, gallery }: { gallery?:readonly string[]; item: TranscriptEntry; nextAt?:string; reveal?:string; turn?:TurnHeaderProps|LiveTurnProps; tail?:boolean; actions?:MessageActions; editing?:EditingProps; plan?:boolean; meta?:boolean }): React.ReactElement {
   switch (item.kind) {
-    case 'activity': return <ActivityGroup items={item.items} prior={item.prior} reveal={reveal} live={tail}/>;
+    case 'activity': return <ActivityGroup items={item.items} prior={item.prior} agents={item.agents} reveal={reveal} live={tail}/>;
     case 'user':
       return (
         <div className="user-message-row">
