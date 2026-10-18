@@ -221,3 +221,22 @@ test('#426 imported chat: /compact and the automatic trigger both work from the 
   await send(service,chatId,'And another.');
   assert.equal((await rows(service,chatId)).filter(row=>row.data?.auto).length,1);
 });
+
+test('one /compact leaves one compaction row even when the provider also reports thread/compacted',async t=>{
+  const fake:Fake={inputs:[],usage:1000,compacts:0};
+  const {service,folder}=await serviceOn(t,'codex-app-server',200_000,fake);
+  const chat=await service.invoke('chat.create',{folderId:folder.id});
+  let report:ProviderInput['onEvent']|undefined;
+  fake.events=input=>{report=input.onEvent;};
+  await send(service,chat.id,'first');
+  fake.failCompact=undefined;
+  const original=fake.events;fake.events=undefined;void original;
+  const reported=report!;
+  fake.compacts=0;
+  const compactNow=service.invoke('chat.compact',{id:chat.id});
+  reported('thread/compacted',{threadId:'thread-1'});
+  await compactNow;
+  const compactionRows=await rows(service,chat.id);
+  assert.equal(compactionRows.length,1,'a single row');
+  assert.equal(compactionRows[0]!.status,'completed');
+});

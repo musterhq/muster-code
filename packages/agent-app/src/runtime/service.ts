@@ -459,7 +459,7 @@ export function createAgentService(options: { dataDir: string; onEvent(event: Ag
         throw error;
       }
       // The provider confirms with thread/compacted; a quiet provider still settles the row once the request was accepted.
-      compactionCompleted(chatId);
+      if (compactions.get(chatId) === row.id) compactionCompleted(chatId);
     } finally {
       compactionRuns.delete(chatId); settle();
       if (!runs.has(chatId) && store.queue(chatId).length) dispatchQueued(chatId);

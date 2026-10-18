@@ -3,15 +3,16 @@ import {APPROVAL_WAIT_LABEL,awaitingApproval,classifyTool} from './toolPresentat
 import {agentDisplayName} from '../agentIdentity.ts';
 import {projectSubagentActivity,subagentLifecycle,subagentState,type SubagentLifecycleEvent} from '../subagentActivity.ts';
 
-export interface ActivityEntry {kind:'activity';id:string;items:TimelineItem[]}
+export interface ActivityEntry {kind:'activity';id:string;items:TimelineItem[];/** Sub-agent lifecycle already shown by earlier groups, so a later group does not repeat it. */prior?:ReadonlyMap<string,SubagentLifecycleEvent>}
 export type TranscriptEntry = TimelineItem | ActivityEntry;
 export function groupActivity(items:TimelineItem[]):TranscriptEntry[] {
-  const rows:TranscriptEntry[]=[];
+  const rows:TranscriptEntry[]=[],shown=new Map<string,SubagentLifecycleEvent>();
   for(const item of items){
     const previous=rows.at(-1);
     if(item.kind==='tool') {
       if(previous?.kind==='activity') previous.items.push(item);
-      else rows.push({kind:'activity',id:item.id,items:[item]});
+      else rows.push({kind:'activity',id:item.id,items:[item],...(shown.size?{prior:new Map(shown)}:{})});
+      for(const {id,event} of newLifecycle(item,shown))shown.set(id,event);
     } else rows.push(item);
   }
   return rows;
@@ -21,11 +22,14 @@ export interface SubagentRowAgent {id:string;name:string;state:'working'|'done'|
   reason?:string}
 export type ActivitySegment = {kind:'tools';id:string;items:TimelineItem[]} | {kind:'subagents';id:string;chatId:string;event:SubagentLifecycleEvent;agents:SubagentRowAgent[]};
 /** Codex-style: subagent lifecycle leaves the tool group as its own ordered rows; adjacent starts merge. Reports with nothing new stay grouped tool work. */
-export function segmentActivity(items:TimelineItem[]):ActivitySegment[] {
-  const out:ActivitySegment[]=[],last=new Map<string,SubagentLifecycleEvent>();
+function newLifecycle(item:TimelineItem,last:ReadonlyMap<string,SubagentLifecycleEvent>) {
+  return subagentLifecycle(item).filter(({id,event})=>{const prior=last.get(id);return event==='started'?prior!=='started':prior===undefined||prior==='started';});
+}
+export function segmentActivity(items:TimelineItem[],prior?:ReadonlyMap<string,SubagentLifecycleEvent>):ActivitySegment[] {
+  const out:ActivitySegment[]=[],last=new Map<string,SubagentLifecycleEvent>(prior);
   const agents=new Map(projectSubagentActivity(items.filter(item=>item.data?.type==='collabAgentToolCall')).map(agent=>[agent.id,agent]));
   for(const item of items){
-    const events=subagentLifecycle(item).filter(({id,event})=>{const prior=last.get(id);return event==='started'?prior!=='started':prior===undefined||prior==='started';});
+    const events=newLifecycle(item,last);
     if(!events.length){const previous=out.at(-1);if(previous?.kind==='tools')previous.items.push(item);else out.push({kind:'tools',id:item.id,items:[item]});continue;}
     for(const {id,event,name,reason} of events){
       last.set(id,event);

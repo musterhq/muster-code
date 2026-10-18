@@ -61,3 +61,11 @@ test('DOGFOOD F51: a failed worker row carries the provider\'s reason, or says n
   assert.equal(subagentRowReason(silent),'No reason reported by the provider');
   assert.equal(subagentRowReason({event:'started',agents:[{reason:'x'}]}),undefined);
 });
+
+test('a finished sub-agent is announced once when its reports span separate activity groups',()=>{
+  const first=item('w1',{type:'collabAgentToolCall',tool:'wait',receiverThreadIds:['c1'],agentsStates:{c1:'completed'}});
+  const second=item('w2',{type:'collabAgentToolCall',tool:'wait',receiverThreadIds:['c1'],agentsStates:{c1:'completed'}});
+  const entries=groupActivity([spawn('s1','c1','Mira'),first,{id:'m',chatId:'chat',kind:'assistant',text:'x',createdAt:''},second]);
+  const labels=entries.flatMap(entry=>entry.kind==='activity'?segmentActivity(entry.items,entry.prior).filter(row=>row.kind==='subagents').map(subagentRowLabel):[]);
+  assert.deepEqual(labels,['Mira started working','Mira finished']);
+});
