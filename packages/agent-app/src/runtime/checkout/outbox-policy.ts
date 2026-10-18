@@ -11,6 +11,35 @@ export class OutboxBackoff {
   /** Called whenever the queue is looked at: an empty one resets the wait. */
   observe(pending: number): void { if (pending === 0) this.failures = 0; }
 }
+/** What the outbox's retry timer reads and does. */
+export interface OutboxRetryPort { pending(): number; authBlocked(): boolean; flush(): Promise<unknown>; lastError(): string | null }
+/**
+ * The outbox's one retry timer (#394, #643): armed only while posts wait, at the backoff's wait. When the queue empties by any path (sent, Retry, discarded,
+ * ended) the backoff starts over and a timer armed at a long wait is dropped, so the next failure is tried again after the base wait, not the old one.
+ */
+export class OutboxRetry {
+  private timer: ReturnType<typeof setTimeout> | null = null;
+  private readonly backoff = new OutboxBackoff();
+  private disposed = false;
+  constructor(private readonly d: OutboxRetryPort) {}
+  schedule(): void {
+    if (this.disposed) return;
+    const pending = this.d.pending();
+    this.backoff.observe(pending);
+    if (!pending) { this.stop(); return; }
+    if (this.timer) return;
+    // A refused sign-in (401) is not retried at all: the check is local, and a new key is noticed within the base wait.
+    this.timer = setTimeout(() => {
+      this.timer = null;
+      if (this.d.authBlocked()) { this.schedule(); return; }
+      void this.d.flush().catch(() => undefined).finally(() => { this.backoff.settled(Boolean(this.d.lastError()), this.d.pending()); this.schedule(); });
+    }, this.backoff.wait(this.d.authBlocked()));
+    this.timer.unref?.();
+  }
+  /** The app is closing: the timer goes, and a flush still in flight does not arm another. */
+  dispose(): void { this.disposed = true; this.stop(); }
+  private stop(): void { if (this.timer) { clearTimeout(this.timer); this.timer = null; } }
+}
 /** A short, stable id of the credential a server answered 401 to: a changed key is a different one. Never the key itself. */
 export const credentialId = (token: string | undefined): string => { let h = 5381; for (const ch of token ?? '') h = ((h * 33) ^ ch.charCodeAt(0)) >>> 0; return `${token ? 'key' : 'session'}:${h.toString(36)}:${(token ?? '').length}`; };
 /** What a lease-ending change expects to find on the server: it is only sent when the task still looks like this. */
