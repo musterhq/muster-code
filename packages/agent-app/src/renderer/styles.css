@@ -8,6 +8,8 @@
   --md-leading: 1.52; --md-gap: 0.55em; --md-heading-gap: 1.05em; --md-strong-weight: 630;
   /* Neutral surfaces matched to the observed Cursor Agents window and its
      installed Cursor Dark palette; native material supplies sidebar blur. */
+  /* The transcript column's widest size; ComputerPip reads it to keep the preview card off the text. */
+  --timeline-max: 804px;
   --bg: #161616;
   --bg-raised: #1d1d1d;
   --bg-hover: rgb(255 255 255 / 5.5%);
@@ -493,7 +495,7 @@ textarea:focus-visible {
   user-select: text;
 }
 
-.timeline-inner { position: relative; width: min(100%, 804px); margin: 0 auto; }
+.timeline-inner { position: relative; width: min(100%, var(--timeline-max)); margin: 0 auto; }
 
 .timeline-row {
   position: absolute;
