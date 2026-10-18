@@ -25,5 +25,16 @@ for (const animate of [false, true]) {
   assert.equal(body.querySelectorAll('code br, pre br, table br').length, 0, 'code and tables get no prose breaks');
   assert.equal(body.querySelectorAll('tbody tr').length, 2, 'table rows remain structured');
 }
+// A Markdown document keeps CommonMark soft breaks: a hard-wrapped file reads as flowing paragraphs.
+flushSync(() => root.render(<MessageBody text={'Wrapped at eighty\ncolumns in a README'} asDocument/>));
+assert.equal(document.querySelectorAll('.md-body br').length, 0, 'documents keep soft breaks as spaces');
+// Streaming text that arrives on a new line still fades in.
+const {setTimeout: delay} = await import('node:timers/promises');
+const stream = async (value: string) => { root.render(<MessageBody text={value} animate linkFiles/>); await delay(15); };
+await stream('Line one');
+await stream('Line one\nLine two arrives');
+await stream('Line one\nLine two arrives\nLine three');
+assert.deepEqual(Array.from(document.querySelectorAll('.md-fade')).map(e => e.textContent), ['Line two arrives', 'Line three'], 'new lines fade in');
+assert.equal(document.querySelectorAll('.md-body br').length, 2);
 root.unmount();
 console.log('markdown-breaks-dom: passed');

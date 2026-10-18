@@ -5,6 +5,7 @@ import { Check, Code, Copy, Quote, WrapText, X } from 'lucide-react';
 import {addComposerContext} from '../composerContext';
 import React, { useEffect, useRef, useState } from 'react';
 import ReactMarkdown, { type Components } from 'react-markdown';
+import type { PluggableList } from 'unified';
 import {ResourceLink, type ResourceContext} from './ResourceLink';
 import {ChatImage} from './ChatImage';
 import {invoke} from '../bridge';
@@ -224,9 +225,16 @@ export function localImagePath(src?: string): string | undefined {
   return (path.startsWith('/') || /^[A-Za-z]:[\\/]/.test(path)) && /\.(?:png|jpe?g|gif|webp|bmp|avif|svg)$/i.test(path) ? path : undefined;
 }
 
-function MessageBodyContent({ text, resourceContext, animate = false, linkFiles = false }: { text: string; resourceContext?: ResourceContext; animate?: boolean; linkFiles?: boolean }): React.ReactElement {
+function MessageBodyContent({ text, resourceContext, animate = false, linkFiles = false, asDocument = false }: { text: string; resourceContext?: ResourceContext; animate?: boolean; linkFiles?: boolean; asDocument?: boolean }): React.ReactElement {
   // Replies link the files they mention (markdown-file-links.ts); documents and previews render as written.
-  const remarkPlugins = React.useMemo(() => linkFiles ? [remarkGfm, createIncrementalMarkdownPlugin(), remarkLeadingLabels, remarkFileLinks, remarkProseBreaks] : [remarkGfm, createIncrementalMarkdownPlugin(), remarkProseBreaks], [linkFiles]);
+  // Agent prose keeps its single line breaks (markdown-breaks.ts); a Markdown document keeps CommonMark soft
+  // breaks, so a hard-wrapped README still reads as flowing paragraphs.
+  const remarkPlugins = React.useMemo(() => {
+    const plugins: PluggableList = [remarkGfm, createIncrementalMarkdownPlugin()];
+    if (linkFiles) plugins.push(remarkLeadingLabels, remarkFileLinks);
+    if (!asDocument) plugins.push(remarkProseBreaks);
+    return plugins;
+  }, [linkFiles, asDocument]);
   const renderedText = React.useMemo(() => inferMarkdownCodeLanguages(text), [text]);
   // Streaming fade (markdown-fade.ts): text that arrives after the first render fades in.
   const fade = useRef<FadeState | null>(null);
@@ -278,6 +286,7 @@ export const MessageBody = React.memo(MessageBodyContent, (previous, next) =>
   previous.text === next.text &&
   previous.animate === next.animate &&
   previous.linkFiles === next.linkFiles &&
+  previous.asDocument === next.asDocument &&
   previous.resourceContext?.folderId === next.resourceContext?.folderId &&
   previous.resourceContext?.path === next.resourceContext?.path,
 );
