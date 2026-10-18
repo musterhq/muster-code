@@ -5,6 +5,7 @@ All notable changes to Muster Agent. Each `## <version>` section becomes the not
 
 ## Unreleased
 
+- Release settled and superseded turn-ledger state and bound retained runs when settlement never arrives.
 - A sub-agent that finished is announced once in the transcript, and one /compact leaves a single compaction row instead of two.
 - Agent wakes that were waiting (for the gap between wakes, or for a run to end) are no longer lost when you quit: they resume when Muster opens, start once, and carry every reason and comment they collected. An agent also wakes once when every subtask of its task is done, including subtasks finished while Muster was closed; turn this off per agent with "Wake when all its subtasks are done".
 - A comparison with exactly 1000 changed files is no longer marked truncated, and CI checks that share a name across different workflows are listed separately (named "Workflow / job") instead of merged, while a workflow that ran again on the same commit still shows only its newest run.
