@@ -291,6 +291,22 @@ export function ComputerPip({paneVisible=true}:{paneVisible?:boolean}={}) {
   const [corner,setCorner]=useState<PipCorner|undefined>(loadPipCorner);
   const frozen=useRef(false),stack=useRef<HTMLDivElement>(null);
   const [anchor,setAnchor]=useStackAnchor(shown,ui.minimized?1:Math.max(1,open.length),corner,frozen);
+  useEffect(()=>{
+    const center=document.querySelector<HTMLElement>('main.center')??document.querySelector<HTMLElement>('.center');
+    if(!center)return;
+    if(shown&&open.length&&!ui.minimized){
+      const box=center.getBoundingClientRect();
+      const left=window.innerWidth-anchor.right-anchor.width;
+      const side=corner?.endsWith('left')?'left':'right';
+      const reserve=side==='left'?left+anchor.width-box.left+8:box.right-left+8;
+      center.dataset.pipSide=side;
+      center.style.setProperty('--pip-reserve',`${Math.max(0,Math.min(box.width,reserve))}px`);
+    }else{
+      delete center.dataset.pipSide;
+      center.style.removeProperty('--pip-reserve');
+    }
+    return()=>{delete center.dataset.pipSide;center.style.removeProperty('--pip-reserve');};
+  },[shown,open.length,ui.minimized,corner,anchor]);
   const drag=usePipDrag(stack,frozen,(next,target,width)=>{
     savePipCorner(next);setCorner(next);setAnchor({right:Math.max(0,window.innerWidth-target.x-width),top:target.y,width});
   });

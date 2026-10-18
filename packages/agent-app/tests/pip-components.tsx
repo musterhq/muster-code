@@ -4,13 +4,23 @@ import assert from 'node:assert/strict';
 import {setTimeout as delay} from 'node:timers/promises';
 const require=createRequire(import.meta.url);
 const {parseHTML}=require('linkedom');
-const {window}=parseHTML('<html><body><div id="root"></div></body></html>');
+const {window}=parseHTML('<html><body><main class="center"><div class="chat"><div class="timeline-shell"><div class="timeline"></div></div></div></main><div id="root"></div></body></html>');
 const storage=new Map<string,string>();
 const memory={getItem:(key:string)=>storage.get(key)??null,setItem:(key:string,value:string)=>{storage.set(key,String(value));},removeItem:(key:string)=>{storage.delete(key);}};
 Object.assign(globalThis,{window,document:window.document,HTMLElement:window.HTMLElement,Element:window.Element,Node:window.Node,MutationObserver:window.MutationObserver,ResizeObserver:class{observe(){}disconnect(){}},requestAnimationFrame:(callback:any)=>setTimeout(callback,0),cancelAnimationFrame:clearTimeout,localStorage:memory,sessionStorage:memory,CustomEvent:window.CustomEvent});
 const styles=()=>({getPropertyValue:()=>'',direction:'ltr',position:'static',overflow:'visible',overflowX:'visible',overflowY:'visible',display:'block',animationName:'none',transitionProperty:'none',transitionDuration:'0s',animationDuration:'0s'});
 Object.assign(globalThis,{getComputedStyle:styles});(window as any).getComputedStyle=styles;
-window.HTMLElement.prototype.getBoundingClientRect=()=>({x:0,y:0,width:300,height:188,top:0,left:0,right:300,bottom:188});
+window.HTMLElement.prototype.getBoundingClientRect=function(){
+  if(this.matches('main.center'))return {x:0,y:0,width:1000,height:900,top:0,left:0,right:1000,bottom:900};
+  if(this.matches('.timeline')){
+    const center=document.querySelector<HTMLElement>('main.center')!;
+    const reserve=Number.parseFloat(center.style.getPropertyValue('--pip-reserve'))||0;
+    const left=center.dataset.pipSide==='left'?reserve:0;
+    const right=center.dataset.pipSide==='right'?1000-reserve:1000;
+    return {x:left,y:0,width:right-left,height:900,top:0,left,right,bottom:900};
+  }
+  return {x:0,y:0,width:300,height:188,top:0,left:0,right:300,bottom:188};
+};
 (window as any).innerWidth=1400;(window as any).innerHeight=900;
 const calls:{command:string;input:any}[]=[];
 const chat={id:'c1',title:'Research',folderId:'repo',pinned:false,archived:false,draft:'',status:'running',updatedAt:'',model:'test',mode:'agent'};
@@ -53,6 +63,10 @@ const tabsText=()=>[...document.querySelectorAll('[role="tab"]')].map(tab=>tab.t
 // 5. No auto-start: two idle PiPs, no tab, no sidebar, no browser session.
 assert.deepEqual(errors,[]);
 assert.equal(cards().length,2,'both live sessions show as PiPs, the past transcript session does not');
+const stack=document.querySelector<HTMLElement>('.pip-stack')!;
+const transcript=document.querySelector<HTMLElement>('.timeline')!.getBoundingClientRect();
+const previewLeft=window.innerWidth-Number.parseFloat(stack.style.right)-Number.parseFloat(stack.style.width);
+assert.ok(transcript.right<=previewLeft,'the visible browser preview does not overlap the transcript container');
 assert.equal(document.querySelector('.pip-empty'),null,'a card with a frame never shows a placeholder');
 assert.equal(cards().every(card=>!!card.querySelector('img')),true,'every card shows its real frame');
 assert.ok(!document.body.textContent!.includes('Ended'),'live sessions are not labelled ended');
