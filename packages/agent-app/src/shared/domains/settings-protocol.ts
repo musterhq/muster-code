@@ -127,6 +127,10 @@ export function validateSetting<K extends SettingKey>(key: K | string, value: un
   if (!isSettingKey(key)) throw new Error(`Unknown setting ${JSON.stringify(String(key).slice(0, 64))}.`);
   const check = CHECKS[key];
   if (!check.valid(value)) throw new Error(`${key} must be ${check.expected}.`);
+  if (key === 'general.defaultModel' && value !== null) {
+    const preference = value as ModelPreference;
+    return { ...preference, model: preference.model.trim() } as AppSettings[K];
+  }
   return value as AppSettings[K];
 }
 
@@ -135,7 +139,7 @@ export function normalizeSettings(raw: unknown): AppSettings {
   const next: Record<string, unknown> = { ...SETTING_DEFAULTS };
   if (raw && typeof raw === 'object' && !Array.isArray(raw)) for (const key of SETTING_KEYS) {
     const value = (raw as Record<string, unknown>)[key];
-    if (CHECKS[key].valid(value)) next[key] = value;
+    if (CHECKS[key].valid(value)) next[key] = validateSetting(key, value);
   }
   return next as unknown as AppSettings;
 }
