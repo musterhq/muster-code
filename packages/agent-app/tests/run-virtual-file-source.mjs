@@ -30,7 +30,7 @@ try {
   await new Promise(resolve => ws.addEventListener('open', resolve, {once: true}));
   let id = 0;
   const pending = new Map();
-  ws.addEventListener('message', event => {const message = JSON.parse(event.data); if (message.id) {pending.get(message.id)?.(message); pending.delete(message.id);}});
+  ws.addEventListener('message', event => {const message = JSON.parse(event.data); if (typeof message.id !== 'number') return; const done = pending.get(message.id); pending.delete(message.id); if (typeof done === 'function') done(message);});
   const call = (method, params = {}) => new Promise(resolve => {pending.set(++id, resolve); ws.send(JSON.stringify({id, method, params}));});
   await call('Page.navigate', {url: `http://127.0.0.1:${server.address().port}`});
   const deadline = Date.now() + 30_000;
