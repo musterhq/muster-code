@@ -29,14 +29,14 @@ export interface Theme { id: string; name: string; base: ThemeBase; tokens: Them
  *  a custom theme can be exported complete. */
 export const BASE_TOKENS: Record<ThemeBase, Record<TokenKey, string>> = {
   dark: {
-    'bg': '#161616', 'bg-raised': '#1d1d1d', 'bg-hover': 'rgb(255 255 255 / 5.5%)', 'bg-active': 'rgb(255 255 255 / 8%)',
-    'hairline': 'rgb(255 255 255 / 6%)', 'nav-material': 'rgb(19 19 19 / 46%)', 'nav-solid': '#1a1a1a',
+    'bg': '#0e0e0e', 'bg-raised': '#161616', 'bg-hover': 'rgb(255 255 255 / 5.5%)', 'bg-active': 'rgb(255 255 255 / 8%)',
+    'hairline': 'rgb(255 255 255 / 6%)', 'nav-material': 'rgb(8 8 8 / 74%)', 'nav-solid': '#0c0c0c',
     'text': '#e8e8e8', 'text-strong': '#ffffff', 'text-dim': 'rgb(232 232 232 / 72%)', 'text-faint': 'rgb(232 232 232 / 48%)',
     'accent': '#91abc2', 'link': '#7cb7ff',
     'file-blue': '#6aa8ff', 'file-yellow': '#e6c35c', 'file-green': '#8fd16a', 'file-red': '#f07a6b', 'file-purple': '#c79bf2', 'file-teal': '#5cc8c4',
     'danger': '#fc6b83', 'ok': '#80b898', 'warn': '#f1b467',
     'add-bg': 'rgba(128, 184, 152, 0.12)', 'del-bg': 'rgba(252, 107, 131, 0.12)', 'add-char': 'rgba(128, 184, 152, 0.28)', 'del-char': 'rgba(252, 107, 131, 0.28)',
-    'fg-rgb': '255 255 255', 'bg-menu': '#252525', 'selection': '#404040', 'primary-bg': '#e6e6e6', 'primary-fg': '#171717',
+    'fg-rgb': '255 255 255', 'bg-menu': '#1c1c1c', 'selection': '#353535', 'primary-bg': '#e6e6e6', 'primary-fg': '#171717',
     'on-accent': '#10161c', 'on-danger': '#1a0d10', 'info': '#9fc1df', 'violet': '#a8abea', 'pink': '#df8fc1',
     'shadow-ink': '#000', 'scrim': 'rgb(0 0 0 / 42%)', 'bg-sunken': 'color-mix(in srgb, var(--bg) 96%, #080909)', 'hue-l': '62%',
   },
