@@ -8,6 +8,46 @@ import {configuredProviderInstances, invalidateProviderInstances} from '../src/r
 const cache = JSON.parse(await readFile(join(import.meta.dirname, 'fixtures/codex-0162-models-cache.json'), 'utf8'));
 const config = 'model = "gpt-6-astra"\nmodel_provider = "openai"\n\n[model_providers.hybrow]\nname = "Hybrow"\nbase_url = "https://router.invalid/v1"\nwire_api = "responses"\n';
 
+test('a signed-in Codex route without a readable cache offers the current fallback models', async t => {
+  for (const contents of [undefined, '{invalid']) {
+    const options = await setup(t, {});
+    const file = join(options.env.CODEX_HOME, 'models_cache.json');
+    if (contents === undefined) await rm(file);
+    else await writeFile(file, contents);
+    invalidateProviderInstances();
+    const info = configuredProviderInstances(options).find(row => row.info.id === 'openai-direct')!.info;
+    assert.equal(info.available, true);
+    for (const [id, name, defaultEffort] of [
+      ['gpt-6.1-sol', 'GPT-6.1 Sol', 'low'],
+      ['gpt-6-sol', 'GPT-6 Sol', 'medium'],
+      ['gpt-6-luna', 'GPT-6 Luna', 'medium'],
+    ]) {
+      const model = info.models.find(model => model.id === id)!;
+      assert.ok(model, `${id} is offered without a cache`);
+      assert.equal(model.name, name);
+      assert.equal(model.contextWindow, 272000);
+      assert.deepEqual(model.efforts, ['low', 'medium', 'high', 'xhigh']);
+      assert.equal(model.defaultEffort, defaultEffort);
+    }
+  }
+});
+
+test('the provider list replaces fallback models and metadata and includes future models', async t => {
+  const options = await setup(t, {models: [
+    {slug: 'gpt-future', display_name: 'Future', context_window: 999000},
+    {slug: 'gpt-6-sol', display_name: 'Provider Sol', context_window: 400000,
+      supported_reasoning_levels: [{effort: 'high'}], default_reasoning_level: 'high'},
+    {slug: 'gpt-6-luna', visibility: 'hide'},
+  ]});
+  const info = configuredProviderInstances(options).find(row => row.info.id === 'openai-direct')!.info;
+  assert.deepEqual(info.models.map(model => model.id), ['gpt-6-astra', 'gpt-future', 'gpt-6-sol']);
+  const sol = info.models.find(model => model.id === 'gpt-6-sol')!;
+  assert.equal(sol.name, 'Provider Sol');
+  assert.equal(sol.contextWindow, 400000);
+  assert.deepEqual(sol.efforts, ['high']);
+  assert.equal(sol.defaultEffort, 'high');
+});
+
 async function setup(t: {after(fn: () => Promise<void>): void}, cacheJson: unknown) {
   const home = await mkdtemp(join(tmpdir(), 'muster-picker-latest-')); t.after(() => rm(home, {recursive: true, force: true}));
   const directory = join(home, 'runtime'), codexHome = join(home, 'codex'), cli = join(home, 'cli');
