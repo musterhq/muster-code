@@ -136,25 +136,53 @@ export function claudeCodeAdapter(options: {binary: string; env?: NodeJS.Process
       let pending = 1, inputClosed = false, unanswered = 0, grace: ReturnType<typeof setTimeout> | undefined;
       const graceMs = options.steerGraceMs ?? STEER_GRACE_MS;
       const closeInput = () => { if (inputClosed) return; inputClosed = true; try { child.stdin?.end(); } catch { /* already closed */ } };
-      // Result usage is cumulative for this CLI process. Only emit what assistant messages (or earlier
-      // results after a steer) have not already reported. Missing output/reasoning counts stay unknown.
-      const reported = {inputTokens: 0, outputTokens: 0};
-      const reportUsage = (raw: unknown, cumulative = false) => {
-        if (!raw || typeof raw !== 'object') return;
-        const usage = raw as Record<string, unknown>;
-        const count = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value) && value >= 0;
-        const last: Partial<typeof reported> = {};
-        if (count(usage.input_tokens)) last.inputTokens = usage.input_tokens
-          + (count(usage.cache_read_input_tokens) ? usage.cache_read_input_tokens : 0)
-          + (count(usage.cache_creation_input_tokens) ? usage.cache_creation_input_tokens : 0);
-        if (count(usage.output_tokens)) last.outputTokens = usage.output_tokens;
-        for (const key of ['inputTokens', 'outputTokens'] as const) {
-          const value = last[key];
-          if (value === undefined) continue;
-          last[key] = cumulative ? Math.max(0, value - reported[key]) : value;
-          reported[key] += last[key];
+      // Token usage (#94). Claude Code repeats an API message's usage on each of its content blocks' `assistant` events,
+      // with the output count as of message_start; the final count arrives on that message's `message_delta` stream event,
+      // and each `result` carries the totals of its own turn (per result, not per process). So each parent API message is
+      // reported once, when its usage is final (message_delta) or its tool results, the next message, the result or the
+      // exit end it, and a result only adds what its turn's messages under-reported. Cache reads are cached input; cache
+      // writes are input. Counts the CLI did not report stay unknown; a message without its final count is flagged `partial`.
+      type Tokens = {input?: number; cached?: number; output?: number};
+      const count = (value: unknown): number | undefined => typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : undefined;
+      const tokensOf = (raw: unknown): Tokens | null => {
+        if (!raw || typeof raw !== 'object') return null;
+        const usage = raw as Record<string, unknown>, fresh = count(usage.input_tokens), output = count(usage.output_tokens);
+        const read = count(usage.cache_read_input_tokens) ?? 0, written = count(usage.cache_creation_input_tokens) ?? 0;
+        const tokens: Tokens = {...(fresh !== undefined ? {input: fresh + read + written, cached: read} : {}), ...(output !== undefined ? {output} : {})};
+        return tokens.input === undefined && tokens.output === undefined ? null : tokens;
+      };
+      const fields = ['input', 'cached', 'output'] as const;
+      let openMessage: {id: string; tokens: Tokens; final: boolean} | undefined, streamId: string | undefined;
+      /** Messages already reported this turn: a late event for one adds nothing (the result reconciles). */
+      const reportedIds = new Set<string>();
+      let turnTokens = {input: 0, cached: 0, output: 0};
+      const emitUsage = (tokens: Tokens, flags: {partial?: true; reconciliation?: true}) => {
+        if (!fields.some(key => (tokens[key] ?? 0) > 0)) return;
+        for (const key of fields) turnTokens[key] += tokens[key] ?? 0;
+        const last = {...(tokens.input !== undefined ? {inputTokens: tokens.input, cachedInputTokens: tokens.cached ?? 0} : {}), ...(tokens.output !== undefined ? {outputTokens: tokens.output} : {})};
+        // A reconciliation is spend, not one request's context, so the context meter ignores it.
+        input.onEvent('thread/tokenUsage/updated', {threadId: sessionId, turnId, tokenUsage: {last, ...flags}});
+      };
+      const flushUsage = () => { if (!openMessage) return; const done = openMessage; openMessage = undefined; if (done.id) reportedIds.add(done.id); emitUsage(done.tokens, done.final ? {} : {partial: true}); };
+      const observeUsage = (id: string | undefined, raw: unknown, final = false) => {
+        if (id && reportedIds.has(id)) return;
+        const tokens = tokensOf(raw);
+        if (openMessage && id !== undefined && openMessage.id !== id) flushUsage();
+        if (!tokens) { if (final) flushUsage(); return; }
+        if (!openMessage) openMessage = {id: id ?? '', tokens: {}, final: false};
+        // Counts only grow within a message; later events carry the same input and a larger output.
+        for (const key of fields) if (tokens[key] !== undefined) openMessage.tokens[key] = Math.max(openMessage.tokens[key] ?? 0, tokens[key]);
+        if (final) { openMessage.final = true; flushUsage(); }
+      };
+      const settleTurnUsage = (raw: unknown) => {
+        flushUsage();
+        const totals = tokensOf(raw), reported = turnTokens;
+        if (totals) {
+          const shortfall: Tokens = {};
+          for (const key of fields) if (totals[key] !== undefined) shortfall[key] = Math.max(0, totals[key] - reported[key]);
+          emitUsage(shortfall, {reconciliation: true});
         }
-        if (Object.values(last).some(value => value > 0)) input.onEvent('thread/tokenUsage/updated', {threadId: sessionId, turnId, tokenUsage: {last}});
+        turnTokens = {input: 0, cached: 0, output: 0}; reportedIds.clear(); streamId = undefined;
       };
       const tools = new Map<string, Record<string, unknown>>();
       // Task/Agent children run inside the CLI. Each is a child thread `<session>:<tool_use id>`; its events carry that
@@ -221,7 +249,9 @@ export function claudeCodeAdapter(options: {binary: string; env?: NodeJS.Process
         // so the service notes it and re-sends static context on the next turn.
         if (type === 'system' && (event.subtype === 'compact_boundary' || event.subtype === 'compaction')) { input.onEvent('thread/compacted', {threadId: sessionId, turnId}); return; }
         if (type === 'stream_event') {
-          const inner = event.event as {type?: string; delta?: {type?: string; text?: unknown; thinking?: unknown}} | undefined;
+          const inner = event.event as {type?: string; delta?: {type?: string; text?: unknown; thinking?: unknown}; message?: {id?: unknown; usage?: unknown}; usage?: unknown} | undefined;
+          if (!event.parent_tool_use_id && inner?.type === 'message_start') { streamId = typeof inner.message?.id === 'string' ? inner.message.id : undefined; observeUsage(streamId, inner.message?.usage); return; }
+          if (!event.parent_tool_use_id && inner?.type === 'message_delta') { observeUsage(streamId ?? openMessage?.id, inner.usage, true); return; }
           if (event.parent_tool_use_id || inner?.type !== 'content_block_delta') return;
           if (inner.delta?.type === 'text_delta' && typeof inner.delta.text === 'string') { streamedText = true; input.onDelta(inner.delta.text); }
           if (inner.delta?.type === 'thinking_delta' && typeof inner.delta.thinking === 'string') input.onReasoning(inner.delta.thinking);
@@ -254,10 +284,12 @@ export function claudeCodeAdapter(options: {binary: string; env?: NodeJS.Process
           }
           // Each assistant message restarts text streaming; the next one streams fresh deltas.
           streamedText = false;
-          if (!event.parent_tool_use_id) reportUsage(message?.usage);
+          if (!event.parent_tool_use_id) observeUsage(typeof message?.id === 'string' ? message.id : undefined, message?.usage);
           return;
         }
         if (type === 'user') {
+          // Tool results follow a finished API message: its usage is as final as it will get.
+          if (!event.parent_tool_use_id) flushUsage();
           const results = blocks.filter(block => block?.type === 'tool_result');
           for (const block of blocks) {
             if (block?.type !== 'tool_result' || typeof block.tool_use_id !== 'string') continue;
@@ -282,7 +314,7 @@ export function claudeCodeAdapter(options: {binary: string; env?: NodeJS.Process
           return;
         }
         if (type === 'result') {
-          if (!event.parent_tool_use_id) reportUsage(event.usage, true);
+          if (!event.parent_tool_use_id) settleTurnUsage(event.usage);
           final = {ok: event.is_error !== true && event.subtype === 'success', text: text(event.result)};
           // Each user message (the prompt, then any steers) ends in one result; the last one closes stdin so the run ends.
           // A background subagent keeps the CLI alive: closing stdin now would end it before it reports back.
@@ -296,6 +328,7 @@ export function claudeCodeAdapter(options: {binary: string; env?: NodeJS.Process
       });
       child.on('error', error => finish({status: 'failed', finalMessage: '', dispatchState: accepted ? 'dispatched' : 'not-dispatched', ...(accepted ? {threadId: sessionId, turnId} : {}), errorMessage: `Claude Code could not start: ${error.message}`}));
       child.on('close', code => {
+        flushUsage();
         for (const [id, item] of tools) input.onEvent('item/completed', {threadId: toolThreads.get(id) ?? sessionId, turnId, item: {...item, id, status: 'interrupted'}});
         for (const run of agents.values()) if (run.state === 'running') { run.state = 'interrupted'; run.launched = true; run.endedAt ??= Date.now(); emitAgent(run); }
         const identity = accepted ? {threadId: sessionId, turnId} : {};
