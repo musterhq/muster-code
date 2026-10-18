@@ -14,6 +14,8 @@ All notable changes to Muster Agent. Each `## <version>` section becomes the not
 - Untracked files can be discarded to Trash with confirmation from Changes or a diff, file actions stay visible, and opening a diff preserves the Changes compare mode.
 
 - Commands stopped during startup now remain stopped when a launch error arrives, avoiding failure follow-ups.
+- Retrying suggested task creation after a failure reuses each suggestion’s tasks, and failed task batches roll back together.
+
 - Typechecking runs on tsc-rs, about twice as fast and using a third less memory, with a CI guard that compares it with the official compiler
 
 ## 0.3.13
