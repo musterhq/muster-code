@@ -8,6 +8,9 @@ import {setTimeout as delay} from 'node:timers/promises';
 import {createAgentService} from '../src/runtime/service.ts';
 import type {ProviderAdapter} from '../src/runtime/provider.ts';
 import {classifyTool,commandOutcome,toolState} from '../src/renderer/components/toolPresentation.ts';
+import {summarizeActivity} from '../src/renderer/components/activityGrouping.ts';
+import type {TimelineItem} from '../src/shared/protocol.ts';
+import {ATTENTION_WINDOW_MS} from '../src/shared/attention-expiry.ts';
 
 async function until(check:()=>Promise<boolean>) {
   for(let i=0;i<200;i++){if(await check())return;await delay(5);}
@@ -77,4 +80,54 @@ test('#580 denied commands say Did not run when the provider reports cancelled',
   assert.equal(commandOutcome(denied.data,denied.status).suffix,'denied');
   assert.equal(toolState({status:'completed'},classifyTool(denied.data)),'Ran');
   assert.equal(toolState({status:'interrupted'},classifyTool(denied.data)),'Stopped');
+});
+
+test('#580 a denied tool the adapter closes as failed reads Did not run, not failed',()=>{
+  const data={type:'commandExecution',command:'kill 1234',executionDenied:true,error:'This was declined.'};
+  const outcome=commandOutcome(data,'failed','This was declined.');
+  assert.equal(outcome.failed,false);assert.equal(outcome.suffix,'denied');assert.deepEqual(outcome.excerpt,[]);
+  assert.equal(toolState({status:'failed',data},classifyTool(data),outcome.failed),'Did not run');
+  assert.equal(commandOutcome({...data,deniedReason:'timeout'},'cancelled').suffix,'not approved');
+  // A real failure keeps its red suffix and excerpt.
+  const real=commandOutcome({type:'commandExecution',command:'npm test',exitCode:1},'failed','boom');
+  assert.equal(real.failed,true);assert.equal(real.suffix,'failed (exit 1)');
+});
+
+test('#580 activity summaries count stopped and refused tools the way their rows read',()=>{
+  const row=(id:string,status:string,data:Record<string,unknown>={}):TimelineItem=>({id,chatId:'c',kind:'tool',text:'',status:status as TimelineItem['status'],createdAt:'2026-10-18T00:00:00.000Z',data:{type:'commandExecution',command:'echo '+id,...data}});
+  assert.equal(summarizeActivity([row('a','completed'),row('b','interrupted'),row('c','cancelled',{executionDenied:true}),row('d','failed',{executionDenied:true})]),'Ran 1 command, 2 not run, 1 stopped');
+  assert.equal(summarizeActivity([row('a','completed',{executionDenied:true})]),'1 not run');
+  // A refused row the provider has not closed yet is not "Running".
+  assert.equal(summarizeActivity([row('a','completed'),row('b','running',{executionDenied:true})]),'Ran 1 command, 1 not run');
+  assert.equal(summarizeActivity([row('a','failed'),row('b','cancelled')]),'1 cancelled, 1 failed');
+});
+
+test('#580 an approval that times out marks its command as not run',async t=>{
+  const dataDir=await mkdtemp(join(tmpdir(),'muster-580-expire-'));
+  let release!:()=>void;const gate=new Promise<void>(r=>{release=r;});
+  const provider:ProviderAdapter={info,
+    async run(input){
+      input.onEvent('item/started',{item:{id:'slow',type:'commandExecution',command:'rm -rf build'}});
+      await input.onRequest('item/commandExecution/requestApproval',{itemId:'slow',command:'rm -rf build'});
+      input.onEvent('item/completed',{item:{id:'slow',type:'commandExecution',command:'rm -rf build',status:'declined'}});
+      await gate;return {status:'completed',finalMessage:'done'};
+    },
+    async stop(){release();return true;},dispose(){release();},
+  };
+  const service=createAgentService({dataDir,provider,onEvent(){}});
+  t.after(async()=>{release();await service.dispose();await rm(dataDir,{recursive:true,force:true});});
+  const chat=await service.invoke('chat.create',{});
+  await service.invoke('chat.setPermissionMode',{id:chat.id,permissionMode:'workspace'});
+  t.mock.timers.enable({apis:['setTimeout']});
+  await service.invoke('chat.send',{id:chat.id,text:'go',requestId:randomUUID()});
+  const rows=async()=>(await service.invoke('chat.timeline',{id:chat.id})).items;
+  await until(async()=>(await rows()).some(i=>i.kind==='approval'));
+  t.mock.timers.tick(ATTENTION_WINDOW_MS);
+  await until(async()=>(await rows()).find(i=>i.kind==='tool')?.status==='cancelled');
+  t.mock.timers.reset();
+  const tool=(await rows()).find(i=>i.kind==='tool')!;
+  assert.equal(tool.data?.executionDenied,true);
+  assert.equal(toolState(tool,classifyTool(tool.data)),'Did not run');
+  assert.equal(commandOutcome(tool.data,tool.status).suffix,'not approved');
+  release();
 });
