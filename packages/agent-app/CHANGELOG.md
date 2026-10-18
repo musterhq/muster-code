@@ -5,6 +5,8 @@ All notable changes to Muster Agent. Each `## <version>` section becomes the not
 
 ## Unreleased
 
+- Claude Code token usage includes final result counts without counting previously reported assistant usage twice. Existing usage rows stay unchanged.
+
 - Back and Forward (⌘[ / ⌘]) work like a browser: they return through Settings sections, Inbox, Projects, Automations and Memory as well as chats, instead of skipping everything but chats. A two-finger trackpad swipe (or three-finger, if macOS is set that way) does the same; code blocks, diffs and tables that scroll sideways keep their swipe.
 - The diff tab header keeps the file name readable in narrow panes and wraps the compare picker and file actions onto their own row instead of cutting them off.
 - The dark theme is darker and less grey: near-black surfaces and a deeper sidebar glass tint, with the blur kept.

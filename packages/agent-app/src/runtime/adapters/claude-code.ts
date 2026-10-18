@@ -136,6 +136,26 @@ export function claudeCodeAdapter(options: {binary: string; env?: NodeJS.Process
       let pending = 1, inputClosed = false, unanswered = 0, grace: ReturnType<typeof setTimeout> | undefined;
       const graceMs = options.steerGraceMs ?? STEER_GRACE_MS;
       const closeInput = () => { if (inputClosed) return; inputClosed = true; try { child.stdin?.end(); } catch { /* already closed */ } };
+      // Result usage is cumulative for this CLI process. Only emit what assistant messages (or earlier
+      // results after a steer) have not already reported. Missing output/reasoning counts stay unknown.
+      const reported = {inputTokens: 0, outputTokens: 0};
+      const reportUsage = (raw: unknown, cumulative = false) => {
+        if (!raw || typeof raw !== 'object') return;
+        const usage = raw as Record<string, unknown>;
+        const count = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value) && value >= 0;
+        const last: Partial<typeof reported> = {};
+        if (count(usage.input_tokens)) last.inputTokens = usage.input_tokens
+          + (count(usage.cache_read_input_tokens) ? usage.cache_read_input_tokens : 0)
+          + (count(usage.cache_creation_input_tokens) ? usage.cache_creation_input_tokens : 0);
+        if (count(usage.output_tokens)) last.outputTokens = usage.output_tokens;
+        for (const key of ['inputTokens', 'outputTokens'] as const) {
+          const value = last[key];
+          if (value === undefined) continue;
+          last[key] = cumulative ? Math.max(0, value - reported[key]) : value;
+          reported[key] += last[key];
+        }
+        if (Object.values(last).some(value => value > 0)) input.onEvent('thread/tokenUsage/updated', {threadId: sessionId, turnId, tokenUsage: {last}});
+      };
       const tools = new Map<string, Record<string, unknown>>();
       // Task/Agent children run inside the CLI. Each is a child thread `<session>:<tool_use id>`; its events carry that
       // tool_use id as parent_tool_use_id. A background child outlives the tool_result that launched it.
@@ -234,8 +254,7 @@ export function claudeCodeAdapter(options: {binary: string; env?: NodeJS.Process
           }
           // Each assistant message restarts text streaming; the next one streams fresh deltas.
           streamedText = false;
-          const usage = message?.usage;
-          if (usage && !event.parent_tool_use_id && typeof usage.input_tokens === 'number') input.onEvent('thread/tokenUsage/updated', {threadId: sessionId, turnId, tokenUsage: {last: {inputTokens: usage.input_tokens + (typeof usage.cache_read_input_tokens === 'number' ? usage.cache_read_input_tokens : 0) + (typeof usage.cache_creation_input_tokens === 'number' ? usage.cache_creation_input_tokens : 0), outputTokens: typeof usage.output_tokens === 'number' ? usage.output_tokens : 0}}});
+          if (!event.parent_tool_use_id) reportUsage(message?.usage);
           return;
         }
         if (type === 'user') {
@@ -263,6 +282,7 @@ export function claudeCodeAdapter(options: {binary: string; env?: NodeJS.Process
           return;
         }
         if (type === 'result') {
+          if (!event.parent_tool_use_id) reportUsage(event.usage, true);
           final = {ok: event.is_error !== true && event.subtype === 'success', text: text(event.result)};
           // Each user message (the prompt, then any steers) ends in one result; the last one closes stdin so the run ends.
           // A background subagent keeps the CLI alive: closing stdin now would end it before it reports back.

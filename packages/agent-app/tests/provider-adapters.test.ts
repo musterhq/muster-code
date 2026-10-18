@@ -98,6 +98,38 @@ test('Claude Code adapter runs in the chat folder and maps stream-json to timeli
   assert.equal(log.events[3]?.[1].threadId,`${sessionId}:task1`);
 });
 
+test('Claude Code reconciles final result usage without counting assistant usage twice',async()=>{
+  const cases = [
+    {name:'result only', lines:[{type:'result',usage:{input_tokens:10,cache_read_input_tokens:20,cache_creation_input_tokens:5,output_tokens:42}}], expected:[{inputTokens:35,outputTokens:42}]},
+    {name:'assistant then result', lines:[
+      {type:'assistant',message:{usage:{input_tokens:10,output_tokens:1}}},
+      {type:'assistant',parent_tool_use_id:'child',message:{usage:{input_tokens:100,output_tokens:100}}},
+      {type:'result',usage:{input_tokens:10,output_tokens:42}},
+      {type:'result',usage:{input_tokens:10,output_tokens:42}},
+    ], expected:[{inputTokens:10,outputTokens:1},{inputTokens:0,outputTokens:41}]},
+    {name:'successive cumulative results', lines:[
+      {type:'assistant',message:{usage:{input_tokens:10,output_tokens:1}}},
+      {type:'result',usage:{input_tokens:10,output_tokens:42}},
+      {type:'assistant',message:{usage:{input_tokens:20,output_tokens:2}}},
+      {type:'result',usage:{input_tokens:30,output_tokens:50}},
+    ], expected:[{inputTokens:10,outputTokens:1},{inputTokens:0,outputTokens:41},{inputTokens:20,outputTokens:2},{inputTokens:0,outputTokens:6}]},
+    {name:'missing final usage keeps assistant counts',lines:[{type:'assistant',message:{usage:{input_tokens:10,output_tokens:3}}},{type:'result'}],expected:[{inputTokens:10,outputTokens:3}]},
+    {name:'output only stays partial',lines:[{type:'result',usage:{output_tokens:42}}],expected:[{outputTokens:42}]},
+    {name:'input only stays partial',lines:[{type:'assistant',message:{usage:{input_tokens:10}}}],expected:[{inputTokens:10}]},
+    {name:'unknown and invalid stay unknown',lines:[{type:'result'},{type:'result',usage:{}},{type:'result',usage:{input_tokens:-1,output_tokens:'42'}},{type:'result',usage:{input_tokens:Infinity,output_tokens:NaN}}],expected:[]},
+  ];
+  for (const scenario of cases) {
+    const fake=fakeChild(), {input,log}=capture();
+    const running=claudeCodeAdapter({binary:'/bin/claude',spawn:()=>fake.child as unknown as ChildProcess}).run(input);
+    fake.emit(...scenario.lines.map(line=>line.type==='result'?{subtype:'success',result:'Done',...line}:line));
+    fake.close(0);await running;
+    const usage=log.events.filter(([method])=>method==='thread/tokenUsage/updated');
+    assert.deepEqual(usage.map(([,params])=>(params.tokenUsage as {last:unknown}).last),scenario.expected,scenario.name);
+    assert.ok(usage.every(([,params])=>params.threadId===log.threads[0] && typeof params.turnId==='string'));
+    assert.ok(usage.every(([,params])=>!JSON.stringify(params).includes('reasoning') && !JSON.stringify(params).includes('cost')),'no inferred reasoning counts or prices');
+  }
+});
+
 test('Claude Code resume, permission mapping, stop and failures',async()=>{
   const base=capture({resumeThreadId:'saved',permissionMode:'full',model:'claude-code/default'}).input;
   const args=claudeArgs(base,'unused');
