@@ -80,7 +80,7 @@ export async function pluginUiEntry(plugin: { id: string; path: string; displayN
   const root = await fs.realpath(plugin.path);
   const target = await fs.realpath(resolve(root, entry)).catch(() => { throw new Error(`${app}'s UI entry ${entry} is missing.`); });
   const inside = relative(root, target);
-  if (!inside || inside.startsWith('..') || inside.startsWith(sep) || resolve(root, inside) !== target) throw new Error(`${app}'s UI entry is outside the plugin.`);
+  if (!inside || inside === '..' || inside.startsWith(`..${sep}`) || inside.startsWith(sep) || resolve(root, inside) !== target) throw new Error(`${app}'s UI entry is outside the plugin.`);
   const stat = await fs.stat(target);
   if (!stat.isFile() || stat.size > MAX_PLUGIN_UI_BYTES) throw new Error(`${app}'s UI entry is not a file under 2 MB.`);
   return { pluginId: plugin.id, app, title: `${plugin.displayName ?? plugin.name} · ${app}`, root, entry: inside.split(sep).join('/') };
