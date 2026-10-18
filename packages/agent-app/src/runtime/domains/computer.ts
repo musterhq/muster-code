@@ -76,7 +76,7 @@ export function createComputerDomain(context: DomainContext): DomainModule {
       // Main answers with Electron's real probe; this is the honest answer outside the desktop shell.
       'computer.permissions': () => ({ platform: process.platform, accessibility: 'unknown', screen: 'unknown' }),
       'computer.openPermissionSettings': async input => {
-        const url = typeof input.pane === 'string' ? SETTINGS[input.pane] : undefined;
+        const url = typeof input.pane === 'string' && Object.hasOwn(SETTINGS, input.pane) ? SETTINGS[input.pane] : undefined;
         if (!url) throw new Error('Unknown settings pane.');
         if (process.platform !== 'darwin') throw new Error('Privacy settings are available on macOS only.');
         await run('/usr/bin/open', [url]);
