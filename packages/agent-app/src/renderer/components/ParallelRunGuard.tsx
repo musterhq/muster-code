@@ -110,7 +110,7 @@ async function runInWorktree(chat: Chat, hasHistory: boolean, send: (targetChatI
       return sent;
     }
     const text = getState().composerDrafts[chat.id]?.text ?? '';
-    const id = await createChat(folder.id);
+    const id = await createChat(folder.id, undefined, { inheritFrom: chat.id });
     if (!id) return false;
     const sent = await send(id);
     if (sent) {
