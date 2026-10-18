@@ -12,7 +12,7 @@ import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import {createRequire} from 'node:module';
 import {existsSync} from 'node:fs';
-import {mkdtemp, mkdir, rm, writeFile, chmod} from 'node:fs/promises';
+import {mkdtemp, mkdir, writeFile, chmod} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join, resolve} from 'node:path';
 import {execFileSync} from 'node:child_process';
