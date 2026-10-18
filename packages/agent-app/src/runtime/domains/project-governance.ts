@@ -243,7 +243,14 @@ export function createGovernance(ctx: DomainContext, deps: GovernanceDeps) {
   }
 
   // ── wake queue and heartbeats (C14, C30) ────────────────────────────────────
-  const wakeQueue = (): WakeQueue => queue ??= new WakeQueue({
+  /** Built once; the first build resumes every wake that was still waiting when the app last closed. */
+  const wakeQueue = (): WakeQueue => {
+    if (queue) return queue;
+    queue = buildQueue();
+    void queue.restore().catch(() => undefined);
+    return queue;
+  };
+  const buildQueue = () => new WakeQueue({
     store: gov(), now, setTimer: timers.set, clearTimer: timers.clear,
     settings, heartbeat: (p, m) => agentGov(p, m).heartbeat,
     member: (p, m) => { const x = memberOf(p, m); return x ? { name: x.name, paused: Boolean(x.pausedAt), revoked: Boolean(x.revokedAt), pending: Boolean(x.pendingAt) } : undefined; },
@@ -323,11 +330,26 @@ export function createGovernance(ctx: DomainContext, deps: GovernanceDeps) {
     finally { arm(projectId, memberId); } // re-arms only while the agent is still eligible
   }
   let armed = false;
-  /** Arms the timers of every enabled agent, once, the first time governance is used. */
+  /** Arms the timers of every enabled agent, once, the first time governance is used. Waiting wakes come back, and every
+   * project is evaluated once, so subtasks that finished while the app was closed still wake their parent's owner. */
   function armAll() {
     if (armed || disposed) return; armed = true;
     for (const a of gov().heartbeatAgents()) arm(a.projectId, a.memberId);
     armMonitors();
+    wakeQueue();
+    let ids: string[] = [];
+    try { ids = (ctx.db().prepare('SELECT id FROM projects WHERE COALESCE(archived, 0) = 0').all() as { id: string }[]).map(r => r.id); } catch { /* a bare test context has no projects table */ }
+    seedChildMarks(ids);
+    for (const projectId of ids) scheduleEval(projectId);
+  }
+  /** Once, at the first start after the update: subtasks that were already done before this wake existed are noted without waking anyone. */
+  function seedChildMarks(ids: readonly string[]) {
+    try {
+      const d = ctx.db();
+      if (d.prepare("SELECT 1 FROM meta WHERE key = 'children_wakes_seeded'").get()) return;
+      for (const projectId of ids) void evaluateChildren(projectId, taskList(projectId), true);
+      d.prepare("INSERT OR REPLACE INTO meta (key, value) VALUES ('children_wakes_seeded', ?)").run(new Date(now()).toISOString());
+    } catch { /* a bare test context has no meta table */ }
   }
 
   // ── stop variants (G33) ─────────────────────────────────────────────────────
@@ -387,6 +409,7 @@ export function createGovernance(ctx: DomainContext, deps: GovernanceDeps) {
         try { tasks().setState({ projectId, id: t.id, revision: tasks().getTask(t.id)!.revision, state: 'cancelled', reason: `Cancelled with ${key}` }, 'user'); } catch { /* a task that raced is left as it is */ }
       }
     }
+    if (mode === 'cancel') scheduleEval(projectId);
     record(projectId, 'task.hold', `${mode === 'cancel' ? 'Cancelled' : 'Paused'} ${key} “${clip(root.title, 60)}” and ${ids.length - 1} ${ids.length === 2 ? 'task' : 'tasks'} under it${stopped ? `; stopped ${stopped} running ${stopped === 1 ? 'run' : 'runs'}` : ''}${reason ? ` (${clip(reason, 80)})` : ''}.`, taskId, 'user');
     deps.changed(projectId, taskId);
     return holdView(gov().getHold(holdId)!);
@@ -557,7 +580,37 @@ export function createGovernance(ctx: DomainContext, deps: GovernanceDeps) {
   /** Coalesces any number of triggers within 100 ms into one evaluation. */
   function scheduleEval(projectId: string) {
     if (disposed || evalTimers.has(projectId)) return;
-    evalTimers.set(projectId, timers.set(() => { evalTimers.delete(projectId); void evaluateWatchdogs(projectId).catch(() => undefined); }, 100));
+    evalTimers.set(projectId, timers.set(() => { evalTimers.delete(projectId); void evaluate(projectId).catch(() => undefined); }, 100));
+  }
+  async function evaluate(projectId: string): Promise<void> {
+    if (!deps.exists(projectId)) return;
+    const all = taskList(projectId);
+    await evaluateChildren(projectId, all).catch(() => undefined);
+    await evaluateWatchdogs(projectId, all);
+  }
+  /**
+   * Every subtask of an agent's task is done (verified or cancelled): one wake for the parent's owner, once per completion
+   * set. The set is fingerprinted by the subtasks' ids, states and revisions, so a later evaluation of the same set wakes
+   * nobody, and a subtask reopened and finished again wakes the owner again. Each pass re-reads the stored states, so a
+   * missed hint is caught by the next one (a run settling, a state change, or the boot catch-up).
+   */
+  async function evaluateChildren(projectId: string, all: ProjectTask[] = taskList(projectId), quiet = false): Promise<void> {
+    const kids = new Map<string, ProjectTask[]>();
+    for (const t of all) if (t.parentId) { const list = kids.get(t.parentId); if (list) list.push(t); else kids.set(t.parentId, [t]); }
+    if (!kids.size) return;
+    const byId = new Map(all.map(t => [t.id, t]));
+    for (const [parentId, children] of kids) {
+      const parent = byId.get(parentId), owner = parent ? ownerMemberId(parent) : null;
+      if (!parent || !owner || DONE.has(parent.state) || !children.every(c => DONE.has(c.state))) continue;
+      const fp = fingerprintOf(children);
+      if (gov().wakeMark(parentId, 'children_completed') === fp) continue;
+      gov().setWakeMark(projectId, parentId, 'children_completed', fp);
+      if (quiet || !agentGov(projectId, owner).heartbeat.wakeOnChildren) continue;
+      const sorted = [...children].sort((a, b) => (a.seq ?? 0) - (b.seq ?? 0)), shown = sorted.slice(0, 12).map(c => `${keyOf(c)}${c.state === 'cancelled' ? ' (cancelled)' : ''}`);
+      const list = `${shown.join(', ')}${sorted.length > shown.length ? ` and ${sorted.length - shown.length} more` : ''}`;
+      const note = children.length === 1 ? `Its subtask is done: ${list}` : `All ${children.length} subtasks are done: ${list}`;
+      await wakeQueue().request({ projectId, memberId: owner, taskId: parentId, reason: 'children_completed', note }).catch(() => undefined);
+    }
   }
   function pendingPath(projectId: string, ids: ReadonlySet<string>): boolean {
     if (gov().monitors(projectId).some(m => m.state === 'scheduled' && ids.has(m.taskId))) return true;
@@ -565,9 +618,9 @@ export function createGovernance(ctx: DomainContext, deps: GovernanceDeps) {
     return gov().wakes(projectId, { limit: 50 }).some(w => (w.status === 'throttled' || w.status === 'deferred') && w.taskId && ids.has(w.taskId));
   }
   /** One finding per distinct stopped state of a root task's subtree: every leaf has stopped, none is live, and something failed or is blocked. */
-  async function evaluateWatchdogs(projectId: string): Promise<void> {
+  async function evaluateWatchdogs(projectId: string, all: ProjectTask[] = taskList(projectId)): Promise<void> {
     if (!deps.exists(projectId)) return;
-    const all = taskList(projectId), tree: TreeTask[] = all, byId = new Map(all.map(t => [t.id, t]));
+    const tree: TreeTask[] = all, byId = new Map(all.map(t => [t.id, t]));
     const roots = all.filter(t => !t.parentId && all.some(k => k.parentId === t.id));
     for (const root of roots) {
       const leaves = leavesOf(tree, root.id), ids = new Set(subtreeIds(tree, root.id));
@@ -708,7 +761,7 @@ export function createGovernance(ctx: DomainContext, deps: GovernanceDeps) {
     const t = tasks().assertTaskProject(projectId, taskId);
     if (action === 'dismiss') { for (const k of ['orphaned_run', 'stranded_assignment', 'needs_followup']) gov().dismissRecovery(taskId, k); deps.changed(projectId, taskId); return; }
     if (action === 'resume') { const h = holdFor(t); if (!h) throw new Error('That task is not on hold.'); releaseHold({ projectId, id: h.id }); return; }
-    if (action === 'cancel') { tasks().setState({ projectId, id: taskId, revision: t.revision, state: 'cancelled', reason: 'Cancelled from recovery' }, 'user'); deps.changed(projectId, taskId); return; }
+    if (action === 'cancel') { tasks().setState({ projectId, id: taskId, revision: t.revision, state: 'cancelled', reason: 'Cancelled from recovery' }, 'user'); deps.changed(projectId, taskId); scheduleEval(projectId); return; }
     if (action === 'block') { tasks().setState({ projectId, id: taskId, revision: t.revision, state: 'blocked', reason: 'Marked blocked from recovery' }, 'user'); deps.changed(projectId, taskId); return; }
     // rerun: back to a startable state, then wake the owner on the usual path.
     let cur = t;
@@ -931,7 +984,7 @@ export function createGovernance(ctx: DomainContext, deps: GovernanceDeps) {
       patch.heartbeat = clampHeartbeat(input.heartbeat as Partial<AgentGovernance['heartbeat']>, cur.heartbeat);
       const hb = patch.heartbeat;
       if (hb.enabled !== cur.heartbeat.enabled || hb.intervalSec !== cur.heartbeat.intervalSec) said.push(hb.enabled ? `heartbeat every ${hb.intervalSec >= 3600 && hb.intervalSec % 3600 === 0 ? `${hb.intervalSec / 3600} h` : hb.intervalSec >= 60 && hb.intervalSec % 60 === 0 ? `${hb.intervalSec / 60} min` : `${hb.intervalSec} s`}` : 'heartbeat off');
-      for (const k of ['wakeOnAssignment', 'wakeOnComment', 'wakeOnDecision'] as const) if (hb[k] !== cur.heartbeat[k]) said.push(`${k === 'wakeOnAssignment' ? 'wake on assignment' : k === 'wakeOnComment' ? 'wake on comment' : 'wake on decision'} ${hb[k] ? 'on' : 'off'}`);
+      for (const k of ['wakeOnAssignment', 'wakeOnComment', 'wakeOnDecision', 'wakeOnChildren'] as const) if (hb[k] !== cur.heartbeat[k]) said.push(`${k === 'wakeOnAssignment' ? 'wake on assignment' : k === 'wakeOnComment' ? 'wake on comment' : k === 'wakeOnDecision' ? 'wake on decision' : 'wake when subtasks finish'} ${hb[k] ? 'on' : 'off'}`);
       if (hb.minGapSec !== cur.heartbeat.minGapSec) said.push(`least ${hb.minGapSec} s between wakes`);
     }
     if (input.capabilities !== undefined) {
@@ -1160,7 +1213,7 @@ export function createGovernance(ctx: DomainContext, deps: GovernanceDeps) {
       if (command === 'project.tasks.add') { const o = output as { id?: string; projectId?: string; owner?: TaskOwner } | undefined; if (o?.id && o.projectId && o.owner?.kind === 'agent') onAssigned(o.projectId, o.id); }
       else if (command === 'project.tasks.edit') { const patch = (input.patch ?? {}) as { owner?: TaskOwner }; const o = output as { id?: string; projectId?: string } | undefined; if (patch.owner?.kind === 'agent' && o?.id && o.projectId) onAssigned(o.projectId, o.id); }
       else if ((command === 'project.members.pause' || command === 'project.members.revoke' || command === 'project.members.restore') && typeof input.projectId === 'string' && typeof input.id === 'string') arm(input.projectId, input.id);
-      else if (command === 'project.archive' || command === 'project.restore') { const pid = typeof input.id === 'string' ? input.id : ''; for (const a of gov().heartbeatAgents()) if (a.projectId === pid) arm(a.projectId, a.memberId); }
+      else if (command === 'project.archive' || command === 'project.restore') { const pid = typeof input.id === 'string' ? input.id : ''; for (const a of gov().heartbeatAgents()) if (a.projectId === pid) arm(a.projectId, a.memberId); if (command === 'project.restore' && pid) scheduleEval(pid); }
       if (command === 'project.members.pause' && input.paused === false && typeof input.projectId === 'string' && typeof input.id === 'string') {
         const open = gov().openBreaker(input.projectId, 'wake_storm', input.id);
         if (open) { gov().setBreakerState(open.id, 'resumed'); deps.changed(input.projectId); }
@@ -1339,7 +1392,7 @@ export function createGovernance(ctx: DomainContext, deps: GovernanceDeps) {
     handlers: commands() as unknown as Record<string, DomainHandler>,
     gate, preflight, release, held, identityForFolder, noteWorktree, clampAccess, beforeSend, prepareDispatch, taskLines, taskSections, runOptions, decideTool, started, settled, idle, purgeTask, purgeProject, memberGone, taskView, holdFor, evaluate: scheduleEval, armAll, dispose,
     /** For tests: the stores and queues behind the commands. */
-    internals: { gov, wakeQueue, heartbeatTimers, retryTimers, tick, fireMonitors, evaluateWatchdogs, readyTaskFor, recoveryItems, effectivePolicy, startStage },
+    internals: { gov, wakeQueue, heartbeatTimers, retryTimers, tick, fireMonitors, evaluateWatchdogs, evaluateChildren, readyTaskFor, recoveryItems, effectivePolicy, startStage },
   };
 }
 export type Governance = ReturnType<typeof createGovernance>;

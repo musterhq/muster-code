@@ -5,6 +5,7 @@ All notable changes to Muster Agent. Each `## <version>` section becomes the not
 
 ## Unreleased
 
+- Agent wakes that were waiting (for the gap between wakes, or for a run to end) are no longer lost when you quit: they resume when Muster opens, start once, and carry every reason and comment they collected. An agent also wakes once when every subtask of its task is done, including subtasks finished while Muster was closed; turn this off per agent with "Wake when all its subtasks are done".
 - Back and Forward (⌘[ / ⌘]) work like a browser: they return through Settings sections, Inbox, Projects, Automations and Memory as well as chats, instead of skipping everything but chats. A two-finger trackpad swipe (or three-finger, if macOS is set that way) does the same; code blocks, diffs and tables that scroll sideways keep their swipe.
 - The diff tab header keeps the file name readable in narrow panes and wraps the compare picker and file actions onto their own row instead of cutting them off.
 - The dark theme is darker and less grey: near-black surfaces and a deeper sidebar glass tint, with the blur kept.
