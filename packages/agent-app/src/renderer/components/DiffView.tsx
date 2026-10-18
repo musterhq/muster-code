@@ -2,11 +2,12 @@ import React, {useCallback, useEffect, useLayoutEffect, useMemo, useRef, useStat
 import { ArrowRight, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, ChevronsDownUp, ChevronsUpDown, FileText, MessageSquarePlus, Minus, Plus, TriangleAlert, Undo2, SlidersHorizontal } from 'lucide-react';
 import {computeDiffModel, expandFolds, hashRevision, layerSpans, mergeExpansion, EXPAND_STEP, WORD_PAIR_BUDGET, type DiffModel, type DiffRow, type FoldExpansion, type FoldRow, type Token} from '../diffModel';
 import {DiffWorkerError, requestDiff} from '../diffWorkerClient';
-import {closeTab, openDiff, openFile, type WorkspaceTab} from '../store';
+import {closeTab, openTab, openDiff, openFile, type WorkspaceTab} from '../store';
 import {invoke} from '../bridge';
-import type {ReviewFileDiff, ReviewWriteResult} from '../../shared/domains/review-protocol';
+import type {ReviewBaseline, ReviewFileDiff, ReviewWriteResult} from '../../shared/domains/review-protocol';
 import {computeHunks, type ReviewHunk} from '../../shared/review-hunks';
-import {addReviewContext, baselineKey, baselineLabel, keepHunks, keptFor, onWorkspaceChanged, refreshRunMarks, useChatBaselines, useReviewBaseline, useReviewChanges, useRunMarks} from '../reviewState';
+import {addReviewContext, baselineKey, baselineLabel, keepHunks, keptFor, onWorkspaceChanged, refreshRunMarks, useChatBaselines, reviewBaselineFor, useReviewChanges, useRunMarks} from '../reviewState';
+import {DiscardUntracked} from './DiscardUntracked';
 import {ReviewBaselineMenu} from './ReviewBaselineMenu';
 import {diffFileStep, isEditableTarget} from '../changesNavigation';
 import {isNotGitRepository} from './resourceErrors';
@@ -99,7 +100,8 @@ function FoldBar({row,columns,onExpand}:{row:FoldRow;columns:number;onExpand:(an
 export const DiffView = React.memo(function DiffView({tab}:{tab:WorkspaceTab}) {
   const diff = useStoreSelector(state=>state.diffs[tab.id]);
   const folderId = tab.folderId!, path = tab.path!;
-  const [baseline,setBaseline] = useReviewBaseline(folderId);
+  const baseline = tab.reviewBaseline ?? reviewBaselineFor(folderId);
+  const setBaseline = (next: ReviewBaseline) => openTab({...tab, reviewBaseline: next});
   const baseKey = baselineKey(baseline), requestKey = `${tab.id}@${baseKey}`;
   const [remote,setRemote] = useState<{key:string;value?:ReviewFileDiff;error?:string}>();
   const [reload,setReload] = useState(0);
@@ -125,7 +127,7 @@ export const DiffView = React.memo(function DiffView({tab}:{tab:WorkspaceTab}) {
   const gitError = useStoreSelector(state=>state.gitChanges[folderId]?.error);
   const reviewList = useReviewChanges(folderId,baseline).value?.files;
   const siblings = reviewList ?? (baseline==='head' ? gitList : undefined) ?? [];
-  const fileStatus = siblings.find(file=>file.path===path)?.status;
+  const fileStatus = reviewed?.status ?? siblings.find(file=>file.path===path)?.status;
   const [busy,setBusy] = useState(false);
   const [problem,setProblem] = useState<{message:string;hunkId?:string;relocatable?:boolean}>();
   const [picked,setPicked] = useState<{text:string;rect:DOMRect;old?:[number,number];next?:[number,number]}>();
@@ -235,7 +237,7 @@ export const DiffView = React.memo(function DiffView({tab}:{tab:WorkspaceTab}) {
     if(destination!==currentPage)setPage(destination);else{scroll.current?.querySelector(`tr[data-hunk="${ids[next]}"]`)?.scrollIntoView({block:'center'});pendingHunk.current=null;}
   };
   const fileIndex = siblings.findIndex(file=>file.path===path);
-  const goFile=(delta:number)=>{const target=siblings[fileIndex+delta];if(!target)return;void openDiff(folderId,target.path);closeTab(tab.id);};
+  const goFile=(delta:number)=>{const target=siblings[fileIndex+delta];if(!target)return;void openDiff(folderId,target.path,baseline);closeTab(tab.id);};
   // DIF-06: Alt+↑/↓ (or [ / ]) step through the changed files without leaving the keyboard.
   const onFileKey=(event:React.KeyboardEvent<HTMLElement>)=>{const step=diffFileStep(event,isEditableTarget(event.target));if(step===undefined)return;const target=siblings[fileIndex+step];if(!target)return;event.preventDefault();goFile(step);};
   const settle=(result:ReviewWriteResult|void,hunkId?:string)=>{
@@ -304,7 +306,8 @@ export const DiffView = React.memo(function DiffView({tab}:{tab:WorkspaceTab}) {
       {fileStatus&&<GitStatusBadge status={fileStatus}/>}
       {model&&!reviewed?.binary&&<span className="diff-stats"><span className="diff-stat-add git-add">+{model.stats.adds}</span><span className="diff-stat-del git-del">−{model.stats.dels}</span></span>}
       {baselineControl}
-      {reviewed&&(reviewed.beforeHash!==reviewed.afterHash)&&<button className="diff-toggle diff-file-action" disabled={busy} title={baseline==='staged'?'Unstage the whole file':'Revert the whole file to the baseline'} onClick={undoAll}>{baseline==='staged'?<Minus size={12} aria-hidden="true"/>:<Undo2 size={12} aria-hidden="true"/>}{baseline==='staged'?'Unstage file':'Undo file'}</button>}
+      {fileStatus==='untracked' && <DiscardUntracked folderId={folderId} path={path} disabled={busy} className="diff-toggle diff-file-action" onDiscard={() => closeTab(tab.id)}/>}
+      {fileStatus!=='untracked'&&reviewed&&(reviewed.beforeHash!==reviewed.afterHash)&&<button className="diff-toggle diff-file-action" disabled={busy} title={baseline==='staged'?'Unstage the whole file':'Revert the whole file to the baseline'} onClick={undoAll}>{baseline==='staged'?<Minus size={12} aria-hidden="true"/>:<Undo2 size={12} aria-hidden="true"/>}{baseline==='staged'?'Unstage file':'Undo file'}</button>}
       {runId&&hunks.some(hunk=>!kept.has(hunk.id))&&!kept.has('*')&&<button className="diff-toggle diff-file-action is-primary" disabled={busy} title="Accept every change in this file" onClick={()=>keep(['*'])}><Check size={12} aria-hidden="true"/>Keep all</button>}
       <button className="icon-button" aria-label="Open current file" onClick={() => void openFile(folderId,path)}><FileText size={14}/></button>
     </header>;

@@ -60,7 +60,7 @@
 
 .change-item-row { display: flex; align-items: center; gap: 2px; min-width: 0; }
 .change-item-row > .change-row { flex: 1; min-width: 0; }
-.change-action { flex: none; opacity: 0; transition: opacity .12s; }
+.change-action { flex: none; opacity: 1; transition: opacity .12s; }
 .change-item-row:hover .change-action, .change-item-row:focus-within .change-action, .change-action:focus-visible { opacity: 1; }
 .change-action.is-text { width: auto; height: 22px; padding: 0 7px; border: 1px solid color-mix(in srgb, var(--git-conflict) 45%, transparent); border-radius: var(--radius-6); background: transparent; color: var(--git-conflict); font: inherit; font-size: var(--fs-12); cursor: pointer; opacity: 1; }
 .change-action.is-text:hover { background: color-mix(in srgb, var(--git-conflict) 12%, transparent); }
