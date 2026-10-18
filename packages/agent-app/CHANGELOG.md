@@ -5,6 +5,7 @@ All notable changes to Muster Agent. Each `## <version>` section becomes the not
 
 ## Unreleased
 
+- Agent wakes that were waiting (for the gap between wakes, or for a run to end) are no longer lost when you quit: they resume when Muster opens, start once, and carry every reason and comment they collected. An agent also wakes once when every subtask of its task is done, including subtasks finished while Muster was closed; turn this off per agent with "Wake when all its subtasks are done".
 - A comparison with exactly 1000 changed files is no longer marked truncated, and CI checks that share a name across different workflows are listed separately (named "Workflow / job") instead of merged, while a workflow that ran again on the same commit still shows only its newest run.
 - The checkout outbox retry wait starts over when the queue empties by any route (Sync, Retry, discard, a lease ending), so a later failure is retried after 30 seconds instead of the old long wait.
 - Each organisation in the sidebar now has All tasks (the org's whole board), Dashboard and Roster rows. Opening one switches to that org first, so they work for every org, not only the active one.
