@@ -68,6 +68,14 @@ assert.match(text(),/No terminal is open/);
 click('.terminal-start');await delay(40);
 assert.equal(count('terminal.create'),3,'New terminal retries once after a failed open');
 assert.ok(!document.querySelector('.terminal-error'),'retry clears the error');
+// #586: "Show panel" in the right-pane Terminal is an explicit open too, so it never reveals an empty dock.
+summaryForDock.setTerminalDock({placement:'panel',open:false},false);terminalList=[];
+const createsBeforeShow=count('terminal.create');
+root.render(<><ProcessesTab chatId="browse:show"/><BrowsingDock chatId="browse:show"/></>);await delay(60);
+const showPanel=[...document.querySelectorAll('button')].find(button=>button.textContent==='Show panel') as HTMLButtonElement|undefined;
+assert.ok(showPanel,'the pane offers Show panel');showPanel!.click();await delay(60);
+assert.ok(document.querySelector('section.terminal-dock'),'Show panel opens the dock');
+assert.equal(count('terminal.create'),createsBeforeShow+1,'Show panel starts the chat\'s first shell');
 root.render(null);await delay(20);
 terminalList=[];created=0;calls.length=0;
 // Terminals default to the bottom panel; these checks cover the right-pane (Settings › Right) form.

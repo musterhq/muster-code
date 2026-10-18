@@ -425,7 +425,7 @@ function DesktopProcessesTab({chatId,active=true}:{chatId:string;active?:boolean
     </div>
     <div className="terminal-pane-body">
       {inPane?<>{shells.current&&<div className="terminal-shell-tools" aria-label="Shell tools"><span className="terminal-shell-name">{shells.labelOf(shells.current)}</span><ShellTools chatId={chatId} shells={shells}/></div>}<ShellBody shells={shells} active={active}/></>
-        :<div className="processes-empty"><PanelBottom size={24} aria-hidden="true"/><p>Terminals are shown in the bottom panel under the conversation.</p><div className="terminal-placement-actions"><button type="button" className="terminal-start" onClick={()=>setTerminalDock({open:true})}><PanelBottom size={12}/>Show panel</button><button type="button" className="terminal-start" onClick={()=>setTerminalDock({placement:'pane',open:false})}><PanelRight size={12}/>Show here instead</button></div></div>}
+        :<div className="processes-empty"><PanelBottom size={24} aria-hidden="true"/><p>Terminals are shown in the bottom panel under the conversation.</p><div className="terminal-placement-actions"><button type="button" className="terminal-start" onClick={()=>openTerminalTab(chatId,'Terminal','terminals')}><PanelBottom size={12}/>Show panel</button><button type="button" className="terminal-start" onClick={()=>setTerminalDock({placement:'pane',open:false})}><PanelRight size={12}/>Show here instead</button></div></div>}
     </div>
   </section>;
 }
