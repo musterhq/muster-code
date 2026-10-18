@@ -295,7 +295,7 @@ export class ProcessSessions {
     const output=(delta:string)=>{if(handle.finished)return;this.outputLog.append(session.chatId,session.processId,delta);Object.assign(session,appendCommandOutput(session,delta));this.dirty.add(session.processId);if(!this.flushTimer)this.flushTimer=setTimeout(()=>this.flushOutput(),80);};
     child.stdout?.on('data',output);child.stderr?.on('data',output);
     child.once('spawn',()=>{if(handle.finished)return;if(handle.stopping){try{this.signal(handle);}catch{handle.stopping=false;session.status='running';session.error='The owned command could not be stopped. You can retry Stop.';this.publish(session);}}else{session.status='running';this.publish(session);this.scheduleSave();}});
-    child.once('error',(error:NodeJS.ErrnoException)=>this.finish(session,handle,'failed',null,undefined,`The command could not start (${error.code??'launch error'}).`));
+    child.once('error',(error:NodeJS.ErrnoException)=>this.finish(session,handle,handle.stopping?'stopped':'failed',null,undefined,handle.stopping?undefined:`The command could not start (${error.code??'launch error'}).`));
     child.once('close',(code,signal)=>{
       handle.closed={code,signal:signal??undefined};
       // A shell leader may exit with redirected descendants still in its group.
