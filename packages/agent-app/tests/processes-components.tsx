@@ -17,6 +17,7 @@ const row={chatId:'chat',processId:'process:fixture',generation:1,sequence:1,sta
 let pendingAttach:((value:any)=>void)|undefined,leaseId='';
 const terminal={id:'',chatId:'chat',title:'zsh',cwd:'/work',shell:'/bin/zsh',owner:'user',status:'running',startedAt:'2026-09-19T01:00:00Z',exitCode:null};
 let terminalList:any[]=[],created=0,timeline:any[]=[];
+let createGate:Promise<void>|undefined,createError:string|undefined;
 // S3-E: the shell listens on :5173 (yours); the agent left a verification server on :5174.
 let ports:any[]=[{id:'listener:user',port:5173,address:'*',name:'node',owner:'user',source:{kind:'terminal',id:'terminal:1'}},{id:'listener:agent',port:5174,address:'127.0.0.1',name:'vite',owner:'agent',source:{kind:'agent'}}];
 let confirmAnswer=false;const confirms:string[]=[];(window as any).confirm=(text:string)=>{confirms.push(text);return confirmAnswer;};
@@ -26,7 +27,7 @@ let confirmAnswer=false;const confirms:string[]=[];(window as any).confirm=(text
   if(command==='processes.attach'){leaseId=input.leaseId;return new Promise(resolve=>{pendingAttach=resolve;});}
   if(command==='processes.stop')return {...row,status:'stopped',sequence:6,signal:'SIGTERM'};
   if(command==='terminal.list')return terminalList;
-  if(command==='terminal.create'){const info={...terminal,id:`terminal:${++created}`};terminalList=[...terminalList,info];return info;}
+  if(command==='terminal.create'){if(createError)throw new Error(createError);if(createGate)await createGate;const info={...terminal,chatId:input.chatId,id:`terminal:${++created}`};terminalList=[...terminalList,info];return info;}
   if(command==='terminal.kill'){terminalList=terminalList.filter(item=>item.id!==input.id);return;}
   if(command==='terminal.snapshot')return {data:'',truncatedBytes:0,omittedLines:0,end:0};
   if(command==='chat.timeline')return {items:timeline,revision:1};
@@ -178,5 +179,30 @@ store.closeTab('processes:restarted');
 await delay(30);
 assert.ok(calls.some(call=>call.command==='terminal.kill'&&call.input.id==='terminal:live'),'closing the Terminal tab kills its running shell');
 assert.equal(calls.filter(call=>call.command==='terminal.kill').length,killsBefore+1,'only the running terminal — an already-ended one is left alone');
+assert.deepEqual(errors,[]);
+// #586: a shell whose create resolves after its pane is gone is closed, not left running with nothing to show it.
+{
+  terminalList=[];
+  let open!:()=>void;createGate=new Promise<void>(resolve=>{open=resolve;});
+  const host=document.createElement('div');document.body.append(host);const late=createRoot(host);
+  late.render(<ProcessesTab chatId="late"/>);
+  for(let end=Date.now()+3000;Date.now()<end&&!calls.some(call=>call.command==='terminal.create'&&call.input.chatId==='late');)await delay(10);
+  assert.ok(calls.some(call=>call.command==='terminal.create'&&call.input.chatId==='late'),'the late pane asked for a shell');
+  late.unmount();open();createGate=undefined;
+  const id=`terminal:${created+1}`;
+  for(let end=Date.now()+3000;Date.now()<end&&!calls.some(call=>call.command==='terminal.kill'&&call.input.id===id);)await delay(10);
+  assert.ok(calls.some(call=>call.command==='terminal.kill'&&call.input.id===id),'a shell created after its pane closed is killed');
+  host.remove();
+}
+// #586: the terminal cap reads as a plain sentence, not the IPC wrapper.
+{
+  terminalList=[];
+  createError="Error invoking remote method 'muster:invoke': Error: Close a terminal before opening another (maximum 12).";
+  const host=document.createElement('div');document.body.append(host);const capped=createRoot(host);
+  capped.render(<ProcessesTab chatId="capped"/>);
+  for(let end=Date.now()+3000;Date.now()<end&&!host.querySelector('.terminal-error');)await delay(10);
+  assert.equal(host.querySelector('.terminal-error')?.textContent,'Close a terminal before opening another (maximum 12).');
+  capped.unmount();host.remove();createError=undefined;
+}
 assert.deepEqual(errors,[]);
 console.log('Process component checks passed: one-level Terminal list (shells, commands, agent commands and servers with owner/status/ports, open in browser, confirmed agent stops), PTY terminals (auto-open, new, exit, close, restart note), Full gate, subscribe/snapshot race, stale lease exclusion, detach/reopen, Stop after downgrade, agent commands, the bottom terminal panel, and closing the Terminal tab ending its running shells.');

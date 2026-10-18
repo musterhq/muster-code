@@ -63,6 +63,7 @@ export class TerminalSessions {
   private writing?:Promise<void>;
   private saveAgain=false;
   private closing=false;
+  private starting=0;
   private readyPromise:Promise<void>;
   private remoteHosts=new Map<string,RemoteTerminalHost>();
   constructor(private filePath:string,private authorize:TerminalAuthorize,private emit:(event:ProcessEvent)=>void,private launch?:TerminalLaunch,private options:TerminalOptions={}) {
@@ -127,7 +128,12 @@ export class TerminalSessions {
     if(!validId(input?.chatId))throw new Error('Invalid terminal conversation.');
     if(input.folderId!==undefined&&!validId(input.folderId))throw new Error('Invalid terminal folder.');
     if(!size(input.cols,1000)||!size(input.rows,500))throw new Error('Invalid terminal size.');
-    if(this.running()>=MAX_TERMINALS)throw new Error(`Close a terminal before opening another (maximum ${MAX_TERMINALS}).`);
+    // Shells still starting count toward the cap: concurrent opens must not each pass the check before any is running.
+    if(this.running()+this.starting>=MAX_TERMINALS)throw new Error(`Close a terminal before opening another (maximum ${MAX_TERMINALS}).`);
+    this.starting++;
+    try{return await this.start(input);}finally{this.starting--;}
+  }
+  private async start(input:TerminalCreate):Promise<TerminalInfo> {
     const host=input.host;
     if(host!==undefined&&!(host&&typeof host==='object'&&(host.kind==='local'||(host.kind==='remote'&&validId(host.id)))))throw new Error('Invalid terminal host.');
     const remote=host?.kind==='remote'?this.remoteHosts.get(host.id):undefined;

@@ -172,3 +172,17 @@ test('closing a terminal that already ended removes it, and a second close is a 
     await f.terminals.kill({id:info.id});
   }finally{await f.close();}
 });
+
+test('concurrent opens cannot pass the terminal cap together',async()=>{
+  const f=await fixture({file:'/bin/sh',args:['-c','sleep 30']});
+  try{
+    const settled=await Promise.allSettled(Array.from({length:16},()=>f.terminals.create({chatId:'chat',cols:80,rows:24})));
+    const opened=settled.flatMap(result=>result.status==='fulfilled'?[result.value]:[]);
+    assert.equal(opened.length,12);assert.equal(f.terminals.running(),12);
+    for(const result of settled)if(result.status==='rejected')assert.match(String(result.reason?.message),/maximum 12/);
+    await Promise.all(opened.map(info=>f.terminals.kill({id:info.id})));
+    assert.equal(f.terminals.running(),0);
+    // A slot that failed to start is released.
+    assert.ok(await f.terminals.create({chatId:'chat',cols:80,rows:24}));
+  }finally{await f.close();}
+});
