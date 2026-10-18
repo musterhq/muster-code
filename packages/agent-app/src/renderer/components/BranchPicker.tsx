@@ -33,7 +33,9 @@ export function routeSwitchConflicts(folder: Folder, conflicts: readonly string[
 export async function startWorktreeChat(folderId: string, branch: string): Promise<boolean> {
   try {
     const {folder} = await invoke('git.worktree.create', {folderId, branch});
-    const parent = getState().activeChatId;
+    // #591: settings carry over only from the chat whose folder is being branched, never from an unrelated chat.
+    const {activeChatId, snapshot} = getState();
+    const parent = snapshot?.chats.find(chat => chat.id === activeChatId && chat.folderId === folderId)?.id;
     await createChat(folder.id, undefined, parent ? { inheritFrom: parent } : {});
     notifySuccess(`New chat in worktree ${branch}`);
     return true;
